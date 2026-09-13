@@ -1,0 +1,51 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Environment files and secrets
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+# Build and test output
+dist/
+build/
+out/
+coverage/
+.nyc_output/
+
+# Framework and bundler caches
+.next/
+.nuxt/
+.vite/
+.turbo/
+.cache/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Local development data
+infra/dev/data/
+*.local
+
+# TypeScript
+*.tsbuildinfo
+
+# Editor and OS files
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+.idea/
+.DS_Store
+
+# Temporary files
+.tmp/
+tmp/
+*.swp
+*.swo

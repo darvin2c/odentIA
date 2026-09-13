@@ -1,0 +1,25 @@
+{
+  "name": "@odentia/auth",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@odentia/db": "workspace:*",
+    "@odentia/mail": "workspace:*",
+    "better-auth": "1.7.4"
+  },
+  "devDependencies": {
+    "@better-auth/cli": "1.4.21",
+    "@types/node": "22.20.2",
+    "typescript": "7.0.2",
+    "vitest": "3.2.7"
+  }
+}

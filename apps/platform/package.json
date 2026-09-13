@@ -1,0 +1,47 @@
+{
+  "name": "@odentia/platform",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "imports": {
+    "#components/*": "./src/components/*.tsx",
+    "#lib/*": "./src/lib/*.ts",
+    "#hooks/*": "./src/hooks/*.ts"
+  },
+  "scripts": {
+    "dev": "portless",
+    "dev:app": "vite dev",
+    "build": "vite build",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@odentia/ui": "workspace:*",
+    "@odentia/ui-patterns": "workspace:*",
+    "@tailwindcss/vite": "4.3.3",
+    "@tanstack/react-form": "1.33.5",
+    "@tanstack/react-query": "5.102.8",
+    "@tanstack/react-router": "^1.170.32",
+    "@tanstack/react-start": "1.168.52",
+    "@tanstack/react-table": "^8.21.3",
+    "better-auth": "1.7.4",
+    "lucide-react": "^0.468.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "tailwindcss": "4.3.3",
+    "vite": "8.3.0",
+    "zod": "4.6.2"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.5",
+    "@vitejs/plugin-react": "6.1.1",
+    "typescript": "7.0.2",
+    "undici": "8.10.2",
+    "vitest": "^3.2.7"
+  },
+  "portless": {
+    "name": "odentia",
+    "script": "dev:app"
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "name": "@odentia/api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "portless",
+    "dev:app": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@hono/node-server": "2.1.1",
+    "@odentia/auth": "workspace:*",
+    "@odentia/db": "workspace:*",
+    "@odentia/mail": "workspace:*",
+    "drizzle-orm": "0.45.2",
+    "hono": "4.13.7",
+    "postgres": "3.4.9",
+    "zod": "4.6.2"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.2",
+    "tsx": "4.23.13",
+    "typescript": "7.0.2",
+    "vitest": "^3.2.7"
+  },
+  "portless": {
+    "name": "api.odentia",
+    "script": "dev:app"
+  }
+}

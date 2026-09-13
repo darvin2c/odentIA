@@ -1,3 +1,8 @@
 {
-  "name": "odentia"
+  "name": "odentia",
+  "apps": {
+    "apps/platform": { "name": "odentia" },
+    "apps/api": { "name": "api.odentia" },
+    "apps/worker": { "proxy": false }
+  }
 }
