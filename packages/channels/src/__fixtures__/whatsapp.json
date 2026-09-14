@@ -1,0 +1,103 @@
+{
+  "config": {
+    "phoneNumberId": "PNID",
+    "wabaId": "WABA1",
+    "accessToken": "TOKEN",
+    "appSecret": "appsecret123",
+    "templates": [{ "name": "cita_recordatorio", "language": "es_PE" }]
+  },
+  "capabilities": { "templates": true, "media": true, "interactive": true, "readReceipts": true, "edit": false },
+  "verify": [
+    {
+      "name": "acepta firma HMAC correcta",
+      "headers": {
+        "x-hub-signature-256": "sha256=04397ab887d2b63f93e3af38d8eba064c10e093d59d9455ebc37a4fcd702a61f"
+      },
+      "rawBody": "{\"object\":\"whatsapp_business_account\"}",
+      "secret": "ignored-config-secret-wins",
+      "expect": true
+    },
+    {
+      "name": "rechaza firma incorrecta",
+      "headers": { "x-hub-signature-256": "sha256=00firma_invalida" },
+      "rawBody": "{\"object\":\"whatsapp_business_account\"}",
+      "secret": "ignored",
+      "expect": false
+    },
+    {
+      "name": "rechaza header ausente",
+      "headers": {},
+      "rawBody": "{\"object\":\"whatsapp_business_account\"}",
+      "secret": "ignored",
+      "expect": false
+    }
+  ],
+  "parse": [
+    {
+      "name": "texto con nombre de contacto",
+      "rawBody": "{\"object\":\"whatsapp_business_account\",\"entry\":[{\"id\":\"WABA1\",\"changes\":[{\"value\":{\"messaging_product\":\"whatsapp\",\"metadata\":{\"phone_number_id\":\"PNID\"},\"contacts\":[{\"profile\":{\"name\":\"Luis\"},\"wa_id\":\"51911122233\"}],\"messages\":[{\"from\":\"51911122233\",\"id\":\"wamid.HBG1\",\"timestamp\":\"1735689600\",\"type\":\"text\",\"text\":{\"body\":\"Buenos días\"}}]},\"field\":\"messages\"}]}]}",
+      "expected": {
+        "messages": [
+          {
+            "externalEventId": "wamid.HBG1",
+            "externalMessageId": "wamid.HBG1",
+            "externalThreadId": "wa:51911122233",
+            "senderExternalId": "wa:51911122233",
+            "senderDisplayName": "Luis",
+            "content": { "type": "text", "text": "Buenos días" },
+            "sentAt": "2025-01-01T00:00:00.000Z"
+          }
+        ],
+        "statuses": []
+      }
+    },
+    {
+      "name": "imagen con caption y estados (sent se descarta)",
+      "rawBody": "{\"object\":\"whatsapp_business_account\",\"entry\":[{\"id\":\"WABA1\",\"changes\":[{\"value\":{\"messaging_product\":\"whatsapp\",\"metadata\":{\"phone_number_id\":\"PNID\"},\"contacts\":[{\"profile\":{\"name\":\"Luis\"},\"wa_id\":\"51911122233\"}],\"messages\":[{\"from\":\"51911122233\",\"id\":\"wamid.HBG2\",\"timestamp\":\"1735689660\",\"type\":\"image\",\"image\":{\"id\":\"media-1\",\"mime_type\":\"image/jpeg\",\"caption\":\"Mi radiografía\"}}],\"statuses\":[{\"id\":\"wamid.OUT1\",\"status\":\"delivered\",\"timestamp\":\"1735689700\",\"recipient_id\":\"51911122233\"},{\"id\":\"wamid.OUT1\",\"status\":\"read\",\"timestamp\":\"1735689760\",\"recipient_id\":\"51911122233\"},{\"id\":\"wamid.OUT2\",\"status\":\"failed\",\"timestamp\":\"1735689800\",\"recipient_id\":\"51911122233\"},{\"id\":\"wamid.OUT3\",\"status\":\"sent\",\"timestamp\":\"1735689810\",\"recipient_id\":\"51911122233\"}]},\"field\":\"messages\"}]}]}",
+      "expected": {
+        "messages": [
+          {
+            "externalEventId": "wamid.HBG2",
+            "externalMessageId": "wamid.HBG2",
+            "externalThreadId": "wa:51911122233",
+            "senderExternalId": "wa:51911122233",
+            "senderDisplayName": "Luis",
+            "content": {
+              "type": "media",
+              "mediaExternalId": "media-1",
+              "mimeType": "image/jpeg",
+              "caption": "Mi radiografía"
+            },
+            "sentAt": "2025-01-01T00:01:00.000Z"
+          }
+        ],
+        "statuses": [
+          { "externalMessageId": "wamid.OUT1", "status": "delivered" },
+          { "externalMessageId": "wamid.OUT1", "status": "read" },
+          { "externalMessageId": "wamid.OUT2", "status": "failed" }
+        ]
+      }
+    }
+  ],
+  "send": [
+    {
+      "name": "texto construye messages/text",
+      "message": { "to": "wa:51911122233", "kind": { "type": "text", "text": "Hola Luis" } },
+      "respondWith": { "messages": [{ "id": "wamid.SENT1" }] },
+      "expectUrl": "https://graph.facebook.com/v21.0/PNID/messages",
+      "expectBody": { "to": "51911122233", "type": "text" },
+      "expectExternalId": "wamid.SENT1"
+    },
+    {
+      "name": "plantilla construye messages/template",
+      "message": {
+        "to": "wa:51911122233",
+        "kind": { "type": "template", "name": "cita_recordatorio", "language": "es_PE", "params": ["Luis", "lunes 10:00"] }
+      },
+      "respondWith": { "messages": [{ "id": "wamid.SENT2" }] },
+      "expectUrl": "https://graph.facebook.com/v21.0/PNID/messages",
+      "expectBody": { "to": "51911122233", "type": "template", "template": { "name": "cita_recordatorio" } },
+      "expectExternalId": "wamid.SENT2"
+    }
+  ]
+}

@@ -1,0 +1,33 @@
+{
+  "name": "@odentia/agent",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@langchain/core": "1.2.11",
+    "@langchain/langgraph": "1.4.15",
+    "@odentia/channels": "workspace:*",
+    "@langchain/langgraph-checkpoint-postgres": "1.0.5",
+    "@langchain/openai": "1.5.13",
+    "@odentia/db": "workspace:*",
+    "@odentia/services": "workspace:*",
+    "drizzle-orm": "0.45.2",
+    "langchain": "1.2.2",
+    "zod": "4.6.2"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.2",
+    "testcontainers": "12.1.0",
+    "tsx": "4.23.13",
+    "typescript": "7.0.2",
+    "vitest": "^3.2.7"
+  }
+}

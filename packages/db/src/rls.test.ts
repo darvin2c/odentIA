@@ -38,6 +38,49 @@ async function branchNames(db: Db): Promise<string[]> {
   return (rows as unknown as { name: string }[]).map((r) => r.name);
 }
 
+async function insertContact(db: Db, id: string, orgId: string, name: string) {
+  await db.execute(
+    sql`insert into "contact" ("id", "organization_id", "display_name")
+        values (${id}::uuid, ${orgId}, ${name})`,
+  );
+}
+
+async function insertConnection(db: Db, id: string, orgId: string) {
+  await db.execute(
+    sql`insert into "channel_connection"
+          ("id", "organization_id", "channel", "provider", "display_name", "config_encrypted", "webhook_secret")
+        values (${id}::uuid, ${orgId}, 'telegram', 'telegram_bot_api', 'Bot', 'enc', 'secret')`,
+  );
+}
+
+async function insertConversation(db: Db, id: string, orgId: string, contactId: string, connId: string) {
+  await db.execute(
+    sql`insert into "conversation"
+          ("id", "organization_id", "contact_id", "channel_connection_id", "external_thread_id")
+        values (${id}::uuid, ${orgId}, ${contactId}::uuid, ${connId}::uuid, ${"thread-" + id})`,
+  );
+}
+
+async function insertMessage(db: Db, orgId: string, conversationId: string, body: string, externalId: string | null) {
+  await db.execute(
+    sql`insert into "message"
+          ("organization_id", "conversation_id", "direction", "sender_kind", "body", "external_id")
+        values (${orgId}, ${conversationId}::uuid, 'in', 'contact', ${body}, ${externalId})`,
+  );
+}
+
+async function contactNames(db: Db): Promise<string[]> {
+  const rows = await db.execute<{ display_name: string }>(
+    sql`select "display_name" from "contact" order by "display_name"`,
+  );
+  return (rows as unknown as { display_name: string }[]).map((r) => r.display_name);
+}
+
+async function messageBodies(db: Db): Promise<string[]> {
+  const rows = await db.execute<{ body: string }>(sql`select "body" from "message" order by "body"`);
+  return (rows as unknown as { body: string }[]).map((r) => r.body);
+}
+
 beforeAll(async () => {
   // GenericContainer en lugar de PostgreSqlContainer: este último inyecta un
   // healthcheck en el CREATE y Podman lo rechaza (sin systemd en la máquina).
@@ -72,6 +115,38 @@ beforeAll(async () => {
   await insertOrg(ownerDb, "org_b", "sur");
   await insertBranch(ownerDb, "11111111-1111-1111-1111-111111111111", "org_a", "Sede Lima");
   await insertBranch(ownerDb, "22222222-2222-2222-2222-222222222222", "org_b", "Sede Sur");
+  await insertContact(ownerDb, "33333333-3333-3333-3333-333333333333", "org_a", "Paciente Ana");
+  await insertContact(ownerDb, "44444444-4444-4444-4444-444444444444", "org_b", "Paciente Beto");
+  await insertConnection(ownerDb, "55555555-5555-5555-5555-555555555555", "org_a");
+  await insertConnection(ownerDb, "66666666-6666-6666-6666-666666666666", "org_b");
+  await insertConversation(
+    ownerDb,
+    "77777777-7777-7777-7777-777777777777",
+    "org_a",
+    "33333333-3333-3333-3333-333333333333",
+    "55555555-5555-5555-5555-555555555555",
+  );
+  await insertConversation(
+    ownerDb,
+    "88888888-8888-8888-8888-888888888888",
+    "org_b",
+    "44444444-4444-4444-4444-444444444444",
+    "66666666-6666-6666-6666-666666666666",
+  );
+  await insertMessage(
+    ownerDb,
+    "org_a",
+    "77777777-7777-7777-7777-777777777777",
+    "Hola",
+    "ext-1",
+  );
+  await insertMessage(
+    ownerDb,
+    "org_b",
+    "88888888-8888-8888-8888-888888888888",
+    "Buenas",
+    "ext-2",
+  );
 }, 180_000);
 
 afterAll(async () => {
@@ -89,4 +164,25 @@ it("sin contexto de org, el rol app ve 0 filas", async () => {
 
 it("el rol owner bypasea RLS y ve todas las sucursales", async () => {
   expect(await branchNames(ownerDb)).toEqual(["Sede Lima", "Sede Sur"]);
+});
+
+it("con contexto de org A solo ve contactos y mensajes de A", async () => {
+  expect(await withOrgContext(appDb, "org_a", (tx) => contactNames(tx))).toEqual(["Paciente Ana"]);
+  expect(await withOrgContext(appDb, "org_a", (tx) => messageBodies(tx))).toEqual(["Hola"]);
+  expect(await withOrgContext(appDb, "org_b", (tx) => contactNames(tx))).toEqual(["Paciente Beto"]);
+  expect(await withOrgContext(appDb, "org_b", (tx) => messageBodies(tx))).toEqual(["Buenas"]);
+});
+
+it("el dedupe por (conversation_id, external_id) rechaza el segundo insert", async () => {
+  await expect(
+    insertMessage(ownerDb, "org_a", "77777777-7777-7777-7777-777777777777", "Hola x2", "ext-1"),
+  ).rejects.toThrow();
+  // external_id null no dedupea: dos mensajes sin id externo conviven.
+  await insertMessage(ownerDb, "org_a", "77777777-7777-7777-7777-777777777777", "Sin id 1", null);
+  await insertMessage(ownerDb, "org_a", "77777777-7777-7777-7777-777777777777", "Sin id 2", null);
+  expect(await withOrgContext(appDb, "org_a", (tx) => messageBodies(tx))).toEqual([
+    "Hola",
+    "Sin id 1",
+    "Sin id 2",
+  ]);
 });

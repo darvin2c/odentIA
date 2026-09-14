@@ -10,178 +10,73 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
-import { Route as AppRouteImport } from './routes/app'
-import { Route as ForgotPasswordRouteImport } from './routes/forgot-password'
-import { Route as LoginRouteImport } from './routes/login'
-import { Route as OnboardingRouteImport } from './routes/onboarding'
-import { Route as RegisterRouteImport } from './routes/register'
-import { Route as ResetPasswordRouteImport } from './routes/reset-password'
-import { Route as VerifyEmailSentRouteImport } from './routes/verify-email-sent'
-import { Route as AcceptInvitationInvitationIdRouteImport } from './routes/accept-invitation/$invitationId'
-import { Route as AppBranchesRouteImport } from './routes/app/branches'
-import { Route as AppDemoRouteImport } from './routes/app/demo'
-import { Route as AppMembersRouteImport } from './routes/app/members'
+import { Route as OrgRouteImport } from './routes/_org'
+import { Route as OrgBranchesRouteImport } from './routes/_org/branches'
+import { Route as OrgDemoRouteImport } from './routes/_org/demo'
+import { Route as OrgMembersRouteImport } from './routes/_org/members'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
-const AppRoute = AppRouteImport.update({
-  id: '/app',
-  path: '/app',
+const OrgRoute = OrgRouteImport.update({
+  id: '/_org',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ForgotPasswordRoute = ForgotPasswordRouteImport.update({
-  id: '/forgot-password',
-  path: '/forgot-password',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const LoginRoute = LoginRouteImport.update({
-  id: '/login',
-  path: '/login',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const OnboardingRoute = OnboardingRouteImport.update({
-  id: '/onboarding',
-  path: '/onboarding',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const RegisterRoute = RegisterRouteImport.update({
-  id: '/register',
-  path: '/register',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ResetPasswordRoute = ResetPasswordRouteImport.update({
-  id: '/reset-password',
-  path: '/reset-password',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const VerifyEmailSentRoute = VerifyEmailSentRouteImport.update({
-  id: '/verify-email-sent',
-  path: '/verify-email-sent',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AcceptInvitationInvitationIdRoute =
-  AcceptInvitationInvitationIdRouteImport.update({
-    id: '/accept-invitation/$invitationId',
-    path: '/accept-invitation/$invitationId',
-    getParentRoute: () => rootRouteImport,
-  } as any)
-const AppBranchesRoute = AppBranchesRouteImport.update({
+const OrgBranchesRoute = OrgBranchesRouteImport.update({
   id: '/branches',
   path: '/branches',
-  getParentRoute: () => AppRoute,
+  getParentRoute: () => OrgRoute,
 } as any)
-const AppDemoRoute = AppDemoRouteImport.update({
+const OrgDemoRoute = OrgDemoRouteImport.update({
   id: '/demo',
   path: '/demo',
-  getParentRoute: () => AppRoute,
+  getParentRoute: () => OrgRoute,
 } as any)
-const AppMembersRoute = AppMembersRouteImport.update({
+const OrgMembersRoute = OrgMembersRouteImport.update({
   id: '/members',
   path: '/members',
-  getParentRoute: () => AppRoute,
+  getParentRoute: () => OrgRoute,
 } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
-  '/app': typeof AppRouteWithChildren
-  '/forgot-password': typeof ForgotPasswordRoute
-  '/login': typeof LoginRoute
-  '/onboarding': typeof OnboardingRoute
-  '/register': typeof RegisterRoute
-  '/reset-password': typeof ResetPasswordRoute
-  '/verify-email-sent': typeof VerifyEmailSentRoute
-  '/accept-invitation/$invitationId': typeof AcceptInvitationInvitationIdRoute
-  '/app/branches': typeof AppBranchesRoute
-  '/app/demo': typeof AppDemoRoute
-  '/app/members': typeof AppMembersRoute
+  '/branches': typeof OrgBranchesRoute
+  '/demo': typeof OrgDemoRoute
+  '/members': typeof OrgMembersRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/app': typeof AppRouteWithChildren
-  '/forgot-password': typeof ForgotPasswordRoute
-  '/login': typeof LoginRoute
-  '/onboarding': typeof OnboardingRoute
-  '/register': typeof RegisterRoute
-  '/reset-password': typeof ResetPasswordRoute
-  '/verify-email-sent': typeof VerifyEmailSentRoute
-  '/accept-invitation/$invitationId': typeof AcceptInvitationInvitationIdRoute
-  '/app/branches': typeof AppBranchesRoute
-  '/app/demo': typeof AppDemoRoute
-  '/app/members': typeof AppMembersRoute
+  '/branches': typeof OrgBranchesRoute
+  '/demo': typeof OrgDemoRoute
+  '/members': typeof OrgMembersRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
-  '/app': typeof AppRouteWithChildren
-  '/forgot-password': typeof ForgotPasswordRoute
-  '/login': typeof LoginRoute
-  '/onboarding': typeof OnboardingRoute
-  '/register': typeof RegisterRoute
-  '/reset-password': typeof ResetPasswordRoute
-  '/verify-email-sent': typeof VerifyEmailSentRoute
-  '/accept-invitation/$invitationId': typeof AcceptInvitationInvitationIdRoute
-  '/app/branches': typeof AppBranchesRoute
-  '/app/demo': typeof AppDemoRoute
-  '/app/members': typeof AppMembersRoute
+  '/_org': typeof OrgRouteWithChildren
+  '/_org/branches': typeof OrgBranchesRoute
+  '/_org/demo': typeof OrgDemoRoute
+  '/_org/members': typeof OrgMembersRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths:
-    | '/'
-    | '/app'
-    | '/forgot-password'
-    | '/login'
-    | '/onboarding'
-    | '/register'
-    | '/reset-password'
-    | '/verify-email-sent'
-    | '/accept-invitation/$invitationId'
-    | '/app/branches'
-    | '/app/demo'
-    | '/app/members'
+  fullPaths: '/' | '/branches' | '/demo' | '/members'
   fileRoutesByTo: FileRoutesByTo
-  to:
-    | '/'
-    | '/app'
-    | '/forgot-password'
-    | '/login'
-    | '/onboarding'
-    | '/register'
-    | '/reset-password'
-    | '/verify-email-sent'
-    | '/accept-invitation/$invitationId'
-    | '/app/branches'
-    | '/app/demo'
-    | '/app/members'
+  to: '/' | '/branches' | '/demo' | '/members'
   id:
     | '__root__'
     | '/'
-    | '/app'
-    | '/forgot-password'
-    | '/login'
-    | '/onboarding'
-    | '/register'
-    | '/reset-password'
-    | '/verify-email-sent'
-    | '/accept-invitation/$invitationId'
-    | '/app/branches'
-    | '/app/demo'
-    | '/app/members'
+    | '/_org'
+    | '/_org/branches'
+    | '/_org/demo'
+    | '/_org/members'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
-  AppRoute: typeof AppRouteWithChildren
-  ForgotPasswordRoute: typeof ForgotPasswordRoute
-  LoginRoute: typeof LoginRoute
-  OnboardingRoute: typeof OnboardingRoute
-  RegisterRoute: typeof RegisterRoute
-  ResetPasswordRoute: typeof ResetPasswordRoute
-  VerifyEmailSentRoute: typeof VerifyEmailSentRoute
-  AcceptInvitationInvitationIdRoute: typeof AcceptInvitationInvitationIdRoute
+  OrgRoute: typeof OrgRouteWithChildren
 }
 
 declare module '@tanstack/react-router' {
@@ -193,110 +88,54 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/app': {
-      id: '/app'
-      path: '/app'
-      fullPath: '/app'
-      preLoaderRoute: typeof AppRouteImport
+    '/_org': {
+      id: '/_org'
+      path: ''
+      fullPath: '/'
+      preLoaderRoute: typeof OrgRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/forgot-password': {
-      id: '/forgot-password'
-      path: '/forgot-password'
-      fullPath: '/forgot-password'
-      preLoaderRoute: typeof ForgotPasswordRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/login': {
-      id: '/login'
-      path: '/login'
-      fullPath: '/login'
-      preLoaderRoute: typeof LoginRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/onboarding': {
-      id: '/onboarding'
-      path: '/onboarding'
-      fullPath: '/onboarding'
-      preLoaderRoute: typeof OnboardingRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/register': {
-      id: '/register'
-      path: '/register'
-      fullPath: '/register'
-      preLoaderRoute: typeof RegisterRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/reset-password': {
-      id: '/reset-password'
-      path: '/reset-password'
-      fullPath: '/reset-password'
-      preLoaderRoute: typeof ResetPasswordRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/verify-email-sent': {
-      id: '/verify-email-sent'
-      path: '/verify-email-sent'
-      fullPath: '/verify-email-sent'
-      preLoaderRoute: typeof VerifyEmailSentRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/accept-invitation/$invitationId': {
-      id: '/accept-invitation/$invitationId'
-      path: '/accept-invitation/$invitationId'
-      fullPath: '/accept-invitation/$invitationId'
-      preLoaderRoute: typeof AcceptInvitationInvitationIdRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/app/branches': {
-      id: '/app/branches'
+    '/_org/branches': {
+      id: '/_org/branches'
       path: '/branches'
-      fullPath: '/app/branches'
-      preLoaderRoute: typeof AppBranchesRouteImport
-      parentRoute: typeof AppRoute
+      fullPath: '/branches'
+      preLoaderRoute: typeof OrgBranchesRouteImport
+      parentRoute: typeof OrgRoute
     }
-    '/app/demo': {
-      id: '/app/demo'
+    '/_org/demo': {
+      id: '/_org/demo'
       path: '/demo'
-      fullPath: '/app/demo'
-      preLoaderRoute: typeof AppDemoRouteImport
-      parentRoute: typeof AppRoute
+      fullPath: '/demo'
+      preLoaderRoute: typeof OrgDemoRouteImport
+      parentRoute: typeof OrgRoute
     }
-    '/app/members': {
-      id: '/app/members'
+    '/_org/members': {
+      id: '/_org/members'
       path: '/members'
-      fullPath: '/app/members'
-      preLoaderRoute: typeof AppMembersRouteImport
-      parentRoute: typeof AppRoute
+      fullPath: '/members'
+      preLoaderRoute: typeof OrgMembersRouteImport
+      parentRoute: typeof OrgRoute
     }
   }
 }
 
-interface AppRouteChildren {
-  AppBranchesRoute: typeof AppBranchesRoute
-  AppDemoRoute: typeof AppDemoRoute
-  AppMembersRoute: typeof AppMembersRoute
+interface OrgRouteChildren {
+  OrgBranchesRoute: typeof OrgBranchesRoute
+  OrgDemoRoute: typeof OrgDemoRoute
+  OrgMembersRoute: typeof OrgMembersRoute
 }
 
-const AppRouteChildren: AppRouteChildren = {
-  AppBranchesRoute: AppBranchesRoute,
-  AppDemoRoute: AppDemoRoute,
-  AppMembersRoute: AppMembersRoute,
+const OrgRouteChildren: OrgRouteChildren = {
+  OrgBranchesRoute: OrgBranchesRoute,
+  OrgDemoRoute: OrgDemoRoute,
+  OrgMembersRoute: OrgMembersRoute,
 }
 
-const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)
+const OrgRouteWithChildren = OrgRoute._addFileChildren(OrgRouteChildren)
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
-  AppRoute: AppRouteWithChildren,
-  ForgotPasswordRoute: ForgotPasswordRoute,
-  LoginRoute: LoginRoute,
-  OnboardingRoute: OnboardingRoute,
-  RegisterRoute: RegisterRoute,
-  ResetPasswordRoute: ResetPasswordRoute,
-  VerifyEmailSentRoute: VerifyEmailSentRoute,
-  AcceptInvitationInvitationIdRoute: AcceptInvitationInvitationIdRoute,
+  OrgRoute: OrgRouteWithChildren,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

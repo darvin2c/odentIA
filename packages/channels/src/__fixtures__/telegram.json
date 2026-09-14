@@ -1,0 +1,85 @@
+{
+  "config": { "botToken": "TESTTOKEN" },
+  "capabilities": { "templates": false, "media": true, "interactive": false, "readReceipts": false, "edit": true },
+  "verify": [
+    {
+      "name": "acepta secret-token correcto",
+      "headers": { "x-telegram-bot-api-secret-token": "s3cret" },
+      "rawBody": "{}",
+      "secret": "s3cret",
+      "expect": true
+    },
+    {
+      "name": "rechaza secret-token incorrecto",
+      "headers": { "x-telegram-bot-api-secret-token": "otro" },
+      "rawBody": "{}",
+      "secret": "s3cret",
+      "expect": false
+    },
+    {
+      "name": "rechaza header ausente",
+      "headers": {},
+      "rawBody": "{}",
+      "secret": "s3cret",
+      "expect": false
+    }
+  ],
+  "parse": [
+    {
+      "name": "texto con nombre de perfil",
+      "rawBody": "{\"update_id\":9001,\"message\":{\"message_id\":42,\"date\":1735689600,\"chat\":{\"id\":555,\"type\":\"private\"},\"from\":{\"id\":555,\"first_name\":\"Ana\",\"last_name\":\"Paz\",\"username\":\"anapaz\"},\"text\":\"Hola, quiero una cita\"}}",
+      "expected": {
+        "messages": [
+          {
+            "externalEventId": "tg:9001",
+            "externalMessageId": "tg:555:42",
+            "externalThreadId": "tg:555",
+            "senderExternalId": "tg:555",
+            "senderDisplayName": "Ana Paz",
+            "content": { "type": "text", "text": "Hola, quiero una cita" },
+            "sentAt": "2025-01-01T00:00:00.000Z"
+          }
+        ],
+        "statuses": []
+      }
+    },
+    {
+      "name": "foto toma el file_id mayor con caption",
+      "rawBody": "{\"update_id\":9002,\"message\":{\"message_id\":43,\"date\":1735689660,\"chat\":{\"id\":555},\"from\":{\"id\":555,\"first_name\":\"Ana\"},\"photo\":[{\"file_id\":\"small\"},{\"file_id\":\"big-file-id\"}],\"caption\":\"Mi radiografía\"}}",
+      "expected": {
+        "messages": [
+          {
+            "externalEventId": "tg:9002",
+            "externalMessageId": "tg:555:43",
+            "externalThreadId": "tg:555",
+            "senderExternalId": "tg:555",
+            "senderDisplayName": "Ana",
+            "content": {
+              "type": "media",
+              "mediaExternalId": "big-file-id",
+              "mimeType": "image/jpeg",
+              "caption": "Mi radiografía"
+            },
+            "sentAt": "2025-01-01T00:01:00.000Z"
+          }
+        ],
+        "statuses": []
+      }
+    },
+    {
+      "name": "update sin mensaje da vacío",
+      "rawBody": "{\"update_id\":9003,\"callback_query\":{\"id\":\"q1\"}}",
+      "expected": { "messages": [], "statuses": [] }
+    }
+  ],
+  "send": [
+    {
+      "name": "texto construye sendMessage",
+      "message": { "to": "tg:555", "kind": { "type": "text", "text": "Hola Ana" } },
+      "respondWith": { "ok": true, "result": { "message_id": 77, "chat": { "id": 555 }, "text": "Hola Ana" } },
+      "expectUrl": "https://api.telegram.org/botTESTTOKEN/sendMessage",
+      "expectBody": { "chat_id": "555", "text": "Hola Ana" },
+      "expectExternalId": "tg:555:77"
+    }
+  ]
+}
