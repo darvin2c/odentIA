@@ -2,6 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 import { latestLinkFor } from "./mailpit";
 
 const API = "https://api.odentia.localhost";
+const PANEL = "https://app.odentia.localhost";
 const run = Date.now().toString(36);
 
 const userA = { name: "Ana Norte", email: `ana-${run}@test.dev`, password: "secreto-123" };
@@ -10,6 +11,11 @@ const userC = { name: "Cora Lima", email: `cora-${run}@test.dev`, password: "sec
 
 const orgA = { name: "Clínica Norte", slug: `clinica-norte-${run}`, branch: "Sede Lima" };
 const orgC = { name: "Clínica Sur", slug: `clinica-sur-${run}`, branch: "Sede Sur" };
+
+// Navegaciones a un tenant: URLs absolutas (page.goto las acepta).
+const tenant = (slug: string, path: string) => `https://${slug}.odentia.localhost${path}`;
+const tenantBranches = (slug: string) =>
+  new RegExp(`^https://${slug}\\.odentia\\.localhost/branches`);
 
 // El dev server de Vite recarga una vez al compilar en frío; hay que esperar
 // a que React hidrate y a que la fibra sobreviva a una posible recarga.
@@ -64,7 +70,8 @@ async function onboard(page: Page, org: typeof orgA) {
   await page.getByRole("button", { name: "Continuar" }).click();
   await page.getByLabel("Nombre de la sucursal").fill(org.branch);
   await page.getByRole("button", { name: "Crear organización" }).click();
-  await expect(page).toHaveURL(/\/app\/branches/);
+  // El panel redirige al tenant con SSO por cookie compartida.
+  await expect(page).toHaveURL(tenantBranches(org.slug));
   await expect(page.getByText(org.branch)).toBeVisible();
 }
 
@@ -80,38 +87,42 @@ test("corte de integración: auth, tenants, roles, cola y SSE", async ({ browser
   await onboard(pageA, orgA);
 
   // (5) A invita a B como member.
-  await gotoHydrated(pageA, "/app/members");
+  await gotoHydrated(pageA, tenant(orgA.slug, "/members"));
   await pageA.getByRole("button", { name: "Invitar miembro" }).click();
   await pageA.getByLabel("Invitar por correo").fill(userB.email);
   await pageA.getByRole("button", { name: "Invitar", exact: true }).click();
   await expect(pageA.getByText(userB.email)).toBeVisible();
 
-  // (6) B acepta la invitación y ve la organización activa.
+  // (6) B acepta la invitación (el enlace apunta al panel) y aterriza en el tenant.
   const contextB = await browser.newContext({ ignoreHTTPSErrors: true });
   const pageB = await contextB.newPage();
   await register(pageB, userB);
   await verifyEmail(pageB, userB.email);
   await login(pageB, userB);
   const invitationLink = await latestLinkFor(userB.email, `Invitación a ${orgA.name}`);
+  expect(invitationLink.startsWith(`${PANEL}/accept-invitation/`)).toBe(true);
   await pageB.goto(invitationLink);
   await waitForHydration(pageB);
-  await expect(pageB).toHaveURL(/\/app\/branches/, { timeout: 20_000 });
+  await expect(pageB).toHaveURL(tenantBranches(orgA.slug), { timeout: 20_000 });
   await expect(pageB.getByText(orgA.branch)).toBeVisible();
 
   // (7) Rol member: la API rechaza escritura y la UI oculta el alta.
   // El fetch va en el navegador: el request-context de Playwright corre en
   // Node y no resuelve *.odentia.localhost (hosts de portless) en WSL.
-  const forbiddenStatus = await pageB.evaluate(async (api) => {
-    const response = await fetch(`${api}/api/branches`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      credentials: "include",
-      body: JSON.stringify({ name: "Sede Prohibida" }),
-    });
-    return response.status;
-  }, API);
+  const forbiddenStatus = await pageB.evaluate(
+    async ({ api, slug }) => {
+      const response = await fetch(`${api}/api/branches`, {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-odentia-org": slug },
+        credentials: "include",
+        body: JSON.stringify({ name: "Sede Prohibida" }),
+      });
+      return response.status;
+    },
+    { api: API, slug: orgA.slug },
+  );
   expect(forbiddenStatus).toBe(403);
-  await gotoHydrated(pageB, "/app/branches");
+  await gotoHydrated(pageB, tenant(orgA.slug, "/branches"));
   await expect(pageB.getByRole("button", { name: "Nueva sucursal" })).toHaveCount(0);
 
   // (8) Tenant C: su listado no contiene datos de la org A (UI y API).
@@ -122,20 +133,42 @@ test("corte de integración: auth, tenants, roles, cola y SSE", async ({ browser
   await login(pageC, userC);
   await onboard(pageC, orgC);
   await expect(pageC.getByText(orgA.branch)).toHaveCount(0);
-  const branchesCNames = await pageC.evaluate(async (api) => {
-    const response = await fetch(`${api}/api/branches`, { credentials: "include" });
-    const body = (await response.json()) as { data: { name: string }[] };
-    return body.data.map((row) => row.name);
-  }, API);
+  const branchesCNames = await pageC.evaluate(
+    async ({ api, slug }) => {
+      const response = await fetch(`${api}/api/branches`, {
+        headers: { "x-odentia-org": slug },
+        credentials: "include",
+      });
+      const body = (await response.json()) as { data: { name: string }[] };
+      return body.data.map((row) => row.name);
+    },
+    { api: API, slug: orgC.slug },
+  );
   expect(branchesCNames).toEqual([orgC.branch]);
 
   // (9) A publica una tarea demo y el feed SSE la muestra en < 15 s.
-  await gotoHydrated(pageA, "/app/demo");
+  await gotoHydrated(pageA, tenant(orgA.slug, "/demo"));
   await pageA.getByPlaceholder("Escribe un mensaje").fill("hola");
   await pageA.getByRole("button", { name: "Enviar tarea" }).click();
   await expect(pageA.getByText("demo_task.done").first()).toBeVisible({ timeout: 15_000 });
 
+  // (10) Anónimo abre el tenant: va al login del panel y vuelve tras ingresar.
+  const contextD = await browser.newContext({ ignoreHTTPSErrors: true });
+  const pageD = await contextD.newPage();
+  await gotoHydrated(pageD, tenant(orgA.slug, "/branches"));
+  await expect(pageD).toHaveURL(/app\.odentia\.localhost\/login\?next=/);
+  await pageD.getByLabel("Correo").fill(userA.email);
+  await pageD.getByLabel("Contraseña").fill(userA.password);
+  await pageD.getByRole("button", { name: "Ingresar" }).click();
+  await expect(pageD).toHaveURL(tenantBranches(orgA.slug), { timeout: 20_000 });
+  await expect(pageD.getByText(orgA.branch)).toBeVisible();
+
+  // (11) No-miembro abre el tenant: aterriza en la lista del panel.
+  await gotoHydrated(pageC, tenant(orgA.slug, "/branches"));
+  await expect(pageC).toHaveURL(`${PANEL}/`);
+
   await contextA.close();
   await contextB.close();
   await contextC.close();
+  await contextD.close();
 });

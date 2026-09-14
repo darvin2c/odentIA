@@ -5,7 +5,7 @@ export default defineConfig({
   timeout: 120_000,
   workers: 1, // comparten Mailpit
   use: {
-    baseURL: "https://odentia.localhost",
+    baseURL: "https://app.odentia.localhost",
     ignoreHTTPSErrors: true,
     trace: "on-first-retry",
   },
