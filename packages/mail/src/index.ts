@@ -68,6 +68,38 @@ export function verifyEmailTemplate({ url }: { url: string }): MailTemplate {
   };
 }
 
+export function changeEmailVerificationTemplate({ url }: { url: string }): MailTemplate {
+  return {
+    subject: "Confirma tu nuevo correo — odentIA",
+    html: layout(
+      "Confirma tu nuevo correo",
+      "Recibimos una solicitud para cambiar el correo de tu cuenta. Confirma esta nueva dirección para completar el cambio. Si no fuiste tú, ignora este mensaje.",
+      url,
+      "Confirmar correo",
+    ),
+    text: `Confirma tu nuevo correo en odentIA: ${url}`,
+  };
+}
+
+export function changeEmailConfirmationTemplate({
+  newEmail,
+  url,
+}: {
+  newEmail: string;
+  url: string;
+}): MailTemplate {
+  return {
+    subject: "Solicitud de cambio de correo — odentIA",
+    html: layout(
+      "Solicitud de cambio de correo",
+      `Recibimos una solicitud para cambiar el correo de tu cuenta a <strong>${newEmail}</strong>. Autoriza el cambio para continuar. Si no fuiste tú, ignora este mensaje y tu cuenta seguirá protegida.`,
+      url,
+      "Autorizar cambio",
+    ),
+    text: `Autoriza el cambio de correo a ${newEmail} en odentIA: ${url}`,
+  };
+}
+
 export function resetPasswordTemplate({ url }: { url: string }): MailTemplate {
   return {
     subject: "Restablece tu contraseña — odentIA",

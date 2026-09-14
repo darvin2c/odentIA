@@ -3,6 +3,8 @@ import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { organization } from "better-auth/plugins";
 import type { Db } from "@odentia/db";
 import {
+  changeEmailConfirmationTemplate,
+  changeEmailVerificationTemplate,
   invitationTemplate,
   resetPasswordTemplate,
   verifyEmailTemplate,
@@ -17,6 +19,17 @@ export interface CreateAuthOptions {
   webURL: string;
   cookieDomain: string;
   trustedOrigins: string[];
+}
+
+function isChangeEmailToken(token: string): boolean {
+  try {
+    const payload = JSON.parse(Buffer.from(token.split(".")[1] ?? "", "base64url").toString()) as {
+      requestType?: string;
+    };
+    return payload.requestType === "change-email-verification";
+  } catch {
+    return false;
+  }
 }
 
 export function createAuth({
@@ -44,9 +57,20 @@ export function createAuth({
     emailVerification: {
       sendOnSignUp: true,
       autoSignInAfterVerification: true,
-      sendVerificationEmail: async ({ user, url }) => {
-        const template = verifyEmailTemplate({ url });
+      sendVerificationEmail: async ({ user, url, token }) => {
+        const template = isChangeEmailToken(token)
+          ? changeEmailVerificationTemplate({ url })
+          : verifyEmailTemplate({ url });
         await mailer.send({ to: user.email, ...template });
+      },
+    },
+    user: {
+      changeEmail: {
+        enabled: true,
+        sendChangeEmailConfirmation: async ({ user, newEmail, url }) => {
+          const template = changeEmailConfirmationTemplate({ newEmail, url });
+          await mailer.send({ to: user.email, ...template });
+        },
       },
     },
     advanced: {
