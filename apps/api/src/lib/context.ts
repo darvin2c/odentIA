@@ -5,9 +5,6 @@ import { and, eq } from "drizzle-orm";
 import type { Context, Next } from "hono";
 import { errorBody } from "./error.js";
 
-/** Subdominios reservados: nunca son slugs de tenant. */
-const RESERVED_SUBDOMAINS: Record<string, true> = { www: true, api: true, app: true };
-
 export interface OrgContext {
   orgId: string;
   userId: string;
@@ -34,6 +31,7 @@ export function requireSession({ auth }: Pick<ApiDeps, "auth">) {
       return c.json(errorBody(c, "UNAUTHORIZED", "Sesión requerida"), 401);
     }
     c.set("userId", session.user.id);
+    c.set("userImage", session.user.image ?? null);
     c.set("activeOrganizationId", session.session.activeOrganizationId ?? null);
     await next();
   };
@@ -41,34 +39,34 @@ export function requireSession({ auth }: Pick<ApiDeps, "auth">) {
 
 /**
  * Resuelve la organización del request:
- *  1. Subdominio <slug>.<cookieDomain> (salvo reservados) → lookup por slug.
- *  2. Si no, activeOrganizationId de la sesión.
- * Verifica membresía en `member`; fija orgId/userId/memberRole.
+ *  1. Header `x-odentia-org` (slug).
+ *  2. Query param `org` (EventSource no puede enviar headers; lo usa
+ *     `/api/notifications/stream`).
+ *  3. Si no, activeOrganizationId de la sesión (lo usa el onboarding del
+ *     panel: `organization.create` deja la org recién creada como activa).
+ * El slug se resuelve a id vía lookup por `organization.slug`; la membresía
+ * en `member` siempre se verifica; fija orgId/userId/memberRole.
  * Invariante: el contexto NUNCA sale de un id crudo del cliente sin verificar.
  */
-export function requireOrgContext({ db, cookieDomain }: Pick<ApiDeps, "db" | "cookieDomain">) {
+export function requireOrgContext({ db }: Pick<ApiDeps, "db">) {
   return async (c: Context, next: Next) => {
     const userId = c.get("userId") as string;
     let orgId: string | null = null;
 
-    const host = c.req.header("host")?.split(":")[0] ?? "";
-    const suffix = `.${cookieDomain}`;
-    if (host.endsWith(suffix)) {
-      const slug = host.slice(0, -suffix.length);
-      if (slug && !slug.includes(".") && !RESERVED_SUBDOMAINS[slug]) {
-        const [org] = await db
-          .select({ id: organization.id })
-          .from(organization)
-          .where(eq(organization.slug, slug))
-          .limit(1);
-        if (!org) {
-          return c.json(errorBody(c, "ORG_NOT_FOUND", "Organización no encontrada"), 404);
-        }
-        orgId = org.id;
+    const slug = c.req.header("x-odentia-org") ?? c.req.query("org") ?? null;
+    if (slug) {
+      const [org] = await db
+        .select({ id: organization.id })
+        .from(organization)
+        .where(eq(organization.slug, slug))
+        .limit(1);
+      if (!org) {
+        return c.json(errorBody(c, "ORG_NOT_FOUND", "Organización no encontrada"), 404);
       }
+      orgId = org.id;
     }
-
     orgId ??= (c.get("activeOrganizationId") as string | null) ?? null;
+
     if (!orgId) {
       return c.json(errorBody(c, "ORG_REQUIRED", "No hay organización activa"), 403);
     }

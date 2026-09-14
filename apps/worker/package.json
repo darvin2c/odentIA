@@ -11,12 +11,19 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@langchain/core": "1.2.11",
+    "@langchain/langgraph-checkpoint-postgres": "1.0.5",
+    "@odentia/agent": "workspace:*",
+    "@odentia/channels": "workspace:*",
     "@odentia/db": "workspace:*",
+    "@odentia/services": "workspace:*",
     "drizzle-orm": "0.45.2",
-    "postgres": "3.4.9"
+    "postgres": "3.4.9",
+    "zod": "4.6.2"
   },
   "devDependencies": {
     "@types/node": "22.20.2",
+    "testcontainers": "12.1.0",
     "tsx": "4.23.13",
     "typescript": "7.0.2",
     "vitest": "^3.2.7"

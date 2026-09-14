@@ -1,7 +1,8 @@
 import type { Auth } from "@odentia/auth";
 import { sendDemoTask, withOrgContext, type Db } from "@odentia/db";
+import { message } from "@odentia/db/schema/crm";
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org";
-import { and, eq, gt, sql } from "drizzle-orm";
+import { and, eq, gt, inArray, sql } from "drizzle-orm";
 import { Hono, type Context } from "hono";
 import { cors } from "hono/cors";
 import { requestId } from "hono/request-id";
@@ -10,16 +11,36 @@ import postgres from "postgres";
 import { z } from "zod";
 import { canWrite, orgContextOf, requireOrgContext, requireSession } from "./lib/context.js";
 import { errorBody } from "./lib/error.js";
+import { createAgentRoute } from "./routes/agent.js";
+import { createConnectionsRoute } from "./routes/connections.js";
+import { createContactsRoute } from "./routes/contacts.js";
+import { createConversationsRoute } from "./routes/conversations.js";
+import { createFieldsRoute } from "./routes/fields.js";
+import { createPipelinesRoute } from "./routes/pipelines.js";
+import { createTasksRoute } from "./routes/tasks.js";
+import { createWebhooksRoute } from "./routes/webhooks.js";
+import type { Storage } from "@odentia/services";
 
 export interface AppDeps {
   auth: Auth;
   db: Db;
+  /**
+   * Rol owner (bypasea RLS): USO LIMITADO a rutas webhook — leer la conexión
+   * por id sin org, ledger de dedupe y encolado. Nunca datos de tenant.
+   */
+  ownerDb: Db;
+  /** Clave AES-256-GCM para configs de conexión (SECRETS_KEY). */
+  secretsKey: Buffer;
+  storage: Storage;
+  /** CHANNEL_VALIDATE_EXTERNAL !== 'false': validar contra el proveedor real. */
+  validateExternal: boolean;
+  /** Base pública del API para webhookUrl (BETTER_AUTH_URL). */
+  webhookBaseUrl: string;
   trustedOrigins: string[];
   cookieDomain: string;
   /** Conexión dedicada LISTEN (postgres.js crudo). */
   listenUrl: string;
 }
-
 const branchInput = z.object({
   name: z.string().min(1).max(120),
   addressLine1: z.string().max(200).optional(),
@@ -56,8 +77,41 @@ const demoTaskInput = z.object({
 interface NotifyPayload {
   orgId: string;
   kind: string;
-  taskId: string | number;
+  taskId?: string | number;
+  conversationId?: string;
+  messageId?: string;
   at: string;
+}
+
+type AuditRow = typeof auditEvent.$inferSelect;
+
+/**
+ * Reconstruye el payload SSE desde una fila de audit_event (replay).
+ * Nunca expone contenido: solo referencias (mismo invariante que NOTIFY).
+ */
+async function toReplayPayload(db: Db, orgId: string, event: AuditRow): Promise<NotifyPayload | null> {
+  const at = event.createdAt.toISOString();
+  if (event.action === "demo_task.done") {
+    return { orgId, kind: "demo_task.done", taskId: event.entityId ?? "", at };
+  }
+  if (event.action === "message.created" || event.action === "message.updated") {
+    if (!event.entityId) return null;
+    const found = await withOrgContext(db, orgId, (tx) =>
+      tx
+        .select({ conversationId: message.conversationId })
+        .from(message)
+        .where(and(eq(message.id, event.entityId as string), eq(message.organizationId, orgId)))
+        .limit(1),
+    );
+    const conversationId = found[0]?.conversationId;
+    if (!conversationId) return null;
+    return { orgId, kind: event.action, conversationId, messageId: event.entityId, at };
+  }
+  if (event.action === "conversation.updated") {
+    if (!event.entityId) return null;
+    return { orgId, kind: "conversation.updated", conversationId: event.entityId, at };
+  }
+  return null;
 }
 
 export function createApp(deps: AppDeps) {
@@ -89,13 +143,75 @@ export function createApp(deps: AppDeps) {
     return c.json({ ok: true });
   });
 
+  // Subdominios reservados: nunca son slugs de tenant (colisionarían con app./api./www.).
+  const RESERVED_SLUGS: Record<string, true> = { api: true, app: true, www: true };
+  app.use("/api/auth/organization/create", async (c, next) => {
+    if (c.req.method !== "POST") return next();
+    const body = (await c.req.raw.clone().json().catch(() => null)) as { slug?: unknown } | null;
+    const slug = typeof body?.slug === "string" ? body.slug : "";
+    if (RESERVED_SLUGS[slug]) {
+      return c.json(errorBody(c, "RESERVED_SLUG", "Ese subdominio está reservado"), 400);
+    }
+    return next();
+  });
+
   // Better Auth: montado ANTES de los guards.
   app.on(["GET", "POST"], "/api/auth/*", (c) => auth.handler(c.req.raw));
 
+  // Rutas de usuario (sin contexto de organización).
+  const userScoped = new Hono();
+  userScoped.use("*", requireSession(deps));
+
+  const AVATAR_MIME: Record<string, string> = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp" };
+  const AVATAR_MAX_BYTES = 2 * 1024 * 1024;
+
+  userScoped.post("/uploads/avatar", async (c) => {
+    const form = await c.req.formData().catch(() => null);
+    const file = form?.get("file");
+    if (!(file instanceof File)) {
+      return c.json(errorBody(c, "VALIDATION", "Adjunta un archivo"), 400);
+    }
+    const ext = AVATAR_MIME[file.type];
+    if (!ext) {
+      return c.json(errorBody(c, "VALIDATION", "Solo se admiten PNG, JPG o WebP"), 400);
+    }
+    if (file.size > AVATAR_MAX_BYTES) {
+      return c.json(errorBody(c, "VALIDATION", "La imagen no puede superar 2 MB"), 400);
+    }
+    const userId = (c as Context).get("userId") as string;
+    const previousImage = (c as Context).get("userImage") as string | null;
+    const { url } = await deps.storage.putAvatar({
+      userId,
+      body: Buffer.from(await file.arrayBuffer()),
+      contentType: file.type,
+      ext,
+    });
+    if (previousImage) {
+      await deps.storage.deleteByUrl(previousImage).catch(() => {});
+    }
+    return c.json({ data: { url } }, 201);
+  });
+
+  // Webhooks de proveedor ANTES que los routers con guards: el use("*") de
+  // userScoped/guarded también casa /api/webhooks/* y respondería 401.
+  app.route("/api/webhooks", createWebhooksRoute({ ownerDb: deps.ownerDb, db: deps.db, secretsKey: deps.secretsKey }));
+
+  app.route("/api", userScoped);
+
   // Guards para el resto de /api/*.
   const guarded = new Hono();
-  guarded.use("*", requireSession(deps));
-  guarded.use("*", requireOrgContext(deps));
+  // Los webhooks del proveedor viven bajo /api/webhooks pero son públicos
+  // (firma HMAC/secret-token): `use("*")` también los alcanza, se salta aquí.
+  const isWebhook = (c: Context) =>
+    c.req.path.startsWith("/api/webhooks/") || c.req.path.startsWith("/webhooks/");
+  guarded.use("*", async (c, next) => {
+    if (isWebhook(c)) return next();
+    return requireSession(deps)(c, next);
+  });
+  guarded.use("*", async (c, next) => {
+    if (isWebhook(c)) return next();
+    return requireOrgContext(deps)(c, next);
+  });
 
   function validationError(c: Context, issues: z.ZodIssue[]) {
     return c.json(
@@ -263,21 +379,19 @@ export function createApp(deps: AppDeps) {
             .where(
               and(
                 eq(auditEvent.organizationId, orgId),
-                eq(auditEvent.action, "demo_task.done"),
+                inArray(auditEvent.action, ["demo_task.done", "message.created", "message.updated", "conversation.updated"]),
                 gt(auditEvent.createdAt, new Date(lastEventId)),
               ),
             )
             .orderBy(auditEvent.createdAt),
         );
         for (const event of missed) {
+          const replay = await toReplayPayload(db, orgId, event);
+          if (!replay) continue;
           await stream.writeSSE({
             id: event.createdAt.toISOString(),
-            event: "demo_task.done",
-            data: JSON.stringify({
-              kind: "demo_task.done",
-              taskId: event.entityId,
-              at: event.createdAt.toISOString(),
-            }),
+            event: replay.kind,
+            data: JSON.stringify(replay),
           });
         }
       }
@@ -313,6 +427,21 @@ export function createApp(deps: AppDeps) {
       await done.promise;
     });
   });
+
+  const crmDeps = {
+    db: deps.db,
+    secretsKey: deps.secretsKey,
+    storage: deps.storage,
+    validateExternal: deps.validateExternal,
+    webhookBaseUrl: deps.webhookBaseUrl,
+  };
+  guarded.route("/conversations", createConversationsRoute(crmDeps));
+  guarded.route("/contacts", createContactsRoute(crmDeps));
+  guarded.route("/pipelines", createPipelinesRoute(crmDeps));
+  guarded.route("/channels/connections", createConnectionsRoute(crmDeps));
+  guarded.route("/agent", createAgentRoute(crmDeps));
+  guarded.route("/tasks", createTasksRoute(crmDeps));
+  guarded.route("/fields", createFieldsRoute(crmDeps));
 
   app.route("/api", guarded);
   return app;

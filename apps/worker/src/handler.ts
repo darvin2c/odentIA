@@ -38,5 +38,5 @@ export async function processDemoTask(db: Db, msg: DemoTaskMessage): Promise<voi
 /** Ciclo completo: procesa y recién entonces hace ack (delete) del mensaje. */
 export async function consumeDemoTask(db: Db, msg: DemoTaskMessage): Promise<void> {
   await processDemoTask(db, msg);
-  await db.execute(sql`select pgmq.delete('demo_tasks', ${Number(msg.msg_id)})`);
+  await db.execute(sql`select pgmq.delete('demo_tasks', ${Number(msg.msg_id)}::bigint)`);
 }
