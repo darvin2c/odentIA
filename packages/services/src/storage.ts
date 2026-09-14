@@ -1,6 +1,15 @@
 import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
+export const PATIENT_DOC_MAX_BYTES = 10 * 1024 * 1024;
+
+export const PATIENT_DOC_MIME_EXT: Record<string, string> = {
+  "image/jpeg": "jpg",
+  "image/png": "png",
+  "image/webp": "webp",
+  "application/pdf": "pdf",
+};
+
 export interface StorageEnv {
   endpoint: string;
   region: string;
@@ -36,6 +45,15 @@ export interface Storage {
   }): Promise<AttachmentRef>;
   /** URL firmada de lectura para un adjunto (por defecto 15 min). */
   attachmentUrl(objectKey: string, ttlSeconds?: number): Promise<string>;
+  /** Elimina un objeto del bucket privado por clave (best-effort huérfanos). */
+  deleteAttachment(objectKey: string): Promise<void>;
+  putPatientDocument(input: {
+    orgId: string;
+    patientId: string;
+    bytes: Uint8Array;
+    contentType: string;
+    ext: string;
+  }): Promise<AttachmentRef>;
 }
 
 export function createStorage(env: StorageEnv): Storage {
@@ -80,6 +98,21 @@ export function createStorage(env: StorageEnv): Storage {
       return getSignedUrl(client, new GetObjectCommand({ Bucket: env.attachmentsBucket, Key: objectKey }), {
         expiresIn: ttlSeconds,
       });
+    },
+    async deleteAttachment(objectKey) {
+      await client.send(new DeleteObjectCommand({ Bucket: env.attachmentsBucket, Key: objectKey }));
+    },
+    async putPatientDocument({ orgId, patientId, bytes, contentType, ext }) {
+      const objectKey = `patients/${orgId}/${patientId}/${crypto.randomUUID()}.${ext}`;
+      await client.send(
+        new PutObjectCommand({
+          Bucket: env.attachmentsBucket,
+          Key: objectKey,
+          Body: bytes,
+          ContentType: contentType,
+        }),
+      );
+      return { objectKey, mimeType: contentType, filename: objectKey.split("/").at(-1) ?? objectKey, size: bytes.byteLength };
     },
   };
 }

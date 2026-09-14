@@ -12,10 +12,12 @@ import { z } from "zod";
 import { canWrite, orgContextOf, requireOrgContext, requireSession } from "./lib/context.js";
 import { errorBody } from "./lib/error.js";
 import { createAgentRoute } from "./routes/agent.js";
+import { createCie10Route } from "./routes/cie10.js";
 import { createConnectionsRoute } from "./routes/connections.js";
 import { createContactsRoute } from "./routes/contacts.js";
 import { createConversationsRoute } from "./routes/conversations.js";
 import { createFieldsRoute } from "./routes/fields.js";
+import { createPatientsRoute } from "./routes/patients.js";
 import { createPipelinesRoute } from "./routes/pipelines.js";
 import { createTasksRoute } from "./routes/tasks.js";
 import { createWebhooksRoute } from "./routes/webhooks.js";
@@ -437,12 +439,13 @@ export function createApp(deps: AppDeps) {
   };
   guarded.route("/conversations", createConversationsRoute(crmDeps));
   guarded.route("/contacts", createContactsRoute(crmDeps));
+  guarded.route("/patients", createPatientsRoute(crmDeps));
+  guarded.route("/cie10", createCie10Route(crmDeps));
   guarded.route("/pipelines", createPipelinesRoute(crmDeps));
   guarded.route("/channels/connections", createConnectionsRoute(crmDeps));
   guarded.route("/agent", createAgentRoute(crmDeps));
   guarded.route("/tasks", createTasksRoute(crmDeps));
   guarded.route("/fields", createFieldsRoute(crmDeps));
-
   app.route("/api", guarded);
   return app;
 }

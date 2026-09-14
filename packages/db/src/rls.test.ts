@@ -76,6 +76,20 @@ async function contactNames(db: Db): Promise<string[]> {
   return (rows as unknown as { display_name: string }[]).map((r) => r.display_name);
 }
 
+async function insertPatient(db: Db, id: string, orgId: string, contactId: string, number: number) {
+  await db.execute(
+    sql`insert into "patient" ("id", "organization_id", "contact_id", "patient_number")
+        values (${id}::uuid, ${orgId}, ${contactId}::uuid, ${number})`,
+  );
+}
+
+async function patientNumbers(db: Db): Promise<number[]> {
+  const rows = await db.execute<{ patient_number: number }>(
+    sql`select "patient_number" from "patient" order by "patient_number"`,
+  );
+  return (rows as unknown as { patient_number: number }[]).map((r) => r.patient_number);
+}
+
 async function messageBodies(db: Db): Promise<string[]> {
   const rows = await db.execute<{ body: string }>(sql`select "body" from "message" order by "body"`);
   return (rows as unknown as { body: string }[]).map((r) => r.body);
@@ -147,6 +161,8 @@ beforeAll(async () => {
     "Buenas",
     "ext-2",
   );
+  await insertPatient(ownerDb, "99999999-9999-9999-9999-999999999999", "org_a", "33333333-3333-3333-3333-333333333333", 1);
+  await insertPatient(ownerDb, "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", "org_b", "44444444-4444-4444-4444-444444444444", 1);
 }, 180_000);
 
 afterAll(async () => {
@@ -185,4 +201,14 @@ it("el dedupe por (conversation_id, external_id) rechaza el segundo insert", asy
     "Sin id 1",
     "Sin id 2",
   ]);
+});
+
+it("org A no ve pacientes de org B; sin GUC ve cero filas", async () => {
+  expect(await withOrgContext(appDb, "org_a", (tx) => patientNumbers(tx))).toEqual([1]);
+  expect(await withOrgContext(appDb, "org_b", (tx) => patientNumbers(tx))).toEqual([1]);
+  const aIds = await withOrgContext(appDb, "org_a", (tx) =>
+    tx.execute<{ id: string }>(sql`select "id" from "patient"`),
+  );
+  expect((aIds as unknown as { id: string }[]).map((r) => r.id)).toEqual(["99999999-9999-9999-9999-999999999999"]);
+  expect(await patientNumbers(appDb)).toEqual([]);
 });

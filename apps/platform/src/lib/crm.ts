@@ -109,6 +109,7 @@ export interface ContactListItem {
 }
 
 export interface ContactFull {
+  patientId: string | null;
   contact: ContactListItem & {
     notes: string | null;
     customFields: Record<string, unknown>;

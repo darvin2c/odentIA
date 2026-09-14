@@ -1,5 +1,6 @@
 import type { Db } from "@odentia/db";
 import { contact, contactIdentity, conversation, crmTask, customFieldDef, pipelineStage } from "@odentia/db/schema/crm";
+import { patient } from "@odentia/db/schema/clinical";
 import { and, asc, desc, eq, ilike, lt, or, sql } from "drizzle-orm";
 import { decodeCursor, encodeCursor } from "./cursors.js";
 import { notFound, validation } from "./errors.js";
@@ -102,6 +103,7 @@ export async function listContacts(
 
 export interface ContactFull {
   contact: ContactDetail;
+  patientId: string | null;
   identities: { id: string; channel: string; externalUserId: string; displayName: string | null }[];
   openTasks: { id: string; title: string; dueAt: string | null; assigneeUserId: string | null }[];
   conversations: { id: string; status: string; lastMessageAt: string | null }[];
@@ -113,8 +115,7 @@ export async function getContact(tx: Db, orgId: string, id: string): Promise<Con
     .from(contact)
     .where(and(eq(contact.id, id), eq(contact.organizationId, orgId)))
     .limit(1);
-  if (!row) throw notFound("Contacto");
-  const [identities, tasks, conversations] = await Promise.all([
+  const [identities, tasks, conversations, patientLink] = await Promise.all([
     tx.select().from(contactIdentity).where(eq(contactIdentity.contactId, id)),
     tx
       .select()
@@ -126,6 +127,11 @@ export async function getContact(tx: Db, orgId: string, id: string): Promise<Con
       .from(conversation)
       .where(eq(conversation.contactId, id))
       .orderBy(sql`"last_message_at" desc nulls last`),
+    tx
+      .select({ id: patient.id })
+      .from(patient)
+      .where(and(eq(patient.contactId, id), eq(patient.organizationId, orgId)))
+      .limit(1),
   ]);
   const customFields =
     row.customFields && typeof row.customFields === "object" && !Array.isArray(row.customFields)
@@ -139,6 +145,7 @@ export async function getContact(tx: Db, orgId: string, id: string): Promise<Con
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
     },
+    patientId: patientLink[0]?.id ?? null,
     identities: identities.map((i) => ({
       id: i.id,
       channel: i.channel,

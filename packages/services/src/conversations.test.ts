@@ -44,6 +44,13 @@ const storageStub: Storage = {
     size: bytes.byteLength,
   }),
   attachmentUrl: async (key) => `https://signed.example.com/${key}`,
+  deleteAttachment: async () => {},
+  putPatientDocument: async ({ orgId, patientId, bytes, contentType }) => ({
+    objectKey: `patients/${orgId}/${patientId}/f.bin`,
+    mimeType: contentType,
+    filename: "f.bin",
+    size: bytes.byteLength,
+  }),
 };
 
 const deps: IngestDeps = { storage: storageStub, fetch, secretsKey: KEY };

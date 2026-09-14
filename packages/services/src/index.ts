@@ -7,12 +7,14 @@
  * varias operaciones en una sola transacción).
  */
 export * from "./agentConfig.js";
+export * from "./clinical.js";
 export * from "./connections.js";
 export * from "./contacts.js";
 export * from "./conversations.js";
 export * from "./cursors.js";
 export * from "./errors.js";
 export * from "./fields.js";
+export * from "./patients.js";
 export * from "./pipelines.js";
 export * from "./secrets.js";
 export * from "./storage.js";

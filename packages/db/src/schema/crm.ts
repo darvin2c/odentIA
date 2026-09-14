@@ -12,12 +12,12 @@ import {
 } from "drizzle-orm/pg-core";
 import { organization, user } from "./auth.js";
 
-const timestamps = {
+export const timestamps = {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 };
 
-function orgFk(target: Parameters<typeof text>[0]) {
+export function orgFk(target: Parameters<typeof text>[0]) {
   return text(target)
     .notNull()
     .references(() => organization.id);

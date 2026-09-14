@@ -14,7 +14,7 @@ import {
   DropdownMenuTrigger,
 } from "@odentia/ui";
 import { AppShell, LoadingState, type AppShellNavEntry } from "@odentia/ui-patterns";
-import { Bot, Building2, Contact, FlaskConical, Inbox, Kanban, ListTodo, MessageCircle, Settings, Tag, Users } from "lucide-react";
+import { Bot, Building2, Contact, FlaskConical, Inbox, Kanban, ListTodo, MessageCircle, Settings, Smile, Tag, Users } from "lucide-react";
 import { authClient } from "../lib/auth-client";
 import { requireVerifiedSession, ssrFetchOptions } from "../lib/guards";
 import { orgSlugFromHostname, panelUrl, requestHostname, tenantUrl } from "../lib/host";
@@ -43,6 +43,7 @@ export const Route = createFileRoute("/_org")({
 const navItems: AppShellNavEntry[] = [
   { label: "Bandeja", to: "/inbox", icon: Inbox },
   { label: "Contactos", to: "/contacts", icon: Contact },
+  { label: "Pacientes", to: "/patients", icon: Smile },
   { label: "Pipeline", to: "/pipeline", icon: Kanban },
   { label: "Tareas", to: "/tasks", icon: ListTodo },
   {

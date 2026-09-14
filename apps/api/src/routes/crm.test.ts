@@ -34,6 +34,10 @@ const storageStub = {
     throw new Error("no usado");
   },
   attachmentUrl: async (key: string) => `https://signed.example.com/${key}`,
+  deleteAttachment: async () => {},
+  putPatientDocument: async () => {
+    throw new Error("no usado");
+  },
 };
 
 function stubOrg(role: string) {

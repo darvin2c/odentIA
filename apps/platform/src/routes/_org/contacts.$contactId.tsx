@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, getRouteApi, Link, useNavigate } from "@tanstack/react-router";
 import { Button, Field, FieldLabel, Input } from "@odentia/ui";
-import { Chip, EmptyState, PageHeader, SubmitButton } from "@odentia/ui-patterns";
+import { Chip, EmptyState, FormDrawer, PageHeader, SubmitButton } from "@odentia/ui-patterns";
 import { ArrowLeft } from "lucide-react";
 import { useState } from "react";
 import { apiFetch } from "../../lib/api";
@@ -20,6 +20,7 @@ function ContactDetailPage() {
   const { org } = orgRouteApi.useRouteContext();
   const { contactId } = Route.useParams();
   const [tagInput, setTagInput] = useState("");
+  const [convertOpen, setConvertOpen] = useState(false);
 
   const detailQuery = useQuery({
     queryKey: ["contact", contactId],
@@ -50,6 +51,19 @@ function ContactDetailPage() {
     onSuccess: invalidate,
   });
 
+  const convertMutation = useMutation({
+    mutationFn: (values: Record<string, unknown>) =>
+      apiFetch<{ data: { id: string } }>("/api/patients", {
+        method: "POST",
+        body: JSON.stringify({ contactId, ...values }),
+      }),
+    onSuccess: (created) => {
+      setConvertOpen(false);
+      invalidate();
+      void navigate({ to: "/patients/$patientId", params: { patientId: created.data.id } });
+    },
+  });
+
   const detail = detailQuery.data?.data;
   if (detailQuery.isLoading) {
     return <p className="p-4 text-sm text-muted-foreground">Cargando…</p>;
@@ -73,6 +87,25 @@ function ContactDetailPage() {
           </Button>
         }
       />
+      <section className="flex flex-col gap-2 rounded-lg border p-4">
+        <h2 className="text-sm font-semibold">Paciente</h2>
+        {detail.patientId ? (
+          <Link
+            to="/patients/$patientId"
+            params={{ patientId: detail.patientId }}
+            className="text-sm text-primary hover:underline"
+          >
+            Ver ficha clínica
+          </Link>
+        ) : (
+          <div>
+            <p className="text-sm text-muted-foreground">Este contacto aún no es paciente.</p>
+            <Button variant="outline" size="sm" className="mt-2" onClick={() => setConvertOpen(true)}>
+              Convertir en paciente
+            </Button>
+          </div>
+        )}
+      </section>
       <div className="grid gap-4 md:grid-cols-2">
         <section className="flex flex-col gap-3 rounded-lg border p-4">
           <h2 className="text-sm font-semibold">Datos</h2>
@@ -238,6 +271,67 @@ function ContactDetailPage() {
           ))}
         </section>
       </div>
+      <FormDrawer
+        open={convertOpen}
+        onClose={() => setConvertOpen(false)}
+        title="Convertir en paciente"
+        submitLabel="Crear ficha"
+        cancelLabel="Cancelar"
+        isSubmitting={convertMutation.isPending}
+        onSubmit={(event) => {
+          event.preventDefault();
+          const form = new FormData(event.currentTarget as HTMLFormElement);
+          const str = (k: string) => {
+            const v = String(form.get(k) ?? "").trim();
+            return v ? v : undefined;
+          };
+          void convertMutation.mutate({
+            ...(str("docType") ? { docType: str("docType") } : {}),
+            ...(str("docNumber") ? { docNumber: str("docNumber") } : {}),
+            ...(str("birthDate") ? { birthDate: str("birthDate") } : {}),
+            ...(str("sex") ? { sex: str("sex") } : {}),
+          });
+        }}
+      >
+        <div className="flex flex-col gap-4">
+          <Field>
+            <FieldLabel>Tipo de documento (opcional)</FieldLabel>
+            <select
+              name="docType"
+              aria-label="Tipo de documento"
+              className="rounded-md border bg-background px-2 py-1.5 text-sm"
+              defaultValue=""
+            >
+              <option value="">—</option>
+              <option value="DNI">DNI</option>
+              <option value="CE">CE</option>
+              <option value="PASAPORTE">Pasaporte</option>
+              <option value="OTRO">Otro</option>
+            </select>
+          </Field>
+          <Field>
+            <FieldLabel>Número de documento (opcional)</FieldLabel>
+            <Input name="docNumber" />
+          </Field>
+          <Field>
+            <FieldLabel>Fecha de nacimiento (opcional)</FieldLabel>
+            <Input name="birthDate" type="date" />
+          </Field>
+          <Field>
+            <FieldLabel>Sexo (opcional)</FieldLabel>
+            <select
+              name="sex"
+              aria-label="Sexo"
+              className="rounded-md border bg-background px-2 py-1.5 text-sm"
+              defaultValue=""
+            >
+              <option value="">—</option>
+              <option value="M">Masculino</option>
+              <option value="F">Femenino</option>
+            </select>
+          </Field>
+        </div>
+      </FormDrawer>
     </div>
   );
 }

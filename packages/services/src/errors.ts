@@ -17,7 +17,12 @@ export function notFound(entity: string): ServiceError {
   return new ServiceError("NOT_FOUND", 404, `${entity} no encontrado`);
 }
 
-/** true si el error es violación de unique (Postgres 23505). */
+/** true si el error es violación de unique (Postgres 23505, incluso envuelto por Drizzle). */
 export function isUniqueViolation(error: unknown): boolean {
-  return !!error && typeof error === "object" && "code" in error && error.code === "23505";
+  const code = (codeOf(error) ?? codeOf((error as { cause?: unknown })?.cause)) as string | undefined;
+  return code === "23505";
+}
+
+function codeOf(error: unknown): unknown {
+  return !!error && typeof error === "object" && "code" in error ? error.code : undefined;
 }
