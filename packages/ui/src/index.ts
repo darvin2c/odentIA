@@ -20,6 +20,17 @@ export {
   CardTitle,
 } from "./components/card.js";
 export {
+  Attachment,
+  AttachmentAction,
+  AttachmentActions,
+  AttachmentContent,
+  AttachmentDescription,
+  AttachmentGroup,
+  AttachmentMedia,
+  AttachmentTitle,
+  AttachmentTrigger,
+} from "./components/attachment.js";
+export {
   Empty,
   EmptyContent,
   EmptyDescription,

@@ -3,6 +3,7 @@ import { Button } from "@odentia/ui";
 import { AuthCard, ErrorState, LoadingState } from "@odentia/ui-patterns";
 import { useEffect, useRef, useState } from "react";
 import { authClient } from "../../lib/auth-client";
+import { tenantUrl } from "../../lib/host";
 
 export const Route = createFileRoute("/accept-invitation/$invitationId")({
   component: AcceptInvitationPage,
@@ -30,14 +31,22 @@ function AcceptInvitationPage() {
         setState({ kind: "needs-auth" });
         return;
       }
-      const { error } = await authClient.organization.acceptInvitation({
+      const { data, error } = await authClient.organization.acceptInvitation({
         invitationId,
       });
       if (error) {
         setState({ kind: "error", message: "La invitación expiró o fue revocada." });
         return;
       }
-      await navigate({ to: "/app/branches" });
+      const organizationId = (data as { member?: { organizationId?: string } } | null)?.member
+        ?.organizationId;
+      const { data: orgs } = await authClient.organization.list();
+      const slug = organizationId ? orgs?.find((org) => org.id === organizationId)?.slug : undefined;
+      if (slug) {
+        window.location.assign(tenantUrl(slug, "/branches"));
+        return;
+      }
+      await navigate({ to: "/" });
     }
     void accept();
   }, [invitationId, navigate]);

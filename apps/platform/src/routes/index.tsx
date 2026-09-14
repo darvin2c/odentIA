@@ -1,12 +1,13 @@
 import { createFileRoute, redirect } from "@tanstack/react-router";
-import { authClient } from "../lib/auth-client";
-import { ssrFetchOptions } from "../lib/guards";
+import { requireSession } from "../lib/guards";
+import { orgSlugFromHostname, panelUrl, requestHostname } from "../lib/host";
 
 export const Route = createFileRoute("/")({
-  beforeLoad: async () => {
-    const { data } = await authClient.getSession({
-      fetchOptions: ssrFetchOptions(),
-    });
-    throw redirect({ to: data ? "/app/branches" : "/login" });
+  beforeLoad: async ({ location }) => {
+    if (!orgSlugFromHostname(requestHostname())) {
+      throw redirect({ href: panelUrl("/") });
+    }
+    await requireSession(location);
+    throw redirect({ to: "/branches" });
   },
 });

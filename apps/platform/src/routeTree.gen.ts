@@ -13,7 +13,16 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as OrgRouteImport } from './routes/_org'
 import { Route as OrgBranchesRouteImport } from './routes/_org/branches'
 import { Route as OrgDemoRouteImport } from './routes/_org/demo'
+import { Route as OrgInboxRouteImport } from './routes/_org/inbox'
 import { Route as OrgMembersRouteImport } from './routes/_org/members'
+import { Route as OrgPipelineRouteImport } from './routes/_org/pipeline'
+import { Route as OrgTasksRouteImport } from './routes/_org/tasks'
+import { Route as OrgContactsIndexRouteImport } from './routes/_org/contacts.index'
+import { Route as OrgContactsContactIdRouteImport } from './routes/_org/contacts.$contactId'
+import { Route as OrgSettingsAgentRouteImport } from './routes/_org/settings.agent'
+import { Route as OrgSettingsChannelsRouteImport } from './routes/_org/settings.channels'
+import { Route as OrgSettingsFieldsRouteImport } from './routes/_org/settings.fields'
+import { Route as OrgSettingsPipelinesRouteImport } from './routes/_org/settings.pipelines'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -34,9 +43,54 @@ const OrgDemoRoute = OrgDemoRouteImport.update({
   path: '/demo',
   getParentRoute: () => OrgRoute,
 } as any)
+const OrgInboxRoute = OrgInboxRouteImport.update({
+  id: '/inbox',
+  path: '/inbox',
+  getParentRoute: () => OrgRoute,
+} as any)
 const OrgMembersRoute = OrgMembersRouteImport.update({
   id: '/members',
   path: '/members',
+  getParentRoute: () => OrgRoute,
+} as any)
+const OrgPipelineRoute = OrgPipelineRouteImport.update({
+  id: '/pipeline',
+  path: '/pipeline',
+  getParentRoute: () => OrgRoute,
+} as any)
+const OrgTasksRoute = OrgTasksRouteImport.update({
+  id: '/tasks',
+  path: '/tasks',
+  getParentRoute: () => OrgRoute,
+} as any)
+const OrgContactsIndexRoute = OrgContactsIndexRouteImport.update({
+  id: '/contacts/',
+  path: '/contacts/',
+  getParentRoute: () => OrgRoute,
+} as any)
+const OrgContactsContactIdRoute = OrgContactsContactIdRouteImport.update({
+  id: '/contacts/$contactId',
+  path: '/contacts/$contactId',
+  getParentRoute: () => OrgRoute,
+} as any)
+const OrgSettingsAgentRoute = OrgSettingsAgentRouteImport.update({
+  id: '/settings/agent',
+  path: '/settings/agent',
+  getParentRoute: () => OrgRoute,
+} as any)
+const OrgSettingsChannelsRoute = OrgSettingsChannelsRouteImport.update({
+  id: '/settings/channels',
+  path: '/settings/channels',
+  getParentRoute: () => OrgRoute,
+} as any)
+const OrgSettingsFieldsRoute = OrgSettingsFieldsRouteImport.update({
+  id: '/settings/fields',
+  path: '/settings/fields',
+  getParentRoute: () => OrgRoute,
+} as any)
+const OrgSettingsPipelinesRoute = OrgSettingsPipelinesRouteImport.update({
+  id: '/settings/pipelines',
+  path: '/settings/pipelines',
   getParentRoute: () => OrgRoute,
 } as any)
 
@@ -44,13 +98,31 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/branches': typeof OrgBranchesRoute
   '/demo': typeof OrgDemoRoute
+  '/inbox': typeof OrgInboxRoute
   '/members': typeof OrgMembersRoute
+  '/pipeline': typeof OrgPipelineRoute
+  '/tasks': typeof OrgTasksRoute
+  '/contacts/$contactId': typeof OrgContactsContactIdRoute
+  '/settings/agent': typeof OrgSettingsAgentRoute
+  '/settings/channels': typeof OrgSettingsChannelsRoute
+  '/settings/fields': typeof OrgSettingsFieldsRoute
+  '/settings/pipelines': typeof OrgSettingsPipelinesRoute
+  '/contacts/': typeof OrgContactsIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/branches': typeof OrgBranchesRoute
   '/demo': typeof OrgDemoRoute
+  '/inbox': typeof OrgInboxRoute
   '/members': typeof OrgMembersRoute
+  '/pipeline': typeof OrgPipelineRoute
+  '/tasks': typeof OrgTasksRoute
+  '/contacts/$contactId': typeof OrgContactsContactIdRoute
+  '/settings/agent': typeof OrgSettingsAgentRoute
+  '/settings/channels': typeof OrgSettingsChannelsRoute
+  '/settings/fields': typeof OrgSettingsFieldsRoute
+  '/settings/pipelines': typeof OrgSettingsPipelinesRoute
+  '/contacts': typeof OrgContactsIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -58,20 +130,64 @@ export interface FileRoutesById {
   '/_org': typeof OrgRouteWithChildren
   '/_org/branches': typeof OrgBranchesRoute
   '/_org/demo': typeof OrgDemoRoute
+  '/_org/inbox': typeof OrgInboxRoute
   '/_org/members': typeof OrgMembersRoute
+  '/_org/pipeline': typeof OrgPipelineRoute
+  '/_org/tasks': typeof OrgTasksRoute
+  '/_org/contacts/$contactId': typeof OrgContactsContactIdRoute
+  '/_org/settings/agent': typeof OrgSettingsAgentRoute
+  '/_org/settings/channels': typeof OrgSettingsChannelsRoute
+  '/_org/settings/fields': typeof OrgSettingsFieldsRoute
+  '/_org/settings/pipelines': typeof OrgSettingsPipelinesRoute
+  '/_org/contacts/': typeof OrgContactsIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/branches' | '/demo' | '/members'
+  fullPaths:
+    | '/'
+    | '/branches'
+    | '/demo'
+    | '/inbox'
+    | '/members'
+    | '/pipeline'
+    | '/tasks'
+    | '/contacts/$contactId'
+    | '/settings/agent'
+    | '/settings/channels'
+    | '/settings/fields'
+    | '/settings/pipelines'
+    | '/contacts/'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/branches' | '/demo' | '/members'
+  to:
+    | '/'
+    | '/branches'
+    | '/demo'
+    | '/inbox'
+    | '/members'
+    | '/pipeline'
+    | '/tasks'
+    | '/contacts/$contactId'
+    | '/settings/agent'
+    | '/settings/channels'
+    | '/settings/fields'
+    | '/settings/pipelines'
+    | '/contacts'
   id:
     | '__root__'
     | '/'
     | '/_org'
     | '/_org/branches'
     | '/_org/demo'
+    | '/_org/inbox'
     | '/_org/members'
+    | '/_org/pipeline'
+    | '/_org/tasks'
+    | '/_org/contacts/$contactId'
+    | '/_org/settings/agent'
+    | '/_org/settings/channels'
+    | '/_org/settings/fields'
+    | '/_org/settings/pipelines'
+    | '/_org/contacts/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -109,11 +225,74 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof OrgDemoRouteImport
       parentRoute: typeof OrgRoute
     }
+    '/_org/inbox': {
+      id: '/_org/inbox'
+      path: '/inbox'
+      fullPath: '/inbox'
+      preLoaderRoute: typeof OrgInboxRouteImport
+      parentRoute: typeof OrgRoute
+    }
     '/_org/members': {
       id: '/_org/members'
       path: '/members'
       fullPath: '/members'
       preLoaderRoute: typeof OrgMembersRouteImport
+      parentRoute: typeof OrgRoute
+    }
+    '/_org/pipeline': {
+      id: '/_org/pipeline'
+      path: '/pipeline'
+      fullPath: '/pipeline'
+      preLoaderRoute: typeof OrgPipelineRouteImport
+      parentRoute: typeof OrgRoute
+    }
+    '/_org/tasks': {
+      id: '/_org/tasks'
+      path: '/tasks'
+      fullPath: '/tasks'
+      preLoaderRoute: typeof OrgTasksRouteImport
+      parentRoute: typeof OrgRoute
+    }
+    '/_org/contacts/': {
+      id: '/_org/contacts/'
+      path: '/contacts'
+      fullPath: '/contacts/'
+      preLoaderRoute: typeof OrgContactsIndexRouteImport
+      parentRoute: typeof OrgRoute
+    }
+    '/_org/contacts/$contactId': {
+      id: '/_org/contacts/$contactId'
+      path: '/contacts/$contactId'
+      fullPath: '/contacts/$contactId'
+      preLoaderRoute: typeof OrgContactsContactIdRouteImport
+      parentRoute: typeof OrgRoute
+    }
+    '/_org/settings/agent': {
+      id: '/_org/settings/agent'
+      path: '/settings/agent'
+      fullPath: '/settings/agent'
+      preLoaderRoute: typeof OrgSettingsAgentRouteImport
+      parentRoute: typeof OrgRoute
+    }
+    '/_org/settings/channels': {
+      id: '/_org/settings/channels'
+      path: '/settings/channels'
+      fullPath: '/settings/channels'
+      preLoaderRoute: typeof OrgSettingsChannelsRouteImport
+      parentRoute: typeof OrgRoute
+    }
+    '/_org/settings/fields': {
+      id: '/_org/settings/fields'
+      path: '/settings/fields'
+      fullPath: '/settings/fields'
+      preLoaderRoute: typeof OrgSettingsFieldsRouteImport
+      parentRoute: typeof OrgRoute
+    }
+    '/_org/settings/pipelines': {
+      id: '/_org/settings/pipelines'
+      path: '/settings/pipelines'
+      fullPath: '/settings/pipelines'
+      preLoaderRoute: typeof OrgSettingsPipelinesRouteImport
       parentRoute: typeof OrgRoute
     }
   }
@@ -122,13 +301,31 @@ declare module '@tanstack/react-router' {
 interface OrgRouteChildren {
   OrgBranchesRoute: typeof OrgBranchesRoute
   OrgDemoRoute: typeof OrgDemoRoute
+  OrgInboxRoute: typeof OrgInboxRoute
   OrgMembersRoute: typeof OrgMembersRoute
+  OrgPipelineRoute: typeof OrgPipelineRoute
+  OrgTasksRoute: typeof OrgTasksRoute
+  OrgContactsContactIdRoute: typeof OrgContactsContactIdRoute
+  OrgSettingsAgentRoute: typeof OrgSettingsAgentRoute
+  OrgSettingsChannelsRoute: typeof OrgSettingsChannelsRoute
+  OrgSettingsFieldsRoute: typeof OrgSettingsFieldsRoute
+  OrgSettingsPipelinesRoute: typeof OrgSettingsPipelinesRoute
+  OrgContactsIndexRoute: typeof OrgContactsIndexRoute
 }
 
 const OrgRouteChildren: OrgRouteChildren = {
   OrgBranchesRoute: OrgBranchesRoute,
   OrgDemoRoute: OrgDemoRoute,
+  OrgInboxRoute: OrgInboxRoute,
   OrgMembersRoute: OrgMembersRoute,
+  OrgPipelineRoute: OrgPipelineRoute,
+  OrgTasksRoute: OrgTasksRoute,
+  OrgContactsContactIdRoute: OrgContactsContactIdRoute,
+  OrgSettingsAgentRoute: OrgSettingsAgentRoute,
+  OrgSettingsChannelsRoute: OrgSettingsChannelsRoute,
+  OrgSettingsFieldsRoute: OrgSettingsFieldsRoute,
+  OrgSettingsPipelinesRoute: OrgSettingsPipelinesRoute,
+  OrgContactsIndexRoute: OrgContactsIndexRoute,
 }
 
 const OrgRouteWithChildren = OrgRoute._addFileChildren(OrgRouteChildren)

@@ -1,13 +1,15 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, getRouteApi } from "@tanstack/react-router";
 import { Field, Input } from "@odentia/ui";
 import { Chip, EmptyState, PageHeader, SubmitButton } from "@odentia/ui-patterns";
 import { useEffect, useRef, useState } from "react";
 import { apiFetch } from "../../lib/api";
 import { API_URL } from "../../lib/auth-client";
 
-export const Route = createFileRoute("/app/demo")({
+export const Route = createFileRoute("/_org/demo")({
   component: DemoPage,
 });
+
+const orgRouteApi = getRouteApi("/_org");
 
 interface DemoEvent {
   kind: string;
@@ -22,8 +24,10 @@ function DemoPage() {
   const [streamState, setStreamState] = useState<"connecting" | "open" | "closed">("connecting");
   const sourceRef = useRef<EventSource | null>(null);
 
+  const { org } = orgRouteApi.useRouteContext();
+
   useEffect(() => {
-    const source = new EventSource(`${API_URL}/api/notifications/stream`, {
+    const source = new EventSource(`${API_URL}/api/notifications/stream?org=${org.slug}`, {
       withCredentials: true,
     });
     sourceRef.current = source;
@@ -34,7 +38,7 @@ function DemoPage() {
       setEvents((previous) => [payload, ...previous].slice(0, 50));
     });
     return () => source.close();
-  }, []);
+  }, [org.slug]);
 
   async function sendTask() {
     if (!message.trim()) return;

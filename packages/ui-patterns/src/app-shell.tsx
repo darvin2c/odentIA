@@ -1,25 +1,23 @@
 import * as React from "react";
 import {
- ChevronDown,
- ChevronUp,
- ExternalLink,
- LogOut,
- Menu,
- PanelLeft,
- Search,
- SlidersHorizontal,
+  ChevronDown,
+  ChevronUp,
+  ExternalLink,
+  LogOut,
+  Menu,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import {
- DropdownMenu,
- DropdownMenuContent,
- DropdownMenuItem,
- DropdownMenuTrigger,
- Separator,
- Sheet,
- SheetContent,
- SheetTrigger,
- cn,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+  Separator,
+  Sheet,
+  SheetContent,
+  SheetTrigger,
+  cn,
 } from "@odentia/ui";
 // ----- Types -----
 export type AppShellNavItem = {
@@ -41,25 +39,34 @@ export type AppShellNavEntry = AppShellNavItem | AppShellNavGroup;
 
 export type AppShellUser = { name: string; email?: string; avatarUrl?: string };
 
+export type AppShellUserMenuItem = {
+  label: string;
+  icon: LucideIcon;
+  to: string;
+  search?: Record<string, string>;
+};
+
 export interface AppShellProps {
- items: AppShellNavEntry[];
- LinkComponent: React.ComponentType<{
- to: string;
- className?: string;
- children: React.ReactNode;
- title?: string;
- onClick?: () => void;
- }>;
- pathname: string;
- user: AppShellUser;
- onSignOut: () => void;
- brand: React.ReactNode;
- searchSlot?: React.ReactNode;
- topbarActions?: React.ReactNode;
- sidebarFooter?: React.ReactNode;
- /** Pantallas operativas densas (POS, KDS, tablas): usa todo el ancho. Default contenido 1280px. */
- fluid?: boolean;
- children: React.ReactNode;
+  items: AppShellNavEntry[];
+  LinkComponent: React.ComponentType<{
+    to: string;
+    search?: Record<string, string>;
+    className?: string;
+    children: React.ReactNode;
+    title?: string;
+    onClick?: () => void;
+  }>;
+  pathname: string;
+  user: AppShellUser;
+  userMenuItems?: AppShellUserMenuItem[];
+  onSignOut: () => void;
+  brand: React.ReactNode;
+  searchSlot?: React.ReactNode;
+  topbarActions?: React.ReactNode;
+  sidebarFooter?: React.ReactNode;
+  /** Pantallas operativas densas (POS, KDS, tablas): usa todo el ancho. Default contenido 1280px. */
+  fluid?: boolean;
+  children: React.ReactNode;
 }
 
 export function isNavItemActive(pathname: string, to: string): boolean {
@@ -210,8 +217,8 @@ function RailGroup({
 
 // ----- AppShell — sin header blanco global; header es por página (PageHeader). Usuario en footer -----
 export function AppShell(props: AppShellProps): React.JSX.Element {
- const { items, LinkComponent, pathname, user, onSignOut, brand, sidebarFooter, fluid, children } =
-   props;
+  const { items, LinkComponent, pathname, user, userMenuItems, onSignOut, brand, sidebarFooter, fluid, children } =
+    props;
  const [mobileOpen, setMobileOpen] = React.useState(false);
 
  const hasItems = items.length > 0;
@@ -296,56 +303,64 @@ export function AppShell(props: AppShellProps): React.JSX.Element {
  </div>
  </>
  );
+  // onClick de Base UI cierra el menú y exige el evento del DOM; LinkComponent
+  // lo declara sin args (el nav del sidebar no lo usa) pero React lo invoca
+  // siempre con el evento real, así que el reenvío es seguro en runtime.
+  const userMenuContent = (
+    <>
+      {userMenuItems?.map((item) => (
+        <DropdownMenuItem
+          key={item.label}
+          render={(props) => {
+            const { onClick, ...rest } = props;
+            return (
+              <LinkComponent
+                to={item.to}
+                search={item.search}
+                {...rest}
+                onClick={onClick as unknown as () => void}
+              >
+                {props.children}
+              </LinkComponent>
+            );
+          }}
+        >
+          <item.icon />
+          {item.label}
+        </DropdownMenuItem>
+      ))}
+      {userMenuItems?.length ? <DropdownMenuSeparator /> : null}
+      <DropdownMenuItem onClick={onSignOut}>
+        <LogOut />
+        Cerrar sesión
+      </DropdownMenuItem>
+    </>
+  );
 
  return (<div className="flex min-h-screen bg-background text-foreground">
  {/* Sidebar — estilo limpio imagen referencia */}
  <aside className="hidden w-[260px] shrink-0 flex-col border-r border-border bg-sidebar px-3 py-3 xl:flex">
- <div className="mb-3 flex items-center justify-between px-1">
- <div className="flex items-center gap-2">{brand}</div>
- <div className="flex items-center gap-1">
- <button
- type="button"
- className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-surface-muted hover:text-foreground"
- aria-label="Toggle sidebar"
- >
- <PanelLeft className="size-4" />
- </button>
- <button
- type="button"
- className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-surface-muted hover:text-foreground"
- aria-label="Buscar"
- >
- <Search className="size-4" />
- </button>
- </div>
- </div>
+  <div className="mb-3 flex items-center px-1">
+    <div className="flex items-center gap-2">{brand}</div>
+  </div>
  <div className="flex flex-1 flex-col gap-0.5 overflow-y-auto">{sidebarNav}</div>
  {sidebarFooter ? (<>
  <Separator className="my-3" />
  <div>{sidebarFooter}</div>
  </>
  ) : null}
- {/* Footer — usuario per conocimiento, estilo imagen: Upgrade + usuario con Dropdown */}
- <div className="mt-auto pt-3">
- <Separator className="mb-3" />
- <div className="mb-2 flex items-center justify-center rounded-md border border-border bg-surface px-3 py-2 text-sm font-medium hover:bg-surface-muted">
- <span className="inline-flex items-center gap-1.5">
- <SlidersHorizontal className="size-3.5" />
- Upgrade to Pro
- </span>
- </div>
- <DropdownMenu>
- <DropdownMenuTrigger className="flex w-full items-center gap-3 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-surface-muted motion-safe:hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-soft">
- {userRowContent}
- </DropdownMenuTrigger>
- <DropdownMenuContent align="end" side="top" className="w-56">
- <DropdownMenuItem onClick={onSignOut}>
- <LogOut />
- Cerrar sesión
- </DropdownMenuItem>
- </DropdownMenuContent>
- </DropdownMenu>
- </div>
+  {/* Footer — usuario con Dropdown */}
+  <div className="mt-auto pt-3">
+    <Separator className="mb-3" />
+    <DropdownMenu>
+      <DropdownMenuTrigger className="flex w-full items-center gap-3 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-surface-muted motion-safe:hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-soft">
+        {userRowContent}
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" side="top" className="w-56">
+        {userMenuContent}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  </div>
  </aside>
 
  {/* Rail 64px — tablet */}
@@ -360,12 +375,9 @@ export function AppShell(props: AppShellProps): React.JSX.Element {
  <DropdownMenuTrigger className="flex size-8 items-center justify-center rounded-full bg-primary text-xs font-semibold text-primary-foreground transition-colors hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-soft motion-safe:hover:opacity-80">
  {initial}
  </DropdownMenuTrigger>
- <DropdownMenuContent align="end" side="right" className="w-48">
- <DropdownMenuItem onClick={onSignOut}>
- <LogOut />
- Cerrar sesión
- </DropdownMenuItem>
- </DropdownMenuContent>
+      <DropdownMenuContent align="end" side="right" className="w-48">
+        {userMenuContent}
+      </DropdownMenuContent>
  </DropdownMenu>
  </div>
  </aside>
@@ -402,12 +414,9 @@ export function AppShell(props: AppShellProps): React.JSX.Element {
  ) : null}
  </div>
  </DropdownMenuTrigger>
- <DropdownMenuContent align="end" side="top" className="w-56">
- <DropdownMenuItem onClick={onSignOut}>
- <LogOut />
- Cerrar sesión
- </DropdownMenuItem>
- </DropdownMenuContent>
+      <DropdownMenuContent align="end" side="top" className="w-56">
+        {userMenuContent}
+      </DropdownMenuContent>
  </DropdownMenu>
  </div>
  </SheetContent>

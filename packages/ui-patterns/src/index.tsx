@@ -29,7 +29,7 @@ export {
 } from "./loading-state.js";
 export { PageShell, type PageShellProps } from "./page-shell.js";
 export { AppShell, PageHeader, isNavItemActive } from "./app-shell.js";
-export type { AppShellProps, AppShellNavEntry, AppShellNavItem, AppShellNavGroup, AppShellUser } from "./app-shell.js";
+export type { AppShellProps, AppShellNavEntry, AppShellNavItem, AppShellNavGroup, AppShellUser, AppShellUserMenuItem } from "./app-shell.js";
 export * from "./list-filtering/index.js";
 export {
  DataTable,

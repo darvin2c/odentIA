@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, getRouteApi } from "@tanstack/react-router";
 import { useForm } from "@tanstack/react-form";
 import {
   getCoreRowModel,
@@ -18,9 +18,11 @@ import { useMemo, useState } from "react";
 import { z } from "zod";
 import { authClient } from "../../lib/auth-client";
 
-export const Route = createFileRoute("/app/members")({
+export const Route = createFileRoute("/_org/members")({
   component: MembersPage,
 });
+
+const orgRouteApi = getRouteApi("/_org");
 
 interface FullOrganization {
   id: string;
@@ -39,26 +41,25 @@ function MembersPage() {
   const [inviteOpen, setInviteOpen] = useState(false);
   const [removing, setRemoving] = useState<{ id: string; label: string } | null>(null);
 
-  const orgQuery = useQuery({
-    queryKey: ["full-org"],
-    queryFn: async () =>
-      (await authClient.organization.getFullOrganization()).data as FullOrganization | null,
-  });
+  const { org: routeOrg, session } = orgRouteApi.useRouteContext();
 
-  const sessionQuery = useQuery({
-    queryKey: ["session"],
-    queryFn: async () => (await authClient.getSession()).data,
+  const orgQuery = useQuery({
+    queryKey: ["full-org", routeOrg.id],
+    queryFn: async () =>
+      (await authClient.organization.getFullOrganization({
+        query: { organizationId: routeOrg.id },
+      })).data as FullOrganization | null,
   });
 
   const myRole =
-    orgQuery.data?.members.find((m) => m.userId === sessionQuery.data?.user.id)?.role ?? "member";
+    orgQuery.data?.members.find((m) => m.userId === session.userId)?.role ?? "member";
   const canWrite = myRole === "owner" || myRole === "admin";
-
   const inviteMutation = useMutation({
     mutationFn: async (values: z.infer<typeof inviteSchema>) => {
       const { error: inviteError } = await authClient.organization.inviteMember({
         email: values.email,
         role: values.role,
+        organizationId: routeOrg.id,
       });
       if (inviteError) throw new Error(inviteError.message ?? "No se pudo invitar.");
     },
@@ -94,6 +95,7 @@ function MembersPage() {
     mutationFn: async (memberIdOrEmail: string) => {
       const { error: removeError } = await authClient.organization.removeMember({
         memberIdOrEmail,
+        organizationId: routeOrg.id,
       });
       if (removeError) throw new Error(removeError.message ?? "No se pudo revocar.");
     },

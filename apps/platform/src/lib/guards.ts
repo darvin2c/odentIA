@@ -2,6 +2,7 @@ import { redirect } from "@tanstack/react-router";
 import { createIsomorphicFn } from "@tanstack/react-start";
 import { getRequestHeaders } from "@tanstack/react-start/server";
 import { authClient } from "./auth-client";
+import { panelUrl, requestHostname } from "./host";
 
 export interface SessionInfo {
   userId: string;
@@ -15,15 +16,23 @@ export const ssrFetchOptions = createIsomorphicFn()
   .server(() => ({ headers: getRequestHeaders() }))
   .client(() => ({}));
 
-/** Sesión actual o redirect a /login. Para beforeLoad de rutas privadas. */
-export async function requireSession(): Promise<SessionInfo> {
+/** URL absoluta actual (cliente o SSR): el `next` de vuelta al tenant. */
+function currentAbsoluteUrl(href: string): string {
+  if (typeof window !== "undefined") return window.location.href;
+  return `https://${requestHostname()}${href}`;
+}
+
+/** Sesión actual o redirect al login del panel (con `next` de vuelta al tenant). */
+export async function requireSession(location: { href: string }): Promise<SessionInfo> {
   // En SSR el fetch corre en Node y no ve las cookies del navegador: hay que
   // reenviar las cabeceras de la petición entrante.
   const { data } = await authClient.getSession({
     fetchOptions: ssrFetchOptions(),
   });
   if (!data) {
-    throw redirect({ to: "/login" });
+    throw redirect({
+      href: panelUrl(`/login?next=${encodeURIComponent(currentAbsoluteUrl(location.href))}`),
+    });
   }
   return {
     userId: data.user.id,
@@ -33,11 +42,11 @@ export async function requireSession(): Promise<SessionInfo> {
   };
 }
 
-/** Sesión con correo verificado; si no, a /verify-email-sent. */
-export async function requireVerifiedSession(): Promise<SessionInfo> {
-  const session = await requireSession();
+/** Sesión con correo verificado; si no, al panel a verificarlo. */
+export async function requireVerifiedSession(location: { href: string }): Promise<SessionInfo> {
+  const session = await requireSession(location);
   if (!session.emailVerified) {
-    throw redirect({ to: "/verify-email-sent" });
+    throw redirect({ href: panelUrl("/verify-email-sent") });
   }
   return session;
 }

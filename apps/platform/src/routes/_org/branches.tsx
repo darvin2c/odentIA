@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, getRouteApi } from "@tanstack/react-router";
 import { useForm } from "@tanstack/react-form";
 import {
   getCoreRowModel,
@@ -12,11 +12,12 @@ import { Building2 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { z } from "zod";
 import { ApiError, apiFetch } from "../../lib/api";
-import { authClient } from "../../lib/auth-client";
 
-export const Route = createFileRoute("/app/branches")({
+export const Route = createFileRoute("/_org/branches")({
   component: BranchesPage,
 });
+
+const orgRouteApi = getRouteApi("/_org");
 
 interface Branch {
   id: string;
@@ -43,10 +44,7 @@ function BranchesPage() {
   const listSearch = useListSearch();
   const search = listSearch.get("search") ?? "";
 
-  const { data: activeOrg } = useQuery({
-    queryKey: ["active-org"],
-    queryFn: async () => (await authClient.organization.getFullOrganization()).data,
-  });
+  const { org } = orgRouteApi.useRouteContext();
 
   const branchesQuery = useQuery({
     queryKey: ["branches"],
@@ -178,7 +176,7 @@ function BranchesPage() {
     <div className="flex flex-col gap-6">
       <PageHeader
         title="Sucursales"
-        subtitle={activeOrg?.name}
+        subtitle={org.name}
         actions={
           canWrite ? (
             <NewButton
@@ -296,19 +294,10 @@ function BranchesPage() {
   );
 }
 
-/** Rol del usuario en la org activa: owner/admin pueden escribir. */
+/** Rol del usuario en la org del host: owner/admin pueden escribir. */
 function useCanWrite(): boolean {
-  const { data } = useQuery({
-    queryKey: ["my-role"],
-    queryFn: async () => {
-      const [session, active] = await Promise.all([
-        authClient.getSession(),
-        authClient.organization.getFullOrganization(),
-      ]);
-      const userId = session.data?.user.id;
-      const me = active.data?.members.find((m) => m.userId === userId);
-      return me?.role ?? "member";
-    },
-  });
-  return data === "owner" || data === "admin";
+  const { org, session } = orgRouteApi.useRouteContext();
+  const me = org.members.find((m) => m.userId === session.userId);
+  const role = me?.role ?? "member";
+  return role === "owner" || role === "admin";
 }

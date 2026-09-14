@@ -16,6 +16,8 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
+    "@dnd-kit/core": "6.3.1",
+    "@dnd-kit/sortable": "10.0.0",
     "@odentia/ui": "workspace:*",
     "@odentia/ui-patterns": "workspace:*",
     "@tailwindcss/vite": "4.3.3",

@@ -1,5 +1,5 @@
 import { useForm } from "@tanstack/react-form";
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { Button, Field, FieldDescription, FieldError, FieldGroup, FieldLabel, Input, toast } from "@odentia/ui";
 import { PageHeader, PageShell, SubmitButton, fieldErrorMessages } from "@odentia/ui-patterns";
 import { useState } from "react";
@@ -7,6 +7,7 @@ import { z } from "zod";
 import { apiFetch } from "../lib/api";
 import { authClient } from "../lib/auth-client";
 import { requireVerifiedSession } from "../lib/guards";
+import { BASE_DOMAIN, tenantUrl } from "../lib/host";
 
 export const Route = createFileRoute("/onboarding")({
   beforeLoad: () => requireVerifiedSession(),
@@ -15,9 +16,14 @@ export const Route = createFileRoute("/onboarding")({
 
 const slugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
+const RESERVED_SLUGS: Record<string, true> = { api: true, app: true, www: true };
+
 const onboardingSchema = z.object({
   orgName: z.string().min(2, "Nombre de la organización"),
-  slug: z.string().regex(slugPattern, "Slug inválido (minúsculas, números y guiones)"),
+  slug: z
+    .string()
+    .regex(slugPattern, "Slug inválido (minúsculas, números y guiones)")
+    .refine((slug) => !RESERVED_SLUGS[slug], "Ese subdominio está reservado"),
   legalName: z.string().min(2, "Razón social"),
   fiscalDocNumber: z.string().max(20),
   branchName: z.string().min(2, "Nombre de la sucursal"),
@@ -35,7 +41,6 @@ function slugify(name: string): string {
 }
 
 function OnboardingPage() {
-  const navigate = useNavigate();
   const [step, setStep] = useState<"org" | "profile" | "branch">("org");
   const form = useForm({
     defaultValues: {
@@ -77,7 +82,7 @@ function OnboardingPage() {
         toast.error(cause instanceof Error ? cause.message : "Error al guardar los datos.");
         return;
       }
-      await navigate({ to: "/app/branches" });
+      window.location.assign(tenantUrl(value.slug, "/branches"));
     },
   });
 
@@ -133,7 +138,7 @@ function OnboardingPage() {
                   onChange={(event) => field.handleChange(event.target.value)}
                 />
                 <FieldDescription>
-                  {field.state.value || "tu-clinica"}.odentia.localhost
+                  {field.state.value || "tu-clinica"}.{BASE_DOMAIN}
                 </FieldDescription>
                 <FieldError>
                   {fieldErrorMessages(field.state.meta.errors)[0] ?? null}
