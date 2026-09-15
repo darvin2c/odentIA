@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { Badge, Button, Card, CardContent, CardHeader, CardTitle, buttonVariants } from "@odentia/ui";
-import { Chip, KpiCard } from "@odentia/ui-patterns";
+import { KpiCard } from "@odentia/ui-patterns";
 import { ClipboardList } from "lucide-react";
 import { useState } from "react";
 import { apiFetch } from "../../lib/api";
@@ -137,14 +137,14 @@ export function ResumenTab({
               <p className="text-sm text-muted-foreground">Sin alertas médicas registradas.</p>
             )}
             {detail.activeAllergies.map((a) => (
-              <Chip key={a.id} variant={a.severity === "leve" ? "neutral" : "danger"}>
+              <Badge key={a.id} variant={a.severity === "leve" ? "secondary" : "destructive"}>
                 Alergia: {a.substance} ({a.severity})
-              </Chip>
+              </Badge>
             ))}
             {detail.activeConditions.map((c) => (
-              <Chip key={c.id} variant="warning">
+              <Badge key={c.id} variant="warning">
                 {c.name}
-              </Chip>
+              </Badge>
             ))}
             {detail.currentMedications.length > 0 && (
               <div className="mt-1">

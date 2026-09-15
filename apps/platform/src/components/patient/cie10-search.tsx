@@ -1,5 +1,16 @@
 import { useQuery } from "@tanstack/react-query";
-import { Badge, Button, Field, FieldLabel, Input } from "@odentia/ui";
+import {
+  Badge,
+  Button,
+  Combobox,
+  ComboboxContent,
+  ComboboxEmpty,
+  ComboboxInput,
+  ComboboxItem,
+  ComboboxList,
+  Field,
+  FieldLabel,
+} from "@odentia/ui";
 import { useEffect, useId, useState } from "react";
 import { apiFetch } from "../../lib/api";
 
@@ -16,7 +27,9 @@ export function Cie10Search({ value, onChange, label = "Diagnóstico CIE-10", di
 }) {
   const id = useId();
   const [query, setQuery] = useState("");
+  const [open, setOpen] = useState(false);
   const [debounced, setDebounced] = useState("");
+  const [selected, setSelected] = useState<Cie10Result | null>(null);
   useEffect(() => {
     const timer = setTimeout(() => setDebounced(query.trim()), 300);
     return () => clearTimeout(timer);
@@ -27,24 +40,100 @@ export function Cie10Search({ value, onChange, label = "Diagnóstico CIE-10", di
     enabled: !disabled && debounced.length > 0,
     staleTime: 60_000,
   });
+
+  const items = results.data?.data ?? [];
+  const searching = results.isFetching || query.trim() !== debounced;
+  // El combobox trabaja con el objeto resultado; `value` público sigue siendo
+  // solo el código. Se sintetiza el item cuando viene de fuera (modo edición).
+  const selectedItem = value
+    ? selected?.code === value
+      ? selected
+      : { code: value, description: "" }
+    : null;
+
   return (
     <Field>
       <FieldLabel htmlFor={id}>{label}</FieldLabel>
-      <Input id={id} value={query} disabled={disabled} placeholder="Buscar código o descripción…" onChange={(event) => setQuery(event.target.value)} />
-      {value && <div className="flex items-center gap-2"><Badge>{value}</Badge>{!disabled && <Button type="button" size="sm" variant="ghost" onClick={() => { onChange("", ""); setQuery(""); }}>Quitar código</Button>}</div>}
-      {!disabled && query.trim() && (
-        <div className="max-h-52 overflow-auto rounded-md border p-1">
-          {results.isFetching || query.trim() !== debounced ? <p className="p-2 text-sm text-muted-foreground">Buscando…</p> : results.isError ? <p role="alert" className="p-2 text-sm text-destructive">{results.error.message}</p> : (
-            <ul aria-label="Diagnósticos disponibles">
-              {(results.data?.data ?? []).map((item) => (
-                <li key={item.code}>
-                  <button type="button" className="flex w-full flex-col rounded-md px-2 py-2 text-left text-sm hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring" onClick={() => { onChange(item.code, item.description); setQuery(""); }}>
-                    <span className="font-medium">{item.code}</span><span className="text-muted-foreground">{item.description}</span>
-                  </button>
-                </li>
-              ))}
-              {results.data?.data.length === 0 && <li className="p-2 text-sm text-muted-foreground">Sin resultados.</li>}
-            </ul>
+      <Combobox
+        items={items}
+        filter={null}
+        disabled={disabled}
+        open={open && !disabled && query.trim().length > 0}
+        onOpenChange={setOpen}
+        value={selectedItem}
+        isItemEqualToValue={(a, b) => a.code === b.code}
+        itemToStringValue={(item) => item.code}
+        inputValue={query}
+        onInputValueChange={(next, details) => {
+          const { reason } = details;
+          if (reason === "input-change") {
+            setQuery(next);
+            setOpen(next.trim().length > 0);
+            return;
+          }
+          // Al elegir un item Base UI rellena el input con su label; se vacía
+          // igual que hacía el buscador anterior y no se reabre el popup.
+          if (reason === "item-press" || reason === "input-clear" || reason === "clear-press") {
+            setQuery("");
+            setOpen(false);
+          }
+        }}
+        onValueChange={(item) => {
+          if (item) {
+            setSelected(item);
+            onChange(item.code, item.description);
+          } else {
+            setSelected(null);
+            onChange("", "");
+          }
+          setQuery("");
+          setOpen(false);
+        }}
+      >
+        <ComboboxInput
+          id={id}
+          disabled={disabled}
+          placeholder="Buscar código o descripción…"
+          showTrigger={false}
+        />
+        <ComboboxContent>
+          {searching ? (
+            <p className="p-2 text-sm text-muted-foreground">Buscando…</p>
+          ) : results.isError ? (
+            <p role="alert" className="p-2 text-sm text-destructive">
+              {results.error.message}
+            </p>
+          ) : (
+            <>
+              <ComboboxList aria-label="Diagnósticos disponibles">
+                {items.map((item) => (
+                  <ComboboxItem key={item.code} value={item} className="flex-col items-start gap-0 py-2">
+                    <span className="font-medium">{item.code}</span>
+                    <span className="text-muted-foreground">{item.description}</span>
+                  </ComboboxItem>
+                ))}
+              </ComboboxList>
+              <ComboboxEmpty>Sin resultados.</ComboboxEmpty>
+            </>
+          )}
+        </ComboboxContent>
+      </Combobox>
+      {value && (
+        <div className="flex items-center gap-2">
+          <Badge>{value}</Badge>
+          {!disabled && (
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              onClick={() => {
+                onChange("", "");
+                setSelected(null);
+                setQuery("");
+              }}
+            >
+              Quitar código
+            </Button>
           )}
         </div>
       )}

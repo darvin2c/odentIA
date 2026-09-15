@@ -1,6 +1,6 @@
 import { createFileRoute, getRouteApi } from "@tanstack/react-router";
-import { Field, Input } from "@odentia/ui";
-import { Chip, EmptyState, PageHeader, SubmitButton } from "@odentia/ui-patterns";
+import { Badge, Field, Input } from "@odentia/ui";
+import { EmptyState, PageHeader, SubmitButton } from "@odentia/ui-patterns";
 import { useEffect, useRef, useState } from "react";
 import { apiFetch } from "../../lib/api";
 import { API_URL } from "../../lib/auth-client";
@@ -83,9 +83,9 @@ function DemoPage() {
 
       <div className="flex items-center gap-2 text-sm text-muted-foreground">
         Feed en vivo
-        <Chip variant={streamState === "open" ? "success" : "neutral"}>
+        <Badge variant={streamState === "open" ? "success" : "secondary"}>
           {streamState === "open" ? "conectado" : streamState === "connecting" ? "conectando" : "desconectado"}
-        </Chip>
+        </Badge>
       </div>
 
       {events.length === 0 ? (

@@ -1,9 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { useForm } from "@tanstack/react-form";
-import { Button, Field, FieldError, FieldLabel, Input } from "@odentia/ui";
-import { Chip, EmptyState, FormDrawer, NewButton, PageHeader, fieldErrorMessages } from "@odentia/ui-patterns";
-import { MessageCircle, Send } from "lucide-react";
+import { Badge, Button, Field, FieldError, FieldLabel, Input } from "@odentia/ui";
+import { EmptyState, FormDrawer, PageHeader, fieldErrorMessages } from "@odentia/ui-patterns";
+import { MessageCircle, Plus, Send } from "lucide-react";
 import { useState } from "react";
 import { z } from "zod";
 import { ApiError, apiFetch } from "../../lib/api";
@@ -102,7 +102,16 @@ function ChannelsPage() {
       <PageHeader
         title="Canales"
         subtitle="Conexiones de WhatsApp y Telegram"
-        actions={<NewButton label="Nueva conexión" onClick={() => { setCreated(null); setDrawerOpen(true); }} />}
+        actions={
+          <Button
+            type="button"
+            className="min-h-11"
+            onClick={() => { setCreated(null); setDrawerOpen(true); }}
+          >
+            <Plus aria-hidden />
+            Nueva conexión
+          </Button>
+        }
       />
       {error && <p className="text-sm text-red-600">{error}</p>}
       {created && (
@@ -125,9 +134,9 @@ function ChannelsPage() {
               )}
               <span className="text-sm font-medium">{conn.displayName}</span>
               {conn.externalId && <span className="text-xs text-muted-foreground">{conn.externalId}</span>}
-              <Chip variant={conn.status === "active" ? "success" : "neutral"}>{conn.status}</Chip>
-              {conn.capabilities?.templates && <Chip>plantillas</Chip>}
-              {conn.capabilities?.media && <Chip>media</Chip>}
+              <Badge variant={conn.status === "active" ? "success" : "secondary"}>{conn.status}</Badge>
+              {conn.capabilities?.templates && <Badge variant="secondary">plantillas</Badge>}
+              {conn.capabilities?.media && <Badge variant="secondary">media</Badge>}
               <span className="flex-1" />
               <Button variant="outline" size="sm" onClick={() => actionMutation.mutate(`${conn.id}/test`)}>
                 Probar

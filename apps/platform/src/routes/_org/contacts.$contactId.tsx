@@ -1,8 +1,19 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, getRouteApi, Link, useNavigate } from "@tanstack/react-router";
-import { Button, Field, FieldLabel, Input } from "@odentia/ui";
-import { Chip, EmptyState, FormDrawer, PageHeader, SubmitButton } from "@odentia/ui-patterns";
-import { ArrowLeft } from "lucide-react";
+import {
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbLink,
+  BreadcrumbList,
+  BreadcrumbPage,
+  BreadcrumbSeparator,
+  Badge,
+  Button,
+  Field,
+  FieldLabel,
+  Input,
+} from "@odentia/ui";
+import { EmptyState, FormDrawer, PageHeader, SubmitButton } from "@odentia/ui-patterns";
 import { useState } from "react";
 import { apiFetch } from "../../lib/api";
 import { timeAgo, type ContactFull, type FieldDef, type Pipeline } from "../../lib/crm";
@@ -78,14 +89,20 @@ function ContactDetailPage() {
 
   return (
     <div className="flex flex-col gap-6">
+      <Breadcrumb>
+        <BreadcrumbList>
+          <BreadcrumbItem>
+            <BreadcrumbLink render={<Link to="/contacts" />}>Contactos</BreadcrumbLink>
+          </BreadcrumbItem>
+          <BreadcrumbSeparator />
+          <BreadcrumbItem>
+            <BreadcrumbPage>{detail.contact.displayName}</BreadcrumbPage>
+          </BreadcrumbItem>
+        </BreadcrumbList>
+      </Breadcrumb>
       <PageHeader
         title={detail.contact.displayName}
         subtitle={`Contacto desde ${timeAgo(detail.contact.createdAt)}`}
-        actions={
-          <Button variant="outline" size="sm" onClick={() => navigate({ to: "/contacts" })}>
-            <ArrowLeft className="size-4" /> Contactos
-          </Button>
-        }
       />
       <section className="flex flex-col gap-2 rounded-lg border p-4">
         <h2 className="text-sm font-semibold">Paciente</h2>
@@ -174,7 +191,7 @@ function ContactDetailPage() {
                     patchMutation.mutate({ tags: detail.contact.tags.filter((x) => x !== t) })
                   }
                 >
-                  <Chip>{t} ×</Chip>
+                  <Badge variant="secondary">{t} ×</Badge>
                 </button>
               ))}
             </div>
@@ -262,7 +279,7 @@ function ContactDetailPage() {
           {detail.conversations.length === 0 && <p className="text-sm text-muted-foreground">Sin conversaciones.</p>}
           {detail.conversations.map((conv) => (
             <p key={conv.id} className="text-sm">
-              <Chip variant={conv.status === "open" ? "success" : "neutral"}>{conv.status}</Chip>{" "}
+              <Badge variant={conv.status === "open" ? "success" : "secondary"}>{conv.status}</Badge>{" "}
               <span className="text-muted-foreground">{timeAgo(conv.lastMessageAt)}</span>{" "}
               <Link to="/inbox" search={{ conversation: conv.id }} className="text-primary hover:underline">
                 Abrir

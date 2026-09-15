@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  Badge,
   Button,
   Card,
   CardContent,
@@ -14,7 +15,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@odentia/ui";
-import { Chip, ConfirmDialog, SubmitButton } from "@odentia/ui-patterns";
+import { ConfirmDialog, SubmitButton } from "@odentia/ui-patterns";
 import { useState } from "react";
 import { ApiError, apiFetch } from "../../lib/api";
 import { useCanWrite } from "../../lib/crm";
@@ -133,7 +134,7 @@ export function AntecedentesCards({ patientId }: { patientId: string }) {
             >
               <span>
                 {a.isActive ? (
-                  <Chip variant="danger">{a.substance}</Chip>
+                  <Badge variant="destructive">{a.substance}</Badge>
                 ) : (
                   <span className="text-muted-foreground line-through">{a.substance}</span>
                 )}
@@ -220,7 +221,7 @@ export function AntecedentesCards({ patientId }: { patientId: string }) {
             >
               <span>
                 {c.status === "activa" ? (
-                  <Chip variant="danger">{c.name}</Chip>
+                  <Badge variant="destructive">{c.name}</Badge>
                 ) : (
                   <span className="text-muted-foreground">{c.name}</span>
                 )}

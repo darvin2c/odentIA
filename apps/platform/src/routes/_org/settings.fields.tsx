@@ -7,12 +7,11 @@ import {
   DataTable,
   EmptyState,
   FormDrawer,
-  NewButton,
   PageHeader,
   fieldErrorMessages,
 } from "@odentia/ui-patterns";
 import { getCoreRowModel, useReactTable, type ColumnDef } from "@tanstack/react-table";
-import { Trash2 } from "lucide-react";
+import { Plus, Trash2 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { z } from "zod";
 import { apiFetch } from "../../lib/api";
@@ -115,7 +114,16 @@ function FieldsPage() {
       <PageHeader
         title="Campos personalizados"
         subtitle="Datos extra de contactos (validados por tipo)"
-        actions={<NewButton label="Nuevo campo" onClick={() => setDrawerOpen(true)} />}
+        actions={
+          <Button
+            type="button"
+            className="min-h-11"
+            onClick={() => setDrawerOpen(true)}
+          >
+            <Plus aria-hidden />
+            Nuevo campo
+          </Button>
+        }
       />
       {listQuery.data?.data.length === 0 && !listQuery.isLoading ? (
         <EmptyState title="Sin campos" description="Define el primero, p.ej. alergias o sede preferida." />

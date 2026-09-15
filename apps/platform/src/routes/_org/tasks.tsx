@@ -2,17 +2,16 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { useForm } from "@tanstack/react-form";
 import { getCoreRowModel, useReactTable, type ColumnDef } from "@tanstack/react-table";
-import { Button, Field, FieldError, FieldLabel, Input } from "@odentia/ui";
+import { Badge, Button, Field, FieldError, FieldLabel, Input } from "@odentia/ui";
 import {
-  Chip,
   DataTable,
   EmptyState,
   FormDrawer,
-  NewButton,
   PageHeader,
   SubmitButton,
   fieldErrorMessages,
 } from "@odentia/ui-patterns";
+import { Plus } from "lucide-react";
 import { useMemo, useState } from "react";
 import { z } from "zod";
 import { apiFetch } from "../../lib/api";
@@ -109,13 +108,13 @@ function TasksPage() {
         accessorKey: "status",
         header: "Estado",
         cell: ({ row }) => (
-          <Chip variant={row.original.status === "done" ? "success" : "neutral"}>{row.original.status}</Chip>
+          <Badge variant={row.original.status === "done" ? "success" : "secondary"}>{row.original.status}</Badge>
         ),
       },
       {
         accessorKey: "createdBy",
         header: "Origen",
-        cell: ({ row }) => (row.original.createdBy === "agent" ? <Chip>Agente</Chip> : "Operador"),
+        cell: ({ row }) => (row.original.createdBy === "agent" ? <Badge variant="secondary">Agente</Badge> : "Operador"),
       },
       {
         id: "actions",
@@ -158,7 +157,14 @@ function TasksPage() {
               <option value="done">Hechas</option>
               <option value="cancelled">Canceladas</option>
             </select>
-            <NewButton label="Nueva tarea" onClick={() => setDrawerOpen(true)} />
+            <Button
+              type="button"
+              className="min-h-11"
+              onClick={() => setDrawerOpen(true)}
+            >
+              <Plus aria-hidden />
+              Nueva tarea
+            </Button>
           </>
         }
       />

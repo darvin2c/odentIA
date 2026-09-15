@@ -1,6 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
 import { Badge, Button, Card, CardContent, CardHeader, CardTitle } from "@odentia/ui";
-import { Chip } from "@odentia/ui-patterns";
 import { useState } from "react";
 import { apiFetch } from "../../lib/api";
 import { timeAgo } from "../../lib/crm";
@@ -51,7 +50,7 @@ export function EncounterHistoryCard({
         {teeth.length > 0 ? (
           <div className="flex flex-wrap gap-1" aria-label="Piezas tratadas">
             {teeth.map((tooth) => (
-              <Chip key={tooth}>Pieza {tooth}</Chip>
+              <Badge variant="secondary" key={tooth}>Pieza {tooth}</Badge>
             ))}
           </div>
         ) : null}

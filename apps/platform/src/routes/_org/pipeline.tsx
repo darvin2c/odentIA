@@ -1,7 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { DndContext, useDraggable, useDroppable, type DragEndEvent } from "@dnd-kit/core";
-import { Chip, EmptyState, PageHeader } from "@odentia/ui-patterns";
+import { Badge } from "@odentia/ui";
+import { EmptyState, PageHeader } from "@odentia/ui-patterns";
 import { MessageCircle, Send } from "lucide-react";
 import { apiFetch } from "../../lib/api";
 import { timeAgo, type ContactListItem, type Pipeline } from "../../lib/crm";
@@ -115,7 +116,7 @@ function StageColumn({ stageId, name, kind, cards }: { stageId: string; name: st
           />
           {name}
         </span>
-        <Chip>{cards.length}</Chip>
+        <Badge variant="secondary">{cards.length}</Badge>
       </header>
       {cards.map((card) => (
         <DraggableCard key={card.id} card={card} />

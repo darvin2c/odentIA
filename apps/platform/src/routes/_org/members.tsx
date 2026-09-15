@@ -6,14 +6,15 @@ import {
   useReactTable,
   type ColumnDef,
 } from "@tanstack/react-table";
-import { Button, Field, FieldError, FieldLabel, Input, toast } from "@odentia/ui";
+import { Badge, Button, Field, FieldError, FieldLabel, Input, toast } from "@odentia/ui";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@odentia/ui";
-import { Chip, ConfirmDialog, DataTable, EmptyState, ErrorState, FormDrawer, LoadingState, NewButton, PageHeader, RowActions, common, fieldErrorMessages } from "@odentia/ui-patterns";
+import { ConfirmDialog, DataTable, EmptyState, ErrorState, FormDrawer, LoadingState, PageHeader, RowActions, common, fieldErrorMessages } from "@odentia/ui-patterns";
+import { Plus } from "lucide-react";
 import { useMemo, useState } from "react";
 import { z } from "zod";
 import { authClient } from "../../lib/auth-client";
@@ -137,9 +138,9 @@ function MembersPage() {
         accessorKey: "role",
         header: "Rol",
         cell: ({ row }) => (
-          <Chip variant={row.original.role === "owner" ? "success" : "neutral"}>
+          <Badge variant={row.original.role === "owner" ? "success" : "secondary"}>
             {row.original.role}
-          </Chip>
+          </Badge>
         ),
       },
       {
@@ -192,13 +193,17 @@ function MembersPage() {
         subtitle={org?.name}
         actions={
           canWrite ? (
-            <NewButton
-              label="Invitar miembro"
+            <Button
+              type="button"
+              className="min-h-11"
               onClick={() => {
                 form.reset();
                 setInviteOpen(true);
               }}
-            />
+            >
+              <Plus aria-hidden />
+              Invitar miembro
+            </Button>
           ) : undefined
         }
       />
@@ -280,7 +285,7 @@ function MembersPage() {
                     className="flex items-center justify-between rounded-lg border border-border p-3 text-sm"
                   >
                     <span>
-                      {inv.email} <Chip>{inv.role}</Chip>
+                      {inv.email} <Badge variant="secondary">{inv.role}</Badge>
                     </span>
                     {canWrite ? (
                       <Button

@@ -2,19 +2,17 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, getRouteApi, Link } from "@tanstack/react-router";
 import { useForm } from "@tanstack/react-form";
 import { getCoreRowModel, useReactTable, type ColumnDef } from "@tanstack/react-table";
-import { Field, FieldError, FieldLabel, Input } from "@odentia/ui";
+import { Badge, Button, Field, FieldError, FieldLabel, Input } from "@odentia/ui";
 import {
-  Chip,
   DataTable,
   EmptyState,
   FilterBar,
   FormDrawer,
-  NewButton,
   PageHeader,
   fieldErrorMessages,
   useListSearch,
 } from "@odentia/ui-patterns";
-import { MessageCircle, Send } from "lucide-react";
+import { MessageCircle, Plus, Send } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { z } from "zod";
 import { apiFetch } from "../../lib/api";
@@ -129,7 +127,7 @@ function ContactsPage() {
         id: "stage",
         header: "Etapa",
         cell: ({ row }) =>
-          row.original.stageId ? <Chip>{stageName.get(row.original.stageId) ?? "—"}</Chip> : "—",
+          row.original.stageId ? <Badge variant="secondary">{stageName.get(row.original.stageId) ?? "—"}</Badge> : "—",
       },
       {
         accessorKey: "tags",
@@ -137,7 +135,7 @@ function ContactsPage() {
         cell: ({ row }) => (
           <span className="flex flex-wrap gap-1">
             {row.original.tags.map((t) => (
-              <Chip key={t}>{t}</Chip>
+              <Badge variant="secondary" key={t}>{t}</Badge>
             ))}
           </span>
         ),
@@ -170,7 +168,16 @@ function ContactsPage() {
       <PageHeader
         title="Contactos"
         subtitle="Pacientes y conversaciones asociadas"
-        actions={<NewButton label="Nuevo contacto" onClick={() => setDrawerOpen(true)} />}
+        actions={
+          <Button
+            type="button"
+            className="min-h-11"
+            onClick={() => setDrawerOpen(true)}
+          >
+            <Plus aria-hidden />
+            Nuevo contacto
+          </Button>
+        }
       />
       <FilterBar
         filters={[

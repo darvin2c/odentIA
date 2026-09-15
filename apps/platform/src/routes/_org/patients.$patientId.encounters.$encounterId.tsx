@@ -1,8 +1,17 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { Badge, Button } from "@odentia/ui";
+import {
+  Badge,
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbLink,
+  BreadcrumbList,
+  BreadcrumbPage,
+  BreadcrumbSeparator,
+} from "@odentia/ui";
 import { EmptyState } from "@odentia/ui-patterns";
-import { ArrowLeft, ClipboardList } from "lucide-react";
+import { Link } from "@tanstack/react-router";
+import { ClipboardList } from "lucide-react";
 import { EncounterDetailView } from "../../components/patient/encounter-detail-view";
 import { EncounterEditor } from "../../components/patient/encounter-editor";
 import { apiFetch } from "../../lib/api";
@@ -12,6 +21,46 @@ import { hcLabel, type EncounterDetail, type PatientFull } from "../../lib/patie
 export const Route = createFileRoute("/_org/patients/$patientId/encounters/$encounterId")({
   component: EncounterPage,
 });
+
+/**
+ * Miga `Pacientes > {paciente} > Atención`. El enlace al paciente conserva la
+ * pestaña `historia` que usaba el botón "Volver al paciente" anterior.
+ */
+function EncounterBreadcrumb({
+  patientId,
+  patientName,
+}: {
+  patientId: string;
+  patientName?: string;
+}) {
+  return (
+    <Breadcrumb>
+      <BreadcrumbList>
+        <BreadcrumbItem>
+          <BreadcrumbLink render={<Link to="/patients" />}>Pacientes</BreadcrumbLink>
+        </BreadcrumbItem>
+        <BreadcrumbSeparator />
+        <BreadcrumbItem>
+          <BreadcrumbLink
+            render={
+              <Link
+                to="/patients/$patientId"
+                params={{ patientId }}
+                search={{ tab: "historia" }}
+              />
+            }
+          >
+            {patientName ?? "…"}
+          </BreadcrumbLink>
+        </BreadcrumbItem>
+        <BreadcrumbSeparator />
+        <BreadcrumbItem>
+          <BreadcrumbPage>Atención</BreadcrumbPage>
+        </BreadcrumbItem>
+      </BreadcrumbList>
+    </Breadcrumb>
+  );
+}
 
 function EncounterPage() {
   const { patientId, encounterId } = Route.useParams();
@@ -40,7 +89,7 @@ function EncounterPage() {
   }
   if (!patientQuery.data || !encounterQuery.data) {
     return <div className="flex flex-col gap-4">
-      <Button variant="ghost" className="self-start" onClick={() => void back()}><ArrowLeft /> Volver al paciente</Button>
+      <EncounterBreadcrumb patientId={patientId} patientName={patientQuery.data?.data.displayName} />
       <EmptyState icon={ClipboardList} title="No se pudo cargar la atención" description={encounterQuery.error?.message ?? patientQuery.error?.message ?? "La atención no existe o no tienes acceso."} />
     </div>;
   }
@@ -53,7 +102,7 @@ function EncounterPage() {
   return <div className="flex flex-col gap-6">
     <header className="flex flex-wrap items-start justify-between gap-3">
       <div className="flex flex-col gap-2">
-        <Button variant="ghost" className="self-start" onClick={() => void back()}><ArrowLeft /> Volver al paciente</Button>
+        <EncounterBreadcrumb patientId={patientId} patientName={patient.displayName} />
         <h1 className="text-2xl font-semibold">Atención {detail.encounter.status === "finalizada" ? "finalizada" : "en curso"}</h1>
         <p className="text-sm text-muted-foreground">{patient.displayName} · {hcLabel(patient.patient.patientNumber)}</p>
       </div>

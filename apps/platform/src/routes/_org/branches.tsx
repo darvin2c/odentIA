@@ -6,9 +6,9 @@ import {
   useReactTable,
   type ColumnDef,
 } from "@tanstack/react-table";
-import { Field, FieldError, FieldLabel, Input, toast } from "@odentia/ui";
-import { Chip, ConfirmDialog, DataTable, EmptyState, ErrorState, FilterBar, FormDrawer, LoadingState, NewButton, PageHeader, RowActions, common, fieldErrorMessages, useListSearch } from "@odentia/ui-patterns";
-import { Building2 } from "lucide-react";
+import { Badge, Button, Field, FieldError, FieldLabel, Input, toast } from "@odentia/ui";
+import { ConfirmDialog, DataTable, EmptyState, ErrorState, FilterBar, FormDrawer, LoadingState, PageHeader, RowActions, common, fieldErrorMessages, useListSearch } from "@odentia/ui-patterns";
+import { Building2, Plus } from "lucide-react";
 import { useMemo, useState } from "react";
 import { z } from "zod";
 import { ApiError, apiFetch } from "../../lib/api";
@@ -118,9 +118,9 @@ function BranchesPage() {
         accessorKey: "isActive",
         header: "Estado",
         cell: ({ getValue }) => (
-          <Chip variant={getValue<boolean>() ? "success" : "neutral"}>
+          <Badge variant={getValue<boolean>() ? "success" : "secondary"}>
             {getValue<boolean>() ? "Activa" : "Inactiva"}
-          </Chip>
+          </Badge>
         ),
       },
       {
@@ -179,14 +179,18 @@ function BranchesPage() {
         subtitle={org.name}
         actions={
           canWrite ? (
-            <NewButton
-              label="Nueva sucursal"
+            <Button
+              type="button"
+              className="min-h-11"
               onClick={() => {
                 setEditing(null);
                 form.reset();
                 setDrawerOpen(true);
               }}
-            />
+            >
+              <Plus aria-hidden />
+              Nueva sucursal
+            </Button>
           ) : undefined
         }
       />

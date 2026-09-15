@@ -1,7 +1,35 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, createFileRoute, getRouteApi } from "@tanstack/react-router";
-import { Badge, Button, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, Input } from "@odentia/ui";
-import { Chip, EmptyState, PageHeader } from "@odentia/ui-patterns";
+import {
+  Badge,
+  Bubble,
+  BubbleContent,
+  Button,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+  Input,
+  InputGroup,
+  InputGroupAddon,
+  InputGroupButton,
+  InputGroupTextarea,
+  Message,
+  MessageContent,
+  MessageFooter,
+  MessageHeader,
+  MessageScroller,
+  MessageScrollerContent,
+  MessageScrollerItem,
+  MessageScrollerProvider,
+  MessageScrollerViewport,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@odentia/ui";
+import { EmptyState, PageHeader } from "@odentia/ui-patterns";
 import {
   AlertCircle,
   Bot,
@@ -157,6 +185,8 @@ function InboxPage() {
   );
 }
 
+const NO_TEMPLATE = "__ninguna__";
+
 interface Member {
   userId: string;
   role: string;
@@ -210,6 +240,14 @@ function ThreadView({ id, members, onBack }: { id: string; members: Member[]; on
       ),
     enabled: windowClosed && !!detail,
   });
+
+  const templateItems = useMemo(
+    () =>
+      Object.fromEntries(
+        (templatesQuery.data?.data ?? []).map((t) => [t.name, `${t.name} (${t.language})`]),
+      ),
+    [templatesQuery.data],
+  );
 
   const invalidate = () => {
     void queryClient.invalidateQueries({ queryKey: ["conversation", id] });
@@ -304,7 +342,7 @@ function ThreadView({ id, members, onBack }: { id: string; members: Member[]; on
           <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
             <span>{detail.connection.channel === "whatsapp" ? "WhatsApp" : "Telegram"}</span>
             <span>·</span>
-            <Chip variant={closed ? "neutral" : "success"}>{closed ? "Cerrada" : "Abierta"}</Chip>
+            <Badge variant={closed ? "secondary" : "success"}>{closed ? "Cerrada" : "Abierta"}</Badge>
             {assignee && <span>· {assignee.user.name}</span>}
           </div>
         </div>
@@ -344,16 +382,30 @@ function ThreadView({ id, members, onBack }: { id: string; members: Member[]; on
         </Button>
       </div>
 
-      <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto p-3">
-        {(olderCursor ?? detail.messagesCursor) && (
-          <Button variant="ghost" size="sm" onClick={loadOlder} disabled={loadingOlder}>
-            {loadingOlder ? "Cargando…" : "Cargar anteriores"}
-          </Button>
-        )}
-        {messages.map((msg) => (
-          <MessageBubble key={msg.id} msg={msg} conversationId={id} />
-        ))}
-      </div>
+      <MessageScrollerProvider autoScroll defaultScrollPosition="end">
+        <MessageScroller className="min-h-0 flex-1">
+          <MessageScrollerViewport preserveScrollOnPrepend className="p-3">
+            {(olderCursor ?? detail.messagesCursor) && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="mb-2 w-fit"
+                onClick={loadOlder}
+                disabled={loadingOlder}
+              >
+                {loadingOlder ? "Cargando…" : "Cargar anteriores"}
+              </Button>
+            )}
+            <MessageScrollerContent className="gap-2">
+              {messages.map((msg) => (
+                <MessageScrollerItem key={msg.id} messageId={msg.id}>
+                  <MessageBubble msg={msg} conversationId={id} />
+                </MessageScrollerItem>
+              ))}
+            </MessageScrollerContent>
+          </MessageScrollerViewport>
+        </MessageScroller>
+      </MessageScrollerProvider>
 
       <div className="border-t p-3">
         {closed ? (
@@ -364,19 +416,23 @@ function ThreadView({ id, members, onBack }: { id: string; members: Member[]; on
               Fuera de la ventana de 24h de WhatsApp: responde con una plantilla autorizada.
             </p>
             <div className="flex gap-2">
-              <select
-                aria-label="Plantilla"
-                className="rounded-md border bg-background px-2 py-1.5 text-sm"
-                value={templateName}
-                onChange={(e) => setTemplateName(e.target.value)}
+              <Select
+                items={{ [NO_TEMPLATE]: "Elegir plantilla…", ...templateItems }}
+                value={templateName || NO_TEMPLATE}
+                onValueChange={(v) => setTemplateName(!v || v === NO_TEMPLATE ? "" : String(v))}
               >
-                <option value="">Elegir plantilla…</option>
-                {(templatesQuery.data?.data ?? []).map((t) => (
-                  <option key={`${t.name}:${t.language}`} value={t.name}>
-                    {t.name} ({t.language})
-                  </option>
-                ))}
-              </select>
+                <SelectTrigger aria-label="Plantilla" className="w-56">
+                  <SelectValue placeholder="Elegir plantilla…" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={NO_TEMPLATE}>Elegir plantilla…</SelectItem>
+                  {(templatesQuery.data?.data ?? []).map((t) => (
+                    <SelectItem key={`${t.name}:${t.language}`} value={t.name}>
+                      {t.name} ({t.language})
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
               <Input
                 placeholder="Parámetros separados por coma"
                 value={templateParams}
@@ -395,10 +451,10 @@ function ThreadView({ id, members, onBack }: { id: string; members: Member[]; on
             </div>
           </div>
         ) : (
-          <div className="flex gap-2">
-            <textarea
+          <InputGroup className="h-auto min-h-10 items-end bg-background">
+            <InputGroupTextarea
               aria-label="Mensaje"
-              className="min-h-10 flex-1 rounded-md border bg-background px-3 py-2 text-sm"
+              rows={1}
               placeholder="Escribe un mensaje… (Enter para enviar)"
               value={composer}
               onChange={(e) => setComposer(e.target.value)}
@@ -409,14 +465,17 @@ function ThreadView({ id, members, onBack }: { id: string; members: Member[]; on
                 }
               }}
             />
-            <Button
-              size="sm"
-              disabled={!composer.trim() || sendMutation.isPending}
-              onClick={() => sendMutation.mutate(composer.trim())}
-            >
-              <Send className="size-4" />
-            </Button>
-          </div>
+            <InputGroupAddon align="inline-end">
+              <InputGroupButton
+                size="icon-sm"
+                aria-label="Enviar"
+                disabled={!composer.trim() || sendMutation.isPending}
+                onClick={() => sendMutation.mutate(composer.trim())}
+              >
+                <Send aria-hidden />
+              </InputGroupButton>
+            </InputGroupAddon>
+          </InputGroup>
         )}
       </div>
     </div>
@@ -433,44 +492,44 @@ function statusIcon(status: string) {
 function MessageBubble({ msg, conversationId }: { msg: ChatMessage; conversationId: string }) {
   const out = msg.direction === "out";
   return (
-    <div className={`flex ${out ? "justify-end" : "justify-start"}`}>
-      <div
-        className={`max-w-[80%] rounded-lg px-3 py-2 text-sm ${
-          out ? "bg-primary text-primary-foreground" : "border bg-muted"
-        }`}
-      >
+    <Message align={out ? "end" : "start"}>
+      <MessageContent>
         {!out && msg.senderKind === "agent" && (
-          <span className="mb-1 flex items-center gap-1 text-xs opacity-70">
+          <MessageHeader>
             <Bot className="size-3" /> Agente
-          </span>
+          </MessageHeader>
         )}
-        {msg.contentType === "template" ? (
-          <span className="italic opacity-80">
-            Plantilla: {msg.templateName} {(msg.templateParams ?? []).join(" · ")}
-          </span>
-        ) : (
-          msg.body && <p className="whitespace-pre-wrap">{msg.body}</p>
-        )}
-        {msg.attachments.length > 0 && (
-          <span className="mt-1 flex flex-col gap-1">
-            {msg.attachments.map((att, i) => (
-              <a
-                key={i}
-                className="flex items-center gap-1 underline"
-                href={`${API_URL}/api/conversations/${conversationId}/messages/${msg.id}/attachments/${i}`}
-                target="_blank"
-                rel="noreferrer"
-              >
-                <Paperclip className="size-3" /> {att.filename}
-              </a>
-            ))}
-          </span>
-        )}
-        <span className="mt-1 flex items-center justify-end gap-1 text-[11px] opacity-70">
+        <Bubble variant={out ? "default" : "muted"} align={out ? "end" : "start"}>
+          <BubbleContent>
+            {msg.contentType === "template" ? (
+              <span className="italic opacity-80">
+                Plantilla: {msg.templateName} {(msg.templateParams ?? []).join(" · ")}
+              </span>
+            ) : (
+              msg.body && <p className="whitespace-pre-wrap">{msg.body}</p>
+            )}
+            {msg.attachments.length > 0 && (
+              <span className="mt-1 flex flex-col gap-1">
+                {msg.attachments.map((att, i) => (
+                  <a
+                    key={i}
+                    className="flex items-center gap-1 underline"
+                    href={`${API_URL}/api/conversations/${conversationId}/messages/${msg.id}/attachments/${i}`}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    <Paperclip className="size-3" /> {att.filename}
+                  </a>
+                ))}
+              </span>
+            )}
+          </BubbleContent>
+        </Bubble>
+        <MessageFooter className="gap-1">
           {new Date(msg.createdAt).toLocaleTimeString("es-PE", { hour: "2-digit", minute: "2-digit" })}
           {out && statusIcon(msg.status)}
-        </span>
-      </div>
-    </div>
+        </MessageFooter>
+      </MessageContent>
+    </Message>
   );
 }

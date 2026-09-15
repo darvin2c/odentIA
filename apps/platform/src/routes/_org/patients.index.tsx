@@ -1,14 +1,15 @@
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { getCoreRowModel, useReactTable, type ColumnDef } from "@tanstack/react-table";
+import { Button } from "@odentia/ui";
 import {
   DataTable,
   EmptyState,
   FilterBar,
-  NewButton,
   PageHeader,
   useListSearch,
 } from "@odentia/ui-patterns";
+import { Plus } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { apiFetch } from "../../lib/api";
 import { timeAgo } from "../../lib/crm";
@@ -97,7 +98,14 @@ function PatientsPage() {
         title="Pacientes"
         subtitle="Fichas clínicas de la organización"
         actions={
-          <NewButton label="Nuevo paciente" onClick={() => navigate({ to: "/patients/new" })} />
+          <Button
+            type="button"
+            className="min-h-11"
+            onClick={() => navigate({ to: "/patients/new" })}
+          >
+            <Plus aria-hidden />
+            Nuevo paciente
+          </Button>
         }
       />
       <FilterBar filters={[]} sortOptions={[]} searchPlaceholder="Buscar paciente" />

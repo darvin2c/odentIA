@@ -134,7 +134,8 @@ test("pacientes: ficha clínica, alertas, nota CIE-10, odontograma y aislamiento
   const noteDialog = pageA.getByRole("dialog", { name: "Nota rápida" });
   await noteDialog.getByLabel("Nota clínica").fill("Se indica endodoncia");
   await noteDialog.getByLabel("Diagnóstico CIE-10").fill("K04.0");
-  await noteDialog.getByRole("button", { name: "K04.0 Pulpitis", exact: true }).click();
+  // El popup del Combobox se portala fuera del diálogo: se busca a nivel de página.
+  await pageA.getByRole("option", { name: /K04\.0\s+Pulpitis/ }).click();
   await noteDialog.getByRole("button", { name: "Guardar nota" }).click();
   await expect(noteDialog).not.toBeVisible();
   await expect(pageA.getByText("Se indica endodoncia").first()).toBeVisible({ timeout: 15_000 });

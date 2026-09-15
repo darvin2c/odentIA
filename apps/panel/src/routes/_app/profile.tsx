@@ -9,6 +9,7 @@ import {
   AttachmentDescription,
   AttachmentMedia,
   AttachmentTitle,
+  Badge,
   Button,
   Card,
   CardAction,
@@ -24,7 +25,7 @@ import {
   Skeleton,
   toast,
 } from "@odentia/ui";
-import { Chip, ConfirmDialog, ErrorState, FormDrawer, PageHeader, common, fieldErrorMessages } from "@odentia/ui-patterns";
+import { ConfirmDialog, ErrorState, FormDrawer, PageHeader, common, fieldErrorMessages } from "@odentia/ui-patterns";
 import { Monitor, Smartphone, XIcon } from "lucide-react";
 import { z } from "zod";
 import { API_URL, authClient } from "../../lib/auth-client";
@@ -377,7 +378,7 @@ function SessionsCard() {
                       <span className="truncate">
                         {browser} · {os}
                       </span>
-                      {isCurrent ? <Chip variant="success">Actual</Chip> : null}
+                      {isCurrent ? <Badge variant="success">Actual</Badge> : null}
                     </p>
                     <p className="text-xs text-muted-foreground">
                       Última actividad {relativeTime(item.updatedAt)} · {item.ipAddress ?? "IP desconocida"}

@@ -1,7 +1,14 @@
-import { useNavigate } from "@tanstack/react-router";
-import { Badge, Button } from "@odentia/ui";
-import { Chip } from "@odentia/ui-patterns";
-import { ArrowLeft } from "lucide-react";
+import { Link } from "@tanstack/react-router";
+import {
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbLink,
+  BreadcrumbList,
+  BreadcrumbPage,
+  BreadcrumbSeparator,
+  Badge,
+  Button,
+} from "@odentia/ui";
 import { useState } from "react";
 import { useCanWrite } from "../../lib/crm";
 import { ageFrom, hcLabel, type PatientFull, type PatientSummary } from "../../lib/patients";
@@ -12,7 +19,6 @@ import { PatientAvatar } from "./patient-avatar";
 const dateLabel = (value: string) => new Date(value).toLocaleString("es-PE", { dateStyle: "medium", timeStyle: "short" });
 
 export function PatientHeader({ detail, summary }: { detail: PatientFull; summary?: PatientSummary }) {
-  const navigate = useNavigate();
   const canWrite = useCanWrite();
   const [editing, setEditing] = useState(false);
   const patient = detail.patient;
@@ -20,6 +26,17 @@ export function PatientHeader({ detail, summary }: { detail: PatientFull; summar
   const identifiers = [patient.docType && patient.docNumber ? `${patient.docType} ${patient.docNumber}` : patient.docNumber, age ? `${age} años` : null, patient.phone].filter(Boolean);
   return (
     <header className="flex flex-col gap-4">
+      <Breadcrumb>
+        <BreadcrumbList>
+          <BreadcrumbItem>
+            <BreadcrumbLink render={<Link to="/patients" />}>Pacientes</BreadcrumbLink>
+          </BreadcrumbItem>
+          <BreadcrumbSeparator />
+          <BreadcrumbItem>
+            <BreadcrumbPage>{detail.displayName}</BreadcrumbPage>
+          </BreadcrumbItem>
+        </BreadcrumbList>
+      </Breadcrumb>
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="flex items-center gap-4">
           <PatientAvatar patientId={patient.id} name={detail.displayName} storageKey={patient.avatarStorageKey} />
@@ -29,7 +46,6 @@ export function PatientHeader({ detail, summary }: { detail: PatientFull; summar
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button variant="outline" onClick={() => navigate({ to: "/patients" })}><ArrowLeft className="size-4" />Pacientes</Button>
           {canWrite && <Button variant="outline" onClick={() => setEditing(true)}>Editar datos</Button>}
           <NewEncounterButton patientId={patient.id} openEncounterId={summary?.openEncounterId} />
         </div>
@@ -37,14 +53,14 @@ export function PatientHeader({ detail, summary }: { detail: PatientFull; summar
       {detail.activeAllergies.length > 0 || detail.activeConditions.length > 0 ? (
         <div className="flex flex-wrap gap-2">
           {detail.activeAllergies.map((allergy) => (
-            <Chip key={allergy.id} variant={allergy.severity === "leve" ? "neutral" : "danger"}>
+            <Badge key={allergy.id} variant={allergy.severity === "leve" ? "secondary" : "destructive"}>
               Alergia: {allergy.substance}
-            </Chip>
+            </Badge>
           ))}
           {detail.activeConditions.map((condition) => (
-            <Chip key={condition.id} variant="warning">
+            <Badge key={condition.id} variant="warning">
               {condition.name}
-            </Chip>
+            </Badge>
           ))}
         </div>
       ) : null}

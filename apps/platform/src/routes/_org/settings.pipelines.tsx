@@ -1,17 +1,15 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { useForm } from "@tanstack/react-form";
-import { Button, Field, FieldError, FieldLabel, Input } from "@odentia/ui";
+import { Badge, Button, Field, FieldError, FieldLabel, Input } from "@odentia/ui";
 import {
-  Chip,
   ConfirmDialog,
   EmptyState,
   FormDrawer,
-  NewButton,
   PageHeader,
   fieldErrorMessages,
 } from "@odentia/ui-patterns";
-import { ArrowDown, ArrowUp, Pencil, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowUp, Pencil, Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { z } from "zod";
 import { ApiError, apiFetch } from "../../lib/api";
@@ -168,9 +166,9 @@ function PipelinesPage() {
             ) : (
               <>
                 <span className="flex-1 text-sm font-medium">{stage.name}</span>
-                <Chip variant={stage.kind === "won" ? "success" : stage.kind === "lost" ? "danger" : "neutral"}>
+                <Badge variant={stage.kind === "won" ? "success" : stage.kind === "lost" ? "destructive" : "secondary"}>
                   {stage.kind}
-                </Chip>
+                </Badge>
               </>
             )}
             <Button variant="ghost" size="icon" aria-label="Subir" disabled={i === 0} onClick={() => move(i, -1)}>
@@ -195,7 +193,14 @@ function PipelinesPage() {
         ))}
       </div>
       <div>
-        <NewButton label="Nueva etapa" onClick={() => setDrawerOpen(true)} />
+        <Button
+          type="button"
+          className="min-h-11"
+          onClick={() => setDrawerOpen(true)}
+        >
+          <Plus aria-hidden />
+          Nueva etapa
+        </Button>
       </div>
       <FormDrawer
         open={drawerOpen}
