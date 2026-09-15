@@ -7,7 +7,7 @@
 export { cn } from "./lib/utils.js";
 export { useIsMobile } from "./hooks/use-mobile.js";
 
-export { Button } from "./components/button.js";
+export { Button, buttonVariants } from "./components/button.js";
 export { Spinner } from "./components/spinner.js";
 export { Skeleton } from "./components/skeleton.js";
 export {
@@ -92,3 +92,9 @@ export {
   TableHeader,
   TableRow,
 } from "./components/table.js";
+export { Tabs, TabsContent, TabsList, TabsTrigger, tabsListVariants } from "./components/tabs.js";
+export { Avatar, AvatarBadge, AvatarFallback, AvatarGroup, AvatarGroupCount, AvatarImage } from "./components/avatar.js";
+export { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogOverlay, DialogPortal, DialogTitle, DialogTrigger } from "./components/dialog.js";
+export { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectScrollDownButton, SelectScrollUpButton, SelectSeparator, SelectTrigger, SelectValue } from "./components/select.js";
+export { Textarea } from "./components/textarea.js";
+export { Checkbox } from "./components/checkbox.js";

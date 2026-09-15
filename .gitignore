@@ -49,3 +49,9 @@ infra/dev/data/
 tmp/
 *.swp
 *.swo
+
+# Playwright
+/e2e/test-results/
+
+# Archivos de trabajo temporales
+.tmp-*

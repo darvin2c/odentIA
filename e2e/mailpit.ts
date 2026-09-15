@@ -1,11 +1,14 @@
-// Docker Desktop publica hacia WSL solo en IPv6: usar [::1], no 127.0.0.1.
-const MAILPIT_API = "http://[::1]:8025/api/v1";
+const MAILPIT_API = process.env.MAILPIT_API ?? "http://127.0.0.1:8025/api/v1";
 
 interface MailpitMessageSummary {
   ID: string;
   To: { Address: string }[];
   Subject: string;
   Created: string;
+}
+
+interface MailpitMessagesResponse {
+  messages: MailpitMessageSummary[];
 }
 
 interface MailpitMessage {

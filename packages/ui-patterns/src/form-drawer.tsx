@@ -26,9 +26,11 @@ export interface FormDrawerProps {
  isLoading?: boolean;
  error?: string | null;
  fieldErrors?: Record<string, string>;
- submitLabel?: string;
- cancelLabel?: string;
- submitDisabled?: boolean;
+  submitLabel?: string;
+  cancelLabel?: string;
+  submitDisabled?: boolean;
+  /** Layout extra del panel (p. ej. ancho mayor para formularios extensos). */
+  className?: string;
 }
 
 /**
@@ -47,8 +49,9 @@ export function FormDrawer({
  isLoading = false,
  error,
  submitLabel = common.actions.save,
- cancelLabel = common.actions.cancel,
- submitDisabled = false,
+  cancelLabel = common.actions.cancel,
+  submitDisabled = false,
+  className,
 }: FormDrawerProps) {
  const isMobile = useIsMobile();
 
@@ -66,7 +69,7 @@ export function FormDrawer({
  if (!nextOpen) handleClose();
  }}
  >
- <DrawerContent>
+      <DrawerContent className={className}>
  <form onSubmit={onSubmit} className="flex h-full flex-col overflow-hidden">
  <div className="flex justify-center pt-3 md:hidden" aria-hidden>
  <span className="h-1.5 w-10 rounded-full bg-border" />

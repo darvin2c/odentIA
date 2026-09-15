@@ -37,3 +37,4 @@ export {
  DataTableSkeleton,
  type DataTableSkeletonProps,
 } from "./data-table.js";
+export { WizardSteps, type WizardStep, type WizardStepsProps } from "./wizard-steps.js";
