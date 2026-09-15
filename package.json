@@ -13,6 +13,7 @@
     "typecheck": "turbo typecheck",
     "db:generate": "pnpm --filter @odentia/db generate",
     "db:migrate": "pnpm --filter @odentia/db migrate",
+    "db:seed": "pnpm --filter @odentia/services seed:dev",
     "e2e": "pnpm --filter @odentia/e2e test"
   },
   "devDependencies": {
