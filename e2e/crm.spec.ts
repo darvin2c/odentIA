@@ -43,7 +43,9 @@ async function gotoHydrated(page: Page, path: string) {
 
 async function register(page: Page, user: typeof userX) {
   await gotoHydrated(page, "/register");
-  await page.getByLabel("Nombre").fill(user.name);
+  const [first, ...rest] = user.name.split(" ");
+  await page.getByLabel("Nombre").fill(first);
+  await page.getByLabel("Apellidos").fill(rest.join(" "));
   await page.getByLabel("Correo").fill(user.email);
   await page.getByLabel("Contraseña").fill(user.password);
   await page.getByRole("button", { name: "Registrarme" }).click();
