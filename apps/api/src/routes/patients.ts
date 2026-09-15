@@ -1,3 +1,4 @@
+import { SURFACES } from "@odentia/clinical";
 import { withOrgContext } from "@odentia/db";
 import {
   PATIENT_AVATAR_MAX_BYTES,
@@ -7,6 +8,7 @@ import {
   addEncounterProcedure,
   addPlanItem,
   createEncounter,
+  createOdontogramAssessment,
   finalizeEncounter,
   getEncounterDetail,
   getPatientSummary,
@@ -39,9 +41,11 @@ import {
   listClinicalNotes,
   listConditions,
   listMedications,
+  listOdontogramAssessments,
   listPatientDocuments,
   listPatients,
   registerPatientDocument,
+  reviewLegacyEntry,
   setAllergyActive,
   setConditionStatus,
   updatePatient,
@@ -187,32 +191,42 @@ const noteInput = z.object({
   encounterId: z.uuid().optional(),
 });
 
+// NTS 188: la validación normativa real la hace el servicio (dominio
+// compartido, fail closed); aquí solo forma/tipos. Superficies canónicas del
+// paquete (facial en anterior, buccal solo en posterior: el servicio rechaza
+// el cruce). strict arriba: un `status` legado se rechaza, nunca se ignora.
+const odontogramSurface = z.enum(SURFACES as unknown as [string, ...string[]]);
+const findingDetailsInput = z.object({
+  variant: z.string().max(80).optional(),
+  quality: z.enum(["good", "poor"]).optional(),
+  grade: z.number().int().optional(),
+  direction: z.enum(["clockwise", "counterclockwise"]).optional(),
+  positions: z.array(z.string().max(30)).max(16).optional(),
+  relatedTeeth: z.array(z.number().int()).max(52).optional(),
+  abutmentTeeth: z.array(z.number().int()).max(52).optional(),
+  clinicallyObserved: z.boolean().optional(),
+  drawing: z.array(z.array(z.tuple([z.number(), z.number()])).min(1)).max(64).optional(),
+  specifications: z.string().max(2000).optional(),
+  observations: z.string().max(2000).optional(),
+}).catchall(z.unknown());
 const odontogramInput = z.object({
   toothNumber: z.number().int(),
-  condition: z.enum([
-    "sano",
-    "caries",
-    "obturacion",
-    "corona",
-    "ausente",
-    "extraccion_indicada",
-    "endodoncia",
-    "implante",
-    "fractura",
-    "sellante",
-    "protesis",
-    "desgaste",
-    "otro",
-  ]),
-  surfaces: z
-    .array(z.enum(["mesial", "distal", "vestibular", "lingual", "palatina", "oclusal", "incisal"]))
-    .default([]),
-  status: z.enum(["registrado", "realizado", "planificado"]).optional(),
+  condition: z.string().trim().min(1).max(80),
+  surfaces: z.array(odontogramSurface).max(8).default([]),
+  details: findingDetailsInput.optional(),
   note: z.string().max(2000).nullish(),
   diagnosisCode: z.string().max(10).nullish(),
   encounterId: z.uuid().optional(),
+}).strict();
+const voidInput = z.object({ reason: z.string().trim().min(1).max(2000) });
+const assessmentInput = z.object({
+  purpose: z.enum(["initial", "new_findings", "completion", "reentry", "legal", "personal"]),
+  specifications: z.string().trim().max(4000),
+  observations: z.string().trim().max(4000),
+  examinerName: z.string().trim().min(1).max(200),
+  registrationNumber: z.string().trim().min(1).max(40),
+  signature: z.array(z.array(z.tuple([z.number(), z.number()])).min(2).max(500)).min(1).max(50),
 });
-
 const timelineQuery = listQuery.extend({
   types: z.string().transform((value) => value.split(",")).pipe(z.array(z.enum(TIMELINE_TYPES))).optional(),
   toothNumber: z.coerce.number().int().optional(),
@@ -423,8 +437,38 @@ export function createPatientsRoute(deps: CrmDeps) {
   });
   app.post("/:id/odontogram/entries/:entryId/void", async (c) => {
     const { orgId, userId } = orgContextOf(c);
+    const parsed = voidInput.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return validationError(c, parsed.error.issues);
     return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) => voidOdontogramEntry(tx, orgId, userId, c.req.param("entryId"))),
+      withOrgContext(deps.db, orgId, (tx) =>
+        voidOdontogramEntry(tx, orgId, userId, c.req.param("entryId"), c.req.param("id"), parsed.data.reason),
+      ),
+    );
+  });
+  app.post("/:id/odontogram/entries/:entryId/review", async (c) => {
+    const { orgId, userId } = orgContextOf(c);
+    const parsed = voidInput.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return validationError(c, parsed.error.issues);
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        reviewLegacyEntry(tx, orgId, userId, c.req.param("id"), c.req.param("entryId"), parsed.data.reason),
+      ),
+    );
+  });
+  app.get("/:id/odontogram/assessments", async (c) => {
+    const { orgId } = orgContextOf(c);
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) => listOdontogramAssessments(tx, orgId, c.req.param("id"))),
+    );
+  });
+  app.post("/:id/odontogram/assessments", async (c) => {
+    const { orgId, userId } = orgContextOf(c);
+    const parsed = assessmentInput.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return validationError(c, parsed.error.issues);
+    return runService(c, 201, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        createOdontogramAssessment(tx, orgId, userId, c.req.param("id"), parsed.data),
+      ),
     );
   });
 

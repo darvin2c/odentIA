@@ -173,6 +173,66 @@ it("odontograma con pieza inválida responde 400", async () => {
   expect(res.status).toBe(400);
 });
 
+it("odontograma: buccal en anterior 400; facial en anterior 201; void exige motivo", async () => {
+  const app = buildApp("member");
+  const post = (body: unknown) => app.request(`/patients/${patientId}/odontogram/entries`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  expect((await post({ toothNumber: 11, condition: "caries", surfaces: ["buccal"] })).status).toBe(400);
+  const created = await post({ toothNumber: 11, condition: "caries", surfaces: ["facial"], details: { variant: "enamel" } });
+  expect(created.status).toBe(201);
+  const { data } = (await created.json()) as { data: { id: string }[] };
+  const entryId = data[0]!.id;
+  const noReason = await app.request(`/patients/${patientId}/odontogram/entries/${entryId}/void`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({}),
+  });
+  expect(noReason.status).toBe(400);
+  const voided = await app.request(`/patients/${patientId}/odontogram/entries/${entryId}/void`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ reason: "Error de registro" }),
+  });
+  expect(voided.status).toBe(200);
+  const voidBody = (await voided.json()) as { data: { status: string; voidReason: string } };
+  expect(voidBody.data.status).toBe("voided");
+  expect(voidBody.data.voidReason).toBe("Error de registro");
+});
+
+it("actas: POST 201 con identidad firmada y GET lista; firma vacía 400", async () => {
+  const app = buildApp("member");
+  const base = {
+    purpose: "initial",
+    specifications: "Odontograma inicial",
+    observations: "Sin observaciones",
+    examinerName: "Doctora Test",
+    registrationNumber: "COP 1",
+    signature: [[[5, 90], [20, 70]]],
+  };
+  const empty = await app.request(`/patients/${patientId}/odontogram/assessments`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ ...base, signature: [] }),
+  });
+  expect(empty.status).toBe(400);
+  const sealed = await app.request(`/patients/${patientId}/odontogram/assessments`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(base),
+  });
+  expect(sealed.status).toBe(201);
+  const sealedBody = (await sealed.json()) as { data: { patientName: string; patientNumber: number; entries: unknown[] } };
+  expect(sealedBody.data.patientName).toBe("María Pérez");
+  expect(sealedBody.data.patientNumber).toBe(1);
+  const listed = await app.request(`/patients/${patientId}/odontogram/assessments`);
+  expect(listed.status).toBe(200);
+  const listedBody = (await listed.json()) as { data: unknown[] };
+  expect(listedBody.data).toHaveLength(1);
+});
+
 it("avatar privado: subida y URL firmada; rechaza tipo y tamaño inválidos", async () => {
   const app = buildApp("member");
   const p = await withOrgContext(appDb, "org_a", (tx) => createPatient(tx, "org_a", "u-1", { displayName: "Avatar" }));

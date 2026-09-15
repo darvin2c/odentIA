@@ -1,3 +1,4 @@
+import type { FindingDetails } from "@odentia/clinical";
 process.env.DOCKER_HOST ??= "unix:///mnt/wsl/podman-sockets/odentia.sock";
 
 import { createAppDb, createOwnerDb, withOrgContext, type Db } from "@odentia/db";
@@ -170,16 +171,15 @@ async function postAnamnesis(app: Hono, patientId: string, motivo: string): Prom
 async function postOdontogramEntry(
   app: Hono,
   patientId: string,
-  input: { toothNumber: number; condition: string; encounterId?: string },
+  input: { toothNumber: number; condition: string; surfaces?: string[]; details?: FindingDetails; encounterId?: string },
 ): Promise<string> {
   const res = await app.request(`/patients/${patientId}/odontogram/entries`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ toothNumber: input.toothNumber, condition: input.condition, surfaces: [], ...(input.encounterId ? { encounterId: input.encounterId } : {}) }),
+    body: JSON.stringify(input),
   });
   expect(res.status).toBe(201);
   const body = (await res.json()) as { data: { id: string }[] };
-  expect(body.data.length).toBeGreaterThan(0);
   return body.data[0]!.id;
 }
 
@@ -234,10 +234,10 @@ async function seedFullTimeline(app: Hono, tag: string): Promise<FullFixture> {
   const noteId = await postNote(app, patientId, `nota suelta ${tag}`);
   const anamnesisId = await postAnamnesis(app, patientId, `dolor ${tag}`);
   const docId = await postDocument(app, patientId, { category: "radiografia", label: `rx 36 ${tag}`, toothNumber: 36 });
-  const odontoId = await postOdontogramEntry(app, patientId, { toothNumber: 36, condition: "caries" });
+  const odontoId = await postOdontogramEntry(app, patientId, { toothNumber: 36, condition: "caries", surfaces: ["occlusal"], details: { variant: "enamel" } });
   const encounterId = await createEncounter(app, patientId, `control ${tag}`, [36]);
   const linkedNoteId = await postNote(app, patientId, `nota vinculada ${tag}`, encounterId);
-  const linkedEntryId = await postOdontogramEntry(app, patientId, { toothNumber: 36, condition: "obturacion", encounterId });
+  const linkedEntryId = await postOdontogramEntry(app, patientId, { toothNumber: 36, condition: "caries", surfaces: ["occlusal"], details: { variant: "enamel" }, encounterId });
   const linkedDocId = await postDocument(app, patientId, {
     category: "radiografia",
     label: `rx vinculada ${tag}`,
