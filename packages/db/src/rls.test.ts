@@ -236,3 +236,29 @@ it("encuentros y planes de A son invisibles para B; las piezas cerradas no se bo
   await expect(withOrgContext(appDb, "org_a", (tx) =>
     tx.execute(sql`delete from encounter where id='bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'`))).rejects.toThrow();
 });
+
+it("aísla hallazgos y evaluaciones por tenant y conserva sus originales", async () => {
+  await ownerDb.execute(sql`insert into "user" (id,name,email) values ('rls-odonto','Odonto','odonto@example.test') on conflict (id) do nothing`);
+  await ownerDb.execute(sql`insert into odontogram_entry (organization_id,patient_id,tooth_number,condition,status,details,needs_review)
+    values ('org_a','99999999-9999-9999-9999-999999999999',16,'caries','recorded','{"variant":"enamel"}',false)`);
+  await ownerDb.execute(sql`insert into odontogram_assessment
+    (organization_id,patient_id,author_user_id,purpose,specifications,observations,examiner_name,registration_number,patient_name,patient_number,signature,entries)
+    values ('org_a','99999999-9999-9999-9999-999999999999','rls-odonto','initial','Acta inicial','Sin observaciones','Odonto','COP 1','Paciente Ana',1,'[[[5,90],[20,70]]]','[]')`);
+  const assessmentQuery = sql`select id from odontogram_assessment`;
+  expect(await withOrgContext(appDb, "org_a", (tx) => tx.execute(assessmentQuery))).toHaveLength(1);
+  expect(await withOrgContext(appDb, "org_b", (tx) => tx.execute(assessmentQuery))).toHaveLength(0);
+  expect(await appDb.execute(assessmentQuery)).toHaveLength(0);
+  // Inmutabilidad real: UPDATE y DELETE con el rol app son rechazados (42501).
+  await expect(withOrgContext(appDb, "org_a", (tx) =>
+    tx.execute(sql`update odontogram_assessment set observations='hack' where organization_id='org_a'`))).rejects.toMatchObject({ cause: { code: "42501" } });
+  await expect(withOrgContext(appDb, "org_a", (tx) =>
+    tx.execute(sql`delete from odontogram_assessment where organization_id='org_a'`))).rejects.toMatchObject({ cause: { code: "42501" } });
+  await expect(withOrgContext(appDb, "org_a", (tx) =>
+    tx.execute(sql`update odontogram_entry set condition='root_remnant' where organization_id='org_a'`))).rejects.toMatchObject({ cause: { code: "42501" } });
+  await expect(withOrgContext(appDb, "org_a", (tx) =>
+    tx.execute(sql`delete from odontogram_entry where organization_id='org_a'`))).rejects.toMatchObject({ cause: { code: "42501" } });
+  // La corrección auditable del hallazgo (void) sí conserva UPDATE permitido.
+  const voided = await withOrgContext(appDb, "org_a", (tx) =>
+    tx.execute(sql`update odontogram_entry set status='voided', voided_at=now(), void_reason='revisión' where organization_id='org_a' and tooth_number=16 returning id`));
+  expect(voided).toHaveLength(1);
+});

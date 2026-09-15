@@ -203,7 +203,12 @@ export const patientDocument = pgTable(
   (table) => [index("patient_document_org_patient_idx").on(table.organizationId, table.patientId)],
 );
 
-/** Odontograma FDI por pieza/superficie; anulación lógica (status='anulado'). */
+/** Odontograma FDI NTS 188-MINSA/DGIESP-2022 por pieza/superficie (append-only).
+ * Los hallazgos nuevos usan status='recorded'; la anulación es una corrección
+ * auditable (voidedAt/voidedBy/voidReason + proyección status='voided') que
+ * NUNCA muta condition/surface/note. needsReview=true marca filas migradas
+ * del catálogo anterior (legacyData conserva el objeto original) excluidas
+ * del dibujo normativo hasta su revisión clínica. */
 export const odontogramEntry = pgTable(
   "odontogram_entry",
   {
@@ -215,14 +220,54 @@ export const odontogramEntry = pgTable(
     toothNumber: smallint("tooth_number").notNull(),
     surface: text("surface"),
     condition: text("condition").notNull(),
-    status: text("status").notNull().default("registrado"),
+    status: text("status").notNull().default("recorded"),
     diagnosisCode: text("diagnosis_code").references(() => cie10Code.code),
     note: text("note"),
+    details: jsonb("details").notNull().default({}),
+    needsReview: boolean("needs_review").notNull().default(false),
+    legacyData: jsonb("legacy_data"),
+    voidedAt: timestamp("voided_at", { withTimezone: true }),
+    voidedBy: text("voided_by").references(() => user.id),
+    voidReason: text("void_reason"),
     createdBy: text("created_by").references(() => user.id),
     encounterId: uuid("encounter_id").references(() => encounter.id),
     ...timestamps,
   },
   (table) => [index("odontogram_entry_org_patient_tooth_idx").on(table.organizationId, table.patientId, table.toothNumber)],
+);
+
+/**
+ * Acta de odontograma NTS 188: snapshot inmutable de los hallazgos activos al
+ * sellar, con firma manuscrita capturada (trazos normalizados 0..100, NO se
+ * afirma firma digital certificada), datos del examinador y propósito.
+ * Append-only sin updatedAt; la inmutabilidad es regla de servicio y REVOKE
+ * a nivel DB. El snapshot `entries` siempre lo calcula el servidor.
+ */
+export const odontogramAssessment = pgTable(
+  "odontogram_assessment",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    organizationId: orgFk("organization_id"),
+    patientId: uuid("patient_id")
+      .notNull()
+      .references(() => patient.id, { onDelete: "cascade" }),
+    authorUserId: text("author_user_id")
+      .notNull()
+      .references(() => user.id),
+    purpose: text("purpose").notNull(),
+    specifications: text("specifications").notNull(),
+    observations: text("observations").notNull(),
+    examinerName: text("examiner_name").notNull(),
+    registrationNumber: text("registration_number").notNull(),
+    patientName: text("patient_name").notNull(),
+    patientNumber: integer("patient_number").notNull(),
+    signature: jsonb("signature").notNull(),
+    signatureKind: text("signature_kind").notNull().default("captured_handwritten"),
+    entries: jsonb("entries").notNull(),
+    standard: text("standard").notNull().default("NTS 188-MINSA/DGIESP-2022"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("odontogram_assessment_org_patient_idx").on(table.organizationId, table.patientId)],
 );
 
 /**
