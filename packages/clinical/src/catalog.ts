@@ -1,0 +1,401 @@
+/**
+ * NTS 188-MINSA/DGIESP-2022: hallazgos 6.1.1–6.1.38 y observaciones 5.15.
+ * Fuente: RM 559-2022-MINSA. La numeración dental corresponde a ISO 3950.
+ */
+import type { FindingDefinition } from "./types.js";
+
+export const FINDINGS: readonly FindingDefinition[] = [
+  {
+    code: "fixed_orthodontic_appliance",
+    label: "Aparato ortodóntico fijo",
+    section: "6.1.1",
+    scope: "span",
+    color: "quality",
+    symbol:
+      "Cuadrados con cruz en su interior a nivel de los ápices de las piezas de los extremos, unidos con línea recta",
+  },
+  {
+    code: "removable_orthodontic_appliance",
+    label: "Aparato ortodóntico removible",
+    section: "6.1.2",
+    scope: "arch",
+    color: "quality",
+    symbol: "Línea en zigzag a la altura de los ápices del maxilar en tratamiento",
+  },
+  {
+    code: "crown",
+    label: "Corona",
+    section: "6.1.3",
+    scope: "tooth",
+    color: "quality",
+    symbol: "Cuadrado que bordea la corona clínica más sigla del tipo en el recuadro",
+    variants: [
+      { value: "metal", label: "Corona metálica", abbreviation: "CM" },
+      { value: "fenestrated", label: "Corona fenestrada", abbreviation: "CF" },
+      { value: "metal_ceramic", label: "Corona metalcerámica", abbreviation: "CMC" },
+      { value: "veneer_crown", label: "Corona veneer", abbreviation: "CV" },
+      { value: "metal_free", label: "Corona libre de metal", abbreviation: "CLM" },
+    ],
+  },
+  {
+    code: "temporary_crown",
+    label: "Corona temporal",
+    section: "6.1.4",
+    scope: "tooth",
+    color: "red",
+    symbol: "Cuadrado rojo que encierra la corona más sigla CT en el recuadro",
+  },
+  {
+    code: "enamel_development_defect",
+    label: "Defectos de desarrollo del esmalte (DDE)",
+    section: "6.1.5",
+    scope: "surface",
+    color: "red",
+    symbol: "Sigla del defecto en el recuadro de la superficie dentaria",
+    variants: [
+      { value: "opacity", label: "Opacidades del esmalte", abbreviation: "O" },
+      { value: "pigmentation", label: "Pigmentación del esmalte", abbreviation: "PE" },
+      // La norma no asigna sigla a fluorosis: se detalla en especificaciones con su clasificación.
+      { value: "fluorosis", label: "Fluorosis", abbreviation: "" },
+    ],
+  },
+  {
+    code: "diastema",
+    label: "Diastema",
+    section: "6.1.6",
+    scope: "pair",
+    color: "blue",
+    symbol: "Signo del paréntesis invertido azul entre las piezas dentarias",
+  },
+  {
+    code: "edentulous_arch",
+    label: "Edéntulo total superior / inferior",
+    section: "6.1.7",
+    scope: "arch",
+    color: "blue",
+    symbol: "Línea recta horizontal azul sobre las coronas del maxilar edéntulo",
+  },
+  {
+    code: "post_and_core",
+    label: "Espigo-muñón",
+    section: "6.1.8",
+    scope: "tooth",
+    color: "quality",
+    symbol: "Línea vertical en la raíz unida a un cuadrado en la corona",
+    requiresEvidence: true,
+  },
+  {
+    code: "deep_pits_fissures",
+    label: "Fosas y fisuras profundas",
+    section: "6.1.9",
+    scope: "tooth",
+    color: "blue",
+    symbol: "Sigla FFP en el recuadro de la pieza",
+  },
+  {
+    code: "fracture",
+    label: "Fractura dental",
+    section: "6.1.10",
+    scope: "tooth",
+    color: "red",
+    symbol: "Línea roja sobre la corona y/o la raíz según el caso",
+    requiresDrawing: true,
+  },
+  {
+    code: "fusion",
+    label: "Fusión",
+    section: "6.1.11",
+    scope: "pair",
+    color: "blue",
+    symbol: "Dos circunferencias interceptadas encerrando los números de ambas piezas",
+  },
+  {
+    code: "gemination",
+    label: "Geminación",
+    section: "6.1.12",
+    scope: "tooth",
+    color: "blue",
+    symbol: "Circunferencia encerrando el número de la pieza",
+  },
+  {
+    code: "rotation",
+    label: "Giroversión",
+    section: "6.1.13",
+    scope: "tooth",
+    color: "blue",
+    symbol: "Flecha curva a nivel de la zona oclusal siguiendo el sentido del giro",
+  },
+  {
+    code: "impaction",
+    label: "Impactación",
+    section: "6.1.14",
+    scope: "tooth",
+    color: "blue",
+    symbol: "Sigla I en el recuadro de la pieza",
+    requiresEvidence: true,
+  },
+  {
+    code: "implant",
+    label: "Implante dental",
+    section: "6.1.15",
+    scope: "tooth",
+    color: "quality",
+    symbol: "Sigla IMP en el recuadro de la pieza o piezas reemplazadas",
+    requiresEvidence: true,
+  },
+  {
+    code: "caries",
+    label: "Lesión de caries dental",
+    section: "6.1.16",
+    scope: "surface",
+    color: "red",
+    symbol: "Dibujo de la lesión según la forma observada, pintado de rojo, más sigla en el recuadro",
+    variants: [
+      { value: "white_spot", label: "Mancha blanca", abbreviation: "MB" },
+      { value: "enamel", label: "Lesión de caries a nivel del esmalte", abbreviation: "CE" },
+      { value: "dentin", label: "Lesión de caries a nivel de la dentina", abbreviation: "CD" },
+      {
+        value: "pulpal_involvement",
+        label: "Lesión de caries a nivel de la dentina / compromiso de la pulpa",
+        abbreviation: "CDP",
+      },
+    ],
+  },
+  {
+    code: "macrodontia",
+    label: "Macrodoncia",
+    section: "6.1.17",
+    scope: "tooth",
+    color: "blue",
+    symbol: "Sigla MAC en el recuadro de la pieza",
+  },
+  {
+    code: "microdontia",
+    label: "Microdoncia",
+    section: "6.1.18",
+    scope: "tooth",
+    color: "blue",
+    symbol: "Sigla MIC en el recuadro de la pieza",
+  },
+  {
+    code: "pathological_mobility",
+    label: "Movilidad patológica",
+    section: "6.1.19",
+    scope: "tooth",
+    color: "red",
+    symbol: "Sigla M seguida del número arábigo del grado en el recuadro",
+  },
+  {
+    code: "missing_tooth",
+    label: "Pieza dentaria ausente",
+    section: "6.1.20",
+    scope: "tooth",
+    color: "blue",
+    symbol: "Aspa azul sobre el gráfico más sigla en el recuadro",
+    variants: [
+      { value: "unerupted", label: "Diente no erupcionado", abbreviation: "DNE" },
+      {
+        value: "caries_extraction",
+        label: "Diente ausente por extracción debido a experiencia de caries dental",
+        abbreviation: "DEX",
+      },
+      {
+        value: "other_absence",
+        label: "Diente ausente por otras razones sin relación a caries dental",
+        abbreviation: "DAO",
+      },
+    ],
+  },
+  {
+    code: "peg_tooth",
+    label: "Pieza dentaria en clavija",
+    section: "6.1.21",
+    scope: "tooth",
+    color: "blue",
+    symbol: "Triángulo azul por encima o debajo de las raíces de la pieza",
+  },
+  {
+    code: "ectopic_tooth",
+    label: "Pieza dentaria ectópica",
+    section: "6.1.22",
+    scope: "tooth",
+    color: "blue",
+    symbol: "Sigla E en el recuadro de la pieza",
+  },
+  {
+    code: "erupting_tooth",
+    label: "Pieza dentaria en erupción",
+    section: "6.1.23",
+    scope: "tooth",
+    color: "blue",
+    symbol: "Flecha en zigzag azul sobre el gráfico dirigida hacia el plano oclusal",
+  },
+  {
+    code: "extruded_tooth",
+    label: "Pieza dentaria extruida",
+    section: "6.1.24",
+    scope: "tooth",
+    color: "blue",
+    symbol: "Flecha recta vertical azul fuera del gráfico en sentido externo (incisal u oclusal)",
+  },
+  {
+    code: "intruded_tooth",
+    label: "Pieza dentaria intruida",
+    section: "6.1.25",
+    scope: "tooth",
+    color: "blue",
+    symbol: "Flecha recta vertical azul fuera del gráfico hacia la zona incisal u oclusal",
+  },
+  {
+    code: "supernumerary_tooth",
+    label: "Pieza dentaria supernumeraria",
+    section: "6.1.26",
+    scope: "pair",
+    color: "blue",
+    symbol: "Circunferencia azul con S encerrada entre los ápices de las piezas adyacentes",
+  },
+  {
+    code: "pulpotomy",
+    label: "Pulpotomía",
+    section: "6.1.27",
+    scope: "tooth",
+    color: "quality",
+    symbol: "Representación de la pulpa dentaria coronal más sigla PP en el recuadro",
+  },
+  {
+    code: "abnormal_position",
+    label: "Posición anormal dentaria",
+    section: "6.1.28",
+    scope: "tooth",
+    color: "blue",
+    symbol: "Siglas M/D/V/P/L en el recuadro (pueden coexistir)",
+  },
+  {
+    code: "fixed_partial_denture",
+    label: "Prótesis dental parcial fija",
+    section: "6.1.29",
+    scope: "span",
+    color: "quality",
+    symbol: "Línea recta horizontal del puente con verticales sobre los pilares, a nivel de los ápices",
+  },
+  {
+    code: "complete_denture",
+    label: "Prótesis dental completa superior / inferior",
+    section: "6.1.30",
+    scope: "arch",
+    color: "quality",
+    symbol: "Dos líneas rectas paralelas horizontales a nivel de los ápices del maxilar",
+  },
+  {
+    code: "removable_partial_denture",
+    label: "Prótesis dental parcial removible",
+    section: "6.1.31",
+    scope: "span",
+    color: "quality",
+    symbol: "Dos líneas horizontales paralelas a nivel de los ápices de las piezas reemplazadas",
+  },
+  {
+    code: "root_remnant",
+    label: "Remanente radicular",
+    section: "6.1.32",
+    scope: "tooth",
+    color: "red",
+    symbol: "Sigla RR en el recuadro",
+  },
+  {
+    code: "definitive_restoration",
+    label: "Restauración definitiva",
+    section: "6.1.33",
+    scope: "surface",
+    color: "quality",
+    symbol: "Restauración acorde a la forma observada, totalmente pintada, más sigla del material",
+    variants: [
+      { value: "amalgam", label: "Amalgama dental", abbreviation: "AM" },
+      { value: "resin", label: "Resina", abbreviation: "R" },
+      { value: "glass_ionomer", label: "Ionómero de vidrio", abbreviation: "IV" },
+      { value: "metal_inlay", label: "Incrustación metálica", abbreviation: "IM" },
+      { value: "aesthetic_inlay", label: "Incrustación estética", abbreviation: "IE" },
+      { value: "veneer", label: "Carilla", abbreviation: "C" },
+    ],
+  },
+  {
+    code: "temporary_restoration",
+    label: "Restauración temporal",
+    section: "6.1.34",
+    scope: "surface",
+    color: "red",
+    symbol: "Contorno rojo siguiendo la forma de la restauración en las superficies comprometidas",
+  },
+  {
+    code: "sealant",
+    label: "Sellantes",
+    section: "6.1.35",
+    scope: "surface",
+    color: "quality",
+    symbol: "Recorrido del sellante por fosas y fisuras más sigla S en el recuadro",
+  },
+  {
+    code: "tooth_wear",
+    label: "Superficie desgastada",
+    section: "6.1.36",
+    scope: "surface",
+    color: "red",
+    symbol: "Sigla DES en el recuadro y dibujo rojo acorde al lugar del desgaste",
+  },
+  {
+    code: "root_canal_treatment",
+    label: "Tratamiento de conducto",
+    section: "6.1.37",
+    scope: "tooth",
+    color: "quality",
+    symbol: "Línea recta vertical más sigla TC o PC en el recuadro",
+    variants: [
+      { value: "root_canal", label: "Tratamiento de conductos", abbreviation: "TC" },
+      { value: "pulpectomy", label: "Pulpectomía", abbreviation: "PC" },
+    ],
+    requiresEvidence: true,
+  },
+  {
+    code: "transposition",
+    label: "Transposición dentaria",
+    section: "6.1.38",
+    scope: "pair",
+    color: "blue",
+    symbol: "Dos flechas curvas entrecruzadas a la altura de los números de ambas piezas",
+  },
+  {
+    code: "clinical_observation",
+    label: "Observación clínica",
+    section: "5.15",
+    scope: "tooth",
+    color: "none",
+    symbol: "Texto libre en el ítem observaciones (sin símbolo gráfico)",
+  },
+];
+
+const BY_CODE: Record<string, FindingDefinition | undefined> = Object.fromEntries(
+  FINDINGS.map((def) => [def.code, def]),
+);
+
+/** Definición del hallazgo o `undefined` si el código es desconocido. */
+export function findingDefinition(code: string): FindingDefinition | undefined {
+  return Object.hasOwn(BY_CODE, code) ? BY_CODE[code] : undefined;
+}
+
+/**
+ * Etiquetas de códigos históricos (migración): solo lectura para revisión,
+ * nunca aceptados por `validateFinding` ni parte de `FINDINGS`.
+ */
+const LEGACY_LABELS: Record<string, string> = {
+  healthy: "Sin hallazgos (registro previo)",
+  extraction_indicated: "Extracción indicada (plan previo)",
+  legacy_prosthesis: "Prótesis no especificada (registro previo)",
+  legacy_restoration: "Restauración no especificada (registro previo)",
+};
+
+/** Etiqueta española del hallazgo; el código desconocido se devuelve tal cual, nunca "Otro". */
+export function conditionLabel(code: string): string {
+  const label = Object.hasOwn(BY_CODE, code) ? BY_CODE[code]?.label : undefined;
+  const legacy = Object.hasOwn(LEGACY_LABELS, code) ? LEGACY_LABELS[code] : undefined;
+  return label ?? legacy ?? code;
+}
