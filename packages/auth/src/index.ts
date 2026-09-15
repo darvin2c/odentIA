@@ -19,6 +19,10 @@ export interface CreateAuthOptions {
   webURL: string;
   cookieDomain: string;
   trustedOrigins: string[];
+  /** Client ID de Google OAuth; vacío si no hay OAuth configurado. */
+  googleClientId: string;
+  /** Client secret de Google OAuth; vacío si no hay OAuth configurado. */
+  googleClientSecret: string;
 }
 
 function isChangeEmailToken(token: string): boolean {
@@ -40,12 +44,19 @@ export function createAuth({
   webURL,
   cookieDomain,
   trustedOrigins,
+  googleClientId,
+  googleClientSecret,
 }: CreateAuthOptions) {
   return betterAuth({
     appName: "odentIA",
     secret,
     baseURL,
     database: drizzleAdapter(db, { provider: "pg" }),
+    socialProviders: {
+      ...(googleClientId && googleClientSecret
+        ? { google: { clientId: googleClientId, clientSecret: googleClientSecret } }
+        : {}),
+    },
     emailAndPassword: {
       enabled: true,
       requireEmailVerification: true,
@@ -65,6 +76,10 @@ export function createAuth({
       },
     },
     user: {
+      additionalFields: {
+        firstName: { type: "string", required: false, defaultValue: "" },
+        lastName: { type: "string", required: false, defaultValue: "" },
+      },
       changeEmail: {
         enabled: true,
         sendChangeEmailConfirmation: async ({ user, newEmail, url }) => {

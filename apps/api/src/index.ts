@@ -24,6 +24,8 @@ const auth = createAuth({
   webURL: env.WEB_URL,
   cookieDomain: env.COOKIE_DOMAIN,
   trustedOrigins: env.trustedOrigins,
+  googleClientId: env.GOOGLE_CLIENT_ID,
+  googleClientSecret: env.GOOGLE_CLIENT_SECRET,
 });
 
 const app = createApp({

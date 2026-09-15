@@ -8,6 +8,8 @@ const envSchema = z.object({
   WEB_URL: z.string().url(),
   COOKIE_DOMAIN: z.string().min(1),
   TRUSTED_ORIGINS: z.string().min(1),
+  GOOGLE_CLIENT_ID: z.string().optional().default(""),
+  GOOGLE_CLIENT_SECRET: z.string().optional().default(""),
   SMTP_HOST: z.string().min(1),
   SMTP_PORT: z.coerce.number().int(),
   SMTP_USER: z.string().optional().default(""),
