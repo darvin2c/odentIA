@@ -1,5 +1,4 @@
-import { Card, cn } from "@odentia/ui";
-import { Chip } from "./chip.js";
+import { Badge, Card, cn } from "@odentia/ui";
 
 export interface KpiCardProps {
   title: string;
@@ -15,9 +14,9 @@ export function KpiCard({ title, value, delta, description, className }: KpiCard
       <div className="flex items-center justify-between gap-2">
         <span className="text-sm font-medium text-muted-foreground">{title}</span>
         {delta ? (
-          <Chip variant={delta.isPositive ? "success" : "danger"}>
+          <Badge variant={delta.isPositive ? "success" : "destructive"}>
             {delta.isPositive ? `+${delta.value}` : delta.value}
-          </Chip>
+          </Badge>
         ) : null}
       </div>
       <div className="mt-3 text-[28px] font-semibold tabular-nums leading-tight text-foreground">

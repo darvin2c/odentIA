@@ -2,6 +2,9 @@ import { common } from "../common.js";
 import {
   Button,
   Input,
+  InputGroup,
+  InputGroupAddon,
+  InputGroupInput,
   Popover,
   PopoverContent,
   PopoverTrigger,
@@ -63,12 +66,11 @@ function OptionSearch({
   onQueryChange: (value: string) => void;
 }) {
   return (
-    <div className="relative mb-1">
-      <Search
-        className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
-        aria-hidden
-      />
-      <Input
+    <InputGroup className="mb-1 bg-surface">
+      <InputGroupAddon align="inline-start">
+        <Search aria-hidden />
+      </InputGroupAddon>
+      <InputGroupInput
         type="search"
         value={query}
         onChange={(event: React.ChangeEvent<HTMLInputElement>) =>
@@ -76,9 +78,8 @@ function OptionSearch({
         }
         placeholder={common.filters.search}
         aria-label={`${common.filters.search} ${label}`}
-        className="h-8 rounded-md bg-surface pl-9"
       />
-    </div>
+    </InputGroup>
   );
 }
 const shortDateFormatter = new Intl.DateTimeFormat("es-PE", {

@@ -1,6 +1,5 @@
 import { common } from "./common.js";
-import { Skeleton, Spinner, cn } from "@odentia/ui";
-import { Marker, MarkerContent } from "./marker.js";
+import { Marker, MarkerContent, Skeleton, Spinner, cn } from "@odentia/ui";
 
 export interface LoadingStateProps {
   message?: string;

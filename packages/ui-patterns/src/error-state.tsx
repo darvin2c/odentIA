@@ -1,5 +1,5 @@
 import { common } from "./common.js";
-import { Button } from "@odentia/ui";
+import { Alert, AlertDescription, AlertTitle, Button, cn } from "@odentia/ui";
 
 export interface ApiErrorShape {
   code?: string;
@@ -43,34 +43,22 @@ export function ErrorState({
   const displayRequestId = requestId ?? normalized.request_id;
 
   return (
-    <div
-      className={[
-        "flex flex-col items-center justify-center gap-3 rounded-lg border border-danger/20 bg-danger-soft p-8 text-center",
-        className,
-      ]
-        .filter(Boolean)
-        .join(" ")}
-      role="alert"
-    >
-      <div
-        className="flex size-10 items-center justify-center rounded-full bg-surface text-danger"
-        aria-hidden
-      >
-        <span className="text-lg">!</span>
-      </div>
-      <h3 className="text-[16px] font-semibold text-foreground">{title}</h3>
-      <p className="max-w-sm text-sm text-muted-foreground">{displayMessage}</p>
-      {displayCode ? (
-        <p className="text-xs text-muted-foreground">{`${common.labels.code}: ${displayCode}`}</p>
-      ) : null}
-      {displayRequestId ? (
-        <p className="text-xs text-muted-foreground">{`${common.labels.requestId}: ${displayRequestId}`}</p>
-      ) : null}
+    <Alert variant="destructive" className={cn("justify-items-center gap-2 border-destructive/20 py-8 text-center", className)}>
+      <AlertTitle className="text-[16px] font-semibold text-foreground">{title}</AlertTitle>
+      <AlertDescription className="flex max-w-sm flex-col items-center gap-1">
+        <p>{displayMessage}</p>
+        {displayCode ? (
+          <p className="text-xs text-muted-foreground">{`${common.labels.code}: ${displayCode}`}</p>
+        ) : null}
+        {displayRequestId ? (
+          <p className="text-xs text-muted-foreground">{`${common.labels.requestId}: ${displayRequestId}`}</p>
+        ) : null}
+      </AlertDescription>
       {onRetry ? (
         <Button type="button" variant="default" onClick={onRetry} className="mt-2">
           {retryLabel}
         </Button>
       ) : null}
-    </div>
+    </Alert>
   );
 }

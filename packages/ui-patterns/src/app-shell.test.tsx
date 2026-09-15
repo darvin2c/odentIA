@@ -29,12 +29,12 @@ function shell(fluid?: boolean) {
 describe("AppShell fluid", () => {
   it("contenido acotado por defecto", () => {
     const { container } = shell();
-    expect(container.querySelector("main > div")?.className).toContain("max-w-[1280px]");
+    expect(container.querySelector("main > div > div")?.className).toContain("max-w-[1280px]");
   });
 
   it("pantallas operativas usan todo el ancho sin tope", () => {
     const { container } = shell(true);
-    const content = container.querySelector("main > div");
+    const content = container.querySelector("main > div > div");
     expect(content?.className).toContain("max-w-none");
     expect(content?.className).not.toContain("max-w-[1280px]");
   });

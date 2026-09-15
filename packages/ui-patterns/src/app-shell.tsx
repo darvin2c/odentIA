@@ -1,38 +1,48 @@
 import * as React from "react";
-import {
-  ChevronDown,
-  ChevronUp,
-  ExternalLink,
-  LogOut,
-  Menu,
-} from "lucide-react";
+import { ChevronDown, ExternalLink, LogOut } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import {
+  Avatar,
+  AvatarFallback,
+  AvatarImage,
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-  Separator,
-  Sheet,
-  SheetContent,
-  SheetTrigger,
+  Sidebar,
+  SidebarContent,
+  SidebarFooter,
+  SidebarGroup,
+  SidebarGroupContent,
+  SidebarGroupLabel,
+  SidebarHeader,
+  SidebarInset,
+  SidebarMenu,
+  SidebarMenuBadge,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  SidebarProvider,
+  SidebarRail,
+  SidebarTrigger,
+  TooltipProvider,
   cn,
+  useSidebar,
 } from "@odentia/ui";
 // ----- Types -----
 export type AppShellNavItem = {
- label: string;
- to: string;
- icon: LucideIcon;
- badge?: string | number;
- external?: boolean;
+  label: string;
+  to: string;
+  icon: LucideIcon;
+  badge?: string | number;
+  external?: boolean;
 };
 
 export type AppShellNavGroup = {
- label: string;
- icon?: LucideIcon;
- children: AppShellNavItem[];
- defaultOpen?: boolean;
+  label: string;
+  icon?: LucideIcon;
+  children: AppShellNavItem[];
+  defaultOpen?: boolean;
 };
 
 export type AppShellNavEntry = AppShellNavItem | AppShellNavGroup;
@@ -70,249 +80,218 @@ export interface AppShellProps {
 }
 
 export function isNavItemActive(pathname: string, to: string): boolean {
- if (to === "/") return pathname === "/";
- if (pathname === to) return true;
- return pathname.startsWith(`${to}/`);
+  if (to === "/") return pathname === "/";
+  if (pathname === to) return true;
+  return pathname.startsWith(`${to}/`);
 }
 
 function isGroup(entry: AppShellNavEntry): entry is AppShellNavGroup {
- return ((entry as AppShellNavGroup).children !== undefined &&
- Array.isArray((entry as AppShellNavGroup).children)
- );
+  return (
+    (entry as AppShellNavGroup).children !== undefined &&
+    Array.isArray((entry as AppShellNavGroup).children)
+  );
 }
 
 // ----- PageHeader — header por página, no global -----
 export function PageHeader(props: {
- title: string;
- subtitle?: string;
- actions?: React.ReactNode;
+  title: string;
+  subtitle?: string;
+  actions?: React.ReactNode;
 }): React.JSX.Element {
- return (<div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
- <div className="min-w-0">
- <h1 className="text-xl font-semibold tracking-tight text-foreground">{props.title}</h1>
- {props.subtitle ? <p className="mt-1 text-sm text-muted-foreground">{props.subtitle}</p> : null}
- </div>
- {props.actions ? <div className="flex shrink-0 items-center gap-2">{props.actions}</div> : null}
- </div>
- );
+  return (
+    <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+      <div className="min-w-0">
+        <h1 className="text-xl font-semibold tracking-tight text-foreground">{props.title}</h1>
+        {props.subtitle ? (
+          <p className="mt-1 text-sm text-muted-foreground">{props.subtitle}</p>
+        ) : null}
+      </div>
+      {props.actions ? (
+        <div className="flex shrink-0 items-center gap-2">{props.actions}</div>
+      ) : null}
+    </div>
+  );
 }
 
-// ----- Helpers — estilos QwenCloud solo visual (DESIGN tokens), sin contenido dummy -----
-function NavIcon({ Icon, className }: { Icon: LucideIcon; className?: string }) {
- return <Icon className={cn("size-4 shrink-0", className)} />;
-}
+// ----- Navegación -----
 
-function SidebarNavItem({
- item,
- pathname,
- LinkComponent,
- onNavigate,
+/**
+ * Item de navegación. Enchufa el `LinkComponent` del router en
+ * `SidebarMenuButton` vía el prop `render` de Base UI (mismo mecanismo que
+ * `DropdownMenuItem` en el footer). `onClick` llega tipado sin args pero
+ * React lo invoca con el evento real, así que el reenvío es seguro en runtime.
+ */
+function NavItemButton({
+  item,
+  pathname,
+  LinkComponent,
 }: {
- item: AppShellNavItem;
- pathname: string;
- LinkComponent: AppShellProps["LinkComponent"];
- onNavigate?: () => void;
+  item: AppShellNavItem;
+  pathname: string;
+  LinkComponent: AppShellProps["LinkComponent"];
 }) {
- const active = isNavItemActive(pathname, item.to);
- const base = "flex items-center gap-2 rounded-md px-2.5 py-1.5 text-[13px] font-medium leading-none";
- const activeCls = "bg-surface-muted text-foreground";
- const inactiveCls = "text-muted-foreground hover:bg-surface-muted/70 hover:text-foreground";
- return (<LinkComponent
- to={item.to}
- className={cn(base, active ? activeCls : inactiveCls)}
- onClick={onNavigate}
- >
- <NavIcon Icon={item.icon} className="size-[15px] opacity-90" />
- <span className="flex-1 truncate">{item.label}</span>
- {item.badge ? (<span className="ml-auto rounded-full bg-accent px-1.5 py-0.5 text-[10px] font-semibold leading-none text-white">
- {item.badge}
- </span>
- ) : null}
- {item.external ? <ExternalLink className="ml-auto size-3 opacity-60" /> : null}
- </LinkComponent>
- );
+  const { setOpenMobile } = useSidebar();
+  const active = isNavItemActive(pathname, item.to);
+  return (
+    <SidebarMenuItem>
+      <SidebarMenuButton
+        isActive={active}
+        tooltip={item.label}
+        aria-current={active ? "page" : undefined}
+        render={(props) => {
+          const { onClick, children, ...rest } = props;
+          return (
+            <LinkComponent
+              to={item.to}
+              {...rest}
+              onClick={() => {
+                setOpenMobile(false);
+                (onClick as unknown as (event?: unknown) => void)?.();
+              }}
+            >
+              {children as React.ReactNode}
+            </LinkComponent>
+          );
+        }}
+      >
+        <item.icon />
+        <span>{item.label}</span>
+        {item.external ? <ExternalLink className="ml-auto size-3 opacity-60" /> : null}
+      </SidebarMenuButton>
+      {item.badge ? <SidebarMenuBadge>{item.badge}</SidebarMenuBadge> : null}
+    </SidebarMenuItem>
+  );
 }
 
-function RailNavItem({
- item,
- pathname,
- LinkComponent,
+function NavGroup({
+  group,
+  pathname,
+  LinkComponent,
 }: {
- item: AppShellNavItem;
- pathname: string;
- LinkComponent: AppShellProps["LinkComponent"];
+  group: AppShellNavGroup;
+  pathname: string;
+  LinkComponent: AppShellProps["LinkComponent"];
 }) {
- const active = isNavItemActive(pathname, item.to);
- const base = "relative flex size-9 items-center justify-center rounded-md";
- const activeCls = "bg-surface-muted text-foreground";
- const inactiveCls = "text-muted-foreground hover:bg-surface-muted hover:text-foreground";
- return (<LinkComponent to={item.to} title={item.label} className={cn(base, active ? activeCls : inactiveCls)}>
- <NavIcon Icon={item.icon} className="size-[18px]" />
- {item.badge ? (<span className="absolute -right-0.5 -top-0.5 size-2 rounded-full bg-accent" aria-hidden />
- ) : null}
- </LinkComponent>
- );
+  const [open, setOpen] = React.useState(group.defaultOpen ?? true);
+  const Icon = group.icon;
+  return (
+    <SidebarGroup>
+      <SidebarGroupLabel
+        render={
+          <button
+            type="button"
+            aria-expanded={open}
+            onClick={() => setOpen((value) => !value)}
+          />
+        }
+        className="w-full justify-between hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+      >
+        <span className="flex min-w-0 items-center gap-2">
+          {Icon ? <Icon className="size-4 shrink-0" /> : null}
+          <span className="truncate">{group.label}</span>
+        </span>
+        <ChevronDown
+          className={cn("size-3.5 shrink-0 opacity-60 transition-transform", !open && "-rotate-90")}
+        />
+      </SidebarGroupLabel>
+      {open ? (
+        <SidebarGroupContent>
+          <SidebarMenu>
+            {group.children.map((child) => (
+              <NavItemButton
+                key={child.to}
+                item={child}
+                pathname={pathname}
+                LinkComponent={LinkComponent}
+              />
+            ))}
+          </SidebarMenu>
+        </SidebarGroupContent>
+      ) : null}
+    </SidebarGroup>
+  );
 }
 
-function SidebarGroup({
- group,
- pathname,
- LinkComponent,
- onNavigate,
+/**
+ * Items sueltos y grupos en su orden original, ya dentro del `SidebarProvider`.
+ * Los items planos contiguos se agrupan en un solo `SidebarMenu` (los `li`
+ * exigen el `ul` padre); un grupo interrumpe la corrida.
+ */
+function SidebarNav({
+  items,
+  pathname,
+  LinkComponent,
 }: {
- group: AppShellNavGroup;
- pathname: string;
- LinkComponent: AppShellProps["LinkComponent"];
- onNavigate?: () => void;
+  items: AppShellNavEntry[];
+  pathname: string;
+  LinkComponent: AppShellProps["LinkComponent"];
 }) {
- const [open, setOpen] = React.useState(group.defaultOpen ?? true);
- const Icon = group.icon;
- return (<div className="flex flex-col gap-0.5">
- <button
- type="button"
- onClick={() => setOpen((v) => !v)}
- className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-[13px] font-medium text-muted-foreground hover:bg-surface-muted/60 hover:text-foreground"
- >
- {Icon ? <NavIcon Icon={Icon} className="size-[15px]" /> : <span className="size-[15px] shrink-0" />}
- <span className="flex-1 truncate text-left">{group.label}</span>
- {open ? (<ChevronUp className="size-3.5 shrink-0 opacity-60" />
- ) : (<ChevronDown className="size-3.5 shrink-0 opacity-60" />
- )}
- </button>
- {open ? (<div className="flex flex-col gap-0.5 pl-2">
- {group.children.length === 0 ? null : (<>
- {group.children.map((child) => (<div key={child.to} className="ml-3 border-l border-border pl-2">
- <SidebarNavItem
- item={child}
- pathname={pathname}
- LinkComponent={LinkComponent}
- onNavigate={onNavigate}
- />
- </div>
- ))}
- </>
- )}
- </div>
- ) : null}
- </div>
- );
+  const runs: AppShellNavEntry[][] = [];
+  for (const entry of items) {
+    if (isGroup(entry)) {
+      runs.push([entry]);
+    } else {
+      const last = runs[runs.length - 1];
+      if (last && !isGroup(last[0]!)) last.push(entry);
+      else runs.push([entry]);
+    }
+  }
+
+  return (
+    <SidebarContent>
+      {runs.map((run, runIndex) => {
+        const first = run[0]!;
+        if (isGroup(first)) {
+          return (
+            <NavGroup
+              key={`g-${first.label}-${runIndex}`}
+              group={first}
+              pathname={pathname}
+              LinkComponent={LinkComponent}
+            />
+          );
+        }
+        return (
+          <SidebarGroup key={`run-${runIndex}`}>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                {run.map((entry) => {
+                  const item = entry as AppShellNavItem;
+                  return (
+                    <NavItemButton
+                      key={item.to}
+                      item={item}
+                      pathname={pathname}
+                      LinkComponent={LinkComponent}
+                    />
+                  );
+                })}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        );
+      })}
+    </SidebarContent>
+  );
 }
 
-function RailGroup({
- group,
- pathname,
- LinkComponent,
-}: {
- group: AppShellNavGroup;
- pathname: string;
- LinkComponent: AppShellProps["LinkComponent"];
-}) {
- if (group.children.length === 0) return null;
- return (<>
- {group.children.map((child) => (<RailNavItem key={child.to} item={child} pathname={pathname} LinkComponent={LinkComponent} />
- ))}
- </>
- );
-}
-
-// ----- AppShell — sin header blanco global; header es por página (PageHeader). Usuario en footer -----
+// ----- AppShell — layout estándar sobre Sidebar: el primitivo resuelve las
+// tres variantes responsive (sidebar escritorio, rail solo-iconos al colapsar
+// y drawer móvil vía Sheet). El header es por página (PageHeader).
+// `searchSlot`/`topbarActions` siguen en la API pública sin renderizar, igual
+// que antes de la migración. -----
 export function AppShell(props: AppShellProps): React.JSX.Element {
   const { items, LinkComponent, pathname, user, userMenuItems, onSignOut, brand, sidebarFooter, fluid, children } =
     props;
- const [mobileOpen, setMobileOpen] = React.useState(false);
+  const initial = user.name?.trim().charAt(0).toUpperCase() || "U";
 
- const hasItems = items.length > 0;
-
- const sidebarNav = hasItems ? (<nav className="flex flex-1 flex-col gap-0.5">
- {items.map((entry, idx) => {
- if (isGroup(entry)) {
- return (<SidebarGroup
- key={`g-${entry.label}-${idx}`}
- group={entry}
- pathname={pathname}
- LinkComponent={LinkComponent}
- onNavigate={() => setMobileOpen(false)}
- />
- );
- }
- return (<SidebarNavItem
- key={entry.to}
- item={entry}
- pathname={pathname}
- LinkComponent={LinkComponent}
- onNavigate={() => setMobileOpen(false)}
- />
- );
- })}
- </nav>
- ) : null;
-
- const railNav = hasItems ? (<nav className="flex flex-1 flex-col items-center gap-1">
- {items.map((entry, idx) => {
- if (isGroup(entry)) {
- return (<RailGroup
- key={`rg-${entry.label}-${idx}`}
- group={entry}
- pathname={pathname}
- LinkComponent={LinkComponent}
- />
- );
- }
- return <RailNavItem key={entry.to} item={entry} pathname={pathname} LinkComponent={LinkComponent} />;
- })}
- </nav>
- ) : null;
-
- const drawerNav = hasItems ? (<nav className="flex flex-col gap-0.5">
- {items.map((entry, idx) => {
- if (isGroup(entry)) {
- return (<SidebarGroup
- key={`dg-${entry.label}-${idx}`}
- group={entry}
- pathname={pathname}
- LinkComponent={LinkComponent}
- onNavigate={() => setMobileOpen(false)}
- />
- );
- }
- return (<SidebarNavItem
- key={entry.to}
- item={entry}
- pathname={pathname}
- LinkComponent={LinkComponent}
- onNavigate={() => setMobileOpen(false)}
- />
- );
- })}
- </nav>
- ) : null;
-
- const initial = user.name?.trim().charAt(0).toUpperCase() || "U";
-
- const userAvatar = user.avatarUrl ? (<img src={user.avatarUrl} alt={user.name} className="size-8 rounded-full object-cover" />
- ) : (<div className="flex size-8 items-center justify-center rounded-full bg-primary text-sm font-semibold text-primary-foreground">
- {initial}
- </div>
- );
-
- const userRowContent = (<>
- {userAvatar}
- <div className="min-w-0 flex-1 text-left">
- <p className="truncate text-sm font-medium text-foreground">{user.name}</p>
- {user.email ? <p className="truncate text-xs text-muted-foreground">{user.email}</p> : null}
- </div>
- </>
- );
-  // onClick de Base UI cierra el menú y exige el evento del DOM; LinkComponent
-  // lo declara sin args (el nav del sidebar no lo usa) pero React lo invoca
-  // siempre con el evento real, así que el reenvío es seguro en runtime.
   const userMenuContent = (
     <>
       {userMenuItems?.map((item) => (
         <DropdownMenuItem
           key={item.label}
-          render={(props) => {
-            const { onClick, ...rest } = props;
+          render={(menuProps) => {
+            const { onClick, ...rest } = menuProps;
             return (
               <LinkComponent
                 to={item.to}
@@ -320,7 +299,7 @@ export function AppShell(props: AppShellProps): React.JSX.Element {
                 {...rest}
                 onClick={onClick as unknown as () => void}
               >
-                {props.children}
+                {menuProps.children}
               </LinkComponent>
             );
           }}
@@ -337,97 +316,48 @@ export function AppShell(props: AppShellProps): React.JSX.Element {
     </>
   );
 
- return (<div className="flex min-h-screen bg-background text-foreground">
- {/* Sidebar — estilo limpio imagen referencia */}
- <aside className="hidden w-[260px] shrink-0 flex-col border-r border-border bg-sidebar px-3 py-3 xl:flex">
-  <div className="mb-3 flex items-center px-1">
-    <div className="flex items-center gap-2">{brand}</div>
-  </div>
- <div className="flex flex-1 flex-col gap-0.5 overflow-y-auto">{sidebarNav}</div>
- {sidebarFooter ? (<>
- <Separator className="my-3" />
- <div>{sidebarFooter}</div>
- </>
- ) : null}
-  {/* Footer — usuario con Dropdown */}
-  <div className="mt-auto pt-3">
-    <Separator className="mb-3" />
-    <DropdownMenu>
-      <DropdownMenuTrigger className="flex w-full items-center gap-3 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-surface-muted motion-safe:hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-soft">
-        {userRowContent}
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" side="top" className="w-56">
-        {userMenuContent}
-      </DropdownMenuContent>
-    </DropdownMenu>
-  </div>
- </aside>
-
- {/* Rail 64px — tablet */}
- <aside className="hidden w-16 shrink-0 flex-col items-center border-r border-border bg-sidebar py-3 md:flex xl:hidden">
- <div className="mb-4 flex size-8 items-center justify-center rounded-full bg-primary text-sm font-semibold text-primary-foreground">
- {initial}
- </div>
- {railNav}
- <div className="mt-auto flex flex-col items-center gap-2">
- <Separator className="my-2 w-8" />
- <DropdownMenu>
- <DropdownMenuTrigger className="flex size-8 items-center justify-center rounded-full bg-primary text-xs font-semibold text-primary-foreground transition-colors hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-soft motion-safe:hover:opacity-80">
- {initial}
- </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" side="right" className="w-48">
-        {userMenuContent}
-      </DropdownMenuContent>
- </DropdownMenu>
- </div>
- </aside>
-
- {/* Main — sin header blanco global */}
- <div className="flex min-w-0 flex-1 flex-col">
- {/* Solo trigger móvil, sin header blanco */}
- <div className="flex h-12 shrink-0 items-center gap-2 border-b border-border bg-background px-3 md:hidden">
- <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
- <SheetTrigger
- className="inline-flex size-9 items-center justify-center rounded-md hover:bg-surface-muted"
- aria-label="Abrir menú"
- >
- <Menu className="size-5" />
- </SheetTrigger>
- <SheetContent side="left" className="w-[280px] bg-sidebar p-3">
- <div className="mb-4 flex items-center gap-2 px-1">
- <div className="flex min-w-0 items-center gap-2">{brand}</div>
- </div>
- {drawerNav}
- {sidebarFooter ? (<>
- <Separator className="my-3" />
- <div>{sidebarFooter}</div>
- </>
- ) : null}
- <div className="mt-auto pt-3">
- <Separator className="mb-3" />
- <DropdownMenu>
- <DropdownMenuTrigger className="flex w-full items-center gap-3 rounded-md px-2 py-2 text-left transition-colors hover:bg-surface-muted motion-safe:hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-soft">
- {userAvatar}
- <div className="min-w-0 flex-1">
- <p className="truncate text-sm font-medium text-foreground">{user.name}</p>
- {user.email ? (<p className="truncate text-xs text-muted-foreground">{user.email}</p>
- ) : null}
- </div>
- </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" side="top" className="w-56">
-        {userMenuContent}
-      </DropdownMenuContent>
- </DropdownMenu>
- </div>
- </SheetContent>
- </Sheet>
- <div className="flex items-center gap-2">{brand}</div>
- </div>
-
- <main className="flex-1 overflow-auto bg-background p-4 md:p-6">
-   <div className={fluid ? "w-full max-w-none" : "mx-auto max-w-[1280px]"}>{children}</div>
- </main>
- </div>
- </div>
- );
+  return (
+    <TooltipProvider>
+      <SidebarProvider>
+        <Sidebar collapsible="icon">
+          <SidebarHeader>
+            <div className="flex min-w-0 items-center gap-2 px-1 group-data-[collapsible=icon]:justify-center">
+              {brand}
+            </div>
+          </SidebarHeader>
+          <SidebarNav items={items} pathname={pathname} LinkComponent={LinkComponent} />
+          <SidebarFooter>
+            {sidebarFooter}
+            <DropdownMenu>
+              <DropdownMenuTrigger className="flex w-full items-center gap-3 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-sidebar-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                <Avatar className="size-8">
+                  {user.avatarUrl ? <AvatarImage src={user.avatarUrl} alt={user.name} /> : null}
+                  <AvatarFallback>{initial}</AvatarFallback>
+                </Avatar>
+                <div className="min-w-0 flex-1 group-data-[collapsible=icon]:hidden">
+                  <p className="truncate text-sm font-medium text-sidebar-foreground">{user.name}</p>
+                  {user.email ? (
+                    <p className="truncate text-xs text-sidebar-foreground/70">{user.email}</p>
+                  ) : null}
+                </div>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" side="top" className="w-56">
+                {userMenuContent}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </SidebarFooter>
+          <SidebarRail />
+        </Sidebar>
+        <SidebarInset>
+          <header className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-3 md:hidden">
+            <SidebarTrigger aria-label="Abrir menú" className="size-9" />
+            <div className="flex min-w-0 items-center gap-2">{brand}</div>
+          </header>
+          <div className="flex-1 overflow-auto p-4 md:p-6">
+            <div className={fluid ? "w-full max-w-none" : "mx-auto max-w-[1280px]"}>{children}</div>
+          </div>
+        </SidebarInset>
+      </SidebarProvider>
+    </TooltipProvider>
+  );
 }
