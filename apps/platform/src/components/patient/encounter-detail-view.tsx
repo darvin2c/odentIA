@@ -1,12 +1,11 @@
+import { conditionLabel, surfaceLabel } from "@odentia/clinical";
 import { useQuery } from "@tanstack/react-query";
 import { Badge } from "@odentia/ui";
 import { useCanWrite } from "../../lib/crm";
 import { apiFetch } from "../../lib/api";
 import {
-  conditionLabel,
   encounterStatusLabel,
   statusLabel,
-  surfaceLabel,
   type EncounterDetail,
   type PatientDocument,
 } from "../../lib/patients";

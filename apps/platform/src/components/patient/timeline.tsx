@@ -1,3 +1,4 @@
+import { FDI_ADULT, FDI_CHILD, conditionLabel, surfaceLabel } from "@odentia/clinical";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import {
   Attachment,
@@ -25,11 +26,7 @@ import { useEffect, useId, useMemo, useState } from "react";
 import { apiFetch } from "../../lib/api";
 import { timeAgo } from "../../lib/crm";
 import {
-  FDI_ADULT,
-  FDI_CHILD,
-  conditionLabel,
   statusLabel,
-  surfaceLabel,
   timelineTypeLabel,
   type TimelineItem,
 } from "../../lib/patients";

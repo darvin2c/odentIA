@@ -9,7 +9,8 @@ import { PatientHeader } from "../../components/patient/patient-header";
 import { PlanTab } from "../../components/patient/plan-tab";
 import { ResumenTab } from "../../components/patient/resumen-tab";
 import { apiFetch } from "../../lib/api";
-import { FDI_ADULT, FDI_CHILD, type PatientFull, type PatientSummary } from "../../lib/patients";
+import { FDI_ADULT, FDI_CHILD } from "@odentia/clinical";
+import { type PatientFull, type PatientSummary } from "../../lib/patients";
 
 const TABS = [
   { value: "resumen", label: "Resumen" },
@@ -49,7 +50,7 @@ function PatientDetailPage() {
     <Tabs value={tab} onValueChange={(value) => { if (TABS.some((item) => item.value === value)) changeTab(value as PatientTab); }}>
       <TabsList className="max-w-full overflow-x-auto overflow-y-hidden" aria-label="Ficha del paciente">{TABS.map((item) => <TabsTrigger key={item.value} value={item.value}>{item.label}</TabsTrigger>)}</TabsList>
       <TabsContent value="resumen" className="pt-4"><ResumenTab patientId={patientId} detail={detail.data.data} summary={summary.data?.data} onTabChange={changeTab} /></TabsContent>
-      <TabsContent value="odontograma" className="pt-4"><OdontogramaTab patientId={patientId} initialTooth={tooth} onToothSelect={(next) => changeTab("odontograma", next)} /></TabsContent>
+      <TabsContent value="odontograma" className="pt-4"><OdontogramaTab patientId={patientId} /></TabsContent>
       <TabsContent value="historia" className="pt-4"><HistoriaTab patientId={patientId} initialTooth={tooth} onOdontogramSelect={(next) => changeTab("odontograma", next)} /></TabsContent>
       <TabsContent value="plan" className="pt-4"><PlanTab patientId={patientId} /></TabsContent>
       <TabsContent value="imagenes" className="pt-4"><ImagenesTab patientId={patientId} initialTooth={tooth} /></TabsContent>

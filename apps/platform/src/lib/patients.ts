@@ -1,4 +1,5 @@
 /** Tipos espejo de la API de pacientes + helpers puros para la UI. */
+import { activeFindingsAsOf, type FindingDetails } from "@odentia/clinical";
 
 export interface Patient {
   id: string;
@@ -102,6 +103,12 @@ export interface OdontogramEntry {
   note?: string | null;
   encounterId?: string | null;
   createdAt?: string;
+  details?: FindingDetails;
+  needsReview?: boolean;
+  legacyData?: Record<string, unknown> | null;
+  voidedAt?: string | null;
+  voidedBy?: string | null;
+  voidReason?: string | null;
 }
 
 export type ToothState = {
@@ -114,6 +121,23 @@ export type ToothState = {
 export interface OdontogramState {
   teeth: Record<string, ToothState>;
   history: OdontogramEntry[];
+}
+
+export interface OdontogramAssessment {
+  id: string;
+  patientId: string;
+  patientName: string;
+  patientNumber: number;
+  authorUserId: string;
+  createdAt: string;
+  purpose: "initial" | "new_findings" | "completion" | "reentry" | "legal" | "personal";
+  standard: string;
+  specifications: string;
+  observations: string;
+  examinerName: string;
+  registrationNumber: string;
+  signature: number[][][];
+  entries: OdontogramEntry[];
 }
 
 /** Atención clínica (borrador editable / finalizada inmutable). Fechas como ISO string. */
@@ -253,120 +277,39 @@ export function ageFrom(birthDate: string | null | undefined): string {
   return `${age}`;
 }
 
-/** Piezas FDI permanentes 11-18, 21-28, 31-38, 41-48. */
-export const FDI_ADULT: number[] = [
-  11, 12, 13, 14, 15, 16, 17, 18, 21, 22, 23, 24, 25, 26, 27, 28, 31, 32, 33, 34, 35, 36,
-  37, 38, 41, 42, 43, 44, 45, 46, 47, 48,
-];
-
-/** Piezas FDI temporales 51-55, 61-65, 71-75, 81-85. */
-export const FDI_CHILD: number[] = [
-  51, 52, 53, 54, 55, 61, 62, 63, 64, 65, 71, 72, 73, 74, 75, 81, 82, 83, 84, 85,
-];
-
-/** Dentición adulta: 32 piezas FDI (cuadrantes ordenados de derecha a izquierda). */
-export const FDI_ADULT_ROWS: number[][] = [
-  [18, 17, 16, 15, 14, 13, 12, 11, 21, 22, 23, 24, 25, 26, 27, 28],
-  [48, 47, 46, 45, 44, 43, 42, 41, 31, 32, 33, 34, 35, 36, 37, 38],
-];
-
-/** Dentición temporal: 20 piezas FDI. */
-export const FDI_CHILD_ROWS: number[][] = [
-  [55, 54, 53, 52, 51, 61, 62, 63, 64, 65],
-  [85, 84, 83, 82, 81, 71, 72, 73, 74, 75],
-];
-
-export const CONDITIONS: string[] = [
-  "sano",
-  "caries",
-  "obturacion",
-  "corona",
-  "ausente",
-  "extraccion_indicada",
-  "endodoncia",
-  "implante",
-  "fractura",
-  "sellante",
-  "protesis",
-  "desgaste",
-  "otro",
-];
-
-export const SURFACES: string[] = ["mesial", "distal", "vestibular", "lingual", "palatina", "oclusal", "incisal"];
-
-export const STATUSES: string[] = ["registrado", "realizado", "planificado"];
-
-export function conditionLabel(condition: string): string {
-  switch (condition) {
-    case "sano":
-      return "Sano";
-    case "caries":
-      return "Caries";
-    case "obturacion":
-      return "Obturación";
-    case "corona":
-      return "Corona";
-    case "ausente":
-      return "Ausente";
-    case "extraccion_indicada":
-      return "Extracción indicada";
-    case "endodoncia":
-      return "Endodoncia";
-    case "implante":
-      return "Implante";
-    case "fractura":
-      return "Fractura";
-    case "sellante":
-      return "Sellante";
-    case "protesis":
-      return "Prótesis";
-    case "desgaste":
-      return "Desgaste";
-    default:
-      return "Otro";
-  }
-}
-
-export function surfaceLabel(surface: string): string {
-  switch (surface) {
-    case "mesial":
-      return "Mesial";
-    case "distal":
-      return "Distal";
-    case "vestibular":
-      return "Vestibular";
-    case "lingual":
-      return "Lingual";
-    case "palatina":
-      return "Palatina";
-    case "oclusal":
-      return "Oclusal";
-    default:
-      return "Incisal";
-  }
-}
-
 export function statusLabel(status: string): string {
-  switch (status) {
-    case "registrado":
-      return "Registrado";
-    case "realizado":
-      return "Realizado";
-    case "planificado":
-      return "Planificado";
+  if (status === "recorded") return "Registrado";
+  if (status === "voided") return "Anulado por corrección";
+  return status;
+}
+
+
+/** Etiqueta en español del tipo de pieza: "incisor" → "Incisivo". */
+export function toothTypeLabel(type: "incisor" | "canine" | "premolar" | "molar"): string {
+  switch (type) {
+    case "incisor":
+      return "Incisivo";
+    case "canine":
+      return "Canino";
+    case "premolar":
+      return "Premolar";
     default:
-      return "Anulado";
+      return "Molar";
   }
 }
 
-/** Tipo de pieza según el segundo dígito FDI: 1-2 incisivo, 3 canino, 4-5 premolar, 6-8 molar. */
-export function toothTypeOf(toothNumber: number): "incisivo" | "canino" | "premolar" | "molar" {
-  const digit = Math.abs(Math.trunc(toothNumber)) % 10;
-  if (digit === 1 || digit === 2) return "incisivo";
-  if (digit === 3) return "canino";
-  if (digit === 4 || digit === 5) return "premolar";
-  if (digit >= 6 && digit <= 8) return "molar";
-  throw new RangeError("Pieza FDI inválida");
+
+/**
+ * Convierte un monto decimal en soles/unidades (ej. "150.50", "150,50") a
+ * centavos enteros. Vacío = sin precio (null), nunca 0.
+ */
+export function parsePriceToCents(raw: string): { ok: true; cents: number | null } | { ok: false } {
+  const text = raw.trim().replace(",", ".");
+  if (text === "") return { ok: true, cents: null };
+  if (!/^\d{1,9}(\.\d{1,2})?$/.test(text)) return { ok: false };
+  const cents = Math.round(Number(text) * 100);
+  if (!Number.isFinite(cents) || cents < 0 || cents > 2147483647) return { ok: false };
+  return { ok: true, cents };
 }
 
 export function planStatusLabel(status: string): string {
@@ -412,70 +355,24 @@ export function timelineTypeLabel(type: string): string {
   }
 }
 
-/** Color de pieza por estado (convención odontológica). */
-export function entryColor(status: string): string {
-  switch (status) {
-    case "realizado":
-      return "fill-blue-500";
-    case "ausente":
-      return "fill-gray-300";
-    case "planificado":
-    case "registrado":
-    default:
-      return "fill-red-500";
-  }
-}
-
-function entryTime(entry: OdontogramEntry): number {
-  if (!entry.createdAt) return 0;
-  const t = new Date(entry.createdAt).getTime();
-  return Number.isNaN(t) ? 0 : t;
-}
-
-function compareEntries(a: OdontogramEntry, b: OdontogramEntry): number {
-  const time = entryTime(a) - entryTime(b);
-  if (time !== 0) return time;
-  if (a.id === b.id) return 0;
-  return a.id < b.id ? -1 : 1;
-}
-
-/**
- * Estado del odontograma a una fecha de corte (last-writer-wins por
- * pieza+superficie, como el servicio): gana la entrada más reciente por
- * `${toothNumber}:${surface ?? ""}`; las anuladas nunca ganan y las
- * posteriores a `iso` no participan. Empates de fecha+id se resuelven
- * de forma determinista por id. Sin `iso` usa todo el historial.
- */
+/** Proyección por pieza de hallazgos coexistentes; el historial original no se modifica. */
 export function winnersAsOf(history: OdontogramEntry[], iso?: string): OdontogramState {
-  const rawCutoff = iso === undefined ? Number.POSITIVE_INFINITY : new Date(iso).getTime();
-  const cutoff = Number.isNaN(rawCutoff) ? Number.POSITIVE_INFINITY : rawCutoff;
-  const ordered = history
-    .filter((entry) => entryTime(entry) <= cutoff)
-    .sort(compareEntries);
-  // La última escritura gana por pieza+superficie (anuladas excluidas).
-  const winners = new Map<string, OdontogramEntry>();
-  for (const entry of ordered) {
-    if (entry.status === "anulado") continue;
-    winners.set(`${entry.toothNumber}:${entry.surface ?? ""}`, entry);
-  }
   const byTooth = new Map<number, OdontogramEntry[]>();
-  for (const entry of winners.values()) {
-    const list = byTooth.get(entry.toothNumber) ?? [];
-    list.push(entry);
-    byTooth.set(entry.toothNumber, list);
+  for (const entry of activeFindingsAsOf(history, iso)) {
+    for (const tooth of entry.details?.relatedTeeth?.length ? entry.details.relatedTeeth : [entry.toothNumber]) {
+      const entries = byTooth.get(tooth) ?? [];
+      entries.push(entry);
+      byTooth.set(tooth, entries);
+    }
   }
   const teeth: Record<string, ToothState> = {};
   for (const [tooth, entries] of byTooth) {
-    entries.sort((a, b) => compareEntries(b, a));
-    const latest = entries[0]!;
+    const latest = entries.at(-1)!;
     teeth[String(tooth)] = {
       condition: latest.condition,
       status: latest.status,
-      surfaces: entries
-        .map((e) => e.surface)
-        .filter((s): s is string => !!s)
-        .sort(),
-      entries: entries.map((e) => e.id),
+      surfaces: [...new Set(entries.flatMap((entry) => entry.surface ? [entry.surface] : []))].sort(),
+      entries: entries.map((entry) => entry.id),
     };
   }
   return { teeth, history };

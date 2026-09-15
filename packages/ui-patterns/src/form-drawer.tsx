@@ -9,7 +9,6 @@ import {
  DrawerTitle,
  ScrollArea,
  Skeleton,
- Spinner,
  useIsMobile,
 } from "@odentia/ui";
 import { SubmitButton } from "./submit-button.js";
@@ -19,6 +18,8 @@ export interface FormDrawerProps {
  onClose: () => void;
  title: string;
  description?: string;
+ /** Contexto visual que permanece fijo mientras se desplaza el formulario. */
+ headerContent?: React.ReactNode;
  children: React.ReactNode;
  onSubmit: (event: React.FormEvent) => void;
  isDirty?: boolean;
@@ -29,12 +30,13 @@ export interface FormDrawerProps {
   submitLabel?: string;
   cancelLabel?: string;
   submitDisabled?: boolean;
+  hideSubmit?: boolean;
   /** Layout extra del panel (p. ej. ancho mayor para formularios extensos). */
   className?: string;
 }
 
 /**
- * Drawer de formulario: replica patrón Sheet validado sin diseño extra.
+ * Drawer de formulario con cabecera fija, scroll interno y acciones persistentes.
  * Usa tokens estándar (popover/card) y layout adaptativo h-full + wrapper flex-1.
  */
 export function FormDrawer({
@@ -42,6 +44,7 @@ export function FormDrawer({
  onClose,
  title,
  description,
+ headerContent,
  children,
  onSubmit,
  isDirty = false,
@@ -51,6 +54,7 @@ export function FormDrawer({
  submitLabel = common.actions.save,
   cancelLabel = common.actions.cancel,
   submitDisabled = false,
+  hideSubmit = false,
   className,
 }: FormDrawerProps) {
  const isMobile = useIsMobile();
@@ -69,17 +73,16 @@ export function FormDrawer({
  if (!nextOpen) handleClose();
  }}
  >
-      <DrawerContent className={className}>
- <form onSubmit={onSubmit} className="flex h-full flex-col overflow-hidden">
- <div className="flex justify-center pt-3 md:hidden" aria-hidden>
- <span className="h-1.5 w-10 rounded-full bg-border" />
- </div>
+      <DrawerContent className={`data-[swipe-axis=y]:[--drawer-height:calc(100dvh-6rem)] ${className ?? ""}`}>
+ <form onSubmit={onSubmit} className="flex h-full min-h-0 flex-1 flex-col overflow-hidden">
  <DrawerHeader className="gap-1 border-b border-border px-6 py-4 pb-4 text-left group-data-[swipe-axis=y]/drawer-popup:text-left">
  <DrawerTitle>{title}</DrawerTitle>
  {description ? <DrawerDescription>{description}</DrawerDescription> : null}
+ {headerContent}
  </DrawerHeader>
 
- <div className="flex-1 overflow-hidden">
+ <div className="relative min-h-0 flex-1 overflow-hidden">
+ <div className="absolute inset-0">
  <ScrollArea className="h-full">
  <div className="px-6 py-4">
  {isLoading ? (<div className="space-y-3">
@@ -101,19 +104,20 @@ export function FormDrawer({
  </div>
  </ScrollArea>
  </div>
+ </div>
 
  <DrawerFooter className="flex-row items-center justify-end gap-2 border-t border-border bg-surface px-6 py-4 pt-4">
  <Button type="button" variant="secondary" onClick={handleClose} disabled={isSubmitting}>
  {cancelLabel}
  </Button>
-        <SubmitButton
+        {!hideSubmit && <SubmitButton
           type="submit"
           variant="default"
           pending={isSubmitting}
           disabled={isLoading || submitDisabled}
         >
           {submitLabel}
-        </SubmitButton>
+        </SubmitButton>}
  </DrawerFooter>
  </form>
  </DrawerContent>

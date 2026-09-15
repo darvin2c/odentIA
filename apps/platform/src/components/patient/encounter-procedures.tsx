@@ -1,3 +1,4 @@
+import { FDI_ADULT, FDI_CHILD } from "@odentia/clinical";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Badge,
@@ -18,8 +19,6 @@ import { useId, useState } from "react";
 import { ApiError, apiFetch } from "../../lib/api";
 import { useCanWrite } from "../../lib/crm";
 import {
-  FDI_ADULT,
-  FDI_CHILD,
   planStatusLabel,
   type EncounterDetail,
   type PlanItem,

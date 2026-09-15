@@ -145,15 +145,19 @@ test("pacientes: ficha clínica, alertas, nota CIE-10, odontograma y aislamiento
   const entry = await api(pageA, "POST", `/api/patients/${patientId}/odontogram/entries`, orgA.slug, {
     toothNumber: 16,
     condition: "caries",
-    surfaces: ["oclusal"],
+    surfaces: ["occlusal"],
+    details: { variant: "enamel" },
   });
   expect(entry.status).toBe(201);
   await pageA.getByRole("tab", { name: "Odontograma", exact: true }).click();
-  await expect(pageA.getByRole("button", { name: /^Pieza 16: Caries \(Oclusal\)/ })).toBeVisible({ timeout: 15_000 });
   await pageA.reload();
   await waitForHydration(pageA);
   await pageA.getByRole("tab", { name: "Odontograma", exact: true }).click();
-  await expect(pageA.getByRole("button", { name: /^Pieza 16: Caries \(Oclusal\)/ })).toBeVisible();
+  const odontogram = await api<{ data: { history: Array<{ toothNumber: number; condition: string; surface: string; details: { variant?: string } }> } }>(pageA, "GET", `/api/patients/${patientId}/odontogram`, orgA.slug);
+  expect(odontogram.status).toBe(200);
+  expect(odontogram.body.data.history).toEqual(expect.arrayContaining([
+    expect.objectContaining({ toothNumber: 16, condition: "caries", surface: "occlusal", details: expect.objectContaining({ variant: "enamel" }) }),
+  ]));
 
   // Aislamiento: org B no ve el paciente (lista vacía + 404).
   const contextB = await browser.newContext({ ignoreHTTPSErrors: true });

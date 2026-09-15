@@ -41,7 +41,7 @@ function RootDocument({ children }: Readonly<{ children: ReactNode }>) {
       </head>
       <body>
         {children}
-        <Toaster position="top-center" />
+        <Toaster position="top-center" richColors />
         <Scripts />
       </body>
     </html>

@@ -1,3 +1,4 @@
+import { FDI_ADULT, FDI_CHILD } from "@odentia/clinical";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Badge,
@@ -25,8 +26,7 @@ import { useId, useState } from "react";
 import { ApiError, apiFetch } from "../../lib/api";
 import { useCanWrite } from "../../lib/crm";
 import {
-  FDI_ADULT,
-  FDI_CHILD,
+  parsePriceToCents,
   planStatusLabel,
   type PlanItem,
 } from "../../lib/patients";
@@ -49,19 +49,6 @@ function formatMoney(cents: number, currency: string): string {
   } catch {
     return `${currency} ${(cents / 100).toFixed(2)}`;
   }
-}
-
-/**
- * Convierte un monto decimal en soles/unidades (ej. "150.50", "150,50") a
- * centavos enteros. Vacío = sin precio (null), nunca 0.
- */
-function parsePriceToCents(raw: string): { ok: true; cents: number | null } | { ok: false } {
-  const text = raw.trim().replace(",", ".");
-  if (text === "") return { ok: true, cents: null };
-  if (!/^\d{1,9}(\.\d{1,2})?$/.test(text)) return { ok: false };
-  const cents = Math.round(Number(text) * 100);
-  if (!Number.isFinite(cents) || cents < 0 || cents > 2147483647) return { ok: false };
-  return { ok: true, cents };
 }
 
 function mutationMessage(err: unknown): string {

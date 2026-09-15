@@ -31,7 +31,8 @@ import { ApiError, apiFetch } from "../../lib/api";
 import { API_URL } from "../../lib/auth-client";
 import { timeAgo, useCanWrite } from "../../lib/crm";
 import { orgSlugFromHostname } from "../../lib/host";
-import { FDI_ADULT, FDI_CHILD, type PatientDocument } from "../../lib/patients";
+import { FDI_ADULT, FDI_CHILD } from "@odentia/clinical";
+import { type PatientDocument } from "../../lib/patients";
 
 const UPLOAD_CATEGORIES = ["radiografia", "foto_clinica", "consentimiento", "informe", "otro"] as const;
 

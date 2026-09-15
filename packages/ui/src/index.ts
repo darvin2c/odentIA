@@ -46,7 +46,7 @@ export {
   DrawerHeader,
   DrawerTitle,
 } from "./components/drawer.js";
-export { Sheet, SheetContent, SheetTrigger } from "./components/sheet.js";
+export { Sheet, SheetClose, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle, SheetTrigger } from "./components/sheet.js";
 export {
   AlertDialog,
   AlertDialogCancel,
