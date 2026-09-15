@@ -1,8 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { Button } from "@odentia/ui";
-import { EmptyState, LoadingState, PageHeader } from "@odentia/ui-patterns";
+import { LoadingState, PageHeader } from "@odentia/ui-patterns";
 import { Building2 } from "lucide-react";
+import { useEffect } from "react";
 import { authClient } from "../../lib/auth-client";
 import { tenantUrl } from "../../lib/host";
 
@@ -19,6 +20,14 @@ function OrgsPage() {
 
   const orgs = orgsQuery.data ?? [];
 
+  // Usuarios nuevos (p. ej. recién llegados de Google con callbackURL "/")
+  // van directo al wizard de onboarding cuando aún no tienen organizaciones.
+  useEffect(() => {
+    if (!orgsQuery.isLoading && !orgsQuery.error && orgs.length === 0) {
+      void navigate({ to: "/onboarding" });
+    }
+  }, [orgsQuery.isLoading, orgsQuery.error, orgs.length, navigate]);
+
   return (
     <>
       <PageHeader
@@ -30,15 +39,9 @@ function OrgsPage() {
         }
       />
       <div className="mt-8">
-        {orgsQuery.isLoading ? (
-          <LoadingState message="Cargando organizaciones…" />
-        ) : orgs.length === 0 ? (
-          <EmptyState
-            icon={Building2}
-            title="Sin organizaciones"
-            description="Crea tu primera organización para empezar a operar."
-            actionLabel="Crear organización"
-            onAction={() => void navigate({ to: "/onboarding" })}
+        {orgsQuery.isLoading || orgs.length === 0 ? (
+          <LoadingState
+            message={orgs.length === 0 ? "Preparando tu espacio…" : "Cargando organizaciones…"}
           />
         ) : (
           <ul className="flex flex-col gap-3">
