@@ -1,7 +1,8 @@
 import type { Db } from "@odentia/db";
 import { clinicalNote, encounter, encounterProcedure, encounterTooth, odontogramEntry, patientAnamnesis, patientDocument, treatmentPlanItem } from "@odentia/db/schema/clinical";
 import { and, desc, eq, inArray, sql, type SQL } from "drizzle-orm";
-import { getOdontogram, VALID_FDI_TEETH } from "./clinical.js";
+import { getOdontogram } from "./clinical.js";
+import { isValidTooth } from "@odentia/clinical";
 import { decodeCursor, encodeCursor } from "./cursors.js";
 import { validation } from "./errors.js";
 import { requirePatient } from "./patients.js";
@@ -24,14 +25,16 @@ export async function getPatientSummary(tx: Db, orgId: string, patientId: string
   }
   const amounts = [...totals.values()].sort((a, b) => a.currency.localeCompare(b.currency));
   const odontogram = await getOdontogram(tx, orgId, patientId);
+  const findings = new Map(odontogram.history.map((entry) => [entry.id, entry]));
   return {
     lastEncounter: lastEncounter ?? null,
     openEncounterId: draft?.id ?? null,
     nextAppointmentAt: lastEncounter?.nextAppointmentAt ?? null,
     // Nunca sumar monedas distintas: la UI muestra un total por moneda.
     planPending: { count: pending.length, totalCents: amounts.length > 1 ? null : amounts[0]?.totalCents ?? 0, currency: amounts.length > 1 ? null : amounts[0]?.currency ?? "PEN", totals: amounts },
-    activeDiagnoses: Object.entries(odontogram.teeth).filter(([, tooth]) => tooth.condition !== "sano")
-      .slice(0, 20).map(([toothNumber, tooth]) => ({ toothNumber: Number(toothNumber), condition: tooth.condition, status: tooth.status })),
+    activeDiagnoses: Object.entries(odontogram.teeth).flatMap(([toothNumber, tooth]) =>
+      [...new Set(tooth.entries.map((id) => findings.get(id)?.condition).filter((condition): condition is string => !!condition && condition !== "healthy"))]
+        .map((condition) => ({ toothNumber: Number(toothNumber), condition, status: "recorded" }))).slice(0, 20),
   };
 }
 
@@ -65,8 +68,7 @@ export async function getTimeline(tx: Db, orgId: string, patientId: string, inpu
   await requirePatient(tx, orgId, patientId);
   const limit = Math.min(Math.max(input.limit ?? 30, 1), 100);
   const types = input.types ?? TIMELINE_TYPES;
-  if (types.some((type) => !TIMELINE_TYPES.includes(type))) throw validation("Tipo de historia inválido");
-  if (input.toothNumber != null && !VALID_FDI_TEETH.includes(input.toothNumber)) throw validation("Pieza FDI inválida");
+  if (input.toothNumber != null && !isValidTooth(input.toothNumber)) throw validation("Pieza FDI inválida");
   const cursor = input.cursor ? decodeCursor(input.cursor) : null;
   if (input.cursor && (!cursor || Number.isNaN(Date.parse(cursor.ts)) || !/^[0-9a-f-]{36}$/i.test(cursor.id))) throw validation("Cursor inválido");
   const tooth = input.toothNumber;
@@ -75,7 +77,7 @@ export async function getTimeline(tx: Db, orgId: string, patientId: string, inpu
     ${tooth == null ? sql`` : sql`and exists (select 1 from encounter_tooth et where et.encounter_id = encounter.id and et.organization_id = ${orgId} and et.tooth_number = ${tooth})`}`);
   if (types.includes("note") && tooth == null) branches.push(sql`select id, 'note'::text as kind, created_at from clinical_note where organization_id = ${orgId} and patient_id = ${patientId}::uuid and encounter_id is null`);
   if (types.includes("anamnesis") && tooth == null) branches.push(sql`select id, 'anamnesis'::text as kind, created_at from patient_anamnesis where organization_id = ${orgId} and patient_id = ${patientId}::uuid`);
-  if (types.includes("odontogram")) branches.push(sql`select id, 'odontogram'::text as kind, created_at from odontogram_entry where organization_id = ${orgId} and patient_id = ${patientId}::uuid and encounter_id is null and status <> 'anulado' ${tooth == null ? sql`` : sql`and tooth_number = ${tooth}`}`);
+  if (types.includes("odontogram")) branches.push(sql`select id, 'odontogram'::text as kind, created_at from odontogram_entry where organization_id = ${orgId} and patient_id = ${patientId}::uuid and encounter_id is null and voided_at is null and status <> 'voided' ${tooth == null ? sql`` : sql`and (tooth_number = ${tooth} or details->'relatedTeeth' @> ${JSON.stringify([tooth])}::jsonb)`}`);
   if (types.includes("document")) branches.push(sql`select id, 'document'::text as kind, created_at from patient_document where organization_id = ${orgId} and patient_id = ${patientId}::uuid and encounter_id is null ${tooth == null ? sql`` : sql`and tooth_number = ${tooth}`} ${input.documentCategory ? sql`and category = ${input.documentCategory}` : sql``}`);
   if (!branches.length) return { data: [], nextCursor: null };
   const rows = await tx.execute<{ id: string; kind: TimelineType; cursor_ts: string }>(sql`
@@ -114,7 +116,9 @@ export async function getTimeline(tx: Db, orgId: string, patientId: string, inpu
   }
   const entries = ids("odontogram");
   if (entries.length) for (const row of await tx.select().from(odontogramEntry).where(and(eq(odontogramEntry.organizationId, orgId), inArray(odontogramEntry.id, entries)))) {
-    hydrated.set(row.id, { id: row.id, refId: row.id, type: "odontogram", createdAt: row.createdAt, title: `Pieza ${row.toothNumber}`, detail: row.note, condition: row.condition, surface: row.surface, status: row.status, diagnosisCode: row.diagnosisCode, toothNumbers: [row.toothNumber], authorId: row.createdBy });
+    const details = row.details as { relatedTeeth?: number[] };
+    const teeth = details.relatedTeeth ?? [row.toothNumber];
+    hydrated.set(row.id, { id: row.id, refId: row.id, type: "odontogram", createdAt: row.createdAt, title: `${teeth.length > 1 ? "Piezas" : "Pieza"} ${teeth.join(", ")}`, detail: row.note, condition: row.condition, surface: row.surface, status: row.status, diagnosisCode: row.diagnosisCode, toothNumbers: teeth, authorId: row.createdBy });
   }
   const last = page[page.length - 1]!;
   return { data: page.map((row) => hydrated.get(row.id)!), nextCursor: rows.length > limit ? encodeCursor(last.cursor_ts, last.id) : null };

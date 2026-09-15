@@ -2,14 +2,14 @@ import type { Db } from "@odentia/db";
 import { cie10Code, encounter, treatmentPlanItem } from "@odentia/db/schema/clinical";
 import { auditEvent } from "@odentia/db/schema/org";
 import { and, asc, eq, sql } from "drizzle-orm";
-import { VALID_FDI_TEETH } from "./clinical.js";
+import { VALID_FDI_TEETH } from "@odentia/clinical";
 import { notFound, ServiceError, validation } from "./errors.js";
 import { requirePatient } from "./patients.js";
 
 /**
  * Plan de tratamiento: lista de ítems por paciente (sin cabecera).
  * Convención: `tx` ya corre dentro de `withOrgContext`; nunca abrir contexto aquí.
- * Dependencia unidireccional plan -> clinical (solo VALID_FDI_TEETH); clinical
+ * Dependencia plan -> @odentia/clinical (solo VALID_FDI_TEETH); clinical
  * nunca importa este módulo. El encounter se toca vía schema directo (lock),
  * nunca vía el servicio de encounters (evita ciclo).
  */

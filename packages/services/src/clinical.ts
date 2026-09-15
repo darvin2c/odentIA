@@ -1,9 +1,19 @@
 import type { Db } from "@odentia/db";
 import {
+  ODONTOGRAM_STANDARD,
+  activeFindingsAsOf,
+  isValidTooth,
+  validateFinding,
+  type FindingDetails,
+  type FindingInput,
+  type FindingRecord,
+} from "@odentia/clinical";
+import {
   cie10Code,
   clinicalNote,
   encounter,
   encounterTooth,
+  odontogramAssessment,
   odontogramEntry,
   patientAllergy,
   patientAnamnesis,
@@ -11,6 +21,7 @@ import {
   patientDocument,
   patientMedication,
 } from "@odentia/db/schema/clinical";
+import { contact } from "@odentia/db/schema/crm";
 import { auditEvent } from "@odentia/db/schema/org";
 import { and, asc, desc, eq, lt, or, sql } from "drizzle-orm";
 import { decodeCursor, encodeCursor } from "./cursors.js";
@@ -24,42 +35,6 @@ async function requireDraftLink(tx: Db, orgId: string, patientId: string, encoun
   if (!row) throw notFound("Atención");
   if (row.status !== "borrador") throw conflict("FINALIZED", "La atención está finalizada");
 }
-
-/** Piezas FDI válidas: adulto 11–18/21–28/31–38/41–48, temporal 51–55/61–65/71–75/81–85. */
-export const VALID_FDI_TEETH: readonly number[] = [
-  11, 12, 13, 14, 15, 16, 17, 18, 21, 22, 23, 24, 25, 26, 27, 28, 31, 32, 33, 34, 35, 36, 37, 38,
-  41, 42, 43, 44, 45, 46, 47, 48, 51, 52, 53, 54, 55, 61, 62, 63, 64, 65, 71, 72, 73, 74, 75,
-  81, 82, 83, 84, 85,
-] as const;
-
-export const ODONTOGRAM_SURFACES = [
-  "mesial",
-  "distal",
-  "vestibular",
-  "lingual",
-  "palatina",
-  "oclusal",
-  "incisal",
-] as const;
-
-export const ODONTOGRAM_CONDITIONS = [
-  "sano",
-  "caries",
-  "obturacion",
-  "corona",
-  "ausente",
-  "extraccion_indicada",
-  "endodoncia",
-  "implante",
-  "fractura",
-  "sellante",
-  "protesis",
-  "desgaste",
-  "otro",
-] as const;
-
-export const ODONTOGRAM_STATUSES = ["registrado", "realizado", "planificado", "anulado"] as const;
-export const ENTRY_STATUSES = ["registrado", "realizado", "planificado"] as const;
 
 const ALLERGY_SEVERITIES = ["leve", "moderada", "severa"] as const;
 const CONDITION_STATUSES = ["activa", "resuelta", "inactiva"] as const;
@@ -461,16 +436,59 @@ export async function listClinicalNotes(
   };
 }
 
-// --- Odontograma ---
+// --- Odontograma NTS 188-MINSA/DGIESP-2022 ---
+//
+// La validación normativa real vive en `@odentia/clinical` (fail closed:
+// condición desconocida, anatomía incompatible o datos faltantes = error).
+// El servicio solo añade controles de tenant/paciente/encuentro y CIE-10.
 
 export interface AddOdontogramInput {
   toothNumber: number;
   condition: string;
   surfaces?: string[];
-  status?: string;
+  details?: FindingDetails;
   note?: string | null;
   diagnosisCode?: string | null;
   encounterId?: string;
+}
+
+type OdontogramRow = typeof odontogramEntry.$inferSelect;
+
+/** Normaliza relatedTeeth: enteros únicos ordenados incluyendo la principal. */
+function normalizeRelatedTeeth(toothNumber: number, related?: unknown): number[] | null {
+  if (!Array.isArray(related) || !related.length) return null;
+  const set = new Set<number>([toothNumber]);
+  for (const t of related) {
+    if (typeof t === "number" && Number.isInteger(t)) set.add(t);
+  }
+  if (set.size < 2) return null;
+  return [...set].sort((a, b) => a - b);
+}
+
+function rowDetails(row: OdontogramRow): FindingDetails {
+  const details = row.details as FindingDetails | null | undefined;
+  return { ...(details ?? {}) };
+}
+
+/** Proyección de estado de corrección sin mutar la fila original. */
+function projectedStatus(row: OdontogramRow): string {
+  if (row.voidedAt || row.status === "voided") return "voided";
+  return row.status;
+}
+
+function isVoidedRow(row: OdontogramRow): boolean {
+  return row.voidedAt != null || row.status === "voided";
+}
+
+function toFindingRecord(row: OdontogramRow) {
+  return { ...row, status: projectedStatus(row), details: rowDetails(row) };
+}
+
+/** Piezas cubiertas por un hallazgo (proyección multi-pieza vía relatedTeeth). */
+function coveredTeeth(record: FindingRecord): number[] {
+  const related = record.details?.relatedTeeth;
+  if (Array.isArray(related) && related.length > 1) return [...new Set(related)].sort((a, b) => a - b);
+  return [record.toothNumber];
 }
 
 export async function addOdontogramEntries(
@@ -482,56 +500,112 @@ export async function addOdontogramEntries(
 ) {
   await requirePatient(tx, orgId, patientId);
   if (input.encounterId) await requireDraftLink(tx, orgId, patientId, input.encounterId);
-  if (!VALID_FDI_TEETH.includes(input.toothNumber)) throw validation("Pieza FDI inválida");
-  if (!(ODONTOGRAM_CONDITIONS as readonly string[]).includes(input.condition)) throw validation("condition inválida");
-  const status = input.status ?? "registrado";
-  if (!(ENTRY_STATUSES as readonly string[]).includes(status)) throw validation("status inválido");
-  const surfaces = input.surfaces ?? [];
-  for (const s of surfaces) {
-    if (!(ODONTOGRAM_SURFACES as readonly string[]).includes(s)) throw validation(`Superficie inválida: ${s}`);
-  }
+  const finding: FindingInput = {
+    toothNumber: input.toothNumber,
+    condition: input.condition,
+    surfaces: input.surfaces ?? [],
+    details: input.details ?? {},
+    note: input.note ?? null,
+    diagnosisCode: input.diagnosisCode ?? null,
+    encounterId: input.encounterId,
+  };
+  const errors = validateFinding(finding);
+  if (errors.length) throw validation(errors.join("; "));
   if (input.diagnosisCode) await assertDiagnosisCode(tx, input.diagnosisCode);
-  const toInsert = (surfaces.length ? surfaces : [null]).map((surface) => ({
+  // Hallazgo de grupo/tramo (puente, dentadura, supernumerario): UNA sola fila
+  // con relatedTeeth incluyendo la principal; se proyecta a cada participante.
+  const related = normalizeRelatedTeeth(input.toothNumber, (input.details as { relatedTeeth?: unknown } | undefined)?.relatedTeeth);
+  const details: FindingDetails = { ...(input.details ?? {}) };
+  if (related) details.relatedTeeth = related;
+  const surfaces = related ? [null] : ((input.surfaces ?? []).length ? input.surfaces! : [null]);
+  const toInsert = surfaces.map((surface) => ({
     organizationId: orgId,
     patientId,
     toothNumber: input.toothNumber,
     surface,
     condition: input.condition,
-    status,
+    status: "recorded",
     diagnosisCode: input.diagnosisCode ?? null,
     note: input.note ?? null,
+    details,
+    needsReview: false,
     createdBy: actorUserId,
     encounterId: input.encounterId ?? null,
   }));
   const rows = await tx.insert(odontogramEntry).values(toInsert).returning();
-  if (input.encounterId) await tx.insert(encounterTooth).values({
-    organizationId: orgId, encounterId: input.encounterId, toothNumber: input.toothNumber,
-  }).onConflictDoNothing();
+  const teethTouched = related ?? [input.toothNumber];
+  if (input.encounterId) {
+    for (const tooth of teethTouched) {
+      await tx.insert(encounterTooth).values({
+        organizationId: orgId, encounterId: input.encounterId, toothNumber: tooth,
+      }).onConflictDoNothing();
+    }
+  }
   await audit(tx, orgId, actorUserId, "odontogram.entry_added", "odontogram_entry", rows[0]?.id ?? patientId, {
     patientId,
     toothNumber: input.toothNumber,
+    relatedTeeth: teethTouched,
     count: rows.length,
   });
   return rows;
 }
 
-export async function voidOdontogramEntry(tx: Db, orgId: string, actorUserId: string, entryId: string) {
+export async function voidOdontogramEntry(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  entryId: string,
+  patientId: string,
+  reason: string,
+) {
+  const trimmed = reason?.trim() ?? "";
+  if (!patientId) throw validation("patientId es obligatorio");
+  if (!trimmed || trimmed.length > 2000) throw validation("El motivo de anulación es obligatorio (1–2000 caracteres)");
   const [current] = await tx
     .select()
     .from(odontogramEntry)
     .where(and(eq(odontogramEntry.id, entryId), eq(odontogramEntry.organizationId, orgId)))
     .limit(1);
-  if (!current) throw notFound("Entrada de odontograma");
+  if (!current || current.patientId !== patientId) throw notFound("Entrada de odontograma");
   if (current.encounterId) await requireDraftLink(tx, orgId, current.patientId, current.encounterId);
-  if (current.status === "anulado") throw conflict("ALREADY_VOIDED", "La entrada ya está anulada");
+  if (isVoidedRow(current)) throw conflict("ALREADY_VOIDED", "La entrada ya está anulada");
+  // Corrección auditable: solo estado de corrección; condition/surface/note
+  // originales se preservan intactos.
   const [updated] = await tx
     .update(odontogramEntry)
-    .set({ status: "anulado", updatedAt: new Date() })
-    .where(eq(odontogramEntry.id, entryId))
+    .set({ status: "voided", voidedAt: new Date(), voidedBy: actorUserId, voidReason: trimmed, updatedAt: new Date() })
+    .where(and(eq(odontogramEntry.id, entryId), eq(odontogramEntry.status, "recorded"), sql`${odontogramEntry.voidedAt} is null`))
     .returning();
-  if (!updated) throw notFound("Entrada de odontograma");
+  if (!updated) throw conflict("ALREADY_VOIDED", "La entrada ya está anulada");
   await audit(tx, orgId, actorUserId, "odontogram.entry_voided", "odontogram_entry", entryId, {
     patientId: current.patientId,
+    reason: trimmed,
+  });
+  return { ...updated, status: projectedStatus(updated) };
+}
+
+/**
+ * Revisión de legado migrado: solo puede anularse con motivo (sin inventar
+ * datos); el registro corregido se crea aparte con addOdontogramEntries.
+ */
+export async function reviewLegacyEntry(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  patientId: string,
+  entryId: string,
+  reason: string,
+) {
+  const [current] = await tx
+    .select({ id: odontogramEntry.id, patientId: odontogramEntry.patientId, needsReview: odontogramEntry.needsReview })
+    .from(odontogramEntry)
+    .where(and(eq(odontogramEntry.id, entryId), eq(odontogramEntry.organizationId, orgId)))
+    .limit(1);
+  if (!current || current.patientId !== patientId) throw notFound("Entrada de odontograma");
+  if (!current.needsReview) throw conflict("NOT_LEGACY", "La entrada no requiere revisión de legado");
+  const updated = await voidOdontogramEntry(tx, orgId, actorUserId, entryId, patientId, reason);
+  await audit(tx, orgId, actorUserId, "odontogram.legacy_reviewed", "odontogram_entry", entryId, {
+    patientId,
   });
   return updated;
 }
@@ -545,38 +619,145 @@ export interface ToothState {
 
 export async function getOdontogram(tx: Db, orgId: string, patientId: string) {
   await requirePatient(tx, orgId, patientId);
-  const history = await tx
+  const rows = await tx
     .select()
     .from(odontogramEntry)
     .where(and(eq(odontogramEntry.patientId, patientId), eq(odontogramEntry.organizationId, orgId)))
-    .orderBy(desc(odontogramEntry.createdAt), desc(odontogramEntry.id));
-  // Estado: gana la más reciente por pieza+superficie (anuladas excluidas).
-  const winners = new Map<string, typeof history[number]>();
-  for (const entry of [...history].reverse()) {
-    if (entry.status === "anulado") continue;
-    winners.set(`${entry.toothNumber}:${entry.surface ?? ""}`, entry);
-  }
-  const byTooth = new Map<number, typeof history[number][]>();
-  for (const entry of winners.values()) {
-    const list = byTooth.get(entry.toothNumber) ?? [];
-    list.push(entry);
-    byTooth.set(entry.toothNumber, list);
+    .orderBy(asc(odontogramEntry.createdAt), asc(odontogramEntry.id));
+  const history = rows.map((row) => ({ ...row, status: projectedStatus(row) }));
+  // Activos: append-only, coexisten todas las condiciones registradas;
+  // Excluye registros pendientes de revisión y correcciones vigentes.
+  const candidates = rows.filter((row) => !row.needsReview && !isVoidedRow(row));
+  const active = activeFindingsAsOf(candidates.map(toFindingRecord));
+  const byTooth = new Map<number, FindingRecord[]>();
+  for (const entry of active) {
+    for (const tooth of coveredTeeth(entry)) {
+      const list = byTooth.get(tooth) ?? [];
+      list.push(entry);
+      byTooth.set(tooth, list);
+    }
   }
   const teeth: Record<string, ToothState> = {};
   for (const [tooth, entries] of byTooth) {
-    entries.sort((a, b) => +b.createdAt - +a.createdAt);
-    const latest = entries[0]!;
+    const latest = entries[entries.length - 1]!;
     teeth[String(tooth)] = {
       condition: latest.condition,
       status: latest.status,
-      surfaces: entries
-        .map((e) => e.surface)
-        .filter((s): s is string => !!s)
-        .sort(),
+      surfaces: [...new Set(entries.map((e) => e.surface).filter((s): s is string => !!s))].sort(),
       entries: entries.map((e) => e.id),
     };
   }
   return { teeth, history };
+}
+
+// --- Actas de odontograma (snapshot inmutable) ---
+
+export const ASSESSMENT_PURPOSES = ["initial", "new_findings", "completion", "reentry", "legal", "personal"] as const;
+
+export interface CreateAssessmentInput {
+  purpose: string;
+  specifications: string;
+  observations: string;
+  examinerName: string;
+  registrationNumber: string;
+  signature: number[][][];
+}
+
+function assertSignature(signature: unknown): asserts signature is number[][][] {
+  if (!Array.isArray(signature) || !signature.length || signature.length > 50) {
+    throw validation("La firma manuscrita es obligatoria (1–50 trazos capturados)");
+  }
+  for (const stroke of signature) {
+    if (!Array.isArray(stroke) || stroke.length < 2 || stroke.length > 500) {
+      throw validation("Cada trazo de la firma requiere 2–500 puntos");
+    }
+    for (const point of stroke) {
+      if (
+        !Array.isArray(point) || point.length !== 2
+        || typeof point[0] !== "number" || typeof point[1] !== "number"
+        || !Number.isFinite(point[0]) || !Number.isFinite(point[1])
+        || point[0] < 0 || point[0] > 100 || point[1] < 0 || point[1] > 100
+      ) {
+        throw validation("Firma inválida: puntos [x, y] normalizados 0–100");
+      }
+    }
+  }
+}
+
+export async function createOdontogramAssessment(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  patientId: string,
+  input: CreateAssessmentInput,
+) {
+  const patientRow = await requirePatient(tx, orgId, patientId);
+  if (!(ASSESSMENT_PURPOSES as readonly string[]).includes(input.purpose)) throw validation("purpose inválido");
+  const specifications = input.specifications?.trim() ?? "";
+  const observations = input.observations?.trim() ?? "";
+  const examinerName = input.examinerName?.trim() ?? "";
+  const registrationNumber = input.registrationNumber?.trim() ?? "";
+  if (specifications.length > 4000) throw validation("specifications admite hasta 4000 caracteres");
+  if (observations.length > 4000) throw validation("observations admite hasta 4000 caracteres");
+  if (!examinerName || examinerName.length > 200) throw validation("examinerName es obligatorio (1–200 caracteres)");
+  if (!registrationNumber || registrationNumber.length > 40) throw validation("registrationNumber es obligatorio (1–40 caracteres)");
+  assertSignature(input.signature);
+  // Sin firma sobre revisión pendiente: primero se revisan los legados.
+  const [pending] = await tx
+    .select({ id: odontogramEntry.id })
+    .from(odontogramEntry)
+    .where(and(
+      eq(odontogramEntry.organizationId, orgId),
+      eq(odontogramEntry.patientId, patientId),
+      eq(odontogramEntry.needsReview, true),
+      sql`${odontogramEntry.voidedAt} IS NULL`,
+      sql`${odontogramEntry.status} <> 'voided'`,
+    ))
+    .limit(1);
+  if (pending) throw conflict("NEEDS_REVIEW", "Existen hallazgos pendientes de revisión; revísalos antes de firmar el acta");
+  // Identidad firmada desde el servidor (nunca del body del cliente).
+  const [contactRow] = await tx
+    .select({ displayName: contact.displayName })
+    .from(contact)
+    .where(and(eq(contact.id, patientRow.contactId), eq(contact.organizationId, orgId)))
+    .limit(1);
+  const patientName = contactRow?.displayName?.trim() ?? "";
+  if (!patientName) throw validation("El paciente no tiene nombre registrado para firmar el acta");
+  // Snapshot calculado en el servidor; nunca se acepta del cliente.
+  const { history } = await getOdontogram(tx, orgId, patientId);
+  const candidates = history.filter((row) => !row.needsReview && !isVoidedRow(row));
+  const entries = activeFindingsAsOf(candidates.map(toFindingRecord));
+  const [row] = await tx.insert(odontogramAssessment).values({
+    organizationId: orgId,
+    patientId,
+    authorUserId: actorUserId,
+    purpose: input.purpose,
+    specifications,
+    observations,
+    examinerName,
+    registrationNumber,
+    patientName,
+    patientNumber: patientRow.patientNumber,
+    signature: input.signature,
+    entries,
+    standard: ODONTOGRAM_STANDARD,
+  }).returning();
+  if (!row) throw notFound("Acta de odontograma");
+  await audit(tx, orgId, actorUserId, "odontogram.assessment_sealed", "odontogram_assessment", row.id, {
+    patientId,
+    purpose: input.purpose,
+    entriesCount: entries.length,
+  });
+  return row;
+}
+
+export async function listOdontogramAssessments(tx: Db, orgId: string, patientId: string) {
+  await requirePatient(tx, orgId, patientId);
+  return tx
+    .select()
+    .from(odontogramAssessment)
+    .where(and(eq(odontogramAssessment.patientId, patientId), eq(odontogramAssessment.organizationId, orgId)))
+    .orderBy(desc(odontogramAssessment.createdAt), desc(odontogramAssessment.id));
 }
 
 // --- Documentos ---
@@ -590,7 +771,7 @@ export async function registerPatientDocument(
 ) {
   await requirePatient(tx, orgId, patientId);
   if (input.encounterId) await requireDraftLink(tx, orgId, patientId, input.encounterId);
-  if (input.toothNumber != null && !VALID_FDI_TEETH.includes(input.toothNumber)) throw validation("Pieza FDI inválida");
+  if (input.toothNumber != null && !isValidTooth(input.toothNumber)) throw validation("Pieza FDI inválida");
   if (!(DOCUMENT_CATEGORIES as readonly string[]).includes(input.category)) throw validation("category inválida");
   const label = input.label?.trim() ?? "";
   if (!label || label.length > 200) throw validation("label debe tener 1–200 caracteres");

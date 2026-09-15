@@ -33,6 +33,7 @@ import {
   encounterProcedure,
   encounterTooth,
   odontogramEntry,
+  odontogramAssessment,
   orgCounter,
   patient,
   patientAllergy,
@@ -57,6 +58,7 @@ import {
   addCondition,
   addMedication,
   addOdontogramEntries,
+  createOdontogramAssessment,
   voidOdontogramEntry,
 } from "./clinical.js";
 import { addPlanItem } from "./plan.js";
@@ -95,6 +97,7 @@ async function wipeSeed(): Promise<void> {
   await db.delete(encounterTooth).where(inArray(encounterTooth.organizationId, SEED_ORGS));
   await db.delete(clinicalNote).where(inArray(clinicalNote.organizationId, SEED_ORGS));
   await db.delete(odontogramEntry).where(inArray(odontogramEntry.organizationId, SEED_ORGS));
+  await db.delete(odontogramAssessment).where(inArray(odontogramAssessment.organizationId, SEED_ORGS));
   await db.delete(patientDocument).where(inArray(patientDocument.organizationId, SEED_ORGS));
   await db.delete(patientAnamnesis).where(inArray(patientAnamnesis.organizationId, SEED_ORGS));
   await db.delete(patientAllergy).where(inArray(patientAllergy.organizationId, SEED_ORGS));
@@ -481,22 +484,26 @@ const draft = await createEncounter(db, ORG_A, ANA_ID, rosaPatientId, {
 await addOdontogramEntries(db, ORG_A, ANA_ID, rosaPatientId, {
   toothNumber: 36,
   condition: "caries",
-  surfaces: ["oclusal"],
+  surfaces: ["occlusal"],
+  details: { variant: "dentin" },
   diagnosisCode: "K02.1",
   encounterId: draft.id,
 });
 await addOdontogramEntries(db, ORG_A, ANA_ID, rosaPatientId, {
   toothNumber: 46,
   condition: "caries",
+  surfaces: ["occlusal"],
+  details: { variant: "enamel" },
   encounterId: draft.id,
 });
-const desgaste = await addOdontogramEntries(db, ORG_A, ANA_ID, rosaPatientId, {
+const wear = await addOdontogramEntries(db, ORG_A, ANA_ID, rosaPatientId, {
   toothNumber: 26,
-  condition: "desgaste",
+  condition: "tooth_wear",
+  surfaces: ["buccal"],
 });
-const desgasteId = desgaste[0]?.id;
-if (!desgasteId) throw new Error("No se pudo crear la entrada de odontograma de la pieza 26");
-await voidOdontogramEntry(db, ORG_A, ANA_ID, desgasteId);
+const wearId = wear[0]?.id;
+if (!wearId) throw new Error("No se pudo crear la entrada de odontograma de la pieza 26");
+await voidOdontogramEntry(db, ORG_A, ANA_ID, wearId, rosaPatientId, "Registro de prueba anulado en seed");
 await addClinicalNote(db, ORG_A, ANA_ID, rosaPatientId, {
   note: "Paciente con dolor a la percusión en pieza 36; se planifica obturación y endodoncia en 46.",
   diagnosisCode: "K02.1",
@@ -509,6 +516,14 @@ await addEncounterProcedure(db, ORG_A, ANA_ID, rosaPatientId, draft.id, {
   planItemId: obt36.id,
 });
 await finalizeEncounter(db, ORG_A, ANA_ID, rosaPatientId, draft.id);
+await createOdontogramAssessment(db, ORG_A, ANA_ID, rosaPatientId, {
+  purpose: "initial",
+  specifications: "Odontograma inicial NTS 188-MINSA/DGIESP-2022: caries oclusal en 36 y 46.",
+  observations: "Paciente con dolor a la percusión en pieza 36; se planifica obturación y endodoncia en 46.",
+  examinerName: "Ana Torres",
+  registrationNumber: "COP 12345",
+  signature: [[[5, 90], [20, 70], [40, 75]], [[60, 80], [75, 65]]],
+});
 await addClinicalNote(db, ORG_A, ANA_ID, rosaPatientId, {
   note: "Control post-obturación: sin dolor, oclusión estable. Pendiente endodoncia pieza 46.",
 });

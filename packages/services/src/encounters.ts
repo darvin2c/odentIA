@@ -10,7 +10,7 @@ import {
 } from "@odentia/db/schema/clinical";
 import { auditEvent, branch } from "@odentia/db/schema/org";
 import { and, asc, desc, eq, lt, or } from "drizzle-orm";
-import { VALID_FDI_TEETH } from "./clinical.js";
+import { VALID_FDI_TEETH } from "@odentia/clinical";
 import { decodeCursor, encodeCursor } from "./cursors.js";
 import { isUniqueViolation, notFound, ServiceError, validation } from "./errors.js";
 import { requirePatient } from "./patients.js";
