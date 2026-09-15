@@ -4,6 +4,16 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* Deriva lenta de los blobs decorativos del layout AuthSplit. */
+@keyframes drift-a {
+  0%, 100% { transform: translate(-25%, 0) scale(1); }
+  50% { transform: translate(-10%, 12%) scale(1.15); }
+}
+@keyframes drift-b {
+  0%, 100% { transform: translate(25%, 0) scale(1); }
+  50% { transform: translate(10%, -12%) scale(1.1); }
+}
+
 @theme inline {
   --font-sans: var(--font-sans);
   --font-mono: var(--font-mono);

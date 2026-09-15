@@ -9,6 +9,7 @@
  */
 export { Chip, type ChipProps, type ChipVariant } from "./chip.js";
 export { AuthCard } from "./auth-card.js";
+export { AuthSplit } from "./auth-split.js";
 export { fieldErrorMessages } from "./field-errors.js";
 export { common } from "./common.js";
 export { Marker, type MarkerProps, MarkerContent, type MarkerContentProps } from "./marker.js";
