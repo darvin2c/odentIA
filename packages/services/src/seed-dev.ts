@@ -197,9 +197,9 @@ await db.insert(organization).values([
   { id: ORG_B, name: "Clínica Norte", slug: "clinica-norte", createdAt: new Date() },
 ]);
 await db.insert(user).values([
-  { id: ANA_ID, name: "Dra. Ana Torres", email: "ana@odentia.dev", emailVerified: true },
-  { id: LUIS_ID, name: "Luis Prado", email: "luis@odentia.dev", emailVerified: true },
-  { id: CORA_ID, name: "Dra. Cora Vega", email: "cora@odentia.dev", emailVerified: true },
+  { id: ANA_ID, name: "Dra. Ana Torres", firstName: "Ana", lastName: "Torres", email: "ana@odentia.dev", emailVerified: true },
+  { id: LUIS_ID, name: "Luis Prado", firstName: "Luis", lastName: "Prado", email: "luis@odentia.dev", emailVerified: true },
+  { id: CORA_ID, name: "Dra. Cora Vega", firstName: "Cora", lastName: "Vega", email: "cora@odentia.dev", emailVerified: true },
 ]);
 const passwordHash = await hashPassword(PASSWORD);
 await db.insert(account).values(
