@@ -30,6 +30,13 @@ export const storageStub = {
     throw new Error("no usado");
   },
   attachmentUrl: async (key: string) => `https://signed.example.com/${key}`,
+  deleteAttachment: async () => {},
+  putPatientDocument: async () => {
+    throw new Error("no usado");
+  },
+  putPatientAvatar: async () => {
+    throw new Error("no usado");
+  },
 };
 
 async function ingestText(thread: string, eventId: string, text: string) {

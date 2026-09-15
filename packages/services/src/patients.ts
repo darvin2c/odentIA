@@ -44,6 +44,8 @@ export interface CreatePatientInput {
   docNumber?: string | null;
   birthDate?: string | null;
   sex?: string | null;
+  phone?: string | null;
+  email?: string | null;
   maritalStatus?: string | null;
   educationLevel?: string | null;
   occupation?: string | null;
@@ -96,6 +98,8 @@ export async function createPatient(
         docNumber: input.docNumber?.trim() ? input.docNumber.trim() : null,
         birthDate: input.birthDate ?? null,
         sex: input.sex ?? null,
+        phone: input.phone?.trim() ? input.phone.trim() : null,
+        email: input.email?.trim() ? input.email.trim() : null,
         maritalStatus: input.maritalStatus ?? null,
         educationLevel: input.educationLevel ?? null,
         occupation: input.occupation ?? null,
@@ -282,6 +286,8 @@ export interface UpdatePatientPatch {
   birthDate?: string | null;
   sex?: string | null;
   maritalStatus?: string | null;
+  phone?: string | null;
+  email?: string | null;
   educationLevel?: string | null;
   occupation?: string | null;
   address?: string | null;
@@ -304,6 +310,8 @@ const PATCH_FIELDS = [
   "birthDate",
   "sex",
   "maritalStatus",
+  "phone",
+  "email",
   "educationLevel",
   "occupation",
   "address",
@@ -360,4 +368,32 @@ export async function updatePatient(
     }
     throw e;
   }
+}
+
+/** Registra la clave de avatar (privado S3) tras subida exitosa; audita. */
+export async function setPatientAvatar(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  patientId: string,
+  storageKey: string,
+): Promise<{ patient: PatientRow; previousStorageKey: string | null }> {
+  const [current] = await tx.select().from(patient)
+    .where(and(eq(patient.id, patientId), eq(patient.organizationId, orgId))).for("update");
+  if (!current) throw notFound("Paciente");
+  const [updated] = await tx
+    .update(patient)
+    .set({ avatarStorageKey: storageKey, updatedAt: new Date() })
+    .where(and(eq(patient.id, patientId), eq(patient.organizationId, orgId)))
+    .returning();
+  if (!updated) throw notFound("Paciente");
+  await tx.insert(auditEvent).values({
+    organizationId: orgId,
+    actorUserId,
+    action: "patient.avatar_updated",
+    entity: "patient",
+    entityId: patientId,
+    metadata: { storageKey },
+  });
+  return { patient: updated, previousStorageKey: current.avatarStorageKey };
 }

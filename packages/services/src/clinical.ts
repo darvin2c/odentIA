@@ -2,6 +2,8 @@ import type { Db } from "@odentia/db";
 import {
   cie10Code,
   clinicalNote,
+  encounter,
+  encounterTooth,
   odontogramEntry,
   patientAllergy,
   patientAnamnesis,
@@ -14,6 +16,14 @@ import { and, asc, desc, eq, lt, or, sql } from "drizzle-orm";
 import { decodeCursor, encodeCursor } from "./cursors.js";
 import { isUniqueViolation, notFound, ServiceError, validation } from "./errors.js";
 import { requirePatient } from "./patients.js";
+
+async function requireDraftLink(tx: Db, orgId: string, patientId: string, encounterId: string) {
+  const [row] = await tx.select().from(encounter)
+    .where(and(eq(encounter.id, encounterId), eq(encounter.organizationId, orgId), eq(encounter.patientId, patientId)))
+    .for("update");
+  if (!row) throw notFound("Atención");
+  if (row.status !== "borrador") throw conflict("FINALIZED", "La atención está finalizada");
+}
 
 /** Piezas FDI válidas: adulto 11–18/21–28/31–38/41–48, temporal 51–55/61–65/71–75/81–85. */
 export const VALID_FDI_TEETH: readonly number[] = [
@@ -395,9 +405,10 @@ export async function addClinicalNote(
   orgId: string,
   actorUserId: string,
   patientId: string,
-  input: { note: string; diagnosisCode?: string | null },
+  input: { note: string; diagnosisCode?: string | null; encounterId?: string },
 ) {
   await requirePatient(tx, orgId, patientId);
+  if (input.encounterId) await requireDraftLink(tx, orgId, patientId, input.encounterId);
   const note = input.note?.trim() ?? "";
   if (note.length < 1 || note.length > 4000) throw validation("note debe tener 1–4000 caracteres");
   if (input.diagnosisCode) await assertDiagnosisCode(tx, input.diagnosisCode);
@@ -409,6 +420,8 @@ export async function addClinicalNote(
       authorUserId: actorUserId,
       note,
       diagnosisCode: input.diagnosisCode ?? null,
+      encounterId: input.encounterId ?? null,
+      kind: "evolucion",
     })
     .returning();
   if (!row) throw new Error("No se pudo guardar la nota");
@@ -457,6 +470,7 @@ export interface AddOdontogramInput {
   status?: string;
   note?: string | null;
   diagnosisCode?: string | null;
+  encounterId?: string;
 }
 
 export async function addOdontogramEntries(
@@ -467,6 +481,7 @@ export async function addOdontogramEntries(
   input: AddOdontogramInput,
 ) {
   await requirePatient(tx, orgId, patientId);
+  if (input.encounterId) await requireDraftLink(tx, orgId, patientId, input.encounterId);
   if (!VALID_FDI_TEETH.includes(input.toothNumber)) throw validation("Pieza FDI inválida");
   if (!(ODONTOGRAM_CONDITIONS as readonly string[]).includes(input.condition)) throw validation("condition inválida");
   const status = input.status ?? "registrado";
@@ -486,8 +501,12 @@ export async function addOdontogramEntries(
     diagnosisCode: input.diagnosisCode ?? null,
     note: input.note ?? null,
     createdBy: actorUserId,
+    encounterId: input.encounterId ?? null,
   }));
   const rows = await tx.insert(odontogramEntry).values(toInsert).returning();
+  if (input.encounterId) await tx.insert(encounterTooth).values({
+    organizationId: orgId, encounterId: input.encounterId, toothNumber: input.toothNumber,
+  }).onConflictDoNothing();
   await audit(tx, orgId, actorUserId, "odontogram.entry_added", "odontogram_entry", rows[0]?.id ?? patientId, {
     patientId,
     toothNumber: input.toothNumber,
@@ -503,6 +522,7 @@ export async function voidOdontogramEntry(tx: Db, orgId: string, actorUserId: st
     .where(and(eq(odontogramEntry.id, entryId), eq(odontogramEntry.organizationId, orgId)))
     .limit(1);
   if (!current) throw notFound("Entrada de odontograma");
+  if (current.encounterId) await requireDraftLink(tx, orgId, current.patientId, current.encounterId);
   if (current.status === "anulado") throw conflict("ALREADY_VOIDED", "La entrada ya está anulada");
   const [updated] = await tx
     .update(odontogramEntry)
@@ -566,9 +586,11 @@ export async function registerPatientDocument(
   orgId: string,
   actorUserId: string,
   patientId: string,
-  input: { category: string; label: string; storageKey: string; contentType: string; sizeBytes: number },
+  input: { category: string; label: string; storageKey: string; contentType: string; sizeBytes: number; encounterId?: string; toothNumber?: number | null },
 ) {
   await requirePatient(tx, orgId, patientId);
+  if (input.encounterId) await requireDraftLink(tx, orgId, patientId, input.encounterId);
+  if (input.toothNumber != null && !VALID_FDI_TEETH.includes(input.toothNumber)) throw validation("Pieza FDI inválida");
   if (!(DOCUMENT_CATEGORIES as readonly string[]).includes(input.category)) throw validation("category inválida");
   const label = input.label?.trim() ?? "";
   if (!label || label.length > 200) throw validation("label debe tener 1–200 caracteres");
@@ -584,8 +606,13 @@ export async function registerPatientDocument(
       contentType: input.contentType,
       sizeBytes: input.sizeBytes,
       uploadedBy: actorUserId,
+      encounterId: input.encounterId ?? null,
+      toothNumber: input.toothNumber ?? null,
     })
     .returning();
+  if (input.encounterId && input.toothNumber != null) await tx.insert(encounterTooth).values({
+    organizationId: orgId, encounterId: input.encounterId, toothNumber: input.toothNumber,
+  }).onConflictDoNothing();
   if (!row) throw new Error("No se pudo registrar el documento");
   await audit(tx, orgId, actorUserId, "document.uploaded", "patient_document", row.id, {
     patientId,

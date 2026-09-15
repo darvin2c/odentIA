@@ -1,5 +1,23 @@
 import { withOrgContext } from "@odentia/db";
 import {
+  PATIENT_AVATAR_MAX_BYTES,
+  PATIENT_AVATAR_MIME_EXT,
+  TIMELINE_TYPES,
+  addEncounterAddendum,
+  addEncounterProcedure,
+  addPlanItem,
+  createEncounter,
+  finalizeEncounter,
+  getEncounterDetail,
+  getPatientSummary,
+  getTimeline,
+  listEncounters,
+  listPlanItems,
+  requirePatient,
+  setPatientAvatar,
+  setPlanItemStatus,
+  updateEncounterDraft,
+  updatePlanItem,
   PATIENT_DOC_MAX_BYTES,
   PATIENT_DOC_MIME_EXT,
   ServiceError,
@@ -46,6 +64,8 @@ const filiation = {
   docNumber: z.string().max(20).nullish(),
   birthDate: z.string().max(10).nullish(),
   sex: z.enum(["M", "F"]).nullish(),
+  phone: z.string().max(50).nullish(),
+  email: z.email().max(200).nullish(),
   maritalStatus: z.string().max(100).nullish(),
   educationLevel: z.string().max(100).nullish(),
   occupation: z.string().max(200).nullish(),
@@ -164,6 +184,7 @@ const anamnesisAnswers = z
 const noteInput = z.object({
   note: z.string().min(1).max(4000),
   diagnosisCode: z.string().max(10).nullish(),
+  encounterId: z.uuid().optional(),
 });
 
 const odontogramInput = z.object({
@@ -189,7 +210,37 @@ const odontogramInput = z.object({
   status: z.enum(["registrado", "realizado", "planificado"]).optional(),
   note: z.string().max(2000).nullish(),
   diagnosisCode: z.string().max(10).nullish(),
+  encounterId: z.uuid().optional(),
 });
+
+const timelineQuery = listQuery.extend({
+  types: z.string().transform((value) => value.split(",")).pipe(z.array(z.enum(TIMELINE_TYPES))).optional(),
+  toothNumber: z.coerce.number().int().optional(),
+  documentCategory: z.enum(["radiografia", "foto_clinica"]).optional(),
+});
+const encounterCreateInput = z.object({
+  reason: z.string().max(2000).nullish(), branchId: z.uuid().nullish(), teeth: z.array(z.number().int()).max(52).optional(),
+});
+const encounterPatchInput = z.object({
+  reason: z.string().max(2000).nullish(), evolution: z.string().max(10000).nullish(),
+  indications: z.string().max(4000).nullish(), nextStep: z.string().max(2000).nullish(),
+  nextAppointmentAt: z.iso.datetime({ offset: true }).nullish(),
+  teeth: z.array(z.number().int()).max(52).optional(),
+});
+const procedureInput = z.object({
+  description: z.string().trim().min(1).max(4000), toothNumber: z.number().int().nullish(),
+  diagnosisCode: z.string().max(10).nullish(), planItemId: z.uuid().nullish(),
+});
+const planFields = {
+  title: z.string().trim().min(1).max(300), detail: z.string().max(4000).nullish(),
+  toothNumber: z.number().int().nullish(), diagnosisCode: z.string().max(10).nullish(),
+  priceCents: z.number().int().min(0).max(2147483647).nullish(),
+};
+const planCreateInput = z.object({ ...planFields, currency: z.string().regex(/^[A-Z]{3}$/).optional() });
+const planPatchInput = z.object(planFields).partial().extend({
+  status: z.enum(["pendiente", "programado", "realizado", "cancelado"]).optional(), encounterId: z.uuid().nullish(),
+});
+const documentLinkInput = z.object({ encounterId: z.uuid().optional(), toothNumber: z.coerce.number().int().optional() });
 
 export function createPatientsRoute(deps: CrmDeps) {
   const app = new Hono();
@@ -391,6 +442,10 @@ export function createPatientsRoute(deps: CrmDeps) {
     const file = form?.get("file");
     const category = form?.get("category");
     const label = form?.get("label");
+    const link = documentLinkInput.safeParse({
+      encounterId: form?.get("encounterId") || undefined, toothNumber: form?.get("toothNumber") || undefined,
+    });
+    if (!link.success) return validationError(c, link.error.issues);
     if (!(file instanceof File)) return c.json(errorBody(c, "VALIDATION", "Adjunta un archivo"), 400);
     if (typeof category !== "string" || typeof label !== "string" || !label.trim()) {
       return c.json(errorBody(c, "VALIDATION", "category y label son obligatorios"), 400);
@@ -401,30 +456,18 @@ export function createPatientsRoute(deps: CrmDeps) {
       return c.json(errorBody(c, "VALIDATION", "El archivo no puede superar 10 MB"), 400);
     }
     const bytes = new Uint8Array(await file.arrayBuffer());
-    let objectKey = "";
-    try {
-      return await runService(c, 201, () =>
-        withOrgContext(deps.db, orgId, async (tx) => {
-          const ref = await deps.storage.putPatientDocument({ orgId, patientId, bytes, contentType: file.type, ext });
-          objectKey = ref.objectKey;
-          try {
-            return await registerPatientDocument(tx, orgId, userId, patientId, {
-              category,
-              label: label.trim(),
-              storageKey: ref.objectKey,
-              contentType: file.type,
-              sizeBytes: file.size,
-            });
-          } catch (e) {
-            await deps.storage.deleteAttachment(ref.objectKey).catch(() => {});
-            throw e;
-          }
-        }),
-      );
-    } catch (e) {
-      if (objectKey) await deps.storage.deleteAttachment(objectKey).catch(() => {});
-      throw e;
-    }
+    return runService(c, 201, async () => {
+      await withOrgContext(deps.db, orgId, (tx) => requirePatient(tx, orgId, patientId));
+      const ref = await deps.storage.putPatientDocument({ orgId, patientId, bytes, contentType: file.type, ext });
+      try {
+        return await withOrgContext(deps.db, orgId, (tx) => registerPatientDocument(tx, orgId, userId, patientId, {
+          category, label: label.trim(), storageKey: ref.objectKey, contentType: file.type, sizeBytes: file.size, ...link.data,
+        }));
+      } catch (e) {
+        await deps.storage.deleteAttachment(ref.objectKey).catch(() => {});
+        throw e;
+      }
+    });
   });
   app.get("/:id/documents/:documentId/url", async (c) => {
     const { orgId } = orgContextOf(c);
@@ -435,6 +478,113 @@ export function createPatientsRoute(deps: CrmDeps) {
       const url = await deps.storage.attachmentUrl(doc.storageKey);
       return { url };
     });
+  });
+
+  app.post("/:id/avatar", async (c) => {
+    const { orgId, userId } = orgContextOf(c);
+    const patientId = c.req.param("id");
+    const form = await c.req.formData().catch(() => null);
+    const file = form?.get("file");
+    if (!(file instanceof File)) return c.json(errorBody(c, "VALIDATION", "Adjunta una imagen"), 400);
+    const ext = PATIENT_AVATAR_MIME_EXT[file.type];
+    if (!ext) return c.json(errorBody(c, "VALIDATION", "Solo se admiten JPG, PNG o WebP"), 400);
+    if (!file.size || file.size > PATIENT_AVATAR_MAX_BYTES) return c.json(errorBody(c, "VALIDATION", "La imagen debe pesar entre 1 byte y 2 MB"), 400);
+    return runService(c, 201, async () => {
+      await withOrgContext(deps.db, orgId, (tx) => requirePatient(tx, orgId, patientId));
+      const ref = await deps.storage.putPatientAvatar({ orgId, patientId, bytes: new Uint8Array(await file.arrayBuffer()), contentType: file.type, ext });
+      try {
+        const avatarUrl = await deps.storage.attachmentUrl(ref.objectKey);
+        const changed = await withOrgContext(deps.db, orgId, (tx) => setPatientAvatar(tx, orgId, userId, patientId, ref.objectKey));
+        if (changed.previousStorageKey) await deps.storage.deleteAttachment(changed.previousStorageKey).catch(() => {});
+        return { avatarUrl };
+      } catch (e) {
+        await deps.storage.deleteAttachment(ref.objectKey).catch(() => {});
+        throw e;
+      }
+    });
+  });
+  app.get("/:id/avatar-url", async (c) => {
+    const { orgId } = orgContextOf(c);
+    return runService(c, 200, async () => {
+      const row = await withOrgContext(deps.db, orgId, (tx) => requirePatient(tx, orgId, c.req.param("id")));
+      if (!row.avatarStorageKey) throw new ServiceError("NO_AVATAR", 404, "El paciente no tiene avatar");
+      return { url: await deps.storage.attachmentUrl(row.avatarStorageKey) };
+    });
+  });
+  app.get("/:id/summary", async (c) => {
+    const { orgId } = orgContextOf(c);
+    return runService(c, 200, () => withOrgContext(deps.db, orgId, (tx) => getPatientSummary(tx, orgId, c.req.param("id"))));
+  });
+  app.get("/:id/timeline", async (c) => {
+    const { orgId } = orgContextOf(c);
+    const parsed = timelineQuery.safeParse(c.req.query());
+    if (!parsed.success) return validationError(c, parsed.error.issues);
+    try {
+      return c.json(await withOrgContext(deps.db, orgId, (tx) => getTimeline(tx, orgId, c.req.param("id"), parsed.data)));
+    } catch (e) { return serviceErrorResponse(c, e) ?? Promise.reject(e); }
+  });
+  app.post("/:id/encounters", async (c) => {
+    const { orgId, userId } = orgContextOf(c);
+    const parsed = encounterCreateInput.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return validationError(c, parsed.error.issues);
+    return runService(c, 201, () => withOrgContext(deps.db, orgId, (tx) => createEncounter(tx, orgId, userId, c.req.param("id"), parsed.data)));
+  });
+  app.get("/:id/encounters", async (c) => {
+    const { orgId } = orgContextOf(c);
+    const parsed = listQuery.extend({ status: z.enum(["borrador", "finalizada"]).optional() }).safeParse(c.req.query());
+    if (!parsed.success) return validationError(c, parsed.error.issues);
+    try {
+      const { items, nextCursor } = await withOrgContext(deps.db, orgId, (tx) => listEncounters(tx, orgId, c.req.param("id"), parsed.data));
+      return c.json({ data: items, nextCursor });
+    } catch (e) { return serviceErrorResponse(c, e) ?? Promise.reject(e); }
+  });
+  app.get("/:id/encounters/:encounterId", async (c) => {
+    const { orgId } = orgContextOf(c);
+    return runService(c, 200, () => withOrgContext(deps.db, orgId, (tx) => getEncounterDetail(tx, orgId, c.req.param("id"), c.req.param("encounterId"))));
+  });
+  app.patch("/:id/encounters/:encounterId", async (c) => {
+    const { orgId, userId } = orgContextOf(c);
+    const parsed = encounterPatchInput.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return validationError(c, parsed.error.issues);
+    return runService(c, 200, () => withOrgContext(deps.db, orgId, (tx) => updateEncounterDraft(tx, orgId, userId, c.req.param("id"), c.req.param("encounterId"), parsed.data)));
+  });
+  app.post("/:id/encounters/:encounterId/procedures", async (c) => {
+    const { orgId, userId } = orgContextOf(c);
+    const parsed = procedureInput.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return validationError(c, parsed.error.issues);
+    return runService(c, 201, () => withOrgContext(deps.db, orgId, (tx) => addEncounterProcedure(tx, orgId, userId, c.req.param("id"), c.req.param("encounterId"), parsed.data)));
+  });
+  app.post("/:id/encounters/:encounterId/finalize", async (c) => {
+    const { orgId, userId } = orgContextOf(c);
+    return runService(c, 200, () => withOrgContext(deps.db, orgId, (tx) => finalizeEncounter(tx, orgId, userId, c.req.param("id"), c.req.param("encounterId"))));
+  });
+  app.post("/:id/encounters/:encounterId/addenda", async (c) => {
+    const { orgId, userId } = orgContextOf(c);
+    const parsed = z.object({ text: z.string().trim().min(1).max(4000) }).safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return validationError(c, parsed.error.issues);
+    return runService(c, 201, () => withOrgContext(deps.db, orgId, (tx) => addEncounterAddendum(tx, orgId, userId, c.req.param("id"), c.req.param("encounterId"), parsed.data)));
+  });
+  app.get("/:id/plan", async (c) => {
+    const { orgId } = orgContextOf(c);
+    return runService(c, 200, () => withOrgContext(deps.db, orgId, (tx) => listPlanItems(tx, orgId, c.req.param("id"))));
+  });
+  app.post("/:id/plan/items", async (c) => {
+    const { orgId, userId } = orgContextOf(c);
+    const parsed = planCreateInput.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return validationError(c, parsed.error.issues);
+    return runService(c, 201, () => withOrgContext(deps.db, orgId, (tx) => addPlanItem(tx, orgId, userId, c.req.param("id"), parsed.data)));
+  });
+  app.patch("/:id/plan/items/:itemId", async (c) => {
+    const { orgId, userId } = orgContextOf(c);
+    const parsed = planPatchInput.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return validationError(c, parsed.error.issues);
+    return runService(c, 200, () => withOrgContext(deps.db, orgId, async (tx) => {
+      const { status, encounterId, ...patch } = parsed.data;
+      const args = [tx, orgId, userId, c.req.param("id"), c.req.param("itemId")] as const;
+      if (status && !Object.keys(patch).length) return setPlanItemStatus(...args, { status, encounterId });
+      const item = await updatePlanItem(...args, patch);
+      return status ? setPlanItemStatus(...args, { status, encounterId }) : item;
+    }));
   });
 
   return app;

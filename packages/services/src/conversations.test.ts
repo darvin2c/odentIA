@@ -51,6 +51,7 @@ const storageStub: Storage = {
     filename: "f.bin",
     size: bytes.byteLength,
   }),
+  putPatientAvatar: async () => { throw new Error("no usado"); },
 };
 
 const deps: IngestDeps = { storage: storageStub, fetch, secretsKey: KEY };

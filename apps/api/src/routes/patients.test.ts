@@ -32,6 +32,10 @@ const storageStub = {
   putPatientDocument: async () => {
     throw new Error("no usado");
   },
+  putPatientAvatar: async ({ orgId, patientId, bytes, contentType, ext }: { orgId: string; patientId: string; bytes: Uint8Array; contentType: string; ext: string }) => ({
+    objectKey: `patients/${orgId}/${patientId}/avatar/${crypto.randomUUID()}.${ext}`,
+    mimeType: contentType, filename: `avatar.${ext}`, size: bytes.byteLength,
+  }),
 };
 
 function stubOrg(role: string) {
@@ -167,4 +171,25 @@ it("odontograma con pieza inválida responde 400", async () => {
     body: JSON.stringify({ toothNumber: 99, condition: "caries", surfaces: [] }),
   });
   expect(res.status).toBe(400);
+});
+
+it("avatar privado: subida y URL firmada; rechaza tipo y tamaño inválidos", async () => {
+  const app = buildApp("member");
+  const p = await withOrgContext(appDb, "org_a", (tx) => createPatient(tx, "org_a", "u-1", { displayName: "Avatar" }));
+  const missing = await app.request(`/patients/${p.id}/avatar-url`);
+  expect(missing.status).toBe(404);
+  expect(await missing.json()).toMatchObject({ error: { code: "NO_AVATAR" } });
+  const image = new FormData();
+  image.set("file", new File([new Uint8Array([255, 216, 255, 217])], "portrait.jpg", { type: "image/jpeg" }));
+  const uploaded = await app.request(`/patients/${p.id}/avatar`, { method: "POST", body: image });
+  expect(uploaded.status).toBe(201);
+  const url = await app.request(`/patients/${p.id}/avatar-url`);
+  expect(url.status).toBe(200);
+  expect(await url.json()).toMatchObject({ data: { url: expect.stringMatching(/^https:\/\/signed\.example\.com\/patients\/org_a\//) } });
+  const pdf = new FormData();
+  pdf.set("file", new File(["pdf"], "portrait.pdf", { type: "application/pdf" }));
+  expect((await app.request(`/patients/${p.id}/avatar`, { method: "POST", body: pdf })).status).toBe(400);
+  const huge = new FormData();
+  huge.set("file", new File([new Uint8Array(2 * 1024 * 1024 + 1)], "huge.png", { type: "image/png" }));
+  expect((await app.request(`/patients/${p.id}/avatar`, { method: "POST", body: huge })).status).toBe(400);
 });

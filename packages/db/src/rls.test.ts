@@ -212,3 +212,27 @@ it("org A no ve pacientes de org B; sin GUC ve cero filas", async () => {
   expect((aIds as unknown as { id: string }[]).map((r) => r.id)).toEqual(["99999999-9999-9999-9999-999999999999"]);
   expect(await patientNumbers(appDb)).toEqual([]);
 });
+
+it("encuentros y planes de A son invisibles para B; las piezas cerradas no se borran", async () => {
+  await ownerDb.execute(sql`insert into "user" (id,name,email) values ('rls-dentist','Dentista','rls@example.test')`);
+  await ownerDb.execute(sql`insert into encounter (id,organization_id,patient_id,dentist_user_id) values
+    ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb','org_a','99999999-9999-9999-9999-999999999999','rls-dentist')`);
+  await ownerDb.execute(sql`insert into treatment_plan_item (organization_id,patient_id,title) values
+    ('org_a','99999999-9999-9999-9999-999999999999','Restauración')`);
+  await ownerDb.execute(sql`insert into encounter_tooth (organization_id,encounter_id,tooth_number) values
+    ('org_a','bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',36)`);
+  await ownerDb.execute(sql`insert into encounter_procedure (organization_id,encounter_id,description) values
+    ('org_a','bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb','Restauración 36')`);
+  for (const table of ["encounter", "encounter_tooth", "encounter_procedure", "treatment_plan_item"]) {
+    const query = sql`select id from ${sql.identifier(table)}`;
+    expect(await withOrgContext(appDb, "org_a", (tx) => tx.execute(query))).toHaveLength(1);
+    expect(await withOrgContext(appDb, "org_b", (tx) => tx.execute(query))).toHaveLength(0);
+    expect(await appDb.execute(query)).toHaveLength(0);
+  }
+  await ownerDb.execute(sql`update encounter set status='finalizada' where id='bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'`);
+  const deleted = await withOrgContext(appDb, "org_a", (tx) =>
+    tx.execute(sql`delete from encounter_tooth where encounter_id='bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb' returning id`));
+  expect(deleted).toHaveLength(0);
+  await expect(withOrgContext(appDb, "org_a", (tx) =>
+    tx.execute(sql`delete from encounter where id='bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'`))).rejects.toThrow();
+});

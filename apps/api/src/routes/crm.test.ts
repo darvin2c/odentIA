@@ -38,6 +38,7 @@ const storageStub = {
   putPatientDocument: async () => {
     throw new Error("no usado");
   },
+  putPatientAvatar: async () => { throw new Error("no usado"); },
 };
 
 function stubOrg(role: string) {

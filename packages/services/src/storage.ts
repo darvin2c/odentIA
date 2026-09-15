@@ -3,6 +3,14 @@ import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 export const PATIENT_DOC_MAX_BYTES = 10 * 1024 * 1024;
 
+export const PATIENT_AVATAR_MAX_BYTES = 2 * 1024 * 1024;
+
+export const PATIENT_AVATAR_MIME_EXT: Record<string, string> = {
+  "image/jpeg": "jpg",
+  "image/png": "png",
+  "image/webp": "webp",
+};
+
 export const PATIENT_DOC_MIME_EXT: Record<string, string> = {
   "image/jpeg": "jpg",
   "image/png": "png",
@@ -48,6 +56,17 @@ export interface Storage {
   /** Elimina un objeto del bucket privado por clave (best-effort huérfanos). */
   deleteAttachment(objectKey: string): Promise<void>;
   putPatientDocument(input: {
+    orgId: string;
+    patientId: string;
+    bytes: Uint8Array;
+    contentType: string;
+    ext: string;
+  }): Promise<AttachmentRef>;
+  /**
+   * Avatar de paciente: va al bucket PRIVADO de adjuntos (la foto del
+   * paciente es dato clínico, no asset público como el avatar de usuario).
+   */
+  putPatientAvatar(input: {
     orgId: string;
     patientId: string;
     bytes: Uint8Array;
@@ -104,6 +123,18 @@ export function createStorage(env: StorageEnv): Storage {
     },
     async putPatientDocument({ orgId, patientId, bytes, contentType, ext }) {
       const objectKey = `patients/${orgId}/${patientId}/${crypto.randomUUID()}.${ext}`;
+      await client.send(
+        new PutObjectCommand({
+          Bucket: env.attachmentsBucket,
+          Key: objectKey,
+          Body: bytes,
+          ContentType: contentType,
+        }),
+      );
+      return { objectKey, mimeType: contentType, filename: objectKey.split("/").at(-1) ?? objectKey, size: bytes.byteLength };
+    },
+    async putPatientAvatar({ orgId, patientId, bytes, contentType, ext }) {
+      const objectKey = `patients/${orgId}/${patientId}/avatar/${crypto.randomUUID()}.${ext}`;
       await client.send(
         new PutObjectCommand({
           Bucket: env.attachmentsBucket,

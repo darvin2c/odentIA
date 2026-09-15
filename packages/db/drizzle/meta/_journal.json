@@ -43,6 +43,13 @@
       "when": 1789414761052,
       "tag": "0005_special_argent",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1789421919075,
+      "tag": "0006_daily_gunslinger",
+      "breakpoints": true
     }
   ]
 }
