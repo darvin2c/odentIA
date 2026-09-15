@@ -1,9 +1,10 @@
 import { useForm } from "@tanstack/react-form";
 import { createFileRoute, Link, useNavigate, useSearch } from "@tanstack/react-router";
-import { Field, FieldError, FieldGroup, FieldLabel, Input, toast } from "@odentia/ui";
-import { AuthCard, SubmitButton, fieldErrorMessages } from "@odentia/ui-patterns";
+import { Field, FieldError, FieldGroup, FieldLabel, Input, Separator, toast } from "@odentia/ui";
+import { AuthSplit, SubmitButton, fieldErrorMessages } from "@odentia/ui-patterns";
 import { z } from "zod";
 import { authClient } from "../lib/auth-client";
+import { GoogleAuthButton } from "../lib/google-auth";
 import { BASE_DOMAIN } from "../lib/host";
 
 export const Route = createFileRoute("/login")({
@@ -67,7 +68,7 @@ function LoginPage() {
   });
 
   return (
-    <AuthCard
+    <AuthSplit
       title="Inicia sesión"
       description="Accede a tu espacio de odentIA"
       footer={
@@ -78,6 +79,14 @@ function LoginPage() {
         </>
       }
     >
+      <div className="flex flex-col gap-4">
+        <GoogleAuthButton label="Continuar con Google" callbackURL={safeNext(next) ?? "/"} />
+        <div className="flex items-center gap-3" role="separator">
+          <Separator className="flex-1" />
+          <span className="text-xs text-muted-foreground">o</span>
+          <Separator className="flex-1" />
+        </div>
+      </div>
       <form
         onSubmit={(event) => {
           event.preventDefault();
@@ -128,6 +137,6 @@ function LoginPage() {
           </form.Subscribe>
         </FieldGroup>
       </form>
-    </AuthCard>
+    </AuthSplit>
   );
 }

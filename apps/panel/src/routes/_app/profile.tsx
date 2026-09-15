@@ -39,7 +39,8 @@ export const Route = createFileRoute("/_app/profile")({
 const appRouteApi = getRouteApi("/_app");
 
 const profileSchema = z.object({
-  name: z.string().trim().min(2, "Ingresa tu nombre"),
+  firstName: z.string().trim().min(1, "Ingresa tu nombre"),
+  lastName: z.string().trim().min(1, "Ingresa tus apellidos"),
 });
 
 const passwordSchema = z
@@ -84,8 +85,19 @@ function ProfilePage() {
   const navigate = useNavigate();
   const live = authClient.useSession().data?.user;
   const user = live
-    ? { name: live.name, email: live.email, avatarUrl: live.image ?? undefined }
-    : { name: session.name, email: session.email };
+    ? {
+        name: live.name,
+        firstName: live.firstName ?? "",
+        lastName: live.lastName ?? "",
+        email: live.email,
+      }
+    : {
+        name: session.name,
+        firstName: session.firstName,
+        lastName: session.lastName,
+        email: session.email,
+        avatarUrl: undefined as string | undefined,
+      };
 
   const [profileError, setProfileError] = useState<string | null>(null);
   const [passwordError, setPasswordError] = useState<string | null>(null);
@@ -231,7 +243,9 @@ function ProfilePage() {
           <div className="flex items-center justify-between py-3">
             <div>
               <p className="text-sm font-medium">Nombre</p>
-              <p className="text-sm text-muted-foreground">{user.name}</p>
+              <p className="text-sm text-muted-foreground">
+                {`${user.firstName} ${user.lastName}`.trim() || user.name}
+              </p>
             </div>
             <Link to="/profile" search={{ edit: "profile" }}>
               <Button type="button" variant="outline" size="sm">
@@ -267,9 +281,10 @@ function ProfilePage() {
       </Card>
       <SessionsCard />
       <EditProfileDrawer
-        key={user.name}
+        key={`${user.firstName}|${user.lastName}`}
         open={edit === "profile"}
-        initialName={user.name}
+        initialFirstName={user.firstName}
+        initialLastName={user.lastName}
         error={profileError}
         onError={setProfileError}
         onClose={closeDrawer}
@@ -405,22 +420,28 @@ function SessionsCard() {
 
 function EditProfileDrawer({
   open,
-  initialName,
+  initialFirstName,
+  initialLastName,
   error,
   onError,
   onClose,
 }: {
   open: boolean;
-  initialName: string;
+  initialFirstName: string;
+  initialLastName: string;
   error: string | null;
   onError: (error: string | null) => void;
   onClose: () => void;
 }) {
   const form = useForm({
-    defaultValues: { name: initialName },
+    defaultValues: { firstName: initialFirstName, lastName: initialLastName },
     validators: { onSubmit: profileSchema },
     onSubmit: async ({ value }) => {
-      const { error: updateError } = await authClient.updateUser({ name: value.name });
+      const { error: updateError } = await authClient.updateUser({
+        name: `${value.firstName} ${value.lastName}`.trim(),
+        firstName: value.firstName,
+        lastName: value.lastName,
+      });
       if (updateError) {
         onError(common.errors.generic);
         return;
@@ -446,14 +467,29 @@ function EditProfileDrawer({
       isSubmitting={isSubmitting}
       error={error}
     >
-      <form.Field name="name">
+      <form.Field name="firstName">
         {(field) => (
           <Field>
-            <FieldLabel htmlFor="profile-name">Nombre</FieldLabel>
+            <FieldLabel htmlFor="profile-first-name">Nombre</FieldLabel>
             <Input
-              id="profile-name"
+              id="profile-first-name"
               type="text"
-              autoComplete="name"
+              autoComplete="given-name"
+              value={field.state.value}
+              onChange={(event) => field.handleChange(event.target.value)}
+            />
+            <FieldError>{fieldErrorMessages(field.state.meta.errors)[0] ?? null}</FieldError>
+          </Field>
+        )}
+      </form.Field>
+      <form.Field name="lastName">
+        {(field) => (
+          <Field>
+            <FieldLabel htmlFor="profile-last-name">Apellidos</FieldLabel>
+            <Input
+              id="profile-last-name"
+              type="text"
+              autoComplete="family-name"
               value={field.state.value}
               onChange={(event) => field.handleChange(event.target.value)}
             />

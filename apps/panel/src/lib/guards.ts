@@ -7,6 +7,8 @@ export interface SessionInfo {
   userId: string;
   email: string;
   name: string;
+  firstName: string;
+  lastName: string;
   emailVerified: boolean;
 }
 
@@ -29,6 +31,8 @@ export async function requireSession(): Promise<SessionInfo> {
     userId: data.user.id,
     email: data.user.email,
     name: data.user.name,
+    firstName: data.user.firstName ?? "",
+    lastName: data.user.lastName ?? "",
     emailVerified: data.user.emailVerified,
   };
 }
