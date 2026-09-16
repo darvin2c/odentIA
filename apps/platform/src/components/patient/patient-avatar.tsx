@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { Avatar, AvatarFallback, AvatarImage } from "@odentia/ui";
+import { Avatar, AvatarFallback, AvatarImage, Button } from "@odentia/ui";
 import { useState } from "react";
 import { apiFetch } from "../../lib/api";
 import { useCanWrite } from "../../lib/crm";
@@ -21,7 +21,7 @@ export function PatientAvatar({ patientId, name, storageKey, size = 80 }: { pati
   </Avatar>;
   if (!canWrite) return avatar;
   return <>
-    <button type="button" className="shrink-0 rounded-full focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ring" aria-label={`Cambiar foto de ${name}`} title={photo.isError ? "No se pudo cargar la foto. Haz clic para cambiarla." : "Cambiar foto"} onClick={() => setOpen(true)}>{avatar}</button>
+    <Button type="button" variant="ghost" className="h-auto rounded-full p-0" aria-label={`Cambiar foto de ${name}`} title={photo.isError ? "No se pudo cargar la foto. Haz clic para cambiarla." : "Cambiar foto"} onClick={() => setOpen(true)}>{avatar}</Button>
     <AvatarDrawer patientId={patientId} open={open} onOpenChange={setOpen} />
   </>;
 }

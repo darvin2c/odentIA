@@ -1,5 +1,6 @@
 /** Tipos espejo de la API de pacientes + helpers puros para la UI. */
 import { activeFindingsAsOf, type FindingDetails } from "@odentia/clinical";
+import { apiFetch } from "./api";
 
 export interface Patient {
   id: string;
@@ -60,7 +61,6 @@ export interface Medication {
   startDate?: string | null;
   endDate?: string | null;
   notes?: string | null;
-  createdAt?: string;
 }
 
 export interface AnamnesisAnswers {
@@ -70,7 +70,86 @@ export interface AnamnesisAnswers {
   observaciones?: string;
   diagnosticoPresuntivo?: string;
 }
+export type HealthReviewState = "unknown" | "none" | "recorded";
 
+export interface HealthReviewStatus {
+  allergies: HealthReviewState;
+  conditions: HealthReviewState;
+  medications: HealthReviewState;
+}
+
+export interface HealthAllergyInput {
+  id?: string;
+  substance: string;
+  reaction?: string | null;
+  severity: string;
+  isActive?: boolean;
+}
+
+export interface HealthConditionInput {
+  id?: string;
+  name: string;
+  status: string;
+  startDate?: string | null;
+  endDate?: string | null;
+  notes?: string | null;
+}
+
+export interface HealthMedicationInput {
+  id?: string;
+  name: string;
+  dose?: string | null;
+  frequency?: string | null;
+  startDate?: string | null;
+  endDate?: string | null;
+  notes?: string | null;
+}
+
+export interface SaveHealthInput {
+  expectedRevision: number;
+  reviewStatus: HealthReviewStatus;
+  allergies: HealthAllergyInput[];
+  conditions: HealthConditionInput[];
+  medications: HealthMedicationInput[];
+  anamnesis?: { expectedVersion: number; answers: AnamnesisAnswers };
+  dataConsent?: true;
+}
+
+export interface PatientHealth {
+  revision: number;
+  reviewStatus: HealthReviewStatus;
+  allergies: Allergy[];
+  conditions: Condition[];
+  medications: Medication[];
+  latestAnamnesis: {
+    id: string;
+    version: number;
+    answers: AnamnesisAnswers;
+    createdAt: string;
+    createdBy: string;
+  } | null;
+}
+
+export const ALLERGY_SEVERITIES = ["leve", "moderada", "severa", "desconocida"] as const;
+
+export const ALLERGY_SEVERITY_LABELS: Record<string, string> = {
+  leve: "Leve",
+  moderada: "Moderada",
+  severa: "Severa",
+  desconocida: "Desconocida",
+};
+
+export const CONDITION_STATUS_LABELS: Record<string, string> = {
+  activa: "Activa",
+  resuelta: "Resuelta",
+  inactiva: "Inactiva",
+};
+
+export const HEALTH_REVIEW_LABELS: Record<HealthReviewState, string> = {
+  unknown: "Sin revisar",
+  none: "Niega antecedentes de este tipo",
+  recorded: "Registrados",
+};
 export interface ClinicalNote {
   id: string;
   note: string;
@@ -88,8 +167,23 @@ export interface PatientDocument {
   storageKey?: string;
   contentType: string;
   sizeBytes: number;
-  encounterId?: string | null;
-  toothNumber?: number | null;
+  encounterId: string | null;
+  planItemId: string | null;
+  toothNumbers: number[];
+  tags: string[];
+  contextVersion: number;
+  createdAt: string;
+}
+
+export interface PatientDocumentContext {
+  id: string;
+  documentId: string;
+  version: number;
+  encounterId: string | null;
+  planItemId: string | null;
+  toothNumbers: number[];
+  tags: string[];
+  authorUserId: string;
   createdAt: string;
 }
 
@@ -154,6 +248,11 @@ export interface Encounter {
   nextStep: string | null;
   nextAppointmentAt: string | null;
   finalizedAt: string | null;
+  examination?: {
+    extraoral?: Record<string, string>;
+    intraoral?: Record<string, string>;
+    higieneOral?: string;
+  } | null;
   finalizedBy: string | null;
   createdAt: string;
   updatedAt: string;
@@ -164,7 +263,12 @@ export interface ProcedureItem {
   id: string;
   organizationId?: string;
   encounterId: string;
+  serviceId: string | null;
   toothNumber: number | null;
+  scope: string | null;
+  surfaces: string[];
+  quadrant: number | null;
+  arch: string | null;
   description: string;
   diagnosisCode: string | null;
   planItemId: string | null;
@@ -172,28 +276,56 @@ export interface ProcedureItem {
   createdAt: string;
 }
 
-/** Ítem del plan de tratamiento. Fechas como ISO string. */
+/** Ítem del plan de tratamiento (decisión derivada de la línea vigente). Fechas como ISO string. */
 export interface PlanItem {
   id: string;
   organizationId?: string;
   patientId?: string;
+  planId: string;
+  budgetId: string | null;
+  decision: "pendiente" | "aceptado" | "rechazado" | "sin_registro";
+  serviceId: string | null;
   toothNumber: number | null;
+  scope: string | null;
+  surfaces: string[];
+  quadrant: number | null;
+  arch: string | null;
   title: string;
   detail: string | null;
   diagnosisCode: string | null;
   priceCents: number | null;
   currency: string;
   status: string;
-  encounterId: string | null;
+  sourceEncounterId: string | null;
   createdBy?: string | null;
   createdAt: string;
   updatedAt?: string;
+}
+
+/** Plan clínico longitudinal con estado derivado. */
+export interface TreatmentPlan {
+  id: string;
+  patientId?: string;
+  title: string;
+  originEncounterId: string | null;
+  isLegacy: boolean;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export interface TreatmentPlanWithStatus {
+  plan: TreatmentPlan;
+  status: "Sin tratamientos" | "En curso" | "Completado" | "Cancelado";
+  totalItems: number;
+  pendingItems: number;
 }
 
 /** Detalle de una atención: encuentro + piezas, procedimientos, notas, odontograma, documentos y adendas. */
 export interface EncounterDetail {
   encounter: Encounter;
   teeth: number[];
+  plannedItems: PlanItem[];
+  indicatedItems: PlanItem[];
   procedures: ProcedureItem[];
   /** Notas de evolución (kind='evolucion'), orden ascendente. */
   notes: ClinicalNote[];
@@ -225,12 +357,33 @@ export interface TimelineItem {
   documentsCount?: number;
   nextStep?: string | null;
   nextAppointmentAt?: string | null;
+  indications?: string | null;
+  diagnoses?: string[];
+  plannedItems: Array<Pick<PlanItem, "id" | "title" | "toothNumber" | "status" | "planId" | "budgetId">>;
+  documents?: PatientLastVisit["documents"];
+  tags?: string[];
+  encounterId?: string | null;
 }
 
 export interface PlanPendingTotal {
   currency: string;
   count: number;
   totalCents: number;
+}
+
+export interface PatientLastVisit {
+  encounterId: string;
+  reason: string | null;
+  evolution: string | null;
+  indications: string | null;
+  nextStep: string | null;
+  nextAppointmentAt: string | null;
+  finalizedAt: string | null;
+  teeth: number[];
+  procedures: Array<Pick<ProcedureItem, "description" | "toothNumber" | "diagnosisCode">>;
+  diagnoses: string[];
+  plannedItems: Array<Pick<PlanItem, "id" | "title" | "toothNumber" | "status" | "planId" | "budgetId">>;
+  documents: Array<Pick<PatientDocument, "id" | "label" | "category">>;
 }
 
 /** Resumen del paciente: última atención finalizada, borrador abierto y plan pendiente. */
@@ -240,6 +393,7 @@ export interface PatientSummary {
   nextAppointmentAt: string | null;
   planPending: {
     count: number;
+    unpricedCount: number;
     /** null cuando hay más de una moneda (ver totals); nunca se suman monedas distintas. */
     totalCents: number | null;
     /** null cuando hay más de una moneda (ver totals). */
@@ -247,6 +401,31 @@ export interface PatientSummary {
     totals: PlanPendingTotal[];
   };
   activeDiagnoses: Array<{ toothNumber: number; condition: string; status: string }>;
+  lastVisit: PatientLastVisit | null;
+  acceptedPending: Array<Pick<PlanItem, "id" | "title" | "toothNumber" | "diagnosisCode" | "priceCents" | "currency" | "status" | "planId" | "budgetId"> & {
+    budgetNumber: number;
+    budgetTitle: string;
+  }>;
+  proposedBudgets: Array<{
+    id: string;
+    budgetNumber: number;
+    title: string;
+    currency: string;
+    status: string;
+    itemsCount: number;
+    unpricedCount: number;
+    totalCents: number | null;
+    totals: PlanPendingTotal[];
+    createdAt: string;
+  }>;
+  anamnesisBrief: {
+    version: number;
+    createdAt: string;
+    motivo: string | null;
+    tiempo: string | null;
+    answeredCount: number;
+  } | null;
+  recentDocuments: Array<Pick<PatientDocument, "id" | "label" | "category" | "encounterId" | "planItemId" | "toothNumbers" | "tags" | "createdAt">>;
 }
 
 export interface PatientFull {
@@ -299,18 +478,6 @@ export function toothTypeLabel(type: "incisor" | "canine" | "premolar" | "molar"
 }
 
 
-/**
- * Convierte un monto decimal en soles/unidades (ej. "150.50", "150,50") a
- * centavos enteros. Vacío = sin precio (null), nunca 0.
- */
-export function parsePriceToCents(raw: string): { ok: true; cents: number | null } | { ok: false } {
-  const text = raw.trim().replace(",", ".");
-  if (text === "") return { ok: true, cents: null };
-  if (!/^\d{1,9}(\.\d{1,2})?$/.test(text)) return { ok: false };
-  const cents = Math.round(Number(text) * 100);
-  if (!Number.isFinite(cents) || cents < 0 || cents > 2147483647) return { ok: false };
-  return { ok: true, cents };
-}
 
 export function planStatusLabel(status: string): string {
   switch (status) {
@@ -376,4 +543,31 @@ export function winnersAsOf(history: OdontogramEntry[], iso?: string): Odontogra
     };
   }
   return { teeth, history };
+}
+
+/** Agregado de antecedentes + entrevista (revisión optimista). */
+export function fetchPatientHealth(patientId: string): Promise<{ data: PatientHealth }> {
+  return apiFetch<{ data: PatientHealth }>(`/api/patients/${patientId}/health`);
+}
+
+export function savePatientHealthApi(patientId: string, body: SaveHealthInput): Promise<{ data: PatientHealth }> {
+  return apiFetch<{ data: PatientHealth }>(`/api/patients/${patientId}/health`, {
+    method: "PUT",
+    body: JSON.stringify(body),
+  });
+}
+
+export function fetchAnamnesisHistory(patientId: string): Promise<{ data: Array<{ id: string; version: number; createdAt: string; createdBy: string }> }> {
+  return apiFetch<{ data: Array<{ id: string; version: number; createdAt: string; createdBy: string }> }>(
+    `/api/patients/${patientId}/anamnesis/history`,
+  );
+}
+
+export function fetchAnamnesisVersion(
+  patientId: string,
+  versionId: string,
+): Promise<{ data: { id: string; version: number; answers: AnamnesisAnswers; createdAt: string; createdBy: string } }> {
+  return apiFetch<{ data: { id: string; version: number; answers: AnamnesisAnswers; createdAt: string; createdBy: string } }>(
+    `/api/patients/${patientId}/anamnesis/${versionId}`,
+  );
 }

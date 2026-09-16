@@ -1,6 +1,6 @@
 import { activeFindingsAsOf, ODONTOGRAM_STANDARD } from "@odentia/clinical";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Badge, Button, Checkbox, Field, FieldLabel, Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Textarea } from "@odentia/ui";
+import { Badge, Button, Checkbox, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, Field, FieldLabel, Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Textarea } from "@odentia/ui";
 import { FormDrawer } from "@odentia/ui-patterns";
 import { useEffect, useId, useRef, useState, type PointerEvent } from "react";
 import { createPortal } from "react-dom";
@@ -16,6 +16,18 @@ const PURPOSES: Record<OdontogramAssessment["purpose"], string> = {
   legal: "Solicitud judicial",
   personal: "Solicitud personal",
 };
+
+interface PrintableSnapshot {
+  entries: OdontogramEntry[];
+  date?: string;
+  specifications?: string;
+  observations?: string;
+  examinerName?: string;
+  registrationNumber?: string;
+  signature?: number[][][];
+  patientName?: string;
+  draft: boolean;
+}
 
 export function OdontogramAssessments({ patientId, history, readOnly, disabled, beforeWrite, onPendingChange }: {
   patientId: string;
@@ -38,7 +50,9 @@ export function OdontogramAssessments({ patientId, history, readOnly, disabled, 
   const [confirmed, setConfirmed] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [printDocument, setPrintDocument] = useState<OdontogramAssessment | null>(null);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [printDocument, setPrintDocument] = useState<PrintableSnapshot | null>(null);
+  const previewTitleRef = useRef<HTMLHeadingElement>(null);
   const query = useQuery({
     queryKey: ["odontogram-assessments", patientId],
     queryFn: () => apiFetch<{ data: OdontogramAssessment[] }>(`/api/patients/${patientId}/odontogram/assessments`),
@@ -52,6 +66,13 @@ export function OdontogramAssessments({ patientId, history, readOnly, disabled, 
     queryFn: () => apiFetch<{ data: PatientFull }>(`/api/patients/${patientId}`),
   });
   const documentEntries = assessment?.entries ?? activeFindingsAsOf(history);
+  const draftName = patientQuery.data?.data.displayName ?? undefined;
+  const preview: PrintableSnapshot = assessment
+    ? { entries: assessment.entries, date: assessment.createdAt, specifications: assessment.specifications, observations: assessment.observations, examinerName: assessment.examinerName, registrationNumber: assessment.registrationNumber, signature: assessment.signature, patientName: `${assessment.patientName} · HC-${String(assessment.patientNumber).padStart(6, "0")}`, draft: false }
+    : { entries: documentEntries, specifications: "", observations: "", patientName: draftName, draft: true };
+  const previewLabel = assessment
+    ? `${new Date(assessment.createdAt).toLocaleString("es-PE")} · ${PURPOSES[assessment.purpose]} · ${assessment.examinerName}`
+    : "Borrador actual · sin firmar";
 
   useEffect(() => {
     if (!printDocument) return;
@@ -102,20 +123,18 @@ export function OdontogramAssessments({ patientId, history, readOnly, disabled, 
 
   return <section className="min-w-0 rounded-lg border p-4 sm:p-6" aria-label="Documento normativo del odontograma">
     <div className="flex flex-wrap items-start justify-between gap-4">
-      <div className="space-y-1"><h3 className="text-lg font-semibold">Evaluaciones del odontograma</h3><p className="text-sm text-muted-foreground">{ODONTOGRAM_STANDARD} · nomenclatura FDI. Cada evaluación firmada conserva una copia inalterable de sus hallazgos.</p></div>
-      {!readOnly && <Button disabled={disabled || pending || query.isPending} onClick={() => { setError(null); setOpen(true); }}>Registrar evaluación</Button>}
+      <div className="min-w-0 flex-1 space-y-1"><h3 className="text-lg font-semibold">Evaluaciones del odontograma</h3><p className="text-sm text-muted-foreground">{ODONTOGRAM_STANDARD} (RM 559-2022-MINSA). El gráfico operativo es una vista de trabajo; solo la evaluación firmada conserva el documento inalterable con sus hallazgos (numerales 5.6, 5.8 y 5.10).</p></div>
+      <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+        {!readOnly && <Button disabled={disabled || pending || query.isPending} onClick={() => { setError(null); setOpen(true); }}>Registrar evaluación</Button>}
+        <Button variant="outline" onClick={() => setPreviewOpen(true)}>Ver documento normativo</Button>
+      </div>
     </div>
     {query.isError && <p role="alert" className="mt-3 text-sm text-destructive">{query.error.message} <Button variant="link" onClick={() => query.refetch()}>Reintentar</Button></p>}
     <div className="my-4 flex flex-wrap items-end gap-3">
-      <Field className="w-full sm:max-w-sm"><FieldLabel htmlFor={`${id}-assessment`}>Documento</FieldLabel><Select value={selected} onValueChange={(value) => setSelected(value ?? "current")} items={{ current: "Estado actual · no firmado", ...Object.fromEntries(assessments.map((item) => [item.id, `${new Date(item.createdAt).toLocaleString("es-PE")} · ${PURPOSES[item.purpose]}`])) }}><SelectTrigger id={`${id}-assessment`}><SelectValue /></SelectTrigger><SelectContent><SelectItem value="current">Estado actual · no firmado</SelectItem>{assessments.map((item) => <SelectItem key={item.id} value={item.id}>{new Date(item.createdAt).toLocaleString("es-PE")} · {PURPOSES[item.purpose]}</SelectItem>)}</SelectContent></Select></Field>
-      {assessment ? <><Badge variant="outline">Evaluación firmada · solo lectura</Badge><Button variant="outline" onClick={() => setPrintDocument(assessment)}>Imprimir evaluación</Button></> : <Badge variant="outline">Vista de trabajo · no es evaluación firmada</Badge>}
+      <Field className="w-full sm:max-w-md"><FieldLabel htmlFor={`${id}-assessment`}>Documento</FieldLabel><Select value={selected} onValueChange={(value) => setSelected(value ?? "current")} items={{ current: "Borrador actual · sin firmar", ...Object.fromEntries(assessments.map((item) => [item.id, `${new Date(item.createdAt).toLocaleString("es-PE")} · ${PURPOSES[item.purpose]} · ${item.examinerName}`])) }}><SelectTrigger id={`${id}-assessment`}><SelectValue /></SelectTrigger><SelectContent><SelectItem value="current">Borrador actual · sin firmar</SelectItem>{assessments.map((item) => <SelectItem key={item.id} value={item.id}>{new Date(item.createdAt).toLocaleString("es-PE")} · {PURPOSES[item.purpose]} · {item.examinerName}</SelectItem>)}</SelectContent></Select></Field>
+      {assessment ? <Badge variant="outline">Evaluación firmada · solo lectura</Badge> : <Badge variant="outline">Vista de trabajo · no es evaluación firmada</Badge>}
     </div>
-    <details>
-      <summary className="cursor-pointer text-sm font-medium">Ver gráfico normativo completo</summary>
-      <div className="mt-4 min-w-0 rounded-lg bg-white p-3 text-black">
-        <OdontogramDocument entries={documentEntries} date={assessment?.createdAt} specifications={assessment?.specifications} observations={assessment?.observations} examinerName={assessment?.examinerName} registrationNumber={assessment?.registrationNumber} signature={assessment?.signature} patientName={assessment ? `${assessment.patientName} · HC-${String(assessment.patientNumber).padStart(6, "0")}` : patientQuery.data?.data.displayName} />
-      </div>
-    </details>
+    {assessment && <p className="mb-4 text-sm text-muted-foreground">{previewLabel} · COP {assessment.registrationNumber} · {assessment.entries.length} hallazgos conservados.</p>}
     <FormDrawer open={open} onClose={() => setOpen(false)} title="Registrar evaluación del odontograma" description="Confirma la evaluación clínica completa. Se conservarán los hallazgos observados actuales, la fecha y tu firma; las correcciones posteriores no alterarán este documento." onSubmit={save} isDirty={dirty} isSubmitting={pending} error={error} submitLabel="Firmar y conservar evaluación" submitDisabled={disabled || readOnly || reviewCount > 0 || !confirmed} className="data-[swipe-axis=x]:sm:[--drawer-content-width:min(48rem,calc(100vw-2rem))]">
       <div className="flex flex-col gap-4">
         {reviewCount > 0 && <p role="alert" className="rounded-lg border p-3 text-sm">Revisa los {reviewCount} registros anteriores antes de firmar. Registra el hallazgo completo y corrige el registro previo con motivo; no se pueden asumir sus datos faltantes.</p>}
@@ -128,7 +147,23 @@ export function OdontogramAssessments({ patientId, history, readOnly, disabled, 
         <label className="flex items-start gap-2 text-sm"><Checkbox checked={confirmed} onCheckedChange={(value) => setConfirmed(value === true)} disabled={pending} />Confirmo que he evaluado al paciente y que estos son los hallazgos clínicos observados, no procedimientos propuestos.</label>
       </div>
     </FormDrawer>
-    {printDocument && typeof document !== "undefined" && createPortal(<div className="odontogram-print-target"><style>{`@media screen {.odontogram-print-target{display:none}} @media print {body.odontogram-printing > :not(.odontogram-print-target){display:none!important} .odontogram-print-target{display:block!important;color:black;background:white}}`}</style><OdontogramDocument entries={printDocument.entries} date={printDocument.createdAt} specifications={printDocument.specifications} observations={printDocument.observations} examinerName={printDocument.examinerName} registrationNumber={printDocument.registrationNumber} signature={printDocument.signature} patientName={`${printDocument.patientName} · HC-${String(printDocument.patientNumber).padStart(6, "0")}`} /></div>, document.body)}
+    <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
+      <DialogContent initialFocus={previewTitleRef} className="max-h-[90vh] w-full overflow-y-auto sm:max-w-4xl">
+        <DialogHeader>
+          <DialogTitle ref={previewTitleRef} tabIndex={-1}>Documento normativo del odontograma</DialogTitle>
+          <DialogDescription>{preview.draft ? "Borrador actual sin firmar: lectura del estado de trabajo. Solo la evaluación firmada es el documento conservado e inalterable." : `Evaluación firmada · ${previewLabel}. Copia inalterable de sus hallazgos.`}</DialogDescription>
+        </DialogHeader>
+        <div className="min-w-0 rounded-lg bg-white p-3 text-black">
+          {preview.draft && <p className="mb-2 rounded border border-dashed p-2 text-center text-xs font-semibold uppercase tracking-wide">Borrador · sin firma · no es documento firmado</p>}
+          <OdontogramDocument entries={preview.entries} date={preview.date} specifications={preview.specifications} observations={preview.observations} examinerName={preview.examinerName} registrationNumber={preview.registrationNumber} signature={preview.signature} patientName={preview.patientName} />
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setPreviewOpen(false)}>Cerrar</Button>
+          <Button onClick={() => { setPreviewOpen(false); setPrintDocument(preview); }}>{preview.draft ? "Imprimir borrador (sin firmar)" : "Imprimir / guardar PDF"}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+    {printDocument && typeof document !== "undefined" && createPortal(<div className="odontogram-print-target"><style>{`@media screen {.odontogram-print-target{display:none}} @page {size:A4; margin:11mm} @media print {body.odontogram-printing > :not(.odontogram-print-target){display:none!important} .odontogram-print-target{display:block!important;color:#000;background:#fff} .odontogram-print-target .odontogram-document{max-width:none;overflow:visible}}`}</style>{printDocument.draft && <p style={{ textAlign: "center", fontSize: 12, fontWeight: 700 }}>BORRADOR · SIN FIRMA · NO ES DOCUMENTO FIRMADO</p>}<OdontogramDocument entries={printDocument.entries} date={printDocument.date} specifications={printDocument.specifications} observations={printDocument.observations} examinerName={printDocument.examinerName} registrationNumber={printDocument.registrationNumber} signature={printDocument.signature} patientName={printDocument.patientName} /></div>, document.body)}
   </section>;
 }
 

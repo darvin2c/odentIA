@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { Link } from "@tanstack/react-router";
 import { Badge, Button, Card, CardContent, CardHeader, CardTitle } from "@odentia/ui";
 import { useState } from "react";
 import { apiFetch } from "../../lib/api";
@@ -8,12 +9,15 @@ import {
   type EncounterDetail,
   type TimelineItem,
 } from "../../lib/patients";
+import { documentCategoryLabel } from "../../lib/patient-overview";
+import { DocumentOpenButton } from "./document-open-button";
 import { EncounterDetailView } from "./encounter-detail-view";
 
 /**
- * Tarjeta autocontenida de una atención finalizada a partir de un
- * TimelineItem: resumen siempre visible y detalle expandible con carga
- * perezosa (GET /api/patients/:id/encounters/:encId).
+ * Atención finalizada como unidad clínica: motivo, evolución, procedimientos
+ * con diagnósticos, tratamientos vinculados, documentos relacionados,
+ * indicaciones y siguiente paso. Detalle expandible con carga perezosa
+ * (GET /api/patients/:id/encounters/:encId).
  */
 export function EncounterHistoryCard({
   patientId,
@@ -32,6 +36,10 @@ export function EncounterHistoryCard({
   const regionId = `encounter-detail-${item.refId}`;
   const procedures = item.procedures ?? [];
   const teeth = item.toothNumbers ?? [];
+  const diagnoses = item.diagnoses ?? (item.diagnosisCode ? [item.diagnosisCode] : []);
+  const planned = item.plannedItems ?? [];
+  const documents = item.documents ?? [];
+  const planBudgetId = planned.find((link) => link.budgetId)?.budgetId;
 
   return (
     <Card>
@@ -42,7 +50,7 @@ export function EncounterHistoryCard({
         </div>
         <p className="text-xs text-muted-foreground">
           <time dateTime={item.createdAt}>{timeAgo(item.createdAt)}</time>
-          {item.diagnosisCode ? ` · CIE-10 ${item.diagnosisCode}` : ""}
+          {diagnoses.length > 0 ? ` · CIE-10 ${diagnoses.join(", ")}` : ""}
         </p>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
@@ -61,20 +69,56 @@ export function EncounterHistoryCard({
             ))}
           </ul>
         ) : null}
+        {planned.length > 0 ? (
+          <div className="flex flex-col gap-1">
+            <p className="text-xs font-medium text-muted-foreground">Tratamientos vinculados del presupuesto</p>
+            <ul className="flex flex-col gap-1 text-sm" aria-label="Tratamientos vinculados">
+              {planned.map((link) => (
+                <li key={link.id}>
+                  {link.title}
+                  {link.toothNumber != null ? <span className="text-muted-foreground"> · P{link.toothNumber}</span> : null}
+                </li>
+              ))}
+            </ul>
+            <div>
+              <Button variant="link" size="sm" nativeButton={false} render={<Link to="/patients/$patientId" params={{ patientId }} search={{ tab: "plan", ...(planBudgetId ? { budgetId: planBudgetId } : {}) } as { tab: "plan" }} />}>
+                Ver presupuesto
+              </Button>
+            </div>
+          </div>
+        ) : null}
+        {documents.length > 0 ? (
+          <div className="flex flex-col gap-1">
+            <p className="text-xs font-medium text-muted-foreground">
+              Documentos relacionados ({documents.length})
+            </p>
+            <ul className="flex flex-col gap-1 text-sm" aria-label="Documentos relacionados">
+              {documents.map((doc) => (
+                <li key={doc.id} className="flex flex-wrap items-center gap-2">
+                  <span>{doc.label} <span className="text-muted-foreground">· {documentCategoryLabel(doc.category)}</span></span>
+                  <DocumentOpenButton patientId={patientId} documentId={doc.id} label={doc.label} />
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+        {item.indications ? (
+          <p className="text-sm"><span className="font-medium">Indicaciones: </span>{item.indications}</p>
+        ) : null}
         <p className="text-xs text-muted-foreground">
-          {typeof item.documentsCount === "number"
+          {typeof item.documentsCount === "number" && documents.length === 0
             ? `${item.documentsCount} documento${item.documentsCount === 1 ? "" : "s"} · `
             : ""}
           {item.nextStep ? `Paso siguiente: ${item.nextStep} · ` : ""}
           {item.nextAppointmentAt ? (
-            <time dateTime={item.nextAppointmentAt}>Próxima cita: {new Date(item.nextAppointmentAt).toLocaleString("es-PE")}</time>
+            <time dateTime={item.nextAppointmentAt}>Próxima revisión sugerida: {new Date(item.nextAppointmentAt).toLocaleString("es-PE")}</time>
           ) : (
-            "Sin próxima cita"
+            "Sin próxima revisión sugerida"
           )}
         </p>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" nativeButton={false} render={<a href={`/patients/${patientId}/encounters/${item.refId}`} />}>
-            Abrir
+          <Button variant="outline" size="sm" nativeButton={false} render={<Link to="/patients/$patientId/encounters/$encounterId" params={{ patientId, encounterId: item.refId }} />}>
+            Abrir atención
           </Button>
           <Button
             variant="ghost"
@@ -88,7 +132,7 @@ export function EncounterHistoryCard({
         </div>
         {expanded ? (
           <div id={regionId} className="border-t pt-3">
-            {detail.isLoading && <p className="text-sm text-muted-foreground">Cargando detalle…</p>}
+            {detail.isPending && <p className="text-sm text-muted-foreground">Cargando detalle…</p>}
             {detail.isError && (
               <p role="alert" className="text-sm text-destructive">
                 {detail.error.message}

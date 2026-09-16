@@ -21,6 +21,7 @@ import {
   Input,
   ScrollArea,
   Tabs,
+  TabsContent,
   TabsList,
   TabsTrigger,
   Select,
@@ -35,7 +36,6 @@ import { useId, useMemo, useState } from "react";
 import { ApiError, apiFetch } from "../lib/api";
 import { timeAgo, useCanWrite } from "../lib/crm";
 import {
-  parsePriceToCents,
   planStatusLabel,
   statusLabel,
   toothTypeLabel,
@@ -43,8 +43,14 @@ import {
   type PatientDocument,
   type PlanItem,
 } from "../lib/patients";
+import {
+  createTreatmentPlanApi,
+  fetchTreatmentPlans,
+} from "../lib/budgets";
 import { ToothSVG } from "./tooth-svg";
 import { Cie10Search } from "./patient/cie10-search";
+import { ServicePicker } from "./patient/service-picker";
+import { formatMoney, type ServiceCatalogItem } from "../lib/services";
 
 /** Las URL firmadas expiran: se consideran frescas 10 min y luego se regeneran. */
 const SIGNED_URL_STALE_MS = 10 * 60 * 1000;
@@ -137,6 +143,7 @@ export function ToothDrawer({
   open,
   onOpenChange,
   onChanged,
+  inline = false,
   beforeWrite,
   onPendingChange,
 }: {
@@ -152,6 +159,8 @@ export function ToothDrawer({
   historical?: boolean;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** Panel lateral embebido (escritorio): mismo cuerpo sin drawer encima. */
+  inline?: boolean;
   onChanged: () => void | Promise<void>;
   /** Vacía ediciones pendientes del llamador antes de escribir (p. ej. atención en curso). */
   beforeWrite?: () => Promise<void>;
@@ -193,10 +202,15 @@ export function ToothDrawer({
   const [diagPending, setDiagPending] = useState(false);
   const [diagError, setDiagError] = useState<string | null>(null);
   const [diagErrors, setDiagErrors] = useState<string[]>([]);
+  // Plan clínico destino de la indicación: obligatorio, sin creación silenciosa.
+  const [treatPlanId, setTreatPlanId] = useState("");
+  const [treatNewPlan, setTreatNewPlan] = useState(false);
+  const [treatPlanTitle, setTreatPlanTitle] = useState("Plan de tratamiento");
+  const [treatPlanPending, setTreatPlanPending] = useState(false);
+  const [treatPlanError, setTreatPlanError] = useState<string | null>(null);
 
-  const [treatTitle, setTreatTitle] = useState("");
+  const [treatService, setTreatService] = useState<ServiceCatalogItem | null>(null);
   const [treatDetail, setTreatDetail] = useState("");
-  const [treatPrice, setTreatPrice] = useState("");
   const [treatCie, setTreatCie] = useState("");
   const [treatPending, setTreatPending] = useState(false);
   const [treatError, setTreatError] = useState<string | null>(null);
@@ -206,7 +220,7 @@ export function ToothDrawer({
   const [voidPending, setVoidPending] = useState(false);
   const [voidError, setVoidError] = useState<string | null>(null);
 
-  const busy = diagPending || treatPending || voidPending;
+  const busy = diagPending || treatPending || voidPending || treatPlanPending;
   const fieldDisabled = !canMutate || disabled || busy;
 
   const def = condition ? findingDefinition(condition) : undefined;
@@ -354,7 +368,47 @@ export function ToothDrawer({
     queryKey: ["patient-documents", patientId],
     queryFn: () => apiFetch<{ data: PatientDocument[] }>(`/api/patients/${patientId}/documents`),
   });
+  // Planes del paciente como destino de la indicación.
+  const treatmentPlansQuery = useQuery({
+    queryKey: ["treatment-plans", patientId],
+    queryFn: () => fetchTreatmentPlans(patientId),
+  });
+  const planOptions = useMemo(
+    () => treatmentPlansQuery.data?.data ?? [],
+    [treatmentPlansQuery.data],
+  );
 
+  // Alta explícita del plan desde el drawer (origen: la atención abierta).
+  const createTreatmentPlan = async (event: React.FormEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (!canMutate || disabled || busy || treatPlanPending) return;
+    if (!encounterId) {
+      setTreatPlanError("Abre una atención en curso para crear el plan.");
+      return;
+    }
+    const title = treatPlanTitle.trim();
+    if (!title) {
+      setTreatPlanError("Ingresa el título del nuevo plan.");
+      return;
+    }
+    setTreatPlanPending(true);
+    onPendingChange?.(true);
+    setTreatPlanError(null);
+    try {
+      await beforeWrite?.();
+      const created = await createTreatmentPlanApi(patientId, { title, originEncounterId: encounterId });
+      await queryClient.invalidateQueries({ queryKey: ["treatment-plans", patientId] });
+      setTreatPlanId(created.data.id);
+      setTreatNewPlan(false);
+      setTreatPlanTitle("Plan de tratamiento");
+    } catch (err) {
+      setTreatPlanError(mutationMessage(err, "No se pudo crear el plan."));
+    } finally {
+      setTreatPlanPending(false);
+      onPendingChange?.(false);
+    }
+  };
   const shownTeeth = multi && teeth.length > MAX_HEAD_TEETH ? teeth.slice(0, MAX_HEAD_TEETH) : teeth;
   const hiddenCount = teeth.length - shownTeeth.length;
   const title =
@@ -440,14 +494,20 @@ export function ToothDrawer({
   const submitTreatment = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!canMutate || disabled || busy || teeth.length === 0) return;
-    const parsed = parsePriceToCents(treatPrice);
-    if (!parsed.ok) {
-      setTreatError("Monto inválido. Usa un número con hasta 2 decimales (ej. 150.50) o déjalo vacío.");
+    if (!treatService) {
+      setTreatError("Selecciona un servicio del catálogo.");
       return;
     }
-    const trimmedTitle = treatTitle.trim();
-    if (!trimmedTitle) {
-      setTreatError("El título es obligatorio.");
+    if (treatService.priceCents === null) {
+      setTreatError("Ese tratamiento aún no tiene tarifa: configúrala en el tarifario antes de cotizar.");
+      return;
+    }
+    if (!treatPlanId) {
+      setTreatError("Elige el plan clínico donde se indicará el tratamiento.");
+      return;
+    }
+    if (!encounterId) {
+      setTreatError("Abre una atención en curso para indicar el tratamiento.");
       return;
     }
     setTreatPending(true);
@@ -456,27 +516,25 @@ export function ToothDrawer({
     try {
       await beforeWrite?.();
       const cieCode = treatCie.trim();
-      await Promise.all(
-        teeth.map((toothNumber) =>
-          apiFetch<{ data: PlanItem }>(`/api/patients/${patientId}/plan/items`, {
-            method: "POST",
-            body: JSON.stringify({
-              title: trimmedTitle,
-              detail: treatDetail.trim() === "" ? null : treatDetail.trim(),
-              toothNumber,
-              diagnosisCode: cieCode === "" ? null : cieCode,
-              priceCents: parsed.cents,
-              currency: "PEN",
-            }),
-          }),
-        ),
-      );
-      setTreatTitle("");
+      await apiFetch<{ data: PlanItem[] }>(`/api/patients/${patientId}/plan/items/batch`, {
+        method: "POST",
+        body: JSON.stringify({
+          planId: treatPlanId,
+          sourceEncounterId: encounterId,
+          serviceId: treatService.id,
+          toothNumbers: teeth,
+          detail: treatDetail.trim() === "" ? null : treatDetail.trim(),
+          diagnosisCode: cieCode === "" ? null : cieCode,
+        }),
+      });
+      setTreatService(null);
       setTreatDetail("");
-      setTreatPrice("");
       setTreatCie("");
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["plan", patientId] }),
+        queryClient.invalidateQueries({ queryKey: ["treatment-plans", patientId] }),
+        queryClient.invalidateQueries({ queryKey: ["budgets", patientId] }),
+        queryClient.invalidateQueries({ queryKey: ["budget", patientId] }),
         queryClient.invalidateQueries({ queryKey: ["patient-summary", patientId] }),
       ]);
     } catch (err) {
@@ -526,9 +584,9 @@ export function ToothDrawer({
     if (busy) return;
     onOpenChange(false);
   };
-
   const diagDirty = draftDirty;
-  const treatDirty = treatTitle !== "" || treatDetail !== "" || treatPrice !== "" || treatCie !== "";
+  const treatDirty =
+    treatService !== null || treatDetail !== "" || treatCie !== "" || treatPlanId !== "";
   const isDirty = canMutate && (diagDirty || treatDirty);
   const activeError = mode === "diagnosis" ? (diagError ?? diagErrors[0] ?? null) : treatError;
   const faceEditing = canMutate && !disabled && !busy && !multi && scope === "surface" && !freehand;
@@ -589,37 +647,21 @@ export function ToothDrawer({
       </div>
     );
 
-  return (
-    <FormDrawer
-      open={open}
-      onClose={handleClose}
-      title={title}
-      description={description}
-      headerContent={headerContent}
-      hideSubmit={!canMutate || teeth.length === 0}
-      className={
-        multi
-          ? "data-[swipe-axis=x]:sm:[--drawer-content-width:min(56rem,calc(100vw-2rem))]"
-          : "data-[swipe-axis=x]:sm:[--drawer-content-width:min(48rem,calc(100vw-2rem))]"
-      }
-      onSubmit={(event) => {
-        if (mode === "diagnosis") void submitDiagnosis(event);
-        else void submitTreatment(event);
-      }}
-      isDirty={isDirty}
-      isSubmitting={busy}
-      error={activeError}
-      submitLabel={mode === "diagnosis" ? `Registrar diagnóstico${multi && !isGroup ? ` (${teeth.length})` : ""}` : `Agregar al plan${multi ? ` (${teeth.length})` : ""}`}
-      cancelLabel="Cerrar"
-      submitDisabled={fieldDisabled || teeth.length === 0}
-    >
+  const submitLabel =
+    mode === "diagnosis"
+      ? `Registrar diagnóstico${multi && !isGroup ? ` (${teeth.length})` : ""}`
+      : `Agregar al plan${multi ? ` (${teeth.length})` : ""}`;
+  const submit = (event: React.FormEvent): void => {
+    if (mode === "diagnosis") void submitDiagnosis(event);
+    else void submitTreatment(event);
+  };
+  const body = (
       <div className="flex flex-col gap-5">
         <Tabs value={mode} onValueChange={(value) => { if (value === "diagnosis" || value === "treatment") setMode(value); }}>
           <TabsList className="w-full" aria-label="Tipo de registro">
             <TabsTrigger value="diagnosis" disabled={busy || disabled}>Diagnóstico</TabsTrigger>
             <TabsTrigger value="treatment" disabled={busy || disabled}>Tratamiento</TabsTrigger>
           </TabsList>
-        </Tabs>
 
         {!canMutate ? (
           <p className="text-sm text-muted-foreground">
@@ -628,7 +670,7 @@ export function ToothDrawer({
               : "No tienes permiso para registrar cambios en estas piezas."}
           </p>
         ) : mode === "diagnosis" ? (
-          <div role="tabpanel" aria-label="Registrar diagnóstico" className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <TabsContent value="diagnosis" className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <Field className="sm:col-span-2">
               <FieldLabel htmlFor={`${uid}-condition`}>Hallazgo (NTS 188)</FieldLabel>
               <Select value={condition} items={Object.fromEntries(FINDINGS.map((f) => [f.code, f.label]))} onValueChange={selectCondition}>
@@ -889,33 +931,103 @@ export function ToothDrawer({
                 </ul>
               </div>
             )}
-          </div>
+          </TabsContent>
         ) : (
-          <div role="tabpanel" aria-label="Agregar tratamiento" className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <Field>
-              <FieldLabel htmlFor={`${uid}-treat-title`}>Título</FieldLabel>
-              <Input
-                id={`${uid}-treat-title`}
-                value={treatTitle}
-                onChange={(e) => setTreatTitle(e.currentTarget.value)}
-                placeholder="p. ej. Corona cerámica"
-                maxLength={300}
-                required
-                disabled={fieldDisabled}
-              />
+          <TabsContent value="treatment" className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <Field className="sm:col-span-2">
+              <FieldLabel htmlFor={`${uid}-treat-plan`}>Plan clínico (obligatorio)</FieldLabel>
+              <Select
+                value={treatPlanId}
+                onValueChange={(v) => setTreatPlanId(v ?? "")}
+                disabled={fieldDisabled || treatNewPlan}
+              >
+                <SelectTrigger id={`${uid}-treat-plan`} aria-label="Plan clínico destino">
+                  <SelectValue placeholder={treatmentPlansQuery.isLoading ? "Cargando planes…" : "Elige el plan clínico…"} />
+                </SelectTrigger>
+                <SelectContent>
+                  {planOptions.map((p) => (
+                    <SelectItem key={p.plan.id} value={p.plan.id}>
+                      {p.plan.title} · {p.status} ({p.pendingItems} pendientes)
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {planOptions.length === 0 && !treatmentPlansQuery.isLoading ? (
+                <p className="text-xs text-muted-foreground">Este paciente aún no tiene planes clínicos.</p>
+              ) : (
+                <p className="text-xs text-muted-foreground">La indicación nace en la atención abierta y vive en el plan, no en un presupuesto.</p>
+              )}
+              {!encounterId ? (
+                <p role="note" className="text-xs text-muted-foreground">Abre una atención en curso para indicar tratamientos desde aquí.</p>
+              ) : null}
+              {!treatNewPlan ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="mt-2 self-start"
+                  disabled={fieldDisabled || !encounterId}
+                  onClick={() => {
+                    setTreatNewPlan(true);
+                    setTreatPlanTitle("Plan de tratamiento");
+                    setTreatPlanError(null);
+                  }}
+                >
+                  Crear plan clínico
+                </Button>
+              ) : (
+                <form className="mt-2 flex flex-col gap-2 rounded-lg border p-3" onSubmit={(e) => void createTreatmentPlan(e)}>
+                  <Field>
+                    <FieldLabel htmlFor={`${uid}-treat-plan-title`}>Título del nuevo plan</FieldLabel>
+                    <Input
+                      id={`${uid}-treat-plan-title`}
+                      value={treatPlanTitle}
+                      onChange={(e) => setTreatPlanTitle(e.currentTarget.value)}
+                      placeholder="Plan de tratamiento"
+                      maxLength={200}
+                      disabled={fieldDisabled || treatPlanPending}
+                    />
+                  </Field>
+                  {treatPlanError && (
+                    <p role="alert" className="text-xs text-destructive">
+                      {treatPlanError}
+                    </p>
+                  )}
+                  <div className="flex gap-2">
+                    <Button type="submit" size="sm" disabled={fieldDisabled || treatPlanPending}>
+                      {treatPlanPending ? "Creando…" : "Crear y seleccionar"}
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      disabled={fieldDisabled || treatPlanPending}
+                      onClick={() => {
+                        setTreatNewPlan(false);
+                        setTreatPlanTitle("Plan de tratamiento");
+                        setTreatPlanError(null);
+                      }}
+                    >
+                      Volver
+                    </Button>
+                  </div>
+                </form>
+              )}
             </Field>
-            <Field>
-              <FieldLabel htmlFor={`${uid}-treat-price`}>Precio (PEN)</FieldLabel>
-              <Input
-                id={`${uid}-treat-price`}
-                value={treatPrice}
-                onChange={(e) => setTreatPrice(e.currentTarget.value)}
-                placeholder="150.50"
-                inputMode="decimal"
-                disabled={fieldDisabled}
-              />
-              <p className="text-xs text-muted-foreground">Monto en soles (PEN). Vacío = por definir.</p>
-            </Field>
+            <div className="sm:col-span-2">
+              <ServicePicker value={treatService?.id ?? ""} onChange={setTreatService} disabled={fieldDisabled} />
+            </div>
+            {treatService && <div className="rounded-lg border bg-muted/30 p-4 sm:col-span-2" aria-live="polite">
+              {treatService.priceCents === null ? (
+                <p className="text-sm">Sin tarifa: configúrala en el tarifario antes de cotizar.</p>
+              ) : (
+                <>
+                  <p className="text-sm">{teeth.length} pieza{multi ? "s" : ""} × {formatMoney(treatService.priceCents, treatService.currency)}</p>
+                  <p className="mt-1 text-xl font-semibold tabular-nums">{formatMoney(treatService.priceCents * teeth.length, treatService.currency)}</p>
+                </>
+              )}
+              <p className="mt-1 text-xs text-muted-foreground">Se agregará un tratamiento por pieza al presupuesto con la tarifa del catálogo vigente al guardar.</p>
+            </div>}
             <Field className="sm:col-span-2">
               <FieldLabel htmlFor={`${uid}-treat-detail`}>Detalle</FieldLabel>
               <Textarea
@@ -936,8 +1048,9 @@ export function ToothDrawer({
                 disabled={fieldDisabled}
               />
             </div>
-          </div>
+          </TabsContent>
         )}
+        </Tabs>
 
         <div className="flex flex-col gap-3">
           <h3 className="text-sm font-medium text-muted-foreground">Contexto clínico</h3>
@@ -951,12 +1064,7 @@ export function ToothDrawer({
               planQuery={planQuery}
               docsQuery={docsQuery}
               canMutate={canMutate && !disabled && !busy}
-              voidingId={voiding?.id ?? null}
-              voidReason={voidReason}
               voidPending={voidPending}
-              onVoidReason={setVoidReason}
-              onCancelVoid={cancelVoid}
-              onConfirmVoid={() => void confirmVoid()}
               defaultOpen={index === 0}
               onVoid={(id, label) => {
                 setVoiding({ id, label });
@@ -965,14 +1073,88 @@ export function ToothDrawer({
               }}
             />
           ))}
-          {voidError && (
-            <p role="alert" className="text-sm text-destructive">
-              {voidError}
-            </p>
-          )}
         </div>
       </div>
+  );
+  return (
+    <>
+    {inline ? (
+      <div className="flex min-h-0 flex-col gap-4" aria-label="Registro de la selección">
+        <div className="flex min-w-0 flex-col gap-1">
+          <h3 className="text-lg font-semibold">{title}</h3>
+          {description ? <p className="text-sm text-muted-foreground">{description}</p> : null}
+          {headerContent}
+        </div>
+        {activeError ? (
+          <p role="alert" className="text-sm text-destructive">
+            {activeError}
+          </p>
+        ) : null}
+        {body}
+        {canMutate && teeth.length > 0 ? (
+          <div>
+            <Button type="button" disabled={fieldDisabled || busy} onClick={submit}>
+              {busy ? "Guardando…" : submitLabel}
+            </Button>
+          </div>
+        ) : null}
+      </div>
+    ) : (
+    <FormDrawer
+      open={open && voiding === null}
+      onClose={handleClose}
+      title={title}
+      description={description}
+      headerContent={headerContent}
+      hideSubmit={!canMutate || teeth.length === 0}
+      className={
+        multi
+          ? "data-[swipe-axis=x]:sm:[--drawer-content-width:min(56rem,calc(100vw-2rem))]"
+          : "data-[swipe-axis=x]:sm:[--drawer-content-width:min(48rem,calc(100vw-2rem))]"
+      }
+      onSubmit={submit}
+      isDirty={isDirty}
+      isSubmitting={busy}
+      error={activeError}
+      submitLabel={submitLabel}
+      cancelLabel="Cerrar"
+      submitDisabled={fieldDisabled || teeth.length === 0}
+    >
+      {body}
     </FormDrawer>
+    )}
+    <FormDrawer
+      open={open && voiding !== null}
+      onClose={cancelVoid}
+      title="Anular registro odontológico"
+      description={voiding ? `Anulación de ${voiding.label}. El registro original y el motivo permanecerán en el historial.` : undefined}
+      onSubmit={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        void confirmVoid();
+      }}
+      isDirty={voidReason !== ""}
+      isSubmitting={voidPending}
+      error={voidError}
+      submitLabel="Confirmar anulación"
+      cancelLabel="Volver al registro"
+      submitDisabled={!canMutate || disabled}
+    >
+      <Field>
+        <FieldLabel htmlFor={`${uid}-void-reason`}>Motivo de la anulación (obligatorio)</FieldLabel>
+        <Textarea
+          id={`${uid}-void-reason`}
+          value={voidReason}
+          onChange={(event) => setVoidReason(event.target.value)}
+          placeholder="Ej. Registro duplicado, pieza equivocada…"
+          rows={4}
+          maxLength={500}
+          required
+          disabled={voidPending}
+        />
+      </Field>
+    </FormDrawer>
+    </>
   );
 }
 
@@ -984,12 +1166,7 @@ function ToothContext({
   planQuery,
   docsQuery,
   canMutate,
-  voidingId,
-  voidReason,
   voidPending,
-  onVoidReason,
-  onCancelVoid,
-  onConfirmVoid,
   defaultOpen,
   onVoid,
 }: {
@@ -1000,12 +1177,7 @@ function ToothContext({
   planQuery: PlanQueryState;
   docsQuery: DocsQueryState;
   canMutate: boolean;
-  voidingId: string | null;
-  voidReason: string;
   voidPending: boolean;
-  onVoidReason: (reason: string) => void;
-  onCancelVoid: () => void;
-  onConfirmVoid: () => void;
   defaultOpen: boolean;
   onVoid: (id: string, label: string) => void;
 }): React.JSX.Element {
@@ -1023,7 +1195,7 @@ function ToothContext({
   const openPlan = toothPlan.filter((item) => OPEN_PLAN_STATUSES.includes(item.status));
   const donePlan = toothPlan.filter((item) => !OPEN_PLAN_STATUSES.includes(item.status));
 
-  const toothDocs = (docsQuery.data?.data ?? []).filter((d) => d.toothNumber === toothNumber);
+  const toothDocs = (docsQuery.data?.data ?? []).filter((d) => d.toothNumbers.includes(toothNumber));
   const toothImages = toothDocs.filter(
     (d) => d.category === "radiografia" || d.category === "foto_clinica",
   );
@@ -1248,30 +1420,6 @@ function ToothContext({
                     {detailBits.length > 0 && (
                       <span className={`text-xs text-muted-foreground ${voided ? "line-through" : ""}`}>
                         {detailBits.join(" · ")}
-                      </span>
-                    )}
-                    {voidingId === entry.id && !voided && canMutate && (
-                      <span className="flex flex-col gap-2 pt-1">
-                        <label htmlFor={`void-reason-${entry.id}`} className="text-xs font-medium">
-                          Motivo de la anulación (obligatorio)
-                        </label>
-                        <Textarea
-                          id={`void-reason-${entry.id}`}
-                          value={voidReason}
-                          onChange={(event) => onVoidReason(event.target.value)}
-                          placeholder="Ej. Registro duplicado, pieza equivocada…"
-                          rows={2}
-                          maxLength={500}
-                          disabled={voidPending}
-                        />
-                        <span className="flex gap-2">
-                          <Button type="button" variant="destructive" size="xs" disabled={voidPending} onClick={onConfirmVoid}>
-                            Confirmar anulación
-                          </Button>
-                          <Button type="button" variant="ghost" size="xs" disabled={voidPending} onClick={onCancelVoid}>
-                            Cancelar
-                          </Button>
-                        </span>
                       </span>
                     )}
                   </li>

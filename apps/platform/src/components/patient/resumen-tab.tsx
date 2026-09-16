@@ -1,37 +1,35 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { Badge, Button, Card, CardContent, CardHeader, CardTitle, buttonVariants } from "@odentia/ui";
-import { KpiCard } from "@odentia/ui-patterns";
-import { ClipboardList } from "lucide-react";
-import { useState } from "react";
-import { apiFetch } from "../../lib/api";
+import { Button, Card, CardContent, CardHeader, CardTitle, Collapsible, CollapsibleContent, CollapsibleTrigger } from "@odentia/ui";
+import { ErrorState, LoadingState } from "@odentia/ui-patterns";
+import { ChevronDown, ClipboardList } from "lucide-react";
+import type { ReactNode } from "react";
+import { ApiError, apiFetch } from "../../lib/api";
 import { timeAgo, useCanWrite } from "../../lib/crm";
 import type {
-  AnamnesisAnswers,
-  ClinicalNote,
   PatientFull,
   PatientSummary,
-  PlanItem,
 } from "../../lib/patients";
-import { AnamnesisDrawer } from "./anamnesis-drawer";
-import { AntecedentesCards } from "./antecedentes-cards";
-
-export type ResumenTabTarget = "plan" | "historia" | "odontograma";
-
-function money(totalCents: number, currency: string): string {
-  try {
-    return new Intl.NumberFormat("es-PE", { style: "currency", currency }).format(totalCents / 100);
-  } catch {
-    return `${(totalCents / 100).toFixed(2)} ${currency}`;
-  }
+import { fetchPatientHealth } from "../../lib/patients";
+import { fetchTreatmentPlanDetail, fetchTreatmentPlans } from "../../lib/budgets";
+import { ageFrom } from "../../lib/patients";
+import {
+  sexLabel,
+} from "../../lib/patient-overview";
+function Field({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="min-w-0">
+      <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}</dt>
+      <dd className="break-words text-sm">{children}</dd>
+    </div>
+  );
 }
 
-function motivoOf(answers: AnamnesisAnswers | undefined): string {
-  if (!answers || typeof answers.motivoConsulta !== "string") return "";
-  return answers.motivoConsulta;
-}
+const missing = <span className="text-muted-foreground">No registrado</span>;
 
-/** Resumen clínico del paciente: alertas, diagnósticos, plan pendiente, última atención y antecedentes. */
+export type ResumenTabTarget = "plan" | "historia" | "odontograma" | "imagenes" | "antecedentes";
+
+/** Resumen breve de lectura: última atención, planes activos y filiación extendida. Sin formularios. */
 export function ResumenTab({
   patientId,
   detail,
@@ -44,19 +42,10 @@ export function ResumenTab({
   onTabChange: (tab: ResumenTabTarget, tooth?: number) => void;
 }) {
   const canWrite = useCanWrite();
-  const [anamnesisOpen, setAnamnesisOpen] = useState(false);
 
-  const allergiesQuery = useQuery({
-    queryKey: ["patient-allergies", patientId],
-    queryFn: () => apiFetch<{ data: unknown[] }>(`/api/patients/${patientId}/allergies`),
-  });
-  const conditionsQuery = useQuery({
-    queryKey: ["patient-conditions", patientId],
-    queryFn: () => apiFetch<{ data: unknown[] }>(`/api/patients/${patientId}/conditions`),
-  });
-  const medicationsQuery = useQuery({
-    queryKey: ["patient-medications", patientId],
-    queryFn: () => apiFetch<{ data: unknown[] }>(`/api/patients/${patientId}/medications`),
+  const healthQuery = useQuery({
+    queryKey: ["patient-health", patientId],
+    queryFn: () => fetchPatientHealth(patientId),
   });
 
   const summaryQuery = useQuery({
@@ -64,226 +53,235 @@ export function ResumenTab({
     queryFn: () => apiFetch<{ data: PatientSummary }>(`/api/patients/${patientId}/summary`),
     enabled: summary === undefined,
   });
-  const planQuery = useQuery({
-    queryKey: ["plan", patientId],
-    queryFn: () => apiFetch<{ data: PlanItem[] }>(`/api/patients/${patientId}/plan`),
-  });
-  const notesQuery = useQuery({
-    queryKey: ["patient-notes", patientId],
-    queryFn: () => apiFetch<{ data: ClinicalNote[] }>(`/api/patients/${patientId}/notes`),
-  });
-  const anamnesisQuery = useQuery({
-    queryKey: ["patient-anamnesis", patientId],
-    queryFn: () =>
-      apiFetch<{ data: { version: number; createdAt: string; answers: AnamnesisAnswers } }>(
-        `/api/patients/${patientId}/anamnesis`,
-      ),
-    retry: false,
+
+  const plansQuery = useQuery({
+    queryKey: ["treatment-plans", patientId],
+    queryFn: () => fetchTreatmentPlans(patientId),
   });
 
-  const triageLoaded =
-    allergiesQuery.isFetched && conditionsQuery.isFetched && medicationsQuery.isFetched && anamnesisQuery.isFetched;
+  const health = healthQuery.data?.data ?? null;
   const triageEmpty =
-    (allergiesQuery.data?.data.length ?? 0) === 0 &&
-    (conditionsQuery.data?.data.length ?? 0) === 0 &&
-    (medicationsQuery.data?.data.length ?? 0) === 0 &&
-    anamnesisQuery.data == null;
+    (health?.allergies.length ?? 0) === 0 &&
+    (health?.conditions.length ?? 0) === 0 &&
+    (health?.medications.length ?? 0) === 0 &&
+    health?.latestAnamnesis == null;
 
   const resolved = summary ?? summaryQuery.data?.data ?? null;
-  const notes = notesQuery.data?.data ?? [];
-  const pendingItems = (planQuery.data?.data ?? []).filter((i) => i.status === "pendiente").slice(0, 5);
-  const lastEncounter = resolved?.lastEncounter ?? null;
-  const unlinkedNote = notes.find((n) => n.encounterId == null) ?? null;
-  const anamnesis = anamnesisQuery.data?.data ?? null;
-  const motivo = motivoOf(anamnesis?.answers);
+  const patient = detail.patient;
+  const lastVisit = resolved?.lastVisit ?? null;
+  const plans = (plansQuery.data?.data ?? []).filter((p) => p.status === "En curso");
 
-  const totals = resolved?.planPending.totals ?? [];
-  const totalsText =
-    totals.length === 0
-      ? "Sin montos registrados"
-      : totals.map((t) => `${money(t.totalCents, t.currency)} (${t.count})`).join(" · ");
+  if (summaryQuery.isPending && resolved == null) return <LoadingState />;
+  if (summaryQuery.isError && resolved == null) {
+    return (
+      <ErrorState
+        error={summaryQuery.error instanceof ApiError ? summaryQuery.error.shape : null}
+        onRetry={() => void summaryQuery.refetch()}
+      />
+    );
+  }
 
   return (
     <div className="flex flex-col gap-4">
-      {canWrite && triageLoaded && triageEmpty ? (
+      {canWrite && healthQuery.isFetched && triageEmpty ? (
         <Card className="border-primary/40 bg-primary/5">
           <CardContent className="flex flex-wrap items-center justify-between gap-3 pt-4">
             <div className="flex items-start gap-2">
               <ClipboardList className="mt-0.5 size-4 text-primary" aria-hidden="true" />
               <div className="flex flex-col gap-0.5">
-                <p className="text-sm font-medium">Este paciente aún no tiene triaje clínico.</p>
+                <p className="text-sm font-medium">Este paciente aún no tiene antecedentes registrados.</p>
                 <p className="text-xs text-muted-foreground">
-                  Registra alergias, condiciones, medicación y anamnesis en un solo paso.
+                  Registra alergias, condiciones, medicación y entrevista en un solo guardado.
                 </p>
               </div>
             </div>
-            <Link
-              to="/patients/$patientId/triaje"
-              params={{ patientId }}
-              className={buttonVariants()}
-            >
-              Iniciar triaje
-            </Link>
+            <Button type="button" onClick={() => onTabChange("antecedentes")}>
+              Registrar antecedentes
+            </Button>
           </CardContent>
         </Card>
       ) : null}
-      <div className="grid gap-4 md:grid-cols-2">
-        <Card className="border-destructive/40">
-          <CardHeader>
-            <CardTitle className="text-destructive">Alertas médicas</CardTitle>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-2">
-            {detail.activeAllergies.length === 0 && detail.activeConditions.length === 0 && (
-              <p className="text-sm text-muted-foreground">Sin alertas médicas registradas.</p>
-            )}
-            {detail.activeAllergies.map((a) => (
-              <Badge key={a.id} variant={a.severity === "leve" ? "secondary" : "destructive"}>
-                Alergia: {a.substance} ({a.severity})
-              </Badge>
-            ))}
-            {detail.activeConditions.map((c) => (
-              <Badge key={c.id} variant="warning">
-                {c.name}
-              </Badge>
-            ))}
-            {detail.currentMedications.length > 0 && (
-              <div className="mt-1">
-                <p className="text-xs font-medium text-muted-foreground">Medicación actual</p>
-                {detail.currentMedications.map((m) => (
-                  <p key={m.id} className="text-sm">
-                    {m.name}
-                    {m.dose && <span className="text-muted-foreground"> · {m.dose}</span>}
-                  </p>
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-        <div className="flex flex-col gap-4">
-          <KpiCard
-            title="Ítems pendientes del plan"
-            value={resolved?.planPending.count ?? (planQuery.data ? pendingItems.length : "—")}
-            description={totalsText}
-          />
-          <Card>
-            <CardHeader>
-              <CardTitle>Próximos por atender</CardTitle>
-            </CardHeader>
-            <CardContent className="flex flex-col gap-2">
-              {planQuery.isError && (
-                <p role="alert" className="text-sm text-destructive">
-                  No se pudo cargar el plan de tratamiento.
-                </p>
-              )}
-              {pendingItems.map((item) => (
-                <div
-                  key={item.id}
-                  className="flex items-center justify-between gap-2 border-b py-1.5 text-sm last:border-0"
-                >
-                  <span>
-                    {item.title}
-                    {item.toothNumber != null && (
-                      <span className="text-muted-foreground"> · P{item.toothNumber}</span>
-                    )}
-                  </span>
-                  {item.priceCents != null && (
-                    <span className="text-muted-foreground">{money(item.priceCents, item.currency)}</span>
-                  )}
-                </div>
-              ))}
-              <div>
-                <Button size="sm" variant="outline" onClick={() => onTabChange("plan")}>
-                  Ver plan
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Última atención</CardTitle>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-2">
-            {lastEncounter ? (
-              <div className="flex flex-col gap-1">
-                <p className="text-sm">
-                  {lastEncounter.reason || "Atención finalizada"}{" "}
-                  <span className="text-muted-foreground">· {timeAgo(lastEncounter.finalizedAt)}</span>
-                </p>
-                {lastEncounter.nextStep && <p className="text-sm">{lastEncounter.nextStep}</p>}
-                <div>
-                  <Button size="sm" variant="outline" onClick={() => onTabChange("historia")}>
-                    Ver historia
-                  </Button>
-                </div>
-              </div>
-            ) : unlinkedNote ? (
-              <div className="flex flex-col gap-1">
-                <p className="text-sm">{unlinkedNote.note}</p>
-                <p className="text-xs text-muted-foreground">
-                  {timeAgo(unlinkedNote.createdAt)}
-                  {unlinkedNote.diagnosisCode && (
-                    <>
-                      {" · "} <Badge>{unlinkedNote.diagnosisCode}</Badge>
-                    </>
-                  )}
-                </p>
-                <div>
-                  <Button size="sm" variant="outline" onClick={() => onTabChange("historia")}>
-                    Ver historia
-                  </Button>
-                </div>
-              </div>
-            ) : (
-              <p className="text-sm text-muted-foreground">Sin atenciones ni notas clínicas.</p>
-            )}
-            {resolved?.openEncounterId && (
-              <p className="text-sm text-muted-foreground">Con borrador de atención abierto.</p>
-            )}
-            {resolved?.nextAppointmentAt && (
-              <p className="text-sm">
-                Próxima cita:{" "}
-                {new Date(resolved.nextAppointmentAt).toLocaleDateString("es-PE", {
-                  day: "numeric",
-                  month: "short",
-                  year: "numeric",
-                })}{" "}
-                <span className="text-muted-foreground">({timeAgo(resolved.nextAppointmentAt)})</span>
+      <Card>
+        <CardHeader>
+          <CardTitle>Última atención</CardTitle>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-2">
+          {lastVisit ? (
+            <div className="flex flex-col gap-2">
+              <p className="text-sm font-medium">
+                {lastVisit.reason || "Atención finalizada"}{" "}
+                <span className="font-normal text-muted-foreground">
+                  · {timeAgo(lastVisit.finalizedAt ?? "")}
+                </span>
               </p>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card className="md:col-span-2">
-          <CardHeader>
-            <CardTitle>Última anamnesis</CardTitle>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-2">
-            {anamnesisQuery.isError ? (
-              <p className="text-sm text-muted-foreground">Sin anamnesis.</p>
-            ) : anamnesis ? (
-              <>
-                <p className="text-sm">
-                  Versión {anamnesis.version} · {timeAgo(anamnesis.createdAt)}
+              {lastVisit.evolution ? (
+                <p className="whitespace-pre-wrap text-sm">
+                  {lastVisit.evolution.length > 280 ? `${lastVisit.evolution.slice(0, 280)}…` : lastVisit.evolution}
                 </p>
-                {motivo !== "" && <p className="text-sm text-muted-foreground">{motivo}</p>}
-              </>
-            ) : (
-              <p className="text-sm text-muted-foreground">Cargando…</p>
-            )}
-            <div>
-              <Button disabled={!canWrite} onClick={() => setAnamnesisOpen(true)}>
-                Nueva anamnesis
+              ) : null}
+              <div>
+                <Link
+                  to="/patients/$patientId/encounters/$encounterId"
+                  params={{ patientId, encounterId: lastVisit.encounterId }}
+                  className="text-sm font-medium text-accent hover:text-accent-foreground"
+                >
+                  Abrir esta atención
+                </Link>
+              </div>
+            </div>
+          ) : (
+            <div className="flex flex-col items-start gap-2">
+              <p className="text-sm text-muted-foreground">Sin atenciones registradas para este paciente.</p>
+              <p className="text-xs text-muted-foreground">La atención se inicia desde la cabecera de la ficha.</p>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Planes en curso</CardTitle>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-2">
+          {plansQuery.isPending ? (
+            <p className="text-sm text-muted-foreground">Cargando planes…</p>
+          ) : plansQuery.isError ? (
+            <p role="alert" className="text-sm text-destructive">
+              No se pudieron cargar los planes.{" "}
+              <Button type="button" size="sm" variant="outline" onClick={() => void plansQuery.refetch()}>
+                Reintentar
+              </Button>
+            </p>
+          ) : plans.length === 0 ? (
+            <div className="flex flex-col items-start gap-2">
+              <p className="text-sm text-muted-foreground">Sin planes en curso. Los planes se indican durante una atención.</p>
+              <Button size="sm" variant="outline" onClick={() => onTabChange("plan")}>
+                Ver planes de tratamiento
               </Button>
             </div>
-          </CardContent>
+          ) : (
+            plans.map((entry) => (
+              <PlanBrief
+                key={entry.plan.id}
+                patientId={patientId}
+                planId={entry.plan.id}
+                title={entry.plan.title}
+                isLegacy={entry.plan.isLegacy}
+                totalItems={entry.totalItems}
+                pendingItems={entry.pendingItems}
+              />
+            ))
+          )}
+        </CardContent>
+      </Card>
+
+      <Collapsible>
+        <Card>
+          <CardHeader className="pb-3">
+            <CollapsibleTrigger className="text-base font-semibold">
+              <span className="flex items-center gap-1">
+                Filiación extendida <ChevronDown aria-hidden className="size-4" />
+              </span>
+            </CollapsibleTrigger>
+          </CardHeader>
+          <CollapsibleContent>
+            <CardContent>
+              <dl className="grid min-w-0 grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
+                <Field label="Nombre completo">{detail.displayName}</Field>
+                <Field label="Documento">
+                  {patient.docType && patient.docNumber
+                    ? `${patient.docType} ${patient.docNumber}`
+                    : (patient.docNumber ?? missing)}
+                </Field>
+                <Field label="Nacimiento / edad">
+                  {patient.birthDate
+                    ? `${patient.birthDate}${ageFrom(patient.birthDate) ? ` · ${ageFrom(patient.birthDate)} años` : ""}`
+                    : missing}
+                </Field>
+                <Field label="Sexo">{patient.sex ? sexLabel(patient.sex) : missing}</Field>
+                <Field label="Teléfono">{patient.phone ?? missing}</Field>
+                <Field label="Correo">{patient.email ?? missing}</Field>
+                <Field label="Dirección">{patient.address ?? missing}</Field>
+                <Field label="Seguro">
+                  {patient.insuranceType
+                    ? `${patient.insuranceType}${patient.insuranceDetail ? ` · ${patient.insuranceDetail}` : ""}`
+                    : missing}
+                </Field>
+                <Field label="Tutor / apoderado">{detail.guardian?.displayName ?? missing}</Field>
+                <Field label="Contacto de emergencia">
+                  {patient.emergencyContactName
+                    ? `${patient.emergencyContactName}${patient.emergencyContactPhone ? ` · ${patient.emergencyContactPhone}` : ""}`
+                    : missing}
+                </Field>
+                <Field label="Consentimiento de datos">
+                  {typeof patient.dataConsentAt === "string"
+                    ? `Registrado el ${new Date(patient.dataConsentAt).toLocaleDateString("es-PE", { day: "numeric", month: "short", year: "numeric" })}`
+                    : "No registrado"}
+                </Field>
+                <Field label="Origen / referencia">{patient.referralSource ?? missing}</Field>
+              </dl>
+            </CardContent>
+          </CollapsibleContent>
         </Card>
-      </div>
+      </Collapsible>
 
-      <AntecedentesCards patientId={patientId} />
+      <Card>
+        <CardContent className="flex flex-wrap items-center justify-between gap-3 pt-4">
+          <p className="text-sm text-muted-foreground">
+            Alergias, condiciones, medicación y entrevista se revisan en Antecedentes.
+          </p>
+          <Button size="sm" variant="outline" onClick={() => onTabChange("antecedentes")}>
+            Ir a antecedentes
+          </Button>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
 
-      <AnamnesisDrawer patientId={patientId} open={anamnesisOpen} onOpenChange={setAnamnesisOpen} />
+function PlanBrief({
+  patientId,
+  planId,
+  title,
+  isLegacy,
+  totalItems,
+  pendingItems,
+}: {
+  patientId: string;
+  planId: string;
+  title: string;
+  isLegacy: boolean;
+  totalItems: number;
+  pendingItems: number;
+}): React.JSX.Element {
+  const detailQuery = useQuery({
+    queryKey: ["treatment-plan", patientId, planId],
+    queryFn: () => fetchTreatmentPlanDetail(patientId, planId),
+  });
+  const items = detailQuery.data?.data.items ?? [];
+  const pending = items.filter((i) => i.status === "pendiente" || i.status === "programado");
+  const next = pending[0] ?? null;
+  const accepted = items.filter((i) => i.decision === "aceptado").length;
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-2 border-b py-1.5 text-sm last:border-0">
+      <span className="flex min-w-0 flex-col">
+        <span className="font-medium">
+          {title} {isLegacy ? <span className="font-normal text-muted-foreground">(heredado)</span> : null}
+        </span>
+        <span className="text-muted-foreground">
+          {pendingItems} de {totalItems} pendientes · {accepted} aceptados
+          {next ? ` · próximo: ${next.title}` : " · sin pendientes"}
+        </span>
+      </span>
+      <Link
+        to="/patients/$patientId"
+        params={{ patientId }}
+        search={{ tab: "plan", planId }}
+        className="font-medium text-accent hover:text-accent-foreground"
+      >
+        Abrir plan
+      </Link>
     </div>
   );
 }

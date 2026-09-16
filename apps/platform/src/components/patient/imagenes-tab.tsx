@@ -7,7 +7,7 @@ import {
   AttachmentDescription,
   AttachmentMedia,
   AttachmentTitle,
-  AttachmentTrigger,
+  Badge,
   Button,
   Dialog,
   DialogContent,
@@ -24,48 +24,23 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@odentia/ui";
-import { EmptyState, FormDrawer } from "@odentia/ui-patterns";
-import { FileText, Image as ImageIcon, Trash2, Upload, X } from "lucide-react";
-import { useEffect, useId, useRef, useState } from "react";
+import { EmptyState, FilterBar, FormDrawer, useListSearch, type FilterDef, type SortOption } from "@odentia/ui-patterns";
+import { FileText, Image as ImageIcon } from "lucide-react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { ApiError, apiFetch } from "../../lib/api";
-import { API_URL } from "../../lib/auth-client";
 import { timeAgo, useCanWrite } from "../../lib/crm";
-import { orgSlugFromHostname } from "../../lib/host";
-import { FDI_ADULT, FDI_CHILD } from "@odentia/clinical";
-import { type PatientDocument } from "../../lib/patients";
-
-const UPLOAD_CATEGORIES = ["radiografia", "foto_clinica", "consentimiento", "informe", "otro"] as const;
-
-const CATEGORY_LABELS: Record<string, string> = {
-  consentimiento: "Consentimiento",
-  radiografia: "Radiografía",
-  foto_clinica: "Foto clínica",
-  informe: "Informe",
-  otro: "Otro",
-};
-
-const ACCEPTED_TYPES = ["image/jpeg", "image/png", "image/webp", "application/pdf"];
-const ACCEPT_ATTR = ACCEPTED_TYPES.join(",");
-const MAX_BYTES = 10 * 1024 * 1024;
+import { type Encounter, type PatientDocument, type PatientDocumentContext, type PlanItem } from "../../lib/patients";
+import { categoryLabel, encounterLabel, planItemLabel, UPLOAD_CATEGORIES } from "./document-labels";
+import { DocumentUploadDialog } from "./document-upload-dialog";
+import { TagsInput } from "./tags-input";
+import { ToothSelector } from "./tooth-selector";
 
 /** Las URL firmadas expiran: se consideran frescas 10 min y luego se regeneran. */
 const SIGNED_URL_STALE_MS = 10 * 60 * 1000;
+type SortKey = "recientes" | "antiguos" | "titulo";
 
-const ALL_TEETH = "todas";
-const NO_TOOTH = "sin-pieza";
-
-type Dentition = "todas" | "adulta" | "temporal";
-const DENTITION_LABELS: Record<Dentition, string> = {
-  todas: "Todas",
-  adulta: "Adulta",
-  temporal: "Temporal",
-};
-
-const DENTITIONS: Dentition[] = ["todas", "adulta", "temporal"];
-
-function categoryLabel(category: string): string {
-  return CATEGORY_LABELS[category] ?? category;
-}
+/** Alias local: el listado ya trae el contexto vigente fusionado (tipos comunes de Main). */
+type DocView = PatientDocument;
 
 function isImageDoc(doc: PatientDocument): boolean {
   return doc.contentType.startsWith("image/");
@@ -81,27 +56,26 @@ function useSignedUrl(patientId: string, documentId: string) {
     queryFn: () =>
       apiFetch<{ data: { url: string } }>(`/api/patients/${patientId}/documents/${documentId}/url`),
     staleTime: SIGNED_URL_STALE_MS,
-    gcTime: 30 * 60 * 1000,
   });
 }
 
 export interface ImagenesTabProps {
   patientId: string;
-  /** En una atención solo se muestran los documentos vinculados a ella; en perfil, todos. */
   encounterId?: string;
-  /** Sincroniza el filtro de pieza (p. ej. al llegar desde el odontograma). */
   initialTooth?: number;
+  initialDocumentId?: string;
   readOnly?: boolean;
+  onUploaded?: () => void | Promise<void>;
   disabled?: boolean;
   beforeWrite?: () => Promise<void>;
   onPendingChange?: (pending: boolean) => void;
-  onUploaded?: () => void | Promise<void>;
 }
 
 export function ImagenesTab({
   patientId,
   encounterId,
   initialTooth,
+  initialDocumentId,
   readOnly,
   onUploaded,
   disabled,
@@ -110,43 +84,151 @@ export function ImagenesTab({
 }: ImagenesTabProps) {
   const queryClient = useQueryClient();
   const canWrite = useCanWrite();
-  const [dentition, setDentition] = useState<Dentition>("todas");
-  const [tooth, setTooth] = useState<string>(ALL_TEETH);
-  const [viewing, setViewing] = useState<PatientDocument | null>(null);
+
+  const listSearch = useListSearch();
+  const [teeth, setTeeth] = useState<number[]>(initialTooth != null ? [initialTooth] : []);
+  const [viewingId, setViewingId] = useState<string | null>(null);
+  const [contextDoc, setContextDoc] = useState<DocView | null>(null);
+  const [resumeId, setResumeId] = useState<string | null>(null);
   const [uploadOpen, setUploadOpen] = useState(false);
-  const dentitionId = useId();
-  const toothId = useId();
+  const openerRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
-    if (initialTooth == null) return;
-    setTooth(String(initialTooth));
-    setDentition(FDI_CHILD.includes(initialTooth) ? "temporal" : "adulta");
+    if (initialTooth != null) setTeeth([initialTooth]);
   }, [initialTooth]);
+
 
   const docsQuery = useQuery({
     queryKey: ["patient-documents", patientId],
-    queryFn: () => apiFetch<{ data: PatientDocument[] }>(`/api/patients/${patientId}/documents`),
+    queryFn: () => apiFetch<{ data: DocView[] }>(`/api/patients/${patientId}/documents`),
+  });
+
+
+  const encountersQuery = useQuery({
+    queryKey: ["encounters", patientId],
+    queryFn: async () => {
+      const all: Encounter[] = [];
+      let cursor: string | null = null;
+      do {
+        const query: string = cursor ? `?limit=100&cursor=${encodeURIComponent(cursor)}` : "?limit=100";
+        const page: { data: Encounter[]; nextCursor: string | null } = await apiFetch(
+          `/api/patients/${patientId}/encounters${query}`,
+        );
+        all.push(...page.data);
+        cursor = page.nextCursor ?? null;
+      } while (cursor);
+      return all;
+    },
+  });
+  const planQuery = useQuery({
+    queryKey: ["plan", patientId],
+    queryFn: () => apiFetch<{ data: PlanItem[] }>(`/api/patients/${patientId}/plan`),
   });
 
   const allDocs = docsQuery.data?.data ?? [];
-  // La lista incluye vínculos opcionales a atenciones: en una atención se filtra a sus
-  // documentos; en el perfil se listan todos.
-  const visibleDocs = encounterId ? allDocs.filter((d) => d.encounterId === encounterId) : allDocs;
-
-  const toothNumber = tooth === ALL_TEETH ? null : Number(tooth);
-  const images = visibleDocs.filter(
-    (d) =>
-      (d.category === "radiografia" || d.category === "foto_clinica") &&
-      (toothNumber === null || d.toothNumber === toothNumber),
+  const encounters = encountersQuery.data ?? [];
+  const planItems = planQuery.data?.data ?? [];
+  const planById = useMemo(() => new Map(planItems.map((p) => [p.id, p])), [planItems]);
+  const encounterById = useMemo(() => new Map(encounters.map((e) => [e.id, e])), [encounters]);
+  const allTags = useMemo(
+    () => [...new Set(allDocs.flatMap((d) => d.tags))].sort((a, b) => a.localeCompare(b, "es")),
+    [allDocs],
   );
-  const documents = visibleDocs.filter(
-    (d) => d.category !== "radiografia" && d.category !== "foto_clinica",
+  useEffect(() => {
+    if (initialDocumentId && docsQuery.data?.data.some((d) => d.id === initialDocumentId)) {
+      setViewingId(initialDocumentId);
+    }
+  }, [initialDocumentId, docsQuery.data]);
+
+  const searchText = (listSearch.get("q") ?? "").trim().toLowerCase();
+  const categoryParam = listSearch.get("categoria");
+  const atencionParam = listSearch.get("atencion");
+  const planParam = listSearch.get("tratamiento");
+  const etiquetaParam = listSearch.get("etiqueta");
+  const sortParam = listSearch.get("sort");
+  const sort: SortKey = sortParam === "antiguos" || sortParam === "titulo" ? sortParam : "recientes";
+  // En una atención, el filtro prefiere esa atención salvo "todas" explícito.
+  const atencion = atencionParam === "todas" ? undefined : (atencionParam ?? encounterId);
+
+  const filters: FilterDef[] = useMemo(
+    () => [
+      {
+        key: "categoria",
+        label: "Categoría",
+        type: "select",
+        options: UPLOAD_CATEGORIES.map((c) => ({ value: c, label: categoryLabel(c) })),
+      },
+      {
+        key: "atencion",
+        label: "Atención",
+        type: "select",
+        options: [
+          ...(encounterId ? [{ value: "todas", label: "Todas" }] : []),
+          { value: "ninguna", label: "Sin atención (generales)" },
+          ...encounters.map((e) => ({ value: e.id, label: encounterLabel(e) })),
+        ],
+      },
+      {
+        key: "tratamiento",
+        label: "Tratamiento",
+        type: "select",
+        placement: "overflow",
+        options: [
+          { value: "ninguno", label: "Sin tratamiento" },
+          ...planItems.map((p) => ({ value: p.id, label: planItemLabel(p) })),
+        ],
+      },
+      {
+        key: "etiqueta",
+        label: "Etiqueta",
+        type: "select",
+        placement: "overflow",
+        options: allTags.map((t) => ({ value: t, label: t })),
+      },
+    ],
+    [encounterId, encounters, planItems, allTags],
   );
 
-  const dentitionTeeth = dentition === "adulta" ? FDI_ADULT : dentition === "temporal" ? FDI_CHILD : [...FDI_ADULT, ...FDI_CHILD];
-  const toothItems: Record<string, string> = {
-    [ALL_TEETH]: "Todas las piezas",
-    ...Object.fromEntries(dentitionTeeth.map((n) => [String(n), `Pieza ${n}`] as const)),
+  const sortOptions: SortOption[] = useMemo(
+    () => [
+      { value: "recientes", label: "Más recientes" },
+      { value: "antiguos", label: "Más antiguos" },
+      { value: "titulo", label: "Título A–Z" },
+    ],
+    [],
+  );
+
+  const filtered = useMemo(() => {
+    const teethSet = new Set(teeth);
+    const list = allDocs.filter((d) => {
+      if (searchText && !d.label.toLowerCase().includes(searchText)) return false;
+      if (categoryParam && d.category !== categoryParam) return false;
+      if (teeth.length > 0 && !d.toothNumbers.some((t) => teethSet.has(t))) return false;
+      if (atencion === "ninguna") {
+        if (d.encounterId) return false;
+      } else if (atencion && d.encounterId !== atencion) {
+        return false;
+      }
+      if (planParam === "ninguno") {
+        if (d.planItemId) return false;
+      } else if (planParam && d.planItemId !== planParam) {
+        return false;
+      }
+      if (etiquetaParam && !d.tags.includes(etiquetaParam)) return false;
+      return true;
+    });
+    return [...list].sort((a, b) => {
+      if (sort === "antiguos") return a.createdAt.localeCompare(b.createdAt);
+      if (sort === "titulo") return a.label.localeCompare(b.label, "es");
+      return b.createdAt.localeCompare(a.createdAt);
+    });
+  }, [allDocs, searchText, categoryParam, teeth, atencion, planParam, etiquetaParam, sort]);
+
+  const viewing = viewingId ? (allDocs.find((d) => d.id === viewingId) ?? null) : null;
+  const viewingIndex = viewing ? filtered.findIndex((d) => d.id === viewing.id) : -1;
+  const openViewing = (id: string) => {
+    if (document.activeElement instanceof HTMLElement) openerRef.current = document.activeElement;
+    setViewingId(id);
   };
 
   const listError =
@@ -156,18 +238,23 @@ export function ImagenesTab({
         ? "No se pudieron cargar los documentos."
         : null;
 
-  const invalidateAfterUpload = async () => {
-    await Promise.all(["patient-documents", "timeline", "patient"].map((key) =>
-      queryClient.invalidateQueries({ queryKey: [key, patientId] }),
-    ));
+  const invalidateAfterChange = async () => {
+    await Promise.all(
+      ["patient-documents", "patient-document-context", "timeline", "patient", "patient-summary", "encounter"].map(
+        (key) => queryClient.invalidateQueries({ queryKey: [key, patientId] }),
+      ),
+    );
     await onUploaded?.();
   };
 
   return (
-    <div className="flex flex-col gap-4">
-      <section aria-label="Imágenes" className="flex flex-col gap-3 rounded-lg border p-4">
+    <div className="flex min-w-0 flex-col gap-4">
+      <section aria-label="Archivo clínico" className="flex min-w-0 flex-col gap-3 rounded-lg border p-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <h2 className="text-sm font-semibold">Imágenes</h2>
+          <h2 className="text-sm font-semibold">
+            Archivos ({filtered.length}
+            {filtered.length !== allDocs.length ? ` de ${allDocs.length}` : ""})
+          </h2>
           {!readOnly && canWrite && (
             <Button size="sm" disabled={disabled} onClick={() => setUploadOpen(true)}>
               Subir imagen o documento
@@ -175,50 +262,16 @@ export function ImagenesTab({
           )}
         </div>
 
-        <div className="flex flex-wrap gap-3">
-          <Field className="min-w-36 flex-1">
-            <FieldLabel htmlFor={dentitionId}>Dentición</FieldLabel>
-            <Select
-              items={DENTITION_LABELS}
-              value={dentition}
-              onValueChange={(v) => {
-                const next = (v ?? "todas") as Dentition;
-                setDentition(DENTITIONS.includes(next) ? next : "todas");
-                setTooth(ALL_TEETH);
-              }}
-            >
-              <SelectTrigger id={dentitionId} aria-label="Dentición">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {DENTITIONS.map((d) => (
-                  <SelectItem key={d} value={d}>
-                    {DENTITION_LABELS[d]}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </Field>
-          <Field className="min-w-36 flex-1">
-            <FieldLabel htmlFor={toothId}>Pieza</FieldLabel>
-            <Select
-              items={toothItems}
-              value={toothItems[tooth] ? tooth : ALL_TEETH}
-              onValueChange={(v) => setTooth(v ?? ALL_TEETH)}
-            >
-              <SelectTrigger id={toothId} aria-label="Pieza">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {Object.entries(toothItems).map(([value, label]) => (
-                  <SelectItem key={value} value={value}>
-                    {label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </Field>
-        </div>
+        <FilterBar filters={filters} sortOptions={sortOptions} searchPlaceholder="Buscar por título" />
+
+        <details className="rounded-md border px-3 py-2">
+          <summary className="cursor-pointer text-sm font-medium">
+            Filtrar por piezas{teeth.length > 0 ? ` (${teeth.length})` : ""}
+          </summary>
+          <div className="pt-2">
+            <ToothSelector value={teeth} onChange={setTeeth} label="Piezas del filtro" />
+          </div>
+        </details>
 
         {docsQuery.isPending && <p className="text-sm text-muted-foreground">Cargando…</p>}
         {listError && (
@@ -229,146 +282,230 @@ export function ImagenesTab({
             </Button>
           </div>
         )}
-        {!docsQuery.isPending && !listError && images.length === 0 && (
+        {!docsQuery.isPending && !listError && filtered.length === 0 && (
           <EmptyState
-            title="Sin imágenes"
+            title="Sin archivos"
             description={
-              encounterId
-                ? "Esta atención aún no tiene imágenes vinculadas."
-                : "Aún no hay radiografías ni fotos clínicas."
+              allDocs.length === 0
+                ? (encounterId
+                  ? "Esta atención aún no tiene archivos vinculados."
+                  : "Aún no hay radiografías, fotos ni documentos.")
+                : "Ningún archivo coincide con los filtros actuales."
             }
           />
         )}
-        {images.length > 0 && (
+        {filtered.length > 0 && (
           <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-            {images.map((doc) => (
-              <ImageAttachment key={doc.id} patientId={patientId} doc={doc} onOpen={setViewing} />
+            {filtered.map((doc) => (
+              <DocCard
+                key={doc.id}
+                patientId={patientId}
+                doc={doc}
+                planItem={doc.planItemId ? planById.get(doc.planItemId) : undefined}
+                encounter={doc.encounterId ? encounterById.get(doc.encounterId) : undefined}
+                onOpen={() => openViewing(doc.id)}
+              />
             ))}
           </ul>
         )}
-      </section>
-
-      <section aria-label="Documentos" className="flex flex-col gap-3 rounded-lg border p-4">
-        <h2 className="text-sm font-semibold">Documentos</h2>
-        {!docsQuery.isPending && !listError && documents.length === 0 && (
-          <p className="text-sm text-muted-foreground">Sin documentos.</p>
-        )}
-        <div className="flex flex-col gap-2">
-          {documents.map((doc) => (
-            <DocumentRow key={doc.id} doc={doc} showEncounter={!encounterId} onOpen={setViewing} />
-          ))}
-        </div>
         <p className="text-xs text-muted-foreground">
-          Los documentos se conservan como parte de la historia clínica: no se pueden eliminar.
+          Los archivos se conservan como parte de la historia clínica: no se pueden eliminar.
         </p>
       </section>
 
       <Dialog
-        open={viewing !== null}
+        open={viewing !== null && contextDoc === null}
         onOpenChange={(open) => {
-          if (!open) setViewing(null);
+          if (!open) {
+            setViewingId(null);
+            openerRef.current?.focus();
+          }
         }}
       >
         {viewing && (
-          <DialogContent aria-label={`Ver ${viewing.label}`}>
+          <DialogContent aria-label={`Ver ${viewing.label}`} className="max-h-[92dvh] overflow-y-auto sm:max-w-[min(90vw,80rem)]">
             <DialogHeader>
-              <DialogTitle>{viewing.label}</DialogTitle>
-              <DialogDescription>
-                {categoryLabel(viewing.category)}
-                {viewing.toothNumber != null && ` · Pieza ${viewing.toothNumber}`} ·{" "}
-                {timeAgo(viewing.createdAt)}
-              </DialogDescription>
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="min-w-0 flex-1">
+                  <DialogTitle>{viewing.label}</DialogTitle>
+                  <DialogDescription>
+                    {categoryLabel(viewing.category)} · {timeAgo(viewing.createdAt)}
+                    {filtered.length > 1 ? ` · ${viewingIndex + 1} de ${filtered.length}` : ""}
+                  </DialogDescription>
+                </div>
+                {viewingIndex > 0 && (
+                  <Button type="button" size="sm" variant="outline" onClick={() => setViewingId(filtered[viewingIndex - 1]!.id)}>
+                    Anterior
+                  </Button>
+                )}
+                {viewingIndex >= 0 && viewingIndex < filtered.length - 1 && (
+                  <Button type="button" size="sm" variant="outline" onClick={() => setViewingId(filtered[viewingIndex + 1]!.id)}>
+                    Siguiente
+                  </Button>
+                )}
+              </div>
             </DialogHeader>
-            <DocumentViewer patientId={patientId} doc={viewing} />
+            <DocumentViewer
+              patientId={patientId}
+              doc={viewing}
+              planItem={viewing.planItemId ? planById.get(viewing.planItemId) : undefined}
+              encounter={viewing.encounterId ? encounterById.get(viewing.encounterId) : undefined}
+              canEdit={!readOnly && canWrite && !disabled}
+              onEditContext={() => {
+                setResumeId(viewingId);
+                setViewingId(null);
+                setContextDoc(viewing);
+              }}
+            />
           </DialogContent>
         )}
       </Dialog>
-
-      <UploadDrawer
+      <DocumentUploadDialog
         patientId={patientId}
-        encounterId={encounterId}
+        defaultEncounterId={encounterId}
+        initialTeeth={initialTooth != null ? [initialTooth] : undefined}
+        encounters={encounters}
+        planItems={planItems}
+        suggestions={allTags}
         open={uploadOpen}
         onOpenChange={setUploadOpen}
-        onSuccess={invalidateAfterUpload}
+        onSuccess={invalidateAfterChange}
         beforeWrite={beforeWrite}
         onPendingChange={onPendingChange}
         disabled={disabled}
       />
+
+      {contextDoc && (
+        <ContextDrawer
+          patientId={patientId}
+          doc={contextDoc}
+          encounters={encounters}
+          planItems={planItems}
+          suggestions={allTags}
+          open={contextDoc !== null}
+          onOpenChange={(open) => {
+            if (!open) {
+              setContextDoc(null);
+              if (resumeId) {
+                setViewingId(resumeId);
+                setResumeId(null);
+              }
+            }
+          }}
+          onSaved={async (updated) => {
+            setContextDoc(null);
+            setResumeId(null);
+            await invalidateAfterChange();
+            if (updated?.id) setViewingId(updated.id);
+          }}
+          beforeWrite={beforeWrite}
+          onPendingChange={onPendingChange}
+          disabled={disabled}
+        />
+      )}
     </div>
   );
 }
 
-function ImageAttachment({
+function DocCard({
   patientId,
   doc,
+  planItem,
+  encounter,
   onOpen,
 }: {
   patientId: string;
-  doc: PatientDocument;
-  onOpen: (doc: PatientDocument) => void;
+  doc: DocView;
+  planItem?: PlanItem;
+  encounter?: Encounter;
+  onOpen: () => void;
 }) {
   const urlQuery = useSignedUrl(patientId, doc.id);
   const url = urlQuery.data?.data.url ?? null;
+  const teeth = doc.toothNumbers;
+  const tags = doc.tags;
 
   return (
     <li>
-      <Attachment orientation="vertical" className="w-full!">
-        <AttachmentMedia variant={url && isImageDoc(doc) ? "image" : "icon"}>
+      <button
+        type="button"
+        onClick={onOpen}
+        aria-label={`Ver ${doc.label}`}
+        className="flex w-full min-w-0 flex-col gap-2 rounded-lg border p-2 text-left transition-colors hover:border-primary focus-visible:outline-2 focus-visible:outline-primary"
+      >
+        <span className="relative block aspect-square w-full overflow-hidden rounded-md bg-muted">
           {url && isImageDoc(doc) ? (
             // URL firmada directa: sin object URLs, sin fugas de recursos multimedia.
-            <img src={url} alt={doc.label} loading="lazy" />
+            // object-contain: la radiografía se ve completa, sin recortes.
+            <img src={url} alt="" loading="lazy" className="h-full w-full object-contain" />
           ) : urlQuery.isPending ? (
-            <span className="text-xs text-muted-foreground">Cargando…</span>
+            <span className="flex h-full items-center justify-center text-xs text-muted-foreground">
+              Cargando…
+            </span>
           ) : (
-            <ImageIcon aria-hidden="true" />
+            <span className="flex h-full items-center justify-center">
+              {isPdfDoc(doc) ? (
+                <FileText className="size-10 text-muted-foreground" aria-hidden="true" />
+              ) : (
+                <ImageIcon className="size-10 text-muted-foreground" aria-hidden="true" />
+              )}
+            </span>
           )}
-        </AttachmentMedia>
-        <AttachmentContent>
-          <AttachmentTitle>{doc.label}</AttachmentTitle>
-          <AttachmentDescription>
+          <Badge variant="secondary" className="absolute top-1.5 left-1.5">
             {categoryLabel(doc.category)}
-            {doc.toothNumber != null ? ` · Pieza ${doc.toothNumber}` : ""}
-          </AttachmentDescription>
-        </AttachmentContent>
-        <AttachmentTrigger aria-label={`Ver ${doc.label}`} onClick={() => onOpen(doc)} />
-      </Attachment>
+          </Badge>
+        </span>
+        <span className="flex min-w-0 flex-col gap-1 px-0.5 pb-0.5">
+          <span className="truncate text-sm font-medium">{doc.label}</span>
+          <span className="text-xs text-muted-foreground">
+            {timeAgo(doc.createdAt)}
+            {teeth.length > 0 && ` · ${teeth.length === 1 ? `Pieza ${teeth[0]}` : `${teeth.length} piezas`}`}
+          </span>
+          {teeth.length > 1 && (
+            <span className="flex flex-wrap gap-1" aria-label={`Piezas: ${teeth.join(", ")}`}>
+              {teeth.slice(0, 4).map((t) => (
+                <Badge key={t} variant="outline">
+                  {t}
+                </Badge>
+              ))}
+              {teeth.length > 4 && <Badge variant="outline">+{teeth.length - 4}</Badge>}
+            </span>
+          )}
+          <span className="text-xs text-muted-foreground">
+            {encounter ? `Atención · ${timeAgo(encounter.createdAt)}` : "Sin atención"}
+            {planItem ? ` · ${planItem.title}` : ""}
+          </span>
+          {tags.length > 0 && (
+            <span className="flex flex-wrap gap-1" aria-label={`Etiquetas: ${tags.join(", ")}`}>
+              {tags.slice(0, 3).map((t) => (
+                <Badge key={t} variant="secondary">
+                  {t}
+                </Badge>
+              ))}
+              {tags.length > 3 && <Badge variant="secondary">+{tags.length - 3}</Badge>}
+            </span>
+          )}
+        </span>
+      </button>
     </li>
   );
 }
 
-function DocumentRow({
+function DocumentViewer({
+  patientId,
   doc,
-  showEncounter,
-  onOpen,
+  planItem,
+  encounter,
+  canEdit,
+  onEditContext,
 }: {
-  doc: PatientDocument;
-  showEncounter: boolean;
-  onOpen: (doc: PatientDocument) => void;
+  patientId: string;
+  doc: DocView;
+  planItem?: PlanItem;
+  encounter?: Encounter;
+  canEdit: boolean;
+  onEditContext: () => void;
 }) {
-  return (
-    <Attachment orientation="horizontal" className="w-full">
-      <AttachmentMedia variant="icon">
-        {isPdfDoc(doc) ? <FileText aria-hidden="true" /> : <ImageIcon aria-hidden="true" />}
-      </AttachmentMedia>
-      <AttachmentContent>
-        <AttachmentTitle>{doc.label}</AttachmentTitle>
-        <AttachmentDescription>
-          {categoryLabel(doc.category)}
-          {doc.toothNumber != null ? ` · Pieza ${doc.toothNumber}` : ""}
-          {showEncounter && doc.encounterId ? " · Atención" : ""} ·{" "}
-          {(doc.sizeBytes / 1024).toFixed(0)} KB · {timeAgo(doc.createdAt)}
-        </AttachmentDescription>
-      </AttachmentContent>
-      <AttachmentActions>
-        <Button size="sm" variant="outline" onClick={() => onOpen(doc)} aria-label={`Ver ${doc.label}`}>
-          Ver
-        </Button>
-      </AttachmentActions>
-    </Attachment>
-  );
-}
-
-function DocumentViewer({ patientId, doc }: { patientId: string; doc: PatientDocument }) {
   const urlQuery = useSignedUrl(patientId, doc.id);
   const url = urlQuery.data?.data.url ?? null;
   const error =
@@ -378,321 +515,347 @@ function DocumentViewer({ patientId, doc }: { patientId: string; doc: PatientDoc
         ? "No se pudo obtener el documento."
         : null;
 
-  if (urlQuery.isPending) return <p className="text-sm text-muted-foreground">Cargando…</p>;
-  if (error || !url) {
-    return (
-      <div className="flex flex-col gap-2">
-        <p className="text-sm text-destructive">{error ?? "No se pudo obtener el documento."}</p>
-        <Button size="sm" variant="outline" onClick={() => void urlQuery.refetch()}>
-          Reintentar
-        </Button>
-      </div>
-    );
-  }
+  const historyQuery = useQuery({
+    queryKey: ["patient-document-context", patientId, doc.id],
+    queryFn: async () => {
+      const body = await apiFetch<{
+        data: { document: PatientDocument; history: PatientDocumentContext[] };
+      }>(`/api/patients/${patientId}/documents/${doc.id}/context`);
+      return body.data.history;
+    },
+  });
 
+  const teeth = doc.toothNumbers;
+  const tags = doc.tags;
+
+  const planHref = planItem
+    ? `/patients/${patientId}?tab=plan&planId=${planItem.planId}${planItem.budgetId ? `&budgetId=${planItem.budgetId}` : ""}`
+    : `/patients/${patientId}?tab=plan`;
   return (
-    <div className="flex flex-col gap-3">
-      {isImageDoc(doc) ? (
+    <div className="grid min-w-0 grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_20rem]">
+      {urlQuery.isPending ? (
+        <p className="text-sm text-muted-foreground">Cargando…</p>
+      ) : error || !url ? (
+        <div className="flex flex-col gap-2">
+          <p className="text-sm text-destructive">{error ?? "No se pudo obtener el documento."}</p>
+          <Button size="sm" variant="outline" onClick={() => void urlQuery.refetch()}>
+            Reintentar
+          </Button>
+        </div>
+      ) : isImageDoc(doc) ? (
         <img src={url} alt={doc.label} className="max-h-[70vh] w-full rounded-md object-contain" />
       ) : isPdfDoc(doc) ? (
         <embed src={url} type="application/pdf" className="h-[70vh] w-full rounded-md border" />
       ) : (
-        <p className="text-sm text-muted-foreground">
-          Vista previa no disponible para este tipo de archivo.
-        </p>
+        <p className="text-sm text-muted-foreground">Vista previa no disponible para este tipo de archivo.</p>
       )}
+      {/* Visor arriba; columna de metadata (plegable en móvil) debajo/al lado. */}
+      <div className="flex min-w-0 flex-col gap-3">
+      <details open className="rounded-md border px-3 py-2">
+        <summary className="cursor-pointer text-sm font-medium">Detalles del archivo</summary>
+      <dl className="grid grid-cols-1 gap-x-4 gap-y-2 pt-2 text-sm">
+        <div>
+          <dt className="text-xs text-muted-foreground">Piezas</dt>
+          <dd>{teeth.length > 0 ? teeth.join(", ") : "Sin piezas vinculadas"}</dd>
+        </div>
+        <div>
+          <dt className="text-xs text-muted-foreground">Etiquetas</dt>
+          <dd>
+            {tags.length > 0 ? (
+              <span className="flex flex-wrap gap-1">
+                {tags.map((t) => (
+                  <Badge key={t} variant="secondary">
+                    {t}
+                  </Badge>
+                ))}
+              </span>
+            ) : (
+              "Sin etiquetas"
+            )}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-xs text-muted-foreground">Atención</dt>
+          <dd>
+            {doc.encounterId ? (
+              <Button
+                size="sm"
+                variant="outline"
+                nativeButton={false}
+                render={<a href={`/patients/${patientId}/encounters/${doc.encounterId}`} />}
+              >
+                {encounter ? `Abrir atención (${timeAgo(encounter.createdAt)})` : "Abrir atención"}
+              </Button>
+            ) : (
+              "Archivo general (sin atención)"
+            )}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-xs text-muted-foreground">Tratamiento</dt>
+          <dd>
+            {doc.planItemId ? (
+              <Button
+                size="sm"
+                variant="outline"
+                nativeButton={false}
+                render={<a href={planHref} />}
+              >
+                {planItem ? `Ver plan: ${planItem.title}` : "Ver plan"}
+              </Button>
+            ) : (
+              "Sin tratamiento vinculado"
+            )}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-xs text-muted-foreground">Revisión de contexto</dt>
+          <dd className="flex items-center gap-2">
+            v{doc.contextVersion}
+            {canEdit && (
+              <Button size="sm" variant="outline" onClick={onEditContext}>
+                Editar contexto
+              </Button>
+            )}
+          </dd>
+        </div>
+      </dl>
+      </details>
+      {historyQuery.data && historyQuery.data.length > 1 && (
+        <details className="rounded-md border px-3 py-2">
+          <summary className="cursor-pointer text-sm font-medium">
+            Historial de contexto ({historyQuery.data.length} revisiones)
+          </summary>
+          <ul className="flex flex-col gap-2 pt-2">
+            {[...historyQuery.data].sort((a, b) => b.version - a.version).map((rev) => (
+              <li key={rev.version} className="text-xs text-muted-foreground">
+                <span className="font-medium text-foreground">v{rev.version}</span> · {timeAgo(rev.createdAt)}
+                {rev.toothNumbers.length > 0 && ` · Piezas ${rev.toothNumbers.join(", ")}`}
+                {rev.tags.length > 0 && ` · ${rev.tags.join(", ")}`}
+                {rev.encounterId && " · Atención"}
+                {rev.planItemId && " · Tratamiento"}
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+
       <div className="flex flex-wrap gap-2">
-        <Button size="sm" variant="outline" onClick={() => window.open(url, "_blank", "noopener")}>
-          Abrir en pestaña nueva
-        </Button>
         <Button
           size="sm"
           variant="outline"
           onClick={() => {
-            const anchor = document.createElement("a");
-            anchor.href = url;
-            anchor.download = doc.label;
-            document.body.appendChild(anchor);
-            anchor.click();
-            anchor.remove();
+            const link = `${window.location.origin}/patients/${patientId}?tab=imagenes&documentId=${doc.id}`;
+            void navigator.clipboard?.writeText(link).catch(() => window.prompt("Copia el enlace:", link));
           }}
         >
-          Descargar
+          Copiar enlace
         </Button>
+        {url && (
+          <>
+            <Button size="sm" variant="outline" onClick={() => window.open(url, "_blank", "noopener")}>
+              Abrir en pestaña nueva
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                const anchor = document.createElement("a");
+                anchor.href = url;
+                anchor.download = doc.label;
+                document.body.appendChild(anchor);
+                anchor.click();
+                anchor.remove();
+              }}
+            >
+              Descargar
+            </Button>
+          </>
+        )}
+      </div>
       </div>
     </div>
   );
 }
 
-interface PickedFile {
-  file: File;
-  previewUrl: string | null;
-}
-
-function UploadDrawer({
+function ContextDrawer({
   patientId,
-  encounterId,
+  doc,
+  encounters,
+  planItems,
+  suggestions,
   open,
   onOpenChange,
-  onSuccess,
+  onSaved,
   beforeWrite,
   onPendingChange,
   disabled,
 }: {
   patientId: string;
-  encounterId?: string;
+  doc: DocView;
+  encounters: Encounter[];
+  planItems: PlanItem[];
+  suggestions: string[];
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onSuccess: () => Promise<void>;
+  onSaved: (updated: DocView | null) => Promise<void>;
   beforeWrite?: () => Promise<void>;
   onPendingChange?: (pending: boolean) => void;
   disabled?: boolean;
 }) {
-  const fileRef = useRef<HTMLInputElement | null>(null);
-  const [category, setCategory] = useState<string>("radiografia");
-  const [label, setLabel] = useState("");
-  const [tooth, setTooth] = useState<string>(NO_TOOTH);
-  const [picked, setPicked] = useState<PickedFile | null>(null);
-  const [dragging, setDragging] = useState(false);
-  const [fieldErrors, setFieldErrors] = useState<{ file?: string; label?: string }>({});
+  const queryClient = useQueryClient();
+  const [encounterChoice, setEncounterChoice] = useState<string>(doc.encounterId ?? "");
+  const [planChoice, setPlanChoice] = useState<string>(doc.planItemId ?? "");
+  const [teeth, setTeeth] = useState<number[]>(doc.toothNumbers);
+  const [tags, setTags] = useState<string[]>(doc.tags);
+  const [expectedVersion, setExpectedVersion] = useState(doc.contextVersion);
   const [serverError, setServerError] = useState<string | null>(null);
+  const [conflict, setConflict] = useState(false);
   const [pending, setPending] = useState(false);
-  const fileId = useId();
-  const categoryId = useId();
-  const labelId = useId();
-  const pieceId = useId();
+  const encounterChoiceId = useId();
+  const planChoiceId = useId();
 
-  const discardPicked = () => {
-    if (picked?.previewUrl) URL.revokeObjectURL(picked.previewUrl);
-    setPicked(null);
-    if (fileRef.current) fileRef.current.value = "";
-  };
-
-  const reset = () => {
-    setCategory("radiografia");
-    setLabel("");
-    setTooth(NO_TOOTH);
-    discardPicked();
-    setDragging(false);
-    setFieldErrors({});
-    setServerError(null);
-  };
-
-  const acceptFile = (file: File | undefined | null) => {
-    if (!file) return;
-    if (picked?.previewUrl) URL.revokeObjectURL(picked.previewUrl);
-    setPicked({
-      file,
-      previewUrl: file.type.startsWith("image/") ? URL.createObjectURL(file) : null,
-    });
-    setFieldErrors((prev) => ({ ...prev, file: undefined }));
-  };
-
-  const onSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (pending || disabled) return;
-    setServerError(null);
-    const file = picked?.file ?? null;
-    // Solo errores alineados con el esquema del servidor (tipo/tamaño, category/label, pieza FDI).
-    const errors: { file?: string; label?: string } = {};
-    if (!file || file.size === 0) {
-      errors.file = "Adjunta un archivo.";
-    } else if (!ACCEPTED_TYPES.includes(file.type)) {
-      errors.file = "Solo se admiten JPG, PNG, WebP o PDF.";
-    } else if (file.size > MAX_BYTES) {
-      errors.file = "El archivo no puede superar 10 MB.";
-    }
-    const trimmed = label.trim();
-    if (!trimmed) {
-      errors.label = "La etiqueta es obligatoria.";
-    } else if (trimmed.length > 200) {
-      errors.label = "La etiqueta debe tener 1–200 caracteres.";
-    }
-    setFieldErrors(errors);
-    if (errors.file || errors.label || !file) return;
-
+  const reloadRevision = async () => {
     setPending(true);
     onPendingChange?.(true);
     try {
-      await beforeWrite?.();
-      const form = new FormData();
-      form.append("file", file);
-      form.append("category", category);
-      form.append("label", trimmed);
-      if (tooth !== NO_TOOTH) form.append("toothNumber", tooth);
-      if (encounterId) form.append("encounterId", encounterId);
-      const slug =
-        typeof window === "undefined" ? null : orgSlugFromHostname(window.location.hostname);
-      const response = await fetch(`${API_URL}/api/patients/${patientId}/documents`, {
-        method: "POST",
-        credentials: "include",
-        headers: slug ? { "x-odentia-org": slug } : {},
-        body: form,
-      });
-      if (!response.ok) {
-        let message = `Error ${response.status}`;
-        try {
-          const body = (await response.json()) as { error?: { message?: string } };
-          if (body.error?.message) message = body.error.message;
-        } catch {
-          // cuerpo no-JSON
-        }
-        throw new Error(message);
-      }
-      await onSuccess();
-      reset();
-      onOpenChange(false);
+      await queryClient.invalidateQueries({ queryKey: ["patient-documents", patientId] });
+      await queryClient.invalidateQueries({ queryKey: ["patient-document-context", patientId, doc.id] });
+      const body = await apiFetch<{ data: DocView[] }>(`/api/patients/${patientId}/documents`);
+      queryClient.setQueryData(["patient-documents", patientId], body);
+      const fresh = body.data.find((d) => d.id === doc.id);
+      if (!fresh) throw new Error("El archivo ya no está disponible.");
+      setEncounterChoice(fresh.encounterId ?? "");
+      setPlanChoice(fresh.planItemId ?? "");
+      setTeeth(fresh.toothNumbers);
+      setTags(fresh.tags);
+      setExpectedVersion(fresh.contextVersion);
+      setConflict(false);
+      setServerError(null);
     } catch (err) {
-      setServerError(err instanceof Error ? err.message : "No se pudo subir el documento.");
+      setServerError(err instanceof Error ? err.message : "No se pudo recargar la revisión vigente.");
     } finally {
       setPending(false);
       onPendingChange?.(false);
     }
   };
 
-  const pieceItems: Record<string, string> = {
-    [NO_TOOTH]: "Sin pieza",
-    ...Object.fromEntries(
-      [...FDI_ADULT, ...FDI_CHILD].map((n) => [String(n), `Pieza ${n}`] as const),
-    ),
+  const onSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (pending || disabled) return;
+    setServerError(null);
+    setPending(true);
+    onPendingChange?.(true);
+    try {
+      await beforeWrite?.();
+      const updated = await apiFetch<{ data: DocView }>(
+        `/api/patients/${patientId}/documents/${doc.id}/context`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            expectedVersion,
+            encounterId: encounterChoice || null,
+            planItemId: planChoice || null,
+            toothNumbers: teeth,
+            tags,
+          }),
+        },
+      );
+      await onSaved(updated.data);
+    } catch (err) {
+      if (err instanceof ApiError && (err.shape.code === "STALE_VERSION" || err.status === 409)) {
+        setConflict(true);
+        setServerError(
+          "Otro usuario actualizó el contexto mientras editabas. Tus cambios se conservan: recarga la revisión vigente y vuelve a guardar.",
+        );
+        await queryClient.invalidateQueries({ queryKey: ["patient-documents", patientId] });
+        await queryClient.invalidateQueries({ queryKey: ["patient-document-context", patientId, doc.id] });
+      } else {
+        setServerError(
+          err instanceof ApiError
+            ? (err.shape.message ?? "No se pudo guardar la revisión de contexto.")
+            : "No se pudo guardar la revisión de contexto.",
+        );
+      }
+    } finally {
+      setPending(false);
+      onPendingChange?.(false);
+    }
   };
 
   return (
     <FormDrawer
+      className="data-[swipe-axis=x]:sm:[--drawer-content-width:min(48rem,calc(100vw-2rem))]"
       open={open}
       onClose={() => {
-        if (pending) return;
-        reset();
-        onOpenChange(false);
+        if (!pending) onOpenChange(false);
       }}
-      title="Subir imagen o documento"
-      description={`PDF o imagen JPG, PNG o WebP, máx. 10 MB.${encounterId ? " Se vinculará a esta atención." : ""}`}
+      title={`Editar contexto · ${doc.label}`}
+      description={`Crea una nueva revisión (actual v${expectedVersion}). El archivo original no se modifica.`}
       onSubmit={(e) => void onSubmit(e)}
       isSubmitting={pending}
       submitDisabled={disabled}
-      submitLabel="Subir"
+      submitLabel="Guardar revisión"
       error={serverError}
     >
       <fieldset disabled={pending || disabled} className="flex flex-col gap-3">
-        <Field>
-          <FieldLabel htmlFor={fileId}>Archivo</FieldLabel>
-          <div
-            onDragOver={(event) => {
-              event.preventDefault();
-              setDragging(true);
-            }}
-            onDragLeave={() => setDragging(false)}
-            onDrop={(event) => {
-              event.preventDefault();
-              setDragging(false);
-              acceptFile(event.dataTransfer.files?.[0]);
-            }}
-            className={`flex flex-col gap-2 rounded-lg border border-dashed p-4 transition-colors ${dragging ? "border-primary bg-primary/5" : ""}`}
-          >
-            <input
-              ref={fileRef}
-              id={fileId}
-              type="file"
-              name="file"
-              aria-label="Archivo"
-              accept={ACCEPT_ATTR}
-              className="sr-only"
-              onChange={(e) => acceptFile(e.currentTarget.files?.[0])}
-            />
-            {picked ? (
-              <Attachment
-                state={pending ? "uploading" : serverError ? "error" : "done"}
-                orientation="horizontal"
-                className="w-full"
-              >
-                <AttachmentMedia variant={picked.previewUrl ? "image" : "icon"}>
-                  {picked.previewUrl ? (
-                    <img src={picked.previewUrl} alt={picked.file.name} />
-                  ) : (
-                    <FileText aria-hidden="true" />
-                  )}
-                </AttachmentMedia>
-                <AttachmentContent>
-                  <AttachmentTitle>{picked.file.name}</AttachmentTitle>
-                  <AttachmentDescription>
-                    {picked.file.type || "archivo"} · {(picked.file.size / 1024).toFixed(0)} KB
-                  </AttachmentDescription>
-                </AttachmentContent>
-                <AttachmentActions>
-                  <AttachmentAction
-                    aria-label="Descartar archivo"
-                    disabled={pending}
-                    onClick={discardPicked}
-                  >
-                    {serverError ? <Trash2 aria-hidden="true" /> : <X aria-hidden="true" />}
-                  </AttachmentAction>
-                </AttachmentActions>
-              </Attachment>
-            ) : (
-              <label
-                htmlFor={fileId}
-                className="flex cursor-pointer flex-col items-center gap-1 text-center text-sm text-muted-foreground"
-              >
-                <Upload className="size-5" aria-hidden="true" />
-                <span className="font-medium text-foreground">Arrastra un archivo o haz clic para elegirlo</span>
-                <span>JPG, PNG, WebP o PDF · máx. 10 MB</span>
-              </label>
-            )}
-            {fieldErrors.file && <FieldError>{fieldErrors.file}</FieldError>}
+        {conflict && (
+          <div className="flex flex-wrap items-center gap-2 rounded-md border border-destructive/40 p-2">
+            <p className="text-xs text-muted-foreground">
+              La revisión vigente cambió (ahora v{doc.contextVersion} o superior). Recargarla reemplaza este formulario.
+            </p>
+            <Button type="button" size="sm" variant="outline" disabled={pending} onClick={() => void reloadRevision()}>
+              Recargar revisión
+            </Button>
           </div>
-        </Field>
+        )}
         <Field>
-          <FieldLabel htmlFor={categoryId}>Categoría</FieldLabel>
-          <Select
-            items={Object.fromEntries(UPLOAD_CATEGORIES.map((c) => [c, categoryLabel(c)]))}
-            value={category}
-            onValueChange={(v) => {
-              if (v) setCategory(v);
-            }}
-          >
-            <SelectTrigger id={categoryId} aria-label="Categoría">
-              <SelectValue />
+          <FieldLabel htmlFor={encounterChoiceId}>Atención</FieldLabel>
+          <Select items={Object.fromEntries(encounters.map((e) => [e.id, encounterLabel(e)] as const))} value={encounterChoice} onValueChange={(v) => setEncounterChoice(v ?? "")}>
+            <SelectTrigger id={encounterChoiceId} aria-label="Atención vinculada">
+              <SelectValue placeholder="General (sin atención)" />
             </SelectTrigger>
             <SelectContent>
-              {UPLOAD_CATEGORIES.map((c) => (
-                <SelectItem key={c} value={c}>
-                  {categoryLabel(c)}
+              {encounters.map((e) => (
+                <SelectItem key={e.id} value={e.id}>
+                  {encounterLabel(e)}
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
+          {encounterChoice && (
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              onClick={() => setEncounterChoice("")}
+            >
+              Quitar vínculo a atención
+            </Button>
+          )}
         </Field>
         <Field>
-          <FieldLabel htmlFor={labelId}>Etiqueta</FieldLabel>
-          <Input
-            id={labelId}
-            name="label"
-            value={label}
-            onChange={(e) => setLabel(e.currentTarget.value)}
-            placeholder="p. ej. Panorámica inicial"
-            maxLength={200}
-          />
-          {fieldErrors.label && <FieldError>{fieldErrors.label}</FieldError>}
-        </Field>
-        <Field>
-          <FieldLabel htmlFor={pieceId}>Pieza (opcional)</FieldLabel>
-          <Select
-            items={pieceItems}
-            value={tooth}
-            onValueChange={(v) => setTooth(v ?? NO_TOOTH)}
-          >
-            <SelectTrigger id={pieceId} aria-label="Pieza">
-              <SelectValue placeholder="Sin pieza" />
+          <FieldLabel htmlFor={planChoiceId}>Tratamiento</FieldLabel>
+          <Select items={Object.fromEntries(planItems.map((p) => [p.id, planItemLabel(p)] as const))} value={planChoice} onValueChange={(v) => setPlanChoice(v ?? "")}>
+            <SelectTrigger id={planChoiceId} aria-label="Tratamiento vinculado">
+              <SelectValue placeholder="Sin tratamiento" />
             </SelectTrigger>
             <SelectContent>
-              {Object.entries(pieceItems).map(([value, text]) => (
-                <SelectItem key={value} value={value}>
-                  {text}
+              {planItems.map((p) => (
+                <SelectItem key={p.id} value={p.id}>
+                  {planItemLabel(p)}
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
+          {planChoice && (
+            <Button type="button" size="sm" variant="ghost" onClick={() => setPlanChoice("")}>
+              Quitar vínculo a tratamiento
+            </Button>
+          )}
         </Field>
+        <ToothSelector value={teeth} onChange={setTeeth} label="Piezas" />
+        <TagsInput value={tags} onChange={setTags} suggestions={suggestions} />
       </fieldset>
     </FormDrawer>
   );

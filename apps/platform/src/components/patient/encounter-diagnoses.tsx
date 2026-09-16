@@ -1,5 +1,5 @@
-import { Badge } from "@odentia/ui";
-import { SubmitButton } from "@odentia/ui-patterns";
+import { Badge, Button, Card, CardContent, CardHeader, CardTitle } from "@odentia/ui";
+import { FormDrawer } from "@odentia/ui-patterns";
 import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { ApiError, apiFetch } from "../../lib/api";
@@ -20,11 +20,11 @@ function mutationMessage(err: unknown): string {
 }
 
 /**
- * Diagnósticos de la atención: lista las notas de evolución del detalle y
- * permite registrar un diagnóstico CIE-10 como nota (`Dx: <descripción>`).
+ * Diagnósticos de la atención: resumen de lectura con las notas de evolución
+ * del detalle y registro de diagnósticos CIE-10 en un FormDrawer hermano.
  * Toda escritura respeta el protocolo de barrera: avisa pending al padre,
  * espera `beforeWrite` (flush del borrador), escribe, espera `onChanged`
- * (refresh del encounter) y recién ahí libera.
+ * (refresh del encounter) y recién ahí libera y cierra.
  */
 export function EncounterDiagnoses({
   patientId,
@@ -43,6 +43,7 @@ export function EncounterDiagnoses({
 }): React.JSX.Element {
   const canWrite = useCanWrite();
   const queryClient = useQueryClient();
+  const [open, setOpen] = useState(false);
   const [code, setCode] = useState("");
   const [description, setDescription] = useState("");
   const [saving, setSaving] = useState(false);
@@ -52,9 +53,11 @@ export function EncounterDiagnoses({
   const finalized = encounter.status === "finalizada";
   const busy = disabled || saving;
   const canSubmit = canWrite && !finalized && !busy && code.trim() !== "";
+  const canOpen = canWrite && !finalized && !disabled;
 
   const onSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
+    event.stopPropagation();
     const selectedCode = code.trim();
     if (!selectedCode || saving || disabled) return;
     const selectedDescription = description.trim();
@@ -75,6 +78,7 @@ export function EncounterDiagnoses({
       await onChanged();
       setCode("");
       setDescription("");
+      setOpen(false);
     } catch (err) {
       setError(mutationMessage(err));
     } finally {
@@ -83,52 +87,77 @@ export function EncounterDiagnoses({
     }
   };
 
-  return (
-    <div className="flex flex-col gap-3">
-      <section aria-label="Diagnósticos registrados">
-        <h4 className="mb-2 text-sm font-medium">Diagnósticos ({detail.notes.length})</h4>
-        {detail.notes.length === 0 ? (
-          <p className="text-sm text-muted-foreground">Sin diagnósticos registrados.</p>
-        ) : (
-          <ul className="flex flex-col gap-2">
-            {detail.notes.map((note) => (
-              <li key={note.id} className="border-b pb-2 text-sm last:border-0">
-                <p className="whitespace-pre-wrap">{note.note}</p>
-                <p className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                  {note.diagnosisCode ? <Badge>{note.diagnosisCode}</Badge> : null}
-                  <time dateTime={note.createdAt}>{formatDateTime(note.createdAt)}</time>
-                </p>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
+  const handleClose = () => {
+    // Durante el guardado no se cierra: el error y el borrador se conservan
+    // en el drawer y no se pierde lo seleccionado.
+    if (saving) return;
+    setCode("");
+    setDescription("");
+    setError(null);
+    setOpen(false);
+  };
 
-      {canWrite && !finalized && (
-        <form className="flex flex-col gap-3" onSubmit={onSubmit}>
-          <Cie10Search
-            value={code}
-            onChange={(nextCode, nextDescription) => {
-              setCode(nextCode);
-              setDescription(nextCode ? nextDescription : "");
-            }}
-            disabled={busy}
-          />
-          {description && (
-            <p className="text-sm text-muted-foreground">Se registrará como: Dx: {description}</p>
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Diagnósticos ({detail.notes.length})</CardTitle>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-3">
+        <section aria-label="Diagnósticos registrados">
+          {detail.notes.length === 0 ? (
+            <p className="text-sm text-muted-foreground">Sin diagnósticos registrados.</p>
+          ) : (
+            <ul className="flex flex-col gap-2">
+              {detail.notes.map((note) => (
+                <li key={note.id} className="border-b pb-2 text-sm last:border-0">
+                  <p className="whitespace-pre-wrap">{note.note}</p>
+                  <p className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                    {note.diagnosisCode ? <Badge>{note.diagnosisCode}</Badge> : null}
+                    <time dateTime={note.createdAt}>{formatDateTime(note.createdAt)}</time>
+                  </p>
+                </li>
+              ))}
+            </ul>
           )}
-          {error && (
-            <p role="alert" className="text-sm text-destructive">
-              {error}
-            </p>
-          )}
+        </section>
+
+        {canWrite && !finalized && (
           <div>
-            <SubmitButton type="submit" pending={saving} disabled={!canSubmit}>
+            <Button type="button" variant="outline" disabled={!canOpen} onClick={() => setOpen(true)}>
               Registrar diagnóstico
-            </SubmitButton>
+            </Button>
           </div>
-        </form>
-      )}
-    </div>
+        )}
+
+        {canWrite && !finalized && (
+          <FormDrawer
+            open={open}
+            onClose={handleClose}
+            title="Registrar diagnóstico"
+            description="Se registrará como nota de evolución de esta atención."
+            onSubmit={(event) => void onSubmit(event)}
+            isDirty={code.trim() !== ""}
+            isSubmitting={saving}
+            submitDisabled={!canSubmit}
+            submitLabel="Registrar diagnóstico"
+            error={error}
+          >
+            <div className="flex flex-col gap-3">
+              <Cie10Search
+                value={code}
+                onChange={(nextCode, nextDescription) => {
+                  setCode(nextCode);
+                  setDescription(nextCode ? nextDescription : "");
+                }}
+                disabled={busy}
+              />
+              {description && (
+                <p className="text-sm text-muted-foreground">Se registrará como: Dx: {description}</p>
+              )}
+            </div>
+          </FormDrawer>
+        )}
+      </CardContent>
+    </Card>
   );
 }

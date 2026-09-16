@@ -9,7 +9,7 @@ import {
   type EncounterDetail,
   type PatientDocument,
 } from "../../lib/patients";
-import { EncounterAddendumForm } from "./encounter-addendum-form";
+import { EncounterAddendumDrawer } from "./encounter-addendum-drawer";
 
 /** Las URL firmadas expiran: se consideran frescas 10 min y luego se regeneran. */
 const SIGNED_URL_STALE_MS = 10 * 60 * 1000;
@@ -61,10 +61,20 @@ function DocumentAttachment({ patientId, doc }: { patientId: string; doc: Patien
         <span className="font-medium">{doc.label}</span>
         <span className="text-xs text-muted-foreground">
           {doc.category}
-          {doc.toothNumber != null ? ` · Pieza ${doc.toothNumber}` : ""}
+          {doc.toothNumbers.length > 0 ? ` · ${doc.toothNumbers.map((t) => `Pieza ${t}`).join(", ")}` : ""}
+          {doc.planItemId ? ` · Vinculado al presupuesto (${doc.planItemId.slice(0, 8)})` : ""}
           {" · "}
           <time dateTime={doc.createdAt}>{formatDateTime(doc.createdAt)}</time>
         </span>
+        {doc.tags.length > 0 && (
+          <span className="flex flex-wrap gap-1">
+            {doc.tags.map((tag) => (
+              <Badge key={tag} variant="outline">
+                {tag}
+              </Badge>
+            ))}
+          </span>
+        )}
         {signed.isLoading && <span className="text-xs text-muted-foreground">Cargando enlace…</span>}
         {signed.isError && (
           <span role="alert" className="text-xs text-destructive">
@@ -88,7 +98,7 @@ function DocumentAttachment({ patientId, doc }: { patientId: string; doc: Patien
             rel="noreferrer"
             className="text-xs text-primary underline-offset-4 hover:underline"
           >
-            Ver imagen
+            Abrir imagen completa
           </a>
         ) : null}
       </div>
@@ -98,8 +108,8 @@ function DocumentAttachment({ patientId, doc }: { patientId: string; doc: Patien
 
 /**
  * Vista de lectura del detalle de una atención: encuentro, procedimientos,
- * notas, odontograma, documentos y adendas. Reutilizable por la ruta de
- * atención completa (Paso 11).
+ * tratamientos vinculados, notas, odontograma, documentos y adendas.
+ * Reutilizable desde la atención y la historia del paciente.
  */
 export function EncounterDetailView({
   patientId,
@@ -115,8 +125,9 @@ export function EncounterDetailView({
   const canAddendum = showAddendum && encounter.status === "finalizada" && canWrite;
 
   return (
-    <div className="flex flex-col gap-5">
-      <dl className="grid gap-3 sm:grid-cols-2">
+    <div className="flex min-w-0 flex-col gap-4">
+      <section aria-label="Datos de la atención" className="flex flex-col gap-3 rounded-lg border p-4">
+      <dl className="grid min-w-0 gap-3 sm:grid-cols-2">
         <div>
           <dt className="text-xs font-medium text-muted-foreground">Motivo</dt>
           <dd className="whitespace-pre-wrap text-sm">{encounter.reason ?? "—"}</dd>
@@ -134,7 +145,7 @@ export function EncounterDetailView({
           <dd className="whitespace-pre-wrap text-sm">{encounter.nextStep ?? "—"}</dd>
         </div>
         <div>
-          <dt className="text-xs font-medium text-muted-foreground">Próxima cita</dt>
+          <dt className="text-xs font-medium text-muted-foreground">Próxima revisión sugerida (sin reserva)</dt>
           <dd className="text-sm">
             {encounter.nextAppointmentAt ? (
               <time dateTime={encounter.nextAppointmentAt}>
@@ -162,6 +173,7 @@ export function EncounterDetailView({
           </dd>
         </div>
       </dl>
+      </section>
 
       <section aria-label="Procedimientos">
         <h4 className="mb-2 text-sm font-medium">Procedimientos ({procedures.length})</h4>
@@ -174,8 +186,7 @@ export function EncounterDetailView({
                 <p>{proc.description}</p>
                 <p className="text-xs text-muted-foreground">
                   {proc.toothNumber != null ? `Pieza ${proc.toothNumber} · ` : ""}
-                  {proc.diagnosisCode ? `CIE-10 ${proc.diagnosisCode} · ` : ""}
-                  {proc.planItemId ? `Vinculado al plan (${shortId(proc.planItemId)}) · ` : ""}
+                  {proc.planItemId ? `Vinculado al presupuesto (${shortId(proc.planItemId)}) · ` : ""}
                   <time dateTime={proc.createdAt}>{formatDateTime(proc.createdAt)}</time>
                 </p>
               </li>
@@ -184,6 +195,28 @@ export function EncounterDetailView({
         )}
       </section>
 
+      <section aria-label="Tratamientos vinculados">
+        <h4 className="mb-2 text-sm font-medium">Tratamientos vinculados ({detail.plannedItems.length})</h4>
+        {detail.plannedItems.length === 0 ? (
+          <p className="text-sm text-muted-foreground">Sin tratamientos del presupuesto vinculados.</p>
+        ) : (
+          <ul className="flex flex-col gap-2">
+            {detail.plannedItems.map((item) => (
+              <li key={item.id} className="border-b pb-2 text-sm last:border-0">
+                <p>
+                  <a className="underline-offset-4 hover:underline" href={`/patients/${patientId}?tab=plan&budgetId=${item.budgetId}`}>
+                    {item.title}
+                  </a>
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {item.toothNumber != null ? `Pieza ${item.toothNumber} · ` : ""}
+                  {item.status}
+                </p>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
       <section aria-label="Notas de evolución">
         <h4 className="mb-2 text-sm font-medium">Notas de evolución ({notes.length})</h4>
         {notes.length === 0 ? (
@@ -257,7 +290,7 @@ export function EncounterDetailView({
         )}
         {canAddendum ? (
           <div className="mt-3">
-            <EncounterAddendumForm patientId={patientId} encounterId={encounter.id} />
+            <EncounterAddendumDrawer patientId={patientId} encounterId={encounter.id} />
           </div>
         ) : null}
       </section>

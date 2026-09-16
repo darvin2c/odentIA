@@ -175,7 +175,7 @@ test("pacientes: ficha clínica, alertas, nota CIE-10, odontograma y aislamiento
   await contextB.close();
 });
 
-test("paciente plus: wizard, avatar, atención, plan", async ({ page }) => {
+test("paciente plus: registro en drawer, avatar, atención, plan", async ({ page }) => {
   const user = { name: "Denta Plus", email: `denta-plus-${run}@test.dev`, password: "secreto-123" };
   const org = { name: "Clínica Plus", slug: `clinica-plus-${run}` };
   await register(page, user);
@@ -183,7 +183,9 @@ test("paciente plus: wizard, avatar, atención, plan", async ({ page }) => {
   await login(page, user);
   await onboard(page, org);
 
-  await gotoHydrated(page, tenant(org.slug, "/patients/new"));
+  await gotoHydrated(page, tenant(org.slug, "/patients"));
+  await page.getByRole("button", { name: "Nuevo paciente", exact: true }).click();
+  await expect(page.getByRole("dialog", { name: "Nuevo paciente" })).toBeVisible();
   await page.getByLabel("Nombre del paciente").fill("Lucía Quispe");
   await page.getByRole("combobox", { name: "Tipo de documento" }).click();
   await page.getByRole("option", { name: "DNI", exact: true }).click();
@@ -191,6 +193,7 @@ test("paciente plus: wizard, avatar, atención, plan", async ({ page }) => {
   await page.getByLabel("Teléfono", { exact: true }).fill("999432198");
   await page.getByRole("button", { name: "Siguiente", exact: true }).click();
   await page.getByLabel("Dirección", { exact: true }).fill("Av. Salud 123");
+  await page.getByRole("button", { name: "Siguiente", exact: true }).click();
   await page.getByRole("button", { name: "Registrar paciente", exact: true }).click();
   await expect(page).toHaveURL(/\/patients\/[0-9a-f-]{36}\/triaje$/);
   const patientId = new URL(page.url()).pathname.split("/").at(-2)!;
@@ -199,10 +202,10 @@ test("paciente plus: wizard, avatar, atención, plan", async ({ page }) => {
   await page.getByRole("combobox", { name: "Severidad" }).click();
   await page.getByRole("option", { name: "Severa", exact: true }).click();
   await page.getByLabel("Motivo de consulta").fill("Dolor en molar inferior");
-  await page.getByRole("button", { name: "Guardar triaje", exact: true }).click();
+  await page.getByRole("button", { name: "Guardar triaje e ir a la ficha", exact: true }).click();
   await expect(page).toHaveURL(/\/patients\/[0-9a-f-]{36}(?:\?|$)/);
   await expect(page.getByText(/HC-\d{6}/).first()).toBeVisible();
-  await expect(page.getByText("Alergia: Látex (severa)", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("Alertas clínicas").getByText("Alergia: Látex (severa)", { exact: true })).toBeVisible();
   await page.getByRole("tab", { name: "Historia", exact: true }).click();
   await expect(page.getByText("Dolor en molar inferior", { exact: true })).toBeVisible();
 
@@ -226,36 +229,65 @@ test("paciente plus: wizard, avatar, atención, plan", async ({ page }) => {
   await waitForHydration(page);
   await expect(page.locator("header").getByRole("img", { name: "Foto de Lucía Quispe" })).toBeVisible();
 
+  const catalog = await api<{ data: { id: string; code: string; name: string }[] }>(page, "GET", "/api/services", org.slug);
+  const endodontics = catalog.body.data.find((service) => service.code === "ENDODONCIA")!;
+  const budget = await api<{ data: { id: string } }>(page, "POST", `/api/patients/${patientId}/budgets`, org.slug, {
+    title: "Rehabilitación de Lucía", currency: "PEN",
+  });
+  expect(budget.status).toBe(201);
   const plan = await api<{ data: { id: string } }>(page, "POST", `/api/patients/${patientId}/plan/items`, org.slug, {
-    title: "Endodoncia de molar",
+    budgetId: budget.body.data.id,
+    serviceId: endodontics.id,
     toothNumber: 36,
     diagnosisCode: "K04.0",
-    priceCents: 25000,
-    currency: "PEN",
   });
   expect(plan.status).toBe(201);
-  const encounter = await api<{ data: { id: string } }>(page, "POST", `/api/patients/${patientId}/encounters`, org.slug, {
-    reason: "Tratamiento endodóntico",
-  });
-  expect(encounter.status).toBe(201);
-  const encounterPath = `/api/patients/${patientId}/encounters/${encounter.body.data.id}`;
+  expect((await api(page, "POST", `/api/patients/${patientId}/budgets/${budget.body.data.id}/present`, org.slug, {})).status).toBe(200);
+  expect((await api(page, "POST", `/api/patients/${patientId}/budgets/${budget.body.data.id}/decision`, org.slug, {
+    acceptedItemIds: [plan.body.data.id], acceptedByName: "Lucía Quispe",
+  })).status).toBe(200);
+
+  // El asistente crea la atención únicamente al confirmar, con el tratamiento aún pendiente.
+  await page.getByRole("button", { name: "Nueva atención", exact: true }).first().click();
+  const newEncounter = page.getByRole("dialog", { name: "Nueva atención", exact: true });
+  await newEncounter.getByLabel("Motivo de la atención").fill("Tratamiento endodóntico");
+  await newEncounter.getByRole("button", { name: "Continuar", exact: true }).click();
+  await newEncounter.getByRole("checkbox", { name: new RegExp(endodontics.name) }).check();
+  await newEncounter.getByRole("button", { name: "Continuar", exact: true }).click();
+  const creatingEncounter = page.waitForResponse((response) =>
+    response.url() === `${API}/api/patients/${patientId}/encounters` && response.request().method() === "POST",
+  );
+  await newEncounter.getByRole("button", { name: "Crear atención", exact: true }).click();
+  const createdEncounter = await creatingEncounter;
+  expect(createdEncounter.status()).toBe(201);
+  const encounter = await createdEncounter.json() as { data: { id: string } };
+  const encounterPath = `/api/patients/${patientId}/encounters/${encounter.data.id}`;
+  await expect(page).toHaveURL(new RegExp(`/encounters/${encounter.data.id}$`));
+  await waitForHydration(page);
+  const linked = await api<{ data: { plannedItems: Array<{ id: string; status: string }>; procedures: unknown[] } }>(page, "GET", encounterPath, org.slug);
+  expect(linked.body.data.plannedItems).toEqual(expect.arrayContaining([expect.objectContaining({ id: plan.body.data.id, status: "pendiente" })]));
+  expect(linked.body.data.procedures).toEqual([]);
 
   // Regresión: guardar sin cambios no debe bloquear el siguiente autoguardado.
-  await gotoHydrated(page, tenant(org.slug, `/patients/${patientId}/encounters/${encounter.body.data.id}`));
+  await page.getByRole("button", { name: "Continuar a tratamientos", exact: true }).click();
+  await page.getByRole("button", { name: "Continuar al cierre", exact: true }).click();
   const saveDraft = page.getByRole("button", { name: "Guardar borrador", exact: true });
   await saveDraft.click();
   await expect(saveDraft).toBeEnabled();
   const saved = page.waitForResponse((response) =>
     response.url() === `${API}${encounterPath}` && response.request().method() === "PATCH",
   );
+  await page.getByRole("button", { name: "Editar evolución", exact: true }).click();
   await page.getByLabel("Evolución (máx. 10000)").fill("Tratamiento realizado sin complicaciones");
   await saved;
+  await page.getByRole("dialog", { name: "Editar datos de la atención" }).getByRole("button", { name: "Guardar cambios", exact: true }).click();
   await page.reload();
   await waitForHydration(page);
-  await expect(page.getByLabel("Evolución (máx. 10000)")).toHaveValue("Tratamiento realizado sin complicaciones");
+  await page.getByRole("button", { name: "Continuar a tratamientos", exact: true }).click();
+  await page.getByRole("button", { name: "Continuar al cierre", exact: true }).click();
+  await expect(page.getByText("Tratamiento realizado sin complicaciones", { exact: true })).toBeVisible();
 
   const procedure = await api(page, "POST", `${encounterPath}/procedures`, org.slug, {
-    description: "Endodoncia de molar completada",
     toothNumber: 36,
     diagnosisCode: "K04.0",
     planItemId: plan.body.data.id,
@@ -267,7 +299,7 @@ test("paciente plus: wizard, avatar, atención, plan", async ({ page }) => {
   await gotoHydrated(page, tenant(org.slug, `/patients/${patientId}?tab=historia`));
   await expect(page.getByText("Tratamiento endodóntico", { exact: true }).first()).toBeVisible();
   await page.getByRole("button", { name: "Expandir", exact: true }).click();
-  await expect(page.getByText("Endodoncia de molar completada", { exact: true }).first()).toBeVisible();
+  await expect(page.getByText(endodontics.name, { exact: true }).first()).toBeVisible();
   await expect(page.getByText("Tratamiento realizado sin complicaciones", { exact: true }).first()).toBeVisible();
 
   // Agrupación por tratamiento: secciones por atención + generales.
@@ -289,11 +321,20 @@ test("paciente plus: wizard, avatar, atención, plan", async ({ page }) => {
       "base64",
     ),
   });
-  await uploadDrawer.getByLabel("Etiqueta").fill("RX de control");
+  await uploadDrawer.getByLabel("Título", { exact: true }).fill("RX de control");
+  await uploadDrawer.getByRole("button", { name: /^Pieza 36:/ }).click();
+  await uploadDrawer.getByRole("button", { name: /^Pieza 46:/ }).click();
+  const tags = uploadDrawer.getByRole("textbox", { name: /^Etiquetas/ });
+  await tags.fill("Control 1");
+  await tags.press("Enter");
+  await tags.fill("CONTROL-1");
+  await tags.press("Enter");
   await uploadDrawer.getByRole("button", { name: "Subir", exact: true }).click();
   await expect(uploadDrawer).toBeHidden();
   await expect(page.getByText("RX de control", { exact: true }).first()).toBeVisible();
-  await page.getByRole("tab", { name: "Plan", exact: true }).click();
-  const item = page.getByRole("row").filter({ hasText: "Endodoncia de molar" });
+  const documents = await api<{ data: Array<{ label: string; toothNumbers: number[]; tags: string[] }> }>(page, "GET", `/api/patients/${patientId}/documents`, org.slug);
+  expect(documents.body.data.find((doc) => doc.label === "RX de control")).toMatchObject({ toothNumbers: [36, 46], tags: ["control-1"] });
+  await gotoHydrated(page, tenant(org.slug, `/patients/${patientId}?tab=plan&budgetId=${budget.body.data.id}`));
+  const item = page.getByRole("row").filter({ hasText: endodontics.name });
   await expect(item.getByText("Realizado", { exact: true })).toBeVisible();
 });

@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { useNavigate } from "@tanstack/react-router";
 import { useForm } from "@tanstack/react-form";
 import {
   Button,
@@ -18,150 +18,33 @@ import {
   SelectValue,
   toast,
 } from "@odentia/ui";
-import { PageHeader, WizardSteps, fieldErrorMessages } from "@odentia/ui-patterns";
+import { FormDrawer, WizardSteps, fieldErrorMessages } from "@odentia/ui-patterns";
 import { useEffect, useId, useRef, useState, type InputHTMLAttributes } from "react";
 import { z } from "zod";
 import { ApiError, apiFetch } from "../../lib/api";
 import type { ContactFull } from "../../lib/crm";
 import type { Patient } from "../../lib/patients";
-
-export const Route = createFileRoute("/_org/patients/new")({
-  validateSearch: (search: Record<string, unknown>) => ({
-    ...(typeof search.contactId === "string" ? { contactId: search.contactId } : {}),
-  }),
-  component: NewPatientPage,
-});
-
+import {
+  DOC_TYPE_OPTIONS,
+  INSURANCE_OPTIONS,
+  ReviewList,
+  SEX_OPTIONS,
+  SectionCard,
+  SelectRow,
+  TextRow,
+  emptyDemographics as emptyForm,
+  validateComplementary as validateStep2,
+  validateIdentity as validateStep1,
+  type DemographicsValues as FormValues,
+  type StepErrors,
+} from "./patient-demographics-form";
 const STEPS = [
-  { id: "identificacion", label: "Identificación" },
-  { id: "filiacion", label: "Filiación" },
+  { id: "datos", label: "Datos personales" },
+  { id: "filiacion", label: "Filiación y seguro" },
+  { id: "revision", label: "Revisión" },
 ];
 
-const DOC_TYPES = ["DNI", "CE", "PASAPORTE", "OTRO"];
-const INSURANCE_TYPES = ["PARTICULAR", "SIS", "ESSALUD", "EPS", "OTRO"];
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-interface FormValues {
-  displayName: string;
-  docType: string;
-  docNumber: string;
-  birthDate: string;
-  sex: string;
-  phone: string;
-  email: string;
-  maritalStatus: string;
-  educationLevel: string;
-  occupation: string;
-  address: string;
-  origin: string;
-  emergencyContactName: string;
-  emergencyContactPhone: string;
-  insuranceType: string;
-  insuranceDetail: string;
-  referralSource: string;
-  registeredBranchId: string;
-}
-
-const emptyForm: FormValues = {
-  displayName: "",
-  docType: "",
-  docNumber: "",
-  birthDate: "",
-  sex: "",
-  phone: "",
-  email: "",
-  maritalStatus: "",
-  educationLevel: "",
-  occupation: "",
-  address: "",
-  origin: "",
-  emergencyContactName: "",
-  emergencyContactPhone: "",
-  insuranceType: "",
-  insuranceDetail: "",
-  referralSource: "",
-  registeredBranchId: "",
-};
-
-const step1Schema = z.object({
-  displayName: z.string().trim().min(1, "Ingresa el nombre del paciente"),
-  docType: z.string(),
-  docNumber: z.string().trim().max(20, "Máximo 20 caracteres"),
-  birthDate: z.string(),
-  sex: z.string(),
-  phone: z.string().trim().max(50, "Máximo 50 caracteres"),
-  email: z.string().trim().max(200, "Máximo 200 caracteres"),
-});
-
-const step2Schema = z.object({
-  maritalStatus: z.string().max(100, "Máximo 100 caracteres"),
-  educationLevel: z.string().max(100, "Máximo 100 caracteres"),
-  occupation: z.string().max(200, "Máximo 200 caracteres"),
-  address: z.string().max(500, "Máximo 500 caracteres"),
-  origin: z.string().max(200, "Máximo 200 caracteres"),
-  emergencyContactName: z.string().max(200, "Máximo 200 caracteres"),
-  emergencyContactPhone: z.string().max(50, "Máximo 50 caracteres"),
-  insuranceType: z.string(),
-  insuranceDetail: z.string().max(500, "Máximo 500 caracteres"),
-  referralSource: z.string().max(500, "Máximo 500 caracteres"),
-  registeredBranchId: z.string(),
-});
-
-type StepErrors = Record<string, string>;
-
-function validateStep1(values: FormValues): StepErrors {
-  const errs: StepErrors = {};
-  const parsed = step1Schema.safeParse(values);
-  if (!parsed.success) {
-    for (const issue of parsed.error.issues) {
-      const key = String(issue.path[0] ?? "");
-      if (key && !errs[key]) errs[key] = issue.message;
-    }
-  }
-  if (values.docType && !DOC_TYPES.includes(values.docType)) {
-    errs.docType = "Tipo de documento inválido";
-  }
-  if (values.docType === "DNI" && !/^\d{8}$/.test(values.docNumber.trim())) {
-    errs.docNumber = "El DNI tiene exactamente 8 dígitos";
-  }
-  const email = values.email.trim();
-  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    errs.email = "Ingresa un correo válido";
-  }
-  if (values.sex && values.sex !== "M" && values.sex !== "F") {
-    errs.sex = "Sexo inválido";
-  }
-  return errs;
-}
-function validateStep2(values: FormValues): StepErrors {
-  const errs: StepErrors = {};
-  const parsed = step2Schema.safeParse({
-    maritalStatus: values.maritalStatus,
-    educationLevel: values.educationLevel,
-    occupation: values.occupation,
-    address: values.address,
-    origin: values.origin,
-    emergencyContactName: values.emergencyContactName,
-    emergencyContactPhone: values.emergencyContactPhone,
-    insuranceType: values.insuranceType,
-    insuranceDetail: values.insuranceDetail,
-    referralSource: values.referralSource,
-    registeredBranchId: values.registeredBranchId,
-  });
-  if (!parsed.success) {
-    for (const issue of parsed.error.issues) {
-      const key = String(issue.path[0] ?? "");
-      if (key && !errs[key]) errs[key] = issue.message;
-    }
-  }
-  if (values.insuranceType && !INSURANCE_TYPES.includes(values.insuranceType)) {
-    errs.insuranceType = "Tipo de seguro inválido";
-  }
-  if (values.registeredBranchId && !UUID_RE.test(values.registeredBranchId)) {
-    errs.registeredBranchId = "Sucursal inválida";
-  }
-  return errs;
-}
 
 interface Branch {
   id: string;
@@ -199,92 +82,20 @@ function buildPatientBody(values: FormValues, contactId: string | undefined): Re
   return body;
 }
 
-function TextRow({
-  label,
-  value,
-  onChange,
-  error,
-  fallbackError,
-  inputProps,
-}: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  error?: string;
-  fallbackError?: string[];
-  inputProps?: InputHTMLAttributes<HTMLInputElement>;
+
+export function CreatePatientDrawer({ open, onClose, contactId }: {
+  open: boolean;
+  onClose: () => void;
+  contactId?: string;
 }) {
-  const id = useId();
-  return (
-    <Field>
-      <FieldLabel htmlFor={id}>{label}</FieldLabel>
-      <Input id={id} {...inputProps} value={value} onChange={(e) => onChange(e.target.value)} />
-      <FieldError>{error ?? fallbackError?.[0]}</FieldError>
-    </Field>
-  );
-}
-
-function SelectRow({
-  label,
-  value,
-  onChange,
-  error,
-  fallbackError,
-  options,
-  disabled,
-}: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  error?: string;
-  fallbackError?: string[];
-  options: readonly { value: string; label: string }[];
-  disabled?: boolean;
-}) {
-  const id = useId();
-  return (
-    <Field>
-      <FieldLabel htmlFor={id}>{label}</FieldLabel>
-      <Select
-        value={value}
-        items={options}
-        disabled={disabled}
-        onValueChange={(next) => onChange(next ?? "")}
-      >
-        <SelectTrigger id={id} aria-label={label}>
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          {options.map((option) => (
-            <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-      <FieldError>{error ?? fallbackError?.[0]}</FieldError>
-    </Field>
-  );
-}
-
-function SectionCard({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-base">{title}</CardTitle>
-      </CardHeader>
-      <CardContent className="grid gap-4 sm:grid-cols-2">{children}</CardContent>
-    </Card>
-  );
-}
-
-function NewPatientPage() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
-  const { contactId } = Route.useSearch();
 
   const [current, setCurrent] = useState(0);
   const [visited, setVisited] = useState<readonly number[]>([0]);
   const [stepErrors, setStepErrors] = useState<StepErrors>({});
   const [pending, setPending] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const prefilled = useRef(false);
 
   const form = useForm({ defaultValues: emptyForm });
@@ -299,7 +110,7 @@ function NewPatientPage() {
   useEffect(() => {
     if (contactName && !prefilled.current) {
       prefilled.current = true;
-      form.setFieldValue("displayName", contactName);
+      form.reset({ ...emptyForm, displayName: contactName });
     }
   }, [contactName, form]);
 
@@ -352,6 +163,7 @@ function NewPatientPage() {
       return;
     }
     setStepErrors({});
+    setSaveError(null);
     setPending(true);
     try {
       const created = await apiFetch<{ data: Patient }>("/api/patients", {
@@ -361,9 +173,9 @@ function NewPatientPage() {
       const patientId = created.data.id;
       await queryClient.invalidateQueries({ queryKey: ["patients"] });
       toast.success("Paciente registrado");
-      await navigate({ to: "/patients/$patientId/triaje", params: { patientId } });
+      await navigate({ to: "/patients/$patientId", params: { patientId }, search: { tab: "antecedentes" } });
     } catch (err) {
-      toast.error(err instanceof ApiError ? (err.shape.message ?? err.message) : "No se pudo registrar el paciente");
+      setSaveError(err instanceof ApiError ? (err.shape.message ?? err.message) : "No se pudo registrar el paciente");
     } finally {
       setPending(false);
     }
@@ -372,29 +184,37 @@ function NewPatientPage() {
   const fromContact = Boolean(contactId);
 
   return (
-    <div className="flex flex-col gap-6">
-      <PageHeader
-        title="Nuevo paciente"
-        subtitle="Registro administrativo en 2 pasos. El triaje clínico se completa al finalizar el registro."
-        actions={
-          <Button
-            type="button"
-            variant="outline"
-            disabled={pending}
-            onClick={() => void navigate({ to: "/patients" })}
-          >
-            Volver a pacientes
-          </Button>
-        }
-      />
-      <WizardSteps
-        steps={STEPS}
-        current={current}
-        visited={visited}
-        onGo={(index) => {
-          if (!pending) setCurrent(index);
-        }}
-      />
+    <form.Subscribe selector={(state) => state.isDirty}>
+      {(isDirty) => (
+        <FormDrawer
+          open={open}
+          onClose={onClose}
+          title="Nuevo paciente"
+          description="Completa los datos de registro. Al guardar continuarás con los antecedentes de salud."
+          isDirty={isDirty}
+          isSubmitting={pending}
+          isLoading={fromContact && contactQuery.isLoading}
+          submitDisabled={fromContact && !contactQuery.data}
+          error={saveError ?? (contactQuery.isError ? contactQuery.error.message : null)}
+          submitLabel={current < STEPS.length - 1 ? "Siguiente" : "Registrar paciente"}
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (current < STEPS.length - 1) next();
+            else void finish();
+          }}
+          className="data-[swipe-axis=x]:sm:[--drawer-content-width:min(42rem,calc(100vw-2rem))]"
+          headerContent={
+            <WizardSteps
+              steps={STEPS}
+              current={current}
+              visited={visited}
+              onGo={(index) => {
+                if (!pending) setCurrent(index);
+              }}
+            />
+          }
+        >
+          <fieldset disabled={pending} className="flex min-w-0 flex-col gap-4">
       {fromContact ? (
         contactQuery.isLoading ? (
           <p className="text-sm text-muted-foreground">Cargando contacto…</p>
@@ -436,13 +256,7 @@ function NewPatientPage() {
                   value={field.state.value}
                   error={stepErrors.docType}
                   fallbackError={fieldErrorMessages(field.state.meta.errors)}
-                  options={[
-                    { value: "", label: "—" },
-                    { value: "DNI", label: "DNI" },
-                    { value: "CE", label: "CE" },
-                    { value: "PASAPORTE", label: "Pasaporte" },
-                    { value: "OTRO", label: "Otro" },
-                  ]}
+                  options={DOC_TYPE_OPTIONS}
                   onChange={(v) => {
                     field.handleChange(v);
                     clearError("docType");
@@ -488,11 +302,7 @@ function NewPatientPage() {
                   value={field.state.value}
                   error={stepErrors.sex}
                   fallbackError={fieldErrorMessages(field.state.meta.errors)}
-                  options={[
-                    { value: "", label: "—" },
-                    { value: "M", label: "Masculino" },
-                    { value: "F", label: "Femenino" },
-                  ]}
+                  options={SEX_OPTIONS}
                   onChange={(v) => {
                     field.handleChange(v);
                     clearError("sex");
@@ -537,8 +347,8 @@ function NewPatientPage() {
       ) : null}
 
       {current === 1 ? (
-        <div className="flex flex-col gap-4">
-          <SectionCard title="Datos personales">
+        <div className="flex min-w-0 flex-col gap-4">
+          <SectionCard title="Filiación">
             <form.Field name="maritalStatus">
               {(field) => (
                 <TextRow
@@ -627,14 +437,7 @@ function NewPatientPage() {
                   value={field.state.value}
                   error={stepErrors.insuranceType}
                   fallbackError={fieldErrorMessages(field.state.meta.errors)}
-                  options={[
-                    { value: "", label: "—" },
-                    { value: "PARTICULAR", label: "Particular" },
-                    { value: "SIS", label: "SIS" },
-                    { value: "ESSALUD", label: "EsSalud" },
-                    { value: "EPS", label: "EPS" },
-                    { value: "OTRO", label: "Otro" },
-                  ]}
+                  options={INSURANCE_OPTIONS}
                   onChange={(v) => {
                     field.handleChange(v);
                     clearError("insuranceType");
@@ -729,21 +532,38 @@ function NewPatientPage() {
           </SectionCard>
         </div>
       ) : null}
+      {current === 2 ? (
+        <div className="flex min-w-0 flex-col gap-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Revisa los datos antes de guardar</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <ReviewList values={form.state.values} branchName={(branchesQuery.data?.data ?? []).find((b) => b.id === form.state.values.registeredBranchId)?.name} />
+            </CardContent>
+          </Card>
+          <Card className="border-primary/40 bg-primary/5">
+            <CardContent className="flex flex-col gap-1 pt-4">
+              <p className="text-sm font-medium">Al registrar pasarás a los antecedentes de salud.</p>
+              <p className="text-sm text-muted-foreground">
+                1. Antecedentes: alergias, condiciones, medicación y entrevista · 2. Ficha: evaluación clínica ·
+                3. Plan: tratamientos indicados desde el tarifario, luego su presupuesto.
+              </p>
+            </CardContent>
+          </Card>
+        </div>
+      ) : null}
 
-      <div className="flex items-center justify-between gap-3">
-        <Button type="button" variant="outline" disabled={current === 0 || pending} onClick={() => setCurrent(current - 1)}>
-          Anterior
-        </Button>
-        {current < STEPS.length - 1 ? (
-          <Button type="button" disabled={pending} onClick={next}>
-            Siguiente
+      {current > 0 && (
+        <div>
+          <Button type="button" variant="outline" disabled={pending} onClick={() => setCurrent(current - 1)}>
+            Anterior
           </Button>
-        ) : (
-          <Button type="button" disabled={pending} onClick={() => void finish()}>
-            Registrar paciente
-          </Button>
-        )}
-      </div>
-    </div>
+        </div>
+      )}
+          </fieldset>
+        </FormDrawer>
+      )}
+    </form.Subscribe>
   );
 }

@@ -1,5 +1,5 @@
 import { FDI_ADULT, FDI_CHILD, conditionLabel, surfaceLabel } from "@odentia/clinical";
-import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery } from "@tanstack/react-query";
 import {
   Attachment,
   AttachmentActions,
@@ -9,6 +9,7 @@ import {
   AttachmentTitle,
   Badge,
   Button,
+  ButtonGroup,
   Card,
   CardContent,
   Field,
@@ -30,9 +31,12 @@ import {
   timelineTypeLabel,
   type TimelineItem,
 } from "../../lib/patients";
+import { documentCategoryLabel as docCategoryLabel } from "../../lib/patient-overview";
 import { AnamnesisVersionDialog } from "./anamnesis-history";
 import { EncounterHistoryCard } from "./encounter-history-card";
+import { DocumentOpenButton, useDocumentUrl } from "./document-open-button";
 
+const ALL_TEETH = "all";
 export interface TimelineProps {
   patientId: string;
   initialTooth?: number;
@@ -42,121 +46,69 @@ export interface TimelineProps {
 interface TimelinePage {
   data: TimelineItem[];
   nextCursor: string | null;
+  timezone: string;
+  locale: string;
 }
-
-type FeedFilter = "todo" | "encounter" | "note" | "rx" | "foto" | "odontogram";
+type FeedFilter = "todo" | "encounter" | "note" | "anamnesis" | "rx" | "foto" | "odontogram";
 
 const FILTERS: Array<{ value: FeedFilter; label: string; dot?: string }> = [
   { value: "todo", label: "Todo" },
   { value: "encounter", label: "Atenciones", dot: "bg-blue-500" },
   { value: "note", label: "Notas", dot: "bg-violet-500" },
+  { value: "anamnesis", label: "Anamnesis", dot: "bg-teal-500" },
   { value: "rx", label: "RX", dot: "bg-sky-500" },
   { value: "foto", label: "Fotos", dot: "bg-emerald-500" },
   { value: "odontogram", label: "Odontograma", dot: "bg-amber-500" },
 ];
 
-type GroupMode = "dia" | "tratamiento";
+type GroupMode = "dia" | "atencion";
 
 const GROUP_MODES: Array<{ value: GroupMode; label: string }> = [
   { value: "dia", label: "Día" },
-  { value: "tratamiento", label: "Tratamiento" },
+  { value: "atencion", label: "Atención" },
 ];
 
-const ALL_TEETH = "todas";
-
-/** Las URL firmadas expiran: se consideran frescas 10 min y luego se regeneran. */
-const SIGNED_URL_STALE_MS = 10 * 60 * 1000;
-
-const DOCUMENT_CATEGORY_LABELS: Record<string, string> = {
-  consentimiento: "Consentimiento",
-  radiografia: "Radiografía",
-  foto_clinica: "Foto clínica",
-  informe: "Informe",
-  otro: "Otro",
-};
-
-function documentCategoryLabel(category: string | undefined): string {
-  if (!category) return "Documento";
-  return DOCUMENT_CATEGORY_LABELS[category] ?? category;
-}
-
-function dayKey(iso: string): string {
-  const date = new Date(iso);
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
-}
-
-function dayHeading(iso: string): string {
-  const date = new Date(iso);
-  const formatted = new Intl.DateTimeFormat("es-PE", {
-    weekday: "long",
-    day: "numeric",
-    month: "long",
-    year: "numeric",
-  }).format(date);
-  const capitalized = formatted.charAt(0).toUpperCase() + formatted.slice(1);
-  const today = new Date();
-  const isToday =
-    date.getFullYear() === today.getFullYear() &&
-    date.getMonth() === today.getMonth() &&
-    date.getDate() === today.getDate();
-  return isToday ? `HOY · ${capitalized}` : capitalized;
-}
-
-function itemDateTime(iso: string): string {
+function dayKey(iso: string, timezone: string): string {
   const time = new Date(iso).getTime();
   if (Number.isNaN(time)) return iso;
-  return new Date(iso).toLocaleString("es-PE");
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date(iso));
 }
 
-function useDocumentUrl(patientId: string, documentId: string) {
-  return useQuery({
-    queryKey: ["patient-document-url", patientId, documentId],
-    queryFn: () =>
-      apiFetch<{ data: { url: string } }>(`/api/patients/${patientId}/documents/${documentId}/url`),
-    staleTime: SIGNED_URL_STALE_MS,
-    gcTime: 30 * 60 * 1000,
+function dayHeading(iso: string, timezone: string, locale: string): string {
+  const time = new Date(iso).getTime();
+  if (Number.isNaN(time)) return iso;
+  return new Date(iso).toLocaleDateString(locale, {
+    timeZone: timezone,
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    year: "numeric",
   });
 }
 
-/** Prefetcha la URL firmada para abrirla en el gesto del usuario sin bloqueos de ventanas. */
-function DocumentOpenButton({ patientId, documentId, label }: { patientId: string; documentId: string; label: string }) {
-  const signed = useDocumentUrl(patientId, documentId);
-  const url = signed.data?.data.url ?? null;
-  if (signed.isError) {
-    return (
-      <span className="flex flex-wrap items-center gap-2">
-        <span role="alert" className="text-xs text-destructive">
-          No se pudo obtener el documento.
-        </span>
-        <Button type="button" size="sm" variant="outline" onClick={() => void signed.refetch()}>
-          Reintentar
-        </Button>
-      </span>
-    );
-  }
-  return (
-    <Button
-      type="button"
-      size="sm"
-      variant="outline"
-      disabled={!url}
-      onClick={() => {
-        if (url) window.open(url, "_blank", "noopener");
-      }}
-    >
-      {signed.isPending ? "Obteniendo documento…" : `Abrir ${label}`}
-    </Button>
-  );
+function itemDateTime(iso: string, timezone: string, locale: string): string {
+  const time = new Date(iso).getTime();
+  if (Number.isNaN(time)) return iso;
+  return new Date(iso).toLocaleString(locale, { timeZone: timezone });
 }
 
 function CardHeaderRow({
   badge,
   context,
   createdAt,
+  timezone,
+  locale,
 }: {
   badge: string;
   context?: string | null;
   createdAt: string;
+  timezone: string;
+  locale: string;
 }) {
   return (
     <div className="flex flex-wrap items-center gap-2">
@@ -164,7 +116,7 @@ function CardHeaderRow({
       {context ? <span className="text-xs text-muted-foreground">{context}</span> : null}
       <time
         dateTime={createdAt}
-        title={itemDateTime(createdAt)}
+        title={itemDateTime(createdAt, timezone, locale)}
         className="ml-auto text-xs text-muted-foreground"
       >
         {timeAgo(createdAt)}
@@ -173,7 +125,7 @@ function CardHeaderRow({
   );
 }
 
-function NoteCard({ item }: { item: TimelineItem }) {
+function NoteCard({ item, timezone, locale }: { item: TimelineItem; timezone: string; locale: string }) {
   return (
     <Card>
       <CardContent className="flex flex-col gap-2 pt-4">
@@ -181,6 +133,8 @@ function NoteCard({ item }: { item: TimelineItem }) {
           badge={timelineTypeLabel(item.type)}
           context={item.diagnosisCode ? `CIE-10: ${item.diagnosisCode}` : null}
           createdAt={item.createdAt}
+          timezone={timezone}
+          locale={locale}
         />
         {item.detail ? <p className="whitespace-pre-wrap text-sm">{item.detail}</p> : null}
       </CardContent>
@@ -190,9 +144,13 @@ function NoteCard({ item }: { item: TimelineItem }) {
 
 function OdontogramCard({
   item,
+  timezone,
+  locale,
   onOdontogramSelect,
 }: {
   item: TimelineItem;
+  timezone: string;
+  locale: string;
   onOdontogramSelect: (tooth: number) => void;
 }) {
   const tooth = item.toothNumbers[0];
@@ -209,6 +167,8 @@ function OdontogramCard({
             .filter(Boolean)
             .join(" · ") || null}
           createdAt={item.createdAt}
+          timezone={timezone}
+          locale={locale}
         />
         {meta.length > 0 ? <p className="text-sm text-muted-foreground">{meta.join(" · ")}</p> : null}
         {item.detail ? <p className="whitespace-pre-wrap text-sm">{item.detail}</p> : null}
@@ -223,9 +183,9 @@ function OdontogramCard({
     </Card>
   );
 }
-
 function DocumentCard({ patientId, item }: { patientId: string; item: TimelineItem }) {
-  const tooth = item.toothNumbers[0];
+  const teeth = item.toothNumbers ?? [];
+  const tags = item.tags ?? [];
   const signed = useDocumentUrl(patientId, item.refId);
   const url = signed.data?.data.url ?? null;
   const isImage = item.category === "radiografia" || item.category === "foto_clinica";
@@ -243,8 +203,10 @@ function DocumentCard({ patientId, item }: { patientId: string; item: TimelineIt
       <AttachmentContent>
         <AttachmentTitle>{item.title}</AttachmentTitle>
         <AttachmentDescription>
-          {documentCategoryLabel(item.category)}
-          {tooth != null ? ` · Pieza ${tooth}` : ""}
+          {item.category ? docCategoryLabel(item.category) : "Documento"}
+          {teeth.length > 0 ? ` · P${teeth.join(", ")}` : ""}
+          {tags.length > 0 ? ` · ${tags.join(", ")}` : ""}
+          {item.encounterId ? " · vinculado a atención" : ""}
         </AttachmentDescription>
       </AttachmentContent>
       <AttachmentActions className="pr-2">
@@ -254,7 +216,7 @@ function DocumentCard({ patientId, item }: { patientId: string; item: TimelineIt
   );
 }
 
-function AnamnesisCard({ item, onView }: { item: TimelineItem; onView: (refId: string) => void }) {
+function AnamnesisCard({ item, timezone, locale, onView }: { item: TimelineItem; timezone: string; locale: string; onView: (refId: string) => void }) {
   return (
     <Card>
       <CardContent className="flex flex-col gap-2 pt-4">
@@ -262,6 +224,8 @@ function AnamnesisCard({ item, onView }: { item: TimelineItem; onView: (refId: s
           badge={timelineTypeLabel(item.type)}
           context={item.version != null ? `v${item.version}` : null}
           createdAt={item.createdAt}
+          timezone={timezone}
+          locale={locale}
         />
         {item.detail ? <p className="whitespace-pre-wrap text-sm">{item.detail}</p> : null}
         <div>
@@ -278,6 +242,7 @@ function AnamnesisCard({ item, onView }: { item: TimelineItem; onView: (refId: s
 export function Timeline({ patientId, initialTooth, onOdontogramSelect }: TimelineProps) {
   const [filter, setFilter] = useState<FeedFilter>("todo");
   const [mode, setMode] = useState<GroupMode>("dia");
+  const [order, setOrder] = useState<"desc" | "asc">("desc");
   const [tooth, setTooth] = useState<string>(initialTooth != null ? String(initialTooth) : ALL_TEETH);
   const [viewingAnamnesis, setViewingAnamnesis] = useState<string | null>(null);
   const toothId = useId();
@@ -287,7 +252,7 @@ export function Timeline({ patientId, initialTooth, onOdontogramSelect }: Timeli
   }, [initialTooth]);
 
   const types =
-    filter === "encounter" || filter === "note" || filter === "odontogram"
+    filter === "encounter" || filter === "note" || filter === "odontogram" || filter === "anamnesis"
       ? filter
       : filter === "rx" || filter === "foto"
         ? "document"
@@ -297,12 +262,13 @@ export function Timeline({ patientId, initialTooth, onOdontogramSelect }: Timeli
   const toothNumber = tooth === ALL_TEETH ? undefined : Number(tooth);
 
   const feed = useInfiniteQuery({
-    queryKey: ["timeline", patientId, types, toothNumber, documentCategory],
+    queryKey: ["timeline", patientId, types, toothNumber, documentCategory, order],
     queryFn: ({ pageParam }) => {
       const params = new URLSearchParams();
       if (types) params.set("types", types);
       if (toothNumber != null) params.set("toothNumber", String(toothNumber));
       if (documentCategory) params.set("documentCategory", documentCategory);
+      if (order !== "desc") params.set("order", order);
       if (pageParam) params.set("cursor", pageParam);
       const query = params.toString();
       return apiFetch<TimelinePage>(`/api/patients/${patientId}/timeline${query ? `?${query}` : ""}`);
@@ -312,24 +278,28 @@ export function Timeline({ patientId, initialTooth, onOdontogramSelect }: Timeli
   });
 
   const items = useMemo(() => feed.data?.pages.flatMap((page) => page.data) ?? [], [feed.data]);
+  const timezone = feed.data?.pages[0]?.timezone ?? "America/Lima";
+  const locale = feed.data?.pages[0]?.locale ?? "es-PE";
 
   const groups = useMemo(() => {
     const ordered = new Map<string, { heading: string; sample: string; items: TimelineItem[] }>();
     if (mode === "dia") {
       for (const item of items) {
-        const key = dayKey(item.createdAt);
+        const key = dayKey(item.createdAt, timezone);
         const group = ordered.get(key);
         if (group) group.items.push(item);
-        else ordered.set(key, { heading: dayHeading(item.createdAt), sample: item.createdAt, items: [item] });
+        else ordered.set(key, { heading: dayHeading(item.createdAt, timezone, locale), sample: item.createdAt, items: [item] });
       }
       return [...ordered.entries()];
     }
-    // Modo Tratamiento: una sección por atención (en orden descendente) y una
-    // sección final "Generales" con eventos no vinculados a una atención.
+    // Modo Atención: una sección por atención con su motivo y fecha, y una
+    // sección final "Generales" con notas sueltas y eventos no vinculados.
+    // Los documentos de cada atención se ven dentro de su tarjeta
+    // (misma unidad clínica), no duplicados en Generales.
     for (const item of items) {
       if (item.type !== "encounter") continue;
       ordered.set(item.id, {
-        heading: `Atención ${dayHeading(item.createdAt)}`,
+        heading: `Atención · ${item.title} · ${dayHeading(item.createdAt, timezone, locale)}`,
         sample: item.createdAt,
         items: [item],
       });
@@ -339,7 +309,7 @@ export function Timeline({ patientId, initialTooth, onOdontogramSelect }: Timeli
       ordered.set("generales", { heading: "Generales", sample: generales[0]!.createdAt, items: generales });
     }
     return [...ordered.entries()];
-  }, [items, mode]);
+  }, [items, mode, timezone, locale]);
 
   const toothItems: Record<string, string> = useMemo(
     () => ({
@@ -349,12 +319,12 @@ export function Timeline({ patientId, initialTooth, onOdontogramSelect }: Timeli
     [],
   );
 
-  const hasActiveFilter = filter !== "todo" || tooth !== ALL_TEETH;
+  const hasActiveFilter = filter !== "todo" || tooth !== ALL_TEETH || order !== "desc";
 
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex flex-wrap gap-2" aria-label="Filtrar historia clínica">
+        <div className="max-w-full overflow-x-auto"><ButtonGroup aria-label="Filtrar historia clínica">
           {FILTERS.map((option) => (
             <Button
               key={option.value}
@@ -374,20 +344,42 @@ export function Timeline({ patientId, initialTooth, onOdontogramSelect }: Timeli
               )}
             </Button>
           ))}
-        </div>
-        <div className="flex gap-2" role="group" aria-label="Agrupar historia clínica">
-          {GROUP_MODES.map((option) => (
+        </ButtonGroup></div>
+        <div className="flex flex-wrap items-center gap-2">
+          <ButtonGroup aria-label="Agrupar historia clínica">
+            {GROUP_MODES.map((option) => (
+              <Button
+                key={option.value}
+                type="button"
+                size="sm"
+                variant={mode === option.value ? "default" : "outline"}
+                aria-pressed={mode === option.value}
+                onClick={() => setMode(option.value)}
+              >
+                {option.label}
+              </Button>
+            ))}
+          </ButtonGroup>
+          <ButtonGroup aria-label="Orden de historia clínica">
             <Button
-              key={option.value}
               type="button"
               size="sm"
-              variant={mode === option.value ? "default" : "outline"}
-              aria-pressed={mode === option.value}
-              onClick={() => setMode(option.value)}
+              variant={order === "desc" ? "default" : "outline"}
+              aria-pressed={order === "desc"}
+              onClick={() => setOrder("desc")}
             >
-              {option.label}
+              Recientes
             </Button>
-          ))}
+            <Button
+              type="button"
+              size="sm"
+              variant={order === "asc" ? "default" : "outline"}
+              aria-pressed={order === "asc"}
+              onClick={() => setOrder("asc")}
+            >
+              Antiguos
+            </Button>
+          </ButtonGroup>
         </div>
       </div>
 
@@ -445,7 +437,8 @@ export function Timeline({ patientId, initialTooth, onOdontogramSelect }: Timeli
       ) : null}
 
       {groups.map(([key, group]) => (
-        <section key={key} aria-label={group.heading} className="flex flex-col gap-3">
+        <section key={key} aria-label={group.heading} className="relative flex flex-col gap-3 border-l-2 border-border pl-4 sm:pl-5">
+          <span aria-hidden="true" className="absolute -left-[7px] top-1 size-3 rounded-full border-2 border-primary bg-background" />
           <h3 className="text-sm font-semibold text-muted-foreground">
             <time dateTime={group.sample}>{group.heading}</time>
           </h3>
@@ -453,13 +446,13 @@ export function Timeline({ patientId, initialTooth, onOdontogramSelect }: Timeli
             item.type === "encounter" ? (
               <EncounterHistoryCard key={item.id} patientId={patientId} item={item} />
             ) : item.type === "note" ? (
-              <NoteCard key={item.id} item={item} />
+              <NoteCard key={item.id} item={item} timezone={timezone} locale={locale} />
             ) : item.type === "odontogram" ? (
-              <OdontogramCard key={item.id} item={item} onOdontogramSelect={onOdontogramSelect} />
+              <OdontogramCard key={item.id} item={item} timezone={timezone} locale={locale} onOdontogramSelect={onOdontogramSelect} />
             ) : item.type === "document" ? (
               <DocumentCard key={item.id} patientId={patientId} item={item} />
             ) : (
-              <AnamnesisCard key={item.id} item={item} onView={setViewingAnamnesis} />
+              <AnamnesisCard key={item.id} item={item} timezone={timezone} locale={locale} onView={setViewingAnamnesis} />
             ),
           )}
         </section>

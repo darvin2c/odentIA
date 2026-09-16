@@ -3,6 +3,10 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Badge,
   Button,
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
   Field,
   FieldLabel,
   Select,
@@ -12,9 +16,8 @@ import {
   SelectLabel,
   SelectTrigger,
   SelectValue,
-  Textarea,
 } from "@odentia/ui";
-import { SubmitButton } from "@odentia/ui-patterns";
+import { FormDrawer } from "@odentia/ui-patterns";
 import { useId, useState } from "react";
 import { ApiError, apiFetch } from "../../lib/api";
 import { useCanWrite } from "../../lib/crm";
@@ -24,11 +27,13 @@ import {
   type PlanItem,
 } from "../../lib/patients";
 import { Cie10Search } from "./cie10-search";
+import { ServicePicker } from "./service-picker";
+import { formatMoney } from "../../lib/services";
 
 const NO_TOOTH = "__sin-pieza__";
 const NO_PLAN = "__sin-plan__";
-const MAX_DESCRIPTION = 4000;
 
+/** Solo presupuesto aceptado o servicio directo explícito: el servidor exige decision aceptado y lo marca realizado. */
 const OPEN_STATUSES: readonly string[] = ["pendiente", "programado"];
 
 function formatDateTime(iso: string | null): string {
@@ -38,17 +43,6 @@ function formatDateTime(iso: string | null): string {
   return date.toLocaleString("es-PE", { dateStyle: "short", timeStyle: "short" });
 }
 
-function formatMoney(cents: number, currency: string): string {
-  try {
-    return new Intl.NumberFormat("es-PE", {
-      style: "currency",
-      currency,
-      minimumFractionDigits: 2,
-    }).format(cents / 100);
-  } catch {
-    return `${currency} ${(cents / 100).toFixed(2)}`;
-  }
-}
 
 function mutationMessage(err: unknown): string {
   if (err instanceof ApiError && err.shape.message) return err.shape.message;
@@ -56,18 +50,19 @@ function mutationMessage(err: unknown): string {
 }
 
 function planOptionLabel(item: PlanItem): string {
-  const piece = item.toothNumber == null ? "General" : `Pieza ${item.toothNumber}`;
-  const price = item.priceCents == null ? "por definir" : formatMoney(item.priceCents, item.currency);
-  return `${item.title} · ${piece} · ${planStatusLabel(item.status)} · ${price}`;
+  const price = item.priceCents == null ? "sin tarifa" : formatMoney(item.priceCents, item.currency);
+  const tooth = item.toothNumber == null ? "general" : `pieza ${item.toothNumber}`;
+  return `${item.title} · ${tooth} · ${planStatusLabel(item.status)} · ${price}`;
 }
 
 /**
- * Procedimientos de la atención: lista los procedimientos reales del detalle
- * y permite registrar uno nuevo, opcionalmente vinculado a un ítem abierto
- * del plan (el POST lo marca realizado de forma atómica en el servidor).
+ * Procedimientos de la atención: resumen de lectura con los procedimientos
+ * reales del detalle y los tratamientos vinculados al abrir (pendientes de
+ * realizar), más registro en un FormDrawer hermano (tratamiento aceptado del
+ * presupuesto o servicio directo del catálogo, con pieza y CIE-10 opcionales).
  * Toda escritura respeta el protocolo de barrera: avisa pending al padre,
- * espera `beforeWrite` (flush del borrador), escribe, refresca plan + resumen,
- * espera `onChanged` (refresh del encounter) y recién ahí libera.
+ * espera `beforeWrite` (flush del borrador), escribe, espera `onChanged`
+ * (refresh del encounter) y recién ahí libera y cierra.
  */
 export function EncounterProcedures({
   patientId,
@@ -87,7 +82,8 @@ export function EncounterProcedures({
   const canWrite = useCanWrite();
   const queryClient = useQueryClient();
   const uid = useId();
-  const [description, setDescription] = useState("");
+  const [open, setOpen] = useState(false);
+  const [serviceId, setServiceId] = useState("");
   const [toothSel, setToothSel] = useState<string>(NO_TOOTH);
   const [cie, setCie] = useState("");
   const [planSel, setPlanSel] = useState<string>("");
@@ -97,15 +93,15 @@ export function EncounterProcedures({
   const encounter = detail.encounter;
   const finalized = encounter.status === "finalizada";
   const busy = disabled || saving;
+  const canOpen = canWrite && !finalized && !disabled;
 
   const planQuery = useQuery({
     queryKey: ["plan", patientId],
     queryFn: () => apiFetch<{ data: PlanItem[] }>(`/api/patients/${patientId}/plan`),
     enabled: canWrite && !finalized,
   });
-
   const allItems = planQuery.data?.data ?? [];
-  const openItems = allItems.filter((item) => OPEN_STATUSES.includes(item.status));
+  const openItems = allItems.filter((item) => item.decision === "aceptado" && OPEN_STATUSES.includes(item.status));
   const planById: Record<string, PlanItem> = Object.fromEntries(allItems.map((item) => [item.id, item]));
 
   const tooth = toothSel === NO_TOOTH ? null : Number(toothSel);
@@ -121,7 +117,7 @@ export function EncounterProcedures({
 
   const toothItems: Record<string, string> = { [NO_TOOTH]: "Sin pieza" };
   for (const n of [...FDI_ADULT, ...FDI_CHILD]) toothItems[String(n)] = `Pieza ${n}`;
-  const planItems: Record<string, string> = { [NO_PLAN]: "Sin vincular" };
+  const planItems: Record<string, string> = { [NO_PLAN]: "Seleccionar otro servicio del catálogo" };
   for (const item of options) planItems[item.id] = planOptionLabel(item);
 
   const onToothChange = (value: string | null) => {
@@ -145,23 +141,23 @@ export function EncounterProcedures({
     const linked = planById[next];
     if (!linked) return;
     setPlanSel(next);
-    if (description.trim() === "") setDescription(linked.title);
-    if (linked.diagnosisCode) setCie(linked.diagnosisCode);
-    if (linked.toothNumber != null) setToothSel(String(linked.toothNumber));
+    setServiceId("");
+    setCie(linked.diagnosisCode ?? "");
+    setToothSel(linked.toothNumber == null ? NO_TOOTH : String(linked.toothNumber));
   };
 
-  const canSubmit = canWrite && !finalized && !busy && description.trim() !== "";
+  const canSubmit = canWrite && !finalized && !busy && (Boolean(selectedPlan) || serviceId !== "");
+  const isDirty = serviceId !== "" || planSel !== "" || cie.trim() !== "" || toothSel !== NO_TOOTH;
 
   const onSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
-    const trimmed = description.trim();
-    if (!trimmed || saving || disabled) return;
+    event.stopPropagation();
+    if (!canSubmit) return;
     const trimmedCie = cie.trim();
     const body = {
-      description: trimmed,
+      ...(selectedPlan ? { planItemId: selectedPlan.id } : { serviceId }),
       toothNumber: tooth,
       diagnosisCode: trimmedCie === "" ? null : trimmedCie,
-      planItemId: planSel === "" ? null : planSel,
     };
     onPendingChange(true);
     setSaving(true);
@@ -176,10 +172,11 @@ export function EncounterProcedures({
       await queryClient.invalidateQueries({ queryKey: ["plan", patientId] });
       await queryClient.invalidateQueries({ queryKey: ["patient-summary", patientId] });
       await onChanged();
-      setDescription("");
+      setServiceId("");
       setToothSel(NO_TOOTH);
       setCie("");
       setPlanSel("");
+      setOpen(false);
     } catch (err) {
       setError(mutationMessage(err));
     } finally {
@@ -188,146 +185,185 @@ export function EncounterProcedures({
     }
   };
 
+  const handleClose = () => {
+    // Durante el guardado no se cierra: el error y lo elegido se conservan
+    // en el drawer y no se pierde la selección del catálogo/presupuesto.
+    if (saving) return;
+    setServiceId("");
+    setToothSel(NO_TOOTH);
+    setCie("");
+    setPlanSel("");
+    setError(null);
+    setOpen(false);
+  };
+
   return (
-    <div className="flex flex-col gap-3">
-      <section aria-label="Procedimientos registrados">
-        {detail.procedures.length === 0 ? (
-          <p className="text-sm text-muted-foreground">Sin procedimientos registrados.</p>
-        ) : (
-          <ul className="flex flex-col gap-2">
-            {detail.procedures.map((proc) => {
-              const linked = proc.planItemId ? planById[proc.planItemId] : undefined;
-              return (
-                <li key={proc.id} className="border-b pb-2 text-sm last:border-0">
-                  <p>{proc.description}</p>
-                  <p className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                    {proc.toothNumber != null ? <span>Pieza {proc.toothNumber}</span> : null}
-                    {proc.diagnosisCode ? <Badge>CIE-10 {proc.diagnosisCode}</Badge> : null}
-                    {proc.planItemId ? (
-                      <span>Plan: {linked ? linked.title : proc.planItemId.slice(0, 8)}</span>
-                    ) : null}
-                    <time dateTime={proc.createdAt}>{formatDateTime(proc.createdAt)}</time>
-                  </p>
-                </li>
-              );
-            })}
-          </ul>
-        )}
-      </section>
-
-      {canWrite && !finalized && (
-        <form className="flex flex-col gap-3" onSubmit={onSubmit}>
-          <Field>
-            <FieldLabel htmlFor={`${uid}-descripcion`}>Procedimiento</FieldLabel>
-            <Textarea
-              id={`${uid}-descripcion`}
-              value={description}
-              onChange={(event) => setDescription(event.target.value)}
-              placeholder="p. ej. Obturación resina pieza 36"
-              rows={3}
-              maxLength={MAX_DESCRIPTION}
-              required
-              disabled={busy}
-            />
-            <p className="text-xs text-muted-foreground">
-              {description.length}/{MAX_DESCRIPTION}
-            </p>
-          </Field>
-
-          <Field>
-            <FieldLabel htmlFor={`${uid}-pieza`}>Pieza (FDI, opcional)</FieldLabel>
-            <Select value={toothSel} items={toothItems} onValueChange={onToothChange} disabled={busy}>
-              <SelectTrigger id={`${uid}-pieza`} aria-label="Pieza (FDI, opcional)">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={NO_TOOTH}>Sin pieza</SelectItem>
-                <SelectGroup>
-                  <SelectLabel>Permanentes</SelectLabel>
-                  {FDI_ADULT.map((n) => (
-                    <SelectItem key={n} value={String(n)}>
-                      Pieza {n}
-                    </SelectItem>
-                  ))}
-                </SelectGroup>
-                <SelectGroup>
-                  <SelectLabel>Temporales</SelectLabel>
-                  {FDI_CHILD.map((n) => (
-                    <SelectItem key={n} value={String(n)}>
-                      Pieza {n}
-                    </SelectItem>
-                  ))}
-                </SelectGroup>
-              </SelectContent>
-            </Select>
-          </Field>
-
-          <Cie10Search
-            value={cie}
-            onChange={(code) => setCie(code)}
-            label="Diagnóstico CIE-10 (opcional)"
-            disabled={busy}
-          />
-
-          <Field>
-            <FieldLabel htmlFor={`${uid}-plan`}>Vincular al plan (opcional)</FieldLabel>
-            {planQuery.isLoading ? (
-              <p className="text-sm text-muted-foreground">Cargando plan…</p>
-            ) : planQuery.isError ? (
-              <div className="flex flex-col gap-2">
-                <p role="alert" className="text-sm text-destructive">
-                  No se pudo cargar el plan de tratamiento.
-                </p>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  className="self-start"
-                  disabled={busy}
-                  onClick={() => void planQuery.refetch()}
-                >
-                  Reintentar
-                </Button>
-              </div>
-            ) : (
-              <Select
-                value={planSel === "" ? NO_PLAN : planSel}
-                items={planItems}
-                onValueChange={onPlanChange}
-                disabled={busy}
-              >
-                <SelectTrigger id={`${uid}-plan`} aria-label="Vincular al plan (opcional)">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={NO_PLAN}>Sin vincular</SelectItem>
-                  {options.map((item) => (
-                    <SelectItem key={item.id} value={item.id}>
-                      {planOptionLabel(item)}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            )}
-            {selectedPlan && (
-              <p className="text-xs text-muted-foreground">
-                Al guardar, «{selectedPlan.title}» quedará realizado y vinculado a esta atención.
-              </p>
-            )}
-          </Field>
-
-          {error && (
-            <p role="alert" className="text-sm text-destructive">
-              {error}
-            </p>
+    <Card>
+      <CardHeader>
+        <CardTitle>Procedimientos ({detail.procedures.length})</CardTitle>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-3">
+        <section aria-label="Tratamientos vinculados pendientes">
+          {detail.plannedItems.filter((item) => item.status === "pendiente" || item.status === "programado").length === 0 ? null : (
+            <ul className="mb-3 flex flex-col gap-2">
+              {detail.plannedItems
+                .filter((item) => item.status === "pendiente" || item.status === "programado")
+                .map((item) => (
+                  <li key={item.id} className="rounded-md border border-dashed p-2 text-sm">
+                    <p>{item.title}</p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Vinculado al abrir{item.toothNumber != null ? ` · Pieza ${item.toothNumber}` : ""} · {planStatusLabel(item.status)}
+                    </p>
+                  </li>
+                ))}
+            </ul>
           )}
+        </section>
+        <section aria-label="Procedimientos registrados">
+          {detail.procedures.length === 0 ? (
+            <p className="text-sm text-muted-foreground">Sin procedimientos registrados.</p>
+          ) : (
+            <ul className="flex flex-col gap-2">
+              {detail.procedures.map((proc) => {
+                const linked = proc.planItemId ? planById[proc.planItemId] : undefined;
+                return (
+                  <li key={proc.id} className="border-b pb-2 text-sm last:border-0">
+                    <p>{proc.description}</p>
+                    <p className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                      {proc.toothNumber != null ? <span>Pieza {proc.toothNumber}</span> : null}
+                      {proc.diagnosisCode ? <Badge>CIE-10 {proc.diagnosisCode}</Badge> : null}
+                      {proc.planItemId ? (
+                        linked ? (
+                          <a className="underline-offset-4 hover:underline" href={`/patients/${patientId}?tab=plan&budgetId=${linked.budgetId}`}>
+                            Plan: {linked.title}
+                          </a>
+                        ) : (
+                          <span>Plan: {proc.planItemId.slice(0, 8)}</span>
+                        )
+                      ) : null}
+                      <time dateTime={proc.createdAt}>{formatDateTime(proc.createdAt)}</time>
+                    </p>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </section>
+
+        {canWrite && !finalized && (
           <div>
-            <SubmitButton type="submit" pending={saving} disabled={!canSubmit}>
+            <Button type="button" variant="outline" disabled={!canOpen} onClick={() => setOpen(true)}>
               Registrar procedimiento
-            </SubmitButton>
+            </Button>
           </div>
-        </form>
-      )}
-    </div>
+        )}
+
+        {canWrite && !finalized && (
+          <FormDrawer
+            open={open}
+            onClose={handleClose}
+            title="Registrar procedimiento"
+            description="Elige un tratamiento aceptado del presupuesto o un servicio directo del catálogo. Al guardar queda realizado y vinculado a esta atención."
+            onSubmit={(event) => void onSubmit(event)}
+            isDirty={isDirty}
+            isSubmitting={saving}
+            submitDisabled={!canSubmit}
+            submitLabel="Registrar procedimiento"
+            error={error}
+          >
+            <div className="flex flex-col gap-4">
+              {!selectedPlan && <ServicePicker value={serviceId} onChange={(service) => setServiceId(service.id)} disabled={busy} />}
+
+              <Field>
+                <FieldLabel htmlFor={`${uid}-pieza`}>Pieza (FDI, opcional)</FieldLabel>
+                <Select value={toothSel} items={toothItems} onValueChange={onToothChange} disabled={busy}>
+                  <SelectTrigger id={`${uid}-pieza`} aria-label="Pieza (FDI, opcional)">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={NO_TOOTH}>Sin pieza</SelectItem>
+                    <SelectGroup>
+                      <SelectLabel>Permanentes</SelectLabel>
+                      {FDI_ADULT.map((n) => (
+                        <SelectItem key={n} value={String(n)}>
+                          Pieza {n}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                    <SelectGroup>
+                      <SelectLabel>Temporales</SelectLabel>
+                      {FDI_CHILD.map((n) => (
+                        <SelectItem key={n} value={String(n)}>
+                          Pieza {n}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+              </Field>
+
+              <Cie10Search
+                value={cie}
+                onChange={(code) => setCie(code)}
+                label="Diagnóstico CIE-10 (opcional)"
+                disabled={busy}
+              />
+
+              <Field>
+                <FieldLabel htmlFor={`${uid}-plan`}>Tratamiento aceptado del presupuesto</FieldLabel>
+                {planQuery.isLoading ? (
+                  <p className="text-sm text-muted-foreground">Cargando plan…</p>
+                ) : planQuery.isError ? (
+                  <div className="flex flex-col gap-2">
+                    <p role="alert" className="text-sm text-destructive">
+                      No se pudo cargar el plan de tratamiento.
+                    </p>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="self-start"
+                      disabled={busy}
+                      onClick={() => void planQuery.refetch()}
+                    >
+                      Reintentar
+                    </Button>
+                  </div>
+                ) : (
+                  <Select
+                    value={planSel === "" ? NO_PLAN : planSel}
+                    items={planItems}
+                    onValueChange={onPlanChange}
+                    disabled={busy}
+                  >
+                    <SelectTrigger id={`${uid}-plan`} aria-label="Tratamiento del presupuesto">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={NO_PLAN}>Seleccionar otro servicio del catálogo</SelectItem>
+                      {options.map((item) => (
+                        <SelectItem key={item.id} value={item.id}>
+                          {planOptionLabel(item)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+                {options.length === 0 && !selectedPlan && (
+                  <p className="text-xs text-muted-foreground">
+                    Sin tratamientos aceptados pendientes: registra un servicio directo del catálogo.
+                  </p>
+                )}
+                {selectedPlan && (
+                  <p className="text-xs text-muted-foreground">
+                    Al guardar, «{selectedPlan.title}» quedará realizado y vinculado a esta atención.
+                  </p>
+                )}
+              </Field>
+            </div>
+          </FormDrawer>
+        )}
+      </CardContent>
+    </Card>
   );
 }
