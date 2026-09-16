@@ -1,3 +1,5 @@
+"use client"
+
 import * as React from "react"
 import {
   MessageScroller as MessageScrollerPrimitive,
@@ -7,8 +9,8 @@ import {
 } from "@shadcn/react/message-scroller"
 import { cn } from "cn"
 
-import { Button } from "#components/button"
-import { ArrowDownIcon } from "lucide-react"
+import { Button } from "@odentia/ui/components/button"
+import { RiArrowDownLine } from "@remixicon/react"
 
 function MessageScrollerProvider(
   props: React.ComponentProps<typeof MessageScrollerPrimitive.Provider>
@@ -55,7 +57,7 @@ function MessageScrollerContent({
   return (
     <MessageScrollerPrimitive.Content
       data-slot="message-scroller-content"
-      className={cn("flex h-max min-h-full flex-col gap-6", className)}
+      className={cn("flex h-max min-h-full flex-col gap-8", className)}
       {...props}
     />
   )
@@ -105,7 +107,7 @@ function MessageScrollerButton({
     >
       {children ?? (
         <>
-          <ArrowDownIcon
+          <RiArrowDownLine
           />
           <span className="sr-only">
             {direction === "end" ? "Scroll to end" : "Scroll to start"}

@@ -1,407 +1,130 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
+@import "@fontsource-variable/raleway";
 
 @custom-variant dark (&:is(.dark *));
 
-/* Deriva lenta de los blobs decorativos del layout AuthSplit. */
-@keyframes drift-a {
-  0%, 100% { transform: translate(-25%, 0) scale(1); }
-  50% { transform: translate(-10%, 12%) scale(1.15); }
-}
-@keyframes drift-b {
-  0%, 100% { transform: translate(25%, 0) scale(1); }
-  50% { transform: translate(10%, -12%) scale(1.1); }
-}
-
 @theme inline {
-  --font-sans: var(--font-sans);
-  --font-mono: var(--font-mono);
-
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-
-  --color-card: var(--card);
-  --color-card-foreground: var(--card-foreground);
-
-  --color-popover: var(--popover);
-  --color-popover-foreground: var(--popover-foreground);
-
-  --color-primary: var(--primary);
-  --color-primary-foreground: var(--primary-foreground);
-
-  --color-secondary: var(--secondary);
-  --color-secondary-foreground: var(--secondary-foreground);
-
-  --color-muted: var(--muted);
-  --color-muted-foreground: var(--muted-foreground);
-
-  --color-accent: var(--accent);
-  --color-accent-foreground: var(--accent-foreground);
-
-  --color-destructive: var(--destructive);
-
-  --color-border: var(--border);
-  --color-input: var(--input);
-  --color-ring: var(--ring);
-
-  --color-chart-1: var(--chart-1);
-  --color-chart-2: var(--chart-2);
-  --color-chart-3: var(--chart-3);
-  --color-chart-4: var(--chart-4);
-  --color-chart-5: var(--chart-5);
-
-  --color-sidebar: var(--sidebar);
-  --color-sidebar-foreground: var(--sidebar-foreground);
-  --color-sidebar-primary: var(--sidebar-primary);
-  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
-  --color-sidebar-accent: var(--sidebar-accent);
-  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
-  --color-sidebar-border: var(--sidebar-border);
-  --color-sidebar-ring: var(--sidebar-ring);
-
-  /*
-   * Tokens adicionales Qwen
-   */
-  --color-brand: var(--brand);
-  --color-brand-foreground: var(--brand-foreground);
-
-  --color-brand-soft: var(--brand-soft);
-  --color-brand-soft-foreground: var(--brand-soft-foreground);
-
-  --color-neutral-strong: var(--neutral-strong);
-  --color-neutral-strong-foreground: var(--neutral-strong-foreground);
-
-  --color-success: var(--success);
-  --color-warning: var(--warning);
-  --color-info: var(--info);
-
-  /*
-   * Brand scale
-   */
-  --color-brand-50: var(--brand-50);
-  --color-brand-150: var(--brand-150);
-  --color-brand-250: var(--brand-250);
-  --color-brand-350: var(--brand-350);
-  --color-brand-450: var(--brand-450);
-  --color-brand-550: var(--brand-550);
-  --color-brand-650: var(--brand-650);
-  --color-brand-750: var(--brand-750);
-  --color-brand-850: var(--brand-850);
-  --color-brand-950: var(--brand-950);
-
-  /*
-   * shadcn radius scale
-   */
-  --radius-sm: calc(var(--radius) * 0.6);
-  --radius-md: calc(var(--radius) * 0.8);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) * 1.4);
-  --radius-2xl: calc(var(--radius) * 1.8);
-  --radius-3xl: calc(var(--radius) * 2.2);
-  --radius-4xl: calc(var(--radius) * 2.6);
+    --font-heading: var(--font-sans);
+    --font-sans: 'Raleway Variable', sans-serif;
+    --color-sidebar-ring: var(--sidebar-ring);
+    --color-sidebar-border: var(--sidebar-border);
+    --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+    --color-sidebar-accent: var(--sidebar-accent);
+    --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+    --color-sidebar-primary: var(--sidebar-primary);
+    --color-sidebar-foreground: var(--sidebar-foreground);
+    --color-sidebar: var(--sidebar);
+    --color-chart-5: var(--chart-5);
+    --color-chart-4: var(--chart-4);
+    --color-chart-3: var(--chart-3);
+    --color-chart-2: var(--chart-2);
+    --color-chart-1: var(--chart-1);
+    --color-ring: var(--ring);
+    --color-input: var(--input);
+    --color-border: var(--border);
+    --color-destructive: var(--destructive);
+    --color-accent-foreground: var(--accent-foreground);
+    --color-accent: var(--accent);
+    --color-muted-foreground: var(--muted-foreground);
+    --color-muted: var(--muted);
+    --color-secondary-foreground: var(--secondary-foreground);
+    --color-secondary: var(--secondary);
+    --color-primary-foreground: var(--primary-foreground);
+    --color-primary: var(--primary);
+    --color-popover-foreground: var(--popover-foreground);
+    --color-popover: var(--popover);
+    --color-card-foreground: var(--card-foreground);
+    --color-card: var(--card);
+    --color-foreground: var(--foreground);
+    --color-background: var(--background);
+    --radius-sm: calc(var(--radius) * 0.6);
+    --radius-md: calc(var(--radius) * 0.8);
+    --radius-lg: var(--radius);
+    --radius-xl: calc(var(--radius) * 1.4);
+    --radius-2xl: calc(var(--radius) * 1.8);
+    --radius-3xl: calc(var(--radius) * 2.2);
+    --radius-4xl: calc(var(--radius) * 2.6);
 }
-
-
-/* =========================================================
-   LIGHT
-   ========================================================= */
 
 :root {
-  /*
-   * Qwen usa Inter como base.
-   */
-  --font-sans:
-    "Inter",
-    -apple-system,
-    BlinkMacSystemFont,
-    "Segoe UI",
-    Roboto,
-    Helvetica,
-    Arial,
-    sans-serif;
-
-  --font-mono:
-    "Roboto Mono",
-    "SFMono-Regular",
-    Consolas,
-    monospace;
-
-  /*
-   * Qwen tiene componentes considerablemente redondeados.
-   * 16px funciona mejor con shadcn que los 10px por defecto.
-   */
-  --radius: 1rem;
-
-  /*
-   * -----------------------------------------------------
-   * Core surfaces
-   * -----------------------------------------------------
-   */
-
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.1546 0.0066 270.96);
-
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.1546 0.0066 270.96);
-
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.1546 0.0066 270.96);
-
-  /*
-   * -----------------------------------------------------
-   * PRIMARY = Qwen purple
-   * Original: #653aff
-   * -----------------------------------------------------
-   */
-
-  --primary: oklch(0.5367 0.2669 282.67);
-  --primary-foreground: oklch(1 0 0);
-
-  /*
-   * Soft purple action
-   */
-  --secondary: oklch(0.9545 0.0243 296.12);
-  --secondary-foreground: oklch(0.4793 0.256 280.63);
-
-  /*
-   * Neutral supporting surfaces
-   */
-  --muted: oklch(0.9668 0.0058 264.53);
-  --muted-foreground: oklch(0.5719 0.0279 265.44);
-
-  /*
-   * Hover / selected states.
-   * Ligero tinte violeta, muy característico del diseño.
-   */
-  --accent: oklch(0.9545 0.0243 296.12);
-  --accent-foreground: oklch(0.4793 0.256 280.63);
-
-  --destructive: oklch(0.6329 0.2216 26.30);
-
-  /*
-   * Qwen utiliza líneas extremadamente suaves.
-   */
-  --border: oklch(0.9335 0.0087 264.52);
-  --input: oklch(0.9335 0.0087 264.52);
-  --ring: oklch(0.5367 0.2669 282.67);
-
-  /*
-   * -----------------------------------------------------
-   * Extra brand tokens
-   * -----------------------------------------------------
-   */
-
-  --brand: oklch(0.5367 0.2669 282.67);
-  --brand-foreground: oklch(1 0 0);
-
-  --brand-soft: oklch(0.9545 0.0243 296.12);
-  --brand-soft-foreground: oklch(0.4793 0.256 280.63);
-
-  /*
-   * Para los CTA negros que también usa Qwen.
-   *
-   * No contaminamos el semantic token `primary`.
-   */
-  --neutral-strong: oklch(0.1546 0.0066 270.96);
-  --neutral-strong-foreground: oklch(1 0 0);
-
-  /*
-   * -----------------------------------------------------
-   * Functional
-   * -----------------------------------------------------
-   */
-
-  --success: oklch(0.6358 0.1843 147.30);
-  --warning: oklch(0.7234 0.1824 45.27);
-  --info: oklch(0.5991 0.1734 255.06);
-
-  /*
-   * -----------------------------------------------------
-   * Charts
-   * -----------------------------------------------------
-   */
-
-  --chart-1: oklch(0.5367 0.2669 282.67);
-  --chart-2: oklch(0.6629 0.1302 168.89);
-  --chart-3: oklch(0.5991 0.1734 255.06);
-  --chart-4: oklch(0.7871 0.1277 65.84);
-  --chart-5: oklch(0.6725 0.1814 5.91);
-
-  /*
-   * -----------------------------------------------------
-   * Sidebar
-   * -----------------------------------------------------
-   */
-
-  --sidebar: oklch(0.9852 0.0041 271.37);
-  --sidebar-foreground: oklch(0.2472 0.0164 264.21);
-
-  --sidebar-primary: oklch(0.5367 0.2669 282.67);
-  --sidebar-primary-foreground: oklch(1 0 0);
-
-  --sidebar-accent: oklch(0.9545 0.0243 296.12);
-  --sidebar-accent-foreground: oklch(0.4793 0.256 280.63);
-
-  --sidebar-border: oklch(0.9335 0.0087 264.52);
-  --sidebar-ring: oklch(0.5367 0.2669 282.67);
-
-  /*
-   * -----------------------------------------------------
-   * Complete Qwen purple scale
-   * -----------------------------------------------------
-   */
-
-  --brand-50: oklch(0.9545 0.0243 296.12);
-  --brand-150: oklch(0.9081 0.0493 294.31);
-  --brand-250: oklch(0.8238 0.0966 292.79);
-  --brand-350: oklch(0.7118 0.1627 290.53);
-  --brand-450: oklch(0.6208 0.2171 287.32);
-  --brand-550: oklch(0.5367 0.2669 282.67);
-  --brand-650: oklch(0.4793 0.2560 280.63);
-  --brand-750: oklch(0.4112 0.2313 279.25);
-  --brand-850: oklch(0.3456 0.2022 276.89);
-  --brand-950: oklch(0.1942 0.1064 280.45);
-
-  /*
-   * -----------------------------------------------------
-   * Qwen-like gradients
-   * Basados directamente en el CSS original.
-   * -----------------------------------------------------
-   */
-
-  --gradient-brand:
-    linear-gradient(
-      90deg,
-      oklch(0.4883 0.2935 277.26) 0%,
-      oklch(0.6598 0.2926 319.10) 40%,
-      oklch(0.5990 0.2789 305.79) 58%,
-      oklch(0.6665 0.1822 251.99) 94%
-    );
-
-  --gradient-brand-warm:
-    linear-gradient(
-      90deg,
-      oklch(0.4831 0.2937 279.35) 17%,
-      oklch(0.6797 0.2623 317.24) 47%,
-      oklch(0.7639 0.1467 41.94) 94%,
-      oklch(0.6901 0.2806 336.41) 140%
-    );
-
-  --gradient-brand-sky:
-    linear-gradient(
-      90deg,
-      oklch(0.5348 0.2724 285.52) 13%,
-      oklch(0.8401 0.1195 218.76) 60%,
-      oklch(0.6433 0.1919 258.64) 89%,
-      oklch(0.5148 0.2736 280.67) 108%
-    );
-
-  /*
-   * Soft card treatment
-   */
-  --gradient-card:
-    linear-gradient(
-      135deg,
-      oklch(0.9668 0.0058 264.53),
-      oklch(1 0 0)
-    );
-
-  --shadow-soft:
-    0 8px 24px oklch(0.4702 0.0278 264.26 / 0.06);
-
-  --shadow-card:
-    0 16px 40px oklch(0.4702 0.0278 264.26 / 0.10);
+    --background: oklch(1 0 0);
+    --foreground: oklch(0.141 0.005 285.823);
+    --card: oklch(1 0 0);
+    --card-foreground: oklch(0.141 0.005 285.823);
+    --popover: oklch(1 0 0);
+    --popover-foreground: oklch(0.141 0.005 285.823);
+    --primary: oklch(0.488 0.243 264.376);
+    --primary-foreground: oklch(0.97 0.014 254.604);
+    --secondary: oklch(0.967 0.001 286.375);
+    --secondary-foreground: oklch(0.21 0.006 285.885);
+    --muted: oklch(0.967 0.001 286.375);
+    --muted-foreground: oklch(0.552 0.016 285.938);
+    --accent: oklch(0.967 0.001 286.375);
+    --accent-foreground: oklch(0.21 0.006 285.885);
+    --destructive: oklch(0.577 0.245 27.325);
+    --border: oklch(0.92 0.004 286.32);
+    --input: oklch(0.92 0.004 286.32);
+    --ring: oklch(0.705 0.015 286.067);
+    --chart-1: oklch(0.809 0.105 251.813);
+    --chart-2: oklch(0.623 0.214 259.815);
+    --chart-3: oklch(0.546 0.245 262.881);
+    --chart-4: oklch(0.488 0.243 264.376);
+    --chart-5: oklch(0.424 0.199 265.638);
+    --radius: 0.875rem;
+    --sidebar: oklch(0.985 0 0);
+    --sidebar-foreground: oklch(0.141 0.005 285.823);
+    --sidebar-primary: oklch(0.546 0.245 262.881);
+    --sidebar-primary-foreground: oklch(0.97 0.014 254.604);
+    --sidebar-accent: oklch(0.967 0.001 286.375);
+    --sidebar-accent-foreground: oklch(0.21 0.006 285.885);
+    --sidebar-border: oklch(0.92 0.004 286.32);
+    --sidebar-ring: oklch(0.705 0.015 286.067);
 }
-
-
-/* =========================================================
-   DARK
-   ========================================================= */
 
 .dark {
-  --background: oklch(0.1403 0.0022 286.11);
-  --foreground: oklch(0.9849 0.0029 264.54);
-
-  --card: oklch(0.1773 0.0089 264.32);
-  --card-foreground: oklch(0.9849 0.0029 264.54);
-
-  --popover: oklch(0.2120 0.0092 255.61);
-  --popover-foreground: oklch(0.9849 0.0029 264.54);
-
-  /*
-   * Original dark Qwen:
-   * #714ffc
-   */
-  --primary: oklch(0.5692 0.2421 284.69);
-  --primary-foreground: oklch(1 0 0);
-
-  --secondary: oklch(0.2630 0.0127 258.37);
-  --secondary-foreground: oklch(0.9573 0.0074 260.73);
-
-  --muted: oklch(0.2120 0.0092 255.61);
-  --muted-foreground: oklch(0.6785 0.0253 264.39);
-
-  --accent: oklch(0.2630 0.0127 258.37);
-  --accent-foreground: oklch(0.9573 0.0074 260.73);
-
-  --destructive: oklch(0.6329 0.2216 26.30);
-
-  --border: oklch(0.2630 0.0127 258.37);
-  --input: oklch(0.2921 0.0179 262.22);
-  --ring: oklch(0.5692 0.2421 284.69);
-
-  --brand: oklch(0.5692 0.2421 284.69);
-  --brand-foreground: oklch(1 0 0);
-
-  --brand-soft: oklch(0.2630 0.0127 258.37);
-  --brand-soft-foreground: oklch(0.6208 0.2171 287.32);
-
-  --neutral-strong: oklch(0.9849 0.0029 264.54);
-  --neutral-strong-foreground: oklch(0.1546 0.0066 270.96);
-
-  --sidebar: oklch(0.1773 0.0089 264.32);
-  --sidebar-foreground: oklch(0.9573 0.0074 260.73);
-
-  --sidebar-primary: oklch(0.5692 0.2421 284.69);
-  --sidebar-primary-foreground: oklch(1 0 0);
-
-  --sidebar-accent: oklch(0.2630 0.0127 258.37);
-  --sidebar-accent-foreground: oklch(0.9573 0.0074 260.73);
-
-  --sidebar-border: oklch(0.2921 0.0179 262.22);
-  --sidebar-ring: oklch(0.5692 0.2421 284.69);
-
-  --chart-1: oklch(0.6208 0.2171 287.32);
-  --chart-2: oklch(0.7611 0.2038 148.79);
-  --chart-3: oklch(0.8401 0.1195 218.76);
-  --chart-4: oklch(0.6995 0.2520 318.75);
-  --chart-5: oklch(0.7871 0.1277 65.84);
-
-  --shadow-soft:
-    0 8px 24px oklch(0 0 0 / 0.28);
-
-  --shadow-card:
-    0 16px 40px oklch(0 0 0 / 0.38);
+    --background: oklch(0.141 0.005 285.823);
+    --foreground: oklch(0.985 0 0);
+    --card: oklch(0.21 0.006 285.885);
+    --card-foreground: oklch(0.985 0 0);
+    --popover: oklch(0.21 0.006 285.885);
+    --popover-foreground: oklch(0.985 0 0);
+    --primary: oklch(0.424 0.199 265.638);
+    --primary-foreground: oklch(0.97 0.014 254.604);
+    --secondary: oklch(0.274 0.006 286.033);
+    --secondary-foreground: oklch(0.985 0 0);
+    --muted: oklch(0.274 0.006 286.033);
+    --muted-foreground: oklch(0.705 0.015 286.067);
+    --accent: oklch(0.274 0.006 286.033);
+    --accent-foreground: oklch(0.985 0 0);
+    --destructive: oklch(0.704 0.191 22.216);
+    --border: oklch(1 0 0 / 10%);
+    --input: oklch(1 0 0 / 15%);
+    --ring: oklch(0.552 0.016 285.938);
+    --chart-1: oklch(0.809 0.105 251.813);
+    --chart-2: oklch(0.623 0.214 259.815);
+    --chart-3: oklch(0.546 0.245 262.881);
+    --chart-4: oklch(0.488 0.243 264.376);
+    --chart-5: oklch(0.424 0.199 265.638);
+    --sidebar: oklch(0.21 0.006 285.885);
+    --sidebar-foreground: oklch(0.985 0 0);
+    --sidebar-primary: oklch(0.623 0.214 259.815);
+    --sidebar-primary-foreground: oklch(0.97 0.014 254.604);
+    --sidebar-accent: oklch(0.274 0.006 286.033);
+    --sidebar-accent-foreground: oklch(0.985 0 0);
+    --sidebar-border: oklch(1 0 0 / 10%);
+    --sidebar-ring: oklch(0.552 0.016 285.938);
 }
-
-
-/* =========================================================
-   BASE
-   ========================================================= */
 
 @layer base {
   * {
     @apply border-border outline-ring/50;
-  }
-
-  html {
-    text-rendering: optimizeLegibility;
-    -webkit-font-smoothing: antialiased;
-    -moz-osx-font-smoothing: grayscale;
-  }
-
+    }
   body {
     @apply bg-background text-foreground;
-  }
+    }
+  html {
+    @apply font-sans;
+    }
 }

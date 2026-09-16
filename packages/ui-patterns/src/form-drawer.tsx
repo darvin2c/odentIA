@@ -6,6 +6,7 @@ import {
   DrawerFooter,
   DrawerHeader,
   DrawerTitle,
+  ScrollArea,
   Skeleton,
   useIsMobile,
 } from "@odentia/ui"
@@ -81,28 +82,30 @@ export function FormDrawer({
             {headerContent}
           </DrawerHeader>
 
-          <div className="flex-1 overflow-y-auto">
-            <div className="px-6 py-4">
-              {isLoading ? (
-                <div className="space-y-3">
-                  <Skeleton className="h-9 w-full" />
-                  <Skeleton className="h-9 w-full" />
-                  <Skeleton className="h-20 w-full" />
-                </div>
-              ) : (
-                <>
-                  {error ? (
-                    <div
-                      className="mb-4 rounded-md border border-danger/20 bg-danger-soft px-3 py-2 text-sm text-danger"
-                      role="alert"
-                    >
-                      {error}
-                    </div>
-                  ) : null}
-                  {children}
-                </>
-              )}
-            </div>
+          <div className="min-h-0 flex-1">
+            <ScrollArea className="h-full">
+              <div className="px-6 py-4">
+                {isLoading ? (
+                  <div className="space-y-3">
+                    <Skeleton className="h-9 w-full" />
+                    <Skeleton className="h-9 w-full" />
+                    <Skeleton className="h-20 w-full" />
+                  </div>
+                ) : (
+                  <>
+                    {error ? (
+                      <div
+                        className="mb-4 rounded-md border border-danger/20 bg-danger-soft px-3 py-2 text-sm text-danger"
+                        role="alert"
+                      >
+                        {error}
+                      </div>
+                    ) : null}
+                    {children}
+                  </>
+                )}
+              </div>
+            </ScrollArea>
           </div>
 
           <DrawerFooter className="flex-row items-center justify-end gap-2 border-t border-border bg-surface px-6 py-4 pt-4">
