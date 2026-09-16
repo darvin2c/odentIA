@@ -18,6 +18,7 @@ import { useState } from "react";
 import { apiFetch } from "../../lib/api";
 import { timeAgo, type ContactFull, type FieldDef, type Pipeline } from "../../lib/crm";
 import { useOrgEvents } from "../../lib/org-events";
+import { TagsInput } from "../../components/patient/tags-input";
 
 export const Route = createFileRoute("/_org/contacts/$contactId")({
   component: ContactDetailPage,
@@ -30,7 +31,8 @@ function ContactDetailPage() {
   const navigate = useNavigate();
   const { org } = orgRouteApi.useRouteContext();
   const { contactId } = Route.useParams();
-  const [tagInput, setTagInput] = useState("");
+  const [tagsOpen, setTagsOpen] = useState(false);
+  const [draftTags, setDraftTags] = useState<string[]>([]);
   const [convertOpen, setConvertOpen] = useState(false);
 
   const detailQuery = useQuery({
@@ -183,32 +185,24 @@ function ContactDetailPage() {
           <div>
             <span className="text-sm font-medium">Etiquetas</span>
             <div className="mt-1 flex flex-wrap gap-1">
+              {detail.contact.tags.length === 0 && (
+                <span className="text-sm text-muted-foreground">Sin etiquetas</span>
+              )}
               {detail.contact.tags.map((t) => (
-                <button
-                  key={t}
-                  title={`Quitar ${t}`}
-                  onClick={() =>
-                    patchMutation.mutate({ tags: detail.contact.tags.filter((x) => x !== t) })
-                  }
-                >
-                  <Badge variant="secondary">{t} ×</Badge>
-                </button>
+                <Badge variant="secondary" key={t}>{t}</Badge>
               ))}
             </div>
-            <div className="mt-2 flex gap-2">
-              <Input
-                placeholder="Nueva etiqueta"
-                value={tagInput}
-                onChange={(e) => setTagInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && tagInput.trim()) {
-                    e.preventDefault();
-                    patchMutation.mutate({ tags: [...detail.contact.tags, tagInput.trim()] });
-                    setTagInput("");
-                  }
-                }}
-              />
-            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              className="mt-2"
+              onClick={() => {
+                setDraftTags(detail.contact.tags);
+                setTagsOpen(true);
+              }}
+            >
+              Editar etiquetas
+            </Button>
           </div>
         </section>
 
@@ -288,6 +282,27 @@ function ContactDetailPage() {
           ))}
         </section>
       </div>
+      <FormDrawer
+        open={tagsOpen}
+        onClose={() => setTagsOpen(false)}
+        title="Editar etiquetas"
+        submitLabel="Guardar"
+        cancelLabel="Cancelar"
+        isSubmitting={patchMutation.isPending}
+        error={patchMutation.error instanceof Error ? patchMutation.error.message : null}
+        onSubmit={(event) => {
+          event.preventDefault();
+          patchMutation.mutate(
+            { tags: draftTags },
+            { onSuccess: () => setTagsOpen(false) },
+          );
+        }}
+      >
+        <Field>
+          <FieldLabel>Etiquetas</FieldLabel>
+          <TagsInput value={draftTags} onChange={setDraftTags} />
+        </Field>
+      </FormDrawer>
       <FormDrawer
         open={convertOpen}
         onClose={() => setConvertOpen(false)}

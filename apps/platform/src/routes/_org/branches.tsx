@@ -42,7 +42,10 @@ const emptyValues: BranchFormValues = { name: "", addressLine1: "", district: ""
 function BranchesPage() {
   const queryClient = useQueryClient();
   const listSearch = useListSearch();
-  const search = listSearch.get("search") ?? "";
+  const search = listSearch.get("q") ?? "";
+  const estadoFilter = listSearch.get("estado");
+  const sort = listSearch.get("sort");
+  const hasCriteria = search !== "" || estadoFilter !== undefined;
 
   const { org } = orgRouteApi.useRouteContext();
 
@@ -158,13 +161,24 @@ function BranchesPage() {
     ],
     [canWrite, form],
   );
-
   const filtered = useMemo(() => {
-    const rows = branchesQuery.data?.data ?? [];
-    if (!search) return rows;
     const needle = search.toLowerCase();
-    return rows.filter((row) => row.name.toLowerCase().includes(needle));
-  }, [branchesQuery.data, search]);
+    const rows = (branchesQuery.data?.data ?? []).filter((row) => {
+      if (needle && !row.name.toLowerCase().includes(needle)) return false;
+      if (estadoFilter === "activa" && !row.isActive) return false;
+      if (estadoFilter === "inactiva" && row.isActive) return false;
+      return true;
+    });
+    if (!sort) return rows;
+    const desc = sort.startsWith("-");
+    const field = desc ? sort.slice(1) : sort;
+    const direction = desc ? -1 : 1;
+    return [...rows].sort((a, b) => {
+      if (field === "estado") return direction * (Number(b.isActive) - Number(a.isActive));
+      if (field === "nombre") return direction * a.name.localeCompare(b.name, "es");
+      return 0;
+    });
+  }, [branchesQuery.data, search, estadoFilter, sort]);
 
   const table = useReactTable({
     data: filtered,
@@ -194,7 +208,24 @@ function BranchesPage() {
           ) : undefined
         }
       />
-      <FilterBar filters={[]} sortOptions={[]} searchPlaceholder="Buscar sucursal" />
+      <FilterBar
+        filters={[
+          {
+            key: "estado",
+            label: "Estado",
+            type: "select",
+            options: [
+              { value: "activa", label: "Activa" },
+              { value: "inactiva", label: "Inactiva" },
+            ],
+          },
+        ]}
+        sortOptions={[
+          { value: "nombre", label: "Nombre" },
+          { value: "estado", label: "Estado" },
+        ]}
+        searchPlaceholder="Buscar sucursal"
+      />
 
       {branchesQuery.isLoading ? (
         <LoadingState />
@@ -206,11 +237,13 @@ function BranchesPage() {
       ) : filtered.length === 0 ? (
         <EmptyState
           icon={Building2}
-          title={search ? common.filters.noResults : "Sin sucursales"}
+          title={hasCriteria ? common.filters.noResults : "Sin sucursales"}
           description={
             search
               ? `No hay sucursales que coincidan con “${search}”.`
-              : "Registra tu primera sucursal para operar."
+              : hasCriteria
+                ? "No hay sucursales que coincidan con los filtros aplicados."
+                : "Registra tu primera sucursal para operar."
           }
         />
       ) : (

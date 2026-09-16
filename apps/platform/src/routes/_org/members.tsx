@@ -13,7 +13,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@odentia/ui";
-import { ConfirmDialog, DataTable, EmptyState, ErrorState, FormDrawer, LoadingState, PageHeader, RowActions, common, fieldErrorMessages } from "@odentia/ui-patterns";
+import { ConfirmDialog, DataTable, EmptyState, ErrorState, FilterBar, FormDrawer, LoadingState, PageHeader, RowActions, common, fieldErrorMessages, useListSearch } from "@odentia/ui-patterns";
 import { Plus } from "lucide-react";
 import { useMemo, useState } from "react";
 import { z } from "zod";
@@ -39,6 +39,11 @@ const inviteSchema = z.object({
 
 function MembersPage() {
   const queryClient = useQueryClient();
+  const listSearch = useListSearch();
+  const search = listSearch.get("q") ?? "";
+  const roleFilter = listSearch.get("rol");
+  const sort = listSearch.get("sort");
+  const hasCriteria = search !== "" || roleFilter !== undefined;
   const [inviteOpen, setInviteOpen] = useState(false);
   const [removing, setRemoving] = useState<{ id: string; label: string } | null>(null);
 
@@ -179,9 +184,28 @@ function MembersPage() {
     ],
     [canWrite, roleMutation],
   );
+  const filteredMembers = useMemo(() => {
+    const needle = search.toLowerCase();
+    const rows = (org?.members ?? []).filter((member) => {
+      if (roleFilter && member.role !== roleFilter) return false;
+      if (needle && !`${member.user.name} ${member.user.email}`.toLowerCase().includes(needle))
+        return false;
+      return true;
+    });
+    if (!sort) return rows;
+    const desc = sort.startsWith("-");
+    const field = desc ? sort.slice(1) : sort;
+    const direction = desc ? -1 : 1;
+    const roleRanks: Record<string, number> = { owner: 0, admin: 1, member: 2 };
+    return [...rows].sort((a, b) => {
+      if (field === "rol") return direction * ((roleRanks[a.role] ?? 99) - (roleRanks[b.role] ?? 99));
+      if (field === "nombre") return direction * a.user.name.localeCompare(b.user.name, "es");
+      return 0;
+    });
+  }, [org?.members, search, roleFilter, sort]);
 
   const table = useReactTable({
-    data: org?.members ?? [],
+    data: filteredMembers,
     columns,
     getCoreRowModel: getCoreRowModel(),
   });
@@ -206,6 +230,25 @@ function MembersPage() {
             </Button>
           ) : undefined
         }
+      />
+      <FilterBar
+        filters={[
+          {
+            key: "rol",
+            label: "Rol",
+            type: "select",
+            options: [
+              { value: "owner", label: "Owner" },
+              { value: "admin", label: "Admin" },
+              { value: "member", label: "Member" },
+            ],
+          },
+        ]}
+        sortOptions={[
+          { value: "nombre", label: "Nombre" },
+          { value: "rol", label: "Rol" },
+        ]}
+        searchPlaceholder="Buscar miembro"
       />
 
       <FormDrawer
@@ -272,7 +315,18 @@ function MembersPage() {
         <EmptyState title="Sin organización activa" />
       ) : (
         <>
-          <DataTable table={table} />
+          {filteredMembers.length === 0 ? (
+            <EmptyState
+              title={hasCriteria ? common.filters.noResults : "Sin miembros"}
+              description={
+                hasCriteria
+                  ? "No hay miembros que coincidan con los filtros aplicados."
+                  : "Invita a tu primer miembro para colaborar."
+              }
+            />
+          ) : (
+            <DataTable table={table} />
+          )}
 
           {org.invitations.filter((inv) => inv.status === "pending").length > 0 ? (
             <div className="flex flex-col gap-2">
@@ -288,13 +342,17 @@ function MembersPage() {
                       {inv.email} <Badge variant="secondary">{inv.role}</Badge>
                     </span>
                     {canWrite ? (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => cancelInvitationMutation.mutate(inv.id)}
-                      >
-                        Revocar
-                      </Button>
+                      <RowActions
+                        label={`Acciones de ${inv.email}`}
+                        items={[
+                          {
+                            key: "revocar",
+                            label: "Revocar",
+                            tone: "danger",
+                            onSelect: () => cancelInvitationMutation.mutate(inv.id),
+                          },
+                        ]}
+                      />
                     ) : null}
                   </div>
                 ))}

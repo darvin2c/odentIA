@@ -9,15 +9,17 @@ import {
   FilterBar,
   FormDrawer,
   PageHeader,
+  common,
   fieldErrorMessages,
   useListSearch,
 } from "@odentia/ui-patterns";
 import { MessageCircle, Plus, Send } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { z } from "zod";
 import { apiFetch } from "../../lib/api";
 import { timeAgo, type ContactListItem, type Pipeline } from "../../lib/crm";
 import { useOrgEvents } from "../../lib/org-events";
+import { TagsInput } from "../../components/patient/tags-input";
 
 export const Route = createFileRoute("/_org/contacts/")({
   component: ContactsPage,
@@ -28,28 +30,21 @@ const orgRouteApi = getRouteApi("/_org");
 const contactSchema = z.object({
   displayName: z.string().min(1, "Ingresa el nombre"),
   notes: z.string(),
-  tags: z.string(),
+  tags: z.array(z.string()),
 });
 
 type ContactFormValues = z.infer<typeof contactSchema>;
 
-const emptyValues: ContactFormValues = { displayName: "", notes: "", tags: "" };
-
-function useDebounced(value: string, ms: number): string {
-  const [debounced, setDebounced] = useState(value);
-  useEffect(() => {
-    const timer = setTimeout(() => setDebounced(value), ms);
-    return () => clearTimeout(timer);
-  }, [value, ms]);
-  return debounced;
-}
+const emptyValues: ContactFormValues = { displayName: "", notes: "", tags: [] };
 
 function ContactsPage() {
   const queryClient = useQueryClient();
   const { org } = orgRouteApi.useRouteContext();
   const listSearch = useListSearch();
-  const search = useDebounced(listSearch.get("search") ?? "", 300);
+  // SearchInput (FilterBar) escribe la búsqueda en `q` con debounce propio.
+  const q = listSearch.get("q") ?? "";
   const stageId = listSearch.get("stageId") ?? undefined;
+  const sort = listSearch.get("sort");
 
   const pipelinesQuery = useQuery({
     queryKey: ["pipelines"],
@@ -59,14 +54,46 @@ function ContactsPage() {
   const stageName = useMemo(() => new Map(stages.map((s) => [s.id, s.name])), [stages]);
 
   const contactsQuery = useQuery({
-    queryKey: ["contacts", search, stageId],
+    // El backend espera `q` directamente, sin mapeo.
+    queryKey: ["contacts", q, stageId],
     queryFn: () => {
       const params = new URLSearchParams();
-      if (search.trim()) params.set("q", search.trim());
+      if (q.trim()) params.set("q", q.trim());
       if (stageId) params.set("stageId", stageId);
       return apiFetch<{ data: ContactListItem[]; nextCursor: string | null }>(`/api/contacts?${params}`);
     },
   });
+  // Sin orden el backend manda; con `sort` se ordena en cliente.
+  const visibleContacts = useMemo(() => {
+    const rows = [...(contactsQuery.data?.data ?? [])];
+    if (!sort) return rows;
+    const descending = sort.startsWith("-");
+    const field = descending ? sort.slice(1) : sort;
+    if (field === "nombre") {
+      rows.sort((a, b) => a.displayName.localeCompare(b.displayName, "es"));
+    } else if (field === "actividad") {
+      rows.sort((a, b) => (a.lastInteractionAt ?? "").localeCompare(b.lastInteractionAt ?? ""));
+    } else {
+      return rows;
+    }
+    // `nombre` asciende por defecto; `actividad` muestra lo reciente primero.
+    const invert = field === "actividad" ? !descending : descending;
+    if (invert) rows.reverse();
+    return rows;
+  }, [contactsQuery.data, sort]);
+  const allTags = useMemo(() => {
+    const seen: Record<string, true> = {};
+    const out: string[] = [];
+    for (const contact of contactsQuery.data?.data ?? []) {
+      for (const tag of contact.tags) {
+        if (!seen[tag]) {
+          seen[tag] = true;
+          out.push(tag);
+        }
+      }
+    }
+    return out;
+  }, [contactsQuery.data]);
 
   useOrgEvents(["message.created", "conversation.updated"], () => {
     void queryClient.invalidateQueries({ queryKey: ["contacts"] });
@@ -81,7 +108,7 @@ function ContactsPage() {
         body: JSON.stringify({
           displayName: values.displayName,
           notes: values.notes || undefined,
-          tags: values.tags.split(",").map((t) => t.trim()).filter(Boolean),
+          tags: values.tags,
         }),
       });
     },
@@ -157,8 +184,9 @@ function ContactsPage() {
     [org.members, stageName],
   );
 
+  const hasFilters = q.trim() !== "" || stageId !== undefined;
   const table = useReactTable({
-    data: contactsQuery.data?.data ?? [],
+    data: visibleContacts,
     columns,
     getCoreRowModel: getCoreRowModel(),
   });
@@ -188,21 +216,35 @@ function ContactsPage() {
             options: stages.map((s) => ({ value: s.id, label: s.name })),
           },
         ]}
-        sortOptions={[]}
+        sortOptions={[
+          { value: "nombre", label: "Nombre" },
+          { value: "actividad", label: "Última actividad" },
+        ]}
         searchPlaceholder="Buscar contacto"
       />
-      {contactsQuery.data?.data.length === 0 && !contactsQuery.isLoading ? (
-        <EmptyState title="Sin contactos" description="Crea el primero o espera un mensaje entrante." />
+      {visibleContacts.length === 0 && !contactsQuery.isLoading ? (
+        <EmptyState
+          title={hasFilters ? common.filters.noResults : "Sin contactos"}
+          description={
+            hasFilters
+              ? "No hay contactos que coincidan con los filtros aplicados."
+              : "Crea el primero o espera un mensaje entrante."
+          }
+        />
       ) : (
         <DataTable table={table} />
       )}
       <FormDrawer
         open={drawerOpen}
-        onClose={() => setDrawerOpen(false)}
+        onClose={() => {
+          setDrawerOpen(false);
+          saveMutation.reset();
+        }}
         title="Nuevo contacto"
         submitLabel="Crear"
         cancelLabel="Cancelar"
         isSubmitting={saveMutation.isPending}
+        error={saveMutation.error instanceof Error ? saveMutation.error.message : null}
         onSubmit={(event) => {
           event.preventDefault();
           void form.handleSubmit();
@@ -230,12 +272,8 @@ function ContactsPage() {
           <form.Field name="tags">
             {(field) => (
               <Field>
-                <FieldLabel>Etiquetas separadas por coma (opcional)</FieldLabel>
-                <Input
-                  value={field.state.value}
-                  onChange={(e) => field.handleChange(e.target.value)}
-                  placeholder="ortodoncia, vip"
-                />
+                <FieldLabel>Etiquetas (opcional)</FieldLabel>
+                <TagsInput value={field.state.value} onChange={(tags) => field.handleChange(tags)} suggestions={allTags} />
                 <FieldError>{fieldErrorMessages(field.state.meta.errors)}</FieldError>
               </Field>
             )}

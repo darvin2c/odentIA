@@ -6,12 +6,15 @@ import {
   ConfirmDialog,
   DataTable,
   EmptyState,
+  FilterBar,
   FormDrawer,
   PageHeader,
+  RowActions,
   fieldErrorMessages,
+  useListSearch,
 } from "@odentia/ui-patterns";
 import { getCoreRowModel, useReactTable, type ColumnDef } from "@tanstack/react-table";
-import { Plus, Trash2 } from "lucide-react";
+import { Plus } from "lucide-react";
 import { useMemo, useState } from "react";
 import { z } from "zod";
 import { apiFetch } from "../../lib/api";
@@ -76,6 +79,32 @@ function FieldsPage() {
     onSubmit: ({ value }) => saveMutation.mutate(value),
   });
 
+  const listSearch = useListSearch();
+  const search = listSearch.get("q") ?? "";
+  const tipoFilter = listSearch.get("tipo");
+  const sort = listSearch.get("sort");
+
+  const rows = listQuery.data?.data ?? [];
+
+  const filtered = useMemo(() => {
+    const needle = search.trim().toLowerCase();
+    const matches = rows.filter((field) => {
+      if (tipoFilter && field.type !== tipoFilter) return false;
+      if (needle && !`${field.key} ${field.label}`.toLowerCase().includes(needle)) return false;
+      return true;
+    });
+    const sortField = (sort ?? "").replace(/^-/, "");
+    const desc = (sort ?? "").startsWith("-");
+    const compare = (a: FieldDef, b: FieldDef) => {
+      if (sortField === "label") return a.label.localeCompare(b.label);
+      if (sortField === "tipo") return a.type.localeCompare(b.type);
+      return a.key.localeCompare(b.key);
+    };
+    return [...matches].sort((a, b) => (desc ? -compare(a, b) : compare(a, b)));
+  }, [rows, search, tipoFilter, sort]);
+
+  const hasCriteria = search.trim() !== "" || Boolean(tipoFilter);
+
   const columns = useMemo<ColumnDef<FieldDef>[]>(
     () => [
       { accessorKey: "key", header: "Clave" },
@@ -90,9 +119,17 @@ function FieldsPage() {
         id: "actions",
         header: "",
         cell: ({ row }) => (
-          <Button variant="ghost" size="icon" aria-label="Eliminar" onClick={() => setDeleting(row.original)}>
-            <Trash2 className="size-4" />
-          </Button>
+          <RowActions
+            label={`Acciones de ${row.original.label}`}
+            items={[
+              {
+                key: "delete",
+                label: "Eliminar",
+                tone: "danger",
+                onSelect: () => setDeleting(row.original),
+              },
+            ]}
+          />
         ),
       },
     ],
@@ -100,7 +137,7 @@ function FieldsPage() {
   );
 
   const table = useReactTable({
-    data: listQuery.data?.data ?? [],
+    data: filtered,
     columns,
     getCoreRowModel: getCoreRowModel(),
   });
@@ -125,8 +162,38 @@ function FieldsPage() {
           </Button>
         }
       />
-      {listQuery.data?.data.length === 0 && !listQuery.isLoading ? (
+      <FilterBar
+        filters={[
+          {
+            key: "tipo",
+            label: "Tipo",
+            type: "select",
+            options: [
+              { value: "text", label: "Texto" },
+              { value: "number", label: "Número" },
+              { value: "date", label: "Fecha" },
+              { value: "select", label: "Opciones" },
+            ],
+          },
+        ]}
+        sortOptions={[
+          { value: "clave", label: "Clave" },
+          { value: "label", label: "Label" },
+          { value: "tipo", label: "Tipo" },
+        ]}
+        searchPlaceholder="Buscar por clave o label"
+      />
+      {rows.length === 0 && !listQuery.isLoading ? (
         <EmptyState title="Sin campos" description="Define el primero, p.ej. alergias o sede preferida." />
+      ) : filtered.length === 0 ? (
+        <EmptyState
+          title="Sin resultados"
+          description={
+            hasCriteria
+              ? "Ningún campo coincide con los criterios de búsqueda."
+              : "Todavía no hay campos para mostrar."
+          }
+        />
       ) : (
         <DataTable table={table} />
       )}

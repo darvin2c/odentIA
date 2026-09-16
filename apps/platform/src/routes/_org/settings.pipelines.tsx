@@ -4,13 +4,16 @@ import { useForm } from "@tanstack/react-form";
 import { Badge, Button, Field, FieldError, FieldLabel, Input } from "@odentia/ui";
 import {
   ConfirmDialog,
+  DataTable,
   EmptyState,
   FormDrawer,
   PageHeader,
+  RowActions,
   fieldErrorMessages,
 } from "@odentia/ui-patterns";
-import { ArrowDown, ArrowUp, Pencil, Plus, Trash2 } from "lucide-react";
-import { useState } from "react";
+import { getCoreRowModel, useReactTable, type ColumnDef } from "@tanstack/react-table";
+import { Plus } from "lucide-react";
+import { useMemo, useState } from "react";
 import { z } from "zod";
 import { ApiError, apiFetch } from "../../lib/api";
 import { useCanWrite, type Pipeline, type Stage } from "../../lib/crm";
@@ -106,6 +109,113 @@ function PipelinesPage() {
     reorderMutation.mutate(ids);
   }
 
+  const columns = useMemo<ColumnDef<Stage>[]>(
+    () => [
+      {
+        accessorKey: "name",
+        header: "Etapa",
+        cell: ({ row }) => {
+          const stage = row.original;
+          if (editing?.id === stage.id) {
+            return (
+              <Input
+                defaultValue={stage.name}
+                aria-label="Nombre de etapa"
+                id={`stage-${stage.id}`}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    const input = e.currentTarget;
+                    if (input.value.trim()) updateMutation.mutate({ id: stage.id, patch: { name: input.value.trim() } });
+                  }
+                }}
+              />
+            );
+          }
+          return <span className="text-sm font-medium">{stage.name}</span>;
+        },
+      },
+      {
+        accessorKey: "kind",
+        header: "Tipo",
+        cell: ({ row }) => {
+          const stage = row.original;
+          if (editing?.id === stage.id) {
+            return (
+              <select
+                aria-label="Tipo"
+                className="rounded-md border bg-background px-2 py-1.5 text-sm"
+                defaultValue={stage.kind}
+                onChange={(e) => updateMutation.mutate({ id: stage.id, patch: { kind: e.target.value } })}
+              >
+                <option value="open">Abierta</option>
+                <option value="won">Ganada</option>
+                <option value="lost">Perdida</option>
+              </select>
+            );
+          }
+          return (
+            <Badge variant={stage.kind === "won" ? "success" : stage.kind === "lost" ? "destructive" : "secondary"}>
+              {stage.kind}
+            </Badge>
+          );
+        },
+      },
+      {
+        id: "actions",
+        header: "",
+        cell: ({ row }) => {
+          const stage = row.original;
+          const index = row.index;
+          if (editing?.id === stage.id) {
+            return (
+              <Button variant="ghost" size="sm" onClick={() => setEditing(null)}>
+                Listo
+              </Button>
+            );
+          }
+          return (
+            <RowActions
+              label={`Acciones de ${stage.name}`}
+              items={[
+                {
+                  key: "up",
+                  label: "Subir",
+                  disabled: index === 0,
+                  onSelect: () => move(index, -1),
+                },
+                {
+                  key: "down",
+                  label: "Bajar",
+                  disabled: index === stages.length - 1,
+                  onSelect: () => move(index, 1),
+                },
+                {
+                  key: "rename",
+                  label: "Renombrar",
+                  onSelect: () => setEditing(stage),
+                },
+                {
+                  key: "delete",
+                  label: "Eliminar",
+                  tone: "danger",
+                  onSelect: () => setDeleting(stage),
+                },
+              ]}
+            />
+          );
+        },
+      },
+    ],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [editing, stages.length],
+  );
+
+  const table = useReactTable({
+    data: stages,
+    columns,
+    getCoreRowModel: getCoreRowModel(),
+  });
+
   if (!canWrite) {
     return <EmptyState title="Sin acceso" description="Solo owner/admin pueden editar pipelines." />;
   }
@@ -133,65 +243,9 @@ function PipelinesPage() {
         }
       />
       {error && <p className="text-sm text-red-600">{error}</p>}
-      <div className="flex flex-col gap-2">
-        {stages.map((stage, i) => (
-          <div key={stage.id} className="flex items-center gap-2 rounded-lg border p-2.5">
-            {editing?.id === stage.id ? (
-              <>
-                <Input
-                  defaultValue={stage.name}
-                  aria-label="Nombre de etapa"
-                  id={`stage-${stage.id}`}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      const input = e.currentTarget;
-                      if (input.value.trim()) updateMutation.mutate({ id: stage.id, patch: { name: input.value.trim() } });
-                    }
-                  }}
-                />
-                <select
-                  aria-label="Tipo"
-                  className="rounded-md border bg-background px-2 py-1.5 text-sm"
-                  defaultValue={stage.kind}
-                  onChange={(e) => updateMutation.mutate({ id: stage.id, patch: { kind: e.target.value } })}
-                >
-                  <option value="open">Abierta</option>
-                  <option value="won">Ganada</option>
-                  <option value="lost">Perdida</option>
-                </select>
-                <Button variant="ghost" size="sm" onClick={() => setEditing(null)}>
-                  Listo
-                </Button>
-              </>
-            ) : (
-              <>
-                <span className="flex-1 text-sm font-medium">{stage.name}</span>
-                <Badge variant={stage.kind === "won" ? "success" : stage.kind === "lost" ? "destructive" : "secondary"}>
-                  {stage.kind}
-                </Badge>
-              </>
-            )}
-            <Button variant="ghost" size="icon" aria-label="Subir" disabled={i === 0} onClick={() => move(i, -1)}>
-              <ArrowUp className="size-4" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              aria-label="Bajar"
-              disabled={i === stages.length - 1}
-              onClick={() => move(i, 1)}
-            >
-              <ArrowDown className="size-4" />
-            </Button>
-            <Button variant="ghost" size="icon" aria-label="Renombrar" onClick={() => setEditing(stage)}>
-              <Pencil className="size-4" />
-            </Button>
-            <Button variant="ghost" size="icon" aria-label="Eliminar" onClick={() => setDeleting(stage)}>
-              <Trash2 className="size-4" />
-            </Button>
-          </div>
-        ))}
-      </div>
+      {/* Sin FilterBar: las etapas se muestran en el orden de posición del pipeline y ese orden es el dato
+          (subir/bajar lo edita); no hay nada que filtrar ni ordenar. */}
+      <DataTable table={table} />
       <div>
         <Button
           type="button"

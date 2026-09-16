@@ -2,9 +2,19 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { useForm } from "@tanstack/react-form";
 import { Badge, Button, Field, FieldError, FieldLabel, Input } from "@odentia/ui";
-import { EmptyState, FormDrawer, PageHeader, fieldErrorMessages } from "@odentia/ui-patterns";
+import {
+  DataTable,
+  EmptyState,
+  FilterBar,
+  FormDrawer,
+  PageHeader,
+  RowActions,
+  fieldErrorMessages,
+  useListSearch,
+} from "@odentia/ui-patterns";
+import { getCoreRowModel, useReactTable, type ColumnDef } from "@tanstack/react-table";
 import { MessageCircle, Plus, Send } from "lucide-react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { z } from "zod";
 import { ApiError, apiFetch } from "../../lib/api";
 import { useCanWrite, type ConnectionItem } from "../../lib/crm";
@@ -95,7 +105,131 @@ function ChannelsPage() {
     return <EmptyState title="Sin acceso" description="Solo owner/admin pueden gestionar conexiones." />;
   }
 
+  const listSearch = useListSearch();
+  const search = listSearch.get("q") ?? "";
+  const canalFilter = listSearch.get("canal");
+  const estadoFilter = listSearch.get("estado");
+  const sort = listSearch.get("sort");
+
   const items = listQuery.data?.data ?? [];
+
+  const filtered = useMemo(() => {
+    const needle = search.trim().toLowerCase();
+    const rows = items.filter((conn) => {
+      if (canalFilter && conn.channel !== canalFilter) return false;
+      if (estadoFilter && conn.status !== estadoFilter) return false;
+      if (needle && !`${conn.displayName} ${conn.externalId ?? ""}`.toLowerCase().includes(needle)) return false;
+      return true;
+    });
+    const field = (sort ?? "").replace(/^-/, "");
+    const desc = (sort ?? "").startsWith("-");
+    const compare = (a: ConnectionItem, b: ConnectionItem) => {
+      if (field === "estado") return a.status.localeCompare(b.status);
+      return a.displayName.localeCompare(b.displayName);
+    };
+    return [...rows].sort((a, b) => (desc ? -compare(a, b) : compare(a, b)));
+  }, [items, search, canalFilter, estadoFilter, sort]);
+
+  const columns = useMemo<ColumnDef<ConnectionItem>[]>(
+    () => [
+      {
+        accessorKey: "displayName",
+        header: "Conexión",
+        cell: ({ row }) => (
+          <span className="flex items-center gap-2">
+            {row.original.channel === "whatsapp" ? (
+              <MessageCircle className="size-4 shrink-0 text-green-600" aria-hidden />
+            ) : (
+              <Send className="size-4 shrink-0 text-sky-600" aria-hidden />
+            )}
+            <span className="flex flex-col">
+              <span className="font-medium">{row.original.displayName}</span>
+              {row.original.externalId && (
+                <span className="text-xs text-muted-foreground">{row.original.externalId}</span>
+              )}
+            </span>
+          </span>
+        ),
+      },
+      {
+        accessorKey: "channel",
+        header: "Canal",
+        cell: ({ row }) => (
+          <Badge variant="secondary">{row.original.channel === "whatsapp" ? "WhatsApp" : "Telegram"}</Badge>
+        ),
+      },
+      {
+        accessorKey: "status",
+        header: "Estado",
+        cell: ({ row }) => (
+          <Badge variant={row.original.status === "active" ? "success" : "secondary"}>
+            {row.original.status === "active" ? "Activa" : "Inactiva"}
+          </Badge>
+        ),
+      },
+      {
+        id: "capabilities",
+        header: "Capacidades",
+        cell: ({ row }) => {
+          const badges = [
+            row.original.capabilities?.templates ? "plantillas" : null,
+            row.original.capabilities?.media ? "media" : null,
+          ].filter((b): b is string => b !== null);
+          if (badges.length === 0) return <span className="text-muted-foreground">—</span>;
+          return (
+            <span className="flex flex-wrap gap-1">
+              {badges.map((b) => (
+                <Badge key={b} variant="secondary">
+                  {b}
+                </Badge>
+              ))}
+            </span>
+          );
+        },
+      },
+      {
+        id: "actions",
+        header: "",
+        cell: ({ row }) => {
+          const conn = row.original;
+          return (
+            <RowActions
+              label={`Acciones de ${conn.displayName}`}
+              items={[
+                {
+                  key: "test",
+                  label: "Probar",
+                  onSelect: () => actionMutation.mutate(`${conn.id}/test`),
+                },
+                conn.status === "active"
+                  ? {
+                      key: "disable",
+                      label: "Desactivar",
+                      tone: "danger" as const,
+                      onSelect: () => actionMutation.mutate(`${conn.id}/disable`),
+                    }
+                  : {
+                      key: "enable",
+                      label: "Activar",
+                      onSelect: () => actionMutation.mutate(`${conn.id}/enable`),
+                    },
+              ]}
+            />
+          );
+        },
+      },
+    ],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
+
+  const table = useReactTable({
+    data: filtered,
+    columns,
+    getCoreRowModel: getCoreRowModel(),
+  });
+
+  const hasCriteria = search.trim() !== "" || Boolean(canalFilter) || Boolean(estadoFilter);
 
   return (
     <div className="flex flex-col gap-6">
@@ -121,38 +255,46 @@ function ChannelsPage() {
           <p className="break-all">Verify token: {created.webhookSecret}</p>
         </div>
       )}
+      <FilterBar
+        filters={[
+          {
+            key: "canal",
+            label: "Canal",
+            type: "select",
+            options: [
+              { value: "whatsapp", label: "WhatsApp" },
+              { value: "telegram", label: "Telegram" },
+            ],
+          },
+          {
+            key: "estado",
+            label: "Estado",
+            type: "select",
+            options: [
+              { value: "active", label: "Activa" },
+              { value: "inactive", label: "Inactiva" },
+            ],
+          },
+        ]}
+        sortOptions={[
+          { value: "nombre", label: "Nombre" },
+          { value: "estado", label: "Estado" },
+        ]}
+        searchPlaceholder="Buscar conexión"
+      />
       {items.length === 0 && !listQuery.isLoading ? (
         <EmptyState title="Sin conexiones" description="Conecta un bot de Telegram o un número de WhatsApp." />
+      ) : filtered.length === 0 ? (
+        <EmptyState
+          title="Sin resultados"
+          description={
+            hasCriteria
+              ? "Ninguna conexión coincide con los criterios de búsqueda."
+              : "Todavía no hay conexiones para mostrar."
+          }
+        />
       ) : (
-        <div className="flex flex-col gap-2">
-          {items.map((conn) => (
-            <div key={conn.id} className="flex flex-wrap items-center gap-2 rounded-lg border p-3">
-              {conn.channel === "whatsapp" ? (
-                <MessageCircle className="size-4 text-green-600" />
-              ) : (
-                <Send className="size-4 text-sky-600" />
-              )}
-              <span className="text-sm font-medium">{conn.displayName}</span>
-              {conn.externalId && <span className="text-xs text-muted-foreground">{conn.externalId}</span>}
-              <Badge variant={conn.status === "active" ? "success" : "secondary"}>{conn.status}</Badge>
-              {conn.capabilities?.templates && <Badge variant="secondary">plantillas</Badge>}
-              {conn.capabilities?.media && <Badge variant="secondary">media</Badge>}
-              <span className="flex-1" />
-              <Button variant="outline" size="sm" onClick={() => actionMutation.mutate(`${conn.id}/test`)}>
-                Probar
-              </Button>
-              {conn.status === "active" ? (
-                <Button variant="outline" size="sm" onClick={() => actionMutation.mutate(`${conn.id}/disable`)}>
-                  Desactivar
-                </Button>
-              ) : (
-                <Button variant="outline" size="sm" onClick={() => actionMutation.mutate(`${conn.id}/enable`)}>
-                  Activar
-                </Button>
-              )}
-            </div>
-          ))}
-        </div>
+        <DataTable table={table} />
       )}
       <FormDrawer
         open={drawerOpen}

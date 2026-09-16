@@ -29,7 +29,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@odentia/ui";
-import { EmptyState, PageHeader } from "@odentia/ui-patterns";
+import { EmptyState, FilterBar, PageHeader, useListSearch } from "@odentia/ui-patterns";
 import {
   AlertCircle,
   Bot,
@@ -45,45 +45,42 @@ import { API_URL } from "../../lib/auth-client";
 import { useEffect, useMemo, useState } from "react";
 import { timeAgo, useMyUserId, type ChatMessage, type ConversationDetail, type ConversationListItem } from "../../lib/crm";
 import { useOrgEvents } from "../../lib/org-events";
+
 export const Route = createFileRoute("/_org/inbox")({
   validateSearch: (search: Record<string, unknown>) => ({
     conversation: typeof search.conversation === "string" ? search.conversation : undefined,
+    ...(typeof search.q === "string" ? { q: search.q } : {}),
+    ...(typeof search.sort === "string" ? { sort: search.sort } : {}),
+    ...(typeof search.status === "string" ? { status: search.status } : {}),
+    ...(typeof search.channel === "string" ? { channel: search.channel } : {}),
+    ...(typeof search.assigned === "string" ? { assigned: search.assigned } : {}),
   }),
   component: InboxPage,
 });
 const orgRouteApi = getRouteApi("/_org");
 
-function useDebounced(value: string, ms: number): string {
-  const [debounced, setDebounced] = useState(value);
-  useEffect(() => {
-    const timer = setTimeout(() => setDebounced(value), ms);
-    return () => clearTimeout(timer);
-  }, [value, ms]);
-  return debounced;
-}
-
 function InboxPage() {
   const queryClient = useQueryClient();
   const { org } = orgRouteApi.useRouteContext();
   const myUserId = useMyUserId();
-
-  const [status, setStatus] = useState("open");
-  const [channel, setChannel] = useState("all");
-  const [assigned, setAssigned] = useState("all");
-  const [search, setSearch] = useState("");
-  const debouncedSearch = useDebounced(search, 300);
+  const listSearch = useListSearch();
+  const status = listSearch.get("status") ?? "open";
+  const channel = listSearch.get("channel");
+  const assigned = listSearch.get("assigned");
+  const search = listSearch.get("q") ?? "";
+  const sort = listSearch.get("sort");
   const initial = Route.useSearch();
   const [selectedId, setSelectedId] = useState<string | null>(initial.conversation ?? null);
 
   const listParams = useMemo(() => {
     const params = new URLSearchParams();
     if (status !== "all") params.set("status", status);
-    if (channel !== "all") params.set("channel", channel);
+    if (channel) params.set("channel", channel);
     if (assigned === "me") params.set("assigned", myUserId);
     else if (assigned === "none") params.set("assigned", "none");
-    if (debouncedSearch.trim()) params.set("q", debouncedSearch.trim());
+    if (search.trim()) params.set("q", search.trim());
     return params.toString();
-  }, [status, channel, assigned, debouncedSearch, myUserId]);
+  }, [status, channel, assigned, search, myUserId]);
 
   const listQuery = useQuery({
     queryKey: ["conversations", listParams],
@@ -95,51 +92,50 @@ function InboxPage() {
     if (selectedId) void queryClient.invalidateQueries({ queryKey: ["conversation", selectedId] });
   });
 
-  const items = listQuery.data?.data ?? [];
-  useEffect(() => {
-    if (!selectedId && items.length > 0 && items[0]) {
-      setSelectedId(items[0].id);
+  const items = useMemo(() => {
+    const base = listQuery.data?.data ?? [];
+    if (!sort) return base;
+    const field = sort.replace(/^-/, "");
+    const sorted = [...base];
+    if (field === "noleidos") {
+      sorted.sort(
+        (a, b) =>
+          b.unreadCount - a.unreadCount ||
+          (b.lastMessageAt ? new Date(b.lastMessageAt).getTime() : 0) -
+            (a.lastMessageAt ? new Date(a.lastMessageAt).getTime() : 0),
+      );
+      return sorted;
     }
-  }, [items, selectedId]);
+    if (field === "actividad") {
+      const desc = sort !== "-actividad";
+      sorted.sort((a, b) => {
+        const diff =
+          (b.lastMessageAt ? new Date(b.lastMessageAt).getTime() : 0) -
+          (a.lastMessageAt ? new Date(a.lastMessageAt).getTime() : 0);
+        return desc ? diff : -diff;
+      });
+      return sorted;
+    }
+    return base;
+  }, [listQuery.data, sort]);
 
   return (
     <div className="flex flex-col gap-4">
       <PageHeader title="Bandeja" subtitle="Conversaciones de WhatsApp y Telegram" />
       <div className="flex gap-4" style={{ height: "calc(100vh - 220px)", minHeight: 480 }}>
         <section className={`w-full flex-col gap-3 md:flex md:w-[clamp(280px,30%,420px)] md:shrink-0 ${selectedId ? "hidden" : "flex"}`}>
-          <div className="flex gap-2">
-            <select
-              aria-label="Estado"
-              className="rounded-md border bg-background px-2 py-1.5 text-sm"
-              value={status}
-              onChange={(e) => setStatus(e.target.value)}
-            >
-              <option value="open">Abiertas</option>
-              <option value="closed">Cerradas</option>
-              <option value="all">Todas</option>
-            </select>
-            <select
-              aria-label="Canal"
-              className="rounded-md border bg-background px-2 py-1.5 text-sm"
-              value={channel}
-              onChange={(e) => setChannel(e.target.value)}
-            >
-              <option value="all">Canales</option>
-              <option value="whatsapp">WhatsApp</option>
-              <option value="telegram">Telegram</option>
-            </select>
-            <select
-              aria-label="Asignado"
-              className="rounded-md border bg-background px-2 py-1.5 text-sm"
-              value={assigned}
-              onChange={(e) => setAssigned(e.target.value)}
-            >
-              <option value="all">Todos</option>
-              <option value="me">Mías</option>
-              <option value="none">Sin asignar</option>
-            </select>
-          </div>
-          <Input placeholder="Buscar contacto" value={search} onChange={(e) => setSearch(e.target.value)} />
+          <FilterBar
+            filters={[
+              { key: "status", label: "Estado", type: "select", options: [{ value: "open", label: "Abiertas" }, { value: "closed", label: "Cerradas" }, { value: "all", label: "Todas" }] },
+              { key: "channel", label: "Canal", type: "select", options: [{ value: "whatsapp", label: "WhatsApp" }, { value: "telegram", label: "Telegram" }] },
+              { key: "assigned", label: "Asignado", type: "select", options: [{ value: "me", label: "Mías" }, { value: "none", label: "Sin asignar" }] },
+            ]}
+            sortOptions={[
+              { value: "actividad", label: "Actividad reciente" },
+              { value: "noleidos", label: "No leídos primero" },
+            ]}
+            searchPlaceholder="Buscar contacto"
+          />
           <div className="flex flex-1 flex-col gap-1 overflow-y-auto">
             {items.map((item) => (
               <button

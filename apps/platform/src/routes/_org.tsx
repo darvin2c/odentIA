@@ -58,6 +58,7 @@ const navItems: AppShellNavEntry[] = [
   },
   { label: "Sucursales", to: "/branches", icon: Building2 },
   { label: "Miembros", to: "/members", icon: Users },
+  { label: "Servicios", to: "/services", icon: Tag },
   { label: "Demo", to: "/demo", icon: FlaskConical },
 ];
 

@@ -6,10 +6,14 @@ import { Badge, Button, Field, FieldError, FieldLabel, Input } from "@odentia/ui
 import {
   DataTable,
   EmptyState,
+  FilterBar,
   FormDrawer,
   PageHeader,
+  RowActions,
   SubmitButton,
+  common,
   fieldErrorMessages,
+  useListSearch,
 } from "@odentia/ui-patterns";
 import { Plus } from "lucide-react";
 import { useMemo, useState } from "react";
@@ -38,12 +42,17 @@ const emptyValues: TaskFormValues = { title: "", dueAt: "", assigneeUserId: "" }
 function TasksPage() {
   const queryClient = useQueryClient();
   const { org } = orgRouteApi.useRouteContext();
-  const [status, setStatus] = useState("open");
+  const listSearch = useListSearch();
+  // El backend filtra por `status`; en la URL el filtro vive como `estado`.
+  const estado = listSearch.get("estado") ?? "open";
+  // SearchInput (FilterBar) escribe la búsqueda en `q` con debounce propio.
+  const q = listSearch.get("q") ?? "";
+  const sort = listSearch.get("sort");
   const [drawerOpen, setDrawerOpen] = useState(false);
 
   const tasksQuery = useQuery({
-    queryKey: ["tasks", status],
-    queryFn: () => apiFetch<{ data: TaskItem[] }>(`/api/tasks?status=${status}`),
+    queryKey: ["tasks", estado],
+    queryFn: () => apiFetch<{ data: TaskItem[] }>(`/api/tasks?status=${estado}`),
   });
 
   useOrgEvents(["message.created", "conversation.updated"], () => {
@@ -119,23 +128,66 @@ function TasksPage() {
       {
         id: "actions",
         header: "",
-        cell: ({ row }) => (
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={toggleMutation.isPending}
-            onClick={() => toggleMutation.mutate(row.original)}
-          >
-            {row.original.status === "done" ? "Reabrir" : "Completar"}
-          </Button>
-        ),
+        cell: ({ row }) => {
+          const task = row.original;
+          return (
+            <RowActions
+              label={`Acciones de ${task.title}`}
+              items={[
+                {
+                  key: "toggle",
+                  label: task.status === "done" ? "Reabrir" : "Completar",
+                  disabled: toggleMutation.isPending,
+                  onSelect: () => toggleMutation.mutate(task),
+                },
+              ]}
+            />
+          );
+        },
       },
     ],
     [org.members, toggleMutation],
   );
 
+  // La búsqueda `q` y el orden `sort` se aplican en cliente sobre lo ya
+  // filtrado por estado en el servidor.
+  const visibleTasks = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    const rows = (tasksQuery.data?.data ?? []).filter((task) =>
+      needle ? task.title.toLowerCase().includes(needle) : true,
+    );
+    if (!sort) return rows;
+    const descending = sort.startsWith("-");
+    const field = descending ? sort.slice(1) : sort;
+    const sorted = [...rows];
+    if (field === "vence") {
+      sorted.sort((a, b) => {
+        const av = a.dueAt ? Date.parse(a.dueAt) : null;
+        const bv = b.dueAt ? Date.parse(b.dueAt) : null;
+        if (av === null && bv === null) return 0;
+        if (av === null) return descending ? -1 : 1;
+        if (bv === null) return descending ? 1 : -1;
+        return descending ? bv - av : av - bv;
+      });
+    } else if (field === "titulo") {
+      sorted.sort((a, b) =>
+        descending
+          ? b.title.localeCompare(a.title, "es")
+          : a.title.localeCompare(b.title, "es"),
+      );
+    } else if (field === "estado") {
+      sorted.sort((a, b) =>
+        descending
+          ? b.status.localeCompare(a.status, "es")
+          : a.status.localeCompare(b.status, "es"),
+      );
+    }
+    return sorted;
+  }, [tasksQuery.data, q, sort]);
+  const hasActiveCriteria = q.trim() !== "" || estado !== "open" || Boolean(sort);
+
   const table = useReactTable({
-    data: tasksQuery.data?.data ?? [],
+    data: visibleTasks,
     columns,
     getCoreRowModel: getCoreRowModel(),
   });
@@ -146,30 +198,45 @@ function TasksPage() {
         title="Tareas"
         subtitle="Seguimientos creados por operadores y el agente"
         actions={
-          <>
-            <select
-              aria-label="Estado"
-              className="rounded-md border bg-background px-2 py-1.5 text-sm"
-              value={status}
-              onChange={(e) => setStatus(e.target.value)}
-            >
-              <option value="open">Abiertas</option>
-              <option value="done">Hechas</option>
-              <option value="cancelled">Canceladas</option>
-            </select>
-            <Button
-              type="button"
-              className="min-h-11"
-              onClick={() => setDrawerOpen(true)}
-            >
-              <Plus aria-hidden />
-              Nueva tarea
-            </Button>
-          </>
+          <Button
+            type="button"
+            className="min-h-11"
+            onClick={() => setDrawerOpen(true)}
+          >
+            <Plus aria-hidden />
+            Nueva tarea
+          </Button>
         }
       />
-      {tasksQuery.data?.data.length === 0 && !tasksQuery.isLoading ? (
-        <EmptyState title="Sin tareas" description="Crea la primera con el botón Nueva tarea." />
+      <FilterBar
+        filters={[
+          {
+            key: "estado",
+            label: "Estado",
+            type: "select",
+            options: [
+              { value: "open", label: "Abiertas" },
+              { value: "done", label: "Hechas" },
+              { value: "cancelled", label: "Canceladas" },
+            ],
+          },
+        ]}
+        sortOptions={[
+          { value: "vence", label: "Vence" },
+          { value: "titulo", label: "Título" },
+          { value: "estado", label: "Estado" },
+        ]}
+        searchPlaceholder="Buscar tarea"
+      />
+      {visibleTasks.length === 0 && !tasksQuery.isLoading ? (
+        <EmptyState
+          title={hasActiveCriteria ? common.filters.noResults : "Sin tareas"}
+          description={
+            hasActiveCriteria
+              ? "No hay tareas que coincidan con los filtros aplicados."
+              : "Crea la primera con el botón Nueva tarea."
+          }
+        />
       ) : (
         <DataTable table={table} />
       )}
