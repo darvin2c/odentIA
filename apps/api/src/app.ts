@@ -19,6 +19,7 @@ import { createConversationsRoute } from "./routes/conversations.js";
 import { createFieldsRoute } from "./routes/fields.js";
 import { createPatientsRoute } from "./routes/patients.js";
 import { createPipelinesRoute } from "./routes/pipelines.js";
+import { createServicesRoute } from "./routes/services.js";
 import { createTasksRoute } from "./routes/tasks.js";
 import { createWebhooksRoute } from "./routes/webhooks.js";
 import type { Storage } from "@odentia/services";
@@ -440,6 +441,7 @@ export function createApp(deps: AppDeps) {
   guarded.route("/conversations", createConversationsRoute(crmDeps));
   guarded.route("/contacts", createContactsRoute(crmDeps));
   guarded.route("/patients", createPatientsRoute(crmDeps));
+  guarded.route("/services", createServicesRoute(crmDeps));
   guarded.route("/cie10", createCie10Route(crmDeps));
   guarded.route("/pipelines", createPipelinesRoute(crmDeps));
   guarded.route("/channels/connections", createConnectionsRoute(crmDeps));

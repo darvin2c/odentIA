@@ -75,13 +75,18 @@ interface EncounterDetailBody {
     odontogramEntries: Array<{ id: string }>;
     documents: Array<{ id: string }>;
     addenda: Array<{ id: string; kind: string; note: string }>;
+    plannedItems: Array<{ id: string; status: string }>;
+    indicatedItems: Array<{ id: string; status: string }>;
   };
 }
 
 interface PlanItemRow {
   id: string;
   status: string;
-  encounterId: string | null;
+  decision: string;
+  planId: string;
+  budgetId: string | null;
+  sourceEncounterId: string | null;
 }
 
 interface ErrorBody {
@@ -105,6 +110,71 @@ async function postEncounter(app: Hono, patientId: string, payload: Record<strin
     headers: { "content-type": "application/json" },
     body: JSON.stringify(payload),
   });
+}
+
+// Plan real antes de cotizar: borrador -> plan -> ítems -> presupuesto -> presentar -> decidir.
+async function setupPlan(app: Hono, patientId: string): Promise<{ planId: string; encounterId: string }> {
+  const created = await postEncounter(app, patientId, { reason: "Evaluación" });
+  expect(created.status).toBe(201);
+  const encounterId = ((await created.json()) as { data: { id: string } }).data.id;
+  const plan = await app.request(`/patients/${patientId}/plans`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ title: "Plan", originEncounterId: encounterId }),
+  });
+  expect(plan.status).toBe(201);
+  const planId = ((await plan.json()) as { data: { id: string } }).data.id;
+  return { planId, encounterId };
+}
+async function createBudget(app: Hono, patientId: string, planId: string, itemIds: string[]): Promise<string> {
+  const res = await app.request(`/patients/${patientId}/budgets`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ planId, itemIds, title: "Presupuesto" }),
+  });
+  expect(res.status).toBe(201);
+  const body = (await res.json()) as { data: { id: string } };
+  return body.data.id;
+}
+async function addPlanItem(
+  app: Hono,
+  patientId: string,
+  ctx: { planId: string; encounterId: string },
+  payload: Record<string, unknown>,
+) {
+  const res = await app.request(`/patients/${patientId}/plan/items`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ ...payload, planId: ctx.planId, sourceEncounterId: ctx.encounterId }),
+  });
+  expect(res.status).toBe(201);
+  return ((await res.json()) as { data: PlanItemRow }).data;
+}
+
+async function presentBudget(app: Hono, patientId: string, budgetId: string): Promise<void> {
+  const res = await app.request(`/patients/${patientId}/budgets/${budgetId}/present`, { method: "POST" });
+  expect(res.status).toBe(200);
+}
+
+async function decideBudget(app: Hono, patientId: string, budgetId: string, acceptedItemIds: string[]): Promise<void> {
+  const res = await app.request(`/patients/${patientId}/budgets/${budgetId}/decision`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ acceptedItemIds, acceptedByName: "Paciente Test" }),
+  });
+  expect(res.status).toBe(200);
+}
+
+// Cierre con mínimos clínicos: motivo al crear + evolución antes de finalizar.
+async function finalizeWithEvolution(app: Hono, patientId: string, encounterId: string): Promise<void> {
+  const patched = await app.request(`/patients/${patientId}/encounters/${encounterId}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ evolution: "Evolución de cierre" }),
+  });
+  expect(patched.status).toBe(200);
+  const finalized = await app.request(`/patients/${patientId}/encounters/${encounterId}/finalize`, { method: "POST" });
+  expect(finalized.status).toBe(200);
 }
 
 beforeAll(async () => {
@@ -141,6 +211,13 @@ beforeAll(async () => {
         ('Z01.2', 'Examen dental')
         on conflict ("code") do nothing`,
   );
+  await ownerDb.execute(
+    sql`insert into "service_catalog" ("id", "organization_id", "source", "code", "name", "specialty", "scope", "price_cents", "currency", "duration_min", "is_active") values
+        ('c1111111-1111-4111-8111-111111111111', 'org_a', 'custom', 'CORONA', 'Corona cerámica', 'protesis', 'tooth', 90000, 'PEN', 60, true),
+        ('c4444444-4444-4444-8444-444444444444', 'org_a', 'custom', 'VIEJO', 'Servicio viejo', 'protesis', 'tooth', 1000, 'PEN', 30, false),
+        ('d5555555-5555-4555-8555-555555555555', 'org_b', 'custom', 'OTRO', 'Otro servicio', 'protesis', 'tooth', 999, 'PEN', 15, true)
+        on conflict ("id") do nothing`,
+  );
 }, 180_000);
 
 afterAll(async () => {
@@ -148,7 +225,7 @@ afterAll(async () => {
 });
 
 it("encounters: POST borrador 201 y segundo borrador 409 DRAFT_OPEN", async () => {
-  const app = buildApp("member");
+  const app = buildApp("admin");
   const patientId = await createFreshPatient(app, "Borrador Unico");
 
   const first = await postEncounter(app, patientId, { reason: "Dolor molar" });
@@ -163,7 +240,7 @@ it("encounters: POST borrador 201 y segundo borrador 409 DRAFT_OPEN", async () =
 });
 
 it("encounters: POST simultáneos resuelven uno 201 y otro 409 DRAFT_OPEN", async () => {
-  const app = buildApp("member");
+  const app = buildApp("admin");
   const patientId = await createFreshPatient(app, "Borrador Carrera");
 
   const [a, b] = await Promise.all([
@@ -178,7 +255,7 @@ it("encounters: POST simultáneos resuelven uno 201 y otro 409 DRAFT_OPEN", asyn
 });
 
 it("encounters: PATCH reason/teeth reemplaza y el detalle lo refleja", async () => {
-  const app = buildApp("member");
+  const app = buildApp("admin");
   const patientId = await createFreshPatient(app, "Borrador Edicion");
 
   const created = await postEncounter(app, patientId, { reason: "Motivo inicial", teeth: [11] });
@@ -203,19 +280,17 @@ it("encounters: PATCH reason/teeth reemplaza y el detalle lo refleja", async () 
 });
 
 it("encounters: finalize 200 y luego PATCH/procedure/nota/odontograma vinculados responden 409 FINALIZED", async () => {
-  const app = buildApp("member");
+  const app = buildApp("admin");
   const patientId = await createFreshPatient(app, "Borrador Cierre");
 
   const created = await postEncounter(app, patientId, { reason: "Cierre" });
   const createdBody = (await created.json()) as { data: EncounterRow };
   const encounterId = createdBody.data.id;
 
-  const finalized = await app.request(`/patients/${patientId}/encounters/${encounterId}/finalize`, {
-    method: "POST",
-  });
-  expect(finalized.status).toBe(200);
-  const finalizedBody = (await finalized.json()) as { data: EncounterRow };
-  expect(finalizedBody.data.status).toBe("finalizada");
+  await finalizeWithEvolution(app, patientId, encounterId);
+  const done = await app.request(`/patients/${patientId}/encounters/${encounterId}`);
+  expect(done.status).toBe(200);
+  expect(((await done.json()) as EncounterDetailBody).data.encounter.status).toBe("finalizada");
 
   const patch = await app.request(`/patients/${patientId}/encounters/${encounterId}`, {
     method: "PATCH",
@@ -228,7 +303,7 @@ it("encounters: finalize 200 y luego PATCH/procedure/nota/odontograma vinculados
   const proc = await app.request(`/patients/${patientId}/encounters/${encounterId}/procedures`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ description: "Obturación tardía" }),
+    body: JSON.stringify({ serviceId: "c1111111-1111-4111-8111-111111111111" }),
   });
   expect(proc.status).toBe(409);
   expect(((await proc.json()) as ErrorBody).error.code).toBe("FINALIZED");
@@ -251,7 +326,7 @@ it("encounters: finalize 200 y luego PATCH/procedure/nota/odontograma vinculados
 });
 
 it("encounters: adenda en borrador 409 NOT_FINALIZED; tras finalizar 201 kind adenda visible en detalle", async () => {
-  const app = buildApp("member");
+  const app = buildApp("admin");
   const patientId = await createFreshPatient(app, "Borrador Adenda");
 
   const created = await postEncounter(app, patientId, { reason: "Con adenda" });
@@ -266,10 +341,7 @@ it("encounters: adenda en borrador 409 NOT_FINALIZED; tras finalizar 201 kind ad
   expect(early.status).toBe(409);
   expect(((await early.json()) as ErrorBody).error.code).toBe("NOT_FINALIZED");
 
-  const finalized = await app.request(`/patients/${patientId}/encounters/${encounterId}/finalize`, {
-    method: "POST",
-  });
-  expect(finalized.status).toBe(200);
+  await finalizeWithEvolution(app, patientId, encounterId);
 
   const added = await app.request(`/patients/${patientId}/encounters/${encounterId}/addenda`, {
     method: "POST",
@@ -286,44 +358,62 @@ it("encounters: adenda en borrador 409 NOT_FINALIZED; tras finalizar 201 kind ad
   expect(detailBody.data.addenda.every((n) => n.kind === "adenda")).toBe(true);
 });
 
-it("encounters: procedure con planItemId deja el plan realizado con el mismo encounterId", async () => {
-  const app = buildApp("member");
+it("encounters: procedure con planItemId deja el plan realizado en la misma atención", async () => {
+  const app = buildApp("admin");
   const patientId = await createFreshPatient(app, "Borrador Plan");
+  const ctx = await setupPlan(app, patientId);
+  const encounterId = ctx.encounterId;
 
-  const created = await postEncounter(app, patientId, { reason: "Cierra plan" });
-  const createdBody = (await created.json()) as { data: EncounterRow };
-  const encounterId = createdBody.data.id;
-
-  const itemRes = await app.request(`/patients/${patientId}/plan/items`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ title: "Corona 36" }),
+  // El tratamiento exige presupuesto presentado y decisión aceptada en su línea.
+  const item = await addPlanItem(app, patientId, ctx, {
+    serviceId: "c1111111-1111-4111-8111-111111111111",
+    toothNumber: 36,
   });
-  expect(itemRes.status).toBe(201);
-  const itemBody = (await itemRes.json()) as { data: PlanItemRow };
-  const itemId = itemBody.data.id;
+  const budgetId = await createBudget(app, patientId, ctx.planId, [item.id]);
+  await presentBudget(app, patientId, budgetId);
+  await decideBudget(app, patientId, budgetId, [item.id]);
+  const itemId = item.id;
 
+  // Sin description: se congela desde el título del plan/servicio.
   const proc = await app.request(`/patients/${patientId}/encounters/${encounterId}/procedures`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ description: "Corona 36", toothNumber: 36, planItemId: itemId }),
+    body: JSON.stringify({ toothNumber: 36, planItemId: itemId }),
   });
   expect(proc.status).toBe(201);
+  const procBody = (await proc.json()) as { data: { description: string; serviceId: string | null } };
+  expect(procBody.data.description).toBe("Corona cerámica");
+  expect(procBody.data.serviceId).toBe("c1111111-1111-4111-8111-111111111111");
+  const duplicate = await app.request(`/patients/${patientId}/encounters/${encounterId}/procedures`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ planItemId: itemId }),
+  });
+  expect(duplicate.status).toBe(409);
+  // Realizado es terminal: reabrir o cancelar un ejecutado se rechaza.
+  const reopen = await app.request(`/patients/${patientId}/plan/items/${itemId}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ encounterId, status: "pendiente" }),
+  });
+  expect(reopen.status).toBe(409);
+  expect(((await reopen.json()) as ErrorBody).error.code).toBe("ITEM_CLOSED");
 
   const plan = await app.request(`/patients/${patientId}/plan`);
   expect(plan.status).toBe(200);
   const planBody = (await plan.json()) as { data: PlanItemRow[] };
   const updated = planBody.data.find((row) => row.id === itemId);
   expect(updated?.status).toBe("realizado");
-  expect(updated?.encounterId).toBe(encounterId);
+  expect(updated?.decision).toBe("aceptado");
+  expect(updated?.sourceEncounterId).toBe(encounterId);
 
   const detail = await app.request(`/patients/${patientId}/encounters/${encounterId}`);
   const detailBody = (await detail.json()) as EncounterDetailBody;
-  expect(detailBody.data.procedures.some((p) => p.planItemId === itemId)).toBe(true);
+  expect(detailBody.data.procedures.filter((p) => p.planItemId === itemId)).toHaveLength(1);
+  expect(detailBody.data.indicatedItems.map((row) => row.id)).toContain(itemId);
 });
-
 it("encounters: referencias de otro paciente del mismo org responden 404 sin efectos", async () => {
-  const app = buildApp("member");
+  const app = buildApp("admin");
   const patientA = await createFreshPatient(app, "Paciente A");
   const patientB = await createFreshPatient(app, "Paciente B");
 
@@ -331,12 +421,11 @@ it("encounters: referencias de otro paciente del mismo org responden 404 sin efe
   const bodyA = (await createdA.json()) as { data: EncounterRow };
   const encounterA = bodyA.data.id;
 
-  const itemB = await app.request(`/patients/${patientB}/plan/items`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ title: "Plan de B" }),
+  const ctxB = await setupPlan(app, patientB);
+  const itemB = await addPlanItem(app, patientB, ctxB, {
+    serviceId: "c1111111-1111-4111-8111-111111111111",
+    toothNumber: 36,
   });
-  const itemBBody = (await itemB.json()) as { data: PlanItemRow };
 
   const crossGet = await app.request(`/patients/${patientB}/encounters/${encounterA}`);
   expect(crossGet.status).toBe(404);
@@ -345,7 +434,7 @@ it("encounters: referencias de otro paciente del mismo org responden 404 sin efe
   const crossProc = await app.request(`/patients/${patientB}/encounters/${encounterA}/procedures`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ description: "Cruce de paciente" }),
+    body: JSON.stringify({ serviceId: "c1111111-1111-4111-8111-111111111111" }),
   });
   expect(crossProc.status).toBe(404);
   expect(((await crossProc.json()) as ErrorBody).error.code).toBe("NOT_FOUND");
@@ -353,7 +442,7 @@ it("encounters: referencias de otro paciente del mismo org responden 404 sin efe
   const crossPlan = await app.request(`/patients/${patientA}/encounters/${encounterA}/procedures`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ description: "Cruce de plan", planItemId: itemBBody.data.id }),
+    body: JSON.stringify({ planItemId: itemB.id }),
   });
   expect(crossPlan.status).toBe(404);
   expect(((await crossPlan.json()) as ErrorBody).error.code).toBe("NOT_FOUND");
@@ -362,16 +451,23 @@ it("encounters: referencias de otro paciente del mismo org responden 404 sin efe
   expect(detailA.data.procedures).toEqual([]);
 
   const planB = (await (await app.request(`/patients/${patientB}/plan`)).json()) as { data: PlanItemRow[] };
-  expect(planB.data.find((row) => row.id === itemBBody.data.id)?.status).toBe("pendiente");
+  expect(planB.data.find((row) => row.id === itemB.id)?.status).toBe("pendiente");
 });
 
 it("encounters: finalize frente a PATCH concurrentes se serializa sin mutación cerrada", async () => {
-  const app = buildApp("member");
+  const app = buildApp("admin");
   const patientId = await createFreshPatient(app, "Borrador Concurrente");
 
   const created = await postEncounter(app, patientId, { reason: "Concurrente" });
   const createdBody = (await created.json()) as { data: EncounterRow };
   const encounterId = createdBody.data.id;
+  // Mínimo de cierre previo a la carrera: la evolución ya está registrada.
+  const evolved = await app.request(`/patients/${patientId}/encounters/${encounterId}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ evolution: "Evolución base" }),
+  });
+  expect(evolved.status).toBe(200);
 
   const [patchRes, finalizeRes] = await Promise.all([
     app.request(`/patients/${patientId}/encounters/${encounterId}`, {
@@ -387,9 +483,212 @@ it("encounters: finalize frente a PATCH concurrentes se serializa sin mutación 
   if (patchRes.status === 409) {
     expect(((await patchRes.json()) as ErrorBody).error.code).toBe("FINALIZED");
   }
+});
+
+it("encounters: procedure exige servicio o plan; inactivo u otra org no pasan", async () => {
+  const app = buildApp("admin");
+  const patientId = await createFreshPatient(app, "Procedure Valida");
+  const created = await postEncounter(app, patientId, { reason: "Valida" });
+  const encounterId = ((await created.json()) as { data: EncounterRow }).data.id;
+  const post = (payload: Record<string, unknown>) =>
+    app.request(`/patients/${patientId}/encounters/${encounterId}/procedures`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+
+  // Texto libre sin servicio ni plan: ya no es sustituto válido.
+  const bare = await post({ description: "Texto libre" });
+  expect(bare.status).toBe(400);
+
+  const inactive = await post({ serviceId: "c4444444-4444-4444-8444-444444444444" });
+  expect(inactive.status).toBe(400);
+
+  const foreign = await post({ serviceId: "d5555555-5555-4555-8555-555555555555" });
+  expect(foreign.status).toBe(404);
+  const ok = await post({ serviceId: "c1111111-1111-4111-8111-111111111111", toothNumber: 36 });
+  expect(ok.status).toBe(201);
+  const okBody = (await ok.json()) as { data: { description: string } };
+  expect(okBody.data.description).toBe("Corona cerámica");
+});
+
+it("encounters: crear con planItemIds aceptados vincula sin marcar realizado", async () => {
+  const app = buildApp("admin");
+  const patientId = await createFreshPatient(app, "Vinculo Plan");
+  const ctx = await setupPlan(app, patientId);
+  const first = await addPlanItem(app, patientId, ctx, {
+    serviceId: "c1111111-1111-4111-8111-111111111111",
+    toothNumber: 36,
+  });
+  const second = await addPlanItem(app, patientId, ctx, {
+    serviceId: "c1111111-1111-4111-8111-111111111111",
+    toothNumber: 37,
+  });
+  const budgetId = await createBudget(app, patientId, ctx.planId, [first.id, second.id]);
+  await presentBudget(app, patientId, budgetId);
+  await decideBudget(app, patientId, budgetId, [first.id, second.id]);
+  // La atención de origen se cierra para abrir la siguiente (un solo borrador).
+  const evolved = await app.request(`/patients/${patientId}/encounters/${ctx.encounterId}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ evolution: "Evaluación completa" }),
+  });
+  expect(evolved.status).toBe(200);
+  const finalized = await app.request(`/patients/${patientId}/encounters/${ctx.encounterId}/finalize`, { method: "POST" });
+  expect(finalized.status).toBe(200);
+
+  const created = await postEncounter(app, patientId, { reason: "Con plan", planItemIds: [first.id, second.id] });
+  expect(created.status).toBe(201);
+  const encounterId = ((await created.json()) as { data: EncounterRow }).data.id;
 
   const detail = await app.request(`/patients/${patientId}/encounters/${encounterId}`);
   expect(detail.status).toBe(200);
   const detailBody = (await detail.json()) as EncounterDetailBody;
-  expect(detailBody.data.encounter.status).toBe("finalizada");
+  expect(detailBody.data.plannedItems.map((row) => row.id).sort()).toEqual([first.id, second.id].sort());
+
+  // Abrir la atención no ejecuta el tratamiento: sigue pendiente y aceptado.
+  const plan = await app.request(`/patients/${patientId}/plan`);
+  const planBody = (await plan.json()) as { data: PlanItemRow[] };
+  for (const id of [first.id, second.id]) {
+    const row = planBody.data.find((item) => item.id === id)!;
+    expect(row.status).toBe("pendiente");
+    expect(row.decision).toBe("aceptado");
+  }
+});
+
+it("encounters: crear con planItemIds pendientes sin decidir responde 409 ITEM_NOT_ACCEPTED sin dejar borrador", async () => {
+  const app = buildApp("admin");
+  const patientId = await createFreshPatient(app, "Vinculo Rechazado");
+  const ctx = await setupPlan(app, patientId);
+  const item = await addPlanItem(app, patientId, ctx, {
+    serviceId: "c1111111-1111-4111-8111-111111111111",
+    toothNumber: 36,
+  });
+  const budgetId = await createBudget(app, patientId, ctx.planId, [item.id]);
+  await presentBudget(app, patientId, budgetId);
+
+  const denied = await postEncounter(app, patientId, { reason: "Sin decidir", planItemIds: [item.id] });
+  expect(denied.status).toBe(409);
+  expect(((await denied.json()) as ErrorBody).error.code).toBe("ITEM_NOT_ACCEPTED");
+
+  // El rechazo no deja otro borrador: sigue solo el de origen.
+  const listed = await app.request(`/patients/${patientId}/encounters`, { method: "GET" });
+  const listedBody = (await listed.json()) as { data: Array<{ id: string }> };
+  expect(listedBody.data.map((row) => row.id)).toEqual([ctx.encounterId]);
+});
+
+it("encounters: crear con planItemIds de otro paciente responde 404", async () => {
+  const app = buildApp("admin");
+  const patientA = await createFreshPatient(app, "Vinculo A");
+  const patientB = await createFreshPatient(app, "Vinculo B");
+  const ctxB = await setupPlan(app, patientB);
+  const itemB = await addPlanItem(app, patientB, ctxB, {
+    serviceId: "c1111111-1111-4111-8111-111111111111",
+    toothNumber: 36,
+  });
+  const budgetB = await createBudget(app, patientB, ctxB.planId, [itemB.id]);
+  await presentBudget(app, patientB, budgetB);
+  await decideBudget(app, patientB, budgetB, [itemB.id]);
+
+  const cross = await postEncounter(app, patientA, { reason: "Cruce", planItemIds: [itemB.id] });
+  expect(cross.status).toBe(404);
+  expect(((await cross.json()) as ErrorBody).error.code).toBe("NOT_FOUND");
+});
+
+it("encounters: procedure con tratamiento no aceptado responde 409 ITEM_NOT_ACCEPTED", async () => {
+  const app = buildApp("admin");
+  const patientId = await createFreshPatient(app, "Procedure Sin Aceptar");
+  const ctx = await setupPlan(app, patientId);
+  const item = await addPlanItem(app, patientId, ctx, {
+    serviceId: "c1111111-1111-4111-8111-111111111111",
+    toothNumber: 36,
+  });
+  const budgetId = await createBudget(app, patientId, ctx.planId, [item.id]);
+  await presentBudget(app, patientId, budgetId);
+
+  const proc = await app.request(`/patients/${patientId}/encounters/${ctx.encounterId}/procedures`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ planItemId: item.id }),
+  });
+  expect(proc.status).toBe(409);
+  expect(((await proc.json()) as ErrorBody).error.code).toBe("ITEM_NOT_ACCEPTED");
+
+  const plan = await app.request(`/patients/${patientId}/plan`);
+  const planBody = (await plan.json()) as { data: PlanItemRow[] };
+  expect(planBody.data.find((row) => row.id === item.id)?.status).toBe("pendiente");
+});
+
+it("encounters: member lee 200 pero registrar procedimiento responde 403 FORBIDDEN sin efectos", async () => {
+  const admin = buildApp("admin");
+  const member = buildApp("member");
+  const patientId = await createFreshPatient(admin, "Permisos Atencion");
+  const ctx = await setupPlan(admin, patientId);
+  const item = await addPlanItem(admin, patientId, ctx, {
+    serviceId: "c1111111-1111-4111-8111-111111111111",
+    toothNumber: 36,
+  });
+  const budgetId = await createBudget(admin, patientId, ctx.planId, [item.id]);
+  await presentBudget(admin, patientId, budgetId);
+  await decideBudget(admin, patientId, budgetId, [item.id]);
+
+  const read = await member.request(`/patients/${patientId}/encounters/${ctx.encounterId}`);
+  expect(read.status).toBe(200);
+
+  const proc = await member.request(`/patients/${patientId}/encounters/${ctx.encounterId}/procedures`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ planItemId: item.id }),
+  });
+  expect(proc.status).toBe(403);
+  expect(((await proc.json()) as ErrorBody).error.code).toBe("FORBIDDEN");
+
+  // Sin efectos: el tratamiento sigue pendiente y sin procedimientos.
+  const plan = await admin.request(`/patients/${patientId}/plan`);
+  const planBody = (await plan.json()) as { data: PlanItemRow[] };
+  expect(planBody.data.find((row) => row.id === item.id)?.status).toBe("pendiente");
+  const detail = await admin.request(`/patients/${patientId}/encounters/${ctx.encounterId}`);
+  expect(((await detail.json()) as EncounterDetailBody).data.procedures).toEqual([]);
+});
+
+it("encounters: PATCH guarda el examen clínico con forma validada y lo limpia con null", async () => {
+  const app = buildApp("admin");
+  const patientId = await createFreshPatient(app, "Examen Clinico");
+  const created = await postEncounter(app, patientId, { reason: "Control" });
+  const encounterId = ((await created.json()) as { data: EncounterRow }).data.id;
+
+  const bad = await app.request(`/patients/${patientId}/encounters/${encounterId}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ examination: { extraoral: { inventado: "x" } } }),
+  });
+  expect(bad.status).toBe(400);
+
+  const ok = await app.request(`/patients/${patientId}/encounters/${encounterId}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      examination: { extraoral: { atm: "Sin alteraciones", ganglios: "" }, intraoral: { encias: "Sanas" }, higieneOral: "buena" },
+    }),
+  });
+  expect(ok.status).toBe(200);
+  const detail = (await (await app.request(`/patients/${patientId}/encounters/${encounterId}`)).json()) as {
+    data: { encounter: { examination: Record<string, unknown> } };
+  };
+  expect(detail.data.encounter.examination).toEqual({
+    extraoral: { atm: "Sin alteraciones" },
+    intraoral: { encias: "Sanas" },
+    higieneOral: "buena",
+  });
+
+  const cleared = await app.request(`/patients/${patientId}/encounters/${encounterId}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ examination: null }),
+  });
+  expect(cleared.status).toBe(200);
+  const clearedDetail = (await (await app.request(`/patients/${patientId}/encounters/${encounterId}`)).json()) as {
+    data: { encounter: { examination: unknown } };
+  };
+  expect(clearedDetail.data.encounter.examination).toBeNull();
 });

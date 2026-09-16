@@ -158,13 +158,23 @@ async function postNote(app: Hono, patientId: string, note: string, encounterId?
 }
 
 async function postAnamnesis(app: Hono, patientId: string, motivo: string): Promise<string> {
-  const res = await app.request(`/patients/${patientId}/anamnesis`, {
-    method: "POST",
+  // La escritura de anamnesis vive en PUT /health (agregado transaccional).
+  const saved = await app.request(`/patients/${patientId}/health`, {
+    method: "PUT",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ answers: { motivoConsulta: motivo } }),
+    body: JSON.stringify({
+      expectedRevision: 0,
+      reviewStatus: { allergies: "none", conditions: "none", medications: "none" },
+      allergies: [],
+      conditions: [],
+      medications: [],
+      anamnesis: { expectedVersion: 0, answers: { antecedentesFamiliares: motivo } },
+    }),
   });
-  expect(res.status).toBe(201);
-  const body = (await res.json()) as { data: { id: string } };
+  expect(saved.status).toBe(200);
+  const read = await app.request(`/patients/${patientId}/anamnesis`, { method: "GET" });
+  expect(read.status).toBe(200);
+  const body = (await read.json()) as { data: { id: string } };
   return body.data.id;
 }
 
@@ -186,13 +196,15 @@ async function postOdontogramEntry(
 async function postDocument(
   app: Hono,
   patientId: string,
-  input: { category: string; label: string; toothNumber?: number; encounterId?: string },
+  input: { category: string; label: string; toothNumbers?: number[]; tags?: string[]; encounterId?: string },
 ): Promise<string> {
   const form = new FormData();
   form.append("file", new File([new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10])], "doc.png", { type: "image/png" }));
   form.append("category", input.category);
   form.append("label", input.label);
-  if (input.toothNumber != null) form.append("toothNumber", String(input.toothNumber));
+  // Contexto versionado: piezas como arreglo JSON (vacío = imagen general).
+  form.append("toothNumbers", JSON.stringify(input.toothNumbers ?? []));
+  form.append("tags", JSON.stringify(input.tags ?? []));
   if (input.encounterId) form.append("encounterId", input.encounterId);
   const res = await app.request(`/patients/${patientId}/documents`, { method: "POST", body: form });
   expect(res.status).toBe(201);
@@ -212,6 +224,13 @@ async function createEncounter(app: Hono, patientId: string, reason: string, tee
 }
 
 async function finalizeEncounter(app: Hono, patientId: string, encounterId: string): Promise<void> {
+  // El cierre exige evolución clínica: se registra antes de finalizar.
+  const patched = await app.request(`/patients/${patientId}/encounters/${encounterId}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ evolution: "Evolución de control" }),
+  });
+  expect(patched.status).toBe(200);
   const res = await app.request(`/patients/${patientId}/encounters/${encounterId}/finalize`, { method: "POST" });
   expect(res.status).toBe(200);
 }
@@ -233,7 +252,7 @@ async function seedFullTimeline(app: Hono, tag: string): Promise<FullFixture> {
   const patientId = await createFixturePatient(app, `Timeline ${tag}`);
   const noteId = await postNote(app, patientId, `nota suelta ${tag}`);
   const anamnesisId = await postAnamnesis(app, patientId, `dolor ${tag}`);
-  const docId = await postDocument(app, patientId, { category: "radiografia", label: `rx 36 ${tag}`, toothNumber: 36 });
+  const docId = await postDocument(app, patientId, { category: "radiografia", label: `rx 36 ${tag}`, toothNumbers: [36] });
   const odontoId = await postOdontogramEntry(app, patientId, { toothNumber: 36, condition: "caries", surfaces: ["occlusal"], details: { variant: "enamel" } });
   const encounterId = await createEncounter(app, patientId, `control ${tag}`, [36]);
   const linkedNoteId = await postNote(app, patientId, `nota vinculada ${tag}`, encounterId);
@@ -241,7 +260,7 @@ async function seedFullTimeline(app: Hono, tag: string): Promise<FullFixture> {
   const linkedDocId = await postDocument(app, patientId, {
     category: "radiografia",
     label: `rx vinculada ${tag}`,
-    toothNumber: 36,
+    toothNumbers: [36],
     encounterId,
   });
   await finalizeEncounter(app, patientId, encounterId);
@@ -258,7 +277,7 @@ async function seedFullTimeline(app: Hono, tag: string): Promise<FullFixture> {
 }
 
 it("timeline: 5 eventos standalone en orden descendente, sin duplicar hijos vinculados", async () => {
-  const app = buildApp("member");
+  const app = buildApp("admin");
   const f = await seedFullTimeline(app, "orden");
 
   const res = await app.request(`/patients/${f.patientId}/timeline`, { method: "GET" });
@@ -288,10 +307,14 @@ it("timeline: 5 eventos standalone en orden descendente, sin duplicar hijos vinc
   expect(itemOf("odontogram").toothNumbers).toEqual([36]);
   expect(itemOf("note").toothNumbers).toEqual([]);
   expect(itemOf("anamnesis").toothNumbers).toEqual([]);
+  const onlyDocuments = await app.request(`/patients/${f.patientId}/timeline?types=document`);
+  expect(onlyDocuments.status).toBe(200);
+  const documents = (await onlyDocuments.json()) as TimelinePage;
+  expect(documents.data.map((item) => item.id).sort()).toEqual([f.docId, f.linkedDocId].sort());
 });
 
 it("timeline types=note devuelve solo la nota suelta", async () => {
-  const app = buildApp("member");
+  const app = buildApp("admin");
   const f = await seedFullTimeline(app, "nota");
 
   const res = await app.request(`/patients/${f.patientId}/timeline?types=note`, { method: "GET" });
@@ -304,7 +327,7 @@ it("timeline types=note devuelve solo la nota suelta", async () => {
 });
 
 it("timeline toothNumber=36 devuelve encounter, document y odontogram", async () => {
-  const app = buildApp("member");
+  const app = buildApp("admin");
   const f = await seedFullTimeline(app, "pieza");
 
   const res = await app.request(`/patients/${f.patientId}/timeline?toothNumber=36`, { method: "GET" });
@@ -323,7 +346,7 @@ it("timeline toothNumber=36 devuelve encounter, document y odontogram", async ()
 });
 
 it("timeline documentCategory=radiografia excluye foto_clinica", async () => {
-  const app = buildApp("member");
+  const app = buildApp("admin");
   const patientId = await createFixturePatient(app, "Timeline fotos");
   const rxId = await postDocument(app, patientId, { category: "radiografia", label: "rx control" });
   const photoId = await postDocument(app, patientId, { category: "foto_clinica", label: "foto frente" });
@@ -351,7 +374,7 @@ it("timeline documentCategory=radiografia excluye foto_clinica", async () => {
 });
 
 it("timeline solo incluye encuentros finalizados", async () => {
-  const app = buildApp("member");
+  const app = buildApp("admin");
   const patientId = await createFixturePatient(app, "Timeline borrador");
   const encounterId = await createEncounter(app, patientId, "control borrador", [36]);
 
@@ -370,7 +393,7 @@ it("timeline solo incluye encuentros finalizados", async () => {
 });
 
 it("timeline pagina con limit=2 sin duplicados y cursor inválido responde 400", async () => {
-  const app = buildApp("member");
+  const app = buildApp("admin");
   const f = await seedFullTimeline(app, "paginado");
 
   const seen: string[] = [];
@@ -410,4 +433,82 @@ it("timeline de paciente de otra organización responde 404", async () => {
   expect(res.status).toBe(404);
   const body = (await res.json()) as ErrorBody;
   expect(typeof body.error.code).toBe("string");
+});
+
+it("timeline: documento multi-pieza aparece en el filtro de cada pieza", async () => {
+  const app = buildApp("admin");
+  const patientId = await createFixturePatient(app, "Timeline multipieza");
+  const docId = await postDocument(app, patientId, {
+    category: "radiografia",
+    label: "rx panoramicada",
+    toothNumbers: [36, 37],
+    tags: ["control"],
+  });
+
+  for (const tooth of [36, 37]) {
+    const res = await app.request(`/patients/${patientId}/timeline?toothNumber=${tooth}`, { method: "GET" });
+    expect(res.status).toBe(200);
+    const page = (await res.json()) as TimelinePage;
+    expect(page.data.map((e) => e.id)).toContain(docId);
+    expect(page.data.find((e) => e.id === docId)!.toothNumbers.sort()).toEqual([36, 37]);
+  }
+
+  const other = await app.request(`/patients/${patientId}/timeline?toothNumber=11`, { method: "GET" });
+  expect(other.status).toBe(200);
+  expect(((await other.json()) as TimelinePage).data.map((e) => e.id)).not.toContain(docId);
+});
+
+it("documentos: la lectura devuelve el contexto vigente fusionado", async () => {
+  const app = buildApp("admin");
+  const patientId = await createFixturePatient(app, "Timeline contexto");
+  const docId = await postDocument(app, patientId, {
+    category: "foto_clinica",
+    label: "foto frente",
+    toothNumbers: [11, 21],
+    tags: ["control"],
+  });
+
+  const res = await app.request(`/patients/${patientId}/documents`, { method: "GET" });
+  expect(res.status).toBe(200);
+  const body = (await res.json()) as {
+    data: Array<{ id: string; toothNumbers: number[]; tags: string[]; contextVersion: number; encounterId: string | null }>;
+  };
+  const doc = body.data.find((d) => d.id === docId)!;
+  expect(doc.toothNumbers).toEqual([11, 21]);
+  expect(doc.tags).toEqual(["control"]);
+  expect(doc.contextVersion).toBe(1);
+  expect(doc.encounterId).toBeNull();
+});
+
+it("timeline: member lee 200 pero mutar clínica o corregir contexto responde 403 sin efectos", async () => {
+  const admin = buildApp("admin");
+  const member = buildApp("member");
+  const patientId = await createFixturePatient(admin, "Timeline permisos");
+  const docId = await postDocument(admin, patientId, { category: "radiografia", label: "rx", toothNumbers: [36] });
+
+  const read = await member.request(`/patients/${patientId}/timeline`, { method: "GET" });
+  expect(read.status).toBe(200);
+
+  const note = await member.request(`/patients/${patientId}/notes`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ note: "Nota de miembro" }),
+  });
+  expect(note.status).toBe(403);
+  expect(((await note.json()) as ErrorBody).error.code).toBe("FORBIDDEN");
+
+  const correction = await member.request(`/patients/${patientId}/documents/${docId}/context`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ expectedVersion: 1, toothNumbers: [37] }),
+  });
+  expect(correction.status).toBe(403);
+  expect(((await correction.json()) as ErrorBody).error.code).toBe("FORBIDDEN");
+
+  // Sin efectos: el contexto vigente sigue intacto.
+  const context = await admin.request(`/patients/${patientId}/documents/${docId}/context`, { method: "GET" });
+  expect(context.status).toBe(200);
+  const contextBody = (await context.json()) as { data: { document: { toothNumbers: number[]; contextVersion: number } } };
+  expect(contextBody.data.document.toothNumbers).toEqual([36]);
+  expect(contextBody.data.document.contextVersion).toBe(1);
 });

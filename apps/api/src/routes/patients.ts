@@ -7,15 +7,20 @@ import {
   addEncounterAddendum,
   addEncounterProcedure,
   addPlanItem,
+  addPlanItemsBatch,
   createEncounter,
+  createTreatmentPlan,
   createOdontogramAssessment,
   finalizeEncounter,
   getEncounterDetail,
   getPatientSummary,
   getTimeline,
+  getTreatmentPlanDetail,
   listEncounters,
   listPlanItems,
+  listTreatmentPlans,
   requirePatient,
+  removePlanItem,
   setPatientAvatar,
   setPlanItemStatus,
   updateEncounterDraft,
@@ -23,44 +28,45 @@ import {
   PATIENT_DOC_MAX_BYTES,
   PATIENT_DOC_MIME_EXT,
   ServiceError,
-  addAllergy,
   addClinicalNote,
-  addCondition,
-  addMedication,
-  addAnamnesis,
   addOdontogramEntries,
   createPatient,
-  discontinueMedication,
   getAnamnesisVersion,
   getLatestAnamnesis,
   getOdontogram,
   getPatient,
   getPatientDocument,
-  listAllergies,
+  getPatientHealth,
   listAnamnesisVersions,
   listClinicalNotes,
-  listConditions,
-  listMedications,
   listOdontogramAssessments,
   listPatientDocuments,
   listPatients,
   registerPatientDocument,
   reviewLegacyEntry,
-  setAllergyActive,
-  setConditionStatus,
+  savePatientHealth,
   updatePatient,
   voidOdontogramEntry,
 } from "@odentia/services";
 import { Hono } from "hono";
 import { z } from "zod";
-import { orgContextOf } from "../lib/context.js";
+import { canWrite, orgContextOf } from "../lib/context.js";
 import { errorBody } from "../lib/error.js";
 import { runService, serviceErrorResponse, validationError, type CrmDeps } from "./helpers.js";
+import { createPatientBudgetsRoute } from "./patient-budgets.js";
+import { createPatientDocumentContextRoute } from "./patient-document-context.js";
 
 const listQuery = z.object({
   q: z.string().optional(),
   cursor: z.string().optional(),
   limit: z.coerce.number().int().min(1).max(100).optional(),
+});
+
+const patientListQuery = listQuery.extend({
+  isActive: z.enum(["true", "false"]).transform((value) => value === "true").optional(),
+  sex: z.enum(["M", "F"]).optional(),
+  docType: z.enum(["DNI", "CE", "PASAPORTE", "OTRO"]).optional(),
+  sort: z.enum(["name", "-name", "created", "-created", "number", "-number"]).optional(),
 });
 
 const filiation = {
@@ -94,94 +100,56 @@ const createInput = z
     message: "Indica contactId o displayName (solo uno)",
   });
 
-const patchInput = z.object({ ...filiation, isActive: z.boolean().optional(), dataConsent: z.boolean().optional() });
+const patchInput = z.object({ displayName: z.string().trim().min(1).max(200).optional(), ...filiation, isActive: z.boolean().optional(), dataConsent: z.boolean().optional() });
 
-const allergyInput = z.object({
-  substance: z.string().min(1).max(200),
-  reaction: z.string().max(2000).nullish(),
-  severity: z.enum(["leve", "moderada", "severa"]).optional(),
-});
-const allergyPatch = z.object({ isActive: z.boolean() });
-
-const conditionInput = z.object({
-  name: z.string().min(1).max(200),
-  status: z.enum(["activa", "resuelta", "inactiva"]).optional(),
-  startDate: z.string().max(10).nullish(),
-  endDate: z.string().max(10).nullish(),
-  notes: z.string().max(2000).nullish(),
-});
-const conditionPatch = z.object({
-  status: z.enum(["activa", "resuelta", "inactiva"]),
-  endDate: z.string().max(10).nullish().optional(),
-});
-
-const medicationInput = z.object({
-  name: z.string().min(1).max(200),
-  dose: z.string().max(200).nullish(),
-  frequency: z.string().max(200).nullish(),
-  startDate: z.string().max(10).nullish(),
-  endDate: z.string().max(10).nullish(),
-  notes: z.string().max(2000).nullish(),
-});
-const medicationPatch = z.object({ endDate: z.string().max(10).nullish().optional() });
-
-const anamnesisAnswers = z
+const healthReviewState = z.enum(["unknown", "none", "recorded"]);
+const healthAllergy = z
   .object({
-    motivoConsulta: z.string().max(2000).optional(),
-    tiempoEnfermedad: z.string().max(500).optional(),
-    antecedentesPersonales: z
-      .object({
-        enfermedades: z.string().max(2000).optional(),
-        hospitalizaciones: z.string().max(2000).optional(),
-        cirugias: z.string().max(2000).optional(),
-        transfusiones: z.string().max(2000).optional(),
-        embarazo: z.boolean().optional(),
-        semanasEmbarazo: z.number().int().min(0).max(42).optional(),
-        medicacionHabitual: z.string().max(2000).optional(),
-      })
+    id: z.uuid().optional(),
+    substance: z.string().min(1).max(200),
+    reaction: z.string().max(2000).nullish(),
+    severity: z.string().min(1).max(20),
+    isActive: z.boolean().optional(),
+  })
+  .strict();
+const healthCondition = z
+  .object({
+    id: z.uuid().optional(),
+    name: z.string().min(1).max(200),
+    status: z.string().min(1).max(20),
+    startDate: z.string().max(10).nullish(),
+    endDate: z.string().max(10).nullish(),
+    notes: z.string().max(2000).nullish(),
+  })
+  .strict();
+const healthMedication = z
+  .object({
+    id: z.uuid().optional(),
+    name: z.string().min(1).max(200),
+    dose: z.string().max(200).nullish(),
+    frequency: z.string().max(200).nullish(),
+    startDate: z.string().max(10).nullish(),
+    endDate: z.string().max(10).nullish(),
+    notes: z.string().max(2000).nullish(),
+  })
+  .strict();
+// Guardado conjunto del agregado: colecciones completas con sus IDs, revisión
+// optimista y entrevista opcional con versión esperada. El servicio valida el
+// dominio (literales, fechas, consistencia none/recorded, claves excluidas).
+const healthSaveInput = z
+  .object({
+    expectedRevision: z.number().int().min(0),
+    reviewStatus: z
+      .object({ allergies: healthReviewState, conditions: healthReviewState, medications: healthReviewState })
+      .strict(),
+    allergies: z.array(healthAllergy).max(200),
+    conditions: z.array(healthCondition).max(200),
+    medications: z.array(healthMedication).max(200),
+    anamnesis: z
+      .object({ expectedVersion: z.number().int().min(0), answers: z.record(z.string(), z.unknown()) })
       .strict()
       .optional(),
-    antecedentesFamiliares: z.string().max(2000).optional(),
-    antecedentesOdontologicos: z
-      .object({
-        ultimaVisita: z.string().max(500).optional(),
-        experienciaPrevia: z.enum(["positiva", "regular", "traumatica"]).optional(),
-        ansiedadDental: z.enum(["ninguna", "leve", "moderada", "alta"]).optional(),
-        cepilladosAlDia: z.number().int().min(0).max(10).optional(),
-        hiloDental: z.boolean().optional(),
-        bruxismo: z.boolean().optional(),
-        habitos: z.array(z.string().max(200)).max(10).optional(),
-      })
-      .strict()
-      .optional(),
-    examenClinico: z
-      .object({
-        extraoral: z
-          .object({
-            atm: z.string().max(500).optional(),
-            ganglios: z.string().max(500).optional(),
-            labios: z.string().max(500).optional(),
-          })
-          .strict()
-          .optional(),
-        intraoral: z
-          .object({
-            encias: z.string().max(500).optional(),
-            lengua: z.string().max(500).optional(),
-            paladar: z.string().max(500).optional(),
-            pisoBoca: z.string().max(500).optional(),
-            carrillos: z.string().max(500).optional(),
-            orofaringe: z.string().max(500).optional(),
-          })
-          .strict()
-          .optional(),
-        higieneOral: z.enum(["buena", "regular", "mala"]).optional(),
-      })
-      .strict()
-      .optional(),
-    diagnosticoPresuntivo: z.string().max(2000).optional(),
-    diagnosticoCie10: z.array(z.string().max(10)).max(10).optional(),
-    observaciones: z.string().max(2000).optional(),
+    dataConsent: z.literal(true).optional(),
   })
   .strict();
 
@@ -231,37 +199,104 @@ const timelineQuery = listQuery.extend({
   types: z.string().transform((value) => value.split(",")).pipe(z.array(z.enum(TIMELINE_TYPES))).optional(),
   toothNumber: z.coerce.number().int().optional(),
   documentCategory: z.enum(["radiografia", "foto_clinica"]).optional(),
+  order: z.enum(["desc", "asc"]).optional(),
 });
 const encounterCreateInput = z.object({
   reason: z.string().max(2000).nullish(), branchId: z.uuid().nullish(), teeth: z.array(z.number().int()).max(52).optional(),
+  planItemIds: z.array(z.uuid()).max(52).optional(),
 });
 const encounterPatchInput = z.object({
   reason: z.string().max(2000).nullish(), evolution: z.string().max(10000).nullish(),
   indications: z.string().max(4000).nullish(), nextStep: z.string().max(2000).nullish(),
   nextAppointmentAt: z.iso.datetime({ offset: true }).nullish(),
   teeth: z.array(z.number().int()).max(52).optional(),
+  examination: z.object({
+    extraoral: z.record(z.string(), z.string().max(500)).nullish(),
+    intraoral: z.record(z.string(), z.string().max(500)).nullish(),
+    higieneOral: z.enum(["buena", "regular", "mala"]).nullish(),
+  }).strict().nullish(),
 });
-const procedureInput = z.object({
-  description: z.string().trim().min(1).max(4000), toothNumber: z.number().int().nullish(),
-  diagnosisCode: z.string().max(10).nullish(), planItemId: z.uuid().nullish(),
-});
-const planFields = {
-  title: z.string().trim().min(1).max(300), detail: z.string().max(4000).nullish(),
-  toothNumber: z.number().int().nullish(), diagnosisCode: z.string().max(10).nullish(),
-  priceCents: z.number().int().min(0).max(2147483647).nullish(),
+const procedureInput = z
+  .object({
+    serviceId: z.uuid().nullish(),
+    toothNumber: z.number().int().nullish(),
+    surfaces: z.array(z.string().min(1).max(20)).max(5).nullish(),
+    quadrant: z.number().int().min(1).max(8).nullish(),
+    arch: z.enum(["upper", "lower"]).nullish(),
+    diagnosisCode: z.string().max(10).nullish(),
+    planItemId: z.uuid().nullish(),
+  })
+  .strict()
+  .refine((d) => Boolean(d.serviceId) !== Boolean(d.planItemId), {
+    message: "Selecciona un servicio del catálogo o un tratamiento del presupuesto, no ambos",
+  });
+// El precio NUNCA se ingresa en evaluación/presupuesto: se congela desde la
+// oferta (serviceId). title/priceCents/currency manuales se rechazan (400).
+// La indicación pertenece a un plan y nace en una atención borrador (origen).
+const planSiteFields = {
+  toothNumber: z.number().int().nullish(),
+  surfaces: z.array(z.string().min(1).max(20)).max(5).nullish(),
+  quadrant: z.number().int().min(1).max(8).nullish(),
+  arch: z.enum(["upper", "lower"]).nullish(),
 };
-const planCreateInput = z.object({ ...planFields, currency: z.string().regex(/^[A-Z]{3}$/).optional() });
-const planPatchInput = z.object(planFields).partial().extend({
-  status: z.enum(["pendiente", "programado", "realizado", "cancelado"]).optional(), encounterId: z.uuid().nullish(),
+const planCreateInput = z
+  .object({
+    serviceId: z.uuid(),
+    planId: z.uuid(),
+    sourceEncounterId: z.uuid(),
+    detail: z.string().max(4000).nullish(),
+    diagnosisCode: z.string().max(10).nullish(),
+    ...planSiteFields,
+  })
+  .strict();
+const planPatchInput = z
+  .object({
+    serviceId: z.uuid().optional(),
+    detail: z.string().max(4000).nullish(),
+    diagnosisCode: z.string().max(10).nullish(),
+    encounterId: z.uuid(),
+    status: z.enum(["pendiente", "programado", "realizado", "cancelado"]).optional(),
+    ...planSiteFields,
+  })
+  .strict();
+// Lote multi-pieza: un ítem por pieza en una sola transacción (ámbito tooth);
+// sin campo precio (snapshot de la oferta). toothNumbers 1–52 FDI únicas.
+const planBatchInput = z
+  .object({
+    serviceId: z.uuid(),
+    planId: z.uuid(),
+    sourceEncounterId: z.uuid(),
+    toothNumbers: z.array(z.number().int()).min(1).max(52),
+    detail: z.string().max(4000).nullish(),
+    diagnosisCode: z.string().max(10).nullish(),
+  })
+  .strict();
+const treatmentPlanCreateInput = z
+  .object({ title: z.string().trim().min(1).max(200), originEncounterId: z.uuid() })
+  .strict();
+const jsonArrayField = z.preprocess((value) => {
+  if (typeof value !== "string") return value;
+  try { return JSON.parse(value); } catch { return value; }
+}, z.array(z.unknown()));
+const documentLinkInput = z.object({
+  encounterId: z.uuid().optional(),
+  planItemId: z.uuid().optional(),
+  toothNumbers: jsonArrayField.pipe(z.array(z.number().int()).max(52)).default([]),
+  tags: jsonArrayField.pipe(z.array(z.string().min(1).max(200)).max(100)).default([]),
 });
-const documentLinkInput = z.object({ encounterId: z.uuid().optional(), toothNumber: z.coerce.number().int().optional() });
 
 export function createPatientsRoute(deps: CrmDeps) {
   const app = new Hono();
+  app.use("*", async (c, next) => {
+    if (!["GET", "HEAD", "OPTIONS"].includes(c.req.method) && !canWrite(orgContextOf(c).memberRole)) {
+      return c.json(errorBody(c, "FORBIDDEN", "Solo owner/admin pueden modificar la ficha clínica"), 403);
+    }
+    await next();
+  });
 
   app.get("/", async (c) => {
     const { orgId } = orgContextOf(c);
-    const parsed = listQuery.safeParse(c.req.query());
+    const parsed = patientListQuery.safeParse(c.req.query());
     if (!parsed.success) return validationError(c, parsed.error.issues);
     try {
       const { items, nextCursor } = await withOrgContext(deps.db, orgId, (tx) =>
@@ -294,79 +329,21 @@ export function createPatientsRoute(deps: CrmDeps) {
     );
   });
 
-  // --- Alergias ---
-  app.get("/:id/allergies", async (c) => {
+  // --- Salud (agregado transaccional de antecedentes + entrevista) ---
+  app.get("/:id/health", async (c) => {
     const { orgId } = orgContextOf(c);
-    return runService(c, 200, () => withOrgContext(deps.db, orgId, (tx) => listAllergies(tx, orgId, c.req.param("id"))));
+    return runService(c, 200, () => withOrgContext(deps.db, orgId, (tx) => getPatientHealth(tx, orgId, c.req.param("id"))));
   });
-  app.post("/:id/allergies", async (c) => {
+  app.put("/:id/health", async (c) => {
     const { orgId, userId } = orgContextOf(c);
-    const parsed = allergyInput.safeParse(await c.req.json().catch(() => null));
-    if (!parsed.success) return validationError(c, parsed.error.issues);
-    return runService(c, 201, () =>
-      withOrgContext(deps.db, orgId, (tx) => addAllergy(tx, orgId, userId, c.req.param("id"), parsed.data)),
-    );
-  });
-  app.patch("/:id/allergies/:allergyId", async (c) => {
-    const { orgId, userId } = orgContextOf(c);
-    const parsed = allergyPatch.safeParse(await c.req.json().catch(() => null));
+    const parsed = healthSaveInput.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) return validationError(c, parsed.error.issues);
     return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) =>
-        setAllergyActive(tx, orgId, userId, c.req.param("allergyId"), parsed.data.isActive),
-      ),
+      withOrgContext(deps.db, orgId, (tx) => savePatientHealth(tx, orgId, userId, c.req.param("id"), parsed.data)),
     );
   });
 
-  // --- Condiciones ---
-  app.get("/:id/conditions", async (c) => {
-    const { orgId } = orgContextOf(c);
-    return runService(c, 200, () => withOrgContext(deps.db, orgId, (tx) => listConditions(tx, orgId, c.req.param("id"))));
-  });
-  app.post("/:id/conditions", async (c) => {
-    const { orgId, userId } = orgContextOf(c);
-    const parsed = conditionInput.safeParse(await c.req.json().catch(() => null));
-    if (!parsed.success) return validationError(c, parsed.error.issues);
-    return runService(c, 201, () =>
-      withOrgContext(deps.db, orgId, (tx) => addCondition(tx, orgId, userId, c.req.param("id"), parsed.data)),
-    );
-  });
-  app.patch("/:id/conditions/:conditionId", async (c) => {
-    const { orgId, userId } = orgContextOf(c);
-    const parsed = conditionPatch.safeParse(await c.req.json().catch(() => null));
-    if (!parsed.success) return validationError(c, parsed.error.issues);
-    return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) =>
-        setConditionStatus(tx, orgId, userId, c.req.param("conditionId"), parsed.data.status, parsed.data.endDate),
-      ),
-    );
-  });
-
-  // --- Medicamentos ---
-  app.get("/:id/medications", async (c) => {
-    const { orgId } = orgContextOf(c);
-    return runService(c, 200, () => withOrgContext(deps.db, orgId, (tx) => listMedications(tx, orgId, c.req.param("id"))));
-  });
-  app.post("/:id/medications", async (c) => {
-    const { orgId, userId } = orgContextOf(c);
-    const parsed = medicationInput.safeParse(await c.req.json().catch(() => null));
-    if (!parsed.success) return validationError(c, parsed.error.issues);
-    return runService(c, 201, () =>
-      withOrgContext(deps.db, orgId, (tx) => addMedication(tx, orgId, userId, c.req.param("id"), parsed.data)),
-    );
-  });
-  app.patch("/:id/medications/:medicationId", async (c) => {
-    const { orgId, userId } = orgContextOf(c);
-    const parsed = medicationPatch.safeParse(await c.req.json().catch(() => null));
-    if (!parsed.success) return validationError(c, parsed.error.issues);
-    return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) =>
-        discontinueMedication(tx, orgId, userId, c.req.param("medicationId"), parsed.data.endDate),
-      ),
-    );
-  });
-
-  // --- Anamnesis ---
+  // --- Anamnesis (lecturas históricas; la escritura va en PUT /health) ---
   app.get("/:id/anamnesis/history", async (c) => {
     const { orgId } = orgContextOf(c);
     return runService(c, 200, () =>
@@ -386,17 +363,6 @@ export function createPatientsRoute(deps: CrmDeps) {
       if (!row) throw new ServiceError("NOT_FOUND", 404, "Anamnesis no encontrada");
       return row;
     });
-  });
-  app.post("/:id/anamnesis", async (c) => {
-    const { orgId, userId } = orgContextOf(c);
-    const body = (await c.req.json().catch(() => null)) as { answers?: unknown } | null;
-    const parsed = anamnesisAnswers.safeParse(body?.answers);
-    if (!parsed.success) return validationError(c, parsed.error.issues);
-    return runService(c, 201, () =>
-      withOrgContext(deps.db, orgId, (tx) =>
-        addAnamnesis(tx, orgId, userId, c.req.param("id"), parsed.data as Record<string, unknown>),
-      ),
-    );
   });
 
   // --- Evoluciones ---
@@ -487,7 +453,10 @@ export function createPatientsRoute(deps: CrmDeps) {
     const category = form?.get("category");
     const label = form?.get("label");
     const link = documentLinkInput.safeParse({
-      encounterId: form?.get("encounterId") || undefined, toothNumber: form?.get("toothNumber") || undefined,
+      encounterId: form?.get("encounterId") || undefined,
+      planItemId: form?.get("planItemId") || undefined,
+      toothNumbers: form?.get("toothNumbers") || undefined,
+      tags: form?.get("tags") || undefined,
     });
     if (!link.success) return validationError(c, link.error.issues);
     if (!(file instanceof File)) return c.json(errorBody(c, "VALIDATION", "Adjunta un archivo"), 400);
@@ -608,9 +577,26 @@ export function createPatientsRoute(deps: CrmDeps) {
     if (!parsed.success) return validationError(c, parsed.error.issues);
     return runService(c, 201, () => withOrgContext(deps.db, orgId, (tx) => addEncounterAddendum(tx, orgId, userId, c.req.param("id"), c.req.param("encounterId"), parsed.data)));
   });
+  app.get("/:id/plans", async (c) => {
+    const { orgId } = orgContextOf(c);
+    return runService(c, 200, () => withOrgContext(deps.db, orgId, (tx) => listTreatmentPlans(tx, orgId, c.req.param("id"))));
+  });
+  app.post("/:id/plans", async (c) => {
+    const { orgId, userId } = orgContextOf(c);
+    const parsed = treatmentPlanCreateInput.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return validationError(c, parsed.error.issues);
+    return runService(c, 201, () => withOrgContext(deps.db, orgId, (tx) =>
+      createTreatmentPlan(tx, orgId, userId, c.req.param("id"), parsed.data)));
+  });
+  app.get("/:id/plans/:planId", async (c) => {
+    const { orgId } = orgContextOf(c);
+    return runService(c, 200, () => withOrgContext(deps.db, orgId, (tx) =>
+      getTreatmentPlanDetail(tx, orgId, c.req.param("id"), c.req.param("planId"))));
+  });
   app.get("/:id/plan", async (c) => {
     const { orgId } = orgContextOf(c);
-    return runService(c, 200, () => withOrgContext(deps.db, orgId, (tx) => listPlanItems(tx, orgId, c.req.param("id"))));
+    const planId = c.req.query("planId") || undefined;
+    return runService(c, 200, () => withOrgContext(deps.db, orgId, (tx) => listPlanItems(tx, orgId, c.req.param("id"), planId)));
   });
   app.post("/:id/plan/items", async (c) => {
     const { orgId, userId } = orgContextOf(c);
@@ -618,18 +604,36 @@ export function createPatientsRoute(deps: CrmDeps) {
     if (!parsed.success) return validationError(c, parsed.error.issues);
     return runService(c, 201, () => withOrgContext(deps.db, orgId, (tx) => addPlanItem(tx, orgId, userId, c.req.param("id"), parsed.data)));
   });
+  app.post("/:id/plan/items/batch", async (c) => {
+    const { orgId, userId } = orgContextOf(c);
+    const parsed = planBatchInput.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return validationError(c, parsed.error.issues);
+    return runService(c, 201, () => withOrgContext(deps.db, orgId, (tx) => addPlanItemsBatch(tx, orgId, userId, c.req.param("id"), parsed.data)));
+  });
   app.patch("/:id/plan/items/:itemId", async (c) => {
     const { orgId, userId } = orgContextOf(c);
     const parsed = planPatchInput.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) return validationError(c, parsed.error.issues);
     return runService(c, 200, () => withOrgContext(deps.db, orgId, async (tx) => {
-      const { status, encounterId, ...patch } = parsed.data;
+      const { status, ...patch } = parsed.data;
       const args = [tx, orgId, userId, c.req.param("id"), c.req.param("itemId")] as const;
-      if (status && !Object.keys(patch).length) return setPlanItemStatus(...args, { status, encounterId });
+      if (status && !Object.keys(patch).filter((k) => k !== "encounterId").length) {
+        return setPlanItemStatus(...args, { status, encounterId: patch.encounterId });
+      }
       const item = await updatePlanItem(...args, patch);
-      return status ? setPlanItemStatus(...args, { status, encounterId }) : item;
+      return status ? setPlanItemStatus(...args, { status, encounterId: patch.encounterId }) : item;
     }));
   });
+  app.delete("/:id/plan/items/:itemId", async (c) => {
+    const { orgId, userId } = orgContextOf(c);
+    const parsed = z.object({ encounterId: z.uuid() }).safeParse({ encounterId: c.req.query("encounterId") });
+    if (!parsed.success) return validationError(c, parsed.error.issues);
+    return runService(c, 200, () => withOrgContext(deps.db, orgId, (tx) =>
+      removePlanItem(tx, orgId, userId, c.req.param("id"), c.req.param("itemId"), parsed.data.encounterId),
+    ));
+  });
+  app.route("/", createPatientBudgetsRoute(deps));
+  app.route("/", createPatientDocumentContextRoute(deps));
 
   return app;
 }
