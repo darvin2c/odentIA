@@ -1,4 +1,3 @@
-import { useQuery } from "@tanstack/react-query";
 import {
   Badge,
   Button,
@@ -10,46 +9,53 @@ import {
   ComboboxList,
   Field,
   FieldLabel,
-} from "@odentia/ui";
-import { useEffect, useId, useState } from "react";
-import { apiFetch } from "../../lib/api";
+} from "@odentia/ui"
+import { useQuery } from "@tanstack/react-query"
+import { useEffect, useId, useState } from "react"
+import { apiFetch } from "../../lib/api"
 
 interface Cie10Result {
-  code: string;
-  description: string;
+  code: string
+  description: string
 }
 
-export function Cie10Search({ value, onChange, label = "Diagnóstico CIE-10", disabled = false }: {
-  value: string;
-  onChange: (code: string, description: string) => void;
-  label?: string;
-  disabled?: boolean;
+export function Cie10Search({
+  value,
+  onChange,
+  label = "Diagnóstico CIE-10",
+  disabled = false,
+}: {
+  value: string
+  onChange: (code: string, description: string) => void
+  label?: string
+  disabled?: boolean
 }) {
-  const id = useId();
-  const [query, setQuery] = useState("");
-  const [open, setOpen] = useState(false);
-  const [debounced, setDebounced] = useState("");
-  const [selected, setSelected] = useState<Cie10Result | null>(null);
+  const id = useId()
+  const [query, setQuery] = useState("")
+  const [open, setOpen] = useState(false)
+  const [debounced, setDebounced] = useState("")
+  const [selected, setSelected] = useState<Cie10Result | null>(null)
   useEffect(() => {
-    const timer = setTimeout(() => setDebounced(query.trim()), 300);
-    return () => clearTimeout(timer);
-  }, [query]);
+    const timer = setTimeout(() => setDebounced(query.trim()), 300)
+    return () => clearTimeout(timer)
+  }, [query])
   const results = useQuery({
     queryKey: ["cie10", debounced],
-    queryFn: () => apiFetch<{ data: Cie10Result[] }>(`/api/cie10?q=${encodeURIComponent(debounced)}`),
+    queryFn: () =>
+      apiFetch<{ data: Cie10Result[] }>(`/api/cie10?q=${encodeURIComponent(debounced)}`),
     enabled: !disabled && debounced.length > 0,
     staleTime: 60_000,
-  });
+  })
 
-  const items = results.data?.data ?? [];
-  const searching = results.isFetching || query.trim() !== debounced;
+  const items = results.data?.data ?? []
+  const searching = results.isFetching || query.trim() !== debounced
   // El combobox trabaja con el objeto resultado; `value` público sigue siendo
   // solo el código. Se sintetiza el item cuando viene de fuera (modo edición).
   const selectedItem = value
     ? selected?.code === value
       ? selected
       : { code: value, description: "" }
-    : null;
+    : null
 
   return (
     <Field>
@@ -65,29 +71,29 @@ export function Cie10Search({ value, onChange, label = "Diagnóstico CIE-10", di
         itemToStringValue={(item) => item.code}
         inputValue={query}
         onInputValueChange={(next, details) => {
-          const { reason } = details;
+          const { reason } = details
           if (reason === "input-change") {
-            setQuery(next);
-            setOpen(next.trim().length > 0);
-            return;
+            setQuery(next)
+            setOpen(next.trim().length > 0)
+            return
           }
           // Al elegir un item Base UI rellena el input con su label; se vacía
           // igual que hacía el buscador anterior y no se reabre el popup.
           if (reason === "item-press" || reason === "input-clear" || reason === "clear-press") {
-            setQuery("");
-            setOpen(false);
+            setQuery("")
+            setOpen(false)
           }
         }}
         onValueChange={(item) => {
           if (item) {
-            setSelected(item);
-            onChange(item.code, item.description);
+            setSelected(item)
+            onChange(item.code, item.description)
           } else {
-            setSelected(null);
-            onChange("", "");
+            setSelected(null)
+            onChange("", "")
           }
-          setQuery("");
-          setOpen(false);
+          setQuery("")
+          setOpen(false)
         }}
       >
         <ComboboxInput
@@ -107,7 +113,11 @@ export function Cie10Search({ value, onChange, label = "Diagnóstico CIE-10", di
             <>
               <ComboboxList aria-label="Diagnósticos disponibles">
                 {items.map((item) => (
-                  <ComboboxItem key={item.code} value={item} className="flex-col items-start gap-0 py-2">
+                  <ComboboxItem
+                    key={item.code}
+                    value={item}
+                    className="flex-col items-start gap-0 py-2"
+                  >
                     <span className="font-medium">{item.code}</span>
                     <span className="text-muted-foreground">{item.description}</span>
                   </ComboboxItem>
@@ -127,9 +137,9 @@ export function Cie10Search({ value, onChange, label = "Diagnóstico CIE-10", di
               size="sm"
               variant="ghost"
               onClick={() => {
-                onChange("", "");
-                setSelected(null);
-                setQuery("");
+                onChange("", "")
+                setSelected(null)
+                setQuery("")
               }}
             >
               Quitar código
@@ -138,5 +148,5 @@ export function Cie10Search({ value, onChange, label = "Diagnóstico CIE-10", di
         </div>
       )}
     </Field>
-  );
+  )
 }

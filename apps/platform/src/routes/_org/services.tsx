@@ -1,11 +1,3 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createFileRoute, getRouteApi } from "@tanstack/react-router";
-import { useForm } from "@tanstack/react-form";
-import {
-  getCoreRowModel,
-  useReactTable,
-  type ColumnDef,
-} from "@tanstack/react-table";
 import {
   Badge,
   Button,
@@ -14,7 +6,6 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
   Field,
-  FieldError as UiFieldError,
   FieldLabel,
   Input,
   Select,
@@ -31,7 +22,8 @@ import {
   TabsList,
   TabsTrigger,
   toast,
-} from "@odentia/ui";
+  FieldError as UiFieldError,
+} from "@odentia/ui"
 import {
   ConfirmDialog,
   DataTable,
@@ -39,21 +31,22 @@ import {
   ErrorState,
   FilterBar,
   FormDrawer,
+  fieldErrorMessages,
   LoadingState,
   PageHeader,
   RowActions,
-  fieldErrorMessages,
   useListSearch,
-} from "@odentia/ui-patterns";
-import { ChevronDown, Library, Plus, Tag } from "lucide-react";
-import { useMemo, useState } from "react";
-import { z } from "zod";
-import { ApiError } from "../../lib/api";
-import { useCanWrite } from "../../lib/crm";
+} from "@odentia/ui-patterns"
+import { useForm } from "@tanstack/react-form"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { createFileRoute, getRouteApi } from "@tanstack/react-router"
+import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-table"
+import { ChevronDown, Library, Plus, Tag } from "lucide-react"
+import { useMemo, useState } from "react"
+import { z } from "zod"
+import { ApiError } from "../../lib/api"
+import { useCanWrite } from "../../lib/crm"
 import {
-  TREATMENT_SCOPE_LABELS,
-  TREATMENT_SPECIALTIES,
-  TREATMENT_SPECIALTY_LABELS,
   createServiceApi,
   fetchServices,
   fetchTreatmentTemplates,
@@ -61,57 +54,61 @@ import {
   formatPriceInput,
   incorporateTemplatesApi,
   parsePriceToCents,
-  updateServiceApi,
   type ServiceCatalogItem,
+  TREATMENT_SCOPE_LABELS,
+  TREATMENT_SPECIALTIES,
+  TREATMENT_SPECIALTY_LABELS,
   type TreatmentTemplateItem,
-} from "../../lib/services";
+  updateServiceApi,
+} from "../../lib/services"
+
 /** Muestra el primer mensaje de validación de TanStack Form. */
 function FieldError({ errors }: { errors: unknown }) {
-  return <UiFieldError>{fieldErrorMessages(errors)[0]}</UiFieldError>;
+  return <UiFieldError>{fieldErrorMessages(errors)[0]}</UiFieldError>
 }
 
 export const Route = createFileRoute("/_org/services")({
   component: ServicesPage,
-});
+})
 
-const orgRouteApi = getRouteApi("/_org");
+const orgRouteApi = getRouteApi("/_org")
 
 const SPECIALTY_OPTIONS = [
   { value: "todas", label: "Todas" },
   ...TREATMENT_SPECIALTIES.map((s) => ({ value: s, label: TREATMENT_SPECIALTY_LABELS[s] ?? s })),
-];
+]
 
 const STATE_OPTIONS = [
   { value: "active", label: "Activas" },
   { value: "inactive", label: "Inactivas" },
   { value: "unpriced", label: "Sin tarifa" },
   { value: "legacy", label: "Pendientes de revisar" },
-];
+]
 
 const TARIFARIO_SORT_OPTIONS = [
   { value: "nombre", label: "Nombre" },
   { value: "precio", label: "Precio" },
   { value: "ambito", label: "Ámbito" },
-];
+]
 
 const BIBLIOTECA_SORT_OPTIONS = [
   { value: "nombre", label: "Nombre" },
   { value: "especialidad", label: "Especialidad" },
-];
+]
 
 function stateLabel(state: string): string {
-  return STATE_OPTIONS.find((o) => o.value === state)?.label ?? state;
+  return STATE_OPTIONS.find((o) => o.value === state)?.label ?? state
 }
 
 function priceLabel(item: ServiceCatalogItem): string {
-  if (item.priceCents === null) return "Sin tarifa";
-  return formatMoney(item.priceCents, item.currency);
+  if (item.priceCents === null) return "Sin tarifa"
+  return formatMoney(item.priceCents, item.currency)
 }
 
 function ServicesPage() {
-  const { org } = orgRouteApi.useRouteContext();
-  const canWrite = useCanWrite();
-  const [view, setView] = useState<"tarifario" | "biblioteca">("tarifario");
+  const { org } = orgRouteApi.useRouteContext()
+  const canWrite = useCanWrite()
+  const [view, setView] = useState<"tarifario" | "biblioteca">("tarifario")
 
   return (
     <div className="flex flex-col gap-6">
@@ -119,7 +116,10 @@ function ServicesPage() {
         title="Tratamientos y tarifas"
         subtitle={`${org.name} · prestaciones de la clínica y su tarifa`}
       />
-      <Tabs value={view} onValueChange={(next) => setView(next === "biblioteca" ? "biblioteca" : "tarifario")}>
+      <Tabs
+        value={view}
+        onValueChange={(next) => setView(next === "biblioteca" ? "biblioteca" : "tarifario")}
+      >
         <TabsList>
           <TabsTrigger value="tarifario">Tarifario de la clínica</TabsTrigger>
           <TabsTrigger value="biblioteca">Biblioteca de prestaciones</TabsTrigger>
@@ -132,22 +132,22 @@ function ServicesPage() {
         </TabsContent>
       </Tabs>
     </div>
-  );
+  )
 }
 
 /* ------------------------------- Tarifario -------------------------------- */
 
 function TarifarioView({ canWrite }: { canWrite: boolean }) {
-  const queryClient = useQueryClient();
-  const listSearch = useListSearch();
-  const search = listSearch.get("q") ?? "";
-  const specialtyFilter = listSearch.get("especialidad") ?? "todas";
-  const estadoFilter = listSearch.get("estado") ?? "active";
-  const sortParam = listSearch.get("sort") ?? "";
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [sheetOpen, setSheetOpen] = useState(false);
-  const [createOpen, setCreateOpen] = useState(false);
-  const [toggling, setToggling] = useState<ServiceCatalogItem | null>(null);
+  const queryClient = useQueryClient()
+  const listSearch = useListSearch()
+  const search = listSearch.get("q") ?? ""
+  const specialtyFilter = listSearch.get("especialidad") ?? "todas"
+  const estadoFilter = listSearch.get("estado") ?? "active"
+  const sortParam = listSearch.get("sort") ?? ""
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [sheetOpen, setSheetOpen] = useState(false)
+  const [createOpen, setCreateOpen] = useState(false)
+  const [toggling, setToggling] = useState<ServiceCatalogItem | null>(null)
 
   const pagesQuery = useQuery({
     queryKey: ["services", "tarifario", search, specialtyFilter, estadoFilter],
@@ -158,60 +158,62 @@ function TarifarioView({ canWrite }: { canWrite: boolean }) {
         state: estadoFilter as "active" | "inactive" | "unpriced" | "legacy",
         limit: 100,
       }),
-  });
+  })
 
-  const rows = useMemo(() => pagesQuery.data?.data ?? [], [pagesQuery.data]);
-  const selected = rows.find((row) => row.id === selectedId) ?? null;
+  const rows = useMemo(() => pagesQuery.data?.data ?? [], [pagesQuery.data])
+  const selected = rows.find((row) => row.id === selectedId) ?? null
 
   const sortedRows = useMemo(() => {
-    if (!sortParam) return rows;
-    const desc = sortParam.startsWith("-");
-    const field = desc ? sortParam.slice(1) : sortParam;
-    const factor = desc ? -1 : 1;
+    if (!sortParam) return rows
+    const desc = sortParam.startsWith("-")
+    const field = desc ? sortParam.slice(1) : sortParam
+    const factor = desc ? -1 : 1
     return [...rows].sort((a, b) => {
       if (field === "precio") {
-        if (a.priceCents === null && b.priceCents === null) return 0;
-        if (a.priceCents === null) return 1;
-        if (b.priceCents === null) return -1;
-        return (a.priceCents - b.priceCents) * factor;
+        if (a.priceCents === null && b.priceCents === null) return 0
+        if (a.priceCents === null) return 1
+        if (b.priceCents === null) return -1
+        return (a.priceCents - b.priceCents) * factor
       }
       if (field === "ambito") {
-        const scopeA = a.scope ? (TREATMENT_SCOPE_LABELS[a.scope] ?? a.scope) : "";
-        const scopeB = b.scope ? (TREATMENT_SCOPE_LABELS[b.scope] ?? b.scope) : "";
-        return scopeA.localeCompare(scopeB, "es") * factor;
+        const scopeA = a.scope ? (TREATMENT_SCOPE_LABELS[a.scope] ?? a.scope) : ""
+        const scopeB = b.scope ? (TREATMENT_SCOPE_LABELS[b.scope] ?? b.scope) : ""
+        return scopeA.localeCompare(scopeB, "es") * factor
       }
-      return a.name.localeCompare(b.name, "es") * factor;
-    });
-  }, [rows, sortParam]);
+      return a.name.localeCompare(b.name, "es") * factor
+    })
+  }, [rows, sortParam])
 
   const groups = useMemo(() => {
-    const map = new Map<string, ServiceCatalogItem[]>();
+    const map = new Map<string, ServiceCatalogItem[]>()
     for (const row of sortedRows) {
-      const key = row.source === "legacy" ? "legacy" : (row.specialty ?? "sin-especialidad");
-      const list = map.get(key) ?? [];
-      list.push(row);
-      map.set(key, list);
+      const key = row.source === "legacy" ? "legacy" : (row.specialty ?? "sin-especialidad")
+      const list = map.get(key) ?? []
+      list.push(row)
+      map.set(key, list)
     }
-    return [...map.entries()].sort(([a], [b]) => a.localeCompare(b));
-  }, [sortedRows]);
+    return [...map.entries()].sort(([a], [b]) => a.localeCompare(b))
+  }, [sortedRows])
 
   const toggleMutation = useMutation({
     mutationFn: (service: ServiceCatalogItem) =>
       updateServiceApi(service.id, { isActive: !service.isActive }),
     onSuccess: async () => {
-      setToggling(null);
-      await queryClient.invalidateQueries({ queryKey: ["services"] });
-      toast.success("Estado actualizado");
+      setToggling(null)
+      await queryClient.invalidateQueries({ queryKey: ["services"] })
+      toast.success("Estado actualizado")
     },
     onError: (error) => {
-      toast.error(error instanceof ApiError ? (error.shape.message ?? error.message) : error.message);
+      toast.error(
+        error instanceof ApiError ? (error.shape.message ?? error.message) : error.message,
+      )
     },
-  });
+  })
 
   const openDetail = (row: ServiceCatalogItem) => {
-    setSelectedId(row.id);
-    setSheetOpen(true);
-  };
+    setSelectedId(row.id)
+    setSheetOpen(true)
+  }
 
   const columns = useMemo<ColumnDef<ServiceCatalogItem>[]>(
     () => [
@@ -235,7 +237,9 @@ function TarifarioView({ canWrite }: { canWrite: boolean }) {
         accessorKey: "scope",
         header: "Ámbito",
         cell: ({ row }) =>
-          row.original.scope ? (TREATMENT_SCOPE_LABELS[row.original.scope] ?? row.original.scope) : "—",
+          row.original.scope
+            ? (TREATMENT_SCOPE_LABELS[row.original.scope] ?? row.original.scope)
+            : "—",
       },
       {
         accessorKey: "priceCents",
@@ -292,15 +296,20 @@ function TarifarioView({ canWrite }: { canWrite: boolean }) {
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [canWrite],
-  );
+  )
 
-  const hasFilters = search.trim() !== "" || specialtyFilter !== "todas" || sortParam !== "";
+  const hasFilters = search.trim() !== "" || specialtyFilter !== "todas" || sortParam !== ""
 
   return (
     <div className="flex flex-col gap-4">
       <FilterBar
         filters={[
-          { key: "especialidad", label: "Especialidad", type: "select", options: SPECIALTY_OPTIONS },
+          {
+            key: "especialidad",
+            label: "Especialidad",
+            type: "select",
+            options: SPECIALTY_OPTIONS,
+          },
           { key: "estado", label: "Estado", type: "select", options: STATE_OPTIONS },
         ]}
         sortOptions={TARIFARIO_SORT_OPTIONS}
@@ -328,7 +337,9 @@ function TarifarioView({ canWrite }: { canWrite: boolean }) {
           title="Sin prestaciones en el tarifario"
           description="Incorpora prestaciones desde la biblioteca o crea una prestación propia. Sin tarifa no se puede cotizar: no es gratuita, falta configurarla."
           actionLabel="Ir a la biblioteca"
-          onAction={() => document.querySelector<HTMLButtonElement>('[value="biblioteca"]')?.click()}
+          onAction={() =>
+            document.querySelector<HTMLButtonElement>('[value="biblioteca"]')?.click()
+          }
         />
       ) : rows.length === 0 ? (
         <EmptyState
@@ -340,11 +351,25 @@ function TarifarioView({ canWrite }: { canWrite: boolean }) {
         <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(20rem,28rem)]">
           <div className="flex min-w-0 flex-col gap-6">
             {groups.map(([key, groupRows]) => (
-              <section key={key} aria-label={key === "legacy" ? "Pendientes de revisar" : (TREATMENT_SPECIALTY_LABELS[key] ?? key)}>
+              <section
+                key={key}
+                aria-label={
+                  key === "legacy"
+                    ? "Pendientes de revisar"
+                    : (TREATMENT_SPECIALTY_LABELS[key] ?? key)
+                }
+              >
                 <h3 className="mb-2 text-sm font-semibold">
-                  {key === "legacy" ? "Pendientes de revisar" : (TREATMENT_SPECIALTY_LABELS[key] ?? "Sin especialidad")}
+                  {key === "legacy"
+                    ? "Pendientes de revisar"
+                    : (TREATMENT_SPECIALTY_LABELS[key] ?? "Sin especialidad")}
                 </h3>
-                <GroupTable rows={groupRows} columns={columns} onSelect={openDetail} selectedId={selectedId} />
+                <GroupTable
+                  rows={groupRows}
+                  columns={columns}
+                  onSelect={openDetail}
+                  selectedId={selectedId}
+                />
               </section>
             ))}
           </div>
@@ -366,7 +391,10 @@ function TarifarioView({ canWrite }: { canWrite: boolean }) {
       )}
 
       <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
-        <SheetContent className="w-full sm:max-w-lg lg:hidden" aria-label="Detalle de la prestación">
+        <SheetContent
+          className="w-full sm:max-w-lg lg:hidden"
+          aria-label="Detalle de la prestación"
+        >
           <SheetHeader>
             <SheetTitle>{selected?.name ?? "Prestación"}</SheetTitle>
           </SheetHeader>
@@ -397,12 +425,12 @@ function TarifarioView({ canWrite }: { canWrite: boolean }) {
         confirmLabel={toggling?.isActive ? "Desactivar" : "Reactivar"}
         variant={toggling?.isActive ? "destructive" : "default"}
         onConfirm={() => {
-          if (toggling) toggleMutation.mutate(toggling);
+          if (toggling) toggleMutation.mutate(toggling)
         }}
         pending={toggleMutation.isPending}
       />
     </div>
-  );
+  )
 }
 
 function GroupTable({
@@ -411,14 +439,14 @@ function GroupTable({
   onSelect,
   selectedId,
 }: {
-  rows: ServiceCatalogItem[];
-  columns: ColumnDef<ServiceCatalogItem>[];
-  onSelect: (row: ServiceCatalogItem) => void;
-  selectedId: string | null;
+  rows: ServiceCatalogItem[]
+  columns: ColumnDef<ServiceCatalogItem>[]
+  onSelect: (row: ServiceCatalogItem) => void
+  selectedId: string | null
 }) {
-  const table = useReactTable({ data: rows, columns, getCoreRowModel: getCoreRowModel() });
-  void selectedId;
-  return <DataTable table={table} onRowClick={onSelect} />;
+  const table = useReactTable({ data: rows, columns, getCoreRowModel: getCoreRowModel() })
+  void selectedId
+  return <DataTable table={table} onRowClick={onSelect} />
 }
 
 /* ----------------------------- Detalle / edición --------------------------- */
@@ -426,34 +454,32 @@ function GroupTable({
 const offerSchema = z.object({
   name: z.string().min(1, "Ingresa el nombre").max(200, "Máximo 200 caracteres"),
   code: z.string().max(40, "Máximo 40 caracteres"),
-  price: z
-    .string()
-    .refine(
-      (value) => {
-        if (value.trim() === "") return true;
-        try {
-          parsePriceToCents(value);
-          return true;
-        } catch {
-          return false;
-        }
-      },
-      { message: "Tarifa inválida: usa números con hasta 2 decimales" },
-    ),
+  price: z.string().refine(
+    (value) => {
+      if (value.trim() === "") return true
+      try {
+        parsePriceToCents(value)
+        return true
+      } catch {
+        return false
+      }
+    },
+    { message: "Tarifa inválida: usa números con hasta 2 decimales" },
+  ),
   durationMin: z.string().refine(
     (value) => {
-      if (value.trim() === "") return true;
-      const n = Number(value);
-      return Number.isInteger(n) && n >= 1 && n <= 1440;
+      if (value.trim() === "") return true
+      const n = Number(value)
+      return Number.isInteger(n) && n >= 1 && n <= 1440
     },
     { message: "Duración: minutos enteros entre 1 y 1440" },
   ),
   specialty: z.string().min(1, "Elige la especialidad"),
   scope: z.string().min(1, "Elige el ámbito"),
   isActive: z.boolean(),
-});
+})
 
-type OfferFormValues = z.infer<typeof offerSchema>;
+type OfferFormValues = z.infer<typeof offerSchema>
 
 function toOfferValues(item: ServiceCatalogItem): OfferFormValues {
   return {
@@ -464,41 +490,44 @@ function toOfferValues(item: ServiceCatalogItem): OfferFormValues {
     specialty: item.specialty ?? "",
     scope: item.scope ?? "",
     isActive: item.isActive,
-  };
+  }
 }
-function useOfferForm(offer: ServiceCatalogItem, onSubmit: (value: OfferFormValues) => Promise<void>) {
+function useOfferForm(
+  offer: ServiceCatalogItem,
+  onSubmit: (value: OfferFormValues) => Promise<void>,
+) {
   return useForm({
     defaultValues: toOfferValues(offer),
     validators: { onSubmit: offerSchema },
     onSubmit: async ({ value }) => {
-      await onSubmit(value);
+      await onSubmit(value)
     },
-  });
+  })
 }
 
-type OfferForm = ReturnType<typeof useOfferForm>;
+type OfferForm = ReturnType<typeof useOfferForm>
 
 function OfferDetail({
   offer,
   canWrite,
   onClose,
 }: {
-  offer: ServiceCatalogItem;
-  canWrite: boolean;
-  onClose: () => void;
+  offer: ServiceCatalogItem
+  canWrite: boolean
+  onClose: () => void
 }) {
-  const queryClient = useQueryClient();
-  const [resolveMode, setResolveMode] = useState<"plantilla" | "propia">("plantilla");
+  const queryClient = useQueryClient()
+  const [resolveMode, setResolveMode] = useState<"plantilla" | "propia">("plantilla")
 
   const templateQuery = useQuery({
     queryKey: ["services", "templates", "all"],
     queryFn: () => fetchTreatmentTemplates({ limit: 100 }),
     staleTime: 300_000,
-  });
+  })
   const templateName = useMemo(() => {
-    if (!offer.templateId) return null;
-    return templateQuery.data?.data.find((t) => t.id === offer.templateId)?.name ?? null;
-  }, [templateQuery.data, offer.templateId]);
+    if (!offer.templateId) return null
+    return templateQuery.data?.data.find((t) => t.id === offer.templateId)?.name ?? null
+  }, [templateQuery.data, offer.templateId])
 
   const saveMutation = useMutation({
     mutationFn: (values: OfferFormValues) =>
@@ -507,41 +536,42 @@ function OfferDetail({
         code: values.code.trim() === "" ? null : values.code.trim(),
         priceCents: values.price.trim() === "" ? null : parsePriceToCents(values.price),
         durationMin: values.durationMin.trim() === "" ? null : Number(values.durationMin),
-        ...(offer.source === "custom"
-          ? { specialty: values.specialty, scope: values.scope }
-          : {}),
+        ...(offer.source === "custom" ? { specialty: values.specialty, scope: values.scope } : {}),
         ...(offer.source === "legacy"
           ? { templateId: null, specialty: values.specialty, scope: values.scope, isActive: true }
           : { isActive: values.isActive }),
       }),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ["services"] });
-      toast.success("Prestación actualizada");
-      onClose();
+      await queryClient.invalidateQueries({ queryKey: ["services"] })
+      toast.success("Prestación actualizada")
+      onClose()
     },
     onError: (error) => {
-      toast.error(error instanceof ApiError ? (error.shape.message ?? error.message) : error.message);
+      toast.error(
+        error instanceof ApiError ? (error.shape.message ?? error.message) : error.message,
+      )
     },
-  });
+  })
 
   const linkTemplateMutation = useMutation({
-    mutationFn: (templateId: string) =>
-      updateServiceApi(offer.id, { templateId, isActive: true }),
+    mutationFn: (templateId: string) => updateServiceApi(offer.id, { templateId, isActive: true }),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ["services"] });
-      toast.success("Prestación vinculada y reactivada");
-      onClose();
+      await queryClient.invalidateQueries({ queryKey: ["services"] })
+      toast.success("Prestación vinculada y reactivada")
+      onClose()
     },
     onError: (error) => {
-      toast.error(error instanceof ApiError ? (error.shape.message ?? error.message) : error.message);
+      toast.error(
+        error instanceof ApiError ? (error.shape.message ?? error.message) : error.message,
+      )
     },
-  });
+  })
 
   const form = useOfferForm(offer, async (value) => {
-    await saveMutation.mutateAsync(value);
-  });
-  const isTemplate = offer.source === "template";
-  const isLegacy = offer.source === "legacy";
+    await saveMutation.mutateAsync(value)
+  })
+  const isTemplate = offer.source === "template"
+  const isLegacy = offer.source === "legacy"
 
   return (
     <div className="flex flex-col gap-4 rounded-xl border p-4">
@@ -551,9 +581,15 @@ function OfferDetail({
             {offer.isActive ? "Activa" : "Inactiva"}
           </Badge>
           <Badge variant="outline">
-            {isLegacy ? "Heredada" : offer.source === "custom" ? "Prestación de la clínica" : "De la biblioteca"}
+            {isLegacy
+              ? "Heredada"
+              : offer.source === "custom"
+                ? "Prestación de la clínica"
+                : "De la biblioteca"}
           </Badge>
-          {offer.priceCents === null && !isLegacy ? <Badge variant="secondary">Sin tarifa</Badge> : null}
+          {offer.priceCents === null && !isLegacy ? (
+            <Badge variant="secondary">Sin tarifa</Badge>
+          ) : null}
         </div>
         {isTemplate && templateName && templateName !== offer.name ? (
           <p className="text-xs text-muted-foreground">Variante de «{templateName}»</p>
@@ -563,9 +599,9 @@ function OfferDetail({
       {isLegacy ? (
         <div className="flex flex-col gap-3 rounded-lg border border-dashed p-3" role="note">
           <p className="text-sm">
-            Prestación heredada del catálogo anterior: conserva nombre, código y precio como registro previo.
-            Vincúlala a la biblioteca o confírmala como propia antes de reactivarla; no se usa para nuevas
-            indicaciones hasta entonces.
+            Prestación heredada del catálogo anterior: conserva nombre, código y precio como
+            registro previo. Vincúlala a la biblioteca o confírmala como propia antes de
+            reactivarla; no se usa para nuevas indicaciones hasta entonces.
           </p>
           {canWrite ? (
             <>
@@ -595,8 +631,8 @@ function OfferDetail({
               ) : (
                 <form
                   onSubmit={(event) => {
-                    event.preventDefault();
-                    void form.handleSubmit();
+                    event.preventDefault()
+                    void form.handleSubmit()
                   }}
                   className="flex flex-col gap-3"
                 >
@@ -605,8 +641,8 @@ function OfferDetail({
                     pending={saveMutation.isPending}
                     submitLabel="Confirmar y reactivar"
                     onCancel={() => {
-                      form.reset();
-                      onClose();
+                      form.reset()
+                      onClose()
                     }}
                   />
                 </form>
@@ -619,8 +655,8 @@ function OfferDetail({
       {(!isLegacy || (isLegacy && canWrite && resolveMode === "propia")) && !isLegacy ? (
         <form
           onSubmit={(event) => {
-            event.preventDefault();
-            void form.handleSubmit();
+            event.preventDefault()
+            void form.handleSubmit()
           }}
           className="flex flex-col gap-3"
         >
@@ -630,8 +666,8 @@ function OfferDetail({
               pending={saveMutation.isPending}
               submitLabel="Guardar cambios"
               onCancel={() => {
-                form.reset();
-                onClose();
+                form.reset()
+                onClose()
               }}
             />
           ) : null}
@@ -653,12 +689,16 @@ function OfferDetail({
             <dt className="text-muted-foreground">Moneda</dt>
             <dd>{offer.currency}</dd>
             <dt className="text-muted-foreground">Especialidad</dt>
-            <dd>{offer.specialty ? (TREATMENT_SPECIALTY_LABELS[offer.specialty] ?? offer.specialty) : "—"}</dd>
+            <dd>
+              {offer.specialty
+                ? (TREATMENT_SPECIALTY_LABELS[offer.specialty] ?? offer.specialty)
+                : "—"}
+            </dd>
           </dl>
         </CollapsibleContent>
       </Collapsible>
     </div>
-  );
+  )
 }
 
 function OfferFields({
@@ -666,11 +706,11 @@ function OfferFields({
   offer,
   allowSpecialtyScope,
 }: {
-  form: OfferForm;
-  offer: ServiceCatalogItem;
-  allowSpecialtyScope: boolean;
+  form: OfferForm
+  offer: ServiceCatalogItem
+  allowSpecialtyScope: boolean
 }) {
-  const isTemplate = offer.source === "template";
+  const isTemplate = offer.source === "template"
   return (
     <>
       <form.Field
@@ -702,7 +742,10 @@ function OfferFields({
             children={(field) => (
               <Field>
                 <FieldLabel htmlFor={`${offer.id}-esp`}>Especialidad</FieldLabel>
-                <Select value={field.state.value} onValueChange={(v) => field.handleChange(v ?? "")}>
+                <Select
+                  value={field.state.value}
+                  onValueChange={(v) => field.handleChange(v ?? "")}
+                >
                   <SelectTrigger id={`${offer.id}-esp`}>
                     <SelectValue placeholder="Elige" />
                   </SelectTrigger>
@@ -724,7 +767,10 @@ function OfferFields({
             children={(field) => (
               <Field>
                 <FieldLabel htmlFor={`${offer.id}-ambito`}>Ámbito</FieldLabel>
-                <Select value={field.state.value} onValueChange={(v) => field.handleChange(v ?? "")}>
+                <Select
+                  value={field.state.value}
+                  onValueChange={(v) => field.handleChange(v ?? "")}
+                >
                   <SelectTrigger id={`${offer.id}-ambito`}>
                     <SelectValue placeholder="Elige" />
                   </SelectTrigger>
@@ -758,7 +804,9 @@ function OfferFields({
                 onBlur={field.handleBlur}
               />
               <FieldError errors={fieldErrorMessages(field.state.meta.errors)} />
-              <p className="text-xs text-muted-foreground">Vacío = Sin tarifa (no cotizable, no gratuita).</p>
+              <p className="text-xs text-muted-foreground">
+                Vacío = Sin tarifa (no cotizable, no gratuita).
+              </p>
             </Field>
           )}
         />
@@ -797,7 +845,7 @@ function OfferFields({
         )}
       />
     </>
-  );
+  )
 }
 
 function FormActions({
@@ -805,9 +853,9 @@ function FormActions({
   submitLabel,
   onCancel,
 }: {
-  pending: boolean;
-  submitLabel: string;
-  onCancel: () => void;
+  pending: boolean
+  submitLabel: string
+  onCancel: () => void
 }) {
   return (
     <div className="flex justify-end gap-2">
@@ -818,17 +866,23 @@ function FormActions({
         {pending ? "Guardando…" : submitLabel}
       </Button>
     </div>
-  );
+  )
 }
 
-function LegacyTemplateLink({ pending, onSelect }: { pending: boolean; onSelect: (id: string) => void }) {
-  const [q, setQ] = useState("");
+function LegacyTemplateLink({
+  pending,
+  onSelect,
+}: {
+  pending: boolean
+  onSelect: (id: string) => void
+}) {
+  const [q, setQ] = useState("")
   const templatesQuery = useQuery({
     queryKey: ["services", "templates", "link", q],
     queryFn: () => fetchTreatmentTemplates({ q: q.trim() || undefined, limit: 20 }),
     staleTime: 60_000,
-  });
-  const rows = templatesQuery.data?.data ?? [];
+  })
+  const rows = templatesQuery.data?.data ?? []
   return (
     <div className="flex flex-col gap-2">
       <Input
@@ -861,11 +915,13 @@ function LegacyTemplateLink({ pending, onSelect }: { pending: boolean; onSelect:
               </Button>
             </li>
           ))}
-          {rows.length === 0 ? <li className="text-sm text-muted-foreground">Sin resultados.</li> : null}
+          {rows.length === 0 ? (
+            <li className="text-sm text-muted-foreground">Sin resultados.</li>
+          ) : null}
         </ul>
       )}
     </div>
-  );
+  )
 }
 
 /* --------------------------- Alta de prestación propia --------------------- */
@@ -877,30 +933,30 @@ const createSchema = z.object({
   code: z.string().max(40, "Máximo 40 caracteres"),
   price: z.string().refine(
     (value) => {
-      if (value.trim() === "") return true;
+      if (value.trim() === "") return true
       try {
-        parsePriceToCents(value);
-        return true;
+        parsePriceToCents(value)
+        return true
       } catch {
-        return false;
+        return false
       }
     },
     { message: "Tarifa inválida: usa números con hasta 2 decimales" },
   ),
   durationMin: z.string().refine(
     (value) => {
-      if (value.trim() === "") return true;
-      const n = Number(value);
-      return Number.isInteger(n) && n >= 1 && n <= 1440;
+      if (value.trim() === "") return true
+      const n = Number(value)
+      return Number.isInteger(n) && n >= 1 && n <= 1440
     },
     { message: "Duración: minutos enteros entre 1 y 1440" },
   ),
-});
+})
 
-type CreateValues = z.infer<typeof createSchema>;
+type CreateValues = z.infer<typeof createSchema>
 
 function CreateOfferDrawer({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const queryClient = useQueryClient();
+  const queryClient = useQueryClient()
   const createMutation = useMutation({
     mutationFn: (values: CreateValues) =>
       createServiceApi({
@@ -912,22 +968,31 @@ function CreateOfferDrawer({ open, onClose }: { open: boolean; onClose: () => vo
         durationMin: values.durationMin.trim() === "" ? null : Number(values.durationMin),
       }),
     onSuccess: async () => {
-      onClose();
-      await queryClient.invalidateQueries({ queryKey: ["services"] });
-      toast.success("Prestación creada");
+      onClose()
+      await queryClient.invalidateQueries({ queryKey: ["services"] })
+      toast.success("Prestación creada")
     },
     onError: (error) => {
-      toast.error(error instanceof ApiError ? (error.shape.message ?? error.message) : error.message);
+      toast.error(
+        error instanceof ApiError ? (error.shape.message ?? error.message) : error.message,
+      )
     },
-  });
+  })
 
   const form = useForm({
-    defaultValues: { name: "", specialty: "", scope: "", code: "", price: "", durationMin: "" } as CreateValues,
+    defaultValues: {
+      name: "",
+      specialty: "",
+      scope: "",
+      code: "",
+      price: "",
+      durationMin: "",
+    } as CreateValues,
     validators: { onSubmit: createSchema },
     onSubmit: async ({ value }) => {
-      await createMutation.mutateAsync(value);
+      await createMutation.mutateAsync(value)
     },
-  });
+  })
 
   return (
     <FormDrawer
@@ -945,7 +1010,12 @@ function CreateOfferDrawer({ open, onClose }: { open: boolean; onClose: () => vo
         children={(field) => (
           <Field>
             <FieldLabel htmlFor="nueva-nombre">Nombre</FieldLabel>
-            <Input id="nueva-nombre" value={field.state.value} onChange={(e) => field.handleChange(e.target.value)} onBlur={field.handleBlur} />
+            <Input
+              id="nueva-nombre"
+              value={field.state.value}
+              onChange={(e) => field.handleChange(e.target.value)}
+              onBlur={field.handleBlur}
+            />
             <FieldError errors={fieldErrorMessages(field.state.meta.errors)} />
           </Field>
         )}
@@ -958,10 +1028,14 @@ function CreateOfferDrawer({ open, onClose }: { open: boolean; onClose: () => vo
             <Field>
               <FieldLabel htmlFor="nueva-esp">Especialidad</FieldLabel>
               <Select value={field.state.value} onValueChange={(v) => field.handleChange(v ?? "")}>
-                <SelectTrigger id="nueva-esp"><SelectValue placeholder="Elige" /></SelectTrigger>
+                <SelectTrigger id="nueva-esp">
+                  <SelectValue placeholder="Elige" />
+                </SelectTrigger>
                 <SelectContent>
                   {TREATMENT_SPECIALTIES.map((s) => (
-                    <SelectItem key={s} value={s}>{TREATMENT_SPECIALTY_LABELS[s]}</SelectItem>
+                    <SelectItem key={s} value={s}>
+                      {TREATMENT_SPECIALTY_LABELS[s]}
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -976,10 +1050,14 @@ function CreateOfferDrawer({ open, onClose }: { open: boolean; onClose: () => vo
             <Field>
               <FieldLabel htmlFor="nueva-ambito">Ámbito</FieldLabel>
               <Select value={field.state.value} onValueChange={(v) => field.handleChange(v ?? "")}>
-                <SelectTrigger id="nueva-ambito"><SelectValue placeholder="Elige" /></SelectTrigger>
+                <SelectTrigger id="nueva-ambito">
+                  <SelectValue placeholder="Elige" />
+                </SelectTrigger>
                 <SelectContent>
                   {Object.entries(TREATMENT_SCOPE_LABELS).map(([value, label]) => (
-                    <SelectItem key={value} value={value}>{label}</SelectItem>
+                    <SelectItem key={value} value={value}>
+                      {label}
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -995,7 +1073,14 @@ function CreateOfferDrawer({ open, onClose }: { open: boolean; onClose: () => vo
           children={(field) => (
             <Field>
               <FieldLabel htmlFor="nueva-precio">Tarifa</FieldLabel>
-              <Input id="nueva-precio" inputMode="decimal" placeholder="Sin tarifa" value={field.state.value} onChange={(e) => field.handleChange(e.target.value)} onBlur={field.handleBlur} />
+              <Input
+                id="nueva-precio"
+                inputMode="decimal"
+                placeholder="Sin tarifa"
+                value={field.state.value}
+                onChange={(e) => field.handleChange(e.target.value)}
+                onBlur={field.handleBlur}
+              />
               <FieldError errors={fieldErrorMessages(field.state.meta.errors)} />
             </Field>
           )}
@@ -1006,7 +1091,13 @@ function CreateOfferDrawer({ open, onClose }: { open: boolean; onClose: () => vo
           children={(field) => (
             <Field>
               <FieldLabel htmlFor="nueva-dur">Duración (min)</FieldLabel>
-              <Input id="nueva-dur" inputMode="numeric" value={field.state.value} onChange={(e) => field.handleChange(e.target.value)} onBlur={field.handleBlur} />
+              <Input
+                id="nueva-dur"
+                inputMode="numeric"
+                value={field.state.value}
+                onChange={(e) => field.handleChange(e.target.value)}
+                onBlur={field.handleBlur}
+              />
               <FieldError errors={fieldErrorMessages(field.state.meta.errors)} />
             </Field>
           )}
@@ -1018,24 +1109,29 @@ function CreateOfferDrawer({ open, onClose }: { open: boolean; onClose: () => vo
         children={(field) => (
           <Field>
             <FieldLabel htmlFor="nueva-codigo">Código interno (opcional)</FieldLabel>
-            <Input id="nueva-codigo" value={field.state.value} onChange={(e) => field.handleChange(e.target.value)} onBlur={field.handleBlur} />
+            <Input
+              id="nueva-codigo"
+              value={field.state.value}
+              onChange={(e) => field.handleChange(e.target.value)}
+              onBlur={field.handleBlur}
+            />
             <FieldError errors={fieldErrorMessages(field.state.meta.errors)} />
           </Field>
         )}
       />
     </FormDrawer>
-  );
+  )
 }
 
 /* -------------------------------- Biblioteca ------------------------------- */
 
 function BibliotecaView({ canWrite }: { canWrite: boolean }) {
-  const queryClient = useQueryClient();
-  const listSearch = useListSearch();
-  const search = listSearch.get("q") ?? "";
-  const specialtyFilter = listSearch.get("especialidad") ?? "todas";
-  const sortParam = listSearch.get("sort") ?? "";
-  const [checked, setChecked] = useState<string[]>([]);
+  const queryClient = useQueryClient()
+  const listSearch = useListSearch()
+  const search = listSearch.get("q") ?? ""
+  const specialtyFilter = listSearch.get("especialidad") ?? "todas"
+  const sortParam = listSearch.get("sort") ?? ""
+  const [checked, setChecked] = useState<string[]>([])
 
   const libraryQuery = useQuery({
     queryKey: ["services", "biblioteca", search, specialtyFilter],
@@ -1045,7 +1141,7 @@ function BibliotecaView({ canWrite }: { canWrite: boolean }) {
         specialty: specialtyFilter === "todas" ? undefined : specialtyFilter,
         limit: 100,
       }),
-  });
+  })
 
   const ownedQuery = useQuery({
     queryKey: ["services", "owned-templates"],
@@ -1054,57 +1150,59 @@ function BibliotecaView({ canWrite }: { canWrite: boolean }) {
         fetchServices({ state: "active", limit: 100 }),
         fetchServices({ state: "inactive", limit: 100 }),
         fetchServices({ state: "unpriced", limit: 100 }),
-      ]);
+      ])
       return new Set(
         [...active.data, ...inactive.data, ...unpriced.data]
           .map((row) => row.templateId)
           .filter((id): id is string => id !== null),
-      );
+      )
     },
     staleTime: 60_000,
-  });
+  })
 
-  const rows = useMemo(() => libraryQuery.data?.data ?? [], [libraryQuery.data]);
-  const owned = ownedQuery.data ?? new Set<string>();
+  const rows = useMemo(() => libraryQuery.data?.data ?? [], [libraryQuery.data])
+  const owned = ownedQuery.data ?? new Set<string>()
   const sortedRows = useMemo(() => {
-    if (!sortParam) return rows;
-    const desc = sortParam.startsWith("-");
-    const field = desc ? sortParam.slice(1) : sortParam;
-    const factor = desc ? -1 : 1;
+    if (!sortParam) return rows
+    const desc = sortParam.startsWith("-")
+    const field = desc ? sortParam.slice(1) : sortParam
+    const factor = desc ? -1 : 1
     return [...rows].sort((a, b) => {
       if (field === "especialidad") {
-        const labelA = TREATMENT_SPECIALTY_LABELS[a.specialty] ?? a.specialty;
-        const labelB = TREATMENT_SPECIALTY_LABELS[b.specialty] ?? b.specialty;
-        return labelA.localeCompare(labelB, "es") * factor;
+        const labelA = TREATMENT_SPECIALTY_LABELS[a.specialty] ?? a.specialty
+        const labelB = TREATMENT_SPECIALTY_LABELS[b.specialty] ?? b.specialty
+        return labelA.localeCompare(labelB, "es") * factor
       }
-      return a.name.localeCompare(b.name, "es") * factor;
-    });
-  }, [rows, sortParam]);
-  const selectable = sortedRows.filter((row) => !owned.has(row.id));
-  const checkedSelectable = checked.filter((id) => selectable.some((row) => row.id === id));
+      return a.name.localeCompare(b.name, "es") * factor
+    })
+  }, [rows, sortParam])
+  const selectable = sortedRows.filter((row) => !owned.has(row.id))
+  const checkedSelectable = checked.filter((id) => selectable.some((row) => row.id === id))
 
   const incorporateMutation = useMutation({
     mutationFn: (templateIds: string[]) => incorporateTemplatesApi(templateIds),
     onSuccess: async (result) => {
-      setChecked([]);
-      await queryClient.invalidateQueries({ queryKey: ["services"] });
-      const created = result.data.created.length;
+      setChecked([])
+      await queryClient.invalidateQueries({ queryKey: ["services"] })
+      const created = result.data.created.length
       toast.success(
         created > 0
           ? `${created} prestación(es) incorporada(s) sin tarifa: configúralas en el tarifario`
           : "Esas prestaciones ya estaban en tu tarifario",
-      );
+      )
     },
     onError: (error) => {
-      toast.error(error instanceof ApiError ? (error.shape.message ?? error.message) : error.message);
+      toast.error(
+        error instanceof ApiError ? (error.shape.message ?? error.message) : error.message,
+      )
     },
-  });
+  })
 
   const toggle = (id: string) => {
-    setChecked((prev) => (prev.includes(id) ? prev.filter((v) => v !== id) : [...prev, id]));
-  };
+    setChecked((prev) => (prev.includes(id) ? prev.filter((v) => v !== id) : [...prev, id]))
+  }
 
-  const allSelected = selectable.length > 0 && checkedSelectable.length === selectable.length;
+  const allSelected = selectable.length > 0 && checkedSelectable.length === selectable.length
 
   const columns = useMemo<ColumnDef<TreatmentTemplateItem>[]>(
     () => [
@@ -1114,12 +1212,14 @@ function BibliotecaView({ canWrite }: { canWrite: boolean }) {
           <Checkbox
             checked={allSelected}
             disabled={!canWrite || selectable.length === 0}
-            onCheckedChange={(value) => setChecked(value === true ? selectable.map((row) => row.id) : [])}
+            onCheckedChange={(value) =>
+              setChecked(value === true ? selectable.map((row) => row.id) : [])
+            }
             aria-label="Seleccionar todas las prestaciones disponibles"
           />
         ),
         cell: ({ row }) => {
-          const incorporated = owned.has(row.original.id);
+          const incorporated = owned.has(row.original.id)
           return (
             <Checkbox
               checked={checked.includes(row.original.id)}
@@ -1127,7 +1227,7 @@ function BibliotecaView({ canWrite }: { canWrite: boolean }) {
               onCheckedChange={() => toggle(row.original.id)}
               aria-label={`Incorporar ${row.original.name}`}
             />
-          );
+          )
         },
       },
       {
@@ -1160,7 +1260,7 @@ function BibliotecaView({ canWrite }: { canWrite: boolean }) {
         id: "actions",
         header: "",
         cell: ({ row }) => {
-          const incorporated = owned.has(row.original.id);
+          const incorporated = owned.has(row.original.id)
           return (
             <RowActions
               label={`Acciones de ${row.original.name}`}
@@ -1173,22 +1273,29 @@ function BibliotecaView({ canWrite }: { canWrite: boolean }) {
                 },
               ]}
             />
-          );
+          )
         },
       },
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [allSelected, canWrite, checked, owned, selectable, incorporateMutation.isPending],
-  );
+  )
 
-  const table = useReactTable({ data: sortedRows, columns, getCoreRowModel: getCoreRowModel() });
+  const table = useReactTable({ data: sortedRows, columns, getCoreRowModel: getCoreRowModel() })
 
-  const hasFilters = search.trim() !== "" || specialtyFilter !== "todas";
+  const hasFilters = search.trim() !== "" || specialtyFilter !== "todas"
 
   return (
     <div className="flex flex-col gap-4">
       <FilterBar
-        filters={[{ key: "especialidad", label: "Especialidad", type: "select", options: SPECIALTY_OPTIONS }]}
+        filters={[
+          {
+            key: "especialidad",
+            label: "Especialidad",
+            type: "select",
+            options: SPECIALTY_OPTIONS,
+          },
+        ]}
         sortOptions={BIBLIOTECA_SORT_OPTIONS}
         searchPlaceholder="Buscar en la biblioteca"
       />
@@ -1217,7 +1324,11 @@ function BibliotecaView({ canWrite }: { canWrite: boolean }) {
           onRetry={() => void libraryQuery.refetch()}
         />
       ) : rows.length === 0 && !hasFilters ? (
-        <EmptyState icon={Library} title="Biblioteca vacía" description="Aún no hay prestaciones publicadas." />
+        <EmptyState
+          icon={Library}
+          title="Biblioteca vacía"
+          description="Aún no hay prestaciones publicadas."
+        />
       ) : rows.length === 0 ? (
         <EmptyState
           icon={Library}
@@ -1227,13 +1338,12 @@ function BibliotecaView({ canWrite }: { canWrite: boolean }) {
       ) : (
         <>
           <p className="text-sm text-muted-foreground">
-            Prestaciones operativas editables, sin precios propuestos. Al incorporarlas quedan «Sin tarifa» hasta
-            que configures cada monto en el tarifario.
+            Prestaciones operativas editables, sin precios propuestos. Al incorporarlas quedan «Sin
+            tarifa» hasta que configures cada monto en el tarifario.
           </p>
           <DataTable table={table} />
         </>
       )}
     </div>
-  );
+  )
 }
-

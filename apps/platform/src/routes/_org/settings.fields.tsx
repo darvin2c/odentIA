@@ -1,50 +1,50 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
-import { useForm } from "@tanstack/react-form";
-import { Button, Field, FieldError, FieldLabel, Input } from "@odentia/ui";
+import { Button, Field, FieldError, FieldLabel, Input } from "@odentia/ui"
 import {
   ConfirmDialog,
   DataTable,
   EmptyState,
   FilterBar,
   FormDrawer,
+  fieldErrorMessages,
   PageHeader,
   RowActions,
-  fieldErrorMessages,
   useListSearch,
-} from "@odentia/ui-patterns";
-import { getCoreRowModel, useReactTable, type ColumnDef } from "@tanstack/react-table";
-import { Plus } from "lucide-react";
-import { useMemo, useState } from "react";
-import { z } from "zod";
-import { apiFetch } from "../../lib/api";
-import { useCanWrite, type FieldDef } from "../../lib/crm";
+} from "@odentia/ui-patterns"
+import { useForm } from "@tanstack/react-form"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { createFileRoute } from "@tanstack/react-router"
+import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-table"
+import { Plus } from "lucide-react"
+import { useMemo, useState } from "react"
+import { z } from "zod"
+import { apiFetch } from "../../lib/api"
+import { type FieldDef, useCanWrite } from "../../lib/crm"
 
 export const Route = createFileRoute("/_org/settings/fields")({
   component: FieldsPage,
-});
+})
 
 const fieldSchema = z.object({
   key: z.string().regex(/^[a-z0-9_]{1,40}$/, "minúsculas, números y _ (máx 40)"),
   label: z.string().min(1, "Ingresa el label"),
   type: z.enum(["text", "number", "date", "select"]),
   options: z.string(),
-});
+})
 
-type FieldFormValues = z.infer<typeof fieldSchema>;
+type FieldFormValues = z.infer<typeof fieldSchema>
 
 function FieldsPage() {
-  const queryClient = useQueryClient();
-  const canWrite = useCanWrite();
-  const [drawerOpen, setDrawerOpen] = useState(false);
-  const [deleting, setDeleting] = useState<FieldDef | null>(null);
+  const queryClient = useQueryClient()
+  const canWrite = useCanWrite()
+  const [drawerOpen, setDrawerOpen] = useState(false)
+  const [deleting, setDeleting] = useState<FieldDef | null>(null)
 
   const listQuery = useQuery({
     queryKey: ["fields"],
     queryFn: () => apiFetch<{ data: FieldDef[] }>("/api/fields"),
-  });
+  })
 
-  const invalidate = () => queryClient.invalidateQueries({ queryKey: ["fields"] });
+  const invalidate = () => queryClient.invalidateQueries({ queryKey: ["fields"] })
 
   const saveMutation = useMutation({
     mutationFn: async (values: FieldFormValues) => {
@@ -54,56 +54,62 @@ function FieldsPage() {
           key: values.key,
           label: values.label,
           type: values.type,
-          options: values.type === "select" ? values.options.split(",").map((s) => s.trim()).filter(Boolean) : undefined,
+          options:
+            values.type === "select"
+              ? values.options
+                  .split(",")
+                  .map((s) => s.trim())
+                  .filter(Boolean)
+              : undefined,
         }),
-      });
+      })
     },
     onSuccess: () => {
-      setDrawerOpen(false);
-      form.reset();
-      void invalidate();
+      setDrawerOpen(false)
+      form.reset()
+      void invalidate()
     },
-  });
+  })
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) => apiFetch(`/api/fields/${id}`, { method: "DELETE" }),
     onSuccess: () => {
-      setDeleting(null);
-      void invalidate();
+      setDeleting(null)
+      void invalidate()
     },
-  });
+  })
 
   const form = useForm({
     defaultValues: { key: "", label: "", type: "text" as FieldFormValues["type"], options: "" },
     validators: { onSubmit: fieldSchema },
     onSubmit: ({ value }) => saveMutation.mutate(value),
-  });
+  })
 
-  const listSearch = useListSearch();
-  const search = listSearch.get("q") ?? "";
-  const tipoFilter = listSearch.get("tipo");
-  const sort = listSearch.get("sort");
+  const listSearch = useListSearch()
+  const search = listSearch.get("q") ?? ""
+  const tipoFilter = listSearch.get("tipo")
+  const sort = listSearch.get("sort")
 
-  const rows = listQuery.data?.data ?? [];
+  const rows = listQuery.data?.data ?? []
 
   const filtered = useMemo(() => {
-    const needle = search.trim().toLowerCase();
+    const needle = search.trim().toLowerCase()
     const matches = rows.filter((field) => {
-      if (tipoFilter && field.type !== tipoFilter) return false;
-      if (needle && !`${field.key} ${field.label}`.toLowerCase().includes(needle)) return false;
-      return true;
-    });
-    const sortField = (sort ?? "").replace(/^-/, "");
-    const desc = (sort ?? "").startsWith("-");
+      if (tipoFilter && field.type !== tipoFilter) return false
+      if (needle && !`${field.key} ${field.label}`.toLowerCase().includes(needle)) return false
+      return true
+    })
+    const sortField = (sort ?? "").replace(/^-/, "")
+    const desc = (sort ?? "").startsWith("-")
     const compare = (a: FieldDef, b: FieldDef) => {
-      if (sortField === "label") return a.label.localeCompare(b.label);
-      if (sortField === "tipo") return a.type.localeCompare(b.type);
-      return a.key.localeCompare(b.key);
-    };
-    return [...matches].sort((a, b) => (desc ? -compare(a, b) : compare(a, b)));
-  }, [rows, search, tipoFilter, sort]);
+      if (sortField === "label") return a.label.localeCompare(b.label)
+      if (sortField === "tipo") return a.type.localeCompare(b.type)
+      return a.key.localeCompare(b.key)
+    }
+    return [...matches].sort((a, b) => (desc ? -compare(a, b) : compare(a, b)))
+  }, [rows, search, tipoFilter, sort])
 
-  const hasCriteria = search.trim() !== "" || Boolean(tipoFilter);
+  const hasCriteria = search.trim() !== "" || Boolean(tipoFilter)
 
   const columns = useMemo<ColumnDef<FieldDef>[]>(
     () => [
@@ -134,16 +140,16 @@ function FieldsPage() {
       },
     ],
     [],
-  );
+  )
 
   const table = useReactTable({
     data: filtered,
     columns,
     getCoreRowModel: getCoreRowModel(),
-  });
+  })
 
   if (!canWrite) {
-    return <EmptyState title="Sin acceso" description="Solo owner/admin pueden definir campos." />;
+    return <EmptyState title="Sin acceso" description="Solo owner/admin pueden definir campos." />
   }
 
   return (
@@ -152,11 +158,7 @@ function FieldsPage() {
         title="Campos personalizados"
         subtitle="Datos extra de contactos (validados por tipo)"
         actions={
-          <Button
-            type="button"
-            className="min-h-11"
-            onClick={() => setDrawerOpen(true)}
-          >
+          <Button type="button" className="min-h-11" onClick={() => setDrawerOpen(true)}>
             <Plus aria-hidden />
             Nuevo campo
           </Button>
@@ -184,7 +186,10 @@ function FieldsPage() {
         searchPlaceholder="Buscar por clave o label"
       />
       {rows.length === 0 && !listQuery.isLoading ? (
-        <EmptyState title="Sin campos" description="Define el primero, p.ej. alergias o sede preferida." />
+        <EmptyState
+          title="Sin campos"
+          description="Define el primero, p.ej. alergias o sede preferida."
+        />
       ) : filtered.length === 0 ? (
         <EmptyState
           title="Sin resultados"
@@ -205,8 +210,8 @@ function FieldsPage() {
         cancelLabel="Cancelar"
         isSubmitting={saveMutation.isPending}
         onSubmit={(event) => {
-          event.preventDefault();
-          void form.handleSubmit();
+          event.preventDefault()
+          void form.handleSubmit()
         }}
       >
         <div className="flex flex-col gap-4">
@@ -214,7 +219,10 @@ function FieldsPage() {
             {(field) => (
               <Field>
                 <FieldLabel>Clave (a-z, 0-9, _)</FieldLabel>
-                <Input value={field.state.value} onChange={(e) => field.handleChange(e.target.value)} />
+                <Input
+                  value={field.state.value}
+                  onChange={(e) => field.handleChange(e.target.value)}
+                />
                 <FieldError>{fieldErrorMessages(field.state.meta.errors)}</FieldError>
               </Field>
             )}
@@ -223,7 +231,10 @@ function FieldsPage() {
             {(field) => (
               <Field>
                 <FieldLabel>Label</FieldLabel>
-                <Input value={field.state.value} onChange={(e) => field.handleChange(e.target.value)} />
+                <Input
+                  value={field.state.value}
+                  onChange={(e) => field.handleChange(e.target.value)}
+                />
                 <FieldError>{fieldErrorMessages(field.state.meta.errors)}</FieldError>
               </Field>
             )}
@@ -270,5 +281,5 @@ function FieldsPage() {
         onConfirm={() => deleting && deleteMutation.mutate(deleting.id)}
       />
     </div>
-  );
+  )
 }

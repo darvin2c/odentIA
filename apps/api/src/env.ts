@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "zod"
 
 const envSchema = z.object({
   DATABASE_URL: z.string().min(1),
@@ -25,17 +25,17 @@ const envSchema = z.object({
   SECRETS_KEY: z.string().min(1),
   CHANNEL_VALIDATE_EXTERNAL: z.string().optional().default("true"),
   PORT: z.coerce.number().int().default(3001),
-});
+})
 
 function loadEnv() {
-  const parsed = envSchema.safeParse(process.env);
+  const parsed = envSchema.safeParse(process.env)
   if (!parsed.success) {
-    console.error("Variables de entorno inválidas:", parsed.error.flatten().fieldErrors);
-    process.exit(1);
+    console.error("Variables de entorno inválidas:", parsed.error.flatten().fieldErrors)
+    process.exit(1)
   }
-  const { TRUSTED_ORIGINS, ...rest } = parsed.data;
-  return { ...rest, trustedOrigins: TRUSTED_ORIGINS.split(",").map((o) => o.trim()) };
+  const { TRUSTED_ORIGINS, ...rest } = parsed.data
+  return { ...rest, trustedOrigins: TRUSTED_ORIGINS.split(",").map((o) => o.trim()) }
 }
 
-export const env = loadEnv();
-export type Env = typeof env;
+export const env = loadEnv()
+export type Env = typeof env

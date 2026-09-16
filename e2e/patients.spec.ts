@@ -1,70 +1,70 @@
-import { expect, test, type Page } from "@playwright/test";
-import { latestLinkFor } from "./mailpit";
+import { expect, type Page, test } from "@playwright/test"
+import { latestLinkFor } from "./mailpit"
 
-const API = "https://api.odentia.localhost";
-const run = Date.now().toString(36);
+const API = "https://api.odentia.localhost"
+const run = Date.now().toString(36)
 
-const userA = { name: "Denta A", email: `denta-a-${run}@test.dev`, password: "secreto-123" };
-const userB = { name: "Denta B", email: `denta-b-${run}@test.dev`, password: "secreto-123" };
-const orgA = { name: "Clínica A", slug: `clinica-pa-${run}` };
-const orgB = { name: "Clínica B", slug: `clinica-pb-${run}` };
+const userA = { name: "Denta A", email: `denta-a-${run}@test.dev`, password: "secreto-123" }
+const userB = { name: "Denta B", email: `denta-b-${run}@test.dev`, password: "secreto-123" }
+const orgA = { name: "Clínica A", slug: `clinica-pa-${run}` }
+const orgB = { name: "Clínica B", slug: `clinica-pb-${run}` }
 
-const tenant = (slug: string, path: string) => `https://${slug}.odentia.localhost${path}`;
+const tenant = (slug: string, path: string) => `https://${slug}.odentia.localhost${path}`
 
 const hasFiber = () => {
   for (const el of [document.documentElement, document.body, ...document.body.children]) {
-    if (el && Object.keys(el).some((key) => key.startsWith("__reactFiber"))) return true;
+    if (el && Object.keys(el).some((key) => key.startsWith("__reactFiber"))) return true
   }
-  return false;
-};
+  return false
+}
 
 async function waitForHydration(page: Page) {
   for (;;) {
-    await page.waitForFunction(hasFiber, null, { timeout: 30_000 });
-    await page.waitForTimeout(1_500);
-    const stable = await page.evaluate(hasFiber).catch(() => false);
-    if (stable) return;
+    await page.waitForFunction(hasFiber, null, { timeout: 30_000 })
+    await page.waitForTimeout(1_500)
+    const stable = await page.evaluate(hasFiber).catch(() => false)
+    if (stable) return
   }
 }
 
 async function gotoHydrated(page: Page, path: string) {
-  await page.goto(path);
-  await waitForHydration(page);
+  await page.goto(path)
+  await waitForHydration(page)
 }
 
 async function register(page: Page, user: typeof userA) {
-  await gotoHydrated(page, "/register");
-  const [first, ...rest] = user.name.split(" ");
-  await page.getByLabel("Nombre").fill(first);
-  await page.getByLabel("Apellidos").fill(rest.join(" "));
-  await page.getByLabel("Correo").fill(user.email);
-  await page.getByLabel("Contraseña").fill(user.password);
-  await page.getByRole("button", { name: "Registrarme" }).click();
-  await expect(page).toHaveURL(/verify-email-sent/);
+  await gotoHydrated(page, "/register")
+  const [first, ...rest] = user.name.split(" ")
+  await page.getByLabel("Nombre").fill(first)
+  await page.getByLabel("Apellidos").fill(rest.join(" "))
+  await page.getByLabel("Correo").fill(user.email)
+  await page.getByLabel("Contraseña").fill(user.password)
+  await page.getByRole("button", { name: "Registrarme" }).click()
+  await expect(page).toHaveURL(/verify-email-sent/)
 }
 
 async function verifyEmail(page: Page, email: string) {
-  const link = await latestLinkFor(email, "Verifica tu correo");
-  await page.goto(link);
+  const link = await latestLinkFor(email, "Verifica tu correo")
+  await page.goto(link)
 }
 
 async function login(page: Page, user: typeof userA) {
-  await gotoHydrated(page, "/login");
-  await page.getByLabel("Correo").fill(user.email);
-  await page.getByLabel("Contraseña").fill(user.password);
-  await page.getByRole("button", { name: "Ingresar" }).click();
+  await gotoHydrated(page, "/login")
+  await page.getByLabel("Correo").fill(user.email)
+  await page.getByLabel("Contraseña").fill(user.password)
+  await page.getByRole("button", { name: "Ingresar" }).click()
 }
 
 async function onboard(page: Page, org: typeof orgA) {
-  await expect(page).toHaveURL(/onboarding/);
-  await page.getByLabel("Nombre de la organización").fill(org.name);
-  await page.getByLabel("Slug (subdominio)").fill(org.slug);
-  await page.getByRole("button", { name: "Continuar" }).click();
-  await page.getByLabel("Razón social").fill(`${org.name} S.A.C.`);
-  await page.getByRole("button", { name: "Continuar" }).click();
-  await page.getByLabel("Nombre de la sucursal").fill("Sede Central");
-  await page.getByRole("button", { name: "Crear organización" }).click();
-  await expect(page).toHaveURL(new RegExp(`^https://${org.slug}\\.odentia\\.localhost/branches`));
+  await expect(page).toHaveURL(/onboarding/)
+  await page.getByLabel("Nombre de la organización").fill(org.name)
+  await page.getByLabel("Slug (subdominio)").fill(org.slug)
+  await page.getByRole("button", { name: "Continuar" }).click()
+  await page.getByLabel("Razón social").fill(`${org.name} S.A.C.`)
+  await page.getByRole("button", { name: "Continuar" }).click()
+  await page.getByLabel("Nombre de la sucursal").fill("Sede Central")
+  await page.getByRole("button", { name: "Crear organización" }).click()
+  await expect(page).toHaveURL(new RegExp(`^https://${org.slug}\\.odentia\\.localhost/branches`))
 }
 
 // Llamadas API desde el navegador (*.odentia.localhost no resuelve en Node/WSL).
@@ -76,31 +76,35 @@ async function api<T>(page: Page, method: string, path: string, slug: string, bo
         headers: { "content-type": "application/json", "x-odentia-org": slug },
         credentials: "include",
         body: body === undefined ? undefined : JSON.stringify(body),
-      });
-      return { status: response.status, body: (await response.json().catch(() => null)) as T };
+      })
+      return { status: response.status, body: (await response.json().catch(() => null)) as T }
     },
     { apiBase: API, method, path, slug, body },
-  );
+  )
 }
 
-test("pacientes: ficha clínica, alertas, nota CIE-10, odontograma y aislamiento", async ({ browser }) => {
-  test.setTimeout(600_000);
-  const contextA = await browser.newContext({ ignoreHTTPSErrors: true });
-  const pageA = await contextA.newPage();
-  await register(pageA, userA);
-  await verifyEmail(pageA, userA.email);
-  await login(pageA, userA);
-  await onboard(pageA, orgA);
+test("pacientes: ficha clínica, alertas, nota CIE-10, odontograma y aislamiento", async ({
+  browser,
+}) => {
+  test.setTimeout(600_000)
+  const contextA = await browser.newContext({ ignoreHTTPSErrors: true })
+  const pageA = await contextA.newPage()
+  await register(pageA, userA)
+  await verifyEmail(pageA, userA.email)
+  await login(pageA, userA)
+  await onboard(pageA, orgA)
 
   // Crear contacto y verificar la sección Paciente en su detalle.
   const contact = await api<{ data: { id: string } }>(pageA, "POST", "/api/contacts", orgA.slug, {
     displayName: "María Pérez",
-  });
-  expect(contact.status).toBe(201);
-  const contactId = contact.body.data.id;
+  })
+  expect(contact.status).toBe(201)
+  const contactId = contact.body.data.id
 
-  await gotoHydrated(pageA, tenant(orgA.slug, `/contacts/${contactId}`));
-  await expect(pageA.getByRole("button", { name: "Convertir en paciente" })).toBeVisible({ timeout: 15_000 });
+  await gotoHydrated(pageA, tenant(orgA.slug, `/contacts/${contactId}`))
+  await expect(pageA.getByRole("button", { name: "Convertir en paciente" })).toBeVisible({
+    timeout: 15_000,
+  })
 
   // Convertir en paciente con DNI.
   const patient = await api<{ data: { id: string; patientNumber: number } }>(
@@ -109,210 +113,299 @@ test("pacientes: ficha clínica, alertas, nota CIE-10, odontograma y aislamiento
     "/api/patients",
     orgA.slug,
     { contactId, docType: "DNI", docNumber: "12345678" },
-  );
-  expect(patient.status).toBe(201);
-  const patientId = patient.body.data.id;
+  )
+  expect(patient.status).toBe(201)
+  const patientId = patient.body.data.id
 
   // La ficha muestra el número de historia clínica asignado.
-  await gotoHydrated(pageA, tenant(orgA.slug, `/patients/${patientId}`));
-  await expect(pageA.getByText(/HC-\d{6}/).first()).toBeVisible({ timeout: 15_000 });
-  await expect(pageA.getByText("María Pérez").first()).toBeVisible();
+  await gotoHydrated(pageA, tenant(orgA.slug, `/patients/${patientId}`))
+  await expect(pageA.getByText(/HC-\d{6}/).first()).toBeVisible({ timeout: 15_000 })
+  await expect(pageA.getByText("María Pérez").first()).toBeVisible()
 
   // Alta de alergia severa → chip rojo visible en Resumen.
   const allergy = await api(pageA, "POST", `/api/patients/${patientId}/allergies`, orgA.slug, {
     substance: "Penicilina",
     severity: "severa",
-  });
-  expect(allergy.status).toBe(201);
-  await pageA.reload();
-  await waitForHydration(pageA);
-  await expect(pageA.getByText("Penicilina").first()).toBeVisible({ timeout: 15_000 });
+  })
+  expect(allergy.status).toBe(201)
+  await pageA.reload()
+  await waitForHydration(pageA)
+  await expect(pageA.getByText("Penicilina").first()).toBeVisible({ timeout: 15_000 })
 
   // Registrar una nota desde el diálogo real de Historia.
-  await pageA.getByRole("tab", { name: "Historia", exact: true }).click();
-  await pageA.getByRole("button", { name: "Nota rápida", exact: true }).click();
-  const noteDialog = pageA.getByRole("dialog", { name: "Nota rápida" });
-  await noteDialog.getByLabel("Nota clínica").fill("Se indica endodoncia");
-  await noteDialog.getByLabel("Diagnóstico CIE-10").fill("K04.0");
+  await pageA.getByRole("tab", { name: "Historia", exact: true }).click()
+  await pageA.getByRole("button", { name: "Nota rápida", exact: true }).click()
+  const noteDialog = pageA.getByRole("dialog", { name: "Nota rápida" })
+  await noteDialog.getByLabel("Nota clínica").fill("Se indica endodoncia")
+  await noteDialog.getByLabel("Diagnóstico CIE-10").fill("K04.0")
   // El popup del Combobox se portala fuera del diálogo: se busca a nivel de página.
-  await pageA.getByRole("option", { name: /K04\.0\s+Pulpitis/ }).click();
-  await noteDialog.getByRole("button", { name: "Guardar nota" }).click();
-  await expect(noteDialog).not.toBeVisible();
-  await expect(pageA.getByText("Se indica endodoncia").first()).toBeVisible({ timeout: 15_000 });
-  await expect(pageA.getByText("K04.0").first()).toBeVisible();
+  await pageA.getByRole("option", { name: /K04\.0\s+Pulpitis/ }).click()
+  await noteDialog.getByRole("button", { name: "Guardar nota" }).click()
+  await expect(noteDialog).not.toBeVisible()
+  await expect(pageA.getByText("Se indica endodoncia").first()).toBeVisible({ timeout: 15_000 })
+  await expect(pageA.getByText("K04.0").first()).toBeVisible()
 
   // Odontograma: pieza 16 con caries en oclusal; persiste tras recargar.
-  const entry = await api(pageA, "POST", `/api/patients/${patientId}/odontogram/entries`, orgA.slug, {
-    toothNumber: 16,
-    condition: "caries",
-    surfaces: ["occlusal"],
-    details: { variant: "enamel" },
-  });
-  expect(entry.status).toBe(201);
-  await pageA.getByRole("tab", { name: "Odontograma", exact: true }).click();
-  await pageA.reload();
-  await waitForHydration(pageA);
-  await pageA.getByRole("tab", { name: "Odontograma", exact: true }).click();
-  const odontogram = await api<{ data: { history: Array<{ toothNumber: number; condition: string; surface: string; details: { variant?: string } }> } }>(pageA, "GET", `/api/patients/${patientId}/odontogram`, orgA.slug);
-  expect(odontogram.status).toBe(200);
-  expect(odontogram.body.data.history).toEqual(expect.arrayContaining([
-    expect.objectContaining({ toothNumber: 16, condition: "caries", surface: "occlusal", details: expect.objectContaining({ variant: "enamel" }) }),
-  ]));
+  const entry = await api(
+    pageA,
+    "POST",
+    `/api/patients/${patientId}/odontogram/entries`,
+    orgA.slug,
+    {
+      toothNumber: 16,
+      condition: "caries",
+      surfaces: ["occlusal"],
+      details: { variant: "enamel" },
+    },
+  )
+  expect(entry.status).toBe(201)
+  await pageA.getByRole("tab", { name: "Odontograma", exact: true }).click()
+  await pageA.reload()
+  await waitForHydration(pageA)
+  await pageA.getByRole("tab", { name: "Odontograma", exact: true }).click()
+  const odontogram = await api<{
+    data: {
+      history: Array<{
+        toothNumber: number
+        condition: string
+        surface: string
+        details: { variant?: string }
+      }>
+    }
+  }>(pageA, "GET", `/api/patients/${patientId}/odontogram`, orgA.slug)
+  expect(odontogram.status).toBe(200)
+  expect(odontogram.body.data.history).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        toothNumber: 16,
+        condition: "caries",
+        surface: "occlusal",
+        details: expect.objectContaining({ variant: "enamel" }),
+      }),
+    ]),
+  )
 
   // Aislamiento: org B no ve el paciente (lista vacía + 404).
-  const contextB = await browser.newContext({ ignoreHTTPSErrors: true });
-  const pageB = await contextB.newPage();
-  await register(pageB, userB);
-  await verifyEmail(pageB, userB.email);
-  await login(pageB, userB);
-  await onboard(pageB, orgB);
-  const listB = await api<{ data: unknown[] }>(pageB, "GET", "/api/patients", orgB.slug);
-  expect(listB.body.data).toEqual([]);
-  const cross = await api(pageB, "GET", `/api/patients/${patientId}`, orgB.slug);
-  expect(cross.status).toBe(404);
+  const contextB = await browser.newContext({ ignoreHTTPSErrors: true })
+  const pageB = await contextB.newPage()
+  await register(pageB, userB)
+  await verifyEmail(pageB, userB.email)
+  await login(pageB, userB)
+  await onboard(pageB, orgB)
+  const listB = await api<{ data: unknown[] }>(pageB, "GET", "/api/patients", orgB.slug)
+  expect(listB.body.data).toEqual([])
+  const cross = await api(pageB, "GET", `/api/patients/${patientId}`, orgB.slug)
+  expect(cross.status).toBe(404)
 
-  await contextA.close();
-  await contextB.close();
-});
+  await contextA.close()
+  await contextB.close()
+})
 
 test("paciente plus: registro en drawer, avatar, atención, plan", async ({ page }) => {
-  const user = { name: "Denta Plus", email: `denta-plus-${run}@test.dev`, password: "secreto-123" };
-  const org = { name: "Clínica Plus", slug: `clinica-plus-${run}` };
-  await register(page, user);
-  await verifyEmail(page, user.email);
-  await login(page, user);
-  await onboard(page, org);
+  const user = { name: "Denta Plus", email: `denta-plus-${run}@test.dev`, password: "secreto-123" }
+  const org = { name: "Clínica Plus", slug: `clinica-plus-${run}` }
+  await register(page, user)
+  await verifyEmail(page, user.email)
+  await login(page, user)
+  await onboard(page, org)
 
-  await gotoHydrated(page, tenant(org.slug, "/patients"));
-  await page.getByRole("button", { name: "Nuevo paciente", exact: true }).click();
-  await expect(page.getByRole("dialog", { name: "Nuevo paciente" })).toBeVisible();
-  await page.getByLabel("Nombre del paciente").fill("Lucía Quispe");
-  await page.getByRole("combobox", { name: "Tipo de documento" }).click();
-  await page.getByRole("option", { name: "DNI", exact: true }).click();
-  await page.getByLabel("Número de documento").fill("87654321");
-  await page.getByLabel("Teléfono", { exact: true }).fill("999432198");
-  await page.getByRole("button", { name: "Siguiente", exact: true }).click();
-  await page.getByLabel("Dirección", { exact: true }).fill("Av. Salud 123");
-  await page.getByRole("button", { name: "Siguiente", exact: true }).click();
-  await page.getByRole("button", { name: "Registrar paciente", exact: true }).click();
-  await expect(page).toHaveURL(/\/patients\/[0-9a-f-]{36}\/triaje$/);
-  const patientId = new URL(page.url()).pathname.split("/").at(-2)!;
-  await page.getByRole("button", { name: "Agregar alergia" }).click();
-  await page.getByLabel("Sustancia").fill("Látex");
-  await page.getByRole("combobox", { name: "Severidad" }).click();
-  await page.getByRole("option", { name: "Severa", exact: true }).click();
-  await page.getByLabel("Motivo de consulta").fill("Dolor en molar inferior");
-  await page.getByRole("button", { name: "Guardar triaje e ir a la ficha", exact: true }).click();
-  await expect(page).toHaveURL(/\/patients\/[0-9a-f-]{36}(?:\?|$)/);
-  await expect(page.getByText(/HC-\d{6}/).first()).toBeVisible();
-  await expect(page.getByLabel("Alertas clínicas").getByText("Alergia: Látex (severa)", { exact: true })).toBeVisible();
-  await page.getByRole("tab", { name: "Historia", exact: true }).click();
-  await expect(page.getByText("Dolor en molar inferior", { exact: true })).toBeVisible();
+  await gotoHydrated(page, tenant(org.slug, "/patients"))
+  await page.getByRole("button", { name: "Nuevo paciente", exact: true }).click()
+  await expect(page.getByRole("dialog", { name: "Nuevo paciente" })).toBeVisible()
+  await page.getByLabel("Nombre del paciente").fill("Lucía Quispe")
+  await page.getByRole("combobox", { name: "Tipo de documento" }).click()
+  await page.getByRole("option", { name: "DNI", exact: true }).click()
+  await page.getByLabel("Número de documento").fill("87654321")
+  await page.getByLabel("Teléfono", { exact: true }).fill("999432198")
+  await page.getByRole("button", { name: "Siguiente", exact: true }).click()
+  await page.getByLabel("Dirección", { exact: true }).fill("Av. Salud 123")
+  await page.getByRole("button", { name: "Siguiente", exact: true }).click()
+  await page.getByRole("button", { name: "Registrar paciente", exact: true }).click()
+  await expect(page).toHaveURL(/\/patients\/[0-9a-f-]{36}\/triaje$/)
+  const patientId = new URL(page.url()).pathname.split("/").at(-2)!
+  await page.getByRole("button", { name: "Agregar alergia" }).click()
+  await page.getByLabel("Sustancia").fill("Látex")
+  await page.getByRole("combobox", { name: "Severidad" }).click()
+  await page.getByRole("option", { name: "Severa", exact: true }).click()
+  await page.getByLabel("Motivo de consulta").fill("Dolor en molar inferior")
+  await page.getByRole("button", { name: "Guardar triaje e ir a la ficha", exact: true }).click()
+  await expect(page).toHaveURL(/\/patients\/[0-9a-f-]{36}(?:\?|$)/)
+  await expect(page.getByText(/HC-\d{6}/).first()).toBeVisible()
+  await expect(
+    page.getByLabel("Alertas clínicas").getByText("Alergia: Látex (severa)", { exact: true }),
+  ).toBeVisible()
+  await page.getByRole("tab", { name: "Historia", exact: true }).click()
+  await expect(page.getByText("Dolor en molar inferior", { exact: true })).toBeVisible()
 
-  const uploaded = await page.evaluate(async ({ apiBase, patientId, slug }) => {
-    const canvas = new OffscreenCanvas(64, 64);
-    const context = canvas.getContext("2d")!;
-    context.fillStyle = "#0d9488";
-    context.fillRect(0, 0, 64, 64);
-    const form = new FormData();
-    form.append("file", await canvas.convertToBlob({ type: "image/png" }), "avatar.png");
-    const response = await fetch(`${apiBase}/api/patients/${patientId}/avatar`, {
-      method: "POST",
-      credentials: "include",
-      headers: { "x-odentia-org": slug },
-      body: form,
-    });
-    return response.status;
-  }, { apiBase: API, patientId, slug: org.slug });
-  expect(uploaded).toBe(201);
-  await page.reload();
-  await waitForHydration(page);
-  await expect(page.locator("header").getByRole("img", { name: "Foto de Lucía Quispe" })).toBeVisible();
+  const uploaded = await page.evaluate(
+    async ({ apiBase, patientId, slug }) => {
+      const canvas = new OffscreenCanvas(64, 64)
+      const context = canvas.getContext("2d")!
+      context.fillStyle = "#0d9488"
+      context.fillRect(0, 0, 64, 64)
+      const form = new FormData()
+      form.append("file", await canvas.convertToBlob({ type: "image/png" }), "avatar.png")
+      const response = await fetch(`${apiBase}/api/patients/${patientId}/avatar`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "x-odentia-org": slug },
+        body: form,
+      })
+      return response.status
+    },
+    { apiBase: API, patientId, slug: org.slug },
+  )
+  expect(uploaded).toBe(201)
+  await page.reload()
+  await waitForHydration(page)
+  await expect(
+    page.locator("header").getByRole("img", { name: "Foto de Lucía Quispe" }),
+  ).toBeVisible()
 
-  const catalog = await api<{ data: { id: string; code: string; name: string }[] }>(page, "GET", "/api/services", org.slug);
-  const endodontics = catalog.body.data.find((service) => service.code === "ENDODONCIA")!;
-  const budget = await api<{ data: { id: string } }>(page, "POST", `/api/patients/${patientId}/budgets`, org.slug, {
-    title: "Rehabilitación de Lucía", currency: "PEN",
-  });
-  expect(budget.status).toBe(201);
-  const plan = await api<{ data: { id: string } }>(page, "POST", `/api/patients/${patientId}/plan/items`, org.slug, {
-    budgetId: budget.body.data.id,
-    serviceId: endodontics.id,
-    toothNumber: 36,
-    diagnosisCode: "K04.0",
-  });
-  expect(plan.status).toBe(201);
-  expect((await api(page, "POST", `/api/patients/${patientId}/budgets/${budget.body.data.id}/present`, org.slug, {})).status).toBe(200);
-  expect((await api(page, "POST", `/api/patients/${patientId}/budgets/${budget.body.data.id}/decision`, org.slug, {
-    acceptedItemIds: [plan.body.data.id], acceptedByName: "Lucía Quispe",
-  })).status).toBe(200);
+  const catalog = await api<{ data: { id: string; code: string; name: string }[] }>(
+    page,
+    "GET",
+    "/api/services",
+    org.slug,
+  )
+  const endodontics = catalog.body.data.find((service) => service.code === "ENDODONCIA")!
+  const budget = await api<{ data: { id: string } }>(
+    page,
+    "POST",
+    `/api/patients/${patientId}/budgets`,
+    org.slug,
+    {
+      title: "Rehabilitación de Lucía",
+      currency: "PEN",
+    },
+  )
+  expect(budget.status).toBe(201)
+  const plan = await api<{ data: { id: string } }>(
+    page,
+    "POST",
+    `/api/patients/${patientId}/plan/items`,
+    org.slug,
+    {
+      budgetId: budget.body.data.id,
+      serviceId: endodontics.id,
+      toothNumber: 36,
+      diagnosisCode: "K04.0",
+    },
+  )
+  expect(plan.status).toBe(201)
+  expect(
+    (
+      await api(
+        page,
+        "POST",
+        `/api/patients/${patientId}/budgets/${budget.body.data.id}/present`,
+        org.slug,
+        {},
+      )
+    ).status,
+  ).toBe(200)
+  expect(
+    (
+      await api(
+        page,
+        "POST",
+        `/api/patients/${patientId}/budgets/${budget.body.data.id}/decision`,
+        org.slug,
+        {
+          acceptedItemIds: [plan.body.data.id],
+          acceptedByName: "Lucía Quispe",
+        },
+      )
+    ).status,
+  ).toBe(200)
 
   // El asistente crea la atención únicamente al confirmar, con el tratamiento aún pendiente.
-  await page.getByRole("button", { name: "Nueva atención", exact: true }).first().click();
-  const newEncounter = page.getByRole("dialog", { name: "Nueva atención", exact: true });
-  await newEncounter.getByLabel("Motivo de la atención").fill("Tratamiento endodóntico");
-  await newEncounter.getByRole("button", { name: "Continuar", exact: true }).click();
-  await newEncounter.getByRole("checkbox", { name: new RegExp(endodontics.name) }).check();
-  await newEncounter.getByRole("button", { name: "Continuar", exact: true }).click();
-  const creatingEncounter = page.waitForResponse((response) =>
-    response.url() === `${API}/api/patients/${patientId}/encounters` && response.request().method() === "POST",
-  );
-  await newEncounter.getByRole("button", { name: "Crear atención", exact: true }).click();
-  const createdEncounter = await creatingEncounter;
-  expect(createdEncounter.status()).toBe(201);
-  const encounter = await createdEncounter.json() as { data: { id: string } };
-  const encounterPath = `/api/patients/${patientId}/encounters/${encounter.data.id}`;
-  await expect(page).toHaveURL(new RegExp(`/encounters/${encounter.data.id}$`));
-  await waitForHydration(page);
-  const linked = await api<{ data: { plannedItems: Array<{ id: string; status: string }>; procedures: unknown[] } }>(page, "GET", encounterPath, org.slug);
-  expect(linked.body.data.plannedItems).toEqual(expect.arrayContaining([expect.objectContaining({ id: plan.body.data.id, status: "pendiente" })]));
-  expect(linked.body.data.procedures).toEqual([]);
+  await page.getByRole("button", { name: "Nueva atención", exact: true }).first().click()
+  const newEncounter = page.getByRole("dialog", { name: "Nueva atención", exact: true })
+  await newEncounter.getByLabel("Motivo de la atención").fill("Tratamiento endodóntico")
+  await newEncounter.getByRole("button", { name: "Continuar", exact: true }).click()
+  await newEncounter.getByRole("checkbox", { name: new RegExp(endodontics.name) }).check()
+  await newEncounter.getByRole("button", { name: "Continuar", exact: true }).click()
+  const creatingEncounter = page.waitForResponse(
+    (response) =>
+      response.url() === `${API}/api/patients/${patientId}/encounters` &&
+      response.request().method() === "POST",
+  )
+  await newEncounter.getByRole("button", { name: "Crear atención", exact: true }).click()
+  const createdEncounter = await creatingEncounter
+  expect(createdEncounter.status()).toBe(201)
+  const encounter = (await createdEncounter.json()) as { data: { id: string } }
+  const encounterPath = `/api/patients/${patientId}/encounters/${encounter.data.id}`
+  await expect(page).toHaveURL(new RegExp(`/encounters/${encounter.data.id}$`))
+  await waitForHydration(page)
+  const linked = await api<{
+    data: { plannedItems: Array<{ id: string; status: string }>; procedures: unknown[] }
+  }>(page, "GET", encounterPath, org.slug)
+  expect(linked.body.data.plannedItems).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ id: plan.body.data.id, status: "pendiente" }),
+    ]),
+  )
+  expect(linked.body.data.procedures).toEqual([])
 
   // Regresión: guardar sin cambios no debe bloquear el siguiente autoguardado.
-  await page.getByRole("button", { name: "Continuar a tratamientos", exact: true }).click();
-  await page.getByRole("button", { name: "Continuar al cierre", exact: true }).click();
-  const saveDraft = page.getByRole("button", { name: "Guardar borrador", exact: true });
-  await saveDraft.click();
-  await expect(saveDraft).toBeEnabled();
-  const saved = page.waitForResponse((response) =>
-    response.url() === `${API}${encounterPath}` && response.request().method() === "PATCH",
-  );
-  await page.getByRole("button", { name: "Editar evolución", exact: true }).click();
-  await page.getByLabel("Evolución (máx. 10000)").fill("Tratamiento realizado sin complicaciones");
-  await saved;
-  await page.getByRole("dialog", { name: "Editar datos de la atención" }).getByRole("button", { name: "Guardar cambios", exact: true }).click();
-  await page.reload();
-  await waitForHydration(page);
-  await page.getByRole("button", { name: "Continuar a tratamientos", exact: true }).click();
-  await page.getByRole("button", { name: "Continuar al cierre", exact: true }).click();
-  await expect(page.getByText("Tratamiento realizado sin complicaciones", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Continuar a tratamientos", exact: true }).click()
+  await page.getByRole("button", { name: "Continuar al cierre", exact: true }).click()
+  const saveDraft = page.getByRole("button", { name: "Guardar borrador", exact: true })
+  await saveDraft.click()
+  await expect(saveDraft).toBeEnabled()
+  const saved = page.waitForResponse(
+    (response) =>
+      response.url() === `${API}${encounterPath}` && response.request().method() === "PATCH",
+  )
+  await page.getByRole("button", { name: "Editar evolución", exact: true }).click()
+  await page.getByLabel("Evolución (máx. 10000)").fill("Tratamiento realizado sin complicaciones")
+  await saved
+  await page
+    .getByRole("dialog", { name: "Editar datos de la atención" })
+    .getByRole("button", { name: "Guardar cambios", exact: true })
+    .click()
+  await page.reload()
+  await waitForHydration(page)
+  await page.getByRole("button", { name: "Continuar a tratamientos", exact: true }).click()
+  await page.getByRole("button", { name: "Continuar al cierre", exact: true }).click()
+  await expect(
+    page.getByText("Tratamiento realizado sin complicaciones", { exact: true }),
+  ).toBeVisible()
 
   const procedure = await api(page, "POST", `${encounterPath}/procedures`, org.slug, {
     toothNumber: 36,
     diagnosisCode: "K04.0",
     planItemId: plan.body.data.id,
-  });
-  expect(procedure.status).toBe(201);
-  const finalized = await api(page, "POST", `${encounterPath}/finalize`, org.slug, {});
-  expect(finalized.status).toBe(200);
+  })
+  expect(procedure.status).toBe(201)
+  const finalized = await api(page, "POST", `${encounterPath}/finalize`, org.slug, {})
+  expect(finalized.status).toBe(200)
 
-  await gotoHydrated(page, tenant(org.slug, `/patients/${patientId}?tab=historia`));
-  await expect(page.getByText("Tratamiento endodóntico", { exact: true }).first()).toBeVisible();
-  await page.getByRole("button", { name: "Expandir", exact: true }).click();
-  await expect(page.getByText(endodontics.name, { exact: true }).first()).toBeVisible();
-  await expect(page.getByText("Tratamiento realizado sin complicaciones", { exact: true }).first()).toBeVisible();
+  await gotoHydrated(page, tenant(org.slug, `/patients/${patientId}?tab=historia`))
+  await expect(page.getByText("Tratamiento endodóntico", { exact: true }).first()).toBeVisible()
+  await page.getByRole("button", { name: "Expandir", exact: true }).click()
+  await expect(page.getByText(endodontics.name, { exact: true }).first()).toBeVisible()
+  await expect(
+    page.getByText("Tratamiento realizado sin complicaciones", { exact: true }).first(),
+  ).toBeVisible()
 
   // Agrupación por tratamiento: secciones por atención + generales.
-  await page.getByRole("button", { name: "Tratamiento", exact: true }).click();
-  await expect(page.getByRole("heading").filter({ hasText: /^Atención / }).first()).toBeVisible();
-  await expect(page.getByText("Generales", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "Día", exact: true }).click();
-  await expect(page.getByText("Generales", { exact: true })).toBeHidden();
+  await page.getByRole("button", { name: "Tratamiento", exact: true }).click()
+  await expect(
+    page
+      .getByRole("heading")
+      .filter({ hasText: /^Atención / })
+      .first(),
+  ).toBeVisible()
+  await expect(page.getByText("Generales", { exact: true })).toBeVisible()
+  await page.getByRole("button", { name: "Día", exact: true }).click()
+  await expect(page.getByText("Generales", { exact: true })).toBeHidden()
 
   // Subida de imagen desde la UI: drawer con dropzone y galería con Attachment.
-  await page.getByRole("tab", { name: "Imágenes", exact: true }).click();
-  await page.getByRole("button", { name: "Subir imagen o documento", exact: true }).click();
-  const uploadDrawer = page.getByRole("dialog", { name: "Subir imagen o documento" });
+  await page.getByRole("tab", { name: "Imágenes", exact: true }).click()
+  await page.getByRole("button", { name: "Subir imagen o documento", exact: true }).click()
+  const uploadDrawer = page.getByRole("dialog", { name: "Subir imagen o documento" })
   await uploadDrawer.locator('input[type="file"]').setInputFiles({
     name: "rx-control.png",
     mimeType: "image/png",
@@ -320,21 +413,29 @@ test("paciente plus: registro en drawer, avatar, atención, plan", async ({ page
       "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
       "base64",
     ),
-  });
-  await uploadDrawer.getByLabel("Título", { exact: true }).fill("RX de control");
-  await uploadDrawer.getByRole("button", { name: /^Pieza 36:/ }).click();
-  await uploadDrawer.getByRole("button", { name: /^Pieza 46:/ }).click();
-  const tags = uploadDrawer.getByRole("textbox", { name: /^Etiquetas/ });
-  await tags.fill("Control 1");
-  await tags.press("Enter");
-  await tags.fill("CONTROL-1");
-  await tags.press("Enter");
-  await uploadDrawer.getByRole("button", { name: "Subir", exact: true }).click();
-  await expect(uploadDrawer).toBeHidden();
-  await expect(page.getByText("RX de control", { exact: true }).first()).toBeVisible();
-  const documents = await api<{ data: Array<{ label: string; toothNumbers: number[]; tags: string[] }> }>(page, "GET", `/api/patients/${patientId}/documents`, org.slug);
-  expect(documents.body.data.find((doc) => doc.label === "RX de control")).toMatchObject({ toothNumbers: [36, 46], tags: ["control-1"] });
-  await gotoHydrated(page, tenant(org.slug, `/patients/${patientId}?tab=plan&budgetId=${budget.body.data.id}`));
-  const item = page.getByRole("row").filter({ hasText: endodontics.name });
-  await expect(item.getByText("Realizado", { exact: true })).toBeVisible();
-});
+  })
+  await uploadDrawer.getByLabel("Título", { exact: true }).fill("RX de control")
+  await uploadDrawer.getByRole("button", { name: /^Pieza 36:/ }).click()
+  await uploadDrawer.getByRole("button", { name: /^Pieza 46:/ }).click()
+  const tags = uploadDrawer.getByRole("textbox", { name: /^Etiquetas/ })
+  await tags.fill("Control 1")
+  await tags.press("Enter")
+  await tags.fill("CONTROL-1")
+  await tags.press("Enter")
+  await uploadDrawer.getByRole("button", { name: "Subir", exact: true }).click()
+  await expect(uploadDrawer).toBeHidden()
+  await expect(page.getByText("RX de control", { exact: true }).first()).toBeVisible()
+  const documents = await api<{
+    data: Array<{ label: string; toothNumbers: number[]; tags: string[] }>
+  }>(page, "GET", `/api/patients/${patientId}/documents`, org.slug)
+  expect(documents.body.data.find((doc) => doc.label === "RX de control")).toMatchObject({
+    toothNumbers: [36, 46],
+    tags: ["control-1"],
+  })
+  await gotoHydrated(
+    page,
+    tenant(org.slug, `/patients/${patientId}?tab=plan&budgetId=${budget.body.data.id}`),
+  )
+  const item = page.getByRole("row").filter({ hasText: endodontics.name })
+  await expect(item.getByText("Realizado", { exact: true })).toBeVisible()
+})

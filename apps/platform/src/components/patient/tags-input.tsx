@@ -1,20 +1,20 @@
-import { useId, useRef, useState } from "react";
-import { MAX_TAGS, MAX_TAG_LENGTH, normalizeTags } from "@odentia/clinical";
-import { Badge, Button, Field, FieldError, FieldLabel, Input } from "@odentia/ui";
-import { X } from "lucide-react";
+import { MAX_TAG_LENGTH, MAX_TAGS, normalizeTags } from "@odentia/clinical"
+import { Badge, Button, Field, FieldError, FieldLabel, Input } from "@odentia/ui"
+import { X } from "lucide-react"
+import { useId, useRef, useState } from "react"
 
 export interface TagsInputProps {
-  value: string[];
-  onChange: (tags: string[]) => void;
-  disabled?: boolean;
-  suggestions?: string[];
+  value: string[]
+  onChange: (tags: string[]) => void
+  disabled?: boolean
+  suggestions?: string[]
 }
 
 function canonicalTag(raw: string): string | null {
   try {
-    return normalizeTags([raw])[0] ?? null;
+    return normalizeTags([raw])[0] ?? null
   } catch {
-    return null;
+    return null
   }
 }
 
@@ -23,40 +23,40 @@ function canonicalTag(raw: string): string | null {
  * de etiquetas existentes. Los duplicados canónicos no se crean.
  */
 export function TagsInput({ value, onChange, disabled = false, suggestions = [] }: TagsInputProps) {
-  const inputId = useId();
-  const inputRef = useRef<HTMLInputElement>(null);
-  const [draft, setDraft] = useState("");
-  const [hint, setHint] = useState<string | null>(null);
+  const inputId = useId()
+  const inputRef = useRef<HTMLInputElement>(null)
+  const [draft, setDraft] = useState("")
+  const [hint, setHint] = useState<string | null>(null)
 
   const commit = (raw: string) => {
-    if (!raw.trim()) return false;
+    if (!raw.trim()) return false
     try {
-      const next = normalizeTags([...value, raw]);
-      const duplicate = next.length === value.length;
-      onChange(next);
-      inputRef.current?.setCustomValidity("");
-      setDraft("");
-      setHint(duplicate ? "La etiqueta ya estaba agregada; no se ha duplicado." : null);
-      return true;
+      const next = normalizeTags([...value, raw])
+      const duplicate = next.length === value.length
+      onChange(next)
+      inputRef.current?.setCustomValidity("")
+      setDraft("")
+      setHint(duplicate ? "La etiqueta ya estaba agregada; no se ha duplicado." : null)
+      return true
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Etiqueta inválida";
-      inputRef.current?.setCustomValidity(message);
-      setHint(message);
-      return false;
+      const message = error instanceof Error ? error.message : "Etiqueta inválida"
+      inputRef.current?.setCustomValidity(message)
+      setHint(message)
+      return false
     }
-  };
+  }
 
   const remove = (tag: string) => {
-    onChange(value.filter((t) => t !== tag));
-    setHint(null);
-  };
+    onChange(value.filter((t) => t !== tag))
+    setHint(null)
+  }
 
-  const draftCanon = draft.trim() ? (canonicalTag(draft) ?? draft.trim().toLowerCase()) : null;
+  const draftCanon = draft.trim() ? (canonicalTag(draft) ?? draft.trim().toLowerCase()) : null
   const visibleSuggestions = suggestions
     .map((s) => canonicalTag(s))
     .filter((canon): canon is string => !!canon && !value.includes(canon))
     .filter((canon) => !draftCanon || canon.includes(draftCanon))
-    .slice(0, 8);
+    .slice(0, 8)
 
   return (
     <Field>
@@ -95,20 +95,20 @@ export function TagsInput({ value, onChange, disabled = false, suggestions = [] 
           value={draft}
           disabled={disabled || value.length >= MAX_TAGS}
           onChange={(e) => {
-            setDraft(e.currentTarget.value);
-            inputRef.current?.setCustomValidity("");
-            setHint(null);
+            setDraft(e.currentTarget.value)
+            inputRef.current?.setCustomValidity("")
+            setHint(null)
           }}
           onKeyDown={(e) => {
             if (e.key === "Enter" || e.key === ",") {
-              e.preventDefault();
-              commit(draft);
+              e.preventDefault()
+              commit(draft)
             } else if (e.key === "Backspace" && draft === "" && value.length > 0) {
-              remove(value[value.length - 1]!);
+              remove(value[value.length - 1]!)
             }
           }}
           onBlur={() => {
-            if (draft.trim()) commit(draft);
+            if (draft.trim()) commit(draft)
           }}
           placeholder="Escribe y pulsa Enter"
           maxLength={200}
@@ -150,5 +150,5 @@ export function TagsInput({ value, onChange, disabled = false, suggestions = [] 
         </p>
       )}
     </Field>
-  );
+  )
 }

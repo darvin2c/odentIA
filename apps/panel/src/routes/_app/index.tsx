@@ -1,32 +1,32 @@
-import { useQuery } from "@tanstack/react-query";
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { Button } from "@odentia/ui";
-import { LoadingState, PageHeader } from "@odentia/ui-patterns";
-import { Building2 } from "lucide-react";
-import { useEffect } from "react";
-import { authClient } from "../../lib/auth-client";
-import { tenantUrl } from "../../lib/host";
+import { Button } from "@odentia/ui"
+import { LoadingState, PageHeader } from "@odentia/ui-patterns"
+import { useQuery } from "@tanstack/react-query"
+import { createFileRoute, useNavigate } from "@tanstack/react-router"
+import { Building2 } from "lucide-react"
+import { useEffect } from "react"
+import { authClient } from "../../lib/auth-client"
+import { tenantUrl } from "../../lib/host"
 
 export const Route = createFileRoute("/_app/")({
   component: OrgsPage,
-});
+})
 
 function OrgsPage() {
-  const navigate = useNavigate();
+  const navigate = useNavigate()
   const orgsQuery = useQuery({
     queryKey: ["orgs"],
     queryFn: async () => (await authClient.organization.list()).data ?? [],
-  });
+  })
 
-  const orgs = orgsQuery.data ?? [];
+  const orgs = orgsQuery.data ?? []
 
   // Usuarios nuevos (p. ej. recién llegados de Google con callbackURL "/")
   // van directo al wizard de onboarding cuando aún no tienen organizaciones.
   useEffect(() => {
     if (!orgsQuery.isLoading && !orgsQuery.error && orgs.length === 0) {
-      void navigate({ to: "/onboarding" });
+      void navigate({ to: "/onboarding" })
     }
-  }, [orgsQuery.isLoading, orgsQuery.error, orgs.length, navigate]);
+  }, [orgsQuery.isLoading, orgsQuery.error, orgs.length, navigate])
 
   return (
     <>
@@ -65,5 +65,5 @@ function OrgsPage() {
         )}
       </div>
     </>
-  );
+  )
 }

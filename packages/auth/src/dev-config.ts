@@ -9,9 +9,9 @@
  * Debe listar las tablas: user, session, account, verification,
  * organization, member, invitation.
  */
-import { betterAuth } from "better-auth";
-import { drizzleAdapter } from "better-auth/adapters/drizzle";
-import { organization } from "better-auth/plugins";
+import { betterAuth } from "better-auth"
+import { drizzleAdapter } from "better-auth/adapters/drizzle"
+import { organization } from "better-auth/plugins"
 
 export const auth = betterAuth({
   appName: "odentIA",
@@ -20,4 +20,4 @@ export const auth = betterAuth({
   database: drizzleAdapter({} as never, { provider: "pg" }),
   emailAndPassword: { enabled: true, requireEmailVerification: true },
   plugins: [organization()],
-});
+})

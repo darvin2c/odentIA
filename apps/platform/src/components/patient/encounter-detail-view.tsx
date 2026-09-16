@@ -1,39 +1,39 @@
-import { conditionLabel, surfaceLabel } from "@odentia/clinical";
-import { useQuery } from "@tanstack/react-query";
-import { Badge } from "@odentia/ui";
-import { useCanWrite } from "../../lib/crm";
-import { apiFetch } from "../../lib/api";
+import { conditionLabel, surfaceLabel } from "@odentia/clinical"
+import { Badge } from "@odentia/ui"
+import { useQuery } from "@tanstack/react-query"
+import { apiFetch } from "../../lib/api"
+import { useCanWrite } from "../../lib/crm"
 import {
-  encounterStatusLabel,
-  statusLabel,
   type EncounterDetail,
+  encounterStatusLabel,
   type PatientDocument,
-} from "../../lib/patients";
-import { EncounterAddendumDrawer } from "./encounter-addendum-drawer";
+  statusLabel,
+} from "../../lib/patients"
+import { EncounterAddendumDrawer } from "./encounter-addendum-drawer"
 
 /** Las URL firmadas expiran: se consideran frescas 10 min y luego se regeneran. */
-const SIGNED_URL_STALE_MS = 10 * 60 * 1000;
+const SIGNED_URL_STALE_MS = 10 * 60 * 1000
 
 function formatDateTime(iso: string | null): string {
-  if (!iso) return "—";
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return "—";
+  if (!iso) return "—"
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return "—"
   return date.toLocaleString("es-PE", {
     day: "2-digit",
     month: "2-digit",
     year: "numeric",
     hour: "2-digit",
     minute: "2-digit",
-  });
+  })
 }
 
 /** Identificador corto del odontólogo tratante (primeros 8 caracteres). */
 function shortId(id: string): string {
-  return id.length > 8 ? id.slice(0, 8) : id;
+  return id.length > 8 ? id.slice(0, 8) : id
 }
 
 function isImageDoc(doc: PatientDocument): boolean {
-  return doc.contentType.startsWith("image/");
+  return doc.contentType.startsWith("image/")
 }
 
 function DocumentAttachment({ patientId, doc }: { patientId: string; doc: PatientDocument }) {
@@ -43,8 +43,8 @@ function DocumentAttachment({ patientId, doc }: { patientId: string; doc: Patien
       apiFetch<{ data: { url: string } }>(`/api/patients/${patientId}/documents/${doc.id}/url`),
     staleTime: SIGNED_URL_STALE_MS,
     gcTime: 30 * 60 * 1000,
-  });
-  const url = signed.data?.data.url;
+  })
+  const url = signed.data?.data.url
   return (
     <li className="flex items-center gap-3">
       {isImageDoc(doc) && url ? (
@@ -61,7 +61,9 @@ function DocumentAttachment({ patientId, doc }: { patientId: string; doc: Patien
         <span className="font-medium">{doc.label}</span>
         <span className="text-xs text-muted-foreground">
           {doc.category}
-          {doc.toothNumbers.length > 0 ? ` · ${doc.toothNumbers.map((t) => `Pieza ${t}`).join(", ")}` : ""}
+          {doc.toothNumbers.length > 0
+            ? ` · ${doc.toothNumbers.map((t) => `Pieza ${t}`).join(", ")}`
+            : ""}
           {doc.planItemId ? ` · Vinculado al presupuesto (${doc.planItemId.slice(0, 8)})` : ""}
           {" · "}
           <time dateTime={doc.createdAt}>{formatDateTime(doc.createdAt)}</time>
@@ -75,7 +77,9 @@ function DocumentAttachment({ patientId, doc }: { patientId: string; doc: Patien
             ))}
           </span>
         )}
-        {signed.isLoading && <span className="text-xs text-muted-foreground">Cargando enlace…</span>}
+        {signed.isLoading && (
+          <span className="text-xs text-muted-foreground">Cargando enlace…</span>
+        )}
         {signed.isError && (
           <span role="alert" className="text-xs text-destructive">
             {signed.error.message}
@@ -103,7 +107,7 @@ function DocumentAttachment({ patientId, doc }: { patientId: string; doc: Patien
         ) : null}
       </div>
     </li>
-  );
+  )
 }
 
 /**
@@ -116,63 +120,68 @@ export function EncounterDetailView({
   detail,
   showAddendum = true,
 }: {
-  patientId: string;
-  detail: EncounterDetail;
-  showAddendum?: boolean;
+  patientId: string
+  detail: EncounterDetail
+  showAddendum?: boolean
 }) {
-  const canWrite = useCanWrite();
-  const { encounter, teeth, procedures, notes, odontogramEntries, documents, addenda } = detail;
-  const canAddendum = showAddendum && encounter.status === "finalizada" && canWrite;
+  const canWrite = useCanWrite()
+  const { encounter, teeth, procedures, notes, odontogramEntries, documents, addenda } = detail
+  const canAddendum = showAddendum && encounter.status === "finalizada" && canWrite
 
   return (
     <div className="flex min-w-0 flex-col gap-4">
-      <section aria-label="Datos de la atención" className="flex flex-col gap-3 rounded-lg border p-4">
-      <dl className="grid min-w-0 gap-3 sm:grid-cols-2">
-        <div>
-          <dt className="text-xs font-medium text-muted-foreground">Motivo</dt>
-          <dd className="whitespace-pre-wrap text-sm">{encounter.reason ?? "—"}</dd>
-        </div>
-        <div>
-          <dt className="text-xs font-medium text-muted-foreground">Evolución</dt>
-          <dd className="whitespace-pre-wrap text-sm">{encounter.evolution ?? "—"}</dd>
-        </div>
-        <div>
-          <dt className="text-xs font-medium text-muted-foreground">Indicaciones</dt>
-          <dd className="whitespace-pre-wrap text-sm">{encounter.indications ?? "—"}</dd>
-        </div>
-        <div>
-          <dt className="text-xs font-medium text-muted-foreground">Paso siguiente</dt>
-          <dd className="whitespace-pre-wrap text-sm">{encounter.nextStep ?? "—"}</dd>
-        </div>
-        <div>
-          <dt className="text-xs font-medium text-muted-foreground">Próxima revisión sugerida (sin reserva)</dt>
-          <dd className="text-sm">
-            {encounter.nextAppointmentAt ? (
-              <time dateTime={encounter.nextAppointmentAt}>
-                {formatDateTime(encounter.nextAppointmentAt)}
-              </time>
-            ) : (
-              "—"
-            )}
-          </dd>
-        </div>
-        <div>
-          <dt className="text-xs font-medium text-muted-foreground">Odontólogo</dt>
-          <dd className="text-sm">{shortId(encounter.dentistUserId)}</dd>
-        </div>
-        <div>
-          <dt className="text-xs font-medium text-muted-foreground">Estado</dt>
-          <dd className="text-sm">
-            <Badge variant="outline">{encounterStatusLabel(encounter.status)}</Badge>
-          </dd>
-        </div>
-        <div>
-          <dt className="text-xs font-medium text-muted-foreground">Piezas tratadas</dt>
-          <dd className="text-sm">
-            {teeth.length === 0 ? "—" : teeth.map((t) => `Pieza ${t}`).join(", ")}
-          </dd>
-        </div>
-      </dl>
+      <section
+        aria-label="Datos de la atención"
+        className="flex flex-col gap-3 rounded-lg border p-4"
+      >
+        <dl className="grid min-w-0 gap-3 sm:grid-cols-2">
+          <div>
+            <dt className="text-xs font-medium text-muted-foreground">Motivo</dt>
+            <dd className="whitespace-pre-wrap text-sm">{encounter.reason ?? "—"}</dd>
+          </div>
+          <div>
+            <dt className="text-xs font-medium text-muted-foreground">Evolución</dt>
+            <dd className="whitespace-pre-wrap text-sm">{encounter.evolution ?? "—"}</dd>
+          </div>
+          <div>
+            <dt className="text-xs font-medium text-muted-foreground">Indicaciones</dt>
+            <dd className="whitespace-pre-wrap text-sm">{encounter.indications ?? "—"}</dd>
+          </div>
+          <div>
+            <dt className="text-xs font-medium text-muted-foreground">Paso siguiente</dt>
+            <dd className="whitespace-pre-wrap text-sm">{encounter.nextStep ?? "—"}</dd>
+          </div>
+          <div>
+            <dt className="text-xs font-medium text-muted-foreground">
+              Próxima revisión sugerida (sin reserva)
+            </dt>
+            <dd className="text-sm">
+              {encounter.nextAppointmentAt ? (
+                <time dateTime={encounter.nextAppointmentAt}>
+                  {formatDateTime(encounter.nextAppointmentAt)}
+                </time>
+              ) : (
+                "—"
+              )}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-xs font-medium text-muted-foreground">Odontólogo</dt>
+            <dd className="text-sm">{shortId(encounter.dentistUserId)}</dd>
+          </div>
+          <div>
+            <dt className="text-xs font-medium text-muted-foreground">Estado</dt>
+            <dd className="text-sm">
+              <Badge variant="outline">{encounterStatusLabel(encounter.status)}</Badge>
+            </dd>
+          </div>
+          <div>
+            <dt className="text-xs font-medium text-muted-foreground">Piezas tratadas</dt>
+            <dd className="text-sm">
+              {teeth.length === 0 ? "—" : teeth.map((t) => `Pieza ${t}`).join(", ")}
+            </dd>
+          </div>
+        </dl>
       </section>
 
       <section aria-label="Procedimientos">
@@ -186,7 +195,9 @@ export function EncounterDetailView({
                 <p>{proc.description}</p>
                 <p className="text-xs text-muted-foreground">
                   {proc.toothNumber != null ? `Pieza ${proc.toothNumber} · ` : ""}
-                  {proc.planItemId ? `Vinculado al presupuesto (${shortId(proc.planItemId)}) · ` : ""}
+                  {proc.planItemId
+                    ? `Vinculado al presupuesto (${shortId(proc.planItemId)}) · `
+                    : ""}
                   <time dateTime={proc.createdAt}>{formatDateTime(proc.createdAt)}</time>
                 </p>
               </li>
@@ -196,15 +207,22 @@ export function EncounterDetailView({
       </section>
 
       <section aria-label="Tratamientos vinculados">
-        <h4 className="mb-2 text-sm font-medium">Tratamientos vinculados ({detail.plannedItems.length})</h4>
+        <h4 className="mb-2 text-sm font-medium">
+          Tratamientos vinculados ({detail.plannedItems.length})
+        </h4>
         {detail.plannedItems.length === 0 ? (
-          <p className="text-sm text-muted-foreground">Sin tratamientos del presupuesto vinculados.</p>
+          <p className="text-sm text-muted-foreground">
+            Sin tratamientos del presupuesto vinculados.
+          </p>
         ) : (
           <ul className="flex flex-col gap-2">
             {detail.plannedItems.map((item) => (
               <li key={item.id} className="border-b pb-2 text-sm last:border-0">
                 <p>
-                  <a className="underline-offset-4 hover:underline" href={`/patients/${patientId}?tab=plan&budgetId=${item.budgetId}`}>
+                  <a
+                    className="underline-offset-4 hover:underline"
+                    href={`/patients/${patientId}?tab=plan&budgetId=${item.budgetId}`}
+                  >
                     {item.title}
                   </a>
                 </p>
@@ -237,7 +255,9 @@ export function EncounterDetailView({
       </section>
 
       <section aria-label="Odontograma vinculado">
-        <h4 className="mb-2 text-sm font-medium">Odontograma vinculado ({odontogramEntries.length})</h4>
+        <h4 className="mb-2 text-sm font-medium">
+          Odontograma vinculado ({odontogramEntries.length})
+        </h4>
         {odontogramEntries.length === 0 ? (
           <p className="text-sm text-muted-foreground">Sin hallazgos de odontograma.</p>
         ) : (
@@ -295,5 +315,5 @@ export function EncounterDetailView({
         ) : null}
       </section>
     </div>
-  );
+  )
 }

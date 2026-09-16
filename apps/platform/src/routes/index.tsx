@@ -1,13 +1,13 @@
-import { createFileRoute, redirect } from "@tanstack/react-router";
-import { requireSession } from "../lib/guards";
-import { orgSlugFromHostname, panelUrl, requestHostname } from "../lib/host";
+import { createFileRoute, redirect } from "@tanstack/react-router"
+import { requireSession } from "../lib/guards"
+import { orgSlugFromHostname, panelUrl, requestHostname } from "../lib/host"
 
 export const Route = createFileRoute("/")({
   beforeLoad: async ({ location }) => {
     if (!orgSlugFromHostname(requestHostname())) {
-      throw redirect({ href: panelUrl("/") });
+      throw redirect({ href: panelUrl("/") })
     }
-    await requireSession(location);
-    throw redirect({ to: "/branches" });
+    await requireSession(location)
+    throw redirect({ to: "/branches" })
   },
-});
+})

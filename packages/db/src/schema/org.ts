@@ -1,4 +1,4 @@
-import { sql } from "drizzle-orm";
+import { sql } from "drizzle-orm"
 import {
   boolean,
   char,
@@ -9,8 +9,8 @@ import {
   timestamp,
   uuid,
   varchar,
-} from "drizzle-orm/pg-core";
-import { organization } from "./auth.js";
+} from "drizzle-orm/pg-core"
+import { organization } from "./auth.js"
 
 export const orgProfile = pgTable("org_profile", {
   organizationId: text("organization_id")
@@ -28,7 +28,7 @@ export const orgProfile = pgTable("org_profile", {
   locale: text("locale").notNull().default("es-PE"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-});
+})
 
 export const branch = pgTable("branch", {
   id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -50,7 +50,7 @@ export const branch = pgTable("branch", {
   isActive: boolean("is_active").notNull().default(true),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-});
+})
 
 export const auditEvent = pgTable(
   "audit_event",
@@ -68,4 +68,4 @@ export const auditEvent = pgTable(
     // Replay SSE: eventos de una org ordenados por tiempo.
     index("audit_event_org_created_idx").on(table.organizationId, table.createdAt),
   ],
-);
+)

@@ -1,34 +1,34 @@
-import { common } from "../common.js";
-import { Button, Calendar as DatePicker, cn } from "@odentia/ui";
-import { es } from "date-fns/locale";
-import { format, subDays } from "date-fns";
+import { Button, cn, Calendar as DatePicker } from "@odentia/ui"
+import { format, subDays } from "date-fns"
+import { es } from "date-fns/locale"
+import { common } from "../common.js"
 
-export type CalendarRange = { from?: string; to?: string };
+export type CalendarRange = { from?: string; to?: string }
 
 export type CalendarProps =
   | {
-      mode: "single";
-      selected?: string;
-      compact?: boolean;
-      onSelect: (value?: string) => void;
+      mode: "single"
+      selected?: string
+      compact?: boolean
+      onSelect: (value?: string) => void
     }
   | {
-      mode: "range";
-      selected?: CalendarRange;
-      compact?: boolean;
-      onSelect: (value: CalendarRange) => void;
-    };
+      mode: "range"
+      selected?: CalendarRange
+      compact?: boolean
+      onSelect: (value: CalendarRange) => void
+    }
 
 /** Día local a medianoche desde una fecha-sola `yyyy-MM-dd` (sin desfase UTC). */
 function parseDateOnly(value?: string): Date | undefined {
-  if (!value) return undefined;
-  const [year, month, day] = value.split("-").map(Number);
-  if (!year || !month || !day) return undefined;
-  return new Date(year, month - 1, day);
+  if (!value) return undefined
+  const [year, month, day] = value.split("-").map(Number)
+  if (!year || !month || !day) return undefined
+  return new Date(year, month - 1, day)
 }
 
 function toDateOnly(value: Date | undefined): string | undefined {
-  return value ? format(value, "yyyy-MM-dd") : undefined;
+  return value ? format(value, "yyyy-MM-dd") : undefined
 }
 
 /** "Hoy" en America/Lima, no en el huso del navegador: los presets de rango
@@ -39,10 +39,10 @@ function todayInLima(): Date {
     year: "numeric",
     month: "numeric",
     day: "numeric",
-  }).formatToParts(new Date());
+  }).formatToParts(new Date())
   const part = (type: Intl.DateTimeFormatPartTypes) =>
-    Number(parts.find((item) => item.type === type)?.value);
-  return new Date(part("year"), part("month") - 1, part("day"));
+    Number(parts.find((item) => item.type === type)?.value)
+  return new Date(part("year"), part("month") - 1, part("day"))
 }
 
 const RANGE_PRESETS = [
@@ -50,7 +50,7 @@ const RANGE_PRESETS = [
   { label: common.filters.last3Days, days: 3 },
   { label: common.filters.last7Days, days: 7 },
   { label: common.filters.last30Days, days: 30 },
-];
+]
 
 /**
  * Envoltorio del `Calendar` estándar (react-day-picker) que conserva la API
@@ -66,14 +66,14 @@ export function Calendar(props: CalendarProps) {
         selected={parseDateOnly(props.selected)}
         onSelect={(day) => props.onSelect(toDateOnly(day))}
       />
-    );
+    )
   }
 
   const selected = {
     from: parseDateOnly(props.selected?.from),
     to: parseDateOnly(props.selected?.to),
-  };
-  const today = todayInLima();
+  }
+  const today = todayInLima()
 
   return (
     <div className="w-full space-y-3">
@@ -93,9 +93,9 @@ export function Calendar(props: CalendarProps) {
         )}
       >
         {RANGE_PRESETS.map((preset) => {
-          const from = format(subDays(today, preset.days - 1), "yyyy-MM-dd");
-          const to = format(today, "yyyy-MM-dd");
-          const active = props.selected?.from === from && props.selected?.to === to;
+          const from = format(subDays(today, preset.days - 1), "yyyy-MM-dd")
+          const to = format(today, "yyyy-MM-dd")
+          const active = props.selected?.from === from && props.selected?.to === to
           return (
             <Button
               key={preset.days}
@@ -108,9 +108,9 @@ export function Calendar(props: CalendarProps) {
             >
               {preset.label}
             </Button>
-          );
+          )
         })}
       </div>
     </div>
-  );
+  )
 }

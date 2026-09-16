@@ -1,32 +1,32 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
-import { useForm } from "@tanstack/react-form";
-import { Badge, Button, Field, FieldError, FieldLabel, Input } from "@odentia/ui";
+import { Badge, Button, Field, FieldError, FieldLabel, Input } from "@odentia/ui"
 import {
   DataTable,
   EmptyState,
   FilterBar,
   FormDrawer,
+  fieldErrorMessages,
   PageHeader,
   RowActions,
-  fieldErrorMessages,
   useListSearch,
-} from "@odentia/ui-patterns";
-import { getCoreRowModel, useReactTable, type ColumnDef } from "@tanstack/react-table";
-import { MessageCircle, Plus, Send } from "lucide-react";
-import { useMemo, useState } from "react";
-import { z } from "zod";
-import { ApiError, apiFetch } from "../../lib/api";
-import { useCanWrite, type ConnectionItem } from "../../lib/crm";
+} from "@odentia/ui-patterns"
+import { useForm } from "@tanstack/react-form"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { createFileRoute } from "@tanstack/react-router"
+import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-table"
+import { MessageCircle, Plus, Send } from "lucide-react"
+import { useMemo, useState } from "react"
+import { z } from "zod"
+import { ApiError, apiFetch } from "../../lib/api"
+import { type ConnectionItem, useCanWrite } from "../../lib/crm"
 
 export const Route = createFileRoute("/_org/settings/channels")({
   component: ChannelsPage,
-});
+})
 
 const telegramSchema = z.object({
   displayName: z.string().min(1, "Ingresa el nombre"),
   botToken: z.string().min(1, "Ingresa el bot token"),
-});
+})
 
 const whatsappSchema = z.object({
   displayName: z.string().min(1, "Ingresa el nombre"),
@@ -35,37 +35,52 @@ const whatsappSchema = z.object({
   accessToken: z.string().min(1, "Requerido"),
   appSecret: z.string().min(1, "Requerido"),
   templates: z.string(),
-});
+})
 
 function ChannelsPage() {
-  const queryClient = useQueryClient();
-  const canWrite = useCanWrite();
-  const [drawerOpen, setDrawerOpen] = useState(false);
-  const [provider, setProvider] = useState<"telegram_bot_api" | "whatsapp_cloud_api">("telegram_bot_api");
-  const [created, setCreated] = useState<{ webhookUrl: string; webhookSecret: string } | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const queryClient = useQueryClient()
+  const canWrite = useCanWrite()
+  const [drawerOpen, setDrawerOpen] = useState(false)
+  const [provider, setProvider] = useState<"telegram_bot_api" | "whatsapp_cloud_api">(
+    "telegram_bot_api",
+  )
+  const [created, setCreated] = useState<{ webhookUrl: string; webhookSecret: string } | null>(null)
+  const [error, setError] = useState<string | null>(null)
 
   const listQuery = useQuery({
     queryKey: ["connections"],
     queryFn: () => apiFetch<{ data: ConnectionItem[] }>("/api/channels/connections"),
-  });
+  })
 
-  const invalidate = () => queryClient.invalidateQueries({ queryKey: ["connections"] });
+  const invalidate = () => queryClient.invalidateQueries({ queryKey: ["connections"] })
 
   const actionMutation = useMutation({
     mutationFn: (path: string) => apiFetch(`/api/channels/connections/${path}`, { method: "POST" }),
     onSuccess: () => void invalidate(),
-    onError: (e) => setError(e instanceof ApiError ? (e.shape.message ?? "Falló la operación") : "Falló la operación"),
-  });
+    onError: (e) =>
+      setError(
+        e instanceof ApiError ? (e.shape.message ?? "Falló la operación") : "Falló la operación",
+      ),
+  })
 
   const tgForm = useForm({
     defaultValues: { displayName: "", botToken: "" },
     validators: { onSubmit: telegramSchema },
-    onSubmit: ({ value }) => createConnection("telegram", "telegram_bot_api", value.displayName, { botToken: value.botToken }),
-  });
+    onSubmit: ({ value }) =>
+      createConnection("telegram", "telegram_bot_api", value.displayName, {
+        botToken: value.botToken,
+      }),
+  })
 
   const waForm = useForm({
-    defaultValues: { displayName: "", phoneNumberId: "", wabaId: "", accessToken: "", appSecret: "", templates: "" },
+    defaultValues: {
+      displayName: "",
+      phoneNumberId: "",
+      wabaId: "",
+      accessToken: "",
+      appSecret: "",
+      templates: "",
+    },
     validators: { onSubmit: whatsappSchema },
     onSubmit: ({ value }) =>
       createConnection("whatsapp", "whatsapp_cloud_api", value.displayName, {
@@ -78,57 +93,68 @@ function ChannelsPage() {
           .map((line) => line.trim())
           .filter(Boolean)
           .map((line) => {
-            const [name, language] = line.split(":").map((s) => s.trim());
-            return { name: name ?? "", language: language ?? "es_PE" };
+            const [name, language] = line.split(":").map((s) => s.trim())
+            return { name: name ?? "", language: language ?? "es_PE" }
           }),
       }),
-  });
+  })
 
-  async function createConnection(channel: string, providerId: string, displayName: string, config: Record<string, unknown>) {
-    setError(null);
+  async function createConnection(
+    channel: string,
+    providerId: string,
+    displayName: string,
+    config: Record<string, unknown>,
+  ) {
+    setError(null)
     try {
-      const res = await apiFetch<{ data: { webhookUrl: string; webhookSecret: string } }>("/api/channels/connections", {
-        method: "POST",
-        body: JSON.stringify({ channel, provider: providerId, displayName, config }),
-      });
-      setCreated(res.data);
-      setDrawerOpen(false);
-      tgForm.reset();
-      waForm.reset();
-      void invalidate();
+      const res = await apiFetch<{ data: { webhookUrl: string; webhookSecret: string } }>(
+        "/api/channels/connections",
+        {
+          method: "POST",
+          body: JSON.stringify({ channel, provider: providerId, displayName, config }),
+        },
+      )
+      setCreated(res.data)
+      setDrawerOpen(false)
+      tgForm.reset()
+      waForm.reset()
+      void invalidate()
     } catch (e) {
-      setError(e instanceof ApiError ? (e.shape.message ?? "No se pudo crear") : "No se pudo crear");
+      setError(e instanceof ApiError ? (e.shape.message ?? "No se pudo crear") : "No se pudo crear")
     }
   }
 
   if (!canWrite) {
-    return <EmptyState title="Sin acceso" description="Solo owner/admin pueden gestionar conexiones." />;
+    return (
+      <EmptyState title="Sin acceso" description="Solo owner/admin pueden gestionar conexiones." />
+    )
   }
 
-  const listSearch = useListSearch();
-  const search = listSearch.get("q") ?? "";
-  const canalFilter = listSearch.get("canal");
-  const estadoFilter = listSearch.get("estado");
-  const sort = listSearch.get("sort");
+  const listSearch = useListSearch()
+  const search = listSearch.get("q") ?? ""
+  const canalFilter = listSearch.get("canal")
+  const estadoFilter = listSearch.get("estado")
+  const sort = listSearch.get("sort")
 
-  const items = listQuery.data?.data ?? [];
+  const items = listQuery.data?.data ?? []
 
   const filtered = useMemo(() => {
-    const needle = search.trim().toLowerCase();
+    const needle = search.trim().toLowerCase()
     const rows = items.filter((conn) => {
-      if (canalFilter && conn.channel !== canalFilter) return false;
-      if (estadoFilter && conn.status !== estadoFilter) return false;
-      if (needle && !`${conn.displayName} ${conn.externalId ?? ""}`.toLowerCase().includes(needle)) return false;
-      return true;
-    });
-    const field = (sort ?? "").replace(/^-/, "");
-    const desc = (sort ?? "").startsWith("-");
+      if (canalFilter && conn.channel !== canalFilter) return false
+      if (estadoFilter && conn.status !== estadoFilter) return false
+      if (needle && !`${conn.displayName} ${conn.externalId ?? ""}`.toLowerCase().includes(needle))
+        return false
+      return true
+    })
+    const field = (sort ?? "").replace(/^-/, "")
+    const desc = (sort ?? "").startsWith("-")
     const compare = (a: ConnectionItem, b: ConnectionItem) => {
-      if (field === "estado") return a.status.localeCompare(b.status);
-      return a.displayName.localeCompare(b.displayName);
-    };
-    return [...rows].sort((a, b) => (desc ? -compare(a, b) : compare(a, b)));
-  }, [items, search, canalFilter, estadoFilter, sort]);
+      if (field === "estado") return a.status.localeCompare(b.status)
+      return a.displayName.localeCompare(b.displayName)
+    }
+    return [...rows].sort((a, b) => (desc ? -compare(a, b) : compare(a, b)))
+  }, [items, search, canalFilter, estadoFilter, sort])
 
   const columns = useMemo<ColumnDef<ConnectionItem>[]>(
     () => [
@@ -155,7 +181,9 @@ function ChannelsPage() {
         accessorKey: "channel",
         header: "Canal",
         cell: ({ row }) => (
-          <Badge variant="secondary">{row.original.channel === "whatsapp" ? "WhatsApp" : "Telegram"}</Badge>
+          <Badge variant="secondary">
+            {row.original.channel === "whatsapp" ? "WhatsApp" : "Telegram"}
+          </Badge>
         ),
       },
       {
@@ -174,8 +202,8 @@ function ChannelsPage() {
           const badges = [
             row.original.capabilities?.templates ? "plantillas" : null,
             row.original.capabilities?.media ? "media" : null,
-          ].filter((b): b is string => b !== null);
-          if (badges.length === 0) return <span className="text-muted-foreground">—</span>;
+          ].filter((b): b is string => b !== null)
+          if (badges.length === 0) return <span className="text-muted-foreground">—</span>
           return (
             <span className="flex flex-wrap gap-1">
               {badges.map((b) => (
@@ -184,14 +212,14 @@ function ChannelsPage() {
                 </Badge>
               ))}
             </span>
-          );
+          )
         },
       },
       {
         id: "actions",
         header: "",
         cell: ({ row }) => {
-          const conn = row.original;
+          const conn = row.original
           return (
             <RowActions
               label={`Acciones de ${conn.displayName}`}
@@ -215,21 +243,21 @@ function ChannelsPage() {
                     },
               ]}
             />
-          );
+          )
         },
       },
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
-  );
+  )
 
   const table = useReactTable({
     data: filtered,
     columns,
     getCoreRowModel: getCoreRowModel(),
-  });
+  })
 
-  const hasCriteria = search.trim() !== "" || Boolean(canalFilter) || Boolean(estadoFilter);
+  const hasCriteria = search.trim() !== "" || Boolean(canalFilter) || Boolean(estadoFilter)
 
   return (
     <div className="flex flex-col gap-6">
@@ -240,7 +268,10 @@ function ChannelsPage() {
           <Button
             type="button"
             className="min-h-11"
-            onClick={() => { setCreated(null); setDrawerOpen(true); }}
+            onClick={() => {
+              setCreated(null)
+              setDrawerOpen(true)
+            }}
           >
             <Plus aria-hidden />
             Nueva conexión
@@ -283,7 +314,10 @@ function ChannelsPage() {
         searchPlaceholder="Buscar conexión"
       />
       {items.length === 0 && !listQuery.isLoading ? (
-        <EmptyState title="Sin conexiones" description="Conecta un bot de Telegram o un número de WhatsApp." />
+        <EmptyState
+          title="Sin conexiones"
+          description="Conecta un bot de Telegram o un número de WhatsApp."
+        />
       ) : filtered.length === 0 ? (
         <EmptyState
           title="Sin resultados"
@@ -303,9 +337,9 @@ function ChannelsPage() {
         submitLabel="Crear"
         cancelLabel="Cancelar"
         onSubmit={(event) => {
-          event.preventDefault();
-          if (provider === "telegram_bot_api") void tgForm.handleSubmit();
-          else void waForm.handleSubmit();
+          event.preventDefault()
+          if (provider === "telegram_bot_api") void tgForm.handleSubmit()
+          else void waForm.handleSubmit()
         }}
       >
         <div className="flex flex-col gap-4">
@@ -327,7 +361,10 @@ function ChannelsPage() {
                 {(field) => (
                   <Field>
                     <FieldLabel>Nombre</FieldLabel>
-                    <Input value={field.state.value} onChange={(e) => field.handleChange(e.target.value)} />
+                    <Input
+                      value={field.state.value}
+                      onChange={(e) => field.handleChange(e.target.value)}
+                    />
                     <FieldError>{fieldErrorMessages(field.state.meta.errors)}</FieldError>
                   </Field>
                 )}
@@ -352,7 +389,10 @@ function ChannelsPage() {
                 {(field) => (
                   <Field>
                     <FieldLabel>Nombre</FieldLabel>
-                    <Input value={field.state.value} onChange={(e) => field.handleChange(e.target.value)} />
+                    <Input
+                      value={field.state.value}
+                      onChange={(e) => field.handleChange(e.target.value)}
+                    />
                     <FieldError>{fieldErrorMessages(field.state.meta.errors)}</FieldError>
                   </Field>
                 )}
@@ -390,5 +430,5 @@ function ChannelsPage() {
         </div>
       </FormDrawer>
     </div>
-  );
+  )
 }

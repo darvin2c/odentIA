@@ -1,31 +1,40 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createFileRoute, getRouteApi } from "@tanstack/react-router";
-import { useForm } from "@tanstack/react-form";
+import { Badge, Button, Field, FieldError, FieldLabel, Input, toast } from "@odentia/ui"
 import {
-  getCoreRowModel,
-  useReactTable,
-  type ColumnDef,
-} from "@tanstack/react-table";
-import { Badge, Button, Field, FieldError, FieldLabel, Input, toast } from "@odentia/ui";
-import { ConfirmDialog, DataTable, EmptyState, ErrorState, FilterBar, FormDrawer, LoadingState, PageHeader, RowActions, common, fieldErrorMessages, useListSearch } from "@odentia/ui-patterns";
-import { Building2, Plus } from "lucide-react";
-import { useMemo, useState } from "react";
-import { z } from "zod";
-import { ApiError, apiFetch } from "../../lib/api";
+  ConfirmDialog,
+  common,
+  DataTable,
+  EmptyState,
+  ErrorState,
+  FilterBar,
+  FormDrawer,
+  fieldErrorMessages,
+  LoadingState,
+  PageHeader,
+  RowActions,
+  useListSearch,
+} from "@odentia/ui-patterns"
+import { useForm } from "@tanstack/react-form"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { createFileRoute, getRouteApi } from "@tanstack/react-router"
+import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-table"
+import { Building2, Plus } from "lucide-react"
+import { useMemo, useState } from "react"
+import { z } from "zod"
+import { ApiError, apiFetch } from "../../lib/api"
 
 export const Route = createFileRoute("/_org/branches")({
   component: BranchesPage,
-});
+})
 
-const orgRouteApi = getRouteApi("/_org");
+const orgRouteApi = getRouteApi("/_org")
 
 interface Branch {
-  id: string;
-  name: string;
-  addressLine1: string | null;
-  district: string | null;
-  phone: string | null;
-  isActive: boolean;
+  id: string
+  name: string
+  addressLine1: string | null
+  district: string | null
+  phone: string | null
+  isActive: boolean
 }
 
 const branchSchema = z.object({
@@ -33,30 +42,30 @@ const branchSchema = z.object({
   addressLine1: z.string(),
   district: z.string(),
   phone: z.string(),
-});
+})
 
-type BranchFormValues = z.infer<typeof branchSchema>;
+type BranchFormValues = z.infer<typeof branchSchema>
 
-const emptyValues: BranchFormValues = { name: "", addressLine1: "", district: "", phone: "" };
+const emptyValues: BranchFormValues = { name: "", addressLine1: "", district: "", phone: "" }
 
 function BranchesPage() {
-  const queryClient = useQueryClient();
-  const listSearch = useListSearch();
-  const search = listSearch.get("q") ?? "";
-  const estadoFilter = listSearch.get("estado");
-  const sort = listSearch.get("sort");
-  const hasCriteria = search !== "" || estadoFilter !== undefined;
+  const queryClient = useQueryClient()
+  const listSearch = useListSearch()
+  const search = listSearch.get("q") ?? ""
+  const estadoFilter = listSearch.get("estado")
+  const sort = listSearch.get("sort")
+  const hasCriteria = search !== "" || estadoFilter !== undefined
 
-  const { org } = orgRouteApi.useRouteContext();
+  const { org } = orgRouteApi.useRouteContext()
 
   const branchesQuery = useQuery({
     queryKey: ["branches"],
     queryFn: () => apiFetch<{ data: Branch[] }>("/api/branches"),
-  });
+  })
 
-  const [drawerOpen, setDrawerOpen] = useState(false);
-  const [editing, setEditing] = useState<Branch | null>(null);
-  const [deactivating, setDeactivating] = useState<Branch | null>(null);
+  const [drawerOpen, setDrawerOpen] = useState(false)
+  const [editing, setEditing] = useState<Branch | null>(null)
+  const [deactivating, setDeactivating] = useState<Branch | null>(null)
 
   const saveMutation = useMutation({
     mutationFn: async (values: BranchFormValues) => {
@@ -65,44 +74,47 @@ function BranchesPage() {
         addressLine1: values.addressLine1 || undefined,
         district: values.district || undefined,
         phone: values.phone || undefined,
-      });
+      })
       if (editing) {
-        await apiFetch(`/api/branches/${editing.id}`, { method: "PATCH", body });
+        await apiFetch(`/api/branches/${editing.id}`, { method: "PATCH", body })
       } else {
-        await apiFetch("/api/branches", { method: "POST", body });
+        await apiFetch("/api/branches", { method: "POST", body })
       }
     },
     onSuccess: async () => {
-      setDrawerOpen(false);
-      setEditing(null);
-      await queryClient.invalidateQueries({ queryKey: ["branches"] });
+      setDrawerOpen(false)
+      setEditing(null)
+      await queryClient.invalidateQueries({ queryKey: ["branches"] })
     },
     onError: (error) => {
-      toast.error(error instanceof ApiError ? (error.shape.message ?? error.message) : error.message);
+      toast.error(
+        error instanceof ApiError ? (error.shape.message ?? error.message) : error.message,
+      )
     },
-  });
+  })
 
   const deactivateMutation = useMutation({
     mutationFn: (branch: Branch) => apiFetch(`/api/branches/${branch.id}`, { method: "DELETE" }),
     onSuccess: async () => {
-      setDeactivating(null);
-      await queryClient.invalidateQueries({ queryKey: ["branches"] });
+      setDeactivating(null)
+      await queryClient.invalidateQueries({ queryKey: ["branches"] })
     },
     onError: (error) => {
-      toast.error(error instanceof ApiError ? (error.shape.message ?? error.message) : error.message);
+      toast.error(
+        error instanceof ApiError ? (error.shape.message ?? error.message) : error.message,
+      )
     },
-  });
+  })
 
   const form = useForm({
     defaultValues: emptyValues,
     validators: { onSubmit: branchSchema },
     onSubmit: async ({ value }) => {
-
-      await saveMutation.mutateAsync(value);
+      await saveMutation.mutateAsync(value)
     },
-  });
+  })
 
-  const canWrite = useCanWrite();
+  const canWrite = useCanWrite()
 
   const columns = useMemo<ColumnDef<Branch>[]>(
     () => [
@@ -138,13 +150,13 @@ function BranchesPage() {
                   key: "edit",
                   label: "Editar",
                   onSelect: () => {
-                    setEditing(row.original);
-                    form.reset();
-                    form.setFieldValue("name", row.original.name);
-                    form.setFieldValue("addressLine1", row.original.addressLine1 ?? "");
-                    form.setFieldValue("district", row.original.district ?? "");
-                    form.setFieldValue("phone", row.original.phone ?? "");
-                    setDrawerOpen(true);
+                    setEditing(row.original)
+                    form.reset()
+                    form.setFieldValue("name", row.original.name)
+                    form.setFieldValue("addressLine1", row.original.addressLine1 ?? "")
+                    form.setFieldValue("district", row.original.district ?? "")
+                    form.setFieldValue("phone", row.original.phone ?? "")
+                    setDrawerOpen(true)
                   },
                 },
                 {
@@ -160,31 +172,31 @@ function BranchesPage() {
       },
     ],
     [canWrite, form],
-  );
+  )
   const filtered = useMemo(() => {
-    const needle = search.toLowerCase();
+    const needle = search.toLowerCase()
     const rows = (branchesQuery.data?.data ?? []).filter((row) => {
-      if (needle && !row.name.toLowerCase().includes(needle)) return false;
-      if (estadoFilter === "activa" && !row.isActive) return false;
-      if (estadoFilter === "inactiva" && row.isActive) return false;
-      return true;
-    });
-    if (!sort) return rows;
-    const desc = sort.startsWith("-");
-    const field = desc ? sort.slice(1) : sort;
-    const direction = desc ? -1 : 1;
+      if (needle && !row.name.toLowerCase().includes(needle)) return false
+      if (estadoFilter === "activa" && !row.isActive) return false
+      if (estadoFilter === "inactiva" && row.isActive) return false
+      return true
+    })
+    if (!sort) return rows
+    const desc = sort.startsWith("-")
+    const field = desc ? sort.slice(1) : sort
+    const direction = desc ? -1 : 1
     return [...rows].sort((a, b) => {
-      if (field === "estado") return direction * (Number(b.isActive) - Number(a.isActive));
-      if (field === "nombre") return direction * a.name.localeCompare(b.name, "es");
-      return 0;
-    });
-  }, [branchesQuery.data, search, estadoFilter, sort]);
+      if (field === "estado") return direction * (Number(b.isActive) - Number(a.isActive))
+      if (field === "nombre") return direction * a.name.localeCompare(b.name, "es")
+      return 0
+    })
+  }, [branchesQuery.data, search, estadoFilter, sort])
 
   const table = useReactTable({
     data: filtered,
     columns,
     getCoreRowModel: getCoreRowModel(),
-  });
+  })
 
   return (
     <div className="flex flex-col gap-6">
@@ -197,9 +209,9 @@ function BranchesPage() {
               type="button"
               className="min-h-11"
               onClick={() => {
-                setEditing(null);
-                form.reset();
-                setDrawerOpen(true);
+                setEditing(null)
+                form.reset()
+                setDrawerOpen(true)
               }}
             >
               <Plus aria-hidden />
@@ -258,8 +270,8 @@ function BranchesPage() {
         submitLabel={common.actions.save}
         cancelLabel={common.actions.cancel}
         onSubmit={(event) => {
-          event.preventDefault();
-          void form.handleSubmit();
+          event.preventDefault()
+          void form.handleSubmit()
         }}
       >
         <div className="flex flex-col gap-4">
@@ -272,9 +284,7 @@ function BranchesPage() {
                   value={field.state.value}
                   onChange={(event) => field.handleChange(event.target.value)}
                 />
-                <FieldError>
-                  {fieldErrorMessages(field.state.meta.errors)[0] ?? null}
-                </FieldError>
+                <FieldError>{fieldErrorMessages(field.state.meta.errors)[0] ?? null}</FieldError>
               </Field>
             )}
           </form.Field>
@@ -328,13 +338,13 @@ function BranchesPage() {
         pending={deactivateMutation.isPending}
       />
     </div>
-  );
+  )
 }
 
 /** Rol del usuario en la org del host: owner/admin pueden escribir. */
 function useCanWrite(): boolean {
-  const { org, session } = orgRouteApi.useRouteContext();
-  const me = org.members.find((m) => m.userId === session.userId);
-  const role = me?.role ?? "member";
-  return role === "owner" || role === "admin";
+  const { org, session } = orgRouteApi.useRouteContext()
+  const me = org.members.find((m) => m.userId === session.userId)
+  const role = me?.role ?? "member"
+  return role === "owner" || role === "admin"
 }

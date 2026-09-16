@@ -1,5 +1,5 @@
-import { cn } from "@odentia/ui";
-import { CheckIcon } from "lucide-react";
+import { cn } from "@odentia/ui"
+import { CheckIcon } from "lucide-react"
 
 /**
  * Indicador de pasos para asistentes (wizards) de 2–5 pasos.
@@ -9,22 +9,22 @@ import { CheckIcon } from "lucide-react";
  */
 export type WizardStep = {
   /** Identificador estable del paso (key de React). */
-  id: string;
+  id: string
   /** Etiqueta visible en español (p. ej. "Paciente"). */
-  label: string;
-};
+  label: string
+}
 
 export type WizardStepsProps = {
-  steps: readonly WizardStep[];
+  steps: readonly WizardStep[]
   /** Índice numérico del paso actual (0-based). */
-  current: number;
+  current: number
   /** Índices visitados (solo lectura); solo estos habilitan clic. */
-  visited: readonly number[];
-  onGo: (index: number) => void;
-  className?: string;
+  visited: readonly number[]
+  onGo: (index: number) => void
+  className?: string
   /** Etiqueta accesible del nav. Por defecto en español. */
-  ariaLabel?: string;
-};
+  ariaLabel?: string
+}
 
 export function WizardSteps({
   steps,
@@ -38,10 +38,10 @@ export function WizardSteps({
     <nav aria-label={ariaLabel} className={className}>
       <ol className="flex items-start gap-1 overflow-x-auto sm:gap-2">
         {steps.map((step, index) => {
-          const isCurrent = index === current;
-          const isVisited = visited.includes(index);
-          const isDone = isVisited && index < current;
-          const clickable = isVisited && !isCurrent;
+          const isCurrent = index === current
+          const isVisited = visited.includes(index)
+          const isDone = isVisited && index < current
+          const clickable = isVisited && !isCurrent
           return (
             <li key={step.id} className="flex min-w-0 flex-1 items-start">
               <button
@@ -65,7 +65,7 @@ export function WizardSteps({
                     !isCurrent && !isDone && "border-border bg-muted text-muted-foreground",
                   )}
                 >
-                  {isDone ? <CheckIcon className="size-3.5" /> : (index + 1)}
+                  {isDone ? <CheckIcon className="size-3.5" /> : index + 1}
                 </span>
                 <span
                   className={cn(
@@ -86,9 +86,9 @@ export function WizardSteps({
                 />
               )}
             </li>
-          );
+          )
         })}
       </ol>
     </nav>
-  );
+  )
 }

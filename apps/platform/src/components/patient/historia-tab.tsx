@@ -1,10 +1,10 @@
-import { QuickNoteDrawer } from "./quick-note-drawer";
-import { Timeline } from "./timeline";
+import { QuickNoteDrawer } from "./quick-note-drawer"
+import { Timeline } from "./timeline"
 
 export interface HistoriaTabProps {
-  patientId: string;
-  initialTooth?: number;
-  onOdontogramSelect: (tooth: number) => void;
+  patientId: string
+  initialTooth?: number
+  onOdontogramSelect: (tooth: number) => void
 }
 
 /**
@@ -20,7 +20,11 @@ export function HistoriaTab({ patientId, initialTooth, onOdontogramSelect }: His
       <div className="flex flex-wrap justify-end gap-2">
         <QuickNoteDrawer patientId={patientId} />
       </div>
-      <Timeline patientId={patientId} initialTooth={initialTooth} onOdontogramSelect={onOdontogramSelect} />
+      <Timeline
+        patientId={patientId}
+        initialTooth={initialTooth}
+        onOdontogramSelect={onOdontogramSelect}
+      />
     </div>
-  );
+  )
 }

@@ -14,19 +14,17 @@
  * y la API a 400 VALIDATION.
  */
 
-export const MAX_TAGS = 20;
-export const MAX_TAG_LENGTH = 40;
+export const MAX_TAGS = 20
+export const MAX_TAG_LENGTH = 40
 
 /** Solo letras/números Unicode con guiones estrictamente internos. */
-const CANONICAL_RE = /^[\p{L}\p{N}]+(?:-[\p{L}\p{N}]+)*$/u;
+const CANONICAL_RE = /^[\p{L}\p{N}]+(?:-[\p{L}\p{N}]+)*$/u
 
 function canonicalize(raw: string): string {
-  const withoutMarks = raw
-    .normalize("NFKD")
-    .replace(/[\u0300-\u036f]/g, "");
-  const lowered = withoutMarks.trim().toLowerCase();
-  const dashed = lowered.replace(/[\s\-_]+/g, "-");
-  return dashed.replace(/^-+|-+$/g, "");
+  const withoutMarks = raw.normalize("NFKD").replace(/[\u0300-\u036f]/g, "")
+  const lowered = withoutMarks.trim().toLowerCase()
+  const dashed = lowered.replace(/[\s\-_]+/g, "-")
+  return dashed.replace(/^-+|-+$/g, "")
 }
 
 /**
@@ -36,33 +34,33 @@ function canonicalize(raw: string): string {
  * @throws Error en español si alguna etiqueta es vacía/inválida o se superan límites.
  */
 export function normalizeTags(input: readonly string[]): string[] {
-  const out: string[] = [];
-  const seen = new Set<string>();
+  const out: string[] = []
+  const seen = new Set<string>()
   for (const raw of input) {
     if (typeof raw !== "string") {
-      throw new Error(`Etiqueta inválida: debe ser texto`);
+      throw new Error(`Etiqueta inválida: debe ser texto`)
     }
-    const canonical = canonicalize(raw);
+    const canonical = canonicalize(raw)
     if (!canonical) {
       throw new Error(
         raw.trim()
           ? `Etiqueta inválida: "${raw.trim()}" (usa solo letras, números y guiones)`
           : `Etiqueta inválida: no puede estar vacía`,
-      );
+      )
     }
     if (canonical.length > MAX_TAG_LENGTH) {
-      throw new Error(`La etiqueta "${canonical}" supera ${MAX_TAG_LENGTH} caracteres`);
+      throw new Error(`La etiqueta "${canonical}" supera ${MAX_TAG_LENGTH} caracteres`)
     }
     if (!CANONICAL_RE.test(canonical)) {
-      throw new Error(`Etiqueta inválida: "${raw.trim()}" (usa solo letras, números y guiones)`);
+      throw new Error(`Etiqueta inválida: "${raw.trim()}" (usa solo letras, números y guiones)`)
     }
     if (!seen.has(canonical)) {
-      seen.add(canonical);
-      out.push(canonical);
+      seen.add(canonical)
+      out.push(canonical)
     }
   }
   if (out.length > MAX_TAGS) {
-    throw new Error(`Máximo ${MAX_TAGS} etiquetas`);
+    throw new Error(`Máximo ${MAX_TAGS} etiquetas`)
   }
-  return out;
+  return out
 }

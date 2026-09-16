@@ -1,7 +1,5 @@
-import { common } from "./common.js";
-import type { Table as TanStackTable } from "@tanstack/react-table";
-import { flexRender } from "@tanstack/react-table";
 import {
+  cn,
   Skeleton,
   Table,
   TableBody,
@@ -9,25 +7,27 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-  cn,
-} from "@odentia/ui";
+} from "@odentia/ui"
+import type { Table as TanStackTable } from "@tanstack/react-table"
+import { flexRender } from "@tanstack/react-table"
+import { common } from "./common.js"
 
 export interface DataTableProps<TData> {
-  table: TanStackTable<TData>;
-  onRowClick?: (row: TData) => void;
+  table: TanStackTable<TData>
+  onRowClick?: (row: TData) => void
 }
 
 export interface DataTableSkeletonProps {
-  columnCount?: number;
-  rowCount?: number;
-  showPagination?: boolean;
-  label?: string;
+  columnCount?: number
+  rowCount?: number
+  showPagination?: boolean
+  label?: string
 }
 
-const skeletonWidths = ["w-40", "w-20", "w-24", "w-16", "w-8"] as const;
+const skeletonWidths = ["w-40", "w-20", "w-24", "w-16", "w-8"] as const
 
 function skeletonWidth(index: number): string {
-  return skeletonWidths[index % skeletonWidths.length] ?? "w-20";
+  return skeletonWidths[index % skeletonWidths.length] ?? "w-20"
 }
 
 export function DataTable<TData>({ table, onRowClick }: DataTableProps<TData>) {
@@ -53,10 +53,10 @@ export function DataTable<TData>({ table, onRowClick }: DataTableProps<TData>) {
               key={row.id}
               className={onRowClick ? "cursor-pointer" : undefined}
               onClick={(event) => {
-                if (!onRowClick) return;
-                const target = event.target as HTMLElement;
-                if (target.closest("button, a, input, select, textarea, [role='menuitem']")) return;
-                onRowClick(row.original);
+                if (!onRowClick) return
+                const target = event.target as HTMLElement
+                if (target.closest("button, a, input, select, textarea, [role='menuitem']")) return
+                onRowClick(row.original)
               }}
             >
               {row.getVisibleCells().map((cell) => (
@@ -69,7 +69,7 @@ export function DataTable<TData>({ table, onRowClick }: DataTableProps<TData>) {
         </TableBody>
       </Table>
     </div>
-  );
+  )
 }
 
 export function DataTableSkeleton({
@@ -78,8 +78,8 @@ export function DataTableSkeleton({
   showPagination = false,
   label = common.states.loading,
 }: DataTableSkeletonProps) {
-  const columns = Array.from({ length: columnCount });
-  const rows = Array.from({ length: rowCount });
+  const columns = Array.from({ length: columnCount })
+  const rows = Array.from({ length: rowCount })
 
   return (
     <div
@@ -125,5 +125,5 @@ export function DataTableSkeleton({
         </div>
       ) : null}
     </div>
-  );
+  )
 }

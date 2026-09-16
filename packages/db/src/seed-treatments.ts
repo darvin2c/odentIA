@@ -1,6 +1,6 @@
-import { sql } from "drizzle-orm";
-import { TREATMENT_TEMPLATES } from "@odentia/clinical";
-import { createOwnerDb } from "./client.js";
+import { TREATMENT_TEMPLATES } from "@odentia/clinical"
+import { sql } from "drizzle-orm"
+import { createOwnerDb } from "./client.js"
 
 /**
  * Siembra la biblioteca global de prestaciones (treatment_template).
@@ -8,10 +8,10 @@ import { createOwnerDb } from "./client.js";
  * aumenta cuando el contenido realmente cambia. Jamás toca tarifas:
  * treatment_template no tiene precios.
  */
-const url = process.env.DATABASE_URL;
-if (!url) throw new Error("DATABASE_URL es obligatoria para sembrar (rol owner)");
+const url = process.env.DATABASE_URL
+if (!url) throw new Error("DATABASE_URL es obligatoria para sembrar (rol owner)")
 
-const db = createOwnerDb(url);
+const db = createOwnerDb(url)
 for (const tpl of TREATMENT_TEMPLATES) {
   await db.execute(
     sql`insert into "treatment_template"
@@ -30,7 +30,7 @@ for (const tpl of TREATMENT_TEMPLATES) {
           (excluded."name", excluded."specialty", excluded."scope",
            excluded."surface_count_min", excluded."surface_count_max")
         )::int`,
-  );
+  )
 }
-console.log(`treatment templates seeded: ${TREATMENT_TEMPLATES.length} rows`);
-process.exit(0);
+console.log(`treatment templates seeded: ${TREATMENT_TEMPLATES.length} rows`)
+process.exit(0)

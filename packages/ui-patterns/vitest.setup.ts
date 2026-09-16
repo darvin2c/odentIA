@@ -1,12 +1,12 @@
-export {};
+export {}
 
 declare global {
-  var IS_REACT_ACT_ENVIRONMENT: boolean | undefined;
+  var IS_REACT_ACT_ENVIRONMENT: boolean | undefined
 }
 
 // RTL + React 19 en Vitest: sin este flag los updates en cascada
 // (p. ej. el ajuste medido de FilterBar) no se vacían en `act`.
-globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+globalThis.IS_REACT_ACT_ENVIRONMENT = true
 
 // jsdom no implementa matchMedia; `useIsMobile` (Sidebar) lo necesita para
 // decidir entre escritorio y drawer móvil. Desktop por defecto: jsdom no
@@ -24,5 +24,5 @@ if (typeof window !== "undefined" && !window.matchMedia) {
       addEventListener: () => {},
       removeEventListener: () => {},
       dispatchEvent: () => false,
-    }) as unknown as MediaQueryList;
+    }) as unknown as MediaQueryList
 }

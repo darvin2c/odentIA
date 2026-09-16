@@ -1,13 +1,13 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { Button } from "@odentia/ui";
-import { AuthCard } from "@odentia/ui-patterns";
+import { Button } from "@odentia/ui"
+import { AuthCard } from "@odentia/ui-patterns"
+import { createFileRoute, useNavigate } from "@tanstack/react-router"
 
 export const Route = createFileRoute("/verify-email-sent")({
   component: VerifyEmailSentPage,
-});
+})
 
 function VerifyEmailSentPage() {
-  const navigate = useNavigate();
+  const navigate = useNavigate()
   return (
     <AuthCard
       title="Revisa tu correo"
@@ -17,5 +17,5 @@ function VerifyEmailSentPage() {
         Ir a iniciar sesión
       </Button>
     </AuthCard>
-  );
+  )
 }

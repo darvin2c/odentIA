@@ -1,23 +1,23 @@
-import type { Callbacks } from "@langchain/core/callbacks/manager";
-import type { PostgresSaver } from "@langchain/langgraph-checkpoint-postgres";
-import { withOrgContext, type AgentRunJob, type Db, type QueueMessage } from "@odentia/db";
-import { auditEvent } from "@odentia/db/schema/org";
-import { conversation, message } from "@odentia/db/schema/crm";
-import { getAgentConfig } from "@odentia/services";
-import { and, desc, eq, sql } from "drizzle-orm";
-import { compileAgentGraph, createChatModel } from "./graph.js";
-import { performHandoff, type AgentToolCtx } from "./tools.js";
+import type { Callbacks } from "@langchain/core/callbacks/manager"
+import type { PostgresSaver } from "@langchain/langgraph-checkpoint-postgres"
+import { type AgentRunJob, type Db, type QueueMessage, withOrgContext } from "@odentia/db"
+import { conversation, message } from "@odentia/db/schema/crm"
+import { auditEvent } from "@odentia/db/schema/org"
+import { getAgentConfig } from "@odentia/services"
+import { and, desc, eq, sql } from "drizzle-orm"
+import { compileAgentGraph, createChatModel } from "./graph.js"
+import { type AgentToolCtx, performHandoff } from "./tools.js"
 export interface AgentRuntime {
-  checkpointer: PostgresSaver;
-  modelName: string;
-  secretsKey: Buffer;
-  callbacks?: Callbacks;
+  checkpointer: PostgresSaver
+  modelName: string
+  secretsKey: Buffer
+  callbacks?: Callbacks
 }
 
 function matchesHandoff(text: string | null, keywords: string[]): boolean {
-  if (!text) return false;
-  const lower = text.toLowerCase();
-  return keywords.some((k) => k.trim() !== "" && lower.includes(k.trim().toLowerCase()));
+  if (!text) return false
+  const lower = text.toLowerCase()
+  return keywords.some((k) => k.trim() !== "" && lower.includes(k.trim().toLowerCase()))
 }
 
 /**
@@ -30,24 +30,24 @@ export async function processAgentRun(
   runtime: AgentRuntime,
   msg: QueueMessage<AgentRunJob>,
 ): Promise<"done" | "retry"> {
-  const { orgId, conversationId, triggerMessageId } = msg.message;
+  const { orgId, conversationId, triggerMessageId } = msg.message
   try {
     const skip = await withOrgContext(db, orgId, async (tx) => {
       const [conv] = await tx
         .select()
         .from(conversation)
         .where(and(eq(conversation.id, conversationId), eq(conversation.organizationId, orgId)))
-        .limit(1);
-      if (!conv) return "missing-conversation";
-      if (conv.agentStatus !== "on") return "agent-off";
-      const cfg = await getAgentConfig(tx, orgId);
-      if (!cfg.enabled) return "agent-disabled";
+        .limit(1)
+      if (!conv) return "missing-conversation"
+      if (conv.agentStatus !== "on") return "agent-off"
+      const cfg = await getAgentConfig(tx, orgId)
+      if (!cfg.enabled) return "agent-disabled"
       const [trigger] = await tx
         .select()
         .from(message)
         .where(and(eq(message.id, triggerMessageId), eq(message.organizationId, orgId)))
-        .limit(1);
-      if (!trigger) return "missing-trigger";
+        .limit(1)
+      if (!trigger) return "missing-trigger"
       if (matchesHandoff(trigger.body, cfg.handoffKeywords)) {
         const toolCtx: AgentToolCtx = {
           db,
@@ -56,9 +56,9 @@ export async function processAgentRun(
           contactId: conv.contactId,
           secretsKey: runtime.secretsKey,
           handedOff: false,
-        };
-        await performHandoff(toolCtx, `palabra clave en: ${(trigger.body ?? "").slice(0, 120)}`);
-        return "handoff";
+        }
+        await performHandoff(toolCtx, `palabra clave en: ${(trigger.body ?? "").slice(0, 120)}`)
+        return "handoff"
       }
       // Ráfaga superseded: el trigger ya no está entre los últimos 5 inbound.
       const recent = await tx
@@ -66,19 +66,19 @@ export async function processAgentRun(
         .from(message)
         .where(and(eq(message.conversationId, conversationId), eq(message.direction, "in")))
         .orderBy(desc(message.createdAt), desc(message.id))
-        .limit(5);
-      if (!recent.some((r) => r.id === triggerMessageId)) return "superseded";
-      return null;
-    });
-    if (skip) return "done";
+        .limit(5)
+      if (!recent.some((r) => r.id === triggerMessageId)) return "superseded"
+      return null
+    })
+    if (skip) return "done"
 
     const toolCtx: AgentToolCtx = await withOrgContext(db, orgId, async (tx) => {
       const [conv] = await tx
         .select()
         .from(conversation)
         .where(eq(conversation.id, conversationId))
-        .limit(1);
-      if (!conv) throw new Error("Conversación no encontrada");
+        .limit(1)
+      if (!conv) throw new Error("Conversación no encontrada")
       return {
         db,
         orgId,
@@ -86,21 +86,21 @@ export async function processAgentRun(
         contactId: conv.contactId,
         secretsKey: runtime.secretsKey,
         handedOff: false,
-      };
-    });
-    const model = createChatModel(runtime.modelName);
-    const graph = compileAgentGraph(model, toolCtx, runtime.checkpointer);
+      }
+    })
+    const model = createChatModel(runtime.modelName)
+    const graph = compileAgentGraph(model, toolCtx, runtime.checkpointer)
     await graph.invoke(
       { messages: [], turnCount: 0 },
       {
         configurable: { thread_id: `${orgId}:${conversationId}` },
         ...(runtime.callbacks ? { callbacks: runtime.callbacks } : {}),
       },
-    );
-    return "done";
+    )
+    return "done"
   } catch (error) {
     if (msg.read_ct >= 2) {
-      const detail = error instanceof Error ? error.message : String(error);
+      const detail = error instanceof Error ? error.message : String(error)
       await withOrgContext(db, orgId, async (tx) => {
         await tx.insert(auditEvent).values({
           organizationId: orgId,
@@ -108,8 +108,8 @@ export async function processAgentRun(
           entity: "conversation",
           entityId: conversationId,
           metadata: { error: detail.slice(0, 500) },
-        });
-      }).catch(() => {});
+        })
+      }).catch(() => {})
       const toolCtx: AgentToolCtx = {
         db,
         orgId,
@@ -117,11 +117,11 @@ export async function processAgentRun(
         contactId: "",
         secretsKey: runtime.secretsKey,
         handedOff: false,
-      };
-      await performHandoff(toolCtx, "error del agente").catch(() => {});
-      return "done";
+      }
+      await performHandoff(toolCtx, "error del agente").catch(() => {})
+      return "done"
     }
-    return "retry";
+    return "retry"
   }
 }
 
@@ -131,8 +131,8 @@ export async function consumeAgentRun(
   runtime: AgentRuntime,
   msg: QueueMessage<AgentRunJob>,
 ): Promise<void> {
-  const verdict = await processAgentRun(db, runtime, msg);
+  const verdict = await processAgentRun(db, runtime, msg)
   if (verdict === "done") {
-    await db.execute(sql`select pgmq.delete('agent_runs', ${Number(msg.msg_id)}::bigint)`);
+    await db.execute(sql`select pgmq.delete('agent_runs', ${Number(msg.msg_id)}::bigint)`)
   }
 }

@@ -16,13 +16,13 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@odentia/ui";
-import { FormDrawer } from "@odentia/ui-patterns";
-import { useEffect, useId, useRef, useState } from "react";
-import { FileText, Upload, X } from "lucide-react";
-import { API_URL } from "../../lib/auth-client";
-import { orgSlugFromHostname } from "../../lib/host";
-import type { Encounter, PlanItem } from "../../lib/patients";
+} from "@odentia/ui"
+import { FormDrawer } from "@odentia/ui-patterns"
+import { FileText, Upload, X } from "lucide-react"
+import { useEffect, useId, useRef, useState } from "react"
+import { API_URL } from "../../lib/auth-client"
+import { orgSlugFromHostname } from "../../lib/host"
+import type { Encounter, PlanItem } from "../../lib/patients"
 import {
   ACCEPT_ATTR,
   ACCEPTED_TYPES,
@@ -32,54 +32,55 @@ import {
   MAX_BYTES,
   planItemLabel,
   UPLOAD_CATEGORIES,
-} from "./document-labels";
-import { TagsInput } from "./tags-input";
-import { ToothSelector } from "./tooth-selector";
+} from "./document-labels"
+import { TagsInput } from "./tags-input"
+import { ToothSelector } from "./tooth-selector"
 
-type RowStatus = "pending" | "uploading" | "saved" | "error" | "unconfirmed";
+type RowStatus = "pending" | "uploading" | "saved" | "error" | "unconfirmed"
 
 interface QueuedFile {
-  key: string;
-  file: File;
-  previewUrl: string | null;
-  title: string;
-  category: string;
-  teeth: number[];
-  tags: string[];
-  planItemId: string;
-  expanded: boolean;
-  status: RowStatus;
-  error: string | null;
-  validationError: string | null;
+  key: string
+  file: File
+  previewUrl: string | null
+  title: string
+  category: string
+  teeth: number[]
+  tags: string[]
+  planItemId: string
+  expanded: boolean
+  status: RowStatus
+  error: string | null
+  validationError: string | null
 }
 
 export interface DocumentUploadDialogProps {
-  patientId: string;
-  defaultEncounterId?: string;
-  initialTeeth?: number[];
-  encounters: Encounter[];
-  planItems: PlanItem[];
-  suggestions: string[];
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  onSuccess: () => Promise<void>;
-  beforeWrite?: () => Promise<void>;
-  onPendingChange?: (pending: boolean) => void;
-  disabled?: boolean;
+  patientId: string
+  defaultEncounterId?: string
+  initialTeeth?: number[]
+  encounters: Encounter[]
+  planItems: PlanItem[]
+  suggestions: string[]
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  onSuccess: () => Promise<void>
+  beforeWrite?: () => Promise<void>
+  onPendingChange?: (pending: boolean) => void
+  disabled?: boolean
 }
 
 /** Solo borradores admiten vínculo directo al subir; lo cerrado se vincula por revisión auditada. */
 function draftEncounters(encounters: Encounter[]): Encounter[] {
-  return encounters.filter((e) => e.status === "borrador");
+  return encounters.filter((e) => e.status === "borrador")
 }
 
-let rowSeq = 0;
+let rowSeq = 0
 
 function toRow(file: File, initialTeeth: number[]): QueuedFile | { fileError: string } {
-  if (!ACCEPTED_TYPES.includes(file.type)) return { fileError: "Solo se admiten JPG, PNG, WebP o PDF." };
-  if (file.size === 0) return { fileError: "El archivo está vacío." };
-  if (file.size > MAX_BYTES) return { fileError: "El archivo no puede superar 10 MB." };
-  rowSeq += 1;
+  if (!ACCEPTED_TYPES.includes(file.type))
+    return { fileError: "Solo se admiten JPG, PNG, WebP o PDF." }
+  if (file.size === 0) return { fileError: "El archivo está vacío." }
+  if (file.size > MAX_BYTES) return { fileError: "El archivo no puede superar 10 MB." }
+  rowSeq += 1
   return {
     key: `${Date.now()}-${rowSeq}`,
     file,
@@ -93,7 +94,7 @@ function toRow(file: File, initialTeeth: number[]): QueuedFile | { fileError: st
     status: "pending",
     error: null,
     validationError: null,
-  };
+  }
 }
 
 /**
@@ -117,103 +118,106 @@ export function DocumentUploadDialog({
   onPendingChange,
   disabled,
 }: DocumentUploadDialogProps) {
-  const drafts = draftEncounters(encounters);
-  const defaultIsDraft = defaultEncounterId != null && drafts.some((e) => e.id === defaultEncounterId);
-  const fileRef = useRef<HTMLInputElement | null>(null);
-  const [encounterChoice, setEncounterChoice] = useState<string>(defaultIsDraft ? (defaultEncounterId ?? "") : "");
-  const [rows, setRows] = useState<QueuedFile[]>([]);
-  const [rejected, setRejected] = useState<string[]>([]);
-  const [dragging, setDragging] = useState(false);
-  const [serverError, setServerError] = useState<string | null>(null);
-  const fileId = useId();
-  const encounterChoiceId = useId();
-  const wasOpen = useRef(false);
+  const drafts = draftEncounters(encounters)
+  const defaultIsDraft =
+    defaultEncounterId != null && drafts.some((e) => e.id === defaultEncounterId)
+  const fileRef = useRef<HTMLInputElement | null>(null)
+  const [encounterChoice, setEncounterChoice] = useState<string>(
+    defaultIsDraft ? (defaultEncounterId ?? "") : "",
+  )
+  const [rows, setRows] = useState<QueuedFile[]>([])
+  const [rejected, setRejected] = useState<string[]>([])
+  const [dragging, setDragging] = useState(false)
+  const [serverError, setServerError] = useState<string | null>(null)
+  const fileId = useId()
+  const encounterChoiceId = useId()
+  const wasOpen = useRef(false)
 
   const patchRow = (key: string, patch: Partial<QueuedFile>) =>
-    setRows((prev) => prev.map((row) => (row.key === key ? { ...row, ...patch } : row)));
+    setRows((prev) => prev.map((row) => (row.key === key ? { ...row, ...patch } : row)))
 
   const reset = () => {
-    for (const row of rows) if (row.previewUrl) URL.revokeObjectURL(row.previewUrl);
-    setRows([]);
-    setRejected([]);
-    setDragging(false);
-    setServerError(null);
-    setEncounterChoice(defaultIsDraft ? (defaultEncounterId ?? "") : "");
-    if (fileRef.current) fileRef.current.value = "";
-  };
+    for (const row of rows) if (row.previewUrl) URL.revokeObjectURL(row.previewUrl)
+    setRows([])
+    setRejected([])
+    setDragging(false)
+    setServerError(null)
+    setEncounterChoice(defaultIsDraft ? (defaultEncounterId ?? "") : "")
+    if (fileRef.current) fileRef.current.value = ""
+  }
 
   useEffect(() => {
-    if (open && !wasOpen.current) reset();
-    wasOpen.current = open;
-  });
+    if (open && !wasOpen.current) reset()
+    wasOpen.current = open
+  })
 
-  const uploading = rows.some((row) => row.status === "uploading");
-  const pendingRows = rows.filter((row) => row.status === "pending" || row.status === "error");
-  const unconfirmedRows = rows.filter((row) => row.status === "unconfirmed");
+  const uploading = rows.some((row) => row.status === "uploading")
+  const pendingRows = rows.filter((row) => row.status === "pending" || row.status === "error")
+  const unconfirmedRows = rows.filter((row) => row.status === "unconfirmed")
   const addFiles = (files: FileList | File[] | undefined | null) => {
-    if (!files || disabled) return;
-    const list = [...files];
-    if (!list.length) return;
-    const added: QueuedFile[] = [];
-    const bad: string[] = [];
+    if (!files || disabled) return
+    const list = [...files]
+    if (!list.length) return
+    const added: QueuedFile[] = []
+    const bad: string[] = []
     for (const file of list) {
-      const row = toRow(file, initialTeeth ?? []);
-      if ("fileError" in row) bad.push(`${file.name}: ${row.fileError}`);
-      else added.push(row);
+      const row = toRow(file, initialTeeth ?? [])
+      if ("fileError" in row) bad.push(`${file.name}: ${row.fileError}`)
+      else added.push(row)
     }
-    if (added.length > 0) setRows((prev) => [...prev, ...added]);
-    if (bad.length > 0) setRejected((prev) => [...prev, ...bad]);
-  };
+    if (added.length > 0) setRows((prev) => [...prev, ...added])
+    if (bad.length > 0) setRejected((prev) => [...prev, ...bad])
+  }
 
   const removeRow = (key: string) => {
     setRows((prev) => {
-      const row = prev.find((r) => r.key === key);
-      if (row?.previewUrl) URL.revokeObjectURL(row.previewUrl);
-      return prev.filter((r) => r.key !== key);
-    });
-  };
+      const row = prev.find((r) => r.key === key)
+      if (row?.previewUrl) URL.revokeObjectURL(row.previewUrl)
+      return prev.filter((r) => r.key !== key)
+    })
+  }
 
   const validateRow = (row: QueuedFile): string | null => {
-    const title = row.title.trim();
-    if (!title) return "El título es obligatorio.";
-    if (title.length > 200) return "El título debe tener 1–200 caracteres.";
-    if (!row.category) return "Elige la categoría.";
-    return null;
-  };
+    const title = row.title.trim()
+    if (!title) return "El título es obligatorio."
+    if (title.length > 200) return "El título debe tener 1–200 caracteres."
+    if (!row.category) return "Elige la categoría."
+    return null
+  }
 
   const uploadRow = async (row: QueuedFile): Promise<boolean> => {
-    patchRow(row.key, { status: "uploading", error: null });
+    patchRow(row.key, { status: "uploading", error: null })
     try {
-      const form = new FormData();
-      form.append("file", row.file);
-      form.append("category", row.category);
-      form.append("label", row.title.trim());
-      if (encounterChoice) form.append("encounterId", encounterChoice);
-      if (row.planItemId) form.append("planItemId", row.planItemId);
-      form.append("toothNumbers", JSON.stringify(row.teeth));
-      form.append("tags", JSON.stringify(row.tags));
+      const form = new FormData()
+      form.append("file", row.file)
+      form.append("category", row.category)
+      form.append("label", row.title.trim())
+      if (encounterChoice) form.append("encounterId", encounterChoice)
+      if (row.planItemId) form.append("planItemId", row.planItemId)
+      form.append("toothNumbers", JSON.stringify(row.teeth))
+      form.append("tags", JSON.stringify(row.tags))
       const slug =
-        typeof window === "undefined" ? null : orgSlugFromHostname(window.location.hostname);
+        typeof window === "undefined" ? null : orgSlugFromHostname(window.location.hostname)
       const response = await fetch(`${API_URL}/api/patients/${patientId}/documents`, {
         method: "POST",
         credentials: "include",
         headers: slug ? { "x-odentia-org": slug } : {},
         body: form,
-      });
+      })
       if (!response.ok) {
-        let message = `Error ${response.status}`;
+        let message = `Error ${response.status}`
         try {
-          const body = (await response.json()) as { error?: { message?: string } };
-          if (body.error?.message) message = body.error.message;
+          const body = (await response.json()) as { error?: { message?: string } }
+          if (body.error?.message) message = body.error.message
         } catch {
           // cuerpo no-JSON
         }
-        patchRow(row.key, { status: "error", error: message });
-        return false;
+        patchRow(row.key, { status: "error", error: message })
+        return false
       }
-      patchRow(row.key, { status: "saved", error: null });
-      await onSuccess();
-      return true;
+      patchRow(row.key, { status: "saved", error: null })
+      await onSuccess()
+      return true
     } catch {
       // Fallo de red o respuesta ilegible: el archivo pudo haberse guardado.
       // No se reintenta a ciegas: se refresca el listado y la fila exige
@@ -222,61 +226,59 @@ export function DocumentUploadDialog({
         status: "unconfirmed",
         error:
           "Resultado no confirmado: se perdió la conexión durante la subida. Revisa la galería antes de reenviar para no duplicar.",
-      });
-      await onSuccess();
-      return false;
+      })
+      await onSuccess()
+      return false
     }
-  };
+  }
 
   const uploadRows = async (targets: QueuedFile[]) => {
-    if (uploading || disabled || targets.length === 0) return;
-    let invalid = 0;
-    const valid: QueuedFile[] = [];
+    if (uploading || disabled || targets.length === 0) return
+    let invalid = 0
+    const valid: QueuedFile[] = []
     for (const row of targets) {
-      const error = validateRow(row);
-      patchRow(row.key, { validationError: error });
-      if (error) invalid += 1;
-      else valid.push(row);
+      const error = validateRow(row)
+      patchRow(row.key, { validationError: error })
+      if (error) invalid += 1
+      else valid.push(row)
     }
     if (valid.length === 0) {
-      setServerError(
-        invalid > 0 ? "Revisa las filas marcadas: falta título o categoría." : null,
-      );
-      return;
+      setServerError(invalid > 0 ? "Revisa las filas marcadas: falta título o categoría." : null)
+      return
     }
-    setServerError(null);
-    onPendingChange?.(true);
+    setServerError(null)
+    onPendingChange?.(true)
     try {
-      await beforeWrite?.();
-      let failures = 0;
+      await beforeWrite?.()
+      let failures = 0
       for (const row of valid) {
-        const ok = await uploadRow(row);
-        if (!ok) failures += 1;
+        const ok = await uploadRow(row)
+        if (!ok) failures += 1
       }
       // Sin cierre automático ni toast de éxito global: si algo falló, el
       // diálogo queda abierto con cada fila marcada para decidir.
       if (failures > 0) {
         setServerError(
           `${failures} archivo(s) sin guardar. Revisa cada fila: corrige, reenvía o descarta.`,
-        );
+        )
       }
     } finally {
-      onPendingChange?.(false);
+      onPendingChange?.(false)
     }
-  };
+  }
 
   const retryRow = async (row: QueuedFile) => {
-    if (uploading || disabled) return;
+    if (uploading || disabled) return
     // Tras un resultado no confirmado el listado ya se refrescó al fallar;
     // reenviar es una decisión explícita del usuario sobre esa fila.
-    await uploadRows([{ ...row, status: "pending", error: null }]);
-  };
+    await uploadRows([{ ...row, status: "pending", error: null }])
+  }
 
   const close = () => {
-    if (uploading) return;
-    reset();
-    onOpenChange(false);
-  };
+    if (uploading) return
+    reset()
+    onOpenChange(false)
+  }
 
   return (
     <FormDrawer
@@ -286,8 +288,8 @@ export function DocumentUploadDialog({
       title="Subir imágenes o documentos"
       description="PDF o imagen JPG, PNG o WebP, máx. 10 MB por archivo. Sin atención queda como General."
       onSubmit={(e) => {
-        e.preventDefault();
-        void uploadRows(pendingRows);
+        e.preventDefault()
+        void uploadRows(pendingRows)
       }}
       isSubmitting={uploading}
       submitDisabled={disabled || pendingRows.length === 0}
@@ -329,14 +331,14 @@ export function DocumentUploadDialog({
           <FieldLabel htmlFor={fileId}>Archivos</FieldLabel>
           <div
             onDragOver={(event) => {
-              event.preventDefault();
-              setDragging(true);
+              event.preventDefault()
+              setDragging(true)
             }}
             onDragLeave={() => setDragging(false)}
             onDrop={(event) => {
-              event.preventDefault();
-              setDragging(false);
-              addFiles(event.dataTransfer.files);
+              event.preventDefault()
+              setDragging(false)
+              addFiles(event.dataTransfer.files)
             }}
             className={`flex flex-col gap-2 rounded-lg border border-dashed p-4 transition-colors ${dragging ? "border-primary bg-primary/5" : ""}`}
           >
@@ -350,8 +352,8 @@ export function DocumentUploadDialog({
               multiple
               className="sr-only"
               onChange={(e) => {
-                addFiles(e.currentTarget.files);
-                e.currentTarget.value = "";
+                addFiles(e.currentTarget.files)
+                e.currentTarget.value = ""
               }}
             />
             <label
@@ -359,7 +361,9 @@ export function DocumentUploadDialog({
               className="flex cursor-pointer flex-col items-center gap-1 text-center text-sm text-muted-foreground"
             >
               <Upload className="size-5" aria-hidden="true" />
-              <span className="font-medium text-foreground">Arrastra archivos o haz clic para elegirlos</span>
+              <span className="font-medium text-foreground">
+                Arrastra archivos o haz clic para elegirlos
+              </span>
               <span>JPG, PNG, WebP o PDF · máx. 10 MB por archivo</span>
             </label>
           </div>
@@ -401,27 +405,27 @@ export function DocumentUploadDialog({
 
         {unconfirmedRows.length > 0 && (
           <p className="text-xs text-muted-foreground">
-            Hay {unconfirmedRows.length} archivo(s) con resultado no confirmado. La galería ya se actualizó:
-            verifica si aparecen antes de reenviar.
+            Hay {unconfirmedRows.length} archivo(s) con resultado no confirmado. La galería ya se
+            actualizó: verifica si aparecen antes de reenviar.
           </p>
         )}
       </fieldset>
     </FormDrawer>
-  );
+  )
 }
 
 function rowStateLabel(status: RowStatus): string {
   switch (status) {
     case "pending":
-      return "Pendiente";
+      return "Pendiente"
     case "uploading":
-      return "Subiendo…";
+      return "Subiendo…"
     case "saved":
-      return "Guardado";
+      return "Guardado"
     case "error":
-      return "Error";
+      return "Error"
     case "unconfirmed":
-      return "Resultado no confirmado";
+      return "Resultado no confirmado"
   }
 }
 
@@ -434,22 +438,29 @@ function QueuedRow({
   onRemove,
   onRetry,
 }: {
-  row: QueuedFile;
-  planItems: PlanItem[];
-  suggestions: string[];
-  busy: boolean;
-  onPatch: (patch: Partial<QueuedFile>) => void;
-  onRemove: () => void;
-  onRetry: () => void;
+  row: QueuedFile
+  planItems: PlanItem[]
+  suggestions: string[]
+  busy: boolean
+  onPatch: (patch: Partial<QueuedFile>) => void
+  onRemove: () => void
+  onRetry: () => void
 }) {
-  const titleId = useId();
-  const categoryId = useId();
-  const planChoiceId = useId();
-  const removable = row.status === "pending" || row.status === "error" || row.status === "unconfirmed";
+  const titleId = useId()
+  const categoryId = useId()
+  const planChoiceId = useId()
+  const removable =
+    row.status === "pending" || row.status === "error" || row.status === "unconfirmed"
   return (
     <li className="flex flex-col gap-2 rounded-lg border p-3">
       <Attachment
-        state={row.status === "uploading" ? "uploading" : row.status === "error" || row.status === "unconfirmed" ? "error" : "done"}
+        state={
+          row.status === "uploading"
+            ? "uploading"
+            : row.status === "error" || row.status === "unconfirmed"
+              ? "error"
+              : "done"
+        }
         orientation="horizontal"
         className="w-full"
       >
@@ -463,12 +474,17 @@ function QueuedRow({
         <AttachmentContent>
           <AttachmentTitle>{row.file.name}</AttachmentTitle>
           <AttachmentDescription>
-            {row.file.type || "archivo"} · {(row.file.size / 1024).toFixed(0)} KB · {rowStateLabel(row.status)}
+            {row.file.type || "archivo"} · {(row.file.size / 1024).toFixed(0)} KB ·{" "}
+            {rowStateLabel(row.status)}
           </AttachmentDescription>
         </AttachmentContent>
         <AttachmentActions>
           {removable && (
-            <AttachmentAction aria-label={`Descartar ${row.file.name}`} disabled={busy} onClick={onRemove}>
+            <AttachmentAction
+              aria-label={`Descartar ${row.file.name}`}
+              disabled={busy}
+              onClick={onRemove}
+            >
               <X aria-hidden="true" />
             </AttachmentAction>
           )}
@@ -523,7 +539,9 @@ function QueuedRow({
               <Field>
                 <FieldLabel htmlFor={planChoiceId}>Tratamiento (opcional)</FieldLabel>
                 <Select
-                  items={Object.fromEntries(planItems.map((p) => [p.id, planItemLabel(p)] as const))}
+                  items={Object.fromEntries(
+                    planItems.map((p) => [p.id, planItemLabel(p)] as const),
+                  )}
                   value={row.planItemId}
                   onValueChange={(v) => onPatch({ planItemId: v ?? "" })}
                 >
@@ -539,13 +557,26 @@ function QueuedRow({
                   </SelectContent>
                 </Select>
                 {row.planItemId && (
-                  <Button type="button" size="sm" variant="ghost" onClick={() => onPatch({ planItemId: "" })}>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => onPatch({ planItemId: "" })}
+                  >
                     Quitar vínculo a tratamiento
                   </Button>
                 )}
               </Field>
-              <ToothSelector value={row.teeth} onChange={(teeth) => onPatch({ teeth })} label="Piezas (opcional)" />
-              <TagsInput value={row.tags} onChange={(tags) => onPatch({ tags })} suggestions={suggestions} />
+              <ToothSelector
+                value={row.teeth}
+                onChange={(teeth) => onPatch({ teeth })}
+                label="Piezas (opcional)"
+              />
+              <TagsInput
+                value={row.tags}
+                onChange={(tags) => onPatch({ tags })}
+                suggestions={suggestions}
+              />
             </div>
           </details>
 
@@ -566,5 +597,5 @@ function QueuedRow({
         </p>
       )}
     </li>
-  );
+  )
 }

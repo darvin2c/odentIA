@@ -1,4 +1,4 @@
-import { defineConfig } from "@playwright/test";
+import { defineConfig } from "@playwright/test"
 
 export default defineConfig({
   testDir: ".",
@@ -10,4 +10,4 @@ export default defineConfig({
     trace: "on-first-retry",
   },
   projects: [{ name: "chromium", use: { browserName: "chromium" } }],
-});
+})

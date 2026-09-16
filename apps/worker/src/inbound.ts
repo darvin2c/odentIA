@@ -1,27 +1,39 @@
-import { channelAdapters } from "@odentia/channels";
-import { sendAgentRun, withOrgContext, type Db, type InboundMessageJob, type QueueMessage } from "@odentia/db";
-import { ingestInbound, ServiceError, type Storage } from "@odentia/services";
-import { and, eq, sql } from "drizzle-orm";
-import { auditEvent } from "@odentia/db/schema/org";
-import { agentConfig, channelConnection, conversation } from "@odentia/db/schema/crm";
+import { channelAdapters } from "@odentia/channels"
+import {
+  type Db,
+  type InboundMessageJob,
+  type QueueMessage,
+  sendAgentRun,
+  withOrgContext,
+} from "@odentia/db"
+import { agentConfig, channelConnection, conversation } from "@odentia/db/schema/crm"
+import { auditEvent } from "@odentia/db/schema/org"
+import { ingestInbound, ServiceError, type Storage } from "@odentia/services"
+import { and, eq, sql } from "drizzle-orm"
 
 export interface IngestDeps {
-  storage: Storage;
-  fetch: typeof fetch;
-  secretsKey: Buffer;
+  storage: Storage
+  fetch: typeof fetch
+  secretsKey: Buffer
 }
 
 /** Máximo de entregas pgmq antes de declarar el mensaje venenoso. */
-export const MAX_DELIVERIES = 5;
+export const MAX_DELIVERIES = 5
 
-async function auditError(tx: Db, orgId: string, action: string, entityId: string, error: string): Promise<void> {
+async function auditError(
+  tx: Db,
+  orgId: string,
+  action: string,
+  entityId: string,
+  error: string,
+): Promise<void> {
   await tx.insert(auditEvent).values({
     organizationId: orgId,
     action,
     entity: "message",
     entityId,
     metadata: { error },
-  });
+  })
 }
 
 /**
@@ -34,7 +46,7 @@ export async function processInbound(
   deps: IngestDeps,
   msg: QueueMessage<InboundMessageJob>,
 ): Promise<"done" | "retry"> {
-  const { orgId } = msg.message;
+  const { orgId } = msg.message
   try {
     await withOrgContext(db, orgId, async (tx) => {
       const [conn] = await tx
@@ -46,52 +58,63 @@ export async function processInbound(
             eq(channelConnection.organizationId, orgId),
           ),
         )
-        .limit(1);
-      if (!conn) throw new ServiceError("CONNECTION_NOT_FOUND", 404, "Conexión no encontrada");
-      const adapter = channelAdapters[conn.provider as keyof typeof channelAdapters];
-      if (!adapter) throw new ServiceError("VALIDATION", 400, `Proveedor desconocido: ${conn.provider}`);
+        .limit(1)
+      if (!conn) throw new ServiceError("CONNECTION_NOT_FOUND", 404, "Conexión no encontrada")
+      const adapter = channelAdapters[conn.provider as keyof typeof channelAdapters]
+      if (!adapter)
+        throw new ServiceError("VALIDATION", 400, `Proveedor desconocido: ${conn.provider}`)
       const result = await ingestInbound(tx, msg.message, adapter, {
         storage: deps.storage,
         fetch: deps.fetch,
         secretsKey: deps.secretsKey,
-      });
-      if (!result.created) return;
+      })
+      if (!result.created) return
       const [conv] = await tx
         .select({ agentStatus: conversation.agentStatus })
         .from(conversation)
         .where(eq(conversation.id, result.conversationId))
-        .limit(1);
+        .limit(1)
       const [cfg] = await tx
         .select({ enabled: agentConfig.enabled })
         .from(agentConfig)
         .where(eq(agentConfig.organizationId, orgId))
-        .limit(1);
+        .limit(1)
       if (conv?.agentStatus === "on" && cfg?.enabled) {
-        await sendAgentRun(tx, { orgId, conversationId: result.conversationId, triggerMessageId: result.messageId });
+        await sendAgentRun(tx, {
+          orgId,
+          conversationId: result.conversationId,
+          triggerMessageId: result.messageId,
+        })
       }
-    });
-    return "done";
+    })
+    return "done"
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    const message = error instanceof Error ? error.message : String(error)
     const skip =
       (error instanceof ServiceError &&
-        (error.code === "CONNECTION_NOT_FOUND" || error.code === "CONNECTION_DISABLED" || error.code === "VALIDATION")) ||
-      msg.read_ct >= MAX_DELIVERIES;
+        (error.code === "CONNECTION_NOT_FOUND" ||
+          error.code === "CONNECTION_DISABLED" ||
+          error.code === "VALIDATION")) ||
+      msg.read_ct >= MAX_DELIVERIES
     if (skip) {
       // Basura o veneno: auditar y ack para no bloquear la cola.
       await withOrgContext(db, orgId, (tx) =>
         auditError(tx, orgId, "message.error", msg.message.event.externalEventId, message),
-      ).catch(() => {});
-      return "done";
+      ).catch(() => {})
+      return "done"
     }
-    return "retry";
+    return "retry"
   }
 }
 
 /** Ciclo completo: procesa y recién entonces hace ack (delete) del mensaje. */
-export async function consumeInbound(db: Db, deps: IngestDeps, msg: QueueMessage<InboundMessageJob>): Promise<void> {
-  const verdict = await processInbound(db, deps, msg);
+export async function consumeInbound(
+  db: Db,
+  deps: IngestDeps,
+  msg: QueueMessage<InboundMessageJob>,
+): Promise<void> {
+  const verdict = await processInbound(db, deps, msg)
   if (verdict === "done") {
-    await db.execute(sql`select pgmq.delete('inbound_messages', ${Number(msg.msg_id)}::bigint)`);
+    await db.execute(sql`select pgmq.delete('inbound_messages', ${Number(msg.msg_id)}::bigint)`)
   }
 }

@@ -1,22 +1,22 @@
-import { channelAdapters, type ChannelAdapter, type NormalizedStatus } from "@odentia/channels";
-import { sendOutboundMessage, type Db, type InboundMessageJob } from "@odentia/db";
+import { type ChannelAdapter, channelAdapters, type NormalizedStatus } from "@odentia/channels"
+import { type Db, type InboundMessageJob, sendOutboundMessage } from "@odentia/db"
 import {
   channelConnection,
   contact,
   contactIdentity,
   conversation,
   message,
-} from "@odentia/db/schema/crm";
-import { auditEvent } from "@odentia/db/schema/org";
-import { and, asc, desc, eq, ilike, lt, or, sql } from "drizzle-orm";
-import { decodeCursor, encodeCursor } from "./cursors.js";
-import { isUniqueViolation, notFound, ServiceError, validation } from "./errors.js";
-import { ensureDefaultPipeline } from "./pipelines.js";
-import { decryptConfig } from "./secrets.js";
-import type { Storage } from "./storage.js";
+} from "@odentia/db/schema/crm"
+import { auditEvent } from "@odentia/db/schema/org"
+import { and, asc, desc, eq, ilike, lt, or, sql } from "drizzle-orm"
+import { decodeCursor, encodeCursor } from "./cursors.js"
+import { isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
+import { ensureDefaultPipeline } from "./pipelines.js"
+import { decryptConfig } from "./secrets.js"
+import type { Storage } from "./storage.js"
 
 /** Ventana de WhatsApp para texto libre: 24h desde el último inbound. */
-const WA_FREE_TEXT_WINDOW_MS = 24 * 60 * 60 * 1000;
+const WA_FREE_TEXT_WINDOW_MS = 24 * 60 * 60 * 1000
 
 const EXT_BY_MIME: Record<string, string> = {
   "image/jpeg": "jpg",
@@ -24,29 +24,29 @@ const EXT_BY_MIME: Record<string, string> = {
   "image/webp": "webp",
   "application/pdf": "pdf",
   "audio/ogg": "ogg",
-};
+}
 
 export interface IngestDeps {
-  storage: Storage;
-  fetch: typeof fetch;
-  secretsKey: Buffer;
+  storage: Storage
+  fetch: typeof fetch
+  secretsKey: Buffer
 }
 
 export interface MessageItem {
-  id: string;
-  direction: string;
-  senderKind: string;
-  senderUserId: string | null;
-  contentType: string;
-  body: string | null;
-  attachments: unknown;
-  externalId: string | null;
-  status: string;
-  error: string | null;
-  templateName: string | null;
-  templateLanguage: string | null;
-  templateParams: string[] | null;
-  createdAt: string;
+  id: string
+  direction: string
+  senderKind: string
+  senderUserId: string | null
+  contentType: string
+  body: string | null
+  attachments: unknown
+  externalId: string | null
+  status: string
+  error: string | null
+  templateName: string | null
+  templateLanguage: string | null
+  templateParams: string[] | null
+  createdAt: string
 }
 function toMessageItem(row: typeof message.$inferSelect): MessageItem {
   return {
@@ -63,21 +63,28 @@ function toMessageItem(row: typeof message.$inferSelect): MessageItem {
     templateName: row.templateName,
     templateLanguage: row.templateLanguage,
     templateParams:
-      Array.isArray(row.templateParams) && row.templateParams.every((p): p is string => typeof p === "string")
+      Array.isArray(row.templateParams) &&
+      row.templateParams.every((p): p is string => typeof p === "string")
         ? row.templateParams
         : null,
     createdAt: row.createdAt.toISOString(),
-  };
+  }
 }
 
 async function notify(tx: Db, payload: Record<string, unknown>): Promise<void> {
-  await tx.execute(sql`select pg_notify('org_events', ${JSON.stringify(payload)})`);
+  await tx.execute(sql`select pg_notify('org_events', ${JSON.stringify(payload)})`)
 }
 
 async function audit(
   tx: Db,
   orgId: string,
-  input: { actorUserId?: string | null; action: string; entity: string; entityId?: string; metadata?: unknown },
+  input: {
+    actorUserId?: string | null
+    action: string
+    entity: string
+    entityId?: string
+    metadata?: unknown
+  },
 ): Promise<void> {
   await tx.insert(auditEvent).values({
     organizationId: orgId,
@@ -86,7 +93,7 @@ async function audit(
     entity: input.entity,
     entityId: input.entityId ?? null,
     metadata: (input.metadata ?? null) as Record<string, unknown> | null,
-  });
+  })
 }
 export async function ingestInbound(
   tx: Db,
@@ -94,19 +101,21 @@ export async function ingestInbound(
   adapter: ChannelAdapter,
   deps: IngestDeps,
 ): Promise<{ conversationId: string; messageId: string; created: boolean }> {
-  const orgId = job.orgId;
-  const event = job.event;
+  const orgId = job.orgId
+  const event = job.event
   const [connection] = await tx
     .select()
     .from(channelConnection)
-    .where(and(eq(channelConnection.id, job.connectionId), eq(channelConnection.organizationId, orgId)))
-    .limit(1);
-  if (!connection) throw new ServiceError("CONNECTION_NOT_FOUND", 404, "Conexión no encontrada");
+    .where(
+      and(eq(channelConnection.id, job.connectionId), eq(channelConnection.organizationId, orgId)),
+    )
+    .limit(1)
+  if (!connection) throw new ServiceError("CONNECTION_NOT_FOUND", 404, "Conexión no encontrada")
   if (connection.status !== "active") {
-    throw new ServiceError("CONNECTION_DISABLED", 409, "Conexión desactivada");
+    throw new ServiceError("CONNECTION_DISABLED", 409, "Conexión desactivada")
   }
 
-  const channel = connection.channel;
+  const channel = connection.channel
   const [identity] = await tx
     .select()
     .from(contactIdentity)
@@ -117,14 +126,14 @@ export async function ingestInbound(
         eq(contactIdentity.externalUserId, event.senderExternalId),
       ),
     )
-    .limit(1);
-  let contactId: string;
+    .limit(1)
+  let contactId: string
   if (identity) {
-    contactId = identity.contactId;
+    contactId = identity.contactId
   } else {
-    const { stages } = await ensureDefaultPipeline(tx, orgId);
-    const first = stages[0];
-    if (!first) throw new Error("Pipeline default sin etapas");
+    const { stages } = await ensureDefaultPipeline(tx, orgId)
+    const first = stages[0]
+    if (!first) throw new Error("Pipeline default sin etapas")
     const [created] = await tx
       .insert(contact)
       .values({
@@ -132,9 +141,9 @@ export async function ingestInbound(
         displayName: event.senderDisplayName ?? event.senderExternalId,
         stageId: first.id,
       })
-      .returning({ id: contact.id });
-    if (!created) throw new Error("No se pudo crear el contacto");
-    contactId = created.id;
+      .returning({ id: contact.id })
+    if (!created) throw new Error("No se pudo crear el contacto")
+    contactId = created.id
     await tx.insert(contactIdentity).values({
       organizationId: orgId,
       contactId,
@@ -142,10 +151,10 @@ export async function ingestInbound(
       externalUserId: event.senderExternalId,
       displayName: event.senderDisplayName ?? null,
       isPrimary: true,
-    });
+    })
   }
 
-  let conversationId: string;
+  let conversationId: string
   const [existing] = await tx
     .select({ id: conversation.id })
     .from(conversation)
@@ -155,9 +164,9 @@ export async function ingestInbound(
         eq(conversation.externalThreadId, event.externalThreadId),
       ),
     )
-    .limit(1);
+    .limit(1)
   if (existing) {
-    conversationId = existing.id;
+    conversationId = existing.id
   } else {
     try {
       const [created] = await tx
@@ -168,12 +177,12 @@ export async function ingestInbound(
           channelConnectionId: connection.id,
           externalThreadId: event.externalThreadId,
         })
-        .returning({ id: conversation.id });
-      if (!created) throw new Error("No se pudo crear la conversación");
-      conversationId = created.id;
+        .returning({ id: conversation.id })
+      if (!created) throw new Error("No se pudo crear la conversación")
+      conversationId = created.id
     } catch (error) {
       // Carrera: otra ingesta creó la conversación; releer.
-      if (!isUniqueViolation(error)) throw error;
+      if (!isUniqueViolation(error)) throw error
       const [retry] = await tx
         .select({ id: conversation.id })
         .from(conversation)
@@ -183,46 +192,55 @@ export async function ingestInbound(
             eq(conversation.externalThreadId, event.externalThreadId),
           ),
         )
-        .limit(1);
-      if (!retry) throw error;
-      conversationId = retry.id;
+        .limit(1)
+      if (!retry) throw error
+      conversationId = retry.id
     }
   }
 
-  const content = event.content;
-  const isMedia = content.type === "media";
-  let contentType: string;
-  let body: string | null;
+  const content = event.content
+  const isMedia = content.type === "media"
+  let contentType: string
+  let body: string | null
   if (!isMedia) {
-    contentType = "text";
-    body = content.text;
+    contentType = "text"
+    body = content.text
   } else {
     contentType = content.mimeType.startsWith("image/")
       ? "image"
       : content.mimeType.startsWith("audio/")
         ? "audio"
-        : "document";
-    body = content.caption ?? null;
+        : "document"
+    body = content.caption ?? null
   }
 
-  let attachments: unknown[] = [];
-  let mediaError: string | null = null;
+  let attachments: unknown[] = []
+  let mediaError: string | null = null
   if (content.type === "media" && adapter.fetchMedia) {
     try {
-      const providerConfig = decryptConfig(deps.secretsKey, connection.configEncrypted);
-      const media = await adapter.fetchMedia(providerConfig, content.mediaExternalId, { fetch: deps.fetch });
-      const ext = EXT_BY_MIME[media.mimeType] ?? "bin";
+      const providerConfig = decryptConfig(deps.secretsKey, connection.configEncrypted)
+      const media = await adapter.fetchMedia(providerConfig, content.mediaExternalId, {
+        fetch: deps.fetch,
+      })
+      const ext = EXT_BY_MIME[media.mimeType] ?? "bin"
       const ref = await deps.storage.putAttachment({
         orgId,
         conversationId,
         bytes: media.bytes,
         contentType: media.mimeType,
         ext,
-      });
-      attachments = [{ objectKey: ref.objectKey, mimeType: ref.mimeType, filename: media.filename, size: ref.size }];
+      })
+      attachments = [
+        {
+          objectKey: ref.objectKey,
+          mimeType: ref.mimeType,
+          filename: media.filename,
+          size: ref.size,
+        },
+      ]
     } catch {
       // No perder el mensaje por un fallo de descarga; queda auditado.
-      mediaError = "media-download-failed";
+      mediaError = "media-download-failed"
     }
   }
 
@@ -244,21 +262,26 @@ export async function ingestInbound(
       error: mediaError,
     })
     .onConflictDoNothing()
-    .returning({ id: message.id });
+    .returning({ id: message.id })
   if (inserted.length === 0) {
     const [dup] = await tx
       .select({ id: message.id })
       .from(message)
-      .where(and(eq(message.conversationId, conversationId), eq(message.externalId, event.externalMessageId)))
-      .limit(1);
-    if (!dup) throw new Error("Dedupe sin fila existente");
-    return { conversationId, messageId: dup.id, created: false };
+      .where(
+        and(
+          eq(message.conversationId, conversationId),
+          eq(message.externalId, event.externalMessageId),
+        ),
+      )
+      .limit(1)
+    if (!dup) throw new Error("Dedupe sin fila existente")
+    return { conversationId, messageId: dup.id, created: false }
   }
-  const first = inserted[0];
-  if (!first) throw new Error("Dedupe sin fila existente");
-  const messageId = first.id;
+  const first = inserted[0]
+  if (!first) throw new Error("Dedupe sin fila existente")
+  const messageId = first.id
 
-  const now = new Date();
+  const now = new Date()
   await tx
     .update(conversation)
     .set({
@@ -267,50 +290,60 @@ export async function ingestInbound(
       unreadCount: sql`"unread_count" + 1`,
       updatedAt: now,
     })
-    .where(eq(conversation.id, conversationId));
+    .where(eq(conversation.id, conversationId))
   await tx
     .update(contact)
     .set({ lastInteractionAt: now, updatedAt: now })
-    .where(eq(contact.id, contactId));
+    .where(eq(contact.id, contactId))
   if (mediaError) {
     await audit(tx, orgId, {
       action: "message.media_failed",
       entity: "message",
       entityId: messageId,
       metadata: { externalId: event.externalMessageId },
-    });
+    })
   }
-  await audit(tx, orgId, { action: "message.created", entity: "message", entityId: messageId });
-  await notify(tx, { orgId, kind: "message.created", conversationId, messageId, at: now.toISOString() });
-  return { conversationId, messageId, created: true };
+  await audit(tx, orgId, { action: "message.created", entity: "message", entityId: messageId })
+  await notify(tx, {
+    orgId,
+    kind: "message.created",
+    conversationId,
+    messageId,
+    at: now.toISOString(),
+  })
+  return { conversationId, messageId, created: true }
 }
 
 /** Aplica estados del proveedor (delivered/read/failed) por externalId. */
-export async function applyStatus(tx: Db, orgId: string, statuses: NormalizedStatus[]): Promise<number> {
-  let applied = 0;
+export async function applyStatus(
+  tx: Db,
+  orgId: string,
+  statuses: NormalizedStatus[],
+): Promise<number> {
+  let applied = 0
   for (const s of statuses) {
     const [updated] = await tx
       .update(message)
       .set({ status: s.status })
       .where(and(eq(message.organizationId, orgId), eq(message.externalId, s.externalMessageId)))
-      .returning({ id: message.id, conversationId: message.conversationId });
+      .returning({ id: message.id, conversationId: message.conversationId })
     if (updated) {
-      applied += 1;
+      applied += 1
       await notify(tx, {
         orgId,
         kind: "message.updated",
         conversationId: updated.conversationId,
         messageId: updated.id,
         at: new Date().toISOString(),
-      });
+      })
     }
   }
-  return applied;
+  return applied
 }
 
 export type OutboundContent =
   | { type: "text"; text: string }
-  | { type: "template"; name: string; language: string; params: string[] };
+  | { type: "template"; name: string; language: string; params: string[] }
 
 async function requireOpenConversation(tx: Db, orgId: string, conversationId: string) {
   const [row] = await tx
@@ -318,19 +351,22 @@ async function requireOpenConversation(tx: Db, orgId: string, conversationId: st
     .from(conversation)
     .innerJoin(channelConnection, eq(conversation.channelConnectionId, channelConnection.id))
     .where(and(eq(conversation.id, conversationId), eq(conversation.organizationId, orgId)))
-    .limit(1);
-  if (!row) throw notFound("Conversación");
+    .limit(1)
+  if (!row) throw notFound("Conversación")
   if (row.conversation.status !== "open") {
-    throw new ServiceError("CONVERSATION_CLOSED", 409, "La conversación está cerrada");
+    throw new ServiceError("CONVERSATION_CLOSED", 409, "La conversación está cerrada")
   }
-  return row;
+  return row
 }
 
-function assertWindowAllows(row: { conversation: typeof conversation.$inferSelect }, content: OutboundContent): void {
-  if (content.type !== "text") return;
-  const last = row.conversation.lastInboundAt;
+function assertWindowAllows(
+  row: { conversation: typeof conversation.$inferSelect },
+  content: OutboundContent,
+): void {
+  if (content.type !== "text") return
+  const last = row.conversation.lastInboundAt
   if (!last || Date.now() - last.getTime() > WA_FREE_TEXT_WINDOW_MS) {
-    throw new ServiceError("WINDOW_CLOSED", 409, "Fuera de la ventana de 24h: usa una plantilla");
+    throw new ServiceError("WINDOW_CLOSED", 409, "Fuera de la ventana de 24h: usa una plantilla")
   }
 }
 
@@ -342,30 +378,30 @@ export async function sendOutbound(
   tx: Db,
   orgId: string,
   input: {
-    conversationId: string;
-    senderKind: "user" | "agent";
-    senderUserId?: string | null;
-    content: OutboundContent;
+    conversationId: string
+    senderKind: "user" | "agent"
+    senderUserId?: string | null
+    content: OutboundContent
   },
 ): Promise<MessageItem> {
-  const row = await requireOpenConversation(tx, orgId, input.conversationId);
+  const row = await requireOpenConversation(tx, orgId, input.conversationId)
   if (row.connection.provider === "whatsapp_cloud_api") {
-    assertWindowAllows(row, input.content);
+    assertWindowAllows(row, input.content)
   }
   if (input.content.type === "text" && !input.content.text.trim()) {
-    throw validation("El texto del mensaje es obligatorio");
+    throw validation("El texto del mensaje es obligatorio")
   }
-  const now = new Date();
+  const now = new Date()
   const patch: Partial<typeof conversation.$inferInsert> = {
     lastOutboundAt: now,
     lastMessageAt: now,
     updatedAt: now,
-  };
-  if (input.senderKind === "user") {
-    patch.agentStatus = "off";
-    patch.unreadCount = 0;
   }
-  await tx.update(conversation).set(patch).where(eq(conversation.id, input.conversationId));
+  if (input.senderKind === "user") {
+    patch.agentStatus = "off"
+    patch.unreadCount = 0
+  }
+  await tx.update(conversation).set(patch).where(eq(conversation.id, input.conversationId))
   const [created] = await tx
     .insert(message)
     .values({
@@ -382,33 +418,29 @@ export async function sendOutbound(
       attachments: [],
       status: "queued",
     })
-    .returning();
-  if (!created) throw new Error("No se pudo crear el mensaje");
-  await sendOutboundMessage(tx, { orgId, messageId: created.id });
+    .returning()
+  if (!created) throw new Error("No se pudo crear el mensaje")
+  await sendOutboundMessage(tx, { orgId, messageId: created.id })
   await audit(tx, orgId, {
     actorUserId: input.senderUserId ?? null,
     action: "message.created",
     entity: "message",
     entityId: created.id,
     metadata: { direction: "out", senderKind: input.senderKind },
-  });
+  })
   await notify(tx, {
     orgId,
     kind: "message.created",
     conversationId: input.conversationId,
     messageId: created.id,
     at: now.toISOString(),
-  });
-  return toMessageItem(created);
+  })
+  return toMessageItem(created)
 }
 
 /** Valida la plantilla contra el allowlist de la conexión (config descifrada). */
-export function assertTemplateAllowed(
-  templates: unknown,
-  name: string,
-  language: string,
-): void {
-  if (!Array.isArray(templates)) throw validation("La conexión no tiene plantillas configuradas");
+export function assertTemplateAllowed(templates: unknown, name: string, language: string): void {
+  if (!Array.isArray(templates)) throw validation("La conexión no tiene plantillas configuradas")
   const found = templates.some(
     (t) =>
       !!t &&
@@ -417,8 +449,8 @@ export function assertTemplateAllowed(
       t.name === name &&
       "language" in t &&
       t.language === language,
-  );
-  if (!found) throw validation("Plantilla no autorizada en esta conexión");
+  )
+  if (!found) throw validation("Plantilla no autorizada en esta conexión")
 }
 
 /** Envío de plantilla con validación contra la config descifrada. */
@@ -427,62 +459,69 @@ export async function sendTemplateOutbound(
   orgId: string,
   secretsKey: Buffer,
   input: {
-    conversationId: string;
-    senderKind: "user" | "agent";
-    senderUserId?: string | null;
-    name: string;
-    language: string;
-    params: string[];
+    conversationId: string
+    senderKind: "user" | "agent"
+    senderUserId?: string | null
+    name: string
+    language: string
+    params: string[]
   },
 ): Promise<MessageItem> {
-  const row = await requireOpenConversation(tx, orgId, input.conversationId);
-  const config = decryptConfig(secretsKey, row.connection.configEncrypted);
-  assertTemplateAllowed(config["templates"], input.name, input.language);
+  const row = await requireOpenConversation(tx, orgId, input.conversationId)
+  const config = decryptConfig(secretsKey, row.connection.configEncrypted)
+  assertTemplateAllowed(config["templates"], input.name, input.language)
   return sendOutbound(tx, orgId, {
     conversationId: input.conversationId,
     senderKind: input.senderKind,
     senderUserId: input.senderUserId,
     content: { type: "template", name: input.name, language: input.language, params: input.params },
-  });
+  })
 }
 
 export interface ConversationListItem {
-  id: string;
-  status: string;
-  agentStatus: string;
-  unreadCount: number;
-  assignedUserId: string | null;
-  lastMessageAt: string | null;
-  contact: { id: string; displayName: string };
-  connection: { id: string; channel: string; provider: string; displayName: string };
-  preview: { body: string | null; direction: string; senderKind: string; createdAt: string } | null;
+  id: string
+  status: string
+  agentStatus: string
+  unreadCount: number
+  assignedUserId: string | null
+  lastMessageAt: string | null
+  contact: { id: string; displayName: string }
+  connection: { id: string; channel: string; provider: string; displayName: string }
+  preview: { body: string | null; direction: string; senderKind: string; createdAt: string } | null
 }
 
 export async function listConversations(
   tx: Db,
   orgId: string,
-  input: { status?: string; channel?: string; assigned?: string; q?: string; cursor?: string; limit?: number },
+  input: {
+    status?: string
+    channel?: string
+    assigned?: string
+    q?: string
+    cursor?: string
+    limit?: number
+  },
 ): Promise<{ items: ConversationListItem[]; nextCursor: string | null }> {
-  const limit = Math.min(Math.max(input.limit ?? 30, 1), 100);
-  const conditions = [eq(conversation.organizationId, orgId)];
-  if (input.status) conditions.push(eq(conversation.status, input.status));
-  if (input.channel) conditions.push(eq(channelConnection.channel, input.channel));
+  const limit = Math.min(Math.max(input.limit ?? 30, 1), 100)
+  const conditions = [eq(conversation.organizationId, orgId)]
+  if (input.status) conditions.push(eq(conversation.status, input.status))
+  if (input.channel) conditions.push(eq(channelConnection.channel, input.channel))
   if (input.assigned === "none") {
-    conditions.push(sql`"conversation"."assigned_user_id" is null`);
+    conditions.push(sql`"conversation"."assigned_user_id" is null`)
   } else if (input.assigned) {
-    conditions.push(eq(conversation.assignedUserId, input.assigned));
+    conditions.push(eq(conversation.assignedUserId, input.assigned))
   }
-  if (input.q) conditions.push(ilike(contact.displayName, `%${input.q}%`));
+  if (input.q) conditions.push(ilike(contact.displayName, `%${input.q}%`))
   if (input.cursor) {
-    const decoded = decodeCursor(input.cursor);
-    if (!decoded) throw validation("Cursor inválido");
-    const ts = new Date(decoded.ts);
+    const decoded = decodeCursor(input.cursor)
+    if (!decoded) throw validation("Cursor inválido")
+    const ts = new Date(decoded.ts)
     conditions.push(
       or(
         lt(conversation.lastMessageAt, ts),
         and(eq(conversation.lastMessageAt, ts), lt(conversation.id, decoded.id)),
       )!,
-    );
+    )
   }
   const rows = await tx
     .select({ conversation, contact, connection: channelConnection })
@@ -491,29 +530,32 @@ export async function listConversations(
     .innerJoin(channelConnection, eq(conversation.channelConnectionId, channelConnection.id))
     .where(and(...conditions))
     .orderBy(desc(conversation.lastMessageAt), desc(conversation.id))
-    .limit(limit + 1);
-  const page = rows.slice(0, limit);
-  const previews = new Map<string, ConversationListItem["preview"]>();
+    .limit(limit + 1)
+  const page = rows.slice(0, limit)
+  const previews = new Map<string, ConversationListItem["preview"]>()
   if (page.length > 0) {
-    const ids = page.map((r) => r.conversation.id);
+    const ids = page.map((r) => r.conversation.id)
     const previewRows = (await tx.execute(sql`
       select distinct on ("conversation_id") "conversation_id", "body", "direction", "sender_kind", "created_at"
       from "message"
-      where "conversation_id" in (${sql.join(ids.map((id) => sql`${id}::uuid`), sql`, `)})
+      where "conversation_id" in (${sql.join(
+        ids.map((id) => sql`${id}::uuid`),
+        sql`, `,
+      )})
       order by "conversation_id", "created_at" desc`)) as unknown as {
-      conversation_id: string;
-      body: string | null;
-      direction: string;
-      sender_kind: string;
-      created_at: Date;
-    }[];
+      conversation_id: string
+      body: string | null
+      direction: string
+      sender_kind: string
+      created_at: Date
+    }[]
     for (const p of previewRows) {
       previews.set(p.conversation_id, {
         body: p.body,
         direction: p.direction,
         senderKind: p.sender_kind,
         createdAt: p.created_at instanceof Date ? p.created_at.toISOString() : String(p.created_at),
-      });
+      })
     }
   }
   const items: ConversationListItem[] = page.map((r) => ({
@@ -531,13 +573,13 @@ export async function listConversations(
       displayName: r.connection.displayName,
     },
     preview: previews.get(r.conversation.id) ?? null,
-  }));
-  const last = page[page.length - 1];
+  }))
+  const last = page[page.length - 1]
   const nextCursor =
     rows.length > limit && last?.conversation.lastMessageAt
       ? encodeCursor(last.conversation.lastMessageAt.toISOString(), last.conversation.id)
-      : null;
-  return { items, nextCursor };
+      : null
+  return { items, nextCursor }
 }
 
 export async function listMessages(
@@ -550,57 +592,71 @@ export async function listMessages(
     .select({ id: conversation.id })
     .from(conversation)
     .where(and(eq(conversation.id, conversationId), eq(conversation.organizationId, orgId)))
-    .limit(1);
-  if (!conv) throw notFound("Conversación");
-  const limit = Math.min(Math.max(input.limit ?? 50, 1), 100);
-  const conditions = [eq(message.conversationId, conversationId)];
+    .limit(1)
+  if (!conv) throw notFound("Conversación")
+  const limit = Math.min(Math.max(input.limit ?? 50, 1), 100)
+  const conditions = [eq(message.conversationId, conversationId)]
   if (input.before) {
-    const decoded = decodeCursor(input.before);
-    if (!decoded) throw validation("Cursor inválido");
-    const ts = new Date(decoded.ts);
-    conditions.push(or(lt(message.createdAt, ts), and(eq(message.createdAt, ts), lt(message.id, decoded.id)))!);
+    const decoded = decodeCursor(input.before)
+    if (!decoded) throw validation("Cursor inválido")
+    const ts = new Date(decoded.ts)
+    conditions.push(
+      or(lt(message.createdAt, ts), and(eq(message.createdAt, ts), lt(message.id, decoded.id)))!,
+    )
   }
   const rows = await tx
     .select()
     .from(message)
     .where(and(...conditions))
     .orderBy(desc(message.createdAt), desc(message.id))
-    .limit(limit + 1);
-  const page = rows.slice(0, limit);
-  const oldest = page[page.length - 1];
+    .limit(limit + 1)
+  const page = rows.slice(0, limit)
+  const oldest = page[page.length - 1]
   return {
     items: page.reverse().map(toMessageItem),
     nextCursor:
-      rows.length > limit && oldest ? encodeCursor(oldest.createdAt.toISOString(), oldest.id) : null,
-  };
+      rows.length > limit && oldest
+        ? encodeCursor(oldest.createdAt.toISOString(), oldest.id)
+        : null,
+  }
 }
 
 export interface ConversationDetail {
   conversation: {
-    id: string;
-    status: string;
-    agentStatus: string;
-    unreadCount: number;
-    assignedUserId: string | null;
-    lastMessageAt: string | null;
-  };
-  contact: { id: string; displayName: string };
-  connection: { id: string; channel: string; provider: string; displayName: string; capabilities: unknown };
-  messages: MessageItem[];
-  messagesCursor: string | null;
+    id: string
+    status: string
+    agentStatus: string
+    unreadCount: number
+    assignedUserId: string | null
+    lastMessageAt: string | null
+  }
+  contact: { id: string; displayName: string }
+  connection: {
+    id: string
+    channel: string
+    provider: string
+    displayName: string
+    capabilities: unknown
+  }
+  messages: MessageItem[]
+  messagesCursor: string | null
 }
 
-export async function getConversationDetail(tx: Db, orgId: string, id: string): Promise<ConversationDetail> {
+export async function getConversationDetail(
+  tx: Db,
+  orgId: string,
+  id: string,
+): Promise<ConversationDetail> {
   const [row] = await tx
     .select({ conversation, contact, connection: channelConnection })
     .from(conversation)
     .innerJoin(contact, eq(conversation.contactId, contact.id))
     .innerJoin(channelConnection, eq(conversation.channelConnectionId, channelConnection.id))
     .where(and(eq(conversation.id, id), eq(conversation.organizationId, orgId)))
-    .limit(1);
-  if (!row) throw notFound("Conversación");
-  const adapter = channelAdapters[row.connection.provider as keyof typeof channelAdapters];
-  const { items, nextCursor } = await listMessages(tx, orgId, id, {});
+    .limit(1)
+  if (!row) throw notFound("Conversación")
+  const adapter = channelAdapters[row.connection.provider as keyof typeof channelAdapters]
+  const { items, nextCursor } = await listMessages(tx, orgId, id, {})
   return {
     conversation: {
       id: row.conversation.id,
@@ -608,7 +664,9 @@ export async function getConversationDetail(tx: Db, orgId: string, id: string): 
       agentStatus: row.conversation.agentStatus,
       unreadCount: row.conversation.unreadCount,
       assignedUserId: row.conversation.assignedUserId,
-      lastMessageAt: row.conversation.lastMessageAt ? row.conversation.lastMessageAt.toISOString() : null,
+      lastMessageAt: row.conversation.lastMessageAt
+        ? row.conversation.lastMessageAt.toISOString()
+        : null,
     },
     contact: { id: row.contact.id, displayName: row.contact.displayName },
     connection: {
@@ -620,7 +678,7 @@ export async function getConversationDetail(tx: Db, orgId: string, id: string): 
     },
     messages: items,
     messagesCursor: nextCursor,
-  };
+  }
 }
 
 async function mutateConversation(
@@ -634,11 +692,22 @@ async function mutateConversation(
     .update(conversation)
     .set({ ...patch, updatedAt: new Date() })
     .where(and(eq(conversation.id, id), eq(conversation.organizationId, orgId)))
-    .returning({ id: conversation.id });
-  if (!updated) throw notFound("Conversación");
+    .returning({ id: conversation.id })
+  if (!updated) throw notFound("Conversación")
   // Acción canónica = kind SSE: el replay reconstruye conversation.updated.
-  await audit(tx, orgId, { actorUserId: auditInput.actorUserId, action: "conversation.updated", entity: "conversation", entityId: id, metadata: { op: auditInput.op } });
-  await notify(tx, { orgId, kind: "conversation.updated", conversationId: id, at: new Date().toISOString() });
+  await audit(tx, orgId, {
+    actorUserId: auditInput.actorUserId,
+    action: "conversation.updated",
+    entity: "conversation",
+    entityId: id,
+    metadata: { op: auditInput.op },
+  })
+  await notify(tx, {
+    orgId,
+    kind: "conversation.updated",
+    conversationId: id,
+    at: new Date().toISOString(),
+  })
 }
 
 export async function assignConversation(
@@ -648,15 +717,25 @@ export async function assignConversation(
   userId: string | null,
   actorUserId?: string,
 ): Promise<void> {
-  await mutateConversation(tx, orgId, id, { assignedUserId: userId }, { actorUserId, op: "assign" });
+  await mutateConversation(tx, orgId, id, { assignedUserId: userId }, { actorUserId, op: "assign" })
 }
 
-export async function closeConversation(tx: Db, orgId: string, id: string, actorUserId?: string): Promise<void> {
-  await mutateConversation(tx, orgId, id, { status: "closed" }, { actorUserId, op: "close" });
+export async function closeConversation(
+  tx: Db,
+  orgId: string,
+  id: string,
+  actorUserId?: string,
+): Promise<void> {
+  await mutateConversation(tx, orgId, id, { status: "closed" }, { actorUserId, op: "close" })
 }
 
-export async function reopenConversation(tx: Db, orgId: string, id: string, actorUserId?: string): Promise<void> {
-  await mutateConversation(tx, orgId, id, { status: "open" }, { actorUserId, op: "reopen" });
+export async function reopenConversation(
+  tx: Db,
+  orgId: string,
+  id: string,
+  actorUserId?: string,
+): Promise<void> {
+  await mutateConversation(tx, orgId, id, { status: "open" }, { actorUserId, op: "reopen" })
 }
 
 export async function setAgentStatus(
@@ -672,11 +751,11 @@ export async function setAgentStatus(
     id,
     { agentStatus: enabled ? "on" : "off" },
     { actorUserId, op: "agent" },
-  );
+  )
 }
 
 export async function markRead(tx: Db, orgId: string, id: string): Promise<void> {
-  await mutateConversation(tx, orgId, id, { unreadCount: 0 }, { op: "read" });
+  await mutateConversation(tx, orgId, id, { unreadCount: 0 }, { op: "read" })
 }
 
 /** Resuelve un adjunto a URL firmada (15 min), verificando la cadena RLS. */
@@ -698,13 +777,18 @@ export async function attachmentUrl(
         eq(conversation.organizationId, orgId),
       ),
     )
-    .limit(1);
-  if (!row) throw notFound("Mensaje");
-  const attachments = row.message.attachments;
-  if (!Array.isArray(attachments)) throw notFound("Adjunto");
-  const ref = attachments[index];
-  if (!ref || typeof ref !== "object" || !("objectKey" in ref) || typeof ref.objectKey !== "string") {
-    throw notFound("Adjunto");
+    .limit(1)
+  if (!row) throw notFound("Mensaje")
+  const attachments = row.message.attachments
+  if (!Array.isArray(attachments)) throw notFound("Adjunto")
+  const ref = attachments[index]
+  if (
+    !ref ||
+    typeof ref !== "object" ||
+    !("objectKey" in ref) ||
+    typeof ref.objectKey !== "string"
+  ) {
+    throw notFound("Adjunto")
   }
-  return storage.attachmentUrl(ref.objectKey, 900);
+  return storage.attachmentUrl(ref.objectKey, 900)
 }

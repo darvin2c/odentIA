@@ -1,48 +1,48 @@
-import type { Auth } from "@odentia/auth";
-import { sendDemoTask, withOrgContext, type Db } from "@odentia/db";
-import { message } from "@odentia/db/schema/crm";
-import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org";
-import { and, eq, gt, inArray, sql } from "drizzle-orm";
-import { Hono, type Context } from "hono";
-import { cors } from "hono/cors";
-import { requestId } from "hono/request-id";
-import { streamSSE } from "hono/streaming";
-import postgres from "postgres";
-import { z } from "zod";
-import { canWrite, orgContextOf, requireOrgContext, requireSession } from "./lib/context.js";
-import { errorBody } from "./lib/error.js";
-import { createAgentRoute } from "./routes/agent.js";
-import { createCie10Route } from "./routes/cie10.js";
-import { createConnectionsRoute } from "./routes/connections.js";
-import { createContactsRoute } from "./routes/contacts.js";
-import { createConversationsRoute } from "./routes/conversations.js";
-import { createFieldsRoute } from "./routes/fields.js";
-import { createPatientsRoute } from "./routes/patients.js";
-import { createPipelinesRoute } from "./routes/pipelines.js";
-import { createServicesRoute } from "./routes/services.js";
-import { createTasksRoute } from "./routes/tasks.js";
-import { createWebhooksRoute } from "./routes/webhooks.js";
-import type { Storage } from "@odentia/services";
+import type { Auth } from "@odentia/auth"
+import { type Db, sendDemoTask, withOrgContext } from "@odentia/db"
+import { message } from "@odentia/db/schema/crm"
+import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
+import type { Storage } from "@odentia/services"
+import { and, eq, gt, inArray, sql } from "drizzle-orm"
+import { type Context, Hono } from "hono"
+import { cors } from "hono/cors"
+import { requestId } from "hono/request-id"
+import { streamSSE } from "hono/streaming"
+import postgres from "postgres"
+import { z } from "zod"
+import { canWrite, orgContextOf, requireOrgContext, requireSession } from "./lib/context.js"
+import { errorBody } from "./lib/error.js"
+import { createAgentRoute } from "./routes/agent.js"
+import { createCie10Route } from "./routes/cie10.js"
+import { createConnectionsRoute } from "./routes/connections.js"
+import { createContactsRoute } from "./routes/contacts.js"
+import { createConversationsRoute } from "./routes/conversations.js"
+import { createFieldsRoute } from "./routes/fields.js"
+import { createPatientsRoute } from "./routes/patients.js"
+import { createPipelinesRoute } from "./routes/pipelines.js"
+import { createServicesRoute } from "./routes/services.js"
+import { createTasksRoute } from "./routes/tasks.js"
+import { createWebhooksRoute } from "./routes/webhooks.js"
 
 export interface AppDeps {
-  auth: Auth;
-  db: Db;
+  auth: Auth
+  db: Db
   /**
    * Rol owner (bypasea RLS): USO LIMITADO a rutas webhook — leer la conexión
    * por id sin org, ledger de dedupe y encolado. Nunca datos de tenant.
    */
-  ownerDb: Db;
+  ownerDb: Db
   /** Clave AES-256-GCM para configs de conexión (SECRETS_KEY). */
-  secretsKey: Buffer;
-  storage: Storage;
+  secretsKey: Buffer
+  storage: Storage
   /** CHANNEL_VALIDATE_EXTERNAL !== 'false': validar contra el proveedor real. */
-  validateExternal: boolean;
+  validateExternal: boolean
   /** Base pública del API para webhookUrl (BETTER_AUTH_URL). */
-  webhookBaseUrl: string;
-  trustedOrigins: string[];
-  cookieDomain: string;
+  webhookBaseUrl: string
+  trustedOrigins: string[]
+  cookieDomain: string
   /** Conexión dedicada LISTEN (postgres.js crudo). */
-  listenUrl: string;
+  listenUrl: string
 }
 const branchInput = z.object({
   name: z.string().min(1).max(120),
@@ -56,9 +56,9 @@ const branchInput = z.object({
   email: z.string().email().optional(),
   mapsUrl: z.string().url().optional(),
   timezone: z.string().max(60).optional(),
-});
+})
 
-const branchPatch = branchInput.partial();
+const branchPatch = branchInput.partial()
 
 const orgProfileInput = z.object({
   legalName: z.string().min(1).max(200),
@@ -71,61 +71,65 @@ const orgProfileInput = z.object({
   currency: z.string().length(3).optional(),
   timezone: z.string().max(60).optional(),
   locale: z.string().max(20).optional(),
-});
+})
 
 const demoTaskInput = z.object({
   message: z.string().min(1).max(200),
-});
+})
 
 interface NotifyPayload {
-  orgId: string;
-  kind: string;
-  taskId?: string | number;
-  conversationId?: string;
-  messageId?: string;
-  at: string;
+  orgId: string
+  kind: string
+  taskId?: string | number
+  conversationId?: string
+  messageId?: string
+  at: string
 }
 
-type AuditRow = typeof auditEvent.$inferSelect;
+type AuditRow = typeof auditEvent.$inferSelect
 
 /**
  * Reconstruye el payload SSE desde una fila de audit_event (replay).
  * Nunca expone contenido: solo referencias (mismo invariante que NOTIFY).
  */
-async function toReplayPayload(db: Db, orgId: string, event: AuditRow): Promise<NotifyPayload | null> {
-  const at = event.createdAt.toISOString();
+async function toReplayPayload(
+  db: Db,
+  orgId: string,
+  event: AuditRow,
+): Promise<NotifyPayload | null> {
+  const at = event.createdAt.toISOString()
   if (event.action === "demo_task.done") {
-    return { orgId, kind: "demo_task.done", taskId: event.entityId ?? "", at };
+    return { orgId, kind: "demo_task.done", taskId: event.entityId ?? "", at }
   }
   if (event.action === "message.created" || event.action === "message.updated") {
-    if (!event.entityId) return null;
+    if (!event.entityId) return null
     const found = await withOrgContext(db, orgId, (tx) =>
       tx
         .select({ conversationId: message.conversationId })
         .from(message)
         .where(and(eq(message.id, event.entityId as string), eq(message.organizationId, orgId)))
         .limit(1),
-    );
-    const conversationId = found[0]?.conversationId;
-    if (!conversationId) return null;
-    return { orgId, kind: event.action, conversationId, messageId: event.entityId, at };
+    )
+    const conversationId = found[0]?.conversationId
+    if (!conversationId) return null
+    return { orgId, kind: event.action, conversationId, messageId: event.entityId, at }
   }
   if (event.action === "conversation.updated") {
-    if (!event.entityId) return null;
-    return { orgId, kind: "conversation.updated", conversationId: event.entityId, at };
+    if (!event.entityId) return null
+    return { orgId, kind: "conversation.updated", conversationId: event.entityId, at }
   }
-  return null;
+  return null
 }
 
 export function createApp(deps: AppDeps) {
-  const { auth, db } = deps;
+  const { auth, db } = deps
   const tenantOrigin = new RegExp(
     `^https://[a-z0-9-]+\\.${deps.cookieDomain.replaceAll(".", "\\.")}$`,
-  );
+  )
 
-  const app = new Hono();
+  const app = new Hono()
 
-  app.use("*", requestId());
+  app.use("*", requestId())
   app.use(
     "*",
     cors({
@@ -133,113 +137,124 @@ export function createApp(deps: AppDeps) {
         deps.trustedOrigins.includes(origin) || tenantOrigin.test(origin) ? origin : "",
       credentials: true,
     }),
-  );
+  )
 
   app.onError((err, c) => {
-    console.error(err);
-    return c.json(errorBody(c, "INTERNAL", "Error interno"), 500);
-  });
-  app.notFound((c) => c.json(errorBody(c, "NOT_FOUND", "Recurso no encontrado"), 404));
+    console.error(err)
+    return c.json(errorBody(c, "INTERNAL", "Error interno"), 500)
+  })
+  app.notFound((c) => c.json(errorBody(c, "NOT_FOUND", "Recurso no encontrado"), 404))
 
   app.get("/health", async (c) => {
-    await db.execute(sql`select 1`);
-    return c.json({ ok: true });
-  });
+    await db.execute(sql`select 1`)
+    return c.json({ ok: true })
+  })
 
   // Subdominios reservados: nunca son slugs de tenant (colisionarían con app./api./www.).
-  const RESERVED_SLUGS: Record<string, true> = { api: true, app: true, www: true };
+  const RESERVED_SLUGS: Record<string, true> = { api: true, app: true, www: true }
   app.use("/api/auth/organization/create", async (c, next) => {
-    if (c.req.method !== "POST") return next();
-    const body = (await c.req.raw.clone().json().catch(() => null)) as { slug?: unknown } | null;
-    const slug = typeof body?.slug === "string" ? body.slug : "";
+    if (c.req.method !== "POST") return next()
+    const body = (await c.req.raw
+      .clone()
+      .json()
+      .catch(() => null)) as { slug?: unknown } | null
+    const slug = typeof body?.slug === "string" ? body.slug : ""
     if (RESERVED_SLUGS[slug]) {
-      return c.json(errorBody(c, "RESERVED_SLUG", "Ese subdominio está reservado"), 400);
+      return c.json(errorBody(c, "RESERVED_SLUG", "Ese subdominio está reservado"), 400)
     }
-    return next();
-  });
+    return next()
+  })
 
   // Better Auth: montado ANTES de los guards.
-  app.on(["GET", "POST"], "/api/auth/*", (c) => auth.handler(c.req.raw));
+  app.on(["GET", "POST"], "/api/auth/*", (c) => auth.handler(c.req.raw))
 
   // Rutas de usuario (sin contexto de organización).
-  const userScoped = new Hono();
-  userScoped.use("*", requireSession(deps));
+  const userScoped = new Hono()
+  userScoped.use("*", requireSession(deps))
 
-  const AVATAR_MIME: Record<string, string> = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp" };
-  const AVATAR_MAX_BYTES = 2 * 1024 * 1024;
+  const AVATAR_MIME: Record<string, string> = {
+    "image/png": "png",
+    "image/jpeg": "jpg",
+    "image/webp": "webp",
+  }
+  const AVATAR_MAX_BYTES = 2 * 1024 * 1024
 
   userScoped.post("/uploads/avatar", async (c) => {
-    const form = await c.req.formData().catch(() => null);
-    const file = form?.get("file");
+    const form = await c.req.formData().catch(() => null)
+    const file = form?.get("file")
     if (!(file instanceof File)) {
-      return c.json(errorBody(c, "VALIDATION", "Adjunta un archivo"), 400);
+      return c.json(errorBody(c, "VALIDATION", "Adjunta un archivo"), 400)
     }
-    const ext = AVATAR_MIME[file.type];
+    const ext = AVATAR_MIME[file.type]
     if (!ext) {
-      return c.json(errorBody(c, "VALIDATION", "Solo se admiten PNG, JPG o WebP"), 400);
+      return c.json(errorBody(c, "VALIDATION", "Solo se admiten PNG, JPG o WebP"), 400)
     }
     if (file.size > AVATAR_MAX_BYTES) {
-      return c.json(errorBody(c, "VALIDATION", "La imagen no puede superar 2 MB"), 400);
+      return c.json(errorBody(c, "VALIDATION", "La imagen no puede superar 2 MB"), 400)
     }
-    const userId = (c as Context).get("userId") as string;
-    const previousImage = (c as Context).get("userImage") as string | null;
+    const userId = (c as Context).get("userId") as string
+    const previousImage = (c as Context).get("userImage") as string | null
     const { url } = await deps.storage.putAvatar({
       userId,
       body: Buffer.from(await file.arrayBuffer()),
       contentType: file.type,
       ext,
-    });
+    })
     if (previousImage) {
-      await deps.storage.deleteByUrl(previousImage).catch(() => {});
+      await deps.storage.deleteByUrl(previousImage).catch(() => {})
     }
-    return c.json({ data: { url } }, 201);
-  });
+    return c.json({ data: { url } }, 201)
+  })
 
   // Webhooks de proveedor ANTES que los routers con guards: el use("*") de
   // userScoped/guarded también casa /api/webhooks/* y respondería 401.
-  app.route("/api/webhooks", createWebhooksRoute({ ownerDb: deps.ownerDb, db: deps.db, secretsKey: deps.secretsKey }));
+  app.route(
+    "/api/webhooks",
+    createWebhooksRoute({ ownerDb: deps.ownerDb, db: deps.db, secretsKey: deps.secretsKey }),
+  )
 
-  app.route("/api", userScoped);
+  app.route("/api", userScoped)
 
   // Guards para el resto de /api/*.
-  const guarded = new Hono();
+  const guarded = new Hono()
   // Los webhooks del proveedor viven bajo /api/webhooks pero son públicos
   // (firma HMAC/secret-token): `use("*")` también los alcanza, se salta aquí.
   const isWebhook = (c: Context) =>
-    c.req.path.startsWith("/api/webhooks/") || c.req.path.startsWith("/webhooks/");
+    c.req.path.startsWith("/api/webhooks/") || c.req.path.startsWith("/webhooks/")
   guarded.use("*", async (c, next) => {
-    if (isWebhook(c)) return next();
-    return requireSession(deps)(c, next);
-  });
+    if (isWebhook(c)) return next()
+    return requireSession(deps)(c, next)
+  })
   guarded.use("*", async (c, next) => {
-    if (isWebhook(c)) return next();
-    return requireOrgContext(deps)(c, next);
-  });
+    if (isWebhook(c)) return next()
+    return requireOrgContext(deps)(c, next)
+  })
 
   function validationError(c: Context, issues: z.ZodIssue[]) {
-    return c.json(
-      errorBody(c, "VALIDATION", issues[0]?.message ?? "Datos inválidos"),
-      400,
-    );
+    return c.json(errorBody(c, "VALIDATION", issues[0]?.message ?? "Datos inválidos"), 400)
   }
 
   guarded.get("/org-profile", async (c) => {
-    const { orgId } = orgContextOf(c);
+    const { orgId } = orgContextOf(c)
     const row = await withOrgContext(db, orgId, async (tx) => {
-      const [found] = await tx.select().from(orgProfile).where(eq(orgProfile.organizationId, orgId)).limit(1);
-      return found ?? null;
-    });
-    return c.json({ data: row });
-  });
+      const [found] = await tx
+        .select()
+        .from(orgProfile)
+        .where(eq(orgProfile.organizationId, orgId))
+        .limit(1)
+      return found ?? null
+    })
+    return c.json({ data: row })
+  })
 
   guarded.put("/org-profile", async (c) => {
-    const { orgId, userId, memberRole } = orgContextOf(c);
+    const { orgId, userId, memberRole } = orgContextOf(c)
     if (!canWrite(memberRole)) {
-      return c.json(errorBody(c, "FORBIDDEN", "Solo owner/admin pueden editar el perfil"), 403);
+      return c.json(errorBody(c, "FORBIDDEN", "Solo owner/admin pueden editar el perfil"), 403)
     }
-    const parsed = orgProfileInput.safeParse(await c.req.json().catch(() => null));
-    if (!parsed.success) return validationError(c, parsed.error.issues);
-    const input = parsed.data;
+    const parsed = orgProfileInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    const input = parsed.data
 
     const row = await withOrgContext(db, orgId, async (tx) => {
       const [upserted] = await tx
@@ -249,7 +264,7 @@ export function createApp(deps: AppDeps) {
           target: orgProfile.organizationId,
           set: { ...input, updatedAt: new Date() },
         })
-        .returning();
+        .returning()
       await tx.insert(auditEvent).values({
         organizationId: orgId,
         actorUserId: userId,
@@ -257,33 +272,33 @@ export function createApp(deps: AppDeps) {
         entity: "org_profile",
         entityId: orgId,
         metadata: input,
-      });
-      return upserted;
-    });
-    return c.json({ data: row });
-  });
+      })
+      return upserted
+    })
+    return c.json({ data: row })
+  })
 
   guarded.get("/branches", async (c) => {
-    const { orgId } = orgContextOf(c);
+    const { orgId } = orgContextOf(c)
     const rows = await withOrgContext(db, orgId, (tx) =>
       tx.select().from(branch).where(eq(branch.organizationId, orgId)).orderBy(branch.name),
-    );
-    return c.json({ data: rows });
-  });
+    )
+    return c.json({ data: rows })
+  })
 
   guarded.post("/branches", async (c) => {
-    const { orgId, userId, memberRole } = orgContextOf(c);
+    const { orgId, userId, memberRole } = orgContextOf(c)
     if (!canWrite(memberRole)) {
-      return c.json(errorBody(c, "FORBIDDEN", "Solo owner/admin pueden crear sucursales"), 403);
+      return c.json(errorBody(c, "FORBIDDEN", "Solo owner/admin pueden crear sucursales"), 403)
     }
-    const parsed = branchInput.safeParse(await c.req.json().catch(() => null));
-    if (!parsed.success) return validationError(c, parsed.error.issues);
+    const parsed = branchInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
 
     const row = await withOrgContext(db, orgId, async (tx) => {
       const [created] = await tx
         .insert(branch)
         .values({ organizationId: orgId, ...parsed.data })
-        .returning();
+        .returning()
       await tx.insert(auditEvent).values({
         organizationId: orgId,
         actorUserId: userId,
@@ -291,27 +306,27 @@ export function createApp(deps: AppDeps) {
         entity: "branch",
         entityId: created.id,
         metadata: parsed.data,
-      });
-      return created;
-    });
-    return c.json({ data: row }, 201);
-  });
+      })
+      return created
+    })
+    return c.json({ data: row }, 201)
+  })
 
   guarded.patch("/branches/:id", async (c) => {
-    const { orgId, userId, memberRole } = orgContextOf(c);
+    const { orgId, userId, memberRole } = orgContextOf(c)
     if (!canWrite(memberRole)) {
-      return c.json(errorBody(c, "FORBIDDEN", "Solo owner/admin pueden editar sucursales"), 403);
+      return c.json(errorBody(c, "FORBIDDEN", "Solo owner/admin pueden editar sucursales"), 403)
     }
-    const id = c.req.param("id");
-    const parsed = branchPatch.safeParse(await c.req.json().catch(() => null));
-    if (!parsed.success) return validationError(c, parsed.error.issues);
+    const id = c.req.param("id")
+    const parsed = branchPatch.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
 
     const row = await withOrgContext(db, orgId, async (tx) => {
       const [updated] = await tx
         .update(branch)
         .set({ ...parsed.data, updatedAt: new Date() })
         .where(and(eq(branch.id, id), eq(branch.organizationId, orgId)))
-        .returning();
+        .returning()
       if (updated) {
         await tx.insert(auditEvent).values({
           organizationId: orgId,
@@ -320,26 +335,26 @@ export function createApp(deps: AppDeps) {
           entity: "branch",
           entityId: id,
           metadata: parsed.data,
-        });
+        })
       }
-      return updated ?? null;
-    });
-    if (!row) return c.json(errorBody(c, "NOT_FOUND", "Sucursal no encontrada"), 404);
-    return c.json({ data: row });
-  });
+      return updated ?? null
+    })
+    if (!row) return c.json(errorBody(c, "NOT_FOUND", "Sucursal no encontrada"), 404)
+    return c.json({ data: row })
+  })
 
   guarded.delete("/branches/:id", async (c) => {
-    const { orgId, userId, memberRole } = orgContextOf(c);
+    const { orgId, userId, memberRole } = orgContextOf(c)
     if (!canWrite(memberRole)) {
-      return c.json(errorBody(c, "FORBIDDEN", "Solo owner/admin pueden desactivar sucursales"), 403);
+      return c.json(errorBody(c, "FORBIDDEN", "Solo owner/admin pueden desactivar sucursales"), 403)
     }
-    const id = c.req.param("id");
+    const id = c.req.param("id")
     const row = await withOrgContext(db, orgId, async (tx) => {
       const [updated] = await tx
         .update(branch)
         .set({ isActive: false, updatedAt: new Date() })
         .where(and(eq(branch.id, id), eq(branch.organizationId, orgId)))
-        .returning({ id: branch.id });
+        .returning({ id: branch.id })
       if (updated) {
         await tx.insert(auditEvent).values({
           organizationId: orgId,
@@ -347,30 +362,30 @@ export function createApp(deps: AppDeps) {
           action: "branch.deactivate",
           entity: "branch",
           entityId: id,
-        });
+        })
       }
-      return updated ?? null;
-    });
-    if (!row) return c.json(errorBody(c, "NOT_FOUND", "Sucursal no encontrada"), 404);
-    return c.json({ data: row });
-  });
+      return updated ?? null
+    })
+    if (!row) return c.json(errorBody(c, "NOT_FOUND", "Sucursal no encontrada"), 404)
+    return c.json({ data: row })
+  })
 
   guarded.post("/demo/tasks", async (c) => {
-    const { orgId, userId } = orgContextOf(c);
-    const parsed = demoTaskInput.safeParse(await c.req.json().catch(() => null));
-    if (!parsed.success) return validationError(c, parsed.error.issues);
+    const { orgId, userId } = orgContextOf(c)
+    const parsed = demoTaskInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
     const taskId = await sendDemoTask(db, {
       orgId,
       userId,
       message: parsed.data.message,
       requestedAt: new Date().toISOString(),
-    });
-    return c.json({ taskId }, 202);
-  });
+    })
+    return c.json({ taskId }, 202)
+  })
 
   guarded.get("/notifications/stream", async (c) => {
-    const { orgId } = orgContextOf(c);
-    const lastEventId = c.req.header("last-event-id");
+    const { orgId } = orgContextOf(c)
+    const lastEventId = c.req.header("last-event-id")
 
     return streamSSE(c, async (stream) => {
       // Replay: solo si llega Last-Event-ID; si no, estrictamente en vivo.
@@ -382,54 +397,59 @@ export function createApp(deps: AppDeps) {
             .where(
               and(
                 eq(auditEvent.organizationId, orgId),
-                inArray(auditEvent.action, ["demo_task.done", "message.created", "message.updated", "conversation.updated"]),
+                inArray(auditEvent.action, [
+                  "demo_task.done",
+                  "message.created",
+                  "message.updated",
+                  "conversation.updated",
+                ]),
                 gt(auditEvent.createdAt, new Date(lastEventId)),
               ),
             )
             .orderBy(auditEvent.createdAt),
-        );
+        )
         for (const event of missed) {
-          const replay = await toReplayPayload(db, orgId, event);
-          if (!replay) continue;
+          const replay = await toReplayPayload(db, orgId, event)
+          if (!replay) continue
           await stream.writeSSE({
             id: event.createdAt.toISOString(),
             event: replay.kind,
             data: JSON.stringify(replay),
-          });
+          })
         }
       }
 
-      const listener = postgres(deps.listenUrl, { max: 1 });
+      const listener = postgres(deps.listenUrl, { max: 1 })
       // NOTIFY nunca lleva datos clínicos: solo orgId/kind/taskId/at.
       const { unlisten } = await listener.listen("org_events", async (raw) => {
-        let payload: NotifyPayload;
+        let payload: NotifyPayload
         try {
-          payload = JSON.parse(raw) as NotifyPayload;
+          payload = JSON.parse(raw) as NotifyPayload
         } catch {
-          return;
+          return
         }
-        if (payload.orgId !== orgId) return;
+        if (payload.orgId !== orgId) return
         await stream.writeSSE({
           id: payload.at,
           event: payload.kind,
           data: JSON.stringify(payload),
-        });
-      });
+        })
+      })
 
       const heartbeat = setInterval(() => {
-        void stream.writeSSE({ event: "ping", data: "" }).catch(() => undefined);
-      }, 15_000);
+        void stream.writeSSE({ event: "ping", data: "" }).catch(() => undefined)
+      }, 15_000)
 
       // Mantener el stream abierto hasta abort; cleanup en un solo handler.
-      const done = Promise.withResolvers<void>();
+      const done = Promise.withResolvers<void>()
       stream.onAbort(() => {
-        clearInterval(heartbeat);
-        void unlisten().then(() => listener.end());
-        done.resolve();
-      });
-      await done.promise;
-    });
-  });
+        clearInterval(heartbeat)
+        void unlisten().then(() => listener.end())
+        done.resolve()
+      })
+      await done.promise
+    })
+  })
 
   const crmDeps = {
     db: deps.db,
@@ -437,17 +457,17 @@ export function createApp(deps: AppDeps) {
     storage: deps.storage,
     validateExternal: deps.validateExternal,
     webhookBaseUrl: deps.webhookBaseUrl,
-  };
-  guarded.route("/conversations", createConversationsRoute(crmDeps));
-  guarded.route("/contacts", createContactsRoute(crmDeps));
-  guarded.route("/patients", createPatientsRoute(crmDeps));
-  guarded.route("/services", createServicesRoute(crmDeps));
-  guarded.route("/cie10", createCie10Route(crmDeps));
-  guarded.route("/pipelines", createPipelinesRoute(crmDeps));
-  guarded.route("/channels/connections", createConnectionsRoute(crmDeps));
-  guarded.route("/agent", createAgentRoute(crmDeps));
-  guarded.route("/tasks", createTasksRoute(crmDeps));
-  guarded.route("/fields", createFieldsRoute(crmDeps));
-  app.route("/api", guarded);
-  return app;
+  }
+  guarded.route("/conversations", createConversationsRoute(crmDeps))
+  guarded.route("/contacts", createContactsRoute(crmDeps))
+  guarded.route("/patients", createPatientsRoute(crmDeps))
+  guarded.route("/services", createServicesRoute(crmDeps))
+  guarded.route("/cie10", createCie10Route(crmDeps))
+  guarded.route("/pipelines", createPipelinesRoute(crmDeps))
+  guarded.route("/channels/connections", createConnectionsRoute(crmDeps))
+  guarded.route("/agent", createAgentRoute(crmDeps))
+  guarded.route("/tasks", createTasksRoute(crmDeps))
+  guarded.route("/fields", createFieldsRoute(crmDeps))
+  app.route("/api", guarded)
+  return app
 }

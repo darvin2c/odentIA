@@ -1,4 +1,4 @@
-import { sql } from "drizzle-orm";
+import { sql } from "drizzle-orm"
 import {
   boolean,
   index,
@@ -9,18 +9,18 @@ import {
   timestamp,
   uniqueIndex,
   uuid,
-} from "drizzle-orm/pg-core";
-import { organization, user } from "./auth.js";
+} from "drizzle-orm/pg-core"
+import { organization, user } from "./auth.js"
 
 export const timestamps = {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-};
+}
 
 export function orgFk(target: Parameters<typeof text>[0]) {
   return text(target)
     .notNull()
-    .references(() => organization.id);
+    .references(() => organization.id)
 }
 
 export const channelConnection = pgTable(
@@ -43,7 +43,7 @@ export const channelConnection = pgTable(
       .on(table.provider, table.externalId)
       .where(sql`"external_id" is not null`),
   ],
-);
+)
 
 export const pipeline = pgTable(
   "pipeline",
@@ -58,7 +58,7 @@ export const pipeline = pgTable(
     // Un solo default por org (las carreras en ensureDefaultPipeline reintentan).
     uniqueIndex("pipeline_org_default_uidx").on(table.organizationId).where(sql`"is_default"`),
   ],
-);
+)
 
 export const pipelineStage = pgTable(
   "pipeline_stage",
@@ -73,26 +73,23 @@ export const pipelineStage = pgTable(
     kind: text("kind").notNull().default("open"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => [uniqueIndex("pipeline_stage_pipeline_position_uidx").on(table.pipelineId, table.position)],
-);
+  (table) => [
+    uniqueIndex("pipeline_stage_pipeline_position_uidx").on(table.pipelineId, table.position),
+  ],
+)
 
 export const contact = pgTable("contact", {
   id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
   organizationId: orgFk("organization_id"),
   displayName: text("display_name").notNull(),
   notes: text("notes"),
-  tags: text("tags")
-    .array()
-    .notNull()
-    .default(sql`'{}'`),
-  customFields: jsonb("custom_fields")
-    .notNull()
-    .default(sql`'{}'::jsonb`),
+  tags: text("tags").array().notNull().default(sql`'{}'`),
+  customFields: jsonb("custom_fields").notNull().default(sql`'{}'::jsonb`),
   stageId: uuid("stage_id").references(() => pipelineStage.id),
   assignedUserId: text("assigned_user_id").references(() => user.id),
   lastInteractionAt: timestamp("last_interaction_at", { withTimezone: true }),
   ...timestamps,
-});
+})
 
 export const contactIdentity = pgTable(
   "contact_identity",
@@ -117,7 +114,7 @@ export const contactIdentity = pgTable(
       table.externalUserId,
     ),
   ],
-);
+)
 
 export const conversation = pgTable(
   "conversation",
@@ -141,10 +138,13 @@ export const conversation = pgTable(
     ...timestamps,
   },
   (table) => [
-    uniqueIndex("conversation_connection_thread_uidx").on(table.channelConnectionId, table.externalThreadId),
+    uniqueIndex("conversation_connection_thread_uidx").on(
+      table.channelConnectionId,
+      table.externalThreadId,
+    ),
     index("conversation_org_last_message_idx").on(table.organizationId, table.lastMessageAt.desc()),
   ],
-);
+)
 
 export const message = pgTable(
   "message",
@@ -159,9 +159,7 @@ export const message = pgTable(
     senderUserId: text("sender_user_id"),
     contentType: text("content_type").notNull().default("text"),
     body: text("body"),
-    attachments: jsonb("attachments")
-      .notNull()
-      .default(sql`'[]'::jsonb`),
+    attachments: jsonb("attachments").notNull().default(sql`'[]'::jsonb`),
     externalId: text("external_id"),
     status: text("status").notNull().default("received"),
     error: text("error"),
@@ -179,7 +177,7 @@ export const message = pgTable(
       .where(sql`"external_id" is not null`),
     index("message_conversation_created_idx").on(table.conversationId, table.createdAt),
   ],
-);
+)
 
 export const crmTask = pgTable("task", {
   id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -192,7 +190,7 @@ export const crmTask = pgTable("task", {
   status: text("status").notNull().default("open"),
   createdBy: text("created_by").notNull(),
   ...timestamps,
-});
+})
 
 export const customFieldDef = pgTable(
   "custom_field_def",
@@ -207,7 +205,7 @@ export const customFieldDef = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [uniqueIndex("custom_field_def_org_key_uidx").on(table.organizationId, table.key)],
-);
+)
 
 export const agentConfig = pgTable("agent_config", {
   organizationId: text("organization_id")
@@ -216,14 +214,11 @@ export const agentConfig = pgTable("agent_config", {
   enabled: boolean("enabled").notNull().default(false),
   model: text("model"),
   systemPrompt: text("system_prompt").notNull().default(""),
-  handoffKeywords: text("handoff_keywords")
-    .array()
-    .notNull()
-    .default(sql`'{}'`),
+  handoffKeywords: text("handoff_keywords").array().notNull().default(sql`'{}'`),
   maxTurns: integer("max_turns").notNull().default(10),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-});
+})
 
 /**
  * Ledger de dedupe de eventos inbound. SIN org_id y SIN RLS: el webhook aún
@@ -237,5 +232,7 @@ export const inboundEvent = pgTable(
     externalEventId: text("external_event_id").notNull(),
     receivedAt: timestamp("received_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => [uniqueIndex("inbound_event_provider_event_uidx").on(table.provider, table.externalEventId)],
-);
+  (table) => [
+    uniqueIndex("inbound_event_provider_event_uidx").on(table.provider, table.externalEventId),
+  ],
+)

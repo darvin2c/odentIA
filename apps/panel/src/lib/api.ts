@@ -1,14 +1,14 @@
-import type { ApiErrorShape } from "@odentia/ui-patterns";
-import { API_URL } from "./auth-client";
+import type { ApiErrorShape } from "@odentia/ui-patterns"
+import { API_URL } from "./auth-client"
 
 export class ApiError extends Error {
-  shape: ApiErrorShape;
-  status: number;
+  shape: ApiErrorShape
+  status: number
 
   constructor(status: number, shape: ApiErrorShape) {
-    super(shape.message ?? `Error ${status}`);
-    this.status = status;
-    this.shape = shape;
+    super(shape.message ?? `Error ${status}`)
+    this.status = status
+    this.shape = shape
   }
 }
 
@@ -18,16 +18,16 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
     credentials: "include",
     headers: { "content-type": "application/json", ...init?.headers },
     ...init,
-  });
+  })
   if (!response.ok) {
-    let shape: ApiErrorShape = {};
+    let shape: ApiErrorShape = {}
     try {
-      const body = (await response.json()) as { error?: ApiErrorShape };
-      shape = body.error ?? {};
+      const body = (await response.json()) as { error?: ApiErrorShape }
+      shape = body.error ?? {}
     } catch {
       // respuesta no-JSON: shape vacío
     }
-    throw new ApiError(response.status, shape);
+    throw new ApiError(response.status, shape)
   }
-  return (await response.json()) as T;
+  return (await response.json()) as T
 }

@@ -1,14 +1,14 @@
-import { common } from "./common.js";
-import { Marker, MarkerContent, Skeleton, Spinner, cn } from "@odentia/ui";
+import { cn, Marker, MarkerContent, Skeleton, Spinner } from "@odentia/ui"
+import { common } from "./common.js"
 
 export interface LoadingStateProps {
-  message?: string;
-  className?: string;
+  message?: string
+  className?: string
 }
 
 export interface DataRefreshMarkerProps {
-  message?: string;
-  className?: string;
+  message?: string
+  className?: string
 }
 
 export function LoadingState({ message = common.states.loading, className }: LoadingStateProps) {
@@ -28,7 +28,7 @@ export function LoadingState({ message = common.states.loading, className }: Loa
         <Skeleton className="h-4 w-3/4" />
       </div>
     </div>
-  );
+  )
 }
 
 export function DataRefreshMarker({
@@ -47,5 +47,5 @@ export function DataRefreshMarker({
         {message}
       </MarkerContent>
     </Marker>
-  );
+  )
 }

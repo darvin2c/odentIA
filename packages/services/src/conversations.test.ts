@@ -1,10 +1,12 @@
-import type { ChannelAdapter, NormalizedInbound } from "@odentia/channels";
-import { withOrgContext, type InboundMessageJob } from "@odentia/db";
-import { sql } from "drizzle-orm";
-import { expect, it } from "vitest";
+import type { ChannelAdapter, NormalizedInbound } from "@odentia/channels"
+import { type InboundMessageJob, withOrgContext } from "@odentia/db"
+import { sql } from "drizzle-orm"
+import { expect, it } from "vitest"
+import { createConnection } from "./connections.js"
 import {
   applyStatus,
   getConversationDetail,
+  type IngestDeps,
   ingestInbound,
   listConversations,
   listMessages,
@@ -12,29 +14,33 @@ import {
   sendOutbound,
   sendTemplateOutbound,
   setAgentStatus,
-  type IngestDeps,
-} from "./conversations.js";
-import { createConnection } from "./connections.js";
-import { secretsKeyFromEnv } from "./secrets.js";
-import type { Storage } from "./storage.js";
-import { appDb, ownerDb, setupTestDb } from "./test-setup.js";
+} from "./conversations.js"
+import { secretsKeyFromEnv } from "./secrets.js"
+import type { Storage } from "./storage.js"
+import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
 
-setupTestDb();
+setupTestDb()
 
-const KEY = secretsKeyFromEnv("cc".repeat(32));
+const KEY = secretsKeyFromEnv("cc".repeat(32))
 
 const stubAdapter: ChannelAdapter = {
   provider: "telegram_bot_api",
-  capabilities: { templates: false, media: true, interactive: false, readReceipts: false, edit: true },
+  capabilities: {
+    templates: false,
+    media: true,
+    interactive: false,
+    readReceipts: false,
+    edit: true,
+  },
   verifyWebhook: () => true,
   parseWebhook: () => ({ messages: [], statuses: [] }),
   sendMessage: async () => ({ externalId: "stub-1" }),
   validateConnection: async () => ({ externalId: "bot-1", displayName: "Bot" }),
-};
+}
 
 const storageStub: Storage = {
   putAvatar: async () => {
-    throw new Error("no usado");
+    throw new Error("no usado")
   },
   deleteByUrl: async () => {},
   putAttachment: async ({ orgId, conversationId, bytes, contentType }) => ({
@@ -51,10 +57,12 @@ const storageStub: Storage = {
     filename: "f.bin",
     size: bytes.byteLength,
   }),
-  putPatientAvatar: async () => { throw new Error("no usado"); },
-};
+  putPatientAvatar: async () => {
+    throw new Error("no usado")
+  },
+}
 
-const deps: IngestDeps = { storage: storageStub, fetch, secretsKey: KEY };
+const deps: IngestDeps = { storage: storageStub, fetch, secretsKey: KEY }
 
 function textEvent(over: Partial<NormalizedInbound> = {}): NormalizedInbound {
   return {
@@ -66,7 +74,7 @@ function textEvent(over: Partial<NormalizedInbound> = {}): NormalizedInbound {
     content: { type: "text", text: "Hola" },
     sentAt: new Date().toISOString(),
     ...over,
-  };
+  }
 }
 
 async function makeTelegramConnection(orgId: string): Promise<string> {
@@ -75,49 +83,66 @@ async function makeTelegramConnection(orgId: string): Promise<string> {
       tx,
       orgId,
       KEY,
-      { channel: "telegram", provider: "telegram_bot_api", displayName: "Bot", config: { botToken: "T" } },
+      {
+        channel: "telegram",
+        provider: "telegram_bot_api",
+        displayName: "Bot",
+        config: { botToken: "T" },
+      },
       { fetch, validateExternal: false },
-    );
-    return created.id;
-  });
+    )
+    return created.id
+  })
 }
 
 async function ingest(orgId: string, connectionId: string, event: NormalizedInbound) {
-  const job: InboundMessageJob = { orgId, connectionId, event };
-  return withOrgContext(appDb, orgId, (tx) => ingestInbound(tx, job, stubAdapter, deps));
+  const job: InboundMessageJob = { orgId, connectionId, event }
+  return withOrgContext(appDb, orgId, (tx) => ingestInbound(tx, job, stubAdapter, deps))
 }
 
 it("ingesta crea contacto, conversación y mensaje; repetida dedupea", async () => {
-  const connId = await makeTelegramConnection("org_a");
-  const first = await ingest("org_a", connId, textEvent());
-  expect(first.created).toBe(true);
-  const detail = await withOrgContext(appDb, "org_a", (tx) => getConversationDetail(tx, "org_a", first.conversationId));
-  expect(detail.contact.displayName).toBe("Ana");
-  expect(detail.messages).toHaveLength(1);
-  expect(detail.messages[0]?.body).toBe("Hola");
-  expect(detail.messages[0]?.status).toBe("received");
+  const connId = await makeTelegramConnection("org_a")
+  const first = await ingest("org_a", connId, textEvent())
+  expect(first.created).toBe(true)
+  const detail = await withOrgContext(appDb, "org_a", (tx) =>
+    getConversationDetail(tx, "org_a", first.conversationId),
+  )
+  expect(detail.contact.displayName).toBe("Ana")
+  expect(detail.messages).toHaveLength(1)
+  expect(detail.messages[0]?.body).toBe("Hola")
+  expect(detail.messages[0]?.status).toBe("received")
 
-  const second = await ingest("org_a", connId, textEvent());
-  expect(second.created).toBe(false);
-  expect(second.messageId).toBe(first.messageId);
-  const messages = await withOrgContext(appDb, "org_a", (tx) => listMessages(tx, "org_a", first.conversationId, {}));
-  expect(messages.items).toHaveLength(1);
-});
+  const second = await ingest("org_a", connId, textEvent())
+  expect(second.created).toBe(false)
+  expect(second.messageId).toBe(first.messageId)
+  const messages = await withOrgContext(appDb, "org_a", (tx) =>
+    listMessages(tx, "org_a", first.conversationId, {}),
+  )
+  expect(messages.items).toHaveLength(1)
+})
 
 it("segundo hilo crea otra conversación; listados aíslan por org", async () => {
-  const connId = await makeTelegramConnection("org_a");
-  const other = await ingest("org_a", connId, textEvent({ externalEventId: "evt-2", externalMessageId: "ext-2" }));
-  expect(other.created).toBe(true);
-  const list = await withOrgContext(appDb, "org_a", (tx) => listConversations(tx, "org_a", {}));
-  expect(list.items.length).toBeGreaterThanOrEqual(1);
-  expect(list.items[0]?.preview?.body).toBe("Hola");
-  const empty = await withOrgContext(appDb, "org_b", (tx) => listConversations(tx, "org_b", {}));
-  expect(empty.items).toEqual([]);
-});
+  const connId = await makeTelegramConnection("org_a")
+  const other = await ingest(
+    "org_a",
+    connId,
+    textEvent({ externalEventId: "evt-2", externalMessageId: "ext-2" }),
+  )
+  expect(other.created).toBe(true)
+  const list = await withOrgContext(appDb, "org_a", (tx) => listConversations(tx, "org_a", {}))
+  expect(list.items.length).toBeGreaterThanOrEqual(1)
+  expect(list.items[0]?.preview?.body).toBe("Hola")
+  const empty = await withOrgContext(appDb, "org_b", (tx) => listConversations(tx, "org_b", {}))
+  expect(empty.items).toEqual([])
+})
 
 it("sendOutbound humano apaga el agente, marca leído y encola", async () => {
-  const connId = await makeTelegramConnection("org_a");
-  const { conversationId } = await ingest("org_a", connId, textEvent({ externalEventId: "evt-3", externalMessageId: "ext-3" }));
+  const connId = await makeTelegramConnection("org_a")
+  const { conversationId } = await ingest(
+    "org_a",
+    connId,
+    textEvent({ externalEventId: "evt-3", externalMessageId: "ext-3" }),
+  )
   const sent = await withOrgContext(appDb, "org_a", (tx) =>
     sendOutbound(tx, "org_a", {
       conversationId,
@@ -125,19 +150,23 @@ it("sendOutbound humano apaga el agente, marca leído y encola", async () => {
       senderUserId: "u-1",
       content: { type: "text", text: "Te ayudo" },
     }),
-  );
-  expect(sent.status).toBe("queued");
-  const detail = await withOrgContext(appDb, "org_a", (tx) => getConversationDetail(tx, "org_a", conversationId));
-  expect(detail.conversation.agentStatus).toBe("off");
-  expect(detail.conversation.unreadCount).toBe(0);
+  )
+  expect(sent.status).toBe("queued")
+  const detail = await withOrgContext(appDb, "org_a", (tx) =>
+    getConversationDetail(tx, "org_a", conversationId),
+  )
+  expect(detail.conversation.agentStatus).toBe("off")
+  expect(detail.conversation.unreadCount).toBe(0)
   const queued = (await ownerDb.execute(
     sql`select message from pgmq.read('outbound_messages', 30, 10)`,
-  )) as unknown as { message: { messageId: string } }[];
-  expect(queued.map((q) => q.message.messageId)).toContain(sent.id);
+  )) as unknown as { message: { messageId: string } }[]
+  expect(queued.map((q) => q.message.messageId)).toContain(sent.id)
   // Re-activar y marcar leído no fallan.
-  await withOrgContext(appDb, "org_a", (tx) => setAgentStatus(tx, "org_a", conversationId, true, "u-1"));
-  await withOrgContext(appDb, "org_a", (tx) => markRead(tx, "org_a", conversationId));
-});
+  await withOrgContext(appDb, "org_a", (tx) =>
+    setAgentStatus(tx, "org_a", conversationId, true, "u-1"),
+  )
+  await withOrgContext(appDb, "org_a", (tx) => markRead(tx, "org_a", conversationId))
+})
 
 it("ventana 24h de WhatsApp bloquea texto pero permite plantilla", async () => {
   const connId = await withOrgContext(appDb, "org_a", async (tx) => {
@@ -158,24 +187,28 @@ it("ventana 24h de WhatsApp bloquea texto pero permite plantilla", async () => {
         },
       },
       { fetch, validateExternal: false },
-    );
-    return created.id;
-  });
+    )
+    return created.id
+  })
   const waEvent = textEvent({
     externalEventId: "evt-wa",
     externalMessageId: "wamid.1",
     externalThreadId: "wa:51911122233",
     senderExternalId: "wa:51911122233",
-  });
-  const { conversationId } = await ingest("org_a", connId, waEvent);
+  })
+  const { conversationId } = await ingest("org_a", connId, waEvent)
   await ownerDb.execute(
     sql`update "conversation" set "last_inbound_at" = now() - interval '25 hours' where "id" = ${conversationId}::uuid`,
-  );
+  )
   await expect(
     withOrgContext(appDb, "org_a", (tx) =>
-      sendOutbound(tx, "org_a", { conversationId, senderKind: "user", content: { type: "text", text: "hola" } }),
+      sendOutbound(tx, "org_a", {
+        conversationId,
+        senderKind: "user",
+        content: { type: "text", text: "hola" },
+      }),
     ),
-  ).rejects.toMatchObject({ code: "WINDOW_CLOSED", status: 409 });
+  ).rejects.toMatchObject({ code: "WINDOW_CLOSED", status: 409 })
   const tpl = await withOrgContext(appDb, "org_a", (tx) =>
     sendTemplateOutbound(tx, "org_a", KEY, {
       conversationId,
@@ -184,8 +217,8 @@ it("ventana 24h de WhatsApp bloquea texto pero permite plantilla", async () => {
       language: "es_PE",
       params: ["Ana"],
     }),
-  );
-  expect(tpl.contentType).toBe("template");
+  )
+  expect(tpl.contentType).toBe("template")
   await expect(
     withOrgContext(appDb, "org_a", (tx) =>
       sendTemplateOutbound(tx, "org_a", KEY, {
@@ -196,56 +229,86 @@ it("ventana 24h de WhatsApp bloquea texto pero permite plantilla", async () => {
         params: [],
       }),
     ),
-  ).rejects.toMatchObject({ status: 400 });
-});
+  ).rejects.toMatchObject({ status: 400 })
+})
 
 it("applyStatus actualiza por externalId", async () => {
-  const connId = await makeTelegramConnection("org_a");
+  const connId = await makeTelegramConnection("org_a")
   const { conversationId } = await ingest(
     "org_a",
     connId,
-    textEvent({ externalEventId: "evt-st", externalMessageId: "ext-st", externalThreadId: "tg:999" }),
-  );
+    textEvent({
+      externalEventId: "evt-st",
+      externalMessageId: "ext-st",
+      externalThreadId: "tg:999",
+    }),
+  )
   const out = await withOrgContext(appDb, "org_a", (tx) =>
-    sendOutbound(tx, "org_a", { conversationId, senderKind: "agent", content: { type: "text", text: "hola" } }),
-  );
+    sendOutbound(tx, "org_a", {
+      conversationId,
+      senderKind: "agent",
+      content: { type: "text", text: "hola" },
+    }),
+  )
   // El out no tiene externalId aún (lo pone el worker); simularlo.
-  await ownerDb.execute(sql`update "message" set "external_id" = 'wamid.x' where "id" = ${out.id}::uuid`);
+  await ownerDb.execute(
+    sql`update "message" set "external_id" = 'wamid.x' where "id" = ${out.id}::uuid`,
+  )
   const applied = await withOrgContext(appDb, "org_a", (tx) =>
     applyStatus(tx, "org_a", [{ externalMessageId: "wamid.x", status: "read" }]),
-  );
-  expect(applied).toBe(1);
-  const messages = await withOrgContext(appDb, "org_a", (tx) => listMessages(tx, "org_a", conversationId, {}));
-  expect(messages.items.find((m) => m.id === out.id)?.status).toBe("read");
-  expect(await withOrgContext(appDb, "org_a", (tx) => applyStatus(tx, "org_a", []))).toBe(0);
-});
+  )
+  expect(applied).toBe(1)
+  const messages = await withOrgContext(appDb, "org_a", (tx) =>
+    listMessages(tx, "org_a", conversationId, {}),
+  )
+  expect(messages.items.find((m) => m.id === out.id)?.status).toBe("read")
+  expect(await withOrgContext(appDb, "org_a", (tx) => applyStatus(tx, "org_a", []))).toBe(0)
+})
 
 it("ingesta con conexión inexistente falla", async () => {
   await expect(
-    ingest("org_a", "00000000-0000-0000-0000-000000000000", textEvent({ externalEventId: "evt-zz" })),
-  ).rejects.toMatchObject({ code: "CONNECTION_NOT_FOUND" });
-});
+    ingest(
+      "org_a",
+      "00000000-0000-0000-0000-000000000000",
+      textEvent({ externalEventId: "evt-zz" }),
+    ),
+  ).rejects.toMatchObject({ code: "CONNECTION_NOT_FOUND" })
+})
 
 it("listMessages pagina con cursor", async () => {
-  const connId = await makeTelegramConnection("org_a");
+  const connId = await makeTelegramConnection("org_a")
   const { conversationId } = await ingest(
     "org_a",
     connId,
-    textEvent({ externalEventId: "evt-pg", externalMessageId: "ext-pg", externalThreadId: "tg:pag" }),
-  );
+    textEvent({
+      externalEventId: "evt-pg",
+      externalMessageId: "ext-pg",
+      externalThreadId: "tg:pag",
+    }),
+  )
   await withOrgContext(appDb, "org_a", (tx) =>
-    sendOutbound(tx, "org_a", { conversationId, senderKind: "agent", content: { type: "text", text: "uno" } }),
-  );
+    sendOutbound(tx, "org_a", {
+      conversationId,
+      senderKind: "agent",
+      content: { type: "text", text: "uno" },
+    }),
+  )
   await withOrgContext(appDb, "org_a", (tx) =>
-    sendOutbound(tx, "org_a", { conversationId, senderKind: "agent", content: { type: "text", text: "dos" } }),
-  );
-  const first = await withOrgContext(appDb, "org_a", (tx) => listMessages(tx, "org_a", conversationId, { limit: 2 }));
-  expect(first.items).toHaveLength(2);
-  expect(first.nextCursor).not.toBeNull();
+    sendOutbound(tx, "org_a", {
+      conversationId,
+      senderKind: "agent",
+      content: { type: "text", text: "dos" },
+    }),
+  )
+  const first = await withOrgContext(appDb, "org_a", (tx) =>
+    listMessages(tx, "org_a", conversationId, { limit: 2 }),
+  )
+  expect(first.items).toHaveLength(2)
+  expect(first.nextCursor).not.toBeNull()
   const second = await withOrgContext(appDb, "org_a", (tx) =>
     listMessages(tx, "org_a", conversationId, { limit: 2, before: first.nextCursor ?? "" }),
-  );
-  expect(second.items).toHaveLength(1);
-  expect(second.items[0]?.body).toBe("Hola");
-  expect(second.nextCursor).toBeNull();
-});
+  )
+  expect(second.items).toHaveLength(1)
+  expect(second.items[0]?.body).toBe("Hola")
+  expect(second.nextCursor).toBeNull()
+})

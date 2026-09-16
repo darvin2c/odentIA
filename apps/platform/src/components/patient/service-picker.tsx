@@ -1,5 +1,3 @@
-import { useQuery } from "@tanstack/react-query";
-import { Link } from "@tanstack/react-router";
 import {
   Badge,
   Button,
@@ -16,28 +14,30 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@odentia/ui";
-import { useId, useMemo, useState } from "react";
-import { ApiError } from "../../lib/api";
-import { useCanWrite } from "../../lib/crm";
+} from "@odentia/ui"
+import { useQuery } from "@tanstack/react-query"
+import { Link } from "@tanstack/react-router"
+import { useId, useMemo, useState } from "react"
+import { ApiError } from "../../lib/api"
+import { useCanWrite } from "../../lib/crm"
 import {
-  TREATMENT_SCOPE_LABELS,
-  TREATMENT_SPECIALTIES,
-  TREATMENT_SPECIALTY_LABELS,
   fetchServices,
   formatMoney,
   type ServiceCatalogItem,
-} from "../../lib/services";
+  TREATMENT_SCOPE_LABELS,
+  TREATMENT_SPECIALTIES,
+  TREATMENT_SPECIALTY_LABELS,
+} from "../../lib/services"
 
 interface ServicePickerProps {
-  value: string;
-  onChange: (service: ServiceCatalogItem) => void;
-  disabled?: boolean;
-  currentService?: { id: string; name: string };
-  label?: string;
+  value: string
+  onChange: (service: ServiceCatalogItem) => void
+  disabled?: boolean
+  currentService?: { id: string; name: string }
+  label?: string
 }
 
-const NO_SPECIALTY = "todas";
+const NO_SPECIALTY = "todas"
 
 /**
  * Selector de tratamiento del tarifario para planes y procedimientos.
@@ -51,11 +51,11 @@ export function ServicePicker({
   currentService,
   label = "Tratamiento",
 }: ServicePickerProps) {
-  const id = useId();
-  const [query, setQuery] = useState("");
-  const [open, setOpen] = useState(false);
-  const [specialty, setSpecialty] = useState<string>(NO_SPECIALTY);
-  const canAdmin = useCanWrite();
+  const id = useId()
+  const [query, setQuery] = useState("")
+  const [open, setOpen] = useState(false)
+  const [specialty, setSpecialty] = useState<string>(NO_SPECIALTY)
+  const canAdmin = useCanWrite()
 
   const servicesQuery = useQuery({
     queryKey: ["services", "picker", query.trim(), specialty],
@@ -68,11 +68,11 @@ export function ServicePicker({
       }),
     enabled: !disabled,
     staleTime: 30_000,
-  });
+  })
 
-  const items = useMemo(() => servicesQuery.data?.data ?? [], [servicesQuery.data]);
+  const items = useMemo(() => servicesQuery.data?.data ?? [], [servicesQuery.data])
 
-  const selectedItem = items.find((row) => row.id === value) ?? null;
+  const selectedItem = items.find((row) => row.id === value) ?? null
 
   return (
     <Field>
@@ -82,7 +82,9 @@ export function ServicePicker({
           value={specialty}
           items={{
             [NO_SPECIALTY]: "Todas las especialidades",
-            ...Object.fromEntries(TREATMENT_SPECIALTIES.map((s) => [s, TREATMENT_SPECIALTY_LABELS[s]])),
+            ...Object.fromEntries(
+              TREATMENT_SPECIALTIES.map((s) => [s, TREATMENT_SPECIALTY_LABELS[s]]),
+            ),
           }}
           onValueChange={(next) => setSpecialty(next ?? NO_SPECIALTY)}
           disabled={disabled}
@@ -110,22 +112,22 @@ export function ServicePicker({
           itemToStringValue={(item) => item.id}
           inputValue={query}
           onInputValueChange={(next, details) => {
-            const { reason } = details;
+            const { reason } = details
             if (reason === "input-change") {
-              setQuery(next);
-              setOpen(true);
-              return;
+              setQuery(next)
+              setOpen(true)
+              return
             }
             if (reason === "input-clear" || reason === "clear-press") {
-              setQuery("");
-              setOpen(false);
+              setQuery("")
+              setOpen(false)
             }
           }}
           onValueChange={(item) => {
             if (item && item.priceCents !== null) {
-              onChange(item);
-              setQuery("");
-              setOpen(true);
+              onChange(item)
+              setQuery("")
+              setOpen(true)
             }
           }}
         >
@@ -145,7 +147,12 @@ export function ServicePicker({
                     ? (servicesQuery.error.shape.message ?? servicesQuery.error.message)
                     : servicesQuery.error.message}
                 </p>
-                <Button type="button" size="sm" variant="outline" onClick={() => void servicesQuery.refetch()}>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => void servicesQuery.refetch()}
+                >
                   Reintentar
                 </Button>
               </div>
@@ -167,7 +174,7 @@ export function ServicePicker({
               <>
                 <ComboboxList aria-label="Tratamientos disponibles">
                   {items.map((item) => {
-                    const priced = item.priceCents !== null;
+                    const priced = item.priceCents !== null
                     return (
                       <ComboboxItem
                         key={item.id}
@@ -177,8 +184,12 @@ export function ServicePicker({
                       >
                         <span className="font-medium">{item.name}</span>
                         <span className="text-muted-foreground">
-                          {item.specialty ? `${TREATMENT_SPECIALTY_LABELS[item.specialty] ?? item.specialty} · ` : ""}
-                          {item.scope ? `${TREATMENT_SCOPE_LABELS[item.scope] ?? item.scope} · ` : ""}
+                          {item.specialty
+                            ? `${TREATMENT_SPECIALTY_LABELS[item.specialty] ?? item.specialty} · `
+                            : ""}
+                          {item.scope
+                            ? `${TREATMENT_SCOPE_LABELS[item.scope] ?? item.scope} · `
+                            : ""}
                           {item.code ? `${item.code} · ` : ""}
                           {priced
                             ? formatMoney(item.priceCents as number, item.currency)
@@ -186,7 +197,7 @@ export function ServicePicker({
                           {item.durationMin !== null ? ` · ${item.durationMin} min` : ""}
                         </span>
                       </ComboboxItem>
-                    );
+                    )
                   })}
                 </ComboboxList>
                 <ComboboxEmpty>Sin resultados.</ComboboxEmpty>
@@ -207,8 +218,10 @@ export function ServicePicker({
           </span>
         </div>
       ) : currentService?.id === value ? (
-        <p className="text-sm text-muted-foreground">{currentService.name} · Tratamiento guardado; no disponible para nuevas selecciones.</p>
+        <p className="text-sm text-muted-foreground">
+          {currentService.name} · Tratamiento guardado; no disponible para nuevas selecciones.
+        </p>
       ) : null}
     </Field>
-  );
+  )
 }

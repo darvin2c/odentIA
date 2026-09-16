@@ -1,22 +1,22 @@
-import { Badge, Button, Card, CardContent, CardHeader, CardTitle } from "@odentia/ui";
-import { FormDrawer } from "@odentia/ui-patterns";
-import { useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
-import { ApiError, apiFetch } from "../../lib/api";
-import { useCanWrite } from "../../lib/crm";
-import type { EncounterDetail } from "../../lib/patients";
-import { Cie10Search } from "./cie10-search";
+import { Badge, Button, Card, CardContent, CardHeader, CardTitle } from "@odentia/ui"
+import { FormDrawer } from "@odentia/ui-patterns"
+import { useQueryClient } from "@tanstack/react-query"
+import { useState } from "react"
+import { ApiError, apiFetch } from "../../lib/api"
+import { useCanWrite } from "../../lib/crm"
+import type { EncounterDetail } from "../../lib/patients"
+import { Cie10Search } from "./cie10-search"
 
 function formatDateTime(iso: string | null): string {
-  if (!iso) return "—";
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return "—";
-  return date.toLocaleString("es-PE", { dateStyle: "short", timeStyle: "short" });
+  if (!iso) return "—"
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return "—"
+  return date.toLocaleString("es-PE", { dateStyle: "short", timeStyle: "short" })
 }
 
 function mutationMessage(err: unknown): string {
-  if (err instanceof ApiError && err.shape.message) return err.shape.message;
-  return err instanceof Error ? err.message : "No se pudo registrar el diagnóstico.";
+  if (err instanceof ApiError && err.shape.message) return err.shape.message
+  return err instanceof Error ? err.message : "No se pudo registrar el diagnóstico."
 }
 
 /**
@@ -34,38 +34,38 @@ export function EncounterDiagnoses({
   onChanged,
   onPendingChange,
 }: {
-  patientId: string;
-  detail: EncounterDetail;
-  disabled?: boolean;
-  beforeWrite: () => Promise<void>;
-  onChanged: () => Promise<void>;
-  onPendingChange: (pending: boolean) => void;
+  patientId: string
+  detail: EncounterDetail
+  disabled?: boolean
+  beforeWrite: () => Promise<void>
+  onChanged: () => Promise<void>
+  onPendingChange: (pending: boolean) => void
 }): React.JSX.Element {
-  const canWrite = useCanWrite();
-  const queryClient = useQueryClient();
-  const [open, setOpen] = useState(false);
-  const [code, setCode] = useState("");
-  const [description, setDescription] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const canWrite = useCanWrite()
+  const queryClient = useQueryClient()
+  const [open, setOpen] = useState(false)
+  const [code, setCode] = useState("")
+  const [description, setDescription] = useState("")
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
-  const encounter = detail.encounter;
-  const finalized = encounter.status === "finalizada";
-  const busy = disabled || saving;
-  const canSubmit = canWrite && !finalized && !busy && code.trim() !== "";
-  const canOpen = canWrite && !finalized && !disabled;
+  const encounter = detail.encounter
+  const finalized = encounter.status === "finalizada"
+  const busy = disabled || saving
+  const canSubmit = canWrite && !finalized && !busy && code.trim() !== ""
+  const canOpen = canWrite && !finalized && !disabled
 
   const onSubmit = async (event: React.FormEvent) => {
-    event.preventDefault();
-    event.stopPropagation();
-    const selectedCode = code.trim();
-    if (!selectedCode || saving || disabled) return;
-    const selectedDescription = description.trim();
-    onPendingChange(true);
-    setSaving(true);
-    setError(null);
+    event.preventDefault()
+    event.stopPropagation()
+    const selectedCode = code.trim()
+    if (!selectedCode || saving || disabled) return
+    const selectedDescription = description.trim()
+    onPendingChange(true)
+    setSaving(true)
+    setError(null)
     try {
-      await beforeWrite();
+      await beforeWrite()
       await apiFetch(`/api/patients/${patientId}/notes`, {
         method: "POST",
         body: JSON.stringify({
@@ -73,29 +73,29 @@ export function EncounterDiagnoses({
           diagnosisCode: selectedCode,
           encounterId: encounter.id,
         }),
-      });
-      await queryClient.invalidateQueries({ queryKey: ["timeline", patientId] });
-      await onChanged();
-      setCode("");
-      setDescription("");
-      setOpen(false);
+      })
+      await queryClient.invalidateQueries({ queryKey: ["timeline", patientId] })
+      await onChanged()
+      setCode("")
+      setDescription("")
+      setOpen(false)
     } catch (err) {
-      setError(mutationMessage(err));
+      setError(mutationMessage(err))
     } finally {
-      setSaving(false);
-      onPendingChange(false);
+      setSaving(false)
+      onPendingChange(false)
     }
-  };
+  }
 
   const handleClose = () => {
     // Durante el guardado no se cierra: el error y el borrador se conservan
     // en el drawer y no se pierde lo seleccionado.
-    if (saving) return;
-    setCode("");
-    setDescription("");
-    setError(null);
-    setOpen(false);
-  };
+    if (saving) return
+    setCode("")
+    setDescription("")
+    setError(null)
+    setOpen(false)
+  }
 
   return (
     <Card>
@@ -123,7 +123,12 @@ export function EncounterDiagnoses({
 
         {canWrite && !finalized && (
           <div>
-            <Button type="button" variant="outline" disabled={!canOpen} onClick={() => setOpen(true)}>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={!canOpen}
+              onClick={() => setOpen(true)}
+            >
               Registrar diagnóstico
             </Button>
           </div>
@@ -146,18 +151,20 @@ export function EncounterDiagnoses({
               <Cie10Search
                 value={code}
                 onChange={(nextCode, nextDescription) => {
-                  setCode(nextCode);
-                  setDescription(nextCode ? nextDescription : "");
+                  setCode(nextCode)
+                  setDescription(nextCode ? nextDescription : "")
                 }}
                 disabled={busy}
               />
               {description && (
-                <p className="text-sm text-muted-foreground">Se registrará como: Dx: {description}</p>
+                <p className="text-sm text-muted-foreground">
+                  Se registrará como: Dx: {description}
+                </p>
               )}
             </div>
           </FormDrawer>
         )}
       </CardContent>
     </Card>
-  );
+  )
 }

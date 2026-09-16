@@ -1,21 +1,21 @@
-import { useId, useState } from "react";
-import { FDI_ADULT_ROWS, FDI_CHILD_ROWS } from "@odentia/clinical";
-import { Button } from "@odentia/ui";
-import { OdontogramArch } from "../odontogram-arch";
+import { FDI_ADULT_ROWS, FDI_CHILD_ROWS } from "@odentia/clinical"
+import { Button } from "@odentia/ui"
+import { useId, useState } from "react"
+import { OdontogramArch } from "../odontogram-arch"
 
 export interface ToothSelectorProps {
-  value: number[];
-  onChange: (value: number[]) => void;
-  disabled?: boolean;
-  label?: string;
+  value: number[]
+  onChange: (value: number[]) => void
+  disabled?: boolean
+  label?: string
 }
 
-type Dentition = "adulta" | "temporal";
+type Dentition = "adulta" | "temporal"
 
 const ROWS: Record<Dentition, readonly (readonly number[])[]> = {
   adulta: FDI_ADULT_ROWS,
   temporal: FDI_CHILD_ROWS,
-};
+}
 
 /** Mitades de cada arcada → cuadrantes [superior derecho, superior izquierdo, inferior derecho, inferior izquierdo]. */
 const QUADRANT_LABELS = [
@@ -23,22 +23,20 @@ const QUADRANT_LABELS = [
   "Cuadrante superior izquierdo",
   "Cuadrante inferior derecho",
   "Cuadrante inferior izquierdo",
-] as const;
+] as const
 
 function quadrantOf(rows: readonly (readonly number[])[]): readonly (readonly number[])[] {
-  const halves: number[][] = [];
+  const halves: number[][] = []
   for (const row of rows) {
-    const mid = Math.ceil(row.length / 2);
-    halves.push([...row.slice(0, mid)], [...row.slice(mid)]);
+    const mid = Math.ceil(row.length / 2)
+    halves.push([...row.slice(0, mid)], [...row.slice(mid)])
   }
-  return halves;
+  return halves
 }
-
 
 function addAll(teeth: number[], add: readonly number[]): number[] {
-  return [...new Set([...teeth, ...add])].sort((a, b) => a - b);
+  return [...new Set([...teeth, ...add])].sort((a, b) => a - b)
 }
-
 
 /**
  * Selector visual multi-pieza reutilizable sobre el OdontogramArch anatómico
@@ -47,16 +45,16 @@ function addAll(teeth: number[], add: readonly number[]): number[] {
  * conserva las piezas ya seleccionadas.
  */
 export function ToothSelector({ value, onChange, disabled = false, label }: ToothSelectorProps) {
-  const groupId = useId();
+  const groupId = useId()
   const [dentition, setDentition] = useState<Dentition>(() =>
     value.some((t) => t >= 50) ? "temporal" : "adulta",
-  );
-  const rows = ROWS[dentition];
-  const flat = rows.flat();
-  const quadrants = quadrantOf(rows);
-  const selectedHere = value.filter((t) => flat.includes(t));
+  )
+  const rows = ROWS[dentition]
+  const flat = rows.flat()
+  const quadrants = quadrantOf(rows)
+  const selectedHere = value.filter((t) => flat.includes(t))
 
-  const groupLabel = label ?? "Selección de piezas dentales";
+  const groupLabel = label ?? "Selección de piezas dentales"
 
   return (
     <div role="group" aria-labelledby={groupId} className="flex min-w-0 flex-col gap-2">
@@ -87,9 +85,9 @@ export function ToothSelector({ value, onChange, disabled = false, label }: Toot
         selected={value}
         disabled={disabled}
         onToggle={(tooth) => {
-          if (disabled) return;
-          const next = value.includes(tooth) ? value.filter((t) => t !== tooth) : [...value, tooth];
-          onChange([...new Set(next)].sort((a, b) => a - b));
+          if (disabled) return
+          const next = value.includes(tooth) ? value.filter((t) => t !== tooth) : [...value, tooth]
+          onChange([...new Set(next)].sort((a, b) => a - b))
         }}
       />
 
@@ -141,8 +139,8 @@ export function ToothSelector({ value, onChange, disabled = false, label }: Toot
           variant="ghost"
           disabled={disabled || selectedHere.length === 0}
           onClick={() => {
-            const gone = new Set(flat);
-            onChange(value.filter((t) => !gone.has(t)));
+            const gone = new Set(flat)
+            onChange(value.filter((t) => !gone.has(t)))
           }}
         >
           Limpiar
@@ -155,5 +153,5 @@ export function ToothSelector({ value, onChange, disabled = false, label }: Toot
           : `${value.length} ${value.length === 1 ? "pieza seleccionada" : "piezas seleccionadas"}: ${[...value].sort((a, b) => a - b).join(", ")}`}
       </p>
     </div>
-  );
+  )
 }

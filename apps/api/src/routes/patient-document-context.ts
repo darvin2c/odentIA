@@ -1,9 +1,9 @@
-import { withOrgContext } from "@odentia/db";
-import { correctDocumentContext, getPatientDocumentWithHistory } from "@odentia/services";
-import { Hono } from "hono";
-import { z } from "zod";
-import { orgContextOf } from "../lib/context.js";
-import { runService, validationError, type CrmDeps } from "./helpers.js";
+import { withOrgContext } from "@odentia/db"
+import { correctDocumentContext, getPatientDocumentWithHistory } from "@odentia/services"
+import { Hono } from "hono"
+import { z } from "zod"
+import { orgContextOf } from "../lib/context.js"
+import { type CrmDeps, runService, validationError } from "./helpers.js"
 
 /**
  * Contexto versionado de documentos del paciente (propiedad DocsData).
@@ -23,32 +23,34 @@ const correctionInput = z
     // Etiquetas crudas como contacts (máx 100; el servicio normaliza a 20 únicas canónicas).
     tags: z.array(z.string().min(1).max(200)).max(100).optional(),
   })
-  .strict();
+  .strict()
 
 export function createPatientDocumentContextRoute(deps: Pick<CrmDeps, "db">) {
-  const app = new Hono();
+  const app = new Hono()
 
   app.get("/:id/documents/:documentId/context", async (c) => {
-    const { orgId } = orgContextOf(c);
-    const patientId = c.req.param("id");
-    const documentId = c.req.param("documentId");
+    const { orgId } = orgContextOf(c)
+    const patientId = c.req.param("id")
+    const documentId = c.req.param("documentId")
     return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) => getPatientDocumentWithHistory(tx, orgId, patientId, documentId)),
-    );
-  });
+      withOrgContext(deps.db, orgId, (tx) =>
+        getPatientDocumentWithHistory(tx, orgId, patientId, documentId),
+      ),
+    )
+  })
 
   app.post("/:id/documents/:documentId/context", async (c) => {
-    const { orgId, userId } = orgContextOf(c);
-    const patientId = c.req.param("id");
-    const documentId = c.req.param("documentId");
-    const parsed = correctionInput.safeParse(await c.req.json().catch(() => null));
-    if (!parsed.success) return validationError(c, parsed.error.issues);
+    const { orgId, userId } = orgContextOf(c)
+    const patientId = c.req.param("id")
+    const documentId = c.req.param("documentId")
+    const parsed = correctionInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 201, () =>
       withOrgContext(deps.db, orgId, (tx) =>
         correctDocumentContext(tx, orgId, userId, patientId, documentId, parsed.data),
       ),
-    );
-  });
+    )
+  })
 
-  return app;
+  return app
 }

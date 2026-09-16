@@ -7,31 +7,44 @@
  * FormDrawer, estados, filtros, DataTable) y el catálogo de
  * copy compartido `common`.
  */
-export { AuthCard } from "./auth-card.js";
-export { AuthSplit } from "./auth-split.js";
-export { fieldErrorMessages } from "./field-errors.js";
-export { common } from "./common.js";
-export { EmptyState, type EmptyStateProps } from "./empty-state.js";
-export { ErrorState, type ErrorStateProps, type ApiErrorShape } from "./error-state.js";
-export { FormDrawer, type FormDrawerProps } from "./form-drawer.js";
-export { ConfirmDialog, type ConfirmDialogProps, type ConfirmVariant } from "./confirm-dialog.js";
-export { RowActions, type RowActionItem, type RowActionsProps, type RowActionTone } from "./row-actions.js";
-export { SubmitButton, type SubmitButtonProps } from "./submit-button.js";
-export { KpiCard, type KpiCardProps } from "./kpi-card.js";
+
+export type {
+  AppShellNavEntry,
+  AppShellNavGroup,
+  AppShellNavItem,
+  AppShellProps,
+  AppShellUser,
+  AppShellUserMenuItem,
+} from "./app-shell.js"
+export { AppShell, isNavItemActive, PageHeader } from "./app-shell.js"
+export { AuthCard } from "./auth-card.js"
+export { AuthSplit } from "./auth-split.js"
+export { common } from "./common.js"
+export { ConfirmDialog, type ConfirmDialogProps, type ConfirmVariant } from "./confirm-dialog.js"
 export {
- DataRefreshMarker,
- type DataRefreshMarkerProps,
- LoadingState,
- type LoadingStateProps,
-} from "./loading-state.js";
-export { PageShell, type PageShellProps } from "./page-shell.js";
-export { AppShell, PageHeader, isNavItemActive } from "./app-shell.js";
-export type { AppShellProps, AppShellNavEntry, AppShellNavItem, AppShellNavGroup, AppShellUser, AppShellUserMenuItem } from "./app-shell.js";
-export * from "./list-filtering/index.js";
+  DataTable,
+  type DataTableProps,
+  DataTableSkeleton,
+  type DataTableSkeletonProps,
+} from "./data-table.js"
+export { EmptyState, type EmptyStateProps } from "./empty-state.js"
+export { type ApiErrorShape, ErrorState, type ErrorStateProps } from "./error-state.js"
+export { fieldErrorMessages } from "./field-errors.js"
+export { FormDrawer, type FormDrawerProps } from "./form-drawer.js"
+export { KpiCard, type KpiCardProps } from "./kpi-card.js"
+export * from "./list-filtering/index.js"
 export {
- DataTable,
- type DataTableProps,
- DataTableSkeleton,
- type DataTableSkeletonProps,
-} from "./data-table.js";
-export { WizardSteps, type WizardStep, type WizardStepsProps } from "./wizard-steps.js";
+  DataRefreshMarker,
+  type DataRefreshMarkerProps,
+  LoadingState,
+  type LoadingStateProps,
+} from "./loading-state.js"
+export { PageShell, type PageShellProps } from "./page-shell.js"
+export {
+  type RowActionItem,
+  RowActions,
+  type RowActionsProps,
+  type RowActionTone,
+} from "./row-actions.js"
+export { SubmitButton, type SubmitButtonProps } from "./submit-button.js"
+export { type WizardStep, WizardSteps, type WizardStepsProps } from "./wizard-steps.js"

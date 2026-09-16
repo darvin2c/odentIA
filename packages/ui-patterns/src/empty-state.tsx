@@ -1,4 +1,3 @@
-import { common } from "./common.js";
 import {
   Button,
   Empty,
@@ -7,20 +6,21 @@ import {
   EmptyHeader,
   EmptyMedia,
   EmptyTitle,
-} from "@odentia/ui";
-import { ArrowUpRight, Inbox, type LucideIcon } from "lucide-react";
+} from "@odentia/ui"
+import { ArrowUpRight, Inbox, type LucideIcon } from "lucide-react"
+import { common } from "./common.js"
 
 export interface EmptyStateProps {
-  icon?: LucideIcon;
-  title?: string;
-  description?: string;
-  actionLabel?: string;
-  onAction?: () => void;
-  secondaryActionLabel?: string;
-  onSecondaryAction?: () => void;
-  learnMoreLabel?: string;
-  learnMoreHref?: string;
-  className?: string;
+  icon?: LucideIcon
+  title?: string
+  description?: string
+  actionLabel?: string
+  onAction?: () => void
+  secondaryActionLabel?: string
+  onSecondaryAction?: () => void
+  learnMoreLabel?: string
+  learnMoreHref?: string
+  className?: string
 }
 
 /**
@@ -40,9 +40,9 @@ export function EmptyState({
   learnMoreHref,
   className,
 }: EmptyStateProps) {
-  const hasPrimary = Boolean(actionLabel && onAction);
-  const hasSecondary = Boolean(secondaryActionLabel && onSecondaryAction);
-  const hasLearnMore = Boolean(learnMoreLabel && learnMoreHref);
+  const hasPrimary = Boolean(actionLabel && onAction)
+  const hasSecondary = Boolean(secondaryActionLabel && onSecondaryAction)
+  const hasLearnMore = Boolean(learnMoreLabel && learnMoreHref)
 
   return (
     <Empty
@@ -87,5 +87,5 @@ export function EmptyState({
         </EmptyContent>
       ) : null}
     </Empty>
-  );
+  )
 }

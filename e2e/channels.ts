@@ -1,5 +1,5 @@
-import { createHmac } from "node:crypto";
-import type { Page } from "@playwright/test";
+import { createHmac } from "node:crypto"
+import type { Page } from "@playwright/test"
 
 /**
  * Simuladores de inbound de proveedor para dev/e2e y uso manual.
@@ -23,18 +23,24 @@ export async function simulateTelegramInbound(
       from: { id: input.fromId, first_name: "E2E", last_name: "Paciente" },
       text: input.text,
     },
-  };
+  }
   return page.evaluate(
     async ({ apiBase, connectionId, secret, body }) => {
-      const response = await fetch(`${apiBase}/api/webhooks/channels/telegram_bot_api/${connectionId}`, {
-        method: "POST",
-        headers: { "content-type": "application/json", "x-telegram-bot-api-secret-token": secret },
-        body: JSON.stringify(body),
-      });
-      return response.status;
+      const response = await fetch(
+        `${apiBase}/api/webhooks/channels/telegram_bot_api/${connectionId}`,
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-telegram-bot-api-secret-token": secret,
+          },
+          body: JSON.stringify(body),
+        },
+      )
+      return response.status
     },
     { apiBase, connectionId, secret, body },
-  );
+  )
 }
 
 export async function simulateWhatsAppInbound(
@@ -70,17 +76,20 @@ export async function simulateWhatsAppInbound(
         ],
       },
     ],
-  });
-  const signature = `sha256=${createHmac("sha256", appSecret).update(rawBody, "utf8").digest("hex")}`;
+  })
+  const signature = `sha256=${createHmac("sha256", appSecret).update(rawBody, "utf8").digest("hex")}`
   return page.evaluate(
     async ({ apiBase, connectionId, signature, rawBody }) => {
-      const response = await fetch(`${apiBase}/api/webhooks/channels/whatsapp_cloud_api/${connectionId}`, {
-        method: "POST",
-        headers: { "content-type": "application/json", "x-hub-signature-256": signature },
-        body: rawBody,
-      });
-      return response.status;
+      const response = await fetch(
+        `${apiBase}/api/webhooks/channels/whatsapp_cloud_api/${connectionId}`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json", "x-hub-signature-256": signature },
+          body: rawBody,
+        },
+      )
+      return response.status
     },
     { apiBase, connectionId, signature, rawBody },
-  );
+  )
 }

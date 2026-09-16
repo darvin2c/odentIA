@@ -1,11 +1,11 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Button, Field, FieldLabel, Textarea } from "@odentia/ui";
-import { FormDrawer } from "@odentia/ui-patterns";
-import { useId, useState } from "react";
-import { apiFetch } from "../../lib/api";
-import { useCanWrite } from "../../lib/crm";
+import { Button, Field, FieldLabel, Textarea } from "@odentia/ui"
+import { FormDrawer } from "@odentia/ui-patterns"
+import { useMutation, useQueryClient } from "@tanstack/react-query"
+import { useId, useState } from "react"
+import { apiFetch } from "../../lib/api"
+import { useCanWrite } from "../../lib/crm"
 
-const MAX_LENGTH = 4000;
+const MAX_LENGTH = 4000
 
 /**
  * Corrección inmutable sobre una atención finalizada (POST {text}, máx. 4000).
@@ -17,15 +17,15 @@ export function EncounterAddendumDrawer({
   encounterId,
   onSaved,
 }: {
-  patientId: string;
-  encounterId: string;
-  onSaved?: () => void;
+  patientId: string
+  encounterId: string
+  onSaved?: () => void
 }) {
-  const canWrite = useCanWrite();
-  const queryClient = useQueryClient();
-  const id = useId();
-  const [open, setOpen] = useState(false);
-  const [text, setText] = useState("");
+  const canWrite = useCanWrite()
+  const queryClient = useQueryClient()
+  const id = useId()
+  const [open, setOpen] = useState(false)
+  const [text, setText] = useState("")
   const save = useMutation({
     mutationFn: () =>
       apiFetch(`/api/patients/${patientId}/encounters/${encounterId}/addenda`, {
@@ -33,27 +33,34 @@ export function EncounterAddendumDrawer({
         body: JSON.stringify({ text: text.trim() }),
       }),
     onSuccess: () => {
-      setText("");
-      setOpen(false);
-      void queryClient.invalidateQueries({ queryKey: ["encounter", patientId, encounterId] });
-      void queryClient.invalidateQueries({ queryKey: ["timeline", patientId] });
-      onSaved?.();
+      setText("")
+      setOpen(false)
+      void queryClient.invalidateQueries({ queryKey: ["encounter", patientId, encounterId] })
+      void queryClient.invalidateQueries({ queryKey: ["timeline", patientId] })
+      onSaved?.()
     },
-  });
+  })
 
-  if (!canWrite) return null;
+  if (!canWrite) return null
 
   const handleClose = () => {
     // Durante el guardado no se cierra: el error y el texto se conservan.
-    if (save.isPending) return;
-    setText("");
-    save.reset();
-    setOpen(false);
-  };
+    if (save.isPending) return
+    setText("")
+    save.reset()
+    setOpen(false)
+  }
 
   return (
     <>
-      <Button type="button" variant="outline" onClick={() => { save.reset(); setOpen(true); }}>
+      <Button
+        type="button"
+        variant="outline"
+        onClick={() => {
+          save.reset()
+          setOpen(true)
+        }}
+      >
         Agregar corrección
       </Button>
       <FormDrawer
@@ -62,9 +69,9 @@ export function EncounterAddendumDrawer({
         title="Agregar corrección (adenda)"
         description="Corrección posterior al cierre. Las adendas son inmutables: no se pueden editar ni eliminar."
         onSubmit={(event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          if (text.trim() && !save.isPending) save.mutate();
+          event.preventDefault()
+          event.stopPropagation()
+          if (text.trim() && !save.isPending) save.mutate()
         }}
         isDirty={text.trim() !== ""}
         isSubmitting={save.isPending}
@@ -85,10 +92,11 @@ export function EncounterAddendumDrawer({
             placeholder="Corrección posterior al cierre…"
           />
           <p className="text-xs text-muted-foreground">
-            {text.length}/{MAX_LENGTH} · Las adendas son inmutables: no se pueden editar ni eliminar.
+            {text.length}/{MAX_LENGTH} · Las adendas son inmutables: no se pueden editar ni
+            eliminar.
           </p>
         </Field>
       </FormDrawer>
     </>
-  );
+  )
 }

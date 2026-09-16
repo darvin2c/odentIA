@@ -1,13 +1,8 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import {
-  createRootRoute,
-  HeadContent,
-  Outlet,
-  Scripts,
-} from "@tanstack/react-router";
-import type { ReactNode } from "react";
-import { Toaster } from "@odentia/ui";
-import appCss from "../styles/app.css?url";
+import { Toaster } from "@odentia/ui"
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { createRootRoute, HeadContent, Outlet, Scripts } from "@tanstack/react-router"
+import type { ReactNode } from "react"
+import appCss from "../styles/app.css?url"
 
 export const Route = createRootRoute({
   head: () => ({
@@ -19,9 +14,9 @@ export const Route = createRootRoute({
     links: [{ rel: "stylesheet", href: appCss }],
   }),
   component: RootComponent,
-});
+})
 
-const queryClient = new QueryClient();
+const queryClient = new QueryClient()
 
 function RootComponent() {
   return (
@@ -30,7 +25,7 @@ function RootComponent() {
         <Outlet />
       </QueryClientProvider>
     </RootDocument>
-  );
+  )
 }
 
 function RootDocument({ children }: Readonly<{ children: ReactNode }>) {
@@ -45,5 +40,5 @@ function RootDocument({ children }: Readonly<{ children: ReactNode }>) {
         <Scripts />
       </body>
     </html>
-  );
+  )
 }

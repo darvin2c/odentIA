@@ -1,10 +1,10 @@
-import { withOrgContext, type DemoTaskPayload, type Db } from "@odentia/db";
-import { auditEvent } from "@odentia/db/schema/org";
-import { sql } from "drizzle-orm";
+import { type Db, type DemoTaskPayload, withOrgContext } from "@odentia/db"
+import { auditEvent } from "@odentia/db/schema/org"
+import { sql } from "drizzle-orm"
 
 export interface DemoTaskMessage {
-  msg_id: number | string;
-  message: DemoTaskPayload;
+  msg_id: number | string
+  message: DemoTaskPayload
 }
 
 /** Payload NOTIFY: nunca datos clínicos, solo referencias. */
@@ -14,7 +14,7 @@ export function buildNotifyPayload(msg: DemoTaskMessage): string {
     kind: "demo_task.done",
     taskId: msg.msg_id,
     at: new Date().toISOString(),
-  });
+  })
 }
 
 /**
@@ -30,13 +30,13 @@ export async function processDemoTask(db: Db, msg: DemoTaskMessage): Promise<voi
       entity: "demo_task",
       entityId: String(msg.msg_id),
       metadata: { message: msg.message.message, userId: msg.message.userId },
-    });
-    await tx.execute(sql`select pg_notify('org_events', ${buildNotifyPayload(msg)})`);
-  });
+    })
+    await tx.execute(sql`select pg_notify('org_events', ${buildNotifyPayload(msg)})`)
+  })
 }
 
 /** Ciclo completo: procesa y recién entonces hace ack (delete) del mensaje. */
 export async function consumeDemoTask(db: Db, msg: DemoTaskMessage): Promise<void> {
-  await processDemoTask(db, msg);
-  await db.execute(sql`select pgmq.delete('demo_tasks', ${Number(msg.msg_id)}::bigint)`);
+  await processDemoTask(db, msg)
+  await db.execute(sql`select pgmq.delete('demo_tasks', ${Number(msg.msg_id)}::bigint)`)
 }

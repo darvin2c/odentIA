@@ -1,6 +1,6 @@
-import { common } from "../common.js";
 import {
   Button,
+  cn,
   Input,
   InputGroup,
   InputGroupAddon,
@@ -10,50 +10,48 @@ import {
   PopoverTrigger,
   ScrollArea,
   Slider,
-  cn,
-} from "@odentia/ui";
-import { Check, ChevronDown, Search, X } from "lucide-react";
-import * as React from "react";
-import { Calendar } from "./calendar.js";
-import type { FilterDef, FilterOption } from "./filter-def.js";
-import { paramKeys } from "./filter-def.js";
-import { useListSearch } from "./list-search.js";
+} from "@odentia/ui"
+import { Check, ChevronDown, Search, X } from "lucide-react"
+import * as React from "react"
+import { common } from "../common.js"
+import { Calendar } from "./calendar.js"
+import type { FilterDef, FilterOption } from "./filter-def.js"
+import { paramKeys } from "./filter-def.js"
+import { useListSearch } from "./list-search.js"
 
 export interface FilterControlProps {
-  filter: FilterDef;
-  layout: "popover" | "inline";
+  filter: FilterDef
+  layout: "popover" | "inline"
 }
 
 function selectedValues(raw?: string): string[] {
-  return raw?.split(",").filter(Boolean) ?? [];
+  return raw?.split(",").filter(Boolean) ?? []
 }
 
 function optionLabels(options: FilterOption[], values: string[]): string[] {
-  const labels = new Map(options.map((option) => [option.value, option.label]));
-  return values.map((value) => labels.get(value) ?? value);
+  const labels = new Map(options.map((option) => [option.value, option.label]))
+  return values.map((value) => labels.get(value) ?? value)
 }
 
-const LOCAL_OPTION_SEARCH_MINIMUM = 8;
+const LOCAL_OPTION_SEARCH_MINIMUM = 8
 
 function normalizeOptionSearch(value: string): string {
   return value
     .normalize("NFD")
     .replace(/\p{Diacritic}/gu, "")
-    .toLocaleLowerCase("es-PE");
+    .toLocaleLowerCase("es-PE")
 }
 
 function useOptionSearch(options: FilterOption[]) {
-  const [query, setQuery] = React.useState("");
-  const searchable = options.length >= LOCAL_OPTION_SEARCH_MINIMUM;
+  const [query, setQuery] = React.useState("")
+  const searchable = options.length >= LOCAL_OPTION_SEARCH_MINIMUM
   const visibleOptions = React.useMemo(() => {
-    const normalizedQuery = normalizeOptionSearch(query.trim());
-    if (!searchable || !normalizedQuery) return options;
-    return options.filter((option) =>
-      normalizeOptionSearch(option.label).includes(normalizedQuery),
-    );
-  }, [options, query, searchable]);
+    const normalizedQuery = normalizeOptionSearch(query.trim())
+    if (!searchable || !normalizedQuery) return options
+    return options.filter((option) => normalizeOptionSearch(option.label).includes(normalizedQuery))
+  }, [options, query, searchable])
 
-  return { query, searchable, setQuery, visibleOptions };
+  return { query, searchable, setQuery, visibleOptions }
 }
 
 function OptionSearch({
@@ -61,9 +59,9 @@ function OptionSearch({
   query,
   onQueryChange,
 }: {
-  label: string;
-  query: string;
-  onQueryChange: (value: string) => void;
+  label: string
+  query: string
+  onQueryChange: (value: string) => void
 }) {
   return (
     <InputGroup className="mb-1 bg-surface">
@@ -73,34 +71,31 @@ function OptionSearch({
       <InputGroupInput
         type="search"
         value={query}
-        onChange={(event: React.ChangeEvent<HTMLInputElement>) =>
-          onQueryChange(event.target.value)
-        }
+        onChange={(event: React.ChangeEvent<HTMLInputElement>) => onQueryChange(event.target.value)}
         placeholder={common.filters.search}
         aria-label={`${common.filters.search} ${label}`}
       />
     </InputGroup>
-  );
+  )
 }
 const shortDateFormatter = new Intl.DateTimeFormat("es-PE", {
   day: "2-digit",
   month: "short",
   year: "numeric",
-});
+})
 
 function formatDate(value?: string): string | undefined {
-  if (!value) return undefined;
-  const [year, month, day] = value.split("-").map(Number);
-  if (!year || !month || !day) return value;
-  return shortDateFormatter.format(new Date(year, month - 1, day));
+  if (!value) return undefined
+  const [year, month, day] = value.split("-").map(Number)
+  if (!year || !month || !day) return value
+  return shortDateFormatter.format(new Date(year, month - 1, day))
 }
-
 
 export function hasFilterValue(
   filter: FilterDef,
   get: (key: string) => string | undefined,
 ): boolean {
-  return paramKeys(filter).some((key) => Boolean(get(key)));
+  return paramKeys(filter).some((key) => Boolean(get(key)))
 }
 
 export function filterSummary(
@@ -108,29 +103,29 @@ export function filterSummary(
   get: (key: string) => string | undefined,
 ): string | undefined {
   if (filter.type === "select" || filter.type === "multi") {
-    const labels = optionLabels(filter.options, selectedValues(get(filter.key)));
-    if (labels.length === 0) return undefined;
-    return labels.length > 2 ? String(labels.length) : labels.join(", ");
+    const labels = optionLabels(filter.options, selectedValues(get(filter.key)))
+    if (labels.length === 0) return undefined
+    return labels.length > 2 ? String(labels.length) : labels.join(", ")
   }
   if (filter.type === "number-range") {
-    const min = get(`${filter.key}_min`);
-    const max = get(`${filter.key}_max`);
-    if (!min && !max) return undefined;
+    const min = get(`${filter.key}_min`)
+    const max = get(`${filter.key}_max`)
+    if (!min && !max) return undefined
     const display = (value?: string) => {
-      if (!value) return undefined;
-      return filter.money ? `S/ ${(Number(value) / 100).toFixed(2)}` : value;
-    };
-    return [display(min), display(max)].filter(Boolean).join(" – ");
+      if (!value) return undefined
+      return filter.money ? `S/ ${(Number(value) / 100).toFixed(2)}` : value
+    }
+    return [display(min), display(max)].filter(Boolean).join(" – ")
   }
-  if (filter.type === "date") return formatDate(get(`${filter.key}_on`));
-  const from = formatDate(get(`${filter.key}_from`));
-  const to = formatDate(get(`${filter.key}_to`));
-  return [from, to].filter(Boolean).join(" – ") || undefined;
+  if (filter.type === "date") return formatDate(get(`${filter.key}_on`))
+  const from = formatDate(get(`${filter.key}_from`))
+  const to = formatDate(get(`${filter.key}_to`))
+  return [from, to].filter(Boolean).join(" – ") || undefined
 }
 
 function ClearFilterButton({ filter }: { filter: FilterDef }) {
-  const { get, setParams } = useListSearch();
-  if (!hasFilterValue(filter, get)) return null;
+  const { get, setParams } = useListSearch()
+  if (!hasFilterValue(filter, get)) return null
   return (
     <div className="border-t border-border pt-2">
       <Button
@@ -144,53 +139,53 @@ function ClearFilterButton({ filter }: { filter: FilterDef }) {
         {common.filters.clear}
       </Button>
     </div>
-  );
+  )
 }
 
 function MultiOptions({ filter }: { filter: Extract<FilterDef, { type: "multi" }> }) {
-  const { get, setParam } = useListSearch();
-  const selected = selectedValues(get(filter.key));
-  const { query, searchable, setQuery, visibleOptions } = useOptionSearch(filter.options);
-  const optionRefs = React.useRef<Array<HTMLButtonElement | null>>([]);
-  const firstSelected = visibleOptions.findIndex((option) => selected.includes(option.value));
-  const [focusIndex, setFocusIndex] = React.useState(Math.max(firstSelected, 0));
+  const { get, setParam } = useListSearch()
+  const selected = selectedValues(get(filter.key))
+  const { query, searchable, setQuery, visibleOptions } = useOptionSearch(filter.options)
+  const optionRefs = React.useRef<Array<HTMLButtonElement | null>>([])
+  const firstSelected = visibleOptions.findIndex((option) => selected.includes(option.value))
+  const [focusIndex, setFocusIndex] = React.useState(Math.max(firstSelected, 0))
 
   React.useEffect(() => {
-    setFocusIndex(0);
-  }, [query]);
+    setFocusIndex(0)
+  }, [query])
 
   function toggle(value: string) {
     const next = selected.includes(value)
       ? selected.filter((current) => current !== value)
-      : [...selected, value];
-    setParam(filter.key, next.length > 0 ? next.join(",") : undefined);
+      : [...selected, value]
+    setParam(filter.key, next.length > 0 ? next.join(",") : undefined)
   }
 
   function focusOption(index: number) {
-    if (visibleOptions.length === 0) return;
-    const nextIndex = (index + visibleOptions.length) % visibleOptions.length;
-    setFocusIndex(nextIndex);
-    optionRefs.current[nextIndex]?.focus();
+    if (visibleOptions.length === 0) return
+    const nextIndex = (index + visibleOptions.length) % visibleOptions.length
+    setFocusIndex(nextIndex)
+    optionRefs.current[nextIndex]?.focus()
   }
 
   function handleKeyDown(event: React.KeyboardEvent<HTMLButtonElement>, index: number) {
     switch (event.key) {
       case "ArrowDown":
-        event.preventDefault();
-        focusOption(index + 1);
-        break;
+        event.preventDefault()
+        focusOption(index + 1)
+        break
       case "ArrowUp":
-        event.preventDefault();
-        focusOption(index - 1);
-        break;
+        event.preventDefault()
+        focusOption(index - 1)
+        break
       case "Home":
-        event.preventDefault();
-        focusOption(0);
-        break;
+        event.preventDefault()
+        focusOption(0)
+        break
       case "End":
-        event.preventDefault();
-        focusOption(visibleOptions.length - 1);
-        break;
+        event.preventDefault()
+        focusOption(visibleOptions.length - 1)
+        break
     }
   }
 
@@ -212,12 +207,12 @@ function MultiOptions({ filter }: { filter: Extract<FilterDef, { type: "multi" }
             className="space-y-0.5 p-1"
           >
             {visibleOptions.map((option, index) => {
-              const isSelected = selected.includes(option.value);
+              const isSelected = selected.includes(option.value)
               return (
                 <button
                   key={option.value}
                   ref={(element) => {
-                    optionRefs.current[index] = element;
+                    optionRefs.current[index] = element
                   }}
                   type="button"
                   role="option"
@@ -245,25 +240,25 @@ function MultiOptions({ filter }: { filter: Extract<FilterDef, { type: "multi" }
                     )}
                   />
                 </button>
-              );
+              )
             })}
           </div>
         </ScrollArea>
       )}
     </div>
-  );
+  )
 }
 
 function SelectOptions({
   filter,
   close,
 }: {
-  filter: Extract<FilterDef, { type: "select" }>;
-  close?: () => void;
+  filter: Extract<FilterDef, { type: "select" }>
+  close?: () => void
 }) {
-  const { get, setParam } = useListSearch();
-  const selected = get(filter.key);
-  const { query, searchable, setQuery, visibleOptions } = useOptionSearch(filter.options);
+  const { get, setParam } = useListSearch()
+  const selected = get(filter.key)
+  const { query, searchable, setQuery, visibleOptions } = useOptionSearch(filter.options)
 
   return (
     <div>
@@ -285,21 +280,16 @@ function SelectOptions({
                 aria-selected={selected === option.value}
                 className="flex min-h-9 w-full items-center gap-2 rounded-md px-2 text-left text-sm hover:bg-surface-muted"
                 onClick={() => {
-                  setParam(filter.key, option.value);
-                  close?.();
+                  setParam(filter.key, option.value)
+                  close?.()
                 }}
               >
                 <Check
-                  className={cn(
-                    "size-4",
-                    selected === option.value ? "opacity-100" : "opacity-0",
-                  )}
+                  className={cn("size-4", selected === option.value ? "opacity-100" : "opacity-0")}
                 />
                 <span className="flex-1">{option.label}</span>
                 {option.count !== undefined ? (
-                  <span className="text-xs tabular-nums text-muted-foreground">
-                    {option.count}
-                  </span>
+                  <span className="text-xs tabular-nums text-muted-foreground">{option.count}</span>
                 ) : null}
               </button>
             ))}
@@ -307,49 +297,45 @@ function SelectOptions({
         </ScrollArea>
       )}
     </div>
-  );
+  )
 }
 
-function NumberRangeControl({
-  filter,
-}: {
-  filter: Extract<FilterDef, { type: "number-range" }>;
-}) {
-  const { get, setParams } = useListSearch();
-  const minKey = `${filter.key}_min`;
-  const maxKey = `${filter.key}_max`;
+function NumberRangeControl({ filter }: { filter: Extract<FilterDef, { type: "number-range" }> }) {
+  const { get, setParams } = useListSearch()
+  const minKey = `${filter.key}_min`
+  const maxKey = `${filter.key}_max`
   const fromParam = (value?: string) =>
-    value === undefined ? "" : String(filter.money ? Number(value) / 100 : Number(value));
-  const [minimum, setMinimum] = React.useState(() => fromParam(get(minKey)));
-  const [maximum, setMaximum] = React.useState(() => fromParam(get(maxKey)));
-  const minimumParam = get(minKey);
-  const maximumParam = get(maxKey);
+    value === undefined ? "" : String(filter.money ? Number(value) / 100 : Number(value))
+  const [minimum, setMinimum] = React.useState(() => fromParam(get(minKey)))
+  const [maximum, setMaximum] = React.useState(() => fromParam(get(maxKey)))
+  const minimumParam = get(minKey)
+  const maximumParam = get(maxKey)
 
-  React.useEffect(() => setMinimum(fromParam(minimumParam)), [filter.money, minimumParam]);
-  React.useEffect(() => setMaximum(fromParam(maximumParam)), [filter.money, maximumParam]);
+  React.useEffect(() => setMinimum(fromParam(minimumParam)), [filter.money, minimumParam])
+  React.useEffect(() => setMaximum(fromParam(maximumParam)), [filter.money, maximumParam])
 
   React.useEffect(() => {
     const timeout = window.setTimeout(() => {
       const toParam = (value: string) => {
-        if (!value) return undefined;
-        const parsed = Number(value);
-        if (!Number.isFinite(parsed)) return undefined;
-        return String(filter.money ? Math.round(parsed * 100) : Math.round(parsed));
-      };
-      const nextMinimum = toParam(minimum);
-      const nextMaximum = toParam(maximum);
-      if (nextMinimum === minimumParam && nextMaximum === maximumParam) return;
-      setParams({ [minKey]: nextMinimum, [maxKey]: nextMaximum }, { replace: true });
-    }, 300);
-    return () => window.clearTimeout(timeout);
-  }, [filter.money, maxKey, maximum, maximumParam, minKey, minimum, minimumParam, setParams]);
+        if (!value) return undefined
+        const parsed = Number(value)
+        if (!Number.isFinite(parsed)) return undefined
+        return String(filter.money ? Math.round(parsed * 100) : Math.round(parsed))
+      }
+      const nextMinimum = toParam(minimum)
+      const nextMaximum = toParam(maximum)
+      if (nextMinimum === minimumParam && nextMaximum === maximumParam) return
+      setParams({ [minKey]: nextMinimum, [maxKey]: nextMaximum }, { replace: true })
+    }, 300)
+    return () => window.clearTimeout(timeout)
+  }, [filter.money, maxKey, maximum, maximumParam, minKey, minimum, minimumParam, setParams])
 
   const sliderMaximum = Math.max(
     filter.money ? 1_000 : 100_000,
     Number(minimum) || 0,
     Number(maximum) || 0,
-  );
-  const sliderValues = [Number(minimum) || 0, Number(maximum) || sliderMaximum];
+  )
+  const sliderValues = [Number(minimum) || 0, Number(maximum) || sliderMaximum]
 
   return (
     <div className="space-y-4">
@@ -382,25 +368,25 @@ function NumberRangeControl({
         value={sliderValues}
         className="mx-auto w-full max-w-xs h-2"
         onValueChange={(values) => {
-          const next = Array.isArray(values) ? values : [values];
-          setMinimum(String(next[0] ?? 0));
-          setMaximum(String(next[1] ?? sliderMaximum));
+          const next = Array.isArray(values) ? values : [values]
+          setMinimum(String(next[0] ?? 0))
+          setMaximum(String(next[1] ?? sliderMaximum))
         }}
       />
     </div>
-  );
+  )
 }
 
 function DateControl({
   filter,
   compact,
 }: {
-  filter: Extract<FilterDef, { type: "date" | "date-range" }>;
-  compact: boolean;
+  filter: Extract<FilterDef, { type: "date" | "date-range" }>
+  compact: boolean
 }) {
-  const { get, setParam, setParams } = useListSearch();
+  const { get, setParam, setParams } = useListSearch()
   if (filter.type === "date") {
-    const key = `${filter.key}_on`;
+    const key = `${filter.key}_on`
     return (
       <Calendar
         mode="single"
@@ -408,11 +394,11 @@ function DateControl({
         selected={get(key)}
         onSelect={(value) => setParam(key, value)}
       />
-    );
+    )
   }
 
-  const fromKey = `${filter.key}_from`;
-  const toKey = `${filter.key}_to`;
+  const fromKey = `${filter.key}_from`
+  const toKey = `${filter.key}_to`
   return (
     <Calendar
       mode="range"
@@ -420,32 +406,28 @@ function DateControl({
       selected={{ from: get(fromKey), to: get(toKey) }}
       onSelect={(value) => setParams({ [fromKey]: value.from, [toKey]: value.to })}
     />
-  );
+  )
 }
 
-function ControlBody({
-  filter,
-  layout,
-  close,
-}: FilterControlProps & { close?: () => void }) {
+function ControlBody({ filter, layout, close }: FilterControlProps & { close?: () => void }) {
   switch (filter.type) {
     case "multi":
-      return <MultiOptions filter={filter} />;
+      return <MultiOptions filter={filter} />
     case "select":
-      return <SelectOptions filter={filter} close={close} />;
+      return <SelectOptions filter={filter} close={close} />
     case "number-range":
-      return <NumberRangeControl filter={filter} />;
+      return <NumberRangeControl filter={filter} />
     case "date":
     case "date-range":
-      return <DateControl filter={filter} compact={layout === "inline"} />;
+      return <DateControl filter={filter} compact={layout === "inline"} />
   }
 }
 
 export function FilterControl({ filter, layout }: FilterControlProps) {
-  const { get, setParams } = useListSearch();
-  const [open, setOpen] = React.useState(false);
-  const summary = filterSummary(filter, get);
-  const Icon = filter.icon;
+  const { get, setParams } = useListSearch()
+  const [open, setOpen] = React.useState(false)
+  const summary = filterSummary(filter, get)
+  const Icon = filter.icon
 
   if (layout === "inline") {
     return (
@@ -457,7 +439,7 @@ export function FilterControl({ filter, layout }: FilterControlProps) {
         <ControlBody filter={filter} layout={layout} />
         <ClearFilterButton filter={filter} />
       </section>
-    );
+    )
   }
 
   return (
@@ -474,8 +456,8 @@ export function FilterControl({ filter, layout }: FilterControlProps) {
             className="ml-1 flex size-7 items-center justify-center rounded-full text-muted-foreground outline-none transition-colors hover:bg-surface-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50"
             aria-label={`${common.filters.clear}: ${filter.label}`}
             onClick={() => {
-              setOpen(false);
-              setParams(Object.fromEntries(paramKeys(filter).map((key) => [key, undefined])));
+              setOpen(false)
+              setParams(Object.fromEntries(paramKeys(filter).map((key) => [key, undefined])))
             }}
           >
             <X className="size-3.5" />
@@ -517,5 +499,5 @@ export function FilterControl({ filter, layout }: FilterControlProps) {
         <ClearFilterButton filter={filter} />
       </PopoverContent>
     </Popover>
-  );
+  )
 }

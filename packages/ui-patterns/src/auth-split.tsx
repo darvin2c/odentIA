@@ -1,11 +1,11 @@
-import { CalendarCheck, MessagesSquare, ShieldCheck } from "lucide-react";
-import type { ReactNode } from "react";
+import { CalendarCheck, MessagesSquare, ShieldCheck } from "lucide-react"
+import type { ReactNode } from "react"
 
 const HIGHLIGHTS = [
   { icon: CalendarCheck, text: "Agenda por profesional, recurso y horario" },
   { icon: MessagesSquare, text: "Bandeja omnicanal con estados por proveedor" },
   { icon: ShieldCheck, text: "Aislamiento total por organización" },
-] as const;
+] as const
 
 /**
  * Layout de autenticación a página completa: branding odentIA ocupa toda la
@@ -19,10 +19,10 @@ export function AuthSplit({
   children,
   footer,
 }: {
-  title: string;
-  description?: string;
-  children: ReactNode;
-  footer?: ReactNode;
+  title: string
+  description?: string
+  children: ReactNode
+  footer?: ReactNode
 }) {
   return (
     <div className="grid min-h-screen bg-surface-muted md:grid-cols-2">
@@ -65,9 +65,7 @@ export function AuthSplit({
         <div className="w-full max-w-sm">
           <div className="flex flex-col gap-1.5">
             <h1 className="text-base leading-snug font-medium">{title}</h1>
-            {description ? (
-              <p className="text-sm text-muted-foreground">{description}</p>
-            ) : null}
+            {description ? <p className="text-sm text-muted-foreground">{description}</p> : null}
           </div>
           <div className="mt-6 flex flex-col gap-4">
             {children}
@@ -78,5 +76,5 @@ export function AuthSplit({
         </div>
       </div>
     </div>
-  );
+  )
 }

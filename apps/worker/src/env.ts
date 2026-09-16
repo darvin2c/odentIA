@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "zod"
 
 const envSchema = z.object({
   APP_DATABASE_URL: z.string().min(1),
@@ -20,16 +20,16 @@ const envSchema = z.object({
   S3_BUCKET: z.string().min(1),
   S3_ATTACHMENTS_BUCKET: z.string().min(1),
   S3_PUBLIC_URL: z.string().url(),
-});
+})
 
 function loadEnv() {
-  const parsed = envSchema.safeParse(process.env);
+  const parsed = envSchema.safeParse(process.env)
   if (!parsed.success) {
-    console.error("Variables de entorno inválidas:", parsed.error.flatten().fieldErrors);
-    process.exit(1);
+    console.error("Variables de entorno inválidas:", parsed.error.flatten().fieldErrors)
+    process.exit(1)
   }
-  return parsed.data;
+  return parsed.data
 }
 
-export const env = loadEnv();
-export type Env = typeof env;
+export const env = loadEnv()
+export type Env = typeof env

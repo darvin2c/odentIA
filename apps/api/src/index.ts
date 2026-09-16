@@ -1,21 +1,21 @@
-import { serve } from "@hono/node-server";
-import { createAuth } from "@odentia/auth";
-import { createAppDb, createOwnerDb } from "@odentia/db";
-import { createMailer } from "@odentia/mail";
-import { createStorage, secretsKeyFromEnv } from "@odentia/services";
-import { createApp } from "./app.js";
-import { env } from "./env.js";
+import { serve } from "@hono/node-server"
+import { createAuth } from "@odentia/auth"
+import { createAppDb, createOwnerDb } from "@odentia/db"
+import { createMailer } from "@odentia/mail"
+import { createStorage, secretsKeyFromEnv } from "@odentia/services"
+import { createApp } from "./app.js"
+import { env } from "./env.js"
 
-const db = createAppDb(env.APP_DATABASE_URL);
-const ownerDb = createOwnerDb(env.DATABASE_URL);
-const secretsKey = secretsKeyFromEnv(env.SECRETS_KEY);
+const db = createAppDb(env.APP_DATABASE_URL)
+const ownerDb = createOwnerDb(env.DATABASE_URL)
+const secretsKey = secretsKeyFromEnv(env.SECRETS_KEY)
 const mailer = createMailer({
   host: env.SMTP_HOST,
   port: env.SMTP_PORT,
   user: env.SMTP_USER || undefined,
   pass: env.SMTP_PASS || undefined,
   from: env.SMTP_FROM,
-});
+})
 const auth = createAuth({
   db,
   mailer,
@@ -26,7 +26,7 @@ const auth = createAuth({
   trustedOrigins: env.trustedOrigins,
   googleClientId: env.GOOGLE_CLIENT_ID,
   googleClientSecret: env.GOOGLE_CLIENT_SECRET,
-});
+})
 
 const app = createApp({
   auth,
@@ -47,8 +47,8 @@ const app = createApp({
   trustedOrigins: env.trustedOrigins,
   cookieDomain: env.COOKIE_DOMAIN,
   listenUrl: env.APP_DATABASE_URL,
-});
+})
 
 serve({ fetch: app.fetch, port: env.PORT }, (info) => {
-  console.log(`api listening on :${info.port}`);
-});
+  console.log(`api listening on :${info.port}`)
+})

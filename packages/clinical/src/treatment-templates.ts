@@ -7,7 +7,7 @@
  * equivalencias comprobadas con sistema, código, versión, display, fuente y
  * licencia completos.
  */
-import { isValidTooth, surfacesForTooth } from "./anatomy.js";
+import { isValidTooth, surfacesForTooth } from "./anatomy.js"
 
 export const TREATMENT_SPECIALTIES = [
   "diagnostico",
@@ -22,49 +22,49 @@ export const TREATMENT_SPECIALTIES = [
   "odontopediatria",
   "estetica",
   "disfuncion",
-] as const;
-export type TreatmentSpecialty = (typeof TREATMENT_SPECIALTIES)[number];
+] as const
+export type TreatmentSpecialty = (typeof TREATMENT_SPECIALTIES)[number]
 
-export const TREATMENT_SCOPES = ["general", "tooth", "surfaces", "quadrant", "arch"] as const;
-export type TreatmentScope = (typeof TREATMENT_SCOPES)[number];
+export const TREATMENT_SCOPES = ["general", "tooth", "surfaces", "quadrant", "arch"] as const
+export type TreatmentScope = (typeof TREATMENT_SCOPES)[number]
 
-export type TreatmentArch = "upper" | "lower";
+export type TreatmentArch = "upper" | "lower"
 
 export interface ExternalCoding {
-  system: string;
-  code: string;
-  version: string;
-  display: string;
-  sourceUrl: string;
-  license: string;
+  system: string
+  code: string
+  version: string
+  display: string
+  sourceUrl: string
+  license: string
 }
 
 export interface TreatmentTemplate {
-  key: string;
-  name: string;
-  specialty: TreatmentSpecialty;
-  scope: TreatmentScope;
+  key: string
+  name: string
+  specialty: TreatmentSpecialty
+  scope: TreatmentScope
   /** Rango de superficies para restauradoras; null en el resto. */
-  surfaceCountMin: number | null;
-  surfaceCountMax: number | null;
+  surfaceCountMin: number | null
+  surfaceCountMax: number | null
 }
 
 export interface TreatmentSiteInput {
-  toothNumber?: number | null;
-  surfaces?: string[] | null;
-  quadrant?: number | null;
-  arch?: string | null;
+  toothNumber?: number | null
+  surfaces?: string[] | null
+  quadrant?: number | null
+  arch?: string | null
 }
 
 function slugify(name: string): string {
   const ascii = name
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase();
+    .toLowerCase()
   return ascii
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
-    .replace(/-{2,}/g, "-");
+    .replace(/-{2,}/g, "-")
 }
 
 function t(
@@ -74,7 +74,14 @@ function t(
   surfaceCountMin: number | null = null,
   surfaceCountMax: number | null = null,
 ): TreatmentTemplate {
-  return { key: `${specialty}:${slugify(name)}`, name, specialty, scope, surfaceCountMin, surfaceCountMax };
+  return {
+    key: `${specialty}:${slugify(name)}`,
+    name,
+    specialty,
+    scope,
+    surfaceCountMin,
+    surfaceCountMax,
+  }
 }
 
 export const TREATMENT_TEMPLATES: readonly TreatmentTemplate[] = [
@@ -175,15 +182,15 @@ export const TREATMENT_TEMPLATES: readonly TreatmentTemplate[] = [
   t("disfuncion", "Evaluación temporomandibular", "general"),
   t("disfuncion", "Férula oclusal", "arch"),
   t("disfuncion", "Ajuste de férula oclusal", "general"),
-];
+]
 
 const BY_KEY: Record<string, TreatmentTemplate | undefined> = Object.fromEntries(
   TREATMENT_TEMPLATES.map((tpl) => [tpl.key, tpl]),
-);
+)
 
 /** Plantilla por key o `undefined` si no existe. */
 export function treatmentTemplate(key: string): TreatmentTemplate | undefined {
-  return Object.hasOwn(BY_KEY, key) ? BY_KEY[key] : undefined;
+  return Object.hasOwn(BY_KEY, key) ? BY_KEY[key] : undefined
 }
 
 /**
@@ -195,56 +202,60 @@ export function assertTreatmentSite(
   site: TreatmentSiteInput,
   surfaceLimits?: { min: number | null; max: number | null },
 ): void {
-  const { toothNumber = null, surfaces = null, quadrant = null, arch = null } = site;
-  const hasSurfaces = Array.isArray(surfaces) && surfaces.length > 0;
+  const { toothNumber = null, surfaces = null, quadrant = null, arch = null } = site
+  const hasSurfaces = Array.isArray(surfaces) && surfaces.length > 0
   if (scope === "general") {
     if (toothNumber != null || hasSurfaces || quadrant != null || arch != null) {
-      throw new Error("La prestación general no lleva pieza, superficies, cuadrante ni arcada");
+      throw new Error("La prestación general no lleva pieza, superficies, cuadrante ni arcada")
     }
-    return;
+    return
   }
   if (scope === "tooth") {
     if (toothNumber == null || !Number.isInteger(toothNumber) || !isValidTooth(toothNumber)) {
-      throw new Error("La prestación requiere una pieza FDI válida");
+      throw new Error("La prestación requiere una pieza FDI válida")
     }
     if (hasSurfaces || quadrant != null || arch != null) {
-      throw new Error("La prestación por pieza no lleva superficies, cuadrante ni arcada");
+      throw new Error("La prestación por pieza no lleva superficies, cuadrante ni arcada")
     }
-    return;
+    return
   }
   if (scope === "surfaces") {
     if (toothNumber == null || !Number.isInteger(toothNumber) || !isValidTooth(toothNumber)) {
-      throw new Error("La prestación requiere una pieza FDI válida");
+      throw new Error("La prestación requiere una pieza FDI válida")
     }
-    if (!hasSurfaces) throw new Error("La prestación requiere al menos una superficie");
-    const valid = new Set(surfacesForTooth(toothNumber));
-    const seen = new Set<string>();
+    if (!hasSurfaces) throw new Error("La prestación requiere al menos una superficie")
+    const valid = new Set(surfacesForTooth(toothNumber))
+    const seen = new Set<string>()
     for (const s of surfaces!) {
-      if (seen.has(s)) throw new Error("Las superficies no deben repetirse");
-      seen.add(s);
-      if (!valid.has(s as never)) throw new Error(`Superficie inválida para la pieza ${toothNumber}`);
+      if (seen.has(s)) throw new Error("Las superficies no deben repetirse")
+      seen.add(s)
+      if (!valid.has(s as never))
+        throw new Error(`Superficie inválida para la pieza ${toothNumber}`)
     }
-    const min = surfaceLimits?.min ?? null;
-    const max = surfaceLimits?.max ?? null;
-    if (min != null && seen.size < min) throw new Error(`La prestación requiere al menos ${min} superficie(s)`);
-    if (max != null && seen.size > max) throw new Error(`La prestación admite como máximo ${max} superficie(s)`);
-    if (quadrant != null || arch != null) throw new Error("La prestación por superficies no lleva cuadrante ni arcada");
-    return;
+    const min = surfaceLimits?.min ?? null
+    const max = surfaceLimits?.max ?? null
+    if (min != null && seen.size < min)
+      throw new Error(`La prestación requiere al menos ${min} superficie(s)`)
+    if (max != null && seen.size > max)
+      throw new Error(`La prestación admite como máximo ${max} superficie(s)`)
+    if (quadrant != null || arch != null)
+      throw new Error("La prestación por superficies no lleva cuadrante ni arcada")
+    return
   }
   if (scope === "quadrant") {
     if (!Number.isInteger(quadrant) || (quadrant as number) < 1 || (quadrant as number) > 8) {
-      throw new Error("La prestación requiere un cuadrante FDI de 1 a 8");
+      throw new Error("La prestación requiere un cuadrante FDI de 1 a 8")
     }
     if (toothNumber != null || hasSurfaces || arch != null) {
-      throw new Error("La prestación por cuadrante no lleva pieza, superficies ni arcada");
+      throw new Error("La prestación por cuadrante no lleva pieza, superficies ni arcada")
     }
-    return;
+    return
   }
   // arch
   if (arch !== "upper" && arch !== "lower") {
-    throw new Error("La prestación requiere arcada superior o inferior");
+    throw new Error("La prestación requiere arcada superior o inferior")
   }
   if (toothNumber != null || hasSurfaces || quadrant != null) {
-    throw new Error("La prestación por arcada no lleva pieza, superficies ni cuadrante");
+    throw new Error("La prestación por arcada no lleva pieza, superficies ni cuadrante")
   }
 }

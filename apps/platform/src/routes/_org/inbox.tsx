@@ -1,5 +1,3 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, createFileRoute, getRouteApi } from "@tanstack/react-router";
 import {
   Badge,
   Bubble,
@@ -28,8 +26,10 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@odentia/ui";
-import { EmptyState, FilterBar, PageHeader, useListSearch } from "@odentia/ui-patterns";
+} from "@odentia/ui"
+import { EmptyState, FilterBar, PageHeader, useListSearch } from "@odentia/ui-patterns"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { createFileRoute, getRouteApi, Link } from "@tanstack/react-router"
 import {
   AlertCircle,
   Bot,
@@ -39,12 +39,18 @@ import {
   MessageCircle,
   Paperclip,
   Send,
-} from "lucide-react";
-import { ApiError, apiFetch } from "../../lib/api";
-import { API_URL } from "../../lib/auth-client";
-import { useEffect, useMemo, useState } from "react";
-import { timeAgo, useMyUserId, type ChatMessage, type ConversationDetail, type ConversationListItem } from "../../lib/crm";
-import { useOrgEvents } from "../../lib/org-events";
+} from "lucide-react"
+import { useEffect, useMemo, useState } from "react"
+import { ApiError, apiFetch } from "../../lib/api"
+import { API_URL } from "../../lib/auth-client"
+import {
+  type ChatMessage,
+  type ConversationDetail,
+  type ConversationListItem,
+  timeAgo,
+  useMyUserId,
+} from "../../lib/crm"
+import { useOrgEvents } from "../../lib/org-events"
 
 export const Route = createFileRoute("/_org/inbox")({
   validateSearch: (search: Record<string, unknown>) => ({
@@ -56,79 +62,109 @@ export const Route = createFileRoute("/_org/inbox")({
     ...(typeof search.assigned === "string" ? { assigned: search.assigned } : {}),
   }),
   component: InboxPage,
-});
-const orgRouteApi = getRouteApi("/_org");
+})
+const orgRouteApi = getRouteApi("/_org")
 
 function InboxPage() {
-  const queryClient = useQueryClient();
-  const { org } = orgRouteApi.useRouteContext();
-  const myUserId = useMyUserId();
-  const listSearch = useListSearch();
-  const status = listSearch.get("status") ?? "open";
-  const channel = listSearch.get("channel");
-  const assigned = listSearch.get("assigned");
-  const search = listSearch.get("q") ?? "";
-  const sort = listSearch.get("sort");
-  const initial = Route.useSearch();
-  const [selectedId, setSelectedId] = useState<string | null>(initial.conversation ?? null);
+  const queryClient = useQueryClient()
+  const { org } = orgRouteApi.useRouteContext()
+  const myUserId = useMyUserId()
+  const listSearch = useListSearch()
+  const status = listSearch.get("status") ?? "open"
+  const channel = listSearch.get("channel")
+  const assigned = listSearch.get("assigned")
+  const search = listSearch.get("q") ?? ""
+  const sort = listSearch.get("sort")
+  const initial = Route.useSearch()
+  const [selectedId, setSelectedId] = useState<string | null>(initial.conversation ?? null)
 
   const listParams = useMemo(() => {
-    const params = new URLSearchParams();
-    if (status !== "all") params.set("status", status);
-    if (channel) params.set("channel", channel);
-    if (assigned === "me") params.set("assigned", myUserId);
-    else if (assigned === "none") params.set("assigned", "none");
-    if (search.trim()) params.set("q", search.trim());
-    return params.toString();
-  }, [status, channel, assigned, search, myUserId]);
+    const params = new URLSearchParams()
+    if (status !== "all") params.set("status", status)
+    if (channel) params.set("channel", channel)
+    if (assigned === "me") params.set("assigned", myUserId)
+    else if (assigned === "none") params.set("assigned", "none")
+    if (search.trim()) params.set("q", search.trim())
+    return params.toString()
+  }, [status, channel, assigned, search, myUserId])
 
   const listQuery = useQuery({
     queryKey: ["conversations", listParams],
-    queryFn: () => apiFetch<{ data: ConversationListItem[]; nextCursor: string | null }>(`/api/conversations?${listParams}`),
-  });
+    queryFn: () =>
+      apiFetch<{ data: ConversationListItem[]; nextCursor: string | null }>(
+        `/api/conversations?${listParams}`,
+      ),
+  })
 
   useOrgEvents(["message.created", "message.updated", "conversation.updated"], () => {
-    void queryClient.invalidateQueries({ queryKey: ["conversations"] });
-    if (selectedId) void queryClient.invalidateQueries({ queryKey: ["conversation", selectedId] });
-  });
+    void queryClient.invalidateQueries({ queryKey: ["conversations"] })
+    if (selectedId) void queryClient.invalidateQueries({ queryKey: ["conversation", selectedId] })
+  })
 
   const items = useMemo(() => {
-    const base = listQuery.data?.data ?? [];
-    if (!sort) return base;
-    const field = sort.replace(/^-/, "");
-    const sorted = [...base];
+    const base = listQuery.data?.data ?? []
+    if (!sort) return base
+    const field = sort.replace(/^-/, "")
+    const sorted = [...base]
     if (field === "noleidos") {
       sorted.sort(
         (a, b) =>
           b.unreadCount - a.unreadCount ||
           (b.lastMessageAt ? new Date(b.lastMessageAt).getTime() : 0) -
             (a.lastMessageAt ? new Date(a.lastMessageAt).getTime() : 0),
-      );
-      return sorted;
+      )
+      return sorted
     }
     if (field === "actividad") {
-      const desc = sort !== "-actividad";
+      const desc = sort !== "-actividad"
       sorted.sort((a, b) => {
         const diff =
           (b.lastMessageAt ? new Date(b.lastMessageAt).getTime() : 0) -
-          (a.lastMessageAt ? new Date(a.lastMessageAt).getTime() : 0);
-        return desc ? diff : -diff;
-      });
-      return sorted;
+          (a.lastMessageAt ? new Date(a.lastMessageAt).getTime() : 0)
+        return desc ? diff : -diff
+      })
+      return sorted
     }
-    return base;
-  }, [listQuery.data, sort]);
+    return base
+  }, [listQuery.data, sort])
 
   return (
     <div className="flex flex-col gap-4">
       <PageHeader title="Bandeja" subtitle="Conversaciones de WhatsApp y Telegram" />
       <div className="flex gap-4" style={{ height: "calc(100vh - 220px)", minHeight: 480 }}>
-        <section className={`w-full flex-col gap-3 md:flex md:w-[clamp(280px,30%,420px)] md:shrink-0 ${selectedId ? "hidden" : "flex"}`}>
+        <section
+          className={`w-full flex-col gap-3 md:flex md:w-[clamp(280px,30%,420px)] md:shrink-0 ${selectedId ? "hidden" : "flex"}`}
+        >
           <FilterBar
             filters={[
-              { key: "status", label: "Estado", type: "select", options: [{ value: "open", label: "Abiertas" }, { value: "closed", label: "Cerradas" }, { value: "all", label: "Todas" }] },
-              { key: "channel", label: "Canal", type: "select", options: [{ value: "whatsapp", label: "WhatsApp" }, { value: "telegram", label: "Telegram" }] },
-              { key: "assigned", label: "Asignado", type: "select", options: [{ value: "me", label: "Mías" }, { value: "none", label: "Sin asignar" }] },
+              {
+                key: "status",
+                label: "Estado",
+                type: "select",
+                options: [
+                  { value: "open", label: "Abiertas" },
+                  { value: "closed", label: "Cerradas" },
+                  { value: "all", label: "Todas" },
+                ],
+              },
+              {
+                key: "channel",
+                label: "Canal",
+                type: "select",
+                options: [
+                  { value: "whatsapp", label: "WhatsApp" },
+                  { value: "telegram", label: "Telegram" },
+                ],
+              },
+              {
+                key: "assigned",
+                label: "Asignado",
+                type: "select",
+                options: [
+                  { value: "me", label: "Mías" },
+                  { value: "none", label: "Sin asignar" },
+                ],
+              },
             ]}
             sortOptions={[
               { value: "actividad", label: "Actividad reciente" },
@@ -156,7 +192,9 @@ function InboxPage() {
                   </span>
                   <span className="flex shrink-0 items-center gap-1.5">
                     {item.unreadCount > 0 && <Badge>{item.unreadCount}</Badge>}
-                    <span className="text-xs text-muted-foreground">{timeAgo(item.lastMessageAt)}</span>
+                    <span className="text-xs text-muted-foreground">
+                      {timeAgo(item.lastMessageAt)}
+                    </span>
                   </span>
                 </div>
                 <span className="truncate text-xs text-muted-foreground">
@@ -165,7 +203,10 @@ function InboxPage() {
               </button>
             ))}
             {items.length === 0 && !listQuery.isLoading && (
-              <EmptyState title="Sin conversaciones" description="Los mensajes entrantes aparecen aquí." />
+              <EmptyState
+                title="Sin conversaciones"
+                description="Los mensajes entrantes aparecen aquí."
+              />
             )}
           </div>
         </section>
@@ -173,60 +214,68 @@ function InboxPage() {
           {selectedId ? (
             <ThreadView id={selectedId} members={org.members} onBack={() => setSelectedId(null)} />
           ) : (
-            <EmptyState title="Selecciona una conversación" description="Elige un hilo de la lista para verlo aquí." />
+            <EmptyState
+              title="Selecciona una conversación"
+              description="Elige un hilo de la lista para verlo aquí."
+            />
           )}
         </section>
       </div>
     </div>
-  );
+  )
 }
 
-const NO_TEMPLATE = "__ninguna__";
+const NO_TEMPLATE = "__ninguna__"
 
 interface Member {
-  userId: string;
-  role: string;
-  user: { email: string; name: string };
+  userId: string
+  role: string
+  user: { email: string; name: string }
 }
 
-function ThreadView({ id, members, onBack }: { id: string; members: Member[]; onBack: () => void }) {
-  const queryClient = useQueryClient();
-  const [composer, setComposer] = useState("");
-  const [older, setOlder] = useState<ChatMessage[]>([]);
-  const [olderCursor, setOlderCursor] = useState<string | null>(null);
-  const [loadingOlder, setLoadingOlder] = useState(false);
-  const [windowClosed, setWindowClosed] = useState(false);
-  const [templateName, setTemplateName] = useState("");
-  const [templateParams, setTemplateParams] = useState("");
-  const [markedRef, setMarkedRef] = useState<string | null>(null);
+function ThreadView({
+  id,
+  members,
+  onBack,
+}: {
+  id: string
+  members: Member[]
+  onBack: () => void
+}) {
+  const queryClient = useQueryClient()
+  const [composer, setComposer] = useState("")
+  const [older, setOlder] = useState<ChatMessage[]>([])
+  const [olderCursor, setOlderCursor] = useState<string | null>(null)
+  const [loadingOlder, setLoadingOlder] = useState(false)
+  const [windowClosed, setWindowClosed] = useState(false)
+  const [templateName, setTemplateName] = useState("")
+  const [templateParams, setTemplateParams] = useState("")
+  const [markedRef, setMarkedRef] = useState<string | null>(null)
 
   const detailQuery = useQuery({
     queryKey: ["conversation", id],
     queryFn: () => apiFetch<{ data: ConversationDetail }>(`/api/conversations/${id}`),
-  });
+  })
 
-  const detail = detailQuery.data?.data;
-  const messages = useMemo(
-    () => [...older, ...(detail?.messages ?? [])],
-    [older, detail?.messages],
-  );
+  const detail = detailQuery.data?.data
+  const messages = useMemo(() => [...older, ...(detail?.messages ?? [])], [older, detail?.messages])
 
   useEffect(() => {
-    setOlder([]);
-    setOlderCursor(null);
-    setComposer("");
-    setWindowClosed(false);
-    setMarkedRef(null);
-  }, [id]);
+    setOlder([])
+    setOlderCursor(null)
+    setComposer("")
+    setWindowClosed(false)
+    setMarkedRef(null)
+  }, [id])
 
   useEffect(() => {
     if (detail && detail.conversation.unreadCount > 0 && markedRef !== id) {
-      setMarkedRef(id);
+      setMarkedRef(id)
       void apiFetch(`/api/conversations/${id}/read`, { method: "POST" }).then(() =>
         queryClient.invalidateQueries({ queryKey: ["conversations"] }),
-      );
+      )
     }
-  }, [detail, id, markedRef, queryClient]);
+  }, [detail, id, markedRef, queryClient])
 
   const templatesQuery = useQuery({
     queryKey: ["templates", detail?.connection.id],
@@ -235,7 +284,7 @@ function ThreadView({ id, members, onBack }: { id: string; members: Member[]; on
         `/api/channels/connections/${detail?.connection.id}/templates`,
       ),
     enabled: windowClosed && !!detail,
-  });
+  })
 
   const templateItems = useMemo(
     () =>
@@ -243,12 +292,12 @@ function ThreadView({ id, members, onBack }: { id: string; members: Member[]; on
         (templatesQuery.data?.data ?? []).map((t) => [t.name, `${t.name} (${t.language})`]),
       ),
     [templatesQuery.data],
-  );
+  )
 
   const invalidate = () => {
-    void queryClient.invalidateQueries({ queryKey: ["conversation", id] });
-    void queryClient.invalidateQueries({ queryKey: ["conversations"] });
-  };
+    void queryClient.invalidateQueries({ queryKey: ["conversation", id] })
+    void queryClient.invalidateQueries({ queryKey: ["conversations"] })
+  }
 
   const sendMutation = useMutation({
     mutationFn: (text: string) =>
@@ -257,16 +306,16 @@ function ThreadView({ id, members, onBack }: { id: string; members: Member[]; on
         body: JSON.stringify({ text }),
       }),
     onSuccess: () => {
-      setComposer("");
-      setWindowClosed(false);
-      invalidate();
+      setComposer("")
+      setWindowClosed(false)
+      invalidate()
     },
     onError: (error) => {
       if (error instanceof ApiError && error.shape.code === "WINDOW_CLOSED") {
-        setWindowClosed(true);
+        setWindowClosed(true)
       }
     },
-  });
+  })
 
   const templateMutation = useMutation({
     mutationFn: () =>
@@ -274,17 +323,21 @@ function ThreadView({ id, members, onBack }: { id: string; members: Member[]; on
         method: "POST",
         body: JSON.stringify({
           name: templateName,
-          language: templatesQuery.data?.data.find((t) => t.name === templateName)?.language ?? "es_PE",
-          params: templateParams.split(",").map((p) => p.trim()).filter(Boolean),
+          language:
+            templatesQuery.data?.data.find((t) => t.name === templateName)?.language ?? "es_PE",
+          params: templateParams
+            .split(",")
+            .map((p) => p.trim())
+            .filter(Boolean),
         }),
       }),
     onSuccess: () => {
-      setTemplateName("");
-      setTemplateParams("");
-      setWindowClosed(false);
-      invalidate();
+      setTemplateName("")
+      setTemplateParams("")
+      setWindowClosed(false)
+      invalidate()
     },
-  });
+  })
 
   const actionMutation = useMutation({
     mutationFn: ({ path, body }: { path: string; body?: unknown }) =>
@@ -293,38 +346,44 @@ function ThreadView({ id, members, onBack }: { id: string; members: Member[]; on
         ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
       }),
     onSuccess: invalidate,
-  });
+  })
 
   async function loadOlder() {
-    const cursor = olderCursor ?? detail?.messagesCursor;
-    if (!cursor || loadingOlder) return;
-    setLoadingOlder(true);
+    const cursor = olderCursor ?? detail?.messagesCursor
+    if (!cursor || loadingOlder) return
+    setLoadingOlder(true)
     try {
       const page = await apiFetch<{ data: ChatMessage[]; nextCursor: string | null }>(
         `/api/conversations/${id}/messages?before=${encodeURIComponent(cursor)}&limit=50`,
-      );
-      setOlder((prev) => [...page.data, ...prev]);
-      setOlderCursor(page.nextCursor);
+      )
+      setOlder((prev) => [...page.data, ...prev])
+      setOlderCursor(page.nextCursor)
     } finally {
-      setLoadingOlder(false);
+      setLoadingOlder(false)
     }
   }
 
   if (detailQuery.isLoading) {
-    return <p className="p-4 text-sm text-muted-foreground">Cargando…</p>;
+    return <p className="p-4 text-sm text-muted-foreground">Cargando…</p>
   }
   if (!detail) {
-    return <EmptyState title="No encontrada" description="La conversación ya no existe." />;
+    return <EmptyState title="No encontrada" description="La conversación ya no existe." />
   }
 
-  const conv = detail.conversation;
-  const closed = conv.status === "closed";
-  const assignee = members.find((m) => m.userId === conv.assignedUserId);
+  const conv = detail.conversation
+  const closed = conv.status === "closed"
+  const assignee = members.find((m) => m.userId === conv.assignedUserId)
 
   return (
     <div className="flex min-h-0 flex-1 flex-col rounded-lg border">
       <div className="flex items-center gap-2 border-b p-3">
-        <Button variant="ghost" size="icon" className="md:hidden" onClick={onBack} aria-label="Volver">
+        <Button
+          variant="ghost"
+          size="icon"
+          className="md:hidden"
+          onClick={onBack}
+          aria-label="Volver"
+        >
           <ChevronLeft className="size-4" />
         </Button>
         <div className="min-w-0 flex-1">
@@ -338,7 +397,9 @@ function ThreadView({ id, members, onBack }: { id: string; members: Member[]; on
           <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
             <span>{detail.connection.channel === "whatsapp" ? "WhatsApp" : "Telegram"}</span>
             <span>·</span>
-            <Badge variant={closed ? "secondary" : "success"}>{closed ? "Cerrada" : "Abierta"}</Badge>
+            <Badge variant={closed ? "secondary" : "success"}>
+              {closed ? "Cerrada" : "Abierta"}
+            </Badge>
             {assignee && <span>· {assignee.user.name}</span>}
           </div>
         </div>
@@ -347,13 +408,17 @@ function ThreadView({ id, members, onBack }: { id: string; members: Member[]; on
             {assignee ? assignee.user.name : "Asignar"}
           </DropdownMenuTrigger>
           <DropdownMenuContent>
-            <DropdownMenuItem onSelect={() => actionMutation.mutate({ path: "/assign", body: { userId: null } })}>
+            <DropdownMenuItem
+              onSelect={() => actionMutation.mutate({ path: "/assign", body: { userId: null } })}
+            >
               Sin asignar
             </DropdownMenuItem>
             {members.map((m) => (
               <DropdownMenuItem
                 key={m.userId}
-                onSelect={() => actionMutation.mutate({ path: "/assign", body: { userId: m.userId } })}
+                onSelect={() =>
+                  actionMutation.mutate({ path: "/assign", body: { userId: m.userId } })
+                }
               >
                 {m.user.name}
               </DropdownMenuItem>
@@ -363,7 +428,9 @@ function ThreadView({ id, members, onBack }: { id: string; members: Member[]; on
         <Button
           variant="outline"
           size="sm"
-          onClick={() => actionMutation.mutate({ path: "/agent", body: { enabled: conv.agentStatus !== "on" } })}
+          onClick={() =>
+            actionMutation.mutate({ path: "/agent", body: { enabled: conv.agentStatus !== "on" } })
+          }
           title={conv.agentStatus === "on" ? "Pausar agente (toma humana)" : "Reactivar agente"}
         >
           <Bot className="size-4" />
@@ -405,7 +472,9 @@ function ThreadView({ id, members, onBack }: { id: string; members: Member[]; on
 
       <div className="border-t p-3">
         {closed ? (
-          <p className="text-sm text-muted-foreground">Conversación cerrada. Reábrela para responder.</p>
+          <p className="text-sm text-muted-foreground">
+            Conversación cerrada. Reábrela para responder.
+          </p>
         ) : windowClosed ? (
           <div className="flex flex-col gap-2">
             <p className="text-sm text-amber-700">
@@ -456,8 +525,9 @@ function ThreadView({ id, members, onBack }: { id: string; members: Member[]; on
               onChange={(e) => setComposer(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  if (composer.trim() && !sendMutation.isPending) sendMutation.mutate(composer.trim());
+                  e.preventDefault()
+                  if (composer.trim() && !sendMutation.isPending)
+                    sendMutation.mutate(composer.trim())
                 }
               }}
             />
@@ -475,18 +545,19 @@ function ThreadView({ id, members, onBack }: { id: string; members: Member[]; on
         )}
       </div>
     </div>
-  );
+  )
 }
 
 function statusIcon(status: string) {
-  if (status === "read") return <CheckCheck className="size-3.5 text-sky-500" />;
-  if (status === "delivered" || status === "sent") return <CheckCheck className="size-3.5 text-muted-foreground" />;
-  if (status === "failed") return <AlertCircle className="size-3.5 text-red-500" />;
-  return <Clock className="size-3.5 text-muted-foreground" />;
+  if (status === "read") return <CheckCheck className="size-3.5 text-sky-500" />
+  if (status === "delivered" || status === "sent")
+    return <CheckCheck className="size-3.5 text-muted-foreground" />
+  if (status === "failed") return <AlertCircle className="size-3.5 text-red-500" />
+  return <Clock className="size-3.5 text-muted-foreground" />
 }
 
 function MessageBubble({ msg, conversationId }: { msg: ChatMessage; conversationId: string }) {
-  const out = msg.direction === "out";
+  const out = msg.direction === "out"
   return (
     <Message align={out ? "end" : "start"}>
       <MessageContent>
@@ -522,10 +593,13 @@ function MessageBubble({ msg, conversationId }: { msg: ChatMessage; conversation
           </BubbleContent>
         </Bubble>
         <MessageFooter className="gap-1">
-          {new Date(msg.createdAt).toLocaleTimeString("es-PE", { hour: "2-digit", minute: "2-digit" })}
+          {new Date(msg.createdAt).toLocaleTimeString("es-PE", {
+            hour: "2-digit",
+            minute: "2-digit",
+          })}
           {out && statusIcon(msg.status)}
         </MessageFooter>
       </MessageContent>
     </Message>
-  );
+  )
 }

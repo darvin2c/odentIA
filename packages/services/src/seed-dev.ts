@@ -10,31 +10,17 @@
  * Regla permanente: toda función nueva que añada pantalla o entidad debe
  * extender este archivo con su escenario mínimo en la misma PR.
  */
-import { randomUUID } from "node:crypto";
-import { hashPassword } from "better-auth/crypto";
-import { createOwnerDb } from "@odentia/db";
-import { account, invitation, member, organization, user } from "@odentia/db/schema/auth";
-import {
-  agentConfig,
-  channelConnection,
-  contact,
-  contactIdentity,
-  conversation,
-  crmTask,
-  customFieldDef,
-  message,
-  pipeline,
-  pipelineStage,
-} from "@odentia/db/schema/crm";
-import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org";
+import { randomUUID } from "node:crypto"
+import { createOwnerDb } from "@odentia/db"
+import { account, invitation, member, organization, user } from "@odentia/db/schema/auth"
 import {
   clinicalNote,
   encounter,
   encounterPlanItem,
   encounterProcedure,
   encounterTooth,
-  odontogramEntry,
   odontogramAssessment,
+  odontogramEntry,
   orgCounter,
   patient,
   patientAllergy,
@@ -46,15 +32,24 @@ import {
   serviceCatalog,
   treatmentBudget,
   treatmentPlanItem,
-} from "@odentia/db/schema/clinical";
-import { inArray, sql } from "drizzle-orm";
-import { ensureDefaultPipeline } from "./pipelines.js";
-import { createFieldDef } from "./fields.js";
-import { createConnection } from "./connections.js";
-import { createContact } from "./contacts.js";
-import { completeTask, createTask } from "./tasks.js";
-import { upsertAgentConfig } from "./agentConfig.js";
-import { createPatient } from "./patients.js";
+} from "@odentia/db/schema/clinical"
+import {
+  agentConfig,
+  channelConnection,
+  contact,
+  contactIdentity,
+  conversation,
+  crmTask,
+  customFieldDef,
+  message,
+  pipeline,
+  pipelineStage,
+} from "@odentia/db/schema/crm"
+import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
+import { hashPassword } from "better-auth/crypto"
+import { inArray, sql } from "drizzle-orm"
+import { upsertAgentConfig } from "./agentConfig.js"
+import { createBudget, decideBudget, presentBudget } from "./budgets.js"
 import {
   addClinicalNote,
   addOdontogramEntries,
@@ -63,38 +58,43 @@ import {
   registerPatientDocument,
   savePatientHealth,
   voidOdontogramEntry,
-} from "./clinical.js";
-import { addPlanItem, createTreatmentPlan, setPlanItemStatus } from "./plan.js";
-import { createBudget, decideBudget, presentBudget } from "./budgets.js";
-import { createService } from "./service-catalog.js";
+} from "./clinical.js"
+import { createConnection } from "./connections.js"
+import { createContact } from "./contacts.js"
 import {
   addEncounterAddendum,
   addEncounterProcedure,
   createEncounter,
   finalizeEncounter,
   updateEncounterDraft,
-} from "./encounters.js";
-import { createStorage } from "./storage.js";
-import { secretsKeyFromEnv } from "./secrets.js";
+} from "./encounters.js"
+import { createFieldDef } from "./fields.js"
+import { createPatient } from "./patients.js"
+import { ensureDefaultPipeline } from "./pipelines.js"
+import { addPlanItem, createTreatmentPlan, setPlanItemStatus } from "./plan.js"
+import { secretsKeyFromEnv } from "./secrets.js"
+import { createService } from "./service-catalog.js"
+import { createStorage } from "./storage.js"
+import { completeTask, createTask } from "./tasks.js"
 
-const databaseUrl = process.env.DATABASE_URL;
-if (!databaseUrl) throw new Error("DATABASE_URL es obligatoria para sembrar (rol owner)");
+const databaseUrl = process.env.DATABASE_URL
+if (!databaseUrl) throw new Error("DATABASE_URL es obligatoria para sembrar (rol owner)")
 // Storage real (MinIO local / R2 prod): los documentos demo se suben de verdad,
 // nunca con rutas S3 inventadas. Requiere las mismas variables que la API.
 function storageEnvFromProcess(): {
-  endpoint: string;
-  region: string;
-  accessKeyId: string;
-  secretAccessKey: string;
-  avatarsBucket: string;
-  publicBaseUrl: string;
-  attachmentsBucket: string;
+  endpoint: string
+  region: string
+  accessKeyId: string
+  secretAccessKey: string
+  avatarsBucket: string
+  publicBaseUrl: string
+  attachmentsBucket: string
 } {
   const missing = ["S3_ENDPOINT", "S3_ACCESS_KEY", "S3_SECRET_KEY", "S3_ATTACHMENTS_BUCKET"].filter(
     (k) => !process.env[k],
-  );
-  if (missing.length) throw new Error(`Storage demo sin configurar (faltan ${missing.join(", ")})`);
-  const endpoint = process.env.S3_ENDPOINT!;
+  )
+  if (missing.length) throw new Error(`Storage demo sin configurar (faltan ${missing.join(", ")})`)
+  const endpoint = process.env.S3_ENDPOINT!
   return {
     endpoint,
     region: process.env.S3_REGION ?? "auto",
@@ -103,90 +103,96 @@ function storageEnvFromProcess(): {
     avatarsBucket: process.env.S3_BUCKET ?? "avatars",
     publicBaseUrl: process.env.S3_PUBLIC_URL ?? endpoint,
     attachmentsBucket: process.env.S3_ATTACHMENTS_BUCKET!,
-  };
+  }
 }
-const storage = createStorage(storageEnvFromProcess());
+const storage = createStorage(storageEnvFromProcess())
 // PNG real mínimo (1x1) para evidencias demo: bytes válidos que sí se almacenan.
 const DEMO_PNG = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
   "base64",
-);
-const secretsKey = secretsKeyFromEnv(process.env.SECRETS_KEY);
+)
+const secretsKey = secretsKeyFromEnv(process.env.SECRETS_KEY)
 
-const db = createOwnerDb(databaseUrl);
+const db = createOwnerDb(databaseUrl)
 
-const ORG_A = "seed-org-dental-smile";
-const ORG_B = "seed-org-clinica-norte";
-const SEED_ORGS = [ORG_A, ORG_B];
-const ANA_ID = "seed-user-ana";
-const LUIS_ID = "seed-user-luis";
-const CORA_ID = "seed-user-cora";
-const PASSWORD = "Demo1234";
+const ORG_A = "seed-org-dental-smile"
+const ORG_B = "seed-org-clinica-norte"
+const SEED_ORGS = [ORG_A, ORG_B]
+const ANA_ID = "seed-user-ana"
+const LUIS_ID = "seed-user-luis"
+const CORA_ID = "seed-user-cora"
+const PASSWORD = "Demo1234"
 // Teléfono compartido del hogar Rosa/Jorge. No puede modelarse con dos filas
 // de contact_identity: el unique (organization_id, channel, external_user_id)
 // lo impide (ver comentario de invariante en el schema). Rosa lo porta como
 // identidad whatsapp; Jorge lo referencia en sus notas.
-const SHARED_PHONE = "+51987654999";
+const SHARED_PHONE = "+51987654999"
 
-const hoursAgo = (h: number): Date => new Date(Date.now() - h * 3_600_000);
-const daysAgo = (d: number): Date => new Date(Date.now() - d * 86_400_000);
-const tomorrowIso = (): string => new Date(Date.now() + 86_400_000).toISOString();
+const hoursAgo = (h: number): Date => new Date(Date.now() - h * 3_600_000)
+const daysAgo = (d: number): Date => new Date(Date.now() - d * 86_400_000)
+const tomorrowIso = (): string => new Date(Date.now() + 86_400_000).toISOString()
 async function wipeSeed(): Promise<void> {
-  const previousDocuments = await db.select({ storageKey: patientDocument.storageKey })
-    .from(patientDocument).where(inArray(patientDocument.organizationId, SEED_ORGS));
-  await db.delete(message).where(inArray(message.organizationId, SEED_ORGS));
-  await db.delete(crmTask).where(inArray(crmTask.organizationId, SEED_ORGS));
-  await db.delete(contactIdentity).where(inArray(contactIdentity.organizationId, SEED_ORGS));
-  await db.delete(conversation).where(inArray(conversation.organizationId, SEED_ORGS));
-  await db.delete(encounterProcedure).where(inArray(encounterProcedure.organizationId, SEED_ORGS));
-  await db.delete(encounterTooth).where(inArray(encounterTooth.organizationId, SEED_ORGS));
-  await db.delete(clinicalNote).where(inArray(clinicalNote.organizationId, SEED_ORGS));
-  await db.delete(odontogramEntry).where(inArray(odontogramEntry.organizationId, SEED_ORGS));
-  await db.delete(odontogramAssessment).where(inArray(odontogramAssessment.organizationId, SEED_ORGS));
+  const previousDocuments = await db
+    .select({ storageKey: patientDocument.storageKey })
+    .from(patientDocument)
+    .where(inArray(patientDocument.organizationId, SEED_ORGS))
+  await db.delete(message).where(inArray(message.organizationId, SEED_ORGS))
+  await db.delete(crmTask).where(inArray(crmTask.organizationId, SEED_ORGS))
+  await db.delete(contactIdentity).where(inArray(contactIdentity.organizationId, SEED_ORGS))
+  await db.delete(conversation).where(inArray(conversation.organizationId, SEED_ORGS))
+  await db.delete(encounterProcedure).where(inArray(encounterProcedure.organizationId, SEED_ORGS))
+  await db.delete(encounterTooth).where(inArray(encounterTooth.organizationId, SEED_ORGS))
+  await db.delete(clinicalNote).where(inArray(clinicalNote.organizationId, SEED_ORGS))
+  await db.delete(odontogramEntry).where(inArray(odontogramEntry.organizationId, SEED_ORGS))
+  await db
+    .delete(odontogramAssessment)
+    .where(inArray(odontogramAssessment.organizationId, SEED_ORGS))
   // Contextos antes que documentos; vínculos atención-plan antes que ítems y
   // presupuestos (FK en cascada parcial, orden explícito e idempotente).
-  await db.delete(patientDocumentContext).where(inArray(patientDocumentContext.organizationId, SEED_ORGS));
-  await db.delete(encounterPlanItem).where(inArray(encounterPlanItem.organizationId, SEED_ORGS));
-  await db.delete(patientDocument).where(inArray(patientDocument.organizationId, SEED_ORGS));
-  await db.delete(patientAnamnesis).where(inArray(patientAnamnesis.organizationId, SEED_ORGS));
-  await db.delete(patientAllergy).where(inArray(patientAllergy.organizationId, SEED_ORGS));
-  await db.delete(patientCondition).where(inArray(patientCondition.organizationId, SEED_ORGS));
-  await db.delete(patientMedication).where(inArray(patientMedication.organizationId, SEED_ORGS));
-  await db.delete(treatmentPlanItem).where(inArray(treatmentPlanItem.organizationId, SEED_ORGS));
-  await db.delete(treatmentBudget).where(inArray(treatmentBudget.organizationId, SEED_ORGS));
-  await db.delete(encounter).where(inArray(encounter.organizationId, SEED_ORGS));
-  await db.delete(serviceCatalog).where(inArray(serviceCatalog.organizationId, SEED_ORGS));
-  await db.delete(patient).where(inArray(patient.organizationId, SEED_ORGS));
-  await db.delete(contact).where(inArray(contact.organizationId, SEED_ORGS));
-  await db.delete(pipelineStage).where(inArray(pipelineStage.organizationId, SEED_ORGS));
-  await db.delete(pipeline).where(inArray(pipeline.organizationId, SEED_ORGS));
-  await db.delete(channelConnection).where(inArray(channelConnection.organizationId, SEED_ORGS));
-  await db.delete(customFieldDef).where(inArray(customFieldDef.organizationId, SEED_ORGS));
-  await db.delete(agentConfig).where(inArray(agentConfig.organizationId, SEED_ORGS));
-  await db.delete(orgCounter).where(inArray(orgCounter.organizationId, SEED_ORGS));
-  await db.delete(branch).where(inArray(branch.organizationId, SEED_ORGS));
-  await db.delete(orgProfile).where(inArray(orgProfile.organizationId, SEED_ORGS));
-  await db.delete(auditEvent).where(inArray(auditEvent.organizationId, SEED_ORGS));
-  await db.delete(member).where(inArray(member.organizationId, SEED_ORGS));
-  await db.delete(invitation).where(inArray(invitation.organizationId, SEED_ORGS));
-  await db.delete(organization).where(inArray(organization.id, SEED_ORGS));
-  await db.execute(sql`delete from "verification" where "identifier" ilike '%@odentia.dev%'`);
-  await db.delete(user).where(inArray(user.id, [ANA_ID, LUIS_ID, CORA_ID]));
-  for (const document of previousDocuments) await storage.deleteAttachment(document.storageKey);
+  await db
+    .delete(patientDocumentContext)
+    .where(inArray(patientDocumentContext.organizationId, SEED_ORGS))
+  await db.delete(encounterPlanItem).where(inArray(encounterPlanItem.organizationId, SEED_ORGS))
+  await db.delete(patientDocument).where(inArray(patientDocument.organizationId, SEED_ORGS))
+  await db.delete(patientAnamnesis).where(inArray(patientAnamnesis.organizationId, SEED_ORGS))
+  await db.delete(patientAllergy).where(inArray(patientAllergy.organizationId, SEED_ORGS))
+  await db.delete(patientCondition).where(inArray(patientCondition.organizationId, SEED_ORGS))
+  await db.delete(patientMedication).where(inArray(patientMedication.organizationId, SEED_ORGS))
+  await db.delete(treatmentPlanItem).where(inArray(treatmentPlanItem.organizationId, SEED_ORGS))
+  await db.delete(treatmentBudget).where(inArray(treatmentBudget.organizationId, SEED_ORGS))
+  await db.delete(encounter).where(inArray(encounter.organizationId, SEED_ORGS))
+  await db.delete(serviceCatalog).where(inArray(serviceCatalog.organizationId, SEED_ORGS))
+  await db.delete(patient).where(inArray(patient.organizationId, SEED_ORGS))
+  await db.delete(contact).where(inArray(contact.organizationId, SEED_ORGS))
+  await db.delete(pipelineStage).where(inArray(pipelineStage.organizationId, SEED_ORGS))
+  await db.delete(pipeline).where(inArray(pipeline.organizationId, SEED_ORGS))
+  await db.delete(channelConnection).where(inArray(channelConnection.organizationId, SEED_ORGS))
+  await db.delete(customFieldDef).where(inArray(customFieldDef.organizationId, SEED_ORGS))
+  await db.delete(agentConfig).where(inArray(agentConfig.organizationId, SEED_ORGS))
+  await db.delete(orgCounter).where(inArray(orgCounter.organizationId, SEED_ORGS))
+  await db.delete(branch).where(inArray(branch.organizationId, SEED_ORGS))
+  await db.delete(orgProfile).where(inArray(orgProfile.organizationId, SEED_ORGS))
+  await db.delete(auditEvent).where(inArray(auditEvent.organizationId, SEED_ORGS))
+  await db.delete(member).where(inArray(member.organizationId, SEED_ORGS))
+  await db.delete(invitation).where(inArray(invitation.organizationId, SEED_ORGS))
+  await db.delete(organization).where(inArray(organization.id, SEED_ORGS))
+  await db.execute(sql`delete from "verification" where "identifier" ilike '%@odentia.dev%'`)
+  await db.delete(user).where(inArray(user.id, [ANA_ID, LUIS_ID, CORA_ID]))
+  for (const document of previousDocuments) await storage.deleteAttachment(document.storageKey)
 }
 
 async function seedConversation(args: {
-  orgId: string;
-  contactId: string;
-  connectionId: string;
-  thread: string;
-  status?: string;
-  agentStatus?: string;
-  assignedUserId?: string | null;
-  unreadCount?: number;
-  lastInboundAt?: Date | null;
-  lastOutboundAt?: Date | null;
-  lastMessageAt?: Date | null;
+  orgId: string
+  contactId: string
+  connectionId: string
+  thread: string
+  status?: string
+  agentStatus?: string
+  assignedUserId?: string | null
+  unreadCount?: number
+  lastInboundAt?: Date | null
+  lastOutboundAt?: Date | null
+  lastMessageAt?: Date | null
 }): Promise<{ id: string }> {
   const [row] = await db
     .insert(conversation)
@@ -203,21 +209,21 @@ async function seedConversation(args: {
       lastOutboundAt: args.lastOutboundAt ?? null,
       lastMessageAt: args.lastMessageAt ?? null,
     })
-    .returning({ id: conversation.id });
-  if (!row) throw new Error(`No se pudo crear la conversación ${args.thread}`);
-  return row;
+    .returning({ id: conversation.id })
+  if (!row) throw new Error(`No se pudo crear la conversación ${args.thread}`)
+  return row
 }
 
 async function seedMessage(args: {
-  orgId: string;
-  conversationId: string;
-  direction: string;
-  senderKind: string;
-  senderUserId?: string | null;
-  body: string;
-  externalId: string;
-  status: string;
-  createdAt: Date;
+  orgId: string
+  conversationId: string
+  direction: string
+  senderKind: string
+  senderUserId?: string | null
+  body: string
+  externalId: string
+  status: string
+  createdAt: Date
 }): Promise<void> {
   const [row] = await db
     .insert(message)
@@ -233,30 +239,51 @@ async function seedMessage(args: {
       status: args.status,
       createdAt: args.createdAt,
     })
-    .returning({ id: message.id });
-  if (!row) throw new Error(`No se pudo crear el mensaje ${args.externalId}`);
+    .returning({ id: message.id })
+  if (!row) throw new Error(`No se pudo crear el mensaje ${args.externalId}`)
 }
 
 async function countWhere(table: string, orgId: string): Promise<number> {
   const rows = (await db.execute(
     sql.raw(`select count(*)::int as n from "${table}" where "organization_id" = '${orgId}'`),
-  )) as unknown as Array<{ n: number }>;
-  return rows[0]?.n ?? 0;
+  )) as unknown as Array<{ n: number }>
+  return rows[0]?.n ?? 0
 }
 
-await wipeSeed();
+await wipeSeed()
 
 // --- Identidad fija ---
 await db.insert(organization).values([
   { id: ORG_A, name: "Dental Smile", slug: "dental-smile", createdAt: new Date() },
   { id: ORG_B, name: "Clínica Norte", slug: "clinica-norte", createdAt: new Date() },
-]);
+])
 await db.insert(user).values([
-  { id: ANA_ID, name: "Dra. Ana Torres", firstName: "Ana", lastName: "Torres", email: "ana@odentia.dev", emailVerified: true },
-  { id: LUIS_ID, name: "Luis Prado", firstName: "Luis", lastName: "Prado", email: "luis@odentia.dev", emailVerified: true },
-  { id: CORA_ID, name: "Dra. Cora Vega", firstName: "Cora", lastName: "Vega", email: "cora@odentia.dev", emailVerified: true },
-]);
-const passwordHash = await hashPassword(PASSWORD);
+  {
+    id: ANA_ID,
+    name: "Dra. Ana Torres",
+    firstName: "Ana",
+    lastName: "Torres",
+    email: "ana@odentia.dev",
+    emailVerified: true,
+  },
+  {
+    id: LUIS_ID,
+    name: "Luis Prado",
+    firstName: "Luis",
+    lastName: "Prado",
+    email: "luis@odentia.dev",
+    emailVerified: true,
+  },
+  {
+    id: CORA_ID,
+    name: "Dra. Cora Vega",
+    firstName: "Cora",
+    lastName: "Vega",
+    email: "cora@odentia.dev",
+    emailVerified: true,
+  },
+])
+const passwordHash = await hashPassword(PASSWORD)
 await db.insert(account).values(
   [ANA_ID, LUIS_ID, CORA_ID].map((userId) => ({
     id: randomUUID(),
@@ -265,39 +292,61 @@ await db.insert(account).values(
     userId,
     password: passwordHash,
   })),
-);
+)
 await db.insert(member).values([
   { id: randomUUID(), organizationId: ORG_A, userId: ANA_ID, role: "owner", createdAt: new Date() },
-  { id: randomUUID(), organizationId: ORG_A, userId: LUIS_ID, role: "member", createdAt: new Date() },
-  { id: randomUUID(), organizationId: ORG_B, userId: LUIS_ID, role: "member", createdAt: new Date() },
-  { id: randomUUID(), organizationId: ORG_B, userId: CORA_ID, role: "owner", createdAt: new Date() },
-]);
+  {
+    id: randomUUID(),
+    organizationId: ORG_A,
+    userId: LUIS_ID,
+    role: "member",
+    createdAt: new Date(),
+  },
+  {
+    id: randomUUID(),
+    organizationId: ORG_B,
+    userId: LUIS_ID,
+    role: "member",
+    createdAt: new Date(),
+  },
+  {
+    id: randomUUID(),
+    organizationId: ORG_B,
+    userId: CORA_ID,
+    role: "owner",
+    createdAt: new Date(),
+  },
+])
 await db.insert(orgProfile).values([
   { organizationId: ORG_A, legalName: "Dental Smile S.A.C.", fiscalDocNumber: "20601234567" },
   { organizationId: ORG_B, legalName: "Clínica Norte S.A.C.", fiscalDocNumber: "20550987654" },
-]);
+])
 const [miraflores] = await db
   .insert(branch)
   .values([
     { organizationId: ORG_A, name: "Sede Miraflores", ubigeo: "150122" },
     { organizationId: ORG_A, name: "Sede Surco", ubigeo: "150140" },
   ])
-  .returning({ id: branch.id });
-if (!miraflores) throw new Error("No se pudo crear la sucursal Sede Miraflores");
-await db.insert(branch).values([{ organizationId: ORG_B, name: "Sede Lima" }]);
+  .returning({ id: branch.id })
+if (!miraflores) throw new Error("No se pudo crear la sucursal Sede Miraflores")
+await db.insert(branch).values([{ organizationId: ORG_B, name: "Sede Lima" }])
 
 // --- CRM con servicios ---
-const pipeA = await ensureDefaultPipeline(db, ORG_A);
-const pipeB = await ensureDefaultPipeline(db, ORG_B);
+const pipeA = await ensureDefaultPipeline(db, ORG_A)
+const pipeB = await ensureDefaultPipeline(db, ORG_B)
 
-await createFieldDef(db, ORG_A, { key: "dni", label: "DNI", type: "text" });
-await createFieldDef(db, ORG_A, { key: "fecha_nacimiento", label: "Fecha de nacimiento", type: "date" });
+await createFieldDef(db, ORG_A, { key: "dni", label: "DNI", type: "text" })
+await createFieldDef(db, ORG_A, {
+  key: "fecha_nacimiento",
+  label: "Fecha de nacimiento",
+  type: "date",
+})
 await createFieldDef(db, ORG_A, {
   key: "aseguradora",
   label: "Aseguradora",
   type: "select",
   options: ["Rimac", "Pacifico", "Particular"],
-});
+})
 
 const connA = await createConnection(
   db,
@@ -314,7 +363,7 @@ const connA = await createConnection(
     },
   },
   { fetch, validateExternal: false },
-);
+)
 const connB = await createConnection(
   db,
   ORG_B,
@@ -330,7 +379,7 @@ const connB = await createConnection(
     },
   },
   { fetch, validateExternal: false },
-);
+)
 
 // --- Contactos A (reparto por etapa según posición) ---
 const CONTACTS_A = [
@@ -344,14 +393,16 @@ const CONTACTS_A = [
   { name: "Diego Salazar", phone: "+51987654308" },
   { name: "Patricia León", phone: "+51987654309" },
   { name: "Andrés Vega", phone: "+51987654310" },
-];
-const contactIdByName = new Map<string, string>();
+]
+const contactIdByName = new Map<string, string>()
 for (let i = 0; i < CONTACTS_A.length; i++) {
-  const c = CONTACTS_A[i]!;
-  const stageId = pipeA.stages[i % pipeA.stages.length]!.id;
+  const c = CONTACTS_A[i]!
+  const stageId = pipeA.stages[i % pipeA.stages.length]!.id
   const notes =
-    c.name === "Jorge Mamani" ? `Teléfono familiar compartido: ${SHARED_PHONE} (titular: Rosa Quispe)` : undefined;
-  const created = await createContact(db, ORG_A, { displayName: c.name, stageId, notes });
+    c.name === "Jorge Mamani"
+      ? `Teléfono familiar compartido: ${SHARED_PHONE} (titular: Rosa Quispe)`
+      : undefined
+  const created = await createContact(db, ORG_A, { displayName: c.name, stageId, notes })
   await db.insert(contactIdentity).values({
     organizationId: ORG_A,
     contactId: created.id,
@@ -359,8 +410,8 @@ for (let i = 0; i < CONTACTS_A.length; i++) {
     externalUserId: c.phone,
     displayName: c.name,
     isPrimary: true,
-  });
-  contactIdByName.set(c.name, created.id);
+  })
+  contactIdByName.set(c.name, created.id)
 }
 
 // --- Conversaciones A ---
@@ -372,22 +423,37 @@ const convRosa = await seedConversation({
   unreadCount: 3,
   lastInboundAt: hoursAgo(1),
   lastMessageAt: hoursAgo(1),
-});
+})
 await seedMessage({
-  orgId: ORG_A, conversationId: convRosa.id, direction: "inbound", senderKind: "contact",
-  body: "Hola, ¿tienen cita para mañana por dolor de muela?", externalId: "seed-msg-1",
-  status: "received", createdAt: hoursAgo(3),
-});
+  orgId: ORG_A,
+  conversationId: convRosa.id,
+  direction: "inbound",
+  senderKind: "contact",
+  body: "Hola, ¿tienen cita para mañana por dolor de muela?",
+  externalId: "seed-msg-1",
+  status: "received",
+  createdAt: hoursAgo(3),
+})
 await seedMessage({
-  orgId: ORG_A, conversationId: convRosa.id, direction: "inbound", senderKind: "contact",
-  body: "Es un dolor fuerte en la muela de abajo, del lado derecho", externalId: "seed-msg-2",
-  status: "received", createdAt: hoursAgo(2),
-});
+  orgId: ORG_A,
+  conversationId: convRosa.id,
+  direction: "inbound",
+  senderKind: "contact",
+  body: "Es un dolor fuerte en la muela de abajo, del lado derecho",
+  externalId: "seed-msg-2",
+  status: "received",
+  createdAt: hoursAgo(2),
+})
 await seedMessage({
-  orgId: ORG_A, conversationId: convRosa.id, direction: "inbound", senderKind: "contact",
-  body: "¿Atienden por la tarde? Trabajo hasta las 5", externalId: "seed-msg-3",
-  status: "received", createdAt: hoursAgo(1),
-});
+  orgId: ORG_A,
+  conversationId: convRosa.id,
+  direction: "inbound",
+  senderKind: "contact",
+  body: "¿Atienden por la tarde? Trabajo hasta las 5",
+  externalId: "seed-msg-3",
+  status: "received",
+  createdAt: hoursAgo(1),
+})
 
 const convJorge = await seedConversation({
   orgId: ORG_A,
@@ -398,20 +464,30 @@ const convJorge = await seedConversation({
   lastInboundAt: hoursAgo(5),
   lastOutboundAt: hoursAgo(4),
   lastMessageAt: hoursAgo(4),
-});
+})
 await seedMessage({
-  orgId: ORG_A, conversationId: convJorge.id, direction: "inbound", senderKind: "contact",
-  body: "Buenas tardes, quiero cotizar una endodoncia", externalId: "seed-msg-4",
-  status: "read", createdAt: hoursAgo(5),
-});
+  orgId: ORG_A,
+  conversationId: convJorge.id,
+  direction: "inbound",
+  senderKind: "contact",
+  body: "Buenas tardes, quiero cotizar una endodoncia",
+  externalId: "seed-msg-4",
+  status: "read",
+  createdAt: hoursAgo(5),
+})
 await seedMessage({
-  orgId: ORG_A, conversationId: convJorge.id, direction: "outbound", senderKind: "user",
+  orgId: ORG_A,
+  conversationId: convJorge.id,
+  direction: "outbound",
+  senderKind: "user",
   senderUserId: LUIS_ID,
   body: "Hola Jorge, claro que sí. ¿Podrías venir mañana para una evaluación? El precio depende del caso.",
-  externalId: "seed-msg-5", status: "read", createdAt: hoursAgo(4),
-});
+  externalId: "seed-msg-5",
+  status: "read",
+  createdAt: hoursAgo(4),
+})
 
-const elenaClosedAt = daysAgo(2);
+const elenaClosedAt = daysAgo(2)
 const convElena = await seedConversation({
   orgId: ORG_A,
   contactId: contactIdByName.get("Elena Huamán")!,
@@ -421,17 +497,27 @@ const convElena = await seedConversation({
   lastInboundAt: elenaClosedAt,
   lastOutboundAt: new Date(elenaClosedAt.getTime() + 600_000),
   lastMessageAt: new Date(elenaClosedAt.getTime() + 600_000),
-});
+})
 await seedMessage({
-  orgId: ORG_A, conversationId: convElena.id, direction: "inbound", senderKind: "contact",
-  body: "Hola, quiero confirmar mi cita de limpieza de mañana", externalId: "seed-msg-6",
-  status: "read", createdAt: elenaClosedAt,
-});
+  orgId: ORG_A,
+  conversationId: convElena.id,
+  direction: "inbound",
+  senderKind: "contact",
+  body: "Hola, quiero confirmar mi cita de limpieza de mañana",
+  externalId: "seed-msg-6",
+  status: "read",
+  createdAt: elenaClosedAt,
+})
 await seedMessage({
-  orgId: ORG_A, conversationId: convElena.id, direction: "outbound", senderKind: "agent",
+  orgId: ORG_A,
+  conversationId: convElena.id,
+  direction: "outbound",
+  senderKind: "agent",
   body: "Hola Elena, tu cita de limpieza quedó confirmada para mañana a las 10:00 am.",
-  externalId: "seed-msg-7", status: "read", createdAt: new Date(elenaClosedAt.getTime() + 600_000),
-});
+  externalId: "seed-msg-7",
+  status: "read",
+  createdAt: new Date(elenaClosedAt.getTime() + 600_000),
+})
 
 const convCarlos = await seedConversation({
   orgId: ORG_A,
@@ -442,12 +528,17 @@ const convCarlos = await seedConversation({
   unreadCount: 1,
   lastInboundAt: hoursAgo(6),
   lastMessageAt: hoursAgo(6),
-});
+})
 await seedMessage({
-  orgId: ORG_A, conversationId: convCarlos.id, direction: "inbound", senderKind: "contact",
-  body: "¿Cuánto cuesta una extracción de muela del juicio?", externalId: "seed-msg-8",
-  status: "received", createdAt: hoursAgo(6),
-});
+  orgId: ORG_A,
+  conversationId: convCarlos.id,
+  direction: "inbound",
+  senderKind: "contact",
+  body: "¿Cuánto cuesta una extracción de muela del juicio?",
+  externalId: "seed-msg-8",
+  status: "received",
+  createdAt: hoursAgo(6),
+})
 
 // --- Tareas A ---
 await createTask(db, ORG_A, {
@@ -456,14 +547,17 @@ await createTask(db, ORG_A, {
   assigneeUserId: LUIS_ID,
   dueAt: tomorrowIso(),
   createdBy: "user",
-});
-const budget = await createTask(db, ORG_A, { title: "Enviar presupuesto de endodoncia", createdBy: "user" });
-await completeTask(db, ORG_A, budget.id);
+})
+const budget = await createTask(db, ORG_A, {
+  title: "Enviar presupuesto de endodoncia",
+  createdBy: "user",
+})
+await completeTask(db, ORG_A, budget.id)
 await createTask(db, ORG_A, {
   title: "Revisar stock de anestesia",
   assigneeUserId: ANA_ID,
   createdBy: "user",
-});
+})
 
 // --- Agente A (B sin fila: ejercita el default deshabilitado) ---
 await upsertAgentConfig(db, ORG_A, {
@@ -472,7 +566,7 @@ await upsertAgentConfig(db, ORG_A, {
   systemPrompt: "Eres el asistente de Dental Smile. Responde en español, tono amable.",
   handoffKeywords: ["humano", "asesor", "recepcion"],
   maxTurns: 10,
-});
+})
 
 // --- Pacientes + clínica (org A) ---
 const PATIENTS_A = [
@@ -482,8 +576,8 @@ const PATIENTS_A = [
   { name: "Lucía Fernández", doc: "45678904", birth: "1995-07-30", sex: "F" },
   { name: "Miguel Torres", doc: "45678905", birth: "1982-01-17", sex: "M" },
   { name: "Carmen Rojas", doc: "45678906", birth: "1992-09-08", sex: "F" },
-];
-const patientIdByName = new Map<string, string>();
+]
+const patientIdByName = new Map<string, string>()
 for (const p of PATIENTS_A) {
   const row = await createPatient(db, ORG_A, ANA_ID, {
     contactId: contactIdByName.get(p.name)!,
@@ -491,80 +585,172 @@ for (const p of PATIENTS_A) {
     docNumber: p.doc,
     birthDate: p.birth,
     sex: p.sex,
-    phone: p.name === "Rosa Quispe" ? SHARED_PHONE : CONTACTS_A.find((c) => c.name === p.name)?.phone,
+    phone:
+      p.name === "Rosa Quispe" ? SHARED_PHONE : CONTACTS_A.find((c) => c.name === p.name)?.phone,
     registeredBranchId: miraflores.id,
-  });
-  patientIdByName.set(p.name, row.id);
+  })
+  patientIdByName.set(p.name, row.id)
 }
 
-const rosaPatientId = patientIdByName.get("Rosa Quispe")!;
+const rosaPatientId = patientIdByName.get("Rosa Quispe")!
 // Antecedentes en un solo guardado transaccional (revisión 0 → 1).
 const rosaHealthV1 = await savePatientHealth(db, ORG_A, ANA_ID, rosaPatientId, {
   expectedRevision: 0,
   reviewStatus: { allergies: "recorded", conditions: "recorded", medications: "recorded" },
   allergies: [{ substance: "Penicilina", reaction: "Urticaria", severity: "severa" }],
-  conditions: [{ name: "Hipertensión arterial", status: "activa", notes: "Controlada con medicación" }],
+  conditions: [
+    { name: "Hipertensión arterial", status: "activa", notes: "Controlada con medicación" },
+  ],
   medications: [{ name: "Losartán", dose: "50 mg", frequency: "1 vez al día" }],
   anamnesis: {
     expectedVersion: 0,
     answers: {
-      antecedentesPersonales: { hospitalizaciones: "Ninguna", cirugias: "Ninguna", transfusiones: "Ninguna" },
+      antecedentesPersonales: {
+        hospitalizaciones: "Ninguna",
+        cirugias: "Ninguna",
+        transfusiones: "Ninguna",
+      },
       antecedentesFamiliares: "Madre con hipertensión arterial",
-      antecedentesOdontologicos: { ultimaVisita: "Hace 1 año", cepilladosAlDia: 2, experienciaPrevia: "regular", ansiedadDental: "leve" },
+      antecedentesOdontologicos: {
+        ultimaVisita: "Hace 1 año",
+        cepilladosAlDia: 2,
+        experienciaPrevia: "regular",
+        ansiedadDental: "leve",
+      },
     },
   },
-});
+})
 // Segunda revisión: suma bruxismo a la entrevista (versión 2) sin tocar lo demás.
 await savePatientHealth(db, ORG_A, ANA_ID, rosaPatientId, {
   expectedRevision: 1,
   reviewStatus: { allergies: "recorded", conditions: "recorded", medications: "recorded" },
-  allergies: rosaHealthV1.allergies.map((a) => ({ id: a.id, substance: a.substance, reaction: a.reaction, severity: a.severity })),
-  conditions: rosaHealthV1.conditions.map((c) => ({ id: c.id, name: c.name, status: c.status, notes: c.notes })),
+  allergies: rosaHealthV1.allergies.map((a) => ({
+    id: a.id,
+    substance: a.substance,
+    reaction: a.reaction,
+    severity: a.severity,
+  })),
+  conditions: rosaHealthV1.conditions.map((c) => ({
+    id: c.id,
+    name: c.name,
+    status: c.status,
+    notes: c.notes,
+  })),
   medications: [
-    ...rosaHealthV1.medications.map((m) => ({ id: m.id, name: m.name, dose: m.dose, frequency: m.frequency })),
-    { name: "Ácido acetilsalicílico", dose: "100 mg", frequency: "1 vez al día", notes: "Suspendida por indicación médica", endDate: "2024-06-01" },
+    ...rosaHealthV1.medications.map((m) => ({
+      id: m.id,
+      name: m.name,
+      dose: m.dose,
+      frequency: m.frequency,
+    })),
+    {
+      name: "Ácido acetilsalicílico",
+      dose: "100 mg",
+      frequency: "1 vez al día",
+      notes: "Suspendida por indicación médica",
+      endDate: "2024-06-01",
+    },
   ],
   anamnesis: {
     expectedVersion: 1,
     answers: {
-      antecedentesPersonales: { hospitalizaciones: "Ninguna", cirugias: "Ninguna", transfusiones: "Ninguna" },
+      antecedentesPersonales: {
+        hospitalizaciones: "Ninguna",
+        cirugias: "Ninguna",
+        transfusiones: "Ninguna",
+      },
       antecedentesFamiliares: "Madre con hipertensión arterial",
-      antecedentesOdontologicos: { ultimaVisita: "Hace 1 año", cepilladosAlDia: 2, experienciaPrevia: "regular", ansiedadDental: "leve", bruxismo: true },
+      antecedentesOdontologicos: {
+        ultimaVisita: "Hace 1 año",
+        cepilladosAlDia: 2,
+        experienciaPrevia: "regular",
+        ansiedadDental: "leve",
+        bruxismo: true,
+      },
     },
   },
-});
+})
 // Catálogo base en ambas orgs (precios de ejemplo se administran aquí; el plan
 // solo congela desde el servicio elegido, nunca montos manuales).
-const seedOffers: Array<{ code: string; name: string; specialty: string; scope: string; priceCents: number; durationMin: number }> = [
-  { code: "OBTURACION", name: "Obturación con resina", specialty: "restauradora", scope: "tooth", priceCents: 18000, durationMin: 45 },
-  { code: "ENDODONCIA", name: "Endodoncia unirradicular", specialty: "endodoncia", scope: "tooth", priceCents: 45000, durationMin: 90 },
-  { code: "CORONA", name: "Corona cerámica", specialty: "protesis", scope: "tooth", priceCents: 90000, durationMin: 60 },
-  { code: "BLANQUEAMIENTO", name: "Blanqueamiento dental", specialty: "estetica", scope: "arch", priceCents: 60000, durationMin: 60 },
-  { code: "LIMPIEZA", name: "Limpieza dental (profilaxis)", specialty: "prevencion", scope: "general", priceCents: 12000, durationMin: 45 },
-  { code: "ORTODONCIA_CTRL", name: "Control de ortodoncia", specialty: "ortodoncia", scope: "general", priceCents: 10000, durationMin: 30 },
-];
-const catalogA: Array<Awaited<ReturnType<typeof createService>>> = [];
+const seedOffers: Array<{
+  code: string
+  name: string
+  specialty: string
+  scope: string
+  priceCents: number
+  durationMin: number
+}> = [
+  {
+    code: "OBTURACION",
+    name: "Obturación con resina",
+    specialty: "restauradora",
+    scope: "tooth",
+    priceCents: 18000,
+    durationMin: 45,
+  },
+  {
+    code: "ENDODONCIA",
+    name: "Endodoncia unirradicular",
+    specialty: "endodoncia",
+    scope: "tooth",
+    priceCents: 45000,
+    durationMin: 90,
+  },
+  {
+    code: "CORONA",
+    name: "Corona cerámica",
+    specialty: "protesis",
+    scope: "tooth",
+    priceCents: 90000,
+    durationMin: 60,
+  },
+  {
+    code: "BLANQUEAMIENTO",
+    name: "Blanqueamiento dental",
+    specialty: "estetica",
+    scope: "arch",
+    priceCents: 60000,
+    durationMin: 60,
+  },
+  {
+    code: "LIMPIEZA",
+    name: "Limpieza dental (profilaxis)",
+    specialty: "prevencion",
+    scope: "general",
+    priceCents: 12000,
+    durationMin: 45,
+  },
+  {
+    code: "ORTODONCIA_CTRL",
+    name: "Control de ortodoncia",
+    specialty: "ortodoncia",
+    scope: "general",
+    priceCents: 10000,
+    durationMin: 30,
+  },
+]
+const catalogA: Array<Awaited<ReturnType<typeof createService>>> = []
 for (const offer of seedOffers) {
-  catalogA.push(await createService(db, ORG_A, ANA_ID, offer));
-  await createService(db, ORG_B, CORA_ID, offer);
+  catalogA.push(await createService(db, ORG_A, ANA_ID, offer))
+  await createService(db, ORG_B, CORA_ID, offer)
 }
 const serviceIdA = (code: string): string => {
-  const found = catalogA.find((s) => s.code === code);
-  if (!found) throw new Error(`Servicio ${code} ausente del catálogo semilla`);
-  return found.id;
-};
+  const found = catalogA.find((s) => s.code === code)
+  if (!found) throw new Error(`Servicio ${code} ausente del catálogo semilla`)
+  return found.id
+}
 // Evaluación inicial (borrador) antes del plan: la indicación nace aquí y la
 // ejecución continúa en la misma atención (un solo borrador por paciente).
 const draft = await createEncounter(db, ORG_A, ANA_ID, rosaPatientId, {
   reason: "Dolor molar inferior derecho",
   teeth: [36, 46],
   branchId: miraflores.id,
-});
+})
 // Plan 1 de Rosa: existe antes del presupuesto y continúa en varias visitas.
 const planRestaurador = await createTreatmentPlan(db, ORG_A, ANA_ID, rosaPatientId, {
   title: "Plan restaurador molar",
   originEncounterId: draft.id,
-});
+})
 const obt36 = await addPlanItem(db, ORG_A, ANA_ID, rosaPatientId, {
   serviceId: serviceIdA("OBTURACION"),
   planId: planRestaurador.id,
@@ -572,7 +758,7 @@ const obt36 = await addPlanItem(db, ORG_A, ANA_ID, rosaPatientId, {
   toothNumber: 36,
   diagnosisCode: "K02.1",
   detail: "Obturación pieza 36",
-});
+})
 const endo46 = await addPlanItem(db, ORG_A, ANA_ID, rosaPatientId, {
   serviceId: serviceIdA("ENDODONCIA"),
   planId: planRestaurador.id,
@@ -580,7 +766,7 @@ const endo46 = await addPlanItem(db, ORG_A, ANA_ID, rosaPatientId, {
   toothNumber: 46,
   diagnosisCode: "K04.0",
   detail: "Endodoncia pieza 46",
-});
+})
 const corona46 = await addPlanItem(db, ORG_A, ANA_ID, rosaPatientId, {
   serviceId: serviceIdA("CORONA"),
   planId: planRestaurador.id,
@@ -588,7 +774,7 @@ const corona46 = await addPlanItem(db, ORG_A, ANA_ID, rosaPatientId, {
   toothNumber: 46,
   diagnosisCode: "K04.0",
   detail: "Corona cerámica pieza 46 (diferida)",
-});
+})
 // Presupuesto 1 de Rosa: 3 ítems del plan, aceptación parcial (corona diferida
 // por la paciente; NUNCA se infiere aceptación histórica, todo pasa por decisión).
 const budgetRestaurador = await createBudget(db, ORG_A, ANA_ID, rosaPatientId, {
@@ -596,62 +782,62 @@ const budgetRestaurador = await createBudget(db, ORG_A, ANA_ID, rosaPatientId, {
   itemIds: [obt36.id, endo46.id, corona46.id],
   title: "Plan restaurador molar",
   notes: "Obturación 36 + endodoncia 46; corona diferida a segunda etapa.",
-});
-await presentBudget(db, ORG_A, ANA_ID, rosaPatientId, budgetRestaurador.id);
+})
+await presentBudget(db, ORG_A, ANA_ID, rosaPatientId, budgetRestaurador.id)
 await decideBudget(db, ORG_A, ANA_ID, rosaPatientId, budgetRestaurador.id, {
   acceptedItemIds: [obt36.id, endo46.id],
   acceptedByName: "Rosa Quispe",
   decisionNote: "Acepta obturación y endodoncia; corona queda para una segunda etapa.",
-});
+})
 // Decisión aceptada pero estado clínico programado: van por carriles separados.
-await setPlanItemStatus(db, ORG_A, ANA_ID, rosaPatientId, endo46.id, { status: "programado" });
+await setPlanItemStatus(db, ORG_A, ANA_ID, rosaPatientId, endo46.id, { status: "programado" })
 // Plan 2 de Rosa + presupuesto presentado, pendiente de decisión (nada aceptado aún).
 const planEstetica = await createTreatmentPlan(db, ORG_A, ANA_ID, rosaPatientId, {
   title: "Plan estética dental",
   originEncounterId: draft.id,
-});
+})
 const blaq = await addPlanItem(db, ORG_A, ANA_ID, rosaPatientId, {
   serviceId: serviceIdA("BLANQUEAMIENTO"),
   planId: planEstetica.id,
   sourceEncounterId: draft.id,
   arch: "upper",
   detail: "Blanqueamiento dental",
-});
+})
 const limp = await addPlanItem(db, ORG_A, ANA_ID, rosaPatientId, {
   serviceId: serviceIdA("LIMPIEZA"),
   planId: planEstetica.id,
   sourceEncounterId: draft.id,
   detail: "Limpieza dental (profilaxis)",
-});
+})
 const budgetEstetica = await createBudget(db, ORG_A, ANA_ID, rosaPatientId, {
   planId: planEstetica.id,
   itemIds: [blaq.id, limp.id],
   title: "Plan estética dental",
   notes: "Pendiente de decisión de la paciente.",
-});
-await presentBudget(db, ORG_A, ANA_ID, rosaPatientId, budgetEstetica.id);
+})
+await presentBudget(db, ORG_A, ANA_ID, rosaPatientId, budgetEstetica.id)
 // Plan 3 de Rosa + presupuesto presentado y rechazado en su totalidad.
 const planOrto = await createTreatmentPlan(db, ORG_A, ANA_ID, rosaPatientId, {
   title: "Plan ortodoncia",
   originEncounterId: draft.id,
-});
+})
 const ctrlOrto = await addPlanItem(db, ORG_A, ANA_ID, rosaPatientId, {
   serviceId: serviceIdA("ORTODONCIA_CTRL"),
   planId: planOrto.id,
   sourceEncounterId: draft.id,
   detail: "Control de ortodoncia",
-});
+})
 const budgetOrto = await createBudget(db, ORG_A, ANA_ID, rosaPatientId, {
   planId: planOrto.id,
   itemIds: [ctrlOrto.id],
   title: "Plan ortodoncia",
-});
-await presentBudget(db, ORG_A, ANA_ID, rosaPatientId, budgetOrto.id);
+})
+await presentBudget(db, ORG_A, ANA_ID, rosaPatientId, budgetOrto.id)
 await decideBudget(db, ORG_A, ANA_ID, rosaPatientId, budgetOrto.id, {
   acceptedItemIds: [],
   acceptedByName: "Rosa Quispe",
   decisionNote: "Rechaza ortodoncia por ahora; reevaluar en 6 meses.",
-});
+})
 await addOdontogramEntries(db, ORG_A, ANA_ID, rosaPatientId, {
   toothNumber: 36,
   condition: "caries",
@@ -659,27 +845,34 @@ await addOdontogramEntries(db, ORG_A, ANA_ID, rosaPatientId, {
   details: { variant: "dentin" },
   diagnosisCode: "K02.1",
   encounterId: draft.id,
-});
+})
 await addOdontogramEntries(db, ORG_A, ANA_ID, rosaPatientId, {
   toothNumber: 46,
   condition: "caries",
   surfaces: ["occlusal"],
   details: { variant: "enamel" },
   encounterId: draft.id,
-});
+})
 const wear = await addOdontogramEntries(db, ORG_A, ANA_ID, rosaPatientId, {
   toothNumber: 26,
   condition: "tooth_wear",
   surfaces: ["buccal"],
-});
-const wearId = wear[0]?.id;
-if (!wearId) throw new Error("No se pudo crear la entrada de odontograma de la pieza 26");
-await voidOdontogramEntry(db, ORG_A, ANA_ID, wearId, rosaPatientId, "Registro de prueba anulado en seed");
+})
+const wearId = wear[0]?.id
+if (!wearId) throw new Error("No se pudo crear la entrada de odontograma de la pieza 26")
+await voidOdontogramEntry(
+  db,
+  ORG_A,
+  ANA_ID,
+  wearId,
+  rosaPatientId,
+  "Registro de prueba anulado en seed",
+)
 await addClinicalNote(db, ORG_A, ANA_ID, rosaPatientId, {
   note: "Paciente con dolor a la percusión en pieza 36; se planifica obturación y endodoncia en 46.",
   diagnosisCode: "K02.1",
   encounterId: draft.id,
-});
+})
 // Documentos demo con bytes reales en storage (el registro exige borrador).
 const rxRef = await storage.putPatientDocument({
   orgId: ORG_A,
@@ -687,7 +880,7 @@ const rxRef = await storage.putPatientDocument({
   bytes: DEMO_PNG,
   contentType: "image/png",
   ext: "png",
-});
+})
 const docRx = await registerPatientDocument(db, ORG_A, ANA_ID, rosaPatientId, {
   category: "radiografia",
   label: "[DEMO] Radiografía periapical pieza 36",
@@ -697,19 +890,19 @@ const docRx = await registerPatientDocument(db, ORG_A, ANA_ID, rosaPatientId, {
   encounterId: draft.id,
   toothNumbers: [36],
   tags: ["radiografia", "diagnostico-inicial"],
-});
+})
 // Corrección versionada: suma etiqueta sin tocar blob ni clasificación.
 await correctDocumentContext(db, ORG_A, ANA_ID, rosaPatientId, docRx.id, {
   expectedVersion: 1,
   tags: ["radiografia", "diagnostico-inicial", "pieza-36"],
-});
+})
 const fotoRef = await storage.putPatientDocument({
   orgId: ORG_A,
   patientId: rosaPatientId,
   bytes: DEMO_PNG,
   contentType: "image/png",
   ext: "png",
-});
+})
 await registerPatientDocument(db, ORG_A, ANA_ID, rosaPatientId, {
   category: "foto_clinica",
   label: "[DEMO] Foto clínica piezas 36 y 46",
@@ -720,96 +913,123 @@ await registerPatientDocument(db, ORG_A, ANA_ID, rosaPatientId, {
   planItemId: endo46.id,
   toothNumbers: [36, 46],
   tags: ["foto-clinica", "seguimiento"],
-});
+})
 // Cierre con datos útiles: evolución, indicaciones y siguiente paso.
 await updateEncounterDraft(db, ORG_A, ANA_ID, rosaPatientId, draft.id, {
   evolution: "Obturación de pieza 36 sin complicaciones; endodoncia de 46 programada.",
   indications: "Higiene con cepillo suave, control en 7 días; acudir si hay dolor.",
   nextStep: "Endodoncia pieza 46 en próxima cita.",
   nextAppointmentAt: tomorrowIso(),
-});
+})
 // Solo el aceptado se realiza; conserva el vínculo atención-plan.
 await addEncounterProcedure(db, ORG_A, ANA_ID, rosaPatientId, draft.id, {
   toothNumber: 36,
   diagnosisCode: "K02.1",
   planItemId: obt36.id,
-});
-await finalizeEncounter(db, ORG_A, ANA_ID, rosaPatientId, draft.id);
+})
+await finalizeEncounter(db, ORG_A, ANA_ID, rosaPatientId, draft.id)
 await addEncounterAddendum(db, ORG_A, ANA_ID, rosaPatientId, draft.id, {
   text: "Adenda demo: la paciente toleró bien la obturación; sin sangrado posterior.",
-});
+})
 await createOdontogramAssessment(db, ORG_A, ANA_ID, rosaPatientId, {
   purpose: "initial",
   specifications: "Odontograma inicial NTS 188-MINSA/DGIESP-2022: caries oclusal en 36 y 46.",
-  observations: "Paciente con dolor a la percusión en pieza 36; se planifica obturación y endodoncia en 46.",
+  observations:
+    "Paciente con dolor a la percusión en pieza 36; se planifica obturación y endodoncia en 46.",
   examinerName: "Ana Torres",
   registrationNumber: "COP 12345",
-  signature: [[[5, 90], [20, 70], [40, 75]], [[60, 80], [75, 65]]],
-});
+  signature: [
+    [
+      [5, 90],
+      [20, 70],
+      [40, 75],
+    ],
+    [
+      [60, 80],
+      [75, 65],
+    ],
+  ],
+})
 await addClinicalNote(db, ORG_A, ANA_ID, rosaPatientId, {
   note: "Control post-obturación: sin dolor, oclusión estable. Pendiente endodoncia pieza 46.",
-});
+})
 
-const elenaPatientId = patientIdByName.get("Elena Huamán")!;
+const elenaPatientId = patientIdByName.get("Elena Huamán")!
 await savePatientHealth(db, ORG_A, ANA_ID, elenaPatientId, {
   expectedRevision: 0,
   reviewStatus: { allergies: "recorded", conditions: "unknown", medications: "unknown" },
   allergies: [{ substance: "Látex", reaction: "Enrojecimiento", severity: "leve" }],
   conditions: [],
   medications: [],
-});
+})
 await addClinicalNote(db, ORG_A, ANA_ID, elenaPatientId, {
   note: "Control de rutina sin hallazgos",
   diagnosisCode: "Z01.2",
-});
+})
 // Plan de Elena + presupuesto en borrador (sin presentar): ejercita el estado inicial.
-const elenaEval = await createEncounter(db, ORG_A, ANA_ID, elenaPatientId, { reason: "Control de rutina" });
+const elenaEval = await createEncounter(db, ORG_A, ANA_ID, elenaPatientId, {
+  reason: "Control de rutina",
+})
 const elenaPlan = await createTreatmentPlan(db, ORG_A, ANA_ID, elenaPatientId, {
   title: "Plan profilaxis",
   originEncounterId: elenaEval.id,
-});
+})
 const elenaItem = await addPlanItem(db, ORG_A, ANA_ID, elenaPatientId, {
   serviceId: serviceIdA("LIMPIEZA"),
   planId: elenaPlan.id,
   sourceEncounterId: elenaEval.id,
   detail: "Limpieza dental (profilaxis)",
-});
+})
 await createBudget(db, ORG_A, ANA_ID, elenaPatientId, {
   planId: elenaPlan.id,
   itemIds: [elenaItem.id],
   title: "Plan profilaxis",
-});
+})
 
 // --- Volumen para paginación: 40 contactos+pacientes ---
 for (let i = 1; i <= 40; i++) {
-  const n = String(i).padStart(2, "0");
+  const n = String(i).padStart(2, "0")
   const created = await createContact(db, ORG_A, {
     displayName: `Paciente Demo ${n}`,
     stageId: pipeA.stages[0]!.id,
-  });
-  await createPatient(db, ORG_A, ANA_ID, { contactId: created.id, phone: `+519000000${n}` });
+  })
+  await createPatient(db, ORG_A, ANA_ID, { contactId: created.id, phone: `+519000000${n}` })
 }
 
 // --- Org B mínima (aislamiento visual) ---
-const sofia = await createContact(db, ORG_B, { displayName: "Sofía Ramos", stageId: pipeB.stages[0]!.id });
-const hugo = await createContact(db, ORG_B, { displayName: "Hugo Díaz", stageId: pipeB.stages[1]!.id });
+const sofia = await createContact(db, ORG_B, {
+  displayName: "Sofía Ramos",
+  stageId: pipeB.stages[0]!.id,
+})
+const hugo = await createContact(db, ORG_B, {
+  displayName: "Hugo Díaz",
+  stageId: pipeB.stages[1]!.id,
+})
 await db.insert(contactIdentity).values([
   {
-    organizationId: ORG_B, contactId: sofia.id, channel: "whatsapp",
-    externalUserId: "+51987654401", displayName: "Sofía Ramos", isPrimary: true,
+    organizationId: ORG_B,
+    contactId: sofia.id,
+    channel: "whatsapp",
+    externalUserId: "+51987654401",
+    displayName: "Sofía Ramos",
+    isPrimary: true,
   },
   {
-    organizationId: ORG_B, contactId: hugo.id, channel: "whatsapp",
-    externalUserId: "+51987654402", displayName: "Hugo Díaz", isPrimary: true,
+    organizationId: ORG_B,
+    contactId: hugo.id,
+    channel: "whatsapp",
+    externalUserId: "+51987654402",
+    displayName: "Hugo Díaz",
+    isPrimary: true,
   },
-]);
+])
 await createPatient(db, ORG_B, CORA_ID, {
   contactId: sofia.id,
   docType: "DNI",
   docNumber: "60111222",
   birthDate: "1993-04-25",
   sex: "F",
-});
+})
 const convSofia = await seedConversation({
   orgId: ORG_B,
   contactId: sofia.id,
@@ -818,12 +1038,17 @@ const convSofia = await seedConversation({
   unreadCount: 1,
   lastInboundAt: hoursAgo(2),
   lastMessageAt: hoursAgo(2),
-});
+})
 await seedMessage({
-  orgId: ORG_B, conversationId: convSofia.id, direction: "inbound", senderKind: "contact",
+  orgId: ORG_B,
+  conversationId: convSofia.id,
+  direction: "inbound",
+  senderKind: "contact",
   body: "Hola, ¿tienen disponibilidad para una limpieza dental esta semana?",
-  externalId: "seed-msg-B1", status: "received", createdAt: hoursAgo(2),
-});
+  externalId: "seed-msg-B1",
+  status: "received",
+  createdAt: hoursAgo(2),
+})
 
 // --- Resumen ---
 async function summary(orgId: string, label: string): Promise<string> {
@@ -837,13 +1062,13 @@ async function summary(orgId: string, label: string): Promise<string> {
     "treatment_budget",
     "treatment_plan_item",
     "patient_document",
-  ] as const;
-  const counts: string[] = [];
-  for (const t of tables) counts.push(`${t}=${await countWhere(t, orgId)}`);
-  return `org ${label} (${orgId}): ${counts.join(" ")}`;
+  ] as const
+  const counts: string[] = []
+  for (const t of tables) counts.push(`${t}=${await countWhere(t, orgId)}`)
+  return `org ${label} (${orgId}): ${counts.join(" ")}`
 }
-console.log("seed-dev ok");
-console.log(await summary(ORG_A, "dental-smile"));
-console.log(await summary(ORG_B, "clinica-norte"));
-console.log("credenciales (password Demo1234): ana@odentia.dev, luis@odentia.dev, cora@odentia.dev");
-process.exit(0);
+console.log("seed-dev ok")
+console.log(await summary(ORG_A, "dental-smile"))
+console.log(await summary(ORG_B, "clinica-norte"))
+console.log("credenciales (password Demo1234): ana@odentia.dev, luis@odentia.dev, cora@odentia.dev")
+process.exit(0)

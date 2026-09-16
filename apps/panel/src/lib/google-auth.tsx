@@ -1,5 +1,5 @@
-import { Button, toast } from "@odentia/ui";
-import { authClient } from "./auth-client";
+import { Button, toast } from "@odentia/ui"
+import { authClient } from "./auth-client"
 
 /** "G" oficial de Google: los colores son parte del asset de marca, no tokens del theme. */
 function GoogleMark() {
@@ -22,7 +22,7 @@ function GoogleMark() {
         d="M12 4.77c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.31 0 3.26 2.69 1.29 6.64l3.98 3.09C6.22 6.88 8.87 4.77 12 4.77Z"
       />
     </svg>
-  );
+  )
 }
 
 /**
@@ -38,15 +38,15 @@ export function GoogleAuthButton({ label, callbackURL }: { label: string; callba
       className="w-full"
       onClick={async () => {
         try {
-          const { error } = await authClient.signIn.social({ provider: "google", callbackURL });
-          if (error) throw error;
+          const { error } = await authClient.signIn.social({ provider: "google", callbackURL })
+          if (error) throw error
         } catch {
-          toast.error("No pudimos conectar con Google. Inténtalo de nuevo.");
+          toast.error("No pudimos conectar con Google. Inténtalo de nuevo.")
         }
       }}
     >
       <GoogleMark />
       {label}
     </Button>
-  );
+  )
 }

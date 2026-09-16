@@ -1,56 +1,56 @@
-import { createFileRoute, getRouteApi } from "@tanstack/react-router";
-import { Badge, Field, Input } from "@odentia/ui";
-import { EmptyState, PageHeader, SubmitButton } from "@odentia/ui-patterns";
-import { useEffect, useRef, useState } from "react";
-import { apiFetch } from "../../lib/api";
-import { API_URL } from "../../lib/auth-client";
+import { Badge, Field, Input } from "@odentia/ui"
+import { EmptyState, PageHeader, SubmitButton } from "@odentia/ui-patterns"
+import { createFileRoute, getRouteApi } from "@tanstack/react-router"
+import { useEffect, useRef, useState } from "react"
+import { apiFetch } from "../../lib/api"
+import { API_URL } from "../../lib/auth-client"
 
 export const Route = createFileRoute("/_org/demo")({
   component: DemoPage,
-});
+})
 
-const orgRouteApi = getRouteApi("/_org");
+const orgRouteApi = getRouteApi("/_org")
 
 interface DemoEvent {
-  kind: string;
-  taskId: string | number;
-  at: string;
+  kind: string
+  taskId: string | number
+  at: string
 }
 
 function DemoPage() {
-  const [message, setMessage] = useState("");
-  const [sending, setSending] = useState(false);
-  const [events, setEvents] = useState<DemoEvent[]>([]);
-  const [streamState, setStreamState] = useState<"connecting" | "open" | "closed">("connecting");
-  const sourceRef = useRef<EventSource | null>(null);
+  const [message, setMessage] = useState("")
+  const [sending, setSending] = useState(false)
+  const [events, setEvents] = useState<DemoEvent[]>([])
+  const [streamState, setStreamState] = useState<"connecting" | "open" | "closed">("connecting")
+  const sourceRef = useRef<EventSource | null>(null)
 
-  const { org } = orgRouteApi.useRouteContext();
+  const { org } = orgRouteApi.useRouteContext()
 
   useEffect(() => {
     const source = new EventSource(`${API_URL}/api/notifications/stream?org=${org.slug}`, {
       withCredentials: true,
-    });
-    sourceRef.current = source;
-    source.onopen = () => setStreamState("open");
-    source.onerror = () => setStreamState("closed");
+    })
+    sourceRef.current = source
+    source.onopen = () => setStreamState("open")
+    source.onerror = () => setStreamState("closed")
     source.addEventListener("demo_task.done", (event) => {
-      const payload = JSON.parse((event as MessageEvent).data as string) as DemoEvent;
-      setEvents((previous) => [payload, ...previous].slice(0, 50));
-    });
-    return () => source.close();
-  }, [org.slug]);
+      const payload = JSON.parse((event as MessageEvent).data as string) as DemoEvent
+      setEvents((previous) => [payload, ...previous].slice(0, 50))
+    })
+    return () => source.close()
+  }, [org.slug])
 
   async function sendTask() {
-    if (!message.trim()) return;
-    setSending(true);
+    if (!message.trim()) return
+    setSending(true)
     try {
       await apiFetch("/api/demo/tasks", {
         method: "POST",
         body: JSON.stringify({ message: message.trim() }),
-      });
-      setMessage("");
+      })
+      setMessage("")
     } finally {
-      setSending(false);
+      setSending(false)
     }
   }
 
@@ -62,8 +62,8 @@ function DemoPage() {
       />
       <form
         onSubmit={(event) => {
-          event.preventDefault();
-          void sendTask();
+          event.preventDefault()
+          void sendTask()
         }}
       >
         <Field>
@@ -84,7 +84,11 @@ function DemoPage() {
       <div className="flex items-center gap-2 text-sm text-muted-foreground">
         Feed en vivo
         <Badge variant={streamState === "open" ? "success" : "secondary"}>
-          {streamState === "open" ? "conectado" : streamState === "connecting" ? "conectando" : "desconectado"}
+          {streamState === "open"
+            ? "conectado"
+            : streamState === "connecting"
+              ? "conectando"
+              : "desconectado"}
         </Badge>
       </div>
 
@@ -109,5 +113,5 @@ function DemoPage() {
         </ul>
       )}
     </div>
-  );
+  )
 }

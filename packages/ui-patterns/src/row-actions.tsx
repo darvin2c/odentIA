@@ -4,30 +4,30 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from "@odentia/ui";
-import { Ellipsis } from "lucide-react";
-import type { ReactNode } from "react";
+} from "@odentia/ui"
+import { Ellipsis } from "lucide-react"
+import type { ReactNode } from "react"
 
 /**
  * Tono del ítem: `danger` pinta en rojo (eliminar, archivar). Mismo
  * vocabulario que el resto de acciones terminales.
  */
-export type RowActionTone = "default" | "danger";
+export type RowActionTone = "default" | "danger"
 
 export interface RowActionItem {
-  key: string;
-  label: string;
-  icon?: ReactNode;
-  tone?: RowActionTone;
-  disabled?: boolean;
-  onSelect: () => void;
+  key: string
+  label: string
+  icon?: ReactNode
+  tone?: RowActionTone
+  disabled?: boolean
+  onSelect: () => void
 }
 
 export interface RowActionsProps {
   /** Etiqueta accesible del botón (p. ej. `Acciones de Mesa T1`). */
-  label: string;
-  items: RowActionItem[];
-  align?: "start" | "end";
+  label: string
+  items: RowActionItem[]
+  align?: "start" | "end"
 }
 
 /**
@@ -65,5 +65,5 @@ export function RowActions({ label, items, align = "end" }: RowActionsProps) {
         ))}
       </DropdownMenuContent>
     </DropdownMenu>
-  );
+  )
 }

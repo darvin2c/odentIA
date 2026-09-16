@@ -1,6 +1,12 @@
 {
   "config": { "botToken": "TESTTOKEN" },
-  "capabilities": { "templates": false, "media": true, "interactive": false, "readReceipts": false, "edit": true },
+  "capabilities": {
+    "templates": false,
+    "media": true,
+    "interactive": false,
+    "readReceipts": false,
+    "edit": true
+  },
   "verify": [
     {
       "name": "acepta secret-token correcto",
@@ -76,7 +82,10 @@
     {
       "name": "texto construye sendMessage",
       "message": { "to": "tg:555", "kind": { "type": "text", "text": "Hola Ana" } },
-      "respondWith": { "ok": true, "result": { "message_id": 77, "chat": { "id": 555 }, "text": "Hola Ana" } },
+      "respondWith": {
+        "ok": true,
+        "result": { "message_id": 77, "chat": { "id": 555 }, "text": "Hola Ana" }
+      },
       "expectUrl": "https://api.telegram.org/botTESTTOKEN/sendMessage",
       "expectBody": { "chat_id": "555", "text": "Hola Ana" },
       "expectExternalId": "tg:555:77"

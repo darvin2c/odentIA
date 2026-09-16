@@ -1,58 +1,64 @@
-import { useId, useRef, useState } from "react";
 import {
   conditionLabel,
+  type FindingDetails,
   findingAbbreviation,
   findingColor,
   findingDefinition,
   surfaceLabel,
   surfacesForTooth,
   toothTypeOf,
-  type FindingDetails,
-} from "@odentia/clinical";
-import type { OdontogramEntry } from "../lib/patients";
+} from "@odentia/clinical"
+import { useId, useRef, useState } from "react"
+import type { OdontogramEntry } from "../lib/patients"
 
 // Colores clínicos normativos (rojo/azul de la NTS 188). La selección de la UI
 // usa violeta (ring) y nunca rellena la corona, para no confundirse con un hallazgo.
-const RED = "#dc2626";
-const BLUE = "#2563eb";
+const RED = "#dc2626"
+const BLUE = "#2563eb"
 
 export interface ToothSVGProps {
-  toothNumber: number;
-  entries: OdontogramEntry[];
-  selected?: boolean;
-  painting?: boolean;
-  disabled?: boolean;
+  toothNumber: number
+  entries: OdontogramEntry[]
+  selected?: boolean
+  painting?: boolean
+  disabled?: boolean
   /** "tile" conserva el recuadro con borde y número; "arch" es solo corona compacta; "preview" es corona grande para cabeceras. */
-  size?: "tile" | "arch" | "preview";
+  size?: "tile" | "arch" | "preview"
   /** Mostrar raíces; el arco y el preview las ocultan para compactar. */
-  showRoots?: boolean;
-  onSelect?: (event?: React.MouseEvent) => void;
-  onPaint?: (surface: string) => void;
+  showRoots?: boolean
+  onSelect?: (event?: React.MouseEvent) => void
+  onPaint?: (surface: string) => void
   /** Dibujo libre: la pieza padre controla el borrador (trazos normalizados 0..100). */
-  onDrawingChange?: (drawing: number[][][]) => void;
-  draftDrawing?: number[][][];
-  drawingEnabled?: boolean;
+  onDrawingChange?: (drawing: number[][][]) => void
+  draftDrawing?: number[][][]
+  drawingEnabled?: boolean
 }
 
-const CROWN_BOX = { x0: 5, x1: 19, y0: 2.5, y1: 13.5, cx0: 9.5, cx1: 14.5, cy0: 5.5, cy1: 10.5 };
+const CROWN_BOX = { x0: 5, x1: 19, y0: 2.5, y1: 13.5, cx0: 9.5, cx1: 14.5, cy0: 5.5, cy1: 10.5 }
 
-function silhouetteFor(type: "incisor" | "canine" | "premolar" | "molar"): { crown: string; roots: string[] } {
+function silhouetteFor(type: "incisor" | "canine" | "premolar" | "molar"): {
+  crown: string
+  roots: string[]
+} {
   switch (type) {
     case "incisor":
       return {
-        crown: "M12 1.8 C9.8 1.8 6.2 6.4 5.8 10.2 Q5.4 13.5 12 13.5 Q18.6 13.5 18.2 10.2 C17.8 6.4 14.2 1.8 12 1.8 Z",
+        crown:
+          "M12 1.8 C9.8 1.8 6.2 6.4 5.8 10.2 Q5.4 13.5 12 13.5 Q18.6 13.5 18.2 10.2 C17.8 6.4 14.2 1.8 12 1.8 Z",
         roots: ["M9.5 13.5 H14.5 L13 25 Q12.7 26.5 12 26.5 Q11.3 26.5 11 25 Z"],
-      };
+      }
     case "canine":
       return {
-        crown: "M12 1.2 C10.6 2.8 5.6 5.7 5.6 9 Q5.6 13.6 12 13.6 Q18.4 13.6 18.4 9 C18.4 5.7 13.4 2.8 12 1.2 Z",
+        crown:
+          "M12 1.2 C10.6 2.8 5.6 5.7 5.6 9 Q5.6 13.6 12 13.6 Q18.4 13.6 18.4 9 C18.4 5.7 13.4 2.8 12 1.2 Z",
         roots: ["M10 13.5 H14 L13 26 Q12.7 27 12 27 Q11.3 27 11 26 Z"],
-      };
+      }
     case "premolar":
       return {
-        crown: "M8 2.6 Q12 1.2 16 2.6 Q19 4.2 18.4 8 Q19 12.8 15.5 13.6 Q12 14.4 8.5 13.6 Q5 12.8 5.6 8 Q5 4.2 8 2.6 Z",
+        crown:
+          "M8 2.6 Q12 1.2 16 2.6 Q19 4.2 18.4 8 Q19 12.8 15.5 13.6 Q12 14.4 8.5 13.6 Q5 12.8 5.6 8 Q5 4.2 8 2.6 Z",
         roots: ["M10 13.5 H14 L13.4 24.5 Q13.2 26 12 26 Q10.8 26 10.6 24.5 Z"],
-      };
+      }
     case "molar":
       return {
         crown:
@@ -61,7 +67,7 @@ function silhouetteFor(type: "incisor" | "canine" | "premolar" | "molar"): { cro
           "M6.5 13.5 H10 L9.6 24 Q9.5 25.5 8.3 25.5 Q7.1 25.5 7 24 Z",
           "M14 13.5 H17.5 L17 24 Q16.9 25.5 15.7 25.5 Q14.5 25.5 14.4 24 Z",
         ],
-      };
+      }
   }
 }
 
@@ -69,41 +75,63 @@ function silhouetteFor(type: "incisor" | "canine" | "premolar" | "molar"): { cro
 function groovesFor(type: "incisor" | "canine" | "premolar" | "molar"): string[] {
   switch (type) {
     case "incisor":
-      return ["M7.2 11.4 Q12 12.8 16.8 11.4"];
+      return ["M7.2 11.4 Q12 12.8 16.8 11.4"]
     case "canine":
-      return ["M12 3.2 Q10.8 7 12 10.4"];
+      return ["M12 3.2 Q10.8 7 12 10.4"]
     case "premolar":
-      return ["M12 3.8 Q10.5 6.4 12 8 Q13.5 9.6 12 12", "M8 7.8 Q12 6 16 7.8"];
+      return ["M12 3.8 Q10.5 6.4 12 8 Q13.5 9.6 12 12", "M8 7.8 Q12 6 16 7.8"]
     case "molar":
-      return ["M10.5 4 Q13 5.6 11.5 7.8 Q10 10 12.5 12", "M7.5 8 Q10.4 6.4 12 7.8 Q13.6 9.2 16.5 7.6"];
+      return [
+        "M10.5 4 Q13 5.6 11.5 7.8 Q10 10 12.5 12",
+        "M7.5 8 Q10.4 6.4 12 7.8 Q13.6 9.2 16.5 7.6",
+      ]
   }
 }
 interface ZoneDef {
-  surface: string;
-  points: string;
-  dot: { cx: number; cy: number };
+  surface: string
+  points: string
+  dot: { cx: number; cy: number }
 }
 function zonesFor(toothNumber: number): ZoneDef[] {
-  const quadrant = Math.trunc(toothNumber / 10);
-  const mesialOnRight = quadrant === 1 || quadrant === 4 || quadrant === 5 || quadrant === 8;
+  const quadrant = Math.trunc(toothNumber / 10)
+  const mesialOnRight = quadrant === 1 || quadrant === 4 || quadrant === 5 || quadrant === 8
   // Claves en inglés del catálogo; la cara externa/interna/central sale de surfacesForTooth.
-  const catalog = surfacesForTooth(toothNumber);
-  const innerSurface = catalog.includes("palatal") ? "palatal" : "lingual";
-  const outerSurface = catalog.includes("facial") ? "facial" : "buccal";
-  const centralSurface = catalog.includes("incisal") ? "incisal" : "occlusal";
-  const { x0, x1, y0, y1, cx0, cx1, cy0, cy1 } = CROWN_BOX;
+  const catalog = surfacesForTooth(toothNumber)
+  const innerSurface = catalog.includes("palatal") ? "palatal" : "lingual"
+  const outerSurface = catalog.includes("facial") ? "facial" : "buccal"
+  const centralSurface = catalog.includes("incisal") ? "incisal" : "occlusal"
+  const { x0, x1, y0, y1, cx0, cx1, cy0, cy1 } = CROWN_BOX
   return [
-    { surface: mesialOnRight ? "distal" : "mesial", points: `${x0},${y0} ${cx0},${cy0} ${cx0},${cy1} ${x0},${y1}`, dot: { cx: 7.9, cy: 8 } },
-    { surface: mesialOnRight ? "mesial" : "distal", points: `${x1},${y0} ${cx1},${cy0} ${cx1},${cy1} ${x1},${y1}`, dot: { cx: 16.1, cy: 8 } },
-    { surface: innerSurface, points: `${x0},${y0} ${x1},${y0} ${cx1},${cy0} ${cx0},${cy0}`, dot: { cx: 12, cy: 4.3 } },
-    { surface: outerSurface, points: `${x0},${y1} ${cx0},${cy1} ${cx1},${cy1} ${x1},${y1}`, dot: { cx: 12, cy: 11.7 } },
-    { surface: centralSurface, points: `${cx0},${cy0} ${cx1},${cy0} ${cx1},${cy1} ${cx0},${cy1}`, dot: { cx: 12, cy: 8 } },
-  ];
+    {
+      surface: mesialOnRight ? "distal" : "mesial",
+      points: `${x0},${y0} ${cx0},${cy0} ${cx0},${cy1} ${x0},${y1}`,
+      dot: { cx: 7.9, cy: 8 },
+    },
+    {
+      surface: mesialOnRight ? "mesial" : "distal",
+      points: `${x1},${y0} ${cx1},${cy0} ${cx1},${cy1} ${x1},${y1}`,
+      dot: { cx: 16.1, cy: 8 },
+    },
+    {
+      surface: innerSurface,
+      points: `${x0},${y0} ${x1},${y0} ${cx1},${cy0} ${cx0},${cy0}`,
+      dot: { cx: 12, cy: 4.3 },
+    },
+    {
+      surface: outerSurface,
+      points: `${x0},${y1} ${cx0},${cy1} ${cx1},${cy1} ${x1},${y1}`,
+      dot: { cx: 12, cy: 11.7 },
+    },
+    {
+      surface: centralSurface,
+      points: `${cx0},${cy0} ${cx1},${cy0} ${cx1},${cy1} ${cx0},${cy1}`,
+      dot: { cx: 12, cy: 8 },
+    },
+  ]
 }
 
-
 function detailsOf(entry: OdontogramEntry): FindingDetails {
-  return (entry.details ?? {}) as FindingDetails;
+  return (entry.details ?? {}) as FindingDetails
 }
 
 /**
@@ -111,53 +139,53 @@ function detailsOf(entry: OdontogramEntry): FindingDetails {
  * normativo: registro previo en revisión o dato requerido pendiente.
  */
 function paintOf(entry: OdontogramEntry): string | null {
-  if (entry.needsReview) return null;
-  const color = findingColor(entry);
-  if (color === "red") return RED;
-  if (color === "blue") return BLUE;
-  return null;
+  if (entry.needsReview) return null
+  const color = findingColor(entry)
+  if (color === "red") return RED
+  if (color === "blue") return BLUE
+  return null
 }
 
 function abbreviationOf(entry: OdontogramEntry): string {
   try {
-    return findingAbbreviation(entry) ?? "";
+    return findingAbbreviation(entry) ?? ""
   } catch {
-    return "";
+    return ""
   }
 }
 
 /** Línea de cabecera accesible por hallazgo: sigla oficial + etiqueta + variante. */
 function entryLine(entry: OdontogramEntry, toothNumber: number): string {
-  const details = detailsOf(entry);
-  const label = conditionLabel(entry.condition);
-  let variantLabel = "";
+  const details = detailsOf(entry)
+  const label = conditionLabel(entry.condition)
+  let variantLabel = ""
   try {
-    const def = findingDefinition(entry.condition);
-    const variant = def?.variants?.find((v) => v.value === details.variant);
-    if (variant) variantLabel = ` (${variant.label})`;
+    const def = findingDefinition(entry.condition)
+    const variant = def?.variants?.find((v) => v.value === details.variant)
+    if (variant) variantLabel = ` (${variant.label})`
   } catch {
-    variantLabel = "";
+    variantLabel = ""
   }
-  const scope = entry.surface ? ` · ${surfaceLabel(entry.surface)}` : "";
-  const abbr = abbreviationOf(entry);
-  const head = abbr ? `${abbr} · ${label}${variantLabel}` : `${label}${variantLabel}`;
-  if (entry.needsReview) return `Registro previo · requiere revisión — ${head}${scope}`;
-  if (!paintOf(entry)) return `${head}${scope} · dato pendiente`;
-  return `${head}${scope}`;
+  const scope = entry.surface ? ` · ${surfaceLabel(entry.surface)}` : ""
+  const abbr = abbreviationOf(entry)
+  const head = abbr ? `${abbr} · ${label}${variantLabel}` : `${label}${variantLabel}`
+  if (entry.needsReview) return `Registro previo · requiere revisión — ${head}${scope}`
+  if (!paintOf(entry)) return `${head}${scope} · dato pendiente`
+  return `${head}${scope}`
 }
 
 // Hallazgos que pintan la superficie completa con su color normativo.
-const FILL_CONDITIONS: Record<string, true> = { caries: true, definitive_restoration: true };
+const FILL_CONDITIONS: Record<string, true> = { caries: true, definitive_restoration: true }
 // Hallazgos que solo marcan el contorno de la forma observada.
-const CONTOUR_CONDITIONS: Record<string, true> = { temporary_restoration: true, tooth_wear: true };
+const CONTOUR_CONDITIONS: Record<string, true> = { temporary_restoration: true, tooth_wear: true }
 
 interface Markers {
-  red: string;
-  blue: string;
+  red: string
+  blue: string
 }
 
 function markerFor(markers: Markers, paint: string): string {
-  return paint === RED ? markers.red : markers.blue;
+  return paint === RED ? markers.red : markers.blue
 }
 
 /**
@@ -165,9 +193,22 @@ function markerFor(markers: Markers, paint: string): string {
  * coordenadas pre-flip del viewBox 0 0 24 28. Los hallazgos de solo sigla
  * (recuadro) devuelven null: nunca tiñen la corona arbitrariamente.
  */
-function symbolFor(condition: string, paint: string, details: FindingDetails, toothNumber: number, markers: Markers, surface: OdontogramEntry["surface"]): React.ReactNode {
-  const marker = `url(#${markerFor(markers, paint)})`;
-  const stroke = { stroke: paint, fill: "none", strokeWidth: 1, strokeLinecap: "round" as const, pointerEvents: "none" as const };
+function symbolFor(
+  condition: string,
+  paint: string,
+  details: FindingDetails,
+  toothNumber: number,
+  markers: Markers,
+  surface: OdontogramEntry["surface"],
+): React.ReactNode {
+  const marker = `url(#${markerFor(markers, paint)})`
+  const stroke = {
+    stroke: paint,
+    fill: "none",
+    strokeWidth: 1,
+    strokeLinecap: "round" as const,
+    pointerEvents: "none" as const,
+  }
   switch (condition) {
     case "missing_tooth":
       // Aspa sobre el gráfico de la pieza.
@@ -176,10 +217,19 @@ function symbolFor(condition: string, paint: string, details: FindingDetails, to
           <line x1={6} y1={3} x2={18} y2={13} />
           <line x1={18} y1={3} x2={6} y2={13} />
         </g>
-      );
+      )
     case "peg_tooth":
       // Triángulo en la zona cervical, junto al número.
-      return <polygon points="12,12.4 9.4,16.6 14.6,16.6" fill="none" stroke={paint} strokeWidth={1} pointerEvents="none" aria-hidden="true" />;
+      return (
+        <polygon
+          points="12,12.4 9.4,16.6 14.6,16.6"
+          fill="none"
+          stroke={paint}
+          strokeWidth={1}
+          pointerEvents="none"
+          aria-hidden="true"
+        />
+      )
     case "erupting_tooth":
       // Flecha en zigzag sobre el gráfico hacia el plano oclusal.
       return (
@@ -194,42 +244,107 @@ function symbolFor(condition: string, paint: string, details: FindingDetails, to
           pointerEvents="none"
           aria-hidden="true"
         />
-      );
+      )
     case "extruded_tooth":
       // Flecha recta fuera del gráfico, se aleja de incisal/oclusal.
       return (
-        <line x1={12} y1={4.6} x2={12} y2={0.7} stroke={paint} strokeWidth={0.9} markerEnd={marker} pointerEvents="none" aria-hidden="true" />
-      );
+        <line
+          x1={12}
+          y1={4.6}
+          x2={12}
+          y2={0.7}
+          stroke={paint}
+          strokeWidth={0.9}
+          markerEnd={marker}
+          pointerEvents="none"
+          aria-hidden="true"
+        />
+      )
     case "intruded_tooth":
       // Flecha recta hacia la zona incisal/oclusal (apunta a la pieza).
       return (
-        <line x1={12} y1={0.7} x2={12} y2={4.6} stroke={paint} strokeWidth={0.9} markerEnd={marker} pointerEvents="none" aria-hidden="true" />
-      );
+        <line
+          x1={12}
+          y1={0.7}
+          x2={12}
+          y2={4.6}
+          stroke={paint}
+          strokeWidth={0.9}
+          markerEnd={marker}
+          pointerEvents="none"
+          aria-hidden="true"
+        />
+      )
     case "supernumerary_tooth":
       // Circunferencia entre ápices; la sigla S se dibuja fuera del flip para no espejarse.
-      return <circle cx={12} cy={22} r={2.8} fill="none" stroke={paint} strokeWidth={1} pointerEvents="none" aria-hidden="true" />;
+      return (
+        <circle
+          cx={12}
+          cy={22}
+          r={2.8}
+          fill="none"
+          stroke={paint}
+          strokeWidth={1}
+          pointerEvents="none"
+          aria-hidden="true"
+        />
+      )
     case "pulpotomy":
       // Dibujo de la pulpa coronal.
       return (
         <g pointerEvents="none" aria-hidden="true">
-          <rect x={9.8} y={4.5} width={4.4} height={6} rx={2} fill={paint} fillOpacity={0.35} stroke={paint} strokeWidth={0.9} />
+          <rect
+            x={9.8}
+            y={4.5}
+            width={4.4}
+            height={6}
+            rx={2}
+            fill={paint}
+            fillOpacity={0.35}
+            stroke={paint}
+            strokeWidth={0.9}
+          />
         </g>
-      );
+      )
     case "rotation":
       // Flecha curva en la zona oclusal según el sentido del giro.
       return details.direction === "counterclockwise" ? (
-        <path d="M14.7 6.6 A3.1 3.1 0 1 0 15.1 9.8" fill="none" stroke={paint} strokeWidth={0.9} markerEnd={marker} pointerEvents="none" aria-hidden="true" />
+        <path
+          d="M14.7 6.6 A3.1 3.1 0 1 0 15.1 9.8"
+          fill="none"
+          stroke={paint}
+          strokeWidth={0.9}
+          markerEnd={marker}
+          pointerEvents="none"
+          aria-hidden="true"
+        />
       ) : (
-        <path d="M9.3 6.6 A3.1 3.1 0 1 1 8.9 9.8" fill="none" stroke={paint} strokeWidth={0.9} markerEnd={marker} pointerEvents="none" aria-hidden="true" />
-      );
+        <path
+          d="M9.3 6.6 A3.1 3.1 0 1 1 8.9 9.8"
+          fill="none"
+          stroke={paint}
+          strokeWidth={0.9}
+          markerEnd={marker}
+          pointerEvents="none"
+          aria-hidden="true"
+        />
+      )
     case "fixed_orthodontic_appliance":
       // Cuadrado a nivel apical + línea recta del tramo visible en la pieza.
       return (
         <g pointerEvents="none" aria-hidden="true">
-          <rect x={9.6} y={21.5} width={4.8} height={4} fill="none" stroke={paint} strokeWidth={0.9} />
+          <rect
+            x={9.6}
+            y={21.5}
+            width={4.8}
+            height={4}
+            fill="none"
+            stroke={paint}
+            strokeWidth={0.9}
+          />
           <line x1={3.5} y1={23.5} x2={20.5} y2={23.5} stroke={paint} strokeWidth={0.9} />
         </g>
-      );
+      )
     case "removable_orthodontic_appliance":
       // Zigzag a nivel de los ápices.
       return (
@@ -243,11 +358,23 @@ function symbolFor(condition: string, paint: string, details: FindingDetails, to
           pointerEvents="none"
           aria-hidden="true"
         />
-      );
+      )
     case "crown":
     case "temporary_crown":
       // Cuadrado sobre la corona clínica (+ sigla en el recuadro/cabecera).
-      return <rect x={8} y={3.2} width={8} height={8.6} fill="none" stroke={paint} strokeWidth={1} pointerEvents="none" aria-hidden="true" />;
+      return (
+        <rect
+          x={8}
+          y={3.2}
+          width={8}
+          height={8.6}
+          fill="none"
+          stroke={paint}
+          strokeWidth={1}
+          pointerEvents="none"
+          aria-hidden="true"
+        />
+      )
     case "post_and_core":
       // Línea vertical en la raíz + cuadrado en la corona.
       return (
@@ -255,7 +382,7 @@ function symbolFor(condition: string, paint: string, details: FindingDetails, to
           <line x1={12} y1={14.5} x2={12} y2={25.5} stroke={paint} strokeWidth={1} />
           <rect x={9} y={4} width={6} height={7} fill="none" stroke={paint} strokeWidth={0.9} />
         </g>
-      );
+      )
     case "diastema":
       // Paréntesis entre piezas: en vista individual marca ambos bordes.
       return (
@@ -263,10 +390,21 @@ function symbolFor(condition: string, paint: string, details: FindingDetails, to
           <path d="M5.6 5.5 Q3.8 8 5.6 10.5" />
           <path d="M18.4 5.5 Q20.2 8 18.4 10.5" />
         </g>
-      );
+      )
     case "edentulous_arch":
       // Línea horizontal sobre las coronas del maxilar (segmento por pieza).
-      return <line x1={3.5} y1={1.1} x2={20.5} y2={1.1} stroke={paint} strokeWidth={1} pointerEvents="none" aria-hidden="true" />;
+      return (
+        <line
+          x1={3.5}
+          y1={1.1}
+          x2={20.5}
+          y2={1.1}
+          stroke={paint}
+          strokeWidth={1}
+          pointerEvents="none"
+          aria-hidden="true"
+        />
+      )
     case "fusion":
       // Dos circunferencias interceptadas (segmento por pieza del par).
       return (
@@ -274,29 +412,63 @@ function symbolFor(condition: string, paint: string, details: FindingDetails, to
           <circle cx={9} cy={7.8} r={3.6} />
           <circle cx={15} cy={7.8} r={3.6} />
         </g>
-      );
+      )
     case "gemination":
       // Una circunferencia sobre la pieza.
-      return <circle cx={12} cy={7.8} r={4.6} fill="none" stroke={paint} strokeWidth={0.9} pointerEvents="none" aria-hidden="true" />;
+      return (
+        <circle
+          cx={12}
+          cy={7.8}
+          r={4.6}
+          fill="none"
+          stroke={paint}
+          strokeWidth={0.9}
+          pointerEvents="none"
+          aria-hidden="true"
+        />
+      )
     case "sealant": {
-      if (details.drawing?.length) return null;
-      const zone = zonesFor(toothNumber).find((item) => item.surface === surface);
-      if (!zone) return null;
-      const { cx, cy } = zone.dot;
-      return <path d={`M${cx - 1.5},${cy + 0.5} L${cx},${cy - 0.5} L${cx + 1.5},${cy + 0.5} M${cx},${cy - 0.5} L${cx + 0.5},${cy - 1.5}`} fill="none" stroke={paint} strokeWidth={0.9} strokeLinecap="round" pointerEvents="none" aria-hidden="true" />;
+      if (details.drawing?.length) return null
+      const zone = zonesFor(toothNumber).find((item) => item.surface === surface)
+      if (!zone) return null
+      const { cx, cy } = zone.dot
+      return (
+        <path
+          d={`M${cx - 1.5},${cy + 0.5} L${cx},${cy - 0.5} L${cx + 1.5},${cy + 0.5} M${cx},${cy - 0.5} L${cx + 0.5},${cy - 1.5}`}
+          fill="none"
+          stroke={paint}
+          strokeWidth={0.9}
+          strokeLinecap="round"
+          pointerEvents="none"
+          aria-hidden="true"
+        />
+      )
     }
     case "root_canal_treatment":
       // Línea recta vertical sobre el gráfico (+ sigla TC/PC en recuadro).
-      return <line x1={12} y1={2.8} x2={12} y2={25.5} stroke={paint} strokeWidth={1} pointerEvents="none" aria-hidden="true" />;
+      return (
+        <line
+          x1={12}
+          y1={2.8}
+          x2={12}
+          y2={25.5}
+          stroke={paint}
+          strokeWidth={1}
+          pointerEvents="none"
+          aria-hidden="true"
+        />
+      )
     case "fixed_partial_denture": {
       // Línea a nivel apical + tick vertical si esta pieza es pilar.
-      const abutment = details.abutmentTeeth?.includes(toothNumber) === true;
+      const abutment = details.abutmentTeeth?.includes(toothNumber) === true
       return (
         <g pointerEvents="none" aria-hidden="true">
           <line x1={3} y1={23.8} x2={21} y2={23.8} stroke={paint} strokeWidth={1} />
-          {abutment ? <line x1={12} y1={20} x2={12} y2={26.5} stroke={paint} strokeWidth={1} /> : null}
+          {abutment ? (
+            <line x1={12} y1={20} x2={12} y2={26.5} stroke={paint} strokeWidth={1} />
+          ) : null}
         </g>
-      );
+      )
     }
     case "complete_denture":
     case "removable_partial_denture":
@@ -306,7 +478,7 @@ function symbolFor(condition: string, paint: string, details: FindingDetails, to
           <line x1={3.5} y1={22.3} x2={20.5} y2={22.3} />
           <line x1={3.5} y1={24.3} x2={20.5} y2={24.3} />
         </g>
-      );
+      )
     case "transposition":
       // Dos flechas curvas entrecruzadas a la altura de los números.
       return (
@@ -314,30 +486,30 @@ function symbolFor(condition: string, paint: string, details: FindingDetails, to
           <path d="M8.2 2.5 Q12 0.3 15.8 2.2" markerEnd={marker} />
           <path d="M8.2 0.9 Q12 2.7 15.8 1.1" markerEnd={marker} />
         </g>
-      );
+      )
     default:
       // Solo sigla en recuadro/cabecera: sin dibujo sobre el gráfico.
-      return null;
+      return null
   }
 }
 
 interface ToothCanvasProps {
-  toothNumber: number;
-  entries: OdontogramEntry[];
-  showRoots: boolean;
-  flip: boolean;
-  grooves: boolean;
-  zoneLines: boolean;
-  className: string;
-  strokeScale: number;
-  mode: "static" | "paint" | "draw" | "paint-draw";
-  disabled?: boolean;
-  onPaint?: (surface: string) => void;
-  draftDrawing?: number[][][];
-  onDrawingChange?: (drawing: number[][][]) => void;
-  titleText: string;
-  editLabel: string;
-  clipId: string;
+  toothNumber: number
+  entries: OdontogramEntry[]
+  showRoots: boolean
+  flip: boolean
+  grooves: boolean
+  zoneLines: boolean
+  className: string
+  strokeScale: number
+  mode: "static" | "paint" | "draw" | "paint-draw"
+  disabled?: boolean
+  onPaint?: (surface: string) => void
+  draftDrawing?: number[][][]
+  onDrawingChange?: (drawing: number[][][]) => void
+  titleText: string
+  editLabel: string
+  clipId: string
 }
 
 /**
@@ -362,90 +534,95 @@ function ToothCanvas({
   editLabel,
   clipId,
 }: ToothCanvasProps) {
-  const svgRef = useRef<SVGSVGElement | null>(null);
-  const [live, setLive] = useState<number[][] | null>(null);
-  const drawingRef = useRef(false);
-  const liveRef = useRef<number[][]>([]);
-  const type = toothTypeOf(toothNumber);
-  const zones = zonesFor(toothNumber);
-  const silhouette = silhouetteFor(type);
-  const cropped = !showRoots;
-  const paintMode = (mode === "paint" || mode === "paint-draw") && !disabled;
-  const drawMode = (mode === "draw" || mode === "paint-draw") && !disabled;
-  const interactiveSvg = mode !== "static";
+  const svgRef = useRef<SVGSVGElement | null>(null)
+  const [live, setLive] = useState<number[][] | null>(null)
+  const drawingRef = useRef(false)
+  const liveRef = useRef<number[][]>([])
+  const type = toothTypeOf(toothNumber)
+  const zones = zonesFor(toothNumber)
+  const silhouette = silhouetteFor(type)
+  const cropped = !showRoots
+  const paintMode = (mode === "paint" || mode === "paint-draw") && !disabled
+  const drawMode = (mode === "draw" || mode === "paint-draw") && !disabled
+  const interactiveSvg = mode !== "static"
 
   const markers: Markers = {
     red: `${clipId}-m-red`,
     blue: `${clipId}-m-blue`,
-  };
+  }
 
   // Solo dibujo normativo rojo/azul: previos en revisión e incompletos no
   // generan símbolo (la cabecera sí los muestra con su advertencia).
-  const graphic: Array<{ entry: OdontogramEntry; paint: string }> = [];
+  const graphic: Array<{ entry: OdontogramEntry; paint: string }> = []
   for (const entry of entries) {
-    if (entry.needsReview) continue;
-    const paint = paintOf(entry);
-    if (paint) graphic.push({ entry, paint });
+    if (entry.needsReview) continue
+    const paint = paintOf(entry)
+    if (paint) graphic.push({ entry, paint })
   }
 
   // Rellenos y contornos normativos por superficie (coexisten todos los hallazgos).
-  const fillOf: Record<string, string> = {};
-  const contourOf: Record<string, string> = {};
+  const fillOf: Record<string, string> = {}
+  const contourOf: Record<string, string> = {}
   for (const { entry, paint } of graphic) {
-    if (!entry.surface) continue;
-    if (FILL_CONDITIONS[entry.condition] && !fillOf[entry.surface]) fillOf[entry.surface] = paint;
-    if (CONTOUR_CONDITIONS[entry.condition] && !contourOf[entry.surface]) contourOf[entry.surface] = paint;
+    if (!entry.surface) continue
+    if (FILL_CONDITIONS[entry.condition] && !fillOf[entry.surface]) fillOf[entry.surface] = paint
+    if (CONTOUR_CONDITIONS[entry.condition] && !contourOf[entry.surface])
+      contourOf[entry.surface] = paint
   }
 
-  const supernumeraryPaint = graphic.find((g) => g.entry.condition === "supernumerary_tooth")?.paint ?? BLUE;
-  const hasSupernumerary = graphic.some((g) => g.entry.condition === "supernumerary_tooth");
+  const supernumeraryPaint =
+    graphic.find((g) => g.entry.condition === "supernumerary_tooth")?.paint ?? BLUE
+  const hasSupernumerary = graphic.some((g) => g.entry.condition === "supernumerary_tooth")
 
   const toNorm = (clientX: number, clientY: number): [number, number] | null => {
-    const matrix = svgRef.current?.getScreenCTM();
-    if (!matrix) return null;
-    const point = new DOMPoint(clientX, clientY).matrixTransform(matrix.inverse());
-    const y = flip ? 28 - point.y : point.y;
-    return [Math.min(100, Math.max(0, point.x / 24 * 100)), Math.min(100, Math.max(0, y / 28 * 100))];
-  };
+    const matrix = svgRef.current?.getScreenCTM()
+    if (!matrix) return null
+    const point = new DOMPoint(clientX, clientY).matrixTransform(matrix.inverse())
+    const y = flip ? 28 - point.y : point.y
+    return [
+      Math.min(100, Math.max(0, (point.x / 24) * 100)),
+      Math.min(100, Math.max(0, (y / 28) * 100)),
+    ]
+  }
 
   const handlePointerDown = (event: React.PointerEvent<SVGRectElement>) => {
-    if (!drawMode || !onDrawingChange || event.button !== 0) return;
-    const point = toNorm(event.clientX, event.clientY);
-    if (!point) return;
-    event.stopPropagation();
-    event.preventDefault();
-    event.currentTarget.setPointerCapture(event.pointerId);
-    drawingRef.current = true;
-    liveRef.current = [point];
-    setLive(liveRef.current);
-  };
+    if (!drawMode || !onDrawingChange || event.button !== 0) return
+    const point = toNorm(event.clientX, event.clientY)
+    if (!point) return
+    event.stopPropagation()
+    event.preventDefault()
+    event.currentTarget.setPointerCapture(event.pointerId)
+    drawingRef.current = true
+    liveRef.current = [point]
+    setLive(liveRef.current)
+  }
 
   const handlePointerMove = (event: React.PointerEvent<SVGRectElement>) => {
-    if (!drawingRef.current || liveRef.current.length >= 512) return;
-    event.stopPropagation();
-    const point = toNorm(event.clientX, event.clientY);
-    if (!point) return;
-    const last = liveRef.current.at(-1);
-    if (last && (point[0] - last[0]) ** 2 + (point[1] - last[1]) ** 2 < 1.44) return;
-    liveRef.current = [...liveRef.current, point];
-    setLive(liveRef.current);
-  };
+    if (!drawingRef.current || liveRef.current.length >= 512) return
+    event.stopPropagation()
+    const point = toNorm(event.clientX, event.clientY)
+    if (!point) return
+    const last = liveRef.current.at(-1)
+    if (last && (point[0] - last[0]) ** 2 + (point[1] - last[1]) ** 2 < 1.44) return
+    liveRef.current = [...liveRef.current, point]
+    setLive(liveRef.current)
+  }
 
   const finishStroke = (event: React.PointerEvent<SVGRectElement>) => {
-    if (!drawingRef.current) return;
-    event.stopPropagation();
-    drawingRef.current = false;
-    const stroke = liveRef.current;
-    liveRef.current = [];
-    setLive(null);
+    if (!drawingRef.current) return
+    event.stopPropagation()
+    drawingRef.current = false
+    const stroke = liveRef.current
+    liveRef.current = []
+    setLive(null)
     if (event.type !== "pointercancel" && stroke.length >= 2 && (draftDrawing?.length ?? 0) < 64) {
-      onDrawingChange?.([...(draftDrawing ?? []), stroke]);
+      onDrawingChange?.([...(draftDrawing ?? []), stroke])
     }
-  };
+  }
 
   const renderStroke = (stroke: number[][], color: string, key: string, fill = false) => {
     if (stroke.length === 1) {
-      const [x, y] = stroke[0];
+      const [x, y] = stroke[0]
       return (
         <circle
           key={key}
@@ -456,12 +633,14 @@ function ToothCanvas({
           pointerEvents="none"
           aria-hidden="true"
         />
-      );
+      )
     }
     return (
       <polyline
         key={key}
-        points={stroke.map((p) => `${((p[0] / 100) * 24).toFixed(2)},${((p[1] / 100) * 28).toFixed(2)}`).join(" ")}
+        points={stroke
+          .map((p) => `${((p[0] / 100) * 24).toFixed(2)},${((p[1] / 100) * 28).toFixed(2)}`)
+          .join(" ")}
         fill={fill && stroke.length >= 3 ? color : "none"}
         stroke={color}
         strokeWidth={0.9}
@@ -470,23 +649,30 @@ function ToothCanvas({
         pointerEvents="none"
         aria-hidden="true"
       />
-    );
-  };
-
-  const persistedStrokes: Array<{ stroke: number[][]; color: string; key: string; fill: boolean }> = [];
-  for (const { entry, paint } of graphic) {
-    const drawing = detailsOf(entry).drawing;
-    if (!drawing) continue;
-    drawing.forEach((stroke, i) => {
-      if (stroke.length > 0) persistedStrokes.push({ stroke, color: paint, key: `${entry.id}-draw-${i}`, fill: !!FILL_CONDITIONS[entry.condition] });
-    });
+    )
   }
-  const draftGraphic = graphic.find(({ entry }) => entry.id.startsWith("draft-"));
+
+  const persistedStrokes: Array<{ stroke: number[][]; color: string; key: string; fill: boolean }> =
+    []
+  for (const { entry, paint } of graphic) {
+    const drawing = detailsOf(entry).drawing
+    if (!drawing) continue
+    drawing.forEach((stroke, i) => {
+      if (stroke.length > 0)
+        persistedStrokes.push({
+          stroke,
+          color: paint,
+          key: `${entry.id}-draw-${i}`,
+          fill: !!FILL_CONDITIONS[entry.condition],
+        })
+    })
+  }
+  const draftGraphic = graphic.find(({ entry }) => entry.id.startsWith("draft-"))
 
   const handlePaint = (surface: string, event: React.SyntheticEvent) => {
-    event.stopPropagation();
-    if (!disabled) onPaint?.(surface);
-  };
+    event.stopPropagation()
+    if (!disabled) onPaint?.(surface)
+  }
 
   return (
     <svg
@@ -503,7 +689,12 @@ function ToothCanvas({
         <clipPath id={clipId}>
           <path d={silhouette.crown} />
         </clipPath>
-        {([["red", RED], ["blue", BLUE]] as const).map(([name, color]) => (
+        {(
+          [
+            ["red", RED],
+            ["blue", BLUE],
+          ] as const
+        ).map(([name, color]) => (
           <marker
             key={name}
             id={`${clipId}-m-${name}`}
@@ -528,8 +719,8 @@ function ToothCanvas({
         </g>
         <g clipPath={`url(#${clipId})`}>
           {zones.map((zone) => {
-            const fill = fillOf[zone.surface] ?? "fill-white";
-            const isPainted = fill !== "fill-white";
+            const fill = fillOf[zone.surface] ?? "fill-white"
+            const isPainted = fill !== "fill-white"
             const common = {
               "data-surface": zone.surface,
               points: zone.points,
@@ -539,13 +730,11 @@ function ToothCanvas({
               strokeWidth: 0.3,
               fillOpacity: isPainted ? 1 : 0.55,
               style: { pointerEvents: paintMode ? ("auto" as const) : ("none" as const) },
-            };
-            if (!paintMode) {
-              return <polygon key={zone.surface} {...common} aria-hidden="true" />;
             }
-            const winner = graphic.find(
-              ({ entry }) => entry.surface === zone.surface,
-            )?.entry;
+            if (!paintMode) {
+              return <polygon key={zone.surface} {...common} aria-hidden="true" />
+            }
+            const winner = graphic.find(({ entry }) => entry.surface === zone.surface)?.entry
             return (
               <polygon
                 key={zone.surface}
@@ -559,16 +748,16 @@ function ToothCanvas({
                 onClick={(e) => handlePaint(zone.surface, e)}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" || e.key === " ") {
-                    e.preventDefault();
-                    handlePaint(zone.surface, e);
+                    e.preventDefault()
+                    handlePaint(zone.surface, e)
                   }
                 }}
               />
-            );
+            )
           })}
           {(Object.entries(contourOf) as Array<[string, string]>).map(([surface, color]) => {
-            const zone = zones.find((z) => z.surface === surface);
-            if (!zone) return null;
+            const zone = zones.find((z) => z.surface === surface)
+            if (!zone) return null
             return (
               <polygon
                 key={`contour-${surface}`}
@@ -579,48 +768,62 @@ function ToothCanvas({
                 pointerEvents="none"
                 aria-hidden="true"
               />
-            );
+            )
           })}
         </g>
-          {persistedStrokes.map((s) => renderStroke(s.stroke, s.color, s.key, s.fill))}
-          {live && draftGraphic ? renderStroke(live, draftGraphic.paint, "live", !!FILL_CONDITIONS[draftGraphic.entry.condition]) : null}
-          {graphic.map(({ entry, paint }) => {
-            const node = symbolFor(entry.condition, paint, detailsOf(entry), toothNumber, markers, entry.surface);
-            if (!node) return null;
-            return <g key={`${entry.id}-symbol`}>{node}</g>;
-          })}
-          {grooves
-            ? groovesFor(type).map((d) => (
-                <path
-                  key={d}
-                  d={d}
-                  fill="none"
-                  stroke="#9ca3af"
-                  strokeWidth={0.45}
-                  opacity={0.7}
-                  pointerEvents="none"
-                  aria-hidden="true"
-                />
-              ))
-            : null}
-          {drawMode ? (
-            <rect
-              x={0}
-              y={0}
-              width={24}
-              height={28}
-              fill="#fff"
-              fillOpacity={0}
-              style={{ touchAction: "none", cursor: "crosshair" }}
-              tabIndex={0}
-              role="button"
-              aria-label={`Dibujo libre sobre la pieza ${toothNumber}. Arrastre para trazar la forma observada.`}
-              onPointerDown={handlePointerDown}
-              onPointerMove={handlePointerMove}
-              onPointerUp={finishStroke}
-              onPointerCancel={finishStroke}
-            />
-          ) : null}
+        {persistedStrokes.map((s) => renderStroke(s.stroke, s.color, s.key, s.fill))}
+        {live && draftGraphic
+          ? renderStroke(
+              live,
+              draftGraphic.paint,
+              "live",
+              !!FILL_CONDITIONS[draftGraphic.entry.condition],
+            )
+          : null}
+        {graphic.map(({ entry, paint }) => {
+          const node = symbolFor(
+            entry.condition,
+            paint,
+            detailsOf(entry),
+            toothNumber,
+            markers,
+            entry.surface,
+          )
+          if (!node) return null
+          return <g key={`${entry.id}-symbol`}>{node}</g>
+        })}
+        {grooves
+          ? groovesFor(type).map((d) => (
+              <path
+                key={d}
+                d={d}
+                fill="none"
+                stroke="#9ca3af"
+                strokeWidth={0.45}
+                opacity={0.7}
+                pointerEvents="none"
+                aria-hidden="true"
+              />
+            ))
+          : null}
+        {drawMode ? (
+          <rect
+            x={0}
+            y={0}
+            width={24}
+            height={28}
+            fill="#fff"
+            fillOpacity={0}
+            style={{ touchAction: "none", cursor: "crosshair" }}
+            tabIndex={0}
+            role="button"
+            aria-label={`Dibujo libre sobre la pieza ${toothNumber}. Arrastre para trazar la forma observada.`}
+            onPointerDown={handlePointerDown}
+            onPointerMove={handlePointerMove}
+            onPointerUp={finishStroke}
+            onPointerCancel={finishStroke}
+          />
+        ) : null}
       </g>
       {hasSupernumerary ? (
         <text
@@ -638,9 +841,8 @@ function ToothCanvas({
         </text>
       ) : null}
     </svg>
-  );
+  )
 }
-
 
 export function ToothSVG({
   toothNumber,
@@ -656,28 +858,28 @@ export function ToothSVG({
   draftDrawing,
   drawingEnabled = false,
 }: ToothSVGProps) {
-  const clipId = useId();
-  const quadrant = Math.trunc(toothNumber / 10);
-  const upper = quadrant === 1 || quadrant === 2 || quadrant === 5 || quadrant === 6;
+  const clipId = useId()
+  const quadrant = Math.trunc(toothNumber / 10)
+  const upper = quadrant === 1 || quadrant === 2 || quadrant === 5 || quadrant === 6
 
-  const lines = entries.map((entry) => entryLine(entry, toothNumber));
-  const title = `Pieza ${toothNumber} — ${lines.length > 0 ? lines.join("; ") : "sin hallazgos"}`;
-  const pieceLabel = `Pieza ${toothNumber}: ${lines.length > 0 ? lines.join("; ") : "sin hallazgos"}. Seleccionar pieza.`;
-  const editLabel = `Edición de la pieza ${toothNumber}: superficies pintables y dibujo libre de la forma observada.`;
+  const lines = entries.map((entry) => entryLine(entry, toothNumber))
+  const title = `Pieza ${toothNumber} — ${lines.length > 0 ? lines.join("; ") : "sin hallazgos"}`
+  const pieceLabel = `Pieza ${toothNumber}: ${lines.length > 0 ? lines.join("; ") : "sin hallazgos"}. Seleccionar pieza.`
+  const editLabel = `Edición de la pieza ${toothNumber}: superficies pintables y dibujo libre de la forma observada.`
 
-  const isTile = size === "tile";
-  const isPreview = size === "preview";
+  const isTile = size === "tile"
+  const isPreview = size === "preview"
   // Sin raíces la corona ocupa todo el viewBox: crop real sin hueco invisible.
   // El flip por cuadrante solo aplica al tile con raíces; en arco/preview la
   // orientación la define el arco (rotación) o es natural (preview).
-  const flip = upper && showRoots;
-  const drawActive = drawingEnabled && !disabled;
+  const flip = upper && showRoots
+  const drawActive = drawingEnabled && !disabled
   const mode: ToothCanvasProps["mode"] =
-    painting && drawActive ? "paint-draw" : painting ? "paint" : drawActive ? "draw" : "static";
+    painting && drawActive ? "paint-draw" : painting ? "paint" : drawActive ? "draw" : "static"
 
   const handleSelect = (event?: React.MouseEvent) => {
-    if (!disabled) onSelect?.(event);
-  };
+    if (!disabled) onSelect?.(event)
+  }
 
   const canvas = (
     <ToothCanvas
@@ -698,15 +900,15 @@ export function ToothSVG({
       editLabel={editLabel}
       clipId={clipId}
     />
-  );
+  )
 
   const tileClass = `flex min-h-11 min-w-11 cursor-pointer flex-col items-center gap-0.5 rounded-md border bg-background p-1 transition-colors ${
     selected ? "border-violet-700 ring-2 ring-violet-600" : "hover:ring-2 hover:ring-ring"
-  } ${disabled ? "cursor-not-allowed opacity-60" : ""}`;
+  } ${disabled ? "cursor-not-allowed opacity-60" : ""}`
 
   const archClass = `rounded bg-transparent p-0 transition-shadow ${
     selected ? "ring-2 ring-violet-600" : disabled ? "" : "hover:ring-2 hover:ring-ring"
-  } ${disabled ? (isPreview ? "" : "cursor-not-allowed opacity-60") : "cursor-pointer"}`;
+  } ${disabled ? (isPreview ? "" : "cursor-not-allowed opacity-60") : "cursor-pointer"}`
 
   if (!isTile && mode === "static") {
     return (
@@ -722,7 +924,7 @@ export function ToothSVG({
       >
         {canvas}
       </button>
-    );
+    )
   }
 
   if (!isTile) {
@@ -730,7 +932,7 @@ export function ToothSVG({
       <div onClick={handleSelect} title={title} data-tooth={toothNumber} className={archClass}>
         {canvas}
       </div>
-    );
+    )
   }
 
   if (mode === "static") {
@@ -750,7 +952,7 @@ export function ToothSVG({
           {toothNumber}
         </span>
       </button>
-    );
+    )
   }
 
   return (
@@ -764,8 +966,8 @@ export function ToothSVG({
       <button
         type="button"
         onClick={(e) => {
-          e.stopPropagation();
-          handleSelect();
+          e.stopPropagation()
+          handleSelect()
         }}
         disabled={disabled}
         aria-label={pieceLabel}
@@ -775,5 +977,5 @@ export function ToothSVG({
         {toothNumber}
       </button>
     </div>
-  );
+  )
 }

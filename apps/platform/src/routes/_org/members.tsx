@@ -1,131 +1,147 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createFileRoute, getRouteApi } from "@tanstack/react-router";
-import { useForm } from "@tanstack/react-form";
 import {
-  getCoreRowModel,
-  useReactTable,
-  type ColumnDef,
-} from "@tanstack/react-table";
-import { Badge, Button, Field, FieldError, FieldLabel, Input, toast } from "@odentia/ui";
-import {
+  Badge,
+  Button,
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from "@odentia/ui";
-import { ConfirmDialog, DataTable, EmptyState, ErrorState, FilterBar, FormDrawer, LoadingState, PageHeader, RowActions, common, fieldErrorMessages, useListSearch } from "@odentia/ui-patterns";
-import { Plus } from "lucide-react";
-import { useMemo, useState } from "react";
-import { z } from "zod";
-import { authClient } from "../../lib/auth-client";
+  Field,
+  FieldError,
+  FieldLabel,
+  Input,
+  toast,
+} from "@odentia/ui"
+import {
+  ConfirmDialog,
+  common,
+  DataTable,
+  EmptyState,
+  ErrorState,
+  FilterBar,
+  FormDrawer,
+  fieldErrorMessages,
+  LoadingState,
+  PageHeader,
+  RowActions,
+  useListSearch,
+} from "@odentia/ui-patterns"
+import { useForm } from "@tanstack/react-form"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { createFileRoute, getRouteApi } from "@tanstack/react-router"
+import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-table"
+import { Plus } from "lucide-react"
+import { useMemo, useState } from "react"
+import { z } from "zod"
+import { authClient } from "../../lib/auth-client"
 
 export const Route = createFileRoute("/_org/members")({
   component: MembersPage,
-});
+})
 
-const orgRouteApi = getRouteApi("/_org");
+const orgRouteApi = getRouteApi("/_org")
 
 interface FullOrganization {
-  id: string;
-  name: string;
-  members: { id: string; userId: string; role: string; user: { email: string; name: string } }[];
-  invitations: { id: string; email: string; role: string; status: string }[];
+  id: string
+  name: string
+  members: { id: string; userId: string; role: string; user: { email: string; name: string } }[]
+  invitations: { id: string; email: string; role: string; status: string }[]
 }
 
 const inviteSchema = z.object({
   email: z.string().email("Correo inválido"),
   role: z.enum(["member", "admin"]),
-});
+})
 
 function MembersPage() {
-  const queryClient = useQueryClient();
-  const listSearch = useListSearch();
-  const search = listSearch.get("q") ?? "";
-  const roleFilter = listSearch.get("rol");
-  const sort = listSearch.get("sort");
-  const hasCriteria = search !== "" || roleFilter !== undefined;
-  const [inviteOpen, setInviteOpen] = useState(false);
-  const [removing, setRemoving] = useState<{ id: string; label: string } | null>(null);
+  const queryClient = useQueryClient()
+  const listSearch = useListSearch()
+  const search = listSearch.get("q") ?? ""
+  const roleFilter = listSearch.get("rol")
+  const sort = listSearch.get("sort")
+  const hasCriteria = search !== "" || roleFilter !== undefined
+  const [inviteOpen, setInviteOpen] = useState(false)
+  const [removing, setRemoving] = useState<{ id: string; label: string } | null>(null)
 
-  const { org: routeOrg, session } = orgRouteApi.useRouteContext();
+  const { org: routeOrg, session } = orgRouteApi.useRouteContext()
 
   const orgQuery = useQuery({
     queryKey: ["full-org", routeOrg.id],
     queryFn: async () =>
-      (await authClient.organization.getFullOrganization({
-        query: { organizationId: routeOrg.id },
-      })).data as FullOrganization | null,
-  });
+      (
+        await authClient.organization.getFullOrganization({
+          query: { organizationId: routeOrg.id },
+        })
+      ).data as FullOrganization | null,
+  })
 
-  const myRole =
-    orgQuery.data?.members.find((m) => m.userId === session.userId)?.role ?? "member";
-  const canWrite = myRole === "owner" || myRole === "admin";
+  const myRole = orgQuery.data?.members.find((m) => m.userId === session.userId)?.role ?? "member"
+  const canWrite = myRole === "owner" || myRole === "admin"
   const inviteMutation = useMutation({
     mutationFn: async (values: z.infer<typeof inviteSchema>) => {
       const { error: inviteError } = await authClient.organization.inviteMember({
         email: values.email,
         role: values.role,
         organizationId: routeOrg.id,
-      });
-      if (inviteError) throw new Error(inviteError.message ?? "No se pudo invitar.");
+      })
+      if (inviteError) throw new Error(inviteError.message ?? "No se pudo invitar.")
     },
     onSuccess: async () => {
-      setInviteOpen(false);
-      await queryClient.invalidateQueries({ queryKey: ["full-org"] });
+      setInviteOpen(false)
+      await queryClient.invalidateQueries({ queryKey: ["full-org"] })
     },
     onError: (cause) => toast.error(cause.message),
-  });
+  })
 
   const form = useForm({
     defaultValues: { email: "", role: "member" as "member" | "admin" },
     validators: { onSubmit: inviteSchema },
     onSubmit: async ({ value, formApi }) => {
-      await inviteMutation.mutateAsync(value);
-      formApi.reset();
+      await inviteMutation.mutateAsync(value)
+      formApi.reset()
     },
-  });
+  })
 
   const roleMutation = useMutation({
     mutationFn: async ({ memberId, role }: { memberId: string; role: string }) => {
       const { error: roleError } = await authClient.organization.updateMemberRole({
         memberId,
         role: role as "member" | "admin",
-      });
-      if (roleError) throw new Error(roleError.message ?? "No se pudo cambiar el rol.");
+      })
+      if (roleError) throw new Error(roleError.message ?? "No se pudo cambiar el rol.")
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["full-org"] }),
     onError: (cause) => toast.error(cause.message),
-  });
+  })
 
   const removeMutation = useMutation({
     mutationFn: async (memberIdOrEmail: string) => {
       const { error: removeError } = await authClient.organization.removeMember({
         memberIdOrEmail,
         organizationId: routeOrg.id,
-      });
-      if (removeError) throw new Error(removeError.message ?? "No se pudo revocar.");
+      })
+      if (removeError) throw new Error(removeError.message ?? "No se pudo revocar.")
     },
     onSuccess: async () => {
-      setRemoving(null);
-      await queryClient.invalidateQueries({ queryKey: ["full-org"] });
+      setRemoving(null)
+      await queryClient.invalidateQueries({ queryKey: ["full-org"] })
     },
     onError: (cause) => toast.error(cause.message),
-  });
+  })
 
   const cancelInvitationMutation = useMutation({
     mutationFn: async (invitationId: string) => {
       const { error: cancelError } = await authClient.organization.cancelInvitation({
         invitationId,
-      });
-      if (cancelError) throw new Error(cancelError.message ?? "No se pudo revocar la invitación.");
+      })
+      if (cancelError) throw new Error(cancelError.message ?? "No se pudo revocar la invitación.")
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["full-org"] }),
     onError: (cause) => toast.error(cause.message),
-  });
+  })
 
-  const org = orgQuery.data;
+  const org = orgQuery.data
 
-  type Membership = NonNullable<typeof org>["members"][number];
+  type Membership = NonNullable<typeof org>["members"][number]
 
   const columns = useMemo<ColumnDef<Membership>[]>(
     () => [
@@ -152,8 +168,8 @@ function MembersPage() {
         id: "actions",
         header: "",
         cell: ({ row }) => {
-          const membership = row.original;
-          if (!canWrite || membership.role === "owner") return null;
+          const membership = row.original
+          if (!canWrite || membership.role === "owner") return null
           return (
             <div className="text-right">
               <RowActions
@@ -178,37 +194,38 @@ function MembersPage() {
                 ]}
               />
             </div>
-          );
+          )
         },
       },
     ],
     [canWrite, roleMutation],
-  );
+  )
   const filteredMembers = useMemo(() => {
-    const needle = search.toLowerCase();
+    const needle = search.toLowerCase()
     const rows = (org?.members ?? []).filter((member) => {
-      if (roleFilter && member.role !== roleFilter) return false;
+      if (roleFilter && member.role !== roleFilter) return false
       if (needle && !`${member.user.name} ${member.user.email}`.toLowerCase().includes(needle))
-        return false;
-      return true;
-    });
-    if (!sort) return rows;
-    const desc = sort.startsWith("-");
-    const field = desc ? sort.slice(1) : sort;
-    const direction = desc ? -1 : 1;
-    const roleRanks: Record<string, number> = { owner: 0, admin: 1, member: 2 };
+        return false
+      return true
+    })
+    if (!sort) return rows
+    const desc = sort.startsWith("-")
+    const field = desc ? sort.slice(1) : sort
+    const direction = desc ? -1 : 1
+    const roleRanks: Record<string, number> = { owner: 0, admin: 1, member: 2 }
     return [...rows].sort((a, b) => {
-      if (field === "rol") return direction * ((roleRanks[a.role] ?? 99) - (roleRanks[b.role] ?? 99));
-      if (field === "nombre") return direction * a.user.name.localeCompare(b.user.name, "es");
-      return 0;
-    });
-  }, [org?.members, search, roleFilter, sort]);
+      if (field === "rol")
+        return direction * ((roleRanks[a.role] ?? 99) - (roleRanks[b.role] ?? 99))
+      if (field === "nombre") return direction * a.user.name.localeCompare(b.user.name, "es")
+      return 0
+    })
+  }, [org?.members, search, roleFilter, sort])
 
   const table = useReactTable({
     data: filteredMembers,
     columns,
     getCoreRowModel: getCoreRowModel(),
-  });
+  })
 
   return (
     <div className="flex flex-col gap-6">
@@ -221,8 +238,8 @@ function MembersPage() {
               type="button"
               className="min-h-11"
               onClick={() => {
-                form.reset();
-                setInviteOpen(true);
+                form.reset()
+                setInviteOpen(true)
               }}
             >
               <Plus aria-hidden />
@@ -260,8 +277,8 @@ function MembersPage() {
         submitLabel="Invitar"
         cancelLabel={common.actions.cancel}
         onSubmit={(event) => {
-          event.preventDefault();
-          void form.handleSubmit();
+          event.preventDefault()
+          void form.handleSubmit()
         }}
       >
         <form.Field name="email">
@@ -275,9 +292,7 @@ function MembersPage() {
                 value={field.state.value}
                 onChange={(event) => field.handleChange(event.target.value)}
               />
-              <FieldError>
-                {fieldErrorMessages(field.state.meta.errors)[0] ?? null}
-              </FieldError>
+              <FieldError>{fieldErrorMessages(field.state.meta.errors)[0] ?? null}</FieldError>
             </Field>
           )}
         </form.Field>
@@ -310,7 +325,10 @@ function MembersPage() {
       {orgQuery.isLoading ? (
         <LoadingState />
       ) : orgQuery.isError ? (
-        <ErrorState message="No se pudo cargar la organización." onRetry={() => void orgQuery.refetch()} />
+        <ErrorState
+          message="No se pudo cargar la organización."
+          onRetry={() => void orgQuery.refetch()}
+        />
       ) : !org ? (
         <EmptyState title="Sin organización activa" />
       ) : (
@@ -373,5 +391,5 @@ function MembersPage() {
         pending={removeMutation.isPending}
       />
     </div>
-  );
+  )
 }

@@ -1,9 +1,9 @@
-import { cn } from "@odentia/ui";
-import * as React from "react";
+import { cn } from "@odentia/ui"
+import type * as React from "react"
 
 export interface PageShellProps {
-  children: React.ReactNode;
-  className?: string;
+  children: React.ReactNode
+  className?: string
 }
 
 /**
@@ -12,9 +12,5 @@ export interface PageShellProps {
  * en la app; este PageShell es el contenedor mínimo compartido.
  */
 export function PageShell({ children, className }: PageShellProps) {
-  return (
-    <div className={cn("bg-muted p-6 h-full", className)}>
-      {children}
-    </div>
-  );
+  return <div className={cn("bg-muted p-6 h-full", className)}>{children}</div>
 }

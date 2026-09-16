@@ -1,10 +1,8 @@
-import * as React from "react";
-import { ChevronDown, ExternalLink, LogOut } from "lucide-react";
-import type { LucideIcon } from "lucide-react";
 import {
   Avatar,
   AvatarFallback,
   AvatarImage,
+  cn,
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -26,77 +24,79 @@ import {
   SidebarRail,
   SidebarTrigger,
   TooltipProvider,
-  cn,
   useSidebar,
-} from "@odentia/ui";
+} from "@odentia/ui"
+import type { LucideIcon } from "lucide-react"
+import { ChevronDown, ExternalLink, LogOut } from "lucide-react"
+import * as React from "react"
 // ----- Types -----
 export type AppShellNavItem = {
-  label: string;
-  to: string;
-  icon: LucideIcon;
-  badge?: string | number;
-  external?: boolean;
-};
+  label: string
+  to: string
+  icon: LucideIcon
+  badge?: string | number
+  external?: boolean
+}
 
 export type AppShellNavGroup = {
-  label: string;
-  icon?: LucideIcon;
-  children: AppShellNavItem[];
-  defaultOpen?: boolean;
-};
+  label: string
+  icon?: LucideIcon
+  children: AppShellNavItem[]
+  defaultOpen?: boolean
+}
 
-export type AppShellNavEntry = AppShellNavItem | AppShellNavGroup;
+export type AppShellNavEntry = AppShellNavItem | AppShellNavGroup
 
-export type AppShellUser = { name: string; email?: string; avatarUrl?: string };
+export type AppShellUser = { name: string; email?: string; avatarUrl?: string }
 
 export type AppShellUserMenuItem = {
-  label: string;
-  icon: LucideIcon;
-  to: string;
-  search?: Record<string, string>;
-};
+  label: string
+  icon: LucideIcon
+  to: string
+  search?: Record<string, string>
+}
 
 export interface AppShellProps {
-  items: AppShellNavEntry[];
+  items: AppShellNavEntry[]
   LinkComponent: React.ComponentType<{
-    to: string;
-    search?: Record<string, string>;
-    className?: string;
-    children: React.ReactNode;
-    title?: string;
-    onClick?: () => void;
-  }>;
-  pathname: string;
-  user: AppShellUser;
-  userMenuItems?: AppShellUserMenuItem[];
-  onSignOut: () => void;
-  brand: React.ReactNode;
-  searchSlot?: React.ReactNode;
-  topbarActions?: React.ReactNode;
-  sidebarFooter?: React.ReactNode;
+    to: string
+    search?: Record<string, string>
+    className?: string
+    children: React.ReactNode
+    title?: string
+    onClick?: () => void
+  }>
+  pathname: string
+  user: AppShellUser
+  userMenuItems?: AppShellUserMenuItem[]
+  onSignOut: () => void
+  brand: React.ReactNode
+  searchSlot?: React.ReactNode
+  topbarActions?: React.ReactNode
+  sidebarFooter?: React.ReactNode
   /** Pantallas operativas densas (POS, KDS, tablas): usa todo el ancho. Default contenido 1280px. */
-  fluid?: boolean;
-  children: React.ReactNode;
+  fluid?: boolean
+  children: React.ReactNode
 }
 
 export function isNavItemActive(pathname: string, to: string): boolean {
-  if (to === "/") return pathname === "/";
-  if (pathname === to) return true;
-  return pathname.startsWith(`${to}/`);
+  if (to === "/") return pathname === "/"
+  if (pathname === to) return true
+  return pathname.startsWith(`${to}/`)
 }
 
 function isGroup(entry: AppShellNavEntry): entry is AppShellNavGroup {
   return (
     (entry as AppShellNavGroup).children !== undefined &&
     Array.isArray((entry as AppShellNavGroup).children)
-  );
+  )
 }
 
 // ----- PageHeader — header por página, no global -----
 export function PageHeader(props: {
-  title: string;
-  subtitle?: string;
-  actions?: React.ReactNode;
+  title: string
+  subtitle?: string
+  actions?: React.ReactNode
 }): React.JSX.Element {
   return (
     <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
@@ -110,7 +110,7 @@ export function PageHeader(props: {
         <div className="flex shrink-0 items-center gap-2">{props.actions}</div>
       ) : null}
     </div>
-  );
+  )
 }
 
 // ----- Navegación -----
@@ -126,12 +126,12 @@ function NavItemButton({
   pathname,
   LinkComponent,
 }: {
-  item: AppShellNavItem;
-  pathname: string;
-  LinkComponent: AppShellProps["LinkComponent"];
+  item: AppShellNavItem
+  pathname: string
+  LinkComponent: AppShellProps["LinkComponent"]
 }) {
-  const { setOpenMobile } = useSidebar();
-  const active = isNavItemActive(pathname, item.to);
+  const { setOpenMobile } = useSidebar()
+  const active = isNavItemActive(pathname, item.to)
   return (
     <SidebarMenuItem>
       <SidebarMenuButton
@@ -139,19 +139,19 @@ function NavItemButton({
         tooltip={item.label}
         aria-current={active ? "page" : undefined}
         render={(props) => {
-          const { onClick, children, ...rest } = props;
+          const { onClick, children, ...rest } = props
           return (
             <LinkComponent
               to={item.to}
               {...rest}
               onClick={() => {
-                setOpenMobile(false);
-                (onClick as unknown as (event?: unknown) => void)?.();
+                setOpenMobile(false)
+                ;(onClick as unknown as (event?: unknown) => void)?.()
               }}
             >
               {children as React.ReactNode}
             </LinkComponent>
-          );
+          )
         }}
       >
         <item.icon />
@@ -160,7 +160,7 @@ function NavItemButton({
       </SidebarMenuButton>
       {item.badge ? <SidebarMenuBadge>{item.badge}</SidebarMenuBadge> : null}
     </SidebarMenuItem>
-  );
+  )
 }
 
 function NavGroup({
@@ -168,21 +168,17 @@ function NavGroup({
   pathname,
   LinkComponent,
 }: {
-  group: AppShellNavGroup;
-  pathname: string;
-  LinkComponent: AppShellProps["LinkComponent"];
+  group: AppShellNavGroup
+  pathname: string
+  LinkComponent: AppShellProps["LinkComponent"]
 }) {
-  const [open, setOpen] = React.useState(group.defaultOpen ?? true);
-  const Icon = group.icon;
+  const [open, setOpen] = React.useState(group.defaultOpen ?? true)
+  const Icon = group.icon
   return (
     <SidebarGroup>
       <SidebarGroupLabel
         render={
-          <button
-            type="button"
-            aria-expanded={open}
-            onClick={() => setOpen((value) => !value)}
-          />
+          <button type="button" aria-expanded={open} onClick={() => setOpen((value) => !value)} />
         }
         className="w-full justify-between hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
       >
@@ -209,7 +205,7 @@ function NavGroup({
         </SidebarGroupContent>
       ) : null}
     </SidebarGroup>
-  );
+  )
 }
 
 /**
@@ -222,25 +218,25 @@ function SidebarNav({
   pathname,
   LinkComponent,
 }: {
-  items: AppShellNavEntry[];
-  pathname: string;
-  LinkComponent: AppShellProps["LinkComponent"];
+  items: AppShellNavEntry[]
+  pathname: string
+  LinkComponent: AppShellProps["LinkComponent"]
 }) {
-  const runs: AppShellNavEntry[][] = [];
+  const runs: AppShellNavEntry[][] = []
   for (const entry of items) {
     if (isGroup(entry)) {
-      runs.push([entry]);
+      runs.push([entry])
     } else {
-      const last = runs[runs.length - 1];
-      if (last && !isGroup(last[0]!)) last.push(entry);
-      else runs.push([entry]);
+      const last = runs[runs.length - 1]
+      if (last && !isGroup(last[0]!)) last.push(entry)
+      else runs.push([entry])
     }
   }
 
   return (
     <SidebarContent>
       {runs.map((run, runIndex) => {
-        const first = run[0]!;
+        const first = run[0]!
         if (isGroup(first)) {
           return (
             <NavGroup
@@ -249,14 +245,14 @@ function SidebarNav({
               pathname={pathname}
               LinkComponent={LinkComponent}
             />
-          );
+          )
         }
         return (
           <SidebarGroup key={`run-${runIndex}`}>
             <SidebarGroupContent>
               <SidebarMenu>
                 {run.map((entry) => {
-                  const item = entry as AppShellNavItem;
+                  const item = entry as AppShellNavItem
                   return (
                     <NavItemButton
                       key={item.to}
@@ -264,15 +260,15 @@ function SidebarNav({
                       pathname={pathname}
                       LinkComponent={LinkComponent}
                     />
-                  );
+                  )
                 })}
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>
-        );
+        )
       })}
     </SidebarContent>
-  );
+  )
 }
 
 // ----- AppShell — layout estándar sobre Sidebar: el primitivo resuelve las
@@ -281,9 +277,19 @@ function SidebarNav({
 // `searchSlot`/`topbarActions` siguen en la API pública sin renderizar, igual
 // que antes de la migración. -----
 export function AppShell(props: AppShellProps): React.JSX.Element {
-  const { items, LinkComponent, pathname, user, userMenuItems, onSignOut, brand, sidebarFooter, fluid, children } =
-    props;
-  const initial = user.name?.trim().charAt(0).toUpperCase() || "U";
+  const {
+    items,
+    LinkComponent,
+    pathname,
+    user,
+    userMenuItems,
+    onSignOut,
+    brand,
+    sidebarFooter,
+    fluid,
+    children,
+  } = props
+  const initial = user.name?.trim().charAt(0).toUpperCase() || "U"
 
   const userMenuContent = (
     <>
@@ -291,7 +297,7 @@ export function AppShell(props: AppShellProps): React.JSX.Element {
         <DropdownMenuItem
           key={item.label}
           render={(menuProps) => {
-            const { onClick, ...rest } = menuProps;
+            const { onClick, ...rest } = menuProps
             return (
               <LinkComponent
                 to={item.to}
@@ -301,7 +307,7 @@ export function AppShell(props: AppShellProps): React.JSX.Element {
               >
                 {menuProps.children}
               </LinkComponent>
-            );
+            )
           }}
         >
           <item.icon />
@@ -314,7 +320,7 @@ export function AppShell(props: AppShellProps): React.JSX.Element {
         Cerrar sesión
       </DropdownMenuItem>
     </>
-  );
+  )
 
   return (
     <TooltipProvider>
@@ -335,7 +341,9 @@ export function AppShell(props: AppShellProps): React.JSX.Element {
                   <AvatarFallback>{initial}</AvatarFallback>
                 </Avatar>
                 <div className="min-w-0 flex-1 group-data-[collapsible=icon]:hidden">
-                  <p className="truncate text-sm font-medium text-sidebar-foreground">{user.name}</p>
+                  <p className="truncate text-sm font-medium text-sidebar-foreground">
+                    {user.name}
+                  </p>
                   {user.email ? (
                     <p className="truncate text-xs text-sidebar-foreground/70">{user.email}</p>
                   ) : null}
@@ -349,11 +357,9 @@ export function AppShell(props: AppShellProps): React.JSX.Element {
           <SidebarRail />
         </Sidebar>
         <SidebarInset>
-          <main className="min-h-svh">
-            {children}
-          </main>
+          <main className="min-h-svh">{children}</main>
         </SidebarInset>
       </SidebarProvider>
     </TooltipProvider>
-  );
+  )
 }

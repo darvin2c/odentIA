@@ -2,7 +2,7 @@
  * NTS 188-MINSA/DGIESP-2022: hallazgos 6.1.1–6.1.38 y observaciones 5.15.
  * Fuente: RM 559-2022-MINSA. La numeración dental corresponde a ISO 3950.
  */
-import type { FindingDefinition } from "./types.js";
+import type { FindingDefinition } from "./types.js"
 
 export const FINDINGS: readonly FindingDefinition[] = [
   {
@@ -149,7 +149,8 @@ export const FINDINGS: readonly FindingDefinition[] = [
     section: "6.1.16",
     scope: "surface",
     color: "red",
-    symbol: "Dibujo de la lesión según la forma observada, pintado de rojo, más sigla en el recuadro",
+    symbol:
+      "Dibujo de la lesión según la forma observada, pintado de rojo, más sigla en el recuadro",
     variants: [
       { value: "white_spot", label: "Mancha blanca", abbreviation: "MB" },
       { value: "enamel", label: "Lesión de caries a nivel del esmalte", abbreviation: "CE" },
@@ -276,7 +277,8 @@ export const FINDINGS: readonly FindingDefinition[] = [
     section: "6.1.29",
     scope: "span",
     color: "quality",
-    symbol: "Línea recta horizontal del puente con verticales sobre los pilares, a nivel de los ápices",
+    symbol:
+      "Línea recta horizontal del puente con verticales sobre los pilares, a nivel de los ápices",
   },
   {
     code: "complete_denture",
@@ -371,15 +373,15 @@ export const FINDINGS: readonly FindingDefinition[] = [
     color: "none",
     symbol: "Texto libre en el ítem observaciones (sin símbolo gráfico)",
   },
-];
+]
 
 const BY_CODE: Record<string, FindingDefinition | undefined> = Object.fromEntries(
   FINDINGS.map((def) => [def.code, def]),
-);
+)
 
 /** Definición del hallazgo o `undefined` si el código es desconocido. */
 export function findingDefinition(code: string): FindingDefinition | undefined {
-  return Object.hasOwn(BY_CODE, code) ? BY_CODE[code] : undefined;
+  return Object.hasOwn(BY_CODE, code) ? BY_CODE[code] : undefined
 }
 
 /**
@@ -391,11 +393,11 @@ const LEGACY_LABELS: Record<string, string> = {
   extraction_indicated: "Extracción indicada (plan previo)",
   legacy_prosthesis: "Prótesis no especificada (registro previo)",
   legacy_restoration: "Restauración no especificada (registro previo)",
-};
+}
 
 /** Etiqueta española del hallazgo; el código desconocido se devuelve tal cual, nunca "Otro". */
 export function conditionLabel(code: string): string {
-  const label = Object.hasOwn(BY_CODE, code) ? BY_CODE[code]?.label : undefined;
-  const legacy = Object.hasOwn(LEGACY_LABELS, code) ? LEGACY_LABELS[code] : undefined;
-  return label ?? legacy ?? code;
+  const label = Object.hasOwn(BY_CODE, code) ? BY_CODE[code]?.label : undefined
+  const legacy = Object.hasOwn(LEGACY_LABELS, code) ? LEGACY_LABELS[code] : undefined
+  return label ?? legacy ?? code
 }

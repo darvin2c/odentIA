@@ -1,5 +1,3 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useForm } from "@tanstack/react-form";
 import {
   Card,
   CardContent,
@@ -18,46 +16,48 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@odentia/ui";
-import { FormDrawer, fieldErrorMessages } from "@odentia/ui-patterns";
-import { ChevronDown } from "lucide-react";
-import { useEffect, useId, useState } from "react";
-import { ApiError, apiFetch } from "../../lib/api";
-import { timeAgo, useCanWrite } from "../../lib/crm";
-import type { PatientFull } from "../../lib/patients";
+} from "@odentia/ui"
+import { FormDrawer, fieldErrorMessages } from "@odentia/ui-patterns"
+import { useForm } from "@tanstack/react-form"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { ChevronDown } from "lucide-react"
+import { useEffect, useId, useState } from "react"
+import { ApiError, apiFetch } from "../../lib/api"
+import { timeAgo, useCanWrite } from "../../lib/crm"
+import type { PatientFull } from "../../lib/patients"
 import {
+  type DemographicsValues,
   DOC_TYPE_OPTIONS,
+  emptyDemographics,
   INSURANCE_OPTIONS,
   SEX_OPTIONS,
-  emptyDemographics,
+  type StepErrors,
   validateComplementary,
   validateIdentity,
-  type DemographicsValues,
-  type StepErrors,
-} from "./patient-demographics-form";
+} from "./patient-demographics-form"
 
 interface Branch {
-  id: string;
-  name: string;
+  id: string
+  name: string
 }
 
 function strField(v: unknown): string {
-  return typeof v === "string" ? v : "";
+  return typeof v === "string" ? v : ""
 }
 
 function errorText(error: unknown): string | null {
   if (error instanceof ApiError) {
-    const shape = error.shape as { message?: unknown; code?: unknown };
-    if (typeof shape.message === "string" && shape.message !== "") return shape.message;
-    if (typeof shape.code === "string" && shape.code !== "") return `Error: ${shape.code}`;
-    return `Error ${error.status}`;
+    const shape = error.shape as { message?: unknown; code?: unknown }
+    if (typeof shape.message === "string" && shape.message !== "") return shape.message
+    if (typeof shape.code === "string" && shape.code !== "") return `Error: ${shape.code}`
+    return `Error ${error.status}`
   }
-  if (error instanceof Error && error.message !== "") return error.message;
-  return null;
+  if (error instanceof Error && error.message !== "") return error.message
+  return null
 }
 
 function toFormValues(detail: PatientFull): DemographicsValues {
-  const p = detail.patient;
+  const p = detail.patient
   return {
     ...emptyDemographics,
     displayName: detail.displayName,
@@ -78,7 +78,7 @@ function toFormValues(detail: PatientFull): DemographicsValues {
     insuranceDetail: strField(p.insuranceDetail),
     referralSource: strField(p.referralSource),
     registeredBranchId: strField(p.registeredBranchId),
-  };
+  }
 }
 
 /** Editor ancho de filiación con los mismos campos y validación del alta. */
@@ -88,98 +88,104 @@ export function FiliacionDrawer({
   open,
   onOpenChange,
 }: {
-  patientId: string;
-  detail: PatientFull;
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
+  patientId: string
+  detail: PatientFull
+  open: boolean
+  onOpenChange: (open: boolean) => void
 }) {
-  const queryClient = useQueryClient();
-  const canWrite = useCanWrite();
-  const uid = useId();
-  const p = detail.patient;
-  const [stepErrors, setStepErrors] = useState<StepErrors>({});
-  const [isActive, setIsActive] = useState<boolean>(p.isActive);
-  const [openAddress, setOpenAddress] = useState(false);
-  const [openEmergency, setOpenEmergency] = useState(false);
-  const [openInsurance, setOpenInsurance] = useState(false);
-  const [openExtra, setOpenExtra] = useState(false);
+  const queryClient = useQueryClient()
+  const canWrite = useCanWrite()
+  const uid = useId()
+  const p = detail.patient
+  const [stepErrors, setStepErrors] = useState<StepErrors>({})
+  const [isActive, setIsActive] = useState<boolean>(p.isActive)
+  const [openAddress, setOpenAddress] = useState(false)
+  const [openEmergency, setOpenEmergency] = useState(false)
+  const [openInsurance, setOpenInsurance] = useState(false)
+  const [openExtra, setOpenExtra] = useState(false)
 
-  const form = useForm({ defaultValues: toFormValues(detail) });
+  const form = useForm({ defaultValues: toFormValues(detail) })
 
   useEffect(() => {
     if (open) {
-      form.reset(toFormValues(detail));
-      setStepErrors({});
-      setIsActive(p.isActive);
+      form.reset(toFormValues(detail))
+      setStepErrors({})
+      setIsActive(p.isActive)
     }
     // Se resincroniza al abrir con el detalle vigente.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
+  }, [open])
 
   const branchesQuery = useQuery({
     queryKey: ["branches"],
     queryFn: () => apiFetch<{ data: Branch[] }>("/api/branches"),
     enabled: open,
-  });
+  })
 
   const invalidatePatient = () => {
-    void queryClient.invalidateQueries({ queryKey: ["patient", patientId] });
-    void queryClient.invalidateQueries({ queryKey: ["patients"] });
-  };
+    void queryClient.invalidateQueries({ queryKey: ["patient", patientId] })
+    void queryClient.invalidateQueries({ queryKey: ["patients"] })
+  }
 
   const patchMutation = useMutation({
     mutationFn: (patch: Record<string, unknown>) =>
       apiFetch(`/api/patients/${patientId}`, { method: "PATCH", body: JSON.stringify(patch) }),
     onSuccess: () => {
-      invalidatePatient();
-      onOpenChange(false);
+      invalidatePatient()
+      onOpenChange(false)
     },
-  });
+  })
 
-  const consentGiven = p.dataConsentAt != null;
+  const consentGiven = p.dataConsentAt != null
 
   function submit(): void {
-    if (patchMutation.isPending || !canWrite) return;
-    const values = form.state.values;
-    const errs = { ...validateIdentity(values), ...validateComplementary(values) };
-    setStepErrors(errs);
+    if (patchMutation.isPending || !canWrite) return
+    const values = form.state.values
+    const errs = { ...validateIdentity(values), ...validateComplementary(values) }
+    setStepErrors(errs)
     if (Object.keys(errs).length > 0) {
-      const first = document.querySelector<HTMLElement>(`[data-filiacion-error="1"] input, [data-filiacion-error="1"] button`);
-      first?.focus();
-      return;
+      const first = document.querySelector<HTMLElement>(
+        `[data-filiacion-error="1"] input, [data-filiacion-error="1"] button`,
+      )
+      first?.focus()
+      return
     }
     // Solo campos explícitamente editados: lo no visitado no se envía (nunca null involuntario).
     const touched = (name: keyof DemographicsValues): boolean =>
-      form.state.fieldMeta[name]?.isTouched === true;
-    const patch: Record<string, unknown> = {};
+      form.state.fieldMeta[name]?.isTouched === true
+    const patch: Record<string, unknown> = {}
     const textOrNull = (name: keyof DemographicsValues): string | null => {
-      const v = values[name].trim();
-      return v === "" ? null : v;
-    };
-    if (touched("displayName")) patch.displayName = values.displayName.trim();
-    if (touched("docType")) patch.docType = values.docType === "" ? null : values.docType;
-    if (touched("docNumber")) patch.docNumber = textOrNull("docNumber");
-    if (touched("birthDate")) patch.birthDate = textOrNull("birthDate");
-    if (touched("sex")) patch.sex = values.sex === "" ? null : values.sex;
-    if (touched("phone")) patch.phone = textOrNull("phone");
-    if (touched("email")) patch.email = textOrNull("email");
-    if (touched("maritalStatus")) patch.maritalStatus = textOrNull("maritalStatus");
-    if (touched("educationLevel")) patch.educationLevel = textOrNull("educationLevel");
-    if (touched("occupation")) patch.occupation = textOrNull("occupation");
-    if (touched("address")) patch.address = textOrNull("address");
-    if (touched("origin")) patch.origin = textOrNull("origin");
-    if (touched("emergencyContactName")) patch.emergencyContactName = textOrNull("emergencyContactName");
-    if (touched("emergencyContactPhone")) patch.emergencyContactPhone = textOrNull("emergencyContactPhone");
-    if (touched("insuranceType")) patch.insuranceType = values.insuranceType === "" ? null : values.insuranceType;
-    if (touched("insuranceDetail")) patch.insuranceDetail = textOrNull("insuranceDetail");
-    if (touched("referralSource")) patch.referralSource = textOrNull("referralSource");
-    if (touched("registeredBranchId")) patch.registeredBranchId = values.registeredBranchId === "" ? null : values.registeredBranchId;
-    if (isActive !== p.isActive) patch.isActive = isActive;
-    if (Object.keys(patch).length === 0) {
-      onOpenChange(false);
-      return;
+      const v = values[name].trim()
+      return v === "" ? null : v
     }
-    void patchMutation.mutate(patch);
+    if (touched("displayName")) patch.displayName = values.displayName.trim()
+    if (touched("docType")) patch.docType = values.docType === "" ? null : values.docType
+    if (touched("docNumber")) patch.docNumber = textOrNull("docNumber")
+    if (touched("birthDate")) patch.birthDate = textOrNull("birthDate")
+    if (touched("sex")) patch.sex = values.sex === "" ? null : values.sex
+    if (touched("phone")) patch.phone = textOrNull("phone")
+    if (touched("email")) patch.email = textOrNull("email")
+    if (touched("maritalStatus")) patch.maritalStatus = textOrNull("maritalStatus")
+    if (touched("educationLevel")) patch.educationLevel = textOrNull("educationLevel")
+    if (touched("occupation")) patch.occupation = textOrNull("occupation")
+    if (touched("address")) patch.address = textOrNull("address")
+    if (touched("origin")) patch.origin = textOrNull("origin")
+    if (touched("emergencyContactName"))
+      patch.emergencyContactName = textOrNull("emergencyContactName")
+    if (touched("emergencyContactPhone"))
+      patch.emergencyContactPhone = textOrNull("emergencyContactPhone")
+    if (touched("insuranceType"))
+      patch.insuranceType = values.insuranceType === "" ? null : values.insuranceType
+    if (touched("insuranceDetail")) patch.insuranceDetail = textOrNull("insuranceDetail")
+    if (touched("referralSource")) patch.referralSource = textOrNull("referralSource")
+    if (touched("registeredBranchId"))
+      patch.registeredBranchId = values.registeredBranchId === "" ? null : values.registeredBranchId
+    if (isActive !== p.isActive) patch.isActive = isActive
+    if (Object.keys(patch).length === 0) {
+      onOpenChange(false)
+      return
+    }
+    void patchMutation.mutate(patch)
   }
 
   function textField(
@@ -191,28 +197,34 @@ export function FiliacionDrawer({
       <form.Field
         name={name}
         children={(field) => (
-          <Field data-filiacion-error={stepErrors[name] || fieldErrorMessages(field.state.meta.errors)[0] ? "1" : undefined}>
+          <Field
+            data-filiacion-error={
+              stepErrors[name] || fieldErrorMessages(field.state.meta.errors)[0] ? "1" : undefined
+            }
+          >
             <FieldLabel htmlFor={`${uid}-${name}`}>{label}</FieldLabel>
             <Input
               id={`${uid}-${name}`}
               {...inputProps}
               value={field.state.value}
               onChange={(e) => {
-                field.handleChange(e.target.value);
+                field.handleChange(e.target.value)
                 setStepErrors((prev) => {
-                  if (!prev[name]) return prev;
-                  const next = { ...prev };
-                  delete next[name];
-                  return next;
-                });
+                  if (!prev[name]) return prev
+                  const next = { ...prev }
+                  delete next[name]
+                  return next
+                })
               }}
               onBlur={field.handleBlur}
             />
-            <FieldError>{stepErrors[name] ?? fieldErrorMessages(field.state.meta.errors)[0]}</FieldError>
+            <FieldError>
+              {stepErrors[name] ?? fieldErrorMessages(field.state.meta.errors)[0]}
+            </FieldError>
           </Field>
         )}
       />
-    );
+    )
   }
 
   function selectField(
@@ -238,15 +250,19 @@ export function FiliacionDrawer({
               </SelectTrigger>
               <SelectContent>
                 {options.map((option) => (
-                  <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
                 ))}
               </SelectContent>
             </Select>
-            <FieldError>{stepErrors[name] ?? fieldErrorMessages(field.state.meta.errors)[0]}</FieldError>
+            <FieldError>
+              {stepErrors[name] ?? fieldErrorMessages(field.state.meta.errors)[0]}
+            </FieldError>
           </Field>
         )}
       />
-    );
+    )
   }
 
   return (
@@ -255,13 +271,15 @@ export function FiliacionDrawer({
       onClose={() => !patchMutation.isPending && onOpenChange(false)}
       title="Editar datos personales"
       onSubmit={(e) => {
-        e.preventDefault();
-        submit();
+        e.preventDefault()
+        submit()
       }}
       isSubmitting={patchMutation.isPending}
       isDirty={form.state.isDirty || isActive !== p.isActive}
       submitLabel="Guardar cambios"
-      error={patchMutation.isError ? (errorText(patchMutation.error) ?? "No se pudo guardar.") : null}
+      error={
+        patchMutation.isError ? (errorText(patchMutation.error) ?? "No se pudo guardar.") : null
+      }
       className="sm:max-w-4xl"
     >
       <div className="flex flex-col gap-4">
@@ -331,7 +349,9 @@ export function FiliacionDrawer({
                           onValueChange={(v) => field.handleChange(v ?? "")}
                         >
                           <SelectTrigger id={`${uid}-branch`} aria-label="Sucursal de registro">
-                            <SelectValue placeholder={branchesQuery.isLoading ? "Cargando…" : "Sin asignar"} />
+                            <SelectValue
+                              placeholder={branchesQuery.isLoading ? "Cargando…" : "Sin asignar"}
+                            />
                           </SelectTrigger>
                           <SelectContent>
                             <SelectItem value="">Sin asignar</SelectItem>
@@ -342,7 +362,10 @@ export function FiliacionDrawer({
                             ))}
                           </SelectContent>
                         </Select>
-                        <FieldError>{stepErrors.registeredBranchId ?? fieldErrorMessages(field.state.meta.errors)[0]}</FieldError>
+                        <FieldError>
+                          {stepErrors.registeredBranchId ??
+                            fieldErrorMessages(field.state.meta.errors)[0]}
+                        </FieldError>
                       </>
                     )}
                   />
@@ -414,18 +437,18 @@ export function FiliacionDrawer({
           <CardContent className="flex flex-col gap-2">
             {consentGiven ? (
               <p className="text-sm text-muted-foreground">
-                Consentimiento registrado el {timeAgo(p.dataConsentAt ?? null)}. No puede retirarse desde este
-                formulario.
+                Consentimiento registrado el {timeAgo(p.dataConsentAt ?? null)}. No puede retirarse
+                desde este formulario.
               </p>
             ) : (
               <p className="text-sm text-muted-foreground">
-                Sin consentimiento de datos registrado. Se registra desde Antecedentes, en un solo paso explícito.
+                Sin consentimiento de datos registrado. Se registra desde Antecedentes, en un solo
+                paso explícito.
               </p>
             )}
           </CardContent>
         </Card>
-
       </div>
     </FormDrawer>
-  );
+  )
 }

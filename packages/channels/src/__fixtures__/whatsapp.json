@@ -6,7 +6,13 @@
     "appSecret": "appsecret123",
     "templates": [{ "name": "cita_recordatorio", "language": "es_PE" }]
   },
-  "capabilities": { "templates": true, "media": true, "interactive": true, "readReceipts": true, "edit": false },
+  "capabilities": {
+    "templates": true,
+    "media": true,
+    "interactive": true,
+    "readReceipts": true,
+    "edit": false
+  },
   "verify": [
     {
       "name": "acepta firma HMAC correcta",
@@ -92,11 +98,20 @@
       "name": "plantilla construye messages/template",
       "message": {
         "to": "wa:51911122233",
-        "kind": { "type": "template", "name": "cita_recordatorio", "language": "es_PE", "params": ["Luis", "lunes 10:00"] }
+        "kind": {
+          "type": "template",
+          "name": "cita_recordatorio",
+          "language": "es_PE",
+          "params": ["Luis", "lunes 10:00"]
+        }
       },
       "respondWith": { "messages": [{ "id": "wamid.SENT2" }] },
       "expectUrl": "https://graph.facebook.com/v21.0/PNID/messages",
-      "expectBody": { "to": "51911122233", "type": "template", "template": { "name": "cita_recordatorio" } },
+      "expectBody": {
+        "to": "51911122233",
+        "type": "template",
+        "template": { "name": "cita_recordatorio" }
+      },
       "expectExternalId": "wamid.SENT2"
     }
   ]

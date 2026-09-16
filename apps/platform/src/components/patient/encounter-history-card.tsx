@@ -1,17 +1,13 @@
-import { useQuery } from "@tanstack/react-query";
-import { Link } from "@tanstack/react-router";
-import { Badge, Button, Card, CardContent, CardHeader, CardTitle } from "@odentia/ui";
-import { useState } from "react";
-import { apiFetch } from "../../lib/api";
-import { timeAgo } from "../../lib/crm";
-import {
-  encounterStatusLabel,
-  type EncounterDetail,
-  type TimelineItem,
-} from "../../lib/patients";
-import { documentCategoryLabel } from "../../lib/patient-overview";
-import { DocumentOpenButton } from "./document-open-button";
-import { EncounterDetailView } from "./encounter-detail-view";
+import { Badge, Button, Card, CardContent, CardHeader, CardTitle } from "@odentia/ui"
+import { useQuery } from "@tanstack/react-query"
+import { Link } from "@tanstack/react-router"
+import { useState } from "react"
+import { apiFetch } from "../../lib/api"
+import { timeAgo } from "../../lib/crm"
+import { documentCategoryLabel } from "../../lib/patient-overview"
+import { type EncounterDetail, encounterStatusLabel, type TimelineItem } from "../../lib/patients"
+import { DocumentOpenButton } from "./document-open-button"
+import { EncounterDetailView } from "./encounter-detail-view"
 
 /**
  * Atención finalizada como unidad clínica: motivo, evolución, procedimientos
@@ -23,23 +19,23 @@ export function EncounterHistoryCard({
   patientId,
   item,
 }: {
-  patientId: string;
-  item: TimelineItem;
+  patientId: string
+  item: TimelineItem
 }) {
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(false)
   const detail = useQuery({
     queryKey: ["encounter", patientId, item.refId],
     queryFn: () =>
       apiFetch<{ data: EncounterDetail }>(`/api/patients/${patientId}/encounters/${item.refId}`),
     enabled: expanded,
-  });
-  const regionId = `encounter-detail-${item.refId}`;
-  const procedures = item.procedures ?? [];
-  const teeth = item.toothNumbers ?? [];
-  const diagnoses = item.diagnoses ?? (item.diagnosisCode ? [item.diagnosisCode] : []);
-  const planned = item.plannedItems ?? [];
-  const documents = item.documents ?? [];
-  const planBudgetId = planned.find((link) => link.budgetId)?.budgetId;
+  })
+  const regionId = `encounter-detail-${item.refId}`
+  const procedures = item.procedures ?? []
+  const teeth = item.toothNumbers ?? []
+  const diagnoses = item.diagnoses ?? (item.diagnosisCode ? [item.diagnosisCode] : [])
+  const planned = item.plannedItems ?? []
+  const documents = item.documents ?? []
+  const planBudgetId = planned.find((link) => link.budgetId)?.budgetId
 
   return (
     <Card>
@@ -58,7 +54,9 @@ export function EncounterHistoryCard({
         {teeth.length > 0 ? (
           <div className="flex flex-wrap gap-1" aria-label="Piezas tratadas">
             {teeth.map((tooth) => (
-              <Badge variant="secondary" key={tooth}>Pieza {tooth}</Badge>
+              <Badge variant="secondary" key={tooth}>
+                Pieza {tooth}
+              </Badge>
             ))}
           </div>
         ) : null}
@@ -71,17 +69,36 @@ export function EncounterHistoryCard({
         ) : null}
         {planned.length > 0 ? (
           <div className="flex flex-col gap-1">
-            <p className="text-xs font-medium text-muted-foreground">Tratamientos vinculados del presupuesto</p>
+            <p className="text-xs font-medium text-muted-foreground">
+              Tratamientos vinculados del presupuesto
+            </p>
             <ul className="flex flex-col gap-1 text-sm" aria-label="Tratamientos vinculados">
               {planned.map((link) => (
                 <li key={link.id}>
                   {link.title}
-                  {link.toothNumber != null ? <span className="text-muted-foreground"> · P{link.toothNumber}</span> : null}
+                  {link.toothNumber != null ? (
+                    <span className="text-muted-foreground"> · P{link.toothNumber}</span>
+                  ) : null}
                 </li>
               ))}
             </ul>
             <div>
-              <Button variant="link" size="sm" nativeButton={false} render={<Link to="/patients/$patientId" params={{ patientId }} search={{ tab: "plan", ...(planBudgetId ? { budgetId: planBudgetId } : {}) } as { tab: "plan" }} />}>
+              <Button
+                variant="link"
+                size="sm"
+                nativeButton={false}
+                render={
+                  <Link
+                    to="/patients/$patientId"
+                    params={{ patientId }}
+                    search={
+                      { tab: "plan", ...(planBudgetId ? { budgetId: planBudgetId } : {}) } as {
+                        tab: "plan"
+                      }
+                    }
+                  />
+                }
+              >
                 Ver presupuesto
               </Button>
             </div>
@@ -95,7 +112,12 @@ export function EncounterHistoryCard({
             <ul className="flex flex-col gap-1 text-sm" aria-label="Documentos relacionados">
               {documents.map((doc) => (
                 <li key={doc.id} className="flex flex-wrap items-center gap-2">
-                  <span>{doc.label} <span className="text-muted-foreground">· {documentCategoryLabel(doc.category)}</span></span>
+                  <span>
+                    {doc.label}{" "}
+                    <span className="text-muted-foreground">
+                      · {documentCategoryLabel(doc.category)}
+                    </span>
+                  </span>
                   <DocumentOpenButton patientId={patientId} documentId={doc.id} label={doc.label} />
                 </li>
               ))}
@@ -103,7 +125,10 @@ export function EncounterHistoryCard({
           </div>
         ) : null}
         {item.indications ? (
-          <p className="text-sm"><span className="font-medium">Indicaciones: </span>{item.indications}</p>
+          <p className="text-sm">
+            <span className="font-medium">Indicaciones: </span>
+            {item.indications}
+          </p>
         ) : null}
         <p className="text-xs text-muted-foreground">
           {typeof item.documentsCount === "number" && documents.length === 0
@@ -111,13 +136,25 @@ export function EncounterHistoryCard({
             : ""}
           {item.nextStep ? `Paso siguiente: ${item.nextStep} · ` : ""}
           {item.nextAppointmentAt ? (
-            <time dateTime={item.nextAppointmentAt}>Próxima revisión sugerida: {new Date(item.nextAppointmentAt).toLocaleString("es-PE")}</time>
+            <time dateTime={item.nextAppointmentAt}>
+              Próxima revisión sugerida: {new Date(item.nextAppointmentAt).toLocaleString("es-PE")}
+            </time>
           ) : (
             "Sin próxima revisión sugerida"
           )}
         </p>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" nativeButton={false} render={<Link to="/patients/$patientId/encounters/$encounterId" params={{ patientId, encounterId: item.refId }} />}>
+          <Button
+            variant="outline"
+            size="sm"
+            nativeButton={false}
+            render={
+              <Link
+                to="/patients/$patientId/encounters/$encounterId"
+                params={{ patientId, encounterId: item.refId }}
+              />
+            }
+          >
             Abrir atención
           </Button>
           <Button
@@ -145,5 +182,5 @@ export function EncounterHistoryCard({
         ) : null}
       </CardContent>
     </Card>
-  );
+  )
 }

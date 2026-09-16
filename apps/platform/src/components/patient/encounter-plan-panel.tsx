@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { surfacesForTooth } from "@odentia/clinical"
 import {
   Badge,
   Button,
@@ -16,23 +16,23 @@ import {
   SelectTrigger,
   SelectValue,
   Textarea,
-} from "@odentia/ui";
-import { useId, useState } from "react";
-import { ApiError, apiFetch } from "../../lib/api";
-import { useCanWrite } from "../../lib/crm";
+} from "@odentia/ui"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { useId, useState } from "react"
+import { ApiError, apiFetch } from "../../lib/api"
 import {
   createTreatmentPlanApi,
   fetchTreatmentPlanDetail,
   fetchTreatmentPlans,
   planDecisionLabel,
-} from "../../lib/budgets";
-import type { PlanItem } from "../../lib/patients";
-import { TREATMENT_SCOPE_LABELS, formatMoney, type ServiceCatalogItem } from "../../lib/services";
-import { surfacesForTooth } from "@odentia/clinical";
-import { Cie10Search } from "./cie10-search";
-import { ServicePicker } from "./service-picker";
-import { ToothSelector } from "./tooth-selector";
-import { treatmentSiteLabel } from "./plan-tab";
+} from "../../lib/budgets"
+import { useCanWrite } from "../../lib/crm"
+import type { PlanItem } from "../../lib/patients"
+import { formatMoney, type ServiceCatalogItem, TREATMENT_SCOPE_LABELS } from "../../lib/services"
+import { Cie10Search } from "./cie10-search"
+import { treatmentSiteLabel } from "./plan-tab"
+import { ServicePicker } from "./service-picker"
+import { ToothSelector } from "./tooth-selector"
 
 const QUADRANT_LABELS: Record<string, string> = {
   "1": "Cuadrante 1 · superior derecho",
@@ -43,11 +43,11 @@ const QUADRANT_LABELS: Record<string, string> = {
   "6": "Cuadrante 6 · superior izquierdo temporal",
   "7": "Cuadrante 7 · inferior izquierdo temporal",
   "8": "Cuadrante 8 · inferior derecho temporal",
-};
+}
 
 function mutationMessage(err: unknown): string {
-  if (err instanceof ApiError && err.shape.message) return err.shape.message;
-  return err instanceof Error ? err.message : "No se pudo guardar la indicación.";
+  if (err instanceof ApiError && err.shape.message) return err.shape.message
+  return err instanceof Error ? err.message : "No se pudo guardar la indicación."
 }
 
 /**
@@ -63,43 +63,43 @@ export function EncounterPlanPanel({
   onChanged,
   onPendingChange,
 }: {
-  patientId: string;
-  encounterId: string;
-  disabled?: boolean;
-  beforeWrite: () => Promise<void>;
-  onChanged: () => Promise<void>;
-  onPendingChange: (pending: boolean) => void;
+  patientId: string
+  encounterId: string
+  disabled?: boolean
+  beforeWrite: () => Promise<void>
+  onChanged: () => Promise<void>
+  onPendingChange: (pending: boolean) => void
 }): React.JSX.Element {
-  const queryClient = useQueryClient();
-  const canWrite = useCanWrite();
-  const uid = useId();
+  const queryClient = useQueryClient()
+  const canWrite = useCanWrite()
+  const uid = useId()
 
-  const [planId, setPlanId] = useState("");
-  const [newTitle, setNewTitle] = useState("Plan de tratamiento");
-  const [scope, setScope] = useState("general");
-  const [teeth, setTeeth] = useState<number[]>([]);
-  const [surfaces, setSurfaces] = useState<string[]>([]);
-  const [quadrant, setQuadrant] = useState("");
-  const [arch, setArch] = useState("");
-  const [service, setService] = useState<ServiceCatalogItem | null>(null);
-  const [detail, setDetail] = useState("");
-  const [cie, setCie] = useState("");
-  const [error, setError] = useState<string | null>(null);
+  const [planId, setPlanId] = useState("")
+  const [newTitle, setNewTitle] = useState("Plan de tratamiento")
+  const [scope, setScope] = useState("general")
+  const [teeth, setTeeth] = useState<number[]>([])
+  const [surfaces, setSurfaces] = useState<string[]>([])
+  const [quadrant, setQuadrant] = useState("")
+  const [arch, setArch] = useState("")
+  const [service, setService] = useState<ServiceCatalogItem | null>(null)
+  const [detail, setDetail] = useState("")
+  const [cie, setCie] = useState("")
+  const [error, setError] = useState<string | null>(null)
 
   const plansQuery = useQuery({
     queryKey: ["treatment-plans", patientId],
     queryFn: () => fetchTreatmentPlans(patientId),
-  });
-  const planOptions = plansQuery.data?.data ?? [];
+  })
+  const planOptions = plansQuery.data?.data ?? []
   const detailQuery = useQuery({
     queryKey: ["treatment-plan", patientId, planId],
     queryFn: () => fetchTreatmentPlanDetail(patientId, planId),
     enabled: planId !== "",
-  });
-  const items: PlanItem[] = detailQuery.data?.data.items ?? [];
+  })
+  const items: PlanItem[] = detailQuery.data?.data.items ?? []
 
-  const fieldDisabled = disabled || !canWrite;
-  const blocked = fieldDisabled;
+  const fieldDisabled = disabled || !canWrite
+  const blocked = fieldDisabled
 
   const invalidatePlans = () =>
     Promise.all([
@@ -107,81 +107,87 @@ export function EncounterPlanPanel({
       queryClient.invalidateQueries({ queryKey: ["treatment-plan", patientId] }),
       queryClient.invalidateQueries({ queryKey: ["plan", patientId] }),
       queryClient.invalidateQueries({ queryKey: ["patient-summary", patientId] }),
-    ]);
+    ])
 
   const createPlanMutation = useMutation({
     mutationFn: async () => {
-      const title = newTitle.trim() || "Plan de tratamiento";
-      onPendingChange(true);
+      const title = newTitle.trim() || "Plan de tratamiento"
+      onPendingChange(true)
       try {
-        await beforeWrite();
-        const created = await createTreatmentPlanApi(patientId, { title, originEncounterId: encounterId });
-        await invalidatePlans();
-        setPlanId(created.data.id);
-        setNewTitle("Plan de tratamiento");
-        setError(null);
+        await beforeWrite()
+        const created = await createTreatmentPlanApi(patientId, {
+          title,
+          originEncounterId: encounterId,
+        })
+        await invalidatePlans()
+        setPlanId(created.data.id)
+        setNewTitle("Plan de tratamiento")
+        setError(null)
       } finally {
-        onPendingChange(false);
+        onPendingChange(false)
       }
     },
     onError: (err) => setError(mutationMessage(err)),
-  });
+  })
 
   const addMutation = useMutation({
     mutationFn: async () => {
-      if (!planId) throw new Error("Elige el plan clínico donde se indicará.");
-      if (!service) throw new Error("Busca y elige la prestación del tarifario.");
-      const tooth = teeth[0] ?? null;
+      if (!planId) throw new Error("Elige el plan clínico donde se indicará.")
+      if (!service) throw new Error("Busca y elige la prestación del tarifario.")
+      const tooth = teeth[0] ?? null
       const body: Record<string, unknown> = {
         serviceId: service.id,
         planId,
         sourceEncounterId: encounterId,
         detail: detail.trim() === "" ? null : detail.trim(),
         diagnosisCode: cie.trim() === "" ? null : cie.trim(),
-      };
+      }
       if (scope === "tooth" || scope === "surfaces") {
-        if (tooth == null) throw new Error("Selecciona la pieza.");
-        body.toothNumber = tooth;
+        if (tooth == null) throw new Error("Selecciona la pieza.")
+        body.toothNumber = tooth
       }
       if (scope === "surfaces") {
-        if (surfaces.length === 0) throw new Error("Marca al menos una superficie.");
-        body.surfaces = surfaces;
+        if (surfaces.length === 0) throw new Error("Marca al menos una superficie.")
+        body.surfaces = surfaces
       }
       if (scope === "quadrant") {
-        if (!quadrant) throw new Error("Elige el cuadrante.");
-        body.quadrant = Number(quadrant);
+        if (!quadrant) throw new Error("Elige el cuadrante.")
+        body.quadrant = Number(quadrant)
       }
       if (scope === "arch") {
-        if (!arch) throw new Error("Elige la arcada.");
-        body.arch = arch;
+        if (!arch) throw new Error("Elige la arcada.")
+        body.arch = arch
       }
-      onPendingChange(true);
+      onPendingChange(true)
       try {
-        await beforeWrite();
+        await beforeWrite()
         await apiFetch(`/api/patients/${patientId}/plan/items`, {
           method: "POST",
           body: JSON.stringify(body),
-        });
-        await invalidatePlans();
-        await onChanged();
-        setService(null);
-        setDetail("");
-        setCie("");
-        setError(null);
+        })
+        await invalidatePlans()
+        await onChanged()
+        setService(null)
+        setDetail("")
+        setCie("")
+        setError(null)
       } finally {
-        onPendingChange(false);
+        onPendingChange(false)
       }
     },
     onError: (err) => setError(mutationMessage(err)),
-  });
+  })
 
-  const busy = createPlanMutation.isPending || addMutation.isPending;
-  const toothForSurfaces = teeth[0] ?? null;
-  const validSurfaces = toothForSurfaces != null ? surfacesForTooth(toothForSurfaces).map(String) : [];
+  const busy = createPlanMutation.isPending || addMutation.isPending
+  const toothForSurfaces = teeth[0] ?? null
+  const validSurfaces =
+    toothForSurfaces != null ? surfacesForTooth(toothForSurfaces).map(String) : []
 
   const toggleSurface = (surface: string): void => {
-    setSurfaces((prev) => (prev.includes(surface) ? prev.filter((s) => s !== surface) : [...prev, surface]));
-  };
+    setSurfaces((prev) =>
+      prev.includes(surface) ? prev.filter((s) => s !== surface) : [...prev, surface],
+    )
+  }
 
   return (
     <div className="flex flex-col gap-4">
@@ -198,9 +204,15 @@ export function EncounterPlanPanel({
           <div className="grid gap-3 sm:grid-cols-2">
             <Field>
               <FieldLabel htmlFor={`${uid}-plan`}>Plan clínico</FieldLabel>
-              <Select value={planId} onValueChange={(v) => setPlanId(v ?? "")} disabled={blocked || busy}>
+              <Select
+                value={planId}
+                onValueChange={(v) => setPlanId(v ?? "")}
+                disabled={blocked || busy}
+              >
                 <SelectTrigger id={`${uid}-plan`}>
-                  <SelectValue placeholder={plansQuery.isLoading ? "Cargando…" : "Elige el plan…"} />
+                  <SelectValue
+                    placeholder={plansQuery.isLoading ? "Cargando…" : "Elige el plan…"}
+                  />
                 </SelectTrigger>
                 <SelectContent>
                   {planOptions.map((p) => (
@@ -212,7 +224,9 @@ export function EncounterPlanPanel({
               </Select>
             </Field>
             <Field>
-              <FieldLabel htmlFor={`${uid}-new-title`}>Nuevo plan (origen: esta atención)</FieldLabel>
+              <FieldLabel htmlFor={`${uid}-new-title`}>
+                Nuevo plan (origen: esta atención)
+              </FieldLabel>
               <div className="flex gap-2">
                 <Input
                   id={`${uid}-new-title`}
@@ -221,7 +235,12 @@ export function EncounterPlanPanel({
                   disabled={blocked || busy}
                   onChange={(e) => setNewTitle(e.target.value)}
                 />
-                <Button type="button" size="sm" disabled={blocked || busy} onClick={() => void createPlanMutation.mutate()}>
+                <Button
+                  type="button"
+                  size="sm"
+                  disabled={blocked || busy}
+                  onClick={() => void createPlanMutation.mutate()}
+                >
                   {createPlanMutation.isPending ? "Creando…" : "Crear"}
                 </Button>
               </div>
@@ -231,7 +250,11 @@ export function EncounterPlanPanel({
           <div className="grid gap-3 sm:grid-cols-2">
             <Field>
               <FieldLabel htmlFor={`${uid}-scope`}>Ámbito</FieldLabel>
-              <Select value={scope} onValueChange={(v) => setScope(v ?? "general")} disabled={blocked || busy}>
+              <Select
+                value={scope}
+                onValueChange={(v) => setScope(v ?? "general")}
+                disabled={blocked || busy}
+              >
                 <SelectTrigger id={`${uid}-scope`}>
                   <SelectValue />
                 </SelectTrigger>
@@ -250,8 +273,8 @@ export function EncounterPlanPanel({
                 <ToothSelector
                   value={teeth.slice(0, 1)}
                   onChange={(next) => {
-                    setTeeth(next.slice(0, 1));
-                    setSurfaces([]);
+                    setTeeth(next.slice(0, 1))
+                    setSurfaces([])
                   }}
                   disabled={blocked || busy}
                 />
@@ -260,7 +283,11 @@ export function EncounterPlanPanel({
             {scope === "quadrant" && (
               <Field>
                 <FieldLabel htmlFor={`${uid}-quadrant`}>Cuadrante</FieldLabel>
-                <Select value={quadrant} onValueChange={(v) => setQuadrant(v ?? "")} disabled={blocked || busy}>
+                <Select
+                  value={quadrant}
+                  onValueChange={(v) => setQuadrant(v ?? "")}
+                  disabled={blocked || busy}
+                >
                   <SelectTrigger id={`${uid}-quadrant`}>
                     <SelectValue placeholder="Elige el cuadrante" />
                   </SelectTrigger>
@@ -277,7 +304,11 @@ export function EncounterPlanPanel({
             {scope === "arch" && (
               <Field>
                 <FieldLabel htmlFor={`${uid}-arch`}>Arcada</FieldLabel>
-                <Select value={arch} onValueChange={(v) => setArch(v ?? "")} disabled={blocked || busy}>
+                <Select
+                  value={arch}
+                  onValueChange={(v) => setArch(v ?? "")}
+                  disabled={blocked || busy}
+                >
                   <SelectTrigger id={`${uid}-arch`}>
                     <SelectValue placeholder="Elige la arcada" />
                   </SelectTrigger>
@@ -296,7 +327,11 @@ export function EncounterPlanPanel({
               <div className="flex flex-wrap gap-2">
                 {validSurfaces.map((surface) => (
                   <label key={surface} className="flex items-center gap-1.5 text-sm">
-                    <Checkbox checked={surfaces.includes(surface)} disabled={blocked || busy} onCheckedChange={() => toggleSurface(surface)} />
+                    <Checkbox
+                      checked={surfaces.includes(surface)}
+                      disabled={blocked || busy}
+                      onCheckedChange={() => toggleSurface(surface)}
+                    />
                     {surface}
                   </label>
                 ))}
@@ -309,14 +344,17 @@ export function EncounterPlanPanel({
             label="Tratamiento"
             disabled={blocked || busy}
             onChange={(next) => {
-              setService(next);
-              if (next.scope) setScope(next.scope);
-              setError(null);
+              setService(next)
+              if (next.scope) setScope(next.scope)
+              setError(null)
             }}
           />
           {service ? (
             <p className="text-sm text-muted-foreground" aria-live="polite">
-              Tarifa de solo lectura: {service.priceCents != null ? formatMoney(service.priceCents, service.currency) : "sin tarifa"}
+              Tarifa de solo lectura:{" "}
+              {service.priceCents != null
+                ? formatMoney(service.priceCents, service.currency)
+                : "sin tarifa"}
               {service.scope ? ` · ${TREATMENT_SCOPE_LABELS[service.scope] ?? service.scope}` : ""}
             </p>
           ) : null}
@@ -335,13 +373,18 @@ export function EncounterPlanPanel({
           <Cie10Search value={cie} onChange={(code) => setCie(code)} disabled={blocked || busy} />
 
           <div>
-            <Button type="button" disabled={blocked || busy || !planId || !service} onClick={() => void addMutation.mutate()}>
+            <Button
+              type="button"
+              disabled={blocked || busy || !planId || !service}
+              onClick={() => void addMutation.mutate()}
+            >
               {addMutation.isPending ? "Añadiendo…" : "Añadir al plan"}
             </Button>
           </div>
           <p className="text-xs text-muted-foreground">
-            La fila queda en el plan con la boca y el listado visibles; se limpia la prestación y se conserva la
-            selección anatómica. El plan puede seguir recibiendo indicaciones en futuras atenciones.
+            La fila queda en el plan con la boca y el listado visibles; se limpia la prestación y se
+            conserva la selección anatómica. El plan puede seguir recibiendo indicaciones en futuras
+            atenciones.
           </p>
         </CardContent>
       </Card>
@@ -359,12 +402,17 @@ export function EncounterPlanPanel({
             ) : (
               <ul className="flex flex-col gap-2">
                 {items.map((item) => (
-                  <li key={item.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border p-2 text-sm">
+                  <li
+                    key={item.id}
+                    className="flex flex-wrap items-center justify-between gap-2 rounded-lg border p-2 text-sm"
+                  >
                     <span className="flex min-w-0 flex-col">
                       <span className="font-medium">{item.title}</span>
                       <span className="text-xs text-muted-foreground">
                         {treatmentSiteLabel(item)} ·{" "}
-                        {item.priceCents != null ? formatMoney(item.priceCents, item.currency) : "sin tarifa"}
+                        {item.priceCents != null
+                          ? formatMoney(item.priceCents, item.currency)
+                          : "sin tarifa"}
                       </span>
                     </span>
                     <span className="flex gap-1">
@@ -381,6 +429,5 @@ export function EncounterPlanPanel({
         </Card>
       ) : null}
     </div>
-  );
+  )
 }
-

@@ -1,62 +1,62 @@
-import { createFileRoute, useNavigate, useParams } from "@tanstack/react-router";
-import { Button } from "@odentia/ui";
-import { AuthCard, ErrorState, LoadingState } from "@odentia/ui-patterns";
-import { useEffect, useRef, useState } from "react";
-import { authClient } from "../../lib/auth-client";
-import { tenantUrl } from "../../lib/host";
+import { Button } from "@odentia/ui"
+import { AuthCard, ErrorState, LoadingState } from "@odentia/ui-patterns"
+import { createFileRoute, useNavigate, useParams } from "@tanstack/react-router"
+import { useEffect, useRef, useState } from "react"
+import { authClient } from "../../lib/auth-client"
+import { tenantUrl } from "../../lib/host"
 
 export const Route = createFileRoute("/accept-invitation/$invitationId")({
   component: AcceptInvitationPage,
-});
+})
 
 type PageState =
   | { kind: "loading" }
   | { kind: "needs-auth"; email?: string }
-  | { kind: "error"; message: string };
+  | { kind: "error"; message: string }
 
 function AcceptInvitationPage() {
-  const navigate = useNavigate();
-  const { invitationId } = useParams({ from: "/accept-invitation/$invitationId" });
-  const [state, setState] = useState<PageState>({ kind: "loading" });
+  const navigate = useNavigate()
+  const { invitationId } = useParams({ from: "/accept-invitation/$invitationId" })
+  const [state, setState] = useState<PageState>({ kind: "loading" })
 
   // StrictMode ejecuta el efecto dos veces en dev; la segunda aceptación
   // falla con "ya aceptada" y mostraría un error falso. Ejecutar una sola vez.
-  const started = useRef(false);
+  const started = useRef(false)
   useEffect(() => {
-    if (started.current) return;
-    started.current = true;
+    if (started.current) return
+    started.current = true
     async function accept() {
-      const { data: session } = await authClient.getSession();
+      const { data: session } = await authClient.getSession()
       if (!session) {
-        setState({ kind: "needs-auth" });
-        return;
+        setState({ kind: "needs-auth" })
+        return
       }
       const { data, error } = await authClient.organization.acceptInvitation({
         invitationId,
-      });
+      })
       if (error) {
-        setState({ kind: "error", message: "La invitación expiró o fue revocada." });
-        return;
+        setState({ kind: "error", message: "La invitación expiró o fue revocada." })
+        return
       }
       const organizationId = (data as { member?: { organizationId?: string } } | null)?.member
-        ?.organizationId;
-      const { data: orgs } = await authClient.organization.list();
-      const slug = organizationId ? orgs?.find((org) => org.id === organizationId)?.slug : undefined;
+        ?.organizationId
+      const { data: orgs } = await authClient.organization.list()
+      const slug = organizationId ? orgs?.find((org) => org.id === organizationId)?.slug : undefined
       if (slug) {
-        window.location.assign(tenantUrl(slug, "/branches"));
-        return;
+        window.location.assign(tenantUrl(slug, "/branches"))
+        return
       }
-      await navigate({ to: "/" });
+      await navigate({ to: "/" })
     }
-    void accept();
-  }, [invitationId, navigate]);
+    void accept()
+  }, [invitationId, navigate])
 
   if (state.kind === "loading") {
     return (
       <AuthCard title="Aceptando invitación">
         <LoadingState message="Aceptando invitación…" />
       </AuthCard>
-    );
+    )
   }
 
   if (state.kind === "needs-auth") {
@@ -78,7 +78,7 @@ function AcceptInvitationPage() {
           </Button>
         </div>
       </AuthCard>
-    );
+    )
   }
 
   return (
@@ -88,5 +88,5 @@ function AcceptInvitationPage() {
         Ir a iniciar sesión
       </Button>
     </AuthCard>
-  );
+  )
 }

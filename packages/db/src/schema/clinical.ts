@@ -1,4 +1,4 @@
-import { sql } from "drizzle-orm";
+import { sql } from "drizzle-orm"
 import {
   bigint,
   boolean,
@@ -14,11 +14,10 @@ import {
   timestamp,
   uniqueIndex,
   uuid,
-} from "drizzle-orm/pg-core";
-import { organization, user } from "./auth.js";
-import { contact } from "./crm.js";
-import { timestamps, orgFk } from "./crm.js";
-import { branch } from "./org.js";
+} from "drizzle-orm/pg-core"
+import { organization, user } from "./auth.js"
+import { contact, orgFk, timestamps } from "./crm.js"
+import { branch } from "./org.js"
 
 /**
  * Paciente dental (ficha clínica). Un contacto CRM se "convierte en paciente"
@@ -58,7 +57,9 @@ export const patient = pgTable(
     registeredBranchId: uuid("registered_branch_id").references(() => branch.id),
     /** Revisión de antecedentes (agregado transaccional de salud). */
     healthRevision: integer("health_revision").notNull().default(0),
-    healthReviewStatus: jsonb("health_review_status").notNull().default({ allergies: "unknown", conditions: "unknown", medications: "unknown" }),
+    healthReviewStatus: jsonb("health_review_status")
+      .notNull()
+      .default({ allergies: "unknown", conditions: "unknown", medications: "unknown" }),
     healthReviewedAt: timestamp("health_reviewed_at", { withTimezone: true }),
     healthReviewedBy: text("health_reviewed_by").references(() => user.id),
     isActive: boolean("is_active").notNull().default(true),
@@ -71,7 +72,7 @@ export const patient = pgTable(
       .on(table.organizationId, table.docType, table.docNumber)
       .where(sql`"doc_number" IS NOT NULL`),
   ],
-);
+)
 
 /** Correlativos por organización (patient → HC-000123; futuros comprobantes). */
 export const orgCounter = pgTable(
@@ -84,7 +85,7 @@ export const orgCounter = pgTable(
     value: bigint("value", { mode: "number" }).notNull().default(0),
   },
   (table) => [primaryKey({ columns: [table.organizationId, table.key] })],
-);
+)
 
 export const patientAllergy = pgTable(
   "patient_allergy",
@@ -102,7 +103,7 @@ export const patientAllergy = pgTable(
     ...timestamps,
   },
   (table) => [index("patient_allergy_org_patient_idx").on(table.organizationId, table.patientId)],
-);
+)
 
 export const patientCondition = pgTable(
   "patient_condition",
@@ -121,7 +122,7 @@ export const patientCondition = pgTable(
     ...timestamps,
   },
   (table) => [index("patient_condition_org_patient_idx").on(table.organizationId, table.patientId)],
-);
+)
 
 export const patientMedication = pgTable(
   "patient_medication",
@@ -140,8 +141,10 @@ export const patientMedication = pgTable(
     createdBy: text("created_by").references(() => user.id),
     ...timestamps,
   },
-  (table) => [index("patient_medication_org_patient_idx").on(table.organizationId, table.patientId)],
-);
+  (table) => [
+    index("patient_medication_org_patient_idx").on(table.organizationId, table.patientId),
+  ],
+)
 
 /** Snapshot versionado de la entrevista (append-only, sin updatedAt). */
 export const patientAnamnesis = pgTable(
@@ -163,7 +166,7 @@ export const patientAnamnesis = pgTable(
     uniqueIndex("patient_anamnesis_patient_version_uidx").on(table.patientId, table.version),
     index("patient_anamnesis_org_patient_idx").on(table.organizationId, table.patientId),
   ],
-);
+)
 
 /** Evolución por consulta (append-only, sin updatedAt). */
 export const clinicalNote = pgTable(
@@ -183,8 +186,14 @@ export const clinicalNote = pgTable(
     kind: text("kind").notNull().default("evolucion"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => [index("clinical_note_org_patient_created_idx").on(table.organizationId, table.patientId, table.createdAt)],
-);
+  (table) => [
+    index("clinical_note_org_patient_created_idx").on(
+      table.organizationId,
+      table.patientId,
+      table.createdAt,
+    ),
+  ],
+)
 
 /** Documentos/consentimientos (append-only, blob en S3). */
 export const patientDocument = pgTable(
@@ -204,7 +213,7 @@ export const patientDocument = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [index("patient_document_org_patient_idx").on(table.organizationId, table.patientId)],
-);
+)
 
 /** Odontograma FDI NTS 188-MINSA/DGIESP-2022 por pieza/superficie (append-only).
  * Los hallazgos nuevos usan status='recorded'; la anulación es una corrección
@@ -236,8 +245,14 @@ export const odontogramEntry = pgTable(
     encounterId: uuid("encounter_id").references(() => encounter.id),
     ...timestamps,
   },
-  (table) => [index("odontogram_entry_org_patient_tooth_idx").on(table.organizationId, table.patientId, table.toothNumber)],
-);
+  (table) => [
+    index("odontogram_entry_org_patient_tooth_idx").on(
+      table.organizationId,
+      table.patientId,
+      table.toothNumber,
+    ),
+  ],
+)
 
 /**
  * Acta de odontograma NTS 188: snapshot inmutable de los hallazgos activos al
@@ -270,8 +285,10 @@ export const odontogramAssessment = pgTable(
     standard: text("standard").notNull().default("NTS 188-MINSA/DGIESP-2022"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => [index("odontogram_assessment_org_patient_idx").on(table.organizationId, table.patientId)],
-);
+  (table) => [
+    index("odontogram_assessment_org_patient_idx").on(table.organizationId, table.patientId),
+  ],
+)
 
 /**
  * Atención/encuentro clínico. Borrador editable; al finalizar queda cerrado
@@ -303,11 +320,9 @@ export const encounter = pgTable(
   },
   (table) => [
     index("encounter_org_patient_idx").on(table.organizationId, table.patientId),
-    uniqueIndex("encounter_patient_open_uidx")
-      .on(table.patientId)
-      .where(sql`status = 'borrador'`),
+    uniqueIndex("encounter_patient_open_uidx").on(table.patientId).where(sql`status = 'borrador'`),
   ],
-);
+)
 
 /** Piezas dentales involucradas en una atención. */
 export const encounterTooth = pgTable(
@@ -321,8 +336,10 @@ export const encounterTooth = pgTable(
     toothNumber: smallint("tooth_number").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => [uniqueIndex("encounter_tooth_encounter_tooth_uidx").on(table.encounterId, table.toothNumber)],
-);
+  (table) => [
+    uniqueIndex("encounter_tooth_encounter_tooth_uidx").on(table.encounterId, table.toothNumber),
+  ],
+)
 
 /** Biblioteca global de prestaciones (solo lectura para el rol app, como cie10_code). */
 export const treatmentTemplate = pgTable(
@@ -340,7 +357,7 @@ export const treatmentTemplate = pgTable(
     externalCodings: jsonb("external_codings").notNull().default([]),
   },
   (table) => [uniqueIndex("treatment_template_key_uidx").on(table.key)],
-);
+)
 
 /** Oferta organizacional de tratamientos y tarifas (recurso /services). */
 export const serviceCatalog = pgTable(
@@ -368,7 +385,7 @@ export const serviceCatalog = pgTable(
     index("service_catalog_org_specialty_idx").on(table.organizationId, table.specialty),
     index("service_catalog_template_idx").on(table.templateId),
   ],
-);
+)
 /** Procedimiento realizado durante una atención; puede cerrar un ítem del plan. */
 export const encounterProcedure = pgTable("encounter_procedure", {
   id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -387,7 +404,7 @@ export const encounterProcedure = pgTable("encounter_procedure", {
   planItemId: uuid("plan_item_id").references(() => treatmentPlanItem.id),
   createdBy: text("created_by").references(() => user.id),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-});
+})
 
 /** Plan clínico longitudinal del paciente: existe antes que cualquier
  * presupuesto y puede continuar en múltiples visitas. `originEncounterId`
@@ -408,7 +425,7 @@ export const treatmentPlan = pgTable(
     ...timestamps,
   },
   (table) => [index("treatment_plan_org_patient_idx").on(table.organizationId, table.patientId)],
-);
+)
 /** Cabecera del documento económico: siempre pertenece a un plan clínico.
  * `status`/`acceptedByName`/`decisionNote` conservan la máquina de estados
  * actual; el contenido cotizado vive en `treatment_budget_item` (snapshot),
@@ -441,7 +458,7 @@ export const treatmentBudget = pgTable(
     index("treatment_budget_org_patient_idx").on(table.organizationId, table.patientId),
     index("treatment_budget_org_plan_idx").on(table.organizationId, table.planId),
   ],
-);
+)
 /** Indicación clínica del plan. `budgetId` es el presupuesto vigente (nullable:
  * sin presupuesto = decisión pendiente). La decisión se deriva de la línea
  * económica vigente, no de una columna propia. `sourceEncounterId` conserva
@@ -481,7 +498,7 @@ export const treatmentPlanItem = pgTable(
     index("treatment_plan_item_org_budget_idx").on(table.organizationId, table.budgetId),
     index("treatment_plan_item_org_plan_idx").on(table.organizationId, table.planId),
   ],
-);
+)
 /** Línea económica cotizada en un presupuesto: snapshot de lo realmente
  * cotizado (no un join mutable). UNIQUE(budgetId,planItemId). Append-only
  * tras presentar: solo `decision` cambia al decidir. */
@@ -521,7 +538,7 @@ export const treatmentBudgetItem = pgTable(
     index("treatment_budget_item_org_budget_idx").on(table.organizationId, table.budgetId),
     index("treatment_budget_item_org_plan_idx").on(table.organizationId, table.planId),
   ],
-);
+)
 /** Vínculo atención ↔ ítem del plan (creado al abrir atención o al registrar
  * procedimiento; conserva aunque el ítem quede realizado). PK compuesta. */
 export const encounterPlanItem = pgTable(
@@ -540,7 +557,7 @@ export const encounterPlanItem = pgTable(
     primaryKey({ columns: [table.encounterId, table.planItemId] }),
     index("encounter_plan_item_plan_item_idx").on(table.planItemId),
   ],
-);
+)
 
 /** Contexto versionado del documento (append-only): cada corrección agrega una
  * versión; las lecturas usan la vigente. Blob/original inmutables en
@@ -565,14 +582,17 @@ export const patientDocumentContext = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
-    uniqueIndex("patient_document_context_document_version_uidx").on(table.documentId, table.version),
+    uniqueIndex("patient_document_context_document_version_uidx").on(
+      table.documentId,
+      table.version,
+    ),
     index("patient_document_context_org_patient_idx").on(table.organizationId, table.patientId),
     index("patient_document_context_document_idx").on(table.documentId),
   ],
-);
+)
 
 /** Catálogo CIE-10 global (SIN org_id, SIN RLS, read-only en runtime). */
 export const cie10Code = pgTable("cie10_code", {
   code: text("code").primaryKey(),
   description: text("description").notNull(),
-});
+})

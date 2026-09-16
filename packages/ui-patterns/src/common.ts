@@ -44,4 +44,4 @@ export const common = {
     sort: "Ordenar",
     sortDefault: "Predeterminado",
   },
-} as const;
+} as const

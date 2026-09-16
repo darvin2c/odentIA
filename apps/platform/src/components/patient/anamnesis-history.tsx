@@ -1,14 +1,18 @@
-import { useQuery } from "@tanstack/react-query";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@odentia/ui";
-import { apiFetch } from "../../lib/api";
-import type { AnamnesisAnswers } from "../../lib/patients";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@odentia/ui"
+import { useQuery } from "@tanstack/react-query"
+import { apiFetch } from "../../lib/api"
+import type { AnamnesisAnswers } from "../../lib/patients"
 
-interface AnamnesisVersion { id: string; version: number; createdAt: string }
+interface AnamnesisVersion {
+  id: string
+  version: number
+  createdAt: string
+}
 
 function AnswerValue({ value }: { value: unknown }) {
-  if (value == null) return null;
-  if (typeof value === "boolean") return <span>{value ? "Sí" : "No"}</span>;
-  if (typeof value !== "object") return <span className="whitespace-pre-wrap">{String(value)}</span>;
+  if (value == null) return null
+  if (typeof value === "boolean") return <span>{value ? "Sí" : "No"}</span>
+  if (typeof value !== "object") return <span className="whitespace-pre-wrap">{String(value)}</span>
   if (Array.isArray(value)) {
     return (
       <ul className="list-inside list-disc">
@@ -18,7 +22,7 @@ function AnswerValue({ value }: { value: unknown }) {
           </li>
         ))}
       </ul>
-    );
+    )
   }
   return (
     <div className="flex flex-col">
@@ -33,12 +37,12 @@ function AnswerValue({ value }: { value: unknown }) {
         </div>
       ))}
     </div>
-  );
+  )
 }
 
 function AnswersView({ value }: { value: unknown }) {
   if (value == null || typeof value !== "object" || Array.isArray(value)) {
-    return <AnswerValue value={value} />;
+    return <AnswerValue value={value} />
   }
   return (
     <div className="flex flex-col gap-4">
@@ -51,17 +55,33 @@ function AnswersView({ value }: { value: unknown }) {
         </section>
       ))}
     </div>
-  );
+  )
 }
 
-export function AnamnesisVersionDialog({ patientId, versionId, onClose }: { patientId: string; versionId: string | null; onClose: () => void }) {
+export function AnamnesisVersionDialog({
+  patientId,
+  versionId,
+  onClose,
+}: {
+  patientId: string
+  versionId: string | null
+  onClose: () => void
+}) {
   const version = useQuery({
     queryKey: ["patient-anamnesis-version", patientId, versionId],
-    queryFn: () => apiFetch<{ data: AnamnesisVersion & { answers: AnamnesisAnswers } }>(`/api/patients/${patientId}/anamnesis/${versionId}`),
+    queryFn: () =>
+      apiFetch<{ data: AnamnesisVersion & { answers: AnamnesisAnswers } }>(
+        `/api/patients/${patientId}/anamnesis/${versionId}`,
+      ),
     enabled: versionId !== null,
-  });
+  })
   return (
-    <Dialog open={versionId !== null} onOpenChange={(open) => { if (!open) onClose(); }}>
+    <Dialog
+      open={versionId !== null}
+      onOpenChange={(open) => {
+        if (!open) onClose()
+      }}
+    >
       <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>Anamnesis {version.data ? `v${version.data.data.version}` : ""}</DialogTitle>
@@ -70,11 +90,13 @@ export function AnamnesisVersionDialog({ patientId, versionId, onClose }: { pati
         {version.isLoading ? (
           <p className="text-sm text-muted-foreground">Cargando…</p>
         ) : version.isError ? (
-          <p role="alert" className="text-sm text-destructive">{version.error.message}</p>
+          <p role="alert" className="text-sm text-destructive">
+            {version.error.message}
+          </p>
         ) : (
           <AnswersView value={version.data?.data.answers} />
         )}
       </DialogContent>
     </Dialog>
-  );
+  )
 }

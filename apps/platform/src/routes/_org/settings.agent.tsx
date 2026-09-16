@@ -1,53 +1,58 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
-import { Button, Field, FieldLabel, Input } from "@odentia/ui";
-import { EmptyState, PageHeader } from "@odentia/ui-patterns";
-import { useState } from "react";
-import { apiFetch } from "../../lib/api";
-import { useCanWrite, type AgentConfig } from "../../lib/crm";
+import { Button, Field, FieldLabel, Input } from "@odentia/ui"
+import { EmptyState, PageHeader } from "@odentia/ui-patterns"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { createFileRoute } from "@tanstack/react-router"
+import { useState } from "react"
+import { apiFetch } from "../../lib/api"
+import { type AgentConfig, useCanWrite } from "../../lib/crm"
 
 export const Route = createFileRoute("/_org/settings/agent")({
   component: AgentPage,
-});
+})
 
 function AgentPage() {
-  const queryClient = useQueryClient();
-  const canWrite = useCanWrite();
-  const [saved, setSaved] = useState(false);
+  const queryClient = useQueryClient()
+  const canWrite = useCanWrite()
+  const [saved, setSaved] = useState(false)
 
   const configQuery = useQuery({
     queryKey: ["agent-config"],
     queryFn: () => apiFetch<{ data: AgentConfig }>("/api/agent/config"),
-  });
+  })
 
-  const [form, setForm] = useState<AgentConfig | null>(null);
-  const current = form ?? configQuery.data?.data ?? null;
+  const [form, setForm] = useState<AgentConfig | null>(null)
+  const current = form ?? configQuery.data?.data ?? null
 
   const saveMutation = useMutation({
     mutationFn: (patch: Partial<AgentConfig>) =>
       apiFetch("/api/agent/config", { method: "PUT", body: JSON.stringify(patch) }),
     onSuccess: () => {
-      setSaved(true);
-      setForm(null);
-      void queryClient.invalidateQueries({ queryKey: ["agent-config"] });
+      setSaved(true)
+      setForm(null)
+      void queryClient.invalidateQueries({ queryKey: ["agent-config"] })
     },
-  });
+  })
 
   if (!canWrite) {
-    return <EmptyState title="Sin acceso" description="Solo owner/admin pueden configurar el agente." />;
+    return (
+      <EmptyState title="Sin acceso" description="Solo owner/admin pueden configurar el agente." />
+    )
   }
   if (!current) {
-    return <p className="p-4 text-sm text-muted-foreground">Cargando…</p>;
+    return <p className="p-4 text-sm text-muted-foreground">Cargando…</p>
   }
 
   const set = (patch: Partial<AgentConfig>) => {
-    setSaved(false);
-    setForm({ ...current, ...patch });
-  };
+    setSaved(false)
+    setForm({ ...current, ...patch })
+  }
 
   return (
     <div className="flex flex-col gap-6">
-      <PageHeader title="Agente" subtitle="Responde y cualifica automáticamente (sin agenda en esta etapa)" />
+      <PageHeader
+        title="Agente"
+        subtitle="Responde y cualifica automáticamente (sin agenda en esta etapa)"
+      />
       <label className="flex items-center gap-2 text-sm">
         <input
           type="checkbox"
@@ -78,7 +83,14 @@ function AgentPage() {
         <FieldLabel>Palabras de derivación (separadas por coma)</FieldLabel>
         <Input
           value={current.handoffKeywords.join(", ")}
-          onChange={(e) => set({ handoffKeywords: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) })}
+          onChange={(e) =>
+            set({
+              handoffKeywords: e.target.value
+                .split(",")
+                .map((s) => s.trim())
+                .filter(Boolean),
+            })
+          }
           placeholder="humano, doctor, queja"
         />
       </Field>
@@ -93,11 +105,14 @@ function AgentPage() {
         />
       </Field>
       <div className="flex items-center gap-2">
-        <Button disabled={saveMutation.isPending || !form} onClick={() => form && saveMutation.mutate(form)}>
+        <Button
+          disabled={saveMutation.isPending || !form}
+          onClick={() => form && saveMutation.mutate(form)}
+        >
           Guardar
         </Button>
         {saved && <span className="text-sm text-green-700">Guardado.</span>}
       </div>
     </div>
-  );
+  )
 }

@@ -1,7 +1,3 @@
-import { useRef, useState } from "react";
-import { useForm, useStore } from "@tanstack/react-form";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { createFileRoute, getRouteApi, Link, useNavigate, useSearch } from "@tanstack/react-router";
 import {
   Attachment,
   AttachmentAction,
@@ -24,25 +20,38 @@ import {
   Separator,
   Skeleton,
   toast,
-} from "@odentia/ui";
-import { ConfirmDialog, ErrorState, FormDrawer, PageHeader, common, fieldErrorMessages } from "@odentia/ui-patterns";
-import { Monitor, Smartphone, XIcon } from "lucide-react";
-import { z } from "zod";
-import { API_URL, authClient } from "../../lib/auth-client";
-import { parseUserAgent, relativeTime } from "../../lib/user-agent";
+} from "@odentia/ui"
+import {
+  ConfirmDialog,
+  common,
+  ErrorState,
+  FormDrawer,
+  fieldErrorMessages,
+  PageHeader,
+} from "@odentia/ui-patterns"
+import { useForm, useStore } from "@tanstack/react-form"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { createFileRoute, getRouteApi, Link, useNavigate, useSearch } from "@tanstack/react-router"
+import { Monitor, Smartphone, XIcon } from "lucide-react"
+import { useRef, useState } from "react"
+import { z } from "zod"
+import { API_URL, authClient } from "../../lib/auth-client"
+import { parseUserAgent, relativeTime } from "../../lib/user-agent"
 
 export const Route = createFileRoute("/_app/profile")({
   validateSearch: (search: Record<string, unknown>): { edit?: "profile" | "password" | "email" } =>
-    search.edit === "profile" || search.edit === "password" || search.edit === "email" ? { edit: search.edit } : {},
+    search.edit === "profile" || search.edit === "password" || search.edit === "email"
+      ? { edit: search.edit }
+      : {},
   component: ProfilePage,
-});
+})
 
-const appRouteApi = getRouteApi("/_app");
+const appRouteApi = getRouteApi("/_app")
 
 const profileSchema = z.object({
   firstName: z.string().trim().min(1, "Ingresa tu nombre"),
   lastName: z.string().trim().min(1, "Ingresa tus apellidos"),
-});
+})
 
 const passwordSchema = z
   .object({
@@ -53,38 +62,38 @@ const passwordSchema = z
   .refine((value) => value.confirmPassword === value.newPassword, {
     message: "Las contraseñas no coinciden",
     path: ["confirmPassword"],
-  });
+  })
 
 const emailSchema = z.object({
   email: z.string().email("Correo inválido"),
-});
+})
 
-const AVATAR_MAX_BYTES = 2 * 1024 * 1024;
+const AVATAR_MAX_BYTES = 2 * 1024 * 1024
 
 function avatarKindLabel(mime: string): string | null {
-  if (mime === "image/png") return "PNG";
-  if (mime === "image/jpeg") return "JPG";
-  if (mime === "image/webp") return "WebP";
-  return null;
+  if (mime === "image/png") return "PNG"
+  if (mime === "image/jpeg") return "JPG"
+  if (mime === "image/webp") return "WebP"
+  return null
 }
 
 function formatAvatarSize(bytes: number): string {
-  return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  return `${Math.max(1, Math.round(bytes / 1024))} KB`
 }
 
 interface AvatarUpload {
-  name: string;
-  meta: string;
-  objectUrl: string;
-  status: "uploading" | "error";
-  message?: string;
+  name: string
+  meta: string
+  objectUrl: string
+  status: "uploading" | "error"
+  message?: string
 }
 
 function ProfilePage() {
-  const { session } = appRouteApi.useRouteContext();
-  const { edit } = useSearch({ from: "/_app/profile" });
-  const navigate = useNavigate();
-  const live = authClient.useSession().data?.user;
+  const { session } = appRouteApi.useRouteContext()
+  const { edit } = useSearch({ from: "/_app/profile" })
+  const navigate = useNavigate()
+  const live = authClient.useSession().data?.user
   const user = live
     ? {
         name: live.name,
@@ -98,25 +107,25 @@ function ProfilePage() {
         lastName: session.lastName,
         email: session.email,
         avatarUrl: undefined as string | undefined,
-      };
+      }
 
-  const [profileError, setProfileError] = useState<string | null>(null);
-  const [passwordError, setPasswordError] = useState<string | null>(null);
-  const [emailError, setEmailError] = useState<string | null>(null);
+  const [profileError, setProfileError] = useState<string | null>(null)
+  const [passwordError, setPasswordError] = useState<string | null>(null)
+  const [emailError, setEmailError] = useState<string | null>(null)
 
   function closeDrawer() {
-    setProfileError(null);
-    setPasswordError(null);
-    setEmailError(null);
-    void navigate({ to: "/profile", search: {}, replace: true });
+    setProfileError(null)
+    setPasswordError(null)
+    setEmailError(null)
+    void navigate({ to: "/profile", search: {}, replace: true })
   }
 
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const [upload, setUpload] = useState<AvatarUpload | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [upload, setUpload] = useState<AvatarUpload | null>(null)
 
   async function handleAvatarFile(file: File | undefined) {
-    if (!file) return;
-    const kind = avatarKindLabel(file.type);
+    if (!file) return
+    const kind = avatarKindLabel(file.type)
     if (!kind) {
       setUpload({
         name: file.name,
@@ -124,9 +133,9 @@ function ProfilePage() {
         objectUrl: URL.createObjectURL(file),
         status: "error",
         message: "Solo se admiten PNG, JPG o WebP",
-      });
-      if (fileInputRef.current) fileInputRef.current.value = "";
-      return;
+      })
+      if (fileInputRef.current) fileInputRef.current.value = ""
+      return
     }
     if (file.size > AVATAR_MAX_BYTES) {
       setUpload({
@@ -135,63 +144,77 @@ function ProfilePage() {
         objectUrl: URL.createObjectURL(file),
         status: "error",
         message: "La imagen no puede superar 2 MB",
-      });
-      if (fileInputRef.current) fileInputRef.current.value = "";
-      return;
+      })
+      if (fileInputRef.current) fileInputRef.current.value = ""
+      return
     }
-    const objectUrl = URL.createObjectURL(file);
-    setUpload({ name: file.name, meta: `${kind} · ${formatAvatarSize(file.size)}`, objectUrl, status: "uploading" });
+    const objectUrl = URL.createObjectURL(file)
+    setUpload({
+      name: file.name,
+      meta: `${kind} · ${formatAvatarSize(file.size)}`,
+      objectUrl,
+      status: "uploading",
+    })
     try {
-      const formData = new FormData();
-      formData.append("file", file);
-      const res = await fetch(`${API_URL}/api/uploads/avatar`, { method: "POST", credentials: "include", body: formData });
+      const formData = new FormData()
+      formData.append("file", file)
+      const res = await fetch(`${API_URL}/api/uploads/avatar`, {
+        method: "POST",
+        credentials: "include",
+        body: formData,
+      })
       if (!res.ok) {
-        const body = (await res.json().catch(() => null)) as { error?: { message?: string } } | null;
+        const body = (await res.json().catch(() => null)) as {
+          error?: { message?: string }
+        } | null
         setUpload((prev) =>
-          prev ? { ...prev, status: "error", message: body?.error?.message ?? common.errors.generic } : prev,
-        );
-        return;
+          prev
+            ? { ...prev, status: "error", message: body?.error?.message ?? common.errors.generic }
+            : prev,
+        )
+        return
       }
-      const { data } = (await res.json()) as { data: { url: string } };
-      const { error: updateError } = await authClient.updateUser({ image: data.url });
+      const { data } = (await res.json()) as { data: { url: string } }
+      const { error: updateError } = await authClient.updateUser({ image: data.url })
       if (updateError) {
-        setUpload((prev) => (prev ? { ...prev, status: "error", message: common.errors.generic } : prev));
-        return;
+        setUpload((prev) =>
+          prev ? { ...prev, status: "error", message: common.errors.generic } : prev,
+        )
+        return
       }
-      URL.revokeObjectURL(objectUrl);
-      setUpload(null);
-      toast.success("Foto actualizada");
+      URL.revokeObjectURL(objectUrl)
+      setUpload(null)
+      toast.success("Foto actualizada")
     } catch {
-      setUpload((prev) => (prev ? { ...prev, status: "error", message: common.errors.generic } : prev));
+      setUpload((prev) =>
+        prev ? { ...prev, status: "error", message: common.errors.generic } : prev,
+      )
     } finally {
-      if (fileInputRef.current) fileInputRef.current.value = "";
+      if (fileInputRef.current) fileInputRef.current.value = ""
     }
   }
 
   async function handleRemovePhoto() {
-    const { error: updateError } = await authClient.updateUser({ image: null });
+    const { error: updateError } = await authClient.updateUser({ image: null })
     if (updateError) {
-      toast.error(common.errors.generic);
-      return;
+      toast.error(common.errors.generic)
+      return
     }
-    toast.success("Foto eliminada");
+    toast.success("Foto eliminada")
   }
 
-  const initial = user.name.trim().charAt(0).toUpperCase() || "U";
+  const initial = user.name.trim().charAt(0).toUpperCase() || "U"
   const avatar = user.avatarUrl ? (
     <img src={user.avatarUrl} alt={user.name} className="size-16 rounded-full object-cover" />
   ) : (
     <div className="flex size-16 items-center justify-center rounded-full bg-primary text-xl font-semibold text-primary-foreground">
       {initial}
     </div>
-  );
+  )
 
   return (
     <div className="flex max-w-2xl flex-col gap-6">
-      <PageHeader
-        title="Mi perfil"
-        subtitle="Administra tu información de cuenta y seguridad"
-      />
+      <PageHeader title="Mi perfil" subtitle="Administra tu información de cuenta y seguridad" />
       <Card>
         <CardHeader>
           <CardTitle>Perfil</CardTitle>
@@ -205,11 +228,21 @@ function ProfilePage() {
               <p className="truncate text-sm text-muted-foreground">{user.email}</p>
             </div>
             <div className="ml-auto flex gap-2">
-              <Button type="button" variant="outline" size="sm" onClick={() => fileInputRef.current?.click()}>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => fileInputRef.current?.click()}
+              >
                 Cambiar foto
               </Button>
               {user.avatarUrl ? (
-                <Button type="button" variant="ghost" size="sm" onClick={() => void handleRemovePhoto()}>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => void handleRemovePhoto()}
+                >
                   Quitar
                 </Button>
               ) : null}
@@ -230,7 +263,9 @@ function ProfilePage() {
               <AttachmentContent>
                 <AttachmentTitle>{upload.name}</AttachmentTitle>
                 <AttachmentDescription>
-                  {upload.status === "error" ? (upload.message ?? common.errors.generic) : upload.meta}
+                  {upload.status === "error"
+                    ? (upload.message ?? common.errors.generic)
+                    : upload.meta}
                 </AttachmentDescription>
               </AttachmentContent>
               {upload.status === "error" ? (
@@ -290,7 +325,12 @@ function ProfilePage() {
         onError={setProfileError}
         onClose={closeDrawer}
       />
-      <ChangePasswordDrawer open={edit === "password"} error={passwordError} onError={setPasswordError} onClose={closeDrawer} />
+      <ChangePasswordDrawer
+        open={edit === "password"}
+        error={passwordError}
+        onError={setPasswordError}
+        onClose={closeDrawer}
+      />
       <ChangeEmailDrawer
         key={user.email}
         open={edit === "email"}
@@ -300,43 +340,45 @@ function ProfilePage() {
         onClose={closeDrawer}
       />
     </div>
-  );
+  )
 }
 
 function SessionsCard() {
-  const queryClient = useQueryClient();
-  const currentToken = authClient.useSession().data?.session.token;
+  const queryClient = useQueryClient()
+  const currentToken = authClient.useSession().data?.session.token
   const sessionsQuery = useQuery({
     queryKey: ["sessions"],
     queryFn: async () => {
-      const { data, error } = await authClient.listSessions();
-      if (error) throw new Error(error.message ?? common.errors.generic);
-      return data ?? [];
+      const { data, error } = await authClient.listSessions()
+      if (error) throw new Error(error.message ?? common.errors.generic)
+      return data ?? []
     },
-  });
-  const [revokeTarget, setRevokeTarget] = useState<{ kind: "one"; token: string } | { kind: "others" } | null>(null);
-  const [revokePending, setRevokePending] = useState(false);
+  })
+  const [revokeTarget, setRevokeTarget] = useState<
+    { kind: "one"; token: string } | { kind: "others" } | null
+  >(null)
+  const [revokePending, setRevokePending] = useState(false)
 
   async function handleConfirmRevoke() {
-    if (!revokeTarget) return;
-    setRevokePending(true);
+    if (!revokeTarget) return
+    setRevokePending(true)
     try {
       if (revokeTarget.kind === "one") {
-        await authClient.revokeSession({ token: revokeTarget.token });
+        await authClient.revokeSession({ token: revokeTarget.token })
       } else {
-        await authClient.revokeOtherSessions();
+        await authClient.revokeOtherSessions()
       }
-      await queryClient.invalidateQueries({ queryKey: ["sessions"] });
-      toast.success(revokeTarget.kind === "one" ? "Sesión cerrada" : "Otras sesiones cerradas");
-      setRevokeTarget(null);
+      await queryClient.invalidateQueries({ queryKey: ["sessions"] })
+      toast.success(revokeTarget.kind === "one" ? "Sesión cerrada" : "Otras sesiones cerradas")
+      setRevokeTarget(null)
     } catch {
-      toast.error(common.errors.generic);
+      toast.error(common.errors.generic)
     } finally {
-      setRevokePending(false);
+      setRevokePending(false)
     }
   }
 
-  const sessions = sessionsQuery.data ?? [];
+  const sessions = sessionsQuery.data ?? []
 
   return (
     <Card>
@@ -345,7 +387,12 @@ function SessionsCard() {
         <CardDescription>Dispositivos con acceso a tu cuenta.</CardDescription>
         {sessions.length > 1 ? (
           <CardAction>
-            <Button type="button" variant="outline" size="sm" onClick={() => setRevokeTarget({ kind: "others" })}>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setRevokeTarget({ kind: "others" })}
+            >
               Cerrar otras sesiones
             </Button>
           </CardAction>
@@ -361,17 +408,20 @@ function SessionsCard() {
           <ErrorState
             error={sessionsQuery.error}
             onRetry={() => {
-              void sessionsQuery.refetch();
+              void sessionsQuery.refetch()
             }}
           />
         ) : (
           <ul className="flex flex-col gap-3">
             {sessions.map((item) => {
-              const { browser, os } = parseUserAgent(item.userAgent);
-              const isCurrent = item.token === currentToken;
-              const Icon = os === "Android" || os === "iOS" ? Smartphone : Monitor;
+              const { browser, os } = parseUserAgent(item.userAgent)
+              const isCurrent = item.token === currentToken
+              const Icon = os === "Android" || os === "iOS" ? Smartphone : Monitor
               return (
-                <li key={item.token} className="flex items-center gap-3 rounded-lg border p-3 text-sm">
+                <li
+                  key={item.token}
+                  className="flex items-center gap-3 rounded-lg border p-3 text-sm"
+                >
                   <Icon className="size-5 shrink-0" aria-hidden />
                   <div className="min-w-0">
                     <p className="flex items-center gap-2 font-medium">
@@ -381,7 +431,8 @@ function SessionsCard() {
                       {isCurrent ? <Badge variant="success">Actual</Badge> : null}
                     </p>
                     <p className="text-xs text-muted-foreground">
-                      Última actividad {relativeTime(item.updatedAt)} · {item.ipAddress ?? "IP desconocida"}
+                      Última actividad {relativeTime(item.updatedAt)} ·{" "}
+                      {item.ipAddress ?? "IP desconocida"}
                     </p>
                   </div>
                   {isCurrent ? null : (
@@ -396,7 +447,7 @@ function SessionsCard() {
                     </Button>
                   )}
                 </li>
-              );
+              )
             })}
           </ul>
         )}
@@ -416,7 +467,7 @@ function SessionsCard() {
         onClose={() => setRevokeTarget(null)}
       />
     </Card>
-  );
+  )
 }
 
 function EditProfileDrawer({
@@ -427,12 +478,12 @@ function EditProfileDrawer({
   onError,
   onClose,
 }: {
-  open: boolean;
-  initialFirstName: string;
-  initialLastName: string;
-  error: string | null;
-  onError: (error: string | null) => void;
-  onClose: () => void;
+  open: boolean
+  initialFirstName: string
+  initialLastName: string
+  error: string | null
+  onError: (error: string | null) => void
+  onClose: () => void
 }) {
   const form = useForm({
     defaultValues: { firstName: initialFirstName, lastName: initialLastName },
@@ -442,17 +493,17 @@ function EditProfileDrawer({
         name: `${value.firstName} ${value.lastName}`.trim(),
         firstName: value.firstName,
         lastName: value.lastName,
-      });
+      })
       if (updateError) {
-        onError(common.errors.generic);
-        return;
+        onError(common.errors.generic)
+        return
       }
-      toast.success("Perfil actualizado");
-      onClose();
+      toast.success("Perfil actualizado")
+      onClose()
     },
-  });
-  const isSubmitting = useStore(form.store, (state) => state.isSubmitting);
-  const isDirty = useStore(form.store, (state) => state.isDirty);
+  })
+  const isSubmitting = useStore(form.store, (state) => state.isSubmitting)
+  const isDirty = useStore(form.store, (state) => state.isDirty)
 
   return (
     <FormDrawer
@@ -460,9 +511,9 @@ function EditProfileDrawer({
       title="Editar perfil"
       onClose={onClose}
       onSubmit={(event) => {
-        event.preventDefault();
-        onError(null);
-        void form.handleSubmit();
+        event.preventDefault()
+        onError(null)
+        void form.handleSubmit()
       }}
       isDirty={isDirty}
       isSubmitting={isSubmitting}
@@ -499,7 +550,7 @@ function EditProfileDrawer({
         )}
       </form.Field>
     </FormDrawer>
-  );
+  )
 }
 
 function ChangePasswordDrawer({
@@ -508,10 +559,10 @@ function ChangePasswordDrawer({
   onError,
   onClose,
 }: {
-  open: boolean;
-  error: string | null;
-  onError: (error: string | null) => void;
-  onClose: () => void;
+  open: boolean
+  error: string | null
+  onError: (error: string | null) => void
+  onClose: () => void
 }) {
   const form = useForm({
     defaultValues: { currentPassword: "", newPassword: "", confirmPassword: "" },
@@ -521,17 +572,19 @@ function ChangePasswordDrawer({
         currentPassword: value.currentPassword,
         newPassword: value.newPassword,
         revokeOtherSessions: true,
-      });
+      })
       if (changeError) {
-        onError("No se pudo cambiar la contraseña. Verifica tu contraseña actual e inténtalo de nuevo.");
-        return;
+        onError(
+          "No se pudo cambiar la contraseña. Verifica tu contraseña actual e inténtalo de nuevo.",
+        )
+        return
       }
-      toast.success("Contraseña actualizada");
-      onClose();
+      toast.success("Contraseña actualizada")
+      onClose()
     },
-  });
-  const isSubmitting = useStore(form.store, (state) => state.isSubmitting);
-  const isDirty = useStore(form.store, (state) => state.isDirty);
+  })
+  const isSubmitting = useStore(form.store, (state) => state.isSubmitting)
+  const isDirty = useStore(form.store, (state) => state.isDirty)
 
   return (
     <FormDrawer
@@ -539,9 +592,9 @@ function ChangePasswordDrawer({
       title="Cambiar contraseña"
       onClose={onClose}
       onSubmit={(event) => {
-        event.preventDefault();
-        onError(null);
-        void form.handleSubmit();
+        event.preventDefault()
+        onError(null)
+        void form.handleSubmit()
       }}
       isDirty={isDirty}
       isSubmitting={isSubmitting}
@@ -595,7 +648,7 @@ function ChangePasswordDrawer({
         </form.Field>
       </div>
     </FormDrawer>
-  );
+  )
 }
 
 function ChangeEmailDrawer({
@@ -605,35 +658,42 @@ function ChangeEmailDrawer({
   onError,
   onClose,
 }: {
-  open: boolean;
-  currentEmail: string;
-  error: string | null;
-  onError: (error: string | null) => void;
-  onClose: () => void;
+  open: boolean
+  currentEmail: string
+  error: string | null
+  onError: (error: string | null) => void
+  onClose: () => void
 }) {
   const form = useForm({
     defaultValues: { email: "" },
     validators: {
-      onSubmit: emailSchema.refine((value) => value.email.trim().toLowerCase() !== currentEmail.toLowerCase(), {
-        message: "El nuevo correo es igual al actual",
-        path: ["email"],
-      }),
+      onSubmit: emailSchema.refine(
+        (value) => value.email.trim().toLowerCase() !== currentEmail.toLowerCase(),
+        {
+          message: "El nuevo correo es igual al actual",
+          path: ["email"],
+        },
+      ),
     },
     onSubmit: async ({ value }) => {
       const { error: changeError } = await authClient.changeEmail({
         newEmail: value.email,
         callbackURL: `${window.location.origin}/profile`,
-      });
+      })
       if (changeError) {
-        onError(changeError.message?.includes("exist") ? "Ese correo ya está en uso." : common.errors.generic);
-        return;
+        onError(
+          changeError.message?.includes("exist")
+            ? "Ese correo ya está en uso."
+            : common.errors.generic,
+        )
+        return
       }
-      toast.success("Te enviamos un correo de confirmación a tu dirección actual");
-      onClose();
+      toast.success("Te enviamos un correo de confirmación a tu dirección actual")
+      onClose()
     },
-  });
-  const isSubmitting = useStore(form.store, (state) => state.isSubmitting);
-  const isDirty = useStore(form.store, (state) => state.isDirty);
+  })
+  const isSubmitting = useStore(form.store, (state) => state.isSubmitting)
+  const isDirty = useStore(form.store, (state) => state.isDirty)
 
   return (
     <FormDrawer
@@ -641,9 +701,9 @@ function ChangeEmailDrawer({
       title="Cambiar correo"
       onClose={onClose}
       onSubmit={(event) => {
-        event.preventDefault();
-        onError(null);
-        void form.handleSubmit();
+        event.preventDefault()
+        onError(null)
+        void form.handleSubmit()
       }}
       isDirty={isDirty}
       isSubmitting={isSubmitting}
@@ -665,5 +725,5 @@ function ChangeEmailDrawer({
         )}
       </form.Field>
     </FormDrawer>
-  );
+  )
 }

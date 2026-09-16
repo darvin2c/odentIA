@@ -1,4 +1,3 @@
-import { common } from "../common.js";
 import {
   Button,
   DropdownMenu,
@@ -6,21 +5,22 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from "@odentia/ui";
-import { ArrowDown, ArrowUp, ArrowUpDown, Check } from "lucide-react";
-import type { SortOption } from "./filter-def.js";
-import { useListSearch } from "./list-search.js";
+} from "@odentia/ui"
+import { ArrowDown, ArrowUp, ArrowUpDown, Check } from "lucide-react"
+import { common } from "../common.js"
+import type { SortOption } from "./filter-def.js"
+import { useListSearch } from "./list-search.js"
 
 export interface SortMenuProps {
-  options: SortOption[];
-  compact?: boolean;
+  options: SortOption[]
+  compact?: boolean
 }
 
 export function SortMenu({ options, compact = false }: SortMenuProps) {
-  const { get, setParam } = useListSearch();
-  const sort = get("sort");
-  const field = sort?.replace(/^-/, "");
-  const active = options.find((option) => option.value === field);
+  const { get, setParam } = useListSearch()
+  const sort = get("sort")
+  const field = sort?.replace(/^-/, "")
+  const active = options.find((option) => option.value === field)
 
   return (
     <DropdownMenu>
@@ -51,26 +51,26 @@ export function SortMenu({ options, compact = false }: SortMenuProps) {
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         {options.map((option) => {
-          const isActive = field === option.value;
-          const descending = isActive && sort?.startsWith("-");
+          const isActive = field === option.value
+          const descending = isActive && sort?.startsWith("-")
           return (
             <DropdownMenuItem
               key={option.value}
               onClick={() => {
                 if (!isActive) {
-                  setParam("sort", option.value);
-                  return;
+                  setParam("sort", option.value)
+                  return
                 }
-                setParam("sort", descending ? option.value : `-${option.value}`);
+                setParam("sort", descending ? option.value : `-${option.value}`)
               }}
             >
               <Check className={isActive ? "opacity-100" : "opacity-0"} />
               <span className="flex-1">{option.label}</span>
               {isActive ? descending ? <ArrowDown /> : <ArrowUp /> : null}
             </DropdownMenuItem>
-          );
+          )
         })}
       </DropdownMenuContent>
     </DropdownMenu>
-  );
+  )
 }

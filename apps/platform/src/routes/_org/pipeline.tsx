@@ -1,27 +1,28 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createFileRoute, Link } from "@tanstack/react-router";
-import { DndContext, useDraggable, useDroppable, type DragEndEvent } from "@dnd-kit/core";
-import { Badge } from "@odentia/ui";
-import { EmptyState, PageHeader } from "@odentia/ui-patterns";
-import { MessageCircle, Send } from "lucide-react";
-import { apiFetch } from "../../lib/api";
-import { timeAgo, type ContactListItem, type Pipeline } from "../../lib/crm";
-import { useOrgEvents } from "../../lib/org-events";
+import { DndContext, type DragEndEvent, useDraggable, useDroppable } from "@dnd-kit/core"
+import { Badge } from "@odentia/ui"
+import { EmptyState, PageHeader } from "@odentia/ui-patterns"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { createFileRoute, Link } from "@tanstack/react-router"
+import { MessageCircle, Send } from "lucide-react"
+import { apiFetch } from "../../lib/api"
+import { type ContactListItem, type Pipeline, timeAgo } from "../../lib/crm"
+import { useOrgEvents } from "../../lib/org-events"
 
 export const Route = createFileRoute("/_org/pipeline")({
   component: PipelinePage,
-});
+})
 
 function PipelinePage() {
-  const queryClient = useQueryClient();
+  const queryClient = useQueryClient()
 
   const pipelinesQuery = useQuery({
     queryKey: ["pipelines"],
     queryFn: () => apiFetch<{ data: Pipeline[] }>("/api/pipelines"),
-  });
+  })
 
-  const pipeline = pipelinesQuery.data?.data.find((p) => p.isDefault) ?? pipelinesQuery.data?.data[0];
-  const stages = pipeline?.stages ?? [];
+  const pipeline =
+    pipelinesQuery.data?.data.find((p) => p.isDefault) ?? pipelinesQuery.data?.data[0]
+  const stages = pipeline?.stages ?? []
 
   const stageQueries = useQuery({
     queryKey: ["pipeline-cards", pipeline?.id, stages.map((s) => s.id).join(",")],
@@ -30,52 +31,55 @@ function PipelinePage() {
         stages.map(async (stage) => {
           const res = await apiFetch<{ data: ContactListItem[] }>(
             `/api/contacts?stageId=${stage.id}&limit=100`,
-          );
-          return [stage.id, res.data] as const;
+          )
+          return [stage.id, res.data] as const
         }),
-      );
-      return Object.fromEntries(entries) as Record<string, ContactListItem[]>;
+      )
+      return Object.fromEntries(entries) as Record<string, ContactListItem[]>
     },
     enabled: !!pipeline,
-  });
+  })
 
   useOrgEvents(["message.created", "conversation.updated"], () => {
-    void queryClient.invalidateQueries({ queryKey: ["pipeline-cards"] });
-    void queryClient.invalidateQueries({ queryKey: ["contacts"] });
-  });
+    void queryClient.invalidateQueries({ queryKey: ["pipeline-cards"] })
+    void queryClient.invalidateQueries({ queryKey: ["contacts"] })
+  })
 
   const moveMutation = useMutation({
     mutationFn: ({ contactId, stageId }: { contactId: string; stageId: string }) =>
-      apiFetch(`/api/contacts/${contactId}`, { method: "PATCH", body: JSON.stringify({ stageId }) }),
+      apiFetch(`/api/contacts/${contactId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ stageId }),
+      }),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["pipeline-cards"] });
-      void queryClient.invalidateQueries({ queryKey: ["contacts"] });
+      void queryClient.invalidateQueries({ queryKey: ["pipeline-cards"] })
+      void queryClient.invalidateQueries({ queryKey: ["contacts"] })
     },
-  });
+  })
 
   function handleDragEnd(event: DragEndEvent) {
-    const contactId = event.active.id as string;
-    const over = event.over?.id as string | undefined;
-    if (!over || over === contactId) return;
+    const contactId = event.active.id as string
+    const over = event.over?.id as string | undefined
+    if (!over || over === contactId) return
     // Soltar sobre columna (id etapa) o sobre otra tarjeta (id contacto con etapa).
-    const cards = stageQueries.data ?? {};
-    let targetStage = stages.some((s) => s.id === over) ? over : null;
+    const cards = stageQueries.data ?? {}
+    let targetStage = stages.some((s) => s.id === over) ? over : null
     if (!targetStage) {
       for (const [stageId, list] of Object.entries(cards)) {
         if (list.some((c) => c.id === over)) {
-          targetStage = stageId;
-          break;
+          targetStage = stageId
+          break
         }
       }
     }
-    if (!targetStage) return;
-    const current = Object.entries(cards).find(([, list]) => list.some((c) => c.id === contactId));
-    if (current?.[0] === targetStage) return;
-    moveMutation.mutate({ contactId, stageId: targetStage });
+    if (!targetStage) return
+    const current = Object.entries(cards).find(([, list]) => list.some((c) => c.id === contactId))
+    if (current?.[0] === targetStage) return
+    moveMutation.mutate({ contactId, stageId: targetStage })
   }
 
   if (!pipeline && !pipelinesQuery.isLoading) {
-    return <EmptyState title="Sin pipeline" description="No hay pipeline configurado." />;
+    return <EmptyState title="Sin pipeline" description="No hay pipeline configurado." />
   }
 
   return (
@@ -98,10 +102,20 @@ function PipelinePage() {
         </div>
       </DndContext>
     </div>
-  );
+  )
 }
-function StageColumn({ stageId, name, kind, cards }: { stageId: string; name: string; kind: string; cards: ContactListItem[] }) {
-  const { setNodeRef, isOver } = useDroppable({ id: stageId });
+function StageColumn({
+  stageId,
+  name,
+  kind,
+  cards,
+}: {
+  stageId: string
+  name: string
+  kind: string
+  cards: ContactListItem[]
+}) {
+  const { setNodeRef, isOver } = useDroppable({ id: stageId })
   return (
     <section
       ref={setNodeRef}
@@ -122,11 +136,11 @@ function StageColumn({ stageId, name, kind, cards }: { stageId: string; name: st
         <DraggableCard key={card.id} card={card} />
       ))}
     </section>
-  );
+  )
 }
 
 function DraggableCard({ card }: { card: ContactListItem }) {
-  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: card.id });
+  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: card.id })
   return (
     <article
       ref={setNodeRef}
@@ -134,14 +148,20 @@ function DraggableCard({ card }: { card: ContactListItem }) {
       {...listeners}
       className={`flex flex-col gap-1 rounded-md border bg-card p-2.5 text-sm shadow-sm ${isDragging ? "opacity-50" : ""}`}
     >
-      <Link to="/contacts/$contactId" params={{ contactId: card.id }} className="font-medium hover:underline">
+      <Link
+        to="/contacts/$contactId"
+        params={{ contactId: card.id }}
+        className="font-medium hover:underline"
+      >
         {card.displayName}
       </Link>
       <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-        {card.channels.includes("whatsapp") && <MessageCircle className="size-3.5 text-green-600" />}
+        {card.channels.includes("whatsapp") && (
+          <MessageCircle className="size-3.5 text-green-600" />
+        )}
         {card.channels.includes("telegram") && <Send className="size-3.5 text-sky-600" />}
         {timeAgo(card.lastInteractionAt)}
       </span>
     </article>
-  );
+  )
 }

@@ -1,4 +1,11 @@
-import { useQuery } from "@tanstack/react-query";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@odentia/ui"
+import { AppShell, type AppShellNavEntry, LoadingState } from "@odentia/ui-patterns"
+import { useQuery } from "@tanstack/react-query"
 import {
   createFileRoute,
   getRouteApi,
@@ -6,39 +13,45 @@ import {
   Outlet,
   redirect,
   useRouterState,
-} from "@tanstack/react-router";
+} from "@tanstack/react-router"
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@odentia/ui";
-import { AppShell, LoadingState, type AppShellNavEntry } from "@odentia/ui-patterns";
-import { Bot, Building2, Contact, FlaskConical, Inbox, Kanban, ListTodo, MessageCircle, Settings, Smile, Tag, Users } from "lucide-react";
-import { authClient } from "../lib/auth-client";
-import { requireVerifiedSession, ssrFetchOptions } from "../lib/guards";
-import { orgSlugFromHostname, panelUrl, requestHostname, tenantUrl } from "../lib/host";
+  Bot,
+  Building2,
+  Contact,
+  FlaskConical,
+  Inbox,
+  Kanban,
+  ListTodo,
+  MessageCircle,
+  Settings,
+  Smile,
+  Tag,
+  Users,
+} from "lucide-react"
+import { authClient } from "../lib/auth-client"
+import { requireVerifiedSession, ssrFetchOptions } from "../lib/guards"
+import { orgSlugFromHostname, panelUrl, requestHostname, tenantUrl } from "../lib/host"
 
 export const Route = createFileRoute("/_org")({
   beforeLoad: async ({ location }) => {
-    const session = await requireVerifiedSession(location);
-    const slug = orgSlugFromHostname(requestHostname());
+    const session = await requireVerifiedSession(location)
+    const slug = orgSlugFromHostname(requestHostname())
     if (!slug) {
-      throw redirect({ href: panelUrl("/") });
+      throw redirect({ href: panelUrl("/") })
     }
-    const fetchOptions = ssrFetchOptions();
+    const fetchOptions = ssrFetchOptions()
     const { data } = await authClient.organization.getFullOrganization({
       query: { organizationSlug: slug },
       fetchOptions,
-    });
+    })
     if (!data) {
-      const { data: orgs } = await authClient.organization.list({ fetchOptions });
-      throw redirect({ href: panelUrl(orgs && orgs.length > 0 ? "/" : "/onboarding") });
+      const { data: orgs } = await authClient.organization.list({ fetchOptions })
+      throw redirect({ href: panelUrl(orgs && orgs.length > 0 ? "/" : "/onboarding") })
     }
-    return { session, org: data };
+    return { session, org: data }
   },
   component: OrgLayout,
-});
+})
 
 const navItems: AppShellNavEntry[] = [
   { label: "Bandeja", to: "/inbox", icon: Inbox },
@@ -60,7 +73,7 @@ const navItems: AppShellNavEntry[] = [
   { label: "Miembros", to: "/members", icon: Users },
   { label: "Servicios", to: "/services", icon: Tag },
   { label: "Demo", to: "/demo", icon: FlaskConical },
-];
+]
 
 function RouterLink({
   to,
@@ -69,30 +82,30 @@ function RouterLink({
   title,
   onClick,
 }: {
-  to: string;
-  className?: string;
-  children: React.ReactNode;
-  title?: string;
-  onClick?: () => void;
+  to: string
+  className?: string
+  children: React.ReactNode
+  title?: string
+  onClick?: () => void
 }) {
   return (
     <Link to={to} className={className} title={title} onClick={onClick}>
       {children}
     </Link>
-  );
+  )
 }
 
-const orgRouteApi = getRouteApi("/_org");
+const orgRouteApi = getRouteApi("/_org")
 
 function OrgSwitcher() {
-  const { org } = orgRouteApi.useRouteContext();
+  const { org } = orgRouteApi.useRouteContext()
   const { data: orgs } = useQuery({
     queryKey: ["orgs"],
     queryFn: async () => (await authClient.organization.list()).data ?? [],
-  });
+  })
 
   if (!orgs || orgs.length <= 1) {
-    return <span className="text-sm font-medium">{org.name}</span>;
+    return <span className="text-sm font-medium">{org.name}</span>
   }
 
   return (
@@ -114,15 +127,15 @@ function OrgSwitcher() {
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
-  );
+  )
 }
 
 function OrgLayout() {
-  const { org, session } = orgRouteApi.useRouteContext();
-  const pathname = useRouterState({ select: (state) => state.location.pathname });
+  const { org, session } = orgRouteApi.useRouteContext()
+  const pathname = useRouterState({ select: (state) => state.location.pathname })
 
   if (!session) {
-    return <LoadingState className="m-8" />;
+    return <LoadingState className="m-8" />
   }
 
   return (
@@ -134,11 +147,11 @@ function OrgLayout() {
       brand={<span className="text-base font-semibold">odentIA</span>}
       topbarActions={<OrgSwitcher />}
       onSignOut={async () => {
-        await authClient.signOut();
-        window.location.assign(panelUrl("/login"));
+        await authClient.signOut()
+        window.location.assign(panelUrl("/login"))
       }}
     >
       <Outlet />
     </AppShell>
-  );
+  )
 }

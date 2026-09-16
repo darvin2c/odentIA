@@ -1,7 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { getCoreRowModel, useReactTable, type ColumnDef, type SortingState } from "@tanstack/react-table";
-import { Badge, Button } from "@odentia/ui";
+import { Badge, Button } from "@odentia/ui"
 import {
   DataTable,
   EmptyState,
@@ -9,16 +6,28 @@ import {
   PageHeader,
   PageShell,
   useListSearch,
-} from "@odentia/ui-patterns";
-import { Plus } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
-import { apiFetch } from "../../lib/api";
-import { timeAgo, useCanWrite } from "../../lib/crm";
-import { ageFrom, hcLabel } from "../../lib/patients";
-import { PATIENT_FILTERS, PATIENT_SORT_OPTIONS, type PatientListRow } from "../../lib/patient-overview";
-import { CreatePatientDrawer } from "../../components/patient/create-patient-drawer";
+} from "@odentia/ui-patterns"
+import { useQuery } from "@tanstack/react-query"
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
+import {
+  type ColumnDef,
+  getCoreRowModel,
+  type SortingState,
+  useReactTable,
+} from "@tanstack/react-table"
+import { Plus } from "lucide-react"
+import { useEffect, useMemo, useState } from "react"
+import { CreatePatientDrawer } from "../../components/patient/create-patient-drawer"
+import { apiFetch } from "../../lib/api"
+import { timeAgo, useCanWrite } from "../../lib/crm"
+import {
+  PATIENT_FILTERS,
+  PATIENT_SORT_OPTIONS,
+  type PatientListRow,
+} from "../../lib/patient-overview"
+import { ageFrom, hcLabel } from "../../lib/patients"
 
-const PAGE_LIMIT = 20;
+const PAGE_LIMIT = 20
 
 export const Route = createFileRoute("/_org/patients/")({
   validateSearch: (search: Record<string, unknown>) => ({
@@ -31,41 +40,42 @@ export const Route = createFileRoute("/_org/patients/")({
     ...(typeof search.cursor === "string" ? { cursor: search.cursor } : {}),
   }),
   component: PatientsPage,
-});
-
+})
 
 function PatientsPage() {
-  const navigate = useNavigate();
-  const canWrite = useCanWrite();
-  const { contactId } = Route.useSearch();
-  const [creating, setCreating] = useState(false);
-  const listSearch = useListSearch();
-  const search = listSearch.get("q") ?? "";
-  const isActive = listSearch.get("isActive");
-  const sex = listSearch.get("sex");
-  const docType = listSearch.get("docType");
-  const sort = listSearch.get("sort");
-  const cursor = listSearch.get("cursor");
-  const [previousCursors, setPreviousCursors] = useState<string[]>([]);
+  const navigate = useNavigate()
+  const canWrite = useCanWrite()
+  const { contactId } = Route.useSearch()
+  const [creating, setCreating] = useState(false)
+  const listSearch = useListSearch()
+  const search = listSearch.get("q") ?? ""
+  const isActive = listSearch.get("isActive")
+  const sex = listSearch.get("sex")
+  const docType = listSearch.get("docType")
+  const sort = listSearch.get("sort")
+  const cursor = listSearch.get("cursor")
+  const [previousCursors, setPreviousCursors] = useState<string[]>([])
 
   useEffect(() => {
-    if (!cursor) setPreviousCursors([]);
-  }, [cursor]);
+    if (!cursor) setPreviousCursors([])
+  }, [cursor])
 
   const patientsQuery = useQuery({
     queryKey: ["patients", search, isActive, sex, docType, sort, cursor],
     queryFn: () => {
-      const params = new URLSearchParams();
-      params.set("limit", String(PAGE_LIMIT));
-      if (search.trim()) params.set("q", search.trim());
-      if (isActive) params.set("isActive", isActive);
-      if (sex) params.set("sex", sex);
-      if (docType) params.set("docType", docType);
-      if (sort) params.set("sort", sort);
-      if (cursor) params.set("cursor", cursor);
-      return apiFetch<{ data: PatientListRow[]; nextCursor?: string | null }>(`/api/patients?${params}`);
+      const params = new URLSearchParams()
+      params.set("limit", String(PAGE_LIMIT))
+      if (search.trim()) params.set("q", search.trim())
+      if (isActive) params.set("isActive", isActive)
+      if (sex) params.set("sex", sex)
+      if (docType) params.set("docType", docType)
+      if (sort) params.set("sort", sort)
+      if (cursor) params.set("cursor", cursor)
+      return apiFetch<{ data: PatientListRow[]; nextCursor?: string | null }>(
+        `/api/patients?${params}`,
+      )
     },
-  });
+  })
 
   const columns = useMemo<ColumnDef<PatientListRow>[]>(
     () => [
@@ -107,8 +117,7 @@ function PatientsPage() {
       {
         id: "phone",
         header: "Teléfono",
-        cell: ({ row }) =>
-          row.original.phone ?? <span className="text-muted-foreground">—</span>,
+        cell: ({ row }) => row.original.phone ?? <span className="text-muted-foreground">—</span>,
       },
       {
         id: "status",
@@ -127,14 +136,16 @@ function PatientsPage() {
       },
     ],
     [],
-  );
+  )
 
-  const rows = patientsQuery.data?.data ?? [];
-  const nextCursor = patientsQuery.data?.nextCursor ?? null;
-  const pageNumber = previousCursors.length + 1;
-  const hasActiveFilter = Boolean(search || isActive || sex || docType);
-  const currentSort = sort ?? "-created";
-  const sorting: SortingState = [{ id: currentSort.replace(/^-/, ""), desc: currentSort.startsWith("-") }];
+  const rows = patientsQuery.data?.data ?? []
+  const nextCursor = patientsQuery.data?.nextCursor ?? null
+  const pageNumber = previousCursors.length + 1
+  const hasActiveFilter = Boolean(search || isActive || sex || docType)
+  const currentSort = sort ?? "-created"
+  const sorting: SortingState = [
+    { id: currentSort.replace(/^-/, ""), desc: currentSort.startsWith("-") },
+  ]
 
   const table = useReactTable({
     data: rows,
@@ -143,38 +154,37 @@ function PatientsPage() {
     enableSortingRemoval: false,
     state: { sorting },
     onSortingChange: (updater) => {
-      const next = typeof updater === "function" ? updater(sorting) : updater;
-      const first = next[0];
-      if (first) listSearch.setParam("sort", `${first.desc ? "-" : ""}${first.id}`);
+      const next = typeof updater === "function" ? updater(sorting) : updater
+      const first = next[0]
+      if (first) listSearch.setParam("sort", `${first.desc ? "-" : ""}${first.id}`)
     },
     getCoreRowModel: getCoreRowModel(),
-  });
+  })
 
   const goNext = () => {
-    if (!nextCursor) return;
-    setPreviousCursors((stack) => [...stack, cursor ?? ""]);
-    listSearch.setParam("cursor", nextCursor);
-  };
+    if (!nextCursor) return
+    setPreviousCursors((stack) => [...stack, cursor ?? ""])
+    listSearch.setParam("cursor", nextCursor)
+  }
   const goPrevious = () => {
-    const copy = [...previousCursors];
-    const previous = copy.pop();
-    setPreviousCursors(copy);
-    listSearch.setParam("cursor", previous || undefined);
-  };
+    const copy = [...previousCursors]
+    const previous = copy.pop()
+    setPreviousCursors(copy)
+    listSearch.setParam("cursor", previous || undefined)
+  }
 
   return (
     <PageShell>
       <PageHeader
         title="Pacientes"
         subtitle="Fichas clínicas de la organización"
-        actions={canWrite &&
-          <Button
-            type="button"
-            onClick={() => setCreating(true)}
-          >
-            <Plus aria-hidden />
-            Nuevo paciente
-          </Button>
+        actions={
+          canWrite && (
+            <Button type="button" onClick={() => setCreating(true)}>
+              <Plus aria-hidden />
+              Nuevo paciente
+            </Button>
+          )
         }
       />
       <div className="py-4">
@@ -188,7 +198,9 @@ function PatientsPage() {
         <p className="text-sm text-muted-foreground">Cargando pacientes…</p>
       ) : patientsQuery.isError ? (
         <div className="flex flex-col gap-2">
-          <p role="alert" className="text-sm text-destructive">{patientsQuery.error.message}</p>
+          <p role="alert" className="text-sm text-destructive">
+            {patientsQuery.error.message}
+          </p>
           <div>
             <Button type="button" variant="outline" onClick={() => void patientsQuery.refetch()}>
               Reintentar
@@ -202,7 +214,10 @@ function PatientsPage() {
             description="Ajusta la búsqueda o limpia los filtros para ver todo el padrón."
           />
         ) : (
-          <EmptyState title="Sin pacientes" description="Registra el primero con el botón Nuevo paciente." />
+          <EmptyState
+            title="Sin pacientes"
+            description="Registra el primero con el botón Nuevo paciente."
+          />
         )
       ) : (
         <>
@@ -241,15 +256,16 @@ function PatientsPage() {
           open
           contactId={contactId}
           onClose={() => {
-            setCreating(false);
-            if (contactId) void navigate({
-              to: "/patients",
-              replace: true,
-              search: (previous) => ({ ...previous, contactId: undefined }),
-            });
+            setCreating(false)
+            if (contactId)
+              void navigate({
+                to: "/patients",
+                replace: true,
+                search: (previous) => ({ ...previous, contactId: undefined }),
+              })
           }}
         />
       )}
     </PageShell>
-  );
+  )
 }

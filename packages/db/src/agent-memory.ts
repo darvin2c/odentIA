@@ -1,12 +1,12 @@
-import { sql } from "drizzle-orm";
-import type { Db } from "./client.js";
+import { sql } from "drizzle-orm"
+import type { Db } from "./client.js"
 
 /**
  * Tablas de LangGraph con thread_id (formato `${orgId}:${conversationId}`).
  * checkpoint_migrations queda SIN RLS a propósito: es un ledger de versión
  * sin columna thread_id ni datos de tenant (igual que inbound_event).
  */
-const THREAD_TABLES = ["checkpoints", "checkpoint_blobs", "checkpoint_writes"] as const;
+const THREAD_TABLES = ["checkpoints", "checkpoint_blobs", "checkpoint_writes"] as const
 
 /**
  * Aplica RLS por prefijo de thread_id a la memoria del agente. Idempotente
@@ -21,10 +21,10 @@ const THREAD_TABLES = ["checkpoints", "checkpoint_blobs", "checkpoint_writes"] a
 export async function setupAgentMemory(ownerDb: Db): Promise<void> {
   for (const table of THREAD_TABLES) {
     // Nombres fijos: interpolación vía sql.raw (DO $$ no admite parámetros).
-    const t = sql.raw(`"${table}"`);
-    const lit = sql.raw(`'${table}'`);
-    await ownerDb.execute(sql`ALTER TABLE ${t} ENABLE ROW LEVEL SECURITY`);
-    await ownerDb.execute(sql`ALTER TABLE ${t} FORCE ROW LEVEL SECURITY`);
+    const t = sql.raw(`"${table}"`)
+    const lit = sql.raw(`'${table}'`)
+    await ownerDb.execute(sql`ALTER TABLE ${t} ENABLE ROW LEVEL SECURITY`)
+    await ownerDb.execute(sql`ALTER TABLE ${t} FORCE ROW LEVEL SECURITY`)
     await ownerDb.execute(sql`
       DO $$ BEGIN
         IF NOT EXISTS (
@@ -42,6 +42,6 @@ export async function setupAgentMemory(ownerDb: Db): Promise<void> {
             USING (current_user <> 'dentalagent_app');
         END IF;
       END $$;
-    `);
+    `)
   }
 }

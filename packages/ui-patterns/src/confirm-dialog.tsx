@@ -1,24 +1,32 @@
-import { AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@odentia/ui";
-import { common } from "./common.js";
-import { SubmitButton } from "./submit-button.js";
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@odentia/ui"
+import { common } from "./common.js"
+import { SubmitButton } from "./submit-button.js"
 
 /**
  * Variante del botón de confirmación (mismo vocabulario que Button):
  * `destructive` para lo irreversible (eliminar), `default` para el resto
  * (archivar, desactivar, reimprimir...). El modal es agnóstico al caso.
  */
-export type ConfirmVariant = "default" | "destructive";
+export type ConfirmVariant = "default" | "destructive"
 
 export interface ConfirmDialogProps {
-  open: boolean;
-  title: string;
-  description: string;
-  confirmLabel: string;
-  cancelLabel?: string;
-  variant?: ConfirmVariant;
-  pending?: boolean;
-  onConfirm: () => void;
-  onClose: () => void;
+  open: boolean
+  title: string
+  description: string
+  confirmLabel: string
+  cancelLabel?: string
+  variant?: ConfirmVariant
+  pending?: boolean
+  onConfirm: () => void
+  onClose: () => void
 }
 
 /**
@@ -41,7 +49,7 @@ export function ConfirmDialog({
     <AlertDialog
       open={open}
       onOpenChange={(next) => {
-        if (!next && !pending) onClose();
+        if (!next && !pending) onClose()
       }}
     >
       <AlertDialogContent size="sm">
@@ -66,5 +74,5 @@ export function ConfirmDialog({
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
-  );
+  )
 }
