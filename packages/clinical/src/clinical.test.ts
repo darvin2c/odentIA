@@ -1,12 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
   FINDINGS,
+  MAX_TAGS,
   activeFindingsAsOf,
   conditionLabel,
   findingAbbreviation,
   findingColor,
   findingDefinition,
   isValidTooth,
+  normalizeTags,
   surfacesForTooth,
   toothTypeOf,
   validateFinding,
@@ -425,5 +427,37 @@ describe("correcciones y registros no válidos", () => {
     expect(
       validateFinding({ toothNumber: 11, condition: "ectopic_tooth", note: long }),
     ).toEqual([expect.stringMatching(/2000/)]);
+  });
+});
+
+describe("normalizeTags", () => {
+  it("deduplica mayúsculas y espacios: TAG/tag/' tag ' -> una sola", () => {
+    expect(normalizeTags(["TAG", "tag", " tag "])).toEqual(["tag"]);
+  });
+
+  it("unifica separadores: 'tag 1', 'tag-1' y 'tag_1' -> 'tag-1'", () => {
+    expect(normalizeTags(["tag 1", "tag-1", "tag_1"])).toEqual(["tag-1"]);
+  });
+
+  it("quita tildes y recorta guiones extremos", () => {
+    expect(normalizeTags(["  Ortodoncia  ", "niño", "--vip--"])).toEqual(["ortodoncia", "nino", "vip"]);
+  });
+
+  it("rechaza etiquetas vacías y puntuación no admitida", () => {
+    expect(() => normalizeTags(["   "])).toThrow(Error);
+    expect(() => normalizeTags(["hola!"])).toThrow(Error);
+  });
+
+  it("impone máximo canónico de longitud y de cantidad", () => {
+    const maxLengthTag = "a".repeat(40);
+    expect(normalizeTags([maxLengthTag])).toEqual([maxLengthTag]);
+    expect(() => normalizeTags([`${maxLengthTag}a`])).toThrow(Error);
+    const veintiuna = Array.from({ length: MAX_TAGS + 1 }, (_, i) => `tag-${i}`);
+    expect(() => normalizeTags(veintiuna)).toThrow(Error);
+  });
+
+  it("el límite cuenta únicas canónicas, no crudas", () => {
+    const twenty = Array.from({ length: MAX_TAGS }, (_, i) => `tag-${i}`);
+    expect(normalizeTags([...twenty, " TAG_0 "])).toEqual(twenty);
   });
 });
