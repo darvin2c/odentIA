@@ -8,6 +8,7 @@ export { cn } from "./lib/utils.js";
 export { useIsMobile } from "./hooks/use-mobile.js";
 
 export { Button, buttonVariants } from "./components/button.js";
+export { ButtonGroup, ButtonGroupSeparator, ButtonGroupText, buttonGroupVariants } from "./components/button-group.js";
 export { Spinner } from "./components/spinner.js";
 export { Skeleton } from "./components/skeleton.js";
 export {
@@ -151,6 +152,7 @@ export {
   ComboboxValue,
   useComboboxAnchor,
 } from "./components/combobox.js";
+export { Collapsible, CollapsibleContent, CollapsibleTrigger } from "./components/collapsible.js";
 export {
   InputGroup,
   InputGroupAddon,
