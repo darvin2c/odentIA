@@ -1,17 +1,23 @@
 {
-    "tailwindCSS.includeLanguages": {
-        "typescript": "javascript",
-        "typescriptreact": "javascript",
-        "javascript": "javascript",
-        "javascriptreact": "javascript"
-    },
-    "editor.quickSuggestions": {
-        "strings": true
-    },
-    "css.lint.unknownAtRules": "ignore",
-    "tailwindCSS.experimental.configFile": {
-        "apps/panel/src/styles/app.css": ["apps/panel/**/*"],
-        "apps/platform/src/styles/app.css": ["apps/platform/**/*"],
-        "packages/ui/src/styles/globals.css": ["packages/**/*"]
-    }
+  "editor.defaultFormatter": "biomejs.biome",
+  "editor.formatOnSave": true,
+  "editor.codeActionsOnSave": {
+    "source.organizeImports.biome": "explicit",
+    "source.fixAll.biome": "explicit"
+  },
+  "tailwindCSS.includeLanguages": {
+    "typescript": "javascript",
+    "typescriptreact": "javascript",
+    "javascript": "javascript",
+    "javascriptreact": "javascript"
+  },
+  "editor.quickSuggestions": {
+    "strings": true
+  },
+  "css.lint.unknownAtRules": "ignore",
+  "tailwindCSS.experimental.configFile": {
+    "apps/panel/src/styles/app.css": ["apps/panel/**/*"],
+    "apps/platform/src/styles/app.css": ["apps/platform/**/*"],
+    "packages/ui/src/styles/globals.css": ["packages/**/*"]
+  }
 }

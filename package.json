@@ -11,12 +11,15 @@
     "build": "turbo build",
     "test": "turbo test",
     "typecheck": "turbo typecheck",
+    "check": "biome check .",
+    "check:write": "biome check --write .",
     "db:generate": "pnpm --filter @odentia/db generate",
     "db:migrate": "pnpm --filter @odentia/db migrate",
     "db:seed": "pnpm --filter @odentia/services seed:dev",
     "e2e": "pnpm --filter @odentia/e2e test"
   },
   "devDependencies": {
+    "@biomejs/biome": "2.5.14",
     "portless": "0.15.6",
     "turbo": "2.10.12",
     "typescript": "5.9.3"
