@@ -108,11 +108,11 @@ export function FilterBar({
     drawerMode === "overflow" ? common.filters.moreFilters : common.filters.label;
 
   return (
-    <>
+    <div className="flex p-3 bg-white rounded-md">
       <div
         ref={containerRef}
         data-filter-row="desktop"
-        className="hidden w-full min-w-0 items-center gap-2 overflow-hidden md:flex"
+        className="hidden w-full min-w-0 items-center gap-2 overflow-hidden p-1 -m-1 md:flex"
       >
         <SearchInput placeholder={searchPlaceholder} expandable />
         {primaryFilters.map((filter) => (
@@ -186,6 +186,6 @@ export function FilterBar({
         }}
         title={drawerTitle}
       />
-    </>
+    </div>
   );
 }

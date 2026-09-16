@@ -7,6 +7,7 @@ import {
   EmptyState,
   FilterBar,
   PageHeader,
+  PageShell,
   useListSearch,
 } from "@odentia/ui-patterns";
 import { Plus } from "lucide-react";
@@ -162,7 +163,7 @@ function PatientsPage() {
   };
 
   return (
-    <div className="flex min-w-0 flex-col gap-2">
+    <PageShell>
       <PageHeader
         title="Pacientes"
         subtitle="Fichas clínicas de la organización"
@@ -205,9 +206,7 @@ function PatientsPage() {
         )
       ) : (
         <>
-          <div className="overflow-hidden rounded-xl border">
-            <DataTable table={table} />
-          </div>
+          <DataTable table={table} />
           <div className="flex flex-wrap items-center justify-between gap-2 py-2">
             <p className="text-xs text-muted-foreground">
               Página {pageNumber} · {rows.length} paciente(s)
@@ -251,6 +250,6 @@ function PatientsPage() {
           }}
         />
       )}
-    </div>
+    </PageShell>
   );
 }

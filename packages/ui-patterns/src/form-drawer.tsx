@@ -73,7 +73,7 @@ export function FormDrawer({
  if (!nextOpen) handleClose();
  }}
  >
-      <DrawerContent className={`data-[swipe-axis=y]:[--drawer-height:calc(100dvh-6rem)] ${className ?? ""}`}>
+      <DrawerContent className={className}>
  <form onSubmit={onSubmit} className="flex h-full min-h-0 flex-1 flex-col overflow-hidden">
  <DrawerHeader className="gap-1 border-b border-border px-6 py-4 pb-4 text-left group-data-[swipe-axis=y]/drawer-popup:text-left">
  <DrawerTitle>{title}</DrawerTitle>

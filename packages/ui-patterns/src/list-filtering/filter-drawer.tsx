@@ -40,20 +40,21 @@ export function FilterDrawer({
       swipeDirection={isMobile ? "down" : "right"}
       showSwipeHandle={isMobile}
     >
-      <DrawerContent>
-        <div className="flex h-full flex-col overflow-hidden">
+      <DrawerContent >
           <DrawerHeader className="gap-1 border-b border-border px-6 py-4 pb-4 text-left group-data-[swipe-axis=y]/drawer-popup:text-left">
             <DrawerTitle>{title}</DrawerTitle>
             <DrawerDescription className="sr-only">{title}</DrawerDescription>
           </DrawerHeader>
-          <div className="flex-1 overflow-hidden">
-            <ScrollArea className="h-full">
-              <div className="space-y-5 px-6 py-4">
-                {filters.map((filter) => (
-                  <FilterControl key={`${filter.type}:${filter.key}`} filter={filter} layout="inline" />
-                ))}
-              </div>
-            </ScrollArea>
+          <div className="relative min-h-0 flex-1 overflow-hidden">
+            <div className="absolute inset-0">
+              <ScrollArea className="h-full">
+                <div className="space-y-5 px-6 py-4">
+                  {filters.map((filter) => (
+                    <FilterControl key={`${filter.type}:${filter.key}`} filter={filter} layout="inline" />
+                  ))}
+                </div>
+              </ScrollArea>
+            </div>
           </div>
           <DrawerFooter className="flex-row items-center justify-end gap-2 border-t border-border bg-surface px-6 py-4 pt-4">
             <Button
@@ -77,7 +78,6 @@ export function FilterDrawer({
               {common.actions.close}
             </Button>
           </DrawerFooter>
-        </div>
       </DrawerContent>
     </Drawer>
   );

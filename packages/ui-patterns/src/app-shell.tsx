@@ -349,13 +349,9 @@ export function AppShell(props: AppShellProps): React.JSX.Element {
           <SidebarRail />
         </Sidebar>
         <SidebarInset>
-          <header className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-3 md:hidden">
-            <SidebarTrigger aria-label="Abrir menú" className="size-9" />
-            <div className="flex min-w-0 items-center gap-2">{brand}</div>
-          </header>
-          <div className="flex-1 overflow-auto p-4 md:p-6">
-            <div className={fluid ? "w-full max-w-none" : "mx-auto max-w-[1280px]"}>{children}</div>
-          </div>
+          <main className="min-h-svh">
+            {children}
+          </main>
         </SidebarInset>
       </SidebarProvider>
     </TooltipProvider>

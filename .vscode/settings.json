@@ -1,0 +1,17 @@
+{
+    "tailwindCSS.includeLanguages": {
+        "typescript": "javascript",
+        "typescriptreact": "javascript",
+        "javascript": "javascript",
+        "javascriptreact": "javascript"
+    },
+    "editor.quickSuggestions": {
+        "strings": true
+    },
+    "css.lint.unknownAtRules": "ignore",
+    "tailwindCSS.experimental.configFile": {
+        "apps/panel/src/styles/app.css": ["apps/panel/**/*"],
+        "apps/platform/src/styles/app.css": ["apps/platform/**/*"],
+        "packages/ui/src/styles/globals.css": ["packages/**/*"]
+    }
+}

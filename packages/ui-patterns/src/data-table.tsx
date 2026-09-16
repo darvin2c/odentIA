@@ -32,41 +32,43 @@ function skeletonWidth(index: number): string {
 
 export function DataTable<TData>({ table, onRowClick }: DataTableProps<TData>) {
   return (
-    <Table>
-      <TableHeader>
-        {table.getHeaderGroups().map((headerGroup) => (
-          <TableRow key={headerGroup.id}>
-            {headerGroup.headers.map((header) => (
-              <TableHead key={header.id}>
-                {header.isPlaceholder
-                  ? null
-                  : flexRender(header.column.columnDef.header, header.getContext())}
-              </TableHead>
-            ))}
-          </TableRow>
-        ))}
-      </TableHeader>
-      <TableBody>
-        {table.getRowModel().rows.map((row) => (
-          <TableRow
-            key={row.id}
-            className={onRowClick ? "cursor-pointer" : undefined}
-            onClick={(event) => {
-              if (!onRowClick) return;
-              const target = event.target as HTMLElement;
-              if (target.closest("button, a, input, select, textarea, [role='menuitem']")) return;
-              onRowClick(row.original);
-            }}
-          >
-            {row.getVisibleCells().map((cell) => (
-              <TableCell key={cell.id}>
-                {flexRender(cell.column.columnDef.cell, cell.getContext())}
-              </TableCell>
-            ))}
-          </TableRow>
-        ))}
-      </TableBody>
-    </Table>
+    <div className="overflow-hidden rounded-md bg-white">
+      <Table>
+        <TableHeader className="bg-gray-50">
+          {table.getHeaderGroups().map((headerGroup) => (
+            <TableRow key={headerGroup.id}>
+              {headerGroup.headers.map((header) => (
+                <TableHead key={header.id} className="h-12 px-3 text-sm">
+                  {header.isPlaceholder
+                    ? null
+                    : flexRender(header.column.columnDef.header, header.getContext())}
+                </TableHead>
+              ))}
+            </TableRow>
+          ))}
+        </TableHeader>
+        <TableBody>
+          {table.getRowModel().rows.map((row) => (
+            <TableRow
+              key={row.id}
+              className={onRowClick ? "cursor-pointer" : undefined}
+              onClick={(event) => {
+                if (!onRowClick) return;
+                const target = event.target as HTMLElement;
+                if (target.closest("button, a, input, select, textarea, [role='menuitem']")) return;
+                onRowClick(row.original);
+              }}
+            >
+              {row.getVisibleCells().map((cell) => (
+                <TableCell key={cell.id}>
+                  {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                </TableCell>
+              ))}
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </div>
   );
 }
 
