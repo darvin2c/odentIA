@@ -56,6 +56,11 @@ export const patient = pgTable(
     dataConsentAt: timestamp("data_consent_at", { withTimezone: true }),
     dataConsentBy: text("data_consent_by").references(() => user.id),
     registeredBranchId: uuid("registered_branch_id").references(() => branch.id),
+    /** Revisión de antecedentes (agregado transaccional de salud). */
+    healthRevision: integer("health_revision").notNull().default(0),
+    healthReviewStatus: jsonb("health_review_status").notNull().default({ allergies: "unknown", conditions: "unknown", medications: "unknown" }),
+    healthReviewedAt: timestamp("health_reviewed_at", { withTimezone: true }),
+    healthReviewedBy: text("health_reviewed_by").references(() => user.id),
     isActive: boolean("is_active").notNull().default(true),
     ...timestamps,
   },
@@ -195,8 +200,6 @@ export const patientDocument = pgTable(
     storageKey: text("storage_key").notNull(),
     contentType: text("content_type").notNull(),
     sizeBytes: integer("size_bytes").notNull(),
-    encounterId: uuid("encounter_id").references(() => encounter.id),
-    toothNumber: smallint("tooth_number"),
     uploadedBy: text("uploaded_by").references(() => user.id),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -292,6 +295,7 @@ export const encounter = pgTable(
     evolution: text("evolution"),
     indications: text("indications"),
     nextStep: text("next_step"),
+    examination: jsonb("examination"),
     nextAppointmentAt: timestamp("next_appointment_at", { withTimezone: true }),
     finalizedAt: timestamp("finalized_at", { withTimezone: true }),
     finalizedBy: text("finalized_by").references(() => user.id),
@@ -320,25 +324,129 @@ export const encounterTooth = pgTable(
   (table) => [uniqueIndex("encounter_tooth_encounter_tooth_uidx").on(table.encounterId, table.toothNumber)],
 );
 
-/** Procedimiento realizado durante una atención; puede cerrar un ítem del plan. */
-export const encounterProcedure = pgTable(
-  "encounter_procedure",
+/** Biblioteca global de prestaciones (solo lectura para el rol app, como cie10_code). */
+export const treatmentTemplate = pgTable(
+  "treatment_template",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    key: text("key").notNull(),
+    name: text("name").notNull(),
+    specialty: text("specialty").notNull(),
+    scope: text("scope").notNull(),
+    surfaceCountMin: integer("surface_count_min"),
+    surfaceCountMax: integer("surface_count_max"),
+    isActive: boolean("is_active").notNull().default(true),
+    version: integer("version").notNull().default(1),
+    externalCodings: jsonb("external_codings").notNull().default([]),
+  },
+  (table) => [uniqueIndex("treatment_template_key_uidx").on(table.key)],
+);
+
+/** Oferta organizacional de tratamientos y tarifas (recurso /services). */
+export const serviceCatalog = pgTable(
+  "service_catalog",
   {
     id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
     organizationId: orgFk("organization_id"),
-    encounterId: uuid("encounter_id")
-      .notNull()
-      .references(() => encounter.id, { onDelete: "cascade" }),
-    toothNumber: smallint("tooth_number"),
-    description: text("description").notNull(),
-    diagnosisCode: text("diagnosis_code").references(() => cie10Code.code),
-    planItemId: uuid("plan_item_id").references(() => treatmentPlanItem.id),
-    createdBy: text("created_by").references(() => user.id),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    templateId: uuid("template_id").references(() => treatmentTemplate.id),
+    source: text("source").notNull().default("custom"),
+    code: text("code"),
+    name: text("name").notNull(),
+    specialty: text("specialty"),
+    scope: text("scope"),
+    priceCents: integer("price_cents"),
+    currency: char("currency", { length: 3 }).notNull().default("PEN"),
+    durationMin: integer("duration_min"),
+    isActive: boolean("is_active").notNull().default(true),
+    ...timestamps,
   },
+  (table) => [
+    uniqueIndex("service_catalog_org_code_uidx")
+      .on(table.organizationId, table.code)
+      .where(sql`"code" IS NOT NULL`),
+    index("service_catalog_org_active_idx").on(table.organizationId, table.isActive),
+    index("service_catalog_org_specialty_idx").on(table.organizationId, table.specialty),
+    index("service_catalog_template_idx").on(table.templateId),
+  ],
 );
+/** Procedimiento realizado durante una atención; puede cerrar un ítem del plan. */
+export const encounterProcedure = pgTable("encounter_procedure", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  organizationId: orgFk("organization_id"),
+  encounterId: uuid("encounter_id")
+    .notNull()
+    .references(() => encounter.id, { onDelete: "cascade" }),
+  serviceId: uuid("service_id").references(() => serviceCatalog.id),
+  toothNumber: smallint("tooth_number"),
+  scope: text("scope"),
+  surfaces: text("surfaces").array().notNull().default([]),
+  quadrant: smallint("quadrant"),
+  arch: text("arch"),
+  description: text("description").notNull(),
+  diagnosisCode: text("diagnosis_code").references(() => cie10Code.code),
+  planItemId: uuid("plan_item_id").references(() => treatmentPlanItem.id),
+  createdBy: text("created_by").references(() => user.id),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
 
-/** Plan de tratamiento = lista de ítems del paciente (sin tabla cabecera). */
+/** Plan clínico longitudinal del paciente: existe antes que cualquier
+ * presupuesto y puede continuar en múltiples visitas. `originEncounterId`
+ * solo se informa en planes heredados (legado); los planes nuevos nacen
+ * desde una atención borrador pero no se cierran con ella. */
+export const treatmentPlan = pgTable(
+  "treatment_plan",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    organizationId: orgFk("organization_id"),
+    patientId: uuid("patient_id")
+      .notNull()
+      .references(() => patient.id, { onDelete: "cascade" }),
+    title: text("title").notNull(),
+    originEncounterId: uuid("origin_encounter_id").references(() => encounter.id),
+    isLegacy: boolean("is_legacy").notNull().default(false),
+    createdBy: text("created_by").references(() => user.id),
+    ...timestamps,
+  },
+  (table) => [index("treatment_plan_org_patient_idx").on(table.organizationId, table.patientId)],
+);
+/** Cabecera del documento económico: siempre pertenece a un plan clínico.
+ * `status`/`acceptedByName`/`decisionNote` conservan la máquina de estados
+ * actual; el contenido cotizado vive en `treatment_budget_item` (snapshot),
+ * no en un join mutable a la oferta vigente. */
+export const treatmentBudget = pgTable(
+  "treatment_budget",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    organizationId: orgFk("organization_id"),
+    patientId: uuid("patient_id")
+      .notNull()
+      .references(() => patient.id, { onDelete: "cascade" }),
+    planId: uuid("plan_id")
+      .notNull()
+      .references(() => treatmentPlan.id),
+    budgetNumber: integer("budget_number").notNull(),
+    title: text("title").notNull(),
+    currency: char("currency", { length: 3 }).notNull().default("PEN"),
+    status: text("status").notNull().default("borrador"),
+    notes: text("notes"),
+    acceptedByName: text("accepted_by_name"),
+    decisionNote: text("decision_note"),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+    decidedBy: text("decided_by").references(() => user.id),
+    createdBy: text("created_by").references(() => user.id),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("treatment_budget_org_number_uidx").on(table.organizationId, table.budgetNumber),
+    index("treatment_budget_org_patient_idx").on(table.organizationId, table.patientId),
+    index("treatment_budget_org_plan_idx").on(table.organizationId, table.planId),
+  ],
+);
+/** Indicación clínica del plan. `budgetId` es el presupuesto vigente (nullable:
+ * sin presupuesto = decisión pendiente). La decisión se deriva de la línea
+ * económica vigente, no de una columna propia. `sourceEncounterId` conserva
+ * la atención de origen y nunca cambia. `serviceId` + título/precio/moneda
+ * son snapshot de la oferta al indicar: el precio NUNCA se edita en el ítem. */
 export const treatmentPlanItem = pgTable(
   "treatment_plan_item",
   {
@@ -347,18 +455,120 @@ export const treatmentPlanItem = pgTable(
     patientId: uuid("patient_id")
       .notNull()
       .references(() => patient.id, { onDelete: "cascade" }),
+    planId: uuid("plan_id")
+      .notNull()
+      .references(() => treatmentPlan.id),
+    serviceId: uuid("service_id").references(() => serviceCatalog.id),
+    budgetId: uuid("budget_id").references(() => treatmentBudget.id),
     toothNumber: smallint("tooth_number"),
+    scope: text("scope"),
+    surfaces: text("surfaces").array().notNull().default([]),
+    quadrant: smallint("quadrant"),
+    arch: text("arch"),
     title: text("title").notNull(),
     detail: text("detail"),
     diagnosisCode: text("diagnosis_code").references(() => cie10Code.code),
     priceCents: integer("price_cents"),
     currency: char("currency", { length: 3 }).notNull().default("PEN"),
     status: text("status").notNull().default("pendiente"),
-    encounterId: uuid("encounter_id").references(() => encounter.id),
+    sourceEncounterId: uuid("source_encounter_id").references(() => encounter.id),
     createdBy: text("created_by").references(() => user.id),
     ...timestamps,
   },
-  (table) => [index("treatment_plan_item_org_patient_idx").on(table.organizationId, table.patientId)],
+  (table) => [
+    index("treatment_plan_item_org_patient_idx").on(table.organizationId, table.patientId),
+    index("treatment_plan_item_org_service_idx").on(table.organizationId, table.serviceId),
+    index("treatment_plan_item_org_budget_idx").on(table.organizationId, table.budgetId),
+    index("treatment_plan_item_org_plan_idx").on(table.organizationId, table.planId),
+  ],
+);
+/** Línea económica cotizada en un presupuesto: snapshot de lo realmente
+ * cotizado (no un join mutable). UNIQUE(budgetId,planItemId). Append-only
+ * tras presentar: solo `decision` cambia al decidir. */
+export const treatmentBudgetItem = pgTable(
+  "treatment_budget_item",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    organizationId: orgFk("organization_id"),
+    patientId: uuid("patient_id")
+      .notNull()
+      .references(() => patient.id, { onDelete: "cascade" }),
+    planId: uuid("plan_id")
+      .notNull()
+      .references(() => treatmentPlan.id),
+    budgetId: uuid("budget_id")
+      .notNull()
+      .references(() => treatmentBudget.id),
+    planItemId: uuid("plan_item_id")
+      .notNull()
+      .references(() => treatmentPlanItem.id),
+    serviceId: uuid("service_id").references(() => serviceCatalog.id),
+    title: text("title").notNull(),
+    scope: text("scope"),
+    toothNumber: smallint("tooth_number"),
+    surfaces: text("surfaces").array().notNull().default([]),
+    quadrant: smallint("quadrant"),
+    arch: text("arch"),
+    priceCents: integer("price_cents"),
+    currency: char("currency", { length: 3 }).notNull().default("PEN"),
+    decision: text("decision").notNull().default("pendiente"),
+    createdBy: text("created_by").references(() => user.id),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("treatment_budget_item_budget_plan_uidx").on(table.budgetId, table.planItemId),
+    index("treatment_budget_item_org_patient_idx").on(table.organizationId, table.patientId),
+    index("treatment_budget_item_org_budget_idx").on(table.organizationId, table.budgetId),
+    index("treatment_budget_item_org_plan_idx").on(table.organizationId, table.planId),
+  ],
+);
+/** Vínculo atención ↔ ítem del plan (creado al abrir atención o al registrar
+ * procedimiento; conserva aunque el ítem quede realizado). PK compuesta. */
+export const encounterPlanItem = pgTable(
+  "encounter_plan_item",
+  {
+    organizationId: orgFk("organization_id"),
+    encounterId: uuid("encounter_id")
+      .notNull()
+      .references(() => encounter.id, { onDelete: "cascade" }),
+    planItemId: uuid("plan_item_id")
+      .notNull()
+      .references(() => treatmentPlanItem.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.encounterId, table.planItemId] }),
+    index("encounter_plan_item_plan_item_idx").on(table.planItemId),
+  ],
+);
+
+/** Contexto versionado del documento (append-only): cada corrección agrega una
+ * versión; las lecturas usan la vigente. Blob/original inmutables en
+ * patient_document (sin encounterId/toothNumber: viven aquí). */
+export const patientDocumentContext = pgTable(
+  "patient_document_context",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    organizationId: orgFk("organization_id"),
+    patientId: uuid("patient_id")
+      .notNull()
+      .references(() => patient.id, { onDelete: "cascade" }),
+    documentId: uuid("document_id")
+      .notNull()
+      .references(() => patientDocument.id, { onDelete: "cascade" }),
+    version: integer("version").notNull(),
+    encounterId: uuid("encounter_id").references(() => encounter.id),
+    planItemId: uuid("plan_item_id").references(() => treatmentPlanItem.id),
+    toothNumbers: smallint("tooth_numbers").array().notNull().default(sql`'{}'`),
+    tags: text("tags").array().notNull().default(sql`'{}'`),
+    authorUserId: text("author_user_id").references(() => user.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("patient_document_context_document_version_uidx").on(table.documentId, table.version),
+    index("patient_document_context_org_patient_idx").on(table.organizationId, table.patientId),
+    index("patient_document_context_document_idx").on(table.documentId),
+  ],
 );
 
 /** Catálogo CIE-10 global (SIN org_id, SIN RLS, read-only en runtime). */

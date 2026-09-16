@@ -214,21 +214,40 @@ it("org A no ve pacientes de org B; sin GUC ve cero filas", async () => {
 });
 
 it("encuentros y planes de A son invisibles para B; las piezas cerradas no se borran", async () => {
-  await ownerDb.execute(sql`insert into "user" (id,name,email) values ('rls-dentist','Dentista','rls@example.test')`);
+  await ownerDb.execute(sql`insert into "user" (id,name,email) values ('rls-dentist','Dentista','rls@example.test') on conflict (id) do nothing`);
+  await ownerDb.execute(sql`insert into "treatment_plan" (id,organization_id,patient_id,title,is_legacy)
+    values ('dddddddd-dddd-dddd-dddd-dddddddddddd','org_a','99999999-9999-9999-9999-999999999999','Plan RLS',false)
+    on conflict (id) do nothing`);
+  await ownerDb.execute(sql`insert into "treatment_budget" (id,organization_id,patient_id,plan_id,budget_number,title,currency,status)
+    values ('cccccccc-cccc-cccc-cccc-cccccccccccc','org_a','99999999-9999-9999-9999-999999999999','dddddddd-dddd-dddd-dddd-dddddddddddd',1,'Presupuesto','PEN','borrador')
+    on conflict (id) do nothing`);
   await ownerDb.execute(sql`insert into encounter (id,organization_id,patient_id,dentist_user_id) values
-    ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb','org_a','99999999-9999-9999-9999-999999999999','rls-dentist')`);
-  await ownerDb.execute(sql`insert into treatment_plan_item (organization_id,patient_id,title) values
-    ('org_a','99999999-9999-9999-9999-999999999999','Restauración')`);
-  await ownerDb.execute(sql`insert into encounter_tooth (organization_id,encounter_id,tooth_number) values
-    ('org_a','bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',36)`);
-  await ownerDb.execute(sql`insert into encounter_procedure (organization_id,encounter_id,description) values
-    ('org_a','bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb','Restauración 36')`);
-  for (const table of ["encounter", "encounter_tooth", "encounter_procedure", "treatment_plan_item"]) {
+    ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb','org_a','99999999-9999-9999-9999-999999999999','rls-dentist')
+    on conflict (id) do nothing`);
+  await ownerDb.execute(sql`insert into treatment_plan_item (id,organization_id,patient_id,plan_id,title,status) values
+    ('11111111-1111-4111-8111-111111111111','org_a','99999999-9999-9999-9999-999999999999','dddddddd-dddd-dddd-dddd-dddddddddddd','Restauración','pendiente')
+    on conflict (id) do nothing`);
+  await ownerDb.execute(sql`insert into treatment_budget_item (organization_id,patient_id,plan_id,budget_id,plan_item_id,title,currency,decision) values
+    ('org_a','99999999-9999-9999-9999-999999999999','dddddddd-dddd-dddd-dddd-dddddddddddd','cccccccc-cccc-cccc-cccc-cccccccccccc','11111111-1111-4111-8111-111111111111','Restauración','PEN','pendiente')
+    on conflict do nothing`);
+  await ownerDb.execute(sql`insert into encounter_tooth (organization_id,encounter_id,tooth_number)
+    values ('org_a','bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',36)`);
+  await ownerDb.execute(sql`insert into service_catalog (organization_id,source,code,name,specialty,scope,price_cents)
+    values ('org_a','custom','RESTAURACION','Restauración','restauradora','tooth',10000)`);
+  await ownerDb.execute(sql`insert into encounter_procedure (organization_id,encounter_id,description)
+    values ('org_a','bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb','Restauración realizada')`);
+  for (const table of ["encounter", "encounter_tooth", "encounter_procedure", "treatment_plan", "treatment_plan_item", "treatment_budget_item", "service_catalog"]) {
     const query = sql`select id from ${sql.identifier(table)}`;
     expect(await withOrgContext(appDb, "org_a", (tx) => tx.execute(query))).toHaveLength(1);
     expect(await withOrgContext(appDb, "org_b", (tx) => tx.execute(query))).toHaveLength(0);
     expect(await appDb.execute(query)).toHaveLength(0);
   }
+  await expect(withOrgContext(appDb, "org_b", (tx) => tx.execute(
+    sql`insert into service_catalog (organization_id,source,code,name,specialty,scope,price_cents) values ('org_a','custom','INTRUSO','Ajeno','restauradora','tooth',1)`,
+  ))).rejects.toThrow();
+  await expect(withOrgContext(appDb, "org_a", (tx) => tx.execute(
+    sql`delete from service_catalog where code='RESTAURACION'`,
+  ))).rejects.toThrow();
   await ownerDb.execute(sql`update encounter set status='finalizada' where id='bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'`);
   const deleted = await withOrgContext(appDb, "org_a", (tx) =>
     tx.execute(sql`delete from encounter_tooth where encounter_id='bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb' returning id`));
@@ -261,4 +280,149 @@ it("aísla hallazgos y evaluaciones por tenant y conserva sus originales", async
   const voided = await withOrgContext(appDb, "org_a", (tx) =>
     tx.execute(sql`update odontogram_entry set status='voided', voided_at=now(), void_reason='revisión' where organization_id='org_a' and tooth_number=16 returning id`));
   expect(voided).toHaveLength(1);
+});
+
+it("presupuestos, contextos versionados y vínculos atención-plan se aíslan por tenant", async () => {
+  await ownerDb.execute(sql`insert into "user" (id,name,email) values ('rls-dentist','Dentista','rls@example.test') on conflict (id) do nothing`);
+  // Presupuesto propio del test (número 2: el 1 lo siembra el test de encuentros).
+  await ownerDb.execute(sql`insert into "treatment_plan" (id,organization_id,patient_id,title,is_legacy)
+    values ('22222222-2222-4222-8222-222222222222','org_a','99999999-9999-9999-9999-999999999999','Plan RLS',false)
+    on conflict (id) do nothing`);
+  await ownerDb.execute(sql`insert into "treatment_budget" (id,organization_id,patient_id,plan_id,budget_number,title,currency,status)
+    values ('eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee','org_a','99999999-9999-9999-9999-999999999999','22222222-2222-4222-8222-222222222222',2,'Presupuesto RLS','PEN','borrador')
+    on conflict (id) do nothing`);
+  await ownerDb.execute(sql`insert into treatment_plan_item (id,organization_id,patient_id,plan_id,budget_id,title,price_cents,currency,status)
+    values ('ffffffff-ffff-ffff-ffff-ffffffffffff','org_a','99999999-9999-9999-9999-999999999999','22222222-2222-4222-8222-222222222222','eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee','Corona',90000,'PEN','pendiente')
+    on conflict (id) do nothing`);
+  await ownerDb.execute(sql`insert into encounter (id,organization_id,patient_id,dentist_user_id,status) values
+    ('aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee','org_a','99999999-9999-9999-9999-999999999999','rls-dentist','finalizada')
+    on conflict (id) do nothing`);
+  await ownerDb.execute(sql`insert into encounter_plan_item (organization_id,encounter_id,plan_item_id) values
+    ('org_a','aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee','ffffffff-ffff-ffff-ffff-ffffffffffff')
+    on conflict do nothing`);
+  await ownerDb.execute(sql`insert into patient_document (id,organization_id,patient_id,category,label,storage_key,content_type,size_bytes)
+    values ('dddddddd-dddd-dddd-dddd-dddddddddddd','org_a','99999999-9999-9999-9999-999999999999','radiografia','rx','k','image/png',4)
+    on conflict (id) do nothing`);
+  await ownerDb.execute(sql`insert into patient_document_context (organization_id,patient_id,document_id,version,tooth_numbers,tags)
+    values ('org_a','99999999-9999-9999-9999-999999999999','dddddddd-dddd-dddd-dddd-dddddddddddd',1,'{36}','{control}')
+    on conflict do nothing`);
+
+  // Lecturas: A ve su fila, B ve cero, sin contexto cero.
+  const budgetQuery = sql`select id from treatment_budget where budget_number = 2`;
+  expect(await withOrgContext(appDb, "org_a", (tx) => tx.execute(budgetQuery))).toHaveLength(1);
+  expect(await withOrgContext(appDb, "org_b", (tx) => tx.execute(budgetQuery))).toHaveLength(0);
+  expect(await appDb.execute(budgetQuery)).toHaveLength(0);
+  const contextQuery = sql`select id from patient_document_context where document_id = 'dddddddd-dddd-dddd-dddd-dddddddddddd'`;
+  expect(await withOrgContext(appDb, "org_a", (tx) => tx.execute(contextQuery))).toHaveLength(1);
+  expect(await withOrgContext(appDb, "org_b", (tx) => tx.execute(contextQuery))).toHaveLength(0);
+  expect(await appDb.execute(contextQuery)).toHaveLength(0);
+  const linkQuery = sql`select encounter_id from encounter_plan_item where encounter_id = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'`;
+  expect(await withOrgContext(appDb, "org_a", (tx) => tx.execute(linkQuery))).toHaveLength(1);
+  expect(await withOrgContext(appDb, "org_b", (tx) => tx.execute(linkQuery))).toHaveLength(0);
+  expect(await appDb.execute(linkQuery)).toHaveLength(0);
+
+  // Escrituras cruzadas: con contexto de B no se puede colar una fila de A.
+  await expect(withOrgContext(appDb, "org_b", (tx) => tx.execute(
+    sql`insert into treatment_budget (organization_id,patient_id,plan_id,budget_number,title) values ('org_a','aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','22222222-2222-4222-8222-222222222222',99,'Intruso')`,
+  ))).rejects.toThrow();
+  await expect(withOrgContext(appDb, "org_b", (tx) => tx.execute(
+    sql`insert into patient_document_context (organization_id,patient_id,document_id,version) values ('org_a','aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','dddddddd-dddd-dddd-dddd-dddddddddddd',99)`,
+  ))).rejects.toThrow();
+  await expect(withOrgContext(appDb, "org_b", (tx) => tx.execute(
+    sql`insert into encounter_plan_item (organization_id,encounter_id,plan_item_id) values ('org_a','aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee','ffffffff-ffff-ffff-ffff-ffffffffffff')`,
+  ))).rejects.toThrow();
+
+  // Versiones append-only: (document_id, version) no se duplica.
+  await expect(ownerDb.execute(
+    sql`insert into patient_document_context (organization_id,patient_id,document_id,version) values ('org_a','99999999-9999-9999-9999-999999999999','dddddddd-dddd-dddd-dddd-dddddddddddd',1)`,
+  )).rejects.toThrow();
+  // Correlativo de presupuesto único por organización.
+  await expect(ownerDb.execute(
+    sql`insert into treatment_budget (organization_id,patient_id,plan_id,budget_number,title) values ('org_a','99999999-9999-9999-9999-999999999999','22222222-2222-4222-8222-222222222222',2,'Duplicado')`,
+  )).rejects.toThrow();
+
+  // Inmutabilidad real: presupuestos se cancelan por estado (nunca DELETE);
+  // vínculos y contextos son append-only (rechazados con 42501).
+  await expect(withOrgContext(appDb, "org_a", (tx) =>
+    tx.execute(sql`delete from treatment_budget where budget_number = 2`))).rejects.toMatchObject({ cause: { code: "42501" } });
+  await expect(withOrgContext(appDb, "org_a", (tx) =>
+    tx.execute(sql`update patient_document_context set tags = '{hack}' where document_id = 'dddddddd-dddd-dddd-dddd-dddddddddddd'`))).rejects.toMatchObject({ cause: { code: "42501" } });
+  await expect(withOrgContext(appDb, "org_a", (tx) =>
+    tx.execute(sql`delete from patient_document_context where document_id = 'dddddddd-dddd-dddd-dddd-dddddddddddd'`))).rejects.toMatchObject({ cause: { code: "42501" } });
+  await expect(withOrgContext(appDb, "org_a", (tx) =>
+    tx.execute(sql`delete from encounter_plan_item where encounter_id = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'`))).rejects.toMatchObject({ cause: { code: "42501" } });
+
+  // El ítem es el set editable del borrador: DELETE permitido en borrador sin
+  // relaciones; bloqueado con vínculos de ejecución o presupuesto no borrador.
+  await ownerDb.execute(sql`insert into treatment_plan_item (id,organization_id,patient_id,plan_id,budget_id,title,status)
+    values ('99999999-0000-4000-8000-000000000000','org_a','99999999-9999-9999-9999-999999999999','22222222-2222-4222-8222-222222222222','eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee','Puente libre','pendiente')
+    on conflict (id) do nothing`);
+  const draftDeleted = await withOrgContext(appDb, "org_a", (tx) =>
+    tx.execute(sql`delete from treatment_plan_item where id = '99999999-0000-4000-8000-000000000000' returning id`));
+  expect(draftDeleted).toHaveLength(1);
+  // Con vínculo atención-plan no se elimina aunque el presupuesto siga en borrador.
+  const linkedDeleted = await withOrgContext(appDb, "org_a", (tx) =>
+    tx.execute(sql`delete from treatment_plan_item where id = 'ffffffff-ffff-ffff-ffff-ffffffffffff' returning id`));
+  expect(linkedDeleted).toHaveLength(0);
+  await ownerDb.execute(sql`insert into treatment_plan_item (id,organization_id,patient_id,plan_id,budget_id,title,status)
+    values ('11111111-2222-3333-4444-555555555555','org_a','99999999-9999-9999-9999-999999999999','22222222-2222-4222-8222-222222222222','eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee','Puente','pendiente')`);
+  await ownerDb.execute(sql`update treatment_budget set status = 'presentado' where id = 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee'`);
+  const presentedDeleted = await withOrgContext(appDb, "org_a", (tx) =>
+    tx.execute(sql`delete from treatment_plan_item where id = '11111111-2222-3333-4444-555555555555' returning id`));
+  expect(presentedDeleted).toHaveLength(0);
+});
+
+it("la biblioteca global es de solo lectura y las líneas se blindan por trigger", async () => {
+  await ownerDb.execute(sql`insert into "treatment_template" ("key", "name", "specialty", "scope")
+    values ('rls:prueba', 'Prestación RLS', 'prevencion', 'general')
+    on conflict ("key") do nothing`);
+  // Lectura global sin tenant: el rol app lee, sin importar el contexto.
+  const libraryQuery = sql`select "key" from "treatment_template" where "key" = 'rls:prueba'`;
+  expect(await withOrgContext(appDb, "org_a", (tx) => tx.execute(libraryQuery))).toHaveLength(1);
+  expect(await withOrgContext(appDb, "org_b", (tx) => tx.execute(libraryQuery))).toHaveLength(1);
+  // Escritura denegada al rol app (42501): solo el seed owner la mantiene.
+  await expect(withOrgContext(appDb, "org_a", (tx) => tx.execute(
+    sql`insert into "treatment_template" ("key", "name", "specialty", "scope") values ('rls:intrusa', 'Intrusa', 'prevencion', 'general')`,
+  ))).rejects.toMatchObject({ cause: { code: "42501" } });
+  await expect(withOrgContext(appDb, "org_a", (tx) => tx.execute(
+    sql`update "treatment_template" set "name" = 'hack' where "key" = 'rls:prueba'`,
+  ))).rejects.toMatchObject({ cause: { code: "42501" } });
+  await expect(withOrgContext(appDb, "org_a", (tx) => tx.execute(
+    sql`delete from "treatment_template" where "key" = 'rls:prueba'`,
+  ))).rejects.toMatchObject({ cause: { code: "42501" } });
+
+  // Líneas económicas: alta solo en borrador; tras presentar, solo decision cambia; nunca DELETE.
+  await ownerDb.execute(sql`insert into "treatment_plan" (id,organization_id,patient_id,title)
+    values ('33333333-3333-4333-8333-333333333333','org_a','99999999-9999-9999-9999-999999999999','Plan líneas')
+    on conflict (id) do nothing`);
+  await ownerDb.execute(sql`insert into "treatment_budget" (id,organization_id,patient_id,plan_id,budget_number,title,currency,status)
+    values ('44444444-4444-4444-8444-444444444444','org_a','99999999-9999-9999-9999-999999999999','33333333-3333-4333-8333-333333333333',3,'Líneas','PEN','borrador')
+    on conflict (id) do nothing`);
+  await ownerDb.execute(sql`insert into treatment_plan_item (id,organization_id,patient_id,plan_id,budget_id,title,price_cents,currency,status)
+    values ('55555555-5555-4555-8555-555555555555','org_a','99999999-9999-9999-9999-999999999999','33333333-3333-4333-8333-333333333333','44444444-4444-4444-8444-444444444444','Línea',10000,'PEN','pendiente')
+    on conflict (id) do nothing`);
+  const inserted = await withOrgContext(appDb, "org_a", (tx) => tx.execute(
+    sql`insert into treatment_budget_item (organization_id,patient_id,plan_id,budget_id,plan_item_id,title,price_cents,currency,decision)
+      values ('org_a','99999999-9999-9999-9999-999999999999','33333333-3333-4333-8333-333333333333','44444444-4444-4444-8444-444444444444','55555555-5555-4555-8555-555555555555','Línea',10000,'PEN','pendiente')
+      returning id`,
+  ));
+  expect(inserted).toHaveLength(1);
+  await ownerDb.execute(sql`update treatment_budget set status = 'presentado' where id = '44444444-4444-4444-8444-444444444444'`);
+  // Snapshot cerrado: ni el contenido ni la pertenencia cambian.
+  await expect(withOrgContext(appDb, "org_a", (tx) => tx.execute(
+    sql`update treatment_budget_item set title = 'hack' where plan_item_id = '55555555-5555-4555-8555-555555555555'`,
+  ))).rejects.toThrow();
+  // La decisión sí puede registrarse sobre el presentado.
+  const decided = await withOrgContext(appDb, "org_a", (tx) => tx.execute(
+    sql`update treatment_budget_item set decision = 'aceptado' where plan_item_id = '55555555-5555-4555-8555-555555555555' returning decision`,
+  ));
+  expect(decided).toHaveLength(1);
+  // Sin DELETE físico en ningún estado (42501 por REVOKE).
+  await expect(withOrgContext(appDb, "org_a", (tx) => tx.execute(
+    sql`delete from treatment_budget_item where plan_item_id = '55555555-5555-4555-8555-555555555555'`,
+  ))).rejects.toMatchObject({ cause: { code: "42501" } });
+  // Ni el owner borra planes por API: el rol app no tiene DELETE en treatment_plan.
+  await expect(withOrgContext(appDb, "org_a", (tx) => tx.execute(
+    sql`delete from treatment_plan where id = '33333333-3333-4333-8333-333333333333'`,
+  ))).rejects.toMatchObject({ cause: { code: "42501" } });
 });
