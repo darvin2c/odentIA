@@ -16,6 +16,8 @@ export * from "./errors.js";
 export * from "./encounters.js";
 export * from "./patient-history.js";
 export * from "./plan.js";
+export * from "./budgets.js";
+export * from "./service-catalog.js";
 export * from "./fields.js";
 export * from "./patients.js";
 export * from "./pipelines.js";

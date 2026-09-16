@@ -2,20 +2,19 @@ import { withOrgContext } from "@odentia/db";
 import { sql } from "drizzle-orm";
 import { expect, it } from "vitest";
 import {
-  addAnamnesis,
   addClinicalNote,
-  addMedication,
   addOdontogramEntries,
   createOdontogramAssessment,
-  discontinueMedication,
   getOdontogram,
+  getPatientHealth,
   listAnamnesisVersions,
   listOdontogramAssessments,
   reviewLegacyEntry,
+  savePatientHealth,
   voidOdontogramEntry,
 } from "./clinical.js";
 import { createContact } from "./contacts.js";
-import { createPatient, getPatientByContact, nextPatientNumber } from "./patients.js";
+import { createPatient, getPatientByContact, listPatients, nextPatientNumber } from "./patients.js";
 import { appDb, ownerDb, setupTestDb } from "./test-setup.js";
 
 setupTestDb();
@@ -35,6 +34,33 @@ async function seedUserAndCie(): Promise<void> {
         on conflict ("code") do nothing`,
   );
 }
+
+it("pagina por fecha sin perder microsegundos ni duplicar empates", async () => {
+  await seedUserAndCie();
+  const patients = [];
+  for (const suffix of ["A", "B", "C"]) {
+    const row = await withOrgContext(appDb, "org_a", (tx) =>
+      createPatient(tx, "org_a", ACTOR, { displayName: `Cursor preciso ${suffix}` }),
+    );
+    patients.push(row);
+    const timestamp = suffix === "A" ? "2026-01-01T00:00:00.123001Z" : "2026-01-01T00:00:00.123002Z";
+    await ownerDb.execute(sql`update patient set created_at = ${timestamp}::timestamptz where id = ${row.id}`);
+  }
+  const ascending = [patients[0]!.id, ...[patients[1]!.id, patients[2]!.id].sort()];
+  for (const sort of ["created", "-created"]) {
+    const ids: string[] = [];
+    let cursor: string | undefined;
+    for (let index = 0; index < 3; index++) {
+      const page = await withOrgContext(appDb, "org_a", (tx) =>
+        listPatients(tx, "org_a", { q: "Cursor preciso", sort, limit: 1, cursor }),
+      );
+      ids.push(...page.items.map((item) => item.id));
+      cursor = page.nextCursor ?? undefined;
+    }
+    expect(cursor).toBeUndefined();
+    expect(ids).toEqual(sort === "created" ? ascending : [...ascending].reverse());
+  }
+});
 
 it("crear paciente directo y por promoción; doble promoción da 409", async () => {
   await seedUserAndCie();
@@ -73,34 +99,113 @@ it("documento duplicado da 409 y el correlativo es por org", async () => {
   expect(n).toBe(b1.patientNumber + 1);
 });
 
-it("anamnesis versiona 1→2 y el historial no trae answers", async () => {
+it("salud guarda el agregado con revisión y versiona la entrevista solo si cambia", async () => {
+  await seedUserAndCie();
   const p = await withOrgContext(appDb, "org_a", (tx) =>
     createPatient(tx, "org_a", ACTOR, { displayName: "Ana V" }),
   );
-  const v1 = await withOrgContext(appDb, "org_a", (tx) =>
-    addAnamnesis(tx, "org_a", ACTOR, p.id, { motivoConsulta: "dolor" }),
+  const base = {
+    expectedRevision: 0,
+    reviewStatus: { allergies: "recorded", conditions: "recorded", medications: "recorded" },
+    allergies: [{ substance: "Penicilina", severity: "severa" as const }],
+    conditions: [{ name: "Asma", status: "activa" as const }],
+    medications: [{ name: "Salbutamol", frequency: "según necesidad" }],
+    anamnesis: { expectedVersion: 0, answers: { antecedentesFamiliares: "Ninguno" } },
+  };
+  const v1 = await withOrgContext(appDb, "org_a", (tx) => savePatientHealth(tx, "org_a", ACTOR, p.id, base));
+  expect(v1.revision).toBe(1);
+  expect(v1.reviewStatus).toEqual({ allergies: "recorded", conditions: "recorded", medications: "recorded" });
+  expect(v1.latestAnamnesis?.version).toBe(1);
+  // Reenvío idéntico con la misma revisión: 409 sin sobrescribir, valores locales intactos.
+  await expect(
+    withOrgContext(appDb, "org_a", (tx) => savePatientHealth(tx, "org_a", ACTOR, p.id, base)),
+  ).rejects.toMatchObject({ code: "STALE_HEALTH_REVISION", status: 409 });
+  const kept = await withOrgContext(appDb, "org_a", (tx) => getPatientHealth(tx, "org_a", p.id));
+  expect(kept.revision).toBe(1);
+  expect(kept.allergies).toHaveLength(1);
+  const sameInterview = await withOrgContext(appDb, "org_a", (tx) =>
+    savePatientHealth(tx, "org_a", ACTOR, p.id, {
+      expectedRevision: 1,
+      reviewStatus: { allergies: "recorded", conditions: "recorded", medications: "recorded" },
+      allergies: [{ id: v1.allergies[0]!.id, substance: "Penicilina", severity: "severa" as const }],
+      conditions: [{ id: v1.conditions[0]!.id, name: "Asma", status: "activa" as const }],
+      medications: [{ id: v1.medications[0]!.id, name: "Salbutamol", frequency: "según necesidad" }],
+    }),
   );
-  expect(v1.version).toBe(1);
-  const v2 = await withOrgContext(appDb, "org_a", (tx) =>
-    addAnamnesis(tx, "org_a", ACTOR, p.id, { motivoConsulta: "dolor", observaciones: "control" }),
-  );
-  expect(v2.version).toBe(2);
+  expect(sameInterview.revision).toBe(2);
+  expect(sameInterview.latestAnamnesis?.version).toBe(1);
   const history = await withOrgContext(appDb, "org_a", (tx) => listAnamnesisVersions(tx, "org_a", p.id));
-  expect(history).toHaveLength(2);
+  expect(history).toHaveLength(1);
   expect(history[0]).not.toHaveProperty("answers");
 });
 
-it("discontinueMedication dos veces da 409", async () => {
+it("salud revierte todo si una fila es inválida y exige colecciones completas", async () => {
+  await seedUserAndCie();
   const p = await withOrgContext(appDb, "org_a", (tx) =>
-    createPatient(tx, "org_a", ACTOR, { displayName: "Med M" }),
+    createPatient(tx, "org_a", ACTOR, { displayName: "Salud Atómica" }),
   );
-  const med = await withOrgContext(appDb, "org_a", (tx) =>
-    addMedication(tx, "org_a", ACTOR, p.id, { name: "Amoxicilina" }),
-  );
-  await withOrgContext(appDb, "org_a", (tx) => discontinueMedication(tx, "org_a", ACTOR, med.id));
+  const valid = {
+    expectedRevision: 0,
+    reviewStatus: { allergies: "recorded", conditions: "none", medications: "none" },
+    allergies: [{ substance: "Látex", severity: "leve" as const }],
+    conditions: [],
+    medications: [],
+  };
+  const saved = await withOrgContext(appDb, "org_a", (tx) => savePatientHealth(tx, "org_a", ACTOR, p.id, valid));
+  expect(saved.revision).toBe(1);
+  // Segunda fila inválida: no guarda ninguna (atomicidad).
   await expect(
-    withOrgContext(appDb, "org_a", (tx) => discontinueMedication(tx, "org_a", ACTOR, med.id)),
-  ).rejects.toMatchObject({ status: 409 });
+    withOrgContext(appDb, "org_a", (tx) =>
+      savePatientHealth(tx, "org_a", ACTOR, p.id, {
+        expectedRevision: 1,
+        reviewStatus: { allergies: "recorded", conditions: "none", medications: "none" },
+        allergies: [
+          { id: saved.allergies[0]!.id, substance: "Látex", severity: "leve" as const },
+          { substance: "", severity: "leve" as const },
+        ],
+        conditions: [],
+        medications: [],
+      }),
+    ),
+  ).rejects.toMatchObject({ status: 400 });
+  const kept = await withOrgContext(appDb, "org_a", (tx) => getPatientHealth(tx, "org_a", p.id));
+  expect(kept.revision).toBe(1);
+  expect(kept.allergies).toHaveLength(1);
+  // Omitir un ID persistido es 400, no borrado silencioso.
+  await expect(
+    withOrgContext(appDb, "org_a", (tx) =>
+      savePatientHealth(tx, "org_a", ACTOR, p.id, {
+        expectedRevision: 1,
+        reviewStatus: { allergies: "recorded", conditions: "none", medications: "none" },
+        allergies: [],
+        conditions: [],
+        medications: [],
+      }),
+    ),
+  ).rejects.toMatchObject({ status: 400 });
+  // Ausencia explícita con filas activas es 400; sin filas, 200.
+  await expect(
+    withOrgContext(appDb, "org_a", (tx) =>
+      savePatientHealth(tx, "org_a", ACTOR, p.id, {
+        expectedRevision: 1,
+        reviewStatus: { allergies: "none", conditions: "none", medications: "none" },
+        allergies: [{ id: saved.allergies[0]!.id, substance: "Látex", severity: "leve" as const }],
+        conditions: [],
+        medications: [],
+      }),
+    ),
+  ).rejects.toMatchObject({ status: 400 });
+  const denied = await withOrgContext(appDb, "org_a", (tx) =>
+    savePatientHealth(tx, "org_a", ACTOR, p.id, {
+      expectedRevision: 1,
+      reviewStatus: { allergies: "none", conditions: "none", medications: "none" },
+      allergies: [{ id: saved.allergies[0]!.id, substance: "Látex", severity: "leve" as const, isActive: false }],
+      conditions: [],
+      medications: [],
+    }),
+  );
+  expect(denied.revision).toBe(2);
+  expect(denied.reviewStatus.allergies).toBe("none");
 });
 
 it("odontograma: add + void; el estado deriva sin anuladas y el original se preserva", async () => {

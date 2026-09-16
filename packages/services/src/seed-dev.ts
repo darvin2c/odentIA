@@ -30,6 +30,7 @@ import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org";
 import {
   clinicalNote,
   encounter,
+  encounterPlanItem,
   encounterProcedure,
   encounterTooth,
   odontogramEntry,
@@ -40,7 +41,10 @@ import {
   patientAnamnesis,
   patientCondition,
   patientDocument,
+  patientDocumentContext,
   patientMedication,
+  serviceCatalog,
+  treatmentBudget,
   treatmentPlanItem,
 } from "@odentia/db/schema/clinical";
 import { inArray, sql } from "drizzle-orm";
@@ -52,21 +56,61 @@ import { completeTask, createTask } from "./tasks.js";
 import { upsertAgentConfig } from "./agentConfig.js";
 import { createPatient } from "./patients.js";
 import {
-  addAllergy,
-  addAnamnesis,
   addClinicalNote,
-  addCondition,
-  addMedication,
   addOdontogramEntries,
+  correctDocumentContext,
   createOdontogramAssessment,
+  registerPatientDocument,
+  savePatientHealth,
   voidOdontogramEntry,
 } from "./clinical.js";
-import { addPlanItem } from "./plan.js";
-import { addEncounterProcedure, createEncounter, finalizeEncounter } from "./encounters.js";
+import { addPlanItem, createTreatmentPlan, setPlanItemStatus } from "./plan.js";
+import { createBudget, decideBudget, presentBudget } from "./budgets.js";
+import { createService } from "./service-catalog.js";
+import {
+  addEncounterAddendum,
+  addEncounterProcedure,
+  createEncounter,
+  finalizeEncounter,
+  updateEncounterDraft,
+} from "./encounters.js";
+import { createStorage } from "./storage.js";
 import { secretsKeyFromEnv } from "./secrets.js";
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) throw new Error("DATABASE_URL es obligatoria para sembrar (rol owner)");
+// Storage real (MinIO local / R2 prod): los documentos demo se suben de verdad,
+// nunca con rutas S3 inventadas. Requiere las mismas variables que la API.
+function storageEnvFromProcess(): {
+  endpoint: string;
+  region: string;
+  accessKeyId: string;
+  secretAccessKey: string;
+  avatarsBucket: string;
+  publicBaseUrl: string;
+  attachmentsBucket: string;
+} {
+  const missing = ["S3_ENDPOINT", "S3_ACCESS_KEY", "S3_SECRET_KEY", "S3_ATTACHMENTS_BUCKET"].filter(
+    (k) => !process.env[k],
+  );
+  if (missing.length) throw new Error(`Storage demo sin configurar (faltan ${missing.join(", ")})`);
+  const endpoint = process.env.S3_ENDPOINT!;
+  return {
+    endpoint,
+    region: process.env.S3_REGION ?? "auto",
+    accessKeyId: process.env.S3_ACCESS_KEY!,
+    secretAccessKey: process.env.S3_SECRET_KEY!,
+    avatarsBucket: process.env.S3_BUCKET ?? "avatars",
+    publicBaseUrl: process.env.S3_PUBLIC_URL ?? endpoint,
+    attachmentsBucket: process.env.S3_ATTACHMENTS_BUCKET!,
+  };
+}
+const storage = createStorage(storageEnvFromProcess());
+// PNG real mínimo (1x1) para evidencias demo: bytes válidos que sí se almacenan.
+const DEMO_PNG = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+  "base64",
+);
 const secretsKey = secretsKeyFromEnv(process.env.SECRETS_KEY);
 
 const db = createOwnerDb(databaseUrl);
@@ -87,8 +131,9 @@ const SHARED_PHONE = "+51987654999";
 const hoursAgo = (h: number): Date => new Date(Date.now() - h * 3_600_000);
 const daysAgo = (d: number): Date => new Date(Date.now() - d * 86_400_000);
 const tomorrowIso = (): string => new Date(Date.now() + 86_400_000).toISOString();
-
 async function wipeSeed(): Promise<void> {
+  const previousDocuments = await db.select({ storageKey: patientDocument.storageKey })
+    .from(patientDocument).where(inArray(patientDocument.organizationId, SEED_ORGS));
   await db.delete(message).where(inArray(message.organizationId, SEED_ORGS));
   await db.delete(crmTask).where(inArray(crmTask.organizationId, SEED_ORGS));
   await db.delete(contactIdentity).where(inArray(contactIdentity.organizationId, SEED_ORGS));
@@ -98,13 +143,19 @@ async function wipeSeed(): Promise<void> {
   await db.delete(clinicalNote).where(inArray(clinicalNote.organizationId, SEED_ORGS));
   await db.delete(odontogramEntry).where(inArray(odontogramEntry.organizationId, SEED_ORGS));
   await db.delete(odontogramAssessment).where(inArray(odontogramAssessment.organizationId, SEED_ORGS));
+  // Contextos antes que documentos; vínculos atención-plan antes que ítems y
+  // presupuestos (FK en cascada parcial, orden explícito e idempotente).
+  await db.delete(patientDocumentContext).where(inArray(patientDocumentContext.organizationId, SEED_ORGS));
+  await db.delete(encounterPlanItem).where(inArray(encounterPlanItem.organizationId, SEED_ORGS));
   await db.delete(patientDocument).where(inArray(patientDocument.organizationId, SEED_ORGS));
   await db.delete(patientAnamnesis).where(inArray(patientAnamnesis.organizationId, SEED_ORGS));
   await db.delete(patientAllergy).where(inArray(patientAllergy.organizationId, SEED_ORGS));
   await db.delete(patientCondition).where(inArray(patientCondition.organizationId, SEED_ORGS));
   await db.delete(patientMedication).where(inArray(patientMedication.organizationId, SEED_ORGS));
   await db.delete(treatmentPlanItem).where(inArray(treatmentPlanItem.organizationId, SEED_ORGS));
+  await db.delete(treatmentBudget).where(inArray(treatmentBudget.organizationId, SEED_ORGS));
   await db.delete(encounter).where(inArray(encounter.organizationId, SEED_ORGS));
+  await db.delete(serviceCatalog).where(inArray(serviceCatalog.organizationId, SEED_ORGS));
   await db.delete(patient).where(inArray(patient.organizationId, SEED_ORGS));
   await db.delete(contact).where(inArray(contact.organizationId, SEED_ORGS));
   await db.delete(pipelineStage).where(inArray(pipelineStage.organizationId, SEED_ORGS));
@@ -121,6 +172,7 @@ async function wipeSeed(): Promise<void> {
   await db.delete(organization).where(inArray(organization.id, SEED_ORGS));
   await db.execute(sql`delete from "verification" where "identifier" ilike '%@odentia.dev%'`);
   await db.delete(user).where(inArray(user.id, [ANA_ID, LUIS_ID, CORA_ID]));
+  for (const document of previousDocuments) await storage.deleteAttachment(document.storageKey);
 }
 
 async function seedConversation(args: {
@@ -446,40 +498,159 @@ for (const p of PATIENTS_A) {
 }
 
 const rosaPatientId = patientIdByName.get("Rosa Quispe")!;
-await addAllergy(db, ORG_A, ANA_ID, rosaPatientId, {
-  substance: "Penicilina",
-  reaction: "Urticaria",
-  severity: "severa",
+// Antecedentes en un solo guardado transaccional (revisión 0 → 1).
+const rosaHealthV1 = await savePatientHealth(db, ORG_A, ANA_ID, rosaPatientId, {
+  expectedRevision: 0,
+  reviewStatus: { allergies: "recorded", conditions: "recorded", medications: "recorded" },
+  allergies: [{ substance: "Penicilina", reaction: "Urticaria", severity: "severa" }],
+  conditions: [{ name: "Hipertensión arterial", status: "activa", notes: "Controlada con medicación" }],
+  medications: [{ name: "Losartán", dose: "50 mg", frequency: "1 vez al día" }],
+  anamnesis: {
+    expectedVersion: 0,
+    answers: {
+      antecedentesPersonales: { hospitalizaciones: "Ninguna", cirugias: "Ninguna", transfusiones: "Ninguna" },
+      antecedentesFamiliares: "Madre con hipertensión arterial",
+      antecedentesOdontologicos: { ultimaVisita: "Hace 1 año", cepilladosAlDia: 2, experienciaPrevia: "regular", ansiedadDental: "leve" },
+    },
+  },
 });
-await addCondition(db, ORG_A, ANA_ID, rosaPatientId, { name: "Hipertensión arterial", status: "activa" });
-await addMedication(db, ORG_A, ANA_ID, rosaPatientId, {
-  name: "Losartán",
-  dose: "50 mg",
-  frequency: "1 vez al día",
+// Segunda revisión: suma bruxismo a la entrevista (versión 2) sin tocar lo demás.
+await savePatientHealth(db, ORG_A, ANA_ID, rosaPatientId, {
+  expectedRevision: 1,
+  reviewStatus: { allergies: "recorded", conditions: "recorded", medications: "recorded" },
+  allergies: rosaHealthV1.allergies.map((a) => ({ id: a.id, substance: a.substance, reaction: a.reaction, severity: a.severity })),
+  conditions: rosaHealthV1.conditions.map((c) => ({ id: c.id, name: c.name, status: c.status, notes: c.notes })),
+  medications: [
+    ...rosaHealthV1.medications.map((m) => ({ id: m.id, name: m.name, dose: m.dose, frequency: m.frequency })),
+    { name: "Ácido acetilsalicílico", dose: "100 mg", frequency: "1 vez al día", notes: "Suspendida por indicación médica", endDate: "2024-06-01" },
+  ],
+  anamnesis: {
+    expectedVersion: 1,
+    answers: {
+      antecedentesPersonales: { hospitalizaciones: "Ninguna", cirugias: "Ninguna", transfusiones: "Ninguna" },
+      antecedentesFamiliares: "Madre con hipertensión arterial",
+      antecedentesOdontologicos: { ultimaVisita: "Hace 1 año", cepilladosAlDia: 2, experienciaPrevia: "regular", ansiedadDental: "leve", bruxismo: true },
+    },
+  },
 });
-await addAnamnesis(db, ORG_A, ANA_ID, rosaPatientId, { motivo: "Dolor molar", diagnosticoCie10: ["K02.1"] });
-await addAnamnesis(db, ORG_A, ANA_ID, rosaPatientId, {
-  motivo: "Dolor molar",
-  evolucion: "Persiste dolor a la masticación en pieza 36",
-  diagnosticoCie10: ["K02.1", "K04.0"],
-});
-const obt36 = await addPlanItem(db, ORG_A, ANA_ID, rosaPatientId, {
-  title: "Obturación pieza 36",
-  toothNumber: 36,
-  diagnosisCode: "K02.1",
-  priceCents: 18000,
-  currency: "PEN",
-});
-await addPlanItem(db, ORG_A, ANA_ID, rosaPatientId, {
-  title: "Endodoncia pieza 46",
-  toothNumber: 46,
-  diagnosisCode: "K04.0",
-  priceCents: 45000,
-});
+// Catálogo base en ambas orgs (precios de ejemplo se administran aquí; el plan
+// solo congela desde el servicio elegido, nunca montos manuales).
+const seedOffers: Array<{ code: string; name: string; specialty: string; scope: string; priceCents: number; durationMin: number }> = [
+  { code: "OBTURACION", name: "Obturación con resina", specialty: "restauradora", scope: "tooth", priceCents: 18000, durationMin: 45 },
+  { code: "ENDODONCIA", name: "Endodoncia unirradicular", specialty: "endodoncia", scope: "tooth", priceCents: 45000, durationMin: 90 },
+  { code: "CORONA", name: "Corona cerámica", specialty: "protesis", scope: "tooth", priceCents: 90000, durationMin: 60 },
+  { code: "BLANQUEAMIENTO", name: "Blanqueamiento dental", specialty: "estetica", scope: "arch", priceCents: 60000, durationMin: 60 },
+  { code: "LIMPIEZA", name: "Limpieza dental (profilaxis)", specialty: "prevencion", scope: "general", priceCents: 12000, durationMin: 45 },
+  { code: "ORTODONCIA_CTRL", name: "Control de ortodoncia", specialty: "ortodoncia", scope: "general", priceCents: 10000, durationMin: 30 },
+];
+const catalogA: Array<Awaited<ReturnType<typeof createService>>> = [];
+for (const offer of seedOffers) {
+  catalogA.push(await createService(db, ORG_A, ANA_ID, offer));
+  await createService(db, ORG_B, CORA_ID, offer);
+}
+const serviceIdA = (code: string): string => {
+  const found = catalogA.find((s) => s.code === code);
+  if (!found) throw new Error(`Servicio ${code} ausente del catálogo semilla`);
+  return found.id;
+};
+// Evaluación inicial (borrador) antes del plan: la indicación nace aquí y la
+// ejecución continúa en la misma atención (un solo borrador por paciente).
 const draft = await createEncounter(db, ORG_A, ANA_ID, rosaPatientId, {
   reason: "Dolor molar inferior derecho",
   teeth: [36, 46],
   branchId: miraflores.id,
+});
+// Plan 1 de Rosa: existe antes del presupuesto y continúa en varias visitas.
+const planRestaurador = await createTreatmentPlan(db, ORG_A, ANA_ID, rosaPatientId, {
+  title: "Plan restaurador molar",
+  originEncounterId: draft.id,
+});
+const obt36 = await addPlanItem(db, ORG_A, ANA_ID, rosaPatientId, {
+  serviceId: serviceIdA("OBTURACION"),
+  planId: planRestaurador.id,
+  sourceEncounterId: draft.id,
+  toothNumber: 36,
+  diagnosisCode: "K02.1",
+  detail: "Obturación pieza 36",
+});
+const endo46 = await addPlanItem(db, ORG_A, ANA_ID, rosaPatientId, {
+  serviceId: serviceIdA("ENDODONCIA"),
+  planId: planRestaurador.id,
+  sourceEncounterId: draft.id,
+  toothNumber: 46,
+  diagnosisCode: "K04.0",
+  detail: "Endodoncia pieza 46",
+});
+const corona46 = await addPlanItem(db, ORG_A, ANA_ID, rosaPatientId, {
+  serviceId: serviceIdA("CORONA"),
+  planId: planRestaurador.id,
+  sourceEncounterId: draft.id,
+  toothNumber: 46,
+  diagnosisCode: "K04.0",
+  detail: "Corona cerámica pieza 46 (diferida)",
+});
+// Presupuesto 1 de Rosa: 3 ítems del plan, aceptación parcial (corona diferida
+// por la paciente; NUNCA se infiere aceptación histórica, todo pasa por decisión).
+const budgetRestaurador = await createBudget(db, ORG_A, ANA_ID, rosaPatientId, {
+  planId: planRestaurador.id,
+  itemIds: [obt36.id, endo46.id, corona46.id],
+  title: "Plan restaurador molar",
+  notes: "Obturación 36 + endodoncia 46; corona diferida a segunda etapa.",
+});
+await presentBudget(db, ORG_A, ANA_ID, rosaPatientId, budgetRestaurador.id);
+await decideBudget(db, ORG_A, ANA_ID, rosaPatientId, budgetRestaurador.id, {
+  acceptedItemIds: [obt36.id, endo46.id],
+  acceptedByName: "Rosa Quispe",
+  decisionNote: "Acepta obturación y endodoncia; corona queda para una segunda etapa.",
+});
+// Decisión aceptada pero estado clínico programado: van por carriles separados.
+await setPlanItemStatus(db, ORG_A, ANA_ID, rosaPatientId, endo46.id, { status: "programado" });
+// Plan 2 de Rosa + presupuesto presentado, pendiente de decisión (nada aceptado aún).
+const planEstetica = await createTreatmentPlan(db, ORG_A, ANA_ID, rosaPatientId, {
+  title: "Plan estética dental",
+  originEncounterId: draft.id,
+});
+const blaq = await addPlanItem(db, ORG_A, ANA_ID, rosaPatientId, {
+  serviceId: serviceIdA("BLANQUEAMIENTO"),
+  planId: planEstetica.id,
+  sourceEncounterId: draft.id,
+  arch: "upper",
+  detail: "Blanqueamiento dental",
+});
+const limp = await addPlanItem(db, ORG_A, ANA_ID, rosaPatientId, {
+  serviceId: serviceIdA("LIMPIEZA"),
+  planId: planEstetica.id,
+  sourceEncounterId: draft.id,
+  detail: "Limpieza dental (profilaxis)",
+});
+const budgetEstetica = await createBudget(db, ORG_A, ANA_ID, rosaPatientId, {
+  planId: planEstetica.id,
+  itemIds: [blaq.id, limp.id],
+  title: "Plan estética dental",
+  notes: "Pendiente de decisión de la paciente.",
+});
+await presentBudget(db, ORG_A, ANA_ID, rosaPatientId, budgetEstetica.id);
+// Plan 3 de Rosa + presupuesto presentado y rechazado en su totalidad.
+const planOrto = await createTreatmentPlan(db, ORG_A, ANA_ID, rosaPatientId, {
+  title: "Plan ortodoncia",
+  originEncounterId: draft.id,
+});
+const ctrlOrto = await addPlanItem(db, ORG_A, ANA_ID, rosaPatientId, {
+  serviceId: serviceIdA("ORTODONCIA_CTRL"),
+  planId: planOrto.id,
+  sourceEncounterId: draft.id,
+  detail: "Control de ortodoncia",
+});
+const budgetOrto = await createBudget(db, ORG_A, ANA_ID, rosaPatientId, {
+  planId: planOrto.id,
+  itemIds: [ctrlOrto.id],
+  title: "Plan ortodoncia",
+});
+await presentBudget(db, ORG_A, ANA_ID, rosaPatientId, budgetOrto.id);
+await decideBudget(db, ORG_A, ANA_ID, rosaPatientId, budgetOrto.id, {
+  acceptedItemIds: [],
+  acceptedByName: "Rosa Quispe",
+  decisionNote: "Rechaza ortodoncia por ahora; reevaluar en 6 meses.",
 });
 await addOdontogramEntries(db, ORG_A, ANA_ID, rosaPatientId, {
   toothNumber: 36,
@@ -509,13 +680,64 @@ await addClinicalNote(db, ORG_A, ANA_ID, rosaPatientId, {
   diagnosisCode: "K02.1",
   encounterId: draft.id,
 });
+// Documentos demo con bytes reales en storage (el registro exige borrador).
+const rxRef = await storage.putPatientDocument({
+  orgId: ORG_A,
+  patientId: rosaPatientId,
+  bytes: DEMO_PNG,
+  contentType: "image/png",
+  ext: "png",
+});
+const docRx = await registerPatientDocument(db, ORG_A, ANA_ID, rosaPatientId, {
+  category: "radiografia",
+  label: "[DEMO] Radiografía periapical pieza 36",
+  storageKey: rxRef.objectKey,
+  contentType: rxRef.mimeType,
+  sizeBytes: rxRef.size,
+  encounterId: draft.id,
+  toothNumbers: [36],
+  tags: ["radiografia", "diagnostico-inicial"],
+});
+// Corrección versionada: suma etiqueta sin tocar blob ni clasificación.
+await correctDocumentContext(db, ORG_A, ANA_ID, rosaPatientId, docRx.id, {
+  expectedVersion: 1,
+  tags: ["radiografia", "diagnostico-inicial", "pieza-36"],
+});
+const fotoRef = await storage.putPatientDocument({
+  orgId: ORG_A,
+  patientId: rosaPatientId,
+  bytes: DEMO_PNG,
+  contentType: "image/png",
+  ext: "png",
+});
+await registerPatientDocument(db, ORG_A, ANA_ID, rosaPatientId, {
+  category: "foto_clinica",
+  label: "[DEMO] Foto clínica piezas 36 y 46",
+  storageKey: fotoRef.objectKey,
+  contentType: fotoRef.mimeType,
+  sizeBytes: fotoRef.size,
+  encounterId: draft.id,
+  planItemId: endo46.id,
+  toothNumbers: [36, 46],
+  tags: ["foto-clinica", "seguimiento"],
+});
+// Cierre con datos útiles: evolución, indicaciones y siguiente paso.
+await updateEncounterDraft(db, ORG_A, ANA_ID, rosaPatientId, draft.id, {
+  evolution: "Obturación de pieza 36 sin complicaciones; endodoncia de 46 programada.",
+  indications: "Higiene con cepillo suave, control en 7 días; acudir si hay dolor.",
+  nextStep: "Endodoncia pieza 46 en próxima cita.",
+  nextAppointmentAt: tomorrowIso(),
+});
+// Solo el aceptado se realiza; conserva el vínculo atención-plan.
 await addEncounterProcedure(db, ORG_A, ANA_ID, rosaPatientId, draft.id, {
-  description: "Obturación con resina pieza 36",
   toothNumber: 36,
   diagnosisCode: "K02.1",
   planItemId: obt36.id,
 });
 await finalizeEncounter(db, ORG_A, ANA_ID, rosaPatientId, draft.id);
+await addEncounterAddendum(db, ORG_A, ANA_ID, rosaPatientId, draft.id, {
+  text: "Adenda demo: la paciente toleró bien la obturación; sin sangrado posterior.",
+});
 await createOdontogramAssessment(db, ORG_A, ANA_ID, rosaPatientId, {
   purpose: "initial",
   specifications: "Odontograma inicial NTS 188-MINSA/DGIESP-2022: caries oclusal en 36 y 46.",
@@ -529,16 +751,34 @@ await addClinicalNote(db, ORG_A, ANA_ID, rosaPatientId, {
 });
 
 const elenaPatientId = patientIdByName.get("Elena Huamán")!;
-await addAllergy(db, ORG_A, ANA_ID, elenaPatientId, {
-  substance: "Látex",
-  reaction: "Enrojecimiento",
-  severity: "leve",
+await savePatientHealth(db, ORG_A, ANA_ID, elenaPatientId, {
+  expectedRevision: 0,
+  reviewStatus: { allergies: "recorded", conditions: "unknown", medications: "unknown" },
+  allergies: [{ substance: "Látex", reaction: "Enrojecimiento", severity: "leve" }],
+  conditions: [],
+  medications: [],
 });
 await addClinicalNote(db, ORG_A, ANA_ID, elenaPatientId, {
   note: "Control de rutina sin hallazgos",
   diagnosisCode: "Z01.2",
 });
-await addPlanItem(db, ORG_A, ANA_ID, elenaPatientId, { title: "Limpieza dental", priceCents: 12000 });
+// Plan de Elena + presupuesto en borrador (sin presentar): ejercita el estado inicial.
+const elenaEval = await createEncounter(db, ORG_A, ANA_ID, elenaPatientId, { reason: "Control de rutina" });
+const elenaPlan = await createTreatmentPlan(db, ORG_A, ANA_ID, elenaPatientId, {
+  title: "Plan profilaxis",
+  originEncounterId: elenaEval.id,
+});
+const elenaItem = await addPlanItem(db, ORG_A, ANA_ID, elenaPatientId, {
+  serviceId: serviceIdA("LIMPIEZA"),
+  planId: elenaPlan.id,
+  sourceEncounterId: elenaEval.id,
+  detail: "Limpieza dental (profilaxis)",
+});
+await createBudget(db, ORG_A, ANA_ID, elenaPatientId, {
+  planId: elenaPlan.id,
+  itemIds: [elenaItem.id],
+  title: "Plan profilaxis",
+});
 
 // --- Volumen para paginación: 40 contactos+pacientes ---
 for (let i = 1; i <= 40; i++) {
@@ -587,7 +827,17 @@ await seedMessage({
 
 // --- Resumen ---
 async function summary(orgId: string, label: string): Promise<string> {
-  const tables = ["contact", "patient", "conversation", "message", "encounter", "task"] as const;
+  const tables = [
+    "contact",
+    "patient",
+    "conversation",
+    "message",
+    "encounter",
+    "task",
+    "treatment_budget",
+    "treatment_plan_item",
+    "patient_document",
+  ] as const;
   const counts: string[] = [];
   for (const t of tables) counts.push(`${t}=${await countWhere(t, orgId)}`);
   return `org ${label} (${orgId}): ${counts.join(" ")}`;

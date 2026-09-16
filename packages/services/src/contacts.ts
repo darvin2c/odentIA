@@ -1,10 +1,20 @@
 import type { Db } from "@odentia/db";
+import { normalizeTags } from "@odentia/clinical";
 import { contact, contactIdentity, conversation, crmTask, customFieldDef, pipelineStage } from "@odentia/db/schema/crm";
 import { patient } from "@odentia/db/schema/clinical";
 import { and, asc, desc, eq, ilike, lt, or, sql } from "drizzle-orm";
 import { decodeCursor, encodeCursor } from "./cursors.js";
 import { notFound, validation } from "./errors.js";
 import { ensureDefaultPipeline } from "./pipelines.js";
+
+/** Normaliza etiquetas con el helper canónico; convierte Error a ServiceError validation. */
+export function normalizeContactTags(tags: readonly string[]): string[] {
+  try {
+    return normalizeTags(tags);
+  } catch (e) {
+    throw validation(e instanceof Error ? e.message : "Etiquetas inválidas");
+  }
+}
 
 const PAGE_DEFAULT = 30;
 
@@ -197,7 +207,7 @@ export async function createContact(
       organizationId: orgId,
       displayName,
       notes: input.notes ?? null,
-      tags: input.tags ?? [],
+      tags: normalizeContactTags(input.tags ?? []),
       stageId,
       assignedUserId: input.assignedUserId ?? null,
     })
@@ -275,7 +285,7 @@ export async function updateContact(
     patch.displayName = displayName;
   }
   if (input.notes !== undefined) patch.notes = input.notes;
-  if (input.tags !== undefined) patch.tags = input.tags;
+  if (input.tags !== undefined) patch.tags = normalizeContactTags(input.tags);
   if (input.stageId !== undefined) patch.stageId = await resolveStageId(tx, orgId, input.stageId);
   if (input.assignedUserId !== undefined) patch.assignedUserId = input.assignedUserId;
   if (input.customFields !== undefined) patch.customFields = await sanitizeCustomFields(tx, orgId, input.customFields);
