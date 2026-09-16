@@ -7,7 +7,7 @@
     "node": ">=24"
   },
   "scripts": {
-    "dev": "set -a && . ./infra/dev/.env && set +a && turbo dev",
+    "dev": "node --env-file=./infra/dev/.env ./node_modules/turbo/bin/turbo dev",
     "build": "turbo build",
     "test": "turbo test",
     "typecheck": "turbo typecheck",
