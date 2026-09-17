@@ -8,7 +8,7 @@ import {
   AlertDialogTitle,
 } from "@odentia/ui"
 import { common } from "./common.js"
-import { SubmitButton } from "./submit-button.js"
+import { SubmitButton } from "./form/submit-button.js"
 
 /**
  * Variante del botón de confirmación (mismo vocabulario que Button):

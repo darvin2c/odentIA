@@ -194,3 +194,10 @@ export {
   QuestionnaireTitle,
 } from "./components/questionnaire.js";
 export { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "./components/tooltip.js";
+export {
+  ResizableHandle,
+  ResizablePanel,
+  ResizablePanelGroup,
+  useGroupRef,
+  usePanelRef,
+} from "./components/resizable.js";

@@ -4,7 +4,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import type * as React from "react"
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest"
 
-import { common } from "./common.js"
+import { common } from "../common.js"
 import { FormDrawer } from "./form-drawer.js"
 
 // Base UI Drawer y jsdom necesitan polyfills mínimos

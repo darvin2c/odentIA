@@ -1,6 +1,6 @@
 import { Button, Spinner } from "@odentia/ui"
 import type { ComponentProps, ReactNode } from "react"
-import { common } from "./common.js"
+import { common } from "../common.js"
 
 /**
  * Botón de mutación: deshabilita + muestra Spinner manteniendo el label.

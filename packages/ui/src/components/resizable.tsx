@@ -45,3 +45,4 @@ function ResizableHandle({
 }
 
 export { ResizableHandle, ResizablePanel, ResizablePanelGroup }
+export { useGroupRef, usePanelRef } from "react-resizable-panels"
