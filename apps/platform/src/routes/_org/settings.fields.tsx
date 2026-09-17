@@ -9,6 +9,7 @@ import {
   PageHeader,
   RowActions,
   useListSearch,
+  PageShell,
 } from "@odentia/ui-patterns"
 import { useForm } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
@@ -149,11 +150,15 @@ function FieldsPage() {
   })
 
   if (!canWrite) {
-    return <EmptyState title="Sin acceso" description="Solo owner/admin pueden definir campos." />
+    return (
+      <PageShell>
+        <EmptyState title="Sin acceso" description="Solo owner/admin pueden definir campos." />
+      </PageShell>
+    )
   }
 
   return (
-    <div className="flex flex-col gap-6">
+    <PageShell className="flex flex-col gap-6">
       <PageHeader
         title="Campos personalizados"
         subtitle="Datos extra de contactos (validados por tipo)"
@@ -280,6 +285,6 @@ function FieldsPage() {
         confirmLabel="Eliminar"
         onConfirm={() => deleting && deleteMutation.mutate(deleting.id)}
       />
-    </div>
+    </PageShell>
   )
 }

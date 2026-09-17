@@ -36,6 +36,7 @@ import {
   PageHeader,
   RowActions,
   useListSearch,
+  PageShell,
 } from "@odentia/ui-patterns"
 import { useForm } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
@@ -111,7 +112,7 @@ function ServicesPage() {
   const [view, setView] = useState<"tarifario" | "biblioteca">("tarifario")
 
   return (
-    <div className="flex flex-col gap-6">
+    <PageShell className="flex flex-col gap-6">
       <PageHeader
         title="Tratamientos y tarifas"
         subtitle={`${org.name} · prestaciones de la clínica y su tarifa`}
@@ -131,7 +132,7 @@ function ServicesPage() {
           <BibliotecaView canWrite={canWrite} />
         </TabsContent>
       </Tabs>
-    </div>
+    </PageShell>
   )
 }
 

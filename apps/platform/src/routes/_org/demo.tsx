@@ -1,5 +1,5 @@
 import { Badge, Field, Input } from "@odentia/ui"
-import { EmptyState, PageHeader, SubmitButton } from "@odentia/ui-patterns"
+import { EmptyState, PageHeader, PageShell, SubmitButton } from "@odentia/ui-patterns"
 import { createFileRoute, getRouteApi } from "@tanstack/react-router"
 import { useEffect, useRef, useState } from "react"
 import { apiFetch } from "../../lib/api"
@@ -55,7 +55,7 @@ function DemoPage() {
   }
 
   return (
-    <div className="flex flex-col gap-6">
+    <PageShell className="flex flex-col gap-6">
       <PageHeader
         title="Demo de tareas"
         subtitle="Cola durable (pgmq) + notificaciones en vivo (SSE)"
@@ -112,6 +112,6 @@ function DemoPage() {
           ))}
         </ul>
       )}
-    </div>
+    </PageShell>
   )
 }

@@ -10,6 +10,7 @@ import {
   RowActions,
   SubmitButton,
   useListSearch,
+  PageShell,
 } from "@odentia/ui-patterns"
 import { useForm } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
@@ -200,7 +201,7 @@ function TasksPage() {
   })
 
   return (
-    <div className="flex flex-col gap-6">
+    <PageShell className="flex flex-col gap-6">
       <PageHeader
         title="Tareas"
         subtitle="Seguimientos creados por operadores y el agente"
@@ -304,6 +305,6 @@ function TasksPage() {
           </form.Field>
         </div>
       </FormDrawer>
-    </div>
+    </PageShell>
   )
 }

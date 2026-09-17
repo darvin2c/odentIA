@@ -7,6 +7,7 @@ import {
   fieldErrorMessages,
   PageHeader,
   RowActions,
+  PageShell,
 } from "@odentia/ui-patterns"
 import { useForm } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
@@ -236,11 +237,15 @@ function PipelinesPage() {
   })
 
   if (!canWrite) {
-    return <EmptyState title="Sin acceso" description="Solo owner/admin pueden editar pipelines." />
+    return (
+      <PageShell>
+        <EmptyState title="Sin acceso" description="Solo owner/admin pueden editar pipelines." />
+      </PageShell>
+    )
   }
 
   return (
-    <div className="flex flex-col gap-6">
+    <PageShell className="flex flex-col gap-6">
       <PageHeader
         title="Pipelines"
         subtitle="Etapas del kanban de ventas"
@@ -323,6 +328,6 @@ function PipelinesPage() {
         confirmLabel="Eliminar"
         onConfirm={() => deleting && deleteMutation.mutate(deleting.id)}
       />
-    </div>
+    </PageShell>
   )
 }

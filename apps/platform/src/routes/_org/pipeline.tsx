@@ -1,6 +1,6 @@
 import { DndContext, type DragEndEvent, useDraggable, useDroppable } from "@dnd-kit/core"
 import { Badge } from "@odentia/ui"
-import { EmptyState, PageHeader } from "@odentia/ui-patterns"
+import { EmptyState, PageHeader, PageShell } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, Link } from "@tanstack/react-router"
 import { MessageCircle, Send } from "lucide-react"
@@ -79,11 +79,15 @@ function PipelinePage() {
   }
 
   if (!pipeline && !pipelinesQuery.isLoading) {
-    return <EmptyState title="Sin pipeline" description="No hay pipeline configurado." />
+    return (
+      <PageShell>
+        <EmptyState title="Sin pipeline" description="No hay pipeline configurado." />
+      </PageShell>
+    )
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-4">
+    <PageShell className="flex min-h-0 flex-1 flex-col gap-4">
       <PageHeader title="Pipeline" subtitle={pipeline ? `Tablero · ${pipeline.name}` : "Tablero"} />
       <DndContext onDragEnd={handleDragEnd}>
         <div
@@ -101,7 +105,7 @@ function PipelinePage() {
           ))}
         </div>
       </DndContext>
-    </div>
+    </PageShell>
   )
 }
 function StageColumn({

@@ -28,6 +28,7 @@ import {
   FormDrawer,
   fieldErrorMessages,
   PageHeader,
+  PageShell,
 } from "@odentia/ui-patterns"
 import { useForm, useStore } from "@tanstack/react-form"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
@@ -213,7 +214,7 @@ function ProfilePage() {
   )
 
   return (
-    <div className="flex max-w-2xl flex-col gap-6">
+    <PageShell className="flex max-w-2xl flex-col gap-6">
       <PageHeader title="Mi perfil" subtitle="Administra tu información de cuenta y seguridad" />
       <Card>
         <CardHeader>
@@ -339,7 +340,7 @@ function ProfilePage() {
         onError={setEmailError}
         onClose={closeDrawer}
       />
-    </div>
+    </PageShell>
   )
 }
 

@@ -1,5 +1,5 @@
 import { Button } from "@odentia/ui"
-import { LoadingState, PageHeader } from "@odentia/ui-patterns"
+import { LoadingState, PageHeader, PageShell } from "@odentia/ui-patterns"
 import { useQuery } from "@tanstack/react-query"
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { Building2 } from "lucide-react"
@@ -29,7 +29,7 @@ function OrgsPage() {
   }, [orgsQuery.isLoading, orgsQuery.error, orgs.length, navigate])
 
   return (
-    <>
+    <PageShell className="flex flex-col gap-2">
       <PageHeader
         title="Tus organizaciones"
         actions={
@@ -64,6 +64,6 @@ function OrgsPage() {
           </ul>
         )}
       </div>
-    </>
+    </PageShell>
   )
 }

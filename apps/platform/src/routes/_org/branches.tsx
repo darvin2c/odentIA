@@ -12,6 +12,7 @@ import {
   PageHeader,
   RowActions,
   useListSearch,
+  PageShell,
 } from "@odentia/ui-patterns"
 import { useForm } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
@@ -199,7 +200,7 @@ function BranchesPage() {
   })
 
   return (
-    <div className="flex flex-col gap-6">
+    <PageShell className="flex flex-col gap-6">
       <PageHeader
         title="Sucursales"
         subtitle={org.name}
@@ -337,7 +338,7 @@ function BranchesPage() {
         variant="destructive"
         pending={deactivateMutation.isPending}
       />
-    </div>
+    </PageShell>
   )
 }
 
