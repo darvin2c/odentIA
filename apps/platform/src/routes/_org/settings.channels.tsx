@@ -4,18 +4,21 @@ import {
   EmptyState,
   FilterBar,
   FormDrawer,
+  FormPanel,
   fieldErrorMessages,
+  MasterDetail,
   PageHeader,
-  RowActions,
-  useListSearch,
   PageShell,
+  RowActions,
+  useDetailMode,
+  useListSearch,
 } from "@odentia/ui-patterns"
-import { useForm } from "@tanstack/react-form"
+import { useForm, useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-table"
 import { MessageCircle, Plus, Send } from "lucide-react"
-import { useMemo, useState } from "react"
+import { type FormEvent, useMemo, useState } from "react"
 import { z } from "zod"
 import { ApiError, apiFetch } from "../../lib/api"
 import { type ConnectionItem, useCanWrite } from "../../lib/crm"
@@ -41,7 +44,8 @@ const whatsappSchema = z.object({
 function ChannelsPage() {
   const queryClient = useQueryClient()
   const canWrite = useCanWrite()
-  const [drawerOpen, setDrawerOpen] = useState(false)
+  const mode = useDetailMode()
+  const [formOpen, setFormOpen] = useState(false)
   const [provider, setProvider] = useState<"telegram_bot_api" | "whatsapp_cloud_api">(
     "telegram_bot_api",
   )
@@ -100,6 +104,22 @@ function ChannelsPage() {
       }),
   })
 
+  // Dos formularios (uno por proveedor): el contenedor está sucio si cualquiera
+  // tiene cambios sin guardar. Suscripción explícita porque el render de la
+  // página no se entera de los cambios de meta por sí solo. Ambas se llaman
+  // siempre: encadenarlas con `||` las volvería condicionales.
+  const tgDirty = useStore(tgForm.store, (state) => state.isDirty)
+  const waDirty = useStore(waForm.store, (state) => state.isDirty)
+  const isDirty = tgDirty || waDirty
+
+  /** Cierra y deja ambos formularios prístinos: sin el reset, el dirty sobrevive
+   *  al cierre y el próximo abrir pediría confirmar cambios ya guardados. */
+  function closeForm() {
+    setFormOpen(false)
+    tgForm.reset()
+    waForm.reset()
+  }
+
   async function createConnection(
     channel: string,
     providerId: string,
@@ -116,9 +136,7 @@ function ChannelsPage() {
         },
       )
       setCreated(res.data)
-      setDrawerOpen(false)
-      tgForm.reset()
-      waForm.reset()
+      closeForm()
       void invalidate()
     } catch (e) {
       setError(e instanceof ApiError ? (e.shape.message ?? "No se pudo crear") : "No se pudo crear")
@@ -263,176 +281,196 @@ function ChannelsPage() {
 
   const hasCriteria = search.trim() !== "" || Boolean(canalFilter) || Boolean(estadoFilter)
 
+  const formFields = (
+    <div className="flex flex-col gap-4">
+      <Field>
+        <FieldLabel>Canal</FieldLabel>
+        <select
+          aria-label="Proveedor"
+          className="rounded-md border bg-background px-2 py-1.5 text-sm"
+          value={provider}
+          onChange={(e) => setProvider(e.target.value as typeof provider)}
+        >
+          <option value="telegram_bot_api">Telegram (BotFather)</option>
+          <option value="whatsapp_cloud_api">WhatsApp (Cloud API)</option>
+        </select>
+      </Field>
+      {provider === "telegram_bot_api" ? (
+        <>
+          <tgForm.Field name="displayName">
+            {(field) => (
+              <Field>
+                <FieldLabel>Nombre</FieldLabel>
+                <Input
+                  value={field.state.value}
+                  onChange={(e) => field.handleChange(e.target.value)}
+                />
+                <FieldError>{fieldErrorMessages(field.state.meta.errors)}</FieldError>
+              </Field>
+            )}
+          </tgForm.Field>
+          <tgForm.Field name="botToken">
+            {(field) => (
+              <Field>
+                <FieldLabel>Bot token</FieldLabel>
+                <Input
+                  type="password"
+                  value={field.state.value}
+                  onChange={(e) => field.handleChange(e.target.value)}
+                />
+                <FieldError>{fieldErrorMessages(field.state.meta.errors)}</FieldError>
+              </Field>
+            )}
+          </tgForm.Field>
+        </>
+      ) : (
+        <>
+          <waForm.Field name="displayName">
+            {(field) => (
+              <Field>
+                <FieldLabel>Nombre</FieldLabel>
+                <Input
+                  value={field.state.value}
+                  onChange={(e) => field.handleChange(e.target.value)}
+                />
+                <FieldError>{fieldErrorMessages(field.state.meta.errors)}</FieldError>
+              </Field>
+            )}
+          </waForm.Field>
+          {(["phoneNumberId", "wabaId", "accessToken", "appSecret"] as const).map((name) => (
+            <waForm.Field key={name} name={name}>
+              {(field) => (
+                <Field>
+                  <FieldLabel>{name}</FieldLabel>
+                  <Input
+                    type="password"
+                    value={field.state.value}
+                    onChange={(e) => field.handleChange(e.target.value)}
+                  />
+                  <FieldError>{fieldErrorMessages(field.state.meta.errors)}</FieldError>
+                </Field>
+              )}
+            </waForm.Field>
+          ))}
+          <waForm.Field name="templates">
+            {(field) => (
+              <Field>
+                <FieldLabel>Plantillas (una por línea: nombre:idioma)</FieldLabel>
+                <Input
+                  value={field.state.value}
+                  onChange={(e) => field.handleChange(e.target.value)}
+                  placeholder="cita_recordatorio:es_PE"
+                />
+                <FieldError>{fieldErrorMessages(field.state.meta.errors)}</FieldError>
+              </Field>
+            )}
+          </waForm.Field>
+        </>
+      )}
+    </div>
+  )
+
+  // Idénticos para los dos contenedores: solo cambia dónde se monta el shell.
+  const formProps = {
+    onClose: closeForm,
+    title: "Nueva conexión",
+    isDirty,
+    submitLabel: "Crear",
+    cancelLabel: "Cancelar",
+    onSubmit: (event: FormEvent) => {
+      event.preventDefault()
+      if (provider === "telegram_bot_api") void tgForm.handleSubmit()
+      else void waForm.handleSubmit()
+    },
+  }
+
   return (
     <PageShell className="flex flex-col gap-2">
-      <PageHeader
-        title="Canales"
-        subtitle="Conexiones de WhatsApp y Telegram"
-        actions={
-          <Button
-            type="button"
-            className="min-h-11"
-            onClick={() => {
-              setCreated(null)
-              setDrawerOpen(true)
-            }}
-          >
-            <Plus aria-hidden />
-            Nueva conexión
-          </Button>
+      <MasterDetail
+        panel={
+          mode === "panel" && formOpen ? <FormPanel {...formProps}>{formFields}</FormPanel> : null
         }
-      />
-      {error && <p className="text-sm text-red-600">{error}</p>}
-      {created && (
-        <div className="flex flex-col gap-1 rounded-lg border border-green-300 bg-green-50 p-4 text-sm">
-          <p className="font-semibold">Conexión creada. Pega estos valores en Meta/Telegram:</p>
-          <p className="break-all">Webhook: {created.webhookUrl}</p>
-          <p className="break-all">Verify token: {created.webhookSecret}</p>
-        </div>
-      )}
-      <FilterBar
-        filters={[
-          {
-            key: "canal",
-            label: "Canal",
-            type: "select",
-            options: [
-              { value: "whatsapp", label: "WhatsApp" },
-              { value: "telegram", label: "Telegram" },
-            ],
-          },
-          {
-            key: "estado",
-            label: "Estado",
-            type: "select",
-            options: [
-              { value: "active", label: "Activa" },
-              { value: "inactive", label: "Inactiva" },
-            ],
-          },
-        ]}
-        sortOptions={[
-          { value: "nombre", label: "Nombre" },
-          { value: "estado", label: "Estado" },
-        ]}
-        searchPlaceholder="Buscar conexión"
-      />
-      {items.length === 0 && !listQuery.isLoading ? (
-        <EmptyState
-          title="Sin conexiones"
-          description="Conecta un bot de Telegram o un número de WhatsApp."
-        />
-      ) : filtered.length === 0 ? (
-        <EmptyState
-          title="Sin resultados"
-          description={
-            hasCriteria
-              ? "Ninguna conexión coincide con los criterios de búsqueda."
-              : "Todavía no hay conexiones para mostrar."
+      >
+        <PageHeader
+          title="Canales"
+          subtitle="Conexiones de WhatsApp y Telegram"
+          actions={
+            <Button
+              type="button"
+              className="min-h-11"
+              onClick={() => {
+                setCreated(null)
+                setFormOpen(true)
+              }}
+            >
+              <Plus aria-hidden />
+              Nueva conexión
+            </Button>
           }
         />
-      ) : (
-        <DataTable table={table}  view="card"/>
-      )}
-      <FormDrawer
-        open={drawerOpen}
-        onClose={() => setDrawerOpen(false)}
-        title="Nueva conexión"
-        submitLabel="Crear"
-        cancelLabel="Cancelar"
-        onSubmit={(event) => {
-          event.preventDefault()
-          if (provider === "telegram_bot_api") void tgForm.handleSubmit()
-          else void waForm.handleSubmit()
-        }}
-      >
-        <div className="flex flex-col gap-4">
-          <Field>
-            <FieldLabel>Canal</FieldLabel>
-            <select
-              aria-label="Proveedor"
-              className="rounded-md border bg-background px-2 py-1.5 text-sm"
-              value={provider}
-              onChange={(e) => setProvider(e.target.value as typeof provider)}
-            >
-              <option value="telegram_bot_api">Telegram (BotFather)</option>
-              <option value="whatsapp_cloud_api">WhatsApp (Cloud API)</option>
-            </select>
-          </Field>
-          {provider === "telegram_bot_api" ? (
-            <>
-              <tgForm.Field name="displayName">
-                {(field) => (
-                  <Field>
-                    <FieldLabel>Nombre</FieldLabel>
-                    <Input
-                      value={field.state.value}
-                      onChange={(e) => field.handleChange(e.target.value)}
-                    />
-                    <FieldError>{fieldErrorMessages(field.state.meta.errors)}</FieldError>
-                  </Field>
-                )}
-              </tgForm.Field>
-              <tgForm.Field name="botToken">
-                {(field) => (
-                  <Field>
-                    <FieldLabel>Bot token</FieldLabel>
-                    <Input
-                      type="password"
-                      value={field.state.value}
-                      onChange={(e) => field.handleChange(e.target.value)}
-                    />
-                    <FieldError>{fieldErrorMessages(field.state.meta.errors)}</FieldError>
-                  </Field>
-                )}
-              </tgForm.Field>
-            </>
-          ) : (
-            <>
-              <waForm.Field name="displayName">
-                {(field) => (
-                  <Field>
-                    <FieldLabel>Nombre</FieldLabel>
-                    <Input
-                      value={field.state.value}
-                      onChange={(e) => field.handleChange(e.target.value)}
-                    />
-                    <FieldError>{fieldErrorMessages(field.state.meta.errors)}</FieldError>
-                  </Field>
-                )}
-              </waForm.Field>
-              {(["phoneNumberId", "wabaId", "accessToken", "appSecret"] as const).map((name) => (
-                <waForm.Field key={name} name={name}>
-                  {(field) => (
-                    <Field>
-                      <FieldLabel>{name}</FieldLabel>
-                      <Input
-                        type="password"
-                        value={field.state.value}
-                        onChange={(e) => field.handleChange(e.target.value)}
-                      />
-                      <FieldError>{fieldErrorMessages(field.state.meta.errors)}</FieldError>
-                    </Field>
-                  )}
-                </waForm.Field>
-              ))}
-              <waForm.Field name="templates">
-                {(field) => (
-                  <Field>
-                    <FieldLabel>Plantillas (una por línea: nombre:idioma)</FieldLabel>
-                    <Input
-                      value={field.state.value}
-                      onChange={(e) => field.handleChange(e.target.value)}
-                      placeholder="cita_recordatorio:es_PE"
-                    />
-                    <FieldError>{fieldErrorMessages(field.state.meta.errors)}</FieldError>
-                  </Field>
-                )}
-              </waForm.Field>
-            </>
-          )}
-        </div>
-      </FormDrawer>
+        {error && <p className="text-sm text-red-600">{error}</p>}
+        {created && (
+          <div className="flex flex-col gap-1 rounded-lg border border-green-300 bg-green-50 p-4 text-sm">
+            <p className="font-semibold">Conexión creada. Pega estos valores en Meta/Telegram:</p>
+            <p className="break-all">Webhook: {created.webhookUrl}</p>
+            <p className="break-all">Verify token: {created.webhookSecret}</p>
+          </div>
+        )}
+        <FilterBar
+          filters={[
+            {
+              key: "canal",
+              label: "Canal",
+              type: "select",
+              options: [
+                { value: "whatsapp", label: "WhatsApp" },
+                { value: "telegram", label: "Telegram" },
+              ],
+            },
+            {
+              key: "estado",
+              label: "Estado",
+              type: "select",
+              options: [
+                { value: "active", label: "Activa" },
+                { value: "inactive", label: "Inactiva" },
+              ],
+            },
+          ]}
+          sortOptions={[
+            { value: "nombre", label: "Nombre" },
+            { value: "estado", label: "Estado" },
+          ]}
+          searchPlaceholder="Buscar conexión"
+        />
+        {items.length === 0 && !listQuery.isLoading ? (
+          <EmptyState
+            title="Sin conexiones"
+            description="Conecta un bot de Telegram o un número de WhatsApp."
+          />
+        ) : filtered.length === 0 ? (
+          <EmptyState
+            title="Sin resultados"
+            description={
+              hasCriteria
+                ? "Ninguna conexión coincide con los criterios de búsqueda."
+                : "Todavía no hay conexiones para mostrar."
+            }
+          />
+        ) : (
+          /* En modo panel el maestro en cards queda apretado: tabla mientras el
+             formulario vive al costado. */
+          <DataTable table={table} view={mode === "panel" ? "table" : "card"} />
+        )}
+      </MasterDetail>
+
+      {/* Un solo contenedor montado a la vez: montar panel y drawer juntos
+          duplicaría los id/htmlFor de los campos. */}
+      {mode === "drawer" ? (
+        <FormDrawer open={formOpen} {...formProps}>
+          {formFields}
+        </FormDrawer>
+      ) : null}
     </PageShell>
   )
 }

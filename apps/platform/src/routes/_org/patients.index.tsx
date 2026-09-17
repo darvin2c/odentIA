@@ -4,9 +4,11 @@ import {
   DataTable,
   EmptyState,
   FilterBar,
+  MasterDetail,
   PageHeader,
   PageShell,
   RowActions,
+  useDetailMode,
   useListSearch,
 } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
@@ -49,6 +51,7 @@ function PatientsPage() {
   const canWrite = useCanWrite()
   const { contactId } = Route.useSearch()
   const [creating, setCreating] = useState(false)
+  const mode = useDetailMode()
   const [archiving, setArchiving] = useState<PatientListRow | null>(null)
   const [archiveError, setArchiveError] = useState<string | null>(null)
   const queryClient = useQueryClient()
@@ -227,99 +230,120 @@ function PatientsPage() {
     listSearch.setParam("cursor", previous || undefined)
   }
 
+  /** Cierra el alta y limpia el contacto del query string si venía de una ficha. */
+  function closeCreatePatient() {
+    setCreating(false)
+    if (contactId)
+      void navigate({
+        to: "/patients",
+        replace: true,
+        search: (previous) => ({ ...previous, contactId: undefined }),
+      })
+  }
+
   return (
     <PageShell>
-      <PageHeader
-        title="Pacientes"
-        subtitle="Fichas clínicas de la organización"
-        actions={
-          canWrite && (
-            <Button type="button" onClick={() => setCreating(true)}>
-              <Plus aria-hidden />
-              Nuevo paciente
-            </Button>
-          )
+      <MasterDetail
+        panelSize="xl"
+        panel={
+          mode === "panel" && canWrite && (creating || contactId) ? (
+            <CreatePatientDrawer
+              key={contactId ?? "new"}
+              asPanel
+              open
+              contactId={contactId}
+              onClose={closeCreatePatient}
+            />
+          ) : null
         }
-      />
-      <div className="py-4">
-        <FilterBar
-          filters={PATIENT_FILTERS}
-          sortOptions={PATIENT_SORT_OPTIONS}
-          searchPlaceholder="Buscar por nombre, documento, teléfono o correo"
-        />
-      </div>
-      {patientsQuery.isPending ? (
-        <p className="text-sm text-muted-foreground">Cargando pacientes…</p>
-      ) : patientsQuery.isError ? (
-        <div className="flex flex-col gap-2">
-          <p role="alert" className="text-sm text-destructive">
-            {patientsQuery.error.message}
-          </p>
-          <div>
-            <Button type="button" variant="outline" onClick={() => void patientsQuery.refetch()}>
-              Reintentar
-            </Button>
-          </div>
-        </div>
-      ) : rows.length === 0 ? (
-        hasActiveFilter ? (
-          <EmptyState
-            title="Sin pacientes para los filtros seleccionados"
-            description="Ajusta la búsqueda o limpia los filtros para ver todo el padrón."
-          />
-        ) : (
-          <EmptyState
-            title="Sin pacientes"
-            description="Registra el primero con el botón Nuevo paciente."
-          />
-        )
-      ) : (
-        <>
-          <DataTable table={table} />
-          <div className="flex flex-wrap items-center justify-between gap-2 py-2">
-            <p className="text-xs text-muted-foreground">
-              Página {pageNumber} · {rows.length} paciente(s)
-              {nextCursor ? " · hay más resultados" : " · fin del listado"}
-            </p>
-            <div className="flex gap-2">
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                disabled={previousCursors.length === 0 || patientsQuery.isFetching}
-                onClick={goPrevious}
-              >
-                Anterior
+      >
+        <PageHeader
+          title="Pacientes"
+          subtitle="Fichas clínicas de la organización"
+          actions={
+            canWrite && (
+              <Button type="button" onClick={() => setCreating(true)}>
+                <Plus aria-hidden />
+                Nuevo paciente
               </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                disabled={!nextCursor || patientsQuery.isFetching}
-                onClick={goNext}
-              >
-                {patientsQuery.isFetching ? "Cargando…" : "Siguiente"}
+            )
+          }
+        />
+        <div className="py-4">
+          <FilterBar
+            filters={PATIENT_FILTERS}
+            sortOptions={PATIENT_SORT_OPTIONS}
+            searchPlaceholder="Buscar por nombre, documento, teléfono o correo"
+          />
+        </div>
+        {patientsQuery.isPending ? (
+          <p className="text-sm text-muted-foreground">Cargando pacientes…</p>
+        ) : patientsQuery.isError ? (
+          <div className="flex flex-col gap-2">
+            <p role="alert" className="text-sm text-destructive">
+              {patientsQuery.error.message}
+            </p>
+            <div>
+              <Button type="button" variant="outline" onClick={() => void patientsQuery.refetch()}>
+                Reintentar
               </Button>
             </div>
           </div>
-        </>
-      )}
-      {canWrite && (creating || contactId) && (
+        ) : rows.length === 0 ? (
+          hasActiveFilter ? (
+            <EmptyState
+              title="Sin pacientes para los filtros seleccionados"
+              description="Ajusta la búsqueda o limpia los filtros para ver todo el padrón."
+            />
+          ) : (
+            <EmptyState
+              title="Sin pacientes"
+              description="Registra el primero con el botón Nuevo paciente."
+            />
+          )
+        ) : (
+          <>
+            <DataTable table={table} />
+            <div className="flex flex-wrap items-center justify-between gap-2 py-2">
+              <p className="text-xs text-muted-foreground">
+                Página {pageNumber} · {rows.length} paciente(s)
+                {nextCursor ? " · hay más resultados" : " · fin del listado"}
+              </p>
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={previousCursors.length === 0 || patientsQuery.isFetching}
+                  onClick={goPrevious}
+                >
+                  Anterior
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={!nextCursor || patientsQuery.isFetching}
+                  onClick={goNext}
+                >
+                  {patientsQuery.isFetching ? "Cargando…" : "Siguiente"}
+                </Button>
+              </div>
+            </div>
+          </>
+        )}
+      </MasterDetail>
+
+      {/* Un solo contenedor montado a la vez: montar panel y drawer juntos
+          duplicaría los id/htmlFor de los campos. */}
+      {mode === "drawer" && canWrite && (creating || contactId) ? (
         <CreatePatientDrawer
           key={contactId ?? "new"}
           open
           contactId={contactId}
-          onClose={() => {
-            setCreating(false)
-            if (contactId)
-              void navigate({
-                to: "/patients",
-                replace: true,
-                search: (previous) => ({ ...previous, contactId: undefined }),
-              })
-          }}
+          onClose={closeCreatePatient}
         />
-      )}
+      ) : null}
       <ConfirmDialog
         open={archiving !== null}
         onClose={() => {

@@ -1,13 +1,13 @@
-import { Alert, AlertDescription, AlertTitle, Button, toast } from "@odentia/ui"
-import { FormDrawer } from "@odentia/ui-patterns"
-import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { useNavigate } from "@tanstack/react-router"
-import { useRef, useState } from "react"
 import type {
   RegistrationAnswers,
   RegistrationConfig,
   RegistrationDemographics,
 } from "@odentia/clinical"
+import { Alert, AlertDescription, AlertTitle, Button, toast } from "@odentia/ui"
+import { FormDrawer, FormPanel } from "@odentia/ui-patterns"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { useNavigate } from "@tanstack/react-router"
+import { useRef, useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
 import type { ContactFull } from "../../lib/crm"
 import { hcLabel, type Patient } from "../../lib/patients"
@@ -55,14 +55,24 @@ async function fetchDuplicates(answers: RegistrationAnswers): Promise<DuplicateS
   return result.data
 }
 
+const FORM_DESCRIPTION =
+  "Completa los datos de registro. Al guardar continuarás con los antecedentes de salud."
+
 export function CreatePatientDrawer({
   open,
   onClose,
   contactId,
+  /**
+   * En modo panel el formulario vive al costado de la tabla (no modal): la
+   * página lo monta dentro de `MasterDetail`. Por defecto sigue siendo drawer,
+   * que es lo correcto en la ficha de contacto (sin tabla que mantener visible).
+   */
+  asPanel = false,
 }: {
   open: boolean
   onClose: () => void
   contactId?: string
+  asPanel?: boolean
 }) {
   const queryClient = useQueryClient()
   const navigate = useNavigate()
@@ -156,23 +166,39 @@ export function CreatePatientDrawer({
     setDuplicates([])
   }
 
-  const today =
-    configQuery.data?.meta.today ?? new Date().toISOString().slice(0, 10)
+  const today = configQuery.data?.meta.today ?? new Date().toISOString().slice(0, 10)
   const queryError = contactQuery.isError
     ? contactQuery.error.message
     : configQuery.isError
-      ? (configQuery.error instanceof ApiError
-          ? (configQuery.error.shape.message ?? "No se pudo cargar la configuración del registro")
-          : "No se pudo cargar la configuración del registro")
+      ? configQuery.error instanceof ApiError
+        ? (configQuery.error.shape.message ?? "No se pudo cargar la configuración del registro")
+        : "No se pudo cargar la configuración del registro"
       : null
 
   if (!ready) {
+    const loadingBody = <p className="text-sm text-muted-foreground">Cargando formulario…</p>
+    if (asPanel) {
+      return (
+        <FormPanel
+          onClose={onClose}
+          title="Nuevo paciente"
+          description={FORM_DESCRIPTION}
+          isLoading
+          submitDisabled
+          error={queryError}
+          submitLabel="Registrar paciente"
+          onSubmit={(event) => event.preventDefault()}
+        >
+          {loadingBody}
+        </FormPanel>
+      )
+    }
     return (
       <FormDrawer
         open={open}
         onClose={onClose}
         title="Nuevo paciente"
-        description="Completa los datos de registro. Al guardar continuarás con los antecedentes de salud."
+        description={FORM_DESCRIPTION}
         isLoading
         submitDisabled
         error={queryError}
@@ -180,7 +206,7 @@ export function CreatePatientDrawer({
         onSubmit={(event) => event.preventDefault()}
         className="data-[swipe-axis=x]:sm:[--drawer-content-width:min(42rem,calc(100vw-2rem))]"
       >
-        <p className="text-sm text-muted-foreground">Cargando formulario…</p>
+        {loadingBody}
       </FormDrawer>
     )
   }
@@ -198,83 +224,99 @@ export function CreatePatientDrawer({
       }
       onSubmit={handleSubmit}
     >
-      {(view) => (
-        <FormDrawer
-          open={open}
-          onClose={onClose}
-          title="Nuevo paciente"
-          description="Completa los datos de registro. Al guardar continuarás con los antecedentes de salud."
-          isDirty={view.isDirty}
-          isSubmitting={view.isSubmitting}
-          submitDisabled={view.submitDisabled}
-          error={view.error ?? queryError}
-          submitLabel={view.submitLabel}
-          onSubmit={view.onSubmit}
-          className="data-[swipe-axis=x]:sm:[--drawer-content-width:min(42rem,calc(100vw-2rem))]"
-          headerContent={view.progress}
-        >
-          {duplicates.length > 0 ? (
-            <Alert className="mb-4">
-              <AlertTitle>Posibles duplicados</AlertTitle>
-              <AlertDescription>
-                <span className="block">
-                  Estos pacientes ya existen y coinciden con los datos ingresados. Abrir la ficha
-                  evita crear duplicados; las coincidencias débiles (teléfono compartido) no
-                  impiden registrar a un familiar.
-                </span>
-                <ul className="mt-2 flex flex-col gap-1">
-                  {duplicates.map((duplicate) => (
-                    <li key={duplicate.id} className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
-                      <span className="font-medium">
-                        {duplicate.displayName} · {hcLabel(duplicate.patientNumber)}
-                      </span>
-                      <span className="text-xs text-muted-foreground">
-                        {DUPLICATE_REASON_LABELS[duplicate.reason]}
-                        {duplicate.isActive ? "" : " · archivada"}
-                      </span>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() =>
-                          void navigate({
-                            to: "/patients/$patientId",
-                            params: { patientId: duplicate.id },
-                          })
-                        }
+      {(view) => {
+        const shellProps = {
+          onClose,
+          title: "Nuevo paciente",
+          description: FORM_DESCRIPTION,
+          isDirty: view.isDirty,
+          isSubmitting: view.isSubmitting,
+          submitDisabled: view.submitDisabled,
+          error: view.error ?? queryError,
+          submitLabel: view.submitLabel,
+          onSubmit: view.onSubmit,
+          headerContent: view.progress,
+        }
+        const body = (
+          <>
+            {duplicates.length > 0 ? (
+              <Alert className="mb-4">
+                <AlertTitle>Posibles duplicados</AlertTitle>
+                <AlertDescription>
+                  <span className="block">
+                    Estos pacientes ya existen y coinciden con los datos ingresados. Abrir la ficha
+                    evita crear duplicados; las coincidencias débiles (teléfono compartido) no
+                    impiden registrar a un familiar.
+                  </span>
+                  <ul className="mt-2 flex flex-col gap-1">
+                    {duplicates.map((duplicate) => (
+                      <li
+                        key={duplicate.id}
+                        className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm"
                       >
-                        Abrir ficha
-                      </Button>
-                    </li>
-                  ))}
-                </ul>
-                <span className="mt-3 flex flex-wrap gap-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handleConfirmAnyway(view)}
-                  >
-                    Registrar de todos modos
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={handleCancelDuplicates}
-                  >
-                    Revisar datos
-                  </Button>
-                </span>
-              </AlertDescription>
-            </Alert>
-          ) : null}
-          <fieldset disabled={view.isSubmitting} className="flex min-w-0 flex-col gap-4">
-            {view.body}
-            {view.previous ? <div>{view.previous}</div> : null}
-          </fieldset>
-        </FormDrawer>
-      )}
+                        <span className="font-medium">
+                          {duplicate.displayName} · {hcLabel(duplicate.patientNumber)}
+                        </span>
+                        <span className="text-xs text-muted-foreground">
+                          {DUPLICATE_REASON_LABELS[duplicate.reason]}
+                          {duplicate.isActive ? "" : " · archivada"}
+                        </span>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() =>
+                            void navigate({
+                              to: "/patients/$patientId",
+                              params: { patientId: duplicate.id },
+                            })
+                          }
+                        >
+                          Abrir ficha
+                        </Button>
+                      </li>
+                    ))}
+                  </ul>
+                  <span className="mt-3 flex flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleConfirmAnyway(view)}
+                    >
+                      Registrar de todos modos
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={handleCancelDuplicates}
+                    >
+                      Revisar datos
+                    </Button>
+                  </span>
+                </AlertDescription>
+              </Alert>
+            ) : null}
+            <fieldset disabled={view.isSubmitting} className="flex min-w-0 flex-col gap-4">
+              {view.body}
+              {view.previous ? <div>{view.previous}</div> : null}
+            </fieldset>
+          </>
+        )
+        if (asPanel) {
+          return <FormPanel {...shellProps}>{body}</FormPanel>
+        }
+        return (
+          <FormDrawer
+            open={open}
+            {...shellProps}
+            className="data-[swipe-axis=x]:sm:[--drawer-content-width:min(42rem,calc(100vw-2rem))]"
+          >
+            {body}
+          </FormDrawer>
+        )
+      }}
     </PatientRegistrationForm>
   )
 }

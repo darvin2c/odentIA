@@ -5,18 +5,21 @@ import {
   EmptyState,
   FilterBar,
   FormDrawer,
+  FormPanel,
   fieldErrorMessages,
+  MasterDetail,
   PageHeader,
-  RowActions,
-  useListSearch,
   PageShell,
+  RowActions,
+  useDetailMode,
+  useListSearch,
 } from "@odentia/ui-patterns"
-import { useForm } from "@tanstack/react-form"
+import { useForm, useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-table"
 import { Plus } from "lucide-react"
-import { useMemo, useState } from "react"
+import { type FormEvent, useMemo, useState } from "react"
 import { z } from "zod"
 import { apiFetch } from "../../lib/api"
 import { type FieldDef, useCanWrite } from "../../lib/crm"
@@ -37,7 +40,8 @@ type FieldFormValues = z.infer<typeof fieldSchema>
 function FieldsPage() {
   const queryClient = useQueryClient()
   const canWrite = useCanWrite()
-  const [drawerOpen, setDrawerOpen] = useState(false)
+  const mode = useDetailMode()
+  const [formOpen, setFormOpen] = useState(false)
   const [deleting, setDeleting] = useState<FieldDef | null>(null)
 
   const listQuery = useQuery({
@@ -66,8 +70,7 @@ function FieldsPage() {
       })
     },
     onSuccess: () => {
-      setDrawerOpen(false)
-      form.reset()
+      closeFieldForm()
       void invalidate()
     },
   })
@@ -85,6 +88,17 @@ function FieldsPage() {
     validators: { onSubmit: fieldSchema },
     onSubmit: ({ value }) => saveMutation.mutate(value),
   })
+
+  // Suscripción explícita: el render de la página no se entera de los cambios de
+  // meta del formulario por sí solo (los campos se re-renderizan por su cuenta).
+  const isDirty = useStore(form.store, (state) => state.isDirty)
+
+  /** Cierra y deja el formulario prístino: sin el reset, el dirty sobrevive al
+   *  cierre y el próximo abrir pediría confirmar cambios ya guardados. */
+  function closeFieldForm() {
+    setFormOpen(false)
+    form.reset()
+  }
 
   const listSearch = useListSearch()
   const search = listSearch.get("q") ?? ""
@@ -157,126 +171,138 @@ function FieldsPage() {
     )
   }
 
+  const formFields = (
+    <div className="flex flex-col gap-4">
+      <form.Field name="key">
+        {(field) => (
+          <Field>
+            <FieldLabel>Clave (a-z, 0-9, _)</FieldLabel>
+            <Input value={field.state.value} onChange={(e) => field.handleChange(e.target.value)} />
+            <FieldError>{fieldErrorMessages(field.state.meta.errors)}</FieldError>
+          </Field>
+        )}
+      </form.Field>
+      <form.Field name="label">
+        {(field) => (
+          <Field>
+            <FieldLabel>Label</FieldLabel>
+            <Input value={field.state.value} onChange={(e) => field.handleChange(e.target.value)} />
+            <FieldError>{fieldErrorMessages(field.state.meta.errors)}</FieldError>
+          </Field>
+        )}
+      </form.Field>
+      <form.Field name="type">
+        {(field) => (
+          <Field>
+            <FieldLabel>Tipo</FieldLabel>
+            <select
+              className="rounded-md border bg-background px-2 py-1.5 text-sm"
+              value={field.state.value}
+              onChange={(e) => field.handleChange(e.target.value as FieldFormValues["type"])}
+            >
+              <option value="text">Texto</option>
+              <option value="number">Número</option>
+              <option value="date">Fecha</option>
+              <option value="select">Opciones</option>
+            </select>
+            <FieldError>{fieldErrorMessages(field.state.meta.errors)}</FieldError>
+          </Field>
+        )}
+      </form.Field>
+      <form.Field name="options">
+        {(field) => (
+          <Field>
+            <FieldLabel>Opciones separadas por coma (solo select)</FieldLabel>
+            <Input
+              value={field.state.value}
+              onChange={(e) => field.handleChange(e.target.value)}
+              placeholder="norte, sur"
+            />
+            <FieldError>{fieldErrorMessages(field.state.meta.errors)}</FieldError>
+          </Field>
+        )}
+      </form.Field>
+    </div>
+  )
+
+  // Idénticos para los dos contenedores: solo cambia dónde se monta el shell.
+  const formProps = {
+    onClose: closeFieldForm,
+    title: "Nuevo campo",
+    isDirty,
+    isSubmitting: saveMutation.isPending,
+    submitLabel: "Crear",
+    cancelLabel: "Cancelar",
+    onSubmit: (event: FormEvent) => {
+      event.preventDefault()
+      void form.handleSubmit()
+    },
+  }
+
   return (
     <PageShell className="flex flex-col gap-6">
-      <PageHeader
-        title="Campos personalizados"
-        subtitle="Datos extra de contactos (validados por tipo)"
-        actions={
-          <Button type="button" className="min-h-11" onClick={() => setDrawerOpen(true)}>
-            <Plus aria-hidden />
-            Nuevo campo
-          </Button>
+      <MasterDetail
+        panel={
+          mode === "panel" && formOpen ? <FormPanel {...formProps}>{formFields}</FormPanel> : null
         }
-      />
-      <FilterBar
-        filters={[
-          {
-            key: "tipo",
-            label: "Tipo",
-            type: "select",
-            options: [
-              { value: "text", label: "Texto" },
-              { value: "number", label: "Número" },
-              { value: "date", label: "Fecha" },
-              { value: "select", label: "Opciones" },
-            ],
-          },
-        ]}
-        sortOptions={[
-          { value: "clave", label: "Clave" },
-          { value: "label", label: "Label" },
-          { value: "tipo", label: "Tipo" },
-        ]}
-        searchPlaceholder="Buscar por clave o label"
-      />
-      {rows.length === 0 && !listQuery.isLoading ? (
-        <EmptyState
-          title="Sin campos"
-          description="Define el primero, p.ej. alergias o sede preferida."
-        />
-      ) : filtered.length === 0 ? (
-        <EmptyState
-          title="Sin resultados"
-          description={
-            hasCriteria
-              ? "Ningún campo coincide con los criterios de búsqueda."
-              : "Todavía no hay campos para mostrar."
+      >
+        <PageHeader
+          title="Campos personalizados"
+          subtitle="Datos extra de contactos (validados por tipo)"
+          actions={
+            <Button type="button" className="min-h-11" onClick={() => setFormOpen(true)}>
+              <Plus aria-hidden />
+              Nuevo campo
+            </Button>
           }
         />
-      ) : (
-        <DataTable table={table} />
-      )}
-      <FormDrawer
-        open={drawerOpen}
-        onClose={() => setDrawerOpen(false)}
-        title="Nuevo campo"
-        submitLabel="Crear"
-        cancelLabel="Cancelar"
-        isSubmitting={saveMutation.isPending}
-        onSubmit={(event) => {
-          event.preventDefault()
-          void form.handleSubmit()
-        }}
-      >
-        <div className="flex flex-col gap-4">
-          <form.Field name="key">
-            {(field) => (
-              <Field>
-                <FieldLabel>Clave (a-z, 0-9, _)</FieldLabel>
-                <Input
-                  value={field.state.value}
-                  onChange={(e) => field.handleChange(e.target.value)}
-                />
-                <FieldError>{fieldErrorMessages(field.state.meta.errors)}</FieldError>
-              </Field>
-            )}
-          </form.Field>
-          <form.Field name="label">
-            {(field) => (
-              <Field>
-                <FieldLabel>Label</FieldLabel>
-                <Input
-                  value={field.state.value}
-                  onChange={(e) => field.handleChange(e.target.value)}
-                />
-                <FieldError>{fieldErrorMessages(field.state.meta.errors)}</FieldError>
-              </Field>
-            )}
-          </form.Field>
-          <form.Field name="type">
-            {(field) => (
-              <Field>
-                <FieldLabel>Tipo</FieldLabel>
-                <select
-                  className="rounded-md border bg-background px-2 py-1.5 text-sm"
-                  value={field.state.value}
-                  onChange={(e) => field.handleChange(e.target.value as FieldFormValues["type"])}
-                >
-                  <option value="text">Texto</option>
-                  <option value="number">Número</option>
-                  <option value="date">Fecha</option>
-                  <option value="select">Opciones</option>
-                </select>
-                <FieldError>{fieldErrorMessages(field.state.meta.errors)}</FieldError>
-              </Field>
-            )}
-          </form.Field>
-          <form.Field name="options">
-            {(field) => (
-              <Field>
-                <FieldLabel>Opciones separadas por coma (solo select)</FieldLabel>
-                <Input
-                  value={field.state.value}
-                  onChange={(e) => field.handleChange(e.target.value)}
-                  placeholder="norte, sur"
-                />
-                <FieldError>{fieldErrorMessages(field.state.meta.errors)}</FieldError>
-              </Field>
-            )}
-          </form.Field>
-        </div>
-      </FormDrawer>
+        <FilterBar
+          filters={[
+            {
+              key: "tipo",
+              label: "Tipo",
+              type: "select",
+              options: [
+                { value: "text", label: "Texto" },
+                { value: "number", label: "Número" },
+                { value: "date", label: "Fecha" },
+                { value: "select", label: "Opciones" },
+              ],
+            },
+          ]}
+          sortOptions={[
+            { value: "clave", label: "Clave" },
+            { value: "label", label: "Label" },
+            { value: "tipo", label: "Tipo" },
+          ]}
+          searchPlaceholder="Buscar por clave o label"
+        />
+        {rows.length === 0 && !listQuery.isLoading ? (
+          <EmptyState
+            title="Sin campos"
+            description="Define el primero, p.ej. alergias o sede preferida."
+          />
+        ) : filtered.length === 0 ? (
+          <EmptyState
+            title="Sin resultados"
+            description={
+              hasCriteria
+                ? "Ningún campo coincide con los criterios de búsqueda."
+                : "Todavía no hay campos para mostrar."
+            }
+          />
+        ) : (
+          <DataTable table={table} />
+        )}
+      </MasterDetail>
+
+      {/* Un solo contenedor montado a la vez: montar panel y drawer juntos
+          duplicaría los id/htmlFor de los campos. */}
+      {mode === "drawer" ? (
+        <FormDrawer open={formOpen} {...formProps}>
+          {formFields}
+        </FormDrawer>
+      ) : null}
       <ConfirmDialog
         open={deleting !== null}
         onClose={() => setDeleting(null)}

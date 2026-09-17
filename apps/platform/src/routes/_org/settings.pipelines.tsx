@@ -4,17 +4,20 @@ import {
   DataTable,
   EmptyState,
   FormDrawer,
+  FormPanel,
   fieldErrorMessages,
+  MasterDetail,
   PageHeader,
-  RowActions,
   PageShell,
+  RowActions,
+  useDetailMode,
 } from "@odentia/ui-patterns"
-import { useForm } from "@tanstack/react-form"
+import { useForm, useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-table"
 import { Plus } from "lucide-react"
-import { useMemo, useState } from "react"
+import { type FormEvent, useMemo, useState } from "react"
 import { z } from "zod"
 import { ApiError, apiFetch } from "../../lib/api"
 import { type Pipeline, type Stage, useCanWrite } from "../../lib/crm"
@@ -31,8 +34,9 @@ const stageSchema = z.object({
 function PipelinesPage() {
   const queryClient = useQueryClient()
   const canWrite = useCanWrite()
+  const mode = useDetailMode()
   const [pipelineId, setPipelineId] = useState<string | null>(null)
-  const [drawerOpen, setDrawerOpen] = useState(false)
+  const [formOpen, setFormOpen] = useState(false)
   const [editing, setEditing] = useState<Stage | null>(null)
   const [deleting, setDeleting] = useState<Stage | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -61,8 +65,7 @@ function PipelinesPage() {
         body: JSON.stringify(values),
       }),
     onSuccess: () => {
-      setDrawerOpen(false)
-      form.reset()
+      closeStageForm()
       void invalidate()
     },
     onError: fail,
@@ -105,6 +108,17 @@ function PipelinesPage() {
     validators: { onSubmit: stageSchema },
     onSubmit: ({ value }) => createMutation.mutate(value),
   })
+
+  // Suscripción explícita: el render de la página no se entera de los cambios de
+  // meta del formulario por sí solo (los campos se re-renderizan por su cuenta).
+  const isDirty = useStore(form.store, (state) => state.isDirty)
+
+  /** Cierra y deja el formulario prístino: sin el reset, el dirty sobrevive al
+   *  cierre y el próximo abrir pediría confirmar cambios ya guardados. */
+  function closeStageForm() {
+    setFormOpen(false)
+    form.reset()
+  }
 
   function move(index: number, delta: -1 | 1) {
     if (!pipeline) return
@@ -245,82 +259,98 @@ function PipelinesPage() {
     )
   }
 
+  const formFields = (
+    <div className="flex flex-col gap-4">
+      <form.Field name="name">
+        {(field) => (
+          <Field>
+            <FieldLabel>Nombre</FieldLabel>
+            <Input value={field.state.value} onChange={(e) => field.handleChange(e.target.value)} />
+            <FieldError>{fieldErrorMessages(field.state.meta.errors)}</FieldError>
+          </Field>
+        )}
+      </form.Field>
+      <form.Field name="kind">
+        {(field) => (
+          <Field>
+            <FieldLabel>Tipo</FieldLabel>
+            <select
+              className="rounded-md border bg-background px-2 py-1.5 text-sm"
+              value={field.state.value}
+              onChange={(e) => field.handleChange(e.target.value as "open" | "won" | "lost")}
+            >
+              <option value="open">Abierta</option>
+              <option value="won">Ganada</option>
+              <option value="lost">Perdida</option>
+            </select>
+            <FieldError>{fieldErrorMessages(field.state.meta.errors)}</FieldError>
+          </Field>
+        )}
+      </form.Field>
+    </div>
+  )
+
+  // Idénticos para los dos contenedores: solo cambia dónde se monta el shell.
+  const formProps = {
+    onClose: closeStageForm,
+    title: "Nueva etapa",
+    isDirty,
+    isSubmitting: createMutation.isPending,
+    submitLabel: "Crear",
+    cancelLabel: "Cancelar",
+    onSubmit: (event: FormEvent) => {
+      event.preventDefault()
+      void form.handleSubmit()
+    },
+  }
+
   return (
     <PageShell className="flex flex-col gap-6">
-      <PageHeader
-        title="Pipelines"
-        subtitle="Etapas del kanban de ventas"
-        actions={
-          pipelines.length > 1 ? (
-            <select
-              aria-label="Pipeline"
-              className="rounded-md border bg-background px-2 py-1.5 text-sm"
-              value={pipeline?.id ?? ""}
-              onChange={(e) => setPipelineId(e.target.value)}
-            >
-              {pipelines.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
-          ) : undefined
+      <MasterDetail
+        panel={
+          mode === "panel" && formOpen ? <FormPanel {...formProps}>{formFields}</FormPanel> : null
         }
-      />
-      {error && <p className="text-sm text-red-600">{error}</p>}
-      {/* Sin FilterBar: las etapas se muestran en el orden de posición del pipeline y ese orden es el dato
-          (subir/bajar lo edita); no hay nada que filtrar ni ordenar. */}
-      <DataTable table={table} />
-      <div>
-        <Button type="button" className="min-h-11" onClick={() => setDrawerOpen(true)}>
-          <Plus aria-hidden />
-          Nueva etapa
-        </Button>
-      </div>
-      <FormDrawer
-        open={drawerOpen}
-        onClose={() => setDrawerOpen(false)}
-        title="Nueva etapa"
-        submitLabel="Crear"
-        cancelLabel="Cancelar"
-        isSubmitting={createMutation.isPending}
-        onSubmit={(event) => {
-          event.preventDefault()
-          void form.handleSubmit()
-        }}
       >
-        <div className="flex flex-col gap-4">
-          <form.Field name="name">
-            {(field) => (
-              <Field>
-                <FieldLabel>Nombre</FieldLabel>
-                <Input
-                  value={field.state.value}
-                  onChange={(e) => field.handleChange(e.target.value)}
-                />
-                <FieldError>{fieldErrorMessages(field.state.meta.errors)}</FieldError>
-              </Field>
-            )}
-          </form.Field>
-          <form.Field name="kind">
-            {(field) => (
-              <Field>
-                <FieldLabel>Tipo</FieldLabel>
-                <select
-                  className="rounded-md border bg-background px-2 py-1.5 text-sm"
-                  value={field.state.value}
-                  onChange={(e) => field.handleChange(e.target.value as "open" | "won" | "lost")}
-                >
-                  <option value="open">Abierta</option>
-                  <option value="won">Ganada</option>
-                  <option value="lost">Perdida</option>
-                </select>
-                <FieldError>{fieldErrorMessages(field.state.meta.errors)}</FieldError>
-              </Field>
-            )}
-          </form.Field>
+        <PageHeader
+          title="Pipelines"
+          subtitle="Etapas del kanban de ventas"
+          actions={
+            pipelines.length > 1 ? (
+              <select
+                aria-label="Pipeline"
+                className="rounded-md border bg-background px-2 py-1.5 text-sm"
+                value={pipeline?.id ?? ""}
+                onChange={(e) => setPipelineId(e.target.value)}
+              >
+                {pipelines.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+            ) : undefined
+          }
+        />
+        {error && <p className="text-sm text-red-600">{error}</p>}
+        {/* Sin FilterBar: las etapas se muestran en el orden de posición del pipeline y ese orden es el dato
+            (subir/bajar lo edita); no hay nada que filtrar ni ordenar. */}
+        {/* La fila marcada aquí es la que se está renombrando en línea, no el panel. */}
+        <DataTable table={table} isRowActive={(row) => editing?.id === row.id} />
+        <div>
+          <Button type="button" className="min-h-11" onClick={() => setFormOpen(true)}>
+            <Plus aria-hidden />
+            Nueva etapa
+          </Button>
         </div>
-      </FormDrawer>
+      </MasterDetail>
+
+      {/* Un solo contenedor montado a la vez: montar panel y drawer juntos
+          duplicaría los id/htmlFor de los campos. */}
+      {mode === "drawer" ? (
+        <FormDrawer open={formOpen} {...formProps}>
+          {formFields}
+        </FormDrawer>
+      ) : null}
       <ConfirmDialog
         open={deleting !== null}
         onClose={() => setDeleting(null)}

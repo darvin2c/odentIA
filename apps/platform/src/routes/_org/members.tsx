@@ -19,19 +19,22 @@ import {
   ErrorState,
   FilterBar,
   FormDrawer,
+  FormPanel,
   fieldErrorMessages,
   LoadingState,
+  MasterDetail,
   PageHeader,
-  RowActions,
-  useListSearch,
   PageShell,
+  RowActions,
+  useDetailMode,
+  useListSearch,
 } from "@odentia/ui-patterns"
-import { useForm } from "@tanstack/react-form"
+import { useForm, useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, getRouteApi } from "@tanstack/react-router"
 import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-table"
 import { Plus } from "lucide-react"
-import { useMemo, useState } from "react"
+import { type FormEvent, useMemo, useState } from "react"
 import { z } from "zod"
 import { authClient } from "../../lib/auth-client"
 
@@ -60,7 +63,8 @@ function MembersPage() {
   const roleFilter = listSearch.get("rol")
   const sort = listSearch.get("sort")
   const hasCriteria = search !== "" || roleFilter !== undefined
-  const [inviteOpen, setInviteOpen] = useState(false)
+  const mode = useDetailMode()
+  const [formOpen, setFormOpen] = useState(false)
   const [removing, setRemoving] = useState<{ id: string; label: string } | null>(null)
 
   const { org: routeOrg, session } = orgRouteApi.useRouteContext()
@@ -87,7 +91,7 @@ function MembersPage() {
       if (inviteError) throw new Error(inviteError.message ?? "No se pudo invitar.")
     },
     onSuccess: async () => {
-      setInviteOpen(false)
+      closeInviteForm()
       await queryClient.invalidateQueries({ queryKey: ["full-org"] })
     },
     onError: (cause) => toast.error(cause.message),
@@ -101,6 +105,17 @@ function MembersPage() {
       formApi.reset()
     },
   })
+
+  // Suscripción explícita: el render de la página no se entera de los cambios de
+  // meta del formulario por sí solo (los campos se re-renderizan por su cuenta).
+  const isDirty = useStore(form.store, (state) => state.isDirty)
+
+  /** Cierra y deja el formulario prístino: sin el reset, el dirty sobrevive al
+   *  cierre y el próximo abrir pediría confirmar cambios ya guardados. */
+  function closeInviteForm() {
+    setFormOpen(false)
+    form.reset()
+  }
 
   const roleMutation = useMutation({
     mutationFn: async ({ memberId, role }: { memberId: string; role: string }) => {
@@ -230,157 +245,176 @@ function MembersPage() {
     getCoreRowModel: getCoreRowModel(),
   })
 
+  const formFields = (
+    <>
+      <form.Field name="email">
+        {(field) => (
+          <Field>
+            <FieldLabel htmlFor="invite-email">Invitar por correo</FieldLabel>
+            <Input
+              id="invite-email"
+              type="email"
+              placeholder="colega@clinica.pe"
+              value={field.state.value}
+              onChange={(event) => field.handleChange(event.target.value)}
+            />
+            <FieldError>{fieldErrorMessages(field.state.meta.errors)[0] ?? null}</FieldError>
+          </Field>
+        )}
+      </form.Field>
+      <form.Field name="role">
+        {(field) => (
+          <Field>
+            <FieldLabel>Rol</FieldLabel>
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                render={
+                  <Button type="button" variant="outline">
+                    Rol: {field.state.value === "admin" ? "admin" : "member"}
+                  </Button>
+                }
+              />
+              <DropdownMenuContent>
+                <DropdownMenuItem onClick={() => field.handleChange("member")}>
+                  member
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => field.handleChange("admin")}>
+                  admin
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </Field>
+        )}
+      </form.Field>
+    </>
+  )
+
+  // Idénticos para los dos contenedores: solo cambia dónde se monta el shell.
+  const formProps = {
+    onClose: closeInviteForm,
+    title: "Invitar miembro",
+    description: org?.name,
+    isDirty,
+    isSubmitting: inviteMutation.isPending,
+    submitLabel: "Invitar",
+    cancelLabel: common.actions.cancel,
+    onSubmit: (event: FormEvent) => {
+      event.preventDefault()
+      void form.handleSubmit()
+    },
+  }
+
   return (
     <PageShell className="flex flex-col gap-6">
-      <PageHeader
-        title="Miembros"
-        subtitle={org?.name}
-        actions={
-          canWrite ? (
-            <Button
-              type="button"
-              className="min-h-11"
-              onClick={() => {
-                form.reset()
-                setInviteOpen(true)
-              }}
-            >
-              <Plus aria-hidden />
-              Invitar miembro
-            </Button>
-          ) : undefined
+      <MasterDetail
+        panel={
+          mode === "panel" && formOpen ? <FormPanel {...formProps}>{formFields}</FormPanel> : null
         }
-      />
-      <FilterBar
-        filters={[
-          {
-            key: "rol",
-            label: "Rol",
-            type: "select",
-            options: [
-              { value: "owner", label: "Owner" },
-              { value: "admin", label: "Admin" },
-              { value: "member", label: "Member" },
-            ],
-          },
-        ]}
-        sortOptions={[
-          { value: "nombre", label: "Nombre" },
-          { value: "rol", label: "Rol" },
-        ]}
-        searchPlaceholder="Buscar miembro"
-      />
-
-      <FormDrawer
-        open={inviteOpen}
-        onClose={() => setInviteOpen(false)}
-        title="Invitar miembro"
-        description={org?.name}
-        isSubmitting={inviteMutation.isPending}
-        submitLabel="Invitar"
-        cancelLabel={common.actions.cancel}
-        onSubmit={(event) => {
-          event.preventDefault()
-          void form.handleSubmit()
-        }}
       >
-        <form.Field name="email">
-          {(field) => (
-            <Field>
-              <FieldLabel htmlFor="invite-email">Invitar por correo</FieldLabel>
-              <Input
-                id="invite-email"
-                type="email"
-                placeholder="colega@clinica.pe"
-                value={field.state.value}
-                onChange={(event) => field.handleChange(event.target.value)}
-              />
-              <FieldError>{fieldErrorMessages(field.state.meta.errors)[0] ?? null}</FieldError>
-            </Field>
-          )}
-        </form.Field>
-        <form.Field name="role">
-          {(field) => (
-            <Field>
-              <FieldLabel>Rol</FieldLabel>
-              <DropdownMenu>
-                <DropdownMenuTrigger
-                  render={
-                    <Button type="button" variant="outline">
-                      Rol: {field.state.value === "admin" ? "admin" : "member"}
-                    </Button>
-                  }
-                />
-                <DropdownMenuContent>
-                  <DropdownMenuItem onClick={() => field.handleChange("member")}>
-                    member
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => field.handleChange("admin")}>
-                    admin
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </Field>
-          )}
-        </form.Field>
-      </FormDrawer>
-
-      {orgQuery.isLoading ? (
-        <LoadingState />
-      ) : orgQuery.isError ? (
-        <ErrorState
-          message="No se pudo cargar la organización."
-          onRetry={() => void orgQuery.refetch()}
+        <PageHeader
+          title="Miembros"
+          subtitle={org?.name}
+          actions={
+            canWrite ? (
+              <Button
+                type="button"
+                className="min-h-11"
+                onClick={() => {
+                  form.reset()
+                  setFormOpen(true)
+                }}
+              >
+                <Plus aria-hidden />
+                Invitar miembro
+              </Button>
+            ) : undefined
+          }
         />
-      ) : !org ? (
-        <EmptyState title="Sin organización activa" />
-      ) : (
-        <>
-          {filteredMembers.length === 0 ? (
-            <EmptyState
-              title={hasCriteria ? common.filters.noResults : "Sin miembros"}
-              description={
-                hasCriteria
-                  ? "No hay miembros que coincidan con los filtros aplicados."
-                  : "Invita a tu primer miembro para colaborar."
-              }
-            />
-          ) : (
-            <DataTable table={table} />
-          )}
+        <FilterBar
+          filters={[
+            {
+              key: "rol",
+              label: "Rol",
+              type: "select",
+              options: [
+                { value: "owner", label: "Owner" },
+                { value: "admin", label: "Admin" },
+                { value: "member", label: "Member" },
+              ],
+            },
+          ]}
+          sortOptions={[
+            { value: "nombre", label: "Nombre" },
+            { value: "rol", label: "Rol" },
+          ]}
+          searchPlaceholder="Buscar miembro"
+        />
 
-          {org.invitations.filter((inv) => inv.status === "pending").length > 0 ? (
-            <div className="flex flex-col gap-2">
-              <h2 className="text-sm font-medium">Invitaciones pendientes</h2>
-              {org.invitations
-                .filter((inv) => inv.status === "pending")
-                .map((inv) => (
-                  <div
-                    key={inv.id}
-                    className="flex items-center justify-between rounded-lg border border-border p-3 text-sm"
-                  >
-                    <span>
-                      {inv.email} <Badge variant="secondary">{inv.role}</Badge>
-                    </span>
-                    {canWrite ? (
-                      <RowActions
-                        label={`Acciones de ${inv.email}`}
-                        items={[
-                          {
-                            key: "revocar",
-                            label: "Revocar",
-                            tone: "danger",
-                            onSelect: () => cancelInvitationMutation.mutate(inv.id),
-                          },
-                        ]}
-                      />
-                    ) : null}
-                  </div>
-                ))}
-            </div>
-          ) : null}
-        </>
-      )}
+        {orgQuery.isLoading ? (
+          <LoadingState />
+        ) : orgQuery.isError ? (
+          <ErrorState
+            message="No se pudo cargar la organización."
+            onRetry={() => void orgQuery.refetch()}
+          />
+        ) : !org ? (
+          <EmptyState title="Sin organización activa" />
+        ) : (
+          <>
+            {filteredMembers.length === 0 ? (
+              <EmptyState
+                title={hasCriteria ? common.filters.noResults : "Sin miembros"}
+                description={
+                  hasCriteria
+                    ? "No hay miembros que coincidan con los filtros aplicados."
+                    : "Invita a tu primer miembro para colaborar."
+                }
+              />
+            ) : (
+              <DataTable table={table} />
+            )}
+
+            {org.invitations.filter((inv) => inv.status === "pending").length > 0 ? (
+              <div className="flex flex-col gap-2">
+                <h2 className="text-sm font-medium">Invitaciones pendientes</h2>
+                {org.invitations
+                  .filter((inv) => inv.status === "pending")
+                  .map((inv) => (
+                    <div
+                      key={inv.id}
+                      className="flex items-center justify-between rounded-lg border border-border p-3 text-sm"
+                    >
+                      <span>
+                        {inv.email} <Badge variant="secondary">{inv.role}</Badge>
+                      </span>
+                      {canWrite ? (
+                        <RowActions
+                          label={`Acciones de ${inv.email}`}
+                          items={[
+                            {
+                              key: "revocar",
+                              label: "Revocar",
+                              tone: "danger",
+                              onSelect: () => cancelInvitationMutation.mutate(inv.id),
+                            },
+                          ]}
+                        />
+                      ) : null}
+                    </div>
+                  ))}
+              </div>
+            ) : null}
+          </>
+        )}
+      </MasterDetail>
+
+      {/* Un solo contenedor montado a la vez: montar panel y drawer juntos
+          duplicaría los id/htmlFor de los campos. */}
+      {mode === "drawer" ? (
+        <FormDrawer open={formOpen} {...formProps}>
+          {formFields}
+        </FormDrawer>
+      ) : null}
 
       <ConfirmDialog
         open={removing !== null}
