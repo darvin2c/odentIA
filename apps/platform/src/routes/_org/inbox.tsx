@@ -1,36 +1,68 @@
 import {
   Badge,
-  Bubble,
-  BubbleContent,
   Button,
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
   Input,
-  InputGroup,
-  InputGroupAddon,
-  InputGroupButton,
-  InputGroupTextarea,
-  Message,
-  MessageContent,
-  MessageFooter,
-  MessageHeader,
   MessageScroller,
   MessageScrollerContent,
   MessageScrollerItem,
   MessageScrollerProvider,
   MessageScrollerViewport,
+  ResizableHandle,
+  ResizablePanel,
+  ResizablePanelGroup,
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
 } from "@odentia/ui"
-import { EmptyState, FilterBar, PageHeader, PageShell, useListSearch } from "@odentia/ui-patterns"
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import {
+  Attachment,
+  type AttachmentData,
+  AttachmentInfo,
+  AttachmentPreview,
+  AttachmentRemove,
+  Attachments,
+} from "@odentia/ui/components/ai-elements/attachments"
+import {
+  AudioPlayer,
+  AudioPlayerControlBar,
+  AudioPlayerDurationDisplay,
+  AudioPlayerElement,
+  AudioPlayerMuteButton,
+  AudioPlayerPlayButton,
+  AudioPlayerTimeRange,
+} from "@odentia/ui/components/ai-elements/audio-player"
+import { Message, MessageContent } from "@odentia/ui/components/ai-elements/message"
+import {
+  PromptInput,
+  PromptInputActionAddAttachments,
+  PromptInputActionMenu,
+  PromptInputActionMenuContent,
+  PromptInputActionMenuTrigger,
+  PromptInputBody,
+  PromptInputFooter,
+  type PromptInputMessage,
+  PromptInputSubmit,
+  PromptInputTextarea,
+  PromptInputTools,
+  usePromptInputAttachments,
+} from "@odentia/ui/components/ai-elements/prompt-input"
+import { SpeechInput } from "@odentia/ui/components/ai-elements/speech-input"
+import {
+  EmptyState,
+  FilterBar,
+  PageHeader,
+  PageShell,
+  useDetailMode,
+  useListSearch,
+} from "@odentia/ui-patterns"
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, getRouteApi, Link, useNavigate } from "@tanstack/react-router"
-import { useEffect, useMemo, useRef, useState } from "react"
 import {
   AlertCircle,
   Bot,
@@ -39,11 +71,11 @@ import {
   Clock,
   Copy,
   MessageCircle,
-  Paperclip,
   Send,
   UserPlus,
 } from "lucide-react"
-import { ApiError, apiFetch } from "../../lib/api"
+import { useEffect, useMemo, useRef, useState } from "react"
+import { ApiError, apiFetch, apiUpload } from "../../lib/api"
 import { API_URL } from "../../lib/auth-client"
 import {
   type ChatMessage,
@@ -96,7 +128,10 @@ function InboxPage() {
   // Consumir la intención una sola vez: retirar el flag con replace.
   // La mutación real la dispara ThreadView con el detalle ya cargado.
   const consumePrepareRegistration = () => {
-    void navigate({ search: (previous) => ({ ...previous, prepareRegistration: undefined }), replace: true })
+    void navigate({
+      search: (previous) => ({ ...previous, prepareRegistration: undefined }),
+      replace: true,
+    })
   }
 
   const listParams = useMemo(() => {
@@ -109,12 +144,14 @@ function InboxPage() {
     return params.toString()
   }, [status, channel, assigned, search, myUserId])
 
-  const listQuery = useQuery({
+  const listQuery = useInfiniteQuery({
     queryKey: ["conversations", listParams],
-    queryFn: () =>
+    queryFn: ({ pageParam }) =>
       apiFetch<{ data: ConversationListItem[]; nextCursor: string | null }>(
-        `/api/conversations?${listParams}`,
+        `/api/conversations?${listParams}${pageParam ? `&cursor=${encodeURIComponent(pageParam)}` : ""}`,
       ),
+    initialPageParam: "",
+    getNextPageParam: (last) => last.nextCursor,
   })
 
   useOrgEvents(["message.created", "message.updated", "conversation.updated"], () => {
@@ -123,7 +160,7 @@ function InboxPage() {
   })
 
   const items = useMemo(() => {
-    const base = listQuery.data?.data ?? []
+    const base = listQuery.data?.pages.flatMap((page) => page.data) ?? []
     if (!sort) return base
     const field = sort.replace(/^-/, "")
     const sorted = [...base]
@@ -149,8 +186,26 @@ function InboxPage() {
     return base
   }, [listQuery.data, sort])
 
+  const mode = useDetailMode()
+
+  const thread = selectedId ? (
+    <ThreadView
+      key={selectedId}
+      id={selectedId}
+      members={org.members}
+      orgName={org.name}
+      orgSlug={org.slug}
+      canWrite={canWrite}
+      prepareRegistration={
+        routeSearch.prepareRegistration === true && routeSearch.conversation === selectedId
+      }
+      onConsumePrepareRegistration={consumePrepareRegistration}
+      onBack={() => setSelectedId(null)}
+    />
+  ) : null
+
   return (
-    <PageShell className="flex flex-col gap-4">
+    <PageShell fill className="gap-4">
       <PageHeader title="Bandeja" subtitle="Conversaciones de WhatsApp y Telegram" />
       <FilterBar
         filters={[
@@ -189,74 +244,124 @@ function InboxPage() {
         ]}
         searchPlaceholder="Buscar contacto"
       />
-      {/* PageShell aporta p-6 y el FilterBar full-width suma alto: se compensan en el panel. */}
-      <div className="flex gap-4" style={{ height: "calc(100vh - 340px)", minHeight: 480 }}>
-        <section
-          className={`w-full flex-col gap-3 md:flex md:w-[clamp(280px,30%,420px)] md:shrink-0 ${selectedId ? "hidden" : "flex"}`}
-        >
-          <div className="flex flex-1 flex-col gap-1 overflow-y-auto">
-            {items.map((item) => (
-              <button
-                key={item.id}
-                onClick={() => setSelectedId(item.id)}
-                className={`flex flex-col gap-1 rounded-lg border p-3 text-left hover:bg-muted/50 ${
-                  item.id === selectedId ? "border-primary bg-muted/50" : ""
-                }`}
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <span className="flex min-w-0 items-center gap-1.5">
-                    {item.connection.channel === "whatsapp" ? (
-                      <MessageCircle className="size-3.5 shrink-0 text-green-600" />
-                    ) : (
-                      <Send className="size-3.5 shrink-0 text-sky-600" />
-                    )}
-                    <span className="truncate text-sm font-medium">{item.contact.displayName}</span>
-                  </span>
-                  <span className="flex shrink-0 items-center gap-1.5">
-                    {item.unreadCount > 0 && <Badge>{item.unreadCount}</Badge>}
-                    <span className="text-xs text-muted-foreground">
-                      {timeAgo(item.lastMessageAt)}
-                    </span>
-                  </span>
-                </div>
-                <span className="truncate text-xs text-muted-foreground">
-                  {item.preview?.body ?? (item.preview ? "[adjunto]" : "—")}
-                </span>
-              </button>
-            ))}
-            {items.length === 0 && !listQuery.isLoading && (
+      {/* PageShell `fill` acota al viewport: el hilo ocupa el alto restante y el
+          composer queda fijo como footer suyo. La lista se separa con un handle
+          arrastrable; en ancho corto (useDetailMode) se muestra una a la vez. */}
+      {mode === "panel" ? (
+        <ResizablePanelGroup orientation="horizontal" className="min-h-0 flex-1">
+          <ResizablePanel
+            id="lista"
+            defaultSize="26rem"
+            minSize="20rem"
+            maxSize="36rem"
+            className="flex min-h-0 flex-col"
+          >
+            <ConversationList
+              items={items}
+              selectedId={selectedId}
+              isLoading={listQuery.isLoading}
+              hasNextPage={listQuery.hasNextPage}
+              isFetchingNextPage={listQuery.isFetchingNextPage}
+              onSelect={setSelectedId}
+              onFetchNextPage={() => void listQuery.fetchNextPage()}
+            />
+          </ResizablePanel>
+          <ResizableHandle withHandle className="mx-1 w-4 bg-transparent" />
+          <ResizablePanel id="hilo" minSize="28rem" className="flex min-h-0 min-w-0 flex-col">
+            {thread ?? (
               <EmptyState
-                title="Sin conversaciones"
-                description="Los mensajes entrantes aparecen aquí."
+                title="Selecciona una conversación"
+                description="Elige un hilo de la lista para verlo aquí."
               />
             )}
-          </div>
-        </section>
-        <section className={`min-w-0 flex-1 flex-col ${selectedId ? "flex" : "hidden md:flex"}`}>
-          {selectedId ? (
-            <ThreadView
-              key={selectedId}
-              id={selectedId}
-              members={org.members}
-              orgName={org.name}
-              canWrite={canWrite}
-              prepareRegistration={routeSearch.prepareRegistration === true && routeSearch.conversation === selectedId}
-              onConsumePrepareRegistration={consumePrepareRegistration}
-              onBack={() => setSelectedId(null)}
-            />
-          ) : (
-            <EmptyState
-              title="Selecciona una conversación"
-              description="Elige un hilo de la lista para verlo aquí."
+          </ResizablePanel>
+        </ResizablePanelGroup>
+      ) : (
+        <div className="flex min-h-0 flex-1 flex-col gap-3">
+          {thread ?? (
+            <ConversationList
+              items={items}
+              selectedId={selectedId}
+              isLoading={listQuery.isLoading}
+              hasNextPage={listQuery.hasNextPage}
+              isFetchingNextPage={listQuery.isFetchingNextPage}
+              onSelect={setSelectedId}
+              onFetchNextPage={() => void listQuery.fetchNextPage()}
             />
           )}
-        </section>
-      </div>
+        </div>
+      )}
     </PageShell>
   )
 }
 
 const NO_TEMPLATE = "__ninguna__"
+
+/** Listado de conversaciones: filas, vacío y paginación por cursor. */
+function ConversationList({
+  items,
+  selectedId,
+  isLoading,
+  hasNextPage,
+  isFetchingNextPage,
+  onSelect,
+  onFetchNextPage,
+}: {
+  items: ConversationListItem[]
+  selectedId: string | null
+  isLoading: boolean
+  hasNextPage: boolean
+  isFetchingNextPage: boolean
+  onSelect: (id: string) => void
+  onFetchNextPage: () => void
+}) {
+  return (
+    <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto">
+      {items.map((item) => (
+        <button
+          key={item.id}
+          type="button"
+          onClick={() => onSelect(item.id)}
+          className={`flex flex-col gap-1 rounded-md bg-card p-3 text-left hover:bg-muted/70 ${
+            item.id === selectedId ? "border border-primary bg-muted/70" : ""
+          }`}
+        >
+          <div className="flex items-center justify-between gap-2">
+            <span className="flex min-w-0 items-center gap-1.5">
+              {item.connection.channel === "whatsapp" ? (
+                <MessageCircle className="size-3.5 shrink-0 text-green-600" />
+              ) : (
+                <Send className="size-3.5 shrink-0 text-sky-600" />
+              )}
+              <span className="truncate text-sm font-medium">{item.contact.displayName}</span>
+            </span>
+            <span className="flex shrink-0 items-center gap-1.5">
+              {item.unreadCount > 0 && <Badge>{item.unreadCount}</Badge>}
+              <span className="text-xs text-muted-foreground">{timeAgo(item.lastMessageAt)}</span>
+            </span>
+          </div>
+          <span className="truncate text-xs text-muted-foreground">
+            {item.preview?.body ?? (item.preview ? "[adjunto]" : "—")}
+          </span>
+        </button>
+      ))}
+      {items.length === 0 && !isLoading && (
+        <EmptyState title="Sin conversaciones" description="Los mensajes entrantes aparecen aquí." />
+      )}
+      {hasNextPage && (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="self-center"
+          disabled={isFetchingNextPage}
+          onClick={onFetchNextPage}
+        >
+          {isFetchingNextPage ? "Cargando…" : "Cargar más"}
+        </Button>
+      )}
+    </div>
+  )
+}
 
 interface Member {
   userId: string
@@ -268,6 +373,7 @@ function ThreadView({
   id,
   members,
   orgName,
+  orgSlug,
   canWrite,
   prepareRegistration,
   onConsumePrepareRegistration,
@@ -276,6 +382,7 @@ function ThreadView({
   id: string
   members: Member[]
   orgName: string
+  orgSlug: string
   canWrite: boolean
   prepareRegistration: boolean
   onConsumePrepareRegistration: () => void
@@ -290,10 +397,14 @@ function ThreadView({
   const [templateName, setTemplateName] = useState("")
   const [templateParams, setTemplateParams] = useState("")
   const [markedRef, setMarkedRef] = useState<string | null>(null)
-  const [registrationLink, setRegistrationLink] = useState<{ url: string; expiresAt: string } | null>(null)
+  const [registrationLink, setRegistrationLink] = useState<{
+    url: string
+    expiresAt: string
+  } | null>(null)
   const [registrationError, setRegistrationError] = useState<string | null>(null)
   const [sendError, setSendError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
+  const [uploading, setUploading] = useState(false)
   const intentConsumedRef = useRef(false)
 
   const detailQuery = useQuery({
@@ -369,7 +480,10 @@ function ThreadView({
   // retira el flag para que navegar de nuevo no regenere el enlace.
   // Sin intención explícita jamás se crea un token al cargar el hilo.
   useEffect(() => {
-    if (!prepareRegistration) { intentConsumedRef.current = false; return }
+    if (!prepareRegistration) {
+      intentConsumedRef.current = false
+      return
+    }
     if (!canWrite || !detail || intentConsumedRef.current || registrationMutation.isPending) return
     intentConsumedRef.current = true
     onConsumePrepareRegistration()
@@ -399,6 +513,38 @@ function ThreadView({
       }
     },
   })
+
+  // Envía texto y/o adjuntos del composer. Lanza en error para que PromptInput
+  // conserve el texto y los adjuntos (permite reintentar sin perder nada).
+  async function handleComposerSubmit(message: PromptInputMessage) {
+    const text = message.text.trim()
+    const files = message.files ?? []
+    if (!text && files.length === 0) return
+    setUploading(true)
+    try {
+      if (text) await sendMutation.mutateAsync(text)
+      for (const file of files) {
+        const blob = await (await fetch(file.url)).blob()
+        const form = new FormData()
+        form.set("file", new File([blob], file.filename ?? "adjunto", { type: file.mediaType }))
+        await apiUpload(`/api/conversations/${id}/messages/media`, form)
+      }
+      setComposer("")
+      setWindowClosed(false)
+      setSendError(null)
+      invalidate()
+    } catch (error) {
+      if (error instanceof ApiError && error.shape.code === "WINDOW_CLOSED") {
+        setWindowClosed(true)
+        setSendError(null)
+      } else {
+        setSendError(error instanceof ApiError ? error.message : "No se pudo enviar el mensaje")
+      }
+      throw error
+    } finally {
+      setUploading(false)
+    }
+  }
 
   const templateMutation = useMutation({
     mutationFn: () =>
@@ -463,7 +609,7 @@ function ThreadView({
   const assignee = members.find((m) => m.userId === conv.assignedUserId)
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col rounded-lg border">
+    <div className="flex min-h-0 flex-1 flex-col rounded-md bg-card">
       <div className="flex items-center gap-2 border-b p-3">
         <Button
           variant="ghost"
@@ -566,7 +712,7 @@ function ThreadView({
             <MessageScrollerContent className="gap-2">
               {messages.map((msg) => (
                 <MessageScrollerItem key={msg.id} messageId={msg.id}>
-                  <MessageBubble msg={msg} conversationId={id} />
+                  <MessageBubble msg={msg} conversationId={id} orgSlug={orgSlug} />
                 </MessageScrollerItem>
               ))}
             </MessageScrollerContent>
@@ -577,8 +723,8 @@ function ThreadView({
       <div className="border-t p-3">
         {detail.contact.isActive === false && (
           <p className="mb-2 text-xs text-muted-foreground">
-            Contacto archivado: las conversaciones siguen accesibles, pero reactívalo para
-            iniciar nuevos envíos o crear relaciones.
+            Contacto archivado: las conversaciones siguen accesibles, pero reactívalo para iniciar
+            nuevos envíos o crear relaciones.
           </p>
         )}
         {registrationError && (
@@ -599,7 +745,9 @@ function ThreadView({
                   await navigator.clipboard.writeText(registrationLink.url)
                   setCopied(true)
                 } catch {
-                  setRegistrationError("No se pudo copiar el enlace; selecciónalo y cópialo manualmente")
+                  setRegistrationError(
+                    "No se pudo copiar el enlace; selecciónalo y cópialo manualmente",
+                  )
                 }
               }}
             >
@@ -626,8 +774,8 @@ function ThreadView({
             )}
             {(templatesQuery.data?.data ?? []).length === 0 && !templatesQuery.isLoading && (
               <p className="text-xs text-muted-foreground">
-                No hay plantillas autorizadas disponibles: copia el enlace de arriba y
-                compártelo por otro medio. No se registró ningún envío.
+                No hay plantillas autorizadas disponibles: copia el enlace de arriba y compártelo
+                por otro medio. No se registró ningún envío.
               </p>
             )}
             <div className="flex gap-2">
@@ -667,35 +815,48 @@ function ThreadView({
           </div>
         ) : (
           <div className="flex flex-col gap-1.5">
-            <InputGroup className="h-auto min-h-10 items-end bg-background">
-              <InputGroupTextarea
-                aria-label="Mensaje"
-                rows={1}
-                placeholder="Escribe un mensaje… (Enter para enviar)"
-                value={composer}
-                onChange={(e) => {
-                  setComposer(e.target.value)
-                  if (sendError) setSendError(null)
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey) {
-                    e.preventDefault()
-                    if (composer.trim() && !sendMutation.isPending)
-                      sendMutation.mutate(composer.trim())
-                  }
-                }}
-              />
-              <InputGroupAddon align="inline-end">
-                <InputGroupButton
-                  size="icon-sm"
+            <PromptInput
+              accept="image/jpeg,image/png,image/webp,application/pdf,audio/ogg,audio/mpeg"
+              multiple
+              className="h-auto min-h-10 items-end bg-background"
+              onSubmit={handleComposerSubmit}
+            >
+              <PromptInputBody>
+                <PromptInputAttachmentsRow />
+                <PromptInputTextarea
+                  aria-label="Mensaje"
+                  rows={1}
+                  placeholder="Escribe un mensaje… (Enter para enviar)"
+                  value={composer}
+                  onChange={(e) => {
+                    setComposer(e.target.value)
+                    if (sendError) setSendError(null)
+                  }}
+                />
+              </PromptInputBody>
+              <PromptInputFooter>
+                <PromptInputTools>
+                  <PromptInputActionMenu>
+                    <PromptInputActionMenuTrigger aria-label="Adjuntar archivo" />
+                    <PromptInputActionMenuContent>
+                      <PromptInputActionAddAttachments label="Adjuntar archivo" />
+                    </PromptInputActionMenuContent>
+                  </PromptInputActionMenu>
+                  <SpeechInput
+                    lang="es-PE"
+                    size="icon-sm"
+                    aria-label="Dictar"
+                    onTranscriptionChange={(text) =>
+                      setComposer((previous) => (previous ? `${previous} ` : "") + text)
+                    }
+                  />
+                </PromptInputTools>
+                <PromptInputSubmit
                   aria-label="Enviar"
-                  disabled={!composer.trim() || sendMutation.isPending}
-                  onClick={() => sendMutation.mutate(composer.trim())}
-                >
-                  <Send aria-hidden />
-                </InputGroupButton>
-              </InputGroupAddon>
-            </InputGroup>
+                  disabled={sendMutation.isPending || uploading}
+                />
+              </PromptInputFooter>
+            </PromptInput>
             {sendError && (
               <p className="text-sm text-red-600" role="alert">
                 {sendError}
@@ -716,50 +877,116 @@ function statusIcon(status: string) {
   return <Clock className="size-3.5 text-muted-foreground" />
 }
 
-function MessageBubble({ msg, conversationId }: { msg: ChatMessage; conversationId: string }) {
+function MessageAttachments({
+  msg,
+  conversationId,
+  orgSlug,
+}: {
+  msg: ChatMessage
+  conversationId: string
+  orgSlug: string
+}) {
+  if (msg.attachments.length === 0) return null
+  return (
+    <div className="flex flex-col gap-2">
+      {msg.attachments.map((att, index) => {
+        // `?org=` porque <img>/<audio>/<a> no pueden enviar el header de tenant.
+        const url = `${API_URL}/api/conversations/${conversationId}/messages/${msg.id}/attachments/${index}?org=${encodeURIComponent(orgSlug)}`
+        if (att.mimeType.startsWith("image/")) {
+          return (
+            <a key={index} href={url} target="_blank" rel="noreferrer">
+              <img src={url} alt={att.filename} className="max-w-64 rounded-md" />
+            </a>
+          )
+        }
+        if (att.mimeType.startsWith("audio/")) {
+          return (
+            <AudioPlayer key={index} className="w-64">
+              <AudioPlayerElement src={url} />
+              <AudioPlayerControlBar>
+                <AudioPlayerPlayButton />
+                <AudioPlayerTimeRange className="flex-1" />
+                <AudioPlayerDurationDisplay />
+                <AudioPlayerMuteButton />
+              </AudioPlayerControlBar>
+            </AudioPlayer>
+          )
+        }
+        const data: AttachmentData = {
+          id: `${msg.id}-${index}`,
+          type: "file",
+          url,
+          mediaType: att.mimeType,
+          filename: att.filename,
+        }
+        return (
+          <a key={index} href={url} target="_blank" rel="noreferrer">
+            <Attachments variant="list">
+              <Attachment data={data}>
+                <AttachmentPreview />
+                <AttachmentInfo showMediaType />
+              </Attachment>
+            </Attachments>
+          </a>
+        )
+      })}
+    </div>
+  )
+}
+
+function MessageBubble({
+  msg,
+  conversationId,
+  orgSlug,
+}: {
+  msg: ChatMessage
+  conversationId: string
+  orgSlug: string
+}) {
   const out = msg.direction === "out"
   return (
-    <Message align={out ? "end" : "start"}>
-      <MessageContent>
+    <Message from={out ? "user" : "assistant"}>
+      <MessageContent className={out ? undefined : "rounded-lg bg-muted px-4 py-3"}>
         {!out && msg.senderKind === "agent" && (
-          <MessageHeader>
+          <div className="flex items-center gap-1 text-xs font-medium text-muted-foreground">
             <Bot className="size-3" /> Agente
-          </MessageHeader>
+          </div>
         )}
-        <Bubble variant={out ? "default" : "muted"} align={out ? "end" : "start"}>
-          <BubbleContent>
-            {msg.contentType === "template" ? (
-              <span className="italic opacity-80">
-                Plantilla: {msg.templateName} {(msg.templateParams ?? []).join(" · ")}
-              </span>
-            ) : (
-              msg.body && <p className="whitespace-pre-wrap">{msg.body}</p>
-            )}
-            {msg.attachments.length > 0 && (
-              <span className="mt-1 flex flex-col gap-1">
-                {msg.attachments.map((att, i) => (
-                  <a
-                    key={i}
-                    className="flex items-center gap-1 underline"
-                    href={`${API_URL}/api/conversations/${conversationId}/messages/${msg.id}/attachments/${i}`}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    <Paperclip className="size-3" /> {att.filename}
-                  </a>
-                ))}
-              </span>
-            )}
-          </BubbleContent>
-        </Bubble>
-        <MessageFooter className="gap-1">
+        {/* WhatsApp muestra la media arriba y el texto (caption o transcripción) abajo. */}
+        <MessageAttachments msg={msg} conversationId={conversationId} orgSlug={orgSlug} />
+        {msg.contentType === "template" ? (
+          <span className="italic opacity-80">
+            Plantilla: {msg.templateName} {(msg.templateParams ?? []).join(" · ")}
+          </span>
+        ) : (
+          msg.body && <p className="whitespace-pre-wrap">{msg.body}</p>
+        )}
+        <div
+          className={`flex items-center gap-1 text-xs text-muted-foreground ${out ? "justify-end" : ""}`}
+        >
           {new Date(msg.createdAt).toLocaleTimeString("es-PE", {
             hour: "2-digit",
             minute: "2-digit",
           })}
           {out && statusIcon(msg.status)}
-        </MessageFooter>
+        </div>
       </MessageContent>
     </Message>
+  )
+}
+
+function PromptInputAttachmentsRow() {
+  const attachments = usePromptInputAttachments()
+  if (attachments.files.length === 0) return null
+  return (
+    <Attachments variant="inline">
+      {attachments.files.map((file) => (
+        <Attachment key={file.id} data={file} onRemove={() => attachments.remove(file.id)}>
+          <AttachmentPreview />
+          <AttachmentInfo />
+          <AttachmentRemove label="Quitar" />
+        </Attachment>
+      ))}
+    </Attachments>
   )
 }
