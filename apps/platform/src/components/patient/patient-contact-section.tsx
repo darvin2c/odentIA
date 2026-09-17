@@ -20,7 +20,7 @@ import {
 } from "@odentia/ui"
 import { ConfirmDialog, FormDrawer, RowActions } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { Link } from "@tanstack/react-router"
+import { Link, useNavigate } from "@tanstack/react-router"
 import { useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
 import { type ContactFull, type ContactListItem, timeAgo, useCanWrite } from "../../lib/crm"
@@ -91,6 +91,7 @@ function useInvalidatePatient(patientId: string) {
 /** Contactos vinculados, procedencia y acciones de relación de la ficha del paciente. */
 export function PatientContactSection({ detail }: { detail: PatientFull }) {
   const canWrite = useCanWrite()
+  const navigate = useNavigate()
   const patientId = detail.patient.id
   const invalidate = useInvalidatePatient(patientId)
   const [contactDialogOpen, setContactDialogOpen] = useState(false)
@@ -185,13 +186,7 @@ export function PatientContactSection({ detail }: { detail: PatientFull }) {
                 >
                   <div className="flex min-w-0 flex-col gap-1">
                     <div className="flex flex-wrap items-center gap-2">
-                      <Link
-                        to="/contacts/$contactId"
-                        params={{ contactId: link.contactId }}
-                        className="font-medium hover:underline"
-                      >
-                        {link.displayName}
-                      </Link>
+                      <span className="font-medium">{link.displayName}</span>
                       {link.isPreferred ? <Badge>Preferente</Badge> : null}
                       {!link.isActive ? <Badge variant="outline">Archivado</Badge> : null}
                     </div>
@@ -203,27 +198,38 @@ export function PatientContactSection({ detail }: { detail: PatientFull }) {
                         : " · Sin medios registrados"}
                     </p>
                   </div>
-                  {canWrite ? (
-                    <RowActions
-                      label={`Acciones del contacto ${link.displayName}`}
-                      items={[
-                        {
-                          key: "edit",
-                          label: "Editar relación",
-                          onSelect: () => setEditing(link),
-                        },
-                        {
-                          key: "unlink",
-                          label: "Desvincular",
-                          tone: "danger",
-                          onSelect: () => {
-                            setUnlinkError(null)
-                            setUnlinking(link)
-                          },
-                        },
-                      ]}
-                    />
-                  ) : null}
+                  <RowActions
+                    label={`Acciones del contacto ${link.displayName}`}
+                    items={[
+                      {
+                        key: "open",
+                        label: "Abrir contacto",
+                        onSelect: () =>
+                          void navigate({
+                            to: "/contacts/$contactId",
+                            params: { contactId: link.contactId },
+                          }),
+                      },
+                      ...(canWrite
+                        ? [
+                            {
+                              key: "edit",
+                              label: "Editar relación",
+                              onSelect: () => setEditing(link),
+                            },
+                            {
+                              key: "unlink",
+                              label: "Desvincular",
+                              tone: "danger" as const,
+                              onSelect: () => {
+                                setUnlinkError(null)
+                                setUnlinking(link)
+                              },
+                            },
+                          ]
+                        : []),
+                    ]}
+                  />
                 </li>
               ))}
             </ul>
@@ -269,15 +275,22 @@ export function PatientContactSection({ detail }: { detail: PatientFull }) {
                 {registration.actor ? ` · Operador: ${registration.actor.name}` : ""}
               </p>
               {registration.conversationId ? (
-                <p className="text-sm">
-                  <Link
-                    to="/inbox"
-                    search={{ conversation: registration.conversationId }}
-                    className="hover:underline"
+                <div>
+                  <Button
+                    type="button"
+                    variant="link"
+                    size="sm"
+                    nativeButton={false}
+                    render={
+                      <Link
+                        to="/inbox"
+                        search={{ conversation: registration.conversationId }}
+                      />
+                    }
                   >
                     Ver conversación de origen
-                  </Link>
-                </p>
+                  </Button>
+                </div>
               ) : null}
             </>
           ) : (
@@ -404,13 +417,19 @@ function PatientConversationsDialog({
                             ? ` · ${timeAgo(conversation.lastMessageAt)}`
                             : ""}
                         </span>
-                        <Link
-                          to="/inbox"
-                          search={{ conversation: conversation.id }}
-                          className="text-sm font-medium hover:underline"
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          render={
+                            <Link
+                              to="/inbox"
+                              search={{ conversation: conversation.id }}
+                            />
+                          }
                         >
                           Abrir en bandeja
-                        </Link>
+                        </Button>
                       </li>
                     ))}
                   </ul>

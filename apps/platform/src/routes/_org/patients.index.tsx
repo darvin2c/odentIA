@@ -10,7 +10,7 @@ import {
   useListSearch,
 } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
+import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import {
   type ColumnDef,
   getCoreRowModel,
@@ -116,13 +116,7 @@ function PatientsPage() {
         header: "Nombre",
         meta: { view: { role: "title" } },
         cell: ({ row }) => (
-          <Link
-            to="/patients/$patientId"
-            params={{ patientId: row.original.id }}
-            className="font-medium hover:underline"
-          >
-            {row.original.displayName ?? "—"}
-          </Link>
+          <span className="font-medium">{row.original.displayName ?? "—"}</span>
         ),
       },
       {
@@ -164,32 +158,35 @@ function PatientsPage() {
       {
         id: "actions",
         header: "",
-        cell: ({ row }) =>
-          canWrite ? (
-            <RowActions
-              label={`Acciones de ${row.original.displayName ?? "paciente"}`}
-              items={[
-                {
-                  key: "open",
-                  label: "Abrir ficha",
-                  onSelect: () =>
-                    void navigate({
-                      to: "/patients/$patientId",
-                      params: { patientId: row.original.id },
-                    }),
-                },
-                {
-                  key: "archive",
-                  label: row.original.isActive ? "Archivar" : "Reactivar",
-                  tone: row.original.isActive ? "danger" : undefined,
-                  onSelect: () => {
-                    setArchiveError(null)
-                    setArchiving(row.original)
-                  },
-                },
-              ]}
-            />
-          ) : null,
+        cell: ({ row }) => (
+          <RowActions
+            label={`Acciones de ${row.original.displayName ?? "paciente"}`}
+            items={[
+              {
+                key: "open",
+                label: "Abrir ficha",
+                onSelect: () =>
+                  void navigate({
+                    to: "/patients/$patientId",
+                    params: { patientId: row.original.id },
+                  }),
+              },
+              ...(canWrite
+                ? [
+                    {
+                      key: "archive",
+                      label: row.original.isActive ? "Archivar" : "Reactivar",
+                      tone: row.original.isActive ? ("danger" as const) : undefined,
+                      onSelect: () => {
+                        setArchiveError(null)
+                        setArchiving(row.original)
+                      },
+                    },
+                  ]
+                : []),
+            ]}
+          />
+        ),
       },
     ],
     [canWrite, navigate],

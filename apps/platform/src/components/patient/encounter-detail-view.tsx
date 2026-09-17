@@ -219,12 +219,7 @@ export function EncounterDetailView({
             {detail.plannedItems.map((item) => (
               <li key={item.id} className="border-b pb-2 text-sm last:border-0">
                 <p>
-                  <a
-                    className="underline-offset-4 hover:underline"
-                    href={`/patients/${patientId}?tab=plan&budgetId=${item.budgetId}`}
-                  >
-                    {item.title}
-                  </a>
+                  <span className="font-medium">{item.title}</span>
                 </p>
                 <p className="text-xs text-muted-foreground">
                   {item.toothNumber != null ? `Pieza ${item.toothNumber} · ` : ""}

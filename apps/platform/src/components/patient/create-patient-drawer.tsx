@@ -224,17 +224,27 @@ export function CreatePatientDrawer({
                 </span>
                 <ul className="mt-2 flex flex-col gap-1">
                   {duplicates.map((duplicate) => (
-                    <li key={duplicate.id} className="flex flex-wrap items-center gap-x-2 text-sm">
-                      <a
-                        className="font-medium underline"
-                        href={`/patients/${duplicate.id}`}
-                      >
+                    <li key={duplicate.id} className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+                      <span className="font-medium">
                         {duplicate.displayName} · {hcLabel(duplicate.patientNumber)}
-                      </a>
+                      </span>
                       <span className="text-xs text-muted-foreground">
                         {DUPLICATE_REASON_LABELS[duplicate.reason]}
                         {duplicate.isActive ? "" : " · archivada"}
                       </span>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() =>
+                          void navigate({
+                            to: "/patients/$patientId",
+                            params: { patientId: duplicate.id },
+                          })
+                        }
+                      >
+                        Abrir ficha
+                      </Button>
                     </li>
                   ))}
                 </ul>

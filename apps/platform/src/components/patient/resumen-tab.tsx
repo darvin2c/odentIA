@@ -127,13 +127,20 @@ export function ResumenTab({
                 </p>
               ) : null}
               <div>
-                <Link
-                  to="/patients/$patientId/encounters/$encounterId"
-                  params={{ patientId, encounterId: lastVisit.encounterId }}
-                  className="text-sm font-medium text-accent hover:text-accent-foreground"
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  nativeButton={false}
+                  render={
+                    <Link
+                      to="/patients/$patientId/encounters/$encounterId"
+                      params={{ patientId, encounterId: lastVisit.encounterId }}
+                    />
+                  }
                 >
                   Abrir esta atención
-                </Link>
+                </Button>
               </div>
             </div>
           ) : (
@@ -290,14 +297,21 @@ function PlanBrief({
           {next ? ` · próximo: ${next.title}` : " · sin pendientes"}
         </span>
       </span>
-      <Link
-        to="/patients/$patientId"
-        params={{ patientId }}
-        search={{ tab: "plan", planId }}
-        className="font-medium text-accent hover:text-accent-foreground"
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        nativeButton={false}
+        render={
+          <Link
+            to="/patients/$patientId"
+            params={{ patientId }}
+            search={{ tab: "plan", planId }}
+          />
+        }
       >
         Abrir plan
-      </Link>
+      </Button>
     </div>
   )
 }

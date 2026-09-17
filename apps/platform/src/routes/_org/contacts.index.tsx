@@ -14,7 +14,7 @@ import {
 } from "@odentia/ui-patterns"
 import { useForm } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { createFileRoute, getRouteApi, Link } from "@tanstack/react-router"
+import { createFileRoute, getRouteApi, useNavigate } from "@tanstack/react-router"
 import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-table"
 import { MessageCircle, Plus, Send } from "lucide-react"
 import { useMemo, useState } from "react"
@@ -56,10 +56,10 @@ function mutationMessage(err: unknown, fallback: string): string {
 
 function ContactsPage() {
   const queryClient = useQueryClient()
+  const navigate = useNavigate()
   const { org } = orgRouteApi.useRouteContext()
   const canWrite = useCanWrite()
   const listSearch = useListSearch()
-  // SearchInput (FilterBar) escribe la búsqueda en `q` con debounce propio.
   const q = listSearch.get("q") ?? ""
   const stageId = listSearch.get("stageId") ?? undefined
   const activeFilter = listSearch.get("isActive") ?? "true"
@@ -177,13 +177,7 @@ function ContactsPage() {
         header: "Nombre",
         cell: ({ row }) => (
           <span className="flex items-center gap-2">
-            <Link
-              to="/contacts/$contactId"
-              params={{ contactId: row.original.id }}
-              className="font-medium hover:underline"
-            >
-              {row.original.displayName}
-            </Link>
+            <span className="font-medium">{row.original.displayName}</span>
             {!row.original.isActive && <Badge variant="secondary">Archivado</Badge>}
           </span>
         ),
@@ -248,6 +242,15 @@ function ContactsPage() {
             label={`Acciones de ${row.original.displayName}`}
             items={[
               {
+                key: "open",
+                label: "Abrir",
+                onSelect: () =>
+                  void navigate({
+                    to: "/contacts/$contactId",
+                    params: { contactId: row.original.id },
+                  }),
+              },
+              {
                 key: "conversar",
                 label: "Conversar",
                 onSelect: () =>
@@ -290,7 +293,7 @@ function ContactsPage() {
         ),
       },
     ],
-    [org.members, stageName, canWrite, activeMutation],
+    [org.members, stageName, canWrite, activeMutation, navigate],
   )
 
   const hasFilters = q.trim() !== "" || stageId !== undefined || activeFilter !== "true"

@@ -391,13 +391,7 @@ function ContactDetailPage() {
               className="flex items-center justify-between gap-2 rounded-md border px-2 py-1.5"
             >
               <span className="flex min-w-0 flex-wrap items-center gap-2 text-sm">
-                <Link
-                  to="/patients/$patientId"
-                  params={{ patientId: p.id }}
-                  className="font-medium text-primary hover:underline"
-                >
-                  {p.displayName}
-                </Link>
+                <span className="font-medium">{p.displayName}</span>
                 <span className="text-muted-foreground">
                   {RELATIONSHIP_LABELS[p.relationship] ?? p.relationship}
                   {p.relationshipDetail ? ` · ${p.relationshipDetail}` : ""}
@@ -700,13 +694,14 @@ function ContactDetailPage() {
                     : "Sin identidad asignada"}
                 </span>
                 <span className="text-muted-foreground">{timeAgo(conv.lastMessageAt)}</span>
-                <Link
-                  to="/inbox"
-                  search={{ conversation: conv.id }}
-                  className="text-primary hover:underline"
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  render={<Link to="/inbox" search={{ conversation: conv.id }} />}
                 >
                   Abrir
-                </Link>
+                </Button>
               </span>
               {canWrite && !linked && sameChannel.length > 0 && (
                 <span className="flex flex-wrap items-center gap-2">
@@ -766,9 +761,15 @@ function ContactDetailPage() {
               )}
             </p>
           ))}
-          <Link to="/tasks" className="text-sm text-primary hover:underline">
+          <Button
+            type="button"
+            variant="link"
+            size="sm"
+            nativeButton={false}
+            render={<Link to="/tasks" />}
+          >
             Ir a tareas
-          </Link>
+          </Button>
         </section>
         <section className="flex flex-col gap-2 rounded-lg border p-4">
           <h2 className="text-sm font-semibold">Registro</h2>

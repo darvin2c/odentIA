@@ -235,12 +235,9 @@ export function EncounterProcedures({
                       {proc.diagnosisCode ? <Badge>CIE-10 {proc.diagnosisCode}</Badge> : null}
                       {proc.planItemId ? (
                         linked ? (
-                          <a
-                            className="underline-offset-4 hover:underline"
-                            href={`/patients/${patientId}?tab=plan&budgetId=${linked.budgetId}`}
-                          >
+                          <span className="font-medium">
                             Plan: {linked.title}
-                          </a>
+                          </span>
                         ) : (
                           <span>Plan: {proc.planItemId.slice(0, 8)}</span>
                         )

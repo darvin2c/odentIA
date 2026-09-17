@@ -160,14 +160,15 @@ export function ServicePicker({
               <div className="flex flex-col gap-2 p-2">
                 <p className="text-sm text-muted-foreground">Sin tratamientos con ese criterio.</p>
                 {canAdmin ? (
-                  <Link
-                    to="/services"
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-sm font-medium text-accent hover:text-accent-foreground"
+                  <Button
+                    type="button"
+                    variant="link"
+                    size="sm"
+                    nativeButton={false}
+                    render={<Link to="/services" target="_blank" rel="noreferrer" />}
                   >
                     Administrar tarifario
-                  </Link>
+                  </Button>
                 ) : null}
               </div>
             ) : (

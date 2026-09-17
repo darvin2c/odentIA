@@ -638,12 +638,17 @@ export function PatientRegistrationForm({
                             {selfPatient.displayName}. Para continuar con esa ficha, ábrela en lugar
                             de registrarla de nuevo.
                           </span>
-                          <a
-                            className="mt-1 inline-block font-medium underline"
-                            href={`/patients/${selfPatient.id}`}
-                          >
-                            Ver paciente
-                          </a>
+                          <span className="mt-1 flex flex-wrap items-center gap-2">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              nativeButton={false}
+                              render={<a href={`/patients/${selfPatient.id}`} />}
+                            >
+                              Ver paciente
+                            </Button>
+                          </span>
                         </AlertDescription>
                       </Alert>
                     ) : (
