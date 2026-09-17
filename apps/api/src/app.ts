@@ -49,15 +49,15 @@ export interface AppDeps {
 }
 const branchInput = z.object({
   name: z.string().min(1).max(120),
-  addressLine1: z.string().max(200).optional(),
-  addressLine2: z.string().max(200).optional(),
-  department: z.string().max(80).optional(),
-  province: z.string().max(80).optional(),
-  district: z.string().max(80).optional(),
-  ubigeo: z.string().length(6).optional(),
-  phone: z.string().max(30).optional(),
-  email: z.string().email().optional(),
-  mapsUrl: z.string().url().optional(),
+  addressLine1: z.string().max(200).nullish(),
+  addressLine2: z.string().max(200).nullish(),
+  department: z.string().max(80).nullish(),
+  province: z.string().max(80).nullish(),
+  district: z.string().max(80).nullish(),
+  ubigeo: z.string().length(6).nullish(),
+  phone: z.string().max(30).nullish(),
+  email: z.string().email().nullish(),
+  mapsUrl: z.string().url().nullish(),
   timezone: z.string().max(60).optional(),
 })
 
