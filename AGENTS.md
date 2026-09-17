@@ -2,6 +2,15 @@
 
 Monorepo pnpm 9.15 + turbo. Node >= 24. Comentarios, mensajes de error y commits en español.
 
+## Objetivo
+
+CRM odontológico omnicanal orientado a la persona.
+
+- La persona es el centro: paciente ≠ interlocutor ≠ responsable; todo lo que entra por cualquier canal converge en la misma persona y en su única historia clínica. Ninguna vía de entrada crea una ficha paralela.
+- Omnicanal: el núcleo trabaja con conceptos propios (contacto, conversación, mensaje) y nunca depende de un proveedor concreto; cada canal es un adaptador intercambiable.
+- UX para el usuario final (recepción, clínico): sencilla, minimalista y profesional. Menos opciones a la vista, una acción clara por pantalla, cero jerga técnica, accesible conforme a WCAG.
+- Estándares: donde exista estándar internacional se usa (clínica, datos, seguridad, accesibilidad); donde solo haya norma nacional aplicable, esa; nunca se inventa un formato propio habiendo estándar. Toda desviación justificada se documenta en el código que la introduce.
+
 ## Mapa
 
 - `apps/api` (Hono + `tsx watch`), `apps/worker` (ingesta/envío/agente), `apps/panel` (`app.odentia.localhost`, Vite), `apps/platform` (`odentia.localhost`, Vite)
