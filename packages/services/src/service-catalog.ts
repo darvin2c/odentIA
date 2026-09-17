@@ -1,15 +1,25 @@
 import {
   TREATMENT_SCOPES,
   TREATMENT_SPECIALTIES,
+  type ProcedureCodingSnapshot,
   type TreatmentScope,
   type TreatmentSpecialty,
 } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
-import { organization } from "@odentia/db/schema/auth"
-import { serviceCatalog, treatmentTemplate } from "@odentia/db/schema/clinical"
+import {
+  procedureCode,
+  serviceCatalog,
+  treatmentTemplate,
+  treatmentTemplateCode,
+} from "@odentia/db/schema/clinical"
 import { auditEvent, orgProfile } from "@odentia/db/schema/org"
-import { and, asc, eq, ilike, inArray, ne, or, sql } from "drizzle-orm"
+import { and, asc, desc, eq, ilike, inArray, ne, or, sql } from "drizzle-orm"
 import { isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
+import {
+  currentCatalogRelease,
+  resolveSingleTemplateCoding,
+  type CatalogRelease,
+} from "./procedure-codings.js"
 
 function conflict(code: string, message: string): ServiceError {
   return new ServiceError(code, 409, message)
@@ -136,6 +146,42 @@ async function requireTemplate(tx: Db, templateId: string): Promise<TreatmentTem
     throw conflict("TEMPLATE_INACTIVE", "La prestación de la biblioteca ya no está vigente")
   return row
 }
+/**
+ * Detalle exacto read-only de una plantilla por id, sin exigir vigencia:
+ * incluye retiradas (`isActive: false`) y sus versiones. Solo lectura para
+ * fichas enlazadas (ofertas/históricos); las nuevas indicaciones siguen
+ * pasando por `requireServiceForIndication` + snapshot único vigente.
+ */
+export async function getTemplate(
+  tx: Db,
+  templateId: string,
+): Promise<TreatmentTemplateRow & { codings: ProcedureCodingSnapshot[] }> {
+  const [row] = await tx
+    .select()
+    .from(treatmentTemplate)
+    .where(eq(treatmentTemplate.id, templateId))
+    .limit(1)
+  if (!row) throw notFound("Prestación de la biblioteca")
+  const mappings = await tx
+    .select({
+      system: treatmentTemplateCode.systemKey,
+      code: treatmentTemplateCode.code,
+      version: treatmentTemplateCode.version,
+      display: procedureCode.display,
+    })
+    .from(treatmentTemplateCode)
+    .innerJoin(
+      procedureCode,
+      and(
+        eq(treatmentTemplateCode.systemKey, procedureCode.systemKey),
+        eq(treatmentTemplateCode.code, procedureCode.code),
+        eq(treatmentTemplateCode.version, procedureCode.version),
+      ),
+    )
+    .where(eq(treatmentTemplateCode.templateId, templateId))
+    .orderBy(desc(treatmentTemplateCode.isPrimary), treatmentTemplateCode.systemKey)
+  return { ...row, codings: mappings }
+}
 
 async function audit(
   tx: Db,
@@ -162,38 +208,138 @@ export interface ListTemplatesQuery {
   limit?: number
 }
 
+export interface TemplateCatalogInfo {
+  system: string
+  version: string
+  scope: string
+  sourceUrl: string
+  sourceSha256: string
+  expectedCount: number
+  availableCount: number
+}
+
 export async function listTemplates(
   tx: Db,
   query: ListTemplatesQuery,
-): Promise<{ data: TreatmentTemplateRow[]; nextCursor: string | null }> {
+): Promise<{
+  data: Array<TreatmentTemplateRow & { codings: ProcedureCodingSnapshot[] }>
+  nextCursor: string | null
+  total: number
+  catalog: TemplateCatalogInfo | null
+}> {
   const limit = clampLimit(query.limit)
   const after = decodeCursor(query.cursor)
-  const conditions = [eq(treatmentTemplate.isActive, true)]
+  const release: CatalogRelease | null = await currentCatalogRelease(tx)
+  if (!release) return { data: [], nextCursor: null, total: 0, catalog: null }
+  const baseConditions = [
+    eq(treatmentTemplate.isActive, true),
+    eq(treatmentTemplateCode.isPrimary, true),
+    eq(procedureCode.systemKey, release.system),
+    eq(procedureCode.version, release.version),
+    eq(procedureCode.isActive, true),
+  ]
+  const availableWhere = and(...baseConditions)
   if (query.specialty) {
-    conditions.push(eq(treatmentTemplate.specialty, assertSpecialty(query.specialty)))
+    baseConditions.push(eq(treatmentTemplate.specialty, assertSpecialty(query.specialty)))
   }
   const q = query.q?.trim()
-  if (q) {
-    conditions.push(
-      or(ilike(treatmentTemplate.name, `%${q}%`), ilike(treatmentTemplate.key, `%${q}%`))!,
-    )
-  }
-  if (after) {
-    conditions.push(
-      sql`("treatment_template"."name", "treatment_template"."id") > (${after.name}, ${after.id})`,
-    )
-  }
-  const rows = await tx
-    .select()
+  const searchCond = q
+    ? or(
+        ilike(treatmentTemplate.name, `%${q}%`),
+        ilike(treatmentTemplate.key, `%${q}%`),
+        ilike(procedureCode.code, `%${q}%`),
+        ilike(procedureCode.display, `%${q}%`),
+      )!
+    : undefined
+  const filteredWhere = searchCond ? and(...baseConditions, searchCond) : and(...baseConditions)
+  const totalRows = await tx
+    .select({ total: sql<number>`count(*)::int` })
     .from(treatmentTemplate)
-    .where(and(...conditions))
+    .innerJoin(treatmentTemplateCode, eq(treatmentTemplateCode.templateId, treatmentTemplate.id))
+    .innerJoin(
+      procedureCode,
+      and(
+        eq(treatmentTemplateCode.systemKey, procedureCode.systemKey),
+        eq(treatmentTemplateCode.code, procedureCode.code),
+        eq(treatmentTemplateCode.version, procedureCode.version),
+      ),
+    )
+    .where(filteredWhere)
+  const total = totalRows[0]?.total ?? 0
+  const availableRows = await tx
+    .select({ availableCount: sql<number>`count(*)::int` })
+    .from(treatmentTemplate)
+    .innerJoin(treatmentTemplateCode, eq(treatmentTemplateCode.templateId, treatmentTemplate.id))
+    .innerJoin(
+      procedureCode,
+      and(
+        eq(treatmentTemplateCode.systemKey, procedureCode.systemKey),
+        eq(treatmentTemplateCode.code, procedureCode.code),
+        eq(treatmentTemplateCode.version, procedureCode.version),
+      ),
+    )
+    .where(availableWhere)
+  const availableCount = availableRows[0]?.availableCount ?? 0
+  const cursorCond = after
+    ? sql`("treatment_template"."name", "treatment_template"."id") > (${after.name}, ${after.id})`
+    : undefined
+  const pageWhere = cursorCond ? and(filteredWhere, cursorCond) : filteredWhere
+  const rows = await tx
+    .select({
+      id: treatmentTemplate.id,
+      key: treatmentTemplate.key,
+      name: treatmentTemplate.name,
+      specialty: treatmentTemplate.specialty,
+      scope: treatmentTemplate.scope,
+      surfaceCountMin: treatmentTemplate.surfaceCountMin,
+      surfaceCountMax: treatmentTemplate.surfaceCountMax,
+      isActive: treatmentTemplate.isActive,
+      version: treatmentTemplate.version,
+      code: procedureCode.code,
+      codeVersion: procedureCode.version,
+      display: procedureCode.display,
+    })
+    .from(treatmentTemplate)
+    .innerJoin(treatmentTemplateCode, eq(treatmentTemplateCode.templateId, treatmentTemplate.id))
+    .innerJoin(
+      procedureCode,
+      and(
+        eq(treatmentTemplateCode.systemKey, procedureCode.systemKey),
+        eq(treatmentTemplateCode.code, procedureCode.code),
+        eq(treatmentTemplateCode.version, procedureCode.version),
+      ),
+    )
+    .where(pageWhere)
     .orderBy(asc(treatmentTemplate.name), asc(treatmentTemplate.id))
     .limit(limit + 1)
   const page = rows.slice(0, limit)
   const last = page[page.length - 1]
   return {
-    data: page,
+    data: page.map((row) => ({
+      id: row.id,
+      key: row.key,
+      name: row.name,
+      specialty: row.specialty,
+      scope: row.scope,
+      surfaceCountMin: row.surfaceCountMin,
+      surfaceCountMax: row.surfaceCountMax,
+      isActive: row.isActive,
+      version: row.version,
+      codings: [
+        { system: release.system, code: row.code, version: row.codeVersion, display: row.display },
+      ],
+    })),
     nextCursor: rows.length > limit && last ? encodeCursor(last.name, last.id) : null,
+    total,
+    catalog: {
+      system: release.system,
+      version: release.version,
+      scope: release.scope,
+      sourceUrl: release.sourceUrl,
+      sourceSha256: release.sourceSha256,
+      expectedCount: release.expectedCount,
+      availableCount,
+    },
   }
 }
 
@@ -271,8 +417,10 @@ export async function requireService(
 }
 
 /**
- * Oferta utilizable para una nueva indicación: activa, no legado y con tarifa
- * explícita (409 SERVICE_INACTIVE / SERVICE_UNPRICED en caso contrario).
+ * Oferta utilizable para una nueva indicación: activa, no legado, con tarifa
+ * explícita y proyección oficial vigente (409 SERVICE_INACTIVE /
+ * SERVICE_UNPRICED / TEMPLATE_INACTIVE / CODING_AMBIGUOUS en caso contrario).
+ * Las ofertas propias (`custom`, sin plantilla) conservan snapshot `[]`.
  */
 export async function requireServiceForIndication(
   tx: Db,
@@ -285,6 +433,9 @@ export async function requireServiceForIndication(
   }
   if (row.priceCents === null) {
     throw conflict("SERVICE_UNPRICED", "La prestación aún no tiene tarifa configurada")
+  }
+  if (row.templateId) {
+    await resolveSingleTemplateCoding(tx, row.templateId)
   }
   return row
 }
@@ -311,6 +462,7 @@ export async function createService(
   let values: typeof serviceCatalog.$inferInsert
   if (input.templateId) {
     const tpl = await requireTemplate(tx, input.templateId)
+    await resolveSingleTemplateCoding(tx, tpl.id)
     const name = input.name?.trim() ? assertName(input.name) : tpl.name
     if (
       input.specialty !== undefined &&
@@ -413,6 +565,7 @@ export async function updateService(
       fields.push("templateId:null")
     } else {
       const tpl = await requireTemplate(tx, patch.templateId)
+      await resolveSingleTemplateCoding(tx, tpl.id)
       if (patch.specialty !== undefined && patch.specialty !== tpl.specialty) {
         throw validation("specialty debe coincidir con la plantilla (derivado, no editable)")
       }
@@ -526,6 +679,7 @@ export async function fromTemplates(
   for (const tpl of templates) {
     if (!tpl.isActive)
       throw conflict("TEMPLATE_INACTIVE", "La prestación de la biblioteca ya no está vigente")
+    await resolveSingleTemplateCoding(tx, tpl.id)
   }
   const owned = await tx
     .select()

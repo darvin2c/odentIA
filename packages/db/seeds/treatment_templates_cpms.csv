@@ -1,0 +1,506 @@
+template_key,specialty,scope,surface_count_min,surface_count_max,system_key,code,version,name
+cpms:RM-550-2023-MINSA:A0141,diagnostico,general,,,CPMS,A0141,RM-550-2023-MINSA,Examen dental post morten
+cpms:RM-550-2023-MINSA:A0142,diagnostico,general,,,CPMS,A0142,RM-550-2023-MINSA,Análisis de marca de mordida
+cpms:RM-550-2023-MINSA:A1331,prevencion,general,,,CPMS,A1331,RM-550-2023-MINSA,Instrucción grupal de técnica de higiene oral
+cpms:RM-550-2023-MINSA:A7903,cirugia,tooth,,,CPMS,A7903,RM-550-2023-MINSA,Tratamiento de pericoronitis
+cpms:RM-550-2023-MINSA:C3201,restauradora,tooth,,,CPMS,C3201,RM-550-2023-MINSA,Restauracion dental con ionomero de vidrio
+cpms:RM-550-2023-MINSA:D0120,diagnostico,general,,,CPMS,D0120,RM-550-2023-MINSA,Evaluación oral periodica; usuario de salud continuador
+cpms:RM-550-2023-MINSA:D0140,diagnostico,general,,,CPMS,D0140,RM-550-2023-MINSA,Consulta estomatologica no especializada
+cpms:RM-550-2023-MINSA:D0150,diagnostico,general,,,CPMS,D0150,RM-550-2023-MINSA,Evaluación oral completa
+cpms:RM-550-2023-MINSA:D0160,diagnostico,general,,,CPMS,D0160,RM-550-2023-MINSA,Consulta estomatologica especializada
+cpms:RM-550-2023-MINSA:D0170,diagnostico,general,,,CPMS,D0170,RM-550-2023-MINSA,Reevaluación oral limitada, centrada en el problema; usuario de salud continuador (no visita postoperatoria)
+cpms:RM-550-2023-MINSA:D0171,diagnostico,general,,,CPMS,D0171,RM-550-2023-MINSA,Reevaluación oral postoperatorio
+cpms:RM-550-2023-MINSA:D0220,diagnostico,general,,,CPMS,D0220,RM-550-2023-MINSA,Radiografía intraoral periapical
+cpms:RM-550-2023-MINSA:D0240,diagnostico,general,,,CPMS,D0240,RM-550-2023-MINSA,Radiografía intraoral oclusal
+cpms:RM-550-2023-MINSA:D0250,diagnostico,general,,,CPMS,D0250,RM-550-2023-MINSA,Radiografía extraoral
+cpms:RM-550-2023-MINSA:D0270,diagnostico,general,,,CPMS,D0270,RM-550-2023-MINSA,Radiografía bitewing
+cpms:RM-550-2023-MINSA:D0290,diagnostico,general,,,CPMS,D0290,RM-550-2023-MINSA,Radiografía postero -anterior o lateral de cráneo y huesos faciales
+cpms:RM-550-2023-MINSA:D0310,diagnostico,general,,,CPMS,D0310,RM-550-2023-MINSA,Sialografía
+cpms:RM-550-2023-MINSA:D0321,diagnostico,general,,,CPMS,D0321,RM-550-2023-MINSA,Otras radiografías de la articulación temporomandibular con informe
+cpms:RM-550-2023-MINSA:D0322,diagnostico,general,,,CPMS,D0322,RM-550-2023-MINSA,Estudio tomográfico
+cpms:RM-550-2023-MINSA:D0330,diagnostico,general,,,CPMS,D0330,RM-550-2023-MINSA,Radiografía panorámica
+cpms:RM-550-2023-MINSA:D0340,diagnostico,general,,,CPMS,D0340,RM-550-2023-MINSA,Radiografía cefalométrica
+cpms:RM-550-2023-MINSA:D0350,diagnostico,general,,,CPMS,D0350,RM-550-2023-MINSA,Imágenes fotográfica oral y facial
+cpms:RM-550-2023-MINSA:D0415,diagnostico,general,,,CPMS,D0415,RM-550-2023-MINSA,Rectolección de muestra de microorganismo para cultivo y prueba de sensibilidad
+cpms:RM-550-2023-MINSA:D0416,diagnostico,general,,,CPMS,D0416,RM-550-2023-MINSA,Cultivo viral
+cpms:RM-550-2023-MINSA:D0425,diagnostico,general,,,CPMS,D0425,RM-550-2023-MINSA,Pruebas de susceptibilidad de la caries
+cpms:RM-550-2023-MINSA:D0460,diagnostico,general,,,CPMS,D0460,RM-550-2023-MINSA,Pruebas de vitalidad de la pulpa
+cpms:RM-550-2023-MINSA:D0470,diagnostico,general,,,CPMS,D0470,RM-550-2023-MINSA,Impresiónes dentales para diagnóstico
+cpms:RM-550-2023-MINSA:D1110,prevencion,general,,,CPMS,D1110,RM-550-2023-MINSA,Profilaxis dental
+cpms:RM-550-2023-MINSA:D1206,prevencion,general,,,CPMS,D1206,RM-550-2023-MINSA,Aplicación flúor barniz
+cpms:RM-550-2023-MINSA:D1208,prevencion,general,,,CPMS,D1208,RM-550-2023-MINSA,Aplicación topica de flúor gel
+cpms:RM-550-2023-MINSA:D1310,prevencion,general,,,CPMS,D1310,RM-550-2023-MINSA,Asesoría nutricional para el control de enfermedades dentales
+cpms:RM-550-2023-MINSA:D1330,prevencion,general,,,CPMS,D1330,RM-550-2023-MINSA,Instrucción de higiene oral (IHO)
+cpms:RM-550-2023-MINSA:D1351,prevencion,tooth,,,CPMS,D1351,RM-550-2023-MINSA,Aplicación de sellante - por diente
+cpms:RM-550-2023-MINSA:D1352,prevencion,general,,,CPMS,D1352,RM-550-2023-MINSA,Inactivacion de caries dental con fluoruro de amino plata, resina; ionomero de vidrio
+cpms:RM-550-2023-MINSA:D1510,odontopediatria,general,,,CPMS,D1510,RM-550-2023-MINSA,Mantenedor de espacio fijo unilateral
+cpms:RM-550-2023-MINSA:D1515,odontopediatria,general,,,CPMS,D1515,RM-550-2023-MINSA,Mantenedor de espacio fijo bilateral
+cpms:RM-550-2023-MINSA:D1520,odontopediatria,general,,,CPMS,D1520,RM-550-2023-MINSA,Mantenedor de espacio removible unilateral
+cpms:RM-550-2023-MINSA:D1525,odontopediatria,general,,,CPMS,D1525,RM-550-2023-MINSA,Mantenedor de espacio removible bilateral
+cpms:RM-550-2023-MINSA:D1550,odontopediatria,general,,,CPMS,D1550,RM-550-2023-MINSA,Re-cementacion de mantenedor de espacio
+cpms:RM-550-2023-MINSA:D1555,odontopediatria,general,,,CPMS,D1555,RM-550-2023-MINSA,Remoción de mantenedor de espacio fijo por el dentista que no lo coloco
+cpms:RM-550-2023-MINSA:D2140,restauradora,surfaces,1,1,CPMS,D2140,RM-550-2023-MINSA,Restauracion de una superficie con amalgama en piezas dentarias, primarias o permanentes
+cpms:RM-550-2023-MINSA:D2150,restauradora,surfaces,2,2,CPMS,D2150,RM-550-2023-MINSA,Restauracion de dos superficies con amalgama en piezas dentarias, primarias o permanentes
+cpms:RM-550-2023-MINSA:D2160,restauradora,surfaces,3,3,CPMS,D2160,RM-550-2023-MINSA,Restauraciones de tres superficies con amalgama en piezas dentarias, primarias o permanentes
+cpms:RM-550-2023-MINSA:D2161,restauradora,surfaces,4,4,CPMS,D2161,RM-550-2023-MINSA,Restauraciones de cuatro superficies con amalgama en piezas dentarias, primarias o permanentes
+cpms:RM-550-2023-MINSA:D2330,restauradora,surfaces,1,1,CPMS,D2330,RM-550-2023-MINSA,Restauracion fotocurable de una superficie con resina en piezas dentarias anteriores (primarias o permanentes)
+cpms:RM-550-2023-MINSA:D2331,restauradora,surfaces,2,2,CPMS,D2331,RM-550-2023-MINSA,Restauraciones fotocurables de dos superficies con resina en piezas dentarias anteriores (primarias o permanentes)
+cpms:RM-550-2023-MINSA:D2332,restauradora,surfaces,3,3,CPMS,D2332,RM-550-2023-MINSA,Restauraciones fotocurables de tres superficies con resina en piezas dentarias anteriores (primarias o permanentes)
+cpms:RM-550-2023-MINSA:D2335,restauradora,surfaces,4,5,CPMS,D2335,RM-550-2023-MINSA,Restauraciones fotocurables de cuatro o más superficies con resina en piezas dentarias anteriores, puede incluir ángulo incisal (primarias o permanentes)
+cpms:RM-550-2023-MINSA:D2385,restauradora,surfaces,1,1,CPMS,D2385,RM-550-2023-MINSA,Restauracion de diente con resina, una superficie, posterior, permanente
+cpms:RM-550-2023-MINSA:D2386,restauradora,surfaces,2,2,CPMS,D2386,RM-550-2023-MINSA,Restauracion de diente con resina, dos superficies, posterior, permanente
+cpms:RM-550-2023-MINSA:D2390,restauradora,tooth,,,CPMS,D2390,RM-550-2023-MINSA,Restauracion fotocurable de resina en toda la corona de piezas anteriores (primarias o permanentes)
+cpms:RM-550-2023-MINSA:D2391,restauradora,surfaces,1,1,CPMS,D2391,RM-550-2023-MINSA,Restauracion fotocurable de una superficie con resina en piezas dentarias posterior (primarias o permanentes)
+cpms:RM-550-2023-MINSA:D2392,restauradora,surfaces,2,2,CPMS,D2392,RM-550-2023-MINSA,Restauraciones fotocurables de dos superficies con resina en piezas dentarias posteriores (primarias o permanentes)
+cpms:RM-550-2023-MINSA:D2393,restauradora,surfaces,3,3,CPMS,D2393,RM-550-2023-MINSA,Restauraciones fotocurables de tres superficies con resina en piezas dentarias posteriores (primarias o permanentes)
+cpms:RM-550-2023-MINSA:D2394,restauradora,surfaces,4,5,CPMS,D2394,RM-550-2023-MINSA,Restauraciones fotocurables de cuatro superficies o más con resina en piezas dentarias posteriores (primarias o permanentes)
+cpms:RM-550-2023-MINSA:D2510,restauradora,tooth,,,CPMS,D2510,RM-550-2023-MINSA,Inlay metálica de una superficie
+cpms:RM-550-2023-MINSA:D2520,restauradora,tooth,,,CPMS,D2520,RM-550-2023-MINSA,Inlay metálica de dos superficies
+cpms:RM-550-2023-MINSA:D2530,restauradora,tooth,,,CPMS,D2530,RM-550-2023-MINSA,Inlay metálico de tres superficies
+cpms:RM-550-2023-MINSA:D2542,restauradora,tooth,,,CPMS,D2542,RM-550-2023-MINSA,Onlay metálico de dos superficies
+cpms:RM-550-2023-MINSA:D2543,restauradora,tooth,,,CPMS,D2543,RM-550-2023-MINSA,Onlay metálico de tres superficies
+cpms:RM-550-2023-MINSA:D2544,restauradora,tooth,,,CPMS,D2544,RM-550-2023-MINSA,Onlay metálico de cuatro a más superficies
+cpms:RM-550-2023-MINSA:D2610,restauradora,tooth,,,CPMS,D2610,RM-550-2023-MINSA,Inlay de cerámica de porcelana una superficie
+cpms:RM-550-2023-MINSA:D2620,restauradora,tooth,,,CPMS,D2620,RM-550-2023-MINSA,Inlay de cerámica de porcelana dos superficies
+cpms:RM-550-2023-MINSA:D2630,restauradora,tooth,,,CPMS,D2630,RM-550-2023-MINSA,Inlay de cerámica de porcelana tres a más superficies
+cpms:RM-550-2023-MINSA:D2642,restauradora,tooth,,,CPMS,D2642,RM-550-2023-MINSA,Onlay de cerámica de porcelana de dos superficies
+cpms:RM-550-2023-MINSA:D2643,restauradora,tooth,,,CPMS,D2643,RM-550-2023-MINSA,Onlay de cerámica de porcelana de tres superficies
+cpms:RM-550-2023-MINSA:D2644,restauradora,tooth,,,CPMS,D2644,RM-550-2023-MINSA,Onlay de cerámica de porcelana de cuatro a más superficies
+cpms:RM-550-2023-MINSA:D2650,restauradora,tooth,,,CPMS,D2650,RM-550-2023-MINSA,Incrustaciones inlay de resina de una superficie
+cpms:RM-550-2023-MINSA:D2651,restauradora,tooth,,,CPMS,D2651,RM-550-2023-MINSA,Incrustaciones inlay de resina de dos superficies
+cpms:RM-550-2023-MINSA:D2652,restauradora,tooth,,,CPMS,D2652,RM-550-2023-MINSA,Incrustaciones inlay de resina de tres o más superficies
+cpms:RM-550-2023-MINSA:D2662,restauradora,tooth,,,CPMS,D2662,RM-550-2023-MINSA,Onlay de resina compuesta de dos superficies
+cpms:RM-550-2023-MINSA:D2663,restauradora,tooth,,,CPMS,D2663,RM-550-2023-MINSA,Onlay de resina compuesta de tres superficies
+cpms:RM-550-2023-MINSA:D2664,restauradora,tooth,,,CPMS,D2664,RM-550-2023-MINSA,Onlay de resina compuesta de cuatro a más superficies
+cpms:RM-550-2023-MINSA:D2710,protesis,tooth,,,CPMS,D2710,RM-550-2023-MINSA,Corona de base de acrílico (indirecta)
+cpms:RM-550-2023-MINSA:D2712,protesis,tooth,,,CPMS,D2712,RM-550-2023-MINSA,Corona de base de acrílico 3/4 de corona (indirecta)
+cpms:RM-550-2023-MINSA:D2721,protesis,tooth,,,CPMS,D2721,RM-550-2023-MINSA,Corona de acrílico predominantemente de metal base
+cpms:RM-550-2023-MINSA:D2740,protesis,tooth,,,CPMS,D2740,RM-550-2023-MINSA,Corona de porcelana
+cpms:RM-550-2023-MINSA:D2751,protesis,tooth,,,CPMS,D2751,RM-550-2023-MINSA,Corona de porcelana base de metal
+cpms:RM-550-2023-MINSA:D2781,protesis,tooth,,,CPMS,D2781,RM-550-2023-MINSA,Corona de 3/4 de metal base
+cpms:RM-550-2023-MINSA:D2783,protesis,tooth,,,CPMS,D2783,RM-550-2023-MINSA,Corona 3/4 de porcelana (no incluye carillas faciales)
+cpms:RM-550-2023-MINSA:D2791,protesis,tooth,,,CPMS,D2791,RM-550-2023-MINSA,Corona de metal base
+cpms:RM-550-2023-MINSA:D2794,protesis,tooth,,,CPMS,D2794,RM-550-2023-MINSA,Corona de titanio
+cpms:RM-550-2023-MINSA:D2799,protesis,tooth,,,CPMS,D2799,RM-550-2023-MINSA,Corona provisional
+cpms:RM-550-2023-MINSA:D2910,protesis,tooth,,,CPMS,D2910,RM-550-2023-MINSA,Re-cementacion de inlay y onlay o cementacion parcial
+cpms:RM-550-2023-MINSA:D2915,protesis,tooth,,,CPMS,D2915,RM-550-2023-MINSA,Re-cementacion de poste prefabricado
+cpms:RM-550-2023-MINSA:D2920,protesis,tooth,,,CPMS,D2920,RM-550-2023-MINSA,Re-cementacion de corona
+cpms:RM-550-2023-MINSA:D2930,protesis,tooth,,,CPMS,D2930,RM-550-2023-MINSA,Corona prefabricada de acero diente primario
+cpms:RM-550-2023-MINSA:D2931,protesis,tooth,,,CPMS,D2931,RM-550-2023-MINSA,Corona prefabricada de acero diente permanente
+cpms:RM-550-2023-MINSA:D2932,protesis,tooth,,,CPMS,D2932,RM-550-2023-MINSA,Corona prefabricada de acrílico
+cpms:RM-550-2023-MINSA:D2933,protesis,tooth,,,CPMS,D2933,RM-550-2023-MINSA,Corona de acero inoxidable prefabricado con frente estético de acrílico
+cpms:RM-550-2023-MINSA:D2934,protesis,tooth,,,CPMS,D2934,RM-550-2023-MINSA,Corona de acero inoxidable prefabricado con revestimiento estético - diente primario
+cpms:RM-550-2023-MINSA:D2940,protesis,tooth,,,CPMS,D2940,RM-550-2023-MINSA,Relleno sedante (eugenato)
+cpms:RM-550-2023-MINSA:D2950,protesis,tooth,,,CPMS,D2950,RM-550-2023-MINSA,Reconstrucción de muñónes, incluyendo los pines
+cpms:RM-550-2023-MINSA:D2951,protesis,tooth,,,CPMS,D2951,RM-550-2023-MINSA,Pin de retención por diente
+cpms:RM-550-2023-MINSA:D2952,protesis,tooth,,,CPMS,D2952,RM-550-2023-MINSA,Realizacion de poste y muñón para la corona
+cpms:RM-550-2023-MINSA:D2954,protesis,tooth,,,CPMS,D2954,RM-550-2023-MINSA,Poste prefabricado y núcleo adicional por cada diente
+cpms:RM-550-2023-MINSA:D2955,protesis,tooth,,,CPMS,D2955,RM-550-2023-MINSA,Remoción de poste
+cpms:RM-550-2023-MINSA:D2960,protesis,tooth,,,CPMS,D2960,RM-550-2023-MINSA,Carilla labial de resina directa
+cpms:RM-550-2023-MINSA:D2961,protesis,tooth,,,CPMS,D2961,RM-550-2023-MINSA,Carillas labiales de resina indirecta
+cpms:RM-550-2023-MINSA:D2962,protesis,tooth,,,CPMS,D2962,RM-550-2023-MINSA,Carillas labiales de porcelana
+cpms:RM-550-2023-MINSA:D2971,protesis,tooth,,,CPMS,D2971,RM-550-2023-MINSA,Reparación de la corona
+cpms:RM-550-2023-MINSA:D2999,protesis,general,,,CPMS,D2999,RM-550-2023-MINSA,Procedimiento de restauracion no especifica, con informe
+cpms:RM-550-2023-MINSA:D3110,endodoncia,tooth,,,CPMS,D3110,RM-550-2023-MINSA,Recubrimiento pulpar directo
+cpms:RM-550-2023-MINSA:D3120,endodoncia,tooth,,,CPMS,D3120,RM-550-2023-MINSA,Recubrimiento pulpar indirecto
+cpms:RM-550-2023-MINSA:D3220,endodoncia,tooth,,,CPMS,D3220,RM-550-2023-MINSA,Pulpotomía
+cpms:RM-550-2023-MINSA:D3221,endodoncia,tooth,,,CPMS,D3221,RM-550-2023-MINSA,Apertura cameral
+cpms:RM-550-2023-MINSA:D3222,endodoncia,tooth,,,CPMS,D3222,RM-550-2023-MINSA,Pulpotomía parcial para apexogénesis
+cpms:RM-550-2023-MINSA:D3230,endodoncia,tooth,,,CPMS,D3230,RM-550-2023-MINSA,Pulpectomía anterior dientes deciduo
+cpms:RM-550-2023-MINSA:D3240,endodoncia,tooth,,,CPMS,D3240,RM-550-2023-MINSA,Pulpectomía posterior diente deciduo
+cpms:RM-550-2023-MINSA:D3310,endodoncia,tooth,,,CPMS,D3310,RM-550-2023-MINSA,Terapia endodontica en piezas dentarias anteriores vitales
+cpms:RM-550-2023-MINSA:D3311,endodoncia,tooth,,,CPMS,D3311,RM-550-2023-MINSA,Tratamiento de conducto en pieza uniradicular no vital (sin obturacion final)
+cpms:RM-550-2023-MINSA:D3320,endodoncia,tooth,,,CPMS,D3320,RM-550-2023-MINSA,Terapia endodontica en piezas dentarias bicúspides vitales
+cpms:RM-550-2023-MINSA:D3330,endodoncia,tooth,,,CPMS,D3330,RM-550-2023-MINSA,Terapia endodontica en piezas dentarias posteriores vitales
+cpms:RM-550-2023-MINSA:D3331,endodoncia,tooth,,,CPMS,D3331,RM-550-2023-MINSA,Tratamiento de la obstrucción del conducto radicular, acceso no quirúrgico
+cpms:RM-550-2023-MINSA:D3332,endodoncia,tooth,,,CPMS,D3332,RM-550-2023-MINSA,Terapia endodontica incompleta, diente inoperable, sin posibilidad de restauracion o fracturado
+cpms:RM-550-2023-MINSA:D3333,endodoncia,tooth,,,CPMS,D3333,RM-550-2023-MINSA,Reparación de la raíz interna por defectos de Perforación
+cpms:RM-550-2023-MINSA:D3346,endodoncia,tooth,,,CPMS,D3346,RM-550-2023-MINSA,Retratamiento de endodoncia en piezas dentaria anteriores
+cpms:RM-550-2023-MINSA:D3347,endodoncia,tooth,,,CPMS,D3347,RM-550-2023-MINSA,Retratamiento de endodoncia en piezas dentarias bicúspides
+cpms:RM-550-2023-MINSA:D3348,endodoncia,tooth,,,CPMS,D3348,RM-550-2023-MINSA,Retratamiento de endodoncia de piezas dentarias posteriores
+cpms:RM-550-2023-MINSA:D3351,endodoncia,tooth,,,CPMS,D3351,RM-550-2023-MINSA,Apexificacion visita inicial
+cpms:RM-550-2023-MINSA:D3352,endodoncia,tooth,,,CPMS,D3352,RM-550-2023-MINSA,Apexificacion remplazo de medicación provisional
+cpms:RM-550-2023-MINSA:D3353,endodoncia,tooth,,,CPMS,D3353,RM-550-2023-MINSA,Apexificacion visita final /apicoformación/recalcificación – visita final (incluye terapia de canal radicular completa - cierre apical/Reparación calcificar de Perforaciónes, reabsorcion de raíz, etc)
+cpms:RM-550-2023-MINSA:D3410,endodoncia,tooth,,,CPMS,D3410,RM-550-2023-MINSA,Apicectomía/cirugía periapical en piezas anteriores
+cpms:RM-550-2023-MINSA:D3421,endodoncia,tooth,,,CPMS,D3421,RM-550-2023-MINSA,Apicectomía/cirugía periapical en piezas bicúspides
+cpms:RM-550-2023-MINSA:D3425,endodoncia,tooth,,,CPMS,D3425,RM-550-2023-MINSA,Apicectomía/cirugía periapical en piezas posteriores
+cpms:RM-550-2023-MINSA:D3430,endodoncia,tooth,,,CPMS,D3430,RM-550-2023-MINSA,Obturacion retrograda por raíz
+cpms:RM-550-2023-MINSA:D3450,endodoncia,tooth,,,CPMS,D3450,RM-550-2023-MINSA,Amputación radicular
+cpms:RM-550-2023-MINSA:D3460,endodoncia,tooth,,,CPMS,D3460,RM-550-2023-MINSA,Implante endodontico endoóseo
+cpms:RM-550-2023-MINSA:D3470,endodoncia,tooth,,,CPMS,D3470,RM-550-2023-MINSA,Reimplantación intencional incluyendo ferulizacion
+cpms:RM-550-2023-MINSA:D3920,endodoncia,tooth,,,CPMS,D3920,RM-550-2023-MINSA,HemiSección (incluyendo cualquier Remoción de raíz), sin incluir la terapia de conducto radicular
+cpms:RM-550-2023-MINSA:D3999,endodoncia,general,,,CPMS,D3999,RM-550-2023-MINSA,Procedimiento endodontico no especificado, por informe
+cpms:RM-550-2023-MINSA:D4210,periodoncia,general,,,CPMS,D4210,RM-550-2023-MINSA,Gingivectomía - gingivoplastía de 4 a más dientes contiguos o espacios dentales vecinos por cuadrante o sextantes
+cpms:RM-550-2023-MINSA:D4211,periodoncia,general,,,CPMS,D4211,RM-550-2023-MINSA,Gingivectomía - gingivoplastía de 1 a 3 dientes contiguos o espacios dentales vecinos por cuadrante o sextantes
+cpms:RM-550-2023-MINSA:D4240,periodoncia,quadrant,,,CPMS,D4240,RM-550-2023-MINSA,Colgajo periodontal con alisado radicular de 4 a más dientes contiguos o espacios dentales vecinos por cuadrante
+cpms:RM-550-2023-MINSA:D4241,periodoncia,quadrant,,,CPMS,D4241,RM-550-2023-MINSA,Colgajo periodontal con alisado radicular de 1 a 3 dientes contiguos o espacios dentales vecinos por cuadrante
+cpms:RM-550-2023-MINSA:D4245,periodoncia,general,,,CPMS,D4245,RM-550-2023-MINSA,Colgajo posicionado apicalmente
+cpms:RM-550-2023-MINSA:D4249,periodoncia,general,,,CPMS,D4249,RM-550-2023-MINSA,Alargamiento clínico de corona
+cpms:RM-550-2023-MINSA:D4266,periodoncia,general,,,CPMS,D4266,RM-550-2023-MINSA,Regeneracion tisular guiada - barrera absorbible sin relleno
+cpms:RM-550-2023-MINSA:D4267,periodoncia,general,,,CPMS,D4267,RM-550-2023-MINSA,Regeneracion tisular guiada - barrera no absorbible sin relleno
+cpms:RM-550-2023-MINSA:D4268,periodoncia,general,,,CPMS,D4268,RM-550-2023-MINSA,Correcciones post quirúrgicas
+cpms:RM-550-2023-MINSA:D4270,periodoncia,general,,,CPMS,D4270,RM-550-2023-MINSA,Colgajo desplazado de tejido blando
+cpms:RM-550-2023-MINSA:D4271,periodoncia,general,,,CPMS,D4271,RM-550-2023-MINSA,Injerto gingival libre (incluye cirugía de la zona donante)
+cpms:RM-550-2023-MINSA:D4273,periodoncia,general,,,CPMS,D4273,RM-550-2023-MINSA,Injerto de tejido conectivo subepitelial (incluye cirugía de la zona donante)
+cpms:RM-550-2023-MINSA:D4274,periodoncia,general,,,CPMS,D4274,RM-550-2023-MINSA,Cuña distal o proximal (cuando no se realiza en conjuncion con procedimientos quirúrgicos en la misma área anatómica
+cpms:RM-550-2023-MINSA:D4275,periodoncia,general,,,CPMS,D4275,RM-550-2023-MINSA,Aloinjerto de tejido blando
+cpms:RM-550-2023-MINSA:D4320,periodoncia,general,,,CPMS,D4320,RM-550-2023-MINSA,Ferulizacion provisional intracoronal
+cpms:RM-550-2023-MINSA:D4321,periodoncia,general,,,CPMS,D4321,RM-550-2023-MINSA,Ferulizacion provisional extracoronal
+cpms:RM-550-2023-MINSA:D4322,periodoncia,general,,,CPMS,D4322,RM-550-2023-MINSA,Fijación y/o ferulizacion de piezas dentales con resina fotocurable
+cpms:RM-550-2023-MINSA:D4341,periodoncia,quadrant,,,CPMS,D4341,RM-550-2023-MINSA,Raspado y alisado radicular - cuatro a más dientes por cuadrante
+cpms:RM-550-2023-MINSA:D4342,periodoncia,quadrant,,,CPMS,D4342,RM-550-2023-MINSA,Raspado y alisado radicular de uno a tres dientes por cuadrante
+cpms:RM-550-2023-MINSA:D4355,periodoncia,general,,,CPMS,D4355,RM-550-2023-MINSA,Raspaje dental; destartraje dental
+cpms:RM-550-2023-MINSA:D4381,periodoncia,general,,,CPMS,D4381,RM-550-2023-MINSA,Medicación antimicrobiana de uso local controlada
+cpms:RM-550-2023-MINSA:D4910,periodoncia,general,,,CPMS,D4910,RM-550-2023-MINSA,Mantenimiento periodontal
+cpms:RM-550-2023-MINSA:D4999,periodoncia,general,,,CPMS,D4999,RM-550-2023-MINSA,Procedimiento periodontal no especificado, por informe
+cpms:RM-550-2023-MINSA:D5110,protesis,arch,,,CPMS,D5110,RM-550-2023-MINSA,Prótesis dental completa maxilar
+cpms:RM-550-2023-MINSA:D5120,protesis,arch,,,CPMS,D5120,RM-550-2023-MINSA,Prótesis dental completa mandibular
+cpms:RM-550-2023-MINSA:D5130,protesis,arch,,,CPMS,D5130,RM-550-2023-MINSA,Prótesis inmediata maxilar
+cpms:RM-550-2023-MINSA:D5140,protesis,arch,,,CPMS,D5140,RM-550-2023-MINSA,Prótesis inmediata mandibular
+cpms:RM-550-2023-MINSA:D5211,protesis,arch,,,CPMS,D5211,RM-550-2023-MINSA,Prótesis removible parcial maxilar base de acrílico (termocurado)
+cpms:RM-550-2023-MINSA:D5212,protesis,arch,,,CPMS,D5212,RM-550-2023-MINSA,Prótesis removible parcial mandibular base de acrílico (termocurado)
+cpms:RM-550-2023-MINSA:D5213,protesis,arch,,,CPMS,D5213,RM-550-2023-MINSA,Prótesis removible parcial maxilar base metálica
+cpms:RM-550-2023-MINSA:D5214,protesis,arch,,,CPMS,D5214,RM-550-2023-MINSA,Prótesis removible parcial mandibular base metálica
+cpms:RM-550-2023-MINSA:D5225,protesis,arch,,,CPMS,D5225,RM-550-2023-MINSA,Prótesis removible parcial maxilar - base flexible
+cpms:RM-550-2023-MINSA:D5226,protesis,arch,,,CPMS,D5226,RM-550-2023-MINSA,Prótesis removible parcial mandibular - base flexible
+cpms:RM-550-2023-MINSA:D5281,protesis,arch,,,CPMS,D5281,RM-550-2023-MINSA,Prótesis removible parcial unilateral - una pieza moldeada de metal
+cpms:RM-550-2023-MINSA:D5410,protesis,arch,,,CPMS,D5410,RM-550-2023-MINSA,Ajuste de prótesis completa maxilar
+cpms:RM-550-2023-MINSA:D5411,protesis,arch,,,CPMS,D5411,RM-550-2023-MINSA,Ajuste de prótesis completa mandibular
+cpms:RM-550-2023-MINSA:D5421,protesis,arch,,,CPMS,D5421,RM-550-2023-MINSA,Ajuste de prótesis parcial maxilar
+cpms:RM-550-2023-MINSA:D5422,protesis,arch,,,CPMS,D5422,RM-550-2023-MINSA,Ajuste de prótesis parcial mandibular
+cpms:RM-550-2023-MINSA:D5510,protesis,arch,,,CPMS,D5510,RM-550-2023-MINSA,Reparación de fractura de base de dentadura completa
+cpms:RM-550-2023-MINSA:D5520,protesis,arch,,,CPMS,D5520,RM-550-2023-MINSA,Remplazar los dientes perdidos o rotos
+cpms:RM-550-2023-MINSA:D5610,protesis,arch,,,CPMS,D5610,RM-550-2023-MINSA,Reparación de prótesis parcial de base de acrílico
+cpms:RM-550-2023-MINSA:D5620,protesis,arch,,,CPMS,D5620,RM-550-2023-MINSA,Reparación de armazon colado
+cpms:RM-550-2023-MINSA:D5630,protesis,arch,,,CPMS,D5630,RM-550-2023-MINSA,Reparación o remplazo de retenedores fracturados
+cpms:RM-550-2023-MINSA:D5640,protesis,arch,,,CPMS,D5640,RM-550-2023-MINSA,Remplazo de dientes fracturados
+cpms:RM-550-2023-MINSA:D5650,protesis,arch,,,CPMS,D5650,RM-550-2023-MINSA,Añadir diente a la prótesis parcial existente
+cpms:RM-550-2023-MINSA:D5660,protesis,arch,,,CPMS,D5660,RM-550-2023-MINSA,Agregar retenedor a la prótesis parcial existente
+cpms:RM-550-2023-MINSA:D5670,protesis,arch,,,CPMS,D5670,RM-550-2023-MINSA,Remplazar todos los dientes y acrílico sobre armazon moldeado de metal
+cpms:RM-550-2023-MINSA:D5710,protesis,arch,,,CPMS,D5710,RM-550-2023-MINSA,Rebase de prótesis maxilar completa
+cpms:RM-550-2023-MINSA:D5711,protesis,arch,,,CPMS,D5711,RM-550-2023-MINSA,Rebase de prótesis mandibular completa
+cpms:RM-550-2023-MINSA:D5720,protesis,arch,,,CPMS,D5720,RM-550-2023-MINSA,Rebase de prótesis maxilar parcial
+cpms:RM-550-2023-MINSA:D5721,protesis,arch,,,CPMS,D5721,RM-550-2023-MINSA,Rebase de prótesis mandibular parcial
+cpms:RM-550-2023-MINSA:D5730,protesis,arch,,,CPMS,D5730,RM-550-2023-MINSA,Revestimiento de prótesis maxilar completa en consultorio
+cpms:RM-550-2023-MINSA:D5731,protesis,arch,,,CPMS,D5731,RM-550-2023-MINSA,Revestimiento de prótesis mandibular completa en consultorio
+cpms:RM-550-2023-MINSA:D5740,protesis,arch,,,CPMS,D5740,RM-550-2023-MINSA,Revestimiento de prótesis parcial maxilar en consultorio
+cpms:RM-550-2023-MINSA:D5741,protesis,arch,,,CPMS,D5741,RM-550-2023-MINSA,Revestimiento de prótesis parcial mandibular en consultorio
+cpms:RM-550-2023-MINSA:D5750,protesis,arch,,,CPMS,D5750,RM-550-2023-MINSA,Revestimiento de prótesis completa maxilar en laboratorio
+cpms:RM-550-2023-MINSA:D5751,protesis,arch,,,CPMS,D5751,RM-550-2023-MINSA,Revestimiento de prótesis completa mandibular en laboratorio
+cpms:RM-550-2023-MINSA:D5760,protesis,arch,,,CPMS,D5760,RM-550-2023-MINSA,Revestimiento de prótesis parcial maxilar en laboratorio
+cpms:RM-550-2023-MINSA:D5761,protesis,arch,,,CPMS,D5761,RM-550-2023-MINSA,Revestimiento de prótesis laboratorio
+cpms:RM-550-2023-MINSA:D5810,protesis,arch,,,CPMS,D5810,RM-550-2023-MINSA,Prótesis completa maxilar provisional
+cpms:RM-550-2023-MINSA:D5811,protesis,arch,,,CPMS,D5811,RM-550-2023-MINSA,Prótesis completa mandibular provisional
+cpms:RM-550-2023-MINSA:D5820,protesis,arch,,,CPMS,D5820,RM-550-2023-MINSA,Prótesis removible parcial maxilar provisional (curado rápido)
+cpms:RM-550-2023-MINSA:D5821,protesis,arch,,,CPMS,D5821,RM-550-2023-MINSA,Prótesis removible parcial mandibular provisional (curado rápido)
+cpms:RM-550-2023-MINSA:D5850,protesis,arch,,,CPMS,D5850,RM-550-2023-MINSA,Acondicionamiento del tejido maxilar
+cpms:RM-550-2023-MINSA:D5851,protesis,arch,,,CPMS,D5851,RM-550-2023-MINSA,Acondicionamiento del tejido mandibular
+cpms:RM-550-2023-MINSA:D5860,protesis,arch,,,CPMS,D5860,RM-550-2023-MINSA,Sobre dentadura completa
+cpms:RM-550-2023-MINSA:D5861,protesis,arch,,,CPMS,D5861,RM-550-2023-MINSA,Sobre dentadura parcial
+cpms:RM-550-2023-MINSA:D5862,protesis,arch,,,CPMS,D5862,RM-550-2023-MINSA,Atachés de precision
+cpms:RM-550-2023-MINSA:D5875,protesis,arch,,,CPMS,D5875,RM-550-2023-MINSA,Modificacion de la prótesis removible siguiendo la cirugía de implantes
+cpms:RM-550-2023-MINSA:D5899,protesis,arch,,,CPMS,D5899,RM-550-2023-MINSA,Procedimiento sin especificar de prótesis removible
+cpms:RM-550-2023-MINSA:D5911,protesis,general,,,CPMS,D5911,RM-550-2023-MINSA,Mascara facial por secciones
+cpms:RM-550-2023-MINSA:D5912,protesis,general,,,CPMS,D5912,RM-550-2023-MINSA,Mascara facial completa
+cpms:RM-550-2023-MINSA:D5913,protesis,general,,,CPMS,D5913,RM-550-2023-MINSA,Prótesis nasal
+cpms:RM-550-2023-MINSA:D5914,protesis,general,,,CPMS,D5914,RM-550-2023-MINSA,Prótesis articular
+cpms:RM-550-2023-MINSA:D5915,protesis,general,,,CPMS,D5915,RM-550-2023-MINSA,Prótesis órbital
+cpms:RM-550-2023-MINSA:D5916,protesis,general,,,CPMS,D5916,RM-550-2023-MINSA,Prótesis ocular
+cpms:RM-550-2023-MINSA:D5919,protesis,general,,,CPMS,D5919,RM-550-2023-MINSA,Prótesis facial
+cpms:RM-550-2023-MINSA:D5922,protesis,general,,,CPMS,D5922,RM-550-2023-MINSA,Prótesis nasal septal
+cpms:RM-550-2023-MINSA:D5923,protesis,general,,,CPMS,D5923,RM-550-2023-MINSA,Prótesis ocular, con carácter interino
+cpms:RM-550-2023-MINSA:D5924,protesis,general,,,CPMS,D5924,RM-550-2023-MINSA,Prótesis craneal
+cpms:RM-550-2023-MINSA:D5925,protesis,general,,,CPMS,D5925,RM-550-2023-MINSA,Implante de prótesis de aumento facial
+cpms:RM-550-2023-MINSA:D5926,protesis,general,,,CPMS,D5926,RM-550-2023-MINSA,Sustitucion de prótesis nasal
+cpms:RM-550-2023-MINSA:D5927,protesis,general,,,CPMS,D5927,RM-550-2023-MINSA,Prótesis auricular de remplazo
+cpms:RM-550-2023-MINSA:D5928,protesis,general,,,CPMS,D5928,RM-550-2023-MINSA,Prótesis órbital de remplazo
+cpms:RM-550-2023-MINSA:D5929,protesis,general,,,CPMS,D5929,RM-550-2023-MINSA,Prótesis facial de remplazo
+cpms:RM-550-2023-MINSA:D5931,protesis,general,,,CPMS,D5931,RM-550-2023-MINSA,Obturador protésico por cirugía
+cpms:RM-550-2023-MINSA:D5932,protesis,general,,,CPMS,D5932,RM-550-2023-MINSA,Prótesis para obturacion definitiva
+cpms:RM-550-2023-MINSA:D5933,protesis,general,,,CPMS,D5933,RM-550-2023-MINSA,Prótesis de obturador modificable
+cpms:RM-550-2023-MINSA:D5934,protesis,general,,,CPMS,D5934,RM-550-2023-MINSA,Resección mandibular prótesis con brida guía
+cpms:RM-550-2023-MINSA:D5935,protesis,general,,,CPMS,D5935,RM-550-2023-MINSA,Resección mandibular prótesis sin brida guía
+cpms:RM-550-2023-MINSA:D5936,protesis,general,,,CPMS,D5936,RM-550-2023-MINSA,Obturador protésico provisional
+cpms:RM-550-2023-MINSA:D5937,protesis,general,,,CPMS,D5937,RM-550-2023-MINSA,Aparato para trismo
+cpms:RM-550-2023-MINSA:D5951,protesis,general,,,CPMS,D5951,RM-550-2023-MINSA,Prótesis para ayuda de alimentacion
+cpms:RM-550-2023-MINSA:D5952,protesis,general,,,CPMS,D5952,RM-550-2023-MINSA,Laringofono prótesis pediátrica
+cpms:RM-550-2023-MINSA:D5953,protesis,general,,,CPMS,D5953,RM-550-2023-MINSA,Laringofono prótesis en adulto
+cpms:RM-550-2023-MINSA:D5954,protesis,general,,,CPMS,D5954,RM-550-2023-MINSA,Aumento de prótesis palatal
+cpms:RM-550-2023-MINSA:D5955,protesis,general,,,CPMS,D5955,RM-550-2023-MINSA,Elevador palatino protésico definitivo
+cpms:RM-550-2023-MINSA:D5958,protesis,general,,,CPMS,D5958,RM-550-2023-MINSA,Elevador palatino protésico provisional
+cpms:RM-550-2023-MINSA:D5959,protesis,general,,,CPMS,D5959,RM-550-2023-MINSA,Modificacion de prótesis elevador palatino
+cpms:RM-550-2023-MINSA:D5960,protesis,general,,,CPMS,D5960,RM-550-2023-MINSA,Prótesis laringofono con modificaciones
+cpms:RM-550-2023-MINSA:D5982,protesis,general,,,CPMS,D5982,RM-550-2023-MINSA,Stent o endoprótesis quirúrgica
+cpms:RM-550-2023-MINSA:D5983,protesis,general,,,CPMS,D5983,RM-550-2023-MINSA,Trasmision de radiación
+cpms:RM-550-2023-MINSA:D5984,protesis,general,,,CPMS,D5984,RM-550-2023-MINSA,Blindaje contra radiación
+cpms:RM-550-2023-MINSA:D5985,protesis,general,,,CPMS,D5985,RM-550-2023-MINSA,Radiación cono localizador
+cpms:RM-550-2023-MINSA:D5986,protesis,general,,,CPMS,D5986,RM-550-2023-MINSA,Soporte de gel fluoruro
+cpms:RM-550-2023-MINSA:D5987,protesis,general,,,CPMS,D5987,RM-550-2023-MINSA,Férula de la comisura
+cpms:RM-550-2023-MINSA:D5988,protesis,general,,,CPMS,D5988,RM-550-2023-MINSA,Férula quirúrgica
+cpms:RM-550-2023-MINSA:D5999,protesis,general,,,CPMS,D5999,RM-550-2023-MINSA,Prótesis maxilofaciales sin especificar, con informe
+cpms:RM-550-2023-MINSA:D6010,implantologia,tooth,,,CPMS,D6010,RM-550-2023-MINSA,Colocación quirúrgica del cuerpo del implante; implante endosteal
+cpms:RM-550-2023-MINSA:D6040,implantologia,tooth,,,CPMS,D6040,RM-550-2023-MINSA,Colocación quirúrgica del cuerpo del implante; implante eposteal
+cpms:RM-550-2023-MINSA:D6050,implantologia,tooth,,,CPMS,D6050,RM-550-2023-MINSA,Colocación quirúrgica: implante transostales
+cpms:RM-550-2023-MINSA:D6053,implantologia,arch,,,CPMS,D6053,RM-550-2023-MINSA,Implante/pilar apoyo de prótesis removible en arcada edéntula completa
+cpms:RM-550-2023-MINSA:D6054,implantologia,arch,,,CPMS,D6054,RM-550-2023-MINSA,Implante o pilar apoyo de prótesis removible de arcada edéntula parcial
+cpms:RM-550-2023-MINSA:D6055,implantologia,general,,,CPMS,D6055,RM-550-2023-MINSA,Implante dental apoyado en barra de conexión
+cpms:RM-550-2023-MINSA:D6056,implantologia,tooth,,,CPMS,D6056,RM-550-2023-MINSA,Pilar prefabricado - incluye Colocación
+cpms:RM-550-2023-MINSA:D6057,implantologia,tooth,,,CPMS,D6057,RM-550-2023-MINSA,Pilar personalizado - incluye la colocación
+cpms:RM-550-2023-MINSA:D6058,implantologia,tooth,,,CPMS,D6058,RM-550-2023-MINSA,Pilar apoyado en corona de porcelana
+cpms:RM-550-2023-MINSA:D6060,implantologia,tooth,,,CPMS,D6060,RM-550-2023-MINSA,Pilar apoyado en corona de porcelana fusionada con metal (predominante de metal base)
+cpms:RM-550-2023-MINSA:D6061,implantologia,tooth,,,CPMS,D6061,RM-550-2023-MINSA,Pilar apoyado en corona de porcelana fusionada con metal resistente (metal noble)
+cpms:RM-550-2023-MINSA:D6063,implantologia,tooth,,,CPMS,D6063,RM-550-2023-MINSA,Pilar apoyado corona fundido en metal base (predominante base de metal)
+cpms:RM-550-2023-MINSA:D6064,implantologia,tooth,,,CPMS,D6064,RM-550-2023-MINSA,Pilar apoyado con corona de metal fundido de metal resistente (noble)
+cpms:RM-550-2023-MINSA:D6065,implantologia,tooth,,,CPMS,D6065,RM-550-2023-MINSA,Implante soportado en corona de metal
+cpms:RM-550-2023-MINSA:D6068,implantologia,general,,,CPMS,D6068,RM-550-2023-MINSA,Pilar apoyado en retenedor de porcelana en prótesis parcial fija
+cpms:RM-550-2023-MINSA:D6070,implantologia,tooth,,,CPMS,D6070,RM-550-2023-MINSA,Pilar apoyado en retenedor de porcelana fundida de metal para prótesis parcial fija (metal predominantemente base)
+cpms:RM-550-2023-MINSA:D6071,implantologia,tooth,,,CPMS,D6071,RM-550-2023-MINSA,Pilar apoyado en retenedor de porcelana fundida de metal para prótesis parcial fija metal resistente (metal noble)
+cpms:RM-550-2023-MINSA:D6073,implantologia,tooth,,,CPMS,D6073,RM-550-2023-MINSA,Pilar apoyado en retenedor para metal fundido en prótesis parcial fija (metal predominantemente base)
+cpms:RM-550-2023-MINSA:D6074,implantologia,tooth,,,CPMS,D6074,RM-550-2023-MINSA,Pilar apoyado para la retención (retenedor) de metal fundido para prótesis parcial fija (metal noble)
+cpms:RM-550-2023-MINSA:D6075,implantologia,tooth,,,CPMS,D6075,RM-550-2023-MINSA,Implante con apoyo de retención (retenedor) de cerámica en prótesis parcial fija
+cpms:RM-550-2023-MINSA:D6076,implantologia,tooth,,,CPMS,D6076,RM-550-2023-MINSA,Implante con apoyo de retención de porcelana fundida de metal para prótesis fija
+cpms:RM-550-2023-MINSA:D6078,implantologia,arch,,,CPMS,D6078,RM-550-2023-MINSA,Implante/pilar de apoyo para prótesis fija arcada parcialmente edéntula
+cpms:RM-550-2023-MINSA:D6079,implantologia,arch,,,CPMS,D6079,RM-550-2023-MINSA,Implante/pilar de apoyo para prótesis fija arcada completamente desdentada
+cpms:RM-550-2023-MINSA:D6080,implantologia,general,,,CPMS,D6080,RM-550-2023-MINSA,Los procedimientos de mantenimiento incluyendo la Remoción de la prótesis, limpieza de la prótesis, limpieza de los pilares e Inserción de la prótesis
+cpms:RM-550-2023-MINSA:D6090,implantologia,general,,,CPMS,D6090,RM-550-2023-MINSA,Reparación de cualquier parte del implante soportada en prótesis, con informe
+cpms:RM-550-2023-MINSA:D6094,implantologia,tooth,,,CPMS,D6094,RM-550-2023-MINSA,Pilar apoyado corona de titanio
+cpms:RM-550-2023-MINSA:D6095,implantologia,tooth,,,CPMS,D6095,RM-550-2023-MINSA,Reparación de pilar de implante, con reporte
+cpms:RM-550-2023-MINSA:D6100,implantologia,tooth,,,CPMS,D6100,RM-550-2023-MINSA,Remoción de implante, con reporte
+cpms:RM-550-2023-MINSA:D6190,implantologia,general,,,CPMS,D6190,RM-550-2023-MINSA,Radiografía índice de implante quirúrgico con reporte
+cpms:RM-550-2023-MINSA:D6194,implantologia,tooth,,,CPMS,D6194,RM-550-2023-MINSA,Pilar apoyado en retenedor de la corona para prótesis parcial fija
+cpms:RM-550-2023-MINSA:D6199,implantologia,general,,,CPMS,D6199,RM-550-2023-MINSA,Procedimiento de implante inespecífico, con reporte
+cpms:RM-550-2023-MINSA:D6205,protesis,tooth,,,CPMS,D6205,RM-550-2023-MINSA,Puente de resina compuesta indirecta
+cpms:RM-550-2023-MINSA:D6211,protesis,tooth,,,CPMS,D6211,RM-550-2023-MINSA,Puente fundido en metal predominantemente de metal base
+cpms:RM-550-2023-MINSA:D6212,protesis,tooth,,,CPMS,D6212,RM-550-2023-MINSA,Puente fundido en metal resistente (noble)
+cpms:RM-550-2023-MINSA:D6214,protesis,tooth,,,CPMS,D6214,RM-550-2023-MINSA,Puente de titanio
+cpms:RM-550-2023-MINSA:D6242,protesis,tooth,,,CPMS,D6242,RM-550-2023-MINSA,Puente de porcelana fusionado con metal resistente (noble)
+cpms:RM-550-2023-MINSA:D6245,protesis,tooth,,,CPMS,D6245,RM-550-2023-MINSA,Puente de porcelana
+cpms:RM-550-2023-MINSA:D6251,protesis,tooth,,,CPMS,D6251,RM-550-2023-MINSA,Puente de resina con metal predominantemente de metal base
+cpms:RM-550-2023-MINSA:D6252,protesis,tooth,,,CPMS,D6252,RM-550-2023-MINSA,Puente de resina con metal resistente (noble)
+cpms:RM-550-2023-MINSA:D6253,protesis,tooth,,,CPMS,D6253,RM-550-2023-MINSA,Puente provisional
+cpms:RM-550-2023-MINSA:D6920,protesis,general,,,CPMS,D6920,RM-550-2023-MINSA,Conector en barra
+cpms:RM-550-2023-MINSA:D6930,protesis,general,,,CPMS,D6930,RM-550-2023-MINSA,Re-cementado de prótesis parcial fija
+cpms:RM-550-2023-MINSA:D6940,protesis,general,,,CPMS,D6940,RM-550-2023-MINSA,Dispositivo dental flexible
+cpms:RM-550-2023-MINSA:D6970,protesis,tooth,,,CPMS,D6970,RM-550-2023-MINSA,Poste fundido y núcleo adicional para retenedor de prótesis parcial fija
+cpms:RM-550-2023-MINSA:D6971,protesis,tooth,,,CPMS,D6971,RM-550-2023-MINSA,Poste fundido como parte del retenedor de prótesis parcial fija
+cpms:RM-550-2023-MINSA:D6972,protesis,tooth,,,CPMS,D6972,RM-550-2023-MINSA,Poste prefabricado y núcleo adicional de retenedor de prótesis parcial fija
+cpms:RM-550-2023-MINSA:D6973,protesis,tooth,,,CPMS,D6973,RM-550-2023-MINSA,Muñón para retenedor, incluyendo los pines
+cpms:RM-550-2023-MINSA:D6975,protesis,tooth,,,CPMS,D6975,RM-550-2023-MINSA,Afrontamiento - metal
+cpms:RM-550-2023-MINSA:D6976,protesis,tooth,,,CPMS,D6976,RM-550-2023-MINSA,Por cada poste fundido adicional-mismo diente
+cpms:RM-550-2023-MINSA:D6977,protesis,tooth,,,CPMS,D6977,RM-550-2023-MINSA,Por cada poste prefabricado adicional - mismo diente
+cpms:RM-550-2023-MINSA:D6980,protesis,general,,,CPMS,D6980,RM-550-2023-MINSA,Reparación de prótesis parcial fija
+cpms:RM-550-2023-MINSA:D6985,protesis,general,,,CPMS,D6985,RM-550-2023-MINSA,Prótesis parcial fija pediátrica
+cpms:RM-550-2023-MINSA:D6999,protesis,general,,,CPMS,D6999,RM-550-2023-MINSA,Procedimiento de prótesis fija sin especificar
+cpms:RM-550-2023-MINSA:D7111,cirugia,tooth,,,CPMS,D7111,RM-550-2023-MINSA,Exodoncia, remanente coronal-diente deciduo
+cpms:RM-550-2023-MINSA:D7140,cirugia,tooth,,,CPMS,D7140,RM-550-2023-MINSA,Exodoncia diente erupcionado o raíz expuesta
+cpms:RM-550-2023-MINSA:D7176,cirugia,tooth,,,CPMS,D7176,RM-550-2023-MINSA,Extracción dental simple, un diente
+cpms:RM-550-2023-MINSA:D7210,cirugia,tooth,,,CPMS,D7210,RM-550-2023-MINSA,Exodoncia quirúrgica del diente erupcionado que requiere elevación del colgajo mucoperiostico, extracción de hueso y/o Sección del diente (extracción compleja)
+cpms:RM-550-2023-MINSA:D7220,cirugia,tooth,,,CPMS,D7220,RM-550-2023-MINSA,Exodoncia quirúrgica de diente impactado en tejido blando
+cpms:RM-550-2023-MINSA:D7230,cirugia,tooth,,,CPMS,D7230,RM-550-2023-MINSA,Exodoncia quirúrgica de diente parcialmente impactado óseo
+cpms:RM-550-2023-MINSA:D7240,cirugia,tooth,,,CPMS,D7240,RM-550-2023-MINSA,Exodoncia quirúrgica de diente completamente impactado óseo
+cpms:RM-550-2023-MINSA:D7241,cirugia,tooth,,,CPMS,D7241,RM-550-2023-MINSA,Exodoncia quirúrgica de diente retenido
+cpms:RM-550-2023-MINSA:D7250,cirugia,tooth,,,CPMS,D7250,RM-550-2023-MINSA,Extracción quirúrgica de restos radiculares
+cpms:RM-550-2023-MINSA:D7260,cirugia,general,,,CPMS,D7260,RM-550-2023-MINSA,Cierre de fistula oroantral
+cpms:RM-550-2023-MINSA:D7261,cirugia,general,,,CPMS,D7261,RM-550-2023-MINSA,Cierre primario de una Perforación sinusal
+cpms:RM-550-2023-MINSA:D7270,cirugia,tooth,,,CPMS,D7270,RM-550-2023-MINSA,Reimplantación de diente y/o estabilizacion de diente
+cpms:RM-550-2023-MINSA:D7272,cirugia,tooth,,,CPMS,D7272,RM-550-2023-MINSA,Diente trasplante (incluye reimplantación de un sitio a otro y entabillado y/o estabilizacion)
+cpms:RM-550-2023-MINSA:D7280,cirugia,tooth,,,CPMS,D7280,RM-550-2023-MINSA,Acceso quirúrgico de diente retenido
+cpms:RM-550-2023-MINSA:D7282,cirugia,tooth,,,CPMS,D7282,RM-550-2023-MINSA,Movilización de diente erupcionado o en mala posicion para permitir erupcion
+cpms:RM-550-2023-MINSA:D7283,cirugia,tooth,,,CPMS,D7283,RM-550-2023-MINSA,Colocación del dispositivo para facilitar la erupcion del diente impactado
+cpms:RM-550-2023-MINSA:D7285,cirugia,general,,,CPMS,D7285,RM-550-2023-MINSA,Biopsia de tejido oral - duro (hueso, dientes)
+cpms:RM-550-2023-MINSA:D7286,cirugia,general,,,CPMS,D7286,RM-550-2023-MINSA,Biopsia de tejido oral - tejidos blandos
+cpms:RM-550-2023-MINSA:D7287,cirugia,general,,,CPMS,D7287,RM-550-2023-MINSA,Coleccion de muestra citologica exfoliativa
+cpms:RM-550-2023-MINSA:D7288,cirugia,general,,,CPMS,D7288,RM-550-2023-MINSA,Raspado de biopsia - rectogida de muestras trans epiteliales
+cpms:RM-550-2023-MINSA:D7290,cirugia,tooth,,,CPMS,D7290,RM-550-2023-MINSA,Reposicionamiento quirúrgico de los dientes
+cpms:RM-550-2023-MINSA:D7291,cirugia,tooth,,,CPMS,D7291,RM-550-2023-MINSA,Fibrotomía transeptal/supracrestal por informe
+cpms:RM-550-2023-MINSA:D7310,cirugia,quadrant,,,CPMS,D7310,RM-550-2023-MINSA,Alveoloplastía con extracciónes de 4 a más dientes o espacios interdentales por cuadrante
+cpms:RM-550-2023-MINSA:D7311,cirugia,quadrant,,,CPMS,D7311,RM-550-2023-MINSA,Alveoloplastía con extracciónes de 1 a 3 dientes o espacios interdentales por cuadrante
+cpms:RM-550-2023-MINSA:D7320,cirugia,quadrant,,,CPMS,D7320,RM-550-2023-MINSA,Alveoloplastía sin extracciónes de 4 o más dientes o espacios interdentales por cuadrante
+cpms:RM-550-2023-MINSA:D7321,cirugia,quadrant,,,CPMS,D7321,RM-550-2023-MINSA,Alveoloplastía sin extracciónes de 1 a 3 dientes o espacios interdentales por cuadrante
+cpms:RM-550-2023-MINSA:D7410,cirugia,general,,,CPMS,D7410,RM-550-2023-MINSA,Escisión de lesión benigna hasta 12.5 cm
+cpms:RM-550-2023-MINSA:D7411,cirugia,general,,,CPMS,D7411,RM-550-2023-MINSA,Escisión de lesión benigna de más de 12.5 cm
+cpms:RM-550-2023-MINSA:D7412,cirugia,general,,,CPMS,D7412,RM-550-2023-MINSA,Escisión de lesión benigna complicada
+cpms:RM-550-2023-MINSA:D7413,cirugia,general,,,CPMS,D7413,RM-550-2023-MINSA,Escisión de lesión maligna 12.5 cm
+cpms:RM-550-2023-MINSA:D7414,cirugia,general,,,CPMS,D7414,RM-550-2023-MINSA,Escisión de lesión maligna mayor que 12.5 cm
+cpms:RM-550-2023-MINSA:D7415,cirugia,general,,,CPMS,D7415,RM-550-2023-MINSA,Escisión de lesión maligna complicada
+cpms:RM-550-2023-MINSA:D7440,cirugia,general,,,CPMS,D7440,RM-550-2023-MINSA,Extirpación de tumor maligno, diámetro de lesión hasta 12.5 cm
+cpms:RM-550-2023-MINSA:D7441,cirugia,general,,,CPMS,D7441,RM-550-2023-MINSA,Extirpación de tumor maligno, diámetro de lesión mayor de 12.5 cm
+cpms:RM-550-2023-MINSA:D7450,cirugia,general,,,CPMS,D7450,RM-550-2023-MINSA,Remoción de quiste o tumor odontogénico benignos, lesiones de diámetro hasta 12.5 cm
+cpms:RM-550-2023-MINSA:D7451,cirugia,general,,,CPMS,D7451,RM-550-2023-MINSA,Remoción de quiste o tumor odontogénico benignos, lesiones de diámetro de más de 12.5 cm
+cpms:RM-550-2023-MINSA:D7460,cirugia,general,,,CPMS,D7460,RM-550-2023-MINSA,Remoción de quiste o tumor no odontogénico benigno, lesiones de diámetro hasta 12.5 cm
+cpms:RM-550-2023-MINSA:D7461,cirugia,general,,,CPMS,D7461,RM-550-2023-MINSA,Remoción de quiste o tumor no odontogénico benigno, lesiones de diámetro de más de 12.5 cm
+cpms:RM-550-2023-MINSA:D7465,cirugia,general,,,CPMS,D7465,RM-550-2023-MINSA,Destrucción de lesiones por el método físico químico, por informe
+cpms:RM-550-2023-MINSA:D7471,cirugia,general,,,CPMS,D7471,RM-550-2023-MINSA,Remoción de exostosis lateral (maxila o mandíbula)
+cpms:RM-550-2023-MINSA:D7472,cirugia,general,,,CPMS,D7472,RM-550-2023-MINSA,Eliminacion de torus palatino
+cpms:RM-550-2023-MINSA:D7473,cirugia,general,,,CPMS,D7473,RM-550-2023-MINSA,Eliminacion de torus mandibular
+cpms:RM-550-2023-MINSA:D7485,cirugia,general,,,CPMS,D7485,RM-550-2023-MINSA,Reducción quirúrgica de la tuberosidad ósea
+cpms:RM-550-2023-MINSA:D7490,cirugia,general,,,CPMS,D7490,RM-550-2023-MINSA,Resección radical maxila o mandíbula
+cpms:RM-550-2023-MINSA:D7510,cirugia,general,,,CPMS,D7510,RM-550-2023-MINSA,Incisión y drenaje de absceso - intraoral
+cpms:RM-550-2023-MINSA:D7511,cirugia,general,,,CPMS,D7511,RM-550-2023-MINSA,Incisión y drenaje de absceso - intraoral - complicado (incluye drenaje de espacios faciales múltiples)
+cpms:RM-550-2023-MINSA:D7520,cirugia,general,,,CPMS,D7520,RM-550-2023-MINSA,Incisión y drenaje de absceso - extraoral
+cpms:RM-550-2023-MINSA:D7521,cirugia,general,,,CPMS,D7521,RM-550-2023-MINSA,Incisión y drenaje de absceso - extraoral - complicado (incluye drenaje de espacios faciales múltiples)
+cpms:RM-550-2023-MINSA:D7530,cirugia,general,,,CPMS,D7530,RM-550-2023-MINSA,Remoción de cuerpo extraño de mucosa, piel o tejido alveolar subcutáneo
+cpms:RM-550-2023-MINSA:D7540,cirugia,general,,,CPMS,D7540,RM-550-2023-MINSA,Eliminacion de reaccion que produce cuerpos extraños, sistema mucoesquelético
+cpms:RM-550-2023-MINSA:D7550,cirugia,general,,,CPMS,D7550,RM-550-2023-MINSA,Secuestrectomía/osteotomía parcial para Remoción de hueso no vital
+cpms:RM-550-2023-MINSA:D7560,cirugia,general,,,CPMS,D7560,RM-550-2023-MINSA,Sinusotomía maxilar para la Remoción de fragmento dental o cuerpo extraño
+cpms:RM-550-2023-MINSA:D7610,cirugia,general,,,CPMS,D7610,RM-550-2023-MINSA,Reducción abierta en fractura simple de maxilar superior (dientes inmovilizados)
+cpms:RM-550-2023-MINSA:D7620,cirugia,general,,,CPMS,D7620,RM-550-2023-MINSA,Reducción cerrada en fractura simple de maxilar superior (dientes inmovilizados)
+cpms:RM-550-2023-MINSA:D7630,cirugia,general,,,CPMS,D7630,RM-550-2023-MINSA,Reducción abierta en fractura simple de mandíbula (dientes inmovilizados)
+cpms:RM-550-2023-MINSA:D7640,cirugia,general,,,CPMS,D7640,RM-550-2023-MINSA,Reducción cerrada en fractura simple de mandíbula (dientes inmovilizados)
+cpms:RM-550-2023-MINSA:D7650,cirugia,general,,,CPMS,D7650,RM-550-2023-MINSA,Reducción abierta en fractura simple de hueso malar y arco cigomático
+cpms:RM-550-2023-MINSA:D7660,cirugia,general,,,CPMS,D7660,RM-550-2023-MINSA,Reducción cerrada en fractura simple de hueso malar y/o arco cigomático
+cpms:RM-550-2023-MINSA:D7670,cirugia,general,,,CPMS,D7670,RM-550-2023-MINSA,Reducción cerrada en fractura simple de alveolo, puede incluir estabilizacion de los dientes
+cpms:RM-550-2023-MINSA:D7671,cirugia,general,,,CPMS,D7671,RM-550-2023-MINSA,Reducción abierta en fractura simple de alveolos, que pueden incluir al estabilizacion de dientes
+cpms:RM-550-2023-MINSA:D7680,cirugia,general,,,CPMS,D7680,RM-550-2023-MINSA,Reducción en fractura simple e los huesos faciales complicado con Fijación y múltiples abordajes quirúrgicos
+cpms:RM-550-2023-MINSA:D7710,cirugia,general,,,CPMS,D7710,RM-550-2023-MINSA,Reducción abierta en fractura complicada de maxilar
+cpms:RM-550-2023-MINSA:D7720,cirugia,general,,,CPMS,D7720,RM-550-2023-MINSA,Reducción cerrada en fractura complicada de maxilar
+cpms:RM-550-2023-MINSA:D7730,cirugia,general,,,CPMS,D7730,RM-550-2023-MINSA,Reducción abierta en fractura complicada de mandíbula
+cpms:RM-550-2023-MINSA:D7740,cirugia,general,,,CPMS,D7740,RM-550-2023-MINSA,Reducción cerrada en fractura complicada de mandíbula
+cpms:RM-550-2023-MINSA:D7750,cirugia,general,,,CPMS,D7750,RM-550-2023-MINSA,Reducción abierta en fractura complicada en hueso malar y/o arco cigomático
+cpms:RM-550-2023-MINSA:D7760,cirugia,general,,,CPMS,D7760,RM-550-2023-MINSA,Reducción cerrada en fractura complicada en hueso malar y/o arco cigomático
+cpms:RM-550-2023-MINSA:D7770,cirugia,general,,,CPMS,D7770,RM-550-2023-MINSA,Reducción abierta en fractura complicada de alveolos, con estabilizacion de dientes
+cpms:RM-550-2023-MINSA:D7771,cirugia,general,,,CPMS,D7771,RM-550-2023-MINSA,Reducción cerrada en fractura complicada de alveolos con estabilizacion de dientes
+cpms:RM-550-2023-MINSA:D7778,cirugia,general,,,CPMS,D7778,RM-550-2023-MINSA,Reducción de fractura complicada de los huesos faciales con la Fijación y múltiples abordajes quirúrgicos
+cpms:RM-550-2023-MINSA:D7810,cirugia,general,,,CPMS,D7810,RM-550-2023-MINSA,Reducción abierta de luxación
+cpms:RM-550-2023-MINSA:D7820,cirugia,general,,,CPMS,D7820,RM-550-2023-MINSA,Reducción cerrada de luxación
+cpms:RM-550-2023-MINSA:D7830,cirugia,general,,,CPMS,D7830,RM-550-2023-MINSA,Manipulacion de luxación bajo anestesia
+cpms:RM-550-2023-MINSA:D7840,cirugia,general,,,CPMS,D7840,RM-550-2023-MINSA,Condilectomía
+cpms:RM-550-2023-MINSA:D7850,cirugia,general,,,CPMS,D7850,RM-550-2023-MINSA,Discectomía quirúrgica, con o sin implante
+cpms:RM-550-2023-MINSA:D7852,cirugia,general,,,CPMS,D7852,RM-550-2023-MINSA,Reparación del disco
+cpms:RM-550-2023-MINSA:D7854,cirugia,general,,,CPMS,D7854,RM-550-2023-MINSA,Sinovectomía
+cpms:RM-550-2023-MINSA:D7856,cirugia,general,,,CPMS,D7856,RM-550-2023-MINSA,Mionotomía
+cpms:RM-550-2023-MINSA:D7858,cirugia,general,,,CPMS,D7858,RM-550-2023-MINSA,Reconstrucción de la articulación
+cpms:RM-550-2023-MINSA:D7860,cirugia,general,,,CPMS,D7860,RM-550-2023-MINSA,Artromía
+cpms:RM-550-2023-MINSA:D7865,cirugia,general,,,CPMS,D7865,RM-550-2023-MINSA,Artroplastia
+cpms:RM-550-2023-MINSA:D7870,cirugia,general,,,CPMS,D7870,RM-550-2023-MINSA,Artrocentesis
+cpms:RM-550-2023-MINSA:D7871,cirugia,general,,,CPMS,D7871,RM-550-2023-MINSA,Lisis y lavado artroscopico
+cpms:RM-550-2023-MINSA:D7872,cirugia,general,,,CPMS,D7872,RM-550-2023-MINSA,Artroscopia - diagnóstico con o sin biopsia
+cpms:RM-550-2023-MINSA:D7873,cirugia,general,,,CPMS,D7873,RM-550-2023-MINSA,Artroscopia - quirúrgico: lavado y lisis de adhesiones
+cpms:RM-550-2023-MINSA:D7874,cirugia,general,,,CPMS,D7874,RM-550-2023-MINSA,Artroscopia - quirúrgico: Reposición de disco y estabilizacion
+cpms:RM-550-2023-MINSA:D7875,cirugia,general,,,CPMS,D7875,RM-550-2023-MINSA,Artroscopia - quirúrgico: sinovectomía
+cpms:RM-550-2023-MINSA:D7876,cirugia,general,,,CPMS,D7876,RM-550-2023-MINSA,Artroscopia - quirúrgico: discectomía
+cpms:RM-550-2023-MINSA:D7877,cirugia,general,,,CPMS,D7877,RM-550-2023-MINSA,Artroscopia - quirúrgico: desbridamiento
+cpms:RM-550-2023-MINSA:D7880,cirugia,general,,,CPMS,D7880,RM-550-2023-MINSA,Dispositivo ortopédico oclusal, por informe
+cpms:RM-550-2023-MINSA:D7899,cirugia,general,,,CPMS,D7899,RM-550-2023-MINSA,Terapia no especificada tmd, por informe
+cpms:RM-550-2023-MINSA:D7910,cirugia,general,,,CPMS,D7910,RM-550-2023-MINSA,Sutura de las recientes heridas pequeñas de hasta 5.0 cm
+cpms:RM-550-2023-MINSA:D7911,cirugia,general,,,CPMS,D7911,RM-550-2023-MINSA,Sutura complicada hasta 5.0 cm
+cpms:RM-550-2023-MINSA:D7912,cirugia,general,,,CPMS,D7912,RM-550-2023-MINSA,Sutura complicada más de 5.0 cm
+cpms:RM-550-2023-MINSA:D7920,cirugia,general,,,CPMS,D7920,RM-550-2023-MINSA,Injerto de piel (identificar el defecto a cubrir, la ubicacion y el tipo de injerto)
+cpms:RM-550-2023-MINSA:D7940,cirugia,general,,,CPMS,D7940,RM-550-2023-MINSA,Osteoplastia
+cpms:RM-550-2023-MINSA:D7941,cirugia,general,,,CPMS,D7941,RM-550-2023-MINSA,Osteotomía - rama mandibular
+cpms:RM-550-2023-MINSA:D7943,cirugia,general,,,CPMS,D7943,RM-550-2023-MINSA,Osteotomía - rama mandibular con injerto óseo, incluye la obtención del injerto
+cpms:RM-550-2023-MINSA:D7944,cirugia,general,,,CPMS,D7944,RM-550-2023-MINSA,Osteotomía segmento o subapical por cuadrante o sextante
+cpms:RM-550-2023-MINSA:D7945,cirugia,general,,,CPMS,D7945,RM-550-2023-MINSA,Osteotomía - cuerpo de la mandíbula
+cpms:RM-550-2023-MINSA:D7946,cirugia,general,,,CPMS,D7946,RM-550-2023-MINSA,Lefort I (maxilar total)
+cpms:RM-550-2023-MINSA:D7947,cirugia,general,,,CPMS,D7947,RM-550-2023-MINSA,Lefort I (maxilar segmentado)
+cpms:RM-550-2023-MINSA:D7948,cirugia,general,,,CPMS,D7948,RM-550-2023-MINSA,Lefort II o Lefort III (osteoplastia de los huesos faciales del tercio medio facial o hipoplasia) sin injerto óseo
+cpms:RM-550-2023-MINSA:D7949,cirugia,general,,,CPMS,D7949,RM-550-2023-MINSA,Lefort II o Lefort III con injerto óseo
+cpms:RM-550-2023-MINSA:D7950,cirugia,general,,,CPMS,D7950,RM-550-2023-MINSA,Injerto óseo, osteoperiosteal o el cartílago de los huesos mandibulares o faciales - autogenos o no autogenos, por informe
+cpms:RM-550-2023-MINSA:D7953,cirugia,general,,,CPMS,D7953,RM-550-2023-MINSA,Injerto óseo de remplazo para la conservacion de la cresta
+cpms:RM-550-2023-MINSA:D7955,cirugia,general,,,CPMS,D7955,RM-550-2023-MINSA,Reparación de defectos maxilofaciales de tejido blando y/o tejido duro
+cpms:RM-550-2023-MINSA:D7960,cirugia,general,,,CPMS,D7960,RM-550-2023-MINSA,Frenulectomía (frenectomía y frenotomía)
+cpms:RM-550-2023-MINSA:D7963,cirugia,general,,,CPMS,D7963,RM-550-2023-MINSA,Frenuloplastía
+cpms:RM-550-2023-MINSA:D7970,cirugia,arch,,,CPMS,D7970,RM-550-2023-MINSA,Escisión de tejido hiperplásico, por arco
+cpms:RM-550-2023-MINSA:D7971,cirugia,tooth,,,CPMS,D7971,RM-550-2023-MINSA,Escisión de encía pericoronal
+cpms:RM-550-2023-MINSA:D7972,cirugia,general,,,CPMS,D7972,RM-550-2023-MINSA,reducción quirúrgica de la tuberosidad fibrosa
+cpms:RM-550-2023-MINSA:D7980,cirugia,general,,,CPMS,D7980,RM-550-2023-MINSA,Sialolitotomia
+cpms:RM-550-2023-MINSA:D7981,cirugia,general,,,CPMS,D7981,RM-550-2023-MINSA,Extirpación de la glándula salival, por informe
+cpms:RM-550-2023-MINSA:D7982,cirugia,general,,,CPMS,D7982,RM-550-2023-MINSA,Sialodocoplastía
+cpms:RM-550-2023-MINSA:D7983,cirugia,general,,,CPMS,D7983,RM-550-2023-MINSA,Cierre de fistula salival
+cpms:RM-550-2023-MINSA:D7990,cirugia,general,,,CPMS,D7990,RM-550-2023-MINSA,Traqueotomía de emergencia
+cpms:RM-550-2023-MINSA:D7991,cirugia,general,,,CPMS,D7991,RM-550-2023-MINSA,Coronoidectomía
+cpms:RM-550-2023-MINSA:D7995,cirugia,general,,,CPMS,D7995,RM-550-2023-MINSA,Injerto sintéticos - huesos mandibulares o faciales, por informe
+cpms:RM-550-2023-MINSA:D7996,cirugia,general,,,CPMS,D7996,RM-550-2023-MINSA,Implante mandibular con fines de aumento (con exclusion de cresta alveolar) mediante informe
+cpms:RM-550-2023-MINSA:D7997,cirugia,general,,,CPMS,D7997,RM-550-2023-MINSA,Eliminacion del aparato del implante (no por el dentista que coloco el aparato), incluye la extirpación del arco bar
+cpms:RM-550-2023-MINSA:D7998,cirugia,general,,,CPMS,D7998,RM-550-2023-MINSA,Colocación intraoral de dispositivo de fijación, no en relacion con una fractura, incluye ambos arcos, si fuera necesario
+cpms:RM-550-2023-MINSA:D7999,cirugia,general,,,CPMS,D7999,RM-550-2023-MINSA,Procedimiento quirúrgico orales no específicos
+cpms:RM-550-2023-MINSA:D8010,ortodoncia,general,,,CPMS,D8010,RM-550-2023-MINSA,Tratamiento de ortodoncia limitado a la denticion primaria
+cpms:RM-550-2023-MINSA:D8020,ortodoncia,general,,,CPMS,D8020,RM-550-2023-MINSA,Tratamiento de ortodoncia limitado a la denticion de transicion
+cpms:RM-550-2023-MINSA:D8030,ortodoncia,general,,,CPMS,D8030,RM-550-2023-MINSA,Tratamiento de ortodoncia limitado a la denticion adolescente
+cpms:RM-550-2023-MINSA:D8040,ortodoncia,general,,,CPMS,D8040,RM-550-2023-MINSA,Tratamiento de ortodoncia limitado a la denticion adulta
+cpms:RM-550-2023-MINSA:D8050,ortodoncia,general,,,CPMS,D8050,RM-550-2023-MINSA,Tratamiento de ortodoncia interceptiva en denticion primaria
+cpms:RM-550-2023-MINSA:D8060,ortodoncia,general,,,CPMS,D8060,RM-550-2023-MINSA,Tratamiento de ortodoncia interceptiva en denticion mixta
+cpms:RM-550-2023-MINSA:D8070,ortodoncia,general,,,CPMS,D8070,RM-550-2023-MINSA,Tratamiento de ortodoncia integral en denticion mixta
+cpms:RM-550-2023-MINSA:D8080,ortodoncia,general,,,CPMS,D8080,RM-550-2023-MINSA,Tratamiento de ortodoncia integral en denticion adolescente
+cpms:RM-550-2023-MINSA:D8090,ortodoncia,general,,,CPMS,D8090,RM-550-2023-MINSA,Tratamiento de ortodoncia integral en denticion adulto
+cpms:RM-550-2023-MINSA:D8210,ortodoncia,arch,,,CPMS,D8210,RM-550-2023-MINSA,Terapia con aparatología en ortodoncia removible
+cpms:RM-550-2023-MINSA:D8210.01,ortodoncia,general,,,CPMS,D8210.01,RM-550-2023-MINSA,Colocación de aparato ortopédico prequirúrgico nasoalveolar palatina
+cpms:RM-550-2023-MINSA:D8220,ortodoncia,arch,,,CPMS,D8220,RM-550-2023-MINSA,Terapia con aparatología en ortodoncia fija
+cpms:RM-550-2023-MINSA:D8660,ortodoncia,general,,,CPMS,D8660,RM-550-2023-MINSA,Visita - pre tratamiento de ortodoncia
+cpms:RM-550-2023-MINSA:D8670,ortodoncia,general,,,CPMS,D8670,RM-550-2023-MINSA,Controles periodicos de tratamiento ortodoncico
+cpms:RM-550-2023-MINSA:D8670.01,ortodoncia,general,,,CPMS,D8670.01,RM-550-2023-MINSA,Control ambulatorio de ortopedia prequirúrgica nasoalveolar palatina
+cpms:RM-550-2023-MINSA:D8680,ortodoncia,arch,,,CPMS,D8680,RM-550-2023-MINSA,Contencion ortodoncica
+cpms:RM-550-2023-MINSA:D8690,ortodoncia,general,,,CPMS,D8690,RM-550-2023-MINSA,Tratamiento ortodoncica realizado por otro cirujano dentista
+cpms:RM-550-2023-MINSA:D8691,ortodoncia,general,,,CPMS,D8691,RM-550-2023-MINSA,Reparación de aparatología ortondoncica
+cpms:RM-550-2023-MINSA:D8692,ortodoncia,arch,,,CPMS,D8692,RM-550-2023-MINSA,Remplazo de retenedor perdido o fracturado
+cpms:RM-550-2023-MINSA:D8999,ortodoncia,general,,,CPMS,D8999,RM-550-2023-MINSA,Procedimiento ortodoncico no especifico
+cpms:RM-550-2023-MINSA:D9110,anestesia,general,,,CPMS,D9110,RM-550-2023-MINSA,Anestesia local no en combinación con procedimientos quirurgicos
+cpms:RM-550-2023-MINSA:D9211,anestesia,general,,,CPMS,D9211,RM-550-2023-MINSA,Anestesia bloque regional
+cpms:RM-550-2023-MINSA:D9212,anestesia,general,,,CPMS,D9212,RM-550-2023-MINSA,División del trigémino anestesia de bloqueo
+cpms:RM-550-2023-MINSA:D9215,anestesia,general,,,CPMS,D9215,RM-550-2023-MINSA,Anestesia local dental
+cpms:RM-550-2023-MINSA:D9220,anestesia,general,,,CPMS,D9220,RM-550-2023-MINSA,Anestesia general: primeros 30 minutos
+cpms:RM-550-2023-MINSA:D9221,anestesia,general,,,CPMS,D9221,RM-550-2023-MINSA,Anestesia general: primeros 15 minutos
+cpms:RM-550-2023-MINSA:D9230,anestesia,general,,,CPMS,D9230,RM-550-2023-MINSA,Analgesia, ansiolosis, la inhalacion de oxido nitroso
+cpms:RM-550-2023-MINSA:D9241,anestesia,general,,,CPMS,D9241,RM-550-2023-MINSA,Sedación consciente intravenosa: primeros 30 minutos
+cpms:RM-550-2023-MINSA:D9242,anestesia,general,,,CPMS,D9242,RM-550-2023-MINSA,Sedación consciente intravenosa: primeros 15 minutos
+cpms:RM-550-2023-MINSA:D9248,anestesia,general,,,CPMS,D9248,RM-550-2023-MINSA,Sedación consciente no intravenosa
+cpms:RM-550-2023-MINSA:D9430,general,general,,,CPMS,D9430,RM-550-2023-MINSA,Visita al consultorio para observacion ningún procedimiento realizado
+cpms:RM-550-2023-MINSA:D9450,general,general,,,CPMS,D9450,RM-550-2023-MINSA,Presentacion del caso, planificacion del tratamiento detallado y extenso
+cpms:RM-550-2023-MINSA:D9610,general,general,,,CPMS,D9610,RM-550-2023-MINSA,Inyección de drogas
+cpms:RM-550-2023-MINSA:D9630,general,general,,,CPMS,D9630,RM-550-2023-MINSA,Administración de otras drogas y/o medicamentos, por informe
+cpms:RM-550-2023-MINSA:D9910,prevencion,general,,,CPMS,D9910,RM-550-2023-MINSA,Aplicación de medicamentos desensibilizantes
+cpms:RM-550-2023-MINSA:D9911,restauradora,tooth,,,CPMS,D9911,RM-550-2023-MINSA,Aplicación de resina en sensibilidad de cuellos y raíces dentarias
+cpms:RM-550-2023-MINSA:D9914,general,arch,,,CPMS,D9914,RM-550-2023-MINSA,Fabricacion de protector bucal atlético
+cpms:RM-550-2023-MINSA:D9920,general,general,,,CPMS,D9920,RM-550-2023-MINSA,Manejo de conducta
+cpms:RM-550-2023-MINSA:D9930,cirugia,general,,,CPMS,D9930,RM-550-2023-MINSA,Tratamiento de las complicaciones post quirúrgicas (circunstancias inusuales), por informe
+cpms:RM-550-2023-MINSA:D9940,disfuncion,arch,,,CPMS,D9940,RM-550-2023-MINSA,Protector oclusal (férula miorelajante)
+cpms:RM-550-2023-MINSA:D9942,disfuncion,arch,,,CPMS,D9942,RM-550-2023-MINSA,Reparación - reacondicionamiento de protector oclusal
+cpms:RM-550-2023-MINSA:D9950,disfuncion,general,,,CPMS,D9950,RM-550-2023-MINSA,Análisis de la oclusión - montaje
+cpms:RM-550-2023-MINSA:D9951,disfuncion,general,,,CPMS,D9951,RM-550-2023-MINSA,Ajuste oclusal limitado
+cpms:RM-550-2023-MINSA:D9952,disfuncion,general,,,CPMS,D9952,RM-550-2023-MINSA,Ajuste oclusal completo
+cpms:RM-550-2023-MINSA:D9970,estetica,tooth,,,CPMS,D9970,RM-550-2023-MINSA,MicroAbrasión del esmalte
+cpms:RM-550-2023-MINSA:D9971,estetica,tooth,,,CPMS,D9971,RM-550-2023-MINSA,Odontoplastía de uno a dos, incluye la eliminacion de las proyecciones del esmalte
+cpms:RM-550-2023-MINSA:D9972,estetica,arch,,,CPMS,D9972,RM-550-2023-MINSA,Blanqueamiento dental externo por arcada
+cpms:RM-550-2023-MINSA:D9973,estetica,tooth,,,CPMS,D9973,RM-550-2023-MINSA,Blanqueamiento dental externo por diente
+cpms:RM-550-2023-MINSA:D9974,estetica,tooth,,,CPMS,D9974,RM-550-2023-MINSA,Blanqueamiento interno por diente
+cpms:RM-550-2023-MINSA:D9999,general,general,,,CPMS,D9999,RM-550-2023-MINSA,Procedimiento complementado no especificado, por informe
+cpms:RM-550-2023-MINSA:E1352,restauradora,general,,,CPMS,E1352,RM-550-2023-MINSA,Tratamiento restaurador atraumático
+cpms:RM-550-2023-MINSA:E2336,restauradora,surfaces,1,1,CPMS,E2336,RM-550-2023-MINSA,Restauracion autocurable de una superficie con resina en piezas dentarias anteriores (primarias o permanentes)
+cpms:RM-550-2023-MINSA:E2337,restauradora,surfaces,2,2,CPMS,E2337,RM-550-2023-MINSA,Restauraciones autocurables de dos superficies con resina en piezas dentarias anteriores (primarias o permanentes)
+cpms:RM-550-2023-MINSA:E2338,restauradora,surfaces,3,3,CPMS,E2338,RM-550-2023-MINSA,Restauraciones autocurables de tres superficies con resina en piezas dentarias anteriores (primarias o permanentes)
+cpms:RM-550-2023-MINSA:E2339,restauradora,surfaces,4,5,CPMS,E2339,RM-550-2023-MINSA,Restauraciones autocurables de cuatro o más superficies con resina en piezas dentarias anteriores, puede incluir ángulo incisal (primarias o permanentes)
+cpms:RM-550-2023-MINSA:E2340,restauradora,surfaces,1,1,CPMS,E2340,RM-550-2023-MINSA,Restauracion autocurable de una superficie con resina en piezas dentarias posteriores (primarias o permanentes)
+cpms:RM-550-2023-MINSA:E2341,restauradora,surfaces,2,2,CPMS,E2341,RM-550-2023-MINSA,Restauraciones autocurables de dos superficies con resina en piezas dentarias posteriores (primarias o permanentes)
+cpms:RM-550-2023-MINSA:E2342,restauradora,surfaces,3,3,CPMS,E2342,RM-550-2023-MINSA,Restauraciones autocurables de tres superficies con resina en piezas dentarias posteriores (primarias o permanentes)
+cpms:RM-550-2023-MINSA:E2343,restauradora,surfaces,4,5,CPMS,E2343,RM-550-2023-MINSA,Restauraciones autocurables de cuatro o más superficies con resina en piezas dentarias posteriores (primarias o permanentes)
+cpms:RM-550-2023-MINSA:E2395,restauradora,surfaces,1,1,CPMS,E2395,RM-550-2023-MINSA,Restauracion fotocurable con ionomero de vidrio en una superficie dentaria (primaria o permanente)
+cpms:RM-550-2023-MINSA:E2396,restauradora,surfaces,2,2,CPMS,E2396,RM-550-2023-MINSA,Restauracion fotocurable con ionomero de vidrio en dos superficies dentarias (primaria o permanente)
+cpms:RM-550-2023-MINSA:E2397,restauradora,surfaces,3,3,CPMS,E2397,RM-550-2023-MINSA,Restauracion fotocurable con ionomero de vidrio en tres superficies dentarias (primarias o permanentes)
+cpms:RM-550-2023-MINSA:E2398,restauradora,surfaces,1,1,CPMS,E2398,RM-550-2023-MINSA,Restauracion autocurable con ionomero de vidrio en una superficie dentaria (primaria o permanente)
+cpms:RM-550-2023-MINSA:E2399,restauradora,surfaces,2,2,CPMS,E2399,RM-550-2023-MINSA,Restauracion autocurable con ionomero de vidrio en dos superficies dentarias (primarias o permanentes)
+cpms:RM-550-2023-MINSA:E2400,restauradora,surfaces,3,3,CPMS,E2400,RM-550-2023-MINSA,Restauracion autocurable con ionomero de vidrio en tres superficies dentarias (primarias o permanentes)
+cpms:RM-550-2023-MINSA:E2911,protesis,tooth,,,CPMS,E2911,RM-550-2023-MINSA,Cementacion provisional de inlay y onlay
+cpms:RM-550-2023-MINSA:E3319,endodoncia,tooth,,,CPMS,E3319,RM-550-2023-MINSA,Terapia endodontica en piezas dentarias anteriores no vitales
+cpms:RM-550-2023-MINSA:E3321,endodoncia,tooth,,,CPMS,E3321,RM-550-2023-MINSA,Terapia endodontica en piezas dentarias bicúspides no vitales
+cpms:RM-550-2023-MINSA:E3322,endodoncia,tooth,,,CPMS,E3322,RM-550-2023-MINSA,Terapia endodontica en piezas dentarias posteriores no vitales
+cpms:RM-550-2023-MINSA:E4110,periodoncia,general,,,CPMS,E4110,RM-550-2023-MINSA,Pulido dental
+cpms:RM-550-2023-MINSA:E4120,periodoncia,general,,,CPMS,E4120,RM-550-2023-MINSA,Raspaje y pulido dental
+cpms:RM-550-2023-MINSA:E4130,periodoncia,general,,,CPMS,E4130,RM-550-2023-MINSA,Curetaje subgingival
+cpms:RM-550-2023-MINSA:E4250,periodoncia,quadrant,,,CPMS,E4250,RM-550-2023-MINSA,Cirugía periodontal receptiva por cuadrante
+cpms:RM-550-2023-MINSA:E4251,periodoncia,general,,,CPMS,E4251,RM-550-2023-MINSA,Cirugía periodontal receptiva por sextante
+cpms:RM-550-2023-MINSA:E4252,periodoncia,general,,,CPMS,E4252,RM-550-2023-MINSA,Regeneracion tisular guiada - barrera absorbible con relleno
+cpms:RM-550-2023-MINSA:E4253,periodoncia,general,,,CPMS,E4253,RM-550-2023-MINSA,Regeneracion tisular guiada-barrera no absorbible con relleno
+cpms:RM-550-2023-MINSA:E5010,periodoncia,general,,,CPMS,E5010,RM-550-2023-MINSA,Regeneracion ósea
+cpms:RM-550-2023-MINSA:E5011,periodoncia,general,,,CPMS,E5011,RM-550-2023-MINSA,Colgajo desplazado con injerto de tejido conectivo
+cpms:RM-550-2023-MINSA:E5012,periodoncia,general,,,CPMS,E5012,RM-550-2023-MINSA,Injerto óseo
+cpms:RM-550-2023-MINSA:E7251,cirugia,tooth,,,CPMS,E7251,RM-550-2023-MINSA,Exodoncia intencional
+cpms:RM-550-2023-MINSA:E7252,cirugia,tooth,,,CPMS,E7252,RM-550-2023-MINSA,Coronectomía profiláctica
+cpms:RM-550-2023-MINSA:E7274,cirugia,general,,,CPMS,E7274,RM-550-2023-MINSA,Biopsia de tejidos blandos extraoral
+cpms:RM-550-2023-MINSA:E7275,cirugia,general,,,CPMS,E7275,RM-550-2023-MINSA,Biopsia de tejidos duros extraoral
+cpms:RM-550-2023-MINSA:E7276,cirugia,general,,,CPMS,E7276,RM-550-2023-MINSA,Biopsia por punzo aspiración
+cpms:RM-550-2023-MINSA:E7998,cirugia,general,,,CPMS,E7998,RM-550-2023-MINSA,Marsupializacion en el sistema estomatognático
+cpms:RM-550-2023-MINSA:E8000,cirugia,general,,,CPMS,E8000,RM-550-2023-MINSA,Tratamiento de la alveolitis seca
+cpms:RM-550-2023-MINSA:E8001,cirugia,general,,,CPMS,E8001,RM-550-2023-MINSA,Tratamiento de la alveolitis húmeda
+cpms:RM-550-2023-MINSA:E8002,cirugia,general,,,CPMS,E8002,RM-550-2023-MINSA,Tratamiento de la fasceítis necrotizante cervicofacial
+cpms:RM-550-2023-MINSA:E8211,ortodoncia,arch,,,CPMS,E8211,RM-550-2023-MINSA,Tratamiento de disyuncion maxilar
+cpms:RM-550-2023-MINSA:E8212,ortodoncia,general,,,CPMS,E8212,RM-550-2023-MINSA,Tratamiento de distraccion osteogénica de los maxilares

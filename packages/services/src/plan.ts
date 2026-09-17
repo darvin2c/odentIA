@@ -18,6 +18,7 @@ import { and, asc, eq, inArray, sql } from "drizzle-orm"
 import { notFound, ServiceError, validation } from "./errors.js"
 import { requirePatient } from "./patients.js"
 import { requireServiceForIndication, type ServiceRow } from "./service-catalog.js"
+import { assertExecutableCodings, resolveServiceCodings } from "./procedure-codings.js"
 
 /**
  * Plan clínico longitudinal: existe antes que cualquier presupuesto y puede
@@ -175,7 +176,7 @@ function assertSite(
 }
 
 /** Límites de superficies: de la plantilla, o 1–5 para ofertas propias. */
-async function surfaceLimits(
+export async function surfaceLimits(
   tx: Db,
   service: ServiceRow,
 ): Promise<{ min: number | null; max: number | null }> {
@@ -554,6 +555,7 @@ export async function addPlanItem(
   if (diagnosisCode) await assertDiagnosisCode(tx, diagnosisCode)
   if (service.priceCents === null)
     throw new ServiceError("SERVICE_UNPRICED", 409, "La prestación aún no tiene tarifa configurada")
+  const codings = await resolveServiceCodings(tx, service)
   const [row] = await tx
     .insert(treatmentPlanItem)
     .values({
@@ -570,6 +572,7 @@ export async function addPlanItem(
       title: service.name,
       detail,
       diagnosisCode,
+      codings,
       priceCents: service.priceCents,
       currency: service.currency,
       status: "pendiente",
@@ -584,6 +587,7 @@ export async function addPlanItem(
     sourceEncounterId: row.sourceEncounterId,
     serviceId: service.id,
     scope,
+    codings: codings.length,
     priceCents: service.priceCents,
     currency: service.currency,
   })
@@ -639,6 +643,7 @@ export async function addPlanItemsBatch(
   if (diagnosisCode) await assertDiagnosisCode(tx, diagnosisCode)
   if (service.priceCents === null)
     throw new ServiceError("SERVICE_UNPRICED", 409, "La prestación aún no tiene tarifa configurada")
+  const codings = await resolveServiceCodings(tx, service)
   const rows: PlanItemRow[] = []
   for (const tooth of teeth) {
     const [row] = await tx
@@ -657,6 +662,7 @@ export async function addPlanItemsBatch(
         title: service.name,
         detail,
         diagnosisCode,
+        codings,
         priceCents: service.priceCents,
         currency: service.currency,
         status: "pendiente",
@@ -768,6 +774,10 @@ export async function updatePlanItem(
       set.scope = scope
       set.priceCents = service.priceCents
       set.currency = service.currency
+      // Cambio de servicio = nueva indicación: re-congela el snapshot exacto
+      // vigente; los históricos (presupuestos presentados/decididos,
+      // atenciones) nunca se mutan.
+      set.codings = await resolveServiceCodings(tx, service)
       fields.push("serviceId")
     }
   }
@@ -834,6 +844,8 @@ export async function updatePlanItem(
   if (!updated) throw notFound("Ítem del plan")
   if (budget && budget.status === "borrador") {
     // La línea del borrador es snapshot: se actualiza en la misma transacción.
+    // Solo el borrador sigue a la nueva indicación; presentados/decididos son
+    // históricos inmutables (updatePlanItem ya rechazó budget no-borrador).
     await tx
       .update(treatmentBudgetItem)
       .set({
@@ -844,6 +856,7 @@ export async function updatePlanItem(
         surfaces: updated.surfaces,
         quadrant: updated.quadrant,
         arch: updated.arch,
+        codings: updated.codings,
         priceCents: updated.priceCents,
         currency: updated.currency,
         updatedAt: new Date(),
@@ -916,6 +929,9 @@ export async function setPlanItemStatus(
     if (!budget || budget.status === "cancelado" || budget.status === "historico") {
       throw new ServiceError("BUDGET_CLOSED", 409, "El presupuesto del tratamiento está cerrado")
     }
+    // Histórico ambiguo heredado: no se ejecuta como múltiples actos; se pide
+    // una nueva indicación exacta desde la biblioteca vigente.
+    assertExecutableCodings(current.codings)
   }
   if (input.status === "realizado") {
     if (!linkedEncounterId) {

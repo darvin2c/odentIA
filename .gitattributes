@@ -1,2 +1,5 @@
 # Scripts ejecutados dentro de contenedores Linux: nunca CRLF.
 *.sh text eol=lf
+
+# Catálogos con importación UTF-8 estricta: conservar LF también en Windows.
+packages/db/seeds/*.csv text eol=lf

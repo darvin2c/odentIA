@@ -2,6 +2,7 @@ import { withOrgContext } from "@odentia/db"
 import {
   createService,
   fromTemplates,
+  getTemplate,
   listServices,
   listTemplates,
   updateService,
@@ -106,6 +107,16 @@ export function createServicesRoute(deps: CrmDeps) {
         }),
       )
       return c.json(page)
+    } catch (e) {
+      return serviceErrorResponse(c, e) ?? Promise.reject(e)
+    }
+  })
+
+  app.get("/templates/:id", async (c) => {
+    const { orgId } = orgContextOf(c)
+    try {
+      const data = await withOrgContext(deps.db, orgId, (tx) => getTemplate(tx, c.req.param("id")))
+      return c.json({ data })
     } catch (e) {
       return serviceErrorResponse(c, e) ?? Promise.reject(e)
     }

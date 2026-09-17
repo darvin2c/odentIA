@@ -18,8 +18,9 @@ import { listEncounterDocuments, type PatientDocumentWithContext } from "./clini
 import { decodeCursor, encodeCursor } from "./cursors.js"
 import { isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
 import { requirePatient } from "./patients.js"
-import { lockPlanItemForExecution, setPlanItemStatus } from "./plan.js"
-import { requireService } from "./service-catalog.js"
+import { lockPlanItemForExecution, setPlanItemStatus, surfaceLimits } from "./plan.js"
+import { assertExecutableCodings, resolveServiceCodings } from "./procedure-codings.js"
+import { requireServiceForIndication } from "./service-catalog.js"
 
 export type EncounterRow = typeof encounter.$inferSelect
 export type EncounterProcedureRow = typeof encounterProcedure.$inferSelect
@@ -664,7 +665,7 @@ export async function addEncounterProcedure(
     )
   }
   // Snapshot desde el plan (misma org + paciente; anti-traversal): la
-  // ejecución toma descripción y sitio del ítem aceptado, sin cambiarlos.
+  // ejecución toma descripción, sitio y codificaciones del ítem aceptado.
   let planServiceId: string | null = null
   let planTitle = ""
   let planScope: string | null = null
@@ -673,6 +674,7 @@ export async function addEncounterProcedure(
   let planQuadrant: number | null = null
   let planArch: string | null = null
   let planDiagnosis: string | null = null
+  let planCodings: Array<{ system: string; code: string; version: string; display: string }> = []
   if (planItemIdParam) {
     const {
       item: plan,
@@ -690,6 +692,9 @@ export async function addEncounterProcedure(
         "Solo se pueden realizar tratamientos aceptados en su presupuesto vigente",
       )
     }
+    // Histórico ambiguo heredado: nunca se factura como múltiples actos ni se
+    // elige un principal; se pide una nueva indicación exacta.
+    assertExecutableCodings(plan.codings)
     const norm = (list: string[] | null | undefined): string[] => [...(list ?? [])].sort()
     if (input.toothNumber !== undefined && (input.toothNumber ?? null) !== plan.toothNumber) {
       throw validation("El procedimiento conserva la pieza del tratamiento indicado, sin cambios")
@@ -718,6 +723,7 @@ export async function addEncounterProcedure(
     planDiagnosis = plan.diagnosisCode
     planTitle = plan.title
     planServiceId = plan.serviceId
+    planCodings = [...plan.codings]
   }
   let serviceId: string | null = null
   let description = ""
@@ -726,17 +732,18 @@ export async function addEncounterProcedure(
   let surfaces: string[] = [...planSurfaces]
   let quadrant: number | null = planQuadrant
   let arch: string | null = planArch
+  let codings = [...planCodings]
   if (serviceIdParam) {
-    const service = await requireService(tx, orgId, serviceIdParam)
-    if (!service.isActive) throw validation("El servicio del catálogo está inactivo")
+    const service = await requireServiceForIndication(tx, orgId, serviceIdParam)
     if (!service.scope) throw validation("La prestación no tiene un ámbito válido")
+    const limits = service.scope === "surfaces" ? await surfaceLimits(tx, service) : undefined
     try {
       assertTreatmentSite(service.scope as "general" | "tooth" | "surfaces" | "quadrant" | "arch", {
         toothNumber: input.toothNumber,
         surfaces: input.surfaces,
         quadrant: input.quadrant,
         arch: input.arch,
-      })
+      }, limits)
     } catch (e) {
       throw validation(e instanceof Error ? e.message : "Sitio clínico inválido")
     }
@@ -747,6 +754,8 @@ export async function addEncounterProcedure(
     surfaces = input.surfaces ? [...input.surfaces] : []
     quadrant = input.quadrant ?? null
     arch = input.arch ?? null
+    // Oferta oficial: un único snapshot exacto con su versión; propia: [].
+    codings = await resolveServiceCodings(tx, service)
   } else {
     serviceId = planServiceId
     description = planTitle
@@ -771,6 +780,7 @@ export async function addEncounterProcedure(
       description,
       diagnosisCode: input.diagnosisCode === undefined ? planDiagnosis : input.diagnosisCode,
       planItemId: input.planItemId ?? null,
+      codings,
       createdBy: actorUserId,
     })
     .returning()

@@ -17,17 +17,20 @@ cp infra/dev/.env.example infra/dev/.env
 pnpm install
 pnpm --filter @odentia/db migrate
 pnpm --filter @odentia/db seed:cie10   # prerrequisito de db:seed
+pnpm --filter @odentia/db seed:procedures  # biblioteca CPMS oficial 1:1
 pnpm db:seed                            # seed dev determinista (idempotente)
 ```
 
 Infra: postgres :5432, minio :9000/:9001, mailpit :1025/:8025. En Windows el dev (`turbo dev`, proxies `portless` en 443) corre en Git Bash con `pnpm` en PATH.
+
+Biblioteca CPMS: `pnpm --filter @odentia/db import:cpms` regenera los CSV desde el XLSX oficial y verifica SHA-256. La edición `RM-550-2023-MINSA` incluye las secciones 1.3 Odontología y 2.7 Salud Bucal completas (505 procedimientos); no afirma equivalencia con CDT/ICHI ni vigencia normativa posterior. `seed:procedures` concilia códigos, plantillas y procedencia en una transacción, conserva versiones retiradas y rechaza reactivar una edición retirada sobre otra vigente. La migración 0019 convierte las ofertas de las antiguas plantillas internas en propias sin cambiar precios ni snapshots clínicos.
 
 ## Comandos
 
 ```sh
 pnpm dev | pnpm build | pnpm test | pnpm typecheck          # turbo, todo el repo
 pnpm --filter @odentia/services test|typecheck              # por paquete
-pnpm --filter @odentia/db generate|migrate|seed:cie10
+pnpm --filter @odentia/db generate|migrate|seed:cie10|seed:procedures
 pnpm --filter @odentia/e2e test
 ```
 

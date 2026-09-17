@@ -43,13 +43,14 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, getRouteApi } from "@tanstack/react-router"
 import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-table"
 import { ChevronDown, Library, Plus, Tag } from "lucide-react"
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { z } from "zod"
 import { ApiError } from "../../lib/api"
 import { useCanWrite } from "../../lib/crm"
 import {
   createServiceApi,
   fetchServices,
+  fetchTreatmentTemplate,
   fetchTreatmentTemplates,
   formatMoney,
   formatPriceInput,
@@ -59,6 +60,7 @@ import {
   TREATMENT_SCOPE_LABELS,
   TREATMENT_SPECIALTIES,
   TREATMENT_SPECIALTY_LABELS,
+  type TreatmentTemplateCatalog,
   type TreatmentTemplateItem,
   updateServiceApi,
 } from "../../lib/services"
@@ -91,11 +93,10 @@ const TARIFARIO_SORT_OPTIONS = [
   { value: "precio", label: "Precio" },
   { value: "ambito", label: "Ámbito" },
 ]
+const BIBLIOTECA_PAGE_LIMIT = 20
 
-const BIBLIOTECA_SORT_OPTIONS = [
-  { value: "nombre", label: "Nombre" },
-  { value: "especialidad", label: "Especialidad" },
-]
+/** Tope de incorporación por envío: la API acepta 100 identificadores como máximo. */
+const MAX_LIBRARY_SELECTION = 100
 
 function stateLabel(state: string): string {
   return STATE_OPTIONS.find((o) => o.value === state)?.label ?? state
@@ -215,24 +216,39 @@ function TarifarioView({ canWrite }: { canWrite: boolean }) {
     setSelectedId(row.id)
     setSheetOpen(true)
   }
-
   const columns = useMemo<ColumnDef<ServiceCatalogItem>[]>(
     () => [
       {
         accessorKey: "name",
         header: "Prestación",
+        meta: { view: { primary: true } },
         cell: ({ row }) => (
-          <span className="flex flex-col">
-            <span className="font-medium">{row.original.name}</span>
+          <span className="flex min-w-0 flex-col">
+            <span className="font-medium break-words">{row.original.name}</span>
             {row.original.source === "template" ? (
-              <span className="text-xs text-muted-foreground">De la biblioteca</span>
+              <span className="text-xs text-muted-foreground">
+                De la biblioteca · nombre comercial editable
+              </span>
             ) : row.original.source === "legacy" ? (
               <span className="text-xs text-muted-foreground">Heredada · pendiente de revisar</span>
             ) : (
-              <span className="text-xs text-muted-foreground">Prestación de la clínica</span>
+              <span className="text-xs text-muted-foreground">
+                Prestación propia de la clínica · sin código oficial asociado
+              </span>
             )}
           </span>
         ),
+      },
+      {
+        accessorKey: "code",
+        header: "Código interno",
+        meta: { view: { primary: true } },
+        cell: ({ row }) =>
+          row.original.code ? (
+            <span className="font-mono">{row.original.code}</span>
+          ) : (
+            <span className="text-muted-foreground">—</span>
+          ),
       },
       {
         accessorKey: "scope",
@@ -522,15 +538,28 @@ function OfferDetail({
   const queryClient = useQueryClient()
   const [resolveMode, setResolveMode] = useState<"plantilla" | "propia">("plantilla")
 
-  const templateQuery = useQuery({
-    queryKey: ["services", "templates", "all"],
-    queryFn: () => fetchTreatmentTemplates({ limit: 100 }),
+  /**
+   * Plantilla vinculada por ID directo (incluye retiradas en solo lectura).
+   * Los mapeos llegan con el primario primero: se usa `codings[0]`.
+   */
+  const linkedTemplateQuery = useQuery({
+    queryKey: ["services", "templates", "linked", offer.templateId],
+    enabled: offer.templateId !== null,
     staleTime: 300_000,
+    queryFn: async (): Promise<TreatmentTemplateItem | null> => {
+      const target = offer.templateId
+      if (!target) return null
+      try {
+        const page = await fetchTreatmentTemplate(target)
+        return page.data
+      } catch {
+        return null
+      }
+    },
   })
-  const templateName = useMemo(() => {
-    if (!offer.templateId) return null
-    return templateQuery.data?.data.find((t) => t.id === offer.templateId)?.name ?? null
-  }, [templateQuery.data, offer.templateId])
+  const linkedTemplate = offer.templateId ? (linkedTemplateQuery.data ?? null) : null
+  const templateName = linkedTemplate?.name ?? null
+  const linkedCoding = linkedTemplate?.codings[0] ?? null
 
   const saveMutation = useMutation({
     mutationFn: (values: OfferFormValues) =>
@@ -596,6 +625,28 @@ function OfferDetail({
         </div>
         {isTemplate && templateName && templateName !== offer.name ? (
           <p className="text-xs text-muted-foreground">Variante de «{templateName}»</p>
+        ) : null}
+        {isTemplate ? (
+          linkedCoding ? (
+            <p className="text-xs text-muted-foreground">
+              Código oficial {linkedCoding.system}{" "}
+              <span className="font-mono">{linkedCoding.code}</span>
+              {" · "}edición {linkedCoding.version} · «{linkedCoding.display}». La tarifa y el
+              nombre comercial de esta oferta son propios de la clínica y no alteran el código
+              oficial.
+            </p>
+          ) : linkedTemplateQuery.isPending ? (
+            <p className="text-xs text-muted-foreground">Buscando el código oficial vinculado…</p>
+          ) : (
+            <p className="text-xs text-muted-foreground">
+              Oferta vinculada a la biblioteca; el código oficial se consulta en la biblioteca.
+            </p>
+          )
+        ) : null}
+        {offer.source === "custom" ? (
+          <p className="text-xs text-muted-foreground">
+            Prestación propia de la clínica, sin código oficial asociado.
+          </p>
         ) : null}
       </div>
 
@@ -687,6 +738,23 @@ function OfferDetail({
           <dl className="mt-2 grid grid-cols-2 gap-2 text-sm">
             <dt className="text-muted-foreground">Código interno</dt>
             <dd>{offer.code ?? "—"}</dd>
+            {isTemplate ? (
+              <>
+                <dt className="text-muted-foreground">Código oficial</dt>
+                <dd>
+                  {linkedCoding ? (
+                    <>
+                      <span className="font-mono">{linkedCoding.code}</span>{" "}
+                      <span className="text-muted-foreground">
+                        ({linkedCoding.system} · {linkedCoding.version})
+                      </span>
+                    </>
+                  ) : (
+                    "Ver en la biblioteca"
+                  )}
+                </dd>
+              </>
+            ) : null}
             <dt className="text-muted-foreground">Duración</dt>
             <dd>{offer.durationMin === null ? "—" : `${offer.durationMin} min`}</dd>
             <dt className="text-muted-foreground">Moneda</dt>
@@ -836,7 +904,9 @@ function OfferFields({
         validators={{ onChange: offerSchema.shape.code }}
         children={(field) => (
           <Field>
-            <FieldLabel htmlFor={`${offer.id}-codigo`}>Código interno (opcional)</FieldLabel>
+            <FieldLabel htmlFor={`${offer.id}-codigo`}>
+              {isTemplate ? "Código interno de la clínica (opcional)" : "Código interno (opcional)"}
+            </FieldLabel>
             <Input
               id={`${offer.id}-codigo`}
               value={field.state.value}
@@ -844,6 +914,11 @@ function OfferFields({
               onBlur={field.handleBlur}
             />
             <FieldError errors={fieldErrorMessages(field.state.meta.errors)} />
+            {isTemplate ? (
+              <p className="text-xs text-muted-foreground">
+                Solo uso interno de la clínica. El código oficial de la biblioteca no se edita aquí.
+              </p>
+            ) : null}
           </Field>
         )}
       />
@@ -880,48 +955,119 @@ function LegacyTemplateLink({
   onSelect: (id: string) => void
 }) {
   const [q, setQ] = useState("")
+  const [cursor, setCursor] = useState<string | undefined>(undefined)
+  const [previousCursors, setPreviousCursors] = useState<string[]>([])
+  const search = q.trim()
+  useEffect(() => {
+    setCursor(undefined)
+    setPreviousCursors([])
+  }, [search])
   const templatesQuery = useQuery({
-    queryKey: ["services", "templates", "link", q],
-    queryFn: () => fetchTreatmentTemplates({ q: q.trim() || undefined, limit: 20 }),
+    queryKey: ["services", "templates", "link", search, cursor],
+    queryFn: () => fetchTreatmentTemplates({ q: search || undefined, limit: 10, cursor }),
     staleTime: 60_000,
   })
   const rows = templatesQuery.data?.data ?? []
+  const total = templatesQuery.data?.total ?? rows.length
+  const catalog = templatesQuery.data?.catalog ?? null
+  const nextCursor = templatesQuery.data?.nextCursor ?? null
+  const goNext = () => {
+    if (!nextCursor) return
+    setPreviousCursors((stack) => [...stack, cursor ?? ""])
+    setCursor(nextCursor)
+  }
+  const goPrevious = () => {
+    const copy = [...previousCursors]
+    const previous = copy.pop()
+    setPreviousCursors(copy)
+    setCursor(previous || undefined)
+  }
   return (
     <div className="flex flex-col gap-2">
       <Input
         value={q}
         onChange={(event) => setQ(event.target.value)}
-        placeholder="Buscar en la biblioteca…"
-        aria-label="Buscar plantilla"
+        placeholder="Buscar por código o nombre…"
+        aria-label="Buscar plantilla por código o nombre"
       />
+      {catalog ? (
+        <p className="text-xs text-muted-foreground">
+          {catalog.system} · edición {catalog.version}
+        </p>
+      ) : null}
       {templatesQuery.isPending ? (
         <p className="text-sm text-muted-foreground">Cargando…</p>
+      ) : templatesQuery.isError ? (
+        <p className="text-sm text-muted-foreground">
+          No se pudo cargar la biblioteca.{" "}
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => void templatesQuery.refetch()}
+          >
+            Reintentar
+          </Button>
+        </p>
       ) : (
-        <ul className="flex max-h-48 flex-col gap-1 overflow-y-auto">
-          {rows.map((tpl) => (
-            <li key={tpl.id}>
+        <>
+          <ul className="flex max-h-48 flex-col gap-1 overflow-y-auto">
+            {rows.map((tpl) => {
+              const coding = tpl.codings[0]
+              return (
+                <li key={tpl.id}>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-auto w-full justify-start py-2 text-left"
+                    disabled={pending}
+                    onClick={() => onSelect(tpl.id)}
+                  >
+                    <span className="flex min-w-0 flex-col items-start">
+                      <span className="font-medium break-words">{tpl.name}</span>
+                      <span className="text-xs text-muted-foreground">
+                        {coding ? (
+                          <>
+                            <span className="font-mono">{coding.code}</span> ·{" "}
+                          </>
+                        ) : null}
+                        {TREATMENT_SPECIALTY_LABELS[tpl.specialty] ?? tpl.specialty} ·{" "}
+                        {TREATMENT_SCOPE_LABELS[tpl.scope] ?? tpl.scope}
+                      </span>
+                    </span>
+                  </Button>
+                </li>
+              )
+            })}
+            {rows.length === 0 ? (
+              <li className="text-sm text-muted-foreground">Sin resultados.</li>
+            ) : null}
+          </ul>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-xs text-muted-foreground">{total} resultado(s) con este filtro</p>
+            <div className="flex gap-2">
               <Button
                 type="button"
-                variant="ghost"
                 size="sm"
-                className="h-auto w-full justify-start py-2 text-left"
-                disabled={pending}
-                onClick={() => onSelect(tpl.id)}
+                variant="outline"
+                disabled={previousCursors.length === 0 || templatesQuery.isFetching}
+                onClick={goPrevious}
               >
-                <span className="flex flex-col items-start">
-                  <span className="font-medium">{tpl.name}</span>
-                  <span className="text-xs text-muted-foreground">
-                    {TREATMENT_SPECIALTY_LABELS[tpl.specialty] ?? tpl.specialty} ·{" "}
-                    {TREATMENT_SCOPE_LABELS[tpl.scope] ?? tpl.scope}
-                  </span>
-                </span>
+                Anterior
               </Button>
-            </li>
-          ))}
-          {rows.length === 0 ? (
-            <li className="text-sm text-muted-foreground">Sin resultados.</li>
-          ) : null}
-        </ul>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={!nextCursor || templatesQuery.isFetching}
+                onClick={goNext}
+              >
+                {templatesQuery.isFetching ? "Cargando…" : "Siguiente"}
+              </Button>
+            </div>
+          </div>
+        </>
       )}
     </div>
   )
@@ -1128,60 +1274,72 @@ function CreateOfferDrawer({ open, onClose }: { open: boolean; onClose: () => vo
 
 /* -------------------------------- Biblioteca ------------------------------- */
 
+/** Todos los templateId ya incorporados (recorre el cursor de cada estado). */
+async function fetchAllOwnedTemplateIds(): Promise<Set<string>> {
+  const ids = new Set<string>()
+  for (const state of ["active", "inactive", "unpriced"] as const) {
+    let cursor: string | undefined
+    do {
+      const page = await fetchServices({ state, limit: 100, cursor })
+      for (const row of page.data) {
+        if (row.templateId) ids.add(row.templateId)
+      }
+      cursor = page.nextCursor ?? undefined
+    } while (cursor)
+  }
+  return ids
+}
+
 function BibliotecaView({ canWrite }: { canWrite: boolean }) {
   const queryClient = useQueryClient()
   const listSearch = useListSearch()
   const search = listSearch.get("q") ?? ""
   const specialtyFilter = listSearch.get("especialidad") ?? "todas"
-  const sortParam = listSearch.get("sort") ?? ""
+  const cursor = listSearch.get("cursor")
+  const [previousCursors, setPreviousCursors] = useState<string[]>([])
   const [checked, setChecked] = useState<string[]>([])
 
+  useEffect(() => {
+    if (!cursor) setPreviousCursors([])
+  }, [cursor])
+
+  // Al cambiar búsqueda o filtro se vuelve a la primera página: el cursor anterior
+  // pertenece al resultado previo y la selección por página se conserva aparte.
+  const filterKey = `${search}||${specialtyFilter}`
+  const prevFilterKey = useRef(filterKey)
+  useEffect(() => {
+    if (prevFilterKey.current === filterKey) return
+    prevFilterKey.current = filterKey
+    setPreviousCursors([])
+    if (cursor) listSearch.setParam("cursor", undefined)
+  })
+
   const libraryQuery = useQuery({
-    queryKey: ["services", "biblioteca", search, specialtyFilter],
+    queryKey: ["services", "biblioteca", search, specialtyFilter, cursor],
     queryFn: () =>
       fetchTreatmentTemplates({
         q: search.trim() || undefined,
         specialty: specialtyFilter === "todas" ? undefined : specialtyFilter,
-        limit: 100,
+        cursor: cursor ?? undefined,
+        limit: BIBLIOTECA_PAGE_LIMIT,
       }),
   })
 
   const ownedQuery = useQuery({
     queryKey: ["services", "owned-templates"],
-    queryFn: async () => {
-      const [active, inactive, unpriced] = await Promise.all([
-        fetchServices({ state: "active", limit: 100 }),
-        fetchServices({ state: "inactive", limit: 100 }),
-        fetchServices({ state: "unpriced", limit: 100 }),
-      ])
-      return new Set(
-        [...active.data, ...inactive.data, ...unpriced.data]
-          .map((row) => row.templateId)
-          .filter((id): id is string => id !== null),
-      )
-    },
+    queryFn: fetchAllOwnedTemplateIds,
     staleTime: 60_000,
   })
 
   const rows = useMemo(() => libraryQuery.data?.data ?? [], [libraryQuery.data])
+  const nextCursor = libraryQuery.data?.nextCursor ?? null
+  const total = libraryQuery.data?.total ?? rows.length
+  const catalog: TreatmentTemplateCatalog | null = libraryQuery.data?.catalog ?? null
+  const pageNumber = previousCursors.length + 1
   const owned = ownedQuery.data ?? new Set<string>()
-  const sortedRows = useMemo(() => {
-    if (!sortParam) return rows
-    const desc = sortParam.startsWith("-")
-    const field = desc ? sortParam.slice(1) : sortParam
-    const factor = desc ? -1 : 1
-    return [...rows].sort((a, b) => {
-      if (field === "especialidad") {
-        const labelA = TREATMENT_SPECIALTY_LABELS[a.specialty] ?? a.specialty
-        const labelB = TREATMENT_SPECIALTY_LABELS[b.specialty] ?? b.specialty
-        return labelA.localeCompare(labelB, "es") * factor
-      }
-      return a.name.localeCompare(b.name, "es") * factor
-    })
-  }, [rows, sortParam])
-  const selectable = sortedRows.filter((row) => !owned.has(row.id))
-  const checkedSelectable = checked.filter((id) => selectable.some((row) => row.id === id))
-
+  const selectable = rows.filter((row) => !owned.has(row.id))
+  /** Selección acumulada de todas las páginas visitadas (ya incorporadas excluidas). */
+  const checkedPending = checked.filter((id) => !owned.has(id))
   const incorporateMutation = useMutation({
     mutationFn: (templateIds: string[]) => incorporateTemplatesApi(templateIds),
     onSuccess: async (result) => {
@@ -1202,10 +1360,35 @@ function BibliotecaView({ canWrite }: { canWrite: boolean }) {
   })
 
   const toggle = (id: string) => {
+    if (!checked.includes(id) && checkedPending.length >= MAX_LIBRARY_SELECTION) {
+      toast.info(`Máximo ${MAX_LIBRARY_SELECTION} prestaciones por incorporación`)
+      return
+    }
     setChecked((prev) => (prev.includes(id) ? prev.filter((v) => v !== id) : [...prev, id]))
   }
 
-  const allSelected = selectable.length > 0 && checkedSelectable.length === selectable.length
+  /** Casillas de esta página marcadas (la selección global se conserva al navegar). */
+  const checkedOnPage = selectable.filter((row) => checked.includes(row.id))
+  const allSelected = selectable.length > 0 && checkedOnPage.length === selectable.length
+  const togglePage = (value: boolean) => {
+    if (value) {
+      const fresh = selectable.map((row) => row.id).filter((id) => !checked.includes(id))
+      const room = MAX_LIBRARY_SELECTION - checkedPending.length
+      if (room <= 0) {
+        toast.info(`Máximo ${MAX_LIBRARY_SELECTION} prestaciones por incorporación`)
+        return
+      }
+      if (fresh.length > room) {
+        toast.info(`Solo se seleccionan ${room} más (máximo ${MAX_LIBRARY_SELECTION})`)
+      }
+      setChecked((prev) => [...prev, ...fresh.slice(0, room)])
+      return
+    }
+    setChecked((prev) => {
+      const pageIds = new Set(selectable.map((row) => row.id))
+      return prev.filter((id) => !pageIds.has(id))
+    })
+  }
 
   const columns = useMemo<ColumnDef<TreatmentTemplateItem>[]>(
     () => [
@@ -1216,10 +1399,8 @@ function BibliotecaView({ canWrite }: { canWrite: boolean }) {
           <Checkbox
             checked={allSelected}
             disabled={!canWrite || selectable.length === 0}
-            onCheckedChange={(value) =>
-              setChecked(value === true ? selectable.map((row) => row.id) : [])
-            }
-            aria-label="Seleccionar todas las prestaciones disponibles"
+            onCheckedChange={(value) => togglePage(value === true)}
+            aria-label="Seleccionar las prestaciones disponibles de esta página"
           />
         ),
         cell: ({ row }) => {
@@ -1237,9 +1418,10 @@ function BibliotecaView({ canWrite }: { canWrite: boolean }) {
       {
         accessorKey: "name",
         header: "Prestación",
+        meta: { view: { primary: true } },
         cell: ({ row }) => (
-          <span className="flex flex-col">
-            <span className="font-medium">{row.original.name}</span>
+          <span className="flex min-w-0 max-w-xl flex-col whitespace-normal">
+            <span className="font-medium break-words">{row.original.name}</span>
             <span className="text-xs text-muted-foreground">
               {TREATMENT_SPECIALTY_LABELS[row.original.specialty] ?? row.original.specialty} ·{" "}
               {TREATMENT_SCOPE_LABELS[row.original.scope] ?? row.original.scope}
@@ -1249,6 +1431,26 @@ function BibliotecaView({ canWrite }: { canWrite: boolean }) {
             </span>
           </span>
         ),
+      },
+      {
+        id: "codigo",
+        header: "Código oficial",
+        meta: { view: { primary: true } },
+        cell: ({ row }) => {
+          // Cada plantilla proyecta UN código oficial: se muestra completo, sin recortes.
+          const coding = row.original.codings[0]
+          if (!coding) {
+            return <span className="text-muted-foreground">Sin código oficial</span>
+          }
+          return (
+            <span className="flex min-w-0 flex-col whitespace-normal">
+              <span className="font-mono font-medium break-all">{coding.code}</span>
+              <span className="text-xs text-muted-foreground break-words">
+                {coding.system} · edición {coding.version}
+              </span>
+            </span>
+          )
+        },
       },
       {
         id: "estado",
@@ -1285,7 +1487,19 @@ function BibliotecaView({ canWrite }: { canWrite: boolean }) {
     [allSelected, canWrite, checked, owned, selectable, incorporateMutation.isPending],
   )
 
-  const table = useReactTable({ data: sortedRows, columns, getCoreRowModel: getCoreRowModel() })
+  const table = useReactTable({ data: rows, columns, getCoreRowModel: getCoreRowModel() })
+
+  const goNext = () => {
+    if (!nextCursor) return
+    setPreviousCursors((stack) => [...stack, cursor ?? ""])
+    listSearch.setParam("cursor", nextCursor)
+  }
+  const goPrevious = () => {
+    const copy = [...previousCursors]
+    const previous = copy.pop()
+    setPreviousCursors(copy)
+    listSearch.setParam("cursor", previous || undefined)
+  }
 
   const hasFilters = search.trim() !== "" || specialtyFilter !== "todas"
 
@@ -1300,26 +1514,60 @@ function BibliotecaView({ canWrite }: { canWrite: boolean }) {
             options: SPECIALTY_OPTIONS,
           },
         ]}
-        sortOptions={BIBLIOTECA_SORT_OPTIONS}
-        searchPlaceholder="Buscar en la biblioteca"
+        sortOptions={[]}
+        searchPlaceholder="Buscar por código o nombre"
       />
+      {catalog ? (
+        <div className="flex flex-col gap-1 rounded-lg border p-3 text-sm" role="note">
+          <p className="font-medium">
+            Biblioteca {catalog.system} · edición {catalog.version}
+          </p>
+          <p className="text-xs text-muted-foreground">
+            Cobertura limitada a esta edición y su ámbito ({catalog.scope}):{" "}
+            {catalog.availableCount} de {catalog.expectedCount} procedimientos disponibles. Cada
+            prestación corresponde a un solo código oficial.
+          </p>
+          <p className="text-xs">
+            <a
+              href={catalog.sourceUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="font-medium text-primary underline-offset-4 hover:underline"
+            >
+              Ver fuente oficial
+            </a>
+          </p>
+        </div>
+      ) : libraryQuery.data ? (
+        <p
+          className="rounded-lg border border-dashed p-3 text-xs text-muted-foreground"
+          role="note"
+        >
+          Sin edición oficial importada: la biblioteca no muestra cobertura ni fuente.
+        </p>
+      ) : null}
       {canWrite ? (
-        <div className="flex justify-end">
+        <div className="flex flex-col items-end gap-1">
           <Button
             type="button"
-            disabled={checkedSelectable.length === 0 || incorporateMutation.isPending}
-            onClick={() => incorporateMutation.mutate(checkedSelectable)}
+            disabled={checkedPending.length === 0 || incorporateMutation.isPending}
+            onClick={() => incorporateMutation.mutate(checkedPending)}
           >
             <Library aria-hidden />
             {incorporateMutation.isPending
               ? "Incorporando…"
-              : checkedSelectable.length > 0
-                ? `Incorporar a mi tarifario (${checkedSelectable.length})`
+              : checkedPending.length > 0
+                ? `Incorporar a mi tarifario (${checkedPending.length})`
                 : "Incorporar a mi tarifario"}
           </Button>
+          {checkedPending.length > 0 ? (
+            <p className="text-xs text-muted-foreground">
+              La selección se conserva al cambiar de página (máximo {MAX_LIBRARY_SELECTION} por
+              envío). Se incorporan sin tarifa.
+            </p>
+          ) : null}
         </div>
       ) : null}
-
       {libraryQuery.isPending ? (
         <LoadingState />
       ) : libraryQuery.isError ? (
@@ -1342,10 +1590,42 @@ function BibliotecaView({ canWrite }: { canWrite: boolean }) {
       ) : (
         <>
           <p className="text-sm text-muted-foreground">
-            Prestaciones operativas editables, sin precios propuestos. Al incorporarlas quedan «Sin
-            tarifa» hasta que configures cada monto en el tarifario.
+            Denominación oficial completa con su código único
+            {catalog ? ` (${catalog.system} · edición ${catalog.version})` : ""}, sin precios
+            propuestos. Al incorporarlas quedan «Sin tarifa» hasta que configures cada monto en el
+            tarifario; el nombre incorporado es comercial y editable, el código oficial no se
+            altera.
           </p>
           <DataTable table={table} />
+          <div className="flex flex-wrap items-center justify-between gap-2 py-2">
+            <p className="text-xs text-muted-foreground">
+              Página {pageNumber} · {rows.length} en esta página · {total} con este filtro
+              {nextCursor ? " · hay más resultados" : " · fin del listado"}
+              {catalog
+                ? ` · cobertura de la edición: ${catalog.availableCount} de ${catalog.expectedCount}`
+                : ""}
+            </p>
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={previousCursors.length === 0 || libraryQuery.isFetching}
+                onClick={goPrevious}
+              >
+                Anterior
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={!nextCursor || libraryQuery.isFetching}
+                onClick={goNext}
+              >
+                {libraryQuery.isFetching ? "Cargando…" : "Siguiente"}
+              </Button>
+            </div>
+          </div>
         </>
       )}
     </div>

@@ -25,6 +25,19 @@ export interface TreatmentTemplateItem {
   scope: "general" | "tooth" | "surfaces" | "quadrant" | "arch"
   surfaceCountMin: number | null
   surfaceCountMax: number | null
+  /** Proyección 1:1 de un código oficial: exactamente un elemento (CPMS primero). */
+  codings: Array<{ system: string; code: string; version: string; display: string }>
+}
+
+/** Edición oficial vigente de la biblioteca (null si no hay edición importada). */
+export interface TreatmentTemplateCatalog {
+  system: string
+  version: string
+  scope: string
+  sourceUrl: string
+  sourceSha256: string
+  expectedCount: number
+  availableCount: number
 }
 
 export const TREATMENT_SPECIALTIES = [
@@ -40,6 +53,8 @@ export const TREATMENT_SPECIALTIES = [
   "odontopediatria",
   "estetica",
   "disfuncion",
+  "anestesia",
+  "general",
 ] as const
 
 export const TREATMENT_SPECIALTY_LABELS: Record<string, string> = {
@@ -55,6 +70,8 @@ export const TREATMENT_SPECIALTY_LABELS: Record<string, string> = {
   odontopediatria: "Odontopediatría",
   estetica: "Estética",
   disfuncion: "Disfunción",
+  anestesia: "Anestesia y sedación",
+  general: "Servicios odontológicos generales",
 }
 
 export const TREATMENT_SCOPE_LABELS: Record<string, string> = {
@@ -134,9 +151,27 @@ export function fetchServices(
 /** Lista la biblioteca global de prestaciones (sin precios). */
 export function fetchTreatmentTemplates(
   query: { q?: string; specialty?: string; cursor?: string; limit?: number } = {},
-): Promise<{ data: TreatmentTemplateItem[]; nextCursor: string | null }> {
-  return apiFetch<{ data: TreatmentTemplateItem[]; nextCursor: string | null }>(
-    `/api/services/templates${toSearch(query)}`,
+): Promise<{
+  data: TreatmentTemplateItem[]
+  nextCursor: string | null
+  total: number
+  catalog: TreatmentTemplateCatalog | null
+}> {
+  return apiFetch<{
+    data: TreatmentTemplateItem[]
+    nextCursor: string | null
+    total: number
+    catalog: TreatmentTemplateCatalog | null
+  }>(`/api/services/templates${toSearch(query)}`)
+}
+
+/**
+ * Obtiene una plantilla por ID (solo lectura, incluye retiradas).
+ * Los mapeos llegan con el primario primero: se usa `codings[0]`.
+ */
+export function fetchTreatmentTemplate(id: string): Promise<{ data: TreatmentTemplateItem }> {
+  return apiFetch<{ data: TreatmentTemplateItem }>(
+    `/api/services/templates/${encodeURIComponent(id)}`,
   )
 }
 

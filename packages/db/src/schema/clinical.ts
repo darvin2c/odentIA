@@ -1,4 +1,4 @@
-import type { BloodGroup, ContactRelationship, RegistrationAnswers, RegistrationEntryPoint, RegistrationRespondent } from "@odentia/clinical"
+import type { BloodGroup, ContactRelationship, ProcedureCodingSnapshot, RegistrationAnswers, RegistrationEntryPoint, RegistrationRespondent } from "@odentia/clinical"
 import { sql } from "drizzle-orm"
 import {
   bigint,
@@ -403,6 +403,69 @@ export const encounterTooth = pgTable(
   ],
 )
 
+/** Sistemas de codificación de procedimientos (catálogo global, SIN org_id, SIN RLS). */
+export const procedureCodeSystem = pgTable("procedure_code_system", {
+  key: text("key").primaryKey(),
+  title: text("title").notNull(),
+  publisher: text("publisher").notNull(),
+  country: char("country", { length: 2 }),
+  license: text("license").notNull(),
+  sourceUrl: text("source_url").notNull(),
+})
+
+/**
+ * Códigos de procedimiento por sistema y versión (global, SIN org_id, SIN RLS,
+ * solo lectura en runtime como cie10_code). La versión es la del publicador
+ * (p. ej. RM-550-2023-MINSA para CPMS), nunca un correlativo interno.
+ */
+export const procedureCode = pgTable(
+  "procedure_code",
+  {
+    systemKey: text("system_key")
+      .notNull()
+      .references(() => procedureCodeSystem.key),
+    code: text("code").notNull(),
+    version: text("version").notNull(),
+    display: text("display").notNull(),
+    isActive: boolean("is_active").notNull().default(true),
+    replacedBy: text("replaced_by"),
+  },
+  (table) => [
+    primaryKey({ columns: [table.systemKey, table.code, table.version] }),
+    index("procedure_code_system_code_idx").on(table.systemKey, table.code),
+  ],
+)
+/**
+ * Ediciones importadas del catálogo oficial (una fila por sistema y versión).
+ * Global, SIN org_id, SIN RLS, solo lectura en runtime como cie10_code. La
+ * versión es la del publicador (p. ej. RM-550-2023-MINSA para CPMS), nunca un
+ * correlativo interno. `isCurrent` marca la edición vigente por sistema
+ * (índice parcial único): el seed solo activa la edición importada y jamás
+ * reactiva versiones anteriores. `scope` describe el ámbito extraído de la
+ * estructura oficial (p. ej. secciones 1.3+2.7) y `expectedCount` las filas
+ * oficiales del ámbito para conciliar cobertura en el seed.
+ */
+export const procedureCatalogRelease = pgTable(
+  "procedure_catalog_release",
+  {
+    systemKey: text("system_key")
+      .notNull()
+      .references(() => procedureCodeSystem.key),
+    version: text("version").notNull(),
+    scope: text("scope").notNull(),
+    sourceUrl: text("source_url").notNull(),
+    sourceSha256: text("source_sha256").notNull(),
+    expectedCount: integer("expected_count").notNull(),
+    isCurrent: boolean("is_current").notNull().default(false),
+  },
+  (table) => [
+    primaryKey({ columns: [table.systemKey, table.version] }),
+    uniqueIndex("procedure_catalog_release_current_uidx")
+      .on(table.systemKey)
+      .where(sql`"is_current"`),
+  ],
+)
+
 /** Biblioteca global de prestaciones (solo lectura para el rol app, como cie10_code). */
 export const treatmentTemplate = pgTable(
   "treatment_template",
@@ -416,9 +479,40 @@ export const treatmentTemplate = pgTable(
     surfaceCountMax: integer("surface_count_max"),
     isActive: boolean("is_active").notNull().default(true),
     version: integer("version").notNull().default(1),
-    externalCodings: jsonb("external_codings").notNull().default([]),
   },
   (table) => [uniqueIndex("treatment_template_key_uidx").on(table.key)],
+)
+
+/**
+ * Proyección 1:1 plantilla ↔ código oficial (global, SIN org_id, SIN RLS).
+ * Cada plantilla es la proyección de UN código oficial (key
+ * `cpms:<version>:<code>`) y cada código tiene UNA plantilla: los únicos
+ * garantizan que ninguna plantilla tenga mappings múltiples ni ningún código
+ * dos plantillas. Sin equivalencias aproximadas ni denominaciones inventadas:
+ * el nombre de la plantilla es la denominación oficial íntegra.
+ * El precio nunca vive aquí: solo en `service_catalog`/presupuestos.
+ */
+export const treatmentTemplateCode = pgTable(
+  "treatment_template_code",
+  {
+    templateId: uuid("template_id")
+      .notNull()
+      .references(() => treatmentTemplate.id, { onDelete: "cascade" }),
+    systemKey: text("system_key").notNull(),
+    code: text("code").notNull(),
+    version: text("version").notNull(),
+    isPrimary: boolean("is_primary").notNull().default(true),
+  },
+  (table) => [
+    primaryKey({ columns: [table.templateId, table.systemKey, table.code, table.version] }),
+    foreignKey({
+      columns: [table.systemKey, table.code, table.version],
+      foreignColumns: [procedureCode.systemKey, procedureCode.code, procedureCode.version],
+    }),
+    index("treatment_template_code_reverse_idx").on(table.systemKey, table.code, table.version),
+    uniqueIndex("treatment_template_code_template_uidx").on(table.templateId),
+    uniqueIndex("treatment_template_code_code_uidx").on(table.systemKey, table.code, table.version),
+  ],
 )
 
 /** Oferta organizacional de tratamientos y tarifas (recurso /services). */
@@ -464,6 +558,7 @@ export const encounterProcedure = pgTable("encounter_procedure", {
   description: text("description").notNull(),
   diagnosisCode: text("diagnosis_code").references(() => cie10Code.code),
   planItemId: uuid("plan_item_id").references(() => treatmentPlanItem.id),
+  codings: jsonb("codings").$type<ProcedureCodingSnapshot[]>().notNull().default([]),
   createdBy: text("created_by").references(() => user.id),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 })
@@ -547,6 +642,7 @@ export const treatmentPlanItem = pgTable(
     title: text("title").notNull(),
     detail: text("detail"),
     diagnosisCode: text("diagnosis_code").references(() => cie10Code.code),
+    codings: jsonb("codings").$type<ProcedureCodingSnapshot[]>().notNull().default([]),
     priceCents: integer("price_cents"),
     currency: char("currency", { length: 3 }).notNull().default("PEN"),
     status: text("status").notNull().default("pendiente"),
@@ -588,6 +684,7 @@ export const treatmentBudgetItem = pgTable(
     surfaces: text("surfaces").array().notNull().default([]),
     quadrant: smallint("quadrant"),
     arch: text("arch"),
+    codings: jsonb("codings").$type<ProcedureCodingSnapshot[]>().notNull().default([]),
     priceCents: integer("price_cents"),
     currency: char("currency", { length: 3 }).notNull().default("PEN"),
     decision: text("decision").notNull().default("pendiente"),

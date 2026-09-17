@@ -12,6 +12,7 @@ import { notFound, ServiceError, validation } from "./errors.js"
 import { requirePatient } from "./patients.js"
 import type { PlanItemDecision } from "./plan.js"
 import { PLAN_ITEM_DECISIONS } from "./plan.js"
+import { assertExecutableCodings } from "./procedure-codings.js"
 
 /**
  * Documento económico de un plan clínico: cabecera con decisión auditada +
@@ -281,6 +282,9 @@ async function requireQuotableItems(
     if (item.status === "realizado" || item.status === "cancelado") {
       throw conflict("ITEM_CLOSED", "El tratamiento está cerrado y no puede cotizarse")
     }
+    // Histórico ambiguo heredado: un nuevo presupuesto nunca cotiza varias
+    // equivalencias como actos; se pide una nueva indicación exacta.
+    assertExecutableCodings(item.codings)
     if (item.priceCents === null) throw validation("Todos los ítems deben tener tarifa conocida")
   }
   const currencies = new Set(items.map((i) => i.currency))
@@ -394,6 +398,7 @@ export async function createBudget(
       surfaces: item.surfaces,
       quadrant: item.quadrant,
       arch: item.arch,
+      codings: item.codings,
       priceCents: item.priceCents,
       currency: item.currency,
       decision: "pendiente",

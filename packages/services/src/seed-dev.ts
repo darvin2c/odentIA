@@ -38,6 +38,7 @@ import {
   treatmentBudgetItem,
   treatmentPlan,
   treatmentPlanItem,
+  treatmentTemplate,
 } from "@odentia/db/schema/clinical"
 import {
   agentConfig,
@@ -763,6 +764,27 @@ const serviceIdA = (code: string): string => {
   if (!found) throw new Error(`Servicio ${code} ausente del catálogo semilla`)
   return found.id
 }
+// Oferta oficial precisa: resina posterior de una superficie (CPMS D2391).
+// El mismo snapshot se conserva en plan, presupuesto y atención.
+const [resinaTemplate] = await db
+  .select()
+  .from(treatmentTemplate)
+  .where(eq(treatmentTemplate.key, "cpms:RM-550-2023-MINSA:D2391"))
+  .limit(1)
+if (!resinaTemplate) throw new Error("Falta CPMS D2391: ejecuta seed:procedures")
+const resinaCpmsA = await createService(db, ORG_A, ANA_ID, {
+  templateId: resinaTemplate.id,
+  code: "RESINA-CPMS",
+  priceCents: 18000,
+  durationMin: 45,
+})
+catalogA.push(resinaCpmsA)
+await createService(db, ORG_B, CORA_ID, {
+  templateId: resinaTemplate.id,
+  code: "RESINA-CPMS",
+  priceCents: 18000,
+  durationMin: 45,
+})
 // Evaluación inicial (borrador) antes del plan: la indicación nace aquí y la
 // ejecución continúa en la misma atención (un solo borrador por paciente).
 const draft = await createEncounter(db, ORG_A, ANA_ID, rosaPatientId, {
@@ -776,10 +798,11 @@ const planRestaurador = await createTreatmentPlan(db, ORG_A, ANA_ID, rosaPatient
   originEncounterId: draft.id,
 })
 const obt36 = await addPlanItem(db, ORG_A, ANA_ID, rosaPatientId, {
-  serviceId: serviceIdA("OBTURACION"),
+  serviceId: resinaCpmsA.id,
   planId: planRestaurador.id,
   sourceEncounterId: draft.id,
   toothNumber: 36,
+  surfaces: ["occlusal"],
   diagnosisCode: "K02.1",
   detail: "Obturación pieza 36",
 })
