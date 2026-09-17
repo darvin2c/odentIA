@@ -237,6 +237,7 @@ function TarifarioView({ canWrite }: { canWrite: boolean }) {
       {
         accessorKey: "scope",
         header: "Ámbito",
+        meta: { view: { primary: true } },
         cell: ({ row }) =>
           row.original.scope
             ? (TREATMENT_SCOPE_LABELS[row.original.scope] ?? row.original.scope)
@@ -245,6 +246,7 @@ function TarifarioView({ canWrite }: { canWrite: boolean }) {
       {
         accessorKey: "priceCents",
         header: "Precio",
+        meta: { view: { primary: true } },
         cell: ({ row }) =>
           row.original.priceCents === null ? (
             <Badge variant="secondary">Sin tarifa</Badge>
@@ -1209,6 +1211,7 @@ function BibliotecaView({ canWrite }: { canWrite: boolean }) {
     () => [
       {
         id: "select",
+        meta: { view: { role: "select" } },
         header: () => (
           <Checkbox
             checked={allSelected}

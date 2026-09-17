@@ -12,15 +12,6 @@ export { ButtonGroup, ButtonGroupSeparator, ButtonGroupText, buttonGroupVariants
 export { Spinner } from "./components/spinner.js";
 export { Skeleton } from "./components/skeleton.js";
 export {
-  Card,
-  CardAction,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from "./components/card.js";
-export {
   Attachment,
   AttachmentAction,
   AttachmentActions,
@@ -95,6 +86,7 @@ export {
 } from "./components/table.js";
 export { Tabs, TabsContent, TabsList, TabsTrigger, tabsListVariants } from "./components/tabs.js";
 export { Avatar, AvatarBadge, AvatarFallback, AvatarGroup, AvatarGroupCount, AvatarImage } from "./components/avatar.js";
+export { Item, ItemActions, ItemContent, ItemDescription, ItemMedia, ItemTitle } from "./components/item.js";
 export { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogOverlay, DialogPortal, DialogTitle, DialogTrigger } from "./components/dialog.js";
 export { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectScrollDownButton, SelectScrollUpButton, SelectSeparator, SelectTrigger, SelectValue } from "./components/select.js";
 export { Textarea } from "./components/textarea.js";

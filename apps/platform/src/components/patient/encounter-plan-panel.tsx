@@ -2,10 +2,6 @@ import { surfacesForTooth } from "@odentia/clinical"
 import {
   Badge,
   Button,
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
   Checkbox,
   Field,
   FieldLabel,
@@ -191,11 +187,11 @@ export function EncounterPlanPanel({
 
   return (
     <div className="flex flex-col gap-4">
-      <Card>
-        <CardHeader>
-          <CardTitle>Indicar en el plan</CardTitle>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-3">
+      <div className="flex flex-col gap-6 rounded-md bg-card p-6">
+        <div className="flex flex-col gap-1.5">
+          <div className="font-heading text-base font-medium">Indicar en el plan</div>
+        </div>
+        <div className="flex flex-col gap-3">
           {error ? (
             <p role="alert" className="text-sm text-destructive">
               {error}
@@ -246,7 +242,7 @@ export function EncounterPlanPanel({
               </div>
             </Field>
           </div>
-
+        
           <div className="grid gap-3 sm:grid-cols-2">
             <Field>
               <FieldLabel htmlFor={`${uid}-scope`}>Ámbito</FieldLabel>
@@ -320,7 +316,7 @@ export function EncounterPlanPanel({
               </Field>
             )}
           </div>
-
+        
           {scope === "surfaces" && toothForSurfaces != null ? (
             <Field>
               <FieldLabel>Superficies de la pieza {toothForSurfaces}</FieldLabel>
@@ -338,7 +334,7 @@ export function EncounterPlanPanel({
               </div>
             </Field>
           ) : null}
-
+        
           <ServicePicker
             value={service?.id ?? ""}
             label="Tratamiento"
@@ -358,7 +354,7 @@ export function EncounterPlanPanel({
               {service.scope ? ` · ${TREATMENT_SCOPE_LABELS[service.scope] ?? service.scope}` : ""}
             </p>
           ) : null}
-
+        
           <Field>
             <FieldLabel htmlFor={`${uid}-detail`}>Detalle</FieldLabel>
             <Textarea
@@ -371,7 +367,7 @@ export function EncounterPlanPanel({
             />
           </Field>
           <Cie10Search value={cie} onChange={(code) => setCie(code)} disabled={blocked || busy} />
-
+        
           <div>
             <Button
               type="button"
@@ -386,15 +382,15 @@ export function EncounterPlanPanel({
             conserva la selección anatómica. El plan puede seguir recibiendo indicaciones en futuras
             atenciones.
           </p>
-        </CardContent>
-      </Card>
+        </div>
+      </div>
 
       {planId ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>Tratamientos del plan</CardTitle>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-2">
+        <div className="flex flex-col gap-6 rounded-md bg-card p-6">
+          <div className="flex flex-col gap-1.5">
+            <div className="font-heading text-base font-medium">Tratamientos del plan</div>
+          </div>
+          <div className="flex flex-col gap-2">
             {detailQuery.isPending ? (
               <p className="text-sm text-muted-foreground">Cargando…</p>
             ) : items.length === 0 ? (
@@ -425,8 +421,8 @@ export function EncounterPlanPanel({
                 ))}
               </ul>
             )}
-          </CardContent>
-        </Card>
+          </div>
+        </div>
       ) : null}
     </div>
   )

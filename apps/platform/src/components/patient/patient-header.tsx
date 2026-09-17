@@ -7,8 +7,6 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
   Button,
-  Card,
-  CardContent,
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -165,8 +163,8 @@ export function PatientHeader({
           </BreadcrumbItem>
         </BreadcrumbList>
       </Breadcrumb>
-      <Card>
-        <CardContent className="flex min-w-0 flex-wrap items-start justify-between gap-4">
+      <div className="flex flex-col gap-6 rounded-md bg-card p-6">
+        <div className="flex min-w-0 flex-wrap items-start justify-between gap-4">
           <div className="flex min-w-0 items-center gap-4">
             <PatientAvatar
               patientId={patient.id}
@@ -231,8 +229,8 @@ export function PatientHeader({
             ) : null}
             <NewEncounterButton patientId={patient.id} openEncounterId={summary?.openEncounterId} />
           </div>
-        </CardContent>
-      </Card>
+        </div>
+      </div>
       <ConfirmDialog
         open={archiveOpen}
         onClose={() => {

@@ -7,12 +7,6 @@ import {
   AttachmentTitle,
   Badge,
   Button,
-  Card,
-  CardAction,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
   Field,
   FieldError,
   FieldLabel,
@@ -216,12 +210,12 @@ function ProfilePage() {
   return (
     <PageShell className="flex max-w-2xl flex-col gap-6">
       <PageHeader title="Mi perfil" subtitle="Administra tu información de cuenta y seguridad" />
-      <Card>
-        <CardHeader>
-          <CardTitle>Perfil</CardTitle>
-          <CardDescription>Tu información personal en odentIA.</CardDescription>
-        </CardHeader>
-        <CardContent>
+      <div className="flex flex-col gap-6 rounded-md bg-card p-6">
+        <div className="flex flex-col gap-1.5">
+          <div className="font-heading text-base font-medium">Perfil</div>
+          <p className="text-sm text-muted-foreground">Tu información personal en odentIA.</p>
+        </div>
+        <div>
           <div className="flex items-center gap-4">
             {avatar}
             <div className="min-w-0">
@@ -301,21 +295,21 @@ function ProfilePage() {
               </Button>
             </Link>
           </div>
-        </CardContent>
-      </Card>
-      <Card>
-        <CardHeader>
-          <CardTitle>Seguridad</CardTitle>
-          <CardDescription>Actualiza tu contraseña de acceso.</CardDescription>
-        </CardHeader>
-        <CardContent>
+        </div>
+      </div>
+      <div className="flex flex-col gap-6 rounded-md bg-card p-6">
+        <div className="flex flex-col gap-1.5">
+          <div className="font-heading text-base font-medium">Seguridad</div>
+          <p className="text-sm text-muted-foreground">Actualiza tu contraseña de acceso.</p>
+        </div>
+        <div>
           <Link to="/profile" search={{ edit: "password" }}>
             <Button type="button" variant="outline">
               Cambiar contraseña
             </Button>
           </Link>
-        </CardContent>
-      </Card>
+        </div>
+      </div>
       <SessionsCard />
       <EditProfileDrawer
         key={`${user.firstName}|${user.lastName}`}
@@ -382,12 +376,12 @@ function SessionsCard() {
   const sessions = sessionsQuery.data ?? []
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Sesiones activas</CardTitle>
-        <CardDescription>Dispositivos con acceso a tu cuenta.</CardDescription>
+    <div className="flex flex-col gap-6 rounded-md bg-card p-6">
+      <div className="flex flex-col gap-1.5">
+        <div className="font-heading text-base font-medium">Sesiones activas</div>
+        <p className="text-sm text-muted-foreground">Dispositivos con acceso a tu cuenta.</p>
         {sessions.length > 1 ? (
-          <CardAction>
+          <div className="self-start">
             <Button
               type="button"
               variant="outline"
@@ -396,10 +390,10 @@ function SessionsCard() {
             >
               Cerrar otras sesiones
             </Button>
-          </CardAction>
+          </div>
         ) : null}
-      </CardHeader>
-      <CardContent>
+      </div>
+      <div>
         {sessionsQuery.isPending ? (
           <div className="flex flex-col gap-3">
             <Skeleton className="h-12 w-full" />
@@ -452,7 +446,7 @@ function SessionsCard() {
             })}
           </ul>
         )}
-      </CardContent>
+      </div>
       <ConfirmDialog
         open={revokeTarget !== null}
         title={revokeTarget?.kind === "others" ? "Cerrar otras sesiones" : "Revocar sesión"}
@@ -467,7 +461,7 @@ function SessionsCard() {
         onConfirm={() => void handleConfirmRevoke()}
         onClose={() => setRevokeTarget(null)}
       />
-    </Card>
+    </div>
   )
 }
 

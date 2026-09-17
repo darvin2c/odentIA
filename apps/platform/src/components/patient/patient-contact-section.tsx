@@ -2,10 +2,6 @@ import { CONTACT_RELATIONSHIP_LABELS } from "@odentia/clinical"
 import {
   Badge,
   Button,
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
   Checkbox,
   Dialog,
   DialogContent,
@@ -123,9 +119,9 @@ export function PatientContactSection({ detail }: { detail: PatientFull }) {
 
   return (
     <div className="flex flex-col gap-4">
-      <Card>
-        <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2">
-          <CardTitle>Contactos vinculados</CardTitle>
+      <div className="flex flex-col gap-6 rounded-md bg-card p-6">
+        <div className="flex flex-row flex-wrap items-center justify-between gap-2">
+          <div className="font-heading text-base font-medium">Contactos vinculados</div>
           {canWrite ? (
             <div className="flex flex-wrap gap-2">
               <Button
@@ -156,8 +152,8 @@ export function PatientContactSection({ detail }: { detail: PatientFull }) {
               </Button>
             </div>
           ) : null}
-        </CardHeader>
-        <CardContent className="flex flex-col gap-3">
+        </div>
+        <div className="flex flex-col gap-3">
           {detail.contacts.length === 0 ? (
             <div className="flex flex-col gap-2">
               <p className="text-sm text-muted-foreground">
@@ -248,14 +244,13 @@ export function PatientContactSection({ detail }: { detail: PatientFull }) {
               </p>
             </div>
           ) : null}
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Procedencia del registro</CardTitle>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-1">
+        </div>
+      </div>
+      <div className="flex flex-col gap-6 rounded-md bg-card p-6">
+        <div className="flex flex-col gap-1.5">
+          <div className="font-heading text-base font-medium">Procedencia del registro</div>
+        </div>
+        <div className="flex flex-col gap-1">
           {registration ? (
             <>
               <p className="text-sm">
@@ -290,8 +285,8 @@ export function PatientContactSection({ detail }: { detail: PatientFull }) {
               Registro anterior: origen no disponible.
             </p>
           )}
-        </CardContent>
-      </Card>
+        </div>
+      </div>
 
       <ContactConversationDialog
         open={contactDialogOpen}

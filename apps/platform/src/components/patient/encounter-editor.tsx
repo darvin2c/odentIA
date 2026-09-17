@@ -2,10 +2,6 @@ import {
   Badge,
   Button,
   ButtonGroup,
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
@@ -676,11 +672,11 @@ export function EncounterEditor({
         </div>
 
         <div className="flex min-w-0 flex-col gap-4">
-          <Card>
-            <CardHeader>
-              <CardTitle>Motivo de la atención</CardTitle>
-            </CardHeader>
-            <CardContent className="flex flex-col gap-3">
+          <div className="flex flex-col gap-6 rounded-md bg-card p-6">
+            <div className="flex flex-col gap-1.5">
+              <div className="font-heading text-base font-medium">Motivo de la atención</div>
+            </div>
+            <div className="flex flex-col gap-3">
               <Field>
                 <FieldLabel htmlFor={`${uid}-reason`}>Motivo (máx. {MAX_REASON})</FieldLabel>
                 <Textarea
@@ -699,8 +695,8 @@ export function EncounterEditor({
                 </p>
                 <ToothSelector value={teeth} onChange={editTeeth} disabled={locked} />
               </div>
-            </CardContent>
-          </Card>
+            </div>
+          </div>
 
           <Tabs
             value={tab}
@@ -725,16 +721,16 @@ export function EncounterEditor({
                 onPendingChange={handlePendingChange}
               />
               <Collapsible open={examOpen} onOpenChange={setExamOpen}>
-                <Card>
-                  <CardHeader className="pb-3">
+                <div className="flex flex-col gap-6 rounded-md bg-card p-6">
+                  <div className="flex flex-col gap-1.5 pb-3">
                     <CollapsibleTrigger className="text-base font-semibold">
                       <span className="flex items-center gap-1">
                         Examen clínico <ChevronDown aria-hidden className="size-4" />
                       </span>
                     </CollapsibleTrigger>
-                  </CardHeader>
+                  </div>
                   <CollapsibleContent>
-                    <CardContent className="grid gap-3 sm:grid-cols-2">
+                    <div className="grid gap-3 sm:grid-cols-2">
                       <Field>
                         <FieldLabel htmlFor={`${uid}-ex-atm`}>ATM</FieldLabel>
                         <Input
@@ -838,9 +834,9 @@ export function EncounterEditor({
                           }
                         />
                       </Field>
-                    </CardContent>
+                    </div>
                   </CollapsibleContent>
-                </Card>
+                </div>
               </Collapsible>
               <ImagenesTab
                 patientId={patientId}
@@ -873,11 +869,11 @@ export function EncounterEditor({
               />
             </TabsContent>
             <TabsContent value="evolucion" className="flex flex-col gap-4">
-              <Card>
-                <CardHeader>
-                  <CardTitle>Evolución e indicaciones</CardTitle>
-                </CardHeader>
-                <CardContent className="flex flex-col gap-3">
+              <div className="flex flex-col gap-6 rounded-md bg-card p-6">
+                <div className="flex flex-col gap-1.5">
+                  <div className="font-heading text-base font-medium">Evolución e indicaciones</div>
+                </div>
+                <div className="flex flex-col gap-3">
                   <Field>
                     <FieldLabel htmlFor={`${uid}-evolution`}>
                       Evolución (máx. {MAX_EVOLUTION})
@@ -955,21 +951,21 @@ export function EncounterEditor({
                     Seguimiento recomendado; no reserva una cita. Guarda fecha y hora juntas o
                     limpia ambas.
                   </p>
-                </CardContent>
-              </Card>
+                </div>
+              </div>
               {detail.addenda.length > 0 ? (
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Adendas</CardTitle>
-                  </CardHeader>
-                  <CardContent className="flex flex-col gap-2">
+                <div className="flex flex-col gap-6 rounded-md bg-card p-6">
+                  <div className="flex flex-col gap-1.5">
+                    <div className="font-heading text-base font-medium">Adendas</div>
+                  </div>
+                  <div className="flex flex-col gap-2">
                     {detail.addenda.map((note) => (
                       <p key={note.id} className="whitespace-pre-wrap text-sm">
                         {note.note}
                       </p>
                     ))}
-                  </CardContent>
-                </Card>
+                  </div>
+                </div>
               ) : null}
             </TabsContent>
           </Tabs>
@@ -1007,11 +1003,11 @@ export function EncounterEditor({
           </Button>
         </ButtonGroup>
       </div>
-      <Card>
-        <CardHeader>
-          <CardTitle>Revisión para el cierre</CardTitle>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-2 text-sm">
+      <div className="flex flex-col gap-6 rounded-md bg-card p-6">
+        <div className="flex flex-col gap-1.5">
+          <div className="font-heading text-base font-medium">Revisión para el cierre</div>
+        </div>
+        <div className="flex flex-col gap-2 text-sm">
           <p>
             {detail.procedures.length} procedimiento(s) · {detail.notes.length} diagnóstico(s) ·{" "}
             {detail.odontogramEntries.length} hallazgo(s) de odontograma · {detail.documents.length}{" "}
@@ -1041,8 +1037,8 @@ export function EncounterEditor({
             El cierre deja la atención inmutable y nunca acepta presupuestos automáticamente: los
             vinculados pendientes siguen su flujo en el presupuesto.
           </p>
-        </CardContent>
-      </Card>
+        </div>
+      </div>
 
       <ConfirmDialog
         open={confirmOpen}

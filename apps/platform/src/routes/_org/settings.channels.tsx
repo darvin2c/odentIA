@@ -181,6 +181,7 @@ function ChannelsPage() {
       {
         accessorKey: "channel",
         header: "Canal",
+        meta: { view: { primary: true } },
         cell: ({ row }) => (
           <Badge variant="secondary">
             {row.original.channel === "whatsapp" ? "WhatsApp" : "Telegram"}
@@ -190,6 +191,7 @@ function ChannelsPage() {
       {
         accessorKey: "status",
         header: "Estado",
+        meta: { view: { primary: true } },
         cell: ({ row }) => (
           <Badge variant={row.original.status === "active" ? "success" : "secondary"}>
             {row.original.status === "active" ? "Activa" : "Inactiva"}
@@ -199,6 +201,7 @@ function ChannelsPage() {
       {
         id: "capabilities",
         header: "Capacidades",
+        meta: { view: { tableOnly: true } },
         cell: ({ row }) => {
           const badges = [
             row.original.capabilities?.templates ? "plantillas" : null,
@@ -329,7 +332,7 @@ function ChannelsPage() {
           }
         />
       ) : (
-        <DataTable table={table} />
+        <DataTable table={table}  view="card"/>
       )}
       <FormDrawer
         open={drawerOpen}

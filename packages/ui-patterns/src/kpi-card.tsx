@@ -1,4 +1,4 @@
-import { Badge, Card, cn } from "@odentia/ui"
+import { Badge, cn } from "@odentia/ui"
 
 export interface KpiCardProps {
   title: string
@@ -10,7 +10,7 @@ export interface KpiCardProps {
 
 export function KpiCard({ title, value, delta, description, className }: KpiCardProps) {
   return (
-    <Card className={cn("p-6", className)}>
+    <div className={cn("rounded-md bg-card p-6", className)}>
       <div className="flex items-center justify-between gap-2">
         <span className="text-sm font-medium text-muted-foreground">{title}</span>
         {delta ? (
@@ -23,6 +23,6 @@ export function KpiCard({ title, value, delta, description, className }: KpiCard
         {value}
       </div>
       {description ? <p className="mt-1 text-xs text-muted-foreground">{description}</p> : null}
-    </Card>
+    </div>
   )
 }

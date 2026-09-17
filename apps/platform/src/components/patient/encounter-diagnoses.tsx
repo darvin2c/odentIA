@@ -1,4 +1,4 @@
-import { Badge, Button, Card, CardContent, CardHeader, CardTitle } from "@odentia/ui"
+import { Badge, Button } from "@odentia/ui"
 import { FormDrawer } from "@odentia/ui-patterns"
 import { useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
@@ -98,11 +98,11 @@ export function EncounterDiagnoses({
   }
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Diagnósticos ({detail.notes.length})</CardTitle>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-3">
+    <div className="flex flex-col gap-6 rounded-md bg-card p-6">
+      <div className="flex flex-col gap-1.5">
+        <div className="font-heading text-base font-medium">Diagnósticos ({detail.notes.length})</div>
+      </div>
+      <div className="flex flex-col gap-3">
         <section aria-label="Diagnósticos registrados">
           {detail.notes.length === 0 ? (
             <p className="text-sm text-muted-foreground">Sin diagnósticos registrados.</p>
@@ -120,7 +120,7 @@ export function EncounterDiagnoses({
             </ul>
           )}
         </section>
-
+      
         {canWrite && !finalized && (
           <div>
             <Button
@@ -133,7 +133,7 @@ export function EncounterDiagnoses({
             </Button>
           </div>
         )}
-
+      
         {canWrite && !finalized && (
           <FormDrawer
             open={open}
@@ -164,7 +164,7 @@ export function EncounterDiagnoses({
             </div>
           </FormDrawer>
         )}
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   )
 }

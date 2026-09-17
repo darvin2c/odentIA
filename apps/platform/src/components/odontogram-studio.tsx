@@ -11,9 +11,6 @@ import {
 import {
   Badge,
   Button,
-  Card,
-  CardContent,
-  CardHeader,
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
@@ -479,16 +476,16 @@ export function OdontogramStudio({
       </div>
       {!compact && (
         <Collapsible>
-          <Card>
-            <CardHeader className="pb-3">
+          <div className="flex flex-col gap-6 rounded-md bg-card p-6">
+            <div className="flex flex-col gap-1.5 pb-3">
               <CollapsibleTrigger className="text-base font-semibold">
                 <span className="flex items-center gap-1">
                   Actas del odontograma <ChevronDown aria-hidden className="size-4" />
                 </span>
               </CollapsibleTrigger>
-            </CardHeader>
+            </div>
             <CollapsibleContent>
-              <CardContent>
+              <div>
                 <OdontogramAssessments
                   patientId={patientId}
                   history={state.history}
@@ -497,23 +494,23 @@ export function OdontogramStudio({
                   beforeWrite={beforeWrite}
                   onPendingChange={onPendingChange}
                 />
-              </CardContent>
+              </div>
             </CollapsibleContent>
-          </Card>
+          </div>
         </Collapsible>
       )}
       {!compact && (
         <Collapsible>
-          <Card>
-            <CardHeader className="pb-3">
+          <div className="flex flex-col gap-6 rounded-md bg-card p-6">
+            <div className="flex flex-col gap-1.5 pb-3">
               <CollapsibleTrigger className="text-base font-semibold">
                 <span className="flex items-center gap-1">
                   Historial del odontograma <ChevronDown aria-hidden className="size-4" />
                 </span>
               </CollapsibleTrigger>
-            </CardHeader>
+            </div>
             <CollapsibleContent>
-              <CardContent className="flex flex-col gap-3">
+              <div className="flex flex-col gap-3">
                 {historical && (
                   <div className="flex flex-wrap items-center gap-2">
                     <Badge variant="outline">Solo lectura</Badge>
@@ -546,9 +543,9 @@ export function OdontogramStudio({
                     <li className="text-sm text-muted-foreground">Sin registros dentales.</li>
                   ) : null}
                 </ol>
-              </CardContent>
+              </div>
             </CollapsibleContent>
-          </Card>
+          </div>
         </Collapsible>
       )}
       {selection.length > 0 && !showInlinePanel && (

@@ -4,6 +4,7 @@ import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { DataTable, DataTableSkeleton } from "./data-table.js"
+import type { DataTableView } from "./data-table-view.js"
 import { DataRefreshMarker } from "./loading-state.js"
 
 type Person = { id: string; name: string }
@@ -16,7 +17,26 @@ const columns: ColumnDef<Person>[] = [
   { accessorKey: "name", header: "Nombre" },
 ]
 
-afterEach(cleanup)
+const originalMatchMedia = window.matchMedia
+
+afterEach(() => {
+  cleanup()
+  window.matchMedia = originalMatchMedia
+})
+
+// jsdom no simula anchos: fija el resultado de la media query móvil.
+function stubMatchMedia(matches: boolean) {
+  window.matchMedia = ((query: string) => ({
+    matches,
+    media: query,
+    onchange: null,
+    addListener: () => {},
+    removeListener: () => {},
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    dispatchEvent: () => false,
+  })) as unknown as typeof window.matchMedia
+}
 
 function TestTable({ onRowClick }: { onRowClick: (row: Person) => void }) {
   const table = useReactTable({ data: rows, columns, getCoreRowModel: getCoreRowModel() })
@@ -52,5 +72,99 @@ describe("DataTable", () => {
     expect(content.classList.contains("shimmer")).toBe(true)
     expect(content.classList.contains("shimmer-color-accent/60")).toBe(true)
     expect(content.classList.contains("motion-reduce:shimmer-none")).toBe(true)
+  })
+})
+
+/* --------------------------- Vistas lista y card --------------------------- */
+
+type Task = { id: string; title: string; due: string; status: string }
+
+const tasks: Task[] = [
+  { id: "1", title: "Llamar a Ana", due: "12 mar", status: "open" },
+  { id: "2", title: "Confirmar cita", due: "13 mar", status: "done" },
+]
+
+const taskColumns: ColumnDef<Task>[] = [
+  { accessorKey: "title", header: "Título" },
+  { accessorKey: "due", header: "Vence" },
+  { accessorKey: "status", header: "Estado" },
+  { id: "actions", header: "", cell: () => <button type="button">Completar</button> },
+]
+
+function TaskTable({
+  view,
+  onRowClick,
+  columns = taskColumns,
+}: {
+  view?: DataTableView
+  onRowClick?: (row: Task) => void
+  columns?: ColumnDef<Task>[]
+}) {
+  const table = useReactTable({ data: tasks, columns, getCoreRowModel: getCoreRowModel() })
+  return <DataTable table={table} view={view} onRowClick={onRowClick} />
+}
+
+describe("DataTable en lista", () => {
+  it("muestra título y resumen sin cabeceras ni tabla", () => {
+    const { container } = render(<TaskTable view="list" />)
+
+    expect(container.querySelector("table")).toBeNull()
+    expect(container.querySelectorAll("[data-slot='item']")).toHaveLength(2)
+    expect(screen.getByText("Llamar a Ana")).toBeTruthy()
+    const summary = container.querySelector("[data-slot='item-description']")
+    expect(summary?.textContent).toContain("12 mar")
+    expect(summary?.textContent).toContain("open")
+  })
+
+  it("la fila completa abre el registro y sus acciones internas no", () => {
+    const onRowClick = vi.fn()
+    render(<TaskTable view="list" onRowClick={onRowClick} />)
+
+    fireEvent.click(screen.getByText("Llamar a Ana"))
+    expect(onRowClick).toHaveBeenCalledWith(tasks[0])
+
+    fireEvent.click(screen.getAllByText("Completar")[0])
+    expect(onRowClick).toHaveBeenCalledTimes(1)
+  })
+
+  it("conserva el seleccionar-todas de la columna de selección", () => {
+    const columns: ColumnDef<Task>[] = [
+      {
+        id: "select",
+        header: () => <input type="checkbox" aria-label="Seleccionar todas las tareas" />,
+        cell: () => <input type="checkbox" />,
+        meta: { view: { role: "select" } },
+      },
+      ...taskColumns,
+    ]
+    render(<TaskTable view="list" columns={columns} />)
+
+    expect(screen.getByLabelText("Seleccionar todas las tareas")).toBeTruthy()
+    expect(screen.getByText("Seleccionar todo")).toBeTruthy()
+    expect(screen.getByText("Llamar a Ana")).toBeTruthy()
+  })
+
+  it("se fuerza en pantallas pequeñas aunque se pida tabla", () => {
+    stubMatchMedia(true)
+    const { container } = render(<TaskTable />)
+
+    expect(container.querySelector("table")).toBeNull()
+    expect(container.querySelectorAll("[data-slot='item']")).toHaveLength(2)
+  })
+})
+
+describe("DataTable en card", () => {
+  it("empareja cada campo con la etiqueta de su columna", () => {
+    const { container } = render(<TaskTable view="card" />)
+
+    expect(container.querySelector("table")).toBeNull()
+    expect(Array.from(container.querySelectorAll("dt")).map((node) => node.textContent)).toEqual([
+      "Vence",
+      "Estado",
+      "Vence",
+      "Estado",
+    ])
+    expect(screen.getByText("Llamar a Ana")).toBeTruthy()
+    expect(screen.getByText("13 mar")).toBeTruthy()
   })
 })

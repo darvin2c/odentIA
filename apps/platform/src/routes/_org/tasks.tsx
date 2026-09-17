@@ -100,6 +100,7 @@ function TasksPage() {
       {
         id: "assignee",
         header: "Asignado",
+        meta: { view: { primary: true } },
         cell: ({ row }) => {
           const member = org.members.find((m) => m.userId === row.original.assigneeUserId)
           return member ? member.user.name : <span className="text-muted-foreground">—</span>
@@ -108,6 +109,7 @@ function TasksPage() {
       {
         accessorKey: "dueAt",
         header: "Vence",
+        meta: { view: { primary: true } },
         cell: ({ row }) =>
           row.original.dueAt
             ? new Date(row.original.dueAt).toLocaleDateString("es-PE", {

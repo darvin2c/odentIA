@@ -105,7 +105,7 @@ export function FilterBar({
   const drawerTitle = drawerMode === "overflow" ? common.filters.moreFilters : common.filters.label
 
   return (
-    <div className="flex p-3 bg-white rounded-md">
+    <div className="flex p-3 bg-card rounded-md">
       <div
         ref={containerRef}
         data-filter-row="desktop"

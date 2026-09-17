@@ -114,9 +114,9 @@ function FieldsPage() {
 
   const columns = useMemo<ColumnDef<FieldDef>[]>(
     () => [
-      { accessorKey: "key", header: "Clave" },
-      { accessorKey: "label", header: "Label" },
-      { accessorKey: "type", header: "Tipo" },
+      { accessorKey: "key", header: "Clave", meta: { view: { primary: true } } },
+      { accessorKey: "label", header: "Label", meta: { view: { role: "title" } } },
+      { accessorKey: "type", header: "Tipo", meta: { view: { primary: true } } },
       {
         id: "options",
         header: "Opciones",

@@ -9,8 +9,6 @@ import {
   Badge,
   Button,
   ButtonGroup,
-  Card,
-  CardContent,
   Field,
   FieldLabel,
   Select,
@@ -131,8 +129,8 @@ function NoteCard({
   locale: string
 }) {
   return (
-    <Card>
-      <CardContent className="flex flex-col gap-2 pt-4">
+    <div className="flex flex-col gap-6 rounded-md bg-card p-6">
+      <div className="flex flex-col gap-2">
         <CardHeaderRow
           badge={timelineTypeLabel(item.type)}
           context={item.diagnosisCode ? `CIE-10: ${item.diagnosisCode}` : null}
@@ -141,8 +139,8 @@ function NoteCard({
           locale={locale}
         />
         {item.detail ? <p className="whitespace-pre-wrap text-sm">{item.detail}</p> : null}
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   )
 }
 
@@ -163,8 +161,8 @@ function OdontogramCard({
   if (item.surface) meta.push(surfaceLabel(item.surface))
   if (item.status) meta.push(statusLabel(item.status))
   return (
-    <Card>
-      <CardContent className="flex flex-col gap-2 pt-4">
+    <div className="flex flex-col gap-6 rounded-md bg-card p-6">
+      <div className="flex flex-col gap-2">
         <CardHeaderRow
           badge={timelineTypeLabel(item.type)}
           context={
@@ -195,8 +193,8 @@ function OdontogramCard({
             </Button>
           </div>
         ) : null}
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   )
 }
 function DocumentCard({ patientId, item }: { patientId: string; item: TimelineItem }) {
@@ -244,8 +242,8 @@ function AnamnesisCard({
   onView: (refId: string) => void
 }) {
   return (
-    <Card>
-      <CardContent className="flex flex-col gap-2 pt-4">
+    <div className="flex flex-col gap-6 rounded-md bg-card p-6">
+      <div className="flex flex-col gap-2">
         <CardHeaderRow
           badge={timelineTypeLabel(item.type)}
           context={item.version != null ? `v${item.version}` : null}
@@ -259,8 +257,8 @@ function AnamnesisCard({
             Ver anamnesis
           </Button>
         </div>
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   )
 }
 

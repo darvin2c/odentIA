@@ -2,10 +2,6 @@ import { FDI_ADULT, FDI_CHILD } from "@odentia/clinical"
 import {
   Badge,
   Button,
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
   Field,
   FieldLabel,
   Select,
@@ -199,11 +195,11 @@ export function EncounterProcedures({
   }
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Procedimientos ({detail.procedures.length})</CardTitle>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-3">
+    <div className="flex flex-col gap-6 rounded-md bg-card p-6">
+      <div className="flex flex-col gap-1.5">
+        <div className="font-heading text-base font-medium">Procedimientos ({detail.procedures.length})</div>
+      </div>
+      <div className="flex flex-col gap-3">
         <section aria-label="Tratamientos vinculados pendientes">
           {detail.plannedItems.filter(
             (item) => item.status === "pendiente" || item.status === "programado",
@@ -257,7 +253,7 @@ export function EncounterProcedures({
             </ul>
           )}
         </section>
-
+      
         {canWrite && !finalized && (
           <div>
             <Button
@@ -270,7 +266,7 @@ export function EncounterProcedures({
             </Button>
           </div>
         )}
-
+      
         {canWrite && !finalized && (
           <FormDrawer
             open={open}
@@ -292,7 +288,7 @@ export function EncounterProcedures({
                   disabled={busy}
                 />
               )}
-
+      
               <Field>
                 <FieldLabel htmlFor={`${uid}-pieza`}>Pieza (FDI, opcional)</FieldLabel>
                 <Select
@@ -325,14 +321,14 @@ export function EncounterProcedures({
                   </SelectContent>
                 </Select>
               </Field>
-
+      
               <Cie10Search
                 value={cie}
                 onChange={(code) => setCie(code)}
                 label="Diagnóstico CIE-10 (opcional)"
                 disabled={busy}
               />
-
+      
               <Field>
                 <FieldLabel htmlFor={`${uid}-plan`}>
                   Tratamiento aceptado del presupuesto
@@ -393,7 +389,7 @@ export function EncounterProcedures({
             </div>
           </FormDrawer>
         )}
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   )
 }

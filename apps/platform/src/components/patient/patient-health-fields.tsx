@@ -19,10 +19,6 @@ import {
 import {
   Badge,
   Button,
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
   Checkbox,
   Field,
   FieldLabel,
@@ -762,16 +758,16 @@ function DeclarationGroupShell({
   children: (hasRows: boolean) => ReactNode
 }): React.JSX.Element {
   return (
-    <Card>
-      <CardHeader>
+    <div className="flex flex-col gap-6 rounded-md bg-card p-6">
+      <div className="flex flex-col gap-1.5">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <CardTitle>{title}</CardTitle>
+          <div className="font-heading text-base font-medium">{title}</div>
           <Badge variant={state === "recorded" ? "default" : "outline"}>
             {DECLARATION_STATE_LABELS[state]}
           </Badge>
         </div>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-3">
+      </div>
+      <div className="flex flex-col gap-3">
         <DeclarationStateSelect
           id={stateId}
           value={state}
@@ -783,8 +779,8 @@ function DeclarationGroupShell({
         {children(true)}
         {emptyHint ? <p className="text-sm text-muted-foreground">{emptyHint}</p> : null}
         {confirm}
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   )
 }
 
@@ -1047,11 +1043,11 @@ export function RegistrationHealthFields({
   return (
     <div className="flex flex-col gap-4">
       {fields.bloodGroup === "hidden" ? null : (
-        <Card>
-          <CardHeader>
-            <CardTitle>Grupo sanguíneo</CardTitle>
-          </CardHeader>
-          <CardContent>
+        <div className="flex flex-col gap-6 rounded-md bg-card p-6">
+          <div className="flex flex-col gap-1.5">
+            <div className="font-heading text-base font-medium">Grupo sanguíneo</div>
+          </div>
+          <div>
             <BloodGroupSelect
               id={`${idPrefix}-blood`}
               value={value.bloodGroup ?? null}
@@ -1060,8 +1056,8 @@ export function RegistrationHealthFields({
               error={pickError(errors, [`${idPrefix}-blood`, "bloodGroup", "health.bloodGroup"])}
               declared
             />
-          </CardContent>
-        </Card>
+          </div>
+        </div>
       )}
       {fields.allergies === "hidden" ? null : (
         <AllergyDeclarationGroup

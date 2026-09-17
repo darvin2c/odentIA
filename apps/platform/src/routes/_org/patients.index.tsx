@@ -107,12 +107,14 @@ function PatientsPage() {
         accessorKey: "patientNumber",
         id: "number",
         header: "HC",
+        meta: { view: { primary: true } },
         cell: ({ row }) => hcLabel(row.original.patientNumber),
       },
       {
         accessorKey: "displayName",
         id: "name",
         header: "Nombre",
+        meta: { view: { role: "title" } },
         cell: ({ row }) => (
           <Link
             to="/patients/$patientId"
@@ -141,7 +143,8 @@ function PatientsPage() {
       {
         id: "phone",
         header: "Teléfono",
-        cell: ({ row }) => row.original.phone ?? <span className="text-muted-foreground">—</span>,
+        meta: { view: { primary: true } },
+        cell: ({ row }) => row.original.phone || <span className="text-muted-foreground">—</span>,
       },
       {
         id: "status",

@@ -191,6 +191,7 @@ function ContactsPage() {
       {
         id: "channels",
         header: "Canales",
+        meta: { view: { role: "media" } },
         cell: ({ row }) => (
           <span className="flex gap-1">
             {row.original.channels.includes("whatsapp") && (
@@ -203,6 +204,7 @@ function ContactsPage() {
       {
         id: "stage",
         header: "Etapa",
+        meta: { view: { primary: true } },
         cell: ({ row }) =>
           row.original.stageId ? (
             <Badge variant="secondary">{stageName.get(row.original.stageId) ?? "—"}</Badge>
@@ -213,6 +215,7 @@ function ContactsPage() {
       {
         accessorKey: "tags",
         header: "Etiquetas",
+        meta: { view: { tableOnly: true } },
         cell: ({ row }) => (
           <span className="flex flex-wrap gap-1">
             {row.original.tags.map((t) => (
@@ -226,6 +229,7 @@ function ContactsPage() {
       {
         accessorKey: "lastInteractionAt",
         header: "Última actividad",
+        meta: { view: { primary: true } },
         cell: ({ row }) => timeAgo(row.original.lastInteractionAt),
       },
       {

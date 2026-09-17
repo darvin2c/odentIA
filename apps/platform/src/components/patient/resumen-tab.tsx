@@ -1,9 +1,5 @@
 import {
   Button,
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
@@ -86,8 +82,8 @@ export function ResumenTab({
   return (
     <div className="flex flex-col gap-4">
       {canWrite && healthQuery.isFetched && (pendingReview || !hasInfo) ? (
-        <Card className="border-primary/40 bg-primary/5">
-          <CardContent className="flex flex-wrap items-center justify-between gap-3 pt-4">
+        <div className="flex flex-col gap-6 rounded-md border border-primary/40 bg-primary/5 p-6">
+          <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-start gap-2">
               <ClipboardList className="mt-0.5 size-4 text-primary" aria-hidden="true" />
               <div className="flex flex-col gap-0.5">
@@ -106,15 +102,15 @@ export function ResumenTab({
             <Button type="button" onClick={() => onTabChange("antecedentes")}>
               {pendingReview ? "Revisar información declarada" : "Registrar antecedentes"}
             </Button>
-          </CardContent>
-        </Card>
+          </div>
+        </div>
       ) : null}
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Última atención</CardTitle>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-2">
+      <div className="flex flex-col gap-6 rounded-md bg-card p-6">
+        <div className="flex flex-col gap-1.5">
+          <div className="font-heading text-base font-medium">Última atención</div>
+        </div>
+        <div className="flex flex-col gap-2">
           {lastVisit ? (
             <div className="flex flex-col gap-2">
               <p className="text-sm font-medium">
@@ -150,14 +146,13 @@ export function ResumenTab({
               </p>
             </div>
           )}
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Planes en curso</CardTitle>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-2">
+        </div>
+      </div>
+      <div className="flex flex-col gap-6 rounded-md bg-card p-6">
+        <div className="flex flex-col gap-1.5">
+          <div className="font-heading text-base font-medium">Planes en curso</div>
+        </div>
+        <div className="flex flex-col gap-2">
           {plansQuery.isPending ? (
             <p className="text-sm text-muted-foreground">Cargando planes…</p>
           ) : plansQuery.isError ? (
@@ -194,22 +189,20 @@ export function ResumenTab({
               />
             ))
           )}
-        </CardContent>
-      </Card>
-
+        </div>
+      </div>
       <PatientContactSection detail={detail} />
-
       <Collapsible>
-        <Card>
-          <CardHeader className="pb-3">
+        <div className="flex flex-col gap-6 rounded-md bg-card p-6">
+          <div className="flex flex-col gap-1.5 pb-3">
             <CollapsibleTrigger className="text-base font-semibold">
               <span className="flex items-center gap-1">
                 Filiación extendida <ChevronDown aria-hidden className="size-4" />
               </span>
             </CollapsibleTrigger>
-          </CardHeader>
+          </div>
           <CollapsibleContent>
-            <CardContent>
+            <div>
               <dl className="grid min-w-0 grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
                 <Field label="Nombre completo">{detail.patient.displayName}</Field>
                 <Field label="Documento">
@@ -243,21 +236,21 @@ export function ResumenTab({
                 </Field>
                 <Field label="Origen / referencia">{patient.referralSource ?? missing}</Field>
               </dl>
-            </CardContent>
+            </div>
           </CollapsibleContent>
-        </Card>
+        </div>
       </Collapsible>
 
-      <Card>
-        <CardContent className="flex flex-wrap items-center justify-between gap-3 pt-4">
+      <div className="flex flex-col gap-6 rounded-md bg-card p-6">
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <p className="text-sm text-muted-foreground">
             Alergias, condiciones, medicación y entrevista se revisan en Antecedentes.
           </p>
           <Button size="sm" variant="outline" onClick={() => onTabChange("antecedentes")}>
             Ir a antecedentes
           </Button>
-        </CardContent>
-      </Card>
+        </div>
+      </div>
     </div>
   )
 }

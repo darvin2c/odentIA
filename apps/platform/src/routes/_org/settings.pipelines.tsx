@@ -147,6 +147,7 @@ function PipelinesPage() {
       {
         accessorKey: "kind",
         header: "Tipo",
+        meta: { view: { primary: true } },
         cell: ({ row }) => {
           const stage = row.original
           if (editing?.id === stage.id) {

@@ -1,4 +1,4 @@
-import { Badge, Button, Card, CardContent, CardHeader, CardTitle } from "@odentia/ui"
+import { Badge, Button } from "@odentia/ui"
 import { useQuery } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { useState } from "react"
@@ -38,18 +38,18 @@ export function EncounterHistoryCard({
   const planBudgetId = planned.find((link) => link.budgetId)?.budgetId
 
   return (
-    <Card>
-      <CardHeader>
+    <div className="flex flex-col gap-6 rounded-md bg-card p-6">
+      <div className="flex flex-col gap-1.5">
         <div className="flex items-start justify-between gap-2">
-          <CardTitle>{item.title}</CardTitle>
+          <div className="font-heading text-base font-medium">{item.title}</div>
           {item.status && <Badge variant="outline">{encounterStatusLabel(item.status)}</Badge>}
         </div>
         <p className="text-xs text-muted-foreground">
           <time dateTime={item.createdAt}>{timeAgo(item.createdAt)}</time>
           {diagnoses.length > 0 ? ` · CIE-10 ${diagnoses.join(", ")}` : ""}
         </p>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-3">
+      </div>
+      <div className="flex flex-col gap-3">
         {item.detail ? <p className="whitespace-pre-wrap text-sm">{item.detail}</p> : null}
         {teeth.length > 0 ? (
           <div className="flex flex-wrap gap-1" aria-label="Piezas tratadas">
@@ -180,7 +180,7 @@ export function EncounterHistoryCard({
             ) : null}
           </div>
         ) : null}
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   )
 }

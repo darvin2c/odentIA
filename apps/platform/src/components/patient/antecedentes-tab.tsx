@@ -1,10 +1,6 @@
 import {
   Badge,
   Button,
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
   Checkbox,
   Collapsible,
   CollapsibleContent,
@@ -24,7 +20,7 @@ import {
   SelectValue,
   Textarea,
 } from "@odentia/ui"
-import { ErrorState, LoadingState } from "@odentia/ui-patterns"
+import { ErrorState, FormDrawer, LoadingState } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { ChevronDown } from "lucide-react"
 import { useEffect, useId, useMemo, useRef, useState } from "react"
@@ -238,11 +234,12 @@ export function AntecedentesTab({ patientId }: { patientId: string }): React.JSX
   const [stale, setStale] = useState(false)
   const [versionId, setVersionId] = useState<string | null>(null)
   const [snapshotOpen, setSnapshotOpen] = useState(false)
+  const [drawerOpen, setDrawerOpen] = useState(false)
   const [openPersonales, setOpenPersonales] = useState(true)
   const [openFamiliares, setOpenFamiliares] = useState(true)
   const [openOdonto, setOpenOdonto] = useState(true)
   const dirtyRef = useRef(false)
-  dirtyRef.current = dirty
+  dirtyRef.current = dirty || interviewDirty
 
   const health = healthQuery.data?.data ?? null
   const versions = useMemo(() => historyQuery.data?.data ?? [], [historyQuery.data])
@@ -257,6 +254,7 @@ export function AntecedentesTab({ patientId }: { patientId: string }): React.JSX
       setMedications(drafts.medications)
       setReview(drafts.review)
       setBloodGroup(drafts.bloodGroup)
+      setInterview(drafts.interview)
       setInterviewDirty(false)
       setFieldErrors({})
       setFormError(null)
@@ -305,9 +303,11 @@ export function AntecedentesTab({ patientId }: { patientId: string }): React.JSX
     },
     onSuccess: async () => {
       setDirty(false)
+      setInterviewDirty(false)
       setFieldErrors({})
       setFormError(null)
       setStale(false)
+      setDrawerOpen(false)
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["patient-health", patientId] }),
         queryClient.invalidateQueries({ queryKey: ["anamnesis-history", patientId] }),
@@ -454,9 +454,8 @@ export function AntecedentesTab({ patientId }: { patientId: string }): React.JSX
   const submitLabel =
     pendingReview && !dirty && !interviewDirty ? "Revisar y guardar" : "Guardar antecedentes"
   const saving = !canWrite || saveMutation.isPending
-
   return (
-    <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+    <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-2">
           <p className="text-sm text-muted-foreground">
@@ -489,9 +488,15 @@ export function AntecedentesTab({ patientId }: { patientId: string }): React.JSX
               Ver declaración original
             </Button>
           ) : null}
-          <Button type="submit" disabled={!canWrite || saveMutation.isPending || !canSubmit}>
-            {saveMutation.isPending ? "Guardando…" : submitLabel}
-          </Button>
+          {canWrite ? (
+            <Button type="button" onClick={() => setDrawerOpen(true)}>
+              {submitLabel === "Revisar y guardar"
+                ? "Revisar antecedentes"
+                : allergies.length + conditions.length + medications.length > 0
+                  ? "Editar antecedentes"
+                  : "Registrar antecedentes"}
+            </Button>
+          ) : null}
         </div>
       </div>
 
@@ -511,6 +516,7 @@ export function AntecedentesTab({ patientId }: { patientId: string }): React.JSX
               variant="outline"
               onClick={() => {
                 setDirty(false)
+                setInterviewDirty(false)
                 void healthQuery.refetch()
               }}
             >
@@ -519,22 +525,55 @@ export function AntecedentesTab({ patientId }: { patientId: string }): React.JSX
           </div>
         </div>
       ) : null}
-      {formError ? (
+      {formError && !drawerOpen ? (
         <p role="alert" className="text-sm text-destructive">
           {formError}
         </p>
       ) : null}
 
-      <Card>
-        <CardHeader>
+      <AntecedentesSummary
+        allergies={allergies}
+        conditions={conditions}
+        medications={medications}
+        review={review}
+        bloodGroup={bloodGroup}
+        pendingReview={pendingReview}
+      />
+
+      <FormDrawer
+        open={drawerOpen}
+        onClose={() => setDrawerOpen(false)}
+        title="Registrar antecedentes"
+        description="Completa por secciones. En móvil avanza en una columna; en tablet y web el formulario usa dos columnas."
+        headerContent={
+          <p className="text-xs text-muted-foreground">
+            Revisión {health.revision} ·{" "}
+            {health.latestAnamnesis
+              ? `entrevista v${health.latestAnamnesis.version}`
+              : "sin entrevista registrada"}
+          </p>
+        }
+        onSubmit={handleSubmit}
+        isDirty={dirty || interviewDirty}
+        isSubmitting={saveMutation.isPending}
+        isLoading={healthQuery.isPending}
+        error={formError}
+        fieldErrors={fieldErrors}
+        submitLabel={submitLabel}
+        submitDisabled={!canWrite || !canSubmit}
+        className="data-[swipe-axis=x]:sm:[--drawer-content-width:min(48rem,calc(100vw-2rem))]"
+      >
+        <div className="flex flex-col gap-4">
+      <section aria-label="Grupo sanguíneo" className="flex flex-col gap-4 rounded-md bg-card p-4 sm:p-6">
+        <div className="flex flex-col gap-1.5">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <CardTitle>Grupo sanguíneo</CardTitle>
+            <div className="font-heading text-base font-medium">Grupo sanguíneo</div>
             {bloodGroup != null && pendingReview ? (
               <Badge variant="outline">Declarado · pendiente de revisión</Badge>
             ) : null}
           </div>
-        </CardHeader>
-        <CardContent>
+        </div>
+        <div>
           <BloodGroupSelect
             id={fid("blood")}
             value={bloodGroup}
@@ -545,8 +584,8 @@ export function AntecedentesTab({ patientId }: { patientId: string }): React.JSX
             readOnly={saving}
             declared={bloodGroup != null}
           />
-        </CardContent>
-      </Card>
+        </div>
+      </section>
 
       <ClinicalGroupCard
         title="Alergias"
@@ -647,11 +686,12 @@ export function AntecedentesTab({ patientId }: { patientId: string }): React.JSX
         />
       </ClinicalGroupCard>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Entrevista de salud</CardTitle>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-3">
+      <section aria-label="Entrevista de salud" className="flex flex-col gap-4 rounded-md bg-card p-4 sm:p-6">
+        <div className="flex flex-col gap-1.5">
+          <h3 className="font-heading text-base font-medium">Entrevista de salud</h3>
+          <p className="text-xs text-muted-foreground">Una columna en móvil, dos en tablet y web.</p>
+        </div>
+        <div className="flex flex-col gap-4">
           <Collapsible open={openPersonales} onOpenChange={setOpenPersonales}>
             <CollapsibleTrigger className="text-sm font-medium">
               <span className="flex items-center gap-1">
@@ -659,7 +699,7 @@ export function AntecedentesTab({ patientId }: { patientId: string }): React.JSX
               </span>
             </CollapsibleTrigger>
             <CollapsibleContent>
-              <div className="grid gap-3 pt-2 sm:grid-cols-2">
+              <div className="grid gap-4 pt-2 sm:grid-cols-2">
                 <Field>
                   <FieldLabel htmlFor={fid("ap-hosp")}>Hospitalizaciones</FieldLabel>
                   <Input
@@ -761,7 +801,7 @@ export function AntecedentesTab({ patientId }: { patientId: string }): React.JSX
               </div>
             </CollapsibleContent>
           </Collapsible>
-
+        
           <Collapsible open={openFamiliares} onOpenChange={setOpenFamiliares}>
             <CollapsibleTrigger className="text-sm font-medium">
               <span className="flex items-center gap-1">
@@ -786,7 +826,7 @@ export function AntecedentesTab({ patientId }: { patientId: string }): React.JSX
               </Field>
             </CollapsibleContent>
           </Collapsible>
-
+        
           <Collapsible open={openOdonto} onOpenChange={setOpenOdonto}>
             <CollapsibleTrigger className="text-sm font-medium">
               <span className="flex items-center gap-1">
@@ -794,7 +834,7 @@ export function AntecedentesTab({ patientId }: { patientId: string }): React.JSX
               </span>
             </CollapsibleTrigger>
             <CollapsibleContent>
-              <div className="grid gap-3 pt-2 sm:grid-cols-2">
+              <div className="grid gap-4 pt-2 sm:grid-cols-2">
                 <Field>
                   <FieldLabel htmlFor={fid("od-ult")}>Última visita</FieldLabel>
                   <Input
@@ -952,7 +992,7 @@ export function AntecedentesTab({ patientId }: { patientId: string }): React.JSX
               </div>
             </CollapsibleContent>
           </Collapsible>
-
+        
           {legacy.length > 0 ? (
             <div
               className="flex flex-col gap-2 rounded-lg border border-dashed p-3"
@@ -964,9 +1004,9 @@ export function AntecedentesTab({ patientId }: { patientId: string }): React.JSX
                 Textos de entrevistas anteriores (motivo, examen, diagnóstico o listas libres). Se
                 muestran tal cual; no se convierten automáticamente en registros.
               </p>
-              <dl className="grid gap-1 text-sm">
+              <dl className="grid gap-2 text-sm">
                 {legacy.map((entry) => (
-                  <div key={entry.label} className="grid grid-cols-[12rem_minmax(0,1fr)] gap-2">
+                  <div key={entry.label} className="grid gap-0.5 sm:grid-cols-[12rem_minmax(0,1fr)] sm:gap-2">
                     <dt className="text-muted-foreground">{entry.label}</dt>
                     <dd className="whitespace-pre-wrap">{entry.text}</dd>
                   </div>
@@ -974,14 +1014,14 @@ export function AntecedentesTab({ patientId }: { patientId: string }): React.JSX
               </dl>
             </div>
           ) : null}
-        </CardContent>
-      </Card>
+        </div>
+      </section>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Consentimiento de datos</CardTitle>
-        </CardHeader>
-        <CardContent>
+      <section aria-label="Consentimiento de datos" className="flex flex-col gap-4 rounded-md bg-card p-4 sm:p-6">
+        <div className="flex flex-col gap-1.5">
+          <h3 className="font-heading text-base font-medium">Consentimiento de datos</h3>
+        </div>
+        <div>
           {consentedAt ? (
             <p className="text-sm text-muted-foreground">
               Consentimiento de datos registrado
@@ -1004,17 +1044,10 @@ export function AntecedentesTab({ patientId }: { patientId: string }): React.JSX
               </label>
             </div>
           )}
-        </CardContent>
-      </Card>
-
-      <div className="flex justify-end">
-        <Button
-          type="submit"
-          disabled={!canWrite || saveMutation.isPending || !canSubmit}
-        >
-          {saveMutation.isPending ? "Guardando…" : submitLabel}
-        </Button>
-      </div>
+        </div>
+      </section>
+        </div>
+      </FormDrawer>
 
       <AnamnesisVersionDialog
         patientId={patientId}
@@ -1026,7 +1059,83 @@ export function AntecedentesTab({ patientId }: { patientId: string }): React.JSX
         onClose={() => setSnapshotOpen(false)}
         registration={registration}
       />
-    </form>
+    </div>
+  )
+}
+
+/** Resumen de lectura: conteos por grupo + estado de revisión. Sin formularios. */
+function AntecedentesSummary({
+  allergies,
+  conditions,
+  medications,
+  review,
+  bloodGroup,
+  pendingReview,
+}: {
+  allergies: AllergyDraft[]
+  conditions: ConditionDraft[]
+  medications: MedicationDraft[]
+  review: ReviewDraft
+  bloodGroup: BloodGroup | null
+  pendingReview: boolean
+}): React.JSX.Element {
+  const activeAlg = allergies.filter((r) => r.isActive).length
+  const activeCon = conditions.filter((r) => r.status === "activa").length
+  const activeMed = medications.filter((r) => r.endDate === "").length
+  const rows: Array<{ title: string; state: HealthReviewState; detail: string }> = [
+    {
+      title: "Alergias",
+      state: review.allergies,
+      detail:
+        allergies.length === 0
+          ? "Sin registros"
+          : `${allergies.length} registro(s) · ${activeAlg} vigente(s)`,
+    },
+    {
+      title: "Condiciones",
+      state: review.conditions,
+      detail:
+        conditions.length === 0
+          ? "Sin registros"
+          : `${conditions.length} registro(s) · ${activeCon} activa(s)`,
+    },
+    {
+      title: "Medicación vigente",
+      state: review.medications,
+      detail:
+        medications.length === 0
+          ? "Sin registros"
+          : `${medications.length} registro(s) · ${activeMed} vigente(s)`,
+    },
+  ]
+  return (
+    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="flex flex-col gap-1 rounded-md bg-card p-4">
+        <span className="font-heading text-sm font-medium">Grupo sanguíneo</span>
+        <span className="text-sm text-muted-foreground">
+          {bloodGroup != null && bloodGroup in BLOOD_GROUP_LABELS
+            ? BLOOD_GROUP_LABELS[bloodGroup as keyof typeof BLOOD_GROUP_LABELS]
+            : "Sin registrar"}
+        </span>
+        {pendingReview && bloodGroup != null ? (
+          <Badge variant="outline" className="mt-1 w-fit">
+            Declarado · pendiente
+          </Badge>
+        ) : null}
+      </div>
+      {rows.map((row) => (
+        <div key={row.title} className="flex flex-col gap-1 rounded-md bg-card p-4">
+          <span className="font-heading text-sm font-medium">{row.title}</span>
+          <span className="text-sm text-muted-foreground">{row.detail}</span>
+          <Badge
+            variant={row.state === "recorded" ? "default" : row.state === "none" ? "secondary" : "outline"}
+            className="mt-1 w-fit"
+          >
+            {HEALTH_REVIEW_LABELS[row.state]}
+          </Badge>
+        </div>
+      ))}
+    </div>
   )
 }
 
@@ -1060,10 +1169,10 @@ function ClinicalGroupCard({
   children: ReactNode
 }): React.JSX.Element {
   return (
-    <Card>
-      <CardHeader>
+    <section aria-label={title} className="flex flex-col gap-4 rounded-md bg-card p-4 sm:p-6">
+      <div className="flex flex-col gap-1.5">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <CardTitle>{title}</CardTitle>
+          <div className="font-heading text-base font-medium">{title}</div>
           <Badge
             variant={
               review === "recorded" ? "default" : review === "none" ? "secondary" : "outline"
@@ -1072,8 +1181,8 @@ function ClinicalGroupCard({
             {HEALTH_REVIEW_LABELS[review]}
           </Badge>
         </div>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-3">
+      </div>
+      <div className="flex flex-col gap-3">
         <ReviewStateSelect
           id={reviewId}
           value={review}
@@ -1083,8 +1192,8 @@ function ClinicalGroupCard({
         />
         {children}
         {empty}
-      </CardContent>
-    </Card>
+      </div>
+    </section>
   )
 }
 

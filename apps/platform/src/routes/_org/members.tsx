@@ -154,11 +154,13 @@ function MembersPage() {
       {
         accessorKey: "user.email",
         header: "Correo",
+        meta: { view: { primary: true } },
         cell: ({ row }) => row.original.user.email,
       },
       {
         accessorKey: "role",
         header: "Rol",
+        meta: { view: { primary: true } },
         cell: ({ row }) => (
           <Badge variant={row.original.role === "owner" ? "success" : "secondary"}>
             {row.original.role}

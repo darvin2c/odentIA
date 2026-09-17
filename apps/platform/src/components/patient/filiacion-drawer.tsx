@@ -1,8 +1,4 @@
 import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
   Checkbox,
   Collapsible,
   CollapsibleContent,
@@ -283,57 +279,57 @@ export function FiliacionDrawer({
       className="sm:max-w-4xl"
     >
       <div className="flex flex-col gap-4">
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base">Identidad</CardTitle>
-          </CardHeader>
-          <CardContent className="grid gap-4 sm:grid-cols-2">
+        <div className="flex flex-col gap-6 rounded-md bg-card p-6">
+          <div className="flex flex-col gap-1.5 pb-3">
+            <div className="font-heading text-base font-medium">Identidad</div>
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
             {textField("displayName", "Nombre completo")}
             {selectField("docType", "Tipo de documento", DOC_TYPE_OPTIONS)}
             {textField("docNumber", "Número de documento", { maxLength: 20 })}
             {textField("birthDate", "Fecha de nacimiento", { type: "date" })}
             {selectField("sex", "Sexo", SEX_OPTIONS)}
-          </CardContent>
-        </Card>
+          </div>
+        </div>
 
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base">Contacto</CardTitle>
-          </CardHeader>
-          <CardContent className="grid gap-4 sm:grid-cols-2">
+        <div className="flex flex-col gap-6 rounded-md bg-card p-6">
+          <div className="flex flex-col gap-1.5 pb-3">
+            <div className="font-heading text-base font-medium">Contacto</div>
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
             {textField("phone", "Teléfono", { type: "tel", maxLength: 50 })}
             {textField("email", "Correo electrónico", { type: "email", maxLength: 200 })}
-          </CardContent>
-        </Card>
+          </div>
+        </div>
 
         <Collapsible open={openAddress} onOpenChange={setOpenAddress}>
-          <Card>
-            <CardHeader className="pb-3">
+          <div className="flex flex-col gap-6 rounded-md bg-card p-6">
+            <div className="flex flex-col gap-1.5 pb-3">
               <CollapsibleTrigger className="text-base font-semibold">
                 <span className="flex items-center gap-1">
                   Domicilio <ChevronDown aria-hidden className="size-4" />
                 </span>
               </CollapsibleTrigger>
-            </CardHeader>
+            </div>
             <CollapsibleContent>
-              <CardContent className="grid gap-4 sm:grid-cols-2">
+              <div className="grid gap-4 sm:grid-cols-2">
                 <div className="sm:col-span-2">{textField("address", "Domicilio")}</div>
-              </CardContent>
+              </div>
             </CollapsibleContent>
-          </Card>
+          </div>
         </Collapsible>
 
         <Collapsible open={openEmergency} onOpenChange={setOpenEmergency}>
-          <Card>
-            <CardHeader className="pb-3">
+          <div className="flex flex-col gap-6 rounded-md bg-card p-6">
+            <div className="flex flex-col gap-1.5 pb-3">
               <CollapsibleTrigger className="text-base font-semibold">
                 <span className="flex items-center gap-1">
                   Tutor y emergencia <ChevronDown aria-hidden className="size-4" />
                 </span>
               </CollapsibleTrigger>
-            </CardHeader>
+            </div>
             <CollapsibleContent>
-              <CardContent className="grid gap-4 sm:grid-cols-2">
+              <div className="grid gap-4 sm:grid-cols-2">
                 {textField("emergencyContactName", "Contacto de emergencia")}
                 {textField("emergencyContactPhone", "Teléfono de emergencia", { type: "tel" })}
                 {textField("referralSource", "Referido por")}
@@ -370,53 +366,53 @@ export function FiliacionDrawer({
                     )}
                   />
                 </Field>
-              </CardContent>
+              </div>
             </CollapsibleContent>
-          </Card>
+          </div>
         </Collapsible>
 
         <Collapsible open={openInsurance} onOpenChange={setOpenInsurance}>
-          <Card>
-            <CardHeader className="pb-3">
+          <div className="flex flex-col gap-6 rounded-md bg-card p-6">
+            <div className="flex flex-col gap-1.5 pb-3">
               <CollapsibleTrigger className="text-base font-semibold">
                 <span className="flex items-center gap-1">
                   Seguro <ChevronDown aria-hidden className="size-4" />
                 </span>
               </CollapsibleTrigger>
-            </CardHeader>
+            </div>
             <CollapsibleContent>
-              <CardContent className="grid gap-4 sm:grid-cols-2">
+              <div className="grid gap-4 sm:grid-cols-2">
                 {selectField("insuranceType", "Seguro", INSURANCE_OPTIONS)}
                 {textField("insuranceDetail", "Detalle del seguro")}
-              </CardContent>
+              </div>
             </CollapsibleContent>
-          </Card>
+          </div>
         </Collapsible>
         <Collapsible open={openExtra} onOpenChange={setOpenExtra}>
-          <Card>
-            <CardHeader className="pb-3">
+          <div className="flex flex-col gap-6 rounded-md bg-card p-6">
+            <div className="flex flex-col gap-1.5 pb-3">
               <CollapsibleTrigger className="text-base font-semibold">
                 <span className="flex items-center gap-1">
                   Datos complementarios <ChevronDown aria-hidden className="size-4" />
                 </span>
               </CollapsibleTrigger>
-            </CardHeader>
+            </div>
             <CollapsibleContent>
-              <CardContent className="grid gap-4 sm:grid-cols-2">
+              <div className="grid gap-4 sm:grid-cols-2">
                 {textField("maritalStatus", "Estado civil")}
                 {textField("educationLevel", "Grado de instrucción")}
                 {textField("occupation", "Ocupación")}
                 {textField("origin", "Procedencia")}
-              </CardContent>
+              </div>
             </CollapsibleContent>
-          </Card>
+          </div>
         </Collapsible>
 
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base">Estado</CardTitle>
-          </CardHeader>
-          <CardContent>
+        <div className="flex flex-col gap-6 rounded-md bg-card p-6">
+          <div className="flex flex-col gap-1.5 pb-3">
+            <div className="font-heading text-base font-medium">Estado</div>
+          </div>
+          <div>
             <Field className="flex-row items-center gap-2">
               <Checkbox
                 id={`${uid}-isActive`}
@@ -427,14 +423,14 @@ export function FiliacionDrawer({
                 Paciente activo
               </FieldLabel>
             </Field>
-          </CardContent>
-        </Card>
+          </div>
+        </div>
 
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base">Consentimiento de datos</CardTitle>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-2">
+        <div className="flex flex-col gap-6 rounded-md bg-card p-6">
+          <div className="flex flex-col gap-1.5 pb-3">
+            <div className="font-heading text-base font-medium">Consentimiento de datos</div>
+          </div>
+          <div className="flex flex-col gap-2">
             {consentGiven ? (
               <p className="text-sm text-muted-foreground">
                 Consentimiento registrado el {timeAgo(p.dataConsentAt ?? null)}. No puede retirarse
@@ -446,8 +442,8 @@ export function FiliacionDrawer({
                 paso explícito.
               </p>
             )}
-          </CardContent>
-        </Card>
+          </div>
+        </div>
       </div>
     </FormDrawer>
   )

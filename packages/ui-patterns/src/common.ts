@@ -44,4 +44,7 @@ export const common = {
     sort: "Ordenar",
     sortDefault: "Predeterminado",
   },
+  views: {
+    selectAll: "Seleccionar todo",
+  },
 } as const

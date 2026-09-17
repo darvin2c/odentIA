@@ -7,11 +7,6 @@ import type {
 } from "@odentia/clinical"
 import {
   Button,
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
   Checkbox,
   Dialog,
   DialogContent,
@@ -264,11 +259,11 @@ function PatientRegistrationSettingsPage() {
 
       <div className="space-y-6">
         {steps.map((step) => (
-          <Card key={step}>
-            <CardHeader>
-              <CardTitle>{STEP_TITLES[step]}</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
+          <div key={step} className="flex flex-col gap-6 rounded-md bg-card p-6">
+            <div className="flex flex-col gap-1.5">
+              <div className="font-heading text-base font-medium">{STEP_TITLES[step]}</div>
+            </div>
+            <div className="space-y-4">
               {CATALOGUE.filter((field) => field.step === step).map((field) => {
                 const key = field.key as RegistrationFieldKey
                 const locked = (LOCKED_REQUIRED as string[]).includes(key)
@@ -305,18 +300,17 @@ function PatientRegistrationSettingsPage() {
                   </Field>
                 )
               })}
-            </CardContent>
-          </Card>
+            </div>
+          </div>
         ))}
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Aviso de privacidad y publicación</CardTitle>
-            <CardDescription>
+        <div className="flex flex-col gap-6 rounded-md bg-card p-6">
+          <div className="flex flex-col gap-1.5">
+            <div className="font-heading text-base font-medium">Aviso de privacidad y publicación</div>
+            <p className="text-sm text-muted-foreground">
               El aviso lo aporta la organización y se muestra antes del consentimiento.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
+            </p>
+          </div>
+          <div className="space-y-4">
             <Field>
               <FieldLabel htmlFor="registro-aviso">Aviso de privacidad</FieldLabel>
               <Textarea
@@ -354,15 +348,15 @@ function PatientRegistrationSettingsPage() {
                 Solo owner o admin pueden modificar esta configuración.
               </p>
             ) : null}
-          </CardContent>
-        </Card>
+          </div>
+        </div>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Enlace público y QR</CardTitle>
-            <CardDescription>{publicLink}</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
+        <div className="flex flex-col gap-6 rounded-md bg-card p-6">
+          <div className="flex flex-col gap-1.5">
+            <div className="font-heading text-base font-medium">Enlace público y QR</div>
+            <p className="text-sm text-muted-foreground">{publicLink}</p>
+          </div>
+          <div className="space-y-4">
             {!enabled ? (
               <p role="status" className="rounded-md border border-border bg-muted p-3 text-sm">
                 El formulario está deshabilitado: el enlace y el QR no admiten registros nuevos
@@ -408,8 +402,8 @@ function PatientRegistrationSettingsPage() {
                 description="Genera el código para descargarlo e imprimirlo. Apunta al registro de esta organización."
               />
             )}
-          </CardContent>
-        </Card>
+          </div>
+        </div>
       </div>
 
       <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>

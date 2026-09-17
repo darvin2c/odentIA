@@ -313,11 +313,13 @@ export function PlanTab({
       {
         accessorKey: "status",
         header: "Estado",
+        meta: { view: { primary: true } },
         cell: ({ row }) => planStatusBadge(row.original.status),
       },
       {
         accessorKey: "pending",
         header: "Pendientes",
+        meta: { view: { primary: true } },
         accessorFn: (row) => row.pendingItems,
         cell: ({ row }) => `${row.original.pendingItems} de ${row.original.totalItems}`,
       },
@@ -347,6 +349,7 @@ export function PlanTab({
       {
         accessorKey: "priceCents",
         header: "Tarifa indicada",
+        meta: { view: { primary: true } },
         cell: ({ row }) =>
           row.original.priceCents == null ? (
             <span className="text-muted-foreground">Sin tarifa</span>
@@ -359,6 +362,7 @@ export function PlanTab({
       {
         accessorKey: "decision",
         header: "Decisión",
+        meta: { view: { primary: true } },
         cell: ({ row }) => (
           <span className="flex flex-col gap-1">
             <Badge
@@ -421,6 +425,7 @@ export function PlanTab({
       {
         accessorKey: "priceCents",
         header: "Cotizado",
+        meta: { view: { primary: true } },
         cell: ({ row }) =>
           row.original.priceCents == null ? (
             <span className="text-muted-foreground">Sin tarifa</span>
@@ -433,6 +438,7 @@ export function PlanTab({
       {
         accessorKey: "decision",
         header: "Decisión",
+        meta: { view: { primary: true } },
         cell: ({ row }) => (
           <Badge
             variant={

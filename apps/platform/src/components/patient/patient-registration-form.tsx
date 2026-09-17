@@ -13,10 +13,6 @@ import {
   AlertDescription,
   AlertTitle,
   Button,
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
   Checkbox,
   Field,
   FieldError,
@@ -1233,16 +1229,16 @@ export function PatientRegistrationForm({
                 branches={branches}
               />
               {config.privacyNotice.trim() ? (
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="text-base">Aviso de privacidad</CardTitle>
-                  </CardHeader>
-                  <CardContent>
+                <div className="flex flex-col gap-6 rounded-md bg-card p-6">
+                  <div className="flex flex-col gap-1.5">
+                    <div className="font-heading text-base font-medium">Aviso de privacidad</div>
+                  </div>
+                  <div>
                     <p className="whitespace-pre-wrap text-sm text-muted-foreground">
                       {config.privacyNotice}
                     </p>
-                  </CardContent>
-                </Card>
+                  </div>
+                </div>
               ) : null}
               <div data-reg-field="privacyAccepted">
                 <form.Field name="answers.privacyAccepted">
@@ -1456,11 +1452,11 @@ function ReviewSummary({
     ])
   }
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-base">Revisa los datos antes de enviar</CardTitle>
-      </CardHeader>
-      <CardContent>
+    <div className="flex flex-col gap-6 rounded-md bg-card p-6">
+      <div className="flex flex-col gap-1.5">
+        <div className="font-heading text-base font-medium">Revisa los datos antes de enviar</div>
+      </div>
+      <div>
         <dl className="grid min-w-0 grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-2">
           {rows.map(([labelText, value]) => (
             <div key={labelText} className="min-w-0">
@@ -1471,7 +1467,7 @@ function ReviewSummary({
             </div>
           ))}
         </dl>
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   )
 }

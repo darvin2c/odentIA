@@ -128,11 +128,13 @@ function BranchesPage() {
       {
         accessorKey: "district",
         header: "Distrito",
+        meta: { view: { primary: true } },
         cell: ({ getValue }) => getValue<string | null>() ?? "—",
       },
       {
         accessorKey: "isActive",
         header: "Estado",
+        meta: { view: { primary: true } },
         cell: ({ getValue }) => (
           <Badge variant={getValue<boolean>() ? "success" : "secondary"}>
             {getValue<boolean>() ? "Activa" : "Inactiva"}
