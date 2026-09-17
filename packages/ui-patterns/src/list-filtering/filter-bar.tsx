@@ -32,11 +32,19 @@ function useFittedInlineCount(eligibleCount: number, contentKey: string): Fitted
     setFitted({ key: resetKey, count: eligibleCount })
   }
   const visibleCount = Math.min(fitted.count, eligibleCount)
-
   React.useEffect(() => {
     const element = containerRef.current
     if (!element || typeof ResizeObserver === "undefined") return
-    const observer = new ResizeObserver(() => setMeasureTick((tick) => tick + 1))
+    // Solo el ancho disponible reintenta el ajuste: el encogimiento propio
+    // cambia el alto/contenido del row y no debe reiniciar la medición
+    // (oscilaría sin converger en columnas donde nada cabe).
+    let lastWidth = element.clientWidth
+    const observer = new ResizeObserver(() => {
+      const current = containerRef.current
+      if (!current || current.clientWidth === lastWidth) return
+      lastWidth = current.clientWidth
+      setMeasureTick((tick) => tick + 1)
+    })
     observer.observe(element)
     return () => observer.disconnect()
   }, [])
@@ -101,7 +109,7 @@ export function FilterBar({
       <div
         ref={containerRef}
         data-filter-row="desktop"
-        className="hidden w-full min-w-0 items-center gap-2 overflow-hidden p-1 -m-1 md:flex"
+        className="hidden w-full min-w-0 items-center gap-2 overflow-x-auto p-1 -m-1 md:flex"
       >
         <SearchInput placeholder={searchPlaceholder} expandable />
         {primaryFilters.map((filter) => (

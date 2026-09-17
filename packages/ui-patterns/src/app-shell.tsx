@@ -29,6 +29,7 @@ import {
 import type { LucideIcon } from "lucide-react"
 import { ChevronDown, ExternalLink, LogOut } from "lucide-react"
 import * as React from "react"
+import { ThemeTabs, useTheme, type ThemeMode } from "./theme.js"
 // ----- Types -----
 export type AppShellNavItem = {
   label: string
@@ -70,12 +71,13 @@ export interface AppShellProps {
   user: AppShellUser
   userMenuItems?: AppShellUserMenuItem[]
   onSignOut: () => void
+  theme?: ThemeMode
+  defaultTheme?: ThemeMode
+  onThemeChange?: (mode: ThemeMode) => void
   brand: React.ReactNode
   searchSlot?: React.ReactNode
   topbarActions?: React.ReactNode
   sidebarFooter?: React.ReactNode
-  /** Pantallas operativas densas (POS, KDS, tablas): usa todo el ancho. Default contenido 1280px. */
-  fluid?: boolean
   children: React.ReactNode
 }
 
@@ -284,11 +286,18 @@ export function AppShell(props: AppShellProps): React.JSX.Element {
     user,
     userMenuItems,
     onSignOut,
+    theme,
+    defaultTheme,
+    onThemeChange,
     brand,
     sidebarFooter,
-    fluid,
     children,
   } = props
+  const { mode: themeMode, setMode: setThemeMode } = useTheme({
+    value: theme,
+    defaultValue: defaultTheme,
+    onChange: onThemeChange,
+  })
   const initial = user.name?.trim().charAt(0).toUpperCase() || "U"
 
   const userMenuContent = (
@@ -315,6 +324,11 @@ export function AppShell(props: AppShellProps): React.JSX.Element {
         </DropdownMenuItem>
       ))}
       {userMenuItems?.length ? <DropdownMenuSeparator /> : null}
+      <div className="px-2 py-1.5">
+        <p className="mb-1.5 px-1 text-xs text-muted-foreground">Apariencia</p>
+        <ThemeTabs value={themeMode} onValueChange={setThemeMode} />
+      </div>
+      <DropdownMenuSeparator />
       <DropdownMenuItem onClick={onSignOut}>
         <LogOut />
         Cerrar sesión

@@ -17,6 +17,15 @@ export type {
   AppShellUserMenuItem,
 } from "./app-shell.js"
 export { AppShell, isNavItemActive, PageHeader } from "./app-shell.js"
+export {
+  applyTheme,
+  readStoredTheme,
+  resolveTheme,
+  THEME_STORAGE_KEY,
+  ThemeTabs,
+  type ThemeMode,
+  useTheme,
+} from "./theme.js"
 export { AuthCard } from "./auth-card.js"
 export { AuthSplit } from "./auth-split.js"
 export { common } from "./common.js"

@@ -10,35 +10,6 @@ afterEach(() => {
   document.body.innerHTML = ""
 })
 
-function shell(fluid?: boolean) {
-  return render(
-    <AppShell
-      items={[]}
-      LinkComponent={({ children }: { children: ReactNode }) => <span>{children}</span>}
-      pathname="/pos"
-      user={{ name: "Caja" }}
-      onSignOut={() => {}}
-      brand={<span>uunit9</span>}
-      fluid={fluid}
-    >
-      <p>contenido</p>
-    </AppShell>,
-  )
-}
-
-describe("AppShell fluid", () => {
-  it("contenido acotado por defecto", () => {
-    const { container } = shell()
-    expect(container.querySelector("main > div > div")?.className).toContain("max-w-[1280px]")
-  })
-
-  it("pantallas operativas usan todo el ancho sin tope", () => {
-    const { container } = shell(true)
-    const content = container.querySelector("main > div > div")
-    expect(content?.className).toContain("max-w-none")
-    expect(content?.className).not.toContain("max-w-[1280px]")
-  })
-})
 
 function AnchorLink({
   to,
@@ -100,5 +71,23 @@ describe("AppShell userMenu", () => {
     const signOut = await screen.findByRole("menuitem", { name: "Cerrar sesión" })
     fireEvent.click(signOut)
     expect(onSignOut).toHaveBeenCalledTimes(1)
+  })
+
+  it("el selector de tema aplica .dark y persiste sin cerrar el menú", async () => {
+    localStorage.clear()
+    document.documentElement.classList.remove("dark")
+    shellWithMenu(() => {})
+    fireEvent.click(screen.getByRole("button", { name: /Ada/ }))
+    const darkTab = await screen.findByRole("tab", { name: "Tema oscuro" })
+    expect(screen.getByText("Apariencia")).toBeTruthy()
+    expect(
+      screen.getByRole("tablist").querySelectorAll('[role="tab"]'),
+    ).toHaveLength(3)
+    fireEvent.click(darkTab)
+    expect(document.documentElement.classList.contains("dark")).toBe(true)
+    expect(localStorage.getItem("odentia-theme")).toBe("dark")
+    expect(await screen.findByRole("menuitem", { name: "Cerrar sesión" })).toBeTruthy()
+    localStorage.clear()
+    document.documentElement.classList.remove("dark")
   })
 })

@@ -40,7 +40,7 @@ export function SearchInput({
         className,
       )}
     >
-      <InputGroup className="h-9 rounded-full bg-surface">
+      <InputGroup className="h-9">
         <InputGroupAddon align="inline-start">
           <Search aria-hidden />
         </InputGroupAddon>
