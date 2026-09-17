@@ -8,13 +8,14 @@ import {
   listMessages,
   markRead,
   reopenConversation,
+  resolveConversationIdentity,
   sendOutbound,
   sendTemplateOutbound,
   setAgentStatus,
 } from "@odentia/services"
 import { Hono } from "hono"
 import { z } from "zod"
-import { orgContextOf } from "../lib/context.js"
+import { canWrite, orgContextOf } from "../lib/context.js"
 import { errorBody } from "../lib/error.js"
 import { type CrmDeps, runService, serviceErrorResponse, validationError } from "./helpers.js"
 
@@ -164,6 +165,25 @@ export function createConversationsRoute(deps: CrmDeps) {
       withOrgContext(deps.db, orgId, (tx) =>
         setAgentStatus(tx, orgId, c.req.param("id"), parsed.data.enabled, userId),
       ).then(() => ({ ok: true })),
+    )
+  })
+
+  const identityInput = z.object({ identityId: z.string().uuid() })
+
+  app.put("/:id/identity", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canWrite(memberRole)) {
+      return c.json(
+        errorBody(c, "FORBIDDEN", "Solo owner/admin pueden resolver identidades"),
+        403,
+      )
+    }
+    const parsed = identityInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        resolveConversationIdentity(tx, orgId, c.req.param("id"), parsed.data, { userId }),
+      ),
     )
   })
 

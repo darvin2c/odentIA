@@ -2,12 +2,14 @@
 import { activeFindingsAsOf, type FindingDetails } from "@odentia/clinical"
 import { apiFetch } from "./api"
 
+export type BloodGroup = "A+" | "A-" | "B+" | "B-" | "AB+" | "AB-" | "O+" | "O-" | "unknown"
+
 export interface Patient {
   id: string
   organizationId?: string
-  contactId: string
   patientNumber: number
-  displayName?: string | null
+  displayName: string
+  bloodGroup?: BloodGroup | null
   docType?: string | null
   docNumber?: string | null
   birthDate?: string | null
@@ -25,7 +27,6 @@ export interface Patient {
   insuranceType?: string | null
   insuranceDetail?: string | null
   referralSource?: string | null
-  guardianContactId?: string | null
   registeredBranchId?: string | null
   isActive: boolean
   dataConsentAt?: string | null
@@ -102,7 +103,6 @@ export interface HealthMedicationInput {
   frequency?: string | null
   startDate?: string | null
   endDate?: string | null
-  notes?: string | null
 }
 
 export interface SaveHealthInput {
@@ -111,6 +111,7 @@ export interface SaveHealthInput {
   allergies: HealthAllergyInput[]
   conditions: HealthConditionInput[]
   medications: HealthMedicationInput[]
+  bloodGroup?: BloodGroup | null
   anamnesis?: { expectedVersion: number; answers: AnamnesisAnswers }
   dataConsent?: true
 }
@@ -121,12 +122,15 @@ export interface PatientHealth {
   allergies: Allergy[]
   conditions: Condition[]
   medications: Medication[]
+  bloodGroup: BloodGroup | null
+  reviewedAt: string | null
+  reviewedBy: string | null
   latestAnamnesis: {
     id: string
     version: number
     answers: AnamnesisAnswers
     createdAt: string
-    createdBy: string
+    createdBy: string | null
   } | null
 }
 
@@ -146,10 +150,39 @@ export const CONDITION_STATUS_LABELS: Record<string, string> = {
 }
 
 export const HEALTH_REVIEW_LABELS: Record<HealthReviewState, string> = {
-  unknown: "Sin revisar",
+  unknown: "Sin determinar",
   none: "Niega antecedentes de este tipo",
   recorded: "Registrados",
 }
+
+/**
+ * Hay información clínica registrada: grupo sanguíneo, filas vigentes o una
+ * determinación explícita (negación o registro) en algún grupo, o entrevista.
+ * La longitud de las listas por sí sola no basta: sangre, un «No» o una
+ * respuesta odontológica también son información.
+ */
+export function hasHealthInfo(health: PatientHealth | null | undefined): boolean {
+  if (!health) return false
+  // La declaración explícita «No sé» incrementa revisión aunque no cree filas.
+  if (health.revision > 0) return true
+  if (health.bloodGroup != null) return true
+  if (health.allergies.length > 0 || health.conditions.length > 0 || health.medications.length > 0)
+    return true
+  const status = health.reviewStatus
+  if (status.allergies !== "unknown" || status.conditions !== "unknown" || status.medications !== "unknown")
+    return true
+  const answers = health.latestAnamnesis?.answers
+  return !!answers && Object.keys(answers).length > 0
+}
+
+/**
+ * Declaración pendiente de revisión profesional: hay información pero nunca se
+ * marcó revisor/fecha. Distinto de «Sin determinar» (contenido desconocido).
+ */
+export function isHealthReviewPending(health: PatientHealth | null | undefined): boolean {
+  return hasHealthInfo(health) && !health?.reviewedAt
+}
+
 export interface ClinicalNote {
   id: string
   note: string
@@ -457,10 +490,35 @@ export interface PatientSummary {
   >
 }
 
-export interface PatientFull {
-  patient: Patient & Record<string, unknown>
+export type PatientContactRelationship = "self" | "guardian" | "family" | "other"
+
+export interface PatientContactLink {
+  contactId: string
   displayName: string
-  guardian: { id: string; displayName: string } | null
+  phone: string | null
+  email: string | null
+  isActive: boolean
+  relationship: PatientContactRelationship
+  relationshipDetail: string | null
+  isPreferred: boolean
+}
+
+export interface PatientRegistrationInfo {
+  entryPoint: string
+  respondent: string | null
+  createdAt: string
+  actor: { id: string; name: string } | null
+  contextContactId: string | null
+  conversationId: string | null
+  formVersion: number | null
+  answers: unknown
+  privacyNotice: string | null
+}
+
+export interface PatientFull {
+  patient: Patient
+  contacts: PatientContactLink[]
+  registration: PatientRegistrationInfo | null
   activeAllergies: Allergy[]
   activeConditions: Condition[]
   currentMedications: Medication[]
@@ -592,9 +650,9 @@ export function savePatientHealthApi(
 
 export function fetchAnamnesisHistory(
   patientId: string,
-): Promise<{ data: Array<{ id: string; version: number; createdAt: string; createdBy: string }> }> {
+): Promise<{ data: Array<{ id: string; version: number; createdAt: string; createdBy: string | null }> }> {
   return apiFetch<{
-    data: Array<{ id: string; version: number; createdAt: string; createdBy: string }>
+    data: Array<{ id: string; version: number; createdAt: string; createdBy: string | null }>
   }>(`/api/patients/${patientId}/anamnesis/history`)
 }
 
@@ -607,7 +665,7 @@ export function fetchAnamnesisVersion(
     version: number
     answers: AnamnesisAnswers
     createdAt: string
-    createdBy: string
+    createdBy: string | null
   }
 }> {
   return apiFetch<{
@@ -616,7 +674,7 @@ export function fetchAnamnesisVersion(
       version: number
       answers: AnamnesisAnswers
       createdAt: string
-      createdBy: string
+      createdBy: string | null
     }
   }>(`/api/patients/${patientId}/anamnesis/${versionId}`)
 }

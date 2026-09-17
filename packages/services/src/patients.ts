@@ -1,3 +1,4 @@
+import { demographicsSchema, registrationContactInputSchema, validateDemographics, type RegistrationContactInput } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import {
   orgCounter,
@@ -5,11 +6,14 @@ import {
   patientAllergy,
   patientCondition,
   patientMedication,
+  patientContact,
+  patientRegistration,
 } from "@odentia/db/schema/clinical"
 import { contact } from "@odentia/db/schema/crm"
-import { auditEvent, branch } from "@odentia/db/schema/org"
-import { and, asc, desc, eq, ilike, or, sql } from "drizzle-orm"
-import { createContact, requireContact, updateContact } from "./contacts.js"
+import { user } from "@odentia/db/schema/auth"
+import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
+import { and, asc, desc, eq, ilike, inArray, or, sql } from "drizzle-orm"
+import { requireContact } from "./contacts.js"
 import { decodeCursor } from "./cursors.js"
 import { isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
 
@@ -46,8 +50,8 @@ function uniqueConstraintOf(error: unknown): string {
 }
 
 export interface CreatePatientInput {
-  contactId?: string
-  displayName?: string
+  displayName: string
+  contacts?: RegistrationContactInput[]
   docType?: string | null
   docNumber?: string | null
   birthDate?: string | null
@@ -64,11 +68,20 @@ export interface CreatePatientInput {
   insuranceType?: string | null
   insuranceDetail?: string | null
   referralSource?: string | null
-  guardianContactId?: string | null
   registeredBranchId?: string | null
 }
 
 export type PatientRow = typeof patient.$inferSelect
+
+export type RegistrationProvenance = Pick<typeof patientRegistration.$inferInsert,
+  "submissionId" | "payloadHash" | "entryPoint" | "respondent" | "contextContactId" |
+  "conversationId" | "linkId" | "formVersion" | "answers" | "privacyNotice">
+
+/** Fecha de referencia del tenant, calculada exclusivamente en servidor. */
+export async function patientOrganizationToday(tx: Db, orgId: string): Promise<string> {
+  const [profile] = await tx.select({ timezone: orgProfile.timezone }).from(orgProfile).where(eq(orgProfile.organizationId, orgId)).limit(1)
+  return new Intl.DateTimeFormat("en-CA", { timeZone: profile?.timezone ?? "America/Lima", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date())
+}
 
 export async function requirePatient(tx: Db, orgId: string, id: string): Promise<PatientRow> {
   const [row] = await tx
@@ -83,75 +96,49 @@ export async function requirePatient(tx: Db, orgId: string, id: string): Promise
 export async function createPatient(
   tx: Db,
   orgId: string,
-  actorUserId: string,
+  actorUserId: string | null,
   input: CreatePatientInput,
+  provenance?: RegistrationProvenance,
 ): Promise<PatientRow> {
-  let contactId = input.contactId
-  if (contactId) {
-    await requireContact(tx, orgId, contactId)
-  } else {
-    if (!input.displayName?.trim())
-      throw validation("displayName es obligatorio si no se indica contactId")
-    const created = await createContact(tx, orgId, { displayName: input.displayName.trim() })
-    contactId = created.id
+  if (!provenance && !actorUserId) throw validation("El alta interna requiere operador")
+  const { contacts = [], registeredBranchId, ...demographics } = input
+  const errors = validateDemographics(demographics, await patientOrganizationToday(tx, orgId))
+  if (Object.keys(errors).length) throw validation(Object.values(errors)[0]!)
+  const clean = demographicsSchema.parse(demographics)
+  if (registeredBranchId) await assertTenantBranch(tx, orgId, registeredBranchId)
+  const links = contacts.map(c => registrationContactInputSchema.parse(c)).sort((a, b) => a.contactId.localeCompare(b.contactId))
+  if (new Set(links.map(c => c.contactId)).size !== links.length) throw validation("No repitas un contacto")
+  if (links.filter(c => c.isPreferred).length > 1 || links.filter(c => c.relationship === "self").length > 1) throw validation("Solo puede haber un contacto propio y un preferente")
+  for (const link of links) {
+    const [row] = await tx.select().from(contact).where(and(eq(contact.id, link.contactId), eq(contact.organizationId, orgId))).for("update")
+    if (!row) throw notFound("Contacto")
+    if (!row.isActive) throw conflict("CONTACT_ARCHIVED", "Reactiva el contacto antes de vincularlo")
   }
-  if (input.guardianContactId)
-    await assertTenantContact(tx, orgId, input.guardianContactId, "Contacto tutor")
-  if (input.registeredBranchId) await assertTenantBranch(tx, orgId, input.registeredBranchId)
-  assertDocNumber(input.docType, input.docNumber?.trim() ? input.docNumber.trim() : null)
-  const number = await nextPatientNumber(tx, orgId)
   try {
-    const [row] = await tx
-      .insert(patient)
-      .values({
-        organizationId: orgId,
-        contactId: contactId!,
-        patientNumber: number,
-        docType: input.docType ?? null,
-        docNumber: input.docNumber?.trim() ? input.docNumber.trim() : null,
-        birthDate: input.birthDate ?? null,
-        sex: input.sex ?? null,
-        phone: input.phone?.trim() ? input.phone.trim() : null,
-        email: input.email?.trim() ? input.email.trim() : null,
-        maritalStatus: input.maritalStatus ?? null,
-        educationLevel: input.educationLevel ?? null,
-        occupation: input.occupation ?? null,
-        address: input.address ?? null,
-        origin: input.origin ?? null,
-        emergencyContactName: input.emergencyContactName ?? null,
-        emergencyContactPhone: input.emergencyContactPhone ?? null,
-        insuranceType: input.insuranceType ?? null,
-        insuranceDetail: input.insuranceDetail ?? null,
-        referralSource: input.referralSource ?? null,
-        guardianContactId: input.guardianContactId ?? null,
-        registeredBranchId: input.registeredBranchId ?? null,
-      })
-      .returning()
+    const [row] = await tx.insert(patient).values({
+      ...clean,
+      docType: clean.docType || null, docNumber: clean.docNumber || null,
+      birthDate: clean.birthDate || null, sex: clean.sex || null,
+      organizationId: orgId, patientNumber: await nextPatientNumber(tx, orgId),
+      registeredBranchId: registeredBranchId || null,
+    }).returning()
     if (!row) throw new Error("No se pudo crear el paciente")
+    if (links.length) await tx.insert(patientContact).values(links.map(link => ({ ...link, organizationId: orgId, patientId: row.id, createdBy: actorUserId })))
+    await tx.insert(patientRegistration).values({
+      ...(provenance ?? { entryPoint: "platform", respondent: "staff", answers: { demographics: clean, respondent: "staff", privacyAccepted: false } }),
+      organizationId: orgId, patientId: row.id, actorUserId,
+    })
     await tx.insert(auditEvent).values({
-      organizationId: orgId,
-      actorUserId,
-      action: "patient.created",
-      entity: "patient",
-      entityId: row.id,
-      metadata: { contactId: row.contactId, patientNumber: row.patientNumber },
+      organizationId: orgId, actorUserId, action: "patient.created", entity: "patient", entityId: row.id,
+      metadata: { patientNumber: row.patientNumber, contactIds: links.map(c => c.contactId) },
     })
     return row
   } catch (e) {
     if (!isUniqueViolation(e)) throw e
-    const c = uniqueConstraintOf(e)
-    if (c.includes("patient_org_contact_uidx"))
-      throw conflict("ALREADY_PATIENT", "El contacto ya es paciente")
-    if (c.includes("patient_org_doc_uidx"))
-      throw conflict("DUPLICATE_DOCUMENT", "Ya existe un paciente con ese documento")
-    // Fallback sin nombre de índice: distinguir por lookup.
-    const [byContact] = await tx
-      .select({ id: patient.id })
-      .from(patient)
-      .where(and(eq(patient.organizationId, orgId), eq(patient.contactId, contactId!)))
-      .limit(1)
-    if (byContact) throw conflict("ALREADY_PATIENT", "El contacto ya es paciente")
-    throw conflict("DUPLICATE_DOCUMENT", "Ya existe un paciente con ese documento")
+    const constraint = uniqueConstraintOf(e)
+    if (constraint.includes("patient_contact_self_")) throw conflict("ALREADY_PATIENT", "El contacto ya tiene una ficha propia")
+    if (constraint.includes("patient_org_doc_uidx")) throw conflict("DUPLICATE_DOCUMENT", "Ya existe un paciente con ese documento")
+    throw e
   }
 }
 
@@ -168,7 +155,6 @@ export type PatientListSort = (typeof PATIENT_LIST_SORTS)[number]
 export interface PatientListItem {
   id: string
   patientNumber: number
-  contactId: string
   displayName: string
   docType: string | null
   docNumber: string | null
@@ -259,7 +245,7 @@ export async function listPatients(
     const like = `%${q}%`
     conditions.push(
       or(
-        ilike(contact.displayName, like),
+        ilike(patient.displayName, like),
         ilike(patient.docNumber, like),
         ilike(patient.phone, like),
         ilike(patient.email, like),
@@ -293,15 +279,15 @@ export async function listPatients(
     } else {
       if (!decoded.key) throw validation("Cursor inválido")
       conditions.push(
-        or(sql`(${contact.displayName}, ${patient.id}) ${cmp} (${decoded.key}, ${decoded.id})`)!,
+        or(sql`(${patient.displayName}, ${patient.id}) ${cmp} (${decoded.key}, ${decoded.id})`)!,
       )
     }
   }
   const order =
     sortField === "name" && !descending
-      ? [asc(contact.displayName), asc(patient.id)]
+      ? [asc(patient.displayName), asc(patient.id)]
       : sortField === "name"
-        ? [desc(contact.displayName), desc(patient.id)]
+        ? [desc(patient.displayName), desc(patient.id)]
         : sortField === "created" && !descending
           ? [asc(patient.createdAt), asc(patient.id)]
           : sortField === "number" && !descending
@@ -312,11 +298,10 @@ export async function listPatients(
   const rows = await tx
     .select({
       patient,
-      displayName: contact.displayName,
+      displayName: patient.displayName,
       cursorTimestamp: sql<string>`${patient.createdAt}::text`,
     })
     .from(patient)
-    .innerJoin(contact, eq(patient.contactId, contact.id))
     .where(and(...conditions))
     .orderBy(...order)
     .limit(limit + 1)
@@ -324,7 +309,6 @@ export async function listPatients(
   const items: PatientListItem[] = page.map((r) => ({
     id: r.patient.id,
     patientNumber: r.patient.patientNumber,
-    contactId: r.patient.contactId,
     displayName: r.displayName,
     docType: r.patient.docType,
     docNumber: r.patient.docNumber,
@@ -352,8 +336,8 @@ export async function listPatients(
 
 export interface PatientFull {
   patient: PatientRow
-  displayName: string
-  guardian: { id: string; displayName: string } | null
+  contacts: { contactId: string; displayName: string; phone: string | null; email: string | null; isActive: boolean; relationship: RegistrationContactInput["relationship"]; relationshipDetail: string | null; isPreferred: boolean }[]
+  registration: (Pick<typeof patientRegistration.$inferSelect, "entryPoint" | "respondent" | "createdAt" | "contextContactId" | "conversationId" | "formVersion" | "answers" | "privacyNotice"> & { actor: { id: string; name: string } | null }) | null
   activeAllergies: (typeof patientAllergy.$inferSelect)[]
   activeConditions: (typeof patientCondition.$inferSelect)[]
   currentMedications: (typeof patientMedication.$inferSelect)[]
@@ -361,20 +345,19 @@ export interface PatientFull {
 
 export async function getPatient(tx: Db, orgId: string, id: string): Promise<PatientFull> {
   const row = await requirePatient(tx, orgId, id)
-  const [contactRow] = await tx
-    .select({ id: contact.id, displayName: contact.displayName })
-    .from(contact)
-    .where(and(eq(contact.id, row.contactId), eq(contact.organizationId, orgId)))
-    .limit(1)
-  let guardian: PatientFull["guardian"] = null
-  if (row.guardianContactId) {
-    const [g] = await tx
-      .select({ id: contact.id, displayName: contact.displayName })
-      .from(contact)
-      .where(and(eq(contact.id, row.guardianContactId), eq(contact.organizationId, orgId)))
-      .limit(1)
-    if (g) guardian = g
-  }
+  const contacts = await tx.select({
+    contactId: contact.id, displayName: contact.displayName, phone: contact.phone, email: contact.email, isActive: contact.isActive,
+    relationship: patientContact.relationship, relationshipDetail: patientContact.relationshipDetail, isPreferred: patientContact.isPreferred,
+  }).from(patientContact).innerJoin(contact, and(eq(contact.id, patientContact.contactId), eq(contact.organizationId, orgId)))
+    .where(and(eq(patientContact.organizationId, orgId), eq(patientContact.patientId, id)))
+    .orderBy(desc(patientContact.isPreferred), asc(contact.displayName), asc(contact.id))
+  const [registration] = await tx.select({
+    entryPoint: patientRegistration.entryPoint, respondent: patientRegistration.respondent, createdAt: patientRegistration.createdAt,
+    actor: { id: user.id, name: user.name }, contextContactId: patientRegistration.contextContactId,
+    conversationId: patientRegistration.conversationId, formVersion: patientRegistration.formVersion,
+    answers: patientRegistration.answers, privacyNotice: patientRegistration.privacyNotice,
+  }).from(patientRegistration).leftJoin(user, eq(user.id, patientRegistration.actorUserId))
+    .where(and(eq(patientRegistration.organizationId, orgId), eq(patientRegistration.patientId, id))).limit(1)
   const [activeAllergies, activeConditions, currentMedications] = await Promise.all([
     tx
       .select()
@@ -409,25 +392,69 @@ export async function getPatient(tx: Db, orgId: string, id: string): Promise<Pat
   ])
   return {
     patient: row,
-    displayName: contactRow?.displayName ?? "",
-    guardian,
+    contacts,
+    registration: registration ?? null,
     activeAllergies,
     activeConditions,
     currentMedications,
   }
 }
 
-export async function getPatientByContact(
-  tx: Db,
-  orgId: string,
-  contactId: string,
-): Promise<PatientRow | null> {
-  const [row] = await tx
-    .select()
-    .from(patient)
-    .where(and(eq(patient.contactId, contactId), eq(patient.organizationId, orgId)))
-    .limit(1)
-  return row ?? null
+export async function listPatientsByContact(tx: Db, orgId: string, contactId: string) {
+  await requireContact(tx, orgId, contactId)
+  return tx.select({
+    id: patient.id, patientNumber: patient.patientNumber, displayName: patient.displayName, isActive: patient.isActive,
+    relationship: patientContact.relationship, relationshipDetail: patientContact.relationshipDetail, isPreferred: patientContact.isPreferred,
+  }).from(patientContact).innerJoin(patient, and(eq(patient.id, patientContact.patientId), eq(patient.organizationId, orgId)))
+    .where(and(eq(patientContact.organizationId, orgId), eq(patientContact.contactId, contactId)))
+    .orderBy(asc(patient.displayName), asc(patient.id))
+}
+
+export async function setPatientContact(tx: Db, orgId: string, actorUserId: string, patientId: string, input: RegistrationContactInput): Promise<void> {
+  const parsed = registrationContactInputSchema.safeParse(input)
+  if (!parsed.success) throw validation("Relación inválida")
+  const link = parsed.data
+  const [person] = await tx.select().from(contact).where(and(eq(contact.organizationId, orgId), eq(contact.id, link.contactId))).for("update")
+  if (!person) throw notFound("Contacto")
+  if (!person.isActive) throw conflict("CONTACT_ARCHIVED", "Reactiva el contacto antes de vincularlo")
+  const [record] = await tx.select({ id: patient.id }).from(patient).where(and(eq(patient.organizationId, orgId), eq(patient.id, patientId))).for("update")
+  if (!record) throw notFound("Paciente")
+  try {
+    if (link.isPreferred) await tx.update(patientContact).set({ isPreferred: false, updatedAt: new Date() }).where(and(eq(patientContact.organizationId, orgId), eq(patientContact.patientId, patientId), eq(patientContact.isPreferred, true)))
+    await tx.insert(patientContact).values({ ...link, organizationId: orgId, patientId, createdBy: actorUserId })
+      .onConflictDoUpdate({
+        target: [patientContact.organizationId, patientContact.patientId, patientContact.contactId],
+        set: { relationship: link.relationship, relationshipDetail: link.relationshipDetail ?? null, isPreferred: link.isPreferred, updatedAt: new Date() },
+      })
+    await tx.insert(auditEvent).values({ organizationId: orgId, actorUserId, action: "patient.contact_set", entity: "patient", entityId: patientId, metadata: { contactId: link.contactId, relationship: link.relationship, isPreferred: link.isPreferred } })
+  } catch (error) {
+    if (isUniqueViolation(error) && uniqueConstraintOf(error).includes("patient_contact_self_")) throw conflict("ALREADY_PATIENT", "El contacto o paciente ya tiene una relación propia")
+    throw error
+  }
+}
+
+export async function removePatientContact(tx: Db, orgId: string, actorUserId: string, patientId: string, contactId: string): Promise<void> {
+  const [person] = await tx.select({ id: contact.id }).from(contact).where(and(eq(contact.organizationId, orgId), eq(contact.id, contactId))).for("update")
+  if (!person) throw notFound("Contacto")
+  const [record] = await tx.select({ id: patient.id }).from(patient).where(and(eq(patient.organizationId, orgId), eq(patient.id, patientId))).for("update")
+  if (!record) throw notFound("Paciente")
+  const deleted = await tx.delete(patientContact).where(and(eq(patientContact.organizationId, orgId), eq(patientContact.patientId, patientId), eq(patientContact.contactId, contactId))).returning({ id: patientContact.id })
+  if (deleted.length) await tx.insert(auditEvent).values({ organizationId: orgId, actorUserId, action: "patient.contact_removed", entity: "patient", entityId: patientId, metadata: { contactId } })
+}
+
+export async function findPatientDuplicates(tx: Db, orgId: string, input: { displayName?: string; birthDate?: string; docType?: string; docNumber?: string; phone?: string }) {
+  const name = input.displayName?.trim().replace(/\s+/g, " ").toLowerCase()
+  const phone = input.phone?.replace(/\D/g, "")
+  const document = input.docType?.trim() && input.docNumber?.trim()
+    ? and(eq(patient.docType, input.docType.trim()), eq(patient.docNumber, input.docNumber.trim()))! : sql`false`
+  const nameAndDate = name && input.birthDate
+    ? and(sql`lower(regexp_replace(btrim(${patient.displayName}), '\\s+', ' ', 'g')) = ${name}`, eq(patient.birthDate, input.birthDate))! : sql`false`
+  const phoneMatch = phone ? sql`regexp_replace(${patient.phone}, '[^0-9]', '', 'g') = ${phone}` : sql`false`
+  const rank = sql<number>`case when ${document} then 1 when ${nameAndDate} then 2 else 3 end`
+  const rows = await tx.select({ id: patient.id, patientNumber: patient.patientNumber, displayName: patient.displayName, isActive: patient.isActive, rank })
+    .from(patient).where(and(eq(patient.organizationId, orgId), or(document, nameAndDate, phoneMatch)))
+    .orderBy(rank, asc(patient.id)).limit(10)
+  return rows.map(({ rank: priority, ...row }) => ({ ...row, reason: priority === 1 ? "document" as const : priority === 2 ? "name_birthDate" as const : "phone" as const }))
 }
 
 export interface UpdatePatientPatch {
@@ -448,42 +475,10 @@ export interface UpdatePatientPatch {
   insuranceType?: string | null
   insuranceDetail?: string | null
   referralSource?: string | null
-  guardianContactId?: string | null
   registeredBranchId?: string | null
   isActive?: boolean
   /** true registra el consentimiento (fecha+autor); false se ignora. */
   dataConsent?: boolean
-}
-/**
- * Regla documental vigente por tipo: solo el DNI exige formato exacto (8
- * dígitos). Ninguna regla peruana se aplica a pasaporte u otros tipos.
- */
-function assertDocNumber(
-  docType: string | null | undefined,
-  docNumber: string | null | undefined,
-): void {
-  if (
-    docType === "DNI" &&
-    docNumber != null &&
-    docNumber !== "" &&
-    !/^\d{8}$/.test(docNumber.trim())
-  ) {
-    throw validation("El DNI tiene exactamente 8 dígitos")
-  }
-}
-
-async function assertTenantContact(
-  tx: Db,
-  orgId: string,
-  contactId: string,
-  name: string,
-): Promise<void> {
-  const [row] = await tx
-    .select({ id: contact.id })
-    .from(contact)
-    .where(and(eq(contact.id, contactId), eq(contact.organizationId, orgId)))
-    .limit(1)
-  if (!row) throw notFound(name)
 }
 
 async function assertTenantBranch(tx: Db, orgId: string, branchId: string): Promise<void> {
@@ -495,6 +490,7 @@ async function assertTenantBranch(tx: Db, orgId: string, branchId: string): Prom
   if (!row) throw notFound("Sucursal")
 }
 const PATCH_FIELDS = [
+  "displayName",
   "docType",
   "docNumber",
   "birthDate",
@@ -511,7 +507,6 @@ const PATCH_FIELDS = [
   "insuranceType",
   "insuranceDetail",
   "referralSource",
-  "guardianContactId",
   "registeredBranchId",
   "isActive",
 ] as const
@@ -524,24 +519,14 @@ export async function updatePatient(
   patch: UpdatePatientPatch,
 ): Promise<PatientRow> {
   const current = await requirePatient(tx, orgId, id)
-  if (patch.displayName !== undefined) {
-    const displayName = patch.displayName.trim()
-    if (!displayName || displayName.length > 200)
-      throw validation("displayName debe tener 1–200 caracteres")
-    // Misma transacción: el nombre vive en el contacto, sin crear otra identidad
-    // ni alterar el teléfono compartido del CRM.
-    await updateContact(tx, orgId, current.contactId, { displayName })
-  }
-  if (patch.guardianContactId !== undefined && patch.guardianContactId !== null) {
-    await assertTenantContact(tx, orgId, patch.guardianContactId, "Contacto tutor")
-  }
+  const { registeredBranchId: _branch, isActive: _active, dataConsent: _consent, ...demographicPatch } = patch
+  const demographics = Object.fromEntries(Object.keys(demographicsSchema.shape).map(key => [key, current[key as keyof PatientRow]]))
+  const errors = validateDemographics({ ...demographics, ...demographicPatch }, await patientOrganizationToday(tx, orgId))
+  if (Object.keys(errors).length) throw validation(Object.values(errors)[0]!)
   if (patch.registeredBranchId !== undefined && patch.registeredBranchId !== null) {
     await assertTenantBranch(tx, orgId, patch.registeredBranchId)
   }
-  assertDocNumber(
-    patch.docType !== undefined ? patch.docType : current.docType,
-    patch.docNumber !== undefined ? patch.docNumber : current.docNumber,
-  )
+  if (patch.displayName !== undefined) patch = { ...patch, displayName: patch.displayName.trim() }
   const set: Partial<typeof patient.$inferInsert> = { updatedAt: new Date() }
   for (const key of PATCH_FIELDS) {
     if (patch[key] !== undefined) (set as Record<string, unknown>)[key] = patch[key] as unknown
@@ -571,7 +556,7 @@ export async function updatePatient(
   } catch (e) {
     if (!isUniqueViolation(e)) throw e
     const c = uniqueConstraintOf(e)
-    if (c.includes("patient_org_doc_uidx") || !c.includes("patient_org_contact_uidx")) {
+    if (c.includes("patient_org_doc_uidx")) {
       throw conflict("DUPLICATE_DOCUMENT", "Ya existe un paciente con ese documento")
     }
     throw e

@@ -17,6 +17,7 @@ import {
 import {
   Bot,
   Building2,
+  ClipboardList,
   Contact,
   FlaskConical,
   Inbox,
@@ -67,6 +68,7 @@ const navItems: AppShellNavEntry[] = [
       { label: "Agente", to: "/settings/agent", icon: Bot },
       { label: "Pipelines", to: "/settings/pipelines", icon: Kanban },
       { label: "Campos", to: "/settings/fields", icon: Tag },
+      { label: "Registro de pacientes", to: "/settings/patient-registration", icon: ClipboardList },
     ],
   },
   { label: "Sucursales", to: "/branches", icon: Building2 },

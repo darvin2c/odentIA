@@ -90,8 +90,12 @@ async function contactNames(db: Db): Promise<string[]> {
 
 async function insertPatient(db: Db, id: string, orgId: string, contactId: string, number: number) {
   await db.execute(
-    sql`insert into "patient" ("id", "organization_id", "contact_id", "patient_number")
-        values (${id}::uuid, ${orgId}, ${contactId}::uuid, ${number})`,
+    sql`insert into "patient" ("id", "organization_id", "display_name", "patient_number")
+        values (${id}::uuid, ${orgId}, ${"Paciente " + number}, ${number})`,
+  )
+  await db.execute(
+    sql`insert into patient_contact (organization_id, patient_id, contact_id, relationship, is_preferred)
+        values (${orgId}, ${id}::uuid, ${contactId}::uuid, 'self', true)`,
   )
 }
 

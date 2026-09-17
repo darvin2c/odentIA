@@ -114,7 +114,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       const merged = await inOrg(async (tx) => {
         const current = await requireContact(tx, ctx.orgId, contactId)
         const next = [...new Set([...current.tags, ...tags])]
-        await updateContact(tx, ctx.orgId, contactId, { tags: next })
+        await updateContact(tx, ctx.orgId, contactId, { tags: next }, { userId: null })
         return next
       })
       return `Etiquetas: ${merged.join(", ")}.`
@@ -135,7 +135,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       customFields?: Record<string, unknown>
     }) => {
       const contactId = ctx.contactId
-      await inOrg((tx) => updateContact(tx, ctx.orgId, contactId, { displayName, customFields }))
+      await inOrg((tx) => updateContact(tx, ctx.orgId, contactId, { displayName, customFields }, { userId: null }))
       return "Contacto actualizado."
     },
     {

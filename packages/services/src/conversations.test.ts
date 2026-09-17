@@ -1,8 +1,10 @@
 import type { ChannelAdapter, NormalizedInbound } from "@odentia/channels"
 import { type InboundMessageJob, withOrgContext } from "@odentia/db"
-import { sql } from "drizzle-orm"
+import { contactIdentity, conversation } from "@odentia/db/schema/crm"
+import { eq, sql } from "drizzle-orm"
 import { expect, it } from "vitest"
 import { createConnection } from "./connections.js"
+import { updateContact } from "./contacts.js"
 import {
   applyStatus,
   getConversationDetail,
@@ -311,4 +313,106 @@ it("listMessages pagina con cursor", async () => {
   expect(second.items).toHaveLength(1)
   expect(second.items[0]?.body).toBe("Hola")
   expect(second.nextCursor).toBeNull()
+})
+
+it("ingesta persiste contactIdentityId en la conversación creada", async () => {
+  const connId = await makeTelegramConnection("org_a")
+  const { conversationId } = await ingest(
+    "org_a",
+    connId,
+    textEvent({
+      externalEventId: "evt-ident-1",
+      externalMessageId: "ext-ident-1",
+      externalThreadId: "tg:910001",
+      senderExternalId: "tg:910001",
+      senderDisplayName: "Ident",
+    }),
+  )
+  const [conv] = await withOrgContext(appDb, "org_a", (tx) =>
+    tx.select().from(conversation).where(eq(conversation.id, conversationId)).limit(1),
+  )
+  expect(conv?.contactIdentityId).not.toBeNull()
+  const [ident] = await withOrgContext(appDb, "org_a", (tx) =>
+    tx.select().from(contactIdentity).where(eq(contactIdentity.id, conv?.contactIdentityId ?? "")).limit(1),
+  )
+  expect(ident).toMatchObject({ channel: "telegram", externalUserId: "tg:910001" })
+  expect(ident?.contactId).toBe(conv?.contactId)
+})
+
+it("hilo compartido conserva interlocutor e identidad ante otro remitente", async () => {
+  const connId = await makeTelegramConnection("org_a")
+  const first = await ingest(
+    "org_a",
+    connId,
+    textEvent({
+      externalEventId: "evt-shared-1",
+      externalMessageId: "ext-shared-1",
+      externalThreadId: "tg:920001",
+      senderExternalId: "tg:920001",
+      senderDisplayName: "Primera",
+    }),
+  )
+  const second = await ingest(
+    "org_a",
+    connId,
+    textEvent({
+      externalEventId: "evt-shared-2",
+      externalMessageId: "ext-shared-2",
+      externalThreadId: "tg:920001",
+      senderExternalId: "tg:920002",
+      senderDisplayName: "Segunda",
+    }),
+  )
+  expect(second.conversationId).toBe(first.conversationId)
+  expect(second.created).toBe(true)
+  const [conv] = await withOrgContext(appDb, "org_a", (tx) =>
+    tx.select().from(conversation).where(eq(conversation.id, first.conversationId)).limit(1),
+  )
+  const firstDetail = await withOrgContext(appDb, "org_a", (tx) =>
+    getConversationDetail(tx, "org_a", first.conversationId),
+  )
+  expect(conv?.contactId).toBe(firstDetail.contact.id)
+  const [ident] = await withOrgContext(appDb, "org_a", (tx) =>
+    tx.select().from(contactIdentity).where(eq(contactIdentity.id, conv?.contactIdentityId ?? "")).limit(1),
+  )
+  expect(ident?.externalUserId).toBe("tg:920001")
+})
+
+it("ingesta reutiliza el contacto archivado sin crear otro", async () => {
+  const connId = await makeTelegramConnection("org_a")
+  const event = textEvent({
+    externalEventId: "evt-arch-1",
+    externalMessageId: "ext-arch-1",
+    externalThreadId: "tg:930001",
+    senderExternalId: "tg:930001",
+    senderDisplayName: "Archivada",
+  })
+  const first = await ingest("org_a", connId, event)
+  const before = await withOrgContext(appDb, "org_a", (tx) =>
+    getConversationDetail(tx, "org_a", first.conversationId),
+  )
+  await withOrgContext(appDb, "org_a", (tx) =>
+    updateContact(tx, "org_a", before.contact.id, { isActive: false }, { userId: null }),
+  )
+  const again = await ingest(
+    "org_a",
+    connId,
+    textEvent({
+      externalEventId: "evt-arch-2",
+      externalMessageId: "ext-arch-2",
+      externalThreadId: "tg:930001",
+      senderExternalId: "tg:930001",
+      senderDisplayName: "Archivada",
+    }),
+  )
+  expect(again.conversationId).toBe(first.conversationId)
+  const after = await withOrgContext(appDb, "org_a", (tx) =>
+    getConversationDetail(tx, "org_a", again.conversationId),
+  )
+  expect(after.contact.id).toBe(before.contact.id)
+  expect(after.contact.isActive).toBe(false)
+  const listed = await withOrgContext(appDb, "org_a", (tx) =>
+    listConversations(tx, "org_a", {}),
+  )
+  expect(listed.items.find((c) => c.id === first.conversationId)?.contact.isActive).toBe(false)
 })

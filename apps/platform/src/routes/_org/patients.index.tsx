@@ -1,13 +1,15 @@
 import { Badge, Button } from "@odentia/ui"
 import {
+  ConfirmDialog,
   DataTable,
   EmptyState,
   FilterBar,
   PageHeader,
   PageShell,
+  RowActions,
   useListSearch,
 } from "@odentia/ui-patterns"
-import { useQuery } from "@tanstack/react-query"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
 import {
   type ColumnDef,
@@ -18,7 +20,7 @@ import {
 import { Plus } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
 import { CreatePatientDrawer } from "../../components/patient/create-patient-drawer"
-import { apiFetch } from "../../lib/api"
+import { ApiError, apiFetch } from "../../lib/api"
 import { timeAgo, useCanWrite } from "../../lib/crm"
 import {
   PATIENT_FILTERS,
@@ -47,6 +49,28 @@ function PatientsPage() {
   const canWrite = useCanWrite()
   const { contactId } = Route.useSearch()
   const [creating, setCreating] = useState(false)
+  const [archiving, setArchiving] = useState<PatientListRow | null>(null)
+  const [archiveError, setArchiveError] = useState<string | null>(null)
+  const queryClient = useQueryClient()
+  const archiveMutation = useMutation({
+    mutationFn: (row: PatientListRow) =>
+      apiFetch(`/api/patients/${row.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ isActive: !row.isActive }),
+      }),
+    onSuccess: () => {
+      setArchiveError(null)
+      setArchiving(null)
+      void queryClient.invalidateQueries({ queryKey: ["patients"] })
+    },
+    onError: (mutationError: unknown) => {
+      setArchiveError(
+        mutationError instanceof ApiError
+          ? (mutationError.shape.message ?? "No se pudo actualizar el estado.")
+          : "No se pudo actualizar el estado.",
+      )
+    },
+  })
   const listSearch = useListSearch()
   const search = listSearch.get("q") ?? ""
   const isActive = listSearch.get("isActive")
@@ -134,8 +158,38 @@ function PatientsPage() {
         header: "Registrado",
         cell: ({ row }) => timeAgo(row.original.createdAt),
       },
+      {
+        id: "actions",
+        header: "",
+        cell: ({ row }) =>
+          canWrite ? (
+            <RowActions
+              label={`Acciones de ${row.original.displayName ?? "paciente"}`}
+              items={[
+                {
+                  key: "open",
+                  label: "Abrir ficha",
+                  onSelect: () =>
+                    void navigate({
+                      to: "/patients/$patientId",
+                      params: { patientId: row.original.id },
+                    }),
+                },
+                {
+                  key: "archive",
+                  label: row.original.isActive ? "Archivar" : "Reactivar",
+                  tone: row.original.isActive ? "danger" : undefined,
+                  onSelect: () => {
+                    setArchiveError(null)
+                    setArchiving(row.original)
+                  },
+                },
+              ]}
+            />
+          ) : null,
+      },
     ],
-    [],
+    [canWrite, navigate],
   )
 
   const rows = patientsQuery.data?.data ?? []
@@ -266,6 +320,27 @@ function PatientsPage() {
           }}
         />
       )}
+      <ConfirmDialog
+        open={archiving !== null}
+        onClose={() => {
+          if (!archiveMutation.isPending) {
+            setArchiving(null)
+            setArchiveError(null)
+          }
+        }}
+        title={archiving?.isActive ? "Archivar paciente" : "Reactivar paciente"}
+        description={
+          archiveError ??
+          (archiving?.isActive
+            ? `«${archiving?.displayName ?? ""}» se archiva pero conserva su historia clínica y relaciones. No se borra.`
+            : `«${archiving?.displayName ?? ""}» vuelve a estar activo en el padrón.`)
+        }
+        confirmLabel={archiving?.isActive ? "Archivar" : "Reactivar"}
+        pending={archiveMutation.isPending}
+        onConfirm={() => {
+          if (archiving) archiveMutation.mutate(archiving)
+        }}
+      />
     </PageShell>
   )
 }

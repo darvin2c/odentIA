@@ -47,7 +47,7 @@ export interface ConversationDetail {
     assignedUserId: string | null
     lastMessageAt: string | null
   }
-  contact: { id: string; displayName: string }
+  contact: { id: string; displayName: string; isActive: boolean }
   connection: {
     id: string
     channel: string
@@ -107,6 +107,9 @@ export function timeAgo(iso: string | null): string {
 export interface ContactListItem {
   id: string
   displayName: string
+  phone: string | null
+  email: string | null
+  isActive: boolean
   tags: string[]
   stageId: string | null
   assignedUserId: string | null
@@ -114,8 +117,18 @@ export interface ContactListItem {
   channels: string[]
 }
 
+export interface ContactPatientLink {
+  id: string
+  patientNumber: number
+  displayName: string
+  isActive: boolean
+  relationship: "self" | "guardian" | "family" | "other"
+  relationshipDetail: string | null
+  isPreferred: boolean
+}
+
 export interface ContactFull {
-  patientId: string | null
+  patients: ContactPatientLink[]
   contact: ContactListItem & {
     notes: string | null
     customFields: Record<string, unknown>
@@ -124,7 +137,15 @@ export interface ContactFull {
   }
   identities: { id: string; channel: string; externalUserId: string; displayName: string | null }[]
   openTasks: { id: string; title: string; dueAt: string | null; assigneeUserId: string | null }[]
-  conversations: { id: string; status: string; lastMessageAt: string | null }[]
+  conversations: {
+    id: string
+    status: string
+    channel: string
+    connectionId: string | null
+    connectionName: string | null
+    contactIdentityId: string | null
+    lastMessageAt: string | null
+  }[]
 }
 
 export interface Stage {

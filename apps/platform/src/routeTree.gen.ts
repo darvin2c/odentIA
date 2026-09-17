@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as OrgRouteImport } from './routes/_org'
+import { Route as RegistroRouteImport } from './routes/registro'
 import { Route as OrgBranchesRouteImport } from './routes/_org/branches'
 import { Route as OrgDemoRouteImport } from './routes/_org/demo'
 import { Route as OrgInboxRouteImport } from './routes/_org/inbox'
@@ -25,6 +26,7 @@ import { Route as OrgPatientsPatientIdRouteImport } from './routes/_org/patients
 import { Route as OrgSettingsAgentRouteImport } from './routes/_org/settings.agent'
 import { Route as OrgSettingsChannelsRouteImport } from './routes/_org/settings.channels'
 import { Route as OrgSettingsFieldsRouteImport } from './routes/_org/settings.fields'
+import { Route as OrgSettingsPatientRegistrationRouteImport } from './routes/_org/settings.patient-registration'
 import { Route as OrgSettingsPipelinesRouteImport } from './routes/_org/settings.pipelines'
 import { Route as OrgPatientsPatientIdEncountersEncounterIdRouteImport } from './routes/_org/patients.$patientId.encounters.$encounterId'
 
@@ -35,6 +37,11 @@ const IndexRoute = IndexRouteImport.update({
 } as any)
 const OrgRoute = OrgRouteImport.update({
   id: '/_org',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const RegistroRoute = RegistroRouteImport.update({
+  id: '/registro',
+  path: '/registro',
   getParentRoute: () => rootRouteImport,
 } as any)
 const OrgBranchesRoute = OrgBranchesRouteImport.update({
@@ -107,6 +114,12 @@ const OrgSettingsFieldsRoute = OrgSettingsFieldsRouteImport.update({
   path: '/settings/fields',
   getParentRoute: () => OrgRoute,
 } as any)
+const OrgSettingsPatientRegistrationRoute =
+  OrgSettingsPatientRegistrationRouteImport.update({
+    id: '/settings/patient-registration',
+    path: '/settings/patient-registration',
+    getParentRoute: () => OrgRoute,
+  } as any)
 const OrgSettingsPipelinesRoute = OrgSettingsPipelinesRouteImport.update({
   id: '/settings/pipelines',
   path: '/settings/pipelines',
@@ -121,6 +134,7 @@ const OrgPatientsPatientIdEncountersEncounterIdRoute =
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/registro': typeof RegistroRoute
   '/branches': typeof OrgBranchesRoute
   '/demo': typeof OrgDemoRoute
   '/inbox': typeof OrgInboxRoute
@@ -133,6 +147,7 @@ export interface FileRoutesByFullPath {
   '/settings/agent': typeof OrgSettingsAgentRoute
   '/settings/channels': typeof OrgSettingsChannelsRoute
   '/settings/fields': typeof OrgSettingsFieldsRoute
+  '/settings/patient-registration': typeof OrgSettingsPatientRegistrationRoute
   '/settings/pipelines': typeof OrgSettingsPipelinesRoute
   '/contacts/': typeof OrgContactsIndexRoute
   '/patients/': typeof OrgPatientsIndexRoute
@@ -140,6 +155,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/registro': typeof RegistroRoute
   '/branches': typeof OrgBranchesRoute
   '/demo': typeof OrgDemoRoute
   '/inbox': typeof OrgInboxRoute
@@ -152,6 +168,7 @@ export interface FileRoutesByTo {
   '/settings/agent': typeof OrgSettingsAgentRoute
   '/settings/channels': typeof OrgSettingsChannelsRoute
   '/settings/fields': typeof OrgSettingsFieldsRoute
+  '/settings/patient-registration': typeof OrgSettingsPatientRegistrationRoute
   '/settings/pipelines': typeof OrgSettingsPipelinesRoute
   '/contacts': typeof OrgContactsIndexRoute
   '/patients': typeof OrgPatientsIndexRoute
@@ -161,6 +178,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/_org': typeof OrgRouteWithChildren
+  '/registro': typeof RegistroRoute
   '/_org/branches': typeof OrgBranchesRoute
   '/_org/demo': typeof OrgDemoRoute
   '/_org/inbox': typeof OrgInboxRoute
@@ -173,6 +191,7 @@ export interface FileRoutesById {
   '/_org/settings/agent': typeof OrgSettingsAgentRoute
   '/_org/settings/channels': typeof OrgSettingsChannelsRoute
   '/_org/settings/fields': typeof OrgSettingsFieldsRoute
+  '/_org/settings/patient-registration': typeof OrgSettingsPatientRegistrationRoute
   '/_org/settings/pipelines': typeof OrgSettingsPipelinesRoute
   '/_org/contacts/': typeof OrgContactsIndexRoute
   '/_org/patients/': typeof OrgPatientsIndexRoute
@@ -182,6 +201,7 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/registro'
     | '/branches'
     | '/demo'
     | '/inbox'
@@ -194,6 +214,7 @@ export interface FileRouteTypes {
     | '/settings/agent'
     | '/settings/channels'
     | '/settings/fields'
+    | '/settings/patient-registration'
     | '/settings/pipelines'
     | '/contacts/'
     | '/patients/'
@@ -201,6 +222,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/registro'
     | '/branches'
     | '/demo'
     | '/inbox'
@@ -213,6 +235,7 @@ export interface FileRouteTypes {
     | '/settings/agent'
     | '/settings/channels'
     | '/settings/fields'
+    | '/settings/patient-registration'
     | '/settings/pipelines'
     | '/contacts'
     | '/patients'
@@ -221,6 +244,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/_org'
+    | '/registro'
     | '/_org/branches'
     | '/_org/demo'
     | '/_org/inbox'
@@ -233,6 +257,7 @@ export interface FileRouteTypes {
     | '/_org/settings/agent'
     | '/_org/settings/channels'
     | '/_org/settings/fields'
+    | '/_org/settings/patient-registration'
     | '/_org/settings/pipelines'
     | '/_org/contacts/'
     | '/_org/patients/'
@@ -242,6 +267,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   OrgRoute: typeof OrgRouteWithChildren
+  RegistroRoute: typeof RegistroRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -258,6 +284,13 @@ declare module '@tanstack/react-router' {
       path: ''
       fullPath: '/'
       preLoaderRoute: typeof OrgRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/registro': {
+      id: '/registro'
+      path: '/registro'
+      fullPath: '/registro'
+      preLoaderRoute: typeof RegistroRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_org/branches': {
@@ -358,6 +391,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof OrgSettingsFieldsRouteImport
       parentRoute: typeof OrgRoute
     }
+    '/_org/settings/patient-registration': {
+      id: '/_org/settings/patient-registration'
+      path: '/settings/patient-registration'
+      fullPath: '/settings/patient-registration'
+      preLoaderRoute: typeof OrgSettingsPatientRegistrationRouteImport
+      parentRoute: typeof OrgRoute
+    }
     '/_org/settings/pipelines': {
       id: '/_org/settings/pipelines'
       path: '/settings/pipelines'
@@ -400,6 +440,7 @@ interface OrgRouteChildren {
   OrgSettingsAgentRoute: typeof OrgSettingsAgentRoute
   OrgSettingsChannelsRoute: typeof OrgSettingsChannelsRoute
   OrgSettingsFieldsRoute: typeof OrgSettingsFieldsRoute
+  OrgSettingsPatientRegistrationRoute: typeof OrgSettingsPatientRegistrationRoute
   OrgSettingsPipelinesRoute: typeof OrgSettingsPipelinesRoute
   OrgContactsIndexRoute: typeof OrgContactsIndexRoute
   OrgPatientsIndexRoute: typeof OrgPatientsIndexRoute
@@ -418,6 +459,7 @@ const OrgRouteChildren: OrgRouteChildren = {
   OrgSettingsAgentRoute: OrgSettingsAgentRoute,
   OrgSettingsChannelsRoute: OrgSettingsChannelsRoute,
   OrgSettingsFieldsRoute: OrgSettingsFieldsRoute,
+  OrgSettingsPatientRegistrationRoute: OrgSettingsPatientRegistrationRoute,
   OrgSettingsPipelinesRoute: OrgSettingsPipelinesRoute,
   OrgContactsIndexRoute: OrgContactsIndexRoute,
   OrgPatientsIndexRoute: OrgPatientsIndexRoute,
@@ -428,6 +470,7 @@ const OrgRouteWithChildren = OrgRoute._addFileChildren(OrgRouteChildren)
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   OrgRoute: OrgRouteWithChildren,
+  RegistroRoute: RegistroRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

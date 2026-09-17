@@ -1,5 +1,9 @@
 import {
   activeFindingsAsOf,
+  BLOOD_GROUPS,
+  registrationAnswersSchema,
+  type BloodGroup,
+  type RegistrationAnswers,
   type FindingDetails,
   type FindingInput,
   type FindingRecord,
@@ -23,9 +27,9 @@ import {
   patientDocument,
   patientDocumentContext,
   patientMedication,
+  patientRegistration,
   treatmentPlanItem,
 } from "@odentia/db/schema/clinical"
-import { contact } from "@odentia/db/schema/crm"
 import { auditEvent } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, inArray, lt, or, sql } from "drizzle-orm"
 import { decodeCursor, encodeCursor } from "./cursors.js"
@@ -66,7 +70,7 @@ function conflict(code: string, message: string): ServiceError {
 async function audit(
   tx: Db,
   orgId: string,
-  actorUserId: string,
+  actorUserId: string | null,
   action: string,
   entity: string,
   entityId: string,
@@ -147,6 +151,7 @@ export interface SavePatientHealthInput {
   medications: HealthMedicationInput[]
   anamnesis?: { expectedVersion: number; answers: Record<string, unknown> }
   dataConsent?: true
+  bloodGroup?: BloodGroup | null
 }
 
 export type HealthAllergyRow = typeof patientAllergy.$inferSelect
@@ -156,6 +161,9 @@ export type AnamnesisRow = typeof patientAnamnesis.$inferSelect
 
 export interface PatientHealth {
   revision: number
+  bloodGroup: BloodGroup | null
+  reviewedAt: Date | null
+  reviewedBy: string | null
   reviewStatus: { allergies: string; conditions: string; medications: string }
   allergies: HealthAllergyRow[]
   conditions: HealthConditionRow[]
@@ -180,7 +188,7 @@ function assertText(
 
 function assertDateStr(value: string | null | undefined, name: string): string | null {
   if (value === null || value === undefined || value === "") return null
-  if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(value))
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value))
     throw validation(`${name} debe ser una fecha YYYY-MM-DD válida`)
   const [y, m, d] = value.split("-").map(Number)
   const date = new Date(Date.UTC(y as number, (m as number) - 1, d as number))
@@ -319,6 +327,9 @@ export async function getPatientHealth(
     .select({
       revision: patient.healthRevision,
       reviewStatus: patient.healthReviewStatus,
+      bloodGroup: patient.bloodGroup,
+      reviewedAt: patient.healthReviewedAt,
+      reviewedBy: patient.healthReviewedBy,
     })
     .from(patient)
     .where(and(eq(patient.id, patientId), eq(patient.organizationId, orgId)))
@@ -365,6 +376,9 @@ export async function getPatientHealth(
     value === "none" || value === "recorded" ? (value as string) : "unknown"
   return {
     revision: header.revision,
+    bloodGroup: header.bloodGroup,
+    reviewedAt: header.reviewedAt,
+    reviewedBy: header.reviewedBy,
     reviewStatus: {
       allergies: stateOf(reviewStatus["allergies"]),
       conditions: stateOf(reviewStatus["conditions"]),
@@ -402,13 +416,42 @@ function assertReviewStatus(input: HealthReviewStatusInput): {
     medications: input.medications,
   }
 }
-export async function savePatientHealth(
+export type DeclaredPatientHealthInput = NonNullable<RegistrationAnswers["health"]>
+
+export async function initializeDeclaredPatientHealth(tx: Db, orgId: string, patientId: string, input: DeclaredPatientHealthInput, actorUserId: string | null): Promise<PatientHealth> {
+  const parsed = registrationAnswersSchema.shape.health.safeParse(input)
+  if (!parsed.success || !parsed.data) throw validation("Declaración de salud inválida")
+  const declared = parsed.data
+  const hasData = declared.bloodGroup != null ||
+    [declared.allergies, declared.conditions, declared.medications].some(group => group && group.state !== "unanswered") ||
+    Object.values(declared.dental ?? {}).some(Boolean)
+  if (!hasData) return getPatientHealth(tx, orgId, patientId)
+  const state = (value: string | undefined) => value === "none" || value === "recorded" ? value : "unknown"
+  const dental = Object.fromEntries(Object.entries(declared.dental ?? {}).filter(([, value]) => value !== ""))
+  return persistPatientHealth(tx, orgId, { kind: "declaration", userId: actorUserId }, patientId, {
+    expectedRevision: 0,
+    bloodGroup: declared.bloodGroup,
+    reviewStatus: { allergies: state(declared.allergies?.state), conditions: state(declared.conditions?.state), medications: state(declared.medications?.state) },
+    allergies: (declared.allergies?.items ?? []).map(item => ({ ...item, isActive: true })),
+    conditions: (declared.conditions?.items ?? []).map(item => ({ ...item, status: "activa" })),
+    medications: declared.medications?.items ?? [],
+    ...(Object.keys(dental).length ? { anamnesis: { expectedVersion: 0, answers: { antecedentesOdontologicos: dental } } } : {}),
+  })
+}
+
+export async function savePatientHealth(tx: Db, orgId: string, actorUserId: string, patientId: string, input: SavePatientHealthInput): Promise<PatientHealth> {
+  return persistPatientHealth(tx, orgId, { kind: "staff", userId: actorUserId }, patientId, input)
+}
+
+async function persistPatientHealth(
   tx: Db,
   orgId: string,
-  actorUserId: string,
+  context: { kind: "staff"; userId: string } | { kind: "declaration"; userId: string | null },
   patientId: string,
   input: SavePatientHealthInput,
 ): Promise<PatientHealth> {
+  const actorUserId = context.userId
+  if (input.bloodGroup != null && !(BLOOD_GROUPS as readonly string[]).includes(input.bloodGroup)) throw validation("Grupo sanguíneo inválido")
   await requirePatient(tx, orgId, patientId)
   // Lock del paciente: serializa revisiones concurrentes del agregado.
   const [locked] = await tx
@@ -427,6 +470,11 @@ export async function savePatientHealth(
       "STALE_HEALTH_REVISION",
       "Otra sesión guardó antecedentes mientras editabas: recarga y reintenta sin perder lo escrito",
     )
+  }
+  if (context.kind === "declaration") {
+    const [registration] = await tx.select({ id: patientRegistration.id }).from(patientRegistration).where(and(eq(patientRegistration.organizationId, orgId), eq(patientRegistration.patientId, patientId))).limit(1)
+    const previous = await getPatientHealth(tx, orgId, patientId)
+    if (!registration || locked.revision !== 0 || previous.latestAnamnesis || previous.allergies.length || previous.conditions.length || previous.medications.length) throw conflict("HEALTH_ALREADY_INITIALIZED", "La declaración inicial requiere una ficha nueva sin antecedentes")
   }
   if (
     !Array.isArray(input.allergies) ||
@@ -662,13 +710,14 @@ export async function savePatientHealth(
     .set({
       healthRevision: locked.revision + 1,
       healthReviewStatus: reviewStatus,
-      healthReviewedAt: new Date(),
-      healthReviewedBy: actorUserId,
+      healthReviewedAt: context.kind === "staff" ? new Date() : null,
+      healthReviewedBy: context.kind === "staff" ? context.userId : null,
+      ...(input.bloodGroup !== undefined ? { bloodGroup: input.bloodGroup } : {}),
       ...(setConsent ? { dataConsentAt: new Date(), dataConsentBy: actorUserId } : {}),
       updatedAt: new Date(),
     })
     .where(and(eq(patient.id, patientId), eq(patient.organizationId, orgId)))
-  await audit(tx, orgId, actorUserId, "health.saved", "patient", patientId, {
+  await audit(tx, orgId, actorUserId, context.kind === "staff" ? "health.saved" : "health.declared", "patient", patientId, {
     revision: { before: locked.revision, after: locked.revision + 1 },
     reviewStatus,
     counts: {
@@ -1137,12 +1186,7 @@ export async function createOdontogramAssessment(
       "Existen hallazgos pendientes de revisión; revísalos antes de firmar el acta",
     )
   // Identidad firmada desde el servidor (nunca del body del cliente).
-  const [contactRow] = await tx
-    .select({ displayName: contact.displayName })
-    .from(contact)
-    .where(and(eq(contact.id, patientRow.contactId), eq(contact.organizationId, orgId)))
-    .limit(1)
-  const patientName = contactRow?.displayName?.trim() ?? ""
+  const patientName = patientRow.displayName.trim()
   if (!patientName) throw validation("El paciente no tiene nombre registrado para firmar el acta")
   // Snapshot calculado en el servidor; nunca se acepta del cliente.
   const { history } = await getOdontogram(tx, orgId, patientId)

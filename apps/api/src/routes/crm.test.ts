@@ -270,3 +270,251 @@ it("tareas y campos van de punta a punta", async () => {
   const fields = await app.request("/fields")
   expect(((await fields.json()) as { data: unknown[] }).data).toHaveLength(1)
 })
+
+it("contactos: filtro isActive, alta sin isActive y PATCH con gating", async () => {
+  const owner = buildApp("owner")
+  const sneaky = await owner.request("/contacts", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ displayName: "Sneaky", isActive: false }),
+  })
+  expect(sneaky.status).toBe(201)
+  const sneakyBody = (await sneaky.json()) as { data: { id: string; isActive: boolean } }
+  expect(sneakyBody.data.isActive).toBe(true)
+  const archived = await owner.request(`/contacts/${sneakyBody.data.id}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ isActive: false }),
+  })
+  expect(archived.status).toBe(200)
+  expect(((await archived.json()) as { data: { isActive: boolean } }).data.isActive).toBe(false)
+  const def = (await (await owner.request("/contacts")).json()) as { data: { id: string }[] }
+  expect(def.data.map((c) => c.id)).not.toContain(sneakyBody.data.id)
+  const all = (await (await owner.request("/contacts?isActive=all")).json()) as {
+    data: { id: string }[]
+  }
+  expect(all.data.map((c) => c.id)).toContain(sneakyBody.data.id)
+  const member = buildApp("member")
+  const forbidden = await member.request(`/contacts/${sneakyBody.data.id}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ isActive: true }),
+  })
+  expect(forbidden.status).toBe(403)
+  const rename = await member.request(`/contacts/${sneakyBody.data.id}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ displayName: "Sneaky Dos" }),
+  })
+  expect(rename.status).toBe(200)
+})
+
+it("identidades: alta manual, idempotencia, conflicto y permisos", async () => {
+  const owner = buildApp("owner")
+  const mk = async (name: string) =>
+    (
+      (await (
+        await owner.request("/contacts", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ displayName: name }),
+        })
+      ).json()) as { data: { id: string } }
+    ).data.id
+  const a = await mk("Ident A")
+  const b = await mk("Ident B")
+  const payload = { channel: "whatsapp", externalUserId: "+51911222334" }
+  const first = await owner.request(`/contacts/${a}/identities`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload),
+  })
+  expect(first.status).toBe(201)
+  const firstBody = (await first.json()) as { data: { id: string; externalUserId: string } }
+  expect(firstBody.data.externalUserId).toBe("wa:51911222334")
+  const again = await owner.request(`/contacts/${a}/identities`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload),
+  })
+  expect(again.status).toBe(201)
+  expect(((await again.json()) as { data: { id: string } }).data.id).toBe(firstBody.data.id)
+  const conflict = await owner.request(`/contacts/${b}/identities`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload),
+  })
+  expect(conflict.status).toBe(409)
+  expect(await conflict.json()).toMatchObject({ error: { code: "IDENTITY_IN_USE" } })
+  const member = buildApp("member")
+  const forbidden = await member.request(`/contacts/${a}/identities`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ channel: "telegram", externalUserId: "tg:123" }),
+  })
+  expect(forbidden.status).toBe(403)
+  const bad = await owner.request(`/contacts/${a}/identities`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ channel: "email", externalUserId: "a@x.com" }),
+  })
+  expect(bad.status).toBe(400)
+})
+
+it("reasignación mueve la conversación directa y exige motivo y permiso", async () => {
+  const owner = buildApp("owner")
+  const mk = async (name: string) =>
+    (
+      (await (
+        await owner.request("/contacts", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ displayName: name }),
+        })
+      ).json()) as { data: { id: string } }
+    ).data.id
+  const from = await mk("Mueve Origen")
+  const to = await mk("Mueve Destino")
+  const identRes = await owner.request(`/contacts/${from}/identities`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ channel: "whatsapp", externalUserId: "wa:51933344455" }),
+  })
+  const identityId = ((await identRes.json()) as { data: { id: string } }).data.id
+  const started = await owner.request(`/contacts/${from}/conversations`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ identityId, connectionId: waConnId }),
+  })
+  expect(started.status).toBe(201)
+  const noReason = await owner.request(`/contacts/${from}/identities/${identityId}/move`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ toContactId: to }),
+  })
+  expect(noReason.status).toBe(400)
+  const member = buildApp("member")
+  const forbidden = await member.request(`/contacts/${from}/identities/${identityId}/move`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ toContactId: to, reason: "x" }),
+  })
+  expect(forbidden.status).toBe(403)
+  const moved = await owner.request(`/contacts/${from}/identities/${identityId}/move`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ toContactId: to, reason: "Corrige titular" }),
+  })
+  expect(moved.status).toBe(200)
+  expect(await moved.json()).toMatchObject({
+    data: { movedConversations: 1, movedTasks: 0, revokedLinks: 0 },
+  })
+})
+
+it("conversaciones: identidad manual y directa con restricciones de canal", async () => {
+  const owner = buildApp("owner")
+  const tgConn = await withOrgContext(appDb, "org_a", (tx) =>
+    createConnection(
+      tx,
+      "org_a",
+      KEY,
+      {
+        channel: "telegram",
+        provider: "telegram_bot_api",
+        displayName: "Bot2",
+        config: { botToken: "T" },
+      },
+      { fetch, validateExternal: false },
+    ),
+  )
+  const mk = async (name: string) =>
+    (
+      (await (
+        await owner.request("/contacts", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ displayName: name }),
+        })
+      ).json()) as { data: { id: string } }
+    ).data.id
+  const person = await mk("Persona Canal")
+  const other = await mk("Otra Persona")
+  const tgIdent = (
+    (await (
+      await owner.request(`/contacts/${person}/identities`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ channel: "telegram", externalUserId: "tg:665001" }),
+      })
+    ).json()) as { data: { id: string } }
+  ).data.id
+  const blocked = await owner.request(`/contacts/${person}/conversations`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ identityId: tgIdent, connectionId: tgConn.id }),
+  })
+  expect(blocked.status).toBe(409)
+  expect(await blocked.json()).toMatchObject({ error: { code: "CHANNEL_REQUIRES_INBOUND" } })
+  const ingested = await withOrgContext(appDb, "org_a", (tx) =>
+    ingestInbound(
+      tx,
+      {
+        orgId: "org_a",
+        connectionId: tgConn.id,
+        event: {
+          externalEventId: "wamid.tg665a",
+          externalMessageId: "wamid.tg665a",
+          externalThreadId: "tg:665001",
+          senderExternalId: "tg:665001",
+          senderDisplayName: "Persona Canal",
+          content: { type: "text", text: "Hola" },
+          sentAt: new Date().toISOString(),
+        },
+      },
+      telegramBotApiAdapter,
+      { storage: storageStub, fetch, secretsKey: KEY },
+    ),
+  )
+  const waIdent = (
+    (await (
+      await owner.request(`/contacts/${other}/identities`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ channel: "whatsapp", externalUserId: "wa:51944455566" }),
+      })
+    ).json()) as { data: { id: string } }
+  ).data.id
+  const member = buildApp("member")
+  const forbidden = await member.request(`/conversations/${ingested.conversationId}/identity`, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ identityId: tgIdent }),
+  })
+  expect(forbidden.status).toBe(403)
+  const mismatch = await owner.request(`/conversations/${ingested.conversationId}/identity`, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ identityId: waIdent }),
+  })
+  expect(mismatch.status).toBe(409)
+  const resolved = await owner.request(`/conversations/${ingested.conversationId}/identity`, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ identityId: tgIdent }),
+  })
+  expect(resolved.status).toBe(200)
+  expect(await resolved.json()).toMatchObject({ data: { contactIdentityId: tgIdent } })
+  const waStart = await owner.request(`/contacts/${other}/conversations`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ identityId: waIdent, connectionId: waConnId }),
+  })
+  expect(waStart.status).toBe(201)
+  const waReuse = await owner.request(`/contacts/${other}/conversations`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ identityId: waIdent, connectionId: waConnId }),
+  })
+  expect(waReuse.status).toBe(200)
+  expect(((await waReuse.json()) as { data: { created: boolean } }).data.created).toBe(false)
+})

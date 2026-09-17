@@ -8,6 +8,7 @@ import {
   PageHeader,
   RowActions,
   useListSearch,
+  PageShell,
 } from "@odentia/ui-patterns"
 import { useForm } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
@@ -260,7 +261,7 @@ function ChannelsPage() {
   const hasCriteria = search.trim() !== "" || Boolean(canalFilter) || Boolean(estadoFilter)
 
   return (
-    <div className="flex flex-col gap-6">
+    <PageShell className="flex flex-col gap-2">
       <PageHeader
         title="Canales"
         subtitle="Conexiones de WhatsApp y Telegram"
@@ -429,6 +430,6 @@ function ChannelsPage() {
           )}
         </div>
       </FormDrawer>
-    </div>
+    </PageShell>
   )
 }

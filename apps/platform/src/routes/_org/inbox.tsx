@@ -27,20 +27,22 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@odentia/ui"
-import { EmptyState, FilterBar, PageHeader, useListSearch } from "@odentia/ui-patterns"
+import { EmptyState, FilterBar, PageHeader, PageShell, useListSearch } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { createFileRoute, getRouteApi, Link } from "@tanstack/react-router"
+import { createFileRoute, getRouteApi, Link, useNavigate } from "@tanstack/react-router"
+import { useEffect, useMemo, useRef, useState } from "react"
 import {
   AlertCircle,
   Bot,
   CheckCheck,
   ChevronLeft,
   Clock,
+  Copy,
   MessageCircle,
   Paperclip,
   Send,
+  UserPlus,
 } from "lucide-react"
-import { useEffect, useMemo, useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
 import { API_URL } from "../../lib/auth-client"
 import {
@@ -48,13 +50,18 @@ import {
   type ConversationDetail,
   type ConversationListItem,
   timeAgo,
+  useCanWrite,
   useMyUserId,
 } from "../../lib/crm"
 import { useOrgEvents } from "../../lib/org-events"
+import { createRegistrationLink } from "../../lib/patient-registration"
 
 export const Route = createFileRoute("/_org/inbox")({
   validateSearch: (search: Record<string, unknown>) => ({
     conversation: typeof search.conversation === "string" ? search.conversation : undefined,
+    ...(search.prepareRegistration === true || search.prepareRegistration === "true"
+      ? { prepareRegistration: true as const }
+      : {}),
     ...(typeof search.q === "string" ? { q: search.q } : {}),
     ...(typeof search.sort === "string" ? { sort: search.sort } : {}),
     ...(typeof search.status === "string" ? { status: search.status } : {}),
@@ -69,14 +76,28 @@ function InboxPage() {
   const queryClient = useQueryClient()
   const { org } = orgRouteApi.useRouteContext()
   const myUserId = useMyUserId()
+  const canWrite = useCanWrite()
+  const navigate = useNavigate({ from: Route.fullPath })
   const listSearch = useListSearch()
   const status = listSearch.get("status") ?? "open"
   const channel = listSearch.get("channel")
   const assigned = listSearch.get("assigned")
   const search = listSearch.get("q") ?? ""
   const sort = listSearch.get("sort")
-  const initial = Route.useSearch()
-  const [selectedId, setSelectedId] = useState<string | null>(initial.conversation ?? null)
+  const routeSearch = Route.useSearch()
+  const [selectedId, setSelectedId] = useState<string | null>(routeSearch.conversation ?? null)
+
+  // La selección sigue al search `conversation` (navegación desde contactos),
+  // no solo al estado del primer montaje.
+  useEffect(() => {
+    if (routeSearch.conversation !== undefined) setSelectedId(routeSearch.conversation)
+  }, [routeSearch.conversation])
+
+  // Consumir la intención una sola vez: retirar el flag con replace.
+  // La mutación real la dispara ThreadView con el detalle ya cargado.
+  const consumePrepareRegistration = () => {
+    void navigate({ search: (previous) => ({ ...previous, prepareRegistration: undefined }), replace: true })
+  }
 
   const listParams = useMemo(() => {
     const params = new URLSearchParams()
@@ -129,49 +150,50 @@ function InboxPage() {
   }, [listQuery.data, sort])
 
   return (
-    <div className="flex flex-col gap-4">
+    <PageShell className="flex flex-col gap-4">
       <PageHeader title="Bandeja" subtitle="Conversaciones de WhatsApp y Telegram" />
-      <div className="flex gap-4" style={{ height: "calc(100vh - 220px)", minHeight: 480 }}>
+      <FilterBar
+        filters={[
+          {
+            key: "status",
+            label: "Estado",
+            type: "select",
+            options: [
+              { value: "open", label: "Abiertas" },
+              { value: "closed", label: "Cerradas" },
+              { value: "all", label: "Todas" },
+            ],
+          },
+          {
+            key: "channel",
+            label: "Canal",
+            type: "select",
+            options: [
+              { value: "whatsapp", label: "WhatsApp" },
+              { value: "telegram", label: "Telegram" },
+            ],
+          },
+          {
+            key: "assigned",
+            label: "Asignado",
+            type: "select",
+            options: [
+              { value: "me", label: "Mías" },
+              { value: "none", label: "Sin asignar" },
+            ],
+          },
+        ]}
+        sortOptions={[
+          { value: "actividad", label: "Actividad reciente" },
+          { value: "noleidos", label: "No leídos primero" },
+        ]}
+        searchPlaceholder="Buscar contacto"
+      />
+      {/* PageShell aporta p-6 y el FilterBar full-width suma alto: se compensan en el panel. */}
+      <div className="flex gap-4" style={{ height: "calc(100vh - 340px)", minHeight: 480 }}>
         <section
           className={`w-full flex-col gap-3 md:flex md:w-[clamp(280px,30%,420px)] md:shrink-0 ${selectedId ? "hidden" : "flex"}`}
         >
-          <FilterBar
-            filters={[
-              {
-                key: "status",
-                label: "Estado",
-                type: "select",
-                options: [
-                  { value: "open", label: "Abiertas" },
-                  { value: "closed", label: "Cerradas" },
-                  { value: "all", label: "Todas" },
-                ],
-              },
-              {
-                key: "channel",
-                label: "Canal",
-                type: "select",
-                options: [
-                  { value: "whatsapp", label: "WhatsApp" },
-                  { value: "telegram", label: "Telegram" },
-                ],
-              },
-              {
-                key: "assigned",
-                label: "Asignado",
-                type: "select",
-                options: [
-                  { value: "me", label: "Mías" },
-                  { value: "none", label: "Sin asignar" },
-                ],
-              },
-            ]}
-            sortOptions={[
-              { value: "actividad", label: "Actividad reciente" },
-              { value: "noleidos", label: "No leídos primero" },
-            ]}
-            searchPlaceholder="Buscar contacto"
-          />
           <div className="flex flex-1 flex-col gap-1 overflow-y-auto">
             {items.map((item) => (
               <button
@@ -212,7 +234,16 @@ function InboxPage() {
         </section>
         <section className={`min-w-0 flex-1 flex-col ${selectedId ? "flex" : "hidden md:flex"}`}>
           {selectedId ? (
-            <ThreadView id={selectedId} members={org.members} onBack={() => setSelectedId(null)} />
+            <ThreadView
+              key={selectedId}
+              id={selectedId}
+              members={org.members}
+              orgName={org.name}
+              canWrite={canWrite}
+              prepareRegistration={routeSearch.prepareRegistration === true && routeSearch.conversation === selectedId}
+              onConsumePrepareRegistration={consumePrepareRegistration}
+              onBack={() => setSelectedId(null)}
+            />
           ) : (
             <EmptyState
               title="Selecciona una conversación"
@@ -221,7 +252,7 @@ function InboxPage() {
           )}
         </section>
       </div>
-    </div>
+    </PageShell>
   )
 }
 
@@ -236,10 +267,18 @@ interface Member {
 function ThreadView({
   id,
   members,
+  orgName,
+  canWrite,
+  prepareRegistration,
+  onConsumePrepareRegistration,
   onBack,
 }: {
   id: string
   members: Member[]
+  orgName: string
+  canWrite: boolean
+  prepareRegistration: boolean
+  onConsumePrepareRegistration: () => void
   onBack: () => void
 }) {
   const queryClient = useQueryClient()
@@ -251,6 +290,11 @@ function ThreadView({
   const [templateName, setTemplateName] = useState("")
   const [templateParams, setTemplateParams] = useState("")
   const [markedRef, setMarkedRef] = useState<string | null>(null)
+  const [registrationLink, setRegistrationLink] = useState<{ url: string; expiresAt: string } | null>(null)
+  const [registrationError, setRegistrationError] = useState<string | null>(null)
+  const [sendError, setSendError] = useState<string | null>(null)
+  const [copied, setCopied] = useState(false)
+  const intentConsumedRef = useRef(false)
 
   const detailQuery = useQuery({
     queryKey: ["conversation", id],
@@ -266,6 +310,10 @@ function ThreadView({
     setComposer("")
     setWindowClosed(false)
     setMarkedRef(null)
+    setRegistrationLink(null)
+    setRegistrationError(null)
+    setSendError(null)
+    setCopied(false)
   }, [id])
 
   useEffect(() => {
@@ -299,6 +347,35 @@ function ThreadView({
     void queryClient.invalidateQueries({ queryKey: ["conversations"] })
   }
 
+  const registrationMutation = useMutation({
+    mutationFn: (contactId: string) => createRegistrationLink(contactId, id),
+    onSuccess: (result) => {
+      const url = result.data.url
+      setRegistrationLink(result.data)
+      setRegistrationError(null)
+      setCopied(false)
+      // Preparar el borrador en el composer existente; el operador revisa y envía.
+      // Nunca se envía automáticamente al generar el enlace.
+      setComposer(`Completa los datos del paciente para ${orgName}: ${url}`)
+    },
+    onError: (error) => {
+      setRegistrationError(error instanceof ApiError ? error.message : "No se pudo crear el enlace")
+    },
+  })
+
+  // Intención `prepareRegistration` (desde Contactos → Enviar registro):
+  // usa la misma mutación que el botón, una sola vez por hilo.
+  // El ref evita duplicados por re-render/StrictMode; el replace del padre
+  // retira el flag para que navegar de nuevo no regenere el enlace.
+  // Sin intención explícita jamás se crea un token al cargar el hilo.
+  useEffect(() => {
+    if (!prepareRegistration) { intentConsumedRef.current = false; return }
+    if (!canWrite || !detail || intentConsumedRef.current || registrationMutation.isPending) return
+    intentConsumedRef.current = true
+    onConsumePrepareRegistration()
+    registrationMutation.mutate(detail.contact.id)
+  }, [prepareRegistration, canWrite, detail])
+
   const sendMutation = useMutation({
     mutationFn: (text: string) =>
       apiFetch(`/api/conversations/${id}/messages`, {
@@ -308,11 +385,17 @@ function ThreadView({
     onSuccess: () => {
       setComposer("")
       setWindowClosed(false)
+      setSendError(null)
       invalidate()
     },
     onError: (error) => {
       if (error instanceof ApiError && error.shape.code === "WINDOW_CLOSED") {
+        // La URL se conserva en el composer; el operador la usa en la plantilla.
         setWindowClosed(true)
+        setSendError(null)
+      } else {
+        // Conexión desactivada u otro fallo real: bloquear el envío con el motivo.
+        setSendError(error instanceof ApiError ? error.message : "No se pudo enviar el mensaje")
       }
     },
   })
@@ -336,6 +419,11 @@ function ThreadView({
       setTemplateParams("")
       setWindowClosed(false)
       invalidate()
+    },
+    onError: (error) => {
+      setRegistrationError(
+        error instanceof ApiError ? error.message : "No se pudo enviar la plantilla",
+      )
     },
   })
 
@@ -397,12 +485,28 @@ function ThreadView({
           <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
             <span>{detail.connection.channel === "whatsapp" ? "WhatsApp" : "Telegram"}</span>
             <span>·</span>
-            <Badge variant={closed ? "secondary" : "success"}>
+            <Badge
+              variant="secondary"
+              className={closed ? undefined : "border-emerald-300 bg-emerald-50 text-emerald-900"}
+            >
               {closed ? "Cerrada" : "Abierta"}
             </Badge>
+            {detail.contact.isActive === false && <Badge variant="secondary">Archivado</Badge>}
             {assignee && <span>· {assignee.user.name}</span>}
           </div>
         </div>
+        {canWrite && (
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={registrationMutation.isPending}
+            onClick={() => registrationMutation.mutate(detail.contact.id)}
+            title="Genera un enlace y prepara el mensaje para revisión; no se envía solo"
+          >
+            <UserPlus className="size-4" />
+            {registrationMutation.isPending ? "Generando…" : "Enviar registro"}
+          </Button>
+        )}
         <DropdownMenu>
           <DropdownMenuTrigger className="rounded-md border bg-background px-3 py-1 text-sm hover:bg-muted">
             {assignee ? assignee.user.name : "Asignar"}
@@ -471,6 +575,39 @@ function ThreadView({
       </MessageScrollerProvider>
 
       <div className="border-t p-3">
+        {detail.contact.isActive === false && (
+          <p className="mb-2 text-xs text-muted-foreground">
+            Contacto archivado: las conversaciones siguen accesibles, pero reactívalo para
+            iniciar nuevos envíos o crear relaciones.
+          </p>
+        )}
+        {registrationError && (
+          <p className="mb-2 text-sm text-red-600" role="alert">
+            {registrationError}
+          </p>
+        )}
+        {registrationLink && (
+          <div className="mb-2 flex flex-wrap items-center gap-2 rounded-md border bg-muted/40 p-2 text-xs">
+            <span className="min-w-0 flex-1 truncate" title={registrationLink.url}>
+              Enlace de registro listo para revisar antes de enviar: {registrationLink.url}
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={async () => {
+                try {
+                  await navigator.clipboard.writeText(registrationLink.url)
+                  setCopied(true)
+                } catch {
+                  setRegistrationError("No se pudo copiar el enlace; selecciónalo y cópialo manualmente")
+                }
+              }}
+            >
+              <Copy className="size-3.5" />
+              {copied ? "Copiado" : "Copiar"}
+            </Button>
+          </div>
+        )}
         {closed ? (
           <p className="text-sm text-muted-foreground">
             Conversación cerrada. Reábrela para responder.
@@ -480,6 +617,19 @@ function ThreadView({
             <p className="text-sm text-amber-700">
               Fuera de la ventana de 24h de WhatsApp: responde con una plantilla autorizada.
             </p>
+            {registrationLink && (
+              <div className="flex flex-wrap items-center gap-2 text-xs">
+                <span className="min-w-0 flex-1 truncate" title={registrationLink.url}>
+                  Enlace listo: {registrationLink.url}
+                </span>
+              </div>
+            )}
+            {(templatesQuery.data?.data ?? []).length === 0 && !templatesQuery.isLoading && (
+              <p className="text-xs text-muted-foreground">
+                No hay plantillas autorizadas disponibles: copia el enlace de arriba y
+                compártelo por otro medio. No se registró ningún envío.
+              </p>
+            )}
             <div className="flex gap-2">
               <Select
                 items={{ [NO_TEMPLATE]: "Elegir plantilla…", ...templateItems }}
@@ -516,32 +666,42 @@ function ThreadView({
             </div>
           </div>
         ) : (
-          <InputGroup className="h-auto min-h-10 items-end bg-background">
-            <InputGroupTextarea
-              aria-label="Mensaje"
-              rows={1}
-              placeholder="Escribe un mensaje… (Enter para enviar)"
-              value={composer}
-              onChange={(e) => setComposer(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault()
-                  if (composer.trim() && !sendMutation.isPending)
-                    sendMutation.mutate(composer.trim())
-                }
-              }}
-            />
-            <InputGroupAddon align="inline-end">
-              <InputGroupButton
-                size="icon-sm"
-                aria-label="Enviar"
-                disabled={!composer.trim() || sendMutation.isPending}
-                onClick={() => sendMutation.mutate(composer.trim())}
-              >
-                <Send aria-hidden />
-              </InputGroupButton>
-            </InputGroupAddon>
-          </InputGroup>
+          <div className="flex flex-col gap-1.5">
+            <InputGroup className="h-auto min-h-10 items-end bg-background">
+              <InputGroupTextarea
+                aria-label="Mensaje"
+                rows={1}
+                placeholder="Escribe un mensaje… (Enter para enviar)"
+                value={composer}
+                onChange={(e) => {
+                  setComposer(e.target.value)
+                  if (sendError) setSendError(null)
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault()
+                    if (composer.trim() && !sendMutation.isPending)
+                      sendMutation.mutate(composer.trim())
+                  }
+                }}
+              />
+              <InputGroupAddon align="inline-end">
+                <InputGroupButton
+                  size="icon-sm"
+                  aria-label="Enviar"
+                  disabled={!composer.trim() || sendMutation.isPending}
+                  onClick={() => sendMutation.mutate(composer.trim())}
+                >
+                  <Send aria-hidden />
+                </InputGroupButton>
+              </InputGroupAddon>
+            </InputGroup>
+            {sendError && (
+              <p className="text-sm text-red-600" role="alert">
+                {sendError}
+              </p>
+            )}
+          </div>
         )}
       </div>
     </div>

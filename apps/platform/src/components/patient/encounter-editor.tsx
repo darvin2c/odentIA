@@ -618,7 +618,7 @@ export function EncounterEditor({
       <PatientClinicalStrip detail={patient} />
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-xl font-semibold">{patient.displayName}</h1>
+          <h1 className="text-xl font-semibold">{patient.patient.displayName}</h1>
           <p className="text-sm text-muted-foreground">
             {hcLabel(patient.patient.patientNumber)} · Odontólogo{" "}
             {dentistShortId(encounter.dentistUserId)}

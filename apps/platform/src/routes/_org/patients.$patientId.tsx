@@ -1,6 +1,6 @@
 import { FDI_ADULT, FDI_CHILD } from "@odentia/clinical"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@odentia/ui"
-import { EmptyState } from "@odentia/ui-patterns"
+import { EmptyState, PageShell } from "@odentia/ui-patterns"
 import { useQuery } from "@tanstack/react-query"
 import { createFileRoute, Outlet, useChildMatches, useNavigate } from "@tanstack/react-router"
 import { AntecedentesTab } from "../../components/patient/antecedentes-tab"
@@ -89,16 +89,23 @@ function PatientDetailPage() {
   const changeTab = (next: PatientTab, nextTooth?: number) => {
     void navigate({ search: { tab: next, ...(nextTooth ? { tooth: nextTooth } : {}) } })
   }
-  if (detail.isLoading) return <p className="p-4 text-sm text-muted-foreground">Cargando…</p>
+  if (detail.isLoading)
+    return (
+      <PageShell>
+        <p className="text-sm text-muted-foreground">Cargando…</p>
+      </PageShell>
+    )
   if (!detail.data)
     return (
-      <EmptyState
-        title="No se pudo cargar el paciente"
-        description={detail.error?.message ?? "El paciente no existe."}
-      />
+      <PageShell>
+        <EmptyState
+          title="No se pudo cargar el paciente"
+          description={detail.error?.message ?? "El paciente no existe."}
+        />
+      </PageShell>
     )
   return (
-    <div className="flex min-w-0 flex-col gap-6">
+    <PageShell className="flex min-w-0 flex-col gap-6">
       <PatientHeader
         detail={detail.data.data}
         summary={summary.data?.data}
@@ -152,6 +159,6 @@ function PatientDetailPage() {
           <ImagenesTab patientId={patientId} initialTooth={tooth} initialDocumentId={documentId} />
         </TabsContent>
       </Tabs>
-    </div>
+    </PageShell>
   )
 }

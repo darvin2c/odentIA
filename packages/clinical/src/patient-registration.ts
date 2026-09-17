@@ -1,0 +1,193 @@
+import { z } from "zod"
+
+export const CONTACT_RELATIONSHIPS = ["self", "guardian", "family", "other"] as const
+export type ContactRelationship = (typeof CONTACT_RELATIONSHIPS)[number]
+export const CONTACT_RELATIONSHIP_LABELS: Record<ContactRelationship, string> = {
+  self: "Propio paciente", guardian: "Tutor o responsable", family: "Familiar", other: "Otro contacto",
+}
+export type RegistrationRespondent = "patient" | "representative" | "staff"
+export type RegistrationEntryPoint = "platform" | "public_link" | "qr" | "conversation"
+export type DeclarationState = "unanswered" | "unknown" | "none" | "recorded"
+export const BLOOD_GROUPS = ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-", "unknown"] as const
+export type BloodGroup = (typeof BLOOD_GROUPS)[number]
+export type RegistrationFieldMode = "hidden" | "optional" | "required"
+export const DOC_TYPES = ["DNI", "CE", "PASAPORTE", "OTRO"] as const
+export const INSURANCE_TYPES = ["PARTICULAR", "SIS", "ESSALUD", "EPS", "OTRO"] as const
+export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+export const REGISTRATION_FIELDS = [
+  { key: "displayName", label: "Nombre completo", step: "datos" },
+  { key: "birthDate", label: "Fecha de nacimiento", step: "datos" },
+  { key: "docType", label: "Tipo de documento", step: "datos" },
+  { key: "docNumber", label: "Número de documento", step: "datos" },
+  { key: "sex", label: "Sexo", step: "datos" },
+  { key: "phone", label: "Teléfono", step: "contacto" },
+  { key: "email", label: "Correo", step: "contacto" },
+  { key: "address", label: "Dirección", step: "contacto" },
+  { key: "maritalStatus", label: "Estado civil", step: "contacto" },
+  { key: "educationLevel", label: "Grado de instrucción", step: "contacto" },
+  { key: "occupation", label: "Ocupación", step: "contacto" },
+  { key: "origin", label: "Procedencia", step: "contacto" },
+  { key: "emergencyContactName", label: "Contacto de emergencia", step: "contacto" },
+  { key: "emergencyContactPhone", label: "Teléfono de emergencia", step: "contacto" },
+  { key: "insuranceType", label: "Seguro", step: "contacto" },
+  { key: "insuranceDetail", label: "Detalle del seguro", step: "contacto" },
+  { key: "referralSource", label: "Referencia", step: "contacto" },
+  { key: "bloodGroup", label: "Grupo sanguíneo", step: "salud" },
+  { key: "allergies", label: "Alergias", step: "salud" },
+  { key: "conditions", label: "Enfermedades", step: "salud" },
+  { key: "medications", label: "Medicación", step: "salud" },
+  { key: "dental.ultimaVisita", label: "Última visita dental", step: "odontologicos" },
+  { key: "dental.experienciaPrevia", label: "Experiencia previa", step: "odontologicos" },
+  { key: "dental.ansiedadDental", label: "Ansiedad dental", step: "odontologicos" },
+] as const
+export type RegistrationFieldKey = (typeof REGISTRATION_FIELDS)[number]["key"]
+export interface RegistrationConfig {
+  version: number
+  enabled: boolean
+  fields: Record<RegistrationFieldKey, RegistrationFieldMode>
+  privacyNotice: string
+}
+const optionalDefaults: Record<string, true> = { docType: true, docNumber: true, email: true, sex: true, address: true, bloodGroup: true, allergies: true, conditions: true, medications: true }
+export const DEFAULT_REGISTRATION_CONFIG: RegistrationConfig = {
+  version: 0, enabled: false, privacyNotice: "",
+  fields: Object.fromEntries(REGISTRATION_FIELDS.map(({ key }) => [key,
+    ["displayName", "birthDate", "phone"].includes(key) ? "required" : optionalDefaults[key] ? "optional" : "hidden",
+  ])) as RegistrationConfig["fields"],
+}
+const text = (max: number) => z.string().trim().max(max, `Máximo ${max} caracteres`)
+const optionalText = (max: number) => text(max).nullable().optional()
+const email = text(200).refine(v => !v || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v), "Ingresa un correo válido")
+export const demographicsSchema = z.strictObject({
+  displayName: text(200).min(1, "Ingresa el nombre del paciente"),
+  birthDate: optionalText(10), docType: z.enum([...DOC_TYPES, ""]).nullable().optional(),
+  docNumber: optionalText(20), sex: z.enum(["M", "F", ""]).nullable().optional(),
+  phone: optionalText(50), email: email.nullable().optional(), address: optionalText(500),
+  maritalStatus: optionalText(100), educationLevel: optionalText(100), occupation: optionalText(200),
+  origin: optionalText(200), emergencyContactName: optionalText(200), emergencyContactPhone: optionalText(50),
+  insuranceType: z.enum([...INSURANCE_TYPES, ""]).nullable().optional(), insuranceDetail: optionalText(500), referralSource: optionalText(500),
+})
+export type RegistrationDemographics = z.infer<typeof demographicsSchema>
+export const healthAllergyDeclarationSchema = z.strictObject({
+  substance: text(200).min(1), reaction: text(2000).optional(), severity: z.enum(["leve", "moderada", "severa", "desconocida"]),
+})
+export const healthConditionDeclarationSchema = z.strictObject({ name: text(200).min(1), notes: text(2000).optional() })
+export const healthMedicationDeclarationSchema = z.strictObject({
+  name: text(200).min(1), dose: text(200).optional(), frequency: text(200).optional(), notes: text(2000).optional(),
+})
+export type HealthAllergyDeclaration = z.infer<typeof healthAllergyDeclarationSchema>
+export type HealthConditionDeclaration = z.infer<typeof healthConditionDeclarationSchema>
+export type HealthMedicationDeclaration = z.infer<typeof healthMedicationDeclarationSchema>
+const declaration = <T extends z.ZodType>(item: T) => z.strictObject({
+  state: z.enum(["unanswered", "unknown", "none", "recorded"]), items: z.array(item).max(50),
+}).refine(v => v.state === "recorded" ? v.items.length > 0 : v.items.length === 0, "Indica entradas solo cuando la respuesta sea Sí")
+export const registrationContactInputSchema = z.strictObject({
+  contactId: z.uuid(), relationship: z.enum(CONTACT_RELATIONSHIPS), relationshipDetail: text(100).nullable().optional(), isPreferred: z.boolean(),
+})
+export type RegistrationContactInput = z.infer<typeof registrationContactInputSchema>
+export const registrationAnswersSchema = z.strictObject({
+  demographics: demographicsSchema,
+  respondent: z.enum(["patient", "representative", "staff"]),
+  representative: z.strictObject({
+    displayName: text(200).min(1), relationship: z.enum(["guardian", "family", "other"]),
+    relationshipDetail: text(100), phone: text(50).optional(), email: email.optional(),
+  }).optional(),
+  health: z.strictObject({
+    bloodGroup: z.enum(BLOOD_GROUPS).nullable().optional(),
+    allergies: declaration(healthAllergyDeclarationSchema).optional(),
+    conditions: declaration(healthConditionDeclarationSchema).optional(),
+    medications: declaration(healthMedicationDeclarationSchema).optional(),
+    dental: z.strictObject({
+      ultimaVisita: text(2000).optional(), experienciaPrevia: z.enum(["positiva", "regular", "traumatica"]).optional(),
+      ansiedadDental: z.enum(["ninguna", "leve", "moderada", "alta"]).optional(),
+    }).optional(),
+  }).optional(),
+  privacyAccepted: z.boolean(),
+})
+export type RegistrationAnswers = z.infer<typeof registrationAnswersSchema>
+const fieldKeys = REGISTRATION_FIELDS.map(f => f.key) as [RegistrationFieldKey, ...RegistrationFieldKey[]]
+export const registrationConfigSchema = z.strictObject({
+  version: z.number().int().nonnegative(), enabled: z.boolean(),
+  fields: z.record(z.enum(fieldKeys), z.enum(["hidden", "optional", "required"])), privacyNotice: text(10000),
+}).superRefine((config, ctx) => {
+  const issue = (path: string[], message: string) => ctx.addIssue({ code: "custom", path, message })
+  for (const key of ["displayName", "birthDate"] as const) {
+    if (config.fields[key] !== "required") issue(["fields", key], "Este campo es obligatorio en el formulario público")
+  }
+  if (config.fields.docType !== config.fields.docNumber) issue(["fields", "docNumber"], "Configura el documento como pareja")
+  if (config.fields.phone !== "required" && config.fields.email !== "required") issue(["fields", "email"], "Exige al menos un medio de contacto")
+  if (config.fields.insuranceType === "hidden" && config.fields.insuranceDetail !== "hidden") issue(["fields", "insuranceDetail"], "Habilita primero el seguro")
+  if (config.enabled && !config.privacyNotice) issue(["privacyNotice"], "Ingresa el aviso de privacidad antes de publicar")
+})
+
+export function isRealDate(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false
+  const date = new Date(`${value}T00:00:00.000Z`)
+  return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value
+}
+export function isMinor(birthDate: string, today: string): boolean {
+  const age = Number(today.slice(0, 4)) - Number(birthDate.slice(0, 4)) - (today.slice(5) < birthDate.slice(5) ? 1 : 0)
+  return age < 18
+}
+export function documentNumberError(docType: string | null | undefined, docNumber: string | null | undefined): string | null {
+  return docType === "DNI" && !!docNumber?.trim() && !/^\d{8}$/.test(docNumber.trim()) ? "El DNI tiene exactamente 8 dígitos" : null
+}
+export function validateDemographics(value: unknown, today?: string): Record<string, string> {
+  const errors: Record<string, string> = {}
+  const parsed = demographicsSchema.safeParse(value)
+  if (!parsed.success) {
+    for (const issue of parsed.error.issues) errors[issue.path.join(".")] ??= issue.message
+    return errors
+  }
+  const data = parsed.data
+  const docError = documentNumberError(data.docType, data.docNumber)
+  if (docError) errors.docNumber = docError
+  if (data.docNumber && !data.docType) errors.docType = "Indica el tipo de documento"
+  if (data.docType && !data.docNumber) errors.docNumber = "Indica el número de documento"
+  if (data.birthDate && (!isRealDate(data.birthDate) || (today && data.birthDate > today))) errors.birthDate = "Ingresa una fecha real no futura"
+  if (data.insuranceDetail && !data.insuranceType) errors.insuranceDetail = "Indica primero el seguro"
+  return errors
+}
+export function validateRegistrationAnswers(config: RegistrationConfig, answers: RegistrationAnswers, context: { mode: "internal" | "public"; today: string }): Record<string, string> {
+  const errors: Record<string, string> = {}
+  const parsed = registrationAnswersSchema.safeParse(answers)
+  if (!parsed.success) {
+    for (const issue of parsed.error.issues) errors[issue.path.join(".")] ??= issue.message
+    return errors
+  }
+  const data = parsed.data
+  for (const [key, message] of Object.entries(validateDemographics(data.demographics, context.today))) errors[`demographics.${key}`] = message
+  const minor = !!data.demographics.birthDate && isRealDate(data.demographics.birthDate) && isMinor(data.demographics.birthDate, context.today)
+  const needsRepresentative = minor || data.respondent === "representative" || (context.mode === "internal" && data.respondent === "staff" && !!data.representative)
+  if (needsRepresentative) {
+    if (!data.representative) errors.representative = "Ingresa los datos del responsable"
+    else {
+      if (!data.representative.phone && !data.representative.email) errors["representative.phone"] = "Indica teléfono o correo del responsable"
+      if (minor && data.representative.relationship !== "guardian") errors["representative.relationship"] = "Para menores corresponde tutor o responsable"
+    }
+  } else if (data.representative) errors.representative = "Selecciona registrar a otra persona"
+  if (context.mode === "public") {
+    if (data.respondent === "staff") errors.respondent = "Selecciona quién declara la información"
+    if (minor && data.respondent !== "representative") errors.respondent = "El responsable debe registrar al menor"
+    if (!data.privacyAccepted) errors.privacyAccepted = "Debes aceptar el aviso de privacidad"
+    for (const field of REGISTRATION_FIELDS) {
+      const key = field.key
+      const path = field.step === "datos" || field.step === "contacto" ? `demographics.${key}` : `health.${key}`
+      let value: unknown
+      if (key.startsWith("dental.")) value = data.health?.dental?.[key.slice(7) as keyof NonNullable<NonNullable<RegistrationAnswers["health"]>["dental"]>]
+      else if (field.step === "salud") value = data.health?.[key as keyof NonNullable<RegistrationAnswers["health"]>]
+      else value = data.demographics[key as keyof RegistrationDemographics]
+      if (config.fields[key] === "hidden") {
+        if (value !== undefined) errors[path] = "Este campo no está habilitado"
+        continue
+      }
+      if (key === "insuranceDetail" && !data.demographics.insuranceType) continue
+      if (needsRepresentative && (key === "phone" || key === "email") && (data.representative?.phone || data.representative?.email)) continue
+      const unanswered = value === undefined || value === null || value === "" || (typeof value === "object" && "state" in value && value.state === "unanswered")
+      if (config.fields[key] === "required" && unanswered) errors[path] = "Este campo es obligatorio"
+      if (["allergies", "conditions", "medications"].includes(key) && value === undefined) errors[path] = "Indica una respuesta, incluido Sin responder"
+    }
+    if (!data.demographics.phone && !data.demographics.email && !(needsRepresentative && (data.representative?.phone || data.representative?.email))) errors["demographics.phone"] = "Indica al menos un medio de contacto"
+  }
+  return errors
+}

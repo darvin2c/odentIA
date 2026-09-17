@@ -9,6 +9,11 @@ import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
   Field,
   FieldLabel,
   Input,
@@ -19,58 +24,54 @@ import {
   SelectValue,
   Textarea,
 } from "@odentia/ui"
-import { EmptyState, ErrorState, LoadingState } from "@odentia/ui-patterns"
+import { ErrorState, LoadingState } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { ChevronDown } from "lucide-react"
 import { useEffect, useId, useMemo, useRef, useState } from "react"
+import type { ReactNode } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
 import { useCanWrite } from "../../lib/crm"
 import {
-  ALLERGY_SEVERITY_LABELS,
   type Allergy,
   type AnamnesisAnswers,
-  CONDITION_STATUS_LABELS,
+  type BloodGroup,
   type Condition,
   fetchAnamnesisHistory,
   fetchPatientHealth,
   HEALTH_REVIEW_LABELS,
   type HealthReviewState,
+  isHealthReviewPending,
   type Medication,
+  type PatientFull,
   type PatientHealth,
   savePatientHealthApi,
 } from "../../lib/patients"
 import { AnamnesisVersionDialog } from "./anamnesis-history"
+import {
+  AllergyRows,
+  type AllergyRowValue,
+  BLOOD_GROUP_LABELS,
+  BloodGroupSelect,
+  ConditionRows,
+  type ConditionRowValue,
+  DECLARATION_STATE_LABELS,
+  MedicationRows,
+  type MedicationRowValue,
+  ReviewStateSelect,
+} from "./patient-health-fields"
 
 type Rec = Record<string, unknown>
 
-interface AllergyDraft {
-  key: string
+interface AllergyDraft extends AllergyRowValue {
   id?: string
-  substance: string
-  reaction: string
-  severity: string
-  isActive: boolean
 }
 
-interface ConditionDraft {
-  key: string
+interface ConditionDraft extends ConditionRowValue {
   id?: string
-  name: string
-  status: string
-  startDate: string
-  endDate: string
-  notes: string
 }
 
-interface MedicationDraft {
-  key: string
+interface MedicationDraft extends MedicationRowValue {
   id?: string
-  name: string
-  dose: string
-  frequency: string
-  startDate: string
-  endDate: string
-  notes: string
 }
 
 interface ReviewDraft {
@@ -79,11 +80,7 @@ interface ReviewDraft {
   medications: HealthReviewState
 }
 
-let keySeq = 0
-function nextKey(): string {
-  keySeq += 1
-  return `ant-${keySeq}`
-}
+type DraftId = { key: string; id?: string }
 
 function strOf(v: unknown): string {
   return typeof v === "string" || typeof v === "number" ? String(v) : ""
@@ -127,8 +124,6 @@ function isValidDateStr(value: string): boolean {
     date.getUTCDate() === d
   )
 }
-
-const REVIEW_OPTIONS: HealthReviewState[] = ["unknown", "recorded", "none"]
 const SEVERITY_OPTIONS = ["leve", "moderada", "severa", "desconocida"]
 const STATUS_OPTIONS = ["activa", "resuelta", "inactiva"]
 
@@ -167,6 +162,7 @@ function buildDrafts(health: PatientHealth): {
   conditions: ConditionDraft[]
   medications: MedicationDraft[]
   review: ReviewDraft
+  bloodGroup: BloodGroup | null
   interview: AnamnesisAnswers
 } {
   return {
@@ -177,6 +173,7 @@ function buildDrafts(health: PatientHealth): {
       reaction: a.reaction ?? "",
       severity: a.severity,
       isActive: a.isActive,
+      persisted: true,
     })),
     conditions: health.conditions.map((c: Condition) => ({
       key: c.id,
@@ -186,6 +183,7 @@ function buildDrafts(health: PatientHealth): {
       startDate: c.startDate ?? "",
       endDate: c.endDate ?? "",
       notes: c.notes ?? "",
+      persisted: true,
     })),
     medications: health.medications.map((m: Medication) => ({
       key: m.id,
@@ -196,8 +194,10 @@ function buildDrafts(health: PatientHealth): {
       startDate: m.startDate ?? "",
       endDate: m.endDate ?? "",
       notes: m.notes ?? "",
+      persisted: true,
     })),
     review: { ...health.reviewStatus },
+    bloodGroup: health.bloodGroup ?? null,
     interview: (health.latestAnamnesis?.answers ?? {}) as AnamnesisAnswers,
   }
 }
@@ -217,8 +217,7 @@ export function AntecedentesTab({ patientId }: { patientId: string }): React.JSX
   })
   const patientQuery = useQuery({
     queryKey: ["patient", patientId],
-    queryFn: () =>
-      apiFetch<{ data: { dataConsentAt: string | null } }>(`/api/patients/${patientId}`),
+    queryFn: () => apiFetch<{ data: PatientFull }>(`/api/patients/${patientId}`),
   })
 
   const [allergies, setAllergies] = useState<AllergyDraft[]>([])
@@ -229,6 +228,7 @@ export function AntecedentesTab({ patientId }: { patientId: string }): React.JSX
     conditions: "unknown",
     medications: "unknown",
   })
+  const [bloodGroup, setBloodGroup] = useState<BloodGroup | null>(null)
   const [interview, setInterview] = useState<AnamnesisAnswers>({})
   const [interviewDirty, setInterviewDirty] = useState(false)
   const [consent, setConsent] = useState(false)
@@ -237,6 +237,7 @@ export function AntecedentesTab({ patientId }: { patientId: string }): React.JSX
   const [formError, setFormError] = useState<string | null>(null)
   const [stale, setStale] = useState(false)
   const [versionId, setVersionId] = useState<string | null>(null)
+  const [snapshotOpen, setSnapshotOpen] = useState(false)
   const [openPersonales, setOpenPersonales] = useState(true)
   const [openFamiliares, setOpenFamiliares] = useState(true)
   const [openOdonto, setOpenOdonto] = useState(true)
@@ -246,7 +247,7 @@ export function AntecedentesTab({ patientId }: { patientId: string }): React.JSX
   const health = healthQuery.data?.data ?? null
   const versions = useMemo(() => historyQuery.data?.data ?? [], [historyQuery.data])
   const latestVersion = health?.latestAnamnesis?.version ?? 0
-  const consentedAt = patientQuery.data?.data.dataConsentAt ?? null
+  const consentedAt = patientQuery.data?.data.patient.dataConsentAt ?? null
 
   useEffect(() => {
     if (health && !dirtyRef.current) {
@@ -255,7 +256,7 @@ export function AntecedentesTab({ patientId }: { patientId: string }): React.JSX
       setConditions(drafts.conditions)
       setMedications(drafts.medications)
       setReview(drafts.review)
-      setInterview(drafts.interview)
+      setBloodGroup(drafts.bloodGroup)
       setInterviewDirty(false)
       setFieldErrors({})
       setFormError(null)
@@ -271,6 +272,7 @@ export function AntecedentesTab({ patientId }: { patientId: string }): React.JSX
       return savePatientHealthApi(patientId, {
         expectedRevision: health.revision,
         reviewStatus: review,
+        bloodGroup,
         allergies: allergies.map((a) => ({
           ...(a.id ? { id: a.id } : {}),
           substance: a.substance.trim(),
@@ -446,15 +448,32 @@ export function AntecedentesTab({ patientId }: { patientId: string }): React.JSX
   const odontologicos = groupOf(interview, "antecedentesOdontologicos")
   const legacy = legacyTexts(health.latestAnamnesis?.answers as AnamnesisAnswers | undefined)
   const fid = (name: string): string => `${uid}-${name}`
+  const registration = patientQuery.data?.data.registration ?? null
+  const pendingReview = isHealthReviewPending(health)
+  const canSubmit = dirty || interviewDirty || pendingReview
+  const submitLabel =
+    pendingReview && !dirty && !interviewDirty ? "Revisar y guardar" : "Guardar antecedentes"
+  const saving = !canWrite || saveMutation.isPending
 
   return (
     <form onSubmit={handleSubmit} className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-sm text-muted-foreground">
-          Revisión {health.revision} ·{" "}
-          {health.latestAnamnesis
-            ? `entrevista v${health.latestAnamnesis.version}`
-            : "sin entrevista registrada"}
+        <div className="flex flex-wrap items-center gap-2">
+          <p className="text-sm text-muted-foreground">
+            Revisión {health.revision} ·{" "}
+            {health.latestAnamnesis
+              ? `entrevista v${health.latestAnamnesis.version}`
+              : "sin entrevista registrada"}
+          </p>
+          {health.reviewedAt ? (
+            <Badge variant="secondary">Revisado por personal autorizado</Badge>
+          ) : pendingReview ? (
+            <Badge variant="outline">
+              Declarado por el paciente/responsable · pendiente de revisión
+            </Badge>
+          ) : null}
+        </div>
+        <div className="flex flex-wrap items-center gap-1">
           {versions.length > 0 ? (
             <Button
               type="button"
@@ -465,13 +484,15 @@ export function AntecedentesTab({ patientId }: { patientId: string }): React.JSX
               Ver historial ({versions.length})
             </Button>
           ) : null}
-        </p>
-        <Button
-          type="submit"
-          disabled={!canWrite || saveMutation.isPending || (!dirty && !interviewDirty)}
-        >
-          {saveMutation.isPending ? "Guardando…" : "Guardar antecedentes"}
-        </Button>
+          {registration ? (
+            <Button type="button" variant="link" size="sm" onClick={() => setSnapshotOpen(true)}>
+              Ver declaración original
+            </Button>
+          ) : null}
+          <Button type="submit" disabled={!canWrite || saveMutation.isPending || !canSubmit}>
+            {saveMutation.isPending ? "Guardando…" : submitLabel}
+          </Button>
+        </div>
       </div>
 
       {stale ? (
@@ -504,53 +525,127 @@ export function AntecedentesTab({ patientId }: { patientId: string }): React.JSX
         </p>
       ) : null}
 
-      <AllergyGroup
-        uid={uid}
-        rows={allergies}
+      <Card>
+        <CardHeader>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <CardTitle>Grupo sanguíneo</CardTitle>
+            {bloodGroup != null && pendingReview ? (
+              <Badge variant="outline">Declarado · pendiente de revisión</Badge>
+            ) : null}
+          </div>
+        </CardHeader>
+        <CardContent>
+          <BloodGroupSelect
+            id={fid("blood")}
+            value={bloodGroup}
+            onChange={(next) => {
+              setBloodGroup(next)
+              markDirty()
+            }}
+            readOnly={saving}
+            declared={bloodGroup != null}
+          />
+        </CardContent>
+      </Card>
+
+      <ClinicalGroupCard
+        title="Alergias"
         review={review.allergies}
-        disabled={!canWrite || saveMutation.isPending}
-        errors={fieldErrors}
-        onChange={(next) => {
-          setAllergies(next)
-          markDirty()
-        }}
+        reviewId={fid("rev-alg")}
+        reviewError={fieldErrors[fid("rev-alg")]}
+        readOnly={saving}
         onReview={(next) => {
           setReview((r) => ({ ...r, allergies: next }))
           markDirty()
         }}
-      />
+        empty={
+          allergies.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              {review.allergies === "none"
+                ? "Ausencia confirmada en este grupo."
+                : "Sin registros. Agrega filas o confirma la ausencia."}
+            </p>
+          ) : null
+        }
+      >
+        <AllergyRows
+          mode="clinical"
+          rows={allergies}
+          onChange={(next) => {
+            setAllergies(restoreIds(allergies, next))
+            markDirty()
+          }}
+          readOnly={saving}
+          errors={fieldErrors}
+          idPrefix={uid}
+        />
+      </ClinicalGroupCard>
 
-      <ConditionGroup
-        uid={uid}
-        rows={conditions}
+      <ClinicalGroupCard
+        title="Condiciones"
         review={review.conditions}
-        disabled={!canWrite || saveMutation.isPending}
-        errors={fieldErrors}
-        onChange={(next) => {
-          setConditions(next)
-          markDirty()
-        }}
+        reviewId={fid("rev-con")}
+        reviewError={fieldErrors[fid("rev-con")]}
+        readOnly={saving}
         onReview={(next) => {
           setReview((r) => ({ ...r, conditions: next }))
           markDirty()
         }}
-      />
+        empty={
+          conditions.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              {review.conditions === "none"
+                ? "Ausencia confirmada en este grupo."
+                : "Sin registros. Agrega filas o confirma la ausencia."}
+            </p>
+          ) : null
+        }
+      >
+        <ConditionRows
+          mode="clinical"
+          rows={conditions}
+          onChange={(next) => {
+            setConditions(restoreIds(conditions, next))
+            markDirty()
+          }}
+          readOnly={saving}
+          errors={fieldErrors}
+          idPrefix={uid}
+        />
+      </ClinicalGroupCard>
 
-      <MedicationGroup
-        uid={uid}
-        rows={medications}
+      <ClinicalGroupCard
+        title="Medicación vigente"
         review={review.medications}
-        disabled={!canWrite || saveMutation.isPending}
-        errors={fieldErrors}
-        onChange={(next) => {
-          setMedications(next)
-          markDirty()
-        }}
+        reviewId={fid("rev-med")}
+        reviewError={fieldErrors[fid("rev-med")]}
+        readOnly={saving}
         onReview={(next) => {
           setReview((r) => ({ ...r, medications: next }))
           markDirty()
         }}
-      />
+        empty={
+          medications.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              {review.medications === "none"
+                ? "Ausencia confirmada en este grupo."
+                : "Sin registros. Agrega filas o confirma la ausencia."}
+            </p>
+          ) : null
+        }
+      >
+        <MedicationRows
+          mode="clinical"
+          rows={medications}
+          onChange={(next) => {
+            setMedications(restoreIds(medications, next))
+            markDirty()
+          }}
+          readOnly={saving}
+          errors={fieldErrors}
+          idPrefix={uid}
+        />
+      </ClinicalGroupCard>
 
       <Card>
         <CardHeader>
@@ -915,9 +1010,9 @@ export function AntecedentesTab({ patientId }: { patientId: string }): React.JSX
       <div className="flex justify-end">
         <Button
           type="submit"
-          disabled={!canWrite || saveMutation.isPending || (!dirty && !interviewDirty)}
+          disabled={!canWrite || saveMutation.isPending || !canSubmit}
         >
-          {saveMutation.isPending ? "Guardando…" : "Guardar antecedentes"}
+          {saveMutation.isPending ? "Guardando…" : submitLabel}
         </Button>
       </div>
 
@@ -926,525 +1021,256 @@ export function AntecedentesTab({ patientId }: { patientId: string }): React.JSX
         versionId={versionId}
         onClose={() => setVersionId(null)}
       />
+      <RegistrationSnapshotDialog
+        open={snapshotOpen}
+        onClose={() => setSnapshotOpen(false)}
+        registration={registration}
+      />
     </form>
   )
 }
 
-function ReviewSelect({
-  id,
-  value,
-  disabled,
-  error,
-  onChange,
+/** Conserva el id persistido al editar filas compartidas (clave estable por fila). */
+function restoreIds<T extends DraftId>(prev: Array<T & DraftId>, next: T[]): Array<T & DraftId> {
+  const ids: Record<string, string | undefined> = {}
+  for (const row of prev) ids[row.key] = row.id
+  return next.map((row) => {
+    const id = ids[row.key]
+    return id ? { ...row, id } : row
+  })
+}
+
+function ClinicalGroupCard({
+  title,
+  review,
+  reviewId,
+  reviewError,
+  readOnly,
+  onReview,
+  empty,
+  children,
 }: {
-  id: string
-  value: HealthReviewState
-  disabled: boolean
-  error?: string
-  onChange: (next: HealthReviewState) => void
+  title: string
+  review: HealthReviewState
+  reviewId: string
+  reviewError?: string
+  readOnly: boolean
+  onReview: (next: HealthReviewState) => void
+  empty: ReactNode
+  children: ReactNode
 }): React.JSX.Element {
   return (
-    <Field>
-      <FieldLabel htmlFor={id}>Revisión del grupo</FieldLabel>
-      <Select
-        value={value}
-        onValueChange={(v) => onChange(v as HealthReviewState)}
-        disabled={disabled}
-      >
-        <SelectTrigger id={id}>
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          {REVIEW_OPTIONS.map((option) => (
-            <SelectItem key={option} value={option}>
-              {HEALTH_REVIEW_LABELS[option]}
-            </SelectItem>
+    <Card>
+      <CardHeader>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <CardTitle>{title}</CardTitle>
+          <Badge
+            variant={
+              review === "recorded" ? "default" : review === "none" ? "secondary" : "outline"
+            }
+          >
+            {HEALTH_REVIEW_LABELS[review]}
+          </Badge>
+        </div>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-3">
+        <ReviewStateSelect
+          id={reviewId}
+          value={review}
+          onChange={onReview}
+          readOnly={readOnly}
+          error={reviewError}
+        />
+        {children}
+        {empty}
+      </CardContent>
+    </Card>
+  )
+}
+
+const ENTRY_POINT_LABELS: Record<string, string> = {
+  platform: "Plataforma (personal)",
+  public_link: "Enlace público",
+  qr: "Código QR",
+  conversation: "Conversación",
+  legacy: "Registro anterior: origen no disponible",
+}
+
+const RESPONDENT_LABELS: Record<string, string> = {
+  patient: "Paciente",
+  representative: "Responsable / representante",
+  staff: "Personal",
+}
+
+function SnapshotGroup({
+  title,
+  group,
+  nameKey,
+}: {
+  title: string
+  group: unknown
+  nameKey: "substance" | "name"
+}): React.JSX.Element | null {
+  if (!group || typeof group !== "object") return null
+  const state = (group as Rec)["state"]
+  const items = Array.isArray((group as Rec)["items"])
+    ? ((group as Rec)["items"] as Array<Rec>)
+    : []
+  return (
+    <section className="flex flex-col gap-1">
+      <h4 className="text-sm font-medium">
+        {title} ·{" "}
+        {typeof state === "string" && state in DECLARATION_STATE_LABELS
+          ? DECLARATION_STATE_LABELS[state as keyof typeof DECLARATION_STATE_LABELS]
+          : "Sin responder"}
+      </h4>
+      {items.length === 0 ? (
+        <p className="text-sm text-muted-foreground">Sin entradas declaradas.</p>
+      ) : (
+        <ul className="list-inside list-disc text-sm">
+          {items.map((item, index) => (
+            <li key={index}>
+              {typeof item[nameKey] === "string" ? (item[nameKey] as string) : "Entrada"}
+              {typeof item["reaction"] === "string" && item["reaction"] !== ""
+                ? ` · ${item["reaction"] as string}`
+                : ""}
+              {typeof item["severity"] === "string" ? ` (${item["severity"] as string})` : ""}
+              {typeof item["notes"] === "string" && item["notes"] !== ""
+                ? ` · ${item["notes"] as string}`
+                : ""}
+            </li>
           ))}
-        </SelectContent>
-      </Select>
-      {error ? <p className="text-sm text-destructive">{error}</p> : null}
-    </Field>
+        </ul>
+      )}
+    </section>
   )
 }
 
-function AllergyGroup({
-  uid,
-  rows,
-  review,
-  disabled,
-  errors,
-  onChange,
-  onReview,
+/**
+ * Declaración original del registro (snapshot append-only): solo lectura, nunca
+ * se edita desde aquí. Los datos vigentes se corrigen con el editor clínico.
+ */
+function RegistrationSnapshotDialog({
+  open,
+  onClose,
+  registration,
 }: {
-  uid: string
-  rows: AllergyDraft[]
-  review: HealthReviewState
-  disabled: boolean
-  errors: Record<string, string>
-  onChange: (next: AllergyDraft[]) => void
-  onReview: (next: HealthReviewState) => void
+  open: boolean
+  onClose: () => void
+  registration: PatientFull["registration"]
 }): React.JSX.Element {
-  const fid = (name: string): string => `${uid}-${name}`
-  const patch = (key: string, next: Partial<AllergyDraft>): void => {
-    onChange(rows.map((r) => (r.key === key ? { ...r, ...next } : r)))
-  }
+  const answers = (registration?.answers ?? {}) as Rec
+  const health = (answers["health"] ?? {}) as Rec
+  const representative = (answers["representative"] ?? null) as Rec | null
+  const dental = (health["dental"] ?? null) as Rec | null
+  const blood = health["bloodGroup"]
   return (
-    <Card>
-      <CardHeader>
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <CardTitle>Alergias</CardTitle>
-          <Badge
-            variant={
-              review === "recorded" ? "default" : review === "none" ? "secondary" : "outline"
-            }
-          >
-            {HEALTH_REVIEW_LABELS[review]}
-          </Badge>
-        </div>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-3">
-        <ReviewSelect
-          id={fid("rev-alg")}
-          value={review}
-          disabled={disabled}
-          error={errors[fid("rev-alg")]}
-          onChange={onReview}
-        />
-        {rows.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            {review === "none"
-              ? "Ausencia confirmada en este grupo."
-              : "Sin registros. Agrega filas o confirma la ausencia."}
-          </p>
-        ) : null}
-        {rows.map((row) => (
-          <div key={row.key} className="grid gap-3 rounded-lg border p-3 sm:grid-cols-2">
-            <Field>
-              <FieldLabel htmlFor={fid(`alg-sus-${row.key}`)}>Sustancia</FieldLabel>
-              <Input
-                id={fid(`alg-sus-${row.key}`)}
-                value={row.substance}
-                disabled={disabled}
-                onChange={(e) => patch(row.key, { substance: e.target.value })}
-              />
-              {errors[fid(`alg-sus-${row.key}`)] ? (
-                <p className="text-sm text-destructive">{errors[fid(`alg-sus-${row.key}`)]}</p>
-              ) : null}
-            </Field>
-            <Field>
-              <FieldLabel htmlFor={fid(`alg-rea-${row.key}`)}>Reacción</FieldLabel>
-              <Input
-                id={fid(`alg-rea-${row.key}`)}
-                value={row.reaction}
-                disabled={disabled}
-                onChange={(e) => patch(row.key, { reaction: e.target.value })}
-              />
-              {errors[fid(`alg-rea-${row.key}`)] ? (
-                <p className="text-sm text-destructive">{errors[fid(`alg-rea-${row.key}`)]}</p>
-              ) : null}
-            </Field>
-            <Field>
-              <FieldLabel htmlFor={fid(`alg-sev-${row.key}`)}>Gravedad</FieldLabel>
-              <Select
-                value={row.severity === "" ? "__elegir__" : row.severity}
-                onValueChange={(v) =>
-                  patch(row.key, { severity: !v || v === "__elegir__" ? "" : v })
-                }
-                disabled={disabled}
-              >
-                <SelectTrigger id={fid(`alg-sev-${row.key}`)}>
-                  <SelectValue placeholder="Elige la gravedad" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__elegir__">Elige la gravedad</SelectItem>
-                  {SEVERITY_OPTIONS.map((s) => (
-                    <SelectItem key={s} value={s}>
-                      {ALLERGY_SEVERITY_LABELS[s] ?? s}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {errors[fid(`alg-sev-${row.key}`)] ? (
-                <p className="text-sm text-destructive">{errors[fid(`alg-sev-${row.key}`)]}</p>
-              ) : null}
-              <p className="text-xs text-muted-foreground">
-                Si se desconoce, márcala como desconocida: sigue siendo alerta.
-              </p>
-            </Field>
-            <div className="flex items-end gap-2">
-              {row.id ? (
-                <div className="flex items-center gap-2">
-                  <Checkbox
-                    id={fid(`alg-vig-${row.key}`)}
-                    checked={row.isActive}
-                    disabled={disabled}
-                    onCheckedChange={(c: boolean) => patch(row.key, { isActive: c === true })}
-                  />
-                  <label htmlFor={fid(`alg-vig-${row.key}`)} className="text-sm">
-                    Vigente (quitar para archivar)
-                  </label>
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!next) onClose()
+      }}
+    >
+      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>Declaración original del registro</DialogTitle>
+          <DialogDescription>
+            Snapshot inmutable de lo declarado al crear la ficha. No se edita: los datos vigentes
+            se corrigen con el editor clínico.
+          </DialogDescription>
+        </DialogHeader>
+        {registration ? (
+          <div className="flex flex-col gap-4 text-sm">
+            <dl className="grid gap-1">
+              <div className="grid grid-cols-[12rem_minmax(0,1fr)] gap-2">
+                <dt className="text-muted-foreground">Entrada</dt>
+                <dd>{ENTRY_POINT_LABELS[registration.entryPoint] ?? registration.entryPoint}</dd>
+              </div>
+              <div className="grid grid-cols-[12rem_minmax(0,1fr)] gap-2">
+                <dt className="text-muted-foreground">Declarante</dt>
+                <dd>
+                  {registration.respondent
+                    ? (RESPONDENT_LABELS[registration.respondent] ?? registration.respondent)
+                    : "No disponible"}
+                </dd>
+              </div>
+              <div className="grid grid-cols-[12rem_minmax(0,1fr)] gap-2">
+                <dt className="text-muted-foreground">Fecha</dt>
+                <dd>{new Date(registration.createdAt).toLocaleString("es-PE")}</dd>
+              </div>
+              <div className="grid grid-cols-[12rem_minmax(0,1fr)] gap-2">
+                <dt className="text-muted-foreground">Registrado por</dt>
+                <dd>{registration.actor?.name ?? "No registrado (envío público o legado)"}</dd>
+              </div>
+              {representative && typeof representative["displayName"] === "string" ? (
+                <div className="grid grid-cols-[12rem_minmax(0,1fr)] gap-2">
+                  <dt className="text-muted-foreground">Responsable declarado</dt>
+                  <dd>
+                    {representative["displayName"] as string}
+                    {typeof representative["relationshipDetail"] === "string" &&
+                    (representative["relationshipDetail"] as string) !== ""
+                      ? ` (${representative["relationshipDetail"] as string})`
+                      : ""}
+                    {typeof representative["phone"] === "string"
+                      ? ` · ${representative["phone"] as string}`
+                      : ""}
+                    {typeof representative["email"] === "string"
+                      ? ` · ${representative["email"] as string}`
+                      : ""}
+                  </dd>
                 </div>
-              ) : (
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  disabled={disabled}
-                  onClick={() => onChange(rows.filter((r) => r.key !== row.key))}
-                >
-                  Quitar fila
-                </Button>
-              )}
-            </div>
-          </div>
-        ))}
-        <div>
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            disabled={disabled}
-            onClick={() =>
-              onChange([
-                ...rows,
-                { key: nextKey(), substance: "", reaction: "", severity: "", isActive: true },
-              ])
-            }
-          >
-            Agregar otra
-          </Button>
-        </div>
-      </CardContent>
-    </Card>
-  )
-}
-
-function ConditionGroup({
-  uid,
-  rows,
-  review,
-  disabled,
-  errors,
-  onChange,
-  onReview,
-}: {
-  uid: string
-  rows: ConditionDraft[]
-  review: HealthReviewState
-  disabled: boolean
-  errors: Record<string, string>
-  onChange: (next: ConditionDraft[]) => void
-  onReview: (next: HealthReviewState) => void
-}): React.JSX.Element {
-  const fid = (name: string): string => `${uid}-${name}`
-  const patch = (key: string, next: Partial<ConditionDraft>): void => {
-    onChange(rows.map((r) => (r.key === key ? { ...r, ...next } : r)))
-  }
-  return (
-    <Card>
-      <CardHeader>
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <CardTitle>Condiciones</CardTitle>
-          <Badge
-            variant={
-              review === "recorded" ? "default" : review === "none" ? "secondary" : "outline"
-            }
-          >
-            {HEALTH_REVIEW_LABELS[review]}
-          </Badge>
-        </div>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-3">
-        <ReviewSelect
-          id={fid("rev-con")}
-          value={review}
-          disabled={disabled}
-          error={errors[fid("rev-con")]}
-          onChange={onReview}
-        />
-        {rows.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            {review === "none"
-              ? "Ausencia confirmada en este grupo."
-              : "Sin registros. Agrega filas o confirma la ausencia."}
-          </p>
-        ) : null}
-        {rows.map((row) => (
-          <div key={row.key} className="grid gap-3 rounded-lg border p-3 sm:grid-cols-2">
-            <Field>
-              <FieldLabel htmlFor={fid(`con-nom-${row.key}`)}>Nombre</FieldLabel>
-              <Input
-                id={fid(`con-nom-${row.key}`)}
-                value={row.name}
-                disabled={disabled}
-                onChange={(e) => patch(row.key, { name: e.target.value })}
-              />
-              {errors[fid(`con-nom-${row.key}`)] ? (
-                <p className="text-sm text-destructive">{errors[fid(`con-nom-${row.key}`)]}</p>
               ) : null}
-            </Field>
-            <Field>
-              <FieldLabel htmlFor={fid(`con-est-${row.key}`)}>Estado</FieldLabel>
-              <Select
-                value={row.status}
-                onValueChange={(v) => patch(row.key, { status: v ?? "activa" })}
-                disabled={disabled}
-              >
-                <SelectTrigger id={fid(`con-est-${row.key}`)}>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {STATUS_OPTIONS.map((s) => (
-                    <SelectItem key={s} value={s}>
-                      {CONDITION_STATUS_LABELS[s] ?? s}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {errors[fid(`con-est-${row.key}`)] ? (
-                <p className="text-sm text-destructive">{errors[fid(`con-est-${row.key}`)]}</p>
-              ) : null}
-            </Field>
-            <Field>
-              <FieldLabel htmlFor={fid(`con-ini-${row.key}`)}>Inicio</FieldLabel>
-              <Input
-                id={fid(`con-ini-${row.key}`)}
-                type="date"
-                value={row.startDate}
-                disabled={disabled}
-                onChange={(e) => patch(row.key, { startDate: e.target.value })}
-              />
-              {errors[fid(`con-ini-${row.key}`)] ? (
-                <p className="text-sm text-destructive">{errors[fid(`con-ini-${row.key}`)]}</p>
-              ) : null}
-            </Field>
-            <Field>
-              <FieldLabel htmlFor={fid(`con-fin-${row.key}`)}>Fin (vacío = activa)</FieldLabel>
-              <Input
-                id={fid(`con-fin-${row.key}`)}
-                type="date"
-                value={row.endDate}
-                disabled={disabled}
-                onChange={(e) => patch(row.key, { endDate: e.target.value })}
-              />
-              {errors[fid(`con-fin-${row.key}`)] ? (
-                <p className="text-sm text-destructive">{errors[fid(`con-fin-${row.key}`)]}</p>
-              ) : null}
-            </Field>
-            <Field className="sm:col-span-2">
-              <FieldLabel htmlFor={fid(`con-not-${row.key}`)}>Notas</FieldLabel>
-              <Textarea
-                id={fid(`con-not-${row.key}`)}
-                rows={2}
-                value={row.notes}
-                disabled={disabled}
-                onChange={(e) => patch(row.key, { notes: e.target.value })}
-              />
-            </Field>
-            {!row.id ? (
-              <div className="sm:col-span-2">
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  disabled={disabled}
-                  onClick={() => onChange(rows.filter((r) => r.key !== row.key))}
-                >
-                  Quitar fila
-                </Button>
+              <div className="grid grid-cols-[12rem_minmax(0,1fr)] gap-2">
+                <dt className="text-muted-foreground">Grupo sanguíneo declarado</dt>
+                <dd>
+                  {typeof blood === "string" && blood in BLOOD_GROUP_LABELS
+                    ? BLOOD_GROUP_LABELS[blood as keyof typeof BLOOD_GROUP_LABELS]
+                    : "Sin responder"}
+                </dd>
               </div>
+            </dl>
+            <SnapshotGroup title="Alergias" group={health["allergies"]} nameKey="substance" />
+            <SnapshotGroup title="Enfermedades" group={health["conditions"]} nameKey="name" />
+            <SnapshotGroup title="Medicación" group={health["medications"]} nameKey="name" />
+            {dental ? (
+              <section className="flex flex-col gap-1">
+                <h4 className="text-sm font-medium">Odontológicos</h4>
+                <dl className="grid gap-1">
+                  {typeof dental["ultimaVisita"] === "string" ? (
+                    <div className="grid grid-cols-[12rem_minmax(0,1fr)] gap-2">
+                      <dt className="text-muted-foreground">Última visita</dt>
+                      <dd>{dental["ultimaVisita"] as string}</dd>
+                    </div>
+                  ) : null}
+                  {typeof dental["experienciaPrevia"] === "string" ? (
+                    <div className="grid grid-cols-[12rem_minmax(0,1fr)] gap-2">
+                      <dt className="text-muted-foreground">Experiencia previa</dt>
+                      <dd>{dental["experienciaPrevia"] as string}</dd>
+                    </div>
+                  ) : null}
+                  {typeof dental["ansiedadDental"] === "string" ? (
+                    <div className="grid grid-cols-[12rem_minmax(0,1fr)] gap-2">
+                      <dt className="text-muted-foreground">Ansiedad dental</dt>
+                      <dd>{dental["ansiedadDental"] as string}</dd>
+                    </div>
+                  ) : null}
+                </dl>
+              </section>
+            ) : null}
+            {typeof registration.privacyNotice === "string" &&
+            registration.privacyNotice !== "" ? (
+              <section className="flex flex-col gap-1">
+                <h4 className="text-sm font-medium">Aviso de privacidad aceptado</h4>
+                <p className="whitespace-pre-wrap text-xs text-muted-foreground">
+                  {registration.privacyNotice}
+                </p>
+              </section>
             ) : null}
           </div>
-        ))}
-        <div>
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            disabled={disabled}
-            onClick={() =>
-              onChange([
-                ...rows,
-                {
-                  key: nextKey(),
-                  name: "",
-                  status: "activa",
-                  startDate: "",
-                  endDate: "",
-                  notes: "",
-                },
-              ])
-            }
-          >
-            Agregar otra
-          </Button>
-        </div>
-      </CardContent>
-    </Card>
-  )
-}
-
-function MedicationGroup({
-  uid,
-  rows,
-  review,
-  disabled,
-  errors,
-  onChange,
-  onReview,
-}: {
-  uid: string
-  rows: MedicationDraft[]
-  review: HealthReviewState
-  disabled: boolean
-  errors: Record<string, string>
-  onChange: (next: MedicationDraft[]) => void
-  onReview: (next: HealthReviewState) => void
-}): React.JSX.Element {
-  const fid = (name: string): string => `${uid}-${name}`
-  const patch = (key: string, next: Partial<MedicationDraft>): void => {
-    onChange(rows.map((r) => (r.key === key ? { ...r, ...next } : r)))
-  }
-  return (
-    <Card>
-      <CardHeader>
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <CardTitle>Medicación vigente</CardTitle>
-          <Badge
-            variant={
-              review === "recorded" ? "default" : review === "none" ? "secondary" : "outline"
-            }
-          >
-            {HEALTH_REVIEW_LABELS[review]}
-          </Badge>
-        </div>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-3">
-        <ReviewSelect
-          id={fid("rev-med")}
-          value={review}
-          disabled={disabled}
-          error={errors[fid("rev-med")]}
-          onChange={onReview}
-        />
-        {rows.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            {review === "none"
-              ? "Ausencia confirmada en este grupo."
-              : "Sin registros. Agrega filas o confirma la ausencia."}
-          </p>
-        ) : null}
-        {rows.map((row) => (
-          <div key={row.key} className="grid gap-3 rounded-lg border p-3 sm:grid-cols-2">
-            <Field>
-              <FieldLabel htmlFor={fid(`med-nom-${row.key}`)}>Nombre</FieldLabel>
-              <Input
-                id={fid(`med-nom-${row.key}`)}
-                value={row.name}
-                disabled={disabled}
-                onChange={(e) => patch(row.key, { name: e.target.value })}
-              />
-              {errors[fid(`med-nom-${row.key}`)] ? (
-                <p className="text-sm text-destructive">{errors[fid(`med-nom-${row.key}`)]}</p>
-              ) : null}
-            </Field>
-            <Field>
-              <FieldLabel htmlFor={fid(`med-dos-${row.key}`)}>Dosis</FieldLabel>
-              <Input
-                id={fid(`med-dos-${row.key}`)}
-                value={row.dose}
-                disabled={disabled}
-                placeholder="Se deja vacío si se desconoce, no se inventa"
-                onChange={(e) => patch(row.key, { dose: e.target.value })}
-              />
-            </Field>
-            <Field>
-              <FieldLabel htmlFor={fid(`med-fre-${row.key}`)}>Frecuencia</FieldLabel>
-              <Input
-                id={fid(`med-fre-${row.key}`)}
-                value={row.frequency}
-                disabled={disabled}
-                onChange={(e) => patch(row.key, { frequency: e.target.value })}
-              />
-            </Field>
-            <Field>
-              <FieldLabel htmlFor={fid(`med-ini-${row.key}`)}>Inicio</FieldLabel>
-              <Input
-                id={fid(`med-ini-${row.key}`)}
-                type="date"
-                value={row.startDate}
-                disabled={disabled}
-                onChange={(e) => patch(row.key, { startDate: e.target.value })}
-              />
-              {errors[fid(`med-ini-${row.key}`)] ? (
-                <p className="text-sm text-destructive">{errors[fid(`med-ini-${row.key}`)]}</p>
-              ) : null}
-            </Field>
-            {row.id ? (
-              <Field>
-                <FieldLabel htmlFor={fid(`med-fin-${row.key}`)}>Fin (suspender)</FieldLabel>
-                <Input
-                  id={fid(`med-fin-${row.key}`)}
-                  type="date"
-                  value={row.endDate}
-                  disabled={disabled}
-                  onChange={(e) => patch(row.key, { endDate: e.target.value })}
-                />
-                {errors[fid(`med-fin-${row.key}`)] ? (
-                  <p className="text-sm text-destructive">{errors[fid(`med-fin-${row.key}`)]}</p>
-                ) : null}
-              </Field>
-            ) : null}
-            <Field className={row.id ? "" : "sm:col-span-2"}>
-              <FieldLabel htmlFor={fid(`med-not-${row.key}`)}>Notas</FieldLabel>
-              <Textarea
-                id={fid(`med-not-${row.key}`)}
-                rows={2}
-                value={row.notes}
-                disabled={disabled}
-                onChange={(e) => patch(row.key, { notes: e.target.value })}
-              />
-            </Field>
-            {!row.id ? (
-              <div className="sm:col-span-2">
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  disabled={disabled}
-                  onClick={() => onChange(rows.filter((r) => r.key !== row.key))}
-                >
-                  Quitar fila
-                </Button>
-              </div>
-            ) : null}
-          </div>
-        ))}
-        <div>
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            disabled={disabled}
-            onClick={() =>
-              onChange([
-                ...rows,
-                {
-                  key: nextKey(),
-                  name: "",
-                  dose: "",
-                  frequency: "",
-                  startDate: "",
-                  endDate: "",
-                  notes: "",
-                },
-              ])
-            }
-          >
-            Agregar otra
-          </Button>
-        </div>
-      </CardContent>
-    </Card>
+        ) : (
+          <p className="text-sm text-muted-foreground">Sin snapshot de registro.</p>
+        )}
+      </DialogContent>
+    </Dialog>
   )
 }

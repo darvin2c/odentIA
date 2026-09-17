@@ -107,14 +107,27 @@ interface ErrorBody {
   error: { code: string; message: string }
 }
 
+function registrationBody(displayName: string) {
+  return {
+    submissionId: crypto.randomUUID(),
+    answers: {
+      demographics: { displayName },
+      respondent: "staff",
+      privacyAccepted: false,
+    },
+  }
+}
+
 async function createFreshPatient(app: Hono, name: string): Promise<string> {
   const res = await app.request("/patients", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ displayName: `${name} ${crypto.randomUUID().slice(0, 8)}` }),
+    body: JSON.stringify(
+      registrationBody(`${name} ${crypto.randomUUID().slice(0, 8)}`),
+    ),
   })
   expect(res.status).toBe(201)
-  const body = (await res.json()) as { data: { id: string } }
+  const body = await res.json() as { data: { id: string } }
   return body.data.id
 }
 

@@ -1,8 +1,10 @@
+import type { RegistrationConfig } from "@odentia/clinical"
 import { sql } from "drizzle-orm"
 import {
   boolean,
   char,
   index,
+  integer,
   jsonb,
   pgTable,
   text,
@@ -26,6 +28,16 @@ export const orgProfile = pgTable("org_profile", {
   currency: char("currency", { length: 3 }).notNull().default("PEN"),
   timezone: text("timezone").notNull().default("America/Lima"),
   locale: text("locale").notNull().default("es-PE"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+})
+
+export const patientRegistrationConfig = pgTable("patient_registration_config", {
+  organizationId: text("organization_id").primaryKey().references(() => organization.id),
+  version: integer("version").notNull().default(1),
+  enabled: boolean("enabled").notNull().default(false),
+  fields: jsonb("fields").$type<RegistrationConfig["fields"]>().notNull(),
+  privacyNotice: text("privacy_notice").notNull().default(""),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 })

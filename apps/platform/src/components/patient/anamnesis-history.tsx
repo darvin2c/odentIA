@@ -7,6 +7,7 @@ interface AnamnesisVersion {
   id: string
   version: number
   createdAt: string
+  createdBy: string | null
 }
 
 function AnswerValue({ value }: { value: unknown }) {
@@ -85,7 +86,14 @@ export function AnamnesisVersionDialog({
       <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>Anamnesis {version.data ? `v${version.data.data.version}` : ""}</DialogTitle>
-          <DialogDescription>Registro histórico inmutable de respuestas.</DialogDescription>
+          <DialogDescription>
+            Registro histórico inmutable de respuestas.{" "}
+            {version.data
+              ? version.data.data.createdBy
+                ? "Registrado por personal clínico."
+                : "Declarado por el paciente/responsable."
+              : ""}
+          </DialogDescription>
         </DialogHeader>
         {version.isLoading ? (
           <p className="text-sm text-muted-foreground">Cargando…</p>

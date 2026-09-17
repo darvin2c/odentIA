@@ -1,8 +1,11 @@
+import type { BloodGroup, ContactRelationship, RegistrationAnswers, RegistrationEntryPoint, RegistrationRespondent } from "@odentia/clinical"
 import { sql } from "drizzle-orm"
 import {
   bigint,
   boolean,
   char,
+  check,
+  foreignKey,
   date,
   index,
   integer,
@@ -16,23 +19,17 @@ import {
   uuid,
 } from "drizzle-orm/pg-core"
 import { organization, user } from "./auth.js"
-import { contact, orgFk, timestamps } from "./crm.js"
+import { contact, conversation, orgFk, timestamps } from "./crm.js"
 import { branch } from "./org.js"
 
-/**
- * Paciente dental (ficha clínica). Un contacto CRM se "convierte en paciente"
- * (1:1 por org vía unique). NTS 139-MINSA/2018: la filiación sigue la ficha
- * odontológica MINSA; los registros clínicos son append-only (ver migración:
- * REVOKE UPDATE/DELETE) con autor+timestamp como prerrequisito de firma.
- */
+/** Ficha clínica independiente de sus interlocutores y responsables CRM. */
 export const patient = pgTable(
   "patient",
   {
     id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
     organizationId: orgFk("organization_id"),
-    contactId: uuid("contact_id")
-      .notNull()
-      .references(() => contact.id),
+    displayName: text("display_name").notNull(),
+    bloodGroup: text("blood_group").$type<BloodGroup>(),
     patientNumber: integer("patient_number").notNull(),
     docType: text("doc_type"),
     docNumber: text("doc_number"),
@@ -51,7 +48,6 @@ export const patient = pgTable(
     insuranceType: text("insurance_type"),
     insuranceDetail: text("insurance_detail"),
     referralSource: text("referral_source"),
-    guardianContactId: uuid("guardian_contact_id").references(() => contact.id),
     dataConsentAt: timestamp("data_consent_at", { withTimezone: true }),
     dataConsentBy: text("data_consent_by").references(() => user.id),
     registeredBranchId: uuid("registered_branch_id").references(() => branch.id),
@@ -66,13 +62,80 @@ export const patient = pgTable(
     ...timestamps,
   },
   (table) => [
-    uniqueIndex("patient_org_contact_uidx").on(table.organizationId, table.contactId),
+    uniqueIndex("patient_org_id_uidx").on(table.organizationId, table.id),
+    check("patient_blood_group_check", sql`${table.bloodGroup} IS NULL OR ${table.bloodGroup} IN ('A+','A-','B+','B-','AB+','AB-','O+','O-','unknown')`),
     uniqueIndex("patient_org_number_uidx").on(table.organizationId, table.patientNumber),
     uniqueIndex("patient_org_doc_uidx")
       .on(table.organizationId, table.docType, table.docNumber)
       .where(sql`"doc_number" IS NOT NULL`),
   ],
 )
+
+export const patientContact = pgTable("patient_contact", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  organizationId: orgFk("organization_id"),
+  patientId: uuid("patient_id").notNull(),
+  contactId: uuid("contact_id").notNull(),
+  relationship: text("relationship").$type<ContactRelationship>().notNull(),
+  relationshipDetail: text("relationship_detail"),
+  isPreferred: boolean("is_preferred").notNull().default(false),
+  createdBy: text("created_by").references(() => user.id),
+  ...timestamps,
+}, table => [
+  foreignKey({ columns: [table.organizationId, table.patientId], foreignColumns: [patient.organizationId, patient.id] }),
+  foreignKey({ columns: [table.organizationId, table.contactId], foreignColumns: [contact.organizationId, contact.id] }),
+  uniqueIndex("patient_contact_org_patient_contact_uidx").on(table.organizationId, table.patientId, table.contactId),
+  uniqueIndex("patient_contact_self_patient_uidx").on(table.organizationId, table.patientId).where(sql`${table.relationship} = 'self'`),
+  uniqueIndex("patient_contact_self_contact_uidx").on(table.organizationId, table.contactId).where(sql`${table.relationship} = 'self'`),
+  uniqueIndex("patient_contact_preferred_uidx").on(table.organizationId, table.patientId).where(sql`${table.isPreferred}`),
+  check("patient_contact_relationship_check", sql`${table.relationship} IN ('self','guardian','family','other')`),
+  check("patient_contact_detail_check", sql`length(${table.relationshipDetail}) <= 100`),
+])
+
+export const patientRegistrationLink = pgTable("patient_registration_link", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  organizationId: orgFk("organization_id"),
+  contactId: uuid("contact_id").notNull(),
+  conversationId: uuid("conversation_id").notNull(),
+  tokenHash: text("token_hash").notNull(),
+  createdBy: text("created_by").notNull().references(() => user.id),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  consumedAt: timestamp("consumed_at", { withTimezone: true }),
+  revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, table => [
+  uniqueIndex("patient_registration_link_org_id_uidx").on(table.organizationId, table.id),
+  uniqueIndex("patient_registration_link_token_uidx").on(table.tokenHash),
+  foreignKey({ columns: [table.organizationId, table.contactId], foreignColumns: [contact.organizationId, contact.id] }),
+  foreignKey({ columns: [table.organizationId, table.conversationId], foreignColumns: [conversation.organizationId, conversation.id] }),
+])
+
+export const patientRegistration = pgTable("patient_registration", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  organizationId: orgFk("organization_id"),
+  patientId: uuid("patient_id").notNull(),
+  submissionId: uuid("submission_id"),
+  payloadHash: text("payload_hash"),
+  entryPoint: text("entry_point").$type<RegistrationEntryPoint | "legacy">().notNull(),
+  respondent: text("respondent").$type<RegistrationRespondent>(),
+  actorUserId: text("actor_user_id").references(() => user.id),
+  contextContactId: uuid("context_contact_id"),
+  conversationId: uuid("conversation_id"),
+  linkId: uuid("link_id"),
+  formVersion: integer("form_version"),
+  answers: jsonb("answers").$type<RegistrationAnswers | Record<string, never>>().notNull(),
+  privacyNotice: text("privacy_notice"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, table => [
+  uniqueIndex("patient_registration_org_patient_uidx").on(table.organizationId, table.patientId),
+  uniqueIndex("patient_registration_submission_uidx").on(table.organizationId, table.submissionId).where(sql`${table.submissionId} IS NOT NULL`),
+  foreignKey({ columns: [table.organizationId, table.patientId], foreignColumns: [patient.organizationId, patient.id] }),
+  foreignKey({ columns: [table.organizationId, table.contextContactId], foreignColumns: [contact.organizationId, contact.id] }),
+  foreignKey({ columns: [table.organizationId, table.conversationId], foreignColumns: [conversation.organizationId, conversation.id] }),
+  foreignKey({ columns: [table.organizationId, table.linkId], foreignColumns: [patientRegistrationLink.organizationId, patientRegistrationLink.id] }),
+  check("patient_registration_entry_check", sql`${table.entryPoint} IN ('platform','public_link','qr','conversation','legacy')`),
+  check("patient_registration_respondent_check", sql`${table.respondent} IS NULL OR ${table.respondent} IN ('patient','representative','staff')`),
+])
 
 /** Correlativos por organización (patient → HC-000123; futuros comprobantes). */
 export const orgCounter = pgTable(
@@ -158,7 +221,6 @@ export const patientAnamnesis = pgTable(
     version: integer("version").notNull(),
     answers: jsonb("answers").notNull(),
     createdBy: text("created_by")
-      .notNull()
       .references(() => user.id),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },

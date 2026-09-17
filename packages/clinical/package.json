@@ -3,13 +3,16 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Dominio clínico puro del odontograma NTS 188-MINSA/DGIESP-2022: anatomía FDI, catálogo de hallazgos y validación. Apto para navegador, sin dependencias de ejecución.",
+  "description": "Dominio clínico puro compartido por navegador, API y servicios.",
   "exports": {
     ".": "./src/index.ts"
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run"
+  },
+  "dependencies": {
+    "zod": "4.6.2"
   },
   "devDependencies": {
     "typescript": "7.0.2",

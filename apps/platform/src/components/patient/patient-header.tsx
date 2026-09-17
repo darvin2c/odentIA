@@ -14,8 +14,11 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@odentia/ui"
+import { ConfirmDialog } from "@odentia/ui-patterns"
 import { Link } from "@tanstack/react-router"
+import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
+import { ApiError, apiFetch } from "../../lib/api"
 import { useCanWrite } from "../../lib/crm"
 import { ageFrom, hcLabel, type PatientFull, type PatientSummary } from "../../lib/patients"
 import { formatMoney } from "../../lib/services"
@@ -91,13 +94,8 @@ export function PatientClinicalStrip({
       {shown.map((alert) => (
         <Badge
           key={alert.id}
-          variant={
-            alert.tone === "destructive"
-              ? "destructive"
-              : alert.tone === "warning"
-                ? "warning"
-                : "secondary"
-          }
+          variant={alert.tone === "destructive" ? "destructive" : alert.tone === "warning" ? "outline" : "secondary"}
+          className={alert.tone === "warning" ? "border-amber-300 bg-amber-50 text-amber-900" : undefined}
         >
           {alert.label}
         </Badge>
@@ -123,9 +121,32 @@ export function PatientHeader({
   onAntecedentes?: () => void
 }) {
   const canWrite = useCanWrite()
+  const queryClient = useQueryClient()
   const [editing, setEditing] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
+  const [archiveOpen, setArchiveOpen] = useState(false)
+  const [archiveError, setArchiveError] = useState<string | null>(null)
   const patient = detail.patient
+  const archiveMutation = useMutation({
+    mutationFn: (nextActive: boolean) =>
+      apiFetch(`/api/patients/${patient.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ isActive: nextActive }),
+      }),
+    onSuccess: () => {
+      setArchiveError(null)
+      setArchiveOpen(false)
+      void queryClient.invalidateQueries({ queryKey: ["patient", patient.id] })
+      void queryClient.invalidateQueries({ queryKey: ["patients"] })
+    },
+    onError: (mutationError: unknown) => {
+      setArchiveError(
+        mutationError instanceof ApiError
+          ? (mutationError.shape.message ?? "No se pudo actualizar el estado.")
+          : "No se pudo actualizar el estado.",
+      )
+    },
+  })
   const age = ageFrom(patient.birthDate)
   const docLabel =
     patient.docType && patient.docNumber
@@ -140,7 +161,7 @@ export function PatientHeader({
           </BreadcrumbItem>
           <BreadcrumbSeparator />
           <BreadcrumbItem>
-            <BreadcrumbPage>{detail.displayName}</BreadcrumbPage>
+            <BreadcrumbPage>{detail.patient.displayName}</BreadcrumbPage>
           </BreadcrumbItem>
         </BreadcrumbList>
       </Breadcrumb>
@@ -149,15 +170,16 @@ export function PatientHeader({
           <div className="flex min-w-0 items-center gap-4">
             <PatientAvatar
               patientId={patient.id}
-              name={detail.displayName}
+              name={detail.patient.displayName}
               storageKey={patient.avatarStorageKey}
             />
             <div className="flex min-w-0 flex-col gap-1">
               <div className="flex flex-wrap items-center gap-2">
                 <h1 className="min-w-0 break-words text-xl font-semibold sm:text-2xl">
-                  {detail.displayName}
+                  {detail.patient.displayName}
                 </h1>
                 <Badge>{hcLabel(patient.patientNumber)}</Badge>
+                {!patient.isActive ? <Badge variant="outline">Archivado</Badge> : null}
               </div>
               <p className="text-sm text-muted-foreground">
                 {[
@@ -178,7 +200,7 @@ export function PatientHeader({
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
                   <DropdownMenuItem
-                    onSelect={() => {
+                    onClick={() => {
                       setMenuOpen(false)
                       setEditing(true)
                     }}
@@ -187,7 +209,7 @@ export function PatientHeader({
                   </DropdownMenuItem>
                   {onAntecedentes ? (
                     <DropdownMenuItem
-                      onSelect={() => {
+                      onClick={() => {
                         setMenuOpen(false)
                         onAntecedentes()
                       }}
@@ -195,6 +217,15 @@ export function PatientHeader({
                       Revisar antecedentes
                     </DropdownMenuItem>
                   ) : null}
+                  <DropdownMenuItem
+                    onClick={() => {
+                      setMenuOpen(false)
+                      setArchiveError(null)
+                      setArchiveOpen(true)
+                    }}
+                  >
+                    {patient.isActive ? "Archivar paciente" : "Reactivar paciente"}
+                  </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
             ) : null}
@@ -202,6 +233,25 @@ export function PatientHeader({
           </div>
         </CardContent>
       </Card>
+      <ConfirmDialog
+        open={archiveOpen}
+        onClose={() => {
+          if (!archiveMutation.isPending) {
+            setArchiveOpen(false)
+            setArchiveError(null)
+          }
+        }}
+        title={patient.isActive ? "Archivar paciente" : "Reactivar paciente"}
+        description={
+          archiveError ??
+          (patient.isActive
+            ? "La ficha se archiva pero conserva su historia clínica y relaciones. No se borra."
+            : "La ficha vuelve a estar activa en el padrón.")
+        }
+        confirmLabel={patient.isActive ? "Archivar" : "Reactivar"}
+        pending={archiveMutation.isPending}
+        onConfirm={() => archiveMutation.mutate(!patient.isActive)}
+      />
       <PatientClinicalStrip detail={detail} onAntecedentes={onAntecedentes} />
       <p className="text-sm text-muted-foreground">
         Última atención:{" "}

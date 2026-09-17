@@ -1,13 +1,16 @@
 import { Badge, Button, Field, FieldError, FieldLabel, Input } from "@odentia/ui"
 import {
   common,
+  ConfirmDialog,
   DataTable,
   EmptyState,
   FilterBar,
   FormDrawer,
   fieldErrorMessages,
   PageHeader,
+  RowActions,
   useListSearch,
+  PageShell,
 } from "@odentia/ui-patterns"
 import { useForm } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
@@ -16,9 +19,10 @@ import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-
 import { MessageCircle, Plus, Send } from "lucide-react"
 import { useMemo, useState } from "react"
 import { z } from "zod"
+import { ContactConversationDialog } from "../../components/contact-conversation-dialog"
 import { TagsInput } from "../../components/patient/tags-input"
-import { apiFetch } from "../../lib/api"
-import { type ContactListItem, type Pipeline, timeAgo } from "../../lib/crm"
+import { ApiError, apiFetch } from "../../lib/api"
+import { type ContactListItem, type Pipeline, timeAgo, useCanWrite } from "../../lib/crm"
 import { useOrgEvents } from "../../lib/org-events"
 
 export const Route = createFileRoute("/_org/contacts/")({
@@ -29,21 +33,36 @@ const orgRouteApi = getRouteApi("/_org")
 
 const contactSchema = z.object({
   displayName: z.string().min(1, "Ingresa el nombre"),
+  phone: z.string().max(50).optional(),
+  email: z.string().max(254).optional(),
   notes: z.string(),
   tags: z.array(z.string()),
 })
 
 type ContactFormValues = z.infer<typeof contactSchema>
 
-const emptyValues: ContactFormValues = { displayName: "", notes: "", tags: [] }
+const emptyValues: ContactFormValues = {
+  displayName: "",
+  phone: "",
+  email: "",
+  notes: "",
+  tags: [],
+}
+
+function mutationMessage(err: unknown, fallback: string): string {
+  if (err instanceof ApiError) return err.message || fallback
+  return err instanceof Error ? err.message : fallback
+}
 
 function ContactsPage() {
   const queryClient = useQueryClient()
   const { org } = orgRouteApi.useRouteContext()
+  const canWrite = useCanWrite()
   const listSearch = useListSearch()
   // SearchInput (FilterBar) escribe la búsqueda en `q` con debounce propio.
   const q = listSearch.get("q") ?? ""
   const stageId = listSearch.get("stageId") ?? undefined
+  const activeFilter = listSearch.get("isActive") ?? "true"
   const sort = listSearch.get("sort")
 
   const pipelinesQuery = useQuery({
@@ -57,12 +76,14 @@ function ContactsPage() {
   const stageName = useMemo(() => new Map(stages.map((s) => [s.id, s.name])), [stages])
 
   const contactsQuery = useQuery({
-    // El backend espera `q` directamente, sin mapeo.
-    queryKey: ["contacts", q, stageId],
+    // El backend espera `q` directamente, sin mapeo. Cambiar filtros resetea
+    // el cursor vía useListSearch.
+    queryKey: ["contacts", q, stageId, activeFilter],
     queryFn: () => {
       const params = new URLSearchParams()
       if (q.trim()) params.set("q", q.trim())
       if (stageId) params.set("stageId", stageId)
+      params.set("isActive", activeFilter === "false" ? "false" : activeFilter === "all" ? "all" : "true")
       return apiFetch<{ data: ContactListItem[]; nextCursor: string | null }>(
         `/api/contacts?${params}`,
       )
@@ -105,6 +126,11 @@ function ContactsPage() {
   })
 
   const [drawerOpen, setDrawerOpen] = useState(false)
+  const [dialog, setDialog] = useState<{
+    contact: ContactListItem
+    prepareRegistration: boolean
+  } | null>(null)
+  const [archiving, setArchiving] = useState<ContactListItem | null>(null)
 
   const saveMutation = useMutation({
     mutationFn: async (values: ContactFormValues) => {
@@ -112,6 +138,8 @@ function ContactsPage() {
         method: "POST",
         body: JSON.stringify({
           displayName: values.displayName,
+          phone: values.phone?.trim() ? values.phone.trim() : undefined,
+          email: values.email?.trim() ? values.email.trim() : undefined,
           notes: values.notes || undefined,
           tags: values.tags,
         }),
@@ -120,6 +148,18 @@ function ContactsPage() {
     onSuccess: () => {
       setDrawerOpen(false)
       form.reset()
+      void queryClient.invalidateQueries({ queryKey: ["contacts"] })
+    },
+  })
+
+  const activeMutation = useMutation({
+    mutationFn: (input: { id: string; isActive: boolean }) =>
+      apiFetch(`/api/contacts/${input.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ isActive: input.isActive }),
+      }),
+    onSuccess: () => {
+      setArchiving(null)
       void queryClient.invalidateQueries({ queryKey: ["contacts"] })
     },
   })
@@ -136,13 +176,16 @@ function ContactsPage() {
         accessorKey: "displayName",
         header: "Nombre",
         cell: ({ row }) => (
-          <Link
-            to="/contacts/$contactId"
-            params={{ contactId: row.original.id }}
-            className="font-medium hover:underline"
-          >
-            {row.original.displayName}
-          </Link>
+          <span className="flex items-center gap-2">
+            <Link
+              to="/contacts/$contactId"
+              params={{ contactId: row.original.id }}
+              className="font-medium hover:underline"
+            >
+              {row.original.displayName}
+            </Link>
+            {!row.original.isActive && <Badge variant="secondary">Archivado</Badge>}
+          </span>
         ),
       },
       {
@@ -193,11 +236,60 @@ function ContactsPage() {
           return member ? member.user.name : <span className="text-muted-foreground">—</span>
         },
       },
+      {
+        id: "actions",
+        header: "",
+        cell: ({ row }) => (
+          <RowActions
+            label={`Acciones de ${row.original.displayName}`}
+            items={[
+              {
+                key: "conversar",
+                label: "Conversar",
+                onSelect: () =>
+                  setDialog({ contact: row.original, prepareRegistration: false }),
+              },
+              ...(canWrite
+                ? [
+                    {
+                      key: "registro",
+                      label: "Enviar registro",
+                      onSelect: () =>
+                        setDialog({ contact: row.original, prepareRegistration: true }),
+                    },
+                  ]
+                : []),
+              ...(canWrite
+                ? [
+                    row.original.isActive
+                      ? {
+                          key: "archivar",
+                          label: "Archivar",
+                          tone: "danger" as const,
+                          onSelect: () => {
+                            activeMutation.reset()
+                            setArchiving(row.original)
+                          },
+                        }
+                      : {
+                          key: "reactivar",
+                          label: "Reactivar",
+                          onSelect: () => {
+                            activeMutation.reset()
+                            setArchiving(row.original)
+                          },
+                        },
+                  ]
+                : []),
+            ]}
+          />
+        ),
+      },
     ],
-    [org.members, stageName],
+    [org.members, stageName, canWrite, activeMutation],
   )
 
-  const hasFilters = q.trim() !== "" || stageId !== undefined
+  const hasFilters = q.trim() !== "" || stageId !== undefined || activeFilter !== "true"
   const table = useReactTable({
     data: visibleContacts,
     columns,
@@ -205,7 +297,7 @@ function ContactsPage() {
   })
 
   return (
-    <div className="flex flex-col gap-6">
+    <PageShell className="flex flex-col gap-2">
       <PageHeader
         title="Contactos"
         subtitle="Pacientes y conversaciones asociadas"
@@ -219,6 +311,16 @@ function ContactsPage() {
       <FilterBar
         filters={[
           {
+            key: "isActive",
+            label: "Estado",
+            type: "select",
+            options: [
+              { value: "true", label: "Activos" },
+              { value: "false", label: "Archivados" },
+              { value: "all", label: "Todos" },
+            ],
+          },
+          {
             key: "stageId",
             label: "Etapa",
             type: "select",
@@ -229,7 +331,7 @@ function ContactsPage() {
           { value: "nombre", label: "Nombre" },
           { value: "actividad", label: "Última actividad" },
         ]}
-        searchPlaceholder="Buscar contacto"
+        searchPlaceholder="Buscar por nombre, teléfono o correo"
       />
       {visibleContacts.length === 0 && !contactsQuery.isLoading ? (
         <EmptyState
@@ -272,6 +374,31 @@ function ContactsPage() {
               </Field>
             )}
           </form.Field>
+          <form.Field name="phone">
+            {(field) => (
+              <Field>
+                <FieldLabel>Teléfono (opcional, declarado)</FieldLabel>
+                <Input
+                  value={field.state.value ?? ""}
+                  onChange={(e) => field.handleChange(e.target.value)}
+                />
+                <FieldError>{fieldErrorMessages(field.state.meta.errors)}</FieldError>
+              </Field>
+            )}
+          </form.Field>
+          <form.Field name="email">
+            {(field) => (
+              <Field>
+                <FieldLabel>Correo (opcional, declarado)</FieldLabel>
+                <Input
+                  type="email"
+                  value={field.state.value ?? ""}
+                  onChange={(e) => field.handleChange(e.target.value)}
+                />
+                <FieldError>{fieldErrorMessages(field.state.meta.errors)}</FieldError>
+              </Field>
+            )}
+          </form.Field>
           <form.Field name="notes">
             {(field) => (
               <Field>
@@ -299,6 +426,46 @@ function ContactsPage() {
           </form.Field>
         </div>
       </FormDrawer>
-    </div>
+      <ContactConversationDialog
+        open={dialog !== null}
+        onClose={() => setDialog(null)}
+        contacts={
+          dialog
+            ? [
+                {
+                  contactId: dialog.contact.id,
+                  displayName: dialog.contact.displayName,
+                  isPreferred: true,
+                },
+              ]
+            : []
+        }
+        prepareRegistration={dialog?.prepareRegistration ?? false}
+      />
+      <ConfirmDialog
+        open={archiving !== null}
+        onClose={() => {
+          if (!activeMutation.isPending) {
+            activeMutation.reset()
+            setArchiving(null)
+          }
+        }}
+        onConfirm={() =>
+          archiving &&
+          activeMutation.mutate({ id: archiving.id, isActive: !archiving.isActive })
+        }
+        title={archiving?.isActive ? `Archivar ${archiving?.displayName ?? ""}` : `Reactivar ${archiving?.displayName ?? ""}`}
+        description={
+          activeMutation.error
+            ? mutationMessage(activeMutation.error, "No se pudo actualizar el contacto.")
+            : archiving?.isActive
+              ? "El contacto archivado conserva identidades y conversaciones. No se podrán iniciar nuevas conversaciones ni crear vínculos o envíos hasta reactivarlo."
+              : "El contacto volverá a estar disponible para conversaciones, vínculos y envíos. Los enlaces de registro revocados al archivar no se reactivan."
+        }
+        confirmLabel={archiving?.isActive ? "Archivar" : "Reactivar"}
+        variant={archiving?.isActive ? "destructive" : "default"}
+        pending={activeMutation.isPending}
+      />
+    </PageShell>
   )
 }

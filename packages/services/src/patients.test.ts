@@ -8,13 +8,23 @@ import {
   getOdontogram,
   getPatientHealth,
   listAnamnesisVersions,
+  listClinicalNotes,
   listOdontogramAssessments,
   reviewLegacyEntry,
   savePatientHealth,
   voidOdontogramEntry,
 } from "./clinical.js"
-import { createContact } from "./contacts.js"
-import { createPatient, getPatientByContact, listPatients, nextPatientNumber } from "./patients.js"
+import { createContact, getContact } from "./contacts.js"
+import {
+  createPatient,
+  findPatientDuplicates,
+  getPatient,
+  listPatients,
+  listPatientsByContact,
+  nextPatientNumber,
+  removePatientContact,
+  setPatientContact,
+} from "./patients.js"
 import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
 
 setupTestDb()
@@ -64,7 +74,7 @@ it("pagina por fecha sin perder microsegundos ni duplicar empates", async () => 
   }
 })
 
-it("crear paciente directo y por promoción; doble promoción da 409", async () => {
+it("crear paciente directo y vinculado; segundo self del mismo contacto da 409", async () => {
   await seedUserAndCie()
   const direct = await withOrgContext(appDb, "org_a", (tx) =>
     createPatient(tx, "org_a", ACTOR, {
@@ -74,24 +84,234 @@ it("crear paciente directo y por promoción; doble promoción da 409", async () 
     }),
   )
   expect(direct.patientNumber).toBeGreaterThan(0)
+  // Alta interna rápida: sin nacimiento conocido ni contacto asociado.
+  expect(direct.birthDate).toBeNull()
+  const directDetail = await withOrgContext(appDb, "org_a", (tx) =>
+    getPatient(tx, "org_a", direct.id),
+  )
+  expect(directDetail.patient.displayName).toBe("María Pérez")
+  expect(directDetail.contacts).toEqual([])
+  expect(directDetail.registration).toMatchObject({ entryPoint: "platform", respondent: "staff" })
 
   const contact = await withOrgContext(appDb, "org_a", (tx) =>
     createContact(tx, "org_a", { displayName: "Juan Ríos" }),
   )
-  const promoted = await withOrgContext(appDb, "org_a", (tx) =>
-    createPatient(tx, "org_a", ACTOR, { contactId: contact.id }),
+  const linked = await withOrgContext(appDb, "org_a", (tx) =>
+    createPatient(tx, "org_a", ACTOR, {
+      displayName: "Juan Ríos",
+      contacts: [{ contactId: contact.id, relationship: "self", isPreferred: true }],
+    }),
   )
-  expect(promoted.contactId).toBe(contact.id)
   const byContact = await withOrgContext(appDb, "org_a", (tx) =>
-    getPatientByContact(tx, "org_a", contact.id),
+    listPatientsByContact(tx, "org_a", contact.id),
   )
-  expect(byContact?.id).toBe(promoted.id)
+  expect(byContact).toEqual([
+    expect.objectContaining({
+      id: linked.id,
+      displayName: "Juan Ríos",
+      relationship: "self",
+      isPreferred: true,
+    }),
+  ])
 
   await expect(
     withOrgContext(appDb, "org_a", (tx) =>
-      createPatient(tx, "org_a", ACTOR, { contactId: contact.id }),
+      createPatient(tx, "org_a", ACTOR, {
+        displayName: "Juan Duplicado",
+        contacts: [{ contactId: contact.id, relationship: "self", isPreferred: false }],
+      }),
     ),
   ).rejects.toMatchObject({ status: 409 })
+})
+
+it("María es self de su ficha y guardian de Pedro; el teléfono compartido no bloquea", async () => {
+  const maria = await withOrgContext(appDb, "org_a", (tx) =>
+    createContact(tx, "org_a", { displayName: "María Madre" }),
+  )
+  const fichaMaria = await withOrgContext(appDb, "org_a", (tx) =>
+    createPatient(tx, "org_a", ACTOR, {
+      displayName: "María Madre",
+      phone: "+51999111222",
+      contacts: [{ contactId: maria.id, relationship: "self", isPreferred: true }],
+    }),
+  )
+  const pedro = await withOrgContext(appDb, "org_a", (tx) =>
+    createPatient(tx, "org_a", ACTOR, {
+      displayName: "Pedro Hijo",
+      birthDate: "2020-05-06",
+      phone: "+51999111222",
+      contacts: [
+        { contactId: maria.id, relationship: "guardian", relationshipDetail: "Madre", isPreferred: true },
+      ],
+    }),
+  )
+  // El teléfono compartido no modificó a María ni bloqueó a Pedro.
+  const detalleMaria = await withOrgContext(appDb, "org_a", (tx) =>
+    getPatient(tx, "org_a", fichaMaria.id),
+  )
+  expect(detalleMaria.patient.phone).toBe("+51999111222")
+  const detallePedro = await withOrgContext(appDb, "org_a", (tx) =>
+    getPatient(tx, "org_a", pedro.id),
+  )
+  expect(detallePedro.contacts).toEqual([
+    expect.objectContaining({
+      contactId: maria.id,
+      displayName: "María Madre",
+      relationship: "guardian",
+      relationshipDetail: "Madre",
+      isPreferred: true,
+    }),
+  ])
+  const vinculadas = await withOrgContext(appDb, "org_a", (tx) =>
+    listPatientsByContact(tx, "org_a", maria.id),
+  )
+  expect(vinculadas).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ id: fichaMaria.id, relationship: "self" }),
+      expect.objectContaining({ id: pedro.id, relationship: "guardian" }),
+    ]),
+  )
+  expect(vinculadas).toHaveLength(2)
+})
+
+it("eliminar la relación guardian conserva personas e historial", async () => {
+  const tutor = await withOrgContext(appDb, "org_a", (tx) =>
+    createContact(tx, "org_a", { displayName: "Tutor Conservado" }),
+  )
+  const hijo = await withOrgContext(appDb, "org_a", (tx) =>
+    createPatient(tx, "org_a", ACTOR, {
+      displayName: "Hijo Conservado",
+      contacts: [{ contactId: tutor.id, relationship: "guardian", isPreferred: true }],
+    }),
+  )
+  const nota = await withOrgContext(appDb, "org_a", (tx) =>
+    addClinicalNote(tx, "org_a", ACTOR, hijo.id, { note: "Control conservado" }),
+  )
+  await withOrgContext(appDb, "org_a", (tx) =>
+    removePatientContact(tx, "org_a", ACTOR, hijo.id, tutor.id),
+  )
+  const detalle = await withOrgContext(appDb, "org_a", (tx) =>
+    getPatient(tx, "org_a", hijo.id),
+  )
+  expect(detalle.contacts).toEqual([])
+  // Ni el paciente ni el contacto se borran con la relación.
+  expect(detalle.patient.isActive).toBe(true)
+  const contactoVivo = await withOrgContext(appDb, "org_a", (tx) =>
+    getContact(tx, "org_a", tutor.id),
+  )
+  expect(contactoVivo.contact.id).toBe(tutor.id)
+  const notas = await withOrgContext(appDb, "org_a", (tx) =>
+    listClinicalNotes(tx, "org_a", hijo.id, {}),
+  )
+  expect(notas.items.map((n) => n.id)).toContain(nota.id)
+})
+
+it("el preferente conserva a lo sumo uno aunque se marque en concurrencia", async () => {
+  const c1 = await withOrgContext(appDb, "org_a", (tx) =>
+    createContact(tx, "org_a", { displayName: "Preferente Uno" }),
+  )
+  const c2 = await withOrgContext(appDb, "org_a", (tx) =>
+    createContact(tx, "org_a", { displayName: "Preferente Dos" }),
+  )
+  const hijo = await withOrgContext(appDb, "org_a", (tx) =>
+    createPatient(tx, "org_a", ACTOR, {
+      displayName: "Hijo Preferente",
+      contacts: [{ contactId: c1.id, relationship: "guardian", isPreferred: true }],
+    }),
+  )
+  await withOrgContext(appDb, "org_a", (tx) =>
+    setPatientContact(tx, "org_a", ACTOR, hijo.id, {
+      contactId: c2.id,
+      relationship: "family",
+      isPreferred: false,
+    }),
+  )
+  const intentos = await Promise.allSettled([
+    withOrgContext(appDb, "org_a", (tx) =>
+      setPatientContact(tx, "org_a", ACTOR, hijo.id, {
+        contactId: c1.id,
+        relationship: "guardian",
+        isPreferred: true,
+      }),
+    ),
+    withOrgContext(appDb, "org_a", (tx) =>
+      setPatientContact(tx, "org_a", ACTOR, hijo.id, {
+        contactId: c2.id,
+        relationship: "family",
+        isPreferred: true,
+      }),
+    ),
+  ])
+  expect(intentos.some((r) => r.status === "fulfilled")).toBe(true)
+  const detalle = await withOrgContext(appDb, "org_a", (tx) =>
+    getPatient(tx, "org_a", hijo.id),
+  )
+  expect(detalle.contacts.filter((c) => c.isPreferred)).toHaveLength(1)
+})
+
+it("un contacto de otra organización jamás se relaciona", async () => {
+  const ajeno = await withOrgContext(appDb, "org_b", (tx) =>
+    createContact(tx, "org_b", { displayName: "Contacto Ajeno" }),
+  )
+  const propio = await withOrgContext(appDb, "org_a", (tx) =>
+    createPatient(tx, "org_a", ACTOR, { displayName: "Paciente Propio" }),
+  )
+  let estado: number | null = null
+  try {
+    await withOrgContext(appDb, "org_a", (tx) =>
+      setPatientContact(tx, "org_a", ACTOR, propio.id, {
+        contactId: ajeno.id,
+        relationship: "family",
+        isPreferred: false,
+      }),
+    )
+  } catch (error) {
+    if (error && typeof error === "object" && "status" in error) {
+      const status = error.status
+      estado = typeof status === "number" ? status : null
+    }
+  }
+  await expect(
+    withOrgContext(appDb, "org_a", (tx) => listPatientsByContact(tx, "org_a", ajeno.id)),
+  ).rejects.toMatchObject({ status: 404 })
+})
+
+it("duplicados: documento exacto y nombre+nacimiento sugieren sin bloquear a la familia", async () => {
+  const base = await withOrgContext(appDb, "org_a", (tx) =>
+    createPatient(tx, "org_a", ACTOR, {
+      displayName: "Rosa Duplicada",
+      birthDate: "1990-02-03",
+      docType: "DNI",
+      docNumber: "12121212",
+      phone: "+51999888777",
+    }),
+  )
+  const porDocumento = await withOrgContext(appDb, "org_a", (tx) =>
+    findPatientDuplicates(tx, "org_a", { docType: "DNI", docNumber: "12121212" }),
+  )
+  expect(porDocumento).toEqual(
+    expect.arrayContaining([expect.objectContaining({ id: base.id })]),
+  )
+  expect(porDocumento.length).toBeLessThanOrEqual(10)
+  const porNombre = await withOrgContext(appDb, "org_a", (tx) =>
+    findPatientDuplicates(tx, "org_a", {
+      displayName: "  rosa   DUPLICADA ",
+      birthDate: "1990-02-03",
+    }),
+  )
+  expect(porNombre).toEqual(expect.arrayContaining([expect.objectContaining({ id: base.id })]))
+  // Coincidencia débil (mismo teléfono de un familiar): sugiere pero no bloquea.
+  const porTelefono = await withOrgContext(appDb, "org_a", (tx) =>
+    findPatientDuplicates(tx, "org_a", { phone: "+51999888777" }),
+  )
+  expect(porTelefono).toEqual(expect.arrayContaining([expect.objectContaining({ id: base.id })]))
+  const familiar = await withOrgContext(appDb, "org_a", (tx) =>
+    createPatient(tx, "org_a", ACTOR, {
+      displayName: "Hija de Rosa",
+      phone: "+51999888777",
+    }),
+  )
+  expect(familiar.id).not.toBe(base.id)
 })
 
 it("documento duplicado da 409 y el correlativo es por org", async () => {

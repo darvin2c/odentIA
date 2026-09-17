@@ -18,7 +18,8 @@ import { fetchTreatmentPlanDetail, fetchTreatmentPlans } from "../../lib/budgets
 import { timeAgo, useCanWrite } from "../../lib/crm"
 import { sexLabel } from "../../lib/patient-overview"
 import type { PatientFull, PatientSummary } from "../../lib/patients"
-import { ageFrom, fetchPatientHealth } from "../../lib/patients"
+import { ageFrom, fetchPatientHealth, hasHealthInfo, isHealthReviewPending } from "../../lib/patients"
+import { PatientContactSection } from "./patient-contact-section"
 
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -64,11 +65,8 @@ export function ResumenTab({
   })
 
   const health = healthQuery.data?.data ?? null
-  const triageEmpty =
-    (health?.allergies.length ?? 0) === 0 &&
-    (health?.conditions.length ?? 0) === 0 &&
-    (health?.medications.length ?? 0) === 0 &&
-    health?.latestAnamnesis == null
+  const hasInfo = hasHealthInfo(health)
+  const pendingReview = isHealthReviewPending(health)
 
   const resolved = summary ?? summaryQuery.data?.data ?? null
   const patient = detail.patient
@@ -87,22 +85,26 @@ export function ResumenTab({
 
   return (
     <div className="flex flex-col gap-4">
-      {canWrite && healthQuery.isFetched && triageEmpty ? (
+      {canWrite && healthQuery.isFetched && (pendingReview || !hasInfo) ? (
         <Card className="border-primary/40 bg-primary/5">
           <CardContent className="flex flex-wrap items-center justify-between gap-3 pt-4">
             <div className="flex items-start gap-2">
               <ClipboardList className="mt-0.5 size-4 text-primary" aria-hidden="true" />
               <div className="flex flex-col gap-0.5">
                 <p className="text-sm font-medium">
-                  Este paciente aún no tiene antecedentes registrados.
+                  {pendingReview
+                    ? "Información declarada pendiente de revisión."
+                    : "Este paciente aún no tiene antecedentes registrados."}
                 </p>
                 <p className="text-xs text-muted-foreground">
-                  Registra alergias, condiciones, medicación y entrevista en un solo guardado.
+                  {pendingReview
+                    ? "Lo declarado por el paciente/responsable está visible en alertas. Revísalo antes de confirmar."
+                    : "Registra alergias, condiciones, medicación y entrevista en un solo guardado."}
                 </p>
               </div>
             </div>
             <Button type="button" onClick={() => onTabChange("antecedentes")}>
-              Registrar antecedentes
+              {pendingReview ? "Revisar información declarada" : "Registrar antecedentes"}
             </Button>
           </CardContent>
         </Card>
@@ -195,6 +197,8 @@ export function ResumenTab({
         </CardContent>
       </Card>
 
+      <PatientContactSection detail={detail} />
+
       <Collapsible>
         <Card>
           <CardHeader className="pb-3">
@@ -207,7 +211,7 @@ export function ResumenTab({
           <CollapsibleContent>
             <CardContent>
               <dl className="grid min-w-0 grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
-                <Field label="Nombre completo">{detail.displayName}</Field>
+                <Field label="Nombre completo">{detail.patient.displayName}</Field>
                 <Field label="Documento">
                   {patient.docType && patient.docNumber
                     ? `${patient.docType} ${patient.docNumber}`
@@ -227,7 +231,6 @@ export function ResumenTab({
                     ? `${patient.insuranceType}${patient.insuranceDetail ? ` · ${patient.insuranceDetail}` : ""}`
                     : missing}
                 </Field>
-                <Field label="Tutor / apoderado">{detail.guardian?.displayName ?? missing}</Field>
                 <Field label="Contacto de emergencia">
                   {patient.emergencyContactName
                     ? `${patient.emergencyContactName}${patient.emergencyContactPhone ? ` · ${patient.emergencyContactPhone}` : ""}`

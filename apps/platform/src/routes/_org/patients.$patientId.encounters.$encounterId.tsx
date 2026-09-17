@@ -7,7 +7,7 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "@odentia/ui"
-import { EmptyState } from "@odentia/ui-patterns"
+import { EmptyState, PageShell } from "@odentia/ui-patterns"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
 import { ClipboardList } from "lucide-react"
@@ -85,14 +85,18 @@ function EncounterPage() {
   }
 
   if (patientQuery.isLoading || encounterQuery.isLoading) {
-    return <p className="text-sm text-muted-foreground">Cargando atención…</p>
+    return (
+      <PageShell>
+        <p className="text-sm text-muted-foreground">Cargando atención…</p>
+      </PageShell>
+    )
   }
   if (!patientQuery.data || !encounterQuery.data) {
     return (
-      <div className="flex flex-col gap-4">
+      <PageShell className="flex flex-col gap-4">
         <EncounterBreadcrumb
           patientId={patientId}
-          patientName={patientQuery.data?.data.displayName}
+          patientName={patientQuery.data?.data.patient.displayName}
         />
         <EmptyState
           icon={ClipboardList}
@@ -103,7 +107,7 @@ function EncounterPage() {
             "La atención no existe o no tienes acceso."
           }
         />
-      </div>
+      </PageShell>
     )
   }
 
@@ -111,32 +115,34 @@ function EncounterPage() {
   const detail = encounterQuery.data.data
   if (detail.encounter.status === "borrador" && canWrite) {
     return (
-      <EncounterEditor
-        key={encounterId}
-        patientId={patientId}
-        patient={patient}
-        detail={detail}
-        onChanged={changed}
-        onFinalized={finalized}
-        onBack={back}
-      />
+      <PageShell>
+        <EncounterEditor
+          key={encounterId}
+          patientId={patientId}
+          patient={patient}
+          detail={detail}
+          onChanged={changed}
+          onFinalized={finalized}
+          onBack={back}
+        />
+      </PageShell>
     )
   }
   return (
-    <div className="flex flex-col gap-6">
+    <PageShell className="flex flex-col gap-6">
       <header className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex flex-col gap-2">
-          <EncounterBreadcrumb patientId={patientId} patientName={patient.displayName} />
+          <EncounterBreadcrumb patientId={patientId} patientName={patient.patient.displayName} />
           <h1 className="text-2xl font-semibold">
             Atención {detail.encounter.status === "finalizada" ? "finalizada" : "en curso"}
           </h1>
           <p className="text-sm text-muted-foreground">
-            {patient.displayName} · {hcLabel(patient.patient.patientNumber)}
+            {patient.patient.displayName} · {hcLabel(patient.patient.patientNumber)}
           </p>
         </div>
         <Badge variant="outline">Solo lectura</Badge>
       </header>
       <EncounterDetailView patientId={patientId} detail={detail} />
-    </div>
+    </PageShell>
   )
 }

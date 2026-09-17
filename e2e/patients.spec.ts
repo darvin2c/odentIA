@@ -56,14 +56,63 @@ async function login(page: Page, user: typeof userA) {
 }
 
 async function onboard(page: Page, org: typeof orgA) {
-  await expect(page).toHaveURL(/onboarding/)
-  await page.getByLabel("Nombre de la organización").fill(org.name)
-  await page.getByLabel("Slug (subdominio)").fill(org.slug)
-  await page.getByRole("button", { name: "Continuar" }).click()
-  await page.getByLabel("Razón social").fill(`${org.name} S.A.C.`)
-  await page.getByRole("button", { name: "Continuar" }).click()
-  await page.getByLabel("Nombre de la sucursal").fill("Sede Central")
-  await page.getByRole("button", { name: "Crear organización" }).click()
+  // Alta real autenticada con la API del repo (sin tocar el onboarding de producción):
+  // organization.create + set-active, y perfil/sucursal con header x-odentia-org
+  // (mismo contrato que patient-registration.spec.ts). Después se navega al tenant.
+  const result = await page.evaluate(
+    async ({ apiBase, org }) => {
+      const fail = (step: string, status: number, body: unknown): never => {
+        throw new Error(`onboard:${step}:${status}:${JSON.stringify(body)?.slice(0, 300)}`)
+      }
+      const post = async (path: string, body: unknown) => {
+        const response = await fetch(`${apiBase}${path}`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify(body),
+        })
+        return { status: response.status, data: (await response.json().catch(() => null)) as unknown }
+      }
+      const created = await post("/api/auth/organization/create", { name: org.name, slug: org.slug })
+      if (created.status !== 200 && created.status !== 201) {
+        fail("organization.create", created.status, created.data)
+      }
+      const createdData = created.data as {
+        id?: string
+        data?: { id?: string }
+        organization?: { id?: string }
+      } | null
+      const orgId = createdData?.id ?? createdData?.data?.id ?? createdData?.organization?.id
+      if (orgId) {
+        const active = await post("/api/auth/organization/set-active", { organizationId: orgId })
+        if (active.status !== 200 && active.status !== 201) {
+          fail("organization.set-active", active.status, active.data)
+        }
+      }
+      const profileResponse = await fetch(`${apiBase}/api/org-profile`, {
+        method: "PUT",
+        headers: { "content-type": "application/json", "x-odentia-org": org.slug },
+        credentials: "include",
+        body: JSON.stringify({ legalName: `${org.name} S.A.C.`, countryCode: "PE" }),
+      })
+      const profileData = (await profileResponse.json().catch(() => null)) as unknown
+      if (!profileResponse.ok) fail("org-profile", profileResponse.status, profileData)
+      const branchResponse = await fetch(`${apiBase}/api/branches`, {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-odentia-org": org.slug },
+        credentials: "include",
+        body: JSON.stringify({ name: "Sede Central" }),
+      })
+      const branchData = (await branchResponse.json().catch(() => null)) as unknown
+      if (branchResponse.status !== 200 && branchResponse.status !== 201) {
+        fail("branches", branchResponse.status, branchData)
+      }
+      return { ok: true as const }
+    },
+    { apiBase: API, org },
+  )
+  expect(result.ok).toBe(true)
+  await gotoHydrated(page, tenant(org.slug, "/branches"))
   await expect(page).toHaveURL(new RegExp(`^https://${org.slug}\\.odentia\\.localhost/branches`))
 }
 
@@ -93,44 +142,74 @@ test("pacientes: ficha clínica, alertas, nota CIE-10, odontograma y aislamiento
   await verifyEmail(pageA, userA.email)
   await login(pageA, userA)
   await onboard(pageA, orgA)
+  const createdContact = await api<{ data: { id: string } }>(pageA, "POST", "/api/contacts", orgA.slug, { displayName: "María Pérez" })
+  expect(createdContact.status).toBe(201)
+  const contactId = createdContact.body.data.id
 
-  // Crear contacto y verificar la sección Paciente en su detalle.
-  const contact = await api<{ data: { id: string } }>(pageA, "POST", "/api/contacts", orgA.slug, {
-    displayName: "María Pérez",
-  })
-  expect(contact.status).toBe(201)
-  const contactId = contact.body.data.id
-
-  await gotoHydrated(pageA, tenant(orgA.slug, `/contacts/${contactId}`))
-  await expect(pageA.getByRole("button", { name: "Convertir en paciente" })).toBeVisible({
-    timeout: 15_000,
-  })
-
-  // Convertir en paciente con DNI.
+  // Registrar paciente vinculado al contacto (vínculo self declarado por personal).
   const patient = await api<{ data: { id: string; patientNumber: number } }>(
     pageA,
     "POST",
     "/api/patients",
     orgA.slug,
-    { contactId, docType: "DNI", docNumber: "12345678" },
+    {
+      submissionId: crypto.randomUUID(),
+      answers: {
+        demographics: { displayName: "María Pérez", docType: "DNI", docNumber: "12345678" },
+        respondent: "staff",
+        privacyAccepted: false,
+      },
+      contacts: [{ contactId, relationship: "self", isPreferred: true }],
+    },
   )
   expect(patient.status).toBe(201)
   const patientId = patient.body.data.id
+
+  // El detalle expone el vínculo self y la procedencia interna.
+  const linked = await api<{
+    data: {
+      patient: { displayName: string }
+      contacts: { contactId: string; relationship: string; isPreferred: boolean }[]
+      registration: { entryPoint: string; respondent: string } | null
+    }
+  }>(pageA, "GET", `/api/patients/${patientId}`, orgA.slug)
+  expect(linked.status).toBe(200)
+  expect(linked.body.data.contacts).toEqual([
+    expect.objectContaining({ contactId, relationship: "self", isPreferred: true }),
+  ])
+  expect(linked.body.data.registration).toMatchObject({
+    entryPoint: "platform",
+    respondent: "staff",
+  })
 
   // La ficha muestra el número de historia clínica asignado.
   await gotoHydrated(pageA, tenant(orgA.slug, `/patients/${patientId}`))
   await expect(pageA.getByText(/HC-\d{6}/).first()).toBeVisible({ timeout: 15_000 })
   await expect(pageA.getByText("María Pérez").first()).toBeVisible()
 
-  // Alta de alergia severa → chip rojo visible en Resumen.
-  const allergy = await api(pageA, "POST", `/api/patients/${patientId}/allergies`, orgA.slug, {
-    substance: "Penicilina",
-    severity: "severa",
+  // La ficha del contacto también expone al paciente vinculado como self.
+  const contactDetail = await api<{
+    data: { patients: { id: string; relationship: string; isPreferred: boolean }[] }
+  }>(pageA, "GET", `/api/contacts/${contactId}`, orgA.slug)
+  expect(contactDetail.status).toBe(200)
+  expect(contactDetail.body.data.patients).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ id: patientId, relationship: "self", isPreferred: true }),
+    ]),
+  )
+  // Alta de alergia severa por el agregado de salud → chip visible en Resumen.
+  const allergy = await api(pageA, "PUT", `/api/patients/${patientId}/health`, orgA.slug, {
+    expectedRevision: 0,
+    reviewStatus: { allergies: "recorded", conditions: "none", medications: "none" },
+    allergies: [{ substance: "Penicilina", severity: "severa" }],
+    conditions: [],
+    medications: [],
   })
-  expect(allergy.status).toBe(201)
+  expect(allergy.status).toBe(200)
   await pageA.reload()
   await waitForHydration(pageA)
   await expect(pageA.getByText("Penicilina").first()).toBeVisible({ timeout: 15_000 })
+
 
   // Registrar una nota desde el diálogo real de Historia.
   await pageA.getByRole("tab", { name: "Historia", exact: true }).click()
@@ -212,30 +291,32 @@ test("paciente plus: registro en drawer, avatar, atención, plan", async ({ page
   await gotoHydrated(page, tenant(org.slug, "/patients"))
   await page.getByRole("button", { name: "Nuevo paciente", exact: true }).click()
   await expect(page.getByRole("dialog", { name: "Nuevo paciente" })).toBeVisible()
+  // Wizard de registro: datos → contacto → salud → odontológicos → revisión.
   await page.getByLabel("Nombre del paciente").fill("Lucía Quispe")
   await page.getByRole("combobox", { name: "Tipo de documento" }).click()
   await page.getByRole("option", { name: "DNI", exact: true }).click()
   await page.getByLabel("Número de documento").fill("87654321")
-  await page.getByLabel("Teléfono", { exact: true }).fill("999432198")
   await page.getByRole("button", { name: "Siguiente", exact: true }).click()
+  await page.getByLabel("Teléfono", { exact: true }).fill("999432198")
   await page.getByLabel("Dirección", { exact: true }).fill("Av. Salud 123")
   await page.getByRole("button", { name: "Siguiente", exact: true }).click()
-  await page.getByRole("button", { name: "Registrar paciente", exact: true }).click()
-  await expect(page).toHaveURL(/\/patients\/[0-9a-f-]{36}\/triaje$/)
-  const patientId = new URL(page.url()).pathname.split("/").at(-2)!
-  await page.getByRole("button", { name: "Agregar alergia" }).click()
+  // Paso salud: declarar alergia con los mismos controles de antecedentes.
+  await page.getByRole("combobox", { name: "¿Tiene alergias?" }).click()
+  await page.getByRole("option", { name: "Sí", exact: true }).click()
+  await page.getByRole("button", { name: "Agregar otra" }).first().click()
   await page.getByLabel("Sustancia").fill("Látex")
-  await page.getByRole("combobox", { name: "Severidad" }).click()
+  await page.getByRole("combobox", { name: "Gravedad" }).click()
   await page.getByRole("option", { name: "Severa", exact: true }).click()
-  await page.getByLabel("Motivo de consulta").fill("Dolor en molar inferior")
-  await page.getByRole("button", { name: "Guardar triaje e ir a la ficha", exact: true }).click()
+  await page.getByRole("button", { name: "Siguiente", exact: true }).click()
+  // Paso odontológico sin respuestas: se omite y se avanza a revisión.
+  await page.getByRole("button", { name: "Siguiente", exact: true }).click()
+  await page.getByRole("button", { name: "Registrar paciente", exact: true }).click()
   await expect(page).toHaveURL(/\/patients\/[0-9a-f-]{36}(?:\?|$)/)
+  const patientId = new URL(page.url()).pathname.split("/").at(-1)!
   await expect(page.getByText(/HC-\d{6}/).first()).toBeVisible()
   await expect(
-    page.getByLabel("Alertas clínicas").getByText("Alergia: Látex (severa)", { exact: true }),
+    page.getByLabel("Alertas clínicas").getByText("Alergia severa: Látex", { exact: true }),
   ).toBeVisible()
-  await page.getByRole("tab", { name: "Historia", exact: true }).click()
-  await expect(page.getByText("Dolor en molar inferior", { exact: true })).toBeVisible()
 
   const uploaded = await page.evaluate(
     async ({ apiBase, patientId, slug }) => {
@@ -262,37 +343,97 @@ test("paciente plus: registro en drawer, avatar, atención, plan", async ({ page
     page.locator("header").getByRole("img", { name: "Foto de Lucía Quispe" }),
   ).toBeVisible()
 
+  // Oferta real de la org vía API del repo (sin depender de seed global):
+  // se reutiliza si ya existe, o se crea como prestación propia con tarifa.
   const catalog = await api<{ data: { id: string; code: string; name: string }[] }>(
     page,
     "GET",
     "/api/services",
     org.slug,
   )
-  const endodontics = catalog.body.data.find((service) => service.code === "ENDODONCIA")!
-  const budget = await api<{ data: { id: string } }>(
+  const existingService = catalog.body.data.find((service) => service.code === "ENDODONCIA")
+  const endodontics =
+    existingService ??
+    (await (async () => {
+      const createdService = await api<{ data: { id: string; code: string; name: string } }>(
+        page,
+        "POST",
+        "/api/services",
+        org.slug,
+        {
+          code: "ENDODONCIA",
+          name: "Endodoncia unirradicular",
+          specialty: "endodoncia",
+          scope: "tooth",
+          priceCents: 45000,
+          currency: "PEN",
+          durationMin: 60,
+        },
+      )
+      expect(createdService.status).toBe(201)
+      return createdService.body.data
+    })())
+  // La indicación nace en una atención borrador y pertenece a un plan;
+  // el presupuesto se arma desde el plan con sus ítems (contrato vigente).
+  const seedEncounter = await api<{ data: { id: string } }>(
     page,
     "POST",
-    `/api/patients/${patientId}/budgets`,
+    `/api/patients/${patientId}/encounters`,
     org.slug,
-    {
-      title: "Rehabilitación de Lucía",
-      currency: "PEN",
-    },
+    { reason: "Evaluación inicial" },
   )
-  expect(budget.status).toBe(201)
+  expect(seedEncounter.status).toBe(201)
+  const treatmentPlan = await api<{ data: { id: string } }>(
+    page,
+    "POST",
+    `/api/patients/${patientId}/plans`,
+    org.slug,
+    { title: "Plan de Lucía", originEncounterId: seedEncounter.body.data.id },
+  )
+  expect(treatmentPlan.status).toBe(201)
   const plan = await api<{ data: { id: string } }>(
     page,
     "POST",
     `/api/patients/${patientId}/plan/items`,
     org.slug,
     {
-      budgetId: budget.body.data.id,
       serviceId: endodontics.id,
+      planId: treatmentPlan.body.data.id,
+      sourceEncounterId: seedEncounter.body.data.id,
       toothNumber: 36,
       diagnosisCode: "K04.0",
     },
   )
   expect(plan.status).toBe(201)
+  const budget = await api<{ data: { id: string } }>(
+    page,
+    "POST",
+    `/api/patients/${patientId}/budgets`,
+    org.slug,
+    {
+      planId: treatmentPlan.body.data.id,
+      itemIds: [plan.body.data.id],
+      title: "Rehabilitación de Lucía",
+    },
+  )
+  expect(budget.status).toBe(201)
+  // Cerrar la atención semilla: el header ofrece "Nueva atención" solo sin borrador abierto.
+  const patchedSeed = await api(
+    page,
+    "PATCH",
+    `/api/patients/${patientId}/encounters/${seedEncounter.body.data.id}`,
+    org.slug,
+    { evolution: "Evaluación inicial sin complicaciones" },
+  )
+  expect(patchedSeed.status).toBe(200)
+  const finalizedSeed = await api(
+    page,
+    "POST",
+    `/api/patients/${patientId}/encounters/${seedEncounter.body.data.id}/finalize`,
+    org.slug,
+    {},
+  )
+  expect(finalizedSeed.status).toBe(200)
   expect(
     (
       await api(
@@ -348,30 +489,27 @@ test("paciente plus: registro en drawer, avatar, atención, plan", async ({ page
   )
   expect(linked.body.data.procedures).toEqual([])
 
-  // Regresión: guardar sin cambios no debe bloquear el siguiente autoguardado.
-  await page.getByRole("button", { name: "Continuar a tratamientos", exact: true }).click()
-  await page.getByRole("button", { name: "Continuar al cierre", exact: true }).click()
+  // Regresión: el guardado explícito sin cambios no bloquea el siguiente guardado.
   const saveDraft = page.getByRole("button", { name: "Guardar borrador", exact: true })
   await saveDraft.click()
   await expect(saveDraft).toBeEnabled()
-  const saved = page.waitForResponse(
-    (response) =>
-      response.url() === `${API}${encounterPath}` && response.request().method() === "PATCH",
-  )
-  await page.getByRole("button", { name: "Editar evolución", exact: true }).click()
-  await page.getByLabel("Evolución (máx. 10000)").fill("Tratamiento realizado sin complicaciones")
-  await saved
-  await page
-    .getByRole("dialog", { name: "Editar datos de la atención" })
-    .getByRole("button", { name: "Guardar cambios", exact: true })
-    .click()
+  // La evolución se edita en su pestaña y persiste tras recargar.
+  await page.getByRole("tab", { name: "Evolución", exact: true }).click()
+  await page.getByLabel(/Evolución \(máx/).fill("Tratamiento realizado sin complicaciones")
+  const [saved] = await Promise.all([
+    page.waitForResponse(
+      (response) =>
+        response.url() === `${API}${encounterPath}` && response.request().method() === "PATCH",
+    ),
+    saveDraft.click(),
+  ])
+  expect(saved.status()).toBe(200)
   await page.reload()
   await waitForHydration(page)
-  await page.getByRole("button", { name: "Continuar a tratamientos", exact: true }).click()
-  await page.getByRole("button", { name: "Continuar al cierre", exact: true }).click()
-  await expect(
-    page.getByText("Tratamiento realizado sin complicaciones", { exact: true }),
-  ).toBeVisible()
+  await page.getByRole("tab", { name: "Evolución", exact: true }).click()
+  await expect(page.getByLabel(/Evolución \(máx/)).toHaveValue(
+    "Tratamiento realizado sin complicaciones",
+  )
 
   const procedure = await api(page, "POST", `${encounterPath}/procedures`, org.slug, {
     toothNumber: 36,
@@ -384,28 +522,32 @@ test("paciente plus: registro en drawer, avatar, atención, plan", async ({ page
 
   await gotoHydrated(page, tenant(org.slug, `/patients/${patientId}?tab=historia`))
   await expect(page.getByText("Tratamiento endodóntico", { exact: true }).first()).toBeVisible()
-  await page.getByRole("button", { name: "Expandir", exact: true }).click()
+  await page.locator(`button[aria-controls="encounter-detail-${encounter.data.id}"]`).click()
   await expect(page.getByText(endodontics.name, { exact: true }).first()).toBeVisible()
   await expect(
     page.getByText("Tratamiento realizado sin complicaciones", { exact: true }).first(),
   ).toBeVisible()
 
   // Agrupación por tratamiento: secciones por atención + generales.
-  await page.getByRole("button", { name: "Tratamiento", exact: true }).click()
+  await page.getByRole("button", { name: "Atención", exact: true }).click()
   await expect(
     page
       .getByRole("heading")
       .filter({ hasText: /^Atención / })
       .first(),
   ).toBeVisible()
-  await expect(page.getByText("Generales", { exact: true })).toBeVisible()
   await page.getByRole("button", { name: "Día", exact: true }).click()
-  await expect(page.getByText("Generales", { exact: true })).toBeHidden()
+  await expect(
+    page
+      .getByRole("heading")
+      .filter({ hasText: /^Atención / })
+      .first(),
+  ).toBeHidden()
 
   // Subida de imagen desde la UI: drawer con dropzone y galería con Attachment.
-  await page.getByRole("tab", { name: "Imágenes", exact: true }).click()
+  await page.getByRole("tab", { name: "Imágenes y documentos", exact: true }).click()
   await page.getByRole("button", { name: "Subir imagen o documento", exact: true }).click()
-  const uploadDrawer = page.getByRole("dialog", { name: "Subir imagen o documento" })
+  const uploadDrawer = page.getByRole("dialog", { name: "Subir imágenes o documentos" })
   await uploadDrawer.locator('input[type="file"]').setInputFiles({
     name: "rx-control.png",
     mimeType: "image/png",
@@ -415,6 +557,9 @@ test("paciente plus: registro en drawer, avatar, atención, plan", async ({ page
     ),
   })
   await uploadDrawer.getByLabel("Título", { exact: true }).fill("RX de control")
+  await uploadDrawer.getByRole("combobox", { name: "Categoría de rx-control.png" }).click()
+  await page.getByRole("option", { name: "Radiografía", exact: true }).click()
+  await uploadDrawer.getByText(/^Extras: piezas/).click()
   await uploadDrawer.getByRole("button", { name: /^Pieza 36:/ }).click()
   await uploadDrawer.getByRole("button", { name: /^Pieza 46:/ }).click()
   const tags = uploadDrawer.getByRole("textbox", { name: /^Etiquetas/ })
@@ -422,7 +567,8 @@ test("paciente plus: registro en drawer, avatar, atención, plan", async ({ page
   await tags.press("Enter")
   await tags.fill("CONTROL-1")
   await tags.press("Enter")
-  await uploadDrawer.getByRole("button", { name: "Subir", exact: true }).click()
+  await uploadDrawer.getByRole("button", { name: /^Subir 1$/ }).click()
+  await uploadDrawer.getByRole("button", { name: "Cancelar", exact: true }).click()
   await expect(uploadDrawer).toBeHidden()
   await expect(page.getByText("RX de control", { exact: true }).first()).toBeVisible()
   const documents = await api<{
@@ -437,5 +583,5 @@ test("paciente plus: registro en drawer, avatar, atención, plan", async ({ page
     tenant(org.slug, `/patients/${patientId}?tab=plan&budgetId=${budget.body.data.id}`),
   )
   const item = page.getByRole("row").filter({ hasText: endodontics.name })
-  await expect(item.getByText("Realizado", { exact: true })).toBeVisible()
+  await expect(item.first().getByText("realizado", { exact: true })).toBeVisible()
 })

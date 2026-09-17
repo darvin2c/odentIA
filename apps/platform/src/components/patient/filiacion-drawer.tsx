@@ -60,7 +60,7 @@ function toFormValues(detail: PatientFull): DemographicsValues {
   const p = detail.patient
   return {
     ...emptyDemographics,
-    displayName: detail.displayName,
+    displayName: detail.patient.displayName,
     docType: strField(p.docType),
     docNumber: strField(p.docNumber),
     birthDate: strField(p.birthDate),

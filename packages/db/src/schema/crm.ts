@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm"
 import {
   boolean,
+  foreignKey,
   index,
   integer,
   jsonb,
@@ -82,6 +83,9 @@ export const contact = pgTable("contact", {
   id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
   organizationId: orgFk("organization_id"),
   displayName: text("display_name").notNull(),
+  phone: text("phone"),
+  email: text("email"),
+  isActive: boolean("is_active").notNull().default(true),
   notes: text("notes"),
   tags: text("tags").array().notNull().default(sql`'{}'`),
   customFields: jsonb("custom_fields").notNull().default(sql`'{}'::jsonb`),
@@ -89,7 +93,7 @@ export const contact = pgTable("contact", {
   assignedUserId: text("assigned_user_id").references(() => user.id),
   lastInteractionAt: timestamp("last_interaction_at", { withTimezone: true }),
   ...timestamps,
-})
+}, table => [uniqueIndex("contact_org_id_uidx").on(table.organizationId, table.id)])
 
 export const contactIdentity = pgTable(
   "contact_identity",
@@ -106,6 +110,7 @@ export const contactIdentity = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
+    uniqueIndex("contact_identity_org_id_uidx").on(table.organizationId, table.id),
     // Invariante: teléfono compartido ≠ paciente único. La identidad apunta a
     // un contacto y nunca se fusiona automáticamente por teléfono.
     uniqueIndex("contact_identity_org_channel_user_uidx").on(
@@ -124,6 +129,7 @@ export const conversation = pgTable(
     contactId: uuid("contact_id")
       .notNull()
       .references(() => contact.id),
+    contactIdentityId: uuid("contact_identity_id"),
     channelConnectionId: uuid("channel_connection_id")
       .notNull()
       .references(() => channelConnection.id),
@@ -138,6 +144,8 @@ export const conversation = pgTable(
     ...timestamps,
   },
   (table) => [
+    uniqueIndex("conversation_org_id_uidx").on(table.organizationId, table.id),
+    foreignKey({ columns: [table.organizationId, table.contactIdentityId], foreignColumns: [contactIdentity.organizationId, contactIdentity.id] }),
     uniqueIndex("conversation_connection_thread_uidx").on(
       table.channelConnectionId,
       table.externalThreadId,

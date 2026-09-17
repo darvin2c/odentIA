@@ -104,7 +104,7 @@ export function OdontogramAssessments({
     queryFn: () => apiFetch<{ data: PatientFull }>(`/api/patients/${patientId}`),
   })
   const documentEntries = assessment?.entries ?? activeFindingsAsOf(history)
-  const draftName = patientQuery.data?.data.displayName ?? undefined
+  const draftName = patientQuery.data?.data.patient.displayName ?? undefined
   const preview: PrintableSnapshot = assessment
     ? {
         entries: assessment.entries,

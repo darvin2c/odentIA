@@ -1,7 +1,7 @@
 process.env.DOCKER_HOST ??= "unix:///mnt/wsl/podman-sockets/odentia.sock"
 
 import { createAppDb, createOwnerDb, type Db, withOrgContext } from "@odentia/db"
-import { createPatient, secretsKeyFromEnv } from "@odentia/services"
+import { createContact, createPatient, secretsKeyFromEnv } from "@odentia/services"
 import { sql } from "drizzle-orm"
 import { migrate } from "drizzle-orm/postgres-js/migrator"
 import type { Context } from "hono"
@@ -18,6 +18,7 @@ const KEY = secretsKeyFromEnv("ee".repeat(32))
 let container: StartedTestContainer
 let ownerDb: Db
 let appDb: Db
+let patientId = ""
 
 const storageStub = {
   putAvatar: async () => {
@@ -60,6 +61,21 @@ function stubOrg(role: string) {
     await next()
   }
 }
+function registrationBody(
+  displayName: string,
+  demographics: Record<string, unknown> = {},
+  top: Record<string, unknown> = {},
+) {
+  return {
+    submissionId: crypto.randomUUID(),
+    answers: {
+      demographics: { displayName, ...demographics },
+      respondent: "staff",
+      privacyAccepted: false,
+    },
+    ...top,
+  }
+}
 
 function buildApp(role: string): Hono {
   const deps: CrmDeps = {
@@ -75,8 +91,6 @@ function buildApp(role: string): Hono {
   app.route("/cie10", createCie10Route(deps))
   return app
 }
-
-let patientId = ""
 
 beforeAll(async () => {
   container = await new GenericContainer(IMAGE)
@@ -129,20 +143,35 @@ it("pacientes: POST 201 y GET 200", async () => {
   const created = await app.request("/patients", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ displayName: "María Pérez", docType: "DNI", docNumber: "12345678" }),
+    body: JSON.stringify(
+      registrationBody("María Pérez", { docType: "DNI", docNumber: "12345678" }),
+    ),
   })
   expect(created.status).toBe(201)
-  const body = (await created.json()) as { data: { id: string; patientNumber: number } }
+  const body = await created.json() as { data: { id: string; patientNumber: number } }
   expect(body.data.patientNumber).toBe(1)
   patientId = body.data.id
 
   const list = await app.request("/patients", { method: "GET" })
   expect(list.status).toBe(200)
-  const listed = (await list.json()) as { data: { id: string }[] }
+  const listed = await list.json() as { data: { id: string }[] }
   expect(listed.data.map((p) => p.id)).toContain(patientId)
 
   const detail = await app.request(`/patients/${patientId}`, { method: "GET" })
   expect(detail.status).toBe(200)
+  const detailBody = await detail.json() as {
+    data: {
+      patient: { id: string; displayName: string }
+      contacts: unknown[]
+      registration: { entryPoint: string; respondent: string } | null
+    }
+  }
+  expect(detailBody.data.patient.displayName).toBe("María Pérez")
+  expect(detailBody.data.contacts).toEqual([])
+  expect(detailBody.data.registration).toMatchObject({
+    entryPoint: "platform",
+    respondent: "staff",
+  })
 })
 
 it("cross-org: paciente de B responde 404 en A", async () => {
@@ -361,20 +390,27 @@ it("avatar privado: subida y URL firmada; rechaza tipo y tamaño inválidos", as
   ).toBe(400)
 })
 
-it("filiación PATCH edita nombre y contacto sin tocar la identidad del CRM", async () => {
+it("filiación PATCH edita el nombre del paciente sin tocar el contacto CRM", async () => {
   const app = buildApp("admin")
+  const contact = await withOrgContext(appDb, "org_a", (tx) =>
+    createContact(tx, "org_a", { displayName: "Contacto Original" }),
+  )
   const created = await app.request("/patients", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      displayName: "Nombre Original",
-      phone: "+51999111222",
-      docType: "DNI",
-      docNumber: "11223344",
-    }),
+    body: JSON.stringify(
+      registrationBody(
+        "Nombre Original",
+        { phone: "+51999111222", docType: "DNI", docNumber: "11223344" },
+        {
+          contacts: [{ contactId: contact.id, relationship: "self", isPreferred: true }],
+        },
+      ),
+    ),
   })
   expect(created.status).toBe(201)
-  const id = ((await created.json()) as { data: { id: string; contactId: string } }).data.id
+  const createdBody = await created.json() as { data: { id: string } }
+  const id = createdBody.data.id
 
   const patched = await app.request(`/patients/${id}`, {
     method: "PATCH",
@@ -385,14 +421,26 @@ it("filiación PATCH edita nombre y contacto sin tocar la identidad del CRM", as
   const other = await app.request("/patients", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ displayName: "Otro", docType: "DNI", docNumber: "44332211" }),
+    body: JSON.stringify(registrationBody("Otro", { docType: "DNI", docNumber: "44332211" })),
   })
   expect(other.status).toBe(201)
-  const detail = (await (await app.request(`/patients/${id}`, { method: "GET" })).json()) as {
-    data: { displayName: string; patient: { phone: string }; contactId: string }
+  const detailRes = await app.request(`/patients/${id}`, { method: "GET" })
+  const detail = await detailRes.json() as {
+    data: {
+      patient: { displayName: string; phone: string }
+      contacts: { contactId: string; displayName: string; relationship: string }[]
+    }
   }
-  expect(detail.data.displayName).toBe("Nombre Editado")
+  expect(detail.data.patient.displayName).toBe("Nombre Editado")
   expect(detail.data.patient.phone).toBe("+51999333444")
+  // El nombre del contacto CRM no se arrastra con la edición del paciente.
+  expect(detail.data.contacts).toEqual([
+    expect.objectContaining({
+      contactId: contact.id,
+      displayName: "Contacto Original",
+      relationship: "self",
+    }),
+  ])
 
   // Documento duplicado visible sin cerrar nada.
   const dup = await app.request(`/patients/${id}`, {
@@ -401,17 +449,19 @@ it("filiación PATCH edita nombre y contacto sin tocar la identidad del CRM", as
     body: JSON.stringify({ docType: "DNI", docNumber: "44332211" }),
   })
   expect(dup.status).toBe(409)
-  expect(((await dup.json()) as { error: { code: string } }).error.code).toBe("DUPLICATE_DOCUMENT")
+  const dupBody = await dup.json() as { error: { code: string } }
+  expect(dupBody.error.code).toBe("DUPLICATE_DOCUMENT")
 })
 
-it("filiación PATCH valida DNI exacto, pasaporte libre y tutor de la org", async () => {
+it("filiación PATCH valida DNI exacto y pasaporte libre", async () => {
   const app = buildApp("admin")
   const created = await app.request("/patients", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ displayName: "Doc Paciente" }),
+    body: JSON.stringify(registrationBody("Doc Paciente")),
   })
-  const id = ((await created.json()) as { data: { id: string } }).data.id
+  const createdBody = await created.json() as { data: { id: string } }
+  const id = createdBody.data.id
 
   const badDni = await app.request(`/patients/${id}`, {
     method: "PATCH",
@@ -426,11 +476,101 @@ it("filiación PATCH valida DNI exacto, pasaporte libre y tutor de la org", asyn
     body: JSON.stringify({ docType: "PASAPORTE", docNumber: "AB123456" }),
   })
   expect(passport.status).toBe(200)
+})
 
-  const foreignGuardian = await app.request(`/patients/${id}`, {
-    method: "PATCH",
+it("relaciones: vincular, preferente, duplicados y desvincular sin borrar personas", async () => {
+  const app = buildApp("admin")
+  const madre = await withOrgContext(appDb, "org_a", (tx) =>
+    createContact(tx, "org_a", { displayName: "Madre Vínculo" }),
+  )
+  const tia = await withOrgContext(appDb, "org_a", (tx) =>
+    createContact(tx, "org_a", { displayName: "Tía Vínculo" }),
+  )
+  const created = await app.request("/patients", {
+    method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ guardianContactId: "c0000000-0000-4000-8000-000000000000" }),
+    body: JSON.stringify(registrationBody("Hijo Vínculo")),
   })
-  expect(foreignGuardian.status).toBe(404)
+  expect(created.status).toBe(201)
+  const createdBody = await created.json() as { data: { id: string } }
+  const id = createdBody.data.id
+
+  const linkMadre = await app.request(`/patients/${id}/contacts/${madre.id}`, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ relationship: "guardian", relationshipDetail: "Madre", isPreferred: true }),
+  })
+  expect(linkMadre.status).toBe(200)
+  const linkTia = await app.request(`/patients/${id}/contacts/${tia.id}`, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ relationship: "family", isPreferred: false }),
+  })
+  expect(linkTia.status).toBe(200)
+
+  // Sugerencias por nombre antes de registrar otro parecido.
+  const dupes = await app.request(
+    `/patients/duplicates?displayName=${encodeURIComponent("Hijo Vínculo")}`,
+    { method: "GET" },
+  )
+  expect(dupes.status).toBe(200)
+  const dupesBody = await dupes.json() as { data: unknown[] }
+  expect(Array.isArray(dupesBody.data)).toBe(true)
+
+  const fichaMadre = await app.request("/patients", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      ...registrationBody("Madre Vínculo"),
+      contacts: [{ contactId: madre.id, relationship: "self", isPreferred: true }],
+    }),
+  })
+  expect(fichaMadre.status).toBe(201)
+  // Segundo self del mismo contacto en otra ficha da 409.
+  const segundo = await app.request("/patients", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(registrationBody("Otra Ficha")),
+  })
+  expect(segundo.status).toBe(201)
+  const segundoBody = await segundo.json() as { data: { id: string } }
+  const segundoSelf = await app.request(
+    `/patients/${segundoBody.data.id}/contacts/${madre.id}`,
+    {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ relationship: "self", isPreferred: false }),
+    },
+  )
+  expect(segundoSelf.status).toBe(409)
+
+  // Desvincular no borra al paciente ni al contacto.
+  const unlinked = await app.request(`/patients/${id}/contacts/${tia.id}`, { method: "DELETE" })
+  expect(unlinked.status).toBe(200)
+  const afterRes = await app.request(`/patients/${id}`, { method: "GET" })
+  expect(afterRes.status).toBe(200)
+  const after = await afterRes.json() as {
+    data: { contacts: { contactId: string }[] }
+  }
+  expect(after.data.contacts.map((c) => c.contactId)).not.toContain(tia.id)
+  expect(after.data.contacts.map((c) => c.contactId)).toContain(madre.id)
+})
+
+it("relaciones: contacto de otra organización responde 404", async () => {
+  const app = buildApp("admin")
+  const ajeno = await withOrgContext(appDb, "org_b", (tx) =>
+    createContact(tx, "org_b", { displayName: "Contacto Ajeno" }),
+  )
+  const created = await app.request("/patients", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(registrationBody("Paciente Propio Rel")),
+  })
+  const createdBody = await created.json() as { data: { id: string } }
+  const foreign = await app.request(`/patients/${createdBody.data.id}/contacts/${ajeno.id}`, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ relationship: "family", isPreferred: false }),
+  })
+  expect(foreign.status).toBe(404)
 })

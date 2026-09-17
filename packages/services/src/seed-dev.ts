@@ -11,6 +11,7 @@
  * extender este archivo con su escenario mínimo en la misma PR.
  */
 import { randomUUID } from "node:crypto"
+import { DEFAULT_REGISTRATION_CONFIG } from "@odentia/clinical"
 import { createOwnerDb } from "@odentia/db"
 import { account, invitation, member, organization, user } from "@odentia/db/schema/auth"
 import {
@@ -29,8 +30,13 @@ import {
   patientDocument,
   patientDocumentContext,
   patientMedication,
+  patientContact,
+  patientRegistration,
+  patientRegistrationLink,
   serviceCatalog,
   treatmentBudget,
+  treatmentBudgetItem,
+  treatmentPlan,
   treatmentPlanItem,
 } from "@odentia/db/schema/clinical"
 import {
@@ -45,9 +51,9 @@ import {
   pipeline,
   pipelineStage,
 } from "@odentia/db/schema/crm"
-import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
+import { auditEvent, branch, orgProfile, patientRegistrationConfig } from "@odentia/db/schema/org"
 import { hashPassword } from "better-auth/crypto"
-import { inArray, sql } from "drizzle-orm"
+import { and, eq, inArray, sql } from "drizzle-orm"
 import { upsertAgentConfig } from "./agentConfig.js"
 import { createBudget, decideBudget, presentBudget } from "./budgets.js"
 import {
@@ -60,7 +66,7 @@ import {
   voidOdontogramEntry,
 } from "./clinical.js"
 import { createConnection } from "./connections.js"
-import { createContact } from "./contacts.js"
+import { createContact, updateContact } from "./contacts.js"
 import {
   addEncounterAddendum,
   addEncounterProcedure,
@@ -69,7 +75,8 @@ import {
   updateEncounterDraft,
 } from "./encounters.js"
 import { createFieldDef } from "./fields.js"
-import { createPatient } from "./patients.js"
+import { createPatient, updatePatient } from "./patients.js"
+import { createPatientRegistrationLink, registerPatient, savePatientRegistrationConfig } from "./patient-registration.js"
 import { ensureDefaultPipeline } from "./pipelines.js"
 import { addPlanItem, createTreatmentPlan, setPlanItemStatus } from "./plan.js"
 import { secretsKeyFromEnv } from "./secrets.js"
@@ -136,10 +143,14 @@ async function wipeSeed(): Promise<void> {
     .select({ storageKey: patientDocument.storageKey })
     .from(patientDocument)
     .where(inArray(patientDocument.organizationId, SEED_ORGS))
+  await db.delete(patientRegistration).where(inArray(patientRegistration.organizationId, SEED_ORGS))
+  await db.delete(patientRegistrationLink).where(inArray(patientRegistrationLink.organizationId, SEED_ORGS))
+  await db.delete(patientContact).where(inArray(patientContact.organizationId, SEED_ORGS))
+  await db.delete(patientRegistrationConfig).where(inArray(patientRegistrationConfig.organizationId, SEED_ORGS))
   await db.delete(message).where(inArray(message.organizationId, SEED_ORGS))
   await db.delete(crmTask).where(inArray(crmTask.organizationId, SEED_ORGS))
-  await db.delete(contactIdentity).where(inArray(contactIdentity.organizationId, SEED_ORGS))
   await db.delete(conversation).where(inArray(conversation.organizationId, SEED_ORGS))
+  await db.delete(contactIdentity).where(inArray(contactIdentity.organizationId, SEED_ORGS))
   await db.delete(encounterProcedure).where(inArray(encounterProcedure.organizationId, SEED_ORGS))
   await db.delete(encounterTooth).where(inArray(encounterTooth.organizationId, SEED_ORGS))
   await db.delete(clinicalNote).where(inArray(clinicalNote.organizationId, SEED_ORGS))
@@ -158,8 +169,15 @@ async function wipeSeed(): Promise<void> {
   await db.delete(patientAllergy).where(inArray(patientAllergy.organizationId, SEED_ORGS))
   await db.delete(patientCondition).where(inArray(patientCondition.organizationId, SEED_ORGS))
   await db.delete(patientMedication).where(inArray(patientMedication.organizationId, SEED_ORGS))
+  // Solo el reset manual owner elimina snapshots demo; el guard runtime queda intacto.
+  await db.transaction(async (tx) => {
+    await tx.execute(sql`alter table treatment_budget_item disable trigger treatment_budget_item_guard_trigger`)
+    await tx.delete(treatmentBudgetItem).where(inArray(treatmentBudgetItem.organizationId, SEED_ORGS))
+    await tx.execute(sql`alter table treatment_budget_item enable trigger treatment_budget_item_guard_trigger`)
+  })
   await db.delete(treatmentPlanItem).where(inArray(treatmentPlanItem.organizationId, SEED_ORGS))
   await db.delete(treatmentBudget).where(inArray(treatmentBudget.organizationId, SEED_ORGS))
+  await db.delete(treatmentPlan).where(inArray(treatmentPlan.organizationId, SEED_ORGS))
   await db.delete(encounter).where(inArray(encounter.organizationId, SEED_ORGS))
   await db.delete(serviceCatalog).where(inArray(serviceCatalog.organizationId, SEED_ORGS))
   await db.delete(patient).where(inArray(patient.organizationId, SEED_ORGS))
@@ -194,13 +212,18 @@ async function seedConversation(args: {
   lastOutboundAt?: Date | null
   lastMessageAt?: Date | null
 }): Promise<{ id: string }> {
+  const [connection] = await db.select({ channel: channelConnection.channel }).from(channelConnection).where(eq(channelConnection.id, args.connectionId))
+  const identities = await db.select({ id: contactIdentity.id, externalUserId: contactIdentity.externalUserId }).from(contactIdentity)
+    .where(and(eq(contactIdentity.organizationId, args.orgId), eq(contactIdentity.contactId, args.contactId), eq(contactIdentity.channel, connection!.channel)))
+  const identity = identities.length === 1 ? identities[0] : undefined
   const [row] = await db
     .insert(conversation)
     .values({
       organizationId: args.orgId,
       contactId: args.contactId,
+      contactIdentityId: identity?.id ?? null,
       channelConnectionId: args.connectionId,
-      externalThreadId: args.thread,
+      externalThreadId: connection?.channel === "whatsapp" && identity ? identity.externalUserId : args.thread,
       status: args.status ?? "open",
       assignedUserId: args.assignedUserId ?? null,
       agentStatus: args.agentStatus ?? "on",
@@ -402,12 +425,12 @@ for (let i = 0; i < CONTACTS_A.length; i++) {
     c.name === "Jorge Mamani"
       ? `Teléfono familiar compartido: ${SHARED_PHONE} (titular: Rosa Quispe)`
       : undefined
-  const created = await createContact(db, ORG_A, { displayName: c.name, stageId, notes })
+  const created = await createContact(db, ORG_A, { displayName: c.name, phone: c.phone, stageId, notes }, { userId: ANA_ID })
   await db.insert(contactIdentity).values({
     organizationId: ORG_A,
     contactId: created.id,
     channel: "whatsapp",
-    externalUserId: c.phone,
+    externalUserId: `wa:${c.phone.replace(/\D/g, "")}`,
     displayName: c.name,
     isPrimary: true,
   })
@@ -580,7 +603,8 @@ const PATIENTS_A = [
 const patientIdByName = new Map<string, string>()
 for (const p of PATIENTS_A) {
   const row = await createPatient(db, ORG_A, ANA_ID, {
-    contactId: contactIdByName.get(p.name)!,
+    displayName: p.name,
+    contacts: [{ contactId: contactIdByName.get(p.name)!, relationship: "self", isPreferred: true }],
     docType: "DNI",
     docNumber: p.doc,
     birthDate: p.birth,
@@ -993,7 +1017,7 @@ for (let i = 1; i <= 40; i++) {
     displayName: `Paciente Demo ${n}`,
     stageId: pipeA.stages[0]!.id,
   })
-  await createPatient(db, ORG_A, ANA_ID, { contactId: created.id, phone: `+519000000${n}` })
+  await createPatient(db, ORG_A, ANA_ID, { displayName: `Paciente Demo ${n}`, contacts: [{ contactId: created.id, relationship: "self", isPreferred: true }], phone: `+519000000${n}` })
 }
 
 // --- Org B mínima (aislamiento visual) ---
@@ -1010,7 +1034,7 @@ await db.insert(contactIdentity).values([
     organizationId: ORG_B,
     contactId: sofia.id,
     channel: "whatsapp",
-    externalUserId: "+51987654401",
+    externalUserId: "wa:51987654401",
     displayName: "Sofía Ramos",
     isPrimary: true,
   },
@@ -1018,13 +1042,14 @@ await db.insert(contactIdentity).values([
     organizationId: ORG_B,
     contactId: hugo.id,
     channel: "whatsapp",
-    externalUserId: "+51987654402",
+    externalUserId: "wa:51987654402",
     displayName: "Hugo Díaz",
     isPrimary: true,
   },
 ])
 await createPatient(db, ORG_B, CORA_ID, {
-  contactId: sofia.id,
+  displayName: "Sofía Ramos",
+  contacts: [{ contactId: sofia.id, relationship: "self", isPreferred: true }],
   docType: "DNI",
   docNumber: "60111222",
   birthDate: "1993-04-25",
@@ -1049,6 +1074,38 @@ await seedMessage({
   status: "received",
   createdAt: hoursAgo(2),
 })
+
+// Registro directo: escenarios de demostración sin cuentas de pacientes.
+const registrationConfig = await db.transaction(tx => savePatientRegistrationConfig(tx, ORG_A, ANA_ID, {
+  expectedVersion: 0, enabled: true,
+  fields: { ...DEFAULT_REGISTRATION_CONFIG.fields, "dental.ultimaVisita": "optional", "dental.experienciaPrevia": "optional", "dental.ansiedadDental": "optional" },
+  privacyNotice: "AVISO DE DEMOSTRACIÓN: autorizo el tratamiento de estos datos ficticios para mostrar el registro de pacientes. No utilizar datos reales en esta demostración.",
+}))
+await db.transaction(tx => savePatientRegistrationConfig(tx, ORG_B, CORA_ID, {
+  expectedVersion: 0, enabled: false, fields: DEFAULT_REGISTRATION_CONFIG.fields, privacyNotice: "",
+}))
+const rosaContactId = contactIdByName.get("Rosa Quispe")!
+const telegramConnection = await createConnection(db, ORG_A, secretsKey, {
+  channel: "telegram", provider: "telegram_bot_api", displayName: "Telegram Dental Smile",
+  config: { botToken: "123456:demo-token", botUsername: "dental_smile_demo_bot" },
+}, { fetch, validateExternal: false })
+await db.insert(contactIdentity).values({ organizationId: ORG_A, contactId: rosaContactId, channel: "telegram", externalUserId: "tg:123456789", displayName: "Rosa Quispe" })
+const rosaTelegram = await seedConversation({ orgId: ORG_A, contactId: rosaContactId, connectionId: telegramConnection.id, thread: "tg:123456789", lastInboundAt: hoursAgo(1), lastMessageAt: hoursAgo(1) })
+await seedMessage({ orgId: ORG_A, conversationId: rosaTelegram.id, direction: "inbound", senderKind: "contact", body: "Quisiera registrar a mi hijo.", externalId: "seed-tg-rosa-1", status: "received", createdAt: hoursAgo(1) })
+await db.transaction(tx => registerPatient(tx, ORG_A, { kind: "internal", userId: ANA_ID, contactId: rosaContactId }, {
+  submissionId: randomUUID(),
+  answers: { demographics: { displayName: "Pedro Quispe", birthDate: "2016-05-20" }, respondent: "representative",
+    representative: { displayName: "Rosa Quispe", relationship: "guardian", relationshipDetail: "Madre", phone: SHARED_PHONE }, privacyAccepted: false },
+  contacts: [{ contactId: rosaContactId, relationship: "guardian", relationshipDetail: "Madre", isPreferred: true }],
+}))
+await db.transaction(tx => registerPatient(tx, ORG_A, { kind: "public", entryPoint: "qr" }, {
+  submissionId: randomUUID(), formVersion: registrationConfig.version,
+  answers: { demographics: { displayName: "Valeria Quispe · QR demo", birthDate: "1998-04-10", phone: SHARED_PHONE }, respondent: "patient", privacyAccepted: true,
+    health: { bloodGroup: "O+", allergies: { state: "recorded", items: [{ substance: "Penicilina", reaction: "Urticaria", severity: "severa" }] }, conditions: { state: "unknown", items: [] }, medications: { state: "none", items: [] } } },
+}))
+await db.transaction(tx => updateContact(tx, ORG_A, contactIdByName.get("Jorge Mamani")!, { isActive: false }, { userId: ANA_ID }))
+await db.transaction(tx => updatePatient(tx, ORG_A, ANA_ID, patientIdByName.get("Miguel Torres")!, { isActive: false }))
+await db.transaction(tx => createPatientRegistrationLink(tx, ORG_A, ANA_ID, { contactId: rosaContactId, conversationId: convRosa.id }))
 
 // --- Resumen ---
 async function summary(orgId: string, label: string): Promise<string> {

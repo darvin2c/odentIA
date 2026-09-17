@@ -1,4 +1,4 @@
-import { SURFACES } from "@odentia/clinical"
+import { SURFACES, BLOOD_GROUPS, demographicsSchema, registrationContactInputSchema, registrationAnswersSchema } from "@odentia/clinical"
 import { withOrgContext } from "@odentia/db"
 import {
   addClinicalNote,
@@ -9,7 +9,7 @@ import {
   addPlanItemsBatch,
   createEncounter,
   createOdontogramAssessment,
-  createPatient,
+  registerPatient,
   createTreatmentPlan,
   finalizeEncounter,
   getAnamnesisVersion,
@@ -28,6 +28,9 @@ import {
   listOdontogramAssessments,
   listPatientDocuments,
   listPatients,
+  findPatientDuplicates,
+  setPatientContact,
+  removePatientContact,
   listPlanItems,
   listTreatmentPlans,
   PATIENT_AVATAR_MAX_BYTES,
@@ -73,38 +76,20 @@ const patientListQuery = listQuery.extend({
 })
 
 const filiation = {
-  docType: z.enum(["DNI", "CE", "PASAPORTE", "OTRO"]).nullish(),
-  docNumber: z.string().max(20).nullish(),
-  birthDate: z.string().max(10).nullish(),
-  sex: z.enum(["M", "F"]).nullish(),
-  phone: z.string().max(50).nullish(),
-  email: z.email().max(200).nullish(),
-  maritalStatus: z.string().max(100).nullish(),
-  educationLevel: z.string().max(100).nullish(),
-  occupation: z.string().max(200).nullish(),
-  address: z.string().max(500).nullish(),
-  origin: z.string().max(200).nullish(),
-  emergencyContactName: z.string().max(200).nullish(),
-  emergencyContactPhone: z.string().max(50).nullish(),
-  insuranceType: z.enum(["PARTICULAR", "SIS", "ESSALUD", "EPS", "OTRO"]).nullish(),
-  insuranceDetail: z.string().max(500).nullish(),
-  referralSource: z.string().max(500).nullish(),
-  guardianContactId: z.string().uuid().nullish(),
-  registeredBranchId: z.string().uuid().nullish(),
+  ...demographicsSchema.partial().shape,
+  registeredBranchId: z.uuid().nullish(),
 }
 
-const createInput = z
-  .object({
-    contactId: z.string().uuid().optional(),
-    displayName: z.string().min(1).max(200).optional(),
-    ...filiation,
-  })
-  .refine((d) => Boolean(d.contactId) !== Boolean(d.displayName?.trim()), {
-    message: "Indica contactId o displayName (solo uno)",
-  })
+const createInput = z.strictObject({
+  submissionId: z.uuid(),
+  answers: registrationAnswersSchema,
+  formVersion: z.number().int().nonnegative().optional(),
+  contacts: z.array(registrationContactInputSchema).max(50).optional(),
+  registeredBranchId: z.uuid().optional(),
+  contextContactId: z.uuid().optional(),
+})
 
 const patchInput = z.object({
-  displayName: z.string().trim().min(1).max(200).optional(),
   ...filiation,
   isActive: z.boolean().optional(),
   dataConsent: z.boolean().optional(),
@@ -165,6 +150,7 @@ const healthSaveInput = z
       .strict()
       .optional(),
     dataConsent: z.literal(true).optional(),
+    bloodGroup: z.enum(BLOOD_GROUPS).nullable().optional(),
   })
   .strict()
 
@@ -364,8 +350,36 @@ export function createPatientsRoute(deps: CrmDeps) {
     const parsed = createInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 201, () =>
-      withOrgContext(deps.db, orgId, (tx) => createPatient(tx, orgId, userId, parsed.data)),
+      withOrgContext(deps.db, orgId, (tx) => {
+        const { contextContactId, ...input } = parsed.data
+        return registerPatient(tx, orgId, { kind: "internal", userId, contactId: contextContactId }, input)
+      }),
     )
+  })
+
+  app.get("/duplicates", async (c) => {
+    const { orgId } = orgContextOf(c)
+    const parsed = z.object({ displayName: z.string().max(200).optional(), birthDate: z.iso.date().optional(), docType: z.string().max(20).optional(), docNumber: z.string().max(20).optional(), phone: z.string().max(50).optional() }).safeParse(c.req.query())
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () => withOrgContext(deps.db, orgId, tx => findPatientDuplicates(tx, orgId, parsed.data)))
+  })
+
+  app.put("/:id/contacts/:contactId", async (c) => {
+    const { orgId, userId } = orgContextOf(c)
+    const parsed = registrationContactInputSchema.omit({ contactId: true }).safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () => withOrgContext(deps.db, orgId, async tx => {
+      await setPatientContact(tx, orgId, userId, c.req.param("id"), { ...parsed.data, contactId: c.req.param("contactId") })
+      return { linked: true }
+    }))
+  })
+
+  app.delete("/:id/contacts/:contactId", async (c) => {
+    const { orgId, userId } = orgContextOf(c)
+    return runService(c, 200, () => withOrgContext(deps.db, orgId, async tx => {
+      await removePatientContact(tx, orgId, userId, c.req.param("id"), c.req.param("contactId"))
+      return { removed: true }
+    }))
   })
 
   app.get("/:id", async (c) => {

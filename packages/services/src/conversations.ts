@@ -9,8 +9,14 @@ import {
 } from "@odentia/db/schema/crm"
 import { auditEvent } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, ilike, lt, or, sql } from "drizzle-orm"
+import {
+  findChannelIdentity,
+  isDirectThread,
+  isTelegramGroupThread,
+  lockChannelIdentity,
+} from "./contacts.js"
 import { decodeCursor, encodeCursor } from "./cursors.js"
-import { isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
+import { notFound, ServiceError, validation } from "./errors.js"
 import { ensureDefaultPipeline } from "./pipelines.js"
 import { decryptConfig } from "./secrets.js"
 import type { Storage } from "./storage.js"
@@ -116,19 +122,15 @@ export async function ingestInbound(
   }
 
   const channel = connection.channel
-  const [identity] = await tx
-    .select()
-    .from(contactIdentity)
-    .where(
-      and(
-        eq(contactIdentity.organizationId, orgId),
-        eq(contactIdentity.channel, channel),
-        eq(contactIdentity.externalUserId, event.senderExternalId),
-      ),
-    )
-    .limit(1)
+  // Serializar creación/resolución/traslado de identidad bajo el mismo
+  // advisory lock que usa la transferencia (sin capturar unique violations
+  // en transacciones abortadas: se inserta con ON CONFLICT).
+  await lockChannelIdentity(tx, orgId, channel, event.senderExternalId)
+  let identity = await findChannelIdentity(tx, orgId, channel, event.senderExternalId)
   let contactId: string
   if (identity) {
+    // El archivado no bloquea la recepción entrante ni crea un contacto
+    // nuevo: se reutiliza el contacto archivado (el badge lo muestra).
     contactId = identity.contactId
   } else {
     const { stages } = await ensureDefaultPipeline(tx, orgId)
@@ -144,22 +146,39 @@ export async function ingestInbound(
       .returning({ id: contact.id })
     if (!created) throw new Error("No se pudo crear el contacto")
     contactId = created.id
-    await tx.insert(contactIdentity).values({
-      organizationId: orgId,
-      contactId,
-      channel,
-      externalUserId: event.senderExternalId,
-      displayName: event.senderDisplayName ?? null,
-      isPrimary: true,
-    })
+    const [insertedIdentity] = await tx
+      .insert(contactIdentity)
+      .values({
+        organizationId: orgId,
+        contactId,
+        channel,
+        externalUserId: event.senderExternalId,
+        displayName: event.senderDisplayName ?? null,
+        isPrimary: true,
+      })
+      .onConflictDoNothing({
+        target: [
+          contactIdentity.organizationId,
+          contactIdentity.channel,
+          contactIdentity.externalUserId,
+        ],
+      })
+      .returning()
+    identity =
+      insertedIdentity ??
+      (await findChannelIdentity(tx, orgId, channel, event.senderExternalId))
+    if (!identity) throw new Error("No se pudo resolver la identidad de canal")
+    contactId = identity.contactId
   }
 
   let conversationId: string
+  let threadContactId: string
   const [existing] = await tx
-    .select({ id: conversation.id })
+    .select()
     .from(conversation)
     .where(
       and(
+        eq(conversation.organizationId, orgId),
         eq(conversation.channelConnectionId, connection.id),
         eq(conversation.externalThreadId, event.externalThreadId),
       ),
@@ -167,34 +186,54 @@ export async function ingestInbound(
     .limit(1)
   if (existing) {
     conversationId = existing.id
+    threadContactId = existing.contactId
+    // Hilo compartido (p. ej. grupo de Telegram con otro remitente):
+    // conservar interlocutor e identidad, nunca reasignar automáticamente.
+    // Solo se vincula la identidad en hilos directos del mismo contacto.
+    if (
+      existing.contactIdentityId === null &&
+      identity.contactId === existing.contactId &&
+      isDirectThread(channel, event.externalThreadId, event.senderExternalId)
+    ) {
+      await tx
+        .update(conversation)
+        .set({ contactIdentityId: identity.id, updatedAt: new Date() })
+        .where(and(eq(conversation.id, existing.id), eq(conversation.organizationId, orgId)))
+    }
   } else {
-    try {
-      const [created] = await tx
-        .insert(conversation)
-        .values({
-          organizationId: orgId,
-          contactId,
-          channelConnectionId: connection.id,
-          externalThreadId: event.externalThreadId,
-        })
-        .returning({ id: conversation.id })
-      if (!created) throw new Error("No se pudo crear la conversación")
+    const [created] = await tx
+      .insert(conversation)
+      .values({
+        organizationId: orgId,
+        contactId,
+        contactIdentityId: isDirectThread(channel, event.externalThreadId, event.senderExternalId) ? identity.id : null,
+        channelConnectionId: connection.id,
+        externalThreadId: event.externalThreadId,
+      })
+      .onConflictDoNothing({
+        target: [conversation.channelConnectionId, conversation.externalThreadId],
+      })
+      .returning({ id: conversation.id, contactId: conversation.contactId })
+    if (created) {
       conversationId = created.id
-    } catch (error) {
-      // Carrera: otra ingesta creó la conversación; releer.
-      if (!isUniqueViolation(error)) throw error
+      threadContactId = created.contactId
+    } else {
+      // Carrera: otra ingesta creó el hilo; releer sin reintentar escrituras
+      // sobre una transacción abortada.
       const [retry] = await tx
-        .select({ id: conversation.id })
+        .select({ id: conversation.id, contactId: conversation.contactId })
         .from(conversation)
         .where(
           and(
+            eq(conversation.organizationId, orgId),
             eq(conversation.channelConnectionId, connection.id),
             eq(conversation.externalThreadId, event.externalThreadId),
           ),
         )
         .limit(1)
-      if (!retry) throw error
+      if (!retry) throw new Error("No se pudo crear la conversación")
       conversationId = retry.id
+      threadContactId = retry.contactId
     }
   }
 
@@ -294,7 +333,7 @@ export async function ingestInbound(
   await tx
     .update(contact)
     .set({ lastInteractionAt: now, updatedAt: now })
-    .where(eq(contact.id, contactId))
+    .where(eq(contact.id, threadContactId))
   if (mediaError) {
     await audit(tx, orgId, {
       action: "message.media_failed",
@@ -485,7 +524,7 @@ export interface ConversationListItem {
   unreadCount: number
   assignedUserId: string | null
   lastMessageAt: string | null
-  contact: { id: string; displayName: string }
+  contact: { id: string; displayName: string; isActive: boolean }
   connection: { id: string; channel: string; provider: string; displayName: string }
   preview: { body: string | null; direction: string; senderKind: string; createdAt: string } | null
 }
@@ -565,7 +604,7 @@ export async function listConversations(
     unreadCount: r.conversation.unreadCount,
     assignedUserId: r.conversation.assignedUserId,
     lastMessageAt: r.conversation.lastMessageAt ? r.conversation.lastMessageAt.toISOString() : null,
-    contact: { id: r.contact.id, displayName: r.contact.displayName },
+    contact: { id: r.contact.id, displayName: r.contact.displayName, isActive: r.contact.isActive },
     connection: {
       id: r.connection.id,
       channel: r.connection.channel,
@@ -630,7 +669,7 @@ export interface ConversationDetail {
     assignedUserId: string | null
     lastMessageAt: string | null
   }
-  contact: { id: string; displayName: string }
+  contact: { id: string; displayName: string; isActive: boolean }
   connection: {
     id: string
     channel: string
@@ -668,7 +707,7 @@ export async function getConversationDetail(
         ? row.conversation.lastMessageAt.toISOString()
         : null,
     },
-    contact: { id: row.contact.id, displayName: row.contact.displayName },
+    contact: { id: row.contact.id, displayName: row.contact.displayName, isActive: row.contact.isActive },
     connection: {
       id: row.connection.id,
       channel: row.connection.channel,
@@ -791,4 +830,183 @@ export async function attachmentUrl(
     throw notFound("Adjunto")
   }
   return storage.attachmentUrl(ref.objectKey, 900)
+}
+
+/**
+ * Resolución manual de la identidad de una conversación (personal
+ * autorizado). Limitada a una identidad del mismo contacto, canal y
+ * organización. Los hilos grupales de Telegram nunca se atribuyen a una
+ * identidad personal.
+ */
+export async function resolveConversationIdentity(
+  tx: Db,
+  orgId: string,
+  conversationId: string,
+  input: { identityId: string },
+  actor?: { userId: string | null },
+): Promise<{ id: string; contactIdentityId: string }> {
+  const [row] = await tx
+    .select({ conv: conversation, connection: channelConnection })
+    .from(conversation)
+    .innerJoin(channelConnection, eq(conversation.channelConnectionId, channelConnection.id))
+    .where(and(eq(conversation.id, conversationId), eq(conversation.organizationId, orgId)))
+    .limit(1)
+  if (!row) throw notFound("Conversación")
+  const [identity] = await tx
+    .select()
+    .from(contactIdentity)
+    .where(and(eq(contactIdentity.id, input.identityId), eq(contactIdentity.organizationId, orgId)))
+    .limit(1)
+  if (!identity) throw notFound("Identidad de canal")
+  await lockChannelIdentity(tx, orgId, identity.channel, identity.externalUserId)
+  const [currentIdentity] = await tx.select().from(contactIdentity).where(and(eq(contactIdentity.id, identity.id), eq(contactIdentity.organizationId, orgId))).for("update")
+  const [currentThread] = await tx.select().from(conversation).where(and(eq(conversation.id, conversationId), eq(conversation.organizationId, orgId))).for("update")
+  if (!currentIdentity || !currentThread) throw notFound("Conversación o identidad")
+  if (currentIdentity.contactId !== currentThread.contactId) throw new ServiceError("IDENTITY_CONTACT_MISMATCH", 409, "La identidad ya no pertenece al contacto de esta conversación")
+  if (identity.contactId !== row.conv.contactId) {
+    throw new ServiceError(
+      "IDENTITY_CONTACT_MISMATCH",
+      409,
+      "La identidad pertenece a otro contacto de la organización",
+    )
+  }
+  if (identity.channel !== row.connection.channel) {
+    throw new ServiceError(
+      "IDENTITY_CHANNEL_MISMATCH",
+      409,
+      "La identidad es de otro canal distinto al de la conversación",
+    )
+  }
+  if (isTelegramGroupThread(row.connection.channel, row.conv.externalThreadId)) {
+    throw new ServiceError(
+      "GROUP_THREAD",
+      409,
+      "Los hilos grupales no se atribuyen a una identidad personal",
+    )
+  }
+  await tx
+    .update(conversation)
+    .set({ contactIdentityId: identity.id, updatedAt: new Date() })
+    .where(and(eq(conversation.id, row.conv.id), eq(conversation.organizationId, orgId)))
+  await audit(tx, orgId, {
+    actorUserId: actor?.userId ?? null,
+    action: "conversation.identity_resolved",
+    entity: "conversation",
+    entityId: row.conv.id,
+    metadata: { conversationId: row.conv.id, identityId: identity.id },
+  })
+  return { id: row.conv.id, contactIdentityId: identity.id }
+}
+
+/**
+ * Inicia (o reutiliza) la conversación directa de un contacto para una
+ * identidad/conexión. Devuelve la conversación existente sin reabrirla en
+ * silencio. WhatsApp crea el hilo `wa:<dígitos>` sin `lastInboundAt`
+ * (el primer envío oficial exigirá plantilla). Telegram requiere una
+ * conversación directa previamente recibida por ese bot.
+ */
+export async function startContactConversation(
+  tx: Db,
+  orgId: string,
+  actorUserId: string | null,
+  contactId: string,
+  input: { identityId: string; connectionId: string },
+): Promise<{ id: string; status: string; created: boolean }> {
+  const actor = { userId: actorUserId }
+  const [candidate] = await tx.select().from(contactIdentity).where(and(eq(contactIdentity.id, input.identityId), eq(contactIdentity.organizationId, orgId))).limit(1)
+  if (!candidate) throw notFound("Identidad de canal")
+  await lockChannelIdentity(tx, orgId, candidate.channel, candidate.externalUserId)
+  const [identity] = await tx.select().from(contactIdentity).where(and(eq(contactIdentity.id, input.identityId), eq(contactIdentity.organizationId, orgId))).for("share")
+  if (!identity || identity.contactId !== contactId) throw notFound("Identidad de canal")
+  const [contactRow] = await tx.select({ id: contact.id, isActive: contact.isActive }).from(contact).where(and(eq(contact.id, contactId), eq(contact.organizationId, orgId))).for("update")
+  if (!contactRow) throw notFound("Contacto")
+  if (!contactRow.isActive) throw new ServiceError("CONTACT_ARCHIVED", 409, "Reactiva el contacto para iniciar conversaciones")
+  if (identity.channel !== "whatsapp" && identity.channel !== "telegram") {
+    throw validation("Canal no soportado: solo whatsapp o telegram")
+  }
+  const [connection] = await tx
+    .select()
+    .from(channelConnection)
+    .where(
+      and(
+        eq(channelConnection.id, input.connectionId),
+        eq(channelConnection.organizationId, orgId),
+      ),
+    )
+    .limit(1)
+    .for("share")
+  if (!connection) throw notFound("Conexión")
+  if (connection.status !== "active") {
+    throw new ServiceError("CONNECTION_DISABLED", 409, "Conexión desactivada")
+  }
+  if (connection.channel !== identity.channel) {
+    throw validation("La conexión es de otro canal distinto al de la identidad")
+  }
+  const candidates = await tx
+    .select({ id: conversation.id, status: conversation.status, externalThreadId: conversation.externalThreadId, lastInboundAt: conversation.lastInboundAt })
+    .from(conversation)
+    .where(
+      and(
+        eq(conversation.organizationId, orgId),
+        eq(conversation.contactId, contactId),
+        eq(conversation.contactIdentityId, identity.id),
+        eq(conversation.channelConnectionId, connection.id),
+      ),
+    )
+  const existing = candidates.find(row => isDirectThread(identity.channel, row.externalThreadId, identity.externalUserId) && (identity.channel !== "telegram" || row.lastInboundAt !== null))
+  if (existing) return { id: existing.id, status: existing.status, created: false }
+  if (identity.channel === "telegram") {
+    throw new ServiceError(
+      "CHANNEL_REQUIRES_INBOUND",
+      409,
+      "Telegram exige que la persona escriba primero al bot: sin conversación previa no se puede iniciar",
+    )
+  }
+  const [created] = await tx
+    .insert(conversation)
+    .values({
+      organizationId: orgId,
+      contactId,
+      contactIdentityId: identity.id,
+      channelConnectionId: connection.id,
+      externalThreadId: identity.externalUserId,
+    })
+    .onConflictDoNothing({
+      target: [conversation.channelConnectionId, conversation.externalThreadId],
+    })
+    .returning({ id: conversation.id, status: conversation.status })
+  if (created) {
+    await audit(tx, orgId, {
+      actorUserId: actor?.userId ?? null,
+      action: "conversation.started",
+      entity: "conversation",
+      entityId: created.id,
+      metadata: {
+        conversationId: created.id,
+        contactId,
+        identityId: identity.id,
+        connectionId: connection.id,
+      },
+    })
+    return { id: created.id, status: created.status, created: true }
+  }
+  const [retry] = await tx
+    .select({ id: conversation.id, status: conversation.status, contactId: conversation.contactId })
+    .from(conversation)
+    .where(
+      and(
+        eq(conversation.organizationId, orgId),
+        eq(conversation.channelConnectionId, connection.id),
+        eq(conversation.externalThreadId, identity.externalUserId),
+      ),
+    )
+    .limit(1)
+  if (!retry || retry.contactId !== contactId) {
+    throw new ServiceError(
+      "AMBIGUOUS_CHANNEL_HISTORY",
+      409,
+      "El hilo ya existe con otro contacto: resuélvelo manualmente",
+    )
+  }
+  return { id: retry.id, status: retry.status, created: false }
 }

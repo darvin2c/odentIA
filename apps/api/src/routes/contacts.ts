@@ -1,15 +1,24 @@
 import { normalizeTags } from "@odentia/clinical"
 import { withOrgContext } from "@odentia/db"
-import { createContact, getContact, listContacts, updateContact } from "@odentia/services"
+import {
+  addContactIdentity,
+  createContact,
+  getContact,
+  listContacts,
+  moveContactIdentity,
+  startContactConversation,
+  updateContact,
+} from "@odentia/services"
 import { Hono } from "hono"
 import { z } from "zod"
-import { orgContextOf } from "../lib/context.js"
+import { canWrite, orgContextOf } from "../lib/context.js"
 import { errorBody } from "../lib/error.js"
 import { type CrmDeps, runService, serviceErrorResponse, validationError } from "./helpers.js"
 
 const listQuery = z.object({
   q: z.string().optional(),
   stageId: z.string().uuid().optional(),
+  isActive: z.enum(["true", "false", "all"]).optional().default("true"),
   cursor: z.string().optional(),
   limit: z.coerce.number().int().min(1).max(100).optional(),
 })
@@ -20,8 +29,14 @@ const listQuery = z.object({
 // normalizeTags; el servicio vuelve a normalizar (idempotente, sin bypass).
 const rawTags = z.array(z.string().min(1).max(200)).max(100).optional()
 
+const contactFields = {
+  phone: z.string().max(50).optional(),
+  email: z.string().max(200).optional(),
+}
+
 const createInput = z.object({
   displayName: z.string().min(1).max(200),
+  ...contactFields,
   notes: z.string().max(2000).optional(),
   tags: rawTags,
   stageId: z.string().uuid().optional(),
@@ -30,6 +45,11 @@ const createInput = z.object({
 
 const patchInput = z.object({
   displayName: z.string().min(1).max(200).optional(),
+  phone: z.string().max(50).nullable().optional(),
+  email: z.string().max(200).nullable().optional(),
+  // Archivar/reactivar exige owner/admin (se comprueba en la ruta); el resto
+  // de la edición CRM sigue disponible para los miembros actuales.
+  isActive: z.boolean().optional(),
   notes: z.string().max(2000).nullable().optional(),
   tags: rawTags,
   stageId: z.string().uuid().optional(),
@@ -44,9 +64,13 @@ export function createContactsRoute(deps: CrmDeps) {
     const { orgId } = orgContextOf(c)
     const parsed = listQuery.safeParse(c.req.query())
     if (!parsed.success) return validationError(c, parsed.error.issues)
+    const { isActive, ...rest } = parsed.data
     try {
       const { items, nextCursor } = await withOrgContext(deps.db, orgId, (tx) =>
-        listContacts(tx, orgId, parsed.data),
+        listContacts(tx, orgId, {
+          ...rest,
+          isActive: isActive === "all" ? "all" : isActive === "false" ? false : true,
+        }),
       )
       return c.json({ data: items, nextCursor })
     } catch (e) {
@@ -55,7 +79,7 @@ export function createContactsRoute(deps: CrmDeps) {
   })
 
   app.post("/", async (c) => {
-    const { orgId } = orgContextOf(c)
+    const { orgId, userId } = orgContextOf(c)
     const parsed = createInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
     let tags: string[] | undefined
@@ -70,7 +94,9 @@ export function createContactsRoute(deps: CrmDeps) {
       }
     }
     return runService(c, 201, () =>
-      withOrgContext(deps.db, orgId, (tx) => createContact(tx, orgId, { ...parsed.data, tags })),
+      withOrgContext(deps.db, orgId, (tx) =>
+        createContact(tx, orgId, { ...parsed.data, tags }, { userId }),
+      ),
     )
   })
 
@@ -82,9 +108,15 @@ export function createContactsRoute(deps: CrmDeps) {
   })
 
   app.patch("/:id", async (c) => {
-    const { orgId } = orgContextOf(c)
+    const { orgId, userId, memberRole } = orgContextOf(c)
     const parsed = patchInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
+    if (parsed.data.isActive !== undefined && !canWrite(memberRole)) {
+      return c.json(
+        errorBody(c, "FORBIDDEN", "Solo owner/admin pueden archivar o reactivar contactos"),
+        403,
+      )
+    }
     let tags: string[] | undefined
     if (parsed.data.tags !== undefined) {
       try {
@@ -98,9 +130,72 @@ export function createContactsRoute(deps: CrmDeps) {
     }
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
-        updateContact(tx, orgId, c.req.param("id"), { ...parsed.data, tags }),
+        updateContact(tx, orgId, c.req.param("id"), { ...parsed.data, tags }, { userId }),
       ),
     )
+  })
+
+  const identityInput = z.object({
+    channel: z.enum(["whatsapp", "telegram"]),
+    externalUserId: z.string().min(1).max(100),
+  })
+
+  app.post("/:id/identities", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canWrite(memberRole)) {
+      return c.json(
+        errorBody(c, "FORBIDDEN", "Solo owner/admin pueden gestionar canales"),
+        403,
+      )
+    }
+    const parsed = identityInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 201, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        addContactIdentity(tx, orgId, userId, c.req.param("id"), parsed.data),
+      ),
+    )
+  })
+
+  const moveInput = z.object({
+    toContactId: z.string().uuid(),
+    reason: z.string().min(1).max(500),
+  })
+
+  app.post("/:id/identities/:identityId/move", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canWrite(memberRole)) {
+      return c.json(
+        errorBody(c, "FORBIDDEN", "Solo owner/admin pueden reasignar canales"),
+        403,
+      )
+    }
+    const parsed = moveInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        moveContactIdentity(tx, orgId, userId, c.req.param("identityId"), { fromContactId: c.req.param("id"), ...parsed.data }),
+      ),
+    )
+  })
+
+  const startConversationInput = z.object({
+    identityId: z.string().uuid(),
+    connectionId: z.string().uuid(),
+  })
+
+  app.post("/:id/conversations", async (c) => {
+    const { orgId, userId } = orgContextOf(c)
+    const parsed = startConversationInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    try {
+      const result = await withOrgContext(deps.db, orgId, (tx) =>
+        startContactConversation(tx, orgId, userId, c.req.param("id"), parsed.data),
+      )
+      return c.json({ data: result }, result.created ? 201 : 200)
+    } catch (e) {
+      return serviceErrorResponse(c, e) ?? Promise.reject(e)
+    }
   })
 
   return app
