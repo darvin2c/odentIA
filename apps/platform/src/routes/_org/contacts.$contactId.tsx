@@ -18,7 +18,6 @@ import {
   FormDrawer,
   PageHeader,
   PageShell,
-  SubmitButton,
 } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, getRouteApi, Link } from "@tanstack/react-router"
@@ -75,12 +74,22 @@ function ContactDetailPage() {
   const { org } = orgRouteApi.useRouteContext()
   const canWrite = useCanWrite()
   const { contactId } = Route.useParams()
+  const [editOpen, setEditOpen] = useState(false)
+  const [draftName, setDraftName] = useState("")
+  const [draftPhone, setDraftPhone] = useState("")
+  const [draftEmail, setDraftEmail] = useState("")
+  const [draftNotes, setDraftNotes] = useState("")
+  const [draftStage, setDraftStage] = useState("")
+  const [draftAssignee, setDraftAssignee] = useState("")
+  const [customOpen, setCustomOpen] = useState(false)
+  const [draftCustom, setDraftCustom] = useState<Record<string, unknown>>({})
+  const [assignConvId, setAssignConvId] = useState<string | null>(null)
+  const [assignIdentityId, setAssignIdentityId] = useState("")
   const [tagsOpen, setTagsOpen] = useState(false)
   const [draftTags, setDraftTags] = useState<string[]>([])
   const [patientDrawer, setPatientDrawer] = useState(false)
   const [dialog, setDialog] = useState<{ prepareRegistration: boolean } | null>(null)
   const [archiveOpen, setArchiveOpen] = useState(false)
-
   const [linkOpen, setLinkOpen] = useState(false)
   const [linkSearch, setLinkSearch] = useState("")
   const [linkChoice, setLinkChoice] = useState<PatientSearchItem | null>(null)
@@ -104,7 +113,6 @@ function ContactDetailPage() {
     identityId: string
     identityLabel: string
   } | null>(null)
-  const [resolveSelection, setResolveSelection] = useState<Record<string, string>>({})
 
   const detailQuery = useQuery({
     queryKey: ["contact", contactId],
@@ -360,7 +368,7 @@ function ContactDetailPage() {
           continuar. Las conversaciones existentes siguen accesibles desde la bandeja.
         </p>
       )}
-      <section className="flex flex-col gap-2 rounded-lg border p-4">
+      <div className="flex flex-col gap-2 rounded-sm bg-card p-4">
         <div className="flex items-center justify-between gap-2">
           <h2 className="text-sm font-semibold">Pacientes vinculados</h2>
           {canWrite && (
@@ -388,7 +396,7 @@ function ContactDetailPage() {
           patients.map((p) => (
             <div
               key={p.id}
-              className="flex items-center justify-between gap-2 rounded-md border px-2 py-1.5"
+              className="flex items-center justify-between gap-2 rounded-sm px-2 py-1.5"
             >
               <span className="flex min-w-0 flex-wrap items-center gap-2 text-sm">
                 <span className="font-medium">{p.displayName}</span>
@@ -414,98 +422,66 @@ function ContactDetailPage() {
           Una coincidencia de teléfono nunca crea el vínculo automáticamente: siempre se
           confirma aquí.
         </p>
-      </section>
+      </div>
       <div className="grid gap-4 md:grid-cols-2">
-        <section className="flex flex-col gap-3 rounded-lg border p-4">
-          <h2 className="text-sm font-semibold">Datos</h2>
-          <form
-            className="flex flex-col gap-3"
-            onSubmit={(e) => {
-              e.preventDefault()
-              const form = new FormData(e.currentTarget)
-              const str = (k: string) => String(form.get(k) ?? "").trim()
-              void patchMutation.mutate({
-                displayName: str("displayName") || detail.contact.displayName,
-                phone: str("phone") ? str("phone") : null,
-                email: str("email") ? str("email") : null,
-                notes: str("notes"),
-              })
-            }}
-          >
-            <Field>
-              <FieldLabel>Nombre</FieldLabel>
-              <Input
-                name="displayName"
-                defaultValue={detail.contact.displayName}
-                key={detail.contact.displayName}
-              />
-            </Field>
-            <Field>
-              <FieldLabel>Teléfono (declarado)</FieldLabel>
-              <Input
-                name="phone"
-                defaultValue={detail.contact.phone ?? ""}
-                key={detail.contact.phone ?? ""}
-              />
-            </Field>
-            <Field>
-              <FieldLabel>Correo (declarado)</FieldLabel>
-              <Input
-                type="email"
-                name="email"
-                defaultValue={detail.contact.email ?? ""}
-                key={detail.contact.email ?? ""}
-              />
-            </Field>
-            {(detail.contact.phone ?? detail.contact.email) &&
-            detail.identities.length === 0 ? (
-              <p className="text-xs text-muted-foreground">
-                Dato declarado, sin verificación de canal: aún no hay identidades vinculadas.
-              </p>
-            ) : null}
-            <Field>
-              <FieldLabel>Notas</FieldLabel>
-              <Input
-                name="notes"
-                defaultValue={detail.contact.notes ?? ""}
-                key={detail.contact.notes ?? ""}
-              />
-            </Field>
+        <div className="flex flex-col gap-3 rounded-sm bg-card p-4">
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="text-sm font-semibold">Datos</h2>
+            {canWrite && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  patchMutation.reset()
+                  setDraftName(detail.contact.displayName)
+                  setDraftPhone(detail.contact.phone ?? "")
+                  setDraftEmail(detail.contact.email ?? "")
+                  setDraftNotes(detail.contact.notes ?? "")
+                  setDraftStage(detail.contact.stageId ?? "")
+                  setDraftAssignee(detail.contact.assignedUserId ?? "")
+                  setEditOpen(true)
+                }}
+              >
+                Editar datos
+              </Button>
+            )}
+          </div>
+          <dl className="flex flex-col gap-2 text-sm">
             <div className="flex gap-2">
-              <Field>
-                <FieldLabel>Etapa</FieldLabel>
-                <select
-                  aria-label="Etapa"
-                  className="rounded-md border bg-background px-2 py-1.5 text-sm"
-                  value={detail.contact.stageId ?? ""}
-                  onChange={(e) => patchMutation.mutate({ stageId: e.target.value || null })}
-                >
-                  {stages.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-              <Field>
-                <FieldLabel>Asignado</FieldLabel>
-                <select
-                  aria-label="Asignado"
-                  className="rounded-md border bg-background px-2 py-1.5 text-sm"
-                  value={detail.contact.assignedUserId ?? ""}
-                  onChange={(e) => patchMutation.mutate({ assignedUserId: e.target.value || null })}
-                >
-                  <option value="">Sin asignar</option>
-                  {org.members.map((m) => (
-                    <option key={m.userId} value={m.userId}>
-                      {m.user.name}
-                    </option>
-                  ))}
-                </select>
-              </Field>
+              <dt className="w-24 shrink-0 text-muted-foreground">Nombre</dt>
+              <dd className="font-medium">{detail.contact.displayName}</dd>
             </div>
-            <SubmitButton pending={patchMutation.isPending}>Guardar</SubmitButton>
-          </form>
+            <div className="flex gap-2">
+              <dt className="w-24 shrink-0 text-muted-foreground">Teléfono</dt>
+              <dd>{detail.contact.phone ?? "—"}</dd>
+            </div>
+            <div className="flex gap-2">
+              <dt className="w-24 shrink-0 text-muted-foreground">Correo</dt>
+              <dd>{detail.contact.email ?? "—"}</dd>
+            </div>
+            <div className="flex gap-2">
+              <dt className="w-24 shrink-0 text-muted-foreground">Notas</dt>
+              <dd>{detail.contact.notes || "—"}</dd>
+            </div>
+            <div className="flex gap-2">
+              <dt className="w-24 shrink-0 text-muted-foreground">Etapa</dt>
+              <dd>{stages.find((s) => s.id === detail.contact.stageId)?.name ?? "—"}</dd>
+            </div>
+            <div className="flex gap-2">
+              <dt className="w-24 shrink-0 text-muted-foreground">Asignado</dt>
+              <dd>
+                {org.members.find((m) => m.userId === detail.contact.assignedUserId)?.user.name ??
+                  "Sin asignar"}
+              </dd>
+            </div>
+          </dl>
+          {(detail.contact.phone ?? detail.contact.email) &&
+          detail.identities.length === 0 ? (
+            <p className="text-xs text-muted-foreground">
+              Dato declarado, sin verificación de canal: aún no hay identidades vinculadas.
+            </p>
+          ) : null}
           <div>
             <span className="text-sm font-medium">Etiquetas</span>
             <div className="mt-1 flex flex-wrap gap-1">
@@ -530,55 +506,40 @@ function ContactDetailPage() {
               Editar etiquetas
             </Button>
           </div>
-        </section>
+        </div>
 
-        <section className="flex flex-col gap-3 rounded-lg border p-4">
-          <h2 className="text-sm font-semibold">Campos personalizados</h2>
-          {fieldDefs.length === 0 && (
+        <div className="flex flex-col gap-3 rounded-sm bg-card p-4">
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="text-sm font-semibold">Campos personalizados</h2>
+            {canWrite && fieldDefs.length > 0 && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  patchMutation.reset()
+                  setDraftCustom({ ...customFields })
+                  setCustomOpen(true)
+                }}
+              >
+                Editar campos
+              </Button>
+            )}
+          </div>
+          {fieldDefs.length === 0 ? (
             <p className="text-sm text-muted-foreground">
               Sin campos definidos (Configuración → Campos).
             </p>
+          ) : (
+            <dl className="flex flex-col gap-2 text-sm">
+              {fieldDefs.map((def) => (
+                <div key={def.key} className="flex gap-2">
+                  <dt className="w-32 shrink-0 text-muted-foreground">{def.label}</dt>
+                  <dd>{String(customFields[def.key] ?? "—")}</dd>
+                </div>
+              ))}
+            </dl>
           )}
-          {fieldDefs.map((def) => (
-            <Field key={def.key}>
-              <FieldLabel>{def.label}</FieldLabel>
-              {def.type === "select" ? (
-                <select
-                  aria-label={def.label}
-                  className="rounded-md border bg-background px-2 py-1.5 text-sm"
-                  value={
-                    typeof customFields[def.key] === "string"
-                      ? (customFields[def.key] as string)
-                      : ""
-                  }
-                  onChange={(e) =>
-                    patchMutation.mutate({
-                      customFields: { ...customFields, [def.key]: e.target.value },
-                    })
-                  }
-                >
-                  <option value="">—</option>
-                  {(def.options ?? []).map((o) => (
-                    <option key={o} value={o}>
-                      {o}
-                    </option>
-                  ))}
-                </select>
-              ) : (
-                <Input
-                  type={def.type === "number" ? "number" : def.type === "date" ? "date" : "text"}
-                  defaultValue={String(customFields[def.key] ?? "")}
-                  key={`${def.key}:${String(customFields[def.key] ?? "")}`}
-                  onBlur={(e) => {
-                    const raw = e.target.value
-                    if (raw === "") return
-                    const value = def.type === "number" ? Number(raw) : raw
-                    patchMutation.mutate({ customFields: { ...customFields, [def.key]: value } })
-                  }}
-                />
-              )}
-            </Field>
-          ))}
           <div className="flex items-center justify-between gap-2">
             <h2 className="text-sm font-semibold">Canales</h2>
             {canWrite && (
@@ -613,7 +574,7 @@ function ContactDetailPage() {
               (c) => c.contactIdentityId === ident.id,
             ).length
             return (
-              <div key={ident.id} className="flex flex-col gap-1 rounded-md border px-2 py-1.5">
+              <div key={ident.id} className="flex flex-col gap-1 rounded-sm px-2 py-1.5">
                 <span className="flex items-center gap-2 text-sm">
                   {ident.channel === "whatsapp" ? (
                     <MessageCircle className="size-4 text-green-600" />
@@ -654,10 +615,10 @@ function ContactDetailPage() {
             El correo es un dato declarado, no un canal de envío: los canales soportados son
             WhatsApp y Telegram.
           </p>
-        </section>
+        </div>
       </div>
 
-      <section className="flex flex-col gap-2 rounded-lg border p-4">
+      <div className="flex flex-col gap-2 rounded-sm bg-card p-4">
         <h2 className="text-sm font-semibold">Conversaciones</h2>
         <p className="text-xs text-muted-foreground">
           La conversación pertenece al contacto y puede incluir a otros pacientes.
@@ -673,7 +634,7 @@ function ContactDetailPage() {
           return (
             <div
               key={conv.id}
-              className="flex flex-col gap-1 rounded-md border px-2 py-1.5"
+              className="flex flex-col gap-1 rounded-sm px-2 py-1.5"
             >
               <span className="flex flex-wrap items-center gap-2 text-sm">
                 <Badge
@@ -704,51 +665,28 @@ function ContactDetailPage() {
                 </Button>
               </span>
               {canWrite && !linked && sameChannel.length > 0 && (
-                <span className="flex flex-wrap items-center gap-2">
-                  <select
-                    aria-label={`Identidad para conversación ${conv.id}`}
-                    className="rounded-md border bg-background px-2 py-1.5 text-sm"
-                    value={resolveSelection[conv.id] ?? ""}
-                    onChange={(e) =>
-                      setResolveSelection((prev) => ({ ...prev, [conv.id]: e.target.value }))
-                    }
-                  >
-                    <option value="">Asignar identidad…</option>
-                    {sameChannel.map((i) => (
-                      <option key={i.id} value={i.id}>
-                        {i.displayName ?? i.externalUserId}
-                      </option>
-                    ))}
-                  </select>
+                <span>
                   <Button
                     type="button"
                     variant="outline"
                     size="sm"
-                    disabled={!resolveSelection[conv.id] || resolveMutation.isPending}
                     onClick={() => {
-                      const identityId = resolveSelection[conv.id]
-                      const identity = sameChannel.find((i) => i.id === identityId)
-                      if (!identity) return
                       resolveMutation.reset()
-                      setResolveConfirm({
-                        conversationId: conv.id,
-                        conversationLabel: `${conv.channel === "whatsapp" ? "WhatsApp" : "Telegram"}${conv.connectionName ? ` · ${conv.connectionName}` : ""}`,
-                        identityId: identity.id,
-                        identityLabel: identity.displayName ?? identity.externalUserId,
-                      })
+                      setAssignConvId(conv.id)
+                      setAssignIdentityId("")
                     }}
                   >
-                    Asignar
+                    Asignar identidad
                   </Button>
                 </span>
               )}
             </div>
           )
         })}
-      </section>
+      </div>
 
       <div className="grid gap-4 md:grid-cols-2">
-        <section className="flex flex-col gap-2 rounded-lg border p-4">
+        <div className="flex flex-col gap-2 rounded-sm bg-card p-4">
           <h2 className="text-sm font-semibold">Tareas abiertas</h2>
           {detail.openTasks.length === 0 && (
             <p className="text-sm text-muted-foreground">Sin tareas abiertas.</p>
@@ -770,8 +708,8 @@ function ContactDetailPage() {
           >
             Ir a tareas
           </Button>
-        </section>
-        <section className="flex flex-col gap-2 rounded-lg border p-4">
+        </div>
+        <div className="flex flex-col gap-2 rounded-sm bg-card p-4">
           <h2 className="text-sm font-semibold">Registro</h2>
           <p className="text-sm text-muted-foreground">
             Los enlaces de registro se crean desde la bandeja: «Conversar» o «Enviar
@@ -786,8 +724,195 @@ function ContactDetailPage() {
           >
             Abrir selector de conversación
           </Button>
-        </section>
+        </div>
       </div>
+      <FormDrawer
+        open={editOpen}
+        onClose={() => {
+          if (!patchMutation.isPending) {
+            setEditOpen(false)
+            patchMutation.reset()
+          }
+        }}
+        title="Editar datos"
+        submitLabel="Guardar"
+        cancelLabel="Cancelar"
+        isSubmitting={patchMutation.isPending}
+        error={patchMutation.error instanceof Error ? patchMutation.error.message : null}
+        onSubmit={(event) => {
+          event.preventDefault()
+          patchMutation.mutate(
+            {
+              displayName: draftName.trim() || detail.contact.displayName,
+              phone: draftPhone.trim() ? draftPhone.trim() : null,
+              email: draftEmail.trim() ? draftEmail.trim() : null,
+              notes: draftNotes.trim(),
+              stageId: draftStage || null,
+              assignedUserId: draftAssignee || null,
+            },
+            { onSuccess: () => setEditOpen(false) },
+          )
+        }}
+      >
+        <div className="flex flex-col gap-4">
+          <Field>
+            <FieldLabel>Nombre</FieldLabel>
+            <Input value={draftName} onChange={(e) => setDraftName(e.target.value)} />
+          </Field>
+          <Field>
+            <FieldLabel>Teléfono (declarado)</FieldLabel>
+            <Input value={draftPhone} onChange={(e) => setDraftPhone(e.target.value)} />
+          </Field>
+          <Field>
+            <FieldLabel>Correo (declarado)</FieldLabel>
+            <Input
+              type="email"
+              value={draftEmail}
+              onChange={(e) => setDraftEmail(e.target.value)}
+            />
+          </Field>
+          <Field>
+            <FieldLabel>Notas</FieldLabel>
+            <Input value={draftNotes} onChange={(e) => setDraftNotes(e.target.value)} />
+          </Field>
+          <Field>
+            <FieldLabel>Etapa</FieldLabel>
+            <select
+              aria-label="Etapa"
+              className="rounded-md border bg-background px-2 py-1.5 text-sm"
+              value={draftStage}
+              onChange={(e) => setDraftStage(e.target.value)}
+            >
+              <option value="">—</option>
+              {stages.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field>
+            <FieldLabel>Asignado</FieldLabel>
+            <select
+              aria-label="Asignado"
+              className="rounded-md border bg-background px-2 py-1.5 text-sm"
+              value={draftAssignee}
+              onChange={(e) => setDraftAssignee(e.target.value)}
+            >
+              <option value="">Sin asignar</option>
+              {org.members.map((m) => (
+                <option key={m.userId} value={m.userId}>
+                  {m.user.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+        </div>
+      </FormDrawer>
+      <FormDrawer
+        open={customOpen}
+        onClose={() => {
+          if (!patchMutation.isPending) {
+            setCustomOpen(false)
+            patchMutation.reset()
+          }
+        }}
+        title="Editar campos personalizados"
+        submitLabel="Guardar"
+        cancelLabel="Cancelar"
+        isSubmitting={patchMutation.isPending}
+        error={patchMutation.error instanceof Error ? patchMutation.error.message : null}
+        onSubmit={(event) => {
+          event.preventDefault()
+          patchMutation.mutate(
+            { customFields: draftCustom },
+            { onSuccess: () => setCustomOpen(false) },
+          )
+        }}
+      >
+        <div className="flex flex-col gap-4">
+          {fieldDefs.map((def) => (
+            <Field key={def.key}>
+              <FieldLabel>{def.label}</FieldLabel>
+              {def.type === "select" ? (
+                <select
+                  aria-label={def.label}
+                  className="rounded-md border bg-background px-2 py-1.5 text-sm"
+                  value={typeof draftCustom[def.key] === "string" ? String(draftCustom[def.key]) : ""}
+                  onChange={(e) =>
+                    setDraftCustom((prev) => ({ ...prev, [def.key]: e.target.value }))
+                  }
+                >
+                  <option value="">—</option>
+                  {(def.options ?? []).map((o) => (
+                    <option key={o} value={o}>
+                      {o}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <Input
+                  type={def.type === "number" ? "number" : def.type === "date" ? "date" : "text"}
+                  value={String(draftCustom[def.key] ?? "")}
+                  onChange={(e) => {
+                    const raw = e.target.value
+                    const value = def.type === "number" ? (raw === "" ? "" : Number(raw)) : raw
+                    setDraftCustom((prev) => ({ ...prev, [def.key]: value }))
+                  }}
+                />
+              )}
+            </Field>
+          ))}
+        </div>
+      </FormDrawer>
+      <FormDrawer
+        open={assignConvId !== null}
+        onClose={() => {
+          if (!resolveMutation.isPending) setAssignConvId(null)
+        }}
+        title="Asignar identidad a la conversación"
+        description="Elige la identidad del mismo canal. Se pedirá confirmación antes de vincular."
+        submitLabel="Continuar"
+        cancelLabel="Cancelar"
+        submitDisabled={!assignIdentityId}
+        onSubmit={(event) => {
+          event.preventDefault()
+          const conv = detail.conversations.find((c) => c.id === assignConvId)
+          const identity = detail.identities.find((i) => i.id === assignIdentityId)
+          if (!conv || !identity) return
+          resolveMutation.reset()
+          setResolveConfirm({
+            conversationId: conv.id,
+            conversationLabel: `${conv.channel === "whatsapp" ? "WhatsApp" : "Telegram"}${conv.connectionName ? ` · ${conv.connectionName}` : ""}`,
+            identityId: identity.id,
+            identityLabel: identity.displayName ?? identity.externalUserId,
+          })
+          setAssignConvId(null)
+        }}
+      >
+        <Field>
+          <FieldLabel>Identidad</FieldLabel>
+          <select
+            aria-label="Identidad"
+            className="rounded-md border bg-background px-2 py-1.5 text-sm"
+            value={assignIdentityId}
+            onChange={(e) => setAssignIdentityId(e.target.value)}
+          >
+            <option value="">Elegir identidad…</option>
+            {detail.identities
+              .filter(
+                (i) =>
+                  i.channel ===
+                  detail.conversations.find((c) => c.id === assignConvId)?.channel,
+              )
+              .map((i) => (
+                <option key={i.id} value={i.id}>
+                  {i.displayName ?? i.externalUserId}
+                </option>
+              ))}
+          </select>
+        </Field>
+      </FormDrawer>
       <FormDrawer
         open={tagsOpen}
         onClose={() => setTagsOpen(false)}
