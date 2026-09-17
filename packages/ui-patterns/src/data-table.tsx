@@ -31,6 +31,12 @@ export interface DataTableProps<TData> {
   table: TanStackTable<TData>
   onRowClick?: (row: TData) => void
   /**
+   * Fila abierta en el detalle: se marca para que se sepa qué registro se está
+   * editando mientras el panel está al costado. El predicado lo aporta la
+   * página, que conoce la identidad de su entidad (`row.id === editing?.id`).
+   */
+  isRowActive?: (row: TData) => boolean
+  /**
    * Vista en pantallas de `md` (768px) o más. Por debajo de ese ancho siempre
    * se renderiza `list`, aunque aquí se pida `table` o `card`. Default `table`.
    */
@@ -54,8 +60,19 @@ function skeletonWidth(index: number): string {
 interface LayoutProps<TData> {
   table: TanStackTable<TData>
   onRowClick?: (row: TData) => void
+  isRowActive?: (row: TData) => boolean
   className?: string
 }
+
+/**
+ * Marca de fila activa: mismo tratamiento en las tres vistas (fondo hundido y
+ * barra primaria a la izquierda) y `aria-current` para lectores de pantalla.
+ */
+function activeRowProps(active: boolean) {
+  return active ? { "data-state": "active", "aria-current": "true" as const } : {}
+}
+
+const activeRowClass = "bg-muted shadow-[inset_2px_0_0_0_var(--color-primary)]"
 
 /**
  * Tabla de datos con tres vistas que comparten celdas: el contenido sale
@@ -66,21 +83,43 @@ interface LayoutProps<TData> {
 export function DataTable<TData>({
   table,
   onRowClick,
+  isRowActive,
   view = "table",
   className,
 }: DataTableProps<TData>) {
   const resolved = useResolvedView(view)
 
   if (resolved === "list") {
-    return <ListLayout table={table} onRowClick={onRowClick} className={className} />
+    return (
+      <ListLayout
+        table={table}
+        onRowClick={onRowClick}
+        isRowActive={isRowActive}
+        className={className}
+      />
+    )
   }
   if (resolved === "card") {
-    return <CardLayout table={table} onRowClick={onRowClick} className={className} />
+    return (
+      <CardLayout
+        table={table}
+        onRowClick={onRowClick}
+        isRowActive={isRowActive}
+        className={className}
+      />
+    )
   }
-  return <TableLayout table={table} onRowClick={onRowClick} className={className} />
+  return (
+    <TableLayout
+      table={table}
+      onRowClick={onRowClick}
+      isRowActive={isRowActive}
+      className={className}
+    />
+  )
 }
 
-function TableLayout<TData>({ table, onRowClick, className }: LayoutProps<TData>) {
+function TableLayout<TData>({ table, onRowClick, isRowActive, className }: LayoutProps<TData>) {
   return (
     <div className={cn("overflow-hidden rounded-md bg-card", className)}>
       <Table>
@@ -98,30 +137,34 @@ function TableLayout<TData>({ table, onRowClick, className }: LayoutProps<TData>
           ))}
         </TableHeader>
         <TableBody>
-          {table.getRowModel().rows.map((row) => (
-            <TableRow
-              key={row.id}
-              className={onRowClick ? "cursor-pointer" : undefined}
-              onClick={(event) => {
-                if (!onRowClick) return
-                if (isInteractiveTarget(event.target)) return
-                onRowClick(row.original)
-              }}
-            >
-              {row.getVisibleCells().map((cell) => (
-                <TableCell key={cell.id}>
-                  {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                </TableCell>
-              ))}
-            </TableRow>
-          ))}
+          {table.getRowModel().rows.map((row) => {
+            const active = isRowActive?.(row.original) ?? false
+            return (
+              <TableRow
+                key={row.id}
+                className={cn(onRowClick && "cursor-pointer", active && activeRowClass)}
+                {...activeRowProps(active)}
+                onClick={(event) => {
+                  if (!onRowClick) return
+                  if (isInteractiveTarget(event.target)) return
+                  onRowClick(row.original)
+                }}
+              >
+                {row.getVisibleCells().map((cell) => (
+                  <TableCell key={cell.id}>
+                    {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                  </TableCell>
+                ))}
+              </TableRow>
+            )
+          })}
         </TableBody>
       </Table>
     </div>
   )
 }
 
-function ListLayout<TData>({ table, onRowClick, className }: LayoutProps<TData>) {
+function ListLayout<TData>({ table, onRowClick, isRowActive, className }: LayoutProps<TData>) {
   const columns = resolveViewColumns(table)
 
   return (
@@ -130,10 +173,16 @@ function ListLayout<TData>({ table, onRowClick, className }: LayoutProps<TData>)
       <div className="flex flex-col gap-2">
         {table.getRowModel().rows.map((row) => {
           const cells = cellsByColumn(row)
+          const active = isRowActive?.(row.original) ?? false
           return (
             <Item
               key={row.id}
-              className={cn("rounded-md bg-card", onRowClick && "cursor-pointer")}
+              className={cn(
+                "rounded-md bg-card",
+                onRowClick && "cursor-pointer",
+                active && activeRowClass,
+              )}
+              {...activeRowProps(active)}
               onClick={rowClickHandler(row, onRowClick)}
             >
               {columns.select ? (
@@ -174,7 +223,7 @@ function ListLayout<TData>({ table, onRowClick, className }: LayoutProps<TData>)
   )
 }
 
-function CardLayout<TData>({ table, onRowClick, className }: LayoutProps<TData>) {
+function CardLayout<TData>({ table, onRowClick, isRowActive, className }: LayoutProps<TData>) {
   const columns = resolveViewColumns(table)
 
   return (
@@ -183,10 +232,16 @@ function CardLayout<TData>({ table, onRowClick, className }: LayoutProps<TData>)
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
         {table.getRowModel().rows.map((row) => {
           const cells = cellsByColumn(row)
+          const active = isRowActive?.(row.original) ?? false
           return (
             <div
               key={row.id}
-              className={cn("rounded-md bg-card p-4", onRowClick && "cursor-pointer")}
+              className={cn(
+                "rounded-md bg-card p-4",
+                onRowClick && "cursor-pointer",
+                active && activeRowClass,
+              )}
+              {...activeRowProps(active)}
               onClick={rowClickHandler(row, onRowClick)}
             >
               <div className="flex items-start justify-between gap-2">

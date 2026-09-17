@@ -43,6 +43,11 @@ function TestTable({ onRowClick }: { onRowClick: (row: Person) => void }) {
   return <DataTable table={table} onRowClick={onRowClick} />
 }
 
+function ActiveTable({ activeId }: { activeId: string }) {
+  const table = useReactTable({ data: rows, columns, getCoreRowModel: getCoreRowModel() })
+  return <DataTable table={table} isRowActive={(row) => row.id === activeId} />
+}
+
 describe("DataTable", () => {
   it("renderiza celdas y entrega la fila pulsada", () => {
     const onRowClick = vi.fn()
@@ -51,6 +56,14 @@ describe("DataTable", () => {
     expect(screen.getByText("Bruno")).toBeTruthy()
     fireEvent.click(screen.getByText("Bruno"))
     expect(onRowClick).toHaveBeenCalledWith(rows[1])
+  })
+
+  it("marca solo la fila en edición, con aria-current para lectores de pantalla", () => {
+    const { container } = render(<ActiveTable activeId="2" />)
+    const marked = container.querySelectorAll('[data-state="active"]')
+    expect(marked).toHaveLength(1)
+    expect(marked[0]?.textContent).toContain("Bruno")
+    expect(marked[0]?.getAttribute("aria-current")).toBe("true")
   })
 
   it("mantiene la geometría de la tabla durante la carga inicial", () => {
