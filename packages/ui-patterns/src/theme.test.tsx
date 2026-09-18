@@ -6,8 +6,8 @@ import {
   readStoredTheme,
   resolveTheme,
   THEME_STORAGE_KEY,
-  useTheme,
   type ThemeMode,
+  useTheme,
 } from "./theme.js"
 
 afterEach(() => {
