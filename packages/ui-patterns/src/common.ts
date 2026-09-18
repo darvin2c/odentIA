@@ -24,6 +24,10 @@ export const common = {
     code: "Código",
     requestId: "ID de solicitud",
   },
+  phone: {
+    country: "País",
+    placeholder: "Número de teléfono",
+  },
   confirm: {
     unsavedMessage: "Tienes cambios sin guardar. ¿Deseas descartarlos?",
   },

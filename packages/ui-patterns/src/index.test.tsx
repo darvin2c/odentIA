@@ -14,5 +14,6 @@ describe("ui-patterns barrel", () => {
     expect(typeof barrel.PageHeader).toBe("function")
     expect(typeof barrel.isNavItemActive).toBe("function")
     expect(typeof barrel.SectionNav).toBe("function")
+    expect(typeof barrel.PhoneInput).toBe("function")
   })
 })

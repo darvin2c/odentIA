@@ -1,0 +1,57 @@
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@odentia/ui"
+import * as React from "react"
+import { common } from "../common.js"
+import {
+  type CountryCode,
+  countryOptions,
+  DEFAULT_COUNTRY,
+  getCountryCallingCode,
+} from "./phone.js"
+
+export interface CountrySelectProps {
+  value: CountryCode
+  onChange: (country: CountryCode) => void
+  /** Acota la lista; sin esto se ofrecen todos los países con plan telefónico. */
+  countries?: readonly CountryCode[]
+  disabled?: boolean
+}
+
+/**
+ * Selector de país del teléfono. El disparador muestra ISO + prefijo
+ * (`PE +51`) porque el nombre completo no cabe en el ancho del campo; el
+ * nombre va en las opciones, que salen de `Intl.DisplayNames`.
+ */
+export function CountrySelect({
+  value,
+  onChange,
+  countries,
+  disabled = false,
+}: CountrySelectProps) {
+  const options = React.useMemo(
+    () => countryOptions(value || DEFAULT_COUNTRY, countries),
+    [value, countries],
+  )
+
+  return (
+    <Select<CountryCode>
+      value={value}
+      onValueChange={(next) => {
+        if (next) onChange(next)
+      }}
+      disabled={disabled}
+    >
+      <SelectTrigger aria-label={common.phone.country} className="w-28 shrink-0">
+        <SelectValue>
+          {(selected: CountryCode) => `${selected} +${getCountryCallingCode(selected)}`}
+        </SelectValue>
+      </SelectTrigger>
+      <SelectContent className="min-w-44">
+        {options.map((option) => (
+          <SelectItem key={option.value} value={option.value}>
+            {`${option.label} (+${option.callingCode})`}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  )
+}

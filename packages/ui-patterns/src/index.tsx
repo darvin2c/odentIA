@@ -49,6 +49,7 @@ export {
   useDetailMode,
 } from "./master-detail.js"
 export { PageShell, type PageShellProps } from "./page-shell.js"
+export * from "./phone/index.js"
 export {
   type RowActionItem,
   RowActions,
