@@ -199,10 +199,12 @@ async function decideBudget(
   budgetId: string,
   acceptedItemIds: string[],
 ): Promise<void> {
+  const detail = await app.request(`/patients/${patientId}/budgets/${budgetId}`)
+  const budget = (await detail.json()) as { data: { items: Array<{ planItemId: string }> } }
   const res = await app.request(`/patients/${patientId}/budgets/${budgetId}/decision`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ acceptedItemIds, acceptedByName: "Paciente Test" }),
+    body: JSON.stringify({ decisions: budget.data.items.map(line => ({ planItemId: line.planItemId, decision: acceptedItemIds.includes(line.planItemId) ? "aceptado" : "rechazado" })) }),
   })
   expect(res.status).toBe(200)
 }
@@ -412,7 +414,7 @@ it("encounters: adenda en borrador 409 NOT_FINALIZED; tras finalizar 201 kind ad
   expect(detailBody.data.addenda.every((n) => n.kind === "adenda")).toBe(true)
 })
 
-it("encounters: procedure con planItemId deja el plan realizado en la misma atención", async () => {
+it("encounters: las sesiones mantienen en curso hasta completar explícitamente", async () => {
   const app = buildApp("admin")
   const patientId = await createFreshPatient(app, "Borrador Plan")
   const ctx = await setupPlan(app, patientId)
@@ -448,8 +450,14 @@ it("encounters: procedure con planItemId deja el plan realizado en la misma aten
       body: JSON.stringify({ planItemId: itemId }),
     },
   )
-  expect(duplicate.status).toBe(409)
-  // Realizado es terminal: reabrir o cancelar un ejecutado se rechaza.
+  expect(duplicate.status).toBe(201)
+  const during = await app.request(`/patients/${patientId}/plan`)
+  expect(((await during.json()) as { data: PlanItemRow[] }).data.find(row => row.id === itemId)?.status).toBe("en_curso")
+  const complete = await app.request(`/patients/${patientId}/treatments/${itemId}/complete`, {
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ encounterId }),
+  })
+  expect(complete.status).toBe(200)
+  // El cierre explícito conserva todas las sesiones.
   const reopen = await app.request(`/patients/${patientId}/plan/items/${itemId}`, {
     method: "PATCH",
     headers: { "content-type": "application/json" },
@@ -468,7 +476,7 @@ it("encounters: procedure con planItemId deja el plan realizado en la misma aten
 
   const detail = await app.request(`/patients/${patientId}/encounters/${encounterId}`)
   const detailBody = (await detail.json()) as EncounterDetailBody
-  expect(detailBody.data.procedures.filter((p) => p.planItemId === itemId)).toHaveLength(1)
+  expect(detailBody.data.procedures.filter((p) => p.planItemId === itemId)).toHaveLength(2)
   expect(detailBody.data.indicatedItems.map((row) => row.id)).toContain(itemId)
 })
 it("encounters: referencias de otro paciente del mismo org responden 404 sin efectos", async () => {

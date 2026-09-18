@@ -1,0 +1,57 @@
+import { withOrgContext } from "@odentia/db"
+import { createOptionGroup, getTreatmentJourney, revisePlanItem, setPlanItemStatus } from "@odentia/services"
+import { Hono } from "hono"
+import { z } from "zod"
+import { orgContextOf } from "../lib/context.js"
+import { type CrmDeps, runService, validationError } from "./helpers.js"
+
+const groupInput = z.object({ title: z.string().trim().min(1).max(200) }).strict()
+const reviseInput = z.object({ encounterId: z.uuid(), reason: z.string().trim().min(1).max(2000), serviceId: z.uuid(), toothNumber: z.number().int().nullish(), surfaces: z.array(z.string()).max(5).nullish(), quadrant: z.number().int().min(1).max(8).nullish(), arch: z.enum(["upper","lower"]).nullish(), detail: z.string().max(4000).nullish(), diagnosisCode: z.string().max(10).nullish() }).strict()
+const completeInput = z.object({ encounterId: z.uuid() }).strict()
+const reasonInput = z.object({ encounterId: z.uuid().optional(), reason: z.string().trim().min(1).max(2000) }).strict()
+const itemParams = z.object({ id: z.uuid(), itemId: z.uuid() })
+
+export function createPatientTreatmentsRoute(deps: Pick<CrmDeps, "db">) {
+  const app = new Hono()
+  app.post("/:id/plans/:planId/option-groups", async c => {
+    const { orgId, userId } = orgContextOf(c)
+    const params = z.object({ id: z.uuid(), planId: z.uuid() }).safeParse(c.req.param())
+    if (!params.success) return validationError(c, params.error.issues)
+    const parsed = groupInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 201, () => withOrgContext(deps.db, orgId, tx => createOptionGroup(tx, orgId, userId, params.data.id, { ...parsed.data, planId: params.data.planId })))
+  })
+  app.get("/:id/treatments/:itemId/journey", async c => {
+    const { orgId } = orgContextOf(c)
+    const params = itemParams.safeParse(c.req.param())
+    if (!params.success) return validationError(c, params.error.issues)
+    return runService(c, 200, () => withOrgContext(deps.db, orgId, tx => getTreatmentJourney(tx, orgId, params.data.id, params.data.itemId)))
+  })
+  app.post("/:id/treatments/:itemId/revise", async c => {
+    const { orgId, userId } = orgContextOf(c)
+    const params = itemParams.safeParse(c.req.param())
+    if (!params.success) return validationError(c, params.error.issues)
+    const parsed = reviseInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 201, () => withOrgContext(deps.db, orgId, tx => revisePlanItem(tx, orgId, userId, params.data.id, params.data.itemId, parsed.data)))
+  })
+  app.post("/:id/treatments/:itemId/complete", async c => {
+    const { orgId, userId } = orgContextOf(c)
+    const params = itemParams.safeParse(c.req.param())
+    if (!params.success) return validationError(c, params.error.issues)
+    const parsed = completeInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () => withOrgContext(deps.db, orgId, tx => setPlanItemStatus(tx, orgId, userId, params.data.id, params.data.itemId, { ...parsed.data, status: "realizado" })))
+  })
+  for (const [action, status] of [["suspend", "suspendido"], ["cancel", "cancelado"]] as const) {
+    app.post(`/:id/treatments/:itemId/${action}`, async c => {
+      const { orgId, userId } = orgContextOf(c)
+      const params = itemParams.safeParse(c.req.param())
+      if (!params.success) return validationError(c, params.error.issues)
+      const parsed = reasonInput.safeParse(await c.req.json().catch(() => null))
+      if (!parsed.success) return validationError(c, parsed.error.issues)
+      return runService(c, 200, () => withOrgContext(deps.db, orgId, tx => setPlanItemStatus(tx, orgId, userId, params.data.id, params.data.itemId, { encounterId: parsed.data.encounterId, statusReason: parsed.data.reason, status })))
+    })
+  }
+  return app
+}

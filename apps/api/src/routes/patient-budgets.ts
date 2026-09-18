@@ -6,6 +6,7 @@ import {
   getBudgetDetail,
   listBudgets,
   presentBudget,
+  reviseBudget,
   updateBudgetDraft,
 } from "@odentia/services"
 import { Hono } from "hono"
@@ -21,7 +22,7 @@ import { type CrmDeps, runService, validationError } from "./helpers.js"
  * - GET /:id/budgets/:budgetId → detalle con líneas + totales
  * - PATCH /:id/budgets/:budgetId { title?, notes? } (solo borrador)
  * - POST /:id/budgets/:budgetId/present {} (borrador→presentado)
- * - POST /:id/budgets/:budgetId/decision { acceptedItemIds, acceptedByName, decisionNote? }
+ * - POST /:id/budgets/:budgetId/decision { decisions, decidedByContactId?, decisionNote? }
  * - POST /:id/budgets/:budgetId/cancel {}
  * Dinero solo en centavos enteros; estados/transiciones según servicio.
  */
@@ -43,11 +44,15 @@ const budgetPatchInput = z
 
 const budgetDecisionInput = z
   .object({
-    acceptedItemIds: z.array(z.uuid()),
-    acceptedByName: z.string().trim().min(1).max(200),
+    decisions: z.array(z.object({ planItemId: z.uuid(), decision: z.enum(["aceptado", "rechazado", "pospuesto"]) }).strict()).min(1).max(200),
+    decidedByContactId: z.uuid().nullish(),
     decisionNote: z.string().max(4000).nullish(),
   })
   .strict()
+
+const budgetRevisionInput = budgetCreateInput.omit({ planId: true }).extend({
+  reason: z.string().trim().min(1).max(2000),
+}).strict()
 
 export function createPatientBudgetsRoute(deps: Pick<CrmDeps, "db">) {
   const app = new Hono()
@@ -126,6 +131,14 @@ export function createPatientBudgetsRoute(deps: Pick<CrmDeps, "db">) {
         cancelBudget(tx, orgId, userId, c.req.param("id"), c.req.param("budgetId")),
       ),
     )
+  })
+
+  app.post("/:id/budgets/:budgetId/revise", async c => {
+    const { orgId, userId } = orgContextOf(c)
+    const parsed = budgetRevisionInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 201, () => withOrgContext(deps.db, orgId, tx =>
+      reviseBudget(tx, orgId, userId, c.req.param("id"), c.req.param("budgetId"), parsed.data)))
   })
 
   return app

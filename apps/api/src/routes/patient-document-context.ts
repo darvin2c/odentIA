@@ -19,6 +19,11 @@ const correctionInput = z
     expectedVersion: z.number().int().min(1),
     encounterId: z.uuid().nullish(),
     planItemId: z.uuid().nullish(),
+    budgetId: z.uuid().nullish(),
+    encounterProcedureId: z.uuid().nullish(),
+    prescriptionId: z.uuid().nullish(),
+    followUpId: z.uuid().nullish(),
+    paymentId: z.uuid().nullish(),
     toothNumbers: z.array(z.number().int()).max(52).optional(),
     // Etiquetas crudas como contacts (máx 100; el servicio normaliza a 20 únicas canónicas).
     tags: z.array(z.string().min(1).max(200)).max(100).optional(),

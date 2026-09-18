@@ -280,9 +280,10 @@ async function decideBudget(
   budgetId: string,
   acceptedItemIds: string[],
 ): Promise<BudgetTotals> {
+  const detail = await app.request(`/patients/${patientId}/budgets/${budgetId}`)
+  const budget = (await detail.json()) as { data: { items: Array<{ planItemId: string }> } }
   const res = await postJson(app, `/patients/${patientId}/budgets/${budgetId}/decision`, {
-    acceptedItemIds,
-    acceptedByName: "Paciente Test",
+    decisions: budget.data.items.map(line => ({ planItemId: line.planItemId, decision: acceptedItemIds.includes(line.planItemId) ? "aceptado" : "rechazado" })),
   })
   expect(res.status).toBe(200)
   const body = (await res.json()) as { data: BudgetTotals }
@@ -436,11 +437,14 @@ it("plan: realizar exige decisión aceptada y atención; manual sin atención re
     status: "realizado",
   })
   expect(denied.status).toBe(409)
-  expect(((await denied.json()) as ErrorBody).error.code).toBe("ITEM_NOT_ACCEPTED")
+  expect(((await denied.json()) as ErrorBody).error.code).toBe("INVALID_TRANSITION")
 
   const budgetId = await createBudget(app, patientId, ctx.planId, [item.id])
   await presentBudget(app, patientId, budgetId)
   await decideBudget(app, patientId, budgetId, [item.id])
+  expect((await patchJson(app, `/patients/${patientId}/plan/items/${item.id}`, {
+    encounterId: ctx.encounterId, status: "programado",
+  })).status).toBe(200)
 
   // Aceptado pero sin procedimiento en atención: el realizado manual no existe.
   const manual = await patchJson(app, `/patients/${patientId}/plan/items/${item.id}`, {
@@ -468,12 +472,16 @@ it("plan: contenido en realizado/cancelado responde 409 ITEM_CLOSED", async () =
     { planItemId: done.id },
   )
   expect(realized.status).toBe(201)
+  expect((await postJson(app, `/patients/${patientId}/treatments/${done.id}/complete`, {
+    encounterId: ctx.encounterId,
+  })).status).toBe(200)
   // La cancelación clínica no exige aceptación, pero sí bloquea si ya está realizado.
   expect(
     (
       await patchJson(app, `/patients/${patientId}/plan/items/${undone.id}`, {
         encounterId: ctx.encounterId,
         status: "cancelado",
+        statusReason: "No continuará este tratamiento",
       })
     ).status,
   ).toBe(200)
@@ -509,6 +517,9 @@ it("plan: realizado es terminal; reabrir o cancelar ejecutado responde 409 ITEM_
     { planItemId: item.id },
   )
   expect(closed.status).toBe(201)
+  expect((await postJson(app, `/patients/${patientId}/treatments/${item.id}/complete`, {
+    encounterId: ctx.encounterId,
+  })).status).toBe(200)
 
   for (const status of ["pendiente", "programado", "cancelado"]) {
     const reopened = await patchJson(app, `/patients/${patientId}/plan/items/${item.id}`, {
@@ -951,54 +962,19 @@ it("plan: decisión parcial congela aceptado/rechazado y el detalle totaliza", a
   expect(detailBody.data.acceptedCents).toBe(12000)
 })
 
-it("plan: borrar solo pendiente desde su origen en borrador; si no, 409", async () => {
+it("plan: cancelar conserva la indicación y exige motivo", async () => {
   const app = buildApp("admin")
-  const patientId = await createFreshPatient(app, "Plan Borrar")
-  const ctx = await setupPlan(app, patientId)
-  const draft = await addItem(app, patientId, ctx, { serviceId: SVC_LIMPIEZA, toothNumber: 36 })
-  const kept = await addItem(app, patientId, ctx, { serviceId: SVC_ENDO, toothNumber: 37 })
-  const budgetId = await createBudget(app, patientId, ctx.planId, [kept.id])
-  await presentBudget(app, patientId, budgetId)
-
-  const removed = await app.request(
-    `/patients/${patientId}/plan/items/${draft.id}?encounterId=${ctx.encounterId}`,
-    { method: "DELETE" },
-  )
-  expect(removed.status).toBe(200)
-  expect(((await removed.json()) as { data: { id: string } }).data.id).toBe(draft.id)
-  const list = await app.request(`/patients/${patientId}/plan`, { method: "GET" })
-  expect(((await list.json()) as { data: PlanItem[] }).data.map((row) => row.id)).not.toContain(
-    draft.id,
-  )
-
-  const late = await app.request(
-    `/patients/${patientId}/plan/items/${kept.id}?encounterId=${ctx.encounterId}`,
-    { method: "DELETE" },
-  )
-  expect(late.status).toBe(409)
-  expect(((await late.json()) as ErrorBody).error.code).toBe("ITEM_HAS_RELATIONS")
-})
-
-it("plan: borrar no pendiente responde 409 ITEM_CLOSED", async () => {
-  const app = buildApp("admin")
-  const patientId = await createFreshPatient(app, "Plan Borrar Cerrado")
+  const patientId = await createFreshPatient(app, "Cancelación")
   const ctx = await setupPlan(app, patientId)
   const item = await addItem(app, patientId, ctx, { serviceId: SVC_LIMPIEZA, toothNumber: 36 })
-  expect(
-    (
-      await patchJson(app, `/patients/${patientId}/plan/items/${item.id}`, {
-        encounterId: ctx.encounterId,
-        status: "cancelado",
-      })
-    ).status,
-  ).toBe(200)
-
-  const removed = await app.request(
-    `/patients/${patientId}/plan/items/${item.id}?encounterId=${ctx.encounterId}`,
-    { method: "DELETE" },
-  )
-  expect(removed.status).toBe(409)
-  expect(((await removed.json()) as ErrorBody).error.code).toBe("ITEM_CLOSED")
+  const cancelled = await postJson(app, `/patients/${patientId}/treatments/${item.id}/cancel`, {
+    reason: "Se descarta tras reevaluación", encounterId: ctx.encounterId,
+  })
+  expect(cancelled.status).toBe(200)
+  expect(((await cancelled.json()) as { data: PlanItem }).data.status).toBe("cancelado")
+  const list = await app.request(`/patients/${patientId}/plan`)
+  expect(((await list.json()) as { data: PlanItem[] }).data.map(row => row.id)).toContain(item.id)
+  expect((await app.request(`/patients/${patientId}/plan/items/${item.id}`, { method: "DELETE" })).status).toBe(404)
 })
 
 it("plan: member lee 200 pero mutar o decidir responde 403 FORBIDDEN sin efectos", async () => {

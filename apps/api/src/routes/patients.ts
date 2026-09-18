@@ -38,7 +38,6 @@ import {
   PATIENT_DOC_MAX_BYTES,
   PATIENT_DOC_MIME_EXT,
   registerPatientDocument,
-  removePlanItem,
   requirePatient,
   reviewLegacyEntry,
   ServiceError,
@@ -58,6 +57,11 @@ import { errorBody } from "../lib/error.js"
 import { type CrmDeps, runService, serviceErrorResponse, validationError } from "./helpers.js"
 import { createPatientBudgetsRoute } from "./patient-budgets.js"
 import { createPatientDocumentContextRoute } from "./patient-document-context.js"
+import { createPatientTreatmentsRoute } from "./patient-treatments.js"
+import { createPatientFollowUpsRoute } from "./patient-follow-ups.js"
+import { createPatientPrescriptionsRoute } from "./patient-prescriptions.js"
+import { createPatientPaymentsRoute } from "./patient-payments.js"
+import { createPatientResponsibilitiesRoute } from "./patient-responsibilities.js"
 
 const listQuery = z.object({
   q: z.string().optional(),
@@ -271,6 +275,8 @@ const planCreateInput = z
     serviceId: z.uuid(),
     planId: z.uuid(),
     sourceEncounterId: z.uuid(),
+    optionGroupId: z.uuid().nullish(),
+    isRecommended: z.boolean().optional(),
     detail: z.string().max(4000).nullish(),
     diagnosisCode: z.string().max(10).nullish(),
     ...planSiteFields,
@@ -282,7 +288,8 @@ const planPatchInput = z
     detail: z.string().max(4000).nullish(),
     diagnosisCode: z.string().max(10).nullish(),
     encounterId: z.uuid(),
-    status: z.enum(["pendiente", "programado", "realizado", "cancelado"]).optional(),
+    status: z.enum(["pendiente", "programado", "en_curso", "suspendido", "realizado", "cancelado", "reemplazado"]).optional(),
+    statusReason: z.string().trim().min(1).max(2000).optional(),
     ...planSiteFields,
   })
   .strict()
@@ -312,6 +319,11 @@ const jsonArrayField = z.preprocess((value) => {
 const documentLinkInput = z.object({
   encounterId: z.uuid().optional(),
   planItemId: z.uuid().optional(),
+  budgetId: z.uuid().optional(),
+  encounterProcedureId: z.uuid().optional(),
+  prescriptionId: z.uuid().optional(),
+  followUpId: z.uuid().optional(),
+  paymentId: z.uuid().optional(),
   toothNumbers: jsonArrayField.pipe(z.array(z.number().int()).max(52)).default([]),
   tags: jsonArrayField.pipe(z.array(z.string().min(1).max(200)).max(100)).default([]),
 })
@@ -556,6 +568,11 @@ export function createPatientsRoute(deps: CrmDeps) {
     const link = documentLinkInput.safeParse({
       encounterId: form?.get("encounterId") || undefined,
       planItemId: form?.get("planItemId") || undefined,
+      budgetId: form?.get("budgetId") || undefined,
+      encounterProcedureId: form?.get("encounterProcedureId") || undefined,
+      prescriptionId: form?.get("prescriptionId") || undefined,
+      followUpId: form?.get("followUpId") || undefined,
+      paymentId: form?.get("paymentId") || undefined,
       toothNumbers: form?.get("toothNumbers") || undefined,
       tags: form?.get("tags") || undefined,
     })
@@ -824,39 +841,25 @@ export function createPatientsRoute(deps: CrmDeps) {
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, async (tx) => {
-        const { status, ...patch } = parsed.data
+        const { status, statusReason, ...patch } = parsed.data
         const args = [tx, orgId, userId, c.req.param("id"), c.req.param("itemId")] as const
         if (status && !Object.keys(patch).filter((k) => k !== "encounterId").length) {
-          return setPlanItemStatus(...args, { status, encounterId: patch.encounterId })
+          return setPlanItemStatus(...args, { status, statusReason, encounterId: patch.encounterId })
         }
         const item = await updatePlanItem(...args, patch)
         return status
-          ? setPlanItemStatus(...args, { status, encounterId: patch.encounterId })
+          ? setPlanItemStatus(...args, { status, statusReason, encounterId: patch.encounterId })
           : item
       }),
     )
   })
-  app.delete("/:id/plan/items/:itemId", async (c) => {
-    const { orgId, userId } = orgContextOf(c)
-    const parsed = z
-      .object({ encounterId: z.uuid() })
-      .safeParse({ encounterId: c.req.query("encounterId") })
-    if (!parsed.success) return validationError(c, parsed.error.issues)
-    return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) =>
-        removePlanItem(
-          tx,
-          orgId,
-          userId,
-          c.req.param("id"),
-          c.req.param("itemId"),
-          parsed.data.encounterId,
-        ),
-      ),
-    )
-  })
   app.route("/", createPatientBudgetsRoute(deps))
   app.route("/", createPatientDocumentContextRoute(deps))
+  app.route("/", createPatientTreatmentsRoute(deps))
+  app.route("/", createPatientFollowUpsRoute(deps))
+  app.route("/", createPatientPrescriptionsRoute(deps))
+  app.route("/", createPatientPaymentsRoute(deps))
+  app.route("/", createPatientResponsibilitiesRoute(deps))
 
   return app
 }
