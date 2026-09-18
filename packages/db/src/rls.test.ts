@@ -451,35 +451,22 @@ it("presupuestos, contextos versionados y vínculos atención-plan se aíslan po
     ),
   ).rejects.toMatchObject({ cause: { code: "42501" } })
 
-  // El ítem es el set editable del borrador: DELETE permitido en borrador sin
-  // relaciones; bloqueado con vínculos de ejecución o presupuesto no borrador.
-  await ownerDb.execute(sql`insert into treatment_plan_item (id,organization_id,patient_id,plan_id,budget_id,title,status)
-    values ('99999999-0000-4000-8000-000000000000','org_a','99999999-9999-9999-9999-999999999999','22222222-2222-4222-8222-222222222222','eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee','Puente libre','pendiente')
-    on conflict (id) do nothing`)
-  const draftDeleted = await withOrgContext(appDb, "org_a", (tx) =>
-    tx.execute(
-      sql`delete from treatment_plan_item where id = '99999999-0000-4000-8000-000000000000' returning id`,
+  // Las indicaciones se cancelan o reemplazan; incluso sin vínculos no se borran.
+  await expect(
+    withOrgContext(appDb, "org_a", (tx) =>
+      tx.execute(sql`delete from treatment_plan_item where id = 'ffffffff-ffff-ffff-ffff-ffffffffffff'`),
     ),
-  )
-  expect(draftDeleted).toHaveLength(1)
-  // Con vínculo atención-plan no se elimina aunque el presupuesto siga en borrador.
-  const linkedDeleted = await withOrgContext(appDb, "org_a", (tx) =>
-    tx.execute(
-      sql`delete from treatment_plan_item where id = 'ffffffff-ffff-ffff-ffff-ffffffffffff' returning id`,
-    ),
-  )
-  expect(linkedDeleted).toHaveLength(0)
-  await ownerDb.execute(sql`insert into treatment_plan_item (id,organization_id,patient_id,plan_id,budget_id,title,status)
-    values ('11111111-2222-3333-4444-555555555555','org_a','99999999-9999-9999-9999-999999999999','22222222-2222-4222-8222-222222222222','eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee','Puente','pendiente')`)
-  await ownerDb.execute(
-    sql`update treatment_budget set status = 'presentado' where id = 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee'`,
-  )
-  const presentedDeleted = await withOrgContext(appDb, "org_a", (tx) =>
-    tx.execute(
-      sql`delete from treatment_plan_item where id = '11111111-2222-3333-4444-555555555555' returning id`,
-    ),
-  )
-  expect(presentedDeleted).toHaveLength(0)
+  ).rejects.toMatchObject({ cause: { code: "42501" } })
+  await ownerDb.execute(sql`insert into treatment_option_group (organization_id,patient_id,plan_id,title)
+    values ('org_a','99999999-9999-9999-9999-999999999999','22222222-2222-4222-8222-222222222222','Alternativas RLS')`)
+  const optionsQuery = sql`select id from treatment_option_group where title = 'Alternativas RLS'`
+  expect(await withOrgContext(appDb, "org_a", tx => tx.execute(optionsQuery))).toHaveLength(1)
+  expect(await withOrgContext(appDb, "org_b", tx => tx.execute(optionsQuery))).toHaveLength(0)
+  expect(await appDb.execute(optionsQuery)).toHaveLength(0)
+  await expect(
+    withOrgContext(appDb, "org_a", tx =>
+      tx.execute(sql`delete from treatment_option_group where title = 'Alternativas RLS'`)),
+  ).rejects.toMatchObject({ cause: { code: "42501" } })
 })
 
 it("la biblioteca global es de solo lectura y las líneas se blindan por trigger", async () => {
