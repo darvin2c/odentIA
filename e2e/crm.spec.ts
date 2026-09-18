@@ -1,8 +1,8 @@
 import { expect, type Page, test } from "@playwright/test"
 import { simulateTelegramInbound, simulateWhatsAppInbound } from "./channels"
+import { API, tenant, tenantPattern } from "./env"
 import { latestLinkFor } from "./mailpit"
 
-const API = "https://api.odentia.localhost"
 const run = Date.now().toString(36)
 
 const userX = { name: "Ximena Roe", email: `ximena-${run}@test.dev`, password: "secreto-123" }
@@ -10,7 +10,6 @@ const userY = { name: "Yuri Sol", email: `yuri-${run}@test.dev`, password: "secr
 const orgX = { name: "Clínica X", slug: `clinica-x-${run}` }
 const orgY = { name: "Clínica Y", slug: `clinica-y-${run}` }
 
-const tenant = (slug: string, path: string) => `https://${slug}.odentia.localhost${path}`
 const FAKE_REPLY = "Gracias por escribir. Te atiendo enseguida."
 
 // El ledger de dedupe (provider, evento) es global: ids únicos por corrida.
@@ -29,7 +28,7 @@ const hasFiber = () => {
 
 async function waitForHydration(page: Page) {
   for (;;) {
-    await page.waitForFunction(hasFiber, null, { timeout: 30_000 })
+    await page.waitForFunction(hasFiber, null, { timeout: 60_000 })
     await page.waitForTimeout(1_500)
     const stable = await page.evaluate(hasFiber).catch(() => false)
     if (stable) return
@@ -66,6 +65,9 @@ async function login(page: Page, user: typeof userX) {
 
 async function onboard(page: Page, org: typeof orgX) {
   await expect(page).toHaveURL(/onboarding/)
+  // Tras el redirect del login la página vuelve a montarse: sin esperar la
+  // hidratación, los campos del asistente se rellenan sin estado y no envía.
+  await waitForHydration(page)
   await page.getByLabel("Nombre de la organización").fill(org.name)
   await page.getByLabel("Slug (subdominio)").fill(org.slug)
   await page.getByRole("button", { name: "Continuar" }).click()
@@ -73,7 +75,7 @@ async function onboard(page: Page, org: typeof orgX) {
   await page.getByRole("button", { name: "Continuar" }).click()
   await page.getByLabel("Nombre de la sucursal").fill("Sede Central")
   await page.getByRole("button", { name: "Crear organización" }).click()
-  await expect(page).toHaveURL(new RegExp(`^https://${org.slug}\\.odentia\\.localhost/branches`))
+  await expect(page).toHaveURL(tenantPattern(org.slug, "/branches"))
 }
 
 // Llamadas API desde el navegador (*.odentia.localhost no resuelve en Node/WSL).
@@ -191,7 +193,10 @@ test("crm omnicanal: bandeja, agente, pipeline, plantillas y aislamiento", async
   )
   const contactado = pipes.body.data.flatMap((p) => p.stages).find((s) => s.name === "Contactado")
   expect(contactado).toBeDefined()
+  // La etapa se edita en el drawer de la ficha (el detalle es de solo lectura).
+  await pageA.getByRole("button", { name: "Editar datos" }).click()
   await pageA.getByLabel("Etapa").selectOption(contactado?.id ?? "")
+  await pageA.getByRole("button", { name: "Guardar" }).click()
   await gotoHydrated(pageA, tenant(orgX.slug, "/pipeline"))
   const contactadoCol = pageA.locator("section", { hasText: "Contactado" }).first()
   await expect(contactadoCol.getByText("E2E Paciente")).toBeVisible({ timeout: 15_000 })
@@ -216,7 +221,13 @@ test("crm omnicanal: bandeja, agente, pipeline, plantillas y aislamiento", async
     },
   )
   expect(waConn.status).toBe(201)
-  const before = await api<{ data: unknown[] }>(pageA, "GET", "/api/conversations", orgX.slug)
+  const before = await api<{ data: { id: string }[] }>(
+    pageA,
+    "GET",
+    "/api/conversations",
+    orgX.slug,
+  )
+  const beforeIds = new Set(before.body.data.map((c) => c.id))
   const beforeCount = before.body.data.length
   expect(
     await simulateWhatsAppInbound(pageA, API, waConn.body.data.id, "e2e-secret", {
@@ -228,14 +239,21 @@ test("crm omnicanal: bandeja, agente, pipeline, plantillas y aislamiento", async
   ).toBe(200)
   // Esperar el hilo por API antes de abrir la UI: evita la carrera entre
   // el fetch inicial y la ingesta del worker.
-  let waReady = false
-  for (let i = 0; i < 15 && !waReady; i++) {
-    const current = await api<{ data: unknown[] }>(pageA, "GET", "/api/conversations", orgX.slug)
-    waReady = current.body.data.length === beforeCount + 1
-    if (!waReady) await pageA.waitForTimeout(2_000)
+  let waConversationId = ""
+  for (let i = 0; i < 15 && !waConversationId; i++) {
+    const current = await api<{ data: { id: string }[] }>(
+      pageA,
+      "GET",
+      "/api/conversations",
+      orgX.slug,
+    )
+    waConversationId = current.body.data.find((c) => !beforeIds.has(c.id))?.id ?? ""
+    if (!waConversationId) await pageA.waitForTimeout(2_000)
   }
-  expect(waReady).toBe(true)
-  await gotoHydrated(pageA, tenant(orgX.slug, "/inbox"))
+  expect(waConversationId).not.toBe("")
+  // El agente viene activo en el hilo nuevo: responde al entrante y el preview del
+  // listado pasa a mostrar su respuesta, así que el entrante se comprueba en el hilo.
+  await gotoHydrated(pageA, tenant(orgX.slug, `/inbox?conversation=${waConversationId}`))
   await expect(pageA.getByText("Buenos días").first()).toBeVisible({ timeout: 30_000 })
 
   const badSig = await pageA.evaluate(

@@ -12,11 +12,10 @@ import { latestLinkFor } from "./mailpit"
  * propietario verificado y su organización aislada por correo efímero.
  */
 
-const API = "https://api.odentia.localhost"
+import { API, tenant, tenantPattern } from "./env"
 const run = Date.now().toString(36)
 let seq = 0
 
-const tenant = (slug: string, path: string) => `https://${slug}.odentia.localhost${path}`
 const nextDoc = () => String(31_000_000 + seq++)
 const nextPhone = () => `+51999${String(100_000 + seq++).slice(-6)}`
 const uid = () => 6_000_000 + Math.floor(Math.random() * 1_000_000)
@@ -111,7 +110,7 @@ async function onboard(page: Page, org: { name: string; slug: string }) {
     { apiBase: API, org },
   )
   await page.goto(tenant(org.slug, "/branches"))
-  await expect(page).toHaveURL(new RegExp(`^https://${org.slug}\\.odentia\\.localhost/branches`))
+  await expect(page).toHaveURL(tenantPattern(org.slug, "/branches"))
 }
 
 // Llamadas API desde el navegador (*.odentia.localhost no resuelve en Node/WSL).

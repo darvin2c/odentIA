@@ -1,8 +1,7 @@
 import { expect, type Page, test } from "@playwright/test"
+import { API, PANEL, panelPattern, tenant, tenantPattern } from "./env"
 import { latestLinkFor } from "./mailpit"
 
-const API = "https://api.odentia.localhost"
-const PANEL = "https://app.odentia.localhost"
 const run = Date.now().toString(36)
 
 const userA = { name: "Ana Norte", email: `ana-${run}@test.dev`, password: "secreto-123" }
@@ -13,9 +12,7 @@ const orgA = { name: "Clínica Norte", slug: `clinica-norte-${run}`, branch: "Se
 const orgC = { name: "Clínica Sur", slug: `clinica-sur-${run}`, branch: "Sede Sur" }
 
 // Navegaciones a un tenant: URLs absolutas (page.goto las acepta).
-const tenant = (slug: string, path: string) => `https://${slug}.odentia.localhost${path}`
-const tenantBranches = (slug: string) =>
-  new RegExp(`^https://${slug}\\.odentia\\.localhost/branches`)
+const tenantBranches = (slug: string) => tenantPattern(slug, "/branches")
 
 // El dev server de Vite recarga una vez al compilar en frío; hay que esperar
 // a que React hidrate y a que la fibra sobreviva a una posible recarga.
@@ -28,7 +25,7 @@ const hasFiber = () => {
 
 async function waitForHydration(page: Page) {
   for (;;) {
-    await page.waitForFunction(hasFiber, null, { timeout: 30_000 })
+    await page.waitForFunction(hasFiber, null, { timeout: 60_000 })
     await page.waitForTimeout(1_500)
     const stable = await page.evaluate(hasFiber).catch(() => false)
     if (stable) return
@@ -65,6 +62,9 @@ async function login(page: Page, user: typeof userA) {
 
 async function onboard(page: Page, org: typeof orgA) {
   await expect(page).toHaveURL(/onboarding/)
+  // Tras el redirect del login la página vuelve a montarse: sin esperar la
+  // hidratación, los campos del asistente se rellenan sin estado y no envía.
+  await waitForHydration(page)
   await page.getByLabel("Nombre de la organización").fill(org.name)
   await page.getByLabel("Slug (subdominio)").fill(org.slug)
   await page.getByRole("button", { name: "Continuar" }).click()
@@ -74,7 +74,7 @@ async function onboard(page: Page, org: typeof orgA) {
   await page.getByRole("button", { name: "Crear organización" }).click()
   // El panel redirige al tenant con SSO por cookie compartida.
   await expect(page).toHaveURL(tenantBranches(org.slug))
-  await expect(page.getByText(org.branch)).toBeVisible()
+  await expect(page.getByText(org.branch)).toBeVisible({ timeout: 30_000 })
 }
 
 test("corte de integración: auth, tenants, roles, cola y SSE", async ({ browser }) => {
@@ -106,7 +106,7 @@ test("corte de integración: auth, tenants, roles, cola y SSE", async ({ browser
   await pageB.goto(invitationLink)
   await waitForHydration(pageB)
   await expect(pageB).toHaveURL(tenantBranches(orgA.slug), { timeout: 20_000 })
-  await expect(pageB.getByText(orgA.branch)).toBeVisible()
+  await expect(pageB.getByText(orgA.branch)).toBeVisible({ timeout: 30_000 })
 
   // (7) Rol member: la API rechaza escritura y la UI oculta el alta.
   // El fetch va en el navegador: el request-context de Playwright corre en
@@ -158,12 +158,12 @@ test("corte de integración: auth, tenants, roles, cola y SSE", async ({ browser
   const contextD = await browser.newContext({ ignoreHTTPSErrors: true })
   const pageD = await contextD.newPage()
   await gotoHydrated(pageD, tenant(orgA.slug, "/branches"))
-  await expect(pageD).toHaveURL(/app\.odentia\.localhost\/login\?next=/)
+  await expect(pageD).toHaveURL(panelPattern("/login?next="))
   await pageD.getByLabel("Correo").fill(userA.email)
   await pageD.getByLabel("Contraseña").fill(userA.password)
   await pageD.getByRole("button", { name: "Ingresar" }).click()
   await expect(pageD).toHaveURL(tenantBranches(orgA.slug), { timeout: 20_000 })
-  await expect(pageD.getByText(orgA.branch)).toBeVisible()
+  await expect(pageD.getByText(orgA.branch)).toBeVisible({ timeout: 30_000 })
 
   // (11) No-miembro abre el tenant: aterriza en la lista del panel.
   await gotoHydrated(pageC, tenant(orgA.slug, "/branches"))

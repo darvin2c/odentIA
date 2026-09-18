@@ -1,15 +1,13 @@
 import { expect, type Page, test } from "@playwright/test"
+import { API, tenant, tenantPattern } from "./env"
 import { latestLinkFor } from "./mailpit"
 
-const API = "https://api.odentia.localhost"
 const run = Date.now().toString(36)
 
 const userA = { name: "Denta A", email: `denta-a-${run}@test.dev`, password: "secreto-123" }
 const userB = { name: "Denta B", email: `denta-b-${run}@test.dev`, password: "secreto-123" }
 const orgA = { name: "Clínica A", slug: `clinica-pa-${run}` }
 const orgB = { name: "Clínica B", slug: `clinica-pb-${run}` }
-
-const tenant = (slug: string, path: string) => `https://${slug}.odentia.localhost${path}`
 
 const hasFiber = () => {
   for (const el of [document.documentElement, document.body, ...document.body.children]) {
@@ -20,7 +18,7 @@ const hasFiber = () => {
 
 async function waitForHydration(page: Page) {
   for (;;) {
-    await page.waitForFunction(hasFiber, null, { timeout: 30_000 })
+    await page.waitForFunction(hasFiber, null, { timeout: 60_000 })
     await page.waitForTimeout(1_500)
     const stable = await page.evaluate(hasFiber).catch(() => false)
     if (stable) return
@@ -113,7 +111,7 @@ async function onboard(page: Page, org: typeof orgA) {
   )
   expect(result.ok).toBe(true)
   await gotoHydrated(page, tenant(org.slug, "/branches"))
-  await expect(page).toHaveURL(new RegExp(`^https://${org.slug}\\.odentia\\.localhost/branches`))
+  await expect(page).toHaveURL(tenantPattern(org.slug, "/branches"))
 }
 
 // Llamadas API desde el navegador (*.odentia.localhost no resuelve en Node/WSL).
@@ -290,7 +288,9 @@ test("paciente plus: registro en drawer, avatar, atención, plan", async ({ page
 
   await gotoHydrated(page, tenant(org.slug, "/patients"))
   await page.getByRole("button", { name: "Nuevo paciente", exact: true }).click()
-  await expect(page.getByRole("dialog", { name: "Nuevo paciente" })).toBeVisible()
+  // En ≥1280px la ficha nueva se abre como panel lateral (MasterDetail) y en
+  // ancho corto como drawer modal: en ambos casos el wizard expone los campos.
+  await expect(page.getByLabel("Nombre del paciente")).toBeVisible()
   // Wizard de registro: datos → contacto → salud → odontológicos → revisión.
   await page.getByLabel("Nombre del paciente").fill("Lucía Quispe")
   await page.getByRole("combobox", { name: "Tipo de documento" }).click()

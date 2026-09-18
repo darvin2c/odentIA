@@ -55,3 +55,9 @@ tmp/
 
 # Archivos de trabajo temporales
 .tmp-*
+
+# Estado del harness e2e (proxy/CA propios; se recrea por corrida)
+/.e2e-portless/
+/.e2e-env
+/.e2e-stack.json
+/.e2e-stack.lock/
