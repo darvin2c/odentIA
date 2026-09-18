@@ -6,7 +6,7 @@
  * - POST /api/patients/:id/budgets { planId, itemIds, title?, notes? } -> 201
  * - PATCH /api/patients/:id/budgets/:budgetId { title?, notes? } (solo borrador)
  * - POST /api/patients/:id/budgets/:budgetId/present {} (borrador->presentado)
- * - POST /api/patients/:id/budgets/:budgetId/decision { acceptedItemIds, acceptedByName, decisionNote? }
+ * - POST /api/patients/:id/budgets/:budgetId/decision { decisions, decidedByContactId?, decisionNote? }
  * - POST /api/patients/:id/budgets/:budgetId/cancel {}
  * - POST /api/patients/:id/plan/items exige planId + atención borrador de origen.
  * - GET/POST /api/patients/:id/plans para el plan clínico longitudinal.
@@ -106,20 +106,6 @@ export function patchPlanItemApi(
   })
 }
 
-/**
- * Quita un ítem pendiente desde su atención de origen en borrador.
- * Con historial económico, procedimientos o vínculos no puede eliminarse.
- */
-export function deletePlanItemApi(
-  patientId: string,
-  itemId: string,
-  encounterId: string,
-): Promise<{ data: { id: string } }> {
-  return apiFetch<{ data: { id: string } }>(
-    `/api/patients/${patientId}/plan/items/${itemId}?encounterId=${encodeURIComponent(encounterId)}`,
-    { method: "DELETE" },
-  )
-}
 
 export const BUDGET_CURRENCIES = ["PEN", "USD", "EUR"] as const
 export type BudgetCurrency = (typeof BUDGET_CURRENCIES)[number]
@@ -229,8 +215,8 @@ export function presentBudgetApi(patientId: string, budgetId: string): Promise<{
 }
 
 export interface DecideBudgetBody {
-  acceptedItemIds: string[]
-  acceptedByName: string
+  decisions: Array<{ planItemId: string; decision: "aceptado" | "rechazado" | "pospuesto" }>
+  decidedByContactId?: string | null
   decisionNote?: string | null
 }
 

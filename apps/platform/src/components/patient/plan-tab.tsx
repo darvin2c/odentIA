@@ -13,6 +13,7 @@ import { ApiError } from "../../lib/api"
 import {
   type BudgetLine,
   type BudgetWithTotals,
+  type DecideBudgetBody,
   budgetNumberLabel,
   budgetStatusLabel,
   cancelBudgetApi,
@@ -250,11 +251,8 @@ export function PlanTab({
   })
 
   const decideMutation = useMutation({
-    mutationFn: (body: {
-      acceptedItemIds: string[]
-      acceptedByName: string
-      decisionNote: string | null
-    }) => writeBudget(() => decideBudgetApi(patientId, selectedBudget!.id, body)),
+    mutationFn: (body: DecideBudgetBody) =>
+      writeBudget(() => decideBudgetApi(patientId, selectedBudget!.id, body)),
     onSuccess: () => {
       setDecisionOpen(false)
       setDecisionError(null)
@@ -678,13 +676,12 @@ export function PlanTab({
           uid={uid}
           lines={selectedBudget.items}
           initialAccepted={acceptedIds}
-          initialBy={acceptedBy}
           initialNote={decisionNote}
           error={decisionError}
           pending={decideMutation.isPending}
           onClose={() => setDecisionOpen(false)}
-          onSubmit={(acceptedItemIds, acceptedByName, decisionNote) =>
-            decideMutation.mutate({ acceptedItemIds, acceptedByName, decisionNote })
+          onSubmit={(decisions, decisionNote) =>
+            decideMutation.mutate({ decisions, decisionNote })
           }
         />
       ) : null}
@@ -1028,7 +1025,6 @@ function DecideBudgetDialog({
   uid,
   lines,
   initialAccepted,
-  initialBy,
   initialNote,
   error,
   pending,
@@ -1038,20 +1034,16 @@ function DecideBudgetDialog({
   uid: string
   lines: BudgetLine[]
   initialAccepted: string[]
-  initialBy: string
   initialNote: string
   error: string | null
   pending: boolean
   onClose: () => void
-  onSubmit: (acceptedItemIds: string[], acceptedByName: string, decisionNote: string | null) => void
+  onSubmit: (decisions: DecideBudgetBody["decisions"], decisionNote: string | null) => void
 }) {
-  const [checked, setChecked] = useState<string[]>(initialAccepted)
-  const [by, setBy] = useState(initialBy)
+  const [decisions, setDecisions] = useState<Record<string, "aceptado" | "rechazado" | "pospuesto">>(
+    Object.fromEntries(lines.map(line => [line.planItemId, initialAccepted.includes(line.planItemId) ? "aceptado" : "pospuesto"])),
+  )
   const [note, setNote] = useState(initialNote)
-  const [localError, setLocalError] = useState<string | null>(null)
-  const toggle = (id: string) => {
-    setChecked((prev) => (prev.includes(id) ? prev.filter((v) => v !== id) : [...prev, id]))
-  }
   return (
     <div
       role="dialog"
@@ -1060,17 +1052,17 @@ function DecideBudgetDialog({
     >
       <h4 className="font-semibold">Registrar decisión</h4>
       <p className="text-sm text-muted-foreground">
-        Marca los tratamientos aceptados en ESTE documento. La aceptación parcial no equivale a
-        realización.
+        Registra una decisión por tratamiento. La aceptación no equivale a ejecución ni cobro.
       </p>
       <ul className="flex flex-col gap-2">
         {lines.map((line) => (
           <li key={line.id} className="flex items-start gap-2">
-            <Checkbox
-              checked={checked.includes(line.planItemId)}
-              onCheckedChange={() => toggle(line.planItemId)}
-              aria-label={line.title}
-            />
+            <select aria-label={`Decisión: ${line.title}`} value={decisions[line.planItemId]}
+              onChange={event => setDecisions(current => ({ ...current, [line.planItemId]: event.target.value as "aceptado" | "rechazado" | "pospuesto" }))}>
+              <option value="aceptado">Aceptado</option>
+              <option value="rechazado">Rechazado</option>
+              <option value="pospuesto">Pospuesto</option>
+            </select>
             <span className="flex flex-1 flex-col">
               <span className="text-sm font-medium">{line.title}</span>
               <span className="text-xs text-muted-foreground">
@@ -1084,15 +1076,6 @@ function DecideBudgetDialog({
         ))}
       </ul>
       <Field>
-        <FieldLabel htmlFor={`${uid}-decide-by`}>Aceptado por (nombre)</FieldLabel>
-        <Input
-          id={`${uid}-decide-by`}
-          value={by}
-          onChange={(e) => setBy(e.currentTarget.value)}
-          maxLength={200}
-        />
-      </Field>
-      <Field>
         <FieldLabel htmlFor={`${uid}-decide-note`}>Nota de decisión</FieldLabel>
         <Textarea
           id={`${uid}-decide-note`}
@@ -1102,11 +1085,7 @@ function DecideBudgetDialog({
           maxLength={4000}
         />
       </Field>
-      {(error ?? localError) ? (
-        <p role="alert" className="text-sm text-destructive">
-          {error ?? localError}
-        </p>
-      ) : null}
+      {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
       <div className="flex justify-end gap-2">
         <Button type="button" variant="outline" onClick={onClose}>
           Cancelar
@@ -1114,13 +1093,9 @@ function DecideBudgetDialog({
         <Button
           type="button"
           disabled={pending}
-          onClick={() => {
-            if (by.trim() === "") {
-              setLocalError("Indica el nombre de quien acepta.")
-              return
-            }
-            onSubmit(checked, by.trim(), note.trim() === "" ? null : note.trim())
-          }}
+          onClick={() => onSubmit(lines.map(line => ({
+            planItemId: line.planItemId, decision: decisions[line.planItemId] ?? "pospuesto",
+          })), note.trim() || null)}
         >
           {pending ? "Guardando…" : "Registrar"}
         </Button>
