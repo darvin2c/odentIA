@@ -1,9 +1,16 @@
-import { Button, Field, FieldLabel, Input } from "@odentia/ui"
-import { EmptyState, PageHeader } from "@odentia/ui-patterns"
+import { Badge, Button, Checkbox, Field, FieldLabel, Input, Textarea } from "@odentia/ui"
+import {
+  EmptyState,
+  FormDrawer,
+  FormPanel,
+  MasterDetail,
+  PageHeader,
+  useDetailMode,
+} from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
-import { useState } from "react"
-import { apiFetch } from "../../lib/api"
+import { type FormEvent, useState } from "react"
+import { ApiError, apiFetch } from "../../lib/api"
 import { type AgentConfig, useCanWrite } from "../../lib/crm"
 
 export const Route = createFileRoute("/_org/settings/agent")({
@@ -13,6 +20,8 @@ export const Route = createFileRoute("/_org/settings/agent")({
 function AgentPage() {
   const queryClient = useQueryClient()
   const canWrite = useCanWrite()
+  const mode = useDetailMode()
+  const [formOpen, setFormOpen] = useState(false)
   const [saved, setSaved] = useState(false)
 
   const configQuery = useQuery({
@@ -20,15 +29,17 @@ function AgentPage() {
     queryFn: () => apiFetch<{ data: AgentConfig }>("/api/agent/config"),
   })
 
+  // El detalle muestra lo guardado; el formulario edita una copia en memoria.
   const [form, setForm] = useState<AgentConfig | null>(null)
-  const current = form ?? configQuery.data?.data ?? null
+  const config = configQuery.data?.data ?? null
+  const current = form ?? config
 
   const saveMutation = useMutation({
     mutationFn: (patch: Partial<AgentConfig>) =>
       apiFetch("/api/agent/config", { method: "PUT", body: JSON.stringify(patch) }),
     onSuccess: () => {
       setSaved(true)
-      setForm(null)
+      closeForm()
       void queryClient.invalidateQueries({ queryKey: ["agent-config"] })
     },
   })
@@ -36,11 +47,14 @@ function AgentPage() {
   if (!canWrite) {
     return (
       <div>
-        <EmptyState title="Sin acceso" description="Solo owner/admin pueden configurar el agente." />
+        <EmptyState
+          title="Sin acceso"
+          description="Solo owner/admin pueden configurar el agente."
+        />
       </div>
     )
   }
-  if (!current) {
+  if (!config || !current) {
     return (
       <div>
         <p className="p-4 text-sm text-muted-foreground">Cargando…</p>
@@ -53,41 +67,65 @@ function AgentPage() {
     setForm({ ...current, ...patch })
   }
 
-  return (
-    <div className="flex flex-col gap-6">
-      <PageHeader
-        title="Agente"
-        subtitle="Responde y cualifica automáticamente (sin agenda en esta etapa)"
-      />
-      <label className="flex items-center gap-2 text-sm">
-        <input
-          type="checkbox"
-          checked={current.enabled}
-          onChange={(e) => set({ enabled: e.target.checked })}
-        />
-        Agente habilitado
-      </label>
+  const error =
+    saveMutation.error instanceof ApiError
+      ? (saveMutation.error.shape.message ?? "No pudimos guardar la configuración")
+      : saveMutation.error
+        ? "No pudimos guardar la configuración"
+        : null
+
+  function openForm() {
+    setSaved(false)
+    setFormOpen(true)
+  }
+
+  /** Cierra y descarta el borrador: el detalle vuelve a lo guardado. */
+  function closeForm() {
+    setFormOpen(false)
+    setForm(null)
+  }
+
+  const formFields = (
+    <div className="flex flex-col gap-4">
       <Field>
-        <FieldLabel>Modelo (vacío = el de `LLM_MODEL` del servidor)</FieldLabel>
+        <label
+          htmlFor="agente-habilitado"
+          className="flex cursor-pointer items-center gap-2 text-sm"
+        >
+          <Checkbox
+            id="agente-habilitado"
+            checked={current.enabled}
+            onCheckedChange={(value) => set({ enabled: value === true })}
+          />
+          Agente habilitado
+        </label>
+      </Field>
+      <Field>
+        <FieldLabel htmlFor="agente-modelo">
+          Modelo (vacío = el de `LLM_MODEL` del servidor)
+        </FieldLabel>
         <Input
+          id="agente-modelo"
           value={current.model ?? ""}
           placeholder="openai:gpt-4o-mini"
           onChange={(e) => set({ model: e.target.value || null })}
         />
       </Field>
       <Field>
-        <FieldLabel>Instrucciones extra de la clínica</FieldLabel>
-        <textarea
-          aria-label="Instrucciones extra"
-          className="min-h-24 rounded-md border bg-background px-3 py-2 text-sm"
+        <FieldLabel htmlFor="agente-instrucciones">Instrucciones extra de la clínica</FieldLabel>
+        <Textarea
+          id="agente-instrucciones"
           value={current.systemPrompt}
           onChange={(e) => set({ systemPrompt: e.target.value })}
           placeholder="Horarios, sedes, tono…"
         />
       </Field>
       <Field>
-        <FieldLabel>Palabras de derivación (separadas por coma)</FieldLabel>
+        <FieldLabel htmlFor="agente-derivacion">
+          Palabras de derivación (separadas por coma)
+        </FieldLabel>
         <Input
+          id="agente-derivacion"
           value={current.handoffKeywords.join(", ")}
           onChange={(e) =>
             set({
@@ -101,8 +139,9 @@ function AgentPage() {
         />
       </Field>
       <Field>
-        <FieldLabel>Máximo de turnos por conversación (1–50)</FieldLabel>
+        <FieldLabel htmlFor="agente-turnos">Máximo de turnos por conversación (1–50)</FieldLabel>
         <Input
+          id="agente-turnos"
           type="number"
           min={1}
           max={50}
@@ -110,15 +149,89 @@ function AgentPage() {
           onChange={(e) => set({ maxTurns: Number(e.target.value) })}
         />
       </Field>
-      <div className="flex items-center gap-2">
-        <Button
-          disabled={saveMutation.isPending || !form}
-          onClick={() => form && saveMutation.mutate(form)}
-        >
-          Guardar
-        </Button>
-        {saved && <span className="text-sm text-green-700">Guardado.</span>}
-      </div>
+    </div>
+  )
+
+  // Idénticos para los dos contenedores: solo cambia dónde se monta el shell.
+  const formProps = {
+    onClose: closeForm,
+    title: "Editar la configuración del agente",
+    isDirty: form !== null,
+    isSubmitting: saveMutation.isPending,
+    error,
+    submitLabel: "Guardar",
+    cancelLabel: "Cancelar",
+    onSubmit: (event: FormEvent) => {
+      event.preventDefault()
+      if (form) saveMutation.mutate(form)
+    },
+  }
+
+  return (
+    <div className="flex flex-col gap-6">
+      <MasterDetail
+        panel={
+          mode === "panel" && formOpen ? <FormPanel {...formProps}>{formFields}</FormPanel> : null
+        }
+      >
+        <PageHeader
+          title="Agente"
+          subtitle="Responde y cualifica automáticamente (sin agenda en esta etapa)"
+        />
+        {saved ? (
+          <p role="status" className="text-sm text-green-700">
+            Guardado.
+          </p>
+        ) : null}
+        <div className="flex flex-col gap-6 rounded-sm bg-card p-6">
+          <div className="flex flex-row flex-wrap items-center justify-between gap-2">
+            <div className="font-heading text-base font-medium">Configuración</div>
+            <Button type="button" variant="outline" size="sm" onClick={openForm}>
+              Editar
+            </Button>
+          </div>
+          <dl className="grid min-w-0 gap-3 sm:grid-cols-2">
+            <div>
+              <dt className="text-xs font-medium text-muted-foreground">Estado</dt>
+              <dd className="text-sm">
+                <Badge variant={config.enabled ? "success" : "secondary"}>
+                  {config.enabled ? "Habilitado" : "Deshabilitado"}
+                </Badge>
+              </dd>
+            </div>
+            <div>
+              <dt className="text-xs font-medium text-muted-foreground">Modelo</dt>
+              <dd className="text-sm">{config.model ?? "El del servidor (LLM_MODEL)"}</dd>
+            </div>
+            <div>
+              <dt className="text-xs font-medium text-muted-foreground">
+                Máximo de turnos por conversación
+              </dt>
+              <dd className="text-sm">{config.maxTurns}</dd>
+            </div>
+            <div>
+              <dt className="text-xs font-medium text-muted-foreground">Palabras de derivación</dt>
+              <dd className="text-sm">
+                {config.handoffKeywords.length > 0 ? config.handoffKeywords.join(", ") : "—"}
+              </dd>
+            </div>
+            <div className="sm:col-span-2">
+              <dt className="text-xs font-medium text-muted-foreground">
+                Instrucciones extra de la clínica
+              </dt>
+              <dd className="whitespace-pre-wrap text-sm">{config.systemPrompt || "—"}</dd>
+            </div>
+          </dl>
+        </div>
+      </MasterDetail>
+
+      {/* Un solo contenedor montado a la vez: montar panel y drawer juntos
+          duplicaría los id/htmlFor de los campos. */}
+      {mode === "drawer" ? (
+        <FormDrawer open={formOpen} {...formProps}>
+          {formFields}
+        </FormDrawer>
+      ) : null}
     </div>
   )
 }
