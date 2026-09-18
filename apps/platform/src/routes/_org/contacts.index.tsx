@@ -8,9 +8,12 @@ import {
   FormDrawer,
   FormPanel,
   fieldErrorMessages,
+  isValidE164,
   MasterDetail,
+  normalizeCountry,
   PageHeader,
   PageShell,
+  PhoneInput,
   RowActions,
   useDetailMode,
   useListSearch,
@@ -26,6 +29,7 @@ import { ContactConversationDialog } from "../../components/contact-conversation
 import { TagsInput } from "../../components/patient/tags-input"
 import { ApiError, apiFetch } from "../../lib/api"
 import { type ContactListItem, type Pipeline, timeAgo, useCanWrite } from "../../lib/crm"
+import { useOrgProfile } from "../../lib/org"
 import { useOrgEvents } from "../../lib/org-events"
 
 export const Route = createFileRoute("/_org/contacts/")({
@@ -36,7 +40,11 @@ const orgRouteApi = getRouteApi("/_org")
 
 const contactSchema = z.object({
   displayName: z.string().min(1, "Ingresa el nombre"),
-  phone: z.string().max(50).optional(),
+  // El campo emite E.164 o `null` (vacío), nunca el texto con máscara.
+  phone: z
+    .string()
+    .nullable()
+    .refine((value) => value === null || isValidE164(value), "Teléfono inválido"),
   email: z.string().max(254).optional(),
   notes: z.string(),
   tags: z.array(z.string()),
@@ -46,7 +54,7 @@ type ContactFormValues = z.infer<typeof contactSchema>
 
 const emptyValues: ContactFormValues = {
   displayName: "",
-  phone: "",
+  phone: null,
   email: "",
   notes: "",
   tags: [],
@@ -61,6 +69,9 @@ function ContactsPage() {
   const queryClient = useQueryClient()
   const navigate = useNavigate()
   const { org } = orgRouteApi.useRouteContext()
+  // El país del perfil define la máscara del teléfono que se captura.
+  const profile = useOrgProfile()
+  const countryCode = normalizeCountry(profile.data?.countryCode)
   const canWrite = useCanWrite()
   const listSearch = useListSearch()
   const q = listSearch.get("q") ?? ""
@@ -145,7 +156,7 @@ function ContactsPage() {
         method: "POST",
         body: JSON.stringify({
           displayName: values.displayName,
-          phone: values.phone?.trim() ? values.phone.trim() : undefined,
+          phone: values.phone ?? undefined,
           email: values.email?.trim() ? values.email.trim() : undefined,
           notes: values.notes || undefined,
           tags: values.tags,
@@ -332,16 +343,22 @@ function ContactsPage() {
         )}
       </form.Field>
       <form.Field name="phone">
-        {(field) => (
-          <Field>
-            <FieldLabel>Teléfono (opcional, declarado)</FieldLabel>
-            <Input
-              value={field.state.value ?? ""}
-              onChange={(e) => field.handleChange(e.target.value)}
-            />
-            <FieldError>{fieldErrorMessages(field.state.meta.errors)}</FieldError>
-          </Field>
-        )}
+        {(field) => {
+          const errors = fieldErrorMessages(field.state.meta.errors)
+          return (
+            <Field>
+              <FieldLabel htmlFor="contact-phone">Teléfono (opcional, declarado)</FieldLabel>
+              <PhoneInput
+                id="contact-phone"
+                value={field.state.value}
+                onChange={(next) => field.handleChange(next)}
+                defaultCountry={countryCode}
+                invalid={errors.length > 0}
+              />
+              <FieldError>{errors}</FieldError>
+            </Field>
+          )
+        }}
       </form.Field>
       <form.Field name="email">
         {(field) => (

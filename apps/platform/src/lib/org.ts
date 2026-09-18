@@ -1,0 +1,59 @@
+import { useQuery } from "@tanstack/react-query"
+import { apiFetch } from "./api"
+
+/**
+ * Perfil de la organización (`org_profile`): lo que define el país, la moneda y
+ * la zona horaria con la que se interpretan agenda, historial y documentos.
+ *
+ * El país y la zona horaria no viven en la organización de Better Auth, así que
+ * las pantallas que muestran un teléfono o una zona horaria leen de aquí. Van
+ * cacheados: son datos de configuración que cambian de tarde en tarde.
+ */
+export interface OrgProfile {
+  organizationId: string
+  legalName: string
+  tradeName: string | null
+  fiscalDocType: string | null
+  fiscalDocNumber: string | null
+  billingEmail: string | null
+  fiscalAddress: string | null
+  countryCode: string
+  currency: string
+  timezone: string
+  locale: string
+}
+
+export interface OrgProfileInput {
+  legalName: string
+  tradeName?: string
+  fiscalDocType?: string
+  fiscalDocNumber?: string
+  billingEmail?: string
+  fiscalAddress?: string
+  countryCode?: string
+  currency?: string
+  timezone?: string
+  locale?: string
+}
+
+export async function fetchOrgProfile(): Promise<OrgProfile | null> {
+  const { data } = await apiFetch<{ data: OrgProfile | null }>("/api/org-profile")
+  return data
+}
+
+export async function saveOrgProfile(input: OrgProfileInput): Promise<OrgProfile> {
+  const { data } = await apiFetch<{ data: OrgProfile }>("/api/org-profile", {
+    method: "PUT",
+    body: JSON.stringify(input),
+  })
+  return data
+}
+
+/** Perfil de la organización, cacheado para toda la sesión de pantalla. */
+export function useOrgProfile() {
+  return useQuery({
+    queryKey: ["org-profile"],
+    queryFn: fetchOrgProfile,
+    staleTime: 5 * 60_000,
+  })
+}

@@ -16,8 +16,10 @@ import {
   ConfirmDialog,
   EmptyState,
   FormDrawer,
+  normalizeCountry,
   PageHeader,
   PageShell,
+  PhoneInput,
 } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, getRouteApi, Link } from "@tanstack/react-router"
@@ -35,6 +37,7 @@ import {
   timeAgo,
   useCanWrite,
 } from "../../lib/crm"
+import { useOrgProfile } from "../../lib/org"
 import { useOrgEvents } from "../../lib/org-events"
 
 export const Route = createFileRoute("/_org/contacts/$contactId")({
@@ -72,6 +75,9 @@ function errorCode(err: unknown): string | undefined {
 function ContactDetailPage() {
   const queryClient = useQueryClient()
   const { org } = orgRouteApi.useRouteContext()
+  // El país del perfil define la máscara del teléfono que se captura.
+  const profile = useOrgProfile()
+  const countryCode = normalizeCountry(profile.data?.countryCode)
   const canWrite = useCanWrite()
   const { contactId } = Route.useParams()
   const [editOpen, setEditOpen] = useState(false)
@@ -198,7 +204,10 @@ function ContactDetailPage() {
     mutationFn: () =>
       apiFetch<{ data: { id: string } }>(`/api/contacts/${contactId}/identities`, {
         method: "POST",
-        body: JSON.stringify({ channel: identityChannel, externalUserId: identityExternalId.trim() }),
+        body: JSON.stringify({
+          channel: identityChannel,
+          externalUserId: identityExternalId.trim(),
+        }),
       }),
     onSuccess: () => {
       setIdentityOpen(false)
@@ -312,9 +321,7 @@ function ContactDetailPage() {
                 variant="outline"
                 disabled={archived}
                 title={
-                  archived
-                    ? "Contacto archivado: reactívalo para enviar un registro"
-                    : undefined
+                  archived ? "Contacto archivado: reactívalo para enviar un registro" : undefined
                 }
                 onClick={() => setDialog({ prepareRegistration: true })}
               >
@@ -338,9 +345,7 @@ function ContactDetailPage() {
               <Button
                 type="button"
                 disabled={archived}
-                title={
-                  archived ? "Contacto archivado: reactívalo para registrar" : undefined
-                }
+                title={archived ? "Contacto archivado: reactívalo para registrar" : undefined}
                 onClick={() => setPatientDrawer(true)}
               >
                 Registrar paciente
@@ -364,8 +369,8 @@ function ContactDetailPage() {
       {archived && (
         <p className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm">
           Contacto archivado: conserva identidades y conversaciones, pero no admite nuevas
-          conversaciones, vínculos de pacientes ni envíos de registro. Reactívalo para
-          continuar. Las conversaciones existentes siguen accesibles desde la bandeja.
+          conversaciones, vínculos de pacientes ni envíos de registro. Reactívalo para continuar.
+          Las conversaciones existentes siguen accesibles desde la bandeja.
         </p>
       )}
       <div className="flex flex-col gap-2 rounded-sm bg-card p-4">
@@ -389,8 +394,8 @@ function ContactDetailPage() {
         </div>
         {patients.length === 0 ? (
           <p className="text-sm text-muted-foreground">
-            Sin pacientes vinculados. Usa «Registrar paciente» para crear la ficha con este
-            contacto como contexto, o vincula una ficha existente con búsqueda explícita.
+            Sin pacientes vinculados. Usa «Registrar paciente» para crear la ficha con este contacto
+            como contexto, o vincula una ficha existente con búsqueda explícita.
           </p>
         ) : (
           patients.map((p) => (
@@ -419,8 +424,8 @@ function ContactDetailPage() {
           ))
         )}
         <p className="text-xs text-muted-foreground">
-          Una coincidencia de teléfono nunca crea el vínculo automáticamente: siempre se
-          confirma aquí.
+          Una coincidencia de teléfono nunca crea el vínculo automáticamente: siempre se confirma
+          aquí.
         </p>
       </div>
       <div className="grid gap-4 md:grid-cols-2">
@@ -476,8 +481,7 @@ function ContactDetailPage() {
               </dd>
             </div>
           </dl>
-          {(detail.contact.phone ?? detail.contact.email) &&
-          detail.identities.length === 0 ? (
+          {(detail.contact.phone ?? detail.contact.email) && detail.identities.length === 0 ? (
             <p className="text-xs text-muted-foreground">
               Dato declarado, sin verificación de canal: aún no hay identidades vinculadas.
             </p>
@@ -548,7 +552,9 @@ function ContactDetailPage() {
                 variant="outline"
                 size="sm"
                 disabled={archived}
-                title={archived ? "Contacto archivado: reactívalo para gestionar canales" : undefined}
+                title={
+                  archived ? "Contacto archivado: reactívalo para gestionar canales" : undefined
+                }
                 onClick={() => {
                   identityMutation.reset()
                   setIdentityOpen(true)
@@ -565,8 +571,8 @@ function ContactDetailPage() {
           )}
           {detail.identities.length === 0 && (
             <p className="text-sm text-muted-foreground">
-              Sin identidades de canal. El teléfono o correo declarados no crean una identidad
-              por sí solos.
+              Sin identidades de canal. El teléfono o correo declarados no crean una identidad por
+              sí solos.
             </p>
           )}
           {detail.identities.map((ident) => {
@@ -587,9 +593,7 @@ function ContactDetailPage() {
                   <span className="text-muted-foreground">
                     {ident.displayName ?? ident.externalUserId}
                   </span>
-                  <Badge variant="secondary">
-                    {resolved} conversación(es) vinculada(s)
-                  </Badge>
+                  <Badge variant="secondary">{resolved} conversación(es) vinculada(s)</Badge>
                 </span>
                 {canWrite && (
                   <span>
@@ -628,18 +632,17 @@ function ContactDetailPage() {
         )}
         {detail.conversations.map((conv) => {
           const linked = detail.identities.find((i) => i.id === conv.contactIdentityId)
-          const sameChannel = detail.identities.filter(
-            (i) => i.channel === conv.channel,
-          )
+          const sameChannel = detail.identities.filter((i) => i.channel === conv.channel)
           return (
-            <div
-              key={conv.id}
-              className="flex flex-col gap-1 rounded-sm px-2 py-1.5"
-            >
+            <div key={conv.id} className="flex flex-col gap-1 rounded-sm px-2 py-1.5">
               <span className="flex flex-wrap items-center gap-2 text-sm">
                 <Badge
                   variant="secondary"
-                  className={conv.status === "open" ? "border-emerald-300 bg-emerald-50 text-emerald-900" : undefined}
+                  className={
+                    conv.status === "open"
+                      ? "border-emerald-300 bg-emerald-50 text-emerald-900"
+                      : undefined
+                  }
                 >
                   {conv.status}
                 </Badge>
@@ -712,8 +715,8 @@ function ContactDetailPage() {
         <div className="flex flex-col gap-2 rounded-sm bg-card p-4">
           <h2 className="text-sm font-semibold">Registro</h2>
           <p className="text-sm text-muted-foreground">
-            Los enlaces de registro se crean desde la bandeja: «Conversar» o «Enviar
-            registro» abren la conversación y allí se prepara el mensaje con el enlace.
+            Los enlaces de registro se crean desde la bandeja: «Conversar» o «Enviar registro» abren
+            la conversación y allí se prepara el mensaje con el enlace.
           </p>
           <Button
             type="button"
@@ -744,7 +747,7 @@ function ContactDetailPage() {
           patchMutation.mutate(
             {
               displayName: draftName.trim() || detail.contact.displayName,
-              phone: draftPhone.trim() ? draftPhone.trim() : null,
+              phone: draftPhone || null,
               email: draftEmail.trim() ? draftEmail.trim() : null,
               notes: draftNotes.trim(),
               stageId: draftStage || null,
@@ -760,8 +763,13 @@ function ContactDetailPage() {
             <Input value={draftName} onChange={(e) => setDraftName(e.target.value)} />
           </Field>
           <Field>
-            <FieldLabel>Teléfono (declarado)</FieldLabel>
-            <Input value={draftPhone} onChange={(e) => setDraftPhone(e.target.value)} />
+            <FieldLabel htmlFor="contact-detail-phone">Teléfono (declarado)</FieldLabel>
+            <PhoneInput
+              id="contact-detail-phone"
+              value={draftPhone || null}
+              onChange={(next) => setDraftPhone(next ?? "")}
+              defaultCountry={countryCode}
+            />
           </Field>
           <Field>
             <FieldLabel>Correo (declarado)</FieldLabel>
@@ -838,7 +846,9 @@ function ContactDetailPage() {
                 <select
                   aria-label={def.label}
                   className="rounded-md border bg-background px-2 py-1.5 text-sm"
-                  value={typeof draftCustom[def.key] === "string" ? String(draftCustom[def.key]) : ""}
+                  value={
+                    typeof draftCustom[def.key] === "string" ? String(draftCustom[def.key]) : ""
+                  }
                   onChange={(e) =>
                     setDraftCustom((prev) => ({ ...prev, [def.key]: e.target.value }))
                   }
@@ -902,8 +912,7 @@ function ContactDetailPage() {
             {detail.identities
               .filter(
                 (i) =>
-                  i.channel ===
-                  detail.conversations.find((c) => c.id === assignConvId)?.channel,
+                  i.channel === detail.conversations.find((c) => c.id === assignConvId)?.channel,
               )
               .map((i) => (
                 <option key={i.id} value={i.id}>
@@ -949,8 +958,8 @@ function ContactDetailPage() {
       >
         <div className="flex flex-col gap-4">
           <p className="text-sm text-muted-foreground">
-            Busca la ficha por nombre o documento y confirma la relación. Son sugerencias:
-            nada se vincula solo por escribir.
+            Busca la ficha por nombre o documento y confirma la relación. Son sugerencias: nada se
+            vincula solo por escribir.
           </p>
           <Field>
             <FieldLabel>Buscar paciente</FieldLabel>
@@ -1068,7 +1077,13 @@ function ContactDetailPage() {
         submitLabel="Reasignar"
         cancelLabel="Cancelar"
         isSubmitting={moveMutation.isPending}
-        error={moveAmbiguous ? null : moveMutation.error instanceof Error ? moveMutation.error.message : null}
+        error={
+          moveAmbiguous
+            ? null
+            : moveMutation.error instanceof Error
+              ? moveMutation.error.message
+              : null
+        }
         onSubmit={(event) => {
           event.preventDefault()
           if (!destChoice || !moveReason.trim()) return
@@ -1077,11 +1092,12 @@ function ContactDetailPage() {
       >
         <div className="flex flex-col gap-4">
           <p className="text-sm text-muted-foreground">
-            Se mueve la identidad de {moveIdentity?.channel === "whatsapp" ? "WhatsApp" : "Telegram"}{" "}
-            ({moveIdentity?.displayName ?? moveIdentity?.externalUserId}) desde{" "}
+            Se mueve la identidad de{" "}
+            {moveIdentity?.channel === "whatsapp" ? "WhatsApp" : "Telegram"} (
+            {moveIdentity?.displayName ?? moveIdentity?.externalUserId}) desde{" "}
             <strong>{detail.contact.displayName}</strong> al contacto destino, junto con{" "}
-            {moveResolvedCount} conversación(es) resuelta(s) por esa identidad. Los vínculos
-            de pacientes no se mueven y el origen no se archiva.
+            {moveResolvedCount} conversación(es) resuelta(s) por esa identidad. Los vínculos de
+            pacientes no se mueven y el origen no se archiva.
           </p>
           <Field>
             <FieldLabel>Buscar contacto destino</FieldLabel>
@@ -1121,8 +1137,8 @@ function ContactDetailPage() {
           {moveAmbiguous && (
             <div className="flex flex-col gap-2 rounded-md border border-amber-300 p-2">
               <p className="text-sm">
-                Hay historial del canal sin identidad determinable: resuelve cada
-                conversación antes de reintentar. No se mueve nada por conjetura.
+                Hay historial del canal sin identidad determinable: resuelve cada conversación antes
+                de reintentar. No se mueve nada por conjetura.
               </p>
               {ambiguousConvs.map((conv) => (
                 <span key={conv.id} className="flex items-center gap-2 text-sm">
@@ -1141,8 +1157,7 @@ function ContactDetailPage() {
                         conversationId: conv.id,
                         conversationLabel: conv.connectionName ?? conv.channel,
                         identityId: moveIdentity.id,
-                        identityLabel:
-                          moveIdentity.displayName ?? moveIdentity.externalUserId,
+                        identityLabel: moveIdentity.displayName ?? moveIdentity.externalUserId,
                       })
                     }}
                   >
@@ -1168,7 +1183,11 @@ function ContactDetailPage() {
           }
         }}
         onConfirm={() => activeMutation.mutate(!detail.contact.isActive)}
-        title={archived ? `Reactivar ${detail.contact.displayName}` : `Archivar ${detail.contact.displayName}`}
+        title={
+          archived
+            ? `Reactivar ${detail.contact.displayName}`
+            : `Archivar ${detail.contact.displayName}`
+        }
         description={
           activeMutation.error
             ? mutationMessage(activeMutation.error, "No se pudo actualizar el contacto.")
@@ -1208,9 +1227,7 @@ function ContactDetailPage() {
       <ContactConversationDialog
         open={dialog !== null}
         onClose={() => setDialog(null)}
-        contacts={[
-          { contactId, displayName: detail.contact.displayName, isPreferred: true },
-        ]}
+        contacts={[{ contactId, displayName: detail.contact.displayName, isPreferred: true }]}
         prepareRegistration={dialog?.prepareRegistration ?? false}
       />
       <CreatePatientDrawer

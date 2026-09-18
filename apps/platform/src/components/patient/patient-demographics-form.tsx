@@ -1,3 +1,4 @@
+import { UUID_RE, validateDemographics } from "@odentia/clinical"
 import {
   Field,
   FieldError,
@@ -9,9 +10,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@odentia/ui"
-import { fieldErrorMessages } from "@odentia/ui-patterns"
+import { fieldErrorMessages, isValidE164 } from "@odentia/ui-patterns"
 import { type InputHTMLAttributes, useId } from "react"
-import { validateDemographics, UUID_RE } from "@odentia/clinical"
 
 /**
  * Campos y validación demográfica compartidos entre el alta
@@ -19,7 +19,6 @@ import { validateDemographics, UUID_RE } from "@odentia/clinical"
  * para nombre, documento, nacimiento, sexo y contacto. La edición reutiliza
  * estos mismos límites; la creación añade el flujo de contacto.
  */
-
 
 export const DOC_TYPE_OPTIONS = [
   { value: "", label: "—" },
@@ -86,22 +85,46 @@ export const emptyDemographics: DemographicsValues = {
   registeredBranchId: "",
 }
 
-const IDENTITY_FIELDS = ["displayName", "docType", "docNumber", "birthDate", "sex", "phone", "email"]
+const IDENTITY_FIELDS = [
+  "displayName",
+  "docType",
+  "docNumber",
+  "birthDate",
+  "sex",
+  "phone",
+  "email",
+]
 
 export type StepErrors = Record<string, string>
-
 
 /** Paso 1: identidad y contacto. Solo el DNI exige formato exacto (8 dígitos); ninguna regla peruana aplica a pasaporte. */
 export function validateIdentity(values: DemographicsValues): StepErrors {
   const { registeredBranchId: _branch, ...demographics } = values
-  return Object.fromEntries(Object.entries(validateDemographics(demographics)).filter(([key]) => IDENTITY_FIELDS.includes(key)))
+  const errs = Object.fromEntries(
+    Object.entries(validateDemographics(demographics)).filter(([key]) =>
+      IDENTITY_FIELDS.includes(key),
+    ),
+  )
+  // El campo de teléfono emite E.164: si hay algo escrito, tiene que ser un
+  // número real (el servidor sigue siendo quien manda, esto es la pantalla).
+  const phone = values.phone.trim()
+  if (phone !== "" && !isValidE164(phone)) errs.phone = "Teléfono inválido"
+  return errs
 }
 
 /** Paso 2: datos complementarios, seguro y sucursal. */
 export function validateComplementary(values: DemographicsValues): StepErrors {
   const { registeredBranchId, ...demographics } = values
-  const errs = Object.fromEntries(Object.entries(validateDemographics(demographics)).filter(([key]) => !IDENTITY_FIELDS.includes(key)))
-  if (registeredBranchId && !UUID_RE.test(registeredBranchId)) errs.registeredBranchId = "Sucursal inválida"
+  const errs = Object.fromEntries(
+    Object.entries(validateDemographics(demographics)).filter(
+      ([key]) => !IDENTITY_FIELDS.includes(key),
+    ),
+  )
+  if (registeredBranchId && !UUID_RE.test(registeredBranchId))
+    errs.registeredBranchId = "Sucursal inválida"
+  // Los teléfonos de este paso emiten E.164 igual que el de contacto.
+  const emergency = values.emergencyContactPhone.trim()
+  if (emergency !== "" && !isValidE164(emergency)) errs.emergencyContactPhone = "Teléfono inválido"
   return errs
 }
 
@@ -112,19 +135,32 @@ export function TextRow({
   error,
   fallbackError,
   inputProps,
+  renderControl,
 }: {
   label: string
-  value: string
-  onChange: (value: string) => void
+  /** Se ignora cuando hay `renderControl`: el control propio lleva su valor. */
+  value?: string
+  onChange?: (value: string) => void
   error?: string
   fallbackError?: string[]
   inputProps?: InputHTMLAttributes<HTMLInputElement>
+  /** Control propio (p. ej. `PhoneInput`) asociado a la misma etiqueta. */
+  renderControl?: (id: string) => React.ReactNode
 }) {
   const id = useId()
   return (
     <Field>
       <FieldLabel htmlFor={id}>{label}</FieldLabel>
-      <Input id={id} {...inputProps} value={value} onChange={(e) => onChange(e.target.value)} />
+      {renderControl ? (
+        renderControl(id)
+      ) : (
+        <Input
+          id={id}
+          {...inputProps}
+          value={value ?? ""}
+          onChange={(e) => onChange?.(e.target.value)}
+        />
+      )}
       <FieldError>{error ?? fallbackError?.[0]}</FieldError>
     </Field>
   )

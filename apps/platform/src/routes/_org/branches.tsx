@@ -1,4 +1,14 @@
-import { Badge, Button, Field, FieldError, FieldLabel, Input, toast } from "@odentia/ui"
+import {
+  Badge,
+  Button,
+  Checkbox,
+  Field,
+  FieldError,
+  FieldLabel,
+  Input,
+  Label,
+  toast,
+} from "@odentia/ui"
 import {
   ConfirmDialog,
   common,
@@ -9,13 +19,18 @@ import {
   FormDrawer,
   FormPanel,
   fieldErrorMessages,
+  isValidE164,
   LoadingState,
   MasterDetail,
+  normalizeCountry,
   PageHeader,
   PageShell,
+  PhoneInput,
   RowActions,
+  TimeZoneSelect,
   useDetailMode,
   useListSearch,
+  zonesForCountry,
 } from "@odentia/ui-patterns"
 import { useForm, useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
@@ -25,6 +40,7 @@ import { Building2, Plus } from "lucide-react"
 import { type FormEvent, useCallback, useMemo, useState } from "react"
 import { z } from "zod"
 import { ApiError, apiFetch } from "../../lib/api"
+import { useOrgProfile } from "../../lib/org"
 
 export const Route = createFileRoute("/_org/branches")({
   component: BranchesPage,
@@ -38,6 +54,8 @@ interface Branch {
   addressLine1: string | null
   district: string | null
   phone: string | null
+  /** `null` = hereda la zona horaria de la organización. */
+  timezone: string | null
   isActive: boolean
 }
 
@@ -45,12 +63,25 @@ const branchSchema = z.object({
   name: z.string().min(1, "Ingresa el nombre"),
   addressLine1: z.string(),
   district: z.string(),
-  phone: z.string(),
+  // El campo de teléfono emite E.164 (o `null` si se deja vacío).
+  phone: z
+    .string()
+    .nullable()
+    .refine((value) => value === null || isValidE164(value), "Teléfono inválido"),
+  timezoneInherited: z.boolean(),
+  timezone: z.string().nullable(),
 })
 
 type BranchFormValues = z.infer<typeof branchSchema>
 
-const emptyValues: BranchFormValues = { name: "", addressLine1: "", district: "", phone: "" }
+const emptyValues: BranchFormValues = {
+  name: "",
+  addressLine1: "",
+  district: "",
+  phone: null,
+  timezoneInherited: true,
+  timezone: null,
+}
 
 /** Valores del formulario para una sucursal; `null` = alta nueva. */
 function branchValues(branch: Branch | null): BranchFormValues {
@@ -59,7 +90,9 @@ function branchValues(branch: Branch | null): BranchFormValues {
     name: branch.name,
     addressLine1: branch.addressLine1 ?? "",
     district: branch.district ?? "",
-    phone: branch.phone ?? "",
+    phone: branch.phone ?? null,
+    timezoneInherited: branch.timezone === null,
+    timezone: branch.timezone ?? null,
   }
 }
 
@@ -72,6 +105,9 @@ function BranchesPage() {
   const hasCriteria = search !== "" || estadoFilter !== undefined
 
   const { org } = orgRouteApi.useRouteContext()
+  // País y zonas del perfil: definen la máscara del teléfono y las sugerencias.
+  const profile = useOrgProfile()
+  const countryCode = normalizeCountry(profile.data?.countryCode)
 
   const branchesQuery = useQuery({
     queryKey: ["branches"],
@@ -92,6 +128,8 @@ function BranchesPage() {
         addressLine1: values.addressLine1 || null,
         district: values.district || null,
         phone: values.phone || null,
+        // `null` = la sucursal hereda la zona horaria de la organización.
+        timezone: values.timezoneInherited ? null : values.timezone || null,
       })
       if (editing) {
         await apiFetch(`/api/branches/${editing.id}`, { method: "PATCH", body })
@@ -288,15 +326,51 @@ function BranchesPage() {
         )}
       </form.Field>
       <form.Field name="phone">
-        {(field) => (
-          <Field>
-            <FieldLabel htmlFor="branch-phone">Teléfono</FieldLabel>
-            <Input
-              id="branch-phone"
-              value={field.state.value}
-              onChange={(event) => field.handleChange(event.target.value)}
-            />
-          </Field>
+        {(field) => {
+          const errors = fieldErrorMessages(field.state.meta.errors)
+          return (
+            <Field>
+              <FieldLabel htmlFor="branch-phone">Teléfono</FieldLabel>
+              <PhoneInput
+                id="branch-phone"
+                value={field.state.value}
+                onChange={(next) => field.handleChange(next)}
+                defaultCountry={countryCode}
+                invalid={errors.length > 0}
+              />
+              <FieldError>{errors[0] ?? null}</FieldError>
+            </Field>
+          )
+        }}
+      </form.Field>
+      <form.Field name="timezoneInherited">
+        {(inheritField) => (
+          <div className="flex flex-col gap-4">
+            <div className="flex items-center gap-3">
+              <Checkbox
+                id="branch-inherit-timezone"
+                checked={inheritField.state.value}
+                onCheckedChange={(checked) => inheritField.handleChange(checked === true)}
+              />
+              <Label htmlFor="branch-inherit-timezone">
+                Usar la zona horaria de la organización
+              </Label>
+            </div>
+            <form.Field name="timezone">
+              {(field) => (
+                <Field>
+                  <FieldLabel htmlFor="branch-timezone">Zona horaria de la sucursal</FieldLabel>
+                  <TimeZoneSelect
+                    id="branch-timezone"
+                    value={field.state.value}
+                    onChange={(next) => field.handleChange(next)}
+                    suggested={zonesForCountry(countryCode)}
+                    disabled={inheritField.state.value}
+                  />
+                </Field>
+              )}
+            </form.Field>
+          </div>
         )}
       </form.Field>
     </div>
@@ -320,9 +394,7 @@ function BranchesPage() {
     <PageShell className="flex flex-col gap-6">
       <MasterDetail
         panel={
-          mode === "panel" && formOpen ? (
-            <FormPanel {...formProps}>{formFields}</FormPanel>
-          ) : null
+          mode === "panel" && formOpen ? <FormPanel {...formProps}>{formFields}</FormPanel> : null
         }
       >
         <PageHeader
@@ -375,10 +447,7 @@ function BranchesPage() {
             }
           />
         ) : (
-          <DataTable
-            table={table}
-            isRowActive={(row) => formOpen && editing?.id === row.id}
-          />
+          <DataTable table={table} isRowActive={(row) => formOpen && editing?.id === row.id} />
         )}
       </MasterDetail>
 

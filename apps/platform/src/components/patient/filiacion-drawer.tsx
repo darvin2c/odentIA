@@ -13,13 +13,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@odentia/ui"
-import { FormDrawer, fieldErrorMessages } from "@odentia/ui-patterns"
+import { FormDrawer, fieldErrorMessages, normalizeCountry, PhoneInput } from "@odentia/ui-patterns"
 import { useForm } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { ChevronDown } from "lucide-react"
 import { useEffect, useId, useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
 import { timeAgo, useCanWrite } from "../../lib/crm"
+import { useOrgProfile } from "../../lib/org"
 import type { PatientFull } from "../../lib/patients"
 import {
   type DemographicsValues,
@@ -91,6 +92,9 @@ export function FiliacionDrawer({
 }) {
   const queryClient = useQueryClient()
   const canWrite = useCanWrite()
+  // El país del perfil define la máscara del teléfono que se captura.
+  const profile = useOrgProfile()
+  const countryCode = normalizeCountry(profile.data?.countryCode)
   const uid = useId()
   const p = detail.patient
   const [stepErrors, setStepErrors] = useState<StepErrors>({})
@@ -184,6 +188,16 @@ export function FiliacionDrawer({
     void patchMutation.mutate(patch)
   }
 
+  /** Quita el error de paso del campo en cuanto se corrige. */
+  function clearStepError(name: keyof DemographicsValues): void {
+    setStepErrors((prev) => {
+      if (!prev[name]) return prev
+      const next = { ...prev }
+      delete next[name]
+      return next
+    })
+  }
+
   function textField(
     name: keyof DemographicsValues,
     label: string,
@@ -205,14 +219,40 @@ export function FiliacionDrawer({
               value={field.state.value}
               onChange={(e) => {
                 field.handleChange(e.target.value)
-                setStepErrors((prev) => {
-                  if (!prev[name]) return prev
-                  const next = { ...prev }
-                  delete next[name]
-                  return next
-                })
+                clearStepError(name)
               }}
               onBlur={field.handleBlur}
+            />
+            <FieldError>
+              {stepErrors[name] ?? fieldErrorMessages(field.state.meta.errors)[0]}
+            </FieldError>
+          </Field>
+        )}
+      />
+    )
+  }
+
+  /** Igual que `textField`, pero el control es el campo de teléfono (E.164). */
+  function phoneField(name: keyof DemographicsValues, label: string): React.JSX.Element {
+    return (
+      <form.Field
+        name={name}
+        children={(field) => (
+          <Field
+            data-filiacion-error={
+              stepErrors[name] || fieldErrorMessages(field.state.meta.errors)[0] ? "1" : undefined
+            }
+          >
+            <FieldLabel htmlFor={`${uid}-${name}`}>{label}</FieldLabel>
+            <PhoneInput
+              id={`${uid}-${name}`}
+              value={field.state.value || null}
+              onChange={(next) => {
+                field.handleChange(next ?? "")
+                clearStepError(name)
+              }}
+              onBlur={field.handleBlur}
+              defaultCountry={countryCode}
             />
             <FieldError>
               {stepErrors[name] ?? fieldErrorMessages(field.state.meta.errors)[0]}
@@ -297,7 +337,7 @@ export function FiliacionDrawer({
             <div className="font-heading text-base font-medium">Contacto</div>
           </div>
           <div className="grid gap-4 sm:grid-cols-2">
-            {textField("phone", "Teléfono", { type: "tel", maxLength: 50 })}
+            {phoneField("phone", "Teléfono")}
             {textField("email", "Correo electrónico", { type: "email", maxLength: 200 })}
           </div>
         </div>
@@ -331,7 +371,7 @@ export function FiliacionDrawer({
             <CollapsibleContent>
               <div className="grid gap-4 sm:grid-cols-2">
                 {textField("emergencyContactName", "Contacto de emergencia")}
-                {textField("emergencyContactPhone", "Teléfono de emergencia", { type: "tel" })}
+                {phoneField("emergencyContactPhone", "Teléfono de emergencia")}
                 {textField("referralSource", "Referido por")}
                 <Field>
                   <FieldLabel htmlFor={`${uid}-branch`}>Sucursal de registro</FieldLabel>

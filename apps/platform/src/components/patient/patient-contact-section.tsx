@@ -18,12 +18,19 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@odentia/ui"
-import { ConfirmDialog, FormDrawer, RowActions } from "@odentia/ui-patterns"
+import {
+  ConfirmDialog,
+  FormDrawer,
+  normalizeCountry,
+  PhoneInput,
+  RowActions,
+} from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link, useNavigate } from "@tanstack/react-router"
 import { useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
 import { type ContactFull, type ContactListItem, timeAgo, useCanWrite } from "../../lib/crm"
+import { useOrgProfile } from "../../lib/org"
 import type { PatientContactLink, PatientFull } from "../../lib/patients"
 import { ContactConversationDialog } from "../contact-conversation-dialog"
 
@@ -125,12 +132,7 @@ export function PatientContactSection({ detail }: { detail: PatientFull }) {
           <div className="font-heading text-base font-medium">Contactos vinculados</div>
           {canWrite ? (
             <div className="flex flex-wrap gap-2">
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={() => setLinkOpen(true)}
-              >
+              <Button type="button" size="sm" variant="outline" onClick={() => setLinkOpen(true)}>
                 Vincular contacto
               </Button>
               <Button
@@ -165,8 +167,8 @@ export function PatientContactSection({ detail }: { detail: PatientFull }) {
                   Datos declarados: contacto aún no vinculado
                   {representative?.displayName ? ` · ${representative.displayName}` : ""}
                   {declaredPhone ? ` · ${declaredPhone}` : ""}
-                  {declaredEmail ? ` · ${declaredEmail}` : ""}. El personal puede vincular
-                  un contacto existente o crear uno desde estos datos.
+                  {declaredEmail ? ` · ${declaredEmail}` : ""}. El personal puede vincular un
+                  contacto existente o crear uno desde estos datos.
                 </p>
               ) : null}
               {canWrite ? (
@@ -239,9 +241,7 @@ export function PatientContactSection({ detail }: { detail: PatientFull }) {
               <p className="text-sm font-medium">Representante declarado</p>
               <p className="text-sm text-muted-foreground">
                 {representative.displayName}
-                {representative.relationshipDetail
-                  ? ` · ${representative.relationshipDetail}`
-                  : ""}
+                {representative.relationshipDetail ? ` · ${representative.relationshipDetail}` : ""}
                 {trimmed(representative.phone) ? ` · ${trimmed(representative.phone)}` : ""}
                 {trimmed(representative.email) ? ` · ${trimmed(representative.email)}` : ""}
               </p>
@@ -282,10 +282,7 @@ export function PatientContactSection({ detail }: { detail: PatientFull }) {
                     size="sm"
                     nativeButton={false}
                     render={
-                      <Link
-                        to="/inbox"
-                        search={{ conversation: registration.conversationId }}
-                      />
+                      <Link to="/inbox" search={{ conversation: registration.conversationId }} />
                     }
                   >
                     Ver conversación de origen
@@ -311,10 +308,7 @@ export function PatientContactSection({ detail }: { detail: PatientFull }) {
         }))}
       />
       {conversationsOpen ? (
-        <PatientConversationsDialog
-          detail={detail}
-          onClose={() => setConversationsOpen(false)}
-        />
+        <PatientConversationsDialog detail={detail} onClose={() => setConversationsOpen(false)} />
       ) : null}
       {linkOpen ? (
         <LinkContactDialog
@@ -326,11 +320,7 @@ export function PatientContactSection({ detail }: { detail: PatientFull }) {
         />
       ) : null}
       {editing ? (
-        <EditRelationDialog
-          patientId={patientId}
-          link={editing}
-          onClose={() => setEditing(null)}
-        />
+        <EditRelationDialog patientId={patientId} link={editing} onClose={() => setEditing(null)} />
       ) : null}
       <ConfirmDialog
         open={unlinking !== null}
@@ -367,9 +357,7 @@ function PatientConversationsDialog({
     queryFn: async () => {
       const entries = await Promise.all(
         detail.contacts.map(async (link) => {
-          const body = await apiFetch<{ data: ContactFull }>(
-            `/api/contacts/${link.contactId}`,
-          )
+          const body = await apiFetch<{ data: ContactFull }>(`/api/contacts/${link.contactId}`)
           return { link, conversations: body.data.conversations }
         }),
       )
@@ -378,13 +366,18 @@ function PatientConversationsDialog({
   })
   const entries = contactsQuery.data ?? []
   return (
-    <Dialog open onOpenChange={(next) => { if (!next) onClose() }}>
+    <Dialog
+      open
+      onOpenChange={(next) => {
+        if (!next) onClose()
+      }}
+    >
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Conversaciones</DialogTitle>
           <DialogDescription>
-            La conversación pertenece al contacto y puede incluir a otros pacientes. No se
-            copian mensajes a la historia clínica.
+            La conversación pertenece al contacto y puede incluir a otros pacientes. No se copian
+            mensajes a la historia clínica.
           </DialogDescription>
         </DialogHeader>
         {contactsQuery.isPending ? (
@@ -409,9 +402,7 @@ function PatientConversationsDialog({
                       >
                         <span className="text-sm text-muted-foreground">
                           {conversation.channel}
-                          {conversation.connectionName
-                            ? ` · ${conversation.connectionName}`
-                            : ""}
+                          {conversation.connectionName ? ` · ${conversation.connectionName}` : ""}
                           {` · ${conversation.status}`}
                           {conversation.lastMessageAt
                             ? ` · ${timeAgo(conversation.lastMessageAt)}`
@@ -421,12 +412,7 @@ function PatientConversationsDialog({
                           type="button"
                           variant="outline"
                           size="sm"
-                          render={
-                            <Link
-                              to="/inbox"
-                              search={{ conversation: conversation.id }}
-                            />
-                          }
+                          render={<Link to="/inbox" search={{ conversation: conversation.id }} />}
                         >
                           Abrir en bandeja
                         </Button>
@@ -463,6 +449,9 @@ function LinkContactDialog({
 }) {
   const patientId = detail.patient.id
   const invalidate = useInvalidatePatient(patientId)
+  // El país del perfil define la máscara del teléfono que se captura.
+  const profile = useOrgProfile()
+  const countryCode = normalizeCountry(profile.data?.countryCode)
   const [query, setQuery] = useState("")
   const [submittedQuery, setSubmittedQuery] = useState("")
   const [selected, setSelected] = useState<ContactListItem | null>(null)
@@ -523,13 +512,18 @@ function LinkContactDialog({
   const results = searchQuery.data?.data ?? []
 
   return (
-    <Dialog open onOpenChange={(next) => { if (!next) onClose() }}>
+    <Dialog
+      open
+      onOpenChange={(next) => {
+        if (!next) onClose()
+      }}
+    >
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Vincular contacto</DialogTitle>
           <DialogDescription>
-            Busca por nombre, teléfono o correo. Los resultados son sugerencias sin
-            verificar: confirma la identidad de la persona antes de vincular.
+            Busca por nombre, teléfono o correo. Los resultados son sugerencias sin verificar:
+            confirma la identidad de la persona antes de vincular.
           </DialogDescription>
         </DialogHeader>
         <div className="flex flex-col gap-3">
@@ -585,51 +579,54 @@ function LinkContactDialog({
             )
           ) : null}
 
-            <div className="flex flex-col gap-3 rounded-md border p-3">
-              <p className="text-sm">
-                {selected ? `Vincular a ${selected.displayName}` : "Elige la relación del contacto que vas a crear"}:
+          <div className="flex flex-col gap-3 rounded-md border p-3">
+            <p className="text-sm">
+              {selected
+                ? `Vincular a ${selected.displayName}`
+                : "Elige la relación del contacto que vas a crear"}
+              :
+            </p>
+            <Field>
+              <FieldLabel htmlFor="link-relationship">Relación</FieldLabel>
+              <Select
+                value={relationship}
+                onValueChange={(value) => setRelationship(value as Relationship)}
+              >
+                <SelectTrigger id="link-relationship">
+                  <SelectValue>{CONTACT_RELATIONSHIP_LABELS[relationship]}</SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  {RELATIONSHIPS.map((value) => (
+                    <SelectItem key={value} value={value}>
+                      {CONTACT_RELATIONSHIP_LABELS[value]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
+            <Field>
+              <FieldLabel htmlFor="link-detail">Detalle (opcional, p. ej. Madre)</FieldLabel>
+              <Input
+                id="link-detail"
+                value={relationshipDetail}
+                maxLength={100}
+                onChange={(event) => setRelationshipDetail(event.target.value)}
+              />
+            </Field>
+            <label className="flex items-center gap-2 text-sm">
+              <Checkbox
+                checked={isPreferred}
+                onCheckedChange={(checked) => setIsPreferred(checked === true)}
+              />
+              Marcar como preferente
+            </label>
+            {error && !pendingCreated ? (
+              <p role="alert" className="text-sm text-destructive">
+                {error}
               </p>
-              <Field>
-                <FieldLabel htmlFor="link-relationship">Relación</FieldLabel>
-                <Select
-                  value={relationship}
-                  onValueChange={(value) => setRelationship(value as Relationship)}
-                >
-                  <SelectTrigger id="link-relationship">
-                    <SelectValue>{CONTACT_RELATIONSHIP_LABELS[relationship]}</SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    {RELATIONSHIPS.map((value) => (
-                      <SelectItem key={value} value={value}>
-                        {CONTACT_RELATIONSHIP_LABELS[value]}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </Field>
-              <Field>
-                <FieldLabel htmlFor="link-detail">Detalle (opcional, p. ej. Madre)</FieldLabel>
-                <Input
-                  id="link-detail"
-                  value={relationshipDetail}
-                  maxLength={100}
-                  onChange={(event) => setRelationshipDetail(event.target.value)}
-                />
-              </Field>
-              <label className="flex items-center gap-2 text-sm">
-                <Checkbox
-                  checked={isPreferred}
-                  onCheckedChange={(checked) => setIsPreferred(checked === true)}
-                />
-                Marcar como preferente
-              </label>
-              {error && !pendingCreated ? (
-                <p role="alert" className="text-sm text-destructive">
-                  {error}
-                </p>
-              ) : null}
-              <div>
-                {selected ? (
+            ) : null}
+            <div>
+              {selected ? (
                 <Button
                   type="button"
                   disabled={linkMutation.isPending}
@@ -644,9 +641,9 @@ function LinkContactDialog({
                 >
                   {linkMutation.isPending ? "Vinculando…" : "Confirmar vinculación"}
                 </Button>
-                ) : null}
-              </div>
+              ) : null}
             </div>
+          </div>
 
           <div className="flex flex-col gap-2 rounded-md border p-3">
             <p className="text-sm font-medium">Crear contacto desde datos declarados</p>
@@ -657,15 +654,34 @@ function LinkContactDialog({
             </p>
             <Field>
               <FieldLabel htmlFor="new-contact-name">Nombre del nuevo contacto</FieldLabel>
-              <Input id="new-contact-name" value={newName} maxLength={200} disabled={!!pendingCreated} onChange={event => setNewName(event.target.value)} />
+              <Input
+                id="new-contact-name"
+                value={newName}
+                maxLength={200}
+                disabled={!!pendingCreated}
+                onChange={(event) => setNewName(event.target.value)}
+              />
             </Field>
             <Field>
               <FieldLabel htmlFor="new-contact-phone">Teléfono declarado</FieldLabel>
-              <Input id="new-contact-phone" type="tel" value={newPhone} maxLength={50} disabled={!!pendingCreated} onChange={event => setNewPhone(event.target.value)} />
+              <PhoneInput
+                id="new-contact-phone"
+                value={newPhone || null}
+                disabled={!!pendingCreated}
+                defaultCountry={countryCode}
+                onChange={(next) => setNewPhone(next ?? "")}
+              />
             </Field>
             <Field>
               <FieldLabel htmlFor="new-contact-email">Correo declarado</FieldLabel>
-              <Input id="new-contact-email" type="email" value={newEmail} maxLength={200} disabled={!!pendingCreated} onChange={event => setNewEmail(event.target.value)} />
+              <Input
+                id="new-contact-email"
+                type="email"
+                value={newEmail}
+                maxLength={200}
+                disabled={!!pendingCreated}
+                onChange={(event) => setNewEmail(event.target.value)}
+              />
             </Field>
             {pendingCreated ? (
               <div className="flex flex-col gap-2">
@@ -717,7 +733,7 @@ function LinkContactDialog({
                         method: "POST",
                         body: JSON.stringify({
                           displayName,
-                          ...(newPhone.trim() ? { phone: newPhone.trim() } : {}),
+                          ...(newPhone ? { phone: newPhone } : {}),
                           ...(newEmail.trim() ? { email: newEmail.trim() } : {}),
                         }),
                       })
@@ -790,9 +806,7 @@ function EditRelationDialog({
         method: "PUT",
         body: JSON.stringify({
           relationship,
-          ...(relationshipDetail.trim()
-            ? { relationshipDetail: relationshipDetail.trim() }
-            : {}),
+          ...(relationshipDetail.trim() ? { relationshipDetail: relationshipDetail.trim() } : {}),
           isPreferred,
         }),
       }),
@@ -819,7 +833,10 @@ function EditRelationDialog({
     >
       <Field>
         <FieldLabel htmlFor="edit-relationship">Relación</FieldLabel>
-        <Select value={relationship} onValueChange={(value) => setRelationship(value as Relationship)}>
+        <Select
+          value={relationship}
+          onValueChange={(value) => setRelationship(value as Relationship)}
+        >
           <SelectTrigger id="edit-relationship">
             <SelectValue>{CONTACT_RELATIONSHIP_LABELS[relationship]}</SelectValue>
           </SelectTrigger>
@@ -842,7 +859,10 @@ function EditRelationDialog({
         />
       </Field>
       <label className="flex items-center gap-2 text-sm">
-        <Checkbox checked={isPreferred} onCheckedChange={(checked) => setIsPreferred(checked === true)} />
+        <Checkbox
+          checked={isPreferred}
+          onCheckedChange={(checked) => setIsPreferred(checked === true)}
+        />
         Contacto preferente
       </label>
     </FormDrawer>
@@ -858,17 +878,20 @@ export function RegistrationDeclarationDialog({
   onClose: () => void
 }) {
   const entries =
-    answers && typeof answers === "object"
-      ? Object.entries(answers as Record<string, unknown>)
-      : []
+    answers && typeof answers === "object" ? Object.entries(answers as Record<string, unknown>) : []
   return (
-    <Dialog open onOpenChange={(next) => { if (!next) onClose() }}>
+    <Dialog
+      open
+      onOpenChange={(next) => {
+        if (!next) onClose()
+      }}
+    >
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Declaración original</DialogTitle>
           <DialogDescription>
-            Lo declarado al registrarse. Los datos vigentes se editan con el editor de
-            antecedentes, no aquí.
+            Lo declarado al registrarse. Los datos vigentes se editan con el editor de antecedentes,
+            no aquí.
           </DialogDescription>
         </DialogHeader>
         {entries.length === 0 ? (

@@ -1,4 +1,4 @@
-import { expect, type Browser, type Page, test } from "@playwright/test"
+import { type Browser, expect, type Page, test } from "@playwright/test"
 import { simulateTelegramInbound } from "./channels"
 import { latestLinkFor } from "./mailpit"
 
@@ -13,11 +13,20 @@ import { latestLinkFor } from "./mailpit"
  */
 
 import { API, tenant, tenantPattern } from "./env"
+
 const run = Date.now().toString(36)
 let seq = 0
 
 const nextDoc = () => String(31_000_000 + seq++)
 const nextPhone = () => `+51999${String(100_000 + seq++).slice(-6)}`
+/**
+ * Lo que se ve en el campo de teléfono: el número nacional enmascarado
+ * (`+51999123456` → `999 123 456`). El E.164 es el valor del formulario.
+ */
+const maskedPhone = (e164: string) => {
+  const national = e164.replace(/\D/g, "").slice(2)
+  return `${national.slice(0, 3)} ${national.slice(3, 6)} ${national.slice(6)}`
+}
 const uid = () => 6_000_000 + Math.floor(Math.random() * 1_000_000)
 
 const PRIVACY = "Aviso e2e: tus datos se usan solo para tu atención clínica (demostración)."
@@ -272,12 +281,7 @@ async function findPatientByName(page: Page, slug: string, displayName: string) 
 }
 
 async function getPatientDetail(page: Page, slug: string, patientId: string) {
-  const detail = await api<{ data: PatientDetail }>(
-    page,
-    "GET",
-    `/api/patients/${patientId}`,
-    slug,
-  )
+  const detail = await api<{ data: PatientDetail }>(page, "GET", `/api/patients/${patientId}`, slug)
   expect(detail.status).toBe(200)
   return detail.body.data
 }
@@ -315,7 +319,9 @@ test("registro público QR en escritorio: conserva borrador, declara salud y no 
       await anon.getByRole("button", { name: "Anterior", exact: true }).click()
       await expect(anon.getByLabel("Nombre del paciente")).toHaveValue(patientName)
       await anon.getByRole("button", { name: "Siguiente", exact: true }).click()
-      await expect(anon.getByLabel("Teléfono", { exact: true })).toHaveValue(sharedPhone)
+      await expect(anon.getByLabel("Teléfono", { exact: true })).toHaveValue(
+        maskedPhone(sharedPhone),
+      )
       await anon.getByRole("button", { name: "Siguiente", exact: true }).click()
 
       await fillSalud(anon)
@@ -459,7 +465,9 @@ test("cambio de configuración conserva el borrador y no reenvía solo", async (
       await expect(anon.getByText("Paciente registrado", { exact: true })).toHaveCount(0)
       expect(publicPosts).toBe(1)
       await expect(anon.getByText(/rev\. 2/)).toBeVisible()
-      await expect(anon.getByRole("checkbox", { name: /Autorizo el tratamiento de mis datos/ })).toBeChecked()
+      await expect(
+        anon.getByRole("checkbox", { name: /Autorizo el tratamiento de mis datos/ }),
+      ).toBeChecked()
       // La declaración de salud se conserva al retroceder.
       await anon.getByRole("button", { name: "Anterior", exact: true }).click()
       await expect(anon.getByLabel("¿Tiene alergias?")).toHaveText("Sí")
@@ -504,19 +512,24 @@ test("enlace contextual registra a un menor sin duplicar self y luego no está d
     )
     expect(tgConn.status).toBe(201)
     expect(
-      await simulateTelegramInbound(page, API, tgConn.body.data.id, tgConn.body.data.webhookSecret, {
-        fromId: 2001 + (seq % 997),
-        chatId: 2001 + (seq % 997),
-        text: "Hola, quiero registrar a mi hijo",
-        updateId: uid(),
-      }),
+      await simulateTelegramInbound(
+        page,
+        API,
+        tgConn.body.data.id,
+        tgConn.body.data.webhookSecret,
+        {
+          fromId: 2001 + (seq % 997),
+          chatId: 2001 + (seq % 997),
+          text: "Hola, quiero registrar a mi hijo",
+          updateId: uid(),
+        },
+      ),
     ).toBe(200)
     await expect
       .poll(
         async () =>
-          (
-            await api<{ data: unknown[] }>(page, "GET", "/api/conversations", org.slug)
-          ).body.data.length,
+          (await api<{ data: unknown[] }>(page, "GET", "/api/conversations", org.slug)).body.data
+            .length,
         { timeout: 30_000 },
       )
       .toBeGreaterThanOrEqual(1)
@@ -532,15 +545,26 @@ test("enlace contextual registra a un menor sin duplicar self y luego no está d
 
     // El contacto ya tiene ficha propia: un segundo «A mí» no debe duplicarla.
     const selfDoc = nextDoc()
-    const selfPatient = await api<{ data: { id: string } }>(page, "POST", "/api/patients", org.slug, {
-      submissionId: crypto.randomUUID(),
-      answers: {
-        demographics: { displayName: `Titular Enlace ${run}`, birthDate: "1985-03-20", docType: "DNI", docNumber: selfDoc },
-        respondent: "staff",
-        privacyAccepted: false,
+    const selfPatient = await api<{ data: { id: string } }>(
+      page,
+      "POST",
+      "/api/patients",
+      org.slug,
+      {
+        submissionId: crypto.randomUUID(),
+        answers: {
+          demographics: {
+            displayName: `Titular Enlace ${run}`,
+            birthDate: "1985-03-20",
+            docType: "DNI",
+            docNumber: selfDoc,
+          },
+          respondent: "staff",
+          privacyAccepted: false,
+        },
+        contacts: [{ contactId, relationship: "self", isPreferred: true }],
       },
-      contacts: [{ contactId, relationship: "self", isPreferred: true }],
-    })
+    )
     expect(selfPatient.status).toBe(201)
 
     const link = await api<{ data: { url: string; expiresAt: string } }>(
@@ -558,7 +582,9 @@ test("enlace contextual registra a un menor sin duplicar self y luego no está d
     const { context: dupContext, page: dup } = await anonymousPage(browser)
     try {
       await gotoHydrated(dup, linkUrl)
-      await expect(dup.getByText("Continúa con el registro compartido por la clínica.")).toBeVisible()
+      await expect(
+        dup.getByText("Continúa con el registro compartido por la clínica."),
+      ).toBeVisible()
       await dup.getByLabel("Nombre del paciente").fill(`Duplicado Enlace ${run}`)
       await dup.getByLabel("Fecha de nacimiento").fill("1985-03-20")
       await dup.getByLabel("Tipo de documento").click()

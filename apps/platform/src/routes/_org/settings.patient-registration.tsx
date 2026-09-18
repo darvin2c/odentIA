@@ -1,10 +1,10 @@
-import { REGISTRATION_FIELDS as CATALOGUE, registrationConfigSchema } from "@odentia/clinical"
 import type {
   RegistrationAnswers,
   RegistrationConfig,
   RegistrationFieldKey,
   RegistrationFieldMode,
 } from "@odentia/clinical"
+import { REGISTRATION_FIELDS as CATALOGUE, registrationConfigSchema } from "@odentia/clinical"
 import {
   Button,
   Checkbox,
@@ -28,6 +28,7 @@ import {
   EmptyState,
   ErrorState,
   LoadingState,
+  normalizeCountry,
   PageHeader,
   SubmitButton,
 } from "@odentia/ui-patterns"
@@ -38,6 +39,7 @@ import { PatientRegistrationForm } from "../../components/patient/patient-regist
 import { ApiError } from "../../lib/api"
 import { useCanWrite } from "../../lib/crm"
 import { orgSlugFromHostname, requestHostname, tenantUrl } from "../../lib/host"
+import { useOrgProfile } from "../../lib/org"
 import { fetchRegistrationConfig, saveRegistrationConfig } from "../../lib/patient-registration"
 
 export const Route = createFileRoute("/_org/settings/patient-registration")({
@@ -65,16 +67,19 @@ const PREVIEW_VALUES: Partial<RegistrationAnswers> = {
   demographics: {
     displayName: "Paciente de ejemplo",
     birthDate: "1990-05-12",
-    phone: "999888777",
+    // E.164, como lo emite el campo: la vista previa muestra un teléfono válido.
+    phone: "+51999888777",
   },
   respondent: "patient",
   privacyAccepted: true,
 }
 
-
 function PatientRegistrationSettingsPage() {
   const queryClient = useQueryClient()
   const canWrite = useCanWrite()
+  // El país del perfil define la máscara de los teléfonos de la vista previa.
+  const profile = useOrgProfile()
+  const countryCode = normalizeCountry(profile.data?.countryCode)
   const { org } = orgRouteApi.useRouteContext()
   const slug = org?.slug ?? orgSlugFromHostname(requestHostname()) ?? ""
   const publicLink = tenantUrl(slug, "/registro")
@@ -137,7 +142,9 @@ function PatientRegistrationSettingsPage() {
           setPrivacyNotice(current.privacyNotice)
           setExpectedVersion(current.version)
         } else {
-          setFormErrors({ general: "No pudimos recargar la configuración. Reintenta antes de guardar." })
+          setFormErrors({
+            general: "No pudimos recargar la configuración. Reintenta antes de guardar.",
+          })
         }
         return
       }
@@ -155,7 +162,10 @@ function PatientRegistrationSettingsPage() {
     if (configQuery.isError) {
       return (
         <div className="mx-auto w-full max-w-3xl">
-          <PageHeader title="Registro de pacientes" subtitle="Formulario público y QR de admisión" />
+          <PageHeader
+            title="Registro de pacientes"
+            subtitle="Formulario público y QR de admisión"
+          />
           <ErrorState
             error={
               configQuery.error instanceof ApiError
@@ -189,9 +199,16 @@ function PatientRegistrationSettingsPage() {
 
   function handleSave() {
     if (!canWrite || !fields) return
-    const parsed = registrationConfigSchema.safeParse({ version: expectedVersion, enabled, fields, privacyNotice })
+    const parsed = registrationConfigSchema.safeParse({
+      version: expectedVersion,
+      enabled,
+      fields,
+      privacyNotice,
+    })
     const errors: Record<string, string> = {}
-    if (!parsed.success) for (const issue of parsed.error.issues) errors[String(issue.path.at(-1) ?? "general")] ??= issue.message
+    if (!parsed.success)
+      for (const issue of parsed.error.issues)
+        errors[String(issue.path.at(-1) ?? "general")] ??= issue.message
     setFormErrors(errors)
     setSavedNotice(null)
     if (Object.keys(errors).length > 0) return
@@ -241,18 +258,21 @@ function PatientRegistrationSettingsPage() {
           </Button>
         }
       />
-    
+
       {savedNotice ? (
         <p role="status" className="mb-4 rounded-md border border-border bg-muted p-3 text-sm">
           {savedNotice}
         </p>
       ) : null}
       {formErrors.general ? (
-        <p role="alert" className="mb-4 rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm">
+        <p
+          role="alert"
+          className="mb-4 rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm"
+        >
           {formErrors.general}
         </p>
       ) : null}
-    
+
       <div className="space-y-6">
         {steps.map((step) => (
           <div key={step} className="flex flex-col gap-6 rounded-sm bg-card p-6">
@@ -301,7 +321,9 @@ function PatientRegistrationSettingsPage() {
         ))}
         <div className="flex flex-col gap-6 rounded-sm bg-card p-6">
           <div className="flex flex-col gap-1.5">
-            <div className="font-heading text-base font-medium">Aviso de privacidad y publicación</div>
+            <div className="font-heading text-base font-medium">
+              Aviso de privacidad y publicación
+            </div>
             <p className="text-sm text-muted-foreground">
               El aviso lo aporta la organización y se muestra antes del consentimiento.
             </p>
@@ -321,7 +343,10 @@ function PatientRegistrationSettingsPage() {
               ) : null}
             </Field>
             <Field>
-              <label htmlFor="registro-habilitado" className="flex cursor-pointer items-center gap-2 text-sm">
+              <label
+                htmlFor="registro-habilitado"
+                className="flex cursor-pointer items-center gap-2 text-sm"
+              >
                 <Checkbox
                   id="registro-habilitado"
                   checked={enabled}
@@ -346,7 +371,7 @@ function PatientRegistrationSettingsPage() {
             ) : null}
           </div>
         </div>
-    
+
         <div className="flex flex-col gap-6 rounded-sm bg-card p-6">
           <div className="flex flex-col gap-1.5">
             <div className="font-heading text-base font-medium">Enlace público y QR</div>
@@ -401,7 +426,7 @@ function PatientRegistrationSettingsPage() {
           </div>
         </div>
       </div>
-    
+
       <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
         <DialogContent className="max-h-[90vh] w-full overflow-y-auto sm:max-w-3xl">
           <DialogHeader>
@@ -419,6 +444,7 @@ function PatientRegistrationSettingsPage() {
               mode="preview"
               config={{ version: expectedVersion, enabled, fields, privacyNotice }}
               today={today}
+              defaultCountry={countryCode}
               context={{ kind: "generic" }}
               initialValues={PREVIEW_VALUES}
               onSubmit={async () => {

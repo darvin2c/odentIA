@@ -4,12 +4,13 @@ import type {
   RegistrationDemographics,
 } from "@odentia/clinical"
 import { Alert, AlertDescription, AlertTitle, Button, toast } from "@odentia/ui"
-import { FormDrawer, FormPanel } from "@odentia/ui-patterns"
+import { FormDrawer, FormPanel, normalizeCountry } from "@odentia/ui-patterns"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
 import { useRef, useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
 import type { ContactFull } from "../../lib/crm"
+import { useOrgProfile } from "../../lib/org"
 import { hcLabel, type Patient } from "../../lib/patients"
 import {
   PatientRegistrationForm,
@@ -76,6 +77,9 @@ export function CreatePatientDrawer({
 }) {
   const queryClient = useQueryClient()
   const navigate = useNavigate()
+  // El país del perfil define la máscara de los teléfonos del alta.
+  const profile = useOrgProfile()
+  const countryCode = normalizeCountry(profile.data?.countryCode)
   const fromContact = Boolean(contactId)
   const submissionRef = useRef<string>(crypto.randomUUID())
   const confirmedRef = useRef(false)
@@ -217,6 +221,7 @@ export function CreatePatientDrawer({
       mode="internal"
       config={config}
       today={today}
+      defaultCountry={countryCode}
       context={contact ? { kind: "contact", contact } : { kind: "generic" }}
       branches={branchesQuery.data?.data}
       initialValues={

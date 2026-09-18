@@ -1,6 +1,6 @@
 import { PageShell, SectionNav, type SectionNavItem } from "@odentia/ui-patterns"
 import { createFileRoute, Outlet, useRouterState } from "@tanstack/react-router"
-import { Bot, ClipboardList, Kanban, MessageCircle, Tag } from "lucide-react"
+import { Bot, Building2, ClipboardList, Kanban, MessageCircle, Tag } from "lucide-react"
 import { RouterLink } from "../../lib/router-link"
 
 export const Route = createFileRoute("/_org/settings")({
@@ -8,6 +8,7 @@ export const Route = createFileRoute("/_org/settings")({
 })
 
 const secciones: SectionNavItem[] = [
+  { label: "Organización", to: "/settings", icon: Building2 },
   { label: "Canales", to: "/settings/channels", icon: MessageCircle },
   { label: "Agente", to: "/settings/agent", icon: Bot },
   { label: "Pipelines", to: "/settings/pipelines", icon: Kanban },

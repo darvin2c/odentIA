@@ -8,6 +8,26 @@
  * sin navegación: todo lo privado (config/today/contacto/sucursales) llega
  * por props. Sin localStorage ni PII en URL.
  */
+
+import {
+  type BloodGroup,
+  CONTACT_RELATIONSHIP_LABELS,
+  type DeclarationState,
+  type DOC_TYPES,
+  type HealthAllergyDeclaration,
+  type HealthConditionDeclaration,
+  type HealthMedicationDeclaration,
+  type INSURANCE_TYPES,
+  isMinor,
+  isRealDate,
+  type RegistrationAnswers,
+  type RegistrationConfig,
+  type RegistrationContactInput,
+  type RegistrationDemographics,
+  type RegistrationFieldKey,
+  type RegistrationRespondent,
+  validateRegistrationAnswers,
+} from "@odentia/clinical"
 import {
   Alert,
   AlertDescription,
@@ -17,35 +37,22 @@ import {
   Field,
   FieldError,
 } from "@odentia/ui"
-import { WizardSteps } from "@odentia/ui-patterns"
+import {
+  type CountryCode,
+  DEFAULT_COUNTRY,
+  isValidE164,
+  PhoneInput,
+  WizardSteps,
+} from "@odentia/ui-patterns"
 import { useForm } from "@tanstack/react-form"
 import { useEffect, useRef, useState } from "react"
 import type { ContactFull } from "../../lib/crm"
 import {
-  CONTACT_RELATIONSHIP_LABELS,
-  DOC_TYPES,
-  INSURANCE_TYPES,
-  isMinor,
-  isRealDate,
-  validateRegistrationAnswers,
-  type BloodGroup,
-  type DeclarationState,
-  type HealthAllergyDeclaration,
-  type HealthConditionDeclaration,
-  type HealthMedicationDeclaration,
-  type RegistrationAnswers,
-  type RegistrationConfig,
-  type RegistrationContactInput,
-  type RegistrationDemographics,
-  type RegistrationFieldKey,
-  type RegistrationRespondent,
-} from "@odentia/clinical"
-import {
   DOC_TYPE_OPTIONS,
   INSURANCE_OPTIONS,
+  SEX_OPTIONS,
   SectionCard,
   SelectRow,
-  SEX_OPTIONS,
   TextRow,
 } from "./patient-demographics-form"
 import { RegistrationHealthFields } from "./patient-health-fields"
@@ -86,6 +93,11 @@ export interface PatientRegistrationFormProps {
   context: RegistrationFormContext
   branches?: RegistrationFormBranch[]
   initialValues?: Partial<RegistrationAnswers>
+  /**
+   * País de los teléfonos que se capturan: el de la organización en el alta
+   * interna. En el formulario público (sin sesión) queda el de partida.
+   */
+  defaultCountry?: CountryCode
   onSubmit: (draft: RegistrationSubmitDraft) => Promise<void>
   children: (view: RegistrationFormView) => React.ReactNode
 }
@@ -234,7 +246,9 @@ function representativeStatus(
   const minor = clean !== "" && isRealDate(clean) && isMinor(clean, today)
   const effective = mode === "internal" ? "staff" : respondent
   const needed =
-    minor || effective === "representative" || (mode === "internal" && hasContact && recipient === "other")
+    minor ||
+    effective === "representative" ||
+    (mode === "internal" && hasContact && recipient === "other")
   return { minor, needed }
 }
 
@@ -267,8 +281,11 @@ function buildAnswers(
     keptHealth[key] = health[key] ?? emptyGroup()
   }
   const dental: Record<string, unknown> = {}
-  const sourceDental: { ultimaVisita?: unknown; experienciaPrevia?: unknown; ansiedadDental?: unknown } =
-    health.dental ?? {}
+  const sourceDental: {
+    ultimaVisita?: unknown
+    experienciaPrevia?: unknown
+    ansiedadDental?: unknown
+  } = health.dental ?? {}
   if (!pub || config.fields["dental.ultimaVisita"] !== "hidden") {
     const ultimaVisita = trim(sourceDental.ultimaVisita)
     if (ultimaVisita) dental.ultimaVisita = ultimaVisita
@@ -323,9 +340,28 @@ const FIELD_ORDER: string[] = [
 function stepPrefixes(step: StepId): string[] {
   switch (step) {
     case "datos":
-      return ["demographics.displayName", "demographics.birthDate", "demographics.docType", "demographics.docNumber", "demographics.sex", "respondent"]
+      return [
+        "demographics.displayName",
+        "demographics.birthDate",
+        "demographics.docType",
+        "demographics.docNumber",
+        "demographics.sex",
+        "respondent",
+      ]
     case "contacto":
-      return ["demographics.phone", "demographics.email", "demographics.address", "demographics.maritalStatus", "demographics.educationLevel", "demographics.occupation", "demographics.origin", "demographics.emergencyContact", "demographics.insurance", "demographics.referral", "representative"]
+      return [
+        "demographics.phone",
+        "demographics.email",
+        "demographics.address",
+        "demographics.maritalStatus",
+        "demographics.educationLevel",
+        "demographics.occupation",
+        "demographics.origin",
+        "demographics.emergencyContact",
+        "demographics.insurance",
+        "demographics.referral",
+        "representative",
+      ]
     case "salud":
       return ["health.bloodGroup", "health.allergies", "health.conditions", "health.medications"]
     case "odontologicos":
@@ -377,6 +413,7 @@ export function PatientRegistrationForm({
   context,
   branches,
   initialValues,
+  defaultCountry = DEFAULT_COUNTRY,
   onSubmit,
   children,
 }: PatientRegistrationFormProps): React.JSX.Element {
@@ -429,6 +466,16 @@ export function PatientRegistrationForm({
       mode: mode === "preview" ? "public" : mode,
       today,
     })
+    // El campo emite E.164: si hay un teléfono escrito, tiene que ser un número
+    // real de su país (el servidor sigue aceptando texto, esto es la pantalla).
+    const patientPhone = trim(answers.demographics.phone)
+    if (patientPhone && !isValidE164(patientPhone)) {
+      found["demographics.phone"] = "Teléfono inválido"
+    }
+    const emergencyPhone = trim(answers.demographics.emergencyContactPhone)
+    if (emergencyPhone && !isValidE164(emergencyPhone)) {
+      found["demographics.emergencyContactPhone"] = "Teléfono inválido"
+    }
     if (mode === "internal" && hasContact && values.recipient === "other" && !status.minor) {
       const representative = values.answers.representative
       if (!trim(representative.displayName)) {
@@ -436,6 +483,8 @@ export function PatientRegistrationForm({
       }
       if (!trim(representative.phone) && !trim(representative.email)) {
         found["representative.phone"] = "Indica teléfono o correo del responsable"
+      } else if (trim(representative.phone) && !isValidE164(trim(representative.phone))) {
+        found["representative.phone"] = "Teléfono inválido"
       }
     }
     return found
@@ -471,11 +520,7 @@ export function PatientRegistrationForm({
         const visible = (key: RegistrationFieldKey): boolean =>
           mode === "internal" || config.fields[key] !== "hidden"
         const steps: StepId[] = ["datos"]
-        if (
-          mode === "internal" ||
-          status.needed ||
-          CONTACTO_KEYS.some((key) => visible(key))
-        ) {
+        if (mode === "internal" || status.needed || CONTACTO_KEYS.some((key) => visible(key))) {
           steps.push("contacto")
         }
         if (mode === "internal" || SALUD_KEYS.some((key) => visible(key))) steps.push("salud")
@@ -502,7 +547,9 @@ export function PatientRegistrationForm({
           const found = validateAll(form.state.values)
           const prefixes = stepPrefixes(step)
           const blocked = Object.fromEntries(
-            Object.entries(found).filter(([key]) => prefixes.some((prefix) => key.startsWith(prefix))),
+            Object.entries(found).filter(([key]) =>
+              prefixes.some((prefix) => key.startsWith(prefix)),
+            ),
           )
           setErrors(blocked)
           setError(null)
@@ -609,7 +656,8 @@ export function PatientRegistrationForm({
               <SectionCard title="Datos personales">
                 {mode === "internal" ? (
                   <p className="text-xs text-muted-foreground sm:col-span-2">
-                    En el registro interno basta el nombre; la clínica completa el resto en la ficha.
+                    En el registro interno basta el nombre; la clínica completa el resto en la
+                    ficha.
                   </p>
                 ) : null}
                 {hasContact && mode === "internal" ? (
@@ -665,14 +713,18 @@ export function PatientRegistrationForm({
                       {(field) => (
                         <SelectRow
                           label="¿Quién completa el registro?"
-                          value={field.state.value === "representative" ? "representative" : "patient"}
+                          value={
+                            field.state.value === "representative" ? "representative" : "patient"
+                          }
                           error={errors.respondent}
                           options={[
                             { value: "patient", label: "Soy el paciente" },
                             { value: "representative", label: "Registro a otra persona" },
                           ]}
                           onChange={(next) => {
-                            field.handleChange(next === "representative" ? "representative" : "patient")
+                            field.handleChange(
+                              next === "representative" ? "representative" : "patient",
+                            )
                             clearError("respondent")
                             clearError("representative")
                           }}
@@ -689,7 +741,10 @@ export function PatientRegistrationForm({
                           label={label("Nombre del paciente", "displayName")}
                           value={field.state.value}
                           error={errors["demographics.displayName"]}
-                          inputProps={{ "aria-label": "Nombre del paciente", placeholder: "Nombres y apellidos" }}
+                          inputProps={{
+                            "aria-label": "Nombre del paciente",
+                            placeholder: "Nombres y apellidos",
+                          }}
                           onChange={(next) => {
                             field.handleChange(next)
                             clearError("demographics.displayName")
@@ -817,7 +872,11 @@ export function PatientRegistrationForm({
                           ]}
                           onChange={(next) => {
                             field.handleChange(
-                              next === "family" ? "family" : next === "other" ? "other" : "guardian",
+                              next === "family"
+                                ? "family"
+                                : next === "other"
+                                  ? "other"
+                                  : "guardian",
                             )
                             clearError("representative.relationship")
                           }}
@@ -846,13 +905,18 @@ export function PatientRegistrationForm({
                       {(field) => (
                         <TextRow
                           label="Teléfono del responsable *"
-                          value={field.state.value ?? ""}
                           error={errors["representative.phone"]}
-                          inputProps={{ "aria-label": "Teléfono del responsable", type: "tel" }}
-                          onChange={(next) => {
-                            field.handleChange(next)
-                            clearError("representative.phone")
-                          }}
+                          renderControl={(id) => (
+                            <PhoneInput
+                              id={id}
+                              value={field.state.value || null}
+                              defaultCountry={defaultCountry}
+                              onChange={(next) => {
+                                field.handleChange(next ?? "")
+                                clearError("representative.phone")
+                              }}
+                            />
+                          )}
                         />
                       )}
                     </form.Field>
@@ -885,13 +949,18 @@ export function PatientRegistrationForm({
                       {(field) => (
                         <TextRow
                           label={label("Teléfono", "phone")}
-                          value={field.state.value ?? ""}
                           error={errors["demographics.phone"]}
-                          inputProps={{ "aria-label": "Teléfono", type: "tel" }}
-                          onChange={(next) => {
-                            field.handleChange(next)
-                            clearError("demographics.phone")
-                          }}
+                          renderControl={(id) => (
+                            <PhoneInput
+                              id={id}
+                              value={field.state.value || null}
+                              defaultCountry={defaultCountry}
+                              onChange={(next) => {
+                                field.handleChange(next ?? "")
+                                clearError("demographics.phone")
+                              }}
+                            />
+                          )}
                         />
                       )}
                     </form.Field>
@@ -1029,13 +1098,18 @@ export function PatientRegistrationForm({
                       {(field) => (
                         <TextRow
                           label={label("Teléfono de emergencia", "emergencyContactPhone")}
-                          value={field.state.value ?? ""}
                           error={errors["demographics.emergencyContactPhone"]}
-                          inputProps={{ "aria-label": "Teléfono de emergencia", type: "tel" }}
-                          onChange={(next) => {
-                            field.handleChange(next)
-                            clearError("demographics.emergencyContactPhone")
-                          }}
+                          renderControl={(id) => (
+                            <PhoneInput
+                              id={id}
+                              value={field.state.value || null}
+                              defaultCountry={defaultCountry}
+                              onChange={(next) => {
+                                field.handleChange(next ?? "")
+                                clearError("demographics.emergencyContactPhone")
+                              }}
+                            />
+                          )}
                         />
                       )}
                     </form.Field>
@@ -1357,10 +1431,7 @@ function ReviewSummary({
       "Documento",
       [trim(demographics.docType), trim(demographics.docNumber)].filter(Boolean).join(" ") || "—",
     ],
-    [
-      "Sexo",
-      demographics.sex === "M" ? "Masculino" : demographics.sex === "F" ? "Femenino" : "—",
-    ],
+    ["Sexo", demographics.sex === "M" ? "Masculino" : demographics.sex === "F" ? "Femenino" : "—"],
     ["Teléfono", trim(demographics.phone) || "—"],
     ["Correo", trim(demographics.email) || "—"],
     ["Dirección", trim(demographics.address) || "—"],
@@ -1423,9 +1494,7 @@ function ReviewSummary({
     if (health.dental) {
       const dentalParts = [
         trim(health.dental.ultimaVisita),
-        health.dental.experienciaPrevia
-          ? `Experiencia ${health.dental.experienciaPrevia}`
-          : "",
+        health.dental.experienciaPrevia ? `Experiencia ${health.dental.experienciaPrevia}` : "",
         health.dental.ansiedadDental ? `Ansiedad ${health.dental.ansiedadDental}` : "",
       ].filter(Boolean)
       if (dentalParts.length > 0) rows.push(["Salud dental", dentalParts.join(" · ")])
@@ -1443,10 +1512,13 @@ function ReviewSummary({
       values.recipient === "self"
         ? `Se vinculará a ${contactName} como propio paciente`
         : `Se vinculará a ${contactName} como ${(
-          CONTACT_RELATIONSHIP_LABELS[
-            (status.minor ? "guardian" : values.answers.representative.relationship) as keyof typeof CONTACT_RELATIONSHIP_LABELS
-          ] ?? ""
-        ).toLowerCase()}`,
+            CONTACT_RELATIONSHIP_LABELS[
+              (status.minor
+                ? "guardian"
+                : values.answers.representative
+                    .relationship) as keyof typeof CONTACT_RELATIONSHIP_LABELS
+            ] ?? ""
+          ).toLowerCase()}`,
     ])
   }
   if (mode === "internal" && values.registeredBranchId) {
