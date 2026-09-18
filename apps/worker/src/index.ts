@@ -9,6 +9,7 @@ import { env } from "./env.js"
 import { type DemoTaskMessage, processDemoTask } from "./handler.js"
 import { consumeInbound } from "./inbound.js"
 import { consumeOutbound } from "./outbound.js"
+import { createTranscriber } from "./transcribe.js"
 
 const db: Db = createAppDb(env.APP_DATABASE_URL)
 const secretsKey = secretsKeyFromEnv(env.SECRETS_KEY)
@@ -21,6 +22,8 @@ const storage: Storage = createStorage({
   publicBaseUrl: env.S3_PUBLIC_URL,
   attachmentsBucket: env.S3_ATTACHMENTS_BUCKET,
 })
+
+const transcribe = createTranscriber(env)
 
 // Memoria del agente (tablas LangGraph + RLS) con rol owner; el runtime usa
 // el checkpointer con esa misma conexión (aislamiento por thread_id exacto).
@@ -78,7 +81,11 @@ const queues: QueueDef[] = [
     poll: async () => {
       const msg = await readOne<InboundMessageJob>("inbound_messages")
       if (!msg) return false
-      await consumeInbound(db, { storage, fetch, secretsKey }, msg)
+      await consumeInbound(
+        db,
+        { storage, fetch, secretsKey, transcribe: transcribe ?? undefined },
+        msg,
+      )
       console.log(`worker: inbound msg_id=${msg.msg_id}`)
       return true
     },

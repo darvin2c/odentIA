@@ -170,3 +170,64 @@ it("plantilla persiste invocación y el worker la reenvía", async () => {
   expect(await processOutbound(appDb, liveTpl, outJob(tpl.id))).toBe("done")
   expect(seen[0]).toMatchObject({ type: "template", template: { name: "t1" } })
 })
+
+it("media sale con link firmado y caption vía sendPhoto", async () => {
+  const ingested = await withOrgContext(appDb, "org_a", (tx) =>
+    ingestInbound(
+      tx,
+      {
+        orgId: "org_a",
+        connectionId: tgConnId,
+        event: {
+          externalEventId: `evt-obm-${Math.random()}`,
+          externalMessageId: `ext-obm-${Math.random()}`,
+          externalThreadId: `tg:obm-${Math.random()}`,
+          senderExternalId: "tg:777",
+          senderDisplayName: "Beto",
+          content: { type: "text", text: "Hola" },
+          sentAt: new Date().toISOString(),
+        },
+      },
+      telegramBotApiAdapter,
+      { storage: storageStub, fetch, secretsKey: KEY },
+    ),
+  )
+  const sent = await withOrgContext(appDb, "org_a", (tx) =>
+    sendOutbound(tx, "org_a", {
+      conversationId: ingested.conversationId,
+      senderKind: "user",
+      content: {
+        type: "media",
+        attachment: {
+          objectKey: "org_a/conv/foto.png",
+          mimeType: "image/png",
+          filename: "foto.png",
+          size: 128,
+        },
+        caption: "Mira esto",
+      },
+    }),
+  )
+  expect(sent.contentType).toBe("image")
+  const seen: { url: string; body: unknown }[] = []
+  const liveMedia = {
+    ...deps,
+    senderMode: "live" as const,
+    fetch: (async (url: unknown, init?: { body?: unknown }) => {
+      seen.push({
+        url: String(url),
+        body: typeof init?.body === "string" ? JSON.parse(init.body) : null,
+      })
+      return new Response(JSON.stringify({ ok: true, result: { message_id: 100 } }), {
+        status: 200,
+      })
+    }) as typeof fetch,
+  }
+  expect(await processOutbound(appDb, liveMedia, outJob(sent.id))).toBe("done")
+  expect(seen[0]?.url).toContain("/sendPhoto")
+  expect(seen[0]?.body).toMatchObject({
+    photo: "https://signed.example.com/org_a/conv/foto.png",
+    caption: "Mira esto",
+  })
+  expect((await messageState(sent.id))?.status).toBe("sent")
+})

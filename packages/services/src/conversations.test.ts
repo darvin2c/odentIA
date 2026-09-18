@@ -234,6 +234,156 @@ it("ventana 24h de WhatsApp bloquea texto pero permite plantilla", async () => {
   ).rejects.toMatchObject({ status: 400 })
 })
 
+it("sendOutbound con media persiste adjunto, contentType derivado y caption", async () => {
+  const connId = await makeTelegramConnection("org_a")
+  const { conversationId } = await ingest(
+    "org_a",
+    connId,
+    textEvent({ externalEventId: "evt-m1", externalMessageId: "ext-m1" }),
+  )
+  const sent = await withOrgContext(appDb, "org_a", (tx) =>
+    sendOutbound(tx, "org_a", {
+      conversationId,
+      senderKind: "user",
+      senderUserId: "u-1",
+      content: {
+        type: "media",
+        attachment: {
+          objectKey: "org_a/conv/foto.png",
+          mimeType: "image/png",
+          filename: "foto.png",
+          size: 128,
+        },
+        caption: "Mira esto",
+      },
+    }),
+  )
+  expect(sent.contentType).toBe("image")
+  expect(sent.body).toBe("Mira esto")
+  expect(sent.status).toBe("queued")
+  const atts = sent.attachments as { filename: string; mimeType: string }[]
+  expect(atts).toHaveLength(1)
+  expect(atts[0]?.filename).toBe("foto.png")
+})
+
+it("media saliente de WhatsApp fuera de ventana lanza WINDOW_CLOSED", async () => {
+  const connId = await withOrgContext(appDb, "org_a", async (tx) => {
+    const created = await createConnection(
+      tx,
+      "org_a",
+      KEY,
+      {
+        channel: "whatsapp",
+        provider: "whatsapp_cloud_api",
+        displayName: "WA",
+        config: {
+          phoneNumberId: "PNID",
+          wabaId: "WABA",
+          accessToken: "T",
+          appSecret: "S",
+          templates: [],
+        },
+      },
+      { fetch, validateExternal: false },
+    )
+    return created.id
+  })
+  const { conversationId } = await ingest(
+    "org_a",
+    connId,
+    textEvent({
+      externalEventId: "evt-wam",
+      externalMessageId: "wamid.m1",
+      externalThreadId: "wa:51944455566",
+      senderExternalId: "wa:51944455566",
+    }),
+  )
+  await ownerDb.execute(
+    sql`update "conversation" set "last_inbound_at" = now() - interval '25 hours' where "id" = ${conversationId}::uuid`,
+  )
+  await expect(
+    withOrgContext(appDb, "org_a", (tx) =>
+      sendOutbound(tx, "org_a", {
+        conversationId,
+        senderKind: "user",
+        content: {
+          type: "media",
+          attachment: {
+            objectKey: "org_a/conv/foto.png",
+            mimeType: "image/png",
+            filename: "foto.png",
+            size: 1,
+          },
+        },
+      }),
+    ),
+  ).rejects.toMatchObject({ code: "WINDOW_CLOSED", status: 409 })
+})
+
+const audioAdapter: ChannelAdapter = {
+  ...stubAdapter,
+  fetchMedia: async () => ({
+    bytes: new Uint8Array([1, 2, 3]),
+    mimeType: "audio/ogg",
+    filename: "nota.ogg",
+  }),
+}
+
+function audioEvent(over: Partial<NormalizedInbound> = {}): NormalizedInbound {
+  return textEvent({
+    content: { type: "media", mediaExternalId: "m-1", mimeType: "audio/ogg" },
+    ...over,
+  })
+}
+
+it("nota de voz entrante se transcribe al body", async () => {
+  const connId = await makeTelegramConnection("org_a")
+  const job: InboundMessageJob = {
+    orgId: "org_a",
+    connectionId: connId,
+    event: audioEvent({ externalEventId: "evt-t1", externalMessageId: "ext-t1" }),
+  }
+  const depsT: IngestDeps = { ...deps, transcribe: async () => "hola, quiero cita" }
+  const { conversationId } = await withOrgContext(appDb, "org_a", (tx) =>
+    ingestInbound(tx, job, audioAdapter, depsT),
+  )
+  const detail = await withOrgContext(appDb, "org_a", (tx) =>
+    getConversationDetail(tx, "org_a", conversationId),
+  )
+  const msg = detail.messages[0]
+  expect(msg?.contentType).toBe("audio")
+  expect(msg?.body).toBe("hola, quiero cita")
+  expect(msg?.error).toBeNull()
+  expect(msg?.attachments).toHaveLength(1)
+})
+
+it("fallo de transcripción no pierde la ingesta del audio", async () => {
+  const connId = await makeTelegramConnection("org_a")
+  const job: InboundMessageJob = {
+    orgId: "org_a",
+    connectionId: connId,
+    event: audioEvent({ externalEventId: "evt-t2", externalMessageId: "ext-t2" }),
+  }
+  const depsT: IngestDeps = {
+    ...deps,
+    transcribe: async () => {
+      throw new Error("whisper caído")
+    },
+  }
+  const { conversationId, created } = await withOrgContext(appDb, "org_a", (tx) =>
+    ingestInbound(tx, job, audioAdapter, depsT),
+  )
+  expect(created).toBe(true)
+  const detail = await withOrgContext(appDb, "org_a", (tx) =>
+    getConversationDetail(tx, "org_a", conversationId),
+  )
+  const msg = detail.messages[0]
+  expect(msg?.contentType).toBe("audio")
+  expect(msg?.body).toBeNull()
+  expect(msg?.error).toBeNull()
+  expect(msg?.attachments).toHaveLength(1)
+})
+
 it("applyStatus actualiza por externalId", async () => {
   const connId = await makeTelegramConnection("org_a")
   const { conversationId } = await ingest(
@@ -333,7 +483,11 @@ it("ingesta persiste contactIdentityId en la conversación creada", async () => 
   )
   expect(conv?.contactIdentityId).not.toBeNull()
   const [ident] = await withOrgContext(appDb, "org_a", (tx) =>
-    tx.select().from(contactIdentity).where(eq(contactIdentity.id, conv?.contactIdentityId ?? "")).limit(1),
+    tx
+      .select()
+      .from(contactIdentity)
+      .where(eq(contactIdentity.id, conv?.contactIdentityId ?? ""))
+      .limit(1),
   )
   expect(ident).toMatchObject({ channel: "telegram", externalUserId: "tg:910001" })
   expect(ident?.contactId).toBe(conv?.contactId)
@@ -373,7 +527,11 @@ it("hilo compartido conserva interlocutor e identidad ante otro remitente", asyn
   )
   expect(conv?.contactId).toBe(firstDetail.contact.id)
   const [ident] = await withOrgContext(appDb, "org_a", (tx) =>
-    tx.select().from(contactIdentity).where(eq(contactIdentity.id, conv?.contactIdentityId ?? "")).limit(1),
+    tx
+      .select()
+      .from(contactIdentity)
+      .where(eq(contactIdentity.id, conv?.contactIdentityId ?? ""))
+      .limit(1),
   )
   expect(ident?.externalUserId).toBe("tg:920001")
 })
@@ -411,8 +569,6 @@ it("ingesta reutiliza el contacto archivado sin crear otro", async () => {
   )
   expect(after.contact.id).toBe(before.contact.id)
   expect(after.contact.isActive).toBe(false)
-  const listed = await withOrgContext(appDb, "org_a", (tx) =>
-    listConversations(tx, "org_a", {}),
-  )
+  const listed = await withOrgContext(appDb, "org_a", (tx) => listConversations(tx, "org_a", {}))
   expect(listed.items.find((c) => c.id === first.conversationId)?.contact.isActive).toBe(false)
 })

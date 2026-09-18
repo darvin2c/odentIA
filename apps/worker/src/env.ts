@@ -10,6 +10,11 @@ const envSchema = z.object({
   LLM_MODEL: z.string().min(1).default("fake"),
   LLM_API_KEY: z.string().optional().default(""),
   LLM_BASE_URL: z.string().url().optional(),
+  /** Transcripción de notas de voz inbound (endpoint OpenAI-compatible); vacío = desactivada. */
+  TRANSCRIBE_MODEL: z.string().optional().default(""),
+  /** Cae a LLM_API_KEY si vacía. */
+  TRANSCRIBE_API_KEY: z.string().optional(),
+  TRANSCRIBE_BASE_URL: z.string().url().optional(),
   LANGFUSE_PUBLIC_KEY: z.string().optional(),
   LANGFUSE_SECRET_KEY: z.string().optional(),
   LANGFUSE_HOST: z.string().url().optional(),

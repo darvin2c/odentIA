@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto"
-import { channelAdapters } from "@odentia/channels"
+import { channelAdapters, type OutboundMessage } from "@odentia/channels"
 import { type Db, type OutboundMessageJob, type QueueMessage, withOrgContext } from "@odentia/db"
 import { channelConnection, conversation, message } from "@odentia/db/schema/crm"
 import { auditEvent } from "@odentia/db/schema/org"
@@ -17,6 +17,70 @@ export interface SendDeps {
 
 async function notify(tx: Db, payload: Record<string, unknown>): Promise<void> {
   await tx.execute(sql`select pg_notify('org_events', ${JSON.stringify(payload)})`)
+}
+
+interface MediaAttachment {
+  objectKey: string
+  mimeType: string
+  filename: string
+}
+
+function isMediaAttachment(value: unknown): value is MediaAttachment {
+  return (
+    !!value &&
+    typeof value === "object" &&
+    "objectKey" in value &&
+    typeof value.objectKey === "string" &&
+    "mimeType" in value &&
+    typeof value.mimeType === "string" &&
+    "filename" in value &&
+    typeof value.filename === "string"
+  )
+}
+
+async function buildOutbound(
+  row: {
+    message: typeof message.$inferSelect
+    conversation: typeof conversation.$inferSelect
+  },
+  deps: SendDeps,
+): Promise<OutboundMessage> {
+  const to = row.conversation.externalThreadId
+  const m = row.message
+  if (m.contentType === "template") {
+    return {
+      to,
+      kind: {
+        type: "template",
+        name: m.templateName ?? "",
+        language: m.templateLanguage ?? "",
+        params:
+          Array.isArray(m.templateParams) &&
+          m.templateParams.every((p): p is string => typeof p === "string")
+            ? m.templateParams
+            : [],
+      },
+    }
+  }
+  if (m.contentType === "image" || m.contentType === "audio" || m.contentType === "document") {
+    const [att] = Array.isArray(m.attachments) ? m.attachments : []
+    if (!isMediaAttachment(att)) throw new Error("Mensaje media sin adjunto válido")
+    // TTL 1h: Meta/Telegram descargan el link al enviar; el default es corto ante reintentos.
+    const url = await deps.storage.attachmentUrl(att.objectKey, 3600)
+    return {
+      to,
+      kind: {
+        type: "media",
+        media: {
+          url,
+          mimeType: att.mimeType,
+          filename: att.filename,
+          caption: m.body ?? undefined,
+        },
+      },
+    }
+  }
+  return { to, kind: { type: "text", text: m.body ?? "" } }
 }
 
 /**
@@ -47,25 +111,7 @@ export async function processOutbound(
           .where(eq(message.id, messageId))
         return
       }
-      const outbound =
-        row.message.contentType === "template"
-          ? {
-              to: row.conversation.externalThreadId,
-              kind: {
-                type: "template" as const,
-                name: row.message.templateName ?? "",
-                language: row.message.templateLanguage ?? "",
-                params:
-                  Array.isArray(row.message.templateParams) &&
-                  row.message.templateParams.every((p): p is string => typeof p === "string")
-                    ? row.message.templateParams
-                    : [],
-              },
-            }
-          : {
-              to: row.conversation.externalThreadId,
-              kind: { type: "text" as const, text: row.message.body ?? "" },
-            }
+      const outbound: OutboundMessage = await buildOutbound(row, deps)
       let externalId: string
       if (deps.senderMode === "mock") {
         externalId = `mock-${randomUUID()}`

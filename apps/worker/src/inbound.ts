@@ -8,13 +8,14 @@ import {
 } from "@odentia/db"
 import { agentConfig, channelConnection, conversation } from "@odentia/db/schema/crm"
 import { auditEvent } from "@odentia/db/schema/org"
-import { ingestInbound, ServiceError, type Storage } from "@odentia/services"
+import { ingestInbound, ServiceError, type Storage, type TranscribeFn } from "@odentia/services"
 import { and, eq, sql } from "drizzle-orm"
 
 export interface IngestDeps {
   storage: Storage
   fetch: typeof fetch
   secretsKey: Buffer
+  transcribe?: TranscribeFn
 }
 
 /** Máximo de entregas pgmq antes de declarar el mensaje venenoso. */
@@ -67,6 +68,7 @@ export async function processInbound(
         storage: deps.storage,
         fetch: deps.fetch,
         secretsKey: deps.secretsKey,
+        ...(deps.transcribe ? { transcribe: deps.transcribe } : {}),
       })
       if (!result.created) return
       const [conv] = await tx
