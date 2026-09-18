@@ -63,6 +63,7 @@ export {
   type SectionNavProps,
   type SectionNavSide,
 } from "./section-nav/index.js"
+export { normalizeSearchText } from "./text.js"
 export {
   applyTheme,
   readStoredTheme,
@@ -72,3 +73,4 @@ export {
   ThemeTabs,
   useTheme,
 } from "./theme.js"
+export * from "./time-zone/index.js"

@@ -28,6 +28,11 @@ export const common = {
     country: "País",
     placeholder: "Número de teléfono",
   },
+  timeZone: {
+    label: "Zona horaria",
+    search: "Buscar ciudad o zona horaria…",
+    empty: "Sin coincidencias",
+  },
   confirm: {
     unsavedMessage: "Tienes cambios sin guardar. ¿Deseas descartarlos?",
   },
