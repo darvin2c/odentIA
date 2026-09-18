@@ -1,8 +1,21 @@
-import { Button, cn, Field, FieldLabel, Input, Textarea, toast } from "@odentia/ui"
+import {
+  Avatar,
+  AvatarFallback,
+  Badge,
+  Button,
+  cn,
+  Field,
+  FieldLabel,
+  Input,
+  Textarea,
+  toast,
+} from "@odentia/ui"
 import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-table"
+import { CalendarDays } from "lucide-react"
 import { type FormEvent, type ReactNode, useMemo, useState } from "react"
 import { DataTable } from "./data-table.js"
 import { type WizardStep, WizardSteps } from "./form/wizard-steps.js"
+import { RowActions } from "./row-actions.js"
 
 /**
  * Fixtures compartidas por las stories: formularios de distintos anchos, un
@@ -179,4 +192,279 @@ export function DemoStage({ className, children }: { className?: string; childre
       <div className={cn("h-[calc(100dvh-3rem)]", className)}>{children}</div>
     </div>
   )
+}
+
+/** Alto libre: fondo de página y padding, sin acotar el contenido (tablas, cards). */
+export function DemoPage({ className, children }: { className?: string; children: ReactNode }) {
+  return <div className={cn("bg-muted min-h-svh w-full p-6", className)}>{children}</div>
+}
+
+/* ------------------------------- Pacientes -------------------------------- */
+
+export interface DemoPatient {
+  id: string
+  patientNumber: number
+  name: string
+  docNumber: string | null
+  age: number
+  phone: string | null
+  channels: Array<"whatsapp" | "telegram">
+  lastVisit: string | null
+  tags: string[]
+  isActive: boolean
+}
+
+export const DEMO_PATIENTS: DemoPatient[] = [
+  {
+    id: "1",
+    patientNumber: 1042,
+    name: "Ana Torres Quispe",
+    docNumber: "45872103",
+    age: 34,
+    phone: "999 888 777",
+    channels: ["whatsapp", "telegram"],
+    lastVisit: "2026-09-12",
+    tags: ["Ortodoncia"],
+    isActive: true,
+  },
+  {
+    id: "2",
+    patientNumber: 1043,
+    name: "Luis Ramírez Sosa",
+    docNumber: "09213847",
+    age: 41,
+    phone: "987 654 321",
+    channels: ["whatsapp"],
+    lastVisit: "2026-08-30",
+    tags: ["Endodoncia"],
+    isActive: true,
+  },
+  {
+    id: "3",
+    patientNumber: 1051,
+    name: "Rosa Medina Vargas",
+    docNumber: null,
+    age: 28,
+    phone: null,
+    channels: [],
+    lastVisit: "2026-07-02",
+    tags: ["Blanqueamiento"],
+    isActive: true,
+  },
+  {
+    id: "4",
+    patientNumber: 1060,
+    name: "Jorge Salazar Peña",
+    docNumber: "72314509",
+    age: 57,
+    phone: "951 234 876",
+    channels: ["telegram"],
+    lastVisit: "2025-11-19",
+    tags: [],
+    isActive: false,
+  },
+  {
+    id: "5",
+    patientNumber: 1074,
+    name: "Carla Núñez Ríos",
+    docNumber: "44120983",
+    age: 19,
+    phone: "934 112 550",
+    channels: ["whatsapp", "telegram"],
+    lastVisit: "2026-09-16",
+    tags: ["Ortodoncia", "Control"],
+    isActive: true,
+  },
+  {
+    id: "6",
+    patientNumber: 1088,
+    name: "Miguel Ángel Chávez",
+    docNumber: "10873422",
+    age: 66,
+    phone: "962 447 019",
+    channels: [],
+    lastVisit: null,
+    tags: ["Prótesis"],
+    isActive: false,
+  },
+]
+
+const dateFormatter = new Intl.DateTimeFormat("es-PE", {
+  day: "2-digit",
+  month: "short",
+  year: "numeric",
+})
+
+/** Etiqueta de historia clínica, con el mismo formato que el platform. */
+export function hcLabel(patientNumber: number): string {
+  return `HC-${String(patientNumber).padStart(6, "0")}`
+}
+
+export function patientInitials(name: string): string {
+  return name
+    .split(" ")
+    .filter((part) => part.length > 2)
+    .slice(0, 2)
+    .map((part) => part[0] ?? "")
+    .join("")
+}
+
+/**
+ * Fecha sin hora: `new Date("2026-09-12")` la lee como UTC y en es-PE (UTC-5)
+ * la mostraría un día antes.
+ */
+export function formatDate(value: string): string {
+  return dateFormatter.format(new Date(`${value}T00:00:00`))
+}
+
+export function channelLabel(channel: DemoPatient["channels"][number]): string {
+  return channel === "whatsapp" ? "WhatsApp" : "Telegram"
+}
+
+export function ChannelBadges({ channels }: { channels: DemoPatient["channels"] }) {
+  if (channels.length === 0) return <span className="text-muted-foreground">Sin canal</span>
+  return (
+    <span className="flex flex-wrap gap-1">
+      {channels.map((channel) => (
+        <Badge key={channel} variant="secondary">
+          {channelLabel(channel)}
+        </Badge>
+      ))}
+    </span>
+  )
+}
+
+export function patientActions(row: DemoPatient) {
+  return (
+    <RowActions
+      label={`Acciones de ${row.name}`}
+      items={[
+        {
+          key: "open",
+          label: "Abrir ficha",
+          onSelect: () => toast.success(`Ficha de ${row.name}`),
+        },
+        {
+          key: "archive",
+          label: row.isActive ? "Archivar" : "Reactivar",
+          tone: row.isActive ? "danger" : undefined,
+          onSelect: () =>
+            toast.success(row.isActive ? "Paciente archivado" : "Paciente reactivado"),
+        },
+      ]}
+    />
+  )
+}
+
+export const PATIENT_BASE_COLUMNS: ColumnDef<DemoPatient>[] = [
+  {
+    accessorKey: "patientNumber",
+    id: "number",
+    header: "HC",
+    meta: { view: { primary: true } },
+    cell: ({ row }) => hcLabel(row.original.patientNumber),
+  },
+  {
+    accessorKey: "name",
+    id: "name",
+    header: "Nombre",
+    meta: { view: { role: "title" } },
+    cell: ({ row }) => <span className="font-medium">{row.original.name}</span>,
+  },
+  {
+    accessorKey: "docNumber",
+    id: "document",
+    header: "Documento",
+    cell: ({ row }) =>
+      row.original.docNumber ? (
+        `DNI ${row.original.docNumber}`
+      ) : (
+        <span className="text-muted-foreground">—</span>
+      ),
+  },
+  {
+    accessorKey: "age",
+    id: "age",
+    header: "Edad",
+    cell: ({ getValue }) => `${getValue<number>()} años`,
+  },
+  {
+    accessorKey: "phone",
+    id: "phone",
+    header: "Teléfono",
+    meta: { view: { primary: true } },
+    cell: ({ row }) => row.original.phone || <span className="text-muted-foreground">—</span>,
+  },
+  {
+    accessorKey: "channels",
+    id: "channels",
+    header: "Canales",
+    cell: ({ row }) => <ChannelBadges channels={row.original.channels} />,
+  },
+  {
+    accessorKey: "lastVisit",
+    id: "lastVisit",
+    // Header no textual: la card usa `meta.view.label` para el par label/valor.
+    header: () => (
+      <span className="inline-flex items-center gap-1">
+        <CalendarDays aria-hidden />
+        Última
+      </span>
+    ),
+    meta: { view: { label: "Última atención" } },
+    cell: ({ row }) =>
+      row.original.lastVisit ? (
+        formatDate(row.original.lastVisit)
+      ) : (
+        <span className="text-muted-foreground">Sin atenciones</span>
+      ),
+  },
+  {
+    accessorKey: "tags",
+    id: "tags",
+    header: "Etiquetas",
+    // Columna densa: solo tiene sentido en la vista tabla.
+    meta: { view: { tableOnly: true } },
+    cell: ({ row }) =>
+      row.original.tags.length > 0 ? (
+        <span className="flex flex-wrap gap-1">
+          {row.original.tags.map((tag) => (
+            <Badge key={tag} variant="outline">
+              {tag}
+            </Badge>
+          ))}
+        </span>
+      ) : (
+        <span className="text-muted-foreground">—</span>
+      ),
+  },
+  {
+    accessorKey: "isActive",
+    id: "status",
+    header: "Estado",
+    cell: ({ row }) => (
+      <Badge variant={row.original.isActive ? "success" : "secondary"}>
+        {row.original.isActive ? "Activo" : "Inactivo"}
+      </Badge>
+    ),
+  },
+  {
+    id: "actions",
+    header: "",
+    cell: ({ row }) => patientActions(row.original),
+  },
+]
+
+// Columna de avatar: ocupa el hueco `media`. En la card se agranda cuando la
+// ficha es ancha (`@container` de `CardLayout`); en lista no hay contenedor de
+// consulta, así que se queda en 40px, el tamaño de `ItemMedia variant="image"`.
+export const PATIENT_AVATAR_COLUMN: ColumnDef<DemoPatient> = {
+  id: "avatar",
+  header: "",
+  meta: { view: { role: "media" } },
+  cell: ({ row }) => (
+    <Avatar className="size-10 @sm:size-14">
+      <AvatarFallback>{patientInitials(row.original.name)}</AvatarFallback>
+    </Avatar>
+  ),
 }

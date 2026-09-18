@@ -193,17 +193,32 @@ describe("DataTable en lista", () => {
 })
 
 describe("DataTable en card", () => {
-  it("empareja cada campo con la etiqueta de su columna", () => {
-    const { container } = render(<TaskTable view="card" />)
+  const cardColumns: ColumnDef<Task>[] = [
+    { accessorKey: "title", header: "Título", meta: { view: { role: "title" } } },
+    { accessorKey: "due", header: "Vence", meta: { view: { primary: true } } },
+    { accessorKey: "status", header: "Estado" },
+    { id: "actions", header: "", cell: () => <button type="button">Completar</button> },
+  ]
+
+  it("sube el campo principal a la cabecera y deja el resto en la ficha, con etiqueta", () => {
+    const { container } = render(<TaskTable view="card" columns={cardColumns} />)
 
     expect(container.querySelector("table")).toBeNull()
-    expect(Array.from(container.querySelectorAll("dt")).map((node) => node.textContent)).toEqual([
-      "Vence",
+    const cards = container.querySelectorAll("[data-slot='data-table-card']")
+    expect(cards).toHaveLength(2)
+    expect(Array.from(container.querySelectorAll("dt")).map((dt) => dt.textContent)).toEqual([
       "Estado",
-      "Vence",
       "Estado",
     ])
     expect(screen.getByText("Llamar a Ana")).toBeTruthy()
-    expect(screen.getByText("13 mar")).toBeTruthy()
+    expect(screen.getAllByText("Completar")).toHaveLength(2)
+  })
+
+  it("no repite en la ficha el campo que ya está en la cabecera", () => {
+    render(<TaskTable view="card" columns={cardColumns} />)
+
+    const card = screen.getByText("Llamar a Ana").closest("[data-slot='data-table-card']")
+    expect(card?.querySelector("p")?.textContent).toContain("12 mar")
+    expect(card?.textContent).not.toContain("Vence")
   })
 })

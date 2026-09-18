@@ -240,26 +240,35 @@ function ListLayout<TData>({ table, onRowClick, isRowActive, className }: Layout
 
 function CardLayout<TData>({ table, onRowClick, isRowActive, className }: LayoutProps<TData>) {
   const columns = resolveViewColumns(table)
+  // Los campos de resumen suben a la cabecera (identidad + datos de un vistazo)
+  // y no se repiten en la ficha: lo que queda abajo es el resto de campos.
+  const summaryIds = new Set(columns.summary.map((column) => column.id))
+  const fields = columns.cardFields.filter((column) => !summaryIds.has(column.id))
 
   return (
     <div className={cn("flex flex-col gap-2", className)}>
       <SelectionBar table={table} columns={columns} />
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {table.getRowModel().rows.map((row) => {
           const cells = cellsByColumn(row)
           const active = isRowActive?.(row.original) ?? false
           return (
             <div
               key={row.id}
+              data-slot="data-table-card"
               className={cn(
-                "rounded-md bg-card p-4",
+                // La ficha se define por su superficie (`bg-card` sobre el fondo
+                // de página) y el hover por elevación: el fondo de página y
+                // `--muted` son el mismo gris, así que un hover de fondo se
+                // funde con la página en vez de destacar.
+                "@container flex flex-col rounded-md bg-card p-5 transition-[background-color,box-shadow] hover:shadow-sm",
                 onRowClick && "cursor-pointer",
                 active && activeRowClass,
               )}
               {...activeRowProps(active)}
               onClick={rowClickHandler(row, onRowClick)}
             >
-              <div className="flex items-start justify-between gap-2">
+              <div className="flex items-start justify-between gap-3">
                 <div className="flex min-w-0 items-start gap-3">
                   {columns.select ? (
                     <div className="shrink-0">{renderCell(cells, columns.select)}</div>
@@ -267,22 +276,40 @@ function CardLayout<TData>({ table, onRowClick, isRowActive, className }: Layout
                   {columns.media ? (
                     <div className="shrink-0">{renderCell(cells, columns.media)}</div>
                   ) : null}
-                  <div className="min-w-0 text-sm font-medium">
-                    {renderCell(cells, columns.title)}
+                  <div className="min-w-0">
+                    <div className="text-base leading-tight font-semibold tracking-tight">
+                      {renderCell(cells, columns.title)}
+                    </div>
+                    {columns.summary.length > 0 ? (
+                      <p className="mt-1 flex flex-wrap items-center gap-x-1.5 text-sm text-muted-foreground">
+                        {columns.summary.map((column, index) => (
+                          <React.Fragment key={column.id}>
+                            {index > 0 ? <span aria-hidden="true">·</span> : null}
+                            {renderCell(cells, column)}
+                          </React.Fragment>
+                        ))}
+                      </p>
+                    ) : null}
                   </div>
                 </div>
                 {columns.actions ? (
                   <div className="shrink-0">{renderCell(cells, columns.actions)}</div>
                 ) : null}
               </div>
-              {columns.cardFields.length > 0 ? (
-                <dl className="mt-3 flex flex-col gap-2">
-                  {columns.cardFields.map((column) => {
+              {fields.length > 0 ? (
+                // La container query decide las columnas por el ancho real de la
+                // card (en `xl:grid-cols-3` ninguna llega a la mitad del ancho
+                // del viewport), no por el del viewport. Ojo: consulta el
+                // CONTENT box, así que el `p-5` no cuenta para el umbral.
+                <dl className="mt-4 grid gap-x-6 gap-y-2 @sm:grid-cols-2">
+                  {fields.map((column) => {
                     const label = columnLabel(column)
                     return (
-                      <div key={column.id} className="flex flex-col gap-0.5">
-                        {label ? <dt className="text-xs text-muted-foreground">{label}</dt> : null}
-                        <dd className="text-sm">{renderCell(cells, column)}</dd>
+                      <div key={column.id} className="flex items-baseline gap-2">
+                        {label ? (
+                          <dt className="w-24 shrink-0 text-xs text-muted-foreground">{label}</dt>
+                        ) : null}
+                        <dd className="min-w-0 text-sm">{renderCell(cells, column)}</dd>
                       </div>
                     )
                   })}
@@ -463,36 +490,39 @@ function ListSkeleton({ rowCount, showPagination, label }: SkeletonShape) {
   )
 }
 
-/** Mismos huecos que `CardLayout`: media, título, acciones y pares label/valor. */
+/** Mismos huecos que `CardLayout`: identidad en la cabecera y ficha debajo. */
 function CardSkeleton({ columnCount, rowCount, showPagination, label }: SkeletonShape) {
   const cards = slotKeys(rowCount, "card")
   const fields = slotKeys(columnCount, "field")
 
   return (
     <div {...statusProps(label)} className="flex flex-col gap-2">
-      <div aria-hidden="true" className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+      <div aria-hidden="true" className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {cards.map((cardKey, cardIndex) => (
           <div
             key={cardKey}
             data-slot="data-table-skeleton-card"
-            className="rounded-md bg-card p-4"
+            className="@container flex flex-col rounded-md bg-card p-5"
           >
-            <div className="flex items-start justify-between gap-2">
+            <div className="flex items-start justify-between gap-3">
               <div className="flex min-w-0 items-start gap-3">
-                <Skeleton className="size-10 shrink-0 rounded-full" />
-                <Skeleton className={cn("h-4", widthAt(skeletonTitleWidths, cardIndex))} />
+                <Skeleton className="size-10 shrink-0 rounded-full @sm:size-14" />
+                <div className="flex min-w-0 flex-col gap-1">
+                  <Skeleton className={cn("h-4", widthAt(skeletonTitleWidths, cardIndex))} />
+                  <Skeleton className={cn("h-3", widthAt(skeletonSummaryWidths, cardIndex))} />
+                </div>
               </div>
               <Skeleton className="size-9 shrink-0 rounded-full" />
             </div>
             {fields.length > 0 ? (
-              <div className="mt-3 flex flex-col gap-2">
+              <div className="mt-4 grid gap-x-6 gap-y-2 @sm:grid-cols-2">
                 {fields.map((fieldKey, fieldIndex) => (
                   <div
                     key={fieldKey}
                     data-slot="data-table-skeleton-field"
-                    className="flex flex-col gap-0.5"
+                    className="flex items-baseline gap-2"
                   >
-                    <Skeleton className="h-3 w-16" />
+                    <Skeleton className="h-3 w-24 shrink-0" />
                     <Skeleton className={cn("h-4", widthAt(skeletonFieldWidths, fieldIndex))} />
                   </div>
                 ))}

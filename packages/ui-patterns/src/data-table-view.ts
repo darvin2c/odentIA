@@ -15,7 +15,7 @@ export type ColumnViewRole = "title" | "media" | "actions" | "select" | "field"
 export interface ColumnViewMeta {
   /** Default `field`; `actions` se deduce de `id: "actions"` (convención del repo). */
   role?: ColumnViewRole
-  /** Entra en la línea de resumen de la vista lista. Sin ninguna, las 2 siguientes al título. */
+  /** Línea de resumen de la lista y de la cabecera de la card. Sin ninguna, las 2 siguientes al título. */
   primary?: boolean
   /** Etiqueta en card cuando `header` no es un string. */
   label?: string
@@ -37,7 +37,7 @@ export interface ViewColumns<TData> {
   media: Column<TData, unknown> | null
   /** Identificador del registro: título de la fila en lista y de la card. */
   title: Column<TData, unknown> | null
-  /** Campos de la línea de resumen en lista. */
+  /** Campos de la línea de resumen en lista y de la cabecera de la card. */
   summary: Column<TData, unknown>[]
   actions: Column<TData, unknown> | null
   /** Todo lo visible salvo título, media, acciones y selección: pares etiqueta/valor de la card. */
