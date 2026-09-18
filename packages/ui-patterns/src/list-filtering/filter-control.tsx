@@ -14,6 +14,7 @@ import {
 import { Check, ChevronDown, Search, X } from "lucide-react"
 import * as React from "react"
 import { common } from "../common.js"
+import { normalizeSearchText } from "../text.js"
 import { Calendar } from "./calendar.js"
 import type { FilterDef, FilterOption } from "./filter-def.js"
 import { paramKeys } from "./filter-def.js"
@@ -35,20 +36,13 @@ function optionLabels(options: FilterOption[], values: string[]): string[] {
 
 const LOCAL_OPTION_SEARCH_MINIMUM = 8
 
-function normalizeOptionSearch(value: string): string {
-  return value
-    .normalize("NFD")
-    .replace(/\p{Diacritic}/gu, "")
-    .toLocaleLowerCase("es-PE")
-}
-
 function useOptionSearch(options: FilterOption[]) {
   const [query, setQuery] = React.useState("")
   const searchable = options.length >= LOCAL_OPTION_SEARCH_MINIMUM
   const visibleOptions = React.useMemo(() => {
-    const normalizedQuery = normalizeOptionSearch(query.trim())
+    const normalizedQuery = normalizeSearchText(query.trim())
     if (!searchable || !normalizedQuery) return options
-    return options.filter((option) => normalizeOptionSearch(option.label).includes(normalizedQuery))
+    return options.filter((option) => normalizeSearchText(option.label).includes(normalizedQuery))
   }, [options, query, searchable])
 
   return { query, searchable, setQuery, visibleOptions }
