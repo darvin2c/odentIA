@@ -1,5 +1,5 @@
 import { Button, Field, FieldLabel, Input } from "@odentia/ui"
-import { EmptyState, PageHeader, PageShell } from "@odentia/ui-patterns"
+import { EmptyState, PageHeader } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { useState } from "react"
@@ -35,16 +35,16 @@ function AgentPage() {
 
   if (!canWrite) {
     return (
-      <PageShell>
+      <div>
         <EmptyState title="Sin acceso" description="Solo owner/admin pueden configurar el agente." />
-      </PageShell>
+      </div>
     )
   }
   if (!current) {
     return (
-      <PageShell>
+      <div>
         <p className="p-4 text-sm text-muted-foreground">Cargando…</p>
-      </PageShell>
+      </div>
     )
   }
 
@@ -54,7 +54,7 @@ function AgentPage() {
   }
 
   return (
-    <PageShell className="flex flex-col gap-6">
+    <div className="flex flex-col gap-6">
       <PageHeader
         title="Agente"
         subtitle="Responde y cualifica automáticamente (sin agenda en esta etapa)"
@@ -119,6 +119,6 @@ function AgentPage() {
         </Button>
         {saved && <span className="text-sm text-green-700">Guardado.</span>}
       </div>
-    </PageShell>
+    </div>
   )
 }

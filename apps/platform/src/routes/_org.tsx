@@ -4,26 +4,27 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@odentia/ui"
-import { AppShell, type AppShellNavEntry, LoadingState } from "@odentia/ui-patterns"
+import {
+  AppShell,
+  type AppShellNavEntry,
+  type AppShellNavItem,
+  LoadingState,
+} from "@odentia/ui-patterns"
 import { useQuery } from "@tanstack/react-query"
 import {
   createFileRoute,
   getRouteApi,
-  Link,
   Outlet,
   redirect,
   useRouterState,
 } from "@tanstack/react-router"
 import {
-  Bot,
   Building2,
-  ClipboardList,
   Contact,
   FlaskConical,
   Inbox,
   Kanban,
   ListTodo,
-  MessageCircle,
   Settings,
   Smile,
   Tag,
@@ -32,6 +33,7 @@ import {
 import { authClient } from "../lib/auth-client"
 import { requireVerifiedSession, ssrFetchOptions } from "../lib/guards"
 import { orgSlugFromHostname, panelUrl, requestHostname, tenantUrl } from "../lib/host"
+import { RouterLink } from "../lib/router-link"
 
 export const Route = createFileRoute("/_org")({
   beforeLoad: async ({ location }) => {
@@ -60,42 +62,15 @@ const navItems: AppShellNavEntry[] = [
   { label: "Pacientes", to: "/patients", icon: Smile },
   { label: "Pipeline", to: "/pipeline", icon: Kanban },
   { label: "Tareas", to: "/tasks", icon: ListTodo },
-  {
-    label: "Configuración",
-    icon: Settings,
-    children: [
-      { label: "Canales", to: "/settings/channels", icon: MessageCircle },
-      { label: "Agente", to: "/settings/agent", icon: Bot },
-      { label: "Pipelines", to: "/settings/pipelines", icon: Kanban },
-      { label: "Campos", to: "/settings/fields", icon: Tag },
-      { label: "Registro de pacientes", to: "/settings/patient-registration", icon: ClipboardList },
-    ],
-  },
   { label: "Sucursales", to: "/branches", icon: Building2 },
   { label: "Miembros", to: "/members", icon: Users },
   { label: "Servicios", to: "/services", icon: Tag },
   { label: "Demo", to: "/demo", icon: FlaskConical },
 ]
 
-function RouterLink({
-  to,
-  className,
-  children,
-  title,
-  onClick,
-}: {
-  to: string
-  className?: string
-  children: React.ReactNode
-  title?: string
-  onClick?: () => void
-}) {
-  return (
-    <Link to={to} className={className} title={title} onClick={onClick}>
-      {children}
-    </Link>
-  )
-}
+/** Anclado al pie del sidebar, encima del bloque de usuario: los apartados de
+ * configuración viven en el nav de sección de `settings.tsx`. */
+const footerItems: AppShellNavItem[] = [{ label: "Configuración", to: "/settings", icon: Settings }]
 
 const orgRouteApi = getRouteApi("/_org")
 
@@ -146,6 +121,7 @@ function OrgLayout() {
       LinkComponent={RouterLink}
       pathname={pathname}
       user={{ name: session.name, email: session.email }}
+      footerItems={footerItems}
       brand={<span className="text-base font-semibold">odentIA</span>}
       topbarActions={<OrgSwitcher />}
       onSignOut={async () => {

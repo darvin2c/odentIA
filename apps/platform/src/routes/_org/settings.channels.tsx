@@ -385,7 +385,7 @@ function ChannelsPage() {
   }
 
   return (
-    <PageShell className="flex flex-col gap-2">
+    <div className="flex flex-col gap-2">
       <MasterDetail
         panel={
           mode === "panel" && formOpen ? <FormPanel {...formProps}>{formFields}</FormPanel> : null
@@ -463,7 +463,7 @@ function ChannelsPage() {
           <DataTable table={table} view={mode === "panel" ? "table" : "card"} />
         )}
       </MasterDetail>
-
+    
       {/* Un solo contenedor montado a la vez: montar panel y drawer juntos
           duplicaría los id/htmlFor de los campos. */}
       {mode === "drawer" ? (
@@ -471,6 +471,6 @@ function ChannelsPage() {
           {formFields}
         </FormDrawer>
       ) : null}
-    </PageShell>
+    </div>
   )
 }

@@ -253,9 +253,9 @@ function PipelinesPage() {
 
   if (!canWrite) {
     return (
-      <PageShell>
+      <div>
         <EmptyState title="Sin acceso" description="Solo owner/admin pueden editar pipelines." />
-      </PageShell>
+      </div>
     )
   }
 
@@ -305,7 +305,7 @@ function PipelinesPage() {
   }
 
   return (
-    <PageShell className="flex flex-col gap-6">
+    <div className="flex flex-col gap-6">
       <MasterDetail
         panel={
           mode === "panel" && formOpen ? <FormPanel {...formProps}>{formFields}</FormPanel> : null
@@ -343,7 +343,7 @@ function PipelinesPage() {
           </Button>
         </div>
       </MasterDetail>
-
+    
       {/* Un solo contenedor montado a la vez: montar panel y drawer juntos
           duplicaría los id/htmlFor de los campos. */}
       {mode === "drawer" ? (
@@ -359,6 +359,6 @@ function PipelinesPage() {
         confirmLabel="Eliminar"
         onConfirm={() => deleting && deleteMutation.mutate(deleting.id)}
       />
-    </PageShell>
+    </div>
   )
 }

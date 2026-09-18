@@ -158,7 +158,7 @@ function PatientRegistrationSettingsPage() {
   if (configQuery.isPending || fields === null) {
     if (configQuery.isError) {
       return (
-        <PageShell className="mx-auto w-full max-w-3xl">
+        <div className="mx-auto w-full max-w-3xl">
           <PageHeader title="Registro de pacientes" subtitle="Formulario público y QR de admisión" />
           <ErrorState
             error={
@@ -168,14 +168,14 @@ function PatientRegistrationSettingsPage() {
             }
             onRetry={() => void configQuery.refetch()}
           />
-        </PageShell>
+        </div>
       )
     }
     return (
-      <PageShell className="mx-auto w-full max-w-3xl">
+      <div className="mx-auto w-full max-w-3xl">
         <PageHeader title="Registro de pacientes" subtitle="Formulario público y QR de admisión" />
         <LoadingState message="Cargando la configuración…" />
-      </PageShell>
+      </div>
     )
   }
 
@@ -235,7 +235,7 @@ function PatientRegistrationSettingsPage() {
   const steps = ["datos", "contacto", "salud", "odontologicos"] as const
 
   return (
-    <PageShell className="mx-auto w-full max-w-3xl">
+    <div className="mx-auto w-full max-w-3xl">
       <PageHeader
         title="Registro de pacientes"
         subtitle="Campos del formulario público, aviso de privacidad y código QR"
@@ -245,7 +245,7 @@ function PatientRegistrationSettingsPage() {
           </Button>
         }
       />
-
+    
       {savedNotice ? (
         <p role="status" className="mb-4 rounded-md border border-border bg-muted p-3 text-sm">
           {savedNotice}
@@ -256,7 +256,7 @@ function PatientRegistrationSettingsPage() {
           {formErrors.general}
         </p>
       ) : null}
-
+    
       <div className="space-y-6">
         {steps.map((step) => (
           <div key={step} className="flex flex-col gap-6 rounded-md bg-card p-6">
@@ -350,7 +350,7 @@ function PatientRegistrationSettingsPage() {
             ) : null}
           </div>
         </div>
-
+    
         <div className="flex flex-col gap-6 rounded-md bg-card p-6">
           <div className="flex flex-col gap-1.5">
             <div className="font-heading text-base font-medium">Enlace público y QR</div>
@@ -405,7 +405,7 @@ function PatientRegistrationSettingsPage() {
           </div>
         </div>
       </div>
-
+    
       <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
         <DialogContent className="max-h-[90vh] w-full overflow-y-auto sm:max-w-3xl">
           <DialogHeader>
@@ -467,6 +467,6 @@ function PatientRegistrationSettingsPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </PageShell>
+    </div>
   )
 }
