@@ -4,6 +4,33 @@ import * as React from "react"
 /** Corte del modo panel: el ancho donde tabla y tarjeta caben a la vez. */
 const PANEL_QUERY = "(min-width: 1280px)"
 
+/** Igual que el corte del modo: el detalle no anima para quien pidió menos movimiento. */
+const REDUCED_MOTION_QUERY = "(prefers-reduced-motion: reduce)"
+
+/**
+ * Duración y curva de la entrada/salida del detalle, copiadas del drawer
+ * (`packages/ui/src/components/drawer.tsx`) para que abrir el panel y abrir el
+ * drawer se sientan igual: el mismo movimiento en los dos modos.
+ */
+const SLIDE_MS = 450
+
+// Transición de ancho del panel. Son tres clases y no una porque Tailwind no
+// genera una propiedad arbitraria (`[transition:...]`) dentro de una variante
+// arbitraria, y van literales porque el escáner lee texto, no interpolaciones.
+// El selector entra por el div externo del panel: ahí escribe la librería el
+// `flex-grow` que hay que interpolar. `data-animating` la enciende solo durante
+// el cambio programático, nunca durante el arrastre.
+const ANCHO_ANIMADO =
+  "[&[data-animating=true]>[data-slot=resizable-panel]]:transition-[flex-grow] [&[data-animating=true]>[data-slot=resizable-panel]]:duration-[450ms] [&[data-animating=true]>[data-slot=resizable-panel]]:ease-[cubic-bezier(0.22,1,0.36,1)]"
+
+// El formulario entra y sale deslizando desde su borde, con el movimiento del
+// popup del drawer. Va dentro de una caja que recorta (`relative
+// overflow-hidden`) para que el desplazamiento no agrande el área scrolleable
+// del panel. `motion-reduce:transition-none` cubre el deslizamiento; el ancho
+// lo cubre el interruptor de `usePrefersReducedMotion`.
+const CONTENIDO_ANIMADO =
+  "absolute inset-0 transition-[translate] duration-450 ease-[cubic-bezier(0.22,1,0.36,1)] data-open:translate-x-0 data-closed:translate-x-full motion-reduce:transition-none"
+
 export type DetailMode = "panel" | "drawer"
 
 /** Anchos predefinidos de la columna de detalle: de formulario compacto a wizard. */
@@ -45,6 +72,26 @@ export function useDetailMode(): DetailMode {
   return isWide ? "panel" : "drawer"
 }
 
+/**
+ * Quien pidió menos movimiento no recibe ninguna animación. Se consulta en JS y
+ * no solo por CSS porque el interruptor también decide si la transición de
+ * ancho se enciende: con `reduce` el detalle aparece y desaparece de una.
+ */
+function usePrefersReducedMotion(): boolean {
+  const [reduce, setReduce] = React.useState(false)
+
+  useEffectBeforePaint(() => {
+    if (typeof window.matchMedia !== "function") return
+    const query = window.matchMedia(REDUCED_MOTION_QUERY)
+    const apply = () => setReduce(query.matches)
+    apply()
+    query.addEventListener("change", apply)
+    return () => query.removeEventListener("change", apply)
+  }, [])
+
+  return reduce
+}
+
 export interface MasterDetailProps {
   /** Contenido maestro: filtros, tabla y sus estados de carga/vacío/error. */
   children: React.ReactNode
@@ -71,32 +118,76 @@ export interface MasterDetailProps {
  *   formularios compactos, `lg`/`xl` para formularios de dos columnas o
  *   asistentes (wizard), que a 24rem quedan apretados.
  *
- * Abrir/cerrar es instantáneo: la librería escribe `flex-basis` imperativo y no
- * trae transición; animarlo exigiría una clase condicional solo para cambios
- * programáticos, que pelearía con el drag.
+ * Entrada y salida: el detalle se abre y se cierra con el mismo movimiento del
+ * drawer (`SLIDE_MS`, la curva del popup), en dos piezas a la vez —la columna
+ * crece/decrece y el formulario entra/sale deslizando desde su borde—. Eso fija
+ * dos cosas:
+ *
+ * - El panel de detalle y su contenido existen desde el montaje, colapsados y
+ *   `inert` mientras están cerrados. El contenido NO se desmonta al cerrar: sin
+ *   un estado de partida no hay nada que animar, y el formulario aparecería ya
+ *   en su sitio. `panel={null}` de la página significa «colapsado», no
+ *   «desmontado»; lo que la página decide con esa prop es qué formulario pasa,
+ *   y el último que pasó es el que sobrevive colapsado.
+ * - La transición de ancho se enciende solo alrededor del cambio programático
+ *   (`data-animating`) y se apaga en el primer `pointerdown` del handle: si
+ *   estuviera siempre activa, el arrastre iría 450ms por detrás del puntero.
+ *   La librería no expone `onResizeStart`, así que esa es la única señal
+ *   sincrónica disponible.
+ *
+ * Con `prefers-reduced-motion: reduce` no se anima nada: ni el ancho ni el
+ * deslizamiento.
  */
 export function MasterDetail({ children, panel, panelSize = "md", className }: MasterDetailProps) {
   const mode = useDetailMode()
   const open = panel != null
   const size = PANEL_SIZES[panelSize]
   const detailRef = usePanelRef()
-  // El panel de detalle y el handle no se montan hasta la primera apertura:
-  // `collapse()` antes de la primera medición del group no sobrevive al layout
-  // inicial (la librería relayoutea con `defaultSize` y deja una columna vacía).
-  const [everOpened, setEverOpened] = React.useState(open)
+  const groupRef = React.useRef<HTMLDivElement | null>(null)
+  const reduceMotion = usePrefersReducedMotion()
+  // El contenido sobrevive al cierre: su último valor es el que queda colapsado
+  // e `inert`, y de donde sale la animación de entrada la próxima vez.
+  const lastPanel = React.useRef<React.ReactNode>(null)
+  if (panel != null) lastPanel.current = panel
+
+  // La transición solo se enciende alrededor del cambio programático: dejarla
+  // activa haría que el arrastre vaya 450ms por detrás del puntero.
+  const markAnimating = React.useCallback(() => {
+    const group = groupRef.current
+    if (!group || reduceMotion) return
+    group.dataset.animating = "true"
+    window.setTimeout(() => {
+      group.dataset.animating = "false"
+    }, SLIDE_MS)
+  }, [reduceMotion])
+
+  // Ancho con el que se abre el detalle: el que pide la página (`panelSize`) y,
+  // después, el que el usuario dejó con el arrastre. Hace falta recordarlo
+  // porque `expand()` no sirve cuando el panel nace colapsado por
+  // `defaultLayout`: sin tamaño previo registrado cae al mínimo (`minSize`) y el
+  // formulario se abriría más angosto de lo que pidió la página.
+  const openSize = React.useRef<string | number>(size.default)
+  React.useEffect(() => {
+    openSize.current = size.default
+  }, [size.default])
 
   // Expandir/colapsar sin remontar: la librería ajusta el tamaño imperativamente.
-  // Effect de layout para que el colapso inicial ocurra antes del paint.
+  // La animación se decide por el estado real del panel, no por «primera
+  // pasada»: el handle se publica recién después del primer layout, así que
+  // cualquier contador se consumiría en la apertura en vez del montaje.
   React.useLayoutEffect(() => {
     const detail = detailRef.current
     if (!detail) return
-    if (open) detail.expand()
-    else detail.collapse()
-  }, [open, detailRef])
-
-  React.useEffect(() => {
-    if (open) setEverOpened(true)
-  }, [open])
+    if (detail.isCollapsed() === !open) return
+    markAnimating()
+    if (open) {
+      detail.resize(openSize.current)
+      return
+    }
+    const { inPixels } = detail.getSize()
+    if (inPixels > 0) openSize.current = inPixels
+    detail.collapse()
+  }, [open, detailRef, markAnimating])
 
   if (mode === "drawer") {
     return <div className={cn("flex min-w-0 flex-col gap-6", className)}>{children}</div>
@@ -104,12 +195,19 @@ export function MasterDetail({ children, panel, panelSize = "md", className }: M
 
   return (
     <ResizablePanelGroup
+      elementRef={groupRef}
       orientation="horizontal"
+      // El detalle nace colapsado en el layout inicial: en la primera medición
+      // el group pasa de alto automático a alto de viewport y la librería
+      // recompone el layout desde `defaultSize`, así que un `collapse()` de
+      // arranque no sobrevive (deja la columna vacía). `defaultLayout` fija ese
+      // primer layout para que la primera aparición tenga de dónde animar.
+      defaultLayout={open ? undefined : { master: 100, detail: 0 }}
       // Por `style` y no por clase: el wrapper trae `h-full` de base y el merge
       // de clases no garantiza que gane el alto fijo; la librería solo bloquea
       // display/flex-direction/flex-wrap/overflow, así que `height` es nuestro.
       style={{ height: open ? "calc(100dvh - 3rem)" : "auto" }}
-      className={className}
+      className={cn(ANCHO_ANIMADO, className)}
     >
       <ResizablePanel
         id="master"
@@ -118,27 +216,39 @@ export function MasterDetail({ children, panel, panelSize = "md", className }: M
       >
         {children}
       </ResizablePanel>
-      {everOpened ? (
-        <>
-          <ResizableHandle
-            withHandle
-            disabled={!open}
-            className={cn("w-6 bg-transparent", !open && "w-0 overflow-hidden")}
-          />
-          <ResizablePanel
-            id="detail"
-            panelRef={detailRef}
-            collapsible
-            collapsedSize={0}
-            defaultSize={size.default}
-            minSize={size.min}
-            maxSize={size.max}
-            className="h-full min-w-0"
+      <ResizableHandle
+        withHandle
+        disabled={!open}
+        // El arrastre manda: apaga la transición en su primer cuadro.
+        onPointerDown={() => {
+          const group = groupRef.current
+          if (group) group.dataset.animating = "false"
+        }}
+        className={cn("w-6 bg-transparent", !open && "w-0 overflow-hidden")}
+      />
+      <ResizablePanel
+        id="detail"
+        panelRef={detailRef}
+        collapsible
+        collapsedSize={0}
+        defaultSize={size.default}
+        minSize={size.min}
+        maxSize={size.max}
+        className="h-full min-w-0"
+      >
+        {/* La caja recorta el deslizamiento: sin ella, mover el formulario
+            agrandaría el área scrolleable del panel (barra horizontal). */}
+        <div className="relative h-full overflow-hidden">
+          <div
+            data-open={open ? "" : undefined}
+            data-closed={open ? undefined : ""}
+            inert={!open ? true : undefined}
+            className={CONTENIDO_ANIMADO}
           >
-            {open ? panel : null}
-          </ResizablePanel>
-        </>
-      ) : null}
+            {panel ?? lastPanel.current}
+          </div>
+        </div>
+      </ResizablePanel>
     </ResizablePanelGroup>
   )
 }

@@ -79,18 +79,23 @@ describe("MasterDetail", () => {
     expect(handle?.getAttribute("aria-disabled")).toBeNull()
   })
 
-  it("si nunca se abrió, no monta el panel de detalle ni el handle", () => {
+  it("si nunca se abrió, monta el detalle colapsado y el handle apagado", () => {
     mockMatchMedia(true)
     render(
       <MasterDetail panel={null}>
         <div>tabla</div>
       </MasterDetail>,
     )
-    expect(document.querySelectorAll('[data-slot="resizable-panel"]').length).toBe(1)
-    expect(document.querySelector('[data-slot="resizable-handle"]')).toBeNull()
+    // El panel existe desde el arranque (colapsado) porque una entrada animada
+    // necesita un estado de partida; el handle sí queda apagado.
+    const panels = document.querySelectorAll('[data-slot="resizable-panel"]')
+    expect(panels.length).toBe(2)
+    expect(panels[1]?.textContent).toBe("")
+    const handle = document.querySelector('[data-slot="resizable-handle"]')
+    expect(handle?.getAttribute("aria-disabled")).toBe("true")
   })
 
-  it("tras abrir y cerrar, el detalle queda colapsado y el handle deshabilitado", () => {
+  it("tras abrir y cerrar, el detalle queda colapsado, inerte y sin foco alcanzable", () => {
     mockMatchMedia(true)
     const utils = render(
       <MasterDetail panel={<div>formulario</div>}>
@@ -105,6 +110,10 @@ describe("MasterDetail", () => {
     const handle = document.querySelector('[data-slot="resizable-handle"]')
     expect(handle?.getAttribute("aria-disabled")).toBe("true")
     const panels = document.querySelectorAll('[data-slot="resizable-panel"]')
-    expect(panels[1]?.textContent).toBe("")
+    // El contenido sobrevive al cierre (la columna se anima vacía si no), pero
+    // queda fuera del alcance del teclado y de la tecnología asistiva.
+    expect(panels[1]?.textContent).toContain("formulario")
+    const contenido = panels[1]?.querySelector("[data-closed]")
+    expect(contenido?.getAttribute("inert")).toBe("")
   })
 })
