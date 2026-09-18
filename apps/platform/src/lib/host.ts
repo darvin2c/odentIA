@@ -2,6 +2,12 @@ import { createIsomorphicFn } from "@tanstack/react-start"
 import { getRequestHeaders } from "@tanstack/react-start/server"
 
 export const BASE_DOMAIN = import.meta.env.VITE_BASE_DOMAIN as string
+/**
+ * Puerto del proxy cuando no es el estándar (dev detrás de portless en 443 no
+ * necesita nada; un entorno de pruebas en otro puerto sí, si no los redirects
+ * entre subdominios apuntarían a 443).
+ */
+const BASE_PORT = import.meta.env.VITE_BASE_PORT ? `:${import.meta.env.VITE_BASE_PORT}` : ""
 
 /** Host del request: cabecera en SSR, location en el cliente. */
 export const requestHostname = createIsomorphicFn()
@@ -19,6 +25,7 @@ export function orgSlugFromHostname(hostname: string): string | null {
   return slug && !slug.includes(".") ? slug : null
 }
 
-export const tenantUrl = (slug: string, path = "/") => `https://${slug}.${BASE_DOMAIN}${path}`
+export const tenantUrl = (slug: string, path = "/") =>
+  `https://${slug}.${BASE_DOMAIN}${BASE_PORT}${path}`
 
-export const panelUrl = (path = "/") => `https://app.${BASE_DOMAIN}${path}`
+export const panelUrl = (path = "/") => `https://app.${BASE_DOMAIN}${BASE_PORT}${path}`
