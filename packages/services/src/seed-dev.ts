@@ -16,6 +16,7 @@ import { DEFAULT_REGISTRATION_CONFIG } from "@odentia/clinical"
 import { createOwnerDb } from "@odentia/db"
 import { account, invitation, member, organization, user } from "@odentia/db/schema/auth"
 import {
+  clinicalFollowUp,
   clinicalNote,
   encounter,
   encounterPlanItem,
@@ -31,6 +32,13 @@ import {
   patientDocument,
   patientDocumentContext,
   patientMedication,
+  patientCharge,
+  patientPayment,
+  patientPaymentApplication,
+  patientPaymentRefund,
+  patientResponsibility,
+  prescription,
+  prescriptionItem,
   patientContact,
   patientRegistration,
   patientRegistrationLink,
@@ -38,6 +46,7 @@ import {
   treatmentBudget,
   treatmentBudgetItem,
   treatmentPlan,
+  treatmentOptionGroup,
   treatmentPlanItem,
   treatmentTemplate,
 } from "@odentia/db/schema/clinical"
@@ -55,7 +64,7 @@ import {
 } from "@odentia/db/schema/crm"
 import { auditEvent, branch, orgProfile, patientRegistrationConfig } from "@odentia/db/schema/org"
 import { hashPassword } from "better-auth/crypto"
-import { and, eq, inArray, sql } from "drizzle-orm"
+import { and, eq, inArray, or, sql } from "drizzle-orm"
 import { upsertAgentConfig } from "./agentConfig.js"
 import { createBudget, decideBudget, presentBudget } from "./budgets.js"
 import {
@@ -76,11 +85,15 @@ import {
   finalizeEncounter,
   updateEncounterDraft,
 } from "./encounters.js"
+import { cancelFollowUp, completeFollowUp, createFollowUp, scheduleFollowUp } from "./follow-ups.js"
 import { createFieldDef } from "./fields.js"
 import { createPatient, updatePatient } from "./patients.js"
 import { createPatientRegistrationLink, registerPatient, savePatientRegistrationConfig } from "./patient-registration.js"
 import { ensureDefaultPipeline } from "./pipelines.js"
-import { addPlanItem, createTreatmentPlan, setPlanItemStatus } from "./plan.js"
+import { addPlanItem, createOptionGroup, createTreatmentPlan, setPlanItemStatus } from "./plan.js"
+import { applyPayment, createCharge, createPayment, refundPayment } from "./payments.js"
+import { cancelPrescription, createPrescription } from "./prescriptions.js"
+import { grantResponsibility } from "./responsibilities.js"
 import { secretsKeyFromEnv } from "./secrets.js"
 import { createService } from "./service-catalog.js"
 import { createStorage } from "./storage.js"
@@ -210,6 +223,7 @@ const SEED_ORGS = [ORG_A, ORG_B]
 const ANA_ID = "seed-user-ana"
 const LUIS_ID = "seed-user-luis"
 const CORA_ID = "seed-user-cora"
+const SEED_USERS = [ANA_ID, LUIS_ID, CORA_ID]
 const PASSWORD = "Demo1234"
 // Teléfono compartido del hogar Rosa/Jorge. No puede modelarse con dos filas
 // de contact_identity: el unique (organization_id, channel, external_user_id)
@@ -229,6 +243,16 @@ async function wipeSeed(): Promise<void> {
     .select({ attachments: message.attachments })
     .from(message)
     .where(inArray(message.organizationId, SEED_ORGS))
+  // Finanzas, recetas, controles y responsabilidades: antes que sus padres
+  // (vínculos de contacto, atenciones, ítems, líneas y documentos).
+  await db.delete(patientPaymentApplication).where(inArray(patientPaymentApplication.organizationId, SEED_ORGS))
+  await db.delete(patientPaymentRefund).where(inArray(patientPaymentRefund.organizationId, SEED_ORGS))
+  await db.delete(patientCharge).where(inArray(patientCharge.organizationId, SEED_ORGS))
+  await db.delete(patientPayment).where(inArray(patientPayment.organizationId, SEED_ORGS))
+  await db.delete(prescriptionItem).where(inArray(prescriptionItem.organizationId, SEED_ORGS))
+  await db.delete(prescription).where(inArray(prescription.organizationId, SEED_ORGS))
+  await db.delete(clinicalFollowUp).where(inArray(clinicalFollowUp.organizationId, SEED_ORGS))
+  await db.delete(patientResponsibility).where(inArray(patientResponsibility.organizationId, SEED_ORGS))
   await db.delete(patientRegistration).where(inArray(patientRegistration.organizationId, SEED_ORGS))
   await db.delete(patientRegistrationLink).where(inArray(patientRegistrationLink.organizationId, SEED_ORGS))
   await db.delete(patientContact).where(inArray(patientContact.organizationId, SEED_ORGS))
@@ -262,10 +286,21 @@ async function wipeSeed(): Promise<void> {
     await tx.execute(sql`alter table treatment_budget_item enable trigger treatment_budget_item_guard_trigger`)
   })
   await db.delete(treatmentPlanItem).where(inArray(treatmentPlanItem.organizationId, SEED_ORGS))
+  await db.delete(treatmentOptionGroup).where(inArray(treatmentOptionGroup.organizationId, SEED_ORGS))
   await db.delete(treatmentBudget).where(inArray(treatmentBudget.organizationId, SEED_ORGS))
   await db.delete(treatmentPlan).where(inArray(treatmentPlan.organizationId, SEED_ORGS))
   await db.delete(encounter).where(inArray(encounter.organizationId, SEED_ORGS))
   await db.delete(serviceCatalog).where(inArray(serviceCatalog.organizationId, SEED_ORGS))
+  // El snapshot del registro referencia `user`, `patient`, `contact` y `branch`
+  // sin cascada: sin borrarlo primero, la baja del usuario semilla falla por FK.
+  // Se borra por organización **y** por actor: una corrida de e2e deja registros
+  // en su propia organización que también apuntan a los usuarios semilla.
+  await db.delete(patientRegistration).where(
+    or(
+      inArray(patientRegistration.organizationId, SEED_ORGS),
+      inArray(patientRegistration.actorUserId, SEED_USERS),
+    ),
+  )
   await db.delete(patient).where(inArray(patient.organizationId, SEED_ORGS))
   await db.delete(contact).where(inArray(contact.organizationId, SEED_ORGS))
   await db.delete(pipelineStage).where(inArray(pipelineStage.organizationId, SEED_ORGS))
@@ -281,7 +316,7 @@ async function wipeSeed(): Promise<void> {
   await db.delete(invitation).where(inArray(invitation.organizationId, SEED_ORGS))
   await db.delete(organization).where(inArray(organization.id, SEED_ORGS))
   await db.execute(sql`delete from "verification" where "identifier" ilike '%@odentia.dev%'`)
-  await db.delete(user).where(inArray(user.id, [ANA_ID, LUIS_ID, CORA_ID]))
+  await db.delete(user).where(inArray(user.id, SEED_USERS))
   for (const document of previousDocuments) await storage.deleteAttachment(document.storageKey)
   for (const row of previousMessages) {
     if (!Array.isArray(row.attachments)) continue
@@ -443,14 +478,40 @@ await db.insert(member).values([
   },
 ])
 await db.insert(orgProfile).values([
-  { organizationId: ORG_A, legalName: "Dental Smile S.A.C.", fiscalDocNumber: "20601234567" },
-  { organizationId: ORG_B, legalName: "Clínica Norte S.A.C.", fiscalDocNumber: "20550987654" },
+  {
+    organizationId: ORG_A,
+    legalName: "Dental Smile S.A.C.",
+    fiscalDocNumber: "20601234567",
+    // Explicito: país, moneda, idioma y zona son el contrato de la agenda y del
+    // formato de los teléfonos (IANA canónico y ISO-3166-1).
+    countryCode: "PE",
+    currency: "PEN",
+    locale: "es-PE",
+    timezone: "America/Lima",
+  },
+  {
+    organizationId: ORG_B,
+    legalName: "Clínica Norte S.A.C.",
+    fiscalDocNumber: "20550987654",
+    countryCode: "PE",
+    currency: "PEN",
+    locale: "es-PE",
+    timezone: "America/Lima",
+  },
 ])
 const [miraflores] = await db
   .insert(branch)
   .values([
+    // Miraflores hereda la zona de la organización (`timezone` en null).
     { organizationId: ORG_A, name: "Sede Miraflores", ubigeo: "150122" },
-    { organizationId: ORG_A, name: "Sede Surco", ubigeo: "150140" },
+    // Surco ejercita el camino contrario: teléfono y zona propios.
+    {
+      organizationId: ORG_A,
+      name: "Sede Surco",
+      ubigeo: "150140",
+      phone: "+51987655001",
+      timezone: "America/Lima",
+    },
   ])
   .returning({ id: branch.id })
 if (!miraflores) throw new Error("No se pudo crear la sucursal Sede Miraflores")
@@ -483,7 +544,7 @@ const connA = await createConnection(
     displayName: "WhatsApp Dental Smile",
     config: {
       phoneNumberId: "seed",
-      displayPhoneNumber: "+51 999 888 777",
+      displayPhoneNumber: "+51999888777",
       accessToken: "seed-dev",
     },
   },
@@ -499,7 +560,7 @@ const connB = await createConnection(
     displayName: "WhatsApp Norte",
     config: {
       phoneNumberId: "seed",
-      displayPhoneNumber: "+51 999 888 776",
+      displayPhoneNumber: "+51999888776",
       accessToken: "seed-dev",
     },
   },
@@ -1158,6 +1219,123 @@ await addClinicalNote(db, ORG_A, ANA_ID, rosaPatientId, {
   note: "Control post-obturación: sin dolor, oclusión estable. Pendiente endodoncia pieza 46.",
 })
 
+// Alternativas excluyentes para pieza 46 (mismo plan, nueva atención borrador:
+// la indicación solo nace de una atención abierta).
+const evaluacion46 = await createEncounter(db, ORG_A, ANA_ID, rosaPatientId, {
+  reason: "Evaluación de alternativas pieza 46",
+})
+// Segunda sesión de la misma indicación: no completa el tratamiento.
+await addEncounterProcedure(db, ORG_A, ANA_ID, rosaPatientId, evaluacion46.id, {
+  planItemId: obt36.id,
+})
+await correctDocumentContext(db, ORG_A, ANA_ID, rosaPatientId, docRx.id, {
+  expectedVersion: 2,
+  planItemId: obt36.id,
+})
+const opciones46 = await createOptionGroup(db, ORG_A, ANA_ID, rosaPatientId, {
+  planId: planRestaurador.id,
+  title: "Restauración definitiva pieza 46",
+})
+await addPlanItem(db, ORG_A, ANA_ID, rosaPatientId, {
+  serviceId: serviceIdA("OBTURACION"),
+  planId: planRestaurador.id,
+  sourceEncounterId: evaluacion46.id,
+  optionGroupId: opciones46.id,
+  toothNumber: 46,
+  detail: "Restauración con resina pieza 46 (alternativa conservadora)",
+})
+await addPlanItem(db, ORG_A, ANA_ID, rosaPatientId, {
+  serviceId: serviceIdA("CORONA"),
+  planId: planRestaurador.id,
+  sourceEncounterId: evaluacion46.id,
+  optionGroupId: opciones46.id,
+  isRecommended: true,
+  toothNumber: 46,
+  detail: "Corona cerámica pieza 46 (alternativa recomendada)",
+})
+
+// Controles longitudinales: ciclo completo (programado→realizado contra la
+// atención finalizada), uno pendiente de mantenimiento y uno cancelado.
+const controlObt = await createFollowUp(db, ORG_A, ANA_ID, rosaPatientId, {
+  kind: "tratamiento",
+  planItemId: obt36.id,
+  originEncounterId: draft.id,
+  title: "Control post-obturación pieza 36",
+  instructions: "Verificar oclusión y sensibilidad.",
+  dueAt: tomorrowIso(),
+})
+await scheduleFollowUp(db, ORG_A, ANA_ID, rosaPatientId, controlObt.id, { scheduledAt: tomorrowIso() })
+await completeFollowUp(db, ORG_A, ANA_ID, rosaPatientId, controlObt.id, {
+  encounterId: draft.id,
+  outcome: "Sin dolor; oclusión estable.",
+})
+await createFollowUp(db, ORG_A, ANA_ID, rosaPatientId, {
+  kind: "mantenimiento",
+  title: "Profilaxis semestral",
+  instructions: "Recordar higiene con cepillo suave.",
+  dueAt: tomorrowIso(),
+})
+const controlEndo = await createFollowUp(db, ORG_A, ANA_ID, rosaPatientId, {
+  kind: "tratamiento",
+  planItemId: endo46.id,
+  title: "Control endodoncia pieza 46",
+  dueAt: tomorrowIso(),
+})
+await cancelFollowUp(db, ORG_A, ANA_ID, rosaPatientId, controlEndo.id, {
+  reason: "Se reprogramará tras la primera sesión de endodoncia.",
+})
+
+// Recetas inmutables: una vigente ligada al tratamiento y una anulada con
+// motivo (la alergia a penicilina de Rosa obliga a retirar amoxicilina).
+await createPrescription(db, ORG_A, ANA_ID, rosaPatientId, {
+  planItemId: obt36.id,
+  notes: "Solo si aparece dolor no controlado.",
+  items: [
+    { medicationName: "Ibuprofeno 400 mg", dose: "400 mg", route: "Oral", frequency: "Cada 8 horas", duration: "3 días", quantity: 9, instructions: "Tomar con alimentos." },
+  ],
+})
+const recetaAnulada = await createPrescription(db, ORG_A, ANA_ID, rosaPatientId, {
+  items: [
+    { medicationName: "Amoxicilina 500 mg", dose: "500 mg", route: "Oral", frequency: "Cada 8 horas", duration: "7 días", quantity: 21 },
+  ],
+})
+await cancelPrescription(db, ORG_A, ANA_ID, rosaPatientId, recetaAnulada.id, {
+  reason: "Alergia a penicilina registrada; se retira la prescripción.",
+})
+
+// Cuenta económica: cargo explícito desde la línea aceptada, cargo manual,
+// pago del propio contacto con aplicación parcial y devolución parcial.
+const [lineaObt] = await db
+  .select()
+  .from(treatmentBudgetItem)
+  .where(and(eq(treatmentBudgetItem.budgetId, budgetRestaurador.id), eq(treatmentBudgetItem.planItemId, obt36.id)))
+if (!lineaObt) throw new Error("Falta la línea aceptada de obturación en el seed")
+const cargoObt = await createCharge(db, ORG_A, ANA_ID, rosaPatientId, { budgetItemId: lineaObt.id })
+await createCharge(db, ORG_A, ANA_ID, rosaPatientId, {
+  description: "Control post-obturación",
+  amountCents: 5000,
+  currency: "PEN",
+})
+const rosaSelfContactId = contactIdByName.get("Rosa Quispe")!
+const pagoRosa = await createPayment(db, ORG_A, ANA_ID, rosaPatientId, {
+  payerContactId: rosaSelfContactId,
+  amountCents: 15000,
+  currency: "PEN",
+  paidAt: new Date().toISOString(),
+  method: "yape",
+  reference: "YAPE-SEED-001",
+})
+await applyPayment(db, ORG_A, ANA_ID, rosaPatientId, pagoRosa.id, { chargeId: cargoObt.id, amountCents: 10000 })
+await refundPayment(db, ORG_A, ANA_ID, rosaPatientId, pagoRosa.id, { amountCents: 2000, reason: "Ajuste de tarifa acordado en recepción." })
+
+// Responsabilidad: Rosa es titular económica de su propia cuenta.
+await grantResponsibility(db, ORG_A, ANA_ID, rosaPatientId, {
+  contactId: rosaSelfContactId,
+  kind: "responsable_economico",
+  startsAt: new Date().toISOString().slice(0, 10),
+  notes: "Titular de la cuenta del paciente.",
+})
+
 const elenaPatientId = patientIdByName.get("Elena Huamán")!
 await savePatientHealth(db, ORG_A, ANA_ID, elenaPatientId, {
   expectedRevision: 0,
@@ -1272,12 +1450,19 @@ const telegramConnection = await createConnection(db, ORG_A, secretsKey, {
 await db.insert(contactIdentity).values({ organizationId: ORG_A, contactId: rosaContactId, channel: "telegram", externalUserId: "tg:123456789", displayName: "Rosa Quispe" })
 const rosaTelegram = await seedConversation({ orgId: ORG_A, contactId: rosaContactId, connectionId: telegramConnection.id, thread: "tg:123456789", lastInboundAt: hoursAgo(1), lastMessageAt: hoursAgo(1) })
 await seedMessage({ orgId: ORG_A, conversationId: rosaTelegram.id, direction: "inbound", senderKind: "contact", body: "Quisiera registrar a mi hijo.", externalId: "seed-tg-rosa-1", status: "received", createdAt: hoursAgo(1) })
-await db.transaction(tx => registerPatient(tx, ORG_A, { kind: "internal", userId: ANA_ID, contactId: rosaContactId }, {
+const pedro = await db.transaction(tx => registerPatient(tx, ORG_A, { kind: "internal", userId: ANA_ID, contactId: rosaContactId }, {
   submissionId: randomUUID(),
   answers: { demographics: { displayName: "Pedro Quispe", birthDate: "2016-05-20" }, respondent: "representative",
     representative: { displayName: "Rosa Quispe", relationship: "guardian", relationshipDetail: "Madre", phone: SHARED_PHONE }, privacyAccepted: false },
   contacts: [{ contactId: rosaContactId, relationship: "guardian", relationshipDetail: "Madre", isPreferred: true }],
 }))
+// Representante legal vigente: habilita a Rosa para decidir por el menor.
+await grantResponsibility(db, ORG_A, ANA_ID, pedro.id, {
+  contactId: rosaContactId,
+  kind: "representante_legal",
+  startsAt: new Date().toISOString().slice(0, 10),
+  notes: "Madre del menor; autoriza decisiones clínicas y económicas.",
+})
 await db.transaction(tx => registerPatient(tx, ORG_A, { kind: "public", entryPoint: "qr" }, {
   submissionId: randomUUID(), formVersion: registrationConfig.version,
   answers: { demographics: { displayName: "Valeria Quispe · QR demo", birthDate: "1998-04-10", phone: SHARED_PHONE }, respondent: "patient", privacyAccepted: true,
@@ -1297,6 +1482,12 @@ async function summary(orgId: string, label: string): Promise<string> {
     "encounter",
     "task",
     "treatment_budget",
+    "treatment_option_group",
+    "clinical_follow_up",
+    "prescription",
+    "patient_charge",
+    "patient_payment",
+    "patient_responsibility",
     "treatment_plan_item",
     "patient_document",
   ] as const
