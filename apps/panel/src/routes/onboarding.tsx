@@ -9,13 +9,21 @@ import {
   toast,
 } from "@odentia/ui"
 import {
+  CountrySelect,
+  DEFAULT_COUNTRY,
+  detectedTimeZone,
   fieldErrorMessages,
+  isValidE164,
+  normalizeCountry,
   PageHeader,
   PageShell,
+  PhoneInput,
   SubmitButton,
+  TimeZoneSelect,
   WizardSteps,
+  zonesForCountry,
 } from "@odentia/ui-patterns"
-import { useForm } from "@tanstack/react-form"
+import { useForm, useStore } from "@tanstack/react-form"
 import { createFileRoute } from "@tanstack/react-router"
 import { useEffect, useState } from "react"
 import { z } from "zod"
@@ -43,8 +51,8 @@ const STEP_TOPICS = ["tus datos", "organización", "perfil legal", "primera sucu
 const STEP_FIELDS = [
   ["firstName", "lastName"],
   ["orgName", "slug"],
-  ["legalName", "fiscalDocNumber"],
-  ["branchName", "branchAddress"],
+  ["legalName", "fiscalDocNumber", "countryCode"],
+  ["branchName", "branchAddress", "branchPhone", "branchTimezone"],
 ] as const
 
 const slugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
@@ -64,8 +72,15 @@ const onboardingSchema = personaSchema.extend({
     .refine((slug) => !RESERVED_SLUGS[slug], "Ese subdominio está reservado"),
   legalName: z.string().min(2, "Razón social"),
   fiscalDocNumber: z.string().max(20),
+  // El país define la máscara de los teléfonos y las zonas horarias sugeridas.
+  countryCode: z.string().length(2, "Elige el país"),
   branchName: z.string().min(2, "Nombre de la sucursal"),
   branchAddress: z.string(),
+  // Vacío = sin teléfono; si hay valor, tiene que ser un número real (E.164).
+  branchPhone: z
+    .string()
+    .refine((value) => value === "" || isValidE164(value), "Teléfono inválido"),
+  branchTimezone: z.string().min(1, "Elige la zona horaria"),
 })
 
 /** Schema por campo; valida al salir de su paso y en el submit final. */
@@ -76,8 +91,11 @@ const FIELD_SCHEMAS = {
   slug: onboardingSchema.shape.slug,
   legalName: onboardingSchema.shape.legalName,
   fiscalDocNumber: onboardingSchema.shape.fiscalDocNumber,
+  countryCode: onboardingSchema.shape.countryCode,
   branchName: onboardingSchema.shape.branchName,
   branchAddress: onboardingSchema.shape.branchAddress,
+  branchPhone: onboardingSchema.shape.branchPhone,
+  branchTimezone: onboardingSchema.shape.branchTimezone,
 } as const
 
 /** Paso que posee cada campo: antes de ese paso el campo no se valida. */
@@ -88,8 +106,11 @@ const FIELD_STEP: Record<keyof typeof FIELD_SCHEMAS, number> = {
   slug: 1,
   legalName: 2,
   fiscalDocNumber: 2,
+  countryCode: 2,
   branchName: 3,
   branchAddress: 3,
+  branchPhone: 3,
+  branchTimezone: 3,
 }
 
 function slugify(name: string): string {
@@ -118,17 +139,24 @@ function OnboardingPage() {
   const offset = hasStoredName ? 1 : 0
   const [step, setStep] = useState(0)
   const [visited, setVisited] = useState<number[]>([0])
+  // El tipo sale del esquema: `branchPhone` es `string | null` y `countryCode`
+  // es un ISO de 2 letras, no el literal del valor inicial.
+  const initialValues: z.infer<typeof onboardingSchema> = {
+    firstName: splitName(sessionUser?.name ?? "").firstName,
+    lastName: splitName(sessionUser?.name ?? "").lastName,
+    orgName: "",
+    slug: "",
+    legalName: "",
+    fiscalDocNumber: "",
+    countryCode: DEFAULT_COUNTRY,
+    branchName: "",
+    branchAddress: "",
+    branchPhone: "",
+    // La clínica se configura desde su propio dispositivo: su zona es la de partida.
+    branchTimezone: detectedTimeZone() ?? "America/Lima",
+  }
   const form = useForm({
-    defaultValues: {
-      firstName: splitName(sessionUser?.name ?? "").firstName,
-      lastName: splitName(sessionUser?.name ?? "").lastName,
-      orgName: "",
-      slug: "",
-      legalName: "",
-      fiscalDocNumber: "",
-      branchName: "",
-      branchAddress: "",
-    },
+    defaultValues: initialValues,
     validators: { onSubmit: onboardingSchema },
     onSubmitInvalid: () => {
       // Si algún paso previo quedó inválido, lleva al usuario al primero con errores.
@@ -162,7 +190,8 @@ function OnboardingPage() {
           body: JSON.stringify({
             legalName: value.legalName,
             fiscalDocNumber: value.fiscalDocNumber || undefined,
-            countryCode: "PE",
+            countryCode: value.countryCode,
+            timezone: value.branchTimezone,
           }),
         })
         await apiFetch("/api/branches", {
@@ -170,6 +199,8 @@ function OnboardingPage() {
           body: JSON.stringify({
             name: value.branchName,
             addressLine1: value.branchAddress || undefined,
+            phone: value.branchPhone || undefined,
+            timezone: value.branchTimezone,
           }),
         })
       } catch (cause) {
@@ -179,6 +210,9 @@ function OnboardingPage() {
       window.location.assign(tenantUrl(value.slug, "/branches"))
     },
   })
+
+  // El país elegido alimenta la máscara del teléfono y las zonas sugeridas.
+  const country = useStore(form.store, (state) => state.values.countryCode)
 
   // Precarga el nombre de la sesión cuando llega después del primer render y
   // salta el paso de perfil si la cuenta ya lo trae guardado.
@@ -338,6 +372,22 @@ function OnboardingPage() {
                 </Field>
               )}
             </form.Field>
+            <form.Field name="countryCode" validators={stepValidator("countryCode")}>
+              {(field) => (
+                <Field>
+                  <FieldLabel htmlFor="countryCode">País</FieldLabel>
+                  <CountrySelect
+                    id="countryCode"
+                    value={normalizeCountry(field.state.value) ?? DEFAULT_COUNTRY}
+                    onChange={(next) => field.handleChange(next)}
+                  />
+                  <FieldDescription>
+                    Define el formato de los teléfonos y las zonas horarias que se sugieren.
+                  </FieldDescription>
+                  <FieldError>{fieldErrorMessages(field.state.meta.errors)[0] ?? null}</FieldError>
+                </Field>
+              )}
+            </form.Field>
           </div>
 
           <div className={step === 3 ? "flex flex-col gap-4" : "hidden"}>
@@ -363,6 +413,41 @@ function OnboardingPage() {
                     value={field.state.value}
                     onChange={(event) => field.handleChange(event.target.value)}
                   />
+                </Field>
+              )}
+            </form.Field>
+            <form.Field name="branchPhone" validators={stepValidator("branchPhone")}>
+              {(field) => {
+                const errors = fieldErrorMessages(field.state.meta.errors)
+                return (
+                  <Field>
+                    <FieldLabel htmlFor="branchPhone">Teléfono (opcional)</FieldLabel>
+                    <PhoneInput
+                      id="branchPhone"
+                      value={field.state.value || null}
+                      defaultCountry={normalizeCountry(country)}
+                      invalid={errors.length > 0}
+                      onChange={(next) => field.handleChange(next ?? "")}
+                    />
+                    <FieldError>{errors[0] ?? null}</FieldError>
+                  </Field>
+                )
+              }}
+            </form.Field>
+            <form.Field name="branchTimezone" validators={stepValidator("branchTimezone")}>
+              {(field) => (
+                <Field>
+                  <FieldLabel htmlFor="branchTimezone">Zona horaria</FieldLabel>
+                  <TimeZoneSelect
+                    id="branchTimezone"
+                    value={field.state.value}
+                    suggested={zonesForCountry(country)}
+                    onChange={(next) => field.handleChange(next ?? "")}
+                  />
+                  <FieldDescription>
+                    Con ella se interpretan la agenda, el historial y los documentos de la clínica.
+                  </FieldDescription>
+                  <FieldError>{fieldErrorMessages(field.state.meta.errors)[0] ?? null}</FieldError>
                 </Field>
               )}
             </form.Field>
