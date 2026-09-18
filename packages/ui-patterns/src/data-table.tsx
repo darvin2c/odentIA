@@ -45,6 +45,13 @@ export interface DataTableProps<TData> {
 }
 
 export interface DataTableSkeletonProps {
+  /**
+   * Vista cuyo hueco se reserva mientras carga. Igual que en `DataTable`, por
+   * debajo del breakpoint móvil siempre es el de `list`, aunque aquí se pida
+   * `table` o `card`. Default `table`.
+   */
+  view?: DataTableView
+  /** Columnas de la tabla; pares label/valor de cada card. En lista no aplica. */
   columnCount?: number
   rowCount?: number
   showPagination?: boolean
@@ -52,9 +59,17 @@ export interface DataTableSkeletonProps {
 }
 
 const skeletonWidths = ["w-40", "w-20", "w-24", "w-16", "w-8"] as const
+const skeletonTitleWidths = ["w-40", "w-32", "w-44", "w-36"] as const
+const skeletonSummaryWidths = ["w-56", "w-48", "w-60", "w-52"] as const
+const skeletonFieldWidths = ["w-24", "w-20", "w-28", "w-16"] as const
 
-function skeletonWidth(index: number): string {
-  return skeletonWidths[index % skeletonWidths.length] ?? "w-20"
+function widthAt(widths: readonly string[], index: number): string {
+  return widths[index % widths.length] ?? "w-20"
+}
+
+/** Claves de los placeholders: no tienen identidad propia, solo posición. */
+function slotKeys(count: number, prefix: string): string[] {
+  return Array.from({ length: count }, (_, index) => `${prefix}-${index}`)
 }
 
 interface LayoutProps<TData> {
@@ -341,42 +356,74 @@ function rowClickHandler<TData>(
   }
 }
 
+interface SkeletonShape {
+  columnCount: number
+  rowCount: number
+  showPagination: boolean
+  label: string
+}
+
+/**
+ * Esqueleto de `DataTable`: reserva el hueco de la vista que va a montarse
+ * encima, para que el contenido real no salte al llegar. Como en `DataTable`,
+ * por debajo del breakpoint móvil el hueco reservado es el de la lista aunque
+ * se pida tabla o card.
+ */
 export function DataTableSkeleton({
+  view = "table",
   columnCount = 5,
   rowCount = 6,
   showPagination = false,
   label = common.states.loading,
 }: DataTableSkeletonProps) {
-  const columns = Array.from({ length: columnCount })
-  const rows = Array.from({ length: rowCount })
+  const resolved = useResolvedView(view)
+  const shape: SkeletonShape = { columnCount, rowCount, showPagination, label }
 
+  if (resolved === "list") return <ListSkeleton {...shape} />
+  if (resolved === "card") return <CardSkeleton {...shape} />
+  return <TableSkeleton {...shape} />
+}
+
+function statusProps(label: string) {
+  return { role: "status" as const, "aria-label": label, "aria-busy": true as const }
+}
+
+/** Pie de paginación: mismas dos pastillas en las tres vistas. */
+function SkeletonPagination({ className }: { className?: string }) {
   return (
     <div
-      role="status"
-      aria-label={label}
-      aria-busy="true"
-      className="overflow-hidden rounded-lg border border-border bg-surface"
+      aria-hidden="true"
+      className={cn("flex items-center justify-between gap-2 p-3", className)}
     >
+      <Skeleton className="h-9 w-24 rounded-full" />
+      <Skeleton className="h-9 w-24 rounded-full" />
+    </div>
+  )
+}
+
+function TableSkeleton({ columnCount, rowCount, showPagination, label }: SkeletonShape) {
+  const columns = slotKeys(columnCount, "column")
+  const rows = slotKeys(rowCount, "row")
+
+  return (
+    <div {...statusProps(label)} className="overflow-hidden rounded-md bg-card">
       <Table aria-hidden="true">
         <TableHeader>
           <TableRow>
-            {columns.map((_, columnIndex) => (
-              <TableHead key={columnIndex}>
-                <Skeleton className={cn("h-3", skeletonWidth(columnIndex))} />
+            {columns.map((columnKey, columnIndex) => (
+              <TableHead key={columnKey}>
+                <Skeleton className={cn("h-3", widthAt(skeletonWidths, columnIndex))} />
               </TableHead>
             ))}
           </TableRow>
         </TableHeader>
         <TableBody>
-          {rows.map((_, rowIndex) => (
-            <TableRow key={rowIndex}>
-              {columns.map((_, columnIndex) => (
-                <TableCell key={columnIndex}>
+          {rows.map((rowKey, rowIndex) => (
+            <TableRow key={rowKey}>
+              {columns.map((columnKey, columnIndex) => (
+                <TableCell key={columnKey}>
                   <Skeleton
-                    className={cn(
-                      "h-4",
-                      skeletonWidth((columnIndex + rowIndex + 1) % skeletonWidths.length),
-                    )}
+                    className={cn("h-4", widthAt(skeletonWidths, columnIndex + rowIndex + 1))}
                   />
                 </TableCell>
               ))}
@@ -384,15 +431,77 @@ export function DataTableSkeleton({
           ))}
         </TableBody>
       </Table>
-      {showPagination ? (
-        <div
-          aria-hidden="true"
-          className="flex items-center justify-between gap-2 border-t border-border p-3"
-        >
-          <Skeleton className="h-9 w-24 rounded-full" />
-          <Skeleton className="h-9 w-24 rounded-full" />
-        </div>
-      ) : null}
+      {showPagination ? <SkeletonPagination className="border-t border-border" /> : null}
+    </div>
+  )
+}
+
+/** Mismos huecos que `ListLayout`: media, título, línea de resumen y acciones. */
+function ListSkeleton({ rowCount, showPagination, label }: SkeletonShape) {
+  const rows = slotKeys(rowCount, "row")
+
+  return (
+    <div {...statusProps(label)} className="flex flex-col gap-2">
+      <div aria-hidden="true" className="flex flex-col gap-2">
+        {rows.map((rowKey, rowIndex) => (
+          <Item key={rowKey} className="rounded-md bg-card">
+            <ItemMedia variant="image">
+              <Skeleton className="size-full rounded-sm" />
+            </ItemMedia>
+            <ItemContent>
+              <Skeleton className={cn("h-4", widthAt(skeletonTitleWidths, rowIndex))} />
+              <Skeleton className={cn("h-3", widthAt(skeletonSummaryWidths, rowIndex))} />
+            </ItemContent>
+            <ItemActions>
+              <Skeleton className="size-9 rounded-full" />
+            </ItemActions>
+          </Item>
+        ))}
+      </div>
+      {showPagination ? <SkeletonPagination className="rounded-md bg-card" /> : null}
+    </div>
+  )
+}
+
+/** Mismos huecos que `CardLayout`: media, título, acciones y pares label/valor. */
+function CardSkeleton({ columnCount, rowCount, showPagination, label }: SkeletonShape) {
+  const cards = slotKeys(rowCount, "card")
+  const fields = slotKeys(columnCount, "field")
+
+  return (
+    <div {...statusProps(label)} className="flex flex-col gap-2">
+      <div aria-hidden="true" className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        {cards.map((cardKey, cardIndex) => (
+          <div
+            key={cardKey}
+            data-slot="data-table-skeleton-card"
+            className="rounded-md bg-card p-4"
+          >
+            <div className="flex items-start justify-between gap-2">
+              <div className="flex min-w-0 items-start gap-3">
+                <Skeleton className="size-10 shrink-0 rounded-full" />
+                <Skeleton className={cn("h-4", widthAt(skeletonTitleWidths, cardIndex))} />
+              </div>
+              <Skeleton className="size-9 shrink-0 rounded-full" />
+            </div>
+            {fields.length > 0 ? (
+              <div className="mt-3 flex flex-col gap-2">
+                {fields.map((fieldKey, fieldIndex) => (
+                  <div
+                    key={fieldKey}
+                    data-slot="data-table-skeleton-field"
+                    className="flex flex-col gap-0.5"
+                  >
+                    <Skeleton className="h-3 w-16" />
+                    <Skeleton className={cn("h-4", widthAt(skeletonFieldWidths, fieldIndex))} />
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        ))}
+      </div>
+      {showPagination ? <SkeletonPagination className="rounded-md bg-card" /> : null}
     </div>
   )
 }

@@ -76,6 +76,32 @@ describe("DataTable", () => {
     expect(container.querySelectorAll("tbody [data-slot='skeleton']")).toHaveLength(6)
   })
 
+  it("reserva el hueco de la lista cuando la vista no tiene cabecera", () => {
+    const { container } = render(<DataTableSkeleton view="list" rowCount={2} />)
+    const status = screen.getByRole("status", { name: "Cargando…" })
+
+    expect(status.getAttribute("aria-busy")).toBe("true")
+    expect(container.querySelector("table")).toBeNull()
+    expect(container.querySelectorAll("[data-slot='item']")).toHaveLength(2)
+  })
+
+  it("reserva el hueco de las cards, con sus pares label/valor", () => {
+    const { container } = render(<DataTableSkeleton view="card" columnCount={3} rowCount={2} />)
+
+    expect(container.querySelector("table")).toBeNull()
+    const cards = container.querySelectorAll("[data-slot='data-table-skeleton-card']")
+    expect(cards).toHaveLength(2)
+    expect(cards[0]?.querySelectorAll("[data-slot='data-table-skeleton-field']")).toHaveLength(3)
+  })
+
+  it("en pantallas pequeñas reserva lista aunque se pida card", () => {
+    stubMatchMedia(true)
+    const { container } = render(<DataTableSkeleton view="card" rowCount={2} />)
+
+    expect(container.querySelector("[data-slot='data-table-skeleton-card']")).toBeNull()
+    expect(container.querySelectorAll("[data-slot='item']")).toHaveLength(2)
+  })
+
   it("muestra el Marker oficial con shimmer durante una actualización", () => {
     render(<DataRefreshMarker />)
     const status = screen.getByRole("status")
