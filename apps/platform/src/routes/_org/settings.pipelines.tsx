@@ -1,4 +1,16 @@
-import { Badge, Button, Field, FieldError, FieldLabel, Input } from "@odentia/ui"
+import {
+  Badge,
+  Button,
+  Field,
+  FieldError,
+  FieldLabel,
+  Input,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@odentia/ui"
 import {
   ConfirmDialog,
   DataTable,
@@ -8,7 +20,6 @@ import {
   fieldErrorMessages,
   MasterDetail,
   PageHeader,
-  PageShell,
   RowActions,
   useDetailMode,
 } from "@odentia/ui-patterns"
@@ -30,6 +41,13 @@ const stageSchema = z.object({
   name: z.string().min(1, "Ingresa el nombre"),
   kind: z.enum(["open", "won", "lost"]),
 })
+
+/** Tipos de etapa: etiqueta única para los dos selects de la página. */
+const STAGE_KINDS = [
+  { value: "open", label: "Abierta" },
+  { value: "won", label: "Ganada" },
+  { value: "lost", label: "Perdida" },
+] as const
 
 function PipelinesPage() {
   const queryClient = useQueryClient()
@@ -166,18 +184,24 @@ function PipelinesPage() {
           const stage = row.original
           if (editing?.id === stage.id) {
             return (
-              <select
-                aria-label="Tipo"
-                className="rounded-md border bg-background px-2 py-1.5 text-sm"
-                defaultValue={stage.kind}
-                onChange={(e) =>
-                  updateMutation.mutate({ id: stage.id, patch: { kind: e.target.value } })
+              <Select
+                value={stage.kind}
+                items={Object.fromEntries(STAGE_KINDS.map((k) => [k.value, k.label]))}
+                onValueChange={(value) =>
+                  updateMutation.mutate({ id: stage.id, patch: { kind: value } })
                 }
               >
-                <option value="open">Abierta</option>
-                <option value="won">Ganada</option>
-                <option value="lost">Perdida</option>
-              </select>
+                <SelectTrigger aria-label="Tipo">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {STAGE_KINDS.map((k) => (
+                    <SelectItem key={k.value} value={k.value}>
+                      {k.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             )
           }
           return (
@@ -273,16 +297,23 @@ function PipelinesPage() {
       <form.Field name="kind">
         {(field) => (
           <Field>
-            <FieldLabel>Tipo</FieldLabel>
-            <select
-              className="rounded-md border bg-background px-2 py-1.5 text-sm"
+            <FieldLabel htmlFor="etapa-tipo">Tipo</FieldLabel>
+            <Select
               value={field.state.value}
-              onChange={(e) => field.handleChange(e.target.value as "open" | "won" | "lost")}
+              items={Object.fromEntries(STAGE_KINDS.map((k) => [k.value, k.label]))}
+              onValueChange={(value) => field.handleChange(value as "open" | "won" | "lost")}
             >
-              <option value="open">Abierta</option>
-              <option value="won">Ganada</option>
-              <option value="lost">Perdida</option>
-            </select>
+              <SelectTrigger id="etapa-tipo">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {STAGE_KINDS.map((k) => (
+                  <SelectItem key={k.value} value={k.value}>
+                    {k.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
             <FieldError>{fieldErrorMessages(field.state.meta.errors)}</FieldError>
           </Field>
         )}
@@ -315,20 +346,30 @@ function PipelinesPage() {
           title="Pipelines"
           subtitle="Etapas del kanban de ventas"
           actions={
-            pipelines.length > 1 ? (
-              <select
-                aria-label="Pipeline"
-                className="rounded-md border bg-background px-2 py-1.5 text-sm"
-                value={pipeline?.id ?? ""}
-                onChange={(e) => setPipelineId(e.target.value)}
-              >
-                {pipelines.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
-                ))}
-              </select>
-            ) : undefined
+            <>
+              {pipelines.length > 1 ? (
+                <Select
+                  value={pipeline?.id ?? ""}
+                  items={Object.fromEntries(pipelines.map((p) => [p.id, p.name]))}
+                  onValueChange={setPipelineId}
+                >
+                  <SelectTrigger aria-label="Pipeline">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {pipelines.map((p) => (
+                      <SelectItem key={p.id} value={p.id}>
+                        {p.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              ) : null}
+              <Button type="button" className="min-h-11" onClick={() => setFormOpen(true)}>
+                <Plus aria-hidden />
+                Nueva etapa
+              </Button>
+            </>
           }
         />
         {error && <p className="text-sm text-red-600">{error}</p>}
@@ -336,12 +377,6 @@ function PipelinesPage() {
             (subir/bajar lo edita); no hay nada que filtrar ni ordenar. */}
         {/* La fila marcada aquí es la que se está renombrando en línea, no el panel. */}
         <DataTable table={table} isRowActive={(row) => editing?.id === row.id} />
-        <div>
-          <Button type="button" className="min-h-11" onClick={() => setFormOpen(true)}>
-            <Plus aria-hidden />
-            Nueva etapa
-          </Button>
-        </div>
       </MasterDetail>
     
       {/* Un solo contenedor montado a la vez: montar panel y drawer juntos

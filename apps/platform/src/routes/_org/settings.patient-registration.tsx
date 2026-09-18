@@ -29,7 +29,6 @@ import {
   ErrorState,
   LoadingState,
   PageHeader,
-  PageShell,
   SubmitButton,
 } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
@@ -39,10 +38,7 @@ import { PatientRegistrationForm } from "../../components/patient/patient-regist
 import { ApiError } from "../../lib/api"
 import { useCanWrite } from "../../lib/crm"
 import { orgSlugFromHostname, requestHostname, tenantUrl } from "../../lib/host"
-import {
-  fetchRegistrationConfig,
-  saveRegistrationConfig,
-} from "../../lib/patient-registration"
+import { fetchRegistrationConfig, saveRegistrationConfig } from "../../lib/patient-registration"
 
 export const Route = createFileRoute("/_org/settings/patient-registration")({
   component: PatientRegistrationSettingsPage,
@@ -259,7 +255,7 @@ function PatientRegistrationSettingsPage() {
     
       <div className="space-y-6">
         {steps.map((step) => (
-          <div key={step} className="flex flex-col gap-6 rounded-md bg-card p-6">
+          <div key={step} className="flex flex-col gap-6 rounded-sm bg-card p-6">
             <div className="flex flex-col gap-1.5">
               <div className="font-heading text-base font-medium">{STEP_TITLES[step]}</div>
             </div>
@@ -303,7 +299,7 @@ function PatientRegistrationSettingsPage() {
             </div>
           </div>
         ))}
-        <div className="flex flex-col gap-6 rounded-md bg-card p-6">
+        <div className="flex flex-col gap-6 rounded-sm bg-card p-6">
           <div className="flex flex-col gap-1.5">
             <div className="font-heading text-base font-medium">Aviso de privacidad y publicación</div>
             <p className="text-sm text-muted-foreground">
@@ -351,7 +347,7 @@ function PatientRegistrationSettingsPage() {
           </div>
         </div>
     
-        <div className="flex flex-col gap-6 rounded-md bg-card p-6">
+        <div className="flex flex-col gap-6 rounded-sm bg-card p-6">
           <div className="flex flex-col gap-1.5">
             <div className="font-heading text-base font-medium">Enlace público y QR</div>
             <p className="text-sm text-muted-foreground">{publicLink}</p>

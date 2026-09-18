@@ -1,4 +1,16 @@
-import { Badge, Button, Field, FieldError, FieldLabel, Input } from "@odentia/ui"
+import {
+  Badge,
+  Button,
+  Field,
+  FieldError,
+  FieldLabel,
+  Input,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@odentia/ui"
 import {
   DataTable,
   EmptyState,
@@ -8,7 +20,6 @@ import {
   fieldErrorMessages,
   MasterDetail,
   PageHeader,
-  PageShell,
   RowActions,
   useDetailMode,
   useListSearch,
@@ -40,6 +51,12 @@ const whatsappSchema = z.object({
   appSecret: z.string().min(1, "Requerido"),
   templates: z.string(),
 })
+
+/** Proveedores ofrecidos al crear una conexión: etiqueta única para el select. */
+const PROVIDERS = [
+  { value: "telegram_bot_api", label: "Telegram (BotFather)" },
+  { value: "whatsapp_cloud_api", label: "WhatsApp (Cloud API)" },
+] as const
 
 function ChannelsPage() {
   const queryClient = useQueryClient()
@@ -141,12 +158,6 @@ function ChannelsPage() {
     } catch (e) {
       setError(e instanceof ApiError ? (e.shape.message ?? "No se pudo crear") : "No se pudo crear")
     }
-  }
-
-  if (!canWrite) {
-    return (
-      <EmptyState title="Sin acceso" description="Solo owner/admin pueden gestionar conexiones." />
-    )
   }
 
   const listSearch = useListSearch()
@@ -279,21 +290,34 @@ function ChannelsPage() {
     getCoreRowModel: getCoreRowModel(),
   })
 
+  if (!canWrite) {
+    return (
+      <EmptyState title="Sin acceso" description="Solo owner/admin pueden gestionar conexiones." />
+    )
+  }
+
   const hasCriteria = search.trim() !== "" || Boolean(canalFilter) || Boolean(estadoFilter)
 
   const formFields = (
     <div className="flex flex-col gap-4">
       <Field>
-        <FieldLabel>Canal</FieldLabel>
-        <select
-          aria-label="Proveedor"
-          className="rounded-md border bg-background px-2 py-1.5 text-sm"
+        <FieldLabel htmlFor="proveedor-canal">Canal</FieldLabel>
+        <Select
           value={provider}
-          onChange={(e) => setProvider(e.target.value as typeof provider)}
+          items={Object.fromEntries(PROVIDERS.map((p) => [p.value, p.label]))}
+          onValueChange={(value) => setProvider(value as typeof provider)}
         >
-          <option value="telegram_bot_api">Telegram (BotFather)</option>
-          <option value="whatsapp_cloud_api">WhatsApp (Cloud API)</option>
-        </select>
+          <SelectTrigger id="proveedor-canal">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {PROVIDERS.map((p) => (
+              <SelectItem key={p.value} value={p.value}>
+                {p.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </Field>
       {provider === "telegram_bot_api" ? (
         <>

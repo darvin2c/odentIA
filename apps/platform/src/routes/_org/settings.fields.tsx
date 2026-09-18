@@ -1,4 +1,15 @@
-import { Button, Field, FieldError, FieldLabel, Input } from "@odentia/ui"
+import {
+  Button,
+  Field,
+  FieldError,
+  FieldLabel,
+  Input,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@odentia/ui"
 import {
   ConfirmDialog,
   DataTable,
@@ -9,7 +20,6 @@ import {
   fieldErrorMessages,
   MasterDetail,
   PageHeader,
-  PageShell,
   RowActions,
   useDetailMode,
   useListSearch,
@@ -36,6 +46,14 @@ const fieldSchema = z.object({
 })
 
 type FieldFormValues = z.infer<typeof fieldSchema>
+
+/** Tipos de campo personalizado: etiqueta única para el select y el filtro. */
+const FIELD_TYPES = [
+  { value: "text", label: "Texto" },
+  { value: "number", label: "Número" },
+  { value: "date", label: "Fecha" },
+  { value: "select", label: "Opciones" },
+] as const
 
 function FieldsPage() {
   const queryClient = useQueryClient()
@@ -194,17 +212,23 @@ function FieldsPage() {
       <form.Field name="type">
         {(field) => (
           <Field>
-            <FieldLabel>Tipo</FieldLabel>
-            <select
-              className="rounded-md border bg-background px-2 py-1.5 text-sm"
+            <FieldLabel htmlFor="campo-tipo">Tipo</FieldLabel>
+            <Select
               value={field.state.value}
-              onChange={(e) => field.handleChange(e.target.value as FieldFormValues["type"])}
+              items={Object.fromEntries(FIELD_TYPES.map((t) => [t.value, t.label]))}
+              onValueChange={(value) => field.handleChange(value as FieldFormValues["type"])}
             >
-              <option value="text">Texto</option>
-              <option value="number">Número</option>
-              <option value="date">Fecha</option>
-              <option value="select">Opciones</option>
-            </select>
+              <SelectTrigger id="campo-tipo">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {FIELD_TYPES.map((t) => (
+                  <SelectItem key={t.value} value={t.value}>
+                    {t.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
             <FieldError>{fieldErrorMessages(field.state.meta.errors)}</FieldError>
           </Field>
         )}
@@ -262,12 +286,7 @@ function FieldsPage() {
               key: "tipo",
               label: "Tipo",
               type: "select",
-              options: [
-                { value: "text", label: "Texto" },
-                { value: "number", label: "Número" },
-                { value: "date", label: "Fecha" },
-                { value: "select", label: "Opciones" },
-              ],
+              options: [...FIELD_TYPES],
             },
           ]}
           sortOptions={[
