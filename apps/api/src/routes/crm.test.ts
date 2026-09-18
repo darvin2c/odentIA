@@ -6,6 +6,7 @@ import {
   createConnection,
   type IngestDeps,
   ingestInbound,
+  type Storage,
   secretsKeyFromEnv,
 } from "@odentia/services"
 import { sql } from "drizzle-orm"
@@ -30,14 +31,17 @@ let container: StartedTestContainer
 let ownerDb: Db
 let appDb: Db
 
-const storageStub = {
+const storageStub: Storage = {
   putAvatar: async () => {
     throw new Error("no usado")
   },
   deleteByUrl: async () => {},
-  putAttachment: async () => {
-    throw new Error("no usado")
-  },
+  putAttachment: async ({ orgId, conversationId, bytes, contentType }) => ({
+    objectKey: `${orgId}/${conversationId}/att.bin`,
+    mimeType: contentType,
+    filename: "att.bin",
+    size: bytes.byteLength,
+  }),
   attachmentUrl: async (key: string) => `https://signed.example.com/${key}`,
   deleteAttachment: async () => {},
   putPatientDocument: async () => {
@@ -183,6 +187,55 @@ it("fuera de ventana 24h responde WINDOW_CLOSED 409", async () => {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ text: "tarde" }),
+  })
+  expect(res.status).toBe(409)
+  expect(await res.json()).toMatchObject({ error: { code: "WINDOW_CLOSED" } })
+  await ownerDb.execute(
+    sql`update "conversation" set "last_inbound_at" = now() where "id" = ${conversationId}::uuid`,
+  )
+})
+
+it("mensajes media: subida 201 con nombre original; mime inválido 400; fuera de ventana 409", async () => {
+  const app = buildApp("owner")
+  const png = new FormData()
+  png.set(
+    "file",
+    new File([new Uint8Array([137, 80, 78, 71])], "radiografía dental.png", {
+      type: "image/png",
+    }),
+  )
+  png.set("caption", "Mira esto")
+  const uploaded = await app.request(`/conversations/${conversationId}/messages/media`, {
+    method: "POST",
+    body: png,
+  })
+  expect(uploaded.status).toBe(201)
+  const uploadedBody = (await uploaded.json()) as {
+    data: { contentType: string; body: string | null; attachments: { filename: string }[] }
+  }
+  expect(uploadedBody.data.contentType).toBe("image")
+  expect(uploadedBody.data.body).toBe("Mira esto")
+  expect(uploadedBody.data.attachments[0]?.filename).toBe("radiografía dental.png")
+
+  const bad = new FormData()
+  bad.set("file", new File(["texto"], "nota.txt", { type: "text/plain" }))
+  expect(
+    (
+      await app.request(`/conversations/${conversationId}/messages/media`, {
+        method: "POST",
+        body: bad,
+      })
+    ).status,
+  ).toBe(400)
+
+  await ownerDb.execute(
+    sql`update "conversation" set "last_inbound_at" = now() - interval '25 hours' where "id" = ${conversationId}::uuid`,
+  )
+  const late = new FormData()
+  late.set("file", new File([new Uint8Array([137, 80, 78, 71])], "foto.png", { type: "image/png" }))
+  const res = await app.request(`/conversations/${conversationId}/messages/media`, {
+    method: "POST",
+    body: late,
   })
   expect(res.status).toBe(409)
   expect(await res.json()).toMatchObject({ error: { code: "WINDOW_CLOSED" } })

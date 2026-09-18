@@ -19,7 +19,7 @@ import { decodeCursor, encodeCursor } from "./cursors.js"
 import { notFound, ServiceError, validation } from "./errors.js"
 import { ensureDefaultPipeline } from "./pipelines.js"
 import { decryptConfig } from "./secrets.js"
-import type { Storage } from "./storage.js"
+import type { AttachmentRef, Storage } from "./storage.js"
 
 /** Ventana de WhatsApp para texto libre: 24h desde el último inbound. */
 const WA_FREE_TEXT_WINDOW_MS = 24 * 60 * 60 * 1000
@@ -36,7 +36,15 @@ export interface IngestDeps {
   storage: Storage
   fetch: typeof fetch
   secretsKey: Buffer
+  /** Transcripción best-effort de notas de voz; ausente = desactivada. */
+  transcribe?: TranscribeFn
 }
+
+export type TranscribeFn = (input: {
+  bytes: Uint8Array
+  mimeType: string
+  filename: string
+}) => Promise<string>
 
 export interface MessageItem {
   id: string
@@ -165,8 +173,7 @@ export async function ingestInbound(
       })
       .returning()
     identity =
-      insertedIdentity ??
-      (await findChannelIdentity(tx, orgId, channel, event.senderExternalId))
+      insertedIdentity ?? (await findChannelIdentity(tx, orgId, channel, event.senderExternalId))
     if (!identity) throw new Error("No se pudo resolver la identidad de canal")
     contactId = identity.contactId
   }
@@ -206,7 +213,9 @@ export async function ingestInbound(
       .values({
         organizationId: orgId,
         contactId,
-        contactIdentityId: isDirectThread(channel, event.externalThreadId, event.senderExternalId) ? identity.id : null,
+        contactIdentityId: isDirectThread(channel, event.externalThreadId, event.senderExternalId)
+          ? identity.id
+          : null,
         channelConnectionId: connection.id,
         externalThreadId: event.externalThreadId,
       })
@@ -255,6 +264,7 @@ export async function ingestInbound(
 
   let attachments: unknown[] = []
   let mediaError: string | null = null
+  let mediaDownload: { bytes: Uint8Array; mimeType: string; filename: string } | null = null
   if (content.type === "media" && adapter.fetchMedia) {
     try {
       const providerConfig = decryptConfig(deps.secretsKey, connection.configEncrypted)
@@ -277,9 +287,20 @@ export async function ingestInbound(
           size: ref.size,
         },
       ]
+      mediaDownload = media
     } catch {
       // No perder el mensaje por un fallo de descarga; queda auditado.
       mediaError = "media-download-failed"
+    }
+  }
+
+  // Nota de voz sin caption: transcribir a body (el agente lo lee como texto).
+  // Best-effort: si falla, body queda null y la ingesta no se pierde.
+  if (mediaDownload && contentType === "audio" && body === null && deps.transcribe) {
+    try {
+      body = await deps.transcribe(mediaDownload)
+    } catch {
+      body = null
     }
   }
 
@@ -383,6 +404,18 @@ export async function applyStatus(
 export type OutboundContent =
   | { type: "text"; text: string }
   | { type: "template"; name: string; language: string; params: string[] }
+  | { type: "media"; attachment: AttachmentRef; caption?: string }
+
+/** Tipos MIME admitidos para media saliente y su extensión (límite WhatsApp: 16 MB). */
+export const OUTBOUND_MEDIA_MIME_EXT: Record<string, string> = {
+  "image/jpeg": "jpg",
+  "image/png": "png",
+  "image/webp": "webp",
+  "application/pdf": "pdf",
+  "audio/ogg": "ogg",
+  "audio/mpeg": "mp3",
+}
+export const OUTBOUND_MEDIA_MAX_BYTES = 16 * 1024 * 1024
 
 async function requireOpenConversation(tx: Db, orgId: string, conversationId: string) {
   const [row] = await tx
@@ -402,7 +435,8 @@ function assertWindowAllows(
   row: { conversation: typeof conversation.$inferSelect },
   content: OutboundContent,
 ): void {
-  if (content.type !== "text") return
+  // Los media salientes también son mensajes de sesión sujetos a la ventana.
+  if (content.type === "template") return
   const last = row.conversation.lastInboundAt
   if (!last || Date.now() - last.getTime() > WA_FREE_TEXT_WINDOW_MS) {
     throw new ServiceError("WINDOW_CLOSED", 409, "Fuera de la ventana de 24h: usa una plantilla")
@@ -441,6 +475,15 @@ export async function sendOutbound(
     patch.unreadCount = 0
   }
   await tx.update(conversation).set(patch).where(eq(conversation.id, input.conversationId))
+  const content = input.content
+  const contentType =
+    content.type === "media"
+      ? content.attachment.mimeType.startsWith("image/")
+        ? "image"
+        : content.attachment.mimeType.startsWith("audio/")
+          ? "audio"
+          : "document"
+      : content.type
   const [created] = await tx
     .insert(message)
     .values({
@@ -449,12 +492,17 @@ export async function sendOutbound(
       direction: "out",
       senderKind: input.senderKind,
       senderUserId: input.senderUserId ?? null,
-      contentType: input.content.type,
-      body: input.content.type === "text" ? input.content.text : null,
-      templateName: input.content.type === "template" ? input.content.name : null,
-      templateLanguage: input.content.type === "template" ? input.content.language : null,
-      templateParams: input.content.type === "template" ? input.content.params : null,
-      attachments: [],
+      contentType,
+      body:
+        content.type === "text"
+          ? content.text
+          : content.type === "media"
+            ? (content.caption ?? null)
+            : null,
+      templateName: content.type === "template" ? content.name : null,
+      templateLanguage: content.type === "template" ? content.language : null,
+      templateParams: content.type === "template" ? content.params : null,
+      attachments: content.type === "media" ? [content.attachment] : [],
       status: "queued",
     })
     .returning()
@@ -707,7 +755,11 @@ export async function getConversationDetail(
         ? row.conversation.lastMessageAt.toISOString()
         : null,
     },
-    contact: { id: row.contact.id, displayName: row.contact.displayName, isActive: row.contact.isActive },
+    contact: {
+      id: row.contact.id,
+      displayName: row.contact.displayName,
+      isActive: row.contact.isActive,
+    },
     connection: {
       id: row.connection.id,
       channel: row.connection.channel,
@@ -859,10 +911,23 @@ export async function resolveConversationIdentity(
     .limit(1)
   if (!identity) throw notFound("Identidad de canal")
   await lockChannelIdentity(tx, orgId, identity.channel, identity.externalUserId)
-  const [currentIdentity] = await tx.select().from(contactIdentity).where(and(eq(contactIdentity.id, identity.id), eq(contactIdentity.organizationId, orgId))).for("update")
-  const [currentThread] = await tx.select().from(conversation).where(and(eq(conversation.id, conversationId), eq(conversation.organizationId, orgId))).for("update")
+  const [currentIdentity] = await tx
+    .select()
+    .from(contactIdentity)
+    .where(and(eq(contactIdentity.id, identity.id), eq(contactIdentity.organizationId, orgId)))
+    .for("update")
+  const [currentThread] = await tx
+    .select()
+    .from(conversation)
+    .where(and(eq(conversation.id, conversationId), eq(conversation.organizationId, orgId)))
+    .for("update")
   if (!currentIdentity || !currentThread) throw notFound("Conversación o identidad")
-  if (currentIdentity.contactId !== currentThread.contactId) throw new ServiceError("IDENTITY_CONTACT_MISMATCH", 409, "La identidad ya no pertenece al contacto de esta conversación")
+  if (currentIdentity.contactId !== currentThread.contactId)
+    throw new ServiceError(
+      "IDENTITY_CONTACT_MISMATCH",
+      409,
+      "La identidad ya no pertenece al contacto de esta conversación",
+    )
   if (identity.contactId !== row.conv.contactId) {
     throw new ServiceError(
       "IDENTITY_CONTACT_MISMATCH",
@@ -913,14 +978,31 @@ export async function startContactConversation(
   input: { identityId: string; connectionId: string },
 ): Promise<{ id: string; status: string; created: boolean }> {
   const actor = { userId: actorUserId }
-  const [candidate] = await tx.select().from(contactIdentity).where(and(eq(contactIdentity.id, input.identityId), eq(contactIdentity.organizationId, orgId))).limit(1)
+  const [candidate] = await tx
+    .select()
+    .from(contactIdentity)
+    .where(and(eq(contactIdentity.id, input.identityId), eq(contactIdentity.organizationId, orgId)))
+    .limit(1)
   if (!candidate) throw notFound("Identidad de canal")
   await lockChannelIdentity(tx, orgId, candidate.channel, candidate.externalUserId)
-  const [identity] = await tx.select().from(contactIdentity).where(and(eq(contactIdentity.id, input.identityId), eq(contactIdentity.organizationId, orgId))).for("share")
+  const [identity] = await tx
+    .select()
+    .from(contactIdentity)
+    .where(and(eq(contactIdentity.id, input.identityId), eq(contactIdentity.organizationId, orgId)))
+    .for("share")
   if (!identity || identity.contactId !== contactId) throw notFound("Identidad de canal")
-  const [contactRow] = await tx.select({ id: contact.id, isActive: contact.isActive }).from(contact).where(and(eq(contact.id, contactId), eq(contact.organizationId, orgId))).for("update")
+  const [contactRow] = await tx
+    .select({ id: contact.id, isActive: contact.isActive })
+    .from(contact)
+    .where(and(eq(contact.id, contactId), eq(contact.organizationId, orgId)))
+    .for("update")
   if (!contactRow) throw notFound("Contacto")
-  if (!contactRow.isActive) throw new ServiceError("CONTACT_ARCHIVED", 409, "Reactiva el contacto para iniciar conversaciones")
+  if (!contactRow.isActive)
+    throw new ServiceError(
+      "CONTACT_ARCHIVED",
+      409,
+      "Reactiva el contacto para iniciar conversaciones",
+    )
   if (identity.channel !== "whatsapp" && identity.channel !== "telegram") {
     throw validation("Canal no soportado: solo whatsapp o telegram")
   }
@@ -943,7 +1025,12 @@ export async function startContactConversation(
     throw validation("La conexión es de otro canal distinto al de la identidad")
   }
   const candidates = await tx
-    .select({ id: conversation.id, status: conversation.status, externalThreadId: conversation.externalThreadId, lastInboundAt: conversation.lastInboundAt })
+    .select({
+      id: conversation.id,
+      status: conversation.status,
+      externalThreadId: conversation.externalThreadId,
+      lastInboundAt: conversation.lastInboundAt,
+    })
     .from(conversation)
     .where(
       and(
@@ -953,7 +1040,11 @@ export async function startContactConversation(
         eq(conversation.channelConnectionId, connection.id),
       ),
     )
-  const existing = candidates.find(row => isDirectThread(identity.channel, row.externalThreadId, identity.externalUserId) && (identity.channel !== "telegram" || row.lastInboundAt !== null))
+  const existing = candidates.find(
+    (row) =>
+      isDirectThread(identity.channel, row.externalThreadId, identity.externalUserId) &&
+      (identity.channel !== "telegram" || row.lastInboundAt !== null),
+  )
   if (existing) return { id: existing.id, status: existing.status, created: false }
   if (identity.channel === "telegram") {
     throw new ServiceError(

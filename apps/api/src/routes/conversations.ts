@@ -7,6 +7,8 @@ import {
   listConversations,
   listMessages,
   markRead,
+  OUTBOUND_MEDIA_MAX_BYTES,
+  OUTBOUND_MEDIA_MIME_EXT,
   reopenConversation,
   resolveConversationIdentity,
   sendOutbound,
@@ -115,6 +117,56 @@ export function createConversationsRoute(deps: CrmDeps) {
     )
   })
 
+  app.post("/:id/messages/media", async (c) => {
+    const { orgId, userId } = orgContextOf(c)
+    const conversationId = c.req.param("id")
+    const form = await c.req.formData().catch(() => null)
+    const file = form?.get("file")
+    if (!(file instanceof File)) {
+      return c.json(errorBody(c, "VALIDATION", "Adjunta un archivo"), 400)
+    }
+    const ext = OUTBOUND_MEDIA_MIME_EXT[file.type]
+    if (!ext) {
+      return c.json(
+        errorBody(c, "VALIDATION", "Tipo de archivo no admitido (JPG, PNG, WebP, PDF, OGG o MP3)"),
+        400,
+      )
+    }
+    if (file.size > OUTBOUND_MEDIA_MAX_BYTES) {
+      return c.json(errorBody(c, "VALIDATION", "El archivo no puede superar 16 MB"), 400)
+    }
+    const captionRaw = form?.get("caption")
+    const caption =
+      typeof captionRaw === "string" && captionRaw.trim()
+        ? captionRaw.trim().slice(0, 1000)
+        : undefined
+    const bytes = new Uint8Array(await file.arrayBuffer())
+    return runService(c, 201, async () => {
+      const ref = await deps.storage.putAttachment({
+        orgId,
+        conversationId,
+        bytes,
+        contentType: file.type,
+        ext,
+      })
+      try {
+        return await withOrgContext(deps.db, orgId, (tx) =>
+          sendOutbound(tx, orgId, {
+            conversationId,
+            senderKind: "user",
+            senderUserId: userId,
+            // putAttachment devuelve como filename el basename del objectKey;
+            // el operador debe ver el nombre original del archivo.
+            content: { type: "media", attachment: { ...ref, filename: file.name }, caption },
+          }),
+        )
+      } catch (e) {
+        await deps.storage.deleteAttachment(ref.objectKey).catch(() => {})
+        throw e
+      }
+    })
+  })
+
   app.post("/:id/read", async (c) => {
     const { orgId } = orgContextOf(c)
     return runService(c, 200, () =>
@@ -173,10 +225,7 @@ export function createConversationsRoute(deps: CrmDeps) {
   app.put("/:id/identity", async (c) => {
     const { orgId, userId, memberRole } = orgContextOf(c)
     if (!canWrite(memberRole)) {
-      return c.json(
-        errorBody(c, "FORBIDDEN", "Solo owner/admin pueden resolver identidades"),
-        403,
-      )
+      return c.json(errorBody(c, "FORBIDDEN", "Solo owner/admin pueden resolver identidades"), 403)
     }
     const parsed = identityInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
