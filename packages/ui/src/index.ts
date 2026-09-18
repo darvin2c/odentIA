@@ -154,15 +154,6 @@ export {
   InputGroupTextarea,
 } from "./components/input-group.js";
 export {
-  Message,
-  MessageAvatar,
-  MessageContent,
-  MessageFooter,
-  MessageGroup,
-  MessageHeader,
-} from "./components/message.js";
-export { Bubble, BubbleContent, BubbleGroup, BubbleReactions } from "./components/bubble.js";
-export {
   MessageScroller,
   MessageScrollerButton,
   MessageScrollerContent,
