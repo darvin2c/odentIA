@@ -38,3 +38,25 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
   }
   return (await response.json()) as T
 }
+
+/** POST multipart (adjuntos) con cookies de sesión y slug de tenant del host. */
+export async function apiUpload<T>(path: string, form: FormData): Promise<T> {
+  const slug = typeof window === "undefined" ? null : orgSlugFromHostname(window.location.hostname)
+  const response = await fetch(`${API_URL}${path}`, {
+    method: "POST",
+    credentials: "include",
+    ...(slug ? { headers: { "x-odentia-org": slug } } : {}),
+    body: form,
+  })
+  if (!response.ok) {
+    let shape: ApiErrorShape = {}
+    try {
+      const body = (await response.json()) as { error?: ApiErrorShape }
+      shape = body.error ?? {}
+    } catch {
+      // respuesta no-JSON: shape vacío
+    }
+    throw new ApiError(response.status, shape)
+  }
+  return (await response.json()) as T
+}
