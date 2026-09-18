@@ -18,10 +18,13 @@ import { createConnectionsRoute } from "./routes/connections.js"
 import { createContactsRoute } from "./routes/contacts.js"
 import { createConversationsRoute } from "./routes/conversations.js"
 import { createFieldsRoute } from "./routes/fields.js"
-import { createPatientsRoute } from "./routes/patients.js"
 import { createPatientRegistrationRoute } from "./routes/patient-registration.js"
-import { createPublicPatientRegistrationRoute, type RegistrationRemoteAddress } from "./routes/public-patient-registration.js"
+import { createPatientsRoute } from "./routes/patients.js"
 import { createPipelinesRoute } from "./routes/pipelines.js"
+import {
+  createPublicPatientRegistrationRoute,
+  type RegistrationRemoteAddress,
+} from "./routes/public-patient-registration.js"
 import { createServicesRoute } from "./routes/services.js"
 import { createTasksRoute } from "./routes/tasks.js"
 import { createWebhooksRoute } from "./routes/webhooks.js"
@@ -58,7 +61,8 @@ const branchInput = z.object({
   phone: z.string().max(30).nullish(),
   email: z.string().email().nullish(),
   mapsUrl: z.string().url().nullish(),
-  timezone: z.string().max(60).optional(),
+  // `null` = hereda la zona horaria de la organización (columna nullable).
+  timezone: z.string().max(60).nullish(),
 })
 
 const branchPatch = branchInput.partial()
@@ -171,7 +175,13 @@ export function createApp(deps: AppDeps) {
   // Better Auth: montado ANTES de los guards.
   app.on(["GET", "POST"], "/api/auth/*", (c) => auth.handler(c.req.raw))
 
-  app.route("/api/public/patient-registration", createPublicPatientRegistrationRoute({ db: deps.db, remoteAddress: deps.registrationRemoteAddress }))
+  app.route(
+    "/api/public/patient-registration",
+    createPublicPatientRegistrationRoute({
+      db: deps.db,
+      remoteAddress: deps.registrationRemoteAddress,
+    }),
+  )
 
   // Rutas de usuario (sin contexto de organización).
   const userScoped = new Hono()
@@ -463,7 +473,10 @@ export function createApp(deps: AppDeps) {
     validateExternal: deps.validateExternal,
     webhookBaseUrl: deps.webhookBaseUrl,
   }
-  guarded.route("/", createPatientRegistrationRoute({ ...crmDeps, cookieDomain: deps.cookieDomain }))
+  guarded.route(
+    "/",
+    createPatientRegistrationRoute({ ...crmDeps, cookieDomain: deps.cookieDomain }),
+  )
   guarded.route("/conversations", createConversationsRoute(crmDeps))
   guarded.route("/contacts", createContactsRoute(crmDeps))
   guarded.route("/patients", createPatientsRoute(crmDeps))
