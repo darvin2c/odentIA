@@ -14,6 +14,8 @@ export interface CountrySelectProps {
   /** Acota la lista; sin esto se ofrecen todos los países con plan telefónico. */
   countries?: readonly CountryCode[]
   disabled?: boolean
+  /** Para asociar la etiqueta de la pantalla (`FieldLabel htmlFor`). */
+  id?: string
 }
 
 /**
@@ -26,6 +28,7 @@ export function CountrySelect({
   onChange,
   countries,
   disabled = false,
+  id,
 }: CountrySelectProps) {
   const options = React.useMemo(
     () => countryOptions(value || DEFAULT_COUNTRY, countries),
@@ -40,7 +43,7 @@ export function CountrySelect({
       }}
       disabled={disabled}
     >
-      <SelectTrigger aria-label={common.phone.country} className="w-28 shrink-0">
+      <SelectTrigger id={id} aria-label={common.phone.country} className="w-28 shrink-0">
         <SelectValue>
           {(selected: CountryCode) => `${selected} +${getCountryCallingCode(selected)}`}
         </SelectValue>
