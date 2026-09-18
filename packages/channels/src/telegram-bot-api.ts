@@ -197,15 +197,30 @@ export const telegramBotApiAdapter: ChannelAdapter = {
 
   async sendMessage(config, msg: OutboundMessage, deps) {
     const cfg = getConfig(config)
-    if (msg.kind.type !== "text") {
+    if (msg.kind.type === "template") {
       throw new Error("Telegram no soporta plantillas")
     }
     // `to` es el externalThreadId del parse (`tg:<chatId>`).
     const chatId = msg.to.startsWith("tg:") ? msg.to.slice("tg:".length) : msg.to
+    if (msg.kind.type === "text") {
+      const result = await telegramCall(
+        cfg,
+        "sendMessage",
+        { chat_id: chatId, text: msg.kind.text },
+        deps,
+      )
+      return { externalId: `tg:${chatId}:${resultMessageId(result)}` }
+    }
+    const { media } = msg.kind
+    const [method, field] = media.mimeType.startsWith("image/")
+      ? ["sendPhoto", "photo"]
+      : media.mimeType.startsWith("audio/")
+        ? ["sendAudio", "audio"]
+        : ["sendDocument", "document"]
     const result = await telegramCall(
       cfg,
-      "sendMessage",
-      { chat_id: chatId, text: msg.kind.text },
+      method,
+      { chat_id: chatId, [field]: media.url, ...(media.caption ? { caption: media.caption } : {}) },
       deps,
     )
     return { externalId: `tg:${chatId}:${resultMessageId(result)}` }

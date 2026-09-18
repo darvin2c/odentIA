@@ -89,6 +89,47 @@
       "expectUrl": "https://api.telegram.org/botTESTTOKEN/sendMessage",
       "expectBody": { "chat_id": "555", "text": "Hola Ana" },
       "expectExternalId": "tg:555:77"
+    },
+    {
+      "name": "media imagen con caption construye sendPhoto",
+      "message": {
+        "to": "tg:555",
+        "kind": {
+          "type": "media",
+          "media": {
+            "url": "https://files.example/signed/foto.png",
+            "mimeType": "image/png",
+            "filename": "foto.png",
+            "caption": "Mira esto"
+          }
+        }
+      },
+      "respondWith": { "ok": true, "result": { "message_id": 78, "chat": { "id": 555 } } },
+      "expectUrl": "https://api.telegram.org/botTESTTOKEN/sendPhoto",
+      "expectBody": {
+        "chat_id": "555",
+        "photo": "https://files.example/signed/foto.png",
+        "caption": "Mira esto"
+      },
+      "expectExternalId": "tg:555:78"
+    },
+    {
+      "name": "media documento sin caption construye sendDocument",
+      "message": {
+        "to": "tg:555",
+        "kind": {
+          "type": "media",
+          "media": {
+            "url": "https://files.example/signed/receta.pdf",
+            "mimeType": "application/pdf",
+            "filename": "receta.pdf"
+          }
+        }
+      },
+      "respondWith": { "ok": true, "result": { "message_id": 79, "chat": { "id": 555 } } },
+      "expectUrl": "https://api.telegram.org/botTESTTOKEN/sendDocument",
+      "expectBody": { "chat_id": "555", "document": "https://files.example/signed/receta.pdf" },
+      "expectExternalId": "tg:555:79"
     }
   ]
 }

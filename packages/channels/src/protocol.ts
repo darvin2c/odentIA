@@ -41,6 +41,11 @@ export interface OutboundMessage {
   kind:
     | { type: "text"; text: string }
     | { type: "template"; name: string; language: string; params: string[] }
+    // `url` es una URL firmada que el proveedor descarga al enviar.
+    | {
+        type: "media"
+        media: { url: string; mimeType: string; filename: string; caption?: string }
+      }
 }
 
 export interface ChannelAdapterDeps {

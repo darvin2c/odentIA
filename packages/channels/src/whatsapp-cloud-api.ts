@@ -200,6 +200,51 @@ function mediaInfo(json: unknown): { url: string; mimeType: string } | null {
   return { url: json.url, mimeType }
 }
 
+function buildBody(to: string, kind: OutboundMessage["kind"]): Record<string, unknown> {
+  if (kind.type === "text") {
+    return {
+      messaging_product: "whatsapp",
+      to,
+      type: "text",
+      text: { body: kind.text, preview_url: false },
+    }
+  }
+  if (kind.type === "template") {
+    return {
+      messaging_product: "whatsapp",
+      to,
+      type: "template",
+      template: {
+        name: kind.name,
+        language: { code: kind.language },
+        components: [
+          {
+            type: "body",
+            parameters: kind.params.map((text) => ({ type: "text", text })),
+          },
+        ],
+      },
+    }
+  }
+  const { media } = kind
+  const waType = media.mimeType.startsWith("image/")
+    ? "image"
+    : media.mimeType.startsWith("audio/")
+      ? "audio"
+      : "document"
+  // WhatsApp no admite caption en audio; filename solo en document.
+  return {
+    messaging_product: "whatsapp",
+    to,
+    type: waType,
+    [waType]: {
+      link: media.url,
+      ...(media.caption && waType !== "audio" ? { caption: media.caption } : {}),
+      ...(waType === "document" ? { filename: media.filename } : {}),
+    },
+  }
+}
+
 function connectionInfo(json: unknown): { id?: string; displayName?: string } {
   if (!json || typeof json !== "object") return {}
   const id = "id" in json && typeof json.id === "string" ? json.id : undefined
@@ -286,29 +331,7 @@ export const whatsappCloudApiAdapter: ChannelAdapter = {
     const cfg = getConfig(config)
     // `to` es el externalThreadId del parse (`wa:<phone>`).
     const to = msg.to.startsWith("wa:") ? msg.to.slice("wa:".length) : msg.to
-    const body =
-      msg.kind.type === "text"
-        ? {
-            messaging_product: "whatsapp",
-            to,
-            type: "text",
-            text: { body: msg.kind.text, preview_url: false },
-          }
-        : {
-            messaging_product: "whatsapp",
-            to,
-            type: "template",
-            template: {
-              name: msg.kind.name,
-              language: { code: msg.kind.language },
-              components: [
-                {
-                  type: "body",
-                  parameters: msg.kind.params.map((text) => ({ type: "text", text })),
-                },
-              ],
-            },
-          }
+    const body = buildBody(to, msg.kind)
     const { status, json } = await graphFetch(
       cfg,
       `${cfg.phoneNumberId}/messages`,

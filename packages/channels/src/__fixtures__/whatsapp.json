@@ -113,6 +113,51 @@
         "template": { "name": "cita_recordatorio" }
       },
       "expectExternalId": "wamid.SENT2"
+    },
+    {
+      "name": "media imagen con caption construye messages/image",
+      "message": {
+        "to": "wa:51911122233",
+        "kind": {
+          "type": "media",
+          "media": {
+            "url": "https://files.example/signed/foto.png",
+            "mimeType": "image/png",
+            "filename": "foto.png",
+            "caption": "Mira esto"
+          }
+        }
+      },
+      "respondWith": { "messages": [{ "id": "wamid.SENT3" }] },
+      "expectUrl": "https://graph.facebook.com/v21.0/PNID/messages",
+      "expectBody": {
+        "to": "51911122233",
+        "type": "image",
+        "image": { "link": "https://files.example/signed/foto.png", "caption": "Mira esto" }
+      },
+      "expectExternalId": "wamid.SENT3"
+    },
+    {
+      "name": "media documento sin caption lleva filename",
+      "message": {
+        "to": "wa:51911122233",
+        "kind": {
+          "type": "media",
+          "media": {
+            "url": "https://files.example/signed/receta.pdf",
+            "mimeType": "application/pdf",
+            "filename": "receta.pdf"
+          }
+        }
+      },
+      "respondWith": { "messages": [{ "id": "wamid.SENT4" }] },
+      "expectUrl": "https://graph.facebook.com/v21.0/PNID/messages",
+      "expectBody": {
+        "to": "51911122233",
+        "type": "document",
+        "document": { "link": "https://files.example/signed/receta.pdf", "filename": "receta.pdf" }
+      },
+      "expectExternalId": "wamid.SENT4"
     }
   ]
 }
