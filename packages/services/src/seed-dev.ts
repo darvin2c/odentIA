@@ -11,6 +11,7 @@
  * extender este archivo con su escenario mínimo en la misma PR.
  */
 import { randomUUID } from "node:crypto"
+import { deflateSync } from "node:zlib"
 import { DEFAULT_REGISTRATION_CONFIG } from "@odentia/clinical"
 import { createOwnerDb } from "@odentia/db"
 import { account, invitation, member, organization, user } from "@odentia/db/schema/auth"
@@ -119,6 +120,86 @@ const DEMO_PNG = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
   "base64",
 )
+// Nota de voz demo: WAV PCM mono 8 kHz de un beep corto. Se sintetiza (no hay
+// encoder de audio disponible) y Chrome lo reproduce sin códec adicional.
+function demoVoiceNoteWav(): Buffer {
+  const rate = 8000
+  const samples = Math.round(rate * 0.6)
+  const pcm = Buffer.alloc(samples * 2)
+  for (let i = 0; i < samples; i++) {
+    const envelope = 1 - i / samples
+    pcm.writeInt16LE(Math.round(12000 * envelope * Math.sin((2 * Math.PI * 440 * i) / rate)), i * 2)
+  }
+  const header = Buffer.alloc(44)
+  header.write("RIFF", 0)
+  header.writeUInt32LE(36 + pcm.length, 4)
+  header.write("WAVE", 8)
+  header.write("fmt ", 12)
+  header.writeUInt32LE(16, 16)
+  header.writeUInt16LE(1, 20)
+  header.writeUInt16LE(1, 22)
+  header.writeUInt32LE(rate, 24)
+  header.writeUInt32LE(rate * 2, 28)
+  header.writeUInt16LE(2, 32)
+  header.writeUInt16LE(16, 34)
+  header.write("data", 36)
+  header.writeUInt32LE(pcm.length, 40)
+  return Buffer.concat([header, pcm])
+}
+const DEMO_VOICE_WAV = demoVoiceNoteWav()
+// Radiografía demo visible (96×64, RGBA) para el adjunto de la bandeja: con un
+// PNG 1×1 no se distingue una imagen cargada de una rota al verificar el render.
+function demoXRayPng(): Buffer {
+  const width = 96
+  const height = 64
+  const raw = Buffer.alloc((width * 4 + 1) * height)
+  for (let y = 0; y < height; y++) {
+    const rowStart = y * (width * 4 + 1)
+    raw[rowStart] = 0
+    for (let x = 0; x < width; x++) {
+      const i = rowStart + 1 + x * 4
+      const dx = (x - width / 2) / (width / 2)
+      const dy = (y - height / 2) / (height / 2)
+      const r = Math.hypot(dx, dy)
+      // Anillo claro (diente) sobre fondo oscuro + marca diagonal (lesión).
+      const ring = r > 0.45 && r < 0.85
+      const mark = Math.abs((y - height / 2) * 1.4 - (x - width / 2)) < 3
+      const value = mark ? 235 : ring ? 205 : 45
+      raw[i] = value
+      raw[i + 1] = Math.min(255, value + (mark ? 10 : 25))
+      raw[i + 2] = Math.min(255, value + (mark ? 20 : 40))
+      raw[i + 3] = 255
+    }
+  }
+  const chunk = (type: string, body: Buffer): Buffer => {
+    const length = Buffer.alloc(4)
+    length.writeUInt32BE(body.length, 0)
+    const payload = Buffer.concat([Buffer.from(type, "ascii"), body])
+    const crc = Buffer.alloc(4)
+    crc.writeUInt32BE(crc32(payload), 0)
+    return Buffer.concat([length, payload, crc])
+  }
+  const ihdr = Buffer.alloc(13)
+  ihdr.writeUInt32BE(width, 0)
+  ihdr.writeUInt32BE(height, 4)
+  ihdr[8] = 8 // bits por canal
+  ihdr[9] = 6 // RGBA
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk("IHDR", ihdr),
+    chunk("IDAT", deflateSync(raw)),
+    chunk("IEND", Buffer.alloc(0)),
+  ])
+}
+function crc32(input: Buffer): number {
+  let crc = 0xffffffff
+  for (const byte of input) {
+    crc ^= byte
+    for (let bit = 0; bit < 8; bit++) crc = crc & 1 ? (crc >>> 1) ^ 0xedb88320 : crc >>> 1
+  }
+  return (crc ^ 0xffffffff) >>> 0
+}
+const DEMO_XRAY_PNG = demoXRayPng()
 const secretsKey = secretsKeyFromEnv(process.env.SECRETS_KEY)
 
 const db = createOwnerDb(databaseUrl)
@@ -144,6 +225,10 @@ async function wipeSeed(): Promise<void> {
     .select({ storageKey: patientDocument.storageKey })
     .from(patientDocument)
     .where(inArray(patientDocument.organizationId, SEED_ORGS))
+  const previousMessages = await db
+    .select({ attachments: message.attachments })
+    .from(message)
+    .where(inArray(message.organizationId, SEED_ORGS))
   await db.delete(patientRegistration).where(inArray(patientRegistration.organizationId, SEED_ORGS))
   await db.delete(patientRegistrationLink).where(inArray(patientRegistrationLink.organizationId, SEED_ORGS))
   await db.delete(patientContact).where(inArray(patientContact.organizationId, SEED_ORGS))
@@ -198,6 +283,19 @@ async function wipeSeed(): Promise<void> {
   await db.execute(sql`delete from "verification" where "identifier" ilike '%@odentia.dev%'`)
   await db.delete(user).where(inArray(user.id, [ANA_ID, LUIS_ID, CORA_ID]))
   for (const document of previousDocuments) await storage.deleteAttachment(document.storageKey)
+  for (const row of previousMessages) {
+    if (!Array.isArray(row.attachments)) continue
+    for (const attachment of row.attachments) {
+      if (
+        attachment &&
+        typeof attachment === "object" &&
+        "objectKey" in attachment &&
+        typeof attachment.objectKey === "string"
+      ) {
+        await storage.deleteAttachment(attachment.objectKey)
+      }
+    }
+  }
 }
 
 async function seedConversation(args: {
@@ -244,7 +342,9 @@ async function seedMessage(args: {
   direction: string
   senderKind: string
   senderUserId?: string | null
-  body: string
+  body?: string | null
+  contentType?: string
+  attachments?: unknown[]
   externalId: string
   status: string
   createdAt: Date
@@ -257,8 +357,9 @@ async function seedMessage(args: {
       direction: args.direction,
       senderKind: args.senderKind,
       senderUserId: args.senderUserId ?? null,
-      contentType: "text",
-      body: args.body,
+      contentType: args.contentType ?? "text",
+      body: args.body ?? null,
+      attachments: args.attachments ?? [],
       externalId: args.externalId,
       status: args.status,
       createdAt: args.createdAt,
@@ -475,6 +576,60 @@ await seedMessage({
   senderKind: "contact",
   body: "¿Atienden por la tarde? Trabajo hasta las 5",
   externalId: "seed-msg-3",
+  status: "received",
+  createdAt: hoursAgo(1),
+})
+// Adjuntos demo con bytes reales: la imagen se ve inline y la nota de voz con
+// su transcripción debajo (así se prueba el render sin TRANSCRIBE_*).
+const rosaImageRef = await storage.putAttachment({
+  orgId: ORG_A,
+  conversationId: convRosa.id,
+  bytes: DEMO_XRAY_PNG,
+  contentType: "image/png",
+  ext: "png",
+})
+await seedMessage({
+  orgId: ORG_A,
+  conversationId: convRosa.id,
+  direction: "inbound",
+  senderKind: "contact",
+  body: "Esta es la muela que me duele",
+  contentType: "image",
+  attachments: [
+    {
+      objectKey: rosaImageRef.objectKey,
+      mimeType: rosaImageRef.mimeType,
+      filename: "radiografia-demo.png",
+      size: rosaImageRef.size,
+    },
+  ],
+  externalId: "seed-msg-4",
+  status: "received",
+  createdAt: hoursAgo(1),
+})
+const rosaVoiceRef = await storage.putAttachment({
+  orgId: ORG_A,
+  conversationId: convRosa.id,
+  bytes: DEMO_VOICE_WAV,
+  contentType: "audio/wav",
+  ext: "wav",
+})
+await seedMessage({
+  orgId: ORG_A,
+  conversationId: convRosa.id,
+  direction: "inbound",
+  senderKind: "contact",
+  body: "Hola, quiero una cita para mañana",
+  contentType: "audio",
+  attachments: [
+    {
+      objectKey: rosaVoiceRef.objectKey,
+      mimeType: rosaVoiceRef.mimeType,
+      filename: "nota-de-voz-demo.wav",
+      size: rosaVoiceRef.size,
+    },
+  ],
+  externalId: "seed-msg-5",
   status: "received",
   createdAt: hoursAgo(1),
 })
