@@ -72,7 +72,7 @@ export function FormPanel({
     <section
       aria-labelledby={titleId}
       aria-describedby={description ? descriptionId : undefined}
-      className={cn("flex h-full min-h-0 flex-col overflow-hidden rounded-md bg-card", className)}
+      className={cn("flex h-full min-h-0 flex-col overflow-hidden rounded-sm bg-card", className)}
     >
       <FormSurface
         title={title}
