@@ -172,7 +172,6 @@ function OnboardingPage() {
             addressLine1: value.branchAddress || undefined,
           }),
         })
-        await apiFetch("/api/services/bootstrap", { method: "POST" })
       } catch (cause) {
         toast.error(cause instanceof Error ? cause.message : "Error al guardar los datos.")
         return
