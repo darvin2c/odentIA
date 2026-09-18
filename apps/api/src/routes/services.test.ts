@@ -1,6 +1,6 @@
 process.env.DOCKER_HOST ??= "unix:///mnt/wsl/podman-sockets/odentia.sock"
 
-import { createAppDb, createOwnerDb, type Db } from "@odentia/db"
+import { createAppDb, createOwnerDb, type Db, seedProcedureCodes } from "@odentia/db"
 import { secretsKeyFromEnv } from "@odentia/services"
 import { sql } from "drizzle-orm"
 import { migrate } from "drizzle-orm/postgres-js/migrator"
@@ -91,12 +91,10 @@ beforeAll(async () => {
   await ownerDb.execute(
     sql`insert into "user" ("id", "name", "email") values ('u-1', 'Doctora', 'doc@test.dev') on conflict do nothing`,
   )
-  await ownerDb.execute(
-    sql`insert into "treatment_template" ("key", "name", "specialty", "scope") values
-      ('prevencion:profilaxis-test', 'Profilaxis de prueba', 'prevencion', 'general'),
-      ('restauradora:resina-test', 'Resina de prueba', 'restauradora', 'surfaces')
-      on conflict ("key") do nothing`,
-  )
+  // Catálogo oficial real (mismo seed que dev/CI): la biblioteca y la
+  // proyección 1:1 plantilla↔código son prerrequisito de /services/templates
+  // y de las ofertas derivadas de plantilla.
+  await seedProcedureCodes(ownerDb)
 }, 180_000)
 
 afterAll(async () => {
@@ -121,6 +119,11 @@ async function getJson(app: Hono, path: string): Promise<Response> {
   return app.request(path, { method: "GET" })
 }
 
+// Plantillas de la biblioteca oficial vigente (RM-550-2023-MINSA): el ámbito
+// y la especialidad se heredan del catálogo 1:1, no de un fixture propio.
+const PREVENCION_KEY = "cpms:RM-550-2023-MINSA:D1110" // Profilaxis dental
+const RESTAURADORA_KEY = "cpms:RM-550-2023-MINSA:D2391" // Resina, 1 superficie
+
 async function templateIdByKey(key: string): Promise<string> {
   const rows = (await ownerDb.execute(
     sql`select "id" from "treatment_template" where "key" = ${key}`,
@@ -143,7 +146,7 @@ it("services: biblioteca global sin precios y con filtro", async () => {
   const res = await getJson(app, "/services/templates?specialty=prevencion")
   expect(res.status).toBe(200)
   const body = (await res.json()) as { data: Array<{ key: string }> }
-  expect(body.data.map((row) => row.key)).toContain("prevencion:profilaxis-test")
+  expect(body.data.map((row) => row.key)).toContain(PREVENCION_KEY)
   expect(body.data.every((row) => !("priceCents" in row))).toBe(true)
 })
 
@@ -191,7 +194,7 @@ it("services: POST crea y PATCH edita con owner/admin; member 403", async () => 
 
 it("services: oferta desde plantilla hereda especialidad y ámbito", async () => {
   const app = buildApp("owner")
-  const tpl = await templateIdByKey("prevencion:profilaxis-test")
+  const tpl = await templateIdByKey(PREVENCION_KEY)
   const res = await app.request("/services", {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -202,7 +205,7 @@ it("services: oferta desde plantilla hereda especialidad y ámbito", async () =>
   expect(body.data.source).toBe("template")
   expect(body.data.specialty).toBe("prevencion")
   expect(body.data.scope).toBe("general")
-  expect(body.data.name).toBe("Profilaxis de prueba")
+  expect(body.data.name).toBe("Profilaxis dental")
 
   const contradict = await app.request(`/services/${body.data.id}`, {
     method: "PATCH",
@@ -214,7 +217,7 @@ it("services: oferta desde plantilla hereda especialidad y ámbito", async () =>
 
 it("services: from-templates crea base sin tarifa sin pisar existentes", async () => {
   const app = buildApp("owner")
-  const tpl = await templateIdByKey("restauradora:resina-test")
+  const tpl = await templateIdByKey(RESTAURADORA_KEY)
   const first = await app.request("/services/from-templates", {
     method: "POST",
     headers: { "content-type": "application/json" },

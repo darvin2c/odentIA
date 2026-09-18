@@ -565,7 +565,8 @@ it("encounters: procedure exige servicio o plan; inactivo u otra org no pasan", 
   expect(bare.status).toBe(400)
 
   const inactive = await post({ serviceId: "c4444444-4444-4444-8444-444444444444" })
-  expect(inactive.status).toBe(400)
+  expect(inactive.status).toBe(409)
+  expect(((await inactive.json()) as ErrorBody).error.code).toBe("SERVICE_INACTIVE")
 
   const foreign = await post({ serviceId: "d5555555-5555-4555-8555-555555555555" })
   expect(foreign.status).toBe(404)

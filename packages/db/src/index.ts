@@ -1,6 +1,7 @@
 export { setupAgentMemory } from "./agent-memory.js"
 export { createAppDb, createOwnerDb, type Db } from "./client.js"
 export { withOrgContext } from "./context.js"
+export { seedProcedureCodes } from "./procedure-codes.js"
 export {
   type AgentRunJob,
   type DemoTaskPayload,
