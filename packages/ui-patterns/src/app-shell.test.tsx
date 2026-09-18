@@ -10,7 +10,6 @@ afterEach(() => {
   document.body.innerHTML = ""
 })
 
-
 function AnchorLink({
   to,
   search,
@@ -80,14 +79,52 @@ describe("AppShell userMenu", () => {
     fireEvent.click(screen.getByRole("button", { name: /Ada/ }))
     const darkTab = await screen.findByRole("tab", { name: "Tema oscuro" })
     expect(screen.getByText("Apariencia")).toBeTruthy()
-    expect(
-      screen.getByRole("tablist").querySelectorAll('[role="tab"]'),
-    ).toHaveLength(3)
+    expect(screen.getByRole("tablist").querySelectorAll('[role="tab"]')).toHaveLength(3)
     fireEvent.click(darkTab)
     expect(document.documentElement.classList.contains("dark")).toBe(true)
     expect(localStorage.getItem("odentia-theme")).toBe("dark")
     expect(await screen.findByRole("menuitem", { name: "Cerrar sesión" })).toBeTruthy()
     localStorage.clear()
     document.documentElement.classList.remove("dark")
+  })
+})
+
+describe("AppShell footerItems", () => {
+  it("ancla los ítems encima del bloque de usuario y los marca activos por prefijo", () => {
+    render(
+      <AppShell
+        items={[{ label: "Bandeja", icon: UserRound, to: "/inbox" }]}
+        LinkComponent={AnchorLink}
+        pathname="/settings/channels"
+        user={{ name: "Ada", email: "ada@x.com" }}
+        footerItems={[{ label: "Configuración", icon: KeyRound, to: "/settings" }]}
+        onSignOut={() => {}}
+        brand={<span>odentIA</span>}
+      >
+        <p>contenido</p>
+      </AppShell>,
+    )
+    const item = screen.getByRole("link", { name: "Configuración" })
+    expect(item.getAttribute("href")).toBe("/settings")
+    // `/settings` cubre sus apartados: activo en `/settings/channels`.
+    expect(item.getAttribute("aria-current")).toBe("page")
+    const userButton = screen.getByRole("button", { name: /Ada/ })
+    expect(item.compareDocumentPosition(userButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it("sin footerItems no añade nada al pie", () => {
+    render(
+      <AppShell
+        items={[]}
+        LinkComponent={AnchorLink}
+        pathname="/"
+        user={{ name: "Ada", email: "ada@x.com" }}
+        onSignOut={() => {}}
+        brand={<span>odentIA</span>}
+      >
+        <p>contenido</p>
+      </AppShell>,
+    )
+    expect(screen.queryByRole("link", { name: "Configuración" })).toBeNull()
   })
 })

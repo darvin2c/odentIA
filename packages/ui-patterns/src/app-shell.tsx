@@ -22,26 +22,34 @@ import {
   SidebarMenuItem,
   SidebarProvider,
   SidebarRail,
+  SidebarSeparator,
   SidebarTrigger,
   TooltipProvider,
   useSidebar,
 } from "@odentia/ui"
-import type { LucideIcon } from "lucide-react"
 import { ChevronDown, ExternalLink, LogOut } from "lucide-react"
 import * as React from "react"
-import { ThemeTabs, useTheme, type ThemeMode } from "./theme.js"
+import { type ThemeMode, ThemeTabs, useTheme } from "./theme.js"
 // ----- Types -----
+/**
+ * Icono decorativo de la navegación: sirve cualquier componente que pinte un svg
+ * con `className` (lucide `LucideIcon`, `@remixicon/react`, un svg propio). Lo
+ * comparten el menú del `AppShell` y la navegación de sección para que el mismo
+ * icono valga en los dos.
+ */
+export type NavIcon = React.ComponentType<{ className?: string }>
+
 export type AppShellNavItem = {
   label: string
   to: string
-  icon: LucideIcon
+  icon: NavIcon
   badge?: string | number
   external?: boolean
 }
 
 export type AppShellNavGroup = {
   label: string
-  icon?: LucideIcon
+  icon?: NavIcon
   children: AppShellNavItem[]
   defaultOpen?: boolean
 }
@@ -52,21 +60,28 @@ export type AppShellUser = { name: string; email?: string; avatarUrl?: string }
 
 export type AppShellUserMenuItem = {
   label: string
-  icon: LucideIcon
+  icon: NavIcon
   to: string
   search?: Record<string, string>
 }
 
+/**
+ * Contrato del link que aporta el router (TanStack `Link` en panel/platform).
+ * Lo comparten `AppShell` y `SectionNav`: el mismo componente de router sirve
+ * en el shell y en la navegación de sección, sin adaptadores.
+ */
+export type ShellLinkComponent = React.ComponentType<{
+  to: string
+  search?: Record<string, string>
+  className?: string
+  children: React.ReactNode
+  title?: string
+  onClick?: () => void
+}>
+
 export interface AppShellProps {
   items: AppShellNavEntry[]
-  LinkComponent: React.ComponentType<{
-    to: string
-    search?: Record<string, string>
-    className?: string
-    children: React.ReactNode
-    title?: string
-    onClick?: () => void
-  }>
+  LinkComponent: ShellLinkComponent
   pathname: string
   user: AppShellUser
   userMenuItems?: AppShellUserMenuItem[]
@@ -78,6 +93,10 @@ export interface AppShellProps {
   searchSlot?: React.ReactNode
   topbarActions?: React.ReactNode
   sidebarFooter?: React.ReactNode
+  /** Ítems de navegación anclados al pie del sidebar, encima del bloque de
+   * usuario (ajustes de la organización, por ejemplo). Mismo ítem que el nav
+   * principal: activo por URL, badge y cierre del drawer móvil. */
+  footerItems?: AppShellNavItem[]
   children: React.ReactNode
 }
 
@@ -291,6 +310,7 @@ export function AppShell(props: AppShellProps): React.JSX.Element {
     onThemeChange,
     brand,
     sidebarFooter,
+    footerItems,
     children,
   } = props
   const { mode: themeMode, setMode: setThemeMode } = useTheme({
@@ -348,6 +368,22 @@ export function AppShell(props: AppShellProps): React.JSX.Element {
           <SidebarNav items={items} pathname={pathname} LinkComponent={LinkComponent} />
           <SidebarFooter>
             {sidebarFooter}
+            {footerItems?.length ? (
+              <>
+                <SidebarMenu>
+                  {footerItems.map((item) => (
+                    <NavItemButton
+                      key={item.to}
+                      item={item}
+                      pathname={pathname}
+                      LinkComponent={LinkComponent}
+                    />
+                  ))}
+                </SidebarMenu>
+                {/* Separa el menú anclado del bloque de usuario. */}
+                <SidebarSeparator />
+              </>
+            ) : null}
             <DropdownMenu>
               <DropdownMenuTrigger className="flex w-full items-center gap-3 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-sidebar-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
                 <Avatar className="size-8">
@@ -370,9 +406,10 @@ export function AppShell(props: AppShellProps): React.JSX.Element {
           </SidebarFooter>
           <SidebarRail />
         </Sidebar>
-        <SidebarInset>
-          <main className="min-h-svh">{children}</main>
-        </SidebarInset>
+        {/* `SidebarInset` ya renderiza el landmark `<main>`: un `<main>`
+            anidado sería HTML inválido y duplicaría el landmark para lectores
+            de pantalla. El alto mínimo vive ahora en el propio inset. */}
+        <SidebarInset className="min-h-svh">{children}</SidebarInset>
       </SidebarProvider>
     </TooltipProvider>
   )

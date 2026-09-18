@@ -1,0 +1,84 @@
+import {
+  RiCalendarFill,
+  RiCalendarLine,
+  RiChat3Fill,
+  RiChat3Line,
+  RiFileListFill,
+  RiFileListLine,
+  RiInbox2Fill,
+  RiInbox2Line,
+  RiSettings3Fill,
+  RiSettings3Line,
+  RiUserFill,
+  RiUserLine,
+} from "@remixicon/react"
+import type { ReactNode } from "react"
+import type { SectionNavItem } from "./types.js"
+
+export const noop = () => {}
+
+/** Link de router falso con el mismo contrato que usan panel y platform. */
+export function StoryLink({
+  to,
+  search,
+  children,
+  ...rest
+}: {
+  to?: string
+  search?: Record<string, string>
+  children: ReactNode
+  [key: string]: unknown
+}) {
+  return (
+    <a href={search ? `${to}?${new URLSearchParams(search)}` : to} {...rest}>
+      {children}
+    </a>
+  )
+}
+
+export const secciones: SectionNavItem[] = [
+  { label: "Resumen", to: "/pacientes/123", icon: RiFileListLine, iconActive: RiFileListFill },
+  {
+    label: "Historia",
+    to: "/pacientes/123/historia",
+    icon: RiFileListLine,
+    iconActive: RiFileListFill,
+  },
+  {
+    label: "Citas",
+    to: "/pacientes/123/citas",
+    icon: RiCalendarLine,
+    iconActive: RiCalendarFill,
+    badge: 2,
+  },
+  { label: "Pagos", to: "/pacientes/123/pagos", icon: RiInbox2Line, iconActive: RiInbox2Fill },
+]
+
+export const destinos: SectionNavItem[] = [
+  { label: "Bandeja", to: "/bandeja", icon: RiInbox2Line, iconActive: RiInbox2Fill, badge: 3 },
+  { label: "Chats", to: "/conversaciones", icon: RiChat3Line, iconActive: RiChat3Fill, badge: 12 },
+  { label: "Agenda", to: "/agenda", icon: RiCalendarLine, iconActive: RiCalendarFill },
+  { label: "Pacientes", to: "/pacientes", icon: RiUserLine, iconActive: RiUserFill },
+  { label: "Ajustes", to: "/ajustes", icon: RiSettings3Line, iconActive: RiSettings3Fill },
+]
+
+/** Contenido de ejemplo: un bloque alto para ver el pegado al scrollear. */
+export function SectionBody({
+  title = "Historia clínica",
+  note = "Contenido de la sección activa. Con scroll, la navegación queda pegada al borde.",
+  placeholder = "Bloque alto para probar el pegado en ambos modos.",
+}: {
+  title?: string
+  note?: string
+  placeholder?: string
+}) {
+  return (
+    <>
+      <h1 className="text-xl font-semibold tracking-tight">{title}</h1>
+      <p className="mt-1 text-sm text-muted-foreground">{note}</p>
+      <div className="mt-4 h-[160vh] rounded-md bg-card p-6 text-sm text-muted-foreground">
+        {placeholder}
+      </div>
+    </>
+  )
+}

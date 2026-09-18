@@ -4,7 +4,7 @@
  * nunca hex hardcodeado. Primitivas vienen del registry shadcn (Button, Card,
  * Input, Label, Field, Skeleton, Spinner, Empty, Sheet/Drawer); aquí viven
  * solo las composiciones que no existen en el registry (PageShell, AppShell,
- * FormDrawer, estados, filtros, DataTable) y el catálogo de
+ * SectionNav, FormDrawer, estados, filtros, DataTable) y el catálogo de
  * copy compartido `common`.
  */
 
@@ -15,6 +15,8 @@ export type {
   AppShellProps,
   AppShellUser,
   AppShellUserMenuItem,
+  NavIcon,
+  ShellLinkComponent,
 } from "./app-shell.js"
 export { AppShell, isNavItemActive, PageHeader } from "./app-shell.js"
 export { AuthCard } from "./auth-card.js"
@@ -53,6 +55,13 @@ export {
   type RowActionsProps,
   type RowActionTone,
 } from "./row-actions.js"
+export {
+  SectionNav,
+  type SectionNavItem,
+  type SectionNavMobilePosition,
+  type SectionNavProps,
+  type SectionNavSide,
+} from "./section-nav/index.js"
 export {
   applyTheme,
   readStoredTheme,
