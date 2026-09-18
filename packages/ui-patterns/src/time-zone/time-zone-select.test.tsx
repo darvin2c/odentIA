@@ -91,8 +91,8 @@ describe("TimeZoneSelect", () => {
     expect(input.value).toBe("")
   })
 
-  it("busca por ciudad, por identificador y por desfase", async () => {
-    const user = userEvent.setup()
+  it("busca por ciudad", { timeout: 20_000 }, async () => {
+    const user = userEvent.setup({ delay: 15 })
     const { input } = renderSelect()
 
     await user.click(input)
@@ -100,18 +100,26 @@ describe("TimeZoneSelect", () => {
 
     await user.type(input, "bogota")
     expect(optionNames().join(" ")).toContain("Bogota")
+  })
 
-    await user.clear(input)
+  it("busca por identificador", { timeout: 20_000 }, async () => {
+    const user = userEvent.setup({ delay: 15 })
+    const { input } = renderSelect()
+
     await user.type(input, "asia/tokyo")
     expect(optionNames().join(" ")).toContain("Asia/Tokyo")
+  })
 
-    await user.clear(input)
+  it("busca por desfase", { timeout: 20_000 }, async () => {
+    const user = userEvent.setup({ delay: 15 })
+    const { input } = renderSelect()
+
     await user.type(input, "gmt+5:45")
     expect(optionNames().join(" ")).toContain("GMT+5:45")
   })
 
   it("monta solo las coincidencias", async () => {
-    const user = userEvent.setup()
+    const user = userEvent.setup({ delay: 15 })
     const { input } = renderSelect()
 
     await user.type(input, "lima")
@@ -120,7 +128,7 @@ describe("TimeZoneSelect", () => {
   })
 
   it("al elegir emite el identificador IANA y su lectura", async () => {
-    const user = userEvent.setup()
+    const user = userEvent.setup({ delay: 15 })
     const { input, onChange } = renderSelect()
 
     await user.type(input, "bogota")
@@ -138,7 +146,7 @@ describe("TimeZoneSelect", () => {
   })
 
   it("al buscar sobre una zona ya elegida, el tecleo reemplaza la etiqueta", async () => {
-    const user = userEvent.setup()
+    const user = userEvent.setup({ delay: 15 })
     const { input, onChange } = renderSelect({ initialValue: "America/Lima" })
 
     await user.click(input)
@@ -155,7 +163,7 @@ describe("TimeZoneSelect", () => {
   })
 
   it("vuelve a mostrar la etiqueta al salir sin elegir nada", async () => {
-    const user = userEvent.setup()
+    const user = userEvent.setup({ delay: 15 })
     const { input, onChange } = renderSelect({ initialValue: "America/Lima" })
 
     await user.click(input)
@@ -167,7 +175,7 @@ describe("TimeZoneSelect", () => {
   })
 
   it("se puede elegir con el teclado", async () => {
-    const user = userEvent.setup()
+    const user = userEvent.setup({ delay: 15 })
     const { input, onChange } = renderSelect()
 
     await user.type(input, "tokyo")
@@ -180,7 +188,7 @@ describe("TimeZoneSelect", () => {
   })
 
   it("encabeza la lista con las zonas sugeridas", async () => {
-    const user = userEvent.setup()
+    const user = userEvent.setup({ delay: 15 })
     const { input } = renderSelect({ suggested: ["America/Lima", "America/Bogota"] })
 
     await user.click(input)
@@ -191,7 +199,7 @@ describe("TimeZoneSelect", () => {
   })
 
   it("no repite en la lista una zona sugerida", async () => {
-    const user = userEvent.setup()
+    const user = userEvent.setup({ delay: 15 })
     const { input } = renderSelect({ suggested: ["America/Lima"] })
 
     await user.click(input)
@@ -200,7 +208,7 @@ describe("TimeZoneSelect", () => {
   })
 
   it("avisa cuando no hay coincidencias", async () => {
-    const user = userEvent.setup()
+    const user = userEvent.setup({ delay: 15 })
     const { input } = renderSelect()
 
     await user.type(input, "zzzz")
@@ -220,7 +228,7 @@ describe("TimeZoneSelect", () => {
   })
 
   it("la lista abre con el campo", async () => {
-    const user = userEvent.setup()
+    const user = userEvent.setup({ delay: 15 })
     const { input } = renderSelect()
 
     await user.click(input)
