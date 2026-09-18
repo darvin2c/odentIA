@@ -17,6 +17,11 @@ import {
   cie10Code,
   clinicalNote,
   encounter,
+  encounterProcedure,
+  clinicalFollowUp,
+  prescription,
+  patientPayment,
+  treatmentBudget,
   encounterTooth,
   odontogramAssessment,
   odontogramEntry,
@@ -60,6 +65,9 @@ const DOCUMENT_CATEGORIES = [
   "radiografia",
   "foto_clinica",
   "informe",
+  "presupuesto",
+  "receta",
+  "comprobante_pago",
   "otro",
 ] as const
 
@@ -1257,6 +1265,11 @@ export type DocumentContextRow = typeof patientDocumentContext.$inferSelect
 export interface DocumentContextInput {
   encounterId?: string | null
   planItemId?: string | null
+  budgetId?: string | null
+  encounterProcedureId?: string | null
+  prescriptionId?: string | null
+  followUpId?: string | null
+  paymentId?: string | null
   toothNumbers?: readonly number[] | null
   tags?: readonly string[] | null
 }
@@ -1280,6 +1293,11 @@ export interface PatientDocumentWithContext {
   createdAt: Date
   encounterId: string | null
   planItemId: string | null
+  budgetId: string | null
+  encounterProcedureId: string | null
+  prescriptionId: string | null
+  followUpId: string | null
+  paymentId: string | null
   toothNumbers: number[]
   tags: string[]
   contextVersion: number
@@ -1401,6 +1419,11 @@ function mergeDocumentContext(
     createdAt: doc.createdAt,
     encounterId: ctx?.encounterId ?? null,
     planItemId: ctx?.planItemId ?? null,
+    budgetId: ctx?.budgetId ?? null,
+    encounterProcedureId: ctx?.encounterProcedureId ?? null,
+    prescriptionId: ctx?.prescriptionId ?? null,
+    followUpId: ctx?.followUpId ?? null,
+    paymentId: ctx?.paymentId ?? null,
     toothNumbers: ctx?.toothNumbers ? [...ctx.toothNumbers] : [],
     tags: ctx?.tags ? [...ctx.tags] : [],
     contextVersion: ctx?.version ?? 0,
@@ -1421,6 +1444,37 @@ async function requireDocumentRow(tx: Db, orgId: string, patientId: string, docu
     .limit(1)
   if (!row) throw notFound("Documento")
   return row
+}
+
+function extendedDocumentLinks(input: DocumentContextInput, current?: DocumentContextRow) {
+  return {
+    budgetId: input.budgetId === undefined ? current?.budgetId ?? null : input.budgetId,
+    encounterProcedureId: input.encounterProcedureId === undefined ? current?.encounterProcedureId ?? null : input.encounterProcedureId,
+    prescriptionId: input.prescriptionId === undefined ? current?.prescriptionId ?? null : input.prescriptionId,
+    followUpId: input.followUpId === undefined ? current?.followUpId ?? null : input.followUpId,
+    paymentId: input.paymentId === undefined ? current?.paymentId ?? null : input.paymentId,
+  }
+}
+
+async function validateExtendedDocumentLinks(tx: Db, orgId: string, patientId: string, input: DocumentContextInput) {
+  for (const [id, table, label] of [
+    [input.budgetId, treatmentBudget, "Presupuesto"],
+    [input.prescriptionId, prescription, "Receta"],
+    [input.followUpId, clinicalFollowUp, "Control"],
+    [input.paymentId, patientPayment, "Pago"],
+  ] as const) {
+    if (!id) continue
+    const [row] = await tx.select({ id: table.id }).from(table)
+      .where(and(eq(table.id, id), eq(table.organizationId, orgId), eq(table.patientId, patientId)))
+    if (!row) throw notFound(label)
+  }
+  if (input.encounterProcedureId) {
+    const [row] = await tx.select({ id: encounterProcedure.id }).from(encounterProcedure)
+      .innerJoin(encounter, and(eq(encounter.id, encounterProcedure.encounterId),
+        eq(encounter.organizationId, orgId), eq(encounter.patientId, patientId)))
+      .where(and(eq(encounterProcedure.id, input.encounterProcedureId), eq(encounterProcedure.organizationId, orgId)))
+    if (!row) throw notFound("Procedimiento")
+  }
 }
 
 export async function registerPatientDocument(
@@ -1447,6 +1501,7 @@ export async function registerPatientDocument(
   // Al registrar solo se permite vincular borradores (la atención aún es mutable).
   if (input.encounterId) await requireDraftLink(tx, orgId, patientId, input.encounterId)
   if (input.planItemId) await requirePatientPlanItem(tx, orgId, patientId, input.planItemId)
+  await validateExtendedDocumentLinks(tx, orgId, patientId, input)
   const [row] = await tx
     .insert(patientDocument)
     .values({
@@ -1470,6 +1525,7 @@ export async function registerPatientDocument(
       version: 1,
       encounterId: input.encounterId ?? null,
       planItemId: input.planItemId ?? null,
+      ...extendedDocumentLinks(input),
       toothNumbers,
       tags,
       authorUserId: actorUserId,
@@ -1628,6 +1684,8 @@ export async function correctDocumentContext(
       : normalizeDocumentTags(input.tags)
   if (encounterId) await requireVisibleEncounter(tx, orgId, patientId, encounterId)
   if (planItemId) await requirePatientPlanItem(tx, orgId, patientId, planItemId)
+  const extended = extendedDocumentLinks(input, current)
+  await validateExtendedDocumentLinks(tx, orgId, patientId, extended)
   let next: DocumentContextRow | undefined
   try {
     ;[next] = await tx
@@ -1639,6 +1697,7 @@ export async function correctDocumentContext(
         version: current.version + 1,
         encounterId,
         planItemId,
+        ...extended,
         toothNumbers,
         tags,
         authorUserId: actorUserId,

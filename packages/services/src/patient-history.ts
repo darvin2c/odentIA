@@ -19,6 +19,7 @@ import { getCurrentDocumentContexts, getOdontogram, listPatientDocuments } from 
 import { decodeCursor, encodeCursor } from "./cursors.js"
 import { validation } from "./errors.js"
 import { requirePatient } from "./patients.js"
+import { listTreatmentJourneys } from "./treatment-journey.js"
 
 /** Presupuestos que ya no representan trabajo vigente. */
 const RETIRED_BUDGETS = ["cancelado", "historico"] as const
@@ -232,8 +233,8 @@ export async function getPatientSummary(tx: Db, orgId: string, patientId: string
       and(
         eq(treatmentPlanItem.organizationId, orgId),
         eq(treatmentPlanItem.patientId, patientId),
-        inArray(treatmentPlanItem.status, ["pendiente", "programado"]),
-        eq(treatmentBudgetItem.decision, "aceptado"),
+        inArray(treatmentPlanItem.status, ["pendiente", "programado", "en_curso", "suspendido"]),
+        eq(treatmentPlanItem.decisionStatus, "aceptado"),
         notInArray(treatmentBudget.status, [...RETIRED_BUDGETS]),
       ),
     )
@@ -466,6 +467,7 @@ export async function getPatientSummary(tx: Db, orgId: string, patientId: string
   })
 
   return {
+    treatmentJourneys: await listTreatmentJourneys(tx, orgId, patientId, 10),
     lastEncounter: lastEncounter ?? null,
     openEncounterId: draft?.id ?? null,
     nextAppointmentAt: lastEncounter?.nextAppointmentAt ?? null,
@@ -496,7 +498,7 @@ export async function getPatientSummary(tx: Db, orgId: string, patientId: string
   }
 }
 
-export const TIMELINE_TYPES = ["encounter", "note", "anamnesis", "document", "odontogram"] as const
+export const TIMELINE_TYPES = ["encounter", "note", "anamnesis", "document", "odontogram", "plan", "budget", "follow_up", "prescription", "payment"] as const
 export type TimelineType = (typeof TIMELINE_TYPES)[number]
 export interface TimelineItem {
   id: string
@@ -526,6 +528,11 @@ export interface TimelineItem {
   documents?: RelatedDocument[]
   tags?: string[]
   encounterId?: string | null
+  planItemId?: string | null
+  budgetId?: string | null
+  followUpId?: string | null
+  prescriptionId?: string | null
+  paymentId?: string | null
 }
 
 export async function getTimeline(
@@ -594,6 +601,18 @@ export async function getTimeline(
     branches.push(
       sql`select id, 'document'::text as kind, created_at from patient_document where organization_id = ${orgId} and patient_id = ${patientId}::uuid ${linkedFilter} ${toothFilter} ${input.documentCategory ? sql`and category = ${input.documentCategory}` : sql``}`,
     )
+  }
+  const journeySources = [
+    { type: "plan", table: "treatment_plan_item", title: sql`title`, author: "created_by", ref: "planItemId" },
+    { type: "budget", table: "treatment_budget", title: sql`title`, author: "created_by", ref: "budgetId" },
+    { type: "follow_up", table: "clinical_follow_up", title: sql`title`, author: "created_by", ref: "followUpId" },
+    { type: "prescription", table: "prescription", title: sql`'Receta ' || prescription_number`, author: "issued_by", ref: "prescriptionId" },
+    { type: "payment", table: "patient_payment", title: sql`'Pago registrado'`, author: "created_by", ref: "paymentId" },
+  ] as const
+  for (const source of journeySources) {
+    if (!types.includes(source.type) || tooth != null) continue
+    branches.push(sql`select id, ${source.type}::text as kind, created_at from ${sql.identifier(source.table)}
+      where organization_id = ${orgId} and patient_id = ${patientId}::uuid`)
   }
   if (!branches.length) return { data: [], nextCursor: null, timezone, locale }
   const rows = await tx.execute<{ id: string; kind: TimelineType; cursor_ts: string }>(sql`
@@ -771,6 +790,18 @@ export async function getTimeline(
         encounterId: null,
       })
     }
+  for (const source of journeySources) {
+    const sourceIds = ids(source.type)
+    if (!sourceIds.length) continue
+    const records = await tx.execute<{ id: string; created_at: Date; title: string; author: string | null }>(
+      sql`select id, created_at, ${source.title} as title, ${sql.identifier(source.author)} as author
+        from ${sql.identifier(source.table)} where organization_id = ${orgId} and patient_id = ${patientId}::uuid
+        and id in (${sql.join(sourceIds.map(id => sql`${id}::uuid`), sql`, `)})`)
+    for (const row of records) hydrated.set(row.id, {
+      id: row.id, refId: row.id, type: source.type, createdAt: new Date(row.created_at),
+      title: row.title, authorId: row.author, toothNumbers: [], [source.ref]: row.id,
+    })
+  }
   const last = page[page.length - 1]!
   return {
     data: page.map((row) => hydrated.get(row.id)!),

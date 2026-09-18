@@ -1,25 +1,29 @@
 import type { Db } from "@odentia/db"
 import {
   orgCounter,
+  encounterProcedure,
+  patientCharge,
+  patientPaymentApplication,
   treatmentBudget,
   treatmentBudgetItem,
   treatmentPlan,
   treatmentPlanItem,
 } from "@odentia/db/schema/clinical"
 import { auditEvent } from "@odentia/db/schema/org"
-import { and, asc, eq, inArray, sql } from "drizzle-orm"
+import { and, asc, eq, inArray, isNull, ne, sql } from "drizzle-orm"
 import { notFound, ServiceError, validation } from "./errors.js"
 import { requirePatient } from "./patients.js"
 import type { PlanItemDecision } from "./plan.js"
-import { PLAN_ITEM_DECISIONS } from "./plan.js"
+import { planDecisions } from "./plan.js"
+import { requireDecisionContact } from "./responsibilities.js"
 import { assertExecutableCodings } from "./procedure-codings.js"
 
 /**
  * Documento económico de un plan clínico: cabecera con decisión auditada +
  * líneas snapshot de lo realmente cotizado (no un join mutable a la oferta
  * vigente). El presupuesto nace de un plan (nunca aislado), con ítems
- * elegibles explícitos y una sola moneda. `acceptedItemIds` identifica ítems
- * clínicos incluidos en ESE documento; la decisión se escribe en sus líneas.
+ * elegibles explícitos y una sola moneda. La decisión por línea se conserva
+ * como evidencia; la indicación guarda la decisión clínica vigente.
  */
 
 export const BUDGET_STATUSES = [
@@ -28,6 +32,8 @@ export const BUDGET_STATUSES = [
   "aceptado",
   "parcial",
   "rechazado",
+  "pospuesto",
+  "sustituido",
   "cancelado",
   "historico",
 ] as const
@@ -59,9 +65,16 @@ export interface UpdateBudgetDraftInput {
 }
 
 export interface DecideBudgetInput {
-  acceptedItemIds: string[]
-  acceptedByName: string
+  decisions: Array<{ planItemId: string; decision: "aceptado" | "rechazado" | "pospuesto" }>
+  decidedByContactId?: string | null
   decisionNote?: string | null
+}
+
+export interface ReviseBudgetInput {
+  itemIds: string[]
+  title?: string | null
+  notes?: string | null
+  reason: string
 }
 
 function conflict(code: string, message: string): ServiceError {
@@ -279,7 +292,7 @@ async function requireQuotableItems(
   if (items.length !== sorted.length) throw notFound("Ítem del plan")
   for (const item of items) {
     if (item.planId !== planId) throw validation("Todos los ítems deben pertenecer al plan")
-    if (item.status === "realizado" || item.status === "cancelado") {
+    if (["realizado", "cancelado", "reemplazado"].includes(item.status)) {
       throw conflict("ITEM_CLOSED", "El tratamiento está cerrado y no puede cotizarse")
     }
     // Histórico ambiguo heredado: un nuevo presupuesto nunca cotiza varias
@@ -338,8 +351,7 @@ async function requireQuotableItems(
         "El tratamiento ya está cotizado en un presupuesto vigente",
       )
     }
-    const line = linesByItem.get(item.id)
-    const decision = (line?.decision ?? "pendiente") as PlanItemDecision
+    const decision = item.decisionStatus as PlanItemDecision
     if (decision === "aceptado") {
       throw conflict("ITEM_CLOSED", "El tratamiento ya fue aceptado y no puede recotizarse")
     }
@@ -508,7 +520,7 @@ export async function presentBudget(
   if (lines.length === 0) throw validation("El presupuesto no tiene ítems")
   const [updated] = await tx
     .update(treatmentBudget)
-    .set({ status: "presentado", updatedAt: new Date() })
+    .set({ status: "presentado", presentedAt: new Date(), updatedAt: new Date() })
     .where(
       and(
         eq(treatmentBudget.id, budgetId),
@@ -518,6 +530,18 @@ export async function presentBudget(
     )
     .returning()
   if (!updated) throw notFound("Presupuesto")
+  if (current.supersedesBudgetId) {
+    const previous = await lockBudgetRow(tx, orgId, patientId, current.supersedesBudgetId)
+    if (!["presentado", "aceptado", "parcial", "pospuesto"].includes(previous.status)) {
+      throw conflict("BUDGET_STATUS", "La propuesta anterior ya no admite sustitución")
+    }
+    await assertRetainedExecutedItems(tx, orgId, patientId, previous.id, lines.map(l => l.planItemId))
+    await tx.update(treatmentBudget).set({ status: "sustituido", updatedAt: new Date() })
+      .where(and(eq(treatmentBudget.id, previous.id), eq(treatmentBudget.organizationId, orgId)))
+    await tx.update(treatmentPlanItem).set({ budgetId, updatedAt: new Date() })
+      .where(and(eq(treatmentPlanItem.organizationId, orgId), eq(treatmentPlanItem.patientId, patientId),
+        inArray(treatmentPlanItem.id, lines.map(l => l.planItemId))))
+  }
   await audit(tx, orgId, actorUserId, "budget.presented", budgetId, {
     patientId,
     itemCount: lines.length,
@@ -552,68 +576,74 @@ export async function decideBudget(
   if (current.status !== "presentado") {
     throw conflict("BUDGET_STATUS", "Solo un presupuesto presentado puede decidirse")
   }
-  if (!Array.isArray(input.acceptedItemIds)) throw validation("acceptedItemIds debe ser un arreglo")
-  const accepted = new Set<string>()
-  for (const id of input.acceptedItemIds) {
-    if (typeof id !== "string" || !id) throw validation("acceptedItemIds contiene un id inválido")
-    accepted.add(id)
-  }
-  const acceptedByName = input.acceptedByName?.trim() ?? ""
-  if (!acceptedByName || acceptedByName.length > 200) {
-    throw validation("acceptedByName debe tener 1–200 caracteres")
-  }
   const decisionNote = assertNotes(input.decisionNote) ?? null
   const lines = await listBudgetLines(tx, orgId, patientId, budgetId)
-  const knownIds = new Set(lines.map((line) => line.planItemId))
-  for (const id of accepted) {
-    if (!knownIds.has(id))
-      throw validation("acceptedItemIds contiene un tratamiento ajeno al presupuesto")
+  if (!Array.isArray(input.decisions) || input.decisions.length !== lines.length) {
+    throw validation("Debe decidir cada línea exactamente una vez")
   }
-  const acceptedCount = lines.filter((line) => accepted.has(line.planItemId)).length
-  const status: BudgetStatus =
-    acceptedCount === lines.length ? "aceptado" : acceptedCount === 0 ? "rechazado" : "parcial"
-  // La decisión se escribe en las líneas ANTES de cambiar el estado de
-  // cabecera, dentro del mismo lock/transacción (el trigger solo permite
-  // cambiar `decision` una vez presentado).
-  for (const line of lines) {
-    const decision = accepted.has(line.planItemId) ? "aceptado" : "rechazado"
-    if (line.decision !== decision) {
-      await tx
-        .update(treatmentBudgetItem)
-        .set({ decision, updatedAt: new Date() })
-        .where(
-          and(eq(treatmentBudgetItem.id, line.id), eq(treatmentBudgetItem.organizationId, orgId)),
-        )
+  const decisions = new Map(input.decisions.map(d => [d.planItemId, d.decision]))
+  if (decisions.size !== lines.length || lines.some(l => !decisions.has(l.planItemId)) ||
+    input.decisions.some(d => !["aceptado", "rechazado", "pospuesto"].includes(d.decision))) {
+    throw validation("Debe decidir cada línea exactamente una vez")
+  }
+  const representative = input.decidedByContactId
+    ? await requireDecisionContact(tx, orgId, patientId, input.decidedByContactId) : null
+  const items = await tx.select().from(treatmentPlanItem).where(and(
+    eq(treatmentPlanItem.organizationId, orgId), eq(treatmentPlanItem.patientId, patientId),
+    eq(treatmentPlanItem.planId, current.planId),
+  )).orderBy(asc(treatmentPlanItem.id)).for("update")
+  const selectedGroups = new Set<string>()
+  for (const item of items) {
+    const decision = decisions.get(item.id)
+    if (!decision) continue
+    if (["cancelado", "reemplazado"].includes(item.status)) throw conflict("ITEM_CLOSED", "La indicación está cerrada")
+    if (item.budgetId !== budgetId) throw conflict("BUDGET_STATUS", "La propuesta ya no es vigente para esta indicación")
+    if (["en_curso", "realizado"].includes(item.status) && decision !== "aceptado") {
+      throw conflict("ITEM_IN_EXECUTION", "No puede retirar la aceptación de un tratamiento ejecutado")
+    }
+    if (decision !== "aceptado" || !item.optionGroupId) continue
+    if (selectedGroups.has(item.optionGroupId)) throw conflict("OPTION_CONFLICT", "Solo puede aceptar una alternativa por grupo")
+    selectedGroups.add(item.optionGroupId)
+    if (items.some(other => other.id !== item.id && other.optionGroupId === item.optionGroupId &&
+      ["en_curso", "realizado"].includes(other.status))) {
+      throw conflict("OPTION_ALREADY_IN_EXECUTION", "Otra alternativa ya está en ejecución")
     }
   }
-  const [updated] = await tx
-    .update(treatmentBudget)
-    .set({
-      status,
-      acceptedByName,
-      decisionNote,
-      decidedAt: new Date(),
-      decidedBy: actorUserId,
-      updatedAt: new Date(),
-    })
-    .where(
-      and(
-        eq(treatmentBudget.id, budgetId),
-        eq(treatmentBudget.organizationId, orgId),
-        eq(treatmentBudget.patientId, patientId),
-      ),
-    )
-    .returning()
+  const now = new Date()
+  for (const line of lines) {
+    const decision = decisions.get(line.planItemId)!
+    await tx.update(treatmentBudgetItem).set({ decision, updatedAt: now })
+      .where(and(eq(treatmentBudgetItem.id, line.id), eq(treatmentBudgetItem.organizationId, orgId)))
+    await tx.update(treatmentPlanItem).set({
+      decisionStatus: decision, decisionNote, decidedAt: now,
+      decidedByContactId: representative?.id ?? null, decidedByName: representative?.displayName ?? null,
+      updatedAt: now,
+    }).where(and(eq(treatmentPlanItem.id, line.planItemId), eq(treatmentPlanItem.organizationId, orgId),
+      eq(treatmentPlanItem.patientId, patientId)))
+  }
+  for (const item of items) {
+    if (!item.optionGroupId || !selectedGroups.has(item.optionGroupId) || decisions.get(item.id) === "aceptado" ||
+      ["realizado", "cancelado", "reemplazado"].includes(item.status)) continue
+    await tx.update(treatmentPlanItem).set({
+      decisionStatus: "rechazado", decisionNote: "Alternativa no elegida", decidedAt: now,
+      decidedByContactId: representative?.id ?? null, decidedByName: representative?.displayName ?? null,
+      updatedAt: now,
+    }).where(and(eq(treatmentPlanItem.id, item.id), eq(treatmentPlanItem.organizationId, orgId)))
+  }
+  const acceptedCount = input.decisions.filter(d => d.decision === "aceptado").length
+  const status: BudgetStatus = acceptedCount === lines.length ? "aceptado" : acceptedCount > 0 ? "parcial"
+    : input.decisions.some(d => d.decision === "pospuesto") ? "pospuesto" : "rechazado"
+  const [updated] = await tx.update(treatmentBudget).set({
+    status, acceptedByName: representative?.displayName ?? null,
+    decisionContactId: representative?.id ?? null, decisionNote, decidedAt: now,
+    decidedBy: actorUserId, updatedAt: now,
+  }).where(and(eq(treatmentBudget.id, budgetId), eq(treatmentBudget.organizationId, orgId),
+    eq(treatmentBudget.patientId, patientId))).returning()
   if (!updated) throw notFound("Presupuesto")
   await audit(tx, orgId, actorUserId, "budget.decision", budgetId, {
-    patientId,
-    status,
-    acceptedCount,
-    rejectedCount: lines.length - acceptedCount,
-    acceptedByName,
+    patientId, status, acceptedCount, decisionContactId: representative?.id ?? null,
   })
-  const fresh = await listBudgetLines(tx, orgId, patientId, budgetId)
-  return withTotals(updated, fresh)
+  return withTotals(updated, await listBudgetLines(tx, orgId, patientId, budgetId))
 }
 
 export async function cancelBudget(
@@ -717,40 +747,78 @@ export async function getBudgetDetail(
   return withTotals(budget, await listBudgetLines(tx, orgId, patientId, budgetId))
 }
 
-/** Decisiones vigentes de varios ítems (proyección de lectura). */
+/** Decisión clínica vigente; las líneas económicas no se reinterpretan. */
 export async function budgetDecisions(
-  tx: Db,
-  orgId: string,
-  items: Array<{ id: string; budgetId: string | null }>,
+  tx: Db, orgId: string, items: Array<{ id: string; budgetId: string | null }>,
 ): Promise<Map<string, PlanItemDecision>> {
-  const result = new Map<string, PlanItemDecision>()
-  const budgetIds = [
-    ...new Set(items.map((i) => i.budgetId).filter((id): id is string => id !== null)),
-  ]
-  const linesByItem = new Map<string, string>()
-  if (budgetIds.length > 0) {
-    const lines = await tx
-      .select({
-        planItemId: treatmentBudgetItem.planItemId,
-        decision: treatmentBudgetItem.decision,
-      })
-      .from(treatmentBudgetItem)
-      .where(
-        and(
-          eq(treatmentBudgetItem.organizationId, orgId),
-          inArray(treatmentBudgetItem.budgetId, budgetIds),
-        ),
-      )
-    for (const line of lines) linesByItem.set(line.planItemId, line.decision)
+  return planDecisions(tx, orgId, items.map(item => item.id))
+}
+
+async function assertRetainedExecutedItems(tx: Db, orgId: string, patientId: string, budgetId: string, itemIds: string[]) {
+  const lines = await listBudgetLines(tx, orgId, patientId, budgetId)
+  const removed = lines.filter(l => !itemIds.includes(l.planItemId))
+  if (removed.length === 0) return
+  const [procedure] = await tx.select({ id: encounterProcedure.id }).from(encounterProcedure)
+    .where(and(eq(encounterProcedure.organizationId, orgId),
+      inArray(encounterProcedure.planItemId, removed.map(l => l.planItemId)))).limit(1)
+  const [charge] = await tx.select({ id: patientCharge.id }).from(patientCharge)
+    .where(and(eq(patientCharge.organizationId, orgId), eq(patientCharge.patientId, patientId),
+      inArray(patientCharge.budgetItemId, removed.map(l => l.id)), isNull(patientCharge.voidedAt))).limit(1)
+  const [application] = await tx.select({ id: patientPaymentApplication.id }).from(patientPaymentApplication)
+    .innerJoin(patientCharge, eq(patientCharge.id, patientPaymentApplication.chargeId))
+    .where(and(eq(patientPaymentApplication.organizationId, orgId), eq(patientPaymentApplication.patientId, patientId),
+      inArray(patientCharge.budgetItemId, removed.map(l => l.id)), isNull(patientPaymentApplication.voidedAt))).limit(1)
+  if (procedure || charge || application) throw conflict("BUDGET_ITEM_IN_USE", "No puede retirar líneas con ejecución o movimientos económicos")
+}
+
+export async function reviseBudget(
+  tx: Db, orgId: string, actorUserId: string, patientId: string, budgetId: string, input: ReviseBudgetInput,
+): Promise<BudgetWithTotals> {
+  await requirePatient(tx, orgId, patientId)
+  const previous = await requireBudget(tx, orgId, patientId, budgetId)
+  await lockPlan(tx, orgId, patientId, previous.planId)
+  const current = await lockBudgetRow(tx, orgId, patientId, budgetId)
+  if (!["presentado", "aceptado", "parcial", "pospuesto"].includes(current.status)) {
+    throw conflict("BUDGET_STATUS", "Esta propuesta no admite revisión")
   }
+  const reason = input.reason?.trim()
+  if (!reason || reason.length > 2000) throw validation("El motivo debe tener 1–2000 caracteres")
+  if (!input.itemIds?.length || input.itemIds.length > 200 || new Set(input.itemIds).size !== input.itemIds.length) {
+    throw validation("itemIds debe contener entre 1 y 200 identificadores únicos")
+  }
+  const [successor] = await tx.select({ id: treatmentBudget.id }).from(treatmentBudget)
+    .where(and(eq(treatmentBudget.organizationId, orgId), eq(treatmentBudget.supersedesBudgetId, budgetId))).limit(1)
+  if (successor) throw conflict("BUDGET_REVISION_EXISTS", "La propuesta ya tiene una revisión")
+  await assertRetainedExecutedItems(tx, orgId, patientId, budgetId, input.itemIds)
+  const items = await tx.select().from(treatmentPlanItem).where(and(
+    eq(treatmentPlanItem.organizationId, orgId), eq(treatmentPlanItem.patientId, patientId),
+    eq(treatmentPlanItem.planId, current.planId), inArray(treatmentPlanItem.id, input.itemIds),
+  )).orderBy(asc(treatmentPlanItem.id)).for("update")
+  if (items.length !== input.itemIds.length) throw notFound("Ítem del plan")
   for (const item of items) {
-    const decision = linesByItem.get(item.id) ?? "pendiente"
-    result.set(
-      item.id,
-      ((PLAN_ITEM_DECISIONS as readonly string[]).includes(decision)
-        ? decision
-        : "pendiente") as PlanItemDecision,
-    )
+    if (["cancelado", "reemplazado"].includes(item.status)) throw conflict("ITEM_CLOSED", "La indicación está cerrada")
+    if (item.priceCents == null || item.currency !== current.currency) throw conflict("BUDGET_CURRENCY_MIX", "Todas las líneas requieren tarifa en la moneda de la propuesta")
+    if (item.budgetId && item.budgetId !== current.id) throw conflict("ITEM_ALREADY_QUOTED", "La indicación pertenece a otra propuesta")
+    assertExecutableCodings(item.codings)
   }
-  return result
+  const [revision] = await tx.insert(treatmentBudget).values({
+    organizationId: orgId, patientId, planId: current.planId, budgetNumber: current.budgetNumber,
+    revisionNumber: current.revisionNumber + 1, supersedesBudgetId: current.id,
+    title: assertTitle(input.title, current.title), notes: assertNotes(input.notes) ?? current.notes,
+    currency: current.currency, createdBy: actorUserId,
+  }).returning()
+  if (!revision) throw new Error("No se pudo crear la revisión")
+  const oldLines = await listBudgetLines(tx, orgId, patientId, current.id)
+  for (const item of items) {
+    const snapshot = oldLines.find(l => l.planItemId === item.id) ?? item
+    await tx.insert(treatmentBudgetItem).values({
+      organizationId: orgId, patientId, planId: current.planId, budgetId: revision.id,
+      planItemId: item.id, serviceId: snapshot.serviceId, title: snapshot.title,
+      scope: snapshot.scope, toothNumber: snapshot.toothNumber, surfaces: snapshot.surfaces,
+      quadrant: snapshot.quadrant, arch: snapshot.arch, codings: snapshot.codings,
+      priceCents: snapshot.priceCents, currency: snapshot.currency, createdBy: actorUserId,
+    })
+  }
+  await audit(tx, orgId, actorUserId, "budget.revised", revision.id, { patientId, reason, supersedesBudgetId: current.id })
+  return withTotals(revision, await listBudgetLines(tx, orgId, patientId, revision.id))
 }

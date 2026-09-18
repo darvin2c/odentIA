@@ -1,0 +1,61 @@
+import { withOrgContext } from "@odentia/db"
+import { encounter, patientContact } from "@odentia/db/schema/clinical"
+import { contact } from "@odentia/db/schema/crm"
+import { eq } from "drizzle-orm"
+import { expect, it } from "vitest"
+import { createBudget, decideBudget, getBudgetDetail, presentBudget, reviseBudget } from "./budgets.js"
+import { registerPatientDocument } from "./clinical.js"
+import { clinicalFixture } from "./clinical-test-fixture.js"
+import { addEncounterProcedure, createEncounter } from "./encounters.js"
+import { createFollowUp } from "./follow-ups.js"
+import { getPatientSummary, getTimeline } from "./patient-history.js"
+import { addPlanItem, createOptionGroup, listPlanItems, revisePlanItem, setPlanItemStatus } from "./plan.js"
+import { createPrescription } from "./prescriptions.js"
+import { grantResponsibility, revokeResponsibility } from "./responsibilities.js"
+import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
+import { getTreatmentJourney } from "./treatment-journey.js"
+setupTestDb()
+it("traza alternativas, propuesta versionada, representante, sesiones y evidencia clínica", async () => {
+  const f = await clinicalFixture()
+  const [representative] = await ownerDb.insert(contact).values({ organizationId: "org_a", displayName: "Representante" }).returning()
+  await ownerDb.insert(patientContact).values({ organizationId: "org_a", patientId: f.patient.id, contactId: representative.id, relationship: "guardian" })
+  const role = await f.run(tx => grantResponsibility(tx, ...f.args, { contactId: representative.id, kind: "representante_legal", startsAt: "2020-01-01" }))
+  const group = await f.run(tx => createOptionGroup(tx, ...f.args, { planId: f.plan.id, title: "Alternativas" }))
+  const indication = { planId: f.plan.id, serviceId: f.service.id, sourceEncounterId: f.encounter.id, optionGroupId: group.id }
+  const a = await f.run(tx => addPlanItem(tx, ...f.args, { ...indication, isRecommended: true }))
+  const b = await f.run(tx => addPlanItem(tx, ...f.args, indication))
+  const budget = await f.run(tx => createBudget(tx, ...f.args, { planId: f.plan.id, itemIds: [a.id, b.id] }))
+  await f.run(tx => presentBudget(tx, ...f.args, budget.id))
+  await expect(f.run(tx => decideBudget(tx, ...f.args, budget.id, { decisions: [{ planItemId: a.id, decision: "aceptado" }] }))).rejects.toMatchObject({ code: "VALIDATION" })
+  const decisions = [{ planItemId: a.id, decision: "aceptado" as const }, { planItemId: b.id, decision: "pospuesto" as const }]
+  const decided = await f.run(tx => decideBudget(tx, ...f.args, budget.id, { decisions, decidedByContactId: representative.id }))
+  expect(decided.status).toBe("parcial")
+  expect((await f.run(tx => listPlanItems(tx, "org_a", f.patient.id))).find(i => i.id === b.id)).toMatchObject({ decisionStatus: "rechazado", decisionNote: "Alternativa no elegida" })
+  const revision = await f.run(tx => reviseBudget(tx, ...f.args, budget.id, { itemIds: [a.id], reason: "Propuesta elegida" }))
+  expect(revision).toMatchObject({ revisionNumber: 2, budgetNumber: budget.budgetNumber, supersedesBudgetId: budget.id })
+  expect((await f.run(tx => getBudgetDetail(tx, "org_a", f.patient.id, budget.id))).status).toBe("parcial")
+  await f.run(tx => presentBudget(tx, ...f.args, revision.id))
+  await f.run(tx => decideBudget(tx, ...f.args, revision.id, { decisions: [decisions[0]], decidedByContactId: representative.id }))
+  expect((await f.run(tx => getBudgetDetail(tx, "org_a", f.patient.id, budget.id))).status).toBe("sustituido")
+  await f.run(tx => addEncounterProcedure(tx, ...f.args, f.encounter.id, { planItemId: a.id }))
+  await ownerDb.update(encounter).set({ status: "finalizada", finalizedAt: new Date() }).where(eq(encounter.id, f.encounter.id))
+  const second = await f.run(tx => createEncounter(tx, ...f.args, { planItemIds: [a.id] }))
+  await f.run(tx => addEncounterProcedure(tx, ...f.args, second.id, { planItemId: a.id }))
+  const during = await f.run(tx => getTreatmentJourney(tx, "org_a", f.patient.id, a.id))
+  expect(during.item.status).toBe("en_curso")
+  expect(during.procedures.map(p => p.encounter.id)).toEqual([f.encounter.id, second.id])
+  await f.run(tx => setPlanItemStatus(tx, ...f.args, a.id, { status: "realizado", encounterId: second.id }))
+  await expect(f.run(tx => revisePlanItem(tx, ...f.args, a.id, { encounterId: second.id, serviceId: f.service.id, reason: "Cambio" }))).rejects.toMatchObject({ code: "ITEM_CLOSED" })
+  const followUp = await f.run(tx => createFollowUp(tx, ...f.args, { kind: "tratamiento", planItemId: a.id, title: "Control", dueAt: new Date(Date.now() + 86400000).toISOString() }))
+  const rx = await f.run(tx => createPrescription(tx, ...f.args, { planItemId: a.id, encounterId: second.id, items: [{ medicationName: "Medicamento", dose: "Dosis", route: "Oral", frequency: "Indicada", duration: "Indicada" }] }))
+  const doc = await f.run(tx => registerPatientDocument(tx, ...f.args, { category: "receta", label: "Receta clínica", storageKey: "test/rx", contentType: "application/pdf", sizeBytes: 4, prescriptionId: rx.id, followUpId: followUp.id, budgetId: revision.id }))
+  const journey = await f.run(tx => getTreatmentJourney(tx, "org_a", f.patient.id, a.id))
+  expect(journey.documents.map(d => d.id)).toContain(doc.id)
+  expect(journey.prescriptions.map(p => p.id)).toContain(rx.id)
+  expect(journey.followUps.map(c => c.id)).toContain(followUp.id)
+  const summary = await f.run(tx => getPatientSummary(tx, "org_a", f.patient.id))
+  expect(summary.treatmentJourneys.find(j => j.item.id === a.id)?.nextAction).toBe("controlar")
+  expect((await f.run(tx => getTimeline(tx, "org_a", f.patient.id))).data.map(e => e.type)).toEqual(expect.arrayContaining(["plan", "budget", "prescription", "follow_up"]))
+  await expect(withOrgContext(appDb, "org_b", tx => getTreatmentJourney(tx, "org_b", f.patient.id, a.id))).rejects.toMatchObject({ status: 404 })
+  await f.run(tx => revokeResponsibility(tx, ...f.args, role.id, { reason: "Fin de representación" }))
+})

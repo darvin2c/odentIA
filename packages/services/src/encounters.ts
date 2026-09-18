@@ -9,7 +9,6 @@ import {
   encounterTooth,
   odontogramEntry,
   treatmentBudget,
-  treatmentBudgetItem,
   treatmentPlanItem,
 } from "@odentia/db/schema/clinical"
 import { auditEvent, branch } from "@odentia/db/schema/org"
@@ -370,10 +369,10 @@ async function assertLinkablePlans(
       .limit(1)
       .for("update")
     if (!plan) throw notFound("Ítem del plan")
-    if (plan.status !== "pendiente" && plan.status !== "programado") {
+    if (!["pendiente", "programado", "en_curso"].includes(plan.status)) {
       throw conflict(
         "ITEM_NOT_READY",
-        "Solo se pueden vincular tratamientos pendientes o programados",
+        "Solo se pueden vincular tratamientos pendientes, programados o en curso",
       )
     }
     if (!plan.budgetId) {
@@ -382,18 +381,7 @@ async function assertLinkablePlans(
         "Solo se pueden vincular tratamientos aceptados en su presupuesto vigente",
       )
     }
-    const [line] = await tx
-      .select({ decision: treatmentBudgetItem.decision })
-      .from(treatmentBudgetItem)
-      .where(
-        and(
-          eq(treatmentBudgetItem.budgetId, plan.budgetId),
-          eq(treatmentBudgetItem.planItemId, plan.id),
-          eq(treatmentBudgetItem.organizationId, orgId),
-        ),
-      )
-      .limit(1)
-    if (!line || line.decision !== "aceptado") {
+    if (plan.decisionStatus !== "aceptado") {
       throw conflict(
         "ITEM_NOT_ACCEPTED",
         "Solo se pueden vincular tratamientos aceptados en su presupuesto vigente",
@@ -678,15 +666,15 @@ export async function addEncounterProcedure(
   if (planItemIdParam) {
     const {
       item: plan,
-      line,
       budget,
     } = await lockPlanItemForExecution(tx, orgId, patientId, planItemIdParam)
-    if (plan.status === "realizado" || plan.status === "cancelado") {
+    if (["realizado", "cancelado", "reemplazado"].includes(plan.status)) {
       throw conflict("ITEM_CLOSED", "El tratamiento ya está cerrado")
     }
+    if (plan.status === "suspendido") throw conflict("ITEM_NOT_READY", "El tratamiento está suspendido")
     // Solo presupuesto aceptado o servicio directo explícito: setPlanItemStatus
     // vuelve a exigirlo, pero aquí el error es específico antes de insertar.
-    if (!line || line.decision !== "aceptado") {
+    if (plan.decisionStatus !== "aceptado") {
       throw conflict(
         "ITEM_NOT_ACCEPTED",
         "Solo se pueden realizar tratamientos aceptados en su presupuesto vigente",
@@ -803,10 +791,14 @@ export async function addEncounterProcedure(
       .onConflictDoNothing({
         target: [encounterPlanItem.encounterId, encounterPlanItem.planItemId],
       })
-    await setPlanItemStatus(tx, orgId, actorUserId, patientId, input.planItemId, {
-      status: "realizado",
-      encounterId,
-    })
+    const [item] = await tx.select({ status: treatmentPlanItem.status }).from(treatmentPlanItem)
+      .where(and(eq(treatmentPlanItem.id, input.planItemId), eq(treatmentPlanItem.organizationId, orgId)))
+    if (item && (item.status === "pendiente" || item.status === "programado")) {
+      await setPlanItemStatus(tx, orgId, actorUserId, patientId, input.planItemId, {
+        status: "en_curso",
+        encounterId,
+      })
+    }
   }
   await audit(tx, orgId, actorUserId, "encounter.procedure_added", "encounter_procedure", row.id, {
     patientId,

@@ -987,8 +987,11 @@ const budgetRestaurador = await createBudget(db, ORG_A, ANA_ID, rosaPatientId, {
 })
 await presentBudget(db, ORG_A, ANA_ID, rosaPatientId, budgetRestaurador.id)
 await decideBudget(db, ORG_A, ANA_ID, rosaPatientId, budgetRestaurador.id, {
-  acceptedItemIds: [obt36.id, endo46.id],
-  acceptedByName: "Rosa Quispe",
+  decisions: [
+    { planItemId: obt36.id, decision: "aceptado" },
+    { planItemId: endo46.id, decision: "aceptado" },
+    { planItemId: corona46.id, decision: "pospuesto" },
+  ],
   decisionNote: "Acepta obturación y endodoncia; corona queda para una segunda etapa.",
 })
 // Decisión aceptada pero estado clínico programado: van por carriles separados.
@@ -1036,8 +1039,7 @@ const budgetOrto = await createBudget(db, ORG_A, ANA_ID, rosaPatientId, {
 })
 await presentBudget(db, ORG_A, ANA_ID, rosaPatientId, budgetOrto.id)
 await decideBudget(db, ORG_A, ANA_ID, rosaPatientId, budgetOrto.id, {
-  acceptedItemIds: [],
-  acceptedByName: "Rosa Quispe",
+  decisions: [{ planItemId: ctrlOrto.id, decision: "rechazado" }],
   decisionNote: "Rechaza ortodoncia por ahora; reevaluar en 6 meses.",
 })
 await addOdontogramEntries(db, ORG_A, ANA_ID, rosaPatientId, {

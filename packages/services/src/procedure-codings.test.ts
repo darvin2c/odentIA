@@ -289,8 +289,7 @@ it("presupuesto y atención heredan el snapshot exacto del ítem", async () => {
   )
   await withOrgContext(appDb, "org_a", (tx) =>
     decideBudget(tx, "org_a", ACTOR, patient.id, budget.id, {
-      acceptedItemIds: [item.id],
-      acceptedByName: "Paciente Test",
+      decisions: [{ planItemId: item.id, decision: "aceptado" }],
     }),
   )
   const procedure = await withOrgContext(appDb, "org_a", (tx) =>
@@ -464,8 +463,7 @@ it("ejecutar un plan antiguo con snapshot ambiguo falla sin elegir principal", a
   )
   await withOrgContext(appDb, "org_a", (tx) =>
     decideBudget(tx, "org_a", ACTOR, patient.id, budget.id, {
-      acceptedItemIds: [item.id],
-      acceptedByName: "Paciente Test",
+      decisions: [{ planItemId: item.id, decision: "aceptado" }],
     }),
   )
   // Simula el histórico heredado con varias equivalencias congeladas.

@@ -5,11 +5,11 @@ import {
   encounter,
   encounterPlanItem,
   encounterProcedure,
-  patientDocumentContext,
   serviceCatalog,
   treatmentBudget,
   treatmentBudgetItem,
   treatmentPlan,
+  treatmentOptionGroup,
   treatmentPlanItem,
   treatmentTemplate,
 } from "@odentia/db/schema/clinical"
@@ -24,8 +24,8 @@ import { assertExecutableCodings, resolveServiceCodings } from "./procedure-codi
  * Plan clínico longitudinal: existe antes que cualquier presupuesto y puede
  * continuar en múltiples visitas. El ítem (indicación) nace en una atención
  * borrador con sitio clínico y snapshot de oferta; `budgetId` es el
- * presupuesto vigente (nullable = decisión pendiente). La decisión se deriva
- * de la línea económica vigente, nunca de una columna propia del ítem.
+ * presupuesto vigente. La decisión clínica vive en la indicación; las líneas
+ * económicas conservan la decisión de cada propuesta histórica.
  * Convención: `tx` ya corre dentro de `withOrgContext`; nunca abrir contexto
  * aquí. El encounter se toca vía schema directo (lock), nunca vía el servicio
  * de encounters (evita ciclo).
@@ -33,12 +33,12 @@ import { assertExecutableCodings, resolveServiceCodings } from "./procedure-codi
  * ítems (UUID ordenado). Sin atención: empieza en plan.
  */
 
-export const PLAN_ITEM_STATUSES = ["pendiente", "programado", "realizado", "cancelado"] as const
+export const PLAN_ITEM_STATUSES = ["pendiente", "programado", "en_curso", "suspendido", "realizado", "cancelado", "reemplazado"] as const
 export type PlanItemStatus = (typeof PLAN_ITEM_STATUSES)[number]
 
-const CLOSED_STATUSES: readonly string[] = ["realizado", "cancelado"]
+const CLOSED_STATUSES: readonly string[] = ["realizado", "cancelado", "reemplazado"]
 
-export const PLAN_ITEM_DECISIONS = ["pendiente", "aceptado", "rechazado", "sin_registro"] as const
+export const PLAN_ITEM_DECISIONS = ["pendiente", "aceptado", "pospuesto", "rechazado", "reemplazado", "sin_registro"] as const
 export type PlanItemDecision = (typeof PLAN_ITEM_DECISIONS)[number]
 
 export type PlanItemRow = typeof treatmentPlanItem.$inferSelect
@@ -48,16 +48,16 @@ type BudgetLineRow = typeof treatmentBudgetItem.$inferSelect
 /** Cabecera de presupuesto (lectura acotada a org+paciente). */
 export type BudgetHeaderRow = typeof treatmentBudget.$inferSelect
 
-/** Ítem con su decisión derivada de la línea económica vigente. */
+/** Ítem con decisión vigente explícita. */
 export type PlanItemWithDecision = PlanItemRow & { decision: PlanItemDecision }
 
 export type TreatmentPlanStatus = "Sin tratamientos" | "En curso" | "Completado" | "Cancelado"
 
 export function derivePlanStatus(statuses: string[]): TreatmentPlanStatus {
   if (statuses.length === 0) return "Sin tratamientos"
-  if (statuses.some((s) => s === "pendiente" || s === "programado")) return "En curso"
-  if (statuses.every((s) => s === "cancelado")) return "Cancelado"
-  return "Completado"
+  if (statuses.every(s => s === "realizado")) return "Completado"
+  if (statuses.every(s => s === "cancelado" || s === "reemplazado")) return "Cancelado"
+  return "En curso"
 }
 
 export interface TreatmentSiteInput {
@@ -80,6 +80,8 @@ export interface AddPlanItemInput {
   arch?: string | null
   detail?: string | null
   diagnosisCode?: string | null
+  optionGroupId?: string | null
+  isRecommended?: boolean
 }
 
 export interface UpdatePlanItemPatch {
@@ -319,42 +321,19 @@ export async function itemDecision(
   orgId: string,
   item: { id: string; budgetId: string | null },
 ): Promise<PlanItemDecision> {
-  const line = await currentLine(tx, orgId, item)
-  const decision = line?.decision ?? "pendiente"
-  if (!(PLAN_ITEM_DECISIONS as readonly string[]).includes(decision)) return "pendiente"
-  return decision as PlanItemDecision
+  const [row] = await tx.select({ decision: treatmentPlanItem.decisionStatus })
+    .from(treatmentPlanItem)
+    .where(and(eq(treatmentPlanItem.organizationId, orgId), eq(treatmentPlanItem.id, item.id)))
+  if (!row) throw notFound("Ítem del plan")
+  return row.decision as PlanItemDecision
 }
 
 async function withDecisions(
-  tx: Db,
-  orgId: string,
+  _tx: Db,
+  _orgId: string,
   items: PlanItemRow[],
 ): Promise<PlanItemWithDecision[]> {
-  const budgetIds = [
-    ...new Set(items.map((i) => i.budgetId).filter((id): id is string => id !== null)),
-  ]
-  const linesByItem = new Map<string, BudgetLineRow>()
-  if (budgetIds.length > 0) {
-    const lines = await tx
-      .select()
-      .from(treatmentBudgetItem)
-      .where(
-        and(
-          eq(treatmentBudgetItem.organizationId, orgId),
-          inArray(treatmentBudgetItem.budgetId, budgetIds),
-        ),
-      )
-    for (const line of lines) linesByItem.set(line.planItemId, line)
-  }
-  return items.map((item) => {
-    const decision = linesByItem.get(item.id)?.decision ?? "pendiente"
-    return {
-      ...item,
-      decision: ((PLAN_ITEM_DECISIONS as readonly string[]).includes(decision)
-        ? decision
-        : "pendiente") as PlanItemDecision,
-    }
-  })
+  return items.map(item => ({ ...item, decision: item.decisionStatus as PlanItemDecision }))
 }
 
 /**
@@ -538,6 +517,21 @@ export async function addPlanItem(
     throw validation("serviceId es obligatorio: selecciona una prestación del tarifario")
   await lockDraftEncounter(tx, orgId, patientId, input.sourceEncounterId.trim())
   await lockPlanRow(tx, orgId, patientId, input.planId.trim())
+  if (input.optionGroupId) {
+    const [group] = await tx.select().from(treatmentOptionGroup).where(and(
+      eq(treatmentOptionGroup.id, input.optionGroupId),
+      eq(treatmentOptionGroup.organizationId, orgId),
+      eq(treatmentOptionGroup.patientId, patientId),
+      eq(treatmentOptionGroup.planId, input.planId),
+    )).for("update")
+    if (!group) throw notFound("Grupo de alternativas")
+    if (input.isRecommended) {
+      await tx.update(treatmentPlanItem).set({ isRecommended: false, updatedAt: new Date() })
+        .where(and(eq(treatmentPlanItem.organizationId, orgId),
+          eq(treatmentPlanItem.optionGroupId, group.id),
+          inArray(treatmentPlanItem.status, ["pendiente", "programado", "en_curso", "suspendido"])))
+    }
+  }
   const service = await requireServiceForIndication(tx, orgId, input.serviceId.trim())
   const scope = assertScopeValue(service.scope)
   const site = assertSite(
@@ -564,6 +558,8 @@ export async function addPlanItem(
       planId: input.planId.trim(),
       serviceId: service.id,
       budgetId: null,
+      optionGroupId: input.optionGroupId ?? null,
+      isRecommended: input.isRecommended ?? false,
       toothNumber: site.toothNumber,
       scope,
       surfaces: site.surfaces,
@@ -877,268 +873,107 @@ export async function updatePlanItem(
 }
 
 export async function setPlanItemStatus(
-  tx: Db,
-  orgId: string,
-  actorUserId: string,
-  patientId: string,
-  itemId: string,
-  input: { status: string; encounterId?: string | null },
+  tx: Db, orgId: string, actorUserId: string, patientId: string, itemId: string,
+  input: { status: string; encounterId?: string | null; statusReason?: string | null },
 ): Promise<PlanItemWithDecision> {
-  if (!(PLAN_ITEM_STATUSES as readonly string[]).includes(input.status))
-    throw validation("status inválido")
+  if (!(PLAN_ITEM_STATUSES as readonly string[]).includes(input.status)) throw validation("status inválido")
   await requirePatient(tx, orgId, patientId)
-  // Terminales realizado|cancelado (ITEM_CLOSED); programar/realizar exige
-  // aceptación en la línea vigente; realizar exige además procedimiento en
-  // una atención borrador (ATTENTION_REQUIRED).
-  let linkedEncounterId: string | null = null
-  if (input.encounterId) {
-    await lockDraftEncounter(tx, orgId, patientId, input.encounterId)
-    linkedEncounterId = input.encounterId
+  if (input.encounterId) await lockDraftEncounter(tx, orgId, patientId, input.encounterId)
+  const { item: current, budget } = await lockPlanItemForExecution(tx, orgId, patientId, itemId)
+  if (CLOSED_STATUSES.includes(current.status)) throw conflict("ITEM_CLOSED", "El tratamiento está cerrado")
+  const transitions: Record<string, readonly string[]> = {
+    pendiente: ["programado", "en_curso", "suspendido", "cancelado"],
+    programado: ["en_curso", "suspendido", "realizado", "cancelado"],
+    en_curso: ["suspendido", "realizado"],
+    suspendido: ["cancelado"],
   }
-  const [prev] = await tx
-    .select({ planId: treatmentPlanItem.planId, budgetId: treatmentPlanItem.budgetId })
-    .from(treatmentPlanItem)
-    .where(
-      and(
-        eq(treatmentPlanItem.id, itemId),
-        eq(treatmentPlanItem.organizationId, orgId),
-        eq(treatmentPlanItem.patientId, patientId),
-      ),
-    )
-    .limit(1)
-  if (!prev) throw notFound("Ítem del plan")
-  await lockPlanRow(tx, orgId, patientId, prev.planId)
-  let budget: BudgetHeaderRow | null = null
-  if (prev.budgetId) budget = await lockBudgetRow(tx, orgId, prev.budgetId)
-  const current = await lockItemRow(tx, orgId, patientId, itemId)
-  if (CLOSED_STATUSES.includes(current.status)) {
-    throw conflict(
-      "ITEM_CLOSED",
-      "El tratamiento está cerrado (realizado o cancelado) y no puede cambiar de estado",
-    )
+  if (!transitions[current.status]?.includes(input.status)) {
+    throw conflict("INVALID_TRANSITION", "La transición clínica no está permitida")
   }
-  if (input.status === "programado" || input.status === "realizado") {
-    const line = await currentLine(tx, orgId, current)
-    if (!line || line.decision !== "aceptado") {
-      throw new ServiceError(
-        "ITEM_NOT_ACCEPTED",
-        409,
-        "Solo se pueden programar o realizar tratamientos aceptados en su presupuesto vigente",
-      )
+  let reason: string | null = null
+  if (input.status === "suspendido" || input.status === "cancelado") {
+    reason = input.statusReason?.trim() ?? ""
+    if (!reason || reason.length > 2000) throw validation("El motivo debe tener 1–2000 caracteres")
+  }
+  if (["programado", "en_curso", "realizado"].includes(input.status)) {
+    if (current.decisionStatus !== "aceptado") throw conflict("ITEM_NOT_ACCEPTED", "El tratamiento no está aceptado")
+    if (!budget || ["cancelado", "historico"].includes(budget.status)) {
+      throw conflict("BUDGET_CLOSED", "El presupuesto del tratamiento está cerrado")
     }
-    if (!budget || budget.status === "cancelado" || budget.status === "historico") {
-      throw new ServiceError("BUDGET_CLOSED", 409, "El presupuesto del tratamiento está cerrado")
-    }
-    // Histórico ambiguo heredado: no se ejecuta como múltiples actos; se pide
-    // una nueva indicación exacta desde la biblioteca vigente.
     assertExecutableCodings(current.codings)
   }
   if (input.status === "realizado") {
-    if (!linkedEncounterId) {
-      throw new ServiceError(
-        "ATTENTION_REQUIRED",
-        409,
-        "Realizar un tratamiento requiere una atención: registra el procedimiento en la atención",
-      )
-    }
-    const [procedure] = await tx
-      .select({ id: encounterProcedure.id })
-      .from(encounterProcedure)
-      .where(
-        and(
-          eq(encounterProcedure.planItemId, itemId),
-          eq(encounterProcedure.encounterId, linkedEncounterId),
-          eq(encounterProcedure.organizationId, orgId),
-        ),
-      )
-      .limit(1)
-    if (!procedure) {
-      throw new ServiceError(
-        "ATTENTION_REQUIRED",
-        409,
-        "Realizar un tratamiento requiere un procedimiento registrado en la atención",
-      )
-    }
-    await tx
-      .insert(encounterPlanItem)
-      .values({ organizationId: orgId, encounterId: linkedEncounterId, planItemId: itemId })
-      .onConflictDoNothing({
-        target: [encounterPlanItem.encounterId, encounterPlanItem.planItemId],
-      })
+    if (!input.encounterId) throw conflict("ATTENTION_REQUIRED", "Completar requiere una atención borrador")
+    const [procedure] = await tx.select({ id: encounterProcedure.id }).from(encounterProcedure)
+      .where(and(eq(encounterProcedure.organizationId, orgId),
+        eq(encounterProcedure.planItemId, itemId))).limit(1)
+    if (!procedure) throw conflict("ATTENTION_REQUIRED", "Completar requiere al menos un procedimiento registrado")
+    await tx.insert(encounterPlanItem).values({
+      organizationId: orgId, encounterId: input.encounterId, planItemId: itemId,
+    }).onConflictDoNothing()
   }
-  const [updated] = await tx
-    .update(treatmentPlanItem)
-    .set({ status: input.status, updatedAt: new Date() })
-    .where(
-      and(
-        eq(treatmentPlanItem.id, itemId),
-        eq(treatmentPlanItem.organizationId, orgId),
-        eq(treatmentPlanItem.patientId, patientId),
-      ),
-    )
-    .returning()
+  const now = new Date()
+  const [updated] = await tx.update(treatmentPlanItem).set({
+    status: input.status, statusReason: reason, updatedAt: now,
+    ...(input.status === "en_curso" && !current.startedAt ? { startedAt: now } : {}),
+    ...(input.status === "realizado" ? { completedAt: now } : {}),
+  }).where(and(eq(treatmentPlanItem.id, itemId), eq(treatmentPlanItem.organizationId, orgId),
+    eq(treatmentPlanItem.patientId, patientId))).returning()
   if (!updated) throw notFound("Ítem del plan")
   await audit(tx, orgId, actorUserId, "plan.item_status_changed", "treatment_plan_item", itemId, {
-    patientId,
-    from: current.status,
-    to: input.status,
-    encounterId: linkedEncounterId,
-    budgetId: current.budgetId,
+    patientId, from: current.status, to: input.status, reason, encounterId: input.encounterId,
   })
-  return { ...updated, decision: await itemDecision(tx, orgId, updated) }
+  return { ...updated, decision: updated.decisionStatus as PlanItemDecision }
 }
 
-/**
- * Baja de ítem pendiente (corrección antes de cualquier cotización histórica).
- * Recibe encounterId explícito y exige mismo origen abierto: después del
- * cierre solo cabe cancelación clínica auditada. Sin líneas económicas
- * históricas, procedimientos, vínculos ni documentos.
- */
-export async function removePlanItem(
-  tx: Db,
-  orgId: string,
-  actorUserId: string,
-  patientId: string,
-  itemId: string,
-  encounterId: string,
-): Promise<{ id: string }> {
+export async function createOptionGroup(
+  tx: Db, orgId: string, actorUserId: string, patientId: string,
+  input: { planId: string; title: string },
+) {
   await requirePatient(tx, orgId, patientId)
-  if (!encounterId?.trim()) throw validation("encounterId es obligatorio para eliminar el ítem")
-  await lockDraftEncounter(tx, orgId, patientId, encounterId.trim())
-  const [prev] = await tx
-    .select({ planId: treatmentPlanItem.planId })
-    .from(treatmentPlanItem)
-    .where(
-      and(
-        eq(treatmentPlanItem.id, itemId),
-        eq(treatmentPlanItem.organizationId, orgId),
-        eq(treatmentPlanItem.patientId, patientId),
-      ),
-    )
-    .limit(1)
-  if (!prev) throw notFound("Ítem del plan")
-  await lockPlanRow(tx, orgId, patientId, prev.planId)
-  const current = await lockItemRow(tx, orgId, patientId, itemId)
-  if (current.sourceEncounterId !== encounterId.trim()) {
-    throw conflict(
-      "ITEM_CLOSED",
-      "Solo puede eliminarse desde su atención de origen mientras sigue en borrador",
-    )
-  }
-  if (current.status !== "pendiente") {
-    throw conflict("ITEM_CLOSED", "Solo se pueden eliminar ítems pendientes")
-  }
-  const [line] = await tx
-    .select({ id: treatmentBudgetItem.id })
-    .from(treatmentBudgetItem)
-    .where(
-      and(
-        eq(treatmentBudgetItem.planItemId, itemId),
-        eq(treatmentBudgetItem.organizationId, orgId),
-      ),
-    )
-    .limit(1)
-  if (line || current.budgetId) {
-    throw conflict("ITEM_HAS_RELATIONS", "El ítem tiene historial económico y no puede eliminarse")
-  }
-  const [proc] = await tx
-    .select({ id: encounterProcedure.id })
-    .from(encounterProcedure)
-    .where(
-      and(eq(encounterProcedure.planItemId, itemId), eq(encounterProcedure.organizationId, orgId)),
-    )
-    .limit(1)
-  if (proc) {
-    throw conflict(
-      "ITEM_HAS_RELATIONS",
-      "El ítem tiene procedimientos registrados y no puede eliminarse",
-    )
-  }
-  const [docCtx] = await tx
-    .select({ id: patientDocumentContext.id })
-    .from(patientDocumentContext)
-    .where(
-      and(
-        eq(patientDocumentContext.planItemId, itemId),
-        eq(patientDocumentContext.organizationId, orgId),
-      ),
-    )
-    .limit(1)
-  if (docCtx) {
-    throw conflict(
-      "ITEM_HAS_RELATIONS",
-      "El ítem tiene documentos vinculados y no puede eliminarse",
-    )
-  }
-  const [link] = await tx
-    .select({ encounterId: encounterPlanItem.encounterId })
-    .from(encounterPlanItem)
-    .where(
-      and(eq(encounterPlanItem.planItemId, itemId), eq(encounterPlanItem.organizationId, orgId)),
-    )
-    .limit(1)
-  if (link) {
-    throw conflict(
-      "ITEM_HAS_RELATIONS",
-      "El ítem está vinculado a una atención y no puede eliminarse",
-    )
-  }
-  await tx
-    .delete(treatmentPlanItem)
-    .where(
-      and(
-        eq(treatmentPlanItem.id, itemId),
-        eq(treatmentPlanItem.organizationId, orgId),
-        eq(treatmentPlanItem.patientId, patientId),
-      ),
-    )
-  await audit(tx, orgId, actorUserId, "plan.item_removed", "treatment_plan_item", itemId, {
-    patientId,
-    planId: current.planId,
-    title: current.title,
-  })
-  return { id: itemId }
+  await lockPlanRow(tx, orgId, patientId, input.planId)
+  const [group] = await tx.insert(treatmentOptionGroup).values({
+    organizationId: orgId, patientId, planId: input.planId,
+    title: assertTitle(input.title), createdBy: actorUserId,
+  }).returning()
+  if (!group) throw new Error("No se pudo crear el grupo de alternativas")
+  await audit(tx, orgId, actorUserId, "plan.option_group_created", "treatment_option_group", group.id, { patientId })
+  return group
 }
 
-/** Decisiones derivadas para un conjunto de ítems (lectura de historia/resumen). */
+export async function revisePlanItem(
+  tx: Db, orgId: string, actorUserId: string, patientId: string, itemId: string,
+  input: TreatmentSiteInput & { encounterId: string; reason: string; serviceId: string; detail?: string | null; diagnosisCode?: string | null },
+): Promise<PlanItemWithDecision> {
+  const reason = input.reason?.trim()
+  if (!reason || reason.length > 2000) throw validation("El motivo debe tener 1–2000 caracteres")
+  await requirePatient(tx, orgId, patientId)
+  await lockDraftEncounter(tx, orgId, patientId, input.encounterId)
+  const { item } = await lockPlanItemForExecution(tx, orgId, patientId, itemId)
+  if (CLOSED_STATUSES.includes(item.status)) throw conflict("ITEM_CLOSED", "El tratamiento está cerrado")
+  const next = await addPlanItem(tx, orgId, actorUserId, patientId, {
+    ...input, sourceEncounterId: input.encounterId, planId: item.planId,
+    optionGroupId: item.optionGroupId, isRecommended: item.isRecommended,
+  })
+  await tx.update(treatmentPlanItem).set({
+    status: "reemplazado", decisionStatus: "reemplazado", statusReason: reason, updatedAt: new Date(),
+  }).where(and(eq(treatmentPlanItem.id, item.id), eq(treatmentPlanItem.organizationId, orgId)))
+  const [revised] = await tx.update(treatmentPlanItem).set({ supersedesItemId: item.id })
+    .where(and(eq(treatmentPlanItem.id, next.id), eq(treatmentPlanItem.organizationId, orgId))).returning()
+  if (!revised) throw notFound("Ítem del plan")
+  await audit(tx, orgId, actorUserId, "plan.item_revised", "treatment_plan_item", item.id, {
+    patientId, reason, supersededBy: revised.id,
+  })
+  return { ...revised, decision: revised.decisionStatus as PlanItemDecision }
+}
+
+/** Decisiones vigentes para las lecturas de historia y resumen. */
 export async function planDecisions(
-  tx: Db,
-  orgId: string,
-  itemIds: string[],
+  tx: Db, orgId: string, itemIds: string[],
 ): Promise<Map<string, PlanItemDecision>> {
-  const result = new Map<string, PlanItemDecision>()
-  if (itemIds.length === 0) return result
-  const items = await tx
-    .select({ id: treatmentPlanItem.id, budgetId: treatmentPlanItem.budgetId })
+  if (itemIds.length === 0) return new Map()
+  const items = await tx.select({ id: treatmentPlanItem.id, decision: treatmentPlanItem.decisionStatus })
     .from(treatmentPlanItem)
     .where(and(eq(treatmentPlanItem.organizationId, orgId), inArray(treatmentPlanItem.id, itemIds)))
-  const budgetIds = [
-    ...new Set(items.map((i) => i.budgetId).filter((id): id is string => id !== null)),
-  ]
-  const linesByItem = new Map<string, string>()
-  if (budgetIds.length > 0) {
-    const lines = await tx
-      .select({
-        planItemId: treatmentBudgetItem.planItemId,
-        decision: treatmentBudgetItem.decision,
-      })
-      .from(treatmentBudgetItem)
-      .where(
-        and(
-          eq(treatmentBudgetItem.organizationId, orgId),
-          inArray(treatmentBudgetItem.budgetId, budgetIds),
-        ),
-      )
-    for (const line of lines) linesByItem.set(line.planItemId, line.decision)
-  }
-  for (const item of items) {
-    const decision = linesByItem.get(item.id) ?? "pendiente"
-    result.set(
-      item.id,
-      ((PLAN_ITEM_DECISIONS as readonly string[]).includes(decision)
-        ? decision
-        : "pendiente") as PlanItemDecision,
-    )
-  }
-  return result
+  return new Map(items.map(item => [item.id, item.decision as PlanItemDecision]))
 }
