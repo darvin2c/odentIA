@@ -5,6 +5,7 @@ import {
   common,
   DEFAULT_COUNTRY,
   EmptyState,
+  ErrorState,
   fieldErrorMessages,
   normalizeCountry,
   PageHeader,
@@ -17,14 +18,35 @@ import {
 import { useForm, useStore } from "@tanstack/react-form"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, getRouteApi } from "@tanstack/react-router"
-import type { FormEvent } from "react"
+import { type FormEvent, useEffect, useState } from "react"
 import { z } from "zod"
 import { useCanWrite } from "../../lib/crm"
-import { type OrgProfileInput, saveOrgProfile, useOrgProfile } from "../../lib/org"
+import { fetchOrgProfile, type OrgProfile, type OrgProfileInput, saveOrgProfile, useOrgProfile } from "../../lib/org"
 
 export const Route = createFileRoute("/_org/settings/")({
+  // El perfil son datos de configuración: el loader lo trae una vez —también en
+  // SSR, para que el formulario esté en el primer pintado— y la query lo
+  // refresca en cliente con la misma caducidad.
+  staleTime: 5 * 60_000,
+  loader: async (): Promise<ProfileLoad> => {
+    try {
+      return { profile: await fetchOrgProfile(), loaded: true }
+    } catch {
+      // Sin perfil no hay formulario que pintar: la pantalla espera a la query y,
+      // si tampoco responde, lo dice y ofrece reintentar.
+      return { profile: null, loaded: false }
+    }
+  },
   component: OrgProfilePage,
 })
+
+/** Lo que el loader deja a la pantalla. */
+interface ProfileLoad {
+  /** Perfil de la organización, o `null` si todavía no tiene. */
+  profile: OrgProfile | null
+  /** `false` cuando la API no respondió: el dato queda pendiente en la query. */
+  loaded: boolean
+}
 
 const orgRouteApi = getRouteApi("/_org")
 
@@ -109,10 +131,15 @@ function toInput(values: ProfileValues): OrgProfileInput {
  */
 function OrgProfilePage() {
   const { org } = orgRouteApi.useRouteContext()
+  const { profile: loaded, loaded: fetched } = Route.useLoaderData()
   const queryClient = useQueryClient()
   const canWrite = useCanWrite()
   const profileQuery = useOrgProfile()
-  const profile = profileQuery.data ?? null
+  // El loader ya trajo el perfil (también en SSR: el formulario está en el primer
+  // pintado). La query manda después —al guardar, al reintentar o si la API no
+  // respondió al servidor—; sólo si tampoco hay dato suyo la pantalla espera.
+  const { data } = profileQuery
+  const profile = data !== undefined ? data : fetched ? loaded : undefined
 
   const saveMutation = useMutation({
     mutationFn: (values: ProfileValues) => saveOrgProfile(toInput(values)),
@@ -130,8 +157,16 @@ function OrgProfilePage() {
         Identidad fiscal y reglas del país: definen la zona horaria con la que se interpretan la
         agenda, el historial y los documentos, y el formato de los teléfonos.
       </p>
-      {profileQuery.isPending ? (
-        <p className="text-sm text-muted-foreground">{common.states.loading}</p>
+      {profile === undefined ? (
+        profileQuery.isError ? (
+          <ErrorState
+            message="No pudimos cargar el perfil de la organización."
+            error={profileQuery.error}
+            onRetry={() => void profileQuery.refetch()}
+          />
+        ) : (
+          <p className="text-sm text-muted-foreground">{common.states.loading}</p>
+        )
       ) : canWrite ? (
         <ProfileForm
           key={profile?.organizationId ?? "nuevo"}
@@ -168,6 +203,11 @@ function ProfileForm({
   const country = useStore(form.store, (state) => state.values.countryCode)
   const timezone = useStore(form.store, (state) => state.values.timezone)
   const zone = timeZoneMeta(timezone)
+  // La hora local es dato del navegador: el primer render —el que hidrata el HTML
+  // del servidor— va sin ella, para que un minuto de diferencia no regenere el
+  // árbol. El desfase, en cambio, es el mismo en los dos lados.
+  const [localTime, setLocalTime] = useState<string | null>(null)
+  useEffect(() => setLocalTime(zone?.localTime ?? null), [zone?.localTime])
 
   return (
     <form
@@ -289,9 +329,14 @@ function ProfileForm({
                 suggested={zonesForCountry(country)}
               />
               <FieldDescription>
-                {zone
-                  ? `Allí son las ${zone.localTime} (${zone.offsetLabel}). Se usa para la agenda, el historial y los documentos.`
-                  : "Elige la zona horaria con la que se interpretan las fechas."}
+                {zone ? (
+                  <>
+                    {localTime ? `Allí son las ${localTime} (${zone.offsetLabel}). ` : ""}
+                    Se usa para la agenda, el historial y los documentos.
+                  </>
+                ) : (
+                  "Elige la zona horaria con la que se interpretan las fechas."
+                )}
               </FieldDescription>
               <FieldError>{fieldErrorMessages(field.state.meta.errors)[0] ?? null}</FieldError>
             </Field>

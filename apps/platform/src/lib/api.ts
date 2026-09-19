@@ -1,6 +1,8 @@
 import type { ApiErrorShape } from "@odentia/ui-patterns"
+import { createIsomorphicFn } from "@tanstack/react-start"
+import { getRequestHeaders } from "@tanstack/react-start/server"
 import { API_URL } from "./auth-client"
-import { orgSlugFromHostname } from "./host"
+import { orgSlugFromHostname, requestHostname } from "./host"
 
 export class ApiError extends Error {
   shape: ApiErrorShape
@@ -13,18 +15,38 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * Cookie de la petición entrante. En SSR el fetch corre en Node y no ve las del
+ * navegador: la API necesita la sesión para resolver la organización.
+ */
+const ssrCookie = createIsomorphicFn()
+  .server(() => getRequestHeaders().get("cookie"))
+  .client(() => null)
+
+/**
+ * Cabeceras de contexto: el tenant del host —en SSR la cabecera del request, en
+ * el navegador `location`; sin él la API no sabe de qué organización es la ruta—
+ * y, en SSR, la cookie de sesión.
+ */
+function contextHeaders(): Record<string, string> {
+  const slug = orgSlugFromHostname(requestHostname())
+  const cookie = ssrCookie()
+  return {
+    ...(slug ? { "x-odentia-org": slug } : {}),
+    ...(cookie ? { cookie } : {}),
+  }
+}
+
 /** Fetch a la API con cookies de sesión y slug de tenant del host; errores en forma ApiErrorShape. */
 export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
-  // En SSR no hay host del navegador: sin header, la API usa el fallback de sesión.
-  const slug = typeof window === "undefined" ? null : orgSlugFromHostname(window.location.hostname)
   const response = await fetch(`${API_URL}${path}`, {
+    ...init,
     credentials: "include",
     headers: {
       "content-type": "application/json",
-      ...(slug ? { "x-odentia-org": slug } : {}),
+      ...contextHeaders(),
       ...init?.headers,
     },
-    ...init,
   })
   if (!response.ok) {
     let shape: ApiErrorShape = {}
@@ -41,11 +63,10 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
 
 /** POST multipart (adjuntos) con cookies de sesión y slug de tenant del host. */
 export async function apiUpload<T>(path: string, form: FormData): Promise<T> {
-  const slug = typeof window === "undefined" ? null : orgSlugFromHostname(window.location.hostname)
   const response = await fetch(`${API_URL}${path}`, {
     method: "POST",
     credentials: "include",
-    ...(slug ? { headers: { "x-odentia-org": slug } } : {}),
+    headers: contextHeaders(),
     body: form,
   })
   if (!response.ok) {
