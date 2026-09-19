@@ -1,6 +1,7 @@
 import { cn } from "@odentia/ui"
 import * as React from "react"
-import { FormSurface, useCloseGuard } from "./form-surface.js"
+import { useCloseGuard, useEscapeClose } from "../surface.js"
+import { FormSurface } from "./form-surface.js"
 
 export interface FormPanelProps {
   onClose: () => void
@@ -21,10 +22,6 @@ export interface FormPanelProps {
   /** Layout extra de la tarjeta (p. ej. ancho forzado). */
   className?: string
 }
-
-// Base UI monta el popup de dialog/drawer/alert-dialog mientras está abierto;
-// con uno encima, el Esc le pertenece a ese popup y no al panel.
-const OPEN_POPUP_SELECTOR = "[role='dialog'],[role='alertdialog'],[data-slot='drawer-popup']"
 
 /**
  * Formulario en tarjeta lateral, no modal: vive en el flujo de la página (ver
@@ -58,15 +55,7 @@ export function FormPanel({
   const titleId = React.useId()
   const descriptionId = React.useId()
 
-  React.useEffect(() => {
-    function onKeyDown(event: KeyboardEvent) {
-      if (event.key !== "Escape" || event.defaultPrevented) return
-      if (document.querySelector(OPEN_POPUP_SELECTOR)) return
-      handleClose()
-    }
-    window.addEventListener("keydown", onKeyDown)
-    return () => window.removeEventListener("keydown", onKeyDown)
-  }, [handleClose])
+  useEscapeClose(handleClose)
 
   return (
     <section

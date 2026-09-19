@@ -1,0 +1,161 @@
+import { ScrollArea, Skeleton, cn } from "@odentia/ui"
+import * as React from "react"
+import { common } from "./common.js"
+
+/**
+ * Chrome compartido por las dos familias de superficies laterales: el
+ * formulario (`FormSurface`) y el detalle de lectura (`DetailSurface`). Fija
+ * lo que debe verse igual en panel y en drawer —cabecera, cuerpo con scroll y
+ * acciones persistentes— y también el cierre protegido de los contenedores
+ * (`useCloseGuard`, `useEscapeClose`), que es la otra mitad del mismo
+ * comportamiento.
+ *
+ * No decide DÓNDE vive la superficie (tarjeta en el flujo o popup modal): eso
+ * lo aportan los contenedores (`FormPanel`/`FormDrawer`, `DetailPanel`/
+ * `DetailDrawer`).
+ */
+
+/** El root es una columna que llena su contenedor y recorta el cuerpo. */
+const SURFACE_ROOT_CLASS = "flex h-full min-h-0 flex-1 flex-col overflow-hidden"
+
+export interface SurfaceShellProps {
+  title: string
+  description?: string
+  /** Contexto visual que permanece fijo mientras se desplaza el cuerpo. */
+  headerContent?: React.ReactNode
+  children: React.ReactNode
+  /** El contenedor (dialog, panel o región) toma su nombre accesible de estos ids. */
+  titleId: string
+  descriptionId: string
+  isLoading?: boolean
+  error?: string | null
+  /**
+   * Acciones del pie. `null` (predeterminado) omite la barra por completo: un
+   * detalle sin acciones ni cierre visible no necesita pie.
+   */
+  footer?: React.ReactNode
+  /** Clases del envoltorio del cuerpo (p. ej. `@container` para el detalle). */
+  bodyClassName?: string
+  /**
+   * Con `onSubmit` el root es un `<form>` y el pie lleva acciones de envío; sin
+   * él es un `<div>` y el pie solo contiene botones `type="button"`. La forma
+   * del root es una consecuencia de la superficie, no una prop aparte.
+   */
+  onSubmit?: (event: React.FormEvent) => void
+}
+
+/**
+ * Cabecera fija, cuerpo con scroll interno y pie opcional. El contenido de
+ * `children` no se monta mientras `isLoading` (el esqueleto lo reemplaza) y el
+ * error va en un banner `role="alert"` por encima del contenido.
+ */
+export function SurfaceShell({
+  title,
+  description,
+  headerContent,
+  children,
+  titleId,
+  descriptionId,
+  isLoading = false,
+  error,
+  footer,
+  bodyClassName,
+  onSubmit,
+}: SurfaceShellProps) {
+  const blocks = (
+    <>
+      <div className="flex shrink-0 flex-col gap-1 border-b border-border px-6 py-4 text-left">
+        <h2 id={titleId} className="font-heading text-base font-medium text-foreground">
+          {title}
+        </h2>
+        {description ? (
+          <p id={descriptionId} className="text-sm text-balance text-muted-foreground">
+            {description}
+          </p>
+        ) : null}
+        {headerContent}
+      </div>
+
+      <div className={cn("min-h-0 flex-1", bodyClassName)}>
+        <ScrollArea className="h-full">
+          <div className="px-6 py-4">
+            {isLoading ? (
+              <div className="space-y-3">
+                <Skeleton className="h-9 w-full" />
+                <Skeleton className="h-9 w-full" />
+                <Skeleton className="h-20 w-full" />
+              </div>
+            ) : (
+              <>
+                {error ? (
+                  <div
+                    className="mb-4 rounded-md border border-danger/20 bg-danger-soft px-3 py-2 text-sm text-danger"
+                    role="alert"
+                  >
+                    {error}
+                  </div>
+                ) : null}
+                {children}
+              </>
+            )}
+          </div>
+        </ScrollArea>
+      </div>
+
+      {footer != null ? (
+        <div className="mt-auto flex shrink-0 flex-row items-center justify-end gap-2 border-t border-border bg-surface px-6 py-4">
+          {footer}
+        </div>
+      ) : null}
+    </>
+  )
+
+  if (onSubmit) {
+    return (
+      <form onSubmit={onSubmit} className={SURFACE_ROOT_CLASS}>
+        {blocks}
+      </form>
+    )
+  }
+
+  return <div className={SURFACE_ROOT_CLASS}>{blocks}</div>
+}
+
+export interface CloseGuardOptions {
+  isSubmitting?: boolean
+  isDirty?: boolean
+  onClose: () => void
+}
+
+/**
+ * Cierre protegido compartido: no interrumpe un envío en curso y pregunta antes
+ * de descartar cambios sin guardar. Lo usan el drawer (onOpenChange y Esc de
+ * Base UI) y el panel (Esc propio) para comportarse igual en los dos modos.
+ */
+export function useCloseGuard({ isSubmitting = false, isDirty = false, onClose }: CloseGuardOptions) {
+  return React.useCallback(() => {
+    if (isSubmitting) return
+    if (isDirty && !window.confirm(common.confirm.unsavedMessage)) return
+    onClose()
+  }, [isSubmitting, isDirty, onClose])
+}
+
+// Base UI monta el popup de dialog/drawer/alert-dialog mientras está abierto;
+// con uno encima, el Esc le pertenece a ese popup y no al panel.
+const OPEN_POPUP_SELECTOR = "[role='dialog'],[role='alertdialog'],[data-slot='drawer-popup']"
+
+/**
+ * Esc propio de una superficie no modal (el panel). El drawer no lo usa: ahí
+ * el Esc lo aporta Base UI sobre el popup, que ya tiene el foco.
+ */
+export function useEscapeClose(handleClose: () => void) {
+  React.useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key !== "Escape" || event.defaultPrevented) return
+      if (document.querySelector(OPEN_POPUP_SELECTOR)) return
+      handleClose()
+    }
+    window.addEventListener("keydown", onKeyDown)
+    return () => window.removeEventListener("keydown", onKeyDown)
+  }, [handleClose])
+}

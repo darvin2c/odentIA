@@ -1,6 +1,7 @@
 import { Drawer, DrawerContent, useIsMobile } from "@odentia/ui"
 import * as React from "react"
-import { FormSurface, useCloseGuard } from "./form-surface.js"
+import { useCloseGuard } from "../surface.js"
+import { FormSurface } from "./form-surface.js"
 
 export interface FormDrawerProps {
   open: boolean
