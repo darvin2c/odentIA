@@ -8,8 +8,9 @@ import { destinos, SectionBody, StoryLink, secciones } from "./story-fixtures.js
 /**
  * Navegación de sección. **Web siempre riel** (`side`, ≥1024px) y **tablet y
  * móvil siempre barra** (`mobilePosition`, <1024px): cada superficie ignora la
- * opción de la otra. Todas las stories montan `SectionNav`, que elige sola, así
- * que el ancho del viewport de Storybook decide qué superficie se ve.
+ * opción de la otra. El corte lo hace el CSS (`lg`) sobre un solo árbol, así que
+ * el ancho del viewport decide qué superficie se ve —también en el HTML que
+ * manda el servidor, sin esperar a que hidrate.
  *
  * La sección va dentro del `PageShell`, que aporta fondo de página y padding: el
  * nav no toca ninguno de los dos.
