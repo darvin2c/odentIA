@@ -30,6 +30,7 @@ export {
   type DataTableSkeletonProps,
 } from "./data-table.js"
 export type { ColumnViewMeta, DataTableView } from "./data-table-view.js"
+export * from "./detail/index.js"
 export { EmptyState, type EmptyStateProps } from "./empty-state.js"
 export { type ApiErrorShape, ErrorState, type ErrorStateProps } from "./error-state.js"
 export * from "./form/index.js"

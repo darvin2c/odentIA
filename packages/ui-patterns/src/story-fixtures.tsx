@@ -14,13 +14,14 @@ import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-
 import { CalendarDays } from "lucide-react"
 import { type FormEvent, type ReactNode, useMemo, useState } from "react"
 import { DataTable } from "./data-table.js"
+import { DetailField, DetailList, DetailSection } from "./detail/detail-rows.js"
 import { type WizardStep, WizardSteps } from "./form/wizard-steps.js"
-import { RowActions } from "./row-actions.js"
+import { RowActions, type RowActionItem } from "./row-actions.js"
 
 /**
  * Fixtures compartidas por las stories: formularios de distintos anchos, un
- * wizard de tres pasos y una tabla de demostración. Viven fuera del barrel:
- * son material de Storybook, no API del paquete.
+ * wizard de tres pasos, una tabla y un cuerpo de detalle de lectura. Viven
+ * fuera del barrel: son material de Storybook, no API del paquete.
  */
 
 export const WIZARD_STEPS: readonly WizardStep[] = [
@@ -197,6 +198,104 @@ export function DemoStage({ className, children }: { className?: string; childre
 /** Alto libre: fondo de página y padding, sin acotar el contenido (tablas, cards). */
 export function DemoPage({ className, children }: { className?: string; children: ReactNode }) {
   return <div className={cn("bg-muted min-h-svh w-full p-6", className)}>{children}</div>
+}
+
+/* -------------------------------- Detalle --------------------------------- */
+
+/**
+ * Cuerpo de detalle de lectura: secciones con campos (`DetailList`) y un bloque
+ * de texto largo. El mismo contenido se usa en panel, en drawer y dentro de un
+ * contenedor angosto, que es donde se ve el reparto por contenedor.
+ */
+export function DemoDetailBody() {
+  return (
+    <>
+      <DetailSection title="Datos de la atención">
+        <DetailList>
+          <DetailField label="Paciente">María Fernanda Quispe Rojas</DetailField>
+          <DetailField label="Historia clínica">{hcLabel(24)}</DetailField>
+          <DetailField label="Odontólogo">Dra. Lucía Ramos</DetailField>
+          <DetailField label="Fecha">
+            <time dateTime="2026-09-12T10:30:00-05:00">12/09/2026 · 10:30</time>
+          </DetailField>
+          <DetailField label="Estado">
+            <Badge variant="success">Finalizada</Badge>
+          </DetailField>
+          <DetailField label="Piezas tratadas">16, 17</DetailField>
+          <DetailField label="Presupuesto vinculado">PR-000138 · aceptado</DetailField>
+          <DetailField label="Control indicado" />
+        </DetailList>
+      </DetailSection>
+
+      <DetailSection title="Registro clínico" className="mt-5">
+        <DetailList columns={1}>
+          <DetailField label="Motivo">
+            Dolor a la masticación en el sector superior derecho desde hace cuatro días.
+          </DetailField>
+          <DetailField label="Evolución">
+            Se retira restauración deficiente, se evalúa vitalidad pulpar y se realiza
+            restauración con resina compuesta en pieza 16. Se indica control a los 15 días.
+          </DetailField>
+          <DetailField label="Indicaciones">
+            Evitar alimentos duros por 48 horas. Cepillado normal con pasta fluorada.
+          </DetailField>
+          <DetailField label="Paso siguiente">
+            Control de restauración y evaluación de pieza 17.
+          </DetailField>
+        </DetailList>
+      </DetailSection>
+    </>
+  )
+}
+
+/**
+ * Acciones secundarias de un detalle: ninguna es «la» acción esperada, así que
+ * ninguna merece un botón visible. Sin acciones terminales: «Anular atención»
+ * iría aparte, con confirmación, no dentro del menú.
+ */
+export const DEMO_DETAIL_MENU_ITEMS: RowActionItem[] = [
+  {
+    key: "full",
+    label: "Ver ficha completa",
+    onSelect: () => toast.info("Se abriría la ficha del paciente."),
+  },
+  {
+    key: "print",
+    label: "Imprimir resumen",
+    onSelect: () => toast.info("Se generaría el PDF de la atención."),
+  },
+  {
+    key: "duplicate",
+    label: "Duplicar como nueva atención",
+    onSelect: () => toast.info("Se abriría una atención nueva precargada."),
+  },
+  {
+    key: "link",
+    label: "Copiar enlace",
+    onSelect: () => toast.info("Enlace copiado al portapapeles."),
+  },
+]
+
+/**
+ * Acciones de demostración del pie del detalle: la secundaria navega al
+ * espacio completo y la principal abre la edición. Ambas avisan por toast, el
+ * mismo feedback que usan las stories de formulario.
+ */
+export function DemoDetailActions() {
+  return (
+    <>
+      <Button
+        type="button"
+        variant="outline"
+        onClick={() => toast.info("Aquí se abriría la ficha completa del paciente.")}
+      >
+        Ver ficha completa
+      </Button>
+      <Button type="button" onClick={() => toast.info("Aquí se abriría la edición.")}>
+        Editar
+      </Button>
+    </>
+  )
 }
 
 /* ------------------------------- Pacientes -------------------------------- */
