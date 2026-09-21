@@ -19,18 +19,15 @@ interface FittedInline {
  * Cuántos filtros elegibles caben inline según el ancho medido del row.
  * Optimista: ante más espacio potencial (resize, valores que se achican)
  * prueba con todo y encoge de a uno hasta que `scrollWidth <= clientWidth`.
- * Solo encoge dentro de cada ajuste: nunca oscila.
+ * Un paso por commit y siempre con la firma vigente: converge en
+ * `eligibleCount` pasos como máximo y no vuelve sobre sus pasos.
  */
 function useFittedInlineCount(eligibleCount: number, contentKey: string): FittedInline {
   const containerRef = React.useRef<HTMLDivElement | null>(null)
   const [measureTick, setMeasureTick] = React.useState(0)
-  // Reset optimista en fase de render (sin carrera con el encogimiento):
-  // ante más espacio potencial se prueba con todo y el layout encoge.
+  /** Firma de lo medido: tope de filtros, contenido y ancho disponible. */
   const resetKey = `${eligibleCount}|${contentKey}|${measureTick}`
   const [fitted, setFitted] = React.useState({ key: resetKey, count: eligibleCount })
-  if (fitted.key !== resetKey) {
-    setFitted({ key: resetKey, count: eligibleCount })
-  }
   const visibleCount = Math.min(fitted.count, eligibleCount)
   React.useEffect(() => {
     const element = containerRef.current
@@ -52,11 +49,16 @@ function useFittedInlineCount(eligibleCount: number, contentKey: string): Fitted
   React.useLayoutEffect(() => {
     const element = containerRef.current
     if (!element) return
+    // El reset optimista vive acá y no en la fase de render: escribirlo durante
+    // el render dejaba el estado con la firma vieja apenas el encogimiento la
+    // cambiaba, y esa firma vieja volvía a pedir el reset: renders encadenados
+    // sin punto fijo (`Maximum update depth exceeded`).
+    if (fitted.key !== resetKey) {
+      setFitted({ key: resetKey, count: eligibleCount })
+      return
+    }
     if (element.scrollWidth - element.clientWidth > 1 && visibleCount > 0) {
-      setFitted((previous) => ({
-        key: previous.key,
-        count: Math.max(0, previous.count - 1),
-      }))
+      setFitted({ key: resetKey, count: visibleCount - 1 })
     }
   })
 
