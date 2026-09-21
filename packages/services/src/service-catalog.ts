@@ -28,11 +28,8 @@ function conflict(code: string, message: string): ServiceError {
 export type ServiceRow = typeof serviceCatalog.$inferSelect
 export type TreatmentTemplateRow = typeof treatmentTemplate.$inferSelect
 
-export const TREATMENT_SOURCES = ["template", "custom", "legacy"] as const
-export type TreatmentSource = (typeof TREATMENT_SOURCES)[number]
 
 export const SERVICE_STATES = ["active", "inactive", "legacy"] as const
-export type ServiceState = (typeof SERVICE_STATES)[number]
 
 const MAX_LIMIT = 100
 const DEFAULT_LIMIT = 30
@@ -718,16 +715,4 @@ export async function fromTemplates(
   return { created, existing: owned }
 }
 
-/** Ofertas heredadas pendientes de revisión (legado inactivo). */
-export async function listLegacyServices(tx: Db, orgId: string): Promise<ServiceRow[]> {
-  return tx
-    .select()
-    .from(serviceCatalog)
-    .where(and(eq(serviceCatalog.organizationId, orgId), eq(serviceCatalog.source, "legacy")))
-    .orderBy(asc(serviceCatalog.name), asc(serviceCatalog.id))
-}
 
-/** Verdadero si la fila puede ofrecerse en una nueva indicación. */
-export function isSelectableForIndication(row: ServiceRow): boolean {
-  return row.isActive && row.source !== "legacy"
-}

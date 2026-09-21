@@ -15,7 +15,7 @@ import {
   treatmentTemplate,
 } from "@odentia/db/schema/clinical"
 import { auditEvent } from "@odentia/db/schema/org"
-import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm"
+import { and, asc, eq, inArray, isNull } from "drizzle-orm"
 import { notFound, ServiceError, validation } from "./errors.js"
 import { requirePatient } from "./patients.js"
 import { requireServiceForIndication, type ServiceRow } from "./service-catalog.js"
@@ -43,7 +43,6 @@ export const PLAN_ITEM_STATUSES = [
   "cancelado",
   "reemplazado",
 ] as const
-export type PlanItemStatus = (typeof PLAN_ITEM_STATUSES)[number]
 
 const CLOSED_STATUSES: readonly string[] = ["realizado", "cancelado", "reemplazado"]
 
@@ -1186,16 +1185,3 @@ export async function revisePlanItem(
   return { ...revised, decision: revised.decisionStatus as PlanItemDecision }
 }
 
-/** Decisiones vigentes para las lecturas de historia y resumen. */
-export async function planDecisions(
-  tx: Db,
-  orgId: string,
-  itemIds: string[],
-): Promise<Map<string, PlanItemDecision>> {
-  if (itemIds.length === 0) return new Map()
-  const items = await tx
-    .select({ id: treatmentPlanItem.id, decision: treatmentPlanItem.decisionStatus })
-    .from(treatmentPlanItem)
-    .where(and(eq(treatmentPlanItem.organizationId, orgId), inArray(treatmentPlanItem.id, itemIds)))
-  return new Map(items.map((item) => [item.id, item.decision as PlanItemDecision]))
-}

@@ -12,7 +12,7 @@ import {
 import { contact } from "@odentia/db/schema/crm"
 import { user } from "@odentia/db/schema/auth"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
-import { and, asc, desc, eq, ilike, inArray, or, sql } from "drizzle-orm"
+import { and, asc, desc, eq, ilike, or, sql } from "drizzle-orm"
 import { requireContact } from "./contacts.js"
 import { decodeCursor } from "./cursors.js"
 import { isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
@@ -150,7 +150,6 @@ export const PATIENT_LIST_SORTS = [
   "number",
   "-number",
 ] as const
-export type PatientListSort = (typeof PATIENT_LIST_SORTS)[number]
 
 export interface PatientListItem {
   id: string

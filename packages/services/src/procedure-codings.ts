@@ -6,7 +6,7 @@ import {
   treatmentTemplate,
   treatmentTemplateCode,
 } from "@odentia/db/schema/clinical"
-import { and, desc, eq, inArray } from "drizzle-orm"
+import { and, desc, eq } from "drizzle-orm"
 import { ServiceError } from "./errors.js"
 
 /**
@@ -78,35 +78,6 @@ export async function listTemplateCodings(
     .where(and(eq(treatmentTemplateCode.templateId, templateId), eq(procedureCode.isActive, true)))
     .orderBy(desc(treatmentTemplateCode.isPrimary), treatmentTemplateCode.systemKey)
   return rows
-}
-
-/** Codificaciones activas de varias plantillas en una sola consulta (ficha de biblioteca). */
-export async function listTemplatesCodings(
-  tx: Db,
-  templateIds: string[],
-): Promise<Map<string, ProcedureCodingSnapshot[]>> {
-  const out = new Map<string, ProcedureCodingSnapshot[]>()
-  if (templateIds.length === 0) return out
-  const rows = await tx
-    .select({
-      templateId: treatmentTemplateCode.templateId,
-      system: treatmentTemplateCode.systemKey,
-      code: treatmentTemplateCode.code,
-      version: treatmentTemplateCode.version,
-      display: procedureCode.display,
-    })
-    .from(treatmentTemplateCode)
-    .innerJoin(procedureCode, codingJoin)
-    .where(
-      and(inArray(treatmentTemplateCode.templateId, templateIds), eq(procedureCode.isActive, true)),
-    )
-    .orderBy(desc(treatmentTemplateCode.isPrimary), treatmentTemplateCode.systemKey)
-  for (const { templateId, system, code, version, display } of rows) {
-    const list = out.get(templateId) ?? []
-    list.push({ system, code, version, display })
-    out.set(templateId, list)
-  }
-  return out
 }
 
 function ambiguousError(codes: string[]): ServiceError {

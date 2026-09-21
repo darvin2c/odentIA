@@ -150,20 +150,6 @@ export async function testConnection(
   return toPublic(updated)
 }
 
-/** Persiste el offset de polling (modo dev Telegram). */
-export async function savePollingOffset(
-  tx: Db,
-  orgId: string,
-  id: string,
-  offset: string,
-): Promise<void> {
-  const updated = await tx
-    .update(channelConnection)
-    .set({ pollingOffset: offset, updatedAt: new Date() })
-    .where(and(eq(channelConnection.id, id), eq(channelConnection.organizationId, orgId)))
-    .returning({ id: channelConnection.id })
-  if (updated.length === 0) throw notFound("Conexión")
-}
 
 /** Plantillas autorizadas de la conexión (nombres, sin secretos). */
 export async function getConnectionTemplates(

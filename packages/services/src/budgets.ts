@@ -10,11 +10,11 @@ import {
   treatmentPlanItem,
 } from "@odentia/db/schema/clinical"
 import { auditEvent } from "@odentia/db/schema/org"
-import { and, asc, eq, inArray, isNull, ne, sql } from "drizzle-orm"
+import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm"
 import { notFound, ServiceError, validation } from "./errors.js"
 import { requirePatient } from "./patients.js"
 import type { PlanItemDecision } from "./plan.js"
-import { planDecisions } from "./plan.js"
+
 import { requireDecisionContact } from "./responsibilities.js"
 import { assertExecutableCodings } from "./procedure-codings.js"
 
@@ -745,13 +745,6 @@ export async function getBudgetDetail(
 ): Promise<BudgetWithTotals> {
   const budget = await requireBudget(tx, orgId, patientId, budgetId)
   return withTotals(budget, await listBudgetLines(tx, orgId, patientId, budgetId))
-}
-
-/** Decisión clínica vigente; las líneas económicas no se reinterpretan. */
-export async function budgetDecisions(
-  tx: Db, orgId: string, items: Array<{ id: string; budgetId: string | null }>,
-): Promise<Map<string, PlanItemDecision>> {
-  return planDecisions(tx, orgId, items.map(item => item.id))
 }
 
 async function assertRetainedExecutedItems(tx: Db, orgId: string, patientId: string, budgetId: string, itemIds: string[]) {
