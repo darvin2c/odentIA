@@ -28,7 +28,6 @@ export function hostUrl(subdomain: string, path = ""): string {
 export const API = hostUrl("api")
 export const PANEL = hostUrl("app")
 export const baseUrl = PANEL
-export const baseDomain = BASE_DOMAIN
 
 /** Tenant: `https://<slug>.<dominio>[/ruta]`. */
 export const tenant = (slug: string, path: string): string => hostUrl(slug, path)
