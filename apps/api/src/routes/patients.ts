@@ -1,4 +1,10 @@
-import { SURFACES, BLOOD_GROUPS, demographicsSchema, registrationContactInputSchema, registrationAnswersSchema } from "@odentia/clinical"
+import {
+  SURFACES,
+  BLOOD_GROUPS,
+  demographicsSchema,
+  registrationContactInputSchema,
+  registrationAnswersSchema,
+} from "@odentia/clinical"
 import { withOrgContext } from "@odentia/db"
 import {
   addClinicalNote,
@@ -226,12 +232,16 @@ const timelineQuery = listQuery.extend({
   order: z.enum(["desc", "asc"]).optional(),
 })
 const encounterCreateInput = z.object({
-  reason: z.string().max(2000).nullish(),
+  // El motivo es obligatorio al abrir la atención (decisión de diseño).
+  reason: z.string().trim().min(1).max(2000),
   branchId: z.uuid().nullish(),
+  /** Profesional que atiende; por defecto quien abre la atención. */
+  dentistUserId: z.string().nullish(),
   teeth: z.array(z.number().int()).max(52).optional(),
   planItemIds: z.array(z.uuid()).max(52).optional(),
 })
 const encounterPatchInput = z.object({
+  branchId: z.uuid().nullish(),
   reason: z.string().max(2000).nullish(),
   evolution: z.string().max(10000).nullish(),
   indications: z.string().max(4000).nullish(),
@@ -256,10 +266,15 @@ const procedureInput = z
     arch: z.enum(["upper", "lower"]).nullish(),
     diagnosisCode: z.string().max(10).nullish(),
     planItemId: z.uuid().nullish(),
+    /** Acto libre (sin servicio ni tratamiento): descripción obligatoria. */
+    description: z.string().trim().min(1).max(2000).nullish(),
   })
   .strict()
-  .refine((d) => Boolean(d.serviceId) !== Boolean(d.planItemId), {
+  .refine((d) => !(d.serviceId && d.planItemId), {
     message: "Selecciona un servicio del catálogo o un tratamiento del presupuesto, no ambos",
+  })
+  .refine((d) => Boolean(d.serviceId) || Boolean(d.planItemId) || Boolean(d.description), {
+    message: "Selecciona un servicio, un tratamiento o describe el acto libre",
   })
 // El precio NUNCA se ingresa en evaluación/presupuesto: se congela desde la
 // oferta (serviceId). title/priceCents/currency manuales se rechazan (400).
@@ -276,6 +291,7 @@ const planCreateInput = z
     planId: z.uuid(),
     sourceEncounterId: z.uuid(),
     optionGroupId: z.uuid().nullish(),
+    odontogramEntryId: z.uuid().nullish(),
     isRecommended: z.boolean().optional(),
     detail: z.string().max(4000).nullish(),
     diagnosisCode: z.string().max(10).nullish(),
@@ -288,7 +304,17 @@ const planPatchInput = z
     detail: z.string().max(4000).nullish(),
     diagnosisCode: z.string().max(10).nullish(),
     encounterId: z.uuid(),
-    status: z.enum(["pendiente", "programado", "en_curso", "suspendido", "realizado", "cancelado", "reemplazado"]).optional(),
+    status: z
+      .enum([
+        "pendiente",
+        "programado",
+        "en_curso",
+        "suspendido",
+        "realizado",
+        "cancelado",
+        "reemplazado",
+      ])
+      .optional(),
     statusReason: z.string().trim().min(1).max(2000).optional(),
     ...planSiteFields,
   })
@@ -364,34 +390,58 @@ export function createPatientsRoute(deps: CrmDeps) {
     return runService(c, 201, () =>
       withOrgContext(deps.db, orgId, (tx) => {
         const { contextContactId, ...input } = parsed.data
-        return registerPatient(tx, orgId, { kind: "internal", userId, contactId: contextContactId }, input)
+        return registerPatient(
+          tx,
+          orgId,
+          { kind: "internal", userId, contactId: contextContactId },
+          input,
+        )
       }),
     )
   })
 
   app.get("/duplicates", async (c) => {
     const { orgId } = orgContextOf(c)
-    const parsed = z.object({ displayName: z.string().max(200).optional(), birthDate: z.iso.date().optional(), docType: z.string().max(20).optional(), docNumber: z.string().max(20).optional(), phone: z.string().max(50).optional() }).safeParse(c.req.query())
+    const parsed = z
+      .object({
+        displayName: z.string().max(200).optional(),
+        birthDate: z.iso.date().optional(),
+        docType: z.string().max(20).optional(),
+        docNumber: z.string().max(20).optional(),
+        phone: z.string().max(50).optional(),
+      })
+      .safeParse(c.req.query())
     if (!parsed.success) return validationError(c, parsed.error.issues)
-    return runService(c, 200, () => withOrgContext(deps.db, orgId, tx => findPatientDuplicates(tx, orgId, parsed.data)))
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) => findPatientDuplicates(tx, orgId, parsed.data)),
+    )
   })
 
   app.put("/:id/contacts/:contactId", async (c) => {
     const { orgId, userId } = orgContextOf(c)
-    const parsed = registrationContactInputSchema.omit({ contactId: true }).safeParse(await c.req.json().catch(() => null))
+    const parsed = registrationContactInputSchema
+      .omit({ contactId: true })
+      .safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
-    return runService(c, 200, () => withOrgContext(deps.db, orgId, async tx => {
-      await setPatientContact(tx, orgId, userId, c.req.param("id"), { ...parsed.data, contactId: c.req.param("contactId") })
-      return { linked: true }
-    }))
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, async (tx) => {
+        await setPatientContact(tx, orgId, userId, c.req.param("id"), {
+          ...parsed.data,
+          contactId: c.req.param("contactId"),
+        })
+        return { linked: true }
+      }),
+    )
   })
 
   app.delete("/:id/contacts/:contactId", async (c) => {
     const { orgId, userId } = orgContextOf(c)
-    return runService(c, 200, () => withOrgContext(deps.db, orgId, async tx => {
-      await removePatientContact(tx, orgId, userId, c.req.param("id"), c.req.param("contactId"))
-      return { removed: true }
-    }))
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, async (tx) => {
+        await removePatientContact(tx, orgId, userId, c.req.param("id"), c.req.param("contactId"))
+        return { removed: true }
+      }),
+    )
   })
 
   app.get("/:id", async (c) => {
@@ -844,7 +894,11 @@ export function createPatientsRoute(deps: CrmDeps) {
         const { status, statusReason, ...patch } = parsed.data
         const args = [tx, orgId, userId, c.req.param("id"), c.req.param("itemId")] as const
         if (status && !Object.keys(patch).filter((k) => k !== "encounterId").length) {
-          return setPlanItemStatus(...args, { status, statusReason, encounterId: patch.encounterId })
+          return setPlanItemStatus(...args, {
+            status,
+            statusReason,
+            encounterId: patch.encounterId,
+          })
         }
         const item = await updatePlanItem(...args, patch)
         return status

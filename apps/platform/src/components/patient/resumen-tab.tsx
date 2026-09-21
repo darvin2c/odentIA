@@ -1,21 +1,30 @@
-import {
-  Button,
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@odentia/ui"
+import { Button, Collapsible, CollapsibleContent, CollapsibleTrigger } from "@odentia/ui"
 import { ErrorState, LoadingState } from "@odentia/ui-patterns"
 import { useQuery } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { ChevronDown, ClipboardList } from "lucide-react"
 import type { ReactNode } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
-import { fetchTreatmentPlanDetail, fetchTreatmentPlans } from "../../lib/budgets"
+import { planDecisionLabel } from "../../lib/budgets"
+import {
+  fetchFollowUps,
+  fetchPatientAccount,
+  formatDate,
+  NEXT_ACTION_LABELS,
+} from "../../lib/clinical-journey"
 import { timeAgo, useCanWrite } from "../../lib/crm"
 import { sexLabel } from "../../lib/patient-overview"
-import type { PatientFull, PatientSummary } from "../../lib/patients"
-import { ageFrom, fetchPatientHealth, hasHealthInfo, isHealthReviewPending } from "../../lib/patients"
+import type { OdontogramState, PatientFull, PatientSummary } from "../../lib/patients"
+import {
+  ageFrom,
+  fetchPatientHealth,
+  hasHealthInfo,
+  isHealthReviewPending,
+  planStatusLabel,
+} from "../../lib/patients"
+import { formatMoney } from "../../lib/services"
 import { PatientContactSection } from "./patient-contact-section"
+import { OdontogramStudio } from "../odontogram-studio"
 
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -28,7 +37,17 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
 
 const missing = <span className="text-muted-foreground">No registrado</span>
 
-export type ResumenTabTarget = "plan" | "historia" | "odontograma" | "imagenes" | "antecedentes"
+export type ResumenTabTarget =
+  | "plan"
+  | "historia"
+  | "odontograma"
+  | "imagenes"
+  | "antecedentes"
+  | "recorrido"
+  | "controles"
+  | "recetas"
+  | "cuenta"
+  | "responsables"
 
 /** Resumen breve de lectura: última atención, planes activos y filiación extendida. Sin formularios. */
 export function ResumenTab({
@@ -40,7 +59,7 @@ export function ResumenTab({
   patientId: string
   detail: PatientFull
   summary?: PatientSummary
-  onTabChange: (tab: ResumenTabTarget, tooth?: number) => void
+  onTabChange: (tab: ResumenTabTarget, tooth?: number, itemId?: string) => void
 }) {
   const canWrite = useCanWrite()
 
@@ -55,9 +74,19 @@ export function ResumenTab({
     enabled: summary === undefined,
   })
 
-  const plansQuery = useQuery({
-    queryKey: ["treatment-plans", patientId],
-    queryFn: () => fetchTreatmentPlans(patientId),
+  const dentalQuery = useQuery({
+    queryKey: ["odontogram", patientId],
+    queryFn: () => apiFetch<{ data: OdontogramState }>(`/api/patients/${patientId}/odontogram`),
+  })
+
+  const followUpsQuery = useQuery({
+    queryKey: ["follow-ups", patientId],
+    queryFn: () => fetchFollowUps(patientId),
+  })
+
+  const accountQuery = useQuery({
+    queryKey: ["patient-account", patientId],
+    queryFn: () => fetchPatientAccount(patientId),
   })
 
   const health = healthQuery.data?.data ?? null
@@ -67,7 +96,11 @@ export function ResumenTab({
   const resolved = summary ?? summaryQuery.data?.data ?? null
   const patient = detail.patient
   const lastVisit = resolved?.lastVisit ?? null
-  const plans = (plansQuery.data?.data ?? []).filter((p) => p.status === "En curso")
+  const journeys = resolved?.treatmentJourneys ?? []
+  const pendingFollowUps = (followUpsQuery.data?.data ?? []).filter(
+    (row) => row.status === "pendiente" || row.status === "programado",
+  )
+  const balances = accountQuery.data?.data.byCurrency ?? []
 
   if (summaryQuery.isPending && resolved == null) return <LoadingState />
   if (summaryQuery.isError && resolved == null) {
@@ -105,6 +138,14 @@ export function ResumenTab({
           </div>
         </div>
       ) : null}
+      <section className="rounded-md bg-card p-4">
+        <h2 className="font-heading text-lg font-medium">Situación clínica</h2>
+        <p className="mb-4 text-sm text-muted-foreground">Selecciona una pieza para consultar sus hallazgos, notas, tratamientos e imágenes.</p>
+        {dentalQuery.isPending ? <LoadingState /> : dentalQuery.isError ?
+          <ErrorState onRetry={() => void dentalQuery.refetch()} /> :
+          dentalQuery.data && <OdontogramStudio patientId={patientId} state={dentalQuery.data.data}
+            compact readOnly onChanged={() => dentalQuery.refetch().then(() => {})} />}
+      </section>
 
       <div className="flex flex-col gap-6 rounded-md bg-card p-6">
         <div className="flex flex-col gap-1.5">
@@ -157,47 +198,103 @@ export function ResumenTab({
       </div>
       <div className="flex flex-col gap-6 rounded-md bg-card p-6">
         <div className="flex flex-col gap-1.5">
-          <div className="font-heading text-base font-medium">Planes en curso</div>
+          <div className="font-heading text-base font-medium">Tratamientos y seguimiento</div>
+          <p className="text-sm text-muted-foreground">Decisiones pendientes, trabajo en curso y próximos controles.</p>
         </div>
-        <div className="flex flex-col gap-2">
-          {plansQuery.isPending ? (
-            <p className="text-sm text-muted-foreground">Cargando planes…</p>
-          ) : plansQuery.isError ? (
-            <p role="alert" className="text-sm text-destructive">
-              No se pudieron cargar los planes.{" "}
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={() => void plansQuery.refetch()}
+        {journeys.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            Sin tratamientos indicados. Se indican durante una atención abierta.
+          </p>
+        ) : (
+          <ul className="flex flex-col divide-y">
+            {journeys.slice(0, 6).map((row) => (
+              <li
+                key={row.item.id}
+                className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm"
               >
-                Reintentar
-              </Button>
-            </p>
-          ) : plans.length === 0 ? (
-            <div className="flex flex-col items-start gap-2">
-              <p className="text-sm text-muted-foreground">
-                Sin planes en curso. Los planes se indican durante una atención.
-              </p>
-              <Button size="sm" variant="outline" onClick={() => onTabChange("plan")}>
-                Ver planes de tratamiento
-              </Button>
-            </div>
-          ) : (
-            plans.map((entry) => (
-              <PlanBrief
-                key={entry.plan.id}
-                patientId={patientId}
-                planId={entry.plan.id}
-                title={entry.plan.title}
-                isLegacy={entry.plan.isLegacy}
-                totalItems={entry.totalItems}
-                pendingItems={entry.pendingItems}
-              />
-            ))
-          )}
+                <span className="flex min-w-0 flex-col">
+                  <span className="font-medium">{row.item.toothNumber ? `Pieza ${row.item.toothNumber} · ` : "General · "}{row.item.title}</span>
+                  <span className="text-muted-foreground">
+                    {row.nextAction ? NEXT_ACTION_LABELS[row.nextAction] : "Sin acción pendiente"} ·
+                    decisión {planDecisionLabel(row.decision)} · ejecución{" "}
+                    {planStatusLabel(row.clinicalStatus)}
+                    {row.nextFollowUp ? ` · control ${formatDate(row.nextFollowUp.dueAt)}` : ""}
+                  </span>
+                </span>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => onTabChange("recorrido", undefined, row.item.id)}
+                >
+                  Ver detalle
+                </Button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      <div className="flex flex-col gap-6 rounded-md bg-card p-6">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="flex flex-col gap-1.5">
+            <div className="font-heading text-base font-medium">Próximos controles</div>
+            {followUpsQuery.isPending ? <p>Cargando controles…</p> :
+              followUpsQuery.isError ? <p role="alert">No se pudieron cargar los controles.</p> :
+              pendingFollowUps.length === 0 ? <p className="text-sm text-muted-foreground">Sin controles pendientes.</p> :
+              <ul className="flex flex-col gap-3">{pendingFollowUps.map((control) => (
+                <li key={control.id} className="text-sm">
+                  <p className="font-medium">{control.title} · {formatDate(control.dueAt)}</p>
+                  <p>{control.instructions || "Sin instrucciones adicionales."}</p>
+                  <p className="text-muted-foreground">{control.kind === "mantenimiento" ? "Mantenimiento preventivo" :
+                    journeys.find((row) => row.item.id === control.planItemId)?.item.title ?? "Control de tratamiento"} · {planStatusLabel(control.status)}</p>
+                </li>
+              ))}</ul>}
+          </div>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={() => onTabChange("controles")}
+          >
+            Ver controles
+          </Button>
         </div>
       </div>
+
+      <div className="flex flex-col gap-6 rounded-md bg-card p-6">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="flex flex-col gap-1.5">
+            <div className="font-heading text-base font-medium">Cuenta</div>
+            {balances.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                Sin movimientos económicos: aceptar una propuesta no genera cargos.
+              </p>
+            ) : (
+              <dl className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+                {balances.map((balance) => (
+                  <div key={balance.currency}>
+                    <dt className="text-xs uppercase tracking-wide text-muted-foreground">
+                      Por cobrar ({balance.currency})
+                    </dt>
+                    <dd className="text-lg font-semibold tabular-nums">
+                      {formatMoney(balance.outstandingCents, balance.currency)}
+                    </dd>
+                    <dd className="text-xs text-muted-foreground">
+                      anticipo disponible{" "}
+                      {formatMoney(balance.availableCreditCents, balance.currency)}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+            )}
+          </div>
+          <Button type="button" size="sm" variant="outline" onClick={() => onTabChange("cuenta")}>
+            Gestionar cuenta
+          </Button>
+        </div>
+      </div>
+
       <PatientContactSection detail={detail} />
       <Collapsible>
         <div className="flex flex-col gap-6 rounded-md bg-card p-6">
@@ -248,70 +345,7 @@ export function ResumenTab({
         </div>
       </Collapsible>
 
-      <div className="flex flex-col gap-6 rounded-md bg-card p-6">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <p className="text-sm text-muted-foreground">
-            Alergias, condiciones, medicación y entrevista se revisan en Antecedentes.
-          </p>
-          <Button size="sm" variant="outline" onClick={() => onTabChange("antecedentes")}>
-            Ir a antecedentes
-          </Button>
-        </div>
-      </div>
     </div>
   )
 }
 
-function PlanBrief({
-  patientId,
-  planId,
-  title,
-  isLegacy,
-  totalItems,
-  pendingItems,
-}: {
-  patientId: string
-  planId: string
-  title: string
-  isLegacy: boolean
-  totalItems: number
-  pendingItems: number
-}): React.JSX.Element {
-  const detailQuery = useQuery({
-    queryKey: ["treatment-plan", patientId, planId],
-    queryFn: () => fetchTreatmentPlanDetail(patientId, planId),
-  })
-  const items = detailQuery.data?.data.items ?? []
-  const pending = items.filter((i) => i.status === "pendiente" || i.status === "programado")
-  const next = pending[0] ?? null
-  const accepted = items.filter((i) => i.decision === "aceptado").length
-  return (
-    <div className="flex flex-wrap items-center justify-between gap-2 border-b py-1.5 text-sm last:border-0">
-      <span className="flex min-w-0 flex-col">
-        <span className="font-medium">
-          {title}{" "}
-          {isLegacy ? <span className="font-normal text-muted-foreground">(heredado)</span> : null}
-        </span>
-        <span className="text-muted-foreground">
-          {pendingItems} de {totalItems} pendientes · {accepted} aceptados
-          {next ? ` · próximo: ${next.title}` : " · sin pendientes"}
-        </span>
-      </span>
-      <Button
-        type="button"
-        variant="outline"
-        size="sm"
-        nativeButton={false}
-        render={
-          <Link
-            to="/patients/$patientId"
-            params={{ patientId }}
-            search={{ tab: "plan", planId }}
-          />
-        }
-      >
-        Abrir plan
-      </Button>
-    </div>
-  )
-}

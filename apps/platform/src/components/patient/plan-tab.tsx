@@ -4,20 +4,21 @@ import {
   DataTable,
   EmptyState,
   ErrorState,
+  FormDrawer,
   LoadingState,
 } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { type ColumnDef, getCoreRowModel, type Table, useReactTable } from "@tanstack/react-table"
 import { useEffect, useId, useMemo, useRef, useState } from "react"
-import { ApiError } from "../../lib/api"
+import { ApiError, apiFetch } from "../../lib/api"
 import {
   type BudgetLine,
   type BudgetWithTotals,
-  type DecideBudgetBody,
   budgetNumberLabel,
   budgetStatusLabel,
   cancelBudgetApi,
   createBudgetApi,
+  type DecideBudgetBody,
   decideBudgetApi,
   fetchBudgetDetail,
   fetchBudgets,
@@ -25,10 +26,19 @@ import {
   fetchTreatmentPlans,
   planDecisionLabel,
   presentBudgetApi,
+  reviseBudgetApi,
   updateBudgetApi,
 } from "../../lib/budgets"
+import {
+  centsFromInput,
+  createChargeApi,
+  createOptionGroupApi,
+  fetchResponsibilities,
+  mutationMessage as journeyMessage,
+  setItemAlternativeApi,
+} from "../../lib/clinical-journey"
 import { useCanWrite } from "../../lib/crm"
-import type { PlanItem, TreatmentPlanWithStatus } from "../../lib/patients"
+import type { PatientFull, PlanItem, TreatmentPlanWithStatus } from "../../lib/patients"
 import { formatMoney } from "../../lib/services"
 
 function mutationMessage(err: unknown): string {
@@ -110,11 +120,26 @@ export function PlanTab({
   const [presenting, setPresenting] = useState(false)
   const [cancellingBudget, setCancellingBudget] = useState<BudgetWithTotals | null>(null)
 
+  const [reviseOpen, setReviseOpen] = useState(false)
+  const [reviseIds, setReviseIds] = useState<string[]>([])
+  const [reviseReason, setReviseReason] = useState("")
+  const [reviseError, setReviseError] = useState<string | null>(null)
+
+  const [chargeLine, setChargeLine] = useState<BudgetLine | null>(null)
+  const [chargeAmount, setChargeAmount] = useState("")
+  const [chargeError, setChargeError] = useState<string | null>(null)
+
   const [decisionOpen, setDecisionOpen] = useState(false)
   const [acceptedIds, setAcceptedIds] = useState<string[]>([])
   const [acceptedBy, setAcceptedBy] = useState("")
   const [decisionNote, setDecisionNote] = useState("")
   const [decisionError, setDecisionError] = useState<string | null>(null)
+  const [decisionByContactId, setDecisionByContactId] = useState("")
+
+  const [groupOpen, setGroupOpen] = useState(false)
+  const [groupTitle, setGroupTitle] = useState("")
+  const [groupError, setGroupError] = useState<string | null>(null)
+  const [alternativeError, setAlternativeError] = useState<string | null>(null)
 
   const plansQuery = useQuery({
     queryKey: ["treatment-plans", patientId],
@@ -128,6 +153,14 @@ export function PlanTab({
     queryKey: ["treatment-plan", patientId, selectedPlanId],
     queryFn: () => fetchTreatmentPlanDetail(patientId, selectedPlanId as string),
     enabled: selectedPlanId != null,
+  })
+  const patientQuery = useQuery({
+    queryKey: ["patient", patientId],
+    queryFn: () => apiFetch<{ data: PatientFull }>(`/api/patients/${patientId}`),
+  })
+  const responsibilitiesQuery = useQuery({
+    queryKey: ["responsibilities", patientId],
+    queryFn: () => fetchResponsibilities(patientId),
   })
   const budgetDetailQuery = useQuery({
     queryKey: ["budget", patientId, selectedBudgetId],
@@ -163,6 +196,22 @@ export function PlanTab({
   }, [initialBudgetId, budgets])
 
   const planDetail = planDetailQuery.data?.data ?? null
+  const optionGroups = planDetail?.optionGroups ?? []
+  // Quién puede decidir la propuesta: el propio paciente o su representante legal vigente.
+  const deciders = useMemo(() => {
+    const list: Array<{ id: string; label: string }> = []
+    for (const contact of patientQuery.data?.data.contacts ?? []) {
+      if (contact.relationship === "self") {
+        list.push({ id: contact.contactId, label: "El propio paciente" })
+      }
+    }
+    for (const row of responsibilitiesQuery.data?.data ?? []) {
+      if (row.kind === "representante_legal" && row.isCurrent && !row.revokedAt) {
+        list.push({ id: row.contactId, label: `Representante legal: ${row.contact.displayName}` })
+      }
+    }
+    return list
+  }, [patientQuery.data, responsibilitiesQuery.data])
   const planItems: PlanItem[] = useMemo(() => planDetail?.items ?? [], [planDetail])
   const planBudgets = useMemo(
     () =>
@@ -257,6 +306,7 @@ export function PlanTab({
       setDecisionOpen(false)
       setDecisionError(null)
       setActionError(null)
+      setDecisionByContactId("")
     },
     onError: (err) => setDecisionError(mutationMessage(err)),
   })
@@ -273,12 +323,77 @@ export function PlanTab({
     },
   })
 
+  const reviseMutation = useMutation({
+    mutationFn: () =>
+      writeBudget(() =>
+        reviseBudgetApi(patientId, selectedBudget!.id, {
+          itemIds: reviseIds,
+          title: selectedBudget!.title,
+          notes: selectedBudget!.notes ?? null,
+          reason: reviseReason.trim(),
+        }),
+      ),
+    onSuccess: (result) => {
+      setReviseOpen(false)
+      setReviseReason("")
+      setReviseError(null)
+      setSelectedBudgetId(result.data.id)
+    },
+    onError: (err) => setReviseError(mutationMessage(err)),
+  })
+
+  const chargeMutation = useMutation({
+    mutationFn: () =>
+      writeBudget(() =>
+        createChargeApi(patientId, {
+          budgetItemId: chargeLine!.id,
+          amountCents: centsFromInput(chargeAmount) ?? undefined,
+        }),
+      ),
+    onSuccess: () => {
+      setChargeLine(null)
+      setChargeAmount("")
+      setChargeError(null)
+    },
+    onError: (err) => setChargeError(journeyMessage(err)),
+  })
+
+  const groupMutation = useMutation({
+    mutationFn: () =>
+      writeBudget(() =>
+        createOptionGroupApi(patientId, selectedPlan!.plan.id, { title: groupTitle.trim() }),
+      ),
+    onSuccess: () => {
+      setGroupOpen(false)
+      setGroupTitle("")
+      setGroupError(null)
+      void queryClient.invalidateQueries({ queryKey: ["treatment-plan", patientId] })
+    },
+    onError: (err) => setGroupError(mutationMessage(err)),
+  })
+
+  const alternativeMutation = useMutation({
+    mutationFn: (body: { itemId: string; optionGroupId: string | null; isRecommended: boolean }) =>
+      writeBudget(() =>
+        setItemAlternativeApi(patientId, body.itemId, {
+          optionGroupId: body.optionGroupId,
+          isRecommended: body.isRecommended,
+        }),
+      ),
+    onSuccess: () => setAlternativeError(null),
+    onError: (err) => setAlternativeError(mutationMessage(err)),
+  })
+
   const busy =
     createBudgetMutation.isPending ||
     updateMutation.isPending ||
     decideMutation.isPending ||
     cancelMutation.isPending ||
-    presentMutation.isPending
+    presentMutation.isPending ||
+    reviseMutation.isPending ||
+    groupMutation.isPending ||
+    alternativeMutation.isPending ||
+    chargeMutation.isPending
   const writeBlocked = disabled || busy
 
   const openPlan = (id: string) => {
@@ -558,6 +673,123 @@ export function PlanTab({
                 </p>
               </section>
 
+              <section aria-label="Alternativas del plan">
+                <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                  <h4 className="text-sm font-semibold">Alternativas</h4>
+                  {canWrite ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      disabled={writeBlocked}
+                      onClick={() => {
+                        setGroupTitle("")
+                        setGroupError(null)
+                        setGroupOpen(true)
+                      }}
+                    >
+                      Crear agrupación
+                    </Button>
+                  ) : null}
+                </div>
+                <p className="mb-2 text-xs text-muted-foreground">
+                  Un grupo reúne opciones excluyentes para el mismo problema clínico: al aceptar
+                  una, las demás se rechazan como «Alternativa no elegida». Marcar la recomendada
+                  orienta la decisión sin aceptarla.
+                </p>
+                {optionGroups.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">
+                    Este plan aún no tiene agrupaciones de alternativas.
+                  </p>
+                ) : (
+                  <ul className="mb-3 flex flex-col gap-1">
+                    {optionGroups.map((group) => {
+                      const members = planItems.filter((item) => item.optionGroupId === group.id)
+                      return (
+                        <li key={group.id} className="rounded-md border p-2 text-sm">
+                          <span className="font-medium">{group.title}</span>{" "}
+                          <span className="text-muted-foreground">
+                            {members.length === 0
+                              ? "· sin alternativas asignadas"
+                              : `· ${members.map((m) => m.title).join(" · ")}`}
+                          </span>
+                        </li>
+                      )
+                    })}
+                  </ul>
+                )}
+                {planItems.filter((item) => !["cancelado", "reemplazado"].includes(item.status))
+                  .length === 0 ? (
+                  <p className="text-sm text-muted-foreground">
+                    Sin indicaciones activas que agrupar.
+                  </p>
+                ) : (
+                  <ul className="flex flex-col gap-3">
+                    {planItems
+                      .filter((item) => !["cancelado", "reemplazado"].includes(item.status))
+                      .map((item) => (
+                        <li key={item.id} className="flex flex-col gap-2 rounded-md border p-3">
+                          <span className="flex flex-wrap items-center gap-2 text-sm">
+                            <span className="font-medium">{item.title}</span>
+                            <span className="text-muted-foreground">
+                              {treatmentSiteLabel(item)}
+                            </span>
+                            {item.isRecommended ? (
+                              <Badge variant="secondary">Recomendada</Badge>
+                            ) : null}
+                          </span>
+                          {canWrite ? (
+                            <div className="flex flex-wrap items-center gap-3">
+                              <label className="flex items-center gap-2 text-sm">
+                                Alternativa de
+                                <select
+                                  aria-label={`Alternativa de ${item.title}`}
+                                  className="h-9 rounded-md border bg-background px-3 text-sm"
+                                  disabled={writeBlocked}
+                                  value={item.optionGroupId ?? ""}
+                                  onChange={(event) =>
+                                    alternativeMutation.mutate({
+                                      itemId: item.id,
+                                      optionGroupId: event.target.value || null,
+                                      isRecommended: false,
+                                    })
+                                  }
+                                >
+                                  <option value="">Sin grupo</option>
+                                  {optionGroups.map((group) => (
+                                    <option key={group.id} value={group.id}>
+                                      {group.title}
+                                    </option>
+                                  ))}
+                                </select>
+                              </label>
+                              <label className="flex items-center gap-2 text-sm">
+                                <Checkbox
+                                  checked={item.isRecommended}
+                                  disabled={writeBlocked || item.optionGroupId == null}
+                                  onCheckedChange={(next) =>
+                                    alternativeMutation.mutate({
+                                      itemId: item.id,
+                                      optionGroupId: item.optionGroupId,
+                                      isRecommended: next === true,
+                                    })
+                                  }
+                                />
+                                Recomendada
+                              </label>
+                            </div>
+                          ) : null}
+                        </li>
+                      ))}
+                  </ul>
+                )}
+                {alternativeError ? (
+                  <p role="alert" className="mt-2 text-sm text-destructive">
+                    {alternativeError}
+                  </p>
+                ) : null}
+              </section>
+
               <section aria-label="Presupuestos del plan">
                 <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                   <h4 className="text-sm font-semibold">Presupuestos</h4>
@@ -627,10 +859,25 @@ export function PlanTab({
                     setAcceptedIds(selectedBudget.items.map((i) => i.planItemId))
                     setAcceptedBy(selectedBudget.acceptedByName ?? "")
                     setDecisionNote(selectedBudget.decisionNote ?? "")
+                    setDecisionByContactId(selectedBudget.decisionContactId ?? "")
                     setDecisionError(null)
                     setDecisionOpen(true)
                   }}
                   onCancel={() => setCancellingBudget(selectedBudget)}
+                  onRevise={() => {
+                    setReviseIds(selectedBudget.items.map((line) => line.planItemId))
+                    setReviseReason("")
+                    setReviseError(null)
+                    setReviseOpen(true)
+                  }}
+                  onCharge={(line) => {
+                    setChargeAmount(String((line.priceCents ?? 0) / 100))
+                    setChargeError(null)
+                    setChargeLine(line)
+                  }}
+                  revisionAvailable={["presentado", "aceptado", "parcial", "pospuesto"].includes(
+                    selectedBudget.status,
+                  )}
                   lineTable={lineTable}
                 />
               ) : null}
@@ -671,17 +918,56 @@ export function PlanTab({
         />
       ) : null}
 
+      {groupOpen && selectedPlan ? (
+        <FormDrawer
+          open={groupOpen}
+          title="Crear agrupación de alternativas"
+          description="Agrupa indicaciones excluyentes del mismo problema clínico; después asigna cada alternativa a este grupo."
+          error={groupError}
+          isSubmitting={groupMutation.isPending}
+          submitLabel="Crear agrupación"
+          onClose={() => {
+            if (!groupMutation.isPending) setGroupOpen(false)
+          }}
+          onSubmit={(event) => {
+            event.preventDefault()
+            if (!groupTitle.trim()) {
+              setGroupError("Indica un título para la agrupación.")
+              return
+            }
+            groupMutation.mutate()
+          }}
+        >
+          <Field>
+            <FieldLabel htmlFor={`${uid}-group-title`}>Título de la agrupación</FieldLabel>
+            <Input
+              id={`${uid}-group-title`}
+              value={groupTitle}
+              maxLength={200}
+              onChange={(event) => setGroupTitle(event.target.value)}
+            />
+          </Field>
+        </FormDrawer>
+      ) : null}
+
       {decisionOpen && selectedBudget ? (
         <DecideBudgetDialog
           uid={uid}
           lines={selectedBudget.items}
           initialAccepted={acceptedIds}
           initialNote={decisionNote}
+          deciders={deciders}
+          deciderId={decisionByContactId}
+          onDeciderChange={setDecisionByContactId}
           error={decisionError}
           pending={decideMutation.isPending}
           onClose={() => setDecisionOpen(false)}
           onSubmit={(decisions, decisionNote) =>
-            decideMutation.mutate({ decisions, decisionNote })
+            decideMutation.mutate({
+              decisions,
+              decisionNote,
+              decidedByContactId: decisionByContactId || null,
+            })
           }
         />
       ) : null}
@@ -716,6 +1002,93 @@ export function PlanTab({
           if (!cancelMutation.isPending) setCancellingBudget(null)
         }}
       />
+
+      <FormDrawer
+        open={reviseOpen}
+        title="Crear revisión de la propuesta"
+        description="La revisión conserva el número del presupuesto y lo versiona: el documento anterior queda sustituido. No puede retirarse una línea ya ejecutada, con cargo o con pago aplicado."
+        error={reviseOpen ? reviseError : null}
+        isSubmitting={reviseMutation.isPending}
+        submitLabel="Crear revisión"
+        onClose={() => {
+          if (!reviseMutation.isPending) setReviseOpen(false)
+        }}
+        onSubmit={(event) => {
+          event.preventDefault()
+          if (reviseIds.length === 0) {
+            setReviseError("Elige al menos un tratamiento para la revisión.")
+            return
+          }
+          if (!reviseReason.trim()) {
+            setReviseError("Indica el motivo de la revisión.")
+            return
+          }
+          reviseMutation.mutate()
+        }}
+      >
+        <fieldset className="flex flex-col gap-2">
+          <legend className="text-sm font-medium">Tratamientos de la revisión</legend>
+          {planItems
+            .filter((item) => !["cancelado", "reemplazado"].includes(item.status))
+            .map((item) => (
+              <label key={item.id} className="flex items-start gap-2 text-sm">
+                <Checkbox
+                  checked={reviseIds.includes(item.id)}
+                  aria-label={item.title}
+                  onCheckedChange={() =>
+                    setReviseIds((current) =>
+                      current.includes(item.id)
+                        ? current.filter((id) => id !== item.id)
+                        : [...current, item.id],
+                    )
+                  }
+                />
+                <span>
+                  {item.title}
+                  {item.toothNumber != null ? ` · Pieza ${item.toothNumber}` : ""}
+                </span>
+              </label>
+            ))}
+        </fieldset>
+        <Field>
+          <FieldLabel htmlFor={`${uid}-revise-reason`}>Motivo de la revisión</FieldLabel>
+          <Textarea
+            id={`${uid}-revise-reason`}
+            maxLength={2000}
+            value={reviseReason}
+            onChange={(event) => setReviseReason(event.target.value)}
+          />
+        </Field>
+      </FormDrawer>
+
+      <FormDrawer
+        open={chargeLine != null}
+        title={`Generar cargo: ${chargeLine?.title ?? ""}`}
+        description="El cargo conserva la línea de la propuesta y su tratamiento, y no puede superar el importe pendiente de esa línea."
+        error={chargeLine ? chargeError : null}
+        isSubmitting={chargeMutation.isPending}
+        submitLabel="Generar cargo"
+        onClose={() => {
+          if (!chargeMutation.isPending) setChargeLine(null)
+        }}
+        onSubmit={(event) => {
+          event.preventDefault()
+          if (centsFromInput(chargeAmount) == null) {
+            setChargeError("Indica un importe positivo con hasta dos decimales.")
+            return
+          }
+          chargeMutation.mutate()
+        }}
+      >
+        <Field>
+          <FieldLabel htmlFor={`${uid}-charge-amount`}>Importe del cargo</FieldLabel>
+          <Input
+            id={`${uid}-charge-amount`}
+            value={chargeAmount}
+            onChange={(event) => setChargeAmount(event.target.value)}
+          />
+        </Field>
+      </FormDrawer>
     </div>
   )
 }
@@ -728,6 +1101,9 @@ function BudgetDetail({
   onPresent,
   onDecide,
   onCancel,
+  onRevise,
+  onCharge,
+  revisionAvailable,
   lineTable,
 }: {
   budget: BudgetWithTotals
@@ -737,11 +1113,18 @@ function BudgetDetail({
   onPresent: () => void
   onDecide: () => void
   onCancel: () => void
+  onRevise: () => void
+  onCharge: (line: BudgetLine) => void
+  /** Revisión vigente o decisiones ya tomadas: la revisión se ofrece después de presentar. */
+  revisionAvailable: boolean
   lineTable: Table<BudgetLine>
 }) {
   const isDraft = budget.status === "borrador"
   const isPresented = budget.status === "presentado"
   const canCancel = isDraft || isPresented
+  const acceptedLines = budget.items.filter(
+    (line) => line.decision === "aceptado" && line.priceCents != null,
+  )
   return (
     <section
       aria-label="Detalle del presupuesto"
@@ -787,6 +1170,34 @@ function BudgetDetail({
         <p className="text-sm text-muted-foreground">Decisión: {budget.decisionNote}</p>
       ) : null}
       <DataTable table={lineTable} />
+      {canWrite && acceptedLines.length > 0 ? (
+        <div className="flex flex-col gap-2 rounded-lg border p-3">
+          <span className="text-sm font-medium">Cargos desde líneas aceptadas</span>
+          <p className="text-xs text-muted-foreground">
+            Aceptar la propuesta no genera cargos: cada cargo se emite explícitamente y conserva la
+            línea y el tratamiento de su origen.
+          </p>
+          <ul className="flex flex-col gap-2">
+            {acceptedLines.map((line) => (
+              <li key={line.id} className="flex flex-wrap items-center gap-2 text-sm">
+                <span>{line.title}</span>
+                <span className="tabular-nums text-muted-foreground">
+                  {formatMoney(line.priceCents ?? 0, line.currency)}
+                </span>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={writeBlocked}
+                  onClick={() => onCharge(line)}
+                >
+                  Generar cargo
+                </Button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
       {canWrite ? (
         <div className="flex flex-wrap gap-2">
           {isDraft ? (
@@ -808,6 +1219,17 @@ function BudgetDetail({
           {isPresented ? (
             <Button type="button" size="sm" disabled={writeBlocked} onClick={onDecide}>
               Registrar decisión
+            </Button>
+          ) : null}
+          {revisionAvailable ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={writeBlocked}
+              onClick={onRevise}
+            >
+              Crear revisión
             </Button>
           ) : null}
           {canCancel ? (
@@ -1026,6 +1448,9 @@ function DecideBudgetDialog({
   lines,
   initialAccepted,
   initialNote,
+  deciders,
+  deciderId,
+  onDeciderChange,
   error,
   pending,
   onClose,
@@ -1035,13 +1460,24 @@ function DecideBudgetDialog({
   lines: BudgetLine[]
   initialAccepted: string[]
   initialNote: string
+  /** Quién puede asumir la decisión: el paciente o su representante legal vigente. */
+  deciders: Array<{ id: string; label: string }>
+  deciderId: string
+  onDeciderChange: (contactId: string) => void
   error: string | null
   pending: boolean
   onClose: () => void
   onSubmit: (decisions: DecideBudgetBody["decisions"], decisionNote: string | null) => void
 }) {
-  const [decisions, setDecisions] = useState<Record<string, "aceptado" | "rechazado" | "pospuesto">>(
-    Object.fromEntries(lines.map(line => [line.planItemId, initialAccepted.includes(line.planItemId) ? "aceptado" : "pospuesto"])),
+  const [decisions, setDecisions] = useState<
+    Record<string, "aceptado" | "rechazado" | "pospuesto">
+  >(
+    Object.fromEntries(
+      lines.map((line) => [
+        line.planItemId,
+        initialAccepted.includes(line.planItemId) ? "aceptado" : "pospuesto",
+      ]),
+    ),
   )
   const [note, setNote] = useState(initialNote)
   return (
@@ -1057,8 +1493,16 @@ function DecideBudgetDialog({
       <ul className="flex flex-col gap-2">
         {lines.map((line) => (
           <li key={line.id} className="flex items-start gap-2">
-            <select aria-label={`Decisión: ${line.title}`} value={decisions[line.planItemId]}
-              onChange={event => setDecisions(current => ({ ...current, [line.planItemId]: event.target.value as "aceptado" | "rechazado" | "pospuesto" }))}>
+            <select
+              aria-label={`Decisión: ${line.title}`}
+              value={decisions[line.planItemId]}
+              onChange={(event) =>
+                setDecisions((current) => ({
+                  ...current,
+                  [line.planItemId]: event.target.value as "aceptado" | "rechazado" | "pospuesto",
+                }))
+              }
+            >
               <option value="aceptado">Aceptado</option>
               <option value="rechazado">Rechazado</option>
               <option value="pospuesto">Pospuesto</option>
@@ -1076,6 +1520,28 @@ function DecideBudgetDialog({
         ))}
       </ul>
       <Field>
+        <FieldLabel htmlFor={`${uid}-decide-by`}>Quién decide</FieldLabel>
+        <select
+          id={`${uid}-decide-by`}
+          className="h-9 w-full rounded-md border bg-background px-3 text-sm"
+          value={deciderId}
+          onChange={(event) => onDeciderChange(event.target.value)}
+        >
+          <option value="">Sin responsable registrado</option>
+          {deciders.map((decider) => (
+            <option key={decider.id} value={decider.id}>
+              {decider.label}
+            </option>
+          ))}
+        </select>
+        {deciders.length === 0 ? (
+          <p className="text-xs text-muted-foreground">
+            Para registrar quién decide, vincula al paciente y asigna el rol de representante legal
+            en Responsables.
+          </p>
+        ) : null}
+      </Field>
+      <Field>
         <FieldLabel htmlFor={`${uid}-decide-note`}>Nota de decisión</FieldLabel>
         <Textarea
           id={`${uid}-decide-note`}
@@ -1085,7 +1551,11 @@ function DecideBudgetDialog({
           maxLength={4000}
         />
       </Field>
-      {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
+      {error ? (
+        <p role="alert" className="text-sm text-destructive">
+          {error}
+        </p>
+      ) : null}
       <div className="flex justify-end gap-2">
         <Button type="button" variant="outline" onClick={onClose}>
           Cancelar
@@ -1093,9 +1563,15 @@ function DecideBudgetDialog({
         <Button
           type="button"
           disabled={pending}
-          onClick={() => onSubmit(lines.map(line => ({
-            planItemId: line.planItemId, decision: decisions[line.planItemId] ?? "pospuesto",
-          })), note.trim() || null)}
+          onClick={() =>
+            onSubmit(
+              lines.map((line) => ({
+                planItemId: line.planItemId,
+                decision: decisions[line.planItemId] ?? "pospuesto",
+              })),
+              note.trim() || null,
+            )
+          }
         >
           {pending ? "Guardando…" : "Registrar"}
         </Button>

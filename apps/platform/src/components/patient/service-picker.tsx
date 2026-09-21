@@ -124,7 +124,7 @@ export function ServicePicker({
             }
           }}
           onValueChange={(item) => {
-            if (item && item.priceCents !== null) {
+            if (item) {
               onChange(item)
               setQuery("")
               setOpen(true)
@@ -174,32 +174,24 @@ export function ServicePicker({
             ) : (
               <>
                 <ComboboxList aria-label="Tratamientos disponibles">
-                  {items.map((item) => {
-                    const priced = item.priceCents !== null
-                    return (
-                      <ComboboxItem
-                        key={item.id}
-                        value={item}
-                        disabled={!priced}
-                        className="flex-col items-start gap-0 py-2"
-                      >
-                        <span className="font-medium">{item.name}</span>
-                        <span className="text-muted-foreground">
-                          {item.specialty
-                            ? `${TREATMENT_SPECIALTY_LABELS[item.specialty] ?? item.specialty} · `
-                            : ""}
-                          {item.scope
-                            ? `${TREATMENT_SCOPE_LABELS[item.scope] ?? item.scope} · `
-                            : ""}
-                          {item.code ? `${item.code} · ` : ""}
-                          {priced
-                            ? formatMoney(item.priceCents as number, item.currency)
-                            : "Sin tarifa: configúrala en el tarifario antes de cotizar"}
-                          {item.durationMin !== null ? ` · ${item.durationMin} min` : ""}
-                        </span>
-                      </ComboboxItem>
-                    )
-                  })}
+                  {items.map((item) => (
+                    <ComboboxItem
+                      key={item.id}
+                      value={item}
+                      className="flex-col items-start gap-0 py-2"
+                    >
+                      <span className="font-medium">{item.name}</span>
+                      <span className="text-muted-foreground">
+                        {item.specialty
+                          ? `${TREATMENT_SPECIALTY_LABELS[item.specialty] ?? item.specialty} · `
+                          : ""}
+                        {item.scope ? `${TREATMENT_SCOPE_LABELS[item.scope] ?? item.scope} · ` : ""}
+                        {item.code ? `${item.code} · ` : ""}
+                        {formatMoney(item.priceCents, item.currency)}
+                        {item.durationMin !== null ? ` · ${item.durationMin} min` : ""}
+                      </span>
+                    </ComboboxItem>
+                  ))}
                 </ComboboxList>
                 <ComboboxEmpty>Sin resultados.</ComboboxEmpty>
               </>
@@ -211,10 +203,7 @@ export function ServicePicker({
         <div className="flex flex-wrap items-center gap-2">
           <Badge>{selectedItem.name}</Badge>
           <span className="text-sm text-muted-foreground">
-            Tarifa de catálogo:{" "}
-            {selectedItem.priceCents !== null
-              ? formatMoney(selectedItem.priceCents, selectedItem.currency)
-              : "sin tarifa"}
+            Tarifa de catálogo: {formatMoney(selectedItem.priceCents, selectedItem.currency)}
             {selectedItem.durationMin !== null ? ` · ${selectedItem.durationMin} min` : ""}
           </span>
         </div>

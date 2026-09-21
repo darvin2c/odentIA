@@ -13,7 +13,7 @@ import {
   listPatientDocuments,
   registerPatientDocument,
 } from "./clinical.js"
-import { createEncounter, finalizeEncounter } from "./encounters.js"
+import { addEncounterProcedure, createEncounter, finalizeEncounter } from "./encounters.js"
 import { createPatient } from "./patients.js"
 import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
 
@@ -95,8 +95,8 @@ async function seedClosedEncounter(
   const closed = await withOrgContext(appDb, org, (tx) =>
     finalizeEncounter(tx, org, ACTOR, patientId, draft.id),
   )
-  expect(closed.status).toBe("finalizada")
-  return closed.id
+  expect(closed.encounter.status).toBe("finalizada")
+  return closed.encounter.id
 }
 
 it("registra documento general y vinculado con contexto v1 fusionado", async () => {
@@ -301,6 +301,9 @@ it("listEncounterDocuments e hidratación por lote siguen el contexto vigente", 
     await addClinicalNote(tx, "org_a", ACTOR, p.id, {
       note: "Cierre de A",
       encounterId: encounterA.id,
+    })
+    await addEncounterProcedure(tx, "org_a", ACTOR, p.id, encounterA.id, {
+      description: "Revisión clínica",
     })
     await finalizeEncounter(tx, "org_a", ACTOR, p.id, encounterA.id)
   })

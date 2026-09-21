@@ -11,6 +11,7 @@ import { EmptyState, PageShell } from "@odentia/ui-patterns"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
 import { ClipboardList } from "lucide-react"
+import { ControlesPanel, RecetasPanel } from "../../components/patient/clinical-panels"
 import { EncounterDetailView } from "../../components/patient/encounter-detail-view"
 import { EncounterEditor } from "../../components/patient/encounter-editor"
 import { apiFetch } from "../../lib/api"
@@ -75,13 +76,18 @@ function EncounterPage() {
     navigate({ to: "/patients/$patientId", params: { patientId }, search: { tab: "historia" } })
   const changed = () =>
     queryClient.invalidateQueries({ queryKey: ["encounter", patientId, encounterId] })
-  const finalized = async () => {
+  const finalized = async (hasCharges: boolean) => {
     await Promise.all(
-      ["encounter", "patient-summary", "timeline", "plan"].map((key) =>
+      ["encounter", "patient-summary", "timeline", "plan", "account"].map((key) =>
         queryClient.invalidateQueries({ queryKey: [key, patientId] }),
       ),
     )
-    await back()
+    // Con cargos generados, el siguiente paso natural es la cuenta (cobrar).
+    await navigate({
+      to: "/patients/$patientId",
+      params: { patientId },
+      search: { tab: hasCharges ? "cuenta" : "historia" },
+    })
   }
 
   if (patientQuery.isLoading || encounterQuery.isLoading) {
@@ -143,6 +149,20 @@ function EncounterPage() {
         <Badge variant="outline">Solo lectura</Badge>
       </header>
       <EncounterDetailView patientId={patientId} detail={detail} />
+      <RecetasPanel
+        patientId={patientId}
+        encounterId={detail.encounter.id}
+        encounterOnly
+        allowCreate={false}
+        items={detail.plannedItems}
+      />
+      <ControlesPanel
+        patientId={patientId}
+        encounterId={detail.encounter.id}
+        encounterOnly
+        allowCreate={false}
+        items={detail.plannedItems}
+      />
     </PageShell>
   )
 }

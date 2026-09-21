@@ -11,6 +11,7 @@ import {
   SelectLabel,
   SelectTrigger,
   SelectValue,
+  Textarea,
 } from "@odentia/ui"
 import { FormDrawer } from "@odentia/ui-patterns"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
@@ -25,8 +26,8 @@ import { ServicePicker } from "./service-picker"
 const NO_TOOTH = "__sin-pieza__"
 const NO_PLAN = "__sin-plan__"
 
-/** Solo presupuesto aceptado o servicio directo explícito: el servidor exige decision aceptado y lo marca realizado. */
-const OPEN_STATUSES: readonly string[] = ["pendiente", "programado"]
+/** Tratamiento aceptado que aún admite sesiones: incluye el que ya está en curso. */
+const OPEN_STATUSES: readonly string[] = ["pendiente", "programado", "en_curso"]
 
 function formatDateTime(iso: string | null): string {
   if (!iso) return "—"
@@ -75,6 +76,8 @@ export function EncounterProcedures({
   const uid = useId()
   const [open, setOpen] = useState(false)
   const [serviceId, setServiceId] = useState("")
+  const [freeMode, setFreeMode] = useState(false)
+  const [freeDescription, setFreeDescription] = useState("")
   const [toothSel, setToothSel] = useState<string>(NO_TOOTH)
   const [cie, setCie] = useState("")
   const [planSel, setPlanSel] = useState<string>("")
@@ -143,19 +146,34 @@ export function EncounterProcedures({
     setToothSel(linked.toothNumber == null ? NO_TOOTH : String(linked.toothNumber))
   }
 
-  const canSubmit = canWrite && !finalized && !busy && (Boolean(selectedPlan) || serviceId !== "")
-  const isDirty = serviceId !== "" || planSel !== "" || cie.trim() !== "" || toothSel !== NO_TOOTH
+  const canSubmit =
+    canWrite &&
+    !finalized &&
+    !busy &&
+    (Boolean(selectedPlan) || serviceId !== "" || (freeMode && freeDescription.trim() !== ""))
+  const isDirty =
+    serviceId !== "" ||
+    planSel !== "" ||
+    cie.trim() !== "" ||
+    toothSel !== NO_TOOTH ||
+    freeDescription.trim() !== ""
 
   const onSubmit = async (event: React.FormEvent) => {
     event.preventDefault()
     event.stopPropagation()
     if (!canSubmit) return
     const trimmedCie = cie.trim()
-    const body = {
-      ...(selectedPlan ? { planItemId: selectedPlan.id } : { serviceId }),
-      toothNumber: tooth,
-      diagnosisCode: trimmedCie === "" ? null : trimmedCie,
-    }
+    const body = freeMode
+      ? {
+          description: freeDescription.trim(),
+          toothNumber: tooth,
+          diagnosisCode: trimmedCie === "" ? null : trimmedCie,
+        }
+      : {
+          ...(selectedPlan ? { planItemId: selectedPlan.id } : { serviceId }),
+          toothNumber: tooth,
+          diagnosisCode: trimmedCie === "" ? null : trimmedCie,
+        }
     onPendingChange(true)
     setSaving(true)
     setError(null)
@@ -173,6 +191,8 @@ export function EncounterProcedures({
       setToothSel(NO_TOOTH)
       setCie("")
       setPlanSel("")
+      setFreeMode(false)
+      setFreeDescription("")
       setOpen(false)
     } catch (err) {
       setError(mutationMessage(err))
@@ -190,6 +210,8 @@ export function EncounterProcedures({
     setToothSel(NO_TOOTH)
     setCie("")
     setPlanSel("")
+    setFreeMode(false)
+    setFreeDescription("")
     setError(null)
     setOpen(false)
   }
@@ -197,16 +219,26 @@ export function EncounterProcedures({
   return (
     <div className="flex flex-col gap-6 rounded-md bg-card p-6">
       <div className="flex flex-col gap-1.5">
-        <div className="font-heading text-base font-medium">Procedimientos ({detail.procedures.length})</div>
+        <div className="font-heading text-base font-medium">
+          Procedimientos ({detail.procedures.length})
+        </div>
       </div>
       <div className="flex flex-col gap-3">
-        <section aria-label="Tratamientos vinculados pendientes">
+        <section aria-label="Tratamientos vinculados en curso">
           {detail.plannedItems.filter(
-            (item) => item.status === "pendiente" || item.status === "programado",
+            (item) =>
+              item.status === "pendiente" ||
+              item.status === "programado" ||
+              item.status === "en_curso",
           ).length === 0 ? null : (
             <ul className="mb-3 flex flex-col gap-2">
               {detail.plannedItems
-                .filter((item) => item.status === "pendiente" || item.status === "programado")
+                .filter(
+                  (item) =>
+                    item.status === "pendiente" ||
+                    item.status === "programado" ||
+                    item.status === "en_curso",
+                )
                 .map((item) => (
                   <li key={item.id} className="rounded-md border border-dashed p-2 text-sm">
                     <p>{item.title}</p>
@@ -235,14 +267,19 @@ export function EncounterProcedures({
                       {proc.diagnosisCode ? <Badge>CIE-10 {proc.diagnosisCode}</Badge> : null}
                       {proc.planItemId ? (
                         linked ? (
-                          <span className="font-medium">
-                            Plan: {linked.title}
-                          </span>
+                          <span className="font-medium">Plan: {linked.title}</span>
                         ) : (
                           <span>Plan: {proc.planItemId.slice(0, 8)}</span>
                         )
                       ) : null}
                       <time dateTime={proc.createdAt}>{formatDateTime(proc.createdAt)}</time>
+                      {proc.priceCents != null && proc.currency ? (
+                        <span className="font-medium text-foreground">
+                          {formatMoney(proc.priceCents, proc.currency)}
+                        </span>
+                      ) : (
+                        <span>Sin cargo (acto libre)</span>
+                      )}
                     </p>
                   </li>
                 )
@@ -250,7 +287,7 @@ export function EncounterProcedures({
             </ul>
           )}
         </section>
-      
+
         {canWrite && !finalized && (
           <div>
             <Button
@@ -263,13 +300,13 @@ export function EncounterProcedures({
             </Button>
           </div>
         )}
-      
+
         {canWrite && !finalized && (
           <FormDrawer
             open={open}
             onClose={handleClose}
             title="Registrar procedimiento"
-            description="Elige un tratamiento aceptado del presupuesto o un servicio directo del catálogo. Al guardar queda realizado y vinculado a esta atención."
+            description="Elige un tratamiento aceptado del presupuesto, un servicio del catálogo (se registra como tratamiento realizado en el acto), o marca acto libre para algo que no se cobra."
             onSubmit={(event) => void onSubmit(event)}
             isDirty={isDirty}
             isSubmitting={saving}
@@ -278,14 +315,45 @@ export function EncounterProcedures({
             error={error}
           >
             <div className="flex flex-col gap-4">
-              {!selectedPlan && (
+              <Field orientation="horizontal" className="items-center gap-2">
+                <input
+                  id={`${uid}-free`}
+                  type="checkbox"
+                  checked={freeMode}
+                  disabled={busy}
+                  onChange={(event) => {
+                    setFreeMode(event.target.checked)
+                    setServiceId("")
+                    setPlanSel("")
+                  }}
+                />
+                <FieldLabel htmlFor={`${uid}-free`} className="font-normal">
+                  Acto libre (sin servicio del tarifario; queda registrado pero no se cobra)
+                </FieldLabel>
+              </Field>
+              {freeMode && (
+                <Field>
+                  <FieldLabel htmlFor={`${uid}-free-desc`}>Descripción del acto</FieldLabel>
+                  <Textarea
+                    id={`${uid}-free-desc`}
+                    value={freeDescription}
+                    onChange={(event) => setFreeDescription(event.target.value)}
+                    placeholder="Ej.: ajuste oclusal menor de cortesía"
+                    rows={2}
+                    maxLength={2000}
+                    disabled={busy}
+                    required
+                  />
+                </Field>
+              )}
+              {!selectedPlan && !freeMode && (
                 <ServicePicker
                   value={serviceId}
                   onChange={(service) => setServiceId(service.id)}
                   disabled={busy}
                 />
               )}
-      
+
               <Field>
                 <FieldLabel htmlFor={`${uid}-pieza`}>Pieza (FDI, opcional)</FieldLabel>
                 <Select
@@ -318,71 +386,73 @@ export function EncounterProcedures({
                   </SelectContent>
                 </Select>
               </Field>
-      
+
               <Cie10Search
                 value={cie}
                 onChange={(code) => setCie(code)}
                 label="Diagnóstico CIE-10 (opcional)"
                 disabled={busy}
               />
-      
-              <Field>
-                <FieldLabel htmlFor={`${uid}-plan`}>
-                  Tratamiento aceptado del presupuesto
-                </FieldLabel>
-                {planQuery.isLoading ? (
-                  <p className="text-sm text-muted-foreground">Cargando plan…</p>
-                ) : planQuery.isError ? (
-                  <div className="flex flex-col gap-2">
-                    <p role="alert" className="text-sm text-destructive">
-                      No se pudo cargar el plan de tratamiento.
-                    </p>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      className="self-start"
+
+              {!freeMode && (
+                <Field>
+                  <FieldLabel htmlFor={`${uid}-plan`}>
+                    Tratamiento aceptado del presupuesto
+                  </FieldLabel>
+                  {planQuery.isLoading ? (
+                    <p className="text-sm text-muted-foreground">Cargando plan…</p>
+                  ) : planQuery.isError ? (
+                    <div className="flex flex-col gap-2">
+                      <p role="alert" className="text-sm text-destructive">
+                        No se pudo cargar el plan de tratamiento.
+                      </p>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="self-start"
+                        disabled={busy}
+                        onClick={() => void planQuery.refetch()}
+                      >
+                        Reintentar
+                      </Button>
+                    </div>
+                  ) : (
+                    <Select
+                      value={planSel === "" ? NO_PLAN : planSel}
+                      items={planItems}
+                      onValueChange={onPlanChange}
                       disabled={busy}
-                      onClick={() => void planQuery.refetch()}
                     >
-                      Reintentar
-                    </Button>
-                  </div>
-                ) : (
-                  <Select
-                    value={planSel === "" ? NO_PLAN : planSel}
-                    items={planItems}
-                    onValueChange={onPlanChange}
-                    disabled={busy}
-                  >
-                    <SelectTrigger id={`${uid}-plan`} aria-label="Tratamiento del presupuesto">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value={NO_PLAN}>
-                        Seleccionar otro servicio del catálogo
-                      </SelectItem>
-                      {options.map((item) => (
-                        <SelectItem key={item.id} value={item.id}>
-                          {planOptionLabel(item)}
+                      <SelectTrigger id={`${uid}-plan`} aria-label="Tratamiento del presupuesto">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={NO_PLAN}>
+                          Seleccionar otro servicio del catálogo
                         </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                )}
-                {options.length === 0 && !selectedPlan && (
-                  <p className="text-xs text-muted-foreground">
-                    Sin tratamientos aceptados pendientes: registra un servicio directo del
-                    catálogo.
-                  </p>
-                )}
-                {selectedPlan && (
-                  <p className="text-xs text-muted-foreground">
-                    Al guardar, «{selectedPlan.title}» quedará realizado y vinculado a esta
-                    atención.
-                  </p>
-                )}
-              </Field>
+                        {options.map((item) => (
+                          <SelectItem key={item.id} value={item.id}>
+                            {planOptionLabel(item)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                  {options.length === 0 && !selectedPlan && (
+                    <p className="text-xs text-muted-foreground">
+                      Sin tratamientos aceptados pendientes: registra un servicio directo del
+                      catálogo.
+                    </p>
+                  )}
+                  {selectedPlan && (
+                    <p className="text-xs text-muted-foreground">
+                      Al guardar, «{selectedPlan.title}» queda en curso y vinculado a esta atención.
+                      Completarlo es una decisión aparte en la pestaña Realizado.
+                    </p>
+                  )}
+                </Field>
+              )}
             </div>
           </FormDrawer>
         )}

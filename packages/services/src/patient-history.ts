@@ -1,6 +1,7 @@
 import { isValidTooth } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import {
+  clinicalFollowUp,
   clinicalNote,
   encounter,
   encounterPlanItem,
@@ -9,6 +10,8 @@ import {
   odontogramEntry,
   patientAnamnesis,
   patientDocument,
+  prescription,
+  prescriptionItem,
   treatmentBudget,
   treatmentBudgetItem,
   treatmentPlanItem,
@@ -498,7 +501,17 @@ export async function getPatientSummary(tx: Db, orgId: string, patientId: string
   }
 }
 
-export const TIMELINE_TYPES = ["encounter", "note", "anamnesis", "document", "odontogram", "plan", "budget", "follow_up", "prescription", "payment"] as const
+export const TIMELINE_TYPES = [
+  "encounter",
+  "note",
+  "anamnesis",
+  "document",
+  "odontogram",
+  "plan",
+  "budget",
+  "follow_up",
+  "prescription",
+] as const
 export type TimelineType = (typeof TIMELINE_TYPES)[number]
 export interface TimelineItem {
   id: string
@@ -532,7 +545,12 @@ export interface TimelineItem {
   budgetId?: string | null
   followUpId?: string | null
   prescriptionId?: string | null
-  paymentId?: string | null
+  /** Plan clínico del tratamiento, para abrir su recorrido desde la historia. */
+  planId?: string | null
+  /** Decisión vigente del tratamiento (aceptado, pendiente, etc.). */
+  decision?: string | null
+  /** Vencimiento de un control, para leerlo sin consultar otra pantalla. */
+  dueAt?: Date | null
 }
 
 export async function getTimeline(
@@ -603,11 +621,10 @@ export async function getTimeline(
     )
   }
   const journeySources = [
-    { type: "plan", table: "treatment_plan_item", title: sql`title`, author: "created_by", ref: "planItemId" },
-    { type: "budget", table: "treatment_budget", title: sql`title`, author: "created_by", ref: "budgetId" },
-    { type: "follow_up", table: "clinical_follow_up", title: sql`title`, author: "created_by", ref: "followUpId" },
-    { type: "prescription", table: "prescription", title: sql`'Receta ' || prescription_number`, author: "issued_by", ref: "prescriptionId" },
-    { type: "payment", table: "patient_payment", title: sql`'Pago registrado'`, author: "created_by", ref: "paymentId" },
+    { type: "plan", table: "treatment_plan_item", ref: "planItemId" },
+    { type: "budget", table: "treatment_budget", ref: "budgetId" },
+    { type: "follow_up", table: "clinical_follow_up", ref: "followUpId" },
+    { type: "prescription", table: "prescription", ref: "prescriptionId" },
   ] as const
   for (const source of journeySources) {
     if (!types.includes(source.type) || tooth != null) continue
@@ -793,15 +810,140 @@ export async function getTimeline(
   for (const source of journeySources) {
     const sourceIds = ids(source.type)
     if (!sourceIds.length) continue
-    const records = await tx.execute<{ id: string; created_at: Date; title: string; author: string | null }>(
-      sql`select id, created_at, ${source.title} as title, ${sql.identifier(source.author)} as author
-        from ${sql.identifier(source.table)} where organization_id = ${orgId} and patient_id = ${patientId}::uuid
-        and id in (${sql.join(sourceIds.map(id => sql`${id}::uuid`), sql`, `)})`)
-    for (const row of records) hydrated.set(row.id, {
-      id: row.id, refId: row.id, type: source.type, createdAt: new Date(row.created_at),
-      title: row.title, authorId: row.author, toothNumbers: [], [source.ref]: row.id,
-    })
+    const records = await tx.execute<{ id: string }>(
+      sql`select id from ${sql.identifier(source.table)}
+        where organization_id = ${orgId} and patient_id = ${patientId}::uuid
+        and id in (${sql.join(
+          sourceIds.map((id) => sql`${id}::uuid`),
+          sql`, `,
+        )})`,
+    )
+    for (const row of records)
+      hydrated.set(row.id, {
+        id: row.id,
+        refId: row.id,
+        type: source.type,
+        createdAt: new Date(0),
+        title: "",
+        toothNumbers: [],
+        [source.ref]: row.id,
+      })
   }
+  // Contexto legible de cada evento del recorrido: la historia no muestra
+  // "plan"/"payment" sin decir de qué tratamiento o pago se trata ni adónde ir.
+  const planIds = ids("plan")
+  if (planIds.length)
+    for (const row of await tx
+      .select()
+      .from(treatmentPlanItem)
+      .where(
+        and(eq(treatmentPlanItem.organizationId, orgId), inArray(treatmentPlanItem.id, planIds)),
+      )) {
+      const site =
+        row.toothNumber != null
+          ? `Pieza ${row.toothNumber}${row.surfaces.length > 0 ? ` (${row.surfaces.join(", ")})` : ""}`
+          : row.scope === "quadrant" && row.quadrant != null
+            ? `Cuadrante ${row.quadrant}`
+            : row.scope === "arch" && row.arch === "upper"
+              ? "Arcada superior"
+              : row.scope === "arch" && row.arch === "lower"
+                ? "Arcada inferior"
+                : "General"
+      hydrated.set(row.id, {
+        ...hydrated.get(row.id)!,
+        createdAt: row.createdAt,
+        title: row.title,
+        detail: `${site} · ${row.status}`,
+        status: row.status,
+        decision: row.decisionStatus,
+        toothNumbers: row.toothNumber != null ? [row.toothNumber] : [],
+        authorId: row.createdBy,
+        planId: row.planId,
+        planItemId: row.id,
+      })
+    }
+  const budgetIds = ids("budget")
+  if (budgetIds.length)
+    for (const row of await tx
+      .select()
+      .from(treatmentBudget)
+      .where(
+        and(eq(treatmentBudget.organizationId, orgId), inArray(treatmentBudget.id, budgetIds)),
+      )) {
+      const [line] = await tx
+        .select({
+          total: sql<number>`count(*)::int`,
+          currency: sql<string>`min(${treatmentBudgetItem.currency})`,
+        })
+        .from(treatmentBudgetItem)
+        .where(
+          and(
+            eq(treatmentBudgetItem.organizationId, orgId),
+            eq(treatmentBudgetItem.budgetId, row.id),
+          ),
+        )
+      hydrated.set(row.id, {
+        ...hydrated.get(row.id)!,
+        createdAt: row.createdAt,
+        title: `Presupuesto N.º ${row.budgetNumber} · ${row.title}`,
+        detail: `Revisión ${row.revisionNumber} · ${line?.total ?? 0} tratamiento(s) · ${line?.currency ?? row.currency}`,
+        status: row.status,
+        authorId: row.createdBy,
+        planId: row.planId,
+        budgetId: row.id,
+      })
+    }
+  const followUpIds = ids("follow_up")
+  if (followUpIds.length)
+    for (const row of await tx
+      .select()
+      .from(clinicalFollowUp)
+      .where(
+        and(eq(clinicalFollowUp.organizationId, orgId), inArray(clinicalFollowUp.id, followUpIds)),
+      )) {
+      hydrated.set(row.id, {
+        ...hydrated.get(row.id)!,
+        createdAt: row.createdAt,
+        title: row.title,
+        detail: row.outcome ?? row.instructions ?? null,
+        status: row.status,
+        dueAt: row.dueAt,
+        authorId: row.createdBy,
+        planItemId: row.planItemId,
+        followUpId: row.id,
+      })
+    }
+  const prescriptionIds = ids("prescription")
+  if (prescriptionIds.length)
+    for (const row of await tx
+      .select()
+      .from(prescription)
+      .where(
+        and(eq(prescription.organizationId, orgId), inArray(prescription.id, prescriptionIds)),
+      )) {
+      const medications = await tx
+        .select({ medicationName: prescriptionItem.medicationName, dose: prescriptionItem.dose })
+        .from(prescriptionItem)
+        .where(
+          and(
+            eq(prescriptionItem.organizationId, orgId),
+            eq(prescriptionItem.prescriptionId, row.id),
+          ),
+        )
+        .orderBy(asc(prescriptionItem.createdAt), asc(prescriptionItem.id))
+      hydrated.set(row.id, {
+        ...hydrated.get(row.id)!,
+        createdAt: row.issuedAt,
+        title: `Receta N.º ${row.prescriptionNumber}`,
+        detail:
+          medications.map((m) => `${m.medicationName} ${m.dose}`).join(" · ") || "Sin medicamentos",
+        status: row.status,
+        authorId: row.issuedBy,
+        planItemId: row.planItemId,
+        prescriptionId: row.id,
+      })
+    }
+  // Los pagos no son historia clínica: sus movimientos viven en la cuenta.
   const last = page[page.length - 1]!
   return {
     data: page.map((row) => hydrated.get(row.id)!),

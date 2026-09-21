@@ -49,6 +49,8 @@ export interface Budget {
   status: BudgetStatus | string
   notes: string | null
   acceptedByName: string | null
+  /** Contacto que asumió la decisión (paciente o representante legal). */
+  decisionContactId?: string | null
   decisionNote: string | null
   decidedAt: string | null
   decidedBy?: string | null
@@ -105,7 +107,6 @@ export function patchPlanItemApi(
     body: JSON.stringify(body),
   })
 }
-
 
 export const BUDGET_CURRENCIES = ["PEN", "USD", "EUR"] as const
 export type BudgetCurrency = (typeof BUDGET_CURRENCIES)[number]
@@ -238,6 +239,25 @@ export function cancelBudgetApi(patientId: string, budgetId: string): Promise<{ 
   })
 }
 
+export interface ReviseBudgetBody {
+  itemIds: string[]
+  title?: string | null
+  notes?: string | null
+  reason: string
+}
+
+/** Nueva revisión del mismo presupuesto: conserva el número y versiona el documento. */
+export function reviseBudgetApi(
+  patientId: string,
+  budgetId: string,
+  body: ReviseBudgetBody,
+): Promise<{ data: BudgetWithTotals }> {
+  return apiFetch<{ data: BudgetWithTotals }>(`${budgetsBase(patientId)}/${budgetId}/revise`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  })
+}
+
 /** Planes clínicos longitudinales del paciente. */
 export function fetchTreatmentPlans(
   patientId: string,
@@ -245,15 +265,26 @@ export function fetchTreatmentPlans(
   return apiFetch<{ data: TreatmentPlanWithStatus[] }>(`/api/patients/${patientId}/plans`)
 }
 
+export interface PlanOptionGroup {
+  id: string
+  planId: string
+  patientId: string
+  title: string
+}
+
+export interface PlanDetail {
+  plan: TreatmentPlan
+  status: string
+  items: PlanItem[]
+  budgetIds: string[]
+  optionGroups: PlanOptionGroup[]
+}
+
 export function fetchTreatmentPlanDetail(
   patientId: string,
   planId: string,
-): Promise<{
-  data: { plan: TreatmentPlan; status: string; items: PlanItem[]; budgetIds: string[] }
-}> {
-  return apiFetch<{
-    data: { plan: TreatmentPlan; status: string; items: PlanItem[]; budgetIds: string[] }
-  }>(`/api/patients/${patientId}/plans/${planId}`)
+): Promise<{ data: PlanDetail }> {
+  return apiFetch<{ data: PlanDetail }>(`/api/patients/${patientId}/plans/${planId}`)
 }
 
 export function createTreatmentPlanApi(

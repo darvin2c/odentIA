@@ -20,6 +20,7 @@ import {
   SelectValue,
 } from "@odentia/ui"
 import { useInfiniteQuery } from "@tanstack/react-query"
+import { Link } from "@tanstack/react-router"
 import { FileText, Image as ImageIcon } from "lucide-react"
 import { useEffect, useId, useMemo, useState } from "react"
 import { apiFetch } from "../../lib/api"
@@ -43,7 +44,18 @@ interface TimelinePage {
   timezone: string
   locale: string
 }
-type FeedFilter = "todo" | "encounter" | "note" | "anamnesis" | "rx" | "foto" | "odontogram"
+type FeedFilter =
+  | "todo"
+  | "encounter"
+  | "note"
+  | "anamnesis"
+  | "rx"
+  | "foto"
+  | "odontogram"
+  | "plan"
+  | "budget"
+  | "follow_up"
+  | "prescription"
 
 const FILTERS: Array<{ value: FeedFilter; label: string; dot?: string }> = [
   { value: "todo", label: "Todo" },
@@ -53,7 +65,14 @@ const FILTERS: Array<{ value: FeedFilter; label: string; dot?: string }> = [
   { value: "rx", label: "RX", dot: "bg-sky-500" },
   { value: "foto", label: "Fotos", dot: "bg-emerald-500" },
   { value: "odontogram", label: "Odontograma", dot: "bg-amber-500" },
+  { value: "plan", label: "Tratamientos", dot: "bg-indigo-500" },
+  { value: "budget", label: "Presupuestos", dot: "bg-fuchsia-500" },
+  { value: "follow_up", label: "Controles", dot: "bg-lime-500" },
+  { value: "prescription", label: "Recetas", dot: "bg-rose-500" },
 ]
+
+/** Tipos que viajan al endpoint: un solo tipo, o todos los del recorrido. */
+const JOURNEY_FILTERS: FeedFilter[] = ["plan", "budget", "follow_up", "prescription"]
 
 type GroupMode = "dia" | "atencion"
 
@@ -262,7 +281,137 @@ function AnamnesisCard({
   )
 }
 
-/** Historia clínica unificada: atenciones finalizadas, notas, anamnesis, documentos y odontograma. */
+/** Etiqueta en español de la decisión vigente de un tratamiento. */
+function decisionLabel(decision: string): string {
+  switch (decision) {
+    case "aceptado":
+      return "Aceptado"
+    case "rechazado":
+      return "Rechazado"
+    case "pospuesto":
+      return "Pospuesto"
+    case "reemplazado":
+      return "Reemplazado"
+    default:
+      return "Pendiente de decisión"
+  }
+}
+
+const STATUS_LABELS: Record<string, string> = {
+  pendiente: "Pendiente",
+  programado: "Programado",
+  en_curso: "En curso",
+  suspendido: "Suspendido",
+  realizado: "Realizado",
+  cancelado: "Cancelado",
+  reemplazado: "Reemplazado",
+  emitida: "Emitida",
+  anulada: "Anulada",
+  borrador: "Borrador",
+  presentado: "Presentado",
+  aceptado: "Aceptado",
+  parcial: "Parcial",
+  rechazado: "Rechazado",
+  pospuesto: "Pospuesto",
+  sustituido: "Sustituido",
+  historico: "Histórico",
+  activo: "Vigente",
+  anulado: "Anulado",
+}
+
+/**
+ * Evento del recorrido clínico-económico (tratamiento, presupuesto, control,
+ * receta o pago) con su contexto y un acceso directo al lugar donde se gestiona.
+ * Antes estos eventos abrían una anamnesis inexistente.
+ */
+function JourneyCard({
+  patientId,
+  item,
+  timezone,
+  locale,
+}: {
+  patientId: string
+  item: TimelineItem
+  timezone: string
+  locale: string
+}) {
+  const link = ((): { label: string; search: Record<string, unknown> } | null => {
+    switch (item.type) {
+      case "plan":
+        return {
+          label: "Abrir recorrido",
+          search: { tab: "recorrido", itemId: item.planItemId ?? item.refId },
+        }
+      case "budget":
+        return {
+          label: "Ver la propuesta",
+          search: {
+            tab: "plan",
+            ...(item.planId ? { planId: item.planId } : {}),
+            budgetId: item.budgetId ?? item.refId,
+          },
+        }
+      case "follow_up":
+        return { label: "Ver controles", search: { tab: "controles" } }
+      case "prescription":
+        return { label: "Ver recetas", search: { tab: "recetas" } }
+      default:
+        return null
+    }
+  })()
+
+  return (
+    <div className="flex flex-col gap-2 rounded-md bg-card p-6">
+      <CardHeaderRow
+        badge={timelineTypeLabel(item.type)}
+        context={item.decision ? decisionLabel(item.decision) : null}
+        createdAt={item.createdAt}
+        timezone={timezone}
+        locale={locale}
+      />
+      <p className="text-sm font-medium">{item.title}</p>
+      {item.detail ? (
+        <p className="whitespace-pre-wrap text-sm text-muted-foreground">{item.detail}</p>
+      ) : null}
+      <div className="flex flex-wrap items-center gap-2">
+        {item.status ? (
+          <Badge variant="secondary">{STATUS_LABELS[item.status] ?? item.status}</Badge>
+        ) : null}
+        {item.dueAt ? (
+          <span className="text-xs text-muted-foreground">
+            Vence {new Date(item.dueAt).toLocaleDateString(locale, { timeZone: timezone })}
+          </span>
+        ) : null}
+        {item.toothNumbers.length > 0 ? (
+          <span className="text-xs text-muted-foreground">
+            Pieza{item.toothNumbers.length > 1 ? "s" : ""} {item.toothNumbers.join(", ")}
+          </span>
+        ) : null}
+      </div>
+      {link ? (
+        <div>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            nativeButton={false}
+            render={
+              <Link
+                to="/patients/$patientId"
+                params={{ patientId }}
+                search={link.search as { tab: "resumen" }}
+              />
+            }
+          >
+            {link.label}
+          </Button>
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+/** Historia clínica unificada: atenciones finalizadas, notas, anamnesis, documentos, odontograma y recorrido. */
 export function Timeline({ patientId, initialTooth, onOdontogramSelect }: TimelineProps) {
   const [filter, setFilter] = useState<FeedFilter>("todo")
   const [mode, setMode] = useState<GroupMode>("dia")
@@ -280,9 +429,11 @@ export function Timeline({ patientId, initialTooth, onOdontogramSelect }: Timeli
   const types =
     filter === "encounter" || filter === "note" || filter === "odontogram" || filter === "anamnesis"
       ? filter
-      : filter === "rx" || filter === "foto"
-        ? "document"
-        : undefined
+      : JOURNEY_FILTERS.includes(filter)
+        ? filter
+        : filter === "rx" || filter === "foto"
+          ? "document"
+          : "encounter,note,odontogram,anamnesis,document,plan,budget,follow_up,prescription"
   const documentCategory =
     filter === "rx" ? "radiografia" : filter === "foto" ? "foto_clinica" : undefined
   const toothNumber = tooth === ALL_TEETH ? undefined : Number(tooth)
@@ -509,13 +660,21 @@ export function Timeline({ patientId, initialTooth, onOdontogramSelect }: Timeli
               />
             ) : item.type === "document" ? (
               <DocumentCard key={item.id} patientId={patientId} item={item} />
-            ) : (
+            ) : item.type === "anamnesis" ? (
               <AnamnesisCard
                 key={item.id}
                 item={item}
                 timezone={timezone}
                 locale={locale}
                 onView={setViewingAnamnesis}
+              />
+            ) : (
+              <JourneyCard
+                key={item.id}
+                patientId={patientId}
+                item={item}
+                timezone={timezone}
+                locale={locale}
               />
             ),
           )}

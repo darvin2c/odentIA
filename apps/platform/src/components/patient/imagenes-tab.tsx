@@ -43,6 +43,7 @@ import type {
   PlanItem,
 } from "../../lib/patients"
 import { categoryLabel, encounterLabel, planItemLabel, UPLOAD_CATEGORIES } from "./document-labels"
+import { DocumentLinkSelects, type DocumentLinkValue } from "./document-link-selects"
 import { DocumentUploadDialog } from "./document-upload-dialog"
 import { TagsInput } from "./tags-input"
 import { ToothSelector } from "./tooth-selector"
@@ -390,7 +391,6 @@ export function ImagenesTab({
               canEdit={!readOnly && canWrite && !disabled}
               onEditContext={() => {
                 setResumeId(viewingId)
-                setViewingId(null)
                 setContextDoc(viewing)
               }}
             />
@@ -400,6 +400,7 @@ export function ImagenesTab({
       <DocumentUploadDialog
         patientId={patientId}
         defaultEncounterId={encounterId}
+        defaultPlanItemId={planParam || undefined}
         initialTeeth={initialTooth != null ? [initialTooth] : undefined}
         encounters={encounters}
         planItems={planItems}
@@ -661,6 +662,82 @@ function DocumentViewer({
                 )}
               </dd>
             </div>
+            <div>
+              <dt className="text-xs text-muted-foreground">Presupuesto</dt>
+              <dd>
+                {doc.budgetId ? (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    nativeButton={false}
+                    render={<a href={`/patients/${patientId}?tab=plan&budgetId=${doc.budgetId}`} />}
+                  >
+                    Ver la propuesta
+                  </Button>
+                ) : (
+                  "Sin presupuesto vinculado"
+                )}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-xs text-muted-foreground">Procedimiento</dt>
+              <dd>
+                {doc.encounterProcedureId
+                  ? "Vinculado a un procedimiento"
+                  : "Sin procedimiento vinculado"}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-xs text-muted-foreground">Control</dt>
+              <dd>
+                {doc.followUpId ? (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    nativeButton={false}
+                    render={<a href={`/patients/${patientId}?tab=controles`} />}
+                  >
+                    Ver controles
+                  </Button>
+                ) : (
+                  "Sin control vinculado"
+                )}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-xs text-muted-foreground">Receta</dt>
+              <dd>
+                {doc.prescriptionId ? (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    nativeButton={false}
+                    render={<a href={`/patients/${patientId}?tab=recetas`} />}
+                  >
+                    Ver recetas
+                  </Button>
+                ) : (
+                  "Sin receta vinculada"
+                )}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-xs text-muted-foreground">Pago</dt>
+              <dd>
+                {doc.paymentId ? (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    nativeButton={false}
+                    render={<a href={`/patients/${patientId}?tab=cuenta`} />}
+                  >
+                    Ver cuenta
+                  </Button>
+                ) : (
+                  "Sin pago vinculado"
+                )}
+              </dd>
+            </div>
           </dl>
         </details>
         {historyQuery.data && historyQuery.data.length > 1 && (
@@ -679,6 +756,11 @@ function DocumentViewer({
                     {rev.tags.length > 0 && ` · ${rev.tags.join(", ")}`}
                     {rev.encounterId && " · Atención"}
                     {rev.planItemId && " · Tratamiento"}
+                    {rev.encounterProcedureId && " · Procedimiento"}
+                    {rev.budgetId && " · Presupuesto"}
+                    {rev.followUpId && " · Control"}
+                    {rev.prescriptionId && " · Receta"}
+                    {rev.paymentId && " · Pago"}
                   </li>
                 ))}
             </ul>
@@ -755,8 +837,25 @@ function ContextDrawer({
   disabled?: boolean
 }) {
   const queryClient = useQueryClient()
+  const previewQuery = useSignedUrl(patientId, doc.id)
   const [encounterChoice, setEncounterChoice] = useState<string>(doc.encounterId ?? "")
   const [planChoice, setPlanChoice] = useState<string>(doc.planItemId ?? "")
+  const [links, setLinks] = useState<DocumentLinkValue>({
+    budgetId: doc.budgetId ?? "",
+    followUpId: doc.followUpId ?? "",
+    prescriptionId: doc.prescriptionId ?? "",
+    paymentId: doc.paymentId ?? "",
+    encounterProcedureId: doc.encounterProcedureId ?? "",
+  })
+  const procedureQuery = useQuery({
+    queryKey: ["encounter-procedures", patientId, doc.encounterId, encounterChoice],
+    queryFn: () =>
+      apiFetch<{ data: { procedures: Array<{ id: string; description: string }> } }>(
+        `/api/patients/${patientId}/encounters/${encounterChoice}`,
+      ),
+    enabled: open && encounterChoice !== "",
+  })
+  const procedures = procedureQuery.data?.data.procedures ?? []
   const [teeth, setTeeth] = useState<number[]>(doc.toothNumbers)
   const [tags, setTags] = useState<string[]>(doc.tags)
   const [expectedVersion, setExpectedVersion] = useState(doc.contextVersion)
@@ -780,6 +879,13 @@ function ContextDrawer({
       if (!fresh) throw new Error("El archivo ya no está disponible.")
       setEncounterChoice(fresh.encounterId ?? "")
       setPlanChoice(fresh.planItemId ?? "")
+      setLinks({
+        budgetId: fresh.budgetId ?? "",
+        followUpId: fresh.followUpId ?? "",
+        prescriptionId: fresh.prescriptionId ?? "",
+        paymentId: fresh.paymentId ?? "",
+        encounterProcedureId: fresh.encounterProcedureId ?? "",
+      })
       setTeeth(fresh.toothNumbers)
       setTags(fresh.tags)
       setExpectedVersion(fresh.contextVersion)
@@ -811,6 +917,11 @@ function ContextDrawer({
             expectedVersion,
             encounterId: encounterChoice || null,
             planItemId: planChoice || null,
+            budgetId: links.budgetId || null,
+            encounterProcedureId: links.encounterProcedureId || null,
+            followUpId: links.followUpId || null,
+            prescriptionId: links.prescriptionId || null,
+            paymentId: links.paymentId || null,
             toothNumbers: teeth,
             tags,
           }),
@@ -842,7 +953,7 @@ function ContextDrawer({
 
   return (
     <FormDrawer
-      className="data-[swipe-axis=x]:sm:[--drawer-content-width:min(48rem,calc(100vw-2rem))]"
+      className="data-[swipe-axis=x]:sm:[--drawer-content-width:min(72rem,calc(100vw-2rem))]"
       open={open}
       onClose={() => {
         if (!pending) onOpenChange(false)
@@ -855,6 +966,16 @@ function ContextDrawer({
       submitLabel="Guardar revisión"
       error={serverError}
     >
+      <div className="grid items-start gap-5 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+      <div className="sticky top-0 rounded-md border bg-background p-3">
+        <p className="mb-2 text-sm font-medium">{doc.label}</p>
+        {previewQuery.isPending ? <p>Cargando imagen…</p> : previewQuery.isError ? (
+          <Button type="button" variant="outline" onClick={() => void previewQuery.refetch()}>Reintentar vista previa</Button>
+        ) : previewQuery.data && (isImageDoc(doc) ?
+          <img src={previewQuery.data.data.url} alt={doc.label} className="max-h-[60vh] w-full object-contain" /> :
+          isPdfDoc(doc) ? <embed src={previewQuery.data.data.url} type="application/pdf" className="h-[60vh] w-full" /> :
+          <a href={previewQuery.data.data.url} target="_blank" rel="noreferrer">Abrir archivo original</a>)}
+      </div>
       <fieldset disabled={pending || disabled} className="flex flex-col gap-3">
         {conflict && (
           <div className="flex flex-wrap items-center gap-2 rounded-md border border-destructive/40 p-2">
@@ -921,9 +1042,17 @@ function ContextDrawer({
             </Button>
           )}
         </Field>
+        <DocumentLinkSelects
+          patientId={patientId}
+          value={links}
+          idPrefix={`${planChoiceId}-links`}
+          procedures={procedures}
+          onChange={(patch) => setLinks((current) => ({ ...current, ...patch }))}
+        />
         <ToothSelector value={teeth} onChange={setTeeth} label="Piezas" />
         <TagsInput value={tags} onChange={setTags} suggestions={suggestions} />
       </fieldset>
+      </div>
     </FormDrawer>
   )
 }

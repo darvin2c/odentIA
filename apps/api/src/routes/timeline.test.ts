@@ -144,7 +144,7 @@ async function createFixturePatient(app: Hono, displayName: string): Promise<str
     body: JSON.stringify(registrationBody(displayName)),
   })
   expect(res.status).toBe(201)
-  const body = await res.json() as { data: { id: string } }
+  const body = (await res.json()) as { data: { id: string } }
   return body.data.id
 }
 
@@ -272,7 +272,13 @@ async function createEncounter(
 }
 
 async function finalizeEncounter(app: Hono, patientId: string, encounterId: string): Promise<void> {
-  // El cierre exige evolución clínica: se registra antes de finalizar.
+  // El cierre exige un acto registrado y la evolución clínica.
+  const proc = await app.request(`/patients/${patientId}/encounters/${encounterId}/procedures`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ description: "Acto de cierre" }),
+  })
+  expect(proc.status).toBe(201)
   const patched = await app.request(`/patients/${patientId}/encounters/${encounterId}`, {
     method: "PATCH",
     headers: { "content-type": "application/json" },

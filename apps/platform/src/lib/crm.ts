@@ -88,6 +88,12 @@ export function useMyUserId(): string {
   return session.userId
 }
 
+/** Miembros de la org con usuario (selector de profesional, asignaciones). */
+export function useOrgMembers(): Array<{ userId: string; role: string; user: { name: string } }> {
+  const { org } = orgRouteApi.useRouteContext()
+  return org.members
+}
+
 /** Hace cuánto (es-PE, corto): "hace 5 min", "ayer", "12/03". */
 export function timeAgo(iso: string | null): string {
   if (!iso) return ""

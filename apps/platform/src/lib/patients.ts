@@ -169,7 +169,11 @@ export function hasHealthInfo(health: PatientHealth | null | undefined): boolean
   if (health.allergies.length > 0 || health.conditions.length > 0 || health.medications.length > 0)
     return true
   const status = health.reviewStatus
-  if (status.allergies !== "unknown" || status.conditions !== "unknown" || status.medications !== "unknown")
+  if (
+    status.allergies !== "unknown" ||
+    status.conditions !== "unknown" ||
+    status.medications !== "unknown"
+  )
     return true
   const answers = health.latestAnamnesis?.answers
   return !!answers && Object.keys(answers).length > 0
@@ -202,6 +206,12 @@ export interface PatientDocument {
   sizeBytes: number
   encounterId: string | null
   planItemId: string | null
+  /** Vínculos clínico-económicos del contexto vigente (nullable). */
+  budgetId: string | null
+  encounterProcedureId: string | null
+  prescriptionId: string | null
+  followUpId: string | null
+  paymentId: string | null
   toothNumbers: number[]
   tags: string[]
   contextVersion: number
@@ -214,6 +224,11 @@ export interface PatientDocumentContext {
   version: number
   encounterId: string | null
   planItemId: string | null
+  encounterProcedureId?: string | null
+  budgetId?: string | null
+  followUpId?: string | null
+  prescriptionId?: string | null
+  paymentId?: string | null
   toothNumbers: number[]
   tags: string[]
   authorUserId: string
@@ -305,6 +320,9 @@ export interface ProcedureItem {
   description: string
   diagnosisCode: string | null
   planItemId: string | null
+  /** Snapshot del costo al registrar el acto; null en actos libres (sin cargo). */
+  priceCents: number | null
+  currency: string | null
   createdBy?: string | null
   createdAt: string
 }
@@ -315,8 +333,30 @@ export interface PlanItem {
   organizationId?: string
   patientId?: string
   planId: string
+  odontogramEntryId?: string | null
   budgetId: string | null
   decision: "pendiente" | "aceptado" | "rechazado" | "sin_registro"
+  /** Decisión clínica vigente del ítem: la indicación manda, el snapshot es evidencia. */
+  decisionStatus:
+    | "pendiente"
+    | "aceptado"
+    | "pospuesto"
+    | "rechazado"
+    | "reemplazado"
+    | "sin_registro"
+  decidedAt: string | null
+  decidedByContactId: string | null
+  decidedByName: string | null
+  decisionNote: string | null
+  /** Alternativas excluyentes del mismo problema clínico. */
+  optionGroupId: string | null
+  isRecommended: boolean
+  /** Indicación anterior que esta reemplaza tras una reevaluación. */
+  supersedesItemId: string | null
+  /** Motivo obligatorio al suspender o cancelar. */
+  statusReason: string | null
+  startedAt: string | null
+  completedAt: string | null
   serviceId: string | null
   toothNumber: number | null
   scope: string | null
@@ -368,7 +408,16 @@ export interface EncounterDetail {
   addenda: ClinicalNote[]
 }
 
-export type TimelineType = "encounter" | "note" | "anamnesis" | "document" | "odontogram"
+export type TimelineType =
+  | "encounter"
+  | "note"
+  | "anamnesis"
+  | "document"
+  | "odontogram"
+  | "plan"
+  | "budget"
+  | "follow_up"
+  | "prescription"
 
 /** Evento de la historia clínica unificada. Fechas como ISO string. */
 export interface TimelineItem {
@@ -398,6 +447,16 @@ export interface TimelineItem {
   documents?: PatientLastVisit["documents"]
   tags?: string[]
   encounterId?: string | null
+  planItemId?: string | null
+  budgetId?: string | null
+  followUpId?: string | null
+  prescriptionId?: string | null
+  /** Plan clínico del tratamiento, para abrir su recorrido desde la historia. */
+  planId?: string | null
+  /** Decisión vigente del tratamiento. */
+  decision?: string | null
+  /** Vencimiento de un control, para leerlo aquí mismo. */
+  dueAt?: string | null
 }
 
 export interface PlanPendingTotal {
@@ -423,11 +482,51 @@ export interface PatientLastVisit {
   documents: Array<Pick<PatientDocument, "id" | "label" | "category">>
 }
 
+/** Próxima acción derivada del recorrido: la calcula la API, la UI solo la muestra. */
+export type TreatmentNextAction =
+  | "definir"
+  | "presupuestar"
+  | "decidir"
+  | "iniciar"
+  | "reanudar"
+  | "continuar"
+  | "completar"
+  | "controlar"
+
+/** Saldo del tratamiento en una moneda concreta (nunca se suman monedas distintas). */
+export interface TreatmentBalance {
+  currency: string
+  chargedCents: number
+  appliedCents: number
+  outstandingCents: number
+}
+
+/** Fila del recorrido clínico-económico que acompaña al resumen del paciente. */
+export interface TreatmentJourneySummary {
+  item: PlanItem
+  plan: TreatmentPlan
+  budget: {
+    id: string
+    budgetNumber: number
+    title: string
+    status: string
+    revisionNumber: number
+  } | null
+  decision: string
+  clinicalStatus: string
+  lastSession: { procedure: ProcedureItem; encounter: Encounter } | null
+  nextFollowUp: { id: string; title: string; status: string; dueAt: string } | null
+  /** null cuando el tratamiento está cerrado y no admite más trabajo. */
+  nextAction: TreatmentNextAction | null
+  balances: TreatmentBalance[]
+}
+
 /** Resumen del paciente: última atención finalizada, borrador abierto y plan pendiente. */
 export interface PatientSummary {
   lastEncounter: Encounter | null
   openEncounterId: string | null
   nextAppointmentAt: string | null
+  treatmentJourneys: TreatmentJourneySummary[]
   planPending: {
     count: number
     unpricedCount: number
@@ -601,6 +700,14 @@ export function timelineTypeLabel(type: string): string {
       return "Documento"
     case "odontogram":
       return "Odontograma"
+    case "plan":
+      return "Tratamiento"
+    case "budget":
+      return "Presupuesto"
+    case "follow_up":
+      return "Control"
+    case "prescription":
+      return "Receta"
     default:
       return type
   }
@@ -648,9 +755,9 @@ export function savePatientHealthApi(
   })
 }
 
-export function fetchAnamnesisHistory(
-  patientId: string,
-): Promise<{ data: Array<{ id: string; version: number; createdAt: string; createdBy: string | null }> }> {
+export function fetchAnamnesisHistory(patientId: string): Promise<{
+  data: Array<{ id: string; version: number; createdAt: string; createdBy: string | null }>
+}> {
   return apiFetch<{
     data: Array<{ id: string; version: number; createdAt: string; createdBy: string | null }>
   }>(`/api/patients/${patientId}/anamnesis/history`)

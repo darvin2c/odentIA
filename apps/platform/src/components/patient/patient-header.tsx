@@ -13,8 +13,8 @@ import {
   DropdownMenuTrigger,
 } from "@odentia/ui"
 import { ConfirmDialog } from "@odentia/ui-patterns"
-import { Link } from "@tanstack/react-router"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
+import { Link } from "@tanstack/react-router"
 import { useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
 import { useCanWrite } from "../../lib/crm"
@@ -30,12 +30,13 @@ const dateLabel = (value: string) =>
 function pendingLine(summary: PatientSummary): string {
   const accepted = summary.planPending.count
   const proposed = summary.proposedBudgets.length
-  const parts = [`${accepted} aceptado(s) pendiente(s)`]
+  const parts = [`${accepted} tratamiento(s) aceptado(s) por ejecutar`]
   if (proposed > 0) parts.push("Presupuestos por revisar")
   const totals = summary.planPending.totals
     .map((total) => `${formatMoney(total.totalCents, total.currency)}`)
     .join(" · ")
-  if (totals) parts.push(`montos pendientes: ${totals}`)
+  // Lo acordado por ejecutar no es deuda: el saldo real vive en la pestaña Cuenta.
+  if (totals) parts.push(`acordado por ejecutar: ${totals} (no es saldo pendiente)`)
   if (summary.planPending.unpricedCount)
     parts.push(`${summary.planPending.unpricedCount} sin tarifa (no incluidos)`)
   return parts.join(" · ")
@@ -92,8 +93,16 @@ export function PatientClinicalStrip({
       {shown.map((alert) => (
         <Badge
           key={alert.id}
-          variant={alert.tone === "destructive" ? "destructive" : alert.tone === "warning" ? "outline" : "secondary"}
-          className={alert.tone === "warning" ? "border-amber-300 bg-amber-50 text-amber-900" : undefined}
+          variant={
+            alert.tone === "destructive"
+              ? "destructive"
+              : alert.tone === "warning"
+                ? "outline"
+                : "secondary"
+          }
+          className={
+            alert.tone === "warning" ? "border-amber-300 bg-amber-50 text-amber-900" : undefined
+          }
         >
           {alert.label}
         </Badge>
@@ -227,7 +236,11 @@ export function PatientHeader({
                 </DropdownMenuContent>
               </DropdownMenu>
             ) : null}
-            <NewEncounterButton patientId={patient.id} openEncounterId={summary?.openEncounterId} />
+            <NewEncounterButton
+              patientId={patient.id}
+              detail={detail}
+              openEncounterId={summary?.openEncounterId}
+            />
           </div>
         </div>
       </div>

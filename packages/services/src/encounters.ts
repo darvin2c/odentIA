@@ -8,16 +8,27 @@ import {
   encounterProcedure,
   encounterTooth,
   odontogramEntry,
+  patient,
+  patientCharge,
   treatmentBudget,
+  treatmentPlan,
   treatmentPlanItem,
 } from "@odentia/db/schema/clinical"
+import { member } from "@odentia/db/schema/auth"
 import { auditEvent, branch } from "@odentia/db/schema/org"
-import { and, asc, desc, eq, inArray, lt, or, sql } from "drizzle-orm"
+import { and, asc, desc, eq, inArray, isNull, lt, or, sql } from "drizzle-orm"
 import { listEncounterDocuments, type PatientDocumentWithContext } from "./clinical.js"
 import { decodeCursor, encodeCursor } from "./cursors.js"
 import { isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
 import { requirePatient } from "./patients.js"
-import { lockPlanItemForExecution, setPlanItemStatus, surfaceLimits } from "./plan.js"
+import { createCharge } from "./payments.js"
+import {
+  addPlanItem,
+  createTreatmentPlan,
+  lockPlanItemForExecution,
+  setPlanItemStatus,
+  surfaceLimits,
+} from "./plan.js"
 import { assertExecutableCodings, resolveServiceCodings } from "./procedure-codings.js"
 import { requireServiceForIndication } from "./service-catalog.js"
 
@@ -30,8 +41,11 @@ export type EncounterDocumentRow = PatientDocumentWithContext
 export type EncounterPlannedItemRow = typeof treatmentPlanItem.$inferSelect
 
 export interface CreateEncounterInput {
-  reason?: string | null
+  /** Motivo de la visita: obligatorio al abrir (1–2000 caracteres). */
+  reason: string
   branchId?: string | null
+  /** Profesional que atiende; por defecto quien abre. Debe ser miembro de la organización. */
+  dentistUserId?: string | null
   teeth?: number[]
   /**
    * Tratamientos del presupuesto para vincular a la atención. Deben estar
@@ -42,6 +56,7 @@ export interface CreateEncounterInput {
 }
 
 export interface UpdateEncounterDraftPatch {
+  branchId?: string | null
   reason?: string | null
   evolution?: string | null
   indications?: string | null
@@ -70,6 +85,8 @@ export interface AddEncounterProcedureInput {
   diagnosisCode?: string | null
   /** Ítem aceptado del plan: descripción y sitio se toman del ítem, sin cambios. */
   planItemId?: string | null
+  /** Acto libre (sin servicio ni tratamiento): descripción obligatoria; nunca genera cargo. */
+  description?: string | null
 }
 
 export interface ListEncountersInput {
@@ -246,8 +263,20 @@ export async function createEncounter(
     if (!found) throw notFound("Sucursal")
     branchId = found.id
   }
-  const reason = input.reason == null ? null : cleanText(input.reason, "reason", TEXT_LIMITS.reason)
-  // Ítems a vincular: deduplicados preservando orden; la validación de
+  const reason = cleanText(input.reason, "reason", TEXT_LIMITS.reason)
+  if (!reason) throw validation("El motivo de la atención es obligatorio")
+  // Profesional que atiende: por defecto quien abre; si recepción la abre para
+  // otro profesional, debe ser miembro de la organización.
+  let dentistUserId = actorUserId
+  if (input.dentistUserId && input.dentistUserId !== actorUserId) {
+    const [membership] = await tx
+      .select({ id: member.id })
+      .from(member)
+      .where(and(eq(member.organizationId, orgId), eq(member.userId, input.dentistUserId)))
+      .limit(1)
+    if (!membership) throw notFound("Profesional")
+    dentistUserId = input.dentistUserId
+  }
   // pertenencia/estado/decisión ocurre antes de crear la atención para que un
   // planItemIds inválido no deje un borrador vacío (409/404/422, sin DRAFT_OPEN).
   const planItemIds = [
@@ -267,7 +296,7 @@ export async function createEncounter(
         organizationId: orgId,
         patientId,
         branchId,
-        dentistUserId: actorUserId,
+        dentistUserId,
         status: "borrador",
         reason,
       })
@@ -593,6 +622,17 @@ export async function updateEncounterDraft(
   const locked = await lockEncounter(tx, orgId, patientId, encounterId)
   if (locked.status === "finalizada") throw conflict("FINALIZED", "La atención está finalizada")
   const set: Partial<typeof encounter.$inferInsert> = {}
+  if (patch.branchId !== undefined) {
+    if (patch.branchId !== null) {
+      const [found] = await tx
+        .select({ id: branch.id })
+        .from(branch)
+        .where(and(eq(branch.id, patch.branchId), eq(branch.organizationId, orgId)))
+        .limit(1)
+      if (!found) throw notFound("Sucursal")
+    }
+    set.branchId = patch.branchId
+  }
   if (patch.reason !== undefined) set.reason = cleanText(patch.reason, "reason", TEXT_LIMITS.reason)
   if (patch.evolution !== undefined)
     set.evolution = cleanText(patch.evolution, "evolution", TEXT_LIMITS.evolution)
@@ -634,6 +674,37 @@ export async function updateEncounterDraft(
   return updated
 }
 
+/**
+ * Plan contenedor del tratamiento directo: el plan vigente más reciente del
+ * paciente; si no tiene ninguno, nace aquí con título estándar.
+ */
+async function getOrCreateDirectPlan(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  patientId: string,
+  encounterId: string,
+): Promise<string> {
+  const [existing] = await tx
+    .select({ id: treatmentPlan.id })
+    .from(treatmentPlan)
+    .where(
+      and(
+        eq(treatmentPlan.organizationId, orgId),
+        eq(treatmentPlan.patientId, patientId),
+        eq(treatmentPlan.isLegacy, false),
+      ),
+    )
+    .orderBy(desc(treatmentPlan.createdAt), desc(treatmentPlan.id))
+    .limit(1)
+  if (existing) return existing.id
+  const created = await createTreatmentPlan(tx, orgId, actorUserId, patientId, {
+    title: "Plan de tratamiento",
+    originEncounterId: encounterId,
+  })
+  return created.id
+}
+
 export async function addEncounterProcedure(
   tx: Db,
   orgId: string,
@@ -647,9 +718,21 @@ export async function addEncounterProcedure(
   if (locked.status === "finalizada") throw conflict("FINALIZED", "La atención está finalizada")
   const serviceIdParam = input.serviceId?.trim() ? input.serviceId.trim() : null
   const planItemIdParam = input.planItemId ?? null
-  if (Boolean(serviceIdParam) === Boolean(planItemIdParam)) {
+  if (serviceIdParam && planItemIdParam) {
     throw validation(
       "Selecciona un servicio del catálogo o un tratamiento del presupuesto, no ambos",
+    )
+  }
+  // Sin servicio ni tratamiento es un acto libre: descripción obligatoria y
+  // jamás genera cargo (no hay tarifa fuera del catálogo).
+  const freeDescription = cleanText(
+    input.description,
+    "description",
+    TEXT_LIMITS.procedureDescription,
+  )
+  if (!serviceIdParam && !planItemIdParam && !freeDescription) {
+    throw validation(
+      "Selecciona un servicio del catálogo, un tratamiento del presupuesto o describe el acto libre",
     )
   }
   // Snapshot desde el plan (misma org + paciente; anti-traversal): la
@@ -663,15 +746,20 @@ export async function addEncounterProcedure(
   let planArch: string | null = null
   let planDiagnosis: string | null = null
   let planCodings: Array<{ system: string; code: string; version: string; display: string }> = []
+  let planPriceCents: number | null = null
+  let planCurrency: string | null = null
   if (planItemIdParam) {
-    const {
-      item: plan,
-      budget,
-    } = await lockPlanItemForExecution(tx, orgId, patientId, planItemIdParam)
+    const { item: plan, budget } = await lockPlanItemForExecution(
+      tx,
+      orgId,
+      patientId,
+      planItemIdParam,
+    )
     if (["realizado", "cancelado", "reemplazado"].includes(plan.status)) {
       throw conflict("ITEM_CLOSED", "El tratamiento ya está cerrado")
     }
-    if (plan.status === "suspendido") throw conflict("ITEM_NOT_READY", "El tratamiento está suspendido")
+    if (plan.status === "suspendido")
+      throw conflict("ITEM_NOT_READY", "El tratamiento está suspendido")
     // Solo presupuesto aceptado o servicio directo explícito: setPlanItemStatus
     // vuelve a exigirlo, pero aquí el error es específico antes de insertar.
     if (plan.decisionStatus !== "aceptado") {
@@ -712,6 +800,9 @@ export async function addEncounterProcedure(
     planTitle = plan.title
     planServiceId = plan.serviceId
     planCodings = [...plan.codings]
+    // Snapshot económico: la ejecución cobra lo acordado en la indicación.
+    planPriceCents = plan.priceCents
+    planCurrency = plan.currency
   }
   let serviceId: string | null = null
   let description = ""
@@ -721,17 +812,25 @@ export async function addEncounterProcedure(
   let quadrant: number | null = planQuadrant
   let arch: string | null = planArch
   let codings = [...planCodings]
+  // El costo nace con el acto: snapshot del tarifario o de la indicación; el
+  // acto libre no tiene precio y nunca genera cargo.
+  let priceCents: number | null = planPriceCents
+  let currency: string | null = planCurrency
   if (serviceIdParam) {
     const service = await requireServiceForIndication(tx, orgId, serviceIdParam)
     if (!service.scope) throw validation("La prestación no tiene un ámbito válido")
     const limits = service.scope === "surfaces" ? await surfaceLimits(tx, service) : undefined
     try {
-      assertTreatmentSite(service.scope as "general" | "tooth" | "surfaces" | "quadrant" | "arch", {
-        toothNumber: input.toothNumber,
-        surfaces: input.surfaces,
-        quadrant: input.quadrant,
-        arch: input.arch,
-      }, limits)
+      assertTreatmentSite(
+        service.scope as "general" | "tooth" | "surfaces" | "quadrant" | "arch",
+        {
+          toothNumber: input.toothNumber,
+          surfaces: input.surfaces,
+          quadrant: input.quadrant,
+          arch: input.arch,
+        },
+        limits,
+      )
     } catch (e) {
       throw validation(e instanceof Error ? e.message : "Sitio clínico inválido")
     }
@@ -744,14 +843,45 @@ export async function addEncounterProcedure(
     arch = input.arch ?? null
     // Oferta oficial: un único snapshot exacto con su versión; propia: [].
     codings = await resolveServiceCodings(tx, service)
-  } else {
+    // El costo viaja con el acto desde el tarifario vigente.
+    priceCents = service.priceCents
+    currency = service.currency
+  } else if (planItemIdParam) {
     serviceId = planServiceId
     description = planTitle
+  } else {
+    // Acto libre: solo descripción; sin servicio no hay tarifa ni cargo.
+    description = freeDescription ?? ""
+    toothNumber = input.toothNumber ?? null
+    surfaces = input.surfaces ? [...input.surfaces] : []
+    quadrant = input.quadrant ?? null
+    arch = input.arch ?? null
+    priceCents = null
+    currency = null
   }
   if (!description)
     throw validation("description es obligatoria (o selecciona un servicio del catálogo)")
   if (description.length > TEXT_LIMITS.procedureDescription) {
     throw validation(`description supera ${TEXT_LIMITS.procedureDescription} caracteres`)
+  }
+  if (!serviceIdParam && !planItemIdParam && toothNumber !== null) assertFdi(toothNumber)
+  // Tratamiento directo (un solo gesto): ejecutar un servicio sin indicación
+  // previa crea la indicación implícita en el plan vigente, ya realizada y
+  // aceptada en la misma atención.
+  let directPlanItemId: string | null = null
+  if (serviceIdParam) {
+    const planId = await getOrCreateDirectPlan(tx, orgId, actorUserId, patientId, encounterId)
+    const indicated = await addPlanItem(tx, orgId, actorUserId, patientId, {
+      serviceId: serviceIdParam,
+      planId,
+      sourceEncounterId: encounterId,
+      toothNumber,
+      surfaces,
+      quadrant,
+      arch,
+      diagnosisCode: input.diagnosisCode ?? null,
+    })
+    directPlanItemId = indicated.id
   }
   if (input.diagnosisCode) await assertDiagnosisCode(tx, input.diagnosisCode)
   const [row] = await tx
@@ -767,7 +897,9 @@ export async function addEncounterProcedure(
       arch,
       description,
       diagnosisCode: input.diagnosisCode === undefined ? planDiagnosis : input.diagnosisCode,
-      planItemId: input.planItemId ?? null,
+      planItemId: input.planItemId ?? directPlanItemId,
+      priceCents,
+      currency,
       codings,
       createdBy: actorUserId,
     })
@@ -791,14 +923,62 @@ export async function addEncounterProcedure(
       .onConflictDoNothing({
         target: [encounterPlanItem.encounterId, encounterPlanItem.planItemId],
       })
-    const [item] = await tx.select({ status: treatmentPlanItem.status }).from(treatmentPlanItem)
-      .where(and(eq(treatmentPlanItem.id, input.planItemId), eq(treatmentPlanItem.organizationId, orgId)))
+    const [item] = await tx
+      .select({ status: treatmentPlanItem.status })
+      .from(treatmentPlanItem)
+      .where(
+        and(
+          eq(treatmentPlanItem.id, input.planItemId),
+          eq(treatmentPlanItem.organizationId, orgId),
+        ),
+      )
     if (item && (item.status === "pendiente" || item.status === "programado")) {
       await setPlanItemStatus(tx, orgId, actorUserId, patientId, input.planItemId, {
         status: "en_curso",
         encounterId,
       })
     }
+  }
+  if (directPlanItemId) {
+    // Tratamiento directo: la indicación implícita queda enlazada a la sesión
+    // y se cierra como aceptada + realizada en la misma transacción.
+    await tx
+      .insert(encounterPlanItem)
+      .values({ organizationId: orgId, encounterId, planItemId: directPlanItemId })
+      .onConflictDoNothing({
+        target: [encounterPlanItem.encounterId, encounterPlanItem.planItemId],
+      })
+    const now = new Date()
+    await tx
+      .update(treatmentPlanItem)
+      .set({
+        status: "realizado",
+        decisionStatus: "aceptado",
+        decisionNote: "Tratamiento directo: indicado y ejecutado en la misma atención",
+        decidedAt: now,
+        startedAt: now,
+        completedAt: now,
+        updatedAt: now,
+      })
+      .where(
+        and(
+          eq(treatmentPlanItem.id, directPlanItemId),
+          eq(treatmentPlanItem.organizationId, orgId),
+        ),
+      )
+    await audit(
+      tx,
+      orgId,
+      actorUserId,
+      "plan.item_direct_completed",
+      "treatment_plan_item",
+      directPlanItemId,
+      {
+        patientId,
+        encounterId,
+        procedureId: row.id,
+      },
+    )
   }
   await audit(tx, orgId, actorUserId, "encounter.procedure_added", "encounter_procedure", row.id, {
     patientId,
@@ -808,62 +988,49 @@ export async function addEncounterProcedure(
   return row
 }
 
+/** Cargo omitido al cerrar: queda registrado para mostrarlo en el resumen. */
+export interface SkippedCharge {
+  procedureId: string
+  reason: "covered" | "free_act" | "zero_price"
+}
+
+export interface FinalizeEncounterResult {
+  encounter: EncounterRow
+  /** Cargos generados automáticamente desde los actos con servicio. */
+  charges: Array<Awaited<ReturnType<typeof createCharge>>>
+  skippedCharges: SkippedCharge[]
+}
+
 export async function finalizeEncounter(
   tx: Db,
   orgId: string,
   actorUserId: string,
   patientId: string,
   encounterId: string,
-): Promise<EncounterRow> {
+): Promise<FinalizeEncounterResult> {
   await requirePatient(tx, orgId, patientId)
+  // El cierre participa del mismo bloqueo que los cargos manuales y de
+  // presupuesto: consultar cobertura y generar cargos es una sola operación.
+  await tx
+    .select({ id: patient.id })
+    .from(patient)
+    .where(and(eq(patient.id, patientId), eq(patient.organizationId, orgId)))
+    .for("update")
   const locked = await lockEncounter(tx, orgId, patientId, encounterId)
   if (locked.status === "finalizada") throw conflict("FINALIZED", "La atención ya está finalizada")
-  // Mínimos de cierre: motivo más algún dato clínico útil (evolución,
-  // procedimiento, diagnóstico o hallazgo de odontograma). No toca presupuestos:
-  // nunca acepta ni realiza ítems automáticamente.
+  // Una consulta puede terminar sin prestaciones: documentarla no obliga a
+  // inventar procedimientos, tratamientos ni cargos.
   if (!locked.reason?.trim())
     throw validation("Registra el motivo de la atención antes de cerrarla")
-  const childOf = and(
-    eq(clinicalNote.encounterId, encounterId),
-    eq(clinicalNote.organizationId, orgId),
-  )
-  const [procedures, notes, entries] = await Promise.all([
-    tx
-      .select({ id: encounterProcedure.id })
-      .from(encounterProcedure)
-      .where(
-        and(
-          eq(encounterProcedure.encounterId, encounterId),
-          eq(encounterProcedure.organizationId, orgId),
-        ),
-      )
-      .limit(1),
-    tx
-      .select({ id: clinicalNote.id })
-      .from(clinicalNote)
-      .where(and(childOf, eq(clinicalNote.kind, "evolucion")))
-      .limit(1),
-    tx
-      .select({ id: odontogramEntry.id })
-      .from(odontogramEntry)
-      .where(
-        and(
-          eq(odontogramEntry.encounterId, encounterId),
-          eq(odontogramEntry.organizationId, orgId),
-        ),
-      )
-      .limit(1),
-  ])
-  if (
-    !locked.evolution?.trim() &&
-    procedures.length === 0 &&
-    notes.length === 0 &&
-    entries.length === 0
-  ) {
-    throw validation(
-      "Registra evolución, un procedimiento, un diagnóstico o un hallazgo antes de cerrar la atención",
+  const procedures = await tx
+    .select()
+    .from(encounterProcedure)
+    .where(
+      and(
+        eq(encounterProcedure.encounterId, encounterId),
+        eq(encounterProcedure.organizationId, orgId),
+      ),
     )
-  }
   const now = new Date()
   const [row] = await tx
     .update(encounter)
@@ -871,10 +1038,51 @@ export async function finalizeEncounter(
     .where(eq(encounter.id, encounterId))
     .returning()
   if (!row) throw notFound("Atención")
+  // Los cargos caen solos al finalizar: un cargo por acto con servicio y
+  // precio > 0 que no esté ya cubierto por un cargo activo del mismo
+  // tratamiento (anti-doble-cobro; el límite por tratamiento sigue en
+  // createCharge como candado).
+  const charges: FinalizeEncounterResult["charges"] = []
+  const skippedCharges: SkippedCharge[] = []
+  for (const proc of procedures) {
+    if (!proc.serviceId) {
+      skippedCharges.push({ procedureId: proc.id, reason: "free_act" })
+      continue
+    }
+    if (proc.priceCents === null || proc.priceCents <= 0) {
+      skippedCharges.push({ procedureId: proc.id, reason: "zero_price" })
+      continue
+    }
+    if (proc.planItemId) {
+      const [existing] = await tx
+        .select({ id: patientCharge.id })
+        .from(patientCharge)
+        .where(
+          and(
+            eq(patientCharge.organizationId, orgId),
+            eq(patientCharge.patientId, patientId),
+            eq(patientCharge.planItemId, proc.planItemId),
+            isNull(patientCharge.voidedAt),
+          ),
+        )
+        .limit(1)
+      if (existing) {
+        skippedCharges.push({ procedureId: proc.id, reason: "covered" })
+        continue
+      }
+    }
+    charges.push(
+      await createCharge(tx, orgId, actorUserId, patientId, {
+        encounterProcedureId: proc.id,
+      }),
+    )
+  }
   await audit(tx, orgId, actorUserId, "encounter.finalized", "encounter", encounterId, {
     patientId,
+    charges: charges.length,
+    skippedCharges: skippedCharges.length,
   })
-  return row
+  return { encounter: row, charges, skippedCharges }
 }
 
 export async function addEncounterAddendum(

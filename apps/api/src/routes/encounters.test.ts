@@ -122,12 +122,10 @@ async function createFreshPatient(app: Hono, name: string): Promise<string> {
   const res = await app.request("/patients", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify(
-      registrationBody(`${name} ${crypto.randomUUID().slice(0, 8)}`),
-    ),
+    body: JSON.stringify(registrationBody(`${name} ${crypto.randomUUID().slice(0, 8)}`)),
   })
   expect(res.status).toBe(201)
-  const body = await res.json() as { data: { id: string } }
+  const body = (await res.json()) as { data: { id: string } }
   return body.data.id
 }
 
@@ -204,17 +202,28 @@ async function decideBudget(
   const res = await app.request(`/patients/${patientId}/budgets/${budgetId}/decision`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ decisions: budget.data.items.map(line => ({ planItemId: line.planItemId, decision: acceptedItemIds.includes(line.planItemId) ? "aceptado" : "rechazado" })) }),
+    body: JSON.stringify({
+      decisions: budget.data.items.map((line) => ({
+        planItemId: line.planItemId,
+        decision: acceptedItemIds.includes(line.planItemId) ? "aceptado" : "rechazado",
+      })),
+    }),
   })
   expect(res.status).toBe(200)
 }
 
-// Cierre con mínimos clínicos: motivo al crear + evolución antes de finalizar.
+// Cierra una atención con procedimiento y evolución para comprobar sus bloqueos.
 async function finalizeWithEvolution(
   app: Hono,
   patientId: string,
   encounterId: string,
 ): Promise<void> {
+  const proc = await app.request(`/patients/${patientId}/encounters/${encounterId}/procedures`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ description: "Acto de cierre" }),
+  })
+  expect(proc.status).toBe(201)
   const patched = await app.request(`/patients/${patientId}/encounters/${encounterId}`, {
     method: "PATCH",
     headers: { "content-type": "application/json" },
@@ -381,6 +390,30 @@ it("encounters: finalize 200 y luego PATCH/procedure/nota/odontograma vinculados
   expect(((await odonto.json()) as ErrorBody).error.code).toBe("FINALIZED")
 })
 
+it("encounters: la consulta sin actos se finaliza sin generar cargos", async () => {
+  const app = buildApp("admin")
+  const patientId = await createFreshPatient(app, "Consulta Sin Actos")
+
+  const created = await postEncounter(app, patientId, { reason: "Consulta de evaluación" })
+  expect(created.status).toBe(201)
+  const encounterId = ((await created.json()) as { data: EncounterRow }).data.id
+
+  const finalized = await app.request(`/patients/${patientId}/encounters/${encounterId}/finalize`, {
+    method: "POST",
+  })
+  expect(finalized.status).toBe(200)
+  const closed = (await finalized.json()) as {
+    data: { charges: unknown[]; skippedCharges: unknown[] }
+  }
+  expect(closed.data.charges).toEqual([])
+  expect(closed.data.skippedCharges).toEqual([])
+
+  const detail = await app.request(`/patients/${patientId}/encounters/${encounterId}`)
+  const body = (await detail.json()) as EncounterDetailBody
+  expect(body.data.encounter.status).toBe("finalizada")
+  expect(body.data.procedures).toEqual([])
+})
+
 it("encounters: adenda en borrador 409 NOT_FINALIZED; tras finalizar 201 kind adenda visible en detalle", async () => {
   const app = buildApp("admin")
   const patientId = await createFreshPatient(app, "Borrador Adenda")
@@ -452,9 +485,14 @@ it("encounters: las sesiones mantienen en curso hasta completar explícitamente"
   )
   expect(duplicate.status).toBe(201)
   const during = await app.request(`/patients/${patientId}/plan`)
-  expect(((await during.json()) as { data: PlanItemRow[] }).data.find(row => row.id === itemId)?.status).toBe("en_curso")
+  expect(
+    ((await during.json()) as { data: PlanItemRow[] }).data.find((row) => row.id === itemId)
+      ?.status,
+  ).toBe("en_curso")
   const complete = await app.request(`/patients/${patientId}/treatments/${itemId}/complete`, {
-    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ encounterId }),
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ encounterId }),
   })
   expect(complete.status).toBe(200)
   // El cierre explícito conserva todas las sesiones.
@@ -532,7 +570,13 @@ it("encounters: finalize frente a PATCH concurrentes se serializa sin mutación 
   const created = await postEncounter(app, patientId, { reason: "Concurrente" })
   const createdBody = (await created.json()) as { data: EncounterRow }
   const encounterId = createdBody.data.id
-  // Mínimo de cierre previo a la carrera: la evolución ya está registrada.
+  // Mínimo de cierre previo a la carrera: un acto y la evolución registrados.
+  const proc = await app.request(`/patients/${patientId}/encounters/${encounterId}/procedures`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ description: "Acto de cierre" }),
+  })
+  expect(proc.status).toBe(201)
   const evolved = await app.request(`/patients/${patientId}/encounters/${encounterId}`, {
     method: "PATCH",
     headers: { "content-type": "application/json" },
@@ -568,9 +612,12 @@ it("encounters: procedure exige servicio o plan; inactivo u otra org no pasan", 
       body: JSON.stringify(payload),
     })
 
-  // Texto libre sin servicio ni plan: ya no es sustituto válido.
+  // Acto libre: descripción propia sin servicio ni plan (queda registrado, no
+  // se cobra). El cuerpo vacío sigue siendo inválido.
   const bare = await post({ description: "Texto libre" })
-  expect(bare.status).toBe(400)
+  expect(bare.status).toBe(201)
+  const vacio = await post({})
+  expect(vacio.status).toBe(400)
 
   const inactive = await post({ serviceId: "c4444444-4444-4444-8444-444444444444" })
   expect(inactive.status).toBe(409)
@@ -599,7 +646,17 @@ it("encounters: crear con planItemIds aceptados vincula sin marcar realizado", a
   const budgetId = await createBudget(app, patientId, ctx.planId, [first.id, second.id])
   await presentBudget(app, patientId, budgetId)
   await decideBudget(app, patientId, budgetId, [first.id, second.id])
-  // La atención de origen se cierra para abrir la siguiente (un solo borrador).
+  // La atención de origen se cierra para abrir la siguiente (un solo borrador);
+  // el cierre exige un acto registrado.
+  const proc = await app.request(
+    `/patients/${patientId}/encounters/${ctx.encounterId}/procedures`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ description: "Acto de cierre" }),
+    },
+  )
+  expect(proc.status).toBe(201)
   const evolved = await app.request(`/patients/${patientId}/encounters/${ctx.encounterId}`, {
     method: "PATCH",
     headers: { "content-type": "application/json" },
@@ -611,7 +668,6 @@ it("encounters: crear con planItemIds aceptados vincula sin marcar realizado", a
     { method: "POST" },
   )
   expect(finalized.status).toBe(200)
-
   const created = await postEncounter(app, patientId, {
     reason: "Con plan",
     planItemIds: [first.id, second.id],
@@ -789,3 +845,134 @@ it("encounters: PATCH guarda el examen clínico con forma validada y lo limpia c
   }
   expect(clearedDetail.data.encounter.examination).toBeNull()
 })
+
+it("encounters: crear sin motivo responde 400", async () => {
+  const app = buildApp("admin")
+  const patientId = await createFreshPatient(app, "Sin Motivo")
+  const res = await postEncounter(app, patientId, {})
+  expect(res.status).toBe(400)
+})
+
+it("encounters: servicio directo se realiza en el acto y el cierre lo cobra una vez", async () => {
+  const app = buildApp("admin")
+  const patientId = await createFreshPatient(app, "Servicio Directo")
+  const created = await postEncounter(app, patientId, { reason: "Consulta y corona" })
+  const encounterId = ((await created.json()) as { data: EncounterRow }).data.id
+
+  // Servicio directo: nace el tratamiento ya realizado, con la tarifa del
+  // tarifario congelada en el acto.
+  const proc = await app.request(`/patients/${patientId}/encounters/${encounterId}/procedures`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ serviceId: "c1111111-1111-4111-8111-111111111111", toothNumber: 36 }),
+  })
+  expect(proc.status).toBe(201)
+  const procBody = (await proc.json()) as {
+    data: { planItemId: string | null; priceCents: number | null; currency: string | null }
+  }
+  expect(procBody.data.planItemId).not.toBeNull()
+  expect(procBody.data.priceCents).toBe(90000)
+  expect(procBody.data.currency).toBe("PEN")
+
+  const plan = await app.request(`/patients/${patientId}/plan`)
+  const planBody = (await plan.json()) as {
+    data: Array<{ id: string; status: string; sourceEncounterId: string | null }>
+  }
+  const item = planBody.data.find((row) => row.id === procBody.data.planItemId)
+  expect(item?.status).toBe("realizado")
+  expect(item?.sourceEncounterId).toBe(encounterId)
+
+  const evolved = await app.request(`/patients/${patientId}/encounters/${encounterId}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ evolution: "Corona cementada" }),
+  })
+  expect(evolved.status).toBe(200)
+  const finalized = await app.request(`/patients/${patientId}/encounters/${encounterId}/finalize`, {
+    method: "POST",
+  })
+  expect(finalized.status).toBe(200)
+  const closed = (await finalized.json()) as {
+    data: {
+      charges: Array<{ id: string; amountCents: number; currency: string }>
+      skippedCharges: Array<{ procedureId: string; reason: string }>
+    }
+  }
+  expect(closed.data.charges).toHaveLength(1)
+  expect(closed.data.charges[0].amountCents).toBe(90000)
+
+  const account = await app.request(`/patients/${patientId}/account`)
+  const accountBody = (await account.json()) as {
+    data: { charges: Array<{ id: string; amountCents: number }> }
+  }
+  expect(accountBody.data.charges.map((row) => row.id)).toContain(closed.data.charges[0].id)
+
+  // Re-cerrar no es posible ni duplica el cargo.
+  const again = await app.request(`/patients/${patientId}/encounters/${encounterId}/finalize`, {
+    method: "POST",
+  })
+  expect(again.status).toBe(409)
+})
+
+it.each(["antes", "después"] as const)(
+  "encounters: presupuesto %s del cierre no duplica el cargo",
+  async (orden) => {
+    const app = buildApp("admin")
+    const patientId = await createFreshPatient(app, "Cargo Unico")
+    const ctx = await setupPlan(app, patientId)
+    const item = await addPlanItem(app, patientId, ctx, {
+      serviceId: "c1111111-1111-4111-8111-111111111111",
+      toothNumber: 36,
+    })
+    const budgetId = await createBudget(app, patientId, ctx.planId, [item.id])
+    await presentBudget(app, patientId, budgetId)
+    await decideBudget(app, patientId, budgetId, [item.id])
+    const budgetDetail = (await (
+      await app.request(`/patients/${patientId}/budgets/${budgetId}`)
+    ).json()) as { data: { items: Array<{ id: string; planItemId: string }> } }
+    const line = budgetDetail.data.items.find((row) => row.planItemId === item.id)!
+    const chargeFromBudget = () =>
+      app.request(`/patients/${patientId}/charges`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ budgetItemId: line.id }),
+      })
+    if (orden === "antes") expect((await chargeFromBudget()).status).toBe(201)
+
+    const proc = await app.request(
+      `/patients/${patientId}/encounters/${ctx.encounterId}/procedures`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ planItemId: item.id }),
+      },
+    )
+    expect(proc.status).toBe(201)
+    const evolved = await app.request(`/patients/${patientId}/encounters/${ctx.encounterId}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ evolution: "Primera sesión" }),
+    })
+    expect(evolved.status).toBe(200)
+    const finalized = await app.request(
+      `/patients/${patientId}/encounters/${ctx.encounterId}/finalize`,
+      { method: "POST" },
+    )
+    expect(finalized.status).toBe(200)
+    const closed = (await finalized.json()) as {
+      data: { charges: unknown[]; skippedCharges: Array<{ reason: string }> }
+    }
+    if (orden === "antes") {
+      expect(closed.data.charges).toHaveLength(0)
+      expect(closed.data.skippedCharges).toEqual([expect.objectContaining({ reason: "covered" })])
+    } else {
+      expect(closed.data.charges).toHaveLength(1)
+      const duplicated = await chargeFromBudget()
+      expect(duplicated.status).toBe(409)
+      expect(((await duplicated.json()) as ErrorBody).error.code).toBe("CHARGE_EXCEEDS_BUDGET")
+    }
+    const account = await app.request(`/patients/${patientId}/account`)
+    const balance = (await account.json()) as { data: { charges: Array<{ amountCents: number }> } }
+    expect(balance.data.charges.map((charge) => charge.amountCents)).toEqual([90000])
+  },
+)

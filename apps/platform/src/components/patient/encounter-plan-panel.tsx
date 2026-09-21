@@ -13,6 +13,7 @@ import {
   SelectValue,
   Textarea,
 } from "@odentia/ui"
+import { FormDrawer } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useId, useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
@@ -22,8 +23,9 @@ import {
   fetchTreatmentPlans,
   planDecisionLabel,
 } from "../../lib/budgets"
+import { createOptionGroupApi } from "../../lib/clinical-journey"
 import { useCanWrite } from "../../lib/crm"
-import type { PlanItem } from "../../lib/patients"
+import type { OdontogramState, PlanItem } from "../../lib/patients"
 import { formatMoney, type ServiceCatalogItem, TREATMENT_SCOPE_LABELS } from "../../lib/services"
 import { Cie10Search } from "./cie10-search"
 import { treatmentSiteLabel } from "./plan-tab"
@@ -78,6 +80,12 @@ export function EncounterPlanPanel({
   const [quadrant, setQuadrant] = useState("")
   const [arch, setArch] = useState("")
   const [service, setService] = useState<ServiceCatalogItem | null>(null)
+  const [findingId, setFindingId] = useState("")
+  const [optionGroupId, setOptionGroupId] = useState("")
+  const [isRecommended, setIsRecommended] = useState(false)
+  const [groupOpen, setGroupOpen] = useState(false)
+  const [groupTitle, setGroupTitle] = useState("")
+  const [groupError, setGroupError] = useState<string | null>(null)
   const [detail, setDetail] = useState("")
   const [cie, setCie] = useState("")
   const [error, setError] = useState<string | null>(null)
@@ -93,6 +101,17 @@ export function EncounterPlanPanel({
     enabled: planId !== "",
   })
   const items: PlanItem[] = detailQuery.data?.data.items ?? []
+  const optionGroups = detailQuery.data?.data.optionGroups ?? []
+
+  const odontogramQuery = useQuery({
+    queryKey: ["odontogram", patientId],
+    queryFn: () => apiFetch<{ data: OdontogramState }>(`/api/patients/${patientId}/odontogram`),
+  })
+  // Solo hallazgos vigentes de la pieza elegida: la indicación responde a lo observado.
+  const tooth = teeth[0] ?? null
+  const findings = (odontogramQuery.data?.data.history ?? []).filter(
+    (entry) => !entry.voidedAt && tooth != null && entry.toothNumber === tooth,
+  )
 
   const fieldDisabled = disabled || !canWrite
   const blocked = fieldDisabled
@@ -137,6 +156,9 @@ export function EncounterPlanPanel({
         sourceEncounterId: encounterId,
         detail: detail.trim() === "" ? null : detail.trim(),
         diagnosisCode: cie.trim() === "" ? null : cie.trim(),
+        odontogramEntryId: findingId === "" ? null : findingId,
+        optionGroupId: optionGroupId === "" ? null : optionGroupId,
+        isRecommended: optionGroupId !== "" && isRecommended,
       }
       if (scope === "tooth" || scope === "surfaces") {
         if (tooth == null) throw new Error("Selecciona la pieza.")
@@ -166,6 +188,8 @@ export function EncounterPlanPanel({
         setService(null)
         setDetail("")
         setCie("")
+        setFindingId("")
+        setIsRecommended(false)
         setError(null)
       } finally {
         onPendingChange(false)
@@ -174,7 +198,24 @@ export function EncounterPlanPanel({
     onError: (err) => setError(mutationMessage(err)),
   })
 
-  const busy = createPlanMutation.isPending || addMutation.isPending
+  const groupMutation = useMutation({
+    mutationFn: async () => {
+      onPendingChange(true)
+      try {
+        await beforeWrite()
+        const created = await createOptionGroupApi(patientId, planId, { title: groupTitle.trim() })
+        await invalidatePlans()
+        setOptionGroupId(created.data.id)
+        setGroupOpen(false)
+        setGroupError(null)
+      } finally {
+        onPendingChange(false)
+      }
+    },
+    onError: (err) => setGroupError(mutationMessage(err)),
+  })
+
+  const busy = createPlanMutation.isPending || addMutation.isPending || groupMutation.isPending
   const toothForSurfaces = teeth[0] ?? null
   const validSurfaces =
     toothForSurfaces != null ? surfacesForTooth(toothForSurfaces).map(String) : []
@@ -242,7 +283,7 @@ export function EncounterPlanPanel({
               </div>
             </Field>
           </div>
-        
+
           <div className="grid gap-3 sm:grid-cols-2">
             <Field>
               <FieldLabel htmlFor={`${uid}-scope`}>Ámbito</FieldLabel>
@@ -271,9 +312,32 @@ export function EncounterPlanPanel({
                   onChange={(next) => {
                     setTeeth(next.slice(0, 1))
                     setSurfaces([])
+                    setFindingId("")
                   }}
                   disabled={blocked || busy}
                 />
+              </Field>
+            )}
+            {(scope === "tooth" || scope === "surfaces") && findings.length > 0 && (
+              <Field>
+                <FieldLabel htmlFor={`${uid}-finding`}>Hallazgo que motiva</FieldLabel>
+                <Select
+                  value={findingId || undefined}
+                  onValueChange={(v) => setFindingId(v ?? "")}
+                  disabled={blocked || busy}
+                >
+                  <SelectTrigger id={`${uid}-finding`}>
+                    <SelectValue placeholder="Sin hallazgo asociado" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {findings.map((entry) => (
+                      <SelectItem key={entry.id} value={entry.id}>
+                        {entry.condition}
+                        {entry.surface ? ` · ${entry.surface}` : ""}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </Field>
             )}
             {scope === "quadrant" && (
@@ -316,7 +380,7 @@ export function EncounterPlanPanel({
               </Field>
             )}
           </div>
-        
+
           {scope === "surfaces" && toothForSurfaces != null ? (
             <Field>
               <FieldLabel>Superficies de la pieza {toothForSurfaces}</FieldLabel>
@@ -334,7 +398,7 @@ export function EncounterPlanPanel({
               </div>
             </Field>
           ) : null}
-        
+
           <ServicePicker
             value={service?.id ?? ""}
             label="Tratamiento"
@@ -347,14 +411,67 @@ export function EncounterPlanPanel({
           />
           {service ? (
             <p className="text-sm text-muted-foreground" aria-live="polite">
-              Tarifa de solo lectura:{" "}
-              {service.priceCents != null
-                ? formatMoney(service.priceCents, service.currency)
-                : "sin tarifa"}
+              Tarifa de solo lectura: {formatMoney(service.priceCents, service.currency)}
               {service.scope ? ` · ${TREATMENT_SCOPE_LABELS[service.scope] ?? service.scope}` : ""}
             </p>
           ) : null}
-        
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field>
+              <FieldLabel htmlFor={`${uid}-option-group`}>Alternativa de (opcional)</FieldLabel>
+              <div className="flex gap-2">
+                <Select
+                  value={optionGroupId || undefined}
+                  onValueChange={(v) => {
+                    setOptionGroupId(v ?? "")
+                    if (!v) setIsRecommended(false)
+                  }}
+                  disabled={blocked || busy || !planId}
+                >
+                  <SelectTrigger id={`${uid}-option-group`}>
+                    <SelectValue placeholder="Sin agrupación" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {optionGroups.map((group) => (
+                      <SelectItem key={group.id} value={group.id}>
+                        {group.title}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={blocked || busy || !planId}
+                  onClick={() => {
+                    setGroupTitle("")
+                    setGroupError(null)
+                    setGroupOpen(true)
+                  }}
+                >
+                  Nueva
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Agrupa opciones excluyentes del mismo problema: al aceptar una, las demás quedan
+                rechazadas.
+              </p>
+            </Field>
+            <Field>
+              <FieldLabel htmlFor={`${uid}-recommended`}>Recomendación</FieldLabel>
+              <label className="flex items-center gap-2 text-sm">
+                <Checkbox
+                  id={`${uid}-recommended`}
+                  checked={isRecommended}
+                  disabled={blocked || busy || optionGroupId === ""}
+                  onCheckedChange={(next) => setIsRecommended(next === true)}
+                />
+                Recomendada dentro de la agrupación
+              </label>
+            </Field>
+          </div>
+
           <Field>
             <FieldLabel htmlFor={`${uid}-detail`}>Detalle</FieldLabel>
             <Textarea
@@ -367,7 +484,7 @@ export function EncounterPlanPanel({
             />
           </Field>
           <Cie10Search value={cie} onChange={(code) => setCie(code)} disabled={blocked || busy} />
-        
+
           <div>
             <Button
               type="button"
@@ -424,6 +541,37 @@ export function EncounterPlanPanel({
           </div>
         </div>
       ) : null}
+
+      <FormDrawer
+        open={groupOpen}
+        title="Nueva agrupación de alternativas"
+        description="Se crea en este plan; después quedará seleccionada para la indicación que estás registrando."
+        error={groupError}
+        isSubmitting={groupMutation.isPending}
+        submitLabel="Crear agrupación"
+        onClose={() => {
+          if (!groupMutation.isPending) setGroupOpen(false)
+        }}
+        onSubmit={(event) => {
+          event.preventDefault()
+          if (!groupTitle.trim()) {
+            setGroupError("Indica un título para la agrupación.")
+            return
+          }
+          groupMutation.mutate()
+        }}
+      >
+        <Field>
+          <FieldLabel htmlFor={`${uid}-group-title`}>Título</FieldLabel>
+          <Input
+            id={`${uid}-group-title`}
+            value={groupTitle}
+            maxLength={200}
+            disabled={busy}
+            onChange={(event) => setGroupTitle(event.target.value)}
+          />
+        </Field>
+      </FormDrawer>
     </div>
   )
 }

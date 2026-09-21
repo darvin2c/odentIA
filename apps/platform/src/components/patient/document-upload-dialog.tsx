@@ -18,8 +18,10 @@ import {
   SelectValue,
 } from "@odentia/ui"
 import { FormDrawer } from "@odentia/ui-patterns"
+import { useQuery } from "@tanstack/react-query"
 import { FileText, Upload, X } from "lucide-react"
 import { useEffect, useId, useRef, useState } from "react"
+import { apiFetch } from "../../lib/api"
 import { API_URL } from "../../lib/auth-client"
 import { orgSlugFromHostname } from "../../lib/host"
 import type { Encounter, PlanItem } from "../../lib/patients"
@@ -33,6 +35,7 @@ import {
   planItemLabel,
   UPLOAD_CATEGORIES,
 } from "./document-labels"
+import { DocumentLinkSelects } from "./document-link-selects"
 import { TagsInput } from "./tags-input"
 import { ToothSelector } from "./tooth-selector"
 
@@ -47,6 +50,11 @@ interface QueuedFile {
   teeth: number[]
   tags: string[]
   planItemId: string
+  encounterProcedureId: string
+  budgetId: string
+  followUpId: string
+  prescriptionId: string
+  paymentId: string
   expanded: boolean
   status: RowStatus
   error: string | null
@@ -56,6 +64,8 @@ interface QueuedFile {
 export interface DocumentUploadDialogProps {
   patientId: string
   defaultEncounterId?: string
+  /** Tratamiento ya en foco (p. ej. desde su recorrido): se propone en cada fila. */
+  defaultPlanItemId?: string
   initialTeeth?: number[]
   encounters: Encounter[]
   planItems: PlanItem[]
@@ -75,7 +85,11 @@ function draftEncounters(encounters: Encounter[]): Encounter[] {
 
 let rowSeq = 0
 
-function toRow(file: File, initialTeeth: number[]): QueuedFile | { fileError: string } {
+function toRow(
+  file: File,
+  initialTeeth: number[],
+  defaultPlanItemId?: string,
+): QueuedFile | { fileError: string } {
   if (!ACCEPTED_TYPES.includes(file.type))
     return { fileError: "Solo se admiten JPG, PNG, WebP o PDF." }
   if (file.size === 0) return { fileError: "El archivo está vacío." }
@@ -89,7 +103,12 @@ function toRow(file: File, initialTeeth: number[]): QueuedFile | { fileError: st
     category: "",
     teeth: [...initialTeeth],
     tags: [],
-    planItemId: "",
+    planItemId: defaultPlanItemId ?? "",
+    encounterProcedureId: "",
+    budgetId: "",
+    followUpId: "",
+    prescriptionId: "",
+    paymentId: "",
     expanded: false,
     status: "pending",
     error: null,
@@ -107,6 +126,7 @@ function toRow(file: File, initialTeeth: number[]): QueuedFile | { fileError: st
 export function DocumentUploadDialog({
   patientId,
   defaultEncounterId,
+  defaultPlanItemId,
   initialTeeth,
   encounters,
   planItems,
@@ -152,6 +172,17 @@ export function DocumentUploadDialog({
   })
 
   const uploading = rows.some((row) => row.status === "uploading")
+  // Los procedimientos solo existen dentro de una atención: el vínculo se elige
+  // con la atención a la vista, nunca escribiendo un identificador.
+  const procedureQuery = useQuery({
+    queryKey: ["encounter-procedures", patientId, encounterChoice],
+    queryFn: () =>
+      apiFetch<{ data: { procedures: Array<{ id: string; description: string }> } }>(
+        `/api/patients/${patientId}/encounters/${encounterChoice}`,
+      ),
+    enabled: open && encounterChoice !== "",
+  })
+  const procedures = procedureQuery.data?.data.procedures ?? []
   const pendingRows = rows.filter((row) => row.status === "pending" || row.status === "error")
   const unconfirmedRows = rows.filter((row) => row.status === "unconfirmed")
   const addFiles = (files: FileList | File[] | undefined | null) => {
@@ -161,7 +192,7 @@ export function DocumentUploadDialog({
     const added: QueuedFile[] = []
     const bad: string[] = []
     for (const file of list) {
-      const row = toRow(file, initialTeeth ?? [])
+      const row = toRow(file, initialTeeth ?? [], defaultPlanItemId)
       if ("fileError" in row) bad.push(`${file.name}: ${row.fileError}`)
       else added.push(row)
     }
@@ -194,6 +225,11 @@ export function DocumentUploadDialog({
       form.append("label", row.title.trim())
       if (encounterChoice) form.append("encounterId", encounterChoice)
       if (row.planItemId) form.append("planItemId", row.planItemId)
+      if (row.encounterProcedureId) form.append("encounterProcedureId", row.encounterProcedureId)
+      if (row.budgetId) form.append("budgetId", row.budgetId)
+      if (row.followUpId) form.append("followUpId", row.followUpId)
+      if (row.prescriptionId) form.append("prescriptionId", row.prescriptionId)
+      if (row.paymentId) form.append("paymentId", row.paymentId)
       form.append("toothNumbers", JSON.stringify(row.teeth))
       form.append("tags", JSON.stringify(row.tags))
       const slug =
@@ -392,7 +428,9 @@ export function DocumentUploadDialog({
               <QueuedRow
                 key={row.key}
                 row={row}
+                patientId={patientId}
                 planItems={planItems}
+                procedures={procedures}
                 suggestions={suggestions}
                 busy={uploading}
                 onPatch={(patch) => patchRow(row.key, patch)}
@@ -431,7 +469,9 @@ function rowStateLabel(status: RowStatus): string {
 
 function QueuedRow({
   row,
+  patientId,
   planItems,
+  procedures,
   suggestions,
   busy,
   onPatch,
@@ -439,7 +479,10 @@ function QueuedRow({
   onRetry,
 }: {
   row: QueuedFile
+  patientId: string
   planItems: PlanItem[]
+  /** Procedimientos de la atención elegida; vacío sin atención. */
+  procedures: Array<{ id: string; description: string }>
   suggestions: string[]
   busy: boolean
   onPatch: (patch: Partial<QueuedFile>) => void
@@ -532,8 +575,17 @@ function QueuedRow({
             onToggle={(e) => onPatch({ expanded: (e.currentTarget as HTMLDetailsElement).open })}
           >
             <summary className="cursor-pointer text-xs font-medium text-muted-foreground">
-              Extras: piezas, tratamiento y etiquetas
-              {row.teeth.length > 0 || row.planItemId || row.tags.length > 0 ? " (con datos)" : ""}
+              Extras: piezas, tratamiento, vínculos y etiquetas
+              {row.teeth.length > 0 ||
+              row.planItemId ||
+              row.encounterProcedureId ||
+              row.budgetId ||
+              row.followUpId ||
+              row.prescriptionId ||
+              row.paymentId ||
+              row.tags.length > 0
+                ? " (con datos)"
+                : ""}
             </summary>
             <div className="flex flex-col gap-2 pt-2">
               <Field>
@@ -571,6 +623,19 @@ function QueuedRow({
                 value={row.teeth}
                 onChange={(teeth) => onPatch({ teeth })}
                 label="Piezas (opcional)"
+              />
+              <DocumentLinkSelects
+                patientId={patientId}
+                idPrefix={`${planChoiceId}-links`}
+                procedures={procedures}
+                value={{
+                  budgetId: row.budgetId,
+                  followUpId: row.followUpId,
+                  prescriptionId: row.prescriptionId,
+                  paymentId: row.paymentId,
+                  encounterProcedureId: row.encounterProcedureId,
+                }}
+                onChange={(patch) => onPatch(patch)}
               />
               <TagsInput
                 value={row.tags}

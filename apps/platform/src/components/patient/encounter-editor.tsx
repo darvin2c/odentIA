@@ -2,9 +2,6 @@ import {
   Badge,
   Button,
   ButtonGroup,
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
   Field,
   FieldLabel,
   Input,
@@ -13,17 +10,21 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
   Textarea,
 } from "@odentia/ui"
-import { ConfirmDialog } from "@odentia/ui-patterns"
+import {
+  ConfirmDialog,
+  DetailDrawer,
+  DetailPanel,
+  FormDrawer,
+  FormPanel,
+  MasterDetail,
+  useDetailMode,
+} from "@odentia/ui-patterns"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { ChevronDown } from "lucide-react"
 import { useEffect, useId, useRef, useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
+import { fetchFollowUps, fetchPatientAccount, fetchPrescriptions } from "../../lib/clinical-journey"
 import { useCanWrite } from "../../lib/crm"
 import {
   type Encounter,
@@ -33,13 +34,15 @@ import {
   type OdontogramState,
   type PatientFull,
 } from "../../lib/patients"
+import { formatMoney } from "../../lib/services"
 import { OdontogramStudio } from "../odontogram-studio"
+import { ControlesPanel, RecetasPanel } from "./clinical-panels"
 import { EncounterDiagnoses } from "./encounter-diagnoses"
 import { EncounterPlanPanel } from "./encounter-plan-panel"
 import { EncounterProcedures } from "./encounter-procedures"
+import { EncounterTreatments } from "./encounter-treatments"
 import { ImagenesTab } from "./imagenes-tab"
 import { PatientClinicalStrip } from "./patient-header"
-import { ToothSelector } from "./tooth-selector"
 
 export interface EncounterEditorProps {
   patientId: string
@@ -47,8 +50,8 @@ export interface EncounterEditorProps {
   patient: PatientFull
   /** Refresca el query del encounter (lo implementa la ruta). */
   onChanged: () => Promise<void>
-  /** Invalida resumen/plan/timeline y navega a Historia (lo implementa la ruta). */
-  onFinalized: () => Promise<void>
+  /** Invalida resumen/plan/timeline y navega (cuenta si hubo cargos, historia si no). */
+  onFinalized: (hasCharges: boolean) => Promise<void>
   /** Solo navega: el editor hace flush antes de llamarla. */
   onBack: () => void | Promise<void>
 }
@@ -62,6 +65,27 @@ type DraftKey =
   | "examination"
 
 type SaveState = "saved" | "pending" | "saving" | "error"
+
+/**
+ * Bloques que la atención puede llegar a tener. No son pasos: la consulta nace
+ * solo con `consulta` y cada bloque se agrega cuando ocurre. Los que ya tienen
+ * contenido registrado se siguen mostrando al recargar; los agregados vacíos se
+ * descartan sin tocar datos.
+ */
+type SectionKey =
+  | "consulta"
+  | "hallazgos"
+  | "examen"
+  | "odontograma"
+  | "procedimientos"
+  | "plan"
+  | "recetas"
+  | "controles"
+  | "documentos"
+  | "evolucion"
+
+/** Secciones cuyos campos son del propio borrador: se editan en un `FormPanel`. */
+const FORM_SECTIONS: readonly SectionKey[] = ["consulta", "examen", "evolucion"]
 
 interface ExaminationDraft {
   extraoral: { atm: string; ganglios: string; labios: string }
@@ -127,13 +151,6 @@ function toLocalTime(iso: string | null): string {
   const date = new Date(iso)
   if (Number.isNaN(date.getTime())) return ""
   return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`
-}
-
-function formatDateTime(iso: string | null): string {
-  if (!iso) return "—"
-  const date = new Date(iso)
-  if (Number.isNaN(date.getTime())) return "—"
-  return date.toLocaleString("es-PE", { dateStyle: "short", timeStyle: "short" })
 }
 
 /** La cita solo se serializa con fecha+hora válidas, o null si ambas están vacías. */
@@ -213,11 +230,14 @@ function saveMessage(err: unknown, fallback: string): string {
  * Autosave con debounce + drenado serializado por campos dirty: nunca envía el
  * objeto completo para no pisar vínculos clínicos (piezas implícitas de
  * procedimientos, diagnósticos, imágenes u odontograma).
- * Editor guiado en 3 pasos (evaluación/diagnósticos, tratamientos-documentos,
- * evolución/cierre) con WizardSteps: los campos escalares se editan en un
- * FormDrawer hermano y cada registro vinculado vive en su propio drawer. Sin
- * inputs inline ni footer de formulario propio: guardar/volver/finalizar son
- * controles del paso de cierre, con revisión del trabajo registrado.
+ * La atención se construye: nace con el motivo y cada bloque (servicios
+ * realizados, odontograma, diagnósticos, plan, recetas, controles, documentos,
+ * evolución) se agrega solo cuando ocurre. `MasterDetail` mantiene el resumen
+ * de lo registrado a la vista y el bloque abierto se edita al costado; por
+ * debajo del corte de panel, ese mismo bloque se monta como drawer. Los campos
+ * escalares usan `FormPanel`/`FormDrawer`; los bloques que alojan registros con
+ * formulario propio usan el detalle de lectura, para no anidar formularios.
+ * Finalizar y volver viven en la revisión de cierre, no en un footer suelto.
  */
 export function EncounterEditor({
   patientId,
@@ -232,6 +252,10 @@ export function EncounterEditor({
   const queryClient = useQueryClient()
   const canWrite = useCanWrite()
   const uid = useId()
+  const accountQuery = useQuery({
+    queryKey: ["account", patientId],
+    queryFn: () => fetchPatientAccount(patientId),
+  })
 
   const [reason, setReason] = useState(encounter.reason ?? "")
   const [evolution, setEvolution] = useState(encounter.evolution ?? "")
@@ -243,7 +267,9 @@ export function EncounterEditor({
   const [examination, setExamination] = useState<ExaminationDraft | null>(() =>
     toExaminationDraft(encounter.examination),
   )
-  const [tab, setTab] = useState<"evaluacion" | "plan" | "realizado" | "evolucion">("evaluacion")
+  // Bloque en edición; `null` colapsa el detalle y deja la lista a todo el ancho.
+  const [openSection, setOpenSection] = useState<SectionKey | null>("consulta")
+  const [addedSections, setAddedSections] = useState<ReadonlySet<SectionKey>>(() => new Set())
 
   const [saveState, setSaveState] = useState<SaveState>("saved")
   const [saveError, setSaveError] = useState<string | null>(null)
@@ -253,7 +279,17 @@ export function EncounterEditor({
   const [finalizing, setFinalizing] = useState(false)
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [backing, setBacking] = useState(false)
-  const [examOpen, setExamOpen] = useState(false)
+
+  // Tratamientos a los que se puede ligar una receta o un control desde esta
+  // atención: los vinculados y los indicados aquí, sin repetir.
+  const attentionItems = (() => {
+    const seen = new Set<string>()
+    return [...detail.plannedItems, ...detail.indicatedItems].filter((item) => {
+      if (seen.has(item.id)) return false
+      seen.add(item.id)
+      return true
+    })
+  })()
 
   const valuesRef = useRef<DraftValues>({
     reason: encounter.reason ?? "",
@@ -284,6 +320,20 @@ export function EncounterEditor({
   const dentalQuery = useQuery({
     queryKey: ["odontogram", patientId],
     queryFn: () => apiFetch<{ data: OdontogramState }>(`/api/patients/${patientId}/odontogram`),
+  })
+  const branchesQuery = useQuery({
+    queryKey: ["branches"],
+    queryFn: () => apiFetch<{ data: Array<{ id: string; name: string }> }>("/api/branches"),
+  })
+  // Recetas y controles no vienen en el detalle: se cuentan por atención para
+  // saber si el bloque ya tiene contenido y debe seguir visible.
+  const prescriptionsQuery = useQuery({
+    queryKey: ["prescriptions", patientId],
+    queryFn: () => fetchPrescriptions(patientId),
+  })
+  const followUpsQuery = useQuery({
+    queryKey: ["follow-ups", patientId],
+    queryFn: () => fetchFollowUps(patientId),
   })
 
   // Los textos pertenecen al editor. Solo los registros vinculados pueden
@@ -528,7 +578,7 @@ export function EncounterEditor({
     if (explicitSaving || finalizing || backing || childCountRef.current > 0) return
     if (apptBlocked()) {
       setApptError(APPT_INCOMPLETE)
-      setTab("evolucion")
+      setOpenSection("evolucion")
       return
     }
     setApptError(null)
@@ -551,7 +601,7 @@ export function EncounterEditor({
     if (apptBlocked()) {
       setApptError(APPT_INCOMPLETE)
       setConfirmOpen(false)
-      setTab("evolucion")
+      setOpenSection("evolucion")
       return
     }
     setApptError(null)
@@ -559,14 +609,13 @@ export function EncounterEditor({
     try {
       // Congela: primero todo PATCH pendiente y último dirty, recién después finalize.
       await flush()
-      await apiFetch<{ data: unknown }>(
-        `/api/patients/${patientId}/encounters/${encounterId}/finalize`,
-        {
-          method: "POST",
-          body: "{}",
-        },
-      )
-      await onFinalized()
+      const result = await apiFetch<{
+        data: { charges: Array<{ id: string }> }
+      }>(`/api/patients/${patientId}/encounters/${encounterId}/finalize`, {
+        method: "POST",
+        body: "{}",
+      })
+      await onFinalized(result.data.charges.length > 0)
     } catch (err) {
       // Falla: se conserva el borrador intacto y se muestra el error real.
       if (mountedRef.current) {
@@ -608,7 +657,586 @@ export function EncounterEditor({
     ])
   }
 
+  // Una sola tarifa por tratamiento; los cargos activos ya emitidos lo cubren.
+  const coveredItems = new Set(
+    (accountQuery.data?.data.charges ?? [])
+      .filter((charge) => !charge.voidedAt && charge.planItemId)
+      .map((charge) => charge.planItemId),
+  )
+  const chargeableByCurrency = new Map<string, number>()
+  for (const proc of detail.procedures) {
+    if (!proc.serviceId || proc.priceCents === null || proc.priceCents <= 0 || !proc.currency)
+      continue
+    if (proc.planItemId && coveredItems.has(proc.planItemId)) continue
+    if (proc.planItemId) coveredItems.add(proc.planItemId)
+    chargeableByCurrency.set(
+      proc.currency,
+      (chargeableByCurrency.get(proc.currency) ?? 0) + proc.priceCents,
+    )
+  }
+  const chargeableText = [...chargeableByCurrency.entries()]
+    .map(([currency, cents]) => formatMoney(cents, currency))
+    .join(" · ")
+
+  const mode = useDetailMode()
+
   const locked = !canWrite || childCount > 0 || finalizing || backing
+
+  const prescriptions = (prescriptionsQuery.data?.data ?? []).filter(
+    (row) => row.encounterId === encounterId,
+  )
+  const followUps = (followUpsQuery.data?.data ?? []).filter(
+    (row) => row.originEncounterId === encounterId,
+  )
+  // Tratamientos que esta atención deja por ejecutar: los indicados aquí y los
+  // vinculados que siguen abiertos. No basta `plannedItems`: el vínculo nace
+  // cuando la sesión arranca, así que una indicación recién propuesta solo
+  // aparece en `indicatedItems`.
+  const pendingTreatments = attentionItems.filter((item) =>
+    ["pendiente", "programado", "en_curso"].includes(item.status),
+  ).length
+
+  /**
+   * Bloques disponibles con su resumen real. `empty` significa «no hay nada
+   * registrado»: sin contenido y sin agregar explícitamente, el bloque no se
+   * muestra; nunca se pinta un bloque vacío por existir en el sistema.
+   */
+  const sections: Array<{
+    key: SectionKey
+    title: string
+    description: string
+    summary: string
+    empty: boolean
+  }> = [
+    {
+      key: "consulta",
+      title: "Consulta",
+      description: "Motivo, sucursal y piezas evaluadas. Es lo único que la atención requiere.",
+      summary: reason.trim() === "" ? "Sin motivo registrado" : reason.trim(),
+      empty: reason.trim() === "",
+    },
+    {
+      key: "hallazgos",
+      title: "Diagnósticos",
+      description: "Diagnósticos CIE-10 registrados en esta atención.",
+      summary:
+        detail.notes.length === 0
+          ? "Sin diagnósticos registrados"
+          : `${detail.notes.length} diagnóstico(s) registrado(s)`,
+      empty: detail.notes.length === 0,
+    },
+    {
+      key: "examen",
+      title: "Examen clínico",
+      description: "Examen extraoral, intraoral e higiene oral.",
+      summary: examination ? "Examen registrado" : "Sin examen registrado",
+      empty: examination === null,
+    },
+    {
+      key: "odontograma",
+      title: "Odontograma",
+      description: "Hallazgos por pieza sobre el odontograma del paciente.",
+      summary:
+        detail.odontogramEntries.length === 0
+          ? "Sin hallazgos en esta atención"
+          : `${detail.odontogramEntries.length} hallazgo(s) de esta atención`,
+      empty: detail.odontogramEntries.length === 0,
+    },
+    {
+      key: "procedimientos",
+      title: "Servicios realizados",
+      description: "Actos ejecutados hoy, con su prestación y tarifa.",
+      summary:
+        detail.procedures.length === 0
+          ? "Sin actos registrados"
+          : `${detail.procedures.length} acto(s) registrado(s)`,
+      empty: detail.procedures.length === 0,
+    },
+    {
+      key: "plan",
+      title: "Plan de tratamiento",
+      description:
+        "Indicaciones propuestas y tratamientos vinculados. Indicar no ejecuta ni cobra.",
+      summary:
+        detail.indicatedItems.length === 0 && detail.plannedItems.length === 0
+          ? "Sin indicaciones"
+          : `${detail.indicatedItems.length} indicación(es) · ${pendingTreatments} por ejecutar`,
+      empty: detail.indicatedItems.length === 0 && detail.plannedItems.length === 0,
+    },
+    {
+      key: "recetas",
+      title: "Recetas",
+      description: "Prescripciones emitidas en esta atención.",
+      summary: prescriptions.length === 0 ? "Sin recetas" : `${prescriptions.length} receta(s)`,
+      empty: prescriptions.length === 0,
+    },
+    {
+      key: "controles",
+      title: "Controles",
+      description: "Controles y mantenimientos indicados desde esta atención.",
+      summary: followUps.length === 0 ? "Sin controles" : `${followUps.length} control(es)`,
+      empty: followUps.length === 0,
+    },
+    {
+      key: "documentos",
+      title: "Documentos",
+      description: "Radiografías, imágenes y documentos de la atención.",
+      summary:
+        detail.documents.length === 0
+          ? "Sin documentos"
+          : `${detail.documents.length} documento(s)`,
+      empty: detail.documents.length === 0,
+    },
+    {
+      key: "evolucion",
+      title: "Evolución e indicaciones",
+      description: "Evolución clínica, indicaciones al paciente y seguimiento sugerido.",
+      summary:
+        evolution.trim() === "" && indications.trim() === "" && nextStep.trim() === ""
+          ? "Sin evolución registrada"
+          : "Evolución registrada",
+      empty: evolution.trim() === "" && indications.trim() === "" && nextStep.trim() === "",
+    },
+  ]
+
+  const includedSections = sections.filter(
+    (section) => section.key === "consulta" || !section.empty || addedSections.has(section.key),
+  )
+  const availableSections = sections.filter((section) => !includedSections.includes(section))
+  const openMeta = sections.find((section) => section.key === openSection) ?? null
+
+  const addSection = (key: SectionKey) => {
+    setAddedSections((current) => {
+      if (current.has(key)) return current
+      const next = new Set(current)
+      next.add(key)
+      return next
+    })
+    setOpenSection(key)
+  }
+
+  /** Solo se quita lo que no tiene nada registrado: nunca se oculta un dato. */
+  const removeSection = (key: SectionKey) => {
+    setAddedSections((current) => {
+      const next = new Set(current)
+      next.delete(key)
+      return next
+    })
+    if (openSection === key) setOpenSection(null)
+  }
+
+  const closeSection = () => {
+    setOpenSection(null)
+    // Los campos escalares son del editor: cerrar no descarta nada y el
+    // autosave sigue vivo. El flush evita dejar un cambio a medias.
+    void flush().catch(() => {})
+  }
+
+  const submitSection = (event: React.FormEvent) => {
+    event.preventDefault()
+    void handleSaveDraft()
+  }
+
+  const consultaBody = (
+    <div className="flex flex-col gap-3">
+      <Field>
+        <FieldLabel htmlFor={`${uid}-branch`}>Sucursal de la atención</FieldLabel>
+        <select
+          id={`${uid}-branch`}
+          className="h-9 rounded-md border bg-background px-3 text-sm"
+          disabled={locked || branchesQuery.isPending}
+          value={encounter.branchId ?? ""}
+          onChange={async (event) => {
+            const branchId = event.target.value || null
+            handlePendingChange(true)
+            try {
+              await flush()
+              await apiFetch(`/api/patients/${patientId}/encounters/${encounterId}`, {
+                method: "PATCH",
+                body: JSON.stringify({ branchId }),
+              })
+              await onChanged()
+            } catch (err) {
+              setSaveError(saveMessage(err, "No se pudo guardar la sucursal."))
+            } finally {
+              handlePendingChange(false)
+            }
+          }}
+        >
+          <option value="">Sin sucursal asignada</option>
+          {(branchesQuery.data?.data ?? []).map((branch) => (
+            <option key={branch.id} value={branch.id}>
+              {branch.name}
+            </option>
+          ))}
+        </select>
+        {branchesQuery.isError && <p role="alert">No se pudieron cargar las sucursales.</p>}
+      </Field>
+      <Field>
+        <FieldLabel htmlFor={`${uid}-reason`}>Motivo (máx. {MAX_REASON})</FieldLabel>
+        <Textarea
+          id={`${uid}-reason`}
+          rows={2}
+          value={reason}
+          disabled={locked}
+          maxLength={MAX_REASON}
+          placeholder="Motivo de la consulta…"
+          onChange={(event) => editReason(event.target.value)}
+        />
+      </Field>
+      <div>
+        <p className="text-xs font-medium text-muted-foreground">
+          Piezas vinculadas ({teeth.length})
+        </p>
+        <div className="flex flex-wrap gap-2">
+          {teeth.map((tooth) => (
+            <Button
+              key={tooth}
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={locked}
+              aria-label={`Quitar pieza ${tooth} de la atención`}
+              onClick={() => editTeeth(teeth.filter((value) => value !== tooth))}
+            >
+              {tooth} ×
+            </Button>
+          ))}
+          {teeth.length === 0 && (
+            <span className="text-xs text-muted-foreground">
+              Evaluación general o localizada en el odontograma.
+            </span>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+
+  const examenBody = (
+    <div className="grid gap-3 sm:grid-cols-2">
+      <Field>
+        <FieldLabel htmlFor={`${uid}-ex-atm`}>ATM</FieldLabel>
+        <Input
+          id={`${uid}-ex-atm`}
+          value={examination?.extraoral.atm ?? ""}
+          disabled={locked}
+          onChange={(e) => editExamination("extraoral", "atm", e.target.value)}
+        />
+      </Field>
+      <Field>
+        <FieldLabel htmlFor={`${uid}-ex-ganglios`}>Ganglios</FieldLabel>
+        <Input
+          id={`${uid}-ex-ganglios`}
+          value={examination?.extraoral.ganglios ?? ""}
+          disabled={locked}
+          onChange={(e) => editExamination("extraoral", "ganglios", e.target.value)}
+        />
+      </Field>
+      <Field>
+        <FieldLabel htmlFor={`${uid}-ex-labios`}>Labios</FieldLabel>
+        <Input
+          id={`${uid}-ex-labios`}
+          value={examination?.extraoral.labios ?? ""}
+          disabled={locked}
+          onChange={(e) => editExamination("extraoral", "labios", e.target.value)}
+        />
+      </Field>
+      <Field>
+        <FieldLabel htmlFor={`${uid}-ex-higiene`}>Higiene oral</FieldLabel>
+        <Select
+          value={examination?.higieneOral ?? ""}
+          onValueChange={(v) => editHigieneOral(v ?? "")}
+          disabled={locked}
+        >
+          <SelectTrigger id={`${uid}-ex-higiene`}>
+            <SelectValue placeholder="Sin indicar" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="">Sin indicar</SelectItem>
+            <SelectItem value="buena">Buena</SelectItem>
+            <SelectItem value="regular">Regular</SelectItem>
+            <SelectItem value="mala">Mala</SelectItem>
+          </SelectContent>
+        </Select>
+      </Field>
+      <Field>
+        <FieldLabel htmlFor={`${uid}-ex-encias`}>Encías</FieldLabel>
+        <Input
+          id={`${uid}-ex-encias`}
+          value={examination?.intraoral.encias ?? ""}
+          disabled={locked}
+          onChange={(e) => editExamination("intraoral", "encias", e.target.value)}
+        />
+      </Field>
+      <Field>
+        <FieldLabel htmlFor={`${uid}-ex-lengua`}>Lengua</FieldLabel>
+        <Input
+          id={`${uid}-ex-lengua`}
+          value={examination?.intraoral.lengua ?? ""}
+          disabled={locked}
+          onChange={(e) => editExamination("intraoral", "lengua", e.target.value)}
+        />
+      </Field>
+      <Field>
+        <FieldLabel htmlFor={`${uid}-ex-paladar`}>Paladar</FieldLabel>
+        <Input
+          id={`${uid}-ex-paladar`}
+          value={examination?.intraoral.paladar ?? ""}
+          disabled={locked}
+          onChange={(e) => editExamination("intraoral", "paladar", e.target.value)}
+        />
+      </Field>
+      <Field>
+        <FieldLabel htmlFor={`${uid}-ex-piso`}>Piso de boca</FieldLabel>
+        <Input
+          id={`${uid}-ex-piso`}
+          value={examination?.intraoral.pisoBoca ?? ""}
+          disabled={locked}
+          onChange={(e) => editExamination("intraoral", "pisoBoca", e.target.value)}
+        />
+      </Field>
+      <Field>
+        <FieldLabel htmlFor={`${uid}-ex-carrillos`}>Carrillos</FieldLabel>
+        <Input
+          id={`${uid}-ex-carrillos`}
+          value={examination?.intraoral.carrillos ?? ""}
+          disabled={locked}
+          onChange={(e) => editExamination("intraoral", "carrillos", e.target.value)}
+        />
+      </Field>
+      <Field>
+        <FieldLabel htmlFor={`${uid}-ex-oro`}>Orofaringe</FieldLabel>
+        <Input
+          id={`${uid}-ex-oro`}
+          value={examination?.intraoral.orofaringe ?? ""}
+          disabled={locked}
+          onChange={(e) => editExamination("intraoral", "orofaringe", e.target.value)}
+        />
+      </Field>
+    </div>
+  )
+
+  const evolucionBody = (
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-col gap-3">
+        <Field>
+          <FieldLabel htmlFor={`${uid}-evolution`}>Evolución (máx. {MAX_EVOLUTION})</FieldLabel>
+          <Textarea
+            id={`${uid}-evolution`}
+            rows={3}
+            value={evolution}
+            disabled={locked}
+            maxLength={MAX_EVOLUTION}
+            placeholder="Evolución clínica…"
+            onChange={(event) => editEvolution(event.target.value)}
+          />
+        </Field>
+        <Field>
+          <FieldLabel htmlFor={`${uid}-indications`}>
+            Indicaciones (máx. {MAX_INDICATIONS})
+          </FieldLabel>
+          <Textarea
+            id={`${uid}-indications`}
+            rows={2}
+            value={indications}
+            disabled={locked}
+            maxLength={MAX_INDICATIONS}
+            placeholder="Indicaciones para el paciente…"
+            onChange={(event) => editIndications(event.target.value)}
+          />
+        </Field>
+        <Field>
+          <FieldLabel htmlFor={`${uid}-next-step`}>
+            Paso siguiente (máx. {MAX_NEXT_STEP})
+          </FieldLabel>
+          <Textarea
+            id={`${uid}-next-step`}
+            rows={2}
+            value={nextStep}
+            disabled={locked}
+            maxLength={MAX_NEXT_STEP}
+            placeholder="Paso siguiente del tratamiento…"
+            onChange={(event) => editNextStep(event.target.value)}
+          />
+        </Field>
+        <div className="flex flex-wrap gap-3">
+          <Field className="min-w-40 flex-1">
+            <FieldLabel htmlFor={`${uid}-appt-date`}>Fecha de revisión sugerida</FieldLabel>
+            <Input
+              id={`${uid}-appt-date`}
+              type="date"
+              value={apptDate}
+              disabled={locked}
+              onChange={(event) => editApptDate(event.target.value)}
+            />
+          </Field>
+          <Field className="min-w-40 flex-1">
+            <FieldLabel htmlFor={`${uid}-appt-time`}>Hora de revisión sugerida</FieldLabel>
+            <Input
+              id={`${uid}-appt-time`}
+              type="time"
+              value={apptTime}
+              disabled={locked}
+              onChange={(event) => editApptTime(event.target.value)}
+            />
+          </Field>
+        </div>
+        {apptError ? (
+          <p role="alert" className="text-sm text-destructive">
+            {apptError}
+          </p>
+        ) : null}
+        <p className="text-xs text-muted-foreground">
+          Seguimiento recomendado; no reserva una cita. Guarda fecha y hora juntas o limpia ambas.
+        </p>
+      </div>
+      {detail.addenda.length > 0 ? (
+        <div className="flex flex-col gap-2 border-t pt-4">
+          <p className="font-heading text-sm font-medium">Adendas</p>
+          {detail.addenda.map((note) => (
+            <p key={note.id} className="whitespace-pre-wrap text-sm">
+              {note.note}
+            </p>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  )
+
+  const sectionBody: Record<SectionKey, React.ReactNode> = {
+    consulta: consultaBody,
+    hallazgos: (
+      <EncounterDiagnoses
+        patientId={patientId}
+        detail={detail}
+        disabled={locked}
+        beforeWrite={flush}
+        onChanged={handleChildChanged}
+        onPendingChange={handlePendingChange}
+      />
+    ),
+    examen: examenBody,
+    odontograma: (
+      <div className="flex min-w-0 flex-col gap-3">
+        {dentalQuery.isLoading && (
+          <p className="text-sm text-muted-foreground">Cargando odontograma…</p>
+        )}
+        {dentalQuery.isError && (
+          <p role="alert" className="text-sm text-destructive">
+            {dentalQuery.error instanceof ApiError && dentalQuery.error.shape.message
+              ? dentalQuery.error.shape.message
+              : "No se pudo cargar el odontograma."}
+          </p>
+        )}
+        {dentalQuery.data && (
+          <OdontogramStudio
+            patientId={patientId}
+            state={dentalQuery.data.data}
+            compact
+            encounterId={encounterId}
+            onChanged={handleChildChanged}
+            beforeWrite={flush}
+            onPendingChange={handlePendingChange}
+            disabled={locked}
+            readOnly={!canWrite}
+          />
+        )}
+      </div>
+    ),
+    procedimientos: (
+      <div className="flex flex-col gap-4">
+        <EncounterProcedures
+          patientId={patientId}
+          detail={detail}
+          disabled={locked}
+          beforeWrite={flush}
+          onChanged={handleChildChanged}
+          onPendingChange={handlePendingChange}
+        />
+        <EncounterTreatments
+          patientId={patientId}
+          encounterId={encounterId}
+          items={detail.plannedItems}
+          disabled={locked}
+          beforeWrite={flush}
+          onChanged={handleChildChanged}
+        />
+      </div>
+    ),
+    plan: (
+      <EncounterPlanPanel
+        patientId={patientId}
+        encounterId={encounterId}
+        disabled={locked}
+        beforeWrite={flush}
+        onChanged={handleChildChanged}
+        onPendingChange={handlePendingChange}
+      />
+    ),
+    recetas: (
+      <RecetasPanel
+        patientId={patientId}
+        encounterId={encounterId}
+        encounterOnly
+        items={attentionItems}
+      />
+    ),
+    controles: (
+      <ControlesPanel
+        patientId={patientId}
+        encounterId={encounterId}
+        encounterOnly
+        items={attentionItems}
+      />
+    ),
+    documentos: (
+      <ImagenesTab
+        patientId={patientId}
+        encounterId={encounterId}
+        beforeWrite={flush}
+        onPendingChange={handlePendingChange}
+        disabled={locked}
+        readOnly={!canWrite}
+        onUploaded={handleChildChanged}
+      />
+    ),
+    evolucion: evolucionBody,
+  }
+
+  /**
+   * Detalle del bloque abierto. Un solo contenedor montado a la vez: `FormPanel`
+   * en ancho de panel y su equivalente en drawer por debajo del corte; montar
+   * ambos duplicaría los `id`/`htmlFor` de los campos. Los bloques que alojan
+   * registros con formulario propio usan el detalle de lectura, para no anidar
+   * formularios.
+   */
+  const sectionDetail = (target: "panel" | "drawer"): React.ReactNode => {
+    if (!openSection || !openMeta) return null
+    const surface = {
+      title: openMeta.title,
+      description: openMeta.description,
+      onClose: closeSection,
+    }
+    const body = sectionBody[openSection]
+    if (FORM_SECTIONS.includes(openSection)) {
+      const form = {
+        ...surface,
+        children: body,
+        onSubmit: submitSection,
+        isSubmitting: explicitSaving,
+        error: saveError,
+        submitLabel: "Guardar",
+      }
+      return target === "panel" ? <FormPanel {...form} /> : <FormDrawer open {...form} />
+    }
+    const detailSurface = { ...surface, children: body }
+    return target === "panel" ? (
+      <DetailPanel {...detailSurface} />
+    ) : (
+      <DetailDrawer open {...detailSurface} />
+    )
+  }
+
   return (
     <div className="flex flex-col gap-4">
       <PatientClinicalStrip detail={patient} />
@@ -644,406 +1272,153 @@ export function EncounterEditor({
         </p>
       )}
 
-      <div className="grid min-w-0 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(24rem,32rem)]">
-        <div className="min-w-0">
-          {dentalQuery.isLoading && (
-            <p className="text-sm text-muted-foreground">Cargando odontograma…</p>
-          )}
-          {dentalQuery.isError && (
-            <p role="alert" className="text-sm text-destructive">
-              {dentalQuery.error instanceof ApiError && dentalQuery.error.shape.message
-                ? dentalQuery.error.shape.message
-                : "No se pudo cargar el odontograma."}
-            </p>
-          )}
-          {dentalQuery.data && (
-            <OdontogramStudio
-              patientId={patientId}
-              state={dentalQuery.data.data}
-              compact
-              encounterId={encounterId}
-              onChanged={handleChildChanged}
-              beforeWrite={flush}
-              onPendingChange={handlePendingChange}
-              disabled={locked}
-              readOnly={!canWrite}
-            />
-          )}
+      <MasterDetail panelSize="xl" panel={mode === "panel" ? sectionDetail("panel") : null}>
+        <div className="flex flex-col gap-4">
+          {includedSections.map((section) => (
+            <section
+              key={section.key}
+              aria-label={section.title}
+              className="flex flex-wrap items-start justify-between gap-3 rounded-sm bg-card p-6"
+            >
+              <div className="flex min-w-0 flex-col gap-1">
+                <h2 className="font-heading text-base font-medium">{section.title}</h2>
+                <p className="text-sm text-muted-foreground">{section.summary}</p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={openSection === section.key ? "secondary" : "outline"}
+                  aria-expanded={openSection === section.key}
+                  onClick={() => setOpenSection(section.key)}
+                >
+                  {openSection === section.key ? "En edición" : "Abrir"}
+                </Button>
+                {section.key !== "consulta" && section.empty ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => removeSection(section.key)}
+                  >
+                    Quitar
+                  </Button>
+                ) : null}
+              </div>
+            </section>
+          ))}
         </div>
 
-        <div className="flex min-w-0 flex-col gap-4">
-          <div className="flex flex-col gap-6 rounded-md bg-card p-6">
-            <div className="flex flex-col gap-1.5">
-              <div className="font-heading text-base font-medium">Motivo de la atención</div>
+        {availableSections.length > 0 ? (
+          <section
+            aria-label="Agregar a la atención"
+            className="flex flex-col gap-3 rounded-sm bg-card p-6"
+          >
+            <div className="flex flex-col gap-1">
+              <h2 className="font-heading text-base font-medium">Agregar según lo que ocurrió</h2>
+              <p className="text-sm text-muted-foreground">
+                Se registra solo lo que la consulta necesita: servicios, odontograma, plan, recetas,
+                controles, documentos o evolución. Nada de esto es obligatorio.
+              </p>
             </div>
-            <div className="flex flex-col gap-3">
-              <Field>
-                <FieldLabel htmlFor={`${uid}-reason`}>Motivo (máx. {MAX_REASON})</FieldLabel>
-                <Textarea
-                  id={`${uid}-reason`}
-                  rows={2}
-                  value={reason}
-                  disabled={locked}
-                  maxLength={MAX_REASON}
-                  placeholder="Motivo de la consulta…"
-                  onChange={(event) => editReason(event.target.value)}
-                />
-              </Field>
-              <div>
-                <p className="text-xs font-medium text-muted-foreground">
-                  Piezas vinculadas ({teeth.length})
-                </p>
-                <ToothSelector value={teeth} onChange={editTeeth} disabled={locked} />
-              </div>
+            <div className="flex flex-wrap gap-2">
+              {availableSections.map((section) => (
+                <Button
+                  key={section.key}
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  title={section.description}
+                  onClick={() => addSection(section.key)}
+                >
+                  Agregar {section.title}
+                </Button>
+              ))}
             </div>
+          </section>
+        ) : null}
+
+        <section
+          aria-label="Cierre de la atención"
+          className="flex flex-col gap-4 rounded-sm bg-card p-6"
+        >
+          <div className="flex flex-col gap-1">
+            <h2 className="font-heading text-base font-medium">Revisión para el cierre</h2>
+            <p className="text-sm text-muted-foreground">
+              Revisa lo registrado antes de finalizar: el cierre deja la atención inmutable.
+            </p>
           </div>
-
-          <Tabs
-            value={tab}
-            onValueChange={(v) => {
-              if (v === "evaluacion" || v === "plan" || v === "realizado" || v === "evolucion")
-                setTab(v)
-            }}
-          >
-            <TabsList className="w-full" aria-label="Secciones de la atención">
-              <TabsTrigger value="evaluacion">Evaluación</TabsTrigger>
-              <TabsTrigger value="plan">Plan</TabsTrigger>
-              <TabsTrigger value="realizado">Realizado</TabsTrigger>
-              <TabsTrigger value="evolucion">Evolución</TabsTrigger>
-            </TabsList>
-            <TabsContent value="evaluacion" className="flex flex-col gap-4">
-              <EncounterDiagnoses
-                patientId={patientId}
-                detail={detail}
-                disabled={locked}
-                beforeWrite={flush}
-                onChanged={handleChildChanged}
-                onPendingChange={handlePendingChange}
-              />
-              <Collapsible open={examOpen} onOpenChange={setExamOpen}>
-                <div className="flex flex-col gap-6 rounded-md bg-card p-6">
-                  <div className="flex flex-col gap-1.5 pb-3">
-                    <CollapsibleTrigger className="text-base font-semibold">
-                      <span className="flex items-center gap-1">
-                        Examen clínico <ChevronDown aria-hidden className="size-4" />
-                      </span>
-                    </CollapsibleTrigger>
-                  </div>
-                  <CollapsibleContent>
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      <Field>
-                        <FieldLabel htmlFor={`${uid}-ex-atm`}>ATM</FieldLabel>
-                        <Input
-                          id={`${uid}-ex-atm`}
-                          value={examination?.extraoral.atm ?? ""}
-                          disabled={locked}
-                          onChange={(e) => editExamination("extraoral", "atm", e.target.value)}
-                        />
-                      </Field>
-                      <Field>
-                        <FieldLabel htmlFor={`${uid}-ex-ganglios`}>Ganglios</FieldLabel>
-                        <Input
-                          id={`${uid}-ex-ganglios`}
-                          value={examination?.extraoral.ganglios ?? ""}
-                          disabled={locked}
-                          onChange={(e) => editExamination("extraoral", "ganglios", e.target.value)}
-                        />
-                      </Field>
-                      <Field>
-                        <FieldLabel htmlFor={`${uid}-ex-labios`}>Labios</FieldLabel>
-                        <Input
-                          id={`${uid}-ex-labios`}
-                          value={examination?.extraoral.labios ?? ""}
-                          disabled={locked}
-                          onChange={(e) => editExamination("extraoral", "labios", e.target.value)}
-                        />
-                      </Field>
-                      <Field>
-                        <FieldLabel htmlFor={`${uid}-ex-higiene`}>Higiene oral</FieldLabel>
-                        <Select
-                          value={examination?.higieneOral ?? ""}
-                          onValueChange={(v) => editHigieneOral(v ?? "")}
-                          disabled={locked}
-                        >
-                          <SelectTrigger id={`${uid}-ex-higiene`}>
-                            <SelectValue placeholder="Sin indicar" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="">Sin indicar</SelectItem>
-                            <SelectItem value="buena">Buena</SelectItem>
-                            <SelectItem value="regular">Regular</SelectItem>
-                            <SelectItem value="mala">Mala</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </Field>
-                      <Field>
-                        <FieldLabel htmlFor={`${uid}-ex-encias`}>Encías</FieldLabel>
-                        <Input
-                          id={`${uid}-ex-encias`}
-                          value={examination?.intraoral.encias ?? ""}
-                          disabled={locked}
-                          onChange={(e) => editExamination("intraoral", "encias", e.target.value)}
-                        />
-                      </Field>
-                      <Field>
-                        <FieldLabel htmlFor={`${uid}-ex-lengua`}>Lengua</FieldLabel>
-                        <Input
-                          id={`${uid}-ex-lengua`}
-                          value={examination?.intraoral.lengua ?? ""}
-                          disabled={locked}
-                          onChange={(e) => editExamination("intraoral", "lengua", e.target.value)}
-                        />
-                      </Field>
-                      <Field>
-                        <FieldLabel htmlFor={`${uid}-ex-paladar`}>Paladar</FieldLabel>
-                        <Input
-                          id={`${uid}-ex-paladar`}
-                          value={examination?.intraoral.paladar ?? ""}
-                          disabled={locked}
-                          onChange={(e) => editExamination("intraoral", "paladar", e.target.value)}
-                        />
-                      </Field>
-                      <Field>
-                        <FieldLabel htmlFor={`${uid}-ex-piso`}>Piso de boca</FieldLabel>
-                        <Input
-                          id={`${uid}-ex-piso`}
-                          value={examination?.intraoral.pisoBoca ?? ""}
-                          disabled={locked}
-                          onChange={(e) => editExamination("intraoral", "pisoBoca", e.target.value)}
-                        />
-                      </Field>
-                      <Field>
-                        <FieldLabel htmlFor={`${uid}-ex-carrillos`}>Carrillos</FieldLabel>
-                        <Input
-                          id={`${uid}-ex-carrillos`}
-                          value={examination?.intraoral.carrillos ?? ""}
-                          disabled={locked}
-                          onChange={(e) =>
-                            editExamination("intraoral", "carrillos", e.target.value)
-                          }
-                        />
-                      </Field>
-                      <Field>
-                        <FieldLabel htmlFor={`${uid}-ex-oro`}>Orofaringe</FieldLabel>
-                        <Input
-                          id={`${uid}-ex-oro`}
-                          value={examination?.intraoral.orofaringe ?? ""}
-                          disabled={locked}
-                          onChange={(e) =>
-                            editExamination("intraoral", "orofaringe", e.target.value)
-                          }
-                        />
-                      </Field>
-                    </div>
-                  </CollapsibleContent>
-                </div>
-              </Collapsible>
-              <ImagenesTab
-                patientId={patientId}
-                encounterId={encounterId}
-                beforeWrite={flush}
-                onPendingChange={handlePendingChange}
-                disabled={locked}
-                readOnly={!canWrite}
-                onUploaded={handleChildChanged}
-              />
-            </TabsContent>
-            <TabsContent value="plan" className="flex flex-col gap-4">
-              <EncounterPlanPanel
-                patientId={patientId}
-                encounterId={encounterId}
-                disabled={locked}
-                beforeWrite={flush}
-                onChanged={handleChildChanged}
-                onPendingChange={handlePendingChange}
-              />
-            </TabsContent>
-            <TabsContent value="realizado" className="flex flex-col gap-4">
-              <EncounterProcedures
-                patientId={patientId}
-                detail={detail}
-                disabled={locked}
-                beforeWrite={flush}
-                onChanged={handleChildChanged}
-                onPendingChange={handlePendingChange}
-              />
-            </TabsContent>
-            <TabsContent value="evolucion" className="flex flex-col gap-4">
-              <div className="flex flex-col gap-6 rounded-md bg-card p-6">
-                <div className="flex flex-col gap-1.5">
-                  <div className="font-heading text-base font-medium">Evolución e indicaciones</div>
-                </div>
-                <div className="flex flex-col gap-3">
-                  <Field>
-                    <FieldLabel htmlFor={`${uid}-evolution`}>
-                      Evolución (máx. {MAX_EVOLUTION})
-                    </FieldLabel>
-                    <Textarea
-                      id={`${uid}-evolution`}
-                      rows={3}
-                      value={evolution}
-                      disabled={locked}
-                      maxLength={MAX_EVOLUTION}
-                      placeholder="Evolución clínica…"
-                      onChange={(event) => editEvolution(event.target.value)}
-                    />
-                  </Field>
-                  <Field>
-                    <FieldLabel htmlFor={`${uid}-indications`}>
-                      Indicaciones (máx. {MAX_INDICATIONS})
-                    </FieldLabel>
-                    <Textarea
-                      id={`${uid}-indications`}
-                      rows={2}
-                      value={indications}
-                      disabled={locked}
-                      maxLength={MAX_INDICATIONS}
-                      placeholder="Indicaciones para el paciente…"
-                      onChange={(event) => editIndications(event.target.value)}
-                    />
-                  </Field>
-                  <Field>
-                    <FieldLabel htmlFor={`${uid}-next-step`}>
-                      Paso siguiente (máx. {MAX_NEXT_STEP})
-                    </FieldLabel>
-                    <Textarea
-                      id={`${uid}-next-step`}
-                      rows={2}
-                      value={nextStep}
-                      disabled={locked}
-                      maxLength={MAX_NEXT_STEP}
-                      placeholder="Paso siguiente del tratamiento…"
-                      onChange={(event) => editNextStep(event.target.value)}
-                    />
-                  </Field>
-                  <div className="flex flex-wrap gap-3">
-                    <Field className="min-w-40 flex-1">
-                      <FieldLabel htmlFor={`${uid}-appt-date`}>
-                        Fecha de revisión sugerida
-                      </FieldLabel>
-                      <Input
-                        id={`${uid}-appt-date`}
-                        type="date"
-                        value={apptDate}
-                        disabled={locked}
-                        onChange={(event) => editApptDate(event.target.value)}
-                      />
-                    </Field>
-                    <Field className="min-w-40 flex-1">
-                      <FieldLabel htmlFor={`${uid}-appt-time`}>
-                        Hora de revisión sugerida
-                      </FieldLabel>
-                      <Input
-                        id={`${uid}-appt-time`}
-                        type="time"
-                        value={apptTime}
-                        disabled={locked}
-                        onChange={(event) => editApptTime(event.target.value)}
-                      />
-                    </Field>
-                  </div>
-                  {apptError ? (
-                    <p role="alert" className="text-sm text-destructive">
-                      {apptError}
-                    </p>
-                  ) : null}
-                  <p className="text-xs text-muted-foreground">
-                    Seguimiento recomendado; no reserva una cita. Guarda fecha y hora juntas o
-                    limpia ambas.
-                  </p>
-                </div>
-              </div>
-              {detail.addenda.length > 0 ? (
-                <div className="flex flex-col gap-6 rounded-md bg-card p-6">
-                  <div className="flex flex-col gap-1.5">
-                    <div className="font-heading text-base font-medium">Adendas</div>
-                  </div>
-                  <div className="flex flex-col gap-2">
-                    {detail.addenda.map((note) => (
-                      <p key={note.id} className="whitespace-pre-wrap text-sm">
-                        {note.note}
-                      </p>
-                    ))}
-                  </div>
-                </div>
-              ) : null}
-            </TabsContent>
-          </Tabs>
-        </div>
-      </div>
-
-      <div className="flex flex-wrap items-center justify-between gap-2 border-t pt-4">
-        <p role="status" aria-live="polite" className="text-sm text-muted-foreground">
-          Borrador: {SAVE_LABEL[saveState]}
-          {childCount > 0 ? " · esperando registros vinculados…" : ""}
-        </p>
-        <ButtonGroup aria-label="Acciones de la atención">
-          <Button
-            type="button"
-            variant="outline"
-            disabled={locked || explicitSaving}
-            onClick={() => void handleSaveDraft()}
-          >
-            {explicitSaving ? "Guardando…" : "Guardar borrador"}
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            disabled={locked || explicitSaving}
-            onClick={() => void handleBack()}
-          >
-            {backing ? "Guardando…" : "Volver"}
-          </Button>
-          <Button
-            type="button"
-            disabled={locked || explicitSaving || backing}
-            onClick={() => setConfirmOpen(true)}
-          >
-            Finalizar atención
-          </Button>
-        </ButtonGroup>
-      </div>
-      <div className="flex flex-col gap-6 rounded-md bg-card p-6">
-        <div className="flex flex-col gap-1.5">
-          <div className="font-heading text-base font-medium">Revisión para el cierre</div>
-        </div>
-        <div className="flex flex-col gap-2 text-sm">
-          <p>
-            {detail.procedures.length} procedimiento(s) · {detail.notes.length} diagnóstico(s) ·{" "}
-            {detail.odontogramEntries.length} hallazgo(s) de odontograma · {detail.documents.length}{" "}
-            documento(s) ·{" "}
-            {
-              detail.plannedItems.filter(
-                (item) => item.status === "pendiente" || item.status === "programado",
-              ).length
-            }{" "}
-            tratamiento(s) vinculado(s) pendiente(s)
-          </p>
-          {!reason.trim() && (
-            <p role="alert" className="text-destructive">
-              Falta el motivo de la atención.
+          <div className="flex flex-col gap-2 text-sm">
+            <p>
+              {detail.procedures.length} procedimiento(s) · {detail.notes.length} diagnóstico(s) ·{" "}
+              {detail.odontogramEntries.length} hallazgo(s) de odontograma ·{" "}
+              {detail.documents.length} documento(s) · {pendingTreatments} tratamiento(s) por
+              ejecutar
             </p>
-          )}
-          {!evolution.trim() &&
-            detail.procedures.length === 0 &&
-            detail.notes.length === 0 &&
-            detail.odontogramEntries.length === 0 && (
-              <p role="alert" className="text-destructive">
-                Para cerrar registra evolución, un procedimiento, un diagnóstico o un hallazgo de
-                odontograma.
+            {accountQuery.isSuccess ? (
+              <p className="font-medium">
+                {chargeableText
+                  ? `Cargos nuevos al finalizar: ${chargeableText}. El cierre vuelve a comprobar lo ya cobrado.`
+                  : "Sin cargos nuevos: actos sin costo o tratamientos ya cargados."}
+              </p>
+            ) : (
+              <p className="text-muted-foreground">
+                {accountQuery.isError
+                  ? "No se pudo consultar la cuenta para estimar los cargos."
+                  : "Consultando cargos existentes…"}
               </p>
             )}
-          <p className="text-xs text-muted-foreground">
-            El cierre deja la atención inmutable y nunca acepta presupuestos automáticamente: los
-            vinculados pendientes siguen su flujo en el presupuesto.
-          </p>
-        </div>
-      </div>
+            {!reason.trim() && (
+              <p role="alert" className="text-destructive">
+                Falta el motivo de la atención.
+              </p>
+            )}
+            <p className="text-xs text-muted-foreground">
+              Una consulta sin actos se cierra igual: documentarla no obliga a registrar
+              procedimientos ni genera cargos. Los tratamientos vinculados pendientes siguen su
+              flujo en el presupuesto.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center justify-between gap-2 border-t pt-4">
+            <p role="status" aria-live="polite" className="text-sm text-muted-foreground">
+              Borrador: {SAVE_LABEL[saveState]}
+              {childCount > 0 ? " · esperando registros vinculados…" : ""}
+            </p>
+            <ButtonGroup aria-label="Acciones de la atención">
+              <Button
+                type="button"
+                variant="outline"
+                disabled={locked || explicitSaving}
+                onClick={() => void handleSaveDraft()}
+              >
+                {explicitSaving ? "Guardando…" : "Guardar borrador"}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={locked || explicitSaving}
+                onClick={() => void handleBack()}
+              >
+                {backing ? "Guardando…" : "Volver"}
+              </Button>
+              <Button
+                type="button"
+                disabled={locked || explicitSaving || backing}
+                onClick={() => setConfirmOpen(true)}
+              >
+                Finalizar atención
+              </Button>
+            </ButtonGroup>
+          </div>
+        </section>
+      </MasterDetail>
+
+      {mode === "drawer" ? sectionDetail("drawer") : null}
 
       <ConfirmDialog
         open={confirmOpen}
         title="Finalizar atención"
-        description="La atención quedará inmutable y ya no se podrá editar el borrador. Después solo se podrán agregar adendas. Esta acción no se puede deshacer."
+        description="La atención quedará inmutable: solo se podrán agregar adendas. Los actos con tarifa generan sus cargos automáticamente (sin duplicar tratamientos ya cargados). Esta acción no se puede deshacer."
         confirmLabel="Finalizar atención"
         variant="default"
         pending={finalizing}
