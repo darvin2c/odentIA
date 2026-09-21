@@ -314,7 +314,11 @@ function TarifarioPage() {
 
   return (
     <div className="flex flex-col gap-2">
-      <MasterDetail panelSize="lg" panel={mode === "panel" && editorVisible ? editor : null}>
+      <MasterDetail
+        listScroll="page"
+        panelSize="lg"
+        panel={mode === "panel" && editorVisible ? editor : null}
+      >
         <PageHeader
           title="Tarifario de la clínica"
           subtitle={`${org.name} · prestaciones de la clínica y su tarifa`}
