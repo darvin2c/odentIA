@@ -9,7 +9,7 @@
     "build": "tsc -p tsconfig.json --noEmit",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
-    "storybook": "storybook dev -p 6006 --no-open",
+    "storybook": "storybook dev -p 6007 --no-open",
     "build-storybook": "storybook build"
   },
   "dependencies": {
