@@ -10,7 +10,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@odentia/ui"
-import { fieldErrorMessages, isValidE164 } from "@odentia/ui-patterns"
+import { isValidE164 } from "@odentia/ui-patterns"
 import { type InputHTMLAttributes, useId } from "react"
 
 /**
@@ -220,54 +220,3 @@ export function SectionCard({ title, children }: { title: string; children: Reac
   )
 }
 
-/** Revisión del alta con TODOS los campos, incluidos educación, procedencia y referencia. */
-export function ReviewList({
-  values,
-  branchName,
-}: {
-  values: DemographicsValues
-  branchName?: string
-}) {
-  const rows: Array<[string, string]> = [
-    ["Nombre", values.displayName.trim() || "—"],
-    ["Documento", [values.docType, values.docNumber.trim()].filter(Boolean).join(" ") || "—"],
-    ["Nacimiento", values.birthDate || "—"],
-    ["Sexo", values.sex === "M" ? "Masculino" : values.sex === "F" ? "Femenino" : "—"],
-    ["Teléfono", values.phone.trim() || "—"],
-    ["Correo", values.email.trim() || "—"],
-    ["Estado civil", values.maritalStatus.trim() || "—"],
-    ["Educación", values.educationLevel.trim() || "—"],
-    ["Ocupación", values.occupation.trim() || "—"],
-    ["Procedencia", values.origin.trim() || "—"],
-    ["Dirección", values.address.trim() || "—"],
-    [
-      "Seguro",
-      [values.insuranceType, values.insuranceDetail.trim()].filter(Boolean).join(" · ") || "—",
-    ],
-    [
-      "Contacto de emergencia",
-      [values.emergencyContactName.trim(), values.emergencyContactPhone.trim()]
-        .filter(Boolean)
-        .join(" · ") || "—",
-    ],
-    ["Referencia", values.referralSource.trim() || "—"],
-    ["Sucursal", branchName ?? (values.registeredBranchId ? values.registeredBranchId : "—")],
-  ]
-  return (
-    <dl className="grid min-w-0 grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-2">
-      {rows.map(([label, value]) => (
-        <div key={label} className="min-w-0">
-          <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-            {label}
-          </dt>
-          <dd className="break-words text-sm">{value}</dd>
-        </div>
-      ))}
-    </dl>
-  )
-}
-
-/** Mensajes de validación de TanStack Form a texto (para FieldError con fallback). */
-export function tanstackFieldErrors(metaErrors: unknown): string[] {
-  return fieldErrorMessages(metaErrors)
-}

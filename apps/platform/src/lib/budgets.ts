@@ -78,8 +78,6 @@ export interface BudgetLine {
   itemStatus: string
 }
 
-/** Ítem del plan con decisión derivada de su línea vigente (tipos de Main). */
-export type BudgetPlanItem = PlanItem
 
 export interface BudgetWithTotals extends Budget {
   items: BudgetLine[]
@@ -87,29 +85,7 @@ export interface BudgetWithTotals extends Budget {
   acceptedCents: number | null
 }
 
-/** Parche de un ítem pendiente (oferta, sitio, detalle, diagnóstico) con atención borrador como contexto. */
-export function patchPlanItemApi(
-  patientId: string,
-  itemId: string,
-  body: {
-    serviceId?: string
-    detail?: string | null
-    diagnosisCode?: string | null
-    toothNumber?: number | null
-    surfaces?: string[] | null
-    quadrant?: number | null
-    arch?: string | null
-    encounterId: string
-  },
-): Promise<{ data: BudgetPlanItem }> {
-  return apiFetch<{ data: BudgetPlanItem }>(`/api/patients/${patientId}/plan/items/${itemId}`, {
-    method: "PATCH",
-    body: JSON.stringify(body),
-  })
-}
 
-export const BUDGET_CURRENCIES = ["PEN", "USD", "EUR"] as const
-export type BudgetCurrency = (typeof BUDGET_CURRENCIES)[number]
 
 /** Etiqueta en español del estado del presupuesto. */
 export function budgetStatusLabel(status: string): string {
@@ -297,24 +273,4 @@ export function createTreatmentPlanApi(
   })
 }
 
-/** Indica un tratamiento en el plan desde la atención borrador (precio desde la oferta, nunca manual). */
-export function addPlanItemToBudget(
-  patientId: string,
-  body: Record<string, unknown>,
-): Promise<{ data: BudgetPlanItem }> {
-  return apiFetch<{ data: BudgetPlanItem }>(`/api/patients/${patientId}/plan/items`, {
-    method: "POST",
-    body: JSON.stringify(body),
-  })
-}
 
-/** Indica un tratamiento por pieza (ámbito tooth) en una sola transacción. */
-export function addPlanItemsBatchToBudget(
-  patientId: string,
-  body: Record<string, unknown>,
-): Promise<{ data: BudgetPlanItem[] }> {
-  return apiFetch<{ data: BudgetPlanItem[] }>(`/api/patients/${patientId}/plan/items/batch`, {
-    method: "POST",
-    body: JSON.stringify(body),
-  })
-}

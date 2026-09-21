@@ -1,6 +1,6 @@
 /** Presentación del perfil/listado de pacientes (filtros, orden y anamnesis legible). */
 import type { FilterDef, SortOption } from "@odentia/ui-patterns"
-import type { AnamnesisAnswers, Patient } from "./patients"
+import type { Patient } from "./patients"
 
 /** Fila del listado server: Patient + teléfono informativo. */
 export interface PatientListRow extends Patient {
@@ -136,63 +136,3 @@ function recordOf(value: unknown): Record<string, unknown> | null {
   return value as Record<string, unknown>
 }
 
-/**
- * Anamnesis en lenguaje del propio formulario: mismas preguntas y etiquetas,
- * booleanos como Sí/No. Solo claves del formulario; el resto no se muestra.
- */
-export function summarizeAnamnesis(
-  answers: AnamnesisAnswers | null | undefined,
-): Array<{ label: string; value: string }> {
-  const rec = recordOf(answers)
-  if (!rec) return []
-  const rows: Array<{ label: string; value: string }> = []
-  const push = (label: string, value: unknown) => {
-    const text = scalarText(value)
-    if (text !== null) rows.push({ label, value: text })
-  }
-  const pushEnum = (label: string, value: unknown) => {
-    if (typeof value !== "string" || value.trim() === "") return
-    rows.push({ label, value: ENUM_LABELS[value] ?? value })
-  }
-  const pushGroup = (
-    groupLabel: string,
-    group: unknown,
-    labels: Record<string, string>,
-    enums = false,
-  ) => {
-    const fields = recordOf(group)
-    if (!fields) return
-    for (const [key, label] of Object.entries(labels)) {
-      if (!(key in fields)) continue
-      if (enums && typeof fields[key] === "string")
-        pushEnum(`${groupLabel} · ${label}`, fields[key])
-      else push(`${groupLabel} · ${label}`, fields[key])
-    }
-  }
-  push(TOP_LABELS.motivoConsulta, rec.motivoConsulta ?? rec.motivo)
-  push(TOP_LABELS.tiempoEnfermedad, rec.tiempoEnfermedad)
-  pushGroup("Antecedentes personales", rec.antecedentesPersonales, PERSONALES_LABELS)
-  push(TOP_LABELS.antecedentesFamiliares, rec.antecedentesFamiliares)
-  pushGroup("Antecedentes odontológicos", rec.antecedentesOdontologicos, {
-    ultimaVisita: ODONTO_LABELS.ultimaVisita,
-    cepilladosAlDia: ODONTO_LABELS.cepilladosAlDia,
-    hiloDental: ODONTO_LABELS.hiloDental,
-    bruxismo: ODONTO_LABELS.bruxismo,
-    habitos: ODONTO_LABELS.habitos,
-  })
-  const odonto = recordOf(rec.antecedentesOdontologicos)
-  if (odonto) {
-    pushEnum("Antecedentes odontológicos · Experiencia previa", odonto.experienciaPrevia)
-    pushEnum("Antecedentes odontológicos · Ansiedad dental", odonto.ansiedadDental)
-  }
-  const examen = recordOf(rec.examenClinico)
-  if (examen) {
-    pushGroup("Examen extraoral", examen.extraoral, EXTRAORAL_LABELS)
-    pushEnum("Examen clínico · Higiene oral", examen.higieneOral)
-    pushGroup("Examen intraoral", examen.intraoral, INTRAORAL_LABELS)
-  }
-  push(TOP_LABELS.diagnosticoPresuntivo, rec.diagnosticoPresuntivo)
-  push(TOP_LABELS.diagnosticoCie10, rec.diagnosticoCie10)
-  push(TOP_LABELS.observaciones, rec.observaciones)
-  return rows
-}

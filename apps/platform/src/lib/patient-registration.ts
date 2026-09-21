@@ -1,8 +1,4 @@
-import type {
-  RegistrationAnswers,
-  RegistrationConfig,
-  RegistrationFieldMode,
-} from "@odentia/clinical"
+import type { RegistrationAnswers, RegistrationConfig } from "@odentia/clinical"
 import { API_URL } from "./auth-client"
 import { ApiError, apiFetch } from "./api"
 
@@ -37,8 +33,6 @@ export interface PublicSubmitInput {
   entryPoint: "qr" | "public_link"
   answers: RegistrationAnswers
 }
-
-export type RegistrationFieldModeOption = RegistrationFieldMode
 
 async function throwPublicError(response: Response): Promise<never> {
   let shape: { code?: string; message?: string; request_id?: string } = {}

@@ -763,25 +763,3 @@ export function fetchAnamnesisHistory(patientId: string): Promise<{
   }>(`/api/patients/${patientId}/anamnesis/history`)
 }
 
-export function fetchAnamnesisVersion(
-  patientId: string,
-  versionId: string,
-): Promise<{
-  data: {
-    id: string
-    version: number
-    answers: AnamnesisAnswers
-    createdAt: string
-    createdBy: string | null
-  }
-}> {
-  return apiFetch<{
-    data: {
-      id: string
-      version: number
-      answers: AnamnesisAnswers
-      createdAt: string
-      createdBy: string | null
-    }
-  }>(`/api/patients/${patientId}/anamnesis/${versionId}`)
-}

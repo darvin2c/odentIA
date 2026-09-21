@@ -33,13 +33,6 @@ export interface DocumentLinkValue {
   encounterProcedureId: string
 }
 
-export const EMPTY_DOCUMENT_LINK: DocumentLinkValue = {
-  budgetId: "",
-  followUpId: "",
-  prescriptionId: "",
-  paymentId: "",
-  encounterProcedureId: "",
-}
 
 export function DocumentLinkSelects({
   patientId,

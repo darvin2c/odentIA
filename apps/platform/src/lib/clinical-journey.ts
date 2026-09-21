@@ -690,16 +690,6 @@ export function createOptionGroupApi(
   )
 }
 
-/** Importes aplicados de un pago a los cargos del tratamiento consultado. */
-export function appliedToCharges(
-  journey: Pick<TreatmentJourney, "charges" | "applications">,
-  paymentId: string,
-): number {
-  const chargeIds = new Set(journey.charges.map((charge) => charge.id))
-  return journey.applications
-    .filter((a) => a.paymentId === paymentId && !a.voidedAt && chargeIds.has(a.chargeId))
-    .reduce((sum, a) => sum + a.amountCents, 0)
-}
 
 /** Saldo del tratamiento por moneda; nunca se suman monedas distintas. */
 export function journeyBalances(
