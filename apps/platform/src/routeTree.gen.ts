@@ -24,6 +24,8 @@ import { Route as OrgContactsIndexRouteImport } from './routes/_org/contacts.ind
 import { Route as OrgContactsContactIdRouteImport } from './routes/_org/contacts.$contactId'
 import { Route as OrgPatientsIndexRouteImport } from './routes/_org/patients.index'
 import { Route as OrgPatientsPatientIdRouteImport } from './routes/_org/patients.$patientId'
+import { Route as OrgServicesIndexRouteImport } from './routes/_org/services.index'
+import { Route as OrgServicesBibliotecaRouteImport } from './routes/_org/services.biblioteca'
 import { Route as OrgSettingsIndexRouteImport } from './routes/_org/settings.index'
 import { Route as OrgSettingsAgentRouteImport } from './routes/_org/settings.agent'
 import { Route as OrgSettingsChannelsRouteImport } from './routes/_org/settings.channels'
@@ -106,6 +108,16 @@ const OrgPatientsPatientIdRoute = OrgPatientsPatientIdRouteImport.update({
   path: '/patients/$patientId',
   getParentRoute: () => OrgRoute,
 } as any)
+const OrgServicesIndexRoute = OrgServicesIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => OrgServicesRoute,
+} as any)
+const OrgServicesBibliotecaRoute = OrgServicesBibliotecaRouteImport.update({
+  id: '/biblioteca',
+  path: '/biblioteca',
+  getParentRoute: () => OrgServicesRoute,
+} as any)
 const OrgSettingsIndexRoute = OrgSettingsIndexRouteImport.update({
   id: '/',
   path: '/',
@@ -152,11 +164,12 @@ export interface FileRoutesByFullPath {
   '/inbox': typeof OrgInboxRoute
   '/members': typeof OrgMembersRoute
   '/pipeline': typeof OrgPipelineRoute
-  '/services': typeof OrgServicesRoute
+  '/services': typeof OrgServicesRouteWithChildren
   '/settings': typeof OrgSettingsRouteWithChildren
   '/tasks': typeof OrgTasksRoute
   '/contacts/$contactId': typeof OrgContactsContactIdRoute
   '/patients/$patientId': typeof OrgPatientsPatientIdRouteWithChildren
+  '/services/biblioteca': typeof OrgServicesBibliotecaRoute
   '/settings/agent': typeof OrgSettingsAgentRoute
   '/settings/channels': typeof OrgSettingsChannelsRoute
   '/settings/fields': typeof OrgSettingsFieldsRoute
@@ -164,6 +177,7 @@ export interface FileRoutesByFullPath {
   '/settings/pipelines': typeof OrgSettingsPipelinesRoute
   '/contacts/': typeof OrgContactsIndexRoute
   '/patients/': typeof OrgPatientsIndexRoute
+  '/services/': typeof OrgServicesIndexRoute
   '/settings/': typeof OrgSettingsIndexRoute
   '/patients/$patientId/encounters/$encounterId': typeof OrgPatientsPatientIdEncountersEncounterIdRoute
 }
@@ -175,10 +189,10 @@ export interface FileRoutesByTo {
   '/inbox': typeof OrgInboxRoute
   '/members': typeof OrgMembersRoute
   '/pipeline': typeof OrgPipelineRoute
-  '/services': typeof OrgServicesRoute
   '/tasks': typeof OrgTasksRoute
   '/contacts/$contactId': typeof OrgContactsContactIdRoute
   '/patients/$patientId': typeof OrgPatientsPatientIdRouteWithChildren
+  '/services/biblioteca': typeof OrgServicesBibliotecaRoute
   '/settings/agent': typeof OrgSettingsAgentRoute
   '/settings/channels': typeof OrgSettingsChannelsRoute
   '/settings/fields': typeof OrgSettingsFieldsRoute
@@ -186,6 +200,7 @@ export interface FileRoutesByTo {
   '/settings/pipelines': typeof OrgSettingsPipelinesRoute
   '/contacts': typeof OrgContactsIndexRoute
   '/patients': typeof OrgPatientsIndexRoute
+  '/services': typeof OrgServicesIndexRoute
   '/settings': typeof OrgSettingsIndexRoute
   '/patients/$patientId/encounters/$encounterId': typeof OrgPatientsPatientIdEncountersEncounterIdRoute
 }
@@ -199,11 +214,12 @@ export interface FileRoutesById {
   '/_org/inbox': typeof OrgInboxRoute
   '/_org/members': typeof OrgMembersRoute
   '/_org/pipeline': typeof OrgPipelineRoute
-  '/_org/services': typeof OrgServicesRoute
+  '/_org/services': typeof OrgServicesRouteWithChildren
   '/_org/settings': typeof OrgSettingsRouteWithChildren
   '/_org/tasks': typeof OrgTasksRoute
   '/_org/contacts/$contactId': typeof OrgContactsContactIdRoute
   '/_org/patients/$patientId': typeof OrgPatientsPatientIdRouteWithChildren
+  '/_org/services/biblioteca': typeof OrgServicesBibliotecaRoute
   '/_org/settings/agent': typeof OrgSettingsAgentRoute
   '/_org/settings/channels': typeof OrgSettingsChannelsRoute
   '/_org/settings/fields': typeof OrgSettingsFieldsRoute
@@ -211,6 +227,7 @@ export interface FileRoutesById {
   '/_org/settings/pipelines': typeof OrgSettingsPipelinesRoute
   '/_org/contacts/': typeof OrgContactsIndexRoute
   '/_org/patients/': typeof OrgPatientsIndexRoute
+  '/_org/services/': typeof OrgServicesIndexRoute
   '/_org/settings/': typeof OrgSettingsIndexRoute
   '/_org/patients/$patientId/encounters/$encounterId': typeof OrgPatientsPatientIdEncountersEncounterIdRoute
 }
@@ -229,6 +246,7 @@ export interface FileRouteTypes {
     | '/tasks'
     | '/contacts/$contactId'
     | '/patients/$patientId'
+    | '/services/biblioteca'
     | '/settings/agent'
     | '/settings/channels'
     | '/settings/fields'
@@ -236,6 +254,7 @@ export interface FileRouteTypes {
     | '/settings/pipelines'
     | '/contacts/'
     | '/patients/'
+    | '/services/'
     | '/settings/'
     | '/patients/$patientId/encounters/$encounterId'
   fileRoutesByTo: FileRoutesByTo
@@ -247,10 +266,10 @@ export interface FileRouteTypes {
     | '/inbox'
     | '/members'
     | '/pipeline'
-    | '/services'
     | '/tasks'
     | '/contacts/$contactId'
     | '/patients/$patientId'
+    | '/services/biblioteca'
     | '/settings/agent'
     | '/settings/channels'
     | '/settings/fields'
@@ -258,6 +277,7 @@ export interface FileRouteTypes {
     | '/settings/pipelines'
     | '/contacts'
     | '/patients'
+    | '/services'
     | '/settings'
     | '/patients/$patientId/encounters/$encounterId'
   id:
@@ -275,6 +295,7 @@ export interface FileRouteTypes {
     | '/_org/tasks'
     | '/_org/contacts/$contactId'
     | '/_org/patients/$patientId'
+    | '/_org/services/biblioteca'
     | '/_org/settings/agent'
     | '/_org/settings/channels'
     | '/_org/settings/fields'
@@ -282,6 +303,7 @@ export interface FileRouteTypes {
     | '/_org/settings/pipelines'
     | '/_org/contacts/'
     | '/_org/patients/'
+    | '/_org/services/'
     | '/_org/settings/'
     | '/_org/patients/$patientId/encounters/$encounterId'
   fileRoutesById: FileRoutesById
@@ -399,6 +421,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof OrgPatientsPatientIdRouteImport
       parentRoute: typeof OrgRoute
     }
+    '/_org/services/': {
+      id: '/_org/services/'
+      path: '/'
+      fullPath: '/services/'
+      preLoaderRoute: typeof OrgServicesIndexRouteImport
+      parentRoute: typeof OrgServicesRoute
+    }
+    '/_org/services/biblioteca': {
+      id: '/_org/services/biblioteca'
+      path: '/biblioteca'
+      fullPath: '/services/biblioteca'
+      preLoaderRoute: typeof OrgServicesBibliotecaRouteImport
+      parentRoute: typeof OrgServicesRoute
+    }
     '/_org/settings/': {
       id: '/_org/settings/'
       path: '/'
@@ -451,6 +487,20 @@ declare module '@tanstack/react-router' {
   }
 }
 
+interface OrgServicesRouteChildren {
+  OrgServicesBibliotecaRoute: typeof OrgServicesBibliotecaRoute
+  OrgServicesIndexRoute: typeof OrgServicesIndexRoute
+}
+
+const OrgServicesRouteChildren: OrgServicesRouteChildren = {
+  OrgServicesBibliotecaRoute: OrgServicesBibliotecaRoute,
+  OrgServicesIndexRoute: OrgServicesIndexRoute,
+}
+
+const OrgServicesRouteWithChildren = OrgServicesRoute._addFileChildren(
+  OrgServicesRouteChildren,
+)
+
 interface OrgSettingsRouteChildren {
   OrgSettingsAgentRoute: typeof OrgSettingsAgentRoute
   OrgSettingsChannelsRoute: typeof OrgSettingsChannelsRoute
@@ -491,7 +541,7 @@ interface OrgRouteChildren {
   OrgInboxRoute: typeof OrgInboxRoute
   OrgMembersRoute: typeof OrgMembersRoute
   OrgPipelineRoute: typeof OrgPipelineRoute
-  OrgServicesRoute: typeof OrgServicesRoute
+  OrgServicesRoute: typeof OrgServicesRouteWithChildren
   OrgSettingsRoute: typeof OrgSettingsRouteWithChildren
   OrgTasksRoute: typeof OrgTasksRoute
   OrgContactsContactIdRoute: typeof OrgContactsContactIdRoute
@@ -506,7 +556,7 @@ const OrgRouteChildren: OrgRouteChildren = {
   OrgInboxRoute: OrgInboxRoute,
   OrgMembersRoute: OrgMembersRoute,
   OrgPipelineRoute: OrgPipelineRoute,
-  OrgServicesRoute: OrgServicesRoute,
+  OrgServicesRoute: OrgServicesRouteWithChildren,
   OrgSettingsRoute: OrgSettingsRouteWithChildren,
   OrgTasksRoute: OrgTasksRoute,
   OrgContactsContactIdRoute: OrgContactsContactIdRoute,

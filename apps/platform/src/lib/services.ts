@@ -9,8 +9,8 @@ export interface ServiceCatalogItem {
   name: string
   specialty: string | null
   scope: "general" | "tooth" | "surfaces" | "quadrant" | "arch" | null
-  /** null = Sin tarifa (no seleccionable para nueva indicación). */
-  priceCents: number | null
+  /** Toda prestación tiene tarifa explícita; 0 = incluida sin costo. */
+  priceCents: number
   currency: string
   durationMin: number | null
   isActive: boolean
@@ -82,6 +82,15 @@ export const TREATMENT_SCOPE_LABELS: Record<string, string> = {
   arch: "Por arcada",
 }
 
+/** Opciones del filtro de especialidad de tarifario y biblioteca. */
+export const SPECIALTY_FILTER_OPTIONS = [
+  { value: "todas", label: "Todas" },
+  ...TREATMENT_SPECIALTIES.map((specialty) => ({
+    value: specialty,
+    label: TREATMENT_SPECIALTY_LABELS[specialty] ?? specialty,
+  })),
+]
+
 /** Máximo entero admitido por la columna PG integer. */
 export const MAX_PRICE_CENTS = 2147483647
 
@@ -121,7 +130,7 @@ export function formatPriceInput(cents: number): string {
 export interface ServicesQuery {
   q?: string
   specialty?: string
-  state?: "active" | "inactive" | "unpriced" | "legacy"
+  state?: "active" | "inactive" | "legacy"
   cursor?: string
   limit?: number
 }
@@ -181,7 +190,8 @@ export interface CreateServiceBody {
   specialty?: string | null
   scope?: string | null
   code?: string | null
-  priceCents?: number | null
+  /** Obligatoria: 0 si la prestación va incluida sin costo. */
+  priceCents: number
   currency?: string | null
   durationMin?: number | null
   isActive?: boolean
@@ -200,7 +210,7 @@ export interface UpdateServiceBody {
   specialty?: string
   scope?: string
   code?: string | null
-  priceCents?: number | null
+  priceCents?: number
   currency?: string | null
   durationMin?: number | null
   isActive?: boolean
