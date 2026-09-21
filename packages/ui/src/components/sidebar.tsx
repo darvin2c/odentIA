@@ -51,6 +51,15 @@ function useSidebar() {
   return context
 }
 
+/**
+ * Igual que `useSidebar` pero devuelve `null` fuera de un `SidebarProvider`.
+ * Lo consumen composiciones que también viven fuera del shell (auth,
+ * onboarding), donde lanzar rompería la pantalla en vez de omitir el control.
+ */
+function useSidebarOptional(): SidebarContextProps | null {
+  return React.useContext(SidebarContext)
+}
+
 function SidebarProvider({
   defaultOpen = true,
   open: openProp,
@@ -194,8 +203,8 @@ function Sidebar({
           side={side}
         >
           <SheetHeader className="sr-only">
-            <SheetTitle>Sidebar</SheetTitle>
-            <SheetDescription>Displays the mobile sidebar.</SheetDescription>
+            <SheetTitle>Menú de navegación</SheetTitle>
+            <SheetDescription>Menú lateral con las secciones de la aplicación.</SheetDescription>
           </SheetHeader>
           <div className="flex h-full w-full flex-col">{children}</div>
         </SheetContent>
@@ -270,7 +279,7 @@ function SidebarTrigger({
       {...props}
     >
       <RiSideBarLine />
-      <span className="sr-only">Toggle Sidebar</span>
+      <span className="sr-only">Alternar menú lateral</span>
     </Button>
   )
 }
@@ -721,4 +730,5 @@ export {
   SidebarSeparator,
   SidebarTrigger,
   useSidebar,
+  useSidebarOptional,
 }

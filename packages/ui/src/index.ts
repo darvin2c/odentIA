@@ -116,6 +116,7 @@ export {
   SidebarSeparator,
   SidebarTrigger,
   useSidebar,
+  useSidebarOptional,
 } from "./components/sidebar.js";
 export {
   Breadcrumb,
