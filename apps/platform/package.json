@@ -6,12 +6,15 @@
   "imports": {
     "#components/*": "./src/components/*.tsx",
     "#lib/*": "./src/lib/*.ts",
-    "#hooks/*": "./src/hooks/*.ts"
+    "#hooks/*": "./src/hooks/*.ts",
+    "#storybook/api": "./.storybook/mocks/api.ts",
+    "#storybook/crm": "./.storybook/mocks/crm.ts"
   },
   "scripts": {
     "dev": "portless",
     "dev:app": "vite dev",
     "build": "vite build",
+    "storybook": "storybook dev -p 6006 --no-open",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run --passWithNoTests"
   },
@@ -49,10 +52,13 @@
     "zod": "4.6.2"
   },
   "devDependencies": {
+    "@storybook/react": "10.6.0",
+    "@storybook/react-vite": "10.6.0",
     "@types/qrcode": "1.5.6",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.5",
     "@vitejs/plugin-react": "6.1.1",
+    "storybook": "10.6.0",
     "typescript": "7.0.2",
     "undici": "8.10.2",
     "vitest": "^3.2.7"

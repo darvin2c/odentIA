@@ -1,0 +1,4 @@
+@import "@odentia/ui/globals.css";
+@source "../src";
+@source "../../../packages/ui/src";
+@source "../../../packages/ui-patterns/src";
