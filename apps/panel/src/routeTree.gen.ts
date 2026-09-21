@@ -19,11 +19,6 @@ import { Route as VerifyEmailSentRouteImport } from './routes/verify-email-sent'
 import { Route as AppIndexRouteImport } from './routes/_app/index'
 import { Route as AppProfileRouteImport } from './routes/_app/profile'
 import { Route as AcceptInvitationInvitationIdRouteImport } from './routes/accept-invitation/$invitationId'
-import { Route as AppPatientsIndexRouteImport } from './routes/_app/patients/index'
-import { Route as AppPatientsPatientIdIndexRouteImport } from './routes/_app/patients/$patientId/index'
-import { Route as AppPatientsPatientIdBudgetsBudgetIdRouteImport } from './routes/_app/patients/$patientId/budgets/$budgetId'
-import { Route as AppPatientsPatientIdEncountersEncounterIdRouteImport } from './routes/_app/patients/$patientId/encounters/$encounterId'
-import { Route as AppPatientsPatientIdTreatmentsItemIdRouteImport } from './routes/_app/patients/$patientId/treatments/$itemId'
 
 const AppRoute = AppRouteImport.update({
   id: '/_app',
@@ -75,35 +70,6 @@ const AcceptInvitationInvitationIdRoute =
     path: '/accept-invitation/$invitationId',
     getParentRoute: () => rootRouteImport,
   } as any)
-const AppPatientsIndexRoute = AppPatientsIndexRouteImport.update({
-  id: '/patients/',
-  path: '/patients/',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppPatientsPatientIdIndexRoute =
-  AppPatientsPatientIdIndexRouteImport.update({
-    id: '/patients/$patientId/',
-    path: '/patients/$patientId/',
-    getParentRoute: () => AppRoute,
-  } as any)
-const AppPatientsPatientIdBudgetsBudgetIdRoute =
-  AppPatientsPatientIdBudgetsBudgetIdRouteImport.update({
-    id: '/patients/$patientId/budgets/$budgetId',
-    path: '/patients/$patientId/budgets/$budgetId',
-    getParentRoute: () => AppRoute,
-  } as any)
-const AppPatientsPatientIdEncountersEncounterIdRoute =
-  AppPatientsPatientIdEncountersEncounterIdRouteImport.update({
-    id: '/patients/$patientId/encounters/$encounterId',
-    path: '/patients/$patientId/encounters/$encounterId',
-    getParentRoute: () => AppRoute,
-  } as any)
-const AppPatientsPatientIdTreatmentsItemIdRoute =
-  AppPatientsPatientIdTreatmentsItemIdRouteImport.update({
-    id: '/patients/$patientId/treatments/$itemId',
-    path: '/patients/$patientId/treatments/$itemId',
-    getParentRoute: () => AppRoute,
-  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof AppIndexRoute
@@ -115,11 +81,6 @@ export interface FileRoutesByFullPath {
   '/verify-email-sent': typeof VerifyEmailSentRoute
   '/profile': typeof AppProfileRoute
   '/accept-invitation/$invitationId': typeof AcceptInvitationInvitationIdRoute
-  '/patients/': typeof AppPatientsIndexRoute
-  '/patients/$patientId/': typeof AppPatientsPatientIdIndexRoute
-  '/patients/$patientId/budgets/$budgetId': typeof AppPatientsPatientIdBudgetsBudgetIdRoute
-  '/patients/$patientId/encounters/$encounterId': typeof AppPatientsPatientIdEncountersEncounterIdRoute
-  '/patients/$patientId/treatments/$itemId': typeof AppPatientsPatientIdTreatmentsItemIdRoute
 }
 export interface FileRoutesByTo {
   '/forgot-password': typeof ForgotPasswordRoute
@@ -131,11 +92,6 @@ export interface FileRoutesByTo {
   '/profile': typeof AppProfileRoute
   '/accept-invitation/$invitationId': typeof AcceptInvitationInvitationIdRoute
   '/': typeof AppIndexRoute
-  '/patients': typeof AppPatientsIndexRoute
-  '/patients/$patientId': typeof AppPatientsPatientIdIndexRoute
-  '/patients/$patientId/budgets/$budgetId': typeof AppPatientsPatientIdBudgetsBudgetIdRoute
-  '/patients/$patientId/encounters/$encounterId': typeof AppPatientsPatientIdEncountersEncounterIdRoute
-  '/patients/$patientId/treatments/$itemId': typeof AppPatientsPatientIdTreatmentsItemIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -149,11 +105,6 @@ export interface FileRoutesById {
   '/_app/profile': typeof AppProfileRoute
   '/accept-invitation/$invitationId': typeof AcceptInvitationInvitationIdRoute
   '/_app/': typeof AppIndexRoute
-  '/_app/patients/': typeof AppPatientsIndexRoute
-  '/_app/patients/$patientId/': typeof AppPatientsPatientIdIndexRoute
-  '/_app/patients/$patientId/budgets/$budgetId': typeof AppPatientsPatientIdBudgetsBudgetIdRoute
-  '/_app/patients/$patientId/encounters/$encounterId': typeof AppPatientsPatientIdEncountersEncounterIdRoute
-  '/_app/patients/$patientId/treatments/$itemId': typeof AppPatientsPatientIdTreatmentsItemIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -167,11 +118,6 @@ export interface FileRouteTypes {
     | '/verify-email-sent'
     | '/profile'
     | '/accept-invitation/$invitationId'
-    | '/patients/'
-    | '/patients/$patientId/'
-    | '/patients/$patientId/budgets/$budgetId'
-    | '/patients/$patientId/encounters/$encounterId'
-    | '/patients/$patientId/treatments/$itemId'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/forgot-password'
@@ -183,11 +129,6 @@ export interface FileRouteTypes {
     | '/profile'
     | '/accept-invitation/$invitationId'
     | '/'
-    | '/patients'
-    | '/patients/$patientId'
-    | '/patients/$patientId/budgets/$budgetId'
-    | '/patients/$patientId/encounters/$encounterId'
-    | '/patients/$patientId/treatments/$itemId'
   id:
     | '__root__'
     | '/_app'
@@ -200,11 +141,6 @@ export interface FileRouteTypes {
     | '/_app/profile'
     | '/accept-invitation/$invitationId'
     | '/_app/'
-    | '/_app/patients/'
-    | '/_app/patients/$patientId/'
-    | '/_app/patients/$patientId/budgets/$budgetId'
-    | '/_app/patients/$patientId/encounters/$encounterId'
-    | '/_app/patients/$patientId/treatments/$itemId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -290,65 +226,17 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AcceptInvitationInvitationIdRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/_app/patients/': {
-      id: '/_app/patients/'
-      path: '/patients'
-      fullPath: '/patients/'
-      preLoaderRoute: typeof AppPatientsIndexRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/patients/$patientId/': {
-      id: '/_app/patients/$patientId/'
-      path: '/patients/$patientId'
-      fullPath: '/patients/$patientId/'
-      preLoaderRoute: typeof AppPatientsPatientIdIndexRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/patients/$patientId/budgets/$budgetId': {
-      id: '/_app/patients/$patientId/budgets/$budgetId'
-      path: '/patients/$patientId/budgets/$budgetId'
-      fullPath: '/patients/$patientId/budgets/$budgetId'
-      preLoaderRoute: typeof AppPatientsPatientIdBudgetsBudgetIdRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/patients/$patientId/encounters/$encounterId': {
-      id: '/_app/patients/$patientId/encounters/$encounterId'
-      path: '/patients/$patientId/encounters/$encounterId'
-      fullPath: '/patients/$patientId/encounters/$encounterId'
-      preLoaderRoute: typeof AppPatientsPatientIdEncountersEncounterIdRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/patients/$patientId/treatments/$itemId': {
-      id: '/_app/patients/$patientId/treatments/$itemId'
-      path: '/patients/$patientId/treatments/$itemId'
-      fullPath: '/patients/$patientId/treatments/$itemId'
-      preLoaderRoute: typeof AppPatientsPatientIdTreatmentsItemIdRouteImport
-      parentRoute: typeof AppRoute
-    }
   }
 }
 
 interface AppRouteChildren {
   AppProfileRoute: typeof AppProfileRoute
   AppIndexRoute: typeof AppIndexRoute
-  AppPatientsIndexRoute: typeof AppPatientsIndexRoute
-  AppPatientsPatientIdIndexRoute: typeof AppPatientsPatientIdIndexRoute
-  AppPatientsPatientIdBudgetsBudgetIdRoute: typeof AppPatientsPatientIdBudgetsBudgetIdRoute
-  AppPatientsPatientIdEncountersEncounterIdRoute: typeof AppPatientsPatientIdEncountersEncounterIdRoute
-  AppPatientsPatientIdTreatmentsItemIdRoute: typeof AppPatientsPatientIdTreatmentsItemIdRoute
 }
 
 const AppRouteChildren: AppRouteChildren = {
   AppProfileRoute: AppProfileRoute,
   AppIndexRoute: AppIndexRoute,
-  AppPatientsIndexRoute: AppPatientsIndexRoute,
-  AppPatientsPatientIdIndexRoute: AppPatientsPatientIdIndexRoute,
-  AppPatientsPatientIdBudgetsBudgetIdRoute:
-    AppPatientsPatientIdBudgetsBudgetIdRoute,
-  AppPatientsPatientIdEncountersEncounterIdRoute:
-    AppPatientsPatientIdEncountersEncounterIdRoute,
-  AppPatientsPatientIdTreatmentsItemIdRoute:
-    AppPatientsPatientIdTreatmentsItemIdRoute,
 }
 
 const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)

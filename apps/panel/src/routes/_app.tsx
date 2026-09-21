@@ -16,10 +16,7 @@ export const Route = createFileRoute("/_app")({
   component: AppLayout,
 })
 
-const navItems: AppShellNavEntry[] = [
-  { label: "Organizaciones", to: "/", icon: Building2 },
-  { label: "Pacientes", to: "/patients", icon: UserRound },
-]
+const navItems: AppShellNavEntry[] = [{ label: "Organizaciones", to: "/", icon: Building2 }]
 
 function RouterLink({
   to,
