@@ -1,7 +1,6 @@
 import {
   conditionLabel as clinicalConditionLabel,
   surfaceLabel as clinicalSurfaceLabel,
-  FINDINGS,
   type FindingDetails,
   type FindingInput,
   findingAbbreviation,
@@ -18,23 +17,18 @@ import {
   Field,
   FieldLabel,
   Input,
-  ScrollArea,
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
   Textarea,
 } from "@odentia/ui"
-import { FormDrawer } from "@odentia/ui-patterns"
+import { FormDrawer, FormPanel } from "@odentia/ui-patterns"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { useId, useMemo, useState } from "react"
+import { useEffect, useId, useMemo, useRef, useState } from "react"
 import { ApiError, apiFetch } from "../lib/api"
-import { createTreatmentPlanApi, fetchTreatmentPlans } from "../lib/budgets"
+import { createTreatmentPlanApi, fetchTreatmentPlans, planDecisionLabel } from "../lib/budgets"
 import { timeAgo, useCanWrite } from "../lib/crm"
 import {
   type OdontogramEntry,
@@ -48,11 +42,12 @@ import { formatMoney, type ServiceCatalogItem } from "../lib/services"
 import { Cie10Search } from "./patient/cie10-search"
 import { ServicePicker } from "./patient/service-picker"
 import { ToothSVG } from "./tooth-svg"
+import { FindingPicker } from "./finding-picker"
 
 /** Las URL firmadas expiran: se consideran frescas 10 min y luego se regeneran. */
 const SIGNED_URL_STALE_MS = 10 * 60 * 1000
 
-const OPEN_PLAN_STATUSES: readonly string[] = ["pendiente", "programado"]
+const OPEN_PLAN_STATUSES: readonly string[] = ["pendiente", "programado", "en_curso", "suspendido"]
 
 /** Cabecera compacta: evita un título gigante cuando se seleccionan muchas piezas. */
 const MAX_HEAD_TEETH = 8
@@ -143,6 +138,7 @@ export function ToothDrawer({
   inline = false,
   beforeWrite,
   onPendingChange,
+  onDirtyChange,
 }: {
   patientId: string
   teeth: number[]
@@ -162,6 +158,7 @@ export function ToothDrawer({
   /** Vacía ediciones pendientes del llamador antes de escribir (p. ej. atención en curso). */
   beforeWrite?: () => Promise<void>
   onPendingChange?: (pending: boolean) => void
+  onDirtyChange?: (dirty: boolean) => void
 }): React.JSX.Element {
   const queryClient = useQueryClient()
   const canWrite = useCanWrite()
@@ -177,6 +174,8 @@ export function ToothDrawer({
   )
 
   const [mode, setMode] = useState<FormMode>("diagnosis")
+  const [choosingFinding, setChoosingFinding] = useState(true)
+  const [savedMessage, setSavedMessage] = useState("")
 
   // Borrador del hallazgo: todo arranca vacío, sin valores clínicos inventados.
   const [condition, setCondition] = useState("")
@@ -211,6 +210,9 @@ export function ToothDrawer({
   const [treatCie, setTreatCie] = useState("")
   const [treatPending, setTreatPending] = useState(false)
   const [treatError, setTreatError] = useState<string | null>(null)
+  const [sourceFindingId, setSourceFindingId] = useState("")
+  const sourceFindings =
+    singleTooth == null ? [] : entriesOf(singleTooth).filter((entry) => !entry.voidedAt)
 
   const [voiding, setVoiding] = useState<{ id: string; label: string } | null>(null)
   const [voidReason, setVoidReason] = useState("")
@@ -348,6 +350,7 @@ export function ToothDrawer({
   }
 
   const resetDraft = () => {
+    setFreehand(false)
     setCondition("")
     setVariant("")
     setQuality("")
@@ -367,7 +370,13 @@ export function ToothDrawer({
   }
 
   const selectCondition = (value: string | null | undefined) => {
+    if (value === condition) {
+      setChoosingFinding(false)
+      return
+    }
     setCondition(value ?? "")
+    setChoosingFinding(false)
+    setSavedMessage("")
     setFreehand(false)
     // El detalle depende del hallazgo: nada de otra definición sobrevive.
     setVariant("")
@@ -382,6 +391,10 @@ export function ToothDrawer({
     setSpecifications("")
     setObservations("")
     setDiagErrors([])
+    setDiagnosisCode("")
+    setDiagnosisDescription("")
+    setNote("")
+    setDiagError(null)
   }
 
   const planQuery = useQuery({
@@ -404,9 +417,8 @@ export function ToothDrawer({
   )
 
   // Alta explícita del plan desde el drawer (origen: la atención abierta).
-  const createTreatmentPlan = async (event: React.FormEvent) => {
-    event.preventDefault()
-    event.stopPropagation()
+  // El alta de plan comparte el único formulario y su acción persistente.
+  const createTreatmentPlan = async () => {
     if (!canMutate || disabled || busy || treatPlanPending) return
     if (!encounterId) {
       setTreatPlanError("Abre una atención en curso para crear el plan.")
@@ -513,6 +525,8 @@ export function ToothDrawer({
       )
       resetDraft()
       await onChanged()
+      setChoosingFinding(true)
+      setSavedMessage("Hallazgo registrado en el odontograma.")
     } catch (err) {
       setDiagError(mutationMessage(err, "No se pudo registrar el diagnóstico."))
     } finally {
@@ -526,12 +540,6 @@ export function ToothDrawer({
     if (!canMutate || disabled || busy || teeth.length === 0) return
     if (!treatService) {
       setTreatError("Selecciona un servicio del catálogo.")
-      return
-    }
-    if (treatService.priceCents === null) {
-      setTreatError(
-        "Ese tratamiento aún no tiene tarifa: configúrala en el tarifario antes de cotizar.",
-      )
       return
     }
     if (!treatPlanId) {
@@ -548,20 +556,43 @@ export function ToothDrawer({
     try {
       await beforeWrite?.()
       const cieCode = treatCie.trim()
-      await apiFetch<{ data: PlanItem[] }>(`/api/patients/${patientId}/plan/items/batch`, {
-        method: "POST",
-        body: JSON.stringify({
-          planId: treatPlanId,
-          sourceEncounterId: encounterId,
-          serviceId: treatService.id,
-          toothNumbers: teeth,
-          detail: treatDetail.trim() === "" ? null : treatDetail.trim(),
-          diagnosisCode: cieCode === "" ? null : cieCode,
-        }),
-      })
+      if (singleTooth != null) {
+        const finding = sourceFindings.find((entry) => entry.id === sourceFindingId)
+        if (sourceFindingId && !finding)
+          throw new Error("El hallazgo cambió; vuelve a seleccionarlo.")
+        await apiFetch(`/api/patients/${patientId}/plan/items`, {
+          method: "POST",
+          body: JSON.stringify({
+            planId: treatPlanId,
+            sourceEncounterId: encounterId,
+            serviceId: treatService.id,
+            toothNumber: singleTooth,
+            odontogramEntryId: finding?.id ?? null,
+            surfaces:
+              treatService.scope === "surfaces" && finding?.surface ? [finding.surface] : null,
+            detail: treatDetail.trim() || null,
+            diagnosisCode: cieCode || null,
+          }),
+        })
+      } else {
+        await apiFetch<{ data: PlanItem[] }>(`/api/patients/${patientId}/plan/items/batch`, {
+          method: "POST",
+          body: JSON.stringify({
+            planId: treatPlanId,
+            sourceEncounterId: encounterId,
+            serviceId: treatService.id,
+            toothNumbers: teeth,
+            detail: treatDetail.trim() || null,
+            diagnosisCode: cieCode || null,
+          }),
+        })
+      }
       setTreatService(null)
       setTreatDetail("")
       setTreatCie("")
+      setSourceFindingId("")
+      setTreatPlanId("")
+      setSavedMessage("Tratamiento agregado al plan.")
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["plan", patientId] }),
         queryClient.invalidateQueries({ queryKey: ["treatment-plans", patientId] }),
@@ -618,16 +649,31 @@ export function ToothDrawer({
   }
   const diagDirty = draftDirty
   const treatDirty =
-    treatService !== null || treatDetail !== "" || treatCie !== "" || treatPlanId !== ""
+    treatService !== null ||
+    treatDetail !== "" ||
+    treatCie !== "" ||
+    (treatNewPlan && treatPlanTitle !== "Plan de tratamiento")
   const isDirty = canMutate && (diagDirty || treatDirty)
-  const activeError = mode === "diagnosis" ? (diagError ?? diagErrors[0] ?? null) : treatError
+  useEffect(() => {
+    onDirtyChange?.(isDirty)
+    return () => onDirtyChange?.(false)
+  }, [isDirty, onDirtyChange])
+  const detailHeading = useRef<HTMLHeadingElement>(null)
+  useEffect(() => {
+    if (!choosingFinding) detailHeading.current?.focus()
+  }, [choosingFinding, condition])
+  const activeError = treatNewPlan
+    ? treatPlanError
+    : mode === "diagnosis"
+      ? (diagError ?? (diagErrors.length ? diagErrors.join(" ") : null))
+      : treatError
   const faceEditing = canMutate && !disabled && !busy && !multi && scope === "surface" && !freehand
   // El trazo se dibuja sobre la vista previa con el Renderer (contrato final):
   // una sola pieza, sin puentes. El borrador lo controla este drawer.
   const drawEditing =
     canMutate && !disabled && !busy && !multi && showDrawing && (freehand || !!def?.requiresDrawing)
 
-  const headerContent =
+  const previewContent =
     teeth.length === 0 ? null : (
       <div className="flex flex-col gap-2 pt-2">
         {historical && <Badge variant="outline">Estado histórico · solo lectura</Badge>}
@@ -637,15 +683,15 @@ export function ToothDrawer({
             {draftAbbreviation ? ` · ${draftAbbreviation}` : ""}
           </Badge>
         )}
-        <ScrollArea className={multi ? "h-40 sm:h-48" : "h-28 sm:h-36"}>
+        <div>
           <div
             className={`grid gap-4 pr-3 ${multi ? "sm:grid-cols-2" : ""}`}
             aria-label="Piezas seleccionadas"
           >
-            {teeth.map((toothNumber) => (
+            {(multi ? [] : teeth).map((toothNumber) => (
               <figure
                 key={toothNumber}
-                className="flex min-w-0 items-center gap-5 rounded-lg bg-muted/40 px-4 py-2"
+                className="flex min-w-0 items-center gap-4 rounded-lg bg-muted/40 p-3 [&_svg]:max-h-32"
               >
                 <ToothSVG
                   toothNumber={toothNumber}
@@ -669,13 +715,14 @@ export function ToothDrawer({
               </figure>
             ))}
           </div>
-        </ScrollArea>
+        </div>
         {!multi && showDrawing && canMutate && (
           <div className="flex flex-wrap gap-2">
             {!def?.requiresDrawing && (
               <Button
                 type="button"
                 size="sm"
+                className="min-h-11"
                 variant={freehand ? "default" : "outline"}
                 disabled={fieldDisabled}
                 onClick={() => setFreehand(!freehand)}
@@ -687,6 +734,7 @@ export function ToothDrawer({
               <Button
                 type="button"
                 size="sm"
+                className="min-h-11"
                 variant="outline"
                 disabled={fieldDisabled}
                 onClick={() => setDrawing([])}
@@ -709,549 +757,588 @@ export function ToothDrawer({
       </div>
     )
 
-  const submitLabel =
-    mode === "diagnosis"
-      ? `Registrar diagnóstico${multi && !isGroup ? ` (${teeth.length})` : ""}`
+  const canPlan =
+    teeth.length > 0 && teeth.every((tooth) => entriesOf(tooth).some((entry) => !entry.voidedAt))
+  const submitLabel = treatNewPlan
+    ? "Crear y seleccionar"
+    : mode === "diagnosis"
+      ? `Registrar hallazgo${multi && !isGroup ? ` (${teeth.length})` : ""}`
       : `Agregar al plan${multi ? ` (${teeth.length})` : ""}`
   const submit = (event: React.FormEvent): void => {
-    if (mode === "diagnosis") void submitDiagnosis(event)
-    else void submitTreatment(event)
+    event.preventDefault()
+    event.stopPropagation()
+    if (treatNewPlan) void createTreatmentPlan()
+    else if (mode === "diagnosis" && !choosingFinding) void submitDiagnosis(event)
+    else if (mode === "treatment") void submitTreatment(event)
   }
+  const headerContent = (
+    <div className="flex flex-wrap items-center gap-2 pt-2">
+      {historical && <Badge variant="outline">Solo lectura · estado histórico</Badge>}
+      {mode === "treatment" ? (
+        <Button
+          type="button"
+          variant="ghost"
+          className="min-h-11"
+          disabled={fieldDisabled}
+          onClick={() => {
+            if (treatNewPlan) setTreatNewPlan(false)
+            else setMode("diagnosis")
+          }}
+        >
+          {treatNewPlan ? "Volver al tratamiento" : "Volver a hallazgos"}
+        </Button>
+      ) : canMutate && canPlan && !draftDirty ? (
+        <Button
+          type="button"
+          variant="outline"
+          className="min-h-11"
+          disabled={fieldDisabled}
+          onClick={() => {
+            setSavedMessage("")
+            setMode("treatment")
+          }}
+        >
+          Indicar tratamiento
+        </Button>
+      ) : null}
+    </div>
+  )
   const body = (
     <div className="flex flex-col gap-5">
-      <Tabs
-        value={mode}
-        onValueChange={(value) => {
-          if (value === "diagnosis" || value === "treatment") setMode(value)
-        }}
-      >
-        <TabsList className="w-full" aria-label="Tipo de registro">
-          <TabsTrigger value="diagnosis" disabled={busy || disabled}>
-            Diagnóstico
-          </TabsTrigger>
-          <TabsTrigger value="treatment" disabled={busy || disabled}>
-            Tratamiento
-          </TabsTrigger>
-        </TabsList>
+      {savedMessage && (
+        <p role="status" className="rounded-md bg-muted p-3 text-sm">
+          {savedMessage}
+        </p>
+      )}
 
-        {!canMutate ? (
-          <p className="text-sm text-muted-foreground">
-            {historical || readOnly
-              ? "Solo lectura: no se pueden registrar cambios."
-              : "No tienes permiso para registrar cambios en estas piezas."}
-          </p>
-        ) : mode === "diagnosis" ? (
-          <TabsContent value="diagnosis" className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <Field className="sm:col-span-2">
-              <FieldLabel htmlFor={`${uid}-condition`}>Hallazgo (NTS 188)</FieldLabel>
-              <Select
-                value={condition}
-                items={Object.fromEntries(FINDINGS.map((f) => [f.code, f.label]))}
-                onValueChange={selectCondition}
-              >
-                <SelectTrigger
-                  id={`${uid}-condition`}
-                  aria-label="Hallazgo"
-                  disabled={fieldDisabled}
-                >
-                  <SelectValue placeholder="Selecciona el hallazgo…" />
-                </SelectTrigger>
-                <SelectContent>
-                  {FINDINGS.map((finding) => (
-                    <SelectItem key={finding.code} value={finding.code}>
-                      {finding.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </Field>
-
-            {def?.variants?.length ? (
-              <Field>
-                <FieldLabel htmlFor={`${uid}-variant`}>Variante</FieldLabel>
-                <Select
-                  value={variant}
-                  items={Object.fromEntries(def.variants.map((v) => [v.value, v.label]))}
-                  onValueChange={(v) => setVariant(v ?? "")}
-                >
-                  <SelectTrigger
-                    id={`${uid}-variant`}
-                    aria-label="Variante"
-                    disabled={fieldDisabled}
-                  >
-                    <SelectValue placeholder="Selecciona la variante…" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {def.variants.map((v) => (
-                      <SelectItem key={v.value} value={v.value}>
-                        {v.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </Field>
-            ) : null}
-
-            {def?.color === "quality" ? (
-              <Field>
-                <FieldLabel htmlFor={`${uid}-quality`}>Calidad</FieldLabel>
-                <Select
-                  value={quality}
-                  items={QUALITY_LABELS}
-                  onValueChange={(v) => setQuality(v ?? "")}
-                >
-                  <SelectTrigger
-                    id={`${uid}-quality`}
-                    aria-label="Calidad"
-                    disabled={fieldDisabled}
-                  >
-                    <SelectValue placeholder="Selecciona la calidad…" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {Object.entries(QUALITY_LABELS).map(([value, label]) => (
-                      <SelectItem key={value} value={value}>
-                        {label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </Field>
-            ) : null}
-
-            {showDirection && (
-              <Field>
-                <FieldLabel htmlFor={`${uid}-direction`}>Dirección de rotación</FieldLabel>
-                <Select
-                  value={direction}
-                  items={DIRECTION_LABELS}
-                  onValueChange={(v) => setDirection(v ?? "")}
-                >
-                  <SelectTrigger
-                    id={`${uid}-direction`}
-                    aria-label="Dirección de rotación"
-                    disabled={fieldDisabled}
-                  >
-                    <SelectValue placeholder="Selecciona la dirección…" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {Object.entries(DIRECTION_LABELS).map(([value, label]) => (
-                      <SelectItem key={value} value={value}>
-                        {label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </Field>
-            )}
-
-            {showGrade && (
-              <Field>
-                <FieldLabel htmlFor={`${uid}-grade`}>Grado de movilidad</FieldLabel>
-                <Input
-                  id={`${uid}-grade`}
-                  value={grade}
-                  onChange={(e) => setGrade(e.currentTarget.value)}
-                  placeholder="1, 2, 3…"
-                  inputMode="numeric"
-                  disabled={fieldDisabled}
-                />
-                <p className="text-xs text-muted-foreground">Solo grados patológicos (nunca M0).</p>
-              </Field>
-            )}
-
-            {isGroup && (
-              <div className="sm:col-span-2">
-                <p className="text-xs text-muted-foreground">
-                  Se registrará una sola vez e incluirá las piezas: {teeth.join(", ")}.
-                </p>
-              </div>
-            )}
-
-            {showAbutments && (
-              <fieldset className="flex flex-col gap-2 sm:col-span-2">
-                <legend className="text-xs font-medium">Piezas pilar del tramo</legend>
-                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                  {teeth.map((toothNumber) => (
-                    <label
-                      key={toothNumber}
-                      htmlFor={`${uid}-abutment-${toothNumber}`}
-                      className="flex items-center gap-1.5 text-sm"
-                    >
-                      <Checkbox
-                        id={`${uid}-abutment-${toothNumber}`}
-                        checked={abutments.includes(toothNumber)}
-                        disabled={fieldDisabled}
-                        onCheckedChange={() => toggleAbutment(toothNumber)}
-                      />
-                      Pieza {toothNumber}
-                    </label>
-                  ))}
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  Marca las piezas pilar del tramo (puentes sobre pilares).
-                </p>
-              </fieldset>
-            )}
-
-            {showPositions && (
-              <fieldset className="flex flex-col gap-2 sm:col-span-2">
-                <legend className="text-xs font-medium">Posiciones (coexisten M/D/V/P/L)</legend>
-                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                  {ABNORMAL_POSITIONS.map((position) => (
-                    <label
-                      key={position}
-                      htmlFor={`${uid}-position-${position}`}
-                      className="flex items-center gap-1.5 text-sm"
-                    >
-                      <Checkbox
-                        id={`${uid}-position-${position}`}
-                        checked={positions.includes(position)}
-                        disabled={fieldDisabled}
-                        onCheckedChange={() => togglePosition(position)}
-                      />
-                      {clinicalSurfaceLabel(position)}
-                    </label>
-                  ))}
-                </div>
-              </fieldset>
-            )}
-
+      {!canMutate ? (
+        <p className="text-sm text-muted-foreground">
+          {historical || readOnly
+            ? "Solo lectura: no se pueden registrar cambios."
+            : "No tienes permiso para registrar cambios en estas piezas."}
+        </p>
+      ) : mode === "diagnosis" ? (
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          {choosingFinding ? (
             <div className="sm:col-span-2">
-              {scope === "surface" && multi ? (
-                <p className="text-xs text-muted-foreground">
-                  Selecciona una sola pieza para registrar por superficie. El diagnóstico sin
-                  superficies se replica a las {teeth.length} piezas.
-                </p>
-              ) : showSurfaces ? (
-                <fieldset className="flex flex-col gap-2">
-                  <legend className="text-xs font-medium">
-                    Superficies comprometidas (o traza la forma observada)
-                  </legend>
+              <FindingPicker
+                value={condition}
+                onChange={selectCondition}
+                disabled={fieldDisabled}
+              />
+            </div>
+          ) : (
+            <>
+              <div className="flex items-center justify-between gap-2 sm:col-span-2">
+                <h3
+                  tabIndex={-1}
+                  ref={detailHeading}
+                  className="text-base font-semibold outline-none"
+                >
+                  {def?.label}
+                </h3>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="min-h-11"
+                  disabled={fieldDisabled}
+                  onClick={() => setChoosingFinding(true)}
+                >
+                  Cambiar hallazgo
+                </Button>
+              </div>
+              <div className="sm:col-span-2">{previewContent}</div>
+
+              {def?.variants?.length ? (
+                <Field>
+                  <FieldLabel htmlFor={`${uid}-variant`}>Variante</FieldLabel>
+                  <Select
+                    value={variant}
+                    items={Object.fromEntries(def.variants.map((v) => [v.value, v.label]))}
+                    onValueChange={(v) => setVariant(v ?? "")}
+                  >
+                    <SelectTrigger
+                      className="min-h-11"
+                      id={`${uid}-variant`}
+                      aria-label="Variante"
+                      disabled={fieldDisabled}
+                    >
+                      <SelectValue placeholder="Selecciona la variante…" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {def.variants.map((v) => (
+                        <SelectItem key={v.value} value={v.value}>
+                          {v.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </Field>
+              ) : null}
+
+              {def?.color === "quality" ? (
+                <Field>
+                  <FieldLabel htmlFor={`${uid}-quality`}>Calidad</FieldLabel>
+                  <Select
+                    value={quality}
+                    items={QUALITY_LABELS}
+                    onValueChange={(v) => setQuality(v ?? "")}
+                  >
+                    <SelectTrigger
+                      className="min-h-11"
+                      id={`${uid}-quality`}
+                      aria-label="Calidad"
+                      disabled={fieldDisabled}
+                    >
+                      <SelectValue placeholder="Selecciona la calidad…" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {Object.entries(QUALITY_LABELS).map(([value, label]) => (
+                        <SelectItem key={value} value={value}>
+                          {label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </Field>
+              ) : null}
+
+              {showDirection && (
+                <Field>
+                  <FieldLabel htmlFor={`${uid}-direction`}>Dirección de rotación</FieldLabel>
+                  <Select
+                    value={direction}
+                    items={DIRECTION_LABELS}
+                    onValueChange={(v) => setDirection(v ?? "")}
+                  >
+                    <SelectTrigger
+                      className="min-h-11"
+                      id={`${uid}-direction`}
+                      aria-label="Dirección de rotación"
+                      disabled={fieldDisabled}
+                    >
+                      <SelectValue placeholder="Selecciona la dirección…" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {Object.entries(DIRECTION_LABELS).map(([value, label]) => (
+                        <SelectItem key={value} value={value}>
+                          {label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </Field>
+              )}
+
+              {showGrade && (
+                <Field>
+                  <FieldLabel htmlFor={`${uid}-grade`}>Grado de movilidad</FieldLabel>
+                  <Input
+                    id={`${uid}-grade`}
+                    value={grade}
+                    onChange={(e) => setGrade(e.currentTarget.value)}
+                    placeholder="1, 2, 3…"
+                    inputMode="numeric"
+                    disabled={fieldDisabled}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Solo grados patológicos (nunca M0).
+                  </p>
+                </Field>
+              )}
+
+              {isGroup && (
+                <div className="sm:col-span-2">
+                  <p className="text-xs text-muted-foreground">
+                    Se registrará una sola vez e incluirá las piezas: {teeth.join(", ")}.
+                  </p>
+                </div>
+              )}
+
+              {showAbutments && (
+                <fieldset className="flex flex-col gap-2 sm:col-span-2">
+                  <legend className="text-xs font-medium">Piezas pilar del tramo</legend>
                   <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                    {allowedSurfaces.map((s) => (
+                    {teeth.map((toothNumber) => (
                       <label
-                        key={s}
-                        htmlFor={`${uid}-surface-${s}`}
-                        className="flex items-center gap-1.5 text-sm"
+                        key={toothNumber}
+                        htmlFor={`${uid}-abutment-${toothNumber}`}
+                        className="flex min-h-11 items-center gap-2 rounded-md border p-2 text-sm"
                       >
                         <Checkbox
-                          id={`${uid}-surface-${s}`}
-                          checked={surfaces.includes(s)}
+                          id={`${uid}-abutment-${toothNumber}`}
+                          checked={abutments.includes(toothNumber)}
                           disabled={fieldDisabled}
-                          onCheckedChange={() => toggleSurface(s)}
+                          onCheckedChange={() => toggleAbutment(toothNumber)}
                         />
-                        {clinicalSurfaceLabel(s)}
+                        Pieza {toothNumber}
+                      </label>
+                    ))}
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Marca las piezas pilar del tramo (puentes sobre pilares).
+                  </p>
+                </fieldset>
+              )}
+
+              {showPositions && (
+                <fieldset className="flex flex-col gap-2 sm:col-span-2">
+                  <legend className="text-xs font-medium">Posiciones (coexisten M/D/V/P/L)</legend>
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                    {ABNORMAL_POSITIONS.map((position) => (
+                      <label
+                        key={position}
+                        htmlFor={`${uid}-position-${position}`}
+                        className="flex min-h-11 items-center gap-2 rounded-md border p-2 text-sm"
+                      >
+                        <Checkbox
+                          id={`${uid}-position-${position}`}
+                          checked={positions.includes(position)}
+                          disabled={fieldDisabled}
+                          onCheckedChange={() => togglePosition(position)}
+                        />
+                        {clinicalSurfaceLabel(position)}
                       </label>
                     ))}
                   </div>
                 </fieldset>
-              ) : null}
-            </div>
+              )}
 
-            {showDrawing && (
-              <div className="flex flex-col gap-2 sm:col-span-2">
-                <span className="text-xs font-medium">
-                  Registro gráfico{def?.requiresDrawing ? " (obligatorio)" : ""}
-                </span>
-                {multi ? (
-                  <p className="text-xs text-muted-foreground">
-                    Selecciona una sola pieza para dibujar el trazo sobre su vista previa.
-                  </p>
-                ) : (
-                  <p className="text-xs text-muted-foreground">
-                    Dibuja el trazo observado sobre el diente en la cabecera
-                    {drawing.length > 0
-                      ? ` (${drawing.length} ${drawing.length === 1 ? "trazo" : "trazos"}).`
-                      : "."}
-                  </p>
-                )}
-                {(def?.requiresEvidence || def?.requiresDrawing) && (
-                  <p className="text-xs text-muted-foreground">
-                    Este hallazgo requiere evidencia: selecciona superficies o registra el trazo
-                    observado.
-                  </p>
-                )}
-              </div>
-            )}
-
-            {def?.requiresEvidence && (
               <div className="sm:col-span-2">
-                <label htmlFor={`${uid}-observed`} className="flex items-center gap-1.5 text-sm">
-                  <Checkbox
-                    id={`${uid}-observed`}
-                    checked={clinicallyObserved}
-                    disabled={fieldDisabled}
-                    onCheckedChange={() => setClinicallyObserved((prev) => !prev)}
-                  />
-                  Observé clínicamente este hallazgo (obligatorio)
-                </label>
+                {scope === "surface" && multi ? (
+                  <p className="text-xs text-muted-foreground">
+                    Selecciona una sola pieza para registrar por superficie. El diagnóstico sin
+                    superficies se replica a las {teeth.length} piezas.
+                  </p>
+                ) : showSurfaces ? (
+                  <fieldset className="flex flex-col gap-2">
+                    <legend className="text-xs font-medium">
+                      Superficies comprometidas (o traza la forma observada)
+                    </legend>
+                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                      {allowedSurfaces.map((s) => (
+                        <label
+                          key={s}
+                          htmlFor={`${uid}-surface-${s}`}
+                          className="flex min-h-11 items-center gap-2 rounded-md border p-2 text-sm"
+                        >
+                          <Checkbox
+                            id={`${uid}-surface-${s}`}
+                            checked={surfaces.includes(s)}
+                            disabled={fieldDisabled}
+                            onCheckedChange={() => toggleSurface(s)}
+                          />
+                          {clinicalSurfaceLabel(s)}
+                        </label>
+                      ))}
+                    </div>
+                  </fieldset>
+                ) : null}
               </div>
-            )}
 
-            <Field className="sm:col-span-2">
-              <FieldLabel htmlFor={`${uid}-specifications`}>Especificaciones</FieldLabel>
-              <Textarea
-                id={`${uid}-specifications`}
-                value={specifications}
-                disabled={fieldDisabled}
-                maxLength={2000}
-                placeholder="Material, clasificación u otra especificación normativa…"
-                onChange={(event) => setSpecifications(event.target.value)}
-              />
-              {SPECIFICATION_HINTS[condition] && (
-                <p className="text-xs text-muted-foreground">{SPECIFICATION_HINTS[condition]}</p>
-              )}
-            </Field>
-
-            {showObservations && (
-              <Field className="sm:col-span-2">
-                <FieldLabel htmlFor={`${uid}-observations`}>Observaciones</FieldLabel>
-                <Textarea
-                  id={`${uid}-observations`}
-                  value={observations}
-                  disabled={fieldDisabled}
-                  maxLength={2000}
-                  placeholder="Observación clínica de la pieza…"
-                  onChange={(event) => setObservations(event.target.value)}
-                />
-              </Field>
-            )}
-
-            <div className="sm:col-span-2">
-              <Cie10Search
-                value={diagnosisCode}
-                label="Diagnóstico CIE-10 (opcional)"
-                disabled={fieldDisabled}
-                onChange={(code, description) => {
-                  setDiagnosisCode(code)
-                  setDiagnosisDescription(description)
-                }}
-              />
-              {diagnosisDescription && (
-                <p className="mt-1 text-xs text-muted-foreground">{diagnosisDescription}</p>
-              )}
-            </div>
-
-            <Field className="sm:col-span-2">
-              <FieldLabel htmlFor={`${uid}-note`}>Nota (opcional)</FieldLabel>
-              <Textarea
-                id={`${uid}-note`}
-                value={note}
-                disabled={fieldDisabled}
-                maxLength={500}
-                placeholder="Detalle clínico del hallazgo…"
-                onChange={(event) => setNote(event.target.value)}
-              />
-            </Field>
-
-            {diagErrors.length > 0 && (
-              <div className="sm:col-span-2" role="alert">
-                <ul className="flex flex-col gap-1 text-sm text-destructive">
-                  {diagErrors.map((message, index) => (
-                    <li key={`${index}-${message}`}>{message}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
-          </TabsContent>
-        ) : (
-          <TabsContent value="treatment" className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <Field className="sm:col-span-2">
-              <FieldLabel htmlFor={`${uid}-treat-plan`}>Plan clínico (obligatorio)</FieldLabel>
-              <Select
-                value={treatPlanId}
-                onValueChange={(v) => setTreatPlanId(v ?? "")}
-                disabled={fieldDisabled || treatNewPlan}
-              >
-                <SelectTrigger id={`${uid}-treat-plan`} aria-label="Plan clínico destino">
-                  <SelectValue
-                    placeholder={
-                      treatmentPlansQuery.isLoading ? "Cargando planes…" : "Elige el plan clínico…"
-                    }
-                  />
-                </SelectTrigger>
-                <SelectContent>
-                  {planOptions.map((p) => (
-                    <SelectItem key={p.plan.id} value={p.plan.id}>
-                      {p.plan.title} · {p.status} ({p.pendingItems} pendientes)
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {planOptions.length === 0 && !treatmentPlansQuery.isLoading ? (
-                <p className="text-xs text-muted-foreground">
-                  Este paciente aún no tiene planes clínicos.
-                </p>
-              ) : (
-                <p className="text-xs text-muted-foreground">
-                  La indicación nace en la atención abierta y vive en el plan, no en un presupuesto.
-                </p>
-              )}
-              {!encounterId ? (
-                <p role="note" className="text-xs text-muted-foreground">
-                  Abre una atención en curso para indicar tratamientos desde aquí.
-                </p>
-              ) : null}
-              {!treatNewPlan ? (
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  className="mt-2 self-start"
-                  disabled={fieldDisabled || !encounterId}
-                  onClick={() => {
-                    setTreatNewPlan(true)
-                    setTreatPlanTitle("Plan de tratamiento")
-                    setTreatPlanError(null)
-                  }}
-                >
-                  Crear plan clínico
-                </Button>
-              ) : (
-                <form
-                  className="mt-2 flex flex-col gap-2 rounded-lg border p-3"
-                  onSubmit={(e) => void createTreatmentPlan(e)}
-                >
-                  <Field>
-                    <FieldLabel htmlFor={`${uid}-treat-plan-title`}>
-                      Título del nuevo plan
-                    </FieldLabel>
-                    <Input
-                      id={`${uid}-treat-plan-title`}
-                      value={treatPlanTitle}
-                      onChange={(e) => setTreatPlanTitle(e.currentTarget.value)}
-                      placeholder="Plan de tratamiento"
-                      maxLength={200}
-                      disabled={fieldDisabled || treatPlanPending}
-                    />
-                  </Field>
-                  {treatPlanError && (
-                    <p role="alert" className="text-xs text-destructive">
-                      {treatPlanError}
+              {showDrawing && (
+                <div className="flex flex-col gap-2 sm:col-span-2">
+                  <span className="text-xs font-medium">
+                    Registro gráfico{def?.requiresDrawing ? " (obligatorio)" : ""}
+                  </span>
+                  {multi ? (
+                    <p className="text-xs text-muted-foreground">
+                      Selecciona una sola pieza para dibujar el trazo sobre su vista previa.
+                    </p>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">
+                      Dibuja el trazo observado sobre la vista previa de la pieza
+                      {drawing.length > 0
+                        ? ` (${drawing.length} ${drawing.length === 1 ? "trazo" : "trazos"}).`
+                        : "."}
                     </p>
                   )}
-                  <div className="flex gap-2">
-                    <Button type="submit" size="sm" disabled={fieldDisabled || treatPlanPending}>
-                      {treatPlanPending ? "Creando…" : "Crear y seleccionar"}
-                    </Button>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      disabled={fieldDisabled || treatPlanPending}
-                      onClick={() => {
-                        setTreatNewPlan(false)
-                        setTreatPlanTitle("Plan de tratamiento")
-                        setTreatPlanError(null)
-                      }}
-                    >
-                      Volver
-                    </Button>
-                  </div>
-                </form>
+                  {(def?.requiresEvidence || def?.requiresDrawing) && (
+                    <p className="text-xs text-muted-foreground">
+                      Este hallazgo requiere evidencia: selecciona superficies o registra el trazo
+                      observado.
+                    </p>
+                  )}
+                </div>
               )}
-            </Field>
-            <div className="sm:col-span-2">
-              <ServicePicker
-                value={treatService?.id ?? ""}
-                onChange={setTreatService}
-                disabled={fieldDisabled}
-              />
-            </div>
-            {treatService && (
-              <div className="rounded-lg border bg-muted/30 p-4 sm:col-span-2" aria-live="polite">
-                {treatService.priceCents === null ? (
-                  <p className="text-sm">
-                    Sin tarifa: configúrala en el tarifario antes de cotizar.
-                  </p>
-                ) : (
-                  <>
-                    <p className="text-sm">
-                      {teeth.length} pieza{multi ? "s" : ""} ×{" "}
-                      {formatMoney(treatService.priceCents, treatService.currency)}
-                    </p>
-                    <p className="mt-1 text-xl font-semibold tabular-nums">
-                      {formatMoney(treatService.priceCents * teeth.length, treatService.currency)}
-                    </p>
-                  </>
-                )}
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Se agregará un tratamiento por pieza al presupuesto con la tarifa del catálogo
-                  vigente al guardar.
-                </p>
-              </div>
-            )}
-            <Field className="sm:col-span-2">
-              <FieldLabel htmlFor={`${uid}-treat-detail`}>Detalle</FieldLabel>
-              <Textarea
-                id={`${uid}-treat-detail`}
-                value={treatDetail}
-                onChange={(e) => setTreatDetail(e.currentTarget.value)}
-                placeholder="Detalle del tratamiento propuesto"
-                rows={3}
-                maxLength={4000}
-                disabled={fieldDisabled}
-              />
-            </Field>
-            <div className="sm:col-span-2">
-              <Cie10Search
-                value={treatCie}
-                onChange={(code) => setTreatCie(code)}
-                label="Diagnóstico CIE-10 (opcional)"
-                disabled={fieldDisabled}
-              />
-            </div>
-          </TabsContent>
-        )}
-      </Tabs>
 
-      <div className="flex flex-col gap-3">
-        <h3 className="text-sm font-medium text-muted-foreground">Contexto clínico</h3>
-        {teeth.map((toothNumber, index) => (
-          <ToothContext
-            key={toothNumber}
-            patientId={patientId}
-            toothNumber={toothNumber}
-            entries={entriesOf(toothNumber)}
-            history={historyOf(toothNumber)}
-            planQuery={planQuery}
-            docsQuery={docsQuery}
-            canMutate={canMutate && !disabled && !busy}
-            voidPending={voidPending}
-            defaultOpen={index === 0}
-            onVoid={(id, label) => {
-              setVoiding({ id, label })
-              setVoidReason("")
-              setVoidError(null)
-            }}
+              {def?.requiresEvidence && (
+                <div className="sm:col-span-2">
+                  <label
+                    htmlFor={`${uid}-observed`}
+                    className="flex min-h-11 items-center gap-2 rounded-md border p-2 text-sm"
+                  >
+                    <Checkbox
+                      id={`${uid}-observed`}
+                      checked={clinicallyObserved}
+                      disabled={fieldDisabled}
+                      onCheckedChange={() => setClinicallyObserved((prev) => !prev)}
+                    />
+                    Observé clínicamente este hallazgo (obligatorio)
+                  </label>
+                </div>
+              )}
+
+              <Field className="sm:col-span-2">
+                <FieldLabel htmlFor={`${uid}-specifications`}>Especificaciones</FieldLabel>
+                <Textarea
+                  id={`${uid}-specifications`}
+                  value={specifications}
+                  disabled={fieldDisabled}
+                  maxLength={2000}
+                  placeholder="Material, clasificación u otra especificación normativa…"
+                  onChange={(event) => setSpecifications(event.target.value)}
+                />
+                {SPECIFICATION_HINTS[condition] && (
+                  <p className="text-xs text-muted-foreground">{SPECIFICATION_HINTS[condition]}</p>
+                )}
+              </Field>
+
+              {showObservations && (
+                <Field className="sm:col-span-2">
+                  <FieldLabel htmlFor={`${uid}-observations`}>Observaciones</FieldLabel>
+                  <Textarea
+                    id={`${uid}-observations`}
+                    value={observations}
+                    disabled={fieldDisabled}
+                    maxLength={2000}
+                    placeholder="Observación clínica de la pieza…"
+                    onChange={(event) => setObservations(event.target.value)}
+                  />
+                </Field>
+              )}
+
+              <details className="sm:col-span-2">
+                <summary className="min-h-11 cursor-pointer py-3 text-sm font-medium">
+                  Diagnóstico CIE-10 y nota (opcional)
+                </summary>
+                <div className="flex flex-col gap-4 pt-2">
+                  <div className="sm:col-span-2">
+                    <Cie10Search
+                      value={diagnosisCode}
+                      label="Diagnóstico CIE-10 (opcional)"
+                      disabled={fieldDisabled}
+                      onChange={(code, description) => {
+                        setDiagnosisCode(code)
+                        setDiagnosisDescription(description)
+                      }}
+                    />
+                    {diagnosisDescription && (
+                      <p className="mt-1 text-xs text-muted-foreground">{diagnosisDescription}</p>
+                    )}
+                  </div>
+
+                  <Field className="sm:col-span-2">
+                    <FieldLabel htmlFor={`${uid}-note`}>Nota (opcional)</FieldLabel>
+                    <Textarea
+                      id={`${uid}-note`}
+                      value={note}
+                      disabled={fieldDisabled}
+                      maxLength={500}
+                      placeholder="Detalle clínico del hallazgo…"
+                      onChange={(event) => setNote(event.target.value)}
+                    />
+                  </Field>
+                </div>
+              </details>
+            </>
+          )}
+        </div>
+      ) : treatNewPlan ? (
+        <Field>
+          <FieldLabel htmlFor={`${uid}-treat-plan-title`}>Título del nuevo plan</FieldLabel>
+          <Input
+            id={`${uid}-treat-plan-title`}
+            className="min-h-11"
+            value={treatPlanTitle}
+            onChange={(event) => setTreatPlanTitle(event.currentTarget.value)}
+            maxLength={200}
+            disabled={fieldDisabled}
           />
-        ))}
-      </div>
+          <p className="text-sm text-muted-foreground">
+            Al crearlo volverás al tratamiento con este plan seleccionado.
+          </p>
+        </Field>
+      ) : (
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          {singleTooth != null && (
+            <Field className="sm:col-span-2">
+              <FieldLabel htmlFor={`${uid}-source-finding`}>
+                Problema que motiva el tratamiento
+              </FieldLabel>
+              <select
+                id={`${uid}-source-finding`}
+                className="min-h-11 rounded-md border bg-background px-3 text-sm"
+                disabled={fieldDisabled}
+                value={sourceFindingId}
+                onChange={(event) => {
+                  setSourceFindingId(event.target.value)
+                  setTreatCie(
+                    sourceFindings.find((entry) => entry.id === event.target.value)
+                      ?.diagnosisCode ?? "",
+                  )
+                }}
+              >
+                <option value="">Sin hallazgo vinculado</option>
+                {sourceFindings.map((entry) => (
+                  <option key={entry.id} value={entry.id}>
+                    {clinicalConditionLabel(entry.condition)}
+                    {entry.surface ? ` · ${clinicalSurfaceLabel(entry.surface)}` : ""}
+                    {entry.note ? ` · ${entry.note}` : ""}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          )}
+          <Field className="sm:col-span-2">
+            <FieldLabel htmlFor={`${uid}-treat-plan`}>Plan clínico (obligatorio)</FieldLabel>
+            <Select
+              items={Object.fromEntries(
+                planOptions.map((entry) => [entry.plan.id, entry.plan.title]),
+              )}
+              value={treatPlanId}
+              onValueChange={(v) => setTreatPlanId(v ?? "")}
+              disabled={fieldDisabled || treatNewPlan}
+            >
+              <SelectTrigger
+                className="min-h-11"
+                id={`${uid}-treat-plan`}
+                aria-label="Plan clínico destino"
+              >
+                <SelectValue
+                  placeholder={
+                    treatmentPlansQuery.isLoading ? "Cargando planes…" : "Elige el plan clínico…"
+                  }
+                />
+              </SelectTrigger>
+              <SelectContent>
+                {planOptions.map((p) => (
+                  <SelectItem key={p.plan.id} value={p.plan.id}>
+                    {p.plan.title} · {p.status} ({p.pendingItems} pendientes)
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {planOptions.length === 0 && !treatmentPlansQuery.isLoading ? (
+              <p className="text-xs text-muted-foreground">
+                Este paciente aún no tiene planes clínicos.
+              </p>
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                La indicación nace en la atención abierta y vive en el plan, no en un presupuesto.
+              </p>
+            )}
+            {!encounterId ? (
+              <p role="note" className="text-xs text-muted-foreground">
+                Abre una atención en curso para indicar tratamientos desde aquí.
+              </p>
+            ) : null}
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="mt-2 min-h-11 self-start"
+              disabled={fieldDisabled || !encounterId}
+              onClick={() => {
+                setTreatNewPlan(true)
+                setTreatPlanTitle("Plan de tratamiento")
+                setTreatPlanError(null)
+              }}
+            >
+              Crear plan clínico
+            </Button>
+          </Field>
+          <div className="sm:col-span-2">
+            <ServicePicker
+              value={treatService?.id ?? ""}
+              onChange={setTreatService}
+              disabled={fieldDisabled}
+            />
+          </div>
+          {treatService && (
+            <div className="rounded-lg border bg-muted/30 p-4 sm:col-span-2" aria-live="polite">
+              <p className="text-sm">
+                {teeth.length} pieza{multi ? "s" : ""} ×{" "}
+                {formatMoney(treatService.priceCents, treatService.currency)}
+              </p>
+              <p className="mt-1 text-xl font-semibold tabular-nums">
+                {formatMoney(treatService.priceCents * teeth.length, treatService.currency)}
+              </p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Se indicará el tratamiento en el plan con la tarifa vigente. Proponerlo no equivale
+                a aceptarlo, ejecutarlo ni cobrarlo.
+              </p>
+            </div>
+          )}
+          <Field className="sm:col-span-2">
+            <FieldLabel htmlFor={`${uid}-treat-detail`}>Detalle</FieldLabel>
+            <Textarea
+              id={`${uid}-treat-detail`}
+              value={treatDetail}
+              onChange={(e) => setTreatDetail(e.currentTarget.value)}
+              placeholder="Detalle del tratamiento propuesto"
+              rows={3}
+              maxLength={4000}
+              disabled={fieldDisabled}
+            />
+          </Field>
+          <div className="sm:col-span-2">
+            <Cie10Search
+              value={treatCie}
+              onChange={(code) => setTreatCie(code)}
+              label="Diagnóstico CIE-10 (opcional)"
+              disabled={fieldDisabled}
+            />
+          </div>
+        </div>
+      )}
+      <details>
+        <summary className="min-h-11 cursor-pointer py-3 text-sm font-medium">
+          Historial y contexto de las piezas
+        </summary>
+        <div className="flex flex-col gap-3 pt-2">
+          {teeth.map((toothNumber) => (
+            <ToothContext
+              key={toothNumber}
+              patientId={patientId}
+              toothNumber={toothNumber}
+              entries={entriesOf(toothNumber)}
+              history={historyOf(toothNumber)}
+              planQuery={planQuery}
+              docsQuery={docsQuery}
+              canMutate={canMutate && !disabled && !busy}
+              voidPending={voidPending}
+              defaultOpen
+              onVoid={(id, label) => {
+                setVoiding({ id, label })
+                setVoidReason("")
+                setVoidError(null)
+              }}
+            />
+          ))}
+        </div>
+      </details>
     </div>
   )
   return (
     <>
       {inline ? (
-        <div className="flex min-h-0 flex-col gap-4" aria-label="Registro de la selección">
-          <div className="flex min-w-0 flex-col gap-1">
-            <h3 className="text-lg font-semibold">{title}</h3>
-            {description ? <p className="text-sm text-muted-foreground">{description}</p> : null}
-            {headerContent}
-          </div>
-          {activeError ? (
-            <p role="alert" className="text-sm text-destructive">
-              {activeError}
-            </p>
-          ) : null}
+        <FormPanel
+          onClose={handleClose}
+          title={title}
+          description={description}
+          headerContent={headerContent}
+          hideSubmit={!canMutate || teeth.length === 0 || (mode === "diagnosis" && choosingFinding)}
+          onSubmit={submit}
+          isDirty={isDirty}
+          isSubmitting={busy}
+          error={activeError}
+          submitLabel={submitLabel}
+          cancelLabel="Cerrar"
+          submitDisabled={fieldDisabled || teeth.length === 0}
+        >
           {body}
-          {canMutate && teeth.length > 0 ? (
-            <div>
-              <Button type="button" disabled={fieldDisabled || busy} onClick={submit}>
-                {busy ? "Guardando…" : submitLabel}
-              </Button>
-            </div>
-          ) : null}
-        </div>
+        </FormPanel>
       ) : (
         <FormDrawer
           open={open && voiding === null}
@@ -1259,12 +1346,8 @@ export function ToothDrawer({
           title={title}
           description={description}
           headerContent={headerContent}
-          hideSubmit={!canMutate || teeth.length === 0}
-          className={
-            multi
-              ? "data-[swipe-axis=x]:sm:[--drawer-content-width:min(56rem,calc(100vw-2rem))]"
-              : "data-[swipe-axis=x]:sm:[--drawer-content-width:min(48rem,calc(100vw-2rem))]"
-          }
+          hideSubmit={!canMutate || teeth.length === 0 || (mode === "diagnosis" && choosingFinding)}
+          className="data-[swipe-axis=x]:sm:[--drawer-content-width:min(42rem,calc(100vw-2rem))] data-[swipe-axis=y]:[--drawer-content-height:calc(100dvh-1rem)] data-[swipe-axis=y]:[--drawer-content-max-height:calc(100dvh-1rem)]"
           onSubmit={submit}
           isDirty={isDirty}
           isSubmitting={busy}
@@ -1391,6 +1474,22 @@ function ToothContext({
                     </Badge>
                   )
                 })}
+                {entries
+                  .filter((entry) => entry.note || entry.encounterId)
+                  .map((entry) => (
+                    <div key={entry.id} className="text-sm">
+                      {entry.note && <p>{entry.note}</p>}
+                      {entry.encounterId && (
+                        <a
+                          className="text-xs underline"
+                          href={`/patients/${patientId}/encounters/${entry.encounterId}`}
+                        >
+                          Evaluación de origen
+                          {entry.createdAt ? ` · ${timeAgo(entry.createdAt)}` : ""}
+                        </a>
+                      )}
+                    </div>
+                  ))}
               </div>
               {affectedSurfaces.length > 0 && (
                 <div className="flex flex-wrap gap-1.5" aria-label="Superficies afectadas">
@@ -1439,9 +1538,7 @@ function ToothContext({
             <div className="flex flex-col gap-2">
               {openPlan.length > 0 && (
                 <div className="flex flex-col gap-1">
-                  <p className="text-xs font-medium text-muted-foreground">
-                    Pendiente / programado
-                  </p>
+                  <p className="text-xs font-medium text-muted-foreground">Tratamientos activos</p>
                   <ul className="flex flex-col gap-1">
                     {openPlan.map((item) => (
                       <li
@@ -1450,6 +1547,28 @@ function ToothContext({
                       >
                         <span className="font-medium">{item.title}</span>
                         <Badge variant="outline">{planStatusLabel(item.status)}</Badge>
+                        <span>Decisión: {planDecisionLabel(item.decisionStatus)}</span>
+                        {item.detail && (
+                          <p className="w-full text-muted-foreground">{item.detail}</p>
+                        )}
+                        {item.statusReason && <p className="w-full">{item.statusReason}</p>}
+                        {item.odontogramEntryId && (
+                          <p className="w-full text-xs">
+                            Hallazgo de origen:{" "}
+                            {clinicalConditionLabel(
+                              history.find((entry) => entry.id === item.odontogramEntryId)
+                                ?.condition ?? "",
+                            ) || "Consultar registro de origen"}
+                          </p>
+                        )}
+                        {item.sourceEncounterId && (
+                          <a
+                            className="text-xs underline"
+                            href={`/patients/${patientId}/encounters/${item.sourceEncounterId}`}
+                          >
+                            Atención donde se indicó
+                          </a>
+                        )}
                         {item.diagnosisCode && (
                           <Badge variant="outline">{item.diagnosisCode}</Badge>
                         )}

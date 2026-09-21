@@ -61,13 +61,20 @@ export function FormSurface({
       onSubmit={onSubmit}
       footer={
         <>
-          <Button type="button" variant="secondary" onClick={onCancel} disabled={isSubmitting}>
+          <Button
+            type="button"
+            variant="secondary"
+            className="min-h-11"
+            onClick={onCancel}
+            disabled={isSubmitting}
+          >
             {cancelLabel}
           </Button>
           {!hideSubmit && (
             <SubmitButton
               type="submit"
               variant="default"
+              className="min-h-11"
               pending={isSubmitting}
               disabled={isLoading || submitDisabled}
             >
