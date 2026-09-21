@@ -31,7 +31,7 @@ export type TreatmentTemplateRow = typeof treatmentTemplate.$inferSelect
 export const TREATMENT_SOURCES = ["template", "custom", "legacy"] as const
 export type TreatmentSource = (typeof TREATMENT_SOURCES)[number]
 
-export const SERVICE_STATES = ["active", "inactive", "unpriced", "legacy"] as const
+export const SERVICE_STATES = ["active", "inactive", "legacy"] as const
 export type ServiceState = (typeof SERVICE_STATES)[number]
 
 const MAX_LIMIT = 100
@@ -100,10 +100,12 @@ function assertScope(scope: string | null | undefined): TreatmentScope {
 }
 
 /**
- * null = Sin tarifa (nunca cero implícito); cero solo con ingreso explícito.
+ * Toda oferta tiene tarifa explícita: 0 = incluido sin costo. Nunca null.
  */
-function assertPrice(priceCents: number | null | undefined): number | null {
-  if (priceCents === null || priceCents === undefined) return null
+function assertPrice(priceCents: number | null | undefined): number {
+  if (priceCents === null || priceCents === undefined) {
+    throw validation("priceCents es obligatorio (0 si no tiene costo)")
+  }
   if (!Number.isInteger(priceCents) || priceCents < 0 || priceCents > 2147483647) {
     throw validation("priceCents debe ser un entero >= 0")
   }
@@ -364,17 +366,12 @@ export async function listServices(
   }
   const state = query.state ?? "active"
   if (!(SERVICE_STATES as readonly string[]).includes(state)) {
-    throw validation("state debe ser active|inactive|unpriced|legacy")
+    throw validation("state debe ser active|inactive|legacy")
   }
   if (state === "active") {
     conditions.push(eq(serviceCatalog.isActive, true), ne(serviceCatalog.source, "legacy"))
   } else if (state === "inactive") {
     conditions.push(eq(serviceCatalog.isActive, false), ne(serviceCatalog.source, "legacy"))
-  } else if (state === "unpriced") {
-    conditions.push(
-      sql`"service_catalog"."price_cents" IS NULL`,
-      ne(serviceCatalog.source, "legacy"),
-    )
   } else {
     conditions.push(eq(serviceCatalog.source, "legacy"))
   }
@@ -430,9 +427,6 @@ export async function requireServiceForIndication(
   const row = await requireService(tx, orgId, serviceId)
   if (!row.isActive || row.source === "legacy") {
     throw conflict("SERVICE_INACTIVE", "La prestación no está disponible para nuevas indicaciones")
-  }
-  if (row.priceCents === null) {
-    throw conflict("SERVICE_UNPRICED", "La prestación aún no tiene tarifa configurada")
   }
   if (row.templateId) {
     await resolveSingleTemplateCoding(tx, row.templateId)
@@ -655,7 +649,7 @@ export interface FromTemplatesResult {
 
 /**
  * Incorpora ofertas base desde la biblioteca: crea solo las faltantes con
- * tarifa nula (Sin tarifa), sin pisar variantes ni precios existentes.
+ * tarifa cero e inactivas hasta su revisión, sin pisar variantes ni precios existentes.
  * Serializa en la fila de organización para evitar duplicados concurrentes.
  */
 export async function fromTemplates(
@@ -706,10 +700,11 @@ export async function fromTemplates(
         name: tpl.name,
         specialty: tpl.specialty,
         scope: tpl.scope,
-        priceCents: null,
+        // Nace inactiva con tarifa 0: pendiente de tarifa real antes de indicarse.
+        priceCents: 0,
         currency: currencyDefault,
         durationMin: null,
-        isActive: true,
+        isActive: false,
       })
       .returning()
     if (!row) throw new Error("No se pudo incorporar la prestación")
@@ -734,5 +729,5 @@ export async function listLegacyServices(tx: Db, orgId: string): Promise<Service
 
 /** Verdadero si la fila puede ofrecerse en una nueva indicación. */
 export function isSelectableForIndication(row: ServiceRow): boolean {
-  return row.isActive && row.source !== "legacy" && row.priceCents !== null
+  return row.isActive && row.source !== "legacy"
 }

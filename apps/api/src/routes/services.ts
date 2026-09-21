@@ -26,7 +26,7 @@ const offersQuery = z
   .object({
     q: z.string().max(200).optional(),
     specialty: z.string().max(40).optional(),
-    state: z.enum(["active", "inactive", "unpriced", "legacy"]).optional(),
+    state: z.enum(["active", "inactive", "legacy"]).optional(),
     cursor: z.string().max(500).optional(),
     limit: z.coerce.number().int().min(1).max(100).optional(),
   })
@@ -39,7 +39,7 @@ const createInput = z
     specialty: z.string().trim().min(1).max(40).nullish(),
     scope: z.string().trim().min(1).max(20).nullish(),
     code: z.string().max(40).nullish(),
-    priceCents: z.number().int().min(0).max(2147483647).nullish(),
+    priceCents: z.number().int().min(0).max(2147483647),
     currency: z
       .string()
       .regex(/^[A-Z]{3}$/)
@@ -56,7 +56,7 @@ const patchInput = z
     specialty: z.string().trim().min(1).max(40).optional(),
     scope: z.string().trim().min(1).max(20).optional(),
     code: z.string().max(40).nullish(),
-    priceCents: z.number().int().min(0).max(2147483647).nullish(),
+    priceCents: z.number().int().min(0).max(2147483647).optional(),
     currency: z
       .string()
       .regex(/^[A-Z]{3}$/)

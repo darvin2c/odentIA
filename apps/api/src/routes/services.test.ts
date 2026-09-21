@@ -215,7 +215,7 @@ it("services: oferta desde plantilla hereda especialidad y ámbito", async () =>
   expect(contradict.status).toBe(400)
 })
 
-it("services: from-templates crea base sin tarifa sin pisar existentes", async () => {
+it("services: incorporar otra vez una plantilla conserva su tarifa configurada", async () => {
   const app = buildApp("owner")
   const tpl = await templateIdByKey(RESTAURADORA_KEY)
   const first = await app.request("/services/from-templates", {
@@ -228,7 +228,6 @@ it("services: from-templates crea base sin tarifa sin pisar existentes", async (
     data: { created: ServiceItem[]; existing: ServiceItem[] }
   }
   expect(firstBody.data.created).toHaveLength(1)
-  expect(firstBody.data.created[0]?.priceCents).toBeNull()
 
   const withPrice = await app.request(`/services/${firstBody.data.created[0]?.id}`, {
     method: "PATCH",
@@ -251,20 +250,20 @@ it("services: from-templates crea base sin tarifa sin pisar existentes", async (
   expect(secondBody.data.existing[0]?.priceCents).toBe(18000)
 })
 
-it("services: state filtra activas, inactivas y sin tarifa", async () => {
+it("services: state filtra activas e inactivas", async () => {
   const app = buildApp("owner")
   const created = await app.request("/services", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ name: "Temporal", specialty: "cirugia", scope: "general" }),
+    body: JSON.stringify({
+      name: "Temporal",
+      specialty: "cirugia",
+      scope: "general",
+      priceCents: 0,
+    }),
   })
   expect(created.status).toBe(201)
   const id = ((await created.json()) as { data: ServiceItem }).data.id
-
-  const unpriced = (await (await getJson(app, "/services?state=unpriced")).json()) as {
-    data: ServiceItem[]
-  }
-  expect(unpriced.data.map((s) => s.id)).toContain(id)
 
   const off = await app.request(`/services/${id}`, {
     method: "PATCH",
