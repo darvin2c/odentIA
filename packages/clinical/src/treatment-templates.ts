@@ -26,7 +26,6 @@ export type TreatmentSpecialty = (typeof TREATMENT_SPECIALTIES)[number]
 export const TREATMENT_SCOPES = ["general", "tooth", "surfaces", "quadrant", "arch"] as const
 export type TreatmentScope = (typeof TREATMENT_SCOPES)[number]
 
-export type TreatmentArch = "upper" | "lower"
 
 /**
  * Snapshot congelado de codificaciones en plan/presupuesto/atención.
@@ -39,15 +38,6 @@ export interface ProcedureCodingSnapshot {
   display: string
 }
 
-export interface TreatmentTemplate {
-  key: string
-  name: string
-  specialty: TreatmentSpecialty
-  scope: TreatmentScope
-  /** Rango de superficies para restauradoras; null en el resto. */
-  surfaceCountMin: number | null
-  surfaceCountMax: number | null
-}
 
 export interface TreatmentSiteInput {
   toothNumber?: number | null
