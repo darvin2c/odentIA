@@ -11,11 +11,6 @@ export interface OrgContext {
   memberRole: string
 }
 
-export interface SessionVariables {
-  userId: string
-  orgId: string
-  memberRole: string
-}
 
 export interface ApiDeps {
   auth: Auth
