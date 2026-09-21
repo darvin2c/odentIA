@@ -1,8 +1,8 @@
 import { Button } from "@odentia/ui"
 import type { Meta, StoryObj } from "@storybook/react"
 import { useState } from "react"
-import { PageHeader } from "../app-shell.js"
 import { MasterDetail } from "../master-detail.js"
+import { PageHeader } from "../page-header.js"
 import { DemoFields, DemoTable, demoSubmit } from "../story-fixtures.js"
 import { FormPanel } from "./form-panel.js"
 

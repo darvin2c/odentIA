@@ -18,7 +18,7 @@ export type {
   NavIcon,
   ShellLinkComponent,
 } from "./app-shell.js"
-export { AppShell, isNavItemActive, PageHeader } from "./app-shell.js"
+export { AppShell, isNavItemActive } from "./app-shell.js"
 export { AuthCard } from "./auth-card.js"
 export { AuthSplit } from "./auth-split.js"
 export { common } from "./common.js"
@@ -49,6 +49,7 @@ export {
   type MasterDetailProps,
   useDetailMode,
 } from "./master-detail.js"
+export { PageHeader, type PageHeaderProps } from "./page-header.js"
 export { PageShell, type PageShellProps } from "./page-shell.js"
 export * from "./phone/index.js"
 export {

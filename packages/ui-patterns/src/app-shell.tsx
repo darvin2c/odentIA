@@ -23,7 +23,6 @@ import {
   SidebarProvider,
   SidebarRail,
   SidebarSeparator,
-  SidebarTrigger,
   TooltipProvider,
   useSidebar,
 } from "@odentia/ui"
@@ -110,27 +109,6 @@ function isGroup(entry: AppShellNavEntry): entry is AppShellNavGroup {
   return (
     (entry as AppShellNavGroup).children !== undefined &&
     Array.isArray((entry as AppShellNavGroup).children)
-  )
-}
-
-// ----- PageHeader — header por página, no global -----
-export function PageHeader(props: {
-  title: string
-  subtitle?: string
-  actions?: React.ReactNode
-}): React.JSX.Element {
-  return (
-    <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-      <div className="min-w-0">
-        <h1 className="text-xl font-semibold tracking-tight text-foreground">{props.title}</h1>
-        {props.subtitle ? (
-          <p className="mt-1 text-sm text-muted-foreground">{props.subtitle}</p>
-        ) : null}
-      </div>
-      {props.actions ? (
-        <div className="flex shrink-0 items-center gap-2">{props.actions}</div>
-      ) : null}
-    </div>
   )
 }
 
