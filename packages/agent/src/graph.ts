@@ -22,12 +22,6 @@ const AgentState = Annotation.Root({
   }),
 })
 
-export interface AgentRunCtx {
-  db: Db
-  orgId: string
-  conversationId: string
-  secretsKey: Buffer
-}
 
 const BASE_SYSTEM_PROMPT = [
   "Eres el asistente virtual de una clínica dental en Perú.",
