@@ -2,7 +2,7 @@
 
 import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-table"
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest"
 import { DataTable, DataTableSkeleton } from "./data-table.js"
 import type { DataTableView } from "./data-table-view.js"
 import { DataRefreshMarker } from "./loading-state.js"
@@ -18,6 +18,24 @@ const columns: ColumnDef<Person>[] = [
 ]
 
 const originalMatchMedia = window.matchMedia
+
+// Base UI ScrollArea en jsdom necesita estos polyfills mínimos: la tabla vive
+// dentro de un área con barra horizontal propia.
+beforeAll(() => {
+  if (typeof window !== "undefined" && !window.ResizeObserver) {
+    window.ResizeObserver = class ResizeObserver {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    } as unknown as typeof window.ResizeObserver
+  }
+  if (typeof Element !== "undefined" && !Element.prototype.getAnimations) {
+    Element.prototype.getAnimations = () => []
+  }
+  if (typeof HTMLElement !== "undefined" && !HTMLElement.prototype.getAnimations) {
+    HTMLElement.prototype.getAnimations = () => []
+  }
+})
 
 afterEach(() => {
   cleanup()

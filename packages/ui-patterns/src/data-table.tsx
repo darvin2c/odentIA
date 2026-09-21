@@ -6,6 +6,7 @@ import {
   ItemDescription,
   ItemMedia,
   ItemTitle,
+  ScrollArea,
   Skeleton,
   Table,
   TableBody,
@@ -137,44 +138,51 @@ export function DataTable<TData>({
 function TableLayout<TData>({ table, onRowClick, isRowActive, className }: LayoutProps<TData>) {
   return (
     <div className={cn("overflow-hidden rounded-md bg-card", className)}>
-      <Table>
-        <TableHeader className="bg-muted/65">
-          {table.getHeaderGroups().map((headerGroup) => (
-            <TableRow key={headerGroup.id}>
-              {headerGroup.headers.map((header) => (
-                <TableHead key={header.id} className="h-12 px-3 text-sm">
-                  {header.isPlaceholder
-                    ? null
-                    : flexRender(header.column.columnDef.header, header.getContext())}
-                </TableHead>
-              ))}
-            </TableRow>
-          ))}
-        </TableHeader>
-        <TableBody>
-          {table.getRowModel().rows.map((row) => {
-            const active = isRowActive?.(row.original) ?? false
-            return (
-              <TableRow
-                key={row.id}
-                className={cn(onRowClick && "cursor-pointer", active && activeRowClass)}
-                {...activeRowProps(active)}
-                onClick={(event) => {
-                  if (!onRowClick) return
-                  if (isInteractiveTarget(event.target)) return
-                  onRowClick(row.original)
-                }}
-              >
-                {row.getVisibleCells().map((cell) => (
-                  <TableCell key={cell.id}>
-                    {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                  </TableCell>
+      {/* La tabla que no entra se recorre con la barra del sistema de diseño:
+          el contenedor del registry deja de scrollear (`overflow-visible`) para
+          que el desborde llegue al área, que solo scrollea en horizontal. Con
+          `overflow-x-auto` el navegador dibujaba su barra nativa —una por tabla
+          agrupada— y habilitaba además el scroll vertical del contenedor. */}
+      <ScrollArea horizontal className="[&_[data-slot=table-container]]:overflow-visible">
+        <Table>
+          <TableHeader className="bg-muted/65">
+            {table.getHeaderGroups().map((headerGroup) => (
+              <TableRow key={headerGroup.id}>
+                {headerGroup.headers.map((header) => (
+                  <TableHead key={header.id} className="h-12 px-3 text-sm">
+                    {header.isPlaceholder
+                      ? null
+                      : flexRender(header.column.columnDef.header, header.getContext())}
+                  </TableHead>
                 ))}
               </TableRow>
-            )
-          })}
-        </TableBody>
-      </Table>
+            ))}
+          </TableHeader>
+          <TableBody>
+            {table.getRowModel().rows.map((row) => {
+              const active = isRowActive?.(row.original) ?? false
+              return (
+                <TableRow
+                  key={row.id}
+                  className={cn(onRowClick && "cursor-pointer", active && activeRowClass)}
+                  {...activeRowProps(active)}
+                  onClick={(event) => {
+                    if (!onRowClick) return
+                    if (isInteractiveTarget(event.target)) return
+                    onRowClick(row.original)
+                  }}
+                >
+                  {row.getVisibleCells().map((cell) => (
+                    <TableCell key={cell.id}>
+                      {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                    </TableCell>
+                  ))}
+                </TableRow>
+              )
+            })}
+          </TableBody>
+        </Table>
+      </ScrollArea>
     </div>
   )
 }
