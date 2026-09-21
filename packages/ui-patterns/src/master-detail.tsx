@@ -99,6 +99,16 @@ export interface MasterDetailProps {
   panel?: React.ReactNode | null
   /** Ancho de la columna de detalle según el tipo de formulario (compacto → wizard). */
   panelSize?: DetailPanelSize
+  /**
+   * Cómo scrollea la lista con el detalle abierto:
+   * - `"panel"` (predeterminado): el group se acota al viewport y la columna
+   *   maestra scrollea por dentro. La cabecera y los filtros quedan a la vista.
+   * - `"page"`: la lista fluye y crece cuanto necesite, scrollea la página y el
+   *   detalle queda pegado al borde superior con el alto del viewport. El panel
+   *   y su pie siguen siempre visibles, pero la cabecera y los filtros se van
+   *   con el scroll.
+   */
+  listScroll?: "panel" | "page"
   className?: string
 }
 
@@ -108,10 +118,20 @@ export interface MasterDetailProps {
  * detalle se abre/cierra colapsando su panel, sin remontar el maestro.
  *
  * - Modo `drawer` (<1280px): no hay group; el maestro va a ancho completo y la
- *   página monta el formulario en un `FormDrawer`.
+ *   página monta el formulario en un `FormDrawer`. `listScroll` no aplica.
  * - Modo `panel` con detalle abierto: el group acota su alto al viewport menos
  *   el padding de la página y cada columna scrollea por dentro, así el detalle
- *   y su footer de acciones quedan siempre a la vista.
+ *   y su footer de acciones quedan siempre a la vista. Es `listScroll="panel"`
+ *   (predeterminado).
+ * - `listScroll="page"`: el group toma el alto de la lista y la página pasa a
+ *   ser el único scroller; el detalle y el handle van `sticky` con el alto del
+ *   viewport, así el formulario queda pegado arriba con su pie a la vista
+ *   mientras la lista pasa por detrás. En este modo el group suelta el
+ *   `overflow: hidden` de la librería —con él, un hijo `sticky` no se despega
+ *   del flujo— y la columna maestra deja de scrollear: la cabecera y los
+ *   filtros se van con el scroll, que es el precio de que la lista crezca
+ *   libre. El corte pegado asume el padding de página de 24px (`p-6`), el mismo
+ *   que ya asume el alto de `calc(100dvh - 3rem)`.
  * - Detalle cerrado: el panel colapsa a 0 y el handle se apaga (`w-0` +
  *   `disabled`), así el maestro recupera todo el ancho sin gutter fantasma.
  * - El ancho del detalle lo elige la página con `panelSize`: `md` para
@@ -138,9 +158,16 @@ export interface MasterDetailProps {
  * Con `prefers-reduced-motion: reduce` no se anima nada: ni el ancho ni el
  * deslizamiento.
  */
-export function MasterDetail({ children, panel, panelSize = "md", className }: MasterDetailProps) {
+export function MasterDetail({
+  children,
+  panel,
+  panelSize = "md",
+  listScroll = "panel",
+  className,
+}: MasterDetailProps) {
   const mode = useDetailMode()
   const open = panel != null
+  const pageScroll = listScroll === "page"
   const size = PANEL_SIZES[panelSize]
   const detailRef = usePanelRef()
   const groupRef = React.useRef<HTMLDivElement | null>(null)
@@ -206,13 +233,28 @@ export function MasterDetail({ children, panel, panelSize = "md", className }: M
       // Por `style` y no por clase: el wrapper trae `h-full` de base y el merge
       // de clases no garantiza que gane el alto fijo; la librería solo bloquea
       // display/flex-direction/flex-wrap/overflow, así que `height` es nuestro.
-      style={{ height: open ? "calc(100dvh - 3rem)" : "auto" }}
+      // Con scroll de página el alto lo pone la lista y el group suelta su
+      // `overflow: hidden`: con él, el detalle `sticky` queda encerrado y no se
+      // despega. La alineación se deja en `stretch` (predeterminada) a
+      // propósito: así la caja de cada columna abarca el alto de la lista y la
+      // tarjeta pegada tiene recorrido dentro de ella.
+      style={{
+        height: open && !pageScroll ? "calc(100dvh - 3rem)" : "auto",
+        ...(pageScroll ? { overflow: "visible" } : {}),
+      }}
       className={cn(ANCHO_ANIMADO, className)}
     >
       <ResizablePanel
         id="master"
         minSize="32rem"
-        className="flex h-full min-w-0 flex-col gap-6 overflow-y-auto"
+        className={cn(
+          "flex h-full min-w-0 flex-col gap-6",
+          // Con scroll de página la lista crece y scrollea la página: la barra
+          // propia de la columna competiría con aquella. El mínimo la deja del
+          // alto del detalle pegado, así una lista corta no deja la tarjeta
+          // salida del group.
+          pageScroll ? "min-h-[calc(100dvh-3rem)]" : "overflow-y-auto",
+        )}
       >
         {children}
       </ResizablePanel>
@@ -224,7 +266,13 @@ export function MasterDetail({ children, panel, panelSize = "md", className }: M
           const group = groupRef.current
           if (group) group.dataset.animating = "false"
         }}
-        className={cn("w-6 bg-transparent", !open && "w-0 overflow-hidden")}
+        className={cn(
+          "w-6 bg-transparent",
+          !open && "w-0 overflow-hidden",
+          // El handle acompaña al detalle pegado: sin esto se estiraría a todo
+          // el alto de la lista.
+          pageScroll && open && "sticky top-6 h-[calc(100dvh-3rem)]",
+        )}
       />
       <ResizablePanel
         id="detail"
@@ -234,7 +282,13 @@ export function MasterDetail({ children, panel, panelSize = "md", className }: M
         defaultSize={size.default}
         minSize={size.min}
         maxSize={size.max}
-        className="h-full min-w-0"
+        // La librería monta el alto en la caja de la columna y deja el
+        // `className` en el envoltorio de adentro: el `sticky` va ahí, dentro de
+        // una caja que abarca la lista entera.
+        className={cn(
+          "min-w-0",
+          pageScroll && open ? "sticky top-6 h-[calc(100dvh-3rem)]" : "h-full",
+        )}
       >
         {/* La caja recorta el deslizamiento: sin ella, mover el formulario
             agrandaría el área scrolleable del panel (barra horizontal). */}

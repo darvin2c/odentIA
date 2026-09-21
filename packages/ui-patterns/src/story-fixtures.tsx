@@ -16,7 +16,7 @@ import { type FormEvent, type ReactNode, useMemo, useState } from "react"
 import { DataTable } from "./data-table.js"
 import { DetailField, DetailList, DetailSection } from "./detail/detail-rows.js"
 import { type WizardStep, WizardSteps } from "./form/wizard-steps.js"
-import { RowActions, type RowActionItem } from "./row-actions.js"
+import { type RowActionItem, RowActions } from "./row-actions.js"
 
 /**
  * Fixtures compartidas por las stories: formularios de distintos anchos, un
@@ -154,30 +154,63 @@ const DEMO_ROWS: DemoBranch[] = [
   { id: "5", name: "Sede Callao", addressLine1: null, district: "Callao", isActive: true },
 ]
 
+/** Columnas de la tabla de demostración: las comparten las dos tablas. */
+const DEMO_BRANCH_COLUMNS: ColumnDef<DemoBranch>[] = [
+  { accessorKey: "name", header: "Nombre" },
+  {
+    accessorKey: "addressLine1",
+    header: "Dirección",
+    cell: ({ getValue }) => getValue<string | null>() ?? "—",
+  },
+  {
+    accessorKey: "district",
+    header: "Distrito",
+    cell: ({ getValue }) => getValue<string | null>() ?? "—",
+  },
+  {
+    accessorKey: "isActive",
+    header: "Estado",
+    cell: ({ getValue }) => (getValue<boolean>() ? "Activa" : "Inactiva"),
+  },
+]
+
 /** Tabla de demostración para las stories de `MasterDetail`. */
 export function DemoTable({ activeId }: { activeId?: string } = {}) {
-  const columns = useMemo<ColumnDef<DemoBranch>[]>(
-    () => [
-      { accessorKey: "name", header: "Nombre" },
-      {
-        accessorKey: "addressLine1",
-        header: "Dirección",
-        cell: ({ getValue }) => getValue<string | null>() ?? "—",
-      },
-      {
-        accessorKey: "district",
-        header: "Distrito",
-        cell: ({ getValue }) => getValue<string | null>() ?? "—",
-      },
-      {
-        accessorKey: "isActive",
-        header: "Estado",
-        cell: ({ getValue }) => (getValue<boolean>() ? "Activa" : "Inactiva"),
-      },
-    ],
-    [],
+  const table = useReactTable({
+    data: DEMO_ROWS,
+    columns: DEMO_BRANCH_COLUMNS,
+    getCoreRowModel: getCoreRowModel(),
+  })
+  return (
+    <DataTable table={table} isRowActive={activeId ? (row) => row.id === activeId : undefined} />
   )
-  const table = useReactTable({ data: DEMO_ROWS, columns, getCoreRowModel: getCoreRowModel() })
+}
+
+/**
+ * Tabla larga: la lista supera el viewport. Es lo que hace visible el detalle
+ * `sticky` con scroll de página (y, al revés, la columna que scrollea por
+ * dentro mientras la cabecera queda a la vista).
+ */
+export function DemoLongTable({
+  activeId,
+  count = 24,
+}: {
+  activeId?: string
+  count?: number
+} = {}) {
+  const data = useMemo(
+    () =>
+      Array.from({ length: count }, (_, index) => {
+        const base = DEMO_ROWS[index % DEMO_ROWS.length]
+        return { ...base, id: `${base.id}-${index}`, name: `${base.name} · ${index + 1}` }
+      }),
+    [count],
+  )
+  const table = useReactTable({
+    data,
+    columns: DEMO_BRANCH_COLUMNS,
+    getCoreRowModel: getCoreRowModel(),
+  })
   return (
     <DataTable table={table} isRowActive={activeId ? (row) => row.id === activeId : undefined} />
   )
@@ -233,8 +266,8 @@ export function DemoDetailBody() {
             Dolor a la masticación en el sector superior derecho desde hace cuatro días.
           </DetailField>
           <DetailField label="Evolución">
-            Se retira restauración deficiente, se evalúa vitalidad pulpar y se realiza
-            restauración con resina compuesta en pieza 16. Se indica control a los 15 días.
+            Se retira restauración deficiente, se evalúa vitalidad pulpar y se realiza restauración
+            con resina compuesta en pieza 16. Se indica control a los 15 días.
           </DetailField>
           <DetailField label="Indicaciones">
             Evitar alimentos duros por 48 horas. Cepillado normal con pasta fluorada.
