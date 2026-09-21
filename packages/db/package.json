@@ -18,7 +18,6 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@langchain/langgraph-checkpoint-postgres": "1.0.5",
     "@odentia/channels": "workspace:*",
     "@odentia/clinical": "workspace:*",
     "drizzle-orm": "0.45.2",

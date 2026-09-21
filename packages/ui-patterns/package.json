@@ -14,7 +14,6 @@
   },
   "dependencies": {
     "@maskito/core": "5.4.0",
-    "@maskito/kit": "5.4.0",
     "@maskito/phone": "5.4.0",
     "@maskito/react": "5.4.0",
     "@odentia/ui": "workspace:*",
