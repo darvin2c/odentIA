@@ -547,3 +547,95 @@ it("la biblioteca global es de solo lectura y las líneas se blindan por trigger
     ),
   ).rejects.toMatchObject({ cause: { code: "42501" } })
 })
+
+it("controles, recetas y cuenta se aíslan por tenant y no admiten borrado", async () => {
+  const paciente = "99999999-9999-9999-9999-999999999999"
+  const planItem = "55555555-5555-4555-8555-555555555555"
+  const contacto = "33333333-3333-3333-3333-333333333333"
+  const atencion = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+  // Vínculo previo: la responsabilidad exige contacto del propio paciente.
+  await ownerDb.execute(
+    sql`insert into patient_contact (organization_id, patient_id, contact_id, relationship)
+        values ('org_a', ${paciente}::uuid, ${contacto}::uuid, 'guardian') on conflict do nothing`,
+  )
+  await ownerDb.execute(
+    sql`insert into clinical_follow_up (organization_id, patient_id, plan_item_id, kind, title, due_at, status)
+        values ('org_a', ${paciente}::uuid, ${planItem}::uuid, 'tratamiento', 'Control RLS', now() + interval '7 days', 'pendiente')`,
+  )
+  await ownerDb.execute(
+    sql`insert into prescription (organization_id, patient_id, prescription_number, status)
+        values ('org_a', ${paciente}::uuid, 9001, 'emitida')`,
+  )
+  await ownerDb.execute(
+    sql`insert into prescription_item (organization_id, patient_id, prescription_id, medication_name, dose, route, frequency, duration)
+        select 'org_a', ${paciente}::uuid, id, 'Ibuprofeno', '400 mg', 'Oral', 'Cada 8 horas', '3 días'
+        from prescription where prescription_number = 9001`,
+  )
+  await ownerDb.execute(
+    sql`insert into patient_charge (id, organization_id, patient_id, description, amount_cents, currency)
+        values ('c0000000-0000-4000-8000-000000000001', 'org_a', ${paciente}::uuid, 'Cargo RLS', 12000, 'PEN')`,
+  )
+  await ownerDb.execute(
+    sql`insert into patient_payment (id, organization_id, patient_id, amount_cents, currency, paid_at, method)
+        values ('c0000000-0000-4000-8000-000000000002', 'org_a', ${paciente}::uuid, 8000, 'PEN', now(), 'efectivo')`,
+  )
+  await ownerDb.execute(
+    sql`insert into patient_payment_application (organization_id, patient_id, payment_id, charge_id, amount_cents)
+        values ('org_a', ${paciente}::uuid, 'c0000000-0000-4000-8000-000000000002', 'c0000000-0000-4000-8000-000000000001', 5000)`,
+  )
+  await ownerDb.execute(
+    sql`insert into patient_payment_refund (organization_id, patient_id, payment_id, amount_cents, refunded_at, reason)
+        values ('org_a', ${paciente}::uuid, 'c0000000-0000-4000-8000-000000000002', 1000, now(), 'Ajuste RLS')`,
+  )
+  await ownerDb.execute(
+    sql`insert into patient_responsibility (organization_id, patient_id, contact_id, kind, starts_at)
+        values ('org_a', ${paciente}::uuid, ${contacto}::uuid, 'representante_legal', current_date)`,
+  )
+  // Nota: `atencion` se referencia para documentar el contexto clínico del corte.
+  expect(atencion).toBe("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
+
+  for (const table of [
+    "clinical_follow_up",
+    "prescription",
+    "prescription_item",
+    "patient_charge",
+    "patient_payment",
+    "patient_payment_application",
+    "patient_payment_refund",
+    "patient_responsibility",
+  ] as const) {
+    const query = sql`select id from ${sql.identifier(table)}`
+    expect(
+      await withOrgContext(appDb, "org_a", (tx) => tx.execute(query)),
+      `${table}: org A`,
+    ).toHaveLength(1)
+    expect(
+      await withOrgContext(appDb, "org_b", (tx) => tx.execute(query)),
+      `${table}: org B`,
+    ).toHaveLength(0)
+    expect(await appDb.execute(query), `${table}: sin contexto`).toHaveLength(0)
+    await expect(
+      withOrgContext(appDb, "org_a", (tx) =>
+        tx.execute(sql`delete from ${sql.identifier(table)}`),
+      ),
+      `${table}: DELETE denegado`,
+    ).rejects.toMatchObject({ cause: { code: "42501" } })
+  }
+
+  // Escritura cruzada: con contexto de B no se cuela una fila de A.
+  await expect(
+    withOrgContext(appDb, "org_b", (tx) =>
+      tx.execute(
+        sql`insert into patient_charge (organization_id, patient_id, description, amount_cents, currency)
+            values ('org_a', ${paciente}::uuid, 'Intruso', 1, 'PEN')`,
+      ),
+    ),
+  ).rejects.toMatchObject({ cause: { code: "42501" } })
+  // La anulación con motivo sí es una corrección permitida sobre el cargo.
+  const anulado = await withOrgContext(appDb, "org_a", (tx) =>
+    tx.execute(
+      sql`update patient_charge set voided_at = now(), void_reason = 'corrección' where description = 'Cargo RLS' returning id`,
+    ),
+  )
+  expect(anulado).toHaveLength(1)
+})

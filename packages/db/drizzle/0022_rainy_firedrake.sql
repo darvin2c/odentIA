@@ -1,0 +1,2 @@
+ALTER TABLE "treatment_plan_item" ADD COLUMN "odontogram_entry_id" uuid;--> statement-breakpoint
+ALTER TABLE "treatment_plan_item" ADD CONSTRAINT "treatment_plan_item_odontogram_entry_id_odontogram_entry_id_fk" FOREIGN KEY ("odontogram_entry_id") REFERENCES "public"."odontogram_entry"("id") ON DELETE no action ON UPDATE no action;

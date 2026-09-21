@@ -1,4 +1,11 @@
-import type { BloodGroup, ContactRelationship, ProcedureCodingSnapshot, RegistrationAnswers, RegistrationEntryPoint, RegistrationRespondent } from "@odentia/clinical"
+import type {
+  BloodGroup,
+  ContactRelationship,
+  ProcedureCodingSnapshot,
+  RegistrationAnswers,
+  RegistrationEntryPoint,
+  RegistrationRespondent,
+} from "@odentia/clinical"
 import { sql } from "drizzle-orm"
 import {
   type AnyPgColumn,
@@ -64,7 +71,10 @@ export const patient = pgTable(
   },
   (table) => [
     uniqueIndex("patient_org_id_uidx").on(table.organizationId, table.id),
-    check("patient_blood_group_check", sql`${table.bloodGroup} IS NULL OR ${table.bloodGroup} IN ('A+','A-','B+','B-','AB+','AB-','O+','O-','unknown')`),
+    check(
+      "patient_blood_group_check",
+      sql`${table.bloodGroup} IS NULL OR ${table.bloodGroup} IN ('A+','A-','B+','B-','AB+','AB-','O+','O-','unknown')`,
+    ),
     uniqueIndex("patient_org_number_uidx").on(table.organizationId, table.patientNumber),
     uniqueIndex("patient_org_doc_uidx")
       .on(table.organizationId, table.docType, table.docNumber)
@@ -72,71 +82,130 @@ export const patient = pgTable(
   ],
 )
 
-export const patientContact = pgTable("patient_contact", {
-  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
-  organizationId: orgFk("organization_id"),
-  patientId: uuid("patient_id").notNull(),
-  contactId: uuid("contact_id").notNull(),
-  relationship: text("relationship").$type<ContactRelationship>().notNull(),
-  relationshipDetail: text("relationship_detail"),
-  isPreferred: boolean("is_preferred").notNull().default(false),
-  createdBy: text("created_by").references(() => user.id),
-  ...timestamps,
-}, table => [
-  foreignKey({ columns: [table.organizationId, table.patientId], foreignColumns: [patient.organizationId, patient.id] }),
-  foreignKey({ columns: [table.organizationId, table.contactId], foreignColumns: [contact.organizationId, contact.id] }),
-  uniqueIndex("patient_contact_org_patient_contact_uidx").on(table.organizationId, table.patientId, table.contactId),
-  uniqueIndex("patient_contact_self_patient_uidx").on(table.organizationId, table.patientId).where(sql`${table.relationship} = 'self'`),
-  uniqueIndex("patient_contact_self_contact_uidx").on(table.organizationId, table.contactId).where(sql`${table.relationship} = 'self'`),
-  uniqueIndex("patient_contact_preferred_uidx").on(table.organizationId, table.patientId).where(sql`${table.isPreferred}`),
-  check("patient_contact_relationship_check", sql`${table.relationship} IN ('self','guardian','family','other')`),
-  check("patient_contact_detail_check", sql`length(${table.relationshipDetail}) <= 100`),
-])
+export const patientContact = pgTable(
+  "patient_contact",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    organizationId: orgFk("organization_id"),
+    patientId: uuid("patient_id").notNull(),
+    contactId: uuid("contact_id").notNull(),
+    relationship: text("relationship").$type<ContactRelationship>().notNull(),
+    relationshipDetail: text("relationship_detail"),
+    isPreferred: boolean("is_preferred").notNull().default(false),
+    createdBy: text("created_by").references(() => user.id),
+    ...timestamps,
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.organizationId, table.patientId],
+      foreignColumns: [patient.organizationId, patient.id],
+    }),
+    foreignKey({
+      columns: [table.organizationId, table.contactId],
+      foreignColumns: [contact.organizationId, contact.id],
+    }),
+    uniqueIndex("patient_contact_org_patient_contact_uidx").on(
+      table.organizationId,
+      table.patientId,
+      table.contactId,
+    ),
+    uniqueIndex("patient_contact_self_patient_uidx")
+      .on(table.organizationId, table.patientId)
+      .where(sql`${table.relationship} = 'self'`),
+    uniqueIndex("patient_contact_self_contact_uidx")
+      .on(table.organizationId, table.contactId)
+      .where(sql`${table.relationship} = 'self'`),
+    uniqueIndex("patient_contact_preferred_uidx")
+      .on(table.organizationId, table.patientId)
+      .where(sql`${table.isPreferred}`),
+    check(
+      "patient_contact_relationship_check",
+      sql`${table.relationship} IN ('self','guardian','family','other')`,
+    ),
+    check("patient_contact_detail_check", sql`length(${table.relationshipDetail}) <= 100`),
+  ],
+)
 
-export const patientRegistrationLink = pgTable("patient_registration_link", {
-  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
-  organizationId: orgFk("organization_id"),
-  contactId: uuid("contact_id").notNull(),
-  conversationId: uuid("conversation_id").notNull(),
-  tokenHash: text("token_hash").notNull(),
-  createdBy: text("created_by").notNull().references(() => user.id),
-  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
-  consumedAt: timestamp("consumed_at", { withTimezone: true }),
-  revokedAt: timestamp("revoked_at", { withTimezone: true }),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-}, table => [
-  uniqueIndex("patient_registration_link_org_id_uidx").on(table.organizationId, table.id),
-  uniqueIndex("patient_registration_link_token_uidx").on(table.tokenHash),
-  foreignKey({ columns: [table.organizationId, table.contactId], foreignColumns: [contact.organizationId, contact.id] }),
-  foreignKey({ columns: [table.organizationId, table.conversationId], foreignColumns: [conversation.organizationId, conversation.id] }),
-])
+export const patientRegistrationLink = pgTable(
+  "patient_registration_link",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    organizationId: orgFk("organization_id"),
+    contactId: uuid("contact_id").notNull(),
+    conversationId: uuid("conversation_id").notNull(),
+    tokenHash: text("token_hash").notNull(),
+    createdBy: text("created_by")
+      .notNull()
+      .references(() => user.id),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    consumedAt: timestamp("consumed_at", { withTimezone: true }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("patient_registration_link_org_id_uidx").on(table.organizationId, table.id),
+    uniqueIndex("patient_registration_link_token_uidx").on(table.tokenHash),
+    foreignKey({
+      columns: [table.organizationId, table.contactId],
+      foreignColumns: [contact.organizationId, contact.id],
+    }),
+    foreignKey({
+      columns: [table.organizationId, table.conversationId],
+      foreignColumns: [conversation.organizationId, conversation.id],
+    }),
+  ],
+)
 
-export const patientRegistration = pgTable("patient_registration", {
-  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
-  organizationId: orgFk("organization_id"),
-  patientId: uuid("patient_id").notNull(),
-  submissionId: uuid("submission_id"),
-  payloadHash: text("payload_hash"),
-  entryPoint: text("entry_point").$type<RegistrationEntryPoint | "legacy">().notNull(),
-  respondent: text("respondent").$type<RegistrationRespondent>(),
-  actorUserId: text("actor_user_id").references(() => user.id),
-  contextContactId: uuid("context_contact_id"),
-  conversationId: uuid("conversation_id"),
-  linkId: uuid("link_id"),
-  formVersion: integer("form_version"),
-  answers: jsonb("answers").$type<RegistrationAnswers | Record<string, never>>().notNull(),
-  privacyNotice: text("privacy_notice"),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-}, table => [
-  uniqueIndex("patient_registration_org_patient_uidx").on(table.organizationId, table.patientId),
-  uniqueIndex("patient_registration_submission_uidx").on(table.organizationId, table.submissionId).where(sql`${table.submissionId} IS NOT NULL`),
-  foreignKey({ columns: [table.organizationId, table.patientId], foreignColumns: [patient.organizationId, patient.id] }),
-  foreignKey({ columns: [table.organizationId, table.contextContactId], foreignColumns: [contact.organizationId, contact.id] }),
-  foreignKey({ columns: [table.organizationId, table.conversationId], foreignColumns: [conversation.organizationId, conversation.id] }),
-  foreignKey({ columns: [table.organizationId, table.linkId], foreignColumns: [patientRegistrationLink.organizationId, patientRegistrationLink.id] }),
-  check("patient_registration_entry_check", sql`${table.entryPoint} IN ('platform','public_link','qr','conversation','legacy')`),
-  check("patient_registration_respondent_check", sql`${table.respondent} IS NULL OR ${table.respondent} IN ('patient','representative','staff')`),
-])
+export const patientRegistration = pgTable(
+  "patient_registration",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    organizationId: orgFk("organization_id"),
+    patientId: uuid("patient_id").notNull(),
+    submissionId: uuid("submission_id"),
+    payloadHash: text("payload_hash"),
+    entryPoint: text("entry_point").$type<RegistrationEntryPoint | "legacy">().notNull(),
+    respondent: text("respondent").$type<RegistrationRespondent>(),
+    actorUserId: text("actor_user_id").references(() => user.id),
+    contextContactId: uuid("context_contact_id"),
+    conversationId: uuid("conversation_id"),
+    linkId: uuid("link_id"),
+    formVersion: integer("form_version"),
+    answers: jsonb("answers").$type<RegistrationAnswers | Record<string, never>>().notNull(),
+    privacyNotice: text("privacy_notice"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("patient_registration_org_patient_uidx").on(table.organizationId, table.patientId),
+    uniqueIndex("patient_registration_submission_uidx")
+      .on(table.organizationId, table.submissionId)
+      .where(sql`${table.submissionId} IS NOT NULL`),
+    foreignKey({
+      columns: [table.organizationId, table.patientId],
+      foreignColumns: [patient.organizationId, patient.id],
+    }),
+    foreignKey({
+      columns: [table.organizationId, table.contextContactId],
+      foreignColumns: [contact.organizationId, contact.id],
+    }),
+    foreignKey({
+      columns: [table.organizationId, table.conversationId],
+      foreignColumns: [conversation.organizationId, conversation.id],
+    }),
+    foreignKey({
+      columns: [table.organizationId, table.linkId],
+      foreignColumns: [patientRegistrationLink.organizationId, patientRegistrationLink.id],
+    }),
+    check(
+      "patient_registration_entry_check",
+      sql`${table.entryPoint} IN ('platform','public_link','qr','conversation','legacy')`,
+    ),
+    check(
+      "patient_registration_respondent_check",
+      sql`${table.respondent} IS NULL OR ${table.respondent} IN ('patient','representative','staff')`,
+    ),
+  ],
+)
 
 /** Correlativos por organización (patient → HC-000123; futuros comprobantes). */
 export const orgCounter = pgTable(
@@ -221,8 +290,7 @@ export const patientAnamnesis = pgTable(
       .references(() => patient.id, { onDelete: "cascade" }),
     version: integer("version").notNull(),
     answers: jsonb("answers").notNull(),
-    createdBy: text("created_by")
-      .references(() => user.id),
+    createdBy: text("created_by").references(() => user.id),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
@@ -528,7 +596,8 @@ export const serviceCatalog = pgTable(
     name: text("name").notNull(),
     specialty: text("specialty"),
     scope: text("scope"),
-    priceCents: integer("price_cents"),
+    // Todo servicio tiene tarifa explícita (>= 0; 0 = incluido sin costo).
+    priceCents: integer("price_cents").notNull(),
     currency: char("currency", { length: 3 }).notNull().default("PEN"),
     durationMin: integer("duration_min"),
     isActive: boolean("is_active").notNull().default(true),
@@ -541,28 +610,46 @@ export const serviceCatalog = pgTable(
     index("service_catalog_org_active_idx").on(table.organizationId, table.isActive),
     index("service_catalog_org_specialty_idx").on(table.organizationId, table.specialty),
     index("service_catalog_template_idx").on(table.templateId),
+    check("service_catalog_price_check", sql`${table.priceCents} >= 0`),
   ],
 )
 /** Procedimiento de una sesión; completar la indicación es una decisión explícita. */
-export const encounterProcedure = pgTable("encounter_procedure", {
-  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
-  organizationId: orgFk("organization_id"),
-  encounterId: uuid("encounter_id")
-    .notNull()
-    .references(() => encounter.id, { onDelete: "cascade" }),
-  serviceId: uuid("service_id").references(() => serviceCatalog.id),
-  toothNumber: smallint("tooth_number"),
-  scope: text("scope"),
-  surfaces: text("surfaces").array().notNull().default([]),
-  quadrant: smallint("quadrant"),
-  arch: text("arch"),
-  description: text("description").notNull(),
-  diagnosisCode: text("diagnosis_code").references(() => cie10Code.code),
-  planItemId: uuid("plan_item_id").references(() => treatmentPlanItem.id),
-  codings: jsonb("codings").$type<ProcedureCodingSnapshot[]>().notNull().default([]),
-  createdBy: text("created_by").references(() => user.id),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-})
+export const encounterProcedure = pgTable(
+  "encounter_procedure",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    organizationId: orgFk("organization_id"),
+    encounterId: uuid("encounter_id")
+      .notNull()
+      .references(() => encounter.id, { onDelete: "cascade" }),
+    serviceId: uuid("service_id").references(() => serviceCatalog.id),
+    toothNumber: smallint("tooth_number"),
+    scope: text("scope"),
+    surfaces: text("surfaces").array().notNull().default([]),
+    quadrant: smallint("quadrant"),
+    arch: text("arch"),
+    description: text("description").notNull(),
+    diagnosisCode: text("diagnosis_code").references(() => cie10Code.code),
+    planItemId: uuid("plan_item_id").references(() => treatmentPlanItem.id),
+    // Snapshot del costo al registrar el acto (tarifario o ítem del plan);
+    // el acto libre (sin servicio) no tiene precio y nunca genera cargo.
+    priceCents: integer("price_cents"),
+    currency: char("currency", { length: 3 }),
+    codings: jsonb("codings").$type<ProcedureCodingSnapshot[]>().notNull().default([]),
+    createdBy: text("created_by").references(() => user.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check(
+      "encounter_procedure_price_check",
+      sql`${table.priceCents} IS NULL OR ${table.priceCents} >= 0`,
+    ),
+    check(
+      "encounter_procedure_price_currency_check",
+      sql`(${table.priceCents} IS NULL) = (${table.currency} IS NULL)`,
+    ),
+  ],
+)
 
 /** Plan clínico longitudinal del paciente: existe antes que cualquier
  * presupuesto y puede continuar en múltiples visitas. `originEncounterId`
@@ -586,18 +673,26 @@ export const treatmentPlan = pgTable(
 )
 
 /** Alternativas excluyentes para un mismo problema clínico. */
-export const treatmentOptionGroup = pgTable("treatment_option_group", {
-  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
-  organizationId: orgFk("organization_id"),
-  patientId: uuid("patient_id").notNull().references(() => patient.id, { onDelete: "cascade" }),
-  planId: uuid("plan_id").notNull().references(() => treatmentPlan.id),
-  title: text("title").notNull(),
-  createdBy: text("created_by").references(() => user.id),
-  ...timestamps,
-}, table => [
-  index("treatment_option_group_org_patient_idx").on(table.organizationId, table.patientId),
-  index("treatment_option_group_org_plan_idx").on(table.organizationId, table.planId),
-])
+export const treatmentOptionGroup = pgTable(
+  "treatment_option_group",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    organizationId: orgFk("organization_id"),
+    patientId: uuid("patient_id")
+      .notNull()
+      .references(() => patient.id, { onDelete: "cascade" }),
+    planId: uuid("plan_id")
+      .notNull()
+      .references(() => treatmentPlan.id),
+    title: text("title").notNull(),
+    createdBy: text("created_by").references(() => user.id),
+    ...timestamps,
+  },
+  (table) => [
+    index("treatment_option_group_org_patient_idx").on(table.organizationId, table.patientId),
+    index("treatment_option_group_org_plan_idx").on(table.organizationId, table.planId),
+  ],
+)
 /** Cabecera del documento económico: siempre pertenece a un plan clínico.
  * `status`/`acceptedByName`/`decisionNote` conservan la máquina de estados
  * actual; el contenido cotizado vive en `treatment_budget_item` (snapshot),
@@ -615,7 +710,9 @@ export const treatmentBudget = pgTable(
       .references(() => treatmentPlan.id),
     budgetNumber: integer("budget_number").notNull(),
     revisionNumber: integer("revision_number").notNull().default(1),
-    supersedesBudgetId: uuid("supersedes_budget_id").references((): AnyPgColumn => treatmentBudget.id),
+    supersedesBudgetId: uuid("supersedes_budget_id").references(
+      (): AnyPgColumn => treatmentBudget.id,
+    ),
     presentedAt: timestamp("presented_at", { withTimezone: true }),
     decisionContactId: uuid("decision_contact_id").references(() => contact.id),
     title: text("title").notNull(),
@@ -630,8 +727,15 @@ export const treatmentBudget = pgTable(
     ...timestamps,
   },
   (table) => [
-    uniqueIndex("treatment_budget_org_number_uidx").on(table.organizationId, table.budgetNumber, table.revisionNumber),
-    check("treatment_budget_status_check", sql`${table.status} IN ('borrador','presentado','aceptado','parcial','rechazado','pospuesto','cancelado','sustituido','historico')`),
+    uniqueIndex("treatment_budget_org_number_uidx").on(
+      table.organizationId,
+      table.budgetNumber,
+      table.revisionNumber,
+    ),
+    check(
+      "treatment_budget_status_check",
+      sql`${table.status} IN ('borrador','presentado','aceptado','parcial','rechazado','pospuesto','cancelado','sustituido','historico')`,
+    ),
     check("treatment_budget_revision_check", sql`${table.revisionNumber} > 0`),
     index("treatment_budget_org_patient_idx").on(table.organizationId, table.patientId),
     index("treatment_budget_org_plan_idx").on(table.organizationId, table.planId),
@@ -653,7 +757,11 @@ export const treatmentPlanItem = pgTable(
     serviceId: uuid("service_id").references(() => serviceCatalog.id),
     budgetId: uuid("budget_id").references(() => treatmentBudget.id),
     optionGroupId: uuid("option_group_id").references(() => treatmentOptionGroup.id),
-    supersedesItemId: uuid("supersedes_item_id").references((): AnyPgColumn => treatmentPlanItem.id),
+    supersedesItemId: uuid("supersedes_item_id").references(
+      (): AnyPgColumn => treatmentPlanItem.id,
+    ),
+    /** Hallazgo del odontograma que motivó la indicación (trazabilidad clínica explícita). */
+    odontogramEntryId: uuid("odontogram_entry_id").references(() => odontogramEntry.id),
     isRecommended: boolean("is_recommended").notNull().default(false),
     decisionStatus: text("decision_status").notNull().default("pendiente"),
     decisionNote: text("decision_note"),
@@ -684,8 +792,14 @@ export const treatmentPlanItem = pgTable(
     index("treatment_plan_item_org_service_idx").on(table.organizationId, table.serviceId),
     index("treatment_plan_item_org_budget_idx").on(table.organizationId, table.budgetId),
     index("treatment_plan_item_org_plan_idx").on(table.organizationId, table.planId),
-    check("treatment_plan_item_status_check", sql`${table.status} IN ('pendiente','programado','en_curso','suspendido','realizado','cancelado','reemplazado')`),
-    check("treatment_plan_item_decision_status_check", sql`${table.decisionStatus} IN ('pendiente','aceptado','pospuesto','rechazado','reemplazado')`),
+    check(
+      "treatment_plan_item_status_check",
+      sql`${table.status} IN ('pendiente','programado','en_curso','suspendido','realizado','cancelado','reemplazado')`,
+    ),
+    check(
+      "treatment_plan_item_decision_status_check",
+      sql`${table.decisionStatus} IN ('pendiente','aceptado','pospuesto','rechazado','reemplazado')`,
+    ),
   ],
 )
 /** Línea económica cotizada en un presupuesto: snapshot de lo realmente
@@ -793,181 +907,262 @@ export const cie10Code = pgTable("cie10_code", {
 })
 
 /** Controles longitudinales; una cita programada no equivale a un control realizado. */
-export const clinicalFollowUp = pgTable("clinical_follow_up", {
-  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
-  organizationId: orgFk("organization_id"),
-  patientId: uuid("patient_id").notNull().references(() => patient.id),
-  planItemId: uuid("plan_item_id").references(() => treatmentPlanItem.id),
-  encounterProcedureId: uuid("encounter_procedure_id").references(() => encounterProcedure.id),
-  originEncounterId: uuid("origin_encounter_id").references(() => encounter.id),
-  kind: text("kind").notNull(),
-  title: text("title").notNull(),
-  instructions: text("instructions"),
-  dueAt: timestamp("due_at", { withTimezone: true }).notNull(),
-  status: text("status").notNull().default("pendiente"),
-  scheduledAt: timestamp("scheduled_at", { withTimezone: true }),
-  completedEncounterId: uuid("completed_encounter_id").references(() => encounter.id),
-  outcome: text("outcome"),
-  cancelledReason: text("cancelled_reason"),
-  createdBy: text("created_by").references(() => user.id),
-  ...timestamps,
-  completedAt: timestamp("completed_at", { withTimezone: true }),
-  cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
-}, table => [
-  index("clinical_follow_up_org_patient_idx").on(table.organizationId, table.patientId),
-  index("clinical_follow_up_item_idx").on(table.organizationId, table.planItemId),
-  index("clinical_follow_up_due_idx").on(table.organizationId, table.dueAt),
-  check("clinical_follow_up_kind_check", sql`${table.kind} IN ('tratamiento','mantenimiento')`),
-  check("clinical_follow_up_status_check", sql`${table.status} IN ('pendiente','programado','realizado','cancelado')`),
-  check("clinical_follow_up_treatment_check", sql`${table.kind} <> 'tratamiento' OR ${table.planItemId} IS NOT NULL`),
-])
+export const clinicalFollowUp = pgTable(
+  "clinical_follow_up",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    organizationId: orgFk("organization_id"),
+    patientId: uuid("patient_id")
+      .notNull()
+      .references(() => patient.id),
+    planItemId: uuid("plan_item_id").references(() => treatmentPlanItem.id),
+    encounterProcedureId: uuid("encounter_procedure_id").references(() => encounterProcedure.id),
+    originEncounterId: uuid("origin_encounter_id").references(() => encounter.id),
+    kind: text("kind").notNull(),
+    title: text("title").notNull(),
+    instructions: text("instructions"),
+    dueAt: timestamp("due_at", { withTimezone: true }).notNull(),
+    status: text("status").notNull().default("pendiente"),
+    scheduledAt: timestamp("scheduled_at", { withTimezone: true }),
+    completedEncounterId: uuid("completed_encounter_id").references(() => encounter.id),
+    outcome: text("outcome"),
+    cancelledReason: text("cancelled_reason"),
+    createdBy: text("created_by").references(() => user.id),
+    ...timestamps,
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
+  },
+  (table) => [
+    index("clinical_follow_up_org_patient_idx").on(table.organizationId, table.patientId),
+    index("clinical_follow_up_item_idx").on(table.organizationId, table.planItemId),
+    index("clinical_follow_up_due_idx").on(table.organizationId, table.dueAt),
+    check("clinical_follow_up_kind_check", sql`${table.kind} IN ('tratamiento','mantenimiento')`),
+    check(
+      "clinical_follow_up_status_check",
+      sql`${table.status} IN ('pendiente','programado','realizado','cancelado')`,
+    ),
+    check(
+      "clinical_follow_up_treatment_check",
+      sql`${table.kind} <> 'tratamiento' OR ${table.planItemId} IS NOT NULL`,
+    ),
+  ],
+)
 
-export const prescription = pgTable("prescription", {
-  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
-  organizationId: orgFk("organization_id"),
-  patientId: uuid("patient_id").notNull().references(() => patient.id),
-  encounterId: uuid("encounter_id").references(() => encounter.id),
-  planItemId: uuid("plan_item_id").references(() => treatmentPlanItem.id),
-  prescriptionNumber: integer("prescription_number").notNull(),
-  status: text("status").notNull().default("emitida"),
-  notes: text("notes"),
-  issuedBy: text("issued_by").references(() => user.id),
-  issuedAt: timestamp("issued_at", { withTimezone: true }).notNull().defaultNow(),
-  cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
-  cancelledBy: text("cancelled_by").references(() => user.id),
-  cancelReason: text("cancel_reason"),
-  ...timestamps,
-}, table => [
-  uniqueIndex("prescription_org_number_uidx").on(table.organizationId, table.prescriptionNumber),
-  index("prescription_org_patient_idx").on(table.organizationId, table.patientId),
-  index("prescription_encounter_idx").on(table.organizationId, table.encounterId),
-  index("prescription_item_idx").on(table.organizationId, table.planItemId),
-  check("prescription_status_check", sql`${table.status} IN ('emitida','anulada')`),
-])
+export const prescription = pgTable(
+  "prescription",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    organizationId: orgFk("organization_id"),
+    patientId: uuid("patient_id")
+      .notNull()
+      .references(() => patient.id),
+    encounterId: uuid("encounter_id").references(() => encounter.id),
+    planItemId: uuid("plan_item_id").references(() => treatmentPlanItem.id),
+    prescriptionNumber: integer("prescription_number").notNull(),
+    status: text("status").notNull().default("emitida"),
+    notes: text("notes"),
+    issuedBy: text("issued_by").references(() => user.id),
+    issuedAt: timestamp("issued_at", { withTimezone: true }).notNull().defaultNow(),
+    cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
+    cancelledBy: text("cancelled_by").references(() => user.id),
+    cancelReason: text("cancel_reason"),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("prescription_org_number_uidx").on(table.organizationId, table.prescriptionNumber),
+    index("prescription_org_patient_idx").on(table.organizationId, table.patientId),
+    index("prescription_encounter_idx").on(table.organizationId, table.encounterId),
+    index("prescription_item_idx").on(table.organizationId, table.planItemId),
+    check("prescription_status_check", sql`${table.status} IN ('emitida','anulada')`),
+  ],
+)
 
-export const prescriptionItem = pgTable("prescription_item", {
-  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
-  organizationId: orgFk("organization_id"),
-  patientId: uuid("patient_id").notNull().references(() => patient.id),
-  prescriptionId: uuid("prescription_id").notNull().references(() => prescription.id, { onDelete: "cascade" }),
-  medicationName: text("medication_name").notNull(),
-  dose: text("dose").notNull(),
-  route: text("route").notNull(),
-  frequency: text("frequency").notNull(),
-  duration: text("duration").notNull(),
-  quantity: integer("quantity"),
-  instructions: text("instructions"),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-}, table => [
-  index("prescription_item_org_patient_idx").on(table.organizationId, table.patientId),
-  index("prescription_item_prescription_idx").on(table.prescriptionId),
-  check("prescription_item_quantity_check", sql`${table.quantity} IS NULL OR ${table.quantity} > 0`),
-])
+export const prescriptionItem = pgTable(
+  "prescription_item",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    organizationId: orgFk("organization_id"),
+    patientId: uuid("patient_id")
+      .notNull()
+      .references(() => patient.id),
+    prescriptionId: uuid("prescription_id")
+      .notNull()
+      .references(() => prescription.id, { onDelete: "cascade" }),
+    medicationName: text("medication_name").notNull(),
+    dose: text("dose").notNull(),
+    route: text("route").notNull(),
+    frequency: text("frequency").notNull(),
+    duration: text("duration").notNull(),
+    quantity: integer("quantity"),
+    instructions: text("instructions"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("prescription_item_org_patient_idx").on(table.organizationId, table.patientId),
+    index("prescription_item_prescription_idx").on(table.prescriptionId),
+    check(
+      "prescription_item_quantity_check",
+      sql`${table.quantity} IS NULL OR ${table.quantity} > 0`,
+    ),
+  ],
+)
 
 /** Cargos, pagos y aplicaciones se corrigen por anulación, nunca por borrado. */
-export const patientCharge = pgTable("patient_charge", {
-  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
-  organizationId: orgFk("organization_id"),
-  patientId: uuid("patient_id").notNull().references(() => patient.id),
-  planItemId: uuid("plan_item_id").references(() => treatmentPlanItem.id),
-  budgetItemId: uuid("budget_item_id").references(() => treatmentBudgetItem.id),
-  encounterProcedureId: uuid("encounter_procedure_id").references(() => encounterProcedure.id),
-  description: text("description").notNull(),
-  amountCents: integer("amount_cents").notNull(),
-  currency: char("currency", { length: 3 }).notNull(),
-  dueAt: timestamp("due_at", { withTimezone: true }),
-  notes: text("notes"),
-  createdBy: text("created_by").references(() => user.id),
-  ...timestamps,
-  voidedAt: timestamp("voided_at", { withTimezone: true }),
-  voidedBy: text("voided_by").references(() => user.id),
-  voidReason: text("void_reason"),
-}, table => [
-  index("patient_charge_org_patient_idx").on(table.organizationId, table.patientId),
-  index("patient_charge_item_idx").on(table.organizationId, table.planItemId),
-  index("patient_charge_budget_item_idx").on(table.organizationId, table.budgetItemId),
-  check("patient_charge_amount_check", sql`${table.amountCents} > 0`),
-])
+export const patientCharge = pgTable(
+  "patient_charge",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    organizationId: orgFk("organization_id"),
+    patientId: uuid("patient_id")
+      .notNull()
+      .references(() => patient.id),
+    planItemId: uuid("plan_item_id").references(() => treatmentPlanItem.id),
+    budgetItemId: uuid("budget_item_id").references(() => treatmentBudgetItem.id),
+    encounterProcedureId: uuid("encounter_procedure_id").references(() => encounterProcedure.id),
+    description: text("description").notNull(),
+    amountCents: integer("amount_cents").notNull(),
+    currency: char("currency", { length: 3 }).notNull(),
+    dueAt: timestamp("due_at", { withTimezone: true }),
+    notes: text("notes"),
+    createdBy: text("created_by").references(() => user.id),
+    ...timestamps,
+    voidedAt: timestamp("voided_at", { withTimezone: true }),
+    voidedBy: text("voided_by").references(() => user.id),
+    voidReason: text("void_reason"),
+  },
+  (table) => [
+    index("patient_charge_org_patient_idx").on(table.organizationId, table.patientId),
+    index("patient_charge_item_idx").on(table.organizationId, table.planItemId),
+    index("patient_charge_budget_item_idx").on(table.organizationId, table.budgetItemId),
+    check("patient_charge_amount_check", sql`${table.amountCents} > 0`),
+  ],
+)
 
-export const patientPayment = pgTable("patient_payment", {
-  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
-  organizationId: orgFk("organization_id"),
-  patientId: uuid("patient_id").notNull().references(() => patient.id),
-  payerContactId: uuid("payer_contact_id").references(() => contact.id),
-  amountCents: integer("amount_cents").notNull(),
-  currency: char("currency", { length: 3 }).notNull(),
-  paidAt: timestamp("paid_at", { withTimezone: true }).notNull(),
-  method: text("method").notNull(),
-  reference: text("reference"),
-  notes: text("notes"),
-  createdBy: text("created_by").references(() => user.id),
-  ...timestamps,
-  voidedAt: timestamp("voided_at", { withTimezone: true }),
-  voidedBy: text("voided_by").references(() => user.id),
-  voidReason: text("void_reason"),
-}, table => [
-  index("patient_payment_org_patient_idx").on(table.organizationId, table.patientId),
-  check("patient_payment_amount_check", sql`${table.amountCents} > 0`),
-  check("patient_payment_method_check", sql`${table.method} IN ('efectivo','tarjeta','transferencia','yape','plin','otro')`),
-])
+export const patientPayment = pgTable(
+  "patient_payment",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    organizationId: orgFk("organization_id"),
+    patientId: uuid("patient_id")
+      .notNull()
+      .references(() => patient.id),
+    payerContactId: uuid("payer_contact_id").references(() => contact.id),
+    amountCents: integer("amount_cents").notNull(),
+    currency: char("currency", { length: 3 }).notNull(),
+    paidAt: timestamp("paid_at", { withTimezone: true }).notNull(),
+    method: text("method").notNull(),
+    reference: text("reference"),
+    notes: text("notes"),
+    createdBy: text("created_by").references(() => user.id),
+    ...timestamps,
+    voidedAt: timestamp("voided_at", { withTimezone: true }),
+    voidedBy: text("voided_by").references(() => user.id),
+    voidReason: text("void_reason"),
+  },
+  (table) => [
+    index("patient_payment_org_patient_idx").on(table.organizationId, table.patientId),
+    check("patient_payment_amount_check", sql`${table.amountCents} > 0`),
+    check(
+      "patient_payment_method_check",
+      sql`${table.method} IN ('efectivo','tarjeta','transferencia','yape','plin','otro')`,
+    ),
+  ],
+)
 
-export const patientPaymentApplication = pgTable("patient_payment_application", {
-  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
-  organizationId: orgFk("organization_id"),
-  patientId: uuid("patient_id").notNull().references(() => patient.id),
-  paymentId: uuid("payment_id").notNull().references(() => patientPayment.id),
-  chargeId: uuid("charge_id").notNull().references(() => patientCharge.id),
-  amountCents: integer("amount_cents").notNull(),
-  createdBy: text("created_by").references(() => user.id),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  voidedAt: timestamp("voided_at", { withTimezone: true }),
-  voidedBy: text("voided_by").references(() => user.id),
-  voidReason: text("void_reason"),
-}, table => [
-  index("payment_application_org_patient_idx").on(table.organizationId, table.patientId),
-  index("payment_application_payment_idx").on(table.organizationId, table.paymentId),
-  index("payment_application_charge_idx").on(table.organizationId, table.chargeId),
-  check("payment_application_amount_check", sql`${table.amountCents} > 0`),
-])
+export const patientPaymentApplication = pgTable(
+  "patient_payment_application",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    organizationId: orgFk("organization_id"),
+    patientId: uuid("patient_id")
+      .notNull()
+      .references(() => patient.id),
+    paymentId: uuid("payment_id")
+      .notNull()
+      .references(() => patientPayment.id),
+    chargeId: uuid("charge_id")
+      .notNull()
+      .references(() => patientCharge.id),
+    amountCents: integer("amount_cents").notNull(),
+    createdBy: text("created_by").references(() => user.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    voidedAt: timestamp("voided_at", { withTimezone: true }),
+    voidedBy: text("voided_by").references(() => user.id),
+    voidReason: text("void_reason"),
+  },
+  (table) => [
+    index("payment_application_org_patient_idx").on(table.organizationId, table.patientId),
+    index("payment_application_payment_idx").on(table.organizationId, table.paymentId),
+    index("payment_application_charge_idx").on(table.organizationId, table.chargeId),
+    check("payment_application_amount_check", sql`${table.amountCents} > 0`),
+  ],
+)
 
-export const patientPaymentRefund = pgTable("patient_payment_refund", {
-  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
-  organizationId: orgFk("organization_id"),
-  patientId: uuid("patient_id").notNull().references(() => patient.id),
-  paymentId: uuid("payment_id").notNull().references(() => patientPayment.id),
-  amountCents: integer("amount_cents").notNull(),
-  refundedAt: timestamp("refunded_at", { withTimezone: true }).notNull(),
-  reason: text("reason").notNull(),
-  createdBy: text("created_by").references(() => user.id),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-}, table => [
-  index("payment_refund_org_patient_idx").on(table.organizationId, table.patientId),
-  index("payment_refund_payment_idx").on(table.organizationId, table.paymentId),
-  check("payment_refund_amount_check", sql`${table.amountCents} > 0`),
-])
+export const patientPaymentRefund = pgTable(
+  "patient_payment_refund",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    organizationId: orgFk("organization_id"),
+    patientId: uuid("patient_id")
+      .notNull()
+      .references(() => patient.id),
+    paymentId: uuid("payment_id")
+      .notNull()
+      .references(() => patientPayment.id),
+    amountCents: integer("amount_cents").notNull(),
+    refundedAt: timestamp("refunded_at", { withTimezone: true }).notNull(),
+    reason: text("reason").notNull(),
+    createdBy: text("created_by").references(() => user.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("payment_refund_org_patient_idx").on(table.organizationId, table.patientId),
+    index("payment_refund_payment_idx").on(table.organizationId, table.paymentId),
+    check("payment_refund_amount_check", sql`${table.amountCents} > 0`),
+  ],
+)
 
-export const patientResponsibility = pgTable("patient_responsibility", {
-  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
-  organizationId: orgFk("organization_id"),
-  patientId: uuid("patient_id").notNull().references(() => patient.id),
-  contactId: uuid("contact_id").notNull(),
-  kind: text("kind").notNull(),
-  startsAt: date("starts_at").notNull(),
-  endsAt: date("ends_at"),
-  evidenceDocumentId: uuid("evidence_document_id").references(() => patientDocument.id),
-  notes: text("notes"),
-  createdBy: text("created_by").references(() => user.id),
-  ...timestamps,
-  revokedAt: timestamp("revoked_at", { withTimezone: true }),
-  revokedBy: text("revoked_by").references(() => user.id),
-  revokeReason: text("revoke_reason"),
-}, table => [
-  foreignKey({ name: "patient_responsibility_contact_fk",
-    columns: [table.organizationId, table.patientId, table.contactId],
-    foreignColumns: [patientContact.organizationId, patientContact.patientId, patientContact.contactId] }),
-  index("patient_responsibility_org_patient_idx").on(table.organizationId, table.patientId),
-  uniqueIndex("patient_responsibility_active_uidx")
-    .on(table.organizationId, table.patientId, table.contactId, table.kind).where(sql`${table.revokedAt} IS NULL`),
-  check("patient_responsibility_kind_check", sql`${table.kind} IN ('representante_legal','autorizado_informacion','responsable_economico','acompanante')`),
-  check("patient_responsibility_dates_check", sql`${table.endsAt} IS NULL OR ${table.endsAt} >= ${table.startsAt}`),
-])
+export const patientResponsibility = pgTable(
+  "patient_responsibility",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    organizationId: orgFk("organization_id"),
+    patientId: uuid("patient_id")
+      .notNull()
+      .references(() => patient.id),
+    contactId: uuid("contact_id").notNull(),
+    kind: text("kind").notNull(),
+    startsAt: date("starts_at").notNull(),
+    endsAt: date("ends_at"),
+    evidenceDocumentId: uuid("evidence_document_id").references(() => patientDocument.id),
+    notes: text("notes"),
+    createdBy: text("created_by").references(() => user.id),
+    ...timestamps,
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    revokedBy: text("revoked_by").references(() => user.id),
+    revokeReason: text("revoke_reason"),
+  },
+  (table) => [
+    foreignKey({
+      name: "patient_responsibility_contact_fk",
+      columns: [table.organizationId, table.patientId, table.contactId],
+      foreignColumns: [
+        patientContact.organizationId,
+        patientContact.patientId,
+        patientContact.contactId,
+      ],
+    }),
+    index("patient_responsibility_org_patient_idx").on(table.organizationId, table.patientId),
+    uniqueIndex("patient_responsibility_active_uidx")
+      .on(table.organizationId, table.patientId, table.contactId, table.kind)
+      .where(sql`${table.revokedAt} IS NULL`),
+    check(
+      "patient_responsibility_kind_check",
+      sql`${table.kind} IN ('representante_legal','autorizado_informacion','responsable_economico','acompanante')`,
+    ),
+    check(
+      "patient_responsibility_dates_check",
+      sql`${table.endsAt} IS NULL OR ${table.endsAt} >= ${table.startsAt}`,
+    ),
+  ],
+)
