@@ -130,8 +130,10 @@ async function toReplayPayload(
 
 export function createApp(deps: AppDeps) {
   const { auth, db } = deps
+  // El puerto es opcional: prod sirve en 443 (sin puerto en Origin) y el
+  // harness e2e expone el proxy en :4463.
   const tenantOrigin = new RegExp(
-    `^https://[a-z0-9-]+\\.${deps.cookieDomain.replaceAll(".", "\\.")}$`,
+    `^https://[a-z0-9-]+\\.${deps.cookieDomain.replaceAll(".", "\\.")}(:\\d+)?$`,
   )
 
   const app = new Hono()
