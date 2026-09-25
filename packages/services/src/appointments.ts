@@ -1,0 +1,600 @@
+/**
+ * Agenda operativa: reserva real de citas. La exclusión anti-solapamiento la
+ * impone PostgreSQL (ver migración 0024); aquí solo se valida pertenencia al
+ * tenant, se interpreta la zona de la sucursal y se mapea el conflicto.
+ * Toda función recibe `tx: Db` ya contextualizado (`withOrgContext`).
+ */
+import type { Db } from "@odentia/db"
+import {
+  APPOINTMENT_STATUSES,
+  type AppointmentStatus,
+  appointment,
+  scheduleChair,
+} from "@odentia/db/schema/agenda"
+import { member, user } from "@odentia/db/schema/auth"
+import { patient, serviceCatalog } from "@odentia/db/schema/clinical"
+import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
+import { and, asc, eq, gte, ilike, inArray, lt, or } from "drizzle-orm"
+import { isExclusionViolation, notFound, ServiceError, validation } from "./errors.js"
+
+function conflict(code: string, message: string): ServiceError {
+  return new ServiceError(code, 409, message)
+}
+
+const DEFAULT_DURATION_MIN = 30
+
+export interface AppointmentItem {
+  id: string
+  branchId: string
+  patientId: string
+  patientName: string
+  dentistUserId: string
+  dentistName: string
+  chairId: string
+  chairName: string
+  serviceId: string | null
+  serviceName: string | null
+  startsAt: string
+  endsAt: string
+  durationMin: number
+  status: AppointmentStatus
+  reason: string | null
+  source: string
+  conversationId: string | null
+  version: number
+}
+
+export interface ScheduleResources {
+  branchId: string
+  branchName: string
+  timeZone: string
+  professionals: Array<{ id: string; label: string }>
+  chairs: Array<{ id: string; label: string }>
+}
+
+/** Sucursal explícita o la primera activa; la zona es branch ?? organización. */
+async function resolveBranch(tx: Db, orgId: string, branchId?: string) {
+  const conditions = [eq(branch.organizationId, orgId), eq(branch.isActive, true)]
+  if (branchId) conditions.push(eq(branch.id, branchId))
+  const [row] = await tx
+    .select({
+      id: branch.id,
+      name: branch.name,
+      timezone: branch.timezone,
+      orgTimezone: orgProfile.timezone,
+    })
+    .from(branch)
+    .leftJoin(orgProfile, eq(orgProfile.organizationId, branch.organizationId))
+    .where(and(...conditions))
+    .orderBy(asc(branch.createdAt))
+    .limit(1)
+  if (!row) throw notFound(branchId ? "Sucursal" : "Sucursal activa")
+  return { ...row, timeZone: row.timezone ?? row.orgTimezone ?? "America/Lima" }
+}
+
+async function requireDentist(tx: Db, orgId: string, dentistUserId: string) {
+  const [membership] = await tx
+    .select({ id: member.id })
+    .from(member)
+    .where(and(eq(member.organizationId, orgId), eq(member.userId, dentistUserId)))
+    .limit(1)
+  if (!membership) throw notFound("Profesional")
+}
+
+async function requireChair(tx: Db, orgId: string, chairId: string, branchId?: string) {
+  const conditions = [
+    eq(scheduleChair.organizationId, orgId),
+    eq(scheduleChair.id, chairId),
+    eq(scheduleChair.isActive, true),
+  ]
+  if (branchId) conditions.push(eq(scheduleChair.branchId, branchId))
+  const [row] = await tx
+    .select({ id: scheduleChair.id, branchId: scheduleChair.branchId })
+    .from(scheduleChair)
+    .where(and(...conditions))
+    .limit(1)
+  if (!row) throw notFound("Sillón")
+  return row
+}
+
+async function requireAppointmentPatient(tx: Db, orgId: string, patientId: string) {
+  const [row] = await tx
+    .select({ id: patient.id })
+    .from(patient)
+    .where(and(eq(patient.organizationId, orgId), eq(patient.id, patientId)))
+    .limit(1)
+  if (!row) throw notFound("Paciente")
+}
+
+/** Servicio activo del tenant; su nombre se congela en la cita. */
+async function requireService(tx: Db, orgId: string, serviceId: string) {
+  const [row] = await tx
+    .select({
+      id: serviceCatalog.id,
+      name: serviceCatalog.name,
+      durationMin: serviceCatalog.durationMin,
+    })
+    .from(serviceCatalog)
+    .where(
+      and(
+        eq(serviceCatalog.organizationId, orgId),
+        eq(serviceCatalog.id, serviceId),
+        eq(serviceCatalog.isActive, true),
+      ),
+    )
+    .limit(1)
+  if (!row) throw notFound("Servicio")
+  return row
+}
+
+async function requireAppointment(tx: Db, orgId: string, id: string) {
+  const [row] = await tx
+    .select()
+    .from(appointment)
+    .where(and(eq(appointment.organizationId, orgId), eq(appointment.id, id)))
+    .limit(1)
+  if (!row) throw notFound("Cita")
+  return row
+}
+
+function parseInstant(value: string, field: string): Date {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) throw validation(`${field} debe ser una fecha ISO válida`)
+  return date
+}
+
+function assertStatus(status: string): AppointmentStatus {
+  if (!(APPOINTMENT_STATUSES as readonly string[]).includes(status)) {
+    throw validation(`Estado inválido: ${status}`)
+  }
+  return status as AppointmentStatus
+}
+
+async function audit(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  action: string,
+  id: string,
+  metadata?: Record<string, unknown>,
+) {
+  await tx.insert(auditEvent).values({
+    organizationId: orgId,
+    actorUserId,
+    action,
+    entity: "appointment",
+    entityId: id,
+    metadata,
+  })
+}
+
+export async function getAppointment(tx: Db, orgId: string, id: string): Promise<AppointmentItem> {
+  const [row] = await tx
+    .select({
+      appointment,
+      patientName: patient.displayName,
+      dentistName: user.name,
+      chairName: scheduleChair.name,
+    })
+    .from(appointment)
+    .innerJoin(
+      patient,
+      and(eq(patient.organizationId, orgId), eq(patient.id, appointment.patientId)),
+    )
+    .innerJoin(user, eq(user.id, appointment.dentistUserId))
+    .innerJoin(scheduleChair, eq(scheduleChair.id, appointment.chairId))
+    .where(and(eq(appointment.organizationId, orgId), eq(appointment.id, id)))
+    .limit(1)
+  if (!row) throw notFound("Cita")
+  return toItem(row)
+}
+
+function toItem(row: {
+  appointment: typeof appointment.$inferSelect
+  patientName: string
+  dentistName: string
+  chairName: string
+}): AppointmentItem {
+  const rowAppointment = row.appointment
+  return {
+    id: rowAppointment.id,
+    branchId: rowAppointment.branchId,
+    patientId: rowAppointment.patientId,
+    patientName: row.patientName,
+    dentistUserId: rowAppointment.dentistUserId,
+    dentistName: row.dentistName,
+    chairId: rowAppointment.chairId,
+    chairName: row.chairName,
+    serviceId: rowAppointment.serviceId,
+    serviceName: rowAppointment.serviceName,
+    startsAt: rowAppointment.startsAt.toISOString(),
+    endsAt: rowAppointment.endsAt.toISOString(),
+    durationMin: rowAppointment.durationMin,
+    status: assertStatus(rowAppointment.status),
+    reason: rowAppointment.reason,
+    source: rowAppointment.source,
+    conversationId: rowAppointment.conversationId,
+    version: rowAppointment.version,
+  }
+}
+
+export interface ListAppointmentsInput {
+  branchId?: string
+  /** Rango UTC explícito (ISO con zona); el cliente lo calcula con la zona de la sucursal. */
+  from: string
+  to: string
+  professionals?: string[]
+  chairs?: string[]
+  statuses?: string[]
+  q?: string
+}
+
+export async function listAppointments(
+  tx: Db,
+  orgId: string,
+  input: ListAppointmentsInput,
+): Promise<AppointmentItem[]> {
+  const from = parseInstant(input.from, "from")
+  const to = parseInstant(input.to, "to")
+  if (to <= from) throw validation("El rango de agenda es inválido")
+  const conditions = [
+    eq(appointment.organizationId, orgId),
+    lt(appointment.startsAt, to),
+    gte(appointment.endsAt, from),
+  ]
+  if (input.branchId) conditions.push(eq(appointment.branchId, input.branchId))
+  if (input.professionals?.length) {
+    conditions.push(inArray(appointment.dentistUserId, input.professionals))
+  }
+  if (input.chairs?.length) conditions.push(inArray(appointment.chairId, input.chairs))
+  if (input.statuses?.length) {
+    for (const status of input.statuses) assertStatus(status)
+    conditions.push(inArray(appointment.status, input.statuses))
+  }
+  const query = input.q?.trim()
+  if (query) {
+    const like = `%${query}%`
+    const match = or(
+      ilike(patient.displayName, like),
+      ilike(appointment.reason, like),
+      ilike(appointment.serviceName, like),
+    )
+    if (match) conditions.push(match)
+  }
+  const rows = await tx
+    .select({
+      appointment,
+      patientName: patient.displayName,
+      dentistName: user.name,
+      chairName: scheduleChair.name,
+    })
+    .from(appointment)
+    .innerJoin(
+      patient,
+      and(eq(patient.organizationId, orgId), eq(patient.id, appointment.patientId)),
+    )
+    .innerJoin(user, eq(user.id, appointment.dentistUserId))
+    .innerJoin(scheduleChair, eq(scheduleChair.id, appointment.chairId))
+    .where(and(...conditions))
+    .orderBy(asc(appointment.startsAt))
+  return rows.map(toItem)
+}
+
+/** Profesionales = miembros de la org; sillones = activos de la sucursal. */
+export async function listScheduleResources(
+  tx: Db,
+  orgId: string,
+  input: { branchId?: string },
+): Promise<ScheduleResources> {
+  const resolved = await resolveBranch(tx, orgId, input.branchId)
+  const [professionals, chairs] = await Promise.all([
+    tx
+      .select({ id: user.id, label: user.name })
+      .from(member)
+      .innerJoin(user, eq(user.id, member.userId))
+      .where(eq(member.organizationId, orgId))
+      .orderBy(asc(user.name)),
+    tx
+      .select({ id: scheduleChair.id, label: scheduleChair.name })
+      .from(scheduleChair)
+      .where(
+        and(
+          eq(scheduleChair.organizationId, orgId),
+          eq(scheduleChair.branchId, resolved.id),
+          eq(scheduleChair.isActive, true),
+        ),
+      )
+      .orderBy(asc(scheduleChair.name)),
+  ])
+  return {
+    branchId: resolved.id,
+    branchName: resolved.name,
+    timeZone: resolved.timeZone,
+    professionals,
+    chairs,
+  }
+}
+
+export interface CreateAppointmentInput {
+  branchId?: string
+  patientId: string
+  dentistUserId: string
+  chairId: string
+  serviceId?: string
+  startsAt: string
+  endsAt?: string
+  durationMin?: number
+  status?: string
+  reason?: string
+  source?: string
+  conversationId?: string
+}
+
+export async function createAppointment(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  input: CreateAppointmentInput,
+): Promise<AppointmentItem> {
+  const startsAt = parseInstant(input.startsAt, "startsAt")
+  const service = input.serviceId ? await requireService(tx, orgId, input.serviceId) : null
+
+  const duration =
+    input.durationMin ??
+    service?.durationMin ??
+    (input.endsAt
+      ? Math.round((parseInstant(input.endsAt, "endsAt").getTime() - startsAt.getTime()) / 60000)
+      : DEFAULT_DURATION_MIN)
+  if (!Number.isInteger(duration) || duration <= 0) {
+    throw validation("La duración debe ser un número positivo de minutos")
+  }
+  const endsAt = input.endsAt
+    ? parseInstant(input.endsAt, "endsAt")
+    : new Date(startsAt.getTime() + duration * 60000)
+  if (endsAt <= startsAt) throw validation("La cita debe terminar después de iniciar")
+
+  const chair = await requireChair(tx, orgId, input.chairId)
+  const resolved = await resolveBranch(tx, orgId, input.branchId ?? chair.branchId)
+  if (chair.branchId !== resolved.id) {
+    throw validation("El sillón no pertenece a la sucursal de la cita")
+  }
+  await requireAppointmentPatient(tx, orgId, input.patientId)
+  await requireDentist(tx, orgId, input.dentistUserId)
+  const status = assertStatus(input.status ?? "programada")
+
+  try {
+    const [created] = await tx
+      .insert(appointment)
+      .values({
+        organizationId: orgId,
+        branchId: resolved.id,
+        patientId: input.patientId,
+        dentistUserId: input.dentistUserId,
+        chairId: input.chairId,
+        serviceId: service?.id ?? null,
+        serviceName: service?.name ?? null,
+        startsAt,
+        endsAt,
+        durationMin: Math.round((endsAt.getTime() - startsAt.getTime()) / 60000),
+        status,
+        reason: input.reason?.trim() || null,
+        source: input.source ?? "recepcion",
+        conversationId: input.conversationId ?? null,
+        createdBy: actorUserId,
+      })
+      .returning({ id: appointment.id })
+    if (!created) throw new Error("No se pudo crear la cita")
+    await audit(tx, orgId, actorUserId, "appointment.created", created.id, {
+      patientId: input.patientId,
+      dentistUserId: input.dentistUserId,
+      chairId: input.chairId,
+      startsAt: startsAt.toISOString(),
+    })
+    return await getAppointment(tx, orgId, created.id)
+  } catch (error) {
+    if (isExclusionViolation(error)) {
+      throw conflict(
+        "APPOINTMENT_CONFLICT",
+        "El profesional o el sillón ya están ocupados en ese horario",
+      )
+    }
+    throw error
+  }
+}
+
+export interface MoveAppointmentInput {
+  expectedVersion: number
+  startsAt: string
+  endsAt?: string
+  dentistUserId?: string
+  chairId?: string
+}
+
+/** Arrastre: nueva hora y recurso de la agrupación activa, con bloqueo optimista. */
+export async function moveAppointment(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  id: string,
+  input: MoveAppointmentInput,
+): Promise<AppointmentItem> {
+  const current = await requireAppointment(tx, orgId, id)
+  const startsAt = parseInstant(input.startsAt, "startsAt")
+  const durationMs = current.endsAt.getTime() - current.startsAt.getTime()
+  const endsAt = input.endsAt
+    ? parseInstant(input.endsAt, "endsAt")
+    : new Date(startsAt.getTime() + durationMs)
+  if (endsAt <= startsAt) throw validation("La cita debe terminar después de iniciar")
+  const dentistUserId = input.dentistUserId ?? current.dentistUserId
+  const chairId = input.chairId ?? current.chairId
+  if (dentistUserId !== current.dentistUserId) await requireDentist(tx, orgId, dentistUserId)
+  if (chairId !== current.chairId) {
+    const chair = await requireChair(tx, orgId, chairId)
+    if (chair.branchId !== current.branchId) {
+      throw validation("El sillón no pertenece a la sucursal de la cita")
+    }
+  }
+  try {
+    const [updated] = await tx
+      .update(appointment)
+      .set({
+        startsAt,
+        endsAt,
+        durationMin: Math.round((endsAt.getTime() - startsAt.getTime()) / 60000),
+        dentistUserId,
+        chairId,
+        version: current.version + 1,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(appointment.organizationId, orgId),
+          eq(appointment.id, id),
+          eq(appointment.version, input.expectedVersion),
+        ),
+      )
+      .returning({ id: appointment.id })
+    if (!updated) {
+      throw conflict(
+        "STALE_VERSION",
+        "La cita cambió mientras la movías; recarga e intenta de nuevo",
+      )
+    }
+    await audit(tx, orgId, actorUserId, "appointment.moved", id, {
+      startsAt: startsAt.toISOString(),
+      dentistUserId,
+      chairId,
+    })
+    return await getAppointment(tx, orgId, id)
+  } catch (error) {
+    if (isExclusionViolation(error)) {
+      throw conflict(
+        "APPOINTMENT_CONFLICT",
+        "El profesional o el sillón ya están ocupados en ese horario",
+      )
+    }
+    throw error
+  }
+}
+
+export interface UpdateAppointmentInput {
+  expectedVersion: number
+  reason?: string | null
+  serviceId?: string | null
+  dentistUserId?: string
+  chairId?: string
+  status?: string
+}
+
+export async function updateAppointment(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  id: string,
+  input: UpdateAppointmentInput,
+): Promise<AppointmentItem> {
+  const current = await requireAppointment(tx, orgId, id)
+  const set: Partial<typeof appointment.$inferInsert> = {
+    version: current.version + 1,
+    updatedAt: new Date(),
+  }
+  if (input.reason !== undefined) set.reason = input.reason?.trim() || null
+  if (input.serviceId !== undefined) {
+    const service = input.serviceId ? await requireService(tx, orgId, input.serviceId) : null
+    set.serviceId = service?.id ?? null
+    set.serviceName = service?.name ?? null
+  }
+  if (input.dentistUserId !== undefined && input.dentistUserId !== current.dentistUserId) {
+    await requireDentist(tx, orgId, input.dentistUserId)
+    set.dentistUserId = input.dentistUserId
+  }
+  if (input.status !== undefined && input.status !== current.status) {
+    set.status = assertStatus(input.status)
+  }
+  if (input.chairId !== undefined && input.chairId !== current.chairId) {
+    const chair = await requireChair(tx, orgId, input.chairId)
+    if (chair.branchId !== current.branchId) {
+      throw validation("El sillón no pertenece a la sucursal de la cita")
+    }
+    set.chairId = input.chairId
+  }
+  try {
+    const [updated] = await tx
+      .update(appointment)
+      .set(set)
+      .where(
+        and(
+          eq(appointment.organizationId, orgId),
+          eq(appointment.id, id),
+          eq(appointment.version, input.expectedVersion),
+        ),
+      )
+      .returning({ id: appointment.id })
+    if (!updated) {
+      throw conflict(
+        "STALE_VERSION",
+        "La cita cambió mientras la editabas; recarga e intenta de nuevo",
+      )
+    }
+    await audit(tx, orgId, actorUserId, "appointment.updated", id, {})
+    return await getAppointment(tx, orgId, id)
+  } catch (error) {
+    if (isExclusionViolation(error)) {
+      throw conflict(
+        "APPOINTMENT_CONFLICT",
+        "El profesional o el sillón ya están ocupados en ese horario",
+      )
+    }
+    throw error
+  }
+}
+
+/** Transición explícita; cancelada y no_asistio liberan el recurso en DB. */
+export async function setAppointmentStatus(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  id: string,
+  status: string,
+): Promise<AppointmentItem> {
+  const next = assertStatus(status)
+  const current = await requireAppointment(tx, orgId, id)
+  if (current.status === next) return getAppointment(tx, orgId, id)
+  try {
+    const [updated] = await tx
+      .update(appointment)
+      .set({ status: next, version: current.version + 1, updatedAt: new Date() })
+      .where(and(eq(appointment.organizationId, orgId), eq(appointment.id, id)))
+      .returning({ id: appointment.id })
+    if (!updated) throw notFound("Cita")
+    await audit(tx, orgId, actorUserId, `appointment.status_${next}`, id, {
+      from: current.status,
+    })
+    return await getAppointment(tx, orgId, id)
+  } catch (error) {
+    if (isExclusionViolation(error)) {
+      throw conflict(
+        "APPOINTMENT_CONFLICT",
+        "El profesional o el sillón ya están ocupados en ese horario",
+      )
+    }
+    throw error
+  }
+}
+
+/** Alta de sillón (recepción no lo crea; lo hace owner/admin en configuración o seed). */
+export async function createChair(
+  tx: Db,
+  orgId: string,
+  input: { branchId: string; name: string },
+): Promise<{ id: string }> {
+  const name = input.name.trim()
+  if (!name) throw validation("El nombre del sillón es obligatorio")
+  await resolveBranch(tx, orgId, input.branchId)
+  const [created] = await tx
+    .insert(scheduleChair)
+    .values({ organizationId: orgId, branchId: input.branchId, name })
+    .returning({ id: scheduleChair.id })
+  if (!created) throw new Error("No se pudo crear el sillón")
+  return created
+}

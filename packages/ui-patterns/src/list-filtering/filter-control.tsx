@@ -96,6 +96,10 @@ export function filterSummary(
   filter: FilterDef,
   get: (key: string) => string | undefined,
 ): string | undefined {
+  if (filter.type === "multi" && filter.emptyMeansAll) {
+    if (!get(filter.key)) return "Todos"
+    if (get(filter.key) === "none") return "Ninguno"
+  }
   if (filter.type === "select" || filter.type === "multi") {
     const labels = optionLabels(filter.options, selectedValues(get(filter.key)))
     if (labels.length === 0) return undefined
@@ -138,7 +142,14 @@ function ClearFilterButton({ filter }: { filter: FilterDef }) {
 
 function MultiOptions({ filter }: { filter: Extract<FilterDef, { type: "multi" }> }) {
   const { get, setParam } = useListSearch()
-  const selected = selectedValues(get(filter.key))
+  const raw = get(filter.key)
+  const selected = filter.emptyMeansAll
+    ? raw === "none"
+      ? []
+      : raw
+        ? selectedValues(raw)
+        : filter.options.map((option) => option.value)
+    : selectedValues(raw)
   const { query, searchable, setQuery, visibleOptions } = useOptionSearch(filter.options)
   const optionRefs = React.useRef<Array<HTMLButtonElement | null>>([])
   const firstSelected = visibleOptions.findIndex((option) => selected.includes(option.value))
@@ -152,7 +163,18 @@ function MultiOptions({ filter }: { filter: Extract<FilterDef, { type: "multi" }
     const next = selected.includes(value)
       ? selected.filter((current) => current !== value)
       : [...selected, value]
-    setParam(filter.key, next.length > 0 ? next.join(",") : undefined)
+    setParam(
+      filter.key,
+      filter.emptyMeansAll
+        ? next.length === filter.options.length
+          ? undefined
+          : next.length
+            ? next.join(",")
+            : "none"
+        : next.length
+          ? next.join(",")
+          : undefined,
+    )
   }
 
   function focusOption(index: number) {
@@ -185,6 +207,26 @@ function MultiOptions({ filter }: { filter: Extract<FilterDef, { type: "multi" }
 
   return (
     <div>
+      {filter.emptyMeansAll && (
+        <div className="mb-2 flex gap-2">
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            onClick={() => setParam(filter.key, undefined)}
+          >
+            Todos
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            onClick={() => setParam(filter.key, "none")}
+          >
+            Ninguno
+          </Button>
+        </div>
+      )}
       {searchable ? (
         <OptionSearch label={filter.label} query={query} onQueryChange={setQuery} />
       ) : null}
@@ -220,6 +262,11 @@ function MultiOptions({ filter }: { filter: Extract<FilterDef, { type: "multi" }
                   onKeyDown={(event) => handleKeyDown(event, index)}
                   onClick={() => toggle(option.value)}
                 >
+                  {option.leading && (
+                    <span aria-hidden className="shrink-0">
+                      {option.leading}
+                    </span>
+                  )}
                   <span className="min-w-0 flex-1 truncate">{option.label}</span>
                   {option.count !== undefined ? (
                     <span className="text-xs tabular-nums text-muted-foreground">
@@ -281,6 +328,11 @@ function SelectOptions({
                 <Check
                   className={cn("size-4", selected === option.value ? "opacity-100" : "opacity-0")}
                 />
+                {option.leading && (
+                  <span aria-hidden className="shrink-0">
+                    {option.leading}
+                  </span>
+                )}
                 <span className="flex-1">{option.label}</span>
                 {option.count !== undefined ? (
                   <span className="text-xs tabular-nums text-muted-foreground">{option.count}</span>
@@ -441,10 +493,10 @@ export function FilterControl({ filter, layout }: FilterControlProps) {
       <div
         className={cn(
           "inline-flex h-9 max-w-64 shrink-0 items-center rounded-full border bg-surface text-foreground transition-colors focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/50",
-          summary ? "border-accent" : "border-border hover:bg-surface-muted",
+          hasFilterValue(filter, get) ? "border-accent" : "border-border hover:bg-surface-muted",
         )}
       >
-        {summary ? (
+        {hasFilterValue(filter, get) ? (
           <button
             type="button"
             className="ml-1 flex size-7 items-center justify-center rounded-full text-muted-foreground outline-none transition-colors hover:bg-surface-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50"

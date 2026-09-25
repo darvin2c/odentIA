@@ -19,12 +19,23 @@ export function notFound(entity: string): ServiceError {
 
 /** true si el error es violación de unique (Postgres 23505, incluso envuelto por Drizzle). */
 export function isUniqueViolation(error: unknown): boolean {
-  const code = (codeOf(error) ?? codeOf((error as { cause?: unknown })?.cause)) as
-    | string
-    | undefined
-  return code === "23505"
+  return pgCodeOf(error) === "23505"
+}
+
+/** true si el error es violación de exclusión (Postgres 23P01, p.ej. doble reserva). */
+export function isExclusionViolation(error: unknown): boolean {
+  return pgCodeOf(error) === "23P01"
+}
+
+function pgCodeOf(error: unknown): string | undefined {
+  const code = codeOf(error) ?? codeOf(causeOf(error))
+  return typeof code === "string" ? code : undefined
 }
 
 function codeOf(error: unknown): unknown {
   return error && typeof error === "object" && "code" in error ? error.code : undefined
+}
+
+function causeOf(error: unknown): unknown {
+  return error && typeof error === "object" && "cause" in error ? error.cause : undefined
 }

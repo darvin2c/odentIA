@@ -13,6 +13,7 @@ import { z } from "zod"
 import { canWrite, orgContextOf, requireOrgContext, requireSession } from "./lib/context.js"
 import { errorBody } from "./lib/error.js"
 import { createAgentRoute } from "./routes/agent.js"
+import { createAgendaRoute, createAppointmentsRoute } from "./routes/appointments.js"
 import { createCie10Route } from "./routes/cie10.js"
 import { createConnectionsRoute } from "./routes/connections.js"
 import { createContactsRoute } from "./routes/contacts.js"
@@ -488,6 +489,8 @@ export function createApp(deps: AppDeps) {
   guarded.route("/channels/connections", createConnectionsRoute(crmDeps))
   guarded.route("/agent", createAgentRoute(crmDeps))
   guarded.route("/tasks", createTasksRoute(crmDeps))
+  guarded.route("/agenda", createAgendaRoute(crmDeps))
+  guarded.route("/appointments", createAppointmentsRoute(crmDeps))
   guarded.route("/fields", createFieldsRoute(crmDeps))
   app.route("/api", guarded)
   return app

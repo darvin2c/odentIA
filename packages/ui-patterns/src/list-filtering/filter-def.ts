@@ -1,9 +1,12 @@
 import type { LucideIcon } from "lucide-react"
+import type { ReactNode } from "react"
 
 export type FilterOption = {
   value: string
   label: string
   count?: number
+  /** Indicador visual complementario; label conserva el nombre textual accesible. */
+  leading?: ReactNode
 }
 
 export type FilterPlacement = "primary" | "overflow"
@@ -23,6 +26,8 @@ export type FilterDef =
   | (FilterBase & {
       type: "multi"
       options: FilterOption[]
+      /** Sin parámetro selecciona todos; `none` representa ninguno (valor reservado). */
+      emptyMeansAll?: boolean
     })
   | (FilterBase & {
       type: "number-range"

@@ -14,6 +14,7 @@ import { randomUUID } from "node:crypto"
 import { deflateSync } from "node:zlib"
 import { DEFAULT_REGISTRATION_CONFIG } from "@odentia/clinical"
 import { createOwnerDb } from "@odentia/db"
+import { appointment, scheduleChair } from "@odentia/db/schema/agenda"
 import { account, invitation, member, organization, user } from "@odentia/db/schema/auth"
 import {
   clinicalFollowUp,
@@ -28,25 +29,25 @@ import {
   patient,
   patientAllergy,
   patientAnamnesis,
+  patientCharge,
   patientCondition,
+  patientContact,
   patientDocument,
   patientDocumentContext,
   patientMedication,
-  patientCharge,
   patientPayment,
   patientPaymentApplication,
   patientPaymentRefund,
+  patientRegistration,
+  patientRegistrationLink,
   patientResponsibility,
   prescription,
   prescriptionItem,
-  patientContact,
-  patientRegistration,
-  patientRegistrationLink,
   serviceCatalog,
   treatmentBudget,
   treatmentBudgetItem,
-  treatmentPlan,
   treatmentOptionGroup,
+  treatmentPlan,
   treatmentPlanItem,
   treatmentTemplate,
 } from "@odentia/db/schema/clinical"
@@ -66,6 +67,7 @@ import { auditEvent, branch, orgProfile, patientRegistrationConfig } from "@oden
 import { hashPassword } from "better-auth/crypto"
 import { and, eq, inArray, or, sql } from "drizzle-orm"
 import { upsertAgentConfig } from "./agentConfig.js"
+import { createAppointment, createChair } from "./appointments.js"
 import { createBudget, decideBudget, presentBudget, reviseBudget } from "./budgets.js"
 import {
   addClinicalNote,
@@ -85,17 +87,17 @@ import {
   finalizeEncounter,
   updateEncounterDraft,
 } from "./encounters.js"
-import { cancelFollowUp, completeFollowUp, createFollowUp, scheduleFollowUp } from "./follow-ups.js"
 import { createFieldDef } from "./fields.js"
-import { createPatient, updatePatient } from "./patients.js"
+import { cancelFollowUp, completeFollowUp, createFollowUp, scheduleFollowUp } from "./follow-ups.js"
 import {
   createPatientRegistrationLink,
   registerPatient,
   savePatientRegistrationConfig,
 } from "./patient-registration.js"
+import { createPatient, updatePatient } from "./patients.js"
+import { applyPayment, createCharge, createPayment, refundPayment } from "./payments.js"
 import { ensureDefaultPipeline } from "./pipelines.js"
 import { addPlanItem, createOptionGroup, createTreatmentPlan, setPlanItemStatus } from "./plan.js"
-import { applyPayment, createCharge, createPayment, refundPayment } from "./payments.js"
 import { cancelPrescription, createPrescription } from "./prescriptions.js"
 import { grantResponsibility } from "./responsibilities.js"
 import { secretsKeyFromEnv } from "./secrets.js"
@@ -317,6 +319,8 @@ async function wipeSeed(): Promise<void> {
     .where(inArray(treatmentOptionGroup.organizationId, SEED_ORGS))
   await db.delete(treatmentBudget).where(inArray(treatmentBudget.organizationId, SEED_ORGS))
   await db.delete(treatmentPlan).where(inArray(treatmentPlan.organizationId, SEED_ORGS))
+  await db.delete(appointment).where(inArray(appointment.organizationId, SEED_ORGS))
+  await db.delete(scheduleChair).where(inArray(scheduleChair.organizationId, SEED_ORGS))
   await db.delete(encounter).where(inArray(encounter.organizationId, SEED_ORGS))
   await db.delete(serviceCatalog).where(inArray(serviceCatalog.organizationId, SEED_ORGS))
   // El snapshot del registro referencia `user`, `patient`, `contact` y `branch`
@@ -1721,6 +1725,143 @@ await db.transaction((tx) =>
     conversationId: convRosa.id,
   }),
 )
+
+// --- Agenda: sillones y citas reales (la constraint impide sembrar solapes;
+// los avisos de la UI cubren datos históricos o importaciones, no este seed) ---
+const surco = await db.query.branch.findFirst({
+  where: and(eq(branch.organizationId, ORG_A), eq(branch.name, "Sede Surco")),
+})
+if (!surco) throw new Error("Falta la sucursal Sede Surco")
+const chairsMiraflores = await Promise.all(
+  ["Sillón 1", "Sillón 2", "Sillón 3"].map((name) =>
+    createChair(db, ORG_A, { branchId: miraflores.id, name }),
+  ),
+)
+await createChair(db, ORG_A, { branchId: surco.id, name: "Sillón único" })
+const chairA = (index: number): string => {
+  const chair = chairsMiraflores[index]
+  if (!chair) throw new Error("Faltan sillones semilla")
+  return chair.id
+}
+/** Hora local de Lima (UTC-5 fijo en la semilla) → instante ISO. */
+const lima = (dayOffset: number, hhmm: string): string => {
+  const base = new Date()
+  base.setUTCDate(base.getUTCDate() + dayOffset)
+  return `${base.toISOString().slice(0, 10)}T${hhmm}:00-05:00`
+}
+const agendaSeed: Array<{
+  patient: string
+  dentist: string
+  chair: number
+  day: number
+  start: string
+  end: string
+  service: string
+  status?: "programada" | "confirmada" | "atendida" | "no_asistio" | "cancelada"
+}> = [
+  {
+    patient: "Rosa Quispe",
+    dentist: ANA_ID,
+    chair: 0,
+    day: 0,
+    start: "09:00",
+    end: "09:45",
+    service: "LIMPIEZA",
+    status: "confirmada",
+  },
+  {
+    patient: "Elena Huamán",
+    dentist: ANA_ID,
+    chair: 0,
+    day: 0,
+    start: "10:00",
+    end: "10:45",
+    service: "OBTURACION",
+  },
+  {
+    patient: "Carlos Paredes",
+    dentist: LUIS_ID,
+    chair: 1,
+    day: 0,
+    start: "09:30",
+    end: "10:00",
+    service: "ORTODONCIA_CTRL",
+    status: "confirmada",
+  },
+  {
+    patient: "Lucía Fernández",
+    dentist: ANA_ID,
+    chair: 2,
+    day: 0,
+    start: "11:00",
+    end: "11:30",
+    service: "LIMPIEZA",
+  },
+  {
+    patient: "Carmen Rojas",
+    dentist: LUIS_ID,
+    chair: 1,
+    day: 1,
+    start: "09:00",
+    end: "09:45",
+    service: "ENDODONCIA",
+  },
+  {
+    patient: "Rosa Quispe",
+    dentist: ANA_ID,
+    chair: 0,
+    day: 1,
+    start: "09:00",
+    end: "10:00",
+    service: "ENDODONCIA",
+    status: "programada",
+  },
+  // Ayer: ejecutada, ausencia y cancelación (estas dos últimas liberan recurso).
+  {
+    patient: "Elena Huamán",
+    dentist: ANA_ID,
+    chair: 0,
+    day: -1,
+    start: "09:00",
+    end: "09:45",
+    service: "LIMPIEZA",
+    status: "atendida",
+  },
+  {
+    patient: "Carlos Paredes",
+    dentist: LUIS_ID,
+    chair: 1,
+    day: -1,
+    start: "09:00",
+    end: "09:30",
+    service: "ORTODONCIA_CTRL",
+    status: "no_asistio",
+  },
+  {
+    patient: "Carmen Rojas",
+    dentist: ANA_ID,
+    chair: 0,
+    day: -1,
+    start: "09:00",
+    end: "09:45",
+    service: "LIMPIEZA",
+    status: "cancelada",
+  },
+]
+for (const item of agendaSeed) {
+  const seedPatientId = patientIdByName.get(item.patient)
+  if (!seedPatientId) throw new Error(`Falta el paciente semilla ${item.patient}`)
+  await createAppointment(db, ORG_A, ANA_ID, {
+    branchId: miraflores.id,
+    patientId: seedPatientId,
+    dentistUserId: item.dentist,
+    chairId: chairA(item.chair),
+    serviceId: serviceIdA(item.service),
+    startsAt: lima(item.day, item.start),
+    endsAt: lima(item.day, item.end),
+    status: item.status ?? "programada",
+  })
+}
 
 // --- Resumen ---
 async function summary(orgId: string, label: string): Promise<string> {

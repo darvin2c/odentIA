@@ -1,0 +1,274 @@
+import { withOrgContext } from "@odentia/db"
+import { member, user } from "@odentia/db/schema/auth"
+import { patient, serviceCatalog } from "@odentia/db/schema/clinical"
+import { branch } from "@odentia/db/schema/org"
+import { sql } from "drizzle-orm"
+import { beforeAll, expect, it } from "vitest"
+import {
+  createAppointment,
+  createChair,
+  listAppointments,
+  listScheduleResources,
+  moveAppointment,
+  setAppointmentStatus,
+  updateAppointment,
+} from "./appointments.js"
+import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
+
+setupTestDb()
+
+const ORG = "org_agenda_svc"
+const ACTOR = "agenda-actor"
+const DENTIST = "agenda-dentist"
+const DENTIST_2 = "agenda-dentist-2"
+
+let branchId: string
+let chairId: string
+let chair2Id: string
+let patientId: string
+let serviceId: string
+
+// 2026-10-05 America/Lima (UTC-5): 09:00–09:45 local.
+const START = "2026-10-05T14:00:00Z"
+const NEXT = "2026-10-05T14:45:00Z"
+const NEXT_END = "2026-10-05T15:30:00Z"
+const OVERLAP = "2026-10-05T14:30:00Z"
+const OVERLAP_END = "2026-10-05T15:15:00Z"
+const FROM = "2026-10-05T05:00:00Z"
+const TO = "2026-10-06T05:00:00Z"
+
+beforeAll(async () => {
+  await ownerDb.execute(sql`
+    insert into "organization" ("id", "name", "slug", "created_at")
+    values (${ORG}, 'Clínica Agenda Svc', 'agenda-svc', now())
+    on conflict do nothing`)
+  const [createdBranch] = await ownerDb
+    .insert(branch)
+    .values({ organizationId: ORG, name: "Sede Agenda", timezone: "America/Lima" })
+    .returning({ id: branch.id })
+  branchId = createdBranch!.id
+  await ownerDb.insert(user).values([
+    { id: ACTOR, name: "Recepción Agenda", email: "agenda-actor@example.test" },
+    { id: DENTIST, name: "Dra. Agenda Uno", email: "agenda-dentist@example.test" },
+    { id: DENTIST_2, name: "Dr. Agenda Dos", email: "agenda-dentist-2@example.test" },
+  ])
+  await ownerDb.execute(sql`
+    insert into "member" ("id", "organization_id", "user_id", "role", "created_at") values
+      ('m-agenda-actor', ${ORG}, ${ACTOR}, 'owner', now()),
+      ('m-agenda-dentist', ${ORG}, ${DENTIST}, 'member', now()),
+      ('m-agenda-dentist-2', ${ORG}, ${DENTIST_2}, 'member', now())`)
+  const [createdPatient] = await ownerDb
+    .insert(patient)
+    .values({ organizationId: ORG, displayName: "Paciente Agenda", patientNumber: 9101 })
+    .returning({ id: patient.id })
+  patientId = createdPatient!.id
+  const [service] = await ownerDb
+    .insert(serviceCatalog)
+    .values({
+      organizationId: ORG,
+      name: "Limpieza Agenda",
+      source: "custom",
+      priceCents: 9000,
+      currency: "PEN",
+      durationMin: 45,
+    })
+    .returning({ id: serviceCatalog.id })
+  serviceId = service!.id
+  const [chair, chair2] = await withOrgContext(appDb, ORG, async (tx) => [
+    await createChair(tx, ORG, { branchId, name: "Sillón Uno" }),
+    await createChair(tx, ORG, { branchId, name: "Sillón Dos" }),
+  ])
+  chairId = chair!.id
+  chair2Id = chair2!.id
+}, 180_000)
+
+const run = <T>(fn: (tx: typeof appDb) => Promise<T>) => withOrgContext(appDb, ORG, fn)
+
+it("crea una cita con duración del servicio y la lista con nombres resueltos", async () => {
+  const created = await run((tx) =>
+    createAppointment(tx, ORG, ACTOR, {
+      patientId,
+      dentistUserId: DENTIST,
+      chairId,
+      serviceId,
+      startsAt: START,
+      reason: "Dolor de muela",
+    }),
+  )
+  expect(created.serviceName).toBe("Limpieza Agenda")
+  expect(created.endsAt).toBe("2026-10-05T14:45:00.000Z")
+  expect(created.status).toBe("programada")
+
+  const list = await run((tx) => listAppointments(tx, ORG, { from: FROM, to: TO }))
+  const found = list.find((item) => item.id === created.id)
+  expect(found).toMatchObject({
+    patientName: "Paciente Agenda",
+    dentistName: "Dra. Agenda Uno",
+    chairName: "Sillón Uno",
+  })
+})
+
+it("rechaza profesional ajeno, paciente ajeno y sillón inexistente", async () => {
+  await expect(
+    run((tx) =>
+      createAppointment(tx, ORG, ACTOR, {
+        patientId,
+        dentistUserId: "no-es-miembro",
+        chairId,
+        startsAt: "2026-10-06T14:00:00Z",
+        durationMin: 30,
+      }),
+    ),
+  ).rejects.toMatchObject({ status: 404 })
+  await expect(
+    run((tx) =>
+      createAppointment(tx, ORG, ACTOR, {
+        patientId: "00000000-0000-4000-8000-000000000000",
+        dentistUserId: DENTIST,
+        chairId,
+        startsAt: "2026-10-06T14:00:00Z",
+        durationMin: 30,
+      }),
+    ),
+  ).rejects.toMatchObject({ status: 404 })
+  await expect(
+    run((tx) =>
+      createAppointment(tx, ORG, ACTOR, {
+        patientId,
+        dentistUserId: DENTIST,
+        chairId: "00000000-0000-4000-8000-000000000000",
+        startsAt: "2026-10-06T14:00:00Z",
+        durationMin: 30,
+      }),
+    ),
+  ).rejects.toMatchObject({ status: 404 })
+})
+
+it("la doble reserva del mismo sillón o profesional responde 409 APPOINTMENT_CONFLICT", async () => {
+  await expect(
+    run((tx) =>
+      createAppointment(tx, ORG, ACTOR, {
+        patientId,
+        dentistUserId: DENTIST_2,
+        chairId,
+        startsAt: OVERLAP,
+        endsAt: OVERLAP_END,
+      }),
+    ),
+  ).rejects.toMatchObject({ code: "APPOINTMENT_CONFLICT", status: 409 })
+  await expect(
+    run((tx) =>
+      createAppointment(tx, ORG, ACTOR, {
+        patientId,
+        dentistUserId: DENTIST,
+        chairId: chair2Id,
+        startsAt: OVERLAP,
+        endsAt: OVERLAP_END,
+      }),
+    ),
+  ).rejects.toMatchObject({ code: "APPOINTMENT_CONFLICT", status: 409 })
+  // Contigua: permitida.
+  const contiguous = await run((tx) =>
+    createAppointment(tx, ORG, ACTOR, {
+      patientId,
+      dentistUserId: DENTIST,
+      chairId,
+      startsAt: NEXT,
+      endsAt: NEXT_END,
+    }),
+  )
+  expect(contiguous.startsAt).toBe(new Date(NEXT).toISOString())
+})
+
+it("mover a un hueco libre sube la versión; versión vieja da STALE_VERSION", async () => {
+  const created = await run((tx) =>
+    createAppointment(tx, ORG, ACTOR, {
+      patientId,
+      dentistUserId: DENTIST_2,
+      chairId: chair2Id,
+      startsAt: "2026-10-06T15:00:00Z",
+      endsAt: "2026-10-06T15:30:00Z",
+    }),
+  )
+  const moved = await run((tx) =>
+    moveAppointment(tx, ORG, ACTOR, created.id, {
+      expectedVersion: created.version,
+      startsAt: "2026-10-06T16:00:00Z",
+    }),
+  )
+  expect(moved.version).toBe(created.version + 1)
+  expect(moved.endsAt).toBe("2026-10-06T16:30:00.000Z")
+  await expect(
+    run((tx) =>
+      moveAppointment(tx, ORG, ACTOR, created.id, {
+        expectedVersion: created.version,
+        startsAt: "2026-10-06T17:00:00Z",
+      }),
+    ),
+  ).rejects.toMatchObject({ code: "STALE_VERSION", status: 409 })
+})
+
+it("mover sobre un hueco ocupado da APPOINTMENT_CONFLICT", async () => {
+  const created = await run((tx) =>
+    createAppointment(tx, ORG, ACTOR, {
+      patientId,
+      dentistUserId: DENTIST_2,
+      chairId: chair2Id,
+      startsAt: "2026-10-07T15:00:00Z",
+      endsAt: "2026-10-07T15:30:00Z",
+    }),
+  )
+  await expect(
+    run((tx) =>
+      moveAppointment(tx, ORG, ACTOR, created.id, {
+        expectedVersion: created.version,
+        startsAt: OVERLAP,
+        endsAt: OVERLAP_END,
+        chairId,
+      }),
+    ),
+  ).rejects.toMatchObject({ code: "APPOINTMENT_CONFLICT", status: 409 })
+})
+
+it("editar congela el nuevo servicio y cancelar libera el recurso", async () => {
+  const created = await run((tx) =>
+    createAppointment(tx, ORG, ACTOR, {
+      patientId,
+      dentistUserId: DENTIST,
+      chairId,
+      startsAt: "2026-10-08T15:00:00Z",
+      endsAt: "2026-10-08T15:30:00Z",
+    }),
+  )
+  const edited = await run((tx) =>
+    updateAppointment(tx, ORG, ACTOR, created.id, {
+      expectedVersion: created.version,
+      serviceId,
+      reason: "Control",
+    }),
+  )
+  expect(edited.serviceName).toBe("Limpieza Agenda")
+  expect(edited.reason).toBe("Control")
+
+  const cancelled = await run((tx) => setAppointmentStatus(tx, ORG, ACTOR, created.id, "cancelada"))
+  expect(cancelled.status).toBe("cancelada")
+  // El mismo rango queda libre para otra cita.
+  const reuse = await run((tx) =>
+    createAppointment(tx, ORG, ACTOR, {
+      patientId,
+      dentistUserId: DENTIST,
+      chairId,
+      startsAt: "2026-10-08T15:00:00Z",
+      endsAt: "2026-10-08T15:30:00Z",
+    }),
+  )
+  expect(reuse.status).toBe("programada")
+})
+
+it("listScheduleResources devuelve miembros, sillones y la zona de la sucursal", async () => {
+  const resources = await run((tx) => listScheduleResources(tx, ORG, {}))
+  expect(resources.branchId).toBe(branchId)
+  expect(resources.timeZone).toBe("America/Lima")
+  expect(resources.professionals.map((p) => p.label)).toContain("Dra. Agenda Uno")
+  expect(resources.chairs.map((c) => c.label)).toEqual(["Sillón Dos", "Sillón Uno"])
+})

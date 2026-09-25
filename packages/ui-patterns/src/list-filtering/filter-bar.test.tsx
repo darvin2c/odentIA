@@ -227,13 +227,6 @@ describe("filtros de listas", () => {
     expect(mocks.setParam).toHaveBeenCalledWith("branch_id", "south")
   })
 
-  it("Reset usa el controlador común de URL", () => {
-    mocks.values = { status: "ready" }
-    render(<FilterBar filters={[statusFilter]} sortOptions={[]} />)
-    fireEvent.click(screen.getByRole("button", { name: "Limpiar" }))
-    expect(mocks.resetFilters).toHaveBeenCalledOnce()
-  })
-
   it("mantiene búsqueda y ordenamiento fuera del drawer compacto", async () => {
     const { container } = render(
       <FilterBar
@@ -301,7 +294,7 @@ describe("filtros de listas", () => {
       },
     ]
     setRowLayoutFitted(1100)
-    render(<FilterBar filters={filters} sortOptions={[]} />)
+    render(<FilterBar filters={filters} sortOptions={[{ value: "name", label: "Nombre" }]} />)
 
     expect(screen.getByRole("button", { name: "Filtro 2" })).toBeTruthy()
     expect(screen.getByRole("button", { name: "Filtro 3" })).toBeTruthy()

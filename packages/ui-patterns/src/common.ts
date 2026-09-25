@@ -56,4 +56,14 @@ export const common = {
   views: {
     selectAll: "Seleccionar todo",
   },
+  agenda: {
+    today: "Hoy",
+    previous: "Anterior",
+    next: "Siguiente",
+    view: "Vista",
+    free: "Hueco libre",
+    unavailable: "No disponible",
+    noEntries: "Sin citas",
+    more: "más",
+  },
 } as const

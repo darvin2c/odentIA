@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as OrgRouteImport } from './routes/_org'
 import { Route as RegistroRouteImport } from './routes/registro'
+import { Route as OrgAgendaRouteImport } from './routes/_org/agenda'
 import { Route as OrgBranchesRouteImport } from './routes/_org/branches'
 import { Route as OrgDemoRouteImport } from './routes/_org/demo'
 import { Route as OrgInboxRouteImport } from './routes/_org/inbox'
@@ -47,6 +48,11 @@ const RegistroRoute = RegistroRouteImport.update({
   id: '/registro',
   path: '/registro',
   getParentRoute: () => rootRouteImport,
+} as any)
+const OrgAgendaRoute = OrgAgendaRouteImport.update({
+  id: '/agenda',
+  path: '/agenda',
+  getParentRoute: () => OrgRoute,
 } as any)
 const OrgBranchesRoute = OrgBranchesRouteImport.update({
   id: '/branches',
@@ -159,6 +165,7 @@ const OrgPatientsPatientIdEncountersEncounterIdRoute =
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/registro': typeof RegistroRoute
+  '/agenda': typeof OrgAgendaRoute
   '/branches': typeof OrgBranchesRoute
   '/demo': typeof OrgDemoRoute
   '/inbox': typeof OrgInboxRoute
@@ -184,6 +191,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/registro': typeof RegistroRoute
+  '/agenda': typeof OrgAgendaRoute
   '/branches': typeof OrgBranchesRoute
   '/demo': typeof OrgDemoRoute
   '/inbox': typeof OrgInboxRoute
@@ -209,6 +217,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/_org': typeof OrgRouteWithChildren
   '/registro': typeof RegistroRoute
+  '/_org/agenda': typeof OrgAgendaRoute
   '/_org/branches': typeof OrgBranchesRoute
   '/_org/demo': typeof OrgDemoRoute
   '/_org/inbox': typeof OrgInboxRoute
@@ -236,6 +245,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/registro'
+    | '/agenda'
     | '/branches'
     | '/demo'
     | '/inbox'
@@ -261,6 +271,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/registro'
+    | '/agenda'
     | '/branches'
     | '/demo'
     | '/inbox'
@@ -285,6 +296,7 @@ export interface FileRouteTypes {
     | '/'
     | '/_org'
     | '/registro'
+    | '/_org/agenda'
     | '/_org/branches'
     | '/_org/demo'
     | '/_org/inbox'
@@ -336,6 +348,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/registro'
       preLoaderRoute: typeof RegistroRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/_org/agenda': {
+      id: '/_org/agenda'
+      path: '/agenda'
+      fullPath: '/agenda'
+      preLoaderRoute: typeof OrgAgendaRouteImport
+      parentRoute: typeof OrgRoute
     }
     '/_org/branches': {
       id: '/_org/branches'
@@ -536,6 +555,7 @@ const OrgPatientsPatientIdRouteWithChildren =
   OrgPatientsPatientIdRoute._addFileChildren(OrgPatientsPatientIdRouteChildren)
 
 interface OrgRouteChildren {
+  OrgAgendaRoute: typeof OrgAgendaRoute
   OrgBranchesRoute: typeof OrgBranchesRoute
   OrgDemoRoute: typeof OrgDemoRoute
   OrgInboxRoute: typeof OrgInboxRoute
@@ -551,6 +571,7 @@ interface OrgRouteChildren {
 }
 
 const OrgRouteChildren: OrgRouteChildren = {
+  OrgAgendaRoute: OrgAgendaRoute,
   OrgBranchesRoute: OrgBranchesRoute,
   OrgDemoRoute: OrgDemoRoute,
   OrgInboxRoute: OrgInboxRoute,

@@ -68,15 +68,29 @@ export interface FilterBarProps {
   filters: FilterDef[]
   sortOptions: SortOption[]
   searchPlaceholder?: string
+  showSearch?: boolean
+  className?: string
+  /** Limita Limpiar a estas claves; conserva fecha, vista y agrupación. */
+  resetKeys?: string[]
+  /** Permite mantener el drawer en tablets sin cambiar otros consumidores. */
+  inlineFrom?: "md" | "lg"
 }
 
 export function FilterBar({
   filters,
   sortOptions,
   searchPlaceholder = common.filters.search,
+  showSearch = true,
+  className,
+  resetKeys,
+  inlineFrom = "md",
 }: FilterBarProps) {
   const [drawerMode, setDrawerMode] = React.useState<"all" | "overflow" | null>(null)
-  const { get, resetFilters } = useListSearch()
+  const { get, resetFilters, setParams } = useListSearch()
+  const clear = () =>
+    resetKeys
+      ? setParams(Object.fromEntries(resetKeys.map((key) => [key, undefined])))
+      : resetFilters()
   // Pool ordenado por prioridad inline: primarias primero y las de
   // `placement: "overflow"` al final (entran a inline solo si sobra sitio).
   const orderedFilters = React.useMemo(
@@ -107,13 +121,16 @@ export function FilterBar({
   const drawerTitle = drawerMode === "overflow" ? common.filters.moreFilters : common.filters.label
 
   return (
-    <div className="flex p-3 bg-card rounded-md">
+    <div className={cn("flex p-3 bg-card rounded-md", className)}>
       <div
         ref={containerRef}
         data-filter-row="desktop"
-        className="hidden w-full min-w-0 items-center gap-2 overflow-x-auto p-1 -m-1 md:flex"
+        className={cn(
+          "hidden w-full min-w-0 items-center gap-2 overflow-x-auto p-1 -m-1",
+          inlineFrom === "lg" ? "lg:flex justify-end" : "md:flex",
+        )}
       >
-        <SearchInput placeholder={searchPlaceholder} expandable />
+        {showSearch && <SearchInput placeholder={searchPlaceholder} expandable />}
         {primaryFilters.map((filter) => (
           <FilterControl key={`${filter.type}:${filter.key}`} filter={filter} layout="popover" />
         ))}
@@ -139,17 +156,26 @@ export function FilterBar({
           </Button>
         ) : null}
         {hasActiveCriteria ? (
-          <Button type="button" variant="ghost" className="shrink-0" onClick={resetFilters}>
+          <Button type="button" variant="ghost" className="shrink-0" onClick={clear}>
             <X />
             {common.filters.clear}
           </Button>
         ) : null}
-        <div className="ml-auto shrink-0">
-          <SortMenu options={sortOptions} />
-        </div>
+        {sortOptions.length > 0 && (
+          <div className="ml-auto shrink-0">
+            <SortMenu options={sortOptions} />
+          </div>
+        )}
       </div>
-      <div className="flex w-full min-w-0 items-center gap-2 md:hidden">
-        <SearchInput placeholder={searchPlaceholder} className="min-w-0 flex-1 sm:max-w-64" />
+      <div
+        className={cn(
+          "flex w-full min-w-0 items-center gap-2",
+          inlineFrom === "lg" ? "lg:hidden" : "md:hidden",
+        )}
+      >
+        {showSearch && (
+          <SearchInput placeholder={searchPlaceholder} className="min-w-0 flex-1 sm:max-w-64" />
+        )}
         <Button
           type="button"
           variant="outline"
@@ -158,16 +184,23 @@ export function FilterBar({
           onClick={() => setDrawerMode("all")}
         >
           <SlidersHorizontal />
-          <span className="hidden sm:inline">{common.filters.label}</span>
+          <span>{common.filters.label}</span>
           {activeFilterCount > 0 ? (
             <span className="flex min-w-5 items-center justify-center rounded-full bg-accent-soft px-1.5 text-xs text-accent-foreground">
               {activeFilterCount}
             </span>
           ) : null}
         </Button>
-        <div className="ml-auto shrink-0">
-          <SortMenu options={sortOptions} compact />
-        </div>
+        {hasActiveCriteria && (
+          <Button type="button" size="sm" variant="ghost" onClick={clear}>
+            {common.filters.clear}
+          </Button>
+        )}
+        {sortOptions.length > 0 && (
+          <div className="ml-auto shrink-0">
+            <SortMenu options={sortOptions} compact />
+          </div>
+        )}
       </div>
       <FilterDrawer
         filters={drawerFilters}

@@ -20,6 +20,7 @@ import {
 } from "@tanstack/react-router"
 import {
   Building2,
+  CalendarDays,
   Contact,
   FlaskConical,
   Inbox,
@@ -61,6 +62,7 @@ const navItems: AppShellNavEntry[] = [
   { label: "Contactos", to: "/contacts", icon: Contact },
   { label: "Pacientes", to: "/patients", icon: Smile },
   { label: "Pipeline", to: "/pipeline", icon: Kanban },
+  { label: "Agenda", to: "/agenda", icon: CalendarDays },
   { label: "Tareas", to: "/tasks", icon: ListTodo },
   { label: "Sucursales", to: "/branches", icon: Building2 },
   { label: "Miembros", to: "/members", icon: Users },
