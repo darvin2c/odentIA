@@ -5,8 +5,8 @@ process.env.DOCKER_HOST ??= "unix:///mnt/wsl/podman-sockets/odentia.sock"
 process.env.TESTCONTAINERS_RYUK_DISABLED ??= "true"
 
 import { spawnSync } from "node:child_process"
-import { createRequire } from "node:module"
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { createRequire } from "node:module"
 import { createConnection } from "node:net"
 import { dirname, join } from "node:path"
 import { CreateBucketCommand, PutBucketPolicyCommand, S3Client } from "@aws-sdk/client-s3"
@@ -33,8 +33,8 @@ import {
   PG_PORT,
   PORTLESS_CLI,
   ROOT,
-  stackEnv,
   STATE_DIR,
+  stackEnv,
 } from "./harness-env"
 
 const require = createRequire(import.meta.url)
@@ -62,9 +62,7 @@ function portless(args: string[], env: NodeJS.ProcessEnv): { status: number | nu
  */
 async function reapLeftovers(): Promise<void> {
   const { container } = await getContainerRuntimeClient()
-  const leftovers = (await container.list()).filter(
-    (info) => info.Labels?.[HARNESS_LABEL] === "1",
-  )
+  const leftovers = (await container.list()).filter((info) => info.Labels?.[HARNESS_LABEL] === "1")
   for (const info of leftovers) {
     await container
       .remove(container.getById(info.Id), { removeVolumes: true })
@@ -211,7 +209,23 @@ async function startStack(): Promise<void> {
 export async function ensureStack(): Promise<void> {
   // Procesos de apps de una corrida interrumpida retienen los puertos fijos:
   // se limpian siempre (la infraestructura puede seguir viva y no re-arranca).
-  killAppPortListeners()
+  // Los workers de Playwright también cargan la config y ejecutan ensureStack:
+  // con las apps ya vivas, limpiar puertos aquí los mataría (Windows, netstat
+  // LISTENING). Sólo el proceso principal puede podar restos de corridas.
+  const isWorker = process.argv.some((arg) => arg.includes("workerProcessEntry"))
+  if (isWorker) {
+    for (let i = 0; i < 120; i++) {
+      if (existsSync(MARKER) && (await Promise.all(HARNESS_PORTS.map(isPortOpen))).every(Boolean)) {
+        return
+      }
+      const { promise, resolve } = Promise.withResolvers<void>()
+      setTimeout(resolve, 1_000)
+      await promise
+    }
+    throw new Error("El harness no quedó listo: revisa .e2e-portless/proxy.log")
+  }
+  // Con E2E_KEEP los servidores se conservan entre corridas: no son restos.
+  if (process.env.E2E_KEEP !== "1") killAppPortListeners()
   // Liveness por puerto: es lo que consumen las apps. Se evita depender de la
   // forma del listado de contenedores y de un doble arranque entre procesos
   // (la config se carga en el proceso principal y en cada worker).

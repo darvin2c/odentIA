@@ -1,5 +1,6 @@
 import { expect, type Page, test } from "@playwright/test"
 import { API, PANEL, panelPattern, tenant, tenantPattern } from "./env"
+import { gotoHydrated, waitForHydration } from "./hydration"
 import { latestLinkFor } from "./mailpit"
 
 const run = Date.now().toString(36)
@@ -13,29 +14,6 @@ const orgC = { name: "Clínica Sur", slug: `clinica-sur-${run}`, branch: "Sede S
 
 // Navegaciones a un tenant: URLs absolutas (page.goto las acepta).
 const tenantBranches = (slug: string) => tenantPattern(slug, "/branches")
-
-// El dev server de Vite recarga una vez al compilar en frío; hay que esperar
-// a que React hidrate y a que la fibra sobreviva a una posible recarga.
-const hasFiber = () => {
-  for (const el of [document.documentElement, document.body, ...document.body.children]) {
-    if (el && Object.keys(el).some((key) => key.startsWith("__reactFiber"))) return true
-  }
-  return false
-}
-
-async function waitForHydration(page: Page) {
-  for (;;) {
-    await page.waitForFunction(hasFiber, null, { timeout: 60_000 })
-    await page.waitForTimeout(1_500)
-    const stable = await page.evaluate(hasFiber).catch(() => false)
-    if (stable) return
-  }
-}
-
-async function gotoHydrated(page: Page, path: string) {
-  await page.goto(path)
-  await waitForHydration(page)
-}
 
 async function register(page: Page, user: typeof userA) {
   await gotoHydrated(page, "/register")

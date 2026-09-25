@@ -1,6 +1,7 @@
 import { expect, type Page, test } from "@playwright/test"
 import { simulateTelegramInbound, simulateWhatsAppInbound } from "./channels"
 import { API, tenant, tenantPattern } from "./env"
+import { gotoHydrated, waitForHydration } from "./hydration"
 import { latestLinkFor } from "./mailpit"
 
 const run = Date.now().toString(36)
@@ -18,27 +19,6 @@ const uid = () => 5_000_000 + Math.floor(Math.random() * 1_000_000)
 // Requiere el stack dev completo con:
 // CHANNEL_VALIDATE_EXTERNAL=false, CHANNEL_SENDER_MODE=mock, LLM_MODEL=fake,
 // SECRETS_KEY configurado y worker corriendo.
-
-const hasFiber = () => {
-  for (const el of [document.documentElement, document.body, ...document.body.children]) {
-    if (el && Object.keys(el).some((key) => key.startsWith("__reactFiber"))) return true
-  }
-  return false
-}
-
-async function waitForHydration(page: Page) {
-  for (;;) {
-    await page.waitForFunction(hasFiber, null, { timeout: 60_000 })
-    await page.waitForTimeout(1_500)
-    const stable = await page.evaluate(hasFiber).catch(() => false)
-    if (stable) return
-  }
-}
-
-async function gotoHydrated(page: Page, path: string) {
-  await page.goto(path)
-  await waitForHydration(page)
-}
 
 async function register(page: Page, user: typeof userX) {
   await gotoHydrated(page, "/register")

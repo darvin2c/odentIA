@@ -1,3 +1,4 @@
+import { createConnection } from "node:net"
 import { defineConfig } from "@playwright/test"
 import { baseUrl } from "./env"
 import { APP_PORTS, PORTLESS_CLI, ROOT, stackEnv } from "./harness-env"
@@ -35,56 +36,89 @@ const timeout = 120_000
  * Node, que no resuelve los subdominios `*.localhost` (los specs ya lo
  * documentan para el request-context). Los banners de arranque son estables.
  */
-const webServer = harness
-  ? [
-      {
-        command: `node ${PORTLESS_CLI} --force --app-port ${APP_PORTS.api} api.odentia pnpm run dev:app`,
-        cwd: `${ROOT}/apps/api`,
-        wait: { stdout: /api listening on/ },
-        env,
-        timeout,
-        reuseExistingServer: false,
-        stdout: "pipe",
-        stderr: "pipe",
-      },
-      {
-        command: `node ${PORTLESS_CLI} --force --app-port ${APP_PORTS.worker} worker pnpm run dev:app`,
-        cwd: `${ROOT}/apps/worker`,
-        wait: { stdout: /worker: consumiendo/ },
-        env,
-        timeout,
-        reuseExistingServer: false,
-        stdout: "pipe",
-        stderr: "pipe",
-      },
-      {
-        command: `node ${PORTLESS_CLI} --force --app-port ${APP_PORTS.panel} app.odentia pnpm run dev:app`,
-        cwd: `${ROOT}/apps/panel`,
-        wait: { stdout: /Local:/ },
-        env,
-        timeout,
-        reuseExistingServer: false,
-        stdout: "pipe",
-        stderr: "pipe",
-      },
-      {
-        command: `node ${PORTLESS_CLI} --force --app-port ${APP_PORTS.platform} odentia pnpm run dev:app`,
-        cwd: `${ROOT}/apps/platform`,
-        wait: { stdout: /Local:/ },
-        env,
-        timeout,
-        reuseExistingServer: false,
-        stdout: "pipe",
-        stderr: "pipe",
-      },
-    ]
-  : undefined
+/**
+ * `E2E_KEEP=1` (sólo local): conserva la infraestructura y los servidores de
+ * una corrida a la siguiente. Vite/tsx recargan solos los cambios, y evita
+ * el arranque en frío de 4 servidores por corrida (minutos en Windows).
+ * Si los 4 puertos ya escuchan no se declara `webServer`: sin `url` de probe
+ * Playwright lanzaría wrappers duplicados sobre los puertos fijos.
+ */
+const keepStack = harness && process.env.E2E_KEEP === "1"
+// El worker no abre puerto TCP (sólo consume colas): se prueban api/panel/platform.
+const PROBE_PORTS = [APP_PORTS.api, APP_PORTS.panel, APP_PORTS.platform]
+const appPortsAlive =
+  keepStack &&
+  (
+    await Promise.all(
+      PROBE_PORTS.map(
+        (port) =>
+          new Promise<boolean>((resolve) => {
+            const socket = createConnection({ host: "127.0.0.1", port })
+            socket.once("connect", () => {
+              socket.destroy()
+              resolve(true)
+            })
+            socket.once("error", () => resolve(false))
+            socket.setTimeout(2_000, () => {
+              socket.destroy()
+              resolve(false)
+            })
+          }),
+      ),
+    )
+  ).every(Boolean)
+
+const webServer =
+  harness && !appPortsAlive
+    ? [
+        {
+          command: `node ${PORTLESS_CLI} --force --app-port ${APP_PORTS.api} api.odentia pnpm run dev:app`,
+          cwd: `${ROOT}/apps/api`,
+          wait: { stdout: /api listening on/ },
+          env,
+          timeout,
+          reuseExistingServer: false,
+          stdout: "pipe",
+          stderr: "pipe",
+        },
+        {
+          command: `node ${PORTLESS_CLI} --force --app-port ${APP_PORTS.worker} worker pnpm run dev:app`,
+          cwd: `${ROOT}/apps/worker`,
+          wait: { stdout: /worker: consumiendo/ },
+          env,
+          timeout,
+          reuseExistingServer: false,
+          stdout: "pipe",
+          stderr: "pipe",
+        },
+        {
+          command: `node ${PORTLESS_CLI} --force --app-port ${APP_PORTS.panel} app.odentia pnpm run dev:app`,
+          cwd: `${ROOT}/apps/panel`,
+          wait: { stdout: /Local:/ },
+          env,
+          timeout,
+          reuseExistingServer: false,
+          stdout: "pipe",
+          stderr: "pipe",
+        },
+        {
+          command: `node ${PORTLESS_CLI} --force --app-port ${APP_PORTS.platform} odentia pnpm run dev:app`,
+          cwd: `${ROOT}/apps/platform`,
+          wait: { stdout: /Local:/ },
+          env,
+          timeout,
+          reuseExistingServer: false,
+          stdout: "pipe",
+          stderr: "pipe",
+        },
+      ]
+    : undefined
 
 export default defineConfig({
   testDir: ".",
   timeout: 120_000,
   workers: 1, // comparten Mailpit
-  globalTeardown: harness ? "./global-teardown.ts" : undefined,
+  globalTeardown: harness && !keepStack ? "./global-teardown.ts" : undefined,
   use: {
     baseURL: baseUrl,
     ignoreHTTPSErrors: true,

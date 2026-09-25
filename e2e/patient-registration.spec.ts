@@ -1,5 +1,6 @@
 import { type Browser, expect, type Page, test } from "@playwright/test"
 import { simulateTelegramInbound } from "./channels"
+import { gotoHydrated } from "./hydration"
 import { latestLinkFor } from "./mailpit"
 
 /**
@@ -30,27 +31,6 @@ const maskedPhone = (e164: string) => {
 const uid = () => 6_000_000 + Math.floor(Math.random() * 1_000_000)
 
 const PRIVACY = "Aviso e2e: tus datos se usan solo para tu atención clínica (demostración)."
-
-const hasFiber = () => {
-  for (const el of [document.documentElement, document.body, ...document.body.children]) {
-    if (el && Object.keys(el).some((key) => key.startsWith("__reactFiber"))) return true
-  }
-  return false
-}
-
-async function waitForHydration(page: Page) {
-  for (;;) {
-    await page.waitForFunction(hasFiber, null, { timeout: 60_000 })
-    await page.waitForTimeout(1_500)
-    const stable = await page.evaluate(hasFiber).catch(() => false)
-    if (stable) return
-  }
-}
-
-async function gotoHydrated(page: Page, path: string) {
-  await page.goto(path)
-  await waitForHydration(page)
-}
 
 async function register(page: Page, user: { name: string; email: string; password: string }) {
   await gotoHydrated(page, "/register")
