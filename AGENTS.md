@@ -23,6 +23,7 @@ CRM odontológico omnicanal orientado a la persona.
 cp infra/dev/.env.example infra/dev/.env
 # generar SECRETS_KEY: openssl rand -hex 32
 # El .env debe tener finales LF: CRLF rompe `set -a && . ./infra/dev/.env`
+# Los scripts tsx de db/services (migrate, seed:cie10, seed:procedures, import:cpms, seed:dev) cargan solos `infra/dev/.env` vía `tsx --env-file-if-exists`; las variables ya definidas en el entorno tienen prioridad.
 pnpm install
 pnpm --filter @odentia/db migrate
 pnpm --filter @odentia/db seed:cie10   # prerrequisito de db:seed
