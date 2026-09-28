@@ -40,7 +40,7 @@ Biblioteca CPMS: `pnpm --filter @odentia/db import:cpms` regenera los CSV desde 
 pnpm dev | pnpm build | pnpm test | pnpm typecheck          # turbo, todo el repo
 pnpm --filter @odentia/services test|typecheck              # por paquete
 pnpm --filter @odentia/db generate|migrate|seed:cie10|seed:procedures
-pnpm --filter @odentia/e2e test
+pnpm e2e --workers=2                                    # entorno efímero propio
 ```
 
 ## Tests
@@ -48,6 +48,19 @@ pnpm --filter @odentia/e2e test
 - DB y services usan testcontainers (`dentalagent-postgres:18.6`); en CI/local necesitan `DOCKER_HOST` apuntando al socket podman. Los `*.test.ts` fijan uno WSL por defecto con `??=` (sobrescribible por env).
 - Cada test crea sus fixtures mínimas. `packages/services/src/seed-dev.ts` es solo manual: NUNCA importarlo en tests ni CI.
 - Regla permanente: nueva pantalla o entidad → extender `seed-dev.ts` en la misma PR.
+
+### E2E efímeros
+
+- `pnpm e2e [specs] [opciones Playwright]` crea PostgreSQL, MinIO y Mailpit propios, un proxy HTTPS con CA temporal y builds independientes de panel/platform. No carga `.env`, no reutiliza dev ni sus puertos/datos y no admite `E2E_KEEP`/`E2E_HARNESS`. Playwright directo sin supervisor falla explícitamente.
+- Prerrequisitos: Node >=24, `pnpm install`, `pnpm --filter @odentia/e2e exec playwright install chromium` y la imagen `dentalagent-postgres:18.6` (`podman build -t dentalagent-postgres:18.6 infra/dev/postgres`). Linux necesita además las dependencias de sistema de Chromium. No hace falta levantar compose ni ejecutar el seed manual.
+- Windows nativo con la máquina Podman de este entorno (PowerShell): `$env:DOCKER_HOST='npipe:////./pipe/podman-machine-default'`; `$env:TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE='/run/podman/podman.sock'`; después `pnpm e2e`. Confirmar los nombres con `podman machine inspect` si la máquina es otra. El supervisor normaliza el pipe para Testcontainers sin cambiar de daemon.
+- Linux/WSL: `DOCKER_HOST=unix:///ruta/al/socket pnpm e2e`; debe ser un socket accesible desde Node Linux. En Podman remoto, `TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE` designa el socket dentro del host de contenedores. Docker estándar puede usar autodetección. No se arranca ni reconfigura el runtime automáticamente.
+- Dos workers por defecto; `--workers=1` o `E2E_WORKERS=1` reduce concurrencia. Sin retries. Cada caso tiene identidad/tenant independientes; solo hash y cliente DB cerrable se comparten por worker. Registro, verificación e invitaciones mantienen sus recorridos UI.
+- `pnpm e2e cut.spec.ts --grep 'registro, verificación' --debug` conserva el entorno mientras está abierto el inspector. Al terminar, cerrar el inspector o pulsar Ctrl+C, el supervisor retira sus procesos, contenedores, volúmenes, CA y bundles. Ryuk sigue habilitado salvo configuración explícita del usuario. SIGKILL/apagón no ejecutan ese cierre: no prometer recuperación automática de procesos/archivos.
+- Logs, resultados JSON, capturas y trazas fallidas quedan en `e2e/test-results/<runId>/`. `runtime.json` identifica recursos propios sin credenciales; las trazas sí pueden contener credenciales de prueba y son privadas. Las duraciones separan infraestructura, catálogos, builds, readiness, tests y cierre; comparar runs con el mismo estado de imágenes.
+- Portless 0.15.6 está fijado y parcheado mediante pnpm para permitir `PORTLESS_HTTP_REDIRECT=0`: E2E no abre el puerto global 80. Solo el proceso del proxy amplía el intento TCP de Happy Eyeballs de 250 ms a 5 s, el mismo plazo HTTP del harness; evita cancelar IPv4 bajo carga antes de probar un IPv6 donde el preview no escucha. No desactiva TLS ni reintenta navegaciones.
+- La resolución local de SSR vive en `scripts/local-network.mjs`, cargado explícitamente por los comandos dev de los frontends y los previews E2E. Solo resuelve `.localhost` a loopback mediante Undici; el resto usa DNS del SO. No forma parte del bundle productivo, no modifica hosts/DNS global y SSR sigue usando el origen HTTPS público por Portless.
+- Verificación del corte (Windows x64, Node 24.11.1, Podman; imágenes ya disponibles): 25/25 con un worker (125,6 s total; 102,7 s tests) y 25/25 con dos (96,9 s total; 73,1 s tests), sin retries. Probados SSR autenticado en preview, Ctrl+C, caída del worker, cierre del inspector, rollback parcial y correo con más de 50 mensajes. Linux/WSL no se ejecutó: las distribuciones disponibles no tienen Node Linux. Tampoco se reinició dev para comprobar SSR dev; la prueba de aislamiento usa otra ejecución E2E como testigo.
 
 ## Convenciones de código
 
