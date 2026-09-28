@@ -4,6 +4,11 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+patchedDependencies:
+  portless@0.15.6:
+    hash: egytb5kxjeezts2fnqokhvxt7e
+    path: patches/portless@0.15.6.patch
+
 importers:
 
   .:
@@ -13,13 +18,16 @@ importers:
         version: 2.5.14
       portless:
         specifier: 0.15.6
-        version: 0.15.6
+        version: 0.15.6(patch_hash=egytb5kxjeezts2fnqokhvxt7e)
       turbo:
         specifier: 2.10.12
         version: 2.10.12
       typescript:
         specifier: 5.9.3
         version: 5.9.3
+      undici:
+        specifier: 8.10.2
+        version: 8.10.2
 
   apps/api:
     dependencies:
@@ -139,9 +147,6 @@ importers:
       typescript:
         specifier: 7.0.2
         version: 7.0.2
-      undici:
-        specifier: 8.10.2
-        version: 8.10.2
       vitest:
         specifier: ^3.2.7
         version: 3.2.7(@types/debug@4.1.13)(@types/node@22.20.2)(jiti@2.7.0)(jsdom@30.0.1(@noble/hashes@2.4.0))(lightningcss@1.33.0)(tsx@4.23.13)(yaml@2.9.1)
@@ -239,9 +244,6 @@ importers:
       typescript:
         specifier: 7.0.2
         version: 7.0.2
-      undici:
-        specifier: 8.10.2
-        version: 8.10.2
       vitest:
         specifier: ^3.2.7
         version: 3.2.7(@types/debug@4.1.13)(@types/node@22.20.2)(jiti@2.7.0)(jsdom@30.0.1(@noble/hashes@2.4.0))(lightningcss@1.33.0)(tsx@4.23.13)(yaml@2.9.1)
@@ -297,15 +299,36 @@ importers:
       '@aws-sdk/client-s3':
         specifier: 3.1131.0
         version: 3.1131.0
+      '@odentia/db':
+        specifier: workspace:*
+        version: link:../packages/db
       '@playwright/test':
         specifier: 1.63.0
         version: 1.63.0
+      '@types/node':
+        specifier: 22.20.2
+        version: 22.20.2
+      better-auth:
+        specifier: 1.7.4
+        version: 1.7.4(@prisma/client@5.22.0)(@tanstack/react-start@1.168.52(esbuild@0.28.2)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(rolldown@1.2.8)(rollup@4.63.1)(vite@8.3.0(@types/node@22.20.2)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.13)(yaml@2.9.1)))(better-sqlite3@12.11.1)(drizzle-kit@0.31.10)(drizzle-orm@0.45.2(@prisma/client@5.22.0)(@types/pg@8.23.1)(better-sqlite3@12.11.1)(kysely@0.29.5)(pg@8.23.0)(postgres@3.4.9))(pg@8.23.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(vitest@3.2.7(@types/debug@4.1.13)(@types/node@22.20.2)(jiti@2.7.0)(jsdom@30.0.1(@noble/hashes@2.4.0))(lightningcss@1.33.0)(tsx@4.23.13)(yaml@2.9.1))
+      drizzle-orm:
+        specifier: 0.45.2
+        version: 0.45.2(@prisma/client@5.22.0)(@types/pg@8.23.1)(better-sqlite3@12.11.1)(kysely@0.29.5)(pg@8.23.0)(postgres@3.4.9)
+      postgres:
+        specifier: 3.4.9
+        version: 3.4.9
       testcontainers:
         specifier: 12.1.0
         version: 12.1.0
+      tsx:
+        specifier: 4.23.13
+        version: 4.23.13
       typescript:
         specifier: 7.0.2
         version: 7.0.2
+      undici:
+        specifier: 8.10.2
+        version: 8.10.2
 
   packages/agent:
     dependencies:
@@ -10732,7 +10755,7 @@ snapshots:
 
   pngjs@5.0.0: {}
 
-  portless@0.15.6: {}
+  portless@0.15.6(patch_hash=egytb5kxjeezts2fnqokhvxt7e): {}
 
   postcss-selector-parser@7.1.6:
     dependencies:

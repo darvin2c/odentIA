@@ -9,7 +9,7 @@
     "#hooks/*": "./src/hooks/*.ts"
   },
   "scripts": {
-    "dev": "portless",
+    "dev": "node --import ../../scripts/local-network.mjs ../../node_modules/portless/dist/cli.js",
     "dev:app": "vite dev",
     "build": "vite build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
@@ -39,7 +39,6 @@
     "@types/react-dom": "^19.2.5",
     "@vitejs/plugin-react": "6.1.1",
     "typescript": "7.0.2",
-    "undici": "8.10.2",
     "vitest": "^3.2.7"
   },
   "portless": {

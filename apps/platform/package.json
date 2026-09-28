@@ -11,7 +11,7 @@
     "#storybook/crm": "./.storybook/mocks/crm.ts"
   },
   "scripts": {
-    "dev": "portless",
+    "dev": "node --import ../../scripts/local-network.mjs ../../node_modules/portless/dist/cli.js",
     "dev:app": "vite dev",
     "build": "vite build",
     "storybook": "storybook dev -p 6006 --no-open",
@@ -51,7 +51,6 @@
     "@vitejs/plugin-react": "6.1.1",
     "storybook": "10.6.0",
     "typescript": "7.0.2",
-    "undici": "8.10.2",
     "vitest": "^3.2.7"
   },
   "portless": {

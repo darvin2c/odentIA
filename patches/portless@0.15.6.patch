@@ -1,0 +1,14 @@
+diff --git a/dist/cli.js b/dist/cli.js
+index 648ea06770ed30d1f527478f0889bb047e2a588c..ca191fc7f7f453b47b66a5bfc00d646160875525 100644
+--- a/dist/cli.js
++++ b/dist/cli.js
+@@ -4706,7 +4706,8 @@ function startProxyServer(store, proxyPort, tld, tlds, tlsOptions, lanIp, strict
+       );
+     });
+   }
+-  if (isTls && proxyPort !== 80) {
++  // Un proxy efímero no debe adquirir el puerto global 80.
++  if (isTls && proxyPort !== 80 && process.env.PORTLESS_HTTP_REDIRECT !== "0") {
+     for (const bindTarget of bindTargets) {
+       const redirectServer = createHttpRedirectServer(proxyPort);
+       redirectServers.add(redirectServer);
