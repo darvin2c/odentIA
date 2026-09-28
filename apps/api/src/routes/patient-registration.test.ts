@@ -88,7 +88,7 @@ const storageStub = {
 
 // Cada instancia de la app real aísla sus buckets de rate-limit; una
 // dirección distinta por grupo aísla los contadores entre pruebas.
-function buildApp(remoteAddress: string): Hono {
+function buildApp(remoteAddress: string, webURL = "https://app.odentia.localhost"): Hono {
   return createApp({
     auth: authStub,
     db: appDb,
@@ -99,6 +99,7 @@ function buildApp(remoteAddress: string): Hono {
     webhookBaseUrl: "https://api.example.com",
     trustedOrigins: [],
     cookieDomain: "odentia.localhost",
+    webURL,
     listenUrl: "postgres://localhost:5432/dentalagent",
     registrationRemoteAddress: () => remoteAddress,
   })
@@ -462,8 +463,8 @@ it("documento duplicado público: 409 neutro sin filtrar la ficha", async () => 
   expect(await countPatients(ORG_A)).toBe(patientsBefore + 1)
 })
 
-it("enlace contextual: crea, resuelve, vincula y se consume una sola vez", async () => {
-  const app = buildApp("link-flow")
+it.each(["https://app.odentia.localhost", "https://app.odentia.localhost:4463"])("enlace contextual (%s): crea, resuelve, vincula y se consume una sola vez", async (webURL) => {
+  const app = buildApp("link-flow", webURL)
   const person = await withOrgContext(appDb, ORG_A, (tx) =>
     createContact(tx, ORG_A, { displayName: "Titular Conversación" }, { userId: "u-reg-owner" }),
   )
@@ -487,14 +488,15 @@ it("enlace contextual: crea, resuelve, vincula y se consume una sola vez", async
       { fetch, validateExternal: false },
     ),
   )
-  const [identity] = await ownerDb.insert(contactIdentity).values({ organizationId: ORG_A, contactId: person.id, channel: "whatsapp", externalUserId: "wa:51999000111" }).returning()
+  const externalId = `wa:${crypto.randomUUID()}`
+  const [identity] = await ownerDb.insert(contactIdentity).values({ organizationId: ORG_A, contactId: person.id, channel: "whatsapp", externalUserId: externalId }).returning()
   const [thread] = await ownerDb
     .insert(conversation)
     .values({
       organizationId: ORG_A,
       contactId: person.id,
       channelConnectionId: conn.id,
-      externalThreadId: "wa:51999000111",
+      externalThreadId: externalId,
       contactIdentityId: identity!.id,
     })
     .returning({ id: conversation.id })
@@ -508,8 +510,12 @@ it("enlace contextual: crea, resuelve, vincula y se consume una sola vez", async
   })
   expect(created.status).toBe(201)
   const createdBody = (await created.json()) as { data: { url: string; expiresAt: string } }
-  expect(createdBody.data.url).toContain("/registro?token=")
-  const token = new URL(createdBody.data.url).searchParams.get("token")!
+  const linkUrl = new URL(createdBody.data.url)
+  const expectedOrigin = new URL(webURL)
+  expectedOrigin.hostname = `${SLUG_A}.odentia.localhost`
+  expect(linkUrl.origin).toBe(expectedOrigin.origin)
+  expect(linkUrl.pathname).toBe("/registro")
+  const token = linkUrl.searchParams.get("token")!
   expect(token).toMatch(/^[A-Za-z0-9_-]{43}$/)
 
   const resolved = await app.request(

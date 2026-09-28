@@ -9,7 +9,7 @@ import { canWrite, orgContextOf } from "../lib/context.js"
 import { errorBody } from "../lib/error.js"
 import { type CrmDeps, runService, serviceErrorResponse, validationError } from "./helpers.js"
 
-export function createPatientRegistrationRoute(deps: CrmDeps & { cookieDomain: string }) {
+export function createPatientRegistrationRoute(deps: CrmDeps & { cookieDomain: string; webURL: string }) {
   const app = new Hono()
   app.get("/patient-registration/config", async c => {
     const { orgId } = orgContextOf(c)
@@ -37,7 +37,11 @@ export function createPatientRegistrationRoute(deps: CrmDeps & { cookieDomain: s
       const [org] = await tx.select({ slug: organization.slug }).from(organization).where(eq(organization.id, orgId)).limit(1)
       if (!org?.slug) throw new Error("La organización no tiene dirección pública")
       const link = await createPatientRegistrationLink(tx, orgId, userId, { contactId: c.req.param("id"), conversationId: parsed.data.conversationId })
-      const url = new URL(`https://${org.slug}.${deps.cookieDomain.replace(/^\./, "")}/registro`)
+      const url = new URL(deps.webURL)
+      url.hostname = `${org.slug}.${deps.cookieDomain.replace(/^\./, "")}`
+      url.pathname = "/registro"
+      url.search = ""
+      url.hash = ""
       url.searchParams.set("token", link.token)
       return { url: url.toString(), expiresAt: link.expiresAt.toISOString() }
     }))

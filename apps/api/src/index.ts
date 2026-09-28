@@ -46,6 +46,7 @@ const app = createApp({
   }),
   trustedOrigins: env.trustedOrigins,
   cookieDomain: env.COOKIE_DOMAIN,
+  webURL: env.WEB_URL,
   listenUrl: env.APP_DATABASE_URL,
 })
 

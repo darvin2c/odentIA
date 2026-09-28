@@ -2,7 +2,7 @@ import { redirect } from "@tanstack/react-router"
 import { createIsomorphicFn } from "@tanstack/react-start"
 import { getRequestHeaders } from "@tanstack/react-start/server"
 import { authClient } from "./auth-client"
-import { panelUrl, requestHostname } from "./host"
+import { orgSlugFromHostname, panelUrl, requestHostname, tenantUrl } from "./host"
 
 export interface SessionInfo {
   userId: string
@@ -19,7 +19,14 @@ export const ssrFetchOptions = createIsomorphicFn()
 /** URL absoluta actual (cliente o SSR): el `next` de vuelta al tenant. */
 function currentAbsoluteUrl(href: string): string {
   if (typeof window !== "undefined") return window.location.href
-  return `https://${requestHostname()}${href}`
+  const slug = orgSlugFromHostname(requestHostname())
+  const base = slug ? tenantUrl(slug) : panelUrl("/")
+  const location = new URL(href, base)
+  const result = new URL(base)
+  result.pathname = location.pathname
+  result.search = location.search
+  result.hash = location.hash
+  return result.href
 }
 
 /** Sesión actual o redirect al login del panel (con `next` de vuelta al tenant). */

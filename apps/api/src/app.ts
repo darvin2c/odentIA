@@ -47,6 +47,7 @@ export interface AppDeps {
   webhookBaseUrl: string
   trustedOrigins: string[]
   cookieDomain: string
+  webURL: string
   /** Conexión dedicada LISTEN (postgres.js crudo). */
   listenUrl: string
   registrationRemoteAddress?: RegistrationRemoteAddress
@@ -478,7 +479,7 @@ export function createApp(deps: AppDeps) {
   }
   guarded.route(
     "/",
-    createPatientRegistrationRoute({ ...crmDeps, cookieDomain: deps.cookieDomain }),
+    createPatientRegistrationRoute({ ...crmDeps, cookieDomain: deps.cookieDomain, webURL: deps.webURL }),
   )
   guarded.route("/conversations", createConversationsRoute(crmDeps))
   guarded.route("/contacts", createContactsRoute(crmDeps))
