@@ -1,7 +1,7 @@
 import { Toaster } from "@odentia/ui"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { createRootRoute, HeadContent, Outlet, Scripts } from "@tanstack/react-router"
-import type { ReactNode } from "react"
+import { type ReactNode, useEffect } from "react"
 import appCss from "../styles/app.css?url"
 
 export const Route = createRootRoute({
@@ -19,6 +19,10 @@ export const Route = createRootRoute({
 const queryClient = new QueryClient()
 
 function RootComponent() {
+  useEffect(() => {
+    document.documentElement.dataset.hydrated = "true"
+    return () => { delete document.documentElement.dataset.hydrated }
+  }, [])
   return (
     <RootDocument>
       <QueryClientProvider client={queryClient}>
