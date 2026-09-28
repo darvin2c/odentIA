@@ -15,6 +15,7 @@
     "SMTP_FROM",
     "VITE_API_URL",
     "VITE_BASE_DOMAIN",
+    "VITE_BASE_PORT",
     "SECRETS_KEY",
     "CHANNEL_VALIDATE_EXTERNAL",
     "CHANNEL_SENDER_MODE",
@@ -43,6 +44,11 @@
     },
     "test": {
       "dependsOn": ["^build"]
+    },
+    "@odentia/e2e#test": {
+      "cache": false,
+      "dependsOn": [],
+      "passThroughEnv": ["DOCKER_*", "TESTCONTAINERS_*", "CI", "E2E_WORKERS"]
     },
     "dev": {
       "cache": false,
