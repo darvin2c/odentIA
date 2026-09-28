@@ -408,7 +408,7 @@ function AgendaPage() {
         ) : (
           <div className="flex min-h-0 min-w-0 flex-1 flex-col">
             <ScheduleTimeline
-              className="min-h-0 flex-1"
+              className="max-h-full min-h-0"
               mobileLayout="focus"
               dates={dates}
               columns={columns}
@@ -459,16 +459,22 @@ function AgendaPage() {
         )}
         {hasColumns && daily.length === 0 && !appointmentsQuery.isLoading && (
           <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 rounded-lg border border-dashed p-3 text-sm">
-            <span>No hay citas para este día con los filtros actuales.</span>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() =>
-                setParams(Object.fromEntries(FILTER_KEYS.map((key) => [key, undefined])))
-              }
-            >
-              Restablecer filtros
-            </Button>
+            <span>
+              {professionalsFilter || chairsFilter || status
+                ? "No hay citas para este día con los filtros actuales."
+                : "No hay citas para este día."}
+            </span>
+            {professionalsFilter || chairsFilter || status ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() =>
+                  setParams(Object.fromEntries(FILTER_KEYS.map((key) => [key, undefined])))
+                }
+              >
+                Restablecer filtros
+              </Button>
+            ) : null}
           </div>
         )}
       </main>

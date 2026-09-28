@@ -4,7 +4,10 @@ import { routeTree } from "./routeTree.gen"
 export function getRouter() {
   return createRouter({
     routeTree,
-    scrollRestoration: true,
+    // La agenda posiciona su timeline según el parámetro `date`: la
+    // restauración (que conserva el scroll de contenedores persistentes
+    // entre ubicaciones) pisaría ese salto en cada navegación.
+    scrollRestoration: ({ location }) => location.pathname !== "/agenda",
   })
 }
 

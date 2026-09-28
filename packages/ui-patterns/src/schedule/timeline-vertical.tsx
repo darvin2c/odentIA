@@ -71,6 +71,8 @@ export interface ScheduleTimelineVerticalProps {
   autoScrollToNow?: boolean
   /** El día bajo la cabecera pegada cambió (alimenta la franja semanal). */
   onVisibleDateChange?: (date: string) => void
+  /** «Hoy» entra o sale del viewport (el botón flotante solo sale si no se ve). */
+  onTodayVisibleChange?: (visible: boolean) => void
   className?: string
 }
 
@@ -93,6 +95,7 @@ export function ScheduleTimelineVertical({
   apiRef,
   autoScrollToNow = true,
   onVisibleDateChange,
+  onTodayVisibleChange,
   className,
 }: ScheduleTimelineVerticalProps) {
   const scrollRef = React.useRef<HTMLDivElement>(null)
@@ -144,42 +147,102 @@ export function ScheduleTimelineVertical({
   // Día visible bajo la cabecera pegada: arranca en «hoy» (a donde salta el
   // auto-scroll) y luego solo cambia al cruzar medianoche.
   const [visibleDay, setVisibleDay] = React.useState<string>(nowDate ?? dates[0])
+  const todayVisibleRef = React.useRef<typeof onTodayVisibleChange>(undefined)
+  todayVisibleRef.current = onTodayVisibleChange
 
   React.useEffect(() => {
     const viewport = scrollContainer()
     if (!viewport) return
+    const reportToday = () => {
+      // «Hoy» visible = su franja intersecta el viewport aunque sea un píxel.
+      if (nowDate === null) return
+      const idx = dates.indexOf(nowDate)
+      const visible =
+        idx >= 0 &&
+        idx * dayHeight < viewport.scrollTop + viewport.clientHeight &&
+        (idx + 1) * dayHeight > viewport.scrollTop
+      todayVisibleRef.current?.(visible)
+    }
     const onScroll = () => {
+      // Tolerancia de aterrizaje igual que en escritorio: casi-en-el-borde
+      // informa el día que llena la pantalla.
       const index = Math.min(
-        Math.max(Math.floor(viewport.scrollTop / dayHeight), 0),
+        Math.max(Math.floor((viewport.scrollTop + 16) / dayHeight), 0),
         dates.length - 1,
       )
       setVisibleDay((current) => (dates[index] === current ? current : dates[index]))
+      reportToday()
     }
-    // Sin llamada inicial: el estado ya arranca en «hoy» y el auto-scroll
-    // emite su propio evento al aterrizar.
+    // Inicial solo la visibilidad: el día visible ya arranca en «hoy» y el
+    // auto-scroll emite su propio evento al aterrizar.
+    reportToday()
     viewport.addEventListener("scroll", onScroll, { passive: true })
     return () => viewport.removeEventListener("scroll", onScroll)
-  }, [dates, dayHeight, scrollContainer])
+  }, [dates, dayHeight, scrollContainer, nowDate])
 
-  // La franja semanal sigue al día bajo la cabecera.
+  // Misma defensa que en escritorio: el scroll suave muere si el padre navega
+  // a mitad del gesto; el informe de fecha se pausa y se emite al asentarse.
+  const smoothScroll = React.useRef(false)
+  const onVisibleDateChangeRef = React.useRef(onVisibleDateChange)
+  onVisibleDateChangeRef.current = onVisibleDateChange
+  const visibleDayRef = React.useRef(visibleDay)
+  visibleDayRef.current = visibleDay
+  const geomRef = React.useRef({ dates, dayHeight })
+  geomRef.current = { dates, dayHeight }
+  const scrollToY = React.useCallback(
+    (top: number, behavior: ScrollBehavior) => {
+      const viewport = scrollContainer()
+      if (!viewport || typeof viewport.scrollTo !== "function") return
+      if (reducedMotion || behavior === "auto") {
+        viewport.scrollTo({ top, behavior: "auto" })
+        return
+      }
+      smoothScroll.current = true
+      let settled = false
+      const finish = () => {
+        if (settled) return
+        settled = true
+        globalThis.clearTimeout(timer)
+        smoothScroll.current = false
+        // El estado puede ir un fotograma atrás: se informa el día calculado
+        // de la posición real ya aterrizada.
+        const { dates: loaded, dayHeight: height } = geomRef.current
+        const index = Math.min(
+          Math.max(Math.floor((viewport.scrollTop + 16) / height), 0),
+          loaded.length - 1,
+        )
+        const day = loaded[index]
+        if (day) onVisibleDateChangeRef.current?.(day)
+      }
+      const timer = globalThis.setTimeout(finish, 2500)
+      viewport.addEventListener("scrollend", finish, { once: true })
+      viewport.addEventListener("wheel", finish, { once: true, passive: true })
+      viewport.addEventListener("pointerdown", finish, { once: true })
+      viewport.scrollTo({ top, behavior: "smooth" })
+    },
+    [scrollContainer, reducedMotion],
+  )
+  // La franja semanal sigue al día bajo la cabecera; en salto suave el
+  // informe al padre espera al aterrizaje (scrollToY lo emite en `finish`).
   React.useEffect(() => {
-    onVisibleDateChange?.(visibleDay)
-  }, [visibleDay, onVisibleDateChange])
-
+    if (!smoothScroll.current) onVisibleDateChangeRef.current?.(visibleDay)
+  }, [visibleDay])
   const scrollToDate = React.useCallback(
     (date: string, minutes?: number, behavior: ScrollBehavior = "smooth") => {
       const viewport = scrollContainer()
       const dayIndex = dates.indexOf(date)
-      if (!viewport || dayIndex < 0 || typeof viewport.scrollTo !== "function") return
+      if (dayIndex < 0) return
       const point =
         dayIndex * dayHeight +
         ((minutes ?? window.startMinutes) - window.startMinutes) * pxPerMinute
       // Un tercio desde arriba: contexto de lo que viene sin perder el ahora.
       const top =
-        minutes === undefined ? dayIndex * dayHeight : point - viewport.clientHeight / 3 + HEADER_PX
-      viewport.scrollTo({ top: Math.max(0, top), behavior: reducedMotion ? "auto" : behavior })
+        minutes === undefined
+          ? dayIndex * dayHeight
+          : point - (viewport?.clientHeight ?? 0) / 3 + HEADER_PX
+      scrollToY(Math.max(0, top), behavior)
     },
-    [dates, dayHeight, pxPerMinute, scrollContainer, window.startMinutes, reducedMotion],
+    [dates, dayHeight, pxPerMinute, scrollContainer, window.startMinutes, scrollToY],
   )
   const scrollToNow = React.useCallback(
     (behavior: ScrollBehavior = "smooth") => {

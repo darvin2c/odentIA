@@ -10,8 +10,8 @@
  * chips; `team` conserva todas las filas con una regla compacta.
  */
 
-import { cn, ScrollArea, Spinner } from "@odentia/ui"
-import { TriangleAlert } from "lucide-react"
+import { Button, cn, ScrollArea, Spinner } from "@odentia/ui"
+import { CalendarClock, TriangleAlert } from "lucide-react"
 import * as React from "react"
 
 import { useAxisDrag } from "./axis-drag.js"
@@ -139,6 +139,8 @@ export function ScheduleTimeline({
   const [visibleDate, setVisibleDate] = React.useState(() =>
     now === undefined ? dates[0] : zonedDateOf(now, timeZone),
   )
+  // «Hoy» intersecta el viewport aunque sea un píxel: alimenta el botón flotante.
+  const [todayVisible, setTodayVisible] = React.useState(true)
 
   const reportedDate = React.useRef<string | undefined>(undefined)
   const handleVisibleDate = React.useCallback(
@@ -226,20 +228,57 @@ export function ScheduleTimeline({
   const nowDate = now === undefined ? null : zonedDateOf(now, timeZone)
   const nowMinutes = now === undefined ? Number.NaN : dayMinutesIn(now, timeZone)
 
+  /**
+   * Scroll suave a prueba del router: Chrome cancela un scroll suave en curso
+   * ante cualquier `history.replaceState`, y aquí cada cruce de día informa la
+   * fecha al padre (que navega). Mientras dura el gesto el informe al padre
+   * queda en pausa (`smoothScroll`) y se emite solo al asentarse.
+   */
+  const smoothScroll = React.useRef(false)
+  const scrollToX = React.useCallback(
+    (left: number, behavior: ScrollBehavior) => {
+      const viewport = scrollContainer()
+      if (!viewport || typeof viewport.scrollTo !== "function") return
+      if (reducedMotion || behavior === "auto") {
+        viewport.scrollTo({ left, behavior: "auto" })
+        return
+      }
+      smoothScroll.current = true
+      let settled = false
+      const finish = () => {
+        if (settled) return
+        settled = true
+        globalThis.clearTimeout(timer)
+        smoothScroll.current = false
+        // Informe final con la posición ya aterrizada.
+        viewport.dispatchEvent(new Event("scroll"))
+      }
+      // Colchón por si `scrollend` no existe: largo, un salto de 15 días
+      // dura ~1 s; un fallback corto navegaría a mitad del gesto y Chrome
+      // cancelaría el scroll antes de llegar.
+      const timer = globalThis.setTimeout(finish, 2500)
+      viewport.addEventListener("scrollend", finish, { once: true })
+      // El usuario toma el volante: se libera igual.
+      viewport.addEventListener("wheel", finish, { once: true, passive: true })
+      viewport.addEventListener("pointerdown", finish, { once: true })
+      viewport.scrollTo({ left, behavior: "smooth" })
+    },
+    [scrollContainer, reducedMotion],
+  )
   const scrollToDate = React.useCallback(
     (date: string, minutes?: number, behavior: ScrollBehavior = "smooth") => {
       const viewport = scrollContainer()
       const root = rootRef.current
       const dayIndex = dates.indexOf(date)
-      if (!viewport || !root || dayIndex < 0 || typeof viewport.scrollTo !== "function") return
+      if (!viewport || !root || dayIndex < 0) return
       const point =
         dayIndex * dayWidth + ((minutes ?? window.startMinutes) - window.startMinutes) * pxPerMinute
       const gutter =
         Number.parseFloat(getComputedStyle(root).getPropertyValue("--schedule-gutter")) || 216
       const left = minutes === undefined ? point : point - (viewport.clientWidth - gutter) / 2
-      viewport.scrollTo({ left: Math.max(0, left), behavior: reducedMotion ? "auto" : behavior })
+      scrollToX(Math.max(0, left), behavior)
     },
-    [dates, dayWidth, pxPerMinute, scrollContainer, window.startMinutes, reducedMotion],
+    [dates, dayWidth, pxPerMinute, scrollContainer, window.startMinutes, scrollToX],
   )
   const scrollToNow = React.useCallback(
     (behavior: ScrollBehavior = "smooth") => {
@@ -252,17 +291,43 @@ export function ScheduleTimeline({
   /** La franja en escritorio: el día elegido aterrice tras la regla de recursos. */
   const scrollToDayFlush = React.useCallback(
     (day: string) => {
-      const viewport = scrollContainer()
       const dayIndex = dates.indexOf(day)
       if (dayIndex < 0) {
         onDateRequest?.(day)
         return
       }
-      if (!viewport || typeof viewport.scrollTo !== "function") return
-      viewport.scrollTo({ left: dayIndex * dayWidth, behavior: reducedMotion ? "auto" : "smooth" })
+      scrollToX(dayIndex * dayWidth, "smooth")
     },
-    [dates, dayWidth, scrollContainer, reducedMotion, onDateRequest],
+    [dates, dayWidth, scrollToX, onDateRequest],
   )
+
+  /**
+   * Botón flotante «Volver a hoy»: aparece cuando el día bajo el viewport no
+   * es el actual. Si hoy está cargado basta con desplazarse (el scroll ya
+   * informa el día visible al padre); si no, se pide la fecha al padre.
+   */
+  const goToday = React.useCallback(() => {
+    if (nowDate === null) return
+    if (dates.includes(nowDate)) {
+      if (focusMobile) verticalApiRef.current?.scrollToNow()
+      else scrollToNow()
+    } else {
+      onDateRequest?.(nowDate)
+    }
+  }, [nowDate, dates, focusMobile, scrollToNow, onDateRequest])
+  const todayButton =
+    nowDate !== null && !todayVisible && (dates.includes(nowDate) || onDateRequest) ? (
+      <Button
+        type="button"
+        size="sm"
+        aria-label="Volver a hoy"
+        onClick={goToday}
+        className="absolute right-4 bottom-4 z-50 rounded-full shadow-md"
+      >
+        <CalendarClock aria-hidden className="size-4" />
+        Hoy
+      </Button>
+    ) : null
 
   React.useImperativeHandle(apiRef, () => ({
     // En teléfono manda la timeline vertical; en escritorio, la horizontal.
@@ -330,23 +395,49 @@ export function ScheduleTimeline({
     return () => viewport.removeEventListener("wheel", onWheel)
   }, [scrollContainer, focusMobile, hasColumns])
 
-  // La regla tapa exactamente el margen inicial del contenido: el índice del
-  // día visible es scrollLeft/dayWidth, también con la regla compacta móvil.
+  // La regla tapa el margen inicial del contenido: el día visible es
+  // scrollLeft/dayWidth (con tolerancia de aterrizaje), también en móvil.
   React.useEffect(() => {
     if (focusMobile || !hasColumns) return
     const viewport = scrollContainer()
     if (!viewport) return
     const onScroll = () => {
+      // El aterrizaje puede quedar a píxeles del borde exacto (barras, ajustes
+      // de layout): con tolerancia, casi-en-el-borde informa el día que se ve.
       const index = Math.min(
         dates.length - 1,
-        Math.max(0, Math.floor(viewport.scrollLeft / dayWidth)),
+        Math.max(0, Math.floor((viewport.scrollLeft + 16) / dayWidth)),
       )
-      handleVisibleDate(dates[index])
+      if (smoothScroll.current) {
+        // En pleno salto suave solo se refresca lo local (franja semanal);
+        // informar al padre navegaría y Chrome cancelaría el gesto. El dedupe
+        // (`reportedDate`) queda intacto para el informe final del aterrizaje.
+        const day = dates[index]
+        if (day) setVisibleDate(day)
+      } else {
+        handleVisibleDate(dates[index])
+      }
+      if (nowDate === null) return
+      const idx = dates.indexOf(nowDate)
+      if (idx < 0) {
+        setTodayVisible(false)
+        return
+      }
+      const gutter =
+        Number.parseFloat(
+          getComputedStyle(rootRef.current ?? viewport).getPropertyValue("--schedule-gutter"),
+        ) || 216
+      const dayStart = gutter + idx * dayWidth
+      // «Hoy» visible = su franja asoma por el hueco útil (menos la regla fija).
+      setTodayVisible(
+        dayStart < viewport.scrollLeft + viewport.clientWidth &&
+          dayStart + dayWidth > viewport.scrollLeft + gutter,
+      )
     }
     onScroll()
     viewport.addEventListener("scroll", onScroll, { passive: true })
     return () => viewport.removeEventListener("scroll", onScroll)
-  }, [focusMobile, dates, dayWidth, scrollContainer, handleVisibleDate, hasColumns])
+  }, [focusMobile, dates, dayWidth, scrollContainer, handleVisibleDate, hasColumns, nowDate])
 
   if (columns.length === 0) {
     return (
@@ -395,7 +486,7 @@ export function ScheduleTimeline({
     const activeColumn = columns.find((column) => column.id === activeColumnId) ?? columns[0]
     return (
       <div
-        className={cn("flex flex-col overflow-hidden rounded-xl border bg-background", className)}
+        className={cn("relative flex flex-col overflow-hidden rounded-xl border bg-background", className)}
       >
         {resourceBar}
         <div className="shrink-0">
@@ -434,8 +525,10 @@ export function ScheduleTimeline({
           extending={extending}
           apiRef={verticalApiRef}
           onVisibleDateChange={handleVisibleDate}
+          onTodayVisibleChange={setTodayVisible}
           autoScrollToNow={autoScrollToNow}
         />
+        {todayButton}
       </div>
     )
   }
@@ -443,7 +536,7 @@ export function ScheduleTimeline({
   return (
     <div
       className={cn(
-        "flex flex-col overflow-hidden rounded-xl border bg-background [--schedule-gutter:216px]",
+        "relative flex flex-col overflow-hidden rounded-xl border bg-background [--schedule-gutter:216px]",
         mobileLayout === "team" && "max-sm:[--schedule-gutter:152px]",
         className,
       )}
@@ -745,6 +838,7 @@ export function ScheduleTimeline({
         </div>
         <DragLiveRegion text={drag.announcement} />
       </ScrollArea>
+      {todayButton}
     </div>
   )
 }

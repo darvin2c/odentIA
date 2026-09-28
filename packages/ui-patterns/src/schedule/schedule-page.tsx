@@ -294,7 +294,7 @@ export function SchedulePage() {
         ) : (
           <div className="flex min-h-0 min-w-0 flex-1 flex-col">
             <ScheduleTimeline
-              className="min-h-0 flex-1"
+              className="max-h-full min-h-0"
               mobileLayout="focus"
               dates={dates}
               columns={columns}
@@ -323,10 +323,16 @@ export function SchedulePage() {
         )}
         {hasColumns && daily.length === 0 && (
           <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 rounded-lg border border-dashed p-3 text-sm">
-            <span>No hay citas para este día con los filtros actuales.</span>
-            <Button variant="ghost" size="sm" onClick={clearFilters}>
-              Restablecer filtros
-            </Button>
+            <span>
+              {professionals || chairs || rooms || status || query
+                ? "No hay citas para este día con los filtros actuales."
+                : "No hay citas para este día."}
+            </span>
+            {professionals || chairs || rooms || status || query ? (
+              <Button variant="ghost" size="sm" onClick={clearFilters}>
+                Restablecer filtros
+              </Button>
+            ) : null}
           </div>
         )}
       </main>
