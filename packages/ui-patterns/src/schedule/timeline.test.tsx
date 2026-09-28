@@ -104,6 +104,34 @@ describe("ScheduleTimeline", () => {
     })
   })
 
+  it("el asa de inicio recorta el comienzo sin tocar el fin", () => {
+    const onEntryResize = vi.fn()
+    render(<ScheduleTimeline {...baseProps} onEntryResize={onEntryResize} />)
+    const asa = screen.getByRole("button", {
+      name: "Cambiar el inicio de la cita de Rosa Quispe",
+    })
+
+    fireEvent.keyDown(asa, { key: "ArrowDown" }) // +15 min al inicio (08:00 → 08:15)
+
+    expect(onEntryResize).toHaveBeenCalledWith(expect.objectContaining({ id: "c1" }), {
+      start: minutesToInstant(SCHEDULE_DATE, 495, SCHEDULE_TIME_ZONE),
+      end: minutesToInstant(SCHEDULE_DATE, 540, SCHEDULE_TIME_ZONE),
+    })
+  })
+
+  it("el asa de fin alarga la duración sin tocar el inicio", () => {
+    const onEntryResize = vi.fn()
+    render(<ScheduleTimeline {...baseProps} onEntryResize={onEntryResize} />)
+    const asa = screen.getByRole("button", { name: "Cambiar la duración de Rosa Quispe" })
+
+    fireEvent.keyDown(asa, { key: "ArrowDown" }) // +15 min al fin (09:00 → 09:15)
+
+    expect(onEntryResize).toHaveBeenCalledWith(expect.objectContaining({ id: "c1" }), {
+      start: minutesToInstant(SCHEDULE_DATE, 480, SCHEDULE_TIME_ZONE),
+      end: minutesToInstant(SCHEDULE_DATE, 555, SCHEDULE_TIME_ZONE),
+    })
+  })
+
   it("los días cargados se ven en la cabecera y posicionan sus citas", () => {
     const maniana = {
       id: "x1",

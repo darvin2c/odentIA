@@ -444,14 +444,14 @@ function AgendaPage() {
                       : undefined,
                 })
               }}
-              onEntryResize={(entry, end) => {
+              onEntryResize={(entry, resize) => {
                 const appointment = byId.get(entry.id)
                 if (!appointment) return
                 moveMutation.mutate({
                   id: appointment.id,
                   expectedVersion: appointment.version,
-                  startsAt: appointment.startsAt,
-                  endsAt: end,
+                  startsAt: resize.start,
+                  endsAt: resize.end,
                 })
               }}
             />

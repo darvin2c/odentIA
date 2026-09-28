@@ -15,6 +15,7 @@ export {
   type DragSessionInfo,
   type EntryDragBlockProps,
   type EntryDragResizeProps,
+  type ResizeEdge,
   type UseEntryDragResult,
   useEntryDrag,
 } from "./drag.js"
@@ -39,8 +40,8 @@ export type {
   ScheduleExtendHandler,
   ScheduleMove,
   ScheduleMoveHandler,
+  ScheduleResize,
   ScheduleResizeHandler,
-  ScheduleSlot,
   ScheduleStatus,
   ScheduleWindow,
 } from "./types.js"

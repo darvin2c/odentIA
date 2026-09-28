@@ -8,9 +8,10 @@
  * - Táctil: pulsación larga de 400 ms; sin ella el gesto es scroll y no se
  *   pelea con él. Mientras la sesión está activa se cancela el scroll nativo
  *   con un `touchmove` no pasivo; al soltar, todo vuelve a la normalidad.
- * - Teclado: Alt+Intro levanta la cita; las flechas la mueven (Alt+flecha
- *   cambia la duración), Intro suelta, Escape cancela. Intro a secas sigue
- *   abriendo la cita, así que no hay conflicto de teclas.
+ * - Teclado: Alt+Intro levanta la cita; las flechas la mueven, Alt+flecha
+ *   mueve el borde de fin y Alt+Mayús+flecha el de inicio; Intro suelta,
+ *   Escape cancela. Intro a secas sigue abriendo la cita, así que no hay
+ *   conflicto de teclas.
  *
  * El patrón nunca muta los datos: al soltar dispara `onMove`/`onResize` y el
  * padre decide. Mientras tanto, el fantasma sigue al puntero y una región
@@ -29,6 +30,9 @@ const EDGE_STEP_PX = 14
 const CLICK_SUPPRESS_MS = 350
 
 /** Geometría que cada vista conoce y el núcleo no: dónde cae el destino. */
+/** Borde de la cita que se redimensiona: inicio (asa izquierda/superior) o fin. */
+export type ResizeEdge = "start" | "end"
+
 export interface DragGeometry<TTarget> {
   /**
    * Destino bajo el puntero; null cuando está fuera de cualquier carril.
@@ -38,14 +42,15 @@ export interface DragGeometry<TTarget> {
   targetFromPoint(
     entry: ScheduleEntry,
     point: { x: number; y: number },
-    resizing: boolean,
+    resizing: ResizeEdge | null,
     grab?: { x: number; y: number },
   ): TTarget | null
   /** Destino de partida del modo teclado: la posición actual de la cita. */
   initialTarget(entry: ScheduleEntry): TTarget
   /**
-   * Siguiente destino de teclado. `key` llega como «ArrowUp» o «Alt+ArrowUp»
-   * (duración). Null = la tecla no hace nada.
+   * Siguiente destino de teclado. `key` llega como «ArrowUp», «Alt+ArrowUp»
+   * (borde de fin) o «Alt+Shift+ArrowUp» (borde de inicio).
+   * Null = la tecla no hace nada.
    */
   keyboardTarget(entry: ScheduleEntry, current: TTarget, key: string): TTarget | null
   sameTarget(a: TTarget, b: TTarget): boolean
@@ -64,7 +69,7 @@ export interface UseEntryDragOptions {
 export interface DragSessionInfo<TTarget> {
   entryId: string
   target: TTarget
-  resizing: boolean
+  resizing: ResizeEdge | null
   keyboard: boolean
 }
 
@@ -74,14 +79,14 @@ interface PendingDrag {
   pointerType: string
   startX: number
   startY: number
-  resizing: boolean
+  resizing: ResizeEdge | null
   longPress: number | null
 }
 
 interface ActiveDrag<TTarget> {
   entry: ScheduleEntry
   target: TTarget
-  resizing: boolean
+  resizing: ResizeEdge | null
   keyboard: boolean
 }
 
@@ -106,7 +111,7 @@ export interface UseEntryDragResult<TTarget> {
   ghostDelta: { x: number; y: number } | null
   announcement: string
   getBlockProps: (entry: ScheduleEntry) => EntryDragBlockProps
-  getResizeProps: ((entry: ScheduleEntry) => EntryDragResizeProps) | null
+  getResizeProps: ((entry: ScheduleEntry, edge: ResizeEdge) => EntryDragResizeProps) | null
   suppressClick: () => boolean
 }
 
@@ -168,7 +173,9 @@ export function useEntryDrag<TTarget>(
       setGhostDelta({ x: 0, y: 0 })
       setAnnouncement(
         pending.resizing
-          ? `Cambiando la duración de ${pending.entry.title}`
+          ? pending.resizing === "start"
+            ? `Cambiando el inicio de ${pending.entry.title}`
+            : `Cambiando la duración de ${pending.entry.title}`
           : `Moviendo ${pending.entry.title}`,
       )
       if (pending.pointerType === "touch") navigator.vibrate?.(20)
@@ -195,7 +202,7 @@ export function useEntryDrag<TTarget>(
         geometryRef.current.onMove(active.entry, active.target)
       }
       setAnnouncement(
-        `${active.resizing ? "Duración cambiada" : "Cita movida"}: ${geometryRef.current.describe(active.entry, active.target)}`,
+        `${active.resizing ? (active.resizing === "start" ? "Inicio cambiado" : "Duración cambiada") : "Cita movida"}: ${geometryRef.current.describe(active.entry, active.target)}`,
       )
     }
 
@@ -264,7 +271,7 @@ export function useEntryDrag<TTarget>(
 
     return { attach, cancelPending, finish, onBlockPointerDown, onBlockKeyDown, onResizeKeyDown }
 
-    function onBlockPointerDown(entry: ScheduleEntry, resizing: boolean) {
+    function onBlockPointerDown(entry: ScheduleEntry, resizing: ResizeEdge | null) {
       return (event: React.PointerEvent) => {
         if (!enabled || event.button !== 0) return
         const pending: PendingDrag = {
@@ -296,14 +303,14 @@ export function useEntryDrag<TTarget>(
         if (event.altKey && event.key === "Enter" && !active) {
           event.preventDefault()
           const target = geometryRef.current.initialTarget(entry)
-          applySession({ entry, target, resizing: false, keyboard: true })
+          applySession({ entry, target, resizing: null, keyboard: true })
           setAnnouncement(
-            `Moviendo ${entry.title}. Flechas para mover, Alt y flecha para la duración, Intro para soltar, Escape para cancelar.`,
+            `Moviendo ${entry.title}. Flechas para mover, Alt y flecha para el fin, Alt+Mayús y flecha para el inicio, Intro para soltar, Escape para cancelar.`,
           )
           return
         }
         if (!active?.keyboard || active.entry.id !== entry.id) return
-        const key = event.altKey ? `Alt+${event.key}` : event.key
+        const key = event.altKey ? `Alt+${event.shiftKey ? "Shift+" : ""}${event.key}` : event.key
         if (key === "Enter") {
           event.preventDefault()
           finish(true)
@@ -317,24 +324,30 @@ export function useEntryDrag<TTarget>(
         const next = geometryRef.current.keyboardTarget(active.entry, active.target, key)
         if (next) {
           event.preventDefault()
-          const resizing = key.startsWith("Alt+")
+          const resizing = key.startsWith("Alt+Shift+")
+            ? ("start" as const)
+            : key.startsWith("Alt+")
+              ? ("end" as const)
+              : null
           applySession({ ...active, target: next, resizing })
           setAnnouncement(geometryRef.current.describe(active.entry, next))
         }
       }
     }
 
-    function onResizeKeyDown(entry: ScheduleEntry) {
+    function onResizeKeyDown(entry: ScheduleEntry, edge: ResizeEdge) {
       return (event: React.KeyboardEvent) => {
         if (!enabled || !geometryRef.current.onResize) return
         if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return
         event.preventDefault()
         event.stopPropagation()
-        const key = event.key === "ArrowUp" ? "Alt+ArrowUp" : "Alt+ArrowDown"
+        const prefix = edge === "start" ? "Alt+Shift+" : "Alt+"
+        const key = event.key === "ArrowUp" ? `${prefix}ArrowUp` : `${prefix}ArrowDown`
         const next = geometryRef.current.keyboardTarget(entry, geometryRef.current.initialTarget(entry), key)
         if (next) {
           geometryRef.current.onResize(entry, next)
-          setAnnouncement(`Duración: ${geometryRef.current.describe(entry, next)}`)
+          const que = edge === "start" ? "Inicio" : "Duración"
+          setAnnouncement(`${que}: ${geometryRef.current.describe(entry, next)}`)
         }
       }
     }
@@ -365,7 +378,7 @@ export function useEntryDrag<TTarget>(
     getBlockProps(entry: ScheduleEntry) {
       const dragging = session?.entry.id === entry.id
       return {
-        onPointerDown: handlers.onBlockPointerDown(entry, false),
+        onPointerDown: handlers.onBlockPointerDown(entry, null),
         onKeyDown: handlers.onBlockKeyDown(entry),
         "data-dragging": dragging ? ("true" as const) : undefined,
         style:
@@ -374,11 +387,11 @@ export function useEntryDrag<TTarget>(
             : undefined,
       }
     },
-    /** Props del asa de duración; null cuando la vista no permite redimensionar. */
+    /** Props del asa de un borde; null cuando la vista no permite redimensionar. */
     getResizeProps: geometry.onResize
-      ? (entry: ScheduleEntry) => ({
-          onPointerDown: handlers.onBlockPointerDown(entry, true),
-          onKeyDown: handlers.onResizeKeyDown(entry),
+      ? (entry: ScheduleEntry, edge: ResizeEdge) => ({
+          onPointerDown: handlers.onBlockPointerDown(entry, edge),
+          onKeyDown: handlers.onResizeKeyDown(entry, edge),
           onClick: (event: React.MouseEvent) => event.stopPropagation(),
         })
       : null,

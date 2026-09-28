@@ -683,7 +683,14 @@ export function ScheduleTimeline({
                           sizePx={ancho}
                           draggable
                           dragProps={drag.getBlockProps(placement.item.entry)}
-                          resizeProps={drag.getResizeProps?.(placement.item.entry) ?? null}
+                          resizeProps={
+                            drag.getResizeProps
+                              ? {
+                                  start: drag.getResizeProps(placement.item.entry, "start"),
+                                  end: drag.getResizeProps(placement.item.entry, "end"),
+                                }
+                              : null
+                          }
                           onOpen={onEntryClick}
                           suppressClick={drag.suppressClick}
                           style={{

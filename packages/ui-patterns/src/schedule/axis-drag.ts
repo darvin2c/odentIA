@@ -154,7 +154,7 @@ export function useAxisDrag(config: UseAxisDragConfig) {
           if (origin) {
             const grabAlong =
               cfg.axis === "vertical" ? grab.y - origin.rect.top : grab.x - origin.rect.left
-            const edgeIso = resizing ? entry.end : entry.start
+            const edgeIso = resizing === "end" ? entry.end : entry.start
             grabOffsetPx =
               grabAlong -
               globalOf(zonedDateOf(edgeIso, cfg.timeZone), dayMinutesIn(edgeIso, cfg.timeZone)) *
@@ -168,17 +168,29 @@ export function useAxisDrag(config: UseAxisDragConfig) {
           grabOffsetPx
         const rawGlobal = along / cfg.pxPerMinute
         if (resizing) {
-          const start = dayMinutesIn(entry.start, cfg.timeZone)
+          // Redimensionar no cruza días: el día es el del inicio de la cita y
+          // solo se mueve el borde agarrado; el otro queda fijo.
           const dayIndex = cfg.dates
             ? Math.max(cfg.dates.indexOf(zonedDateOf(entry.start, cfg.timeZone)), 0)
             : 0
           const localRaw = rawGlobal - dayIndex * span + cfg.window.startMinutes
-          const end = Math.max(start + cfg.snap, snapMinutes(localRaw, cfg.snap))
+          if (resizing === "end") {
+            const start = dayMinutesIn(entry.start, cfg.timeZone)
+            const end = Math.max(start + cfg.snap, snapMinutes(localRaw, cfg.snap))
+            return {
+              columnId: hit.columnId,
+              date: cfg.dates?.[dayIndex],
+              startMinutes: start,
+              endMinutes: Math.min(end, cfg.window.endMinutes),
+            }
+          }
+          const end = dayMinutesIn(entry.end, cfg.timeZone)
+          const start = Math.min(end - cfg.snap, snapMinutes(localRaw, cfg.snap))
           return {
             columnId: hit.columnId,
             date: cfg.dates?.[dayIndex],
-            startMinutes: start,
-            endMinutes: Math.min(end, cfg.window.endMinutes),
+            startMinutes: Math.max(start, cfg.window.startMinutes),
+            endMinutes: end,
           }
         }
         const duration = durationMinutes(entry)
@@ -271,6 +283,14 @@ export function useAxisDrag(config: UseAxisDragConfig) {
           const next = order[order.indexOf(current.columnId) + columnKeys[key]]
           return next ? { ...current, columnId: next } : null
         }
+        if (key === "Alt+Shift+ArrowUp" || key === "Alt+Shift+ArrowLeft") {
+          const start = Math.max(cfg.window.startMinutes, current.startMinutes - cfg.snap)
+          return { ...current, startMinutes: start }
+        }
+        if (key === "Alt+Shift+ArrowDown" || key === "Alt+Shift+ArrowRight") {
+          const start = Math.min(current.endMinutes - cfg.snap, current.startMinutes + cfg.snap)
+          return { ...current, startMinutes: start }
+        }
         if (key === "Alt+ArrowUp" || key === "Alt+ArrowLeft") {
           const end = Math.max(current.startMinutes + cfg.snap, current.endMinutes - cfg.snap)
           return { ...current, endMinutes: end }
@@ -303,7 +323,8 @@ export function useAxisDrag(config: UseAxisDragConfig) {
       },
       onResize: configRef.current.onResize
         ? (entry, target) => {
-            configRef.current.onResize?.(entry, toIso(entry, target).end)
+            const iso = toIso(entry, target)
+            configRef.current.onResize?.(entry, { start: iso.start, end: iso.end })
           }
         : undefined,
     }

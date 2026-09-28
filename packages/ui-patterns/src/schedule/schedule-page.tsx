@@ -314,9 +314,9 @@ export function SchedulePage() {
                 if (!appointment) return
                 update(moveAppointment(appointment, move, group))
               }}
-              onEntryResize={(entry, end) => {
+              onEntryResize={(entry, resize) => {
                 const appointment = byId.get(entry.id)
-                if (appointment) update({ ...appointment, end })
+                if (appointment) update({ ...appointment, start: resize.start, end: resize.end })
               }}
             />
           </div>

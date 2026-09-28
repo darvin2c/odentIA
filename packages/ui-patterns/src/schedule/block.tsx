@@ -1,8 +1,8 @@
 /**
  * El bloque del eje de tiempo: posición absoluta que le da el carril,
  * densidad de texto por tamaño. El fantasma (transform) va en el envoltorio,
- * los gestos en el botón principal y el asa de duración es un botón hermano,
- * nunca anidado (HTML válido, ARIA limpio).
+ * los gestos en el botón principal y las asas de los bordes son botones
+ * hermanos, nunca anidados (HTML válido, ARIA limpio).
  */
 
 import { cn } from "@odentia/ui"
@@ -59,7 +59,8 @@ export function ScheduleBlock({
   axis: "vertical" | "horizontal"
   /** Alto (eje vertical) o ancho (horizontal) en px: decide qué texto cabe. */
   sizePx: number
-  resizeProps: EntryDragResizeProps | null
+  /** Asas de los dos bordes; null cuando la vista no permite redimensionar. */
+  resizeProps: { start: EntryDragResizeProps; end: EntryDragResizeProps } | null
   className?: string
   style?: React.CSSProperties
 }) {
@@ -119,27 +120,50 @@ export function ScheduleBlock({
         ) : null}
       </button>
       {resizeProps ? (
-        <button
-          type="button"
-          {...resizeProps}
-          aria-label={`Cambiar la duración de ${entry.title}`}
-          className={cn(
-            "absolute opacity-0 transition-opacity focus-visible:opacity-100 hover:opacity-100",
-            axis === "vertical"
-              ? "inset-x-0 bottom-0 h-2.5 cursor-ns-resize"
-              : "inset-y-0 right-0 w-2.5 cursor-ew-resize",
-          )}
-        >
-          <span
-            aria-hidden
+        <>
+          <button
+            type="button"
+            {...resizeProps.start}
+            aria-label={`Cambiar el inicio de la cita de ${entry.title}`}
             className={cn(
-              "absolute bg-foreground/40",
+              "absolute opacity-0 transition-opacity focus-visible:opacity-100 hover:opacity-100",
               axis === "vertical"
-                ? "inset-x-2 bottom-0.5 h-0.5 rounded-full"
-                : "inset-y-2 right-0.5 w-0.5 rounded-full",
+                ? "inset-x-0 top-0 h-2.5 cursor-ns-resize"
+                : "inset-y-0 left-0 w-2.5 cursor-ew-resize",
             )}
-          />
-        </button>
+          >
+            <span
+              aria-hidden
+              className={cn(
+                "absolute bg-foreground/40",
+                axis === "vertical"
+                  ? "inset-x-2 top-0.5 h-0.5 rounded-full"
+                  : "inset-y-2 left-0.5 w-0.5 rounded-full",
+              )}
+            />
+          </button>
+          <button
+            type="button"
+            {...resizeProps.end}
+            aria-label={`Cambiar la duración de ${entry.title}`}
+            className={cn(
+              "absolute opacity-0 transition-opacity focus-visible:opacity-100 hover:opacity-100",
+              axis === "vertical"
+                ? "inset-x-0 bottom-0 h-2.5 cursor-ns-resize"
+                : "inset-y-0 right-0 w-2.5 cursor-ew-resize",
+            )}
+          >
+            <span
+              aria-hidden
+              className={cn(
+                "absolute bg-foreground/40",
+                axis === "vertical"
+                  ? "inset-x-2 bottom-0.5 h-0.5 rounded-full"
+                  : "inset-y-2 right-0.5 w-0.5 rounded-full",
+              )}
+            />
+          </button>
+        </>
       ) : null}
     </div>
   )

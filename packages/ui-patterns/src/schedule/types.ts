@@ -73,6 +73,11 @@ export interface ScheduleMove {
 
 export type ScheduleEntryHandler = (entry: ScheduleEntry) => void
 export type ScheduleMoveHandler = (entry: ScheduleEntry, move: ScheduleMove) => void
-export type ScheduleResizeHandler = (entry: ScheduleEntry, end: string) => void
+/** Rango nuevo al redimensionar: cambia solo el borde arrastrado (inicio o fin). */
+export interface ScheduleResize {
+  start: string
+  end: string
+}
+export type ScheduleResizeHandler = (entry: ScheduleEntry, resize: ScheduleResize) => void
 /** Extensión de la ventana por scroll infinito, hacia el borde tocado. */
 export type ScheduleExtendHandler = (edge: "start" | "end") => void
