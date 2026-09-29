@@ -1,11 +1,13 @@
+import { startAuthentication, startRegistration } from "@simplewebauthn/browser"
 import { Badge, Button, Input, Label, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Tabs, TabsContent, TabsList, TabsTrigger, Textarea } from "@odentia/ui"
 import { EmptyState, ErrorState, LoadingState, PageHeader, PageShell, SubmitButton } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { createFileRoute } from "@tanstack/react-router"
+import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { useEffect, useState } from "react"
 import {
   closePortalSessionApi,
   confirmPortalAppointmentApi,
+  createPublicPortalRequestApi,
   decidePortalBudgetApi,
   fetchPortalAccount,
   fetchPortalAppointments,
@@ -13,19 +15,28 @@ import {
   fetchPortalDocumentUrl,
   fetchPortalDocuments,
   fetchPortalSession,
+  fetchPublicPortalPolicyApi,
   formatPortalDate,
   formatPortalMoney,
+  listMyPortalGrantsApi,
   portalErrorMessage,
+  requestPasskeyAuthOptionsApi,
+  requestPasskeyRegistrationOptionsApi,
   reschedulePortalAppointmentApi,
   fetchPortalRescheduleSlots,
   exchangePortalTokenApi,
+  selectPortalGrantApi,
+  verifyPasskeyAuthApi,
+  verifyPasskeyRegistrationApi,
   type PortalAppointment,
   type PortalBudget,
 } from "../lib/portal"
+import { orgSlugFromHostname, requestHostname } from "../lib/host"
 
 export const Route = createFileRoute("/portal")({
   validateSearch: (search: Record<string, unknown>) => ({
     token: typeof search.token === "string" && search.token.length <= 256 ? search.token : undefined,
+    org: typeof search.org === "string" && search.org.length <= 128 ? search.org : undefined,
   }),
   head: () => ({
     meta: [
@@ -37,6 +48,16 @@ export const Route = createFileRoute("/portal")({
 })
 
 const STORAGE_KEY = "odentia-portal-session"
+const ORG_STORAGE_KEY = "odentia-portal-org"
+
+function defaultOrgSlug(override?: string): string {
+  if (override && override.trim() !== "") return override.trim()
+  try {
+    return orgSlugFromHostname(requestHostname()) ?? ""
+  } catch {
+    return ""
+  }
+}
 
 const APPOINTMENT_STATUS_LABEL: Record<string, string> = {
   programada: "Programada",
@@ -72,6 +93,15 @@ function readStoredPortalSession(): string | null {
   }
 }
 
+function readStoredPortalOrg(): string | null {
+  if (typeof window === "undefined") return null
+  try {
+    return window.sessionStorage.getItem(ORG_STORAGE_KEY)
+  } catch {
+    return null
+  }
+}
+
 function writeStoredPortalSession(value: string | null): void {
   if (typeof window === "undefined") return
   try {
@@ -82,33 +112,80 @@ function writeStoredPortalSession(value: string | null): void {
   }
 }
 
+function writeStoredPortalOrg(value: string | null): void {
+  if (typeof window === "undefined") return
+  try {
+    if (value) window.sessionStorage.setItem(ORG_STORAGE_KEY, value)
+    else window.sessionStorage.removeItem(ORG_STORAGE_KEY)
+  } catch {
+    // Almacenamiento no disponible: la organización vive solo en memoria.
+  }
+}
+
 function PortalPage() {
-  const { token } = Route.useSearch()
+  const { token, org } = Route.useSearch()
+  const navigate = useNavigate({ from: Route.id })
   const [sessionToken, setSessionToken] = useState<string | null>(() => readStoredPortalSession())
+  const [storedOrg, setStoredOrg] = useState<string | null>(() => readStoredPortalOrg())
   const [closed, setClosed] = useState(false)
   const [pin, setPin] = useState("")
 
   const exchangeMutation = useMutation({
     mutationFn: (code: string) => exchangePortalTokenApi(token ?? "", code),
     onSuccess: (data) => {
+      // La org se resuelve de la fuente confiable actual (parámetro explícito u
+      // hostname), nunca de una sesión anterior; el token crudo sale de la URL.
+      const slug = defaultOrgSlug(org ?? storedOrg ?? "")
       writeStoredPortalSession(data.sessionToken)
       setSessionToken(data.sessionToken)
+      if (slug !== "") {
+        writeStoredPortalOrg(slug)
+        setStoredOrg(slug)
+      } else {
+        writeStoredPortalOrg(null)
+        setStoredOrg(null)
+      }
       setPin("")
+      void navigate({ search: { org, token: undefined }, replace: true })
     },
   })
 
+  function adoptSession(nextToken: string, orgSlug: string | null) {
+    writeStoredPortalSession(nextToken)
+    setSessionToken(nextToken)
+    if (orgSlug) {
+      writeStoredPortalOrg(orgSlug)
+      setStoredOrg(orgSlug)
+    }
+    setClosed(false)
+    setPin("")
+  }
+
+  function forgetSession() {
+    writeStoredPortalSession(null)
+    setSessionToken(null)
+  }
+
   if (!sessionToken && (!token || closed)) {
+    if (closed) {
+      return (
+        <PageShell maxWidth="md">
+          <EmptyState
+            title="Sesión cerrada"
+            description="Cerraste tu acceso. Puedes volver a entrar con tu passkey."
+          />
+          <PortalAccessLandingContent
+            initialOrg={defaultOrgSlug(org ?? storedOrg ?? "")}
+            onSession={(nextToken, orgSlug) => adoptSession(nextToken, orgSlug)}
+          />
+        </PageShell>
+      )
+    }
     return (
-      <PageShell maxWidth="md">
-        <EmptyState
-          title={closed ? "Sesión cerrada" : "Acceso al portal"}
-          description={
-            closed
-              ? "Cerraste tu acceso. Abre de nuevo el enlace de tu clínica si necesitas volver a entrar."
-              : "Abre el enlace que te envió tu clínica por WhatsApp, SMS o correo para ver tus citas, presupuestos y cuenta."
-          }
-        />
-      </PageShell>
+      <PortalAccessLanding
+        initialOrg={defaultOrgSlug(org ?? storedOrg ?? "")}
+        onSession={(nextToken, orgSlug) => adoptSession(nextToken, orgSlug)}
+      />
     )
   }
 
@@ -154,10 +231,27 @@ function PortalPage() {
     )
   }
   if (!sessionToken) return null
-  return <PortalDashboard sessionToken={sessionToken} onClose={() => { setClosed(true); setSessionToken(null) }} />
+  return (
+    <PortalDashboard
+      sessionToken={sessionToken}
+      orgSlug={storedOrg ?? defaultOrgSlug(org ?? "")}
+      onSessionToken={(nextToken) => adoptSession(nextToken, storedOrg ?? defaultOrgSlug(org ?? ""))}
+      onClose={() => { setClosed(true); forgetSession() }}
+    />
+  )
 }
 
-function PortalDashboard({ sessionToken, onClose }: { sessionToken: string; onClose: () => void }) {
+function PortalDashboard({
+  sessionToken,
+  orgSlug,
+  onSessionToken,
+  onClose,
+}: {
+  sessionToken: string
+  orgSlug: string
+  onSessionToken: (nextToken: string) => void
+  onClose: () => void
+}) {
   const sessionQuery = useQuery({
     queryKey: ["portal-session", sessionToken],
     queryFn: () => fetchPortalSession(sessionToken),
@@ -210,6 +304,7 @@ function PortalDashboard({ sessionToken, onClose }: { sessionToken: string; onCl
         title={`Hola, ${info.patientName}`}
         subtitle={`Tu acceso vence el ${formatPortalDate(info.session.expiresAt)}. No compartas esta pantalla.`}
       />
+      <GrantSwitcher sessionToken={sessionToken} onSessionToken={onSessionToken} />
       <div className="mb-4 flex flex-wrap items-center gap-2">
         {tabs.map((t) => (
           <Badge key={t.value} variant="secondary">{t.label}</Badge>
@@ -219,6 +314,7 @@ function PortalDashboard({ sessionToken, onClose }: { sessionToken: string; onCl
           Cerrar sesión
         </Button>
       </div>
+      <PasskeyRegisterSection sessionToken={sessionToken} orgSlug={orgSlug} />
       {tabs.length === 0 ? (
         <EmptyState title="Sin secciones" description="Tu acceso no tiene secciones autorizadas." />
       ) : (
@@ -665,6 +761,417 @@ function AccountTab({ sessionToken }: { sessionToken: string }) {
       <p className="text-xs text-muted-foreground">
         El pago se realiza en recepción o por los medios de la clínica; aquí ves tu historial y saldo real.
       </p>
+    </div>
+  )
+}
+
+function useDebouncedValue(value: string, delayMs: number): string {
+  const [debounced, setDebounced] = useState(value)
+  useEffect(() => {
+    const timer = setTimeout(() => setDebounced(value), delayMs)
+    return () => clearTimeout(timer)
+  }, [value, delayMs])
+  return debounced
+}
+function passkeyFriendlyMessage(error: unknown): string {
+  if (error instanceof Error && error.name === "NotAllowedError")
+    return "Se canceló la operación. Vuelve a intentarlo cuando quieras."
+  return portalErrorMessage(error)
+}
+
+function PortalAccessLanding({
+  initialOrg,
+  onSession,
+}: {
+  initialOrg: string
+  onSession: (nextToken: string, orgSlug: string) => void
+}) {
+  return (
+    <PageShell maxWidth="md">
+      <PortalAccessLandingContent initialOrg={initialOrg} onSession={onSession} />
+    </PageShell>
+  )
+}
+
+function PortalAccessLandingContent({
+  initialOrg,
+  onSession,
+}: {
+  initialOrg: string
+  onSession: (nextToken: string, orgSlug: string) => void
+}) {
+  return (
+    <>
+      <PageHeader
+        title="Portal del paciente"
+        subtitle="Solicita acceso a tu clínica o entra con tu passkey si ya registraste este dispositivo."
+      />
+      <Tabs defaultValue="solicitar">
+        <TabsList>
+          <TabsTrigger value="solicitar">Solicitar acceso</TabsTrigger>
+          <TabsTrigger value="passkey">Entrar con passkey</TabsTrigger>
+        </TabsList>
+        <TabsContent value="solicitar">
+          <PublicRequestForm initialOrg={initialOrg} />
+        </TabsContent>
+        <TabsContent value="passkey">
+          <PasskeyLoginForm initialOrg={initialOrg} onSession={onSession} />
+        </TabsContent>
+      </Tabs>
+      <p className="mt-4 text-sm text-muted-foreground">
+        ¿Tienes un enlace de la clínica? Ábrelo directamente: te pedirá tu código de 6 dígitos.
+      </p>
+    </>
+  )
+}
+
+function PublicRequestForm({ initialOrg }: { initialOrg: string }) {
+  const [orgSlug, setOrgSlug] = useState(initialOrg)
+  const [contactName, setContactName] = useState("")
+  const [contactText, setContactText] = useState("")
+  const [patientHint, setPatientHint] = useState("")
+
+  // En hostname de la clínica la organización es conocida: sin código técnico.
+  const hostnameOrg = defaultOrgSlug()
+  const effectiveOrg = (hostnameOrg !== "" ? hostnameOrg : orgSlug).trim()
+  const debouncedOrg = useDebouncedValue(effectiveOrg, 300)
+
+  const policyQuery = useQuery({
+    queryKey: ["public-portal-policy", debouncedOrg],
+    queryFn: () => fetchPublicPortalPolicyApi(debouncedOrg),
+    enabled: debouncedOrg !== "",
+    retry: false,
+  })
+  const requestsOpen = policyQuery.data
+    ? policyQuery.data.enabled && policyQuery.data.requestsEnabled
+    : true
+
+  const requestMutation = useMutation({
+    mutationFn: () =>
+      createPublicPortalRequestApi({
+        orgSlug: effectiveOrg,
+        contactName: contactName.trim(),
+        contactText: contactText.trim(),
+        patientHint: patientHint.trim() === "" ? undefined : patientHint.trim(),
+        idempotencyKey: crypto.randomUUID(),
+      }),
+  })
+
+  if (requestMutation.isSuccess) {
+    return (
+      <div className="grid gap-3 pt-2">
+        <p className="text-sm" role="status">
+          Recibimos tu solicitud. Si la clínica la aprueba tras verificar tu identidad, te
+          contactará por la vía que indicaste. Este paso puede tomar unos días.
+        </p>
+      </div>
+    )
+  }
+
+  const canSubmit =
+    effectiveOrg !== "" &&
+    contactName.trim() !== "" &&
+    contactText.trim() !== "" &&
+    requestsOpen &&
+    !requestMutation.isPending
+
+  return (
+    <div className="grid gap-3 pt-2">
+      {hostnameOrg !== "" ? (
+        <p className="text-sm text-muted-foreground" role="note">
+          Solicitud para {policyQuery.data?.orgName ? `la clínica ${policyQuery.data.orgName}` : "tu clínica"}.
+        </p>
+      ) : (
+        <div className="grid gap-2">
+          <Label htmlFor="portal-request-org">Código de la organización</Label>
+          <Input
+            id="portal-request-org"
+            value={orgSlug}
+            maxLength={128}
+            placeholder="El código que te dio la clínica"
+            onChange={(e) => setOrgSlug(e.target.value)}
+          />
+        </div>
+      )}
+      <div className="grid gap-2">
+        <Label htmlFor="portal-request-name">Tu nombre</Label>
+        <Input
+          id="portal-request-name"
+          value={contactName}
+          maxLength={120}
+          autoComplete="name"
+          onChange={(e) => setContactName(e.target.value)}
+        />
+      </div>
+      <div className="grid gap-2">
+        <Label htmlFor="portal-request-contact">Dónde contactarte</Label>
+        <Input
+          id="portal-request-contact"
+          value={contactText}
+          maxLength={200}
+          placeholder="Teléfono o correo"
+          onChange={(e) => setContactText(e.target.value)}
+        />
+        <p className="text-xs text-muted-foreground">
+          Solo para gestionar tu solicitud. El teléfono no verifica tu identidad.
+        </p>
+      </div>
+      <div className="grid gap-2">
+        <Label htmlFor="portal-request-hint">Paciente al que representas (opcional)</Label>
+        <Input
+          id="portal-request-hint"
+          value={patientHint}
+          maxLength={200}
+          onChange={(e) => setPatientHint(e.target.value)}
+        />
+      </div>
+      <p className="text-xs text-muted-foreground">
+        Usaremos estos datos solo para gestionar tu acceso al portal. No los usaremos para
+        publicidad ni los compartiremos con terceros con fines de marketing.
+      </p>
+      {requestMutation.isError && (
+        <ErrorState
+          title="No pudimos enviar tu solicitud"
+          message={portalErrorMessage(requestMutation.error)}
+        />
+      )}
+      <div>
+        {!requestsOpen && (
+          <p className="text-sm text-muted-foreground" role="note">
+            Esta organización no recibe solicitudes web por ahora. Pide tu acceso en recepción.
+          </p>
+        )}
+        <SubmitButton
+          pending={requestMutation.isPending}
+          disabled={!canSubmit}
+          onClick={() => requestMutation.mutate()}
+        >
+          Enviar solicitud
+        </SubmitButton>
+      </div>
+    </div>
+  )
+}
+
+function PasskeyLoginForm({
+  initialOrg,
+  onSession,
+}: {
+  initialOrg: string
+  onSession: (nextToken: string, orgSlug: string) => void
+}) {
+  const [orgSlug, setOrgSlug] = useState(initialOrg)
+  const [error, setError] = useState<string | null>(null)
+  const [pending, setPending] = useState(false)
+  const supported = typeof window !== "undefined" && "PublicKeyCredential" in window
+  const hostnameOrg = defaultOrgSlug()
+  const effectiveOrg = (hostnameOrg !== "" ? hostnameOrg : orgSlug).trim()
+  const debouncedOrg = useDebouncedValue(effectiveOrg, 300)
+  const policyQuery = useQuery({
+    queryKey: ["public-portal-policy", debouncedOrg],
+    queryFn: () => fetchPublicPortalPolicyApi(debouncedOrg),
+    enabled: debouncedOrg !== "",
+    retry: false,
+  })
+  const passkeysOpen = policyQuery.data
+    ? policyQuery.data.enabled && policyQuery.data.passkeysEnabled
+    : true
+
+  async function login() {
+    const slug = effectiveOrg
+    if (slug === "" || pending) return
+    setPending(true)
+    setError(null)
+    try {
+      const challenge = await requestPasskeyAuthOptionsApi(slug)
+      const response = await startAuthentication({ optionsJSON: challenge.options })
+      const result = await verifyPasskeyAuthApi(slug, {
+        challengeId: challenge.challengeId,
+        response,
+      })
+      onSession(result.sessionToken, slug)
+    } catch (e) {
+      setError(passkeyFriendlyMessage(e))
+    } finally {
+      setPending(false)
+    }
+  }
+
+  return (
+    <div className="grid gap-3 pt-2">
+      {hostnameOrg !== "" ? (
+        <p className="text-sm text-muted-foreground" role="note">
+          Acceso para {policyQuery.data?.orgName ? `la clínica ${policyQuery.data.orgName}` : "tu clínica"}.
+        </p>
+      ) : (
+        <div className="grid gap-2">
+          <Label htmlFor="portal-passkey-org">Código de la organización</Label>
+          <Input
+            id="portal-passkey-org"
+            value={orgSlug}
+            maxLength={128}
+            placeholder="El código que te dio la clínica"
+            onChange={(e) => setOrgSlug(e.target.value)}
+          />
+        </div>
+      )}
+      {!supported && (
+        <p className="text-sm text-muted-foreground" role="alert">
+          Este navegador no admite passkeys. Usa un navegador reciente o pide un nuevo enlace en
+          recepción.
+        </p>
+      )}
+      {error && <ErrorState title="No pudimos abrir tu acceso" message={error} />}
+      {policyQuery.data && !passkeysOpen && (
+        <p className="text-sm text-muted-foreground" role="note">
+          Esta organización no tiene activado el acceso con passkey. Pide un enlace en recepción.
+        </p>
+      )}
+      <div>
+        <SubmitButton pending={pending} disabled={effectiveOrg === "" || !supported || !passkeysOpen} onClick={() => void login()}>
+          Entrar con mi passkey
+        </SubmitButton>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        Si representas a varios pacientes, elegirás entre tus accesos autorizados tras entrar.
+      </p>
+    </div>
+  )
+}
+
+function GrantSwitcher({
+  sessionToken,
+  onSessionToken,
+}: {
+  sessionToken: string
+  onSessionToken: (nextToken: string) => void
+}) {
+  const queryClient = useQueryClient()
+  const [grantId, setGrantId] = useState("")
+  const grantsQuery = useQuery({
+    queryKey: ["portal-my-grants", sessionToken],
+    queryFn: () => listMyPortalGrantsApi(sessionToken),
+    retry: false,
+  })
+  const sessionQuery = useQuery({
+    queryKey: ["portal-session", sessionToken],
+    queryFn: () => fetchPortalSession(sessionToken),
+    retry: false,
+  })
+  const selectMutation = useMutation({
+    mutationFn: (id: string) => selectPortalGrantApi(sessionToken, id),
+    onSuccess: (result) => {
+      setGrantId("")
+      onSessionToken(result.sessionToken)
+      void queryClient.invalidateQueries({ queryKey: ["portal-session"] })
+      void queryClient.invalidateQueries({ queryKey: ["portal-my-grants"] })
+    },
+  })
+
+  if (grantsQuery.isPending || grantsQuery.isError) return null
+  const active = grantsQuery.data.filter((g) => g.status === "activo")
+  if (active.length <= 1) return null
+  const current = sessionQuery.data
+
+  return (
+    <div className="mb-4 grid gap-2 rounded-md border p-3">
+      <Label htmlFor="portal-grant-switch">Paciente autorizado</Label>
+      <div className="flex flex-wrap gap-2">
+        <Select
+          value={grantId}
+          onValueChange={(value) => {
+            if (value !== null) setGrantId(value)
+          }}
+        >
+          <SelectTrigger id="portal-grant-switch" className="min-w-48 flex-1">
+            <SelectValue placeholder="Elige el paciente" />
+          </SelectTrigger>
+          <SelectContent>
+            {active.map((g) => {
+              const isCurrent =
+                current !== undefined &&
+                g.patientId === current.session.patientId &&
+                g.contactId === current.session.contactId
+              return (
+                <SelectItem key={g.id} value={g.id}>
+                  {g.patientName}
+                  {isCurrent ? " (actual)" : ""}
+                </SelectItem>
+              )
+            })}
+          </SelectContent>
+        </Select>
+        <SubmitButton
+          size="sm"
+          pending={selectMutation.isPending}
+          disabled={grantId === ""}
+          onClick={() => selectMutation.mutate(grantId)}
+        >
+          Cambiar
+        </SubmitButton>
+      </div>
+      {selectMutation.isError && (
+        <ErrorState
+          title="No pudimos cambiar de paciente"
+          message={portalErrorMessage(selectMutation.error)}
+        />
+      )}
+    </div>
+  )
+}
+
+function PasskeyRegisterSection({
+  sessionToken,
+  orgSlug,
+}: {
+  sessionToken: string
+  orgSlug: string
+}) {
+  const [done, setDone] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [pending, setPending] = useState(false)
+  const supported = typeof window !== "undefined" && "PublicKeyCredential" in window
+
+  async function register() {
+    if (orgSlug === "" || pending) return
+    setPending(true)
+    setError(null)
+    try {
+      const challenge = await requestPasskeyRegistrationOptionsApi(sessionToken, orgSlug)
+      const response = await startRegistration({ optionsJSON: challenge.options })
+      await verifyPasskeyRegistrationApi(sessionToken, orgSlug, {
+        challengeId: challenge.challengeId,
+        response,
+      })
+      setDone(true)
+    } catch (e) {
+      setError(passkeyFriendlyMessage(e))
+    } finally {
+      setPending(false)
+    }
+  }
+
+  if (!supported || orgSlug === "") return null
+  return (
+    <div className="mb-4 grid gap-2 rounded-md border p-3">
+      <p className="text-sm font-medium">Acceso rápido en este dispositivo</p>
+      {done ? (
+        <p className="text-sm text-muted-foreground" role="status">
+          Passkey registrada. La próxima vez entra con tu huella, rostro o PIN del dispositivo.
+        </p>
+      ) : (
+        <>
+          <p className="text-xs text-muted-foreground">
+            Registra este dispositivo para entrar sin enlace ni código. Solo funciona aquí.
+          </p>
+          {error && <ErrorState title="No pudimos registrar tu passkey" message={error} />}
+          <div>
+            <SubmitButton size="sm" pending={pending} onClick={() => void register()}>
+              Registrar passkey
+            </SubmitButton>
+          </div>
+        </>
+      )}
     </div>
   )
 }

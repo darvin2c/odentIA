@@ -265,7 +265,8 @@ async function wipeSeed(): Promise<void> {
     .where(inArray(message.organizationId, SEED_ORGS))
   // Hijos de los nuevos dominios: purga únicamente las organizaciones demo.
   for (const table of [
-    "portal_access_log", "portal_session", "portal_link",
+    "portal_challenge", "portal_passkey", "portal_verification", "portal_request", "portal_grant",
+    "portal_policy", "portal_access_log", "portal_session", "portal_link",
     "automation_link_token", "automation_job", "automation_consent", "automation_rule",
     "agent_run_ledger", "agent_proposal", "agent_handoff",
     "agent_knowledge_revision", "agent_knowledge_entry", "agent_policy",
@@ -305,6 +306,7 @@ async function wipeSeed(): Promise<void> {
   await db
     .delete(patientRegistrationConfig)
     .where(inArray(patientRegistrationConfig.organizationId, SEED_ORGS))
+  await db.delete(appointment).where(inArray(appointment.organizationId, SEED_ORGS))
   await db.delete(message).where(inArray(message.organizationId, SEED_ORGS))
   await db.delete(crmTask).where(inArray(crmTask.organizationId, SEED_ORGS))
   await db.delete(conversation).where(inArray(conversation.organizationId, SEED_ORGS))
@@ -351,7 +353,6 @@ async function wipeSeed(): Promise<void> {
     .where(inArray(treatmentOptionGroup.organizationId, SEED_ORGS))
   await db.delete(treatmentBudget).where(inArray(treatmentBudget.organizationId, SEED_ORGS))
   await db.delete(treatmentPlan).where(inArray(treatmentPlan.organizationId, SEED_ORGS))
-  await db.delete(appointment).where(inArray(appointment.organizationId, SEED_ORGS))
   await db.delete(scheduleChair).where(inArray(scheduleChair.organizationId, SEED_ORGS))
   await db.delete(encounter).where(inArray(encounter.organizationId, SEED_ORGS))
   await db.delete(serviceCatalog).where(inArray(serviceCatalog.organizationId, SEED_ORGS))

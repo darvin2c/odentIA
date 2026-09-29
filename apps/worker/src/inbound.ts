@@ -6,9 +6,10 @@ import {
   sendAgentRun,
   withOrgContext,
 } from "@odentia/db"
+import { organization } from "@odentia/db/schema/auth"
 import { agentConfig, channelConnection, conversation } from "@odentia/db/schema/crm"
 import { auditEvent } from "@odentia/db/schema/org"
-import { ingestInbound, ServiceError, type Storage, type TranscribeFn } from "@odentia/services"
+import { ingestInbound, handlePortalChannelRequest, ServiceError, type Storage, type TranscribeFn } from "@odentia/services"
 import { and, eq, sql } from "drizzle-orm"
 
 export interface IngestDeps {
@@ -16,6 +17,8 @@ export interface IngestDeps {
   fetch: typeof fetch
   secretsKey: Buffer
   transcribe?: TranscribeFn
+  webURL?: string
+  cookieDomain?: string
 }
 
 /** Máximo de entregas pgmq antes de declarar el mensaje venenoso. */
@@ -71,6 +74,20 @@ export async function processInbound(
         ...(deps.transcribe ? { transcribe: deps.transcribe } : {}),
       })
       if (!result.created) return
+      if (deps.webURL && deps.cookieDomain) {
+        const [org] = await tx.select({ slug: organization.slug }).from(organization).where(eq(organization.id, orgId)).limit(1)
+        if (org?.slug) {
+          const portal = new URL(deps.webURL)
+          portal.hostname = `${org.slug}.${deps.cookieDomain.replace(/^\./, "")}`
+          portal.pathname = "/portal"
+          portal.search = ""
+          portal.hash = ""
+          const handled = await handlePortalChannelRequest(tx, orgId, {
+            conversationId: result.conversationId, messageId: result.messageId,
+          }, { portalUrl: () => portal.toString() })
+          if (handled) return
+        }
+      }
       const [conv] = await tx
         .select({ agentStatus: conversation.agentStatus })
         .from(conversation)

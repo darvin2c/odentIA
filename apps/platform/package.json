@@ -25,6 +25,7 @@
     "@odentia/clinical": "workspace:*",
     "@odentia/ui": "workspace:*",
     "@odentia/ui-patterns": "workspace:*",
+    "@simplewebauthn/browser": "14.0.0",
     "@tailwindcss/vite": "4.3.3",
     "@tanstack/react-form": "1.33.5",
     "@tanstack/react-query": "5.102.8",

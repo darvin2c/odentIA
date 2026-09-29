@@ -17,6 +17,10 @@ import {
   ServiceError,
   type PortalContext,
   type Storage,
+  getPortalPolicy, createPublicPortalRequest, listMyPortalGrants, selectPortalGrant,
+  createPasskeyRegistrationOptions, verifyPasskeyRegistration,
+  createPasskeyAuthOptions, verifyPasskeyAuth,
+  recordPortalPinFailure,
 } from "@odentia/services"
 import { getConnInfo } from "@hono/node-server/conninfo"
 import { bodyLimit } from "hono/body-limit"
@@ -24,6 +28,8 @@ import { type Context, Hono } from "hono"
 import { z } from "zod"
 import { errorBody } from "../lib/error.js"
 import { runService, serviceErrorResponse, validationError } from "./helpers.js"
+import { portalOrigin, portalOrganization } from "../lib/portal-origin.js"
+import { portalSlugInput } from "./portal-input.js"
 
 const exchangeInput = z.strictObject({ token: z.string().min(1).max(256), pin: z.string().regex(/^\d{6}$/) })
 const rescheduleInput = z.strictObject({
@@ -52,6 +58,8 @@ export function createPublicPortalRoute(deps: {
   db: Db
   ownerDb: Db
   storage: Pick<Storage, "attachmentUrl">
+  webURL: string
+  cookieDomain: string
   remoteAddress?: (c: Context) => string | undefined
 }) {
   const app = new Hono()
@@ -131,6 +139,96 @@ export function createPublicPortalRoute(deps: {
     }
   }
 
+  function publicLimited(c: Context): Response | null {
+    const policyRead = c.req.method === "GET"
+    return limited(c, `${policyRead ? "policy" : "access"}:${address(c) ?? "shared"}`, policyRead ? 120 : 30)
+      ? c.json(errorBody(c, "RATE_LIMITED", "Intenta nuevamente más tarde"), 429) : null
+  }
+
+  function rpFor(org: { slug: string | null; name: string }) {
+    if (!org.slug) throw new ServiceError("NOT_FOUND", 404, "Organización no disponible")
+    const expectedOrigin = portalOrigin(deps, org.slug)
+    return { rpID: new URL(expectedOrigin).hostname, rpName: org.name, expectedOrigin }
+  }
+
+  app.get("/policy", async c => {
+    const throttled = publicLimited(c)
+    if (throttled) return throttled
+    const parsed = portalSlugInput.safeParse(c.req.query("orgSlug"))
+    const org = parsed.success ? await portalOrganization(deps.ownerDb, parsed.data) : null
+    if (!org) return c.json({ data: { enabled: false, requestsEnabled: false, passkeysEnabled: false } })
+    return runService(c, 200, () => withOrgContext(deps.db, org.id, async tx => {
+      const policy = await getPortalPolicy(tx, org.id)
+      return { enabled: policy.enabled, requestsEnabled: policy.enabled && policy.requestsEnabled && policy.publicRequestsEnabled, passkeysEnabled: policy.enabled && policy.passkeysEnabled, orgName: org.name }
+    }))
+  })
+
+  app.post("/requests", async c => {
+    const throttled = publicLimited(c)
+    if (throttled) return throttled
+    const parsed = z.strictObject({
+      orgSlug: portalSlugInput, contactName: z.string().trim().min(1).max(200),
+      contactText: z.string().trim().min(1).max(300), patientHint: z.string().trim().max(300).optional(),
+      idempotencyKey: z.string().trim().min(8).max(128).optional(),
+    }).safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    const org = await portalOrganization(deps.ownerDb, parsed.data.orgSlug)
+    if (!org) return c.json({ data: { received: true } })
+    return runService(c, 200, () => withOrgContext(deps.db, org.id, tx => createPublicPortalRequest(tx, org.id, parsed.data)))
+  })
+
+  app.post("/passkeys/register/options", async c => {
+    const parsed = z.strictObject({ orgSlug: portalSlugInput }).safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    const org = await portalOrganization(deps.ownerDb, parsed.data.orgSlug)
+    if (!org) return unavailable(c)
+    return portalCall(c, (tx, ctx) => {
+      if (ctx.orgId !== org.id) throw new ServiceError("PORTAL_FORBIDDEN", 404, "Acceso no disponible")
+      return createPasskeyRegistrationOptions(tx, ctx, rpFor(org))
+    })
+  })
+
+  const passkeyVerifyInput = z.strictObject({
+    orgSlug: portalSlugInput, challengeId: z.uuid(), response: z.record(z.string(), z.unknown()),
+  })
+  app.post("/passkeys/register/verify", async c => {
+    const parsed = passkeyVerifyInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    const org = await portalOrganization(deps.ownerDb, parsed.data.orgSlug)
+    if (!org) return unavailable(c)
+    return portalCall(c, (tx, ctx) => {
+      if (ctx.orgId !== org.id) throw new ServiceError("PORTAL_FORBIDDEN", 404, "Acceso no disponible")
+      return verifyPasskeyRegistration(tx, ctx, parsed.data.challengeId, parsed.data.response, rpFor(org))
+    })
+  })
+
+  app.post("/passkeys/auth/options", async c => {
+    const throttled = publicLimited(c)
+    if (throttled) return throttled
+    const parsed = z.strictObject({ orgSlug: portalSlugInput }).safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    const org = await portalOrganization(deps.ownerDb, parsed.data.orgSlug)
+    if (!org) return unavailable(c)
+    return runService(c, 200, () => withOrgContext(deps.db, org.id, tx => createPasskeyAuthOptions(tx, org.id, rpFor(org))))
+  })
+
+  app.post("/passkeys/auth/verify", async c => {
+    const throttled = publicLimited(c)
+    if (throttled) return throttled
+    const parsed = passkeyVerifyInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    const org = await portalOrganization(deps.ownerDb, parsed.data.orgSlug)
+    if (!org) return unavailable(c)
+    return runService(c, 200, () => withOrgContext(deps.db, org.id, tx => verifyPasskeyAuth(tx, org.id, parsed.data.challengeId, parsed.data.response, rpFor(org))))
+  })
+
+  app.get("/grants", c => portalCall(c, (tx, ctx) => listMyPortalGrants(tx, ctx)))
+  app.post("/grants/select", async c => {
+    const parsed = z.strictObject({ grantId: z.uuid() }).safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return portalCall(c, (tx, ctx) => selectPortalGrant(tx, ctx, parsed.data.grantId))
+  })
+
   app.post("/exchange", async (c) => {
     if (limited(c, `exchange:${address(c) ?? "shared"}`, 10)) {
       return c.json(errorBody(c, "RATE_LIMITED", "Intenta nuevamente más tarde"), 429)
@@ -139,9 +237,17 @@ export function createPublicPortalRoute(deps: {
     if (!parsed.success) return unavailable(c)
     const orgId = await resolvePortalOrgByLinkToken(deps.ownerDb, parsed.data.token)
     if (!orgId) return unavailable(c)
-    return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) => exchangePortalToken(tx, orgId, parsed.data.token, { pin: parsed.data.pin })),
-    )
+    return runService(c, 200, async () => {
+      try {
+        return await withOrgContext(deps.db, orgId, tx => exchangePortalToken(tx, orgId, parsed.data.token, { pin: parsed.data.pin }))
+      } catch (error) {
+        // Registrar tras el rollback: el intento fallido no debe desaparecer ni bloquear otra transacción.
+        if (error instanceof ServiceError && error.code === "PORTAL_PIN_INVALID") {
+          await withOrgContext(deps.db, orgId, tx => recordPortalPinFailure(tx, orgId, parsed.data.token))
+        }
+        throw error
+      }
+    })
   })
 
   app.get("/session", async (c) =>
@@ -152,6 +258,8 @@ export function createPublicPortalRoute(deps: {
         contactId: ctx.session.contactId,
         scope: ctx.session.scope,
         expiresAt: ctx.session.expiresAt,
+        grantId: ctx.session.grantId,
+        authMethod: ctx.session.authMethod,
       },
       patientName: ctx.patientName,
     })),

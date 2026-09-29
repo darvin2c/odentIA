@@ -22,7 +22,6 @@ import { Route as OrgHomeRouteImport } from './routes/_org/home'
 import { Route as OrgInboxRouteImport } from './routes/_org/inbox'
 import { Route as OrgInventoryRouteImport } from './routes/_org/inventory'
 import { Route as OrgMembersRouteImport } from './routes/_org/members'
-import { Route as OrgPatientAccessRouteImport } from './routes/_org/patient-access'
 import { Route as OrgPipelineRouteImport } from './routes/_org/pipeline'
 import { Route as OrgReportsRouteImport } from './routes/_org/reports'
 import { Route as OrgServicesRouteImport } from './routes/_org/services'
@@ -50,6 +49,7 @@ import { Route as OrgSettingsChannelsRouteImport } from './routes/_org/settings.
 import { Route as OrgSettingsFieldsRouteImport } from './routes/_org/settings.fields'
 import { Route as OrgSettingsFormsRouteImport } from './routes/_org/settings.forms'
 import { Route as OrgSettingsMailRouteImport } from './routes/_org/settings.mail'
+import { Route as OrgSettingsPatientAccessRouteImport } from './routes/_org/settings.patient-access'
 import { Route as OrgSettingsPatientRegistrationRouteImport } from './routes/_org/settings.patient-registration'
 import { Route as OrgSettingsPipelinesRouteImport } from './routes/_org/settings.pipelines'
 import { Route as OrgSettingsSpecialtiesRouteImport } from './routes/_org/settings.specialties'
@@ -118,11 +118,6 @@ const OrgInventoryRoute = OrgInventoryRouteImport.update({
 const OrgMembersRoute = OrgMembersRouteImport.update({
   id: '/members',
   path: '/members',
-  getParentRoute: () => OrgRoute,
-} as any)
-const OrgPatientAccessRoute = OrgPatientAccessRouteImport.update({
-  id: '/patient-access',
-  path: '/patient-access',
   getParentRoute: () => OrgRoute,
 } as any)
 const OrgPipelineRoute = OrgPipelineRouteImport.update({
@@ -261,6 +256,12 @@ const OrgSettingsMailRoute = OrgSettingsMailRouteImport.update({
   path: '/mail',
   getParentRoute: () => OrgSettingsRoute,
 } as any)
+const OrgSettingsPatientAccessRoute =
+  OrgSettingsPatientAccessRouteImport.update({
+    id: '/patient-access',
+    path: '/patient-access',
+    getParentRoute: () => OrgSettingsRoute,
+  } as any)
 const OrgSettingsPatientRegistrationRoute =
   OrgSettingsPatientRegistrationRouteImport.update({
     id: '/patient-registration',
@@ -302,7 +303,6 @@ export interface FileRoutesByFullPath {
   '/inbox': typeof OrgInboxRoute
   '/inventory': typeof OrgInventoryRouteWithChildren
   '/members': typeof OrgMembersRoute
-  '/patient-access': typeof OrgPatientAccessRoute
   '/pipeline': typeof OrgPipelineRoute
   '/reports': typeof OrgReportsRoute
   '/services': typeof OrgServicesRouteWithChildren
@@ -325,6 +325,7 @@ export interface FileRoutesByFullPath {
   '/settings/fields': typeof OrgSettingsFieldsRoute
   '/settings/forms': typeof OrgSettingsFormsRoute
   '/settings/mail': typeof OrgSettingsMailRoute
+  '/settings/patient-access': typeof OrgSettingsPatientAccessRoute
   '/settings/patient-registration': typeof OrgSettingsPatientRegistrationRoute
   '/settings/pipelines': typeof OrgSettingsPipelinesRoute
   '/settings/specialties': typeof OrgSettingsSpecialtiesRoute
@@ -349,7 +350,6 @@ export interface FileRoutesByTo {
   '/inbox': typeof OrgInboxRoute
   '/inventory': typeof OrgInventoryRouteWithChildren
   '/members': typeof OrgMembersRoute
-  '/patient-access': typeof OrgPatientAccessRoute
   '/pipeline': typeof OrgPipelineRoute
   '/reports': typeof OrgReportsRoute
   '/tasks': typeof OrgTasksRoute
@@ -370,6 +370,7 @@ export interface FileRoutesByTo {
   '/settings/fields': typeof OrgSettingsFieldsRoute
   '/settings/forms': typeof OrgSettingsFormsRoute
   '/settings/mail': typeof OrgSettingsMailRoute
+  '/settings/patient-access': typeof OrgSettingsPatientAccessRoute
   '/settings/patient-registration': typeof OrgSettingsPatientRegistrationRoute
   '/settings/pipelines': typeof OrgSettingsPipelinesRoute
   '/settings/specialties': typeof OrgSettingsSpecialtiesRoute
@@ -396,7 +397,6 @@ export interface FileRoutesById {
   '/_org/inbox': typeof OrgInboxRoute
   '/_org/inventory': typeof OrgInventoryRouteWithChildren
   '/_org/members': typeof OrgMembersRoute
-  '/_org/patient-access': typeof OrgPatientAccessRoute
   '/_org/pipeline': typeof OrgPipelineRoute
   '/_org/reports': typeof OrgReportsRoute
   '/_org/services': typeof OrgServicesRouteWithChildren
@@ -419,6 +419,7 @@ export interface FileRoutesById {
   '/_org/settings/fields': typeof OrgSettingsFieldsRoute
   '/_org/settings/forms': typeof OrgSettingsFormsRoute
   '/_org/settings/mail': typeof OrgSettingsMailRoute
+  '/_org/settings/patient-access': typeof OrgSettingsPatientAccessRoute
   '/_org/settings/patient-registration': typeof OrgSettingsPatientRegistrationRoute
   '/_org/settings/pipelines': typeof OrgSettingsPipelinesRoute
   '/_org/settings/specialties': typeof OrgSettingsSpecialtiesRoute
@@ -445,7 +446,6 @@ export interface FileRouteTypes {
     | '/inbox'
     | '/inventory'
     | '/members'
-    | '/patient-access'
     | '/pipeline'
     | '/reports'
     | '/services'
@@ -468,6 +468,7 @@ export interface FileRouteTypes {
     | '/settings/fields'
     | '/settings/forms'
     | '/settings/mail'
+    | '/settings/patient-access'
     | '/settings/patient-registration'
     | '/settings/pipelines'
     | '/settings/specialties'
@@ -492,7 +493,6 @@ export interface FileRouteTypes {
     | '/inbox'
     | '/inventory'
     | '/members'
-    | '/patient-access'
     | '/pipeline'
     | '/reports'
     | '/tasks'
@@ -513,6 +513,7 @@ export interface FileRouteTypes {
     | '/settings/fields'
     | '/settings/forms'
     | '/settings/mail'
+    | '/settings/patient-access'
     | '/settings/patient-registration'
     | '/settings/pipelines'
     | '/settings/specialties'
@@ -538,7 +539,6 @@ export interface FileRouteTypes {
     | '/_org/inbox'
     | '/_org/inventory'
     | '/_org/members'
-    | '/_org/patient-access'
     | '/_org/pipeline'
     | '/_org/reports'
     | '/_org/services'
@@ -561,6 +561,7 @@ export interface FileRouteTypes {
     | '/_org/settings/fields'
     | '/_org/settings/forms'
     | '/_org/settings/mail'
+    | '/_org/settings/patient-access'
     | '/_org/settings/patient-registration'
     | '/_org/settings/pipelines'
     | '/_org/settings/specialties'
@@ -674,13 +675,6 @@ declare module '@tanstack/react-router' {
       path: '/members'
       fullPath: '/members'
       preLoaderRoute: typeof OrgMembersRouteImport
-      parentRoute: typeof OrgRoute
-    }
-    '/_org/patient-access': {
-      id: '/_org/patient-access'
-      path: '/patient-access'
-      fullPath: '/patient-access'
-      preLoaderRoute: typeof OrgPatientAccessRouteImport
       parentRoute: typeof OrgRoute
     }
     '/_org/pipeline': {
@@ -872,6 +866,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof OrgSettingsMailRouteImport
       parentRoute: typeof OrgSettingsRoute
     }
+    '/_org/settings/patient-access': {
+      id: '/_org/settings/patient-access'
+      path: '/patient-access'
+      fullPath: '/settings/patient-access'
+      preLoaderRoute: typeof OrgSettingsPatientAccessRouteImport
+      parentRoute: typeof OrgSettingsRoute
+    }
     '/_org/settings/patient-registration': {
       id: '/_org/settings/patient-registration'
       path: '/patient-registration'
@@ -944,6 +945,7 @@ interface OrgSettingsRouteChildren {
   OrgSettingsFieldsRoute: typeof OrgSettingsFieldsRoute
   OrgSettingsFormsRoute: typeof OrgSettingsFormsRoute
   OrgSettingsMailRoute: typeof OrgSettingsMailRoute
+  OrgSettingsPatientAccessRoute: typeof OrgSettingsPatientAccessRoute
   OrgSettingsPatientRegistrationRoute: typeof OrgSettingsPatientRegistrationRoute
   OrgSettingsPipelinesRoute: typeof OrgSettingsPipelinesRoute
   OrgSettingsSpecialtiesRoute: typeof OrgSettingsSpecialtiesRoute
@@ -959,6 +961,7 @@ const OrgSettingsRouteChildren: OrgSettingsRouteChildren = {
   OrgSettingsFieldsRoute: OrgSettingsFieldsRoute,
   OrgSettingsFormsRoute: OrgSettingsFormsRoute,
   OrgSettingsMailRoute: OrgSettingsMailRoute,
+  OrgSettingsPatientAccessRoute: OrgSettingsPatientAccessRoute,
   OrgSettingsPatientRegistrationRoute: OrgSettingsPatientRegistrationRoute,
   OrgSettingsPipelinesRoute: OrgSettingsPipelinesRoute,
   OrgSettingsSpecialtiesRoute: OrgSettingsSpecialtiesRoute,
@@ -992,7 +995,6 @@ interface OrgRouteChildren {
   OrgInboxRoute: typeof OrgInboxRoute
   OrgInventoryRoute: typeof OrgInventoryRouteWithChildren
   OrgMembersRoute: typeof OrgMembersRoute
-  OrgPatientAccessRoute: typeof OrgPatientAccessRoute
   OrgPipelineRoute: typeof OrgPipelineRoute
   OrgReportsRoute: typeof OrgReportsRoute
   OrgServicesRoute: typeof OrgServicesRouteWithChildren
@@ -1018,7 +1020,6 @@ const OrgRouteChildren: OrgRouteChildren = {
   OrgInboxRoute: OrgInboxRoute,
   OrgInventoryRoute: OrgInventoryRouteWithChildren,
   OrgMembersRoute: OrgMembersRoute,
-  OrgPatientAccessRoute: OrgPatientAccessRoute,
   OrgPipelineRoute: OrgPipelineRoute,
   OrgReportsRoute: OrgReportsRoute,
   OrgServicesRoute: OrgServicesRouteWithChildren,

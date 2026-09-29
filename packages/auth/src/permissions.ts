@@ -168,8 +168,6 @@ const PLATFORM_PATH_RULES: PlatformPathRule[] = [
   { prefix: "/settings", permissions: ["settings.read"] },
   { prefix: "/members", permissions: ["settings.read"] },
   { prefix: "/branches", permissions: ["settings.read"] },
-  // Acceso staff del portal (el portal público /portal es público, sin regla).
-  { prefix: "/patient-access", permissions: ["patients.write"] },
 ];
 
 export function platformPathPermission(pathname: string): Permission[] | null {

@@ -202,7 +202,7 @@ export function createApp(deps: AppDeps) {
       remoteAddress: deps.registrationRemoteAddress,
     }),
   )
-  app.route("/api/public/portal", createPublicPortalRoute({ db, ownerDb: deps.ownerDb, storage: deps.storage }))
+  app.route("/api/public/portal", createPublicPortalRoute({ db, ownerDb: deps.ownerDb, storage: deps.storage, webURL: deps.webURL, cookieDomain: deps.cookieDomain }))
   app.route("/api/public/automations", createPublicAutomationsRoute({ db, ownerDb: deps.ownerDb }))
   app.route("/api/webchat", createWebchatPublicRoute({ ownerDb: deps.ownerDb, db, secretsKey: deps.secretsKey, cookieDomain: deps.cookieDomain }))
   app.route("/api/mail", createMailboxesRoute({ auth, db, ownerDb: deps.ownerDb, secretsKey: deps.secretsKey, webUrl: deps.webURL, mailbox: deps.mailbox ?? {} }))

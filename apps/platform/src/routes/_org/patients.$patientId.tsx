@@ -17,7 +17,7 @@ import { PlanTab } from "../../components/patient/plan-tab"
 import { RecorridoClinicoTab } from "../../components/patient/recorrido-tab"
 import { ResponsablesTab } from "../../components/patient/responsables-tab"
 import { ResumenTab } from "../../components/patient/resumen-tab"
-import { PortalInvitePanel } from "../../components/portal/portal-invite-panel"
+import { PatientPortalAccessSection } from "../../components/portal/portal-access-section"
 import { apiFetch } from "../../lib/api"
 import { usePermission } from "../../lib/crm"
 import type { PatientFull, PatientSummary, PlanItem } from "../../lib/patients"
@@ -168,7 +168,7 @@ function PatientDetailPage() {
         summary={summary.data?.data}
         onAntecedentes={() => changeTab("antecedentes")}
       />
-      <PortalInvitePanel patientId={patientId} />
+      <PatientPortalAccessSection patientId={patientId} />
       {summary.isError && canClinical && (
         <p role="alert" className="text-sm text-destructive">
           {summary.error.message}
