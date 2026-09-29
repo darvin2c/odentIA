@@ -12,6 +12,7 @@ import {
 } from "drizzle-orm/pg-core"
 import { user } from "./auth.js"
 import { patient } from "./clinical.js"
+import { portalGrant, portalPasskey } from "./portal-access.js"
 import { contact, conversation, message, orgFk, timestamps } from "./crm.js"
 
 /**
@@ -104,9 +105,14 @@ export const portalSession = pgTable(
     contactId: uuid("contact_id")
       .notNull()
       .references(() => contact.id, { onDelete: "cascade" }),
-    linkId: uuid("link_id")
-      .notNull()
-      .references(() => portalLink.id, { onDelete: "cascade" }),
+    /** Nulo en sesiones passkey o por cambio de identidad (sin enlace). */
+    linkId: uuid("link_id").references(() => portalLink.id, { onDelete: "cascade" }),
+    /** Grant persistente que autoriza la sesión (exigido en cada lectura). */
+    grantId: uuid("grant_id").references(() => portalGrant.id, { onDelete: "cascade" }),
+    /** Cómo se autenticó: enlace_pin (activación asistida) o passkey. */
+    authMethod: text("auth_method").notNull().default("enlace_pin"),
+    /** Credencial que abrió la sesión (solo passkey; para revocación precisa). */
+    passkeyId: uuid("passkey_id").references(() => portalPasskey.id, { onDelete: "set null" }),
     /** Alcance congelado al canjear (copia del enlace). */
     scope: jsonb("scope").$type<PortalScope>().notNull(),
     /** sha256 hex del token de sesión (el crudo se entrega una vez al canjear). */
@@ -124,6 +130,7 @@ export const portalSession = pgTable(
     uniqueIndex("portal_session_token_hash_uidx").on(table.tokenHash),
     index("portal_session_org_patient_idx").on(table.organizationId, table.patientId),
     index("portal_session_org_link_idx").on(table.organizationId, table.linkId),
+    index("portal_session_org_grant_idx").on(table.organizationId, table.grantId),
     index("portal_session_org_expires_idx").on(table.organizationId, table.expiresAt),
   ],
 )

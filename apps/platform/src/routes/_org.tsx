@@ -35,7 +35,6 @@ import {
   Smile,
   Package,
   Wallet,
-  Users,
   Workflow,
 } from "lucide-react"
 import { WorkspaceNotifications } from "../components/workspace-notifications"
@@ -71,7 +70,6 @@ export const Route = createFileRoute("/_org")({
 const navDefinitions: Array<AppShellNavEntry & { permission?: string }> = [
   { label: "Inicio", to: "/home", icon: Home },
   { label: "Agenda", to: "/agenda", icon: CalendarDays, permission: "appointments.read" },
-  { label: "Accesos de pacientes", to: "/patient-access", icon: Users, permission: "patients.write" },
   { label: "Bandeja", to: "/inbox", icon: Inbox, permission: "conversations.read" },
   { label: "Pacientes", to: "/patients", icon: Smile, permission: "patients.read" },
   { label: "CRM", icon: Contact, children: [

@@ -7,6 +7,7 @@ const envSchema = z.object({
   SECRETS_KEY: z.string().min(1),
   /** Origen público de la plataforma para confirmaciones y bajas. */
   WEB_URL: z.string().url(),
+  COOKIE_DOMAIN: z.string().min(1),
   GMAIL_CLIENT_ID: z.string().default(""),
   GMAIL_CLIENT_SECRET: z.string().default(""),
   GMAIL_REDIRECT_URI: z.string().default(""),

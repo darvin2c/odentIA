@@ -1,3 +1,9 @@
+import type {
+  AuthenticationResponseJSON,
+  PublicKeyCredentialCreationOptionsJSON,
+  PublicKeyCredentialRequestOptionsJSON,
+  RegistrationResponseJSON,
+} from "@simplewebauthn/browser"
 import { API_URL } from "./auth-client"
 import { ApiError, apiFetch } from "./api"
 
@@ -335,4 +341,340 @@ export function formatPortalDate(iso: string | null): string {
   const date = new Date(iso)
   if (!Number.isFinite(date.getTime())) return "—"
   return date.toLocaleString("es-PE", { dateStyle: "medium", timeStyle: "short" })
+}
+
+// ---- Gobernanza del portal (contrato PortalDomain 2026-09-29) ----
+// Fechas como ISO en JSON. Sin datos clínicos en ningún mensaje de canal.
+
+export type PortalChannel = "web_publica" | "conversacion"
+export type PortalRequestStatus = "pendiente" | "aprobada" | "rechazada" | "expirada"
+export type PortalGrantStatus = "activo" | "revocado"
+export type PortalAuthMethod = "enlace_pin" | "passkey"
+export type PortalRelationship = "self" | "guardian" | "family" | "other"
+
+export interface PortalPolicy {
+  enabled: boolean
+  requestsEnabled: boolean
+  publicRequestsEnabled: boolean
+  channelRequestsEnabled: boolean
+  autoApproveVerified: boolean
+  allowedConnectionIds: string[]
+  linkTtlMinutes: number
+  sessionTtlHours: number
+  grantTtlDays: number | null
+  allowedScope: { appointments: boolean; budgets: boolean; account: boolean; documents: boolean }
+  passkeysEnabled: boolean
+  assistedRecoveryEnabled: boolean
+  updatedAt: string
+}
+
+export type PortalPolicyInput = Omit<PortalPolicy, "updatedAt">
+
+export interface PortalAccessRequest {
+  id: string
+  patientName: string | null
+  contactName: string
+  contactText: string | null
+  channel: PortalChannel
+  status: PortalRequestStatus
+  conversationId: string | null
+  createdAt: string
+  expiresAt: string
+  decidedAt: string | null
+}
+
+export interface PortalGrant {
+  id: string
+  patientId: string
+  patientName: string
+  contactId: string
+  contactName: string
+  scope: PortalScope
+  status: PortalGrantStatus
+  verifiedMethod: string
+  verifiedAt: string
+  expiresAt: string | null
+  createdAt: string
+  revokedAt: string | null
+}
+
+export interface PortalSessionView {
+  id: string
+  patientId: string
+  contactId: string
+  scope: PortalScope
+  expiresAt: string
+  grantId: string | null
+  authMethod: PortalAuthMethod
+}
+
+export interface PortalPasskeyInfo {
+  id: string
+  nickname: string | null
+  createdAt: string
+  lastUsedAt: string | null
+  revokedAt: string | null
+}
+
+export async function fetchPortalPolicyApi(): Promise<PortalPolicy> {
+  const res = await apiFetch<{ data: PortalPolicy }>("/api/portal/policy")
+  return res.data
+}
+
+export async function savePortalPolicyApi(input: PortalPolicyInput): Promise<PortalPolicy> {
+  const res = await apiFetch<{ data: PortalPolicy }>("/api/portal/policy", {
+    method: "PUT",
+    body: JSON.stringify(input),
+  })
+  return res.data
+}
+
+export interface CreatePortalGrantDraft {
+  patientId: string
+  contactId: string
+  relationship?: PortalRelationship
+  scope: IssuePortalLinkDraft["scope"]
+  verifiedMethod: string
+  evidenceNote?: string
+}
+
+export async function listPortalGrantsApi(patientId?: string): Promise<PortalGrant[]> {
+  const params = patientId ? `?patientId=${encodeURIComponent(patientId)}` : ""
+  const res = await apiFetch<{ data: PortalGrant[] }>(`/api/portal/grants${params}`)
+  return res.data
+}
+
+export async function createPortalGrantApi(draft: CreatePortalGrantDraft): Promise<PortalGrant> {
+  const res = await apiFetch<{ data: PortalGrant }>("/api/portal/grants", {
+    method: "POST",
+    body: JSON.stringify(draft),
+  })
+  return res.data
+}
+
+export async function revokePortalGrantApi(id: string, reason?: string): Promise<PortalGrant> {
+  const res = await apiFetch<{ data: PortalGrant }>(`/api/portal/grants/${id}/revoke`, {
+    method: "POST",
+    body: JSON.stringify({ reason }),
+  })
+  return res.data
+}
+
+export async function listPortalSessionsApi(opts?: {
+  patientId?: string
+  contactId?: string
+  grantId?: string
+}): Promise<PortalSessionView[]> {
+  const params = new URLSearchParams()
+  if (opts?.patientId) params.set("patientId", opts.patientId)
+  if (opts?.contactId) params.set("contactId", opts.contactId)
+  if (opts?.grantId) params.set("grantId", opts.grantId)
+  const suffix = params.size > 0 ? `?${params}` : ""
+  const res = await apiFetch<{ data: PortalSessionView[] }>(`/api/portal/sessions${suffix}`)
+  return res.data
+}
+
+export async function listPortalRequestsApi(status?: PortalRequestStatus): Promise<PortalAccessRequest[]> {
+  const params = status ? `?status=${encodeURIComponent(status)}` : ""
+  const res = await apiFetch<{ data: PortalAccessRequest[] }>(`/api/portal/requests${params}`)
+  return res.data
+}
+
+export interface ApprovePortalRequestDraft {
+  patientId: string
+  contactId: string
+  relationship?: PortalRelationship
+  scope: IssuePortalLinkDraft["scope"]
+  verifiedMethod: string
+  evidenceNote?: string
+  conversationId: string
+}
+
+export interface ApprovedPortalRequest {
+  grant: PortalGrant
+  link: IssuedPortalLink
+}
+
+export async function approvePortalRequestApi(
+  id: string,
+  draft: ApprovePortalRequestDraft,
+): Promise<ApprovedPortalRequest> {
+  const res = await apiFetch<{ data: ApprovedPortalRequest }>(
+    `/api/portal/requests/${id}/approve`,
+    { method: "POST", body: JSON.stringify(draft) },
+  )
+  return res.data
+}
+
+export async function rejectPortalRequestApi(id: string, note?: string): Promise<PortalAccessRequest> {
+  const res = await apiFetch<{ data: PortalAccessRequest }>(`/api/portal/requests/${id}/reject`, {
+    method: "POST",
+    body: JSON.stringify({ note }),
+  })
+  return res.data
+}
+
+// ---- Lado público sin sesión (orgSlug explícito, sin oráculo de existencia) ----
+
+async function publicPortalFetch<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(`${API_URL}/api/public/portal${path}`, {
+    ...init,
+    headers: { "content-type": "application/json", ...init?.headers },
+  })
+  if (!response.ok) {
+    let shape: { message?: string; code?: string } = {}
+    try {
+      const body = (await response.json()) as { error?: { message?: string; code?: string } }
+      shape = body.error ?? {}
+    } catch {
+      // respuesta no-JSON: shape vacío
+    }
+    throw new ApiError(response.status, shape)
+  }
+  return (await response.json()) as T
+}
+
+export interface PublicPortalPolicy {
+  enabled: boolean
+  requestsEnabled: boolean
+  passkeysEnabled: boolean
+  orgName: string
+}
+
+export async function fetchPublicPortalPolicyApi(orgSlug: string): Promise<PublicPortalPolicy> {
+  const res = await publicPortalFetch<{ data: PublicPortalPolicy }>(
+    `/policy?orgSlug=${encodeURIComponent(orgSlug)}`,
+  )
+  return res.data
+}
+
+export interface PublicPortalRequestDraft {
+  orgSlug: string
+  contactName: string
+  contactText: string
+  patientHint?: string
+  idempotencyKey?: string
+}
+
+export async function createPublicPortalRequestApi(
+  draft: PublicPortalRequestDraft,
+): Promise<{ received: boolean }> {
+  const res = await publicPortalFetch<{ data: { received: boolean } }>("/requests", {
+    method: "POST",
+    body: JSON.stringify(draft),
+  })
+  return res.data
+}
+
+// ---- Passkeys (navegador con @simplewebauthn/browser; rp/origen los valida el servidor) ----
+
+export interface PortalRegistrationChallenge {
+  challengeId: string
+  options: PublicKeyCredentialCreationOptionsJSON
+}
+
+export interface PortalAuthChallenge {
+  challengeId: string
+  options: PublicKeyCredentialRequestOptionsJSON
+}
+
+export type PortalRegistrationResponse = RegistrationResponseJSON
+export type PortalAuthResponse = AuthenticationResponseJSON
+
+export async function requestPasskeyRegistrationOptionsApi(
+  sessionToken: string,
+  orgSlug: string,
+): Promise<PortalRegistrationChallenge> {
+  const res = await portalFetch<{ data: PortalRegistrationChallenge }>(
+    sessionToken,
+    "/passkeys/register/options",
+    { method: "POST", body: JSON.stringify({ orgSlug }) },
+  )
+  return res.data
+}
+
+export async function verifyPasskeyRegistrationApi(
+  sessionToken: string,
+  orgSlug: string,
+  input: { challengeId: string; response: RegistrationResponseJSON },
+): Promise<PortalPasskeyInfo> {
+  const res = await portalFetch<{ data: PortalPasskeyInfo }>(sessionToken, "/passkeys/register/verify", {
+    method: "POST",
+    body: JSON.stringify({ orgSlug, ...input }),
+  })
+  return res.data
+}
+
+export async function requestPasskeyAuthOptionsApi(orgSlug: string): Promise<PortalAuthChallenge> {
+  const res = await publicPortalFetch<{ data: PortalAuthChallenge }>("/passkeys/auth/options", {
+    method: "POST",
+    body: JSON.stringify({ orgSlug }),
+  })
+  return res.data
+}
+
+export async function verifyPasskeyAuthApi(
+  orgSlug: string,
+  input: { challengeId: string; response: AuthenticationResponseJSON },
+): Promise<{ sessionToken: string; session: PortalSessionView }> {
+  const res = await publicPortalFetch<{ data: { sessionToken: string; session: PortalSessionView } }>(
+    "/passkeys/auth/verify",
+    { method: "POST", body: JSON.stringify({ orgSlug, ...input }) },
+  )
+  return res.data
+}
+
+export async function listMyPortalGrantsApi(sessionToken: string): Promise<PortalGrant[]> {
+  const res = await portalFetch<{ data: PortalGrant[] }>(sessionToken, "/grants")
+  return res.data
+}
+
+export async function selectPortalGrantApi(
+  sessionToken: string,
+  grantId: string,
+): Promise<{ sessionToken: string; session: PortalSessionView }> {
+  const res = await portalFetch<{ data: { sessionToken: string; session: PortalSessionView } }>(
+    sessionToken,
+    "/grants/select",
+    { method: "POST", body: JSON.stringify({ grantId }) },
+  )
+  return res.data
+}
+
+export async function listPortalPasskeysApi(contactId: string): Promise<PortalPasskeyInfo[]> {
+  const res = await apiFetch<{ data: PortalPasskeyInfo[] }>(
+    `/api/portal/passkeys?contactId=${encodeURIComponent(contactId)}`,
+  )
+  return res.data
+}
+
+export async function revokePortalPasskeyApi(id: string): Promise<{ revoked: boolean }> {
+  const res = await apiFetch<{ data: { revoked: boolean } }>(`/api/portal/passkeys/${id}/revoke`, {
+    method: "POST",
+  })
+  return res.data
+}
+
+export interface PortalActivationQrInput {
+  patientId: string
+  contactId: string
+  scope: IssuePortalLinkDraft["scope"]
+  ttlHours?: number
+  idempotencyKey?: string
+}
+
+export interface PortalActivationQr {
+  link: PortalLinkView
+  activationUrlOnce: string
+  pinOnce: string | null
+}
+
+export async function issuePortalActivationQrApi(
+  input: PortalActivationQrInput,
+): Promise<PortalActivationQr> {
+  const res = await apiFetch<{ data: PortalActivationQr }>("/api/portal/activations/qr", {
+    method: "POST",
+    body: JSON.stringify(input),
+  })
+  return res.data
 }

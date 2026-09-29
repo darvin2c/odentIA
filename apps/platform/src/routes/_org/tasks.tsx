@@ -23,6 +23,7 @@ import { type FormEvent, useMemo, useState } from "react"
 import { z } from "zod"
 import { apiFetch } from "../../lib/api"
 import type { TaskItem } from "../../lib/crm"
+import { PortalRequestsSection } from "../../components/portal/portal-requests-panel"
 import { useOrgEvents } from "../../lib/org-events"
 
 export const Route = createFileRoute("/_org/tasks")({
@@ -297,6 +298,7 @@ function TasksPage() {
             </Button>
           }
         />
+        <PortalRequestsSection />
         <FilterBar
           filters={[
             {

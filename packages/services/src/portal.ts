@@ -6,7 +6,7 @@ import {
   patientContact,
   patientDocument,
 } from "@odentia/db/schema/clinical"
-import { contact, conversation } from "@odentia/db/schema/crm"
+import { channelConnection, contact, conversation } from "@odentia/db/schema/crm"
 import { auditEvent, branch } from "@odentia/db/schema/org"
 import {
   portalAccessLog,
@@ -14,7 +14,8 @@ import {
   portalSession,
   type PortalScope,
 } from "@odentia/db/schema/portal"
-import { and, asc, desc, eq, gt, gte, inArray, isNull } from "drizzle-orm"
+import { portalPasskey } from "@odentia/db/schema/portal-access"
+import { and, asc, desc, eq, gt, gte, inArray, isNull, lt } from "drizzle-orm"
 import { moveAppointment, setAppointmentStatus } from "./appointments.js"
 import {
   listAvailableSlots,
@@ -28,6 +29,7 @@ import { requirePatient } from "./patients.js"
 import { getPatientAccount } from "./payments.js"
 import type { Storage } from "./storage.js"
 import { createWorkspaceNotification } from "./workspace.js"
+import { getPortalPolicy, portalDisabled, requireActivePortalGrant } from "./portal-policy.js"
 
 /**
  * Portal del paciente: enlaces de un solo uso + sesiones revocables.
@@ -151,15 +153,19 @@ export interface PortalSessionView {
   contactId: string
   scope: PortalScope
   expiresAt: Date
+  grantId: string | null
+  authMethod: "enlace_pin" | "passkey"
 }
 
-function toSessionView(row: PortalSessionRow): PortalSessionView {
+export function toSessionView(row: PortalSessionRow): PortalSessionView {
   return {
     id: row.id,
     patientId: row.patientId,
     contactId: row.contactId,
     scope: row.scope,
     expiresAt: row.expiresAt,
+    grantId: row.grantId,
+    authMethod: row.authMethod === "passkey" ? "passkey" : "enlace_pin",
   }
 }
 
@@ -202,7 +208,7 @@ async function requirePatientLink(tx: Db, orgId: string, patientId: string, cont
 }
 
 /** El vínculo puede retirarse tras emitir: sin fila el acceso equivale a revocado. */
-async function requireActiveGrant(tx: Db, orgId: string, patientId: string, contactId: string): Promise<void> {
+export async function requireActiveGrant(tx: Db, orgId: string, patientId: string, contactId: string): Promise<void> {
   const [grant] = await tx
     .select({ id: patientContact.id })
     .from(patientContact)
@@ -217,7 +223,7 @@ async function requireActiveGrant(tx: Db, orgId: string, patientId: string, cont
   if (!grant) throw conflict("PORTAL_REVOKED", "Este acceso fue revocado; pide uno nuevo en recepción")
 }
 
-async function assertScope(
+export async function assertScope(
   tx: Db,
   orgId: string,
   patientId: string,
@@ -299,7 +305,10 @@ export async function issuePortalLink(
   input: IssuePortalLinkInput,
   deliver: { linkUrl: (rawLinkToken: string) => string; canShareFinance: boolean },
 ): Promise<IssuedPortalLink> {
+  const policy = await getPortalPolicy(tx, orgId)
+  if (!policy.enabled) throw portalDisabled()
   const ttlHours = assertTtl(input.ttlHours, LINK_TTL_HOURS_DEFAULT, LINK_TTL_HOURS_MAX, "La vigencia")
+  const linkTtlMs = Math.min(ttlHours * 3600_000, policy.linkTtlMinutes * 60_000)
   const idempotencyKey = input.idempotencyKey?.trim() || null
   if (idempotencyKey && (idempotencyKey.length < 8 || idempotencyKey.length > 128)) {
     throw validation("La clave de idempotencia debe tener 8–128 caracteres")
@@ -315,6 +324,18 @@ export async function issuePortalLink(
   if (!contactRow.isActive) throw validation("El contacto está inactivo")
   await requirePatientLink(tx, orgId, input.patientId, input.contactId)
   const scope = await assertScope(tx, orgId, input.patientId, input.scope)
+  if (scope.appointments && !policy.allowedScope.appointments) {
+    throw validation("Las citas no están permitidas por la política del portal")
+  }
+  if (scope.budgets && !policy.allowedScope.budgets) {
+    throw validation("Los presupuestos no están permitidos por la política del portal")
+  }
+  if (scope.account && !policy.allowedScope.account) {
+    throw validation("La cuenta no está permitida por la política del portal")
+  }
+  if (scope.documents.length > 0 && !policy.allowedScope.documents) {
+    throw validation("Los documentos no están permitidos por la política del portal")
+  }
   if ((scope.budgets || scope.account) && !deliver.canShareFinance) {
     throw new ServiceError("PORTAL_FORBIDDEN", 404, "El alcance financiero requiere permiso de finanzas")
   }
@@ -337,6 +358,10 @@ export async function issuePortalLink(
       }
     }
   }
+  // La emisión exige el grant verificado ya creado (vía grants/solicitud
+  // aprobada): nunca crea grants implícitos ni toca las passkeys (la
+  // recuperación usa el endpoint dedicado de revocación).
+  await requireActivePortalGrant(tx, orgId, input.patientId, input.contactId)
 
   const [conv] = await tx
     .select()
@@ -348,6 +373,19 @@ export async function issuePortalLink(
     throw validation("La conversación no pertenece a este contacto")
   }
   if (conv.status !== "open") throw conflict("CONVERSATION_CLOSED", "La conversación está cerrada")
+  // La emisión por canal exige conexión autorizada en la política.
+  const [issuanceConnection] = await tx
+    .select({ id: channelConnection.id, status: channelConnection.status })
+    .from(channelConnection)
+    .where(eq(channelConnection.id, conv.channelConnectionId))
+    .limit(1)
+  if (
+    !issuanceConnection ||
+    issuanceConnection.status !== "active" ||
+    !policy.allowedConnectionIds.includes(issuanceConnection.id)
+  ) {
+    throw new ServiceError("PORTAL_FORBIDDEN", 404, "Esta conversación no está autorizada para el portal")
+  }
 
   const token = rawToken()
   const pin = String(randomInt(0, 1_000_000)).padStart(6, "0")
@@ -364,7 +402,7 @@ export async function issuePortalLink(
         tokenHash: hashToken(token),
         pinHash: hashToken(pin),
         status: "pendiente",
-        expiresAt: new Date(now.getTime() + ttlHours * 3600_000),
+        expiresAt: new Date(now.getTime() + linkTtlMs),
         idempotencyKey,
         createdBy: actorUserId,
       })
@@ -380,10 +418,10 @@ export async function issuePortalLink(
 
   const url = deliver.linkUrl(token)
   const vence = row.expiresAt.toLocaleString("es-PE", { dateStyle: "medium", timeStyle: "short" })
+  // Mensaje genérico y discreto: sin nombres, sin datos clínicos ni PIN.
   const text =
-    `Hola ${contactRow.displayName}: este es el acceso al portal del paciente ` +
-    `${patientRow.displayName}: ${url}\nVence el ${vence}. Al abrirlo te pedirá un código ` +
-    `de 6 dígitos: pídelo a quien te envió este mensaje. No compartas el acceso: es personal.`
+    `Tienes un acceso al portal del paciente: ${url}\nVence el ${vence}. Al abrirlo te pedirá un código ` +
+    `de 6 dígitos: pídelo a quien te envió este mensaje. No lo compartas: es personal y vence pronto.`
   const sent = await sendOutbound(tx, orgId, {
     conversationId: conv.id,
     senderKind: "user",
@@ -408,6 +446,106 @@ export async function issuePortalLink(
     replay: false,
     pinOnce: pin,
   }
+}
+
+export interface IssuePortalActivationQrInput {
+  patientId: string
+  contactId: string
+  scope: IssuePortalLinkInput["scope"]
+  ttlHours?: number
+  idempotencyKey?: string
+}
+
+export interface IssuedPortalActivationQr {
+  link: PortalLinkView
+  /** Token crudo de un solo uso: la UI lo muestra en QR una sola vez. */
+  rawTokenOnce: string
+  /** PIN de 6 dígitos: el operador lo dicta en persona (nunca en bandeja). */
+  pinOnce: string
+}
+
+/**
+ * Activación directa con QR individual (paciente presente). Sin entrega por
+ * conversación: el token crudo se devuelve UNA vez para renderizar el QR y el
+ * PIN se comunica verbalmente. Exige el grant verificado ya creado y nunca
+ * toca las passkeys (la recuperación usa el endpoint dedicado de revocación).
+ */
+export async function issuePortalActivationQr(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  input: IssuePortalActivationQrInput,
+): Promise<IssuedPortalActivationQr> {
+  const policy = await getPortalPolicy(tx, orgId)
+  if (!policy.enabled) throw portalDisabled()
+  const ttlHours = assertTtl(input.ttlHours, LINK_TTL_HOURS_DEFAULT, LINK_TTL_HOURS_MAX, "La vigencia")
+  const linkTtlMs = Math.min(ttlHours * 3600_000, policy.linkTtlMinutes * 60_000)
+  const idempotencyKey = input.idempotencyKey?.trim() || null
+  if (idempotencyKey && (idempotencyKey.length < 8 || idempotencyKey.length > 128)) {
+    throw validation("La clave de idempotencia debe tener 8–128 caracteres")
+  }
+  const patientRow = await requirePatient(tx, orgId, input.patientId)
+  if (!patientRow.isActive) throw notFound("Paciente")
+  const [contactRow] = await tx
+    .select()
+    .from(contact)
+    .where(and(eq(contact.id, input.contactId), eq(contact.organizationId, orgId)))
+    .limit(1)
+  if (!contactRow) throw notFound("Contacto")
+  if (!contactRow.isActive) throw validation("El contacto está inactivo")
+  await requirePatientLink(tx, orgId, input.patientId, input.contactId)
+  const scope = await assertScope(tx, orgId, input.patientId, input.scope)
+  if (scope.appointments && !policy.allowedScope.appointments) {
+    throw validation("Las citas no están permitidas por la política del portal")
+  }
+  if (scope.budgets && !policy.allowedScope.budgets) {
+    throw validation("Los presupuestos no están permitidos por la política del portal")
+  }
+  if (scope.account && !policy.allowedScope.account) {
+    throw validation("La cuenta no está permitida por la política del portal")
+  }
+  if (scope.documents.length > 0 && !policy.allowedScope.documents) {
+    throw validation("Los documentos no están permitidos por la política del portal")
+  }
+  if (idempotencyKey) {
+    throw conflict("PORTAL_REPLAY", "La activación QR no admite reintentos con la misma clave")
+  }
+  await requireActivePortalGrant(tx, orgId, input.patientId, input.contactId)
+  const token = rawToken()
+  const pin = String(randomInt(0, 1_000_000)).padStart(6, "0")
+  const now = new Date()
+  let row: PortalLinkRow
+  try {
+    const [inserted] = await tx
+      .insert(portalLink)
+      .values({
+        organizationId: orgId,
+        patientId: input.patientId,
+        contactId: input.contactId,
+        scope,
+        tokenHash: hashToken(token),
+        pinHash: hashToken(pin),
+        status: "pendiente",
+        expiresAt: new Date(now.getTime() + linkTtlMs),
+        idempotencyKey,
+        createdBy: actorUserId,
+      })
+      .returning()
+    if (!inserted) throw new Error("No se pudo emitir la activación")
+    row = inserted
+  } catch (error) {
+    if (isUniqueViolation(error)) {
+      throw conflict("PORTAL_REPLAY", "Ya existe una activación con esa clave; recarga la lista")
+    }
+    throw error
+  }
+  await auditPortal(tx, orgId, actorUserId, "portal.link_issued", "portal_link", row.id, {
+    patientId: input.patientId,
+    contactId: input.contactId,
+    via: "qr",
+    scope,
+  })
+  return { link: await linkView(tx, orgId, row), rawTokenOnce: token, pinOnce: pin }
 }
 
 export async function listPortalLinks(
@@ -543,9 +681,14 @@ function pinMatches(expectedHash: string | null, pin: string): boolean {
 
 /**
  * Canjea un enlace de un solo uso por una sesión revocable. Exige el PIN que
- * el operador comunicó por vía independiente de la bandeja: aunque el token
- * sea visible en la conversación, sin PIN no hay canje. El consumo es
- * atómico (carrera → PORTAL_USED) y cubre revocación/expiración concurrentes.
+ * el operador comunicó por vía independiente de la bandeja y un grant
+ * persistente verificado por el staff (el canje jamás crea grants: los
+ * enlaces anteriores al corte se invalidaron en migración).
+ *
+ * Antifuerza bruta: ante un PIN incorrecto NO se escribe en esta transacción
+ * (el rollback del llamante borraría el conteo). Se lanza PORTAL_PIN_INVALID
+ * y la API registra el intento con recordPortalPinFailure en un contexto
+ * nuevo con SQL atómico.
  */
 export async function exchangePortalToken(
   tx: Db,
@@ -553,6 +696,8 @@ export async function exchangePortalToken(
   rawLinkToken: string,
   input: ExchangePortalTokenInput,
 ): Promise<PortalExchangeResult> {
+  const policy = await getPortalPolicy(tx, orgId)
+  if (!policy.enabled || !policy.assistedRecoveryEnabled) throw portalDisabled()
   const token = assertTokenFormat(rawLinkToken)
   if (typeof input?.pin !== "string" || !PIN_RE.test(input.pin)) {
     throw validation("El código de 6 dígitos es inválido")
@@ -576,22 +721,9 @@ export async function exchangePortalToken(
     throw conflict("PORTAL_EXPIRED", "Este enlace venció; pide uno nuevo en recepción")
   }
   await requireActiveGrant(tx, orgId, link.patientId, link.contactId)
+  const grant = await requireActivePortalGrant(tx, orgId, link.patientId, link.contactId)
   if (!pinMatches(link.pinHash, input.pin)) {
-    const attempts = link.failedAttempts + 1
-    const locked = attempts >= MAX_PIN_ATTEMPTS
-    await tx
-      .update(portalLink)
-      .set({
-        failedAttempts: attempts,
-        ...(locked ? { status: "revocado", revokedAt: now } : {}),
-        updatedAt: now,
-      })
-      .where(and(eq(portalLink.id, link.id), eq(portalLink.organizationId, orgId)))
-    if (locked) {
-      await auditPortal(tx, orgId, null, "portal.link_pin_locked", "portal_link", link.id, { attempts })
-      throw conflict("PORTAL_REVOKED", "Demasiados intentos; pide un nuevo acceso en recepción")
-    }
-    throw validation("El código es incorrecto")
+    throw new ServiceError("PORTAL_PIN_INVALID", 400, "El código es incorrecto")
   }
   const [consumed] = await tx
     .update(portalLink)
@@ -604,6 +736,7 @@ export async function exchangePortalToken(
         isNull(portalLink.usedAt),
         isNull(portalLink.revokedAt),
         gt(portalLink.expiresAt, now),
+        lt(portalLink.failedAttempts, MAX_PIN_ATTEMPTS),
       ),
     )
     .returning()
@@ -619,7 +752,10 @@ export async function exchangePortalToken(
     throw conflict("PORTAL_USED", "Este enlace ya fue usado")
   }
 
-  const sessionTtl = assertTtl(input?.sessionTtlHours, SESSION_TTL_HOURS_DEFAULT, SESSION_TTL_HOURS_MAX, "La sesión")
+  const sessionTtl = Math.min(
+    assertTtl(input?.sessionTtlHours, SESSION_TTL_HOURS_DEFAULT, SESSION_TTL_HOURS_MAX, "La sesión"),
+    policy.sessionTtlHours,
+  )
   const sessionToken = rawToken()
   const [session] = await tx
     .insert(portalSession)
@@ -628,6 +764,8 @@ export async function exchangePortalToken(
       patientId: link.patientId,
       contactId: link.contactId,
       linkId: link.id,
+      grantId: grant.id,
+      authMethod: "enlace_pin",
       scope: link.scope,
       tokenHash: hashToken(sessionToken),
       expiresAt: new Date(now.getTime() + sessionTtl * 3600_000),
@@ -652,8 +790,16 @@ export interface PortalContext {
   patientName: string
 }
 
-/** Valida el token de sesión en cada lectura: revocación y expiración reales. */
+/**
+ * Valida el token de sesión en cada lectura: portal habilitado, revocación,
+ * expiración, fichas activas, vínculo + grant vigente, sesión atada al grant
+ * vigente (nunca a uno anterior reemitido), passkey no revocada y alcance
+ * efectivo como intersección (solo reduce: grant y política solo recortan,
+ * jamás amplían el alcance congelado de la sesión).
+ */
 export async function requirePortalSession(tx: Db, orgId: string, rawSessionToken: string): Promise<PortalContext> {
+  const policy = await getPortalPolicy(tx, orgId)
+  if (!policy.enabled) throw portalDisabled()
   const token = assertTokenFormat(rawSessionToken)
   const [session] = await tx
     .select()
@@ -675,11 +821,48 @@ export async function requirePortalSession(tx: Db, orgId: string, rawSessionToke
     .limit(1)
   if (!contactRow?.isActive) throw notFound("Sesión del portal")
   await requireActiveGrant(tx, orgId, session.patientId, session.contactId)
-  await tx
-    .update(portalSession)
-    .set({ lastSeenAt: new Date() })
-    .where(and(eq(portalSession.id, session.id), eq(portalSession.organizationId, orgId)))
-  return { orgId, session, patientName: patientRow.displayName }
+  const grant = await requireActivePortalGrant(tx, orgId, session.patientId, session.contactId)
+  if (!session.grantId || session.grantId !== grant.id) {
+    throw conflict("PORTAL_REVOKED", "Este acceso fue revocado; pide uno nuevo en recepción")
+  }
+  if (session.passkeyId) {
+    const [cred] = await tx
+      .select({ revokedAt: portalPasskey.revokedAt, grantId: portalPasskey.grantId })
+      .from(portalPasskey)
+      .where(and(eq(portalPasskey.id, session.passkeyId), eq(portalPasskey.organizationId, orgId)))
+      .limit(1)
+    if (!cred || cred.revokedAt || cred.grantId !== grant.id) {
+      throw conflict("PORTAL_REVOKED", "Esta sesión fue revocada")
+    }
+  }
+  const stored = session.scope ?? { appointments: false, budgets: false, account: false, documents: [] }
+  const granted = grant.scope ?? { appointments: false, budgets: false, account: false, documents: [] }
+  const storedDocs = Array.isArray(stored.documents) ? stored.documents : []
+  const grantedDocs = Array.isArray(granted.documents) ? granted.documents : []
+  const effective: PortalScope = {
+    appointments: stored.appointments === true && granted.appointments === true && policy.allowedScope.appointments,
+    budgets: stored.budgets === true && granted.budgets === true && policy.allowedScope.budgets,
+    account: stored.account === true && granted.account === true && policy.allowedScope.account,
+    documents: policy.allowedScope.documents ? storedDocs.filter((id) => grantedDocs.includes(id)) : [],
+  }
+  let effectiveRow = session
+  if (JSON.stringify(effective) !== JSON.stringify(session.scope)) {
+    const [refreshed] = await tx
+      .update(portalSession)
+      .set({ scope: effective, lastSeenAt: new Date(), updatedAt: new Date() })
+      .where(and(eq(portalSession.id, session.id), eq(portalSession.organizationId, orgId)))
+      .returning()
+    if (refreshed) effectiveRow = refreshed
+    await auditPortal(tx, orgId, session.issuedBy, "portal.session_scope_refreshed", "portal_session", session.id, {
+      grantId: grant.id,
+    })
+  } else {
+    await tx
+      .update(portalSession)
+      .set({ lastSeenAt: new Date() })
+      .where(and(eq(portalSession.id, session.id), eq(portalSession.organizationId, orgId)))
+  }
+  return { orgId, session: effectiveRow, patientName: patientRow.displayName }
 }
 
 function requireScope(session: PortalSessionRow, key: "appointments" | "budgets" | "account"): void {
