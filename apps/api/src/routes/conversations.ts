@@ -17,7 +17,7 @@ import {
 } from "@odentia/services"
 import { Hono } from "hono"
 import { z } from "zod"
-import { canWrite, orgContextOf } from "../lib/context.js"
+import { canAccess, orgContextOf } from "../lib/context.js"
 import { errorBody } from "../lib/error.js"
 import { type CrmDeps, runService, serviceErrorResponse, validationError } from "./helpers.js"
 
@@ -49,6 +49,21 @@ const messagesQuery = z.object({
 
 export function createConversationsRoute(deps: CrmDeps) {
   const app = new Hono()
+  app.use("*", async (c, next) => {
+    const { memberRole } = orgContextOf(c)
+    const write = !["GET", "HEAD", "OPTIONS"].includes(c.req.method)
+    if (!canAccess(memberRole, write ? "conversations.write" : "conversations.read")) {
+      return c.json(
+        errorBody(
+          c,
+          "FORBIDDEN",
+          write ? "No tienes permiso para escribir en conversaciones" : "No tienes permiso para ver conversaciones",
+        ),
+        403,
+      )
+    }
+    await next()
+  })
 
   app.get("/", async (c) => {
     const { orgId } = orgContextOf(c)
@@ -223,10 +238,7 @@ export function createConversationsRoute(deps: CrmDeps) {
   const identityInput = z.object({ identityId: z.string().uuid() })
 
   app.put("/:id/identity", async (c) => {
-    const { orgId, userId, memberRole } = orgContextOf(c)
-    if (!canWrite(memberRole)) {
-      return c.json(errorBody(c, "FORBIDDEN", "Solo owner/admin pueden resolver identidades"), 403)
-    }
+    const { orgId, userId } = orgContextOf(c)
     const parsed = identityInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () =>

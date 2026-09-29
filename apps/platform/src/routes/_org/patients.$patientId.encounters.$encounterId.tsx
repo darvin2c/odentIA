@@ -7,7 +7,7 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "@odentia/ui"
-import { EmptyState, PageShell } from "@odentia/ui-patterns"
+import { EmptyState, PageHeader, PageShell } from "@odentia/ui-patterns"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
 import { ClipboardList } from "lucide-react"
@@ -15,7 +15,7 @@ import { ControlesPanel, RecetasPanel } from "../../components/patient/clinical-
 import { EncounterDetailView } from "../../components/patient/encounter-detail-view"
 import { EncounterEditor } from "../../components/patient/encounter-editor"
 import { apiFetch } from "../../lib/api"
-import { useCanWrite } from "../../lib/crm"
+import { usePermission } from "../../lib/crm"
 import { type EncounterDetail, hcLabel, type PatientFull } from "../../lib/patients"
 
 export const Route = createFileRoute("/_org/patients/$patientId/encounters/$encounterId")({
@@ -62,15 +62,18 @@ function EncounterPage() {
   const { patientId, encounterId } = Route.useParams()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
-  const canWrite = useCanWrite()
+  const canRead = usePermission("clinical.read")
+  const canWrite = usePermission("clinical.write")
   const patientQuery = useQuery({
     queryKey: ["patient", patientId],
     queryFn: () => apiFetch<{ data: PatientFull }>(`/api/patients/${patientId}`),
+    enabled: canRead,
   })
   const encounterQuery = useQuery({
     queryKey: ["encounter", patientId, encounterId],
     queryFn: () =>
       apiFetch<{ data: EncounterDetail }>(`/api/patients/${patientId}/encounters/${encounterId}`),
+    enabled: canRead,
   })
   const back = () =>
     navigate({ to: "/patients/$patientId", params: { patientId }, search: { tab: "historia" } })
@@ -136,18 +139,12 @@ function EncounterPage() {
   }
   return (
     <PageShell className="flex flex-col gap-6">
-      <header className="flex flex-wrap items-start justify-between gap-3">
-        <div className="flex flex-col gap-2">
-          <EncounterBreadcrumb patientId={patientId} patientName={patient.patient.displayName} />
-          <h1 className="text-2xl font-semibold">
-            Atención {detail.encounter.status === "finalizada" ? "finalizada" : "en curso"}
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            {patient.patient.displayName} · {hcLabel(patient.patient.patientNumber)}
-          </p>
-        </div>
-        <Badge variant="outline">Solo lectura</Badge>
-      </header>
+      <EncounterBreadcrumb patientId={patientId} patientName={patient.patient.displayName} />
+      <PageHeader
+        title={`Atención ${detail.encounter.status === "finalizada" ? "finalizada" : "en curso"}`}
+        subtitle={`${patient.patient.displayName} · ${hcLabel(patient.patient.patientNumber)}`}
+        actions={<Badge variant="outline">Solo lectura</Badge>}
+      />
       <EncounterDetailView patientId={patientId} detail={detail} />
       <RecetasPanel
         patientId={patientId}

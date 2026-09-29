@@ -761,8 +761,9 @@ it("encounters: procedure con tratamiento no aceptado responde 409 ITEM_NOT_ACCE
   expect(planBody.data.find((row) => row.id === item.id)?.status).toBe("pendiente")
 })
 
-it("encounters: member lee 200 pero registrar procedimiento responde 403 FORBIDDEN sin efectos", async () => {
+it("encounters: dentist lee 200, member ni lee ni registra procedimiento (403 sin efectos)", async () => {
   const admin = buildApp("admin")
+  const dentist = buildApp("dentist")
   const member = buildApp("member")
   const patientId = await createFreshPatient(admin, "Permisos Atencion")
   const ctx = await setupPlan(admin, patientId)
@@ -774,8 +775,11 @@ it("encounters: member lee 200 pero registrar procedimiento responde 403 FORBIDD
   await presentBudget(admin, patientId, budgetId)
   await decideBudget(admin, patientId, budgetId, [item.id])
 
-  const read = await member.request(`/patients/${patientId}/encounters/${ctx.encounterId}`)
+  const read = await dentist.request(`/patients/${patientId}/encounters/${ctx.encounterId}`)
   expect(read.status).toBe(200)
+
+  const memberRead = await member.request(`/patients/${patientId}/encounters/${ctx.encounterId}`)
+  expect(memberRead.status).toBe(403)
 
   const proc = await member.request(
     `/patients/${patientId}/encounters/${ctx.encounterId}/procedures`,
@@ -787,7 +791,6 @@ it("encounters: member lee 200 pero registrar procedimiento responde 403 FORBIDD
   )
   expect(proc.status).toBe(403)
   expect(((await proc.json()) as ErrorBody).error.code).toBe("FORBIDDEN")
-
   // Sin efectos: el tratamiento sigue pendiente y sin procedimientos.
   const plan = await admin.request(`/patients/${patientId}/plan`)
   const planBody = (await plan.json()) as { data: PlanItemRow[] }

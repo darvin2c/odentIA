@@ -3,7 +3,7 @@ import { FormDrawer } from "@odentia/ui-patterns"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useId, useState } from "react"
 import { apiFetch } from "../../lib/api"
-import { useCanWrite } from "../../lib/crm"
+import { usePermission } from "../../lib/crm"
 import { Cie10Search } from "./cie10-search"
 
 export function QuickNoteDrawer({
@@ -15,7 +15,7 @@ export function QuickNoteDrawer({
   encounterId?: string
   onSaved?: () => void
 }) {
-  const canWrite = useCanWrite()
+  const canWrite = usePermission("clinical.write")
   const queryClient = useQueryClient()
   const id = useId()
   const [open, setOpen] = useState(false)

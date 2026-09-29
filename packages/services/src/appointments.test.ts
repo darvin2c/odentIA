@@ -5,6 +5,7 @@ import { branch } from "@odentia/db/schema/org"
 import { sql } from "drizzle-orm"
 import { beforeAll, expect, it } from "vitest"
 import {
+  bookWaitlistEntry,
   createAppointment,
   createChair,
   listAppointments,
@@ -13,6 +14,13 @@ import {
   setAppointmentStatus,
   updateAppointment,
 } from "./appointments.js"
+import {
+  addWaitlistEntry,
+  createScheduleBlock,
+  listAvailableSlots,
+  offerWaitlistSlot,
+  setProfessionalSchedule,
+} from "./availability.js"
 import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
 
 setupTestDb()
@@ -80,6 +88,24 @@ beforeAll(async () => {
   ])
   chairId = chair!.id
   chair2Id = chair2!.id
+  // Horario explícito Lun–Vie 09:00–13:00 y 14:00–18:00 (hora Lima): las citas
+  // de prueba caen lunes a jueves por la mañana.
+  const rules = [1, 2, 3, 4, 5].flatMap((weekday) => [
+    { weekday, startMin: 9 * 60, endMin: 13 * 60 },
+    { weekday, startMin: 14 * 60, endMin: 18 * 60 },
+  ])
+  await withOrgContext(appDb, ORG, async (tx) => {
+    await setProfessionalSchedule(tx, ORG, ACTOR, {
+      branchId,
+      dentistUserId: DENTIST,
+      rules,
+    })
+    await setProfessionalSchedule(tx, ORG, ACTOR, {
+      branchId,
+      dentistUserId: DENTIST_2,
+      rules,
+    })
+  })
 }, 180_000)
 
 const run = <T>(fn: (tx: typeof appDb) => Promise<T>) => withOrgContext(appDb, ORG, fn)
@@ -271,4 +297,81 @@ it("listScheduleResources devuelve miembros, sillones y la zona de la sucursal",
   expect(resources.timeZone).toBe("America/Lima")
   expect(resources.professionals.map((p) => p.label)).toContain("Dra. Agenda Uno")
   expect(resources.chairs.map((c) => c.label)).toEqual(["Sillón Dos", "Sillón Uno"])
+})
+
+it("rechaza reserva fuera del horario y sin horario configurado", async () => {
+  // Domingo 2026-10-11 sin turnos: fuera de horario aunque esté libre.
+  await expect(
+    run((tx) =>
+      createAppointment(tx, ORG, ACTOR, {
+        patientId,
+        dentistUserId: DENTIST,
+        chairId,
+        startsAt: "2026-10-11T14:00:00Z",
+        endsAt: "2026-10-11T14:30:00Z",
+      }),
+    ),
+  ).rejects.toMatchObject({ code: "VALIDATION", status: 400 })
+})
+
+it("ofrece huecos dentro del horario y respeta bloqueos", async () => {
+  const slots = await run((tx) =>
+    listAvailableSlots(tx, ORG, {
+      branchId,
+      dentistUserId: DENTIST,
+      from: "2026-10-05T05:00:00Z",
+      to: "2026-10-06T05:00:00Z",
+      durationMin: 30,
+    }),
+  )
+  // 09:00 y 09:45 ocupadas por las citas previas; 10:30 libre con sillón.
+  expect(slots.slots.some((slot) => slot.startsAt === "2026-10-05T15:30:00.000Z")).toBe(true)
+  expect(slots.slots.some((slot) => slot.startsAt === "2026-10-05T14:00:00.000Z")).toBe(false)
+  expect(slots.truncated).toBe(false)
+  await run((tx) =>
+    createScheduleBlock(tx, ORG, ACTOR, {
+      branchId,
+      dentistUserId: DENTIST,
+      startsAt: "2026-10-05T15:30:00Z",
+      endsAt: "2026-10-05T16:00:00Z",
+      kind: "ausencia",
+      reason: "Prueba",
+    }),
+  )
+  const blocked = await run((tx) =>
+    listAvailableSlots(tx, ORG, {
+      branchId,
+      dentistUserId: DENTIST,
+      from: "2026-10-05T05:00:00Z",
+      to: "2026-10-06T05:00:00Z",
+      durationMin: 30,
+    }),
+  )
+  expect(blocked.slots.some((slot) => slot.startsAt === "2026-10-05T15:30:00.000Z")).toBe(false)
+})
+
+it("la espera ofrece un hueco y lo reserva con el mismo servicio", async () => {
+  const entry = await run((tx) =>
+    addWaitlistEntry(tx, ORG, ACTOR, {
+      branchId,
+      patientId,
+      dentistUserId: DENTIST_2,
+      serviceId,
+      priority: "alta",
+      notes: "Prueba",
+    }),
+  )
+  expect(entry.status).toBe("en_espera")
+  const offered = await run((tx) =>
+    offerWaitlistSlot(tx, ORG, ACTOR, entry.id, {
+      startsAt: "2026-10-06T17:00:00Z",
+      endsAt: "2026-10-06T17:45:00Z",
+      dentistUserId: DENTIST_2,
+      chairId: chair2Id,
+    }),
+  )
+  expect(offered.status).toBe("ofrecida")
+  const booked = await run((tx) => bookWaitlistEntry(tx, ORG, ACTOR, entry.id, {}))
+  expect(booked.status).toBe("confirmada")
+  expect(booked.serviceName).toBe("Limpieza Agenda")
 })

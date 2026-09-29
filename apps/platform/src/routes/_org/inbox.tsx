@@ -82,7 +82,7 @@ import {
   type ConversationDetail,
   type ConversationListItem,
   timeAgo,
-  useCanWrite,
+  usePermission,
   useMyUserId,
 } from "../../lib/crm"
 import { useOrgEvents } from "../../lib/org-events"
@@ -108,7 +108,9 @@ function InboxPage() {
   const queryClient = useQueryClient()
   const { org } = orgRouteApi.useRouteContext()
   const myUserId = useMyUserId()
-  const canWrite = useCanWrite()
+  const canRead = usePermission("conversations.read")
+  const canWrite = usePermission("conversations.write")
+  const canRegister = usePermission("crm.write")
   const navigate = useNavigate({ from: Route.fullPath })
   const listSearch = useListSearch()
   const status = listSearch.get("status") ?? "open"
@@ -152,6 +154,7 @@ function InboxPage() {
       ),
     initialPageParam: "",
     getNextPageParam: (last) => last.nextCursor,
+    enabled: canRead,
   })
 
   useOrgEvents(["message.created", "message.updated", "conversation.updated"], () => {
@@ -195,7 +198,9 @@ function InboxPage() {
       members={org.members}
       orgName={org.name}
       orgSlug={org.slug}
+      canRead={canRead}
       canWrite={canWrite}
+      canRegister={canRegister}
       prepareRegistration={
         routeSearch.prepareRegistration === true && routeSearch.conversation === selectedId
       }
@@ -204,9 +209,18 @@ function InboxPage() {
     />
   ) : null
 
+  if (!canRead) {
+    return (
+      <PageShell fill className="gap-4">
+        <PageHeader title="Bandeja" subtitle="Todas las conversaciones de la clínica" />
+        <EmptyState title="Sin acceso" description="Sin permiso de lectura de conversaciones." />
+      </PageShell>
+    )
+  }
+
   return (
     <PageShell fill className="gap-4">
-      <PageHeader title="Bandeja" subtitle="Conversaciones de WhatsApp y Telegram" />
+      <PageHeader title="Bandeja" subtitle="Todas las conversaciones de la clínica" />
       <FilterBar
         filters={[
           {
@@ -374,7 +388,9 @@ function ThreadView({
   members,
   orgName,
   orgSlug,
+  canRead,
   canWrite,
+  canRegister,
   prepareRegistration,
   onConsumePrepareRegistration,
   onBack,
@@ -383,7 +399,9 @@ function ThreadView({
   members: Member[]
   orgName: string
   orgSlug: string
+  canRead: boolean
   canWrite: boolean
+  canRegister: boolean
   prepareRegistration: boolean
   onConsumePrepareRegistration: () => void
   onBack: () => void
@@ -410,6 +428,7 @@ function ThreadView({
   const detailQuery = useQuery({
     queryKey: ["conversation", id],
     queryFn: () => apiFetch<{ data: ConversationDetail }>(`/api/conversations/${id}`),
+    enabled: canRead,
   })
 
   const detail = detailQuery.data?.data
@@ -442,7 +461,7 @@ function ThreadView({
       apiFetch<{ data: { name: string; language: string }[] }>(
         `/api/channels/connections/${detail?.connection.id}/templates`,
       ),
-    enabled: windowClosed && !!detail,
+    enabled: windowClosed && !!detail && canWrite,
   })
 
   const templateItems = useMemo(
@@ -484,11 +503,11 @@ function ThreadView({
       intentConsumedRef.current = false
       return
     }
-    if (!canWrite || !detail || intentConsumedRef.current || registrationMutation.isPending) return
+    if (!canRegister || !detail || intentConsumedRef.current || registrationMutation.isPending) return
     intentConsumedRef.current = true
     onConsumePrepareRegistration()
     registrationMutation.mutate(detail.contact.id)
-  }, [prepareRegistration, canWrite, detail])
+  }, [prepareRegistration, canRegister, detail])
 
   const sendMutation = useMutation({
     mutationFn: (text: string) =>
@@ -641,7 +660,7 @@ function ThreadView({
             {assignee && <span>· {assignee.user.name}</span>}
           </div>
         </div>
-        {canWrite && (
+        {canRegister && (
           <Button
             variant="outline"
             size="sm"
@@ -653,46 +672,52 @@ function ThreadView({
             {registrationMutation.isPending ? "Generando…" : "Enviar registro"}
           </Button>
         )}
-        <DropdownMenu>
-          <DropdownMenuTrigger className="rounded-md border bg-background px-3 py-1 text-sm hover:bg-muted">
-            {assignee ? assignee.user.name : "Asignar"}
-          </DropdownMenuTrigger>
-          <DropdownMenuContent>
-            <DropdownMenuItem
-              onSelect={() => actionMutation.mutate({ path: "/assign", body: { userId: null } })}
-            >
-              Sin asignar
-            </DropdownMenuItem>
-            {members.map((m) => (
+        {canWrite && (
+          <DropdownMenu>
+            <DropdownMenuTrigger className="rounded-md border bg-background px-3 py-1 text-sm hover:bg-muted">
+              {assignee ? assignee.user.name : "Asignar"}
+            </DropdownMenuTrigger>
+            <DropdownMenuContent>
               <DropdownMenuItem
-                key={m.userId}
-                onSelect={() =>
-                  actionMutation.mutate({ path: "/assign", body: { userId: m.userId } })
-                }
+                onSelect={() => actionMutation.mutate({ path: "/assign", body: { userId: null } })}
               >
-                {m.user.name}
+                Sin asignar
               </DropdownMenuItem>
-            ))}
-          </DropdownMenuContent>
-        </DropdownMenu>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() =>
-            actionMutation.mutate({ path: "/agent", body: { enabled: conv.agentStatus !== "on" } })
-          }
-          title={conv.agentStatus === "on" ? "Pausar agente (toma humana)" : "Reactivar agente"}
-        >
-          <Bot className="size-4" />
-          {conv.agentStatus === "on" ? "ON" : "OFF"}
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => actionMutation.mutate({ path: closed ? "/reopen" : "/close" })}
-        >
-          {closed ? "Reabrir" : "Cerrar"}
-        </Button>
+              {members.map((m) => (
+                <DropdownMenuItem
+                  key={m.userId}
+                  onSelect={() =>
+                    actionMutation.mutate({ path: "/assign", body: { userId: m.userId } })
+                  }
+                >
+                  {m.user.name}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
+        {canWrite && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() =>
+              actionMutation.mutate({ path: "/agent", body: { enabled: conv.agentStatus !== "on" } })
+            }
+            title={conv.agentStatus === "on" ? "Pausar agente (toma humana)" : "Reactivar agente"}
+          >
+            <Bot className="size-4" />
+            {conv.agentStatus === "on" ? "ON" : "OFF"}
+          </Button>
+        )}
+        {canWrite && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => actionMutation.mutate({ path: closed ? "/reopen" : "/close" })}
+          >
+            {closed ? "Reabrir" : "Cerrar"}
+          </Button>
+        )}
       </div>
 
       <MessageScrollerProvider autoScroll defaultScrollPosition="end">
@@ -803,7 +828,7 @@ function ThreadView({
               />
               <Button
                 size="sm"
-                disabled={!templateName || templateMutation.isPending}
+                disabled={!templateName || templateMutation.isPending || !canWrite}
                 onClick={() => templateMutation.mutate()}
               >
                 Enviar
@@ -813,6 +838,10 @@ function ThreadView({
               </Button>
             </div>
           </div>
+        ) : !canWrite ? (
+          <p className="text-sm text-muted-foreground">
+            Sin permiso de escritura de conversaciones.
+          </p>
         ) : (
           <div className="flex flex-col gap-1.5">
             <PromptInput

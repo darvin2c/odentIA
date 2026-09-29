@@ -74,9 +74,14 @@ export function ContactConversationDialog({
     queryFn: () => apiFetch<{ data: ContactFull }>(`/api/contacts/${selectedId}`),
     enabled: open && selectedId !== "",
   })
+  // Metadatos de uso (conversations.read): el listado admin exige settings.read.
+  type UsableConnection = Pick<
+    ConnectionItem,
+    "id" | "channel" | "provider" | "displayName" | "externalId" | "status" | "capabilities"
+  >
   const connectionsQuery = useQuery({
-    queryKey: ["connections"],
-    queryFn: () => apiFetch<{ data: ConnectionItem[] }>("/api/channels/connections"),
+    queryKey: ["connections", "usable"],
+    queryFn: () => apiFetch<{ data: UsableConnection[] }>("/api/channels/connections/usable"),
     enabled: open,
   })
 

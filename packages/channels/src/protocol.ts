@@ -1,7 +1,17 @@
 // Protocolo puro del framework de canales: sin db, sin S3, sin env.
 // Los adaptadores de proveedor (paso 2) implementan ChannelAdapter.
 
-export type ChannelProvider = "whatsapp_cloud_api" | "telegram_bot_api"
+// Proveedores registrados: whatsapp/telegram (núcleo), messenger/instagram
+// (Meta, este slice), gmail/microsoft365 (slice Email), web_chat (slice Web).
+// Los adaptadores pendientes de esos slices se registran en channelAdapters.
+export type ChannelProvider =
+  | "whatsapp_cloud_api"
+  | "telegram_bot_api"
+  | "messenger"
+  | "instagram"
+  | "gmail"
+  | "microsoft365"
+  | "web_chat"
 
 export interface ChannelCapabilities {
   templates: boolean

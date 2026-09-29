@@ -31,8 +31,25 @@ function toPublic(row: typeof channelConnection.$inferSelect): ConnectionPublic 
 
 function requireAdapter(provider: string) {
   const adapter = channelAdapters[provider as ChannelProvider]
-  if (!adapter) throw validation(`Proveedor desconocido: ${provider}`)
+  // Registro parcial (cada slice dueño registra el suyo): sin adaptador no
+  // hay validación externa posible; nunca se crea una conexión "activa" ciega.
+  if (!adapter) throw validation(`Proveedor desconocido o no registrado: ${provider}`)
   return adapter
+}
+
+/** Canal esperado por proveedor conocido; otros proveedores los valida su slice. */
+const KNOWN_PROVIDER_CHANNELS: Record<string, string> = {
+  whatsapp_cloud_api: "whatsapp",
+  telegram_bot_api: "telegram",
+  messenger: "messenger",
+  instagram: "instagram",
+}
+
+function assertChannelMatches(provider: string, channel: string): void {
+  const expected = KNOWN_PROVIDER_CHANNELS[provider]
+  if (expected && channel !== expected) {
+    throw validation(`El proveedor ${provider} exige el canal "${expected}"`)
+  }
 }
 
 export async function listConnections(tx: Db, orgId: string): Promise<ConnectionPublic[]> {
@@ -69,6 +86,7 @@ export async function createConnection(
   deps: ConnectionDeps,
 ): Promise<ConnectionPublic & { webhookSecret: string }> {
   const adapter = requireAdapter(input.provider)
+  assertChannelMatches(input.provider, input.channel)
   const displayName = input.displayName.trim()
   if (!displayName) throw validation("El nombre de la conexión es obligatorio")
   if (!input.config || typeof input.config !== "object") throw validation("Config inválida")

@@ -35,7 +35,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { FileText, Image as ImageIcon } from "lucide-react"
 import { useEffect, useId, useMemo, useRef, useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
-import { timeAgo, useCanWrite } from "../../lib/crm"
+import { timeAgo, usePermission } from "../../lib/crm"
 import type {
   Encounter,
   PatientDocument,
@@ -64,11 +64,13 @@ function isPdfDoc(doc: PatientDocument): boolean {
 }
 
 function useSignedUrl(patientId: string, documentId: string) {
+  const canRead = usePermission("clinical.read")
   return useQuery({
     queryKey: ["patient-document-url", patientId, documentId],
     queryFn: () =>
       apiFetch<{ data: { url: string } }>(`/api/patients/${patientId}/documents/${documentId}/url`),
     staleTime: SIGNED_URL_STALE_MS,
+    enabled: canRead,
   })
 }
 
@@ -96,7 +98,8 @@ export function ImagenesTab({
   onPendingChange,
 }: ImagenesTabProps) {
   const queryClient = useQueryClient()
-  const canWrite = useCanWrite()
+  const canWrite = usePermission("clinical.write")
+  const canRead = usePermission("clinical.read")
 
   const listSearch = useListSearch()
   const [teeth, setTeeth] = useState<number[]>(initialTooth != null ? [initialTooth] : [])
@@ -113,6 +116,7 @@ export function ImagenesTab({
   const docsQuery = useQuery({
     queryKey: ["patient-documents", patientId],
     queryFn: () => apiFetch<{ data: DocView[] }>(`/api/patients/${patientId}/documents`),
+    enabled: canRead,
   })
 
   const encountersQuery = useQuery({
@@ -132,10 +136,12 @@ export function ImagenesTab({
       } while (cursor)
       return all
     },
+    enabled: canRead,
   })
   const planQuery = useQuery({
     queryKey: ["plan", patientId],
     queryFn: () => apiFetch<{ data: PlanItem[] }>(`/api/patients/${patientId}/plan`),
+    enabled: canRead,
   })
 
   const allDocs = docsQuery.data?.data ?? []
@@ -545,6 +551,7 @@ function DocumentViewer({
   canEdit: boolean
   onEditContext: () => void
 }) {
+  const canRead = usePermission("clinical.read")
   const urlQuery = useSignedUrl(patientId, doc.id)
   const url = urlQuery.data?.data.url ?? null
   const error =
@@ -562,6 +569,7 @@ function DocumentViewer({
       }>(`/api/patients/${patientId}/documents/${doc.id}/context`)
       return body.data.history
     },
+    enabled: canRead,
   })
 
   const teeth = doc.toothNumbers
@@ -837,6 +845,7 @@ function ContextDrawer({
   disabled?: boolean
 }) {
   const queryClient = useQueryClient()
+  const canRead = usePermission("clinical.read")
   const previewQuery = useSignedUrl(patientId, doc.id)
   const [encounterChoice, setEncounterChoice] = useState<string>(doc.encounterId ?? "")
   const [planChoice, setPlanChoice] = useState<string>(doc.planItemId ?? "")
@@ -853,7 +862,7 @@ function ContextDrawer({
       apiFetch<{ data: { procedures: Array<{ id: string; description: string }> } }>(
         `/api/patients/${patientId}/encounters/${encounterChoice}`,
       ),
-    enabled: open && encounterChoice !== "",
+    enabled: open && encounterChoice !== "" && canRead,
   })
   const procedures = procedureQuery.data?.data.procedures ?? []
   const [teeth, setTeeth] = useState<number[]>(doc.toothNumbers)

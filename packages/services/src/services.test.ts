@@ -4,6 +4,7 @@ import { expect, it } from "vitest"
 import { getAgentConfig, upsertAgentConfig } from "./agentConfig.js"
 import { sanitizeCustomFields } from "./contacts.js"
 import { createFieldDef, deleteFieldDef, listFieldDefs, updateFieldDef } from "./fields.js"
+import { createOpportunity } from "./opportunities.js"
 import {
   createPipeline,
   deleteStage,
@@ -68,13 +69,17 @@ it("createPipeline + reorderStages reordenan posiciones", async () => {
   void created
 })
 
-it("deleteStage con contactos en uso da STAGE_IN_USE", async () => {
+it("deleteStage con oportunidades en uso da STAGE_IN_USE", async () => {
   await withOrgContext(appDb, "org_a", async (tx) => {
     const { stages } = await ensureDefaultPipeline(tx, "org_a")
-    await tx.insert(contact).values({
-      organizationId: "org_a",
-      displayName: "Con etapa",
+    const [created] = await tx
+      .insert(contact)
+      .values({ organizationId: "org_a", displayName: "Con oportunidad" })
+      .returning({ id: contact.id })
+    await createOpportunity(tx, "org_a", {
+      contactId: created?.id ?? "",
       stageId: stages[0]?.id ?? "",
+      title: "Caso de prueba",
     })
     await expect(deleteStage(tx, "org_a", stages[0]?.id ?? "")).rejects.toMatchObject({
       code: "STAGE_IN_USE",

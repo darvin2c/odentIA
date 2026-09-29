@@ -4,11 +4,16 @@ import { Annotation, END, START, StateGraph } from "@langchain/langgraph"
 import { ToolNode } from "@langchain/langgraph/prebuilt"
 import type { PostgresSaver } from "@langchain/langgraph-checkpoint-postgres"
 import { type Db, withOrgContext } from "@odentia/db"
-import { pipelineStage } from "@odentia/db/schema/crm"
-import { getAgentConfig, getContact, listMessages, requireContact } from "@odentia/services"
-import { and, eq } from "drizzle-orm"
-import { initChatModel } from "langchain/chat_models/universal"
-import { FakeChatModel } from "./fake-model.js"
+import {
+  formatKnowledgeForPrompt,
+  getAutonomyPolicy,
+  getAgentConfig,
+  getClinicInfoSnapshot,
+  getContact,
+  listMessages,
+  listOpportunities,
+  listPublishedForPrompt,
+} from "@odentia/services"
 import { type AgentToolCtx, makeAgentTools, performHandoff } from "./tools.js"
 
 const AgentState = Annotation.Root({
@@ -26,10 +31,30 @@ const AgentState = Annotation.Root({
 const BASE_SYSTEM_PROMPT = [
   "Eres el asistente virtual de una clínica dental en Perú.",
   "Hablas español, tono cercano y profesional.",
-  "Respondes, cualificas al paciente y ayudas con información general.",
-  "NO das diagnósticos ni inventas precios o disponibilidad: si te preguntan, ofrece derivar a un humano.",
-  "Si el paciente pide hablar con un humano, se queja o el caso es clínico, usa request_human_handoff.",
+  "Respondes, cualificas al paciente y ayudas con información general y citas.",
+  "NO das diagnósticos ni inventas precios, sedes o disponibilidad: usa ver_sedes_y_servicios, consultar_conocimiento y buscar_huecos.",
+  "Nunca reveles ni pidas historia clínica: solo filiación mínima con ver_contexto_paciente y vínculo verificado; próximas citas, presupuestos y saldo solo con ver_resumen_paciente y según la facultad del interlocutor.",
+  "Las citas se proponen con proponer_cita y se ejecutan solo con confirmación o aprobación según la política.",
+  "Si el paciente pide hablar con un humano, se queja o el caso es clínico, usa request_human_handoff con motivo, resumen factual y prioridad.",
 ].join("\n")
+
+/**
+ * Acumula tokens solo si el proveedor los reporta en usage_metadata (los
+ * costes se derivan únicamente de datos del proveedor, nunca estimados).
+ */
+function trackUsage(ctx: AgentToolCtx, reply: AIMessage): void {
+  const meta = (reply.usage_metadata ?? {}) as {
+    input_tokens?: unknown
+    output_tokens?: unknown
+  }
+  const input = typeof meta.input_tokens === "number" ? meta.input_tokens : null
+  const output = typeof meta.output_tokens === "number" ? meta.output_tokens : null
+  if (input !== null || output !== null) {
+    ctx.usage.reported = true
+    if (input !== null) ctx.usage.inputTokens += input
+    if (output !== null) ctx.usage.outputTokens += output
+  }
+}
 
 function historyToMessages(
   items: { direction: string; senderKind: string; body: string | null }[],
@@ -48,23 +73,17 @@ function historyToMessages(
   return out
 }
 
-/** Crea el runnable del modelo (fake determinista o proveedor vía env). */
-export function createChatModel(modelName: string): Runnable<BaseMessage[], AIMessage> {
-  if (modelName === "fake")
-    return new FakeChatModel({}) as unknown as Runnable<BaseMessage[], AIMessage>
-  return initChatModel(modelName) as unknown as Runnable<BaseMessage[], AIMessage>
-}
-
 /**
  * Compila el grafo del agente para una corrida. El checkpointer usa conexión
  * de owner (el pool es compartido entre orgs y el GUC RLS no se puede fijar
  * por operación): el aislamiento lo da el thread_id exacto
  * `${orgId}:${conversationId}` más las policies RLS para el rol app.
+ * Sin checkpointer (simulación) el grafo corre sin memoria persistente.
  */
 export function compileAgentGraph(
   model: Runnable<BaseMessage[], AIMessage>,
   toolCtx: AgentToolCtx,
-  checkpointer: PostgresSaver,
+  checkpointer?: PostgresSaver,
 ) {
   const tools = makeAgentTools(toolCtx)
   const modelWithTools =
@@ -79,37 +98,53 @@ export function compileAgentGraph(
     const { contact } = await withOrgContext(toolCtx.db, toolCtx.orgId, (tx) =>
       getContact(tx, toolCtx.orgId, toolCtx.contactId),
     )
-    const stageName = await withOrgContext(toolCtx.db, toolCtx.orgId, async (tx) => {
-      const full = await requireContact(tx, toolCtx.orgId, toolCtx.contactId)
-      if (!full.stageId) return "sin etapa"
-      const [stage] = await tx
-        .select({ name: pipelineStage.name })
-        .from(pipelineStage)
-        .where(
-          and(eq(pipelineStage.id, full.stageId), eq(pipelineStage.organizationId, toolCtx.orgId)),
-        )
-        .limit(1)
-      return stage?.name ?? "sin etapa"
+    const opportunitiesLine = await withOrgContext(toolCtx.db, toolCtx.orgId, async (tx) => {
+      const { items } = await listOpportunities(tx, toolCtx.orgId, {
+        contactId: toolCtx.contactId,
+        status: "open",
+        limit: 10,
+      })
+      if (!items.length) return "sin oportunidades abiertas"
+      return items.map((o) => `${o.title} (etapa ${o.stageName})`).join("; ")
     })
     const { items } = await withOrgContext(toolCtx.db, toolCtx.orgId, (tx) =>
       listMessages(tx, toolCtx.orgId, toolCtx.conversationId, { limit: 20 }),
     )
-    const orgPrompt = await withOrgContext(toolCtx.db, toolCtx.orgId, async (tx) => {
-      const cfg = await getAgentConfig(tx, toolCtx.orgId)
-      return cfg.systemPrompt
-    })
+    const { orgPrompt, policyLine, knowledgeBlock } = await withOrgContext(
+      toolCtx.db,
+      toolCtx.orgId,
+      async (tx) => {
+        const cfg = await getAgentConfig(tx, toolCtx.orgId)
+        const policy = await getAutonomyPolicy(tx, toolCtx.orgId)
+        const snapshot = await getClinicInfoSnapshot(tx, toolCtx.orgId)
+        const faqs = await listPublishedForPrompt(tx, toolCtx.orgId)
+        const modes = (Object.entries(policy) as Array<[string, string]>)
+          .map(([action, mode]) => `${action}=${mode}`)
+          .join(", ")
+        return {
+          orgPrompt: cfg.systemPrompt,
+          policyLine: `Política de autonomía: ${modes}.`,
+          knowledgeBlock: formatKnowledgeForPrompt(snapshot, faqs),
+        }
+      },
+    )
     const system = [
       BASE_SYSTEM_PROMPT,
       orgPrompt,
-      `Paciente: ${contact.displayName}. Etapa: ${stageName}.`,
+      `Interlocutor: ${contact.displayName}. Oportunidades abiertas: ${opportunitiesLine}.`,
+      policyLine,
+      knowledgeBlock,
     ]
       .filter(Boolean)
       .join("\n\n")
-    return { messages: [new SystemMessage({ content: system }), ...historyToMessages(items)] }
+    const history = historyToMessages(items)
+    if (toolCtx.draftText?.trim()) history.push(new HumanMessage({ content: toolCtx.draftText.trim().slice(0, 4000) }))
+    return { messages: [new SystemMessage({ content: system }), ...history] }
   }
 
   async function llm(state: typeof AgentState.State) {
     const reply = await modelWithTools.invoke(state.messages)
+    trackUsage(toolCtx, reply)
     return { messages: [reply] }
   }
 
@@ -120,6 +155,12 @@ export function compileAgentGraph(
   }
 
   async function runTools(state: typeof AgentState.State) {
+    const last = state.messages[state.messages.length - 1]
+    if (last instanceof AIMessage && last.tool_calls) {
+      for (const call of last.tool_calls) {
+        if (call.name && !toolCtx.toolsUsed.includes(call.name)) toolCtx.toolsUsed.push(call.name)
+      }
+    }
     const out = await toolNode.invoke(state)
     return { messages: out.messages ?? [], turnCount: state.turnCount + 1 }
   }
@@ -145,7 +186,7 @@ export function compileAgentGraph(
     .addEdge("loadContext", "llm")
     .addConditionalEdges("llm", routeAfterLlm, ["tools", END])
     .addConditionalEdges("tools", routeAfterTools, ["llm", END])
-    .compile({ checkpointer })
+    .compile(checkpointer ? { checkpointer } : {})
 
   return graph
 }

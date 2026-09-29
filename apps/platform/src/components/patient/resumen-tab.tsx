@@ -12,7 +12,7 @@ import {
   formatDate,
   NEXT_ACTION_LABELS,
 } from "../../lib/clinical-journey"
-import { timeAgo, useCanWrite } from "../../lib/crm"
+import { timeAgo, usePermission } from "../../lib/crm"
 import { sexLabel } from "../../lib/patient-overview"
 import type { OdontogramState, PatientFull, PatientSummary } from "../../lib/patients"
 import {
@@ -61,32 +61,36 @@ export function ResumenTab({
   summary?: PatientSummary
   onTabChange: (tab: ResumenTabTarget, tooth?: number, itemId?: string) => void
 }) {
-  const canWrite = useCanWrite()
+  const canRead = usePermission("clinical.read")
 
   const healthQuery = useQuery({
     queryKey: ["patient-health", patientId],
     queryFn: () => fetchPatientHealth(patientId),
+    enabled: canRead,
   })
 
   const summaryQuery = useQuery({
     queryKey: ["patient-summary", patientId],
     queryFn: () => apiFetch<{ data: PatientSummary }>(`/api/patients/${patientId}/summary`),
-    enabled: summary === undefined,
+    enabled: canRead && summary === undefined,
   })
 
   const dentalQuery = useQuery({
     queryKey: ["odontogram", patientId],
     queryFn: () => apiFetch<{ data: OdontogramState }>(`/api/patients/${patientId}/odontogram`),
+    enabled: canRead,
   })
 
   const followUpsQuery = useQuery({
     queryKey: ["follow-ups", patientId],
     queryFn: () => fetchFollowUps(patientId),
+    enabled: canRead,
   })
 
   const accountQuery = useQuery({
     queryKey: ["patient-account", patientId],
     queryFn: () => fetchPatientAccount(patientId),
+    enabled: canRead,
   })
 
   const health = healthQuery.data?.data ?? null
@@ -114,7 +118,7 @@ export function ResumenTab({
 
   return (
     <div className="flex flex-col gap-4">
-      {canWrite && healthQuery.isFetched && (pendingReview || !hasInfo) ? (
+      {canRead && healthQuery.isFetched && (pendingReview || !hasInfo) ? (
         <div className="flex flex-col gap-6 rounded-md border border-primary/40 bg-primary/5 p-6">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-start gap-2">

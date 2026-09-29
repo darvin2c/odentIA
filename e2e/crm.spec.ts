@@ -149,7 +149,7 @@ test("crm agente: responde al segundo inbound y el operador toma el hilo", async
   await expect(page.getByRole("button", { name: "OFF" })).toBeVisible()
 })
 
-test("crm pipeline: contacto pasa a Contactado y aparece en su columna", async ({
+test("crm pipeline: mover una oportunidad no mueve las otras de la misma persona", async ({
   owner,
   nextEventId,
 }) => {
@@ -169,10 +169,16 @@ test("crm pipeline: contacto pasa a Contactado y aparece en su columna", async (
   const contactId = conversation.contact.id
 
   await gotoHydrated(page, tenant(org.slug, "/pipeline"))
-  await expect(page.getByText("E2E Paciente").first()).toBeVisible()
-
-  await gotoHydrated(page, tenant(org.slug, `/contacts/${contactId}`))
-  await expect(page.getByRole("button", { name: "Editar datos" })).toBeEnabled()
+  await page.getByRole("button", { name: "Nueva oportunidad" }).click()
+  await page.getByRole("combobox", { name: "Contacto", exact: true }).selectOption(contactId)
+  await page.getByLabel("Título", { exact: true }).fill("Evaluación de ortodoncia")
+  await page.getByRole("button", { name: "Crear", exact: true }).click()
+  const card = page.getByRole("link", { name: "Evaluación de ortodoncia", exact: true })
+  await expect(card).toBeVisible()
+  await call(page, "POST", "/api/opportunities", org.slug, {
+    contactId,
+    title: "Control preventivo",
+  }, 201)
   const pipes = await call<{ stages: { id: string; name: string }[] }[]>(
     page,
     "GET",
@@ -181,14 +187,15 @@ test("crm pipeline: contacto pasa a Contactado y aparece en su columna", async (
   )
   const contactado = pipes.flatMap((p) => p.stages).find((s) => s.name === "Contactado")
   expect(contactado).toBeDefined()
-  await page.getByRole("button", { name: "Editar datos" }).click()
-  await page.getByLabel("Etapa").selectOption(contactado?.id ?? "")
-  await expect(page.getByRole("button", { name: "Guardar" })).toBeEnabled()
-  await page.getByRole("button", { name: "Guardar" }).click()
+  await card.click()
+  await page.getByRole("combobox", { name: "Etapa", exact: true }).selectOption(contactado!.id)
+  await expect(page.getByRole("combobox", { name: "Etapa", exact: true })).toHaveValue(contactado!.id)
 
   await gotoHydrated(page, tenant(org.slug, "/pipeline"))
   const contactadoCol = page.locator("section", { hasText: "Contactado" }).first()
-  await expect(contactadoCol.getByText("E2E Paciente")).toBeVisible()
+  await expect(contactadoCol.getByRole("link", { name: "Evaluación de ortodoncia" })).toBeVisible()
+  const nuevoCol = page.locator("section", { hasText: "Nuevo" }).first()
+  await expect(nuevoCol.getByRole("link", { name: "Control preventivo" })).toBeVisible()
 })
 
 test("crm whatsapp: firma válida crea conversación y firma inválida da 401", async ({

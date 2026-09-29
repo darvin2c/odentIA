@@ -18,6 +18,31 @@ let appDb: Db
 let tgConn: string
 let waConn: string
 let waSecret = ""
+let msgrConn: string
+let msgrSecret = ""
+
+function msgrBody(): string {
+  return JSON.stringify({
+    object: "page",
+    entry: [
+      {
+        id: "PAGE1",
+        messaging: [
+          {
+            sender: { id: "PSID1" },
+            recipient: { id: "PAGE1" },
+            timestamp: 1727440000000,
+            message: { mid: "mid.msgr1", text: "Hola" },
+          },
+        ],
+      },
+    ],
+  })
+}
+
+function msgrSig(raw: string): string {
+  return `sha256=${createHmac("sha256", "MSGRSECRET").update(raw, "utf8").digest("hex")}`
+}
 
 const TG_UPDATE = JSON.stringify({
   update_id: 7001,
@@ -115,6 +140,16 @@ beforeAll(async () => {
   )) as unknown as { id: string; webhook_secret: string }[]
   waConn = wa[0]?.id ?? ""
   waSecret = wa[0]?.webhook_secret ?? ""
+  const msgr = (await ownerDb.execute(
+    sql`insert into "channel_connection"
+          ("organization_id", "channel", "provider", "display_name", "config_encrypted", "webhook_secret")
+        values ('org_a', 'messenger', 'messenger', 'MSGR',
+          ${encryptJson(KEY, { pageId: "PAGE1", pageAccessToken: "T", appSecret: "MSGRSECRET" })},
+          'msgr-secret')
+        returning "id", "webhook_secret"`,
+  )) as unknown as { id: string; webhook_secret: string }[]
+  msgrConn = msgr[0]?.id ?? ""
+  msgrSecret = msgr[0]?.webhook_secret ?? ""
 }, 180_000)
 
 afterAll(async () => {
@@ -203,4 +238,59 @@ it("whatsapp válido encola con firma HMAC; firma mala da 401", async () => {
   })
   expect(bad.status).toBe(401)
   expect(await queueDepth()).toBe(2)
+})
+
+it("reto GET de Messenger valida verify_token", async () => {
+  const app = route()
+  const ok = await app.request(
+    `/channels/messenger/${msgrConn}?hub.mode=subscribe&hub.verify_token=${msgrSecret}&hub.challenge=CHAL`,
+  )
+  expect(ok.status).toBe(200)
+  expect(await ok.text()).toBe("CHAL")
+  const bad = await app.request(
+    `/channels/messenger/${msgrConn}?hub.mode=subscribe&hub.verify_token=mal&hub.challenge=CHAL`,
+  )
+  expect(bad.status).toBe(403)
+})
+
+it("messenger válido encola con firma HMAC; eco propio no encola; firma mala da 401", async () => {
+  const app = route()
+  const raw = msgrBody()
+  const before = await queueDepth()
+  const ok = await app.request(`/channels/messenger/${msgrConn}`, {
+    method: "POST",
+    headers: { "x-hub-signature-256": msgrSig(raw), "content-type": "application/json" },
+    body: raw,
+  })
+  expect(ok.status).toBe(200)
+  expect(await queueDepth()).toBe(before + 1)
+  const echo = JSON.stringify({
+    object: "page",
+    entry: [
+      {
+        id: "PAGE1",
+        messaging: [
+          {
+            sender: { id: "PAGE1" },
+            recipient: { id: "PSID1" },
+            timestamp: 1727440000000,
+            message: { mid: "mid.eco", text: "respuesta", is_echo: true },
+          },
+        ],
+      },
+    ],
+  })
+  const echoed = await app.request(`/channels/messenger/${msgrConn}`, {
+    method: "POST",
+    headers: { "x-hub-signature-256": msgrSig(echo), "content-type": "application/json" },
+    body: echo,
+  })
+  expect(echoed.status).toBe(200)
+  expect(await queueDepth()).toBe(before + 1)
+  const bad = await app.request(`/channels/messenger/${msgrConn}`, {
+    method: "POST",
+    headers: { "x-hub-signature-256": "sha256=00", "content-type": "application/json" },
+    body: raw,
+  })
+  expect(bad.status).toBe(401)
 })

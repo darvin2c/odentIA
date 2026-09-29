@@ -31,7 +31,7 @@ import { Plus } from "lucide-react"
 import { type FormEvent, useMemo, useState } from "react"
 import { z } from "zod"
 import { ApiError, apiFetch } from "../../lib/api"
-import { type Pipeline, type Stage, useCanWrite } from "../../lib/crm"
+import { type Pipeline, type Stage, usePermission } from "../../lib/crm"
 
 export const Route = createFileRoute("/_org/settings/pipelines")({
   component: PipelinesPage,
@@ -51,7 +51,8 @@ const STAGE_KINDS = [
 
 function PipelinesPage() {
   const queryClient = useQueryClient()
-  const canWrite = useCanWrite()
+  const canWrite = usePermission("crm.write")
+  const canRead = usePermission("crm.read")
   const mode = useDetailMode()
   const [pipelineId, setPipelineId] = useState<string | null>(null)
   const [formOpen, setFormOpen] = useState(false)
@@ -62,6 +63,7 @@ function PipelinesPage() {
   const listQuery = useQuery({
     queryKey: ["pipelines"],
     queryFn: () => apiFetch<{ data: Pipeline[] }>("/api/pipelines"),
+    enabled: canRead,
   })
 
   const pipelines = listQuery.data?.data ?? []
@@ -232,6 +234,7 @@ function PipelinesPage() {
               </Button>
             )
           }
+          if (!canWrite) return null
           return (
             <RowActions
               label={`Acciones de ${stage.name}`}
@@ -266,7 +269,7 @@ function PipelinesPage() {
       },
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [editing, stages.length],
+    [editing, stages.length, canWrite],
   )
 
   const table = useReactTable({
@@ -275,10 +278,10 @@ function PipelinesPage() {
     getCoreRowModel: getCoreRowModel(),
   })
 
-  if (!canWrite) {
+  if (!canRead) {
     return (
       <div>
-        <EmptyState title="Sin acceso" description="Solo owner/admin pueden editar pipelines." />
+        <EmptyState title="Sin acceso" description="Sin permiso de lectura del CRM." />
       </div>
     )
   }
@@ -339,7 +342,9 @@ function PipelinesPage() {
     <div className="flex flex-col gap-6">
       <MasterDetail
         panel={
-          mode === "panel" && formOpen ? <FormPanel {...formProps}>{formFields}</FormPanel> : null
+          canWrite && mode === "panel" && formOpen ? (
+            <FormPanel {...formProps}>{formFields}</FormPanel>
+          ) : null
         }
       >
         <PageHeader
@@ -365,10 +370,12 @@ function PipelinesPage() {
                   </SelectContent>
                 </Select>
               ) : null}
-              <Button type="button" className="min-h-11" onClick={() => setFormOpen(true)}>
-                <Plus aria-hidden />
-                Nueva etapa
-              </Button>
+              {canWrite && (
+                <Button type="button" className="min-h-11" onClick={() => setFormOpen(true)}>
+                  <Plus aria-hidden />
+                  Nueva etapa
+                </Button>
+              )}
             </>
           }
         />
@@ -381,19 +388,21 @@ function PipelinesPage() {
     
       {/* Un solo contenedor montado a la vez: montar panel y drawer juntos
           duplicaría los id/htmlFor de los campos. */}
-      {mode === "drawer" ? (
+      {canWrite && mode === "drawer" ? (
         <FormDrawer open={formOpen} {...formProps}>
           {formFields}
         </FormDrawer>
       ) : null}
-      <ConfirmDialog
-        open={deleting !== null}
-        onClose={() => setDeleting(null)}
-        title={`Eliminar ${deleting?.name ?? ""}`}
-        description="Solo si ningún contacto la usa."
-        confirmLabel="Eliminar"
-        onConfirm={() => deleting && deleteMutation.mutate(deleting.id)}
-      />
+      {canWrite && (
+        <ConfirmDialog
+          open={deleting !== null}
+          onClose={() => setDeleting(null)}
+          title={`Eliminar ${deleting?.name ?? ""}`}
+          description="Solo si ninguna oportunidad la usa."
+          confirmLabel="Eliminar"
+          onConfirm={() => deleting && deleteMutation.mutate(deleting.id)}
+        />
+      )}
     </div>
   )
 }

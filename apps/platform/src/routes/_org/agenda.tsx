@@ -10,6 +10,7 @@ import {
   formatDayShort,
   hourLabel,
   minutesToInstant,
+  PageHeader,
   PageShell,
   ResourceSelect,
   type ResourceSelectOption,
@@ -33,9 +34,13 @@ import type {
   AgendaResources,
   AgendaServiceOption,
   AppointmentStatus,
+  AvailableSlot,
+  AvailableSlotsResult,
+  WaitlistEntry,
+  WaitlistPriority,
 } from "../../lib/agenda"
 import { ApiError, apiFetch } from "../../lib/api"
-
+import { usePermission } from "../../lib/crm"
 export const Route = createFileRoute("/_org/agenda")({
   component: AgendaPage,
 })
@@ -315,84 +320,75 @@ function AgendaPage() {
 
   return (
     <PageShell fill className="gap-3 text-foreground">
-      <header className="min-w-0 shrink-0 rounded-xl border bg-background">
-        <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 p-3 sm:p-4 lg:grid-cols-[minmax(0,1fr)_minmax(240px,360px)_auto]">
-          <div className="min-w-0">
-            <h1 className="truncate text-lg font-semibold">Agenda</h1>
-            <p className="truncate text-sm text-muted-foreground">
-              {resources
-                ? `${resources.branchName} · ${formatDayShort(day)}`
-                : "Cargando recursos…"}
-            </p>
-          </div>
-          <div className="col-span-2 row-start-2 lg:col-span-1 lg:col-start-2 lg:row-start-1" />
-          <Button
-            className="col-start-2 row-start-1 lg:col-start-3"
-            aria-label="Nueva cita"
-            onClick={() => setEditor({})}
-          >
+      <PageHeader
+        title="Agenda"
+        subtitle={
+          resources ? `${resources.branchName} · ${formatDayShort(day)}` : "Cargando recursos…"
+        }
+        actions={
+          <Button aria-label="Nueva cita" onClick={() => setEditor({})}>
             <Plus className="size-4" />
             <span className="hidden sm:inline">Nueva cita</span>
           </Button>
-        </div>
-        <div className="flex flex-wrap items-center gap-2 border-t px-3 py-2 sm:px-4">
-          <div className="flex items-center gap-1">
-            <Button
-              variant="outline"
-              size="icon-sm"
-              aria-label="Día anterior"
-              onClick={() => navigate(addDays(day, -1))}
-            >
-              <ChevronLeft />
-            </Button>
-            <Button variant="outline" size="sm" onClick={() => navigate(today)}>
-              Hoy
-            </Button>
-            <Button
-              variant="outline"
-              size="icon-sm"
-              aria-label="Día siguiente"
-              onClick={() => navigate(addDays(day, 1))}
-            >
-              <ChevronRight />
-            </Button>
-          </div>
-          <input
-            className={SELECT}
-            type="date"
-            aria-label="Ir a fecha"
-            value={day}
-            onChange={(event) => navigate(event.target.value)}
-          />
-          <select
-            aria-label="Ver por"
-            className={SELECT}
-            value={group}
-            onChange={(event) => setParams({ group: event.target.value })}
+        }
+      />
+      <div className="flex min-w-0 shrink-0 flex-wrap items-center gap-2 rounded-xl border bg-background px-3 py-2 sm:px-4">
+        <div className="flex items-center gap-1">
+          <Button
+            variant="outline"
+            size="icon-sm"
+            aria-label="Día anterior"
+            onClick={() => navigate(addDays(day, -1))}
           >
-            <option value="professionals">Por profesional</option>
-            <option value="chairs">Por sillón</option>
-          </select>
-          <select
-            aria-label="Escala"
-            className={SELECT}
-            value={zoom}
-            onChange={(event) => setZoom(Number(event.target.value))}
+            <ChevronLeft />
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => navigate(today)}>
+            Hoy
+          </Button>
+          <Button
+            variant="outline"
+            size="icon-sm"
+            aria-label="Día siguiente"
+            onClick={() => navigate(addDays(day, 1))}
           >
-            <option value={90}>Escala compacta</option>
-            <option value={150}>Escala normal</option>
-            <option value={240}>Escala ampliada</option>
-          </select>
-          <FilterBar
-            filters={filters}
-            sortOptions={[]}
-            showSearch={false}
-            resetKeys={[...FILTER_KEYS]}
-            inlineFrom="lg"
-            className="ml-auto min-w-0 bg-transparent p-0 lg:min-w-[480px] lg:flex-1"
-          />
+            <ChevronRight />
+          </Button>
         </div>
-      </header>
+        <input
+          className={SELECT}
+          type="date"
+          aria-label="Ir a fecha"
+          value={day}
+          onChange={(event) => navigate(event.target.value)}
+        />
+        <select
+          aria-label="Ver por"
+          className={SELECT}
+          value={group}
+          onChange={(event) => setParams({ group: event.target.value })}
+        >
+          <option value="professionals">Por profesional</option>
+          <option value="chairs">Por sillón</option>
+        </select>
+        <select
+          aria-label="Escala"
+          className={SELECT}
+          value={zoom}
+          onChange={(event) => setZoom(Number(event.target.value))}
+        >
+          <option value={90}>Escala compacta</option>
+          <option value={150}>Escala normal</option>
+          <option value={240}>Escala ampliada</option>
+        </select>
+        <FilterBar
+          filters={filters}
+          sortOptions={[]}
+          showSearch={false}
+          resetKeys={[...FILTER_KEYS]}
+          inlineFrom="lg"
+          className="ml-auto min-w-0 bg-transparent p-0 lg:min-w-[480px] lg:flex-1"
+        />
+      </div>
       <main className="flex min-h-0 min-w-0 flex-1 flex-col gap-2">
         {!resources ? (
           <div className="grid min-h-0 flex-1 place-content-center rounded-xl border border-dashed p-6 text-sm text-muted-foreground">
@@ -478,6 +474,17 @@ function AgendaPage() {
           </div>
         )}
       </main>
+      {resources && branchId && (
+        <WaitlistPanel
+          branchId={branchId}
+          timeZone={TZ}
+          resources={resources}
+          day={day}
+          onChanged={async () => {
+            await invalidate()
+          }}
+        />
+      )}
       <span role="status" className="sr-only">
         {message}
       </span>
@@ -788,6 +795,426 @@ function AppointmentEditor({
             </div>
           </FieldSet>
         )}
+      </div>
+    </FormDrawer>
+  )
+}
+
+const PRIORITY_OPTIONS: WaitlistPriority[] = ["alta", "normal", "baja"]
+
+/** Lista de espera de la sede: registro, ofrecimiento de huecos y reserva. */
+function WaitlistPanel({
+  branchId,
+  timeZone,
+  resources,
+  day,
+  onChanged,
+}: {
+  branchId: string
+  timeZone: string
+  resources: AgendaResources
+  day: string
+  onChanged: () => Promise<void>
+}) {
+  const canOperate = usePermission("appointments.write")
+  const [open, setOpen] = React.useState(false)
+  const [offerFor, setOfferFor] = React.useState<WaitlistEntry | null>(null)
+  const [formOpen, setFormOpen] = React.useState(false)
+  const waitlistQuery = useQuery({
+    queryKey: ["agenda-waitlist", branchId],
+    queryFn: () =>
+      apiFetch<{ data: WaitlistEntry[] }>(
+        `/api/agenda/waitlist?branchId=${branchId}&status=en_espera,ofrecida`,
+      ),
+  })
+  const entries = waitlistQuery.data?.data ?? []
+  return (
+    <section className="shrink-0 rounded-xl border bg-background">
+      <div className="flex flex-wrap items-center gap-2 p-3 sm:px-4">
+        <h2 className="font-medium">Lista de espera</h2>
+        <span className="text-xs text-muted-foreground">
+          {entries.length === 0 ? "Sin pendientes" : `${entries.length} en espera`}
+        </span>
+        <div className="ml-auto flex items-center gap-2">
+          {canOperate && (
+            <Button variant="outline" size="sm" onClick={() => setFormOpen(true)}>
+              Añadir
+            </Button>
+          )}
+          <Button variant="ghost" size="sm" onClick={() => setOpen((value) => !value)}>
+            {open ? "Ocultar" : "Ver"}
+          </Button>
+        </div>
+      </div>
+      {open && (
+        <ul className="grid gap-2 border-t p-3 sm:px-4">
+          {entries.length === 0 && (
+            <li className="text-sm text-muted-foreground">No hay pacientes en espera.</li>
+          )}
+          {entries.map((entry) => (
+            <WaitlistRow
+              key={entry.id}
+              entry={entry}
+              timeZone={timeZone}
+              canOperate={canOperate}
+              onOffer={() => setOfferFor(entry)}
+              onChanged={async () => {
+                await waitlistQuery.refetch()
+                await onChanged()
+              }}
+            />
+          ))}
+        </ul>
+      )}
+      {formOpen && (
+        <WaitlistForm
+          branchId={branchId}
+          resources={resources}
+          onClose={() => setFormOpen(false)}
+          onSaved={async () => {
+            setFormOpen(false)
+            await waitlistQuery.refetch()
+          }}
+        />
+      )}
+      {offerFor && (
+        <SlotOfferPicker
+          entry={offerFor}
+          branchId={branchId}
+          timeZone={timeZone}
+          day={day}
+          professionals={resources.professionals}
+          onClose={() => setOfferFor(null)}
+          onSaved={async () => {
+            setOfferFor(null)
+            await waitlistQuery.refetch()
+            await onChanged()
+          }}
+        />
+      )}
+    </section>
+  )
+}
+
+function WaitlistRow({
+  entry,
+  timeZone,
+  canOperate,
+  onOffer,
+  onChanged,
+}: {
+  entry: WaitlistEntry
+  timeZone: string
+  canOperate: boolean
+  onOffer: () => void
+  onChanged: () => Promise<void>
+}) {
+  const [error, setError] = React.useState("")
+  const run = useMutation({
+    mutationFn: (action: "book" | "cancel") =>
+      apiFetch(`/api/agenda/waitlist/${entry.id}/${action}`, { method: "POST", body: "{}" }),
+    onSuccess: async (_data, action) => {
+      toast.success(action === "book" ? "Cita confirmada." : "Espera cancelada.")
+      await onChanged()
+    },
+    onError: (cause) => setError(errorMessage(cause)),
+  })
+  const subject = entry.patientName ?? entry.contactName ?? "Sin nombre"
+  return (
+    <li className="grid gap-1 rounded-lg border p-2 text-sm">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="font-medium">{subject}</span>
+        <span className="text-xs text-muted-foreground">Prioridad {entry.priority}</span>
+        <span className="text-xs text-muted-foreground">
+          {entry.status === "ofrecida" ? "Hueco ofrecido" : "En espera"}
+        </span>
+        {entry.serviceName && <span className="text-xs">{entry.serviceName}</span>}
+        {entry.dentistName && <span className="text-xs text-muted-foreground">{entry.dentistName}</span>}
+      </div>
+      {entry.notes && <p className="text-xs text-muted-foreground">{entry.notes}</p>}
+      {entry.offeredStartsAt && entry.offeredEndsAt && (
+        <p className="text-xs">
+          Ofrecido:{" "}
+          {new Date(entry.offeredStartsAt).toLocaleString("es-PE", { timeZone })} →{" "}
+          {new Date(entry.offeredEndsAt).toLocaleTimeString("es-PE", { timeZone })}
+        </p>
+      )}
+      {canOperate && (
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="outline" size="sm" onClick={onOffer}>
+            Ofrecer hueco
+          </Button>
+          {entry.status === "ofrecida" && (
+            <Button variant="outline" size="sm" onClick={() => run.mutate("book")}>
+              Confirmar reserva
+            </Button>
+          )}
+          <Button variant="ghost" size="sm" onClick={() => run.mutate("cancel")}>
+            Cancelar espera
+          </Button>
+        </div>
+      )}
+      {error && <p className="text-xs text-destructive">{error}</p>}
+    </li>
+  )
+}
+
+function WaitlistForm({
+  branchId,
+  resources,
+  onClose,
+  onSaved,
+}: {
+  branchId: string
+  resources: AgendaResources
+  onClose: () => void
+  onSaved: () => Promise<void>
+}) {
+  const [patientId, setPatientId] = React.useState("")
+  const [patientQuery, setPatientQuery] = React.useState("")
+  const [dentistUserId, setDentistUserId] = React.useState("")
+  const [serviceId, setServiceId] = React.useState("")
+  const [priority, setPriority] = React.useState<WaitlistPriority>("normal")
+  const [notes, setNotes] = React.useState("")
+  const [error, setError] = React.useState("")
+  const patientsQuery = useQuery({
+    queryKey: ["patients", "waitlist-picker", patientQuery],
+    queryFn: () =>
+      apiFetch<{ data: { id: string; displayName: string }[] }>(
+        `/api/patients?q=${encodeURIComponent(patientQuery)}&limit=20`,
+      ),
+    placeholderData: (previous) => previous,
+  })
+  const servicesQuery = useQuery({
+    queryKey: ["services", "waitlist-picker"],
+    queryFn: () => apiFetch<{ data: AgendaServiceOption[] }>("/api/services?limit=100"),
+  })
+  const save = useMutation({
+    mutationFn: async () => {
+      if (!patientId) throw new Error("Elige un paciente.")
+      await apiFetch("/api/agenda/waitlist", {
+        method: "POST",
+        body: JSON.stringify({
+          branchId,
+          patientId,
+          dentistUserId: dentistUserId || null,
+          serviceId: serviceId || null,
+          priority,
+          notes: notes.trim() || undefined,
+        }),
+      })
+    },
+    onSuccess: async () => {
+      toast.success("Espera registrada.")
+      await onSaved()
+    },
+    onError: (cause) => setError(errorMessage(cause)),
+  })
+  return (
+    <FormDrawer
+      open
+      title="Añadir a lista de espera"
+      description="Registra un paciente pendiente de hueco en esta sede."
+      onClose={onClose}
+      onSubmit={(event) => {
+        event.preventDefault()
+        setError("")
+        save.mutate()
+      }}
+      isSubmitting={save.isPending}
+      isDirty
+      error={error || null}
+      submitLabel="Registrar espera"
+    >
+      <div className="grid gap-4">
+        <ResourceSelect
+          id="espera-paciente"
+          label="Paciente"
+          options={(patientsQuery.data?.data ?? []).map((patient) => ({
+            id: patient.id,
+            label: patient.displayName,
+          }))}
+          value={patientId}
+          onChange={setPatientId}
+          onQueryChange={setPatientQuery}
+        />
+        <ResourceSelect
+          id="espera-profesional"
+          label="Profesional preferido (opcional)"
+          options={[{ id: "", label: "Sin preferencia" }].concat(
+            resources.professionals.map((item) => ({ id: item.id, label: item.label })),
+          )}
+          value={dentistUserId}
+          onChange={setDentistUserId}
+        />
+        <ResourceSelect
+          id="espera-servicio"
+          label="Servicio (opcional)"
+          options={[{ id: "", label: "Sin servicio" }].concat(
+            (servicesQuery.data?.data ?? []).map((service) => ({ id: service.id, label: service.name })),
+          )}
+          value={serviceId}
+          onChange={setServiceId}
+        />
+        <div className="grid gap-2">
+          <FieldLabel htmlFor="espera-prioridad">Prioridad</FieldLabel>
+          <select
+            id="espera-prioridad"
+            className="h-9 rounded-md border bg-background px-2 text-sm"
+            value={priority}
+            onChange={(event) => setPriority(event.target.value as WaitlistPriority)}
+          >
+            {PRIORITY_OPTIONS.map((option) => (
+              <option key={option} value={option}>
+                {option === "alta" ? "Alta" : option === "baja" ? "Baja" : "Normal"}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="grid gap-2">
+          <FieldLabel htmlFor="espera-notas">Notas (opcional)</FieldLabel>
+          <Input
+            id="espera-notas"
+            value={notes}
+            maxLength={500}
+            onChange={(event) => setNotes(event.target.value)}
+          />
+        </div>
+      </div>
+    </FormDrawer>
+  )
+}
+
+/** Busca huecos reales y ofrece uno a la espera con el mismo servicio. */
+function SlotOfferPicker({
+  entry,
+  branchId,
+  timeZone,
+  day,
+  professionals,
+  onClose,
+  onSaved,
+}: {
+  entry: WaitlistEntry
+  branchId: string
+  timeZone: string
+  day: string
+  professionals: { id: string; label: string }[]
+  onClose: () => void
+  onSaved: () => Promise<void>
+}) {
+  const [date, setDate] = React.useState(day)
+  const [dentistUserId, setDentistUserId] = React.useState(entry.dentistUserId ?? "")
+  const [error, setError] = React.useState("")
+  const range = React.useMemo(() => {
+    const from = minutesToInstant(date, 0, timeZone)
+    const to = minutesToInstant(date, 24 * 60, timeZone)
+    return { from, to }
+  }, [date, timeZone])
+  const slotsQuery = useQuery({
+    queryKey: ["agenda-slots", branchId, date, dentistUserId, entry.serviceId],
+    queryFn: () => {
+      const params = new URLSearchParams({
+        branchId,
+        from: range.from,
+        to: range.to,
+      })
+      if (dentistUserId) params.set("dentistUserId", dentistUserId)
+      if (entry.serviceId) params.set("serviceId", entry.serviceId)
+      return apiFetch<{ data: AvailableSlotsResult }>(`/api/agenda/slots?${params.toString()}`)
+    },
+  })
+  const result = slotsQuery.data?.data
+  const slots = result?.slots ?? []
+  const offer = useMutation({
+    mutationFn: (slot: AvailableSlot) =>
+      apiFetch(`/api/agenda/waitlist/${entry.id}/offer`, {
+        method: "POST",
+        body: JSON.stringify({
+          startsAt: slot.startsAt,
+          endsAt: slot.endsAt,
+          dentistUserId: slot.dentistUserId,
+          chairId: slot.chairId,
+        }),
+      }),
+    onSuccess: async () => {
+      toast.success("Hueco ofrecido.")
+      await onSaved()
+    },
+    onError: (cause) => setError(errorMessage(cause)),
+  })
+  return (
+    <FormDrawer
+      open
+      title="Ofrecer hueco"
+      description={`Huecos reales para ${entry.patientName ?? entry.contactName ?? "la espera"}${entry.serviceName ? ` · ${entry.serviceName}` : ""}.`}
+      onClose={onClose}
+      onSubmit={(event) => event.preventDefault()}
+      isSubmitting={offer.isPending}
+      isDirty={false}
+      error={error || null}
+      submitLabel="Cerrar"
+    >
+      <div className="grid gap-3">
+        <div className="flex flex-wrap gap-2">
+          <Input
+            aria-label="Fecha de búsqueda"
+            type="date"
+            className="h-8 w-40"
+            value={date}
+            onChange={(event) => setDate(event.target.value)}
+          />
+          <select
+            aria-label="Profesional"
+            className={SELECT}
+            value={dentistUserId}
+            onChange={(event) => setDentistUserId(event.target.value)}
+          >
+            <option value="">Todos</option>
+            {professionals.map((item) => (
+              <option key={item.id} value={item.id}>
+                {item.label}
+              </option>
+            ))}
+          </select>
+        </div>
+        {slotsQuery.isLoading && <p className="text-sm text-muted-foreground">Buscando huecos…</p>}
+        {!slotsQuery.isLoading && slots.length === 0 && (
+          <p className="text-sm text-muted-foreground">
+            Sin huecos ese día. El profesional necesita horario configurado y agenda libre.
+          </p>
+        )}
+        {result?.truncated && (
+          <p className="text-sm text-muted-foreground">
+            Se muestran los primeros huecos; acota la fecha para ver más.
+          </p>
+        )}
+        <ul className="grid gap-2">
+          {slots.map((slot) => (
+            <li
+              key={`${slot.startsAt}:${slot.dentistUserId}:${slot.chairId}`}
+              className="flex flex-wrap items-center gap-2 rounded-lg border p-2 text-sm"
+            >
+              <span className="font-medium">
+                {new Date(slot.startsAt).toLocaleTimeString("es-PE", { timeZone })} →{" "}
+                {new Date(slot.endsAt).toLocaleTimeString("es-PE", { timeZone })}
+              </span>
+              <span className="text-muted-foreground">{slot.dentistName}</span>
+              {slot.chairName && <span className="text-muted-foreground">{slot.chairName}</span>}
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={offer.isPending}
+                onClick={() => {
+                  setError("")
+                  offer.mutate(slot)
+                }}
+              >
+                Ofrecer
+              </Button>
+            </li>
+          ))}
+        </ul>
       </div>
     </FormDrawer>
   )

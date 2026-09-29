@@ -3,7 +3,7 @@ import { FormDrawer } from "@odentia/ui-patterns"
 import { useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
-import { useCanWrite } from "../../lib/crm"
+import { usePermission } from "../../lib/crm"
 import type { EncounterDetail } from "../../lib/patients"
 import { Cie10Search } from "./cie10-search"
 
@@ -41,7 +41,7 @@ export function EncounterDiagnoses({
   onChanged: () => Promise<void>
   onPendingChange: (pending: boolean) => void
 }): React.JSX.Element {
-  const canWrite = useCanWrite()
+  const canWrite = usePermission("clinical.write")
   const queryClient = useQueryClient()
   const [open, setOpen] = useState(false)
   const [code, setCode] = useState("")

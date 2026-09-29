@@ -36,7 +36,7 @@ import {
   useRef,
   useState,
 } from "react"
-import { useCanWrite } from "../lib/crm"
+import { usePermission } from "../lib/crm"
 import {
   type OdontogramEntry,
   type OdontogramState,
@@ -88,7 +88,7 @@ export function OdontogramStudio({
   beforeWrite?: () => Promise<void>
   onPendingChange?: (pending: boolean) => void
 }) {
-  const canWrite = useCanWrite()
+  const canWrite = usePermission("clinical.write")
   const queryClient = useQueryClient()
   const id = useId()
   const { ref: containerRef, wide } = useContainerWide()

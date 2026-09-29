@@ -2,7 +2,7 @@ import { Avatar, AvatarFallback, AvatarImage, Button } from "@odentia/ui"
 import { useQuery } from "@tanstack/react-query"
 import { useState } from "react"
 import { apiFetch } from "../../lib/api"
-import { useCanWrite } from "../../lib/crm"
+import { usePermission } from "../../lib/crm"
 import { AvatarDrawer } from "./avatar-drawer"
 
 export function PatientAvatar({
@@ -16,12 +16,13 @@ export function PatientAvatar({
   storageKey?: string | null
   size?: number
 }) {
-  const canWrite = useCanWrite()
+  const canWrite = usePermission("patients.write")
+  const canRead = usePermission("patients.read")
   const [open, setOpen] = useState(false)
   const photo = useQuery({
     queryKey: ["patient-avatar", patientId],
     queryFn: () => apiFetch<{ data: { url: string } }>(`/api/patients/${patientId}/avatar-url`),
-    enabled: Boolean(storageKey),
+    enabled: canRead && Boolean(storageKey),
     staleTime: 10 * 60_000,
     retry: false,
   })

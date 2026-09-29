@@ -37,7 +37,7 @@ import { createFileRoute, getRouteApi } from "@tanstack/react-router"
 import { useEffect, useState } from "react"
 import { PatientRegistrationForm } from "../../components/patient/patient-registration-form"
 import { ApiError } from "../../lib/api"
-import { useCanWrite } from "../../lib/crm"
+import { usePermission } from "../../lib/crm"
 import { orgSlugFromHostname, requestHostname, tenantUrl } from "../../lib/host"
 import { useOrgProfile } from "../../lib/org"
 import { fetchRegistrationConfig, saveRegistrationConfig } from "../../lib/patient-registration"
@@ -76,7 +76,7 @@ const PREVIEW_VALUES: Partial<RegistrationAnswers> = {
 
 function PatientRegistrationSettingsPage() {
   const queryClient = useQueryClient()
-  const canWrite = useCanWrite()
+  const canWrite = usePermission("settings.write")
   // El país del perfil define la máscara de los teléfonos de la vista previa.
   const profile = useOrgProfile()
   const countryCode = normalizeCountry(profile.data?.countryCode)
@@ -366,7 +366,7 @@ function PatientRegistrationSettingsPage() {
             </SubmitButton>
             {!canWrite ? (
               <p className="text-xs text-muted-foreground">
-                Solo owner o admin pueden modificar esta configuración.
+                Necesitas permiso de configuración para modificar esta pantalla.
               </p>
             ) : null}
           </div>

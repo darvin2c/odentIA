@@ -174,13 +174,16 @@ it("pacientes: POST 201 y GET 200", async () => {
   })
 })
 
-it("cross-org: paciente de B responde 404 en A", async () => {
+it("cross-org: paciente de B responde 404 en A con rol legítimo; member 403", async () => {
   const other = await withOrgContext(appDb, "org_b", (tx) =>
     createPatient(tx, "org_b", "u-1", { displayName: "Paciente B" }),
   )
-  const app = buildApp("member")
-  const res = await app.request(`/patients/${other.id}`, { method: "GET" })
+  const reception = buildApp("reception")
+  const res = await reception.request(`/patients/${other.id}`, { method: "GET" })
   expect(res.status).toBe(404)
+  const member = buildApp("member")
+  const denied = await member.request(`/patients/${other.id}`, { method: "GET" })
+  expect(denied.status).toBe(403)
 })
 
 it("POST /:id/notes como admin responde 201; como member 403 FORBIDDEN", async () => {
@@ -201,13 +204,16 @@ it("POST /:id/notes como admin responde 201; como member 403 FORBIDDEN", async (
   expect(((await denied.json()) as { error: { code: string } }).error.code).toBe("FORBIDDEN")
 })
 
-it("GET /cie10?q=caries devuelve resultados", async () => {
-  const app = buildApp("member")
-  const res = await app.request("/cie10?q=caries", { method: "GET" })
+it("GET /cie10?q=caries devuelve resultados con rol clínico; member 403", async () => {
+  const dentist = buildApp("dentist")
+  const res = await dentist.request("/cie10?q=caries", { method: "GET" })
   expect(res.status).toBe(200)
   const body = (await res.json()) as { data: { code: string }[] }
   expect(body.data.length).toBeGreaterThan(0)
   expect(body.data[0]!.code).toBe("K02.1")
+  const member = buildApp("member")
+  const denied = await member.request("/cie10?q=caries", { method: "GET" })
+  expect(denied.status).toBe(403)
 })
 
 it("salud PUT guarda el agregado; claves viejas de entrevista y endpoints retirados responden 400/404", async () => {

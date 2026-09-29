@@ -5,6 +5,8 @@ import { and, eq } from "drizzle-orm"
 import type { Context, Next } from "hono"
 import { errorBody } from "./error.js"
 
+export { canAccess, canAccessAny, type OrgRole, type Permission } from "@odentia/auth/permissions"
+
 export interface OrgContext {
   orgId: string
   userId: string
@@ -87,8 +89,4 @@ export function orgContextOf(c: Context): OrgContext {
     userId: c.get("userId") as string,
     memberRole: c.get("memberRole") as string,
   }
-}
-
-export function canWrite(role: string): boolean {
-  return role === "owner" || role === "admin"
 }

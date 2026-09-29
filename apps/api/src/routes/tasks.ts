@@ -2,7 +2,8 @@ import { withOrgContext } from "@odentia/db"
 import { createTask, listTasks, updateTask } from "@odentia/services"
 import { Hono } from "hono"
 import { z } from "zod"
-import { orgContextOf } from "../lib/context.js"
+import { canAccess, orgContextOf } from "../lib/context.js"
+import { errorBody } from "../lib/error.js"
 import { type CrmDeps, runService, validationError } from "./helpers.js"
 
 const listQuery = z.object({
@@ -27,6 +28,21 @@ const patchInput = z.object({
 
 export function createTasksRoute(deps: CrmDeps) {
   const app = new Hono()
+  app.use("*", async (c, next) => {
+    const { memberRole } = orgContextOf(c)
+    const write = !["GET", "HEAD", "OPTIONS"].includes(c.req.method)
+    if (!canAccess(memberRole, write ? "tasks.write" : "tasks.read")) {
+      return c.json(
+        errorBody(
+          c,
+          "FORBIDDEN",
+          write ? "No tienes permiso para gestionar tareas" : "No tienes permiso para ver tareas",
+        ),
+        403,
+      )
+    }
+    await next()
+  })
 
   app.get("/", async (c) => {
     const { orgId } = orgContextOf(c)

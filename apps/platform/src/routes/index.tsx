@@ -8,6 +8,6 @@ export const Route = createFileRoute("/")({
       throw redirect({ href: panelUrl("/") })
     }
     await requireSession(location)
-    throw redirect({ to: "/branches" })
+    throw redirect({ to: "/home" })
   },
 })

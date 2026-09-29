@@ -25,7 +25,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useId, useRef, useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
 import { fetchFollowUps, fetchPatientAccount, fetchPrescriptions } from "../../lib/clinical-journey"
-import { useCanWrite } from "../../lib/crm"
+import { usePermission } from "../../lib/crm"
 import {
   type Encounter,
   type EncounterDetail,
@@ -250,11 +250,14 @@ export function EncounterEditor({
   const encounter = detail.encounter
   const encounterId = encounter.id
   const queryClient = useQueryClient()
-  const canWrite = useCanWrite()
+  const canWrite = usePermission("clinical.write")
+  const canRead = usePermission("clinical.read")
+  const canReadFinance = usePermission("finance.read")
   const uid = useId()
   const accountQuery = useQuery({
     queryKey: ["account", patientId],
     queryFn: () => fetchPatientAccount(patientId),
+    enabled: canReadFinance,
   })
 
   const [reason, setReason] = useState(encounter.reason ?? "")
@@ -320,20 +323,24 @@ export function EncounterEditor({
   const dentalQuery = useQuery({
     queryKey: ["odontogram", patientId],
     queryFn: () => apiFetch<{ data: OdontogramState }>(`/api/patients/${patientId}/odontogram`),
+    enabled: canRead,
   })
   const branchesQuery = useQuery({
     queryKey: ["branches"],
     queryFn: () => apiFetch<{ data: Array<{ id: string; name: string }> }>("/api/branches"),
+    enabled: canRead,
   })
   // Recetas y controles no vienen en el detalle: se cuentan por atención para
   // saber si el bloque ya tiene contenido y debe seguir visible.
   const prescriptionsQuery = useQuery({
     queryKey: ["prescriptions", patientId],
     queryFn: () => fetchPrescriptions(patientId),
+    enabled: canRead,
   })
   const followUpsQuery = useQuery({
     queryKey: ["follow-ups", patientId],
     queryFn: () => fetchFollowUps(patientId),
+    enabled: canRead,
   })
 
   // Los textos pertenecen al editor. Solo los registros vinculados pueden

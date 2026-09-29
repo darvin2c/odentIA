@@ -1,4 +1,4 @@
-import { type ChannelProvider, channelAdapters } from "@odentia/channels"
+import { type ChannelProvider, channelAdapters, verifyMetaChallenge } from "@odentia/channels"
 import { type Db, sendInboundMessage, withOrgContext } from "@odentia/db"
 import { channelConnection, inboundEvent } from "@odentia/db/schema/crm"
 import { applyStatus, decryptConfig } from "@odentia/services"
@@ -16,7 +16,15 @@ export interface WebhookDeps {
   secretsKey: Buffer
 }
 
-const providerParam = z.enum(["whatsapp_cloud_api", "telegram_bot_api"])
+const providerParam = z.enum([
+  "whatsapp_cloud_api",
+  "telegram_bot_api",
+  "messenger",
+  "instagram",
+  "gmail",
+  "microsoft365",
+  "web_chat",
+])
 
 /**
  * Webhooks de proveedor. Sin sesión ni contexto de org (llama el proveedor).
@@ -26,12 +34,16 @@ const providerParam = z.enum(["whatsapp_cloud_api", "telegram_bot_api"])
 export function createWebhooksRoute(deps: WebhookDeps) {
   const app = new Hono()
 
-  // Reto de verificación de WhatsApp (Meta): hub.verify_token debe ser el
-  // webhookSecret generado al crear la conexión.
+  // Reto de verificación de Meta (WhatsApp/Messenger/Instagram):
+  // hub.verify_token debe ser el webhookSecret generado al crear la conexión.
   app.get("/channels/:provider/:connectionId", async (c) => {
     const parsed = providerParam.safeParse(c.req.param("provider"))
     if (!parsed.success) return c.json(errorBody(c, "VALIDATION", "Proveedor inválido"), 400)
-    if (parsed.data !== "whatsapp_cloud_api") {
+    if (
+      parsed.data !== "whatsapp_cloud_api" &&
+      parsed.data !== "messenger" &&
+      parsed.data !== "instagram"
+    ) {
       return c.json(errorBody(c, "NOT_FOUND", "Recurso no encontrado"), 404)
     }
     const [connection] = await deps.ownerDb
@@ -39,19 +51,19 @@ export function createWebhooksRoute(deps: WebhookDeps) {
       .from(channelConnection)
       .where(eq(channelConnection.id, c.req.param("connectionId")))
       .limit(1)
-    const mode = c.req.query("hub.mode")
-    const token = c.req.query("hub.verify_token")
-    const challenge = c.req.query("hub.challenge")
-    if (
-      mode === "subscribe" &&
-      token &&
-      connection &&
-      token === connection.webhookSecret &&
-      challenge
-    ) {
-      return c.text(challenge, 200)
+    if (!connection) return c.json(errorBody(c, "FORBIDDEN", "Verificación inválida"), 403)
+    const challenge = verifyMetaChallenge(
+      {
+        mode: c.req.query("hub.mode") ?? null,
+        token: c.req.query("hub.verify_token") ?? null,
+        challenge: c.req.query("hub.challenge") ?? null,
+      },
+      connection.webhookSecret,
+    )
+    if (challenge === null) {
+      return c.json(errorBody(c, "FORBIDDEN", "Verificación inválida"), 403)
     }
-    return c.json(errorBody(c, "FORBIDDEN", "Verificación inválida"), 403)
+    return c.text(challenge, 200)
   })
 
   app.post("/channels/:provider/:connectionId", async (c) => {
@@ -60,6 +72,9 @@ export function createWebhooksRoute(deps: WebhookDeps) {
     if (!parsed.success) return c.json(errorBody(c, "VALIDATION", "Proveedor inválido"), 400)
     const provider: ChannelProvider = parsed.data
     const adapter = channelAdapters[provider]
+    // Proveedor válido pero sin adaptador registrado (slice pendiente):
+    // 400 para distinguirlo del 200 de dedupe/desactivada.
+    if (!adapter) return c.json(errorBody(c, "VALIDATION", "Proveedor no registrado"), 400)
 
     const [connection] = await deps.ownerDb
       .select()

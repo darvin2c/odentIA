@@ -17,7 +17,7 @@ import { FormDrawer } from "@odentia/ui-patterns"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useId, useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
-import { useCanWrite } from "../../lib/crm"
+import { usePermission } from "../../lib/crm"
 import { type EncounterDetail, type PlanItem, planStatusLabel } from "../../lib/patients"
 import { formatMoney } from "../../lib/services"
 import { Cie10Search } from "./cie10-search"
@@ -71,7 +71,8 @@ export function EncounterProcedures({
   onChanged: () => Promise<void>
   onPendingChange: (pending: boolean) => void
 }): React.JSX.Element {
-  const canWrite = useCanWrite()
+  const canWrite = usePermission("clinical.write")
+  const canRead = usePermission("clinical.read")
   const queryClient = useQueryClient()
   const uid = useId()
   const [open, setOpen] = useState(false)
@@ -92,7 +93,7 @@ export function EncounterProcedures({
   const planQuery = useQuery({
     queryKey: ["plan", patientId],
     queryFn: () => apiFetch<{ data: PlanItem[] }>(`/api/patients/${patientId}/plan`),
-    enabled: canWrite && !finalized,
+    enabled: canRead && canWrite && !finalized,
   })
   const allItems = planQuery.data?.data ?? []
   const openItems = allItems.filter(

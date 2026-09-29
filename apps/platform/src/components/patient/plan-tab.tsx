@@ -37,7 +37,7 @@ import {
   mutationMessage as journeyMessage,
   setItemAlternativeApi,
 } from "../../lib/clinical-journey"
-import { useCanWrite } from "../../lib/crm"
+import { usePermission } from "../../lib/crm"
 import type { PatientFull, PlanItem, TreatmentPlanWithStatus } from "../../lib/patients"
 import { formatMoney } from "../../lib/services"
 
@@ -99,7 +99,8 @@ export function PlanTab({
   initialBudgetId?: string
 }): React.JSX.Element {
   const queryClient = useQueryClient()
-  const canWrite = useCanWrite()
+  const canWrite = usePermission("clinical.write")
+  const canRead = usePermission("clinical.read")
   const uid = useId()
 
   const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null)
@@ -144,28 +145,32 @@ export function PlanTab({
   const plansQuery = useQuery({
     queryKey: ["treatment-plans", patientId],
     queryFn: () => fetchTreatmentPlans(patientId),
+    enabled: canRead,
   })
   const budgetsQuery = useQuery({
     queryKey: ["budgets", patientId],
     queryFn: () => fetchBudgets(patientId),
+    enabled: canRead,
   })
   const planDetailQuery = useQuery({
     queryKey: ["treatment-plan", patientId, selectedPlanId],
     queryFn: () => fetchTreatmentPlanDetail(patientId, selectedPlanId as string),
-    enabled: selectedPlanId != null,
+    enabled: canRead && selectedPlanId != null,
   })
   const patientQuery = useQuery({
     queryKey: ["patient", patientId],
     queryFn: () => apiFetch<{ data: PatientFull }>(`/api/patients/${patientId}`),
+    enabled: canRead,
   })
   const responsibilitiesQuery = useQuery({
     queryKey: ["responsibilities", patientId],
     queryFn: () => fetchResponsibilities(patientId),
+    enabled: canRead,
   })
   const budgetDetailQuery = useQuery({
     queryKey: ["budget", patientId, selectedBudgetId],
     queryFn: () => fetchBudgetDetail(patientId, selectedBudgetId as string),
-    enabled: selectedBudgetId != null,
+    enabled: canRead && selectedBudgetId != null,
   })
 
   const plans = useMemo(() => plansQuery.data?.data ?? [], [plansQuery.data])

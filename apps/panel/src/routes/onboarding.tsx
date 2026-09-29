@@ -207,7 +207,7 @@ function OnboardingPage() {
         toast.error(cause instanceof Error ? cause.message : "Error al guardar los datos.")
         return
       }
-      window.location.assign(tenantUrl(value.slug, "/branches"))
+      window.location.assign(tenantUrl(value.slug, "/home"))
     },
   })
 

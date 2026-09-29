@@ -17,7 +17,7 @@ import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-
 import { Library } from "lucide-react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { ApiError } from "../../lib/api"
-import { useCanWrite } from "../../lib/crm"
+import { usePermission } from "../../lib/crm"
 import {
   fetchServices,
   fetchTreatmentTemplates,
@@ -60,7 +60,12 @@ async function fetchAllOwnedTemplateIds(): Promise<Set<string>> {
  * y activarlo allí.
  */
 function BibliotecaPage() {
-  const canWrite = useCanWrite()
+  const canIncorporate = usePermission("settings.write")
+  const canViewLibrary =
+    canIncorporate ||
+    usePermission("clinical.read") ||
+    usePermission("appointments.read") ||
+    usePermission("finance.read")
   const queryClient = useQueryClient()
   const listSearch = useListSearch()
   const search = listSearch.get("q") ?? ""
@@ -86,6 +91,7 @@ function BibliotecaPage() {
 
   const libraryQuery = useQuery({
     queryKey: ["services", "biblioteca", search, specialtyFilter, cursor],
+    enabled: canViewLibrary,
     queryFn: () =>
       fetchTreatmentTemplates({
         q: search.trim() || undefined,
@@ -97,6 +103,7 @@ function BibliotecaPage() {
 
   const ownedQuery = useQuery({
     queryKey: ["services", "owned-templates"],
+    enabled: canViewLibrary,
     queryFn: fetchAllOwnedTemplateIds,
     staleTime: 60_000,
   })
@@ -174,7 +181,7 @@ function BibliotecaPage() {
         header: () => (
           <Checkbox
             checked={allSelected}
-            disabled={!canWrite || selectable.length === 0}
+            disabled={!canIncorporate || selectable.length === 0}
             onCheckedChange={(value) => togglePage(value === true)}
             aria-label="Seleccionar las prestaciones disponibles de esta página"
           />
@@ -184,7 +191,7 @@ function BibliotecaPage() {
           return (
             <Checkbox
               checked={checked.includes(row.original.id)}
-              disabled={!canWrite || incorporated}
+              disabled={!canIncorporate || incorporated}
               onCheckedChange={() => toggle(row.original.id)}
               aria-label={`Incorporar ${row.original.name}`}
             />
@@ -250,7 +257,7 @@ function BibliotecaPage() {
                 {
                   key: "incorporar",
                   label: "Incorporar a mi tarifario",
-                  disabled: incorporated || !canWrite || incorporateMutation.isPending,
+                  disabled: incorporated || !canIncorporate || incorporateMutation.isPending,
                   onSelect: () => incorporateMutation.mutate([row.original.id]),
                 },
               ]}
@@ -261,7 +268,7 @@ function BibliotecaPage() {
     ],
     [
       allSelected,
-      canWrite,
+      canIncorporate,
       checked,
       incorporateMutation.isPending,
       incorporateMutation.mutate,
@@ -287,6 +294,21 @@ function BibliotecaPage() {
   }
 
   const hasFilters = search.trim() !== "" || specialtyFilter !== "todas"
+
+  if (!canViewLibrary) {
+    return (
+      <div className="flex flex-col gap-4">
+        <PageHeader
+          title="Biblioteca de prestaciones"
+          subtitle="Catálogo oficial sin precios: lo que se incorpora se tarifa en el tarifario"
+        />
+        <EmptyState
+          title="Sin acceso"
+          description="Necesitas permiso clínico, de agenda, de caja o de configuración para ver la biblioteca."
+        />
+      </div>
+    )
+  }
 
   return (
     <div className="flex flex-col gap-4">
@@ -335,7 +357,7 @@ function BibliotecaPage() {
           Sin edición oficial importada: la biblioteca no muestra cobertura ni fuente.
         </p>
       ) : null}
-      {canWrite ? (
+      {canIncorporate ? (
         <div className="flex flex-col items-end gap-1">
           <SubmitButton
             type="button"

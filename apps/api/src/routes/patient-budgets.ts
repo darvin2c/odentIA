@@ -1,4 +1,6 @@
 import { withOrgContext } from "@odentia/db"
+import { Hono } from "hono"
+import { z } from "zod"
 import {
   cancelBudget,
   createBudget,
@@ -9,14 +11,16 @@ import {
   reviseBudget,
   updateBudgetDraft,
 } from "@odentia/services"
-import { Hono } from "hono"
-import { z } from "zod"
-import { orgContextOf } from "../lib/context.js"
+import { canAccess, orgContextOf } from "../lib/context.js"
+import { errorBody } from "../lib/error.js"
 import { type CrmDeps, runService, validationError } from "./helpers.js"
+import type { Context } from "hono"
 
+function forbid(c: Context) {
+  return c.json(errorBody(c, "FORBIDDEN", "No tienes acceso a finanzas"), 403)
+}
 /**
  * Documentos económicos de un plan clínico (propiedad BudgetData).
- * Main la monta bajo /patients, por eso los paths son /:id/...
  * - GET /:id/budgets?planId= → presupuestos con líneas snapshot + totalCents/acceptedCents
  * - POST /:id/budgets { planId, itemIds, title?, notes? } → 201 (rechaza cuerpo viejo sin plan)
  * - GET /:id/budgets/:budgetId → detalle con líneas + totales
@@ -56,6 +60,12 @@ const budgetRevisionInput = budgetCreateInput.omit({ planId: true }).extend({
 
 export function createPatientBudgetsRoute(deps: Pick<CrmDeps, "db">) {
   const app = new Hono()
+  // Documentos económicos: lectura finance.read, mutaciones finance.write.
+  app.use("*", async (c, next) => {
+    const { memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "finance.read")) return forbid(c)
+    await next()
+  })
   app.get("/:id/budgets", async (c) => {
     const { orgId } = orgContextOf(c)
     const patientId = c.req.param("id")
@@ -66,7 +76,8 @@ export function createPatientBudgetsRoute(deps: Pick<CrmDeps, "db">) {
   })
 
   app.post("/:id/budgets", async (c) => {
-    const { orgId, userId } = orgContextOf(c)
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "finance.write")) return forbid(c)
     const patientId = c.req.param("id")
     const parsed = budgetCreateInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
@@ -87,7 +98,8 @@ export function createPatientBudgetsRoute(deps: Pick<CrmDeps, "db">) {
   })
 
   app.patch("/:id/budgets/:budgetId", async (c) => {
-    const { orgId, userId } = orgContextOf(c)
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "finance.write")) return forbid(c)
     const parsed = budgetPatchInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () =>
@@ -105,7 +117,8 @@ export function createPatientBudgetsRoute(deps: Pick<CrmDeps, "db">) {
   })
 
   app.post("/:id/budgets/:budgetId/present", async (c) => {
-    const { orgId, userId } = orgContextOf(c)
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "finance.write")) return forbid(c)
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
         presentBudget(tx, orgId, userId, c.req.param("id"), c.req.param("budgetId")),
@@ -114,7 +127,8 @@ export function createPatientBudgetsRoute(deps: Pick<CrmDeps, "db">) {
   })
 
   app.post("/:id/budgets/:budgetId/decision", async (c) => {
-    const { orgId, userId } = orgContextOf(c)
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "finance.write")) return forbid(c)
     const parsed = budgetDecisionInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () =>
@@ -125,7 +139,8 @@ export function createPatientBudgetsRoute(deps: Pick<CrmDeps, "db">) {
   })
 
   app.post("/:id/budgets/:budgetId/cancel", async (c) => {
-    const { orgId, userId } = orgContextOf(c)
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "finance.write")) return forbid(c)
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
         cancelBudget(tx, orgId, userId, c.req.param("id"), c.req.param("budgetId")),
@@ -134,7 +149,8 @@ export function createPatientBudgetsRoute(deps: Pick<CrmDeps, "db">) {
   })
 
   app.post("/:id/budgets/:budgetId/revise", async c => {
-    const { orgId, userId } = orgContextOf(c)
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "finance.write")) return forbid(c)
     const parsed = budgetRevisionInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 201, () => withOrgContext(deps.db, orgId, tx =>

@@ -1,5 +1,6 @@
 import type { Db } from "@odentia/db"
-import { contact, pipeline, pipelineStage } from "@odentia/db/schema/crm"
+import { pipeline, pipelineStage } from "@odentia/db/schema/crm"
+import { opportunity } from "@odentia/db/schema/opportunities"
 import { and, asc, eq } from "drizzle-orm"
 import { isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
 
@@ -254,13 +255,17 @@ async function reassignPositions(tx: Db, orderedIds: string[]): Promise<void> {
 
 export async function deleteStage(tx: Db, orgId: string, stageId: string): Promise<void> {
   const stage = await requireStage(tx, orgId, stageId)
-  const [used] = await tx
-    .select({ id: contact.id })
-    .from(contact)
-    .where(and(eq(contact.stageId, stageId), eq(contact.organizationId, orgId)))
+  const [usedByOpp] = await tx
+    .select({ id: opportunity.id })
+    .from(opportunity)
+    .where(and(eq(opportunity.stageId, stageId), eq(opportunity.organizationId, orgId)))
     .limit(1)
-  if (used) {
-    throw new ServiceError("STAGE_IN_USE", 409, "La etapa tiene contactos y no se puede eliminar")
+  if (usedByOpp) {
+    throw new ServiceError(
+      "STAGE_IN_USE",
+      409,
+      "La etapa tiene oportunidades y no se puede eliminar",
+    )
   }
   await tx
     .delete(pipelineStage)

@@ -4,14 +4,17 @@ import type { AgentRunJob, InboundMessageJob, OutboundMessageJob, QueueMessage }
 import { createAppDb, createOwnerDb, type Db, setupAgentMemory } from "@odentia/db"
 import { createStorage, type Storage, secretsKeyFromEnv } from "@odentia/services"
 import { sql } from "drizzle-orm"
-import { applyLlmEnv, langfuseCallbacks } from "./agent/llm.js"
+import { langfuseCallbacks } from "./agent/llm.js"
 import { env } from "./env.js"
 import { type DemoTaskMessage, processDemoTask } from "./handler.js"
 import { consumeInbound } from "./inbound.js"
 import { consumeOutbound } from "./outbound.js"
 import { createTranscriber } from "./transcribe.js"
+import { runAutomationTick } from "./automation.js"
+import { tickMailboxes } from "./mailboxes.js"
 
 const db: Db = createAppDb(env.APP_DATABASE_URL)
+const ownerDb = createOwnerDb(env.DATABASE_URL)
 const secretsKey = secretsKeyFromEnv(env.SECRETS_KEY)
 const storage: Storage = createStorage({
   endpoint: env.S3_ENDPOINT,
@@ -27,13 +30,13 @@ const transcribe = createTranscriber(env)
 
 // Memoria del agente (tablas LangGraph + RLS) con rol owner; el runtime usa
 // el checkpointer con esa misma conexión (aislamiento por thread_id exacto).
-applyLlmEnv()
 const checkpointer = PostgresSaver.fromConnString(env.DATABASE_URL)
 await checkpointer.setup()
-await setupAgentMemory(createOwnerDb(env.DATABASE_URL))
+await setupAgentMemory(ownerDb)
 const agentRuntime: AgentRuntime = {
   checkpointer,
   modelName: env.LLM_MODEL,
+  llm: { apiKey: env.LLM_API_KEY, baseUrl: env.LLM_BASE_URL },
   secretsKey,
   callbacks: await langfuseCallbacks(),
 }
@@ -114,7 +117,25 @@ const queues: QueueDef[] = [
       return true
     },
   },
+  {
+    name: "automation_ticks",
+    poll: () => runAutomationTick({ appDb: db, ownerDb, secretsKey, publicBaseUrl: env.WEB_URL }),
+  },
 ]
+let nextMailboxPoll = 0
+queues.push({
+  name: "mailboxes",
+  poll: async () => {
+    if (Date.now() < nextMailboxPoll) return false
+    nextMailboxPoll = Date.now() + env.MAILBOX_POLL_INTERVAL_MS
+    const result = await tickMailboxes({
+      db, ownerDb, secretsKey, fetch,
+      gmail: { clientId: env.GMAIL_CLIENT_ID, clientSecret: env.GMAIL_CLIENT_SECRET, redirectUri: env.GMAIL_REDIRECT_URI },
+      microsoft365: { clientId: env.MICROSOFT_MAIL_CLIENT_ID, clientSecret: env.MICROSOFT_MAIL_CLIENT_SECRET, redirectUri: env.MICROSOFT_MAIL_REDIRECT_URI, tenant: env.MICROSOFT_MAIL_TENANT },
+    })
+    return result.ingested > 0
+  },
+})
 
 console.log(`worker: consumiendo ${queues.map((q) => q.name).join(", ")}`)
 while (!stopping) {

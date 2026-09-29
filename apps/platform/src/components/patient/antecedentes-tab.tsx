@@ -26,7 +26,7 @@ import { ChevronDown } from "lucide-react"
 import { useEffect, useId, useMemo, useRef, useState } from "react"
 import type { ReactNode } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
-import { useCanWrite } from "../../lib/crm"
+import { usePermission } from "../../lib/crm"
 import {
   type Allergy,
   type AnamnesisAnswers,
@@ -200,20 +200,24 @@ function buildDrafts(health: PatientHealth): {
 
 export function AntecedentesTab({ patientId }: { patientId: string }): React.JSX.Element {
   const queryClient = useQueryClient()
-  const canWrite = useCanWrite()
+  const canWrite = usePermission("clinical.write")
+  const canRead = usePermission("clinical.read")
   const uid = useId()
 
   const healthQuery = useQuery({
     queryKey: ["patient-health", patientId],
     queryFn: () => fetchPatientHealth(patientId),
+    enabled: canRead,
   })
   const historyQuery = useQuery({
     queryKey: ["anamnesis-history", patientId],
     queryFn: () => fetchAnamnesisHistory(patientId),
+    enabled: canRead,
   })
   const patientQuery = useQuery({
     queryKey: ["patient", patientId],
     queryFn: () => apiFetch<{ data: PatientFull }>(`/api/patients/${patientId}`),
+    enabled: canRead,
   })
 
   const [allergies, setAllergies] = useState<AllergyDraft[]>([])

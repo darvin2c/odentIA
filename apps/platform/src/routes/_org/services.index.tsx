@@ -44,7 +44,7 @@ import { ChevronDown, Plus, Tag } from "lucide-react"
 import { type FormEvent, type ReactNode, useCallback, useEffect, useMemo, useState } from "react"
 import { z } from "zod"
 import { ApiError } from "../../lib/api"
-import { useCanWrite } from "../../lib/crm"
+import { usePermission } from "../../lib/crm"
 import {
   createServiceApi,
   fetchServices,
@@ -101,7 +101,12 @@ type EditorTarget = { kind: "offer"; id: string } | { kind: "create" }
  */
 function TarifarioPage() {
   const { org } = orgRouteApi.useRouteContext()
-  const canWrite = useCanWrite()
+  const canManage = usePermission("settings.write")
+  const canViewTariff =
+    canManage ||
+    usePermission("clinical.read") ||
+    usePermission("appointments.read") ||
+    usePermission("finance.read")
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const listSearch = useListSearch()
@@ -118,6 +123,7 @@ function TarifarioPage() {
 
   const pagesQuery = useQuery({
     queryKey: ["services", "tarifario", search, specialtyFilter, estadoFilter],
+    enabled: canViewTariff,
     queryFn: () =>
       fetchServices({
         q: search.trim() || undefined,
@@ -248,7 +254,7 @@ function TarifarioPage() {
         id: "actions",
         header: "",
         cell: ({ row }) =>
-          canWrite ? (
+          canManage ? (
             <RowActions
               label={`Acciones de ${row.original.name}`}
               items={[
@@ -278,7 +284,7 @@ function TarifarioPage() {
           ) : null,
       },
     ],
-    [canWrite, openOffer],
+    [canManage, openOffer],
   )
 
   const hasFilters = search.trim() !== "" || specialtyFilter !== "todas" || sortParam !== ""
@@ -296,7 +302,7 @@ function TarifarioPage() {
         offer={null}
         asPanel={mode === "panel"}
         open={surfaceOpen}
-        canWrite={canWrite}
+        canWrite={canManage}
         onClose={closeOffer}
       />
     ) : editing ? (
@@ -305,12 +311,24 @@ function TarifarioPage() {
         offer={editing}
         asPanel={mode === "panel"}
         open={surfaceOpen}
-        canWrite={canWrite}
+        canWrite={canManage}
         onClose={closeOffer}
       />
     ) : null
   const editorVisible = surfaceOpen && editor !== null
   const activeOfferId = editorVisible && target?.kind === "offer" ? target.id : null
+
+  if (!canViewTariff) {
+    return (
+      <div className="flex flex-col gap-6">
+        <PageHeader title="Tarifario de la clínica" subtitle={org.name} />
+        <EmptyState
+          title="Sin acceso"
+          description="Necesitas permiso clínico, de agenda, de caja o de configuración para ver el tarifario."
+        />
+      </div>
+    )
+  }
 
   return (
     <div className="flex flex-col gap-2">
@@ -323,7 +341,7 @@ function TarifarioPage() {
           title="Tarifario de la clínica"
           subtitle={`${org.name} · prestaciones de la clínica y su tarifa`}
           actions={
-            canWrite ? (
+            canManage ? (
               <Button type="button" className="min-h-11" onClick={() => openOffer(null)}>
                 <Plus aria-hidden />
                 Nueva prestación propia

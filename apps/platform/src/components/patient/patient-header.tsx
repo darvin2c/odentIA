@@ -17,7 +17,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
-import { useCanWrite } from "../../lib/crm"
+import { usePermission } from "../../lib/crm"
 import { ageFrom, hcLabel, type PatientFull, type PatientSummary } from "../../lib/patients"
 import { formatMoney } from "../../lib/services"
 import { FiliacionDrawer } from "./filiacion-drawer"
@@ -127,7 +127,7 @@ export function PatientHeader({
   summary?: PatientSummary
   onAntecedentes?: () => void
 }) {
-  const canWrite = useCanWrite()
+  const canWrite = usePermission("patients.write")
   const queryClient = useQueryClient()
   const [editing, setEditing] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)

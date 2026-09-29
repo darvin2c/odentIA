@@ -132,22 +132,26 @@ async function templateIdByKey(key: string): Promise<string> {
   return rows[0].id
 }
 
-it("services: leer un tarifario vacío no crea ofertas", async () => {
-  const app = buildApp("member")
+it("services: leer un tarifario vacío no crea ofertas (recepción; member 403)", async () => {
+  const app = buildApp("reception")
   const res = await getJson(app, "/services")
   expect(res.status).toBe(200)
   expect(await res.json()).toEqual({ data: [], nextCursor: null })
   const legacy = await getJson(app, "/services?state=legacy")
   expect(await legacy.json()).toEqual({ data: [], nextCursor: null })
+  const member = buildApp("member")
+  expect((await getJson(member, "/services")).status).toBe(403)
 })
 
-it("services: biblioteca global sin precios y con filtro", async () => {
-  const app = buildApp("member")
+it("services: biblioteca global sin precios y con filtro (recepción; member 403)", async () => {
+  const app = buildApp("reception")
   const res = await getJson(app, "/services/templates?specialty=prevencion")
   expect(res.status).toBe(200)
   const body = (await res.json()) as { data: Array<{ key: string }> }
   expect(body.data.map((row) => row.key)).toContain(PREVENCION_KEY)
   expect(body.data.every((row) => !("priceCents" in row))).toBe(true)
+  const member = buildApp("member")
+  expect((await getJson(member, "/services/templates?specialty=prevencion")).status).toBe(403)
 })
 
 it("services: POST crea y PATCH edita con owner/admin; member 403", async () => {

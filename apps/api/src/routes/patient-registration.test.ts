@@ -45,10 +45,11 @@ let container: StartedTestContainer
 let ownerDb: Db
 let appDb: Db
 
-type SessionWho = "owner" | "member" | "other"
+type SessionWho = "owner" | "member" | "reception" | "other"
 const SESSIONS: Record<SessionWho, { userId: string; activeOrg: string }> = {
   owner: { userId: "u-reg-owner", activeOrg: ORG_A },
   member: { userId: "u-reg-member", activeOrg: ORG_A },
+  reception: { userId: "u-reg-reception", activeOrg: ORG_A },
   other: { userId: "u-reg-other", activeOrg: ORG_B },
 }
 
@@ -227,10 +228,10 @@ beforeAll(async () => {
     sql`insert into "organization" ("id", "name", "slug", "created_at") values (${ORG_B}, 'Clínica Norte', ${SLUG_B}, now())`,
   )
   await ownerDb.execute(
-    sql`insert into "user" ("id", "name", "email") values ('u-reg-owner', 'Dueña', 'owner-reg@test.dev'), ('u-reg-member', 'Miembro', 'member-reg@test.dev'), ('u-reg-other', 'Otra', 'other-reg@test.dev') on conflict do nothing`,
+    sql`insert into "user" ("id", "name", "email") values ('u-reg-owner', 'Dueña', 'owner-reg@test.dev'), ('u-reg-member', 'Miembro', 'member-reg@test.dev'), ('u-reg-reception', 'Recepción', 'reception-reg@test.dev'), ('u-reg-other', 'Otra', 'other-reg@test.dev') on conflict do nothing`,
   )
   await ownerDb.execute(
-    sql`insert into "member" ("id", "organization_id", "user_id", "role", "created_at") values ('m-reg-owner', ${ORG_A}, 'u-reg-owner', 'owner', now()), ('m-reg-member', ${ORG_A}, 'u-reg-member', 'member', now()), ('m-reg-other', ${ORG_B}, 'u-reg-other', 'owner', now()) on conflict do nothing`,
+    sql`insert into "member" ("id", "organization_id", "user_id", "role", "created_at") values ('m-reg-owner', ${ORG_A}, 'u-reg-owner', 'owner', now()), ('m-reg-member', ${ORG_A}, 'u-reg-member', 'member', now()), ('m-reg-reception', ${ORG_A}, 'u-reg-reception', 'reception', now()), ('m-reg-other', ${ORG_B}, 'u-reg-other', 'owner', now()) on conflict do nothing`,
   )
 }, 180_000)
 
@@ -758,21 +759,35 @@ it("límite: 10 POST y 120 GET por 10 minutos, sin confiar en X-Forwarded-For", 
   expect(getLimited.headers.get("retry-after")).toBeTruthy()
 })
 
-it("member: edita CRM pero no toca clínica, config ni canales", async () => {
+it("recepción opera CRM y member queda en solo tareas (403 sin efectos)", async () => {
   const app = buildApp("member-perms")
   const edited = await app.request(`/api/contacts/${sharedContactId}`, {
     method: "PATCH",
-    headers: authed("member", SLUG_A),
+    headers: authed("reception", SLUG_A),
     body: JSON.stringify({ displayName: "Titular Editado" }),
   })
   expect(edited.status).toBe(200)
 
   const created = await app.request("/api/contacts", {
     method: "POST",
+    headers: authed("reception", SLUG_A),
+    body: JSON.stringify({ displayName: "Contacto Recepción" }),
+  })
+  expect(created.status).toBe(201)
+
+  const memberEdit = await app.request(`/api/contacts/${sharedContactId}`, {
+    method: "PATCH",
+    headers: authed("member", SLUG_A),
+    body: JSON.stringify({ displayName: "Titular Miembro" }),
+  })
+  expect(memberEdit.status).toBe(403)
+
+  const memberCreate = await app.request("/api/contacts", {
+    method: "POST",
     headers: authed("member", SLUG_A),
     body: JSON.stringify({ displayName: "Contacto Miembro" }),
   })
-  expect(created.status).toBe(201)
+  expect(memberCreate.status).toBe(403)
 
   const clinical = await app.request("/api/patients", {
     method: "POST",
@@ -800,12 +815,24 @@ it("member: edita CRM pero no toca clínica, config ni canales", async () => {
   })
   expect(config.status).toBe(403)
 
-  const link = await app.request(`/api/contacts/${sharedContactId}/registration-links`, {
+  const receptionConfig = await app.request("/api/patient-registration/config", {
+    method: "PUT",
+    headers: authed("reception", SLUG_A),
+    body: JSON.stringify({
+      enabled: true,
+      fields: DEFAULT_REGISTRATION_CONFIG.fields,
+      privacyNotice: PRIVACY,
+      expectedVersion: configVersion,
+    }),
+  })
+  expect(receptionConfig.status).toBe(403)
+
+  const receptionLink = await app.request(`/api/contacts/${sharedContactId}/registration-links`, {
     method: "POST",
-    headers: authed("member", SLUG_A),
+    headers: authed("reception", SLUG_A),
     body: JSON.stringify({ conversationId: sharedConversationId }),
   })
-  expect(link.status).toBe(403)
+  expect(receptionLink.status).toBe(201)
 
   const identity = await app.request(`/api/contacts/${sharedContactId}/identities`, {
     method: "POST",

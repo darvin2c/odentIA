@@ -348,13 +348,16 @@ it("contactos: filtro isActive, alta sin isActive y PATCH con gating", async () 
   }
   expect(all.data.map((c) => c.id)).toContain(sneakyBody.data.id)
   const member = buildApp("member")
+  const forbiddenRead = await member.request(`/contacts/${sneakyBody.data.id}`, { method: "GET" })
+  expect(forbiddenRead.status).toBe(403)
   const forbidden = await member.request(`/contacts/${sneakyBody.data.id}`, {
     method: "PATCH",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ isActive: true }),
   })
   expect(forbidden.status).toBe(403)
-  const rename = await member.request(`/contacts/${sneakyBody.data.id}`, {
+  const reception = buildApp("reception")
+  const rename = await reception.request(`/contacts/${sneakyBody.data.id}`, {
     method: "PATCH",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ displayName: "Sneaky Dos" }),

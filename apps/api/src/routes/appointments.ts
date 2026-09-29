@@ -1,17 +1,28 @@
 import { withOrgContext } from "@odentia/db"
 import {
+  addWaitlistEntry,
+  bookWaitlistEntry,
+  cancelWaitlistEntry,
   createAppointment,
   createChair,
+  createScheduleBlock,
+  deleteScheduleBlock,
   getAppointment,
+  getProfessionalSchedule,
   listAppointments,
+  listAvailableSlots,
+  listScheduleBlocks,
   listScheduleResources,
+  listWaitlistEntries,
   moveAppointment,
+  offerWaitlistSlot,
   setAppointmentStatus,
+  setProfessionalSchedule,
   updateAppointment,
 } from "@odentia/services"
 import { Hono } from "hono"
 import { z } from "zod"
-import { canWrite, orgContextOf } from "../lib/context.js"
+import { canAccess, orgContextOf } from "../lib/context.js"
 import { errorBody } from "../lib/error.js"
 import { type CrmDeps, runService, validationError } from "./helpers.js"
 
@@ -72,12 +83,72 @@ const chairInput = z.object({
   name: z.string().min(1).max(120),
 })
 
-/** Recursos de la agenda: sucursal resuelta, profesionales y sillones. */
+const scheduleRuleInput = z.object({
+  weekday: z.number().int().min(0).max(6),
+  startMin: z.number().int().min(0).max(1440),
+  endMin: z.number().int().min(0).max(1440),
+})
+
+const scheduleInput = z.object({
+  branchId: z.uuid(),
+  dentistUserId: z.string().min(1),
+  rules: z.array(scheduleRuleInput).max(42),
+})
+
+const blockInput = z.object({
+  branchId: z.uuid(),
+  dentistUserId: z.string().min(1).nullable().optional(),
+  chairId: z.uuid().nullable().optional(),
+  kind: z.enum(["bloqueo", "ausencia"]).optional(),
+  reason: z.string().max(500).optional(),
+  startsAt: z.iso.datetime({ offset: true }),
+  endsAt: z.iso.datetime({ offset: true }),
+})
+
+const slotsQuery = z.object({
+  branchId: z.uuid(),
+  dentistUserId: z.string().min(1).optional(),
+  chairId: z.uuid().optional(),
+  serviceId: z.uuid().optional(),
+  from: z.iso.datetime({ offset: true }),
+  to: z.iso.datetime({ offset: true }),
+  durationMin: z.coerce.number().int().positive().max(480).optional(),
+  timeZone: z.string().max(60).optional(),
+  stepMin: z.coerce.number().int().min(5).max(120).optional(),
+})
+
+const waitlistInput = z.object({
+  branchId: z.uuid(),
+  patientId: z.uuid().optional(),
+  contactId: z.uuid().optional(),
+  dentistUserId: z.string().min(1).nullable().optional(),
+  serviceId: z.uuid().nullable().optional(),
+  priority: z.enum(["alta", "normal", "baja"]).optional(),
+  notes: z.string().max(500).optional(),
+})
+
+const offerInput = z.object({
+  startsAt: z.iso.datetime({ offset: true }),
+  endsAt: z.iso.datetime({ offset: true }),
+  dentistUserId: z.string().min(1).optional(),
+  chairId: z.uuid().optional(),
+})
+
+const bookInput = z.object({
+  startsAt: z.iso.datetime({ offset: true }).optional(),
+  endsAt: z.iso.datetime({ offset: true }).optional(),
+  chairId: z.uuid().optional(),
+})
+
+/** Agenda: recursos, huecos, horarios, bloqueos y lista de espera. */
 export function createAgendaRoute(deps: CrmDeps) {
   const app = new Hono()
 
   app.get("/resources", async (c) => {
-    const { orgId } = orgContextOf(c)
+    const { orgId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "appointments.read")) {
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para ver la agenda"), 403)
+    }
     const branchId = c.req.query("branchId")
     if (branchId && !z.uuid().safeParse(branchId).success) {
       return c.json(errorBody(c, "VALIDATION", "branchId inválido"), 400)
@@ -89,13 +160,176 @@ export function createAgendaRoute(deps: CrmDeps) {
 
   app.post("/chairs", async (c) => {
     const { orgId, memberRole } = orgContextOf(c)
-    if (!canWrite(memberRole)) {
-      return c.json(errorBody(c, "FORBIDDEN", "Solo owner/admin pueden crear sillones"), 403)
+    if (!canAccess(memberRole, "settings.write")) {
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para configurar sillones"), 403)
     }
     const parsed = chairInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 201, () =>
       withOrgContext(deps.db, orgId, (tx) => createChair(tx, orgId, parsed.data)),
+    )
+  })
+
+  // Huecos reservables con zona IANA.
+  app.get("/slots", async (c) => {
+    const { orgId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "appointments.read")) {
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para ver la agenda"), 403)
+    }
+    const parsed = slotsQuery.safeParse(c.req.query())
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) => listAvailableSlots(tx, orgId, parsed.data)),
+    )
+  })
+
+  // Horario semanal del profesional.
+  app.get("/schedules", async (c) => {
+    const { orgId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "appointments.read")) {
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para ver la agenda"), 403)
+    }
+    const branchId = c.req.query("branchId")
+    const dentistUserId = c.req.query("dentistUserId")
+    if (!branchId || !z.uuid().safeParse(branchId).success || !dentistUserId) {
+      return c.json(errorBody(c, "VALIDATION", "branchId y dentistUserId son obligatorios"), 400)
+    }
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        getProfessionalSchedule(tx, orgId, branchId, dentistUserId),
+      ),
+    )
+  })
+
+  // Configuración de horario.
+  app.put("/schedules", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "settings.write")) {
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para configurar horarios"), 403)
+    }
+    const parsed = scheduleInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        setProfessionalSchedule(tx, orgId, userId, parsed.data),
+      ),
+    )
+  })
+
+  // Bloqueos y ausencias.
+  app.get("/blocks", async (c) => {
+    const { orgId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "appointments.read")) {
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para ver la agenda"), 403)
+    }
+    const branchId = c.req.query("branchId")
+    const from = c.req.query("from")
+    const to = c.req.query("to")
+    if (!branchId || !z.uuid().safeParse(branchId).success || !from || !to) {
+      return c.json(errorBody(c, "VALIDATION", "branchId, from y to son obligatorios"), 400)
+    }
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        listScheduleBlocks(tx, orgId, { branchId, from, to }),
+      ),
+    )
+  })
+
+  // Configuración de bloqueos.
+  app.post("/blocks", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "settings.write")) {
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para configurar bloqueos"), 403)
+    }
+    const parsed = blockInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 201, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        createScheduleBlock(tx, orgId, userId, parsed.data),
+      ),
+    )
+  })
+
+  app.delete("/blocks/:id", async (c) => {
+    const { orgId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "settings.write")) {
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para configurar bloqueos"), 403)
+    }
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, async (tx) => {
+        await deleteScheduleBlock(tx, orgId, c.req.param("id"))
+        return { ok: true }
+      }),
+    )
+  })
+
+  // Lista de espera: ver.
+  app.get("/waitlist", async (c) => {
+    const { orgId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "appointments.read")) {
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para ver la agenda"), 403)
+    }
+    const branchId = c.req.query("branchId")
+    const status = c.req.query("status")
+    if (branchId && !z.uuid().safeParse(branchId).success) {
+      return c.json(errorBody(c, "VALIDATION", "branchId inválido"), 400)
+    }
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        listWaitlistEntries(tx, orgId, { branchId: branchId ?? undefined, status: status ?? undefined }),
+      ),
+    )
+  })
+
+  app.post("/waitlist", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "appointments.write")) {
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para gestionar la lista de espera"), 403)
+    }
+    const parsed = waitlistInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 201, () =>
+      withOrgContext(deps.db, orgId, (tx) => addWaitlistEntry(tx, orgId, userId, parsed.data)),
+    )
+  })
+
+  app.post("/waitlist/:id/offer", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "appointments.write")) {
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para gestionar la lista de espera"), 403)
+    }
+    const parsed = offerInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        offerWaitlistSlot(tx, orgId, userId, c.req.param("id"), parsed.data),
+      ),
+    )
+  })
+
+  app.post("/waitlist/:id/book", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "appointments.write")) {
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para gestionar la lista de espera"), 403)
+    }
+    const parsed = bookInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 201, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        bookWaitlistEntry(tx, orgId, userId, c.req.param("id"), parsed.data),
+      ),
+    )
+  })
+
+  app.post("/waitlist/:id/cancel", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "appointments.write")) {
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para gestionar la lista de espera"), 403)
+    }
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        cancelWaitlistEntry(tx, orgId, userId, c.req.param("id")),
+      ),
     )
   })
 
@@ -106,7 +340,10 @@ export function createAppointmentsRoute(deps: CrmDeps) {
   const app = new Hono()
 
   app.get("/", async (c) => {
-    const { orgId } = orgContextOf(c)
+    const { orgId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "appointments.read")) {
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para ver la agenda"), 403)
+    }
     const parsed = listQuery.safeParse(c.req.query())
     if (!parsed.success) return validationError(c, parsed.error.issues)
     const { professionals, chairs, status, ...rest } = parsed.data
@@ -123,7 +360,10 @@ export function createAppointmentsRoute(deps: CrmDeps) {
   })
 
   app.post("/", async (c) => {
-    const { orgId, userId } = orgContextOf(c)
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "appointments.write")) {
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para reservar citas"), 403)
+    }
     const parsed = createInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 201, () =>
@@ -132,14 +372,20 @@ export function createAppointmentsRoute(deps: CrmDeps) {
   })
 
   app.get("/:id", async (c) => {
-    const { orgId } = orgContextOf(c)
+    const { orgId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "appointments.read")) {
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para ver la agenda"), 403)
+    }
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) => getAppointment(tx, orgId, c.req.param("id"))),
     )
   })
 
   app.patch("/:id", async (c) => {
-    const { orgId, userId } = orgContextOf(c)
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "appointments.write")) {
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para modificar citas"), 403)
+    }
     const parsed = patchInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () =>
@@ -150,7 +396,10 @@ export function createAppointmentsRoute(deps: CrmDeps) {
   })
 
   app.post("/:id/move", async (c) => {
-    const { orgId, userId } = orgContextOf(c)
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "appointments.write")) {
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para mover citas"), 403)
+    }
     const parsed = moveInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () =>
@@ -161,7 +410,10 @@ export function createAppointmentsRoute(deps: CrmDeps) {
   })
 
   app.post("/:id/status", async (c) => {
-    const { orgId, userId } = orgContextOf(c)
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "appointments.write")) {
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para cambiar el estado de citas"), 403)
+    }
     const parsed = statusInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () =>

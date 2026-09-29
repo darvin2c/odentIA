@@ -23,7 +23,7 @@ import { Plus } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
 import { CreatePatientDrawer } from "../../components/patient/create-patient-drawer"
 import { ApiError, apiFetch } from "../../lib/api"
-import { timeAgo, useCanWrite } from "../../lib/crm"
+import { timeAgo, usePermission } from "../../lib/crm"
 import {
   PATIENT_FILTERS,
   PATIENT_SORT_OPTIONS,
@@ -48,7 +48,8 @@ export const Route = createFileRoute("/_org/patients/")({
 
 function PatientsPage() {
   const navigate = useNavigate()
-  const canWrite = useCanWrite()
+  const canView = usePermission("patients.read")
+  const canAdmin = usePermission("patients.write")
   const { contactId } = Route.useSearch()
   const [creating, setCreating] = useState(false)
   const mode = useDetailMode()
@@ -102,6 +103,7 @@ function PatientsPage() {
         `/api/patients?${params}`,
       )
     },
+    enabled: canView,
   })
 
   const columns = useMemo<ColumnDef<PatientListRow>[]>(
@@ -174,7 +176,7 @@ function PatientsPage() {
                     params: { patientId: row.original.id },
                   }),
               },
-              ...(canWrite
+              ...(canAdmin
                 ? [
                     {
                       key: "archive",
@@ -192,7 +194,7 @@ function PatientsPage() {
         ),
       },
     ],
-    [canWrite, navigate],
+    [canAdmin, navigate],
   )
 
   const rows = patientsQuery.data?.data ?? []
@@ -246,7 +248,7 @@ function PatientsPage() {
       <MasterDetail
         panelSize="xl"
         panel={
-          mode === "panel" && canWrite && (creating || contactId) ? (
+          mode === "panel" && canAdmin && (creating || contactId) ? (
             <CreatePatientDrawer
               key={contactId ?? "new"}
               asPanel
@@ -261,7 +263,7 @@ function PatientsPage() {
           title="Pacientes"
           subtitle="Fichas clínicas de la organización"
           actions={
-            canWrite && (
+            canAdmin && (
               <Button type="button" onClick={() => setCreating(true)}>
                 <Plus aria-hidden />
                 Nuevo paciente
@@ -336,7 +338,7 @@ function PatientsPage() {
 
       {/* Un solo contenedor montado a la vez: montar panel y drawer juntos
           duplicaría los id/htmlFor de los campos. */}
-      {mode === "drawer" && canWrite && (creating || contactId) ? (
+      {mode === "drawer" && canAdmin && (creating || contactId) ? (
         <CreatePatientDrawer
           key={contactId ?? "new"}
           open

@@ -48,6 +48,13 @@ const app = createApp({
   cookieDomain: env.COOKIE_DOMAIN,
   webURL: env.WEB_URL,
   listenUrl: env.APP_DATABASE_URL,
+  agentModelName: env.LLM_MODEL,
+  llmApiKey: env.LLM_API_KEY,
+  llmBaseUrl: env.LLM_BASE_URL,
+  mailbox: {
+    gmail: { clientId: env.GMAIL_CLIENT_ID, clientSecret: env.GMAIL_CLIENT_SECRET, redirectUri: env.GMAIL_REDIRECT_URI },
+    microsoft365: { clientId: env.MICROSOFT_MAIL_CLIENT_ID, clientSecret: env.MICROSOFT_MAIL_CLIENT_SECRET, redirectUri: env.MICROSOFT_MAIL_REDIRECT_URI, tenant: env.MICROSOFT_MAIL_TENANT },
+  },
 })
 
 serve({ fetch: app.fetch, port: env.PORT }, (info) => {

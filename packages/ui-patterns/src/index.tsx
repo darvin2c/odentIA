@@ -34,6 +34,10 @@ export * from "./detail/index.js"
 export { EmptyState, type EmptyStateProps } from "./empty-state.js"
 export { type ApiErrorShape, ErrorState, type ErrorStateProps } from "./error-state.js"
 export * from "./form/index.js"
+export {
+  HeaderUtilitiesProvider,
+  useHeaderUtilities,
+} from "./header-utilities.js"
 export { KpiCard, type KpiCardProps } from "./kpi-card.js"
 export * from "./list-filtering/index.js"
 export {

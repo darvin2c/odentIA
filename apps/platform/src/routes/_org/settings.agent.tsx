@@ -11,7 +11,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { type FormEvent, useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
-import { type AgentConfig, useCanWrite } from "../../lib/crm"
+import { type AgentConfig, usePermission } from "../../lib/crm"
 
 export const Route = createFileRoute("/_org/settings/agent")({
   component: AgentPage,
@@ -19,7 +19,7 @@ export const Route = createFileRoute("/_org/settings/agent")({
 
 function AgentPage() {
   const queryClient = useQueryClient()
-  const canWrite = useCanWrite()
+  const canWrite = usePermission("agent.write")
   const mode = useDetailMode()
   const [formOpen, setFormOpen] = useState(false)
   const [saved, setSaved] = useState(false)
@@ -176,7 +176,7 @@ function AgentPage() {
       >
         <PageHeader
           title="Agente"
-          subtitle="Responde y cualifica automáticamente (sin agenda en esta etapa)"
+          subtitle="Responde, cualifica y propone citas con aprobación"
         />
         {saved ? (
           <p role="status" className="text-sm text-green-700">
@@ -223,6 +223,7 @@ function AgentPage() {
             </div>
           </dl>
         </div>
+        <PolicySection />
       </MasterDetail>
 
       {/* Un solo contenedor montado a la vez: montar panel y drawer juntos
@@ -232,6 +233,100 @@ function AgentPage() {
           {formFields}
         </FormDrawer>
       ) : null}
+    </div>
+  )
+}
+
+const POLICY_ACTIONS = [
+  { key: "reservar_cita", label: "Reservar cita" },
+  { key: "reprogramar_cita", label: "Reprogramar cita" },
+  { key: "cancelar_cita", label: "Cancelar cita" },
+  { key: "enviar_mensaje", label: "Enviar mensaje" },
+  { key: "mover_oportunidad", label: "Mover oportunidad" },
+] as const
+
+const MODE_LABEL: Record<string, string> = {
+  directo: "Directo (ejecuta)",
+  confirmar_usuario: "Confirmar con el paciente",
+  aprobar_equipo: "Aprobar por el equipo",
+}
+
+type AutonomyPolicy = Record<string, string>
+
+/** Política de autonomía por acción: cada acto confirma con el paciente o lo aprueba el equipo. */
+function PolicySection() {
+  const queryClient = useQueryClient()
+  const policyQuery = useQuery({
+    queryKey: ["agent-policy"],
+    queryFn: () => apiFetch<{ data: AutonomyPolicy }>("/api/agent/policy"),
+  })
+  const [draft, setDraft] = useState<AutonomyPolicy | null>(null)
+  const policy = draft ?? policyQuery.data?.data ?? null
+
+  const saveMutation = useMutation({
+    mutationFn: (patch: AutonomyPolicy) =>
+      apiFetch("/api/agent/policy", { method: "PUT", body: JSON.stringify(patch) }),
+    onSuccess: () => {
+      setDraft(null)
+      void queryClient.invalidateQueries({ queryKey: ["agent-policy"] })
+    },
+  })
+
+  if (!policy) {
+    return (
+      <div className="rounded-sm bg-card p-6">
+        <p className="text-sm text-muted-foreground">Cargando política de autonomía…</p>
+      </div>
+    )
+  }
+
+  const error =
+    saveMutation.error instanceof ApiError
+      ? (saveMutation.error.shape.message ?? "No pudimos guardar la política")
+      : saveMutation.error
+        ? "No pudimos guardar la política"
+        : null
+
+  return (
+    <div className="flex flex-col gap-4 rounded-sm bg-card p-6">
+      <div className="font-heading text-base font-medium">Autonomía por acción</div>
+      <p className="text-sm text-muted-foreground">
+        Directo ejecuta al momento; confirmar pide un sí del paciente en el chat; aprobar lo revisa
+        el equipo en Aprobaciones.
+      </p>
+      {POLICY_ACTIONS.map((action) => (
+        <label key={action.key} className="flex flex-col gap-1 text-sm">
+          {action.label}
+          <select
+            value={policy[action.key] ?? "directo"}
+            onChange={(e) => setDraft({ ...policy, [action.key]: e.target.value })}
+            className="rounded-sm border p-2"
+          >
+            {Object.entries(MODE_LABEL).map(([mode, label]) => (
+              <option key={mode} value={mode}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </label>
+      ))}
+      {error ? (
+        <p role="alert" className="text-sm text-destructive">
+          {error}
+        </p>
+      ) : null}
+      <div>
+        <Button
+          type="button"
+          size="sm"
+          disabled={draft === null || saveMutation.isPending}
+          onClick={() => {
+            if (draft) saveMutation.mutate(draft)
+          }}
+        >
+          {saveMutation.isPending ? "Guardando…" : "Guardar política"}
+        </Button>
+      </div>
     </div>
   )
 }

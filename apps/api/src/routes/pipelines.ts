@@ -10,7 +10,7 @@ import {
 } from "@odentia/services"
 import { Hono } from "hono"
 import { z } from "zod"
-import { canWrite, orgContextOf } from "../lib/context.js"
+import { canAccess, orgContextOf } from "../lib/context.js"
 import { errorBody } from "../lib/error.js"
 import { type CrmDeps, runService, validationError } from "./helpers.js"
 
@@ -30,14 +30,19 @@ export function createPipelinesRoute(deps: CrmDeps) {
 
   app.get("/", async (c) => {
     const { orgId } = orgContextOf(c)
+    if (!canAccess(orgContextOf(c).memberRole, "crm.read")) {
+      return c.json(errorBody(c, "FORBIDDEN", "Sin permiso de lectura del CRM"), 403)
+    }
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) => listPipelines(tx, orgId)),
     )
   })
 
   app.post("/", async (c) => {
-    const { orgId, memberRole } = orgContextOf(c)
-    if (!canWrite(memberRole)) return c.json(errorBody(c, "FORBIDDEN", "Solo owner/admin"), 403)
+    const { orgId } = orgContextOf(c)
+    if (!canAccess(orgContextOf(c).memberRole, "crm.write")) {
+      return c.json(errorBody(c, "FORBIDDEN", "Sin permiso de escritura del CRM"), 403)
+    }
     const parsed = nameInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 201, () =>
@@ -46,8 +51,10 @@ export function createPipelinesRoute(deps: CrmDeps) {
   })
 
   app.patch("/:id", async (c) => {
-    const { orgId, memberRole } = orgContextOf(c)
-    if (!canWrite(memberRole)) return c.json(errorBody(c, "FORBIDDEN", "Solo owner/admin"), 403)
+    const { orgId } = orgContextOf(c)
+    if (!canAccess(orgContextOf(c).memberRole, "crm.write")) {
+      return c.json(errorBody(c, "FORBIDDEN", "Sin permiso de escritura del CRM"), 403)
+    }
     const parsed = nameInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () =>
@@ -60,8 +67,10 @@ export function createPipelinesRoute(deps: CrmDeps) {
   })
 
   app.post("/:id/stages", async (c) => {
-    const { orgId, memberRole } = orgContextOf(c)
-    if (!canWrite(memberRole)) return c.json(errorBody(c, "FORBIDDEN", "Solo owner/admin"), 403)
+    const { orgId } = orgContextOf(c)
+    if (!canAccess(orgContextOf(c).memberRole, "crm.write")) {
+      return c.json(errorBody(c, "FORBIDDEN", "Sin permiso de escritura del CRM"), 403)
+    }
     const parsed = stageInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 201, () =>
@@ -72,8 +81,10 @@ export function createPipelinesRoute(deps: CrmDeps) {
   })
 
   app.post("/:id/reorder", async (c) => {
-    const { orgId, memberRole } = orgContextOf(c)
-    if (!canWrite(memberRole)) return c.json(errorBody(c, "FORBIDDEN", "Solo owner/admin"), 403)
+    const { orgId } = orgContextOf(c)
+    if (!canAccess(orgContextOf(c).memberRole, "crm.write")) {
+      return c.json(errorBody(c, "FORBIDDEN", "Sin permiso de escritura del CRM"), 403)
+    }
     const parsed = reorderInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () =>
@@ -84,8 +95,10 @@ export function createPipelinesRoute(deps: CrmDeps) {
   })
 
   app.patch("/stages/:id", async (c) => {
-    const { orgId, memberRole } = orgContextOf(c)
-    if (!canWrite(memberRole)) return c.json(errorBody(c, "FORBIDDEN", "Solo owner/admin"), 403)
+    const { orgId } = orgContextOf(c)
+    if (!canAccess(orgContextOf(c).memberRole, "crm.write")) {
+      return c.json(errorBody(c, "FORBIDDEN", "Sin permiso de escritura del CRM"), 403)
+    }
     const parsed = stagePatch.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () =>
@@ -96,8 +109,10 @@ export function createPipelinesRoute(deps: CrmDeps) {
   })
 
   app.delete("/stages/:id", async (c) => {
-    const { orgId, memberRole } = orgContextOf(c)
-    if (!canWrite(memberRole)) return c.json(errorBody(c, "FORBIDDEN", "Solo owner/admin"), 403)
+    const { orgId } = orgContextOf(c)
+    if (!canAccess(orgContextOf(c).memberRole, "crm.write")) {
+      return c.json(errorBody(c, "FORBIDDEN", "Sin permiso de escritura del CRM"), 403)
+    }
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) => deleteStage(tx, orgId, c.req.param("id"))).then(
         () => ({ ok: true }),

@@ -23,10 +23,15 @@ import {
   SidebarProvider,
   SidebarRail,
   SidebarSeparator,
+  SidebarTrigger,
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
   TooltipProvider,
   useSidebar,
 } from "@odentia/ui"
 import { ChevronDown, ExternalLink, LogOut } from "lucide-react"
+import { RiSideBarLine } from "@remixicon/react"
 import * as React from "react"
 import { type ThemeMode, ThemeTabs, useTheme } from "./theme.js"
 // ----- Types -----
@@ -89,8 +94,8 @@ export interface AppShellProps {
   defaultTheme?: ThemeMode
   onThemeChange?: (mode: ThemeMode) => void
   brand: React.ReactNode
-  searchSlot?: React.ReactNode
-  topbarActions?: React.ReactNode
+  /** Marca compacta del riel colapsado; al hover troca al icono de expandir. */
+  brandIcon?: React.ReactNode
   sidebarFooter?: React.ReactNode
   /** Ítems de navegación anclados al pie del sidebar, encima del bloque de
    * usuario (ajustes de la organización, por ejemplo). Mismo ítem que el nav
@@ -270,11 +275,82 @@ function SidebarNav({
   )
 }
 
+/**
+ * Cabecera del sidebar, patrón ChatGPT sin search: expandido muestra la marca
+ * a la izquierda y el colapso a la derecha; en el riel colapsado la marca se
+ * vuelve el botón superior y al pasar el hover troca al icono de expandir.
+ * Ambos estados con tooltip. En móvil el drawer lo dispara el `PageHeader`,
+ * así que aquí no se monta nada por debajo de `md`.
+ */
+function ShellSidebarHeader({
+  brand,
+  brandIcon,
+}: {
+  brand: React.ReactNode
+  brandIcon?: React.ReactNode
+}) {
+  const { toggleSidebar } = useSidebar()
+  return (
+    <SidebarHeader>
+      <div className="flex min-w-0 items-center gap-2 px-1 group-data-[collapsible=icon]:justify-center">
+        <div className="min-w-0 flex-1 truncate group-data-[collapsible=icon]:hidden">{brand}</div>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <SidebarTrigger
+                aria-label="Contraer el panel lateral"
+                className="hidden md:inline-flex group-data-[collapsible=icon]:hidden"
+              />
+            }
+          />
+          <TooltipContent side="bottom" sideOffset={8}>
+            Contraer el panel lateral
+          </TooltipContent>
+        </Tooltip>
+        {brandIcon ? (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <button
+                  type="button"
+                  onClick={() => toggleSidebar()}
+                  aria-label="Expandir el panel lateral"
+                  className="group/rail relative hidden size-8 cursor-ew-resize items-center justify-center rounded-md text-sidebar-foreground transition-colors outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring md:group-data-[collapsible=icon]:flex"
+                >
+                  <span className="flex items-center justify-center transition-opacity group-hover/rail:opacity-0">
+                    {brandIcon}
+                  </span>
+                  <RiSideBarLine className="absolute size-4 opacity-0 transition-opacity group-hover/rail:opacity-100" />
+                </button>
+              }
+            />
+            <TooltipContent side="right" align="center">
+              Expandir el panel lateral
+            </TooltipContent>
+          </Tooltip>
+        ) : (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <SidebarTrigger
+                  aria-label="Expandir el panel lateral"
+                  className="hidden md:group-data-[collapsible=icon]:inline-flex"
+                />
+              }
+            />
+            <TooltipContent side="right" align="center">
+              Expandir el panel lateral
+            </TooltipContent>
+          </Tooltip>
+        )}
+      </div>
+    </SidebarHeader>
+  )
+}
+
 // ----- AppShell — layout estándar sobre Sidebar: el primitivo resuelve las
 // tres variantes responsive (sidebar escritorio, rail solo-iconos al colapsar
-// y drawer móvil vía Sheet). El header es por página (PageHeader).
-// `searchSlot`/`topbarActions` siguen en la API pública sin renderizar, igual
-// que antes de la migración. -----
+// y drawer móvil vía Sheet). Cada página conserva su propio PageHeader.
 export function AppShell(props: AppShellProps): React.JSX.Element {
   const {
     items,
@@ -287,6 +363,7 @@ export function AppShell(props: AppShellProps): React.JSX.Element {
     defaultTheme,
     onThemeChange,
     brand,
+    brandIcon,
     sidebarFooter,
     footerItems,
     children,
@@ -338,11 +415,7 @@ export function AppShell(props: AppShellProps): React.JSX.Element {
     <TooltipProvider>
       <SidebarProvider>
         <Sidebar collapsible="icon">
-          <SidebarHeader>
-            <div className="flex min-w-0 items-center gap-2 px-1 group-data-[collapsible=icon]:justify-center">
-              {brand}
-            </div>
-          </SidebarHeader>
+          <ShellSidebarHeader brand={brand} brandIcon={brandIcon} />
           <SidebarNav items={items} pathname={pathname} LinkComponent={LinkComponent} />
           <SidebarFooter>
             {sidebarFooter}
@@ -387,7 +460,9 @@ export function AppShell(props: AppShellProps): React.JSX.Element {
         {/* `SidebarInset` ya renderiza el landmark `<main>`: un `<main>`
             anidado sería HTML inválido y duplicaría el landmark para lectores
             de pantalla. El alto mínimo vive ahora en el propio inset. */}
-        <SidebarInset className="min-h-svh">{children}</SidebarInset>
+        <SidebarInset className="min-h-svh">
+          {children}
+        </SidebarInset>
       </SidebarProvider>
     </TooltipProvider>
   )

@@ -2,7 +2,7 @@ import { withOrgContext } from "@odentia/db"
 import { createFieldDef, deleteFieldDef, listFieldDefs, updateFieldDef } from "@odentia/services"
 import { Hono } from "hono"
 import { z } from "zod"
-import { canWrite, orgContextOf } from "../lib/context.js"
+import { canAccess, orgContextOf } from "../lib/context.js"
 import { errorBody } from "../lib/error.js"
 import { type CrmDeps, runService, validationError } from "./helpers.js"
 
@@ -24,7 +24,10 @@ export function createFieldsRoute(deps: CrmDeps) {
   const app = new Hono()
 
   app.get("/", async (c) => {
-    const { orgId } = orgContextOf(c)
+    const { orgId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "crm.read")) {
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para ver los campos"), 403)
+    }
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) => listFieldDefs(tx, orgId)),
     )
@@ -32,7 +35,9 @@ export function createFieldsRoute(deps: CrmDeps) {
 
   app.post("/", async (c) => {
     const { orgId, memberRole } = orgContextOf(c)
-    if (!canWrite(memberRole)) return c.json(errorBody(c, "FORBIDDEN", "Solo owner/admin"), 403)
+    if (!canAccess(memberRole, "crm.write")) {
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para crear campos"), 403)
+    }
     const parsed = createInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 201, () =>
@@ -42,7 +47,9 @@ export function createFieldsRoute(deps: CrmDeps) {
 
   app.patch("/:id", async (c) => {
     const { orgId, memberRole } = orgContextOf(c)
-    if (!canWrite(memberRole)) return c.json(errorBody(c, "FORBIDDEN", "Solo owner/admin"), 403)
+    if (!canAccess(memberRole, "crm.write")) {
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para editar campos"), 403)
+    }
     const parsed = patchInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () =>
@@ -54,7 +61,9 @@ export function createFieldsRoute(deps: CrmDeps) {
 
   app.delete("/:id", async (c) => {
     const { orgId, memberRole } = orgContextOf(c)
-    if (!canWrite(memberRole)) return c.json(errorBody(c, "FORBIDDEN", "Solo owner/admin"), 403)
+    if (!canAccess(memberRole, "crm.write")) {
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para eliminar campos"), 403)
+    }
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) => deleteFieldDef(tx, orgId, c.req.param("id"))).then(
         () => ({ ok: true }),

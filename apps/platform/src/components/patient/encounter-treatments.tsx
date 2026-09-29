@@ -11,7 +11,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
 import { planDecisionLabel } from "../../lib/budgets"
 import { completeTreatmentApi, formatDate, mutationMessage } from "../../lib/clinical-journey"
-import { useCanWrite } from "../../lib/crm"
+import { usePermission } from "../../lib/crm"
 import { type PlanItem, planStatusLabel } from "../../lib/patients"
 
 function decisionBadge(status: string): "default" | "secondary" | "success" | "destructive" {
@@ -36,7 +36,7 @@ export function EncounterTreatments({
   beforeWrite?: () => Promise<void>
   onChanged?: () => void
 }): React.JSX.Element {
-  const canWrite = useCanWrite()
+  const canWrite = usePermission("clinical.write")
   const queryClient = useQueryClient()
   const [error, setError] = useState<string | null>(null)
   const [completingId, setCompletingId] = useState<string | null>(null)

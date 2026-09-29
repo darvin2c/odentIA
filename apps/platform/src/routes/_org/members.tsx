@@ -1,3 +1,4 @@
+import { ORG_ROLES, ROLE_DESCRIPTIONS, ROLE_LABELS, assignableRoles, type OrgRole } from "@odentia/auth/permissions"
 import {
   Badge,
   Button,
@@ -37,6 +38,7 @@ import { Plus } from "lucide-react"
 import { type FormEvent, useMemo, useState } from "react"
 import { z } from "zod"
 import { authClient } from "../../lib/auth-client"
+import { useMyRole, usePermission } from "../../lib/crm"
 
 export const Route = createFileRoute("/_org/members")({
   component: MembersPage,
@@ -51,10 +53,23 @@ interface FullOrganization {
   invitations: { id: string; email: string; role: string; status: string }[]
 }
 
+const ASSIGNABLE_SCHEMA_ROLES: [OrgRole, ...OrgRole[]] = [
+  "owner",
+  "admin",
+  "reception",
+  "dentist",
+  "cashier",
+  "member",
+]
+
 const inviteSchema = z.object({
   email: z.string().email("Correo inválido"),
-  role: z.enum(["member", "admin"]),
+  role: z.enum(ASSIGNABLE_SCHEMA_ROLES),
 })
+
+function roleLabel(role: string): string {
+  return (ROLE_LABELS as Record<string, string>)[role] ?? role
+}
 
 function MembersPage() {
   const queryClient = useQueryClient()
@@ -68,6 +83,10 @@ function MembersPage() {
   const [removing, setRemoving] = useState<{ id: string; label: string } | null>(null)
 
   const { org: routeOrg, session } = orgRouteApi.useRouteContext()
+  const myRole = useMyRole()
+  const canView = usePermission("settings.read")
+  const canManage = usePermission("settings.write")
+  const assignable = useMemo(() => assignableRoles(myRole), [myRole])
 
   const orgQuery = useQuery({
     queryKey: ["full-org", routeOrg.id],
@@ -77,10 +96,9 @@ function MembersPage() {
           query: { organizationId: routeOrg.id },
         })
       ).data as FullOrganization | null,
+    enabled: canView,
   })
 
-  const myRole = orgQuery.data?.members.find((m) => m.userId === session.userId)?.role ?? "member"
-  const canWrite = myRole === "owner" || myRole === "admin"
   const inviteMutation = useMutation({
     mutationFn: async (values: z.infer<typeof inviteSchema>) => {
       const { error: inviteError } = await authClient.organization.inviteMember({
@@ -98,7 +116,7 @@ function MembersPage() {
   })
 
   const form = useForm({
-    defaultValues: { email: "", role: "member" as "member" | "admin" },
+    defaultValues: { email: "", role: "member" as OrgRole },
     validators: { onSubmit: inviteSchema },
     onSubmit: async ({ value, formApi }) => {
       await inviteMutation.mutateAsync(value)
@@ -109,7 +127,6 @@ function MembersPage() {
   // Suscripción explícita: el render de la página no se entera de los cambios de
   // meta del formulario por sí solo (los campos se re-renderizan por su cuenta).
   const isDirty = useStore(form.store, (state) => state.isDirty)
-
   /** Cierra y deja el formulario prístino: sin el reset, el dirty sobrevive al
    *  cierre y el próximo abrir pediría confirmar cambios ya guardados. */
   function closeInviteForm() {
@@ -118,10 +135,10 @@ function MembersPage() {
   }
 
   const roleMutation = useMutation({
-    mutationFn: async ({ memberId, role }: { memberId: string; role: string }) => {
+    mutationFn: async ({ memberId, role }: { memberId: string; role: OrgRole }) => {
       const { error: roleError } = await authClient.organization.updateMemberRole({
         memberId,
-        role: role as "member" | "admin",
+        role,
       })
       if (roleError) throw new Error(roleError.message ?? "No se pudo cambiar el rol.")
     },
@@ -159,12 +176,22 @@ function MembersPage() {
 
   type Membership = NonNullable<typeof org>["members"][number]
 
+  const ownerCount = useMemo(
+    () => (org?.members ?? []).filter((member) => member.role === "owner").length,
+    [org?.members],
+  )
+
   const columns = useMemo<ColumnDef<Membership>[]>(
     () => [
       {
         accessorKey: "user.name",
         header: "Nombre",
-        cell: ({ row }) => row.original.user.name,
+        cell: ({ row }) => (
+          <span className="flex items-center gap-2">
+            {row.original.user.name}
+            {row.original.userId === session.userId ? <Badge variant="secondary">Tú</Badge> : null}
+          </span>
+        ),
       },
       {
         accessorKey: "user.email",
@@ -177,8 +204,11 @@ function MembersPage() {
         header: "Rol",
         meta: { view: { primary: true } },
         cell: ({ row }) => (
-          <Badge variant={row.original.role === "owner" ? "success" : "secondary"}>
-            {row.original.role}
+          <Badge
+            variant={row.original.role === "owner" ? "success" : "secondary"}
+            title={ROLE_DESCRIPTIONS[row.original.role as OrgRole] ?? row.original.role}
+          >
+            {roleLabel(row.original.role)}
           </Badge>
         ),
       },
@@ -187,25 +217,28 @@ function MembersPage() {
         header: "",
         cell: ({ row }) => {
           const membership = row.original
-          if (!canWrite || membership.role === "owner") return null
+          // Sin gestión, sobre uno mismo o siendo propietario único: sin acciones.
+          if (!canManage || membership.userId === session.userId) return null
+          const isLastOwner = membership.role === "owner" && ownerCount <= 1
+          if (isLastOwner) return null
           return (
             <div className="text-right">
               <RowActions
                 label={`Acciones de ${membership.user.name}`}
                 items={[
-                  {
-                    key: "role",
-                    label: membership.role === "admin" ? "Bajar a member" : "Subir a admin",
-                    onSelect: () =>
-                      roleMutation.mutate({
-                        memberId: membership.id,
-                        role: membership.role === "admin" ? "member" : "admin",
-                      }),
-                  },
+                  ...assignable.map((role) => ({
+                    key: `role-${role}`,
+                    label:
+                      role === membership.role
+                        ? `${roleLabel(role)} (actual)`
+                        : `Asignar ${roleLabel(role).toLowerCase()}`,
+                    disabled: role === membership.role || roleMutation.isPending,
+                    onSelect: () => roleMutation.mutate({ memberId: membership.id, role }),
+                  })),
                   {
                     key: "remove",
                     label: "Revocar acceso",
-                    tone: "danger",
+                    tone: "danger" as const,
                     onSelect: () =>
                       setRemoving({ id: membership.id, label: membership.user.email }),
                   },
@@ -216,7 +249,7 @@ function MembersPage() {
         },
       },
     ],
-    [canWrite, roleMutation],
+    [assignable, canManage, ownerCount, roleMutation, session.userId],
   )
   const filteredMembers = useMemo(() => {
     const needle = search.toLowerCase()
@@ -230,7 +263,14 @@ function MembersPage() {
     const desc = sort.startsWith("-")
     const field = desc ? sort.slice(1) : sort
     const direction = desc ? -1 : 1
-    const roleRanks: Record<string, number> = { owner: 0, admin: 1, member: 2 }
+    const roleRanks: Record<string, number> = {
+      owner: 0,
+      admin: 1,
+      reception: 2,
+      dentist: 3,
+      cashier: 4,
+      member: 5,
+    }
     return [...rows].sort((a, b) => {
       if (field === "rol")
         return direction * ((roleRanks[a.role] ?? 99) - (roleRanks[b.role] ?? 99))
@@ -270,19 +310,26 @@ function MembersPage() {
               <DropdownMenuTrigger
                 render={
                   <Button type="button" variant="outline">
-                    Rol: {field.state.value === "admin" ? "admin" : "member"}
+                    Rol: {roleLabel(field.state.value)}
                   </Button>
                 }
               />
               <DropdownMenuContent>
-                <DropdownMenuItem onClick={() => field.handleChange("member")}>
-                  member
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => field.handleChange("admin")}>
-                  admin
-                </DropdownMenuItem>
+                {assignable.map((role) => (
+                  <DropdownMenuItem
+                    key={role}
+                    title={ROLE_DESCRIPTIONS[role]}
+                    onClick={() => field.handleChange(role)}
+                  >
+                    {roleLabel(role)}
+                  </DropdownMenuItem>
+                ))}
               </DropdownMenuContent>
             </DropdownMenu>
+            <p className="text-xs text-muted-foreground">
+              {ROLE_DESCRIPTIONS[field.state.value as OrgRole]}
+            </p>
+            <FieldError>{fieldErrorMessages(field.state.meta.errors)[0] ?? null}</FieldError>
           </Field>
         )}
       </form.Field>
@@ -304,6 +351,18 @@ function MembersPage() {
     },
   }
 
+  if (!canView) {
+    return (
+      <PageShell className="flex flex-col gap-6">
+        <PageHeader title="Miembros" subtitle={routeOrg.name} />
+        <EmptyState
+          title="Sin acceso"
+          description="Necesitas permiso de configuración para ver los miembros."
+        />
+      </PageShell>
+    )
+  }
+
   return (
     <PageShell className="flex flex-col gap-6">
       <MasterDetail
@@ -315,7 +374,7 @@ function MembersPage() {
           title="Miembros"
           subtitle={org?.name}
           actions={
-            canWrite ? (
+            canManage ? (
               <Button
                 type="button"
                 className="min-h-11"
@@ -336,11 +395,7 @@ function MembersPage() {
               key: "rol",
               label: "Rol",
               type: "select",
-              options: [
-                { value: "owner", label: "Owner" },
-                { value: "admin", label: "Admin" },
-                { value: "member", label: "Member" },
-              ],
+              options: ORG_ROLES.map((role) => ({ value: role, label: roleLabel(role) })),
             },
           ]}
           sortOptions={[
@@ -385,9 +440,12 @@ function MembersPage() {
                       className="flex items-center justify-between rounded-lg border border-border p-3 text-sm"
                     >
                       <span>
-                        {inv.email} <Badge variant="secondary">{inv.role}</Badge>
+                        {inv.email}{" "}
+                        <Badge variant="secondary" title={ROLE_DESCRIPTIONS[inv.role as OrgRole] ?? inv.role}>
+                          {roleLabel(inv.role)}
+                        </Badge>
                       </span>
-                      {canWrite ? (
+                      {canManage ? (
                         <RowActions
                           label={`Acciones de ${inv.email}`}
                           items={[

@@ -29,7 +29,7 @@ import {
   type Prescription,
   scheduleFollowUpApi,
 } from "../../lib/clinical-journey"
-import { useCanWrite } from "../../lib/crm"
+import { usePermission } from "../../lib/crm"
 import type { Encounter, PlanItem } from "../../lib/patients"
 
 const MAX_TITLE = 200
@@ -73,11 +73,13 @@ export function ControlesPanel({
   items?: PlanItem[]
 }): React.JSX.Element {
   const uid = useId()
-  const canWrite = useCanWrite()
+  const canWrite = usePermission("clinical.write")
+  const canRead = usePermission("clinical.read")
   const queryClient = useQueryClient()
   const list = useQuery({
     queryKey: ["follow-ups", patientId],
     queryFn: () => fetchFollowUps(patientId),
+    enabled: canRead,
   })
   const sessions = useQuery({
     queryKey: ["encounters", patientId, "finalizada"],
@@ -85,6 +87,7 @@ export function ControlesPanel({
       apiFetch<{ data: Encounter[] }>(
         `/api/patients/${patientId}/encounters?status=finalizada&limit=50`,
       ),
+    enabled: canRead,
   })
   const invalidate = () => {
     void queryClient.invalidateQueries({ queryKey: ["follow-ups", patientId] })
@@ -514,11 +517,13 @@ function PrescriptionEntry({
   items?: PlanItem[]
 }): React.JSX.Element {
   const uid = useId()
-  const canWrite = useCanWrite()
+  const canWrite = usePermission("clinical.write")
+  const canRead = usePermission("clinical.read")
   const queryClient = useQueryClient()
   const detail = useQuery({
     queryKey: ["prescription", patientId, prescription.id],
     queryFn: () => fetchPrescriptionDetail(patientId, prescription.id),
+    enabled: canRead,
   })
   const [cancelling, setCancelling] = useState(false)
   const [reason, setReason] = useState("")
@@ -659,11 +664,13 @@ export function RecetasPanel({
   items?: PlanItem[]
 }): React.JSX.Element {
   const uid = useId()
-  const canWrite = useCanWrite()
+  const canWrite = usePermission("clinical.write")
+  const canRead = usePermission("clinical.read")
   const queryClient = useQueryClient()
   const list = useQuery({
     queryKey: ["prescriptions", patientId],
     queryFn: () => fetchPrescriptions(patientId),
+    enabled: canRead,
   })
   const [planItemIdState, setPlanItemId] = useState(itemId ?? "")
   // Igual que en controles: desde el recorrido el tratamiento es el del

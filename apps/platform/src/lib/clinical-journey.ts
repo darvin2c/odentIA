@@ -378,6 +378,7 @@ export function createPaymentApi(
     method: PaymentMethod
     reference?: string | null
     notes?: string | null
+    shiftId?: string | null
   },
 ): Promise<{ data: Payment }> {
   return apiFetch<{ data: Payment }>(`${base(patientId)}/payments`, {
@@ -422,7 +423,7 @@ export function refundPaymentApi(
 export function voidPaymentApi(
   patientId: string,
   paymentId: string,
-  body: { reason: string },
+  body: { reason: string; compensateShiftId?: string | null },
 ): Promise<{ data: Payment }> {
   return apiFetch<{ data: Payment }>(`${base(patientId)}/payments/${paymentId}/void`, {
     method: "POST",

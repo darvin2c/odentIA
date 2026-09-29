@@ -1,0 +1,181 @@
+/**
+ * Matriz de roles y permisos por dominio (fuente única API/UI).
+ *
+ * BetterAuth sigue siendo la identidad (sesión, membresías, invitaciones);
+ * este módulo decide QUÉ puede hacer cada rol en cada dominio. La API lo
+ * consume con `canAccess` y la plataforma con `usePermission`.
+ *
+ * Dominios: patients (filiación administrativa), clinical (ficha clínica),
+ * appointments (agenda operativa), crm (contactos, oportunidades, campos),
+ * conversations (bandeja y mensajes), tasks (tareas), finance (caja y cobros),
+ * inventory (existencias), reports (reportes), settings (configuración),
+ * audit (auditoría), agent (agente IA). Cada dominio tiene `.read`/`.write`.
+ *
+ * Invariante: lo clínico (`clinical.*`) nunca se entrega a recepción/caja y
+ * lo financiero (`finance.*`) nunca a recepción/clínica. `member` es el
+ * mínimo seguro (solo ver tareas). Falla cerrado: rol o permiso
+ * desconocido siempre deniega, incluso para owner/admin.
+ */
+
+/** Roles de membresía de la organización. */
+export const ORG_ROLES = ["owner", "admin", "reception", "dentist", "cashier", "member"] as const;
+export type OrgRole = (typeof ORG_ROLES)[number];
+
+/** Dominios con permisos `.read`/`.write`. */
+export const PERMISSION_DOMAINS = [
+  "patients",
+  "clinical",
+  "appointments",
+  "crm",
+  "conversations",
+  "tasks",
+  "finance",
+  "inventory",
+  "reports",
+  "settings",
+  "audit",
+  "agent",
+] as const;
+export type PermissionDomain = (typeof PERMISSION_DOMAINS)[number];
+export type Permission = `${PermissionDomain}.${"read" | "write"}`;
+
+/** Etiquetas en español para la UI de miembros. */
+export const ROLE_LABELS: Record<OrgRole, string> = {
+  owner: "Propietario",
+  admin: "Administrador",
+  reception: "Recepción",
+  dentist: "Odontólogo",
+  cashier: "Caja",
+  member: "Miembro",
+};
+
+/** Qué hace cada rol, en español para la UI de miembros. */
+export const ROLE_DESCRIPTIONS: Record<OrgRole, string> = {
+  owner: "Acceso total, incluida la gestión de propietarios.",
+  admin: "Acceso total a todos los dominios.",
+  reception: "Filiación de pacientes, agenda, CRM, conversaciones y tareas. Sin clínica ni caja.",
+  dentist: "Lectura de pacientes, clínica completa, agenda, conversaciones y tareas. Sin caja ni CRM.",
+  cashier: "Lectura de pacientes, caja y tareas. Sin clínica ni agenda.",
+  member: "Acceso mínimo: solo ver tareas.",
+};
+
+const ALL_PERMISSIONS: Permission[] = PERMISSION_DOMAINS.flatMap((domain) => [
+  `${domain}.read` as Permission,
+  `${domain}.write` as Permission,
+]);
+
+/**
+ * Permisos explícitos por rol. owner/admin no figuran: tienen todo permiso
+ * conocido (ver `canAccess`). Nada aquí otorga gestión de propietarios de
+ * BetterAuth; eso lo refuerza el plugin organization (roles operativos sin
+ * `member:update`/`invitation:create`).
+ */
+const ROLE_PERMISSIONS: Record<Exclude<OrgRole, "owner" | "admin">, readonly Permission[]> = {
+  reception: [
+    "patients.read",
+    "patients.write",
+    "appointments.read",
+    "appointments.write",
+    "crm.read",
+    "crm.write",
+    "conversations.read",
+    "conversations.write",
+    "tasks.read",
+    "tasks.write",
+  ],
+  dentist: [
+    "patients.read",
+    "clinical.read",
+    "clinical.write",
+    "appointments.read",
+    "appointments.write",
+    "conversations.read",
+    "conversations.write",
+    "tasks.read",
+    "tasks.write",
+  ],
+  cashier: ["patients.read", "finance.read", "finance.write", "tasks.read", "tasks.write"],
+  member: ["tasks.read"],
+};
+
+function normalizeRole(role: string): OrgRole | null {
+  const normalized = role.trim().toLowerCase();
+  return (ORG_ROLES as readonly string[]).includes(normalized) ? (normalized as OrgRole) : null;
+}
+
+function isPermission(permission: string): permission is Permission {
+  const separator = permission.lastIndexOf(".");
+  if (separator < 0) return false;
+  const domain = permission.slice(0, separator);
+  const action = permission.slice(separator + 1);
+  return (
+    (PERMISSION_DOMAINS as readonly string[]).includes(domain) && (action === "read" || action === "write")
+  );
+}
+
+/**
+ * ¿Puede `role` ejercer `permission`? Falla cerrado ante rol o permiso
+ * desconocido. owner/admin tienen todo permiso conocido.
+ */
+export function canAccess(role: string, permission: string): boolean {
+  if (!isPermission(permission)) return false;
+  const normalized = normalizeRole(role);
+  if (!normalized) return false;
+  if (normalized === "owner" || normalized === "admin") return true;
+  return ROLE_PERMISSIONS[normalized].includes(permission);
+}
+
+/** ¿Puede `role` ejercer al menos uno de `permissions`? (puertas O). */
+export function canAccessAny(role: string, permissions: readonly string[]): boolean {
+  return permissions.some((permission) => canAccess(role, permission));
+}
+
+/** Roles que `memberRole` puede asignar a otros (sin escalada propia). */
+export function assignableRoles(memberRole: string): OrgRole[] {
+  const normalized = normalizeRole(memberRole);
+  if (normalized === "owner") return [...ORG_ROLES];
+  if (normalized === "admin") return ORG_ROLES.filter((role) => role !== "owner");
+  return [];
+}
+
+export { ALL_PERMISSIONS };
+
+interface PlatformPathRule {
+  prefix: string;
+  permissions: Permission[];
+}
+
+/**
+ * Mapa ruta de plataforma → permisos de lectura para el guard de `_org`
+ * (la navegación lo consume para filtrar con `canAccessAny`; cada pantalla
+ * re-verifica con `usePermission`). Rutas en inglés, `null` = pública o
+ * fuera del panel. El tarifario lo ven clínica, agenda, caja y ajuste.
+ */
+const PLATFORM_PATH_RULES: PlatformPathRule[] = [
+  { prefix: "/agenda", permissions: ["appointments.read"] },
+  { prefix: "/patients", permissions: ["patients.read"] },
+  { prefix: "/inbox", permissions: ["conversations.read"] },
+  { prefix: "/contacts", permissions: ["crm.read"] },
+  { prefix: "/opportunities", permissions: ["crm.read"] },
+  { prefix: "/tasks", permissions: ["tasks.read"] },
+  { prefix: "/services", permissions: ["clinical.read", "appointments.read", "finance.read", "settings.read"] },
+  { prefix: "/caja", permissions: ["finance.read"] },
+  { prefix: "/finance", permissions: ["finance.read"] },
+  { prefix: "/inventory", permissions: ["inventory.read"] },
+  { prefix: "/reports", permissions: ["reports.read"] },
+  { prefix: "/audit", permissions: ["audit.read"] },
+  { prefix: "/agent", permissions: ["agent.read"] },
+  { prefix: "/settings", permissions: ["settings.read"] },
+  { prefix: "/members", permissions: ["settings.read"] },
+  { prefix: "/branches", permissions: ["settings.read"] },
+  // Acceso staff del portal (el portal público /portal es público, sin regla).
+  { prefix: "/patient-access", permissions: ["patients.write"] },
+];
+
+export function platformPathPermission(pathname: string): Permission[] | null {
+  return (
+    PLATFORM_PATH_RULES.find(
+      (rule) => pathname === rule.prefix || pathname.startsWith(`${rule.prefix}/`),
+    )?.permissions ?? null
+  );
+}

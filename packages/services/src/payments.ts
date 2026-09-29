@@ -12,12 +12,13 @@ import {
   treatmentPlan,
   treatmentPlanItem,
 } from "@odentia/db/schema/clinical"
+import { cashMovement, cashShift } from "@odentia/db/schema/finance"
 import { auditEvent } from "@odentia/db/schema/org"
 import { and, asc, eq, isNull, sql } from "drizzle-orm"
 import { notFound, ServiceError, validation } from "./errors.js"
+import { linkPaymentToShift, refreshPlansForCharge, voidPlansForCharge } from "./finance.js"
 import { requirePatient } from "./patients.js"
 import { requireLinkedActiveContact } from "./responsibilities.js"
-
 export const PAYMENT_METHODS = [
   "efectivo",
   "tarjeta",
@@ -353,6 +354,7 @@ export async function voidCharge(
     )
     .returning()
   await audit(tx, orgId, actorUserId, "patient_charge", id, "charge.voided")
+  await voidPlansForCharge(tx, orgId, actorUserId, id)
   return row
 }
 export interface CreatePaymentInput {
@@ -363,6 +365,12 @@ export interface CreatePaymentInput {
   method: (typeof PAYMENT_METHODS)[number]
   reference?: string | null
   notes?: string | null
+  /**
+   * Turno abierto donde ingresa el cobro (una sola vez por pago). El medio
+   * distingue el arqueo: efectivo suma al contado; tarjeta/transferencia y
+   * billeteras quedan trazadas como electrónicas sin entrar al contado.
+   */
+  shiftId?: string | null
 }
 export async function createPayment(
   tx: Db,
@@ -376,10 +384,11 @@ export async function createPayment(
     throw validation("Medio de pago inválido")
   if (input.payerContactId)
     await requireLinkedActiveContact(tx, orgId, patientId, input.payerContactId)
+  const { shiftId, ...payment } = input
   const [row] = await tx
     .insert(patientPayment)
     .values({
-      ...input,
+      ...payment,
       organizationId: orgId,
       patientId,
       amountCents: assertPositiveCents(input.amountCents),
@@ -389,8 +398,10 @@ export async function createPayment(
     })
     .returning()
   await audit(tx, orgId, actorUserId, "patient_payment", row.id, "payment.created")
+  if (shiftId) await linkPaymentToShift(tx, orgId, actorUserId, shiftId, row)
   return row
 }
+
 export async function applyPayment(
   tx: Db,
   orgId: string,
@@ -434,6 +445,7 @@ export async function applyPayment(
     })
     .returning()
   await audit(tx, orgId, actorUserId, "patient_payment_application", row.id, "payment.applied")
+  await refreshPlansForCharge(tx, orgId, actorUserId, charge.id)
   return row
 }
 export async function voidPaymentApplication(
@@ -466,6 +478,7 @@ export async function voidPaymentApplication(
     id,
     "payment.application_voided",
   )
+  await refreshPlansForCharge(tx, orgId, actorUserId, current.chargeId)
   return row
 }
 export async function refundPayment(
@@ -495,6 +508,20 @@ export async function refundPayment(
     })
     .returning()
   await audit(tx, orgId, actorUserId, "patient_payment_refund", row.id, "payment.refunded")
+  const applied = await tx
+    .select({ chargeId: patientPaymentApplication.chargeId })
+    .from(patientPaymentApplication)
+    .where(
+      and(
+        eq(patientPaymentApplication.organizationId, orgId),
+        eq(patientPaymentApplication.patientId, patientId),
+        eq(patientPaymentApplication.paymentId, paymentId),
+        isNull(patientPaymentApplication.voidedAt),
+      ),
+    )
+  for (const chargeId of new Set(applied.map((a) => a.chargeId))) {
+    await refreshPlansForCharge(tx, orgId, actorUserId, chargeId)
+  }
   return row
 }
 export async function voidPayment(
@@ -503,19 +530,87 @@ export async function voidPayment(
   actorUserId: string,
   patientId: string,
   paymentId: string,
-  input: { reason: string },
+  input: { reason: string; compensateShiftId?: string | null },
 ) {
   await lockAccount(tx, orgId, patientId)
   const payment = await paymentRow(tx, orgId, patientId, paymentId)
   const balance = await paymentBalance(tx, orgId, patientId, payment)
   if (balance.applications.length || balance.refunds.length)
     throw conflict("PAYMENT_HAS_MOVEMENTS", "El pago tiene aplicaciones activas o devoluciones")
+  const voidReason = reason(input.reason)
+  const [movement] = await tx
+    .select()
+    .from(cashMovement)
+    .where(
+      and(
+        eq(cashMovement.organizationId, orgId),
+        eq(cashMovement.patientPaymentId, paymentId),
+        isNull(cashMovement.voidedAt),
+      ),
+    )
+  if (movement) {
+    const [shift] = await tx
+      .select()
+      .from(cashShift)
+      .where(and(eq(cashShift.id, movement.shiftId), eq(cashShift.organizationId, orgId)))
+    if (!shift) throw notFound("Turno de caja")
+    if (shift.status === "abierta") {
+      await tx
+        .update(cashMovement)
+        .set({ voidedAt: new Date(), voidedBy: actorUserId, voidReason })
+        .where(eq(cashMovement.id, movement.id))
+      await audit(tx, orgId, actorUserId, "cash_movement", movement.id, "cash.movement_voided")
+    } else {
+      // Turno cerrado e inmutable: no se reescribe; el dinero sale con una
+      // compensación nueva en un turno abierto de la misma sede y moneda.
+      const compensateId = input.compensateShiftId
+      if (!compensateId)
+        throw conflict(
+          "SHIFT_CLOSED_NEEDS_COMPENSATION",
+          "El turno donde ingresó el cobro ya cerró y no se modifica: indica un turno abierto de la misma sede y moneda para registrar la compensación",
+        )
+      const [target] = await tx
+        .select()
+        .from(cashShift)
+        .where(and(eq(cashShift.id, compensateId), eq(cashShift.organizationId, orgId)))
+      if (!target) throw notFound("Turno de caja")
+      if (target.status !== "abierta")
+        throw conflict("SHIFT_CLOSED", "El turno de compensación no está abierto")
+      if (target.branchId !== shift.branchId || target.currency !== payment.currency)
+        throw conflict(
+          "COMPENSATION_MISMATCH",
+          "La compensación debe ir a un turno abierto de la misma sede y moneda",
+        )
+      const [compensation] = await tx
+        .insert(cashMovement)
+        .values({
+          organizationId: orgId,
+          shiftId: target.id,
+          direction: "egreso",
+          kind: "devolucion",
+          amountCents: payment.amountCents,
+          currency: payment.currency,
+          method: payment.method,
+          concept: `Compensación por anulación de cobro ${payment.method}`,
+          createdBy: actorUserId,
+        })
+        .returning()
+      await audit(
+        tx,
+        orgId,
+        actorUserId,
+        "cash_movement",
+        compensation.id,
+        "cash.compensation_created",
+      )
+    }
+  }
   const [row] = await tx
     .update(patientPayment)
     .set({
       voidedAt: new Date(),
       voidedBy: actorUserId,
-      voidReason: reason(input.reason),
+      voidReason,
       updatedAt: new Date(),
     })
     .where(

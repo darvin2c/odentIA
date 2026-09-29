@@ -40,6 +40,7 @@ import { Building2, Plus } from "lucide-react"
 import { type FormEvent, useCallback, useMemo, useState } from "react"
 import { z } from "zod"
 import { ApiError, apiFetch } from "../../lib/api"
+import { usePermission } from "../../lib/crm"
 import { useOrgProfile } from "../../lib/org"
 
 export const Route = createFileRoute("/_org/branches")({
@@ -181,7 +182,7 @@ function BranchesPage() {
   // meta del formulario por sí solo (los campos se re-renderizan por su cuenta).
   const isDirty = useStore(form.store, (state) => state.isDirty)
 
-  const canWrite = useCanWrite()
+  const canWrite = usePermission("settings.write")
 
   /**
    * Abre el formulario sobre una sucursal (o una nueva). El panel lateral no es
@@ -471,12 +472,4 @@ function BranchesPage() {
       />
     </PageShell>
   )
-}
-
-/** Rol del usuario en la org del host: owner/admin pueden escribir. */
-function useCanWrite(): boolean {
-  const { org, session } = orgRouteApi.useRouteContext()
-  const me = org.members.find((m) => m.userId === session.userId)
-  const role = me?.role ?? "member"
-  return role === "owner" || role === "admin"
 }

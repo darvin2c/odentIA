@@ -29,7 +29,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link, useNavigate } from "@tanstack/react-router"
 import { useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
-import { type ContactFull, type ContactListItem, timeAgo, useCanWrite } from "../../lib/crm"
+import { type ContactFull, type ContactListItem, timeAgo, usePermission } from "../../lib/crm"
 import { useOrgProfile } from "../../lib/org"
 import type { PatientContactLink, PatientFull } from "../../lib/patients"
 import { ContactConversationDialog } from "../contact-conversation-dialog"
@@ -97,7 +97,8 @@ function useInvalidatePatient(patientId: string) {
 
 /** Contactos vinculados, procedencia y acciones de relación de la ficha del paciente. */
 export function PatientContactSection({ detail }: { detail: PatientFull }) {
-  const canWrite = useCanWrite()
+  const canWrite = usePermission("patients.write")
+  const canChat = usePermission("conversations.write")
   const navigate = useNavigate()
   const patientId = detail.patient.id
   const invalidate = useInvalidatePatient(patientId)
@@ -130,29 +131,35 @@ export function PatientContactSection({ detail }: { detail: PatientFull }) {
       <div className="flex flex-col gap-6 rounded-md bg-card p-6">
         <div className="flex flex-row flex-wrap items-center justify-between gap-2">
           <div className="font-heading text-base font-medium">Contactos vinculados</div>
-          {canWrite ? (
+          {(canWrite || canChat) ? (
             <div className="flex flex-wrap gap-2">
-              <Button type="button" size="sm" variant="outline" onClick={() => setLinkOpen(true)}>
-                Vincular contacto
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                disabled={detail.contacts.length === 0}
-                onClick={() => setContactDialogOpen(true)}
-              >
-                Contactar
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                disabled={detail.contacts.length === 0}
-                onClick={() => setConversationsOpen(true)}
-              >
-                Ver conversaciones
-              </Button>
+              {canWrite ? (
+                <Button type="button" size="sm" variant="outline" onClick={() => setLinkOpen(true)}>
+                  Vincular contacto
+                </Button>
+              ) : null}
+              {canChat ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={detail.contacts.length === 0}
+                  onClick={() => setContactDialogOpen(true)}
+                >
+                  Contactar
+                </Button>
+              ) : null}
+              {canWrite ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={detail.contacts.length === 0}
+                  onClick={() => setConversationsOpen(true)}
+                >
+                  Ver conversaciones
+                </Button>
+              ) : null}
             </div>
           ) : null}
         </div>
@@ -352,6 +359,7 @@ function PatientConversationsDialog({
   detail: PatientFull
   onClose: () => void
 }) {
+  const canRead = usePermission("patients.read")
   const contactsQuery = useQuery({
     queryKey: ["patient-contact-conversations", detail.patient.id],
     queryFn: async () => {
@@ -363,6 +371,7 @@ function PatientConversationsDialog({
       )
       return entries
     },
+    enabled: canRead,
   })
   const entries = contactsQuery.data ?? []
   return (
@@ -449,6 +458,7 @@ function LinkContactDialog({
 }) {
   const patientId = detail.patient.id
   const invalidate = useInvalidatePatient(patientId)
+  const canRead = usePermission("patients.read")
   // El país del perfil define la máscara del teléfono que se captura.
   const profile = useOrgProfile()
   const countryCode = normalizeCountry(profile.data?.countryCode)
@@ -478,7 +488,7 @@ function LinkContactDialog({
       params.set("limit", "10")
       return apiFetch<{ data: ContactListItem[] }>(`/api/contacts?${params}`)
     },
-    enabled: submittedQuery.trim().length > 0,
+    enabled: canRead && submittedQuery.trim().length > 0,
   })
 
   const linkMutation = useMutation({

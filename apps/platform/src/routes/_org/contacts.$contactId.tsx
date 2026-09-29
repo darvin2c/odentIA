@@ -33,9 +33,9 @@ import {
   type ContactFull,
   type ContactListItem,
   type FieldDef,
-  type Pipeline,
+  type OpportunityListItem,
   timeAgo,
-  useCanWrite,
+  usePermission,
 } from "../../lib/crm"
 import { useOrgProfile } from "../../lib/org"
 import { useOrgEvents } from "../../lib/org-events"
@@ -78,14 +78,13 @@ function ContactDetailPage() {
   // El país del perfil define la máscara del teléfono que se captura.
   const profile = useOrgProfile()
   const countryCode = normalizeCountry(profile.data?.countryCode)
-  const canWrite = useCanWrite()
+  const canWrite = usePermission("crm.write")
   const { contactId } = Route.useParams()
   const [editOpen, setEditOpen] = useState(false)
   const [draftName, setDraftName] = useState("")
   const [draftPhone, setDraftPhone] = useState("")
   const [draftEmail, setDraftEmail] = useState("")
   const [draftNotes, setDraftNotes] = useState("")
-  const [draftStage, setDraftStage] = useState("")
   const [draftAssignee, setDraftAssignee] = useState("")
   const [customOpen, setCustomOpen] = useState(false)
   const [draftCustom, setDraftCustom] = useState<Record<string, unknown>>({})
@@ -125,10 +124,14 @@ function ContactDetailPage() {
     queryFn: () => apiFetch<{ data: ContactFull }>(`/api/contacts/${contactId}`),
   })
   const detail = detailQuery.data?.data ?? null
-  const pipelinesQuery = useQuery({
-    queryKey: ["pipelines"],
-    queryFn: () => apiFetch<{ data: Pipeline[] }>("/api/pipelines"),
+  const opportunitiesQuery = useQuery({
+    queryKey: ["contact-opportunities", contactId],
+    queryFn: () =>
+      apiFetch<{ data: OpportunityListItem[] }>(
+        `/api/opportunities?contactId=${contactId}&limit=100`,
+      ),
   })
+  const contactOpportunities = opportunitiesQuery.data?.data ?? []
   const fieldsQuery = useQuery({
     queryKey: ["fields"],
     queryFn: () => apiFetch<{ data: FieldDef[] }>("/api/fields"),
@@ -265,7 +268,6 @@ function ContactDetailPage() {
     )
   }
 
-  const stages = pipelinesQuery.data?.data.flatMap((p) => p.stages) ?? []
   const fieldDefs = fieldsQuery.data?.data ?? []
   const customFields = detail.contact.customFields
   const patients = detail.patients
@@ -443,7 +445,6 @@ function ContactDetailPage() {
                   setDraftPhone(detail.contact.phone ?? "")
                   setDraftEmail(detail.contact.email ?? "")
                   setDraftNotes(detail.contact.notes ?? "")
-                  setDraftStage(detail.contact.stageId ?? "")
                   setDraftAssignee(detail.contact.assignedUserId ?? "")
                   setEditOpen(true)
                 }}
@@ -470,8 +471,27 @@ function ContactDetailPage() {
               <dd>{detail.contact.notes || "—"}</dd>
             </div>
             <div className="flex gap-2">
-              <dt className="w-24 shrink-0 text-muted-foreground">Etapa</dt>
-              <dd>{stages.find((s) => s.id === detail.contact.stageId)?.name ?? "—"}</dd>
+              <dt className="w-24 shrink-0 text-muted-foreground">Oportunidades</dt>
+              <dd className="flex flex-col gap-1">
+                {contactOpportunities.length === 0 && <span>Sin oportunidades</span>}
+                {contactOpportunities.map((o) => (
+                  <span key={o.id} className="flex items-center gap-1.5">
+                    <Link
+                      to="/opportunities/$opportunityId"
+                      params={{ opportunityId: o.id }}
+                      className="hover:underline"
+                    >
+                      {o.title}
+                    </Link>
+                    <Badge variant="secondary">{o.stageName}</Badge>
+                    {o.status !== "open" && (
+                      <Badge variant={o.status === "won" ? "default" : "outline"}>
+                        {o.status === "won" ? "Ganada" : "Perdida"}
+                      </Badge>
+                    )}
+                  </span>
+                ))}
+              </dd>
             </div>
             <div className="flex gap-2">
               <dt className="w-24 shrink-0 text-muted-foreground">Asignado</dt>
@@ -750,7 +770,6 @@ function ContactDetailPage() {
               phone: draftPhone || null,
               email: draftEmail.trim() ? draftEmail.trim() : null,
               notes: draftNotes.trim(),
-              stageId: draftStage || null,
               assignedUserId: draftAssignee || null,
             },
             { onSuccess: () => setEditOpen(false) },
@@ -782,22 +801,6 @@ function ContactDetailPage() {
           <Field>
             <FieldLabel>Notas</FieldLabel>
             <Input value={draftNotes} onChange={(e) => setDraftNotes(e.target.value)} />
-          </Field>
-          <Field>
-            <FieldLabel>Etapa</FieldLabel>
-            <select
-              aria-label="Etapa"
-              className="rounded-md border bg-background px-2 py-1.5 text-sm"
-              value={draftStage}
-              onChange={(e) => setDraftStage(e.target.value)}
-            >
-              <option value="">—</option>
-              {stages.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name}
-                </option>
-              ))}
-            </select>
           </Field>
           <Field>
             <FieldLabel>Asignado</FieldLabel>

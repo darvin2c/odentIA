@@ -26,7 +26,7 @@ import {
   resumeTreatmentApi,
   suspendTreatmentApi,
 } from "../../lib/clinical-journey"
-import { useCanWrite } from "../../lib/crm"
+import { usePermission } from "../../lib/crm"
 import type {
   Encounter,
   OdontogramEntry,
@@ -92,20 +92,24 @@ export function RecorridoClinicoTab({
   onTabChange: (tab: RecorridoTarget, target?: RecorridoNavigation) => void
 }): React.JSX.Element {
   const uid = useId()
-  const canWrite = useCanWrite()
+  const canWrite = usePermission("clinical.write")
+  const canRead = usePermission("clinical.read")
   const queryClient = useQueryClient()
 
   const itemsQuery = useQuery({
     queryKey: ["plan-items", patientId],
     queryFn: () => apiFetch<{ data: PlanItem[] }>(`/api/patients/${patientId}/plan`),
+    enabled: canRead,
   })
   const summaryQuery = useQuery({
     queryKey: ["patient-summary", patientId],
     queryFn: () => apiFetch<{ data: PatientSummary }>(`/api/patients/${patientId}/summary`),
+    enabled: canRead,
   })
   const odontogramQuery = useQuery({
     queryKey: ["odontogram", patientId],
     queryFn: () => apiFetch<{ data: OdontogramState }>(`/api/patients/${patientId}/odontogram`),
+    enabled: canRead,
   })
 
   const items = itemsQuery.data?.data ?? []
@@ -130,7 +134,7 @@ export function RecorridoClinicoTab({
   const journeyQuery = useQuery({
     queryKey: ["treatment-journey", patientId, selectedId],
     queryFn: () => fetchTreatmentJourney(patientId, selectedId),
-    enabled: selectedId !== "",
+    enabled: canRead && selectedId !== "",
   })
   const journey = journeyQuery.data?.data ?? null
   const summaryRow = summaryQuery.data?.data.treatmentJourneys.find(

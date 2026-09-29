@@ -10,6 +10,7 @@ import {
 import { betterAuth } from "better-auth"
 import { drizzleAdapter } from "better-auth/adapters/drizzle"
 import { organization } from "better-auth/plugins"
+import { adminAc, defaultAc, memberAc, ownerAc } from "better-auth/plugins/organization/access"
 
 export interface CreateAuthOptions {
   db: Db
@@ -94,6 +95,36 @@ export function createAuth({
     trustedOrigins,
     plugins: [
       organization({
+        // Roles operativos: existen en `member.role` para que la matriz de
+        // `permissions.ts` decida por dominio. Sin gestión de miembros ni
+        // invitaciones (igual que `member`): solo owner/admin administran,
+        // BetterAuth impide la escalada propia y el último owner persiste.
+        roles: {
+          owner: ownerAc,
+          admin: adminAc,
+          member: memberAc,
+          reception: defaultAc.newRole({
+            organization: [],
+            member: [],
+            invitation: [],
+            team: [],
+            ac: ["read"],
+          }),
+          dentist: defaultAc.newRole({
+            organization: [],
+            member: [],
+            invitation: [],
+            team: [],
+            ac: ["read"],
+          }),
+          cashier: defaultAc.newRole({
+            organization: [],
+            member: [],
+            invitation: [],
+            team: [],
+            ac: ["read"],
+          }),
+        },
         sendInvitationEmail: async ({ email, inviter, organization: org, invitation }) => {
           const template = invitationTemplate({
             organizationName: org.name,
@@ -109,3 +140,4 @@ export function createAuth({
 
 export type Auth = ReturnType<typeof createAuth>
 export type Session = Auth["$Infer"]["Session"]
+export * from "./permissions.js"

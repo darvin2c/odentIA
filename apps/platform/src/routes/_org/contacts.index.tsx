@@ -20,7 +20,7 @@ import {
 } from "@odentia/ui-patterns"
 import { useForm, useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { createFileRoute, getRouteApi, useNavigate } from "@tanstack/react-router"
+import { createFileRoute, getRouteApi, Link, useNavigate } from "@tanstack/react-router"
 import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-table"
 import { MessageCircle, Plus, Send } from "lucide-react"
 import { type FormEvent, useMemo, useState } from "react"
@@ -28,7 +28,7 @@ import { z } from "zod"
 import { ContactConversationDialog } from "../../components/contact-conversation-dialog"
 import { TagsInput } from "../../components/patient/tags-input"
 import { ApiError, apiFetch } from "../../lib/api"
-import { type ContactListItem, type Pipeline, timeAgo, useCanWrite } from "../../lib/crm"
+import { type ContactListItem, type OpportunityListItem, timeAgo, usePermission } from "../../lib/crm"
 import { useOrgProfile } from "../../lib/org"
 import { useOrgEvents } from "../../lib/org-events"
 
@@ -72,31 +72,37 @@ function ContactsPage() {
   // El país del perfil define la máscara del teléfono que se captura.
   const profile = useOrgProfile()
   const countryCode = normalizeCountry(profile.data?.countryCode)
-  const canWrite = useCanWrite()
+  const canWrite = usePermission("crm.write")
   const listSearch = useListSearch()
   const q = listSearch.get("q") ?? ""
-  const stageId = listSearch.get("stageId") ?? undefined
   const activeFilter = listSearch.get("isActive") ?? "true"
   const sort = listSearch.get("sort")
 
-  const pipelinesQuery = useQuery({
-    queryKey: ["pipelines"],
-    queryFn: () => apiFetch<{ data: Pipeline[] }>("/api/pipelines"),
+  // Conteo de oportunidades abiertas por contacto (una sola consulta para
+  // toda la tabla; el embudo vive en el Pipeline, aquí solo el conteo).
+  const openCountsQuery = useQuery({
+    queryKey: ["contact-opportunity-counts"],
+    queryFn: () =>
+      apiFetch<{ data: OpportunityListItem[] }>("/api/opportunities?status=open&limit=100"),
   })
-  const stages = useMemo(
-    () => pipelinesQuery.data?.data.flatMap((p) => p.stages) ?? [],
-    [pipelinesQuery.data],
-  )
-  const stageName = useMemo(() => new Map(stages.map((s) => [s.id, s.name])), [stages])
+  const openCounts = useMemo(() => {
+    const counts: Record<string, { total: number; firstId: string | null }> = {}
+    for (const opp of openCountsQuery.data?.data ?? []) {
+      const entry = counts[opp.contactId] ?? { total: 0, firstId: null }
+      entry.total += 1
+      entry.firstId ??= opp.id
+      counts[opp.contactId] = entry
+    }
+    return counts
+  }, [openCountsQuery.data])
 
   const contactsQuery = useQuery({
     // El backend espera `q` directamente, sin mapeo. Cambiar filtros resetea
     // el cursor vía useListSearch.
-    queryKey: ["contacts", q, stageId, activeFilter],
+    queryKey: ["contacts", q, activeFilter],
     queryFn: () => {
       const params = new URLSearchParams()
       if (q.trim()) params.set("q", q.trim())
-      if (stageId) params.set("stageId", stageId)
       params.set(
         "isActive",
         activeFilter === "false" ? "false" : activeFilter === "all" ? "all" : "true",
@@ -137,9 +143,9 @@ function ContactsPage() {
     }
     return out
   }, [contactsQuery.data])
-
   useOrgEvents(["message.created", "conversation.updated"], () => {
     void queryClient.invalidateQueries({ queryKey: ["contacts"] })
+    void queryClient.invalidateQueries({ queryKey: ["contact-opportunity-counts"] })
   })
 
   const mode = useDetailMode()
@@ -225,15 +231,30 @@ function ContactsPage() {
         ),
       },
       {
-        id: "stage",
-        header: "Etapa",
+        id: "contacto",
+        header: "Contacto",
         meta: { view: { primary: true } },
         cell: ({ row }) =>
-          row.original.stageId ? (
-            <Badge variant="secondary">{stageName.get(row.original.stageId) ?? "—"}</Badge>
-          ) : (
-            "—"
-          ),
+          [row.original.phone, row.original.email].filter(Boolean).join(" · ") || "—",
+      },
+      {
+        id: "opportunities",
+        header: "Oportunidades",
+        cell: ({ row }) => {
+          const entry = openCounts[row.original.id]
+          if (!entry || entry.total === 0 || !entry.firstId) return "—"
+          return (
+            <Link
+              to="/opportunities/$opportunityId"
+              params={{ opportunityId: entry.firstId }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <Badge variant="secondary">
+                {entry.total === 1 ? "1 abierta" : `${entry.total} abiertas`}
+              </Badge>
+            </Link>
+          )
+        },
       },
       {
         accessorKey: "tags",
@@ -252,7 +273,6 @@ function ContactsPage() {
       {
         accessorKey: "lastInteractionAt",
         header: "Última actividad",
-        meta: { view: { primary: true } },
         cell: ({ row }) => timeAgo(row.original.lastInteractionAt),
       },
       {
@@ -321,10 +341,10 @@ function ContactsPage() {
         ),
       },
     ],
-    [org.members, stageName, canWrite, activeMutation, navigate],
+    [org.members, openCounts, canWrite, activeMutation, navigate],
   )
 
-  const hasFilters = q.trim() !== "" || stageId !== undefined || activeFilter !== "true"
+  const hasFilters = q.trim() !== "" || activeFilter !== "true"
   const table = useReactTable({
     data: visibleContacts,
     columns,
@@ -441,12 +461,6 @@ function ContactsPage() {
                 { value: "false", label: "Archivados" },
                 { value: "all", label: "Todos" },
               ],
-            },
-            {
-              key: "stageId",
-              label: "Etapa",
-              type: "select",
-              options: stages.map((s) => ({ value: s.id, label: s.name })),
             },
           ]}
           sortOptions={[

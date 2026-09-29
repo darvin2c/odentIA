@@ -32,7 +32,7 @@ import { MessageCircle, Plus, Send } from "lucide-react"
 import { type FormEvent, useMemo, useState } from "react"
 import { z } from "zod"
 import { ApiError, apiFetch } from "../../lib/api"
-import { type ConnectionItem, useCanWrite } from "../../lib/crm"
+import { type ConnectionItem, usePermission } from "../../lib/crm"
 
 export const Route = createFileRoute("/_org/settings/channels")({
   component: ChannelsPage,
@@ -52,20 +52,51 @@ const whatsappSchema = z.object({
   templates: z.string(),
 })
 
+const messengerSchema = z.object({
+  displayName: z.string().min(1, "Ingresa el nombre"),
+  pageId: z.string().min(1, "Requerido"),
+  pageAccessToken: z.string().min(1, "Requerido"),
+  appSecret: z.string().min(1, "Requerido"),
+})
+
+const instagramSchema = z.object({
+  displayName: z.string().min(1, "Ingresa el nombre"),
+  instagramId: z.string().min(1, "Requerido"),
+  accessToken: z.string().min(1, "Requerido"),
+  appSecret: z.string().min(1, "Requerido"),
+})
+
+type ProviderId = "telegram_bot_api" | "whatsapp_cloud_api" | "messenger" | "instagram"
+
 /** Proveedores ofrecidos al crear una conexión: etiqueta única para el select. */
-const PROVIDERS = [
+const PROVIDERS: { value: ProviderId; label: string }[] = [
   { value: "telegram_bot_api", label: "Telegram (BotFather)" },
   { value: "whatsapp_cloud_api", label: "WhatsApp (Cloud API)" },
-] as const
+  { value: "messenger", label: "Messenger (página de Facebook)" },
+  { value: "instagram", label: "Instagram (cuenta profesional)" },
+]
 
+/** Canal interno que cada proveedor exige (validado en el servicio). */
+const PROVIDER_CHANNEL: Record<ProviderId, string> = {
+  telegram_bot_api: "telegram",
+  whatsapp_cloud_api: "whatsapp",
+  messenger: "messenger",
+  instagram: "instagram",
+}
+
+const CHANNEL_LABEL: Record<string, string> = {
+  whatsapp: "WhatsApp",
+  telegram: "Telegram",
+  messenger: "Messenger",
+  instagram: "Instagram",
+}
 function ChannelsPage() {
   const queryClient = useQueryClient()
-  const canWrite = useCanWrite()
+  const canRead = usePermission("settings.read")
+  const canWrite = usePermission("settings.write")
   const mode = useDetailMode()
   const [formOpen, setFormOpen] = useState(false)
-  const [provider, setProvider] = useState<"telegram_bot_api" | "whatsapp_cloud_api">(
-    "telegram_bot_api",
-  )
+  const [provider, setProvider] = useState<ProviderId>("telegram_bot_api")
   const [created, setCreated] = useState<{ webhookUrl: string; webhookSecret: string } | null>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -121,20 +152,45 @@ function ChannelsPage() {
       }),
   })
 
-  // Dos formularios (uno por proveedor): el contenedor está sucio si cualquiera
-  // tiene cambios sin guardar. Suscripción explícita porque el render de la
-  // página no se entera de los cambios de meta por sí solo. Ambas se llaman
-  // siempre: encadenarlas con `||` las volvería condicionales.
+  const msgrForm = useForm({
+    defaultValues: { displayName: "", pageId: "", pageAccessToken: "", appSecret: "" },
+    validators: { onSubmit: messengerSchema },
+    onSubmit: ({ value }) =>
+      createConnection("messenger", "messenger", value.displayName, {
+        pageId: value.pageId,
+        pageAccessToken: value.pageAccessToken,
+        appSecret: value.appSecret,
+      }),
+  })
+
+  const igForm = useForm({
+    defaultValues: { displayName: "", instagramId: "", accessToken: "", appSecret: "" },
+    validators: { onSubmit: instagramSchema },
+    onSubmit: ({ value }) =>
+      createConnection("instagram", "instagram", value.displayName, {
+        instagramId: value.instagramId,
+        accessToken: value.accessToken,
+        appSecret: value.appSecret,
+      }),
+  })
+
+  // Cuatro formularios (uno por proveedor): el contenedor está sucio si
+  // cualquiera tiene cambios sin guardar. Todas se llaman siempre:
+  // encadenarlas con `||` las volvería condicionales.
   const tgDirty = useStore(tgForm.store, (state) => state.isDirty)
   const waDirty = useStore(waForm.store, (state) => state.isDirty)
-  const isDirty = tgDirty || waDirty
+  const msgrDirty = useStore(msgrForm.store, (state) => state.isDirty)
+  const igDirty = useStore(igForm.store, (state) => state.isDirty)
+  const isDirty = tgDirty || waDirty || msgrDirty || igDirty
 
-  /** Cierra y deja ambos formularios prístinos: sin el reset, el dirty sobrevive
+  /** Cierra y deja los formularios prístinos: sin el reset, el dirty sobrevive
    *  al cierre y el próximo abrir pediría confirmar cambios ya guardados. */
   function closeForm() {
     setFormOpen(false)
     tgForm.reset()
     waForm.reset()
+    msgrForm.reset()
+    igForm.reset()
   }
 
   async function createConnection(
@@ -193,7 +249,9 @@ function ChannelsPage() {
         header: "Conexión",
         cell: ({ row }) => (
           <span className="flex items-center gap-2">
-            {row.original.channel === "whatsapp" ? (
+            {row.original.channel === "messenger" || row.original.channel === "instagram" ? (
+              <MessageCircle className="size-4 shrink-0 text-blue-600" aria-hidden />
+            ) : row.original.channel === "whatsapp" ? (
               <MessageCircle className="size-4 shrink-0 text-green-600" aria-hidden />
             ) : (
               <Send className="size-4 shrink-0 text-sky-600" aria-hidden />
@@ -212,9 +270,7 @@ function ChannelsPage() {
         header: "Canal",
         meta: { view: { primary: true } },
         cell: ({ row }) => (
-          <Badge variant="secondary">
-            {row.original.channel === "whatsapp" ? "WhatsApp" : "Telegram"}
-          </Badge>
+          <Badge variant="secondary">{CHANNEL_LABEL[row.original.channel] ?? row.original.channel}</Badge>
         ),
       },
       {
@@ -235,6 +291,7 @@ function ChannelsPage() {
           const badges = [
             row.original.capabilities?.templates ? "plantillas" : null,
             row.original.capabilities?.media ? "media" : null,
+            row.original.capabilities?.readReceipts ? "lecturas" : null,
           ].filter((b): b is string => b !== null)
           if (badges.length === 0) return <span className="text-muted-foreground">—</span>
           return (
@@ -251,7 +308,9 @@ function ChannelsPage() {
       {
         id: "actions",
         header: "",
+        meta: { view: { tableOnly: true } },
         cell: ({ row }) => {
+          if (!canWrite) return null
           const conn = row.original
           return (
             <RowActions
@@ -280,8 +339,7 @@ function ChannelsPage() {
         },
       },
     ],
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [],
+    [canWrite],
   )
 
   const table = useReactTable({
@@ -290,9 +348,12 @@ function ChannelsPage() {
     getCoreRowModel: getCoreRowModel(),
   })
 
-  if (!canWrite) {
+  if (!canRead) {
     return (
-      <EmptyState title="Sin acceso" description="Solo owner/admin pueden gestionar conexiones." />
+      <EmptyState
+        title="Sin acceso"
+        description="Necesitas permiso de lectura de configuración para ver las conexiones."
+      />
     )
   }
 
@@ -347,7 +408,7 @@ function ChannelsPage() {
             )}
           </tgForm.Field>
         </>
-      ) : (
+      ) : provider === "whatsapp_cloud_api" ? (
         <>
           <waForm.Field name="displayName">
             {(field) => (
@@ -390,6 +451,85 @@ function ChannelsPage() {
             )}
           </waForm.Field>
         </>
+      ) : provider === "messenger" ? (
+        <>
+          <p className="text-sm text-muted-foreground">
+            Conecta la página de Facebook en Meta Developers (producto Messenger, permiso
+            pages_messaging). Tras crear, pega la URL del webhook con el verify token y suscribe
+            messages, messaging_postbacks, message_deliveries y message_reads. Sin página ni token
+            válidos la creación falla: nunca se muestra como activa sin validar contra Meta.
+          </p>
+          <msgrForm.Field name="displayName">
+            {(field) => (
+              <Field>
+                <FieldLabel>Nombre</FieldLabel>
+                <Input
+                  value={field.state.value}
+                  onChange={(e) => field.handleChange(e.target.value)}
+                />
+                <FieldError>{fieldErrorMessages(field.state.meta.errors)}</FieldError>
+              </Field>
+            )}
+          </msgrForm.Field>
+          {(["pageId", "pageAccessToken", "appSecret"] as const).map((name) => (
+            <msgrForm.Field key={name} name={name}>
+              {(field) => (
+                <Field>
+                  <FieldLabel>{name === "pageId" ? "ID de página" : name}</FieldLabel>
+                  <Input
+                    type={name === "pageId" ? "text" : "password"}
+                    value={field.state.value}
+                    onChange={(e) => field.handleChange(e.target.value)}
+                  />
+                  <FieldError>{fieldErrorMessages(field.state.meta.errors)}</FieldError>
+                </Field>
+              )}
+            </msgrForm.Field>
+          ))}
+        </>
+      ) : (
+        <>
+          <p className="text-sm text-muted-foreground">
+            Cuenta profesional con Instagram Login: pega el token de usuario de Instagram
+            (permisos instagram_business_basic + instagram_business_manage_messages, sin OAuth
+            completo: token manual). Tras crear, pega la URL del webhook con el verify token y
+            suscribe messages, messaging_postbacks y messaging_seen. Texto máx. 1000 bytes;
+            media imagen/audio/video/pdf. Sin cuenta ni token válidos la creación falla.
+          </p>
+          <igForm.Field name="displayName">
+            {(field) => (
+              <Field>
+                <FieldLabel>Nombre</FieldLabel>
+                <Input
+                  value={field.state.value}
+                  onChange={(e) => field.handleChange(e.target.value)}
+                />
+                <FieldError>{fieldErrorMessages(field.state.meta.errors)}</FieldError>
+              </Field>
+            )}
+          </igForm.Field>
+          {(["instagramId", "accessToken", "appSecret"] as const).map((name) => (
+            <igForm.Field key={name} name={name}>
+              {(field) => (
+                <Field>
+                  <FieldLabel>
+                    {name === "instagramId"
+                      ? "ID de cuenta (IG-ID)"
+                      : name === "accessToken"
+                        ? "Token de usuario de Instagram"
+                        : "App secret"}
+                  </FieldLabel>
+                  <Input
+                    type={name === "instagramId" ? "text" : "password"}
+                    value={field.state.value}
+                    onChange={(e) => field.handleChange(e.target.value)}
+                  />
+                  <FieldError>{fieldErrorMessages(field.state.meta.errors)}</FieldError>
+                </Field>
+              )}
+            </igForm.Field>
+          ))}
+        </>
       )}
     </div>
   )
@@ -404,7 +544,9 @@ function ChannelsPage() {
     onSubmit: (event: FormEvent) => {
       event.preventDefault()
       if (provider === "telegram_bot_api") void tgForm.handleSubmit()
-      else void waForm.handleSubmit()
+      else if (provider === "whatsapp_cloud_api") void waForm.handleSubmit()
+      else if (provider === "messenger") void msgrForm.handleSubmit()
+      else void igForm.handleSubmit()
     },
   }
 
@@ -417,19 +559,21 @@ function ChannelsPage() {
       >
         <PageHeader
           title="Canales"
-          subtitle="Conexiones de WhatsApp y Telegram"
+          subtitle="Conexiones de WhatsApp, Telegram, Messenger e Instagram"
           actions={
-            <Button
-              type="button"
-              className="min-h-11"
-              onClick={() => {
-                setCreated(null)
-                setFormOpen(true)
-              }}
-            >
-              <Plus aria-hidden />
-              Nueva conexión
-            </Button>
+            canWrite ? (
+              <Button
+                type="button"
+                className="min-h-11"
+                onClick={() => {
+                  setCreated(null)
+                  setFormOpen(true)
+                }}
+              >
+                <Plus aria-hidden />
+                Nueva conexión
+              </Button>
+            ) : null
           }
         />
         {error && <p className="text-sm text-red-600">{error}</p>}
@@ -449,6 +593,8 @@ function ChannelsPage() {
               options: [
                 { value: "whatsapp", label: "WhatsApp" },
                 { value: "telegram", label: "Telegram" },
+                { value: "messenger", label: "Messenger" },
+                { value: "instagram", label: "Instagram" },
               ],
             },
             {
@@ -470,7 +616,7 @@ function ChannelsPage() {
         {items.length === 0 && !listQuery.isLoading ? (
           <EmptyState
             title="Sin conexiones"
-            description="Conecta un bot de Telegram o un número de WhatsApp."
+            description="Conecta WhatsApp, Telegram, Messenger o Instagram. Cada conexión se valida contra su proveedor: sin credenciales válidas no se activa."
           />
         ) : filtered.length === 0 ? (
           <EmptyState

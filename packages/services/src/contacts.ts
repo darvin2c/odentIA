@@ -8,13 +8,11 @@ import {
   conversation,
   crmTask,
   customFieldDef,
-  pipelineStage,
 } from "@odentia/db/schema/crm"
 import { auditEvent } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, ilike, inArray, lt, or, sql } from "drizzle-orm"
 import { decodeCursor } from "./cursors.js"
 import { notFound, ServiceError, validation } from "./errors.js"
-import { ensureDefaultPipeline } from "./pipelines.js"
 
 /** Normaliza etiquetas con el helper canónico; convierte Error a ServiceError validation. */
 export function normalizeContactTags(tags: readonly string[]): string[] {
@@ -32,7 +30,6 @@ export interface ContactListItem {
   email: string | null
   isActive: boolean
   tags: string[]
-  stageId: string | null
   assignedUserId: string | null
   lastInteractionAt: string | null
   channels: string[]
@@ -57,7 +54,6 @@ function toListItem(row: typeof contact.$inferSelect, channels: string[]): Conta
     email: row.email,
     isActive: row.isActive,
     tags: row.tags,
-    stageId: row.stageId,
     assignedUserId: row.assignedUserId,
     lastInteractionAt: iso(row.lastInteractionAt),
     channels,
@@ -67,7 +63,6 @@ const PAGE_DEFAULT = 30
 
 export interface ContactListFilters {
   q?: string
-  stageId?: string
   /** true = solo activos (default), false = solo archivados, "all" = todos. */
   isActive?: boolean | "all"
   cursor?: string
@@ -75,8 +70,8 @@ export interface ContactListFilters {
 }
 
 /** Huella de filtros: el cursor solo es válido con los mismos parámetros. */
-function listingFingerprint(input: { q: string; stageId: string; isActive: boolean | "all" }): string {
-  return JSON.stringify({ q: input.q, stageId: input.stageId, isActive: input.isActive })
+function listingFingerprint(input: { q: string; isActive: boolean | "all" }): string {
+  return JSON.stringify({ q: input.q, isActive: input.isActive })
 }
 
 function encodeListingCursor(ts: string, id: string, fingerprint: string): string {
@@ -104,9 +99,8 @@ export async function listContacts(
 ): Promise<{ items: ContactListItem[]; nextCursor: string | null }> {
   const limit = Math.min(Math.max(input.limit ?? PAGE_DEFAULT, 1), 100)
   const q = input.q?.trim() ? input.q.trim() : ""
-  const stageId = input.stageId ?? ""
   const active = input.isActive ?? true
-  const fingerprint = listingFingerprint({ q, stageId, isActive: active })
+  const fingerprint = listingFingerprint({ q, isActive: active })
   const conditions = [eq(contact.organizationId, orgId)]
   if (q) {
     const like = `%${q}%`
@@ -118,7 +112,6 @@ export async function listContacts(
       )!,
     )
   }
-  if (stageId) conditions.push(eq(contact.stageId, stageId))
   if (active !== "all") conditions.push(eq(contact.isActive, active))
   if (input.cursor) {
     const decoded = decodeListingCursor(input.cursor)
@@ -294,21 +287,6 @@ export async function requireContact(
   return row
 }
 
-async function resolveStageId(tx: Db, orgId: string, stageId: string | undefined): Promise<string> {
-  if (stageId) {
-    const [stage] = await tx
-      .select({ id: pipelineStage.id })
-      .from(pipelineStage)
-      .where(and(eq(pipelineStage.id, stageId), eq(pipelineStage.organizationId, orgId)))
-      .limit(1)
-    if (!stage) throw validation("Etapa inválida para esta organización")
-    return stage.id
-  }
-  const { stages } = await ensureDefaultPipeline(tx, orgId)
-  const first = stages[0]
-  if (!first) throw new Error("Pipeline default sin etapas")
-  return first.id
-}
 
 /** Auditoría administrativa: IDs y campos modificados, sin texto clínico ni tokens. */
 async function auditContact(
@@ -360,14 +338,12 @@ export async function createContact(
     isActive?: boolean
     notes?: string
     tags?: string[]
-    stageId?: string
     assignedUserId?: string | null
   },
   actor?: { userId: string | null },
 ): Promise<ContactDetail> {
   const displayName = input.displayName.trim()
   if (!displayName) throw validation("El nombre del contacto es obligatorio")
-  const stageId = await resolveStageId(tx, orgId, input.stageId)
   const [created] = await tx
     .insert(contact)
     .values({
@@ -378,7 +354,6 @@ export async function createContact(
       isActive: input.isActive ?? true,
       notes: input.notes ?? null,
       tags: normalizeContactTags(input.tags ?? []),
-      stageId,
       assignedUserId: input.assignedUserId ?? null,
     })
     .returning()
@@ -390,7 +365,6 @@ export async function createContact(
   if (input.isActive !== undefined) createdFields.push("isActive")
   if (input.notes !== undefined) createdFields.push("notes")
   if (input.tags !== undefined) createdFields.push("tags")
-  if (input.stageId !== undefined) createdFields.push("stageId")
   if (input.assignedUserId !== undefined) createdFields.push("assignedUserId")
   await auditContact(tx, orgId, actor, "contact.created", created.id, { fields: createdFields })
   const full = await getContact(tx, orgId, created.id)
@@ -462,7 +436,6 @@ export async function updateContact(
     isActive?: boolean
     notes?: string | null
     tags?: string[]
-    stageId?: string
     assignedUserId?: string | null
     customFields?: Record<string, unknown>
   },
@@ -493,10 +466,6 @@ export async function updateContact(
   if (fields.tags !== undefined) {
     patch.tags = normalizeContactTags(fields.tags)
     changed.push("tags")
-  }
-  if (fields.stageId !== undefined) {
-    patch.stageId = await resolveStageId(tx, orgId, fields.stageId)
-    changed.push("stageId")
   }
   if (fields.assignedUserId !== undefined) {
     patch.assignedUserId = fields.assignedUserId
@@ -562,28 +531,17 @@ async function applyContactActive(
   })
 }
 
-export async function setStage(
-  tx: Db,
-  orgId: string,
-  contactId: string,
-  stageId: string,
-): Promise<void> {
-  await requireContact(tx, orgId, contactId)
-  const resolved = await resolveStageId(tx, orgId, stageId)
-  await tx
-    .update(contact)
-    .set({ stageId: resolved, updatedAt: new Date() })
-    .where(and(eq(contact.id, contactId), eq(contact.organizationId, orgId)))
-}
 
 /* ------------------------------------------------------------------ */
 /* Canales omnicanal (paso 5): identidades, transferencia y locks.      */
-/* Solo WhatsApp y Telegram. El teléfono/correo declarado del contacto  */
-/* NUNCA genera ni infiere una identidad: solo el alta manual o la      */
-/* ingesta autenticada por el proveedor crean filas en contact_identity. */
+/* WhatsApp, Telegram, Messenger e Instagram. gmail/microsoft365 y      */
+/* web_chat los amplían sus slices en OMNI_CHANNELS/normalize. El       */
+/* teléfono/correo declarado del contacto NUNCA genera ni infiere una   */
+/* identidad: solo el alta manual o la ingesta autenticada por el       */
+/* proveedor crean filas en contact_identity.                           */
 /* ------------------------------------------------------------------ */
 
-export const OMNI_CHANNELS = ["whatsapp", "telegram"] as const
+export const OMNI_CHANNELS = ["whatsapp", "telegram", "messenger", "instagram"] as const
 export type OmniChannel = (typeof OMNI_CHANNELS)[number]
 
 /** Normaliza la identidad al formato del adaptador o falla con validación. */
@@ -591,8 +549,8 @@ export function normalizeChannelIdentity(
   channel: string,
   externalUserId: string,
 ): { channel: OmniChannel; externalUserId: string } {
-  if (channel !== "whatsapp" && channel !== "telegram") {
-    throw validation("Canal no soportado: solo whatsapp o telegram")
+  if (!OMNI_CHANNELS.includes(channel as OmniChannel)) {
+    throw validation("Canal no soportado: solo whatsapp, telegram, messenger o instagram")
   }
   const raw = externalUserId.trim()
   if (!raw) throw validation("El identificador del canal es obligatorio")
@@ -604,11 +562,15 @@ export function normalizeChannelIdentity(
     }
     return { channel, externalUserId: `wa:${digits}` }
   }
-  const withoutPrefix = raw.toLowerCase().startsWith("tg:") ? raw.slice(3) : raw
+  // telegram (tg:), messenger (msgr:) e instagram (ig:) usan IDs numéricos
+  // de la plataforma (chat id, PSID, IGSID); nunca @usuario ni teléfonos.
+  const prefix = channel === "messenger" ? "msgr" : channel === "instagram" ? "ig" : "tg"
+  const label = channel === "messenger" ? "Messenger" : channel === "instagram" ? "Instagram" : "Telegram"
+  const withoutPrefix = raw.toLowerCase().startsWith(`${prefix}:`) ? raw.slice(prefix.length + 1) : raw
   if (!/^\d+$/.test(withoutPrefix)) {
-    throw validation("Telegram exige el ID numérico del usuario (no @usuario)")
+    throw validation(`${label} exige el ID numérico de la plataforma (no @usuario)`)
   }
-  return { channel, externalUserId: `tg:${withoutPrefix}` }
+  return { channel: channel as OmniChannel, externalUserId: `${prefix}:${withoutPrefix}` }
 }
 
 /** Hilo grupal de Telegram (chat negativo): nunca se atribuye ni se traslada. */

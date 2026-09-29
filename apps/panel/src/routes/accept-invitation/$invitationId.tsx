@@ -43,7 +43,7 @@ function AcceptInvitationPage() {
       const { data: orgs } = await authClient.organization.list()
       const slug = organizationId ? orgs?.find((org) => org.id === organizationId)?.slug : undefined
       if (slug) {
-        window.location.assign(tenantUrl(slug, "/branches"))
+        window.location.assign(tenantUrl(slug, "/home"))
         return
       }
       await navigate({ to: "/" })

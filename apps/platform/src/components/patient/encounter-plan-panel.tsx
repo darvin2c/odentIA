@@ -24,7 +24,7 @@ import {
   planDecisionLabel,
 } from "../../lib/budgets"
 import { createOptionGroupApi } from "../../lib/clinical-journey"
-import { useCanWrite } from "../../lib/crm"
+import { usePermission } from "../../lib/crm"
 import type { OdontogramState, PlanItem } from "../../lib/patients"
 import { formatMoney, type ServiceCatalogItem, TREATMENT_SCOPE_LABELS } from "../../lib/services"
 import { Cie10Search } from "./cie10-search"
@@ -69,9 +69,9 @@ export function EncounterPlanPanel({
   onPendingChange: (pending: boolean) => void
 }): React.JSX.Element {
   const queryClient = useQueryClient()
-  const canWrite = useCanWrite()
+  const canWrite = usePermission("clinical.write")
+  const canRead = usePermission("clinical.read")
   const uid = useId()
-
   const [planId, setPlanId] = useState("")
   const [newTitle, setNewTitle] = useState("Plan de tratamiento")
   const [scope, setScope] = useState("general")
@@ -93,12 +93,13 @@ export function EncounterPlanPanel({
   const plansQuery = useQuery({
     queryKey: ["treatment-plans", patientId],
     queryFn: () => fetchTreatmentPlans(patientId),
+    enabled: canRead,
   })
   const planOptions = plansQuery.data?.data ?? []
   const detailQuery = useQuery({
     queryKey: ["treatment-plan", patientId, planId],
     queryFn: () => fetchTreatmentPlanDetail(patientId, planId),
-    enabled: planId !== "",
+    enabled: canRead && planId !== "",
   })
   const items: PlanItem[] = detailQuery.data?.data.items ?? []
   const optionGroups = detailQuery.data?.data.optionGroups ?? []
@@ -106,6 +107,7 @@ export function EncounterPlanPanel({
   const odontogramQuery = useQuery({
     queryKey: ["odontogram", patientId],
     queryFn: () => apiFetch<{ data: OdontogramState }>(`/api/patients/${patientId}/odontogram`),
+    enabled: canRead,
   })
   // Solo hallazgos vigentes de la pieza elegida: la indicación responde a lo observado.
   const tooth = teeth[0] ?? null

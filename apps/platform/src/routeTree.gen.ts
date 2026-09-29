@@ -11,28 +11,49 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as OrgRouteImport } from './routes/_org'
+import { Route as PortalRouteImport } from './routes/portal'
 import { Route as RegistroRouteImport } from './routes/registro'
 import { Route as OrgAgendaRouteImport } from './routes/_org/agenda'
+import { Route as OrgAutomationsRouteImport } from './routes/_org/automations'
 import { Route as OrgBranchesRouteImport } from './routes/_org/branches'
 import { Route as OrgDemoRouteImport } from './routes/_org/demo'
+import { Route as OrgFinanceRouteImport } from './routes/_org/finance'
+import { Route as OrgHomeRouteImport } from './routes/_org/home'
 import { Route as OrgInboxRouteImport } from './routes/_org/inbox'
+import { Route as OrgInventoryRouteImport } from './routes/_org/inventory'
 import { Route as OrgMembersRouteImport } from './routes/_org/members'
+import { Route as OrgPatientAccessRouteImport } from './routes/_org/patient-access'
 import { Route as OrgPipelineRouteImport } from './routes/_org/pipeline'
+import { Route as OrgReportsRouteImport } from './routes/_org/reports'
 import { Route as OrgServicesRouteImport } from './routes/_org/services'
 import { Route as OrgSettingsRouteImport } from './routes/_org/settings'
 import { Route as OrgTasksRouteImport } from './routes/_org/tasks'
+import { Route as BajaTokenRouteImport } from './routes/baja.$token'
+import { Route as CTokenRouteImport } from './routes/c.$token'
+import { Route as EmbedConnectionIdRouteImport } from './routes/embed.$connectionId'
+import { Route as OrgAgentIndexRouteImport } from './routes/_org/agent.index'
+import { Route as OrgAgentApprovalsRouteImport } from './routes/_org/agent.approvals'
+import { Route as OrgAgentKnowledgeRouteImport } from './routes/_org/agent.knowledge'
 import { Route as OrgContactsIndexRouteImport } from './routes/_org/contacts.index'
 import { Route as OrgContactsContactIdRouteImport } from './routes/_org/contacts.$contactId'
+import { Route as OrgInventoryProductIdRouteImport } from './routes/_org/inventory.$productId'
+import { Route as OrgOpportunitiesOpportunityIdRouteImport } from './routes/_org/opportunities.$opportunityId'
 import { Route as OrgPatientsIndexRouteImport } from './routes/_org/patients.index'
 import { Route as OrgPatientsPatientIdRouteImport } from './routes/_org/patients.$patientId'
 import { Route as OrgServicesIndexRouteImport } from './routes/_org/services.index'
 import { Route as OrgServicesBibliotecaRouteImport } from './routes/_org/services.biblioteca'
 import { Route as OrgSettingsIndexRouteImport } from './routes/_org/settings.index'
 import { Route as OrgSettingsAgentRouteImport } from './routes/_org/settings.agent'
+import { Route as OrgSettingsAuditRouteImport } from './routes/_org/settings.audit'
+import { Route as OrgSettingsAvailabilityRouteImport } from './routes/_org/settings.availability'
 import { Route as OrgSettingsChannelsRouteImport } from './routes/_org/settings.channels'
 import { Route as OrgSettingsFieldsRouteImport } from './routes/_org/settings.fields'
+import { Route as OrgSettingsFormsRouteImport } from './routes/_org/settings.forms'
+import { Route as OrgSettingsMailRouteImport } from './routes/_org/settings.mail'
 import { Route as OrgSettingsPatientRegistrationRouteImport } from './routes/_org/settings.patient-registration'
 import { Route as OrgSettingsPipelinesRouteImport } from './routes/_org/settings.pipelines'
+import { Route as OrgSettingsSpecialtiesRouteImport } from './routes/_org/settings.specialties'
+import { Route as OrgSettingsWebchatRouteImport } from './routes/_org/settings.webchat'
 import { Route as OrgPatientsPatientIdEncountersEncounterIdRouteImport } from './routes/_org/patients.$patientId.encounters.$encounterId'
 
 const IndexRoute = IndexRouteImport.update({
@@ -42,6 +63,11 @@ const IndexRoute = IndexRouteImport.update({
 } as any)
 const OrgRoute = OrgRouteImport.update({
   id: '/_org',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PortalRoute = PortalRouteImport.update({
+  id: '/portal',
+  path: '/portal',
   getParentRoute: () => rootRouteImport,
 } as any)
 const RegistroRoute = RegistroRouteImport.update({
@@ -54,6 +80,11 @@ const OrgAgendaRoute = OrgAgendaRouteImport.update({
   path: '/agenda',
   getParentRoute: () => OrgRoute,
 } as any)
+const OrgAutomationsRoute = OrgAutomationsRouteImport.update({
+  id: '/automations',
+  path: '/automations',
+  getParentRoute: () => OrgRoute,
+} as any)
 const OrgBranchesRoute = OrgBranchesRouteImport.update({
   id: '/branches',
   path: '/branches',
@@ -64,9 +95,24 @@ const OrgDemoRoute = OrgDemoRouteImport.update({
   path: '/demo',
   getParentRoute: () => OrgRoute,
 } as any)
+const OrgFinanceRoute = OrgFinanceRouteImport.update({
+  id: '/finance',
+  path: '/finance',
+  getParentRoute: () => OrgRoute,
+} as any)
+const OrgHomeRoute = OrgHomeRouteImport.update({
+  id: '/home',
+  path: '/home',
+  getParentRoute: () => OrgRoute,
+} as any)
 const OrgInboxRoute = OrgInboxRouteImport.update({
   id: '/inbox',
   path: '/inbox',
+  getParentRoute: () => OrgRoute,
+} as any)
+const OrgInventoryRoute = OrgInventoryRouteImport.update({
+  id: '/inventory',
+  path: '/inventory',
   getParentRoute: () => OrgRoute,
 } as any)
 const OrgMembersRoute = OrgMembersRouteImport.update({
@@ -74,9 +120,19 @@ const OrgMembersRoute = OrgMembersRouteImport.update({
   path: '/members',
   getParentRoute: () => OrgRoute,
 } as any)
+const OrgPatientAccessRoute = OrgPatientAccessRouteImport.update({
+  id: '/patient-access',
+  path: '/patient-access',
+  getParentRoute: () => OrgRoute,
+} as any)
 const OrgPipelineRoute = OrgPipelineRouteImport.update({
   id: '/pipeline',
   path: '/pipeline',
+  getParentRoute: () => OrgRoute,
+} as any)
+const OrgReportsRoute = OrgReportsRouteImport.update({
+  id: '/reports',
+  path: '/reports',
   getParentRoute: () => OrgRoute,
 } as any)
 const OrgServicesRoute = OrgServicesRouteImport.update({
@@ -94,6 +150,36 @@ const OrgTasksRoute = OrgTasksRouteImport.update({
   path: '/tasks',
   getParentRoute: () => OrgRoute,
 } as any)
+const BajaTokenRoute = BajaTokenRouteImport.update({
+  id: '/baja/$token',
+  path: '/baja/$token',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CTokenRoute = CTokenRouteImport.update({
+  id: '/c/$token',
+  path: '/c/$token',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const EmbedConnectionIdRoute = EmbedConnectionIdRouteImport.update({
+  id: '/embed/$connectionId',
+  path: '/embed/$connectionId',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const OrgAgentIndexRoute = OrgAgentIndexRouteImport.update({
+  id: '/agent/',
+  path: '/agent/',
+  getParentRoute: () => OrgRoute,
+} as any)
+const OrgAgentApprovalsRoute = OrgAgentApprovalsRouteImport.update({
+  id: '/agent/approvals',
+  path: '/agent/approvals',
+  getParentRoute: () => OrgRoute,
+} as any)
+const OrgAgentKnowledgeRoute = OrgAgentKnowledgeRouteImport.update({
+  id: '/agent/knowledge',
+  path: '/agent/knowledge',
+  getParentRoute: () => OrgRoute,
+} as any)
 const OrgContactsIndexRoute = OrgContactsIndexRouteImport.update({
   id: '/contacts/',
   path: '/contacts/',
@@ -104,6 +190,17 @@ const OrgContactsContactIdRoute = OrgContactsContactIdRouteImport.update({
   path: '/contacts/$contactId',
   getParentRoute: () => OrgRoute,
 } as any)
+const OrgInventoryProductIdRoute = OrgInventoryProductIdRouteImport.update({
+  id: '/$productId',
+  path: '/$productId',
+  getParentRoute: () => OrgInventoryRoute,
+} as any)
+const OrgOpportunitiesOpportunityIdRoute =
+  OrgOpportunitiesOpportunityIdRouteImport.update({
+    id: '/opportunities/$opportunityId',
+    path: '/opportunities/$opportunityId',
+    getParentRoute: () => OrgRoute,
+  } as any)
 const OrgPatientsIndexRoute = OrgPatientsIndexRouteImport.update({
   id: '/patients/',
   path: '/patients/',
@@ -134,6 +231,16 @@ const OrgSettingsAgentRoute = OrgSettingsAgentRouteImport.update({
   path: '/agent',
   getParentRoute: () => OrgSettingsRoute,
 } as any)
+const OrgSettingsAuditRoute = OrgSettingsAuditRouteImport.update({
+  id: '/audit',
+  path: '/audit',
+  getParentRoute: () => OrgSettingsRoute,
+} as any)
+const OrgSettingsAvailabilityRoute = OrgSettingsAvailabilityRouteImport.update({
+  id: '/availability',
+  path: '/availability',
+  getParentRoute: () => OrgSettingsRoute,
+} as any)
 const OrgSettingsChannelsRoute = OrgSettingsChannelsRouteImport.update({
   id: '/channels',
   path: '/channels',
@@ -142,6 +249,16 @@ const OrgSettingsChannelsRoute = OrgSettingsChannelsRouteImport.update({
 const OrgSettingsFieldsRoute = OrgSettingsFieldsRouteImport.update({
   id: '/fields',
   path: '/fields',
+  getParentRoute: () => OrgSettingsRoute,
+} as any)
+const OrgSettingsFormsRoute = OrgSettingsFormsRouteImport.update({
+  id: '/forms',
+  path: '/forms',
+  getParentRoute: () => OrgSettingsRoute,
+} as any)
+const OrgSettingsMailRoute = OrgSettingsMailRouteImport.update({
+  id: '/mail',
+  path: '/mail',
   getParentRoute: () => OrgSettingsRoute,
 } as any)
 const OrgSettingsPatientRegistrationRoute =
@@ -155,6 +272,16 @@ const OrgSettingsPipelinesRoute = OrgSettingsPipelinesRouteImport.update({
   path: '/pipelines',
   getParentRoute: () => OrgSettingsRoute,
 } as any)
+const OrgSettingsSpecialtiesRoute = OrgSettingsSpecialtiesRouteImport.update({
+  id: '/specialties',
+  path: '/specialties',
+  getParentRoute: () => OrgSettingsRoute,
+} as any)
+const OrgSettingsWebchatRoute = OrgSettingsWebchatRouteImport.update({
+  id: '/webchat',
+  path: '/webchat',
+  getParentRoute: () => OrgSettingsRoute,
+} as any)
 const OrgPatientsPatientIdEncountersEncounterIdRoute =
   OrgPatientsPatientIdEncountersEncounterIdRouteImport.update({
     id: '/encounters/$encounterId',
@@ -164,24 +291,45 @@ const OrgPatientsPatientIdEncountersEncounterIdRoute =
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/portal': typeof PortalRoute
   '/registro': typeof RegistroRoute
   '/agenda': typeof OrgAgendaRoute
+  '/automations': typeof OrgAutomationsRoute
   '/branches': typeof OrgBranchesRoute
   '/demo': typeof OrgDemoRoute
+  '/finance': typeof OrgFinanceRoute
+  '/home': typeof OrgHomeRoute
   '/inbox': typeof OrgInboxRoute
+  '/inventory': typeof OrgInventoryRouteWithChildren
   '/members': typeof OrgMembersRoute
+  '/patient-access': typeof OrgPatientAccessRoute
   '/pipeline': typeof OrgPipelineRoute
+  '/reports': typeof OrgReportsRoute
   '/services': typeof OrgServicesRouteWithChildren
   '/settings': typeof OrgSettingsRouteWithChildren
   '/tasks': typeof OrgTasksRoute
+  '/baja/$token': typeof BajaTokenRoute
+  '/c/$token': typeof CTokenRoute
+  '/embed/$connectionId': typeof EmbedConnectionIdRoute
+  '/agent/approvals': typeof OrgAgentApprovalsRoute
+  '/agent/knowledge': typeof OrgAgentKnowledgeRoute
   '/contacts/$contactId': typeof OrgContactsContactIdRoute
+  '/inventory/$productId': typeof OrgInventoryProductIdRoute
+  '/opportunities/$opportunityId': typeof OrgOpportunitiesOpportunityIdRoute
   '/patients/$patientId': typeof OrgPatientsPatientIdRouteWithChildren
   '/services/biblioteca': typeof OrgServicesBibliotecaRoute
   '/settings/agent': typeof OrgSettingsAgentRoute
+  '/settings/audit': typeof OrgSettingsAuditRoute
+  '/settings/availability': typeof OrgSettingsAvailabilityRoute
   '/settings/channels': typeof OrgSettingsChannelsRoute
   '/settings/fields': typeof OrgSettingsFieldsRoute
+  '/settings/forms': typeof OrgSettingsFormsRoute
+  '/settings/mail': typeof OrgSettingsMailRoute
   '/settings/patient-registration': typeof OrgSettingsPatientRegistrationRoute
   '/settings/pipelines': typeof OrgSettingsPipelinesRoute
+  '/settings/specialties': typeof OrgSettingsSpecialtiesRoute
+  '/settings/webchat': typeof OrgSettingsWebchatRoute
+  '/agent/': typeof OrgAgentIndexRoute
   '/contacts/': typeof OrgContactsIndexRoute
   '/patients/': typeof OrgPatientsIndexRoute
   '/services/': typeof OrgServicesIndexRoute
@@ -190,22 +338,43 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/portal': typeof PortalRoute
   '/registro': typeof RegistroRoute
   '/agenda': typeof OrgAgendaRoute
+  '/automations': typeof OrgAutomationsRoute
   '/branches': typeof OrgBranchesRoute
   '/demo': typeof OrgDemoRoute
+  '/finance': typeof OrgFinanceRoute
+  '/home': typeof OrgHomeRoute
   '/inbox': typeof OrgInboxRoute
+  '/inventory': typeof OrgInventoryRouteWithChildren
   '/members': typeof OrgMembersRoute
+  '/patient-access': typeof OrgPatientAccessRoute
   '/pipeline': typeof OrgPipelineRoute
+  '/reports': typeof OrgReportsRoute
   '/tasks': typeof OrgTasksRoute
+  '/baja/$token': typeof BajaTokenRoute
+  '/c/$token': typeof CTokenRoute
+  '/embed/$connectionId': typeof EmbedConnectionIdRoute
+  '/agent/approvals': typeof OrgAgentApprovalsRoute
+  '/agent/knowledge': typeof OrgAgentKnowledgeRoute
   '/contacts/$contactId': typeof OrgContactsContactIdRoute
+  '/inventory/$productId': typeof OrgInventoryProductIdRoute
+  '/opportunities/$opportunityId': typeof OrgOpportunitiesOpportunityIdRoute
   '/patients/$patientId': typeof OrgPatientsPatientIdRouteWithChildren
   '/services/biblioteca': typeof OrgServicesBibliotecaRoute
   '/settings/agent': typeof OrgSettingsAgentRoute
+  '/settings/audit': typeof OrgSettingsAuditRoute
+  '/settings/availability': typeof OrgSettingsAvailabilityRoute
   '/settings/channels': typeof OrgSettingsChannelsRoute
   '/settings/fields': typeof OrgSettingsFieldsRoute
+  '/settings/forms': typeof OrgSettingsFormsRoute
+  '/settings/mail': typeof OrgSettingsMailRoute
   '/settings/patient-registration': typeof OrgSettingsPatientRegistrationRoute
   '/settings/pipelines': typeof OrgSettingsPipelinesRoute
+  '/settings/specialties': typeof OrgSettingsSpecialtiesRoute
+  '/settings/webchat': typeof OrgSettingsWebchatRoute
+  '/agent': typeof OrgAgentIndexRoute
   '/contacts': typeof OrgContactsIndexRoute
   '/patients': typeof OrgPatientsIndexRoute
   '/services': typeof OrgServicesIndexRoute
@@ -216,24 +385,45 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/_org': typeof OrgRouteWithChildren
+  '/portal': typeof PortalRoute
   '/registro': typeof RegistroRoute
   '/_org/agenda': typeof OrgAgendaRoute
+  '/_org/automations': typeof OrgAutomationsRoute
   '/_org/branches': typeof OrgBranchesRoute
   '/_org/demo': typeof OrgDemoRoute
+  '/_org/finance': typeof OrgFinanceRoute
+  '/_org/home': typeof OrgHomeRoute
   '/_org/inbox': typeof OrgInboxRoute
+  '/_org/inventory': typeof OrgInventoryRouteWithChildren
   '/_org/members': typeof OrgMembersRoute
+  '/_org/patient-access': typeof OrgPatientAccessRoute
   '/_org/pipeline': typeof OrgPipelineRoute
+  '/_org/reports': typeof OrgReportsRoute
   '/_org/services': typeof OrgServicesRouteWithChildren
   '/_org/settings': typeof OrgSettingsRouteWithChildren
   '/_org/tasks': typeof OrgTasksRoute
+  '/baja/$token': typeof BajaTokenRoute
+  '/c/$token': typeof CTokenRoute
+  '/embed/$connectionId': typeof EmbedConnectionIdRoute
+  '/_org/agent/approvals': typeof OrgAgentApprovalsRoute
+  '/_org/agent/knowledge': typeof OrgAgentKnowledgeRoute
   '/_org/contacts/$contactId': typeof OrgContactsContactIdRoute
+  '/_org/inventory/$productId': typeof OrgInventoryProductIdRoute
+  '/_org/opportunities/$opportunityId': typeof OrgOpportunitiesOpportunityIdRoute
   '/_org/patients/$patientId': typeof OrgPatientsPatientIdRouteWithChildren
   '/_org/services/biblioteca': typeof OrgServicesBibliotecaRoute
   '/_org/settings/agent': typeof OrgSettingsAgentRoute
+  '/_org/settings/audit': typeof OrgSettingsAuditRoute
+  '/_org/settings/availability': typeof OrgSettingsAvailabilityRoute
   '/_org/settings/channels': typeof OrgSettingsChannelsRoute
   '/_org/settings/fields': typeof OrgSettingsFieldsRoute
+  '/_org/settings/forms': typeof OrgSettingsFormsRoute
+  '/_org/settings/mail': typeof OrgSettingsMailRoute
   '/_org/settings/patient-registration': typeof OrgSettingsPatientRegistrationRoute
   '/_org/settings/pipelines': typeof OrgSettingsPipelinesRoute
+  '/_org/settings/specialties': typeof OrgSettingsSpecialtiesRoute
+  '/_org/settings/webchat': typeof OrgSettingsWebchatRoute
+  '/_org/agent/': typeof OrgAgentIndexRoute
   '/_org/contacts/': typeof OrgContactsIndexRoute
   '/_org/patients/': typeof OrgPatientsIndexRoute
   '/_org/services/': typeof OrgServicesIndexRoute
@@ -244,24 +434,45 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/portal'
     | '/registro'
     | '/agenda'
+    | '/automations'
     | '/branches'
     | '/demo'
+    | '/finance'
+    | '/home'
     | '/inbox'
+    | '/inventory'
     | '/members'
+    | '/patient-access'
     | '/pipeline'
+    | '/reports'
     | '/services'
     | '/settings'
     | '/tasks'
+    | '/baja/$token'
+    | '/c/$token'
+    | '/embed/$connectionId'
+    | '/agent/approvals'
+    | '/agent/knowledge'
     | '/contacts/$contactId'
+    | '/inventory/$productId'
+    | '/opportunities/$opportunityId'
     | '/patients/$patientId'
     | '/services/biblioteca'
     | '/settings/agent'
+    | '/settings/audit'
+    | '/settings/availability'
     | '/settings/channels'
     | '/settings/fields'
+    | '/settings/forms'
+    | '/settings/mail'
     | '/settings/patient-registration'
     | '/settings/pipelines'
+    | '/settings/specialties'
+    | '/settings/webchat'
+    | '/agent/'
     | '/contacts/'
     | '/patients/'
     | '/services/'
@@ -270,22 +481,43 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/portal'
     | '/registro'
     | '/agenda'
+    | '/automations'
     | '/branches'
     | '/demo'
+    | '/finance'
+    | '/home'
     | '/inbox'
+    | '/inventory'
     | '/members'
+    | '/patient-access'
     | '/pipeline'
+    | '/reports'
     | '/tasks'
+    | '/baja/$token'
+    | '/c/$token'
+    | '/embed/$connectionId'
+    | '/agent/approvals'
+    | '/agent/knowledge'
     | '/contacts/$contactId'
+    | '/inventory/$productId'
+    | '/opportunities/$opportunityId'
     | '/patients/$patientId'
     | '/services/biblioteca'
     | '/settings/agent'
+    | '/settings/audit'
+    | '/settings/availability'
     | '/settings/channels'
     | '/settings/fields'
+    | '/settings/forms'
+    | '/settings/mail'
     | '/settings/patient-registration'
     | '/settings/pipelines'
+    | '/settings/specialties'
+    | '/settings/webchat'
+    | '/agent'
     | '/contacts'
     | '/patients'
     | '/services'
@@ -295,24 +527,45 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/_org'
+    | '/portal'
     | '/registro'
     | '/_org/agenda'
+    | '/_org/automations'
     | '/_org/branches'
     | '/_org/demo'
+    | '/_org/finance'
+    | '/_org/home'
     | '/_org/inbox'
+    | '/_org/inventory'
     | '/_org/members'
+    | '/_org/patient-access'
     | '/_org/pipeline'
+    | '/_org/reports'
     | '/_org/services'
     | '/_org/settings'
     | '/_org/tasks'
+    | '/baja/$token'
+    | '/c/$token'
+    | '/embed/$connectionId'
+    | '/_org/agent/approvals'
+    | '/_org/agent/knowledge'
     | '/_org/contacts/$contactId'
+    | '/_org/inventory/$productId'
+    | '/_org/opportunities/$opportunityId'
     | '/_org/patients/$patientId'
     | '/_org/services/biblioteca'
     | '/_org/settings/agent'
+    | '/_org/settings/audit'
+    | '/_org/settings/availability'
     | '/_org/settings/channels'
     | '/_org/settings/fields'
+    | '/_org/settings/forms'
+    | '/_org/settings/mail'
     | '/_org/settings/patient-registration'
     | '/_org/settings/pipelines'
+    | '/_org/settings/specialties'
+    | '/_org/settings/webchat'
+    | '/_org/agent/'
     | '/_org/contacts/'
     | '/_org/patients/'
     | '/_org/services/'
@@ -323,7 +576,11 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   OrgRoute: typeof OrgRouteWithChildren
+  PortalRoute: typeof PortalRoute
   RegistroRoute: typeof RegistroRoute
+  BajaTokenRoute: typeof BajaTokenRoute
+  CTokenRoute: typeof CTokenRoute
+  EmbedConnectionIdRoute: typeof EmbedConnectionIdRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -342,6 +599,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof OrgRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/portal': {
+      id: '/portal'
+      path: '/portal'
+      fullPath: '/portal'
+      preLoaderRoute: typeof PortalRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/registro': {
       id: '/registro'
       path: '/registro'
@@ -354,6 +618,13 @@ declare module '@tanstack/react-router' {
       path: '/agenda'
       fullPath: '/agenda'
       preLoaderRoute: typeof OrgAgendaRouteImport
+      parentRoute: typeof OrgRoute
+    }
+    '/_org/automations': {
+      id: '/_org/automations'
+      path: '/automations'
+      fullPath: '/automations'
+      preLoaderRoute: typeof OrgAutomationsRouteImport
       parentRoute: typeof OrgRoute
     }
     '/_org/branches': {
@@ -370,11 +641,32 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof OrgDemoRouteImport
       parentRoute: typeof OrgRoute
     }
+    '/_org/finance': {
+      id: '/_org/finance'
+      path: '/finance'
+      fullPath: '/finance'
+      preLoaderRoute: typeof OrgFinanceRouteImport
+      parentRoute: typeof OrgRoute
+    }
+    '/_org/home': {
+      id: '/_org/home'
+      path: '/home'
+      fullPath: '/home'
+      preLoaderRoute: typeof OrgHomeRouteImport
+      parentRoute: typeof OrgRoute
+    }
     '/_org/inbox': {
       id: '/_org/inbox'
       path: '/inbox'
       fullPath: '/inbox'
       preLoaderRoute: typeof OrgInboxRouteImport
+      parentRoute: typeof OrgRoute
+    }
+    '/_org/inventory': {
+      id: '/_org/inventory'
+      path: '/inventory'
+      fullPath: '/inventory'
+      preLoaderRoute: typeof OrgInventoryRouteImport
       parentRoute: typeof OrgRoute
     }
     '/_org/members': {
@@ -384,11 +676,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof OrgMembersRouteImport
       parentRoute: typeof OrgRoute
     }
+    '/_org/patient-access': {
+      id: '/_org/patient-access'
+      path: '/patient-access'
+      fullPath: '/patient-access'
+      preLoaderRoute: typeof OrgPatientAccessRouteImport
+      parentRoute: typeof OrgRoute
+    }
     '/_org/pipeline': {
       id: '/_org/pipeline'
       path: '/pipeline'
       fullPath: '/pipeline'
       preLoaderRoute: typeof OrgPipelineRouteImport
+      parentRoute: typeof OrgRoute
+    }
+    '/_org/reports': {
+      id: '/_org/reports'
+      path: '/reports'
+      fullPath: '/reports'
+      preLoaderRoute: typeof OrgReportsRouteImport
       parentRoute: typeof OrgRoute
     }
     '/_org/services': {
@@ -412,6 +718,48 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof OrgTasksRouteImport
       parentRoute: typeof OrgRoute
     }
+    '/baja/$token': {
+      id: '/baja/$token'
+      path: '/baja/$token'
+      fullPath: '/baja/$token'
+      preLoaderRoute: typeof BajaTokenRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/c/$token': {
+      id: '/c/$token'
+      path: '/c/$token'
+      fullPath: '/c/$token'
+      preLoaderRoute: typeof CTokenRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/embed/$connectionId': {
+      id: '/embed/$connectionId'
+      path: '/embed/$connectionId'
+      fullPath: '/embed/$connectionId'
+      preLoaderRoute: typeof EmbedConnectionIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/_org/agent/': {
+      id: '/_org/agent/'
+      path: '/agent'
+      fullPath: '/agent/'
+      preLoaderRoute: typeof OrgAgentIndexRouteImport
+      parentRoute: typeof OrgRoute
+    }
+    '/_org/agent/approvals': {
+      id: '/_org/agent/approvals'
+      path: '/agent/approvals'
+      fullPath: '/agent/approvals'
+      preLoaderRoute: typeof OrgAgentApprovalsRouteImport
+      parentRoute: typeof OrgRoute
+    }
+    '/_org/agent/knowledge': {
+      id: '/_org/agent/knowledge'
+      path: '/agent/knowledge'
+      fullPath: '/agent/knowledge'
+      preLoaderRoute: typeof OrgAgentKnowledgeRouteImport
+      parentRoute: typeof OrgRoute
+    }
     '/_org/contacts/': {
       id: '/_org/contacts/'
       path: '/contacts'
@@ -424,6 +772,20 @@ declare module '@tanstack/react-router' {
       path: '/contacts/$contactId'
       fullPath: '/contacts/$contactId'
       preLoaderRoute: typeof OrgContactsContactIdRouteImport
+      parentRoute: typeof OrgRoute
+    }
+    '/_org/inventory/$productId': {
+      id: '/_org/inventory/$productId'
+      path: '/$productId'
+      fullPath: '/inventory/$productId'
+      preLoaderRoute: typeof OrgInventoryProductIdRouteImport
+      parentRoute: typeof OrgInventoryRoute
+    }
+    '/_org/opportunities/$opportunityId': {
+      id: '/_org/opportunities/$opportunityId'
+      path: '/opportunities/$opportunityId'
+      fullPath: '/opportunities/$opportunityId'
+      preLoaderRoute: typeof OrgOpportunitiesOpportunityIdRouteImport
       parentRoute: typeof OrgRoute
     }
     '/_org/patients/': {
@@ -468,6 +830,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof OrgSettingsAgentRouteImport
       parentRoute: typeof OrgSettingsRoute
     }
+    '/_org/settings/audit': {
+      id: '/_org/settings/audit'
+      path: '/audit'
+      fullPath: '/settings/audit'
+      preLoaderRoute: typeof OrgSettingsAuditRouteImport
+      parentRoute: typeof OrgSettingsRoute
+    }
+    '/_org/settings/availability': {
+      id: '/_org/settings/availability'
+      path: '/availability'
+      fullPath: '/settings/availability'
+      preLoaderRoute: typeof OrgSettingsAvailabilityRouteImport
+      parentRoute: typeof OrgSettingsRoute
+    }
     '/_org/settings/channels': {
       id: '/_org/settings/channels'
       path: '/channels'
@@ -480,6 +856,20 @@ declare module '@tanstack/react-router' {
       path: '/fields'
       fullPath: '/settings/fields'
       preLoaderRoute: typeof OrgSettingsFieldsRouteImport
+      parentRoute: typeof OrgSettingsRoute
+    }
+    '/_org/settings/forms': {
+      id: '/_org/settings/forms'
+      path: '/forms'
+      fullPath: '/settings/forms'
+      preLoaderRoute: typeof OrgSettingsFormsRouteImport
+      parentRoute: typeof OrgSettingsRoute
+    }
+    '/_org/settings/mail': {
+      id: '/_org/settings/mail'
+      path: '/mail'
+      fullPath: '/settings/mail'
+      preLoaderRoute: typeof OrgSettingsMailRouteImport
       parentRoute: typeof OrgSettingsRoute
     }
     '/_org/settings/patient-registration': {
@@ -496,6 +886,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof OrgSettingsPipelinesRouteImport
       parentRoute: typeof OrgSettingsRoute
     }
+    '/_org/settings/specialties': {
+      id: '/_org/settings/specialties'
+      path: '/specialties'
+      fullPath: '/settings/specialties'
+      preLoaderRoute: typeof OrgSettingsSpecialtiesRouteImport
+      parentRoute: typeof OrgSettingsRoute
+    }
+    '/_org/settings/webchat': {
+      id: '/_org/settings/webchat'
+      path: '/webchat'
+      fullPath: '/settings/webchat'
+      preLoaderRoute: typeof OrgSettingsWebchatRouteImport
+      parentRoute: typeof OrgSettingsRoute
+    }
     '/_org/patients/$patientId/encounters/$encounterId': {
       id: '/_org/patients/$patientId/encounters/$encounterId'
       path: '/encounters/$encounterId'
@@ -505,6 +909,18 @@ declare module '@tanstack/react-router' {
     }
   }
 }
+
+interface OrgInventoryRouteChildren {
+  OrgInventoryProductIdRoute: typeof OrgInventoryProductIdRoute
+}
+
+const OrgInventoryRouteChildren: OrgInventoryRouteChildren = {
+  OrgInventoryProductIdRoute: OrgInventoryProductIdRoute,
+}
+
+const OrgInventoryRouteWithChildren = OrgInventoryRoute._addFileChildren(
+  OrgInventoryRouteChildren,
+)
 
 interface OrgServicesRouteChildren {
   OrgServicesBibliotecaRoute: typeof OrgServicesBibliotecaRoute
@@ -522,19 +938,31 @@ const OrgServicesRouteWithChildren = OrgServicesRoute._addFileChildren(
 
 interface OrgSettingsRouteChildren {
   OrgSettingsAgentRoute: typeof OrgSettingsAgentRoute
+  OrgSettingsAuditRoute: typeof OrgSettingsAuditRoute
+  OrgSettingsAvailabilityRoute: typeof OrgSettingsAvailabilityRoute
   OrgSettingsChannelsRoute: typeof OrgSettingsChannelsRoute
   OrgSettingsFieldsRoute: typeof OrgSettingsFieldsRoute
+  OrgSettingsFormsRoute: typeof OrgSettingsFormsRoute
+  OrgSettingsMailRoute: typeof OrgSettingsMailRoute
   OrgSettingsPatientRegistrationRoute: typeof OrgSettingsPatientRegistrationRoute
   OrgSettingsPipelinesRoute: typeof OrgSettingsPipelinesRoute
+  OrgSettingsSpecialtiesRoute: typeof OrgSettingsSpecialtiesRoute
+  OrgSettingsWebchatRoute: typeof OrgSettingsWebchatRoute
   OrgSettingsIndexRoute: typeof OrgSettingsIndexRoute
 }
 
 const OrgSettingsRouteChildren: OrgSettingsRouteChildren = {
   OrgSettingsAgentRoute: OrgSettingsAgentRoute,
+  OrgSettingsAuditRoute: OrgSettingsAuditRoute,
+  OrgSettingsAvailabilityRoute: OrgSettingsAvailabilityRoute,
   OrgSettingsChannelsRoute: OrgSettingsChannelsRoute,
   OrgSettingsFieldsRoute: OrgSettingsFieldsRoute,
+  OrgSettingsFormsRoute: OrgSettingsFormsRoute,
+  OrgSettingsMailRoute: OrgSettingsMailRoute,
   OrgSettingsPatientRegistrationRoute: OrgSettingsPatientRegistrationRoute,
   OrgSettingsPipelinesRoute: OrgSettingsPipelinesRoute,
+  OrgSettingsSpecialtiesRoute: OrgSettingsSpecialtiesRoute,
+  OrgSettingsWebchatRoute: OrgSettingsWebchatRoute,
   OrgSettingsIndexRoute: OrgSettingsIndexRoute,
 }
 
@@ -556,32 +984,52 @@ const OrgPatientsPatientIdRouteWithChildren =
 
 interface OrgRouteChildren {
   OrgAgendaRoute: typeof OrgAgendaRoute
+  OrgAutomationsRoute: typeof OrgAutomationsRoute
   OrgBranchesRoute: typeof OrgBranchesRoute
   OrgDemoRoute: typeof OrgDemoRoute
+  OrgFinanceRoute: typeof OrgFinanceRoute
+  OrgHomeRoute: typeof OrgHomeRoute
   OrgInboxRoute: typeof OrgInboxRoute
+  OrgInventoryRoute: typeof OrgInventoryRouteWithChildren
   OrgMembersRoute: typeof OrgMembersRoute
+  OrgPatientAccessRoute: typeof OrgPatientAccessRoute
   OrgPipelineRoute: typeof OrgPipelineRoute
+  OrgReportsRoute: typeof OrgReportsRoute
   OrgServicesRoute: typeof OrgServicesRouteWithChildren
   OrgSettingsRoute: typeof OrgSettingsRouteWithChildren
   OrgTasksRoute: typeof OrgTasksRoute
+  OrgAgentApprovalsRoute: typeof OrgAgentApprovalsRoute
+  OrgAgentKnowledgeRoute: typeof OrgAgentKnowledgeRoute
   OrgContactsContactIdRoute: typeof OrgContactsContactIdRoute
+  OrgOpportunitiesOpportunityIdRoute: typeof OrgOpportunitiesOpportunityIdRoute
   OrgPatientsPatientIdRoute: typeof OrgPatientsPatientIdRouteWithChildren
+  OrgAgentIndexRoute: typeof OrgAgentIndexRoute
   OrgContactsIndexRoute: typeof OrgContactsIndexRoute
   OrgPatientsIndexRoute: typeof OrgPatientsIndexRoute
 }
 
 const OrgRouteChildren: OrgRouteChildren = {
   OrgAgendaRoute: OrgAgendaRoute,
+  OrgAutomationsRoute: OrgAutomationsRoute,
   OrgBranchesRoute: OrgBranchesRoute,
   OrgDemoRoute: OrgDemoRoute,
+  OrgFinanceRoute: OrgFinanceRoute,
+  OrgHomeRoute: OrgHomeRoute,
   OrgInboxRoute: OrgInboxRoute,
+  OrgInventoryRoute: OrgInventoryRouteWithChildren,
   OrgMembersRoute: OrgMembersRoute,
+  OrgPatientAccessRoute: OrgPatientAccessRoute,
   OrgPipelineRoute: OrgPipelineRoute,
+  OrgReportsRoute: OrgReportsRoute,
   OrgServicesRoute: OrgServicesRouteWithChildren,
   OrgSettingsRoute: OrgSettingsRouteWithChildren,
   OrgTasksRoute: OrgTasksRoute,
+  OrgAgentApprovalsRoute: OrgAgentApprovalsRoute,
+  OrgAgentKnowledgeRoute: OrgAgentKnowledgeRoute,
   OrgContactsContactIdRoute: OrgContactsContactIdRoute,
+  OrgOpportunitiesOpportunityIdRoute: OrgOpportunitiesOpportunityIdRoute,
   OrgPatientsPatientIdRoute: OrgPatientsPatientIdRouteWithChildren,
+  OrgAgentIndexRoute: OrgAgentIndexRoute,
   OrgContactsIndexRoute: OrgContactsIndexRoute,
   OrgPatientsIndexRoute: OrgPatientsIndexRoute,
 }
@@ -591,7 +1039,11 @@ const OrgRouteWithChildren = OrgRoute._addFileChildren(OrgRouteChildren)
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   OrgRoute: OrgRouteWithChildren,
+  PortalRoute: PortalRoute,
   RegistroRoute: RegistroRoute,
+  BajaTokenRoute: BajaTokenRoute,
+  CTokenRoute: CTokenRoute,
+  EmbedConnectionIdRoute: EmbedConnectionIdRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

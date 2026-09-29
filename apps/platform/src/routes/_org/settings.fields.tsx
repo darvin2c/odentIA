@@ -32,7 +32,7 @@ import { Plus } from "lucide-react"
 import { type FormEvent, useMemo, useState } from "react"
 import { z } from "zod"
 import { apiFetch } from "../../lib/api"
-import { type FieldDef, useCanWrite } from "../../lib/crm"
+import { type FieldDef, usePermission } from "../../lib/crm"
 
 export const Route = createFileRoute("/_org/settings/fields")({
   component: FieldsPage,
@@ -57,7 +57,8 @@ const FIELD_TYPES = [
 
 function FieldsPage() {
   const queryClient = useQueryClient()
-  const canWrite = useCanWrite()
+  const canWrite = usePermission("crm.write")
+  const canRead = usePermission("crm.read")
   const mode = useDetailMode()
   const [formOpen, setFormOpen] = useState(false)
   const [deleting, setDeleting] = useState<FieldDef | null>(null)
@@ -65,6 +66,7 @@ function FieldsPage() {
   const listQuery = useQuery({
     queryKey: ["fields"],
     queryFn: () => apiFetch<{ data: FieldDef[] }>("/api/fields"),
+    enabled: canRead,
   })
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["fields"] })
@@ -157,22 +159,23 @@ function FieldsPage() {
       {
         id: "actions",
         header: "",
-        cell: ({ row }) => (
-          <RowActions
-            label={`Acciones de ${row.original.label}`}
-            items={[
-              {
-                key: "delete",
-                label: "Eliminar",
-                tone: "danger",
-                onSelect: () => setDeleting(row.original),
-              },
-            ]}
-          />
-        ),
+        cell: ({ row }) =>
+          canWrite ? (
+            <RowActions
+              label={`Acciones de ${row.original.label}`}
+              items={[
+                {
+                  key: "delete",
+                  label: "Eliminar",
+                  tone: "danger",
+                  onSelect: () => setDeleting(row.original),
+                },
+              ]}
+            />
+          ) : null,
       },
     ],
-    [],
+    [canWrite],
   )
 
   const table = useReactTable({
@@ -181,10 +184,10 @@ function FieldsPage() {
     getCoreRowModel: getCoreRowModel(),
   })
 
-  if (!canWrite) {
+  if (!canRead) {
     return (
       <div>
-        <EmptyState title="Sin acceso" description="Solo owner/admin pueden definir campos." />
+        <EmptyState title="Sin acceso" description="Sin permiso de lectura del CRM." />
       </div>
     )
   }
@@ -267,17 +270,21 @@ function FieldsPage() {
     <div className="flex flex-col gap-6">
       <MasterDetail
         panel={
-          mode === "panel" && formOpen ? <FormPanel {...formProps}>{formFields}</FormPanel> : null
+          canWrite && mode === "panel" && formOpen ? (
+            <FormPanel {...formProps}>{formFields}</FormPanel>
+          ) : null
         }
       >
         <PageHeader
           title="Campos personalizados"
           subtitle="Datos extra de contactos (validados por tipo)"
           actions={
-            <Button type="button" className="min-h-11" onClick={() => setFormOpen(true)}>
-              <Plus aria-hidden />
-              Nuevo campo
-            </Button>
+            canWrite ? (
+              <Button type="button" className="min-h-11" onClick={() => setFormOpen(true)}>
+                <Plus aria-hidden />
+                Nuevo campo
+              </Button>
+            ) : undefined
           }
         />
         <FilterBar
@@ -317,19 +324,21 @@ function FieldsPage() {
     
       {/* Un solo contenedor montado a la vez: montar panel y drawer juntos
           duplicaría los id/htmlFor de los campos. */}
-      {mode === "drawer" ? (
+      {canWrite && mode === "drawer" ? (
         <FormDrawer open={formOpen} {...formProps}>
           {formFields}
         </FormDrawer>
       ) : null}
-      <ConfirmDialog
-        open={deleting !== null}
-        onClose={() => setDeleting(null)}
-        title={`Eliminar ${deleting?.label ?? ""}`}
-        description="Los valores ya guardados quedan intactos pero se ocultan."
-        confirmLabel="Eliminar"
-        onConfirm={() => deleting && deleteMutation.mutate(deleting.id)}
-      />
+      {canWrite && (
+        <ConfirmDialog
+          open={deleting !== null}
+          onClose={() => setDeleting(null)}
+          title={`Eliminar ${deleting?.label ?? ""}`}
+          description="Los valores ya guardados quedan intactos pero se ocultan."
+          confirmLabel="Eliminar"
+          onConfirm={() => deleting && deleteMutation.mutate(deleting.id)}
+        />
+      )}
     </div>
   )
 }

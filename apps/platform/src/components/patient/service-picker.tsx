@@ -19,7 +19,7 @@ import { useQuery } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { useId, useMemo, useState } from "react"
 import { ApiError } from "../../lib/api"
-import { useCanWrite } from "../../lib/crm"
+import { usePermission } from "../../lib/crm"
 import {
   fetchServices,
   formatMoney,
@@ -55,7 +55,8 @@ export function ServicePicker({
   const [query, setQuery] = useState("")
   const [open, setOpen] = useState(false)
   const [specialty, setSpecialty] = useState<string>(NO_SPECIALTY)
-  const canAdmin = useCanWrite()
+  const canRead = usePermission("clinical.read")
+  const canAdmin = usePermission("settings.write")
 
   const servicesQuery = useQuery({
     queryKey: ["services", "picker", query.trim(), specialty],
@@ -66,7 +67,7 @@ export function ServicePicker({
         state: "active",
         limit: 30,
       }),
-    enabled: !disabled,
+    enabled: canRead && !disabled,
     staleTime: 30_000,
   })
 

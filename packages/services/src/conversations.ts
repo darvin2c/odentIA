@@ -14,10 +14,11 @@ import {
   isDirectThread,
   isTelegramGroupThread,
   lockChannelIdentity,
+  OMNI_CHANNELS,
 } from "./contacts.js"
 import { decodeCursor, encodeCursor } from "./cursors.js"
 import { notFound, ServiceError, validation } from "./errors.js"
-import { ensureDefaultPipeline } from "./pipelines.js"
+import { createOpportunity } from "./opportunities.js"
 import { decryptConfig } from "./secrets.js"
 import type { AttachmentRef, Storage } from "./storage.js"
 
@@ -141,19 +142,26 @@ export async function ingestInbound(
     // nuevo: se reutiliza el contacto archivado (el badge lo muestra).
     contactId = identity.contactId
   } else {
-    const { stages } = await ensureDefaultPipeline(tx, orgId)
-    const first = stages[0]
-    if (!first) throw new Error("Pipeline default sin etapas")
     const [created] = await tx
       .insert(contact)
       .values({
         organizationId: orgId,
         displayName: event.senderDisplayName ?? event.senderExternalId,
-        stageId: first.id,
       })
       .returning({ id: contact.id })
     if (!created) throw new Error("No se pudo crear el contacto")
     contactId = created.id
+    // El embudo son oportunidades: el contacto entrante nace con su primera
+    // oportunidad en la etapa inicial (una por persona recién llegada).
+    await createOpportunity(
+      tx,
+      orgId,
+      {
+        contactId,
+        title: `Seguimiento · ${event.senderDisplayName ?? event.senderExternalId}`.slice(0, 200),
+      },
+      { userId: null },
+    )
     const [insertedIdentity] = await tx
       .insert(contactIdentity)
       .values({
@@ -443,6 +451,21 @@ function assertWindowAllows(
   }
 }
 
+/** Meta (Messenger/Instagram) exige ventana de 24h y no admite plantillas. */
+function assertMetaWindowAllows(row: {
+  conversation: typeof conversation.$inferSelect
+}): void {
+  const last = row.conversation.lastInboundAt
+  if (!last || Date.now() - last.getTime() > WA_FREE_TEXT_WINDOW_MS) {
+    throw new ServiceError(
+      "WINDOW_CLOSED",
+      409,
+      "Fuera de la ventana de 24 h de Meta: espera un mensaje nuevo de la persona",
+    )
+  }
+}
+
+const META_OUTBOUND_PROVIDERS = ["messenger", "instagram"]
 /**
  * Encola un mensaje saliente (texto o plantilla ya validada). Respuesta
  * humana (`user`) apaga el agente (patrón Kommo) y marca como leído.
@@ -460,6 +483,8 @@ export async function sendOutbound(
   const row = await requireOpenConversation(tx, orgId, input.conversationId)
   if (row.connection.provider === "whatsapp_cloud_api") {
     assertWindowAllows(row, input.content)
+  } else if (META_OUTBOUND_PROVIDERS.includes(row.connection.provider)) {
+    assertMetaWindowAllows(row)
   }
   if (input.content.type === "text" && !input.content.text.trim()) {
     throw validation("El texto del mensaje es obligatorio")
@@ -1003,8 +1028,8 @@ export async function startContactConversation(
       409,
       "Reactiva el contacto para iniciar conversaciones",
     )
-  if (identity.channel !== "whatsapp" && identity.channel !== "telegram") {
-    throw validation("Canal no soportado: solo whatsapp o telegram")
+  if (!OMNI_CHANNELS.includes(identity.channel as (typeof OMNI_CHANNELS)[number])) {
+    throw validation("Canal no soportado: solo whatsapp, telegram, messenger o instagram")
   }
   const [connection] = await tx
     .select()
@@ -1040,17 +1065,24 @@ export async function startContactConversation(
         eq(conversation.channelConnectionId, connection.id),
       ),
     )
+  // Solo WhatsApp crea el hilo en frío (con plantilla obligatoria). Telegram,
+  // Messenger e Instagram exigen que la persona escriba primero.
+  const needsPriorInbound = identity.channel !== "whatsapp"
   const existing = candidates.find(
     (row) =>
       isDirectThread(identity.channel, row.externalThreadId, identity.externalUserId) &&
-      (identity.channel !== "telegram" || row.lastInboundAt !== null),
+      (!needsPriorInbound || row.lastInboundAt !== null),
   )
   if (existing) return { id: existing.id, status: existing.status, created: false }
-  if (identity.channel === "telegram") {
+  if (needsPriorInbound) {
+    const who =
+      identity.channel === "telegram"
+        ? "Telegram exige que la persona escriba primero al bot"
+        : "Meta exige que la persona escriba primero a la página o cuenta"
     throw new ServiceError(
       "CHANNEL_REQUIRES_INBOUND",
       409,
-      "Telegram exige que la persona escriba primero al bot: sin conversación previa no se puede iniciar",
+      `${who}: sin conversación previa no se puede iniciar`,
     )
   }
   const [created] = await tx

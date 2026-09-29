@@ -19,7 +19,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { ChevronDown } from "lucide-react"
 import { useEffect, useId, useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
-import { timeAgo, useCanWrite } from "../../lib/crm"
+import { timeAgo, usePermission } from "../../lib/crm"
 import { useOrgProfile } from "../../lib/org"
 import type { PatientFull } from "../../lib/patients"
 import {
@@ -91,7 +91,8 @@ export function FiliacionDrawer({
   onOpenChange: (open: boolean) => void
 }) {
   const queryClient = useQueryClient()
-  const canWrite = useCanWrite()
+  const canWrite = usePermission("patients.write")
+  const canRead = usePermission("patients.read")
   // El país del perfil define la máscara del teléfono que se captura.
   const profile = useOrgProfile()
   const countryCode = normalizeCountry(profile.data?.countryCode)
@@ -119,7 +120,7 @@ export function FiliacionDrawer({
   const branchesQuery = useQuery({
     queryKey: ["branches"],
     queryFn: () => apiFetch<{ data: Branch[] }>("/api/branches"),
-    enabled: open,
+    enabled: open && canRead,
   })
 
   const invalidatePatient = () => {

@@ -41,6 +41,21 @@ async function prepareAppointment(owner: OwnerFixture): Promise<{
     201,
   )
   const { date, startsAt, endsAt } = limaToday()
+  // Horario explícito del profesional (la reserva estricta lo exige): el día
+  // de hoy en Lima de 17:00 a 20:00 cubre la cita de las 18:00.
+  const weekday = new Date(`${date}T17:00:00Z`).getUTCDay()
+  await call(
+    owner.page,
+    "PUT",
+    "/api/agenda/schedules",
+    owner.org.slug,
+    {
+      branchId: owner.branchId,
+      dentistUserId: owner.user.id,
+      rules: [{ weekday, startMin: 17 * 60, endMin: 20 * 60 }],
+    },
+    200,
+  )
   const appointment = await call<{ id: string; version: number }>(
     owner.page,
     "POST",

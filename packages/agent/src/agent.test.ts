@@ -4,6 +4,7 @@ import { PostgresSaver } from "@langchain/langgraph-checkpoint-postgres"
 import { telegramBotApiAdapter } from "@odentia/channels"
 import { createAppDb, createOwnerDb, type Db, setupAgentMemory, withOrgContext } from "@odentia/db"
 import { conversation, crmTask, message } from "@odentia/db/schema/crm"
+import { agentHandoff, agentRunLedger } from "@odentia/db/schema/agent"
 import {
   createConnection,
   ingestInbound,
@@ -143,6 +144,13 @@ it("inbound con agente habilitado produce respuesta del agente", async () => {
   const { conversationId, messageId } = await ingestText("tg:ag1", "evt-ag1", "Hola, quiero info")
   expect(await runAgent(conversationId, messageId)).toBe("done")
   expect(await agentMessages(conversationId)).toContain(FAKE_REPLY_TEXT)
+  const runs = await withOrgContext(appDb, "org_a", (tx) =>
+    tx
+      .select({ status: agentRunLedger.status, model: agentRunLedger.model })
+      .from(agentRunLedger)
+      .where(eq(agentRunLedger.conversationId, conversationId)),
+  )
+  expect(runs.some((r) => r.status === "ok" && r.model === "fake")).toBe(true)
 })
 
 it("handoff por palabra clave apaga el agente y crea tarea", async () => {
@@ -170,6 +178,19 @@ it("handoff por palabra clave apaga el agente y crea tarea", async () => {
       .where(eq(crmTask.conversationId, conversationId)),
   )
   expect(tasks.some((t) => t.title.startsWith("Derivación"))).toBe(true)
+  const handoffs = await withOrgContext(appDb, "org_a", (tx) =>
+    tx
+      .select({
+        reason: agentHandoff.reason,
+        summary: agentHandoff.summary,
+        priority: agentHandoff.priority,
+        taskId: agentHandoff.taskId,
+      })
+      .from(agentHandoff)
+      .where(eq(agentHandoff.conversationId, conversationId)),
+  )
+  expect(handoffs.length).toBe(1)
+  expect(handoffs[0]?.taskId).toBeTruthy()
   await withOrgContext(appDb, "org_a", (tx) =>
     upsertAgentConfig(tx, "org_a", { handoffKeywords: [] }),
   )

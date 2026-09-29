@@ -2,7 +2,7 @@ import type { Auth } from "@odentia/auth"
 import { type Db, sendDemoTask, withOrgContext } from "@odentia/db"
 import { message } from "@odentia/db/schema/crm"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
-import type { Storage } from "@odentia/services"
+import type { MailboxEnv, Storage } from "@odentia/services"
 import { and, eq, gt, inArray, sql } from "drizzle-orm"
 import { type Context, Hono } from "hono"
 import { cors } from "hono/cors"
@@ -10,7 +10,7 @@ import { requestId } from "hono/request-id"
 import { streamSSE } from "hono/streaming"
 import postgres from "postgres"
 import { z } from "zod"
-import { canWrite, orgContextOf, requireOrgContext, requireSession } from "./lib/context.js"
+import { canAccess, orgContextOf, requireOrgContext, requireSession } from "./lib/context.js"
 import { errorBody } from "./lib/error.js"
 import { createAgentRoute } from "./routes/agent.js"
 import { createAgendaRoute, createAppointmentsRoute } from "./routes/appointments.js"
@@ -29,6 +29,18 @@ import {
 import { createServicesRoute } from "./routes/services.js"
 import { createTasksRoute } from "./routes/tasks.js"
 import { createWebhooksRoute } from "./routes/webhooks.js"
+import { createWorkspaceRoute } from "./routes/workspace.js"
+import { createInventoryRoute } from "./routes/inventory.js"
+import { createOpportunitiesRoute } from "./routes/opportunities.js"
+import { createAgentKnowledgeRoute } from "./routes/agent-knowledge.js"
+import { createAgentOpsRoute } from "./routes/agent-ops.js"
+import { createFinanceRoute } from "./routes/finance.js"
+import { createAutomationsRoute, createPublicAutomationsRoute } from "./routes/automations.js"
+import { createClinicalFormsRoute } from "./routes/clinical-forms.js"
+import { createPortalRoute } from "./routes/portal.js"
+import { createPublicPortalRoute } from "./routes/public-portal.js"
+import { createWebchatPublicRoute, createWebchatAdminRoute } from "./routes/webchat.js"
+import { createMailboxesRoute } from "./routes/mailboxes.js"
 
 export interface AppDeps {
   auth: Auth
@@ -51,6 +63,10 @@ export interface AppDeps {
   /** Conexión dedicada LISTEN (postgres.js crudo). */
   listenUrl: string
   registrationRemoteAddress?: RegistrationRemoteAddress
+  agentModelName?: string
+  llmApiKey?: string
+  llmBaseUrl?: string
+  mailbox?: MailboxEnv
 }
 const branchInput = z.object({
   name: z.string().min(1).max(120),
@@ -186,6 +202,10 @@ export function createApp(deps: AppDeps) {
       remoteAddress: deps.registrationRemoteAddress,
     }),
   )
+  app.route("/api/public/portal", createPublicPortalRoute({ db, ownerDb: deps.ownerDb, storage: deps.storage }))
+  app.route("/api/public/automations", createPublicAutomationsRoute({ db, ownerDb: deps.ownerDb }))
+  app.route("/api/webchat", createWebchatPublicRoute({ ownerDb: deps.ownerDb, db, secretsKey: deps.secretsKey, cookieDomain: deps.cookieDomain }))
+  app.route("/api/mail", createMailboxesRoute({ auth, db, ownerDb: deps.ownerDb, secretsKey: deps.secretsKey, webUrl: deps.webURL, mailbox: deps.mailbox ?? {} }))
 
   // Rutas de usuario (sin contexto de organización).
   const userScoped = new Hono()
@@ -268,8 +288,8 @@ export function createApp(deps: AppDeps) {
 
   guarded.put("/org-profile", async (c) => {
     const { orgId, userId, memberRole } = orgContextOf(c)
-    if (!canWrite(memberRole)) {
-      return c.json(errorBody(c, "FORBIDDEN", "Solo owner/admin pueden editar el perfil"), 403)
+    if (!canAccess(memberRole, "settings.write")) {
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para editar el perfil"), 403)
     }
     const parsed = orgProfileInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
@@ -307,8 +327,8 @@ export function createApp(deps: AppDeps) {
 
   guarded.post("/branches", async (c) => {
     const { orgId, userId, memberRole } = orgContextOf(c)
-    if (!canWrite(memberRole)) {
-      return c.json(errorBody(c, "FORBIDDEN", "Solo owner/admin pueden crear sucursales"), 403)
+    if (!canAccess(memberRole, "settings.write")) {
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para crear sucursales"), 403)
     }
     const parsed = branchInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
@@ -333,8 +353,8 @@ export function createApp(deps: AppDeps) {
 
   guarded.patch("/branches/:id", async (c) => {
     const { orgId, userId, memberRole } = orgContextOf(c)
-    if (!canWrite(memberRole)) {
-      return c.json(errorBody(c, "FORBIDDEN", "Solo owner/admin pueden editar sucursales"), 403)
+    if (!canAccess(memberRole, "settings.write")) {
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para editar sucursales"), 403)
     }
     const id = c.req.param("id")
     const parsed = branchPatch.safeParse(await c.req.json().catch(() => null))
@@ -364,8 +384,8 @@ export function createApp(deps: AppDeps) {
 
   guarded.delete("/branches/:id", async (c) => {
     const { orgId, userId, memberRole } = orgContextOf(c)
-    if (!canWrite(memberRole)) {
-      return c.json(errorBody(c, "FORBIDDEN", "Solo owner/admin pueden desactivar sucursales"), 403)
+    if (!canAccess(memberRole, "settings.write")) {
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para desactivar sucursales"), 403)
     }
     const id = c.req.param("id")
     const row = await withOrgContext(db, orgId, async (tx) => {
@@ -493,6 +513,16 @@ export function createApp(deps: AppDeps) {
   guarded.route("/agenda", createAgendaRoute(crmDeps))
   guarded.route("/appointments", createAppointmentsRoute(crmDeps))
   guarded.route("/fields", createFieldsRoute(crmDeps))
+  guarded.route("/workspace", createWorkspaceRoute(crmDeps))
+  guarded.route("/inventory", createInventoryRoute(crmDeps))
+  guarded.route("/opportunities", createOpportunitiesRoute(crmDeps))
+  guarded.route("/agent/knowledge", createAgentKnowledgeRoute(crmDeps))
+  guarded.route("/agent", createAgentOpsRoute({ ...crmDeps, defaultModelName: deps.agentModelName, llmApiKey: deps.llmApiKey, llmBaseUrl: deps.llmBaseUrl }))
+  guarded.route("/finance", createFinanceRoute(crmDeps))
+  guarded.route("/automations", createAutomationsRoute(crmDeps))
+  guarded.route("/clinical-forms", createClinicalFormsRoute(crmDeps))
+  guarded.route("/portal", createPortalRoute({ db, webURL: deps.webURL, cookieDomain: deps.cookieDomain }))
+  guarded.route("/channels/webchat", createWebchatAdminRoute(crmDeps))
   app.route("/api", guarded)
   return app
 }

@@ -5,6 +5,16 @@ const envSchema = z.object({
   /** Rol owner: setup de memoria del agente (paso 7). */
   DATABASE_URL: z.string().min(1),
   SECRETS_KEY: z.string().min(1),
+  /** Origen público de la plataforma para confirmaciones y bajas. */
+  WEB_URL: z.string().url(),
+  GMAIL_CLIENT_ID: z.string().default(""),
+  GMAIL_CLIENT_SECRET: z.string().default(""),
+  GMAIL_REDIRECT_URI: z.string().default(""),
+  MICROSOFT_MAIL_CLIENT_ID: z.string().default(""),
+  MICROSOFT_MAIL_CLIENT_SECRET: z.string().default(""),
+  MICROSOFT_MAIL_REDIRECT_URI: z.string().default(""),
+  MICROSOFT_MAIL_TENANT: z.string().default("common"),
+  MAILBOX_POLL_INTERVAL_MS: z.coerce.number().int().min(1000).default(60000),
   CHANNEL_SENDER_MODE: z.enum(["mock", "live"]).default("mock"),
   /** Formato initChatModel (p.ej. openai:gpt-4o-mini); fake = determinista. */
   LLM_MODEL: z.string().min(1).default("fake"),

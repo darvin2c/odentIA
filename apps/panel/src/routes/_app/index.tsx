@@ -48,7 +48,7 @@ function OrgsPage() {
             {orgs.map((org) => (
               <li key={org.id}>
                 <a
-                  href={tenantUrl(org.slug, "/branches")}
+                  href={tenantUrl(org.slug, "/home")}
                   className="flex items-center gap-3 rounded-lg border p-4 hover:bg-muted"
                 >
                   <Building2 className="size-5 shrink-0" aria-hidden />

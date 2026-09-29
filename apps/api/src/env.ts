@@ -23,7 +23,18 @@ const envSchema = z.object({
   S3_ATTACHMENTS_BUCKET: z.string().min(1),
   S3_PUBLIC_URL: z.string().url(),
   SECRETS_KEY: z.string().min(1),
-  CHANNEL_VALIDATE_EXTERNAL: z.string().optional().default("true"),
+  CHANNEL_VALIDATE_EXTERNAL: z.enum(["true", "false"]).default("true"),
+  GMAIL_CLIENT_ID: z.string().default(""),
+  GMAIL_CLIENT_SECRET: z.string().default(""),
+  GMAIL_REDIRECT_URI: z.string().default(""),
+  MICROSOFT_MAIL_CLIENT_ID: z.string().default(""),
+  MICROSOFT_MAIL_CLIENT_SECRET: z.string().default(""),
+  MICROSOFT_MAIL_REDIRECT_URI: z.string().default(""),
+  MICROSOFT_MAIL_TENANT: z.string().default("common"),
+  /** Formato initChatModel (p.ej. openai:gpt-4o-mini); fake = determinista. */
+  LLM_MODEL: z.string().min(1).default("fake"),
+  LLM_API_KEY: z.string().optional(),
+  LLM_BASE_URL: z.string().url().optional(),
   PORT: z.coerce.number().int().default(3001),
 })
 

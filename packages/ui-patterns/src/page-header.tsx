@@ -1,17 +1,23 @@
 import { cn, SidebarTrigger, useSidebarOptional } from "@odentia/ui"
 import type * as React from "react"
+import { useHeaderUtilities } from "./header-utilities.js"
 
 /**
  * Header por página: el primer bloque de contenido de cada pantalla.
  *
- * Una sola fila siempre, también en móvil: el título se recorta antes que
- * empujar las acciones a una segunda línea, que en una pantalla de teléfono
- * cuesta media pantalla de scroll. Las acciones nunca se parten ni se envuelven;
- * lo que no cabe en el ancho disponible se recorta por la izquierda del título.
+ * Banda sobre `bg-card` sin borde ni sombra: el título y su
+ * subtítulo a la izquierda y, a la derecha, las utilidades globales que
+ * inyecta el layout (`HeaderUtilitiesProvider`: avisos, selector de
+ * organización) separadas por un divisor de las acciones propias de la página.
  *
- * En móvil monta el único disparador del drawer del sidebar —el shell no tiene
- * header propio—, así que solo aparece dentro de `AppShell` y por debajo del
- * corte móvil; en escritorio el menú se colapsa desde su riel.
+ * El disparador del sidebar vive aquí solo en móvil (`md:hidden`): en
+ * escritorio el colapso está dentro del propio sidebar (`AppShell`), al estilo
+ * ChatGPT. Sin `SidebarProvider` (auth, onboarding, páginas públicas) no hay
+ * contexto y el control no se renderiza.
+ *
+ * En anchos cortos la banda envuelve: el título conserva una base mínima
+ * (`basis-48`) y, si no cabe todo, las utilidades y acciones bajan completas a
+ * una segunda fila antes de recortar el título hasta hacerlo desaparecer.
  */
 
 export interface PageHeaderProps {
@@ -24,28 +30,39 @@ export interface PageHeaderProps {
   className?: string
 }
 
+function HeaderDivider() {
+  return <span aria-hidden="true" className="mx-1 h-6 w-px shrink-0 bg-border" />
+}
+
 export function PageHeader({
   title,
   subtitle,
   actions,
   className,
 }: PageHeaderProps): React.JSX.Element {
-  // El drawer móvil del sidebar no tiene otro disparador: el shell lo deja
-  // aquí, en el primer bloque de cada página. Sin `SidebarProvider` (auth,
-  // onboarding) no hay contexto y el control no se renderiza.
   const sidebar = useSidebarOptional()
+  const utilities = useHeaderUtilities()
   const navTrigger = sidebar ? <SidebarTrigger className="-ml-2 shrink-0 md:hidden" /> : null
 
   return (
-    <header className={cn("flex min-w-0 items-center justify-between gap-3", className)}>
-      <div className="flex min-w-0 items-center gap-3">
-        {navTrigger}
-        <div className="min-w-0">
-          <h1 className="truncate text-xl font-semibold tracking-tight text-foreground">{title}</h1>
-          {subtitle ? <p className="truncate text-sm text-muted-foreground">{subtitle}</p> : null}
-        </div>
+    <header
+      className={cn(
+        "flex min-w-0 flex-wrap items-center gap-3 rounded-lg bg-card px-4 py-2.5",
+        className,
+      )}
+    >
+      {navTrigger}
+      <div className="min-w-0 flex-1 basis-48">
+        <h1 className="truncate text-lg font-semibold tracking-tight text-foreground">{title}</h1>
+        {subtitle ? <p className="truncate text-sm text-muted-foreground">{subtitle}</p> : null}
       </div>
-      {actions ? <div className="flex shrink-0 items-center gap-2">{actions}</div> : null}
+      {utilities || actions ? (
+        <div className="ml-auto flex shrink-0 items-center gap-1">
+          {utilities}
+          {utilities && actions ? <HeaderDivider /> : null}
+          {actions ? <div className="flex items-center gap-2">{actions}</div> : null}
+        </div>
+      ) : null}
     </header>
   )
 }

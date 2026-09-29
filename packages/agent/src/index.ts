@@ -4,6 +4,6 @@
  */
 export type { QueueMessage } from "@odentia/db"
 export { FAKE_REPLY_TEXT, FakeChatModel } from "./fake-model.js"
-export { compileAgentGraph, createChatModel } from "./graph.js"
-export { type AgentRuntime, consumeAgentRun, processAgentRun } from "./run.js"
-export { type AgentToolCtx, makeAgentTools, performHandoff } from "./tools.js"
+export { compileAgentGraph } from "./graph.js"
+export { createConfiguredChatModel, providerOf, type LlmCredentials } from "./llm.js"
+export { type AgentRuntime, consumeAgentRun, processAgentRun, simulateAgentTurn, type SimulationResult } from "./run.js"

@@ -9,7 +9,6 @@ import {
   fieldErrorMessages,
   normalizeCountry,
   PageHeader,
-  PageShell,
   SubmitButton,
   TimeZoneSelect,
   timeZoneMeta,
@@ -20,7 +19,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, getRouteApi } from "@tanstack/react-router"
 import { type FormEvent, useEffect, useState } from "react"
 import { z } from "zod"
-import { useCanWrite } from "../../lib/crm"
+import { usePermission } from "../../lib/crm"
 import { fetchOrgProfile, type OrgProfile, type OrgProfileInput, saveOrgProfile, useOrgProfile } from "../../lib/org"
 
 export const Route = createFileRoute("/_org/settings/")({
@@ -133,7 +132,7 @@ function OrgProfilePage() {
   const { org } = orgRouteApi.useRouteContext()
   const { profile: loaded, loaded: fetched } = Route.useLoaderData()
   const queryClient = useQueryClient()
-  const canWrite = useCanWrite()
+  const canWrite = usePermission("settings.write")
   const profileQuery = useOrgProfile()
   // El loader ya trajo el perfil (también en SSR: el formulario está en el primer
   // pintado). La query manda después —al guardar, al reintentar o si la API no
@@ -151,7 +150,7 @@ function OrgProfilePage() {
   })
 
   return (
-    <PageShell className="flex flex-col gap-6">
+    <div className="flex flex-col gap-6">
       <PageHeader title="Organización" subtitle={org.name} />
       <p className="max-w-2xl text-sm text-muted-foreground">
         Identidad fiscal y reglas del país: definen la zona horaria con la que se interpretan la
@@ -176,11 +175,11 @@ function OrgProfilePage() {
         />
       ) : (
         <EmptyState
-          title="Solo owner/admin"
-          description="Pide a un administrador de la organización que edite estos datos."
+          title="Sin permiso"
+          description="Necesitas permiso de configuración para editar estos datos."
         />
       )}
-    </PageShell>
+    </div>
   )
 }
 

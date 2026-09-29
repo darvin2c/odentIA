@@ -1,3 +1,4 @@
+import { canAccess } from "@odentia/auth/permissions"
 import { getRouteApi } from "@tanstack/react-router"
 
 const orgRouteApi = getRouteApi("/_org")
@@ -76,11 +77,18 @@ export interface TaskItem {
   createdBy: string
 }
 
-/** Rol del usuario en la org del host: owner/admin pueden escribir. */
-export function useCanWrite(): boolean {
+/** Rol del usuario en la org actual (fuente: membresía de la sesión). */
+export function useMyRole(): string {
   const { org, session } = orgRouteApi.useRouteContext()
-  const me = org.members.find((m) => m.userId === session.userId)
-  return me?.role === "owner" || me?.role === "admin"
+  return org.members.find((m) => m.userId === session.userId)?.role ?? "member"
+}
+
+/**
+ * ¿Puede el usuario ejercer `permission` (p. ej. `clinical.write`)? Solo
+ * gating visual: la API aplica la matriz con `canAccess` y devuelve 403.
+ */
+export function usePermission(permission: string): boolean {
+  return canAccess(useMyRole(), permission)
 }
 
 export function useMyUserId(): string {
@@ -117,7 +125,6 @@ export interface ContactListItem {
   email: string | null
   isActive: boolean
   tags: string[]
-  stageId: string | null
   assignedUserId: string | null
   lastInteractionAt: string | null
   channels: string[]
@@ -169,6 +176,49 @@ export interface Pipeline {
   stages: Stage[]
 }
 
+export interface OpportunityListItem {
+  id: string
+  title: string
+  contactId: string
+  contactName: string
+  patientId: string | null
+  patientName: string | null
+  pipelineId: string
+  stageId: string
+  stageName: string
+  stageKind: string
+  status: "open" | "won" | "lost"
+  amountCents: number | null
+  currency: string
+  interestText: string | null
+  serviceName: string | null
+  assignedUserId: string | null
+  nextActionAt: string | null
+  updatedAt: string
+}
+
+export interface OpportunityDetail extends OpportunityListItem {
+  contactPhone: string | null
+  contactEmail: string | null
+  serviceId: string | null
+  nextActionNote: string | null
+  closedAt: string | null
+  closeReason: string | null
+  budgetId: string | null
+  budgetTitle: string | null
+  budgetStatus: string | null
+  createdAt: string
+  history: Array<{
+    id: string
+    action: string
+    fromStageId: string | null
+    toStageId: string | null
+    actorUserId: string | null
+    note: string | null
+    createdAt: string
+  }>
+}
+
 export interface FieldDef {
   id: string
   key: string
@@ -205,3 +255,4 @@ export interface AgentConfig {
   handoffKeywords: string[]
   maxTurns: number
 }
+

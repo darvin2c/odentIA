@@ -30,7 +30,8 @@ import {
   voidPaymentApi,
   voidPaymentApplicationApi,
 } from "../../lib/clinical-journey"
-import { useCanWrite } from "../../lib/crm"
+import { usePermission } from "../../lib/crm"
+import { fetchShifts } from "../../lib/finance"
 import type { PatientFull, PlanItem } from "../../lib/patients"
 import { formatMoney } from "../../lib/services"
 
@@ -60,7 +61,8 @@ interface AccountKeys {
 /** Cuenta económica del paciente: cargos, anticipos, aplicaciones y devoluciones. */
 export function CuentaTab({ patientId }: { patientId: string }): React.JSX.Element {
   const uid = useId()
-  const canWrite = useCanWrite()
+  const canRead = usePermission("finance.read")
+  const canWrite = usePermission("finance.write")
   const queryClient = useQueryClient()
   const account = useQuery({
     queryKey: ["patient-account", patientId],
@@ -77,6 +79,12 @@ export function CuentaTab({ patientId }: { patientId: string }): React.JSX.Eleme
   const planItems = useQuery({
     queryKey: ["plan-items", patientId],
     queryFn: () => apiFetch<{ data: PlanItem[] }>(`/api/patients/${patientId}/plan`),
+  })
+  // Turnos abiertos para ingresar el cobro a caja sin duplicar (solo lectura).
+  const openShifts = useQuery({
+    queryKey: ["finance-shifts-open"],
+    queryFn: () => fetchShifts("abierta"),
+    enabled: canRead,
   })
 
   const [error, setError] = useState<string | null>(null)
@@ -108,6 +116,8 @@ export function CuentaTab({ patientId }: { patientId: string }): React.JSX.Eleme
   const [refundAmount, setRefundAmount] = useState("")
   const [targetId, setTargetId] = useState("")
   const [reason, setReason] = useState("")
+  const [paymentShiftId, setPaymentShiftId] = useState("")
+  const [compensateShiftId, setCompensateShiftId] = useState("")
 
   const data = account.data?.data
   const invalidate = () => {
@@ -120,6 +130,8 @@ export function CuentaTab({ patientId }: { patientId: string }): React.JSX.Eleme
     setForm(null)
     setError(null)
     setReason("")
+    setPaymentShiftId("")
+    setCompensateShiftId("")
   }
 
   const createChargeMutation = useMutation({
@@ -148,6 +160,7 @@ export function CuentaTab({ patientId }: { patientId: string }): React.JSX.Eleme
         method: paymentMethod,
         reference: paymentReference.trim() || null,
         payerContactId: payerContactId || null,
+        shiftId: paymentShiftId || null,
       }),
     onSuccess: () => {
       close()
@@ -192,7 +205,11 @@ export function CuentaTab({ patientId }: { patientId: string }): React.JSX.Eleme
     onError: (mutationError) => setError(mutationMessage(mutationError)),
   })
   const voidPaymentMutation = useMutation({
-    mutationFn: () => voidPaymentApi(patientId, targetId, { reason: reason.trim() }),
+    mutationFn: () =>
+      voidPaymentApi(patientId, targetId, {
+        reason: reason.trim(),
+        compensateShiftId: compensateShiftId || null,
+      }),
     onSuccess: () => {
       close()
       invalidate()
@@ -208,6 +225,14 @@ export function CuentaTab({ patientId }: { patientId: string }): React.JSX.Eleme
     onError: (mutationError) => setError(mutationMessage(mutationError)),
   })
 
+  if (!canRead) {
+    return (
+      <EmptyState
+        title="Sin acceso a la cuenta"
+        description="Tu rol no tiene permiso de finanzas. Pide a un administrador el rol de cajero."
+      />
+    )
+  }
   if (account.isPending) {
     return <p className="text-sm text-muted-foreground">Cargando cuenta del paciente…</p>
   }
@@ -759,6 +784,27 @@ export function CuentaTab({ patientId }: { patientId: string }): React.JSX.Eleme
               onChange={(event) => setPaymentReference(event.target.value)}
             />
           </Field>
+          <Field>
+            <FieldLabel htmlFor={`${uid}-payment-shift`}>Turno de caja (opcional)</FieldLabel>
+            <select
+              id={`${uid}-payment-shift`}
+              className="h-9 w-full rounded-md border bg-background px-3 text-sm"
+              value={paymentShiftId}
+              onChange={(event) => setPaymentShiftId(event.target.value)}
+            >
+              <option value="">Sin turno (solo cuenta)</option>
+              {(openShifts.data?.data ?? [])
+                .filter((shift) => shift.currency === paymentCurrency)
+                .map((shift) => (
+                  <option key={shift.id} value={shift.id}>
+                    Turno {shift.currency} · {shift.id.slice(0, 8)}
+                    {paymentMethod === "efectivo"
+                      ? " · entra al arqueo"
+                      : " · electrónico, sin arqueo"}
+                  </option>
+                ))}
+            </select>
+          </Field>
         </div>
       </FormDrawer>
 
@@ -947,6 +993,26 @@ export function CuentaTab({ patientId }: { patientId: string }): React.JSX.Eleme
             onChange={(event) => setReason(event.target.value)}
           />
         </Field>
+        {form === "void-payment" ? (
+          <Field>
+            <FieldLabel htmlFor={`${uid}-void-compensate`}>
+              Compensación en caja (si su turno ya cerró)
+            </FieldLabel>
+            <select
+              id={`${uid}-void-compensate`}
+              className="h-9 w-full rounded-md border bg-background px-3 text-sm"
+              value={compensateShiftId}
+              onChange={(event) => setCompensateShiftId(event.target.value)}
+            >
+              <option value="">Sin compensación</option>
+              {(openShifts.data?.data ?? []).map((shift) => (
+                <option key={shift.id} value={shift.id}>
+                  Turno {shift.currency} · {shift.id.slice(0, 8)}
+                </option>
+              ))}
+            </select>
+          </Field>
+        ) : null}
       </FormDrawer>
     </div>
   )

@@ -20,7 +20,7 @@ import {
   type ResponsibilityKind,
   revokeResponsibilityApi,
 } from "../../lib/clinical-journey"
-import { useCanWrite } from "../../lib/crm"
+import { usePermission } from "../../lib/crm"
 import type { PatientDocument, PatientFull } from "../../lib/patients"
 
 const MAX_TEXT = 2000
@@ -31,19 +31,23 @@ function todayIso(): string {
 
 export function ResponsablesTab({ patientId }: { patientId: string }): React.JSX.Element {
   const uid = useId()
-  const canWrite = useCanWrite()
+  const canWrite = usePermission("patients.write")
+  const canRead = usePermission("patients.read")
   const queryClient = useQueryClient()
   const list = useQuery({
     queryKey: ["responsibilities", patientId],
     queryFn: () => fetchResponsibilities(patientId),
+    enabled: canRead,
   })
   const patient = useQuery({
     queryKey: ["patient", patientId],
     queryFn: () => apiFetch<{ data: PatientFull }>(`/api/patients/${patientId}`),
+    enabled: canRead,
   })
   const documents = useQuery({
     queryKey: ["patient-documents", patientId],
     queryFn: () => apiFetch<{ data: PatientDocument[] }>(`/api/patients/${patientId}/documents`),
+    enabled: canRead,
   })
 
   const [grantOpen, setGrantOpen] = useState(false)

@@ -40,8 +40,9 @@ async function onboard(page: Page, org: UiOrg): Promise<void> {
   await page.getByRole("button", { name: "Continuar" }).click()
   await page.getByLabel("Nombre de la sucursal").fill(org.branch)
   await page.getByRole("button", { name: "Crear organización" }).click()
-  await expect(page).toHaveURL(tenantPattern(org.slug, "/branches"))
-  await expect(page.getByText(org.branch)).toBeVisible()
+  await expect(page).toHaveURL(tenantPattern(org.slug, "/home"))
+  const branches = await call<{ name: string }[]>(page, "GET", "/api/branches", org.slug)
+  expect(branches.map(branch => branch.name)).toContain(org.branch)
 }
 
 test("auth: registro, verificación y onboarding", async ({ browser }) => {
@@ -80,8 +81,8 @@ test("auth: invitación, permisos y aislamiento", async ({ browser, createOwner 
     const invitationLink = await latestLinkFor(member.email, `Invitación a ${owner.org.name}`)
     expect(invitationLink.startsWith(`${PANEL}/accept-invitation/`)).toBe(true)
     await gotoHydrated(memberPage, invitationLink)
-    await expect(memberPage).toHaveURL(tenantPattern(owner.org.slug, "/branches"))
-    await expect(memberPage.getByText("Sede Central")).toBeVisible()
+    await expect(memberPage).toHaveURL(tenantPattern(owner.org.slug, "/home"))
+    await expect(memberPage.getByRole("link", { name: "Tareas", exact: true })).toBeVisible()
 
     const forbidden = await api(memberPage, "POST", "/api/branches", owner.org.slug, { name: "Sede Prohibida" })
     expect(forbidden.status).toBe(403)

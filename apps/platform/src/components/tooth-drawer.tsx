@@ -29,7 +29,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useId, useMemo, useRef, useState } from "react"
 import { ApiError, apiFetch } from "../lib/api"
 import { createTreatmentPlanApi, fetchTreatmentPlans, planDecisionLabel } from "../lib/budgets"
-import { timeAgo, useCanWrite } from "../lib/crm"
+import { timeAgo, usePermission } from "../lib/crm"
 import {
   type OdontogramEntry,
   type PatientDocument,
@@ -161,7 +161,8 @@ export function ToothDrawer({
   onDirtyChange?: (dirty: boolean) => void
 }): React.JSX.Element {
   const queryClient = useQueryClient()
-  const canWrite = useCanWrite()
+  const canWrite = usePermission("clinical.write")
+  const canRead = usePermission("clinical.read")
   const canMutate = !readOnly && canWrite
   const uid = useId()
   const multi = teeth.length > 1
@@ -400,16 +401,19 @@ export function ToothDrawer({
   const planQuery = useQuery({
     queryKey: ["plan", patientId],
     queryFn: () => apiFetch<{ data: PlanItem[] }>(`/api/patients/${patientId}/plan`),
+    enabled: canRead,
   })
 
   const docsQuery = useQuery({
     queryKey: ["patient-documents", patientId],
     queryFn: () => apiFetch<{ data: PatientDocument[] }>(`/api/patients/${patientId}/documents`),
+    enabled: canRead,
   })
   // Planes del paciente como destino de la indicación.
   const treatmentPlansQuery = useQuery({
     queryKey: ["treatment-plans", patientId],
     queryFn: () => fetchTreatmentPlans(patientId),
+    enabled: canRead,
   })
   const planOptions = useMemo(
     () => treatmentPlansQuery.data?.data ?? [],
@@ -1755,10 +1759,12 @@ function ToothContext({
 }
 
 function useSignedDocUrl(patientId: string, documentId: string) {
+  const canRead = usePermission("clinical.read")
   return useQuery({
     queryKey: ["patient-document-url", patientId, documentId],
     queryFn: () =>
       apiFetch<{ data: { url: string } }>(`/api/patients/${patientId}/documents/${documentId}/url`),
+    enabled: canRead,
     staleTime: SIGNED_URL_STALE_MS,
     gcTime: 30 * 60 * 1000,
   })

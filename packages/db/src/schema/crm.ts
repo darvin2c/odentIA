@@ -89,7 +89,6 @@ export const contact = pgTable("contact", {
   notes: text("notes"),
   tags: text("tags").array().notNull().default(sql`'{}'`),
   customFields: jsonb("custom_fields").notNull().default(sql`'{}'::jsonb`),
-  stageId: uuid("stage_id").references(() => pipelineStage.id),
   assignedUserId: text("assigned_user_id").references(() => user.id),
   lastInteractionAt: timestamp("last_interaction_at", { withTimezone: true }),
   ...timestamps,

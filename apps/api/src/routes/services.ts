@@ -9,9 +9,12 @@ import {
 } from "@odentia/services"
 import { Hono } from "hono"
 import { z } from "zod"
-import { canWrite, orgContextOf } from "../lib/context.js"
+import { canAccess, orgContextOf } from "../lib/context.js"
 import { errorBody } from "../lib/error.js"
 import { type CrmDeps, runService, serviceErrorResponse, validationError } from "./helpers.js"
+
+// Catálogo visible para clínica (dentista), configuración y caja: el dentista
+// lo necesita para planificar y la caja para cobrar; la escritura es ajuste.
 
 const templatesQuery = z
   .object({
@@ -74,7 +77,15 @@ export function createServicesRoute(deps: CrmDeps) {
   const app = new Hono()
 
   app.get("/", async (c) => {
-    const { orgId } = orgContextOf(c)
+    const { orgId, memberRole } = orgContextOf(c)
+    if (
+      !canAccess(memberRole, "clinical.read") &&
+      !canAccess(memberRole, "appointments.read") &&
+      !canAccess(memberRole, "settings.read") &&
+      !canAccess(memberRole, "finance.read")
+    ) {
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para ver el tarifario"), 403)
+    }
     const parsed = offersQuery.safeParse(c.req.query())
     if (!parsed.success) return validationError(c, parsed.error.issues)
     try {
@@ -94,7 +105,15 @@ export function createServicesRoute(deps: CrmDeps) {
   })
 
   app.get("/templates", async (c) => {
-    const { orgId } = orgContextOf(c)
+    const { orgId, memberRole } = orgContextOf(c)
+    if (
+      !canAccess(memberRole, "clinical.read") &&
+      !canAccess(memberRole, "appointments.read") &&
+      !canAccess(memberRole, "settings.read") &&
+      !canAccess(memberRole, "finance.read")
+    ) {
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para ver el tarifario"), 403)
+    }
     const parsed = templatesQuery.safeParse(c.req.query())
     if (!parsed.success) return validationError(c, parsed.error.issues)
     try {
@@ -113,7 +132,15 @@ export function createServicesRoute(deps: CrmDeps) {
   })
 
   app.get("/templates/:id", async (c) => {
-    const { orgId } = orgContextOf(c)
+    const { orgId, memberRole } = orgContextOf(c)
+    if (
+      !canAccess(memberRole, "clinical.read") &&
+      !canAccess(memberRole, "appointments.read") &&
+      !canAccess(memberRole, "settings.read") &&
+      !canAccess(memberRole, "finance.read")
+    ) {
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para ver el tarifario"), 403)
+    }
     try {
       const data = await withOrgContext(deps.db, orgId, (tx) => getTemplate(tx, c.req.param("id")))
       return c.json({ data })
@@ -124,9 +151,9 @@ export function createServicesRoute(deps: CrmDeps) {
 
   app.post("/from-templates", async (c) => {
     const { orgId, userId, memberRole } = orgContextOf(c)
-    if (!canWrite(memberRole)) {
+    if (!canAccess(memberRole, "settings.write")) {
       return c.json(
-        errorBody(c, "FORBIDDEN", "Solo owner/admin pueden administrar el tarifario"),
+        errorBody(c, "FORBIDDEN", "No tienes permiso para administrar el tarifario"),
         403,
       )
     }
@@ -141,8 +168,8 @@ export function createServicesRoute(deps: CrmDeps) {
 
   app.post("/", async (c) => {
     const { orgId, userId, memberRole } = orgContextOf(c)
-    if (!canWrite(memberRole)) {
-      return c.json(errorBody(c, "FORBIDDEN", "Solo owner/admin pueden crear prestaciones"), 403)
+    if (!canAccess(memberRole, "settings.write")) {
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para crear prestaciones"), 403)
     }
     const parsed = createInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
@@ -165,8 +192,8 @@ export function createServicesRoute(deps: CrmDeps) {
 
   app.patch("/:id", async (c) => {
     const { orgId, userId, memberRole } = orgContextOf(c)
-    if (!canWrite(memberRole)) {
-      return c.json(errorBody(c, "FORBIDDEN", "Solo owner/admin pueden editar prestaciones"), 403)
+    if (!canAccess(memberRole, "settings.write")) {
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para editar prestaciones"), 403)
     }
     const parsed = patchInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)

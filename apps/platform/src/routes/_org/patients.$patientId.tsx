@@ -5,31 +5,41 @@ import { useQuery } from "@tanstack/react-query"
 import { createFileRoute, Outlet, useChildMatches, useNavigate } from "@tanstack/react-router"
 import { AntecedentesTab } from "../../components/patient/antecedentes-tab"
 import { ControlesPanel, RecetasPanel } from "../../components/patient/clinical-panels"
+import { ConsentimientosTab } from "../../components/patient/consentimientos-tab"
 import { CuentaTab } from "../../components/patient/cuenta-tab"
+import { FormulariosTab } from "../../components/patient/formularios-tab"
 import { HistoriaTab } from "../../components/patient/historia-tab"
 import { ImagenesTab } from "../../components/patient/imagenes-tab"
 import { OdontogramaTab } from "../../components/patient/odontograma-tab"
+import { OrdenesTab } from "../../components/patient/ordenes-tab"
 import { PatientHeader } from "../../components/patient/patient-header"
 import { PlanTab } from "../../components/patient/plan-tab"
 import { RecorridoClinicoTab } from "../../components/patient/recorrido-tab"
 import { ResponsablesTab } from "../../components/patient/responsables-tab"
 import { ResumenTab } from "../../components/patient/resumen-tab"
+import { PortalInvitePanel } from "../../components/portal/portal-invite-panel"
 import { apiFetch } from "../../lib/api"
+import { usePermission } from "../../lib/crm"
 import type { PatientFull, PatientSummary, PlanItem } from "../../lib/patients"
 
+type TabPermission = "clinical.read" | "finance.read" | "patients.read"
+
 const TABS = [
-  { value: "resumen", label: "Resumen" },
-  { value: "recorrido", label: "Recorrido clínico" },
-  { value: "antecedentes", label: "Antecedentes" },
-  { value: "odontograma", label: "Odontograma" },
-  { value: "historia", label: "Historia" },
-  { value: "plan", label: "Planes de tratamiento" },
-  { value: "controles", label: "Controles" },
-  { value: "recetas", label: "Recetas" },
-  { value: "cuenta", label: "Cuenta" },
-  { value: "responsables", label: "Responsables" },
-  { value: "imagenes", label: "Imágenes y documentos" },
-] as const
+  { value: "resumen", label: "Resumen", permission: "clinical.read" },
+  { value: "recorrido", label: "Recorrido clínico", permission: "clinical.read" },
+  { value: "antecedentes", label: "Antecedentes", permission: "clinical.read" },
+  { value: "odontograma", label: "Odontograma", permission: "clinical.read" },
+  { value: "historia", label: "Historia", permission: "clinical.read" },
+  { value: "plan", label: "Planes de tratamiento", permission: "clinical.read" },
+  { value: "controles", label: "Controles", permission: "clinical.read" },
+  { value: "recetas", label: "Recetas", permission: "clinical.read" },
+  { value: "formularios", label: "Formularios", permission: "clinical.read" },
+  { value: "consentimientos", label: "Consentimientos", permission: "clinical.read" },
+  { value: "ordenes", label: "Órdenes", permission: "clinical.read" },
+  { value: "cuenta", label: "Cuenta", permission: "finance.read" },
+  { value: "responsables", label: "Responsables", permission: "patients.read" },
+  { value: "imagenes", label: "Imágenes y documentos", permission: "clinical.read" },
+] as const satisfies ReadonlyArray<{ value: string; label: string; permission: TabPermission }>
 type PatientTab = (typeof TABS)[number]["value"]
 
 const searchId = (value: unknown): string | undefined =>
@@ -89,17 +99,29 @@ function PatientDetailPage() {
   const { patientId } = Route.useParams()
   const { tab = "resumen", tooth, planId, budgetId, documentId, itemId } = Route.useSearch()
   const navigate = useNavigate({ from: Route.fullPath })
+  const canClinical = usePermission("clinical.read")
+  const canFinance = usePermission("finance.read")
+  const canPatients = usePermission("patients.read")
+  const canTab = (permission: TabPermission) =>
+    permission === "clinical.read" ? canClinical : permission === "finance.read" ? canFinance : canPatients
+  const visibleTabs = TABS.filter((item) => canTab(item.permission))
+  const activeTab = visibleTabs.some((item) => item.value === tab)
+    ? tab
+    : (visibleTabs[0]?.value ?? "responsables")
   const detail = useQuery({
     queryKey: ["patient", patientId],
     queryFn: () => apiFetch<{ data: PatientFull }>(`/api/patients/${patientId}`),
+    enabled: canPatients || canClinical || canFinance,
   })
   const summary = useQuery({
     queryKey: ["patient-summary", patientId],
     queryFn: () => apiFetch<{ data: PatientSummary }>(`/api/patients/${patientId}/summary`),
+    enabled: canClinical,
   })
   const planItems = useQuery({
     queryKey: ["plan-items", patientId],
     queryFn: () => apiFetch<{ data: PlanItem[] }>(`/api/patients/${patientId}/plan`),
+    enabled: canClinical,
   })
   const changeTab = (next: PatientTab, nextTooth?: number) => {
     void navigate({ search: { tab: next, ...(nextTooth ? { tooth: nextTooth } : {}) } })
@@ -146,21 +168,22 @@ function PatientDetailPage() {
         summary={summary.data?.data}
         onAntecedentes={() => changeTab("antecedentes")}
       />
-      {summary.isError && (
+      <PortalInvitePanel patientId={patientId} />
+      {summary.isError && canClinical && (
         <p role="alert" className="text-sm text-destructive">
           {summary.error.message}
         </p>
       )}
       <Tabs
         className="min-w-0 w-full"
-        value={tab}
+        value={activeTab}
         onValueChange={(value) => {
-          if (TABS.some((item) => item.value === value)) changeTab(value as PatientTab)
+          if (visibleTabs.some((item) => item.value === value)) changeTab(value as PatientTab)
         }}
       >
         <div className="max-w-full overflow-x-auto border-b pb-1">
           <TabsList className="h-auto flex-wrap justify-start" variant="line" aria-label="Ficha del paciente">
-            {TABS.map((item) => (
+            {visibleTabs.map((item) => (
               <TabsTrigger key={item.value} value={item.value}>
                 {item.label}
               </TabsTrigger>
@@ -245,6 +268,25 @@ function PatientDetailPage() {
             patientId={patientId}
             itemId={itemId}
             items={planItems.data?.data ?? []}
+            encounterId={summary.data?.data.openEncounterId ?? undefined}
+          />
+        </TabsContent>
+        <TabsContent value="formularios" className="pt-4">
+          <FormulariosTab
+            patientId={patientId}
+            encounterId={summary.data?.data.openEncounterId ?? undefined}
+          />
+        </TabsContent>
+        <TabsContent value="consentimientos" className="pt-4">
+          <ConsentimientosTab
+            patientId={patientId}
+            encounterId={summary.data?.data.openEncounterId ?? undefined}
+            planItemId={itemId}
+          />
+        </TabsContent>
+        <TabsContent value="ordenes" className="pt-4">
+          <OrdenesTab
+            patientId={patientId}
             encounterId={summary.data?.data.openEncounterId ?? undefined}
           />
         </TabsContent>

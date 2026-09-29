@@ -58,7 +58,7 @@ import {
 } from "@odentia/services"
 import { Hono } from "hono"
 import { z } from "zod"
-import { canWrite, orgContextOf } from "../lib/context.js"
+import { canAccess, orgContextOf } from "../lib/context.js"
 import { errorBody } from "../lib/error.js"
 import { type CrmDeps, runService, serviceErrorResponse, validationError } from "./helpers.js"
 import { createPatientBudgetsRoute } from "./patient-budgets.js"
@@ -354,15 +354,45 @@ const documentLinkInput = z.object({
   tags: jsonArrayField.pipe(z.array(z.string().min(1).max(200)).max(100)).default([]),
 })
 
+/** Subrutas con datos clínicos: exigen `clinical.read`/`.write`. */
+const CLINICAL_SUBPATHS = [
+  "/encounters",
+  "/plan",
+  "/treatments",
+  "/prescriptions",
+  "/follow-ups",
+  "/documents",
+  "/notes",
+  "/health",
+  "/anamnesis",
+  "/odontogram",
+  "/timeline",
+  "/summary",
+]
+
+/** Subrutas de caja: exigen `finance.read`/`.write`. */
+const FINANCE_SUBPATHS = ["/account", "/payments", "/budgets"]
+
 export function createPatientsRoute(deps: CrmDeps) {
   const app = new Hono()
   app.use("*", async (c, next) => {
-    if (
-      !["GET", "HEAD", "OPTIONS"].includes(c.req.method) &&
-      !canWrite(orgContextOf(c).memberRole)
-    ) {
+    const { memberRole } = orgContextOf(c)
+    // `c.req.path` trae el prefijo de montaje (/api/patients...): el resto
+    // tras el id clasifica el subdominio (filiación, clínica o caja).
+    const remainder = c.req.path.match(/\/patients\/[^/]+(\/.*)?$/)?.[1] ?? ""
+    const domain = CLINICAL_SUBPATHS.some((prefix) => remainder.startsWith(prefix))
+      ? "clinical"
+      : FINANCE_SUBPATHS.some((prefix) => remainder.startsWith(prefix))
+        ? "finance"
+        : "patients"
+    const write = !["GET", "HEAD", "OPTIONS"].includes(c.req.method)
+    if (!canAccess(memberRole, `${domain}.${write ? "write" : "read"}`)) {
       return c.json(
-        errorBody(c, "FORBIDDEN", "Solo owner/admin pueden modificar la ficha clínica"),
+        errorBody(
+          c,
+          "FORBIDDEN",
+          write ? "No tienes permiso para modificar este recurso" : "No tienes permiso para ver este recurso",
+        ),
         403,
       )
     }
@@ -445,9 +475,21 @@ export function createPatientsRoute(deps: CrmDeps) {
   })
 
   app.get("/:id", async (c) => {
-    const { orgId } = orgContextOf(c)
+    const { orgId, memberRole } = orgContextOf(c)
     return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) => getPatient(tx, orgId, c.req.param("id"))),
+      withOrgContext(deps.db, orgId, async (tx) => {
+        const full = await getPatient(tx, orgId, c.req.param("id"))
+        // Sin `clinical.read` (recepción/caja): filiación y vínculos sin
+        // registro de salud ni antecedentes/alergias/condiciones/medicación.
+        if (canAccess(memberRole, "clinical.read")) return full
+        return {
+          ...full,
+          registration: null,
+          activeAllergies: [],
+          activeConditions: [],
+          currentMedications: [],
+        }
+      }),
     )
   })
 

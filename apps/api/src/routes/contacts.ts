@@ -11,13 +11,12 @@ import {
 } from "@odentia/services"
 import { Hono } from "hono"
 import { z } from "zod"
-import { canWrite, orgContextOf } from "../lib/context.js"
+import { canAccess, orgContextOf } from "../lib/context.js"
 import { errorBody } from "../lib/error.js"
 import { type CrmDeps, runService, serviceErrorResponse, validationError } from "./helpers.js"
 
 const listQuery = z.object({
   q: z.string().optional(),
-  stageId: z.string().uuid().optional(),
   isActive: z.enum(["true", "false", "all"]).optional().default("true"),
   cursor: z.string().optional(),
   limit: z.coerce.number().int().min(1).max(100).optional(),
@@ -39,7 +38,6 @@ const createInput = z.object({
   ...contactFields,
   notes: z.string().max(2000).optional(),
   tags: rawTags,
-  stageId: z.string().uuid().optional(),
   assignedUserId: z.string().nullable().optional(),
 })
 
@@ -47,12 +45,9 @@ const patchInput = z.object({
   displayName: z.string().min(1).max(200).optional(),
   phone: z.string().max(50).nullable().optional(),
   email: z.string().max(200).nullable().optional(),
-  // Archivar/reactivar exige owner/admin (se comprueba en la ruta); el resto
-  // de la edición CRM sigue disponible para los miembros actuales.
   isActive: z.boolean().optional(),
   notes: z.string().max(2000).nullable().optional(),
   tags: rawTags,
-  stageId: z.string().uuid().optional(),
   assignedUserId: z.string().nullable().optional(),
   customFields: z.record(z.string(), z.unknown()).optional(),
 })
@@ -62,6 +57,9 @@ export function createContactsRoute(deps: CrmDeps) {
 
   app.get("/", async (c) => {
     const { orgId } = orgContextOf(c)
+    if (!canAccess(orgContextOf(c).memberRole, "crm.read")) {
+      return c.json(errorBody(c, "FORBIDDEN", "Sin permiso de lectura del CRM"), 403)
+    }
     const parsed = listQuery.safeParse(c.req.query())
     if (!parsed.success) return validationError(c, parsed.error.issues)
     const { isActive, ...rest } = parsed.data
@@ -80,6 +78,9 @@ export function createContactsRoute(deps: CrmDeps) {
 
   app.post("/", async (c) => {
     const { orgId, userId } = orgContextOf(c)
+    if (!canAccess(orgContextOf(c).memberRole, "crm.write")) {
+      return c.json(errorBody(c, "FORBIDDEN", "Sin permiso de escritura del CRM"), 403)
+    }
     const parsed = createInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
     let tags: string[] | undefined
@@ -102,21 +103,21 @@ export function createContactsRoute(deps: CrmDeps) {
 
   app.get("/:id", async (c) => {
     const { orgId } = orgContextOf(c)
+    if (!canAccess(orgContextOf(c).memberRole, "crm.read")) {
+      return c.json(errorBody(c, "FORBIDDEN", "Sin permiso de lectura del CRM"), 403)
+    }
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) => getContact(tx, orgId, c.req.param("id"))),
     )
   })
 
   app.patch("/:id", async (c) => {
-    const { orgId, userId, memberRole } = orgContextOf(c)
+    const { orgId, userId } = orgContextOf(c)
+    if (!canAccess(orgContextOf(c).memberRole, "crm.write")) {
+      return c.json(errorBody(c, "FORBIDDEN", "Sin permiso de escritura del CRM"), 403)
+    }
     const parsed = patchInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
-    if (parsed.data.isActive !== undefined && !canWrite(memberRole)) {
-      return c.json(
-        errorBody(c, "FORBIDDEN", "Solo owner/admin pueden archivar o reactivar contactos"),
-        403,
-      )
-    }
     let tags: string[] | undefined
     if (parsed.data.tags !== undefined) {
       try {
@@ -136,15 +137,15 @@ export function createContactsRoute(deps: CrmDeps) {
   })
 
   const identityInput = z.object({
-    channel: z.enum(["whatsapp", "telegram"]),
+    channel: z.enum(["whatsapp", "telegram", "messenger", "instagram"]),
     externalUserId: z.string().min(1).max(100),
   })
 
   app.post("/:id/identities", async (c) => {
-    const { orgId, userId, memberRole } = orgContextOf(c)
-    if (!canWrite(memberRole)) {
+    const { orgId, userId } = orgContextOf(c)
+    if (!canAccess(orgContextOf(c).memberRole, "conversations.write")) {
       return c.json(
-        errorBody(c, "FORBIDDEN", "Solo owner/admin pueden gestionar canales"),
+        errorBody(c, "FORBIDDEN", "Sin permiso de escritura de conversaciones"),
         403,
       )
     }
@@ -163,10 +164,10 @@ export function createContactsRoute(deps: CrmDeps) {
   })
 
   app.post("/:id/identities/:identityId/move", async (c) => {
-    const { orgId, userId, memberRole } = orgContextOf(c)
-    if (!canWrite(memberRole)) {
+    const { orgId, userId } = orgContextOf(c)
+    if (!canAccess(orgContextOf(c).memberRole, "conversations.write")) {
       return c.json(
-        errorBody(c, "FORBIDDEN", "Solo owner/admin pueden reasignar canales"),
+        errorBody(c, "FORBIDDEN", "Sin permiso de escritura de conversaciones"),
         403,
       )
     }
@@ -186,6 +187,12 @@ export function createContactsRoute(deps: CrmDeps) {
 
   app.post("/:id/conversations", async (c) => {
     const { orgId, userId } = orgContextOf(c)
+    if (!canAccess(orgContextOf(c).memberRole, "conversations.write")) {
+      return c.json(
+        errorBody(c, "FORBIDDEN", "Sin permiso de escritura de conversaciones"),
+        403,
+      )
+    }
     const parsed = startConversationInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
     try {

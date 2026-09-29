@@ -125,7 +125,7 @@ afterAll(async () => {
 
 const json = { "content-type": "application/json" }
 
-it("recursos: member lee; member no crea sillón, owner sí", async () => {
+it("recursos: reception lee; member no crea sillón ni lee agenda, owner sí", async () => {
   const member = buildApp("member")
   const denied = await member.request("/agenda/chairs", {
     method: "POST",
@@ -133,6 +133,8 @@ it("recursos: member lee; member no crea sillón, owner sí", async () => {
     body: JSON.stringify({ branchId, name: "Sillón API" }),
   })
   expect(denied.status).toBe(403)
+  const memberReads = await member.request(`/agenda/resources?branchId=${branchId}`)
+  expect(memberReads.status).toBe(403)
 
   const owner = buildApp("owner")
   const created = await owner.request("/agenda/chairs", {
@@ -143,7 +145,8 @@ it("recursos: member lee; member no crea sillón, owner sí", async () => {
   expect(created.status).toBe(201)
   chairId = ((await created.json()) as { data: { id: string } }).data.id
 
-  const resources = await member.request(`/agenda/resources?branchId=${branchId}`)
+  const reception = buildApp("reception")
+  const resources = await reception.request(`/agenda/resources?branchId=${branchId}`)
   expect(resources.status).toBe(200)
   const body = (await resources.json()) as {
     data: {
@@ -159,9 +162,22 @@ it("recursos: member lee; member no crea sillón, owner sí", async () => {
 
 it("cita: crear, listar con filtro, mover, conflicto 409 y cancelar", async () => {
   const owner = buildApp("owner")
+  // Horario explícito del profesional (lunes 09:00–13:00 y 14:00–18:00 Lima).
+  const schedule = await owner.request("/agenda/schedules", {
+    method: "PUT",
+    headers: json,
+    body: JSON.stringify({
+      branchId,
+      dentistUserId: DENTIST,
+      rules: [
+        { weekday: 1, startMin: 540, endMin: 780 },
+        { weekday: 1, startMin: 840, endMin: 1080 },
+      ],
+    }),
+  })
+  expect(schedule.status).toBe(200)
   const created = await owner.request("/appointments", {
     method: "POST",
-    headers: json,
     body: JSON.stringify({
       branchId,
       patientId,

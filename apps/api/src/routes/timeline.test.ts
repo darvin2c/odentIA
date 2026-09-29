@@ -541,15 +541,18 @@ it("timeline pagina con limit=2 sin duplicados y cursor inválido responde 400",
   expect(badBody.error.code.length).toBeGreaterThan(0)
 })
 
-it("timeline de paciente de otra organización responde 404", async () => {
+it("timeline de paciente de otra organización responde 404 con rol clínico; member 403", async () => {
   const other = await withOrgContext(appDb, "org_b", (tx) =>
     createPatient(tx, "org_b", "u-1", { displayName: "Paciente B timeline" }),
   )
-  const app = buildApp("member")
-  const res = await app.request(`/patients/${other.id}/timeline`, { method: "GET" })
+  const dentist = buildApp("dentist")
+  const res = await dentist.request(`/patients/${other.id}/timeline`, { method: "GET" })
   expect(res.status).toBe(404)
   const body = (await res.json()) as ErrorBody
   expect(typeof body.error.code).toBe("string")
+  const member = buildApp("member")
+  const denied = await member.request(`/patients/${other.id}/timeline`, { method: "GET" })
+  expect(denied.status).toBe(403)
 })
 
 it("timeline: documento multi-pieza aparece en el filtro de cada pieza", async () => {
@@ -607,8 +610,9 @@ it("documentos: la lectura devuelve el contexto vigente fusionado", async () => 
   expect(doc.encounterId).toBeNull()
 })
 
-it("timeline: member lee 200 pero mutar clínica o corregir contexto responde 403 sin efectos", async () => {
+it("timeline: dentist lee 200, member ni lee ni muta clínica ni corrige contexto (403 sin efectos)", async () => {
   const admin = buildApp("admin")
+  const dentist = buildApp("dentist")
   const member = buildApp("member")
   const patientId = await createFixturePatient(admin, "Timeline permisos")
   const docId = await postDocument(admin, patientId, {
@@ -617,8 +621,11 @@ it("timeline: member lee 200 pero mutar clínica o corregir contexto responde 40
     toothNumbers: [36],
   })
 
-  const read = await member.request(`/patients/${patientId}/timeline`, { method: "GET" })
+  const read = await dentist.request(`/patients/${patientId}/timeline`, { method: "GET" })
   expect(read.status).toBe(200)
+
+  const memberRead = await member.request(`/patients/${patientId}/timeline`, { method: "GET" })
+  expect(memberRead.status).toBe(403)
 
   const note = await member.request(`/patients/${patientId}/notes`, {
     method: "POST",

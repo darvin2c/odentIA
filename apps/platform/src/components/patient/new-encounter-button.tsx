@@ -13,7 +13,7 @@ import { FormDrawer } from "@odentia/ui-patterns"
 import { useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
-import { useCanWrite, useMyUserId, useOrgMembers } from "../../lib/crm"
+import { useMyUserId, useOrgMembers, usePermission } from "../../lib/crm"
 import type { Encounter, PatientFull, PatientSummary } from "../../lib/patients"
 
 /**
@@ -31,7 +31,7 @@ export function NewEncounterButton({
   openEncounterId?: string | null
   initialPlanItemIds?: string[]
 }) {
-  const canWrite = useCanWrite()
+  const canWrite = usePermission("clinical.write")
   const myUserId = useMyUserId()
   const members = useOrgMembers()
   const queryClient = useQueryClient()

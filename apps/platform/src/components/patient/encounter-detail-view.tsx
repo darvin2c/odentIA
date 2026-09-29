@@ -2,7 +2,7 @@ import { conditionLabel, surfaceLabel } from "@odentia/clinical"
 import { Badge } from "@odentia/ui"
 import { useQuery } from "@tanstack/react-query"
 import { apiFetch } from "../../lib/api"
-import { useCanWrite } from "../../lib/crm"
+import { usePermission } from "../../lib/crm"
 import {
   type EncounterDetail,
   encounterStatusLabel,
@@ -37,10 +37,12 @@ function isImageDoc(doc: PatientDocument): boolean {
 }
 
 function DocumentAttachment({ patientId, doc }: { patientId: string; doc: PatientDocument }) {
+  const canRead = usePermission("clinical.read")
   const signed = useQuery({
     queryKey: ["patient-document-url", patientId, doc.id],
     queryFn: () =>
       apiFetch<{ data: { url: string } }>(`/api/patients/${patientId}/documents/${doc.id}/url`),
+    enabled: canRead,
     staleTime: SIGNED_URL_STALE_MS,
     gcTime: 30 * 60 * 1000,
   })
@@ -124,7 +126,7 @@ export function EncounterDetailView({
   detail: EncounterDetail
   showAddendum?: boolean
 }) {
-  const canWrite = useCanWrite()
+  const canWrite = usePermission("clinical.write")
   const { encounter, teeth, procedures, notes, odontogramEntries, documents, addenda } = detail
   const canAddendum = showAddendum && encounter.status === "finalizada" && canWrite
 
