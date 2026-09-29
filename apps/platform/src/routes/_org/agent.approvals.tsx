@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
+import { ACTION_LABEL } from "../../lib/agent"
 import { usePermission } from "../../lib/crm"
 
 export const Route = createFileRoute("/_org/agent/approvals")({
@@ -31,11 +32,6 @@ interface Handoff {
   createdAt: string
 }
 
-const ACTION_LABEL: Record<string, string> = {
-  reservar_cita: "Reservar cita",
-  reprogramar_cita: "Reprogramar cita",
-  cancelar_cita: "Cancelar cita",
-}
 
 const STATUS_LABEL: Record<string, string> = {
   propuesta: "Pendiente",

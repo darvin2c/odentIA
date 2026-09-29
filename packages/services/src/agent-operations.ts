@@ -40,6 +40,24 @@ import { getPatientBalanceForPortal } from "./finance.js"
 
 /** Plazo de confirmación por el interlocutor antes de expirar la propuesta. */
 const CONFIRM_TTL_HOURS = 48
+/** Aviso en vivo para el stream del home (`org_events`): solo `{ orgId, kind, at }`, sin datos clínicos. */
+async function notify(tx: Db, payload: { orgId: string; kind: string; at: string }): Promise<void> {
+  await tx.execute(sql`select pg_notify('org_events', ${JSON.stringify(payload)})`)
+}
+
+/**
+ * Resumen corto del payload para las tarjetas del home.
+ * Misma lógica que `payloadSummary` del frontend de aprobaciones.
+ */
+export function proposalPayloadSummary(payload: Record<string, unknown>): string {
+  const parts: string[] = []
+  if (typeof payload["startsAt"] === "string") {
+    const date = new Date(payload["startsAt"])
+    if (!Number.isNaN(date.getTime())) parts.push(date.toLocaleString("es-PE"))
+  }
+  if (typeof payload["appointmentId"] === "string") parts.push(`cita ${String(payload["appointmentId"]).slice(0, 8)}…`)
+  return parts.join(" · ")
+}
 
 function assertAction(action: string): asserts action is ProposalAction {
   if (!(PROPOSAL_ACTIONS as readonly string[]).includes(action)) {
@@ -510,6 +528,7 @@ export async function createProposal(
       entityId: row.id,
       metadata: { action: input.action, conversationId: input.conversationId },
     })
+    await notify(tx, { orgId, kind: "agent.proposal.created", at: new Date().toISOString() })
     const policy = await getAutonomyPolicy(tx, orgId)
     const mode = policy[input.action]
     if (mode === "directo") {
@@ -596,6 +615,7 @@ export async function decideProposal(
       entityId: id,
       metadata: {},
     })
+    await notify(tx, { orgId, kind: "agent.proposal.decided", at: new Date().toISOString() })
     return toProposal(row)
   }
   const [row] = await tx
@@ -612,6 +632,7 @@ export async function decideProposal(
     entityId: id,
     metadata: {},
   })
+  await notify(tx, { orgId, kind: "agent.proposal.decided", at: new Date().toISOString() })
   return executeProposal(tx, orgId, actorUserId, id)
 }
 
@@ -793,6 +814,7 @@ export async function executeProposal(
       entityId: id,
       metadata: { action },
     })
+    await notify(tx, { orgId, kind: "agent.proposal.executed", at: new Date().toISOString() })
     return toProposal(row)
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error)
@@ -962,6 +984,7 @@ export async function createHandoff(
       permission: "tasks.read",
     })
   }
+  await notify(tx, { orgId, kind: "agent.handoff.created", at: new Date().toISOString() })
   return toHandoff(row)
 }
 

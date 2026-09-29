@@ -1,7 +1,12 @@
 import type { Db } from "@odentia/db"
 import { crmTask } from "@odentia/db/schema/crm"
-import { and, asc, desc, eq } from "drizzle-orm"
+import { and, asc, desc, eq, sql } from "drizzle-orm"
 import { notFound, validation } from "./errors.js"
+
+/** Aviso en vivo para el stream del home (`org_events`): solo `{ orgId, kind, at }`, sin datos clínicos. */
+async function notify(tx: Db, payload: { orgId: string; kind: string; at: string }): Promise<void> {
+  await tx.execute(sql`select pg_notify('org_events', ${JSON.stringify(payload)})`)
+}
 
 const STATUSES = ["open", "done", "cancelled"]
 const CREATED_BY = ["user", "agent"]
@@ -82,6 +87,7 @@ export async function createTask(
     })
     .returning()
   if (!created) throw new Error("No se pudo crear la tarea")
+  await notify(tx, { orgId, kind: "task.updated", at: new Date().toISOString() })
   return toItem(created)
 }
 
@@ -117,6 +123,7 @@ export async function updateTask(
     .where(and(eq(crmTask.id, id), eq(crmTask.organizationId, orgId)))
     .returning()
   if (!updated) throw notFound("Tarea")
+  await notify(tx, { orgId, kind: "task.updated", at: new Date().toISOString() })
   return toItem(updated)
 }
 

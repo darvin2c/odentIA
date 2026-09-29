@@ -128,3 +128,26 @@
     @apply font-sans;
     }
 }
+
+/* Puente de paleta para `@tanstack/charts`: el tema por defecto de la
+ * librería pinta con `var(--ts-chart-1..6)`; aquí derivan de `--chart-1..5`
+ * del tema, así el modo oscuro funciona sin lógica extra. */
+.ts-chart-host {
+  --ts-chart-1: var(--chart-1);
+  --ts-chart-2: var(--chart-2);
+  --ts-chart-3: var(--chart-3);
+  --ts-chart-4: var(--chart-4);
+  --ts-chart-5: var(--chart-5);
+  --ts-chart-6: var(--chart-3);
+}
+
+/* Refuerzo de movimiento reducido dentro de los gráficos (el renderer SVG ya
+ * respeta `prefers-reduced-motion` por defecto). */
+@media (prefers-reduced-motion: reduce) {
+  .ts-chart-host *,
+  .ts-chart-host *::before,
+  .ts-chart-host *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

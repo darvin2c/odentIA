@@ -307,6 +307,12 @@ async function wipeSeed(): Promise<void> {
     .where(inArray(patientRegistrationConfig.organizationId, SEED_ORGS))
   await db.delete(message).where(inArray(message.organizationId, SEED_ORGS))
   await db.delete(crmTask).where(inArray(crmTask.organizationId, SEED_ORGS))
+  // Las citas creadas por el agente referencian su conversación: se suelta la
+  // referencia antes de borrarla (las citas se purgan más abajo).
+  await db
+    .update(appointment)
+    .set({ conversationId: null })
+    .where(inArray(appointment.organizationId, SEED_ORGS))
   await db.delete(conversation).where(inArray(conversation.organizationId, SEED_ORGS))
   await db.delete(contactIdentity).where(inArray(contactIdentity.organizationId, SEED_ORGS))
   await db.delete(encounterProcedure).where(inArray(encounterProcedure.organizationId, SEED_ORGS))

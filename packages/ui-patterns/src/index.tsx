@@ -21,6 +21,13 @@ export type {
 export { AppShell, isNavItemActive } from "./app-shell.js"
 export { AuthCard } from "./auth-card.js"
 export { AuthSplit } from "./auth-split.js"
+export {
+  BarChart,
+  type ChartPoint,
+  DonutChart,
+  FunnelChart,
+  TrendChart,
+} from "./charts/index.js"
 export { common } from "./common.js"
 export { ConfirmDialog, type ConfirmDialogProps, type ConfirmVariant } from "./confirm-dialog.js"
 export {

@@ -1,5 +1,16 @@
 import type { Db } from "@odentia/db"
-import { agentKnowledgeEntry, agentKnowledgeRevision, agentPolicy } from "@odentia/db/schema/agent"
+import { agentHandoff, agentKnowledgeEntry, agentKnowledgeRevision, agentPolicy, agentProposal, agentRunLedger } from "@odentia/db/schema/agent"
+import { appointment, scheduleChair } from "@odentia/db/schema/agenda"
+import { patientContact } from "@odentia/db/schema/clinical"
+import { conversation } from "@odentia/db/schema/crm"
+import { and, asc, eq, gt } from "drizzle-orm"
+
+/** Hora local de Lima (UTC-5 fijo en la semilla) → instante ISO, como en seed-dev. */
+const lima = (dayOffset: number, hhmm: string): string => {
+  const base = new Date()
+  base.setUTCDate(base.getUTCDate() + dayOffset)
+  return `${base.toISOString().slice(0, 10)}T${hhmm}:00-05:00`
+}
 
 /**
  * Seed del dominio IA: FAQs publicadas deterministas, una en borrador y la
@@ -67,4 +78,118 @@ export async function seedAgent(
     .insert(agentPolicy)
     .values({ organizationId: orgId, modes: {}, updatedBy: ownerUserId })
     .onConflictDoNothing({ target: agentPolicy.organizationId })
+
+  // Propuestas pendientes, derivación y corridas para el home y el pulso en
+  // dev. Idempotente por ids fijos; sin conversación semilla no hay nada que
+  // sembrar en este bloque.
+  const convs = await tx
+    .select({ id: conversation.id, contactId: conversation.contactId })
+    .from(conversation)
+    .where(eq(conversation.organizationId, orgId))
+    .limit(2)
+  const first = convs[0]
+  if (first) {
+    // Referencias reales para que aprobar la propuesta en dev ejecute de
+    // verdad: sillón de la sede y una cita futura programada (su versión se
+    // lee aquí porque el seed purga y recrea la org en cada ejecución).
+    const [chair] = await tx
+      .select({ id: scheduleChair.id })
+      .from(scheduleChair)
+      .where(and(eq(scheduleChair.organizationId, orgId), eq(scheduleChair.branchId, branchId)))
+      .limit(1)
+    const [futureAppointment] = await tx
+      .select({ id: appointment.id, version: appointment.version, patientId: appointment.patientId })
+      .from(appointment)
+      .where(
+        and(
+          eq(appointment.organizationId, orgId),
+          eq(appointment.status, "programada"),
+          gt(appointment.startsAt, new Date()),
+        ),
+      )
+      .orderBy(asc(appointment.startsAt))
+      .limit(1)
+    // La ejecución exige que el contacto de la propuesta esté vinculado al
+    // paciente de la cita: se usa su contacto self (si existe).
+    const [selfContact] = futureAppointment
+      ? await tx
+          .select({ contactId: patientContact.contactId })
+          .from(patientContact)
+          .where(
+            and(
+              eq(patientContact.organizationId, orgId),
+              eq(patientContact.patientId, futureAppointment.patientId),
+              eq(patientContact.relationship, "self"),
+            ),
+          )
+          .limit(1)
+      : []
+    const proposals = [
+      {
+        id: "00000000-0000-4000-8000-00000000a611",
+        conversationId: first.id,
+        contactId: input.contactId,
+        action: "reservar_cita",
+        payload: {
+          patientId: input.patientId,
+          branchId,
+          dentistUserId: ownerUserId,
+          chairId: chair?.id,
+          durationMin: 30,
+          startsAt: lima(2, "15:00"),
+        },
+        idempotencyKey: "seed:agent:propuesta:1",
+      },
+      ...(futureAppointment
+        ? [
+            {
+              id: "00000000-0000-4000-8000-00000000a612",
+              conversationId: (convs[1] ?? first).id,
+              contactId: selfContact?.contactId ?? null,
+              action: "reprogramar_cita",
+              payload: {
+                appointmentId: futureAppointment.id,
+                expectedVersion: futureAppointment.version,
+                startsAt: lima(3, "16:00"),
+              },
+              idempotencyKey: "seed:agent:propuesta:2",
+            },
+          ]
+        : []),
+    ]
+    for (const proposal of proposals) {
+      await tx.insert(agentProposal).values({ organizationId: orgId, ...proposal }).onConflictDoNothing({ target: agentProposal.id })
+    }
+    await tx
+      .insert(agentHandoff)
+      .values({
+        id: "00000000-0000-4000-8000-00000000a620",
+        organizationId: orgId,
+        conversationId: first.id,
+        contactId: first.contactId,
+        reason: "La persona pide hablar con un humano",
+        summary: "Derivación semilla: la persona prefiere atención humana para su cita.",
+        priority: "media",
+        createdBy: "agent",
+      })
+      .onConflictDoNothing({ target: agentHandoff.id })
+    // Corridas de los últimos 30 días con mezcla ok/handoff/error.
+    const statuses = ["ok", "ok", "handoff", "ok", "error", "ok", "handoff"] as const
+    for (let n = 0; n < 30; n++) {
+      const startedAt = new Date(Date.now() - n * 86_400_000)
+      await tx
+        .insert(agentRunLedger)
+        .values({
+          id: `00000000-0000-4000-8000-00000000c0${String(n).padStart(2, "0")}`,
+          organizationId: orgId,
+          conversationId: first.id,
+          model: "seed-dev",
+          status: statuses[n % statuses.length]!,
+          startedAt,
+          endedAt: new Date(startedAt.getTime() + 1500),
+          latencyMs: 1500,
+        })
+        .onConflictDoNothing({ target: agentRunLedger.id })
+    }
+  }
 }
