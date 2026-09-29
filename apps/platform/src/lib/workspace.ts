@@ -2,7 +2,7 @@ export interface WorkspaceHome {
   date: string
   timezone: string
   locale: string
-  access: Record<"patients" | "appointments" | "conversations" | "tasks" | "finance" | "clinical" | "crm" | "allTasks", boolean>
+  access: Record<"patients" | "appointments" | "conversations" | "tasks" | "finance" | "clinical" | "crm" | "agent" | "allTasks", boolean>
   appointments: Array<{ id: string; patientId: string; patientName: string; startsAt: string; status: string; branchName: string; dentistName: string }>
   appointmentCounts: Array<{ status: string; count: number }>
   tasks: Array<{ id: string; title: string; dueAt: string | null; overdue: boolean }>
@@ -10,6 +10,21 @@ export interface WorkspaceHome {
   conversations: { unread: number; waiting: number; human: number } | null
   budgets: Array<{ id: string; patientId: string; patientName: string; title: string; presentedAt: string | null }>
   debt: DebtSummary[]
+  /** Resumen del agente autónomo; null sin permiso `agent.read`. */
+  agent: WorkspaceAgentHome | null
+}
+export interface WorkspaceAgentHome {
+  pendingProposals: number
+  proposals: Array<{ id: string; action: string; summary: string; createdAt: string }>
+  recentHandoffs: Array<{ id: string; reason: string; priority: string; createdAt: string }>
+  today: { runs: number; ok: number; handoff: number; error: number; omitida: number }
+}
+/** Foto agregada de los últimos 30 días; cada sección es null sin su permiso. */
+export interface WorkspacePulse {
+  funnel: Array<{ stage: string; count: number; amountCents: string; currency: string }> | null
+  channels: Array<{ channel: string; count: number }> | null
+  autonomy: Array<{ day: string; ok: number; handoff: number }> | null
+  collections: Array<{ day: string; currency: string; amountCents: string }> | null
 }
 export interface DebtSummary { currency: string; outstandingCents: string; overdueCents: string; patients: number }
 export interface WorkspaceNotice { id: string; title: string; body: string; href: string; createdAt: string; readAt: string | null }

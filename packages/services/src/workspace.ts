@@ -1,7 +1,7 @@
 import type { Db } from "@odentia/db"
 import { member } from "@odentia/db/schema/auth"
 import { workspaceNotification } from "@odentia/db/schema/workspace"
-import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm"
+import { and, desc, eq, inArray, isNull, sql, type SQL } from "drizzle-orm"
 import { notFound, validation } from "./errors.js"
 
 export interface WorkspaceAccess {
@@ -12,6 +12,7 @@ export interface WorkspaceAccess {
   finance: boolean
   clinical: boolean
   crm: boolean
+  agent: boolean
   allTasks: boolean
 }
 
@@ -75,6 +76,105 @@ async function workspaceZone(tx: Db, orgId: string) {
   return row
 }
 
+/** Resumen corto del payload de una propuesta (misma lógica que el frontend de aprobaciones). */
+function proposalPayloadSummary(payload: Record<string, unknown>): string {
+  const parts: string[] = []
+  if (typeof payload["startsAt"] === "string") {
+    const date = new Date(payload["startsAt"])
+    if (!Number.isNaN(date.getTime())) parts.push(date.toLocaleString("es-PE"))
+  }
+  if (typeof payload["appointmentId"] === "string") parts.push(`cita ${String(payload["appointmentId"]).slice(0, 8)}…`)
+  return parts.join(" · ")
+}
+
+export interface WorkspaceAgentHome {
+  pendingProposals: number
+  proposals: { id: string; action: string; summary: string; createdAt: string }[]
+  recentHandoffs: { id: string; reason: string; priority: string; createdAt: string }[]
+  today: { runs: number; ok: number; handoff: number; error: number; omitida: number }
+}
+
+/** Banda del agente para el home: pendientes, derivaciones recientes y corridas de hoy (zona de la org). */
+async function workspaceAgent(tx: Db, orgId: string, start: SQL, end: SQL): Promise<WorkspaceAgentHome> {
+  const [pending] = await tx.execute<{ count: number }>(sql`
+    select count(*)::int as count from agent_proposal where organization_id=${orgId} and status='propuesta'`)
+  const proposalRows = await tx.execute<{ id: string; action: string; payload: unknown; createdAt: Date }>(sql`
+    select id, action, payload, created_at as "createdAt" from agent_proposal
+    where organization_id=${orgId} and status='propuesta' order by created_at desc, id desc limit 3`)
+  const handoffRows = await tx.execute<{ id: string; reason: string; priority: string; createdAt: Date }>(sql`
+    select id, reason, priority, created_at as "createdAt" from agent_handoff
+    where organization_id=${orgId} and created_at >= now() - interval '72 hours'
+    order by created_at desc, id desc limit 3`)
+  const [today] = await tx.execute<{ runs: number; ok: number; handoff: number; error: number; omitida: number }>(sql`
+    select count(*)::int as runs,
+      count(*) filter (where status='ok')::int as ok,
+      count(*) filter (where status='handoff')::int as handoff,
+      count(*) filter (where status='error')::int as error,
+      count(*) filter (where status='omitida')::int as omitida
+    from agent_run_ledger where organization_id=${orgId} and started_at >= ${start} and started_at < ${end}`)
+  return {
+    pendingProposals: pending?.count ?? 0,
+    proposals: proposalRows.map(row => ({
+      id: row.id, action: row.action,
+      summary: proposalPayloadSummary((row.payload ?? {}) as Record<string, unknown>),
+      createdAt: new Date(row.createdAt).toISOString(),
+    })),
+    recentHandoffs: handoffRows.map(row => ({
+      id: row.id, reason: row.reason, priority: row.priority,
+      createdAt: new Date(row.createdAt).toISOString(),
+    })),
+    today: {
+      runs: today?.runs ?? 0, ok: today?.ok ?? 0, handoff: today?.handoff ?? 0,
+      error: today?.error ?? 0, omitida: today?.omitida ?? 0,
+    },
+  }
+}
+
+export interface WorkspacePulse {
+  funnel: { stage: string; count: number; amountCents: string; currency: string }[] | null
+  channels: { channel: string; count: number }[] | null
+  autonomy: { day: string; ok: number; handoff: number }[] | null
+  collections: { day: string; currency: string; amountCents: string }[] | null
+}
+
+/**
+ * Pulso del negocio para los gráficos del home. Cada sección es nula sin su
+ * permiso; los días usan la zona horaria de la organización.
+ */
+export async function getWorkspacePulse(tx: Db, orgId: string, access: WorkspaceAccess): Promise<WorkspacePulse> {
+  const { timezone } = await workspaceZone(tx, orgId)
+  const funnel = access.crm ? await tx.execute<{ stage: string; count: number; amountCents: string; currency: string }>(sql`
+    select s.name as stage, count(*)::int as count,
+      coalesce(sum(o.amount_cents), 0)::text as "amountCents", o.currency as currency
+    from opportunity o join pipeline_stage s on s.id = o.stage_id and s.organization_id = ${orgId}
+    where o.organization_id = ${orgId} and o.status = 'open'
+    group by s.id, s.name, s.position, o.currency
+    order by s.position, s.name, o.currency`) : null
+  const channels = access.conversations ? await tx.execute<{ channel: string; count: number }>(sql`
+    select cc.channel as channel, count(*)::int as count
+    from conversation c join channel_connection cc on cc.id = c.channel_connection_id and cc.organization_id = ${orgId}
+    where c.organization_id = ${orgId} and c.status = 'open'
+    group by cc.channel order by cc.channel`) : null
+  const autonomy = access.agent ? await tx.execute<{ day: string; ok: number; handoff: number }>(sql`
+    with days as (
+      select to_char((now() at time zone ${timezone}) - (n || ' days')::interval, 'YYYY-MM-DD') as day
+      from generate_series(0, 29) n
+    ) select days.day as day,
+      count(l.id) filter (where l.status = 'ok')::int as ok,
+      count(l.id) filter (where l.status = 'handoff')::int as handoff
+    from days left join agent_run_ledger l
+      on l.organization_id = ${orgId} and to_char(l.started_at at time zone ${timezone}, 'YYYY-MM-DD') = days.day
+    group by days.day order by days.day`) : null
+  const collections = access.finance ? await tx.execute<{ day: string; currency: string; amountCents: string }>(sql`
+    select to_char(paid_at at time zone ${timezone}, 'YYYY-MM-DD') as day,
+      currency, sum(amount_cents)::text as "amountCents"
+    from patient_payment
+    where organization_id = ${orgId} and voided_at is null
+      and paid_at >= (((to_char(now() at time zone ${timezone}, 'YYYY-MM-DD'))::date - 29)::timestamp at time zone ${timezone})
+    group by day, currency order by day, currency`) : null
+  return { funnel, channels, autonomy, collections }
+}
+
 export async function getWorkspaceHome(tx: Db, orgId: string, userId: string, access: WorkspaceAccess) {
   const { timezone, locale } = await workspaceZone(tx, orgId)
   const [day] = await tx.execute<{ date: string }>(sql`select to_char(now() at time zone ${timezone}, 'YYYY-MM-DD') as date`)
@@ -112,8 +212,9 @@ export async function getWorkspaceHome(tx: Db, orgId: string, userId: string, ac
     where b.organization_id=${orgId} and b.status in ('presentado','pospuesto')
     order by b.presented_at nulls last, b.id limit 8`) : []
   const debt = access.finance ? await currentDebt(tx, orgId) : []
+  const agent = access.agent ? await workspaceAgent(tx, orgId, start, end) : null
   return { date: day.date, timezone, locale, access, appointments, appointmentCounts, tasks,
-    taskCount: taskCount ?? null, conversations: conversations ?? null, budgets, debt }
+    taskCount: taskCount ?? null, conversations: conversations ?? null, budgets, debt, agent }
 }
 
 async function currentDebt(tx: Db, orgId: string) {

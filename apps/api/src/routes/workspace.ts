@@ -1,5 +1,5 @@
 import { withOrgContext } from "@odentia/db"
-import { getManagementReport, getWorkspaceHome, listWorkspaceAudit, listWorkspaceNotifications, readWorkspaceNotification, type WorkspaceAccess } from "@odentia/services"
+import { getManagementReport, getWorkspaceHome, getWorkspacePulse, listWorkspaceAudit, listWorkspaceNotifications, readWorkspaceNotification, type WorkspaceAccess } from "@odentia/services"
 import { Hono } from "hono"
 import { z } from "zod"
 import { canAccess, orgContextOf } from "../lib/context.js"
@@ -11,7 +11,8 @@ function accessFor(role: string): WorkspaceAccess {
     patients: canAccess(role, "patients.read"), appointments: canAccess(role, "appointments.read"),
     conversations: canAccess(role, "conversations.read"), tasks: canAccess(role, "tasks.read"),
     finance: canAccess(role, "finance.read"), clinical: canAccess(role, "clinical.read"),
-    crm: canAccess(role, "crm.read"), allTasks: role === "owner" || role === "admin",
+    crm: canAccess(role, "crm.read"), agent: canAccess(role, "agent.read"),
+    allTasks: role === "owner" || role === "admin",
   }
 }
 const domains = ["patients", "clinical", "appointments", "crm", "conversations", "tasks", "finance", "inventory", "reports", "settings", "audit", "agent"]
@@ -23,6 +24,10 @@ export function createWorkspaceRoute(deps: CrmDeps) {
   app.get("/home", c => {
     const { orgId, userId, memberRole } = orgContextOf(c)
     return runService(c, 200, () => withOrgContext(deps.db, orgId, tx => getWorkspaceHome(tx, orgId, userId, accessFor(memberRole))))
+  })
+  app.get("/pulse", c => {
+    const { orgId, memberRole } = orgContextOf(c)
+    return runService(c, 200, () => withOrgContext(deps.db, orgId, tx => getWorkspacePulse(tx, orgId, accessFor(memberRole))))
   })
   app.get("/notifications", c => {
     const { orgId, userId, memberRole } = orgContextOf(c)

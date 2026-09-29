@@ -17,7 +17,7 @@ import { member, user } from "@odentia/db/schema/auth"
 import { patient, serviceCatalog } from "@odentia/db/schema/clinical"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import { waitlistEntry } from "@odentia/db/schema/availability"
-import { and, asc, eq, gte, ilike, inArray, lt, or } from "drizzle-orm"
+import { and, asc, eq, gte, ilike, inArray, lt, or, sql } from "drizzle-orm"
 import { validateAvailability } from "./availability.js"
 import {
   cancelPendingForAppointment,
@@ -27,6 +27,11 @@ import { isExclusionViolation, notFound, ServiceError, validation } from "./erro
 
 function conflict(code: string, message: string): ServiceError {
   return new ServiceError(code, 409, message)
+}
+
+/** Aviso en vivo para el stream del home (`org_events`): solo `{ orgId, kind, at }`, sin datos clínicos. */
+async function notify(tx: Db, payload: { orgId: string; kind: string; at: string }): Promise<void> {
+  await tx.execute(sql`select pg_notify('org_events', ${JSON.stringify(payload)})`)
 }
 
 const DEFAULT_DURATION_MIN = 30
@@ -407,6 +412,7 @@ export async function createAppointment(
       chairId: input.chairId,
       startsAt: startsAt.toISOString(),
     })
+    await notify(tx, { orgId, kind: "appointment.updated", at: new Date().toISOString() })
     return await getAppointment(tx, orgId, created.id)
   } catch (error) {
     if (isExclusionViolation(error)) {
@@ -493,6 +499,7 @@ export async function moveAppointment(
       chairId,
     })
     await invalidateAppointmentTokens(tx, orgId, id)
+    await notify(tx, { orgId, kind: "appointment.updated", at: new Date().toISOString() })
     return await getAppointment(tx, orgId, id)
   } catch (error) {
     if (isExclusionViolation(error)) {
@@ -570,6 +577,7 @@ export async function updateAppointment(
       await cancelPendingForAppointment(tx, orgId, id, "cita actualizada")
       await invalidateAppointmentTokens(tx, orgId, id)
     }
+    await notify(tx, { orgId, kind: "appointment.updated", at: new Date().toISOString() })
     return await getAppointment(tx, orgId, id)
   } catch (error) {
     if (isExclusionViolation(error)) {
@@ -605,6 +613,7 @@ export async function setAppointmentStatus(
     })
     await cancelPendingForAppointment(tx, orgId, id, `cita ${next}`)
     await invalidateAppointmentTokens(tx, orgId, id)
+    await notify(tx, { orgId, kind: "appointment.updated", at: new Date().toISOString() })
     return await getAppointment(tx, orgId, id)
   } catch (error) {
     if (isExclusionViolation(error)) {

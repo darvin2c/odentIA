@@ -11,6 +11,7 @@ export { Button, buttonVariants } from "./components/button.js";
 export { ButtonGroup, ButtonGroupSeparator, ButtonGroupText, buttonGroupVariants } from "./components/button-group.js";
 export { Spinner } from "./components/spinner.js";
 export { Skeleton } from "./components/skeleton.js";
+export { ChartContainer, type ChartContainerProps } from "./components/chart.js";
 export {
   Attachment,
   AttachmentAction,

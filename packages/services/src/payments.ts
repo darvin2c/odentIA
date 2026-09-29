@@ -19,6 +19,12 @@ import { notFound, ServiceError, validation } from "./errors.js"
 import { linkPaymentToShift, refreshPlansForCharge, voidPlansForCharge } from "./finance.js"
 import { requirePatient } from "./patients.js"
 import { requireLinkedActiveContact } from "./responsibilities.js"
+
+/** Aviso en vivo para el stream del home (`org_events`): solo `{ orgId, kind, at }`, sin datos clínicos. */
+async function notify(tx: Db, payload: { orgId: string; kind: string; at: string }): Promise<void> {
+  await tx.execute(sql`select pg_notify('org_events', ${JSON.stringify(payload)})`)
+}
+
 export const PAYMENT_METHODS = [
   "efectivo",
   "tarjeta",
@@ -399,6 +405,7 @@ export async function createPayment(
     .returning()
   await audit(tx, orgId, actorUserId, "patient_payment", row.id, "payment.created")
   if (shiftId) await linkPaymentToShift(tx, orgId, actorUserId, shiftId, row)
+  await notify(tx, { orgId, kind: "payment.created", at: new Date().toISOString() })
   return row
 }
 
@@ -622,6 +629,7 @@ export async function voidPayment(
     )
     .returning()
   await audit(tx, orgId, actorUserId, "patient_payment", paymentId, "payment.voided")
+  await notify(tx, { orgId, kind: "payment.voided", at: new Date().toISOString() })
   return row
 }
 export async function getPatientAccount(tx: Db, orgId: string, patientId: string) {
