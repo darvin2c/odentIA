@@ -1,5 +1,5 @@
 import { Link } from "@tanstack/react-router"
-import type { ReactNode } from "react"
+import type { MouseEventHandler, ReactNode } from "react"
 
 /**
  * Link del router con el contrato que esperan `AppShell` y `SectionNav`
@@ -20,7 +20,7 @@ export function RouterLink({
   className?: string
   children: ReactNode
   title?: string
-  onClick?: () => void
+  onClick?: MouseEventHandler<HTMLAnchorElement>
 }) {
   return (
     <Link to={to} search={search} className={className} title={title} onClick={onClick} {...rest}>

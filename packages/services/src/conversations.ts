@@ -25,6 +25,21 @@ import type { AttachmentRef, Storage } from "./storage.js"
 /** Ventana de WhatsApp para texto libre: 24h desde el último inbound. */
 const WA_FREE_TEXT_WINDOW_MS = 24 * 60 * 60 * 1000
 
+/** Acepta las marcas UTC emitidas por nuestros cursores sin perder microsegundos. */
+function conversationCursor(value: string): { ts: string; id: string } {
+  const decoded = decodeCursor(value)
+  if (!decoded ||
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(decoded.id) ||
+    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z$/.test(decoded.ts)) {
+    throw validation("Cursor inválido")
+  }
+  const date = new Date(decoded.ts)
+  if (Number.isNaN(date.getTime()) || date.toISOString().slice(0, 19) !== decoded.ts.slice(0, 19)) {
+    throw validation("Cursor inválido")
+  }
+  return decoded
+}
+
 const EXT_BY_MIME: Record<string, string> = {
   "image/jpeg": "jpg",
   "image/png": "png",
@@ -58,6 +73,9 @@ export interface MessageItem {
   externalId: string | null
   status: string
   error: string | null
+  // Instante de aceptación real por el proveedor (outbound). Nulo si aún está
+  // en cola/falló o si es histórico sin timestamp (sin backfill inventado).
+  sentAt: string | null
   templateName: string | null
   templateLanguage: string | null
   templateParams: string[] | null
@@ -75,6 +93,7 @@ function toMessageItem(row: typeof message.$inferSelect): MessageItem {
     externalId: row.externalId,
     status: row.status,
     error: row.error,
+    sentAt: row.sentAt ? row.sentAt.toISOString() : null,
     templateName: row.templateName,
     templateLanguage: row.templateLanguage,
     templateParams:
@@ -382,7 +401,7 @@ export async function ingestInbound(
   return { conversationId, messageId, created: true }
 }
 
-/** Aplica estados del proveedor (delivered/read/failed) por externalId. */
+/** Aplica estados del proveedor por externalId. Registra el primer sent/delivered/read en sent_at si sigue nulo. */
 export async function applyStatus(
   tx: Db,
   orgId: string,
@@ -390,11 +409,19 @@ export async function applyStatus(
 ): Promise<number> {
   let applied = 0
   for (const s of statuses) {
-    const [updated] = await tx
-      .update(message)
-      .set({ status: s.status })
-      .where(and(eq(message.organizationId, orgId), eq(message.externalId, s.externalMessageId)))
-      .returning({ id: message.id, conversationId: message.conversationId })
+    const status: string = s.status
+    const firstSent = status === "sent" || status === "delivered" || status === "read"
+    const [updated] = firstSent
+      ? await tx
+          .update(message)
+          .set({ status: s.status, sentAt: sql`coalesce("sent_at", now())` })
+          .where(and(eq(message.organizationId, orgId), eq(message.externalId, s.externalMessageId)))
+          .returning({ id: message.id, conversationId: message.conversationId })
+      : await tx
+          .update(message)
+          .set({ status: s.status })
+          .where(and(eq(message.organizationId, orgId), eq(message.externalId, s.externalMessageId)))
+          .returning({ id: message.id, conversationId: message.conversationId })
     if (updated) {
       applied += 1
       await notify(tx, {
@@ -601,7 +628,7 @@ export interface ConversationListItem {
   connection: { id: string; channel: string; provider: string; displayName: string }
   preview: { body: string | null; direction: string; senderKind: string; createdAt: string } | null
 }
-
+export type ConversationView = "unanswered" | "human" | "approval"
 export async function listConversations(
   tx: Db,
   orgId: string,
@@ -610,6 +637,7 @@ export async function listConversations(
     channel?: string
     assigned?: string
     q?: string
+    view?: ConversationView
     cursor?: string
     limit?: number
   },
@@ -624,24 +652,69 @@ export async function listConversations(
     conditions.push(eq(conversation.assignedUserId, input.assigned))
   }
   if (input.q) conditions.push(ilike(contact.displayName, `%${input.q}%`))
+  if (input.view !== undefined) {
+    if (input.view !== "unanswered" && input.view !== "human" && input.view !== "approval") {
+      throw validation("Vista inválida (unanswered|human|approval)")
+    }
+    if (input.view === "human") {
+      conditions.push(eq(conversation.agentStatus, "off"))
+      conditions.push(eq(conversation.status, "open"))
+    } else if (input.view === "approval") {
+      conditions.push(
+        sql`exists (select 1 from "agent_proposal" where "agent_proposal"."conversation_id" = "conversation"."id" and "agent_proposal"."organization_id" = ${orgId} and "agent_proposal"."status" = 'propuesta')`,
+      )
+    } else {
+      conditions.push(
+        sql`exists (select 1 from "message" as "m_in" where "m_in"."conversation_id" = "conversation"."id" and "m_in"."organization_id" = ${orgId} and "m_in"."direction" = 'in')`,
+      )
+      conditions.push(
+        sql`(
+          not exists (
+            select 1 from "message" as "m_out"
+            where "m_out"."conversation_id" = "conversation"."id"
+              and "m_out"."organization_id" = ${orgId}
+              and "m_out"."direction" = 'out'
+              and "m_out"."status" in ('sent', 'delivered', 'read')
+              and coalesce("m_out"."external_id", '') not like 'mock-%'
+          )
+          or (
+            (select max("m_in2"."created_at") from "message" as "m_in2"
+              where "m_in2"."conversation_id" = "conversation"."id"
+                and "m_in2"."organization_id" = ${orgId}
+                and "m_in2"."direction" = 'in')
+            >
+            (select max("m_out2"."created_at") from "message" as "m_out2"
+              where "m_out2"."conversation_id" = "conversation"."id"
+                and "m_out2"."organization_id" = ${orgId}
+                and "m_out2"."direction" = 'out'
+                and "m_out2"."status" in ('sent', 'delivered', 'read')
+                and coalesce("m_out2"."external_id", '') not like 'mock-%')
+          )
+        )`,
+      )
+    }
+  }
+  const activityAt = sql`coalesce(${conversation.lastMessageAt}, ${conversation.createdAt})`
   if (input.cursor) {
-    const decoded = decodeCursor(input.cursor)
-    if (!decoded) throw validation("Cursor inválido")
-    const ts = new Date(decoded.ts)
+    const decoded = conversationCursor(input.cursor)
+    const ts = sql`${decoded.ts}::timestamptz`
     conditions.push(
       or(
-        lt(conversation.lastMessageAt, ts),
-        and(eq(conversation.lastMessageAt, ts), lt(conversation.id, decoded.id)),
+        sql`${activityAt} < ${ts}`,
+        and(sql`${activityAt} = ${ts}`, lt(conversation.id, decoded.id)),
       )!,
     )
   }
   const rows = await tx
-    .select({ conversation, contact, connection: channelConnection })
+    .select({
+      conversation, contact, connection: channelConnection,
+      cursorAt: sql<string>`to_char(${activityAt} at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`,
+    })
     .from(conversation)
     .innerJoin(contact, eq(conversation.contactId, contact.id))
     .innerJoin(channelConnection, eq(conversation.channelConnectionId, channelConnection.id))
     .where(and(...conditions))
-    .orderBy(desc(conversation.lastMessageAt), desc(conversation.id))
+    .orderBy(desc(activityAt), desc(conversation.id))
     .limit(limit + 1)
   const page = rows.slice(0, limit)
   const previews = new Map<string, ConversationListItem["preview"]>()
@@ -688,8 +761,8 @@ export async function listConversations(
   }))
   const last = page[page.length - 1]
   const nextCursor =
-    rows.length > limit && last?.conversation.lastMessageAt
-      ? encodeCursor(last.conversation.lastMessageAt.toISOString(), last.conversation.id)
+    rows.length > limit && last
+      ? encodeCursor(last.cursorAt, last.conversation.id)
       : null
   return { items, nextCursor }
 }
@@ -709,8 +782,7 @@ export async function listMessages(
   const limit = Math.min(Math.max(input.limit ?? 50, 1), 100)
   const conditions = [eq(message.conversationId, conversationId)]
   if (input.before) {
-    const decoded = decodeCursor(input.before)
-    if (!decoded) throw validation("Cursor inválido")
+    const decoded = conversationCursor(input.before)
     const ts = new Date(decoded.ts)
     conditions.push(
       or(lt(message.createdAt, ts), and(eq(message.createdAt, ts), lt(message.id, decoded.id)))!,

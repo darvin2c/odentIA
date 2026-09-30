@@ -243,6 +243,9 @@ const POLICY_ACTIONS = [
   { key: "cancelar_cita", label: "Cancelar cita" },
   { key: "enviar_mensaje", label: "Enviar mensaje" },
   { key: "mover_oportunidad", label: "Mover oportunidad" },
+  { key: "crear_oportunidad", label: "Crear oportunidad" },
+  { key: "actualizar_seguimiento", label: "Actualizar seguimiento" },
+  { key: "cerrar_oportunidad", label: "Cerrar oportunidad" },
 ] as const
 
 const MODE_LABEL: Record<string, string> = {

@@ -1,8 +1,19 @@
-import { Badge, Button, Input } from "@odentia/ui"
+import {
+  Badge,
+  Button,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+  Input,
+} from "@odentia/ui"
 import { EmptyState, PageHeader, PageShell } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, Link } from "@tanstack/react-router"
+import { MoreHorizontal } from "lucide-react"
 import { useState } from "react"
+import { formatDueAt, isOverdue } from "../../components/crm/crm-helpers"
+import { OpportunityDrawer } from "../../components/crm/opportunity-drawer"
 import { apiFetch } from "../../lib/api"
 import {
   type OpportunityDetail,
@@ -10,8 +21,8 @@ import {
   useOrgMembers,
   usePermission,
 } from "../../lib/crm"
+import { useOrgEvents } from "../../lib/org-events"
 import { formatMoney } from "./pipeline"
-
 export const Route = createFileRoute("/_org/opportunities/$opportunityId")({
   component: OpportunityDetailPage,
 })
@@ -31,6 +42,7 @@ function OpportunityDetailPage() {
   const members = useOrgMembers()
   const canWrite = usePermission("crm.write")
   const [closeOpen, setCloseOpen] = useState<"won" | "lost" | null>(null)
+  const [editOpen, setEditOpen] = useState(false)
 
   const detailQuery = useQuery({
     queryKey: ["opportunity", opportunityId],
@@ -50,8 +62,25 @@ function OpportunityDetailPage() {
 
   function invalidate() {
     void queryClient.invalidateQueries({ queryKey: ["opportunity", opportunityId] })
+    void queryClient.invalidateQueries({ queryKey: ["opportunities"] })
     void queryClient.invalidateQueries({ queryKey: ["pipeline-cards"] })
+    void queryClient.invalidateQueries({ queryKey: ["pipeline-list"] })
+    void queryClient.invalidateQueries({ queryKey: ["opportunity-summary"] })
+    void queryClient.invalidateQueries({ queryKey: ["contact-opportunities"] })
+    void queryClient.invalidateQueries({ queryKey: ["tasks"] })
   }
+
+  useOrgEvents(
+    [
+      "message.created",
+      "conversation.updated",
+      "opportunity.updated",
+      "task.updated",
+      "contact.updated",
+      "stream.reconnected",
+    ],
+    invalidate,
+  )
 
   const moveMutation = useMutation({
     mutationFn: (stageId: string) =>
@@ -93,6 +122,20 @@ function OpportunityDetailPage() {
       </PageShell>
     )
   }
+  if (detailQuery.isError) {
+    return (
+      <PageShell>
+        <EmptyState
+          title="No se pudo cargar"
+          description={
+            detailQuery.error instanceof Error
+              ? detailQuery.error.message
+              : "La oportunidad no se pudo cargar."
+          }
+        />
+      </PageShell>
+    )
+  }
   if (!detail) {
     return (
       <PageShell>
@@ -111,30 +154,60 @@ function OpportunityDetailPage() {
         subtitle={`${detail.stageName} · ${detail.contactName}`}
         actions={
           canWrite && isOpen ? (
-            <div className="flex gap-2">
-              <Button size="sm" variant="outline" onClick={() => setCloseOpen("lost")}>
-                Marcar perdida
-              </Button>
+            <div className="flex flex-wrap items-center gap-2">
               <Button size="sm" onClick={() => setCloseOpen("won")}>
                 Marcar ganada
               </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  render={<Button variant="outline" size="icon-sm" aria-label="Más acciones" />}
+                >
+                  <MoreHorizontal />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={() => setEditOpen(true)}>Editar</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setCloseOpen("lost")}>
+                    Marcar perdida
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
           ) : canWrite && !isOpen ? (
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => reopenMutation.mutate()}
-              disabled={reopenMutation.isPending}
-            >
-              Reabrir
-            </Button>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => reopenMutation.mutate()}
+                disabled={reopenMutation.isPending}
+              >
+                Reabrir
+              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  render={<Button variant="outline" size="icon-sm" aria-label="Más acciones" />}
+                >
+                  <MoreHorizontal />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={() => setEditOpen(true)}>Ver detalle</DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
           ) : undefined
         }
       />
-      <div className="grid gap-4 md:grid-cols-2">
-        <section className="flex flex-col gap-2 rounded-lg border p-4">
+      {reopenMutation.error ? (
+        <p role="alert" className="rounded-md border border-destructive/40 p-2 text-sm text-destructive">
+          No se pudo reabrir la oportunidad:{" "}
+          {reopenMutation.error instanceof Error
+            ? reopenMutation.error.message
+            : "error desconocido"}
+        </p>
+      ) : null}
+      <div className="grid min-w-0 gap-4 md:grid-cols-2">
+        <section className="flex min-w-0 flex-col gap-2 rounded-lg border p-4">
           <h2 className="text-sm font-semibold">Negociación</h2>
-          <dl className="flex flex-col gap-1.5 text-sm">
+          <dl className="flex min-w-0 flex-col gap-1.5 text-sm [&>div]:flex [&>div]:gap-2 [&_dd]:min-w-0 [&_dd]:flex-1 [&_dd]:break-words">
             <div className="flex gap-2">
               <dt className="w-28 shrink-0 text-muted-foreground">Contacto</dt>
               <dd>
@@ -147,6 +220,20 @@ function OpportunityDetailPage() {
                 </Link>
               </dd>
             </div>
+            {detail.conversationId && (
+              <div className="flex gap-2">
+                <dt className="w-28 shrink-0 text-muted-foreground">Origen</dt>
+                <dd>
+                  <Link
+                    to="/inbox"
+                    search={{ conversation: detail.conversationId }}
+                    className="hover:underline"
+                  >
+                    Abrir hilo de origen
+                  </Link>
+                </dd>
+              </div>
+            )}
             {detail.patientId && (
               <div className="flex gap-2">
                 <dt className="w-28 shrink-0 text-muted-foreground">Paciente</dt>
@@ -175,10 +262,15 @@ function OpportunityDetailPage() {
             </div>
             <div className="flex gap-2">
               <dt className="w-28 shrink-0 text-muted-foreground">Próxima acción</dt>
-              <dd>
-                {detail.nextActionAt
-                  ? new Date(detail.nextActionAt).toLocaleString("es-PE")
-                  : "—"}
+              <dd className={detail.nextActionAt && isOverdue(detail.nextActionAt) ? "font-medium text-red-600" : undefined}>
+                {detail.nextActionAt ? (
+                  <>
+                    {isOverdue(detail.nextActionAt) ? "Vencida · " : ""}
+                    {formatDueAt(detail.nextActionAt)}
+                  </>
+                ) : (
+                  "—"
+                )}
                 {detail.nextActionNote ? ` · ${detail.nextActionNote}` : ""}
               </dd>
             </div>
@@ -203,132 +295,56 @@ function OpportunityDetailPage() {
             )}
           </dl>
           {canWrite && isOpen && pipeline && (
-            <label className="mt-2 flex items-center gap-2 text-sm">
-              Etapa
-              <select
-                className="rounded border p-1.5"
-                value={detail.stageId}
-                onChange={(e) => moveMutation.mutate(e.target.value)}
-                disabled={moveMutation.isPending}
-              >
-                {pipeline.stages
-                  .filter((s) => s.kind === "open")
-                  .map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name}
-                    </option>
-                  ))}
-              </select>
-            </label>
+            <div className="mt-2 flex min-w-0 flex-wrap items-center gap-2 text-sm">
+              <span className="text-muted-foreground">Etapa: {detail.stageName}</span>
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  render={
+                    <Button variant="outline" size="sm" disabled={moveMutation.isPending} />
+                  }
+                >
+                  Cambiar etapa
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start">
+                  {pipeline.stages
+                    .filter((s) => s.kind === "open")
+                    .map((s) => (
+                      <DropdownMenuItem
+                        key={s.id}
+                        disabled={s.id === detail.stageId || moveMutation.isPending}
+                        onClick={() => {
+                          if (s.id !== detail.stageId) moveMutation.mutate(s.id)
+                        }}
+                      >
+                        {s.name}
+                        {s.id === detail.stageId ? " · actual" : ""}
+                      </DropdownMenuItem>
+                    ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
           )}
+          {moveMutation.error ? (
+            <p role="alert" className="text-sm text-destructive">
+              No se pudo mover de etapa:{" "}
+              {moveMutation.error instanceof Error
+                ? moveMutation.error.message
+                : "error desconocido"}
+            </p>
+          ) : null}
           {canWrite && isOpen && detail.patientId && (
             <BudgetLinkRow
               patientId={detail.patientId}
               budgetId={detail.budgetId}
               onLink={(budgetId) => editMutation.mutate({ budgetId })}
               pending={editMutation.isPending}
+              linkError={
+                editMutation.error instanceof Error ? editMutation.error.message : null
+              }
             />
           )}
         </section>
-        {canWrite && isOpen && (
-          <section className="rounded-lg border p-4 md:col-span-2">
-            <h2 className="mb-2 text-sm font-semibold">Editar seguimiento</h2>
-            <form
-              className="grid gap-3 md:grid-cols-3"
-              onSubmit={(e) => {
-                e.preventDefault()
-                const form = new FormData(e.currentTarget)
-                const amount = String(form.get("amount") ?? "").trim()
-                const nextActionAt = String(form.get("nextActionAt") ?? "")
-                editMutation.mutate({
-                  title: String(form.get("title")),
-                  interestText: String(form.get("interestText") ?? "").trim() || null,
-                  amountCents: amount ? Math.round(Number(amount) * 100) : null,
-                  currency:
-                    String(form.get("currency") ?? "PEN").trim().toUpperCase() || "PEN",
-                  assignedUserId: String(form.get("assignedUserId") ?? "") || null,
-                  nextActionAt: nextActionAt
-                    ? new Date(nextActionAt).toISOString()
-                    : null,
-                  nextActionNote: String(form.get("nextActionNote") ?? "").trim() || null,
-                })
-              }}
-            >
-              <label className="flex flex-col gap-1 text-sm">
-                Título
-                <Input name="title" required maxLength={200} defaultValue={detail.title} />
-              </label>
-              <label className="flex flex-col gap-1 text-sm">
-                Interés
-                <Input
-                  name="interestText"
-                  maxLength={500}
-                  defaultValue={detail.interestText ?? ""}
-                />
-              </label>
-              <div className="flex gap-2">
-                <label className="flex flex-1 flex-col gap-1 text-sm">
-                  Valor
-                  <Input
-                    name="amount"
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    defaultValue={
-                      detail.amountCents !== null ? detail.amountCents / 100 : ""
-                    }
-                  />
-                </label>
-                <label className="flex w-24 flex-col gap-1 text-sm">
-                  Moneda
-                  <Input name="currency" maxLength={3} defaultValue={detail.currency} />
-                </label>
-              </div>
-              <label className="flex flex-col gap-1 text-sm">
-                Asignado
-                <select
-                  name="assignedUserId"
-                  className="rounded border p-2"
-                  defaultValue={detail.assignedUserId ?? ""}
-                >
-                  <option value="">Sin asignar</option>
-                  {members.map((m) => (
-                    <option key={m.userId} value={m.userId}>
-                      {m.user.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="flex flex-col gap-1 text-sm">
-                Próxima acción
-                <Input
-                  name="nextActionAt"
-                  type="datetime-local"
-                  defaultValue={detail.nextActionAt ? detail.nextActionAt.slice(0, 16) : ""}
-                />
-              </label>
-              <label className="flex flex-col gap-1 text-sm">
-                Nota de seguimiento
-                <Input
-                  name="nextActionNote"
-                  maxLength={500}
-                  defaultValue={detail.nextActionNote ?? ""}
-                />
-              </label>
-              <div className="flex items-end">
-                <Button type="submit" disabled={editMutation.isPending}>
-                  Guardar
-                </Button>
-              </div>
-              {editMutation.error && (
-                <p className="text-sm text-red-600 md:col-span-3">
-                  {(editMutation.error as Error).message}
-                </p>
-              )}
-            </form>
-          </section>
-        )}
-        <section className="flex flex-col gap-2 rounded-lg border p-4">
+        <section className="flex min-w-0 flex-col gap-2 rounded-lg border p-4">
           <h2 className="text-sm font-semibold">Historial</h2>
           {detail.history.length === 0 && (
             <p className="text-sm text-muted-foreground">Sin movimientos registrados.</p>
@@ -351,6 +367,14 @@ function OpportunityDetailPage() {
           </ol>
         </section>
       </div>
+      <OpportunityDrawer
+        open={editOpen}
+        contactId={detail.contactId}
+        conversationId={detail.conversationId ?? undefined}
+        opportunityId={opportunityId}
+        onClose={() => setEditOpen(false)}
+        onSaved={invalidate}
+      />
       {closeOpen && (
         <CloseDialog
           outcome={closeOpen}
@@ -369,11 +393,13 @@ function BudgetLinkRow({
   budgetId,
   onLink,
   pending,
+  linkError,
 }: {
   patientId: string
   budgetId: string | null
   onLink: (budgetId: string | null) => void
   pending: boolean
+  linkError: string | null
 }) {
   const budgetsQuery = useQuery({
     queryKey: ["patient-budgets", patientId],
@@ -384,22 +410,38 @@ function BudgetLinkRow({
   })
   const budgets = budgetsQuery.data?.data ?? []
   return (
-    <label className="mt-2 flex items-center gap-2 text-sm">
-      Presupuesto
-      <select
-        className="rounded border p-1.5"
-        value={budgetId ?? ""}
-        onChange={(e) => onLink(e.target.value || null)}
-        disabled={pending || budgetsQuery.isLoading}
-      >
-        <option value="">Sin vincular</option>
-        {budgets.map((b) => (
-          <option key={b.id} value={b.id}>
-            {b.title} · {b.status}
-          </option>
-        ))}
-      </select>
-    </label>
+    <div className="mt-2 flex min-w-0 flex-col gap-1">
+      <label className="flex min-w-0 flex-wrap items-center gap-2 text-sm">
+        Presupuesto
+        <select
+          aria-label="Presupuesto vinculado"
+          className="min-w-0 max-w-full rounded border p-1.5"
+          value={budgetId ?? ""}
+          onChange={(e) => onLink(e.target.value || null)}
+          disabled={pending || budgetsQuery.isLoading}
+        >
+          <option value="">Sin vincular</option>
+          {budgets.map((b) => (
+            <option key={b.id} value={b.id}>
+              {b.title} · {b.status}
+            </option>
+          ))}
+        </select>
+      </label>
+      {budgetsQuery.isError ? (
+        <p role="alert" className="text-sm text-destructive">
+          No se pudieron cargar los presupuestos.{" "}
+          <Button type="button" variant="link" size="sm" onClick={() => void budgetsQuery.refetch()}>
+            Reintentar
+          </Button>
+        </p>
+      ) : null}
+      {linkError ? (
+        <p role="alert" className="text-sm text-destructive">
+          No se pudo vincular el presupuesto: {linkError}
+        </p>
+      ) : null}
+    </div>
   )
 }
 

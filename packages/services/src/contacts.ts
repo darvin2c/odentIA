@@ -10,9 +10,14 @@ import {
   customFieldDef,
 } from "@odentia/db/schema/crm"
 import { auditEvent } from "@odentia/db/schema/org"
-import { and, asc, desc, eq, ilike, inArray, lt, or, sql } from "drizzle-orm"
-import { decodeCursor } from "./cursors.js"
+import { and, asc, desc, eq, gt, ilike, inArray, lt, or, sql } from "drizzle-orm"
+import { opportunity } from "@odentia/db/schema/opportunities"
 import { notFound, ServiceError, validation } from "./errors.js"
+
+/** Aviso en vivo mínimo para refresco CRM: solo `{ orgId, kind, at }`, sin PII. */
+async function notifyCrm(tx: Db, orgId: string, kind: string): Promise<void> {
+  await tx.execute(sql`select pg_notify('org_events', ${JSON.stringify({ orgId, kind, at: new Date().toISOString() })})`)
+}
 
 /** Normaliza etiquetas con el helper canónico; convierte Error a ServiceError validation. */
 export function normalizeContactTags(tags: readonly string[]): string[] {
@@ -33,6 +38,8 @@ export interface ContactListItem {
   assignedUserId: string | null
   lastInteractionAt: string | null
   channels: string[]
+  /** Oportunidades abiertas del contacto (agregado SQL completo, no muestra truncada). */
+  openOpportunityCount: number
 }
 
 export interface ContactDetail extends ContactListItem {
@@ -45,8 +52,11 @@ export interface ContactDetail extends ContactListItem {
 function iso(date: Date | null): string | null {
   return date ? date.toISOString() : null
 }
-
-function toListItem(row: typeof contact.$inferSelect, channels: string[]): ContactListItem {
+function toListItem(
+  row: typeof contact.$inferSelect,
+  channels: string[],
+  openOpportunityCount = 0,
+): ContactListItem {
   return {
     id: row.id,
     displayName: row.displayName,
@@ -57,39 +67,57 @@ function toListItem(row: typeof contact.$inferSelect, channels: string[]): Conta
     assignedUserId: row.assignedUserId,
     lastInteractionAt: iso(row.lastInteractionAt),
     channels,
+    openOpportunityCount,
   }
 }
 const PAGE_DEFAULT = 30
 
+export type ContactSort = "nombre" | "-nombre" | "actividad" | "-actividad"
 export interface ContactListFilters {
   q?: string
   /** true = solo activos (default), false = solo archivados, "all" = todos. */
   isActive?: boolean | "all"
+  /** Orden global servidor; default "-actividad" (recientes primero). */
+  sort?: ContactSort
   cursor?: string
   limit?: number
 }
 
 /** Huella de filtros: el cursor solo es válido con los mismos parámetros. */
-function listingFingerprint(input: { q: string; isActive: boolean | "all" }): string {
-  return JSON.stringify({ q: input.q, isActive: input.isActive })
+function listingFingerprint(input: { q: string; isActive: boolean | "all"; sort: ContactSort }): string {
+  return JSON.stringify({ q: input.q, isActive: input.isActive, sort: input.sort })
 }
 
-function encodeListingCursor(ts: string, id: string, fingerprint: string): string {
-  return Buffer.from(JSON.stringify({ ts, id, f: fingerprint }), "utf8").toString("base64url")
+function encodeListingCursor(key: string, id: string, fingerprint: string): string {
+  return Buffer.from(JSON.stringify({ k: key, id, f: fingerprint }), "utf8").toString("base64url")
 }
 
-function decodeListingCursor(cursor: string): { ts: string; id: string; f: string } | null {
-  const base = decodeCursor(cursor)
-  if (!base) return null
+function decodeListingCursor(cursor: string): { k: string; id: string; f: string } | null {
   try {
     const raw: unknown = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8"))
-    if (!raw || typeof raw !== "object" || !("f" in raw)) return null
-    const f: unknown = raw.f
-    if (typeof f !== "string") return null
-    return { ts: base.ts, id: base.id, f }
+    if (!raw || typeof raw !== "object") return null
+    const rec = raw as Record<string, unknown>
+    if (typeof rec.k !== "string" || typeof rec.id !== "string" || typeof rec.f !== "string") {
+      return null
+    }
+    if (!/^[0-9a-f-]{36}$/i.test(rec.id)) return null
+    return { k: rec.k, id: rec.id, f: rec.f }
   } catch {
     return null
   }
+}
+
+/** Clave actividad UTC con microsegundos (to_char ... .US"Z"); "" = NULL. */
+const ACTIVITY_KEY_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,6})?Z$/
+function assertActivityKey(k: string): void {
+  if (!ACTIVITY_KEY_RE.test(k) || Number.isNaN(new Date(k).getTime())) {
+    throw validation("Cursor inválido")
+  }
+}
+function normalizeContactSort(sort: ContactSort | undefined): ContactSort {
+  if (sort === undefined) return "-actividad"
+  if (sort === "nombre" || sort === "-nombre" || sort === "actividad" || sort === "-actividad") return sort
+  throw validation("Orden inválido (nombre|-nombre|actividad|-actividad)")
 }
 
 export async function listContacts(
@@ -100,7 +128,8 @@ export async function listContacts(
   const limit = Math.min(Math.max(input.limit ?? PAGE_DEFAULT, 1), 100)
   const q = input.q?.trim() ? input.q.trim() : ""
   const active = input.isActive ?? true
-  const fingerprint = listingFingerprint({ q, isActive: active })
+  const sort = normalizeContactSort(input.sort)
+  const fingerprint = listingFingerprint({ q, isActive: active, sort })
   const conditions = [eq(contact.organizationId, orgId)]
   if (q) {
     const like = `%${q}%`
@@ -115,30 +144,78 @@ export async function listContacts(
   if (active !== "all") conditions.push(eq(contact.isActive, active))
   if (input.cursor) {
     const decoded = decodeListingCursor(input.cursor)
-    if (!decoded || !/^[0-9a-f-]{36}$/i.test(decoded.id)) throw validation("Cursor inválido")
+    if (!decoded) throw validation("Cursor inválido")
     if (decoded.f !== fingerprint)
       throw validation("El cursor no corresponde a los filtros actuales")
-    if (decoded.ts === "") {
-      // Cola de nulos (NULLS LAST): paginar solo por id.
-      conditions.push(sql`"last_interaction_at" is null`)
-      conditions.push(lt(contact.id, decoded.id))
-    } else {
-      const ts = new Date(decoded.ts)
-      if (Number.isNaN(ts.getTime())) throw validation("Cursor inválido")
+    if (sort === "-actividad") {
+      if (decoded.k === "") {
+        conditions.push(sql`"last_interaction_at" is null`)
+        conditions.push(lt(contact.id, decoded.id))
+      } else {
+        assertActivityKey(decoded.k)
+        conditions.push(
+          or(
+            sql`"last_interaction_at" < ${decoded.k}::timestamptz`,
+            and(
+              sql`"last_interaction_at" = ${decoded.k}::timestamptz`,
+              lt(contact.id, decoded.id),
+            ),
+            sql`"last_interaction_at" is null`,
+          )!,
+        )
+      }
+    } else if (sort === "actividad") {
+      if (decoded.k === "") {
+        conditions.push(
+          or(
+            and(sql`"last_interaction_at" is null`, gt(contact.id, decoded.id)),
+            sql`"last_interaction_at" is not null`,
+          )!,
+        )
+      } else {
+        assertActivityKey(decoded.k)
+        conditions.push(
+          or(
+            sql`"last_interaction_at" > ${decoded.k}::timestamptz`,
+            and(
+              sql`"last_interaction_at" = ${decoded.k}::timestamptz`,
+              gt(contact.id, decoded.id),
+            ),
+          )!,
+        )
+      }
+    } else if (sort === "nombre") {
       conditions.push(
         or(
-          lt(contact.lastInteractionAt, ts),
-          and(eq(contact.lastInteractionAt, ts), lt(contact.id, decoded.id)),
-          sql`"last_interaction_at" is null`,
+          gt(contact.displayName, decoded.k),
+          and(eq(contact.displayName, decoded.k), gt(contact.id, decoded.id)),
+        )!,
+      )
+    } else {
+      conditions.push(
+        or(
+          lt(contact.displayName, decoded.k),
+          and(eq(contact.displayName, decoded.k), lt(contact.id, decoded.id)),
         )!,
       )
     }
   }
+  const orderBy =
+    sort === "-actividad"
+      ? [sql`"last_interaction_at" desc nulls last`, desc(contact.id)]
+      : sort === "actividad"
+        ? [sql`"last_interaction_at" asc nulls first`, asc(contact.id)]
+        : sort === "nombre"
+          ? [asc(contact.displayName), asc(contact.id)]
+          : [desc(contact.displayName), desc(contact.id)]
   const rows = await tx
-    .select()
+    .select({
+      contact,
+      activityKey: sql<string | null>`to_char("last_interaction_at" at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`,
+    })
     .from(contact)
     .where(and(...conditions))
-    .orderBy(sql`"last_interaction_at" desc nulls last`, desc(contact.id))
+    .orderBy(...orderBy)
     .limit(limit + 1)
   const page = rows.slice(0, limit)
   const identities = page.length
@@ -149,7 +226,7 @@ export async function listContacts(
           and(
             eq(contactIdentity.organizationId, orgId),
             sql`"contact_id" in (${sql.join(
-              page.map((r) => sql`${r.id}::uuid`),
+              page.map((r) => sql`${r.contact.id}::uuid`),
               sql`, `,
             )})`,
           ),
@@ -161,12 +238,36 @@ export async function listContacts(
     if (!list.includes(ident.channel)) list.push(ident.channel)
     byContact.set(ident.contactId, list)
   }
-  const items = page.map((r) => toListItem(r, byContact.get(r.id) ?? []))
+  // Conteo completo de oportunidades abiertas por contacto (agregado SQL, no muestra).
+  const openCounts = new Map<string, number>()
+  if (page.length) {
+    const counted = await tx
+      .select({ contactId: opportunity.contactId, count: sql<number>`count(*)::int` })
+      .from(opportunity)
+      .where(
+        and(
+          eq(opportunity.organizationId, orgId),
+          eq(opportunity.status, "open"),
+          inArray(
+            opportunity.contactId,
+            page.map((r) => r.contact.id),
+          ),
+        ),
+      )
+      .groupBy(opportunity.contactId)
+    for (const row of counted) openCounts.set(row.contactId, row.count)
+  }
+  const items = page.map((r) =>
+    toListItem(r.contact, byContact.get(r.contact.id) ?? [], openCounts.get(r.contact.id) ?? 0),
+  )
   const last = page[page.length - 1]
+  const cursorKey = last
+    ? sort === "nombre" || sort === "-nombre"
+      ? last.contact.displayName
+      : (last.activityKey ?? "")
+    : ""
   const nextCursor =
-    rows.length > limit && last
-      ? encodeListingCursor(last.lastInteractionAt?.toISOString() ?? "", last.id, fingerprint)
-      : null
+    rows.length > limit && last ? encodeListingCursor(cursorKey, last.contact.id, fingerprint) : null
   return { items, nextCursor }
 }
 
@@ -367,6 +468,7 @@ export async function createContact(
   if (input.tags !== undefined) createdFields.push("tags")
   if (input.assignedUserId !== undefined) createdFields.push("assignedUserId")
   await auditContact(tx, orgId, actor, "contact.created", created.id, { fields: createdFields })
+  await notifyCrm(tx, orgId, "contact.updated")
   const full = await getContact(tx, orgId, created.id)
   return full.contact
 }
@@ -482,6 +584,9 @@ export async function updateContact(
       .set(patch)
       .where(and(eq(contact.id, id), eq(contact.organizationId, orgId)))
     await auditContact(tx, orgId, actor, "contact.updated", id, { fields: changed })
+    await notifyCrm(tx, orgId, "contact.updated")
+  } else if (isActive !== undefined) {
+    await notifyCrm(tx, orgId, "contact.updated")
   }
   const full = await getContact(tx, orgId, id)
   return full.contact

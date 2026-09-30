@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { useEffect, useState, type ReactNode } from "react"
 import { apiFetch } from "../../lib/api"
+import { PerformanceSummary } from "../../components/crm/performance-summary"
 import { usePermission } from "../../lib/crm"
 import { useOrgProfile } from "../../lib/org"
 import { type ManagementReport, moneyFromCents, stateLabel } from "../../lib/workspace"
@@ -46,6 +47,7 @@ function ReportsPage() {
         <ReportSection title="Cobros y devoluciones" description="Por fecha de pago y devolución. Los pagos anulados no se incluyen."><SimpleTable headers={["Moneda", "Recibido", "Devuelto", "Neto"]} rows={report.collections.map(row => [row.currency, moneyFromCents(row.receivedCents, row.currency, report.locale), moneyFromCents(row.refundedCents, row.currency, report.locale), moneyFromCents(row.netCents, row.currency, report.locale)])} /></ReportSection>
         <ReportSection title="Deuda actual" description="Saldo de cargos vigentes menos aplicaciones vigentes a la fecha de consulta; no es un saldo histórico del período."><SimpleTable headers={["Moneda", "Pendiente", "Vencido", "Pacientes"]} rows={report.debt.map(row => [row.currency, moneyFromCents(row.outstandingCents, row.currency, report.locale), moneyFromCents(row.overdueCents, row.currency, report.locale), row.patients])} /></ReportSection>
       </div>
+      <PerformanceSummary data={report.performance} />
     </> : null}
   </PageShell>
 }

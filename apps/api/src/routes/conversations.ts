@@ -26,6 +26,7 @@ const listQuery = z.object({
   channel: z.string().optional(),
   assigned: z.string().optional(),
   q: z.string().optional(),
+  view: z.enum(["unanswered", "human", "approval"]).optional(),
   cursor: z.string().optional(),
   limit: z.coerce.number().int().min(1).max(100).optional(),
 })

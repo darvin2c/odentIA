@@ -1,13 +1,18 @@
-import { Badge, Field, FieldLabel, Input, Textarea } from "@odentia/ui"
-import { DataTable, EmptyState, KpiCard, PageHeader, PageShell, SubmitButton } from "@odentia/ui-patterns"
-import { useMutation, useQuery } from "@tanstack/react-query"
-import { createFileRoute } from "@tanstack/react-router"
+import { Badge, Button, Field, FieldLabel, Input, Textarea } from "@odentia/ui"
+import { DataTable, EmptyState, KpiCard, LoadingState, PageHeader, PageShell, SubmitButton } from "@odentia/ui-patterns"
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { createFileRoute, Link } from "@tanstack/react-router"
 import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-table"
 import { useMemo, useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
-import { usePermission } from "../../lib/crm"
+import { channelLabel } from "../../lib/channels"
+import { type ConversationListItem, usePermission } from "../../lib/crm"
+import { useOrgEvents } from "../../lib/org-events"
 
 export const Route = createFileRoute("/_org/agent/")({
+  validateSearch: (search: Record<string, unknown>): { conversation?: string } => ({
+    conversation: typeof search.conversation === "string" ? search.conversation : undefined,
+  }),
   component: AgentSupervisionPage,
 })
 
@@ -46,17 +51,39 @@ interface Simulation {
 }
 
 const STATUS_LABEL: Record<string, string> = {
-  ok: "Correctas",
-  handoff: "Derivadas",
+  ok: "Ejecución correcta",
+  handoff: "Pidió atención del equipo",
   error: "Con error",
-  omitida: "Omitidas",
+  omitida: "Sin ejecutar",
 }
 
 function AgentSupervisionPage() {
   const canRead = usePermission("agent.read")
   const canWrite = usePermission("agent.write")
-  const [conversationId, setConversationId] = useState("")
+  const search = Route.useSearch()
+  const navigate = Route.useNavigate()
+  const conversationId = search.conversation ?? ""
+  const [conversationSearch, setConversationSearch] = useState("")
   const [draft, setDraft] = useState("")
+  const queryClient = useQueryClient()
+  const conversationsQuery = useInfiniteQuery({
+    queryKey: ["simulation-conversations", conversationSearch],
+    initialPageParam: null as string | null,
+    queryFn: ({ pageParam }) => {
+      const params = new URLSearchParams({ limit: "30" })
+      if (conversationSearch.trim()) params.set("q", conversationSearch.trim())
+      if (pageParam) params.set("cursor", pageParam)
+      return apiFetch<{ data: ConversationListItem[]; nextCursor: string | null }>(`/api/conversations?${params}`)
+    },
+    getNextPageParam: page => page.nextCursor,
+    enabled: canWrite,
+  })
+  const conversations = conversationsQuery.data?.pages.flatMap(page => page.data) ?? []
+  useOrgEvents(["conversation.updated", "message.created", "stream.reconnected"], () => {
+    for (const key of ["agent-runs", "agent-run-stats", "simulation-conversations"]) {
+      void queryClient.invalidateQueries({ queryKey: [key] })
+    }
+  })
 
   const statsQuery = useQuery({
     queryKey: ["agent-run-stats"],
@@ -88,6 +115,13 @@ function AgentSupervisionPage() {
         ),
       },
       { accessorKey: "model", header: "Modelo" },
+      {
+        id: "conversation",
+        header: "Caso",
+        cell: ({ row }) => row.original.conversationId
+          ? <Link to="/inbox" search={{ conversation: row.original.conversationId }} className="text-primary underline">Abrir conversación</Link>
+          : "Sin conversación",
+      },
       {
         accessorKey: "latencyMs",
         header: "Latencia",
@@ -136,9 +170,10 @@ function AgentSupervisionPage() {
 
   return (
     <PageShell className="flex flex-col gap-6">
-      <PageHeader title="Agente" subtitle="Supervisión de corridas reales, métricas y simulación" />
+      <PageHeader title="Agente" subtitle="Ejecuciones registradas y simulación sin cambios; una ejecución correcta no equivale a un caso resuelto." />
+      {statsQuery.isPending ? <LoadingState /> : statsQuery.isError ? <div role="alert"><p>No pudimos cargar la actividad del agente.</p><Button variant="outline" onClick={() => void statsQuery.refetch()}>Volver a intentar</Button></div> : null}
       <div className="grid min-w-0 gap-3 sm:grid-cols-4">
-        <KpiCard title="Corridas" value={stats?.total ?? "—"} />
+        <KpiCard title="Ejecuciones" value={stats?.total ?? "—"} />
         <KpiCard
           title="Latencia media"
           value={stats?.avgLatencyMs == null ? "—" : `${(stats.avgLatencyMs / 1000).toFixed(1)} s`}
@@ -176,9 +211,9 @@ function AgentSupervisionPage() {
         </div>
       ) : null}
       <div className="rounded-md bg-card p-6">
-        <div className="font-heading text-base font-medium">Últimas corridas</div>
-        {runs.length === 0 ? (
-          <EmptyState title="Últimas corridas" description="Aún no hay corridas registradas." />
+        <h2 className="font-heading text-base font-medium">Últimas 50 ejecuciones</h2>
+        {runsQuery.isPending ? <LoadingState /> : runsQuery.isError ? <div role="alert"><p>No pudimos cargar las ejecuciones.</p><Button variant="outline" onClick={() => void runsQuery.refetch()}>Volver a intentar</Button></div> : runs.length === 0 ? (
+          <EmptyState title="Sin ejecuciones" description="Aún no hay actividad registrada." />
         ) : (
           <DataTable table={runsTable} />
         )}
@@ -187,20 +222,30 @@ function AgentSupervisionPage() {
         <div className="flex flex-col gap-3 rounded-md bg-card p-6">
           <div className="font-heading text-base font-medium">Simular instrucciones</div>
           <p className="text-sm text-muted-foreground">
-            Corre el modelo configurado con las instrucciones vigentes sin enviar mensajes ni crear citas,
-            tareas o derivaciones. No se guarda nada.
+            Simula un solo turno con el mismo modelo efectivo que la atención de esta organización, sin enviar mensajes
+            ni cambiar citas, oportunidades, tareas o derivaciones. No reproduce activaciones ni derivaciones previas ni la
+            memoria de la atención real: el resultado es orientativo, no una equivalencia total. El resultado muestra el modelo usado.
           </p>
           <Field>
-            <FieldLabel htmlFor="sim-conversacion">ID de conversación</FieldLabel>
-            <Input
-              id="sim-conversacion"
-              value={conversationId}
-              onChange={(e) => setConversationId(e.target.value)}
-              placeholder="UUID de la conversación"
-            />
+            <FieldLabel htmlFor="sim-busqueda">Buscar conversación por persona</FieldLabel>
+            <Input id="sim-busqueda" type="search" value={conversationSearch} onChange={event => setConversationSearch(event.target.value)} placeholder="Nombre del interlocutor…" />
           </Field>
           <Field>
-            <FieldLabel htmlFor="sim-mensaje">Mensaje hipotético del paciente</FieldLabel>
+            <FieldLabel htmlFor="sim-conversacion">Conversación y canal</FieldLabel>
+            <select id="sim-conversacion" className="min-w-0 rounded-md border bg-background p-2 text-sm" value={conversationId} onChange={event => {
+              simulateMutation.reset()
+              void navigate({ search: { conversation: event.target.value || undefined }, replace: true })
+            }}>
+              <option value="">Elige una conversación…</option>
+              {conversationId && !conversations.some(item => item.id === conversationId) && <option value={conversationId}>Caso seleccionado desde la bandeja</option>}
+              {conversations.map(item => <option key={item.id} value={item.id}>{item.contact.displayName} · {channelLabel(item.connection.channel)} · {item.connection.displayName}</option>)}
+            </select>
+            {conversationsQuery.isPending ? <p className="text-sm text-muted-foreground">Cargando conversaciones…</p> : conversationsQuery.isError ? <p role="alert" className="text-sm">No pudimos cargar las conversaciones. <button type="button" className="underline" onClick={() => void conversationsQuery.refetch()}>Volver a intentar</button></p> : conversations.length === 0 ? <p className="text-sm text-muted-foreground">No hay conversaciones para esta búsqueda.</p> : null}
+            {conversationsQuery.hasNextPage && <Button type="button" variant="outline" disabled={conversationsQuery.isFetchingNextPage} onClick={() => void conversationsQuery.fetchNextPage()}>Cargar más conversaciones</Button>}
+            {conversationId && <Link to="/inbox" search={{ conversation: conversationId }} className="text-sm text-primary underline">Abrir el caso real</Link>}
+          </Field>
+          <Field>
+            <FieldLabel htmlFor="sim-mensaje">Mensaje hipotético del interlocutor</FieldLabel>
             <Textarea
               id="sim-mensaje"
               value={draft}
@@ -222,6 +267,7 @@ function AgentSupervisionPage() {
           {simulation ? (
             <div className="flex flex-col gap-2 rounded-md bg-muted p-3 text-sm">
               <p className="whitespace-pre-wrap">{simulation.reply}</p>
+              {simulation.model === "fake" && <p className="text-sm text-muted-foreground">Demostración determinista: no acredita inteligencia ni calidad de un proveedor real.</p>}
               <p className="text-xs text-muted-foreground">
                 Modelo {simulation.model} · {(simulation.latencyMs / 1000).toFixed(1)} s
                 {simulation.inputTokens != null

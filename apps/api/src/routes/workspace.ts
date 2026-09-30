@@ -2,7 +2,7 @@ import { withOrgContext } from "@odentia/db"
 import { getManagementReport, getWorkspaceHome, getWorkspacePulse, listWorkspaceAudit, listWorkspaceNotifications, readWorkspaceNotification, type WorkspaceAccess } from "@odentia/services"
 import { Hono } from "hono"
 import { z } from "zod"
-import { canAccess, orgContextOf } from "../lib/context.js"
+import { canAccess, canAccessAny, orgContextOf } from "../lib/context.js"
 import { errorBody } from "../lib/error.js"
 import { type CrmDeps, runService, validationError } from "./helpers.js"
 
@@ -11,7 +11,9 @@ function accessFor(role: string): WorkspaceAccess {
     patients: canAccess(role, "patients.read"), appointments: canAccess(role, "appointments.read"),
     conversations: canAccess(role, "conversations.read"), tasks: canAccess(role, "tasks.read"),
     finance: canAccess(role, "finance.read"), clinical: canAccess(role, "clinical.read"),
-    crm: canAccess(role, "crm.read"), agent: canAccess(role, "agent.read"),
+    // La banda operativa del agente (pendientes y pulso) la ve quien supervisa
+    // o quien decide; la configuración y el proveedor siguen en `agent.write`.
+    crm: canAccess(role, "crm.read"), agent: canAccessAny(role, ["agent.read", "agent.decide"]),
     allTasks: role === "owner" || role === "admin",
   }
 }
@@ -31,14 +33,22 @@ export function createWorkspaceRoute(deps: CrmDeps) {
   })
   app.get("/notifications", c => {
     const { orgId, userId, memberRole } = orgContextOf(c)
-    const permissions = domains.map(domain => `${domain}.read`).filter(permission => canAccess(memberRole, permission))
+    // Los avisos de aprobación usan `agent.decide` (ver ProposalLifecycle):
+    // recepción operativa los recibe sin lectura general del agente.
+    const permissions = [
+      ...domains.map(domain => `${domain}.read`).filter(permission => canAccess(memberRole, permission)),
+      ...(canAccess(memberRole, "agent.decide") ? ["agent.decide"] : []),
+    ]
     return runService(c, 200, () => withOrgContext(deps.db, orgId, tx => listWorkspaceNotifications(tx, orgId, userId, permissions)))
   })
   app.post("/notifications/:id/read", async c => {
     const { orgId, userId, memberRole } = orgContextOf(c)
     const parsed = z.string().uuid().safeParse(c.req.param("id"))
     if (!parsed.success) return validationError(c, parsed.error.issues)
-    const permissions = domains.map(domain => `${domain}.read`).filter(permission => canAccess(memberRole, permission))
+    const permissions = [
+      ...domains.map(domain => `${domain}.read`).filter(permission => canAccess(memberRole, permission)),
+      ...(canAccess(memberRole, "agent.decide") ? ["agent.decide"] : []),
+    ]
     return runService(c, 200, () => withOrgContext(deps.db, orgId, tx => readWorkspaceNotification(tx, orgId, userId, parsed.data, permissions)))
   })
   app.get("/reports", async c => {
@@ -46,7 +56,7 @@ export function createWorkspaceRoute(deps: CrmDeps) {
     if (!canAccess(memberRole, "reports.read")) return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para consultar reportes"), 403)
     const parsed = reportInput.safeParse(c.req.query())
     if (!parsed.success) return validationError(c, parsed.error.issues)
-    return runService(c, 200, () => withOrgContext(deps.db, orgId, tx => getManagementReport(tx, orgId, parsed.data.from, parsed.data.to)))
+    return runService(c, 200, () => withOrgContext(deps.db, orgId, tx => getManagementReport(tx, orgId, parsed.data.from, parsed.data.to, accessFor(memberRole))))
   })
   app.get("/audit", async c => {
     const { orgId, memberRole } = orgContextOf(c)

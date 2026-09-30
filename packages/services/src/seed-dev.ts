@@ -104,7 +104,7 @@ import { secretsKeyFromEnv } from "./secrets.js"
 import { createService } from "./service-catalog.js"
 import { createStorage } from "./storage.js"
 import { completeTask, createTask } from "./tasks.js"
-import { closeOpportunity, createOpportunity } from "./opportunities.js"
+import { closeOpportunity, createOpportunity, listOpportunities } from "./opportunities.js"
 import { seedAgent } from "./seed-agent.js"
 import { seedAutomation } from "./seed-automation.js"
 import { seedAvailability } from "./seed-availability.js"
@@ -118,6 +118,8 @@ import { seedPortal } from "./seed-portal.js"
 import { seedWebchat } from "./seed-webchat.js"
 import { seedWorkspace } from "./seed-workspace.js"
 import { seedRoles } from "./seed-roles.js"
+import { seedCrmActivity } from "./seed-crm-activity.js"
+import { seedCrmAgent } from "./seed-crm-agent.js"
 
 const databaseUrl = process.env.DATABASE_URL
 if (!databaseUrl) throw new Error("DATABASE_URL es obligatoria para sembrar (rol owner)")
@@ -270,6 +272,7 @@ async function wipeSeed(): Promise<void> {
     "automation_link_token", "automation_job", "automation_consent", "automation_rule",
     "agent_run_ledger", "agent_proposal", "agent_handoff",
     "agent_knowledge_revision", "agent_knowledge_entry", "agent_policy",
+    "crm_note", "task",
     "workspace_notification", "opportunity_event", "opportunity",
     "clinical_form_addendum", "clinical_form_response", "consent_event", "consent_document",
     "clinical_order", "clinical_form_template", "consent_template",
@@ -308,7 +311,6 @@ async function wipeSeed(): Promise<void> {
     .where(inArray(patientRegistrationConfig.organizationId, SEED_ORGS))
   await db.delete(appointment).where(inArray(appointment.organizationId, SEED_ORGS))
   await db.delete(message).where(inArray(message.organizationId, SEED_ORGS))
-  await db.delete(crmTask).where(inArray(crmTask.organizationId, SEED_ORGS))
   // Las citas creadas por el agente referencian su conversación: se suelta la
   // referencia antes de borrarla (las citas se purgan más abajo).
   await db
@@ -716,7 +718,7 @@ const convRosa = await seedConversation({
 await seedMessage({
   orgId: ORG_A,
   conversationId: convRosa.id,
-  direction: "inbound",
+  direction: "in",
   senderKind: "contact",
   body: "Hola, ¿tienen cita para mañana por dolor de muela?",
   externalId: "seed-msg-1",
@@ -726,7 +728,7 @@ await seedMessage({
 await seedMessage({
   orgId: ORG_A,
   conversationId: convRosa.id,
-  direction: "inbound",
+  direction: "in",
   senderKind: "contact",
   body: "Es un dolor fuerte en la muela de abajo, del lado derecho",
   externalId: "seed-msg-2",
@@ -736,7 +738,7 @@ await seedMessage({
 await seedMessage({
   orgId: ORG_A,
   conversationId: convRosa.id,
-  direction: "inbound",
+  direction: "in",
   senderKind: "contact",
   body: "¿Atienden por la tarde? Trabajo hasta las 5",
   externalId: "seed-msg-3",
@@ -755,7 +757,7 @@ const rosaImageRef = await storage.putAttachment({
 await seedMessage({
   orgId: ORG_A,
   conversationId: convRosa.id,
-  direction: "inbound",
+  direction: "in",
   senderKind: "contact",
   body: "Esta es la muela que me duele",
   contentType: "image",
@@ -781,7 +783,7 @@ const rosaVoiceRef = await storage.putAttachment({
 await seedMessage({
   orgId: ORG_A,
   conversationId: convRosa.id,
-  direction: "inbound",
+  direction: "in",
   senderKind: "contact",
   body: "Hola, quiero una cita para mañana",
   contentType: "audio",
@@ -811,7 +813,7 @@ const convJorge = await seedConversation({
 await seedMessage({
   orgId: ORG_A,
   conversationId: convJorge.id,
-  direction: "inbound",
+  direction: "in",
   senderKind: "contact",
   body: "Buenas tardes, quiero cotizar una endodoncia",
   externalId: "seed-msg-4",
@@ -821,7 +823,7 @@ await seedMessage({
 await seedMessage({
   orgId: ORG_A,
   conversationId: convJorge.id,
-  direction: "outbound",
+  direction: "out",
   senderKind: "user",
   senderUserId: LUIS_ID,
   body: "Hola Jorge, claro que sí. ¿Podrías venir mañana para una evaluación? El precio depende del caso.",
@@ -844,7 +846,7 @@ const convElena = await seedConversation({
 await seedMessage({
   orgId: ORG_A,
   conversationId: convElena.id,
-  direction: "inbound",
+  direction: "in",
   senderKind: "contact",
   body: "Hola, quiero confirmar mi cita de limpieza de mañana",
   externalId: "seed-msg-6",
@@ -854,7 +856,7 @@ await seedMessage({
 await seedMessage({
   orgId: ORG_A,
   conversationId: convElena.id,
-  direction: "outbound",
+  direction: "out",
   senderKind: "agent",
   body: "Hola Elena, tu cita de limpieza quedó confirmada para mañana a las 10:00 am.",
   externalId: "seed-msg-7",
@@ -875,7 +877,7 @@ const convCarlos = await seedConversation({
 await seedMessage({
   orgId: ORG_A,
   conversationId: convCarlos.id,
-  direction: "inbound",
+  direction: "in",
   senderKind: "contact",
   body: "¿Cuánto cuesta una extracción de muela del juicio?",
   externalId: "seed-msg-8",
@@ -1593,7 +1595,7 @@ const convSofia = await seedConversation({
 await seedMessage({
   orgId: ORG_B,
   conversationId: convSofia.id,
-  direction: "inbound",
+  direction: "in",
   senderKind: "contact",
   body: "Hola, ¿tienen disponibilidad para una limpieza dental esta semana?",
   externalId: "seed-msg-B1",
@@ -1655,7 +1657,7 @@ const rosaTelegram = await seedConversation({
 await seedMessage({
   orgId: ORG_A,
   conversationId: rosaTelegram.id,
-  direction: "inbound",
+  direction: "in",
   senderKind: "contact",
   body: "Quisiera registrar a mi hijo.",
   externalId: "seed-tg-rosa-1",
@@ -1799,6 +1801,7 @@ await createChair(db, ORG_A, { branchId: surco.id, name: "Sillón único" })
 const domainSeed = {
   orgId: ORG_A, ownerUserId: ANA_ID, branchId: miraflores.id,
   patientId: patientIdByName.get("Rosa Quispe")!, contactId: rosaContactId,
+  conversationId: convRosa.id,
 }
 await db.transaction(tx => seedAvailability(tx, domainSeed))
 await db.transaction(tx => seedAvailability(tx, { ...domainSeed, branchId: surco.id }))
@@ -1932,6 +1935,17 @@ for (const seed of [
 ]) {
   await db.transaction(tx => seed(tx, domainSeed))
 }
+await db.transaction(async tx => {
+  const { items } = await listOpportunities(tx, ORG_A, { contactId: rosaContactId, q: "Ortodoncia · evaluación inicial", limit: 1 })
+  const commercial = items[0]
+  if (!commercial) throw new Error("Falta la oportunidad de demostración conectada")
+  const openStages = pipeA.stages.filter(stage => stage.kind === "open")
+  await seedCrmActivity(tx, { ...domainSeed, opportunityId: commercial.id })
+  await seedCrmAgent(tx, {
+    ...domainSeed, opportunityId: commercial.id,
+    stageId: (openStages[1] ?? openStages[0])!.id,
+  })
+})
 await db.transaction(tx => seedChannels(tx, domainSeed, secretsKey, { fetch }))
 await db.transaction(tx => seedWebchat(tx, domainSeed, { secretsKey, fetch }))
 

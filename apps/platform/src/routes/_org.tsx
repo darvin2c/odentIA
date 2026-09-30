@@ -10,6 +10,8 @@ import {
 import {
   AppShell,
   type AppShellNavEntry,
+  type AppShellNavGroup,
+  type AppShellNavItem,
   HeaderUtilitiesProvider,
   LoadingState,
 } from "@odentia/ui-patterns"
@@ -67,7 +69,12 @@ export const Route = createFileRoute("/_org")({
   component: OrgLayout,
 })
 
-const navDefinitions: Array<AppShellNavEntry & { permission?: string }> = [
+type NavChild = AppShellNavItem & { permission?: string }
+type NavDefinition =
+  | (AppShellNavItem & { permission?: string; permissionsAny?: string[]; children?: undefined })
+  | (Omit<AppShellNavGroup, "children"> & { permission?: string; permissionsAny?: string[]; children: NavChild[] })
+
+const navDefinitions: NavDefinition[] = [
   { label: "Inicio", to: "/home", icon: Home },
   { label: "Agenda", to: "/agenda", icon: CalendarDays, permission: "appointments.read" },
   { label: "Bandeja", to: "/inbox", icon: Inbox, permission: "conversations.read" },
@@ -80,10 +87,12 @@ const navDefinitions: Array<AppShellNavEntry & { permission?: string }> = [
   { label: "Finanzas", to: "/finance", icon: Wallet, permission: "finance.read" },
   { label: "Inventario", to: "/inventory", icon: Package, permission: "inventory.read" },
   { label: "Automatizaciones", to: "/automations", icon: Workflow, permission: "crm.read" },
-  { label: "IA", icon: Bot, permission: "agent.read", children: [
-    { label: "Supervisión", to: "/agent", icon: Bot },
-    { label: "Conocimiento", to: "/agent/knowledge", icon: ListTodo },
-    { label: "Aprobaciones", to: "/agent/approvals", icon: Inbox },
+  // Aprobaciones operativas separadas de la configuración: quien decide ve
+  // solo Aprobaciones; supervisión y conocimiento piden lectura/administración.
+  { label: "IA", icon: Bot, permissionsAny: ["agent.read", "agent.decide"], children: [
+    { label: "Supervisión", to: "/agent", icon: Bot, permission: "agent.read" },
+    { label: "Conocimiento", to: "/agent/knowledge", icon: ListTodo, permission: "agent.write" },
+    { label: "Aprobaciones", to: "/agent/approvals", icon: Inbox, permission: "agent.decide" },
   ] },
   { label: "Reportes", to: "/reports", icon: BarChart3, permission: "reports.read" },
 ]
@@ -141,7 +150,18 @@ function OrgLayout() {
   const { org, session } = orgRouteApi.useRouteContext()
   const pathname = useRouterState({ select: (state) => state.location.pathname })
   const role = org.members.find(member => member.userId === session?.userId)?.role ?? "member"
-  const navItems = navDefinitions.filter(item => !item.permission || canAccess(role, item.permission))
+  // Filtra entradas y subentradas por permiso: el grupo IA muestra solo las
+  // hijas autorizadas (Aprobaciones para quien decide, sin configuración).
+  const navItems = navDefinitions.flatMap((item): AppShellNavEntry[] => {
+    const selfVisible =
+      (!item.permission || canAccess(role, item.permission)) &&
+      (!item.permissionsAny || canAccessAny(role, item.permissionsAny))
+    if (!item.children) return selfVisible ? [item] : []
+    const children = item.children.filter(child => !child.permission || canAccess(role, child.permission))
+    if (children.length === 0) return []
+    if (selfVisible && children.length === item.children.length) return [item]
+    return [{ ...item, children }]
+  })
   const footerItems = canAccess(role, "settings.read")
     ? [{ label: "Configuración", to: "/settings", icon: Settings }]
     : []

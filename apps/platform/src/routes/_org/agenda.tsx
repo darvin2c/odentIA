@@ -41,11 +41,23 @@ import type {
 } from "../../lib/agenda"
 import { ApiError, apiFetch } from "../../lib/api"
 import { usePermission } from "../../lib/crm"
+import { fetchCrmContext } from "../../lib/crm-workspace"
 export const Route = createFileRoute("/_org/agenda")({
+  validateSearch: (search: Record<string, unknown>) => ({
+    ...search,
+    patientId: typeof search.patientId === "string" ? search.patientId : undefined,
+    contactId: typeof search.contactId === "string" ? search.contactId : undefined,
+    conversationId: typeof search.conversationId === "string" ? search.conversationId : undefined,
+  }),
   component: AgendaPage,
 })
 
 type GroupMode = "professionals" | "chairs"
+interface AppointmentContext {
+  patientId: string
+  patientName: string
+  conversationId?: string
+}
 
 const FILTER_KEYS = ["professionals", "chairs", "status"] as const
 const SELECT =
@@ -99,7 +111,7 @@ function AgendaPage() {
   const day = /^\d{4}-\d{2}-\d{2}$/.test(get("date") ?? "") ? (get("date") as string) : today
   const group: GroupMode = get("group") === "chairs" ? "chairs" : "professionals"
   const [dates, setDates] = React.useState<string[]>(() => weekAround(day))
-  const [editor, setEditor] = React.useState<{ appointment?: AgendaAppointment } | null>(null)
+  const [editor, setEditor] = React.useState<{ appointment?: AgendaAppointment; context?: AppointmentContext } | null>(null)
   const [message, setMessage] = React.useState("")
   const [navigation, setNavigation] = React.useState(0)
   const scrolledDay = React.useRef<string | null>(null)
@@ -108,6 +120,28 @@ function AgendaPage() {
   const targetDay = React.useRef(day)
   const previousNavigation = React.useRef(navigation)
   targetDay.current = day
+  const canWrite = usePermission("appointments.write")
+  const requested = Route.useSearch()
+  const contextualPatient = useQuery({
+    queryKey: ["crm-context", requested.contactId, requested.conversationId ?? "todas"],
+    enabled: canWrite && !!requested.contactId && !!requested.patientId,
+    queryFn: () => fetchCrmContext(requested.contactId!, requested.conversationId),
+  })
+  const patientLink = contextualPatient.data?.data.contact.patients.find(item => item.id === requested.patientId)
+  const openedRequest = React.useRef<string | null>(null)
+  React.useEffect(() => {
+    const key = requested.contactId && requested.patientId
+      ? `${requested.contactId}:${requested.patientId}:${requested.conversationId ?? ""}` : null
+    if (!key) openedRequest.current = null
+    if (key && key !== openedRequest.current && patientLink && resources && canWrite) {
+      openedRequest.current = key
+      setEditor({ context: { patientId: patientLink.id, patientName: patientLink.displayName, conversationId: requested.conversationId } })
+    }
+  }, [requested.contactId, requested.patientId, requested.conversationId, patientLink, resources, canWrite])
+  const closeEditor = () => {
+    setEditor(null)
+    if (editor?.context) setParams({ patientId: undefined, contactId: undefined, conversationId: undefined })
+  }
 
   const range = React.useMemo(() => windowRange(day, TZ), [day, TZ])
   const appointmentsQuery = useQuery({
@@ -325,13 +359,19 @@ function AgendaPage() {
         subtitle={
           resources ? `${resources.branchName} · ${formatDayShort(day)}` : "Cargando recursos…"
         }
-        actions={
+        actions={canWrite ? (
           <Button aria-label="Nueva cita" onClick={() => setEditor({})}>
             <Plus className="size-4" />
             <span className="hidden sm:inline">Nueva cita</span>
           </Button>
+        ) : undefined
         }
       />
+      {requested.patientId && (contextualPatient.error || (contextualPatient.isSuccess && !patientLink)) && (
+        <p role="alert" className="px-4 text-sm text-destructive">
+          No se pudo preparar la cita: comprueba el vínculo del paciente y vuelve a abrir el caso.
+        </p>
+      )}
       <div className="flex min-w-0 shrink-0 flex-wrap items-center gap-2 rounded-xl border bg-background px-3 py-2 sm:px-4">
         <div className="flex items-center gap-1">
           <Button
@@ -492,14 +532,16 @@ function AgendaPage() {
         <AppointmentEditor
           key={editor.appointment?.id ?? "new"}
           appointment={editor.appointment}
+          context={editor.context}
           day={day}
           timeZone={TZ}
           resources={resources}
-          onClose={() => setEditor(null)}
+          onClose={closeEditor}
           onSaved={async (text) => {
             setMessage(text)
-            setEditor(null)
+            closeEditor()
             await invalidate()
+            await queryClient.invalidateQueries({ queryKey: ["crm-context"] })
           }}
         />
       )}
@@ -521,6 +563,7 @@ interface DraftValues {
 
 function AppointmentEditor({
   appointment,
+  context,
   day,
   timeZone,
   resources,
@@ -528,6 +571,7 @@ function AppointmentEditor({
   onSaved,
 }: {
   appointment?: AgendaAppointment
+  context?: AppointmentContext
   day: string
   timeZone: string
   resources: AgendaResources
@@ -551,7 +595,7 @@ function AppointmentEditor({
     const nowMinutes = dayMinutesIn(new Date().toISOString(), timeZone)
     const from = Math.min(Math.max(Math.ceil(nowMinutes / 30) * 30, 8 * 60), 19 * 60)
     return {
-      patientId: "",
+      patientId: context?.patientId ?? "",
       dentistUserId: resources.professionals[0]?.id ?? "",
       chairId: resources.chairs[0]?.id ?? "",
       serviceId: "",
@@ -561,7 +605,7 @@ function AppointmentEditor({
       reason: "",
       status: "programada",
     }
-  }, [appointment, day, timeZone, resources])
+  }, [appointment, context, day, timeZone, resources])
   const [values, setValues] = React.useState(initial)
   const [error, setError] = React.useState("")
   const [patientQuery, setPatientQuery] = React.useState("")
@@ -588,8 +632,11 @@ function AppointmentEditor({
     if (appointment && !options.some((option) => option.id === appointment.patientId)) {
       options.unshift({ id: appointment.patientId, label: appointment.patientName })
     }
+    if (context && !options.some(option => option.id === context.patientId)) {
+      options.unshift({ id: context.patientId, label: context.patientName })
+    }
     return options
-  }, [patientsQuery.data, appointment])
+  }, [patientsQuery.data, appointment, context])
 
   const professionalOptions = resources.professionals.map((item) => ({
     id: item.id,
@@ -655,21 +702,18 @@ function AppointmentEditor({
         })
         return "Cita actualizada."
       }
-      const service = servicesQuery.data?.data.find((item) => item.id === values.serviceId)
       await apiFetch("/api/appointments", {
         method: "POST",
         body: JSON.stringify({
           patientId: values.patientId,
           dentistUserId: values.dentistUserId,
           chairId: values.chairId,
-          serviceId,
+          serviceId: serviceId ?? undefined,
           startsAt,
-          durationMin:
-            service?.durationMin != null && startMinutes + service.durationMin === endMinutes
-              ? service.durationMin
-              : undefined,
-          endsAt: undefined,
+          durationMin: endMinutes - startMinutes,
           reason,
+          conversationId: context?.conversationId,
+          source: context?.conversationId ? "conversacion" : "recepcion",
         }),
       })
       return "Cita creada."
@@ -698,14 +742,21 @@ function AppointmentEditor({
       submitLabel={appointment ? "Guardar cambios" : "Crear cita"}
     >
       <div className="grid gap-4">
-        <ResourceSelect
-          id="cita-paciente"
-          label="Paciente"
-          options={patientOptions}
-          value={values.patientId}
-          onChange={(patientId) => setValues((prev) => ({ ...prev, patientId }))}
-          onQueryChange={setPatientQuery}
-        />
+        {context ? (
+          <div>
+            <FieldLabel>Paciente del caso</FieldLabel>
+            <p className="text-sm font-medium">{context.patientName}</p>
+          </div>
+        ) : (
+          <ResourceSelect
+            id="cita-paciente"
+            label="Paciente"
+            options={patientOptions}
+            value={values.patientId}
+            onChange={(patientId) => setValues((prev) => ({ ...prev, patientId }))}
+            onQueryChange={setPatientQuery}
+          />
+        )}
         <ResourceSelect
           id="cita-profesional"
           label="Profesional"

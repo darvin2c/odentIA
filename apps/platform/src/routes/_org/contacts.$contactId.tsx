@@ -21,14 +21,17 @@ import {
   PageShell,
   PhoneInput,
 } from "@odentia/ui-patterns"
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, getRouteApi, Link } from "@tanstack/react-router"
-import { MessageCircle, Send } from "lucide-react"
-import { useState } from "react"
+import { MessageCircle } from "lucide-react"
+import { useMemo, useState } from "react"
 import { ContactConversationDialog } from "../../components/contact-conversation-dialog"
+import { OpportunityDrawer } from "../../components/crm/opportunity-drawer"
+import { TaskDrawer } from "../../components/crm/task-drawer"
 import { CreatePatientDrawer } from "../../components/patient/create-patient-drawer"
 import { TagsInput } from "../../components/patient/tags-input"
 import { ApiError, apiFetch } from "../../lib/api"
+import { channelIcon, channelLabel } from "../../lib/channels"
 import {
   type ContactFull,
   type ContactListItem,
@@ -37,6 +40,8 @@ import {
   timeAgo,
   usePermission,
 } from "../../lib/crm"
+import { fetchCrmActivityPage } from "../../lib/crm-workspace"
+import { formatDueAt } from "../../components/crm/crm-helpers"
 import { useOrgProfile } from "../../lib/org"
 import { useOrgEvents } from "../../lib/org-events"
 
@@ -93,6 +98,8 @@ function ContactDetailPage() {
   const [tagsOpen, setTagsOpen] = useState(false)
   const [draftTags, setDraftTags] = useState<string[]>([])
   const [patientDrawer, setPatientDrawer] = useState(false)
+  const [oppDrawerOpen, setOppDrawerOpen] = useState(false)
+  const [taskDrawerOpen, setTaskDrawerOpen] = useState(false)
   const [dialog, setDialog] = useState<{ prepareRegistration: boolean } | null>(null)
   const [archiveOpen, setArchiveOpen] = useState(false)
   const [linkOpen, setLinkOpen] = useState(false)
@@ -124,14 +131,32 @@ function ContactDetailPage() {
     queryFn: () => apiFetch<{ data: ContactFull }>(`/api/contacts/${contactId}`),
   })
   const detail = detailQuery.data?.data ?? null
-  const opportunitiesQuery = useQuery({
+  const opportunitiesQuery = useInfiniteQuery({
     queryKey: ["contact-opportunities", contactId],
-    queryFn: () =>
-      apiFetch<{ data: OpportunityListItem[] }>(
-        `/api/opportunities?contactId=${contactId}&limit=100`,
-      ),
+    queryFn: ({ pageParam }: { pageParam: string | null }) => {
+      const params = new URLSearchParams({ contactId, limit: "30" })
+      if (pageParam) params.set("cursor", pageParam)
+      return apiFetch<{ data: OpportunityListItem[]; nextCursor: string | null }>(
+        `/api/opportunities?${params}`,
+      )
+    },
+    initialPageParam: null as string | null,
+    getNextPageParam: (last) => last.nextCursor,
   })
-  const contactOpportunities = opportunitiesQuery.data?.data ?? []
+  const contactOpportunities = useMemo(
+    () => opportunitiesQuery.data?.pages.flatMap((page) => page.data) ?? [],
+    [opportunitiesQuery.data],
+  )
+  // Notas operativas de la bitácora (distintas del campo libre del contacto):
+  // solo las 3 recientes para la ficha; el historial completo vive en la bandeja.
+  const notesQuery = useQuery({
+    queryKey: ["contact-notes", contactId],
+    queryFn: () => fetchCrmActivityPage(contactId, null, 10),
+  })
+  const operationalNotes = useMemo(
+    () => (notesQuery.data?.data ?? []).filter((item) => item.kind === "note").slice(0, 3),
+    [notesQuery.data],
+  )
   const fieldsQuery = useQuery({
     queryKey: ["fields"],
     queryFn: () => apiFetch<{ data: FieldDef[] }>("/api/fields"),
@@ -153,14 +178,28 @@ function ContactDetailPage() {
     enabled: moveIdentityId !== null && destSearch.trim().length > 0,
   })
 
-  useOrgEvents(["message.created", "conversation.updated"], () => {
-    void queryClient.invalidateQueries({ queryKey: ["contact", contactId] })
-    void queryClient.invalidateQueries({ queryKey: ["contacts"] })
-  })
+  useOrgEvents(
+    [
+      "message.created",
+      "conversation.updated",
+      "contact.updated",
+      "opportunity.updated",
+      "task.updated",
+      "stream.reconnected",
+    ],
+    () => {
+      void queryClient.invalidateQueries({ queryKey: ["contact", contactId] })
+      void queryClient.invalidateQueries({ queryKey: ["contacts"] })
+      void queryClient.invalidateQueries({ queryKey: ["contact-opportunities", contactId] })
+      void queryClient.invalidateQueries({ queryKey: ["contact-notes", contactId] })
+    },
+  )
 
   const invalidate = () => {
     void queryClient.invalidateQueries({ queryKey: ["contact", contactId] })
     void queryClient.invalidateQueries({ queryKey: ["contacts"] })
+    void queryClient.invalidateQueries({ queryKey: ["contact-opportunities", contactId] })
+    void queryClient.invalidateQueries({ queryKey: ["contact-notes", contactId] })
   }
 
   const patchMutation = useMutation({
@@ -467,30 +506,75 @@ function ContactDetailPage() {
               <dd>{detail.contact.email ?? "—"}</dd>
             </div>
             <div className="flex gap-2">
-              <dt className="w-24 shrink-0 text-muted-foreground">Notas</dt>
-              <dd>{detail.contact.notes || "—"}</dd>
+              <dt className="w-24 shrink-0 text-muted-foreground">Notas del contacto</dt>
+              <dd>{detail.contact.notes || "Sin notas del contacto"}</dd>
             </div>
             <div className="flex gap-2">
               <dt className="w-24 shrink-0 text-muted-foreground">Oportunidades</dt>
               <dd className="flex flex-col gap-1">
-                {contactOpportunities.length === 0 && <span>Sin oportunidades</span>}
-                {contactOpportunities.map((o) => (
-                  <span key={o.id} className="flex items-center gap-1.5">
-                    <Link
-                      to="/opportunities/$opportunityId"
-                      params={{ opportunityId: o.id }}
-                      className="hover:underline"
+                {opportunitiesQuery.isLoading ? (
+                  <span className="text-muted-foreground">Cargando…</span>
+                ) : opportunitiesQuery.isError ? (
+                  <span className="text-destructive">
+                    No se pudieron cargar.{" "}
+                    <Button
+                      type="button"
+                      variant="link"
+                      size="sm"
+                      onClick={() => opportunitiesQuery.refetch()}
                     >
-                      {o.title}
-                    </Link>
-                    <Badge variant="secondary">{o.stageName}</Badge>
-                    {o.status !== "open" && (
-                      <Badge variant={o.status === "won" ? "default" : "outline"}>
-                        {o.status === "won" ? "Ganada" : "Perdida"}
-                      </Badge>
-                    )}
+                      Reintentar
+                    </Button>
                   </span>
-                ))}
+                ) : (
+                  <>
+                    {contactOpportunities.length === 0 && <span>Sin oportunidades</span>}
+                    {contactOpportunities.map((o) => (
+                      <span key={o.id} className="flex items-center gap-1.5">
+                        <Link
+                          to="/opportunities/$opportunityId"
+                          params={{ opportunityId: o.id }}
+                          className="hover:underline"
+                        >
+                          {o.title}
+                        </Link>
+                        <Badge variant="secondary">{o.stageName}</Badge>
+                        {o.status !== "open" && (
+                          <Badge variant={o.status === "won" ? "default" : "outline"}>
+                            {o.status === "won" ? "Ganada" : "Perdida"}
+                          </Badge>
+                        )}
+                      </span>
+                    ))}
+                    {opportunitiesQuery.hasNextPage ? (
+                      <Button
+                        type="button"
+                        variant="link"
+                        size="sm"
+                        className="self-start"
+                        disabled={opportunitiesQuery.isFetchingNextPage}
+                        onClick={() => void opportunitiesQuery.fetchNextPage()}
+                      >
+                        {opportunitiesQuery.isFetchingNextPage
+                          ? "Cargando…"
+                          : `Cargar más (${contactOpportunities.length})`}
+                      </Button>
+                    ) : null}
+                  </>
+                )}
+                {canWrite ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="self-start"
+                    disabled={archived}
+                    title={archived ? "Contacto archivado: reactívalo para crear" : undefined}
+                    onClick={() => setOppDrawerOpen(true)}
+                  >
+                    Nueva oportunidad
+                  </Button>
+                ) : null}
               </dd>
             </div>
             <div className="flex gap-2">
@@ -599,17 +683,12 @@ function ContactDetailPage() {
             const resolved = detail.conversations.filter(
               (c) => c.contactIdentityId === ident.id,
             ).length
+            const ChannelIcon = channelIcon(ident.channel)
             return (
               <div key={ident.id} className="flex flex-col gap-1 rounded-sm px-2 py-1.5">
                 <span className="flex items-center gap-2 text-sm">
-                  {ident.channel === "whatsapp" ? (
-                    <MessageCircle className="size-4 text-green-600" />
-                  ) : (
-                    <Send className="size-4 text-sky-600" />
-                  )}
-                  <span className="font-medium">
-                    {ident.channel === "whatsapp" ? "WhatsApp" : "Telegram"}
-                  </span>
+                  <ChannelIcon className="size-4" aria-hidden />
+                  <span className="font-medium">{channelLabel(ident.channel)}</span>
                   <span className="text-muted-foreground">
                     {ident.displayName ?? ident.externalUserId}
                   </span>
@@ -636,12 +715,65 @@ function ContactDetailPage() {
             )
           })}
           <p className="text-xs text-muted-foreground">
-            El correo es un dato declarado, no un canal de envío: los canales soportados son
-            WhatsApp y Telegram.
+            El correo es un dato declarado, no un canal de envío.
           </p>
         </div>
       </div>
 
+      <div className="flex flex-col gap-2 rounded-sm bg-card p-4">
+        <h2 className="text-sm font-semibold">Notas operativas</h2>
+        <p className="text-xs text-muted-foreground">
+          Bitácora del caso escrita por el equipo; distinta de las notas del contacto de arriba.
+          Se crean desde la bandeja y aquí solo se leen.
+        </p>
+        {notesQuery.isLoading ? (
+          <p className="text-sm text-muted-foreground">Cargando notas…</p>
+        ) : notesQuery.isError ? (
+          <span className="text-sm text-destructive">
+            No se pudieron cargar las notas operativas.{" "}
+            <Button
+              type="button"
+              variant="link"
+              size="sm"
+              onClick={() => notesQuery.refetch()}
+            >
+              Reintentar
+            </Button>
+          </span>
+        ) : operationalNotes.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            Sin notas operativas todavía. Las notas del contacto, si existen, están en Datos.
+          </p>
+        ) : (
+          <ul className="flex flex-col gap-2">
+            {operationalNotes.map((noteItem) => (
+              <li key={noteItem.id} className="flex flex-col gap-1 rounded-sm px-2 py-1.5">
+                <span className="text-xs text-muted-foreground">
+                  {timeAgo(noteItem.at)}
+                  {noteItem.actorName ? ` · ${noteItem.actorName}` : ""}
+                </span>
+                <span className="whitespace-pre-wrap text-sm">{noteItem.body ?? noteItem.title}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+        {detail.conversations.length > 0 && (
+          <Button
+            type="button"
+            variant="link"
+            size="sm"
+            className="self-start"
+            render={
+              <Link
+                to="/inbox"
+                search={{ conversation: detail.conversations[0].id }}
+              />
+            }
+          >
+            Ver bitácora en la bandeja
+          </Button>
+        )}
+      </div>
       <div className="flex flex-col gap-2 rounded-sm bg-card p-4">
         <h2 className="text-sm font-semibold">Conversaciones</h2>
         <p className="text-xs text-muted-foreground">
@@ -666,9 +798,7 @@ function ContactDetailPage() {
                 >
                   {conv.status}
                 </Badge>
-                <span className="font-medium">
-                  {conv.channel === "whatsapp" ? "WhatsApp" : "Telegram"}
-                </span>
+                <span className="font-medium">{channelLabel(conv.channel)}</span>
                 {conv.connectionName && (
                   <span className="text-muted-foreground">{conv.connectionName}</span>
                 )}
@@ -718,19 +848,31 @@ function ContactDetailPage() {
             <p key={t.id} className="text-sm">
               {t.title}
               {t.dueAt && (
-                <span className="text-muted-foreground"> · vence {timeAgo(t.dueAt)}</span>
+                <span className="text-muted-foreground"> · vence {formatDueAt(t.dueAt)}</span>
               )}
             </p>
           ))}
-          <Button
-            type="button"
-            variant="link"
-            size="sm"
-            nativeButton={false}
-            render={<Link to="/tasks" />}
-          >
-            Ir a tareas
-          </Button>
+          <span className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              variant="link"
+              size="sm"
+              nativeButton={false}
+              render={<Link to="/tasks" />}
+            >
+              Ir a tareas
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={archived}
+              title={archived ? "Contacto archivado: reactívalo para crear" : undefined}
+              onClick={() => setTaskDrawerOpen(true)}
+            >
+              Nueva tarea
+            </Button>
+          </span>
         </div>
         <div className="flex flex-col gap-2 rounded-sm bg-card p-4">
           <h2 className="text-sm font-semibold">Registro</h2>
@@ -799,7 +941,7 @@ function ContactDetailPage() {
             />
           </Field>
           <Field>
-            <FieldLabel>Notas</FieldLabel>
+            <FieldLabel>Notas del contacto</FieldLabel>
             <Input value={draftNotes} onChange={(e) => setDraftNotes(e.target.value)} />
           </Field>
           <Field>
@@ -896,7 +1038,7 @@ function ContactDetailPage() {
           resolveMutation.reset()
           setResolveConfirm({
             conversationId: conv.id,
-            conversationLabel: `${conv.channel === "whatsapp" ? "WhatsApp" : "Telegram"}${conv.connectionName ? ` · ${conv.connectionName}` : ""}`,
+            conversationLabel: `${channelLabel(conv.channel)}${conv.connectionName ? ` · ${conv.connectionName}` : ""}`,
             identityId: identity.id,
             identityLabel: identity.displayName ?? identity.externalUserId,
           })
@@ -1095,8 +1237,7 @@ function ContactDetailPage() {
       >
         <div className="flex flex-col gap-4">
           <p className="text-sm text-muted-foreground">
-            Se mueve la identidad de{" "}
-            {moveIdentity?.channel === "whatsapp" ? "WhatsApp" : "Telegram"} (
+            Se mueve la identidad de {moveIdentity ? channelLabel(moveIdentity.channel) : ""} (
             {moveIdentity?.displayName ?? moveIdentity?.externalUserId}) desde{" "}
             <strong>{detail.contact.displayName}</strong> al contacto destino, junto con{" "}
             {moveResolvedCount} conversación(es) resuelta(s) por esa identidad. Los vínculos de
@@ -1240,6 +1381,18 @@ function ContactDetailPage() {
           invalidate()
         }}
         contactId={contactId}
+      />
+      <OpportunityDrawer
+        open={oppDrawerOpen}
+        contactId={contactId}
+        onClose={() => setOppDrawerOpen(false)}
+        onSaved={invalidate}
+      />
+      <TaskDrawer
+        open={taskDrawerOpen}
+        contactId={contactId}
+        onClose={() => setTaskDrawerOpen(false)}
+        onSaved={invalidate}
       />
     </PageShell>
   )

@@ -2,10 +2,11 @@ import type { Db } from "@odentia/db"
 import { member } from "@odentia/db/schema/auth"
 import {
   patient,
+  patientContact,
   serviceCatalog,
   treatmentBudget,
 } from "@odentia/db/schema/clinical"
-import { contact, pipeline, pipelineStage } from "@odentia/db/schema/crm"
+import { contact, conversation, crmTask, pipeline, pipelineStage } from "@odentia/db/schema/crm"
 import {
   opportunity,
   opportunityEvent,
@@ -26,7 +27,6 @@ export const OPPORTUNITY_STATUS_LIST: OpportunityStatus[] = [...OPPORTUNITY_STAT
 
 /** Motivo de cierre: texto corto obligatorio al ganar o perder. */
 const CLOSE_REASON_MAX = 500
-
 /** Moneda de la organización (perfil); sin perfil rige el default existente. */
 async function orgCurrency(tx: Db, orgId: string): Promise<string> {
   const [profile] = await tx
@@ -35,6 +35,13 @@ async function orgCurrency(tx: Db, orgId: string): Promise<string> {
     .where(eq(orgProfile.organizationId, orgId))
     .limit(1)
   return profile?.currency ?? "PEN"
+}
+
+/** Aviso mínimo CRM para refresco: solo `{ orgId, kind, at }`, sin PII. */
+async function notifyOpp(tx: Db, orgId: string): Promise<void> {
+  await tx.execute(
+    sql`select pg_notify('org_events', ${JSON.stringify({ orgId, kind: "opportunity.updated", at: new Date().toISOString() })})`,
+  )
 }
 
 export interface OpportunityListItem {
@@ -55,6 +62,9 @@ export interface OpportunityListItem {
   serviceName: string | null
   assignedUserId: string | null
   nextActionAt: string | null
+  nextActionNote: string | null
+  conversationId: string | null
+  createdAt: string
   updatedAt: string
 }
 
@@ -108,6 +118,7 @@ export interface CreateOpportunityInput {
   nextActionAt?: string | null
   nextActionNote?: string | null
   budgetId?: string | null
+  conversationId?: string | null
 }
 
 export interface UpdateOpportunityInput {
@@ -122,6 +133,7 @@ export interface UpdateOpportunityInput {
   nextActionAt?: string | null
   nextActionNote?: string | null
   budgetId?: string | null
+  conversationId?: string | null
 }
 
 function iso(date: Date | null): string | null {
@@ -294,6 +306,215 @@ async function resolveBudget(
   return budget.id
 }
 
+/** Conversación de la org con su contacto dueño. */
+async function requireConversationInOrg(tx: Db, orgId: string, id: string) {
+  const [row] = await tx
+    .select({ id: conversation.id, contactId: conversation.contactId })
+    .from(conversation)
+    .where(and(eq(conversation.id, id), eq(conversation.organizationId, orgId)))
+    .limit(1)
+  if (!row) throw notFound("Conversación")
+  return row
+}
+
+/** El paciente debe estar vinculado al contacto (patient_contact), sin duplicar fichas. */
+async function requirePatientLink(tx: Db, orgId: string, patientId: string, contactId: string): Promise<void> {
+  const [link] = await tx
+    .select({ id: patientContact.id })
+    .from(patientContact)
+    .where(
+      and(
+        eq(patientContact.organizationId, orgId),
+        eq(patientContact.patientId, patientId),
+        eq(patientContact.contactId, contactId),
+      ),
+    )
+    .limit(1)
+  if (!link) throw validation("El paciente no está vinculado a este contacto")
+}
+
+/** Presupuesto efectivo coherente con el paciente efectivo (también al cambiar patientId). */
+async function assertBudgetCoherent(
+  tx: Db,
+  orgId: string,
+  budgetId: string | null,
+  patientId: string | null,
+): Promise<void> {
+  if (!budgetId) return
+  const [budget] = await tx
+    .select({ id: treatmentBudget.id, patientId: treatmentBudget.patientId })
+    .from(treatmentBudget)
+    .where(and(eq(treatmentBudget.id, budgetId), eq(treatmentBudget.organizationId, orgId)))
+    .limit(1)
+  if (!budget) throw validation("Presupuesto inválido para esta organización")
+  if (patientId && budget.patientId !== patientId) {
+    throw validation("El presupuesto pertenece a otro paciente")
+  }
+  if (!patientId && budget.patientId) {
+    throw validation("El presupuesto pertenece a otro paciente")
+  }
+}
+
+/** Valida el hilo origen: debe ser de la org y del mismo contacto de la oportunidad. */
+async function resolveOpportunityConversation(
+  tx: Db,
+  orgId: string,
+  conversationId: string | null | undefined,
+  effectiveContactId: string,
+): Promise<string | null | undefined> {
+  if (conversationId === undefined) return undefined
+  if (conversationId === null) return null
+  const row = await requireConversationInOrg(tx, orgId, conversationId)
+  if (row.contactId !== effectiveContactId) {
+    throw validation("La conversación pertenece a otro contacto")
+  }
+  return row.id
+}
+
+/** Título del seguimiento: nota de próxima acción o título de la oportunidad (máx 200). */
+function followUpTitle(nextActionNote: string | null, opportunityTitle: string): string {
+  const note = nextActionNote?.trim() ? nextActionNote.trim() : opportunityTitle.trim()
+  return note.slice(0, 200) || opportunityTitle.slice(0, 200)
+}
+
+/**
+ * Sincroniza la próxima acción con una tarea durable kind=opportunity_follow_up.
+ * Un seguimiento abierto por oportunidad (único parcial en migración).
+ * Idempotente y transaccional; nunca reactiva tareas canceladas.
+ */
+async function syncOpportunityFollowUp(
+  tx: Db,
+  orgId: string,
+  opp: typeof opportunity.$inferSelect,
+  actorUserId: string | null,
+): Promise<void> {
+  // La oportunidad ya viene bloqueada por el llamador (require FOR UPDATE en
+  // update, fila recién insertada en create): se bloquea la tarea DESPUÉS,
+  // mismo orden que updateTask (opp antes que task) para noDeadlock.
+  if (opp.status !== "open" || !opp.nextActionAt) {
+    // Eliminar fecha o cerrar cancela el seguimiento abierto.
+    await cancelOpportunityFollowUp(tx, orgId, opp.id, actorUserId)
+    return
+  }
+  const [open] = await tx
+    .select()
+    .from(crmTask)
+    .where(
+      and(
+        eq(crmTask.organizationId, orgId),
+        eq(crmTask.opportunityId, opp.id),
+        eq(crmTask.kind, "opportunity_follow_up"),
+        eq(crmTask.status, "open"),
+      ),
+    )
+    .limit(1)
+    .for("update")
+  const title = followUpTitle(opp.nextActionNote, opp.title)
+  if (open) {
+    const [updated] = await tx
+      .update(crmTask)
+      .set({
+        title,
+        contactId: opp.contactId,
+        conversationId: opp.conversationId,
+        assigneeUserId: opp.assignedUserId,
+        dueAt: sql`(select next_action_at from opportunity where id = ${opp.id} and organization_id = ${orgId})`,
+        updatedAt: new Date(),
+      })
+      .where(and(
+        eq(crmTask.id, open.id),
+        eq(crmTask.organizationId, orgId),
+        sql`(${crmTask.title}, ${crmTask.contactId}, ${crmTask.conversationId}, ${crmTask.assigneeUserId}, ${crmTask.dueAt})
+          is distinct from (${title}, ${opp.contactId}, ${opp.conversationId}, ${opp.assignedUserId},
+            (select next_action_at from opportunity where id = ${opp.id} and organization_id = ${orgId}))`,
+      ))
+      .returning()
+    if (updated) await auditFollowUp(tx, orgId, actorUserId, open, updated)
+    return
+  }
+  // Sin catch 23505 (continuar la tx abortada es inválido): un solo UPSERT
+  // contra el único parcial; la concurrencia ya está serializada por el lock
+  // de oportunidad que conserva el llamador.
+  await tx.execute(sql`
+    insert into "task"
+      ("organization_id", "title", "contact_id", "conversation_id", "opportunity_id",
+       "assignee_user_id", "due_at", "status", "kind", "created_by")
+    select organization_id, ${title}, contact_id, conversation_id, id,
+      assigned_user_id, next_action_at, 'open', 'opportunity_follow_up', 'user'
+    from opportunity where id = ${opp.id} and organization_id = ${orgId}
+    on conflict ("organization_id", "opportunity_id")
+      where "opportunity_id" is not null and "kind" = 'opportunity_follow_up' and "status" = 'open'
+    do update set
+      "title" = excluded."title",
+      "contact_id" = excluded."contact_id",
+      "conversation_id" = excluded."conversation_id",
+      "assignee_user_id" = excluded."assignee_user_id",
+      "due_at" = excluded."due_at",
+      "updated_at" = now()
+  `)
+}
+
+/** Cancela el seguimiento abierto de la oportunidad (cierre o limpieza de fecha). */
+async function cancelOpportunityFollowUp(
+  tx: Db,
+  orgId: string,
+  opportunityId: string,
+  actorUserId: string | null,
+): Promise<void> {
+  const [current] = await tx.select().from(crmTask).where(and(
+    eq(crmTask.organizationId, orgId),
+    eq(crmTask.opportunityId, opportunityId),
+    eq(crmTask.kind, "opportunity_follow_up"),
+    eq(crmTask.status, "open"),
+  )).for("update").limit(1)
+  if (!current) return
+  const [updated] = await tx
+    .update(crmTask)
+    .set({ status: "cancelled", updatedAt: new Date() })
+    .where(
+      and(
+        eq(crmTask.organizationId, orgId),
+        eq(crmTask.opportunityId, opportunityId),
+        eq(crmTask.kind, "opportunity_follow_up"),
+        eq(crmTask.status, "open"),
+      ),
+    )
+    .returning()
+  if (updated) await auditFollowUp(tx, orgId, actorUserId, current, updated)
+}
+
+/** Mismo contrato de transición que las tareas manuales para la actividad del caso. */
+async function auditFollowUp(
+  tx: Db,
+  orgId: string,
+  actorUserId: string | null,
+  previous: typeof crmTask.$inferSelect,
+  updated: typeof crmTask.$inferSelect,
+): Promise<void> {
+  await tx.insert(auditEvent).values({
+    organizationId: orgId,
+    actorUserId,
+    action: "task.updated",
+    entity: "task",
+    entityId: updated.id,
+    metadata: {
+      title: updated.title,
+      statusPrev: previous.status,
+      statusNext: updated.status,
+      dueAtPrev: previous.dueAt?.toISOString() ?? null,
+      dueAtNext: updated.dueAt?.toISOString() ?? null,
+      assigneeUserIdPrev: previous.assigneeUserId,
+      assigneeUserIdNext: updated.assigneeUserId,
+      contactId: updated.contactId,
+      conversationId: updated.conversationId,
+      opportunityId: updated.opportunityId,
+    },
+  })
+  await tx.execute(sql`select pg_notify('org_events', ${JSON.stringify({
+    orgId, kind: "task.updated", at: new Date().toISOString(),
+  })})`)
+}
+
 async function auditOpportunity(
   tx: Db,
   orgId: string,
@@ -442,8 +663,8 @@ export async function listOpportunities(
     if (Number.isNaN(ts.getTime())) throw validation("Cursor inválido")
     conditions.push(
       or(
-        lt(opportunity.updatedAt, ts),
-        and(eq(opportunity.updatedAt, ts), lt(opportunity.id, decoded.id)),
+        lt(opportunity.updatedAt, sql`${decoded.ts}::timestamptz`),
+        and(eq(opportunity.updatedAt, sql`${decoded.ts}::timestamptz`), lt(opportunity.id, decoded.id)),
       )!,
     )
   }
@@ -455,6 +676,7 @@ export async function listOpportunities(
       stageName: pipelineStage.name,
       stageKind: pipelineStage.kind,
       serviceName: serviceCatalog.name,
+      cursorAt: sql<string>`to_char(${opportunity.updatedAt} at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`,
     })
     .from(opportunity)
     .innerJoin(
@@ -489,16 +711,114 @@ export async function listOpportunities(
     serviceName: r.serviceName,
     assignedUserId: r.opp.assignedUserId,
     nextActionAt: iso(r.opp.nextActionAt),
+    nextActionNote: r.opp.nextActionNote,
+    conversationId: r.opp.conversationId,
+    createdAt: r.opp.createdAt.toISOString(),
     updatedAt: r.opp.updatedAt.toISOString(),
   }))
   const last = page[page.length - 1]
   const nextCursor =
     rows.length > limit && last
-      ? encodeCursor(last.opp.updatedAt.toISOString(), last.opp.id, fingerprint)
+      ? encodeCursor(last.cursorAt, last.opp.id, fingerprint)
       : null
   return { items, nextCursor }
 }
 
+export interface OpportunitySummaryStage {
+  stageId: string
+  count: number
+  amounts: Array<{ currency: string; amountCents: string }>
+}
+
+export interface OpportunitySummary {
+  total: number
+  stages: OpportunitySummaryStage[]
+}
+
+/** Resumen agregado por filtros (mismos filtros de lista, sin cursor/limit). */
+export async function getOpportunitySummary(
+  tx: Db,
+  orgId: string,
+  input: Omit<OpportunityFilters, "cursor" | "limit">,
+): Promise<OpportunitySummary> {
+  const q = input.q?.trim() ? input.q.trim() : ""
+  if (input.status && !OPPORTUNITY_STATUSES.includes(input.status)) {
+    throw validation("Estado de oportunidad inválido")
+  }
+  const conditions = [eq(opportunity.organizationId, orgId)]
+  if (q) {
+    const like = `%${q}%`
+    conditions.push(
+      or(ilike(opportunity.title, like), ilike(opportunity.interestText, like))!,
+    )
+  }
+  if (input.contactId) conditions.push(eq(opportunity.contactId, input.contactId))
+  if (input.patientId) conditions.push(eq(opportunity.patientId, input.patientId))
+  if (input.pipelineId) conditions.push(eq(opportunity.pipelineId, input.pipelineId))
+  if (input.stageId) conditions.push(eq(opportunity.stageId, input.stageId))
+  if (input.status) conditions.push(eq(opportunity.status, input.status))
+  if (input.assignedUserId) conditions.push(eq(opportunity.assignedUserId, input.assignedUserId))
+  if (input.nextActionDue) {
+    conditions.push(
+      or(
+        sql`"next_action_at" <= now()`,
+        and(sql`"next_action_at" is null`, eq(opportunity.status, "open")),
+      )!,
+    )
+  }
+  const where = and(...conditions)
+  const [totalRow] = await tx
+    .select({ count: sql<number>`count(*)::int` })
+    .from(opportunity)
+    .where(where)
+  const total = totalRow?.count ?? 0
+  if (total === 0) return { total: 0, stages: [] }
+  const grouped = await tx
+    .select({
+      stageId: opportunity.stageId,
+      currency: opportunity.currency,
+      count: sql<number>`count(*)::int`,
+      totalCents: sql<string>`coalesce(sum("amount_cents"), 0)::text`,
+    })
+    .from(opportunity)
+    .where(where)
+    .groupBy(opportunity.stageId, opportunity.currency)
+  const byStage = new Map<string, { count: number; amounts: Array<{ currency: string; amountCents: string }> }>()
+  for (const row of grouped) {
+    const entry = byStage.get(row.stageId) ?? { count: 0, amounts: [] }
+    entry.count += row.count
+    entry.amounts.push({ currency: row.currency, amountCents: row.totalCents })
+    byStage.set(row.stageId, entry)
+  }
+  // Ordenar por posición del pipeline para un resumen estable.
+  const stageIds = [...byStage.keys()]
+  const stagesMeta = stageIds.length
+    ? await tx
+        .select({
+          id: pipelineStage.id,
+          pipelineId: pipelineStage.pipelineId,
+          position: pipelineStage.position,
+        })
+        .from(pipelineStage)
+        .where(and(eq(pipelineStage.organizationId, orgId)))
+    : []
+  const posById = new Map(stagesMeta.map((s) => [s.id, s] as const))
+  const stages: OpportunitySummaryStage[] = [...byStage.entries()].map(([stageId, v]) => ({
+    stageId,
+    count: v.count,
+    amounts: v.amounts.sort((a, b) => (a.currency < b.currency ? -1 : 1)),
+  }))
+  stages.sort((a, b) => {
+    const pa = posById.get(a.stageId)
+    const pb = posById.get(b.stageId)
+    if (pa && pb) {
+      if (pa.pipelineId !== pb.pipelineId) return pa.pipelineId < pb.pipelineId ? -1 : 1
+      return pa.position - pb.position
+    }
+    return a.stageId < b.stageId ? -1 : 1
+  })
+  return { total, stages }
+}
 export async function getOpportunity(
   tx: Db,
   orgId: string,
@@ -573,6 +893,7 @@ export async function getOpportunity(
     assignedUserId: row.assignedUserId,
     nextActionAt: iso(row.nextActionAt),
     nextActionNote: row.nextActionNote,
+    conversationId: row.conversationId,
     closedAt: iso(row.closedAt),
     closeReason: row.closeReason,
     budgetId: row.budgetId,
@@ -603,6 +924,7 @@ export async function createOpportunity(
   if (input.patientId) {
     const found = await requirePatient(tx, orgId, input.patientId)
     patientId = found.id
+    await requirePatientLink(tx, orgId, patientId, input.contactId)
   }
   const stage = await resolveStage(tx, orgId, input.stageId, input.pipelineId)
   if (stage.kind !== "open") {
@@ -613,6 +935,15 @@ export async function createOpportunity(
   const budgetId = await resolveBudget(tx, orgId, input.budgetId, patientId)
   // Si el presupuesto trae paciente y no se declaró, se adopta (sin duplicar ficha).
   const effectivePatientId = patientId ?? (await budgetPatient(tx, orgId, budgetId))
+  if (effectivePatientId) {
+    await requirePatientLink(tx, orgId, effectivePatientId, input.contactId)
+  }
+  const conversationId = await resolveOpportunityConversation(
+    tx,
+    orgId,
+    input.conversationId ?? null,
+    input.contactId,
+  )
   const amountCents = cleanAmount(input.amountCents) ?? null
   const currency = cleanCurrency(input.currency) ?? (await orgCurrency(tx, orgId))
   const assignedUserId = (await resolveAssignee(tx, orgId, input.assignedUserId)) ?? null
@@ -637,6 +968,7 @@ export async function createOpportunity(
       nextActionNote,
       status: "open",
       budgetId,
+      conversationId: conversationId ?? null,
     })
     .returning()
   if (!created) throw new Error("No se pudo crear la oportunidad")
@@ -645,6 +977,8 @@ export async function createOpportunity(
     contactId: input.contactId,
     stageId: stage.stageId,
   })
+  await syncOpportunityFollowUp(tx, orgId, created, actor?.userId ?? null)
+  await notifyOpp(tx, orgId)
   await notifyAssignee(
     tx,
     orgId,
@@ -682,17 +1016,21 @@ export async function updateOpportunity(
   if (current.status !== "open") throw validation("La oportunidad cerrada no se edita; reábrala primero")
   const patch: Partial<typeof opportunity.$inferInsert> = { updatedAt: new Date() }
   const changed: string[] = []
+  const effectiveContactId = input.contactId ?? current.contactId
   if (input.contactId !== undefined) {
     await requireContact(tx, orgId, input.contactId)
     patch.contactId = input.contactId
     changed.push("contactId")
   }
+  let effectivePatientId: string | null = input.patientId !== undefined ? input.patientId : current.patientId
   if (input.patientId !== undefined) {
     if (input.patientId === null) {
       patch.patientId = null
+      effectivePatientId = null
     } else {
       const found = await requirePatient(tx, orgId, input.patientId)
       patch.patientId = found.id
+      effectivePatientId = found.id
     }
     changed.push("patientId")
   }
@@ -730,10 +1068,34 @@ export async function updateOpportunity(
     patch.nextActionNote = cleanNote(input.nextActionNote, 500, "La nota") ?? null
     changed.push("nextActionNote")
   }
+  const effectiveBudgetId: string | null =
+    input.budgetId !== undefined ? input.budgetId : current.budgetId
   if (input.budgetId !== undefined) {
-    const effectivePatient = (patch.patientId ?? current.patientId) as string | null
-    patch.budgetId = (await resolveBudget(tx, orgId, input.budgetId, effectivePatient)) ?? null
+    patch.budgetId =
+      (await resolveBudget(tx, orgId, input.budgetId, effectivePatientId)) ?? null
     changed.push("budgetId")
+  }
+  // Coherencia estricta aunque solo cambie patientId/contacto: el presupuesto
+  // vigente debe seguir siendo del paciente efectivo.
+  await assertBudgetCoherent(tx, orgId, effectiveBudgetId, effectivePatientId)
+  // Los datos legados no conceden representación: editar título/seguimiento
+  // no crea un vínculo. Cualquier cambio de persona, paciente o presupuesto
+  // sí exige verificar la relación explícita vigente.
+  const relationshipChanged = effectiveContactId !== current.contactId ||
+    effectivePatientId !== current.patientId || effectiveBudgetId !== current.budgetId
+  if (effectivePatientId && relationshipChanged) {
+    await requirePatientLink(tx, orgId, effectivePatientId, effectiveContactId)
+  }
+  if (input.conversationId !== undefined) {
+    patch.conversationId =
+      (await resolveOpportunityConversation(tx, orgId, input.conversationId, effectiveContactId)) ?? null
+    changed.push("conversationId")
+  } else if (input.contactId !== undefined && current.conversationId) {
+    // Al cambiar de contacto, el hilo origen debe seguir siendo del nuevo contacto.
+    const conv = await requireConversationInOrg(tx, orgId, current.conversationId)
+    if (conv.contactId !== effectiveContactId) {
+      throw validation("La conversación pertenece a otro contacto")
+    }
   }
   if (changed.length > 0) {
     await tx
@@ -744,6 +1106,16 @@ export async function updateOpportunity(
     await auditOpportunity(tx, orgId, actor?.userId ?? null, "opportunity.updated", id, {
       fields: changed,
     })
+    await notifyOpp(tx, orgId)
+  }
+  if (changed.length > 0) {
+    const [fresh] = await tx
+      .select()
+      .from(opportunity)
+      .where(and(eq(opportunity.id, id), eq(opportunity.organizationId, orgId)))
+      .limit(1)
+      .for("update")
+    if (fresh) await syncOpportunityFollowUp(tx, orgId, fresh, actor?.userId ?? null)
   }
   if (assigneeChanged && patch.assignedUserId && patch.assignedUserId !== previousAssignee) {
     await notifyAssignee(
@@ -811,6 +1183,7 @@ export async function moveOpportunity(
     toStageId: stage.id,
     stageKind: stage.kind,
   })
+  await notifyOpp(tx, orgId)
   const event = stageEventOf(orgId, current, current.stageId, stage, actor)
   return { detail: await getOpportunity(tx, orgId, id), event }
 }
@@ -872,6 +1245,10 @@ export async function closeOpportunity(
       status: input.outcome,
       closedAt: now,
       closeReason: reason,
+      // Cierre limpia la próxima acción (cancela el seguimiento); reabrir no
+      // reactiva nada y la fecha queda null hasta nueva programación.
+      nextActionAt: null,
+      nextActionNote: null,
       updatedAt: now,
     })
     .where(and(eq(opportunity.id, id), eq(opportunity.organizationId, orgId)))
@@ -890,13 +1267,14 @@ export async function closeOpportunity(
     toStageId: terminal?.id ?? current.stageId,
   })
   // El cierre solo cancela los seguimientos ligados a ESTA oportunidad
-  // (otras oportunidades, recordatorios y controles sobreviven).
   await cancelPendingJobsForOpportunity(
     tx,
     orgId,
     id,
     input.outcome === "won" ? "Oportunidad ganada" : "Oportunidad perdida",
   )
+  await cancelOpportunityFollowUp(tx, orgId, id, actor?.userId ?? null)
+  await notifyOpp(tx, orgId)
   if (current.assignedUserId && current.assignedUserId !== (actor?.userId ?? null)) {
     await notifyAssignee(
       tx,
@@ -948,6 +1326,8 @@ export async function reopenOpportunity(
     fromStageId: current.stageId,
     toStageId: first.id,
   })
+  // No se reactivan tareas canceladas al reabrir (el próximo edit con fecha crea una nueva).
+  await notifyOpp(tx, orgId)
   return getOpportunity(tx, orgId, id)
 }
 

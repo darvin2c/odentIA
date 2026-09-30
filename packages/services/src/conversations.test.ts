@@ -572,3 +572,23 @@ it("ingesta reutiliza el contacto archivado sin crear otro", async () => {
   const listed = await withOrgContext(appDb, "org_a", (tx) => listConversations(tx, "org_a", {}))
   expect(listed.items.find((c) => c.id === first.conversationId)?.contact.isActive).toBe(false)
 })
+
+it("cursores manipulados de bandeja y mensajes se rechazan antes de consultar PostgreSQL", async () => {
+  const connId = await makeTelegramConnection("org_a")
+  const ingested = await ingest("org_a", connId, textEvent({
+    externalEventId: "cursor-invalido", externalMessageId: "cursor-invalido", externalThreadId: "tg:cursor-invalido",
+  }))
+  for (const payload of [
+    { ts: "x", id: ingested.conversationId },
+    { ts: "2026-10-01T00:00:00.000000Z", id: "y" },
+    { ts: "2026-02-31T00:00:00.000000Z", id: ingested.conversationId },
+  ]) {
+    const cursor = Buffer.from(JSON.stringify(payload)).toString("base64url")
+    await expect(withOrgContext(appDb, "org_a", tx =>
+      listConversations(tx, "org_a", { cursor }),
+    )).rejects.toMatchObject({ code: "VALIDATION", status: 400 })
+    await expect(withOrgContext(appDb, "org_a", tx =>
+      listMessages(tx, "org_a", ingested.conversationId, { before: cursor }),
+    )).rejects.toMatchObject({ code: "VALIDATION", status: 400 })
+  }
+})

@@ -76,12 +76,17 @@ export async function seedAgent(
   }
   await tx
     .insert(agentPolicy)
-    .values({ organizationId: orgId, modes: {}, updatedBy: ownerUserId })
+    .values({ organizationId: orgId, modes: {
+      enviar_mensaje: "aprobar_equipo", mover_oportunidad: "aprobar_equipo",
+      crear_oportunidad: "aprobar_equipo", actualizar_seguimiento: "aprobar_equipo",
+      cerrar_oportunidad: "aprobar_equipo",
+    }, updatedBy: ownerUserId })
     .onConflictDoNothing({ target: agentPolicy.organizationId })
 
   // Propuestas pendientes, derivación y corridas para el home y el pulso en
   // dev. Idempotente por ids fijos; sin conversación semilla no hay nada que
-  // sembrar en este bloque.
+  // sembrar en este bloque. Las propuestas se insertan directo como filas
+  // legado (sin expected_state: nunca son stale y el antes no se reconstruye).
   const convs = await tx
     .select({ id: conversation.id, contactId: conversation.contactId })
     .from(conversation)
@@ -142,19 +147,26 @@ export async function seedAgent(
       },
       ...(futureAppointment
         ? [
-            {
-              id: "00000000-0000-4000-8000-00000000a612",
-              conversationId: (convs[1] ?? first).id,
-              contactId: selfContact?.contactId ?? null,
-              action: "reprogramar_cita",
-              payload: {
-                appointmentId: futureAppointment.id,
-                expectedVersion: futureAppointment.version,
-                startsAt: lima(3, "16:00"),
+              {
+                id: "00000000-0000-4000-8000-00000000a612",
+                conversationId: (convs[1] ?? first).id,
+                contactId: selfContact?.contactId ?? null,
+                action: "reprogramar_cita",
+                payload: {
+                  appointmentId: futureAppointment.id,
+                  expectedVersion: futureAppointment.version,
+                  startsAt: lima(3, "16:00"),
+                },
+                // Evidencia real como la que congela createProposal: sin ella
+                // la propuesta no sería ejecutable (nunca vigente falsa).
+                expectedState: {
+                  appointmentId: futureAppointment.id,
+                  appointmentVersion: futureAppointment.version,
+                  appointmentStatus: "programada",
+                },
+                idempotencyKey: "seed:agent:propuesta:2",
               },
-              idempotencyKey: "seed:agent:propuesta:2",
-            },
-          ]
+            ]
         : []),
     ]
     for (const proposal of proposals) {

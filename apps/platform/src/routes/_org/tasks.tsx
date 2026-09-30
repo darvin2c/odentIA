@@ -1,67 +1,101 @@
-import { Badge, Button, Field, FieldError, FieldLabel, Input } from "@odentia/ui"
+import { Badge, Button } from "@odentia/ui"
 import {
   common,
   DataTable,
+  DataTableSkeleton,
   EmptyState,
+  ErrorState,
   FilterBar,
-  FormDrawer,
-  FormPanel,
-  fieldErrorMessages,
-  MasterDetail,
   PageHeader,
   PageShell,
   RowActions,
-  useDetailMode,
   useListSearch,
 } from "@odentia/ui-patterns"
-import { useForm, useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { createFileRoute, getRouteApi } from "@tanstack/react-router"
+import { createFileRoute, getRouteApi, Link } from "@tanstack/react-router"
 import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-table"
 import { Plus } from "lucide-react"
-import { type FormEvent, useMemo, useState } from "react"
-import { z } from "zod"
+import { useEffect, useMemo, useState } from "react"
+import { TaskDrawer } from "../../components/crm/task-drawer"
+import { formatDueAt, isOverdue } from "../../components/crm/crm-helpers"
 import { apiFetch } from "../../lib/api"
-import type { TaskItem } from "../../lib/crm"
+import { type TaskItem, useMyUserId, usePermission } from "../../lib/crm"
 import { PortalRequestsSection } from "../../components/portal/portal-requests-panel"
 import { useOrgEvents } from "../../lib/org-events"
 
 export const Route = createFileRoute("/_org/tasks")({
+  validateSearch: (search: Record<string, unknown>): { task?: string } => ({
+    task: typeof search.task === "string" ? search.task : undefined,
+  }),
   component: TasksPage,
 })
 
 const orgRouteApi = getRouteApi("/_org")
 
-const taskSchema = z.object({
-  title: z.string().min(1, "Ingresa el título"),
-  dueAt: z.string(),
-  assigneeUserId: z.string(),
-})
-
-type TaskFormValues = z.infer<typeof taskSchema>
-
-const emptyValues: TaskFormValues = { title: "", dueAt: "", assigneeUserId: "" }
+const STATUS_LABEL: Record<string, string> = {
+  open: "Abierta",
+  done: "Hecha",
+  cancelled: "Cancelada",
+}
 
 function TasksPage() {
   const queryClient = useQueryClient()
   const { org } = orgRouteApi.useRouteContext()
+  const myUserId = useMyUserId()
+  const canReadCrm = usePermission("crm.read")
+  const canReadConversations = usePermission("conversations.read")
+  const canWrite = usePermission("tasks.write")
   const listSearch = useListSearch()
   // El backend filtra por `status`; en la URL el filtro vive como `estado`.
   const estado = listSearch.get("estado") ?? "open"
+  // Vista de trabajo: todas, mis seguimientos o vencidas (filtros servidor).
+  const vista = listSearch.get("vista") ?? "todas"
   // SearchInput (FilterBar) escribe la búsqueda en `q` con debounce propio.
   const q = listSearch.get("q") ?? ""
   const sort = listSearch.get("sort")
-  const mode = useDetailMode()
-  const [formOpen, setFormOpen] = useState(false)
+  // El detalle se consulta por id, incluso si la tarea está fuera de los filtros.
+  const focusId = listSearch.get("task") ?? ""
+  const [drawerOpen, setDrawerOpen] = useState(false)
+  const [editTaskId, setEditTaskId] = useState<string | null>(null)
+  const [focusHandled, setFocusHandled] = useState<string | null>(null)
+  const [actionError, setActionError] = useState<string | null>(null)
 
+  // La API devuelve la lista completa sin cursor ({data: TaskItem[]}): un
+  // solo fetch con filtros SQL y orden/búsqueda en cliente sobre TODO el
+  // resultado (la API no ordena ni pagina tareas).
   const tasksQuery = useQuery({
-    queryKey: ["tasks", estado],
-    queryFn: () => apiFetch<{ data: TaskItem[] }>(`/api/tasks?status=${estado}`),
+    queryKey: ["tasks", estado, vista, myUserId],
+    queryFn: () => {
+      const params = new URLSearchParams()
+      if (estado) params.set("status", estado)
+      if (vista === "mias" && myUserId) params.set("assignee", myUserId)
+      if (vista === "vencidas") params.set("overdue", "true")
+      return apiFetch<{ data: TaskItem[] }>(`/api/tasks?${params}`)
+    },
   })
+  const allTasks = useMemo(() => tasksQuery.data?.data ?? [], [tasksQuery.data])
 
-  useOrgEvents(["message.created", "conversation.updated"], () => {
-    void queryClient.invalidateQueries({ queryKey: ["tasks"] })
-  })
+  useEffect(() => {
+    if (!focusId) { setFocusHandled(null); return }
+    if (focusHandled === focusId) return
+    setFocusHandled(focusId)
+    setDrawerOpen(false)
+    setEditTaskId(focusId)
+  }, [focusId, focusHandled])
+
+  useOrgEvents(
+    [
+      "message.created",
+      "conversation.updated",
+      "task.updated",
+      "opportunity.updated",
+      "contact.updated",
+      "stream.reconnected",
+    ],
+    () => {
+      void queryClient.invalidateQueries({ queryKey: ["tasks"] })
+    },
+  )
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["tasks"] })
 
@@ -71,46 +105,59 @@ function TasksPage() {
         method: "PATCH",
         body: JSON.stringify({ status: task.status === "done" ? "open" : "done" }),
       }),
-    onSuccess: () => void invalidate(),
-  })
-
-  const saveMutation = useMutation({
-    mutationFn: async (values: TaskFormValues) => {
-      await apiFetch("/api/tasks", {
-        method: "POST",
-        body: JSON.stringify({
-          title: values.title,
-          dueAt: values.dueAt || undefined,
-          assigneeUserId: values.assigneeUserId || null,
-        }),
-      })
-    },
     onSuccess: () => {
-      closeTaskForm()
+      setActionError(null)
       void invalidate()
     },
+    onError: (err: Error) => setActionError(err.message),
   })
-
-  const form = useForm({
-    defaultValues: emptyValues,
-    validators: { onSubmit: taskSchema },
-    onSubmit: ({ value }) => saveMutation.mutate(value),
-  })
-
-  // Suscripción explícita: el render de la página no se entera de los cambios de
-  // meta del formulario por sí solo (los campos se re-renderizan por su cuenta).
-  const isDirty = useStore(form.store, (state) => state.isDirty)
-
-  /** Cierra y deja el formulario prístino: sin el reset, el dirty sobrevive al
-   *  cierre y el próximo abrir pediría confirmar cambios ya guardados. */
-  function closeTaskForm() {
-    setFormOpen(false)
-    form.reset()
-  }
 
   const columns = useMemo<ColumnDef<TaskItem>[]>(
     () => [
       { accessorKey: "title", header: "Título" },
+      {
+        id: "contexto",
+        header: "Contexto",
+        meta: { view: { primary: true } },
+        cell: ({ row }) => {
+          const task = row.original
+          if ((!canReadCrm || (!task.contactId && !task.opportunityId)) && (!canReadConversations || !task.conversationId)) return "—"
+          return (
+            <span className="flex flex-wrap items-center gap-1.5">
+              {canReadCrm && task.contactId ? (
+                <Link
+                  to="/contacts/$contactId"
+                  params={{ contactId: task.contactId }}
+                  className="hover:underline"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {task.contactName ?? "Contacto"}
+                </Link>
+              ) : null}
+              {canReadCrm && task.opportunityId ? (
+                <Link
+                  to="/opportunities/$opportunityId"
+                  params={{ opportunityId: task.opportunityId }}
+                  className="hover:underline"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <Badge variant="outline">{task.opportunityTitle ?? "Oportunidad"}</Badge>
+                </Link>
+              ) : null}
+              {canReadConversations && task.conversationId ? (
+                <Link
+                  to="/inbox"
+                  search={{ conversation: task.conversationId }}
+                  className="text-xs text-muted-foreground hover:underline"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  Abrir hilo
+                </Link>
+              ) : null}
+            </span>
+          )
+        },
+      },
       {
         id: "assignee",
         header: "Asignado",
@@ -124,32 +171,39 @@ function TasksPage() {
         accessorKey: "dueAt",
         header: "Vence",
         meta: { view: { primary: true } },
-        cell: ({ row }) =>
-          row.original.dueAt
-            ? new Date(row.original.dueAt).toLocaleDateString("es-PE", {
-                day: "numeric",
-                month: "short",
-              })
-            : "—",
+        cell: ({ row }) => {
+          if (!row.original.dueAt) return "—"
+          const overdue = isOverdue(row.original.dueAt) && row.original.status === "open"
+          return (
+            <span className={overdue ? "font-medium text-red-600" : undefined}>
+              {overdue ? "Vencida · " : ""}
+              {formatDueAt(row.original.dueAt)}
+            </span>
+          )
+        },
       },
       {
         accessorKey: "status",
         header: "Estado",
         cell: ({ row }) => (
           <Badge variant={row.original.status === "done" ? "success" : "secondary"}>
-            {row.original.status}
+            {STATUS_LABEL[row.original.status] ?? row.original.status}
           </Badge>
         ),
       },
       {
         accessorKey: "createdBy",
         header: "Origen",
-        cell: ({ row }) =>
-          row.original.createdBy === "agent" ? (
+        cell: ({ row }) => {
+          if (row.original.kind === "opportunity_follow_up") {
+            return <Badge variant="secondary">Seguimiento</Badge>
+          }
+          return row.original.createdBy === "agent" ? (
             <Badge variant="secondary">Agente</Badge>
           ) : (
             "Operador"
-          ),
+          )
+        },
       },
       {
         id: "actions",
@@ -161,26 +215,36 @@ function TasksPage() {
               label={`Acciones de ${task.title}`}
               items={[
                 {
+                  key: "ver",
+                  label: "Ver / editar",
+                  onSelect: () => listSearch.setParam("task", task.id),
+                },
+                ...(canWrite && (task.kind !== "opportunity_follow_up" || task.status === "open") ? [{
                   key: "toggle",
                   label: task.status === "done" ? "Reabrir" : "Completar",
                   disabled: toggleMutation.isPending,
                   onSelect: () => toggleMutation.mutate(task),
-                },
+                }] : []),
               ]}
             />
           )
         },
       },
     ],
-    [org.members, toggleMutation],
+    [org.members, toggleMutation, canReadCrm, canReadConversations, canWrite, listSearch],
   )
 
-  // La búsqueda `q` y el orden `sort` se aplican en cliente sobre lo ya
-  // filtrado por estado en el servidor.
+  // Búsqueda y orden en cliente sobre el resultado completo del servidor (la
+  // API de tareas no filtra por texto ni ordena): nunca se ordena por página
+  // porque no hay páginas.
   const visibleTasks = useMemo(() => {
     const needle = q.trim().toLowerCase()
-    const rows = (tasksQuery.data?.data ?? []).filter((task) =>
-      needle ? task.title.toLowerCase().includes(needle) : true,
+    const rows = allTasks.filter((task) =>
+      needle
+        ? task.title.toLowerCase().includes(needle) ||
+          (task.contactName ?? "").toLowerCase().includes(needle) ||
+          (task.opportunityTitle ?? "").toLowerCase().includes(needle)
+        : true,
     )
     if (!sort) return rows
     const descending = sort.startsWith("-")
@@ -207,8 +271,8 @@ function TasksPage() {
       )
     }
     return sorted
-  }, [tasksQuery.data, q, sort])
-  const hasActiveCriteria = q.trim() !== "" || estado !== "open" || Boolean(sort)
+  }, [allTasks, q, sort])
+  const hasActiveCriteria = q.trim() !== "" || estado !== "open" || vista !== "todas" || Boolean(sort)
 
   const table = useReactTable({
     data: visibleTasks,
@@ -216,130 +280,89 @@ function TasksPage() {
     getCoreRowModel: getCoreRowModel(),
   })
 
-  const formFields = (
-    <div className="flex flex-col gap-4">
-      <form.Field name="title">
-        {(field) => (
-          <Field>
-            <FieldLabel>Título</FieldLabel>
-            <Input
-              value={field.state.value}
-              onChange={(e) => field.handleChange(e.target.value)}
-              placeholder="Llamar al paciente"
-            />
-            <FieldError>{fieldErrorMessages(field.state.meta.errors)}</FieldError>
-          </Field>
-        )}
-      </form.Field>
-      <form.Field name="dueAt">
-        {(field) => (
-          <Field>
-            <FieldLabel>Vence (opcional)</FieldLabel>
-            <Input
-              type="date"
-              value={field.state.value}
-              onChange={(e) => field.handleChange(e.target.value)}
-            />
-            <FieldError>{fieldErrorMessages(field.state.meta.errors)}</FieldError>
-          </Field>
-        )}
-      </form.Field>
-      <form.Field name="assigneeUserId">
-        {(field) => (
-          <Field>
-            <FieldLabel>Asignado (opcional)</FieldLabel>
-            <select
-              className="rounded-md border bg-background px-2 py-1.5 text-sm"
-              value={field.state.value}
-              onChange={(e) => field.handleChange(e.target.value)}
-            >
-              <option value="">Sin asignar</option>
-              {org.members.map((m) => (
-                <option key={m.userId} value={m.userId}>
-                  {m.user.name}
-                </option>
-              ))}
-            </select>
-            <FieldError>{fieldErrorMessages(field.state.meta.errors)}</FieldError>
-          </Field>
-        )}
-      </form.Field>
-    </div>
-  )
-
-  // Idénticos para los dos contenedores: solo cambia dónde se monta el shell.
-  const formProps = {
-    onClose: closeTaskForm,
-    title: "Nueva tarea",
-    isDirty,
-    isSubmitting: saveMutation.isPending,
-    submitLabel: "Crear",
-    cancelLabel: "Cancelar",
-    onSubmit: (event: FormEvent) => {
-      event.preventDefault()
-      void form.handleSubmit()
-    },
-  }
-
   return (
     <PageShell className="flex flex-col gap-6">
-      <MasterDetail
-        panel={
-          mode === "panel" && formOpen ? <FormPanel {...formProps}>{formFields}</FormPanel> : null
-        }
-      >
-        <PageHeader
-          title="Tareas"
-          subtitle="Seguimientos creados por operadores y el agente"
-          actions={
-            <Button type="button" className="min-h-11" onClick={() => setFormOpen(true)}>
-              <Plus aria-hidden />
-              Nueva tarea
-            </Button>
+      <PageHeader
+        title="Tareas"
+        subtitle="Seguimientos creados por operadores y el agente"
+        actions={canWrite ? (
+          <Button type="button" className="min-h-11" onClick={() => { setEditTaskId(null); setDrawerOpen(true) }}>
+            <Plus aria-hidden />
+            Nueva tarea
+          </Button>
+        ) : undefined}
+      />
+      <PortalRequestsSection />
+      {actionError ? (
+        <p role="alert" className="rounded-md border border-destructive/40 p-2 text-sm text-destructive">
+          No se pudo actualizar la tarea: {actionError}
+        </p>
+      ) : null}
+      <FilterBar
+        filters={[
+          {
+            key: "estado",
+            label: "Estado",
+            type: "select",
+            options: [
+              { value: "open", label: "Abiertas" },
+              { value: "done", label: "Hechas" },
+              { value: "cancelled", label: "Canceladas" },
+            ],
+          },
+          {
+            key: "vista",
+            label: "Vista",
+            type: "select",
+            options: [
+              { value: "todas", label: "Todas" },
+              { value: "mias", label: "Mis seguimientos" },
+              { value: "vencidas", label: "Vencidos" },
+            ],
+          },
+        ]}
+        sortOptions={[
+          { value: "vence", label: "Vence" },
+          { value: "titulo", label: "Título" },
+          { value: "estado", label: "Estado" },
+        ]}
+        searchPlaceholder="Buscar tarea"
+      />
+      {tasksQuery.isLoading ? (
+        <DataTableSkeleton />
+      ) : tasksQuery.isError ? (
+        <ErrorState
+          error={tasksQuery.error instanceof Error ? tasksQuery.error : String(tasksQuery.error)}
+          onRetry={() => void tasksQuery.refetch()}
+        />
+      ) : visibleTasks.length === 0 ? (
+        <EmptyState
+          title={hasActiveCriteria ? common.filters.noResults : "Sin tareas"}
+          description={
+            hasActiveCriteria
+              ? "No hay tareas que coincidan con los filtros aplicados."
+              : "Crea la primera con el botón Nueva tarea."
           }
         />
-        <PortalRequestsSection />
-        <FilterBar
-          filters={[
-            {
-              key: "estado",
-              label: "Estado",
-              type: "select",
-              options: [
-                { value: "open", label: "Abiertas" },
-                { value: "done", label: "Hechas" },
-                { value: "cancelled", label: "Canceladas" },
-              ],
-            },
-          ]}
-          sortOptions={[
-            { value: "vence", label: "Vence" },
-            { value: "titulo", label: "Título" },
-            { value: "estado", label: "Estado" },
-          ]}
-          searchPlaceholder="Buscar tarea"
-        />
-        {visibleTasks.length === 0 && !tasksQuery.isLoading ? (
-          <EmptyState
-            title={hasActiveCriteria ? common.filters.noResults : "Sin tareas"}
-            description={
-              hasActiveCriteria
-                ? "No hay tareas que coincidan con los filtros aplicados."
-                : "Crea la primera con el botón Nueva tarea."
-            }
-          />
-        ) : (
+      ) : (
+        <div className="flex flex-col gap-2">
           <DataTable table={table} />
-        )}
-      </MasterDetail>
-
-      {/* Un solo contenedor montado a la vez: montar panel y drawer juntos
-          duplicaría los id/htmlFor de los campos. */}
-      {mode === "drawer" ? (
-        <FormDrawer open={formOpen} {...formProps}>
-          {formFields}
-        </FormDrawer>
-      ) : null}
+          <p className="text-sm text-muted-foreground" role="status">
+            Mostrando {visibleTasks.length} tarea{visibleTasks.length === 1 ? "" : "s"}
+          </p>
+        </div>
+      )}
+      <TaskDrawer
+        open={drawerOpen}
+        onClose={() => setDrawerOpen(false)}
+        onSaved={invalidate}
+      />
+      <TaskDrawer
+        open={editTaskId !== null}
+        taskId={editTaskId ?? undefined}
+        onClose={() => { setEditTaskId(null); listSearch.setParam("task", undefined) }}
+        onSaved={invalidate}
+      />
     </PageShell>
   )
 }

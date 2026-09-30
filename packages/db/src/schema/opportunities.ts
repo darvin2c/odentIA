@@ -11,7 +11,7 @@ import {
 } from "drizzle-orm/pg-core"
 import { user } from "./auth.js"
 import { patient, serviceCatalog, treatmentBudget } from "./clinical.js"
-import { contact, orgFk, pipeline, pipelineStage, timestamps } from "./crm.js"
+import { contact, conversation, orgFk, pipeline, pipelineStage, timestamps } from "./crm.js"
 
 /**
  * Oportunidad comercial del CRM: la tarjeta real del embudo.
@@ -61,6 +61,10 @@ export const opportunity = pgTable(
     status: text("status").notNull().default("open"),
     closedAt: timestamp("closed_at", { withTimezone: true }),
     closeReason: text("close_reason"),
+    // Hilo origen de la negociación (conversación del mismo contacto).
+    conversationId: uuid("conversation_id").references(() => conversation.id, {
+      onDelete: "set null",
+    }),
     // Presupuesto clínico vinculado (evidencia económica, no duplica cifras).
     budgetId: uuid("budget_id").references(() => treatmentBudget.id, {
       onDelete: "set null",
@@ -75,6 +79,7 @@ export const opportunity = pgTable(
     index("opportunity_org_status_idx").on(table.organizationId, table.status),
     index("opportunity_org_assigned_idx").on(table.organizationId, table.assignedUserId),
     index("opportunity_org_next_action_idx").on(table.organizationId, table.nextActionAt),
+    index("opportunity_org_conversation_idx").on(table.organizationId, table.conversationId),
   ],
 )
 

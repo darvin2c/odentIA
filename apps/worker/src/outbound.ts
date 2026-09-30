@@ -123,7 +123,11 @@ export async function processOutbound(
       }
       await tx
         .update(message)
-        .set({ status: "sent", externalId, error: null })
+        .set({
+          status: "sent", externalId, error: null,
+          // El envío de demostración no acredita aceptación de un proveedor.
+          sentAt: deps.senderMode === "live" ? sql`coalesce(${message.sentAt}, clock_timestamp())` : null,
+        })
         .where(eq(message.id, messageId))
       await notify(tx, {
         orgId,

@@ -170,6 +170,10 @@ export const message = pgTable(
     externalId: text("external_id"),
     status: text("status").notNull().default("received"),
     error: text("error"),
+    // Instante en que el proveedor aceptó el envío real (outbound). Lo registra
+    // el worker al aceptar el proveedor y applyStatus al primer sent/delivered/read
+    // si sigue nulo. Histórico sin timestamp queda nulo (sin backfill inventado).
+    sentAt: timestamp("sent_at", { withTimezone: true }),
     // Invocación de plantilla (solo content_type 'template'): lo necesario
     // para que el worker reenvíe sin acoplar el body.
     templateName: text("template_name"),
@@ -178,7 +182,6 @@ export const message = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
-    // Dedupe de ingesta: mismo evento del proveedor → un solo mensaje.
     uniqueIndex("message_conversation_external_uidx")
       .on(table.conversationId, table.externalId)
       .where(sql`"external_id" is not null`),
@@ -186,18 +189,38 @@ export const message = pgTable(
   ],
 )
 
-export const crmTask = pgTable("task", {
-  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
-  organizationId: orgFk("organization_id"),
-  contactId: uuid("contact_id").references(() => contact.id),
-  conversationId: uuid("conversation_id").references(() => conversation.id),
-  assigneeUserId: text("assignee_user_id").references(() => user.id),
-  title: text("title").notNull(),
-  dueAt: timestamp("due_at", { withTimezone: true }),
-  status: text("status").notNull().default("open"),
-  createdBy: text("created_by").notNull(),
-  ...timestamps,
-})
+/** Clases de tarea: manual o seguimiento comercial sincronizado con la próxima acción. */
+export const TASK_KINDS = ["manual", "opportunity_follow_up"] as const
+export type TaskKind = (typeof TASK_KINDS)[number]
+export const crmTask = pgTable(
+  "task",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    organizationId: orgFk("organization_id"),
+    contactId: uuid("contact_id").references(() => contact.id),
+    conversationId: uuid("conversation_id").references(() => conversation.id),
+    // Oportunidad vinculada. Sin FK en TS para evitar el ciclo con opportunities.ts;
+    // la migración del coordinador añade la FK con ON DELETE SET NULL.
+    opportunityId: uuid("opportunity_id"),
+    assigneeUserId: text("assignee_user_id").references(() => user.id),
+    title: text("title").notNull(),
+    dueAt: timestamp("due_at", { withTimezone: true }),
+    status: text("status").notNull().default("open"),
+    kind: text("kind").notNull().default("manual"),
+    createdBy: text("created_by").notNull(),
+    ...timestamps,
+  },
+  (table) => [
+    // Un solo seguimiento abierto por oportunidad (índice único parcial en migración).
+    uniqueIndex("task_org_opp_open_uidx")
+      .on(table.organizationId, table.opportunityId)
+      .where(sql`"opportunity_id" IS NOT NULL AND "kind" = 'opportunity_follow_up' AND "status" = 'open'`),
+    index("task_org_contact_idx").on(table.organizationId, table.contactId),
+    index("task_org_conversation_idx").on(table.organizationId, table.conversationId),
+    index("task_org_opportunity_idx").on(table.organizationId, table.opportunityId),
+    index("task_org_status_due_idx").on(table.organizationId, table.status, table.dueAt),
+  ],
+)
 
 export const customFieldDef = pgTable(
   "custom_field_def",

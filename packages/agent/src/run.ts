@@ -30,12 +30,14 @@ function baseToolCtx(
   conversationId: string,
   contactId: string,
   secretsKey: Buffer,
+  triggerMessageId?: string | null,
 ): AgentToolCtx {
   return {
     db,
     orgId,
     conversationId,
     contactId,
+    triggerMessageId: triggerMessageId ?? null,
     secretsKey,
     handedOff: false,
     dryRun: false,
@@ -68,20 +70,21 @@ export async function processAgentRun(
         .from(conversation)
         .where(and(eq(conversation.id, conversationId), eq(conversation.organizationId, orgId)))
         .limit(1)
-      if (!conv) return "missing-conversation"
-      if (conv.agentStatus !== "on") return "agent-off"
+      if (!conv) return { reason: "missing-conversation", model: runtime.modelName }
+      if (conv.agentStatus !== "on") return { reason: "agent-off", model: runtime.modelName }
       const cfg = await getAgentConfig(tx, orgId)
-      if (!cfg.enabled) return "agent-disabled"
+      const effectiveModel = cfg.model?.trim() ? cfg.model.trim() : runtime.modelName
+      if (!cfg.enabled) return { reason: "agent-disabled", model: effectiveModel }
       const [trigger] = await tx
         .select()
         .from(message)
         .where(and(eq(message.id, triggerMessageId), eq(message.organizationId, orgId)))
         .limit(1)
-      if (!trigger) return "missing-trigger"
+      if (!trigger) return { reason: "missing-trigger", model: effectiveModel }
       if (matchesHandoff(trigger.body, cfg.handoffKeywords)) {
-        const toolCtx = baseToolCtx(db, orgId, conversationId, conv.contactId, runtime.secretsKey)
+        const toolCtx = baseToolCtx(db, orgId, conversationId, conv.contactId, runtime.secretsKey, triggerMessageId)
         await performHandoff(toolCtx, `palabra clave en: ${(trigger.body ?? "").slice(0, 120)}`)
-        return "handoff"
+        return { reason: "handoff", model: effectiveModel }
       }
       // Ráfaga superseded: el trigger ya no está entre los últimos 5 inbound.
       const recent = await tx
@@ -90,32 +93,37 @@ export async function processAgentRun(
         .where(and(eq(message.conversationId, conversationId), eq(message.direction, "in")))
         .orderBy(desc(message.createdAt), desc(message.id))
         .limit(5)
-      if (!recent.some((r) => r.id === triggerMessageId)) return "superseded"
+      if (!recent.some((r) => r.id === triggerMessageId)) return { reason: "superseded", model: effectiveModel }
       return null
     })
     if (skip) {
       await ledger(db, orgId, {
         conversationId,
         triggerMessageId,
-        model: runtime.modelName,
-        status: skip === "handoff" ? "handoff" : "omitida",
+        model: skip.model,
+        status: skip.reason === "handoff" ? "handoff" : "omitida",
         startedAt,
         endedAt: new Date(),
-        error: skip,
+        error: skip.reason,
       })
       return "done"
     }
-
-    const toolCtx = await withOrgContext(db, orgId, async (tx) => {
+    const { toolCtx, effectiveModel } = await withOrgContext(db, orgId, async (tx) => {
       const [conv] = await tx
         .select()
         .from(conversation)
         .where(eq(conversation.id, conversationId))
         .limit(1)
       if (!conv) throw new Error("Conversación no encontrada")
-      return baseToolCtx(db, orgId, conversationId, conv.contactId, runtime.secretsKey)
+      // Modelo efectivo único: la config de la org prevalece, igual que en simulación.
+      const cfg = await getAgentConfig(tx, orgId)
+      const resolved = cfg.model?.trim() ? cfg.model.trim() : runtime.modelName
+      return {
+        toolCtx: baseToolCtx(db, orgId, conversationId, conv.contactId, runtime.secretsKey, triggerMessageId),
+        effectiveModel: resolved,
+      }
     })
-    const model = createConfiguredChatModel(runtime.modelName, runtime.llm)
+    const model = createConfiguredChatModel(effectiveModel, runtime.llm)
     const graph = compileAgentGraph(model, toolCtx, runtime.checkpointer)
     await graph.invoke(
       { messages: [], turnCount: 0 },
@@ -127,7 +135,7 @@ export async function processAgentRun(
     await ledger(db, orgId, {
       conversationId,
       triggerMessageId,
-      model: runtime.modelName,
+      model: effectiveModel,
       status: toolCtx.handedOff ? "handoff" : "ok",
       startedAt,
       endedAt: new Date(),
@@ -140,7 +148,7 @@ export async function processAgentRun(
   } catch (error) {
     if (msg.read_ct >= 2) {
       const detail = error instanceof Error ? error.message : String(error)
-      await withOrgContext(db, orgId, async (tx) => {
+      const effectiveModel = await withOrgContext(db, orgId, async (tx) => {
         await tx.insert(auditEvent).values({
           organizationId: orgId,
           action: "agent.error",
@@ -148,13 +156,15 @@ export async function processAgentRun(
           entityId: conversationId,
           metadata: { error: detail.slice(0, 500) },
         })
-      }).catch(() => {})
-      const toolCtx = baseToolCtx(db, orgId, conversationId, "", runtime.secretsKey)
+        const cfg = await getAgentConfig(tx, orgId)
+        return cfg.model?.trim() ? cfg.model.trim() : runtime.modelName
+      }).catch(() => runtime.modelName)
+      const toolCtx = baseToolCtx(db, orgId, conversationId, "", runtime.secretsKey, triggerMessageId)
       await performHandoff(toolCtx, "error del agente").catch(() => {})
       await ledger(db, orgId, {
         conversationId,
         triggerMessageId,
-        model: runtime.modelName,
+        model: effectiveModel,
         status: "error",
         startedAt,
         endedAt: new Date(),
@@ -207,10 +217,12 @@ function messageText(msg: BaseMessage): string {
 }
 
 /**
- * Simula un turno con el modelo y las instrucciones vigentes sin efectos
- * externos ni persistencia: sin checkpointer (grafo sin memoria), las
- * herramientas corren en dryRun (describen, no escriben), el mensaje
+ * Simula un solo turno con el modelo y las instrucciones vigentes, sin
+ * efectos externos ni persistencia: sin checkpointer (grafo sin memoria),
+ * las herramientas corren en dryRun (describen, no escriben), el mensaje
  * hipotético no se persiste y no se escribe el libro. Solo lecturas RLS.
+ * No reproduce activaciones ni derivaciones previas ni la memoria de la
+ * atención real: el resultado es orientativo, no una equivalencia total.
  */
 export async function simulateAgentTurn(
   db: Db,
@@ -220,16 +232,19 @@ export async function simulateAgentTurn(
   const { orgId, conversationId } = input
   const text = input.text.trim()
   if (!text) throw new Error("El mensaje a simular es obligatorio")
-  const modelName = input.model?.trim() || deps.modelName || "fake"
   const startedAt = new Date()
-  const contactId = await withOrgContext(db, orgId, async (tx) => {
+  const { contactId, modelName } = await withOrgContext(db, orgId, async (tx) => {
     const [conv] = await tx
       .select({ contactId: conversation.contactId })
       .from(conversation)
       .where(and(eq(conversation.id, conversationId), eq(conversation.organizationId, orgId)))
       .limit(1)
     if (!conv) throw new Error("Conversación no encontrada")
-    return conv.contactId
+    // Modelo efectivo único: parámetro explícito, config de la org y default,
+    // igual que la corrida real. Se reporta el efectivo.
+    const cfg = await getAgentConfig(tx, orgId)
+    const resolved = input.model?.trim() || cfg.model?.trim() || deps.modelName || "fake"
+    return { contactId: conv.contactId, modelName: resolved }
   })
   const toolCtx = baseToolCtx(db, orgId, conversationId, contactId, deps.secretsKey)
   toolCtx.dryRun = true
