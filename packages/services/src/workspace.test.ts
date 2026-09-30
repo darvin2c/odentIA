@@ -6,7 +6,7 @@ import { patient, patientCharge, patientPayment } from "@odentia/db/schema/clini
 import { channelConnection, contact, conversation, message, pipeline, pipelineStage } from "@odentia/db/schema/crm"
 import { opportunity } from "@odentia/db/schema/opportunities"
 import { orgProfile } from "@odentia/db/schema/org"
-import { sql } from "drizzle-orm"
+import { eq, sql } from "drizzle-orm"
 import { beforeAll, expect, it } from "vitest"
 import { appDb, insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
 import { createWorkspaceNotification, getManagementReport, getWorkspaceHome, getWorkspacePulse, listWorkspaceAudit, listWorkspaceNotifications, readWorkspaceNotification, type WorkspaceAccess } from "./workspace.js"
@@ -229,4 +229,28 @@ it("la primera respuesta usa aceptación real y excluye colas, fallos y simulaci
   expect(home.conversations!.waiting).toBe(3)
   const hidden = await withOrgContext(appDb, orgId, tx => getManagementReport(tx, orgId, "2026-09-01", "2026-09-30", restricted))
   expect(hidden.performance).toEqual({ responses: null, followUps: null, conversations: null, bookings: null, conversion: null, proposals: null })
+})
+
+it("el primer inicio excluye caducadas del contador completo, no solo de la muestra", async () => {
+  const orgId = "home-expiry"
+  await insertOrg(ownerDb, orgId, orgId)
+  await ownerDb.insert(orgProfile).values({ organizationId: orgId, legalName: "Caducidad de propuestas" })
+  const expiredId = randomUUID()
+  await ownerDb.insert(agentProposal).values([
+    {
+      id: expiredId, organizationId: orgId, action: "enviar_mensaje", status: "propuesta",
+      payload: { kind: "text", text: "Caducada" }, idempotencyKey: "home:caducada",
+      createdAt: new Date(Date.now() - 49 * 3_600_000),
+    },
+    ...Array.from({ length: 4 }, (_, index) => ({
+      organizationId: orgId, action: "enviar_mensaje", status: "propuesta",
+      payload: { kind: "text", text: `Vigente ${index}` }, idempotencyKey: `home:vigente:${index}`,
+    })),
+  ])
+  const home = await withOrgContext(appDb, orgId, tx => getWorkspaceHome(tx, orgId, recipient, full))
+  expect(home.agent?.pendingProposals).toBe(4)
+  expect(home.agent?.proposals).toHaveLength(3)
+  expect(home.agent?.proposals.map(row => row.id)).not.toContain(expiredId)
+  const [expired] = await ownerDb.select({ status: agentProposal.status }).from(agentProposal).where(eq(agentProposal.id, expiredId))
+  expect(expired?.status).toBe("expirada")
 })

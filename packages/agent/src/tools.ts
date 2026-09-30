@@ -87,8 +87,10 @@ export function makeAgentTools(ctx: AgentToolCtx) {
    * confirmación o aprobación, queda pendiente con su recorrido real. Los
    * errores de dominio en ejecución llegan como `fallida` con código estable
    * en `result.errorCode` y motivo prefijado en `error` (HTTP 200): se
-   * reportan al modelo, nunca como aprobación. Si el hilo ya espera un «sí»,
-   * crear lanza PROPOSAL_PENDING y se guía al modelo a pedir la confirmación.
+   * reportan al modelo, nunca como aprobación. Si el hilo ya espera un «sí»
+   * (PROPOSAL_PENDING_CONFIRM), se guía al modelo a pedir la confirmación;
+   * si la pendiente es del equipo (PROPOSAL_PENDING_APPROVAL), se guía a
+   * esperar al equipo sin pedir «sí» ni usar confirmar_propuesta.
    */
   const propose = async (
     action: string,
@@ -114,8 +116,11 @@ export function makeAgentTools(ctx: AgentToolCtx) {
         }),
       )
     } catch (e) {
-      if (e instanceof ServiceError && e.code === "PROPOSAL_PENDING") {
-        return "Ya hay una propuesta esperando la confirmación del paciente en este hilo: pídele que confirme con un sí claro y luego usa confirmar_propuesta, no crees otra."
+      if (e instanceof ServiceError && e.code === "PROPOSAL_PENDING_CONFIRM") {
+        return "Ya hay una propuesta esperando la confirmación del interlocutor en este hilo: pídele que confirme con un sí claro y luego usa confirmar_propuesta, no crees otra."
+      }
+      if (e instanceof ServiceError && e.code === "PROPOSAL_PENDING_APPROVAL") {
+        return "Ya hay una propuesta pendiente de decisión del equipo en este hilo. Informa al interlocutor de que el equipo la está revisando y espera su decisión; un sí del interlocutor no sustituye esa aprobación."
       }
       throw e
     }
@@ -132,9 +137,9 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       return `La propuesta ${proposal.id} expiró (48h): vuelve a proponer el acto con datos vigentes, no la confirmes.`
     }
     if (proposal.mode === "confirmar_usuario") {
-      return `Propuesta ${proposal.id} creada: pide al paciente que confirme con un sí claro y luego usa confirmar_propuesta.`
+      return `Propuesta ${proposal.id} creada: pide al interlocutor que confirme con un sí claro y luego usa confirmar_propuesta.`
     }
-    return `Propuesta ${proposal.id} enviada a aprobación del equipo: avisa al paciente que lo contactaremos.`
+    return `Propuesta ${proposal.id} enviada a aprobación del equipo: avisa al interlocutor que lo contactaremos.`
   }
 
   /**
@@ -459,9 +464,18 @@ export function makeAgentTools(ctx: AgentToolCtx) {
   const confirmProposal = tool(
     async ({ proposalId }: { proposalId: string }) => {
       if (ctx.dryRun) return `[SIMULACIÓN] Se confirmaría la propuesta ${proposalId}.`
-      const proposal = await inOrg((tx) =>
-        confirmProposalByContact(tx, ctx.orgId, ctx.contactId, proposalId, { secretsKey: ctx.secretsKey }),
-      )
+      let proposal: ProposalItem
+      try {
+        proposal = await inOrg((tx) =>
+          confirmProposalByContact(tx, ctx.orgId, ctx.contactId, proposalId, { secretsKey: ctx.secretsKey }),
+        )
+      } catch (e) {
+        if (e instanceof ServiceError && e.code === "PROPOSAL_NEEDS_TEAM_APPROVAL") {
+          return "Esa propuesta exige aprobación del equipo: el sí del interlocutor no la ejecuta. Avísale de que el equipo la está revisando y espera su decisión."
+        }
+        if (e instanceof ServiceError && e.code === "PROPOSAL_NOT_CONTACT_CONFIRMABLE") return e.message
+        throw e
+      }
       if (proposal.status === "ejecutada") return `Confirmado y ejecutado (propuesta ${proposal.id}).`
       if (proposal.status === "fallida") {
         const rawError = proposal.error?.trim() ?? ""
@@ -470,13 +484,14 @@ export function makeAgentTools(ctx: AgentToolCtx) {
         return `No se pudo ejecutar al confirmar (propuesta ${proposal.id})${detail} Ofrece una alternativa o deriva a humano.`
       }
       if (proposal.status === "expirada") {
-        return `La propuesta ${proposal.id} expiró (48h): pide de nuevo el acto al paciente para crear una nueva propuesta, no reintentes confirmar.`
+        return `La propuesta ${proposal.id} expiró (48h): pide de nuevo el acto al interlocutor para crear una nueva propuesta, no reintentes confirmar.`
       }
       return `Propuesta ${proposal.id} en estado ${proposal.status}.`
     },
     {
       name: "confirmar_propuesta",
-      description: "Úsala SOLO cuando el paciente confirmó explícitamente el acto propuesto.",
+      description:
+        "Confirma un acto en modo confirmar_usuario cuando el interlocutor lo aprobó con un sí explícito. Jamás la uses para propuestas que requieren aprobación del equipo: esas las decide el equipo.",
       schema: z.object({ proposalId: z.string().uuid() }),
     },
   )

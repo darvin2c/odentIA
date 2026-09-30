@@ -14,6 +14,7 @@ import {
   listHandoffs,
   listProposals,
   requiredPermissionForAction,
+  ServiceError,
 } from "@odentia/services"
 import { type Context, Hono } from "hono"
 import { z } from "zod"
@@ -88,7 +89,10 @@ const simulateInput = z.object({
    * `agent.write` en sus rutas propias.
    */
   async function actionGate(c: Context, memberRole: string, orgId: string, id: string): Promise<Response | null> {
-    const proposal = await withOrgContext(deps.db, orgId, (tx) => getProposal(tx, orgId, id)).catch(() => null)
+    const proposal = await withOrgContext(deps.db, orgId, (tx) => getProposal(tx, orgId, id)).catch((error: unknown) => {
+      if (error instanceof ServiceError && error.code === "NOT_FOUND" && error.status === 404) return null
+      throw error
+    })
     if (!proposal) return c.json(errorBody(c, "NOT_FOUND", "Propuesta no encontrada"), 404)
     const needed = requiredPermissionForAction(proposal.action)
     if (!canAccess(memberRole, needed)) {

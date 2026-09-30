@@ -13,6 +13,7 @@ import {
   ingestInbound,
   createTask,
   listProposals,
+  listOpportunities,
   nextPatientNumber,
   secretsKeyFromEnv,
   setPatientContact,
@@ -519,4 +520,49 @@ it("segunda propuesta en espera guía a confirmar en vez de romper el turno", as
   const pending = await withOrgContext(appDb, "org_a", (tx) =>
     listProposals(tx, "org_a", { conversationId, status: "propuesta" }))
   expect(pending).toHaveLength(1)
+})
+
+it("en modo equipo el segundo intento y confirmar_propuesta no piden sí ni ejecutan", async () => {
+  const { conversationId } = await ingestText("tg:equipo-si", "evt-equipo-si", "Quiero abrir mi caso")
+  const [conv] = await withOrgContext(appDb, "org_a", (tx) =>
+    tx.select({ contactId: conversation.contactId }).from(conversation).where(eq(conversation.id, conversationId)))
+  expect(conv).toBeDefined()
+  const prevPolicy = await withOrgContext(appDb, "org_a", (tx) => getAutonomyPolicy(tx, "org_a"))
+  const stamp = Date.now()
+  const actorId = `agent-actor-e-${stamp}`
+  await ownerDb.insert(user).values([
+    { id: actorId, name: "Actor Equipo", email: `actor-e-${stamp}@example.test` },
+  ])
+  await ownerDb.execute(sql`
+    insert into "member" ("id", "organization_id", "user_id", "role", "created_at") values
+      (${`m-${actorId}`}, 'org_a', ${actorId}, 'owner', now())`)
+  await withOrgContext(appDb, "org_a", (tx) =>
+    updateAutonomyPolicy(tx, "org_a", actorId, { crear_oportunidad: "aprobar_equipo" }))
+  const ctx: AgentToolCtx = {
+    db: appDb, orgId: "org_a", conversationId, contactId: conv!.contactId,
+    triggerMessageId: null, secretsKey: KEY, dryRun: false, handedOff: false,
+    toolsUsed: [], usage: { inputTokens: 0, outputTokens: 0, reported: false },
+  }
+  const tools = makeAgentTools(ctx)
+  const creator = tools.find((t) => t.name === "create_opportunity")
+  expect(creator).toBeDefined()
+  const before = await withOrgContext(appDb, "org_a", tx =>
+    listOpportunities(tx, "org_a", { contactId: conv!.contactId }))
+  await creator!.invoke({ title: "Caso equipo" })
+  await creator!.invoke({ title: "Segundo caso equipo" })
+  const pendingTeam = await withOrgContext(appDb, "org_a", (tx) =>
+    listProposals(tx, "org_a", { conversationId, status: "propuesta" }))
+  expect(pendingTeam).toHaveLength(1)
+  await ingestText("tg:equipo-si", "evt-equipo-si-2", "Sí, confirmo")
+  const confirmer = tools.find((t) => t.name === "confirmar_propuesta")
+  expect(confirmer).toBeDefined()
+  await confirmer!.invoke({ proposalId: pendingTeam[0]!.id })
+  const stillPending = await withOrgContext(appDb, "org_a", (tx) =>
+    listProposals(tx, "org_a", { conversationId, status: "propuesta" }))
+  expect(stillPending).toHaveLength(1)
+  const opportunities = await withOrgContext(appDb, "org_a", tx =>
+    listOpportunities(tx, "org_a", { contactId: conv!.contactId }))
+  expect(opportunities.items.map(row => row.id)).toEqual(before.items.map(row => row.id))
+  await withOrgContext(appDb, "org_a", (tx) =>
+    updateAutonomyPolicy(tx, "org_a", actorId, { crear_oportunidad: prevPolicy.crear_oportunidad }))
 })

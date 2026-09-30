@@ -87,9 +87,9 @@ export interface WorkspaceAgentHome {
 
 /** Banda del agente para el home: pendientes, derivaciones recientes y corridas de hoy (zona de la org). */
 async function workspaceAgent(tx: Db, orgId: string, start: SQL, end: SQL): Promise<WorkspaceAgentHome> {
+  const proposalRows = await listProposals(tx, orgId, { status: "propuesta", limit: 3 })
   const [pending] = await tx.execute<{ count: number }>(sql`
     select count(*)::int as count from agent_proposal where organization_id=${orgId} and status='propuesta'`)
-  const proposalRows = await listProposals(tx, orgId, { status: "propuesta", limit: 3 })
   const handoffRows = (await listHandoffs(tx, orgId, { limit: 3 }))
     .filter(row => Date.parse(row.createdAt) >= Date.now() - 72 * 3_600_000)
   const [today] = await tx.execute<{ runs: number; ok: number; handoff: number; error: number; omitida: number }>(sql`

@@ -189,8 +189,14 @@ export function TaskDrawer({
         })
       }
       // La oportunidad manda el contacto: si hay discrepancia con el contacto
-      // elegido se rechaza aquí en vez de dejarla al servidor en silencio.
+      // elegido se rechaza aquí en vez de dejarla al servidor en silencio. Si
+      // hay contacto y la oportunidad manual no está entre sus opciones (p. ej.
+      // quedó huérfana tras cambiar el contacto), no se envía su id oculto.
+      // Sin contacto, el id solo es válido: el servidor deriva el vínculo.
       const oppContactId = chosenOpp?.contactId ?? null
+      if (!opportunityId && draftOpportunityId !== "" && !chosenOpp && effectiveContactId !== "") {
+        throw new Error("La oportunidad elegida ya no está disponible: vuelve a elegirla.")
+      }
       if (oppContactId && effectiveContactId && oppContactId !== effectiveContactId) {
         throw new Error("La oportunidad pertenece a otro contacto: revisa los vínculos.")
       }
@@ -341,6 +347,7 @@ export function TaskDrawer({
                   onClick={() => {
                     setDraftContactId("")
                     setDraftConversationId("")
+                    setDraftOpportunityId("")
                   }}
                 >
                   Quitar
@@ -365,6 +372,7 @@ export function TaskDrawer({
                       onClick={() => {
                         setDraftContactId(c.id)
                         setDraftConversationId("")
+                        setDraftOpportunityId("")
                       }}
                     >
                       {c.displayName}
@@ -453,8 +461,12 @@ export function TaskDrawer({
                   className="justify-start"
                   onClick={() => {
                     setDraftConversationId(c.id)
-                    // El hilo arrastra su contacto salvo que ya haya uno fijo.
-                    if (!contactId && draftContactId === "") setDraftContactId(c.contact.id)
+                    // El hilo arrastra su contacto salvo que ya haya uno fijo; si
+                    // cambia el contacto, la oportunidad anterior queda huérfana.
+                    if (!contactId && draftContactId === "") {
+                      setDraftContactId(c.contact.id)
+                      setDraftOpportunityId("")
+                    }
                   }}
                 >
                   {c.contact.displayName} · {channelLabel(c.connection.channel)}

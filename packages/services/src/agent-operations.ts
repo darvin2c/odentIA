@@ -1204,16 +1204,20 @@ export async function createProposal(
     const pendingModes = pendings.map((p) => policy[p.action as ProposalAction] ?? "aprobar_equipo")
     if (mode === "confirmar_usuario" && pendingModes.includes("confirmar_usuario")) {
       throw new ServiceError(
-        "PROPOSAL_PENDING",
+        "PROPOSAL_PENDING_CONFIRM",
         409,
-        "Hay una propuesta esperando la confirmación del paciente en este hilo; resuélvela primero",
+        "Hay una propuesta esperando la confirmación del interlocutor en este hilo; resuélvela primero",
       )
     }
-    if (input.action !== "enviar_mensaje" && pendings.some((p) => p.action !== "enviar_mensaje")) {
+    const pendingCommercial = pendings.find((p) => p.action !== "enviar_mensaje")
+    if (input.action !== "enviar_mensaje" && pendingCommercial) {
+      const awaitingContact = policy[pendingCommercial.action as ProposalAction] === "confirmar_usuario"
       throw new ServiceError(
-        "PROPOSAL_PENDING",
+        awaitingContact ? "PROPOSAL_PENDING_CONFIRM" : "PROPOSAL_PENDING_APPROVAL",
         409,
-        "Hay una propuesta pendiente en esta conversación; confírmala o recházala primero",
+        awaitingContact
+          ? "Hay una propuesta esperando la confirmación del interlocutor en este hilo; resuélvela primero"
+          : "Hay una propuesta pendiente de decisión del equipo en esta conversación; el equipo debe decidirla antes de crear otra",
       )
     }
   }
@@ -1431,13 +1435,17 @@ async function pendingConflict(tx: Db, orgId: string, id: string): Promise<Servi
 }
 
 /**
- * Confirmación del interlocutor en el chat (modo `confirmar_usuario`).
- * Evidencia estricta y ligada a la propuesta: un mensaje entrante posterior a
- * ESTA propuesta cuyo texto completo sea una afirmación (sin negaciones ni
- * preguntas). El mensaje que confirma queda en la auditoría. Vencida a las
- * 48h: se devuelve `expirada` (HTTP 200, sin reintento), nunca update+throw.
- * El staff que confirma desde consola queda auditado.
- * Devuelve `ejecutada`, `fallida` o `expirada` (HTTP 200; ver `decideProposal`).
+ * Confirmación del interlocutor en el chat (solo modo `confirmar_usuario`
+ * vigente). Evidencia estricta y ligada a la propuesta: un mensaje entrante
+ * posterior a ESTA propuesta cuyo texto completo sea una afirmación (sin
+ * negaciones ni preguntas). El mensaje que confirma queda en la auditoría.
+ * Los modos `aprobar_equipo` y `directo` no aceptan confirmación del contacto:
+ * el sí del interlocutor jamás autoriza un acto del equipo. Si la política
+ * se endureció tras crear la propuesta, la vigente manda.
+ * Vencida a las 48h: se devuelve `expirada` (HTTP 200, sin
+ * reintento), nunca update+throw. El staff que confirma desde consola queda
+ * auditado. Devuelve `ejecutada`, `fallida` o `expirada` (HTTP 200; ver
+ * `decideProposal`).
  */
 const AFFIRMATIVE_PHRASES = new Set([
   "si",
@@ -1481,6 +1489,17 @@ export async function confirmProposalByContact(
   if (expired) return expired
   if (current.status !== "propuesta") {
     throw new ServiceError("PROPOSAL_NOT_PENDING", 409, `La propuesta ya está ${current.status}`)
+  }
+  const policy = await getAutonomyPolicy(tx, orgId)
+  const effectiveMode = policy[current.action as ProposalAction] ?? "aprobar_equipo"
+  if (effectiveMode !== "confirmar_usuario") {
+    throw new ServiceError(
+      effectiveMode === "aprobar_equipo" ? "PROPOSAL_NEEDS_TEAM_APPROVAL" : "PROPOSAL_NOT_CONTACT_CONFIRMABLE",
+      409,
+      effectiveMode === "directo"
+        ? "Esta propuesta es de ejecución directa; no se confirma con el sí del interlocutor"
+        : "Esta propuesta exige aprobación del equipo; el sí del interlocutor no la ejecuta",
+    )
   }
   let confirmationId: string | null = null
   if (current.conversationId) {

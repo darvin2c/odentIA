@@ -148,6 +148,7 @@ it("la navegación lateral permite cancelar la salida antes de perder cambios", 
       LinkComponent={({ to, children, ...props }) => <Link to={to} {...props}>{children}</Link>}
       pathname="/"
       user={{ name: "Operadora", email: "operadora@example.test" }}
+      brand={<span>odentIA</span>}
       onSignOut={() => {}}
     ><Outlet /></AppShell>,
   })

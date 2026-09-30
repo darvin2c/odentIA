@@ -232,6 +232,56 @@ describe("recorrido comercial con aprobación del equipo", () => {
     const reread = await run((tx) => getProposal(tx, ORG, proposal.id))
     expect(reread.result).toMatchObject({ opportunityId: opp.id })
   })
+
+  it("el sí del interlocutor no ejecuta una propuesta que exige aprobación del equipo", async () => {
+    const sender = "comercial-7"
+    const { conversationId, contactId, connectionId: connId } = await openConversation(sender, "evt-com-7")
+    const { openA } = await openStages()
+    const opp = await run((tx) =>
+      createOpportunity(tx, ORG, { contactId, title: "Ortodoncia equipo", stageId: openA }, { userId: null }),
+    )
+    await run((tx) => updateAutonomyPolicy(tx, ORG, "owner-1", { cerrar_oportunidad: "aprobar_equipo" }))
+    const proposal = await run((tx) =>
+      createProposal(tx, ORG, {
+        conversationId, action: "cerrar_oportunidad",
+        payload: { opportunityId: opp.id, outcome: "lost", reason: "El paciente desistió" },
+        idempotencyKey: "test:crm-agent:team-confirm-1",
+      }),
+    )
+    expect(proposal.status).toBe("propuesta")
+    expect(proposal.mode).toBe("aprobar_equipo")
+    await inbound(sender, connId, "evt-com-7-si", "Sí, confirmo")
+    await expect(
+      run((tx) => confirmProposalByContact(tx, ORG, contactId, proposal.id)),
+    ).rejects.toMatchObject({ code: "PROPOSAL_NEEDS_TEAM_APPROVAL", status: 409 })
+    expect((await run((tx) => getProposal(tx, ORG, proposal.id))).status).toBe("propuesta")
+    expect((await run((tx) => getOpportunity(tx, ORG, opp.id))).status).toBe("open")
+    const decided = await run((tx) => decideProposal(tx, ORG, "owner-1", proposal.id, { decision: "aprobada" }))
+    expect(decided.status).toBe("ejecutada")
+    expect((await run((tx) => getOpportunity(tx, ORG, opp.id))).status).toBe("lost")
+  })
+
+  it("endurecer la política a aprobar_equipo bloquea el sí aunque se creó como confirmar_usuario", async () => {
+    const sender = "comercial-8"
+    const { conversationId, contactId, connectionId: connId } = await openConversation(sender, "evt-com-8")
+    await run((tx) => updateAutonomyPolicy(tx, ORG, "owner-1", { crear_oportunidad: "confirmar_usuario" }))
+    const proposal = await run((tx) =>
+      createProposal(tx, ORG, {
+        conversationId, action: "crear_oportunidad",
+        payload: { title: "Endurecida a equipo" },
+        idempotencyKey: "test:crm-agent:team-harden-1",
+      }),
+    )
+    expect(proposal.mode).toBe("confirmar_usuario")
+    await run((tx) => updateAutonomyPolicy(tx, ORG, "owner-1", { crear_oportunidad: "aprobar_equipo" }))
+    await inbound(sender, connId, "evt-com-8-si", "Sí, confirmo")
+    await expect(
+      run((tx) => confirmProposalByContact(tx, ORG, contactId, proposal.id)),
+    ).rejects.toMatchObject({ code: "PROPOSAL_NEEDS_TEAM_APPROVAL", status: 409 })
+    expect((await run((tx) => getProposal(tx, ORG, proposal.id))).status).toBe("propuesta")
+    const decided = await run((tx) => decideProposal(tx, ORG, "owner-1", proposal.id, { decision: "aprobada" }))
+    expect(decided.status).toBe("ejecutada")
+  })
 })
 
 describe("evidencia congelada de lo aprobado", () => {
@@ -449,7 +499,7 @@ describe("el hilo nunca se silencia: mensajes y caducidad", () => {
     const { conversationId, contactId } = await openConversation("hilo-5", "evt-hilo-5")
     const { openA } = await openStages()
     await run((tx) =>
-      updateAutonomyPolicy(tx, ORG, "owner-1", { actualizar_seguimiento: "confirmar_usuario", enviar_mensaje: "confirmar_usuario" }),
+      updateAutonomyPolicy(tx, ORG, "owner-1", { actualizar_seguimiento: "confirmar_usuario", enviar_mensaje: "confirmar_usuario", crear_oportunidad: "aprobar_equipo" }),
     )
     const opp = await run((tx) =>
       createOpportunity(tx, ORG, { contactId, title: "Blanqueamiento", stageId: openA }, { userId: null }),
@@ -462,6 +512,10 @@ describe("el hilo nunca se silencia: mensajes y caducidad", () => {
       }),
     )
     expect(first.status).toBe("propuesta")
+    await expect(run(tx => createProposal(tx, ORG, {
+      conversationId, action: "crear_oportunidad", payload: { title: "Otra consulta pendiente" },
+      idempotencyKey: "test:crm-agent:hilo-8-equipo",
+    }))).rejects.toMatchObject({ code: "PROPOSAL_PENDING_CONFIRM", status: 409 })
     await expect(
       run((tx) =>
         createProposal(tx, ORG, {
@@ -470,7 +524,7 @@ describe("el hilo nunca se silencia: mensajes y caducidad", () => {
           idempotencyKey: "test:crm-agent:hilo-9",
         }),
       ),
-    ).rejects.toMatchObject({ code: "PROPOSAL_PENDING", status: 409 })
+    ).rejects.toMatchObject({ code: "PROPOSAL_PENDING_CONFIRM", status: 409 })
     // En modo directo el mensaje sí coexiste con la espera de confirmación.
     await run((tx) => updateAutonomyPolicy(tx, ORG, "owner-1", { enviar_mensaje: "directo" }))
     const direct = await run((tx) =>
@@ -481,6 +535,34 @@ describe("el hilo nunca se silencia: mensajes y caducidad", () => {
       }),
     )
     expect(direct.status).toBe("ejecutada")
+  })
+
+  it("la segunda comercial pendiente del equipo usa código de aprobación, no de confirmación", async () => {
+    const { conversationId, contactId } = await openConversation("hilo-6", "evt-hilo-6")
+    const { openA } = await openStages()
+    await run((tx) =>
+      updateAutonomyPolicy(tx, ORG, "owner-1", { actualizar_seguimiento: "aprobar_equipo", crear_oportunidad: "aprobar_equipo" }),
+    )
+    const opp = await run((tx) =>
+      createOpportunity(tx, ORG, { contactId, title: "Corona", stageId: openA }, { userId: null }),
+    )
+    const first = await run((tx) =>
+      createProposal(tx, ORG, {
+        conversationId, action: "actualizar_seguimiento",
+        payload: { opportunityId: opp.id, nextActionNote: "Llamar mañana" },
+        idempotencyKey: "test:crm-agent:hilo-11",
+      }),
+    )
+    expect(first.status).toBe("propuesta")
+    await expect(
+      run((tx) =>
+        createProposal(tx, ORG, {
+          conversationId, action: "crear_oportunidad",
+          payload: { title: "Segunda comercial" },
+          idempotencyKey: "test:crm-agent:hilo-12",
+        }),
+      ),
+    ).rejects.toMatchObject({ code: "PROPOSAL_PENDING_APPROVAL", status: 409 })
   })
 })
 

@@ -10,7 +10,7 @@ import {
   customFieldDef,
 } from "@odentia/db/schema/crm"
 import { auditEvent } from "@odentia/db/schema/org"
-import { and, asc, desc, eq, gt, ilike, inArray, lt, or, sql } from "drizzle-orm"
+import { and, asc, desc, eq, gt, ilike, inArray, isNotNull, lt, or, sql } from "drizzle-orm"
 import { opportunity } from "@odentia/db/schema/opportunities"
 import { notFound, ServiceError, validation } from "./errors.js"
 
@@ -812,11 +812,18 @@ export async function addContactIdentity(
 /**
  * Reasignación explícita de una identidad («Reasignar canal»).
  * Orden de locks: advisory de identidad → enlaces de registro pendientes
- * ordenados por id → contactos ordenados por id (FOR UPDATE). Mueve la
+ * ordenados por id → contactos ordenados por id (FOR UPDATE) → oportunidades
+ * y tareas del origen (FOR UPDATE, oportunidad antes que tarea). Mueve la
  * identidad y solo las conversaciones directas resueltas por esa identidad,
- * más las tareas doblemente ligadas (esas conversaciones + contacto origen).
- * No mueve vínculos de pacientes ni archiva/fusiona el origen. Revoca los
- * enlaces de registro pendientes del contacto origen.
+ * más las tareas operativas (sin oportunidad) ligadas a esos hilos.
+ * No transfiere pacientes, representación ni negocio: las oportunidades y las
+ * tareas comerciales (opportunityId != null) quedan en el contacto origen con
+ * su conversationId desvinculado antes de mover el hilo (el guard SQL 23514
+ * exige hilo y oportunidad del mismo contacto). Los seguimientos abiertos que
+ * espejan el hilo de su oportunidad se desvinculan también, así el sync
+ * futuro nunca revincula la conversación antigua. No mueve vínculos de
+ * pacientes ni archiva/fusiona el origen. Revoca los enlaces de registro
+ * pendientes del contacto origen.
  */
 export async function moveContactIdentity(
   tx: Db,
@@ -829,6 +836,8 @@ export async function moveContactIdentity(
   movedConversations: number
   movedTasks: number
   revokedLinks: number
+  reconciledOpportunities: number
+  reconciledTasks: number
 }> {
   const actor = { userId: actorUserId }
   const reason = input.reason.trim()
@@ -910,6 +919,83 @@ export async function moveContactIdentity(
       !isTelegramGroupThread(r.connection.channel, r.conv.externalThreadId),
   )
   const movedIds = movable.map((r) => r.conv.id)
+  const movedSorted = [...movedIds].sort()
+  // La reasignación de canal no transfiere negocio: las oportunidades y las
+  // tareas comerciales quedan en el origen. El guard SQL exige hilo y
+  // oportunidad del mismo contacto, así que se desvinculan ANTES de mover el
+  // hilo; solo las tareas operativas (sin oportunidad) viajan con él.
+  const reconciledOpportunityIds = new Set<string>()
+  const reconciledTaskIds = new Set<string>()
+  let operationalTaskIds: string[] = []
+  if (movedSorted.length > 0) {
+    const originOpps = await tx
+      .select({ id: opportunity.id, conversationId: opportunity.conversationId })
+      .from(opportunity)
+      .where(
+        and(eq(opportunity.organizationId, orgId), eq(opportunity.contactId, input.fromContactId)),
+      )
+      .orderBy(asc(opportunity.id))
+      .for("update")
+    const detachOppIds = originOpps
+      .filter((o) => o.conversationId !== null && movedSorted.includes(o.conversationId))
+      .map((o) => o.id)
+    const linkedTasks = await tx
+      .select({
+        id: crmTask.id,
+        opportunityId: crmTask.opportunityId,
+        conversationId: crmTask.conversationId,
+      })
+      .from(crmTask)
+      .where(
+        and(
+          eq(crmTask.organizationId, orgId),
+          eq(crmTask.contactId, input.fromContactId),
+          inArray(crmTask.conversationId, movedSorted),
+        ),
+      )
+      .orderBy(asc(crmTask.id))
+      .for("update")
+    for (const t of linkedTasks) {
+      if (t.opportunityId !== null) reconciledTaskIds.add(t.id)
+      else operationalTaskIds.push(t.id)
+    }
+    if (detachOppIds.length > 0) {
+      const detachedOpps = await tx
+        .update(opportunity)
+        .set({ conversationId: null, updatedAt: new Date() })
+        .where(
+          and(eq(opportunity.organizationId, orgId), inArray(opportunity.id, [...detachOppIds].sort())),
+        )
+        .returning({ id: opportunity.id })
+      for (const r of detachedOpps) reconciledOpportunityIds.add(r.id)
+      // Seguimientos abiertos que espejan el hilo de su oportunidad: se
+      // desvinculan también aunque apunten a otro hilo, para que el sync
+      // futuro no revincule la conversación antigua.
+      const followUps = await tx
+        .select({ id: crmTask.id })
+        .from(crmTask)
+        .where(
+          and(
+            eq(crmTask.organizationId, orgId),
+            inArray(crmTask.opportunityId, [...detachOppIds].sort()),
+            eq(crmTask.kind, "opportunity_follow_up"),
+            eq(crmTask.status, "open"),
+            isNotNull(crmTask.conversationId),
+          ),
+        )
+        .orderBy(asc(crmTask.id))
+        .for("update")
+      for (const f of followUps) reconciledTaskIds.add(f.id)
+    }
+    if (reconciledTaskIds.size > 0) {
+      await tx
+        .update(crmTask)
+        .set({ conversationId: null, updatedAt: new Date() })
+        .where(
+          and(eq(crmTask.organizationId, orgId), inArray(crmTask.id, [...reconciledTaskIds].sort())),
+        )
+    }
+  }
   const revokedCount = await revokePendingRegistrationLinks(tx, orgId, input.fromContactId)
   await tx
     .update(contactIdentity)
@@ -918,28 +1004,28 @@ export async function moveContactIdentity(
       and(eq(contactIdentity.id, lockedIdentity.id), eq(contactIdentity.organizationId, orgId)),
     )
   let movedTasks = 0
-  if (movedIds.length > 0) {
+  if (movedSorted.length > 0) {
     await tx
       .update(conversation)
       .set({ contactId: input.toContactId, updatedAt: new Date() })
       .where(
-        and(
-          eq(conversation.organizationId, orgId),
-          inArray(conversation.id, [...movedIds].sort()),
-        ),
+        and(eq(conversation.organizationId, orgId), inArray(conversation.id, movedSorted)),
       )
-    const movedTaskRows = await tx
-      .update(crmTask)
-      .set({ contactId: input.toContactId, updatedAt: new Date() })
-      .where(
-        and(
-          eq(crmTask.organizationId, orgId),
-          eq(crmTask.contactId, input.fromContactId),
-          inArray(crmTask.conversationId, [...movedIds].sort()),
-        ),
-      )
-      .returning({ id: crmTask.id })
-    movedTasks = movedTaskRows.length
+    operationalTaskIds = [...operationalTaskIds].sort()
+    if (operationalTaskIds.length > 0) {
+      const movedTaskRows = await tx
+        .update(crmTask)
+        .set({ contactId: input.toContactId, updatedAt: new Date() })
+        .where(
+          and(
+            eq(crmTask.organizationId, orgId),
+            eq(crmTask.contactId, input.fromContactId),
+            inArray(crmTask.id, operationalTaskIds),
+          ),
+        )
+        .returning({ id: crmTask.id })
+      movedTasks = movedTaskRows.length
+    }
   }
   await auditContact(tx, orgId, actor, "contact.identity_moved", input.fromContactId, {
     fields: ["identityId", "fromContactId", "toContactId", "reason"],
@@ -950,6 +1036,10 @@ export async function moveContactIdentity(
     movedConversations: movedIds.length,
     movedTasks,
     revokedLinks: revokedCount,
+    reconciledOpportunities: reconciledOpportunityIds.size,
+    reconciledTasks: reconciledTaskIds.size,
+    reconciledOpportunityIds: [...reconciledOpportunityIds].sort(),
+    reconciledTaskIds: [...reconciledTaskIds].sort(),
   })
   const [moved] = await tx
     .select()
@@ -962,6 +1052,8 @@ export async function moveContactIdentity(
     movedConversations: movedIds.length,
     movedTasks,
     revokedLinks: revokedCount,
+    reconciledOpportunities: reconciledOpportunityIds.size,
+    reconciledTasks: reconciledTaskIds.size,
   }
 }
 

@@ -262,7 +262,7 @@ function ContactDetailPage() {
     mutationFn: () => {
       if (!moveIdentityId || !destChoice) throw new Error("Elige el contacto destino")
       return apiFetch<{
-        data: { movedConversations: number; movedTasks: number; revokedLinks: number }
+        data: { movedConversations: number; movedTasks: number; revokedLinks: number; reconciledOpportunities: number; reconciledTasks: number }
       }>(`/api/contacts/${contactId}/identities/${moveIdentityId}/move`, {
         method: "POST",
         body: JSON.stringify({ toContactId: destChoice.id, reason: moveReason.trim() }),
@@ -270,7 +270,7 @@ function ContactDetailPage() {
     },
     onSuccess: (result) => {
       setMoveResult(
-        `Identidad reasignada: ${result.data.movedConversations} conversación(es), ${result.data.movedTasks} tarea(s). Enlaces pendientes revocados: ${result.data.revokedLinks}.`,
+        `Canal reasignado: ${result.data.movedConversations} conversación(es) y ${result.data.movedTasks} tarea(s) operativa(s) trasladadas. Se conservaron en origen ${result.data.reconciledOpportunities} oportunidad(es) y ${result.data.reconciledTasks} tarea(s) comerciales, desvinculadas del hilo trasladado. Enlaces pendientes revocados: ${result.data.revokedLinks}.`,
       )
       setMoveIdentityId(null)
       setDestChoice(null)
@@ -1240,8 +1240,9 @@ function ContactDetailPage() {
             Se mueve la identidad de {moveIdentity ? channelLabel(moveIdentity.channel) : ""} (
             {moveIdentity?.displayName ?? moveIdentity?.externalUserId}) desde{" "}
             <strong>{detail.contact.displayName}</strong> al contacto destino, junto con{" "}
-            {moveResolvedCount} conversación(es) resuelta(s) por esa identidad. Los vínculos de
-            pacientes no se mueven y el origen no se archiva.
+            {moveResolvedCount} conversación(es) resuelta(s) por esa identidad y sus tareas operativas.
+            Las oportunidades, seguimientos comerciales y vínculos de pacientes permanecen en el origen,
+            desvinculados del hilo trasladado. El origen no se archiva.
           </p>
           <Field>
             <FieldLabel>Buscar contacto destino</FieldLabel>

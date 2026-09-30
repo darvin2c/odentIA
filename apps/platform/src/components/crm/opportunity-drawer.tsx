@@ -2,7 +2,7 @@ import { Button, Field, FieldLabel, Input } from "@odentia/ui"
 import { FormDrawer } from "@odentia/ui-patterns"
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
 import { channelLabel } from "../../lib/channels"
 import {
@@ -120,10 +120,16 @@ export function OpportunityDrawer({
 
   const effectiveContactId = contactId ?? draftContactId ?? ""
   const defaultPipeline = pipelines.find((p) => p.isDefault) ?? pipelines[0] ?? null
+  const defaultPipelineId = defaultPipeline?.id ?? ""
+  // El usuario manda sobre el valor por defecto: si elige o limpia el embudo
+  // a mano, la llegada tardía de /pipelines no lo pisa.
+  const pipelineTouchedRef = useRef(false)
 
-  // Al abrir: valores iniciales (edición desde el detalle, creación en blanco
-  // con el embudo por defecto). Al cerrar se conserva el borrador hasta el
-  // próximo abrir para no perder el caso a mitad de captura.
+  // Al abrir o cambiar de registro: valores iniciales (edición desde el
+  // detalle, creación en blanco). No depende del embudo por defecto para no
+  // borrar lo que el usuario ya escribió cuando /pipelines llega tarde. Al
+  // cerrar se conserva el borrador hasta el próximo abrir para no perder el
+  // caso a mitad de captura.
   useEffect(() => {
     if (!open) return
     if (detail) {
@@ -144,7 +150,7 @@ export function OpportunityDrawer({
     } else if (!isEdit) {
       setDraftContactId("")
       setDraftPatientId("")
-      setDraftPipelineId(defaultPipeline?.id ?? "")
+      setDraftPipelineId("")
       setDraftStageId("")
       setDraftTitle("")
       setDraftInterest("")
@@ -157,13 +163,25 @@ export function OpportunityDrawer({
       setDraftNote("")
       setDraftBudgetId("")
     }
+    pipelineTouchedRef.current = false
     setAmountError(null)
     setShowAllContacts(false)
     setCloseOutcome(null)
     setCloseReason("")
     // Solo al abrir o al llegar el detalle: el borrador es del usuario después.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, detail?.id, defaultPipeline?.id])
+  }, [open, opportunityId, detail?.id])
+
+  // Embudo por defecto tardío: solo si la selección sigue sin valor y el
+  // usuario no la tocó (respeta elegir o limpiar a mano). Nunca toca el resto
+  // del borrador.
+  useEffect(() => {
+    if (!open || isEdit) return
+    if (defaultPipelineId === "") return
+    if (pipelineTouchedRef.current) return
+    if (draftPipelineId !== "") return
+    setDraftPipelineId(defaultPipelineId)
+  }, [open, isEdit, defaultPipelineId, draftPipelineId])
 
   const contactDetailQuery = useQuery({
     queryKey: ["contact", effectiveContactId],
@@ -196,21 +214,18 @@ export function OpportunityDrawer({
     [servicesQuery.data],
   )
 
-  // Presupuesto mínimo del API /crm con permisos del servidor: en edición por
-  // oportunidad, en creación por contacto+paciente. Sin opciones, el selector
-  // muestra el error real sin inventar datos.
-  const budgetQueryKey = isEdit
-    ? ["opportunity-budget-options", opportunityId]
-    : ["contact-budget-options", effectiveContactId, draftPatientId]
+  // Presupuesto mínimo del API /crm con permisos del servidor: siempre por
+  // contacto+paciente efectivos del borrador, también en edición, para no
+  // ofrecer presupuestos del paciente persistido tras cambiar el borrador. La
+  // clave incluye ambas dependencias para no mostrar opciones viejas de otro
+  // paciente. Sin opciones, el selector muestra el error real sin inventar datos.
   const budgetQuery = useQuery({
-    queryKey: budgetQueryKey,
-    queryFn: () => {
-      const url = isEdit
-        ? `/api/crm/opportunities/${opportunityId as string}/budget-options`
-        : `/api/crm/contacts/${effectiveContactId}/budget-options?patientId=${draftPatientId}`
-      return apiFetch<{ data: BudgetOption[] }>(url)
-    },
-    enabled: open && (isEdit || (effectiveContactId !== "" && draftPatientId !== "")),
+    queryKey: ["contact-budget-options", effectiveContactId, draftPatientId],
+    queryFn: () =>
+      apiFetch<{ data: BudgetOption[] }>(
+        `/api/crm/contacts/${effectiveContactId}/budget-options?patientId=${draftPatientId}`,
+      ),
+    enabled: open && effectiveContactId !== "" && draftPatientId !== "",
     retry: false,
   })
   const budgetOptions = budgetQuery.data?.data ?? null
@@ -598,6 +613,7 @@ export function OpportunityDrawer({
                 className="rounded-md border bg-background px-2 py-1.5 text-sm"
                 value={draftPipelineId}
                 onChange={(e) => {
+                  pipelineTouchedRef.current = true
                   setDraftPipelineId(e.target.value)
                   setDraftStageId("")
                 }}
