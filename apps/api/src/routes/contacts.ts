@@ -18,6 +18,7 @@ import { type CrmDeps, runService, serviceErrorResponse, validationError } from 
 const listQuery = z.object({
   q: z.string().optional(),
   isActive: z.enum(["true", "false", "all"]).optional().default("true"),
+  sort: z.enum(["nombre", "-nombre", "actividad", "-actividad"]).optional(),
   cursor: z.string().optional(),
   limit: z.coerce.number().int().min(1).max(100).optional(),
 })

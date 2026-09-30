@@ -32,7 +32,7 @@ function RouterLink({
   className?: string
   children: React.ReactNode
   title?: string
-  onClick?: () => void
+  onClick?: React.MouseEventHandler<HTMLAnchorElement>
 }) {
   return (
     <Link to={to} search={search} className={className} title={title} onClick={onClick} {...rest}>

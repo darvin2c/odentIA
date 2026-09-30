@@ -11,14 +11,27 @@ import {
   getClinicInfoSnapshot,
   getContact,
   listMessages,
+  listContactNotes,
   listOpportunities,
   listPublishedForPrompt,
 } from "@odentia/services"
 import { type AgentToolCtx, makeAgentTools, performHandoff } from "./tools.js"
 
+function isSystemMessage(msg: BaseMessage): boolean {
+  if (msg instanceof SystemMessage) return true
+  // Mensajes rehidratados del checkpointer: misma clase por nombre.
+  return msg.constructor?.name === "SystemMessage"
+}
+
 const AgentState = Annotation.Root({
   messages: Annotation<BaseMessage[]>({
-    reducer: (left, right) => left.concat(right),
+    // El contexto vigente reemplaza al anterior entre turnos (con
+    // checkpointer) en vez de copiarse encima: loadContext devuelve el lote
+    // [system, ...historial] y ese lote sustituye el estado guardado, así no
+    // crece por copia ni conserva políticas antiguas. Dentro del turno los
+    // lotes del modelo y las herramientas no empiezan por system y se
+    // concatenan, sin perder mensajes de herramientas.
+    reducer: (left, right) => (right.length > 0 && right[0] && isSystemMessage(right[0]) ? right : left.concat(right)),
     default: () => [],
   }),
   turnCount: Annotation<number>({
@@ -33,6 +46,7 @@ const BASE_SYSTEM_PROMPT = [
   "Hablas español, tono cercano y profesional.",
   "Respondes, cualificas al paciente y ayudas con información general y citas.",
   "NO das diagnósticos ni inventas precios, sedes o disponibilidad: usa ver_sedes_y_servicios, consultar_conocimiento y buscar_huecos.",
+  "Antes de buscar huecos confirma la sede real con ver_sedes_y_servicios y usa su ID exacto; reserva con proponer_cita usando los IDs exactos del hueco elegido (sede, sillón, profesional, inicio).",
   "Nunca reveles ni pidas historia clínica: solo filiación mínima con ver_contexto_paciente y vínculo verificado; próximas citas, presupuestos y saldo solo con ver_resumen_paciente y según la facultad del interlocutor.",
   "Las citas se proponen con proponer_cita y se ejecutan solo con confirmación o aprobación según la política.",
   "Si el paciente pide hablar con un humano, se queja o el caso es clínico, usa request_human_handoff con motivo, resumen factual y prioridad.",
@@ -78,6 +92,8 @@ function historyToMessages(
  * de owner (el pool es compartido entre orgs y el GUC RLS no se puede fijar
  * por operación): el aislamiento lo da el thread_id exacto
  * `${orgId}:${conversationId}` más las policies RLS para el rol app.
+ * Entre turnos el contexto vigente (sistema e historial desde la base)
+ * reemplaza al guardado: no crece por copia ni conserva políticas antiguas.
  * Sin checkpointer (simulación) el grafo corre sin memoria persistente.
  */
 export function compileAgentGraph(
@@ -95,18 +111,51 @@ export function compileAgentGraph(
   const toolNode = new ToolNode(tools)
 
   async function loadContext(): Promise<{ messages: BaseMessage[] }> {
-    const { contact } = await withOrgContext(toolCtx.db, toolCtx.orgId, (tx) =>
+    const full = await withOrgContext(toolCtx.db, toolCtx.orgId, (tx) =>
       getContact(tx, toolCtx.orgId, toolCtx.contactId),
     )
-    const opportunitiesLine = await withOrgContext(toolCtx.db, toolCtx.orgId, async (tx) => {
-      const { items } = await listOpportunities(tx, toolCtx.orgId, {
+    const contactDetail = full.contact
+    const notes = await withOrgContext(toolCtx.db, toolCtx.orgId, (tx) =>
+      listContactNotes(tx, toolCtx.orgId, toolCtx.contactId, { limit: 5 }),
+    )
+    // Contexto comercial autorizado y paginado: si hay más oportunidades de
+    // las mostradas se avisa (nunca corte mudo).
+    const commercialLine = await withOrgContext(toolCtx.db, toolCtx.orgId, async (tx) => {
+      const { items, nextCursor } = await listOpportunities(tx, toolCtx.orgId, {
         contactId: toolCtx.contactId,
         status: "open",
         limit: 10,
       })
-      if (!items.length) return "sin oportunidades abiertas"
-      return items.map((o) => `${o.title} (etapa ${o.stageName})`).join("; ")
+      const parts: string[] = []
+      if (!items.length) {
+        parts.push("sin oportunidades abiertas")
+      } else {
+        for (const o of items) {
+          const followup = o.nextActionAt
+            ? `; próxima acción ${new Date(o.nextActionAt).toLocaleString("es-PE")}`
+            : ""
+          const amount =
+            o.amountCents !== null ? `; valor ${(o.amountCents / 100).toFixed(2)} ${o.currency}` : ""
+          parts.push(`${o.title} (etapa ${o.stageName}${followup}${amount})`)
+        }
+        if (nextCursor) parts.push("hay más oportunidades: usa listar_oportunidades para verlas todas")
+      }
+      return parts.join("; ")
     })
+    // Seguimientos pendientes del contacto (tareas abiertas): misma fuente
+    // que la ficha, sin ampliar acceso.
+    const followupLine = full.openTasks.length
+      ? full.openTasks
+          .slice(0, 10)
+          .map((t) => `${t.title}${t.dueAt ? ` (vence ${new Date(t.dueAt).toLocaleString("es-PE")})` : ""}`)
+          .join("; ") + (full.openTasks.length > 10 ? "; hay más tareas: usa listar_tareas para verlas todas" : "")
+      : "sin seguimientos pendientes"
+    const tagsLine = contactDetail.tags.length ? contactDetail.tags.join(", ") : "sin etiquetas"
+    const notesLine = contactDetail.notes?.trim() ? contactDetail.notes.trim().slice(0, 500) : null
+    const customLine = Object.entries(contactDetail.customFields ?? {})
+      .slice(0, 10)
+      .map(([k, v]) => `${k}: ${typeof v === "string" ? v.slice(0, 120) : JSON.stringify(v)?.slice(0, 120) ?? ""}`)
+      .join("; ")
     const { items } = await withOrgContext(toolCtx.db, toolCtx.orgId, (tx) =>
       listMessages(tx, toolCtx.orgId, toolCtx.conversationId, { limit: 20 }),
     )
@@ -131,7 +180,10 @@ export function compileAgentGraph(
     const system = [
       BASE_SYSTEM_PROMPT,
       orgPrompt,
-      `Interlocutor: ${contact.displayName}. Oportunidades abiertas: ${opportunitiesLine}.`,
+      `Interlocutor: ${contactDetail.displayName}. Etiquetas: ${tagsLine}. Oportunidades abiertas: ${commercialLine}. Seguimientos: ${followupLine}.`,
+      notesLine ? `Notas del contacto (internas): ${notesLine}${(contactDetail.notes?.trim().length ?? 0) > 500 ? "… (texto completo en leer_contexto_comercial)" : ""}.` : null,
+      notes.items.length ? `Notas operativas recientes (internas; no las reproduzcas al interlocutor):\n${notes.items.map(n => `${n.at}: ${n.body}`).join("\n")}${notes.nextCursor ? "\nHay más notas: usa leer_contexto_comercial con cursor de notas para consultarlas." : ""}` : null,
+      customLine ? `Campos (resumen; valores completos en leer_contexto_comercial): ${customLine}.` : null,
       policyLine,
       knowledgeBlock,
     ]

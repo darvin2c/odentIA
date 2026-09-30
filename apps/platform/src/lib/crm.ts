@@ -71,6 +71,10 @@ export interface TaskItem {
   title: string
   contactId: string | null
   conversationId: string | null
+  opportunityId: string | null
+  kind: "manual" | "opportunity_follow_up"
+  contactName: string | null
+  opportunityTitle: string | null
   assigneeUserId: string | null
   dueAt: string | null
   status: string
@@ -128,6 +132,7 @@ export interface ContactListItem {
   assignedUserId: string | null
   lastInteractionAt: string | null
   channels: string[]
+  openOpportunityCount: number
 }
 
 export interface ContactPatientLink {
@@ -193,6 +198,9 @@ export interface OpportunityListItem {
   interestText: string | null
   serviceName: string | null
   assignedUserId: string | null
+  conversationId: string | null
+  createdAt: string
+  nextActionNote: string | null
   nextActionAt: string | null
   updatedAt: string
 }

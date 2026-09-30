@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { createMemoryHistory, createRootRoute, createRoute, createRouter, Link, Outlet, RouterProvider, useBlocker } from "@tanstack/react-router"
 import { KeyRound, UserRound } from "lucide-react"
 import type { ReactNode } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
@@ -127,4 +128,48 @@ describe("AppShell footerItems", () => {
     )
     expect(screen.queryByRole("link", { name: "Configuración" })).toBeNull()
   })
+})
+
+it("la navegación lateral permite cancelar la salida antes de perder cambios", async () => {
+  function EditingPage() {
+    const blocker = useBlocker({ shouldBlockFn: () => true, withResolver: true })
+    return <>
+      <p>Borrador del caso</p>
+      {blocker.status === "blocked" && <div role="alert">
+        Cambios sin guardar
+        <button type="button" onClick={blocker.reset}>Continuar editando</button>
+        <button type="button" onClick={blocker.proceed}>Descartar y salir</button>
+      </div>}
+    </>
+  }
+  const root = createRootRoute({
+    component: () => <AppShell
+      items={[{ label: "Destino", to: "/destino", icon: UserRound }]}
+      LinkComponent={({ to, children, ...props }) => <Link to={to} {...props}>{children}</Link>}
+      pathname="/"
+      user={{ name: "Operadora", email: "operadora@example.test" }}
+      brand={<span>odentIA</span>}
+      onSignOut={() => {}}
+    ><Outlet /></AppShell>,
+  })
+  const home = createRoute({ getParentRoute: () => root, path: "/", component: EditingPage })
+  const destination = createRoute({
+    getParentRoute: () => root, path: "/destino", component: () => <p>Caso cerrado</p>,
+  })
+  const router = createRouter({
+    routeTree: root.addChildren([home, destination]),
+    history: createMemoryHistory({ initialEntries: ["/"] }),
+  })
+  render(<RouterProvider router={router} />)
+  await screen.findByText("Borrador del caso")
+  fireEvent.click(screen.getByRole("link", { name: "Destino" }))
+  await screen.findByRole("alert")
+  fireEvent.click(screen.getByRole("button", { name: "Continuar editando" }))
+  await waitFor(() => expect(screen.queryByRole("alert")).toBeNull())
+  expect(router.state.location.pathname).toBe("/")
+  fireEvent.click(screen.getByRole("link", { name: "Destino" }))
+  await screen.findByRole("alert")
+  fireEvent.click(screen.getByRole("button", { name: "Descartar y salir" }))
+  await screen.findByText("Caso cerrado")
+  expect(router.state.location.pathname).toBe("/destino")
 })

@@ -1,3 +1,5 @@
+import type { AgentProposal } from "./agent"
+
 export interface WorkspaceHome {
   date: string
   timezone: string
@@ -10,21 +12,22 @@ export interface WorkspaceHome {
   conversations: { unread: number; waiting: number; human: number } | null
   budgets: Array<{ id: string; patientId: string; patientName: string; title: string; presentedAt: string | null }>
   debt: DebtSummary[]
-  /** Resumen del agente autónomo; null sin permiso `agent.read`. */
+  /** Resumen del agente autónomo; null sin permiso `agent.read` ni `agent.decide`. */
   agent: WorkspaceAgentHome | null
 }
 export interface WorkspaceAgentHome {
   pendingProposals: number
-  proposals: Array<{ id: string; action: string; summary: string; createdAt: string }>
-  recentHandoffs: Array<{ id: string; reason: string; priority: string; createdAt: string }>
+  proposals: Array<{ id: string; action: string; summary: string; createdAt: string; conversationId: string | null; mode: string; context: AgentProposal["context"] }>
+  recentHandoffs: Array<{ id: string; reason: string; priority: string; createdAt: string; conversationId: string | null; contactName: string | null; channel: string | null }>
   today: { runs: number; ok: number; handoff: number; error: number; omitida: number }
 }
 /** Foto agregada de los últimos 30 días; cada sección es null sin su permiso. */
 export interface WorkspacePulse {
   funnel: Array<{ stage: string; count: number; amountCents: string; currency: string }> | null
   channels: Array<{ channel: string; count: number }> | null
-  autonomy: Array<{ day: string; ok: number; handoff: number }> | null
+  execution: Array<{ day: string; ok: number; handoff: number; error: number }> | null
   collections: Array<{ day: string; currency: string; amountCents: string }> | null
+  performance: CrmPerformance
 }
 export interface DebtSummary { currency: string; outstandingCents: string; overdueCents: string; patients: number }
 export interface WorkspaceNotice { id: string; title: string; body: string; href: string; createdAt: string; readAt: string | null }
@@ -38,6 +41,15 @@ export interface ManagementReport {
   clinicalProduction: Array<{ name: string; currency: string | null; procedures: number; amountCents: string }>
   opportunities: Array<{ status: string; currency: string; count: number; amountCents: string }>
   aging: Array<{ currency: string; bucket: string; amountCents: string }>
+  performance: CrmPerformance
+}
+export interface CrmPerformance {
+  responses: { conversations: number; responded: number; timedResponses: number; avgFirstResponseSeconds: number | null } | null
+  followUps: { open: number; overdue: number; unassigned: number } | null
+  conversations: { closed: number; waiting: number } | null
+  bookings: Array<{ source: string; count: number; active: number }> | null
+  conversion: Array<{ channel: string | null; assigneeUserId: string | null; assigneeName: string | null; created: number; won: number; lost: number; open: number; wonRate: number | null }> | null
+  proposals: { executed: number; failed: number; pending: number } | null
 }
 export const stateLabel: Record<string, string> = {
   programada: "Programada", confirmada: "Confirmada", atendida: "Atendida", no_asistio: "No asistió", cancelada: "Cancelada",

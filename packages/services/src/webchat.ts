@@ -512,6 +512,7 @@ export async function listWebchatNew(
           ? row.templateParams
           : null,
       createdAt: row.createdAt.toISOString(),
+      sentAt: row.sentAt?.toISOString() ?? null,
     })),
   }
 }

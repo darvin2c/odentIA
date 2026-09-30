@@ -10,9 +10,14 @@ import {
   customFieldDef,
 } from "@odentia/db/schema/crm"
 import { auditEvent } from "@odentia/db/schema/org"
-import { and, asc, desc, eq, ilike, inArray, lt, or, sql } from "drizzle-orm"
-import { decodeCursor } from "./cursors.js"
+import { and, asc, desc, eq, gt, ilike, inArray, isNotNull, lt, or, sql } from "drizzle-orm"
+import { opportunity } from "@odentia/db/schema/opportunities"
 import { notFound, ServiceError, validation } from "./errors.js"
+
+/** Aviso en vivo mínimo para refresco CRM: solo `{ orgId, kind, at }`, sin PII. */
+async function notifyCrm(tx: Db, orgId: string, kind: string): Promise<void> {
+  await tx.execute(sql`select pg_notify('org_events', ${JSON.stringify({ orgId, kind, at: new Date().toISOString() })})`)
+}
 
 /** Normaliza etiquetas con el helper canónico; convierte Error a ServiceError validation. */
 export function normalizeContactTags(tags: readonly string[]): string[] {
@@ -33,6 +38,8 @@ export interface ContactListItem {
   assignedUserId: string | null
   lastInteractionAt: string | null
   channels: string[]
+  /** Oportunidades abiertas del contacto (agregado SQL completo, no muestra truncada). */
+  openOpportunityCount: number
 }
 
 export interface ContactDetail extends ContactListItem {
@@ -45,8 +52,11 @@ export interface ContactDetail extends ContactListItem {
 function iso(date: Date | null): string | null {
   return date ? date.toISOString() : null
 }
-
-function toListItem(row: typeof contact.$inferSelect, channels: string[]): ContactListItem {
+function toListItem(
+  row: typeof contact.$inferSelect,
+  channels: string[],
+  openOpportunityCount = 0,
+): ContactListItem {
   return {
     id: row.id,
     displayName: row.displayName,
@@ -57,39 +67,57 @@ function toListItem(row: typeof contact.$inferSelect, channels: string[]): Conta
     assignedUserId: row.assignedUserId,
     lastInteractionAt: iso(row.lastInteractionAt),
     channels,
+    openOpportunityCount,
   }
 }
 const PAGE_DEFAULT = 30
 
+export type ContactSort = "nombre" | "-nombre" | "actividad" | "-actividad"
 export interface ContactListFilters {
   q?: string
   /** true = solo activos (default), false = solo archivados, "all" = todos. */
   isActive?: boolean | "all"
+  /** Orden global servidor; default "-actividad" (recientes primero). */
+  sort?: ContactSort
   cursor?: string
   limit?: number
 }
 
 /** Huella de filtros: el cursor solo es válido con los mismos parámetros. */
-function listingFingerprint(input: { q: string; isActive: boolean | "all" }): string {
-  return JSON.stringify({ q: input.q, isActive: input.isActive })
+function listingFingerprint(input: { q: string; isActive: boolean | "all"; sort: ContactSort }): string {
+  return JSON.stringify({ q: input.q, isActive: input.isActive, sort: input.sort })
 }
 
-function encodeListingCursor(ts: string, id: string, fingerprint: string): string {
-  return Buffer.from(JSON.stringify({ ts, id, f: fingerprint }), "utf8").toString("base64url")
+function encodeListingCursor(key: string, id: string, fingerprint: string): string {
+  return Buffer.from(JSON.stringify({ k: key, id, f: fingerprint }), "utf8").toString("base64url")
 }
 
-function decodeListingCursor(cursor: string): { ts: string; id: string; f: string } | null {
-  const base = decodeCursor(cursor)
-  if (!base) return null
+function decodeListingCursor(cursor: string): { k: string; id: string; f: string } | null {
   try {
     const raw: unknown = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8"))
-    if (!raw || typeof raw !== "object" || !("f" in raw)) return null
-    const f: unknown = raw.f
-    if (typeof f !== "string") return null
-    return { ts: base.ts, id: base.id, f }
+    if (!raw || typeof raw !== "object") return null
+    const rec = raw as Record<string, unknown>
+    if (typeof rec.k !== "string" || typeof rec.id !== "string" || typeof rec.f !== "string") {
+      return null
+    }
+    if (!/^[0-9a-f-]{36}$/i.test(rec.id)) return null
+    return { k: rec.k, id: rec.id, f: rec.f }
   } catch {
     return null
   }
+}
+
+/** Clave actividad UTC con microsegundos (to_char ... .US"Z"); "" = NULL. */
+const ACTIVITY_KEY_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,6})?Z$/
+function assertActivityKey(k: string): void {
+  if (!ACTIVITY_KEY_RE.test(k) || Number.isNaN(new Date(k).getTime())) {
+    throw validation("Cursor inválido")
+  }
+}
+function normalizeContactSort(sort: ContactSort | undefined): ContactSort {
+  if (sort === undefined) return "-actividad"
+  if (sort === "nombre" || sort === "-nombre" || sort === "actividad" || sort === "-actividad") return sort
+  throw validation("Orden inválido (nombre|-nombre|actividad|-actividad)")
 }
 
 export async function listContacts(
@@ -100,7 +128,8 @@ export async function listContacts(
   const limit = Math.min(Math.max(input.limit ?? PAGE_DEFAULT, 1), 100)
   const q = input.q?.trim() ? input.q.trim() : ""
   const active = input.isActive ?? true
-  const fingerprint = listingFingerprint({ q, isActive: active })
+  const sort = normalizeContactSort(input.sort)
+  const fingerprint = listingFingerprint({ q, isActive: active, sort })
   const conditions = [eq(contact.organizationId, orgId)]
   if (q) {
     const like = `%${q}%`
@@ -115,30 +144,78 @@ export async function listContacts(
   if (active !== "all") conditions.push(eq(contact.isActive, active))
   if (input.cursor) {
     const decoded = decodeListingCursor(input.cursor)
-    if (!decoded || !/^[0-9a-f-]{36}$/i.test(decoded.id)) throw validation("Cursor inválido")
+    if (!decoded) throw validation("Cursor inválido")
     if (decoded.f !== fingerprint)
       throw validation("El cursor no corresponde a los filtros actuales")
-    if (decoded.ts === "") {
-      // Cola de nulos (NULLS LAST): paginar solo por id.
-      conditions.push(sql`"last_interaction_at" is null`)
-      conditions.push(lt(contact.id, decoded.id))
-    } else {
-      const ts = new Date(decoded.ts)
-      if (Number.isNaN(ts.getTime())) throw validation("Cursor inválido")
+    if (sort === "-actividad") {
+      if (decoded.k === "") {
+        conditions.push(sql`"last_interaction_at" is null`)
+        conditions.push(lt(contact.id, decoded.id))
+      } else {
+        assertActivityKey(decoded.k)
+        conditions.push(
+          or(
+            sql`"last_interaction_at" < ${decoded.k}::timestamptz`,
+            and(
+              sql`"last_interaction_at" = ${decoded.k}::timestamptz`,
+              lt(contact.id, decoded.id),
+            ),
+            sql`"last_interaction_at" is null`,
+          )!,
+        )
+      }
+    } else if (sort === "actividad") {
+      if (decoded.k === "") {
+        conditions.push(
+          or(
+            and(sql`"last_interaction_at" is null`, gt(contact.id, decoded.id)),
+            sql`"last_interaction_at" is not null`,
+          )!,
+        )
+      } else {
+        assertActivityKey(decoded.k)
+        conditions.push(
+          or(
+            sql`"last_interaction_at" > ${decoded.k}::timestamptz`,
+            and(
+              sql`"last_interaction_at" = ${decoded.k}::timestamptz`,
+              gt(contact.id, decoded.id),
+            ),
+          )!,
+        )
+      }
+    } else if (sort === "nombre") {
       conditions.push(
         or(
-          lt(contact.lastInteractionAt, ts),
-          and(eq(contact.lastInteractionAt, ts), lt(contact.id, decoded.id)),
-          sql`"last_interaction_at" is null`,
+          gt(contact.displayName, decoded.k),
+          and(eq(contact.displayName, decoded.k), gt(contact.id, decoded.id)),
+        )!,
+      )
+    } else {
+      conditions.push(
+        or(
+          lt(contact.displayName, decoded.k),
+          and(eq(contact.displayName, decoded.k), lt(contact.id, decoded.id)),
         )!,
       )
     }
   }
+  const orderBy =
+    sort === "-actividad"
+      ? [sql`"last_interaction_at" desc nulls last`, desc(contact.id)]
+      : sort === "actividad"
+        ? [sql`"last_interaction_at" asc nulls first`, asc(contact.id)]
+        : sort === "nombre"
+          ? [asc(contact.displayName), asc(contact.id)]
+          : [desc(contact.displayName), desc(contact.id)]
   const rows = await tx
-    .select()
+    .select({
+      contact,
+      activityKey: sql<string | null>`to_char("last_interaction_at" at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`,
+    })
     .from(contact)
     .where(and(...conditions))
-    .orderBy(sql`"last_interaction_at" desc nulls last`, desc(contact.id))
+    .orderBy(...orderBy)
     .limit(limit + 1)
   const page = rows.slice(0, limit)
   const identities = page.length
@@ -149,7 +226,7 @@ export async function listContacts(
           and(
             eq(contactIdentity.organizationId, orgId),
             sql`"contact_id" in (${sql.join(
-              page.map((r) => sql`${r.id}::uuid`),
+              page.map((r) => sql`${r.contact.id}::uuid`),
               sql`, `,
             )})`,
           ),
@@ -161,12 +238,36 @@ export async function listContacts(
     if (!list.includes(ident.channel)) list.push(ident.channel)
     byContact.set(ident.contactId, list)
   }
-  const items = page.map((r) => toListItem(r, byContact.get(r.id) ?? []))
+  // Conteo completo de oportunidades abiertas por contacto (agregado SQL, no muestra).
+  const openCounts = new Map<string, number>()
+  if (page.length) {
+    const counted = await tx
+      .select({ contactId: opportunity.contactId, count: sql<number>`count(*)::int` })
+      .from(opportunity)
+      .where(
+        and(
+          eq(opportunity.organizationId, orgId),
+          eq(opportunity.status, "open"),
+          inArray(
+            opportunity.contactId,
+            page.map((r) => r.contact.id),
+          ),
+        ),
+      )
+      .groupBy(opportunity.contactId)
+    for (const row of counted) openCounts.set(row.contactId, row.count)
+  }
+  const items = page.map((r) =>
+    toListItem(r.contact, byContact.get(r.contact.id) ?? [], openCounts.get(r.contact.id) ?? 0),
+  )
   const last = page[page.length - 1]
+  const cursorKey = last
+    ? sort === "nombre" || sort === "-nombre"
+      ? last.contact.displayName
+      : (last.activityKey ?? "")
+    : ""
   const nextCursor =
-    rows.length > limit && last
-      ? encodeListingCursor(last.lastInteractionAt?.toISOString() ?? "", last.id, fingerprint)
-      : null
+    rows.length > limit && last ? encodeListingCursor(cursorKey, last.contact.id, fingerprint) : null
   return { items, nextCursor }
 }
 
@@ -367,6 +468,7 @@ export async function createContact(
   if (input.tags !== undefined) createdFields.push("tags")
   if (input.assignedUserId !== undefined) createdFields.push("assignedUserId")
   await auditContact(tx, orgId, actor, "contact.created", created.id, { fields: createdFields })
+  await notifyCrm(tx, orgId, "contact.updated")
   const full = await getContact(tx, orgId, created.id)
   return full.contact
 }
@@ -482,6 +584,9 @@ export async function updateContact(
       .set(patch)
       .where(and(eq(contact.id, id), eq(contact.organizationId, orgId)))
     await auditContact(tx, orgId, actor, "contact.updated", id, { fields: changed })
+    await notifyCrm(tx, orgId, "contact.updated")
+  } else if (isActive !== undefined) {
+    await notifyCrm(tx, orgId, "contact.updated")
   }
   const full = await getContact(tx, orgId, id)
   return full.contact
@@ -707,11 +812,18 @@ export async function addContactIdentity(
 /**
  * Reasignación explícita de una identidad («Reasignar canal»).
  * Orden de locks: advisory de identidad → enlaces de registro pendientes
- * ordenados por id → contactos ordenados por id (FOR UPDATE). Mueve la
+ * ordenados por id → contactos ordenados por id (FOR UPDATE) → oportunidades
+ * y tareas del origen (FOR UPDATE, oportunidad antes que tarea). Mueve la
  * identidad y solo las conversaciones directas resueltas por esa identidad,
- * más las tareas doblemente ligadas (esas conversaciones + contacto origen).
- * No mueve vínculos de pacientes ni archiva/fusiona el origen. Revoca los
- * enlaces de registro pendientes del contacto origen.
+ * más las tareas operativas (sin oportunidad) ligadas a esos hilos.
+ * No transfiere pacientes, representación ni negocio: las oportunidades y las
+ * tareas comerciales (opportunityId != null) quedan en el contacto origen con
+ * su conversationId desvinculado antes de mover el hilo (el guard SQL 23514
+ * exige hilo y oportunidad del mismo contacto). Los seguimientos abiertos que
+ * espejan el hilo de su oportunidad se desvinculan también, así el sync
+ * futuro nunca revincula la conversación antigua. No mueve vínculos de
+ * pacientes ni archiva/fusiona el origen. Revoca los enlaces de registro
+ * pendientes del contacto origen.
  */
 export async function moveContactIdentity(
   tx: Db,
@@ -724,6 +836,8 @@ export async function moveContactIdentity(
   movedConversations: number
   movedTasks: number
   revokedLinks: number
+  reconciledOpportunities: number
+  reconciledTasks: number
 }> {
   const actor = { userId: actorUserId }
   const reason = input.reason.trim()
@@ -805,6 +919,83 @@ export async function moveContactIdentity(
       !isTelegramGroupThread(r.connection.channel, r.conv.externalThreadId),
   )
   const movedIds = movable.map((r) => r.conv.id)
+  const movedSorted = [...movedIds].sort()
+  // La reasignación de canal no transfiere negocio: las oportunidades y las
+  // tareas comerciales quedan en el origen. El guard SQL exige hilo y
+  // oportunidad del mismo contacto, así que se desvinculan ANTES de mover el
+  // hilo; solo las tareas operativas (sin oportunidad) viajan con él.
+  const reconciledOpportunityIds = new Set<string>()
+  const reconciledTaskIds = new Set<string>()
+  let operationalTaskIds: string[] = []
+  if (movedSorted.length > 0) {
+    const originOpps = await tx
+      .select({ id: opportunity.id, conversationId: opportunity.conversationId })
+      .from(opportunity)
+      .where(
+        and(eq(opportunity.organizationId, orgId), eq(opportunity.contactId, input.fromContactId)),
+      )
+      .orderBy(asc(opportunity.id))
+      .for("update")
+    const detachOppIds = originOpps
+      .filter((o) => o.conversationId !== null && movedSorted.includes(o.conversationId))
+      .map((o) => o.id)
+    const linkedTasks = await tx
+      .select({
+        id: crmTask.id,
+        opportunityId: crmTask.opportunityId,
+        conversationId: crmTask.conversationId,
+      })
+      .from(crmTask)
+      .where(
+        and(
+          eq(crmTask.organizationId, orgId),
+          eq(crmTask.contactId, input.fromContactId),
+          inArray(crmTask.conversationId, movedSorted),
+        ),
+      )
+      .orderBy(asc(crmTask.id))
+      .for("update")
+    for (const t of linkedTasks) {
+      if (t.opportunityId !== null) reconciledTaskIds.add(t.id)
+      else operationalTaskIds.push(t.id)
+    }
+    if (detachOppIds.length > 0) {
+      const detachedOpps = await tx
+        .update(opportunity)
+        .set({ conversationId: null, updatedAt: new Date() })
+        .where(
+          and(eq(opportunity.organizationId, orgId), inArray(opportunity.id, [...detachOppIds].sort())),
+        )
+        .returning({ id: opportunity.id })
+      for (const r of detachedOpps) reconciledOpportunityIds.add(r.id)
+      // Seguimientos abiertos que espejan el hilo de su oportunidad: se
+      // desvinculan también aunque apunten a otro hilo, para que el sync
+      // futuro no revincule la conversación antigua.
+      const followUps = await tx
+        .select({ id: crmTask.id })
+        .from(crmTask)
+        .where(
+          and(
+            eq(crmTask.organizationId, orgId),
+            inArray(crmTask.opportunityId, [...detachOppIds].sort()),
+            eq(crmTask.kind, "opportunity_follow_up"),
+            eq(crmTask.status, "open"),
+            isNotNull(crmTask.conversationId),
+          ),
+        )
+        .orderBy(asc(crmTask.id))
+        .for("update")
+      for (const f of followUps) reconciledTaskIds.add(f.id)
+    }
+    if (reconciledTaskIds.size > 0) {
+      await tx
+        .update(crmTask)
+        .set({ conversationId: null, updatedAt: new Date() })
+        .where(
+          and(eq(crmTask.organizationId, orgId), inArray(crmTask.id, [...reconciledTaskIds].sort())),
+        )
+    }
+  }
   const revokedCount = await revokePendingRegistrationLinks(tx, orgId, input.fromContactId)
   await tx
     .update(contactIdentity)
@@ -813,28 +1004,28 @@ export async function moveContactIdentity(
       and(eq(contactIdentity.id, lockedIdentity.id), eq(contactIdentity.organizationId, orgId)),
     )
   let movedTasks = 0
-  if (movedIds.length > 0) {
+  if (movedSorted.length > 0) {
     await tx
       .update(conversation)
       .set({ contactId: input.toContactId, updatedAt: new Date() })
       .where(
-        and(
-          eq(conversation.organizationId, orgId),
-          inArray(conversation.id, [...movedIds].sort()),
-        ),
+        and(eq(conversation.organizationId, orgId), inArray(conversation.id, movedSorted)),
       )
-    const movedTaskRows = await tx
-      .update(crmTask)
-      .set({ contactId: input.toContactId, updatedAt: new Date() })
-      .where(
-        and(
-          eq(crmTask.organizationId, orgId),
-          eq(crmTask.contactId, input.fromContactId),
-          inArray(crmTask.conversationId, [...movedIds].sort()),
-        ),
-      )
-      .returning({ id: crmTask.id })
-    movedTasks = movedTaskRows.length
+    operationalTaskIds = [...operationalTaskIds].sort()
+    if (operationalTaskIds.length > 0) {
+      const movedTaskRows = await tx
+        .update(crmTask)
+        .set({ contactId: input.toContactId, updatedAt: new Date() })
+        .where(
+          and(
+            eq(crmTask.organizationId, orgId),
+            eq(crmTask.contactId, input.fromContactId),
+            inArray(crmTask.id, operationalTaskIds),
+          ),
+        )
+        .returning({ id: crmTask.id })
+      movedTasks = movedTaskRows.length
+    }
   }
   await auditContact(tx, orgId, actor, "contact.identity_moved", input.fromContactId, {
     fields: ["identityId", "fromContactId", "toContactId", "reason"],
@@ -845,6 +1036,10 @@ export async function moveContactIdentity(
     movedConversations: movedIds.length,
     movedTasks,
     revokedLinks: revokedCount,
+    reconciledOpportunities: reconciledOpportunityIds.size,
+    reconciledTasks: reconciledTaskIds.size,
+    reconciledOpportunityIds: [...reconciledOpportunityIds].sort(),
+    reconciledTaskIds: [...reconciledTaskIds].sort(),
   })
   const [moved] = await tx
     .select()
@@ -857,6 +1052,8 @@ export async function moveContactIdentity(
     movedConversations: movedIds.length,
     movedTasks,
     revokedLinks: revokedCount,
+    reconciledOpportunities: reconciledOpportunityIds.size,
+    reconciledTasks: reconciledTaskIds.size,
   }
 }
 

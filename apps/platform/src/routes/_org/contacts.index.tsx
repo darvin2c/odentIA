@@ -3,7 +3,9 @@ import {
   ConfirmDialog,
   common,
   DataTable,
+  DataTableSkeleton,
   EmptyState,
+  ErrorState,
   FilterBar,
   FormDrawer,
   FormPanel,
@@ -19,16 +21,17 @@ import {
   useListSearch,
 } from "@odentia/ui-patterns"
 import { useForm, useStore } from "@tanstack/react-form"
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, getRouteApi, Link, useNavigate } from "@tanstack/react-router"
 import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-table"
-import { MessageCircle, Plus, Send } from "lucide-react"
+import { Plus } from "lucide-react"
 import { type FormEvent, useMemo, useState } from "react"
 import { z } from "zod"
 import { ContactConversationDialog } from "../../components/contact-conversation-dialog"
 import { TagsInput } from "../../components/patient/tags-input"
 import { ApiError, apiFetch } from "../../lib/api"
-import { type ContactListItem, type OpportunityListItem, timeAgo, usePermission } from "../../lib/crm"
+import { channelIcon, channelLabel } from "../../lib/channels"
+import { type ContactListItem, timeAgo, usePermission } from "../../lib/crm"
 import { useOrgProfile } from "../../lib/org"
 import { useOrgEvents } from "../../lib/org-events"
 
@@ -52,6 +55,11 @@ const contactSchema = z.object({
 
 type ContactFormValues = z.infer<typeof contactSchema>
 
+/**
+ * openOpportunityCount es agregado SQL requerido del servidor sobre el total
+ * (contrato C01/C07): la UI solo lo muestra, nunca lo calcula.
+ */
+
 const emptyValues: ContactFormValues = {
   displayName: "",
   phone: null,
@@ -59,6 +67,8 @@ const emptyValues: ContactFormValues = {
   notes: "",
   tags: [],
 }
+
+const PAGE_LIMIT = 30
 
 function mutationMessage(err: unknown, fallback: string): string {
   if (err instanceof ApiError) return err.message || fallback
@@ -76,64 +86,39 @@ function ContactsPage() {
   const listSearch = useListSearch()
   const q = listSearch.get("q") ?? ""
   const activeFilter = listSearch.get("isActive") ?? "true"
-  const sort = listSearch.get("sort")
+  // Orden global del servidor (nombre|-nombre|actividad|-actividad): nunca se
+  // reordena la página en cliente (C01).
+  const sort = listSearch.get("sort") ?? ""
 
-  // Conteo de oportunidades abiertas por contacto (una sola consulta para
-  // toda la tabla; el embudo vive en el Pipeline, aquí solo el conteo).
-  const openCountsQuery = useQuery({
-    queryKey: ["contact-opportunity-counts"],
-    queryFn: () =>
-      apiFetch<{ data: OpportunityListItem[] }>("/api/opportunities?status=open&limit=100"),
-  })
-  const openCounts = useMemo(() => {
-    const counts: Record<string, { total: number; firstId: string | null }> = {}
-    for (const opp of openCountsQuery.data?.data ?? []) {
-      const entry = counts[opp.contactId] ?? { total: 0, firstId: null }
-      entry.total += 1
-      entry.firstId ??= opp.id
-      counts[opp.contactId] = entry
-    }
-    return counts
-  }, [openCountsQuery.data])
-
-  const contactsQuery = useQuery({
-    // El backend espera `q` directamente, sin mapeo. Cambiar filtros resetea
-    // el cursor vía useListSearch.
-    queryKey: ["contacts", q, activeFilter],
-    queryFn: () => {
+  const contactsQuery = useInfiniteQuery({
+    // Cambiar filtros/sort resetea el cursor (useListSearch borra `cursor`).
+    queryKey: ["contacts", q, activeFilter, sort],
+    queryFn: ({ pageParam }: { pageParam: string | null }) => {
       const params = new URLSearchParams()
       if (q.trim()) params.set("q", q.trim())
       params.set(
         "isActive",
         activeFilter === "false" ? "false" : activeFilter === "all" ? "all" : "true",
       )
+      if (sort) params.set("sort", sort)
+      params.set("limit", String(PAGE_LIMIT))
+      if (pageParam) params.set("cursor", pageParam)
       return apiFetch<{ data: ContactListItem[]; nextCursor: string | null }>(
         `/api/contacts?${params}`,
       )
     },
+    initialPageParam: null as string | null,
+    getNextPageParam: (last) => last.nextCursor,
   })
-  // Sin orden el backend manda; con `sort` se ordena en cliente.
-  const visibleContacts = useMemo(() => {
-    const rows = [...(contactsQuery.data?.data ?? [])]
-    if (!sort) return rows
-    const descending = sort.startsWith("-")
-    const field = descending ? sort.slice(1) : sort
-    if (field === "nombre") {
-      rows.sort((a, b) => a.displayName.localeCompare(b.displayName, "es"))
-    } else if (field === "actividad") {
-      rows.sort((a, b) => (a.lastInteractionAt ?? "").localeCompare(b.lastInteractionAt ?? ""))
-    } else {
-      return rows
-    }
-    // `nombre` asciende por defecto; `actividad` muestra lo reciente primero.
-    const invert = field === "actividad" ? !descending : descending
-    if (invert) rows.reverse()
-    return rows
-  }, [contactsQuery.data, sort])
+  // Filas de todas las páginas cargadas, en el orden que mandó el servidor.
+  const visibleContacts = useMemo(
+    () => contactsQuery.data?.pages.flatMap((page) => page.data) ?? [],
+    [contactsQuery.data],
+  )
   const allTags = useMemo(() => {
     const seen: Record<string, true> = {}
     const out: string[] = []
-    for (const contact of contactsQuery.data?.data ?? []) {
+    for (const contact of visibleContacts) {
       for (const tag of contact.tags) {
         if (!seen[tag]) {
           seen[tag] = true
@@ -142,11 +127,21 @@ function ContactsPage() {
       }
     }
     return out
-  }, [contactsQuery.data])
-  useOrgEvents(["message.created", "conversation.updated"], () => {
-    void queryClient.invalidateQueries({ queryKey: ["contacts"] })
-    void queryClient.invalidateQueries({ queryKey: ["contact-opportunity-counts"] })
-  })
+  }, [visibleContacts])
+
+  useOrgEvents(
+    [
+      "message.created",
+      "conversation.updated",
+      "contact.updated",
+      "opportunity.updated",
+      "task.updated",
+      "stream.reconnected",
+    ],
+    () => {
+      void queryClient.invalidateQueries({ queryKey: ["contacts"] })
+    },
+  )
 
   const mode = useDetailMode()
   const [formOpen, setFormOpen] = useState(false)
@@ -221,14 +216,26 @@ function ContactsPage() {
         id: "channels",
         header: "Canales",
         meta: { view: { role: "media" } },
-        cell: ({ row }) => (
-          <span className="flex gap-1">
-            {row.original.channels.includes("whatsapp") && (
-              <MessageCircle className="size-4 text-green-600" />
-            )}
-            {row.original.channels.includes("telegram") && <Send className="size-4 text-sky-600" />}
-          </span>
-        ),
+        cell: ({ row }) =>
+          row.original.channels.length === 0 ? (
+            "—"
+          ) : (
+            <span className="flex gap-1.5">
+              {row.original.channels.map((channelName) => {
+                const Icon = channelIcon(channelName)
+                return (
+                  <span
+                    key={channelName}
+                    title={channelLabel(channelName)}
+                    className="inline-flex"
+                    aria-label={channelLabel(channelName)}
+                  >
+                    <Icon className="size-4" aria-hidden />
+                  </span>
+                )
+              })}
+            </span>
+          ),
       },
       {
         id: "contacto",
@@ -241,16 +248,16 @@ function ContactsPage() {
         id: "opportunities",
         header: "Oportunidades",
         cell: ({ row }) => {
-          const entry = openCounts[row.original.id]
-          if (!entry || entry.total === 0 || !entry.firstId) return "—"
+          const total = row.original.openOpportunityCount
+          if (total === 0) return "—"
           return (
             <Link
-              to="/opportunities/$opportunityId"
-              params={{ opportunityId: entry.firstId }}
+              to="/contacts/$contactId"
+              params={{ contactId: row.original.id }}
               onClick={(e) => e.stopPropagation()}
             >
               <Badge variant="secondary">
-                {entry.total === 1 ? "1 abierta" : `${entry.total} abiertas`}
+                {total === 1 ? "1 abierta" : `${total} abiertas`}
               </Badge>
             </Link>
           )
@@ -341,7 +348,7 @@ function ContactsPage() {
         ),
       },
     ],
-    [org.members, openCounts, canWrite, activeMutation, navigate],
+    [org.members, canWrite, activeMutation, navigate],
   )
 
   const hasFilters = q.trim() !== "" || activeFilter !== "true"
@@ -469,7 +476,18 @@ function ContactsPage() {
           ]}
           searchPlaceholder="Buscar por nombre, teléfono o correo"
         />
-        {visibleContacts.length === 0 && !contactsQuery.isLoading ? (
+        {contactsQuery.isLoading ? (
+          <DataTableSkeleton />
+        ) : contactsQuery.isError ? (
+          <ErrorState
+            error={
+              contactsQuery.error instanceof Error
+                ? contactsQuery.error
+                : String(contactsQuery.error)
+            }
+            onRetry={() => void contactsQuery.refetch()}
+          />
+        ) : visibleContacts.length === 0 ? (
           <EmptyState
             title={hasFilters ? common.filters.noResults : "Sin contactos"}
             description={
@@ -479,7 +497,25 @@ function ContactsPage() {
             }
           />
         ) : (
-          <DataTable table={table} />
+          <>
+            <DataTable table={table} />
+            <div className="flex items-center gap-3">
+              <p className="text-sm text-muted-foreground" role="status">
+                Mostrando {visibleContacts.length} contacto{visibleContacts.length === 1 ? "" : "s"}
+              </p>
+              {contactsQuery.hasNextPage ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={contactsQuery.isFetchingNextPage}
+                  onClick={() => void contactsQuery.fetchNextPage()}
+                >
+                  {contactsQuery.isFetchingNextPage ? "Cargando…" : "Cargar más"}
+                </Button>
+              ) : null}
+            </div>
+          </>
         )}
       </MasterDetail>
 

@@ -1,31 +1,35 @@
 import { tool } from "@langchain/core/tools"
 import { type Db, withOrgContext } from "@odentia/db"
 import {
+  buildAgentProposalKey,
   confirmProposalByContact,
   createHandoff,
   createProposal,
   createTask,
   findFreeGaps,
-  getAutonomyPolicy,
   getAgentPatientSummary,
+  getContact,
   getClinicInfoSnapshot,
+  getOpportunity,
   listAgentContextCandidates,
+  listContactNotes,
   listOpportunities,
-  moveOpportunity,
+  listTasks,
   requireContact,
   resolveAgentPatientContext,
   searchPublishedKnowledge,
   ServiceError,
-  sendOutbound,
-  sendTemplateOutbound,
   updateContact,
 } from "@odentia/services"
+import type { OpportunityDetail, ProposalItem } from "@odentia/services"
 import { z } from "zod"
 export interface AgentToolCtx {
   db: Db
   orgId: string
   conversationId: string
   contactId: string
+  /** Mensaje entrante que disparó el turno (clave de idempotencia estable). */
+  triggerMessageId: string | null
   secretsKey: Buffer
   /** La herramienta de handoff lo marca; el grafo termina el turno. */
   handedOff: boolean
@@ -69,33 +73,127 @@ export async function performHandoff(ctx: AgentToolCtx, reason: string, summary?
 export function makeAgentTools(ctx: AgentToolCtx) {
   const inOrg = <T>(fn: (tx: Db) => Promise<T>): Promise<T> => withOrgContext(ctx.db, ctx.orgId, fn)
 
+  /**
+   * Ventana de WhatsApp cerrada: el modelo cambia a plantilla autorizada o
+   * deriva. Llega persistida como `fallida` con `error` prefijado por el
+   * código estable `WINDOW_CLOSED` y `result.errorCode` igual (pacto con
+   * ProposalLifecycle, que ya no la lanza); se traduce a este texto.
+   */
+  const OUTSIDE_WINDOW =
+    "outside_window: fuera de la ventana de 24h de WhatsApp. Usa send_template con una plantilla autorizada o deriva a humano."
+  /**
+   * Crea la propuesta comercial con clave estable por trigger + herramienta
+   * + payload. En modo directo se ejecuta en el mismo acto; si exige
+   * confirmación o aprobación, queda pendiente con su recorrido real. Los
+   * errores de dominio en ejecución llegan como `fallida` con código estable
+   * en `result.errorCode` y motivo prefijado en `error` (HTTP 200): se
+   * reportan al modelo, nunca como aprobación. Si el hilo ya espera un «sí»
+   * (PROPOSAL_PENDING_CONFIRM), se guía al modelo a pedir la confirmación;
+   * si la pendiente es del equipo (PROPOSAL_PENDING_APPROVAL), se guía a
+   * esperar al equipo sin pedir «sí» ni usar confirmar_propuesta.
+   */
+  const propose = async (
+    action: string,
+    payload: Record<string, unknown>,
+    toolName: string,
+    reason?: string,
+  ): Promise<string> => {
+    let proposal: ProposalItem
+    try {
+      proposal = await inOrg((tx) =>
+        createProposal(tx, ctx.orgId, {
+          conversationId: ctx.conversationId,
+          action,
+          payload,
+          reason,
+          idempotencyKey: buildAgentProposalKey({
+            conversationId: ctx.conversationId,
+            triggerMessageId: ctx.triggerMessageId,
+            tool: toolName,
+            payload,
+          }),
+          secretsKey: ctx.secretsKey,
+        }),
+      )
+    } catch (e) {
+      if (e instanceof ServiceError && e.code === "PROPOSAL_PENDING_CONFIRM") {
+        return "Ya hay una propuesta esperando la confirmación del interlocutor en este hilo: pídele que confirme con un sí claro y luego usa confirmar_propuesta, no crees otra."
+      }
+      if (e instanceof ServiceError && e.code === "PROPOSAL_PENDING_APPROVAL") {
+        return "Ya hay una propuesta pendiente de decisión del equipo en este hilo. Informa al interlocutor de que el equipo la está revisando y espera su decisión; un sí del interlocutor no sustituye esa aprobación."
+      }
+      throw e
+    }
+    if (proposal.status === "ejecutada") return `Ejecutado en modo directo (propuesta ${proposal.id}).`
+    if (proposal.status === "fallida") {
+      const rawError = proposal.error?.trim() ?? ""
+      if (rawError.startsWith("WINDOW_CLOSED") || proposal.result?.errorCode === "WINDOW_CLOSED") {
+        return OUTSIDE_WINDOW
+      }
+      const detail = rawError ? `: ${rawError.slice(0, 300)}` : "."
+      return `No se pudo ejecutar en modo directo (propuesta ${proposal.id})${detail} Ofrece una alternativa o deriva a humano.`
+    }
+    if (proposal.status === "expirada") {
+      return `La propuesta ${proposal.id} expiró (48h): vuelve a proponer el acto con datos vigentes, no la confirmes.`
+    }
+    if (proposal.mode === "confirmar_usuario") {
+      return `Propuesta ${proposal.id} creada: pide al interlocutor que confirme con un sí claro y luego usa confirmar_propuesta.`
+    }
+    return `Propuesta ${proposal.id} enviada a aprobación del equipo: avisa al interlocutor que lo contactaremos.`
+  }
+
+  /**
+   * Elige una oportunidad abierta del contacto de ctx. La selección explícita
+   * se verifica directa (pertenencia al contacto y estado abierto) para no
+   * rechazarla por truncación de la lista. Sin id y con varias abiertas,
+   * devuelve el mensaje para preguntar (nunca adivina ni toca oportunidades
+   * de otro interlocutor).
+   */
+  const chooseOpportunity = async (opportunityId?: string): Promise<{ id: string } | { message: string }> => {
+    if (opportunityId) {
+      let detail: OpportunityDetail | null = null
+      try {
+        detail = await inOrg((tx) => getOpportunity(tx, ctx.orgId, opportunityId))
+      } catch (e) {
+        // Solo ausente equivale a ajena o cerrada; otro fallo se propaga.
+        if (!(e instanceof ServiceError && e.code === "NOT_FOUND")) throw e
+      }
+      if (!detail || detail.contactId !== ctx.contactId || detail.status !== "open") {
+        return { message: "Esa oportunidad no es del contacto o no está abierta: pide aclaración." }
+      }
+      return { id: detail.id }
+    }
+    const { items, nextCursor } = await inOrg((tx) =>
+      listOpportunities(tx, ctx.orgId, { contactId: ctx.contactId, status: "open", limit: 100 }),
+    )
+    if (items.length === 0) return { message: "El contacto no tiene oportunidades abiertas." }
+    if (items.length > 1) {
+      const shown = items
+        .slice(0, 20)
+        .map((o) => `- ${o.title} (id ${o.id}, etapa ${o.stageName})`)
+        .join("\n")
+      const more =
+        nextCursor || items.length > 20
+          ? "\nHay más oportunidades: usa listar_oportunidades con el cursor para verlas todas antes de elegir."
+          : ""
+      return { message: `El contacto tiene varias oportunidades abiertas, pregunta cuál:\n${shown}${more}` }
+    }
+    const only = items[0]
+    if (!only) return { message: "El contacto no tiene oportunidades abiertas." }
+    return { id: only.id }
+  }
+
   const sendReply = tool(
     async ({ text }: { text: string }) => {
       if (ctx.dryRun) return `[SIMULACIÓN] Se enviaría al paciente: ${text}`
-      const mode = await inOrg((tx) => getAutonomyPolicy(tx, ctx.orgId).then((p) => p.enviar_mensaje))
-      if (mode !== "directo") {
-        return `Bloqueado por la política de la clínica (enviar_mensaje=${mode}): no envíes texto, deriva a humano para que el equipo responda.`
-      }
-      try {
-        const sent = await inOrg((tx) =>
-          sendOutbound(tx, ctx.orgId, {
-            conversationId: ctx.conversationId,
-            senderKind: "agent",
-            content: { type: "text", text },
-          }),
-        )
-        return `Respuesta enviada (id ${sent.id}).`
-      } catch (e) {
-        if (e instanceof ServiceError && e.code === "WINDOW_CLOSED") {
-          return "outside_window: fuera de la ventana de 24h de WhatsApp. Usa send_template con una plantilla autorizada o deriva a humano."
-        }
-        throw e
-      }
+      // WINDOW_CLOSED ya no lanza: llega como `fallida` y propose la traduce
+      // a outside_window. Solo infra (429/5xx) lanza y reintenta el turno.
+      return propose("enviar_mensaje", { kind: "text", text }, "send_reply")
     },
     {
       name: "send_reply",
       description:
-        "Envía un texto al paciente. Si devuelve outside_window, usa send_template o deriva.",
+        "Envía un texto al paciente (propuesta si la política no es directa). Si devuelve outside_window, usa send_template o deriva.",
       schema: z.object({ text: z.string().min(1).max(4000) }),
     },
   )
@@ -103,25 +201,12 @@ export function makeAgentTools(ctx: AgentToolCtx) {
   const sendTemplate = tool(
     async ({ name, language, params }: { name: string; language: string; params: string[] }) => {
       if (ctx.dryRun) return `[SIMULACIÓN] Se enviaría plantilla ${name} (${language}).`
-      const mode = await inOrg((tx) => getAutonomyPolicy(tx, ctx.orgId).then((p) => p.enviar_mensaje))
-      if (mode !== "directo") {
-        return `Bloqueado por la política de la clínica (enviar_mensaje=${mode}): deriva a humano.`
-      }
-      const sent = await inOrg((tx) =>
-        sendTemplateOutbound(tx, ctx.orgId, ctx.secretsKey, {
-          conversationId: ctx.conversationId,
-          senderKind: "agent",
-          name,
-          language,
-          params,
-        }),
-      )
-      return `Plantilla enviada (id ${sent.id}).`
+      return propose("enviar_mensaje", { kind: "template", name, language, params }, "send_template")
     },
     {
       name: "send_template",
       description:
-        "Envía una plantilla de WhatsApp autorizada (solo fuera de ventana o primer contacto).",
+        "Envía una plantilla de WhatsApp autorizada (propuesta si la política no es directa; solo fuera de ventana o primer contacto).",
       schema: z.object({
         name: z.string().min(1),
         language: z.string().min(1),
@@ -132,32 +217,15 @@ export function makeAgentTools(ctx: AgentToolCtx) {
 
   const moveToStage = tool(
     async ({ stageId, opportunityId }: { stageId: string; opportunityId?: string }) => {
-      if (ctx.dryRun) return "[SIMULACIÓN] Se movería la oportunidad de etapa."
-      return inOrg(async (tx) => {
-        const moveMode = await getAutonomyPolicy(tx, ctx.orgId).then((p) => p.mover_oportunidad)
-        if (moveMode !== "directo") {
-          return `Bloqueado por la política de la clínica (mover_oportunidad=${moveMode}): no muevas etapas, deriva a humano.`
-        }
-        const { items } = await listOpportunities(tx, ctx.orgId, {
-          contactId: ctx.contactId,
-          status: "open",
-          limit: 100,
-        })
-        if (items.length === 0) return "El contacto no tiene oportunidades abiertas: no hay etapa que mover."
-        if (!opportunityId && items.length > 1) {
-          const options = items.map((o) => `- ${o.title} (id ${o.id}, etapa ${o.stageName})`).join("\n")
-          return `El contacto tiene varias oportunidades abiertas, pregunta cuál mover:\n${options}`
-        }
-        const chosen = opportunityId ? items.find((o) => o.id === opportunityId) : items[0]
-        if (!chosen) return "Esa oportunidad no es del contacto o no está abierta: pide aclaración."
-        await moveOpportunity(tx, ctx.orgId, chosen.id, stageId, undefined)
-        return `Oportunidad ${chosen.title} movida a la etapa indicada.`
-      })
+      if (ctx.dryRun) return "[SIMULACIÓN] Se propondría mover la oportunidad de etapa."
+      const chosen = await chooseOpportunity(opportunityId)
+      if ("message" in chosen) return chosen.message
+      return propose("mover_oportunidad", { opportunityId: chosen.id, stageId }, "move_to_stage")
     },
     {
       name: "move_to_stage",
       description:
-        "Mueve una oportunidad abierta del contacto a otra etapa. Si no das opportunityId y hay varias abiertas, devuelve la lista para preguntar.",
+        "Mueve una oportunidad abierta del contacto a otra etapa (propuesta si la política no es directa). Si no das opportunityId y hay varias abiertas, devuelve la lista para preguntar.",
       schema: z.object({ stageId: z.string().uuid(), opportunityId: z.string().uuid().optional() }),
     },
   )
@@ -330,14 +398,23 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     }) => {
       const { gaps, truncated, timeZone } = await inOrg((tx) => findFreeGaps(tx, ctx.orgId, input))
       if (!gaps.length) return "Sin huecos en ese rango (quizá sin horario configurado): ofrece otro rango o deriva."
-      const lines = gaps.map((g) => `- ${g.startsAt} → ${g.endsAt} (profesional ${g.dentistUserId})`)
+      const lines = gaps.map((g) => {
+        const chair = g.chairId ?? "sin sillón asignado: filtra por un sillón real o deriva"
+        return (
+          `- ${g.startsAt} → ${g.endsAt} (${input.durationMin} min, zona ${timeZone})` +
+          ` · sede ${input.branchId} · sillón ${chair} · profesional ${g.dentistUserId}`
+        )
+      })
+      lines.push(
+        "Usa los IDs exactos del hueco elegido en proponer_cita (sede, sillón y profesional): nunca inventes IDs.",
+      )
       if (truncated) lines.push(`Hay más huecos (${timeZone}): acota el rango por días.`)
       return lines.join("\n")
     },
     {
       name: "buscar_huecos",
       description:
-        "Huecos reales de agenda según horario del profesional y citas ocupantes. branchId, from/to ISO y durationMin obligatorios.",
+        "Huecos reales de agenda según horario del profesional y citas ocupantes. Antes de usarla confirma la sede real con ver_sedes_y_servicios y usa su ID exacto: branchId, from/to ISO y durationMin obligatorios. Cada hueco devuelve sede, sillón, profesional, inicio, fin, zona y duración para proponer_cita.",
       schema: z.object({
         branchId: z.string().uuid(),
         from: z.string().min(1),
@@ -361,31 +438,16 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       durationMin?: number
       reason?: string
     }) => {
-      const policy = await inOrg((tx) => getAutonomyPolicy(tx, ctx.orgId))
-      const mode = policy.reservar_cita
-      const key = `agent:${ctx.conversationId}:reservar_cita:${input.patientId}:${input.startsAt}`
       if (ctx.dryRun) {
-        return `[SIMULACIÓN] Se propondría reservar (modo ${mode}): paciente ${input.patientId} el ${input.startsAt}.`
+        return `[SIMULACIÓN] Se propondría reservar: paciente ${input.patientId} el ${input.startsAt}.`
       }
-      const proposal = await inOrg((tx) =>
-        createProposal(tx, ctx.orgId, {
-          conversationId: ctx.conversationId,
-          action: "reservar_cita",
-          payload: { ...input },
-          reason: input.reason,
-          idempotencyKey: key,
-        }),
-      )
-      if (proposal.status === "ejecutada") return `Cita reservada (propuesta ${proposal.id}).`
-      if (mode === "confirmar_usuario") {
-        return `Propuesta ${proposal.id} creada: pide al paciente que confirme con un sí claro y luego usa confirmar_propuesta.`
-      }
-      return `Propuesta ${proposal.id} enviada a aprobación del equipo: avisa al paciente que lo contactaremos.`
+      const { reason, ...payload } = input
+      return propose("reservar_cita", payload, "proponer_cita", reason)
     },
     {
       name: "proponer_cita",
       description:
-        "Propone reservar una cita (verifica vínculo del paciente al ejecutar). Según la política puede pedir confirmación del paciente o aprobación del equipo.",
+        "Propone reservar una cita con los IDs exactos de un hueco de buscar_huecos (sede, sillón, profesional, inicio). Verifica vínculo del paciente al ejecutar; según la política puede pedir confirmación del paciente o aprobación del equipo.",
       schema: z.object({
         patientId: z.string().uuid(),
         dentistUserId: z.string().min(1),
@@ -402,14 +464,192 @@ export function makeAgentTools(ctx: AgentToolCtx) {
   const confirmProposal = tool(
     async ({ proposalId }: { proposalId: string }) => {
       if (ctx.dryRun) return `[SIMULACIÓN] Se confirmaría la propuesta ${proposalId}.`
-      const proposal = await inOrg((tx) => confirmProposalByContact(tx, ctx.orgId, ctx.contactId, proposalId))
+      let proposal: ProposalItem
+      try {
+        proposal = await inOrg((tx) =>
+          confirmProposalByContact(tx, ctx.orgId, ctx.contactId, proposalId, { secretsKey: ctx.secretsKey }),
+        )
+      } catch (e) {
+        if (e instanceof ServiceError && e.code === "PROPOSAL_NEEDS_TEAM_APPROVAL") {
+          return "Esa propuesta exige aprobación del equipo: el sí del interlocutor no la ejecuta. Avísale de que el equipo la está revisando y espera su decisión."
+        }
+        if (e instanceof ServiceError && e.code === "PROPOSAL_NOT_CONTACT_CONFIRMABLE") return e.message
+        throw e
+      }
       if (proposal.status === "ejecutada") return `Confirmado y ejecutado (propuesta ${proposal.id}).`
+      if (proposal.status === "fallida") {
+        const rawError = proposal.error?.trim() ?? ""
+        if (rawError.startsWith("WINDOW_CLOSED") || proposal.result?.errorCode === "WINDOW_CLOSED") return OUTSIDE_WINDOW
+        const detail = rawError ? `: ${rawError.slice(0, 300)}` : "."
+        return `No se pudo ejecutar al confirmar (propuesta ${proposal.id})${detail} Ofrece una alternativa o deriva a humano.`
+      }
+      if (proposal.status === "expirada") {
+        return `La propuesta ${proposal.id} expiró (48h): pide de nuevo el acto al interlocutor para crear una nueva propuesta, no reintentes confirmar.`
+      }
       return `Propuesta ${proposal.id} en estado ${proposal.status}.`
     },
     {
       name: "confirmar_propuesta",
-      description: "Úsala SOLO cuando el paciente confirmó explícitamente el acto propuesto.",
+      description:
+        "Confirma un acto en modo confirmar_usuario cuando el interlocutor lo aprobó con un sí explícito. Jamás la uses para propuestas que requieren aprobación del equipo: esas las decide el equipo.",
       schema: z.object({ proposalId: z.string().uuid() }),
+    },
+  )
+  const createOpportunityTool = tool(
+    async (input: {
+      title: string
+      stageId?: string
+      pipelineId?: string
+      patientId?: string
+      serviceId?: string
+      interestText?: string
+      amountCents?: number
+      currency?: string
+      nextActionAt?: string
+      nextActionNote?: string
+      reason?: string
+    }) => {
+      if (ctx.dryRun) return `[SIMULACIÓN] Se propondría crear la oportunidad: ${input.title}.`
+      const { reason, ...payload } = input
+      return propose("crear_oportunidad", payload, "create_opportunity", reason)
+    },
+    {
+      name: "create_opportunity",
+      description:
+        "Crea una oportunidad para el contacto de la conversación (propuesta si la política no es directa). El título es obligatorio; la etapa nace abierta.",
+      schema: z.object({
+        title: z.string().min(1).max(200),
+        stageId: z.string().uuid().optional(),
+        pipelineId: z.string().uuid().optional(),
+        patientId: z.string().uuid().optional(),
+        serviceId: z.string().uuid().optional(),
+        interestText: z.string().max(500).optional(),
+        amountCents: z.number().int().min(0).optional(),
+        currency: z.string().max(3).optional(),
+        nextActionAt: z.string().optional(),
+        nextActionNote: z.string().max(500).optional(),
+        reason: z.string().max(500).optional(),
+      }),
+    },
+  )
+
+  const updateFollowup = tool(
+    async (input: { opportunityId?: string; nextActionAt?: string; nextActionNote?: string; reason?: string }) => {
+      if (ctx.dryRun) return "[SIMULACIÓN] Se propondría actualizar el seguimiento de la oportunidad."
+      if (input.nextActionAt === undefined && input.nextActionNote === undefined) {
+        return "Indica la fecha (nextActionAt ISO) o la nota (nextActionNote) del seguimiento."
+      }
+      const chosen = await chooseOpportunity(input.opportunityId)
+      if ("message" in chosen) return chosen.message
+      const payload: Record<string, unknown> = { opportunityId: chosen.id }
+      if (input.nextActionAt !== undefined) payload["nextActionAt"] = input.nextActionAt
+      if (input.nextActionNote !== undefined) payload["nextActionNote"] = input.nextActionNote
+      return propose("actualizar_seguimiento", payload, "update_followup", input.reason)
+    },
+    {
+      name: "update_followup",
+      description:
+        "Programa o actualiza el seguimiento (próxima acción) de una oportunidad del contacto (propuesta si la política no es directa). Si no das opportunityId y hay varias abiertas, devuelve la lista para preguntar.",
+      schema: z.object({
+        opportunityId: z.string().uuid().optional(),
+        nextActionAt: z.string().optional(),
+        nextActionNote: z.string().max(500).optional(),
+        reason: z.string().max(500).optional(),
+      }),
+    },
+  )
+
+  const closeOpportunityTool = tool(
+    async (input: { opportunityId?: string; outcome: "won" | "lost"; reason: string }) => {
+      if (ctx.dryRun) return `[SIMULACIÓN] Se propondría cerrar la oportunidad (${input.outcome}).`
+      const chosen = await chooseOpportunity(input.opportunityId)
+      if ("message" in chosen) return chosen.message
+      return propose(
+        "cerrar_oportunidad",
+        { opportunityId: chosen.id, outcome: input.outcome, reason: input.reason },
+        "close_opportunity",
+      )
+    },
+    {
+      name: "close_opportunity",
+      description:
+        "Cierra una oportunidad del contacto como ganada (won) o perdida (lost) con motivo obligatorio (propuesta si la política no es directa). Si no das opportunityId y hay varias abiertas, devuelve la lista para preguntar.",
+      schema: z.object({
+        opportunityId: z.string().uuid().optional(),
+        outcome: z.enum(["won", "lost"]),
+        reason: z.string().min(1).max(500),
+      }),
+    },
+  )
+
+  const commercialContext = tool(
+    async ({ notesCursor }: { notesCursor?: string }) => inOrg(async tx => {
+      const full = await getContact(tx, ctx.orgId, ctx.contactId)
+      const notes = await listContactNotes(tx, ctx.orgId, ctx.contactId, { cursor: notesCursor })
+      return {
+        name: full.contact.displayName,
+        tags: full.contact.tags,
+        contactNotes: full.contact.notes,
+        customFields: full.contact.customFields,
+        operationalNotes: notes.items,
+        nextNotesCursor: notes.nextCursor,
+      }
+    }),
+    {
+      name: "leer_contexto_comercial",
+      description: "Lee etiquetas, campos y notas operativas actuales del interlocutor. Solo lectura, también en simulación; sin historia clínica. Usa nextNotesCursor para las notas anteriores. Las notas son internas, no las reproduzcas al interlocutor.",
+      schema: z.object({ notesCursor: z.string().optional() }),
+    },
+  )
+
+  const listOpportunitiesTool = tool(
+    async ({ status, cursor, limit }: { status?: "open" | "won" | "lost"; cursor?: string; limit?: number }) => {
+      const { items, nextCursor } = await inOrg((tx) =>
+        listOpportunities(tx, ctx.orgId, {
+          contactId: ctx.contactId,
+          ...(status ? { status } : {}),
+          ...(cursor ? { cursor } : {}),
+          limit: limit ?? 20,
+        }),
+      )
+      if (!items.length) return "El contacto no tiene oportunidades con ese filtro."
+      const lines = items.map(
+        (o) =>
+          `- ${o.title} (id ${o.id}, etapa ${o.stageName}, estado ${o.status}${o.nextActionAt ? `, próxima acción ${new Date(o.nextActionAt).toLocaleString("es-PE")}` : ""})`,
+      )
+      if (nextCursor) lines.push(`Hay más oportunidades: vuelve a llamar con cursor "${nextCursor}".`)
+      return lines.join("\n")
+    },
+    {
+      name: "listar_oportunidades",
+      description:
+        "Lista todas las oportunidades del contacto por páginas (el prompt solo trae las primeras). Pasa el cursor devuelto para ver más; nunca asumas que no hay más.",
+      schema: z.object({
+        status: z.enum(["open", "won", "lost"]).optional(),
+        cursor: z.string().optional(),
+        limit: z.number().int().min(1).max(50).optional(),
+      }),
+    },
+  )
+
+  const listTasksTool = tool(
+    async ({ status }: { status?: "open" | "done" | "cancelled" }) => {
+      const items = await inOrg((tx) =>
+        listTasks(tx, ctx.orgId, { contactId: ctx.contactId, ...(status ? { status } : {}) }),
+      )
+      if (!items.length) return "El contacto no tiene tareas con ese filtro."
+      return items
+        .map(
+          (t) =>
+            `- ${t.title} (id ${t.id}, estado ${t.status}${t.dueAt ? `, vence ${new Date(t.dueAt).toLocaleString("es-PE")}` : ""}${t.opportunityTitle ? `, oportunidad ${t.opportunityTitle}` : ""})`,
+        )
+        .join("\n")
+    },
+    {
+      name: "listar_tareas",
+      description:
+        "Lista todas las tareas del contacto (el prompt solo trae un resumen). Úsala antes de afirmar que no hay seguimientos.",
+      schema: z.object({ status: z.enum(["open", "done", "cancelled"]).optional() }),
     },
   )
 
@@ -448,6 +688,12 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     sendReply,
     sendTemplate,
     moveToStage,
+    createOpportunityTool,
+    updateFollowup,
+    closeOpportunityTool,
+    listOpportunitiesTool,
+    listTasksTool,
+    commercialContext,
     addTags,
     updateContactTool,
     createTaskTool,

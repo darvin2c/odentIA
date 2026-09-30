@@ -9,13 +9,16 @@
  * appointments (agenda operativa), crm (contactos, oportunidades, campos),
  * conversations (bandeja y mensajes), tasks (tareas), finance (caja y cobros),
  * inventory (existencias), reports (reportes), settings (configuración),
- * audit (auditoría), agent (agente IA). Cada dominio tiene `.read`/`.write`.
+ * audit (auditoría), agent (agente IA). Cada dominio tiene `.read`/`.write`,
+ * salvo el agente que además expone `agent.decide`: decidir/ejecutar/
+ * confirmar propuestas operativas del propio dominio del acto (agenda, CRM,
+ * conversaciones). `agent.write` queda reservado a administrar el agente
+ * (configuración, conocimiento, simulación); `agent.read` a supervisar.
  *
  * Invariante: lo clínico (`clinical.*`) nunca se entrega a recepción/caja y
  * lo financiero (`finance.*`) nunca a recepción/clínica. `member` es el
  * mínimo seguro (solo ver tareas). Falla cerrado: rol o permiso
  * desconocido siempre deniega, incluso para owner/admin.
- */
 
 /** Roles de membresía de la organización. */
 export const ORG_ROLES = ["owner", "admin", "reception", "dentist", "cashier", "member"] as const;
@@ -37,7 +40,7 @@ export const PERMISSION_DOMAINS = [
   "agent",
 ] as const;
 export type PermissionDomain = (typeof PERMISSION_DOMAINS)[number];
-export type Permission = `${PermissionDomain}.${"read" | "write"}`;
+export type Permission = `${PermissionDomain}.${"read" | "write"}` | "agent.decide";
 
 /** Etiquetas en español para la UI de miembros. */
 export const ROLE_LABELS: Record<OrgRole, string> = {
@@ -53,16 +56,20 @@ export const ROLE_LABELS: Record<OrgRole, string> = {
 export const ROLE_DESCRIPTIONS: Record<OrgRole, string> = {
   owner: "Acceso total, incluida la gestión de propietarios.",
   admin: "Acceso total a todos los dominios.",
-  reception: "Filiación de pacientes, agenda, CRM, conversaciones y tareas. Sin clínica ni caja.",
+  reception:
+    "Filiación de pacientes, agenda, CRM, conversaciones y tareas; resuelve decisiones del agente de sus dominios. Sin clínica, caja ni administración del agente.",
   dentist: "Lectura de pacientes, clínica completa, agenda, conversaciones y tareas. Sin caja ni CRM.",
   cashier: "Lectura de pacientes, caja y tareas. Sin clínica ni agenda.",
   member: "Acceso mínimo: solo ver tareas.",
 };
 
-const ALL_PERMISSIONS: Permission[] = PERMISSION_DOMAINS.flatMap((domain) => [
-  `${domain}.read` as Permission,
-  `${domain}.write` as Permission,
-]);
+const ALL_PERMISSIONS: Permission[] = [
+  ...PERMISSION_DOMAINS.flatMap((domain) => [
+    `${domain}.read` as Permission,
+    `${domain}.write` as Permission,
+  ]),
+  "agent.decide",
+];
 
 /**
  * Permisos explícitos por rol. owner/admin no figuran: tienen todo permiso
@@ -82,6 +89,7 @@ const ROLE_PERMISSIONS: Record<Exclude<OrgRole, "owner" | "admin">, readonly Per
     "conversations.write",
     "tasks.read",
     "tasks.write",
+    "agent.decide",
   ],
   dentist: [
     "patients.read",
@@ -104,6 +112,7 @@ function normalizeRole(role: string): OrgRole | null {
 }
 
 function isPermission(permission: string): permission is Permission {
+  if (permission === "agent.decide") return true;
   const separator = permission.lastIndexOf(".");
   if (separator < 0) return false;
   const domain = permission.slice(0, separator);
@@ -164,6 +173,9 @@ const PLATFORM_PATH_RULES: PlatformPathRule[] = [
   { prefix: "/inventory", permissions: ["inventory.read"] },
   { prefix: "/reports", permissions: ["reports.read"] },
   { prefix: "/audit", permissions: ["audit.read"] },
+  // Regla específica antes de la genérica: las aprobaciones operativas las
+  // resuelve quien decide (`agent.decide`), no solo quien supervisa.
+  { prefix: "/agent/approvals", permissions: ["agent.read", "agent.decide"] },
   { prefix: "/agent", permissions: ["agent.read"] },
   { prefix: "/settings", permissions: ["settings.read"] },
   { prefix: "/members", permissions: ["settings.read"] },

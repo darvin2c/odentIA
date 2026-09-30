@@ -21,11 +21,12 @@ import {
 } from "./conversations.js"
 import { secretsKeyFromEnv } from "./secrets.js"
 import type { Storage } from "./storage.js"
-import { createTask } from "./tasks.js"
+import { createOpportunity, getOpportunity, updateOpportunity } from "./opportunities.js"
+import { ensureDefaultPipeline } from "./pipelines.js"
+import { createTask, listTasks } from "./tasks.js"
 import { appDb, setupTestDb } from "./test-setup.js"
 
 setupTestDb()
-
 const KEY = secretsKeyFromEnv("dd".repeat(32))
 
 const stubAdapter: ChannelAdapter = {
@@ -392,4 +393,109 @@ it("transferencia no cruza organizaciones", async () => {
       moveContactIdentity(tx, "org_b", null, identity.id, { fromContactId: a.id, toContactId: b.id, reason: "Intento ajeno" }),
     ),
   ).rejects.toMatchObject({ code: "NOT_FOUND", status: 404 })
+})
+
+it("transferencia conserva negocio en origen y desvincula el hilo movido", async () => {
+  const connId = await makeWaConnection("org_a")
+  const from = await withOrgContext(appDb, "org_a", (tx) =>
+    createContact(tx, "org_a", { displayName: "Origen Negocio" }),
+  )
+  const to = await withOrgContext(appDb, "org_a", (tx) =>
+    createContact(tx, "org_a", { displayName: "Destino Negocio" }),
+  )
+  const identity = await withOrgContext(appDb, "org_a", (tx) =>
+    addContactIdentity(tx, "org_a", null, from.id, { channel: "whatsapp", externalUserId: "wa:51900000555" }),
+  )
+  const moved = await withOrgContext(appDb, "org_a", (tx) =>
+    startContactConversation(tx, "org_a", null, from.id, { identityId: identity.id, connectionId: connId }),
+  )
+  // Otro canal del origen que no se transfiere.
+  const otherIdentity = await withOrgContext(appDb, "org_a", (tx) =>
+    addContactIdentity(tx, "org_a", null, from.id, { channel: "whatsapp", externalUserId: "wa:51900000556" }),
+  )
+  const stayed = await withOrgContext(appDb, "org_a", (tx) =>
+    startContactConversation(tx, "org_a", null, from.id, { identityId: otherIdentity.id, connectionId: connId }),
+  )
+  await withOrgContext(appDb, "org_a", (tx) => ensureDefaultPipeline(tx, "org_a"))
+  const opp = await withOrgContext(appDb, "org_a", (tx) =>
+    createOpportunity(
+      tx,
+      "org_a",
+      {
+        contactId: from.id,
+        title: "Ortodoncia",
+        conversationId: moved.id,
+        nextActionAt: new Date(Date.now() + 86_400_000).toISOString(),
+        nextActionNote: "Llamar mañana",
+      },
+      { userId: null },
+    ),
+  )
+  const followUps = await withOrgContext(appDb, "org_a", (tx) =>
+    listTasks(tx, "org_a", { opportunityId: opp.id, status: "open" }),
+  )
+  expect(followUps).toHaveLength(1)
+  expect(followUps[0]?.conversationId).toBe(moved.id)
+  const commercial = await withOrgContext(appDb, "org_a", (tx) =>
+    createTask(tx, "org_a", { title: "Comercial", contactId: from.id, conversationId: moved.id, opportunityId: opp.id, createdBy: "user" }),
+  )
+  const manual = await withOrgContext(appDb, "org_a", (tx) =>
+    createTask(tx, "org_a", { title: "Operativa", contactId: from.id, conversationId: moved.id, createdBy: "user" }),
+  )
+  const loose = await withOrgContext(appDb, "org_a", (tx) =>
+    createTask(tx, "org_a", { title: "Suelta", contactId: from.id, createdBy: "user" }),
+  )
+  const result = await withOrgContext(appDb, "org_a", (tx) =>
+    moveContactIdentity(tx, "org_a", null, identity.id, { fromContactId: from.id, toContactId: to.id, reason: "Número del hijo" }),
+  )
+  expect(result).toMatchObject({
+    movedConversations: 1,
+    movedTasks: 1,
+    reconciledOpportunities: 1,
+    reconciledTasks: 2,
+  })
+  // Hilo e identidad pasan a B con la tarea operativa.
+  const detail = await withOrgContext(appDb, "org_a", (tx) =>
+    getConversationDetail(tx, "org_a", moved.id),
+  )
+  expect(detail.contact.id).toBe(to.id)
+  const [identityRow] = await withOrgContext(appDb, "org_a", (tx) =>
+    tx.select().from(contactIdentity).where(eq(contactIdentity.id, identity.id)).limit(1),
+  )
+  expect(identityRow?.contactId).toBe(to.id)
+  const tasks = await withOrgContext(appDb, "org_a", (tx) =>
+    tx.select().from(crmTask).where(eq(crmTask.organizationId, "org_a")),
+  )
+  const byId = new Map(tasks.map((t) => [t.id, t]))
+  expect(byId.get(manual.id)?.contactId).toBe(to.id)
+  expect(byId.get(manual.id)?.conversationId).toBe(moved.id)
+  // Negocio y paciente quedan en A sin el hilo de B.
+  const kept = await withOrgContext(appDb, "org_a", (tx) => getOpportunity(tx, "org_a", opp.id))
+  expect(kept.contactId).toBe(from.id)
+  expect(kept.conversationId).toBeNull()
+  expect(byId.get(commercial.id)?.contactId).toBe(from.id)
+  expect(byId.get(commercial.id)?.conversationId).toBeNull()
+  expect(byId.get(commercial.id)?.opportunityId).toBe(opp.id)
+  expect(byId.get(followUps[0]!.id)?.contactId).toBe(from.id)
+  expect(byId.get(followUps[0]!.id)?.conversationId).toBeNull()
+  expect(byId.get(followUps[0]!.id)?.status).toBe("open")
+  // Otro canal y tareas sueltas no se tocan.
+  const stayedDetail = await withOrgContext(appDb, "org_a", (tx) =>
+    getConversationDetail(tx, "org_a", stayed.id),
+  )
+  expect(stayedDetail.contact.id).toBe(from.id)
+  expect(byId.get(loose.id)?.contactId).toBe(from.id)
+  // Editar el seguimiento luego no revincula la conversación antigua.
+  const edited = await withOrgContext(appDb, "org_a", (tx) =>
+    updateOpportunity(tx, "org_a", opp.id, { nextActionNote: "Llamar pasado mañana" }, { userId: null }),
+  )
+  expect(edited.contactId).toBe(from.id)
+  expect(edited.conversationId).toBeNull()
+  const after = await withOrgContext(appDb, "org_a", (tx) =>
+    listTasks(tx, "org_a", { opportunityId: opp.id, status: "open" }),
+  )
+  const openFollowUps = after.filter(task => task.kind === "opportunity_follow_up")
+  expect(openFollowUps).toHaveLength(1)
+  expect(openFollowUps[0]?.contactId).toBe(from.id)
+  expect(openFollowUps[0]?.conversationId).toBeNull()
 })

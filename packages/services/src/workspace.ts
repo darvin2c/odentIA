@@ -3,6 +3,7 @@ import { member } from "@odentia/db/schema/auth"
 import { workspaceNotification } from "@odentia/db/schema/workspace"
 import { and, desc, eq, inArray, isNull, sql, type SQL } from "drizzle-orm"
 import { notFound, validation } from "./errors.js"
+import { listHandoffs, listProposals, type ProposalItem } from "./agent-operations.js"
 
 export interface WorkspaceAccess {
   patients: boolean
@@ -76,35 +77,21 @@ async function workspaceZone(tx: Db, orgId: string) {
   return row
 }
 
-/** Resumen corto del payload de una propuesta (misma lógica que el frontend de aprobaciones). */
-function proposalPayloadSummary(payload: Record<string, unknown>): string {
-  const parts: string[] = []
-  if (typeof payload["startsAt"] === "string") {
-    const date = new Date(payload["startsAt"])
-    if (!Number.isNaN(date.getTime())) parts.push(date.toLocaleString("es-PE"))
-  }
-  if (typeof payload["appointmentId"] === "string") parts.push(`cita ${String(payload["appointmentId"]).slice(0, 8)}…`)
-  return parts.join(" · ")
-}
 
 export interface WorkspaceAgentHome {
   pendingProposals: number
-  proposals: { id: string; action: string; summary: string; createdAt: string }[]
-  recentHandoffs: { id: string; reason: string; priority: string; createdAt: string }[]
+  proposals: Array<{ id: string; action: string; summary: string; createdAt: string; conversationId: string | null; mode: string; context: ProposalItem["context"] }>
+  recentHandoffs: Array<{ id: string; reason: string; priority: string; createdAt: string; conversationId: string | null; contactName: string | null; channel: string | null }>
   today: { runs: number; ok: number; handoff: number; error: number; omitida: number }
 }
 
 /** Banda del agente para el home: pendientes, derivaciones recientes y corridas de hoy (zona de la org). */
 async function workspaceAgent(tx: Db, orgId: string, start: SQL, end: SQL): Promise<WorkspaceAgentHome> {
+  const proposalRows = await listProposals(tx, orgId, { status: "propuesta", limit: 3 })
   const [pending] = await tx.execute<{ count: number }>(sql`
     select count(*)::int as count from agent_proposal where organization_id=${orgId} and status='propuesta'`)
-  const proposalRows = await tx.execute<{ id: string; action: string; payload: unknown; createdAt: Date }>(sql`
-    select id, action, payload, created_at as "createdAt" from agent_proposal
-    where organization_id=${orgId} and status='propuesta' order by created_at desc, id desc limit 3`)
-  const handoffRows = await tx.execute<{ id: string; reason: string; priority: string; createdAt: Date }>(sql`
-    select id, reason, priority, created_at as "createdAt" from agent_handoff
-    where organization_id=${orgId} and created_at >= now() - interval '72 hours'
-    order by created_at desc, id desc limit 3`)
+  const handoffRows = (await listHandoffs(tx, orgId, { limit: 3 }))
+    .filter(row => Date.parse(row.createdAt) >= Date.now() - 72 * 3_600_000)
   const [today] = await tx.execute<{ runs: number; ok: number; handoff: number; error: number; omitida: number }>(sql`
     select count(*)::int as runs,
       count(*) filter (where status='ok')::int as ok,
@@ -115,13 +102,12 @@ async function workspaceAgent(tx: Db, orgId: string, start: SQL, end: SQL): Prom
   return {
     pendingProposals: pending?.count ?? 0,
     proposals: proposalRows.map(row => ({
-      id: row.id, action: row.action,
-      summary: proposalPayloadSummary((row.payload ?? {}) as Record<string, unknown>),
-      createdAt: new Date(row.createdAt).toISOString(),
+      id: row.id, action: row.action, summary: row.context.afterSummary,
+      createdAt: row.createdAt, conversationId: row.conversationId, mode: row.mode, context: row.context,
     })),
     recentHandoffs: handoffRows.map(row => ({
-      id: row.id, reason: row.reason, priority: row.priority,
-      createdAt: new Date(row.createdAt).toISOString(),
+      id: row.id, reason: row.reason, priority: row.priority, createdAt: row.createdAt,
+      conversationId: row.conversationId, contactName: row.contactName, channel: row.channel,
     })),
     today: {
       runs: today?.runs ?? 0, ok: today?.ok ?? 0, handoff: today?.handoff ?? 0,
@@ -133,10 +119,78 @@ async function workspaceAgent(tx: Db, orgId: string, start: SQL, end: SQL): Prom
 export interface WorkspacePulse {
   funnel: { stage: string; count: number; amountCents: string; currency: string }[] | null
   channels: { channel: string; count: number }[] | null
-  autonomy: { day: string; ok: number; handoff: number }[] | null
+  execution: Array<{ day: string; ok: number; handoff: number; error: number }> | null
   collections: { day: string; currency: string; amountCents: string }[] | null
+  performance: CrmPerformance
 }
 
+
+export interface CrmPerformance {
+  responses: { conversations: number; responded: number; timedResponses: number; avgFirstResponseSeconds: number | null } | null
+  followUps: { open: number; overdue: number; unassigned: number } | null
+  conversations: { closed: number; waiting: number } | null
+  bookings: Array<{ source: string; count: number; active: number }> | null
+  conversion: Array<{ channel: string | null; assigneeUserId: string | null; assigneeName: string | null; created: number; won: number; lost: number; open: number; wonRate: number | null }> | null
+  proposals: { executed: number; failed: number; pending: number } | null
+}
+
+/** Cohorte por fecha de entrada/creación; los pendientes son una foto actual. */
+async function crmPerformance(tx: Db, orgId: string, access: WorkspaceAccess, start: SQL, end: SQL): Promise<CrmPerformance> {
+  const [responses] = access.conversations ? await tx.execute<NonNullable<CrmPerformance["responses"]>>(sql`
+    with first_inbound as (
+      select distinct on (conversation_id) conversation_id, created_at
+      from message where organization_id=${orgId} and direction='in'
+      order by conversation_id, created_at, id
+    ), cohort as (
+      select i.conversation_id, i.created_at, r.sent_at, r.id as response_id
+      from first_inbound i left join lateral (
+        select m.id, m.sent_at from message m
+        where m.organization_id=${orgId} and m.conversation_id=i.conversation_id
+          and m.direction='out' and m.status in ('sent','delivered','read')
+          and coalesce(m.external_id,'') not like 'mock-%'
+          and m.created_at >= i.created_at
+        order by coalesce(m.sent_at, m.created_at), m.id limit 1
+      ) r on true where i.created_at >= ${start} and i.created_at < ${end}
+    ) select count(*)::int as conversations,
+      count(response_id)::int as responded,
+      count(*) filter(where sent_at >= created_at)::int as "timedResponses",
+      avg(extract(epoch from (sent_at-created_at))) filter(where sent_at >= created_at)::float8 as "avgFirstResponseSeconds"
+    from cohort`) : []
+  const [followUps] = access.crm && access.tasks ? await tx.execute<NonNullable<CrmPerformance["followUps"]>>(sql`
+    select count(*)::int as open, count(*) filter(where due_at <= now())::int as overdue,
+      count(*) filter(where assignee_user_id is null)::int as unassigned
+    from task where organization_id=${orgId} and status='open' and kind='opportunity_follow_up'`) : []
+  const [conversations] = access.conversations ? await tx.execute<NonNullable<CrmPerformance["conversations"]>>(sql`
+    select (select count(distinct entity_id)::int from audit_event
+      where organization_id=${orgId} and entity='conversation' and action='conversation.updated'
+        and metadata->>'op'='close' and created_at >= ${start} and created_at < ${end}) as closed,
+      (select count(*)::int from conversation c where c.organization_id=${orgId} and c.status='open'
+        and exists(select 1 from message i where i.organization_id=${orgId} and i.conversation_id=c.id and i.direction='in'
+          and not exists(select 1 from message o where o.organization_id=${orgId} and o.conversation_id=c.id
+            and o.direction='out' and o.status in ('sent','delivered','read')
+            and coalesce(o.external_id,'') not like 'mock-%' and o.created_at >= i.created_at))) as waiting`) : []
+  const bookings = access.appointments ? await tx.execute<NonNullable<CrmPerformance["bookings"]>[number]>(sql`
+    select source, count(*)::int as count,
+      count(*) filter(where status in ('programada','confirmada','atendida'))::int as active
+    from appointment where organization_id=${orgId} and created_at >= ${start} and created_at < ${end}
+    group by source order by source`) : null
+  const conversion = access.crm ? await tx.execute<NonNullable<CrmPerformance["conversion"]>[number]>(sql`
+    select cc.channel, o.assigned_user_id as "assigneeUserId", u.name as "assigneeName",
+      count(*)::int as created, count(*) filter(where o.status='won')::int as won,
+      count(*) filter(where o.status='lost')::int as lost, count(*) filter(where o.status='open')::int as open,
+      (100.0*count(*) filter(where o.status='won')/nullif(count(*),0))::float8 as "wonRate"
+    from opportunity o left join conversation c on c.id=o.conversation_id and c.organization_id=${orgId}
+    left join channel_connection cc on cc.id=c.channel_connection_id and cc.organization_id=${orgId}
+    left join "user" u on u.id=o.assigned_user_id
+    where o.organization_id=${orgId} and o.created_at >= ${start} and o.created_at < ${end}
+    group by cc.channel, o.assigned_user_id, u.name order by cc.channel nulls last, u.name nulls last`) : null
+  const [proposals] = access.agent ? await tx.execute<NonNullable<CrmPerformance["proposals"]>>(sql`
+    select count(*) filter(where status='ejecutada' and executed_at >= ${start} and executed_at < ${end})::int as executed,
+      count(*) filter(where status='fallida' and updated_at >= ${start} and updated_at < ${end})::int as failed,
+      count(*) filter(where status='propuesta')::int as pending
+    from agent_proposal where organization_id=${orgId}`) : []
+  return { responses: responses ?? null, followUps: followUps ?? null, conversations: conversations ?? null, bookings, conversion, proposals: proposals ?? null }
+}
 /**
  * Pulso del negocio para los gráficos del home. Cada sección es nula sin su
  * permiso; los días usan la zona horaria de la organización.
@@ -155,13 +209,14 @@ export async function getWorkspacePulse(tx: Db, orgId: string, access: Workspace
     from conversation c join channel_connection cc on cc.id = c.channel_connection_id and cc.organization_id = ${orgId}
     where c.organization_id = ${orgId} and c.status = 'open'
     group by cc.channel order by cc.channel`) : null
-  const autonomy = access.agent ? await tx.execute<{ day: string; ok: number; handoff: number }>(sql`
+  const execution = access.agent ? await tx.execute<{ day: string; ok: number; handoff: number; error: number }>(sql`
     with days as (
       select to_char((now() at time zone ${timezone}) - (n || ' days')::interval, 'YYYY-MM-DD') as day
       from generate_series(0, 29) n
     ) select days.day as day,
       count(l.id) filter (where l.status = 'ok')::int as ok,
-      count(l.id) filter (where l.status = 'handoff')::int as handoff
+      count(l.id) filter (where l.status = 'handoff')::int as handoff,
+      count(l.id) filter (where l.status = 'error')::int as error
     from days left join agent_run_ledger l
       on l.organization_id = ${orgId} and to_char(l.started_at at time zone ${timezone}, 'YYYY-MM-DD') = days.day
     group by days.day order by days.day`) : null
@@ -172,7 +227,8 @@ export async function getWorkspacePulse(tx: Db, orgId: string, access: Workspace
     where organization_id = ${orgId} and voided_at is null
       and paid_at >= (((to_char(now() at time zone ${timezone}, 'YYYY-MM-DD'))::date - 29)::timestamp at time zone ${timezone})
     group by day, currency order by day, currency`) : null
-  return { funnel, channels, autonomy, collections }
+  const start = sql`((now() at time zone ${timezone})::date - 29)::timestamp at time zone ${timezone}`
+  return { funnel, channels, execution, collections, performance: await crmPerformance(tx, orgId, access, start, sql`now()`) }
 }
 
 export async function getWorkspaceHome(tx: Db, orgId: string, userId: string, access: WorkspaceAccess) {
@@ -202,10 +258,16 @@ export async function getWorkspaceHome(tx: Db, orgId: string, userId: string, ac
     from task where organization_id=${orgId} and status='open'
     and (${access.allTasks} or assignee_user_id=${userId})`) : []
   const [conversations] = access.conversations ? await tx.execute<{ unread: number; waiting: number; human: number }>(sql`
-    select count(*) filter (where unread_count > 0)::int as unread,
-    count(*) filter (where last_inbound_at > coalesce(last_outbound_at, '-infinity'::timestamptz))::int as waiting,
-    count(*) filter (where agent_status='off' and last_inbound_at > coalesce(last_outbound_at, '-infinity'::timestamptz))::int as human
-    from conversation where organization_id=${orgId} and status='open'`) : []
+    with operative as (
+      select c.unread_count, c.agent_status, exists (
+        select 1 from message i where i.organization_id=${orgId} and i.conversation_id=c.id and i.direction='in'
+          and not exists (select 1 from message o where o.organization_id=${orgId} and o.conversation_id=c.id
+            and o.direction='out' and o.status in ('sent','delivered','read')
+            and coalesce(o.external_id,'') not like 'mock-%' and o.created_at >= i.created_at)
+      ) as waiting from conversation c where c.organization_id=${orgId} and c.status='open'
+    ) select count(*) filter(where unread_count > 0)::int as unread,
+      count(*) filter(where waiting)::int as waiting,
+      count(*) filter(where agent_status='off' and waiting)::int as human from operative`) : []
   const budgets = access.finance || access.clinical ? await tx.execute<{ id: string; patientId: string; patientName: string; title: string; presentedAt: string | null }>(sql`
     select b.id, b.patient_id as "patientId", p.display_name as "patientName", b.title, b.presented_at as "presentedAt"
     from treatment_budget b join patient p on p.id=b.patient_id and p.organization_id=${orgId}
@@ -230,7 +292,7 @@ async function currentDebt(tx: Db, orgId: string) {
       count(distinct patient_id)::int as patients from balances where remaining > 0 group by currency order by currency`)
 }
 
-export async function getManagementReport(tx: Db, orgId: string, from: string, to: string) {
+export async function getManagementReport(tx: Db, orgId: string, from: string, to: string, access: WorkspaceAccess) {
   const { timezone, locale } = await workspaceZone(tx, orgId)
   if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to) || from > to ||
     !Number.isFinite(Date.parse(from)) || !Number.isFinite(Date.parse(to)) ||
@@ -282,7 +344,7 @@ export async function getManagementReport(tx: Db, orgId: string, from: string, t
       when due_at >= now()-interval '60 days' then '31–60 días'
       when due_at >= now()-interval '90 days' then '61–90 días' else 'Más de 90 días' end as bucket,
       sum(remaining)::text as "amountCents" from balances where remaining>0 group by currency, bucket order by currency, bucket`)
-  return { from, to, timezone, locale, appointments, production, clinicalProduction, opportunities, aging, budgets, collections, debt: await currentDebt(tx, orgId) }
+  return { from, to, timezone, locale, appointments, production, clinicalProduction, opportunities, aging, budgets, collections, debt: await currentDebt(tx, orgId), performance: await crmPerformance(tx, orgId, access, start, end) }
 }
 
 export async function listWorkspaceAudit(tx: Db, orgId: string, input: { action?: string; before?: string; beforeId?: string }) {

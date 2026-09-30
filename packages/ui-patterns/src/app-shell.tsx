@@ -80,7 +80,7 @@ export type ShellLinkComponent = React.ComponentType<{
   className?: string
   children: React.ReactNode
   title?: string
-  onClick?: () => void
+  onClick?: React.MouseEventHandler<HTMLAnchorElement>
 }>
 
 export interface AppShellProps {
@@ -122,8 +122,8 @@ function isGroup(entry: AppShellNavEntry): entry is AppShellNavGroup {
 /**
  * Item de navegación. Enchufa el `LinkComponent` del router en
  * `SidebarMenuButton` vía el prop `render` de Base UI (mismo mecanismo que
- * `DropdownMenuItem` en el footer). `onClick` llega tipado sin args pero
- * React lo invoca con el evento real, así que el reenvío es seguro en runtime.
+ * `DropdownMenuItem` en el footer). Conserva el evento para que el router
+ * intercepte la navegación y respete los bloqueos por cambios sin guardar.
  */
 function NavItemButton({
   item,
@@ -148,9 +148,9 @@ function NavItemButton({
             <LinkComponent
               to={item.to}
               {...rest}
-              onClick={() => {
+              onClick={(event) => {
                 setOpenMobile(false)
-                ;(onClick as unknown as (event?: unknown) => void)?.()
+                onClick?.(event)
               }}
             >
               {children as React.ReactNode}
@@ -387,7 +387,7 @@ export function AppShell(props: AppShellProps): React.JSX.Element {
                 to={item.to}
                 search={item.search}
                 {...rest}
-                onClick={onClick as unknown as () => void}
+                onClick={onClick}
               >
                 {menuProps.children}
               </LinkComponent>

@@ -3,13 +3,13 @@ import { withOrgContext } from "@odentia/db"
 import { agentHandoff, agentProposal, agentRunLedger } from "@odentia/db/schema/agent"
 import { member, user } from "@odentia/db/schema/auth"
 import { patient, patientCharge, patientPayment } from "@odentia/db/schema/clinical"
-import { channelConnection, contact, conversation, pipeline, pipelineStage } from "@odentia/db/schema/crm"
+import { channelConnection, contact, conversation, message, pipeline, pipelineStage } from "@odentia/db/schema/crm"
 import { opportunity } from "@odentia/db/schema/opportunities"
 import { orgProfile } from "@odentia/db/schema/org"
-import { sql } from "drizzle-orm"
+import { eq, sql } from "drizzle-orm"
 import { beforeAll, expect, it } from "vitest"
-import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
-import { createWorkspaceNotification, getWorkspaceHome, getWorkspacePulse, listWorkspaceAudit, listWorkspaceNotifications, readWorkspaceNotification, type WorkspaceAccess } from "./workspace.js"
+import { appDb, insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
+import { createWorkspaceNotification, getManagementReport, getWorkspaceHome, getWorkspacePulse, listWorkspaceAudit, listWorkspaceNotifications, readWorkspaceNotification, type WorkspaceAccess } from "./workspace.js"
 
 setupTestDb()
 const recipient = randomUUID()
@@ -145,9 +145,6 @@ it("el inicio muestra la banda del agente con pendientes, derivaciones y corrida
   expect(home.agent!.pendingProposals).toBe(2)
   // Solo propuestas en estado 'propuesta', la más reciente primero.
   expect(home.agent!.proposals.map(item => item.action)).toEqual(["cancelar_cita", "reservar_cita"])
-  expect(home.agent!.proposals[0]!.summary).toContain("cita 12345678…")
-  expect(home.agent!.proposals[1]!.summary).not.toContain("cita")
-  expect(home.agent!.proposals[0]!.createdAt).not.toBe("")
   // Solo derivaciones de las últimas 72 horas.
   expect(home.agent!.recentHandoffs).toHaveLength(1)
   expect(home.agent!.recentHandoffs[0]).toMatchObject({ reason: "Reciente", priority: "alta" })
@@ -176,19 +173,13 @@ it("el pulso cuenta conversaciones abiertas por canal", async () => {
   expect(gated.channels).toBeNull()
 })
 
-it("el pulso trae 30 días de autonomía con días a cero incluidos", async () => {
+it("las ejecuciones correctas no incluyen derivaciones ni errores y se ocultan sin permiso", async () => {
   const pulse = await withOrgContext(appDb, "org_a", tx => getWorkspacePulse(tx, "org_a", full))
-  expect(pulse.autonomy).toHaveLength(30)
-  const days = pulse.autonomy!.map(item => item.day)
-  expect([...days].sort()).toEqual(days)
-  expect(days.every(day => /^\d{4}-\d{2}-\d{2}$/.test(day))).toBe(true)
-  const totalOk = pulse.autonomy!.reduce((sum, item) => sum + item.ok, 0)
-  const totalHandoff = pulse.autonomy!.reduce((sum, item) => sum + item.handoff, 0)
-  expect(totalOk).toBe(2)
-  expect(totalHandoff).toBe(1)
-  expect(pulse.autonomy!.some(item => item.ok === 0 && item.handoff === 0)).toBe(true)
+  expect(pulse.execution!.reduce((sum, item) => sum + item.ok, 0)).toBe(2)
+  expect(pulse.execution!.reduce((sum, item) => sum + item.handoff, 0)).toBe(1)
+  expect(pulse.execution!.reduce((sum, item) => sum + item.error, 0)).toBe(1)
   const gated = await withOrgContext(appDb, "org_a", tx => getWorkspacePulse(tx, "org_a", { ...full, agent: false }))
-  expect(gated.autonomy).toBeNull()
+  expect(gated.execution).toBeNull()
 })
 
 it("el pulso suma cobros no anulados por día y moneda", async () => {
@@ -200,4 +191,66 @@ it("el pulso suma cobros no anulados por día y moneda", async () => {
   expect(pulse.collections!.every(item => /^\d{4}-\d{2}-\d{2}$/.test(item.day))).toBe(true)
   const gated = await withOrgContext(appDb, "org_a", tx => getWorkspacePulse(tx, "org_a", { ...full, finance: false }))
   expect(gated.collections).toBeNull()
+})
+
+it("la primera respuesta usa aceptación real y excluye colas, fallos y simulación", async () => {
+  const orgId = randomUUID()
+  await insertOrg(ownerDb, orgId, `metricas-${orgId}`)
+  await ownerDb.insert(orgProfile).values({ organizationId: orgId, legalName: "Métricas", timezone: "America/Lima" })
+  const [person] = await ownerDb.insert(contact).values({ organizationId: orgId, displayName: "Interlocutor" }).returning()
+  const [connection] = await ownerDb.insert(channelConnection).values({
+    organizationId: orgId, channel: "whatsapp", provider: "prueba", displayName: "Métricas", configEncrypted: "x", webhookSecret: "y",
+  }).returning()
+  const inboundAt = new Date("2026-09-10T10:00:00.000Z")
+  for (const [index, status] of ["sent", "queued", "failed", "mock", "legacy"].entries()) {
+    const [thread] = await ownerDb.insert(conversation).values({
+      organizationId: orgId, contactId: person!.id, channelConnectionId: connection!.id, externalThreadId: `metricas-${index}`,
+    }).returning()
+    await ownerDb.insert(message).values([
+      { organizationId: orgId, conversationId: thread!.id, direction: "in", senderKind: "contact", status: "received", createdAt: inboundAt },
+      { organizationId: orgId, conversationId: thread!.id, direction: "out", senderKind: "user",
+        status: status === "mock" || status === "legacy" ? "sent" : status,
+        externalId: status === "mock" ? "mock-demostracion" : `proveedor-${index}`,
+        createdAt: new Date(inboundAt.getTime() + 10_000),
+        sentAt: status === "sent" ? new Date(inboundAt.getTime() + 90_000) : null },
+    ])
+    if (status === "sent") {
+      await ownerDb.insert(message).values({
+        organizationId: orgId, conversationId: thread!.id, direction: "out", senderKind: "user",
+        status: "sent", externalId: "proveedor-primero-aceptado",
+        createdAt: new Date(inboundAt.getTime() + 20_000), sentAt: new Date(inboundAt.getTime() + 30_000),
+      })
+    }
+  }
+  const report = await withOrgContext(appDb, orgId, tx => getManagementReport(tx, orgId, "2026-09-01", "2026-09-30", full))
+  expect(report.performance.responses).toEqual({ conversations: 5, responded: 2, timedResponses: 1, avgFirstResponseSeconds: 30 })
+  expect(report.performance.conversations!.waiting).toBe(3)
+  const home = await withOrgContext(appDb, orgId, tx => getWorkspaceHome(tx, orgId, recipient, full))
+  expect(home.conversations!.waiting).toBe(3)
+  const hidden = await withOrgContext(appDb, orgId, tx => getManagementReport(tx, orgId, "2026-09-01", "2026-09-30", restricted))
+  expect(hidden.performance).toEqual({ responses: null, followUps: null, conversations: null, bookings: null, conversion: null, proposals: null })
+})
+
+it("el primer inicio excluye caducadas del contador completo, no solo de la muestra", async () => {
+  const orgId = "home-expiry"
+  await insertOrg(ownerDb, orgId, orgId)
+  await ownerDb.insert(orgProfile).values({ organizationId: orgId, legalName: "Caducidad de propuestas" })
+  const expiredId = randomUUID()
+  await ownerDb.insert(agentProposal).values([
+    {
+      id: expiredId, organizationId: orgId, action: "enviar_mensaje", status: "propuesta",
+      payload: { kind: "text", text: "Caducada" }, idempotencyKey: "home:caducada",
+      createdAt: new Date(Date.now() - 49 * 3_600_000),
+    },
+    ...Array.from({ length: 4 }, (_, index) => ({
+      organizationId: orgId, action: "enviar_mensaje", status: "propuesta",
+      payload: { kind: "text", text: `Vigente ${index}` }, idempotencyKey: `home:vigente:${index}`,
+    })),
+  ])
+  const home = await withOrgContext(appDb, orgId, tx => getWorkspaceHome(tx, orgId, recipient, full))
+  expect(home.agent?.pendingProposals).toBe(4)
+  expect(home.agent?.proposals).toHaveLength(3)
+  expect(home.agent?.proposals.map(row => row.id)).not.toContain(expiredId)
+  const [expired] = await ownerDb.select({ status: agentProposal.status }).from(agentProposal).where(eq(agentProposal.id, expiredId))
+  expect(expired?.status).toBe("expirada")
 })

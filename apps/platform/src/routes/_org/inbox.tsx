@@ -54,6 +54,7 @@ import {
 } from "@odentia/ui/components/ai-elements/prompt-input"
 import { SpeechInput } from "@odentia/ui/components/ai-elements/speech-input"
 import {
+  ConfirmDialog,
   EmptyState,
   FilterBar,
   PageHeader,
@@ -70,11 +71,10 @@ import {
   ChevronLeft,
   Clock,
   Copy,
-  MessageCircle,
-  Send,
+  PanelRight,
   UserPlus,
 } from "lucide-react"
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { ApiError, apiFetch, apiUpload } from "../../lib/api"
 import { API_URL } from "../../lib/auth-client"
 import {
@@ -85,6 +85,8 @@ import {
   usePermission,
   useMyUserId,
 } from "../../lib/crm"
+import { ContactWorkspace } from "../../components/crm/contact-workspace"
+import { channelIcon, channelLabel } from "../../lib/channels"
 import { useOrgEvents } from "../../lib/org-events"
 import { createRegistrationLink } from "../../lib/patient-registration"
 
@@ -99,10 +101,27 @@ export const Route = createFileRoute("/_org/inbox")({
     ...(typeof search.status === "string" ? { status: search.status } : {}),
     ...(typeof search.channel === "string" ? { channel: search.channel } : {}),
     ...(typeof search.assigned === "string" ? { assigned: search.assigned } : {}),
+    ...(typeof search.view === "string" ? { view: search.view } : {}),
+    ...(search.contexto === true || search.contexto === "true"
+      ? { contexto: true as const }
+      : {}),
   }),
   component: InboxPage,
 })
 const orgRouteApi = getRouteApi("/_org")
+
+/**
+ * Canales del filtro de la bandeja: todos los soportados por el núcleo,
+ * etiquetados con el helper canónico (no solo WhatsApp/Telegram).
+ */
+const CHANNEL_FILTER_OPTIONS = [
+  "whatsapp",
+  "telegram",
+  "messenger",
+  "instagram",
+  "email",
+  "webchat",
+] as const
 
 function InboxPage() {
   const queryClient = useQueryClient()
@@ -118,14 +137,44 @@ function InboxPage() {
   const assigned = listSearch.get("assigned")
   const search = listSearch.get("q") ?? ""
   const sort = listSearch.get("sort")
+  // Vistas de trabajo (filtrado SQL en el servidor, antes de paginar):
+  // `unanswered` sin responder, `human` necesita al equipo, `approval` por aprobar.
+  const view = listSearch.get("view")
   const routeSearch = Route.useSearch()
-  const [selectedId, setSelectedId] = useState<string | null>(routeSearch.conversation ?? null)
-
-  // La selección sigue al search `conversation` (navegación desde contactos),
-  // no solo al estado del primer montaje.
+  const showContext = routeSearch.contexto === true
+  // La selección deriva solo de la URL: navegar es lo único que cambia el
+  // hilo, así el bloqueador del workspace intercepta antes de desmontar.
+  // Limpiar el search (undefined) también limpia la selección.
+  const selectedId = routeSearch.conversation ?? null
+  // El panel de contexto de escritorio se abre con cada hilo y puede ocultarse.
+  const [contextOpen, setContextOpen] = useState(true)
+  // Borrador del workspace (vía onDraftChange): cerrar el panel en escritorio
+  // es estado local y no navega, así que se guarda aquí con confirmación.
+  const [wsDraft, setWsDraft] = useState(false)
+  const [confirmContextClose, setConfirmContextClose] = useState(false)
   useEffect(() => {
-    if (routeSearch.conversation !== undefined) setSelectedId(routeSearch.conversation)
-  }, [routeSearch.conversation])
+    setContextOpen(true)
+    setWsDraft(false)
+    setConfirmContextClose(false)
+  }, [selectedId])
+
+  // La selección vive en la URL: conservar la conversación permite volver al
+  // caso desde cualquier vista y navegar en móvil una vista por vez.
+  const selectConversation = useCallback(
+    (id: string | null) => {
+      void navigate({
+        search: (previous) => ({ ...previous, conversation: id ?? undefined, contexto: undefined }),
+        replace: true,
+      })
+    },
+    [navigate],
+  )
+  // Cerrar u ocultar el panel con borrador pide confirmación; sin borrador
+  // cierra directo. En móvil el cierre navega y lo guarda el bloqueador.
+  const requestCloseContext = useCallback(() => {
+    if (wsDraft) setConfirmContextClose(true)
+    else setContextOpen(false)
+  }, [wsDraft])
 
   // Consumir la intención una sola vez: retirar el flag con replace.
   // La mutación real la dispara ThreadView con el detalle ya cargado.
@@ -143,8 +192,11 @@ function InboxPage() {
     if (assigned === "me") params.set("assigned", myUserId)
     else if (assigned === "none") params.set("assigned", "none")
     if (search.trim()) params.set("q", search.trim())
+    if (view === "unanswered" || view === "human" || view === "approval") {
+      params.set("view", view)
+    }
     return params.toString()
-  }, [status, channel, assigned, search, myUserId])
+  }, [status, channel, assigned, search, myUserId, view])
 
   const listQuery = useInfiniteQuery({
     queryKey: ["conversations", listParams],
@@ -157,10 +209,44 @@ function InboxPage() {
     enabled: canRead,
   })
 
-  useOrgEvents(["message.created", "message.updated", "conversation.updated"], () => {
-    void queryClient.invalidateQueries({ queryKey: ["conversations"] })
-    if (selectedId) void queryClient.invalidateQueries({ queryKey: ["conversation", selectedId] })
-  })
+  const selectedRef = useRef<string | null>(null)
+  selectedRef.current = selectedId
+  const handleOrgEvent = useCallback(
+    (kind: string) => {
+      const current = selectedRef.current
+      if (kind === "stream.reconnected") {
+        // Reconexión: refrescar todo lo visible, no solo el hilo.
+        void queryClient.invalidateQueries({ queryKey: ["crm-context"] })
+        void queryClient.invalidateQueries({ queryKey: ["crm-activity"] })
+        void queryClient.invalidateQueries({ queryKey: ["crm-opportunities"] })
+        void queryClient.invalidateQueries({ queryKey: ["tasks"] })
+        void queryClient.invalidateQueries({ queryKey: ["agent-proposals"] })
+      }
+      void queryClient.invalidateQueries({ queryKey: ["conversations"] })
+      if (current) {
+        void queryClient.invalidateQueries({ queryKey: ["conversation", current] })
+        void queryClient.invalidateQueries({ queryKey: ["crm-context"] })
+        void queryClient.invalidateQueries({ queryKey: ["crm-activity"] })
+      }
+    },
+    [queryClient],
+  )
+  useOrgEvents(
+    [
+      "message.created",
+      "message.updated",
+      "conversation.updated",
+      "contact.updated",
+      "opportunity.updated",
+      "task.updated",
+      "agent.proposal.created",
+      "agent.proposal.decided",
+      "agent.proposal.executed",
+      "agent.handoff.created",
+      "stream.reconnected",
+    ],
+    handleOrgEvent,
+  )
 
   const items = useMemo(() => {
     const base = listQuery.data?.pages.flatMap((page) => page.data) ?? []
@@ -191,6 +277,28 @@ function InboxPage() {
 
   const mode = useDetailMode()
 
+  // Contacto del hilo seleccionado: sale de la lista; en enlace directo se
+  // resuelve con el detalle ya cacheado por ThreadView (misma queryKey).
+  const selectedItem = items.find((item) => item.id === selectedId) ?? null
+  const contactFallbackQuery = useQuery({
+    queryKey: ["conversation", selectedId ?? "ninguna"],
+    queryFn: () =>
+      apiFetch<{ data: ConversationDetail }>(`/api/conversations/${selectedId}`),
+    enabled: canRead && !!selectedId && !selectedItem,
+  })
+  const workspaceContactId =
+    selectedItem?.contact.id ?? contactFallbackQuery.data?.data.contact.id ?? null
+
+  const openContextMobile = useCallback(() => {
+    void navigate({ search: (previous) => ({ ...previous, contexto: true }), replace: true })
+  }, [navigate])
+  const closeContextMobile = useCallback(() => {
+    void navigate({
+      search: (previous) => ({ ...previous, contexto: undefined }),
+      replace: true,
+    })
+  }, [navigate])
+
   const thread = selectedId ? (
     <ThreadView
       key={selectedId}
@@ -205,9 +313,31 @@ function InboxPage() {
         routeSearch.prepareRegistration === true && routeSearch.conversation === selectedId
       }
       onConsumePrepareRegistration={consumePrepareRegistration}
-      onBack={() => setSelectedId(null)}
+      onBack={() => selectConversation(null)}
+      showBack={mode !== "panel"}
+      onToggleContext={mode === "panel" ? () => (contextOpen ? requestCloseContext() : setContextOpen(true)) : openContextMobile}
+      contextOpen={mode === "panel" ? contextOpen : true}
     />
   ) : null
+
+  const refreshAfterWorkspace = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: ["conversations"] })
+    if (selectedRef.current) {
+      void queryClient.invalidateQueries({ queryKey: ["conversation", selectedRef.current] })
+    }
+  }, [queryClient])
+
+  const workspace =
+    selectedId && workspaceContactId ? (
+      <ContactWorkspace
+        key={`${workspaceContactId}:${selectedId}`}
+        contactId={workspaceContactId}
+        conversationId={selectedId}
+        onClose={mode === "panel" ? requestCloseContext : closeContextMobile}
+        onRefresh={refreshAfterWorkspace}
+        onDraftChange={setWsDraft}
+      />
+    ) : null
 
   if (!canRead) {
     return (
@@ -237,10 +367,10 @@ function InboxPage() {
             key: "channel",
             label: "Canal",
             type: "select",
-            options: [
-              { value: "whatsapp", label: "WhatsApp" },
-              { value: "telegram", label: "Telegram" },
-            ],
+            options: CHANNEL_FILTER_OPTIONS.map((channel) => ({
+              value: channel,
+              label: channelLabel(channel),
+            })),
           },
           {
             key: "assigned",
@@ -251,6 +381,16 @@ function InboxPage() {
               { value: "none", label: "Sin asignar" },
             ],
           },
+          {
+            key: "view",
+            label: "Vista",
+            type: "select",
+            options: [
+              { value: "unanswered", label: "Sin responder" },
+              { value: "human", label: "Necesita al equipo" },
+              { value: "approval", label: "Por aprobar" },
+            ],
+          },
         ]}
         sortOptions={[
           { value: "actividad", label: "Actividad reciente" },
@@ -259,8 +399,9 @@ function InboxPage() {
         searchPlaceholder="Buscar contacto"
       />
       {/* PageShell `fill` acota al viewport: el hilo ocupa el alto restante y el
-          composer queda fijo como footer suyo. La lista se separa con un handle
-          arrastrable; en ancho corto (useDetailMode) se muestra una a la vez. */}
+          composer queda fijo como footer suyo. En escritorio hay tres paneles
+          (lista, hilo, contexto); en angosto se muestra una vista por vez y la
+          conversación se conserva en la URL. */}
       {mode === "panel" ? (
         <ResizablePanelGroup orientation="horizontal" className="min-h-0 flex-1">
           <ResizablePanel
@@ -274,10 +415,12 @@ function InboxPage() {
               items={items}
               selectedId={selectedId}
               isLoading={listQuery.isLoading}
-              hasNextPage={listQuery.hasNextPage}
+              isError={listQuery.isError}
+              hasNextPage={listQuery.hasNextPage ?? false}
               isFetchingNextPage={listQuery.isFetchingNextPage}
-              onSelect={setSelectedId}
+              onSelect={(id) => selectConversation(id)}
               onFetchNextPage={() => void listQuery.fetchNextPage()}
+              onRetry={() => void listQuery.refetch()}
             />
           </ResizablePanel>
           <ResizableHandle withHandle className="mx-1 w-4 bg-transparent" />
@@ -289,22 +432,56 @@ function InboxPage() {
               />
             )}
           </ResizablePanel>
+          {workspace && contextOpen && (
+            <>
+              <ResizableHandle withHandle className="mx-1 w-4 bg-transparent" />
+              <ResizablePanel
+                id="contexto"
+                defaultSize="30rem"
+                minSize="24rem"
+                maxSize="40rem"
+                className="flex min-h-0 flex-col"
+              >
+                {workspace}
+              </ResizablePanel>
+            </>
+          )}
         </ResizablePanelGroup>
       ) : (
         <div className="flex min-h-0 flex-1 flex-col gap-3">
-          {thread ?? (
+          {!selectedId || (!showContext && !thread) ? (
             <ConversationList
               items={items}
               selectedId={selectedId}
               isLoading={listQuery.isLoading}
-              hasNextPage={listQuery.hasNextPage}
+              isError={listQuery.isError}
+              hasNextPage={listQuery.hasNextPage ?? false}
               isFetchingNextPage={listQuery.isFetchingNextPage}
-              onSelect={setSelectedId}
+              onSelect={(id) => selectConversation(id)}
               onFetchNextPage={() => void listQuery.fetchNextPage()}
+              onRetry={() => void listQuery.refetch()}
             />
+          ) : showContext ? (
+            (workspace ?? (
+              <p className="p-4 text-sm text-muted-foreground">Cargando contexto…</p>
+            ))
+          ) : (
+            thread
           )}
         </div>
       )}
+      <ConfirmDialog
+        open={confirmContextClose}
+        title="Ocultar contexto con borrador sin guardar"
+        description="La nota operativa no se guardó y se perderá al ocultar el contexto. ¿Continuar?"
+        confirmLabel="Ocultar sin guardar"
+        variant="default"
+        onClose={() => setConfirmContextClose(false)}
+        onConfirm={() => {
+          setConfirmContextClose(false)
+          setContextOpen(false)
+        }}
+      />
     </PageShell>
   )
 }
@@ -316,22 +493,28 @@ function ConversationList({
   items,
   selectedId,
   isLoading,
+  isError,
   hasNextPage,
   isFetchingNextPage,
   onSelect,
   onFetchNextPage,
+  onRetry,
 }: {
   items: ConversationListItem[]
   selectedId: string | null
   isLoading: boolean
+  isError: boolean
   hasNextPage: boolean
   isFetchingNextPage: boolean
   onSelect: (id: string) => void
   onFetchNextPage: () => void
+  onRetry: () => void
 }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto">
-      {items.map((item) => (
+      {items.map((item) => {
+        const ChannelIcon = channelIcon(item.connection.channel)
+        return (
         <button
           key={item.id}
           type="button"
@@ -342,11 +525,10 @@ function ConversationList({
         >
           <div className="flex items-center justify-between gap-2">
             <span className="flex min-w-0 items-center gap-1.5">
-              {item.connection.channel === "whatsapp" ? (
-                <MessageCircle className="size-3.5 shrink-0 text-green-600" />
-              ) : (
-                <Send className="size-3.5 shrink-0 text-sky-600" />
-              )}
+              <ChannelIcon
+                className="size-3.5 shrink-0 text-muted-foreground"
+                aria-label={channelLabel(item.connection.channel)}
+              />
               <span className="truncate text-sm font-medium">{item.contact.displayName}</span>
             </span>
             <span className="flex shrink-0 items-center gap-1.5">
@@ -355,11 +537,28 @@ function ConversationList({
             </span>
           </div>
           <span className="truncate text-xs text-muted-foreground">
+            {channelLabel(item.connection.channel)} ·{" "}
             {item.preview?.body ?? (item.preview ? "[adjunto]" : "—")}
           </span>
         </button>
-      ))}
-      {items.length === 0 && !isLoading && (
+        )
+      })}
+      {isLoading && items.length === 0 && (
+        <p className="p-4 text-sm text-muted-foreground" role="status">
+          Cargando conversaciones…
+        </p>
+      )}
+      {isError && items.length === 0 && !isLoading && (
+        <div className="flex flex-wrap items-center gap-2 p-4">
+          <p className="text-sm text-red-600" role="alert">
+            No se pudieron cargar las conversaciones.
+          </p>
+          <Button variant="outline" size="sm" onClick={onRetry}>
+            Reintentar
+          </Button>
+        </div>
+      )}
+      {!isError && items.length === 0 && !isLoading && (
         <EmptyState title="Sin conversaciones" description="Los mensajes entrantes aparecen aquí." />
       )}
       {hasNextPage && (
@@ -394,6 +593,9 @@ function ThreadView({
   prepareRegistration,
   onConsumePrepareRegistration,
   onBack,
+  showBack,
+  onToggleContext,
+  contextOpen,
 }: {
   id: string
   members: Member[]
@@ -405,6 +607,9 @@ function ThreadView({
   prepareRegistration: boolean
   onConsumePrepareRegistration: () => void
   onBack: () => void
+  showBack?: boolean
+  onToggleContext?: () => void
+  contextOpen?: boolean
 }) {
   const queryClient = useQueryClient()
   const [composer, setComposer] = useState("")
@@ -619,8 +824,29 @@ function ThreadView({
   if (detailQuery.isLoading) {
     return <p className="p-4 text-sm text-muted-foreground">Cargando…</p>
   }
-  if (!detail) {
-    return <EmptyState title="No encontrada" description="La conversación ya no existe." />
+  if (detailQuery.isError || !detail) {
+    return (
+      <div className="flex flex-col gap-2 p-4">
+        {showBack && (
+          <Button variant="ghost" size="icon" onClick={onBack} aria-label="Volver">
+            <ChevronLeft className="size-4" />
+          </Button>
+        )}
+        <p className="text-sm text-red-600" role="alert">
+          No se pudo cargar la conversación.
+        </p>
+        <span className="flex flex-wrap gap-2">
+          <Button variant="outline" size="sm" onClick={() => void detailQuery.refetch()}>
+            Reintentar
+          </Button>
+          {showBack && (
+            <Button variant="ghost" size="sm" onClick={onBack}>
+              Volver a la lista
+            </Button>
+          )}
+        </span>
+      </div>
+    )
   }
 
   const conv = detail.conversation
@@ -629,26 +855,22 @@ function ThreadView({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col rounded-md bg-card">
-      <div className="flex items-center gap-2 border-b p-3">
-        <Button
-          variant="ghost"
-          size="icon"
-          className="md:hidden"
-          onClick={onBack}
-          aria-label="Volver"
-        >
-          <ChevronLeft className="size-4" />
-        </Button>
+      <div className="flex flex-wrap items-center gap-2 border-b p-3">
+        {showBack && (
+          <Button variant="ghost" size="icon" onClick={onBack} aria-label="Volver">
+            <ChevronLeft className="size-4" />
+          </Button>
+        )}
         <div className="min-w-0 flex-1">
           <Link
             to="/contacts/$contactId"
             params={{ contactId: detail.contact.id }}
-            className="truncate text-sm font-semibold hover:underline"
+            className="block truncate text-sm font-semibold hover:underline"
           >
             {detail.contact.displayName}
           </Link>
           <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <span>{detail.connection.channel === "whatsapp" ? "WhatsApp" : "Telegram"}</span>
+            <span>{channelLabel(detail.connection.channel)}</span>
             <span>·</span>
             <Badge
               variant="secondary"
@@ -660,6 +882,7 @@ function ThreadView({
             {assignee && <span>· {assignee.user.name}</span>}
           </div>
         </div>
+        <div className="flex w-full flex-wrap items-center gap-2">
         {canRegister && (
           <Button
             variant="outline"
@@ -706,7 +929,7 @@ function ThreadView({
             title={conv.agentStatus === "on" ? "Pausar agente (toma humana)" : "Reactivar agente"}
           >
             <Bot className="size-4" />
-            {conv.agentStatus === "on" ? "ON" : "OFF"}
+            {conv.agentStatus === "on" ? "Tomar atención" : "Reactivar agente"}
           </Button>
         )}
         {canWrite && (
@@ -718,6 +941,18 @@ function ThreadView({
             {closed ? "Reabrir" : "Cerrar"}
           </Button>
         )}
+        {onToggleContext && (
+          <Button
+            variant={contextOpen ? "secondary" : "outline"}
+            size="sm"
+            onClick={onToggleContext}
+            title="Mostrar el contexto del contacto (persona, oportunidades, agente)"
+          >
+            <PanelRight className="size-4" />
+            Contexto
+          </Button>
+        )}
+        </div>
       </div>
 
       <MessageScrollerProvider autoScroll defaultScrollPosition="end">

@@ -1,11 +1,13 @@
 import { Badge } from "@odentia/ui"
-import { DonutChart, EmptyState, FunnelChart, KpiCard, LoadingState, PageHeader, PageShell, SubmitButton, TrendChart } from "@odentia/ui-patterns"
+import { ConfirmDialog, DonutChart, EmptyState, FunnelChart, KpiCard, LoadingState, PageHeader, PageShell, SubmitButton, TrendChart } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, Link } from "@tanstack/react-router"
 import { AlertTriangle, ArrowRight, Bot, CalendarDays, CheckCircle2, CheckSquare, Hand, Inbox, Wallet } from "lucide-react"
-import type { ReactNode } from "react"
+import { useState, type ReactNode } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
-import { ACTION_LABEL } from "../../lib/agent"
+import { ACTION_LABEL, proposalErrorMessage, type AgentProposal } from "../../lib/agent"
+import { channelLabel } from "../../lib/channels"
+import { PerformanceSummary } from "../../components/crm/performance-summary"
 import { usePermission } from "../../lib/crm"
 import { useOrgEvents } from "../../lib/org-events"
 import { type WorkspaceHome, type WorkspacePulse, moneyFromCents, stateLabel } from "../../lib/workspace"
@@ -25,11 +27,18 @@ const HOME_EVENTS = [
   "task.updated",
   "payment.created",
   "payment.voided",
+  "opportunity.updated",
+  "contact.updated",
+  "stream.reconnected",
 ]
 
 function HomePage() {
   const queryClient = useQueryClient()
-  const canApprove = usePermission("agent.write")
+  const canApprove = usePermission("agent.decide")
+  const [approving, setApproving] = useState<NonNullable<WorkspaceHome["agent"]>["proposals"][number] | null>(null)
+  // Un 200 con `fallida`/`expirada` saca la propuesta de pendientes: el
+  // resultado queda fijo en pantalla junto a la vuelta al caso.
+  const [outcome, setOutcome] = useState<{ status: string; detail: string | null; conversationId: string | null } | null>(null)
   const query = useQuery({ queryKey: ["workspace-home"], queryFn: () => apiFetch<{ data: WorkspaceHome }>("/api/workspace/home"), refetchInterval: 300_000 })
   useOrgEvents(HOME_EVENTS, () => {
     void queryClient.invalidateQueries({ queryKey: ["workspace-home"] })
@@ -38,11 +47,18 @@ function HomePage() {
   // Aprobar desde el home equivale a "Aprobar y ejecutar" de la página de aprobaciones.
   const decideMutation = useMutation({
     mutationFn: (id: string) =>
-      apiFetch(`/api/agent/proposals/${id}/decision`, {
+      apiFetch<{ data: AgentProposal }>(`/api/agent/proposals/${id}/decision`, {
         method: "POST",
         body: JSON.stringify({ decision: "aprobada" }),
       }),
-    onSuccess: () => {
+    onSuccess: (response) => {
+      setApproving(null)
+      const proposal = response.data
+      setOutcome(
+        proposal.status === "fallida" || proposal.status === "expirada"
+          ? { status: proposal.status, detail: proposalErrorMessage(proposal), conversationId: proposal.conversationId }
+          : null,
+      )
       void queryClient.invalidateQueries({ queryKey: ["workspace-home"] })
       void queryClient.invalidateQueries({ queryKey: ["workspace-pulse"] })
     },
@@ -65,24 +81,33 @@ function HomePage() {
           <Link to="/agent/approvals" className="inline-flex items-center gap-1 text-sm text-primary hover:underline">Revisar<ArrowRight className="size-4" aria-hidden /></Link>
         </div>
         {decideError ? <p role="alert" className="mb-3 text-sm text-destructive">{decideError}</p> : null}
+        {outcome && <div role="alert" className="mb-3 flex flex-wrap items-center gap-3 rounded-md border p-3 text-sm">
+          <p className="min-w-0 flex-1">La propuesta quedó {outcome.status === "expirada" ? "expirada" : "fallida"}.{outcome.detail ? ` ${outcome.detail}` : ""} Gestiona la acción desde el caso.</p>
+          <Link to={outcome.conversationId ? "/inbox" : "/agent/approvals"} search={outcome.conversationId ? { conversation: outcome.conversationId } : {}} className="shrink-0 text-primary underline">Volver al caso</Link>
+          <button type="button" className="shrink-0 underline" onClick={() => setOutcome(null)}>Descartar</button>
+        </div>}
         {data.agent.proposals.length > 0 && <ul className="flex flex-col gap-3">
           {data.agent.proposals.map(proposal => <li key={proposal.id} className="flex flex-wrap items-center justify-between gap-3 rounded-md border p-3">
             <div className="min-w-0">
               <p className="font-medium">{ACTION_LABEL[proposal.action] ?? proposal.action}</p>
+              <p className="text-sm">{proposal.context.contactName ?? "Interlocutor no disponible"}{proposal.context.patientName ? ` · Paciente: ${proposal.context.patientName}` : ""}</p>
+              {proposal.context.beforeSummary && <p className="text-xs text-muted-foreground">Al proponer: {proposal.context.beforeSummary}</p>}
+              {proposal.context.currentSummary && <p className="text-xs text-muted-foreground">Estado del caso: {proposal.context.currentSummary}</p>}
               {proposal.summary ? <p className="text-sm text-muted-foreground">{proposal.summary}</p> : null}
               <p className="text-xs text-muted-foreground">{formatDateTime(proposal.createdAt, data.locale, data.timezone)}</p>
             </div>
-            {canApprove && <SubmitButton type="button" size="sm" pending={decideMutation.isPending} onClick={() => decideMutation.mutate(proposal.id)}>
-              Aprobar y ejecutar
-            </SubmitButton>}
+            {canApprove && proposal.mode === "aprobar_equipo" ? <SubmitButton type="button" size="sm" pending={decideMutation.isPending} onClick={() => setApproving(proposal)}>
+              Revisar y aprobar
+            </SubmitButton> : <Link to="/agent/approvals" search={{ conversationId: proposal.conversationId ?? undefined }} className="text-sm text-primary underline">Revisar caso</Link>}
           </li>)}
         </ul>}
         {data.agent.recentHandoffs.length > 0 && <div className={data.agent.proposals.length > 0 ? "mt-4" : undefined}>
           <p className="text-sm font-medium">Derivaciones al equipo ({data.agent.recentHandoffs.length})</p>
           <ul className="mt-2 flex flex-col gap-2">
             {data.agent.recentHandoffs.map(handoff => <li key={handoff.id}>
-              <Link to="/agent/approvals" className="flex flex-wrap items-center gap-2 rounded-md border p-3 hover:bg-muted/40">
+              <Link to={handoff.conversationId ? "/inbox" : "/agent/approvals"} search={handoff.conversationId ? { conversation: handoff.conversationId } : {}} className="flex flex-wrap items-center gap-2 rounded-md border p-3 hover:bg-muted/40">
                 <Badge variant={handoff.priority === "alta" ? "destructive" : "secondary"}>{handoff.priority}</Badge>
+                {handoff.contactName && <span className="text-sm">{handoff.contactName}{handoff.channel ? ` · ${channelLabel(handoff.channel)}` : ""}</span>}
                 <span className="text-sm font-medium">{handoff.reason}</span>
                 <span className="text-xs text-muted-foreground">{formatDateTime(handoff.createdAt, data.locale, data.timezone)}</span>
               </Link>
@@ -90,7 +115,7 @@ function HomePage() {
           </ul>
         </div>}
         {data.agent.proposals.length === 0 && data.agent.recentHandoffs.length === 0 &&
-          <p className="text-sm text-muted-foreground">El agente tiene todo bajo control. No hay propuestas ni derivaciones esperando tu revisión.</p>}
+          <p className="text-sm text-muted-foreground">No hay propuestas pendientes ni derivaciones recientes. Esto no acredita que todos los casos estén resueltos.</p>}
       </section>}
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {data.access.appointments && <Metric title="Citas de hoy" value={data.appointmentCounts.filter(item => item.status !== "cancelada").reduce((sum, item) => sum + item.count, 0)} detail="Abrir agenda" href="/agenda" icon={<CalendarDays className="size-5" />} />}
@@ -122,7 +147,7 @@ function HomePage() {
         </div>
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <KpiCard title="Intervenciones de hoy" value={data.agent.today.runs} description="Veces que el agente actuó" icon={<Bot className="size-5" />} />
-          <KpiCard title="Resueltas sin ayuda" value={data.agent.today.ok} description="El agente lo resolvió solo" icon={<CheckCircle2 className="size-5" />} />
+          <KpiCard title="Ejecuciones correctas" value={data.agent.today.ok} description="Sin fallo técnico registrado; no mide resolución" icon={<CheckCircle2 className="size-5" />} />
           <KpiCard title="Derivadas al equipo" value={data.agent.today.handoff} description="Pidió ayuda humana" icon={<Hand className="size-5" />} />
           <KpiCard title="Con error" value={data.agent.today.error} description="Necesitan revisión" icon={<AlertTriangle className="size-5" />} />
         </div>
@@ -130,10 +155,11 @@ function HomePage() {
       <PulseSection locale={data.locale} />
       {!Object.entries(data.access).some(([key, value]) => key !== "allTasks" && value) && <EmptyState title="Tu espacio está listo" description="Pide a la administración los permisos necesarios para tu trabajo." />}
     </> : null}
+    <ConfirmDialog open={approving !== null} title="Aprobar y ejecutar el cambio" description={approving ? `${approving.context.contactName ?? "Interlocutor"}: ${approving.context.afterSummary}` : ""} confirmLabel="Aprobar y ejecutar" variant="default" pending={decideMutation.isPending} onClose={() => { if (!decideMutation.isPending) setApproving(null) }} onConfirm={() => approving && decideMutation.mutate(approving.id)} />
   </PageShell>
 }
 
-/** Foto de los últimos 30 días: embudo, canales, autonomía del agente y cobros. */
+/** Foto de los últimos 30 días; las ejecuciones no se confunden con resultados. */
 function PulseSection({ locale }: { locale: string }) {
   const pulseQuery = useQuery({ queryKey: ["workspace-pulse"], queryFn: () => apiFetch<{ data: WorkspacePulse }>("/api/workspace/pulse"), refetchInterval: 300_000 })
   const pulse = pulseQuery.data?.data
@@ -149,15 +175,14 @@ function PulseSection({ locale }: { locale: string }) {
       <p role="alert" className="text-sm text-muted-foreground">No pudimos cargar el pulso de tu consultorio. <button type="button" className="underline" onClick={() => void pulseQuery.refetch()}>Volver a intentar</button></p>
     </section>
   }
-  if (!pulse.funnel && !pulse.channels && !pulse.autonomy && !pulse.collections) return null
+  if (!pulse.funnel && !pulse.channels && !pulse.execution && !pulse.collections && !Object.values(pulse.performance).some(value => value !== null)) return null
   // Con varias monedas se distingue la etapa por moneda para no mezclar importes.
   const funnelByCurrency: Record<string, true> = {}
   for (const item of pulse.funnel ?? []) funnelByCurrency[item.currency] = true
   const funnelCurrencies = Object.keys(funnelByCurrency)
-  const autonomyPoints = pulse.autonomy?.map(day => {
-    const total = day.ok + day.handoff
-    return { label: formatDay(day.day, locale), value: total === 0 ? 100 : Math.round((day.ok / total) * 100) }
-  })
+  const executionPoints = pulse.execution?.map(day => ({
+    label: formatDay(day.day, locale), value: day.ok,
+  }))
   // 30 días con varias series se lee mejor con una línea por moneda que con barras.
   const collectionsByCurrency: Record<string, { label: string; value: number }[]> = {}
   for (const row of pulse.collections ?? []) {
@@ -173,7 +198,7 @@ function PulseSection({ locale }: { locale: string }) {
     <div className="grid items-start gap-6 xl:grid-cols-2">
       {pulse.funnel && <FunnelChart
         title="Oportunidades por etapa"
-        summary={`Oportunidades abiertas por etapa del embudo: ${pulse.funnel.length} registros con su importe estimado.`}
+        summary={`Oportunidades abiertas por etapa del embudo: ${pulse.funnel.reduce((total, item) => total + item.count, 0)} oportunidades con su importe estimado.`}
         stages={pulse.funnel.map(item => ({
           label: funnelCurrencies.length > 1 ? `${item.stage} · ${item.currency}` : item.stage,
           value: item.count,
@@ -182,14 +207,14 @@ function PulseSection({ locale }: { locale: string }) {
       />}
       {pulse.channels && <DonutChart
         title="Conversaciones abiertas por canal"
-        summary={`De dónde llegan las conversaciones que siguen abiertas: ${pulse.channels.map(item => `${item.channel} ${item.count}`).join(", ")}.`}
-        segments={pulse.channels.map(item => ({ label: item.channel, value: item.count }))}
+        summary={`Conversaciones abiertas por canal: ${pulse.channels.map(item => `${channelLabel(item.channel)} ${item.count}`).join(", ")}.`}
+        segments={pulse.channels.map(item => ({ label: channelLabel(item.channel), value: item.count }))}
       />}
-      {autonomyPoints && <TrendChart
-        title="El agente resolviendo solo"
-        summary="Porcentaje de casos que el agente resolvió sin pedir ayuda, por día. Los días sin casos cuentan como 100."
-        points={autonomyPoints}
-      />}
+      {executionPoints && (executionPoints.some(point => point.value > 0) ? <TrendChart
+        title="Ejecuciones correctas del agente"
+        summary="Cantidad de ejecuciones sin fallo técnico registrado por día. No representa casos resueltos ni calidad de respuesta."
+        points={executionPoints}
+      /> : <EmptyState title="Sin ejecuciones correctas" description="No hay ejecuciones correctas registradas en el período. Sin actividad no equivale a éxito." />)}
       {Object.entries(collectionsByCurrency).map(([currency, points]) => <TrendChart
         key={currency}
         title={`Cobros por día · ${currency}`}
@@ -197,6 +222,7 @@ function PulseSection({ locale }: { locale: string }) {
         points={points}
       />)}
     </div>
+    <PerformanceSummary data={pulse.performance} />
   </section>
 }
 

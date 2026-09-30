@@ -23,6 +23,9 @@ const policyInput = z.object({
   cancelar_cita: z.enum(MODES).optional(),
   enviar_mensaje: z.enum(MODES).optional(),
   mover_oportunidad: z.enum(MODES).optional(),
+  crear_oportunidad: z.enum(MODES).optional(),
+  actualizar_seguimiento: z.enum(MODES).optional(),
+  cerrar_oportunidad: z.enum(MODES).optional(),
 })
 export function createAgentRoute(deps: CrmDeps) {
   const app = new Hono()

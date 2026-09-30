@@ -3,6 +3,7 @@ import {
   closeOpportunity,
   createOpportunity,
   getOpportunity,
+  getOpportunitySummary,
   listOpportunities,
   moveOpportunity,
   reopenOpportunity,
@@ -48,6 +49,7 @@ const createInput = z.object({
   nextActionAt: z.string().nullable().optional(),
   nextActionNote: z.string().max(500).nullable().optional(),
   budgetId: uuid.nullable().optional(),
+  conversationId: uuid.nullable().optional(),
 })
 
 const patchInput = z.object({
@@ -61,6 +63,7 @@ const patchInput = z.object({
   nextActionAt: z.string().nullable().optional(),
   nextActionNote: z.string().max(500).nullable().optional(),
   budgetId: uuid.nullable().optional(),
+  conversationId: uuid.nullable().optional(),
 })
 
 const moveInput = z.object({ stageId: uuid })
@@ -104,6 +107,28 @@ export function createOpportunitiesRoute(deps: CrmDeps) {
     return runService(c, 201, () =>
       withOrgContext(deps.db, orgId, (tx) => createOpportunity(tx, orgId, parsed.data, { userId })),
     )
+  })
+
+  // Resumen agregado por filtros; registrado ANTES de /:id para no colisionar.
+  app.get("/summary", async (c) => {
+    const { orgId } = orgContextOf(c)
+    if (!canAccess(orgContextOf(c).memberRole, "crm.read")) {
+      return c.json(errorBody(c, "FORBIDDEN", "Sin permiso de lectura del CRM"), 403)
+    }
+    const parsed = listQuery.omit({ cursor: true, limit: true }).safeParse(c.req.query())
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    const { nextActionDue, ...rest } = parsed.data
+    try {
+      const summary = await withOrgContext(deps.db, orgId, (tx) =>
+        getOpportunitySummary(tx, orgId, {
+          ...rest,
+          nextActionDue: nextActionDue === "true",
+        }),
+      )
+      return c.json({ data: summary })
+    } catch (e) {
+      return serviceErrorResponse(c, e) ?? Promise.reject(e)
+    }
   })
 
   app.get("/:id", async (c) => {

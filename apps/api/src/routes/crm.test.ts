@@ -1,4 +1,5 @@
 process.env.DOCKER_HOST ??= "unix:///mnt/wsl/podman-sockets/odentia.sock"
+import { randomUUID } from "node:crypto"
 
 import { telegramBotApiAdapter } from "@odentia/channels"
 import { createAppDb, createOwnerDb, type Db, withOrgContext } from "@odentia/db"
@@ -16,6 +17,7 @@ import { Hono, type Next } from "hono"
 import { GenericContainer, type StartedTestContainer, Wait } from "testcontainers"
 import { afterAll, beforeAll, expect, it } from "vitest"
 import { createAgentRoute } from "./agent.js"
+import { createAgentOpsRoute } from "./agent-ops.js"
 import { createConnectionsRoute } from "./connections.js"
 import { createContactsRoute } from "./contacts.js"
 import { createConversationsRoute } from "./conversations.js"
@@ -76,6 +78,7 @@ function buildApp(role: string): Hono {
   app.route("/pipelines", createPipelinesRoute(deps))
   app.route("/channels/connections", createConnectionsRoute(deps))
   app.route("/agent", createAgentRoute(deps))
+  app.route("/agent", createAgentOpsRoute(deps))
   app.route("/tasks", createTasksRoute(deps))
   app.route("/fields", createFieldsRoute(deps))
   return app
@@ -158,6 +161,20 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await container?.stop()
+})
+
+it.each([
+  { endpoint: "decision", body: { decision: "aprobada" } },
+  { endpoint: "execute", body: undefined },
+  { endpoint: "confirm", body: { contactId: randomUUID() } },
+])("una propuesta ausente conserva 404 en $endpoint", async ({ endpoint, body }) => {
+  const response = await buildApp("owner").request(`/agent/proposals/${randomUUID()}/${endpoint}`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  })
+  expect(response.status).toBe(404)
+  expect(await response.json()).toMatchObject({ error: { code: "NOT_FOUND" } })
 })
 
 it("bandeja: lista, detalle y envío dentro de ventana", async () => {

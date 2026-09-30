@@ -14,9 +14,10 @@ import {
   scheduleChair,
 } from "@odentia/db/schema/agenda"
 import { member, user } from "@odentia/db/schema/auth"
-import { patient, serviceCatalog } from "@odentia/db/schema/clinical"
+import { patient, patientContact, serviceCatalog } from "@odentia/db/schema/clinical"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import { waitlistEntry } from "@odentia/db/schema/availability"
+import { conversation } from "@odentia/db/schema/crm"
 import { and, asc, eq, gte, ilike, inArray, lt, or, sql } from "drizzle-orm"
 import { validateAvailability } from "./availability.js"
 import {
@@ -373,6 +374,17 @@ export async function createAppointment(
   }
   await requireAppointmentPatient(tx, orgId, input.patientId)
   await requireDentist(tx, orgId, input.dentistUserId)
+  if (input.conversationId) {
+    const [linked] = await tx.select({ id: conversation.id }).from(conversation)
+      .innerJoin(patientContact, and(
+        eq(patientContact.contactId, conversation.contactId),
+        eq(patientContact.organizationId, orgId),
+        eq(patientContact.patientId, input.patientId),
+      ))
+      .where(and(eq(conversation.id, input.conversationId), eq(conversation.organizationId, orgId)))
+      .limit(1)
+    if (!linked) throw validation("La conversación no corresponde a un interlocutor del paciente")
+  }
   const status = assertStatus(input.status ?? "programada")
   if (status === "programada" || status === "confirmada") {
     await validateAvailability(tx, orgId, {

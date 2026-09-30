@@ -76,6 +76,9 @@ export const AUTONOMY_ACTIONS = [
   "cancelar_cita",
   "enviar_mensaje",
   "mover_oportunidad",
+  "crear_oportunidad",
+  "actualizar_seguimiento",
+  "cerrar_oportunidad",
 ] as const
 export type AutonomyAction = (typeof AUTONOMY_ACTIONS)[number]
 
@@ -95,6 +98,11 @@ export const PROPOSAL_ACTIONS = [
   "reservar_cita",
   "reprogramar_cita",
   "cancelar_cita",
+  "enviar_mensaje",
+  "mover_oportunidad",
+  "crear_oportunidad",
+  "actualizar_seguimiento",
+  "cerrar_oportunidad",
 ] as const
 export type ProposalAction = (typeof PROPOSAL_ACTIONS)[number]
 
@@ -123,6 +131,16 @@ export const agentProposal = pgTable(
     status: text("status").notNull().default("propuesta"),
     payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
     reason: text("reason"),
+    /** Evidencia de lo aprobado: estado previo al acto (nulo si no aplica). */
+    beforeSummary: text("before_summary"),
+    /** Evidencia de lo aprobado: cambio previsto/ejecutado (nunca nulo en lectura). */
+    afterSummary: text("after_summary"),
+    /**
+     * Estado vivo congelado al crear para el control de obsolescencia al
+     * ejecutar (etapa/versión de oportunidad o cita). Nulo si el acto no pisa
+     * estado previo o si el legado no lo trae (entonces nunca es stale).
+     */
+    expectedState: jsonb("expected_state").$type<Record<string, unknown>>(),
     idempotencyKey: text("idempotency_key").notNull(),
     result: jsonb("result").$type<Record<string, unknown>>(),
     error: text("error"),
@@ -139,7 +157,7 @@ export const agentProposal = pgTable(
     uniqueIndex("agent_proposal_org_key_uidx").on(table.organizationId, table.idempotencyKey),
     check(
       "agent_proposal_action_check",
-      sql`${table.action} in ('reservar_cita','reprogramar_cita','cancelar_cita')`,
+      sql`${table.action} in ('reservar_cita','reprogramar_cita','cancelar_cita','enviar_mensaje','mover_oportunidad','crear_oportunidad','actualizar_seguimiento','cerrar_oportunidad')`,
     ),
     check(
       "agent_proposal_status_check",
@@ -229,4 +247,7 @@ export const DEFAULT_AUTONOMY_MODES: Record<AutonomyAction, AutonomyMode> = {
   cancelar_cita: "aprobar_equipo",
   enviar_mensaje: "directo",
   mover_oportunidad: "directo",
+  crear_oportunidad: "aprobar_equipo",
+  actualizar_seguimiento: "aprobar_equipo",
+  cerrar_oportunidad: "aprobar_equipo",
 }

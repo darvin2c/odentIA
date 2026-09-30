@@ -41,6 +41,7 @@ import { createPortalRoute } from "./routes/portal.js"
 import { createPublicPortalRoute } from "./routes/public-portal.js"
 import { createWebchatPublicRoute, createWebchatAdminRoute } from "./routes/webchat.js"
 import { createMailboxesRoute } from "./routes/mailboxes.js"
+import { createCrmWorkspaceRoute } from "./routes/crm-workspace.js"
 
 export interface AppDeps {
   auth: Auth
@@ -503,6 +504,7 @@ export function createApp(deps: AppDeps) {
   )
   guarded.route("/conversations", createConversationsRoute(crmDeps))
   guarded.route("/contacts", createContactsRoute(crmDeps))
+  guarded.route("/crm", createCrmWorkspaceRoute(crmDeps))
   guarded.route("/patients", createPatientsRoute(crmDeps))
   guarded.route("/services", createServicesRoute(crmDeps))
   guarded.route("/cie10", createCie10Route(crmDeps))
