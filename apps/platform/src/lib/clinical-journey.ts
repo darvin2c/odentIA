@@ -6,6 +6,8 @@
  * Aquí viven controles, recetas, cuenta y responsables; la API es la fuente de
  * verdad y estas funciones solo traducen su contrato a la UI.
  */
+
+import type { AppointmentStatus } from "./agenda"
 import { ApiError, apiFetch } from "./api"
 import type { BudgetLine, BudgetWithTotals } from "./budgets"
 import type {
@@ -90,6 +92,9 @@ export interface FollowUp {
   dueAt: string
   status: FollowUpStatus
   scheduledAt: string | null
+  appointmentId: string | null
+  appointment: { id: string; startsAt: string; endsAt: string; status: AppointmentStatus } | null
+  legacyScheduledAt: string | null
   completedEncounterId: string | null
   outcome: string | null
   cancelledReason: string | null
@@ -97,6 +102,35 @@ export interface FollowUp {
   cancelledAt: string | null
   createdAt: string
 }
+
+/** Situación de la reserva, independiente del cierre clínico del control. */
+export function followUpAppointmentLabel(control: FollowUp): string {
+  const appointment = control.appointment
+  if (!appointment)
+    return control.legacyScheduledAt ? "Sin reserva verificada" : "Sin cita reservada"
+  if (appointment.status === "atendida") {
+    return control.status === "pendiente" || control.status === "programado"
+      ? "Pendiente de cierre clínico"
+      : "Cita atendida"
+  }
+  if (appointment.status === "cancelada") return "Cita cancelada · sin reserva vigente"
+  if (appointment.status === "no_asistio") return "No asistió · sin reserva vigente"
+  return `Cita ${appointment.status === "confirmada" ? "confirmada" : "reservada"} · ${formatDateTime(appointment.startsAt)}`
+}
+
+export type ScheduleFollowUpBody =
+  | { appointmentId: string }
+  | {
+      appointment: {
+        branchId?: string
+        dentistUserId: string
+        chairId: string
+        serviceId?: string
+        startsAt: string
+        endsAt?: string
+        durationMin?: number
+      }
+    }
 
 export function fetchFollowUps(
   patientId: string,
@@ -129,7 +163,7 @@ export function createFollowUpApi(
 export function scheduleFollowUpApi(
   patientId: string,
   followUpId: string,
-  body: { scheduledAt: string },
+  body: ScheduleFollowUpBody,
 ): Promise<{ data: FollowUp }> {
   return apiFetch<{ data: FollowUp }>(`${base(patientId)}/follow-ups/${followUpId}/schedule`, {
     method: "POST",
@@ -540,7 +574,7 @@ export const NEXT_ACTION_LABELS: Record<TreatmentNextAction, string> = {
   reanudar: "Reanudar el tratamiento",
   continuar: "Continuar en la atención abierta",
   completar: "Completar el tratamiento",
-  controlar: "Programar el control",
+  controlar: "Revisar el control",
 }
 
 /** Cabecera de presupuesto tal como la devuelve el recorrido (sin totales agregados). */
@@ -690,7 +724,6 @@ export function createOptionGroupApi(
     { method: "POST", body: JSON.stringify(body) },
   )
 }
-
 
 /** Saldo del tratamiento por moneda; nunca se suman monedas distintas. */
 export function journeyBalances(

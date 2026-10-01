@@ -11,9 +11,9 @@ import {
   uuid,
 } from "drizzle-orm/pg-core"
 import { user } from "./auth.js"
-import { orgFk, timestamps, conversation } from "./crm.js"
-import { branch } from "./org.js"
 import { patient, serviceCatalog } from "./clinical.js"
+import { conversation, orgFk, timestamps } from "./crm.js"
+import { branch } from "./org.js"
 
 /**
  * Estados de la cita. Los ocupantes bloquean profesional y sillón en la
@@ -91,6 +91,11 @@ export const appointment = pgTable(
   },
   (table) => [
     uniqueIndex("appointment_org_id_uidx").on(table.organizationId, table.id),
+    uniqueIndex("appointment_org_patient_id_uidx").on(
+      table.organizationId,
+      table.patientId,
+      table.id,
+    ),
     index("appointment_org_branch_range_idx").on(
       table.organizationId,
       table.branchId,

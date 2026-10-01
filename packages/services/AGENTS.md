@@ -11,6 +11,7 @@ Objetivo: una operación de negocio coherente para personal, portal y agente, co
 - Portal deshabilitado por defecto. Personal verifica identidad/representación y alcance; activación por conversación o QR más PIN separado. Reingreso con passkey descubrible y verificación del usuario. Revocación invalida sesiones/enlaces; recuperación exige revocar explícitamente la credencial perdida.
 - Contactos/oportunidades: paginación y orden servidor, cursores con microsegundos y totales sobre todos los resultados filtrados, no sobre la página cargada.
 - Una tarea abierta de seguimiento por oportunidad. Completar limpia solo su próxima acción, no una reprogramación posterior; editar/reabrir seguimiento mediante la oportunidad.
+- Controles clínicos: programar reserva o vincula una cita real del mismo paciente y organización en la misma transacción. Mover la cita reprograma el control; cancelarla, inasistencia o atención lo devuelve a pendiente conservando la traza; cancelar el control no cancela la cita. Históricos sin cita conservan `legacyScheduledAt` sin marcarse como reserva verificada.
 - Notas operativas y evidencia de propuestas inmutables. Notas operativas distintas de notas clínicas; recepción recibe presupuestos mínimos, no líneas/importes clínicos ni caja.
 - Métricas: primera respuesta desde aceptación real del envío, no encolado/simulación; históricos sin hora conservan duración desconocida. Ejecución no significa resolución, conversión no significa cobro ni causalidad. Sin datos no mostrar éxito del 100 %.
 

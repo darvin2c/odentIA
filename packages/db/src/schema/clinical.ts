@@ -13,8 +13,8 @@ import {
   boolean,
   char,
   check,
-  foreignKey,
   date,
+  foreignKey,
   index,
   integer,
   jsonb,
@@ -26,6 +26,7 @@ import {
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core"
+import { appointment } from "./agenda.js"
 import { organization, user } from "./auth.js"
 import { contact, conversation, orgFk, timestamps } from "./crm.js"
 import { branch } from "./org.js"
@@ -923,7 +924,8 @@ export const clinicalFollowUp = pgTable(
     instructions: text("instructions"),
     dueAt: timestamp("due_at", { withTimezone: true }).notNull(),
     status: text("status").notNull().default("pendiente"),
-    scheduledAt: timestamp("scheduled_at", { withTimezone: true }),
+    appointmentId: uuid("appointment_id"),
+    legacyScheduledAt: timestamp("legacy_scheduled_at", { withTimezone: true }),
     completedEncounterId: uuid("completed_encounter_id").references(() => encounter.id),
     outcome: text("outcome"),
     cancelledReason: text("cancelled_reason"),
@@ -933,6 +935,16 @@ export const clinicalFollowUp = pgTable(
     cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
   },
   (table) => [
+    foreignKey({
+      columns: [table.organizationId, table.patientId, table.appointmentId],
+      foreignColumns: [appointment.organizationId, appointment.patientId, appointment.id],
+      name: "clinical_follow_up_appointment_fk",
+    }),
+    index("clinical_follow_up_appointment_idx").on(table.organizationId, table.appointmentId),
+    check(
+      "clinical_follow_up_reservation_check",
+      sql`${table.status} <> 'programado' OR ${table.appointmentId} IS NOT NULL`,
+    ),
     index("clinical_follow_up_org_patient_idx").on(table.organizationId, table.patientId),
     index("clinical_follow_up_item_idx").on(table.organizationId, table.planItemId),
     index("clinical_follow_up_due_idx").on(table.organizationId, table.dueAt),

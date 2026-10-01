@@ -1,4 +1,22 @@
 /** Contratos de la agenda con la API (`/api/agenda` y `/api/appointments`). */
+import type { QueryClient } from "@tanstack/react-query"
+
+/** Una cita afecta disponibilidad y seguimiento, también en superficies no montadas. */
+export async function invalidateAppointmentQueries(client: QueryClient): Promise<void> {
+  await Promise.all(
+    [
+      "agenda",
+      "agenda-appointment",
+      "agenda-resources",
+      "agenda-slots",
+      "follow-up-appointments",
+      "follow-ups",
+      "patient-summary",
+      "treatment-journey",
+      "workspace-home",
+    ].map((key) => client.invalidateQueries({ queryKey: [key] })),
+  )
+}
 
 export type AppointmentStatus =
   | "programada"
@@ -38,7 +56,6 @@ export interface AgendaServiceOption {
   name: string
   durationMin: number | null
 }
-
 
 export interface AvailableSlot {
   startsAt: string
