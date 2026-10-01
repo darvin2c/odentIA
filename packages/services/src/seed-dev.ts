@@ -89,6 +89,7 @@ import {
 } from "./encounters.js"
 import { createFieldDef } from "./fields.js"
 import { cancelFollowUp, completeFollowUp, createFollowUp, scheduleFollowUp } from "./follow-ups.js"
+import { closeOpportunity, createOpportunity, listOpportunities } from "./opportunities.js"
 import {
   createPatientRegistrationLink,
   registerPatient,
@@ -101,25 +102,24 @@ import { addPlanItem, createOptionGroup, createTreatmentPlan, setPlanItemStatus 
 import { cancelPrescription, createPrescription } from "./prescriptions.js"
 import { grantResponsibility } from "./responsibilities.js"
 import { secretsKeyFromEnv } from "./secrets.js"
-import { createService } from "./service-catalog.js"
-import { createStorage } from "./storage.js"
-import { completeTask, createTask } from "./tasks.js"
-import { closeOpportunity, createOpportunity, listOpportunities } from "./opportunities.js"
 import { seedAgent } from "./seed-agent.js"
 import { seedAutomation } from "./seed-automation.js"
 import { seedAvailability } from "./seed-availability.js"
 import { seedChannels } from "./seed-channels.js"
 import { seedClinicalForms } from "./seed-clinical-forms.js"
+import { seedCrmActivity } from "./seed-crm-activity.js"
+import { seedCrmAgent } from "./seed-crm-agent.js"
 import { seedFinance } from "./seed-finance.js"
 import { seedInventory } from "./seed-inventory.js"
 import { seedMailbox } from "./seed-mailbox.js"
 import { seedOpportunities } from "./seed-opportunities.js"
 import { seedPortal } from "./seed-portal.js"
+import { seedRoles } from "./seed-roles.js"
 import { seedWebchat } from "./seed-webchat.js"
 import { seedWorkspace } from "./seed-workspace.js"
-import { seedRoles } from "./seed-roles.js"
-import { seedCrmActivity } from "./seed-crm-activity.js"
-import { seedCrmAgent } from "./seed-crm-agent.js"
+import { createService } from "./service-catalog.js"
+import { createStorage } from "./storage.js"
+import { completeTask, createTask } from "./tasks.js"
 
 const databaseUrl = process.env.DATABASE_URL
 if (!databaseUrl) throw new Error("DATABASE_URL es obligatoria para sembrar (rol owner)")
@@ -267,23 +267,63 @@ async function wipeSeed(): Promise<void> {
     .where(inArray(message.organizationId, SEED_ORGS))
   // Hijos de los nuevos dominios: purga únicamente las organizaciones demo.
   for (const table of [
-    "portal_challenge", "portal_passkey", "portal_verification", "portal_request", "portal_grant",
-    "portal_policy", "portal_access_log", "portal_session", "portal_link",
-    "automation_link_token", "automation_job", "automation_consent", "automation_rule",
-    "agent_run_ledger", "agent_proposal", "agent_handoff",
-    "agent_knowledge_revision", "agent_knowledge_entry", "agent_policy",
-    "crm_note", "task",
-    "workspace_notification", "opportunity_event", "opportunity",
-    "clinical_form_addendum", "clinical_form_response", "consent_event", "consent_document",
-    "clinical_order", "clinical_form_template", "consent_template",
-    "professional_specialty", "service_specialty", "org_specialty",
-    "commission_settlement_line", "commission_settlement", "commission_rule",
-    "installment_quota", "installment_plan", "cash_movement", "expense", "cash_shift",
-    "stock_movement", "product_lot", "purchase_order_line", "purchase_order",
-    "product", "warehouse", "supplier", "mailbox_oauth_state",
-    "waitlist_entry", "schedule_block", "professional_schedule",
+    "portal_challenge",
+    "portal_passkey",
+    "portal_verification",
+    "portal_request",
+    "portal_grant",
+    "portal_policy",
+    "portal_access_log",
+    "portal_session",
+    "portal_link",
+    "automation_link_token",
+    "automation_job",
+    "automation_consent",
+    "automation_rule",
+    "agent_run_ledger",
+    "agent_proposal",
+    "agent_handoff",
+    "agent_knowledge_revision",
+    "agent_knowledge_entry",
+    "agent_policy",
+    "crm_note",
+    "task",
+    "workspace_notification",
+    "opportunity_event",
+    "opportunity",
+    "clinical_form_addendum",
+    "clinical_form_response",
+    "consent_event",
+    "consent_document",
+    "clinical_order",
+    "clinical_form_template",
+    "consent_template",
+    "professional_specialty",
+    "service_specialty",
+    "org_specialty",
+    "commission_settlement_line",
+    "commission_settlement",
+    "commission_rule",
+    "installment_quota",
+    "installment_plan",
+    "cash_movement",
+    "expense",
+    "cash_shift",
+    "stock_movement",
+    "product_lot",
+    "purchase_order_line",
+    "purchase_order",
+    "product",
+    "warehouse",
+    "supplier",
+    "mailbox_oauth_state",
+    "waitlist_entry",
+    "schedule_block",
+    "professional_schedule",
   ]) {
-    await db.execute(sql`delete from ${sql.identifier(table)} where organization_id in (${ORG_A}, ${ORG_B})`)
+    await db.execute(
+      sql`delete from ${sql.identifier(table)} where organization_id in (${ORG_A}, ${ORG_B})`,
+    )
   }
   // Finanzas, recetas, controles y responsabilidades: antes que sus padres
   // (vínculos de contacto, atenciones, ítems, líneas y documentos).
@@ -682,17 +722,28 @@ for (let i = 0; i < CONTACTS_A.length; i++) {
     { userId: ANA_ID },
   )
   const historicalStage = pipeA.stages[i % pipeA.stages.length]!
-  const openStage = pipeA.stages.find(stage => stage.kind === "open")!
-  const commercial = await createOpportunity(db, ORG_A, {
-    contactId: created.id,
-    stageId: historicalStage.kind === "open" ? stageId : openStage.id,
-    title: `Seguimiento · ${c.name}`,
-  }, { userId: ANA_ID })
+  const openStage = pipeA.stages.find((stage) => stage.kind === "open")!
+  const commercial = await createOpportunity(
+    db,
+    ORG_A,
+    {
+      contactId: created.id,
+      stageId: historicalStage.kind === "open" ? stageId : openStage.id,
+      title: `Seguimiento · ${c.name}`,
+    },
+    { userId: ANA_ID },
+  )
   if (historicalStage.kind === "won" || historicalStage.kind === "lost") {
-    await closeOpportunity(db, ORG_A, commercial.id, {
-      outcome: historicalStage.kind,
-      reason: "Resultado del escenario de demostración",
-    }, { userId: ANA_ID })
+    await closeOpportunity(
+      db,
+      ORG_A,
+      commercial.id,
+      {
+        outcome: historicalStage.kind,
+        reason: "Resultado del escenario de demostración",
+      },
+      { userId: ANA_ID },
+    )
   }
   await db.insert(contactIdentity).values({
     organizationId: ORG_A,
@@ -1395,8 +1446,7 @@ await addPlanItem(db, ORG_A, ANA_ID, rosaPatientId, {
   detail: "Corona cerámica pieza 46 (alternativa recomendada)",
 })
 
-// Controles longitudinales: ciclo completo (programado→realizado contra la
-// atención finalizada), uno pendiente de mantenimiento y uno cancelado.
+// El cierre clínico requiere atención finalizada, no una reserva retrospectiva.
 const controlObt = await createFollowUp(db, ORG_A, ANA_ID, rosaPatientId, {
   kind: "tratamiento",
   planItemId: obt36.id,
@@ -1404,9 +1454,6 @@ const controlObt = await createFollowUp(db, ORG_A, ANA_ID, rosaPatientId, {
   title: "Control post-obturación pieza 36",
   instructions: "Verificar oclusión y sensibilidad.",
   dueAt: tomorrowIso(),
-})
-await scheduleFollowUp(db, ORG_A, ANA_ID, rosaPatientId, controlObt.id, {
-  scheduledAt: tomorrowIso(),
 })
 await completeFollowUp(db, ORG_A, ANA_ID, rosaPatientId, controlObt.id, {
   encounterId: draft.id,
@@ -1534,9 +1581,16 @@ for (let i = 1; i <= 40; i++) {
   const created = await createContact(db, ORG_A, {
     displayName: `Paciente Demo ${n}`,
   })
-  await createOpportunity(db, ORG_A, {
-    contactId: created.id, stageId: pipeA.stages[0]!.id, title: `Seguimiento · Paciente Demo ${n}`,
-  }, { userId: ANA_ID })
+  await createOpportunity(
+    db,
+    ORG_A,
+    {
+      contactId: created.id,
+      stageId: pipeA.stages[0]!.id,
+      title: `Seguimiento · Paciente Demo ${n}`,
+    },
+    { userId: ANA_ID },
+  )
   await createPatient(db, ORG_A, ANA_ID, {
     displayName: `Paciente Demo ${n}`,
     contacts: [{ contactId: created.id, relationship: "self", isPreferred: true }],
@@ -1551,12 +1605,26 @@ const sofia = await createContact(db, ORG_B, {
 const hugo = await createContact(db, ORG_B, {
   displayName: "Hugo Díaz",
 })
-await createOpportunity(db, ORG_B, {
-  contactId: sofia.id, stageId: pipeB.stages[0]!.id, title: "Seguimiento · Sofía Ramos",
-}, { userId: CORA_ID })
-await createOpportunity(db, ORG_B, {
-  contactId: hugo.id, stageId: pipeB.stages[1]!.id, title: "Seguimiento · Hugo Díaz",
-}, { userId: CORA_ID })
+await createOpportunity(
+  db,
+  ORG_B,
+  {
+    contactId: sofia.id,
+    stageId: pipeB.stages[0]!.id,
+    title: "Seguimiento · Sofía Ramos",
+  },
+  { userId: CORA_ID },
+)
+await createOpportunity(
+  db,
+  ORG_B,
+  {
+    contactId: hugo.id,
+    stageId: pipeB.stages[1]!.id,
+    title: "Seguimiento · Hugo Díaz",
+  },
+  { userId: CORA_ID },
+)
 await db.insert(contactIdentity).values([
   {
     organizationId: ORG_B,
@@ -1799,12 +1867,15 @@ const chairsMiraflores = await Promise.all(
 )
 await createChair(db, ORG_A, { branchId: surco.id, name: "Sillón único" })
 const domainSeed = {
-  orgId: ORG_A, ownerUserId: ANA_ID, branchId: miraflores.id,
-  patientId: patientIdByName.get("Rosa Quispe")!, contactId: rosaContactId,
+  orgId: ORG_A,
+  ownerUserId: ANA_ID,
+  branchId: miraflores.id,
+  patientId: patientIdByName.get("Rosa Quispe")!,
+  contactId: rosaContactId,
   conversationId: convRosa.id,
 }
-await db.transaction(tx => seedAvailability(tx, domainSeed))
-await db.transaction(tx => seedAvailability(tx, { ...domainSeed, branchId: surco.id }))
+await db.transaction((tx) => seedAvailability(tx, domainSeed))
+await db.transaction((tx) => seedAvailability(tx, { ...domainSeed, branchId: surco.id }))
 const chairA = (index: number): string => {
   const chair = chairsMiraflores[index]
   if (!chair) throw new Error("Faltan sillones semilla")
@@ -1918,7 +1989,7 @@ const agendaSeed: Array<{
 for (const item of agendaSeed) {
   const seedPatientId = patientIdByName.get(item.patient)
   if (!seedPatientId) throw new Error(`Falta el paciente semilla ${item.patient}`)
-  await createAppointment(db, ORG_A, ANA_ID, {
+  const reserved = await createAppointment(db, ORG_A, ANA_ID, {
     branchId: miraflores.id,
     patientId: seedPatientId,
     dentistUserId: item.dentist,
@@ -1928,26 +1999,52 @@ for (const item of agendaSeed) {
     endsAt: lima(item.day, item.end),
     status: item.status ?? "programada",
   })
+  if (item.patient === "Rosa Quispe" && item.day === 1) {
+    await db.transaction(async (tx) => {
+      const control = await createFollowUp(tx, ORG_A, ANA_ID, rosaPatientId, {
+        kind: "tratamiento",
+        planItemId: endo46.id,
+        title: "Control de evolución endodóntica",
+        dueAt: lima(1, "09:00"),
+      })
+      await scheduleFollowUp(tx, ORG_A, ANA_ID, rosaPatientId, control.id, {
+        appointmentId: reserved.id,
+      })
+    })
+  }
 }
 for (const seed of [
-  seedAgent, seedAutomation, seedClinicalForms, seedInventory, seedFinance,
-  seedMailbox, seedOpportunities, seedPortal, seedWorkspace, seedRoles,
+  seedAgent,
+  seedAutomation,
+  seedClinicalForms,
+  seedInventory,
+  seedFinance,
+  seedMailbox,
+  seedOpportunities,
+  seedPortal,
+  seedWorkspace,
+  seedRoles,
 ]) {
-  await db.transaction(tx => seed(tx, domainSeed))
+  await db.transaction((tx) => seed(tx, domainSeed))
 }
-await db.transaction(async tx => {
-  const { items } = await listOpportunities(tx, ORG_A, { contactId: rosaContactId, q: "Ortodoncia · evaluación inicial", limit: 1 })
+await db.transaction(async (tx) => {
+  const { items } = await listOpportunities(tx, ORG_A, {
+    contactId: rosaContactId,
+    q: "Ortodoncia · evaluación inicial",
+    limit: 1,
+  })
   const commercial = items[0]
   if (!commercial) throw new Error("Falta la oportunidad de demostración conectada")
-  const openStages = pipeA.stages.filter(stage => stage.kind === "open")
+  const openStages = pipeA.stages.filter((stage) => stage.kind === "open")
   await seedCrmActivity(tx, { ...domainSeed, opportunityId: commercial.id })
   await seedCrmAgent(tx, {
-    ...domainSeed, opportunityId: commercial.id,
+    ...domainSeed,
+    opportunityId: commercial.id,
     stageId: (openStages[1] ?? openStages[0])!.id,
   })
 })
-await db.transaction(tx => seedChannels(tx, domainSeed, secretsKey, { fetch }))
-await db.transaction(tx => seedWebchat(tx, domainSeed, { secretsKey, fetch }))
+await db.transaction((tx) => seedChannels(tx, domainSeed, secretsKey, { fetch }))
+await db.transaction((tx) => seedWebchat(tx, domainSeed, { secretsKey, fetch }))
 
 // --- Resumen ---
 async function summary(orgId: string, label: string): Promise<string> {

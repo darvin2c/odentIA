@@ -17,13 +17,14 @@ import {
   cancelTreatmentApi,
   completeTreatmentApi,
   fetchTreatmentJourney,
+  followUpAppointmentLabel,
   formatDate,
   formatDateTime,
   journeyBalances,
   mutationMessage,
   NEXT_ACTION_LABELS,
-  reviseTreatmentApi,
   resumeTreatmentApi,
+  reviseTreatmentApi,
   suspendTreatmentApi,
 } from "../../lib/clinical-journey"
 import { usePermission } from "../../lib/crm"
@@ -37,8 +38,8 @@ import type {
 } from "../../lib/patients"
 import { planStatusLabel } from "../../lib/patients"
 import { formatMoney, type ServiceCatalogItem } from "../../lib/services"
-import { ControlesPanel, RecetasPanel } from "./clinical-panels"
 import { Cie10Search } from "./cie10-search"
+import { ControlesPanel, RecetasPanel } from "./clinical-panels"
 import { DocumentOpenButton } from "./document-open-button"
 import { ServicePicker } from "./service-picker"
 
@@ -139,6 +140,9 @@ export function RecorridoClinicoTab({
   const journey = journeyQuery.data?.data ?? null
   const summaryRow = summaryQuery.data?.data.treatmentJourneys.find(
     (row) => row.item.id === selectedId,
+  )
+  const nextFollowUp = journey?.followUps.find(
+    (control) => control.id === summaryRow?.nextFollowUp?.id,
   )
 
   const [error, setError] = useState<string | null>(null)
@@ -285,7 +289,11 @@ export function RecorridoClinicoTab({
     try {
       const hasSessions = (journey?.procedures.length ?? 0) > 0
       await resumeTreatmentApi(patientId, item.id, {
-        status: hasSessions ? "en_curso" : journey?.item.decisionStatus === "aceptado" ? "programado" : "pendiente",
+        status: hasSessions
+          ? "en_curso"
+          : journey?.item.decisionStatus === "aceptado"
+            ? "programado"
+            : "pendiente",
       })
       invalidate()
     } catch (mutationError) {
@@ -405,6 +413,11 @@ export function RecorridoClinicoTab({
                     ? ` · control previsto ${formatDate(summaryRow.nextFollowUp.dueAt)}`
                     : ""}
                 </span>
+                {nextFollowUp ? (
+                  <span className="text-xs text-muted-foreground">
+                    {followUpAppointmentLabel(nextFollowUp)}
+                  </span>
+                ) : null}
               </div>
               {canWrite && nextAction ? (
                 <Button

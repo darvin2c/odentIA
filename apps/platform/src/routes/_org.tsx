@@ -15,7 +15,7 @@ import {
   HeaderUtilitiesProvider,
   LoadingState,
 } from "@odentia/ui-patterns"
-import { useQuery } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   createFileRoute,
   getRouteApi,
@@ -33,16 +33,18 @@ import {
   Inbox,
   Kanban,
   ListTodo,
+  Package,
   Settings,
   Smile,
-  Package,
   Wallet,
   Workflow,
 } from "lucide-react"
 import { WorkspaceNotifications } from "../components/workspace-notifications"
+import { invalidateAppointmentQueries } from "../lib/agenda"
 import { authClient } from "../lib/auth-client"
 import { requireVerifiedSession, ssrFetchOptions } from "../lib/guards"
 import { orgSlugFromHostname, panelUrl, requestHostname, tenantUrl } from "../lib/host"
+import { useOrgEvents } from "../lib/org-events"
 import { RouterLink } from "../lib/router-link"
 
 export const Route = createFileRoute("/_org")({
@@ -61,7 +63,7 @@ export const Route = createFileRoute("/_org")({
       const { data: orgs } = await authClient.organization.list({ fetchOptions })
       throw redirect({ href: panelUrl(orgs && orgs.length > 0 ? "/" : "/onboarding") })
     }
-    const role = data.members.find(member => member.userId === session.userId)?.role ?? "member"
+    const role = data.members.find((member) => member.userId === session.userId)?.role ?? "member"
     const permissions = platformPathPermission(location.pathname)
     if (permissions && !canAccessAny(role, permissions)) throw redirect({ to: "/home" })
     return { session, org: data }
@@ -72,28 +74,42 @@ export const Route = createFileRoute("/_org")({
 type NavChild = AppShellNavItem & { permission?: string }
 type NavDefinition =
   | (AppShellNavItem & { permission?: string; permissionsAny?: string[]; children?: undefined })
-  | (Omit<AppShellNavGroup, "children"> & { permission?: string; permissionsAny?: string[]; children: NavChild[] })
+  | (Omit<AppShellNavGroup, "children"> & {
+      permission?: string
+      permissionsAny?: string[]
+      children: NavChild[]
+    })
 
 const navDefinitions: NavDefinition[] = [
   { label: "Inicio", to: "/home", icon: Home },
   { label: "Agenda", to: "/agenda", icon: CalendarDays, permission: "appointments.read" },
   { label: "Bandeja", to: "/inbox", icon: Inbox, permission: "conversations.read" },
   { label: "Pacientes", to: "/patients", icon: Smile, permission: "patients.read" },
-  { label: "CRM", icon: Contact, children: [
-    { label: "Contactos", to: "/contacts", icon: Contact },
-    { label: "Oportunidades", to: "/pipeline", icon: Kanban },
-  ], permission: "crm.read" },
+  {
+    label: "CRM",
+    icon: Contact,
+    children: [
+      { label: "Contactos", to: "/contacts", icon: Contact },
+      { label: "Oportunidades", to: "/pipeline", icon: Kanban },
+    ],
+    permission: "crm.read",
+  },
   { label: "Tareas", to: "/tasks", icon: ListTodo, permission: "tasks.read" },
   { label: "Finanzas", to: "/finance", icon: Wallet, permission: "finance.read" },
   { label: "Inventario", to: "/inventory", icon: Package, permission: "inventory.read" },
   { label: "Automatizaciones", to: "/automations", icon: Workflow, permission: "crm.read" },
   // Aprobaciones operativas separadas de la configuración: quien decide ve
   // solo Aprobaciones; supervisión y conocimiento piden lectura/administración.
-  { label: "IA", icon: Bot, permissionsAny: ["agent.read", "agent.decide"], children: [
-    { label: "Supervisión", to: "/agent", icon: Bot, permission: "agent.read" },
-    { label: "Conocimiento", to: "/agent/knowledge", icon: ListTodo, permission: "agent.write" },
-    { label: "Aprobaciones", to: "/agent/approvals", icon: Inbox, permission: "agent.decide" },
-  ] },
+  {
+    label: "IA",
+    icon: Bot,
+    permissionsAny: ["agent.read", "agent.decide"],
+    children: [
+      { label: "Supervisión", to: "/agent", icon: Bot, permission: "agent.read" },
+      { label: "Conocimiento", to: "/agent/knowledge", icon: ListTodo, permission: "agent.write" },
+      { label: "Aprobaciones", to: "/agent/approvals", icon: Inbox, permission: "agent.decide" },
+    ],
+  },
   { label: "Reportes", to: "/reports", icon: BarChart3, permission: "reports.read" },
 ]
 
@@ -149,7 +165,11 @@ function OrgSwitcher() {
 function OrgLayout() {
   const { org, session } = orgRouteApi.useRouteContext()
   const pathname = useRouterState({ select: (state) => state.location.pathname })
-  const role = org.members.find(member => member.userId === session?.userId)?.role ?? "member"
+  const role = org.members.find((member) => member.userId === session?.userId)?.role ?? "member"
+  const queryClient = useQueryClient()
+  useOrgEvents(["appointment.updated", "stream.reconnected"], () => {
+    void invalidateAppointmentQueries(queryClient)
+  })
   // Filtra entradas y subentradas por permiso: el grupo IA muestra solo las
   // hijas autorizadas (Aprobaciones para quien decide, sin configuración).
   const navItems = navDefinitions.flatMap((item): AppShellNavEntry[] => {
@@ -157,7 +177,9 @@ function OrgLayout() {
       (!item.permission || canAccess(role, item.permission)) &&
       (!item.permissionsAny || canAccessAny(role, item.permissionsAny))
     if (!item.children) return selfVisible ? [item] : []
-    const children = item.children.filter(child => !child.permission || canAccess(role, child.permission))
+    const children = item.children.filter(
+      (child) => !child.permission || canAccess(role, child.permission),
+    )
     if (children.length === 0) return []
     if (selfVisible && children.length === item.children.length) return [item]
     return [{ ...item, children }]

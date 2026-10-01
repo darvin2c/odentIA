@@ -1,15 +1,16 @@
 process.env.DOCKER_HOST ??= "unix:///mnt/wsl/podman-sockets/odentia.sock"
 
-import { createAppDb, createOwnerDb, type Db } from "@odentia/db"
-import { secretsKeyFromEnv } from "@odentia/services"
+import { createAppDb, createOwnerDb, type Db, withOrgContext } from "@odentia/db"
+import { branch } from "@odentia/db/schema/org"
+import { createChair, secretsKeyFromEnv, setProfessionalSchedule } from "@odentia/services"
 import { sql } from "drizzle-orm"
 import { migrate } from "drizzle-orm/postgres-js/migrator"
 import type { Context } from "hono"
 import { Hono, type Next } from "hono"
 import { GenericContainer, type StartedTestContainer, Wait } from "testcontainers"
 import { afterAll, beforeAll, expect, it } from "vitest"
-import type { CrmDeps } from "./helpers.js"
 import { createContactsRoute } from "./contacts.js"
+import type { CrmDeps } from "./helpers.js"
 import { createPatientsRoute } from "./patients.js"
 
 const IMAGE = "dentalagent-postgres:18.6"
@@ -277,14 +278,46 @@ it("controles: alta, programación, cierre contra atención finalizada y cancela
   expect(premature.status).toBe(409)
   expect((await json<ErrorBody>(premature)).error.code).toBe("ENCOUNTER_NOT_FINALIZED")
 
+  await ownerDb.execute(
+    sql`insert into member (id, organization_id, user_id, role, created_at) values ('control-member', 'org_a', 'u-1', 'owner', now()) on conflict do nothing`,
+  )
+  const [site] = await ownerDb
+    .insert(branch)
+    .values({ organizationId: "org_a", name: "Sede controles", timezone: "America/Lima" })
+    .returning()
+  const chair = await withOrgContext(appDb, "org_a", (tx) =>
+    createChair(tx, "org_a", { branchId: site.id, name: "Control" }),
+  )
+  await withOrgContext(appDb, "org_a", (tx) =>
+    setProfessionalSchedule(tx, "org_a", "u-1", {
+      branchId: site.id,
+      dentistUserId: "u-1",
+      rules: Array.from({ length: 7 }, (_, weekday) => ({
+        weekday,
+        startMin: 8 * 60,
+        endMin: 20 * 60,
+      })),
+    }),
+  )
+  const startsAt = `${new Date(Date.now() + 172_800_000).toISOString().slice(0, 10)}T15:00:00Z`
+  const denied = await post(
+    buildApp("reception"),
+    `/patients/${patientId}/follow-ups/${followUpId}/schedule`,
+    {
+      appointment: { chairId: chair.id, dentistUserId: "u-1", startsAt },
+    },
+  )
+  expect(denied.status).toBe(403)
   const scheduled = await post(app, `/patients/${patientId}/follow-ups/${followUpId}/schedule`, {
-    scheduledAt: new Date(Date.now() + 172_800_000).toISOString(),
+    appointment: { chairId: chair.id, dentistUserId: "u-1", startsAt },
   })
   expect(scheduled.status).toBe(200)
-  expect((await json<{ data: { status: string } }>(scheduled)).data.status).toBe("programado")
+  const programmed = (await json<{ data: { status: string; appointmentId: string } }>(scheduled))
+    .data
+  expect(programmed.status).toBe("programado")
   // Programar dos veces es una transición ilegal.
   const reschedule = await post(app, `/patients/${patientId}/follow-ups/${followUpId}/schedule`, {
-    scheduledAt: new Date(Date.now() + 200_000_000).toISOString(),
+    appointmentId: programmed.appointmentId,
   })
   expect(reschedule.status).toBe(409)
 

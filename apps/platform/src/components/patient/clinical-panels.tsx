@@ -8,7 +8,9 @@
 import { Badge, Button, Field, FieldLabel, Input, Textarea, toast } from "@odentia/ui"
 import { EmptyState, FormDrawer } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { Link } from "@tanstack/react-router"
 import { useId, useState } from "react"
+import { invalidateAppointmentQueries } from "../../lib/agenda"
 import { apiFetch } from "../../lib/api"
 import {
   cancelFollowUpApi,
@@ -22,15 +24,16 @@ import {
   fetchFollowUps,
   fetchPrescriptionDetail,
   fetchPrescriptions,
+  followUpAppointmentLabel,
   formatDate,
   formatDateTime,
   mutationMessage,
   PRESCRIPTION_STATUS_LABELS,
   type Prescription,
-  scheduleFollowUpApi,
 } from "../../lib/clinical-journey"
 import { usePermission } from "../../lib/crm"
 import type { Encounter, PlanItem } from "../../lib/patients"
+import { FollowUpScheduler } from "./follow-up-scheduler"
 
 const MAX_TITLE = 200
 const MAX_TEXT = 2000
@@ -75,6 +78,8 @@ export function ControlesPanel({
   const uid = useId()
   const canWrite = usePermission("clinical.write")
   const canRead = usePermission("clinical.read")
+  const canSchedule = usePermission("appointments.write")
+  const canReadAgenda = usePermission("appointments.read")
   const queryClient = useQueryClient()
   const list = useQuery({
     queryKey: ["follow-ups", patientId],
@@ -93,6 +98,7 @@ export function ControlesPanel({
     void queryClient.invalidateQueries({ queryKey: ["follow-ups", patientId] })
     void queryClient.invalidateQueries({ queryKey: ["patient-summary", patientId] })
     void queryClient.invalidateQueries({ queryKey: ["treatment-journey", patientId] })
+    void invalidateAppointmentQueries(queryClient)
   }
 
   const [kindState, setKind] = useState<"tratamiento" | "mantenimiento">(
@@ -109,7 +115,6 @@ export function ControlesPanel({
   const [createOpen, setCreateOpen] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [scheduling, setScheduling] = useState<FollowUp | null>(null)
-  const [scheduledAt, setScheduledAt] = useState(localInputValue(new Date(Date.now() + 86_400_000)))
   const [completing, setCompleting] = useState<FollowUp | null>(null)
   const [completeEncounterId, setCompleteEncounterId] = useState("")
   const [outcome, setOutcome] = useState("")
@@ -130,16 +135,6 @@ export function ControlesPanel({
       setTitle("")
       setInstructions("")
       setCreateOpen(false)
-      setError(null)
-      invalidate()
-    },
-    onError: (mutationError) => setError(mutationMessage(mutationError)),
-  })
-  const scheduleMutation = useMutation({
-    mutationFn: () =>
-      scheduleFollowUpApi(patientId, scheduling?.id ?? "", { scheduledAt: toIso(scheduledAt) }),
-    onSuccess: () => {
-      setScheduling(null)
       setError(null)
       invalidate()
     },
@@ -181,6 +176,13 @@ export function ControlesPanel({
   const finalized = sessions.data?.data ?? []
   const planItemLabel = (id: string | null) =>
     id ? ((items ?? []).find((item) => item.id === id)?.title ?? id) : null
+
+  if (!canRead)
+    return (
+      <p className="text-sm text-muted-foreground">
+        No tienes permiso para ver información clínica.
+      </p>
+    )
 
   return (
     <div className="flex flex-col gap-4 rounded-md bg-card p-6">
@@ -232,9 +234,29 @@ export function ControlesPanel({
                 <span className="text-sm text-muted-foreground">
                   {FOLLOW_UP_KIND_LABELS[row.kind] ?? row.kind} · previsto{" "}
                   {formatDateTime(row.dueAt)}
-                  {row.scheduledAt ? ` · cita ${formatDateTime(row.scheduledAt)}` : ""}
+                  {row.legacyScheduledAt && !row.appointment
+                    ? ` · fecha histórica ${formatDateTime(row.legacyScheduledAt)}`
+                    : ""}
                 </span>
               </div>
+              <p className="text-sm text-muted-foreground">{followUpAppointmentLabel(row)}</p>
+              {row.appointment &&
+              (row.appointment.status === "programada" ||
+                row.appointment.status === "confirmada") &&
+              row.status === "cancelado" ? (
+                <p className="text-sm">
+                  Cancelar el control no cancela la cita: la reserva sigue vigente.
+                </p>
+              ) : null}
+              {row.appointment && canReadAgenda ? (
+                <Link
+                  to="/agenda"
+                  search={{ appointmentId: row.appointment.id }}
+                  className="w-fit text-sm underline"
+                >
+                  Ver cita en agenda
+                </Link>
+              ) : null}
               {planItemLabel(row.planItemId) ? (
                 <p className="text-sm text-muted-foreground">
                   Tratamiento: {planItemLabel(row.planItemId)}
@@ -247,17 +269,19 @@ export function ControlesPanel({
               ) : null}
               {canWrite ? (
                 <div className="flex flex-wrap gap-2">
-                  {row.status === "pendiente" ? (
+                  {row.status === "pendiente" &&
+                  row.appointment?.status !== "atendida" &&
+                  canSchedule ? (
                     <Button
                       type="button"
                       size="sm"
-                      variant="outline"
+                      variant="default"
                       onClick={() => {
                         setError(null)
                         setScheduling(row)
                       }}
                     >
-                      Programar cita
+                      Programar control
                     </Button>
                   ) : null}
                   {row.status === "pendiente" || row.status === "programado" ? (
@@ -265,6 +289,7 @@ export function ControlesPanel({
                       <Button
                         type="button"
                         size="sm"
+                        variant="outline"
                         onClick={() => {
                           setError(null)
                           setCompleteEncounterId(finalized[0]?.id ?? "")
@@ -287,6 +312,14 @@ export function ControlesPanel({
                     </>
                   ) : null}
                 </div>
+              ) : null}
+              {canWrite &&
+              !canSchedule &&
+              row.status === "pendiente" &&
+              row.appointment?.status !== "atendida" ? (
+                <p className="text-sm text-muted-foreground">
+                  Para programar el control necesitas también permiso de escritura en agenda.
+                </p>
               ) : null}
             </li>
           ))}
@@ -396,31 +429,14 @@ export function ControlesPanel({
         </div>
       </FormDrawer>
 
-      <FormDrawer
-        open={scheduling != null}
-        title="Programar cita del control"
-        description="La cita no marca el control como realizado: eso ocurre al completarlo."
-        error={scheduling != null ? error : null}
-        isSubmitting={scheduleMutation.isPending}
-        submitLabel="Programar"
-        onClose={() => {
-          if (!scheduleMutation.isPending) setScheduling(null)
-        }}
-        onSubmit={(event) => {
-          event.preventDefault()
-          scheduleMutation.mutate()
-        }}
-      >
-        <Field>
-          <FieldLabel htmlFor={`${uid}-scheduled-at`}>Fecha de cita</FieldLabel>
-          <Input
-            id={`${uid}-scheduled-at`}
-            type="datetime-local"
-            value={scheduledAt}
-            onChange={(event) => setScheduledAt(event.target.value)}
-          />
-        </Field>
-      </FormDrawer>
+      {scheduling && canWrite && canSchedule ? (
+        <FollowUpScheduler
+          key={`${patientId}:${scheduling.id}`}
+          patientId={patientId}
+          control={rows.find((row) => row.id === scheduling.id) ?? scheduling}
+          onClose={() => setScheduling(null)}
+        />
+      ) : null}
 
       <FormDrawer
         open={completing != null}
@@ -477,7 +493,7 @@ export function ControlesPanel({
       <FormDrawer
         open={cancelling != null}
         title="Cancelar control"
-        description="El control se conserva en la historia con su motivo de cancelación."
+        description="El control se conserva con su motivo. Cancelar el control NO cancela la cita: cualquier reserva vigente permanece en agenda."
         error={cancelling != null ? error : null}
         isSubmitting={cancelMutation.isPending}
         submitLabel="Cancelar control"
@@ -493,6 +509,18 @@ export function ControlesPanel({
           cancelMutation.mutate()
         }}
       >
+        {cancelling?.appointment && canReadAgenda ? (
+          <p className="mb-4 text-sm">
+            {followUpAppointmentLabel(cancelling)}.{" "}
+            <Link
+              to="/agenda"
+              search={{ appointmentId: cancelling.appointment.id }}
+              className="underline"
+            >
+              Ver reserva en agenda
+            </Link>
+          </p>
+        ) : null}
         <Field>
           <FieldLabel htmlFor={`${uid}-cancel-reason`}>Motivo</FieldLabel>
           <Textarea

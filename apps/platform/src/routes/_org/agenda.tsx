@@ -29,25 +29,34 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { ChevronLeft, ChevronRight, Plus } from "lucide-react"
 import * as React from "react"
+import { AgendaSlotPicker } from "../../components/agenda-slot-picker"
 import type {
   AgendaAppointment,
   AgendaResources,
   AgendaServiceOption,
   AppointmentStatus,
   AvailableSlot,
-  AvailableSlotsResult,
   WaitlistEntry,
   WaitlistPriority,
 } from "../../lib/agenda"
+import { invalidateAppointmentQueries } from "../../lib/agenda"
 import { ApiError, apiFetch } from "../../lib/api"
 import { usePermission } from "../../lib/crm"
 import { fetchCrmContext } from "../../lib/crm-workspace"
 export const Route = createFileRoute("/_org/agenda")({
-  validateSearch: (search: Record<string, unknown>) => ({
+  validateSearch: (
+    search: Record<string, unknown>,
+  ): {
+    patientId?: string
+    contactId?: string
+    conversationId?: string
+    appointmentId?: string
+  } => ({
     ...search,
     patientId: typeof search.patientId === "string" ? search.patientId : undefined,
     contactId: typeof search.contactId === "string" ? search.contactId : undefined,
     conversationId: typeof search.conversationId === "string" ? search.conversationId : undefined,
+    appointmentId: typeof search.appointmentId === "string" ? search.appointmentId : undefined,
   }),
   component: AgendaPage,
 })
@@ -98,9 +107,13 @@ function AgendaPage() {
   const { get, setParam, setParams } = useListSearch()
   const [zoom, setZoom] = React.useState(150)
 
+  const branchParam = get("branch")
   const resourcesQuery = useQuery({
-    queryKey: ["agenda-resources"],
-    queryFn: () => apiFetch<{ data: AgendaResources }>("/api/agenda/resources"),
+    queryKey: ["agenda-resources", branchParam ?? null],
+    queryFn: () =>
+      apiFetch<{ data: AgendaResources }>(
+        `/api/agenda/resources${branchParam ? `?branchId=${encodeURIComponent(branchParam)}` : ""}`,
+      ),
   })
   const resources = resourcesQuery.data?.data
   const branchId = resources?.branchId
@@ -111,7 +124,10 @@ function AgendaPage() {
   const day = /^\d{4}-\d{2}-\d{2}$/.test(get("date") ?? "") ? (get("date") as string) : today
   const group: GroupMode = get("group") === "chairs" ? "chairs" : "professionals"
   const [dates, setDates] = React.useState<string[]>(() => weekAround(day))
-  const [editor, setEditor] = React.useState<{ appointment?: AgendaAppointment; context?: AppointmentContext } | null>(null)
+  const [editor, setEditor] = React.useState<{
+    appointment?: AgendaAppointment
+    context?: AppointmentContext
+  } | null>(null)
   const [message, setMessage] = React.useState("")
   const [navigation, setNavigation] = React.useState(0)
   const scrolledDay = React.useRef<string | null>(null)
@@ -122,25 +138,67 @@ function AgendaPage() {
   targetDay.current = day
   const canWrite = usePermission("appointments.write")
   const requested = Route.useSearch()
+  const linkedAppointment = useQuery({
+    queryKey: ["agenda-appointment", requested.appointmentId],
+    enabled: Boolean(requested.appointmentId),
+    queryFn: () =>
+      apiFetch<{ data: AgendaAppointment }>(`/api/appointments/${requested.appointmentId}`),
+  })
+  const openedAppointment = React.useRef<string | null>(null)
+  React.useEffect(() => {
+    if (!requested.appointmentId) {
+      openedAppointment.current = null
+      return
+    }
+    const linked = linkedAppointment.data?.data
+    if (!linked || !resources || openedAppointment.current === linked.id) return
+    if (resources.branchId !== linked.branchId) {
+      setParam("branch", linked.branchId)
+      return
+    }
+    openedAppointment.current = linked.id
+    setParam("date", zonedDateOf(linked.startsAt, resources.timeZone))
+    setMessage(`Cita de ${linked.patientName}: ${SCHEDULE_STATUS_LABELS[linked.status]}.`)
+    if (canWrite) setEditor({ appointment: linked })
+  }, [requested.appointmentId, linkedAppointment.data, resources, canWrite, setParam])
   const contextualPatient = useQuery({
     queryKey: ["crm-context", requested.contactId, requested.conversationId ?? "todas"],
     enabled: canWrite && !!requested.contactId && !!requested.patientId,
     queryFn: () => fetchCrmContext(requested.contactId!, requested.conversationId),
   })
-  const patientLink = contextualPatient.data?.data.contact.patients.find(item => item.id === requested.patientId)
+  const patientLink = contextualPatient.data?.data.contact.patients.find(
+    (item) => item.id === requested.patientId,
+  )
   const openedRequest = React.useRef<string | null>(null)
   React.useEffect(() => {
-    const key = requested.contactId && requested.patientId
-      ? `${requested.contactId}:${requested.patientId}:${requested.conversationId ?? ""}` : null
+    const key =
+      requested.contactId && requested.patientId
+        ? `${requested.contactId}:${requested.patientId}:${requested.conversationId ?? ""}`
+        : null
     if (!key) openedRequest.current = null
     if (key && key !== openedRequest.current && patientLink && resources && canWrite) {
       openedRequest.current = key
-      setEditor({ context: { patientId: patientLink.id, patientName: patientLink.displayName, conversationId: requested.conversationId } })
+      setEditor({
+        context: {
+          patientId: patientLink.id,
+          patientName: patientLink.displayName,
+          conversationId: requested.conversationId,
+        },
+      })
     }
-  }, [requested.contactId, requested.patientId, requested.conversationId, patientLink, resources, canWrite])
+  }, [
+    requested.contactId,
+    requested.patientId,
+    requested.conversationId,
+    patientLink,
+    resources,
+    canWrite,
+  ])
   const closeEditor = () => {
     setEditor(null)
-    if (editor?.context) setParams({ patientId: undefined, contactId: undefined, conversationId: undefined })
+    if (requested.appointmentId) setParam("appointmentId", undefined)
+    if (editor?.context)
+      setParams({ patientId: undefined, contactId: undefined, conversationId: undefined })
   }
 
   const range = React.useMemo(() => windowRange(day, TZ), [day, TZ])
@@ -184,11 +242,7 @@ function AgendaPage() {
     return counts
   }, [appointments, conflicts, day, TZ])
 
-  const invalidate = () =>
-    Promise.all([
-      queryClient.invalidateQueries({ queryKey: ["agenda"] }),
-      queryClient.invalidateQueries({ queryKey: ["agenda-resources"] }),
-    ])
+  const invalidate = () => invalidateAppointmentQueries(queryClient)
 
   const moveMutation = useMutation({
     mutationFn: (input: {
@@ -359,17 +413,32 @@ function AgendaPage() {
         subtitle={
           resources ? `${resources.branchName} · ${formatDayShort(day)}` : "Cargando recursos…"
         }
-        actions={canWrite ? (
-          <Button aria-label="Nueva cita" onClick={() => setEditor({})}>
-            <Plus className="size-4" />
-            <span className="hidden sm:inline">Nueva cita</span>
-          </Button>
-        ) : undefined
+        actions={
+          canWrite ? (
+            <Button aria-label="Nueva cita" onClick={() => setEditor({})}>
+              <Plus className="size-4" />
+              <span className="hidden sm:inline">Nueva cita</span>
+            </Button>
+          ) : undefined
         }
       />
-      {requested.patientId && (contextualPatient.error || (contextualPatient.isSuccess && !patientLink)) && (
+      {requested.patientId &&
+        (contextualPatient.error || (contextualPatient.isSuccess && !patientLink)) && (
+          <p role="alert" className="px-4 text-sm text-destructive">
+            No se pudo preparar la cita: comprueba el vínculo del paciente y vuelve a abrir el caso.
+          </p>
+        )}
+      {linkedAppointment.isError && (
         <p role="alert" className="px-4 text-sm text-destructive">
-          No se pudo preparar la cita: comprueba el vínculo del paciente y vuelve a abrir el caso.
+          No se pudo cargar la cita vinculada.{" "}
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => void linkedAppointment.refetch()}
+          >
+            Reintentar
+          </Button>
         </p>
       )}
       <div className="flex min-w-0 shrink-0 flex-wrap items-center gap-2 rounded-xl border bg-background px-3 py-2 sm:px-4">
@@ -632,7 +701,7 @@ function AppointmentEditor({
     if (appointment && !options.some((option) => option.id === appointment.patientId)) {
       options.unshift({ id: appointment.patientId, label: appointment.patientName })
     }
-    if (context && !options.some(option => option.id === context.patientId)) {
+    if (context && !options.some((option) => option.id === context.patientId)) {
       options.unshift({ id: context.patientId, label: context.patientName })
     }
     return options
@@ -980,13 +1049,14 @@ function WaitlistRow({
           {entry.status === "ofrecida" ? "Hueco ofrecido" : "En espera"}
         </span>
         {entry.serviceName && <span className="text-xs">{entry.serviceName}</span>}
-        {entry.dentistName && <span className="text-xs text-muted-foreground">{entry.dentistName}</span>}
+        {entry.dentistName && (
+          <span className="text-xs text-muted-foreground">{entry.dentistName}</span>
+        )}
       </div>
       {entry.notes && <p className="text-xs text-muted-foreground">{entry.notes}</p>}
       {entry.offeredStartsAt && entry.offeredEndsAt && (
         <p className="text-xs">
-          Ofrecido:{" "}
-          {new Date(entry.offeredStartsAt).toLocaleString("es-PE", { timeZone })} →{" "}
+          Ofrecido: {new Date(entry.offeredStartsAt).toLocaleString("es-PE", { timeZone })} →{" "}
           {new Date(entry.offeredEndsAt).toLocaleTimeString("es-PE", { timeZone })}
         </p>
       )}
@@ -1102,7 +1172,10 @@ function WaitlistForm({
           id="espera-servicio"
           label="Servicio (opcional)"
           options={[{ id: "", label: "Sin servicio" }].concat(
-            (servicesQuery.data?.data ?? []).map((service) => ({ id: service.id, label: service.name })),
+            (servicesQuery.data?.data ?? []).map((service) => ({
+              id: service.id,
+              label: service.name,
+            })),
           )}
           value={serviceId}
           onChange={setServiceId}
@@ -1154,29 +1227,7 @@ function SlotOfferPicker({
   onClose: () => void
   onSaved: () => Promise<void>
 }) {
-  const [date, setDate] = React.useState(day)
-  const [dentistUserId, setDentistUserId] = React.useState(entry.dentistUserId ?? "")
   const [error, setError] = React.useState("")
-  const range = React.useMemo(() => {
-    const from = minutesToInstant(date, 0, timeZone)
-    const to = minutesToInstant(date, 24 * 60, timeZone)
-    return { from, to }
-  }, [date, timeZone])
-  const slotsQuery = useQuery({
-    queryKey: ["agenda-slots", branchId, date, dentistUserId, entry.serviceId],
-    queryFn: () => {
-      const params = new URLSearchParams({
-        branchId,
-        from: range.from,
-        to: range.to,
-      })
-      if (dentistUserId) params.set("dentistUserId", dentistUserId)
-      if (entry.serviceId) params.set("serviceId", entry.serviceId)
-      return apiFetch<{ data: AvailableSlotsResult }>(`/api/agenda/slots?${params.toString()}`)
-    },
-  })
-  const result = slotsQuery.data?.data
-  const slots = result?.slots ?? []
   const offer = useMutation({
     mutationFn: (slot: AvailableSlot) =>
       apiFetch(`/api/agenda/waitlist/${entry.id}/offer`, {
@@ -1206,67 +1257,20 @@ function SlotOfferPicker({
       error={error || null}
       submitLabel="Cerrar"
     >
-      <div className="grid gap-3">
-        <div className="flex flex-wrap gap-2">
-          <Input
-            aria-label="Fecha de búsqueda"
-            type="date"
-            className="h-8 w-40"
-            value={date}
-            onChange={(event) => setDate(event.target.value)}
-          />
-          <select
-            aria-label="Profesional"
-            className={SELECT}
-            value={dentistUserId}
-            onChange={(event) => setDentistUserId(event.target.value)}
-          >
-            <option value="">Todos</option>
-            {professionals.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.label}
-              </option>
-            ))}
-          </select>
-        </div>
-        {slotsQuery.isLoading && <p className="text-sm text-muted-foreground">Buscando huecos…</p>}
-        {!slotsQuery.isLoading && slots.length === 0 && (
-          <p className="text-sm text-muted-foreground">
-            Sin huecos ese día. El profesional necesita horario configurado y agenda libre.
-          </p>
-        )}
-        {result?.truncated && (
-          <p className="text-sm text-muted-foreground">
-            Se muestran los primeros huecos; acota la fecha para ver más.
-          </p>
-        )}
-        <ul className="grid gap-2">
-          {slots.map((slot) => (
-            <li
-              key={`${slot.startsAt}:${slot.dentistUserId}:${slot.chairId}`}
-              className="flex flex-wrap items-center gap-2 rounded-lg border p-2 text-sm"
-            >
-              <span className="font-medium">
-                {new Date(slot.startsAt).toLocaleTimeString("es-PE", { timeZone })} →{" "}
-                {new Date(slot.endsAt).toLocaleTimeString("es-PE", { timeZone })}
-              </span>
-              <span className="text-muted-foreground">{slot.dentistName}</span>
-              {slot.chairName && <span className="text-muted-foreground">{slot.chairName}</span>}
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={offer.isPending}
-                onClick={() => {
-                  setError("")
-                  offer.mutate(slot)
-                }}
-              >
-                Ofrecer
-              </Button>
-            </li>
-          ))}
-        </ul>
-      </div>
+      <AgendaSlotPicker
+        branchId={branchId}
+        timeZone={timeZone}
+        day={day}
+        professionals={professionals}
+        serviceId={entry.serviceId}
+        initialProfessionalId={entry.dentistUserId}
+        disabled={offer.isPending}
+        actionLabel="Ofrecer"
+        onSelect={(slot) => {
+          setError("")
+          offer.mutate(slot)
+        }}
+      />
     </FormDrawer>
   )
 }

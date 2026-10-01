@@ -9,6 +9,7 @@ import { planDecisionLabel } from "../../lib/budgets"
 import {
   fetchFollowUps,
   fetchPatientAccount,
+  followUpAppointmentLabel,
   formatDate,
   NEXT_ACTION_LABELS,
 } from "../../lib/clinical-journey"
@@ -23,8 +24,8 @@ import {
   planStatusLabel,
 } from "../../lib/patients"
 import { formatMoney } from "../../lib/services"
-import { PatientContactSection } from "./patient-contact-section"
 import { OdontogramStudio } from "../odontogram-studio"
+import { PatientContactSection } from "./patient-contact-section"
 
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -144,11 +145,24 @@ export function ResumenTab({
       ) : null}
       <section className="rounded-md bg-card p-4">
         <h2 className="font-heading text-lg font-medium">Situación clínica</h2>
-        <p className="mb-4 text-sm text-muted-foreground">Selecciona una pieza para consultar sus hallazgos, notas, tratamientos e imágenes.</p>
-        {dentalQuery.isPending ? <LoadingState /> : dentalQuery.isError ?
-          <ErrorState onRetry={() => void dentalQuery.refetch()} /> :
-          dentalQuery.data && <OdontogramStudio patientId={patientId} state={dentalQuery.data.data}
-            compact readOnly onChanged={() => dentalQuery.refetch().then(() => {})} />}
+        <p className="mb-4 text-sm text-muted-foreground">
+          Selecciona una pieza para consultar sus hallazgos, notas, tratamientos e imágenes.
+        </p>
+        {dentalQuery.isPending ? (
+          <LoadingState />
+        ) : dentalQuery.isError ? (
+          <ErrorState onRetry={() => void dentalQuery.refetch()} />
+        ) : (
+          dentalQuery.data && (
+            <OdontogramStudio
+              patientId={patientId}
+              state={dentalQuery.data.data}
+              compact
+              readOnly
+              onChanged={() => dentalQuery.refetch().then(() => {})}
+            />
+          )
+        )}
       </section>
 
       <div className="flex flex-col gap-6 rounded-md bg-card p-6">
@@ -203,7 +217,9 @@ export function ResumenTab({
       <div className="flex flex-col gap-6 rounded-md bg-card p-6">
         <div className="flex flex-col gap-1.5">
           <div className="font-heading text-base font-medium">Tratamientos y seguimiento</div>
-          <p className="text-sm text-muted-foreground">Decisiones pendientes, trabajo en curso y próximos controles.</p>
+          <p className="text-sm text-muted-foreground">
+            Decisiones pendientes, trabajo en curso y próximos controles.
+          </p>
         </div>
         {journeys.length === 0 ? (
           <p className="text-sm text-muted-foreground">
@@ -217,7 +233,10 @@ export function ResumenTab({
                 className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm"
               >
                 <span className="flex min-w-0 flex-col">
-                  <span className="font-medium">{row.item.toothNumber ? `Pieza ${row.item.toothNumber} · ` : "General · "}{row.item.title}</span>
+                  <span className="font-medium">
+                    {row.item.toothNumber ? `Pieza ${row.item.toothNumber} · ` : "General · "}
+                    {row.item.title}
+                  </span>
                   <span className="text-muted-foreground">
                     {row.nextAction ? NEXT_ACTION_LABELS[row.nextAction] : "Sin acción pendiente"} ·
                     decisión {planDecisionLabel(row.decision)} · ejecución{" "}
@@ -242,18 +261,33 @@ export function ResumenTab({
       <div className="flex flex-col gap-6 rounded-md bg-card p-6">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="flex flex-col gap-1.5">
-            <div className="font-heading text-base font-medium">Próximos controles</div>
-            {followUpsQuery.isPending ? <p>Cargando controles…</p> :
-              followUpsQuery.isError ? <p role="alert">No se pudieron cargar los controles.</p> :
-              pendingFollowUps.length === 0 ? <p className="text-sm text-muted-foreground">Sin controles pendientes.</p> :
-              <ul className="flex flex-col gap-3">{pendingFollowUps.map((control) => (
-                <li key={control.id} className="text-sm">
-                  <p className="font-medium">{control.title} · {formatDate(control.dueAt)}</p>
-                  <p>{control.instructions || "Sin instrucciones adicionales."}</p>
-                  <p className="text-muted-foreground">{control.kind === "mantenimiento" ? "Mantenimiento preventivo" :
-                    journeys.find((row) => row.item.id === control.planItemId)?.item.title ?? "Control de tratamiento"} · {planStatusLabel(control.status)}</p>
-                </li>
-              ))}</ul>}
+            <div className="font-heading text-base font-medium">Controles pendientes</div>
+            {followUpsQuery.isPending ? (
+              <p>Cargando controles…</p>
+            ) : followUpsQuery.isError ? (
+              <p role="alert">No se pudieron cargar los controles.</p>
+            ) : pendingFollowUps.length === 0 ? (
+              <p className="text-sm text-muted-foreground">Sin controles pendientes.</p>
+            ) : (
+              <ul className="flex flex-col gap-3">
+                {pendingFollowUps.map((control) => (
+                  <li key={control.id} className="text-sm">
+                    <p className="font-medium">
+                      {control.title} · {formatDate(control.dueAt)}
+                    </p>
+                    <p>{control.instructions || "Sin instrucciones adicionales."}</p>
+                    <p className="text-muted-foreground">
+                      {control.kind === "mantenimiento"
+                        ? "Mantenimiento preventivo"
+                        : (journeys.find((row) => row.item.id === control.planItemId)?.item.title ??
+                          "Control de tratamiento")}{" "}
+                      · {planStatusLabel(control.status)}
+                    </p>
+                    <p className="text-muted-foreground">{followUpAppointmentLabel(control)}</p>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
           <Button
             type="button"
@@ -348,8 +382,6 @@ export function ResumenTab({
           </CollapsibleContent>
         </div>
       </Collapsible>
-
     </div>
   )
 }
-
