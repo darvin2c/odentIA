@@ -23,6 +23,7 @@
     "portless": "0.15.6",
     "turbo": "2.10.12",
     "typescript": "5.9.3",
+    "typescript-language-server": "6.0.1",
     "undici": "8.10.2"
   },
   "pnpm": {
