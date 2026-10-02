@@ -10,6 +10,7 @@ import {
   getAgentConfig,
   getClinicInfoSnapshot,
   getContact,
+  listContactChannelHistory,
   listMessages,
   listContactNotes,
   listOpportunities,
@@ -159,6 +160,34 @@ export function compileAgentGraph(
     const { items } = await withOrgContext(toolCtx.db, toolCtx.orgId, (tx) =>
       listMessages(tx, toolCtx.orgId, toolCtx.conversationId, { limit: 20 }),
     )
+    // Historial acotado de otros canales del mismo contacto verificado, con
+    // procedencia, para continuidad omnicanal. La autorización la da el
+    // contactId vigente del hilo; nunca se resuelve por teléfono. Acotado y
+    // con aviso explícito si hay más (nunca corte mudo).
+    const cross = await withOrgContext(toolCtx.db, toolCtx.orgId, (tx) =>
+      listContactChannelHistory(tx, toolCtx.orgId, {
+        contactId: toolCtx.contactId,
+        excludeConversationId: toolCtx.conversationId,
+        limit: 3,
+        perConversation: 5,
+      }),
+    )
+    const crossBlock = cross.items.length
+      ? [
+          "Historial de otros canales del mismo contacto (procedencia indicada; no pidas de nuevo lo ya conversado ni lo presentes como de este canal):",
+          ...cross.items.map((c) => {
+            const when = c.lastMessageAt ? new Date(c.lastMessageAt).toLocaleString("es-PE") : "sin fecha"
+            const lines = c.messages.map((m) => {
+              const who = m.direction === "in" ? "contacto" : m.senderKind === "agent" ? "agente" : "operador"
+              return `  ${who}: ${(m.body ?? "[adjunto]").slice(0, 300)}`
+            })
+            return `[${c.channel} · ${when}]\n${lines.join("\n")}`
+          }),
+          cross.nextCursor ? "Hay más historial en otros canales: usa ver_otros_canales para consultarlo." : null,
+        ]
+          .filter(Boolean)
+          .join("\n")
+      : null
     const { orgPrompt, policyLine, knowledgeBlock } = await withOrgContext(
       toolCtx.db,
       toolCtx.orgId,
@@ -184,6 +213,7 @@ export function compileAgentGraph(
       notesLine ? `Notas del contacto (internas): ${notesLine}${(contactDetail.notes?.trim().length ?? 0) > 500 ? "… (texto completo en leer_contexto_comercial)" : ""}.` : null,
       notes.items.length ? `Notas operativas recientes (internas; no las reproduzcas al interlocutor):\n${notes.items.map(n => `${n.at}: ${n.body}`).join("\n")}${notes.nextCursor ? "\nHay más notas: usa leer_contexto_comercial con cursor de notas para consultarlas." : ""}` : null,
       customLine ? `Campos (resumen; valores completos en leer_contexto_comercial): ${customLine}.` : null,
+      crossBlock,
       policyLine,
       knowledgeBlock,
     ]

@@ -3,17 +3,20 @@ process.env.DOCKER_HOST ??= "unix:///mnt/wsl/podman-sockets/odentia.sock"
 import { PostgresSaver } from "@langchain/langgraph-checkpoint-postgres"
 import { telegramBotApiAdapter } from "@odentia/channels"
 import { createAppDb, createOwnerDb, type Db, setupAgentMemory, withOrgContext } from "@odentia/db"
-import { conversation, crmTask, message } from "@odentia/db/schema/crm"
+import { contactIdentity, conversation, crmTask, message } from "@odentia/db/schema/crm"
 import { agentHandoff, agentRunLedger } from "@odentia/db/schema/agent"
 import {
+  addContactIdentity,
   createChair,
   createConnection,
+  createContact,
   decideProposal,
   getAutonomyPolicy,
   ingestInbound,
   createTask,
   listProposals,
   listOpportunities,
+  moveContactIdentity,
   nextPatientNumber,
   secretsKeyFromEnv,
   setPatientContact,
@@ -65,12 +68,16 @@ export const storageStub = {
 }
 
 async function ingestText(thread: string, eventId: string, text: string) {
+  return ingestOn(tgConnId, thread, eventId, text)
+}
+
+async function ingestOn(connectionId: string, thread: string, eventId: string, text: string) {
   return withOrgContext(appDb, "org_a", (tx) =>
     ingestInbound(
       tx,
       {
         orgId: "org_a",
-        connectionId: tgConnId,
+        connectionId,
         event: {
           externalEventId: eventId,
           externalMessageId: eventId,
@@ -289,6 +296,14 @@ class RecordingModel extends BaseChatModel {
   }
 }
 
+/** Texto del system prompt visto por el modelo en un turno grabado. */
+function systemTextOf(turn: BaseMessage[]): string {
+  return turn
+    .filter((m) => m instanceof SystemMessage || m.constructor?.name === "SystemMessage")
+    .map((m) => String(m.content))
+    .join("\n")
+}
+
 it("el contexto se reemplaza entre turnos sin crecer por copia ni conservar políticas", async () => {
   const { conversationId } = await ingestText("tg:memoria-ctx", "evt-memoria-ctx", "Hola, una consulta")
   const [conv] = await withOrgContext(appDb, "org_a", (tx) =>
@@ -323,6 +338,121 @@ it("el contexto se reemplaza entre turnos sin crecer por copia ni conservar pol�
   const systemText = systems.map((m) => String(m.content)).join("\n")
   expect(systemText).toContain("PROMPT-TURNO-DOS")
   expect(await agentMessages(conversationId)).toEqual([])
+})
+
+it("el prompt incluye el compromiso de otro canal con procedencia y lo pierde al reasignar la identidad", async () => {
+  const waConn = await withOrgContext(appDb, "org_a", async (tx) =>
+    (await createConnection(
+      tx,
+      "org_a",
+      KEY,
+      {
+        channel: "whatsapp",
+        provider: "whatsapp_cloud_api",
+        displayName: "WA Cross",
+        config: { phoneNumberId: "P", wabaId: "W", accessToken: "T", appSecret: "S", templates: [] },
+      },
+      { fetch, validateExternal: false },
+    )).id,
+  )
+  const wa = await ingestOn(waConn, "wa:51988990001", "evt-cross-wa", "Mi compromiso: prefiero cita los lunes por la mañana")
+  const [waConv] = await withOrgContext(appDb, "org_a", (tx) =>
+    tx.select({ contactId: conversation.contactId }).from(conversation).where(eq(conversation.id, wa.conversationId)))
+  expect(waConv).toBeDefined()
+  const contactId = waConv!.contactId
+  await withOrgContext(appDb, "org_a", (tx) =>
+    addContactIdentity(tx, "org_a", null, contactId, { channel: "telegram", externalUserId: "tg:990011" }))
+  // El mismo contacto continúa por Telegram: otro hilo, misma persona.
+  const tg = await ingestText("tg:990011", "evt-cross-tg", "Hola, sigo desde otro canal")
+  const toolCtx: AgentToolCtx = {
+    db: appDb, orgId: "org_a", conversationId: tg.conversationId, contactId,
+    triggerMessageId: null, secretsKey: KEY, dryRun: true, handedOff: false,
+    toolsUsed: [], usage: { inputTokens: 0, outputTokens: 0, reported: false },
+  }
+  const model = new RecordingModel({})
+  await compileAgentGraph(model, toolCtx, runtime.checkpointer).invoke(
+    { messages: [], turnCount: 0 },
+    { configurable: { thread_id: `org_a:${tg.conversationId}` } },
+  )
+  const firstSystem = systemTextOf(model.seen[0] ?? [])
+  expect(firstSystem).toContain("[whatsapp")
+  expect(firstSystem).toContain("prefiero cita los lunes por la mañana")
+  // Reasignar la identidad de WhatsApp a otro contacto revoca ese contexto.
+  const other = await withOrgContext(appDb, "org_a", (tx) =>
+    createContact(tx, "org_a", { displayName: "Nuevo Titular" }))
+  const [waIdentity] = await withOrgContext(appDb, "org_a", (tx) =>
+    tx.select().from(contactIdentity).where(and(eq(contactIdentity.channel, "whatsapp"), eq(contactIdentity.externalUserId, "wa:51988990001"))).limit(1))
+  expect(waIdentity).toBeDefined()
+  await withOrgContext(appDb, "org_a", (tx) =>
+    moveContactIdentity(tx, "org_a", null, waIdentity!.id, {
+      fromContactId: contactId,
+      toContactId: other.id,
+      reason: "Corrige titular",
+    }))
+  await compileAgentGraph(model, toolCtx, runtime.checkpointer).invoke(
+    { messages: [], turnCount: 0 },
+    { configurable: { thread_id: `org_a:${tg.conversationId}` } },
+  )
+  const secondSystem = systemTextOf(model.seen[1] ?? [])
+  expect(secondSystem).not.toContain("prefiero cita los lunes por la mañana")
+})
+
+it("el prompt avisa cuando hay más historial y ver_otros_canales pagina con cursor", async () => {
+  const current = await ingestText("tg:cross-pages", "evt-cross-pages", "hilo actual")
+  const [conv] = await withOrgContext(appDb, "org_a", (tx) =>
+    tx.select({ contactId: conversation.contactId }).from(conversation).where(eq(conversation.id, current.conversationId)))
+  const contactId = conv!.contactId
+  // Cinco hilos antiguos del mismo contacto (más de la página de 3).
+  await withOrgContext(appDb, "org_a", async (tx) => {
+    for (let i = 1; i <= 5; i++) {
+      const at = new Date(Date.now() - i * 60_000)
+      const [old] = await tx
+        .insert(conversation)
+        .values({
+          organizationId: "org_a",
+          contactId,
+          contactIdentityId: null,
+          channelConnectionId: tgConnId,
+          externalThreadId: `tg:hist-${i}`,
+          createdAt: at,
+          lastMessageAt: at,
+        })
+        .returning({ id: conversation.id })
+      await tx.insert(message).values({
+        organizationId: "org_a",
+        conversationId: old!.id,
+        direction: "in",
+        senderKind: "contact",
+        body: `historial viejo ${i}`,
+        createdAt: at,
+      })
+    }
+  })
+  const toolCtx: AgentToolCtx = {
+    db: appDb, orgId: "org_a", conversationId: current.conversationId, contactId,
+    triggerMessageId: null, secretsKey: KEY, dryRun: true, handedOff: false,
+    toolsUsed: [], usage: { inputTokens: 0, outputTokens: 0, reported: false },
+  }
+  const model = new RecordingModel({})
+  await compileAgentGraph(model, toolCtx, runtime.checkpointer).invoke(
+    { messages: [], turnCount: 0 },
+    { configurable: { thread_id: `org_a:${current.conversationId}` } },
+  )
+  const system = systemTextOf(model.seen[0] ?? [])
+  expect(system).toContain("[telegram")
+  expect(system).toContain("usa ver_otros_canales")
+  const reader = makeAgentTools(toolCtx).find((t) => t.name === "ver_otros_canales")
+  expect(reader).toBeDefined()
+  const first = String(await reader!.invoke({}))
+  expect(first).toContain("[telegram")
+  expect(first).toContain("historial viejo 1")
+  const cursor = /cursor "([^"]+)"/.exec(first)?.[1]
+  expect(cursor).toBeTruthy()
+  const second = String(await reader!.invoke({ cursor }))
+  expect(second).toContain("historial viejo 5")
+  expect(second).not.toContain("Hay más historial")
+  // Solo lectura también en simulación: no genera mensajes salientes.
+  expect(await agentMessages(current.conversationId)).toEqual([])
 })
 
 it("buscar_huecos entrega una opción completa que proponer_cita ejecuta como cita real", async () => {
