@@ -805,6 +805,124 @@ export async function listMessages(
   }
 }
 
+export interface CrossThreadMessage {
+  direction: string
+  senderKind: string
+  body: string | null
+  createdAt: string
+}
+
+export interface ContactChannelHistoryItem {
+  conversationId: string
+  channel: string
+  provider: string
+  connectionName: string
+  lastMessageAt: string | null
+  messages: CrossThreadMessage[]
+}
+
+/**
+ * Recuperación acotada y paginada del historial de otros hilos del mismo
+ * contacto verificado, con procedencia (canal/conexión). La autorización la
+ * da el contactId vigente del hilo: nunca se resuelve identidad por
+ * coincidencia de teléfono ni se mezclan contactos. Al reasignar una
+ * identidad los hilos transferidos cambian de contactId y dejan de aparecer
+ * aquí para el contacto origen. Son mensajes conversacionales; nunca
+ * historia clínica ni notas.
+ */
+export async function listContactChannelHistory(
+  tx: Db,
+  orgId: string,
+  input: {
+    contactId: string
+    excludeConversationId?: string
+    perConversation?: number
+    limit?: number
+    cursor?: string
+  },
+): Promise<{ items: ContactChannelHistoryItem[]; nextCursor: string | null }> {
+  const limit = Math.min(Math.max(input.limit ?? 3, 1), 10)
+  const per = Math.min(Math.max(input.perConversation ?? 5, 1), 20)
+  const conditions = [
+    eq(conversation.organizationId, orgId),
+    eq(conversation.contactId, input.contactId),
+  ]
+  if (input.excludeConversationId) {
+    conditions.push(sql`${conversation.id} <> ${input.excludeConversationId}::uuid`)
+  }
+  const activityAt = sql`coalesce(${conversation.lastMessageAt}, ${conversation.createdAt})`
+  if (input.cursor) {
+    const decoded = conversationCursor(input.cursor)
+    const ts = sql`${decoded.ts}::timestamptz`
+    conditions.push(
+      or(
+        sql`${activityAt} < ${ts}`,
+        and(sql`${activityAt} = ${ts}`, lt(conversation.id, decoded.id)),
+      )!,
+    )
+  }
+  const rows = await tx
+    .select({
+      conversation,
+      connection: channelConnection,
+      cursorAt: sql<string>`to_char(${activityAt} at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`,
+    })
+    .from(conversation)
+    .innerJoin(channelConnection, eq(conversation.channelConnectionId, channelConnection.id))
+    .where(and(...conditions))
+    .orderBy(desc(activityAt), desc(conversation.id))
+    .limit(limit + 1)
+  const page = rows.slice(0, limit)
+  const byConversation = new Map<string, CrossThreadMessage[]>()
+  if (page.length > 0) {
+    const ids = page.map((r) => r.conversation.id)
+    const messageRows = (await tx.execute(sql`
+      select "conversation_id", "direction", "sender_kind", "body", "created_at"
+      from (
+        select "id", "conversation_id", "direction", "sender_kind", "body", "created_at",
+          row_number() over (partition by "conversation_id" order by "created_at" desc, "id" desc) as rn
+        from "message"
+        where "organization_id" = ${orgId}
+          and "conversation_id" in (${sql.join(
+            ids.map((id) => sql`${id}::uuid`),
+            sql`, `,
+          )})
+      ) t
+      where rn <= ${per}
+      order by "conversation_id", "created_at" asc, "id" asc`)) as unknown as {
+      conversation_id: string
+      direction: string
+      sender_kind: string
+      body: string | null
+      created_at: Date
+    }[]
+    for (const m of messageRows) {
+      const list = byConversation.get(m.conversation_id) ?? []
+      list.push({
+        direction: m.direction,
+        senderKind: m.sender_kind,
+        body: m.body,
+        createdAt: m.created_at instanceof Date ? m.created_at.toISOString() : String(m.created_at),
+      })
+      byConversation.set(m.conversation_id, list)
+    }
+  }
+  const items: ContactChannelHistoryItem[] = page.map((r) => ({
+    conversationId: r.conversation.id,
+    channel: r.connection.channel,
+    provider: r.connection.provider,
+    connectionName: r.connection.displayName,
+    lastMessageAt: r.conversation.lastMessageAt ? r.conversation.lastMessageAt.toISOString() : null,
+    messages: byConversation.get(r.conversation.id) ?? [],
+  }))
+  const last = page[page.length - 1]
+  const nextCursor =
+    rows.length > limit && last
+      ? encodeCursor(last.cursorAt, last.conversation.id)
+      : null
+  return { items, nextCursor }
+}
+
 export interface ConversationDetail {
   conversation: {
     id: string

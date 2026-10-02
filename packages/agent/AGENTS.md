@@ -4,6 +4,7 @@ Objetivo: ayudar a resolver la atención con contexto autorizado y acciones traz
 
 - Conocimiento publicado/versionado y contexto filtrado por autorización. No SQL directo del modelo, credenciales en prompts ni fetch arbitrario.
 - Contexto e historial se reemplazan entre turnos, no se acumulan copias. Recuperar detalle comercial mediante `leer_contexto_comercial` y cursores, sin historia clínica fuera de permiso.
+- Continuidad omnicanal: el prompt incluye un resumen acotado de otros hilos del mismo contacto verificado (`listContactChannelHistory`, con procedencia canal/fecha) y la herramienta `ver_otros_canales` pagina el resto. La autorización la da el contactId vigente del hilo, nunca coincidencia de teléfono; reasignar una identidad mueve sus hilos y revoca ese contexto.
 - Enviar respuesta, mover etapa, crear oportunidad, actualizar seguimiento y cerrar pasan por política de autonomía y propuestas reales. Idempotencia por mensaje/herramienta/payload; actor, motivo y efecto previsto auditables.
 - Aprobación requiere `agent.decide` y permiso operativo del acto. Confirmación del interlocutor exige modo vigente `confirmar_usuario` y mensaje afirmativo posterior a la propuesta; aprobación del empleado no lo sustituye.
 - Una sola propuesta esperando confirmación por hilo. Distinguir bloqueo `PROPOSAL_PENDING_CONFIRM` de `PROPOSAL_PENDING_APPROVAL` según la propuesta bloqueante.

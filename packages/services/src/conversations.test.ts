@@ -1,16 +1,17 @@
 import type { ChannelAdapter, NormalizedInbound } from "@odentia/channels"
 import { type InboundMessageJob, withOrgContext } from "@odentia/db"
-import { contactIdentity, conversation } from "@odentia/db/schema/crm"
+import { contactIdentity, conversation, message } from "@odentia/db/schema/crm"
 import { eq, sql } from "drizzle-orm"
 import { expect, it } from "vitest"
 import { createConnection } from "./connections.js"
-import { updateContact } from "./contacts.js"
+import { addContactIdentity, createContact, moveContactIdentity, updateContact } from "./contacts.js"
 import {
   applyStatus,
   getConversationDetail,
   type IngestDeps,
   ingestInbound,
   listConversations,
+  listContactChannelHistory,
   listMessages,
   markRead,
   sendOutbound,
@@ -591,4 +592,185 @@ it("cursores manipulados de bandeja y mensajes se rechazan antes de consultar Po
       listMessages(tx, "org_a", ingested.conversationId, { before: cursor }),
     )).rejects.toMatchObject({ code: "VALIDATION", status: 400 })
   }
+})
+
+it("listContactChannelHistory: procedencia, acotación, paginación, identidad y transferencia", async () => {
+  const tgConn = await makeTelegramConnection("org_a")
+  const waConn = await withOrgContext(appDb, "org_a", async (tx) => {
+    const created = await createConnection(
+      tx,
+      "org_a",
+      KEY,
+      {
+        channel: "whatsapp",
+        provider: "whatsapp_cloud_api",
+        displayName: "WA",
+        config: { phoneNumberId: "P", wabaId: "W", accessToken: "T", appSecret: "S", templates: [] },
+      },
+      { fetch, validateExternal: false },
+    )
+    return created.id
+  })
+  const waConn2 = await withOrgContext(appDb, "org_a", async (tx) => {
+    const created = await createConnection(
+      tx,
+      "org_a",
+      KEY,
+      {
+        channel: "whatsapp",
+        provider: "whatsapp_cloud_api",
+        displayName: "WA2",
+        config: { phoneNumberId: "P2", wabaId: "W2", accessToken: "T", appSecret: "S", templates: [] },
+      },
+      { fetch, validateExternal: false },
+    )
+    return created.id
+  })
+  const person = await withOrgContext(appDb, "org_a", (tx) =>
+    createContact(tx, "org_a", { displayName: "Multi Canal" }),
+  )
+  const tgIdentity = await withOrgContext(appDb, "org_a", (tx) =>
+    addContactIdentity(tx, "org_a", null, person.id, { channel: "telegram", externalUserId: "tg:555001" }),
+  )
+  const waIdentity = await withOrgContext(appDb, "org_a", (tx) =>
+    addContactIdentity(tx, "org_a", null, person.id, { channel: "whatsapp", externalUserId: "wa:51999000111" }),
+  )
+  const insertConv = async (args: {
+    connectionId: string
+    identityId: string | null
+    thread: string
+    at: string
+    bodies: { direction: string; senderKind: string; body: string }[]
+    contactId?: string
+  }) => {
+    return withOrgContext(appDb, "org_a", async (tx) => {
+      const [conv] = await tx
+        .insert(conversation)
+        .values({
+          organizationId: "org_a",
+          contactId: args.contactId ?? person.id,
+          contactIdentityId: args.identityId,
+          channelConnectionId: args.connectionId,
+          externalThreadId: args.thread,
+          createdAt: new Date(args.at),
+          lastMessageAt: new Date(args.at),
+        })
+        .returning({ id: conversation.id })
+      if (!conv) throw new Error("sin conversación")
+      for (const [i, m] of args.bodies.entries()) {
+        await tx.insert(message).values({
+          organizationId: "org_a",
+          conversationId: conv.id,
+          direction: m.direction,
+          senderKind: m.senderKind,
+          body: m.body,
+          createdAt: new Date(new Date(args.at).getTime() + i * 1000),
+        })
+      }
+      return conv.id
+    })
+  }
+  // Hilo antiguo de Telegram con 6 mensajes (acota a 5), hilo medio de
+  // WhatsApp y hilo actual (excluido).
+  const convTg = await insertConv({
+    connectionId: tgConn,
+    identityId: tgIdentity.id,
+    thread: "tg:multi-1",
+    at: "2026-09-01T10:00:00Z",
+    bodies: Array.from({ length: 6 }, (_, i) => ({
+      direction: "in",
+      senderKind: "contact",
+      body: `mensaje tg ${i + 1}`,
+    })),
+  })
+  const convWa = await insertConv({
+    connectionId: waConn,
+    identityId: waIdentity.id,
+    thread: "wa:51999000111",
+    at: "2026-09-10T10:00:00Z",
+    bodies: [
+      { direction: "in", senderKind: "contact", body: "quiero mi cita del lunes" },
+      { direction: "out", senderKind: "agent", body: "quedó para el lunes 9:00" },
+    ],
+  })
+  const convActual = await insertConv({
+    connectionId: tgConn,
+    identityId: tgIdentity.id,
+    thread: "tg:multi-1-actual",
+    at: "2026-09-20T10:00:00Z",
+    bodies: [{ direction: "in", senderKind: "contact", body: "hola de nuevo" }],
+  })
+  // Teléfono coincidente en OTRO contacto: nunca entra en el historial.
+  const other = await withOrgContext(appDb, "org_a", (tx) =>
+    createContact(tx, "org_a", { displayName: "Otra Persona" }),
+  )
+  const convOther = await insertConv({
+    connectionId: waConn2,
+    identityId: null,
+    thread: "wa:51999000111",
+    at: "2026-09-15T10:00:00Z",
+    bodies: [{ direction: "in", senderKind: "contact", body: "mensaje de otra persona" }],
+    contactId: other.id,
+  })
+
+  const first = await withOrgContext(appDb, "org_a", (tx) =>
+    listContactChannelHistory(tx, "org_a", {
+      contactId: person.id,
+      excludeConversationId: convActual,
+      limit: 1,
+    }),
+  )
+  expect(first.items).toHaveLength(1)
+  expect(first.items[0]).toMatchObject({ conversationId: convWa, channel: "whatsapp" })
+  expect(first.items[0]?.messages.map((m) => m.body)).toEqual([
+    "quiero mi cita del lunes",
+    "quedó para el lunes 9:00",
+  ])
+  expect(first.nextCursor).not.toBeNull()
+  const second = await withOrgContext(appDb, "org_a", (tx) =>
+    listContactChannelHistory(tx, "org_a", {
+      contactId: person.id,
+      excludeConversationId: convActual,
+      limit: 1,
+      cursor: first.nextCursor ?? "",
+    }),
+  )
+  expect(second.items.map((i) => i.conversationId)).toEqual([convTg])
+  // Acotado a 5 mensajes en orden cronológico, sin corte mudo implícito.
+  expect(second.items[0]?.messages.map((m) => m.body)).toEqual([
+    "mensaje tg 2",
+    "mensaje tg 3",
+    "mensaje tg 4",
+    "mensaje tg 5",
+    "mensaje tg 6",
+  ])
+  expect(second.nextCursor).toBeNull()
+  // Sin exclusión: el hilo actual aparece primero por actividad reciente.
+  const all = await withOrgContext(appDb, "org_a", (tx) =>
+    listContactChannelHistory(tx, "org_a", { contactId: person.id, limit: 10 }),
+  )
+  expect(all.items.map((i) => i.conversationId)).toEqual([convActual, convWa, convTg])
+  expect(all.items.map((i) => i.conversationId)).not.toContain(convOther)
+  // Aislamiento por organización.
+  const otherOrg = await withOrgContext(appDb, "org_b", (tx) =>
+    listContactChannelHistory(tx, "org_b", { contactId: person.id, limit: 10 }),
+  )
+  expect(otherOrg.items).toHaveLength(0)
+  // Reasignar la identidad de WhatsApp a otro contacto mueve el hilo: deja
+  // de aparecer para el origen y pasa al destino.
+  await withOrgContext(appDb, "org_a", (tx) =>
+    moveContactIdentity(tx, "org_a", null, waIdentity.id, {
+      fromContactId: person.id,
+      toContactId: other.id,
+      reason: "Corrige titular",
+    }),
+  )
+  const afterOrigin = await withOrgContext(appDb, "org_a", (tx) =>
+    listContactChannelHistory(tx, "org_a", { contactId: person.id, limit: 10 }),
+  )
+  expect(afterOrigin.items.map((i) => i.conversationId)).not.toContain(convWa)
+  const afterDest = await withOrgContext(appDb, "org_a", (tx) =>
+    listContactChannelHistory(tx, "org_a", { contactId: other.id, limit: 10 }),
+  )
+  expect(afterDest.items.map((i) => i.conversationId)).toContain(convWa)
 })

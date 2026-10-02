@@ -12,6 +12,7 @@ import {
   getClinicInfoSnapshot,
   getOpportunity,
   listAgentContextCandidates,
+  listContactChannelHistory,
   listContactNotes,
   listOpportunities,
   listTasks,
@@ -602,6 +603,38 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     },
   )
 
+  const crossChannelHistory = tool(
+    async ({ cursor }: { cursor?: string }) => {
+      const { items, nextCursor } = await inOrg((tx) =>
+        listContactChannelHistory(tx, ctx.orgId, {
+          contactId: ctx.contactId,
+          excludeConversationId: ctx.conversationId,
+          ...(cursor ? { cursor } : {}),
+          limit: 3,
+          perConversation: 10,
+        }),
+      )
+      if (!items.length) return "No hay historial en otros canales con ese filtro."
+      const lines: string[] = []
+      for (const c of items) {
+        const when = c.lastMessageAt ? new Date(c.lastMessageAt).toLocaleString("es-PE") : "sin fecha"
+        lines.push(`[${c.channel} · ${when}]`)
+        for (const m of c.messages) {
+          const who = m.direction === "in" ? "contacto" : m.senderKind === "agent" ? "agente" : "operador"
+          lines.push(`  ${who}: ${(m.body ?? "[adjunto]").slice(0, 300)}`)
+        }
+      }
+      if (nextCursor) lines.push(`Hay más historial en otros canales: vuelve a llamar con cursor "${nextCursor}".`)
+      return lines.join("\n")
+    },
+    {
+      name: "ver_otros_canales",
+      description:
+        "Historial acotado de otros hilos del mismo contacto verificado en otros canales, con procedencia (canal y fecha). Solo lectura, también en simulación; sin historia clínica. Pasa el cursor devuelto para páginas anteriores; nunca asumas que no hay más.",
+      schema: z.object({ cursor: z.string().optional() }),
+    },
+  )
+
   const listOpportunitiesTool = tool(
     async ({ status, cursor, limit }: { status?: "open" | "won" | "lost"; cursor?: string; limit?: number }) => {
       const { items, nextCursor } = await inOrg((tx) =>
@@ -694,6 +727,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     listOpportunitiesTool,
     listTasksTool,
     commercialContext,
+    crossChannelHistory,
     addTags,
     updateContactTool,
     createTaskTool,
