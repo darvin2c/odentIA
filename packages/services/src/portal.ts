@@ -27,6 +27,7 @@ import { sendOutbound } from "./conversations.js"
 import { isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
 import { requirePatient } from "./patients.js"
 import { getPatientAccount } from "./payments.js"
+import { getOrgLocale } from "./locale.js"
 import type { Storage } from "./storage.js"
 import { createWorkspaceNotification } from "./workspace.js"
 import { getPortalPolicy, portalDisabled, requireActivePortalGrant } from "./portal-policy.js"
@@ -417,7 +418,8 @@ export async function issuePortalLink(
   }
 
   const url = deliver.linkUrl(token)
-  const vence = row.expiresAt.toLocaleString("es-PE", { dateStyle: "medium", timeStyle: "short" })
+  const zone = await getOrgLocale(tx, orgId)
+  const vence = row.expiresAt.toLocaleString(zone.locale, { dateStyle: "medium", timeStyle: "short", timeZone: zone.timezone })
   // Mensaje genérico y discreto: sin nombres, sin datos clínicos ni PIN.
   const text =
     `Tienes un acceso al portal del paciente: ${url}\nVence el ${vence}. Al abrirlo te pedirá un código ` +

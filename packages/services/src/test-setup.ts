@@ -19,6 +19,11 @@ export async function insertOrg(db: Db, id: string, slug: string): Promise<void>
         values (${id}, ${"Clínica " + slug}, ${slug}, now())
         on conflict do nothing`,
   )
+  await db.execute(
+    sql`insert into "org_profile" ("organization_id", "legal_name")
+        values (${id}, ${"Clínica " + slug})
+        on conflict do nothing`,
+  )
 }
 
 export function setupTestDb(): void {

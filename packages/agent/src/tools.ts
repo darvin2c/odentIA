@@ -11,6 +11,8 @@ import {
   getContact,
   getClinicInfoSnapshot,
   getOpportunity,
+  getOrgLocale,
+  formatZoned,
   listAgentContextCandidates,
   listContactChannelHistory,
   listContactNotes,
@@ -22,7 +24,7 @@ import {
   ServiceError,
   updateContact,
 } from "@odentia/services"
-import type { OpportunityDetail, ProposalItem } from "@odentia/services"
+import type { OpportunityDetail, OrgLocale, ProposalItem } from "@odentia/services"
 import { z } from "zod"
 export interface AgentToolCtx {
   db: Db
@@ -73,6 +75,11 @@ export async function performHandoff(ctx: AgentToolCtx, reason: string, summary?
  */
 export function makeAgentTools(ctx: AgentToolCtx) {
   const inOrg = <T>(fn: (tx: Db) => Promise<T>): Promise<T> => withOrgContext(ctx.db, ctx.orgId, fn)
+
+  // Configuración regional de la org, resuelta una vez por corrida: toda
+  // fecha comunicada usa la zona de la sede de la cita o la de la org.
+  let zonePromise: Promise<OrgLocale> | null = null
+  const orgZone = (): Promise<OrgLocale> => (zonePromise ??= inOrg((tx) => getOrgLocale(tx, ctx.orgId)))
 
   /**
    * Ventana de WhatsApp cerrada: el modelo cambia a plantilla autorizada o
@@ -238,7 +245,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       const merged = await inOrg(async (tx) => {
         const current = await requireContact(tx, ctx.orgId, contactId)
         const next = [...new Set([...current.tags, ...tags])]
-        await updateContact(tx, ctx.orgId, contactId, { tags: next }, { userId: null })
+        await updateContact(tx, ctx.orgId, contactId, { tags: next }, { userId: null, origin: "agent" })
         return next
       })
       return `Etiquetas: ${merged.join(", ")}.`
@@ -260,7 +267,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     }) => {
       const contactId = ctx.contactId
       if (ctx.dryRun) return "[SIMULACIÓN] Se actualizaría el contacto."
-      await inOrg((tx) => updateContact(tx, ctx.orgId, contactId, { displayName, customFields }, { userId: null }))
+      await inOrg((tx) => updateContact(tx, ctx.orgId, contactId, { displayName, customFields }, { userId: null, origin: "agent" }))
       return "Contacto actualizado."
     },
     {
@@ -284,6 +291,13 @@ export function makeAgentTools(ctx: AgentToolCtx) {
           ...(contactId ? { contactId } : {}),
           conversationId: ctx.conversationId,
           createdBy: "agent",
+          // Misma clave estable que las propuestas: reentregar el mensaje no duplica la tarea.
+          idempotencyKey: buildAgentProposalKey({
+            conversationId: ctx.conversationId,
+            triggerMessageId: ctx.triggerMessageId,
+            tool: "create_task",
+            payload: { title, dueAt: dueAt ?? null },
+          }),
         }),
       )
       return `Tarea creada (id ${created.id}).`
@@ -354,13 +368,15 @@ export function makeAgentTools(ctx: AgentToolCtx) {
   const patientSummary = tool(
     async ({ patientId }: { patientId: string }) => {
       const summary = await inOrg((tx) => getAgentPatientSummary(tx, ctx.orgId, ctx.contactId, patientId))
+      const zone = await orgZone()
       const lines = [`Paciente: ${summary.context.displayName} (vínculo ${summary.context.relationship}).`]
       if (!summary.upcomingAppointments.length) {
         lines.push("Sin citas próximas.")
       }
       for (const a of summary.upcomingAppointments) {
+        const cuando = formatZoned(new Date(a.startsAt), { timezone: a.branchTimezone ?? zone.timezone, locale: zone.locale })
         lines.push(
-          `- Cita ${a.status} el ${new Date(a.startsAt).toLocaleString("es-PE")}, ${a.branchName} con ${a.dentistName}.`,
+          `- Cita ${a.status} (id ${a.appointmentId}, versión ${a.version}) el ${cuando}, ${a.branchName} con ${a.dentistName}.`,
         )
       }
       for (const b of summary.budgets) {
@@ -382,7 +398,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     {
       name: "ver_resumen_paciente",
       description:
-        "Próximas citas y estado de presupuestos del paciente verificado; saldo solo si el interlocutor tiene facultad económica. Nunca historia clínica.",
+        "Próximas citas (con id y versión para reprogramar_cita/cancelar_cita) y estado de presupuestos del paciente verificado; saldo solo si el interlocutor tiene facultad económica. Nunca historia clínica.",
       schema: z.object({ patientId: z.string().uuid() }),
     },
   )
@@ -457,6 +473,55 @@ export function makeAgentTools(ctx: AgentToolCtx) {
         branchId: z.string().uuid().optional(),
         serviceId: z.string().uuid().optional(),
         durationMin: z.number().int().min(10).max(480).optional(),
+        reason: z.string().max(500).optional(),
+      }),
+    },
+  )
+
+  const rescheduleAppointment = tool(
+    async (input: {
+      appointmentId: string
+      startsAt: string
+      expectedVersion: number
+      dentistUserId?: string
+      chairId?: string
+      reason?: string
+    }) => {
+      if (ctx.dryRun) {
+        return `[SIMULACIÓN] Se propondría reprogramar la cita ${input.appointmentId} al ${input.startsAt}.`
+      }
+      const { reason, ...payload } = input
+      return propose("reprogramar_cita", payload, "reprogramar_cita", reason)
+    },
+    {
+      name: "reprogramar_cita",
+      description:
+        "Propone mover una cita existente a un nuevo inicio: nunca crea una reserva duplicada. Usa el id y la versión exactos de ver_resumen_paciente; con varias citas pregunta primero cuál corresponde y nunca actúes sobre pacientes no autorizados. Según la política puede pedir confirmación del interlocutor (confirmar_propuesta) o aprobación del equipo; la aprobación del equipo no sustituye la confirmación del interlocutor.",
+      schema: z.object({
+        appointmentId: z.string().uuid(),
+        startsAt: z.string().min(1),
+        expectedVersion: z.number().int().min(0),
+        dentistUserId: z.string().optional(),
+        chairId: z.string().uuid().optional(),
+        reason: z.string().max(500).optional(),
+      }),
+    },
+  )
+
+  const cancelAppointmentProposal = tool(
+    async (input: { appointmentId: string; reason?: string }) => {
+      if (ctx.dryRun) {
+        return `[SIMULACIÓN] Se propondría cancelar la cita ${input.appointmentId}.`
+      }
+      const { reason, ...payload } = input
+      return propose("cancelar_cita", payload, "cancelar_cita", reason)
+    },
+    {
+      name: "cancelar_cita",
+      description:
+        "Propone cancelar una cita existente (nunca la borra ni crea otra). Usa el id exacto de ver_resumen_paciente; con varias citas pregunta primero cuál corresponde. Según la política puede pedir confirmación del interlocutor (confirmar_propuesta) o aprobación del equipo; la respuesta indica el estado real: pendiente, ejecutada o fallida.",
+      schema: z.object({
+        appointmentId: z.string().uuid(),
         reason: z.string().max(500).optional(),
       }),
     },
@@ -616,8 +681,9 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       )
       if (!items.length) return "No hay historial en otros canales con ese filtro."
       const lines: string[] = []
+      const zone = await orgZone()
       for (const c of items) {
-        const when = c.lastMessageAt ? new Date(c.lastMessageAt).toLocaleString("es-PE") : "sin fecha"
+        const when = c.lastMessageAt ? formatZoned(new Date(c.lastMessageAt), zone) : "sin fecha"
         lines.push(`[${c.channel} · ${when}]`)
         for (const m of c.messages) {
           const who = m.direction === "in" ? "contacto" : m.senderKind === "agent" ? "agente" : "operador"
@@ -646,9 +712,10 @@ export function makeAgentTools(ctx: AgentToolCtx) {
         }),
       )
       if (!items.length) return "El contacto no tiene oportunidades con ese filtro."
+      const zone = await orgZone()
       const lines = items.map(
         (o) =>
-          `- ${o.title} (id ${o.id}, etapa ${o.stageName}, estado ${o.status}${o.nextActionAt ? `, próxima acción ${new Date(o.nextActionAt).toLocaleString("es-PE")}` : ""})`,
+          `- ${o.title} (id ${o.id}, etapa ${o.stageName}, estado ${o.status}${o.nextActionAt ? `, próxima acción ${formatZoned(new Date(o.nextActionAt), zone)}` : ""})`,
       )
       if (nextCursor) lines.push(`Hay más oportunidades: vuelve a llamar con cursor "${nextCursor}".`)
       return lines.join("\n")
@@ -671,10 +738,11 @@ export function makeAgentTools(ctx: AgentToolCtx) {
         listTasks(tx, ctx.orgId, { contactId: ctx.contactId, ...(status ? { status } : {}) }),
       )
       if (!items.length) return "El contacto no tiene tareas con ese filtro."
+      const zone = await orgZone()
       return items
         .map(
           (t) =>
-            `- ${t.title} (id ${t.id}, estado ${t.status}${t.dueAt ? `, vence ${new Date(t.dueAt).toLocaleString("es-PE")}` : ""}${t.opportunityTitle ? `, oportunidad ${t.opportunityTitle}` : ""})`,
+            `- ${t.title} (id ${t.id}, estado ${t.status}${t.dueAt ? `, vence ${formatZoned(new Date(t.dueAt), zone)}` : ""}${t.opportunityTitle ? `, oportunidad ${t.opportunityTitle}` : ""})`,
         )
         .join("\n")
     },
@@ -687,32 +755,35 @@ export function makeAgentTools(ctx: AgentToolCtx) {
   )
 
   const requestHandoff = tool(
-    async ({ reason, summary, priority }: { reason: string; summary?: string; priority?: string }) => {
+    async ({ reason, summary, priority, assigneeUserId }: { reason: string; summary?: string; priority?: string; assigneeUserId?: string }) => {
       if (ctx.dryRun) {
         await performHandoff(ctx, reason, summary)
         return `[SIMULACIÓN] Se derivaría a humano: ${reason}.`
       }
       const validPriority = priority === "alta" || priority === "baja" ? priority : "media"
-      await inOrg((tx) =>
+      const handoff = await inOrg((tx) =>
         createHandoff(tx, ctx.orgId, null, {
           conversationId: ctx.conversationId,
           reason,
           summary: summary?.trim() ? summary : reason,
           priority: validPriority,
+          ...(assigneeUserId ? { assigneeUserId } : {}),
           createdBy: "agent",
         }),
       )
       ctx.handedOff = true
-      return "Derivado a humano. No envíes más mensajes."
+      const destino = handoff.assigneeUserId ? "con responsable asignado" : "en la cola del equipo por recoger"
+      return `Derivado a humano (${destino}, plazo ${handoff.dueAt ?? "sin plazo"}). No envíes más mensajes.`
     },
     {
       name: "request_human_handoff",
       description:
-        "Deriva a un humano con motivo, resumen factual de lo conversado y prioridad (alta/media/baja). Apaga el agente.",
+        "Deriva a un humano con motivo, resumen factual de lo conversado y prioridad (alta/media/baja); sin assigneeUserId queda en la cola del equipo con plazo según prioridad. Apaga el agente.",
       schema: z.object({
         reason: z.string().min(1).max(300),
         summary: z.string().min(1).max(2000),
         priority: z.enum(["alta", "media", "baja"]).default("media"),
+        assigneeUserId: z.string().optional(),
       }),
     },
   )
@@ -737,6 +808,8 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     patientSummary,
     availability,
     proposeBooking,
+    rescheduleAppointment,
+    cancelAppointmentProposal,
     confirmProposal,
     requestHandoff,
   ]

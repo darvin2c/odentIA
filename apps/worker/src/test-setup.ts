@@ -62,6 +62,9 @@ export function setupTestDb(): void {
     await ownerDb.execute(
       sql`insert into "organization" ("id", "name", "slug", "created_at") values ('org_a', 'Clínica', 'norte', now())`,
     )
+    await ownerDb.execute(
+      sql`insert into "org_profile" ("organization_id", "legal_name") values ('org_a', 'Clínica') on conflict do nothing`,
+    )
     const created = await withOrgContext(appDb, "org_a", (tx) =>
       createConnection(
         tx,

@@ -1,0 +1,12 @@
+diff --git a/build/container-runtime/auth/credential-provider.js b/build/container-runtime/auth/credential-provider.js
+--- a/build/container-runtime/auth/credential-provider.js
++++ b/build/container-runtime/auth/credential-provider.js
+@@ -15,7 +15,7 @@ class CredentialProvider {
+     }
+     runCredentialProvider(registry, providerName) {
+         return new Promise((resolve, reject) => {
+-            const sink = (0, child_process_1.spawn)(providerName, ["get"]);
++            const sink = (0, child_process_1.spawn)(providerName, ["get"], { windowsHide: true });
+             const chunks = [];
+             sink.stdout.on("data", (chunk) => chunks.push(chunk));
+             sink.on("error", (err) => {

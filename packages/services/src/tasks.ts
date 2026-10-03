@@ -249,6 +249,10 @@ export async function createTask(
     dueAt?: string | null
     createdBy: string
     kind?: TaskKind
+    /** Clave estable por trigger (agente): la reentrega no duplica la tarea. */
+    idempotencyKey?: string | null
+    /** Usuario real que crea la tarea; nulo cuando es el agente. */
+    actorUserId?: string | null
   },
 ): Promise<TaskItem> {
   const title = input.title.trim()
@@ -261,27 +265,55 @@ export async function createTask(
     throw validation("El seguimiento comercial exige opportunityId")
   }
   const dueAt = cleanDueAt(input.dueAt) ?? null
+  const idemKey = input.idempotencyKey?.trim() ? input.idempotencyKey.trim().slice(0, 120) : null
   const assignee = await resolveTaskAssignee(tx, orgId, input.assigneeUserId)
   const links = await resolveTaskContact(tx, orgId, {
     contactId: input.contactId ?? null,
     conversationId: input.conversationId ?? null,
     opportunityId: input.opportunityId ?? null,
   })
-  const [created] = await tx
-    .insert(crmTask)
-    .values({
-      organizationId: orgId,
-      title,
-      contactId: links.contactId,
-      conversationId: links.conversationId,
-      opportunityId: links.opportunityId,
-      assigneeUserId: assignee ?? null,
-      dueAt,
-      kind,
-      createdBy: input.createdBy,
-    })
-    .returning()
-  if (!created) throw new Error("No se pudo crear la tarea")
+  const values = {
+    organizationId: orgId,
+    title,
+    contactId: links.contactId,
+    conversationId: links.conversationId,
+    opportunityId: links.opportunityId,
+    assigneeUserId: assignee ?? null,
+    dueAt,
+    kind,
+    createdBy: input.createdBy,
+    idempotencyKey: idemKey,
+  }
+  // El índice único es parcial (solo claves no nulas): el upsert aplica solo
+  // cuando el llamador trae clave estable (agente); el resto inserta directo.
+  const [created] = idemKey
+    ? await tx
+        .insert(crmTask)
+        .values(values)
+        .onConflictDoNothing({
+          target: [crmTask.organizationId, crmTask.idempotencyKey],
+          where: sql`"idempotency_key" is not null`,
+        })
+        .returning()
+    : await tx.insert(crmTask).values(values).returning()
+  if (!created) {
+    // Reentrega del mismo trigger: devuelve la tarea ya creada, sin duplicar.
+    const [existing] = await tx
+      .select()
+      .from(crmTask)
+      .where(and(eq(crmTask.organizationId, orgId), eq(crmTask.idempotencyKey, idemKey ?? "")))
+      .limit(1)
+    if (!existing) throw new Error("Conflicto de idempotencia sin tarea existente")
+    return withNames(tx, orgId, existing)
+  }
+  await tx.insert(auditEvent).values({
+    organizationId: orgId,
+    actorUserId: input.actorUserId ?? null,
+    action: "task.created",
+    entity: "task",
+    entityId: created.id,
+    metadata: { createdBy: input.createdBy, kind, title },
+  })
   await notify(tx, { orgId, kind: "task.updated", at: new Date().toISOString() })
   return withNames(tx, orgId, created)
 }

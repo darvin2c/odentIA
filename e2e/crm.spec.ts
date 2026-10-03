@@ -148,6 +148,52 @@ test("crm agente: responde al segundo inbound y el operador toma el hilo", async
   await expect(page.getByText("Te ayudo por aquí mismo").first()).toBeVisible()
 })
 
+test("crm derivación: recepción ve plazo y toma un caso de la cola", async ({
+  owner,
+  nextEventId,
+}) => {
+  const { page, org } = owner
+  const tg = await createTelegramConnection(page, org.slug)
+  const tgUser = nextEventId()
+  expect(
+    await simulateTelegramInbound(page, API, tg.id, tg.webhookSecret, {
+      fromId: tgUser,
+      chatId: tgUser,
+      text: "Necesito hablar con recepción",
+      updateId: nextEventId(),
+    }),
+  ).toBe(200)
+  const conversation = await waitForConversation(page, org.slug, tg.id)
+  const handoff = await call<{
+    id: string
+    assigneeUserId: string | null
+    dueAt: string | null
+  }>(page, "POST", "/api/agent/handoffs", org.slug, {
+    conversationId: conversation.id,
+    reason: "El interlocutor pidió atención humana",
+    summary: "Solicita que recepción continúe el caso.",
+    priority: "alta",
+  }, 201)
+  expect(handoff.assigneeUserId).toBeNull()
+  expect(handoff.dueAt).toBeTruthy()
+
+  await gotoHydrated(page, tenant(org.slug, "/agent/approvals"))
+  const queueItem = page.getByRole("listitem").filter({ hasText: "El interlocutor pidió atención humana" })
+  await expect(queueItem).toContainText("En cola por recoger")
+  await expect(queueItem).toContainText("vence")
+  await queueItem.getByRole("button", { name: "Tomar caso" }).click()
+  await expect(queueItem).toContainText("Responsable asignado")
+  await expect(queueItem.getByRole("button", { name: "Tomar caso" })).toHaveCount(0)
+
+  const persisted = await call<Array<{ id: string; assigneeUserId: string | null }>>(
+    page,
+    "GET",
+    `/api/agent/handoffs?conversationId=${conversation.id}`,
+    org.slug,
+  )
+  expect(persisted.find(item => item.id === handoff.id)?.assigneeUserId).toBeTruthy()
+})
+
 test("crm pipeline: mover una oportunidad no mueve las otras de la misma persona", async ({
   owner,
   nextEventId,

@@ -224,6 +224,22 @@ function AgentPage() {
           </dl>
         </div>
         <PolicySection />
+        <div className="flex flex-col gap-3 rounded-sm bg-card p-6">
+          <div className="font-heading text-base font-medium">Escrituras directas del agente</div>
+          <p className="text-sm text-muted-foreground">
+            Estas acciones escriben al momento, sin confirmación ni aprobación: son de bajo riesgo y
+            reversibles desde la ficha del contacto. Quedan auditadas con origen «agente» y su
+            repetición no duplica efectos.
+          </p>
+          <ul className="flex flex-col gap-2 text-sm">
+            {DIRECT_WRITES.map((item) => (
+              <li key={item.name}>
+                <span className="font-medium">{item.name}</span>
+                <span className="text-muted-foreground"> — {item.scope}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
       </MasterDetail>
 
       {/* Un solo contenedor montado a la vez: montar panel y drawer juntos
@@ -236,6 +252,21 @@ function AgentPage() {
     </div>
   )
 }
+
+const DIRECT_WRITES = [
+  {
+    name: "add_tags",
+    scope: "agrega etiquetas al contacto de la conversación (máx. 10 por llamada, 40 caracteres); nunca las quita ni toca a otro contacto.",
+  },
+  {
+    name: "update_contact",
+    scope: "actualiza nombre visible y campos personalizados del contacto de la conversación; no cambia teléfono, email ni estado.",
+  },
+  {
+    name: "create_task",
+    scope: "crea una tarea de seguimiento (título de 200 caracteres, con vencimiento opcional) vinculada al contacto y la conversación.",
+  },
+] as const
 
 const POLICY_ACTIONS = [
   { key: "reservar_cita", label: "Reservar cita" },

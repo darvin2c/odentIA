@@ -11,12 +11,15 @@ import {
   getClinicInfoSnapshot,
   getContact,
   listContactChannelHistory,
+  formatZoned,
+  getOrgLocale,
   listMessages,
   listContactNotes,
   listOpportunities,
   listPublishedForPrompt,
 } from "@odentia/services"
 import { type AgentToolCtx, makeAgentTools, performHandoff } from "./tools.js"
+import type { OrgLocale } from "@odentia/services"
 
 function isSystemMessage(msg: BaseMessage): boolean {
   if (msg instanceof SystemMessage) return true
@@ -42,16 +45,19 @@ const AgentState = Annotation.Root({
 })
 
 
-const BASE_SYSTEM_PROMPT = [
-  "Eres el asistente virtual de una clínica dental en Perú.",
-  "Hablas español, tono cercano y profesional.",
-  "Respondes, cualificas al paciente y ayudas con información general y citas.",
-  "NO das diagnósticos ni inventas precios, sedes o disponibilidad: usa ver_sedes_y_servicios, consultar_conocimiento y buscar_huecos.",
-  "Antes de buscar huecos confirma la sede real con ver_sedes_y_servicios y usa su ID exacto; reserva con proponer_cita usando los IDs exactos del hueco elegido (sede, sillón, profesional, inicio).",
-  "Nunca reveles ni pidas historia clínica: solo filiación mínima con ver_contexto_paciente y vínculo verificado; próximas citas, presupuestos y saldo solo con ver_resumen_paciente y según la facultad del interlocutor.",
-  "Las citas se proponen con proponer_cita y se ejecutan solo con confirmación o aprobación según la política.",
-  "Si el paciente pide hablar con un humano, se queja o el caso es clínico, usa request_human_handoff con motivo, resumen factual y prioridad.",
-].join("\n")
+function baseSystemPrompt(zone: OrgLocale): string {
+  return [
+    `Eres el asistente virtual de una clínica dental (país ${zone.countryCode}).`,
+    `Te comunicas en el idioma configurado por la organización (${zone.locale}), tono cercano y profesional.`,
+    `La zona horaria de la clínica es ${zone.timezone}; comunica fechas y horas en la zona de la sede de cada cita.`,
+    "Respondes, cualificas al paciente y ayudas con información general y citas.",
+    "NO das diagnósticos ni inventas precios, sedes o disponibilidad: usa ver_sedes_y_servicios, consultar_conocimiento y buscar_huecos.",
+    "Antes de buscar huecos confirma la sede real con ver_sedes_y_servicios y usa su ID exacto; reserva con proponer_cita usando los IDs exactos del hueco elegido (sede, sillón, profesional, inicio).",
+    "Nunca reveles ni pidas historia clínica: solo filiación mínima con ver_contexto_paciente y vínculo verificado; próximas citas, presupuestos y saldo solo con ver_resumen_paciente y según la facultad del interlocutor.",
+    "Las citas se reservan con proponer_cita y se cambian o cancelan con reprogramar_cita y cancelar_cita (id y versión exactos de ver_resumen_paciente); todo se ejecuta solo con confirmación o aprobación según la política.",
+    "Si el paciente pide hablar con un humano, se queja o el caso es clínico, usa request_human_handoff con motivo, resumen factual y prioridad.",
+  ].join("\n")
+}
 
 /**
  * Acumula tokens solo si el proveedor los reporta en usage_metadata (los
@@ -112,6 +118,7 @@ export function compileAgentGraph(
   const toolNode = new ToolNode(tools)
 
   async function loadContext(): Promise<{ messages: BaseMessage[] }> {
+    const zone = await withOrgContext(toolCtx.db, toolCtx.orgId, (tx) => getOrgLocale(tx, toolCtx.orgId))
     const full = await withOrgContext(toolCtx.db, toolCtx.orgId, (tx) =>
       getContact(tx, toolCtx.orgId, toolCtx.contactId),
     )
@@ -133,7 +140,7 @@ export function compileAgentGraph(
       } else {
         for (const o of items) {
           const followup = o.nextActionAt
-            ? `; próxima acción ${new Date(o.nextActionAt).toLocaleString("es-PE")}`
+            ? `; próxima acción ${formatZoned(new Date(o.nextActionAt), zone)}`
             : ""
           const amount =
             o.amountCents !== null ? `; valor ${(o.amountCents / 100).toFixed(2)} ${o.currency}` : ""
@@ -148,7 +155,7 @@ export function compileAgentGraph(
     const followupLine = full.openTasks.length
       ? full.openTasks
           .slice(0, 10)
-          .map((t) => `${t.title}${t.dueAt ? ` (vence ${new Date(t.dueAt).toLocaleString("es-PE")})` : ""}`)
+          .map((t) => `${t.title}${t.dueAt ? ` (vence ${formatZoned(new Date(t.dueAt), zone)})` : ""}`)
           .join("; ") + (full.openTasks.length > 10 ? "; hay más tareas: usa listar_tareas para verlas todas" : "")
       : "sin seguimientos pendientes"
     const tagsLine = contactDetail.tags.length ? contactDetail.tags.join(", ") : "sin etiquetas"
@@ -176,7 +183,7 @@ export function compileAgentGraph(
       ? [
           "Historial de otros canales del mismo contacto (procedencia indicada; no pidas de nuevo lo ya conversado ni lo presentes como de este canal):",
           ...cross.items.map((c) => {
-            const when = c.lastMessageAt ? new Date(c.lastMessageAt).toLocaleString("es-PE") : "sin fecha"
+            const when = c.lastMessageAt ? formatZoned(new Date(c.lastMessageAt), zone) : "sin fecha"
             const lines = c.messages.map((m) => {
               const who = m.direction === "in" ? "contacto" : m.senderKind === "agent" ? "agente" : "operador"
               return `  ${who}: ${(m.body ?? "[adjunto]").slice(0, 300)}`
@@ -207,7 +214,8 @@ export function compileAgentGraph(
       },
     )
     const system = [
-      BASE_SYSTEM_PROMPT,
+      baseSystemPrompt(zone),
+      `Fecha y hora actual de la clínica: ${formatZoned(new Date(), zone)}.`,
       orgPrompt,
       `Interlocutor: ${contactDetail.displayName}. Etiquetas: ${tagsLine}. Oportunidades abiertas: ${commercialLine}. Seguimientos: ${followupLine}.`,
       notesLine ? `Notas del contacto (internas): ${notesLine}${(contactDetail.notes?.trim().length ?? 0) > 500 ? "… (texto completo en leer_contexto_comercial)" : ""}.` : null,

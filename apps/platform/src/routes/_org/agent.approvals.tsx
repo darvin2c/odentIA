@@ -101,7 +101,12 @@ function AgentApprovalsPage() {
     },
     onSuccess: settleProposal,
   })
-  const mutationError = decideMutation.error ?? executeMutation.error ?? confirmMutation.error
+  const claimMutation = useMutation({
+    mutationFn: (handoffId: string) =>
+      apiFetch<{ data: AgentHandoff }>(`/api/agent/handoffs/${handoffId}/claim`, { method: "POST" }),
+    onSuccess: invalidate,
+  })
+  const mutationError = decideMutation.error ?? executeMutation.error ?? confirmMutation.error ?? claimMutation.error
   const proposals = proposalsQuery.data?.data ?? []
   const handoffs = handoffsQuery.data?.data ?? []
 
@@ -158,8 +163,68 @@ function AgentApprovalsPage() {
           </li>
         })}</ul>
       </>}
-      <section className="rounded-md bg-card p-5"><h2 className="font-medium">Derivaciones recientes</h2>
-        {handoffsQuery.isPending ? <LoadingState /> : handoffsQuery.isError ? <div role="alert"><p>No pudimos cargar las derivaciones.</p><Button variant="outline" onClick={() => void handoffsQuery.refetch()}>Volver a intentar</Button></div> : handoffs.length === 0 ? <p className="mt-2 text-sm text-muted-foreground">Sin derivaciones para estos casos.</p> : <ul className="mt-3 flex flex-col gap-4">{handoffs.map(handoff => <li key={handoff.id} className="flex flex-col gap-1 text-sm"><div className="flex flex-wrap gap-2"><Badge variant={handoff.priority === "alta" ? "destructive" : "secondary"}>{handoff.priority}</Badge><strong>{handoff.contactName ?? "Interlocutor no disponible"}{handoff.channel ? ` · ${channelLabel(handoff.channel)}` : ""}</strong></div><p>{handoff.reason}</p><p className="whitespace-pre-wrap text-muted-foreground">{handoff.summary}</p>{handoff.conversationId && <Link to="/inbox" search={{ conversation: handoff.conversationId }} className="text-primary underline">Atender conversación</Link>}{handoff.taskId && <Link to="/tasks" search={{ task: handoff.taskId }} className="text-primary underline">Abrir pendiente asignado</Link>}</li>)}</ul>}
+      <section className="rounded-md bg-card p-5">
+        <h2 className="font-medium">Derivaciones recientes</h2>
+        {handoffsQuery.isPending ? (
+          <LoadingState />
+        ) : handoffsQuery.isError ? (
+          <div role="alert">
+            <p>No pudimos cargar las derivaciones.</p>
+            <Button variant="outline" onClick={() => void handoffsQuery.refetch()}>
+              Volver a intentar
+            </Button>
+          </div>
+        ) : handoffs.length === 0 ? (
+          <p className="mt-2 text-sm text-muted-foreground">Sin derivaciones para estos casos.</p>
+        ) : (
+          <ul className="mt-3 flex flex-col gap-4">
+            {handoffs.map((handoff) => (
+              <li key={handoff.id} className="flex flex-col gap-1 text-sm">
+                <div className="flex flex-wrap gap-2">
+                  <Badge variant={handoff.priority === "alta" ? "destructive" : "secondary"}>
+                    {handoff.priority}
+                  </Badge>
+                  <strong>
+                    {handoff.contactName ?? "Interlocutor no disponible"}
+                    {handoff.channel ? ` · ${channelLabel(handoff.channel)}` : ""}
+                  </strong>
+                </div>
+                <p>{handoff.reason}</p>
+                <p className="whitespace-pre-wrap text-muted-foreground">{handoff.summary}</p>
+                <p className="text-muted-foreground">
+                  {handoff.assigneeUserId ? "Responsable asignado" : "En cola por recoger"}
+                  {handoff.dueAt ? ` · vence ${new Date(handoff.dueAt).toLocaleString("es-PE")}` : ""}
+                </p>
+                <div className="flex flex-wrap items-center gap-3">
+                  {handoff.conversationId ? (
+                    <Link
+                      to="/inbox"
+                      search={{ conversation: handoff.conversationId }}
+                      className="text-primary underline"
+                    >
+                      Atender conversación
+                    </Link>
+                  ) : null}
+                  {handoff.taskId ? (
+                    <Link to="/tasks" search={{ task: handoff.taskId }} className="text-primary underline">
+                      Abrir pendiente
+                    </Link>
+                  ) : null}
+                  {!handoff.assigneeUserId ? (
+                    <SubmitButton
+                      size="sm"
+                      variant="outline"
+                      pending={claimMutation.isPending}
+                      onClick={() => claimMutation.mutate(handoff.id)}
+                    >
+                      Tomar caso
+                    </SubmitButton>
+                  ) : null}
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
       </section>
       <ConfirmDialog open={confirm !== null} title="Aprobar y ejecutar el cambio" description={confirm ? `${confirm.context.contactName ?? "Interlocutor"}: ${confirm.context.afterSummary}` : ""} confirmLabel="Aprobar y ejecutar" variant="default" pending={decideMutation.isPending} onClose={() => { if (!decideMutation.isPending) setConfirm(null) }} onConfirm={() => confirm && decideMutation.mutate({ id: confirm.id, decision: "aprobada" })} />
     </>}

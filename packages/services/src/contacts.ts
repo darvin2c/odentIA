@@ -541,7 +541,7 @@ export async function updateContact(
     assignedUserId?: string | null
     customFields?: Record<string, unknown>
   },
-  actor?: { userId: string | null },
+  actor?: { userId: string | null; origin?: "agent" },
 ): Promise<ContactDetail> {
   const { isActive, ...fields } = input
   await requireContact(tx, orgId, id)
@@ -583,7 +583,10 @@ export async function updateContact(
       .update(contact)
       .set(patch)
       .where(and(eq(contact.id, id), eq(contact.organizationId, orgId)))
-    await auditContact(tx, orgId, actor, "contact.updated", id, { fields: changed })
+    await auditContact(tx, orgId, actor, "contact.updated", id, {
+      fields: changed,
+      ...(actor?.origin ? { origin: actor.origin } : {}),
+    })
     await notifyCrm(tx, orgId, "contact.updated")
   } else if (isActive !== undefined) {
     await notifyCrm(tx, orgId, "contact.updated")

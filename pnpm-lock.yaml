@@ -8,6 +8,9 @@ patchedDependencies:
   portless@0.15.6:
     hash: bgglgc2fmr3oly7oxjypn3jzka
     path: patches/portless@0.15.6.patch
+  testcontainers@12.1.0:
+    hash: f5kmca7lyl5dyed43ncv5o3kpq
+    path: patches/testcontainers@12.1.0.patch
 
 importers:
 
@@ -76,7 +79,7 @@ importers:
         version: 22.20.2
       testcontainers:
         specifier: 12.1.0
-        version: 12.1.0
+        version: 12.1.0(patch_hash=f5kmca7lyl5dyed43ncv5o3kpq)
       tsx:
         specifier: 4.23.13
         version: 4.23.13
@@ -295,7 +298,7 @@ importers:
         version: 22.20.2
       testcontainers:
         specifier: 12.1.0
-        version: 12.1.0
+        version: 12.1.0(patch_hash=f5kmca7lyl5dyed43ncv5o3kpq)
       tsx:
         specifier: 4.23.13
         version: 4.23.13
@@ -331,7 +334,7 @@ importers:
         version: 3.4.9
       testcontainers:
         specifier: 12.1.0
-        version: 12.1.0
+        version: 12.1.0(patch_hash=f5kmca7lyl5dyed43ncv5o3kpq)
       tsx:
         specifier: 4.23.13
         version: 4.23.13
@@ -377,7 +380,7 @@ importers:
         version: 22.20.2
       testcontainers:
         specifier: 12.1.0
-        version: 12.1.0
+        version: 12.1.0(patch_hash=f5kmca7lyl5dyed43ncv5o3kpq)
       tsx:
         specifier: 4.23.13
         version: 4.23.13
@@ -464,7 +467,7 @@ importers:
         version: 0.31.10
       testcontainers:
         specifier: 12.1.0
-        version: 12.1.0
+        version: 12.1.0(patch_hash=f5kmca7lyl5dyed43ncv5o3kpq)
       tsx:
         specifier: 4.23.13
         version: 4.23.13
@@ -535,7 +538,7 @@ importers:
         version: 1.7.4(@prisma/client@5.22.0)(@tanstack/react-start@1.168.52(esbuild@0.28.2)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(rolldown@1.2.8)(rollup@4.63.1)(vite@8.3.0(@types/node@22.20.2)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.13)(yaml@2.9.1)))(better-sqlite3@12.11.1)(drizzle-kit@0.31.10)(drizzle-orm@0.45.2(@prisma/client@5.22.0)(@types/pg@8.23.1)(better-sqlite3@12.11.1)(kysely@0.29.5)(pg@8.23.0)(postgres@3.4.9))(pg@8.23.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(vitest@3.2.7(@types/debug@4.1.13)(@types/node@22.20.2)(jiti@2.7.0)(jsdom@30.0.1(@noble/hashes@2.4.0))(lightningcss@1.33.0)(tsx@4.23.13)(yaml@2.9.1))
       testcontainers:
         specifier: 12.1.0
-        version: 12.1.0
+        version: 12.1.0(patch_hash=f5kmca7lyl5dyed43ncv5o3kpq)
       tsx:
         specifier: 4.23.13
         version: 4.23.13
@@ -9122,7 +9125,7 @@ snapshots:
 
   '@testcontainers/postgresql@12.1.0':
     dependencies:
-      testcontainers: 12.1.0
+      testcontainers: 12.1.0(patch_hash=f5kmca7lyl5dyed43ncv5o3kpq)
     transitivePeerDependencies:
       - bare-abort-controller
       - bare-buffer
@@ -12119,7 +12122,7 @@ snapshots:
       - bare-abort-controller
       - react-native-b4a
 
-  testcontainers@12.1.0:
+  testcontainers@12.1.0(patch_hash=f5kmca7lyl5dyed43ncv5o3kpq):
     dependencies:
       '@balena/dockerignore': 1.0.2
       '@types/dockerode': 4.0.1
