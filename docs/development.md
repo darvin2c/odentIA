@@ -39,7 +39,7 @@ Infra definida en `infra/dev/compose.yaml`: PostgreSQL :5432, MinIO :9000/:9001 
 
 - `CHANNEL_VALIDATE_EXTERNAL=false` en dev/e2e evita contactar Meta/Telegram al crear conexiones.
 - Portless `already registered by PID 0`: comprobar entradas muertas de `~/.portless/routes.json` antes de retirarlas. Colisiones de puertos API/panel: reiniciar el stack para reasignar.
-- Portless 0.15.6 está fijado y parcheado en `patches/portless@0.15.6.patch`: `PORTLESS_HTTP_REDIRECT=0` evita puerto 80 en E2E; configuración OpenSSL mínima evita `basicConstraints` duplicado en la CA.
+- Portless 0.15.6 está fijado y parcheado en `patches/portless@0.15.6.patch`: `PORTLESS_HTTP_REDIRECT=0` evita puerto 80 en E2E; configuración OpenSSL mínima evita `basicConstraints` duplicado en la CA; sus procesos OpenSSL se crean ocultos para que la generación dinámica de certificados no abra ventanas de Terminal en Windows.
 - Ante TLS `unable to verify the first certificate`, inspeccionar CA del state dir afectado. Si es inválida, regenerar sus `ca*.pem`, `server*.pem` y `host-certs/` reiniciando solo ese proxy; no desactivar validación TLS ni modificar confianza global como solución.
 - `scripts/local-network.mjs` resuelve `.localhost` a loopback con Undici en dev/previews SSR. No pertenece al bundle productivo ni cambia hosts/DNS global.
 - Si loopback Windows no entrega saludo SMTP pero HTTP funciona, comprobar conectividad a la máquina Podman antes de usar su IP con `TESTCONTAINERS_HOST_OVERRIDE`; no omitir readiness.
