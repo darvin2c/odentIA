@@ -67,6 +67,7 @@ import { auditEvent, branch, orgProfile, patientRegistrationConfig } from "@oden
 import { hashPassword } from "better-auth/crypto"
 import { and, eq, inArray, or, sql } from "drizzle-orm"
 import { upsertAgentConfig } from "./agentConfig.js"
+import { createHandoff } from "./agent-operations.js"
 import { createAppointment, createChair } from "./appointments.js"
 import { createBudget, decideBudget, presentBudget, reviseBudget } from "./budgets.js"
 import {
@@ -962,6 +963,23 @@ await upsertAgentConfig(db, ORG_A, {
   systemPrompt: "Eres el asistente de Dental Smile. Responde en español, tono amable.",
   handoffKeywords: ["humano", "asesor", "recepcion"],
   maxTurns: 10,
+})
+
+// --- Derivaciones del agente: cola con plazo visible y caso ya tomado ---
+await createHandoff(db, ORG_A, null, {
+  conversationId: convCarlos.id,
+  reason: "Pregunta por precio de extracción y pide hablar con una persona",
+  summary: "Carlos consultó el costo de una extracción de muela del juicio; el agente no da precios inventados y derivó con prioridad alta.",
+  priority: "alta",
+  createdBy: "agent",
+})
+await createHandoff(db, ORG_A, null, {
+  conversationId: convJorge.id,
+  reason: "El interlocutor se mostró molesto por la espera",
+  summary: "Jorge reportó demora en la atención anterior; se derivó a recepción para seguimiento.",
+  priority: "media",
+  assigneeUserId: LUIS_ID,
+  createdBy: "agent",
 })
 
 // --- Pacientes + clínica (org A) ---

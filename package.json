@@ -28,7 +28,8 @@
   },
   "pnpm": {
     "patchedDependencies": {
-      "portless@0.15.6": "patches/portless@0.15.6.patch"
+      "portless@0.15.6": "patches/portless@0.15.6.patch",
+      "testcontainers@12.1.0": "patches/testcontainers@12.1.0.patch"
     }
   }
 }

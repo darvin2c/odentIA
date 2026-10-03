@@ -18,7 +18,7 @@ import {
   type ProposalStatus,
 } from "@odentia/db/schema/agent"
 import { member, user } from "@odentia/db/schema/auth"
-import { channelConnection, contact, conversation, pipelineStage } from "@odentia/db/schema/crm"
+import { channelConnection, contact, conversation, crmTask, pipelineStage } from "@odentia/db/schema/crm"
 import { patient, patientResponsibility, treatmentBudget } from "@odentia/db/schema/clinical"
 import { appointment } from "@odentia/db/schema/agenda"
 import { opportunity } from "@odentia/db/schema/opportunities"
@@ -41,10 +41,11 @@ import {
 } from "./opportunities.js"
 import { listPatientsByContact, requirePatient } from "./patients.js"
 import { requireLinkedActiveContact } from "./responsibilities.js"
-import { createTask } from "./tasks.js"
+import { createTask, updateTask } from "./tasks.js"
 import { createWorkspaceNotification } from "./workspace.js"
 import { auditEvent, branch } from "@odentia/db/schema/org"
 import { getPatientBalanceForPortal } from "./finance.js"
+import { formatZoned, getOrgLocale, type OrgLocale } from "./locale.js"
 
 /** Plazo de confirmación por el interlocutor antes de expirar la propuesta. */
 const CONFIRM_TTL_HOURS = 48
@@ -88,30 +89,6 @@ async function expireProposalById(tx: Db, orgId: string, id: string): Promise<vo
 /** Aviso en vivo para el stream del home (`org_events`): solo `{ orgId, kind, at }`, sin datos clínicos. */
 async function notify(tx: Db, payload: { orgId: string; kind: string; at: string }): Promise<void> {
   await tx.execute(sql`select pg_notify('org_events', ${JSON.stringify(payload)})`)
-}
-
-/**
- * Resumen corto del payload para las tarjetas del home.
- * Misma lógica que `payloadSummary` del frontend de aprobaciones.
- */
-export function proposalPayloadSummary(payload: Record<string, unknown>): string {
-  const parts: string[] = []
-  if (typeof payload["startsAt"] === "string") {
-    const date = new Date(payload["startsAt"])
-    if (!Number.isNaN(date.getTime())) parts.push(date.toLocaleString("es-PE"))
-  }
-  if (typeof payload["appointmentId"] === "string") parts.push(`cita ${String(payload["appointmentId"]).slice(0, 8)}…`)
-  if (typeof payload["opportunityId"] === "string") parts.push(`oportunidad ${String(payload["opportunityId"]).slice(0, 8)}…`)
-  if (typeof payload["text"] === "string" && payload["text"].trim()) {
-    parts.push(payload["text"].trim().slice(0, 80))
-  }
-  if (typeof payload["name"] === "string" && payload["name"].trim()) {
-    parts.push(`plantilla ${payload["name"].trim()}`)
-  }
-  if (typeof payload["title"] === "string" && payload["title"].trim()) {
-    parts.push(payload["title"].trim().slice(0, 80))
-  }
-  return parts.join(" · ")
 }
 
 function assertAction(action: string): asserts action is ProposalAction {
@@ -311,10 +288,13 @@ export async function listAgentContextCandidates(tx: Db, orgId: string, contactI
 export interface AgentPatientSummary {
   context: AgentPatientContext
   upcomingAppointments: Array<{
+    appointmentId: string
+    version: number
     startsAt: string
     endsAt: string
     status: string
     branchName: string
+    branchTimezone: string | null
     dentistName: string
   }>
   budgets: Array<{ number: number; title: string; status: string }>
@@ -339,10 +319,13 @@ export async function getAgentPatientSummary(
   const now = new Date()
   const appointments = await tx
     .select({
+      appointmentId: appointment.id,
+      version: appointment.version,
       startsAt: appointment.startsAt,
       endsAt: appointment.endsAt,
       status: appointment.status,
       branchName: branch.name,
+      branchTimezone: branch.timezone,
       dentistName: user.name,
     })
     .from(appointment)
@@ -380,10 +363,13 @@ export async function getAgentPatientSummary(
   return {
     context,
     upcomingAppointments: appointments.map((a) => ({
+      appointmentId: a.appointmentId,
+      version: a.version,
       startsAt: a.startsAt.toISOString(),
       endsAt: a.endsAt.toISOString(),
       status: a.status,
       branchName: a.branchName,
+      branchTimezone: a.branchTimezone,
       dentistName: a.dentistName,
     })),
     budgets: budgetRows,
@@ -547,14 +533,14 @@ function payloadText(value: unknown, max = 140): string | null {
   return text.length > max ? `${text.slice(0, max)}…` : text
 }
 
-function payloadDate(value: unknown): string | null {
+function payloadDate(value: unknown, zone: Pick<OrgLocale, "timezone" | "locale">): string | null {
   if (value instanceof Date) {
-    return Number.isNaN(value.getTime()) ? null : value.toLocaleString("es-PE")
+    return Number.isNaN(value.getTime()) ? null : formatZoned(value, zone)
   }
   if (typeof value !== "string" || !value) return null
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return null
-  return date.toLocaleString("es-PE")
+  return formatZoned(date, zone)
 }
 
 function isUuid(value: unknown): value is string {
@@ -594,7 +580,12 @@ async function contactOpportunityOrNull(tx: Db, orgId: string, contactId: string
  * Cambio previsto del acto a partir del payload (intención, sin leer estado
  * previo: sirve al crear y como fallback del legado). Nunca nulo.
  */
-async function summarizeAfter(tx: Db, action: ProposalAction, payload: Record<string, unknown>): Promise<string> {
+async function summarizeAfter(
+  tx: Db,
+  action: ProposalAction,
+  payload: Record<string, unknown>,
+  zone: Pick<OrgLocale, "timezone" | "locale">,
+): Promise<string> {
   const label = PROPOSAL_ACTION_LABEL[action]
   if (action === "enviar_mensaje") {
     const text = payload["kind"] === "text" || payload["text"] ? payloadText(payload["text"]) : null
@@ -611,7 +602,7 @@ async function summarizeAfter(tx: Db, action: ProposalAction, payload: Record<st
     return title ? `Nueva oportunidad: ${title}` : label
   }
   if (action === "actualizar_seguimiento") {
-    const line = [payloadText(payload["nextActionNote"]), payloadDate(payload["nextActionAt"])]
+    const line = [payloadText(payload["nextActionNote"]), payloadDate(payload["nextActionAt"], zone)]
       .filter(Boolean)
       .join(" · ")
     return line ? `Nuevo seguimiento: ${line}` : label
@@ -621,7 +612,7 @@ async function summarizeAfter(tx: Db, action: ProposalAction, payload: Record<st
     const reasonText = payloadText(payload["reason"], 80)
     return outcome ? `${outcome}${reasonText ? `: ${reasonText}` : ""}` : label
   }
-  const startsAt = payloadDate(payload["startsAt"])
+  const startsAt = payloadDate(payload["startsAt"], zone)
   const appointmentId = typeof payload["appointmentId"] === "string" ? payload["appointmentId"].slice(0, 8) : null
   const line = [startsAt, appointmentId ? `cita ${appointmentId}…` : null].filter(Boolean).join(" · ")
   return line || label
@@ -637,6 +628,7 @@ async function summarizeBefore(
   action: ProposalAction,
   payload: Record<string, unknown>,
   contactId: string,
+  zone: Pick<OrgLocale, "timezone" | "locale">,
 ): Promise<string | null> {
   if (action !== "mover_oportunidad" && action !== "actualizar_seguimiento" && action !== "cerrar_oportunidad") {
     return null
@@ -649,7 +641,7 @@ async function summarizeBefore(
     if (!name) return null
     return action === "mover_oportunidad" ? `Etapa actual: ${name}` : `Abierta en etapa: ${name}`
   }
-  const line = [payloadText(opp.nextActionNote), payloadDate(opp.nextActionAt)].filter(Boolean).join(" · ")
+  const line = [payloadText(opp.nextActionNote), payloadDate(opp.nextActionAt, zone)].filter(Boolean).join(" · ")
   return line ? `Seguimiento actual: ${line}` : null
 }
 
@@ -765,10 +757,11 @@ function oppCurrentSummary(
   action: ProposalAction,
   live: LiveOppState | null,
   stageName: string | null,
+  zone: Pick<OrgLocale, "timezone" | "locale">,
 ): string | null {
   if (!live) return "La oportunidad ya no está disponible"
   if (action === "actualizar_seguimiento") {
-    const line = [payloadText(live.nextActionNote), payloadDate(live.nextActionAt)].filter(Boolean).join(" · ")
+    const line = [payloadText(live.nextActionNote), payloadDate(live.nextActionAt, zone)].filter(Boolean).join(" · ")
     return line ? `Seguimiento actual: ${line}` : "Sin seguimiento programado"
   }
   const stage = stageName ?? `etapa ${live.stageId.slice(0, 8)}…`
@@ -780,8 +773,9 @@ function oppFreshness(
   expected: ExpectedProposalState | null,
   live: LiveOppState | null,
   stageName: string | null,
+  zone: Pick<OrgLocale, "timezone" | "locale">,
 ): { isStale: boolean; currentSummary: string | null; reason: string } {
-  const currentSummary = oppCurrentSummary(action, live, stageName)
+  const currentSummary = oppCurrentSummary(action, live, stageName, zone)
   if (!expected?.opportunityId) return { isStale: false, currentSummary, reason: "" }
   if (!live) return { isStale: true, currentSummary, reason: "la oportunidad ya no existe" }
   if (live.status !== "open") return { isStale: true, currentSummary, reason: `la oportunidad ya está ${live.status}` }
@@ -805,11 +799,12 @@ function apptFreshness(
   expected: ExpectedProposalState | null,
   payloadExpectedVersion: number | null,
   live: LiveApptState | null,
+  zone: Pick<OrgLocale, "timezone" | "locale">,
 ): { isStale: boolean; currentSummary: string | null; reason: string } {
   if (!live) {
     return { isStale: true, currentSummary: "La cita ya no está disponible", reason: "la cita ya no existe" }
   }
-  const currentSummary = `Cita actual: ${payloadDate(live.startsAt) ?? live.startsAt.toISOString()} (${live.status})`
+  const currentSummary = `Cita actual: ${payloadDate(live.startsAt, zone) ?? live.startsAt.toISOString()} (${live.status})`
   const version = expected?.appointmentVersion ?? payloadExpectedVersion
   if (version != null && live.version !== version) {
     return { isStale: true, currentSummary, reason: "la cita cambió desde la propuesta" }
@@ -828,6 +823,7 @@ function apptFreshness(
  */
 async function enrichProposals(tx: Db, orgId: string, rows: ProposalRow[]): Promise<ProposalItem[]> {
   const policy = await getAutonomyPolicy(tx, orgId)
+  const zone = await getOrgLocale(tx, orgId)
   const contactIds = new Set<string>()
   const conversationIds = new Set<string>()
   const opportunityIds = new Set<string>()
@@ -924,7 +920,7 @@ async function enrichProposals(tx: Db, orgId: string, rows: ProposalRow[]): Prom
       .map(async (row) => {
         legacyAfter.set(
           row.id,
-          await summarizeAfter(tx, row.action as ProposalAction, row.payload as Record<string, unknown>),
+          await summarizeAfter(tx, row.action as ProposalAction, row.payload as Record<string, unknown>, zone),
         )
       }),
   )
@@ -958,14 +954,14 @@ async function enrichProposals(tx: Db, orgId: string, rows: ProposalRow[]): Prom
             nextActionNote: opp.nextActionNote,
           }
         : null
-      const fresh = oppFreshness(action, expected, live, live ? (liveStageNames.get(live.stageId) ?? null) : null)
+      const fresh = oppFreshness(action, expected, live, live ? (liveStageNames.get(live.stageId) ?? null) : null, zone)
       isStale = fresh.isStale
       currentSummary = fresh.currentSummary
     } else if (action === "reprogramar_cita" || action === "cancelar_cita") {
       const apptId = payload["appointmentId"] ?? expected?.appointmentId
       const live = typeof apptId === "string" ? apptById.get(apptId) : undefined
       const payloadVersion = typeof payload["expectedVersion"] === "number" ? (payload["expectedVersion"] as number) : null
-      const fresh = apptFreshness(expected, payloadVersion, live ?? null)
+      const fresh = apptFreshness(expected, payloadVersion, live ?? null, zone)
       isStale = fresh.isStale
       currentSummary = fresh.currentSummary
     }
@@ -1224,10 +1220,11 @@ export async function createProposal(
   // Evidencia de lo aprobado: se congela al crear (tras validar el payload)
   // y ningún camino posterior la reescribe. El estado vivo esperado sirve al
   // control de obsolescencia al ejecutar (no pisa decisiones humanas).
+  const zone = await getOrgLocale(tx, orgId)
   const beforeSnapshot = conv.contactId
-    ? await summarizeBefore(tx, orgId, input.action, input.payload, conv.contactId)
+    ? await summarizeBefore(tx, orgId, input.action, input.payload, conv.contactId, zone)
     : null
-  const afterSnapshot = await summarizeAfter(tx, input.action, input.payload)
+  const afterSnapshot = await summarizeAfter(tx, input.action, input.payload, zone)
   const expectedSnapshot = conv.contactId
     ? await captureExpectedState(tx, orgId, input.action, input.payload, conv.contactId)
     : null
@@ -1587,6 +1584,7 @@ export async function executeProposal(
   const action = locked.action as ProposalAction
   const payload = locked.payload
   const expected = expectedOf(locked)
+  const zone = await getOrgLocale(tx, orgId)
   // Solo un userId real va a las auditorías de negocio; el resto de la
   // autoridad (agent/contact/staff) queda en decidedBy y en el audit del acto.
   const teamUserId = /^[0-9a-f-]{36}$/i.test(actorUserId) ? actorUserId : null
@@ -1632,13 +1630,14 @@ export async function executeProposal(
       if (!expected?.appointmentId) {
         throw staleError(
           "la propuesta no trae evidencia de estado; pide una nueva",
-          `Cita actual: ${payloadDate(liveAppt.startsAt) ?? liveAppt.startsAt.toISOString()} (${liveAppt.status})`,
+          `Cita actual: ${payloadDate(liveAppt.startsAt, zone) ?? liveAppt.startsAt.toISOString()} (${liveAppt.status})`,
         )
       }
       const fresh = apptFreshness(
         expected,
         typeof payload["expectedVersion"] === "number" ? (payload["expectedVersion"] as number) : null,
         { version: liveAppt.version, status: liveAppt.status, startsAt: liveAppt.startsAt },
+        zone,
       )
       if (fresh.isStale) throw staleError(fresh.reason, fresh.currentSummary)
       const moved = await moveAppointment(tx, orgId, actorUserId, appointmentId, {
@@ -1664,14 +1663,14 @@ export async function executeProposal(
       if (!expected?.appointmentId) {
         throw staleError(
           "la propuesta no trae evidencia de estado; pide una nueva",
-          `Cita actual: ${payloadDate(liveAppt.startsAt) ?? liveAppt.startsAt.toISOString()} (${liveAppt.status})`,
+          `Cita actual: ${payloadDate(liveAppt.startsAt, zone) ?? liveAppt.startsAt.toISOString()} (${liveAppt.status})`,
         )
       }
       const fresh = apptFreshness(expected, null, {
         version: liveAppt.version,
         status: liveAppt.status,
         startsAt: liveAppt.startsAt,
-      })
+      }, zone)
       if (fresh.isStale) throw staleError(fresh.reason, fresh.currentSummary)
       const cancelled = await setAppointmentStatus(tx, orgId, actorUserId, appointmentId, "cancelada")
       result = { appointmentId: cancelled.id, status: cancelled.status }
@@ -1711,10 +1710,10 @@ export async function executeProposal(
       if (!expected?.opportunityId) {
         throw staleError(
           "la propuesta no trae evidencia de estado; pide una nueva",
-          oppCurrentSummary("mover_oportunidad", liveOpp, stageName),
+          oppCurrentSummary("mover_oportunidad", liveOpp, stageName, zone),
         )
       }
-      const fresh = oppFreshness("mover_oportunidad", expected, liveOpp, stageName)
+      const fresh = oppFreshness("mover_oportunidad", expected, liveOpp, stageName, zone)
       if (fresh.isStale) throw staleError(fresh.reason, fresh.currentSummary)
       const { detail } = await moveOpportunity(tx, orgId, opportunityId, payload["stageId"] as string, {
         userId: teamUserId,
@@ -1762,10 +1761,10 @@ export async function executeProposal(
       if (!expected?.opportunityId) {
         throw staleError(
           "la propuesta no trae evidencia de estado; pide una nueva",
-          oppCurrentSummary("actualizar_seguimiento", liveOpp, null),
+          oppCurrentSummary("actualizar_seguimiento", liveOpp, null, zone),
         )
       }
-      const fresh = oppFreshness("actualizar_seguimiento", expected, liveOpp, null)
+      const fresh = oppFreshness("actualizar_seguimiento", expected, liveOpp, null, zone)
       if (fresh.isStale) throw staleError(fresh.reason, fresh.currentSummary)
       const updated = await updateOpportunity(
         tx,
@@ -1796,10 +1795,10 @@ export async function executeProposal(
       if (!expected?.opportunityId) {
         throw staleError(
           "la propuesta no trae evidencia de estado; pide una nueva",
-          oppCurrentSummary("cerrar_oportunidad", liveOpp, stageName),
+          oppCurrentSummary("cerrar_oportunidad", liveOpp, stageName, zone),
         )
       }
-      const fresh = oppFreshness("cerrar_oportunidad", expected, liveOpp, stageName)
+      const fresh = oppFreshness("cerrar_oportunidad", expected, liveOpp, stageName, zone)
       if (fresh.isStale) throw staleError(fresh.reason, fresh.currentSummary)
       const closed = await closeOpportunity(
         tx,
@@ -1877,6 +1876,8 @@ export interface HandoffItem {
   priority: HandoffPriority
   assigneeUserId: string | null
   taskId: string | null
+  /** Plazo de la tarea de seguimiento según la prioridad (visible en la cola). */
+  dueAt: string | null
   createdBy: string
   createdAt: string
 }
@@ -1886,6 +1887,7 @@ type HandoffRow = typeof agentHandoff.$inferSelect
 async function enrichHandoffs(tx: Db, rows: HandoffRow[]): Promise<HandoffItem[]> {
   const contactIds = [...new Set(rows.map((r) => r.contactId).filter((v): v is string => !!v))]
   const conversationIds = [...new Set(rows.map((r) => r.conversationId).filter((v): v is string => !!v))]
+  const taskIds = [...new Set(rows.map((r) => r.taskId).filter((v): v is string => !!v))]
   const [contacts, convs] = await Promise.all([
     contactIds.length
       ? tx.select({ id: contact.id, displayName: contact.displayName }).from(contact).where(inArray(contact.id, contactIds))
@@ -1898,6 +1900,14 @@ async function enrichHandoffs(tx: Db, rows: HandoffRow[]): Promise<HandoffItem[]
       : [],
   ])
   const contactById = new Map(contacts.map((c) => [c.id, c.displayName]))
+  const dueByTask = new Map<string, Date>()
+  if (taskIds.length) {
+    const tasks = await tx
+      .select({ id: crmTask.id, dueAt: crmTask.dueAt })
+      .from(crmTask)
+      .where(inArray(crmTask.id, taskIds))
+    for (const t of tasks) if (t.dueAt) dueByTask.set(t.id, t.dueAt)
+  }
   const connectionByConv = new Map(convs.map((c) => [c.id, c.connectionId]))
   const connIds = [...new Set(connectionByConv.values())].filter((v): v is string => !!v)
   const channelByConnection = new Map<string, string>()
@@ -1921,6 +1931,7 @@ async function enrichHandoffs(tx: Db, rows: HandoffRow[]): Promise<HandoffItem[]
       priority: row.priority as HandoffPriority,
       assigneeUserId: row.assigneeUserId,
       taskId: row.taskId,
+      dueAt: row.taskId ? (dueByTask.get(row.taskId)?.toISOString() ?? null) : null,
       createdBy: row.createdBy,
       createdAt: row.createdAt.toISOString(),
     }
@@ -1977,6 +1988,12 @@ async function notifyApprovers(tx: Db, orgId: string, proposal: ProposalItem) {
 }
 
 /**
+ * Plazo de recogida/resolución de una derivación por prioridad (política
+ * explícita de recepción): vencida, avisa al responsable o escala al equipo.
+ */
+const HANDOFF_DUE_HOURS: Record<HandoffPriority, number> = { alta: 4, media: 24, baja: 72 }
+
+/**
  * Derivación con resumen factual, motivo, prioridad, responsable y tarea de
  * seguimiento. Apaga el agente en la conversación y avisa al responsable o
  * al equipo. Sin datos clínicos en el aviso.
@@ -2018,7 +2035,9 @@ export async function createHandoff(
     contactId: conv.contactId,
     conversationId: input.conversationId,
     assigneeUserId,
+    dueAt: new Date(Date.now() + HANDOFF_DUE_HOURS[priority] * 3_600_000).toISOString(),
     createdBy,
+    actorUserId,
   })
   const [row] = await tx
     .insert(agentHandoff)
@@ -2059,6 +2078,9 @@ export async function createHandoff(
 }
 
 export async function listHandoffs(tx: Db, orgId: string, input: { conversationId?: string; limit?: number } = {}): Promise<HandoffItem[]> {
+  // Escalamiento perezoso (mismo patrón que la caducidad de propuestas):
+  // la primera lectura consolida el aviso de vencidas, sin jobs ni duplicados.
+  await escalateOverdueHandoffs(tx, orgId)
   const conditions = [eq(agentHandoff.organizationId, orgId)]
   if (input.conversationId) conditions.push(eq(agentHandoff.conversationId, input.conversationId))
   const limit = input.limit === undefined ? 50 : Math.min(Math.max(input.limit, 1), 100)
@@ -2069,6 +2091,97 @@ export async function listHandoffs(tx: Db, orgId: string, input: { conversationI
     .orderBy(desc(agentHandoff.createdAt), asc(agentHandoff.id))
     .limit(limit)
   return enrichHandoffs(tx, rows)
+}
+
+/**
+ * Toma una derivación de la cola (sin responsable) de forma atómica: dos
+ * miembros no pueden tomar el mismo caso (UPDATE condicional). La tarea
+ * vinculada pasa al mismo responsable. Resolverla registra actor y resultado
+ * por la vía de tareas; no reactiva el agente implícitamente.
+ */
+export async function claimHandoff(tx: Db, orgId: string, userId: string, handoffId: string): Promise<HandoffItem> {
+  const [membership] = await tx
+    .select({ userId: member.userId })
+    .from(member)
+    .where(and(eq(member.organizationId, orgId), eq(member.userId, userId)))
+    .limit(1)
+  if (!membership) throw validation("Solo un miembro de la organización puede tomar la derivación")
+  const [claimed] = await tx
+    .update(agentHandoff)
+    .set({ assigneeUserId: userId })
+    .where(
+      and(
+        eq(agentHandoff.id, handoffId),
+        eq(agentHandoff.organizationId, orgId),
+        isNull(agentHandoff.assigneeUserId),
+      ),
+    )
+    .returning()
+  if (!claimed) {
+    const [existing] = await tx
+      .select({ assigneeUserId: agentHandoff.assigneeUserId })
+      .from(agentHandoff)
+      .where(and(eq(agentHandoff.id, handoffId), eq(agentHandoff.organizationId, orgId)))
+      .limit(1)
+    if (!existing) throw notFound("Derivación")
+    if (existing.assigneeUserId === userId) {
+      const [row] = await tx
+        .select()
+        .from(agentHandoff)
+        .where(and(eq(agentHandoff.id, handoffId), eq(agentHandoff.organizationId, orgId)))
+        .limit(1)
+      return enrichHandoff(tx, row!)
+    }
+    throw new ServiceError("HANDOFF_ALREADY_CLAIMED", 409, "Otro miembro ya tomó esta derivación")
+  }
+  if (claimed.taskId) {
+    await updateTask(tx, orgId, claimed.taskId, { assigneeUserId: userId, actorUserId: userId })
+  }
+  await tx.insert(auditEvent).values({
+    organizationId: orgId,
+    actorUserId: userId,
+    action: "agent.handoff_claimed",
+    entity: "agent_handoff",
+    entityId: claimed.id,
+    metadata: { taskId: claimed.taskId },
+  })
+  return enrichHandoff(tx, claimed)
+}
+
+/**
+ * Vencimiento según el plazo por prioridad: avisa al responsable o escala al
+ * equipo cuando la tarea de la derivación sigue abierta pasado su plazo. La
+ * clave de dedupe hace el aviso una sola vez (no duplica tareas ni avisos).
+ */
+async function escalateOverdueHandoffs(tx: Db, orgId: string): Promise<void> {
+  const overdue = await tx
+    .select({
+      id: agentHandoff.id,
+      reason: agentHandoff.reason,
+      priority: agentHandoff.priority,
+      assigneeUserId: agentHandoff.assigneeUserId,
+    })
+    .from(agentHandoff)
+    .innerJoin(crmTask, eq(crmTask.id, agentHandoff.taskId))
+    .where(
+      and(
+        eq(agentHandoff.organizationId, orgId),
+        eq(crmTask.status, "open"),
+        lt(crmTask.dueAt, new Date()),
+      ),
+    )
+    .limit(50)
+  for (const row of overdue) {
+    const recipients = row.assigneeUserId ? [row.assigneeUserId] : await teamUserIds(tx, orgId)
+    if (!recipients.length) continue
+    await notifyUsers(tx, orgId, recipients, {
+      dedupeKey: `agent-handoff-overdue:${row.id}`,
+      title: "Derivación vencida",
+      body: `La derivación (prioridad ${row.priority}) superó su plazo sin resolverse: ${row.reason}`.slice(0, 200),
+      href: "/inbox",
+      permission: "tasks.read",
+    })
+  }
 }
 
 /* ---------- Supervisión: libro de corridas reales ---------- */

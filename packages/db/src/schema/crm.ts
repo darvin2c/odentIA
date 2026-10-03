@@ -208,6 +208,8 @@ export const crmTask = pgTable(
     status: text("status").notNull().default("open"),
     kind: text("kind").notNull().default("manual"),
     createdBy: text("created_by").notNull(),
+    /** Clave estable por trigger del agente: la reentrega no duplica la tarea. */
+    idempotencyKey: text("idempotency_key"),
     ...timestamps,
   },
   (table) => [
@@ -215,6 +217,9 @@ export const crmTask = pgTable(
     uniqueIndex("task_org_opp_open_uidx")
       .on(table.organizationId, table.opportunityId)
       .where(sql`"opportunity_id" IS NOT NULL AND "kind" = 'opportunity_follow_up' AND "status" = 'open'`),
+    uniqueIndex("task_org_idempotency_uidx")
+      .on(table.organizationId, table.idempotencyKey)
+      .where(sql`"idempotency_key" IS NOT NULL`),
     index("task_org_contact_idx").on(table.organizationId, table.contactId),
     index("task_org_conversation_idx").on(table.organizationId, table.conversationId),
     index("task_org_opportunity_idx").on(table.organizationId, table.opportunityId),

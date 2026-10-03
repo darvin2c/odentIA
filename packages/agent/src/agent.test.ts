@@ -11,8 +11,14 @@ import {
   createConnection,
   createContact,
   decideProposal,
+  createAppointment,
+  moveAppointment,
+  claimHandoff,
+  createHandoff,
+  updateTask,
   getAutonomyPolicy,
   ingestInbound,
+  listHandoffs,
   createTask,
   listProposals,
   listOpportunities,
@@ -36,9 +42,10 @@ import { BaseChatModel } from "@langchain/core/language_models/chat_models"
 import { AIMessage, SystemMessage, type BaseMessage } from "@langchain/core/messages"
 import type { ChatResult } from "@langchain/core/outputs"
 import { user } from "@odentia/db/schema/auth"
-import { branch } from "@odentia/db/schema/org"
+import { branch, auditEvent } from "@odentia/db/schema/org"
 import { patient } from "@odentia/db/schema/clinical"
 import { appointment } from "@odentia/db/schema/agenda"
+import { workspaceNotification } from "@odentia/db/schema/workspace"
 
 const IMAGE = "dentalagent-postgres:18.6"
 const KEY = secretsKeyFromEnv("aa".repeat(31) + "ab")
@@ -138,6 +145,9 @@ beforeAll(async () => {
   appDb = createAppDb(`postgres://dentalagent_app:dentalagent_app@${host}:${port}/dentalagent`)
   await ownerDb.execute(
     sql`insert into "organization" ("id", "name", "slug", "created_at") values ('org_a', 'Clínica', 'norte', now())`,
+  )
+  await ownerDb.execute(
+    sql`insert into "org_profile" ("organization_id", "legal_name") values ('org_a', 'Clínica') on conflict do nothing`,
   )
   const checkpointer = PostgresSaver.fromConnString(ownerUri)
   await checkpointer.setup()
@@ -559,6 +569,133 @@ it("buscar_huecos entrega una opción completa que proponer_cita ejecuta como ci
   expect(booked.status).toBe("programada")
 })
 
+it("reprogramar_cita y cancelar_cita actúan sobre la cita real sin duplicar reserva ni pisar cambios ajenos", async () => {
+  const [createdBranch] = await ownerDb
+    .insert(branch)
+    .values({ organizationId: "org_a", name: "Sede Agente Reprog", timezone: "America/Lima" })
+    .returning({ id: branch.id })
+  const branchId = createdBranch!.id
+  const stamp = Date.now()
+  const actorId = `agent-actor-reprog-${stamp}`
+  const dentistId = `agent-dentist-reprog-${stamp}`
+  await ownerDb.insert(user).values([
+    { id: actorId, name: "Actor Reprog", email: `actor-reprog-${stamp}@example.test` },
+    { id: dentistId, name: "Dentista Reprog", email: `dentista-reprog-${stamp}@example.test` },
+  ])
+  await ownerDb.execute(sql`
+    insert into "member" ("id", "organization_id", "user_id", "role", "created_at") values
+      (${`m-${actorId}`}, 'org_a', ${actorId}, 'owner', now()),
+      (${`m-${dentistId}`}, 'org_a', ${dentistId}, 'member', now())`)
+  const createdChair = await withOrgContext(appDb, "org_a", (tx) =>
+    createChair(tx, "org_a", { branchId, name: "Sillón Reprog" }))
+  const chairId = createdChair!.id
+  await withOrgContext(appDb, "org_a", (tx) =>
+    setProfessionalSchedule(tx, "org_a", actorId, {
+      branchId,
+      dentistUserId: dentistId,
+      rules: [1, 2, 3, 4, 5].flatMap((weekday) => [
+        { weekday, startMin: 9 * 60, endMin: 13 * 60 },
+      ]),
+    }))
+  const { conversationId } = await ingestText("tg:reprog-ctx", "evt-reprog-ctx", "Necesito cambiar mi cita")
+  const [conv] = await withOrgContext(appDb, "org_a", (tx) =>
+    tx.select({ contactId: conversation.contactId }).from(conversation).where(eq(conversation.id, conversationId)))
+  const contactId = conv!.contactId
+  const patientNumber = await withOrgContext(appDb, "org_a", (tx) => nextPatientNumber(tx, "org_a"))
+  const [createdPatient] = await ownerDb
+    .insert(patient)
+    .values({ organizationId: "org_a", displayName: "Paciente Reprog Agente", patientNumber })
+    .returning({ id: patient.id })
+  const patientId = createdPatient!.id
+  await withOrgContext(appDb, "org_a", (tx) =>
+    setPatientContact(tx, "org_a", actorId, patientId, { contactId, relationship: "self", isPreferred: true }))
+  const booked = await withOrgContext(appDb, "org_a", (tx) =>
+    createAppointment(tx, "org_a", actorId, {
+      patientId, dentistUserId: dentistId, chairId, branchId,
+      startsAt: "2026-10-05T15:00:00Z", durationMin: 45,
+    }))
+  const ctx: AgentToolCtx = {
+    db: appDb, orgId: "org_a", conversationId, contactId,
+    triggerMessageId: "trig-reprog-1", secretsKey: KEY, dryRun: false, handedOff: false,
+    toolsUsed: [], usage: { inputTokens: 0, outputTokens: 0, reported: false },
+  }
+  const tools = makeAgentTools(ctx)
+  // El resumen expone id y versión exactos para actuar sin adivinar.
+  const summary = String(await tools.find((t) => t.name === "ver_resumen_paciente")!.invoke({ patientId }))
+  expect(summary).toContain(`id ${booked.id}`)
+  expect(summary).toContain(`versión ${booked.version}`)
+
+  // Reprogramar (confirmar_usuario): propuesta → confirmación → agenda movida.
+  const reprogram = tools.find((t) => t.name === "reprogramar_cita")!
+  const proposed = String(await reprogram.invoke({
+    appointmentId: booked.id, startsAt: "2026-10-06T16:00:00Z", expectedVersion: booked.version,
+  }))
+  expect(proposed).toContain("pide al interlocutor que confirme")
+  const proposalId = /Propuesta ([0-9a-f-]{36})/.exec(proposed)?.[1]
+  expect(proposalId).toBeTruthy()
+  await ingestText("tg:reprog-ctx", "evt-reprog-si-1", "Sí, confirmo")
+  const confirmed = String(await tools.find((t) => t.name === "confirmar_propuesta")!.invoke({ proposalId: proposalId! }))
+  expect(confirmed).toContain("Confirmado y ejecutado")
+  let rows = await withOrgContext(appDb, "org_a", (tx) =>
+    tx.select().from(appointment).where(eq(appointment.patientId, patientId)))
+  expect(rows).toHaveLength(1)
+  expect(rows[0]!.startsAt.toISOString()).toBe("2026-10-06T16:00:00.000Z")
+  expect(rows[0]!.version).toBe(booked.version + 1)
+
+  // Obsolescencia: si la cita cambió desde la propuesta, confirmar no ejecuta.
+  ctx.triggerMessageId = "trig-reprog-2"
+  const staleProposal = String(await reprogram.invoke({
+    appointmentId: booked.id, startsAt: "2026-10-07T15:00:00Z", expectedVersion: booked.version + 1,
+  }))
+  const staleId = /Propuesta ([0-9a-f-]{36})/.exec(staleProposal)?.[1]
+  expect(staleId).toBeTruthy()
+  await ingestText("tg:reprog-ctx", "evt-reprog-si-2", "Si confirmo")
+  await withOrgContext(appDb, "org_a", (tx) =>
+    moveAppointment(tx, "org_a", actorId, booked.id, {
+      expectedVersion: booked.version + 1, startsAt: "2026-10-08T15:00:00Z",
+    }))
+  const staleConfirm = String(await tools.find((t) => t.name === "confirmar_propuesta")!.invoke({ proposalId: staleId! }))
+  expect(staleConfirm).toContain("No se pudo ejecutar al confirmar")
+  expect(staleConfirm).toContain("obsoleta")
+  rows = await withOrgContext(appDb, "org_a", (tx) =>
+    tx.select().from(appointment).where(eq(appointment.patientId, patientId)))
+  expect(rows).toHaveLength(1)
+  expect(rows[0]!.startsAt.toISOString()).toBe("2026-10-08T15:00:00.000Z")
+
+  // Cancelar (aprobar_equipo): la confirmación del interlocutor no basta;
+  // reentregar el mismo trigger no duplica la propuesta.
+  ctx.triggerMessageId = "trig-cancel-1"
+  const cancel = tools.find((t) => t.name === "cancelar_cita")!
+  const pendingMsg = String(await cancel.invoke({ appointmentId: booked.id }))
+  expect(pendingMsg).toContain("aprobación del equipo")
+  const repeatedMsg = String(await cancel.invoke({ appointmentId: booked.id }))
+  const cancelId = /Propuesta ([0-9a-f-]{36})/.exec(pendingMsg)?.[1]
+  expect(cancelId).toBeTruthy()
+  expect(repeatedMsg).toContain(cancelId!)
+  const pendingCancels = await withOrgContext(appDb, "org_a", (tx) =>
+    listProposals(tx, "org_a", { conversationId, status: "propuesta" }))
+  expect(pendingCancels.filter((p) => p.action === "cancelar_cita")).toHaveLength(1)
+  const confirmCancel = String(await tools.find((t) => t.name === "confirmar_propuesta")!.invoke({ proposalId: cancelId! }))
+  expect(confirmCancel).toContain("exige aprobación del equipo")
+  const decided = await withOrgContext(appDb, "org_a", (tx) =>
+    decideProposal(tx, "org_a", actorId, cancelId!, { decision: "aprobada" }))
+  expect(decided.status).toBe("ejecutada")
+  rows = await withOrgContext(appDb, "org_a", (tx) =>
+    tx.select().from(appointment).where(eq(appointment.patientId, patientId)))
+  expect(rows).toHaveLength(1)
+  expect(rows[0]!.status).toBe("cancelada")
+
+  // Cancelar una cita ya cancelada no produce efectos parciales.
+  ctx.triggerMessageId = "trig-cancel-2"
+  const lateMsg = String(await cancel.invoke({ appointmentId: booked.id }))
+  const lateId = /Propuesta ([0-9a-f-]{36})/.exec(lateMsg)?.[1]
+  expect(lateId).toBeTruthy()
+  const lateDecided = await withOrgContext(appDb, "org_a", (tx) =>
+    decideProposal(tx, "org_a", actorId, lateId!, { decision: "aprobada" }))
+  expect(lateDecided.status).toBe("fallida")
+  expect(lateDecided.error ?? "").toMatch(/obsoleta|cancelada/)
+})
+
 it("proponer_cita en directo fallido no se reporta como aprobación", async () => {
   const [createdBranch] = await ownerDb
     .insert(branch)
@@ -695,4 +832,113 @@ it("en modo equipo el segundo intento y confirmar_propuesta no piden sí ni ejec
   expect(opportunities.items.map(row => row.id)).toEqual(before.items.map(row => row.id))
   await withOrgContext(appDb, "org_a", (tx) =>
     updateAutonomyPolicy(tx, "org_a", actorId, { crear_oportunidad: prevPolicy.crear_oportunidad }))
+})
+
+it("create_task no duplica en reentrega y las escrituras directas auditan su origen agente", async () => {
+  const { conversationId } = await ingestText("tg:direct-writes", "evt-dw-1", "Recuérdame llamar")
+  const [conv] = await withOrgContext(appDb, "org_a", (tx) =>
+    tx.select({ contactId: conversation.contactId }).from(conversation).where(eq(conversation.id, conversationId)))
+  const contactId = conv!.contactId
+  const ctx: AgentToolCtx = {
+    db: appDb, orgId: "org_a", conversationId, contactId,
+    triggerMessageId: "trig-dw-1", secretsKey: KEY, dryRun: false, handedOff: false,
+    toolsUsed: [], usage: { inputTokens: 0, outputTokens: 0, reported: false },
+  }
+  const tools = makeAgentTools(ctx)
+  const createTaskTool = tools.find((t) => t.name === "create_task")!
+  // Reentrega del mismo trigger con el mismo payload: misma tarea, sin duplicar.
+  const first = String(await createTaskTool.invoke({ title: "Llamar al paciente" }))
+  const second = String(await createTaskTool.invoke({ title: "Llamar al paciente" }))
+  expect(second).toBe(first)
+  const tasks = await withOrgContext(appDb, "org_a", (tx) =>
+    tx.select().from(crmTask).where(and(eq(crmTask.organizationId, "org_a"), eq(crmTask.conversationId, conversationId))))
+  expect(tasks).toHaveLength(1)
+  await tools.find((t) => t.name === "add_tags")!.invoke({ tags: ["interesado-limpieza"] })
+  await tools.find((t) => t.name === "update_contact")!.invoke({ displayName: "Ana Actualizada" })
+  const audits = await withOrgContext(appDb, "org_a", (tx) =>
+    tx.select().from(auditEvent).where(eq(auditEvent.organizationId, "org_a")))
+  const taskAudit = audits.find((a) => a.action === "task.created" && a.entityId === tasks[0]!.id)
+  expect((taskAudit?.metadata as Record<string, unknown> | null)?.createdBy).toBe("agent")
+  expect(taskAudit?.actorUserId).toBeNull()
+  const contactAudits = audits.filter((a) => a.action === "contact.updated" && a.entityId === contactId)
+  expect(contactAudits.length).toBeGreaterThanOrEqual(2)
+  for (const audit of contactAudits) {
+    expect((audit.metadata as Record<string, unknown> | null)?.origin).toBe("agent")
+  }
+  // En simulación no escribe nada.
+  const dryCtx: AgentToolCtx = { ...ctx, dryRun: true, triggerMessageId: "trig-dw-dry" }
+  const dry = String(await makeAgentTools(dryCtx).find((t) => t.name === "create_task")!.invoke({ title: "No debe persistir" }))
+  expect(dry).toContain("SIMULACIÓN")
+  const afterDry = await withOrgContext(appDb, "org_a", (tx) =>
+    tx.select().from(crmTask).where(and(eq(crmTask.organizationId, "org_a"), eq(crmTask.conversationId, conversationId))))
+  expect(afterDry).toHaveLength(1)
+})
+
+it("la derivación tiene plazo, toma atómica de la cola y escalamiento único al vencer", async () => {
+  const stamp = Date.now()
+  const ownerId = `ho-owner-${stamp}`
+  const recepId = `ho-recep-${stamp}`
+  await ownerDb.insert(user).values([
+    { id: ownerId, name: "Dueña Handoff", email: `ho-owner-${stamp}@example.test` },
+    { id: recepId, name: "Recepción Handoff", email: `ho-recep-${stamp}@example.test` },
+  ])
+  await ownerDb.execute(sql`
+    insert into "member" ("id", "organization_id", "user_id", "role", "created_at") values
+      (${`m-${ownerId}`}, 'org_a', ${ownerId}, 'owner', now()),
+      (${`m-${recepId}`}, 'org_a', ${recepId}, 'reception', now())`)
+  const { conversationId } = await ingestText("tg:handoff-sla", "evt-ho-1", "Quiero hablar con una persona")
+  const handoff = await withOrgContext(appDb, "org_a", (tx) =>
+    createHandoff(tx, "org_a", null, {
+      conversationId,
+      reason: "El interlocutor pidió una persona",
+      summary: "Pide atención humana sin más detalle.",
+      priority: "alta",
+      createdBy: "agent",
+    }))
+  // Sin responsable queda en la cola, con plazo visible según prioridad (alta ≈ 4h).
+  expect(handoff.assigneeUserId).toBeNull()
+  expect(handoff.dueAt).toBeTruthy()
+  const dueInMs = Date.parse(handoff.dueAt!) - Date.now()
+  expect(dueInMs).toBeGreaterThan(3 * 3_600_000)
+  expect(dueInMs).toBeLessThan(5 * 3_600_000)
+
+  // Dos miembros toman el caso a la vez: uno gana, el otro recibe 409.
+  const [firstTry, secondTry] = await Promise.allSettled([
+    withOrgContext(appDb, "org_a", (tx) => claimHandoff(tx, "org_a", ownerId, handoff.id)),
+    withOrgContext(appDb, "org_a", (tx) => claimHandoff(tx, "org_a", recepId, handoff.id)),
+  ])
+  const winner = firstTry.status === "fulfilled" ? ownerId : recepId
+  const loser = firstTry.status === "fulfilled" ? secondTry : firstTry
+  expect(loser.status).toBe("rejected")
+  expect(String((loser as PromiseRejectedResult).reason)).toContain("Otro miembro ya tomó esta derivación")
+  // La tarea vinculada pasa al mismo responsable.
+  const [claimedTask] = await withOrgContext(appDb, "org_a", (tx) =>
+    tx.select().from(crmTask).where(eq(crmTask.id, handoff.taskId!)))
+  expect(claimedTask!.assigneeUserId).toBe(winner)
+  // Reclamar de nuevo el mismo usuario es idempotente.
+  const again = await withOrgContext(appDb, "org_a", (tx) => claimHandoff(tx, "org_a", winner, handoff.id))
+  expect(again.assigneeUserId).toBe(winner)
+
+  // Vencimiento: avisa al responsable una sola vez, sin duplicar avisos.
+  await ownerDb.execute(sql`update "task" set due_at = now() - interval '1 hour' where id = ${handoff.taskId!}`)
+  await withOrgContext(appDb, "org_a", (tx) => listHandoffs(tx, "org_a", {}))
+  const overdueNotifs = async () =>
+    withOrgContext(appDb, "org_a", (tx) =>
+      tx.select().from(workspaceNotification).where(
+        sql`dedupe_key like ${`agent-handoff-overdue:${handoff.id}:%`}`))
+  const firstWave = await overdueNotifs()
+  expect(firstWave).toHaveLength(1)
+  expect(firstWave[0]!.userId).toBe(winner)
+  await withOrgContext(appDb, "org_a", (tx) => listHandoffs(tx, "org_a", {}))
+  expect(await overdueNotifs()).toHaveLength(1)
+
+  // La resolución registra actor y no reactiva el agente.
+  await withOrgContext(appDb, "org_a", (tx) =>
+    updateTask(tx, "org_a", handoff.taskId!, { status: "done", actorUserId: winner }))
+  const [resolved] = await withOrgContext(appDb, "org_a", (tx) =>
+    tx.select().from(crmTask).where(eq(crmTask.id, handoff.taskId!)))
+  expect(resolved!.status).toBe("done")
+  const [conv] = await withOrgContext(appDb, "org_a", (tx) =>
+    tx.select({ agentStatus: conversation.agentStatus }).from(conversation).where(eq(conversation.id, conversationId)))
+  expect(conv!.agentStatus).toBe("off")
 })

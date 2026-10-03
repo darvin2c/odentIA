@@ -17,7 +17,7 @@ import { randomUUID } from "node:crypto"
 import { lookup as dnsLookup } from "node:dns"
 import type { LookupAddress, LookupOptions } from "node:dns"
 import { createWriteStream, existsSync, readFileSync, type WriteStream } from "node:fs"
-import { copyFile, mkdir, mkdtemp, rm } from "node:fs/promises"
+import { copyFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { createRequire } from "node:module"
 import { connect, createServer } from "node:net"
 import { tmpdir } from "node:os"
@@ -61,6 +61,12 @@ interface OwnedProcess {
   /** Solo api/worker/previews abortan la suite al terminar antes del cierre. */
   watch: boolean
   stopPromise?: Promise<void>
+}
+
+interface WindowsTerminalMonitor {
+  proc: ChildProcess
+  stopPath: string
+  reportPath: string
 }
 
 interface RunState {
@@ -164,6 +170,68 @@ async function waitForExitTimeout(
   }
 }
 
+/** Ruta estable del host PowerShell clásico necesario para ocultar consolas. */
+function windowsPowerShellPath(): string {
+  return join(
+    process.env["SystemRoot"] ?? "C:\\Windows",
+    "System32",
+    "WindowsPowerShell",
+    "v1.0",
+    "powershell.exe",
+  )
+}
+
+/** Vigila todo el run y registra cualquier ventana nueva de Windows Terminal. */
+async function startWindowsTerminalMonitor(logsDir: string): Promise<WindowsTerminalMonitor | null> {
+  if (process.platform !== "win32") return null
+  const stopPath = join(logsDir, "windows-terminal-monitor.stop")
+  const reportPath = join(logsDir, "windows-terminal-windows.json")
+  const readyPath = join(logsDir, "windows-terminal-monitor.ready")
+  const proc = spawn(
+    windowsPowerShellPath(),
+    [
+      "-NoLogo",
+      "-NoProfile",
+      "-NonInteractive",
+      "-WindowStyle",
+      "Hidden",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-File",
+      join(E2E_DIR, "windows-terminal-monitor.ps1"),
+      stopPath,
+      reportPath,
+      readyPath,
+    ],
+    { stdio: "ignore", windowsHide: true },
+  )
+  for (let attempt = 0; attempt < 40; attempt++) {
+    if (existsSync(readyPath)) return { proc, stopPath, reportPath }
+    if (proc.exitCode !== null || proc.signalCode !== null) {
+      throw new Error("El monitor de ventanas de Windows terminó antes de iniciar")
+    }
+    await sleep(50)
+  }
+  proc.kill()
+  throw new Error("El monitor de ventanas de Windows no quedó listo en 2 s")
+}
+
+async function stopWindowsTerminalMonitor(monitor: WindowsTerminalMonitor | null): Promise<number[]> {
+  if (!monitor) return []
+  await writeFile(monitor.stopPath, "stop", "utf8")
+  const result = await waitForExitTimeout(monitor.proc, STOP_GRACE_MS)
+  if (result === "timeout") {
+    monitor.proc.kill()
+    throw new Error("El monitor de ventanas de Windows no terminó a tiempo")
+  }
+  if (result.code !== 0) throw new Error(`El monitor de ventanas de Windows terminó con código ${result.code}`)
+  const raw: unknown = JSON.parse(readFileSync(monitor.reportPath, "utf8") || "[]")
+  if (!Array.isArray(raw) || raw.some((value) => typeof value !== "number")) {
+    throw new Error("El monitor de ventanas de Windows produjo un reporte inválido")
+  }
+  return raw
+}
+
 /** Últimas líneas del log de un hijo (marcador si aún no escribió nada). */
 function tailLog(logPath: string, lines = 60): string {
   try {
@@ -173,6 +241,11 @@ function tailLog(logPath: string, lines = 60): string {
   } catch {
     return "(sin salida)"
   }
+}
+
+/** Literal PowerShell seguro para rutas y argumentos generados por el supervisor. */
+function powershellLiteral(value: string): string {
+  return `'${value.replaceAll("'", "''")}'`
 }
 
 /**
@@ -189,12 +262,44 @@ function spawnOwned(
   if (state.shuttingDown && !opts.cleanup) throw new Error("Cierre solicitado antes de iniciar otro proceso.")
   const logPath = join(state.logsDir, `${name}.log`)
   let proc: ChildProcess
+  const isWindows = process.platform === "win32"
   try {
-    proc = spawn(cmd, [...args], {
+    let spawnCmd = cmd
+    let spawnArgs = [...args]
+    if (isWindows) {
+      // Una consola propia oculta —sin `-NoNewWindow`— se hereda por todos
+      // los nietos. Es la única combinación que evita la delegación de cada
+      // CLI a Windows Terminal y conserva un árbol cerrable.
+      const encoded = Buffer.from(
+        JSON.stringify({ cmd, args, cwd: opts.cwd, logPath }),
+        "utf8",
+      ).toString("base64")
+      const runner = join(E2E_DIR, "windows-child-runner.cjs")
+      const ps = [
+        '$ErrorActionPreference = "Stop"; try {',
+        `$p = Start-Process -FilePath ${powershellLiteral(process.execPath)}`,
+        `-ArgumentList @(${powershellLiteral(`"${runner}"`)}, ${powershellLiteral(encoded)})`,
+        `-WorkingDirectory ${powershellLiteral(opts.cwd)}`,
+        "-WindowStyle Hidden -PassThru",
+        "; $p.WaitForExit(); exit $p.ExitCode",
+        `} catch { [IO.File]::AppendAllText(${powershellLiteral(logPath)}, $_.Exception.Message + [Environment]::NewLine); exit 1 }`,
+      ].join(" ")
+      spawnCmd = windowsPowerShellPath()
+      spawnArgs = [
+        "-NoLogo",
+        "-NoProfile",
+        "-NonInteractive",
+        "-WindowStyle",
+        "Hidden",
+        "-EncodedCommand",
+        Buffer.from(ps, "utf16le").toString("base64"),
+      ]
+    }
+    proc = spawn(spawnCmd, spawnArgs, {
       cwd: opts.cwd,
       env: opts.env,
-      stdio: ["ignore", "pipe", "pipe"],
-      detached: process.platform !== "win32",
+      stdio: isWindows ? "ignore" : ["ignore", "pipe", "pipe"],
+      detached: !isWindows,
       windowsHide: true,
     })
   } catch (err) {
@@ -202,13 +307,15 @@ function spawnOwned(
       `No se pudo arrancar ${name}: ${err instanceof Error ? err.message : String(err)}`,
     )
   }
-  const file = createWriteStream(logPath, { flags: "a" })
-  state.fileStreams.push(file)
-  proc.stdout?.pipe(file, { end: false })
-  proc.stderr?.pipe(file, { end: false })
-  if (opts.tee) {
-    proc.stdout?.pipe(process.stdout)
-    proc.stderr?.pipe(process.stderr)
+  const file = isWindows ? null : createWriteStream(logPath, { flags: "a" })
+  if (file) {
+    state.fileStreams.push(file)
+    proc.stdout?.pipe(file, { end: false })
+    proc.stderr?.pipe(file, { end: false })
+    if (opts.tee) {
+      proc.stdout?.pipe(process.stdout)
+      proc.stderr?.pipe(process.stderr)
+    }
   }
   const owned: OwnedProcess = { name, proc, logPath, watch: opts.watch }
   state.owned.push(owned)
@@ -216,7 +323,7 @@ function spawnOwned(
     updateRuntimeMeta(state.metaPath, { processes: [{ name, pid: proc.pid }] })
   }
   proc.on("error", error => { state.failed ??= new Error(`No se pudo iniciar ${name}`, { cause: error }) })
-  proc.on("close", () => file.end())
+  proc.on("close", () => file?.end())
   proc.on("exit", (code, signal) => {
     if (owned.watch && !state.shuttingDown) {
       noteUnexpectedExit(state, owned, code, signal)
@@ -352,7 +459,13 @@ function proxyEnv(state: RunState): Record<string, string> {
   }
 }
 
-/** Proxy propio con estado nuevo: sin stop previo ni poda global, sin tocar CA del SO ni proxy dev. */
+/**
+ * Proxy propio con estado nuevo: sin stop previo ni poda global, sin tocar CA
+ * del SO ni proxy dev. Portless 0.15.6 puede devolver código 1 en Windows por
+ * agotar su espera interna de 5 s aunque el daemon ya haya escrito `proxy.pid`
+ * y esté arrancando; el PID propio es la evidencia para continuar y la
+ * readiness funcional posterior comprueba que realmente escucha.
+ */
 async function startProxy(state: RunState): Promise<void> {
   const owned = spawnOwned(state, "proxy-start", process.execPath, [PORTLESS_CLI, "proxy", "start", "--skip-trust"], {
     cwd: ROOT, env: proxyEnv(state), watch: false, tee: false,
@@ -360,9 +473,6 @@ async function startProxy(state: RunState): Promise<void> {
   // El comando puede haber creado el daemon incluso si termina con error.
   state.proxyStarted = true
   const started = await waitForExitTimeout(owned.proc, APPS_READY_TIMEOUT_MS)
-  if (started === "timeout" || started.code !== 0) {
-    throw new Error(`No se pudo arrancar el proxy propio: ${tailLog(owned.logPath)}`)
-  }
   for (let attempt = 0; attempt < PROXY_PID_RETRIES; attempt++) {
     const pid = readProxyPid(state.portlessDir)
     if (pid !== null) {
@@ -371,6 +481,9 @@ async function startProxy(state: RunState): Promise<void> {
       return
     }
     await sleep(250)
+  }
+  if (started === "timeout" || started.code !== 0) {
+    throw new Error(`No se pudo arrancar el proxy propio: ${tailLog(owned.logPath)}`)
   }
   throw new Error(
     `El proxy arrancó pero no dejó su PID en ${join(state.portlessDir, "proxy.pid")}; no se puede garantizar su cierre.`,
@@ -788,6 +901,10 @@ async function runPlaywright(
   })
   state.playwright = owned
   const result = await waitForExit(owned.proc)
+  if (process.platform === "win32") {
+    const output = readFileSync(owned.logPath, "utf8")
+    if (output) process.stdout.write(output)
+  }
   state.playwright = null
   if (state.failed) return 1
   if (state.shuttingDown) {
@@ -933,7 +1050,9 @@ export async function main(args: string[]): Promise<number> {
 
   let code = 1
   const leases: PortLease[] = []
+  let terminalMonitor: WindowsTerminalMonitor | null = null
   try {
+    terminalMonitor = await startWindowsTerminalMonitor(logsDir)
     if (!existsSync(PORTLESS_CLI)) {
       throw new Error(`No existe el CLI de Portless en ${PORTLESS_CLI}: ejecuta pnpm install.`)
     }
@@ -1131,6 +1250,20 @@ export async function main(args: string[]): Promise<number> {
       } catch {
         // Liberar una reserva ya liberada no es error.
       }
+    }
+    try {
+      const terminalWindows = await stopWindowsTerminalMonitor(terminalMonitor)
+      if (terminalWindows.length > 0) {
+        state.log.log(
+          `E2E abrió ${terminalWindows.length} ventana(s) de Windows Terminal: ${terminalWindows.join(", ")}`,
+        )
+        code = 1
+      }
+    } catch (err) {
+      state.log.log(
+        `No se pudo validar la ausencia de ventanas de Windows Terminal: ${err instanceof Error ? err.message : String(err)}`,
+      )
+      code = 1
     }
     mark("Cierre", tClose)
     if (cleanupErrors.length > 0) {

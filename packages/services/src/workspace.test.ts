@@ -5,7 +5,6 @@ import { member, user } from "@odentia/db/schema/auth"
 import { patient, patientCharge, patientPayment } from "@odentia/db/schema/clinical"
 import { channelConnection, contact, conversation, message, pipeline, pipelineStage } from "@odentia/db/schema/crm"
 import { opportunity } from "@odentia/db/schema/opportunities"
-import { orgProfile } from "@odentia/db/schema/org"
 import { eq, sql } from "drizzle-orm"
 import { beforeAll, expect, it } from "vitest"
 import { appDb, insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
@@ -24,7 +23,6 @@ beforeAll(async () => {
     { id: randomUUID(), organizationId: "org_a", userId: colleague, role: "reception", createdAt: new Date() },
     { id: randomUUID(), organizationId: "org_b", userId: outsider, role: "owner", createdAt: new Date() },
   ])
-  await ownerDb.insert(orgProfile).values({ organizationId: "org_a", legalName: "Clínica de prueba" })
 
   // Canales y conversaciones: 2 abiertas en whatsapp, 1 cerrada.
   const [connection] = await ownerDb.insert(channelConnection).values({
@@ -196,7 +194,6 @@ it("el pulso suma cobros no anulados por día y moneda", async () => {
 it("la primera respuesta usa aceptación real y excluye colas, fallos y simulación", async () => {
   const orgId = randomUUID()
   await insertOrg(ownerDb, orgId, `metricas-${orgId}`)
-  await ownerDb.insert(orgProfile).values({ organizationId: orgId, legalName: "Métricas", timezone: "America/Lima" })
   const [person] = await ownerDb.insert(contact).values({ organizationId: orgId, displayName: "Interlocutor" }).returning()
   const [connection] = await ownerDb.insert(channelConnection).values({
     organizationId: orgId, channel: "whatsapp", provider: "prueba", displayName: "Métricas", configEncrypted: "x", webhookSecret: "y",
@@ -234,7 +231,6 @@ it("la primera respuesta usa aceptación real y excluye colas, fallos y simulaci
 it("el primer inicio excluye caducadas del contador completo, no solo de la muestra", async () => {
   const orgId = "home-expiry"
   await insertOrg(ownerDb, orgId, orgId)
-  await ownerDb.insert(orgProfile).values({ organizationId: orgId, legalName: "Caducidad de propuestas" })
   const expiredId = randomUUID()
   await ownerDb.insert(agentProposal).values([
     {

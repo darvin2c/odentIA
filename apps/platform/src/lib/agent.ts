@@ -62,5 +62,7 @@ export interface AgentHandoff {
   priority: string
   assigneeUserId: string | null
   taskId: string | null
+  /** Plazo de recogida/resolución según la prioridad. */
+  dueAt: string | null
   createdAt: string
 }

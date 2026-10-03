@@ -12,6 +12,7 @@ import {
   getProposal,
   listAgentRuns,
   listHandoffs,
+  claimHandoff,
   listProposals,
   requiredPermissionForAction,
   ServiceError,
@@ -218,6 +219,15 @@ const simulateInput = z.object({
       withOrgContext(deps.db, orgId, (tx) =>
         createHandoff(tx, orgId, userId, { ...parsed.data, createdBy: "user" }),
       ),
+    )
+  })
+
+  app.post("/handoffs/:id/claim", async (c) => {
+    const { orgId, memberRole, userId } = orgContextOf(c)
+    if (!canAccess(memberRole, "tasks.write")) return forbidden(c, "tasks.write")
+    const id = c.req.param("id")
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) => claimHandoff(tx, orgId, userId, id)),
     )
   })
 

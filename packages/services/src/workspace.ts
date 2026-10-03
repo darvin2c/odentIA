@@ -3,6 +3,7 @@ import { member } from "@odentia/db/schema/auth"
 import { workspaceNotification } from "@odentia/db/schema/workspace"
 import { and, desc, eq, inArray, isNull, sql, type SQL } from "drizzle-orm"
 import { notFound, validation } from "./errors.js"
+import { getOrgLocale } from "./locale.js"
 import { listHandoffs, listProposals, type ProposalItem } from "./agent-operations.js"
 
 export interface WorkspaceAccess {
@@ -71,10 +72,8 @@ export async function readWorkspaceNotification(tx: Db, orgId: string, userId: s
 }
 
 async function workspaceZone(tx: Db, orgId: string) {
-  const [row] = await tx.execute<{ timezone: string; locale: string }>(sql`
-    select timezone, locale from org_profile where organization_id = ${orgId}`)
-  if (!row) throw notFound("Perfil de organización")
-  return row
+  const { timezone, locale } = await getOrgLocale(tx, orgId)
+  return { timezone, locale }
 }
 
 
