@@ -2,7 +2,23 @@ diff --git a/dist/cli.js b/dist/cli.js
 index 648ea06770ed30d1f527478f0889bb047e2a588c..8f4cd320848774eb758bf1b69380c424902fb8f4 100644
 --- a/dist/cli.js
 +++ b/dist/cli.js
-@@ -295,6 +295,27 @@ ${opensslErrorMessage()}`);
+@@ -264,6 +264,7 @@ function openssl(args, options) {
+       timeout: OPENSSL_TIMEOUT_MS,
+       input: options?.input,
+       stdio: ["pipe", "pipe", "pipe"],
++      windowsHide: true,
+       ...extraEnv && Object.keys(extraEnv).length > 0 ? { env: { ...process.env, ...extraEnv } } : {}
+     });
+   } catch (err) {
+@@ -282,6 +283,7 @@ async function opensslAsync(args) {
+     const { stdout } = await execFileAsync("openssl", args, {
+       encoding: "utf-8",
+       timeout: OPENSSL_TIMEOUT_MS,
++      windowsHide: true,
+       ...extraEnv && Object.keys(extraEnv).length > 0 ? { env: { ...process.env, ...extraEnv } } : {}
+     });
+     return stdout;
+@@ -295,6 +297,27 @@ ${opensslErrorMessage()}`);
  function generateCA(stateDir) {
    const keyPath = path.join(stateDir, CA_KEY_FILE);
    const certPath = path.join(stateDir, CA_CERT_FILE);
@@ -30,7 +46,7 @@ index 648ea06770ed30d1f527478f0889bb047e2a588c..8f4cd320848774eb758bf1b69380c424
    openssl(["ecparam", "-genkey", "-name", "prime256v1", "-noout", "-out", keyPath]);
    openssl([
      "req",
-@@ -309,10 +330,8 @@ function generateCA(stateDir) {
+@@ -309,10 +332,8 @@ function generateCA(stateDir) {
      CA_VALIDITY_DAYS.toString(),
      "-subj",
      `/CN=${CA_COMMON_NAME}`,
@@ -43,7 +59,7 @@ index 648ea06770ed30d1f527478f0889bb047e2a588c..8f4cd320848774eb758bf1b69380c424
    ]);
    fs2.chmodSync(keyPath, 384);
    fs2.chmodSync(certPath, 420);
-@@ -4706,7 +4725,8 @@ function startProxyServer(store, proxyPort, tld, tlds, tlsOptions, lanIp, strict
+@@ -4706,7 +4727,8 @@ function startProxyServer(store, proxyPort, tld, tlds, tlsOptions, lanIp, strict
        );
      });
    }

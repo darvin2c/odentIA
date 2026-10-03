@@ -6,7 +6,7 @@ settings:
 
 patchedDependencies:
   portless@0.15.6:
-    hash: sa2ws57kbnp7tszxjwsbcsn3v4
+    hash: bgglgc2fmr3oly7oxjypn3jzka
     path: patches/portless@0.15.6.patch
 
 importers:
@@ -18,7 +18,7 @@ importers:
         version: 2.5.14
       portless:
         specifier: 0.15.6
-        version: 0.15.6(patch_hash=sa2ws57kbnp7tszxjwsbcsn3v4)
+        version: 0.15.6(patch_hash=bgglgc2fmr3oly7oxjypn3jzka)
       turbo:
         specifier: 2.10.12
         version: 2.10.12
@@ -11392,7 +11392,7 @@ snapshots:
 
   pngjs@5.0.0: {}
 
-  portless@0.15.6(patch_hash=sa2ws57kbnp7tszxjwsbcsn3v4): {}
+  portless@0.15.6(patch_hash=bgglgc2fmr3oly7oxjypn3jzka): {}
 
   postcss-selector-parser@7.1.6:
     dependencies:
