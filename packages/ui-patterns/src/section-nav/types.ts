@@ -48,9 +48,9 @@ export function resolveActiveTo(items: SectionNavItem[], pathname: string): stri
 export const ITEM_CLASSES =
   "relative flex w-full items-center gap-2 overflow-hidden rounded-xl ring-sidebar-ring outline-hidden transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 active:bg-sidebar-accent active:text-sidebar-accent-foreground [&_svg]:size-4 [&_svg]:shrink-0"
 
-/** `data-active` del shell: acento de sidebar y más peso. En reposo el ítem
+/** `data-active` del shell: acento de sidebar y mayor peso. En reposo el ítem
  * hereda `text-sidebar-foreground` de la superficie, como en el sidebar. */
-export const ITEM_ACTIVE_CLASSES = "bg-sidebar-accent font-medium text-sidebar-accent-foreground"
+export const ITEM_ACTIVE_CLASSES = "bg-sidebar-accent font-semibold text-sidebar-accent-foreground"
 
 /** Contador: la pastilla de texto del `SidebarMenuBadge` (`h-5 min-w-5`). */
 export const BADGE_CLASSES =

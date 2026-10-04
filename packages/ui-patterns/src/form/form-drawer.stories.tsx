@@ -44,6 +44,30 @@ export const Ancho48rem: Story = {
   ),
 }
 
+export const FormularioLargoEnMovil: Story = {
+  render: () => (
+    <FormDrawer
+      open
+      title="Nuevo paciente"
+      description="La cabecera y las acciones permanecen visibles mientras el formulario se desplaza."
+      submitLabel="Siguiente"
+      onClose={noop}
+      onSubmit={demoSubmit}
+    >
+      <div className="flex flex-col gap-6">
+        <section className="flex flex-col gap-3">
+          <h3 className="font-medium">Datos personales</h3>
+          <DemoFields idPrefix="personal" />
+        </section>
+        <section className="flex flex-col gap-3">
+          <h3 className="font-medium">Contacto y filiación</h3>
+          <DemoFields idPrefix="contacto" />
+        </section>
+      </div>
+    </FormDrawer>
+  ),
+}
+
 export const Wizard: Story = {
   render: function WizardStory() {
     const wizard = useDemoWizard()

@@ -3,7 +3,7 @@ import type { Meta, StoryObj } from "@storybook/react"
 import { AppShell } from "../app-shell.js"
 import { PageShell } from "../page-shell.js"
 import { SectionNav } from "./index.js"
-import { destinos, SectionBody, StoryLink, secciones } from "./story-fixtures.js"
+import { configuracion, destinos, SectionBody, StoryLink, secciones } from "./story-fixtures.js"
 
 /**
  * Navegación de sección. **Web siempre riel** (`side`, ≥1024px) y **tablet y
@@ -83,6 +83,38 @@ export const CincoDestinos: Story = {
         />
       </SectionNav>
     </PageShell>
+  ),
+}
+
+export const DieciseisDestinos: Story = {
+  render: () => (
+    <AppShell
+      items={[
+        { label: "Inicio", to: "/", icon: RiCalendarLine },
+        { label: "Pacientes", to: "/patients", icon: RiUserLine },
+      ]}
+      LinkComponent={StoryLink}
+      pathname="/settings/audit"
+      user={{ name: "Ada Lovelace", email: "ada@odentia.localhost" }}
+      brand={<span className="text-base font-semibold">odentIA</span>}
+      footerItems={[{ label: "Configuración", to: "/settings", icon: RiSettings3Line }]}
+      onSignOut={() => {}}
+    >
+      <PageShell>
+        <SectionNav
+          label="Configuración"
+          items={configuracion}
+          pathname="/settings/audit"
+          LinkComponent={StoryLink}
+        >
+          <SectionBody
+            title="Auditoría"
+            note="Los dieciséis destinos se abren desde un selector y conservan etiquetas legibles."
+            placeholder="La lista tiene scroll local, mantiene el destino activo visible y no desborda el documento."
+          />
+        </SectionNav>
+      </PageShell>
+    </AppShell>
   ),
 }
 
