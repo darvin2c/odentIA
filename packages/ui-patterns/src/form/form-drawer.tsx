@@ -1,4 +1,4 @@
-import { Drawer, DrawerContent, useIsMobile } from "@odentia/ui"
+import { cn, Drawer, DrawerContent, useIsMobile } from "@odentia/ui"
 import * as React from "react"
 import { useCloseGuard } from "../surface.js"
 import { FormSurface } from "./form-surface.js"
@@ -67,7 +67,10 @@ export function FormDrawer({
           nombre accesible del diálogo se cablea a mano: las props propias
           ganan sobre las que Base UI deriva del Title. */}
       <DrawerContent
-        className={className}
+        className={cn(
+          "data-[swipe-axis=y]:[--drawer-content-height:calc(100dvh-1rem-env(safe-area-inset-top))] data-[swipe-axis=y]:[--drawer-content-max-height:calc(100dvh-1rem-env(safe-area-inset-top))]",
+          className,
+        )}
         aria-labelledby={titleId}
         aria-describedby={description ? descriptionId : undefined}
       >

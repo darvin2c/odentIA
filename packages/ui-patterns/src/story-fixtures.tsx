@@ -46,18 +46,27 @@ export function demoSubmit(event: FormEvent) {
 }
 
 /** Formulario de demostración; `wide` reparte los campos en dos columnas. */
-export function DemoFields({ wide = false }: { wide?: boolean }) {
+export function DemoFields({
+  wide = false,
+  idPrefix = "demo",
+}: {
+  wide?: boolean
+  idPrefix?: string
+}) {
   return (
     <div className={cn(wide ? "grid gap-4 sm:grid-cols-2" : "flex flex-col gap-4")}>
-      {FIELD_LABELS.map((label, index) => (
-        <Field key={label}>
-          <FieldLabel htmlFor={`demo-field-${index}`}>{label}</FieldLabel>
-          <Input id={`demo-field-${index}`} />
-        </Field>
-      ))}
+      {FIELD_LABELS.map((label, index) => {
+        const id = `${idPrefix}-field-${index}`
+        return (
+          <Field key={label}>
+            <FieldLabel htmlFor={id}>{label}</FieldLabel>
+            <Input id={id} />
+          </Field>
+        )
+      })}
       <Field className={wide ? "sm:col-span-2" : undefined}>
-        <FieldLabel htmlFor="demo-notes">Notas</FieldLabel>
-        <Textarea id="demo-notes" rows={3} />
+        <FieldLabel htmlFor={`${idPrefix}-notes`}>Notas</FieldLabel>
+        <Textarea id={`${idPrefix}-notes`} rows={3} />
       </Field>
     </div>
   )

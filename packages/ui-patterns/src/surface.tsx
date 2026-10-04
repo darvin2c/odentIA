@@ -1,4 +1,4 @@
-import { ScrollArea, Skeleton, cn } from "@odentia/ui"
+import { cn, ScrollArea, Skeleton } from "@odentia/ui"
 import * as React from "react"
 import { common } from "./common.js"
 
@@ -76,7 +76,7 @@ export function SurfaceShell({
         {headerContent}
       </div>
 
-      <div className={cn("min-h-0 flex-1", bodyClassName)}>
+      <div className={cn("min-h-0 flex-1 overflow-hidden", bodyClassName)}>
         <ScrollArea className="h-full">
           <div className="px-6 py-4">
             {isLoading ? (
@@ -103,7 +103,7 @@ export function SurfaceShell({
       </div>
 
       {footer != null ? (
-        <div className="mt-auto flex shrink-0 flex-row items-center justify-end gap-2 border-t border-border bg-surface px-6 py-4">
+        <div className="mt-auto flex shrink-0 flex-row items-center justify-end gap-2 border-t border-border bg-surface px-6 pt-4 pb-[calc(1rem+env(safe-area-inset-bottom))]">
           {footer}
         </div>
       ) : null}
@@ -132,7 +132,11 @@ export interface CloseGuardOptions {
  * de descartar cambios sin guardar. Lo usan el drawer (onOpenChange y Esc de
  * Base UI) y el panel (Esc propio) para comportarse igual en los dos modos.
  */
-export function useCloseGuard({ isSubmitting = false, isDirty = false, onClose }: CloseGuardOptions) {
+export function useCloseGuard({
+  isSubmitting = false,
+  isDirty = false,
+  onClose,
+}: CloseGuardOptions) {
   return React.useCallback(() => {
     if (isSubmitting) return
     if (isDirty && !window.confirm(common.confirm.unsavedMessage)) return

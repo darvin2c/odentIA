@@ -62,6 +62,31 @@ export const destinos: SectionNavItem[] = [
   { label: "Ajustes", to: "/ajustes", icon: RiSettings3Line, iconActive: RiSettings3Fill },
 ]
 
+/** Configuración realista: obliga a resolver una navegación secundaria larga. */
+export const configuracion: SectionNavItem[] = [
+  ["Organización", "/settings"],
+  ["Sucursales", "/branches"],
+  ["Equipo y permisos", "/members"],
+  ["Servicios y tarifas", "/services"],
+  ["Disponibilidad", "/settings/availability"],
+  ["Especialidades", "/settings/specialties"],
+  ["Formularios y consentimientos", "/settings/forms"],
+  ["Canales", "/settings/channels"],
+  ["Chat web", "/settings/webchat"],
+  ["Correo", "/settings/mail"],
+  ["Agente", "/settings/agent"],
+  ["Pipelines", "/settings/pipelines"],
+  ["Campos", "/settings/fields"],
+  ["Registro de pacientes", "/settings/patient-registration"],
+  ["Acceso de pacientes", "/settings/patient-access"],
+  ["Auditoría", "/settings/audit"],
+].map(([label, to]) => ({
+  label,
+  to,
+  icon: RiSettings3Line,
+  iconActive: RiSettings3Fill,
+}))
+
 /** Contenido de ejemplo: un bloque alto para ver el pegado al scrollear. */
 export function SectionBody({
   title = "Historia clínica",

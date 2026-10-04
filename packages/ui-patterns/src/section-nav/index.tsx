@@ -1,5 +1,5 @@
 import { cn } from "@odentia/ui"
-import type * as React from "react"
+import * as React from "react"
 import type { ShellLinkComponent } from "../app-shell.js"
 import {
   BADGE_CLASSES,
@@ -46,9 +46,9 @@ export interface SectionNavProps {
  * corregir al hidratar (sin parpadeo) y nada duplicado (dos árboles, uno por
  * breakpoint, repetirían los links y el landmark para lectores de pantalla).
  *
- * La barra va pegada al borde inferior (o superior, `mobilePosition`) y el riel
- * a la izquierda (o a la derecha, `side`); cada opción sólo aplica a su
- * superficie, que es la que la usa en sus clases.
+ * En móvil, hasta cinco destinos forman una barra; una lista larga usa un
+ * selector que revela opciones verticales desplazables. El riel de escritorio
+ * conserva todas las opciones visibles.
  *
  * Se monta dentro del `PageShell`, que aporta fondo de página y padding: el nav
  * no toca ninguno de los dos. Las dos superficies usan la del sidebar
@@ -67,6 +67,11 @@ export function SectionNav({
   const activeTo = resolveActiveTo(items, pathname)
   const isRight = side === "right"
   const isBottom = mobilePosition === "footer"
+  const hasManyItems = items.length > 5
+  const activeItem = activeTo ? items.find((item) => item.to === activeTo) : undefined
+  const ActiveIcon = activeItem?.iconActive ?? activeItem?.icon
+  const [expanded, setExpanded] = React.useState(false)
+  const listId = React.useId()
 
   return (
     <div
@@ -103,14 +108,36 @@ export function SectionNav({
           // mientras se scrollea. Deshace el sangrado, el borde pegajoso y la
           // altura de la barra.
           "lg:top-6 lg:mx-0 lg:mb-0 lg:w-56 lg:shrink-0 lg:rounded-md lg:border-0 lg:p-2",
+          hasManyItems && "flex flex-col",
+          hasManyItems && isBottom && "flex-col-reverse lg:flex-col",
           isBottom && "lg:bottom-auto",
         )}
       >
+        {hasManyItems ? (
+          <button
+            type="button"
+            className="mx-2 flex min-h-11 items-center gap-2 rounded-xl bg-sidebar-accent px-3 text-left font-semibold text-sidebar-accent-foreground outline-hidden focus-visible:ring-2 focus-visible:ring-sidebar-ring lg:hidden"
+            aria-expanded={expanded}
+            aria-controls={listId}
+            onClick={() => setExpanded((current) => !current)}
+          >
+            {ActiveIcon ? <ActiveIcon /> : null}
+            <span className="min-w-0 flex-1 truncate">{activeItem?.label ?? "Elegir sección"}</span>
+            <span className="text-xs font-medium">
+              {expanded ? "Ocultar secciones" : "Cambiar sección"}
+            </span>
+          </button>
+        ) : null}
         <ul
+          id={listId}
           className={cn(
-            // Barra: celdas de ancho igual, sin scroll horizontal (nada se
-            // recorta a mitad de ítem).
-            "grid grid-flow-col auto-cols-fr gap-0.5",
+            "gap-0.5",
+            hasManyItems
+              ? cn(
+                  "max-h-[min(60svh,28rem)] flex-col overflow-y-auto overscroll-y-contain px-2 py-2 [scrollbar-width:thin] lg:flex lg:max-h-none lg:overflow-visible lg:p-0",
+                  expanded ? "flex" : "hidden",
+                )
+              : "grid grid-flow-col auto-cols-fr",
             // Riel: lista vertical.
             "lg:flex lg:flex-col",
           )}
@@ -125,27 +152,37 @@ export function SectionNav({
                   to={item.to}
                   title={item.label}
                   aria-current={active ? "page" : undefined}
+                  onClick={() => setExpanded(false)}
                   className={cn(
                     ITEM_CLASSES,
-                    // Barra: icono sobre rótulo, centrado.
-                    "flex-col justify-center gap-1 px-1 py-2 text-center text-xs leading-tight",
+                    // Hasta cinco destinos conservan la barra compacta. Una
+                    // lista larga usa un selector que abre opciones legibles.
+                    hasManyItems
+                      ? "min-h-11 flex-row justify-start gap-2 px-3 py-2 text-left text-sm leading-tight"
+                      : "min-h-11 flex-col justify-center gap-1 px-1 py-2 text-center text-xs leading-tight",
                     // Riel: fila del sidebar, con su alto y su padding.
-                    "lg:h-9 lg:flex-row lg:justify-normal lg:gap-2 lg:px-3 lg:text-left lg:text-sm",
+                    "lg:h-9 lg:min-h-0 lg:flex-row lg:justify-normal lg:gap-2 lg:px-3 lg:text-left lg:text-sm",
                     active && ITEM_ACTIVE_CLASSES,
                     badge !== undefined && "pr-8",
                   )}
                 >
                   {Icon ? <Icon /> : null}
-                  <span className="truncate">{item.label}</span>
+                  <span
+                    className={cn(hasManyItems ? "whitespace-normal" : "truncate", "lg:truncate")}
+                  >
+                    {item.label}
+                  </span>
                 </LinkComponent>
                 {badge === undefined ? null : (
                   <span
                     className={cn(
                       BADGE_CLASSES,
-                      // Barra: sobre el icono. Riel: al final de la fila, con el
-                      // espacio ya reservado por el `pr-8` del link.
-                      "pointer-events-none absolute top-1 left-1/2 translate-x-1",
-                      "lg:top-1.5 lg:left-auto lg:right-1 lg:translate-x-0",
+                      hasManyItems
+                        ? "pointer-events-none absolute top-1/2 right-2 -translate-y-1/2"
+                        : "pointer-events-none absolute top-1 left-1/2 translate-x-1",
+                      // Riel: al final de la fila, con el espacio ya reservado
+                      // por el `pr-8` del link.
+                      "lg:top-1.5 lg:right-1 lg:left-auto lg:translate-x-0 lg:translate-y-0",
                       active ? "text-sidebar-accent-foreground" : "text-sidebar-foreground",
                     )}
                   >
