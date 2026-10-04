@@ -833,17 +833,15 @@ function ThreadView({
           </Button>
         )}
         <p className="text-sm text-red-600" role="alert">
-          No se pudo cargar la conversación.
+          Esta conversación ya no está disponible o no tienes acceso.
         </p>
         <span className="flex flex-wrap gap-2">
           <Button variant="outline" size="sm" onClick={() => void detailQuery.refetch()}>
             Reintentar
           </Button>
-          {showBack && (
-            <Button variant="ghost" size="sm" onClick={onBack}>
-              Volver a la lista
-            </Button>
-          )}
+          <Button variant="ghost" size="sm" onClick={onBack}>
+            Volver a la bandeja
+          </Button>
         </span>
       </div>
     )
@@ -1137,6 +1135,7 @@ function statusIcon(status: string) {
   if (status === "read") return <CheckCheck className="size-3.5 text-sky-500" />
   if (status === "delivered" || status === "sent")
     return <CheckCheck className="size-3.5 text-muted-foreground" />
+  if (status === "unknown") return <AlertCircle className="size-3.5 text-amber-600" />
   if (status === "failed") return <AlertCircle className="size-3.5 text-red-500" />
   return <Clock className="size-3.5 text-muted-foreground" />
 }

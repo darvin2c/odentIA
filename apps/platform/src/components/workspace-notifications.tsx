@@ -1,5 +1,6 @@
 import { Button, Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@odentia/ui"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { Link } from "@tanstack/react-router"
 import { Bell } from "lucide-react"
 import { useState } from "react"
 import { apiFetch } from "../lib/api"
@@ -63,10 +64,10 @@ export function WorkspaceNotifications() {
               {data.items.map((item) => (
                 <li key={item.id} className="py-3">
                   <div className="flex items-start justify-between gap-3">
-                    <a href={item.href} className="min-w-0 hover:underline">
+                    <Link to={item.href} className="min-w-0 hover:underline" onClick={() => setOpen(false)}>
                       <span className={`block ${item.readAt ? "font-medium" : "font-semibold"}`}>{item.title}</span>
                       <span className="mt-1 block text-sm text-muted-foreground">{item.body}</span>
-                    </a>
+                    </Link>
                     {!item.readAt && (
                       <Button type="button" variant="ghost" size="sm" disabled={mark.isPending} onClick={() => mark.mutate(item.id)}>
                         Marcar leído

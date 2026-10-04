@@ -9,7 +9,7 @@ import {
 import { organization } from "@odentia/db/schema/auth"
 import { agentConfig, channelConnection, conversation } from "@odentia/db/schema/crm"
 import { auditEvent } from "@odentia/db/schema/org"
-import { ingestInbound, handlePortalChannelRequest, ServiceError, type Storage, type TranscribeFn } from "@odentia/services"
+import { handlePortalChannelRequest, ingestInbound, ServiceError, type Storage, type TranscribeFn } from "@odentia/services"
 import { and, eq, sql } from "drizzle-orm"
 
 export interface IngestDeps {
@@ -100,9 +100,10 @@ export async function processInbound(
         .limit(1)
       if (conv?.agentStatus === "on" && cfg?.enabled) {
         await sendAgentRun(tx, {
+          kind: "inbound_message",
           orgId,
           conversationId: result.conversationId,
-          triggerMessageId: result.messageId,
+          messageId: result.messageId,
         })
       }
     })

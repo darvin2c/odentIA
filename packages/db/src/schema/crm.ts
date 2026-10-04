@@ -213,6 +213,7 @@ export const crmTask = pgTable(
     ...timestamps,
   },
   (table) => [
+    uniqueIndex("task_org_id_uidx").on(table.organizationId, table.id),
     // Un solo seguimiento abierto por oportunidad (índice único parcial en migración).
     uniqueIndex("task_org_opp_open_uidx")
       .on(table.organizationId, table.opportunityId)

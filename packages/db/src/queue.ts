@@ -29,11 +29,19 @@ export interface OutboundMessageJob {
   messageId: string
 }
 
-export interface AgentRunJob {
-  orgId: string
-  conversationId: string
-  triggerMessageId: string
-}
+export type AgentRunJob =
+  | {
+      kind: "inbound_message"
+      orgId: string
+      conversationId: string
+      messageId: string
+    }
+  | {
+      kind: "overdue_opportunity_follow_up"
+      orgId: string
+      conversationId: string
+      coordinationId: string
+    }
 
 async function sendTo(db: Db, queue: string, payload: unknown): Promise<string> {
   const rows = await db.execute<{ send: number | string }>(

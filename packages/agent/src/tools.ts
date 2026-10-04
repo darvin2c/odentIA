@@ -6,6 +6,7 @@ import {
   createHandoff,
   createProposal,
   createTask,
+  deriveCommercialFollowUpCoordination,
   findFreeGaps,
   getAgentPatientSummary,
   getContact,
@@ -18,6 +19,7 @@ import {
   listContactNotes,
   listOpportunities,
   listTasks,
+  recordCommercialFollowUpProposal,
   requireContact,
   resolveAgentPatientContext,
   searchPublishedKnowledge,
@@ -31,8 +33,8 @@ export interface AgentToolCtx {
   orgId: string
   conversationId: string
   contactId: string
-  /** Mensaje entrante que disparó el turno (clave de idempotencia estable). */
-  triggerMessageId: string | null
+  /** Evento durable que disparó el turno (mensaje o coordinación). */
+  triggerId: string | null
   secretsKey: Buffer
   /** La herramienta de handoff lo marca; el grafo termina el turno. */
   handedOff: boolean
@@ -40,6 +42,13 @@ export interface AgentToolCtx {
   dryRun: boolean
   /** Mensaje hipotético solo para simulación (no se persiste). */
   draftText?: string
+  /** Instrucción interna adicional; nunca se representa como mensaje del interlocutor. */
+  runInstruction?: string
+  /** Restringe herramientas para disparadores operativos sin mensaje entrante. */
+  allowedTools?: readonly string[]
+  commercialCoordinationId?: string
+  /** Una coordinación proactiva ya produjo su único resultado terminal. */
+  decisionRecorded: boolean
   /** Nombres de herramientas usadas en la corrida (supervisión). */
   toolsUsed: string[]
   /** Tokens acumulados solo si el proveedor los reporta. */
@@ -53,10 +62,21 @@ export interface AgentToolCtx {
  */
 export async function performHandoff(ctx: AgentToolCtx, reason: string, summary?: string): Promise<void> {
   if (ctx.dryRun) {
+    ctx.decisionRecorded = true
     ctx.handedOff = true
     return
   }
   await withOrgContext(ctx.db, ctx.orgId, async (tx) => {
+    if (ctx.commercialCoordinationId) {
+      await deriveCommercialFollowUpCoordination(
+        tx,
+        ctx.orgId,
+        ctx.commercialCoordinationId,
+        reason,
+        summary?.trim() ? summary : reason,
+      )
+      return
+    }
     await createHandoff(tx, ctx.orgId, null, {
       conversationId: ctx.conversationId,
       reason,
@@ -65,6 +85,7 @@ export async function performHandoff(ctx: AgentToolCtx, reason: string, summary?
       createdBy: "agent",
     })
   })
+  ctx.decisionRecorded = true
   ctx.handedOff = true
 }
 
@@ -116,13 +137,20 @@ export function makeAgentTools(ctx: AgentToolCtx) {
           reason,
           idempotencyKey: buildAgentProposalKey({
             conversationId: ctx.conversationId,
-            triggerMessageId: ctx.triggerMessageId,
+            triggerId: ctx.triggerId,
             tool: toolName,
             payload,
           }),
           secretsKey: ctx.secretsKey,
         }),
       )
+      const coordinationId = ctx.commercialCoordinationId
+      if (coordinationId) {
+        await inOrg((tx) =>
+          recordCommercialFollowUpProposal(tx, ctx.orgId, coordinationId, proposal),
+        )
+        ctx.decisionRecorded = true
+      }
     } catch (e) {
       if (e instanceof ServiceError && e.code === "PROPOSAL_PENDING_CONFIRM") {
         return "Ya hay una propuesta esperando la confirmación del interlocutor en este hilo: pídele que confirme con un sí claro y luego usa confirmar_propuesta, no crees otra."
@@ -294,7 +322,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
           // Misma clave estable que las propuestas: reentregar el mensaje no duplica la tarea.
           idempotencyKey: buildAgentProposalKey({
             conversationId: ctx.conversationId,
-            triggerMessageId: ctx.triggerMessageId,
+            triggerId: ctx.triggerId,
             tool: "create_task",
             payload: { title, dueAt: dueAt ?? null },
           }),
@@ -760,6 +788,10 @@ export function makeAgentTools(ctx: AgentToolCtx) {
         await performHandoff(ctx, reason, summary)
         return `[SIMULACIÓN] Se derivaría a humano: ${reason}.`
       }
+      if (ctx.commercialCoordinationId) {
+        await performHandoff(ctx, reason, summary)
+        return "Derivado a una persona usando el pendiente existente. No envíes más mensajes."
+      }
       const validPriority = priority === "alta" || priority === "baja" ? priority : "media"
       const handoff = await inOrg((tx) =>
         createHandoff(tx, ctx.orgId, null, {
@@ -788,7 +820,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     },
   )
 
-  return [
+  const tools = [
     sendReply,
     sendTemplate,
     moveToStage,
@@ -813,4 +845,5 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     confirmProposal,
     requestHandoff,
   ]
+  return ctx.allowedTools ? tools.filter((candidate) => ctx.allowedTools?.includes(candidate.name)) : tools
 }

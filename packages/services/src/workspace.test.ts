@@ -3,7 +3,7 @@ import { withOrgContext } from "@odentia/db"
 import { agentHandoff, agentProposal, agentRunLedger } from "@odentia/db/schema/agent"
 import { member, user } from "@odentia/db/schema/auth"
 import { patient, patientCharge, patientPayment } from "@odentia/db/schema/clinical"
-import { channelConnection, contact, conversation, message, pipeline, pipelineStage } from "@odentia/db/schema/crm"
+import { channelConnection, contact, conversation, crmTask, message, pipeline, pipelineStage } from "@odentia/db/schema/crm"
 import { opportunity } from "@odentia/db/schema/opportunities"
 import { eq, sql } from "drizzle-orm"
 import { beforeAll, expect, it } from "vitest"
@@ -125,6 +125,45 @@ it("el inicio no revela saldos a un rol sin permiso financiero", async () => {
   expect(authorized.debt).toEqual([{ currency: "PEN", outstandingCents: "25000", overdueCents: "0", patients: 1 }])
 })
 
+it("Inicio y avisos abren el contexto autorizado de una tarea", async () => {
+  const [opp] = await ownerDb
+    .select({ id: opportunity.id, contactId: opportunity.contactId, conversationId: opportunity.conversationId })
+    .from(opportunity)
+    .where(eq(opportunity.organizationId, "org_a"))
+    .limit(1)
+  if (!opp) throw new Error("Falta la oportunidad de prueba")
+  const [task] = await ownerDb
+    .insert(crmTask)
+    .values({
+      organizationId: "org_a",
+      title: "Retomar caso contextual",
+      contactId: opp.contactId,
+      conversationId: opp.conversationId,
+      opportunityId: opp.id,
+      assigneeUserId: recipient,
+      dueAt: new Date(Date.now() - 60_000),
+      createdBy: "user",
+    })
+    .returning({ id: crmTask.id })
+  const authorized = await withOrgContext(appDb, "org_a", tx =>
+    getWorkspaceHome(tx, "org_a", recipient, full),
+  )
+  expect(authorized.tasks.find((item) => item.id === task!.id)?.href).toBe(
+    `/opportunities/${opp.id}`,
+  )
+  const tasksOnly = await withOrgContext(appDb, "org_a", tx =>
+    getWorkspaceHome(tx, "org_a", recipient, { ...restricted, tasks: true }),
+  )
+  expect(tasksOnly.tasks.find((item) => item.id === task!.id)?.href).toBe(`/tasks?task=${task!.id}`)
+  const notices = await withOrgContext(appDb, "org_a", tx =>
+    listWorkspaceNotifications(tx, "org_a", recipient, ["tasks.read", "crm.read"]),
+  )
+  expect(notices.items.find((item) => item.body === "Retomar caso contextual")).toMatchObject({
+    href: `/opportunities/${opp.id}`,
+    permission: "crm.read",
+  })
+})
+
 it("la auditoría pagina sin saltar eventos del mismo milisegundo", async () => {
   await ownerDb.execute(sql`insert into audit_event (organization_id, action, entity, created_at)
     select 'org_a', 'cursor.regression', 'prueba', '2026-09-28 10:00:00.000001+00'::timestamptz + n * interval '1 microsecond'
@@ -225,7 +264,17 @@ it("la primera respuesta usa aceptación real y excluye colas, fallos y simulaci
   const home = await withOrgContext(appDb, orgId, tx => getWorkspaceHome(tx, orgId, recipient, full))
   expect(home.conversations!.waiting).toBe(3)
   const hidden = await withOrgContext(appDb, orgId, tx => getManagementReport(tx, orgId, "2026-09-01", "2026-09-30", restricted))
-  expect(hidden.performance).toEqual({ responses: null, followUps: null, conversations: null, bookings: null, conversion: null, proposals: null })
+  expect(hidden.performance).toEqual({
+    responses: null,
+    followUps: null,
+    conversations: null,
+    bookings: null,
+    conversion: null,
+    proposals: null,
+    handoffs: null,
+    clinicalControls: null,
+    taskTimeliness: null,
+  })
 })
 
 it("el primer inicio excluye caducadas del contador completo, no solo de la muestra", async () => {

@@ -32,6 +32,9 @@ Infra definida en `infra/dev/compose.yaml`: PostgreSQL :5432, MinIO :9000/:9001 
 
 - `pnpm --filter @odentia/agent test` recorre herramientas y propuestas con PostgreSQL real: reserva, reprogramación, cancelación, obsolescencia, reentrega idempotente y derivación humana.
 - `pnpm e2e crm.spec.ts --workers=1 --grep "crm derivación"` comprueba en la plataforma la cola con plazo y la toma de un caso.
+- `pnpm --filter @odentia/services test -- commercial-coordination.test.ts workspace-continuity.test.ts` verifica deduplicación del seguimiento vencido, revocación, aislamiento y cohortes con desconocidos; requiere el mismo PostgreSQL efímero.
+- La prueba real de un seguimiento proactivo debe observar vencimiento → decisión → propuesta/derivación y reinicio del worker. Un envío `unknown` se concilia en el proveedor y no se reintenta.
+- En Inicio y Reportes, derivaciones usan cohorte por creación; controles y tareas usan cohorte por vencimiento. Cancelaciones no cuentan como éxito y los históricos sin evento suficiente permanecen desconocidos.
 - Los modos fake/mock prueban contratos internos, no entrega de proveedor, calidad de un LLM real ni observación con usuarios. El cierre de una validación integral exige proveedor/modelo reales identificados, datos consentidos o sintéticos y observación de recepción, clínico y caja.
 
 ## Herramientas de contexto

@@ -1,7 +1,7 @@
 import { sql } from "drizzle-orm"
 import {
-  boolean,
   check,
+  foreignKey,
   index,
   integer,
   jsonb,
@@ -12,7 +12,8 @@ import {
   uuid,
 } from "drizzle-orm/pg-core"
 import { organization } from "./auth.js"
-import { contact, conversation, orgFk } from "./crm.js"
+import { contact, conversation, crmTask, orgFk } from "./crm.js"
+import { opportunity } from "./opportunities.js"
 import { branch } from "./org.js"
 
 /** Tipos de conocimiento que el agente puede citar (FAQs versionadas e info de sede/política). */
@@ -192,6 +193,77 @@ export const agentHandoff = pgTable(
     index("agent_handoff_org_idx").on(table.organizationId, table.createdAt),
     index("agent_handoff_conversation_idx").on(table.conversationId),
     check("agent_handoff_priority_check", sql`${table.priority} in ('alta','media','baja')`),
+  ],
+)
+
+export const COMMERCIAL_COORDINATION_STATUSES = [
+  "pendiente",
+  "propuesta",
+  "ejecutada",
+  "derivada",
+  "omitida",
+  "incierta",
+] as const
+export type CommercialCoordinationStatus = (typeof COMMERCIAL_COORDINATION_STATUSES)[number]
+
+/**
+ * Decisión durable para una próxima acción comercial vencida. Una fecha
+ * explícita de la tarea genera como máximo una coordinación; nunca programa
+ * por sí sola otra reiteración.
+ */
+export const commercialFollowUpCoordination = pgTable(
+  "commercial_follow_up_coordination",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    organizationId: orgFk("organization_id"),
+    taskId: uuid("task_id").notNull(),
+    opportunityId: uuid("opportunity_id").notNull(),
+    conversationId: uuid("conversation_id"),
+    triggerDueAt: timestamp("trigger_due_at", { withTimezone: true }).notNull(),
+    status: text("status").notNull().default("pendiente"),
+    reason: text("reason"),
+    result: jsonb("result").$type<Record<string, unknown>>(),
+    nextResponsibleKind: text("next_responsible_kind").notNull().default("agent"),
+    nextResponsibleUserId: text("next_responsible_user_id"),
+    attempts: integer("attempts").notNull().default(0),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("commercial_coordination_org_task_due_uidx").on(
+      table.organizationId,
+      table.taskId,
+      table.triggerDueAt,
+    ),
+    index("commercial_coordination_org_status_idx").on(
+      table.organizationId,
+      table.status,
+      table.createdAt,
+    ),
+    foreignKey({
+      columns: [table.organizationId, table.taskId],
+      foreignColumns: [crmTask.organizationId, crmTask.id],
+      name: "commercial_coordination_task_fk",
+    }),
+    foreignKey({
+      columns: [table.organizationId, table.opportunityId],
+      foreignColumns: [opportunity.organizationId, opportunity.id],
+      name: "commercial_coordination_opportunity_fk",
+    }),
+    foreignKey({
+      columns: [table.organizationId, table.conversationId],
+      foreignColumns: [conversation.organizationId, conversation.id],
+      name: "commercial_coordination_conversation_fk",
+    }),
+    check(
+      "commercial_coordination_status_check",
+      sql`${table.status} in ('pendiente','propuesta','ejecutada','derivada','omitida','incierta')`,
+    ),
+    check(
+      "commercial_coordination_responsible_check",
+      sql`${table.nextResponsibleKind} in ('agent','team','user','contact','none')`,
+    ),
   ],
 )
 

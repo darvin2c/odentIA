@@ -2,9 +2,9 @@ import type { Db } from "@odentia/db"
 import { member } from "@odentia/db/schema/auth"
 import { workspaceNotification } from "@odentia/db/schema/workspace"
 import { and, desc, eq, inArray, isNull, sql, type SQL } from "drizzle-orm"
+import { listHandoffs, listProposals, type ProposalItem } from "./agent-operations.js"
 import { notFound, validation } from "./errors.js"
 import { getOrgLocale } from "./locale.js"
-import { listHandoffs, listProposals, type ProposalItem } from "./agent-operations.js"
 
 export interface WorkspaceAccess {
   patients: boolean
@@ -34,10 +34,24 @@ export async function createWorkspaceNotification(tx: Db, orgId: string, input: 
 export async function listWorkspaceNotifications(tx: Db, orgId: string, userId: string, permissions: string[]) {
   // Materializa avisos de vencimiento para el destinatario, sin un temporizador en memoria.
   if (permissions.includes("tasks.read")) {
+    const canReadCrm = permissions.includes("crm.read")
+    const canReadConversations = permissions.includes("conversations.read")
     await tx.execute(sql`insert into workspace_notification
       (organization_id, user_id, dedupe_key, title, body, href, permission)
       select ${orgId}, ${userId}, 'task-due:' || id || ':' || due_at::text,
-        'Tarea vencida', title, '/tasks', 'tasks.read'
+        'Tarea vencida', title,
+        case
+          when ${canReadCrm} and opportunity_id is not null then '/opportunities/' || opportunity_id
+          when ${canReadConversations} and conversation_id is not null then '/inbox?conversation=' || conversation_id
+          when ${canReadCrm} and contact_id is not null then '/contacts/' || contact_id
+          else '/tasks?task=' || id
+        end,
+        case
+          when ${canReadCrm} and opportunity_id is not null then 'crm.read'
+          when ${canReadConversations} and conversation_id is not null then 'conversations.read'
+          when ${canReadCrm} and contact_id is not null then 'crm.read'
+          else 'tasks.read'
+        end
       from task where organization_id = ${orgId} and assignee_user_id = ${userId}
         and status = 'open' and due_at <= now()
       on conflict (organization_id, user_id, dedupe_key) do nothing`)
@@ -54,8 +68,14 @@ export async function listWorkspaceNotifications(tx: Db, orgId: string, userId: 
   }
   if (permissions.length === 0) return { items: [], unread: 0 }
   const scope = and(eq(workspaceNotification.organizationId, orgId), eq(workspaceNotification.userId, userId), inArray(workspaceNotification.permission, permissions))
-  const items = await tx.select().from(workspaceNotification).where(scope)
+  const storedItems = await tx.select().from(workspaceNotification).where(scope)
     .orderBy(desc(workspaceNotification.createdAt), desc(workspaceNotification.id)).limit(100)
+  const canReadConversations = permissions.includes("conversations.read")
+  const items = storedItems.map((item) => {
+    if (canReadConversations || !item.href.startsWith("/inbox?")) return item
+    const fallbackTask = new URL(item.href, "https://workspace.invalid").searchParams.get("fallbackTask")
+    return fallbackTask ? { ...item, href: `/tasks?task=${fallbackTask}` } : item
+  })
   const [count] = await tx.select({ value: sql<number>`count(*)::int` }).from(workspaceNotification)
     .where(and(scope, isNull(workspaceNotification.readAt)))
   return { items, unread: count?.value ?? 0 }
@@ -131,6 +151,9 @@ export interface CrmPerformance {
   bookings: Array<{ source: string; count: number; active: number }> | null
   conversion: Array<{ channel: string | null; assigneeUserId: string | null; assigneeName: string | null; created: number; won: number; lost: number; open: number; wonRate: number | null }> | null
   proposals: { executed: number; failed: number; pending: number } | null
+  handoffs: { cohort: number; collected: number; resolved: number; cancelled: number; open: number; unknown: number } | null
+  clinicalControls: { cohort: number; realized: number; cancelled: number; pending: number; unknown: number } | null
+  taskTimeliness: { cohort: number; onTime: number; late: number; cancelled: number; open: number; unknown: number } | null
 }
 
 /** Cohorte por fecha de entrada/creación; los pendientes son una foto actual. */
@@ -188,7 +211,87 @@ async function crmPerformance(tx: Db, orgId: string, access: WorkspaceAccess, st
       count(*) filter(where status='fallida' and updated_at >= ${start} and updated_at < ${end})::int as failed,
       count(*) filter(where status='propuesta')::int as pending
     from agent_proposal where organization_id=${orgId}`) : []
-  return { responses: responses ?? null, followUps: followUps ?? null, conversations: conversations ?? null, bookings, conversion, proposals: proposals ?? null }
+  const [handoffs] = access.agent && access.tasks ? await tx.execute<NonNullable<CrmPerformance["handoffs"]>>(sql`
+    with cohort as (
+      select h.id, h.assignee_user_id, t.id as task_id,
+        coalesce(last_transition.status, case when t.updated_at < ${end} then t.status else 'open' end) as effective_status,
+        last_transition.at as transition_at,
+        exists(
+          select 1 from audit_event a where a.organization_id=${orgId}
+            and a.entity='agent_handoff' and a.entity_id=h.id
+            and a.action='agent.handoff_claimed' and a.created_at < ${end}
+        ) as claimed
+      from agent_handoff h
+      left join task t on t.id=h.task_id and t.organization_id=${orgId} and t.created_at < ${end}
+      left join lateral (
+        select a.metadata->>'statusNext' as status, a.created_at as at
+        from audit_event a where a.organization_id=${orgId}
+          and a.entity='task' and a.entity_id=t.id and a.action='task.updated'
+          and a.created_at < ${end} and a.metadata->>'statusNext' in ('open','done','cancelled')
+        order by a.created_at desc, a.id desc limit 1
+      ) last_transition on true
+      where h.organization_id=${orgId} and h.created_at >= ${start} and h.created_at < ${end}
+    ) select count(*)::int as cohort,
+      count(*) filter(where task_id is not null and (assignee_user_id is not null or claimed))::int as collected,
+      count(*) filter(where effective_status='done' and transition_at is not null)::int as resolved,
+      count(*) filter(where effective_status='cancelled' and transition_at is not null)::int as cancelled,
+      count(*) filter(where task_id is not null and effective_status='open')::int as open,
+      count(*) filter(where task_id is null or (effective_status in ('done','cancelled') and transition_at is null))::int as unknown
+    from cohort`) : []
+  const [clinicalControls] = access.clinical ? await tx.execute<NonNullable<CrmPerformance["clinicalControls"]>>(sql`
+    with cohort as (
+      select f.id, f.status, f.completed_at, f.cancelled_at, f.completed_encounter_id,
+        f.outcome, e.status as encounter_status, e.finalized_at as encounter_finalized_at
+      from clinical_follow_up f
+      left join encounter e on e.id=f.completed_encounter_id and e.organization_id=${orgId}
+      where f.organization_id=${orgId} and f.due_at >= ${start} and f.due_at < ${end}
+        and f.created_at < ${end}
+    ) select count(*)::int as cohort,
+      count(*) filter(where completed_at < ${end} and completed_encounter_id is not null
+        and outcome is not null and encounter_status='finalizada' and encounter_finalized_at < ${end})::int as realized,
+      count(*) filter(where cancelled_at < ${end})::int as cancelled,
+      count(*) filter(where ((status in ('pendiente','programado')
+          and (completed_at is null or completed_at >= ${end})
+          and (cancelled_at is null or cancelled_at >= ${end}))
+        or completed_at >= ${end} or cancelled_at >= ${end}))::int as pending,
+      count(*) filter(where (status='realizado' and completed_at is null)
+        or (completed_at < ${end} and (completed_encounter_id is null or outcome is null
+          or encounter_status<>'finalizada' or encounter_finalized_at is null or encounter_finalized_at >= ${end}))
+        or (status='cancelado' and cancelled_at is null))::int as unknown
+    from cohort`) : []
+  const [taskTimeliness] = access.tasks ? await tx.execute<NonNullable<CrmPerformance["taskTimeliness"]>>(sql`
+    with cohort as (
+      select t.id, t.due_at,
+        coalesce(last_transition.status, case when t.updated_at < ${end} then t.status else 'open' end) as effective_status,
+        last_transition.at as transition_at
+      from task t
+      left join lateral (
+        select a.metadata->>'statusNext' as status, a.created_at as at
+        from audit_event a where a.organization_id=${orgId}
+          and a.entity='task' and a.entity_id=t.id and a.action='task.updated'
+          and a.created_at < ${end} and a.metadata->>'statusNext' in ('open','done','cancelled')
+        order by a.created_at desc, a.id desc limit 1
+      ) last_transition on true
+      where t.organization_id=${orgId} and t.due_at >= ${start} and t.due_at < ${end}
+        and t.created_at < ${end}
+    ) select count(*)::int as cohort,
+      count(*) filter(where effective_status='done' and transition_at is not null and transition_at <= due_at)::int as "onTime",
+      count(*) filter(where effective_status='done' and transition_at is not null and transition_at > due_at)::int as late,
+      count(*) filter(where effective_status='cancelled' and transition_at is not null)::int as cancelled,
+      count(*) filter(where effective_status='open')::int as open,
+      count(*) filter(where effective_status in ('done','cancelled') and transition_at is null)::int as unknown
+    from cohort`) : []
+  return {
+    responses: responses ?? null,
+    followUps: followUps ?? null,
+    conversations: conversations ?? null,
+    bookings,
+    conversion,
+    proposals: proposals ?? null,
+    handoffs: handoffs ?? null,
+    clinicalControls: clinicalControls ?? null,
+    taskTimeliness: taskTimeliness ?? null,
+  }
 }
 /**
  * Pulso del negocio para los gráficos del home. Cada sección es nula sin su
@@ -247,11 +350,28 @@ export async function getWorkspaceHome(tx: Db, orgId: string, userId: string, ac
   const appointmentCounts = access.appointments ? await tx.execute<{ status: string; count: number }>(sql`
     select status, count(*)::int as count from appointment where organization_id=${orgId}
     and starts_at >= ${start} and starts_at < ${end} group by status`) : []
-  const tasks = access.tasks ? await tx.execute<{ id: string; title: string; dueAt: string | null; overdue: boolean }>(sql`
-    select id, title, due_at as "dueAt", coalesce(due_at < now(), false) as overdue
+  const taskRows = access.tasks ? await tx.execute<{
+    id: string; title: string; dueAt: string | null; overdue: boolean
+    contactId: string | null; conversationId: string | null; opportunityId: string | null
+  }>(sql`
+    select id, title, due_at as "dueAt", coalesce(due_at < now(), false) as overdue,
+      contact_id as "contactId", conversation_id as "conversationId", opportunity_id as "opportunityId"
     from task where organization_id=${orgId} and status='open'
     and (${access.allTasks} or assignee_user_id=${userId})
     order by due_at asc nulls last, id limit 8`) : []
+  const tasks = taskRows.map(({ id, title, dueAt, overdue, contactId, conversationId, opportunityId }) => ({
+    id,
+    title,
+    dueAt,
+    overdue,
+    href: access.crm && opportunityId
+      ? `/opportunities/${opportunityId}`
+      : access.conversations && conversationId
+        ? `/inbox?conversation=${conversationId}`
+        : access.crm && contactId
+          ? `/contacts/${contactId}`
+          : `/tasks?task=${id}`,
+  }))
   const [taskCount] = access.tasks ? await tx.execute<{ overdue: number; open: number }>(sql`
     select count(*) filter (where due_at < now())::int as overdue, count(*)::int as open
     from task where organization_id=${orgId} and status='open'

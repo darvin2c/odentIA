@@ -7,7 +7,7 @@ export interface WorkspaceHome {
   access: Record<"patients" | "appointments" | "conversations" | "tasks" | "finance" | "clinical" | "crm" | "agent" | "allTasks", boolean>
   appointments: Array<{ id: string; patientId: string; patientName: string; startsAt: string; status: string; branchName: string; dentistName: string }>
   appointmentCounts: Array<{ status: string; count: number }>
-  tasks: Array<{ id: string; title: string; dueAt: string | null; overdue: boolean }>
+  tasks: Array<{ id: string; title: string; dueAt: string | null; overdue: boolean; href: string }>
   taskCount: { overdue: number; open: number } | null
   conversations: { unread: number; waiting: number; human: number } | null
   budgets: Array<{ id: string; patientId: string; patientName: string; title: string; presentedAt: string | null }>
@@ -50,6 +50,9 @@ export interface CrmPerformance {
   bookings: Array<{ source: string; count: number; active: number }> | null
   conversion: Array<{ channel: string | null; assigneeUserId: string | null; assigneeName: string | null; created: number; won: number; lost: number; open: number; wonRate: number | null }> | null
   proposals: { executed: number; failed: number; pending: number } | null
+  handoffs: { cohort: number; collected: number; resolved: number; cancelled: number; open: number; unknown: number } | null
+  clinicalControls: { cohort: number; realized: number; cancelled: number; pending: number; unknown: number } | null
+  taskTimeliness: { cohort: number; onTime: number; late: number; cancelled: number; open: number; unknown: number } | null
 }
 export const stateLabel: Record<string, string> = {
   programada: "Programada", confirmada: "Confirmada", atendida: "Atendida", no_asistio: "No asistió", cancelada: "Cancelada",
