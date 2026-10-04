@@ -1,16 +1,16 @@
 import { Badge } from "@odentia/ui"
 import { ConfirmDialog, DonutChart, EmptyState, FunnelChart, KpiCard, LoadingState, PageHeader, PageShell, SubmitButton, TrendChart } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { createFileRoute, Link } from "@tanstack/react-router"
+import { Link, createFileRoute } from "@tanstack/react-router"
 import { AlertTriangle, ArrowRight, Bot, CalendarDays, CheckCircle2, CheckSquare, Hand, Inbox, Wallet } from "lucide-react"
 import { useState, type ReactNode } from "react"
-import { ApiError, apiFetch } from "../../lib/api"
-import { ACTION_LABEL, proposalErrorMessage, type AgentProposal } from "../../lib/agent"
-import { channelLabel } from "../../lib/channels"
 import { PerformanceSummary } from "../../components/crm/performance-summary"
+import { ACTION_LABEL, proposalErrorMessage, type AgentProposal } from "../../lib/agent"
+import { ApiError, apiFetch } from "../../lib/api"
+import { channelLabel } from "../../lib/channels"
 import { usePermission } from "../../lib/crm"
 import { useOrgEvents } from "../../lib/org-events"
-import { type WorkspaceHome, type WorkspacePulse, moneyFromCents, stateLabel } from "../../lib/workspace"
+import { moneyFromCents, stateLabel, type WorkspaceHome, type WorkspacePulse } from "../../lib/workspace"
 
 export const Route = createFileRoute("/_org/home")({ component: HomePage })
 
@@ -131,7 +131,7 @@ function HomePage() {
           </li>)}</ul>}
         </Section>}
         {data.access.tasks && <Section title={data.access.allTasks ? "Pendientes del equipo" : "Mis pendientes"} href="/tasks" action="Ver tareas">
-          {data.tasks.length === 0 ? <p className="text-sm text-muted-foreground">No tienes tareas pendientes.</p> : <ul className="divide-y">{data.tasks.map(item => <li key={item.id} className="flex justify-between gap-3 py-3"><span className="text-sm">{item.title}</span>{item.overdue && <Badge variant="destructive">Vencida</Badge>}</li>)}</ul>}
+          {data.tasks.length === 0 ? <p className="text-sm text-muted-foreground">No tienes tareas pendientes.</p> : <ul className="divide-y">{data.tasks.map(item => <li key={item.id}><Link to={item.href} className="flex justify-between gap-3 rounded-sm py-3 focus-visible:outline-2 focus-visible:outline-primary"><span className="text-sm">{item.title}</span>{item.overdue && <Badge variant="destructive">Vencida</Badge>}</Link></li>)}</ul>}
         </Section>}
         {(data.access.finance || data.access.clinical) && <Section title="Presupuestos por seguir" href="/patients" action="Ver pacientes">
           {data.budgets.length === 0 ? <p className="text-sm text-muted-foreground">No hay presupuestos presentados o pospuestos por revisar.</p> : <ul className="divide-y">{data.budgets.map(item => <li key={item.id} className="py-3"><Link to="/patients/$patientId" params={{ patientId: item.patientId }} search={{ tab: "plan" }} className="font-medium hover:underline">{item.patientName}</Link><p className="text-sm text-muted-foreground">{item.title}</p></li>)}</ul>}
@@ -230,7 +230,7 @@ function Metric({ title, value, detail, href, icon }: { title: string; value: nu
   return <Link to={href} className="rounded-md focus-visible:outline-2 focus-visible:outline-primary"><KpiCard title={title} value={value} description={detail} icon={icon} className="hover:bg-muted/40 transition-colors" /></Link>
 }
 function Section({ title, href, action, children }: { title: string; href: string; action: string; children: ReactNode }) {
-  return <section className="rounded-md border bg-card p-5"><div className="mb-4 flex items-center justify-between gap-3"><h2 className="font-semibold">{title}</h2><a href={href} className="inline-flex items-center gap-1 text-sm text-primary hover:underline">{action}<ArrowRight className="size-4" aria-hidden /></a></div>{children}</section>
+  return <section className="rounded-md border bg-card p-5"><div className="mb-4 flex items-center justify-between gap-3"><h2 className="font-semibold">{title}</h2><Link to={href} className="inline-flex items-center gap-1 text-sm text-primary hover:underline">{action}<ArrowRight className="size-4" aria-hidden /></Link></div>{children}</section>
 }
 /** Fecha ISO → texto corto en el idioma y zona de la organización. */
 function formatDateTime(value: string, locale: string, timezone: string) {

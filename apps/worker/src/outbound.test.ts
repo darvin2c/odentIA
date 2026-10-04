@@ -74,20 +74,22 @@ it("mensaje ya enviado hace ack sin reenviar", async () => {
   expect(await messageState(messageId)).toEqual(before)
 })
 
-it("fallo live reintenta; tras 5 entregas marca failed", async () => {
+it("fallo ambiguo live no reintenta ni duplica el envío", async () => {
   const { messageId } = await seedQueuedText()
+  let calls = 0
   const liveFail = {
     ...deps,
     senderMode: "live" as const,
     fetch: (async () => {
-      throw new Error("red caída")
+      calls++
+      throw new Error("red caída tras despachar")
     }) as typeof fetch,
   }
-  expect(await processOutbound(appDb, liveFail, outJob(messageId, 0))).toBe("retry")
-  expect((await messageState(messageId))?.status).toBe("queued")
+  expect(await processOutbound(appDb, liveFail, outJob(messageId, 0))).toBe("done")
+  expect((await messageState(messageId))?.status).toBe("unknown")
   expect(await processOutbound(appDb, liveFail, outJob(messageId, 5))).toBe("done")
-  const failed = await messageState(messageId)
-  expect(failed?.status).toBe("failed")
+  expect(calls).toBe(1)
+  expect((await messageState(messageId))?.status).toBe("unknown")
 })
 
 it("live con stub de proveedor marca sent", async () => {

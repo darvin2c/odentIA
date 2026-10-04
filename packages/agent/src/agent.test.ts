@@ -111,11 +111,11 @@ async function agentMessages(conversationId: string): Promise<string[]> {
   return rows.map((r) => r.body ?? "")
 }
 
-async function runAgent(conversationId: string, triggerMessageId: string, readCt = 0) {
+async function runAgent(conversationId: string, messageId: string, readCt = 0) {
   return processAgentRun(appDb, runtime, {
     msg_id: 1,
     read_ct: readCt,
-    message: { orgId: "org_a", conversationId, triggerMessageId },
+    message: { kind: "inbound_message", orgId: "org_a", conversationId, messageId },
   })
 }
 
@@ -278,7 +278,7 @@ it("simulación consulta seguimientos reales sin generar respuesta ni cambiar pe
     createTask(tx, "org_a", { contactId: conv!.contactId, conversationId, title: "Confirmar horario de tarde", createdBy: "user" }))
   const ctx: AgentToolCtx = {
     db: appDb, orgId: "org_a", conversationId, contactId: conv!.contactId,
-    triggerMessageId: null, secretsKey: KEY, dryRun: true, handedOff: false,
+    triggerId: null, secretsKey: KEY, dryRun: true, handedOff: false, decisionRecorded: false,
     toolsUsed: [], usage: { inputTokens: 0, outputTokens: 0, reported: false },
   }
   const reader = makeAgentTools(ctx).find(t => t.name === "listar_tareas")
@@ -321,7 +321,7 @@ it("el contexto se reemplaza entre turnos sin crecer por copia ni conservar pol�
   expect(conv).toBeDefined()
   const toolCtx: AgentToolCtx = {
     db: appDb, orgId: "org_a", conversationId, contactId: conv!.contactId,
-    triggerMessageId: null, secretsKey: KEY, dryRun: true, handedOff: false,
+    triggerId: null, secretsKey: KEY, dryRun: true, handedOff: false, decisionRecorded: false,
     toolsUsed: [], usage: { inputTokens: 0, outputTokens: 0, reported: false },
   }
   const model = new RecordingModel({})
@@ -376,7 +376,7 @@ it("el prompt incluye el compromiso de otro canal con procedencia y lo pierde al
   const tg = await ingestText("tg:990011", "evt-cross-tg", "Hola, sigo desde otro canal")
   const toolCtx: AgentToolCtx = {
     db: appDb, orgId: "org_a", conversationId: tg.conversationId, contactId,
-    triggerMessageId: null, secretsKey: KEY, dryRun: true, handedOff: false,
+    triggerId: null, secretsKey: KEY, dryRun: true, handedOff: false, decisionRecorded: false,
     toolsUsed: [], usage: { inputTokens: 0, outputTokens: 0, reported: false },
   }
   const model = new RecordingModel({})
@@ -440,7 +440,7 @@ it("el prompt avisa cuando hay más historial y ver_otros_canales pagina con cur
   })
   const toolCtx: AgentToolCtx = {
     db: appDb, orgId: "org_a", conversationId: current.conversationId, contactId,
-    triggerMessageId: null, secretsKey: KEY, dryRun: true, handedOff: false,
+    triggerId: null, secretsKey: KEY, dryRun: true, handedOff: false, decisionRecorded: false,
     toolsUsed: [], usage: { inputTokens: 0, outputTokens: 0, reported: false },
   }
   const model = new RecordingModel({})
@@ -511,7 +511,7 @@ it("buscar_huecos entrega una opción completa que proponer_cita ejecuta como ci
     updateAutonomyPolicy(tx, "org_a", actorId, { reservar_cita: "aprobar_equipo" }))
   const ctx: AgentToolCtx = {
     db: appDb, orgId: "org_a", conversationId, contactId,
-    triggerMessageId: null, secretsKey: KEY, dryRun: false, handedOff: false,
+    triggerId: null, secretsKey: KEY, dryRun: false, handedOff: false, decisionRecorded: false,
     toolsUsed: [], usage: { inputTokens: 0, outputTokens: 0, reported: false },
   }
   const tools = makeAgentTools(ctx)
@@ -616,7 +616,7 @@ it("reprogramar_cita y cancelar_cita actúan sobre la cita real sin duplicar res
     }))
   const ctx: AgentToolCtx = {
     db: appDb, orgId: "org_a", conversationId, contactId,
-    triggerMessageId: "trig-reprog-1", secretsKey: KEY, dryRun: false, handedOff: false,
+    triggerId: "trig-reprog-1", secretsKey: KEY, dryRun: false, handedOff: false, decisionRecorded: false,
     toolsUsed: [], usage: { inputTokens: 0, outputTokens: 0, reported: false },
   }
   const tools = makeAgentTools(ctx)
@@ -643,7 +643,7 @@ it("reprogramar_cita y cancelar_cita actúan sobre la cita real sin duplicar res
   expect(rows[0]!.version).toBe(booked.version + 1)
 
   // Obsolescencia: si la cita cambió desde la propuesta, confirmar no ejecuta.
-  ctx.triggerMessageId = "trig-reprog-2"
+  ctx.triggerId = "trig-reprog-2"
   const staleProposal = String(await reprogram.invoke({
     appointmentId: booked.id, startsAt: "2026-10-07T15:00:00Z", expectedVersion: booked.version + 1,
   }))
@@ -664,7 +664,7 @@ it("reprogramar_cita y cancelar_cita actúan sobre la cita real sin duplicar res
 
   // Cancelar (aprobar_equipo): la confirmación del interlocutor no basta;
   // reentregar el mismo trigger no duplica la propuesta.
-  ctx.triggerMessageId = "trig-cancel-1"
+  ctx.triggerId = "trig-cancel-1"
   const cancel = tools.find((t) => t.name === "cancelar_cita")!
   const pendingMsg = String(await cancel.invoke({ appointmentId: booked.id }))
   expect(pendingMsg).toContain("aprobación del equipo")
@@ -686,7 +686,7 @@ it("reprogramar_cita y cancelar_cita actúan sobre la cita real sin duplicar res
   expect(rows[0]!.status).toBe("cancelada")
 
   // Cancelar una cita ya cancelada no produce efectos parciales.
-  ctx.triggerMessageId = "trig-cancel-2"
+  ctx.triggerId = "trig-cancel-2"
   const lateMsg = String(await cancel.invoke({ appointmentId: booked.id }))
   const lateId = /Propuesta ([0-9a-f-]{36})/.exec(lateMsg)?.[1]
   expect(lateId).toBeTruthy()
@@ -731,7 +731,7 @@ it("proponer_cita en directo fallido no se reporta como aprobación", async () =
     updateAutonomyPolicy(tx, "org_a", actorId, { reservar_cita: "directo" }))
   const ctx: AgentToolCtx = {
     db: appDb, orgId: "org_a", conversationId, contactId,
-    triggerMessageId: null, secretsKey: KEY, dryRun: false, handedOff: false,
+    triggerId: null, secretsKey: KEY, dryRun: false, handedOff: false, decisionRecorded: false,
     toolsUsed: [], usage: { inputTokens: 0, outputTokens: 0, reported: false },
   }
   const booking = makeAgentTools(ctx).find((t) => t.name === "proponer_cita")
@@ -774,7 +774,7 @@ it("segunda propuesta en espera guía a confirmar en vez de romper el turno", as
     updateAutonomyPolicy(tx, "org_a", actorId, { enviar_mensaje: "confirmar_usuario" }))
   const ctx: AgentToolCtx = {
     db: appDb, orgId: "org_a", conversationId, contactId: conv!.contactId,
-    triggerMessageId: null, secretsKey: KEY, dryRun: false, handedOff: false,
+    triggerId: null, secretsKey: KEY, dryRun: false, handedOff: false, decisionRecorded: false,
     toolsUsed: [], usage: { inputTokens: 0, outputTokens: 0, reported: false },
   }
   const sender = makeAgentTools(ctx).find((t) => t.name === "send_reply")
@@ -807,7 +807,7 @@ it("en modo equipo el segundo intento y confirmar_propuesta no piden sí ni ejec
     updateAutonomyPolicy(tx, "org_a", actorId, { crear_oportunidad: "aprobar_equipo" }))
   const ctx: AgentToolCtx = {
     db: appDb, orgId: "org_a", conversationId, contactId: conv!.contactId,
-    triggerMessageId: null, secretsKey: KEY, dryRun: false, handedOff: false,
+    triggerId: null, secretsKey: KEY, dryRun: false, handedOff: false, decisionRecorded: false,
     toolsUsed: [], usage: { inputTokens: 0, outputTokens: 0, reported: false },
   }
   const tools = makeAgentTools(ctx)
@@ -841,7 +841,7 @@ it("create_task no duplica en reentrega y las escrituras directas auditan su ori
   const contactId = conv!.contactId
   const ctx: AgentToolCtx = {
     db: appDb, orgId: "org_a", conversationId, contactId,
-    triggerMessageId: "trig-dw-1", secretsKey: KEY, dryRun: false, handedOff: false,
+    triggerId: "trig-dw-1", secretsKey: KEY, dryRun: false, handedOff: false, decisionRecorded: false,
     toolsUsed: [], usage: { inputTokens: 0, outputTokens: 0, reported: false },
   }
   const tools = makeAgentTools(ctx)
@@ -866,7 +866,7 @@ it("create_task no duplica en reentrega y las escrituras directas auditan su ori
     expect((audit.metadata as Record<string, unknown> | null)?.origin).toBe("agent")
   }
   // En simulación no escribe nada.
-  const dryCtx: AgentToolCtx = { ...ctx, dryRun: true, triggerMessageId: "trig-dw-dry" }
+  const dryCtx: AgentToolCtx = { ...ctx, dryRun: true, triggerId: "trig-dw-dry" }
   const dry = String(await makeAgentTools(dryCtx).find((t) => t.name === "create_task")!.invoke({ title: "No debe persistir" }))
   expect(dry).toContain("SIMULACIÓN")
   const afterDry = await withOrgContext(appDb, "org_a", (tx) =>

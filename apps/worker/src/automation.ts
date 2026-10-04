@@ -45,7 +45,8 @@ export async function runAutomationTick(deps: AutomationWorkerDeps): Promise<boo
   const summary = await tickAutomations(ownerDb, appDb, now, { secretsKey, publicBaseUrl })
   console.log(
     `worker: automations despertadores=${pending} orgs=${summary.orgs} ` +
-      `programados=${summary.programados} entregados=${summary.entregados} fallidos=${summary.fallidos}`,
+      `programados=${summary.programados} coordinados=${summary.coordinados} ` +
+      `entregados=${summary.entregados} fallidos=${summary.fallidos}`,
   )
   return true
 }

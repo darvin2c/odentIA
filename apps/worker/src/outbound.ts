@@ -3,7 +3,7 @@ import { channelAdapters, type OutboundMessage } from "@odentia/channels"
 import { type Db, type OutboundMessageJob, type QueueMessage, withOrgContext } from "@odentia/db"
 import { channelConnection, conversation, message } from "@odentia/db/schema/crm"
 import { auditEvent } from "@odentia/db/schema/org"
-import { decryptConfig, type Storage } from "@odentia/services"
+import { decryptConfig, markCommercialFollowUpUncertain, type Storage } from "@odentia/services"
 import { and, eq, sql } from "drizzle-orm"
 import { MAX_DELIVERIES } from "./inbound.js"
 
@@ -84,8 +84,9 @@ async function buildOutbound(
 }
 
 /**
- * Envía un mensaje `queued` al proveedor. Reintenta vía pgmq (sin ack);
- * tras MAX_DELIVERIES lo marca `failed` con auditoría y hace ack.
+ * Envía un mensaje `queued` al proveedor. Solo reintenta errores anteriores a
+ * la llamada externa; una excepción durante `sendMessage` es ambigua y exige
+ * conciliación humana para no duplicar el efecto.
  */
 export async function processOutbound(
   db: Db,
@@ -93,6 +94,7 @@ export async function processOutbound(
   msg: QueueMessage<OutboundMessageJob>,
 ): Promise<"done" | "retry"> {
   const { orgId, messageId } = msg.message
+  let providerAttempted = false
   try {
     await withOrgContext(db, orgId, async (tx) => {
       const [row] = await tx
@@ -103,7 +105,7 @@ export async function processOutbound(
         .where(and(eq(message.id, messageId), eq(message.organizationId, orgId)))
         .limit(1)
       // Mensaje inexistente o ya procesado: ack.
-      if (!row || row.message.status !== "queued") return
+      if (row?.message.status !== "queued") return
       if (row.conversation.status !== "open" || row.connection.status !== "active") {
         await tx
           .update(message)
@@ -119,6 +121,7 @@ export async function processOutbound(
         const config = decryptConfig(deps.secretsKey, row.connection.configEncrypted)
         const adapter = channelAdapters[row.connection.provider as keyof typeof channelAdapters]
         if (!adapter) throw new Error(`Proveedor desconocido: ${row.connection.provider}`)
+        providerAttempted = true
         externalId = (await adapter.sendMessage(config, outbound, { fetch: deps.fetch })).externalId
       }
       await tx
@@ -139,6 +142,24 @@ export async function processOutbound(
     })
     return "done"
   } catch (error) {
+    if (providerAttempted) {
+      const detail = error instanceof Error ? error.message : String(error)
+      await withOrgContext(db, orgId, async (tx) => {
+        await tx
+          .update(message)
+          .set({ status: "unknown", error: `ambiguous: ${detail.slice(0, 480)}` })
+          .where(and(eq(message.id, messageId), eq(message.organizationId, orgId)))
+        await tx.insert(auditEvent).values({
+          organizationId: orgId,
+          action: "message.updated",
+          entity: "message",
+          entityId: messageId,
+          metadata: { op: "send-uncertain", error: detail.slice(0, 500) },
+        })
+        await markCommercialFollowUpUncertain(tx, orgId, messageId, detail.slice(0, 500))
+      }).catch(() => {})
+      return "done"
+    }
     if (msg.read_ct >= MAX_DELIVERIES) {
       const detail = error instanceof Error ? error.message : String(error)
       await withOrgContext(db, orgId, async (tx) => {

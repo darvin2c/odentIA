@@ -3,23 +3,23 @@ import type { Runnable } from "@langchain/core/runnables"
 import { Annotation, END, START, StateGraph } from "@langchain/langgraph"
 import { ToolNode } from "@langchain/langgraph/prebuilt"
 import type { PostgresSaver } from "@langchain/langgraph-checkpoint-postgres"
-import { type Db, withOrgContext } from "@odentia/db"
+import { withOrgContext } from "@odentia/db"
 import {
   formatKnowledgeForPrompt,
-  getAutonomyPolicy,
+  formatZoned,
   getAgentConfig,
+  getAutonomyPolicy,
   getClinicInfoSnapshot,
   getContact,
-  listContactChannelHistory,
-  formatZoned,
   getOrgLocale,
-  listMessages,
+  listContactChannelHistory,
   listContactNotes,
+  listMessages,
   listOpportunities,
   listPublishedForPrompt,
+  type OrgLocale,
 } from "@odentia/services"
 import { type AgentToolCtx, makeAgentTools, performHandoff } from "./tools.js"
-import type { OrgLocale } from "@odentia/services"
 
 function isSystemMessage(msg: BaseMessage): boolean {
   if (msg instanceof SystemMessage) return true
@@ -217,6 +217,7 @@ export function compileAgentGraph(
       baseSystemPrompt(zone),
       `Fecha y hora actual de la clínica: ${formatZoned(new Date(), zone)}.`,
       orgPrompt,
+      toolCtx.runInstruction ? `Instrucción operativa de esta corrida:\n${toolCtx.runInstruction}` : null,
       `Interlocutor: ${contactDetail.displayName}. Etiquetas: ${tagsLine}. Oportunidades abiertas: ${commercialLine}. Seguimientos: ${followupLine}.`,
       notesLine ? `Notas del contacto (internas): ${notesLine}${(contactDetail.notes?.trim().length ?? 0) > 500 ? "… (texto completo en leer_contexto_comercial)" : ""}.` : null,
       notes.items.length ? `Notas operativas recientes (internas; no las reproduzcas al interlocutor):\n${notes.items.map(n => `${n.at}: ${n.body}`).join("\n")}${notes.nextCursor ? "\nHay más notas: usa leer_contexto_comercial con cursor de notas para consultarlas." : ""}` : null,
@@ -256,7 +257,7 @@ export function compileAgentGraph(
   }
 
   async function routeAfterTools(state: typeof AgentState.State): Promise<string> {
-    if (toolCtx.handedOff) return END
+    if (toolCtx.decisionRecorded || toolCtx.handedOff) return END
     const maxTurns = await withOrgContext(toolCtx.db, toolCtx.orgId, async (tx) => {
       const cfg = await getAgentConfig(tx, toolCtx.orgId)
       return cfg.maxTurns

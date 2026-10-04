@@ -108,9 +108,9 @@ function run<T>(fn: (tx: Db) => Promise<T>): Promise<T> {
 describe("clave de idempotencia", () => {
   it("es estable ante el mismo trigger y cambia con otro trigger", () => {
     const payload = { kind: "text", text: "Hola" }
-    const first = buildAgentProposalKey({ conversationId: "conv-1", triggerMessageId: "msg-1", tool: "send_reply", payload })
-    const replay = buildAgentProposalKey({ conversationId: "conv-1", triggerMessageId: "msg-1", tool: "send_reply", payload })
-    const other = buildAgentProposalKey({ conversationId: "conv-1", triggerMessageId: "msg-2", tool: "send_reply", payload })
+    const first = buildAgentProposalKey({ conversationId: "conv-1", triggerId: "msg-1", tool: "send_reply", payload })
+    const replay = buildAgentProposalKey({ conversationId: "conv-1", triggerId: "msg-1", tool: "send_reply", payload })
+    const other = buildAgentProposalKey({ conversationId: "conv-1", triggerId: "msg-2", tool: "send_reply", payload })
     expect(replay).toBe(first)
     expect(other).not.toBe(first)
   })

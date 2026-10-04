@@ -41,7 +41,7 @@ import {
 } from "./opportunities.js"
 import { listPatientsByContact, requirePatient } from "./patients.js"
 import { requireLinkedActiveContact } from "./responsibilities.js"
-import { createTask, updateTask } from "./tasks.js"
+import { createTask, getTask, updateTask } from "./tasks.js"
 import { createWorkspaceNotification } from "./workspace.js"
 import { auditEvent, branch } from "@odentia/db/schema/org"
 import { getPatientBalanceForPortal } from "./finance.js"
@@ -159,16 +159,16 @@ function payloadFingerprint(payload: Record<string, unknown>): string {
 }
 
 /**
- * Clave de idempotencia estable por trigger (mensaje) + herramienta +
- * payload: reaprobar o reintentar no reenvía ni duplica el acto.
+ * Clave de idempotencia estable por evento durable + herramienta + payload:
+ * reaprobar o reintentar no reenvía ni duplica el acto.
  */
 export function buildAgentProposalKey(input: {
   conversationId: string
-  triggerMessageId?: string | null
+  triggerId?: string | null
   tool: string
   payload: Record<string, unknown>
 }): string {
-  const trigger = input.triggerMessageId?.trim() ? input.triggerMessageId.trim().slice(0, 40) : "sim"
+  const trigger = input.triggerId?.trim() ? input.triggerId.trim().slice(0, 40) : "sim"
   return `agent:${input.conversationId}:${trigger}:${input.tool}:${payloadFingerprint(input.payload)}`.slice(0, 120)
 }
 
@@ -2008,6 +2008,8 @@ export async function createHandoff(
     summary: string
     priority?: string
     assigneeUserId?: string | null
+    /** Reutiliza el pendiente origen; no crea una segunda tarea. */
+    taskId?: string
     createdBy?: string
   },
 ): Promise<HandoffItem> {
@@ -2020,7 +2022,18 @@ export async function createHandoff(
   if (!(HANDOFF_PRIORITIES as readonly string[]).includes(priority)) {
     throw validation("priority debe ser alta|media|baja")
   }
-  const assigneeUserId = input.assigneeUserId ?? null
+  let assigneeUserId = input.assigneeUserId ?? null
+  let task = input.taskId ? await getTask(tx, orgId, input.taskId) : null
+  if (task) {
+    if (task.status !== "open") throw validation("La tarea de la derivación ya no está abierta")
+    if (task.conversationId !== input.conversationId || task.contactId !== conv.contactId) {
+      throw validation("La tarea no corresponde a la conversación de la derivación")
+    }
+    if (assigneeUserId && task.assigneeUserId && assigneeUserId !== task.assigneeUserId) {
+      throw validation("La derivación no puede cambiar el responsable del seguimiento vinculado")
+    }
+    assigneeUserId ??= task.assigneeUserId
+  }
   if (assigneeUserId) {
     const [membership] = await tx
       .select({ userId: member.userId })
@@ -2030,7 +2043,7 @@ export async function createHandoff(
     if (!membership) throw validation("El responsable no es miembro de la organización")
   }
   const createdBy = input.createdBy === "user" ? "user" : "agent"
-  const task = await createTask(tx, orgId, {
+  task ??= await createTask(tx, orgId, {
     title: `Derivación (${priority}): ${reason}`.slice(0, 200),
     contactId: conv.contactId,
     conversationId: input.conversationId,
@@ -2061,7 +2074,7 @@ export async function createHandoff(
     action: "agent.handoff_created",
     entity: "agent_handoff",
     entityId: row.id,
-    metadata: { priority, taskId: task.id },
+    metadata: { priority, taskId: task.id, assigneeUserId },
   })
   const recipients = assigneeUserId ? [assigneeUserId] : await teamUserIds(tx, orgId)
   if (recipients.length) {
@@ -2069,7 +2082,7 @@ export async function createHandoff(
       dedupeKey: `agent-handoff:${row.id}`,
       title: "Derivación del agente",
       body: `Prioridad ${priority}: ${reason}`.slice(0, 200),
-      href: "/inbox",
+      href: `/inbox?conversation=${input.conversationId}&fallbackTask=${task.id}`,
       permission: "tasks.read",
     })
   }
@@ -2157,9 +2170,11 @@ async function escalateOverdueHandoffs(tx: Db, orgId: string): Promise<void> {
   const overdue = await tx
     .select({
       id: agentHandoff.id,
+      conversationId: agentHandoff.conversationId,
       reason: agentHandoff.reason,
       priority: agentHandoff.priority,
       assigneeUserId: agentHandoff.assigneeUserId,
+      taskId: crmTask.id,
     })
     .from(agentHandoff)
     .innerJoin(crmTask, eq(crmTask.id, agentHandoff.taskId))
@@ -2178,7 +2193,9 @@ async function escalateOverdueHandoffs(tx: Db, orgId: string): Promise<void> {
       dedupeKey: `agent-handoff-overdue:${row.id}`,
       title: "Derivación vencida",
       body: `La derivación (prioridad ${row.priority}) superó su plazo sin resolverse: ${row.reason}`.slice(0, 200),
-      href: "/inbox",
+      href: row.conversationId
+        ? `/inbox?conversation=${row.conversationId}&fallbackTask=${row.taskId}`
+        : `/tasks?task=${row.taskId}`,
       permission: "tasks.read",
     })
   }

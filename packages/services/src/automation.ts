@@ -1,8 +1,8 @@
 import { createHash, randomBytes } from "node:crypto"
-import type { Db } from "@odentia/db"
-import { withOrgContext } from "@odentia/db"
+import { sendAgentRun, type Db, withOrgContext } from "@odentia/db"
 import { appointment } from "@odentia/db/schema/agenda"
 import { member, organization } from "@odentia/db/schema/auth"
+import { commercialFollowUpCoordination } from "@odentia/db/schema/agent"
 import type {
   AutomationChannel,
   AutomationJobStatus,
@@ -20,7 +20,7 @@ import {
   CONSENT_PURPOSES,
 } from "@odentia/db/schema/automation"
 import { clinicalFollowUp, patientContact, treatmentBudget } from "@odentia/db/schema/clinical"
-import { channelConnection, contact, contactIdentity } from "@odentia/db/schema/crm"
+import { agentConfig, channelConnection, contact, contactIdentity, conversation, crmTask } from "@odentia/db/schema/crm"
 import { opportunity } from "@odentia/db/schema/opportunities"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import {
@@ -757,6 +757,144 @@ function afterQuietEnd(now: Date, timeZone: string, start?: string, end?: string
 export interface SyncSummary {
   programados: number
   omitidos: number
+}
+
+const COMMERCIAL_QUIET_START = "20:00"
+const COMMERCIAL_QUIET_END = "08:00"
+
+/**
+ * Convierte una próxima acción comercial vencida en una sola decisión durable.
+ * No agenda otra reiteración: una nueva coordinación exige que una persona
+ * vuelva a fijar `nextActionAt`.
+ */
+export async function syncOverdueCommercialFollowUps(
+  tx: Db,
+  orgId: string,
+  now: Date,
+): Promise<SyncSummary> {
+  const rows = await tx
+    .select({
+      taskId: crmTask.id,
+      opportunityId: crmTask.opportunityId,
+      conversationId: crmTask.conversationId,
+      contactId: crmTask.contactId,
+      assigneeUserId: crmTask.assigneeUserId,
+      dueAt: crmTask.dueAt,
+      agentStatus: conversation.agentStatus,
+      channel: channelConnection.channel,
+      connectionStatus: channelConnection.status,
+      agentEnabled: agentConfig.enabled,
+    })
+    .from(crmTask)
+    .innerJoin(
+      opportunity,
+      and(
+        eq(opportunity.id, crmTask.opportunityId),
+        eq(opportunity.organizationId, crmTask.organizationId),
+      ),
+    )
+    .leftJoin(
+      conversation,
+      and(
+        eq(conversation.id, crmTask.conversationId),
+        eq(conversation.organizationId, crmTask.organizationId),
+      ),
+    )
+    .leftJoin(
+      channelConnection,
+      and(
+        eq(channelConnection.id, conversation.channelConnectionId),
+        eq(channelConnection.organizationId, crmTask.organizationId),
+      ),
+    )
+    .leftJoin(agentConfig, eq(agentConfig.organizationId, crmTask.organizationId))
+    .where(
+      and(
+        eq(crmTask.organizationId, orgId),
+        eq(crmTask.kind, "opportunity_follow_up"),
+        eq(crmTask.status, "open"),
+        lte(crmTask.dueAt, now),
+        eq(opportunity.status, "open"),
+        sql`${opportunity.nextActionAt} = ${crmTask.dueAt}`,
+      ),
+    )
+    .orderBy(asc(crmTask.dueAt), asc(crmTask.id))
+    .limit(25)
+  const timeZone = await timezoneOf(tx, orgId)
+  let programados = 0
+  let omitidos = 0
+  for (const row of rows) {
+    if (!row.opportunityId || !row.dueAt) continue
+    if (
+      row.conversationId &&
+      row.channel &&
+      row.agentStatus === "on" &&
+      row.connectionStatus === "active" &&
+      row.agentEnabled &&
+      inQuietHours(now, timeZone, COMMERCIAL_QUIET_START, COMMERCIAL_QUIET_END)
+    ) {
+      continue
+    }
+    let reason: string | null = null
+    if (!row.conversationId) reason = "La próxima acción no tiene una conversación vinculada"
+    else if (row.agentStatus !== "on") reason = "El agente está desactivado en la conversación"
+    else if (!row.agentEnabled) reason = "El agente está desactivado en la organización"
+    else if (!row.channel || row.connectionStatus !== "active") reason = "El canal no está disponible"
+    else if (!row.contactId || !(await hasConsent(tx, orgId, row.contactId, "seguimiento", row.channel))) {
+      reason = "No existe consentimiento vigente para seguimiento en el canal"
+    }
+    const recipient = reason ? await failureRecipient(tx, orgId, row.assigneeUserId) : null
+    const [created] = await tx
+      .insert(commercialFollowUpCoordination)
+      .values({
+        organizationId: orgId,
+        taskId: row.taskId,
+        opportunityId: row.opportunityId,
+        conversationId: row.conversationId,
+        triggerDueAt: row.dueAt,
+        status: reason ? "derivada" : "pendiente",
+        reason,
+        result: reason ? { code: "HUMAN_REQUIRED" } : null,
+        nextResponsibleKind: reason ? (recipient ? "user" : "team") : "agent",
+        nextResponsibleUserId: recipient,
+        decidedAt: reason ? now : null,
+      })
+      .onConflictDoNothing()
+      .returning({ id: commercialFollowUpCoordination.id })
+    if (!created) continue
+    if (reason) {
+      omitidos++
+      if (recipient) {
+        await createWorkspaceNotification(tx, orgId, {
+          userId: recipient,
+          dedupeKey: `commercial-coordination:${created.id}`,
+          title: "Seguimiento comercial requiere intervención",
+          body: reason,
+          href: `/tasks?task=${row.taskId}`,
+          permission: "tasks.read",
+        })
+      }
+      await audit(tx, orgId, null, "commercial_follow_up.derived", created.id, {
+        taskId: row.taskId,
+        opportunityId: row.opportunityId,
+        reason,
+      })
+      continue
+    }
+    if (!row.conversationId) throw new Error("La coordinación encolable perdió su conversación")
+    await sendAgentRun(tx, {
+      kind: "overdue_opportunity_follow_up",
+      orgId,
+      conversationId: row.conversationId,
+      coordinationId: created.id,
+    })
+    programados++
+    await audit(tx, orgId, null, "commercial_follow_up.queued", created.id, {
+      taskId: row.taskId,
+      opportunityId: row.opportunityId,
+    })
+  }
+  return { programados, omitidos }
 }
 
 /**
@@ -1864,6 +2002,7 @@ export interface TickDeps {
 export interface TickSummary {
   orgs: number
   programados: number
+  coordinados: number
   entregados: number
   fallidos: number
 }
@@ -1882,21 +2021,23 @@ export async function tickAutomations(
   deps: TickDeps,
 ): Promise<TickSummary> {
   const orgRows = await ownerDb.select({ orgId: organization.id }).from(organization)
-  const summary: TickSummary = { orgs: 0, programados: 0, entregados: 0, fallidos: 0 }
+  const summary: TickSummary = { orgs: 0, programados: 0, coordinados: 0, entregados: 0, fallidos: 0 }
   for (const { orgId } of orgRows) {
     summary.orgs++
     // Secuencial: las sincronizaciones comparten la transacción del tenant.
-    const programmed = await withOrgContext(appDb, orgId, async (tx) => {
+    const synced = await withOrgContext(appDb, orgId, async (tx) => {
       let total = 0
+      const commercial = await syncOverdueCommercialFollowUps(tx, orgId, now)
       total += (await syncAppointmentReminders(tx, orgId, now, deps.publicBaseUrl)).programados
       total += (await syncBudgetFollowUps(tx, orgId, now)).programados
       total += (await syncVisitFollowUps(tx, orgId, now)).programados
       total += (await syncInactiveRecall(tx, orgId, now)).programados
       total += (await syncCheckupReminders(tx, orgId, now)).programados
       total += (await syncCampaigns(tx, orgId, now, deps.publicBaseUrl)).programados
-      return total
+      return { total, coordinated: commercial.programados }
     })
-    summary.programados += programmed
+    summary.programados += synced.total
+    summary.coordinados += synced.coordinated
     const delivered = await withOrgContext(appDb, orgId, (tx) =>
       deliverDueJobs(tx, orgId, now, { secretsKey: deps.secretsKey }, deps.limit ?? 25),
     )

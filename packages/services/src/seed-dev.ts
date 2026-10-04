@@ -16,6 +16,7 @@ import { DEFAULT_REGISTRATION_CONFIG } from "@odentia/clinical"
 import { createOwnerDb } from "@odentia/db"
 import { appointment, scheduleChair } from "@odentia/db/schema/agenda"
 import { account, invitation, member, organization, user } from "@odentia/db/schema/auth"
+import { commercialFollowUpCoordination } from "@odentia/db/schema/agent"
 import {
   clinicalFollowUp,
   clinicalNote,
@@ -281,6 +282,7 @@ async function wipeSeed(): Promise<void> {
     "automation_job",
     "automation_consent",
     "automation_rule",
+    "commercial_follow_up_coordination",
     "agent_run_ledger",
     "agent_proposal",
     "agent_handoff",
@@ -2060,6 +2062,35 @@ await db.transaction(async (tx) => {
     opportunityId: commercial.id,
     stageId: (openStages[1] ?? openStages[0])!.id,
   })
+  const [followUpTask] = await tx
+    .select()
+    .from(crmTask)
+    .where(
+      and(
+        eq(crmTask.organizationId, ORG_A),
+        eq(crmTask.opportunityId, commercial.id),
+        eq(crmTask.kind, "opportunity_follow_up"),
+      ),
+    )
+    .limit(1)
+  if (!followUpTask?.dueAt) throw new Error("Falta el pendiente comercial de demostración")
+  await tx
+    .insert(commercialFollowUpCoordination)
+    .values({
+      organizationId: ORG_A,
+      taskId: followUpTask.id,
+      opportunityId: commercial.id,
+      conversationId: followUpTask.conversationId,
+      triggerDueAt: followUpTask.dueAt,
+      status: "omitida",
+      reason: "Escenario histórico revisado manualmente",
+      result: { code: "NO_LONGER_APPLICABLE" },
+      nextResponsibleKind: "none",
+      decidedAt: new Date("2026-10-06T15:00:00.000Z"),
+      createdAt: new Date("2026-10-06T15:00:00.000Z"),
+      updatedAt: new Date("2026-10-06T15:00:00.000Z"),
+    })
+    .onConflictDoNothing()
 })
 await db.transaction((tx) => seedChannels(tx, domainSeed, secretsKey, { fetch }))
 await db.transaction((tx) => seedWebchat(tx, domainSeed, { secretsKey, fetch }))
