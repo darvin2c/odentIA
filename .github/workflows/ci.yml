@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm typecheck
+      # Tests unitarios/de integración; E2E queda fuera de CI (supervisor Windows).
+      - run: pnpm test --filter=!@odentia/e2e
+
+  docker-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      # Verifica que la imagen de producción construye (sin push; el build real
+      # lo ejecuta OpenShip en el servidor al desplegar).
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          build-args: |
+            VITE_API_URL=https://api.example.invalid
+            VITE_BASE_DOMAIN=example.invalid
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

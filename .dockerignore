@@ -1,0 +1,11 @@
+.git
+node_modules
+**/node_modules
+**/dist
+**/.tanstack
+**/storybook-static
+infra/dev/.env
+infra/prod/.env
+*.log
+e2e/test-results
+e2e/playwright-report
