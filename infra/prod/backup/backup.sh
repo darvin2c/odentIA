@@ -3,14 +3,15 @@
 set -euo pipefail
 
 : "${DATABASE_URL:?}"
+if [ -z "${BACKUP_BUCKET:-}" ]; then
+  echo "[backup] BACKUP_BUCKET vacío: backups desactivados (entorno efímero)"
+  sleep infinity
+fi
+: "${DATABASE_URL:?}"
 : "${BACKUP_S3_ENDPOINT:?}"
 : "${BACKUP_S3_ACCESS_KEY:?}"
 : "${BACKUP_S3_SECRET_KEY:?}"
 : "${BACKUP_BUCKET:?}"
-RETAIN="${BACKUP_RETAIN:-14}"
-INTERVAL="${BACKUP_INTERVAL:-86400}"
-
-mc alias set r2 "$BACKUP_S3_ENDPOINT" "$BACKUP_S3_ACCESS_KEY" "$BACKUP_S3_SECRET_KEY" >/dev/null
 mc mb -p "r2/$BACKUP_BUCKET" 2>/dev/null || true
 
 while true; do
