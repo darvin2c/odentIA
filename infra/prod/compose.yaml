@@ -9,7 +9,8 @@ name: odentia-prod
 services:
   postgres:
     build:
-      context: ../../infra/dev/postgres
+      # Contexto relativo a la RAÍZ del repo (OpenShip); ver nota en &app-build.
+      context: infra/dev/postgres
       args:
         PGMQ_REF: v1.13.0
         PG_CRON_REF: v1.6.8
@@ -36,10 +37,11 @@ services:
 
   migrate:
     build: &app-build
-      context: ../..
-      args:
-        VITE_API_URL: ${VITE_API_URL:?}
-        VITE_BASE_DOMAIN: ${VITE_BASE_DOMAIN:?}
+      # Contexto relativo a la RAÍZ del repo (así lo resuelve OpenShip).
+      # `docker compose` local en este directorio lo interpretaría distinto;
+      # el deploy de producción vive en OpenShip (docs/deployment.md).
+      context: .
+      dockerfile: Dockerfile
     image: odentia-app:latest
     command: ["pnpm", "--filter", "@odentia/db", "migrate"]
     env_file: .env
@@ -107,7 +109,7 @@ services:
       - api
 
   backup:
-    build: ./backup
+    build: infra/prod/backup
     restart: unless-stopped
     env_file: .env
     depends_on:
