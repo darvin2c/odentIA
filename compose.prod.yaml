@@ -1,20 +1,21 @@
 name: odentia-prod
 
-# Stack de aplicación para OpenShip (se despliega "as-is" desde el repo).
-# El borde (TLS, dominios, routing) lo gestiona el edge OpenResty de OpenShip;
-# por eso no hay Caddy aquí y los servicios web/api publican en loopback para
-# que el edge (network_mode: host) les enrute los dominios asignados en la UI.
-# Variables en .env (copiar de .env.example).
+# Stack de producción: rutas relativas a este archivo, en la raíz del repo.
+# OpenShip aporta el borde HTTPS; las aplicaciones solo publican en loopback.
+# Variables: entorno del proyecto en OpenShip o infra/prod/.env para Compose.
+# Los servicios con build no declaran image: un refresh reutiliza el artefacto.
+
+x-runtime-env-file: &runtime-env-file
+  - path: ./infra/prod/.env
+    required: false
 
 services:
   postgres:
     build:
-      # Contexto relativo a la RAÍZ del repo (OpenShip); ver nota en &app-build.
       context: infra/dev/postgres
       args:
         PGMQ_REF: v1.13.0
         PG_CRON_REF: v1.6.8
-    image: odentia-postgres:18.6
     restart: unless-stopped
     command:
       - "postgres"
@@ -37,14 +38,13 @@ services:
 
   migrate:
     build: &app-build
-      # Contexto relativo a la RAÍZ del repo (así lo resuelve OpenShip).
-      # `docker compose` local en este directorio lo interpretaría distinto;
-      # el deploy de producción vive en OpenShip (docs/deployment.md).
       context: .
       dockerfile: Dockerfile
-    image: odentia-app:latest
+      args:
+        VITE_API_URL: ${VITE_API_URL:?}
+        VITE_BASE_DOMAIN: ${VITE_BASE_DOMAIN:?}
     command: ["pnpm", "--filter", "@odentia/db", "migrate"]
-    env_file: .env
+    env_file: *runtime-env-file
     depends_on:
       postgres:
         condition: service_healthy
@@ -52,9 +52,8 @@ services:
 
   api:
     build: *app-build
-    image: odentia-app:latest
     command: ["pnpm", "--filter", "@odentia/api", "start"]
-    env_file: .env
+    env_file: *runtime-env-file
     restart: unless-stopped
     ports:
       # Host 3101: el 3001 de loopback lo ocupa el dashboard de OpenShip.
@@ -75,9 +74,8 @@ services:
 
   worker:
     build: *app-build
-    image: odentia-app:latest
     command: ["pnpm", "--filter", "@odentia/worker", "start"]
-    env_file: .env
+    env_file: *runtime-env-file
     restart: unless-stopped
     depends_on:
       migrate:
@@ -85,9 +83,10 @@ services:
 
   panel:
     build: *app-build
-    image: odentia-app:latest
     command: ["pnpm", "--filter", "@odentia/panel", "start"]
-    env_file: .env
+    env_file: *runtime-env-file
+    environment:
+      PORT: "3000"
     restart: unless-stopped
     ports:
       - "127.0.0.1:3010:3000"
@@ -96,9 +95,10 @@ services:
 
   platform:
     build: *app-build
-    image: odentia-app:latest
     command: ["pnpm", "--filter", "@odentia/platform", "start"]
-    env_file: .env
+    env_file: *runtime-env-file
+    environment:
+      PORT: "3000"
     restart: unless-stopped
     ports:
       - "127.0.0.1:3011:3000"
@@ -108,7 +108,7 @@ services:
   backup:
     build: infra/prod/backup
     restart: unless-stopped
-    env_file: .env
+    env_file: *runtime-env-file
     depends_on:
       postgres:
         condition: service_healthy

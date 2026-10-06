@@ -1,6 +1,5 @@
-# syntax=docker/dockerfile:1
-# Imagen única de producción: mismo build para panel, platform, api y worker;
-# cada servicio de compose solo cambia el comando de arranque.
+# Receta compartida de producción para panel, platform, api y worker.
+# OpenShip construye un artefacto por servicio; cada uno cambia su comando.
 
 FROM node:24-slim AS base
 ENV PNPM_HOME=/pnpm
@@ -25,8 +24,8 @@ COPY packages/services/package.json packages/services/
 COPY packages/ui/package.json packages/ui/
 COPY packages/ui-patterns/package.json packages/ui-patterns/
 COPY e2e/package.json e2e/
-# Instalación filtrada: solo lo necesario en runtime/build de producción
-# (excluye e2e y storybook del node_modules final).
+# Instalación filtrada: excluye e2e; conserva las dependencias necesarias
+# para construir las dos aplicaciones y ejecutar los paquetes fuente TS.
 RUN pnpm install --frozen-lockfile \
   --filter @odentia/api... \
   --filter @odentia/worker... \
