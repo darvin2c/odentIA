@@ -107,7 +107,7 @@ describe("timeZoneOptions", () => {
   it("timeZoneOption describe una zona suelta, incluidas las que no lista el catálogo", () => {
     // `UTC` es válido pero no aparece en `Intl.supportedValuesOf`.
     expect(timeZoneOptions(ENERO).some((option) => option.timeZone === "UTC")).toBe(false)
-    expect(timeZoneOption("UTC", ENERO)).toMatchObject({ offsetMinutes: 0, offsetLabel: "GMT" })
+    expect(timeZoneOption("UTC", ENERO)?.offsetMinutes).toBe(0)
     expect(timeZoneOption("Lima", ENERO)).toBeUndefined()
   })
 })

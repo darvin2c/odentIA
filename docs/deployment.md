@@ -1,100 +1,122 @@
 # Despliegue a producción
 
-Topología: un único VPS (x86, DC en UE) con Docker y **OpenShip** como plataforma
-de despliegue (build, push-to-deploy, dominios, TLS, variables por entorno,
-previews, métricas). Los archivos van a Cloudflare R2 (contrato S3) y los backups
-de la base de datos también (off-box, servicio propio del stack).
+El VPS es compartido y OpenShip administra sus aplicaciones y el borde HTTPS.
+odentIA es un proyecto, no el propietario del servidor. PostgreSQL de odentIA
+no se comparte con OpenShip ni con las demás aplicaciones.
 
+## Contrato de ejecución
+
+- `compose.prod.yaml`, en la raíz del repositorio, usa rutas estándar de Docker
+  Compose. Los servicios con `build` no declaran `image`: OpenShip construye sus
+  artefactos y un refresh reutiliza los del despliegue anterior. No requiere GHCR.
+- `Dockerfile` es la receta compartida de las aplicaciones. OpenShip construye un
+  artefacto por servicio, secuencialmente, con caché de capas. No implica una única
+  invocación de build ni que cada contenedor ocupe el tamaño completo de la imagen.
+- PostgreSQL 18 lleva PGMQ y pg_cron mediante `infra/dev/postgres/Dockerfile`.
+  Cambiarlo por una imagen stock sin esas extensiones no es una sustitución válida.
+- `migrate` termina después de aplicar las migraciones; detenido con código cero
+  es su estado normal. API y worker dependen de su finalización.
+- API, panel y platform publican únicamente en loopback. Los dominios se asignan
+  al servicio correspondiente en OpenShip; el dominio raíz queda reservado para
+  marketing y platform atiende los hosts de las organizaciones.
+- `pgdata` es persistente. Un redeploy puede reiniciar PostgreSQL; no debe borrar
+  ni sustituir su volumen. No ejecutar `down -v` en producción.
+
+### Ejecución sin OpenShip
+
+Docker Compose 2.24 o posterior permite el archivo de entorno opcional del stack:
+
+```bash
+cp infra/prod/.env.example infra/prod/.env
+# Rellenar infra/prod/.env antes de continuar.
+docker compose --env-file infra/prod/.env -f compose.prod.yaml config --quiet
+docker compose --env-file infra/prod/.env -f compose.prod.yaml up -d --build
 ```
-internet ── edge OpenResty de OpenShip (80/443, TLS automático)
-              ├─ portal   (platform, TanStack Start SSR)
-              ├─ panel    (panel, TanStack Start SSR)
-              └─ api      (Hono + SSE)
-             worker (proceso aparte, misma imagen; consume PGMQ)
-             postgres 18 + PGMQ + pg_cron (volumen local; NO el Postgres one-click)
-             backup (pg_dump diario → R2, retención configurable)
+
+Las rutas se resuelven desde la raíz, donde vive `compose.prod.yaml`. No copiar el
+archivo a otro directorio sin conservar el árbol del repositorio. El borde no
+forma parte del stack: fuera de OpenShip es necesario un proxy HTTPS propio.
+
+## Variables: una sola fuente
+
+En OpenShip, las variables comunes viven en el entorno **production del proyecto**.
+No copiar `.env.example` a los entornos de cada servicio ni mantener copias de los
+secretos. Los overrides por servicio tienen precedencia y pueden eclipsar cambios
+del proyecto. Panel y platform solo necesitan el override declarado `PORT=3000`;
+la API usa `PORT=3001`.
+
+Para Compose manual, la misma fuente es `infra/prod/.env`, excluido de Git y del
+contexto Docker. Los secretos se generan una vez, se conservan y se rotan mediante
+un procedimiento explícito; no regenerarlos para corregir un deploy.
+
+`VITE_API_URL` y `VITE_BASE_DOMAIN` son argumentos de build: cambiar sus valores
+requiere reconstruir las webs. Las variables de runtime requieren **Apply/refresh**,
+que recrea los contenedores. Un restart solo reinicia con la configuración antigua.
+
+## CI y despliegue automático
+
+`.github/workflows/ci.yml` instala dependencias con el lockfile, ejecuta typecheck,
+construye la imagen de PostgreSQL para las pruebas de integración, ejecuta los tests
+sin E2E y comprueba el Dockerfile de la app. Solo después de que ambos jobs pasen,
+un push a `main` dispara el deploy en OpenShip para el SHA exacto y espera su resultado.
+Un fallo o despliegue parcial falla el workflow; no se anuncia como éxito.
+
+Configurar en GitHub:
+
+- Variables `OPENSHIP_URL` (origen HTTPS del panel) y `OPENSHIP_PROJECT_ID`.
+- Secreto `OPENSHIP_DEPLOY_TOKEN`: token con grants read/write **solo** sobre el
+  proyecto odentIA. Tiene caducidad; renovarlo antes de que expire.
+
+En OpenShip, mantener **Auto-deploy por push desactivado en producción**: el job
+anterior es el único disparador automático. La GitHub App sigue dando acceso al
+repo. El deploy manual queda disponible para operación y recuperación, pero no
+sustituye las comprobaciones del CI.
+
+Configurar `composePath=compose.prod.yaml` y dejar el directorio raíz vacío en el
+proyecto. No importar una copia temporal de Compose con placeholders interpolados.
+Si se necesita corregir configuración mediante CLI, `openship api` usa el contexto
+local; no imprimir ni copiar sus tokens en logs.
+
+El Dockerfile no usa extensiones exclusivas de BuildKit ni declara un frontend
+externo. Esto evita que OpenShip fuerce la ruta de transporte del contexto asociada
+a esa directiva. CI sigue utilizando BuildKit mediante buildx.
+
+## Backups y recuperación
+
+El servicio `backup` usa `pg_dump` de PostgreSQL 18 y rclone oficial fijado por
+versión. El bucket R2 debe existir y ser privado. El token necesita acceso de
+lectura/escritura a sus objetos; `no_check_bucket=true` evita solicitar permisos
+de administración de buckets.
+
+- `BACKUP_S3_ENDPOINT` es el endpoint S3 de la cuenta, sin nombre de bucket.
+- `BACKUP_BUCKET` selecciona el bucket de backups; no usar el bucket público de
+  avatares. `BACKUP_RETAIN` conserva los últimos dumps y `BACKUP_INTERVAL` determina
+  el intervalo entre ejecuciones.
+- Un bucket vacío desactiva el servicio solo para entornos efímeros. En producción
+  deben configurarse bucket y credenciales.
+- Supervisar los logs: un contenedor en ejecución no demuestra que el backup se
+  haya subido. Verificar descarga y restauración periódicamente.
+
+Restaurar el dump descargado primero en una instancia aislada con la misma major
+ y extensiones, nunca directamente sobre la base activa:
+
+```bash
+pg_restore --exit-on-error --clean --if-exists --no-owner --no-acl \
+  --dbname="$DATABASE_URL" archivo.dump
 ```
 
-## Artefactos
+La restauración debe conservar esquema, historial de migraciones y datos, y no
+activar proveedores externos. El healthcheck `/health` de la API comprueba la base,
+no R2, SMTP ni el modelo: esas integraciones requieren comprobaciones separadas.
 
-- `Dockerfile` (raíz): imagen única multi-etapa; los cuatro servicios comparten
-  build y difieren en el comando. OpenShip la construye en el servidor.
-- `infra/prod/compose.yaml`: stack desplegado "as-is" por OpenShip. Los servicios
-  web/api publican en `127.0.0.1` para que el edge les enrute dominios; no hay
-  borde propio (Caddy eliminado: el edge de OpenShip ocupa 80/443).
-- `infra/prod/.env.example`: contrato de variables (se cargan por entorno en la
-  UI de OpenShip).
-- `infra/prod/backup/`: volcado diario a R2 con retención.
-- `.github/workflows/ci.yml`: typecheck + tests + verificación de que el
-  Dockerfile construye (sin push; el build real lo hace OpenShip).
+## Previews y límites
 
-## Puesta en marcha del VPS (una vez)
+Estas correcciones estabilizan producción. No habilitan ni acreditan previews:
+los puertos fijos de `compose.prod.yaml` no permiten levantar copias simultáneas
+sin que el orquestador les asigne otros bindings. Entornos distintos requieren
+bases, variables, almacenamiento y ciclos de vida aislados y verificados.
 
-1. VPS con Ubuntu 24.04 y Docker. DNS: registros A del dominio del panel de
-   OpenShip y de los dominios de la app al VPS.
-2. Instalar OpenShip (modo compose, Linux + Docker):
-
-   ```bash
-   curl -fsSL https://get.openship.io | sh
-   openship up --public-url https://ops.example.com
-   ```
-
-
-3. En el dashboard: conectar el repo de GitHub y crear el proyecto con el
-   compose `infra/prod/compose.yaml`. Asignar dominios: portal → `platform`,
-   `app.<dominio>` → `panel`, `api.<dominio>` → `api`.
-4. Cargar las variables del entorno *production* desde `.env.example`
-   (secretos con `openssl rand -hex 32`; credenciales R2; SMTP real).
-   `VITE_API_URL` y `VITE_BASE_DOMAIN` son build-args del Dockerfile: deben
-   estar definidas en el entorno para que el build las incruste.
-5. Activar push-to-deploy (webhook de GitHub que configura OpenShip) sobre
-   `main`.
-
-## Entornos y previews
-
-- **Staging**: segundo entorno del proyecto en OpenShip apuntando a la rama
-  `staging`, con sus propias variables (dominios `*-staging`, buckets R2
-  `*-staging`). Solo datos de semilla (`seed-dev.ts`), nunca copia de
-  producción (RGPD).
-- **Previews por PR/rama**: nativos en OpenShip; activarlos en el proyecto.
-  Mismas reglas: datos de semilla, variables de preview aisladas.
-
-## Operación
-
-- Deploy: push a `main` (o rama del entorno). Rollback: un clic en el dashboard
-  (re-ejecuta el snapshot exacto del build).
-- Logs y métricas de contenedores: dashboard de OpenShip.
-- Backup de la app: diario, conserva `BACKUP_RETAIN` dumps en el bucket.
-  Restaurar: `pg_restore --clean --no-owner -d "$DATABASE_URL" pg-<ts>.dump`.
-- Migraciones: el servicio `migrate` corre en cada `compose up`, antes de api
-  y worker.
-
-## Riesgos aceptados y mitigaciones
-
-- **OpenShip es joven (jul 2026) y sus docs están en construcción.** Mitigación:
-  los dumps a R2 son la salida de emergencia; el stack es Docker Compose
-  estándar y portable a otro orquestador (Komodo/Coolify/manual) sin cambios.
-  Aspectos no verificados por documentación incompleta — confirmar en la UI al
-  montar: sintaxis exacta de asignación de dominios a servicios compose, y
-  cómo se inyectan variables de entorno en builds.
-- **MCP/agentes**: el endpoint MCP permite a agentes IA desplegar y operar.
-  Política: solo lectura o staging; nunca deploy/rollback/secretos de
-  producción sin aprobación humana (invariante del repo).
-- **Correo**: se usa SMTP transaccional externo; el servidor de correo
-  integrado de OpenShip queda desactivado (reputación de IP de VPS = spam).
-- La imagen incluye devDeps de api/worker (tsx ejecuta TS en runtime; las
-  dependencias workspace exportan fuente TS). Deliberado.
-- Un solo nodo: si el VPS cae, cae todo. E2E no corre en CI (supervisor
-  Windows); ejecutarlo local.
-## Particularidades de OpenShip (verificadas en 0.8.0)
-
-- Los `build.context` del compose se resuelven desde la **raíz del repo**,
-  no desde el directorio del compose. `../..` falla con *path escapes the
-  linked repository*: usar rutas como `infra/dev/postgres` o `.` (raíz).
-- El `composePath` del proyecto (`infra/prod/compose.yaml`) no se fija desde
-  el CLI `project create`; se establece con
-  `openship api /projects/<id> -X PATCH -d '{"composePath":"..."}'`.
-- `service sync` materializa el `.env` local como variables por servicio que
-  **eclipsan** las del proyecto: tras sincronizar, cargar los valores reales
-  en cada servicio (`service env set -p <slug> -e production <svc> ...`).
-- Los builds de la imagen comparten caché de capas entre servicios y deploys.
+El VPS y sus volúmenes siguen siendo un único punto de fallo. Mantener backups
+fuera del host y un procedimiento de recuperación independiente del panel. No
+exponer bases ni puertos internos al público. MCP no recibe facultades productivas
+irreversibles sin aprobación humana.

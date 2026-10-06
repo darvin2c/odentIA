@@ -7,7 +7,8 @@ on:
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  # No cancelar un deploy productivo por un push posterior.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   check:
@@ -25,7 +26,7 @@ jobs:
       - run: pnpm typecheck
       - name: Preparar PostgreSQL para las pruebas de integración
         run: docker build --tag dentalagent-postgres:18.6 ./infra/dev/postgres
-      # Tests unitarios/de integración; E2E queda fuera de CI (supervisor Windows).
+      # Tests unitarios y de integración; los recorridos E2E se ejecutan por separado.
       - run: pnpm test --filter=!@odentia/e2e
 
   docker-build:
@@ -44,3 +45,41 @@ jobs:
             VITE_BASE_DOMAIN=example.invalid
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  deploy:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [check, docker-build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      OPENSHIP_URL: ${{ vars.OPENSHIP_URL }}
+      OPENSHIP_PROJECT_ID: ${{ vars.OPENSHIP_PROJECT_ID }}
+      OPENSHIP_DEPLOY_TOKEN: ${{ secrets.OPENSHIP_DEPLOY_TOKEN }}
+    steps:
+      - name: Desplegar el commit verificado y esperar su resultado
+        shell: bash
+        run: |
+          : "${OPENSHIP_URL:?}" "${OPENSHIP_PROJECT_ID:?}" "${OPENSHIP_DEPLOY_TOKEN:?}"
+          api="${OPENSHIP_URL%/}/api/proxy/api"
+          body=$(jq -nc --arg projectId "$OPENSHIP_PROJECT_ID" --arg commitSha "$GITHUB_SHA" \
+            '{projectId:$projectId, branch:"main", commitSha:$commitSha, environment:"production", smartRoute:true}')
+          response=$(curl --fail-with-body --silent --show-error --connect-timeout 10 --max-time 60 \
+            -H "Authorization: Bearer $OPENSHIP_DEPLOY_TOKEN" -H "Content-Type: application/json" \
+            --data "$body" "$api/deployments")
+          deployment=$(jq -er '.data.deployment_id // .deployment_id' <<< "$response")
+          echo "Deployment: $deployment"
+          for attempt in $(seq 1 55); do
+            response=$(curl --fail-with-body --silent --show-error --connect-timeout 10 --max-time 30 \
+              -H "Authorization: Bearer $OPENSHIP_DEPLOY_TOKEN" "$api/deployments/$deployment")
+            status=$(jq -er '.data.status' <<< "$response")
+            echo "Estado: $status"
+            case "$status" in
+              ready|no_changes) exit 0 ;;
+              failed|cancelled|partial_failure|action_required)
+                jq -r '.data.errorMessage // "El despliegue requiere intervención."' <<< "$response"
+                exit 1 ;;
+            esac
+            sleep 20
+          done
+          echo "El despliegue no alcanzó READY dentro del plazo." >&2
+          exit 1

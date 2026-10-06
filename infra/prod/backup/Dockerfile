@@ -1,8 +1,10 @@
-FROM postgres:18-bookworm
+FROM rclone/rclone:1.75.1 AS rclone
+FROM postgres:18.6-bookworm
 
-# pg_dump 18 (misma major que el servidor) + rclone para subir a S3/R2.
+# Binario oficial actual: rclone 1.60 de Bookworm falla con el versionado de R2.
+COPY --from=rclone /usr/local/bin/rclone /usr/local/bin/rclone
 RUN apt-get update \
- && apt-get install -y --no-install-recommends bash curl ca-certificates rclone \
+ && apt-get install -y --no-install-recommends bash ca-certificates \
  && rm -rf /var/lib/apt/lists/*
 
 COPY backup.sh /backup.sh

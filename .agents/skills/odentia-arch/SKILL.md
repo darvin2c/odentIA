@@ -23,7 +23,7 @@ Objetivos y restricciones globales: `AGENTS.md` raíz. Límites de aplicaciones/
 - PostgreSQL con RLS, PGMQ y pg_cron. API y worker ejecutan los mismos servicios; el modelo usa herramientas autorizadas, nunca SQL directo.
 - SSE navegador y LISTEN/NOTIFY entre procesos: aviso mínimo, estado persistido en PostgreSQL y conciliación al reconectar.
 - Dev/E2E con Portless; PostgreSQL, SMTP y API S3 usan sus puertos de protocolo. SSR local mediante `scripts/local-network.mjs`.
-- MinIO en local y contrato S3-compatible para almacenamiento; R2 es destino previsto de producción. Caddy reservado para borde productivo; no presentar una topología prevista como despliegue verificado.
+- MinIO en local y contrato S3-compatible; R2 para almacenamiento productivo. OpenShip administra el borde HTTPS del VPS compartido. El Compose de odentIA conserva rutas estándar y su PostgreSQL independiente; operación y gate de CI en `docs/deployment.md`.
 
 ## Fronteras que revisar
 

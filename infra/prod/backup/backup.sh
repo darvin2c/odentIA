@@ -16,11 +16,12 @@ INTERVAL="${BACKUP_INTERVAL:-86400}"
 
 export RCLONE_CONFIG_R2_TYPE=s3
 export RCLONE_CONFIG_R2_PROVIDER=Cloudflare
+# El bucket se provisiona fuera del runtime; el token solo necesita acceso a objetos.
+export RCLONE_CONFIG_R2_NO_CHECK_BUCKET=true
 export RCLONE_CONFIG_R2_ENDPOINT="$BACKUP_S3_ENDPOINT"
 export RCLONE_CONFIG_R2_ACCESS_KEY_ID="$BACKUP_S3_ACCESS_KEY"
 export RCLONE_CONFIG_R2_SECRET_ACCESS_KEY="$BACKUP_S3_SECRET_KEY"
 
-rclone mkdir "r2:$BACKUP_BUCKET" 2>/dev/null || true
 
 while true; do
   ts=$(date -u +%Y%m%dT%H%M%SZ)
