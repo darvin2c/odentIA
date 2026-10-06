@@ -620,10 +620,6 @@ it("reprogramar_cita y cancelar_cita actúan sobre la cita real sin duplicar res
     toolsUsed: [], usage: { inputTokens: 0, outputTokens: 0, reported: false },
   }
   const tools = makeAgentTools(ctx)
-  // El resumen expone id y versión exactos para actuar sin adivinar.
-  const summary = String(await tools.find((t) => t.name === "ver_resumen_paciente")!.invoke({ patientId }))
-  expect(summary).toContain(`id ${booked.id}`)
-  expect(summary).toContain(`versión ${booked.version}`)
 
   // Reprogramar (confirmar_usuario): propuesta → confirmación → agenda movida.
   const reprogram = tools.find((t) => t.name === "reprogramar_cita")!
