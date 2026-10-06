@@ -158,6 +158,8 @@ export interface CrmPerformance {
 
 /** Cohorte por fecha de entrada/creación; los pendientes son una foto actual. */
 async function crmPerformance(tx: Db, orgId: string, access: WorkspaceAccess, start: SQL, end: SQL): Promise<CrmPerformance> {
+  // audit_event.entity_id es polimórfico (text); convertir el UUID de la entidad
+  // conserva esa columna indexable y evita interpretar referencias ajenas como UUID.
   const [responses] = access.conversations ? await tx.execute<NonNullable<CrmPerformance["responses"]>>(sql`
     with first_inbound as (
       select distinct on (conversation_id) conversation_id, created_at
@@ -218,7 +220,7 @@ async function crmPerformance(tx: Db, orgId: string, access: WorkspaceAccess, st
         last_transition.at as transition_at,
         exists(
           select 1 from audit_event a where a.organization_id=${orgId}
-            and a.entity='agent_handoff' and a.entity_id=h.id
+            and a.entity='agent_handoff' and a.entity_id=h.id::text
             and a.action='agent.handoff_claimed' and a.created_at < ${end}
         ) as claimed
       from agent_handoff h
@@ -226,7 +228,7 @@ async function crmPerformance(tx: Db, orgId: string, access: WorkspaceAccess, st
       left join lateral (
         select a.metadata->>'statusNext' as status, a.created_at as at
         from audit_event a where a.organization_id=${orgId}
-          and a.entity='task' and a.entity_id=t.id and a.action='task.updated'
+          and a.entity='task' and a.entity_id=t.id::text and a.action='task.updated'
           and a.created_at < ${end} and a.metadata->>'statusNext' in ('open','done','cancelled')
         order by a.created_at desc, a.id desc limit 1
       ) last_transition on true
@@ -268,7 +270,7 @@ async function crmPerformance(tx: Db, orgId: string, access: WorkspaceAccess, st
       left join lateral (
         select a.metadata->>'statusNext' as status, a.created_at as at
         from audit_event a where a.organization_id=${orgId}
-          and a.entity='task' and a.entity_id=t.id and a.action='task.updated'
+          and a.entity='task' and a.entity_id=t.id::text and a.action='task.updated'
           and a.created_at < ${end} and a.metadata->>'statusNext' in ('open','done','cancelled')
         order by a.created_at desc, a.id desc limit 1
       ) last_transition on true
