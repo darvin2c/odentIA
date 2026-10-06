@@ -387,6 +387,13 @@ export async function createAppointment(
   }
   const status = assertStatus(input.status ?? "programada")
   if (status === "programada" || status === "confirmada") {
+    // Serializar altas por recurso, siempre profesional → sillón. Dos inserciones
+    // simultáneas pueden interbloquear las exclusiones antes de devolver 23P01.
+    const lockScope = `appointment:${orgId}`
+    await tx.execute(sql`select pg_advisory_xact_lock(
+      hashtext(${lockScope}), hashtext(${"dentist:" + input.dentistUserId}))`)
+    await tx.execute(sql`select pg_advisory_xact_lock(
+      hashtext(${lockScope}), hashtext(${"chair:" + input.chairId}))`)
     await validateAvailability(tx, orgId, {
       branchId: resolved.id,
       dentistUserId: input.dentistUserId,
