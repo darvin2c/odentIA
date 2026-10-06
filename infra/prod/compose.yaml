@@ -88,8 +88,6 @@ services:
     image: odentia-app:latest
     command: ["pnpm", "--filter", "@odentia/panel", "start"]
     env_file: .env
-    environment:
-      PORT: "3000"
     restart: unless-stopped
     ports:
       - "127.0.0.1:3010:3000"
@@ -101,8 +99,6 @@ services:
     image: odentia-app:latest
     command: ["pnpm", "--filter", "@odentia/platform", "start"]
     env_file: .env
-    environment:
-      PORT: "3000"
     restart: unless-stopped
     ports:
       - "127.0.0.1:3011:3000"
