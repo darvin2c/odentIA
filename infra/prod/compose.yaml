@@ -57,7 +57,8 @@ services:
     env_file: .env
     restart: unless-stopped
     ports:
-      - "127.0.0.1:3001:3001"
+      # Host 3101: el 3001 de loopback lo ocupa el dashboard de OpenShip.
+      - "127.0.0.1:3101:3001"
     depends_on:
       migrate:
         condition: service_completed_successfully

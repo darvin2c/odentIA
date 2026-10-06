@@ -39,6 +39,7 @@ internet ── edge OpenResty de OpenShip (80/443, TLS automático)
    openship up --public-url https://ops.example.com
    ```
 
+
 3. En el dashboard: conectar el repo de GitHub y crear el proyecto con el
    compose `infra/prod/compose.yaml`. Asignar dominios: portal → `platform`,
    `app.<dominio>` → `panel`, `api.<dominio>` → `api`.
@@ -85,3 +86,15 @@ internet ── edge OpenResty de OpenShip (80/443, TLS automático)
   dependencias workspace exportan fuente TS). Deliberado.
 - Un solo nodo: si el VPS cae, cae todo. E2E no corre en CI (supervisor
   Windows); ejecutarlo local.
+## Particularidades de OpenShip (verificadas en 0.8.0)
+
+- Los `build.context` del compose se resuelven desde la **raíz del repo**,
+  no desde el directorio del compose. `../..` falla con *path escapes the
+  linked repository*: usar rutas como `infra/dev/postgres` o `.` (raíz).
+- El `composePath` del proyecto (`infra/prod/compose.yaml`) no se fija desde
+  el CLI `project create`; se establece con
+  `openship api /projects/<id> -X PATCH -d '{"composePath":"..."}'`.
+- `service sync` materializa el `.env` local como variables por servicio que
+  **eclipsan** las del proyecto: tras sincronizar, cargar los valores reales
+  en cada servicio (`service env set -p <slug> -e production <svc> ...`).
+- Los builds de la imagen comparten caché de capas entre servicios y deploys.
