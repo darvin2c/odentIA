@@ -24,7 +24,8 @@ export function createMailer(env: MailerEnv): Mailer {
   const transporter: Transporter = nodemailer.createTransport({
     host: env.host,
     port: env.port,
-    secure: env.secure ?? false,
+    // Sin override, Nodemailer selecciona TLS implícito en 465 y STARTTLS en 587.
+    secure: env.secure,
     // Mailpit (dev) no usa auth; solo se envía si hay user.
     auth: env.user ? { user: env.user, pass: env.pass ?? "" } : undefined,
   })

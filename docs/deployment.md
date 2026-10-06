@@ -53,6 +53,14 @@ un procedimiento explícito; no regenerarlos para corregir un deploy.
 requiere reconstruir las webs. Las variables de runtime requieren **Apply/refresh**,
 que recrea los contenedores. Un restart solo reinicia con la configuración antigua.
 
+### SMTP
+
+`SMTP_PORT=465` usa TLS implícito; `587` usa STARTTLS cuando el servidor lo
+ofrece. El mailer deja esa selección a Nodemailer y respeta un `secure` explícito
+del caller. SMTP local de desarrollo, como Mailpit en 1025, sigue sin TLS.
+No desactivar la validación de certificados para corregir la conexión. Autenticar
+contra SMTP no demuestra que el proveedor acepte el remitente ni entregue el correo.
+
 ## CI y despliegue automático
 
 `.github/workflows/ci.yml` instala dependencias con el lockfile, ejecuta typecheck,
