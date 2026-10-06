@@ -64,8 +64,9 @@ Un fallo o despliegue parcial falla el workflow; no se anuncia como éxito.
 Configurar en GitHub:
 
 - Variables `OPENSHIP_URL` (origen HTTPS del panel) y `OPENSHIP_PROJECT_ID`.
-- Secreto `OPENSHIP_DEPLOY_TOKEN`: token con grants read/write **solo** sobre el
-  proyecto odentIA. Tiene caducidad; renovarlo antes de que expire.
+- Secreto `OPENSHIP_DEPLOY_TOKEN`: grants `project:<id>:read,write` y
+  `github_repository:darvin2c/odentIA:read`. El permiso del proyecto no concede
+  acceso al origen Git. Tiene caducidad; renovarlo antes de que expire.
 
 En OpenShip, mantener **Auto-deploy por push desactivado en producción**: el job
 anterior es el único disparador automático. La GitHub App sigue dando acceso al
