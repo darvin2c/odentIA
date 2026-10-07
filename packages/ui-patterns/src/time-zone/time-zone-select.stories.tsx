@@ -64,13 +64,15 @@ function Demo({
   invalid = false,
 }: DemoProps) {
   const [value, setValue] = React.useState<string | null>(initialValue)
+  const id = React.useId()
 
   return (
     <div className="flex max-w-md flex-col gap-4">
       <Field>
-        <FieldLabel htmlFor="tz-demo">{label}</FieldLabel>
+        <FieldLabel htmlFor={id}>{label}</FieldLabel>
         <TimeZoneSelect
-          id="tz-demo"
+          id={id}
+          aria-describedby={hint ? `${id}-help` : undefined}
           value={value}
           suggested={suggested}
           referenceDate={referenceDate}
@@ -78,7 +80,7 @@ function Demo({
           invalid={invalid}
           onChange={(next) => setValue(next)}
         />
-        {hint ? <FieldDescription>{hint}</FieldDescription> : null}
+        {hint ? <FieldDescription id={`${id}-help`}>{hint}</FieldDescription> : null}
       </Field>
       <Lectura value={value} reference={referenceDate} />
     </div>

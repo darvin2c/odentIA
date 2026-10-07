@@ -39,7 +39,8 @@ export function AuthSplit({
         >
           <span className="block size-full translate-x-1/4 rounded-full bg-gradient-to-br from-info via-brand-350 to-brand-650 opacity-30 blur-3xl animate-pulse [animation-duration:8s] motion-reduce:animate-none" />
         </span>
-        <div className="relative flex h-full flex-col gap-10 p-12">
+        {/* El plano de lectura limita el fondo en cualquier fotograma del degradado. */}
+        <div className="relative flex h-full flex-col gap-10 bg-card/95 p-12">
           <span className="text-xl font-semibold text-foreground">odentIA</span>
           <div className="flex flex-col gap-3">
             <h2 className="max-w-md text-3xl font-semibold tracking-tight text-foreground">
@@ -61,7 +62,7 @@ export function AuthSplit({
           </ul>
         </div>
       </aside>
-      <div className="flex items-center justify-center p-6">
+      <main className="flex items-center justify-center p-6">
         <div className="w-full max-w-sm">
           <div className="flex flex-col gap-1.5">
             <h1 className="text-base leading-snug font-medium">{title}</h1>
@@ -74,7 +75,7 @@ export function AuthSplit({
             ) : null}
           </div>
         </div>
-      </div>
+      </main>
     </div>
   )
 }

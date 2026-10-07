@@ -40,6 +40,7 @@ function ComboboxClear({ className, ...props }: ComboboxPrimitive.Clear.Props) {
   return (
     <ComboboxPrimitive.Clear
       data-slot="combobox-clear"
+      aria-label="Borrar selección"
       render={<InputGroupButton variant="ghost" size="icon-xs" />}
       className={cn(className)}
       {...props}
@@ -55,10 +56,12 @@ function ComboboxInput({
   disabled = false,
   showTrigger = true,
   showClear = false,
+  triggerLabel = "Mostrar opciones",
   ...props
 }: ComboboxPrimitive.Input.Props & {
   showTrigger?: boolean
   showClear?: boolean
+  triggerLabel?: string
 }) {
   return (
     <InputGroup className={cn("w-auto", className)}>
@@ -71,6 +74,7 @@ function ComboboxInput({
           <InputGroupButton
             size="icon-xs"
             variant="ghost"
+            aria-label={triggerLabel}
             render={<ComboboxTrigger />}
             data-slot="input-group-button"
             className="group-has-data-[slot=combobox-clear]/input-group:hidden data-pressed:bg-transparent"
@@ -91,6 +95,7 @@ function ComboboxContent({
   align = "start",
   alignOffset = 0,
   anchor,
+  "aria-label": ariaLabel = "Opciones disponibles",
   ...props
 }: ComboboxPrimitive.Popup.Props &
   Pick<
@@ -100,6 +105,8 @@ function ComboboxContent({
   return (
     <ComboboxPrimitive.Portal>
       <ComboboxPrimitive.Positioner
+        role="region"
+        aria-label={ariaLabel}
         side={side}
         sideOffset={sideOffset}
         align={align}

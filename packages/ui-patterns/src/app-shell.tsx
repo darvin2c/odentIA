@@ -142,6 +142,11 @@ function NavItemButton({
         isActive={active}
         tooltip={item.label}
         aria-current={active ? "page" : undefined}
+        className={
+          active
+            ? "[&>span]:underline [&>span]:underline-offset-4 group-data-[collapsible=icon]:outline-1 group-data-[collapsible=icon]:outline-sidebar-foreground group-data-[collapsible=icon]:outline-offset-[-2px]"
+            : undefined
+        }
         render={(props) => {
           const { onClick, children, ...rest } = props
           return (
@@ -238,7 +243,7 @@ function SidebarNav({
   }
 
   return (
-    <SidebarContent>
+    <SidebarContent role="navigation" aria-label="Principal">
       {runs.map((run, runIndex) => {
         const first = run[0]!
         if (isGroup(first)) {
@@ -383,12 +388,7 @@ export function AppShell(props: AppShellProps): React.JSX.Element {
           render={(menuProps) => {
             const { onClick, ...rest } = menuProps
             return (
-              <LinkComponent
-                to={item.to}
-                search={item.search}
-                {...rest}
-                onClick={onClick}
-              >
+              <LinkComponent to={item.to} search={item.search} {...rest} onClick={onClick}>
                 {menuProps.children}
               </LinkComponent>
             )
@@ -436,7 +436,10 @@ export function AppShell(props: AppShellProps): React.JSX.Element {
               </>
             ) : null}
             <DropdownMenu>
-              <DropdownMenuTrigger className="flex w-full items-center gap-3 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-sidebar-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+              <DropdownMenuTrigger
+                aria-label={`Menú de ${user.name || "usuario"}`}
+                className="flex w-full items-center gap-3 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-sidebar-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
                 <Avatar className="size-8">
                   {user.avatarUrl ? <AvatarImage src={user.avatarUrl} alt={user.name} /> : null}
                   <AvatarFallback>{initial}</AvatarFallback>
@@ -460,9 +463,7 @@ export function AppShell(props: AppShellProps): React.JSX.Element {
         {/* `SidebarInset` ya renderiza el landmark `<main>`: un `<main>`
             anidado sería HTML inválido y duplicaría el landmark para lectores
             de pantalla. El alto mínimo vive ahora en el propio inset. */}
-        <SidebarInset className="min-h-svh">
-          {children}
-        </SidebarInset>
+        <SidebarInset className="min-h-svh">{children}</SidebarInset>
       </SidebarProvider>
     </TooltipProvider>
   )

@@ -257,220 +257,270 @@ function OnboardingPage() {
   const visibleSteps = STEPS.slice(offset)
 
   return (
-    <PageShell maxWidth="md" className="py-10">
-      <PageHeader
-        title="Configura tu clínica"
-        subtitle={`Paso ${step - offset + 1} de ${visibleSteps.length}: ${STEP_TOPICS[step]}`}
-      />
-      <WizardSteps
-        steps={visibleSteps}
-        current={step - offset}
-        visited={visited.map((v) => v - offset).filter((v) => v >= 0)}
-        onGo={(index) => goTo(index + offset)}
-        className="mt-6"
-      />
-      <form
-        className="mt-8"
-        onSubmit={(event) => {
-          event.preventDefault()
-          if (step < STEPS.length - 1) void handleContinue()
-          else void form.handleSubmit()
-        }}
-      >
-        <FieldGroup className="gap-4">
-          <div className={step === 0 ? "flex flex-col gap-4" : "hidden"}>
-            <form.Field name="firstName" validators={stepValidator("firstName")}>
-              {(field) => (
-                <Field>
-                  <FieldLabel htmlFor="firstName">Nombre</FieldLabel>
-                  <Input
-                    id="firstName"
-                    autoComplete="given-name"
-                    value={field.state.value}
-                    onChange={(event) => field.handleChange(event.target.value)}
-                  />
-                  <FieldError>{fieldErrorMessages(field.state.meta.errors)[0] ?? null}</FieldError>
-                </Field>
-              )}
-            </form.Field>
-            <form.Field name="lastName" validators={stepValidator("lastName")}>
-              {(field) => (
-                <Field>
-                  <FieldLabel htmlFor="lastName">Apellidos</FieldLabel>
-                  <Input
-                    id="lastName"
-                    autoComplete="family-name"
-                    value={field.state.value}
-                    onChange={(event) => field.handleChange(event.target.value)}
-                  />
-                  <FieldError>{fieldErrorMessages(field.state.meta.errors)[0] ?? null}</FieldError>
-                </Field>
-              )}
-            </form.Field>
-          </div>
-
-          <div className={step === 1 ? "flex flex-col gap-4" : "hidden"}>
-            <form.Field name="orgName" validators={stepValidator("orgName")}>
-              {(field) => (
-                <Field>
-                  <FieldLabel htmlFor="orgName">Nombre de la organización</FieldLabel>
-                  <Input
-                    id="orgName"
-                    value={field.state.value}
-                    onChange={(event) => {
-                      field.handleChange(event.target.value)
-                      const slugField = form.getFieldValue("slug")
-                      if (!slugField) form.setFieldValue("slug", slugify(event.target.value))
-                    }}
-                  />
-                  <FieldError>{fieldErrorMessages(field.state.meta.errors)[0] ?? null}</FieldError>
-                </Field>
-              )}
-            </form.Field>
-            <form.Field name="slug" validators={stepValidator("slug")}>
-              {(field) => (
-                <Field>
-                  <FieldLabel htmlFor="slug">Slug (subdominio)</FieldLabel>
-                  <Input
-                    id="slug"
-                    value={field.state.value}
-                    onChange={(event) => field.handleChange(event.target.value)}
-                  />
-                  <FieldDescription>
-                    {field.state.value || "tu-clinica"}.{BASE_DOMAIN}
-                  </FieldDescription>
-                  <FieldError>{fieldErrorMessages(field.state.meta.errors)[0] ?? null}</FieldError>
-                </Field>
-              )}
-            </form.Field>
-          </div>
-
-          <div className={step === 2 ? "flex flex-col gap-4" : "hidden"}>
-            <form.Field name="legalName" validators={stepValidator("legalName")}>
-              {(field) => (
-                <Field>
-                  <FieldLabel htmlFor="legalName">Razón social</FieldLabel>
-                  <Input
-                    id="legalName"
-                    value={field.state.value}
-                    onChange={(event) => field.handleChange(event.target.value)}
-                  />
-                  <FieldError>{fieldErrorMessages(field.state.meta.errors)[0] ?? null}</FieldError>
-                </Field>
-              )}
-            </form.Field>
-            <form.Field name="fiscalDocNumber" validators={stepValidator("fiscalDocNumber")}>
-              {(field) => (
-                <Field>
-                  <FieldLabel htmlFor="fiscalDocNumber">RUC (opcional)</FieldLabel>
-                  <Input
-                    id="fiscalDocNumber"
-                    inputMode="numeric"
-                    value={field.state.value}
-                    onChange={(event) => field.handleChange(event.target.value)}
-                  />
-                </Field>
-              )}
-            </form.Field>
-            <form.Field name="countryCode" validators={stepValidator("countryCode")}>
-              {(field) => (
-                <Field>
-                  <FieldLabel htmlFor="countryCode">País</FieldLabel>
-                  <CountrySelect
-                    id="countryCode"
-                    value={normalizeCountry(field.state.value) ?? DEFAULT_COUNTRY}
-                    onChange={(next) => field.handleChange(next)}
-                  />
-                  <FieldDescription>
-                    Define el formato de los teléfonos y las zonas horarias que se sugieren.
-                  </FieldDescription>
-                  <FieldError>{fieldErrorMessages(field.state.meta.errors)[0] ?? null}</FieldError>
-                </Field>
-              )}
-            </form.Field>
-          </div>
-
-          <div className={step === 3 ? "flex flex-col gap-4" : "hidden"}>
-            <form.Field name="branchName" validators={stepValidator("branchName")}>
-              {(field) => (
-                <Field>
-                  <FieldLabel htmlFor="branchName">Nombre de la sucursal</FieldLabel>
-                  <Input
-                    id="branchName"
-                    value={field.state.value}
-                    onChange={(event) => field.handleChange(event.target.value)}
-                  />
-                  <FieldError>{fieldErrorMessages(field.state.meta.errors)[0] ?? null}</FieldError>
-                </Field>
-              )}
-            </form.Field>
-            <form.Field name="branchAddress" validators={stepValidator("branchAddress")}>
-              {(field) => (
-                <Field>
-                  <FieldLabel htmlFor="branchAddress">Dirección (opcional)</FieldLabel>
-                  <Input
-                    id="branchAddress"
-                    value={field.state.value}
-                    onChange={(event) => field.handleChange(event.target.value)}
-                  />
-                </Field>
-              )}
-            </form.Field>
-            <form.Field name="branchPhone" validators={stepValidator("branchPhone")}>
-              {(field) => {
-                const errors = fieldErrorMessages(field.state.meta.errors)
-                return (
+    <main>
+      <PageShell maxWidth="md" className="py-10">
+        <PageHeader
+          title="Configura tu clínica"
+          subtitle={`Paso ${step - offset + 1} de ${visibleSteps.length}: ${STEP_TOPICS[step]}`}
+        />
+        <WizardSteps
+          steps={visibleSteps}
+          current={step - offset}
+          visited={visited.map((v) => v - offset).filter((v) => v >= 0)}
+          onGo={(index) => goTo(index + offset)}
+          className="mt-6"
+        />
+        <form
+          className="mt-8"
+          onSubmit={(event) => {
+            event.preventDefault()
+            if (step < STEPS.length - 1) void handleContinue()
+            else void form.handleSubmit()
+          }}
+        >
+          <FieldGroup className="gap-4">
+            <div className={step === 0 ? "flex flex-col gap-4" : "hidden"}>
+              <form.Field name="firstName" validators={stepValidator("firstName")}>
+                {(field) => (
                   <Field>
-                    <FieldLabel htmlFor="branchPhone">Teléfono (opcional)</FieldLabel>
-                    <PhoneInput
-                      id="branchPhone"
-                      value={field.state.value || null}
-                      defaultCountry={normalizeCountry(country)}
-                      invalid={errors.length > 0}
+                    <FieldLabel htmlFor="firstName">Nombre</FieldLabel>
+                    <Input
+                      id="firstName"
+                      aria-invalid={field.state.meta.errors.length > 0 || undefined}
+                      aria-describedby={
+                        field.state.meta.errors.length ? "firstName-error" : undefined
+                      }
+                      autoComplete="given-name"
+                      value={field.state.value}
+                      onChange={(event) => field.handleChange(event.target.value)}
+                    />
+                    <FieldError id="firstName-error">
+                      {fieldErrorMessages(field.state.meta.errors)[0] ?? null}
+                    </FieldError>
+                  </Field>
+                )}
+              </form.Field>
+              <form.Field name="lastName" validators={stepValidator("lastName")}>
+                {(field) => (
+                  <Field>
+                    <FieldLabel htmlFor="lastName">Apellidos</FieldLabel>
+                    <Input
+                      id="lastName"
+                      aria-invalid={field.state.meta.errors.length > 0 || undefined}
+                      aria-describedby={
+                        field.state.meta.errors.length ? "lastName-error" : undefined
+                      }
+                      autoComplete="family-name"
+                      value={field.state.value}
+                      onChange={(event) => field.handleChange(event.target.value)}
+                    />
+                    <FieldError id="lastName-error">
+                      {fieldErrorMessages(field.state.meta.errors)[0] ?? null}
+                    </FieldError>
+                  </Field>
+                )}
+              </form.Field>
+            </div>
+
+            <div className={step === 1 ? "flex flex-col gap-4" : "hidden"}>
+              <form.Field name="orgName" validators={stepValidator("orgName")}>
+                {(field) => (
+                  <Field>
+                    <FieldLabel htmlFor="orgName">Nombre de la organización</FieldLabel>
+                    <Input
+                      id="orgName"
+                      aria-invalid={field.state.meta.errors.length > 0 || undefined}
+                      aria-describedby={
+                        field.state.meta.errors.length ? "orgName-error" : undefined
+                      }
+                      value={field.state.value}
+                      onChange={(event) => {
+                        field.handleChange(event.target.value)
+                        const slugField = form.getFieldValue("slug")
+                        if (!slugField) form.setFieldValue("slug", slugify(event.target.value))
+                      }}
+                    />
+                    <FieldError id="orgName-error">
+                      {fieldErrorMessages(field.state.meta.errors)[0] ?? null}
+                    </FieldError>
+                  </Field>
+                )}
+              </form.Field>
+              <form.Field name="slug" validators={stepValidator("slug")}>
+                {(field) => (
+                  <Field>
+                    <FieldLabel htmlFor="slug">Slug (subdominio)</FieldLabel>
+                    <Input
+                      id="slug"
+                      aria-invalid={field.state.meta.errors.length > 0 || undefined}
+                      aria-describedby={
+                        field.state.meta.errors.length ? "slug-help slug-error" : "slug-help"
+                      }
+                      value={field.state.value}
+                      onChange={(event) => field.handleChange(event.target.value)}
+                    />
+                    <FieldDescription id="slug-help">
+                      {field.state.value || "tu-clinica"}.{BASE_DOMAIN}
+                    </FieldDescription>
+                    <FieldError id="slug-error">
+                      {fieldErrorMessages(field.state.meta.errors)[0] ?? null}
+                    </FieldError>
+                  </Field>
+                )}
+              </form.Field>
+            </div>
+
+            <div className={step === 2 ? "flex flex-col gap-4" : "hidden"}>
+              <form.Field name="legalName" validators={stepValidator("legalName")}>
+                {(field) => (
+                  <Field>
+                    <FieldLabel htmlFor="legalName">Razón social</FieldLabel>
+                    <Input
+                      id="legalName"
+                      aria-invalid={field.state.meta.errors.length > 0 || undefined}
+                      aria-describedby={
+                        field.state.meta.errors.length ? "legalName-error" : undefined
+                      }
+                      value={field.state.value}
+                      onChange={(event) => field.handleChange(event.target.value)}
+                    />
+                    <FieldError id="legalName-error">
+                      {fieldErrorMessages(field.state.meta.errors)[0] ?? null}
+                    </FieldError>
+                  </Field>
+                )}
+              </form.Field>
+              <form.Field name="fiscalDocNumber" validators={stepValidator("fiscalDocNumber")}>
+                {(field) => (
+                  <Field>
+                    <FieldLabel htmlFor="fiscalDocNumber">RUC (opcional)</FieldLabel>
+                    <Input
+                      id="fiscalDocNumber"
+                      inputMode="numeric"
+                      value={field.state.value}
+                      onChange={(event) => field.handleChange(event.target.value)}
+                    />
+                  </Field>
+                )}
+              </form.Field>
+              <form.Field name="countryCode" validators={stepValidator("countryCode")}>
+                {(field) => (
+                  <Field>
+                    <FieldLabel htmlFor="countryCode">País</FieldLabel>
+                    <CountrySelect
+                      id="countryCode"
+                      value={normalizeCountry(field.state.value) ?? DEFAULT_COUNTRY}
+                      onChange={(next) => field.handleChange(next)}
+                    />
+                    <FieldDescription>
+                      Define el formato de los teléfonos y las zonas horarias que se sugieren.
+                    </FieldDescription>
+                    <FieldError>
+                      {fieldErrorMessages(field.state.meta.errors)[0] ?? null}
+                    </FieldError>
+                  </Field>
+                )}
+              </form.Field>
+            </div>
+
+            <div className={step === 3 ? "flex flex-col gap-4" : "hidden"}>
+              <form.Field name="branchName" validators={stepValidator("branchName")}>
+                {(field) => (
+                  <Field>
+                    <FieldLabel htmlFor="branchName">Nombre de la sucursal</FieldLabel>
+                    <Input
+                      id="branchName"
+                      aria-invalid={field.state.meta.errors.length > 0 || undefined}
+                      aria-describedby={
+                        field.state.meta.errors.length ? "branchName-error" : undefined
+                      }
+                      value={field.state.value}
+                      onChange={(event) => field.handleChange(event.target.value)}
+                    />
+                    <FieldError id="branchName-error">
+                      {fieldErrorMessages(field.state.meta.errors)[0] ?? null}
+                    </FieldError>
+                  </Field>
+                )}
+              </form.Field>
+              <form.Field name="branchAddress" validators={stepValidator("branchAddress")}>
+                {(field) => (
+                  <Field>
+                    <FieldLabel htmlFor="branchAddress">Dirección (opcional)</FieldLabel>
+                    <Input
+                      id="branchAddress"
+                      value={field.state.value}
+                      onChange={(event) => field.handleChange(event.target.value)}
+                    />
+                  </Field>
+                )}
+              </form.Field>
+              <form.Field name="branchPhone" validators={stepValidator("branchPhone")}>
+                {(field) => {
+                  const errors = fieldErrorMessages(field.state.meta.errors)
+                  return (
+                    <Field>
+                      <FieldLabel htmlFor="branchPhone">Teléfono (opcional)</FieldLabel>
+                      <PhoneInput
+                        id="branchPhone"
+                        value={field.state.value || null}
+                        defaultCountry={normalizeCountry(country)}
+                        invalid={errors.length > 0}
+                        aria-describedby={errors.length ? "branchPhone-error" : undefined}
+                        onChange={(next) => field.handleChange(next ?? "")}
+                      />
+                      <FieldError id="branchPhone-error">{errors[0] ?? null}</FieldError>
+                    </Field>
+                  )
+                }}
+              </form.Field>
+              <form.Field name="branchTimezone" validators={stepValidator("branchTimezone")}>
+                {(field) => (
+                  <Field>
+                    <FieldLabel htmlFor="branchTimezone">Zona horaria</FieldLabel>
+                    <TimeZoneSelect
+                      id="branchTimezone"
+                      invalid={field.state.meta.errors.length > 0}
+                      aria-describedby={
+                        field.state.meta.errors.length
+                          ? "branchTimezone-help branchTimezone-error"
+                          : "branchTimezone-help"
+                      }
+                      value={field.state.value}
+                      suggested={zonesForCountry(country)}
                       onChange={(next) => field.handleChange(next ?? "")}
                     />
-                    <FieldError>{errors[0] ?? null}</FieldError>
+                    <FieldDescription id="branchTimezone-help">
+                      Con ella se interpretan la agenda, el historial y los documentos de la
+                      clínica.
+                    </FieldDescription>
+                    <FieldError id="branchTimezone-error">
+                      {fieldErrorMessages(field.state.meta.errors)[0] ?? null}
+                    </FieldError>
                   </Field>
-                )
-              }}
-            </form.Field>
-            <form.Field name="branchTimezone" validators={stepValidator("branchTimezone")}>
-              {(field) => (
-                <Field>
-                  <FieldLabel htmlFor="branchTimezone">Zona horaria</FieldLabel>
-                  <TimeZoneSelect
-                    id="branchTimezone"
-                    value={field.state.value}
-                    suggested={zonesForCountry(country)}
-                    onChange={(next) => field.handleChange(next ?? "")}
-                  />
-                  <FieldDescription>
-                    Con ella se interpretan la agenda, el historial y los documentos de la clínica.
-                  </FieldDescription>
-                  <FieldError>{fieldErrorMessages(field.state.meta.errors)[0] ?? null}</FieldError>
-                </Field>
-              )}
-            </form.Field>
-          </div>
+                )}
+              </form.Field>
+            </div>
 
-          <div className="flex justify-between">
-            {step > offset ? (
-              <Button type="button" variant="outline" onClick={() => goTo(step - 1)}>
-                Atrás
-              </Button>
-            ) : (
-              <span />
-            )}
-            <form.Subscribe selector={(state) => state.isSubmitting}>
-              {(isSubmitting) => (
-                <SubmitButton type="submit" pending={isSubmitting}>
-                  {step === STEPS.length - 1 ? "Crear organización" : "Continuar"}
-                </SubmitButton>
+            <div className="flex justify-between">
+              {step > offset ? (
+                <Button type="button" variant="outline" onClick={() => goTo(step - 1)}>
+                  Atrás
+                </Button>
+              ) : (
+                <span />
               )}
-            </form.Subscribe>
-          </div>
-        </FieldGroup>
-      </form>
-    </PageShell>
+              <form.Subscribe selector={(state) => state.isSubmitting}>
+                {(isSubmitting) => (
+                  <SubmitButton type="submit" pending={isSubmitting}>
+                    {step === STEPS.length - 1 ? "Crear organización" : "Continuar"}
+                  </SubmitButton>
+                )}
+              </form.Subscribe>
+            </div>
+          </FieldGroup>
+        </form>
+      </PageShell>
+    </main>
   )
 }

@@ -171,6 +171,9 @@ export function MasterDetail({
   const size = PANEL_SIZES[panelSize]
   const detailRef = usePanelRef()
   const groupRef = React.useRef<HTMLDivElement | null>(null)
+  const detailContentRef = React.useRef<HTMLDivElement>(null)
+  const handleRef = React.useRef<HTMLDivElement>(null)
+  const returnFocusRef = React.useRef<HTMLElement | null>(null)
   const reduceMotion = usePrefersReducedMotion()
   // El contenido sobrevive al cierre: su último valor es el que queda colapsado
   // e `inert`, y de donde sale la animación de entrada la próxima vez.
@@ -216,6 +219,25 @@ export function MasterDetail({
     detail.collapse()
   }, [open, detailRef, markAnimating])
 
+  // El detalle cerrado permanece montado e inert: el retorno depende de open,
+  // no del desmontaje del formulario.
+  React.useLayoutEffect(() => {
+    if (mode !== "panel") return
+    const active = document.activeElement
+    const inside =
+      active != null && (detailContentRef.current?.contains(active) || active === handleRef.current)
+    if (open) {
+      if (active instanceof HTMLElement && active !== document.body && !inside) {
+        returnFocusRef.current = active
+      }
+    } else {
+      if ((active === document.body || inside) && returnFocusRef.current?.isConnected) {
+        returnFocusRef.current.focus()
+      }
+      returnFocusRef.current = null
+    }
+  }, [mode, open])
+
   if (mode === "drawer") {
     return <div className={cn("flex min-w-0 flex-col gap-6", className)}>{children}</div>
   }
@@ -259,6 +281,7 @@ export function MasterDetail({
         {children}
       </ResizablePanel>
       <ResizableHandle
+        elementRef={handleRef}
         withHandle
         disabled={!open}
         // El arrastre manda: apaga la transición en su primer cuadro.
@@ -294,6 +317,7 @@ export function MasterDetail({
             agrandaría el área scrolleable del panel (barra horizontal). */}
         <div className="relative h-full overflow-hidden">
           <div
+            ref={detailContentRef}
             data-open={open ? "" : undefined}
             data-closed={open ? undefined : ""}
             inert={!open ? true : undefined}

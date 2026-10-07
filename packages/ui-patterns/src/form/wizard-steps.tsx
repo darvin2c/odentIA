@@ -48,10 +48,10 @@ export function WizardSteps({
                 type="button"
                 disabled={!clickable}
                 aria-current={isCurrent ? "step" : undefined}
-                aria-label={`${index + 1}. ${step.label}${isCurrent ? " (paso actual)" : ""}`}
+                aria-label={`${index + 1}. ${step.label}${isCurrent ? " (paso actual)" : isDone ? " (completado)" : ""}`}
                 onClick={() => onGo(index)}
                 className={cn(
-                  "flex min-w-0 flex-1 items-center gap-2 rounded-md px-1 py-1 text-left",
+                  "flex min-w-0 flex-1 items-center gap-2 rounded-md px-1 py-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring",
                   clickable && "cursor-pointer hover:bg-surface-muted/70",
                   !clickable && "cursor-default",
                 )}
@@ -70,7 +70,9 @@ export function WizardSteps({
                 <span
                   className={cn(
                     "min-w-0 truncate text-xs font-medium",
-                    isCurrent ? "text-foreground" : "text-muted-foreground",
+                    isCurrent
+                      ? "text-foreground underline underline-offset-4"
+                      : "text-muted-foreground",
                   )}
                 >
                   {step.label}

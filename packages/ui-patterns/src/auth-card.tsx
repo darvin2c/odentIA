@@ -13,10 +13,10 @@ export function AuthCard({
   footer?: ReactNode
 }) {
   return (
-    <div className="flex min-h-screen items-center justify-center bg-surface-muted p-4">
+    <main className="flex min-h-screen items-center justify-center bg-surface-muted p-4">
       <div className="flex w-full max-w-sm flex-col gap-6 rounded-md bg-card p-6">
         <div className="flex flex-col gap-1.5">
-          <div className="font-heading text-base font-medium">{title}</div>
+          <h1 className="font-heading text-base font-medium">{title}</h1>
           {description ? <p className="text-sm text-muted-foreground">{description}</p> : null}
         </div>
         <div className="flex flex-col gap-4">
@@ -26,6 +26,6 @@ export function AuthCard({
           ) : null}
         </div>
       </div>
-    </div>
+    </main>
   )
 }

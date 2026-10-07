@@ -131,6 +131,7 @@ export function TimeZoneSelect({
         aria-invalid={invalid || undefined}
         aria-describedby={ariaDescribedBy}
         placeholder={placeholder}
+        triggerLabel="Mostrar zonas horarias"
         disabled={disabled}
         // El texto del campo es la etiqueta de la zona elegida, no una consulta
         // editable: al entrar a buscar se vacía (y se ve el catálogo completo), y
@@ -141,7 +142,7 @@ export function TimeZoneSelect({
         }}
         onBlur={() => setTyped(null)}
       />
-      <ComboboxContent>
+      <ComboboxContent aria-label={common.timeZone.label}>
         <ComboboxList aria-label={common.timeZone.label}>
           {/* Hijo función: Base UI renderiza solo las zonas que pasan el filtro
               (el catálogo completo son cientos de filas). */}

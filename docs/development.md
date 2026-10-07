@@ -28,6 +28,12 @@ Infra definida en `infra/dev/compose.yaml`: PostgreSQL :5432, MinIO :9000/:9001 
 - Linux/WSL: `DOCKER_HOST=unix:///ruta/al/socket pnpm e2e`; socket accesible desde Node Linux. En Podman remoto, el override del socket apunta al host de contenedores. Docker estándar puede autodetectarse.
 - Tests de paquetes fijan socket WSL con `??=`; sobrescribir por entorno cuando corresponda. No arrancar/reconfigurar runtime automáticamente.
 
+### Accesibilidad de las superficies principales
+
+- `pnpm e2e accessibility.spec.ts --workers=2` recorre login, registro, onboarding, Inicio, Configuración y alta de paciente con Chromium y Axe, en 1440px/390px y temas claro/oscuro. Incluye errores de formulario, selector de zona horaria abierto, navegación móvil y cierre con retorno de foco del panel/drawer.
+- La salida de Axe y las capturas quedan como adjuntos de cada caso en `e2e/test-results/<runId>/results.json` y `playwright/`. Revisar también los resultados incompletos que requieran juicio humano; cero violaciones automáticas no acredita WCAG completa.
+- Completar una lectura con Narrador/NVDA o equivalente: landmarks, nombre/rol/estado de controles, selección y errores asociados. Registrar el lector y el recorrido efectivamente ejecutado en el reporte, no asumirlo a partir del árbol accesible.
+
 ### Verificación operativa del agente
 
 - `pnpm --filter @odentia/agent test` recorre herramientas y propuestas con PostgreSQL real: reserva, reprogramación, cancelación, obsolescencia, reentrega idempotente y derivación humana.
@@ -50,6 +56,8 @@ Infra definida en `infra/dev/compose.yaml`: PostgreSQL :5432, MinIO :9000/:9001 
 - Portless `already registered by PID 0`: comprobar entradas muertas de `~/.portless/routes.json` antes de retirarlas. Colisiones de puertos API/panel: reiniciar el stack para reasignar.
 - Portless 0.15.6 está fijado y parcheado en `patches/portless@0.15.6.patch`: `PORTLESS_HTTP_REDIRECT=0` evita puerto 80 en E2E; configuración OpenSSL mínima evita `basicConstraints` duplicado en la CA; sus procesos OpenSSL se crean ocultos para que la generación dinámica de certificados no abra ventanas de Terminal en Windows.
 - En Windows, el supervisor E2E lanza todo proceso y sus descendientes dentro de una consola propia oculta (`e2e/windows-child-runner.cjs`) y vigila el recorrido completo con `e2e/windows-terminal-monitor.ps1`; cualquier ventana nueva de Windows Terminal hace fallar la ejecución. `patches/testcontainers@12.1.0.patch` aplica la misma restricción al helper `docker-credential-desktop`.
+- Base UI 1.8.0 usa `aria-hidden` en controles externos a un combobox editable aun cuando permite alcanzarlos con Tab. `patches/@base-ui__react@1.8.0.patch` conserva esos controles en el árbol accesible, sin cambiar el aislamiento de los diálogos modales; aplica a ESM y CommonJS.
+- `patches/react-resizable-panels@4.12.4.patch` suscribe el separador antes de registrarlo y recalcula sus vecinos al habilitarlo/deshabilitarlo. Así resize por teclado y `aria-valuenow` funcionan desde la apertura de un panel inicialmente colapsado. Al actualizar la librería, comprobar ambos comportamientos.
 - Ante TLS `unable to verify the first certificate`, inspeccionar CA del state dir afectado. Si es inválida, regenerar sus `ca*.pem`, `server*.pem` y `host-certs/` reiniciando solo ese proxy; no desactivar validación TLS ni modificar confianza global como solución.
 - `scripts/local-network.mjs` resuelve `.localhost` a loopback con Undici en dev/previews SSR. No pertenece al bundle productivo ni cambia hosts/DNS global.
 - Si loopback Windows no entrega saludo SMTP pero HTTP funciona, comprobar conectividad a la máquina Podman antes de usar su IP con `TESTCONTAINERS_HOST_OVERRIDE`; no omitir readiness.
