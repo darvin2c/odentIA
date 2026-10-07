@@ -1,10 +1,12 @@
 import { Badge, Button, Field, FieldLabel, Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Textarea } from "@odentia/ui"
-import { EmptyState, FormDrawer, PageHeader, PageShell } from "@odentia/ui-patterns"
+import { EmptyState, ErrorState, FormDrawer, LoadingState, PageHeader, PageShell } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { type FormEvent, useState } from "react"
-import { ApiError, apiFetch } from "../../lib/api"
+import { apiFetch } from "../../lib/api"
 import { usePermission } from "../../lib/crm"
+import { isAmbiguousMutationError, mutationErrorMessage, QueryErrorState } from "../../lib/query-error"
+import { PageDraftGuard, sameDraft } from "../../lib/page-draft-guard"
 
 export const Route = createFileRoute("/_org/agent/knowledge")({
   component: AgentKnowledgePage,
@@ -41,6 +43,8 @@ function AgentKnowledgePage() {
   const [creating, setCreating] = useState(false)
   const [revisionsFor, setRevisionsFor] = useState<KnowledgeEntry | null>(null)
   const [form, setForm] = useState({ kind: "faq", title: "", body: "", branchId: "" })
+  const [baseline, setBaseline] = useState(form)
+  const formDirty = (creating || editing !== null) && !sameDraft(form, baseline)
 
   const entriesQuery = useQuery({
     queryKey: ["agent-knowledge", kindFilter, statusFilter],
@@ -51,11 +55,13 @@ function AgentKnowledgePage() {
       return apiFetch<{ data: KnowledgeEntry[] }>(`/api/agent/knowledge?${params}`)
     },
     enabled: canRead,
+    retry: false,
   })
   const revisionsQuery = useQuery({
     queryKey: ["agent-knowledge-revisions", revisionsFor?.id],
     queryFn: () => apiFetch<{ data: Revision[] }>(`/api/agent/knowledge/${revisionsFor?.id}/revisions`),
     enabled: canRead && revisionsFor !== null,
+    retry: false,
   })
 
   const invalidate = () => {
@@ -63,6 +69,7 @@ function AgentKnowledgePage() {
   }
 
   const saveMutation = useMutation({
+    retry: false,
     mutationFn: () => {
       const payload = {
         kind: form.kind,
@@ -83,6 +90,7 @@ function AgentKnowledgePage() {
   })
 
   const statusMutation = useMutation({
+    retry: false,
     mutationFn: (entry: KnowledgeEntry) =>
       apiFetch(`/api/agent/knowledge/${entry.id}/status`, {
         method: "POST",
@@ -94,29 +102,30 @@ function AgentKnowledgePage() {
   if (!canRead) {
     return (
       <PageShell>
-        <EmptyState title="Sin acceso" description="No tienes acceso al conocimiento del agente." />
+        <ErrorState title="Sin acceso" message="No tienes acceso al conocimiento del agente. Solicita acceso a la administración." />
       </PageShell>
     )
   }
 
   const entries = entriesQuery.data?.data ?? []
   const revisions = revisionsQuery.data?.data ?? []
-  const error =
-    saveMutation.error instanceof ApiError
-      ? (saveMutation.error.shape.message ?? "No pudimos guardar")
-      : saveMutation.error
-        ? "No pudimos guardar"
-        : null
+  const error = mutationErrorMessage(saveMutation.error)
 
   function openCreate() {
+    saveMutation.reset()
     setEditing(null)
-    setForm({ kind: "faq", title: "", body: "", branchId: "" })
+    const initial = { kind: "faq", title: "", body: "", branchId: "" }
+    setForm(initial)
+    setBaseline(initial)
     setCreating(true)
   }
 
   function openEdit(entry: KnowledgeEntry) {
+    saveMutation.reset()
     setCreating(false)
-    setForm({ kind: entry.kind, title: entry.title, body: entry.body, branchId: entry.branchId ?? "" })
+    const initial = { kind: entry.kind, title: entry.title, body: entry.body, branchId: entry.branchId ?? "" }
+    setForm(initial)
+    setBaseline(initial)
     setEditing(entry)
   }
 
@@ -127,11 +136,13 @@ function AgentKnowledgePage() {
 
   function submit(event: FormEvent) {
     event.preventDefault()
+    if (saveMutation.isPending || isAmbiguousMutationError(saveMutation.error)) return
     saveMutation.mutate()
   }
 
   return (
     <PageShell className="flex flex-col gap-6">
+      <PageDraftGuard dirty={formDirty || saveMutation.isPending} />
       <PageHeader
         title="Conocimiento del agente"
         subtitle="Respuestas oficiales versionadas: solo lo publicado alimenta al agente"
@@ -170,8 +181,15 @@ function AgentKnowledgePage() {
           </Button>
         ) : null}
       </div>
-      {entries.length === 0 ? (
-        <EmptyState title="Sin entradas" description="Crea la primera respuesta oficial de la clínica." />
+      {statusMutation.isError ? (
+        <ErrorState title="No pudimos confirmar el cambio de estado" message={mutationErrorMessage(statusMutation.error) ?? undefined} onRetry={() => { void entriesQuery.refetch().then(result => { if (result.isSuccess) statusMutation.reset() }) }} retryLabel="Consultar estado actual" />
+      ) : null}
+      {entriesQuery.isPending ? (
+        <LoadingState message="Cargando entradas…" />
+      ) : entriesQuery.isError ? (
+        <QueryErrorState error={entriesQuery.error} onRetry={() => { void entriesQuery.refetch() }} />
+      ) : entries.length === 0 ? (
+        <EmptyState title={kindFilter || statusFilter ? "Sin resultados" : "Sin entradas"} description={kindFilter || statusFilter ? "Prueba otro tipo o estado para encontrar entradas." : "Crea la primera respuesta oficial de la clínica."} />
       ) : (
         <ul className="flex flex-col gap-3">
           {entries.map((entry) => (
@@ -196,7 +214,7 @@ function AgentKnowledgePage() {
                     variant="outline"
                     size="sm"
                     onClick={() => statusMutation.mutate(entry)}
-                    disabled={statusMutation.isPending}
+                    disabled={statusMutation.isPending || isAmbiguousMutationError(statusMutation.error)}
                   >
                     {entry.status === "publicada" ? "Despublicar" : "Publicar"}
                   </Button>
@@ -216,10 +234,11 @@ function AgentKnowledgePage() {
           title={editing ? "Editar entrada" : "Nueva entrada"}
           onSubmit={submit}
           isSubmitting={saveMutation.isPending}
+          isDirty={formDirty}
           error={error}
           submitLabel="Guardar"
           cancelLabel="Cancelar"
-          submitDisabled={!form.title.trim() || !form.body.trim()}
+          submitDisabled={!form.title.trim() || !form.body.trim() || isAmbiguousMutationError(saveMutation.error)}
         >
           <Field>
             <FieldLabel htmlFor="nc-tipo">Tipo</FieldLabel>
@@ -257,8 +276,12 @@ function AgentKnowledgePage() {
       {revisionsFor ? (
         <div className="flex flex-col gap-2 rounded-md bg-card p-6">
           <div className="font-heading text-base font-medium">Versiones de “{revisionsFor.title}”</div>
-          {revisions.length === 0 ? (
-            <p className="text-sm text-muted-foreground">Cargando…</p>
+          {revisionsQuery.isPending ? (
+            <LoadingState message="Cargando versiones…" />
+          ) : revisionsQuery.isError ? (
+            <QueryErrorState error={revisionsQuery.error} onRetry={() => { void revisionsQuery.refetch() }} />
+          ) : revisions.length === 0 ? (
+            <EmptyState title="Sin versiones" description="Esta entrada todavía no tiene versiones anteriores." />
           ) : (
             <ul className="flex flex-col gap-2">
               {revisions.map((r) => (

@@ -5,6 +5,7 @@ import { Link, createFileRoute } from "@tanstack/react-router"
 import { AlertTriangle, ArrowRight, Bot, CalendarDays, CheckCircle2, CheckSquare, Hand, Inbox, Wallet } from "lucide-react"
 import { useState, type ReactNode } from "react"
 import { PerformanceSummary } from "../../components/crm/performance-summary"
+import { HomeStart } from "../../components/home-start"
 import { ACTION_LABEL, proposalErrorMessage, type AgentProposal } from "../../lib/agent"
 import { ApiError, apiFetch } from "../../lib/api"
 import { channelLabel } from "../../lib/channels"
@@ -35,6 +36,7 @@ const HOME_EVENTS = [
 function HomePage() {
   const queryClient = useQueryClient()
   const canApprove = usePermission("agent.decide")
+  const canReadAgent = usePermission("agent.read")
   const [approving, setApproving] = useState<NonNullable<WorkspaceHome["agent"]>["proposals"][number] | null>(null)
   // Un 200 con `fallida`/`expirada` saca la propuesta de pendientes: el
   // resultado queda fijo en pantalla junto a la vuelta al caso.
@@ -64,6 +66,13 @@ function HomePage() {
     },
   })
   const data = query.data?.data
+  const hasAgentPending = Boolean(data?.agent && (data.agent.pendingProposals > 0 || data.agent.recentHandoffs.length > 0))
+  const hasPending = Boolean(data && (hasAgentPending || data.appointments.length > 0 || (data.taskCount?.open ?? 0) > 0
+    || (data.conversations && (data.conversations.waiting > 0 || data.conversations.unread > 0))
+    || data.budgets.length > 0 || data.debt.length > 0 || (data.agent?.today.error ?? 0) > 0))
+  const hasMetrics = Boolean(data && (data.appointmentCounts.some(item => item.count > 0 && item.status !== "cancelada")
+    || (data.conversations && (data.conversations.waiting > 0 || data.conversations.unread > 0))
+    || (data.taskCount?.open ?? 0) > 0 || data.debt.length > 0))
   const decideError =
     decideMutation.error instanceof ApiError
       ? (decideMutation.error.shape.message ?? "No pudimos aprobar la propuesta")
@@ -73,7 +82,8 @@ function HomePage() {
   return <PageShell className="flex flex-col gap-6">
     <PageHeader title="Inicio" subtitle={data ? `Tu jornada · ${data.date} · ${data.timezone}` : "Lo que necesita tu atención hoy"} />
     {query.isPending ? <LoadingState /> : query.isError ? <p role="alert">No pudimos cargar tu jornada. <button type="button" className="underline" onClick={() => void query.refetch()}>Volver a intentar</button></p> : data ? <>
-      {data.agent && <section aria-label="Pendiente de ti" className="rounded-md border bg-card p-5">
+      {!hasPending && <HomeStart data={data} />}
+      {data.agent && (hasAgentPending || outcome || decideError) && <section aria-label="Pendiente de ti" className="rounded-md border bg-card p-5">
         <div className="mb-4 flex items-center justify-between gap-3">
           <h2 className="flex items-center gap-2 font-semibold">Pendiente de ti
             {data.agent.pendingProposals > 0 && <Badge>{data.agent.pendingProposals} por revisar</Badge>}
@@ -114,36 +124,34 @@ function HomePage() {
             </li>)}
           </ul>
         </div>}
-        {data.agent.proposals.length === 0 && data.agent.recentHandoffs.length === 0 &&
-          <p className="text-sm text-muted-foreground">No hay propuestas pendientes ni derivaciones recientes. Esto no acredita que todos los casos estén resueltos.</p>}
       </section>}
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        {data.access.appointments && <Metric title="Citas de hoy" value={data.appointmentCounts.filter(item => item.status !== "cancelada").reduce((sum, item) => sum + item.count, 0)} detail="Abrir agenda" href="/agenda" icon={<CalendarDays className="size-5" />} />}
-        {data.conversations && <Metric title="Esperan respuesta" value={data.conversations.waiting} detail={`${data.conversations.human} pendientes con atención humana`} href="/inbox" icon={<Inbox className="size-5" />} />}
-        {data.taskCount && <Metric title="Tareas vencidas" value={data.taskCount.overdue} detail={`${data.taskCount.open} tareas abiertas${data.access.allTasks ? " en el equipo" : " asignadas a ti"}`} href="/tasks" icon={<CheckSquare className="size-5" />} />}
-        {data.access.finance && <Metric title="Cuentas con saldo" value={data.debt.reduce((sum, item) => sum + item.patients, 0)} detail="Revisar cobranza · por moneda" href="/finance" icon={<Wallet className="size-5" />} />}
-      </div>
-      <div className="grid items-start gap-6 xl:grid-cols-2">
-        {data.access.appointments && <Section title="Agenda de hoy" href="/agenda" action="Ver agenda">
-          {data.appointments.length === 0 ? <p className="text-sm text-muted-foreground">No hay citas pendientes para hoy.</p> : <ul className="divide-y">{data.appointments.map(item => <li key={item.id} className="flex items-center justify-between gap-4 py-3">
+      {hasMetrics && <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        {data.access.appointments && data.appointmentCounts.some(item => item.count > 0 && item.status !== "cancelada") && <Metric title="Citas de hoy" value={data.appointmentCounts.filter(item => item.status !== "cancelada").reduce((sum, item) => sum + item.count, 0)} detail="Abrir agenda" href="/agenda" icon={<CalendarDays className="size-5" />} />}
+        {data.conversations && (data.conversations.waiting > 0 || data.conversations.unread > 0) && <Metric title={data.conversations.waiting > 0 ? "Esperan respuesta" : "Conversaciones sin leer"} value={data.conversations.waiting || data.conversations.unread} detail={`${data.conversations.human} con atención humana · ${data.conversations.unread} sin leer`} href="/inbox" icon={<Inbox className="size-5" />} />}
+        {data.taskCount && data.taskCount.open > 0 && <Metric title="Tareas abiertas" value={data.taskCount.open} detail={`${data.taskCount.overdue} vencidas${data.access.allTasks ? " en el equipo" : " asignadas a ti"}`} href="/tasks" icon={<CheckSquare className="size-5" />} />}
+        {data.access.finance && data.debt.length > 0 && <Metric title="Cuentas con saldo" value={data.debt.reduce((sum, item) => sum + item.patients, 0)} detail="Revisar cobranza · por moneda" href="/finance" icon={<Wallet className="size-5" />} />}
+      </div>}
+      {(data.appointments.length > 0 || data.tasks.length > 0 || data.budgets.length > 0 || data.debt.length > 0) && <div className="grid items-start gap-6 xl:grid-cols-2">
+        {data.access.appointments && data.appointments.length > 0 && <Section title="Agenda de hoy" href="/agenda" action="Ver agenda">
+          <ul className="divide-y">{data.appointments.map(item => <li key={item.id} className="flex items-center justify-between gap-4 py-3">
             <div className="min-w-0"><Link to="/patients/$patientId" params={{ patientId: item.patientId }} className="font-medium hover:underline">{item.patientName}</Link><p className="text-sm text-muted-foreground">{item.dentistName} · {item.branchName}</p></div>
             <div className="shrink-0 text-right"><p className="text-sm font-medium">{new Date(item.startsAt).toLocaleTimeString(data.locale, { timeZone: data.timezone, hour: "2-digit", minute: "2-digit" })}</p><Badge variant="secondary">{stateLabel[item.status] ?? item.status}</Badge></div>
-          </li>)}</ul>}
+          </li>)}</ul>
         </Section>}
-        {data.access.tasks && <Section title={data.access.allTasks ? "Pendientes del equipo" : "Mis pendientes"} href="/tasks" action="Ver tareas">
-          {data.tasks.length === 0 ? <p className="text-sm text-muted-foreground">No tienes tareas pendientes.</p> : <ul className="divide-y">{data.tasks.map(item => <li key={item.id}><Link to={item.href} className="flex justify-between gap-3 rounded-sm py-3 focus-visible:outline-2 focus-visible:outline-primary"><span className="text-sm">{item.title}</span>{item.overdue && <Badge variant="destructive">Vencida</Badge>}</Link></li>)}</ul>}
+        {data.access.tasks && data.tasks.length > 0 && <Section title={data.access.allTasks ? "Pendientes del equipo" : "Mis pendientes"} href="/tasks" action="Ver tareas">
+          <ul className="divide-y">{data.tasks.map(item => <li key={item.id}><Link to={item.href} className="flex justify-between gap-3 rounded-sm py-3 focus-visible:outline-2 focus-visible:outline-primary"><span className="text-sm">{item.title}</span>{item.overdue && <Badge variant="destructive">Vencida</Badge>}</Link></li>)}</ul>
         </Section>}
-        {(data.access.finance || data.access.clinical) && <Section title="Presupuestos por seguir" href="/patients" action="Ver pacientes">
-          {data.budgets.length === 0 ? <p className="text-sm text-muted-foreground">No hay presupuestos presentados o pospuestos por revisar.</p> : <ul className="divide-y">{data.budgets.map(item => <li key={item.id} className="py-3"><Link to="/patients/$patientId" params={{ patientId: item.patientId }} search={{ tab: "plan" }} className="font-medium hover:underline">{item.patientName}</Link><p className="text-sm text-muted-foreground">{item.title}</p></li>)}</ul>}
+        {(data.access.finance || data.access.clinical) && data.budgets.length > 0 && <Section title="Presupuestos por seguir" href="/patients" action="Ver pacientes">
+          <ul className="divide-y">{data.budgets.map(item => <li key={item.id} className="py-3"><Link to="/patients/$patientId" params={{ patientId: item.patientId }} search={{ tab: "plan" }} className="font-medium hover:underline">{item.patientName}</Link><p className="text-sm text-muted-foreground">{item.title}</p></li>)}</ul>
         </Section>}
-        {data.access.finance && <Section title="Cobranza pendiente" href="/finance" action="Revisar cuentas">
-          {data.debt.length === 0 ? <p className="text-sm text-muted-foreground">No hay cargos con saldo pendiente.</p> : <ul className="divide-y">{data.debt.map(item => <li key={item.currency} className="py-3"><p className="font-medium">{moneyFromCents(item.outstandingCents, item.currency, data.locale)}</p><p className="text-sm text-muted-foreground">Vencido: {moneyFromCents(item.overdueCents, item.currency, data.locale)}</p></li>)}</ul>}
+        {data.access.finance && data.debt.length > 0 && <Section title="Cobranza pendiente" href="/finance" action="Revisar cuentas">
+          <ul className="divide-y">{data.debt.map(item => <li key={item.currency} className="py-3"><p className="font-medium">{moneyFromCents(item.outstandingCents, item.currency, data.locale)}</p><p className="text-sm text-muted-foreground">Vencido: {moneyFromCents(item.overdueCents, item.currency, data.locale)}</p></li>)}</ul>
         </Section>}
-      </div>
-      {data.agent && <section aria-label="El agente hoy" className="flex flex-col gap-4">
+      </div>}
+      {data.agent && data.agent.today.runs > 0 && <section aria-label="El agente hoy" className="flex flex-col gap-4">
         <div className="flex items-center justify-between gap-3">
           <h2 className="font-semibold">El agente hoy</h2>
-          <Link to="/agent" className="inline-flex items-center gap-1 text-sm text-primary hover:underline">Ver agente<ArrowRight className="size-4" aria-hidden /></Link>
+          <Link to={canReadAgent ? "/agent" : "/agent/approvals"} className="inline-flex items-center gap-1 text-sm text-primary hover:underline">{canReadAgent ? "Ver agente" : "Revisar decisiones"}<ArrowRight className="size-4" aria-hidden /></Link>
         </div>
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <KpiCard title="Intervenciones de hoy" value={data.agent.today.runs} description="Veces que el agente actuó" icon={<Bot className="size-5" />} />
@@ -153,7 +161,7 @@ function HomePage() {
         </div>
       </section>}
       <PulseSection locale={data.locale} />
-      {!Object.entries(data.access).some(([key, value]) => key !== "allTasks" && value) && <EmptyState title="Tu espacio está listo" description="Pide a la administración los permisos necesarios para tu trabajo." />}
+      {!Object.entries(data.access).some(([key, value]) => key !== "allTasks" && key !== "configure" && value) && <EmptyState title="Sin permisos operativos" description="Pide a la administración los permisos necesarios para tu trabajo." />}
     </> : null}
     <ConfirmDialog open={approving !== null} title="Aprobar y ejecutar el cambio" description={approving ? `${approving.context.contactName ?? "Interlocutor"}: ${approving.context.afterSummary}` : ""} confirmLabel="Aprobar y ejecutar" variant="default" pending={decideMutation.isPending} onClose={() => { if (!decideMutation.isPending) setApproving(null) }} onConfirm={() => approving && decideMutation.mutate(approving.id)} />
   </PageShell>
@@ -162,7 +170,26 @@ function HomePage() {
 /** Foto de los últimos 30 días; las ejecuciones no se confunden con resultados. */
 function PulseSection({ locale }: { locale: string }) {
   const pulseQuery = useQuery({ queryKey: ["workspace-pulse"], queryFn: () => apiFetch<{ data: WorkspacePulse }>("/api/workspace/pulse"), refetchInterval: 300_000 })
-  const pulse = pulseQuery.data?.data
+  const source = pulseQuery.data?.data
+  // Una respuesta autorizada puede contener agregados vacíos: no son actividad.
+  const pulse = source ? {
+    ...source,
+    funnel: source.funnel?.some(item => item.count > 0) ? source.funnel : null,
+    channels: source.channels?.some(item => item.count > 0) ? source.channels : null,
+    execution: source.execution?.some(item => item.ok > 0 || item.handoff > 0 || item.error > 0) ? source.execution : null,
+    collections: source.collections?.length ? source.collections : null,
+    performance: {
+      responses: source.performance.responses?.conversations ? source.performance.responses : null,
+      followUps: source.performance.followUps?.open ? source.performance.followUps : null,
+      conversations: source.performance.conversations && (source.performance.conversations.closed > 0 || source.performance.conversations.waiting > 0) ? source.performance.conversations : null,
+      bookings: source.performance.bookings?.length ? source.performance.bookings : null,
+      conversion: source.performance.conversion?.length ? source.performance.conversion : null,
+      proposals: source.performance.proposals && (source.performance.proposals.executed > 0 || source.performance.proposals.failed > 0 || source.performance.proposals.pending > 0) ? source.performance.proposals : null,
+      handoffs: source.performance.handoffs?.cohort ? source.performance.handoffs : null,
+      clinicalControls: source.performance.clinicalControls?.cohort ? source.performance.clinicalControls : null,
+      taskTimeliness: source.performance.taskTimeliness?.cohort ? source.performance.taskTimeliness : null,
+    },
+  } : null
   if (pulseQuery.isPending) {
     return <section aria-label="Pulso" className="flex flex-col gap-4">
       <h2 className="font-semibold">Pulso</h2>

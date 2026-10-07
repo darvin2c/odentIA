@@ -16,6 +16,7 @@ export interface WorkspaceAccess {
   crm: boolean
   agent: boolean
   allTasks: boolean
+  configure: boolean
 }
 
 export async function createWorkspaceNotification(tx: Db, orgId: string, input: {
@@ -396,8 +397,38 @@ export async function getWorkspaceHome(tx: Db, orgId: string, userId: string, ac
     order by b.presented_at nulls last, b.id limit 8`) : []
   const debt = access.finance ? await currentDebt(tx, orgId) : []
   const agent = access.agent ? await workspaceAgent(tx, orgId, start, end) : null
+  // La puesta en marcha consulta capacidades existentes, no deduce configuración
+  // a partir de contadores operativos en cero. Solo administración recibe estos datos.
+  const [setup] = access.configure ? await tx.execute<{ availability: boolean; chairs: boolean; patients: boolean }>(sql`
+    select exists(select 1 from professional_schedule where organization_id=${orgId} and is_active) as availability,
+      exists(select 1 from schedule_chair where organization_id=${orgId} and is_active) as chairs,
+      exists(select 1 from patient where organization_id=${orgId}) as patients`) : []
+  const [activity] = await tx.execute<{ recorded: boolean; completedToday: boolean }>(sql`
+    select (
+      ${access.appointments} and exists(select 1 from appointment where organization_id=${orgId})
+      or ${access.tasks} and exists(select 1 from task where organization_id=${orgId} and (${access.allTasks} or assignee_user_id=${userId}))
+      or ${access.conversations} and exists(select 1 from conversation where organization_id=${orgId})
+      or ${access.finance} and exists(select 1 from patient_payment where organization_id=${orgId} and voided_at is null)
+      or ${access.finance} and exists(select 1 from patient_charge where organization_id=${orgId} and voided_at is null)
+      or ${access.finance || access.clinical} and exists(select 1 from treatment_budget where organization_id=${orgId})
+      or ${access.clinical} and exists(select 1 from encounter where organization_id=${orgId})
+      or ${access.crm} and exists(select 1 from opportunity where organization_id=${orgId})
+      or ${access.agent} and exists(select 1 from agent_run_ledger where organization_id=${orgId})
+      or ${access.agent} and exists(select 1 from agent_proposal where organization_id=${orgId})
+    ) as recorded, (
+      ${access.appointments} and exists(select 1 from appointment where organization_id=${orgId}
+        and status='atendida' and starts_at >= ${start} and starts_at < ${end})
+      or ${access.tasks} and exists(select 1 from task where organization_id=${orgId}
+        and (${access.allTasks} or assignee_user_id=${userId}) and status='done' and updated_at >= ${start} and updated_at < ${end})
+      or ${access.finance} and exists(select 1 from patient_payment where organization_id=${orgId}
+        and voided_at is null and paid_at >= ${start} and paid_at < ${end})
+      or ${access.conversations} and exists(select 1 from audit_event where organization_id=${orgId}
+        and entity='conversation' and action='conversation.updated' and metadata->>'op'='close'
+        and created_at >= ${start} and created_at < ${end})
+    ) as "completedToday"`)
   return { date: day.date, timezone, locale, access, appointments, appointmentCounts, tasks,
-    taskCount: taskCount ?? null, conversations: conversations ?? null, budgets, debt, agent }
+    taskCount: taskCount ?? null, conversations: conversations ?? null, budgets, debt, agent,
+    setup: setup ?? null, activity }
 }
 
 async function currentDebt(tx: Db, orgId: string) {

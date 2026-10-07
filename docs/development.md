@@ -18,6 +18,27 @@ pnpm db:seed
 
 Infra definida en `infra/dev/compose.yaml`: PostgreSQL :5432, MinIO :9000/:9001 y Mailpit :1025/:8025. En Windows lanzar `pnpm dev` desde Git Bash con pnpm en PATH; proxies Portless en 443. Panel: `app.odentia.localhost`; plataforma: `odentia.localhost`.
 
+### Modelo real con API compatible
+
+En `infra/dev/.env`, configurar `LLM_MODEL=openai:<identificador-del-modelo>`,
+`LLM_API_KEY` y `LLM_BASE_URL` con la URL base publicada por el proveedor
+(incluido `/v1` o el prefijo que este indique). `openai:` selecciona el protocolo:
+con una URL de otro proveedor no se envían las peticiones a OpenAI. El adaptador
+`@langchain/openai` está incluido; otros protocolos nativos requieren su SDK.
+
+El modelo elegido debe admitir llamadas a herramientas (`tools`/`tool_calls`).
+API y worker usan las mismas credenciales de servidor; reiniciarlos tras cambiar
+la configuración. El campo Modelo de Configuración → Agente puede sobrescribir
+`LLM_MODEL` para una organización: dejarlo vacío para usar el del servidor o
+poner un identificador compatible con el mismo endpoint. Nunca poner la key en
+una variable `VITE_*`, un campo de conversación ni el repositorio.
+
+En producción, usar las mismas variables en los secretos de despliegue de API y
+worker o en `infra/prod/.env`. `CHANNEL_SENDER_MODE=mock` sigue impidiendo envíos
+reales aunque el LLM sea real; habilitar `live` y validación externa de conexiones
+solo para una prueba autorizada, con destinatarios consentidos. Una respuesta
+del modelo no demuestra entrega del canal ni sustituye la observación humana.
+
 ## Verificación
 
 - `pnpm build|test|typecheck`: monorepo mediante Turbo; `pnpm --filter @odentia/services test|typecheck`: paquete.
@@ -25,6 +46,7 @@ Infra definida en `infra/dev/compose.yaml`: PostgreSQL :5432, MinIO :9000/:9001 
 - Instalar Chromium: `pnpm --filter @odentia/e2e exec playwright install chromium`. Linux requiere dependencias de sistema del navegador.
 - `pnpm e2e --workers=2` crea entorno efímero sin `.env`, compose dev ni semilla manual. Reglas en `e2e/AGENTS.md`.
 - Windows/Podman (PowerShell): `$env:DOCKER_HOST='npipe:////./pipe/podman-machine-default'` y `$env:TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE='/run/podman/podman.sock'`. Confirmar nombre con `podman machine inspect` si cambia la máquina.
+- Si el pipe no existe, reenviar el socket root de la conexión por defecto (`podman system connection list`) con `ssh -N -L 127.0.0.1:<puerto>:/run/podman/podman.sock` y usar `DOCKER_HOST=tcp://127.0.0.1:<puerto>`. En Git Bash, exportar `MSYS2_ENV_CONV_EXCL=TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE` para que la ruta del override no se convierta a una ruta de Windows.
 - Linux/WSL: `DOCKER_HOST=unix:///ruta/al/socket pnpm e2e`; socket accesible desde Node Linux. En Podman remoto, el override del socket apunta al host de contenedores. Docker estándar puede autodetectarse.
 - Tests de paquetes fijan socket WSL con `??=`; sobrescribir por entorno cuando corresponda. No arrancar/reconfigurar runtime automáticamente.
 
@@ -33,6 +55,12 @@ Infra definida en `infra/dev/compose.yaml`: PostgreSQL :5432, MinIO :9000/:9001 
 - `pnpm e2e accessibility.spec.ts --workers=2` recorre login, registro, onboarding, Inicio, Configuración y alta de paciente con Chromium y Axe, en 1440px/390px y temas claro/oscuro. Incluye errores de formulario, selector de zona horaria abierto, navegación móvil y cierre con retorno de foco del panel/drawer.
 - La salida de Axe y las capturas quedan como adjuntos de cada caso en `e2e/test-results/<runId>/results.json` y `playwright/`. Revisar también los resultados incompletos que requieran juicio humano; cero violaciones automáticas no acredita WCAG completa.
 - Completar una lectura con Narrador/NVDA o equivalente: landmarks, nombre/rol/estado de controles, selección y errores asociados. Registrar el lector y el recorrido efectivamente ejecutado en el reporte, no asumirlo a partir del árbol accesible.
+
+### Borradores, estados remotos e Inicio
+
+- `pnpm e2e page-drafts.spec.ts --workers=1`: navegación por sidebar/SectionNav, atrás/adelante, recarga, fallo y guardado en formularios de página. Tras «Descartar y salir», esperar el contenido del destino antes de volver a navegar: la URL cambia antes de desmontar la página.
+- `pnpm e2e remote-states.spec.ts --workers=2`: 500/red, 404 y 403 con reintento real; una respuesta perdida tras aplicar un POST conserva la entrada y no reenvía la operación.
+- `pnpm e2e home-start.spec.ts --workers=2`: organización nueva, parcial, configurada sin actividad, jornada activa, error recuperable y roles en 1440px/390px.
 
 ### Verificación operativa del agente
 

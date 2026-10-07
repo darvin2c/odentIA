@@ -1,5 +1,5 @@
 import { Button, Input, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@odentia/ui"
-import { LoadingState, PageHeader, PageShell } from "@odentia/ui-patterns"
+import { EmptyState, ErrorState, LoadingState, PageHeader, PageShell } from "@odentia/ui-patterns"
 import { useQuery } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { useEffect, useState, type ReactNode } from "react"
@@ -8,6 +8,7 @@ import { PerformanceSummary } from "../../components/crm/performance-summary"
 import { usePermission } from "../../lib/crm"
 import { useOrgProfile } from "../../lib/org"
 import { type ManagementReport, moneyFromCents, stateLabel } from "../../lib/workspace"
+import { QueryErrorState } from "../../lib/query-error"
 
 export const Route = createFileRoute("/_org/reports")({ component: ReportsPage })
 function ReportsPage() {
@@ -26,16 +27,16 @@ function ReportsPage() {
     setTo(today)
     setPeriod({ from: first, to: today })
   }, [profile.data?.timezone, period])
-  const query = useQuery({ queryKey: ["management-report", period], enabled: allowed && period !== null,
+  const query = useQuery({ queryKey: ["management-report", period], enabled: allowed && period !== null, retry: false,
     queryFn: () => apiFetch<{ data: ManagementReport }>(`/api/workspace/reports?from=${period?.from}&to=${period?.to}`) })
   const report = query.data?.data
-  if (!allowed) return <PageShell><PageHeader title="Reportes" /><p>No tienes permiso para consultar reportes.</p></PageShell>
+  if (!allowed) return <PageShell><PageHeader title="Reportes" /><ErrorState title="Sin acceso" message="No tienes permiso para consultar reportes. Solicita acceso a la administración." /></PageShell>
   return <PageShell className="flex flex-col gap-6"><PageHeader title="Reportes" subtitle="Resultados de la clínica, separados por moneda y sin mezclar cobros con producción." />
     <form className="flex flex-wrap items-end gap-3" onSubmit={event => { event.preventDefault(); setPeriod({ from, to }) }}>
       <label htmlFor="report-from" className="flex flex-col gap-1 text-sm">Desde<Input id="report-from" type="date" required value={from} max={to} onChange={event => setFrom(event.target.value)} /></label>
       <label htmlFor="report-to" className="flex flex-col gap-1 text-sm">Hasta<Input id="report-to" type="date" required value={to} min={from} onChange={event => setTo(event.target.value)} /></label><Button type="submit">Consultar</Button>
     </form>
-    {query.isPending ? <LoadingState /> : query.isError ? <p role="alert">No pudimos consultar el período. Elige un intervalo válido de hasta un año.</p> : report ? <>
+    {profile.isError && !period ? <QueryErrorState error={profile.error} onRetry={() => { void profile.refetch() }} /> : query.isPending ? <LoadingState /> : query.isError ? <QueryErrorState error={query.error} onRetry={() => { void query.refetch() }} invalid="Elige un intervalo válido de hasta un año y vuelve a consultar." /> : report ? <>
       <p className="text-sm text-muted-foreground">Del {report.from} al {report.to}, ambos incluidos. Zona horaria: {report.timezone}.</p>
       <div className="grid gap-6 xl:grid-cols-2">
         <ReportSection title="Asistencia y cancelaciones" description="Citas cuya fecha de inicio pertenece al período; estado actual."><SimpleTable headers={["Estado", "Citas"]} rows={report.appointments.map(row => [stateLabel[row.status] ?? row.status, row.count])} /></ReportSection>
@@ -55,5 +56,5 @@ function ReportSection({ title, description, children }: { title: string; descri
   return <section className="min-w-0 rounded-md border bg-card p-5"><h2 className="font-semibold">{title}</h2><p className="mb-4 mt-1 text-sm text-muted-foreground">{description}</p>{children}</section>
 }
 function SimpleTable({ headers, rows }: { headers: string[]; rows: Array<Array<string | number>> }) {
-  return rows.length === 0 ? <p className="py-3 text-sm text-muted-foreground">Sin registros para este criterio.</p> : <Table><TableHeader><TableRow>{headers.map(header => <TableHead key={header} scope="col">{header}</TableHead>)}</TableRow></TableHeader><TableBody>{rows.map(row => <TableRow key={row.map(String).join("|")}>{row.map((cell, index) => <TableCell key={headers[index]} className="tabular-nums">{cell}</TableCell>)}</TableRow>)}</TableBody></Table>
+  return rows.length === 0 ? <EmptyState title="Sin registros" description="No hay registros para este criterio." /> : <Table><TableHeader><TableRow>{headers.map(header => <TableHead key={header} scope="col">{header}</TableHead>)}</TableRow></TableHeader><TableBody>{rows.map(row => <TableRow key={row.map(String).join("|")}>{row.map((cell, index) => <TableCell key={headers[index]} className="tabular-nums">{cell}</TableCell>)}</TableRow>)}</TableBody></Table>
 }

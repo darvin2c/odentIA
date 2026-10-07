@@ -1,6 +1,6 @@
 import { FDI_ADULT, FDI_CHILD } from "@odentia/clinical"
 import { Button, Tabs, TabsContent, TabsList, TabsTrigger } from "@odentia/ui"
-import { EmptyState, PageShell } from "@odentia/ui-patterns"
+import { ErrorState, LoadingState, PageShell } from "@odentia/ui-patterns"
 import { useQuery } from "@tanstack/react-query"
 import { createFileRoute, Outlet, useChildMatches, useNavigate } from "@tanstack/react-router"
 import { AntecedentesTab } from "../../components/patient/antecedentes-tab"
@@ -21,6 +21,7 @@ import { PatientPortalAccessSection } from "../../components/portal/portal-acces
 import { apiFetch } from "../../lib/api"
 import { usePermission } from "../../lib/crm"
 import type { PatientFull, PatientSummary, PlanItem } from "../../lib/patients"
+import { QueryErrorState } from "../../lib/query-error"
 
 type TabPermission = "clinical.read" | "finance.read" | "patients.read"
 
@@ -112,16 +113,19 @@ function PatientDetailPage() {
     queryKey: ["patient", patientId],
     queryFn: () => apiFetch<{ data: PatientFull }>(`/api/patients/${patientId}`),
     enabled: canPatients || canClinical || canFinance,
+    retry: false,
   })
   const summary = useQuery({
     queryKey: ["patient-summary", patientId],
     queryFn: () => apiFetch<{ data: PatientSummary }>(`/api/patients/${patientId}/summary`),
     enabled: canClinical,
+    retry: false,
   })
   const planItems = useQuery({
     queryKey: ["plan-items", patientId],
     queryFn: () => apiFetch<{ data: PlanItem[] }>(`/api/patients/${patientId}/plan`),
     enabled: canClinical,
+    retry: false,
   })
   const changeTab = (next: PatientTab, nextTooth?: number) => {
     void navigate({ search: { tab: next, ...(nextTooth ? { tooth: nextTooth } : {}) } })
@@ -146,34 +150,24 @@ function PatientDetailPage() {
       },
     })
   }
-  if (detail.isLoading)
-    return (
-      <PageShell>
-        <p className="text-sm text-muted-foreground">Cargando…</p>
-      </PageShell>
-    )
-  if (!detail.data)
-    return (
-      <PageShell>
-        <EmptyState
-          title="No se pudo cargar el paciente"
-          description={detail.error?.message ?? "El paciente no existe."}
-        />
-      </PageShell>
-    )
+  if (!canPatients && !canClinical && !canFinance)
+    return <PageShell><ErrorState title="Sin acceso" message="No tienes permiso para consultar esta ficha. Solicita acceso a la administración." /></PageShell>
+  if (detail.isPending)
+    return <PageShell><LoadingState message="Cargando paciente…" /></PageShell>
+  if (detail.isError)
+    return <PageShell><QueryErrorState error={detail.error} onRetry={() => { void detail.refetch() }} notFound="El paciente solicitado no existe o ya no está disponible. Vuelve a la lista de pacientes." /></PageShell>
   return (
     <PageShell className="flex min-w-0 flex-col gap-6">
       <PatientHeader
         detail={detail.data.data}
-        summary={summary.data?.data}
+        summary={canClinical && summary.isSuccess ? summary.data.data : undefined}
         onAntecedentes={() => changeTab("antecedentes")}
       />
       <PatientPortalAccessSection patientId={patientId} />
-      {summary.isError && canClinical && (
-        <p role="alert" className="text-sm text-destructive">
-          {summary.error.message}
-        </p>
-      )}
+      {canClinical && summary.isPending ? <LoadingState message="Cargando resumen clínico…" /> : null}
+      {canClinical && summary.isError ? (
+        <QueryErrorState error={summary.error} onRetry={() => { void summary.refetch() }} />
+      ) : null}
       <Tabs
         className="min-w-0 w-full"
         value={activeTab}
@@ -191,12 +185,12 @@ function PatientDetailPage() {
           </TabsList>
         </div>
         <TabsContent value="resumen" className="pt-4">
-          <ResumenTab
+          {summary.isSuccess ? <ResumenTab
             patientId={patientId}
             detail={detail.data.data}
             summary={summary.data?.data}
             onTabChange={openTab}
-          />
+          /> : null}
         </TabsContent>
         <TabsContent value="recorrido" className="pt-4">
           <RecorridoClinicoTab
@@ -246,12 +240,12 @@ function PatientDetailPage() {
               </Button>
             </div>
           ) : null}
-          <ControlesPanel
+          {planItems.isPending ? <LoadingState message="Cargando tratamientos…" /> : planItems.isError ? <QueryErrorState error={planItems.error} onRetry={() => { void planItems.refetch() }} /> : summary.isSuccess ? <ControlesPanel
             patientId={patientId}
             itemId={itemId}
             items={planItems.data?.data ?? []}
             encounterId={summary.data?.data.openEncounterId ?? undefined}
-          />
+          /> : null}
         </TabsContent>
         <TabsContent value="recetas" className="pt-4">
           {itemId ? (
@@ -264,12 +258,12 @@ function PatientDetailPage() {
               </Button>
             </div>
           ) : null}
-          <RecetasPanel
+          {planItems.isPending ? <LoadingState message="Cargando tratamientos…" /> : planItems.isError ? <QueryErrorState error={planItems.error} onRetry={() => { void planItems.refetch() }} /> : summary.isSuccess ? <RecetasPanel
             patientId={patientId}
             itemId={itemId}
             items={planItems.data?.data ?? []}
             encounterId={summary.data?.data.openEncounterId ?? undefined}
-          />
+          /> : null}
         </TabsContent>
         <TabsContent value="formularios" className="pt-4">
           <FormulariosTab

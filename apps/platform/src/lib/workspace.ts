@@ -4,7 +4,9 @@ export interface WorkspaceHome {
   date: string
   timezone: string
   locale: string
-  access: Record<"patients" | "appointments" | "conversations" | "tasks" | "finance" | "clinical" | "crm" | "agent" | "allTasks", boolean>
+  access: Record<"patients" | "appointments" | "conversations" | "tasks" | "finance" | "clinical" | "crm" | "agent" | "allTasks" | "configure", boolean>
+  setup: { availability: boolean; chairs: boolean; patients: boolean } | null
+  activity: { recorded: boolean; completedToday: boolean }
   appointments: Array<{ id: string; patientId: string; patientName: string; startsAt: string; status: string; branchName: string; dentistName: string }>
   appointmentCounts: Array<{ status: string; count: number }>
   tasks: Array<{ id: string; title: string; dueAt: string | null; overdue: boolean; href: string }>

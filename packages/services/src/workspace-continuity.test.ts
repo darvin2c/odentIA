@@ -21,6 +21,7 @@ const full: WorkspaceAccess = {
   crm: true,
   agent: true,
   allTasks: true,
+  configure: true,
 }
 
 it("mide continuidad por caso sin inflar reaperturas, cancelaciones ni históricos desconocidos", async () => {

@@ -39,6 +39,7 @@ import { type FormEvent, useMemo, useState } from "react"
 import { z } from "zod"
 import { authClient } from "../../lib/auth-client"
 import { useMyRole, usePermission } from "../../lib/crm"
+import { PageDraftGuard } from "../../lib/page-draft-guard"
 
 export const Route = createFileRoute("/_org/members")({
   component: MembersPage,
@@ -126,7 +127,7 @@ function MembersPage() {
 
   // Suscripción explícita: el render de la página no se entera de los cambios de
   // meta del formulario por sí solo (los campos se re-renderizan por su cuenta).
-  const isDirty = useStore(form.store, (state) => state.isDirty)
+  const isDirty = useStore(form.store, (state) => !state.isDefaultValue)
   /** Cierra y deja el formulario prístino: sin el reset, el dirty sobrevive al
    *  cierre y el próximo abrir pediría confirmar cambios ya guardados. */
   function closeInviteForm() {
@@ -365,6 +366,7 @@ function MembersPage() {
 
   return (
     <PageShell className="flex flex-col gap-6">
+      <PageDraftGuard dirty={formOpen && isDirty} />
       <MasterDetail
         panel={
           mode === "panel" && formOpen ? <FormPanel {...formProps}>{formFields}</FormPanel> : null

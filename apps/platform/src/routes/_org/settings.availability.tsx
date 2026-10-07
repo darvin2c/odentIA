@@ -12,6 +12,7 @@ import {
   type ScheduleBlock,
 } from "../../lib/agenda"
 import { usePermission } from "../../lib/crm"
+import { sameDraft, usePageDraftGuard } from "../../lib/page-draft-guard"
 
 export const Route = createFileRoute("/_org/settings/availability")({
   component: AvailabilityPage,
@@ -56,25 +57,30 @@ function AvailabilityPage() {
   })
   const [turns, setTurns] = React.useState<TurnDraft[]>([])
   const [loadedFor, setLoadedFor] = React.useState("")
+  const [baseline, setBaseline] = React.useState<TurnDraft[]>([])
+  const draftGuard = usePageDraftGuard(!sameDraft(
+    turns.map(({ weekday, from, to }) => ({ weekday, from, to })),
+    baseline.map(({ weekday, from, to }) => ({ weekday, from, to })),
+  ))
   const loadedKey = `${resources?.branchId}:${professionalId}`
   React.useEffect(() => {
     const rules = scheduleQuery.data?.data.rules
     if (!rules || loadedFor === loadedKey) return
-    setTurns(
-      rules.map((rule) => ({
-        key: turnSeq++,
-        weekday: rule.weekday,
-        from: minutesLabel(rule.startMin),
-        to: minutesLabel(rule.endMin),
-      })),
-    )
+    const loadedTurns = rules.map((rule) => ({
+      key: turnSeq++,
+      weekday: rule.weekday,
+      from: minutesLabel(rule.startMin),
+      to: minutesLabel(rule.endMin),
+    }))
+    setTurns(loadedTurns)
+    setBaseline(loadedTurns)
     setLoadedFor(loadedKey)
   }, [scheduleQuery.data, loadedFor, loadedKey])
 
   const [error, setError] = React.useState("")
   const saveMutation = useMutation({
-    mutationFn: () => {
-      const rules = turns.map((turn) => {
+    mutationFn: (submitted: TurnDraft[]) => {
+      const rules = submitted.map((turn) => {
         const startMin = toMinutes(turn.from)
         const endMin = toMinutes(turn.to)
         if (endMin <= startMin) throw new Error("Cada turno debe terminar después de iniciar.")
@@ -85,7 +91,8 @@ function AvailabilityPage() {
         body: JSON.stringify({ branchId: resources?.branchId, dentistUserId: professionalId, rules }),
       })
     },
-    onSuccess: async () => {
+    onSuccess: async (_result, submitted) => {
+      setBaseline(submitted)
       toast.success("Horario guardado.")
       setError("")
       await queryClient.invalidateQueries({ queryKey: ["professional-schedule"] })
@@ -108,6 +115,7 @@ function AvailabilityPage() {
 
   return (
     <div className="grid gap-4">
+      {draftGuard.dialog}
       <PageHeader
         title="Horarios y bloqueos"
         subtitle={
@@ -128,8 +136,13 @@ function AvailabilityPage() {
                 className="h-8 rounded-md border bg-background px-2 text-sm"
                 value={professionalId}
                 onChange={(event) => {
-                  setDentistId(event.target.value)
-                  setLoadedFor("")
+                  const nextId = event.target.value
+                  draftGuard.requestLeave(() => {
+                    setDentistId(nextId)
+                    setLoadedFor("")
+                    setTurns([])
+                    setBaseline([])
+                  })
                 }}
               >
                 {resources.professionals.map((item) => (
@@ -215,7 +228,7 @@ function AvailabilityPage() {
             {error && <p className="text-sm text-destructive">{error}</p>}
             {canConfigure && (
               <div>
-                <Button disabled={saveMutation.isPending} onClick={() => saveMutation.mutate()}>
+                <Button disabled={saveMutation.isPending} onClick={() => saveMutation.mutate(turns)}>
                   Guardar horario
                 </Button>
               </div>

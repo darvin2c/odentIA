@@ -21,6 +21,7 @@ import { type FormEvent, useEffect, useState } from "react"
 import { z } from "zod"
 import { usePermission } from "../../lib/crm"
 import { fetchOrgProfile, type OrgProfile, type OrgProfileInput, saveOrgProfile, useOrgProfile } from "../../lib/org"
+import { PageDraftGuard, sameDraft } from "../../lib/page-draft-guard"
 
 export const Route = createFileRoute("/_org/settings/")({
   // El perfil son datos de configuración: el loader lo trae una vez —también en
@@ -168,10 +169,10 @@ function OrgProfilePage() {
         )
       ) : canWrite ? (
         <ProfileForm
-          key={profile?.organizationId ?? "nuevo"}
+          key={org.id}
           values={toValues(profile ?? emptyValues)}
           pending={saveMutation.isPending}
-          onSubmit={(values) => saveMutation.mutate(values)}
+          onSubmit={(values) => saveMutation.mutateAsync(values)}
         />
       ) : (
         <EmptyState
@@ -190,13 +191,26 @@ function ProfileForm({
 }: {
   values: ProfileValues
   pending: boolean
-  onSubmit: (values: ProfileValues) => void
+  onSubmit: (values: ProfileValues) => Promise<unknown>
 }) {
+  const [initialValues, setInitialValues] = useState(values)
+  const [baseline, setBaseline] = useState(values)
   const form = useForm({
-    defaultValues: values,
+    defaultValues: initialValues,
     validators: { onSubmit: profileSchema },
-    onSubmit: ({ value }) => onSubmit(value),
+    onSubmit: async ({ value, formApi }) => {
+      try {
+        await onSubmit(value)
+        setInitialValues(value)
+        setBaseline(value)
+        if (sameDraft(formApi.state.values, value)) formApi.reset(value)
+      } catch {
+        // La mutación muestra el error; el borrador queda intacto para reintentar.
+      }
+    },
   })
+  const currentValues = useStore(form.store, (state) => state.values)
+  const dirty = !sameDraft(currentValues, baseline)
   // Suscripción explícita: el país y la zona alimentan campos que se renderizan
   // aparte (sugerencias y la hora local), no solo su propio `<Field>`.
   const country = useStore(form.store, (state) => state.values.countryCode)
@@ -216,6 +230,7 @@ function ProfileForm({
         void form.handleSubmit()
       }}
     >
+      <PageDraftGuard dirty={dirty} />
       <section className="flex flex-col gap-4 rounded-md bg-card p-6">
         <h2 className="font-heading text-base font-medium">Identidad</h2>
         <form.Field name="legalName">

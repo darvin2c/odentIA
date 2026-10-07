@@ -2,16 +2,19 @@ name: CI
 
 on:
   pull_request:
+    # `closed` retira el preview del PR; check y docker-build no corren en ese evento.
+    types: [opened, synchronize, reopened, closed]
   push:
     branches: [main]
 
 concurrency:
   group: ci-${{ github.ref }}
-  # No cancelar un deploy productivo por un push posterior.
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  # No cancelar un deploy productivo ni la retirada de un preview.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' && github.event.action != 'closed' }}
 
 jobs:
   check:
+    if: github.event.action != 'closed'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -30,6 +33,7 @@ jobs:
       - run: pnpm test --filter=!@odentia/e2e
 
   docker-build:
+    if: github.event.action != 'closed'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -65,3 +69,78 @@ jobs:
         run: openship login --api-url "$OPENSHIP_URL/api/proxy" --dashboard-url "$OPENSHIP_URL" --token "$OPENSHIP_DEPLOY_TOKEN"
       - name: Desplegar el commit verificado
         run: openship deploy --project "$OPENSHIP_PROJECT_ID" --branch main --commit "$GITHUB_SHA" --env production --smart-route --watch --timeout 1200000
+
+  # Un entorno OpenShip por PR del mismo repositorio, solo con el commit verificado.
+  # Los forks no reciben secretos y no pueden desplegar.
+  preview:
+    if: >-
+      github.event_name == 'pull_request' && github.event.action != 'closed' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    needs: [check, docker-build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    permissions:
+      contents: read
+      pull-requests: write
+    env:
+      OPENSHIP_URL: ${{ vars.OPENSHIP_URL }}
+      OPENSHIP_PROJECT_ID: ${{ vars.OPENSHIP_PROJECT_ID }}
+      OPENSHIP_PREVIEW_DOMAIN: ${{ vars.OPENSHIP_PREVIEW_DOMAIN }}
+      OPENSHIP_PREVIEW_TOKEN: ${{ secrets.OPENSHIP_PREVIEW_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Instalar CLI oficial de OpenShip
+        run: npm install --global openship@0.8.1
+      # `login` valida listando tokens, operación que un token scoped no tiene;
+      # el primer comando del script comprueba el acceso real.
+      - name: Conectar con OpenShip
+        run: openship context add ci --api-url "$OPENSHIP_URL/api/proxy" --dashboard-url "$OPENSHIP_URL" --token "$OPENSHIP_PREVIEW_TOKEN" --use
+      - name: Crear o actualizar el preview
+        id: preview
+        run: >-
+          node scripts/preview-environment.mjs up
+          --pr "${{ github.event.pull_request.number }}"
+          --branch "${{ github.event.pull_request.head.ref }}"
+          --commit "${{ github.event.pull_request.head.sha }}"
+      - name: Publicar la URL en el PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PREVIEW_URL: ${{ steps.preview.outputs.url }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          body="<!-- odentia-preview -->
+          **Preview:** $PREVIEW_URL
+          Commit: \`$HEAD_SHA\` · datos demo (\`ana@odentia.dev\` / \`Demo1234\`); canales mock y LLM fake."
+          comment=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" --paginate \
+            --jq '[.[] | select(.body | startswith("<!-- odentia-preview -->"))][0].id // empty')
+          if [ -n "$comment" ]; then
+            gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$comment" -f body="$body" >/dev/null
+          else
+            gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body "$body"
+          fi
+
+  preview-teardown:
+    if: >-
+      github.event_name == 'pull_request' && github.event.action == 'closed' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      OPENSHIP_URL: ${{ vars.OPENSHIP_URL }}
+      OPENSHIP_PROJECT_ID: ${{ vars.OPENSHIP_PROJECT_ID }}
+      OPENSHIP_PREVIEW_TOKEN: ${{ secrets.OPENSHIP_PREVIEW_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Instalar CLI oficial de OpenShip
+        run: npm install --global openship@0.8.1
+      - name: Conectar con OpenShip
+        run: openship context add ci --api-url "$OPENSHIP_URL/api/proxy" --dashboard-url "$OPENSHIP_URL" --token "$OPENSHIP_PREVIEW_TOKEN" --use
+      - name: Retirar el preview y sus volúmenes
+        run: node scripts/preview-environment.mjs down --pr "${{ github.event.pull_request.number }}"

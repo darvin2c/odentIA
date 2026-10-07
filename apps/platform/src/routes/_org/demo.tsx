@@ -4,6 +4,7 @@ import { createFileRoute, getRouteApi } from "@tanstack/react-router"
 import { useEffect, useRef, useState } from "react"
 import { apiFetch } from "../../lib/api"
 import { API_URL } from "../../lib/auth-client"
+import { PageDraftGuard } from "../../lib/page-draft-guard"
 
 export const Route = createFileRoute("/_org/demo")({
   component: DemoPage,
@@ -56,6 +57,7 @@ function DemoPage() {
 
   return (
     <PageShell className="flex flex-col gap-6">
+      <PageDraftGuard dirty={message !== ""} />
       <PageHeader
         title="Demo de tareas"
         subtitle="Cola durable (pgmq) + notificaciones en vivo (SSE)"
@@ -71,6 +73,7 @@ function DemoPage() {
             <Input
               placeholder="Escribe un mensaje"
               value={message}
+              disabled={sending}
               onChange={(event) => setMessage(event.target.value)}
               maxLength={200}
             />

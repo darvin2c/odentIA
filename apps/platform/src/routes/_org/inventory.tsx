@@ -1,13 +1,15 @@
 import { Badge, Button, Input, Label, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Textarea, toast } from "@odentia/ui"
-import { DataTable, EmptyState, FilterBar, type FilterDef, FormDrawer, PageHeader, PageShell, RowActions, type RowActionItem, useListSearch } from "@odentia/ui-patterns"
+import { DataTable, EmptyState, ErrorState, FilterBar, type FilterDef, FormDrawer, LoadingState, PageHeader, PageShell, RowActions, type RowActionItem, useListSearch } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, Link } from "@tanstack/react-router"
 import { AlertTriangle, Package, Plus } from "lucide-react"
 import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-table"
 import * as React from "react"
-import { ApiError, apiFetch } from "../../lib/api"
+import { apiFetch } from "../../lib/api"
 import { usePermission } from "../../lib/crm"
 import { MOVEMENT_KIND_LABELS, ORDER_STATUS_LABELS, type InventoryAlerts, type InventoryProduct, type PurchaseOrderDetail, type PurchaseOrderItem, type StockMovementItem, type SupplierItem, type WarehouseItem } from "../../lib/inventory"
+import { isAmbiguousMutationError, mutationErrorMessage, QueryErrorState } from "../../lib/query-error"
+import { usePageDraftGuard } from "../../lib/page-draft-guard"
 
 export const Route = createFileRoute("/_org/inventory")({
   component: InventoryPage,
@@ -16,7 +18,7 @@ export const Route = createFileRoute("/_org/inventory")({
 type Tab = "productos" | "compras" | "movimientos" | "catalogos" | "alertas"
 
 function errorMessage(error: unknown): string {
-  return error instanceof ApiError ? (error.shape.message ?? error.message) : String(error)
+  return mutationErrorMessage(error) ?? "No se guardaron los cambios. Revisa los campos antes de continuar."
 }
 
 function InventoryPage() {
@@ -27,6 +29,8 @@ function InventoryPage() {
   const [tab, setTab] = React.useState<Tab>("productos")
   const [drawer, setDrawer] = React.useState<"product" | "order" | "movement" | "supplier" | "warehouse" | null>(null)
   const [formError, setFormError] = React.useState<string | null>(null)
+  const [receptionDirty, setReceptionDirty] = React.useState(false)
+  const draftGuard = usePageDraftGuard(receptionDirty)
 
   const invalidate = () => {
     void queryClient.invalidateQueries({ queryKey: ["inventory"] })
@@ -35,13 +39,14 @@ function InventoryPage() {
   if (!canRead) {
     return (
       <PageShell className="flex min-h-0 flex-1 flex-col gap-4">
-        <EmptyState title="Sin acceso" description="Tu rol no tiene permiso de lectura de inventario." />
+        <ErrorState title="Sin acceso" message="Tu rol no tiene permiso de lectura de inventario. Solicita acceso a la administración." />
       </PageShell>
     )
   }
 
   return (
     <PageShell className="flex min-h-0 flex-1 flex-col gap-4">
+      {draftGuard.dialog}
       <PageHeader
         title="Inventario"
         subtitle="Productos, compras con recepción parcial, movimientos y alertas por sede."
@@ -81,10 +86,13 @@ function InventoryPage() {
       <div className="flex gap-1 border-b" role="tablist" aria-label="Secciones de inventario">
         {(["productos", "compras", "movimientos", "catalogos", "alertas"] as Tab[]).map((value) => (
           <button
+            type="button"
             key={value}
             role="tab"
             aria-selected={tab === value}
-            onClick={() => setTab(value)}
+            onClick={() => {
+              if (tab !== value) draftGuard.requestLeave(() => setTab(value))
+            }}
             className={`px-3 pb-2 text-sm capitalize ${tab === value ? "border-b-2 border-primary font-medium" : "text-muted-foreground"}`}
           >
             {value === "catalogos" ? "catálogos" : value}
@@ -93,7 +101,7 @@ function InventoryPage() {
       </div>
 
       {tab === "productos" && <ProductsSection search={get("q") ?? ""} lowStock={get("lowStock") ?? null} kind={get("kind") ?? null} />}
-      {tab === "compras" && <OrdersSection status={get("status") ?? null} canWrite={canWrite} />}
+      {tab === "compras" && <OrdersSection status={get("status") ?? null} canWrite={canWrite} onDirtyChange={setReceptionDirty} requestLeave={draftGuard.requestLeave} />}
       {tab === "movimientos" && <MovementsSection kind={get("kind") ?? null} />}
       {tab === "catalogos" && <CatalogsSection canWrite={canWrite} />}
       {tab === "alertas" && <AlertsSection />}
@@ -141,6 +149,7 @@ function ProductsSection({ search, lowStock, kind }: { search: string; lowStock:
     [],
   )
   const query = useQuery({
+    retry: false,
     queryKey: ["inventory", "products", search, lowStock, kind],
     queryFn: () => {
       const params = new URLSearchParams()
@@ -190,10 +199,12 @@ function ProductsSection({ search, lowStock, kind }: { search: string; lowStock:
   return (
     <div className="flex flex-col gap-3">
       <FilterBar filters={filters} sortOptions={[]} searchPlaceholder="Buscar por nombre o SKU…" resetKeys={["kind", "lowStock"]} />
-      {query.isLoading ? (
-        <p className="text-sm text-muted-foreground">Cargando productos…</p>
+      {query.isPending ? (
+        <LoadingState message="Cargando productos…" />
+      ) : query.isError ? (
+        <QueryErrorState error={query.error} onRetry={() => { void query.refetch() }} />
       ) : rows.length === 0 ? (
-        <EmptyState icon={Package} title="Sin productos" description="Crea el primero con el botón Nuevo producto." />
+        <EmptyState icon={Package} title={search || lowStock || kind ? "Sin resultados" : "Sin productos"} description={search || lowStock || kind ? "Prueba otros filtros para encontrar productos." : "Crea el primero con el botón Producto."} />
       ) : (
         <DataTable table={table} />
       )}
@@ -203,6 +214,7 @@ function ProductsSection({ search, lowStock, kind }: { search: string; lowStock:
 
 function ProductFormDrawer({ formError, onClose, onDone, onError }: { formError: string | null; onClose: () => void; onDone: () => void; onError: (message: string | null) => void }) {
   const mutation = useMutation({
+    retry: false,
     mutationFn: (values: Record<string, unknown>) =>
       apiFetch("/api/inventory/products", { method: "POST", body: JSON.stringify(values) }),
     onSuccess: () => { onError(null); toast.success("Producto creado"); onDone() },
@@ -210,6 +222,7 @@ function ProductFormDrawer({ formError, onClose, onDone, onError }: { formError:
   })
   function handleSubmit(event: React.FormEvent) {
     event.preventDefault()
+    if (mutation.isPending || isAmbiguousMutationError(mutation.error)) return
     const form = new FormData(event.currentTarget as HTMLFormElement)
     mutation.mutate({
       sku: String(form.get("sku") ?? ""),
@@ -227,6 +240,7 @@ function ProductFormDrawer({ formError, onClose, onDone, onError }: { formError:
       description="La unidad se declara tal cual; el sistema no convierte unidades."
       error={formError}
       isSubmitting={mutation.isPending}
+      submitDisabled={isAmbiguousMutationError(mutation.error)}
       submitLabel="Guardar"
       cancelLabel="Cancelar"
       onSubmit={handleSubmit}
@@ -251,7 +265,12 @@ function ProductFormDrawer({ formError, onClose, onDone, onError }: { formError:
 
 /* ---------------- compras ---------------- */
 
-function OrdersSection({ status, canWrite }: { status: string | null; canWrite: boolean }) {
+function OrdersSection({ status, canWrite, onDirtyChange, requestLeave }: {
+  status: string | null
+  canWrite: boolean
+  onDirtyChange: (dirty: boolean) => void
+  requestLeave: (action: () => void) => void
+}) {
   const queryClient = useQueryClient()
   const [expanded, setExpanded] = React.useState<string | null>(null)
   const filters: FilterDef[] = React.useMemo(
@@ -266,6 +285,7 @@ function OrdersSection({ status, canWrite }: { status: string | null; canWrite: 
     [],
   )
   const query = useQuery({
+    retry: false,
     queryKey: ["inventory", "orders", status],
     queryFn: () => {
       const suffix = status ? `?status=${encodeURIComponent(status)}` : ""
@@ -273,11 +293,13 @@ function OrdersSection({ status, canWrite }: { status: string | null; canWrite: 
     },
   })
   const confirm = useMutation({
+    retry: false,
     mutationFn: (id: string) => apiFetch(`/api/inventory/purchase-orders/${id}/confirm`, { method: "POST" }),
     onSuccess: () => { toast.success("Orden confirmada"); void queryClient.invalidateQueries({ queryKey: ["inventory"] }) },
     onError: (error) => toast.error(errorMessage(error)),
   })
   const cancel = useMutation({
+    retry: false,
     mutationFn: (id: string) => apiFetch(`/api/inventory/purchase-orders/${id}/cancel`, { method: "POST" }),
     onSuccess: () => { toast.success("Orden cancelada"); void queryClient.invalidateQueries({ queryKey: ["inventory"] }) },
     onError: (error) => toast.error(errorMessage(error)),
@@ -290,8 +312,9 @@ function OrdersSection({ status, canWrite }: { status: string | null; canWrite: 
         header: "Proveedor",
         cell: ({ row }) => (
           <button
+            type="button"
             className="text-left font-medium hover:underline"
-            onClick={() => setExpanded((current) => (current === row.original.id ? null : row.original.id))}
+            onClick={() => requestLeave(() => setExpanded((current) => (current === row.original.id ? null : row.original.id)))}
             aria-expanded={expanded === row.original.id}
           >
             {row.original.supplierName ?? "Proveedor"}
@@ -317,14 +340,14 @@ function OrdersSection({ status, canWrite }: { status: string | null; canWrite: 
             {
               key: "detalle",
               label: expanded === order.id ? "Ocultar detalle" : "Ver detalle",
-              onSelect: () => setExpanded((current) => (current === order.id ? null : order.id)),
+              onSelect: () => requestLeave(() => setExpanded((current) => (current === order.id ? null : order.id))),
             },
           ]
           if (canWrite && order.status === "borrador") {
             items.push({
               key: "confirmar",
               label: "Confirmar",
-              disabled: confirm.isPending,
+              disabled: confirm.isPending || cancel.isPending || isAmbiguousMutationError(confirm.error) || isAmbiguousMutationError(cancel.error),
               onSelect: () => confirm.mutate(order.id),
             })
           }
@@ -333,8 +356,11 @@ function OrdersSection({ status, canWrite }: { status: string | null; canWrite: 
               key: "cancelar",
               label: "Cancelar",
               tone: "danger",
-              disabled: cancel.isPending,
-              onSelect: () => cancel.mutate(order.id),
+              disabled: confirm.isPending || cancel.isPending || isAmbiguousMutationError(confirm.error) || isAmbiguousMutationError(cancel.error),
+              onSelect: () => requestLeave(() => {
+                setExpanded(null)
+                cancel.mutate(order.id)
+              }),
             })
           }
           return (
@@ -345,22 +371,23 @@ function OrdersSection({ status, canWrite }: { status: string | null; canWrite: 
         },
       },
     ],
-    [canWrite, cancel, confirm, expanded],
+    [canWrite, cancel, confirm, expanded, requestLeave],
   )
   const table = useReactTable({ data: rows, columns, getCoreRowModel: getCoreRowModel() })
   return (
     <div className="flex flex-col gap-3">
       <FilterBar filters={filters} sortOptions={[]} showSearch={false} resetKeys={["status"]} />
-      {query.isLoading ? (
-        <p className="text-sm text-muted-foreground">Cargando órdenes…</p>
+      {confirm.isError || cancel.isError ? <ErrorState title="No pudimos confirmar la operación" message={errorMessage(confirm.error ?? cancel.error)} onRetry={() => { void query.refetch().then(result => { if (result.isSuccess) { confirm.reset(); cancel.reset() } }) }} retryLabel="Consultar estado actual" /> : null}
+      {query.isPending ? (
+        <LoadingState message="Cargando órdenes…" />
+      ) : query.isError ? (
+        <QueryErrorState error={query.error} onRetry={() => { void query.refetch() }} />
       ) : rows.length === 0 ? (
-        <EmptyState title="Sin órdenes de compra" description="Registra la primera con el botón Nueva orden." />
+        <EmptyState title={status ? "Sin resultados" : "Sin órdenes de compra"} description={status ? "Prueba otro estado para encontrar órdenes." : "Registra la primera con el botón Orden de compra."} />
       ) : (
-        <>
-          <DataTable table={table} />
-          {expanded && <OrderDetail orderId={expanded} canWrite={canWrite} />}
-        </>
+        <DataTable table={table} />
       )}
+      {expanded && <OrderDetail key={expanded} orderId={expanded} canWrite={canWrite} onDirtyChange={onDirtyChange} />}
       <p className="text-xs text-muted-foreground">
         Las órdenes registran compromiso comercial referencial; nunca equivalen a un pago ni tocan caja.
       </p>
@@ -368,17 +395,35 @@ function OrdersSection({ status, canWrite }: { status: string | null; canWrite: 
   )
 }
 
-function OrderDetail({ orderId, canWrite }: { orderId: string; canWrite: boolean }) {
+function OrderDetail({ orderId, canWrite, onDirtyChange }: {
+  orderId: string
+  canWrite: boolean
+  onDirtyChange: (dirty: boolean) => void
+}) {
   const queryClient = useQueryClient()
   const [receiveError, setReceiveError] = React.useState<string | null>(null)
   // Clave UUID por recepción: persiste a reintentos hasta el éxito y rota
   // después, para que dos entregas idénticas legítimas nunca se confundan.
   const [receptionKey, setReceptionKey] = React.useState(() => crypto.randomUUID())
+  const [draft, setDraft] = React.useState<Record<string, { quantity: string; lotCode: string; expiresAt: string }>>({})
+  const dirty = Object.values(draft).some((line) => Number(line.quantity) !== 0 || line.lotCode !== "" || line.expiresAt !== "")
+  React.useEffect(() => {
+    onDirtyChange(dirty)
+    return () => onDirtyChange(false)
+  }, [dirty, onDirtyChange])
+  function setLine(productId: string, field: "quantity" | "lotCode" | "expiresAt", value: string) {
+    setDraft((current) => ({
+      ...current,
+      [productId]: { ...(current[productId] ?? { quantity: "0", lotCode: "", expiresAt: "" }), [field]: value },
+    }))
+  }
   const detailQuery = useQuery({
+    retry: false,
     queryKey: ["inventory", "order", orderId],
     queryFn: () => apiFetch<{ data: PurchaseOrderDetail }>(`/api/inventory/purchase-orders/${orderId}`),
   })
   const receive = useMutation({
+    retry: false,
     mutationFn: (lines: Array<{ productId: string; quantity: number; lotCode?: string | null; expiresAt?: string | null }>) =>
       apiFetch(`/api/inventory/purchase-orders/${orderId}/receive`, {
         method: "POST",
@@ -387,24 +432,25 @@ function OrderDetail({ orderId, canWrite }: { orderId: string; canWrite: boolean
     onSuccess: () => {
       setReceiveError(null)
       setReceptionKey(crypto.randomUUID())
+      setDraft({})
       toast.success("Recepción registrada: lotes y saldos actualizados")
       void queryClient.invalidateQueries({ queryKey: ["inventory"] })
     },
     onError: (error) => setReceiveError(errorMessage(error)),
   })
   const detail = detailQuery.data?.data
-  if (detailQuery.isLoading) return <p className="mt-2 text-sm text-muted-foreground">Cargando detalle…</p>
-  if (!detail) return <p className="mt-2 text-sm text-destructive">No se pudo cargar la orden.</p>
+  if (detailQuery.isPending) return <LoadingState message="Cargando detalle…" />
+  if (detailQuery.isError || !detail) return <QueryErrorState error={detailQuery.error} onRetry={() => { void detailQuery.refetch() }} notFound="La orden de compra ya no está disponible." />
   const pending = detail.lines.filter((line) => line.receivedQuantity < line.quantity)
   function handleReceive(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    const form = new FormData(event.currentTarget)
+    if (receive.isPending || isAmbiguousMutationError(receive.error)) return
     const lines = pending
       .map((line) => ({
         productId: line.productId,
-        quantity: Number(form.get(`qty-${line.productId}`) ?? 0),
-        lotCode: String(form.get(`lot-${line.productId}`) ?? "").trim() || null,
-        expiresAt: String(form.get(`exp-${line.productId}`) ?? "").trim() || null,
+        quantity: Number(draft[line.productId]?.quantity ?? 0),
+        lotCode: draft[line.productId]?.lotCode.trim() || null,
+        expiresAt: draft[line.productId]?.expiresAt || null,
       }))
       .filter((line) => line.quantity > 0)
     if (lines.length === 0) {
@@ -425,27 +471,29 @@ function OrderDetail({ orderId, canWrite }: { orderId: string; canWrite: boolean
       </ul>
       {canWrite && (detail.status === "confirmada" || detail.status === "parcialmente_recibida") && pending.length > 0 && (
         <form onSubmit={handleReceive} className="flex flex-col gap-2">
+          <fieldset disabled={receive.isPending} className="contents">
           <h3 className="text-sm font-semibold">Recepción parcial (crea lotes con vencimiento)</h3>
           {receiveError && <p className="text-sm text-destructive" role="alert">{receiveError}</p>}
           {pending.map((line) => (
             <div key={line.productId} className="grid grid-cols-2 gap-2 md:grid-cols-4">
               <div className="col-span-2 md:col-span-1">
                 <Label htmlFor={`qty-${line.productId}`}>{line.productSku ?? line.productName} (faltan {line.quantity - line.receivedQuantity})</Label>
-                <Input id={`qty-${line.productId}`} name={`qty-${line.productId}`} type="number" min={0} max={line.quantity - line.receivedQuantity} defaultValue={0} />
+                <Input id={`qty-${line.productId}`} name={`qty-${line.productId}`} type="number" min={0} max={line.quantity - line.receivedQuantity} value={draft[line.productId]?.quantity ?? "0"} onChange={(event) => setLine(line.productId, "quantity", event.target.value)} />
               </div>
               <div>
                 <Label htmlFor={`lot-${line.productId}`}>Código de lote</Label>
-                <Input id={`lot-${line.productId}`} name={`lot-${line.productId}`} maxLength={120} placeholder="Opcional" />
+                <Input id={`lot-${line.productId}`} name={`lot-${line.productId}`} maxLength={120} placeholder="Opcional" value={draft[line.productId]?.lotCode ?? ""} onChange={(event) => setLine(line.productId, "lotCode", event.target.value)} />
               </div>
               <div>
                 <Label htmlFor={`exp-${line.productId}`}>Vence</Label>
-                <Input id={`exp-${line.productId}`} name={`exp-${line.productId}`} type="date" />
+                <Input id={`exp-${line.productId}`} name={`exp-${line.productId}`} type="date" value={draft[line.productId]?.expiresAt ?? ""} onChange={(event) => setLine(line.productId, "expiresAt", event.target.value)} />
               </div>
             </div>
           ))}
-          <Button size="sm" type="submit" disabled={receive.isPending} className="w-fit">
+          <Button size="sm" type="submit" disabled={receive.isPending || isAmbiguousMutationError(receive.error)} className="w-fit">
             Registrar recepción
           </Button>
+          </fieldset>
         </form>
       )}
     </div>
@@ -454,18 +502,22 @@ function OrderDetail({ orderId, canWrite }: { orderId: string; canWrite: boolean
 
 function OrderFormDrawer({ formError, onClose, onDone, onError }: { formError: string | null; onClose: () => void; onDone: () => void; onError: (message: string | null) => void }) {
   const suppliersQuery = useQuery({
+    retry: false,
     queryKey: ["inventory", "suppliers", "active"],
     queryFn: () => apiFetch<{ data: SupplierItem[] }>("/api/inventory/suppliers?onlyActive=true"),
   })
   const warehousesQuery = useQuery({
+    retry: false,
     queryKey: ["inventory", "warehouses", "active"],
     queryFn: () => apiFetch<{ data: WarehouseItem[] }>("/api/inventory/warehouses?onlyActive=true"),
   })
   const productsQuery = useQuery({
+    retry: false,
     queryKey: ["inventory", "products", "active"],
     queryFn: () => apiFetch<{ data: InventoryProduct[] }>("/api/inventory/products?onlyActive=true"),
   })
   const mutation = useMutation({
+    retry: false,
     mutationFn: (values: Record<string, unknown>) =>
       apiFetch("/api/inventory/purchase-orders", { method: "POST", body: JSON.stringify(values) }),
     onSuccess: () => { onError(null); toast.success("Orden creada en borrador"); onDone() },
@@ -473,6 +525,7 @@ function OrderFormDrawer({ formError, onClose, onDone, onError }: { formError: s
   })
   function handleSubmit(event: React.FormEvent) {
     event.preventDefault()
+    if (mutation.isPending || isAmbiguousMutationError(mutation.error)) return
     const form = new FormData(event.currentTarget as HTMLFormElement)
     const productId = String(form.get("productId") ?? "")
     const quantity = Number(form.get("quantity") ?? 0)
@@ -496,10 +549,14 @@ function OrderFormDrawer({ formError, onClose, onDone, onError }: { formError: s
       description="La orden registra el compromiso comercial: no equivale a un pago."
       error={formError}
       isSubmitting={mutation.isPending}
+      submitDisabled={isAmbiguousMutationError(mutation.error) || !suppliersQuery.isSuccess || !warehousesQuery.isSuccess || !productsQuery.isSuccess}
       submitLabel="Guardar"
       cancelLabel="Cancelar"
       onSubmit={handleSubmit}
     >
+      {suppliersQuery.isPending ? <LoadingState message="Cargando proveedores…" /> : suppliersQuery.isError ? <QueryErrorState error={suppliersQuery.error} onRetry={() => { void suppliersQuery.refetch() }} /> : suppliersQuery.data.data.length === 0 ? <EmptyState title="Sin proveedores activos" description="Registra o activa un proveedor en Catálogos." /> : null}
+      {warehousesQuery.isPending ? <LoadingState message="Cargando almacenes…" /> : warehousesQuery.isError ? <QueryErrorState error={warehousesQuery.error} onRetry={() => { void warehousesQuery.refetch() }} /> : warehousesQuery.data.data.length === 0 ? <EmptyState title="Sin almacenes activos" description="Registra o activa un almacén en Catálogos." /> : null}
+      {productsQuery.isPending ? <LoadingState message="Cargando productos…" /> : productsQuery.isError ? <QueryErrorState error={productsQuery.error} onRetry={() => { void productsQuery.refetch() }} /> : productsQuery.data.data.length === 0 ? <EmptyState title="Sin productos activos" description="Registra un producto antes de crear la orden." /> : null}
       <div>
         <Label htmlFor="ord-sup">Proveedor (catálogo único compartido con Finanzas)</Label>
         <Select name="supplierId" required>
@@ -557,6 +614,7 @@ function MovementsSection({ kind }: { kind: string | null }) {
     [],
   )
   const query = useQuery({
+    retry: false,
     queryKey: ["inventory", "movements", kind],
     queryFn: () => {
       const suffix = kind ? `?kind=${encodeURIComponent(kind)}` : ""
@@ -603,10 +661,12 @@ function MovementsSection({ kind }: { kind: string | null }) {
   return (
     <div className="flex flex-col gap-3">
       <FilterBar filters={filters} sortOptions={[]} showSearch={false} resetKeys={["kind"]} />
-      {query.isLoading ? (
-        <p className="text-sm text-muted-foreground">Cargando movimientos…</p>
+      {query.isPending ? (
+        <LoadingState message="Cargando movimientos…" />
+      ) : query.isError ? (
+        <QueryErrorState error={query.error} onRetry={() => { void query.refetch() }} />
       ) : rows.length === 0 ? (
-        <EmptyState title="Sin movimientos" description="El ledger está vacío para este filtro." />
+        <EmptyState title={kind ? "Sin resultados" : "Sin movimientos"} description={kind ? "Prueba otro tipo de movimiento." : "Todavía no se han registrado movimientos."} />
       ) : (
         <DataTable table={table} />
       )}
@@ -619,21 +679,25 @@ function MovementsSection({ kind }: { kind: string | null }) {
 
 function MovementFormDrawer({ formError, onClose, onDone, onError }: { formError: string | null; onClose: () => void; onDone: () => void; onError: (message: string | null) => void }) {
   const productsQuery = useQuery({
+    retry: false,
     queryKey: ["inventory", "products", "active"],
     queryFn: () => apiFetch<{ data: InventoryProduct[] }>("/api/inventory/products?onlyActive=true"),
   })
   const warehousesQuery = useQuery({
+    retry: false,
     queryKey: ["inventory", "warehouses", "active"],
     queryFn: () => apiFetch<{ data: WarehouseItem[] }>("/api/inventory/warehouses?onlyActive=true"),
   })
   const [productId, setProductId] = React.useState("")
   const [kind, setKind] = React.useState("ingreso")
   const lotsQuery = useQuery({
+    retry: false,
     queryKey: ["inventory", "lots", productId],
     enabled: productId !== "",
     queryFn: () => apiFetch<{ data: { lots: Array<{ id: string; code: string; quantityOnHand: number }> } }>(`/api/inventory/products/${productId}`),
   })
   const mutation = useMutation({
+    retry: false,
     mutationFn: (values: Record<string, unknown>) =>
       apiFetch("/api/inventory/movements", { method: "POST", body: JSON.stringify(values) }),
     onSuccess: () => {
@@ -645,6 +709,7 @@ function MovementFormDrawer({ formError, onClose, onDone, onError }: { formError
   })
   function handleSubmit(event: React.FormEvent) {
     event.preventDefault()
+    if (mutation.isPending || isAmbiguousMutationError(mutation.error)) return
     const form = new FormData(event.currentTarget as HTMLFormElement)
     const rawQuantity = Number(form.get("quantity") ?? 0)
     mutation.mutate({
@@ -666,10 +731,14 @@ function MovementFormDrawer({ formError, onClose, onDone, onError }: { formError
       description="Todo movimiento exige motivo y queda en el ledger inmutable."
       error={formError}
       isSubmitting={mutation.isPending}
+      submitDisabled={isAmbiguousMutationError(mutation.error) || !productsQuery.isSuccess || !lotsQuery.isSuccess || (kind === "traslado" && !warehousesQuery.isSuccess)}
       submitLabel="Registrar"
       cancelLabel="Cancelar"
       onSubmit={handleSubmit}
     >
+      {productsQuery.isPending ? <LoadingState message="Cargando productos…" /> : productsQuery.isError ? <QueryErrorState error={productsQuery.error} onRetry={() => { void productsQuery.refetch() }} /> : productsQuery.data.data.length === 0 ? <EmptyState title="Sin productos activos" description="Registra un producto antes de registrar movimientos." /> : null}
+      {kind === "traslado" && (warehousesQuery.isPending ? <LoadingState message="Cargando almacenes…" /> : warehousesQuery.isError ? <QueryErrorState error={warehousesQuery.error} onRetry={() => { void warehousesQuery.refetch() }} /> : warehousesQuery.data.data.length === 0 ? <EmptyState title="Sin almacenes activos" description="Activa un almacén de destino en Catálogos." /> : null)}
+      {productId && (lotsQuery.isPending ? <LoadingState message="Cargando lotes…" /> : lotsQuery.isError ? <QueryErrorState error={lotsQuery.error} onRetry={() => { void lotsQuery.refetch() }} /> : lotsQuery.data.data.lots.length === 0 ? <EmptyState title="Sin lotes" description="Registra una recepción para este producto antes de mover existencias." /> : null)}
       <div>
         <Label htmlFor="mov-prod">Producto</Label>
         <Select name="productId" required value={productId} onValueChange={(value) => setProductId(value ?? "")}>
@@ -735,14 +804,17 @@ function CatalogsSection({ canWrite }: { canWrite: boolean }) {
   const [supplierError, setSupplierError] = React.useState<string | null>(null)
   const [warehouseError, setWarehouseError] = React.useState<string | null>(null)
   const suppliersQuery = useQuery({
+    retry: false,
     queryKey: ["inventory", "suppliers"],
     queryFn: () => apiFetch<{ data: SupplierItem[] }>("/api/inventory/suppliers"),
   })
   const warehousesQuery = useQuery({
+    retry: false,
     queryKey: ["inventory", "warehouses"],
     queryFn: () => apiFetch<{ data: WarehouseItem[] }>("/api/inventory/warehouses"),
   })
   const toggleSupplier = useMutation({
+    retry: false,
     mutationFn: (item: SupplierItem) =>
       apiFetch(`/api/inventory/suppliers/${item.id}/activation`, {
         method: "POST",
@@ -752,6 +824,7 @@ function CatalogsSection({ canWrite }: { canWrite: boolean }) {
     onError: (error) => toast.error(errorMessage(error)),
   })
   const toggleWarehouse = useMutation({
+    retry: false,
     mutationFn: (item: WarehouseItem) =>
       apiFetch(`/api/inventory/warehouses/${item.id}/activation`, {
         method: "POST",
@@ -801,7 +874,7 @@ function CatalogsSection({ canWrite }: { canWrite: boolean }) {
                     key: "activacion",
                     label: item.isActive ? "Desactivar" : "Reactivar",
                     tone: item.isActive ? "danger" : undefined,
-                    disabled: toggleSupplier.isPending,
+                    disabled: toggleSupplier.isPending || isAmbiguousMutationError(toggleSupplier.error),
                     onSelect: () => toggleSupplier.mutate(item),
                   },
                 ]}
@@ -846,7 +919,7 @@ function CatalogsSection({ canWrite }: { canWrite: boolean }) {
                     key: "activacion",
                     label: item.isActive ? "Desactivar" : "Reactivar",
                     tone: item.isActive ? "danger" : undefined,
-                    disabled: toggleWarehouse.isPending,
+                    disabled: toggleWarehouse.isPending || isAmbiguousMutationError(toggleWarehouse.error),
                     onSelect: () => toggleWarehouse.mutate(item),
                   },
                 ]}
@@ -863,12 +936,14 @@ function CatalogsSection({ canWrite }: { canWrite: boolean }) {
   return (
     <div className="grid gap-4 lg:grid-cols-2">
       <section className="flex flex-col gap-2">
-        <h2 className="text-sm font-semibold">Proveedores ({supplierRows.length})</h2>
-        <DataTable table={suppliersTable} />
+        <h2 className="text-sm font-semibold">Proveedores</h2>
+        {toggleSupplier.isError ? <ErrorState title="No pudimos confirmar el cambio" message={errorMessage(toggleSupplier.error)} onRetry={() => { void suppliersQuery.refetch().then(result => { if (result.isSuccess) toggleSupplier.reset() }) }} retryLabel="Consultar estado actual" /> : null}
+        {suppliersQuery.isPending ? <LoadingState message="Cargando proveedores…" /> : suppliersQuery.isError ? <QueryErrorState error={suppliersQuery.error} onRetry={() => { void suppliersQuery.refetch() }} /> : supplierRows.length === 0 ? <EmptyState title="Sin proveedores" description="Registra el primero con el botón Proveedor." /> : <DataTable table={suppliersTable} />}
       </section>
       <section className="flex flex-col gap-2">
-        <h2 className="text-sm font-semibold">Almacenes ({warehouseRows.length})</h2>
-        <DataTable table={warehousesTable} />
+        <h2 className="text-sm font-semibold">Almacenes</h2>
+        {toggleWarehouse.isError ? <ErrorState title="No pudimos confirmar el cambio" message={errorMessage(toggleWarehouse.error)} onRetry={() => { void warehousesQuery.refetch().then(result => { if (result.isSuccess) toggleWarehouse.reset() }) }} retryLabel="Consultar estado actual" /> : null}
+        {warehousesQuery.isPending ? <LoadingState message="Cargando almacenes…" /> : warehousesQuery.isError ? <QueryErrorState error={warehousesQuery.error} onRetry={() => { void warehousesQuery.refetch() }} /> : warehouseRows.length === 0 ? <EmptyState title="Sin almacenes" description="Registra el primero con el botón Almacén." /> : <DataTable table={warehousesTable} />}
       </section>
 
       {editingSupplier && (
@@ -904,6 +979,7 @@ type DrawerBaseProps = {
 
 function SupplierFormDrawer({ initial, formError, onClose, onDone, onError }: DrawerBaseProps & { initial?: SupplierItem }) {
   const mutation = useMutation({
+    retry: false,
     mutationFn: (values: Record<string, unknown>) =>
       initial
         ? apiFetch(`/api/inventory/suppliers/${initial.id}`, { method: "PATCH", body: JSON.stringify(values) })
@@ -913,6 +989,7 @@ function SupplierFormDrawer({ initial, formError, onClose, onDone, onError }: Dr
   })
   function handleSubmit(event: React.FormEvent) {
     event.preventDefault()
+    if (mutation.isPending || isAmbiguousMutationError(mutation.error)) return
     const form = new FormData(event.currentTarget as HTMLFormElement)
     mutation.mutate({
       name: String(form.get("name") ?? ""),
@@ -931,6 +1008,7 @@ function SupplierFormDrawer({ initial, formError, onClose, onDone, onError }: Dr
       description={initial ? undefined : "Catálogo único de proveedores, compartido con Finanzas."}
       error={formError}
       isSubmitting={mutation.isPending}
+      submitDisabled={isAmbiguousMutationError(mutation.error)}
       submitLabel="Guardar"
       cancelLabel="Cancelar"
       onSubmit={handleSubmit}
@@ -949,10 +1027,12 @@ function SupplierFormDrawer({ initial, formError, onClose, onDone, onError }: Dr
 
 function WarehouseFormDrawer({ initial, formError, onClose, onDone, onError }: DrawerBaseProps & { initial?: WarehouseItem }) {
   const branchesQuery = useQuery({
+    retry: false,
     queryKey: ["branches"],
     queryFn: () => apiFetch<{ data: Array<{ id: string; name: string }> }>("/api/branches"),
   })
   const mutation = useMutation({
+    retry: false,
     mutationFn: (values: Record<string, unknown>) =>
       initial
         ? apiFetch(`/api/inventory/warehouses/${initial.id}`, { method: "PATCH", body: JSON.stringify(values) })
@@ -962,6 +1042,7 @@ function WarehouseFormDrawer({ initial, formError, onClose, onDone, onError }: D
   })
   function handleSubmit(event: React.FormEvent) {
     event.preventDefault()
+    if (mutation.isPending || isAmbiguousMutationError(mutation.error)) return
     const form = new FormData(event.currentTarget as HTMLFormElement)
     mutation.mutate({
       name: String(form.get("name") ?? ""),
@@ -976,10 +1057,12 @@ function WarehouseFormDrawer({ initial, formError, onClose, onDone, onError }: D
       description={initial ? undefined : "Cada almacén pertenece a una sede."}
       error={formError}
       isSubmitting={mutation.isPending}
+      submitDisabled={isAmbiguousMutationError(mutation.error) || (!initial && !branchesQuery.isSuccess)}
       submitLabel="Guardar"
       cancelLabel="Cancelar"
       onSubmit={handleSubmit}
     >
+      {!initial && (branchesQuery.isPending ? <LoadingState message="Cargando sedes…" /> : branchesQuery.isError ? <QueryErrorState error={branchesQuery.error} onRetry={() => { void branchesQuery.refetch() }} /> : branchesQuery.data.data.length === 0 ? <EmptyState title="Sin sedes" description="Registra una sede en Configuración antes de crear el almacén." /> : null)}
       <div><Label htmlFor="wh-name">Nombre</Label><Input id="wh-name" name="name" required maxLength={200} defaultValue={initial?.name ?? ""} /></div>
       {!initial && (
         <div>
@@ -1002,12 +1085,13 @@ function WarehouseFormDrawer({ initial, formError, onClose, onDone, onError }: D
 
 function AlertsSection() {
   const query = useQuery({
+    retry: false,
     queryKey: ["inventory", "alerts"],
     queryFn: () => apiFetch<{ data: InventoryAlerts }>("/api/inventory/alerts?expiryDays=30"),
   })
   const alerts = query.data?.data
-  if (query.isLoading) return <p className="text-sm text-muted-foreground">Cargando alertas…</p>
-  if (!alerts) return <EmptyState title="Sin datos" description="No se pudieron cargar las alertas." />
+  if (query.isPending) return <LoadingState message="Cargando alertas…" />
+  if (query.isError || !alerts) return <QueryErrorState error={query.error} onRetry={() => { void query.refetch() }} />
   const total = alerts.lowStock.length + alerts.expiring.length + alerts.expired.length
   if (total === 0) return <EmptyState title="Todo en orden" description="Sin stock bajo mínimos ni vencimientos próximos." />
   return (

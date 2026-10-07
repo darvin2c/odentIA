@@ -1,5 +1,3 @@
-import type { AIMessage, BaseMessage } from "@langchain/core/messages"
-import type { Runnable } from "@langchain/core/runnables"
 import { initChatModel } from "langchain/chat_models/universal"
 import { FakeChatModel } from "./fake-model.js"
 
@@ -19,15 +17,15 @@ export function providerOf(modelName: string): string {
  * mapa actual), configuration.baseURL. Sin credenciales, initChatModel lee
  * el entorno del proceso.
  */
-export function createConfiguredChatModel(
+export async function createConfiguredChatModel(
   modelName: string,
   creds: LlmCredentials = {},
-): Runnable<BaseMessage[], AIMessage> {
-  if (modelName === "fake") return new FakeChatModel({}) as unknown as Runnable<BaseMessage[], AIMessage>
+) {
+  if (modelName === "fake") return new FakeChatModel({})
   const options: { apiKey?: string; configuration?: { baseURL: string } } = {}
   if (creds.apiKey) options.apiKey = creds.apiKey
   if (creds.baseUrl && providerOf(modelName) === "openai") {
     options.configuration = { baseURL: creds.baseUrl }
   }
-  return initChatModel(modelName, options) as unknown as Runnable<BaseMessage[], AIMessage>
+  return initChatModel(modelName, options)
 }

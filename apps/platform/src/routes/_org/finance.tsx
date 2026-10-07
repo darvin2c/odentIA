@@ -11,7 +11,7 @@ import { Badge, Button, Field, FieldLabel, Input, Textarea } from "@odentia/ui"
 import { EmptyState, FormDrawer, PageHeader, PageShell } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
 import { useOrgMembers, usePermission } from "../../lib/crm"
 import {
@@ -50,6 +50,7 @@ import {
   type ShiftDetail,
 } from "../../lib/finance"
 import { formatMoney } from "../../lib/services"
+import { sameDraft, usePageDraftGuard } from "../../lib/page-draft-guard"
 
 export const Route = createFileRoute("/_org/finance")({
   component: FinancePage,
@@ -88,6 +89,8 @@ function isForbidden(err: unknown): boolean {
 function FinancePage() {
   const [tab, setTab] = useState<Tab>("caja")
   const canRead = usePermission("finance.read")
+  const [commissionDirty, setCommissionDirty] = useState(false)
+  const draftGuard = usePageDraftGuard(commissionDirty)
   if (!canRead) {
     return (
       <PageShell>
@@ -98,6 +101,7 @@ function FinancePage() {
   }
   return (
     <PageShell>
+      {draftGuard.dialog}
       <PageHeader
         title="Finanzas"
         subtitle="Caja por sede y turno, gastos, cuentas por cobrar y comisiones"
@@ -107,7 +111,9 @@ function FinancePage() {
           <Button
             key={entry.key}
             variant={tab === entry.key ? "default" : "outline"}
-            onClick={() => setTab(entry.key)}
+            onClick={() => {
+              if (tab !== entry.key) draftGuard.requestLeave(() => setTab(entry.key))
+            }}
           >
             {entry.label}
           </Button>
@@ -116,7 +122,7 @@ function FinancePage() {
       {tab === "caja" ? <CajaTab /> : null}
       {tab === "gastos" ? <GastosTab /> : null}
       {tab === "cobros" ? <CobrosTab /> : null}
-      {tab === "comisiones" ? <ComisionesTab /> : null}
+      {tab === "comisiones" ? <ComisionesTab onDirtyChange={setCommissionDirty} /> : null}
       {tab === "resumen" ? <ResumenTab /> : null}
     </PageShell>
   )
@@ -1296,7 +1302,7 @@ function CobrosTab() {
 
 // --- Comisiones ---------------------------------------------------------------------
 
-function ComisionesTab() {
+function ComisionesTab({ onDirtyChange }: { onDirtyChange: (dirty: boolean) => void }) {
   const queryClient = useQueryClient()
   const canWrite = usePermission("finance.write")
   const members = useOrgMembers()
@@ -1311,6 +1317,12 @@ function ComisionesTab() {
   const [voidSettlement, setVoidSettlement] = useState(false)
   const [voidReason, setVoidReason] = useState("")
   const [error, setError] = useState<string | null>(null)
+  const [baseline, setBaseline] = useState({ professionalId: "", base: "cobrado", rate: "10" })
+  const dirty = !sameDraft({ professionalId, base, rate }, baseline)
+  useEffect(() => {
+    onDirtyChange(dirty)
+    return () => onDirtyChange(false)
+  }, [dirty, onDirtyChange])
 
   const rulesQuery = useQuery({ queryKey: ["finance-rules"], queryFn: fetchCommissionRules })
   const settlementsQuery = useQuery({ queryKey: ["finance-settlements"], queryFn: fetchSettlements })
@@ -1320,28 +1332,23 @@ function ComisionesTab() {
     enabled: settlementId !== null,
   })
 
-  if (
-    (rulesQuery.isError && isForbidden(rulesQuery.error)) ||
-    (settlementsQuery.isError && isForbidden(settlementsQuery.error))
-  ) {
-    return <AccessDenied message="Tu rol no tiene permiso de finanzas." />
-  }
 
   const memberName = (userId: string) =>
     members.find((m) => m.userId === userId)?.user.name ?? userId.slice(0, 8)
 
   const ruleMutation = useMutation({
-    mutationFn: () => {
-      const percent = Number(rate.replace(",", "."))
+    mutationFn: (submitted: { professionalId: string; base: "cobrado" | "produccion"; rate: string }) => {
+      const percent = Number(submitted.rate.replace(",", "."))
       if (!Number.isFinite(percent) || percent < 0 || percent > 100)
         throw new Error("Tasa inválida")
       return upsertRuleApi({
-        professionalUserId: professionalId,
-        base,
+        professionalUserId: submitted.professionalId,
+        base: submitted.base,
         rateBps: Math.round(percent * 100),
       })
     },
-    onSuccess: () => {
+    onSuccess: (_result, submitted) => {
+      setBaseline(submitted)
       setError(null)
       void queryClient.invalidateQueries({ queryKey: ["finance-rules"] })
     },
@@ -1379,6 +1386,13 @@ function ComisionesTab() {
     },
     onError: (err) => setError(financeErrorMessage(err)),
   })
+
+  if (
+    (rulesQuery.isError && isForbidden(rulesQuery.error)) ||
+    (settlementsQuery.isError && isForbidden(settlementsQuery.error))
+  ) {
+    return <AccessDenied message="Tu rol no tiene permiso de finanzas." />
+  }
 
   const rules = rulesQuery.data?.data ?? []
   const settlements = settlementsQuery.data?.data ?? []
@@ -1433,12 +1447,13 @@ function ComisionesTab() {
           </Field>
           {canWrite ? (
             <Button
+              disabled={ruleMutation.isPending}
               onClick={() => {
                 if (!professionalId) {
                   setError("Elige el profesional de la regla.")
                   return
                 }
-                ruleMutation.mutate()
+                ruleMutation.mutate({ professionalId, base, rate })
               }}
             >
               Guardar regla
