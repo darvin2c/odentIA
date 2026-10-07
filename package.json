@@ -29,7 +29,9 @@
   "pnpm": {
     "patchedDependencies": {
       "portless@0.15.6": "patches/portless@0.15.6.patch",
-      "testcontainers@12.1.0": "patches/testcontainers@12.1.0.patch"
+      "testcontainers@12.1.0": "patches/testcontainers@12.1.0.patch",
+      "@base-ui/react@1.8.0": "patches/@base-ui__react@1.8.0.patch",
+      "react-resizable-panels@4.12.4": "patches/react-resizable-panels@4.12.4.patch"
     }
   }
 }

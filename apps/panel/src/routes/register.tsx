@@ -83,11 +83,15 @@ function RegisterPage() {
                 <FieldLabel htmlFor="firstName">Nombre</FieldLabel>
                 <Input
                   id="firstName"
+                  aria-invalid={field.state.meta.errors.length > 0 || undefined}
+                  aria-describedby={field.state.meta.errors.length ? "firstName-error" : undefined}
                   autoComplete="given-name"
                   value={field.state.value}
                   onChange={(event) => field.handleChange(event.target.value)}
                 />
-                <FieldError>{fieldErrorMessages(field.state.meta.errors)[0] ?? null}</FieldError>
+                <FieldError id="firstName-error">
+                  {fieldErrorMessages(field.state.meta.errors)[0] ?? null}
+                </FieldError>
               </Field>
             )}
           </form.Field>
@@ -97,11 +101,15 @@ function RegisterPage() {
                 <FieldLabel htmlFor="lastName">Apellidos</FieldLabel>
                 <Input
                   id="lastName"
+                  aria-invalid={field.state.meta.errors.length > 0 || undefined}
+                  aria-describedby={field.state.meta.errors.length ? "lastName-error" : undefined}
                   autoComplete="family-name"
                   value={field.state.value}
                   onChange={(event) => field.handleChange(event.target.value)}
                 />
-                <FieldError>{fieldErrorMessages(field.state.meta.errors)[0] ?? null}</FieldError>
+                <FieldError id="lastName-error">
+                  {fieldErrorMessages(field.state.meta.errors)[0] ?? null}
+                </FieldError>
               </Field>
             )}
           </form.Field>
@@ -111,12 +119,16 @@ function RegisterPage() {
                 <FieldLabel htmlFor="email">Correo</FieldLabel>
                 <Input
                   id="email"
+                  aria-invalid={field.state.meta.errors.length > 0 || undefined}
+                  aria-describedby={field.state.meta.errors.length ? "email-error" : undefined}
                   type="email"
                   autoComplete="email"
                   value={field.state.value}
                   onChange={(event) => field.handleChange(event.target.value)}
                 />
-                <FieldError>{fieldErrorMessages(field.state.meta.errors)[0] ?? null}</FieldError>
+                <FieldError id="email-error">
+                  {fieldErrorMessages(field.state.meta.errors)[0] ?? null}
+                </FieldError>
               </Field>
             )}
           </form.Field>
@@ -126,12 +138,16 @@ function RegisterPage() {
                 <FieldLabel htmlFor="password">Contraseña</FieldLabel>
                 <Input
                   id="password"
+                  aria-invalid={field.state.meta.errors.length > 0 || undefined}
+                  aria-describedby={field.state.meta.errors.length ? "password-error" : undefined}
                   type="password"
                   autoComplete="new-password"
                   value={field.state.value}
                   onChange={(event) => field.handleChange(event.target.value)}
                 />
-                <FieldError>{fieldErrorMessages(field.state.meta.errors)[0] ?? null}</FieldError>
+                <FieldError id="password-error">
+                  {fieldErrorMessages(field.state.meta.errors)[0] ?? null}
+                </FieldError>
               </Field>
             )}
           </form.Field>

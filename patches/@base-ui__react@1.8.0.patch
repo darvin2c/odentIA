@@ -1,0 +1,52 @@
+diff --git a/floating-ui-react/components/FloatingFocusManager.js b/floating-ui-react/components/FloatingFocusManager.js
+index 5d5b40c9500cd0f4f546dd62ef38d3900e3b6519..654b48d6af3eed2acb5631fcd4d8a36b328b6350 100644
+--- a/floating-ui-react/components/FloatingFocusManager.js
++++ b/floating-ui-react/components/FloatingFocusManager.js
+@@ -142,10 +142,8 @@ function FloatingFocusManager(props) {
+   } = store.context;
+   const getNodeId = (0, _useStableCallback.useStableCallback)(() => dataRef.current.floatingContext?.nodeId);
+   const ignoreInitialFocus = initialFocus === false;
+-  // A typeable combobox reference (e.g. input/textarea) with `initialFocus={false}`
+-  // has different focus semantics: focus is not trapped inside the floating element,
+-  // so in the modal case the guards are not rendered, but `aria-hidden` is still
+-  // applied to the outside nodes.
++  // Un combobox editable permite salir con Tab: sus controles externos deben
++  // seguir disponibles también para el lector de pantalla.
+   const isUntrappedTypeableCombobox = (0, _element.isTypeableCombobox)(domReference) && ignoreInitialFocus;
+   const initialFocusRef = (0, _useValueAsRef.useValueAsRef)(initialFocus);
+   const returnFocusRef = (0, _useValueAsRef.useValueAsRef)(returnFocus);
+@@ -343,7 +341,7 @@ function FloatingFocusManager(props) {
+     const controlInsideElements = [floating, ...portalNodes, beforeGuardRef.current, afterGuardRef.current, portalContext?.beforeOutsideRef.current, portalContext?.afterOutsideRef.current, ...getResolvedInsideElements()];
+     const insideElements = [...controlInsideElements, rootAncestorComboboxDomReference, (0, _resolveRef.resolveRef)(previousFocusableElement), (0, _resolveRef.resolveRef)(nextFocusableElement), isUntrappedTypeableCombobox ? domReference : null].filter(x => x != null);
+     const ariaHiddenCleanup = (0, _markOthers.markOthers)(insideElements, {
+-      ariaHidden: modal || isUntrappedTypeableCombobox,
++      ariaHidden: modal && !isUntrappedTypeableCombobox,
+       mark: false
+     });
+     const markerInsideElements = [floating, ...portalNodes].filter(x => x != null);
+diff --git a/floating-ui-react/components/FloatingFocusManager.mjs b/floating-ui-react/components/FloatingFocusManager.mjs
+index 8a6039fc4fb65de89bb4bfcca286ef819a54fcf4..4d462fe265dc513fcf5e93d9d579bbe2a9008aa2 100644
+--- a/floating-ui-react/components/FloatingFocusManager.mjs
++++ b/floating-ui-react/components/FloatingFocusManager.mjs
+@@ -136,10 +136,8 @@ export function FloatingFocusManager(props) {
+   } = store.context;
+   const getNodeId = useStableCallback(() => dataRef.current.floatingContext?.nodeId);
+   const ignoreInitialFocus = initialFocus === false;
+-  // A typeable combobox reference (e.g. input/textarea) with `initialFocus={false}`
+-  // has different focus semantics: focus is not trapped inside the floating element,
+-  // so in the modal case the guards are not rendered, but `aria-hidden` is still
+-  // applied to the outside nodes.
++  // Un combobox editable permite salir con Tab: sus controles externos deben
++  // seguir disponibles también para el lector de pantalla.
+   const isUntrappedTypeableCombobox = isTypeableCombobox(domReference) && ignoreInitialFocus;
+   const initialFocusRef = useValueAsRef(initialFocus);
+   const returnFocusRef = useValueAsRef(returnFocus);
+@@ -337,7 +335,7 @@ export function FloatingFocusManager(props) {
+     const controlInsideElements = [floating, ...portalNodes, beforeGuardRef.current, afterGuardRef.current, portalContext?.beforeOutsideRef.current, portalContext?.afterOutsideRef.current, ...getResolvedInsideElements()];
+     const insideElements = [...controlInsideElements, rootAncestorComboboxDomReference, resolveRef(previousFocusableElement), resolveRef(nextFocusableElement), isUntrappedTypeableCombobox ? domReference : null].filter(x => x != null);
+     const ariaHiddenCleanup = markOthers(insideElements, {
+-      ariaHidden: modal || isUntrappedTypeableCombobox,
++      ariaHidden: modal && !isUntrappedTypeableCombobox,
+       mark: false
+     });
+     const markerInsideElements = [floating, ...portalNodes].filter(x => x != null);
