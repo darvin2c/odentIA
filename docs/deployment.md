@@ -119,34 +119,51 @@ La restauración debe conservar esquema, historial de migraciones y datos, y no
 activar proveedores externos. El healthcheck `/health` de la API comprueba la base,
 no R2, SMTP ni el modelo: esas integraciones requieren comprobaciones separadas.
 
-## Previews nativos de OpenShip
+## Previews automáticos por PR
 
-Seguir la [guía de entornos](https://openship.io/docs/guides/preview-environments):
-en el proyecto, pulsar **+** junto al selector de entorno, elegir la rama y
-seleccionar el nuevo entorno antes de configurar o desplegar. Reutilizar el
-entorno existente para esa rama; no crear otra aplicación ni copiar producción.
+Cada PR del mismo repositorio tiene su propio entorno de OpenShip. El job
+`preview` de `.github/workflows/ci.yml` corre después de `check` y `docker-build`
+y ejecuta `scripts/preview-environment.mjs up`:
 
-Configuración inicial del preview:
+1. Reutiliza el entorno `pr-<número>` o lo crea con
+   `openship project environment create` a partir del proyecto productivo, en la
+   rama del PR. Cada entorno es un proyecto con su propio ID, red y volúmenes.
+2. Fija `compose.preview.yaml` (el entorno copia `compose.prod.yaml`) y desactiva
+   Auto Deploy: Actions es el único disparador y solo despliega commits verificados.
+3. Aplica las variables de `infra/prod/.env.preview.example` derivadas de
+   `pr-<número>.<OPENSHIP_PREVIEW_DOMAIN>`. Los secretos (PostgreSQL, Better Auth,
+   `SECRETS_KEY`, MinIO) se generan una vez por entorno y no se rotan después.
+4. Despliega el commit del PR con `openship deploy --watch`.
+5. Expone `app.` (panel, 3000, primario), `api.` (3001), `storage.` (MinIO, 9000)
+   y `*.` (platform, 3000). El dominio se crea al exponer el servicio. Publica
+   los registros con el proveedor DNS de OpenShip y espera al DNS autoritativo
+   antes de verificar: el comodín usa DNS-01 y el resto HTTP-01.
+6. Comenta la URL en el PR, actualizando el mismo comentario en cada push.
 
-1. Usar `compose.preview.yaml`, directorio raíz vacío. Es Docker Compose estándar,
-   no un gestor de despliegue: API, worker y webs usan el mismo Dockerfile de
-   producción. PostgreSQL conserva PGMQ/pg_cron. MinIO y Mailpit pertenecen solo
-   al preview; no incluye backup productivo.
-2. Cargar valores propios siguiendo `infra/prod/.env.preview.example`. Generar
-   secretos independientes y no importar datos de producción.
-3. En **Services**, asignar `api.<base-preview>` a API (3001),
-   `app.<base-preview>` al panel (3000) y `*.<base-preview>` a platform (3000).
-   El panel es la entrada principal. No enumerar clínicas: el wildcard sirve
-   todos los slugs, con prioridad de las rutas exactas de API y panel.
-   Usar DNS-01 mediante Cloudflare para el certificado wildcard; el token de
-   usuario requiere Zone:Read y DNS:Edit. OpenShip 0.8.1 corrige la validación
-   de hooks de Certbot que falla en 0.8.0.
-   PostgreSQL, SMTP y las consolas administrativas permanecen internos.
-   S3 necesita un endpoint accesible para las URLs firmadas; no retirarlo antes
-   de migrar a almacenamiento aislado equivalente.
-4. Desplegar desde OpenShip y activar **Source → Auto Deploy** en ese preview
-   para que sus siguientes pushes se desplieguen por la GitHub App. No requiere
-   un job de preview en Actions, Python ni acceso SSH desde GitHub.
+Al cerrar o fusionar el PR, `preview-teardown` ejecuta
+`scripts/preview-environment.mjs down`, que borra el entorno con
+`--wipe-volumes`. Los registros DNS de Cloudflare no se eliminan con el proyecto;
+apuntan al mismo servidor y se reutilizan si el número de PR reaparece.
+
+Los PR desde forks no reciben secretos y no generan preview. Cada preview es un
+stack completo (PostgreSQL, MinIO, Mailpit, API, worker, panel, platform, unos
+4 GB de límite de memoria): los PR abiertos compiten con producción en el VPS.
+
+Configuración en GitHub:
+
+- Variable `OPENSHIP_PREVIEW_DOMAIN` (p. ej. `preview.example.com`). Su zona debe
+  estar en el proveedor DNS conectado a OpenShip (token Cloudflare con
+  Zone:Read y DNS:Edit). OpenShip 0.8.1 corrige la validación de hooks de
+  Certbot que falla en 0.8.0.
+- Secreto `OPENSHIP_PREVIEW_TOKEN`: grants `project:*:create` (solo los entornos
+  que crea el propio token), `project:<id-produccion>:read,write` (origen de los
+  entornos) y `github_repository:darvin2c/odentIA:read`. Un entorno creado con otra
+  credencial no es administrable por este token: retirarlo y dejar que el job lo
+  recree. Es distinto de `OPENSHIP_DEPLOY_TOKEN`, que sigue limitado a producción.
+- Reutiliza `OPENSHIP_URL` y `OPENSHIP_PROJECT_ID`.
+
+PostgreSQL, SMTP y las consolas administrativas permanecen internos. S3 necesita
+el endpoint `storage.` para las URLs firmadas del navegador.
 
 El servicio one-shot `seed` inicializa cada preview después de `migrate` y
 `minio-init`: ejecuta `seed:cie10`, `seed:procedures` y `db:seed`, en ese orden.
@@ -166,34 +183,28 @@ contraseña `Demo1234`. Solo datos ficticios. La inicialización pertenece al
 runtime del preview, no a producción, tests ni CI; el comando manual
 `pnpm db:seed` conserva su comportamiento de reinicio explícito.
 
-### CLI: vincular una vez, desplegar con un comando
+### Operar un preview manualmente
 
 Instalar el CLI oficial y ejecutar `openship login`. Para esta instalación,
 el API público se alcanza bajo `https://ops.darvincotrina.com/api/proxy`.
 El token queda en el contexto privado del CLI; no guardarlo en el repositorio.
+El mismo script reproduce el job, también para recuperar un preview fallido:
 
 ```bash
-# Seleccionar el ID del entorno, no el ID de producción.
-openship init --project <id-del-entorno-preview>
-openship deploy --watch
+export OPENSHIP_PROJECT_ID=<id-de-produccion> OPENSHIP_PREVIEW_DOMAIN=<dominio>
+node scripts/preview-environment.mjs up --pr 29 --branch <rama> --commit <sha>
+node scripts/preview-environment.mjs down --pr 29
 ```
-
-`.openship/project.json` es un enlace local excluido de Git. En otra copia de
-trabajo puede vincularse producción con su ID y usar el mismo `openship deploy`.
-`--watch` observa el resultado; sin él solo se solicita el despliegue.
 
 **Proyecto/entorno y conjunto de variables no son lo mismo.** En OpenShip 0.8,
 el panel y los pushes usan el conjunto predeterminado `production` **dentro del
 proyecto seleccionado**, incluso si ese proyecto es de tipo preview. Ese nombre
-no le da acceso al runtime ni a los secretos del proyecto productivo.
-`openship deploy --env preview` selecciona un conjunto alternativo de variables;
-no crea ni selecciona otro entorno. Usarlo solo si ese conjunto está configurado.
+no le da acceso al runtime ni a los secretos del proyecto productivo. Por eso el
+script escribe y despliega con `--env production` sobre el ID del entorno.
 Ver la [referencia del CLI](https://openship.io/docs/cli/deploy).
 
-Los previews se actualizan por su rama. La creación del entorno y su retirada
-son operaciones nativas explícitas: no asumir que abrir o cerrar un PR las realiza.
-Al retirar un preview, usar **Advanced → Delete Project** sobre su ID y revisar
-los volúmenes efímeros que se eliminarán; nunca hacerlo sobre Production.
+Nunca ejecutar `project delete` sobre el ID de Production: `down` solo actúa
+sobre entornos `preview` cuyo slug es `pr-<número>`.
 
 El correo de prueba queda en Mailpit. Una entrega allí no acredita entrega por
 Resend; `LLM_MODEL=fake` y canales mock tampoco acreditan proveedores reales.
