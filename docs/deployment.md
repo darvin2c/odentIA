@@ -134,10 +134,16 @@ Configuración inicial del preview:
    al preview; no incluye backup productivo.
 2. Cargar valores propios siguiendo `infra/prod/.env.preview.example`. Generar
    secretos independientes y no importar datos de producción.
-3. En **Services**, asignar dominios propios a API (3001), panel (3000),
-   platform (3000) y S3 (9000). Los hosts deben estar bajo el mismo dominio
-   de cookies del preview; registrar los hosts de organizaciones que se probarán.
+3. En **Services**, asignar `api.<base-preview>` a API (3001),
+   `app.<base-preview>` al panel (3000) y `*.<base-preview>` a platform (3000).
+   El panel es la entrada principal. No enumerar clínicas: el wildcard sirve
+   todos los slugs, con prioridad de las rutas exactas de API y panel.
+   Usar DNS-01 mediante Cloudflare para el certificado wildcard; el token de
+   usuario requiere Zone:Read y DNS:Edit. OpenShip 0.8.1 corrige la validación
+   de hooks de Certbot que falla en 0.8.0.
    PostgreSQL, SMTP y las consolas administrativas permanecen internos.
+   S3 necesita un endpoint accesible para las URLs firmadas; no retirarlo antes
+   de migrar a almacenamiento aislado equivalente.
 4. Desplegar desde OpenShip y activar **Source → Auto Deploy** en ese preview
    para que sus siguientes pushes se desplieguen por la GitHub App. No requiere
    un job de preview en Actions, Python ni acceso SSH desde GitHub.
