@@ -148,6 +148,24 @@ Configuración inicial del preview:
    para que sus siguientes pushes se desplieguen por la GitHub App. No requiere
    un job de preview en Actions, Python ni acceso SSH desde GitHub.
 
+El servicio one-shot `seed` inicializa cada preview después de `migrate` y
+`minio-init`: ejecuta `seed:cie10`, `seed:procedures` y `db:seed`, en ese orden.
+API y worker esperan su salida correcta. Si falla, no escribe el marcador de
+finalización ni permite arrancar sus dependientes.
+
+`seedstate` conserva ese marcador entre despliegues: no se recrean usuarios ni
+datos demo y se respetan las modificaciones hechas durante las pruebas. Un
+preview nuevo tiene sus propios volúmenes e inicializa la demo automáticamente.
+`pgdata`, `miniodata` y `seedstate` forman una unidad: al reiniciar desde cero o
+restaurar un preview deben gestionarse juntos, nunca conservar el marcador con
+una base vacía. No eliminar `seedstate` para actualizar código: volvería a
+ejecutar la semilla, que restablece sus organizaciones demo.
+
+Credenciales demo: `ana@odentia.dev`, `luis@odentia.dev` y `cora@odentia.dev`,
+contraseña `Demo1234`. Solo datos ficticios. La inicialización pertenece al
+runtime del preview, no a producción, tests ni CI; el comando manual
+`pnpm db:seed` conserva su comportamiento de reinicio explícito.
+
 ### CLI: vincular una vez, desplegar con un comando
 
 Instalar el CLI oficial y ejecutar `openship login`. Para esta instalación,

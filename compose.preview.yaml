@@ -91,6 +91,33 @@ services:
     restart: "no"
     mem_limit: 512m
 
+  seed:
+    build: *app-build
+    env_file: *runtime-env-file
+    # Marcador escrito solo después de completar toda la semilla.
+    # Este volumen pertenece al mismo ciclo de vida que pgdata y miniodata.
+    volumes:
+      - seedstate:/var/lib/odentia-seed
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        if [ -f /var/lib/odentia-seed/completed ]; then
+          echo "Semilla del preview ya inicializada; se conservan los datos."
+          exit 0
+        fi
+        pnpm --filter @odentia/db seed:cie10
+        pnpm --filter @odentia/db seed:procedures
+        pnpm db:seed
+        touch /var/lib/odentia-seed/completed
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      minio-init:
+        condition: service_completed_successfully
+    restart: "no"
+    mem_limit: 768m
+
   api:
     build: *app-build
     command: [pnpm, --filter, "@odentia/api", start]
@@ -99,9 +126,7 @@ services:
     ports:
       - "127.0.0.1::3001"
     depends_on:
-      migrate:
-        condition: service_completed_successfully
-      minio-init:
+      seed:
         condition: service_completed_successfully
       mailpit:
         condition: service_started
@@ -119,9 +144,7 @@ services:
     env_file: *runtime-env-file
     restart: unless-stopped
     depends_on:
-      migrate:
-        condition: service_completed_successfully
-      minio-init:
+      seed:
         condition: service_completed_successfully
     mem_limit: 768m
 
@@ -156,3 +179,4 @@ services:
 volumes:
   pgdata:
   miniodata:
+  seedstate:
