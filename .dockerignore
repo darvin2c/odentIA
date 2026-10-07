@@ -6,6 +6,7 @@ node_modules
 **/storybook-static
 infra/dev/.env
 infra/prod/.env
+infra/preview/.env
 *.log
 e2e/test-results
 e2e/playwright-report

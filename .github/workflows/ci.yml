@@ -56,30 +56,12 @@ jobs:
       OPENSHIP_PROJECT_ID: ${{ vars.OPENSHIP_PROJECT_ID }}
       OPENSHIP_DEPLOY_TOKEN: ${{ secrets.OPENSHIP_DEPLOY_TOKEN }}
     steps:
-      - name: Desplegar el commit verificado y esperar su resultado
-        shell: bash
-        run: |
-          : "${OPENSHIP_URL:?}" "${OPENSHIP_PROJECT_ID:?}" "${OPENSHIP_DEPLOY_TOKEN:?}"
-          api="${OPENSHIP_URL%/}/api/proxy/api"
-          body=$(jq -nc --arg projectId "$OPENSHIP_PROJECT_ID" --arg commitSha "$GITHUB_SHA" \
-            '{projectId:$projectId, branch:"main", commitSha:$commitSha, environment:"production", smartRoute:true}')
-          response=$(curl --fail-with-body --silent --show-error --connect-timeout 10 --max-time 60 \
-            -H "Authorization: Bearer $OPENSHIP_DEPLOY_TOKEN" -H "Content-Type: application/json" \
-            --data "$body" "$api/deployments")
-          deployment=$(jq -er '.data.deployment_id // .deployment_id' <<< "$response")
-          echo "Deployment: $deployment"
-          for attempt in $(seq 1 55); do
-            response=$(curl --fail-with-body --silent --show-error --connect-timeout 10 --max-time 30 \
-              -H "Authorization: Bearer $OPENSHIP_DEPLOY_TOKEN" "$api/deployments/$deployment")
-            status=$(jq -er '.data.status' <<< "$response")
-            echo "Estado: $status"
-            case "$status" in
-              ready|no_changes) exit 0 ;;
-              failed|cancelled|partial_failure|action_required)
-                jq -r '.data.errorMessage // "El despliegue requiere intervención."' <<< "$response"
-                exit 1 ;;
-            esac
-            sleep 20
-          done
-          echo "El despliegue no alcanzó READY dentro del plazo." >&2
-          exit 1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Instalar CLI oficial de OpenShip
+        run: npm install --global openship@0.8.1
+      - name: Conectar con OpenShip
+        run: openship login --api-url "$OPENSHIP_URL/api/proxy" --dashboard-url "$OPENSHIP_URL" --token "$OPENSHIP_DEPLOY_TOKEN"
+      - name: Desplegar el commit verificado
+        run: openship deploy --project "$OPENSHIP_PROJECT_ID" --branch main --commit "$GITHUB_SHA" --env production --smart-route --watch --timeout 1200000

@@ -33,6 +33,9 @@ function RegisterPage() {
         lastName: value.lastName,
         email: value.email,
         password: value.password,
+        callbackURL: invitationId
+          ? `${window.location.origin}/accept-invitation/${encodeURIComponent(invitationId)}`
+          : `${window.location.origin}/`,
       })
       if (signUpError) {
         toast.error(signUpError.message ?? "No se pudo registrar la cuenta.")
