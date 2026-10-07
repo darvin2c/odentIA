@@ -9,9 +9,10 @@ import {
 } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
-import { type FormEvent, useState } from "react"
+import { type FormEvent, useEffect, useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
 import { type AgentConfig, usePermission } from "../../lib/crm"
+import { PageDraftGuard, sameDraft } from "../../lib/page-draft-guard"
 
 export const Route = createFileRoute("/_org/settings/agent")({
   component: AgentPage,
@@ -23,6 +24,8 @@ function AgentPage() {
   const mode = useDetailMode()
   const [formOpen, setFormOpen] = useState(false)
   const [saved, setSaved] = useState(false)
+  const [policyDirty, setPolicyDirty] = useState(false)
+  const [baseline, setBaseline] = useState<AgentConfig | null>(null)
 
   const configQuery = useQuery({
     queryKey: ["agent-config"],
@@ -33,6 +36,7 @@ function AgentPage() {
   const [form, setForm] = useState<AgentConfig | null>(null)
   const config = configQuery.data?.data ?? null
   const current = form ?? config
+  const configDirty = formOpen && !sameDraft(form, baseline)
 
   const saveMutation = useMutation({
     mutationFn: (patch: Partial<AgentConfig>) =>
@@ -76,6 +80,8 @@ function AgentPage() {
 
   function openForm() {
     setSaved(false)
+    setForm(config)
+    setBaseline(config)
     setFormOpen(true)
   }
 
@@ -156,7 +162,7 @@ function AgentPage() {
   const formProps = {
     onClose: closeForm,
     title: "Editar la configuración del agente",
-    isDirty: form !== null,
+    isDirty: configDirty,
     isSubmitting: saveMutation.isPending,
     error,
     submitLabel: "Guardar",
@@ -169,6 +175,7 @@ function AgentPage() {
 
   return (
     <div className="flex flex-col gap-6">
+      <PageDraftGuard dirty={configDirty || policyDirty} />
       <MasterDetail
         panel={
           mode === "panel" && formOpen ? <FormPanel {...formProps}>{formFields}</FormPanel> : null
@@ -223,7 +230,7 @@ function AgentPage() {
             </div>
           </dl>
         </div>
-        <PolicySection />
+        <PolicySection onDirtyChange={setPolicyDirty} />
         <div className="flex flex-col gap-3 rounded-sm bg-card p-6">
           <div className="font-heading text-base font-medium">Escrituras directas del agente</div>
           <p className="text-sm text-muted-foreground">
@@ -288,7 +295,7 @@ const MODE_LABEL: Record<string, string> = {
 type AutonomyPolicy = Record<string, string>
 
 /** Política de autonomía por acción: cada acto confirma con el paciente o lo aprueba el equipo. */
-function PolicySection() {
+function PolicySection({ onDirtyChange }: { onDirtyChange: (dirty: boolean) => void }) {
   const queryClient = useQueryClient()
   const policyQuery = useQuery({
     queryKey: ["agent-policy"],
@@ -296,12 +303,19 @@ function PolicySection() {
   })
   const [draft, setDraft] = useState<AutonomyPolicy | null>(null)
   const policy = draft ?? policyQuery.data?.data ?? null
+  const [baseline, setBaseline] = useState<AutonomyPolicy | null>(null)
+  const dirty = draft !== null && !sameDraft(draft, baseline)
+  useEffect(() => {
+    onDirtyChange(dirty)
+    return () => onDirtyChange(false)
+  }, [dirty, onDirtyChange])
 
   const saveMutation = useMutation({
     mutationFn: (patch: AutonomyPolicy) =>
       apiFetch("/api/agent/policy", { method: "PUT", body: JSON.stringify(patch) }),
-    onSuccess: () => {
-      setDraft(null)
+    onSuccess: (_result, submitted) => {
+      setBaseline(submitted)
+      queryClient.setQueryData(["agent-policy"], { data: submitted })
       void queryClient.invalidateQueries({ queryKey: ["agent-policy"] })
     },
   })
@@ -333,7 +347,10 @@ function PolicySection() {
           {action.label}
           <select
             value={policy[action.key] ?? "directo"}
-            onChange={(e) => setDraft({ ...policy, [action.key]: e.target.value })}
+            onChange={(e) => {
+              if (draft === null) setBaseline(policy)
+              setDraft({ ...policy, [action.key]: e.target.value })
+            }}
             className="rounded-sm border p-2"
           >
             {Object.entries(MODE_LABEL).map(([mode, label]) => (
@@ -353,7 +370,7 @@ function PolicySection() {
         <Button
           type="button"
           size="sm"
-          disabled={draft === null || saveMutation.isPending}
+          disabled={!dirty || saveMutation.isPending}
           onClick={() => {
             if (draft) saveMutation.mutate(draft)
           }}

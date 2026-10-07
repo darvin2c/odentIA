@@ -191,7 +191,7 @@ export async function processAgentRun(
       return "done"
     }
     const { toolCtx, effectiveModel } = prepared
-    const model = createConfiguredChatModel(effectiveModel, runtime.llm)
+    const model = await createConfiguredChatModel(effectiveModel, runtime.llm)
     const graph = compileAgentGraph(model, toolCtx, runtime.checkpointer)
     await graph.invoke(
       { messages: [], turnCount: 0 },
@@ -332,7 +332,7 @@ export async function simulateAgentTurn(
   const toolCtx = baseToolCtx(db, orgId, conversationId, contactId, deps.secretsKey)
   toolCtx.dryRun = true
   toolCtx.draftText = text.slice(0, 4000)
-  const model = createConfiguredChatModel(modelName, { apiKey: deps.apiKey, baseUrl: deps.baseUrl })
+  const model = await createConfiguredChatModel(modelName, { apiKey: deps.apiKey, baseUrl: deps.baseUrl })
   const graph = compileAgentGraph(model, toolCtx)
   const state = (await graph.invoke(
     { messages: [], turnCount: 0 },

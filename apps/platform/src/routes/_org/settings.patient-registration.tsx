@@ -41,6 +41,7 @@ import { usePermission } from "../../lib/crm"
 import { orgSlugFromHostname, requestHostname, tenantUrl } from "../../lib/host"
 import { useOrgProfile } from "../../lib/org"
 import { fetchRegistrationConfig, saveRegistrationConfig } from "../../lib/patient-registration"
+import { PageDraftGuard, sameDraft } from "../../lib/page-draft-guard"
 
 export const Route = createFileRoute("/_org/settings/patient-registration")({
   component: PatientRegistrationSettingsPage,
@@ -103,6 +104,7 @@ function PatientRegistrationSettingsPage() {
   const [qrPending, setQrPending] = useState(false)
   const [qrError, setQrError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
+  const [baseline, setBaseline] = useState<Pick<RegistrationConfig, "fields" | "enabled" | "privacyNotice"> | null>(null)
 
   const loaded = configQuery.data?.data
   useEffect(() => {
@@ -111,6 +113,7 @@ function PatientRegistrationSettingsPage() {
       setEnabled(loaded.enabled)
       setPrivacyNotice(loaded.privacyNotice)
       setExpectedVersion(loaded.version)
+      setBaseline({ fields: loaded.fields, enabled: loaded.enabled, privacyNotice: loaded.privacyNotice })
     }
   }, [loaded, fields])
 
@@ -124,6 +127,7 @@ function PatientRegistrationSettingsPage() {
       }),
     onSuccess: (result) => {
       setExpectedVersion(result.data.version)
+      setBaseline({ fields: result.data.fields, enabled: result.data.enabled, privacyNotice: result.data.privacyNotice })
       setFormErrors({})
       setSavedNotice("Configuración guardada")
       void queryClient.invalidateQueries({ queryKey: ["patient-registration-config"] })
@@ -132,14 +136,11 @@ function PatientRegistrationSettingsPage() {
       const shape = error instanceof ApiError ? error.shape : null
       if (shape?.code === "STALE_REGISTRATION_CONFIG") {
         setSavedNotice(
-          "Otro cambio se guardó antes: recargamos la configuración vigente. Revisa y vuelve a guardar.",
+          "Otro cambio se guardó antes. Conservamos tu borrador: revisa los cambios y vuelve a guardar.",
         )
         const refreshed = await configQuery.refetch()
         if (refreshed.data) {
           const current = refreshed.data.data
-          setFields({ ...current.fields })
-          setEnabled(current.enabled)
-          setPrivacyNotice(current.privacyNotice)
           setExpectedVersion(current.version)
         } else {
           setFormErrors({
@@ -249,6 +250,7 @@ function PatientRegistrationSettingsPage() {
 
   return (
     <div className="mx-auto w-full max-w-3xl">
+      <PageDraftGuard dirty={baseline !== null && !sameDraft({ fields, enabled, privacyNotice }, baseline)} />
       <PageHeader
         title="Registro de pacientes"
         subtitle="Campos del formulario público, aviso de privacidad y código QR"

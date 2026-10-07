@@ -7,7 +7,24 @@ import { expect, test } from "./fixtures"
 import { gotoHydrated } from "./hydration"
 import { latestLinkFor } from "./mailpit"
 
+// Axe mide colores computados: un panel a mitad de su animación de entrada
+// produce contrastes intermedios que el usuario no ve al terminar.
+async function settleAnimations(page: Page) {
+  await page.evaluate(async () => {
+    await new Promise<void>((resolve) =>
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+    )
+    await Promise.all(
+      document
+        .getAnimations()
+        .filter((animation) => animation.effect?.getComputedTiming().iterations !== Infinity)
+        .map((animation) => animation.finished.catch(() => {})),
+    )
+  })
+}
+
 async function audit(page: Page, info: TestInfo, surface: string) {
+  await settleAnimations(page)
   const results = await new AxeBuilder({ page })
     .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "best-practice"])
     .analyze()
@@ -39,19 +56,11 @@ async function audit(page: Page, info: TestInfo, surface: string) {
 }
 
 async function theme(page: Page, dark: boolean) {
-  await page.evaluate(async (dark) => {
+  await page.evaluate((dark) => {
     document.documentElement.classList.toggle("dark", dark)
     document.documentElement.style.colorScheme = dark ? "dark" : "light"
-    await new Promise<void>((resolve) =>
-      requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
-    )
-    await Promise.all(
-      document
-        .getAnimations()
-        .filter((animation) => animation.effect?.getComputedTiming().iterations !== Infinity)
-        .map((animation) => animation.finished.catch(() => {})),
-    )
   }, dark)
+  await settleAnimations(page)
 }
 
 for (const viewport of [
@@ -133,7 +142,7 @@ for (const viewport of [
       const page = owner.page
       await page.setViewportSize(viewport)
       await gotoHydrated(page, tenant(owner.org.slug, "/home"))
-      await expect(page.getByRole("link", { name: /^Citas de hoy/ })).toBeVisible()
+      await expect(page.getByRole("region", { name: "Siguiente paso" }).getByRole("link").first()).toBeVisible()
       await theme(page, dark)
       await audit(page, info, "inicio")
       if (viewport.width < 768) {

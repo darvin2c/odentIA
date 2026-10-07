@@ -14,9 +14,10 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-table"
 import { Plus } from "lucide-react"
-import { type FormEvent, useMemo, useState } from "react"
+import { type FormEvent, useEffect, useMemo, useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
 import { usePermission } from "../../lib/crm"
+import { usePageDraftGuard } from "../../lib/page-draft-guard"
 
 export const Route = createFileRoute("/_org/automations")({
   component: AutomationsPage,
@@ -109,6 +110,8 @@ function AutomationsPage() {
   const [formOpen, setFormOpen] = useState(false)
   const [editing, setEditing] = useState<AutomationRule | null>(null)
   const [formError, setFormError] = useState<string | null>(null)
+  const [campaignDirty, setCampaignDirty] = useState(false)
+  const draftGuard = usePageDraftGuard(campaignDirty)
 
   const rulesQuery = useQuery({
     queryKey: ["automation-rules"],
@@ -259,6 +262,7 @@ function AutomationsPage() {
 
   return (
     <PageShell className="flex flex-col gap-6">
+      {draftGuard.dialog}
       <PageHeader
         title="Automatizaciones"
         subtitle="Recordatorios, seguimientos y campañas con consentimiento"
@@ -292,7 +296,9 @@ function AutomationsPage() {
             key={value}
             type="button"
             variant={tab === value ? "default" : "outline"}
-            onClick={() => setTab(value)}
+            onClick={() => {
+              if (tab !== value) draftGuard.requestLeave(() => setTab(value))
+            }}
             role="tab"
             aria-selected={tab === value}
           >
@@ -340,7 +346,7 @@ function AutomationsPage() {
         </div>
       ) : null}
 
-      {tab === "campanas" ? <CampaignsPanel campaigns={campaigns} canWrite={canWrite} onChanged={invalidate} /> : null}
+      {tab === "campanas" ? <CampaignsPanel campaigns={campaigns} canWrite={canWrite} onChanged={invalidate} onDirtyChange={setCampaignDirty} /> : null}
 
       {tab === "consentimientos" ? <ConsentsPanel canWrite={canWrite} /> : null}
 
@@ -527,10 +533,12 @@ function CampaignsPanel({
   campaigns,
   canWrite,
   onChanged,
+  onDirtyChange,
 }: {
   campaigns: AutomationRule[]
   canWrite: boolean
   onChanged: () => void
+  onDirtyChange: (dirty: boolean) => void
 }) {
   const [name, setName] = useState("")
   const [tags, setTags] = useState("")
@@ -538,6 +546,11 @@ function CampaignsPanel({
   const [channel, setChannel] = useState("whatsapp")
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const dirty = name !== "" || tags !== "" || stageIds.length > 0 || channel !== "whatsapp"
+  useEffect(() => {
+    onDirtyChange(dirty)
+    return () => onDirtyChange(false)
+  }, [dirty, onDirtyChange])
   const [preview, setPreview] = useState<{
     total: number
     consentidos: number
@@ -611,6 +624,7 @@ function CampaignsPanel({
       setName("")
       setTags("")
       setStageIds([])
+      setChannel("whatsapp")
       setPreview(null)
       onChanged()
     } catch (e) {
@@ -645,6 +659,7 @@ function CampaignsPanel({
       )}
       {canWrite ? (
         <form onSubmit={handleCreate} className="flex flex-col gap-4 rounded-md border p-4">
+          <fieldset disabled={saving} className="contents">
           <h3 className="font-heading text-base font-medium">Nueva campaña (nace pausada)</h3>
           <Field>
             <FieldLabel>Nombre</FieldLabel>
@@ -720,6 +735,7 @@ function CampaignsPanel({
             </div>
           ) : null}
           {error ? <FieldError>{error}</FieldError> : null}
+          </fieldset>
         </form>
       ) : null}
     </div>

@@ -14,8 +14,9 @@
   "dependencies": {
     "@langchain/core": "1.2.11",
     "@langchain/langgraph": "1.4.15",
-    "@odentia/channels": "workspace:*",
     "@langchain/langgraph-checkpoint-postgres": "1.0.5",
+    "@langchain/openai": "1.5.3",
+    "@odentia/channels": "workspace:*",
     "@odentia/db": "workspace:*",
     "@odentia/services": "workspace:*",
     "drizzle-orm": "0.45.2",

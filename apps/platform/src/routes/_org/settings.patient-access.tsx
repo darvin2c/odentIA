@@ -5,6 +5,7 @@ import { createFileRoute } from "@tanstack/react-router"
 import { useEffect, useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
 import { type ConnectionItem, usePermission } from "../../lib/crm"
+import { PageDraftGuard, sameDraft } from "../../lib/page-draft-guard"
 import {
   fetchPortalPolicyApi,
   savePortalPolicyApi,
@@ -57,19 +58,22 @@ function PolicyForm({ canWrite }: { canWrite: boolean }) {
   const [saved, setSaved] = useState(false)
   const [form, setForm] = useState<PortalPolicyInput | null>(null)
   const [errors, setErrors] = useState<string | null>(null)
+  const [baseline, setBaseline] = useState<PortalPolicyInput | null>(null)
 
   useEffect(() => {
     if (policyQuery.data && form === null) {
       const { updatedAt: _ignored, ...input } = policyQuery.data
       setForm({ ...input, allowedConnectionIds: [...input.allowedConnectionIds] })
+      setBaseline(input)
     }
   }, [policyQuery.data, form])
 
   const saveMutation = useMutation({
     mutationFn: (input: PortalPolicyInput) => savePortalPolicyApi(input),
-    onSuccess: (policy: PortalPolicy) => {
+    onSuccess: (policy: PortalPolicy, submitted) => {
       const { updatedAt: _ignored, ...input } = policy
-      setForm({ ...input, allowedConnectionIds: [...input.allowedConnectionIds] })
+      setForm((current) => sameDraft(current, submitted) ? { ...input, allowedConnectionIds: [...input.allowedConnectionIds] } : current)
+      setBaseline(input)
       setSaved(true)
       setErrors(null)
       void queryClient.invalidateQueries({ queryKey: ["portal-policy"] })
@@ -136,6 +140,10 @@ function PolicyForm({ canWrite }: { canWrite: boolean }) {
 
   return (
     <div className="flex flex-col gap-5">
+      <PageDraftGuard dirty={form !== null && !sameDraft(
+        { ...form, allowedConnectionIds: [...form.allowedConnectionIds].sort() },
+        baseline && { ...baseline, allowedConnectionIds: [...baseline.allowedConnectionIds].sort() },
+      )} />
       <PageHeader
         title="Acceso de pacientes"
         subtitle="Políticas del portal: solicitudes, verificación, vigencias y alcance. La emisión y los permisos por paciente se gestionan en la ficha del paciente."

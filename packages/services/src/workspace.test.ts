@@ -14,8 +14,8 @@ setupTestDb()
 const recipient = randomUUID()
 const colleague = randomUUID()
 const outsider = randomUUID()
-const restricted: WorkspaceAccess = { patients: true, appointments: false, conversations: false, tasks: false, finance: false, clinical: false, crm: false, agent: false, allTasks: false }
-const full: WorkspaceAccess = { patients: true, appointments: true, conversations: true, tasks: true, finance: true, clinical: true, crm: true, agent: true, allTasks: true }
+const restricted: WorkspaceAccess = { patients: true, appointments: false, conversations: false, tasks: false, finance: false, clinical: false, crm: false, agent: false, allTasks: false, configure: false }
+const full: WorkspaceAccess = { patients: true, appointments: true, conversations: true, tasks: true, finance: true, clinical: true, crm: true, agent: true, allTasks: true, configure: true }
 beforeAll(async () => {
   await ownerDb.insert(user).values([recipient, colleague, outsider].map(id => ({ id, name: "Persona de prueba", email: `${id}@workspace.test`, emailVerified: true })))
   await ownerDb.insert(member).values([

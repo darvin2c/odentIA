@@ -33,6 +33,7 @@ import { type FormEvent, useMemo, useState } from "react"
 import { z } from "zod"
 import { ApiError, apiFetch } from "../../lib/api"
 import { type ConnectionItem, usePermission } from "../../lib/crm"
+import { PageDraftGuard } from "../../lib/page-draft-guard"
 
 export const Route = createFileRoute("/_org/settings/channels")({
   component: ChannelsPage,
@@ -177,10 +178,10 @@ function ChannelsPage() {
   // Cuatro formularios (uno por proveedor): el contenedor está sucio si
   // cualquiera tiene cambios sin guardar. Todas se llaman siempre:
   // encadenarlas con `||` las volvería condicionales.
-  const tgDirty = useStore(tgForm.store, (state) => state.isDirty)
-  const waDirty = useStore(waForm.store, (state) => state.isDirty)
-  const msgrDirty = useStore(msgrForm.store, (state) => state.isDirty)
-  const igDirty = useStore(igForm.store, (state) => state.isDirty)
+  const tgDirty = useStore(tgForm.store, (state) => !state.isDefaultValue)
+  const waDirty = useStore(waForm.store, (state) => !state.isDefaultValue)
+  const msgrDirty = useStore(msgrForm.store, (state) => !state.isDefaultValue)
+  const igDirty = useStore(igForm.store, (state) => !state.isDefaultValue)
   const isDirty = tgDirty || waDirty || msgrDirty || igDirty
 
   /** Cierra y deja los formularios prístinos: sin el reset, el dirty sobrevive
@@ -552,6 +553,7 @@ function ChannelsPage() {
 
   return (
     <div className="flex flex-col gap-2">
+      <PageDraftGuard dirty={formOpen && isDirty} />
       <MasterDetail
         panel={
           mode === "panel" && formOpen ? <FormPanel {...formProps}>{formFields}</FormPanel> : null

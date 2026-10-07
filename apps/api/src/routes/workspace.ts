@@ -15,6 +15,7 @@ function accessFor(role: string): WorkspaceAccess {
     // o quien decide; la configuración y el proveedor siguen en `agent.write`.
     crm: canAccess(role, "crm.read"), agent: canAccessAny(role, ["agent.read", "agent.decide"]),
     allTasks: role === "owner" || role === "admin",
+    configure: canAccess(role, "settings.write"),
   }
 }
 const domains = ["patients", "clinical", "appointments", "crm", "conversations", "tasks", "finance", "inventory", "reports", "settings", "audit", "agent"]

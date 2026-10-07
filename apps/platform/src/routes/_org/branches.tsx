@@ -42,6 +42,7 @@ import { z } from "zod"
 import { ApiError, apiFetch } from "../../lib/api"
 import { usePermission } from "../../lib/crm"
 import { useOrgProfile } from "../../lib/org"
+import { PageDraftGuard } from "../../lib/page-draft-guard"
 
 export const Route = createFileRoute("/_org/branches")({
   component: BranchesPage,
@@ -180,7 +181,7 @@ function BranchesPage() {
   })
   // Suscripción explícita: el render de la página no se entera de los cambios de
   // meta del formulario por sí solo (los campos se re-renderizan por su cuenta).
-  const isDirty = useStore(form.store, (state) => state.isDirty)
+  const isDirty = useStore(form.store, (state) => !state.isDefaultValue)
 
   const canWrite = usePermission("settings.write")
 
@@ -393,6 +394,7 @@ function BranchesPage() {
 
   return (
     <PageShell className="flex flex-col gap-6">
+      <PageDraftGuard dirty={formOpen && isDirty} />
       <MasterDetail
         panel={
           mode === "panel" && formOpen ? <FormPanel {...formProps}>{formFields}</FormPanel> : null

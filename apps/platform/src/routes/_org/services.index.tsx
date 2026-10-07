@@ -45,6 +45,7 @@ import { type FormEvent, type ReactNode, useCallback, useEffect, useMemo, useSta
 import { z } from "zod"
 import { ApiError } from "../../lib/api"
 import { usePermission } from "../../lib/crm"
+import { PageDraftGuard } from "../../lib/page-draft-guard"
 import {
   createServiceApi,
   fetchServices,
@@ -629,7 +630,7 @@ function OfferEditor({ offer, asPanel, open, canWrite, onClose }: OfferEditorPro
   })
   // Suscripción explícita: la página no se entera de los cambios de meta del
   // formulario por sí sola, y el cierre protegido necesita saber si hay cambios.
-  const isDirty = useStore(form.store, (state) => state.isDirty)
+  const isDirty = useStore(form.store, (state) => !state.isDefaultValue)
 
   const headerContent = (
     <div className="flex flex-col gap-1">
@@ -749,12 +750,17 @@ function OfferEditor({ offer, asPanel, open, canWrite, onClose }: OfferEditorPro
     onClose,
   }
 
-  return asPanel ? (
-    <FormPanel {...formSurface}>{fields}</FormPanel>
-  ) : (
-    <FormDrawer open={open} {...formSurface}>
-      {fields}
-    </FormDrawer>
+  return (
+    <>
+      <PageDraftGuard dirty={open && isDirty} />
+      {asPanel ? (
+        <FormPanel {...formSurface}>{fields}</FormPanel>
+      ) : (
+        <FormDrawer open={open} {...formSurface}>
+          {fields}
+        </FormDrawer>
+      )}
+    </>
   )
 }
 
