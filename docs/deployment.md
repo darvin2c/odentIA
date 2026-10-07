@@ -66,8 +66,9 @@ contra SMTP no demuestra que el proveedor acepte el remitente ni entregue el cor
 `.github/workflows/ci.yml` instala dependencias con el lockfile, ejecuta typecheck,
 construye la imagen de PostgreSQL para las pruebas de integración, ejecuta los tests
 sin E2E y comprueba el Dockerfile de la app. Solo después de que ambos jobs pasen,
-un push a `main` dispara el deploy en OpenShip para el SHA exacto y espera su resultado.
-Un fallo o despliegue parcial falla el workflow; no se anuncia como éxito.
+un push a `main` ejecuta el CLI oficial `openship deploy --commit "$GITHUB_SHA"
+--watch`. El CLI envía el despliegue y espera su resultado; no hay controlador
+propio ni bucle HTTP de espera.
 
 Configurar en GitHub:
 
@@ -118,12 +119,65 @@ La restauración debe conservar esquema, historial de migraciones y datos, y no
 activar proveedores externos. El healthcheck `/health` de la API comprueba la base,
 no R2, SMTP ni el modelo: esas integraciones requieren comprobaciones separadas.
 
-## Previews y límites
+## Previews nativos de OpenShip
 
-Estas correcciones estabilizan producción. No habilitan ni acreditan previews:
-los puertos fijos de `compose.prod.yaml` no permiten levantar copias simultáneas
-sin que el orquestador les asigne otros bindings. Entornos distintos requieren
-bases, variables, almacenamiento y ciclos de vida aislados y verificados.
+Seguir la [guía de entornos](https://openship.io/docs/guides/preview-environments):
+en el proyecto, pulsar **+** junto al selector de entorno, elegir la rama y
+seleccionar el nuevo entorno antes de configurar o desplegar. Reutilizar el
+entorno existente para esa rama; no crear otra aplicación ni copiar producción.
+
+Configuración inicial del preview:
+
+1. Usar `compose.preview.yaml`, directorio raíz vacío. Es Docker Compose estándar,
+   no un gestor de despliegue: API, worker y webs usan el mismo Dockerfile de
+   producción. PostgreSQL conserva PGMQ/pg_cron. MinIO y Mailpit pertenecen solo
+   al preview; no incluye backup productivo.
+2. Cargar valores propios siguiendo `infra/prod/.env.preview.example`. Generar
+   secretos independientes y no importar datos de producción.
+3. En **Services**, asignar dominios propios a API (3001), panel (3000),
+   platform (3000) y S3 (9000). Los hosts deben estar bajo el mismo dominio
+   de cookies del preview; registrar los hosts de organizaciones que se probarán.
+   PostgreSQL, SMTP y las consolas administrativas permanecen internos.
+4. Desplegar desde OpenShip y activar **Source → Auto Deploy** en ese preview
+   para que sus siguientes pushes se desplieguen por la GitHub App. No requiere
+   un job de preview en Actions, Python ni acceso SSH desde GitHub.
+
+### CLI: vincular una vez, desplegar con un comando
+
+Instalar el CLI oficial y ejecutar `openship login`. Para esta instalación,
+el API público se alcanza bajo `https://ops.darvincotrina.com/api/proxy`.
+El token queda en el contexto privado del CLI; no guardarlo en el repositorio.
+
+```bash
+# Seleccionar el ID del entorno, no el ID de producción.
+openship init --project <id-del-entorno-preview>
+openship deploy --watch
+```
+
+`.openship/project.json` es un enlace local excluido de Git. En otra copia de
+trabajo puede vincularse producción con su ID y usar el mismo `openship deploy`.
+`--watch` observa el resultado; sin él solo se solicita el despliegue.
+
+**Proyecto/entorno y conjunto de variables no son lo mismo.** En OpenShip 0.8,
+el panel y los pushes usan el conjunto predeterminado `production` **dentro del
+proyecto seleccionado**, incluso si ese proyecto es de tipo preview. Ese nombre
+no le da acceso al runtime ni a los secretos del proyecto productivo.
+`openship deploy --env preview` selecciona un conjunto alternativo de variables;
+no crea ni selecciona otro entorno. Usarlo solo si ese conjunto está configurado.
+Ver la [referencia del CLI](https://openship.io/docs/cli/deploy).
+
+Los previews se actualizan por su rama. La creación del entorno y su retirada
+son operaciones nativas explícitas: no asumir que abrir o cerrar un PR las realiza.
+Al retirar un preview, usar **Advanced → Delete Project** sobre su ID y revisar
+los volúmenes efímeros que se eliminarán; nunca hacerlo sobre Production.
+
+El correo de prueba queda en Mailpit. Una entrega allí no acredita entrega por
+Resend; `LLM_MODEL=fake` y canales mock tampoco acreditan proveedores reales.
+MinIO se construye desde su release oficial de fuente porque esa release no
+publica una imagen comunitaria oficial utilizable; no se introduce otro proveedor.
+El callback del registro devuelve al panel del mismo entorno tras verificar el correo.
+
+## Límites operativos
 
 El VPS y sus volúmenes siguen siendo un único punto de fallo. Mantener backups
 fuera del host y un procedimiento de recuperación independiente del panel. No
