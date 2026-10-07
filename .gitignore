@@ -32,6 +32,7 @@ pnpm-debug.log*
 # Local development data
 infra/dev/data/
 *.local
+.openship/
 
 # TypeScript
 *.tsbuildinfo

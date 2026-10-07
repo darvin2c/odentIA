@@ -2,18 +2,16 @@ name: CI
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened, closed]
   push:
     branches: [main]
 
 concurrency:
-  group: ci-${{ github.event.pull_request.number || github.ref }}
-  # No interrumpir un despliegue admitido por OpenShip; serializar por PR.
-  cancel-in-progress: false
+  group: ci-${{ github.ref }}
+  # No cancelar un deploy productivo por un push posterior.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   check:
-    if: github.event.action != 'closed'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -32,7 +30,6 @@ jobs:
       - run: pnpm test --filter=!@odentia/e2e
 
   docker-build:
-    if: github.event.action != 'closed'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -59,111 +56,12 @@ jobs:
       OPENSHIP_PROJECT_ID: ${{ vars.OPENSHIP_PROJECT_ID }}
       OPENSHIP_DEPLOY_TOKEN: ${{ secrets.OPENSHIP_DEPLOY_TOKEN }}
     steps:
-      - name: Desplegar el commit verificado y esperar su resultado
-        shell: bash
-        run: |
-          : "${OPENSHIP_URL:?}" "${OPENSHIP_PROJECT_ID:?}" "${OPENSHIP_DEPLOY_TOKEN:?}"
-          api="${OPENSHIP_URL%/}/api/proxy/api"
-          body=$(jq -nc --arg projectId "$OPENSHIP_PROJECT_ID" --arg commitSha "$GITHUB_SHA" \
-            '{projectId:$projectId, branch:"main", commitSha:$commitSha, environment:"production", smartRoute:true}')
-          response=$(curl --fail-with-body --silent --show-error --connect-timeout 10 --max-time 60 \
-            -H "Authorization: Bearer $OPENSHIP_DEPLOY_TOKEN" -H "Content-Type: application/json" \
-            --data "$body" "$api/deployments")
-          deployment=$(jq -er '.data.deployment_id // .deployment_id' <<< "$response")
-          echo "Deployment: $deployment"
-          for attempt in $(seq 1 55); do
-            response=$(curl --fail-with-body --silent --show-error --connect-timeout 10 --max-time 30 \
-              -H "Authorization: Bearer $OPENSHIP_DEPLOY_TOKEN" "$api/deployments/$deployment")
-            status=$(jq -er '.data.status' <<< "$response")
-            echo "Estado: $status"
-            case "$status" in
-              ready|no_changes) exit 0 ;;
-              failed|cancelled|partial_failure|action_required)
-                jq -r '.data.errorMessage // "El despliegue requiere intervención."' <<< "$response"
-                exit 1 ;;
-            esac
-            sleep 20
-          done
-          echo "El despliegue no alcanzó READY dentro del plazo." >&2
-          exit 1
-
-  preview:
-    if: >-
-      always() && github.event_name == 'pull_request' &&
-      github.event.pull_request.head.repo.full_name == github.repository &&
-      (github.event.action == 'closed' ||
-      (needs.check.result == 'success' && needs.docker-build.result == 'success'))
-    needs: [check, docker-build]
-    runs-on: ubuntu-latest
-    timeout-minutes: 40
-    permissions:
-      contents: read
-      deployments: write
-      pull-requests: write
-    env:
-      GH_TOKEN: ${{ github.token }}
-      GH_REPO: ${{ github.repository }}
-      PREVIEW_HOST: ${{ vars.OPENSHIP_PREVIEW_HOST }}
-      PREVIEW_KNOWN_HOSTS: ${{ vars.OPENSHIP_PREVIEW_KNOWN_HOSTS }}
-      PREVIEW_SSH_KEY: ${{ secrets.OPENSHIP_PREVIEW_SSH_KEY }}
-    steps:
-      - name: Registrar despliegue de preview en GitHub
-        id: github-deployment
-        if: github.event.action != 'closed'
-        run: |
-          body=$(jq '{ref:.pull_request.head.sha, auto_merge:false, required_contexts:[],
-            environment:("preview-pr-"+(.number|tostring)),
-            transient_environment:true, production_environment:false}' "$GITHUB_EVENT_PATH")
-          id=$(gh api "repos/$GH_REPO/deployments" --input - --jq .id <<< "$body")
-          echo "id=$id" >> "$GITHUB_OUTPUT"
-          gh api "repos/$GH_REPO/deployments/$id/statuses" \
-            -f state=in_progress -f log_url="$GITHUB_SERVER_URL/$GH_REPO/actions/runs/$GITHUB_RUN_ID"
-      - name: Crear, actualizar o retirar el preview aislado
-        id: runtime
-        shell: bash
-        run: |
-          set -euo pipefail
-          : "${PREVIEW_HOST:?}" "${PREVIEW_KNOWN_HOSTS:?}" "${PREVIEW_SSH_KEY:?}"
-          directory="$RUNNER_TEMP/preview-ssh"
-          mkdir -m 700 "$directory"
-          printf '%s\n' "$PREVIEW_SSH_KEY" > "$directory/key"
-          printf '%s\n' "$PREVIEW_KNOWN_HOSTS" > "$directory/known_hosts"
-          chmod 600 "$directory/key" "$directory/known_hosts"
-          payload=$(jq '{action:(if .action=="closed" then "close" else "deploy" end),
-            pr:.number, branch:.pull_request.head.ref, sha:.pull_request.head.sha}' "$GITHUB_EVENT_PATH")
-          # La clave fuerza el gestor instalado: sin shell, PTY ni forwarding.
-          ssh -T -o BatchMode=yes -o StrictHostKeyChecking=yes \
-            -o UserKnownHostsFile="$directory/known_hosts" -i "$directory/key" \
-            "$PREVIEW_HOST" <<< "$payload" | tee "$RUNNER_TEMP/preview-output.log"
-          result=$(jq -Rs 'split("\n")|map(select(startswith("PREVIEW_RESULT=")))[-1]|
-            ltrimstr("PREVIEW_RESULT=")|fromjson' "$RUNNER_TEMP/preview-output.log")
-          echo "panel=$(jq -r '.panel // ""' <<< "$result")" >> "$GITHUB_OUTPUT"
-          if [ "$(jq -r .state <<< "$result")" = ready ]; then
-            jq -r '"## Preview PR #\(.pr)\n\n- Panel: \(.panel)\n- Plataforma demo: \(.platform)\n- API: \(.api)\n- Commit: `\(.sha)`\n\nPostgreSQL y MinIO aislados; SMTP capturado en Mailpit interno."' \
-              <<< "$result" | tee "$RUNNER_TEMP/preview-comment.md" >> "$GITHUB_STEP_SUMMARY"
-            gh pr comment "$(jq -r .pr <<< "$result")" --body-file "$RUNNER_TEMP/preview-comment.md"
-          else
-            echo "Preview retirado y volúmenes efímeros eliminados." >> "$GITHUB_STEP_SUMMARY"
-          fi
-      - name: Publicar URL del preview verificado
-        if: github.event.action != 'closed'
-        run: |
-          gh api "repos/$GH_REPO/deployments/${{ steps.github-deployment.outputs.id }}/statuses" \
-            -f state=success -f environment_url="${{ steps.runtime.outputs.panel }}" \
-            -f log_url="$GITHUB_SERVER_URL/$GH_REPO/actions/runs/$GITHUB_RUN_ID"
-      - name: Marcar previews cerrados como inactivos
-        if: github.event.action == 'closed'
-        run: |
-          environment=$(jq -r '"preview-pr-"+(.number|tostring)' "$GITHUB_EVENT_PATH")
-          gh api --paginate "repos/$GH_REPO/deployments?environment=$environment" --jq '.[].id' |
-            while read -r id; do
-              state=$(gh api "repos/$GH_REPO/deployments/$id/statuses" --jq '.[0].state')
-              if [ "$state" = success ] || [ "$state" = in_progress ]; then
-                gh api "repos/$GH_REPO/deployments/$id/statuses" -f state=inactive
-              fi
-            done
-      - name: Registrar fallo sin anunciar preview disponible
-        if: failure() && steps.github-deployment.outputs.id != ''
-        run: |
-          gh api "repos/$GH_REPO/deployments/${{ steps.github-deployment.outputs.id }}/statuses" \
-            -f state=failure -f log_url="$GITHUB_SERVER_URL/$GH_REPO/actions/runs/$GITHUB_RUN_ID"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Instalar CLI oficial de OpenShip
+        run: npm install --global openship@0.8.1
+      - name: Conectar con OpenShip
+        run: openship login --api-url "$OPENSHIP_URL/api/proxy" --dashboard-url "$OPENSHIP_URL" --token "$OPENSHIP_DEPLOY_TOKEN"
+      - name: Desplegar el commit verificado
+        run: openship deploy --project "$OPENSHIP_PROJECT_ID" --branch main --commit "$GITHUB_SHA" --env production --smart-route --watch --timeout 1200000

@@ -1,6 +1,6 @@
 name: odentia-preview
 
-# OpenShip asigna un slug, red y volúmenes distintos a cada PR.
+# OpenShip asigna un slug, red y volúmenes distintos a cada entorno.
 # Solo las superficies HTTP publican puertos aleatorios en loopback.
 x-runtime-env-file: &runtime-env-file
   - path: ./infra/preview/.env
