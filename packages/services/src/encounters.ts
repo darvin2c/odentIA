@@ -606,12 +606,18 @@ export async function getEncounterDetail(
   }
 }
 
+/** Atención en la lista del paciente, con lo necesario para reconocerla. */
+export type EncounterListItem = EncounterRow & {
+  diagnosisCodes: string[]
+  procedureCount: number
+}
+
 export async function listEncounters(
   tx: Db,
   orgId: string,
   patientId: string,
   input: ListEncountersInput,
-): Promise<{ items: EncounterRow[]; nextCursor: string | null }> {
+): Promise<{ items: EncounterListItem[]; nextCursor: string | null }> {
   await requirePatient(tx, orgId, patientId)
   const limit = Math.min(Math.max(input.limit ?? PAGE_DEFAULT, 1), 100)
   if (
@@ -642,8 +648,44 @@ export async function listEncounters(
     .limit(limit + 1)
   const page = rows.slice(0, limit)
   const last = page[page.length - 1]
+  // Lo que la lista necesita para reconocer cada atención sin abrirla:
+  // diagnósticos y actos vigentes (los anulados no cuentan).
+  const ids = page.map((row) => row.id)
+  const codes = ids.length
+    ? await tx
+        .select({ encounterId: encounterDiagnosis.encounterId, code: encounterDiagnosis.cie10Code })
+        .from(encounterDiagnosis)
+        .where(
+          and(
+            eq(encounterDiagnosis.organizationId, orgId),
+            inArray(encounterDiagnosis.encounterId, ids),
+            isNull(encounterDiagnosis.voidedAt),
+          ),
+        )
+        .orderBy(asc(encounterDiagnosis.createdAt))
+    : []
+  const counts = ids.length
+    ? await tx
+        .select({ encounterId: encounterProcedure.encounterId, n: sql<number>`count(*)::int` })
+        .from(encounterProcedure)
+        .where(
+          and(
+            eq(encounterProcedure.organizationId, orgId),
+            inArray(encounterProcedure.encounterId, ids),
+            isNull(encounterProcedure.voidedAt),
+          ),
+        )
+        .groupBy(encounterProcedure.encounterId)
+    : []
+  const procedureCount = new Map(counts.map((row) => [row.encounterId, row.n]))
   return {
-    items: page,
+    items: page.map((row) => ({
+      ...row,
+      diagnosisCodes: [
+        ...new Set(codes.filter((c) => c.encounterId === row.id).map((c) => c.code)),
+      ],
+      procedureCount: procedureCount.get(row.id) ?? 0,
+    })),
     nextCursor:
       rows.length > limit && last ? encodeCursor(last.createdAt.toISOString(), last.id) : null,
   }

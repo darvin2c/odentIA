@@ -35,6 +35,12 @@ import { QueryErrorState } from "../../lib/query-error"
 import { formatMoney } from "../../lib/services"
 import { useTreatmentCoordination } from "./coordinacion-panel"
 import { NewPatientTaskButton } from "./new-patient-task-button"
+import {
+  ClinicalAlertsCard,
+  ClinicalShortcuts,
+  OpenEncounterCard,
+  RecentImagesCard,
+} from "./resumen-clinico"
 
 interface Pending {
   id: string
@@ -45,7 +51,15 @@ interface Pending {
   agent?: boolean
 }
 
-function Card({ title, children, action }: { title: string; children: ReactNode; action?: ReactNode }) {
+function Card({
+  title,
+  children,
+  action,
+}: {
+  title: string
+  children: ReactNode
+  action?: ReactNode
+}) {
   return (
     <section className="flex min-w-0 flex-col gap-3 elevated rounded-xl border bg-card p-6">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -130,7 +144,9 @@ export function ResumenTab({
   const resolved = summary ?? summaryQuery.data?.data ?? null
   if (canClinical && resolved == null) {
     if (summaryQuery.isError)
-      return <QueryErrorState error={summaryQuery.error} onRetry={() => void summaryQuery.refetch()} />
+      return (
+        <QueryErrorState error={summaryQuery.error} onRetry={() => void summaryQuery.refetch()} />
+      )
     return <LoadingState message="Cargando resumen…" />
   }
 
@@ -184,7 +200,8 @@ export function ResumenTab({
         action: go("antecedentes", "Registrar"),
       })
   }
-  if (resolved?.openEncounterId)
+  // Quien lee la clínica ve la atención en curso en su propia tarjeta.
+  if (resolved?.openEncounterId && !resolved.openEncounter)
     pending.push({
       id: "open-encounter",
       title: "Atención en borrador",
@@ -203,6 +220,13 @@ export function ResumenTab({
           Continuar
         </Button>
       ),
+    })
+  for (const consent of resolved?.pendingConsents ?? [])
+    pending.push({
+      id: `consent-${consent.id}`,
+      title: `Consentimiento sin firmar: ${consent.title}`,
+      detail: "Emitido y pendiente de la firma del paciente o su representante.",
+      action: go("consentimientos", "Firmar"),
     })
   if (resolved && resolved.proposedBudgets.length > 0)
     pending.push({
@@ -288,7 +312,8 @@ export function ResumenTab({
     pending.push({
       id: "minor-representative",
       title: "Menor sin representante legal registrado",
-      detail: "Sin representante vigente no se pueden decidir presupuestos ni firmar consentimientos.",
+      detail:
+        "Sin representante vigente no se pueden decidir presupuestos ni firmar consentimientos.",
       action: go("responsables", "Registrar"),
     })
   if (canEditPatient) {
@@ -332,232 +357,256 @@ export function ResumenTab({
   const preferred = detail.contacts.find((contact) => contact.isPreferred) ?? detail.contacts[0]
 
   return (
-    <div className="grid min-w-0 gap-4 lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
-      <div className="flex min-w-0 flex-col gap-4">
-        <Card title="Pendientes" action={<NewPatientTaskButton patientId={patientId} />}>
-          {pending.length === 0 ? (
-            <EmptyState
-              icon={CircleCheck}
-              title="Sin pendientes"
-              description="No hay nada que requiera tu acción sobre esta persona ahora."
-            />
-          ) : (
-            <ul className="flex flex-col divide-y">
-              {pending.map((item) => (
-                <li
-                  key={item.id}
-                  className={`flex flex-wrap items-center justify-between gap-3 py-3 ${
-                    item.agent
-                      ? "my-2 rounded-lg border border-agent-border bg-agent-soft px-3"
-                      : "first:pt-0 last:pb-0"
-                  }`}
-                >
-                  {item.agent ? <AgentMark size="sm" /> : null}
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium">{item.title}</p>
-                    <p className="text-sm text-muted-foreground">{item.detail}</p>
-                  </div>
-                  {item.action}
-                </li>
-              ))}
-            </ul>
-          )}
-        </Card>
-
-        {canClinical ? (
-          <Card
-            title="Tratamientos y seguimiento"
-            action={journeys.length > 0 ? go("odontograma", "Ver odontograma y plan") : undefined}
-          >
-            {journeys.length === 0 ? (
-              <p className="text-sm text-muted-foreground">
-                Sin tratamientos indicados. Se indican durante una atención abierta.
-              </p>
+    <div className="flex min-w-0 flex-col gap-4">
+      {canClinical && resolved?.openEncounter ? (
+        <OpenEncounterCard patientId={patientId} encounter={resolved.openEncounter} />
+      ) : null}
+      {canClinical ? <ClinicalShortcuts onOpen={(section) => onTabChange(section)} /> : null}
+      <div className="grid min-w-0 gap-4 lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
+        <div className="flex min-w-0 flex-col gap-4">
+          {canClinical && healthQuery.isSuccess ? (
+            <ClinicalAlertsCard health={health} action={go("antecedentes", "Antecedentes")} />
+          ) : null}
+          <Card title="Pendientes" action={<NewPatientTaskButton patientId={patientId} />}>
+            {pending.length === 0 ? (
+              <EmptyState
+                icon={CircleCheck}
+                title="Sin pendientes"
+                description="No hay nada que requiera tu acción sobre esta persona ahora."
+              />
             ) : (
               <ul className="flex flex-col divide-y">
-                {journeys.slice(0, 6).map((row) => (
+                {pending.map((item) => (
                   <li
-                    key={row.item.id}
-                    className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm"
+                    key={item.id}
+                    className={`flex flex-wrap items-center justify-between gap-3 py-3 ${
+                      item.agent
+                        ? "my-2 rounded-lg border border-agent-border bg-agent-soft px-3"
+                        : "first:pt-0 last:pb-0"
+                    }`}
                   >
-                    <span className="flex min-w-0 flex-col">
-                      <span className="font-medium">
-                        {row.item.toothNumber ? `Pieza ${row.item.toothNumber} · ` : "General · "}
-                        {row.item.title}
-                      </span>
-                      <span className="text-muted-foreground">
-                        {row.nextAction ? NEXT_ACTION_LABELS[row.nextAction] : "Sin acción pendiente"}{" "}
-                        · decisión {planDecisionLabel(row.decision)} · ejecución{" "}
-                        {planStatusLabel(row.clinicalStatus)}
-                        {row.nextFollowUp ? ` · control ${formatDate(row.nextFollowUp.dueAt)}` : ""}
-                      </span>
-                    </span>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      onClick={() => onTabChange("recorrido", undefined, row.item.id)}
-                    >
-                      Ver detalle
-                    </Button>
+                    {item.agent ? <AgentMark size="sm" /> : null}
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium">{item.title}</p>
+                      <p className="text-sm text-muted-foreground">{item.detail}</p>
+                    </div>
+                    {item.action}
                   </li>
                 ))}
               </ul>
             )}
           </Card>
-        ) : null}
-      </div>
 
-      <div className="flex min-w-0 flex-col gap-4">
-        {canAppointments ? (
-          <Card title="Próxima cita" action={go("citas", "Ver citas")}>
-            {appointmentsQuery.isPending ? (
-              <p className="text-sm text-muted-foreground">Consultando la agenda…</p>
-            ) : appointmentsQuery.isError ? (
-              <p role="alert" className="text-sm text-destructive">
-                No se pudo consultar la agenda.
-              </p>
-            ) : upcoming ? (
-              <div className="flex flex-col gap-1 text-sm">
-                <span className="font-medium">{appointmentWhen(upcoming)}</span>
-                <span className="text-muted-foreground">
-                  {[upcoming.serviceName ?? upcoming.reason, upcoming.dentistName]
-                    .filter(Boolean)
-                    .join(" · ")}
-                </span>
-                <Badge variant={upcoming.status === "confirmada" ? "success" : "soft"}>
-                  {APPOINTMENT_STATUS_LABELS[upcoming.status]}
-                </Badge>
-              </div>
-            ) : (
-              <div className="flex flex-col items-start gap-2">
-                <p className="text-sm text-muted-foreground">Sin cita reservada.</p>
-                {canBook ? (
-                  <Button
-                    size="sm"
-                    nativeButton={false}
-                    render={<Link to="/agenda" search={{ patientId }} />}
-                  >
-                    Agendar cita
-                  </Button>
-                ) : null}
-              </div>
-            )}
-          </Card>
-        ) : null}
-
-        {canClinical ? (
-          <Card title="Última atención">
-            {lastVisit ? (
-              <div className="flex flex-col gap-2 text-sm">
-                <p className="font-medium">
-                  {lastVisit.reason || "Atención finalizada"}{" "}
-                  <span className="font-normal text-muted-foreground">
-                    · {timeAgo(lastVisit.finalizedAt ?? "")}
-                  </span>
-                </p>
-                {lastVisit.evolution ? (
-                  <p className="whitespace-pre-wrap">
-                    {lastVisit.evolution.length > 280
-                      ? `${lastVisit.evolution.slice(0, 280)}…`
-                      : lastVisit.evolution}
-                  </p>
-                ) : null}
-                <div>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    nativeButton={false}
-                    render={
-                      <Link
-                        to="/patients/$patientId/encounters/$encounterId"
-                        params={{ patientId, encounterId: lastVisit.encounterId }}
-                      />
-                    }
-                  >
-                    Abrir esta atención
-                  </Button>
-                </div>
-              </div>
-            ) : (
-              <p className="text-sm text-muted-foreground">
-                Sin atenciones registradas. La atención se inicia desde la cabecera de la ficha.
-              </p>
-            )}
-          </Card>
-        ) : null}
-
-        {canFinance ? (
-          <Card title="Cuenta" action={go("cuenta", "Gestionar cuenta")}>
-            {accountQuery.isPending ? (
-              <p className="text-sm text-muted-foreground">Consultando la cuenta…</p>
-            ) : accountQuery.isError ? (
-              <p role="alert" className="text-sm text-destructive">
-                No se pudo consultar la cuenta.
-              </p>
-            ) : balances.length === 0 ? (
-              <p className="text-sm text-muted-foreground">
-                Sin movimientos económicos: aceptar una propuesta no genera cargos.
-              </p>
-            ) : (
-              <dl className="grid grid-cols-2 gap-4">
-                {balances.map((balance) => (
-                  <div key={balance.currency}>
-                    <dt className="text-xs uppercase tracking-wide text-muted-foreground">
-                      Por cobrar ({balance.currency})
-                    </dt>
-                    <dd className="text-lg font-semibold tabular-nums">
-                      {formatMoney(balance.outstandingCents, balance.currency)}
-                    </dd>
-                    <dd className="text-xs text-muted-foreground">
-                      anticipo disponible{" "}
-                      {formatMoney(balance.availableCreditCents, balance.currency)}
-                    </dd>
-                  </div>
-                ))}
-              </dl>
-            )}
-          </Card>
-        ) : null}
-
-        {canPatients ? (
-          <Card title="Quién habla y quién decide" action={go("responsables", "Ver responsables")}>
-            <div className="flex flex-col gap-2 text-sm">
-              {preferred ? (
-                <p>
-                  <span className="font-medium">{preferred.displayName}</span>
-                  <span className="text-muted-foreground">
-                    {" "}
-                    · {preferred.relationship === "self" ? "titular" : "interlocutor"}
-                    {preferred.isPreferred ? " · contacto preferido" : ""}
-                  </span>
+          {canClinical ? (
+            <Card
+              title="Tratamientos y seguimiento"
+              action={journeys.length > 0 ? go("odontograma", "Ver odontograma y plan") : undefined}
+            >
+              {journeys.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  Sin tratamientos indicados. Se indican durante una atención abierta.
                 </p>
               ) : (
-                <p className="text-muted-foreground">Sin interlocutor vinculado.</p>
-              )}
-              {current.length === 0 ? (
-                <p className="text-muted-foreground">
-                  {isMinor
-                    ? "Sin responsables vigentes."
-                    : "Decide por sí mismo: sin responsables registrados."}
-                </p>
-              ) : (
-                <ul className="flex flex-col gap-1">
-                  {current.map((row) => (
-                    <li key={row.id}>
-                      <span className="font-medium">{row.contact.displayName}</span>
-                      <span className="text-muted-foreground">
-                        {" "}
-                        · {RESPONSIBILITY_KIND_LABELS[row.kind]}
+                <ul className="flex flex-col divide-y">
+                  {journeys.slice(0, 6).map((row) => (
+                    <li
+                      key={row.item.id}
+                      className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm"
+                    >
+                      <span className="flex min-w-0 flex-col">
+                        <span className="font-medium">
+                          {row.item.toothNumber ? `Pieza ${row.item.toothNumber} · ` : "General · "}
+                          {row.item.title}
+                        </span>
+                        <span className="text-muted-foreground">
+                          {row.nextAction
+                            ? NEXT_ACTION_LABELS[row.nextAction]
+                            : "Sin acción pendiente"}{" "}
+                          · decisión {planDecisionLabel(row.decision)} · ejecución{" "}
+                          {planStatusLabel(row.clinicalStatus)}
+                          {row.nextFollowUp
+                            ? ` · control ${formatDate(row.nextFollowUp.dueAt)}`
+                            : ""}
+                        </span>
                       </span>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() => onTabChange("recorrido", undefined, row.item.id)}
+                      >
+                        Ver detalle
+                      </Button>
                     </li>
                   ))}
                 </ul>
               )}
-            </div>
-          </Card>
-        ) : null}
+            </Card>
+          ) : null}
+        </div>
+
+        <div className="flex min-w-0 flex-col gap-4">
+          {canAppointments ? (
+            <Card title="Próxima cita" action={go("citas", "Ver citas")}>
+              {appointmentsQuery.isPending ? (
+                <p className="text-sm text-muted-foreground">Consultando la agenda…</p>
+              ) : appointmentsQuery.isError ? (
+                <p role="alert" className="text-sm text-destructive">
+                  No se pudo consultar la agenda.
+                </p>
+              ) : upcoming ? (
+                <div className="flex flex-col gap-1 text-sm">
+                  <span className="font-medium">{appointmentWhen(upcoming)}</span>
+                  <span className="text-muted-foreground">
+                    {[upcoming.serviceName ?? upcoming.reason, upcoming.dentistName]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </span>
+                  <Badge variant={upcoming.status === "confirmada" ? "success" : "soft"}>
+                    {APPOINTMENT_STATUS_LABELS[upcoming.status]}
+                  </Badge>
+                </div>
+              ) : (
+                <div className="flex flex-col items-start gap-2">
+                  <p className="text-sm text-muted-foreground">Sin cita reservada.</p>
+                  {canBook ? (
+                    <Button
+                      size="sm"
+                      nativeButton={false}
+                      render={<Link to="/agenda" search={{ patientId }} />}
+                    >
+                      Agendar cita
+                    </Button>
+                  ) : null}
+                </div>
+              )}
+            </Card>
+          ) : null}
+
+          {canClinical ? (
+            <RecentImagesCard
+              patientId={patientId}
+              documents={resolved?.recentDocuments ?? []}
+              onOpen={(section) => onTabChange(section)}
+            />
+          ) : null}
+
+          {canClinical ? (
+            <Card title="Última atención">
+              {lastVisit ? (
+                <div className="flex flex-col gap-2 text-sm">
+                  <p className="font-medium">
+                    {lastVisit.reason || "Atención finalizada"}{" "}
+                    <span className="font-normal text-muted-foreground">
+                      · {timeAgo(lastVisit.finalizedAt ?? "")}
+                    </span>
+                  </p>
+                  {lastVisit.evolution ? (
+                    <p className="whitespace-pre-wrap">
+                      {lastVisit.evolution.length > 280
+                        ? `${lastVisit.evolution.slice(0, 280)}…`
+                        : lastVisit.evolution}
+                    </p>
+                  ) : null}
+                  <div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      nativeButton={false}
+                      render={
+                        <Link
+                          to="/patients/$patientId/encounters/$encounterId"
+                          params={{ patientId, encounterId: lastVisit.encounterId }}
+                        />
+                      }
+                    >
+                      Abrir esta atención
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  Sin atenciones registradas. La atención se inicia desde la cabecera de la ficha.
+                </p>
+              )}
+            </Card>
+          ) : null}
+
+          {canFinance ? (
+            <Card title="Cuenta" action={go("cuenta", "Gestionar cuenta")}>
+              {accountQuery.isPending ? (
+                <p className="text-sm text-muted-foreground">Consultando la cuenta…</p>
+              ) : accountQuery.isError ? (
+                <p role="alert" className="text-sm text-destructive">
+                  No se pudo consultar la cuenta.
+                </p>
+              ) : balances.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  Sin movimientos económicos: aceptar una propuesta no genera cargos.
+                </p>
+              ) : (
+                <dl className="grid grid-cols-2 gap-4">
+                  {balances.map((balance) => (
+                    <div key={balance.currency}>
+                      <dt className="text-xs uppercase tracking-wide text-muted-foreground">
+                        Por cobrar ({balance.currency})
+                      </dt>
+                      <dd className="text-lg font-semibold tabular-nums">
+                        {formatMoney(balance.outstandingCents, balance.currency)}
+                      </dd>
+                      <dd className="text-xs text-muted-foreground">
+                        anticipo disponible{" "}
+                        {formatMoney(balance.availableCreditCents, balance.currency)}
+                      </dd>
+                    </div>
+                  ))}
+                </dl>
+              )}
+            </Card>
+          ) : null}
+
+          {canPatients ? (
+            <Card
+              title="Quién habla y quién decide"
+              action={go("responsables", "Ver responsables")}
+            >
+              <div className="flex flex-col gap-2 text-sm">
+                {preferred ? (
+                  <p>
+                    <span className="font-medium">{preferred.displayName}</span>
+                    <span className="text-muted-foreground">
+                      {" "}
+                      · {preferred.relationship === "self" ? "titular" : "interlocutor"}
+                      {preferred.isPreferred ? " · contacto preferido" : ""}
+                    </span>
+                  </p>
+                ) : (
+                  <p className="text-muted-foreground">Sin interlocutor vinculado.</p>
+                )}
+                {current.length === 0 ? (
+                  <p className="text-muted-foreground">
+                    {isMinor
+                      ? "Sin responsables vigentes."
+                      : "Decide por sí mismo: sin responsables registrados."}
+                  </p>
+                ) : (
+                  <ul className="flex flex-col gap-1">
+                    {current.map((row) => (
+                      <li key={row.id}>
+                        <span className="font-medium">{row.contact.displayName}</span>
+                        <span className="text-muted-foreground">
+                          {" "}
+                          · {RESPONSIBILITY_KIND_LABELS[row.kind]}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            </Card>
+          ) : null}
+        </div>
       </div>
     </div>
   )

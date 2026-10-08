@@ -41,7 +41,20 @@ export const PATIENT_SECTIONS = [
     permission: "clinical.read",
     group: null,
   },
-  { id: "controles", area: "clinica", label: "Controles", permission: "clinical.read", group: null },
+  {
+    id: "controles",
+    area: "clinica",
+    label: "Controles",
+    permission: "clinical.read",
+    group: null,
+  },
+  {
+    id: "atenciones",
+    area: "clinica",
+    label: "Atenciones",
+    permission: "clinical.read",
+    group: null,
+  },
   { id: "historia", area: "clinica", label: "Historia", permission: "clinical.read", group: null },
   {
     id: "antecedentes",
@@ -186,12 +199,12 @@ export function sectionOf(id: PatientSectionId): PatientSection {
 }
 
 /**
- * Sección de entrada según el trabajo del rol: quien atiende sin gestionar la
- * filiación abre el odontograma; quien solo cobra, la cuenta; el resto, el
- * resumen con sus pendientes.
+ * Sección de entrada según el trabajo del rol: quien solo cobra abre la
+ * cuenta; el resto, el resumen. Para quien atiende el resumen es clínico
+ * (atención en curso, alertas, pendientes e imágenes) y el odontograma queda
+ * a un clic: la ficha no se organiza alrededor del odontograma.
  */
 export function defaultSection(can: Can): PatientSectionId {
-  if (can("clinical.read") && !can("patients.write")) return "odontograma"
   if (can("finance.read") && !can("clinical.read") && !can("patients.write")) return "cuenta"
   return "resumen"
 }

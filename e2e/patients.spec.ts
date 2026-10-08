@@ -441,7 +441,12 @@ for (const role of ["reception", "dentist", "cashier"] as const) {
     }
     if (role === "dentist") {
       await expect(areas).toHaveText(["Resumen", "Clínica", "Relación", "Datos"])
-      // Entra directo al odontograma con el plan debajo, en la dentición de su edad.
+      // Entra por el resumen clínico; el odontograma queda a un clic, en la dentición de su edad.
+      await expect(page.getByRole("heading", { name: "Alertas clínicas" })).toBeVisible()
+      await page
+        .getByRole("navigation", { name: "Accesos clínicos" })
+        .getByRole("button", { name: "Odontograma", exact: true })
+        .click()
       await expect(page.getByRole("heading", { name: "Odontograma", exact: true })).toBeVisible()
       await expect(page.getByRole("heading", { name: "Plan de tratamiento" })).toBeVisible()
       await expect(page.getByRole("button", { name: "Mixta", exact: true })).toHaveAttribute(

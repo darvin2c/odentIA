@@ -566,9 +566,24 @@ export interface TreatmentJourneySummary {
 }
 
 /** Resumen del paciente: última atención finalizada, borrador abierto y plan pendiente. */
+/** Atención en curso con lo que lleva y lo que le falta para cerrarse. */
+export interface OpenEncounterBrief {
+  id: string
+  reason: string | null
+  startedAt: string
+  dentistUserId: string
+  appointmentId: string | null
+  diagnosisCount: number
+  procedureCount: number
+  missing: Array<"reason" | "diagnosis" | "evolution" | "signature">
+}
+
 export interface PatientSummary {
   lastEncounter: Encounter | null
   openEncounterId: string | null
+  openEncounter?: OpenEncounterBrief | null
+  /** Consentimientos emitidos y aún sin firmar. */
+  pendingConsents?: Array<{ id: string; title: string }>
   nextAppointmentAt: string | null
   treatmentJourneys: TreatmentJourneySummary[]
   planPending: {
@@ -624,6 +639,7 @@ export interface PatientSummary {
       | "id"
       | "label"
       | "category"
+      | "contentType"
       | "encounterId"
       | "planItemId"
       | "toothNumbers"

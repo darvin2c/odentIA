@@ -15,12 +15,14 @@ import {
   finalizeEncounter,
   getEncounterClosing,
   getEncounterDetail,
+  listEncounters,
   takeOverEncounter,
   updateEncounterDraft,
   voidEncounter,
   voidEncounterProcedure,
 } from "./encounters.js"
 import { createFollowUp, listFollowUps, scheduleFollowUp } from "./follow-ups.js"
+import { getPatientSummary } from "./patient-history.js"
 import { listPlanItems } from "./plan.js"
 import { getProfessionalProfile, setProfessionalProfile } from "./professional-profiles.js"
 import { ownerDb, setupTestDb } from "./test-setup.js"
@@ -294,4 +296,44 @@ it("el hallazgo tratado deja de estar vigente al cerrar la atención que lo trat
   expect(entry?.resolvedAt).not.toBeNull()
   expect(entry?.status).toBe("recorded")
   expect(entry?.voidedAt).toBeNull()
+})
+
+it("la lista de atenciones filtra por estado y resume diagnósticos y actos vigentes", async () => {
+  const f = await clinicalFixture()
+  await f.run((tx) =>
+    addEncounterProcedure(tx, ...f.args, f.encounter.id, { serviceId: f.service.id }),
+  )
+  const anulado = await f.run((tx) =>
+    addEncounterProcedure(tx, ...f.args, f.encounter.id, { serviceId: f.service.id }),
+  )
+  await f.run((tx) =>
+    voidEncounterProcedure(tx, ...f.args, f.encounter.id, anulado.id, { reason: "Duplicado" }),
+  )
+  await f.ready(f.encounter.id)
+  const all = await f.run((tx) => listEncounters(tx, "org_a", f.patient.id, {}))
+  expect(all.items).toHaveLength(1)
+  expect(all.items[0]).toMatchObject({
+    status: "borrador",
+    diagnosisCodes: ["K02.1"],
+    procedureCount: 1,
+  })
+  const finalizadas = await f.run((tx) =>
+    listEncounters(tx, "org_a", f.patient.id, { status: "finalizada" }),
+  )
+  expect(finalizadas.items).toEqual([])
+})
+
+it("el resumen muestra la atención en curso con lo que le falta para cerrarse", async () => {
+  const f = await clinicalFixture()
+  const before = await f.run((tx) => getPatientSummary(tx, "org_a", f.patient.id))
+  expect(before.openEncounter).toMatchObject({
+    id: f.encounter.id,
+    diagnosisCount: 0,
+    procedureCount: 0,
+    missing: ["diagnosis", "evolution"],
+  })
+  expect(before.pendingConsents).toEqual([])
+  await f.ready(f.encounter.id)
+  const after = await f.run((tx) => getPatientSummary(tx, "org_a", f.patient.id))
+  expect(after.openEncounter).toMatchObject({ diagnosisCount: 1, missing: [] })
 })

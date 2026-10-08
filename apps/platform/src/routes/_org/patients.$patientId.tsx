@@ -7,10 +7,11 @@ import type { ReactNode } from "react"
 import { AccesosPanel } from "../../components/patient/accesos-panel"
 import { ActividadPanel } from "../../components/patient/actividad-panel"
 import { AntecedentesTab } from "../../components/patient/antecedentes-tab"
+import { AtencionesTab } from "../../components/patient/atenciones-tab"
 import { CitasPanel } from "../../components/patient/citas-panel"
 import { ControlesPanel, RecetasPanel } from "../../components/patient/clinical-panels"
-import { CoordinacionPanel } from "../../components/patient/coordinacion-panel"
 import { ConsentimientosTab } from "../../components/patient/consentimientos-tab"
+import { CoordinacionPanel } from "../../components/patient/coordinacion-panel"
 import { CuentaTab } from "../../components/patient/cuenta-tab"
 import { DocumentosPanel } from "../../components/patient/documentos-panel"
 import { FiliacionPanel } from "../../components/patient/filiacion-panel"
@@ -269,6 +270,8 @@ function PatientDetailPage() {
             ))}
           </>
         )
+      case "atenciones":
+        return <AtencionesTab patientId={patientId} />
       case "historia":
         return (
           <HistoriaTab

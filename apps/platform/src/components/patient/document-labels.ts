@@ -1,5 +1,5 @@
 import { timeAgo } from "../../lib/crm"
-import type { Encounter, PlanItem } from "../../lib/patients"
+import { type Encounter, encounterStatusLabel, type PlanItem } from "../../lib/patients"
 
 export const UPLOAD_CATEGORIES = [
   "radiografia",
@@ -27,7 +27,7 @@ export function categoryLabel(category: string): string {
 
 export function encounterLabel(e: Encounter): string {
   const when = timeAgo(e.createdAt)
-  return `${when}${e.reason ? ` · ${e.reason}` : ""} · ${e.status}`
+  return `${when}${e.reason ? ` · ${e.reason}` : ""} · ${encounterStatusLabel(e.status)}`
 }
 
 export function planItemLabel(p: PlanItem): string {

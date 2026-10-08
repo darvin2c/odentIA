@@ -37,15 +37,16 @@ describe("áreas de la ficha por rol", () => {
     expect(visibleSections(as("admin")).map((section) => section.id)).not.toContain("coordinacion")
   })
 
-  it("odontología entra por el odontograma y no ve la cuenta ni el portal", () => {
+  it("odontología entra por el resumen clínico y no ve la cuenta ni el portal", () => {
     const can = as("dentist")
-    expect(defaultSection(can)).toBe("odontograma")
+    expect(defaultSection(can)).toBe("resumen")
     expect(visibleAreas(can).map((area) => area.id)).toEqual([
       "resumen",
       "clinica",
       "relacion",
       "datos",
     ])
+    // Dentro de Clínica, el odontograma sigue siendo la primera sección.
     expect(visibleAreas(can).find((area) => area.id === "clinica")?.target).toBe("odontograma")
     expect(visibleSections(can).map((section) => section.id)).not.toContain("portal")
   })
@@ -58,7 +59,7 @@ describe("áreas de la ficha por rol", () => {
 
   it("una sección sin permiso cae en la entrada del rol; sin acceso no hay sección", () => {
     expect(resolveSection("odontograma", as("reception"))).toBe("resumen")
-    expect(resolveSection("cuenta", as("dentist"))).toBe("odontograma")
+    expect(resolveSection("cuenta", as("dentist"))).toBe("resumen")
     expect(resolveSection("plan", as("admin"))).toBe("plan")
     expect(resolveSection(undefined, as("member"))).toBeNull()
   })
@@ -70,6 +71,7 @@ describe("áreas de la ficha por rol", () => {
       "Tratamientos",
       "Planes y presupuestos",
       "Controles",
+      "Atenciones",
       "Historia",
       "Antecedentes",
       "Documentos",
