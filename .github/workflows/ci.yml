@@ -33,7 +33,9 @@ jobs:
       - run: pnpm test --filter=!@odentia/e2e
 
   docker-build:
-    if: github.event.action != 'closed'
+    # Solo antes de desplegar producción. En un PR la imagen ya la construye
+    # el preview en OpenShip; repetirlo aquí solo retrasaba ese despliegue.
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -70,13 +72,13 @@ jobs:
       - name: Desplegar el commit verificado
         run: openship deploy --project "$OPENSHIP_PROJECT_ID" --branch main --commit "$GITHUB_SHA" --env production --smart-route --watch --timeout 1200000
 
-  # Un entorno OpenShip por PR del mismo repositorio, solo con el commit verificado.
-  # Los forks no reciben secretos y no pueden desplegar.
+  # Un entorno OpenShip por PR del mismo repositorio. Arranca en paralelo con
+  # `check`: el preview sirve para revisar, no para decidir la fusión, que sigue
+  # dependiendo de `check`. Los forks no reciben secretos y no pueden desplegar.
   preview:
     if: >-
       github.event_name == 'pull_request' && github.event.action != 'closed' &&
       github.event.pull_request.head.repo.full_name == github.repository
-    needs: [check, docker-build]
     runs-on: ubuntu-latest
     timeout-minutes: 40
     permissions:
