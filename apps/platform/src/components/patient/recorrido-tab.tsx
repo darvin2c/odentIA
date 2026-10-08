@@ -267,7 +267,9 @@ export function RecorridoClinicoTab({
     )
   }
 
-  const balances = journey ? journeyBalances(journey) : []
+  // Caja del tratamiento: el servidor solo la entrega con `finance.read`.
+  const finance = journey?.finance ?? null
+  const balances = finance ? journeyBalances(finance) : []
   const activeFindings = (odontogramQuery.data?.data.history ?? []).filter(
     (entry: OdontogramEntry) =>
       !entry.voidedAt && item?.toothNumber != null && entry.toothNumber === item.toothNumber,
@@ -804,7 +806,12 @@ export function RecorridoClinicoTab({
 
           <div className="flex flex-col gap-3 elevated rounded-xl border bg-card p-6">
             <div className="font-heading text-base font-medium">5. Qué se pagó</div>
-            {balances.length === 0 ? (
+            {finance === null ? (
+              <p className="text-sm text-muted-foreground">
+                Los cobros de este tratamiento los gestiona caja: tu permiso no incluye cargos,
+                pagos ni saldos.
+              </p>
+            ) : balances.length === 0 ? (
               <p className="text-sm text-muted-foreground">
                 Este tratamiento no tiene cargos: aceptar la propuesta no genera cargos.
               </p>
@@ -826,9 +833,9 @@ export function RecorridoClinicoTab({
                 ))}
               </dl>
             )}
-            {journey.charges.length > 0 ? (
+            {finance && finance.charges.length > 0 ? (
               <ul className="flex flex-col gap-1 text-sm">
-                {journey.charges.map((charge) => (
+                {finance.charges.map((charge) => (
                   <li key={charge.id}>
                     {charge.description} · {formatMoney(charge.amountCents, charge.currency)}
                     {charge.voidedAt ? " · anulado" : ""}
@@ -836,10 +843,10 @@ export function RecorridoClinicoTab({
                 ))}
               </ul>
             ) : null}
-            {journey.payments.length > 0 ? (
+            {finance && finance.payments.length > 0 ? (
               <ul className="flex flex-col gap-1 text-sm">
-                {journey.payments.map((payment) => {
-                  const applied = journey.applications
+                {finance.payments.map((payment) => {
+                  const applied = finance.applications
                     .filter(
                       (application) =>
                         application.paymentId === payment.id && !application.voidedAt,
@@ -855,16 +862,18 @@ export function RecorridoClinicoTab({
                 })}
               </ul>
             ) : null}
-            <div>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={() => onTabChange("cuenta", { itemId: journey.item.id })}
-              >
-                Gestionar la cuenta del paciente
-              </Button>
-            </div>
+            {finance ? (
+              <div>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => onTabChange("cuenta", { itemId: journey.item.id })}
+                >
+                  Gestionar la cuenta del paciente
+                </Button>
+              </div>
+            ) : null}
           </div>
         </>
       )}

@@ -118,17 +118,11 @@ export async function listTreatmentJourneys(tx: Db, orgId: string, patientId: st
       ),
     )
     .orderBy(asc(clinicalFollowUp.dueAt), asc(clinicalFollowUp.id))
-  const account = await getPatientAccount(tx, orgId, patientId)
+  // Resumen clínico: estado y próxima acción de cada tratamiento, sin saldos.
+  // La caja se consulta con `finance.read` en la cuenta del paciente.
   return rows.map((row) => {
     const lastSession = procedures.find((p) => p.procedure.planItemId === row.item.id) ?? null
     const nextFollowUp = controls.find((c) => c.planItemId === row.item.id) ?? null
-    const charges = account.charges.filter((c) => c.planItemId === row.item.id && !c.voidedAt)
-    const chargeIds = new Set(charges.map((c) => c.id))
-    const appliedMap = new Map<string, number>()
-    for (const a of account.applications) {
-      if (a.voidedAt || !chargeIds.has(a.chargeId)) continue
-      appliedMap.set(a.chargeId, (appliedMap.get(a.chargeId) ?? 0) + a.amountCents)
-    }
     const nextAction = deriveNextAction({
       status: row.item.status,
       decisionStatus: row.item.decisionStatus,
@@ -142,7 +136,6 @@ export async function listTreatmentJourneys(tx: Db, orgId: string, patientId: st
       lastSession,
       nextFollowUp,
       nextAction,
-      balances: balancesByCurrency(charges, appliedMap),
     }
   })
 }
@@ -188,6 +181,7 @@ export async function getTreatmentJourney(
   orgId: string,
   patientId: string,
   itemId: string,
+  options: { finance: boolean },
 ) {
   await requirePatient(tx, orgId, patientId)
   const scope = and(
@@ -336,13 +330,10 @@ export async function getTreatmentJourney(
     ...h,
     items: medications.filter((m) => m.prescriptionId === h.id),
   }))
-  const account = await getPatientAccount(tx, orgId, patientId)
-  const charges = account.charges.filter((c) => c.planItemId === itemId)
-  const activeCharges = charges.filter((c) => !c.voidedAt)
-  const chargeIds = new Set(charges.map((c) => c.id))
-  const applications = account.applications.filter((a) => chargeIds.has(a.chargeId))
-  const paymentIds = new Set(applications.map((a) => a.paymentId))
-  const payments = account.payments.filter((p) => paymentIds.has(p.id))
+  // Caja del tratamiento solo para quien tiene `finance.read`: odontología ve
+  // el recorrido clínico completo sin cargos, pagos ni saldos (`finance: null`).
+  const finance = options.finance ? await treatmentFinance(tx, orgId, patientId, itemId) : null
+  const paymentIds = new Set(finance?.payments.map((p) => p.id) ?? [])
   const allDocuments = await listPatientDocuments(tx, orgId, patientId)
   const documents = allDocuments.filter(
     (d) =>
@@ -386,14 +377,31 @@ export async function getTreatmentJourney(
     followUps,
     prescriptions,
     documents,
+    finance,
+    nextAction,
+  }
+}
+
+export type TreatmentFinance = NonNullable<
+  Awaited<ReturnType<typeof getTreatmentJourney>>["finance"]
+>
+
+/** Cargos, pagos y saldos del tratamiento: la parte de caja del recorrido. */
+async function treatmentFinance(tx: Db, orgId: string, patientId: string, itemId: string) {
+  const account = await getPatientAccount(tx, orgId, patientId)
+  const charges = account.charges.filter((c) => c.planItemId === itemId)
+  const activeCharges = charges.filter((c) => !c.voidedAt)
+  const chargeIds = new Set(charges.map((c) => c.id))
+  const applications = account.applications.filter((a) => chargeIds.has(a.chargeId))
+  const paymentIds = new Set(applications.map((a) => a.paymentId))
+  return {
     charges,
-    payments,
+    payments: account.payments.filter((p) => paymentIds.has(p.id)),
     applications,
     refunds: account.refunds.filter((r) => paymentIds.has(r.paymentId)),
     balances: balancesByCurrency(
       activeCharges,
       appliedByCharge(activeCharges, account.applications),
     ),
-    nextAction,
   }
 }

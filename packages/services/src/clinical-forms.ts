@@ -1093,19 +1093,29 @@ export async function listFormResponses(
     .orderBy(desc(clinicalFormResponse.createdAt))
 }
 
-export async function listFormAddenda(
+/** Paciente dueño de un formulario: para dejar traza de su lectura (404 si no existe). */
+export async function formResponsePatientId(
   tx: Db,
   orgId: string,
   responseId: string,
-): Promise<(typeof clinicalFormAddendum.$inferSelect)[]> {
+): Promise<string> {
   const [current] = await tx
-    .select({ id: clinicalFormResponse.id })
+    .select({ patientId: clinicalFormResponse.patientId })
     .from(clinicalFormResponse)
     .where(
       and(eq(clinicalFormResponse.id, responseId), eq(clinicalFormResponse.organizationId, orgId)),
     )
     .limit(1)
   if (!current) throw notFound("Formulario")
+  return current.patientId
+}
+
+export async function listFormAddenda(
+  tx: Db,
+  orgId: string,
+  responseId: string,
+): Promise<(typeof clinicalFormAddendum.$inferSelect)[]> {
+  await formResponsePatientId(tx, orgId, responseId)
   return tx
     .select()
     .from(clinicalFormAddendum)
@@ -1571,17 +1581,27 @@ export async function listConsentDocuments(
     .orderBy(desc(consentDocument.createdAt))
 }
 
+/** Paciente dueño de un consentimiento: para dejar traza de su lectura (404 si no existe). */
+export async function consentDocumentPatientId(
+  tx: Db,
+  orgId: string,
+  documentId: string,
+): Promise<string> {
+  const [doc] = await tx
+    .select({ patientId: consentDocument.patientId })
+    .from(consentDocument)
+    .where(and(eq(consentDocument.id, documentId), eq(consentDocument.organizationId, orgId)))
+    .limit(1)
+  if (!doc) throw notFound("Consentimiento")
+  return doc.patientId
+}
+
 export async function listConsentEvents(
   tx: Db,
   orgId: string,
   documentId: string,
 ): Promise<(typeof consentEvent.$inferSelect)[]> {
-  const [doc] = await tx
-    .select({ id: consentDocument.id })
-    .from(consentDocument)
-    .where(and(eq(consentDocument.id, documentId), eq(consentDocument.organizationId, orgId)))
-    .limit(1)
-  if (!doc) throw notFound("Consentimiento")
+  await consentDocumentPatientId(tx, orgId, documentId)
   return tx
     .select()
     .from(consentEvent)

@@ -29,7 +29,6 @@ import {
   getTimeline,
   getTreatmentCoordination,
   listClinicalAccess,
-  recordClinicalAccess,
   type ClinicalAccessResource,
   scheduleFollowUpFromCoordination,
   getTreatmentPlanDetail,
@@ -63,6 +62,7 @@ import {
 } from "@odentia/services"
 import { Hono } from "hono"
 import { z } from "zod"
+import { traceClinicalRead } from "../lib/clinical-trace.js"
 import { canAccess, orgContextOf } from "../lib/context.js"
 import { errorBody } from "../lib/error.js"
 import { type CrmDeps, runService, serviceErrorResponse, validationError } from "./helpers.js"
@@ -457,25 +457,13 @@ export function createPatientsRoute(deps: CrmDeps) {
     }
     await next()
     // Toda lectura clínica atendida deja traza de quién consultó qué parte de
-    // la ficha. Se registra después de responder bien: una consulta rechazada o
-    // a un paciente inexistente no genera fila, y un fallo de la traza no
-    // convierte una lectura ya servida en error.
+    // la ficha (`traceClinicalRead`: solo tras responder bien).
     if (domain !== "clinical" || write || c.res.status !== 200) return
     const patientId = c.req.path.match(/\/patients\/([0-9a-f-]{36})\//i)?.[1]
     const resource = ACCESS_RESOURCE_BY_PREFIX.find(([prefix]) => remainder.startsWith(prefix))?.[1]
     if (!patientId || !resource) return
     const { orgId, userId } = orgContextOf(c)
-    try {
-      await withOrgContext(deps.db, orgId, (tx) =>
-        recordClinicalAccess(tx, orgId, userId, patientId, resource),
-      )
-    } catch (error) {
-      console.error("No se pudo registrar la consulta a la historia clínica", {
-        patientId,
-        resource,
-        error: error instanceof Error ? error.message : String(error),
-      })
-    }
+    await traceClinicalRead(deps.db, { orgId, userId, patientId, resource })
   })
 
   app.get("/:id/access-log", async (c) => {
@@ -561,14 +549,15 @@ export function createPatientsRoute(deps: CrmDeps) {
   })
 
   app.get("/:id", async (c) => {
-    const { orgId, memberRole } = orgContextOf(c)
-    return runService(c, 200, () =>
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    const clinical = canAccess(memberRole, "clinical.read")
+    const response = await runService(c, 200, () =>
       withOrgContext(deps.db, orgId, async (tx) => {
         const full = await getPatient(tx, orgId, c.req.param("id"))
         // Sin `clinical.read` (recepción/caja): filiación y vínculos sin
         // registro de salud ni antecedentes/condiciones/medicación. Las
         // alergias activas solo se conservan con `clinical.alerts`.
-        if (canAccess(memberRole, "clinical.read")) return full
+        if (clinical) return full
         return {
           ...full,
           registration: null,
@@ -578,6 +567,13 @@ export function createPatientsRoute(deps: CrmDeps) {
         }
       }),
     )
+    // La ficha completa entrega condiciones, medicación y registro de salud:
+    // es una lectura de antecedentes y deja la misma traza que `/health`.
+    if (clinical && response.status === 200) {
+      const patientId = c.req.param("id")
+      await traceClinicalRead(deps.db, { orgId, userId, patientId, resource: "antecedentes" })
+    }
+    return response
   })
 
   app.patch("/:id", async (c) => {

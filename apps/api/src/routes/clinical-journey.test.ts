@@ -749,12 +749,26 @@ it("recorrido: hallazgo de origen, sesiones y saldo del tratamiento; aislado por
       item: { odontogramEntryId: string | null }
       originEncounter: { id: string } | null
       originFinding: { id: string; condition: string } | null
-      balances: unknown[]
+      finance: { balances: unknown[] } | null
     }
   }>(journey)
   expect(body.data.item.odontogramEntryId).toBe(findingId)
   expect(body.data.originEncounter?.id).toBe(encounterId)
   expect(body.data.originFinding).toMatchObject({ id: findingId, condition: "caries" })
+  expect(body.data.finance?.balances).toEqual([])
+
+  // Odontología recorre el tratamiento sin caja: la ruta es clínica, pero
+  // cargos, pagos y saldos solo viajan con `finance.read`.
+  const clinicalOnly = await buildApp("dentist").request(
+    `/patients/${patientId}/treatments/${linkedItemId}/journey`,
+  )
+  expect(clinicalOnly.status).toBe(200)
+  const clinicalBody = await json<{ data: Record<string, unknown> }>(clinicalOnly)
+  expect(clinicalBody.data.finance).toBeNull()
+  expect(clinicalBody.data.originFinding).toMatchObject({ id: findingId })
+  for (const key of ["charges", "payments", "applications", "refunds", "balances"]) {
+    expect(clinicalBody.data).not.toHaveProperty(key)
+  }
 
   // El hallazgo de otro paciente no puede motivar la indicación.
   const foreignFinding = await post(app, `/patients/${patientId}/plan/items`, {

@@ -217,11 +217,20 @@ it("cada subruta del paciente exige solo el permiso de su dominio", async () => 
   ])
   expect((await get("dentist", "/coordination")).status).toBe(200)
   expect((await get("cashier", "/coordination")).status).toBe(403)
+  // La ficha completa lleva antecedentes para quien atiende: deja traza; para
+  // recepción llega sin salud y no la deja.
+  expect((await get("dentist", "")).status).toBe(200)
+  expect((await get("reception", "")).status).toBe(200)
   // Cada lectura clínica atendida deja traza; la lee solo quien audita.
   const log = await buildApp("admin").request(`/patients/${patientId}/access-log`, { method: "GET" })
   expect(log.status).toBe(200)
   const entries = ((await log.json()) as { data: { resource: string; hits: number }[] }).data
-  expect(entries.map((entry) => entry.resource).sort()).toEqual(["controles", "recetas"])
+  expect(entries.map((entry) => entry.resource).sort()).toEqual([
+    "antecedentes",
+    "controles",
+    "recetas",
+  ])
+  expect(entries.find((entry) => entry.resource === "antecedentes")?.hits).toBe(1)
   expect((await get("dentist", "/access-log")).status).toBe(403)
   expect((await get("reception", "/access-log")).status).toBe(403)
   expect((await get("cashier", "/account")).status).toBe(200)

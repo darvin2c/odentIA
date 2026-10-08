@@ -24,6 +24,9 @@ export const CLINICAL_ACCESS_RESOURCES = [
   "controles",
   "recetas",
   "documentos",
+  "formularios",
+  "consentimientos",
+  "ordenes",
 ] as const
 export type ClinicalAccessResource = (typeof CLINICAL_ACCESS_RESOURCES)[number]
 

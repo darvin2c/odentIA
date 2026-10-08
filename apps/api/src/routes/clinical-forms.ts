@@ -4,6 +4,7 @@ import {
   advanceClinicalOrder,
   archiveFormTemplate,
   archiveSpecialty,
+  consentDocumentPatientId,
   createClinicalOrder,
   createConsentDocument,
   createConsentTemplate,
@@ -11,6 +12,7 @@ import {
   createFormTemplate,
   createSpecialty,
   finalizeFormResponse,
+  formResponsePatientId,
   listClinicalOrders,
   listConsentDocuments,
   listConsentEvents,
@@ -35,6 +37,7 @@ import {
 } from "@odentia/services"
 import { type Context, Hono } from "hono"
 import { z } from "zod"
+import { traceClinicalRead } from "../lib/clinical-trace.js"
 import { canAccess, orgContextOf } from "../lib/context.js"
 import { errorBody } from "../lib/error.js"
 import { type CrmDeps, runService, validationError } from "./helpers.js"
@@ -406,19 +409,23 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
 
   // --- Capturas ---
   app.get("/form-responses", async (c) => {
-    const { orgId, memberRole } = orgContextOf(c)
+    const { orgId, userId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "clinical.read")) return forbidden(c, "Sin acceso clínico")
     const query = c.req.query()
     if (!query.patientId) return missingParam(c, "patientId es obligatorio")
-    return runService(c, 200, () =>
+    const patientId = query.patientId
+    const response = await runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
         listFormResponses(tx, orgId, {
-          patientId: query.patientId!,
+          patientId,
           encounterId: query.encounterId,
           templateId: query.templateId,
         }),
       ),
     )
+    if (response.status === 200)
+      await traceClinicalRead(deps.db, { orgId, userId, patientId, resource: "formularios" })
+    return response
   })
 
   app.post("/form-responses", async (c) => {
@@ -460,11 +467,18 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
   })
 
   app.get("/form-responses/:id/addenda", async (c) => {
-    const { orgId, memberRole } = orgContextOf(c)
+    const { orgId, userId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "clinical.read")) return forbidden(c, "Sin acceso clínico")
-    return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) => listFormAddenda(tx, orgId, c.req.param("id"))),
+    let patientId: string | null = null
+    const response = await runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, async (tx) => {
+        patientId = await formResponsePatientId(tx, orgId, c.req.param("id"))
+        return listFormAddenda(tx, orgId, c.req.param("id"))
+      }),
     )
+    if (response.status === 200 && patientId)
+      await traceClinicalRead(deps.db, { orgId, userId, patientId, resource: "formularios" })
+    return response
   })
 
   app.post("/form-responses/:id/addenda", async (c) => {
@@ -536,15 +550,19 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
   })
 
   app.get("/consents", async (c) => {
-    const { orgId, memberRole } = orgContextOf(c)
+    const { orgId, userId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "clinical.read")) return forbidden(c, "Sin acceso clínico")
     const query = c.req.query()
     if (!query.patientId) return missingParam(c, "patientId es obligatorio")
-    return runService(c, 200, () =>
+    const patientId = query.patientId
+    const response = await runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
-        listConsentDocuments(tx, orgId, { patientId: query.patientId!, status: query.status }),
+        listConsentDocuments(tx, orgId, { patientId, status: query.status }),
       ),
     )
+    if (response.status === 200)
+      await traceClinicalRead(deps.db, { orgId, userId, patientId, resource: "consentimientos" })
+    return response
   })
 
   app.post("/consents", async (c) => {
@@ -588,28 +606,46 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
   })
 
   app.get("/consents/:id/history", async (c) => {
-    const { orgId, memberRole } = orgContextOf(c)
+    const { orgId, userId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "clinical.read")) return forbidden(c, "Sin acceso clínico")
-    return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) => listConsentEvents(tx, orgId, c.req.param("id"))),
+    let patientId: string | null = null
+    const response = await runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, async (tx) => {
+        patientId = await consentDocumentPatientId(tx, orgId, c.req.param("id"))
+        return listConsentEvents(tx, orgId, c.req.param("id"))
+      }),
     )
+    if (response.status === 200 && patientId)
+      await traceClinicalRead(deps.db, { orgId, userId, patientId, resource: "consentimientos" })
+    return response
   })
 
   // --- Órdenes ---
   app.get("/orders", async (c) => {
-    const { orgId, memberRole } = orgContextOf(c)
+    const { orgId, userId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "clinical.read")) return forbidden(c, "Sin acceso clínico")
     const query = c.req.query()
-    return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) =>
-        listClinicalOrders(tx, orgId, {
+    // Sin paciente es una lista de trabajo: deja traza en cada paciente cuyas
+    // órdenes se sirvieron, no solo en el filtrado.
+    const served = new Set<string>()
+    const response = await runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, async (tx) => {
+        const orders = await listClinicalOrders(tx, orgId, {
           patientId: query.patientId,
           status: query.status,
           kind: query.kind,
           specialtyId: query.specialtyId,
-        }),
-      ),
+        })
+        for (const order of orders) served.add(order.patientId)
+        if (query.patientId) served.add(query.patientId)
+        return orders
+      }),
     )
+    if (response.status === 200) {
+      for (const patientId of served)
+        await traceClinicalRead(deps.db, { orgId, userId, patientId, resource: "ordenes" })
+    }
+    return response
   })
 
   app.post("/orders", async (c) => {

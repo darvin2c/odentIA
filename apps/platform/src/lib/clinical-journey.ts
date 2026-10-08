@@ -651,12 +651,18 @@ export interface TreatmentJourney {
   followUps: FollowUp[]
   prescriptions: Array<Prescription & { items: PrescriptionItem[] }>
   documents: PatientDocument[]
+  /** Caja del tratamiento; `null` cuando quien consulta no tiene `finance.read`. */
+  finance: TreatmentFinance | null
+  /** Derivada con el tratamiento completo a la vista; null si está cerrado. */
+  nextAction: TreatmentNextAction | null
+}
+
+export interface TreatmentFinance {
   charges: Charge[]
   payments: Payment[]
   applications: PaymentApplication[]
   refunds: PaymentRefund[]
-  /** Derivada con el tratamiento completo a la vista; null si está cerrado. */
-  nextAction: TreatmentNextAction | null
+  balances: AccountBalance[]
 }
 
 export function fetchTreatmentJourney(
@@ -757,7 +763,7 @@ export function createOptionGroupApi(
 
 /** Saldo del tratamiento por moneda; nunca se suman monedas distintas. */
 export function journeyBalances(
-  journey: Pick<TreatmentJourney, "charges" | "applications">,
+  journey: Pick<TreatmentFinance, "charges" | "applications">,
 ): AccountBalance[] {
   const active = journey.charges.filter((charge) => !charge.voidedAt)
   const units = [...new Set(active.map((charge) => charge.currency))].sort()
