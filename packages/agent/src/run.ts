@@ -1,5 +1,6 @@
 import type { Callbacks } from "@langchain/core/callbacks/manager"
 import { AIMessage, type BaseMessage } from "@langchain/core/messages"
+import type { Runnable } from "@langchain/core/runnables"
 import type { PostgresSaver } from "@langchain/langgraph-checkpoint-postgres"
 import { type AgentRunJob, type Db, type QueueMessage, withOrgContext } from "@odentia/db"
 import { conversation, message } from "@odentia/db/schema/crm"
@@ -10,6 +11,7 @@ import {
   getAgentConfig,
   type RecordRunInput,
   recordAgentRun,
+  reportAgentNoReply,
 } from "@odentia/services"
 import { and, desc, eq, sql } from "drizzle-orm"
 import { compileAgentGraph } from "./graph.js"
@@ -20,6 +22,8 @@ export interface AgentRuntime {
   modelName: string
   /** Credenciales del proveedor por llamada (sin entorno global). */
   llm?: LlmCredentials
+  /** Sustituye la construcción del modelo (pruebas con un modelo guionizado). */
+  createModel?: (modelName: string) => Promise<Runnable<BaseMessage[], AIMessage>>
   secretsKey: Buffer
   callbacks?: Callbacks
 }
@@ -52,6 +56,7 @@ function baseToolCtx(
     secretsKey,
     handedOff: false,
     decisionRecorded: false,
+    replySettled: false,
     dryRun: false,
     ...(options.runInstruction ? { runInstruction: options.runInstruction } : {}),
     ...(options.allowedTools ? { allowedTools: options.allowedTools } : {}),
@@ -59,7 +64,14 @@ function baseToolCtx(
       ? { commercialCoordinationId: options.commercialCoordinationId }
       : {}),
     toolsUsed: [],
-    usage: { inputTokens: 0, outputTokens: 0, reported: false },
+    usage: {
+      inputTokens: 0,
+      outputTokens: 0,
+      cachedInputTokens: 0,
+      calls: 0,
+      reported: false,
+      cacheReported: false,
+    },
   }
 }
 
@@ -70,8 +82,12 @@ async function ledger(db: Db, orgId: string, input: RecordRunInput): Promise<voi
 /**
  * Ejecuta una corrida del agente. Devuelve "done" (ack) o "retry".
  * Excepción → no ack (1 reintento vía vt); con read_ct>=2 audita
- * `agent.error`, deriva a humano y hace ack. Cada corrida real queda en el
- * libro de supervisión (tokens/coste solo si el proveedor los da).
+ * `agent.error`, deriva a humano y hace ack. Lo que lanza una herramienta
+ * no llega aquí: ToolNode lo devuelve al modelo como mensaje de error.
+ * Cada corrida real queda en el libro de supervisión (tokens/coste solo si
+ * el proveedor los da). Una corrida por mensaje entrante que deja el hilo
+ * sin respuesta ni derivación se registra `sin_respuesta` y avisa al
+ * equipo: nunca cuenta como correcta.
  */
 export async function processAgentRun(
   db: Db,
@@ -83,6 +99,8 @@ export async function processAgentRun(
   const coordinationId =
     msg.message.kind === "overdue_opportunity_follow_up" ? msg.message.coordinationId : null
   const startedAt = new Date()
+  // Uso de la corrida en curso, para registrarlo también si termina en error.
+  let runUsage: AgentToolCtx["usage"] | null = null
   try {
     let prepared:
       | { skip: { reason: string; model: string } }
@@ -186,12 +204,16 @@ export async function processAgentRun(
           : "omitida",
         startedAt,
         endedAt: new Date(),
+        llmCalls: 0,
         error: prepared.skip.reason,
       })
       return "done"
     }
     const { toolCtx, effectiveModel } = prepared
-    const model = await createConfiguredChatModel(effectiveModel, runtime.llm)
+    runUsage = toolCtx.usage
+    const model = runtime.createModel
+      ? await runtime.createModel(effectiveModel)
+      : await createConfiguredChatModel(effectiveModel, runtime.llm)
     const graph = compileAgentGraph(model, toolCtx, runtime.checkpointer)
     await graph.invoke(
       { messages: [], turnCount: 0 },
@@ -212,16 +234,28 @@ export async function processAgentRun(
       )
       toolCtx.handedOff = true
     }
+    // Sin envío ni derivación en esta corrida: se avisa al equipo salvo que
+    // el hilo ya tenga una respuesta posterior al disparador (reentrega o
+    // cola atrasada). Un fallo del aviso no reintenta la corrida: volvería a
+    // llamar al modelo.
+    const unanswered =
+      inboundMessageId !== null && !toolCtx.handedOff && !toolCtx.replySettled
+        ? await withOrgContext(db, orgId, (tx) =>
+            reportAgentNoReply(tx, orgId, { conversationId, triggerMessageId: inboundMessageId }),
+          ).catch(() => true)
+        : false
     await ledger(db, orgId, {
       conversationId,
       triggerMessageId: inboundMessageId,
       model: effectiveModel,
-      status: toolCtx.handedOff ? "handoff" : "ok",
+      status: toolCtx.handedOff ? "handoff" : unanswered ? "sin_respuesta" : "ok",
       startedAt,
       endedAt: new Date(),
       latencyMs: Date.now() - startedAt.getTime(),
       inputTokens: toolCtx.usage.reported ? toolCtx.usage.inputTokens : null,
       outputTokens: toolCtx.usage.reported ? toolCtx.usage.outputTokens : null,
+      cachedInputTokens: toolCtx.usage.cacheReported ? toolCtx.usage.cachedInputTokens : null,
+      llmCalls: toolCtx.usage.calls,
       toolsUsed: toolCtx.toolsUsed,
     })
     return "done"
@@ -252,6 +286,10 @@ export async function processAgentRun(
         startedAt,
         endedAt: new Date(),
         latencyMs: Date.now() - startedAt.getTime(),
+        inputTokens: runUsage?.reported ? runUsage.inputTokens : null,
+        outputTokens: runUsage?.reported ? runUsage.outputTokens : null,
+        cachedInputTokens: runUsage?.cacheReported ? runUsage.cachedInputTokens : null,
+        llmCalls: runUsage?.calls ?? null,
         error: detail.slice(0, 500),
       })
       return "done"
@@ -273,7 +311,10 @@ export async function consumeAgentRun(
 }
 
 export interface SimulationResult {
+  /** Texto que se habría enviado; si `replied` es falso, lo que dijo el modelo sin enviarlo. */
   reply: string
+  /** El modelo usó la herramienta de envío: en una corrida real habría respuesta. */
+  replied: boolean
   toolsUsed: string[]
   handedOff: boolean
   inputTokens: number | null
@@ -342,7 +383,8 @@ export async function simulateAgentTurn(
   const last = replies[replies.length - 1]
   const latencyMs = Date.now() - startedAt.getTime()
   return {
-    reply: last ? messageText(last) : "(sin respuesta)",
+    reply: toolCtx.simulatedReply ?? ((last ? messageText(last) : "") || "(sin respuesta)"),
+    replied: toolCtx.replySettled,
     toolsUsed: toolCtx.toolsUsed,
     handedOff: toolCtx.handedOff,
     inputTokens: toolCtx.usage.reported ? toolCtx.usage.inputTokens : null,

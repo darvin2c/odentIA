@@ -24,6 +24,7 @@ const HOME_EVENTS = [
   "agent.proposal.decided",
   "agent.proposal.executed",
   "agent.handoff.created",
+  "agent.run.recorded",
   "appointment.updated",
   "task.updated",
   "payment.created",
@@ -69,7 +70,8 @@ function HomePage() {
   const hasAgentPending = Boolean(data?.agent && (data.agent.pendingProposals > 0 || data.agent.recentHandoffs.length > 0))
   const hasPending = Boolean(data && (hasAgentPending || data.appointments.length > 0 || (data.taskCount?.open ?? 0) > 0
     || (data.conversations && (data.conversations.waiting > 0 || data.conversations.unread > 0))
-    || data.budgets.length > 0 || data.debt.length > 0 || (data.agent?.today.error ?? 0) > 0))
+    || data.budgets.length > 0 || data.debt.length > 0
+    || (data.agent?.today.error ?? 0) + (data.agent?.today.sinRespuesta ?? 0) > 0))
   const hasMetrics = Boolean(data && (data.appointmentCounts.some(item => item.count > 0 && item.status !== "cancelada")
     || (data.conversations && (data.conversations.waiting > 0 || data.conversations.unread > 0))
     || (data.taskCount?.open ?? 0) > 0 || data.debt.length > 0))
@@ -182,7 +184,7 @@ function HomePage() {
           <KpiCard title="Intervenciones de hoy" value={data.agent.today.runs} description="Veces que el agente actuó" icon={<Bot className="size-5" />} />
           <KpiCard title="Ejecuciones correctas" value={data.agent.today.ok} description="Sin fallo técnico registrado; no mide resolución" icon={<CheckCircle2 className="size-5" />} />
           <KpiCard title="Derivadas al equipo" value={data.agent.today.handoff} description="Pidió ayuda humana" icon={<Hand className="size-5" />} />
-          <KpiCard title="Con error" value={data.agent.today.error} description="Necesitan revisión" icon={<AlertTriangle className="size-5" />} />
+          <KpiCard title="Necesitan revisión" value={data.agent.today.error + data.agent.today.sinRespuesta} description="Con error o sin responder al interlocutor" icon={<AlertTriangle className="size-5" />} />
         </div>
       </section>}
       <PulseSection locale={data.locale} />
@@ -201,7 +203,7 @@ function PulseSection({ locale }: { locale: string }) {
     ...source,
     funnel: source.funnel?.some(item => item.count > 0) ? source.funnel : null,
     channels: source.channels?.some(item => item.count > 0) ? source.channels : null,
-    execution: source.execution?.some(item => item.ok > 0 || item.handoff > 0 || item.error > 0) ? source.execution : null,
+    execution: source.execution?.some(item => item.ok > 0 || item.handoff > 0 || item.error > 0 || item.sinRespuesta > 0) ? source.execution : null,
     collections: source.collections?.length ? source.collections : null,
     performance: {
       responses: source.performance.responses?.conversations ? source.performance.responses : null,

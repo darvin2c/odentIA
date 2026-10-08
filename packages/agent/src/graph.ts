@@ -1,4 +1,4 @@
-import { AIMessage, type BaseMessage, HumanMessage, SystemMessage } from "@langchain/core/messages"
+import { AIMessage, type BaseMessage, HumanMessage, SystemMessage, ToolMessage } from "@langchain/core/messages"
 import type { Runnable } from "@langchain/core/runnables"
 import { Annotation, END, START, StateGraph } from "@langchain/langgraph"
 import { ToolNode } from "@langchain/langgraph/prebuilt"
@@ -20,6 +20,12 @@ import {
   type OrgLocale,
 } from "@odentia/services"
 import { type AgentToolCtx, makeAgentTools, performHandoff } from "./tools.js"
+
+/** Herramientas que comunican algo al interlocutor. */
+const SEND_TOOLS = new Set(["send_reply", "send_template"])
+
+const NOT_SENT =
+  "No enviado: la respuesta al interlocutor debe ir sola en su paso. Revisa los resultados de las otras herramientas y vuelve a llamar a send_reply o send_template una sola vez."
 
 function isSystemMessage(msg: BaseMessage): boolean {
   if (msg instanceof SystemMessage) return true
@@ -55,18 +61,23 @@ function baseSystemPrompt(zone: OrgLocale): string {
     "Antes de buscar huecos confirma la sede real con ver_sedes_y_servicios y usa su ID exacto; reserva con proponer_cita usando los IDs exactos del hueco elegido (sede, sillón, profesional, inicio).",
     "Nunca reveles ni pidas historia clínica: solo filiación mínima con ver_contexto_paciente y vínculo verificado; próximas citas, presupuestos y saldo solo con ver_resumen_paciente y según la facultad del interlocutor.",
     "Las citas se reservan con proponer_cita y se cambian o cancelan con reprogramar_cita y cancelar_cita (id y versión exactos de ver_resumen_paciente); todo se ejecuta solo con confirmación o aprobación según la política.",
-    "Si el paciente pide hablar con un humano, se queja o el caso es clínico, usa request_human_handoff con motivo, resumen factual y prioridad.",
+    "Si el paciente pide hablar con un humano, se queja o el caso es clínico, usa request_human_handoff con motivo, resumen factual, prioridad y, en message, el aviso para el interlocutor; no uses send_reply para ese aviso.",
+    "El interlocutor solo recibe lo que envías con send_reply o send_template (tus mensajes anteriores del historial se enviaron así). Envía una única respuesta completa, sola en su paso y después de ver el resultado de cualquier otra herramienta: cuando el mensaje sale o queda pendiente de decisión, el turno termina; si la herramienta devuelve un error u outside_window, sigue sus indicaciones. Un texto fuera de esas herramientas no llega a nadie.",
   ].join("\n")
 }
 
 /**
- * Acumula tokens solo si el proveedor los reporta en usage_metadata (los
- * costes se derivan únicamente de datos del proveedor, nunca estimados).
+ * Cuenta cada llamada al modelo y acumula tokens solo si el proveedor los
+ * reporta en usage_metadata (los costes se derivan únicamente de datos del
+ * proveedor, nunca estimados). La entrada servida desde caché es parte de
+ * input_tokens y se guarda aparte para medir el ahorro.
  */
 function trackUsage(ctx: AgentToolCtx, reply: AIMessage): void {
+  ctx.usage.calls += 1
   const meta = (reply.usage_metadata ?? {}) as {
     input_tokens?: unknown
     output_tokens?: unknown
+    input_token_details?: { cache_read?: unknown }
   }
   const input = typeof meta.input_tokens === "number" ? meta.input_tokens : null
   const output = typeof meta.output_tokens === "number" ? meta.output_tokens : null
@@ -74,6 +85,11 @@ function trackUsage(ctx: AgentToolCtx, reply: AIMessage): void {
     ctx.usage.reported = true
     if (input !== null) ctx.usage.inputTokens += input
     if (output !== null) ctx.usage.outputTokens += output
+  }
+  const cached = meta.input_token_details?.cache_read
+  if (typeof cached === "number") {
+    ctx.usage.cacheReported = true
+    ctx.usage.cachedInputTokens += cached
   }
 }
 
@@ -245,19 +261,37 @@ export function compileAgentGraph(
     return END
   }
 
+  /**
+   * Una respuesta al interlocutor solo sale si es la única llamada del paso:
+   * junto a otras herramientas se ejecutaría en paralelo y podría afirmar
+   * algo cuyo resultado el modelo aún no vio. En ese caso no se envía y el
+   * modelo recibe la indicación de reenviarla sola.
+   */
   async function runTools(state: typeof AgentState.State) {
     const last = state.messages[state.messages.length - 1]
-    if (last instanceof AIMessage && last.tool_calls) {
-      for (const call of last.tool_calls) {
-        if (call.name && !toolCtx.toolsUsed.includes(call.name)) toolCtx.toolsUsed.push(call.name)
-      }
+    const calls = last instanceof AIMessage ? (last.tool_calls ?? []) : []
+    const held = calls.length > 1 ? calls.filter((call) => SEND_TOOLS.has(call.name)) : []
+    const executed = calls.filter((call) => !held.includes(call))
+    for (const call of executed) {
+      if (call.name && !toolCtx.toolsUsed.includes(call.name)) toolCtx.toolsUsed.push(call.name)
     }
-    const out = await toolNode.invoke(state)
-    return { messages: out.messages ?? [], turnCount: state.turnCount + 1 }
+    if (held.length === 0 || !(last instanceof AIMessage)) {
+      const out = await toolNode.invoke(state)
+      return { messages: out.messages ?? [], turnCount: state.turnCount + 1 }
+    }
+    const notSent: BaseMessage[] = held.map(
+      (call) => new ToolMessage({ tool_call_id: call.id ?? "", name: call.name, content: NOT_SENT }),
+    )
+    if (executed.length === 0) return { messages: notSent, turnCount: state.turnCount + 1 }
+    const trimmed = new AIMessage({ content: last.content, tool_calls: executed })
+    const out = await toolNode.invoke({ messages: [...state.messages.slice(0, -1), trimmed] })
+    return { messages: notSent.concat(out.messages ?? []), turnCount: state.turnCount + 1 }
   }
 
   async function routeAfterTools(state: typeof AgentState.State): Promise<string> {
-    if (toolCtx.decisionRecorded || toolCtx.handedOff) return END
+    // La respuesta ya salió o espera decisión: otra llamada al modelo solo
+    // produciría texto que no llega a nadie.
+    if (toolCtx.decisionRecorded || toolCtx.handedOff || toolCtx.replySettled) return END
     const maxTurns = await withOrgContext(toolCtx.db, toolCtx.orgId, async (tx) => {
       const cfg = await getAgentConfig(tx, toolCtx.orgId)
       return cfg.maxTurns

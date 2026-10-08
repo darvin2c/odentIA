@@ -185,8 +185,8 @@ export async function seedAgent(
         createdBy: "agent",
       })
       .onConflictDoNothing({ target: agentHandoff.id })
-    // Corridas de los últimos 30 días con mezcla ok/handoff/error.
-    const statuses = ["ok", "ok", "handoff", "ok", "error", "ok", "handoff"] as const
+    // Corridas de los últimos 30 días con mezcla ok/handoff/error/sin_respuesta.
+    const statuses = ["ok", "ok", "handoff", "ok", "error", "sin_respuesta", "handoff"] as const
     for (let n = 0; n < 30; n++) {
       const startedAt = new Date(Date.now() - n * 86_400_000)
       await tx
@@ -200,6 +200,7 @@ export async function seedAgent(
           startedAt,
           endedAt: new Date(startedAt.getTime() + 1500),
           latencyMs: 1500,
+          llmCalls: statuses[n % statuses.length] === "ok" ? 1 : 2,
         })
         .onConflictDoNothing({ target: agentRunLedger.id })
     }

@@ -267,12 +267,17 @@ export const commercialFollowUpCoordination = pgTable(
   ],
 )
 
-export const AGENT_RUN_STATUSES = ["ok", "handoff", "error", "omitida"] as const
+/**
+ * `sin_respuesta`: la corrida por mensaje entrante terminó sin enviar ni
+ * proponer una respuesta y sin derivar; no es una ejecución correcta.
+ */
+export const AGENT_RUN_STATUSES = ["ok", "handoff", "error", "omitida", "sin_respuesta"] as const
 export type AgentRunStatus = (typeof AGENT_RUN_STATUSES)[number]
 
 /**
  * Libro de corridas reales del agente (supervisión). Tokens y coste solo se
  * registran si el proveedor los entrega; coste en micro-unidades enteras.
+ * `llm_calls` cuenta las llamadas al modelo de la corrida, lo reporte o no.
  */
 export const agentRunLedger = pgTable(
   "agent_run_ledger",
@@ -288,6 +293,9 @@ export const agentRunLedger = pgTable(
     latencyMs: integer("latency_ms"),
     inputTokens: integer("input_tokens"),
     outputTokens: integer("output_tokens"),
+    /** Parte de `input_tokens` servida desde la caché del proveedor. */
+    cachedInputTokens: integer("cached_input_tokens"),
+    llmCalls: integer("llm_calls"),
     costMicros: integer("cost_micros"),
     toolsUsed: text("tools_used").array().notNull().default(sql`'{}'`),
     error: text("error"),
@@ -297,7 +305,7 @@ export const agentRunLedger = pgTable(
     index("agent_run_ledger_conversation_idx").on(table.conversationId),
     check(
       "agent_run_ledger_status_check",
-      sql`${table.status} in ('ok','handoff','error','omitida')`,
+      sql`${table.status} in ('ok','handoff','error','omitida','sin_respuesta')`,
     ),
   ],
 )

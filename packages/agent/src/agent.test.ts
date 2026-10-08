@@ -241,20 +241,222 @@ it("trigger superseded no genera respuesta", async () => {
   expect(await agentMessages(first.conversationId)).toEqual([])
 })
 
-it("maxTurns deriva automáticamente", async () => {
-  await withOrgContext(appDb, "org_a", (tx) =>
-    upsertAgentConfig(tx, "org_a", { enabled: true, maxTurns: 1 }),
+function emptyUsage(): AgentToolCtx["usage"] {
+  return { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0, calls: 0, reported: false, cacheReported: false }
+}
+
+/** Modelo guionizado: decide cada respuesta a partir de los mensajes vistos. */
+class ScriptedModel extends BaseChatModel {
+  seen: BaseMessage[][] = []
+  constructor(private readonly script: (messages: BaseMessage[], call: number) => AIMessage) {
+    super({})
+  }
+  _llmType(): string {
+    return "scripted-chat"
+  }
+  override bindTools(): this {
+    return this
+  }
+  async _generate(messages: BaseMessage[]): Promise<ChatResult> {
+    this.seen.push(messages)
+    const message = this.script(messages, this.seen.length)
+    return { generations: [{ text: String(message.content), message }] }
+  }
+}
+
+function toolCall(name: string, args: Record<string, unknown>, id: string): AIMessage {
+  return new AIMessage({ content: "", tool_calls: [{ name, args, id, type: "tool_call" }] })
+}
+
+async function runScripted(model: ScriptedModel, conversationId: string, messageId: string) {
+  return processAgentRun(appDb, { ...runtime, createModel: async () => model }, {
+    msg_id: 1,
+    read_ct: 0,
+    message: { kind: "inbound_message", orgId: "org_a", conversationId, messageId },
+  })
+}
+
+async function ledgerRows(conversationId: string) {
+  return withOrgContext(appDb, "org_a", (tx) =>
+    tx
+      .select({ status: agentRunLedger.status, llmCalls: agentRunLedger.llmCalls, toolsUsed: agentRunLedger.toolsUsed })
+      .from(agentRunLedger)
+      .where(eq(agentRunLedger.conversationId, conversationId)),
   )
-  const { conversationId, messageId } = await ingestText("tg:ag4", "evt-ag4", "Hola")
-  expect(await runAgent(conversationId, messageId)).toBe("done")
+}
+
+async function agentStatusOf(conversationId: string) {
   const [conv] = await withOrgContext(appDb, "org_a", (tx) =>
     tx
       .select({ agentStatus: conversation.agentStatus })
       .from(conversation)
       .where(eq(conversation.id, conversationId)),
   )
-  expect(conv?.agentStatus).toBe("off")
-  await withOrgContext(appDb, "org_a", (tx) => upsertAgentConfig(tx, "org_a", { maxTurns: 10 }))
+  return conv?.agentStatus
+}
+
+it("maxTurns deriva cuando el modelo no llega a responder", async () => {
+  await withOrgContext(appDb, "org_a", (tx) =>
+    upsertAgentConfig(tx, "org_a", { enabled: true, maxTurns: 1 }),
+  )
+  try {
+    const { conversationId, messageId } = await ingestText("tg:ag4", "evt-ag4", "Hola")
+    const model = new ScriptedModel((_messages, call) => toolCall("listar_tareas", {}, `call-${call}`))
+    expect(await runScripted(model, conversationId, messageId)).toBe("done")
+    expect(await agentStatusOf(conversationId)).toBe("off")
+    expect(await agentMessages(conversationId)).toEqual([])
+    expect((await ledgerRows(conversationId)).map((r) => r.status)).toEqual(["handoff"])
+  } finally {
+    await withOrgContext(appDb, "org_a", (tx) => upsertAgentConfig(tx, "org_a", { maxTurns: 10 }))
+  }
+})
+
+it("la respuesta cierra el turno: una sola llamada al modelo y sin derivar con maxTurns=1", async () => {
+  await withOrgContext(appDb, "org_a", (tx) =>
+    upsertAgentConfig(tx, "org_a", { enabled: true, maxTurns: 1 }),
+  )
+  try {
+    const { conversationId, messageId } = await ingestText("tg:ag-cierre", "evt-ag-cierre", "Hola")
+    const model = new ScriptedModel((_messages, call) =>
+      call === 1
+        ? toolCall("send_reply", { text: "Hola, ¿en qué te ayudo?" }, "call-1")
+        : new AIMessage({ content: "texto que nadie recibe" }),
+    )
+    expect(await runScripted(model, conversationId, messageId)).toBe("done")
+    expect(model.seen.length).toBe(1)
+    expect(await agentMessages(conversationId)).toEqual(["Hola, ¿en qué te ayudo?"])
+    expect(await agentStatusOf(conversationId)).toBe("on")
+    expect(await ledgerRows(conversationId)).toEqual([{ status: "ok", llmCalls: 1, toolsUsed: ["send_reply"] }])
+  } finally {
+    await withOrgContext(appDb, "org_a", (tx) => upsertAgentConfig(tx, "org_a", { maxTurns: 10 }))
+  }
+})
+
+it("texto sin herramienta de envío queda como sin_respuesta y avisa al equipo sin derivar", async () => {
+  const stamp = Date.now()
+  const receptionId = `agent-reception-${stamp}`
+  await ownerDb.insert(user).values({ id: receptionId, name: "Recepción", email: `recepcion-${stamp}@example.test` })
+  await ownerDb.execute(sql`
+    insert into "member" ("id", "organization_id", "user_id", "role", "created_at") values
+      (${`m-${receptionId}`}, 'org_a', ${receptionId}, 'reception', now())`)
+  const { conversationId, messageId } = await ingestText("tg:ag-mudo", "evt-ag-mudo", "¿Atienden sábados?")
+  const model = new ScriptedModel(() => new AIMessage({ content: "Sí, atendemos los sábados." }))
+  expect(await runScripted(model, conversationId, messageId)).toBe("done")
+  expect(await agentMessages(conversationId)).toEqual([])
+  expect(await agentStatusOf(conversationId)).toBe("on")
+  expect(await ledgerRows(conversationId)).toEqual([{ status: "sin_respuesta", llmCalls: 1, toolsUsed: [] }])
+  const notices = await withOrgContext(appDb, "org_a", (tx) =>
+    tx
+      .select({ title: workspaceNotification.title, href: workspaceNotification.href })
+      .from(workspaceNotification)
+      .where(eq(workspaceNotification.userId, receptionId)),
+  )
+  expect(notices).toEqual([{ title: "El agente no respondió", href: `/inbox?conversation=${conversationId}` }])
+  // Reprocesar el mismo disparador no duplica el aviso.
+  expect(await runScripted(model, conversationId, messageId)).toBe("done")
+  const again = await withOrgContext(appDb, "org_a", (tx) =>
+    tx
+      .select({ id: workspaceNotification.id })
+      .from(workspaceNotification)
+      .where(eq(workspaceNotification.userId, receptionId)),
+  )
+  expect(again.length).toBe(1)
+})
+
+it("lo que lanza una herramienta vuelve al modelo como mensaje de error y no reintenta la corrida", async () => {
+  await withOrgContext(appDb, "org_a", (tx) => upsertAgentConfig(tx, "org_a", { enabled: true, maxTurns: 10 }))
+  const { conversationId, messageId } = await ingestText("tg:ag-toolerr", "evt-ag-toolerr", "Necesito ayuda")
+  const model = new ScriptedModel((_messages, call) =>
+    call === 1
+      ? toolCall(
+          "request_human_handoff",
+          { reason: "Pide ayuda", summary: "Pide ayuda", priority: "media", assigneeUserId: "no-es-miembro" },
+          "call-1",
+        )
+      : toolCall("send_reply", { text: "Enseguida te ayudamos." }, "call-2"),
+  )
+  expect(await runScripted(model, conversationId, messageId)).toBe("done")
+  expect(model.seen.length).toBe(2)
+  const second = model.seen[1] ?? []
+  const last = second[second.length - 1]
+  expect(last?.getType()).toBe("tool")
+  expect(String(last?.content)).toContain("El responsable no es miembro de la organización")
+  expect(await agentStatusOf(conversationId)).toBe("on")
+  expect(await agentMessages(conversationId)).toEqual(["Enseguida te ayudamos."])
+  expect(await ledgerRows(conversationId)).toEqual([
+    { status: "ok", llmCalls: 2, toolsUsed: ["request_human_handoff", "send_reply"] },
+  ])
+})
+
+it("una respuesta emitida junto a otra herramienta no sale hasta ir sola en su paso", async () => {
+  const { conversationId, messageId } = await ingestText("tg:ag-lote", "evt-ag-lote", "¿Tengo algo pendiente?")
+  const model = new ScriptedModel((_messages, call) =>
+    call === 1
+      ? new AIMessage({
+          content: "",
+          tool_calls: [
+            { name: "listar_tareas", args: {}, id: "call-1a", type: "tool_call" },
+            { name: "send_reply", args: { text: "No tienes pendientes." }, id: "call-1b", type: "tool_call" },
+          ],
+        })
+      : toolCall("send_reply", { text: "Revisé tus pendientes: no hay ninguno." }, "call-2"),
+  )
+  expect(await runScripted(model, conversationId, messageId)).toBe("done")
+  expect(model.seen.length).toBe(2)
+  const results = (model.seen[1] ?? []).filter((m) => m.getType() === "tool").map((m) => String(m.content))
+  expect(results).toHaveLength(2)
+  expect(results.filter((text) => text.startsWith("No enviado"))).toHaveLength(1)
+  expect(await agentMessages(conversationId)).toEqual(["Revisé tus pendientes: no hay ninguno."])
+  expect(await ledgerRows(conversationId)).toEqual([
+    { status: "ok", llmCalls: 2, toolsUsed: ["listar_tareas", "send_reply"] },
+  ])
+})
+
+it("derivar con aviso envía el mensaje y registra la derivación en una sola llamada al modelo", async () => {
+  const { conversationId, messageId } = await ingestText("tg:ag-deriva", "evt-ag-deriva", "Quiero que me atienda alguien")
+  const model = new ScriptedModel(() =>
+    toolCall(
+      "request_human_handoff",
+      {
+        reason: "Pide atención de una persona",
+        summary: "Pide que lo atienda alguien del equipo",
+        priority: "alta",
+        message: "Te paso con una persona del equipo.",
+      },
+      "call-1",
+    ),
+  )
+  expect(await runScripted(model, conversationId, messageId)).toBe("done")
+  expect(model.seen.length).toBe(1)
+  expect(await agentMessages(conversationId)).toEqual(["Te paso con una persona del equipo."])
+  expect(await agentStatusOf(conversationId)).toBe("off")
+  const handoffs = await withOrgContext(appDb, "org_a", (tx) =>
+    tx
+      .select({ priority: agentHandoff.priority })
+      .from(agentHandoff)
+      .where(eq(agentHandoff.conversationId, conversationId)),
+  )
+  expect(handoffs).toEqual([{ priority: "alta" }])
+  expect(await ledgerRows(conversationId)).toEqual([
+    { status: "handoff", llmCalls: 1, toolsUsed: ["request_human_handoff"] },
+  ])
+})
+
+it("una reentrega con el hilo ya respondido no avisa ni queda sin_respuesta", async () => {
+  const { conversationId, messageId } = await ingestText("tg:ag-reentrega", "evt-ag-reentrega", "¿Abren mañana?")
+  const replies = new ScriptedModel(() => toolCall("send_reply", { text: "Sí, abrimos mañana." }, "call-1"))
+  expect(await runScripted(replies, conversationId, messageId)).toBe("done")
+  const silent = new ScriptedModel(() => new AIMessage({ content: "Ya respondí antes." }))
+  expect(await runScripted(silent, conversationId, messageId)).toBe("done")
+  expect(await agentMessages(conversationId)).toEqual(["Sí, abrimos mañana."])
+  expect((await ledgerRows(conversationId)).map((r) => r.status)).toEqual(["ok", "ok"])
+  const notices = await withOrgContext(appDb, "org_a", (tx) =>
+    tx
+      .select({ id: workspaceNotification.id })
+      .from(workspaceNotification)
+      .where(eq(workspaceNotification.href, `/inbox?conversation=${conversationId}`)),
+  )
+  expect(notices).toEqual([])
 })
 
 it("memoria del agente aísla por prefijo de thread_id", async () => {
@@ -278,8 +480,8 @@ it("simulación consulta seguimientos reales sin generar respuesta ni cambiar pe
     createTask(tx, "org_a", { contactId: conv!.contactId, conversationId, title: "Confirmar horario de tarde", createdBy: "user" }))
   const ctx: AgentToolCtx = {
     db: appDb, orgId: "org_a", conversationId, contactId: conv!.contactId,
-    triggerId: null, secretsKey: KEY, dryRun: true, handedOff: false, decisionRecorded: false,
-    toolsUsed: [], usage: { inputTokens: 0, outputTokens: 0, reported: false },
+    triggerId: null, secretsKey: KEY, dryRun: true, handedOff: false, decisionRecorded: false, replySettled: false,
+    toolsUsed: [], usage: emptyUsage(),
   }
   const reader = makeAgentTools(ctx).find(t => t.name === "listar_tareas")
   expect(reader).toBeDefined()
@@ -321,8 +523,8 @@ it("el contexto se reemplaza entre turnos sin crecer por copia ni conservar pol�
   expect(conv).toBeDefined()
   const toolCtx: AgentToolCtx = {
     db: appDb, orgId: "org_a", conversationId, contactId: conv!.contactId,
-    triggerId: null, secretsKey: KEY, dryRun: true, handedOff: false, decisionRecorded: false,
-    toolsUsed: [], usage: { inputTokens: 0, outputTokens: 0, reported: false },
+    triggerId: null, secretsKey: KEY, dryRun: true, handedOff: false, decisionRecorded: false, replySettled: false,
+    toolsUsed: [], usage: emptyUsage(),
   }
   const model = new RecordingModel({})
   const threadId = `org_a:${conversationId}`
@@ -376,8 +578,8 @@ it("el prompt incluye el compromiso de otro canal con procedencia y lo pierde al
   const tg = await ingestText("tg:990011", "evt-cross-tg", "Hola, sigo desde otro canal")
   const toolCtx: AgentToolCtx = {
     db: appDb, orgId: "org_a", conversationId: tg.conversationId, contactId,
-    triggerId: null, secretsKey: KEY, dryRun: true, handedOff: false, decisionRecorded: false,
-    toolsUsed: [], usage: { inputTokens: 0, outputTokens: 0, reported: false },
+    triggerId: null, secretsKey: KEY, dryRun: true, handedOff: false, decisionRecorded: false, replySettled: false,
+    toolsUsed: [], usage: emptyUsage(),
   }
   const model = new RecordingModel({})
   await compileAgentGraph(model, toolCtx, runtime.checkpointer).invoke(
@@ -440,8 +642,8 @@ it("el prompt avisa cuando hay más historial y ver_otros_canales pagina con cur
   })
   const toolCtx: AgentToolCtx = {
     db: appDb, orgId: "org_a", conversationId: current.conversationId, contactId,
-    triggerId: null, secretsKey: KEY, dryRun: true, handedOff: false, decisionRecorded: false,
-    toolsUsed: [], usage: { inputTokens: 0, outputTokens: 0, reported: false },
+    triggerId: null, secretsKey: KEY, dryRun: true, handedOff: false, decisionRecorded: false, replySettled: false,
+    toolsUsed: [], usage: emptyUsage(),
   }
   const model = new RecordingModel({})
   await compileAgentGraph(model, toolCtx, runtime.checkpointer).invoke(
@@ -511,8 +713,8 @@ it("buscar_huecos entrega una opción completa que proponer_cita ejecuta como ci
     updateAutonomyPolicy(tx, "org_a", actorId, { reservar_cita: "aprobar_equipo" }))
   const ctx: AgentToolCtx = {
     db: appDb, orgId: "org_a", conversationId, contactId,
-    triggerId: null, secretsKey: KEY, dryRun: false, handedOff: false, decisionRecorded: false,
-    toolsUsed: [], usage: { inputTokens: 0, outputTokens: 0, reported: false },
+    triggerId: null, secretsKey: KEY, dryRun: false, handedOff: false, decisionRecorded: false, replySettled: false,
+    toolsUsed: [], usage: emptyUsage(),
   }
   const tools = makeAgentTools(ctx)
   const gaps = tools.find((t) => t.name === "buscar_huecos")
@@ -616,8 +818,8 @@ it("reprogramar_cita y cancelar_cita actúan sobre la cita real sin duplicar res
     }))
   const ctx: AgentToolCtx = {
     db: appDb, orgId: "org_a", conversationId, contactId,
-    triggerId: "trig-reprog-1", secretsKey: KEY, dryRun: false, handedOff: false, decisionRecorded: false,
-    toolsUsed: [], usage: { inputTokens: 0, outputTokens: 0, reported: false },
+    triggerId: "trig-reprog-1", secretsKey: KEY, dryRun: false, handedOff: false, decisionRecorded: false, replySettled: false,
+    toolsUsed: [], usage: emptyUsage(),
   }
   const tools = makeAgentTools(ctx)
 
@@ -727,8 +929,8 @@ it("proponer_cita en directo fallido no se reporta como aprobación", async () =
     updateAutonomyPolicy(tx, "org_a", actorId, { reservar_cita: "directo" }))
   const ctx: AgentToolCtx = {
     db: appDb, orgId: "org_a", conversationId, contactId,
-    triggerId: null, secretsKey: KEY, dryRun: false, handedOff: false, decisionRecorded: false,
-    toolsUsed: [], usage: { inputTokens: 0, outputTokens: 0, reported: false },
+    triggerId: null, secretsKey: KEY, dryRun: false, handedOff: false, decisionRecorded: false, replySettled: false,
+    toolsUsed: [], usage: emptyUsage(),
   }
   const booking = makeAgentTools(ctx).find((t) => t.name === "proponer_cita")
   expect(booking).toBeDefined()
@@ -770,8 +972,8 @@ it("segunda propuesta en espera guía a confirmar en vez de romper el turno", as
     updateAutonomyPolicy(tx, "org_a", actorId, { enviar_mensaje: "confirmar_usuario" }))
   const ctx: AgentToolCtx = {
     db: appDb, orgId: "org_a", conversationId, contactId: conv!.contactId,
-    triggerId: null, secretsKey: KEY, dryRun: false, handedOff: false, decisionRecorded: false,
-    toolsUsed: [], usage: { inputTokens: 0, outputTokens: 0, reported: false },
+    triggerId: null, secretsKey: KEY, dryRun: false, handedOff: false, decisionRecorded: false, replySettled: false,
+    toolsUsed: [], usage: emptyUsage(),
   }
   const sender = makeAgentTools(ctx).find((t) => t.name === "send_reply")
   expect(sender).toBeDefined()
@@ -803,8 +1005,8 @@ it("en modo equipo el segundo intento y confirmar_propuesta no piden sí ni ejec
     updateAutonomyPolicy(tx, "org_a", actorId, { crear_oportunidad: "aprobar_equipo" }))
   const ctx: AgentToolCtx = {
     db: appDb, orgId: "org_a", conversationId, contactId: conv!.contactId,
-    triggerId: null, secretsKey: KEY, dryRun: false, handedOff: false, decisionRecorded: false,
-    toolsUsed: [], usage: { inputTokens: 0, outputTokens: 0, reported: false },
+    triggerId: null, secretsKey: KEY, dryRun: false, handedOff: false, decisionRecorded: false, replySettled: false,
+    toolsUsed: [], usage: emptyUsage(),
   }
   const tools = makeAgentTools(ctx)
   const creator = tools.find((t) => t.name === "create_opportunity")
@@ -837,8 +1039,8 @@ it("create_task no duplica en reentrega y las escrituras directas auditan su ori
   const contactId = conv!.contactId
   const ctx: AgentToolCtx = {
     db: appDb, orgId: "org_a", conversationId, contactId,
-    triggerId: "trig-dw-1", secretsKey: KEY, dryRun: false, handedOff: false, decisionRecorded: false,
-    toolsUsed: [], usage: { inputTokens: 0, outputTokens: 0, reported: false },
+    triggerId: "trig-dw-1", secretsKey: KEY, dryRun: false, handedOff: false, decisionRecorded: false, replySettled: false,
+    toolsUsed: [], usage: emptyUsage(),
   }
   const tools = makeAgentTools(ctx)
   const createTaskTool = tools.find((t) => t.name === "create_task")!

@@ -4,6 +4,7 @@ import {
   agentPolicy,
   agentProposal,
   agentRunLedger,
+  AGENT_RUN_STATUSES,
   AUTONOMY_ACTIONS,
   AUTONOMY_MODES,
   DEFAULT_AUTONOMY_MODES,
@@ -18,7 +19,14 @@ import {
   type ProposalStatus,
 } from "@odentia/db/schema/agent"
 import { member, user } from "@odentia/db/schema/auth"
-import { channelConnection, contact, conversation, crmTask, pipelineStage } from "@odentia/db/schema/crm"
+import {
+  channelConnection,
+  contact,
+  conversation,
+  crmTask,
+  message as conversationMessage,
+  pipelineStage,
+} from "@odentia/db/schema/crm"
 import { patient, patientResponsibility, treatmentBudget } from "@odentia/db/schema/clinical"
 import { appointment } from "@odentia/db/schema/agenda"
 import { opportunity } from "@odentia/db/schema/opportunities"
@@ -1988,6 +1996,73 @@ async function notifyApprovers(tx: Db, orgId: string, proposal: ProposalItem) {
 }
 
 /**
+ * La corrida por un mensaje entrante terminó sin responder ni derivar.
+ * Devuelve si el hilo quedó de verdad sin respuesta: no lo está cuando ya
+ * hay un envío posterior al disparador, o uno a la espera de decisión
+ * (reentrega del mismo trabajo, o una corrida previa que contestó varios
+ * mensajes seguidos). Si quedó sin respuesta, el agente sigue activo en el
+ * hilo, así que se avisa a quien atiende para que nadie dé por hecho que el
+ * interlocutor fue atendido; no deriva ni apaga el agente, y el aviso es uno
+ * por mensaje disparador.
+ */
+export async function reportAgentNoReply(
+  tx: Db,
+  orgId: string,
+  input: { conversationId: string; triggerMessageId: string },
+): Promise<boolean> {
+  const [trigger] = await tx
+    .select({ createdAt: conversationMessage.createdAt })
+    .from(conversationMessage)
+    .where(
+      and(
+        eq(conversationMessage.id, input.triggerMessageId),
+        eq(conversationMessage.organizationId, orgId),
+        eq(conversationMessage.conversationId, input.conversationId),
+      ),
+    )
+    .limit(1)
+  if (trigger) {
+    const [sent] = await tx
+      .select({ id: conversationMessage.id })
+      .from(conversationMessage)
+      .where(
+        and(
+          eq(conversationMessage.organizationId, orgId),
+          eq(conversationMessage.conversationId, input.conversationId),
+          eq(conversationMessage.direction, "out"),
+          ne(conversationMessage.status, "failed"),
+          gt(conversationMessage.createdAt, trigger.createdAt),
+        ),
+      )
+      .limit(1)
+    if (sent) return false
+    const [pending] = await tx
+      .select({ id: agentProposal.id })
+      .from(agentProposal)
+      .where(
+        and(
+          eq(agentProposal.organizationId, orgId),
+          eq(agentProposal.conversationId, input.conversationId),
+          eq(agentProposal.action, "enviar_mensaje"),
+          inArray(agentProposal.status, ["propuesta", "aprobada"]),
+          gt(agentProposal.createdAt, trigger.createdAt),
+        ),
+      )
+      .limit(1)
+    if (pending) return false
+  }
+  const team = await teamUserIds(tx, orgId)
+  await notifyUsers(tx, orgId, team, {
+    dedupeKey: `agent-no-reply:${input.triggerMessageId}`,
+    title: "El agente no respondió",
+    body: "Un mensaje entrante quedó sin respuesta del agente. Revisa la conversación.",
+    href: `/inbox?conversation=${input.conversationId}`,
+    permission: "conversations.read",
+  })
+  return true
+}
+
+/**
  * Plazo de recogida/resolución de una derivación por prioridad (política
  * explícita de recepción): vencida, avisa al responsable o escala al equipo.
  */
@@ -2214,6 +2289,10 @@ export interface RecordRunInput {
   /** Solo si el proveedor los entrega. */
   inputTokens?: number | null
   outputTokens?: number | null
+  /** Parte de la entrada servida desde caché; solo si el proveedor la entrega. */
+  cachedInputTokens?: number | null
+  /** Llamadas al modelo hechas en la corrida. */
+  llmCalls?: number | null
   /** Solo si el proveedor lo entrega, en micro-unidades enteras. */
   costMicros?: number | null
   toolsUsed?: string[]
@@ -2234,10 +2313,15 @@ export async function recordAgentRun(tx: Db, orgId: string, input: RecordRunInpu
     latencyMs: cleanInt(input.latencyMs),
     inputTokens: cleanInt(input.inputTokens),
     outputTokens: cleanInt(input.outputTokens),
+    cachedInputTokens: cleanInt(input.cachedInputTokens),
+    llmCalls: cleanInt(input.llmCalls),
     costMicros: cleanInt(input.costMicros),
     toolsUsed: (input.toolsUsed ?? []).filter((t) => typeof t === "string").slice(0, 30),
     error: input.error?.slice(0, 500) ?? null,
   })
+  // La fila se escribe después de los efectos de la corrida: sin este aviso
+  // la supervisión no se entera de las que no envían ni cambian el hilo.
+  await notify(tx, { orgId, kind: "agent.run.recorded", at: new Date().toISOString() })
 }
 
 export async function listAgentRuns(
@@ -2248,7 +2332,7 @@ export async function listAgentRuns(
   const conditions = [eq(agentRunLedger.organizationId, orgId)]
   if (input.conversationId) conditions.push(eq(agentRunLedger.conversationId, input.conversationId))
   if (input.status) {
-    if (!["ok", "handoff", "error", "omitida"].includes(input.status)) throw validation("status inválido")
+    if (!(AGENT_RUN_STATUSES as readonly string[]).includes(input.status)) throw validation("status inválido")
     conditions.push(eq(agentRunLedger.status, input.status))
   }
   const limit = input.limit === undefined ? 50 : Math.min(Math.max(input.limit, 1), 100)
@@ -2269,6 +2353,8 @@ export async function listAgentRuns(
     latencyMs: r.latencyMs,
     inputTokens: r.inputTokens,
     outputTokens: r.outputTokens,
+    cachedInputTokens: r.cachedInputTokens,
+    llmCalls: r.llmCalls,
     costMicros: r.costMicros,
     toolsUsed: r.toolsUsed,
     error: r.error,
@@ -2281,6 +2367,10 @@ export interface AgentRunStats {
   avgLatencyMs: number | null
   totalInputTokens: number | null
   totalOutputTokens: number | null
+  totalCachedInputTokens: number | null
+  totalLlmCalls: number | null
+  /** Corridas con `llm_calls` registrado: el denominador de `totalLlmCalls`. */
+  runsWithLlmCalls: number
   totalCostMicros: number | null
   topTools: Array<{ tool: string; uses: number }>
 }
@@ -2305,6 +2395,9 @@ export async function getAgentRunStats(tx: Db, orgId: string, input: { from?: st
       avgLatency: avg(agentRunLedger.latencyMs),
       inputTokens: sum(agentRunLedger.inputTokens),
       outputTokens: sum(agentRunLedger.outputTokens),
+      cachedInputTokens: sum(agentRunLedger.cachedInputTokens),
+      llmCalls: sum(agentRunLedger.llmCalls),
+      runsWithLlmCalls: count(agentRunLedger.llmCalls),
       cost: sum(agentRunLedger.costMicros),
     })
     .from(agentRunLedger)
@@ -2330,6 +2423,9 @@ export async function getAgentRunStats(tx: Db, orgId: string, input: { from?: st
     avgLatencyMs: totals?.avgLatency === null || totals?.avgLatency === undefined ? null : Math.round(Number(totals.avgLatency)),
     totalInputTokens: toNum(totals?.inputTokens),
     totalOutputTokens: toNum(totals?.outputTokens),
+    totalCachedInputTokens: toNum(totals?.cachedInputTokens),
+    totalLlmCalls: toNum(totals?.llmCalls),
+    runsWithLlmCalls: Number(totals?.runsWithLlmCalls ?? 0),
     totalCostMicros: toNum(totals?.cost),
     topTools: (toolRows as unknown as Array<{ tool: string; uses: number }>).map((r) => ({
       tool: r.tool,
