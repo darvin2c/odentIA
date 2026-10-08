@@ -4,13 +4,14 @@
  * su estado clínico (activo o resuelto) sigue al paciente y forma su lista de
  * problemas.
  */
+
 import { isValidTooth, surfacesForTooth } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { user } from "@odentia/db/schema/auth"
 import { cie10Code, encounter, encounterDiagnosis } from "@odentia/db/schema/clinical"
 import { auditEvent } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, isNull } from "drizzle-orm"
-import { DIAGNOSIS_TYPES } from "./clinical.js"
+import { assertCodableCie10, DIAGNOSIS_TYPES } from "./clinical.js"
 import { assertOpenDraft, type EncounterDiagnosisRow, lockEncounter } from "./encounters.js"
 import { notFound, ServiceError, validation } from "./errors.js"
 import { requirePatient } from "./patients.js"
@@ -82,6 +83,7 @@ export async function addEncounterDiagnosis(
     .where(eq(cie10Code.code, code))
     .limit(1)
   if (!known) throw validation(`Código CIE-10 inexistente: ${code}`)
+  await assertCodableCie10(tx, code)
   if (!(DIAGNOSIS_TYPES as readonly string[]).includes(input.diagnosisType))
     throw validation("Tipo de diagnóstico inválido: presuntivo, definitivo o repetido")
   const toothNumber = input.toothNumber ?? null

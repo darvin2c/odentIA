@@ -233,6 +233,11 @@ export const PRESCRIPTION_STATUS_LABELS: Record<string, string> = {
 export interface PrescriptionItem {
   id: string
   medicationName: string
+  genericName?: string | null
+  brandName?: string | null
+  strength?: string | null
+  dosageForm?: string | null
+  atcCode?: string | null
   dose: string
   route: string
   frequency: string
@@ -254,11 +259,45 @@ export interface Prescription {
   issuedAt: string
   cancelledAt: string | null
   cancelReason: string | null
+  diagnosisCode?: string | null
+  validUntil?: string | null
+  prescriberName?: string | null
+  prescriberTitle?: string | null
+  prescriberRegistration?: string | null
   items?: PrescriptionItem[]
 }
 
+/** Datos de la hoja impresa de una receta. */
+export interface PrescriptionPrint {
+  prescription: Prescription
+  diagnosisDescription: string | null
+  patient: {
+    displayName: string
+    patientNumber: number
+    docType: string | null
+    docNumber: string | null
+    birthDate: string | null
+  }
+  establishment: {
+    legalName: string
+    tradeName: string | null
+    fiscalDocType: string
+    fiscalDocNumber: string | null
+    address: string | null
+  } | null
+}
+
+export function fetchPrescriptionPrint(patientId: string, prescriptionId: string) {
+  return apiFetch<{ data: PrescriptionPrint }>(
+    `${base(patientId)}/prescriptions/${prescriptionId}/print`,
+  )
+}
+
 export interface PrescriptionMedicationBody {
-  medicationName: string
+  genericName: string
+  brandName?: string | null
+  strength: string
+  dosageForm: string
   dose: string
   route: string
   frequency: string
@@ -284,6 +323,9 @@ export function createPrescriptionApi(
     encounterId?: string | null
     planItemId?: string | null
     notes?: string | null
+    diagnosisCode?: string | null
+    validUntil?: string | null
+    acknowledgeAllergies?: boolean
     items: PrescriptionMedicationBody[]
   },
 ): Promise<{ data: Prescription }> {

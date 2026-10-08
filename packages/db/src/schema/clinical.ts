@@ -536,9 +536,17 @@ export const encounter = pgTable(
     /** Cita que motivó la atención; nula en atenciones sin cita o históricas. */
     appointmentId: uuid("appointment_id"),
     reason: text("reason"),
+    /** Relato de la enfermedad actual y su tiempo (NTS 139: anamnesis de la consulta). */
+    presentIllness: text("present_illness"),
+    illnessDuration: text("illness_duration"),
+    /** Signos vitales con claves de @odentia/clinical (LOINC y UCUM). */
+    vitals: jsonb("vitals"),
     evolution: text("evolution"),
     indications: text("indications"),
     nextStep: text("next_step"),
+    prognosis: text("prognosis"),
+    /** Exámenes auxiliares solicitados o con resultado. */
+    auxiliaryExams: text("auxiliary_exams"),
     examination: jsonb("examination"),
     nextAppointmentAt: timestamp("next_appointment_at", { withTimezone: true }),
     /** Hora de inicio declarada (por defecto, al abrir). */
@@ -811,6 +819,8 @@ export const encounterProcedure = pgTable(
     quadrant: smallint("quadrant"),
     arch: text("arch"),
     description: text("description").notNull(),
+    /** Unidades del acto (p. ej. 3 sellantes); el cargo es precio × cantidad. */
+    quantity: smallint("quantity").notNull().default(1),
     diagnosisCode: text("diagnosis_code").references(() => cie10Code.code),
     planItemId: uuid("plan_item_id").references(() => treatmentPlanItem.id),
     // Snapshot del costo al registrar el acto (tarifario o ítem del plan);
@@ -826,6 +836,7 @@ export const encounterProcedure = pgTable(
     voidReason: text("void_reason"),
   },
   (table) => [
+    check("encounter_procedure_quantity_check", sql`${table.quantity} BETWEEN 1 AND 99`),
     check(
       "encounter_procedure_void_check",
       sql`(${table.voidedAt} IS NULL) = (${table.voidReason} IS NULL)`,
@@ -1176,6 +1187,13 @@ export const prescription = pgTable(
     prescriptionNumber: integer("prescription_number").notNull(),
     status: text("status").notNull().default("emitida"),
     notes: text("notes"),
+    /** Diagnóstico que justifica la receta y fecha hasta la que es válida. */
+    diagnosisCode: text("diagnosis_code").references(() => cie10Code.code),
+    validUntil: date("valid_until"),
+    /** Instantánea de quien prescribe (perfil profesional al emitir). */
+    prescriberName: text("prescriber_name"),
+    prescriberTitle: text("prescriber_title"),
+    prescriberRegistration: text("prescriber_registration"),
     issuedBy: text("issued_by").references(() => user.id),
     issuedAt: timestamp("issued_at", { withTimezone: true }).notNull().defaultNow(),
     cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
@@ -1204,6 +1222,13 @@ export const prescriptionItem = pgTable(
       .notNull()
       .references(() => prescription.id, { onDelete: "cascade" }),
     medicationName: text("medication_name").notNull(),
+    /** Denominación Común Internacional, concentración y forma farmacéutica. */
+    genericName: text("generic_name"),
+    brandName: text("brand_name"),
+    strength: text("strength"),
+    dosageForm: text("dosage_form"),
+    /** Código ATC de la OMS cuando la DCI es conocida. */
+    atcCode: text("atc_code"),
     dose: text("dose").notNull(),
     route: text("route").notNull(),
     frequency: text("frequency").notNull(),

@@ -1,4 +1,4 @@
-import { conditionLabel, surfaceLabel } from "@odentia/clinical"
+import { conditionLabel, formatVitals, surfaceLabel } from "@odentia/clinical"
 import { Badge } from "@odentia/ui"
 import { useQuery } from "@tanstack/react-query"
 import { apiFetch } from "../../lib/api"
@@ -175,6 +175,33 @@ export function EncounterDetailView({
             <dt className="text-xs font-medium text-muted-foreground">Motivo</dt>
             <dd className="whitespace-pre-wrap text-sm">{encounter.reason ?? "—"}</dd>
           </div>
+          {encounter.presentIllness || encounter.illnessDuration ? (
+            <div>
+              <dt className="text-xs font-medium text-muted-foreground">Enfermedad actual</dt>
+              <dd className="whitespace-pre-wrap text-sm">
+                {encounter.illnessDuration ? `Tiempo: ${encounter.illnessDuration}. ` : ""}
+                {encounter.presentIllness ?? ""}
+              </dd>
+            </div>
+          ) : null}
+          {encounter.vitals && Object.keys(encounter.vitals).length > 0 ? (
+            <div>
+              <dt className="text-xs font-medium text-muted-foreground">Signos vitales</dt>
+              <dd className="text-sm">{formatVitals(encounter.vitals)}</dd>
+            </div>
+          ) : null}
+          {encounter.auxiliaryExams ? (
+            <div>
+              <dt className="text-xs font-medium text-muted-foreground">Exámenes auxiliares</dt>
+              <dd className="whitespace-pre-wrap text-sm">{encounter.auxiliaryExams}</dd>
+            </div>
+          ) : null}
+          {encounter.prognosis ? (
+            <div>
+              <dt className="text-xs font-medium text-muted-foreground">Pronóstico</dt>
+              <dd className="whitespace-pre-wrap text-sm">{encounter.prognosis}</dd>
+            </div>
+          ) : null}
           <div>
             <dt className="text-xs font-medium text-muted-foreground">Evolución</dt>
             <dd className="whitespace-pre-wrap text-sm">{encounter.evolution ?? "—"}</dd>
@@ -292,6 +319,7 @@ export function EncounterDetailView({
                   <p className="text-xs text-muted-foreground">Anulado: {proc.voidReason}</p>
                 ) : null}
                 <p className="text-xs text-muted-foreground">
+                  {(proc.quantity ?? 1) > 1 ? `× ${proc.quantity} · ` : ""}
                   {proc.toothNumber != null ? `Pieza ${proc.toothNumber} · ` : ""}
                   {proc.surfaces.length > 0
                     ? `${proc.surfaces.map(surfaceLabel).join(", ")} · `

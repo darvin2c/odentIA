@@ -1,4 +1,4 @@
-import { assertTreatmentSite, VALID_FDI_TEETH } from "@odentia/clinical"
+import { assertTreatmentSite, parseVitals, VALID_FDI_TEETH } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { appointment } from "@odentia/db/schema/agenda"
 import {
@@ -79,6 +79,13 @@ export interface UpdateEncounterDraftPatch {
   teeth?: number[]
   /** Examen clínico de la atención (extraoral/intraoral/higieneOral); null lo limpia. */
   examination?: ExaminationInput | null
+  /** Enfermedad actual: relato y tiempo de enfermedad. */
+  presentIllness?: string | null
+  illnessDuration?: string | null
+  /** Signos vitales (claves de @odentia/clinical); null los limpia. */
+  vitals?: Record<string, unknown> | null
+  prognosis?: string | null
+  auxiliaryExams?: string | null
 }
 
 export interface ExaminationInput {
@@ -101,6 +108,8 @@ export interface AddEncounterProcedureInput {
   description?: string | null
   /** Hallazgo del odontograma que trata un servicio directo; queda tratado al cerrar. */
   odontogramEntryId?: string | null
+  /** Unidades del acto (1–99); el cargo es precio unitario × cantidad. */
+  quantity?: number | null
 }
 
 export interface ListEncountersInput {
@@ -137,6 +146,10 @@ const TEXT_LIMITS = {
   indications: 5000,
   nextStep: 2000,
   procedureDescription: 2000,
+  presentIllness: 4000,
+  illnessDuration: 200,
+  prognosis: 2000,
+  auxiliaryExams: 4000,
 } as const
 
 const FDI_SET: ReadonlySet<number> = new Set(VALID_FDI_TEETH)
@@ -779,6 +792,14 @@ export async function updateEncounterDraft(
   const teeth = patch.teeth === undefined ? undefined : dedupeTeeth(patch.teeth)
   if (patch.examination !== undefined)
     set.examination = patch.examination === null ? null : assertExamination(patch.examination)
+  for (const key of ["presentIllness", "illnessDuration", "prognosis", "auxiliaryExams"] as const) {
+    if (patch[key] !== undefined) set[key] = cleanText(patch[key], key, TEXT_LIMITS[key])
+  }
+  if (patch.vitals !== undefined) {
+    const parsed = parseVitals(patch.vitals)
+    if (!parsed.ok) throw validation(parsed.error)
+    set.vitals = parsed.value
+  }
   const [updated] = await tx
     .update(encounter)
     .set({ ...set, updatedAt: new Date() })
@@ -985,6 +1006,13 @@ export async function addEncounterProcedure(
     priceCents = null
     currency = null
   }
+  const quantity = input.quantity ?? 1
+  if (!Number.isInteger(quantity) || quantity < 1 || quantity > 99)
+    throw validation("La cantidad va de 1 a 99")
+  if (planItemIdParam && quantity !== 1)
+    throw validation("El tratamiento del plan se registra por sesión: la cantidad es 1")
+  // El cargo nace del acto: precio unitario × cantidad.
+  if (priceCents !== null) priceCents *= quantity
   if (!description)
     throw validation("description es obligatoria (o selecciona un servicio del catálogo)")
   if (description.length > TEXT_LIMITS.procedureDescription) {
@@ -1009,6 +1037,13 @@ export async function addEncounterProcedure(
       odontogramEntryId: input.odontogramEntryId ?? null,
     })
     directPlanItemId = indicated.id
+    if (quantity > 1 && indicated.priceCents !== null) {
+      // La indicación implícita refleja lo realizado: todas las unidades.
+      await tx
+        .update(treatmentPlanItem)
+        .set({ priceCents: indicated.priceCents * quantity, updatedAt: new Date() })
+        .where(eq(treatmentPlanItem.id, indicated.id))
+    }
   }
   if (input.diagnosisCode) await assertDiagnosisCode(tx, input.diagnosisCode)
   const [row] = await tx
@@ -1023,6 +1058,7 @@ export async function addEncounterProcedure(
       quadrant,
       arch,
       description,
+      quantity,
       diagnosisCode: input.diagnosisCode === undefined ? planDiagnosis : input.diagnosisCode,
       planItemId: input.planItemId ?? directPlanItemId,
       priceCents,

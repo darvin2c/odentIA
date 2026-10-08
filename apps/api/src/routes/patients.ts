@@ -279,9 +279,16 @@ const encounterPatchInput = z.object({
     })
     .strict()
     .nullish(),
+  presentIllness: z.string().max(4000).nullish(),
+  illnessDuration: z.string().max(200).nullish(),
+  /** Claves y rangos de @odentia/clinical (VITAL_SIGNS); el servicio valida. */
+  vitals: z.record(z.string(), z.union([z.number(), z.string().max(10), z.null()])).nullish(),
+  prognosis: z.string().max(2000).nullish(),
+  auxiliaryExams: z.string().max(4000).nullish(),
 })
 const procedureInput = z
   .object({
+    quantity: z.number().int().min(1).max(99).nullish(),
     serviceId: z.uuid().nullish(),
     toothNumber: z.number().int().nullish(),
     surfaces: z.array(z.string().min(1).max(20)).max(5).nullish(),

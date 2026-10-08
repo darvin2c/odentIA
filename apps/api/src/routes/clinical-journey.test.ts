@@ -370,17 +370,21 @@ it("recetas: emisión con medicamentos, detalle y anulación con motivo", async 
     notes: "Solo si hay dolor",
     items: [
       {
-        medicationName: "Ibuprofeno 400 mg",
-        dose: "400 mg",
-        route: "Oral",
+        genericName: "ibuprofeno",
+        strength: "400 mg",
+        dosageForm: "tableta",
+        dose: "1 tableta",
+        route: "oral",
         frequency: "Cada 8 horas",
         duration: "3 días",
         quantity: 9,
       },
       {
-        medicationName: "Clorhexidina 0.12%",
-        dose: "15 ml",
-        route: "Enjuague",
+        genericName: "clorhexidina",
+        strength: "0,12 %",
+        dosageForm: "colutorio",
+        dose: "15 mL",
+        route: "bucal tópica",
         frequency: "Cada 12 horas",
         duration: "5 días",
       },
@@ -396,7 +400,33 @@ it("recetas: emisión con medicamentos, detalle y anulación con motivo", async 
   const body = await json<{ data: { items: Array<{ medicationName: string }> } }>(detail)
   expect(
     body.data.items.map((item) => item.medicationName).sort((a, b) => a.localeCompare(b, "es")),
-  ).toEqual(["Clorhexidina 0.12%", "Ibuprofeno 400 mg"])
+  ).toEqual(["clorhexidina 0,12 % colutorio", "ibuprofeno 400 mg tableta"])
+
+  // La hoja impresa lleva el prescriptor con su colegiatura y el paciente.
+  const print = await app.request(`/patients/${patientId}/prescriptions/${prescriptionId}/print`)
+  expect(print.status).toBe(200)
+  const sheet = await json<{
+    data: {
+      prescription: { prescriberRegistration: string | null }
+      patient: { patientNumber: number }
+    }
+  }>(print)
+  expect(sheet.data.prescription.prescriberRegistration).toMatch(/^COP /)
+  expect(sheet.data.patient.patientNumber).toBeGreaterThan(0)
+
+  // Sin DCI la receta no se emite.
+  const noDci = await post(app, `/patients/${patientId}/prescriptions`, {
+    items: [
+      {
+        medicationName: "Ibuprofeno",
+        dose: "1",
+        route: "oral",
+        frequency: "c/8h",
+        duration: "2 días",
+      },
+    ],
+  })
+  expect(noDci.status).toBe(400)
 
   // Sin medicamentos la receta no existe.
   const empty = await post(app, `/patients/${patientId}/prescriptions`, { items: [] })
@@ -874,9 +904,11 @@ it("documentos: carga con vínculos clínicos y corrección versionada", async (
     planItemId: itemId,
     items: [
       {
-        medicationName: "Ibuprofeno",
-        dose: "400 mg",
-        route: "Oral",
+        genericName: "ibuprofeno",
+        strength: "400 mg",
+        dosageForm: "tableta",
+        dose: "1 tableta",
+        route: "oral",
         frequency: "Cada 8 horas",
         duration: "2 días",
       },

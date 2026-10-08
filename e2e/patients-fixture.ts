@@ -221,9 +221,11 @@ export async function grantLegalRepresentative(
 
 const PRESCRIPTION_ITEMS = [
   {
-    medicationName: "Ibuprofeno 400 mg",
-    dose: "400 mg",
-    route: "Oral",
+    genericName: "ibuprofeno",
+    strength: "400 mg",
+    dosageForm: "tableta",
+    dose: "1 tableta",
+    route: "oral",
     frequency: "Cada 8 horas",
     duration: "3 días",
     quantity: null,

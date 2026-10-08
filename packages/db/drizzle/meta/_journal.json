@@ -267,6 +267,13 @@
       "when": 1791479423306,
       "tag": "0037_plan_phases",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1791480172877,
+      "tag": "0038_nota_normativa_receta",
+      "breakpoints": true
     }
   ]
 }

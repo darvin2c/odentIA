@@ -320,6 +320,12 @@ export interface Encounter {
   /** Cita que motivó la atención, si la hubo. */
   appointmentId?: string | null
   reason: string | null
+  /** Nota normativa: enfermedad actual, signos vitales, pronóstico y exámenes. */
+  presentIllness?: string | null
+  illnessDuration?: string | null
+  vitals?: Record<string, number> | null
+  prognosis?: string | null
+  auxiliaryExams?: string | null
   evolution: string | null
   indications: string | null
   nextStep: string | null
@@ -348,6 +354,8 @@ export interface Encounter {
 /** Procedimiento realizado durante una atención. Fechas como ISO string. */
 export interface ProcedureItem {
   id: string
+  /** Unidades del acto; el cargo es precio unitario × cantidad. */
+  quantity?: number
   organizationId?: string
   encounterId: string
   serviceId: string | null

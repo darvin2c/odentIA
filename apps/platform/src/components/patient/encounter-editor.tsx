@@ -1,3 +1,4 @@
+import { formatVitals, parseVitals, VITAL_SIGNS, type Vitals } from "@odentia/clinical"
 import {
   Badge,
   Button,
@@ -66,6 +67,8 @@ export interface EncounterEditorProps {
   onBack: () => void | Promise<void>
 }
 type DraftKey =
+  | NoteKey
+  | "vitals"
   | "reason"
   | "evolution"
   | "indications"
@@ -75,6 +78,9 @@ type DraftKey =
   | "examination"
 
 type SaveState = "saved" | "pending" | "saving" | "error"
+
+/** Campos de texto de la nota normativa que se guardan tal cual (vacío = null). */
+type NoteKey = "presentIllness" | "illnessDuration" | "prognosis" | "auxiliaryExams"
 
 /**
  * Bloques que la atención puede llegar a tener. No son pasos: la consulta nace
@@ -110,7 +116,9 @@ interface ExaminationDraft {
   higieneOral: string
 }
 
-interface DraftValues {
+interface DraftValues extends Record<NoteKey, string> {
+  /** Signos vitales tal como se escriben; el servidor valida rango y unidad. */
+  vitals: Record<string, string>
   reason: string
   evolution: string
   indications: string
@@ -121,7 +129,8 @@ interface DraftValues {
   examination: ExaminationDraft | null
 }
 
-interface DraftPatch {
+interface DraftPatch extends Partial<Record<NoteKey, string | null>> {
+  vitals?: Record<string, string> | null
   reason?: string | null
   evolution?: string | null
   indications?: string | null
@@ -197,6 +206,16 @@ function strMap(value: unknown): Record<string, string> {
 }
 
 /** Examen persistido a borrador editable (sin copiar exámenes antiguos a consultas nuevas: cada atención parte en null). */
+/** Signos vitales guardados como texto editable. */
+function vitalsDraft(raw: unknown): Record<string, string> {
+  if (!raw || typeof raw !== "object") return {}
+  return Object.fromEntries(
+    Object.entries(raw as Record<string, unknown>)
+      .filter(([, value]) => typeof value === "number")
+      .map(([key, value]) => [key, String(value)]),
+  )
+}
+
 function toExaminationDraft(examination: Encounter["examination"]): ExaminationDraft | null {
   if (!examination || typeof examination !== "object") return null
   const extraoral = strMap((examination as Record<string, unknown>).extraoral)
@@ -274,6 +293,15 @@ export function EncounterEditor({
   })
 
   const [reason, setReason] = useState(encounter.reason ?? "")
+  const [notes, setNotes] = useState<Record<NoteKey, string>>(() => ({
+    presentIllness: encounter.presentIllness ?? "",
+    illnessDuration: encounter.illnessDuration ?? "",
+    prognosis: encounter.prognosis ?? "",
+    auxiliaryExams: encounter.auxiliaryExams ?? "",
+  }))
+  const [vitals, setVitals] = useState<Record<string, string>>(() => vitalsDraft(encounter.vitals))
+  const parsed = parseVitals(vitals)
+  const parsedVitals: Vitals | null = parsed.ok ? parsed.value : null
   const [evolution, setEvolution] = useState(encounter.evolution ?? "")
   const [indications, setIndications] = useState(encounter.indications ?? "")
   const [nextStep, setNextStep] = useState(encounter.nextStep ?? "")
@@ -329,6 +357,11 @@ export function EncounterEditor({
   })()
 
   const valuesRef = useRef<DraftValues>({
+    presentIllness: encounter.presentIllness ?? "",
+    illnessDuration: encounter.illnessDuration ?? "",
+    prognosis: encounter.prognosis ?? "",
+    auxiliaryExams: encounter.auxiliaryExams ?? "",
+    vitals: vitalsDraft(encounter.vitals),
     reason: encounter.reason ?? "",
     evolution: encounter.evolution ?? "",
     indications: encounter.indications ?? "",
@@ -401,6 +434,22 @@ export function EncounterEditor({
     const body: DraftPatch = {}
     for (const key of keys) {
       switch (key) {
+        case "presentIllness":
+        case "illnessDuration":
+        case "prognosis":
+        case "auxiliaryExams":
+          body[key] = values[key].trim() === "" ? null : values[key]
+          break
+        case "vitals": {
+          const filled = Object.fromEntries(
+            Object.entries(values.vitals).filter(([, raw]) => raw.trim() !== ""),
+          )
+          // Incompletos o fuera de rango no se envían: el error se muestra en línea
+          // y se guardan al corregirlos.
+          if (!parseVitals(filled).ok) break
+          body.vitals = Object.keys(filled).length > 0 ? filled : null
+          break
+        }
         case "reason":
           body.reason = values.reason === "" ? null : values.reason
           break
@@ -541,6 +590,18 @@ export function EncounterEditor({
       timerRef.current = undefined
       void drain().catch(() => {})
     }, AUTOSAVE_MS)
+  }
+
+  const editNote = (key: NoteKey, value: string) => {
+    valuesRef.current[key] = value
+    setNotes((prev) => ({ ...prev, [key]: value }))
+    markEdited(key)
+  }
+  const editVital = (key: string, value: string) => {
+    const next = { ...valuesRef.current.vitals, [key]: value }
+    valuesRef.current.vitals = next
+    setVitals(next)
+    markEdited("vitals")
   }
 
   const editReason = (value: string) => {
@@ -804,16 +865,19 @@ export function EncounterEditor({
     {
       key: "consulta",
       title: "Consulta",
-      description: "Motivo, sucursal y piezas evaluadas. Es lo único que la atención requiere.",
+      description: "Motivo, enfermedad actual, sucursal y piezas evaluadas.",
       summary: reason.trim() === "" ? "Sin motivo registrado" : reason.trim(),
       empty: reason.trim() === "",
     },
     {
       key: "examen",
       title: "Examen clínico",
-      description: "Examen extraoral, intraoral e higiene oral.",
-      summary: examination ? "Examen registrado" : "Sin examen registrado",
-      empty: examination === null,
+      description: "Signos vitales, examen extraoral, intraoral e higiene oral.",
+      summary:
+        [formatVitals(parsedVitals), examination ? "Examen registrado" : ""]
+          .filter(Boolean)
+          .join(" · ") || "Sin examen registrado",
+      empty: examination === null && Object.values(vitals).every((v) => v.trim() === ""),
     },
     {
       key: "odontograma",
@@ -882,8 +946,9 @@ export function EncounterEditor({
     },
     {
       key: "evolucion",
-      title: "Evolución e indicaciones",
-      description: "Evolución clínica (obligatoria para cerrar), indicaciones y seguimiento.",
+      title: "Evolución, pronóstico e indicaciones",
+      description:
+        "Exámenes auxiliares, pronóstico, evolución (obligatoria para cerrar), indicaciones y seguimiento.",
       summary:
         evolution.trim() === "" && indications.trim() === "" && nextStep.trim() === ""
           ? "Sin evolución registrada"
@@ -994,6 +1059,30 @@ export function EncounterEditor({
           onChange={(event) => editReason(event.target.value)}
         />
       </Field>
+      <Field>
+        <FieldLabel htmlFor={`${uid}-present-illness`}>Enfermedad actual (relato)</FieldLabel>
+        <Textarea
+          id={`${uid}-present-illness`}
+          rows={3}
+          value={notes.presentIllness}
+          disabled={locked}
+          maxLength={4000}
+          placeholder="Inicio, curso, síntomas y lo que lo alivia o empeora…"
+          onChange={(event) => editNote("presentIllness", event.target.value)}
+        />
+      </Field>
+      <Field>
+        <FieldLabel htmlFor={`${uid}-illness-duration`}>Tiempo de enfermedad</FieldLabel>
+        <Input
+          id={`${uid}-illness-duration`}
+          className="sm:w-60"
+          value={notes.illnessDuration}
+          disabled={locked}
+          maxLength={200}
+          placeholder="Ej.: 3 días"
+          onChange={(event) => editNote("illnessDuration", event.target.value)}
+        />
+      </Field>
       <div>
         <p className="text-xs font-medium text-muted-foreground">
           Piezas vinculadas ({teeth.length})
@@ -1024,6 +1113,34 @@ export function EncounterEditor({
 
   const examenBody = (
     <div className="grid gap-3 sm:grid-cols-2">
+      <fieldset className="m-0 flex flex-col gap-2 border-0 p-0 sm:col-span-2">
+        <legend className="mb-1 text-sm font-medium">Signos vitales</legend>
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          {VITAL_SIGNS.map((sign) => (
+            <Field key={sign.key}>
+              <FieldLabel htmlFor={`${uid}-vital-${sign.key}`} className="text-xs">
+                {sign.label} ({sign.suffix})
+              </FieldLabel>
+              <Input
+                id={`${uid}-vital-${sign.key}`}
+                inputMode="decimal"
+                value={vitals[sign.key] ?? ""}
+                disabled={locked}
+                onChange={(event) => editVital(sign.key, event.target.value.replace(",", "."))}
+              />
+            </Field>
+          ))}
+        </div>
+        {parsed.ok ? (
+          <p className="text-xs text-muted-foreground">
+            La presión se registra completa (sistólica y diastólica).
+          </p>
+        ) : (
+          <p role="alert" className="text-xs text-destructive">
+            {parsed.error}. No se guarda hasta corregirlo.
+          </p>
+        )}
+      </fieldset>
       <Field>
         <FieldLabel htmlFor={`${uid}-ex-atm`}>ATM</FieldLabel>
         <Input
@@ -1129,6 +1246,29 @@ export function EncounterEditor({
   const evolucionBody = (
     <div className="flex flex-col gap-4">
       <div className="flex flex-col gap-3">
+        <Field>
+          <FieldLabel htmlFor={`${uid}-aux-exams`}>Exámenes auxiliares</FieldLabel>
+          <Textarea
+            id={`${uid}-aux-exams`}
+            rows={2}
+            value={notes.auxiliaryExams}
+            disabled={locked}
+            maxLength={4000}
+            placeholder="Solicitados o con resultado (radiografías, laboratorio…)"
+            onChange={(event) => editNote("auxiliaryExams", event.target.value)}
+          />
+        </Field>
+        <Field>
+          <FieldLabel htmlFor={`${uid}-prognosis`}>Pronóstico</FieldLabel>
+          <Textarea
+            id={`${uid}-prognosis`}
+            rows={2}
+            value={notes.prognosis}
+            disabled={locked}
+            maxLength={2000}
+            onChange={(event) => editNote("prognosis", event.target.value)}
+          />
+        </Field>
         <Field>
           <FieldLabel htmlFor={`${uid}-evolution`}>Evolución (máx. {MAX_EVOLUTION})</FieldLabel>
           <Textarea

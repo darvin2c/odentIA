@@ -337,3 +337,50 @@ it("el resumen muestra la atención en curso con lo que le falta para cerrarse",
   const after = await f.run((tx) => getPatientSummary(tx, "org_a", f.patient.id))
   expect(after.openEncounter).toMatchObject({ diagnosisCount: 1, missing: [] })
 })
+
+it("la nota normativa valida signos vitales y el cargo multiplica la cantidad", async () => {
+  const f = await clinicalFixture()
+  await expect(
+    f.run((tx) =>
+      updateEncounterDraft(tx, ...f.args, f.encounter.id, { vitals: { presionSistolica: 120 } }),
+    ),
+  ).rejects.toMatchObject({ status: 400 })
+  const updated = await f.run((tx) =>
+    updateEncounterDraft(tx, ...f.args, f.encounter.id, {
+      presentIllness: "Dolor pulsátil desde hace dos días",
+      illnessDuration: "2 días",
+      vitals: { presionSistolica: 120, presionDiastolica: 80, temperatura: "36.6" },
+      prognosis: "Favorable",
+    }),
+  )
+  expect(updated).toMatchObject({
+    illnessDuration: "2 días",
+    vitals: { presionSistolica: 120, presionDiastolica: 80, temperatura: 36.6 },
+  })
+  const proc = await f.run((tx) =>
+    addEncounterProcedure(tx, ...f.args, f.encounter.id, { serviceId: f.service.id, quantity: 3 }),
+  )
+  expect(proc).toMatchObject({ quantity: 3, priceCents: 360000 })
+  await f.ready(f.encounter.id)
+  const closed = await f.run((tx) => finalizeEncounter(tx, ...f.args, f.encounter.id))
+  expect(closed.charges.map((c) => c.amountCents)).toEqual([360000])
+})
+
+it("una categoría CIE-10 con subcódigos no se registra como diagnóstico", async () => {
+  const f = await clinicalFixture()
+  await ownerDb
+    .insert(cie10Code)
+    .values([
+      { code: "K04", description: "Enfermedades de la pulpa y de los tejidos periapicales" },
+      { code: "K04.0", description: "Pulpitis" },
+    ])
+    .onConflictDoNothing()
+  await expect(
+    f.run((tx) =>
+      addEncounterDiagnosis(tx, ...f.args, f.encounter.id, {
+        cie10Code: "K04",
+        diagnosisType: "definitivo",
+      }),
+    ),
+  ).rejects.toMatchObject({ status: 400 })
+})

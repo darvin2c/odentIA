@@ -1558,11 +1558,14 @@ await cancelFollowUp(db, ORG_A, ANA_ID, rosaPatientId, controlEndo.id, {
 await createPrescription(db, ORG_A, ANA_ID, rosaPatientId, {
   planItemId: obt36.id,
   notes: "Solo si aparece dolor no controlado.",
+  diagnosisCode: "K02.1",
   items: [
     {
-      medicationName: "Ibuprofeno 400 mg",
-      dose: "400 mg",
-      route: "Oral",
+      genericName: "ibuprofeno",
+      strength: "400 mg",
+      dosageForm: "tableta",
+      dose: "1 tableta",
+      route: "oral",
       frequency: "Cada 8 horas",
       duration: "3 días",
       quantity: 9,
@@ -1570,12 +1573,16 @@ await createPrescription(db, ORG_A, ANA_ID, rosaPatientId, {
     },
   ],
 })
+// Se emitió confirmando el aviso de alergia por error y se anula: queda la traza.
 const recetaAnulada = await createPrescription(db, ORG_A, ANA_ID, rosaPatientId, {
+  acknowledgeAllergies: true,
   items: [
     {
-      medicationName: "Amoxicilina 500 mg",
-      dose: "500 mg",
-      route: "Oral",
+      genericName: "amoxicilina",
+      strength: "500 mg",
+      dosageForm: "cápsula",
+      dose: "1 cápsula",
+      route: "oral",
       frequency: "Cada 8 horas",
       duration: "7 días",
       quantity: 21,

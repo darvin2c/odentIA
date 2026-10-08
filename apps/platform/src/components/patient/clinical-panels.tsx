@@ -5,6 +5,12 @@
  * un tratamiento, donde quedan acotados por tratamiento y atención. Registrar
  * una receta o un control nunca ejecuta ni cobra nada.
  */
+import {
+  ADMINISTRATION_ROUTES,
+  allergyConflicts,
+  DENTAL_MEDICATIONS,
+  DOSAGE_FORMS,
+} from "@odentia/clinical"
 import { Badge, Button, Field, FieldLabel, Input, Textarea, toast } from "@odentia/ui"
 import { EmptyState, FormDrawer } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
@@ -32,7 +38,8 @@ import {
   type Prescription,
 } from "../../lib/clinical-journey"
 import { usePermission } from "../../lib/crm"
-import type { Encounter, PlanItem } from "../../lib/patients"
+import { type Encounter, fetchPatientHealth, type PlanItem } from "../../lib/patients"
+import { Cie10Search } from "./cie10-search"
 import { FollowUpScheduler } from "./follow-up-scheduler"
 
 const MAX_TITLE = 200
@@ -586,8 +593,10 @@ function PrescriptionEntry({
           <ul className="flex flex-col gap-1 text-sm">
             {rows.map((item) => (
               <li key={item.id}>
-                {item.medicationName} · {item.dose} · {item.route} · {item.frequency} ·{" "}
-                {item.duration}
+                {item.medicationName}
+                {item.brandName ? ` (${item.brandName})` : ""} · {item.dose} · vía {item.route} ·{" "}
+                {item.frequency} · {item.duration}
+                {item.quantity ? ` · cantidad ${item.quantity}` : ""}
                 {item.instructions ? ` · ${item.instructions}` : ""}
               </li>
             ))}
@@ -601,6 +610,34 @@ function PrescriptionEntry({
           <p role="alert" className="text-sm text-destructive">
             {error}
           </p>
+        ) : null}
+        {prescription.prescriberName ? (
+          <p className="text-xs text-muted-foreground">
+            Prescribe {prescription.prescriberName}
+            {prescription.prescriberRegistration ? ` · ${prescription.prescriberRegistration}` : ""}
+            {prescription.validUntil
+              ? ` · válida hasta ${formatDate(prescription.validUntil)}`
+              : ""}
+          </p>
+        ) : null}
+        {prescription.status === "emitida" ? (
+          <div>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              nativeButton={false}
+              render={
+                <Link
+                  to="/patients/$patientId/prescriptions/$prescriptionId/print"
+                  params={{ patientId, prescriptionId: prescription.id }}
+                  target="_blank"
+                />
+              }
+            >
+              Imprimir
+            </Button>
+          </div>
         ) : null}
         {canWrite && prescription.status === "emitida" ? (
           <div>
@@ -653,22 +690,30 @@ function PrescriptionEntry({
 
 interface MedicationDraft {
   key: string
-  medicationName: string
+  genericName: string
+  brandName: string
+  strength: string
+  dosageForm: string
   dose: string
   route: string
   frequency: string
   duration: string
+  quantity: string
   instructions: string
 }
 
 function emptyMedication(): MedicationDraft {
   return {
     key: crypto.randomUUID(),
-    medicationName: "",
+    genericName: "",
+    brandName: "",
+    strength: "",
+    dosageForm: "",
     dose: "",
-    route: "Oral",
+    route: "oral",
     frequency: "",
     duration: "",
+    quantity: "",
     instructions: "",
   }
 }
@@ -705,8 +750,26 @@ export function RecetasPanel({
   // recorrido abierto y no una selección previa de otra pantalla.
   const planItemId = itemId ?? planItemIdState
   const [notes, setNotes] = useState("")
-  const [medications, setMedications] = useState<MedicationDraft[]>([emptyMedication()])
+  const [diagnosisCode, setDiagnosisCode] = useState("")
+  const [validUntil, setValidUntil] = useState("")
+  const [acknowledged, setAcknowledged] = useState(false)
   const [createOpen, setCreateOpen] = useState(false)
+  const [medications, setMedications] = useState<MedicationDraft[]>([emptyMedication()])
+  // Alergias registradas: el aviso aparece al escribir la DCI, antes de emitir.
+  const healthQuery = useQuery({
+    queryKey: ["patient-health", patientId],
+    queryFn: () => fetchPatientHealth(patientId),
+    enabled: canRead && createOpen,
+  })
+  const allergySubstances = (healthQuery.data?.data.allergies ?? [])
+    .filter((allergy) => allergy.isActive)
+    .map((allergy) => allergy.substance)
+  const conflicts = medications.flatMap((medication) =>
+    allergyConflicts(medication.genericName, allergySubstances).map(
+      (conflict) =>
+        `${medication.genericName}: alergia a ${conflict.substance} (${conflict.reason})`,
+    ),
+  )
   const [error, setError] = useState<string | null>(null)
   const createMutation = useMutation({
     mutationFn: () =>
@@ -714,18 +777,28 @@ export function RecetasPanel({
         encounterId: encounterId ?? null,
         planItemId: planItemId || null,
         notes: notes.trim() || null,
+        diagnosisCode: diagnosisCode || null,
+        validUntil: validUntil || null,
+        acknowledgeAllergies: conflicts.length > 0 && acknowledged,
         items: medications.map((medication) => ({
-          medicationName: medication.medicationName.trim(),
+          genericName: medication.genericName.trim(),
+          brandName: medication.brandName.trim() || null,
+          strength: medication.strength.trim(),
+          dosageForm: medication.dosageForm.trim(),
           dose: medication.dose.trim(),
-          route: medication.route.trim(),
+          route: medication.route,
           frequency: medication.frequency.trim(),
           duration: medication.duration.trim(),
+          quantity: medication.quantity.trim() ? Number(medication.quantity) : null,
           instructions: medication.instructions.trim() || null,
         })),
       }),
     onSuccess: () => {
       setMedications([emptyMedication()])
       setNotes("")
+      setDiagnosisCode("")
+      setValidUntil("")
+      setAcknowledged(false)
       setCreateOpen(false)
       setError(null)
       toast.success("Receta emitida.")
@@ -813,14 +886,21 @@ export function RecetasPanel({
           event.preventDefault()
           const incomplete = medications.some(
             (medication) =>
-              !medication.medicationName.trim() ||
+              !medication.genericName.trim() ||
+              !medication.strength.trim() ||
+              !medication.dosageForm.trim() ||
               !medication.dose.trim() ||
-              !medication.route.trim() ||
               !medication.frequency.trim() ||
               !medication.duration.trim(),
           )
           if (incomplete) {
-            setError("Completa medicamento, dosis, vía, frecuencia y duración.")
+            setError(
+              "Completa DCI, concentración, forma farmacéutica, dosis, frecuencia y duración.",
+            )
+            return
+          }
+          if (conflicts.length > 0 && !acknowledged) {
+            setError("Revisa el aviso de alergia y confírmalo para emitir.")
             return
           }
           createMutation.mutate()
@@ -859,33 +939,80 @@ export function RecetasPanel({
             >
               <legend className="px-1 text-sm font-medium">Medicamento {index + 1}</legend>
               <Field>
-                <FieldLabel htmlFor={`${uid}-med-${medication.key}`}>Medicamento</FieldLabel>
+                <FieldLabel htmlFor={`${uid}-med-${medication.key}`}>
+                  DCI (denominación común)
+                </FieldLabel>
                 <Input
                   id={`${uid}-med-${medication.key}`}
+                  list={`${uid}-dci`}
                   maxLength={MAX_TITLE}
-                  value={medication.medicationName}
-                  onChange={(event) =>
-                    patchMedication(index, { medicationName: event.target.value })
-                  }
+                  value={medication.genericName}
+                  onChange={(event) => patchMedication(index, { genericName: event.target.value })}
                 />
+              </Field>
+              <Field>
+                <FieldLabel htmlFor={`${uid}-brand-${medication.key}`}>
+                  Nombre comercial (opcional)
+                </FieldLabel>
+                <Input
+                  id={`${uid}-brand-${medication.key}`}
+                  maxLength={MAX_TITLE}
+                  value={medication.brandName}
+                  onChange={(event) => patchMedication(index, { brandName: event.target.value })}
+                />
+              </Field>
+              <Field>
+                <FieldLabel htmlFor={`${uid}-strength-${medication.key}`}>Concentración</FieldLabel>
+                <Input
+                  id={`${uid}-strength-${medication.key}`}
+                  maxLength={60}
+                  placeholder="Ej.: 500 mg"
+                  value={medication.strength}
+                  onChange={(event) => patchMedication(index, { strength: event.target.value })}
+                />
+              </Field>
+              <Field>
+                <FieldLabel htmlFor={`${uid}-form-${medication.key}`}>
+                  Forma farmacéutica
+                </FieldLabel>
+                <select
+                  id={`${uid}-form-${medication.key}`}
+                  className="h-9 rounded-md border bg-background px-3 text-sm"
+                  value={medication.dosageForm}
+                  onChange={(event) => patchMedication(index, { dosageForm: event.target.value })}
+                >
+                  <option value="">Elige la forma…</option>
+                  {DOSAGE_FORMS.map((form) => (
+                    <option key={form} value={form}>
+                      {form}
+                    </option>
+                  ))}
+                </select>
               </Field>
               <Field>
                 <FieldLabel htmlFor={`${uid}-dose-${medication.key}`}>Dosis</FieldLabel>
                 <Input
                   id={`${uid}-dose-${medication.key}`}
                   maxLength={MAX_TITLE}
+                  placeholder="Ej.: 1 tableta"
                   value={medication.dose}
                   onChange={(event) => patchMedication(index, { dose: event.target.value })}
                 />
               </Field>
               <Field>
                 <FieldLabel htmlFor={`${uid}-route-${medication.key}`}>Vía</FieldLabel>
-                <Input
+                <select
                   id={`${uid}-route-${medication.key}`}
-                  maxLength={MAX_TITLE}
+                  className="h-9 rounded-md border bg-background px-3 text-sm"
                   value={medication.route}
                   onChange={(event) => patchMedication(index, { route: event.target.value })}
-                />
+                >
+                  {ADMINISTRATION_ROUTES.map((route) => (
+                    <option key={route} value={route}>
+                      {route}
+                    </option>
+                  ))}
+                </select>
               </Field>
               <Field>
                 <FieldLabel htmlFor={`${uid}-frequency-${medication.key}`}>Frecuencia</FieldLabel>
@@ -903,6 +1030,18 @@ export function RecetasPanel({
                   maxLength={MAX_TITLE}
                   value={medication.duration}
                   onChange={(event) => patchMedication(index, { duration: event.target.value })}
+                />
+              </Field>
+              <Field>
+                <FieldLabel htmlFor={`${uid}-qty-${medication.key}`}>Cantidad total</FieldLabel>
+                <Input
+                  id={`${uid}-qty-${medication.key}`}
+                  type="number"
+                  inputMode="numeric"
+                  min={1}
+                  max={9999}
+                  value={medication.quantity}
+                  onChange={(event) => patchMedication(index, { quantity: event.target.value })}
                 />
               </Field>
               <Field>
@@ -939,6 +1078,48 @@ export function RecetasPanel({
               </Button>
             ) : null}
           </div>
+          <datalist id={`${uid}-dci`}>
+            {DENTAL_MEDICATIONS.map((medication) => (
+              <option key={medication.dci} value={medication.dci} />
+            ))}
+          </datalist>
+          {conflicts.length > 0 ? (
+            <div
+              role="alert"
+              className="flex flex-col gap-2 rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm"
+            >
+              <p className="font-medium">Alergia registrada</p>
+              <ul className="list-disc pl-5">
+                {conflicts.map((line) => (
+                  <li key={line}>{line}</li>
+                ))}
+              </ul>
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={acknowledged}
+                  onChange={(event) => setAcknowledged(event.target.checked)}
+                />
+                Lo revisé y prescribo igualmente (queda registrado).
+              </label>
+            </div>
+          ) : null}
+          <Cie10Search
+            label="Diagnóstico (CIE-10, opcional)"
+            value={diagnosisCode}
+            onChange={(code) => setDiagnosisCode(code)}
+          />
+          <Field>
+            <FieldLabel htmlFor={`${uid}-rx-valid`}>Válida hasta (opcional)</FieldLabel>
+            <Input
+              id={`${uid}-rx-valid`}
+              type="date"
+              className="w-44"
+              min={new Date().toISOString().slice(0, 10)}
+              value={validUntil}
+              onChange={(event) => setValidUntil(event.target.value)}
+            />
+          </Field>
           <Field>
             <FieldLabel htmlFor={`${uid}-rx-notes`}>Notas de la receta</FieldLabel>
             <Textarea

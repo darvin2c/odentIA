@@ -1,27 +1,24 @@
 import {
   activeFindingsAsOf,
   BLOOD_GROUPS,
-  registrationAnswersSchema,
   type BloodGroup,
-  type RegistrationAnswers,
   type FindingDetails,
   type FindingInput,
   type FindingRecord,
   isValidTooth,
   normalizeTags,
   ODONTOGRAM_STANDARD,
+  type RegistrationAnswers,
+  registrationAnswersSchema,
   validateFinding,
 } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import {
   cie10Code,
+  clinicalFollowUp,
   clinicalNote,
   encounter,
   encounterProcedure,
-  clinicalFollowUp,
-  prescription,
-  patientPayment,
-  treatmentBudget,
   encounterTooth,
   odontogramAssessment,
   odontogramEntry,
@@ -32,7 +29,10 @@ import {
   patientDocument,
   patientDocumentContext,
   patientMedication,
+  patientPayment,
   patientRegistration,
+  prescription,
+  treatmentBudget,
   treatmentPlanItem,
 } from "@odentia/db/schema/clinical"
 import { auditEvent } from "@odentia/db/schema/org"
@@ -453,28 +453,52 @@ function assertReviewStatus(input: HealthReviewStatusInput): {
 }
 export type DeclaredPatientHealthInput = NonNullable<RegistrationAnswers["health"]>
 
-export async function initializeDeclaredPatientHealth(tx: Db, orgId: string, patientId: string, input: DeclaredPatientHealthInput, actorUserId: string | null): Promise<PatientHealth> {
+export async function initializeDeclaredPatientHealth(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+  input: DeclaredPatientHealthInput,
+  actorUserId: string | null,
+): Promise<PatientHealth> {
   const parsed = registrationAnswersSchema.shape.health.safeParse(input)
   if (!parsed.success || !parsed.data) throw validation("Declaración de salud inválida")
   const declared = parsed.data
-  const hasData = declared.bloodGroup != null ||
-    [declared.allergies, declared.conditions, declared.medications].some(group => group && group.state !== "unanswered") ||
+  const hasData =
+    declared.bloodGroup != null ||
+    [declared.allergies, declared.conditions, declared.medications].some(
+      (group) => group && group.state !== "unanswered",
+    ) ||
     Object.values(declared.dental ?? {}).some(Boolean)
   if (!hasData) return getPatientHealth(tx, orgId, patientId)
-  const state = (value: string | undefined) => value === "none" || value === "recorded" ? value : "unknown"
-  const dental = Object.fromEntries(Object.entries(declared.dental ?? {}).filter(([, value]) => value !== ""))
+  const state = (value: string | undefined) =>
+    value === "none" || value === "recorded" ? value : "unknown"
+  const dental = Object.fromEntries(
+    Object.entries(declared.dental ?? {}).filter(([, value]) => value !== ""),
+  )
   return persistPatientHealth(tx, orgId, { kind: "declaration", userId: actorUserId }, patientId, {
     expectedRevision: 0,
     bloodGroup: declared.bloodGroup,
-    reviewStatus: { allergies: state(declared.allergies?.state), conditions: state(declared.conditions?.state), medications: state(declared.medications?.state) },
-    allergies: (declared.allergies?.items ?? []).map(item => ({ ...item, isActive: true })),
-    conditions: (declared.conditions?.items ?? []).map(item => ({ ...item, status: "activa" })),
+    reviewStatus: {
+      allergies: state(declared.allergies?.state),
+      conditions: state(declared.conditions?.state),
+      medications: state(declared.medications?.state),
+    },
+    allergies: (declared.allergies?.items ?? []).map((item) => ({ ...item, isActive: true })),
+    conditions: (declared.conditions?.items ?? []).map((item) => ({ ...item, status: "activa" })),
     medications: declared.medications?.items ?? [],
-    ...(Object.keys(dental).length ? { anamnesis: { expectedVersion: 0, answers: { antecedentesOdontologicos: dental } } } : {}),
+    ...(Object.keys(dental).length
+      ? { anamnesis: { expectedVersion: 0, answers: { antecedentesOdontologicos: dental } } }
+      : {}),
   })
 }
 
-export async function savePatientHealth(tx: Db, orgId: string, actorUserId: string, patientId: string, input: SavePatientHealthInput): Promise<PatientHealth> {
+export async function savePatientHealth(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  patientId: string,
+  input: SavePatientHealthInput,
+): Promise<PatientHealth> {
   return persistPatientHealth(tx, orgId, { kind: "staff", userId: actorUserId }, patientId, input)
 }
 
@@ -486,7 +510,8 @@ async function persistPatientHealth(
   input: SavePatientHealthInput,
 ): Promise<PatientHealth> {
   const actorUserId = context.userId
-  if (input.bloodGroup != null && !(BLOOD_GROUPS as readonly string[]).includes(input.bloodGroup)) throw validation("Grupo sanguíneo inválido")
+  if (input.bloodGroup != null && !(BLOOD_GROUPS as readonly string[]).includes(input.bloodGroup))
+    throw validation("Grupo sanguíneo inválido")
   await requirePatient(tx, orgId, patientId)
   // Lock del paciente: serializa revisiones concurrentes del agregado.
   const [locked] = await tx
@@ -507,9 +532,29 @@ async function persistPatientHealth(
     )
   }
   if (context.kind === "declaration") {
-    const [registration] = await tx.select({ id: patientRegistration.id }).from(patientRegistration).where(and(eq(patientRegistration.organizationId, orgId), eq(patientRegistration.patientId, patientId))).limit(1)
+    const [registration] = await tx
+      .select({ id: patientRegistration.id })
+      .from(patientRegistration)
+      .where(
+        and(
+          eq(patientRegistration.organizationId, orgId),
+          eq(patientRegistration.patientId, patientId),
+        ),
+      )
+      .limit(1)
     const previous = await getPatientHealth(tx, orgId, patientId)
-    if (!registration || locked.revision !== 0 || previous.latestAnamnesis || previous.allergies.length || previous.conditions.length || previous.medications.length) throw conflict("HEALTH_ALREADY_INITIALIZED", "La declaración inicial requiere una ficha nueva sin antecedentes")
+    if (
+      !registration ||
+      locked.revision !== 0 ||
+      previous.latestAnamnesis ||
+      previous.allergies.length ||
+      previous.conditions.length ||
+      previous.medications.length
+    )
+      throw conflict(
+        "HEALTH_ALREADY_INITIALIZED",
+        "La declaración inicial requiere una ficha nueva sin antecedentes",
+      )
   }
   if (
     !Array.isArray(input.allergies) ||
@@ -760,17 +805,25 @@ async function persistPatientHealth(
       updatedAt: new Date(),
     })
     .where(and(eq(patient.id, patientId), eq(patient.organizationId, orgId)))
-  await audit(tx, orgId, actorUserId, context.kind === "staff" ? "health.saved" : "health.declared", "patient", patientId, {
-    revision: { before: locked.revision, after: locked.revision + 1 },
-    reviewStatus,
-    counts: {
-      allergies: allergies.length,
-      conditions: conditions.length,
-      medications: medications.length,
+  await audit(
+    tx,
+    orgId,
+    actorUserId,
+    context.kind === "staff" ? "health.saved" : "health.declared",
+    "patient",
+    patientId,
+    {
+      revision: { before: locked.revision, after: locked.revision + 1 },
+      reviewStatus,
+      counts: {
+        allergies: allergies.length,
+        conditions: conditions.length,
+        medications: medications.length,
+      },
+      newInterviewVersion: newVersion,
+      dataConsent: setConsent,
     },
-    newInterviewVersion: newVersion,
-    dataConsent: setConsent,
-  })
+  )
   return getPatientHealth(tx, orgId, patientId)
 }
 
@@ -1501,15 +1554,24 @@ async function requireDocumentRow(tx: Db, orgId: string, patientId: string, docu
 
 function extendedDocumentLinks(input: DocumentContextInput, current?: DocumentContextRow) {
   return {
-    budgetId: input.budgetId === undefined ? current?.budgetId ?? null : input.budgetId,
-    encounterProcedureId: input.encounterProcedureId === undefined ? current?.encounterProcedureId ?? null : input.encounterProcedureId,
-    prescriptionId: input.prescriptionId === undefined ? current?.prescriptionId ?? null : input.prescriptionId,
-    followUpId: input.followUpId === undefined ? current?.followUpId ?? null : input.followUpId,
-    paymentId: input.paymentId === undefined ? current?.paymentId ?? null : input.paymentId,
+    budgetId: input.budgetId === undefined ? (current?.budgetId ?? null) : input.budgetId,
+    encounterProcedureId:
+      input.encounterProcedureId === undefined
+        ? (current?.encounterProcedureId ?? null)
+        : input.encounterProcedureId,
+    prescriptionId:
+      input.prescriptionId === undefined ? (current?.prescriptionId ?? null) : input.prescriptionId,
+    followUpId: input.followUpId === undefined ? (current?.followUpId ?? null) : input.followUpId,
+    paymentId: input.paymentId === undefined ? (current?.paymentId ?? null) : input.paymentId,
   }
 }
 
-async function validateExtendedDocumentLinks(tx: Db, orgId: string, patientId: string, input: DocumentContextInput) {
+async function validateExtendedDocumentLinks(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+  input: DocumentContextInput,
+) {
   for (const [id, table, label] of [
     [input.budgetId, treatmentBudget, "Presupuesto"],
     [input.prescriptionId, prescription, "Receta"],
@@ -1517,15 +1579,30 @@ async function validateExtendedDocumentLinks(tx: Db, orgId: string, patientId: s
     [input.paymentId, patientPayment, "Pago"],
   ] as const) {
     if (!id) continue
-    const [row] = await tx.select({ id: table.id }).from(table)
+    const [row] = await tx
+      .select({ id: table.id })
+      .from(table)
       .where(and(eq(table.id, id), eq(table.organizationId, orgId), eq(table.patientId, patientId)))
     if (!row) throw notFound(label)
   }
   if (input.encounterProcedureId) {
-    const [row] = await tx.select({ id: encounterProcedure.id }).from(encounterProcedure)
-      .innerJoin(encounter, and(eq(encounter.id, encounterProcedure.encounterId),
-        eq(encounter.organizationId, orgId), eq(encounter.patientId, patientId)))
-      .where(and(eq(encounterProcedure.id, input.encounterProcedureId), eq(encounterProcedure.organizationId, orgId)))
+    const [row] = await tx
+      .select({ id: encounterProcedure.id })
+      .from(encounterProcedure)
+      .innerJoin(
+        encounter,
+        and(
+          eq(encounter.id, encounterProcedure.encounterId),
+          eq(encounter.organizationId, orgId),
+          eq(encounter.patientId, patientId),
+        ),
+      )
+      .where(
+        and(
+          eq(encounterProcedure.id, input.encounterProcedureId),
+          eq(encounterProcedure.organizationId, orgId),
+        ),
+      )
     if (!row) throw notFound("Procedimiento")
   }
 }
@@ -1841,12 +1918,35 @@ export async function listEncounterDocuments(
     .map((entry) => mergeDocumentContext(entry.doc, entry.ctx))
 }
 
+/**
+ * Búsqueda por código o descripción. Cada fila dice si es una categoría de
+ * tres caracteres con subcódigos: esas no se registran como diagnóstico, se
+ * usa el subcódigo más específico (regla de codificación de la CIE-10).
+ */
 export async function searchCie10(tx: Db, q: string, limit = 20) {
   const like = `%${q}%`
   return tx
-    .select()
+    .select({
+      code: cie10Code.code,
+      description: cie10Code.description,
+      isCategory: sql<boolean>`exists (select 1 from ${cie10Code} as sub where sub.code like ${cie10Code.code} || '.%')`,
+    })
     .from(cie10Code)
     .where(sql`${cie10Code.code} ilike ${like} or ${cie10Code.description} ilike ${like}`)
     .orderBy(asc(cie10Code.code))
     .limit(Math.min(Math.max(limit, 1), 50))
+}
+
+/** Falla si el código es una categoría con subcódigos (no es codificable). */
+export async function assertCodableCie10(tx: Db, code: string): Promise<void> {
+  if (code.includes(".")) return
+  const [sub] = await tx
+    .select({ code: cie10Code.code })
+    .from(cie10Code)
+    .where(sql`${cie10Code.code} like ${`${code}.%`}`)
+    .limit(1)
+  if (sub)
+    throw validation(
+      `${code} es una categoría: registra el subcódigo más específico (p. ej. ${sub.code})`,
+    )
 }

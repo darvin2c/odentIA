@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest"
 import type { FindingRecord } from "./index.js"
 import {
+  allergyConflicts,
+  formatVitals,
+  parseVitals,
   activeFindingsAsOf,
   conditionLabel,
   FINDINGS,
@@ -531,5 +534,35 @@ describe("normalizeTags", () => {
   it("el límite cuenta únicas canónicas, no crudas", () => {
     const twenty = Array.from({ length: MAX_TAGS }, (_, i) => `tag-${i}`)
     expect(normalizeTags([...twenty, " TAG_0 "])).toEqual(twenty)
+  })
+})
+
+describe("signos vitales", () => {
+  it("normaliza decimales y exige presión completa y plausible", () => {
+    expect(parseVitals({ temperatura: "36.54", frecuenciaCardiaca: 72 })).toEqual({
+      ok: true,
+      value: { temperatura: 36.5, frecuenciaCardiaca: 72 },
+    })
+    expect(parseVitals({ presionSistolica: 120 })).toMatchObject({ ok: false })
+    expect(parseVitals({ presionSistolica: 80, presionDiastolica: 120 })).toMatchObject({
+      ok: false,
+    })
+    expect(parseVitals({ temperatura: 50 })).toMatchObject({ ok: false })
+    expect(parseVitals({ glucosa: 90 })).toMatchObject({ ok: false })
+    expect(parseVitals({ temperatura: "" })).toEqual({ ok: true, value: null })
+    expect(formatVitals({ presionSistolica: 120, presionDiastolica: 80, temperatura: 36.5 })).toBe(
+      "PA 120/80 mmHg · T 36.5 °C",
+    )
+  })
+})
+
+describe("alergias al prescribir", () => {
+  it("advierte la misma sustancia, el mismo grupo y la reactividad cruzada", () => {
+    expect(allergyConflicts("Amoxicilina", ["Amoxicilina"])[0]?.reason).toBe("misma sustancia")
+    expect(allergyConflicts("amoxicilina", ["Penicilina"])[0]?.reason).toMatch(/mismo grupo/)
+    expect(allergyConflicts("cefalexina", ["penicilina G"])[0]?.reason).toMatch(/cruzada/)
+    expect(allergyConflicts("ibuprofeno", ["Aspirina"])[0]?.reason).toMatch(/cruzada/)
+    expect(allergyConflicts("clindamicina", ["Penicilina"])).toEqual([])
+    expect(allergyConflicts("paracetamol", ["Látex"])).toEqual([])
   })
 })

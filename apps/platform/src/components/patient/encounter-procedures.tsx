@@ -3,7 +3,9 @@ import {
   Badge,
   Button,
   Field,
+  FieldDescription,
   FieldLabel,
+  Input,
   Select,
   SelectContent,
   SelectItem,
@@ -101,6 +103,7 @@ export function EncounterProcedures({
   const [freeDescription, setFreeDescription] = useState("")
   const [site, setSite] = useState<ToothSite>(NO_SITE)
   const [quadrant, setQuadrant] = useState("")
+  const [quantity, setQuantity] = useState("1")
   const [arch, setArch] = useState("")
   const [cie, setCie] = useState("")
   const [planSel, setPlanSel] = useState<string>("")
@@ -175,11 +178,15 @@ export function EncounterProcedures({
     setSite({ toothNumber: linked.toothNumber, surfaces: linked.surfaces ?? [] })
   }
 
+  const quantityNumber = Number(quantity)
+  const quantityValid =
+    Number.isInteger(quantityNumber) && quantityNumber >= 1 && quantityNumber <= 99
   const canSubmit =
     canWrite &&
     !finalized &&
     !busy &&
     siteComplete &&
+    quantityValid &&
     (Boolean(selectedPlan) || serviceId !== "" || (freeMode && freeDescription.trim() !== ""))
   const isDirty =
     serviceId !== "" ||
@@ -193,6 +200,7 @@ export function EncounterProcedures({
     setSite(NO_SITE)
     setQuadrant("")
     setArch("")
+    setQuantity("1")
     setCie("")
     setPlanSel("")
     setFreeMode(false)
@@ -213,6 +221,7 @@ export function EncounterProcedures({
             description: freeDescription.trim(),
             toothNumber: tooth,
             surfaces: site.surfaces,
+            quantity: quantityNumber,
             diagnosisCode,
           }
         : {
@@ -221,6 +230,7 @@ export function EncounterProcedures({
             ...(scope === "surfaces" ? { surfaces: site.surfaces } : {}),
             ...(scope === "quadrant" ? { quadrant: Number(quadrant) } : {}),
             ...(scope === "arch" ? { arch } : {}),
+            quantity: quantityNumber,
             diagnosisCode,
           }
     onPendingChange(true)
@@ -340,6 +350,7 @@ export function EncounterProcedures({
                       ) : null}
                       <p className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                         <span>{procedureSiteLabel(proc)}</span>
+                        {(proc.quantity ?? 1) > 1 ? <span>× {proc.quantity}</span> : null}
                         {proc.diagnosisCode ? <Badge>CIE-10 {proc.diagnosisCode}</Badge> : null}
                         {proc.planItemId ? (
                           linked ? (
@@ -510,6 +521,27 @@ export function EncounterProcedures({
                       <SelectItem value="lower">Arcada inferior</SelectItem>
                     </SelectContent>
                   </Select>
+                </Field>
+              ) : null}
+
+              {!selectedPlan ? (
+                <Field>
+                  <FieldLabel htmlFor={`${uid}-quantity`}>Cantidad</FieldLabel>
+                  <Input
+                    id={`${uid}-quantity`}
+                    type="number"
+                    inputMode="numeric"
+                    min={1}
+                    max={99}
+                    className="w-24"
+                    value={quantity}
+                    aria-invalid={!quantityValid}
+                    disabled={busy}
+                    onChange={(event) => setQuantity(event.target.value)}
+                  />
+                  <FieldDescription>
+                    Unidades realizadas (p. ej. 3 sellantes); el cargo es precio × cantidad.
+                  </FieldDescription>
                 </Field>
               ) : null}
 

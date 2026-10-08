@@ -174,9 +174,11 @@ it("traza alternativas, propuesta versionada, representante, sesiones y evidenci
       encounterId: second.id,
       items: [
         {
-          medicationName: "Medicamento",
+          genericName: "paracetamol",
+          strength: "500 mg",
+          dosageForm: "tableta",
           dose: "Dosis",
-          route: "Oral",
+          route: "oral",
           frequency: "Indicada",
           duration: "Indicada",
         },
