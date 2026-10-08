@@ -217,20 +217,31 @@ it("cada subruta del paciente exige solo el permiso de su dominio", async () => 
   ])
   expect((await get("dentist", "/coordination")).status).toBe(200)
   expect((await get("cashier", "/coordination")).status).toBe(403)
+  // Cada lectura clínica atendida deja traza; la lee solo quien audita. Todos
+  // los roles de prueba comparten usuario: se compara el contador de la franja.
+  const readLog = async () => {
+    const log = await buildApp("admin").request(`/patients/${patientId}/access-log`, {
+      method: "GET",
+    })
+    expect(log.status).toBe(200)
+    return ((await log.json()) as { data: { resource: string; hits: number }[] }).data
+  }
+  const hitsOf = (entries: { resource: string; hits: number }[], resource: string) =>
+    entries.find((entry) => entry.resource === resource)?.hits ?? 0
   // La ficha completa lleva antecedentes para quien atiende: deja traza; para
   // recepción llega sin salud y no la deja.
+  const before = hitsOf(await readLog(), "antecedentes")
   expect((await get("dentist", "")).status).toBe(200)
+  const afterDentist = hitsOf(await readLog(), "antecedentes")
+  expect(afterDentist).toBe(before + 1)
   expect((await get("reception", "")).status).toBe(200)
-  // Cada lectura clínica atendida deja traza; la lee solo quien audita.
-  const log = await buildApp("admin").request(`/patients/${patientId}/access-log`, { method: "GET" })
-  expect(log.status).toBe(200)
-  const entries = ((await log.json()) as { data: { resource: string; hits: number }[] }).data
+  const entries = await readLog()
+  expect(hitsOf(entries, "antecedentes")).toBe(afterDentist)
   expect(entries.map((entry) => entry.resource).sort()).toEqual([
     "antecedentes",
     "controles",
     "recetas",
   ])
-  expect(entries.find((entry) => entry.resource === "antecedentes")?.hits).toBe(1)
   expect((await get("dentist", "/access-log")).status).toBe(403)
   expect((await get("reception", "/access-log")).status).toBe(403)
   expect((await get("cashier", "/account")).status).toBe(200)
