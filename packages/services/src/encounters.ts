@@ -1,27 +1,33 @@
 import { assertTreatmentSite, VALID_FDI_TEETH } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
+import { appointment } from "@odentia/db/schema/agenda"
 import {
   cie10Code,
+  clinicalFollowUp,
   clinicalNote,
   encounter,
+  encounterDiagnosis,
   encounterPlanItem,
   encounterProcedure,
   encounterTooth,
   odontogramEntry,
   patient,
   patientCharge,
+  prescription,
   treatmentBudget,
   treatmentPlan,
   treatmentPlanItem,
 } from "@odentia/db/schema/clinical"
 import { member } from "@odentia/db/schema/auth"
 import { auditEvent, branch } from "@odentia/db/schema/org"
-import { and, asc, desc, eq, inArray, isNull, lt, or, sql } from "drizzle-orm"
+import { and, asc, desc, eq, inArray, isNotNull, isNull, lt, ne, or, sql } from "drizzle-orm"
+import { setAppointmentStatus } from "./appointments.js"
 import { listEncounterDocuments, type PatientDocumentWithContext } from "./clinical.js"
 import { decodeCursor, encodeCursor } from "./cursors.js"
 import { isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
 import { requirePatient } from "./patients.js"
 import { createCharge } from "./payments.js"
+import { requireProfessionalSignature } from "./professional-profiles.js"
 import {
   addPlanItem,
   createTreatmentPlan,
@@ -34,6 +40,7 @@ import { requireServiceForIndication } from "./service-catalog.js"
 
 export type EncounterRow = typeof encounter.$inferSelect
 export type EncounterProcedureRow = typeof encounterProcedure.$inferSelect
+export type EncounterDiagnosisRow = typeof encounterDiagnosis.$inferSelect
 export type EncounterNoteRow = typeof clinicalNote.$inferSelect
 export type EncounterOdontogramRow = typeof odontogramEntry.$inferSelect
 /** Documento con vínculos, piezas y etiquetas de su revisión vigente. */
@@ -43,6 +50,11 @@ export type EncounterPlannedItemRow = typeof treatmentPlanItem.$inferSelect
 export interface CreateEncounterInput {
   /** Motivo de la visita: obligatorio al abrir (1–2000 caracteres). */
   reason: string
+  /**
+   * Cita que motiva la atención (mismo paciente). Hereda sede y profesional;
+   * al cerrar la atención la cita pasa a «atendida».
+   */
+  appointmentId?: string | null
   branchId?: string | null
   /** Profesional que atiende; por defecto quien abre. Debe ser miembro de la organización. */
   dentistUserId?: string | null
@@ -87,6 +99,8 @@ export interface AddEncounterProcedureInput {
   planItemId?: string | null
   /** Acto libre (sin servicio ni tratamiento): descripción obligatoria; nunca genera cargo. */
   description?: string | null
+  /** Hallazgo del odontograma que trata un servicio directo; queda tratado al cerrar. */
+  odontogramEntryId?: string | null
 }
 
 export interface ListEncountersInput {
@@ -98,8 +112,11 @@ export interface ListEncountersInput {
 export interface EncounterDetail {
   encounter: EncounterRow
   teeth: number[]
+  /** Incluye los anulados (con motivo) para conservar la traza del borrador. */
   procedures: EncounterProcedureRow[]
-  /** clinical_note con kind='evolucion', orden ascendente determinista. */
+  /** Diagnósticos CIE-10 de la atención, anulados incluidos. */
+  diagnoses: EncounterDiagnosisRow[]
+  /** Notas de evolución sin código (los diagnósticos históricos viven en `diagnoses`). */
   notes: EncounterNoteRow[]
   odontogramEntries: EncounterOdontogramRow[]
   documents: EncounterDocumentRow[]
@@ -112,7 +129,7 @@ export interface EncounterDetail {
 }
 
 const PAGE_DEFAULT = 30
-const ENCOUNTER_STATUSES = ["borrador", "finalizada"] as const
+export const ENCOUNTER_STATUSES = ["borrador", "finalizada", "anulada"] as const
 
 const TEXT_LIMITS = {
   reason: 2000,
@@ -218,11 +235,26 @@ export async function requireEncounter(
 }
 
 /**
+ * Borrador abierto y llevado por quien escribe. Otro profesional lee la
+ * atención y, para continuarla, toma el relevo (queda registrado).
+ */
+export function assertOpenDraft(row: EncounterRow, actorUserId: string): void {
+  if (row.status === "finalizada") throw conflict("FINALIZED", "La atención está finalizada")
+  if (row.status === "anulada") throw conflict("VOIDED", "La atención está anulada")
+  if (row.dentistUserId !== actorUserId) {
+    throw conflict(
+      "NOT_ATTENDING",
+      "Otro profesional lleva esta atención: toma el relevo para continuarla",
+    )
+  }
+}
+
+/**
  * Igual que requireEncounter pero bloqueando la fila FOR UPDATE: serializa
  * edición concurrente vs finalización (update/finalize/procedure/addenda
  * verifican el estado solo después de tomar el lock).
  */
-async function lockEncounter(
+export async function lockEncounter(
   tx: Db,
   orgId: string,
   patientId: string,
@@ -253,7 +285,37 @@ export async function createEncounter(
 ): Promise<EncounterRow> {
   await requirePatient(tx, orgId, patientId)
   const selectedTeeth = input.teeth === undefined ? [] : dedupeTeeth(input.teeth)
-  let branchId: string | null = null
+  // La cita que motiva la atención fija sede y profesional; su estado debe
+  // admitir que se atienda (no cancelada, sin inasistencia ni ya atendida).
+  let fromAppointment: { id: string; branchId: string; dentistUserId: string } | null = null
+  if (input.appointmentId) {
+    const [row] = await tx
+      .select({
+        id: appointment.id,
+        branchId: appointment.branchId,
+        dentistUserId: appointment.dentistUserId,
+        status: appointment.status,
+      })
+      .from(appointment)
+      .where(
+        and(
+          eq(appointment.id, input.appointmentId),
+          eq(appointment.organizationId, orgId),
+          eq(appointment.patientId, patientId),
+        ),
+      )
+      .for("update")
+      .limit(1)
+    if (!row) throw notFound("Cita")
+    if (!["programada", "confirmada"].includes(row.status)) {
+      throw conflict(
+        "APPOINTMENT_NOT_ATTENDABLE",
+        "Solo se atiende una cita programada o confirmada",
+      )
+    }
+    fromAppointment = row
+  }
+  let branchId: string | null = fromAppointment?.branchId ?? null
   if (input.branchId) {
     const [found] = await tx
       .select({ id: branch.id })
@@ -265,10 +327,10 @@ export async function createEncounter(
   }
   const reason = cleanText(input.reason, "reason", TEXT_LIMITS.reason)
   if (!reason) throw validation("El motivo de la atención es obligatorio")
-  // Profesional que atiende: por defecto quien abre; si recepción la abre para
-  // otro profesional, debe ser miembro de la organización.
-  let dentistUserId = actorUserId
-  if (input.dentistUserId && input.dentistUserId !== actorUserId) {
+  // Profesional que atiende: el de la cita o, sin cita, quien abre; otro
+  // profesional elegido debe ser miembro de la organización.
+  let dentistUserId = fromAppointment?.dentistUserId ?? actorUserId
+  if (input.dentistUserId && input.dentistUserId !== dentistUserId) {
     const [membership] = await tx
       .select({ id: member.id })
       .from(member)
@@ -297,6 +359,7 @@ export async function createEncounter(
         patientId,
         branchId,
         dentistUserId,
+        appointmentId: fromAppointment?.id ?? null,
         status: "borrador",
         reason,
       })
@@ -329,12 +392,16 @@ export async function createEncounter(
       patientId,
       teeth,
       planItemIds,
+      appointmentId: fromAppointment?.id ?? null,
     })
     return row
   } catch (e) {
     if (!isUniqueViolation(e)) throw e
     if (uniqueConstraintOf(e).includes("encounter_patient_open_uidx")) {
       throw conflict("DRAFT_OPEN", "Ya hay una atención en curso para este paciente")
+    }
+    if (uniqueConstraintOf(e).includes("encounter_appointment_active_uidx")) {
+      throw conflict("APPOINTMENT_HAS_ENCOUNTER", "Esta cita ya tiene una atención")
     }
     throw e
   }
@@ -443,76 +510,93 @@ export async function getEncounterDetail(
     eq(clinicalNote.encounterId, encounterId),
     eq(clinicalNote.organizationId, orgId),
   )
-  const [teethRows, procedures, notes, addenda, entries, documents, plannedItems, indicatedItems] =
-    await Promise.all([
-      tx
-        .select({ toothNumber: encounterTooth.toothNumber })
-        .from(encounterTooth)
-        .where(
-          and(
-            eq(encounterTooth.encounterId, encounterId),
-            eq(encounterTooth.organizationId, orgId),
-          ),
-        )
-        .orderBy(asc(encounterTooth.toothNumber)),
-      tx
-        .select()
-        .from(encounterProcedure)
-        .where(
-          and(
-            eq(encounterProcedure.encounterId, encounterId),
-            eq(encounterProcedure.organizationId, orgId),
-          ),
-        )
-        .orderBy(asc(encounterProcedure.createdAt), asc(encounterProcedure.id)),
-      tx
-        .select()
-        .from(clinicalNote)
-        .where(and(childOf, eq(clinicalNote.kind, "evolucion")))
-        .orderBy(asc(clinicalNote.createdAt), asc(clinicalNote.id)),
-      tx
-        .select()
-        .from(clinicalNote)
-        .where(and(childOf, eq(clinicalNote.kind, "adenda")))
-        .orderBy(asc(clinicalNote.createdAt), asc(clinicalNote.id)),
-      tx
-        .select()
-        .from(odontogramEntry)
-        .where(
-          and(
-            eq(odontogramEntry.encounterId, encounterId),
-            eq(odontogramEntry.organizationId, orgId),
-          ),
-        )
-        .orderBy(asc(odontogramEntry.createdAt), asc(odontogramEntry.id)),
-      listEncounterDocuments(tx, orgId, patientId, encounterId),
-      tx
-        .select({ item: treatmentPlanItem })
-        .from(encounterPlanItem)
-        .innerJoin(treatmentPlanItem, eq(treatmentPlanItem.id, encounterPlanItem.planItemId))
-        .where(
-          and(
-            eq(encounterPlanItem.encounterId, encounterId),
-            eq(encounterPlanItem.organizationId, orgId),
-          ),
-        )
-        .orderBy(asc(treatmentPlanItem.createdAt), asc(treatmentPlanItem.id)),
-      tx
-        .select()
-        .from(treatmentPlanItem)
-        .where(
-          and(
-            eq(treatmentPlanItem.sourceEncounterId, encounterId),
-            eq(treatmentPlanItem.organizationId, orgId),
-            eq(treatmentPlanItem.patientId, patientId),
-          ),
-        )
-        .orderBy(asc(treatmentPlanItem.createdAt), asc(treatmentPlanItem.id)),
-    ])
+  const [
+    teethRows,
+    procedures,
+    notes,
+    addenda,
+    entries,
+    documents,
+    plannedItems,
+    indicatedItems,
+    diagnoses,
+  ] = await Promise.all([
+    tx
+      .select({ toothNumber: encounterTooth.toothNumber })
+      .from(encounterTooth)
+      .where(
+        and(eq(encounterTooth.encounterId, encounterId), eq(encounterTooth.organizationId, orgId)),
+      )
+      .orderBy(asc(encounterTooth.toothNumber)),
+    tx
+      .select()
+      .from(encounterProcedure)
+      .where(
+        and(
+          eq(encounterProcedure.encounterId, encounterId),
+          eq(encounterProcedure.organizationId, orgId),
+        ),
+      )
+      .orderBy(asc(encounterProcedure.createdAt), asc(encounterProcedure.id)),
+    tx
+      .select()
+      .from(clinicalNote)
+      .where(and(childOf, eq(clinicalNote.kind, "evolucion"), isNull(clinicalNote.diagnosisCode)))
+      .orderBy(asc(clinicalNote.createdAt), asc(clinicalNote.id)),
+    tx
+      .select()
+      .from(clinicalNote)
+      .where(and(childOf, eq(clinicalNote.kind, "adenda")))
+      .orderBy(asc(clinicalNote.createdAt), asc(clinicalNote.id)),
+    tx
+      .select()
+      .from(odontogramEntry)
+      .where(
+        and(
+          eq(odontogramEntry.encounterId, encounterId),
+          eq(odontogramEntry.organizationId, orgId),
+        ),
+      )
+      .orderBy(asc(odontogramEntry.createdAt), asc(odontogramEntry.id)),
+    listEncounterDocuments(tx, orgId, patientId, encounterId),
+    tx
+      .select({ item: treatmentPlanItem })
+      .from(encounterPlanItem)
+      .innerJoin(treatmentPlanItem, eq(treatmentPlanItem.id, encounterPlanItem.planItemId))
+      .where(
+        and(
+          eq(encounterPlanItem.encounterId, encounterId),
+          eq(encounterPlanItem.organizationId, orgId),
+        ),
+      )
+      .orderBy(asc(treatmentPlanItem.createdAt), asc(treatmentPlanItem.id)),
+    tx
+      .select()
+      .from(treatmentPlanItem)
+      .where(
+        and(
+          eq(treatmentPlanItem.sourceEncounterId, encounterId),
+          eq(treatmentPlanItem.organizationId, orgId),
+          eq(treatmentPlanItem.patientId, patientId),
+        ),
+      )
+      .orderBy(asc(treatmentPlanItem.createdAt), asc(treatmentPlanItem.id)),
+    tx
+      .select()
+      .from(encounterDiagnosis)
+      .where(
+        and(
+          eq(encounterDiagnosis.encounterId, encounterId),
+          eq(encounterDiagnosis.organizationId, orgId),
+        ),
+      )
+      .orderBy(asc(encounterDiagnosis.createdAt), asc(encounterDiagnosis.id)),
+  ])
   return {
     encounter: row,
     teeth: teethRows.map((t) => t.toothNumber),
     procedures,
+    diagnoses,
     notes,
     odontogramEntries: entries,
     documents,
@@ -534,7 +618,7 @@ export async function listEncounters(
     input.status !== undefined &&
     !(ENCOUNTER_STATUSES as readonly string[]).includes(input.status)
   ) {
-    throw validation("status debe ser 'borrador' o 'finalizada'")
+    throw validation("status debe ser 'borrador', 'finalizada' o 'anulada'")
   }
   const conditions = [eq(encounter.patientId, patientId), eq(encounter.organizationId, orgId)]
   if (input.status) conditions.push(eq(encounter.status, input.status))
@@ -620,7 +704,7 @@ export async function updateEncounterDraft(
 ): Promise<EncounterRow> {
   await requirePatient(tx, orgId, patientId)
   const locked = await lockEncounter(tx, orgId, patientId, encounterId)
-  if (locked.status === "finalizada") throw conflict("FINALIZED", "La atención está finalizada")
+  assertOpenDraft(locked, actorUserId)
   const set: Partial<typeof encounter.$inferInsert> = {}
   if (patch.branchId !== undefined) {
     if (patch.branchId !== null) {
@@ -715,7 +799,7 @@ export async function addEncounterProcedure(
 ): Promise<EncounterProcedureRow> {
   await requirePatient(tx, orgId, patientId)
   const locked = await lockEncounter(tx, orgId, patientId, encounterId)
-  if (locked.status === "finalizada") throw conflict("FINALIZED", "La atención está finalizada")
+  assertOpenDraft(locked, actorUserId)
   const serviceIdParam = input.serviceId?.trim() ? input.serviceId.trim() : null
   const planItemIdParam = input.planItemId ?? null
   if (serviceIdParam && planItemIdParam) {
@@ -880,6 +964,7 @@ export async function addEncounterProcedure(
       quadrant,
       arch,
       diagnosisCode: input.diagnosisCode ?? null,
+      odontogramEntryId: input.odontogramEntryId ?? null,
     })
     directPlanItemId = indicated.id
   }
@@ -1001,12 +1086,80 @@ export interface FinalizeEncounterResult {
   skippedCharges: SkippedCharge[]
 }
 
+/** Lo que falta para cerrar una atención, en el orden de la historia clínica. */
+export type ClosingRequirement = "reason" | "diagnosis" | "evolution" | "signature"
+
+export interface ClosingCheck {
+  ready: boolean
+  missing: ClosingRequirement[]
+}
+
+const CLOSING_MESSAGES: Record<ClosingRequirement, string> = {
+  reason: "el motivo de consulta",
+  diagnosis: "al menos un diagnóstico CIE-10 con su tipo",
+  evolution: "la evolución",
+  signature: "tu colegiatura en el perfil profesional",
+}
+
+/**
+ * Mínimo para cerrar (ADR 0003): motivo, un diagnóstico CIE-10 con tipo,
+ * evolución y firma con colegiatura. Funciones vitales, exámenes auxiliares y
+ * pronóstico quedan opcionales: documentar una consulta no obliga a inventar.
+ */
+export async function checkEncounterClosing(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  row: EncounterRow,
+): Promise<ClosingCheck> {
+  const missing: ClosingRequirement[] = []
+  if (!row.reason?.trim()) missing.push("reason")
+  const [diagnosis] = await tx
+    .select({ id: encounterDiagnosis.id })
+    .from(encounterDiagnosis)
+    .where(
+      and(
+        eq(encounterDiagnosis.organizationId, orgId),
+        eq(encounterDiagnosis.encounterId, row.id),
+        isNull(encounterDiagnosis.voidedAt),
+        isNotNull(encounterDiagnosis.diagnosisType),
+      ),
+    )
+    .limit(1)
+  if (!diagnosis) missing.push("diagnosis")
+  if (!row.evolution?.trim()) missing.push("evolution")
+  try {
+    await requireProfessionalSignature(tx, orgId, actorUserId)
+  } catch (e) {
+    if (!(e instanceof ServiceError) || e.code !== "PROFILE_INCOMPLETE") throw e
+    missing.push("signature")
+  }
+  return { ready: missing.length === 0, missing }
+}
+
+export async function getEncounterClosing(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  patientId: string,
+  encounterId: string,
+): Promise<ClosingCheck> {
+  const row = await requireEncounter(tx, orgId, patientId, encounterId)
+  return checkEncounterClosing(tx, orgId, actorUserId, row)
+}
+
+export interface FinalizeEncounterInput {
+  /** Hora de fin declarada (ISO); por defecto, ahora. */
+  endedAt?: string | null
+}
+
 export async function finalizeEncounter(
   tx: Db,
   orgId: string,
   actorUserId: string,
   patientId: string,
   encounterId: string,
+  input: FinalizeEncounterInput = {},
 ): Promise<FinalizeEncounterResult> {
   await requirePatient(tx, orgId, patientId)
   // El cierre participa del mismo bloqueo que los cargos manuales y de
@@ -1018,10 +1171,28 @@ export async function finalizeEncounter(
     .for("update")
   const locked = await lockEncounter(tx, orgId, patientId, encounterId)
   if (locked.status === "finalizada") throw conflict("FINALIZED", "La atención ya está finalizada")
+  assertOpenDraft(locked, actorUserId)
   // Una consulta puede terminar sin prestaciones: documentarla no obliga a
-  // inventar procedimientos, tratamientos ni cargos.
-  if (!locked.reason?.trim())
-    throw validation("Registra el motivo de la atención antes de cerrarla")
+  // inventar procedimientos, tratamientos ni cargos; sí exige el mínimo clínico.
+  const closing = await checkEncounterClosing(tx, orgId, actorUserId, locked)
+  if (!closing.ready) {
+    throw new ServiceError(
+      "CLOSING_INCOMPLETE",
+      409,
+      `Para cerrar la atención registra ${closing.missing.map((m) => CLOSING_MESSAGES[m]).join(", ")}`,
+    )
+  }
+  const signature = await requireProfessionalSignature(tx, orgId, actorUserId)
+  const now = new Date()
+  let endedAt = now
+  if (input.endedAt) {
+    endedAt = new Date(input.endedAt)
+    if (Number.isNaN(endedAt.getTime())) throw validation("endedAt debe ser una fecha ISO válida")
+    if (endedAt < locked.startedAt)
+      throw validation("La hora de fin no puede ser anterior al inicio de la atención")
+    if (endedAt.getTime() > now.getTime() + 5 * 60_000)
+      throw validation("La hora de fin no puede estar en el futuro")
+  }
   const procedures = await tx
     .select()
     .from(encounterProcedure)
@@ -1029,15 +1200,26 @@ export async function finalizeEncounter(
       and(
         eq(encounterProcedure.encounterId, encounterId),
         eq(encounterProcedure.organizationId, orgId),
+        isNull(encounterProcedure.voidedAt),
       ),
     )
-  const now = new Date()
   const [row] = await tx
     .update(encounter)
-    .set({ status: "finalizada", finalizedAt: now, finalizedBy: actorUserId, updatedAt: now })
+    .set({
+      status: "finalizada",
+      finalizedAt: now,
+      finalizedBy: actorUserId,
+      endedAt,
+      signerName: signature.name,
+      signerTitle: signature.title,
+      signerRegistration: signature.registration,
+      updatedAt: now,
+    })
     .where(eq(encounter.id, encounterId))
     .returning()
   if (!row) throw notFound("Atención")
+  await resolveTreatedFindings(tx, orgId, actorUserId, patientId, encounterId, now)
+  if (row.appointmentId) await closeAppointment(tx, orgId, actorUserId, patientId, row, now)
   // Los cargos caen solos al finalizar: un cargo por acto con servicio y
   // precio > 0 que no esté ya cubierto por un cargo activo del mismo
   // tratamiento (anti-doble-cobro; el límite por tratamiento sigue en
@@ -1115,6 +1297,411 @@ export async function addEncounterAddendum(
   await audit(tx, orgId, actorUserId, "encounter.addendum_added", "clinical_note", row.id, {
     patientId,
     encounterId,
+  })
+  return row
+}
+
+function cleanReason(reason: string | null | undefined): string {
+  const text = reason?.trim() ?? ""
+  if (text.length < 1 || text.length > 2000)
+    throw validation("El motivo debe tener 1–2000 caracteres")
+  return text
+}
+
+/**
+ * Hallazgos tratados al cerrar: cada indicación realizada en la atención que
+ * nació de un hallazgo deja ese hallazgo como tratado (sigue en la historia,
+ * pero ya no es un problema por tratar).
+ */
+async function resolveTreatedFindings(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  patientId: string,
+  encounterId: string,
+  at: Date,
+): Promise<void> {
+  const items = await tx
+    .select({ id: treatmentPlanItem.id, entryId: treatmentPlanItem.odontogramEntryId })
+    .from(encounterPlanItem)
+    .innerJoin(treatmentPlanItem, eq(treatmentPlanItem.id, encounterPlanItem.planItemId))
+    .where(
+      and(
+        eq(encounterPlanItem.organizationId, orgId),
+        eq(encounterPlanItem.encounterId, encounterId),
+        eq(treatmentPlanItem.patientId, patientId),
+        eq(treatmentPlanItem.status, "realizado"),
+        isNotNull(treatmentPlanItem.odontogramEntryId),
+      ),
+    )
+  for (const item of items) {
+    if (!item.entryId) continue
+    const [resolved] = await tx
+      .update(odontogramEntry)
+      .set({ resolvedAt: at, resolvedBy: actorUserId, resolvedByPlanItemId: item.id })
+      .where(
+        and(
+          eq(odontogramEntry.id, item.entryId),
+          eq(odontogramEntry.organizationId, orgId),
+          eq(odontogramEntry.patientId, patientId),
+          isNull(odontogramEntry.resolvedAt),
+          isNull(odontogramEntry.voidedAt),
+        ),
+      )
+      .returning({ id: odontogramEntry.id })
+    if (resolved) {
+      await audit(
+        tx,
+        orgId,
+        actorUserId,
+        "odontogram.entry_resolved",
+        "odontogram_entry",
+        resolved.id,
+        {
+          patientId,
+          encounterId,
+          planItemId: item.id,
+        },
+      )
+    }
+  }
+}
+
+/**
+ * La cita atendida se cierra con la atención: los controles reservados en ella
+ * quedan realizados con esta atención y la cita pasa a «atendida».
+ */
+async function closeAppointment(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  patientId: string,
+  row: EncounterRow,
+  at: Date,
+): Promise<void> {
+  if (!row.appointmentId) return
+  const completed = await tx
+    .update(clinicalFollowUp)
+    .set({
+      status: "realizado",
+      completedEncounterId: row.id,
+      completedAt: at,
+      updatedAt: at,
+    })
+    .where(
+      and(
+        eq(clinicalFollowUp.organizationId, orgId),
+        eq(clinicalFollowUp.patientId, patientId),
+        eq(clinicalFollowUp.appointmentId, row.appointmentId),
+        eq(clinicalFollowUp.status, "programado"),
+      ),
+    )
+    .returning({ id: clinicalFollowUp.id })
+  for (const followUp of completed) {
+    await audit(tx, orgId, actorUserId, "follow_up.completed", "clinical_follow_up", followUp.id, {
+      patientId,
+      encounterId: row.id,
+    })
+  }
+  await setAppointmentStatus(tx, orgId, actorUserId, row.appointmentId, "atendida")
+}
+
+/**
+ * Anula un procedimiento del borrador sin borrarlo: no genera cargo ni cuenta
+ * como sesión. La indicación vuelve a su carril real: un tratamiento directo
+ * se cancela; uno planificado queda en curso si le quedan sesiones o vuelve a
+ * programado si no.
+ */
+async function voidProcedureRow(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  patientId: string,
+  encounterId: string,
+  proc: EncounterProcedureRow,
+  reason: string,
+  at: Date,
+): Promise<EncounterProcedureRow> {
+  const [voided] = await tx
+    .update(encounterProcedure)
+    .set({ voidedAt: at, voidedBy: actorUserId, voidReason: reason })
+    .where(
+      and(
+        eq(encounterProcedure.id, proc.id),
+        eq(encounterProcedure.organizationId, orgId),
+        isNull(encounterProcedure.voidedAt),
+      ),
+    )
+    .returning()
+  if (!voided) throw conflict("ALREADY_VOIDED", "El procedimiento ya está anulado")
+  if (proc.planItemId) {
+    const [item] = await tx
+      .select()
+      .from(treatmentPlanItem)
+      .where(
+        and(
+          eq(treatmentPlanItem.id, proc.planItemId),
+          eq(treatmentPlanItem.organizationId, orgId),
+          eq(treatmentPlanItem.patientId, patientId),
+        ),
+      )
+      .for("update")
+      .limit(1)
+    if (item) {
+      const direct =
+        item.sourceEncounterId === encounterId &&
+        (item.decisionNote ?? "").startsWith("Tratamiento directo")
+      if (direct) {
+        await tx
+          .update(treatmentPlanItem)
+          .set({
+            status: "cancelado",
+            statusReason: `Procedimiento anulado: ${reason}`,
+            completedAt: null,
+            updatedAt: at,
+          })
+          .where(eq(treatmentPlanItem.id, item.id))
+      } else if (item.status === "en_curso" || item.status === "realizado") {
+        const [remaining] = await tx
+          .select({ n: sql<number>`count(*)::int` })
+          .from(encounterProcedure)
+          .where(
+            and(
+              eq(encounterProcedure.organizationId, orgId),
+              eq(encounterProcedure.planItemId, item.id),
+              isNull(encounterProcedure.voidedAt),
+            ),
+          )
+        const sessions = remaining?.n ?? 0
+        await tx
+          .update(treatmentPlanItem)
+          .set({
+            status: sessions > 0 ? "en_curso" : "programado",
+            completedAt: null,
+            ...(sessions > 0 ? {} : { startedAt: null }),
+            updatedAt: at,
+          })
+          .where(eq(treatmentPlanItem.id, item.id))
+      }
+    }
+  }
+  await audit(
+    tx,
+    orgId,
+    actorUserId,
+    "encounter.procedure_voided",
+    "encounter_procedure",
+    proc.id,
+    {
+      patientId,
+      encounterId,
+      planItemId: proc.planItemId,
+      reason,
+    },
+  )
+  return voided
+}
+
+export async function voidEncounterProcedure(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  patientId: string,
+  encounterId: string,
+  procedureId: string,
+  input: { reason: string },
+): Promise<EncounterProcedureRow> {
+  await requirePatient(tx, orgId, patientId)
+  const locked = await lockEncounter(tx, orgId, patientId, encounterId)
+  assertOpenDraft(locked, actorUserId)
+  const reason = cleanReason(input.reason)
+  const [proc] = await tx
+    .select()
+    .from(encounterProcedure)
+    .where(
+      and(
+        eq(encounterProcedure.id, procedureId),
+        eq(encounterProcedure.organizationId, orgId),
+        eq(encounterProcedure.encounterId, encounterId),
+      ),
+    )
+    .limit(1)
+  if (!proc) throw notFound("Procedimiento")
+  if (proc.voidedAt) throw conflict("ALREADY_VOIDED", "El procedimiento ya está anulado")
+  return voidProcedureRow(tx, orgId, actorUserId, patientId, encounterId, proc, reason, new Date())
+}
+
+/**
+ * Anula el borrador completo (ADR 0002): queda en la historia como «anulada»
+ * con quién, cuándo y por qué; no genera cargos ni controles. Anula con el
+ * mismo motivo sus procedimientos, diagnósticos, hallazgos, recetas y
+ * controles; la cita conserva su estado y puede volver a atenderse.
+ */
+export async function voidEncounter(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  patientId: string,
+  encounterId: string,
+  input: { reason: string },
+): Promise<EncounterRow> {
+  await requirePatient(tx, orgId, patientId)
+  const locked = await lockEncounter(tx, orgId, patientId, encounterId)
+  if (locked.status === "anulada") throw conflict("ALREADY_VOIDED", "La atención ya está anulada")
+  assertOpenDraft(locked, actorUserId)
+  const reason = cleanReason(input.reason)
+  const cascade = `Atención anulada: ${reason}`.slice(0, 2000)
+  // Lo indicado aquí que ya entró a una propuesta no desaparece en silencio.
+  const [budgeted] = await tx
+    .select({ id: treatmentPlanItem.id })
+    .from(treatmentPlanItem)
+    .where(
+      and(
+        eq(treatmentPlanItem.organizationId, orgId),
+        eq(treatmentPlanItem.patientId, patientId),
+        eq(treatmentPlanItem.sourceEncounterId, encounterId),
+        isNotNull(treatmentPlanItem.budgetId),
+        inArray(treatmentPlanItem.status, ["pendiente", "programado", "en_curso", "suspendido"]),
+      ),
+    )
+    .limit(1)
+  if (budgeted) {
+    throw conflict(
+      "INDICATIONS_BUDGETED",
+      "Esta atención indicó tratamientos que ya están en una propuesta: cancélala o revísala antes de anular",
+    )
+  }
+  const at = new Date()
+  const procedures = await tx
+    .select()
+    .from(encounterProcedure)
+    .where(
+      and(
+        eq(encounterProcedure.organizationId, orgId),
+        eq(encounterProcedure.encounterId, encounterId),
+        isNull(encounterProcedure.voidedAt),
+      ),
+    )
+    .orderBy(asc(encounterProcedure.createdAt), asc(encounterProcedure.id))
+  for (const proc of procedures) {
+    await voidProcedureRow(tx, orgId, actorUserId, patientId, encounterId, proc, cascade, at)
+  }
+  await tx
+    .update(treatmentPlanItem)
+    .set({ status: "cancelado", statusReason: cascade, updatedAt: at })
+    .where(
+      and(
+        eq(treatmentPlanItem.organizationId, orgId),
+        eq(treatmentPlanItem.patientId, patientId),
+        eq(treatmentPlanItem.sourceEncounterId, encounterId),
+        inArray(treatmentPlanItem.status, ["pendiente", "programado", "suspendido"]),
+      ),
+    )
+  await tx
+    .update(encounterDiagnosis)
+    .set({ voidedAt: at, voidedBy: actorUserId, voidReason: cascade, updatedAt: at })
+    .where(
+      and(
+        eq(encounterDiagnosis.organizationId, orgId),
+        eq(encounterDiagnosis.encounterId, encounterId),
+        isNull(encounterDiagnosis.voidedAt),
+      ),
+    )
+  await tx
+    .update(odontogramEntry)
+    .set({
+      status: "voided",
+      voidedAt: at,
+      voidedBy: actorUserId,
+      voidReason: cascade,
+      updatedAt: at,
+    })
+    .where(
+      and(
+        eq(odontogramEntry.organizationId, orgId),
+        eq(odontogramEntry.patientId, patientId),
+        eq(odontogramEntry.encounterId, encounterId),
+        isNull(odontogramEntry.voidedAt),
+        ne(odontogramEntry.status, "voided"),
+      ),
+    )
+  await tx
+    .update(prescription)
+    .set({
+      status: "anulada",
+      cancelledAt: at,
+      cancelledBy: actorUserId,
+      cancelReason: cascade,
+      updatedAt: at,
+    })
+    .where(
+      and(
+        eq(prescription.organizationId, orgId),
+        eq(prescription.patientId, patientId),
+        eq(prescription.encounterId, encounterId),
+        eq(prescription.status, "emitida"),
+      ),
+    )
+  await tx
+    .update(clinicalFollowUp)
+    .set({ status: "cancelado", cancelledReason: cascade, cancelledAt: at, updatedAt: at })
+    .where(
+      and(
+        eq(clinicalFollowUp.organizationId, orgId),
+        eq(clinicalFollowUp.patientId, patientId),
+        eq(clinicalFollowUp.originEncounterId, encounterId),
+        inArray(clinicalFollowUp.status, ["pendiente", "programado"]),
+      ),
+    )
+  const [row] = await tx
+    .update(encounter)
+    .set({
+      status: "anulada",
+      voidedAt: at,
+      voidedBy: actorUserId,
+      voidReason: reason,
+      updatedAt: at,
+    })
+    .where(and(eq(encounter.id, encounterId), eq(encounter.organizationId, orgId)))
+    .returning()
+  if (!row) throw notFound("Atención")
+  await audit(tx, orgId, actorUserId, "encounter.voided", "encounter", encounterId, {
+    patientId,
+    reason,
+    procedures: procedures.length,
+  })
+  return row
+}
+
+/**
+ * Relevo: otro profesional continúa el borrador. Queda registrado quién lo
+ * llevaba; desde ahí, quien toma el relevo es quien firma.
+ */
+export async function takeOverEncounter(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  patientId: string,
+  encounterId: string,
+): Promise<EncounterRow> {
+  await requirePatient(tx, orgId, patientId)
+  const locked = await lockEncounter(tx, orgId, patientId, encounterId)
+  if (locked.status !== "borrador") {
+    throw conflict(
+      locked.status === "anulada" ? "VOIDED" : "FINALIZED",
+      "Solo se toma el relevo de una atención en curso",
+    )
+  }
+  if (locked.dentistUserId === actorUserId) return locked
+  const [row] = await tx
+    .update(encounter)
+    .set({ dentistUserId: actorUserId, updatedAt: new Date() })
+    .where(and(eq(encounter.id, encounterId), eq(encounter.organizationId, orgId)))
+    .returning()
+  if (!row) throw notFound("Atención")
+  await audit(tx, orgId, actorUserId, "encounter.taken_over", "encounter", encounterId, {
+    patientId,
+    from: locked.dentistUserId,
   })
   return row
 }

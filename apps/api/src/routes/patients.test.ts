@@ -255,9 +255,16 @@ it("POST /:id/notes como admin responde 201; como member 403 FORBIDDEN", async (
   const res = await admin.request(`/patients/${patientId}/notes`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ note: "Se indica endodoncia", diagnosisCode: "K04.0" }),
+    body: JSON.stringify({ note: "Se indica endodoncia" }),
   })
   expect(res.status).toBe(201)
+  // El diagnóstico se registra en la atención, no en una nota suelta.
+  const coded = await admin.request(`/patients/${patientId}/notes`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ note: "Se indica endodoncia", diagnosisCode: "K04.0" }),
+  })
+  expect(coded.status).toBe(400)
   const denied = await member.request(`/patients/${patientId}/notes`, {
     method: "POST",
     headers: { "content-type": "application/json" },

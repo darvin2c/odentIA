@@ -100,6 +100,16 @@ beforeAll(async () => {
   await ownerDb.execute(
     sql`insert into "user" ("id", "name", "email") values ('u-1', 'Doctora', 'doc@test.dev') on conflict do nothing`,
   )
+  // La doctora de las pruebas es miembro con colegiatura: puede firmar cierres.
+  await ownerDb.execute(
+    sql`insert into "member" ("id", "organization_id", "user_id", "role", "created_at") values ('m-u1-a', 'org_a', 'u-1', 'dentist', now()) on conflict do nothing`,
+  )
+  await ownerDb.execute(
+    sql`insert into "professional_profile" ("organization_id", "user_id", "registration_number") values ('org_a', 'u-1', '12345') on conflict do nothing`,
+  )
+  await ownerDb.execute(
+    sql`insert into "cie10_code" ("code", "description") values ('K02.1', 'Caries de la dentina') on conflict do nothing`,
+  )
 }, 180_000)
 
 afterAll(async () => {
@@ -272,7 +282,13 @@ async function createEncounter(
 }
 
 async function finalizeEncounter(app: Hono, patientId: string, encounterId: string): Promise<void> {
-  // El cierre exige un acto registrado y la evolución clínica.
+  // El cierre exige diagnóstico CIE-10 con tipo y evolución (ADR 0003).
+  const dx = await app.request(`/patients/${patientId}/encounters/${encounterId}/diagnoses`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ cie10Code: "K02.1", diagnosisType: "definitivo" }),
+  })
+  expect(dx.status).toBe(201)
   const proc = await app.request(`/patients/${patientId}/encounters/${encounterId}/procedures`, {
     method: "POST",
     headers: { "content-type": "application/json" },

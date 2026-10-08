@@ -34,6 +34,7 @@ export async function createPrescription(tx: Db, orgId: string, actorUserId: str
   if (input.encounterId) {
     const [enc] = await tx.select().from(encounter).where(and(eq(encounter.id, input.encounterId), eq(encounter.organizationId, orgId), eq(encounter.patientId, patientId))).for("update")
     if (!enc) throw notFound("Atención")
+    if (enc.status === "anulada") throw new ServiceError("VOIDED", 409, "La atención está anulada")
     if (enc.status !== "borrador") throw new ServiceError("FINALIZED", 409, "La atención está finalizada")
   }
   if (input.planItemId) {

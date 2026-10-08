@@ -132,7 +132,12 @@ it("traza alternativas, propuesta versionada, representante, sesiones y evidenci
   await f.run((tx) => addEncounterProcedure(tx, ...f.args, f.encounter.id, { planItemId: a.id }))
   await ownerDb
     .update(encounter)
-    .set({ status: "finalizada", finalizedAt: new Date() })
+    .set({
+      status: "finalizada",
+      finalizedAt: new Date(),
+      signerName: "Clínico",
+      signerRegistration: "COP 12345",
+    })
     .where(eq(encounter.id, f.encounter.id))
   const second = await f.run((tx) =>
     createEncounter(tx, ...f.args, { reason: "Segunda sesión", planItemIds: [a.id] }),

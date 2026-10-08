@@ -54,6 +54,7 @@ async function requireDraftLink(tx: Db, orgId: string, patientId: string, encoun
     )
     .for("update")
   if (!row) throw notFound("Atención")
+  if (row.status === "anulada") throw conflict("VOIDED", "La atención está anulada")
   if (row.status !== "borrador") throw conflict("FINALIZED", "La atención está finalizada")
 }
 
@@ -845,13 +846,12 @@ export async function addClinicalNote(
   if (input.encounterId) await requireDraftLink(tx, orgId, patientId, input.encounterId)
   const note = input.note?.trim() ?? ""
   if (note.length < 1 || note.length > 4000) throw validation("note debe tener 1–4000 caracteres")
-  if (input.diagnosisCode) await assertDiagnosisCode(tx, input.diagnosisCode)
-  const diagnosisType = input.diagnosisType?.trim() || null
-  if (diagnosisType) {
-    if (!input.diagnosisCode) throw validation("El tipo de diagnóstico exige un código CIE-10")
-    if (!(DIAGNOSIS_TYPES as readonly string[]).includes(diagnosisType))
-      throw validation("Tipo de diagnóstico inválido: presuntivo, definitivo o repetido")
+  // Una sola vía para diagnosticar: el diagnóstico es una entidad de la
+  // atención (`addEncounterDiagnosis`), no un campo de una nota suelta.
+  if (input.diagnosisCode || input.diagnosisType?.trim()) {
+    throw validation("Registra el diagnóstico en la sección Diagnóstico de la atención")
   }
+  const diagnosisType = null
   const toothNumber = input.toothNumber ?? null
   if (toothNumber !== null && (!Number.isInteger(toothNumber) || !isValidTooth(toothNumber)))
     throw validation("Pieza FDI inválida")

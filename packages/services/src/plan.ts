@@ -229,6 +229,7 @@ async function lockDraftEncounter(
     .limit(1)
     .for("update")
   if (!enc) throw notFound("Atención")
+  if (enc.status === "anulada") throw conflict("VOIDED", "La atención está anulada")
   if (enc.status !== "borrador") throw conflict("FINALIZED", "La atención está finalizada")
 }
 

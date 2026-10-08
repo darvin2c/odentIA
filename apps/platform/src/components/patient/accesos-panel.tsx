@@ -22,6 +22,7 @@ const RESOURCE_LABELS: Record<string, string> = {
   odontograma: "Odontograma",
   historia: "Historia",
   atenciones: "Atenciones",
+  diagnosticos: "Diagnósticos",
   notas: "Notas clínicas",
   plan: "Plan de tratamiento",
   tratamientos: "Tratamientos",

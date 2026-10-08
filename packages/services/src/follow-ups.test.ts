@@ -1,7 +1,5 @@
-import { randomUUID } from "node:crypto"
 import { withOrgContext } from "@odentia/db"
 import { appointment } from "@odentia/db/schema/agenda"
-import { member } from "@odentia/db/schema/auth"
 import { clinicalFollowUp, encounter } from "@odentia/db/schema/clinical"
 import { branch } from "@odentia/db/schema/org"
 import { eq } from "drizzle-orm"
@@ -27,13 +25,6 @@ setupTestDb()
 
 async function fixture() {
   const f = await clinicalFixture()
-  await ownerDb.insert(member).values({
-    id: randomUUID(),
-    organizationId: "org_a",
-    userId: f.actor,
-    role: "dentist",
-    createdAt: new Date(),
-  })
   const [site] = await ownerDb
     .insert(branch)
     .values({ organizationId: "org_a", name: "Sede control", timezone: "America/Lima" })
@@ -113,7 +104,12 @@ it("reserva, mueve y libera el control sin confundir asistencia con cierre clín
   ).rejects.toMatchObject({ code: "ENCOUNTER_NOT_FINALIZED" })
   await ownerDb
     .update(encounter)
-    .set({ status: "finalizada", finalizedAt: new Date() })
+    .set({
+      status: "finalizada",
+      finalizedAt: new Date(),
+      signerName: "Clínico",
+      signerRegistration: "COP 12345",
+    })
     .where(eq(encounter.id, f.encounter.id))
   await expect(
     f.run((tx) =>

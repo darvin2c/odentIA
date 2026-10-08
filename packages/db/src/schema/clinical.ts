@@ -457,6 +457,15 @@ export const odontogramEntry = pgTable(
     voidedAt: timestamp("voided_at", { withTimezone: true }),
     voidedBy: text("voided_by").references(() => user.id),
     voidReason: text("void_reason"),
+    /**
+     * Hallazgo tratado: el tratamiento indicado para él se realizó. Resolver no
+     * es anular: el hallazgo estuvo vigente hasta esa fecha.
+     */
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+    resolvedBy: text("resolved_by").references(() => user.id),
+    resolvedByPlanItemId: uuid("resolved_by_plan_item_id").references(
+      (): AnyPgColumn => treatmentPlanItem.id,
+    ),
     createdBy: text("created_by").references(() => user.id),
     encounterId: uuid("encounter_id").references(() => encounter.id),
     ...timestamps,
@@ -524,20 +533,107 @@ export const encounter = pgTable(
       .notNull()
       .references(() => user.id),
     status: text("status").notNull().default("borrador"),
+    /** Cita que motivó la atención; nula en atenciones sin cita o históricas. */
+    appointmentId: uuid("appointment_id"),
     reason: text("reason"),
     evolution: text("evolution"),
     indications: text("indications"),
     nextStep: text("next_step"),
     examination: jsonb("examination"),
     nextAppointmentAt: timestamp("next_appointment_at", { withTimezone: true }),
+    /** Hora de inicio declarada (por defecto, al abrir). */
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
+    /** Hora de fin declarada al cerrar. */
+    endedAt: timestamp("ended_at", { withTimezone: true }),
     finalizedAt: timestamp("finalized_at", { withTimezone: true }),
     finalizedBy: text("finalized_by").references(() => user.id),
+    /** Instantánea de la firma del profesional al cerrar (nombre, título y colegiatura). */
+    signerName: text("signer_name"),
+    signerTitle: text("signer_title"),
+    signerRegistration: text("signer_registration"),
+    voidedAt: timestamp("voided_at", { withTimezone: true }),
+    voidedBy: text("voided_by").references(() => user.id),
+    voidReason: text("void_reason"),
     ...timestamps,
   },
   (table) => [
     index("encounter_org_patient_idx").on(table.organizationId, table.patientId),
     uniqueIndex("encounter_patient_open_uidx").on(table.patientId).where(sql`status = 'borrador'`),
-    check("encounter_status_check", sql`${table.status} IN ('borrador','finalizada')`),
+    uniqueIndex("encounter_appointment_active_uidx")
+      .on(table.organizationId, table.appointmentId)
+      .where(sql`appointment_id IS NOT NULL AND status <> 'anulada'`),
+    foreignKey({
+      columns: [table.organizationId, table.patientId, table.appointmentId],
+      foreignColumns: [appointment.organizationId, appointment.patientId, appointment.id],
+      name: "encounter_appointment_fk",
+    }),
+    check("encounter_status_check", sql`${table.status} IN ('borrador','finalizada','anulada')`),
+    check(
+      "encounter_void_check",
+      sql`(${table.status} = 'anulada') = (${table.voidedAt} IS NOT NULL) AND (${table.voidedAt} IS NULL) = (${table.voidReason} IS NULL)`,
+    ),
+    check(
+      "encounter_end_check",
+      sql`${table.endedAt} IS NULL OR ${table.endedAt} >= ${table.startedAt}`,
+    ),
+  ],
+)
+
+/**
+ * Diagnóstico registrado en una atención: CIE-10 con tipo HIS (presuntivo,
+ * definitivo o repetido) y sitio dental. Se anula en borrador con motivo; el
+ * estado activo/resuelto alimenta la lista de problemas del paciente.
+ */
+export const encounterDiagnosis = pgTable(
+  "encounter_diagnosis",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    organizationId: orgFk("organization_id"),
+    patientId: uuid("patient_id").notNull(),
+    /** Nulo solo en diagnósticos históricos registrados fuera de una atención. */
+    encounterId: uuid("encounter_id").references(() => encounter.id),
+    cie10Code: text("cie10_code")
+      .notNull()
+      .references(() => cie10Code.code),
+    /** Nulo solo en históricos migrados sin clasificar. */
+    diagnosisType: text("diagnosis_type"),
+    toothNumber: smallint("tooth_number"),
+    surfaces: text("surfaces").array().notNull().default([]),
+    note: text("note"),
+    status: text("status").notNull().default("activo"),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+    /** Nota de evolución de la que proviene un diagnóstico histórico. */
+    legacyNoteId: uuid("legacy_note_id").references((): AnyPgColumn => clinicalNote.id),
+    createdBy: text("created_by").references(() => user.id),
+    voidedAt: timestamp("voided_at", { withTimezone: true }),
+    voidedBy: text("voided_by").references(() => user.id),
+    voidReason: text("void_reason"),
+    ...timestamps,
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.organizationId, table.patientId],
+      foreignColumns: [patient.organizationId, patient.id],
+      name: "encounter_diagnosis_patient_fk",
+    }),
+    index("encounter_diagnosis_org_patient_idx").on(table.organizationId, table.patientId),
+    index("encounter_diagnosis_encounter_idx").on(table.organizationId, table.encounterId),
+    uniqueIndex("encounter_diagnosis_legacy_note_uidx")
+      .on(table.legacyNoteId)
+      .where(sql`legacy_note_id IS NOT NULL`),
+    check(
+      "encounter_diagnosis_type_check",
+      sql`(${table.diagnosisType} IS NULL AND ${table.legacyNoteId} IS NOT NULL) OR ${table.diagnosisType} IN ('presuntivo','definitivo','repetido')`,
+    ),
+    check("encounter_diagnosis_status_check", sql`${table.status} IN ('activo','resuelto')`),
+    check(
+      "encounter_diagnosis_void_check",
+      sql`(${table.voidedAt} IS NULL) = (${table.voidReason} IS NULL)`,
+    ),
+    check(
+      "encounter_diagnosis_origin_check",
+      sql`${table.encounterId} IS NOT NULL OR ${table.legacyNoteId} IS NOT NULL`,
+    ),
   ],
 )
 
@@ -724,8 +820,16 @@ export const encounterProcedure = pgTable(
     codings: jsonb("codings").$type<ProcedureCodingSnapshot[]>().notNull().default([]),
     createdBy: text("created_by").references(() => user.id),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    /** Anulación en borrador: el acto queda en la traza, sin cargo ni sesión. */
+    voidedAt: timestamp("voided_at", { withTimezone: true }),
+    voidedBy: text("voided_by").references(() => user.id),
+    voidReason: text("void_reason"),
   },
   (table) => [
+    check(
+      "encounter_procedure_void_check",
+      sql`(${table.voidedAt} IS NULL) = (${table.voidReason} IS NULL)`,
+    ),
     check(
       "encounter_procedure_price_check",
       sql`${table.priceCents} IS NULL OR ${table.priceCents} >= 0`,

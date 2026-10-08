@@ -13,6 +13,7 @@ import {
   createSpecialty,
   finalizeFormResponse,
   formResponsePatientId,
+  getProfessionalProfile,
   listClinicalOrders,
   listConsentDocuments,
   listConsentEvents,
@@ -20,6 +21,7 @@ import {
   listFormAddenda,
   listFormResponses,
   listFormTemplates,
+  listProfessionalProfiles,
   listProfessionalSpecialties,
   listServiceSpecialties,
   listSpecialties,
@@ -27,6 +29,7 @@ import {
   publishConsentTemplate,
   publishFormTemplate,
   revokeConsentDocument,
+  setProfessionalProfile,
   setProfessionalSpecialties,
   setServiceSpecialties,
   signConsentDocument,
@@ -311,6 +314,54 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
         setProfessionalSpecialties(tx, orgId, userId, c.req.param("userId"), parsed.data.specialtyIds),
+      ),
+    )
+  })
+
+  // --- Perfil profesional (firma de atenciones, actas, recetas y consentimientos) ---
+  const profileInput = z
+    .object({
+      signatureName: z.string().max(200).nullish(),
+      professionalTitle: z.string().trim().min(1).max(120).optional(),
+      registrationBody: z.string().trim().min(1).max(40).optional(),
+      registrationNumber: z.string().max(20).nullish(),
+      specialtyRegistration: z.string().max(40).nullish(),
+    })
+    .strict()
+
+  app.get("/professionals/profiles", async (c) => {
+    const { orgId, memberRole } = orgContextOf(c)
+    if (!canReadCatalog(memberRole) && !canAccess(memberRole, "settings.read")) {
+      return forbidden(c, "Sin acceso a los profesionales")
+    }
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) => listProfessionalProfiles(tx, orgId)),
+    )
+  })
+
+  app.get("/professionals/:userId/profile", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    const target = c.req.param("userId") === "me" ? userId : c.req.param("userId")
+    if (target !== userId && !canReadCatalog(memberRole) && !canAccess(memberRole, "settings.read")) {
+      return forbidden(c, "Sin acceso a los profesionales")
+    }
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) => getProfessionalProfile(tx, orgId, target)),
+    )
+  })
+
+  // Cada profesional mantiene su propia colegiatura; administración, la de todos.
+  app.put("/professionals/:userId/profile", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    const target = c.req.param("userId") === "me" ? userId : c.req.param("userId")
+    if (target !== userId && !canAccess(memberRole, "settings.write")) {
+      return forbidden(c, "Solo administración edita el perfil de otro profesional")
+    }
+    const parsed = profileInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        setProfessionalProfile(tx, orgId, userId, target, parsed.data),
       ),
     )
   })

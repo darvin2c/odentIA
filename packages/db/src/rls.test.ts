@@ -294,7 +294,7 @@ it("encuentros y planes de A son invisibles para B; las piezas cerradas no se bo
     ),
   ).rejects.toThrow()
   await ownerDb.execute(
-    sql`update encounter set status='finalizada' where id='bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'`,
+    sql`update encounter set status='finalizada', signer_name='Dra. Prueba', signer_registration='COP 1' where id='bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'`,
   )
   const deleted = await withOrgContext(appDb, "org_a", (tx) =>
     tx.execute(

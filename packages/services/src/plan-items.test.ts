@@ -66,7 +66,7 @@ it("conserva dos sesiones, exige completar explícitamente y encadena revisiones
     (await run((tx) => listPlanItems(tx, "org_a", patient.id))).find((i) => i.id === item.id)
       ?.status,
   ).toBe("en_curso")
-  await ownerDb.execute(sql`update encounter set status = 'finalizada' where id = ${first.id}`)
+  await ownerDb.execute(sql`update encounter set status = 'finalizada', signer_name = 'Clínico', signer_registration = 'COP 1' where id = ${first.id}`)
   const [second] = await ownerDb.execute<{ id: string }>(
     sql`insert into encounter (organization_id,patient_id,dentist_user_id) values ('org_a',${patient.id},'clinical-actor') returning id`,
   )

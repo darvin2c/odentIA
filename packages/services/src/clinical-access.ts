@@ -18,6 +18,7 @@ export const CLINICAL_ACCESS_RESOURCES = [
   "odontograma",
   "historia",
   "atenciones",
+  "diagnosticos",
   "notas",
   "plan",
   "tratamientos",

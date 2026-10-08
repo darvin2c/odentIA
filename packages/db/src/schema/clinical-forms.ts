@@ -70,6 +70,39 @@ export const professionalSpecialty = pgTable(
   ],
 )
 
+/**
+ * Registro profesional del miembro en la organización. Es la identidad con la
+ * que firma atenciones, actas de odontograma, recetas y consentimientos: cada
+ * documento guarda una instantánea, así que editarlo no reescribe lo firmado.
+ */
+export const professionalProfile = pgTable(
+  "professional_profile",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    organizationId: orgFk("organization_id"),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id),
+    /** Nombre con el que firma; si falta se usa el de la cuenta. */
+    signatureName: text("signature_name"),
+    professionalTitle: text("professional_title").notNull().default("Cirujano dentista"),
+    /** Colegio profesional que emite la colegiatura (COP en Perú). */
+    registrationBody: text("registration_body").notNull().default("COP"),
+    registrationNumber: text("registration_number"),
+    /** Registro nacional de especialista, cuando corresponde. */
+    specialtyRegistration: text("specialty_registration"),
+    updatedBy: text("updated_by").references(() => user.id),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("professional_profile_org_user_uidx").on(table.organizationId, table.userId),
+    check(
+      "professional_profile_lengths_check",
+      sql`length(${table.professionalTitle}) between 1 and 120 and length(${table.registrationBody}) between 1 and 40 and (${table.registrationNumber} is null or length(${table.registrationNumber}) between 1 and 20) and (${table.signatureName} is null or length(${table.signatureName}) between 1 and 200) and (${table.specialtyRegistration} is null or length(${table.specialtyRegistration}) between 1 and 40)`,
+    ),
+  ],
+)
+
 /** Prestaciones del tarifario vinculadas a una especialidad dinámica. */
 export const serviceSpecialty = pgTable(
   "service_specialty",
@@ -126,12 +159,12 @@ export const clinicalFormTemplate = pgTable(
       table.key,
       table.version,
     ),
-    index("clinical_form_template_org_specialty_idx").on(
-      table.organizationId,
-      table.specialtyId,
-    ),
+    index("clinical_form_template_org_specialty_idx").on(table.organizationId, table.specialtyId),
     index("clinical_form_template_org_status_idx").on(table.organizationId, table.status),
-    check("clinical_form_template_status_check", sql`${table.status} in ('borrador','publicado','archivado')`),
+    check(
+      "clinical_form_template_status_check",
+      sql`${table.status} in ('borrador','publicado','archivado')`,
+    ),
     check("clinical_form_template_version_check", sql`${table.version} >= 1`),
   ],
 )
@@ -165,22 +198,10 @@ export const clinicalFormResponse = pgTable(
     ...timestamps,
   },
   (table) => [
-    index("clinical_form_response_org_patient_idx").on(
-      table.organizationId,
-      table.patientId,
-    ),
-    index("clinical_form_response_org_encounter_idx").on(
-      table.organizationId,
-      table.encounterId,
-    ),
-    index("clinical_form_response_org_template_idx").on(
-      table.organizationId,
-      table.templateId,
-    ),
-    check(
-      "clinical_form_response_status_check",
-      sql`${table.status} in ('borrador','finalizado')`,
-    ),
+    index("clinical_form_response_org_patient_idx").on(table.organizationId, table.patientId),
+    index("clinical_form_response_org_encounter_idx").on(table.organizationId, table.encounterId),
+    index("clinical_form_response_org_template_idx").on(table.organizationId, table.templateId),
+    check("clinical_form_response_status_check", sql`${table.status} in ('borrador','finalizado')`),
   ],
 )
 
@@ -358,10 +379,7 @@ export const clinicalOrder = pgTable(
     index("clinical_order_org_patient_idx").on(table.organizationId, table.patientId),
     index("clinical_order_org_status_idx").on(table.organizationId, table.status),
     index("clinical_order_org_specialty_idx").on(table.organizationId, table.specialtyId),
-    check(
-      "clinical_order_kind_check",
-      sql`${table.kind} in ('laboratorio','interconsulta')`,
-    ),
+    check("clinical_order_kind_check", sql`${table.kind} in ('laboratorio','interconsulta')`),
     check(
       "clinical_order_status_check",
       sql`${table.status} in ('solicitado','en_proceso','completado','cancelado')`,
@@ -389,4 +407,3 @@ export const CLINICAL_FORMS_TABLES = [
   "consent_event",
   "clinical_order",
 ] as const
-

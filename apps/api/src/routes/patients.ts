@@ -9,6 +9,7 @@ import { withOrgContext } from "@odentia/db"
 import {
   addClinicalNote,
   addEncounterAddendum,
+  addEncounterDiagnosis,
   addEncounterProcedure,
   addOdontogramEntries,
   addPlanItem,
@@ -19,6 +20,7 @@ import {
   createTreatmentPlan,
   finalizeEncounter,
   getAnamnesisVersion,
+  getEncounterClosing,
   getEncounterDetail,
   getLatestAnamnesis,
   getOdontogram,
@@ -29,6 +31,7 @@ import {
   getTimeline,
   getTreatmentCoordination,
   listClinicalAccess,
+  listPatientDiagnoses,
   type ClinicalAccessResource,
   scheduleFollowUpFromCoordination,
   getTreatmentPlanDetail,
@@ -52,12 +55,17 @@ import {
   reviewLegacyEntry,
   ServiceError,
   savePatientHealth,
+  setDiagnosisStatus,
   setPatientAvatar,
   setPlanItemStatus,
   TIMELINE_TYPES,
+  takeOverEncounter,
   updateEncounterDraft,
   updatePatient,
   updatePlanItem,
+  voidEncounter,
+  voidEncounterDiagnosis,
+  voidEncounterProcedure,
   voidOdontogramEntry,
 } from "@odentia/services"
 import { Hono } from "hono"
@@ -244,6 +252,8 @@ const timelineQuery = listQuery.extend({
 const encounterCreateInput = z.object({
   // El motivo es obligatorio al abrir la atención (decisión de diseño).
   reason: z.string().trim().min(1).max(2000),
+  /** Cita que motiva la atención: hereda sede y profesional. */
+  appointmentId: z.uuid().nullish(),
   branchId: z.uuid().nullish(),
   /** Profesional que atiende; por defecto quien abre la atención. */
   dentistUserId: z.string().nullish(),
@@ -278,6 +288,8 @@ const procedureInput = z
     planItemId: z.uuid().nullish(),
     /** Acto libre (sin servicio ni tratamiento): descripción obligatoria. */
     description: z.string().trim().min(1).max(2000).nullish(),
+    /** Hallazgo que trata un servicio directo; queda tratado al cerrar la atención. */
+    odontogramEntryId: z.uuid().nullish(),
   })
   .strict()
   .refine((d) => !(d.serviceId && d.planItemId), {
@@ -341,6 +353,20 @@ const planBatchInput = z
     diagnosisCode: z.string().max(10).nullish(),
   })
   .strict()
+const reasonInput = z.object({ reason: z.string().trim().min(1).max(2000) }).strict()
+const finalizeInput = z
+  .object({ endedAt: z.iso.datetime({ offset: true }).nullish() })
+  .strict()
+const diagnosisInput = z
+  .object({
+    cie10Code: z.string().trim().min(1).max(10),
+    diagnosisType: z.enum(["presuntivo", "definitivo", "repetido"]),
+    toothNumber: z.number().int().nullish(),
+    surfaces: z.array(z.string().min(1).max(20)).max(5).nullish(),
+    note: z.string().max(2000).nullish(),
+  })
+  .strict()
+const diagnosisStatusInput = z.object({ status: z.enum(["activo", "resuelto"]) }).strict()
 const treatmentPlanCreateInput = z
   .object({ title: z.string().trim().min(1).max(200), originEncounterId: z.uuid() })
   .strict()
@@ -367,6 +393,7 @@ const documentLinkInput = z.object({
 /** Subrutas con datos clínicos: exigen `clinical.read`/`.write`. */
 const CLINICAL_SUBPATHS = [
   "/encounters",
+  "/diagnoses",
   "/plan",
   "/treatments",
   "/prescriptions",
@@ -400,6 +427,7 @@ const ACCESS_RESOURCE_BY_PREFIX: Array<[string, ClinicalAccessResource]> = [
   ["/odontogram", "odontograma"],
   ["/timeline", "historia"],
   ["/encounters", "atenciones"],
+  ["/diagnoses", "diagnosticos"],
   ["/notes", "notas"],
   ["/plan", "plan"],
   ["/treatments", "tratamientos"],
@@ -905,7 +933,7 @@ export function createPatientsRoute(deps: CrmDeps) {
   app.get("/:id/encounters", async (c) => {
     const { orgId } = orgContextOf(c)
     const parsed = listQuery
-      .extend({ status: z.enum(["borrador", "finalizada"]).optional() })
+      .extend({ status: z.enum(["borrador", "finalizada", "anulada"]).optional() })
       .safeParse(c.req.query())
     if (!parsed.success) return validationError(c, parsed.error.issues)
     try {
@@ -959,11 +987,130 @@ export function createPatientsRoute(deps: CrmDeps) {
       ),
     )
   })
-  app.post("/:id/encounters/:encounterId/finalize", async (c) => {
+  app.get("/:id/encounters/:encounterId/closing", async (c) => {
     const { orgId, userId } = orgContextOf(c)
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
-        finalizeEncounter(tx, orgId, userId, c.req.param("id"), c.req.param("encounterId")),
+        getEncounterClosing(tx, orgId, userId, c.req.param("id"), c.req.param("encounterId")),
+      ),
+    )
+  })
+  app.post("/:id/encounters/:encounterId/finalize", async (c) => {
+    const { orgId, userId } = orgContextOf(c)
+    const body = await c.req.json().catch(() => ({}))
+    const parsed = finalizeInput.safeParse(body ?? {})
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        finalizeEncounter(
+          tx,
+          orgId,
+          userId,
+          c.req.param("id"),
+          c.req.param("encounterId"),
+          parsed.data,
+        ),
+      ),
+    )
+  })
+  app.post("/:id/encounters/:encounterId/void", async (c) => {
+    const { orgId, userId } = orgContextOf(c)
+    const parsed = reasonInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        voidEncounter(tx, orgId, userId, c.req.param("id"), c.req.param("encounterId"), parsed.data),
+      ),
+    )
+  })
+  app.post("/:id/encounters/:encounterId/take-over", async (c) => {
+    const { orgId, userId } = orgContextOf(c)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        takeOverEncounter(tx, orgId, userId, c.req.param("id"), c.req.param("encounterId")),
+      ),
+    )
+  })
+  app.post("/:id/encounters/:encounterId/procedures/:procedureId/void", async (c) => {
+    const { orgId, userId } = orgContextOf(c)
+    const parsed = reasonInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        voidEncounterProcedure(
+          tx,
+          orgId,
+          userId,
+          c.req.param("id"),
+          c.req.param("encounterId"),
+          c.req.param("procedureId"),
+          parsed.data,
+        ),
+      ),
+    )
+  })
+  app.post("/:id/encounters/:encounterId/diagnoses", async (c) => {
+    const { orgId, userId } = orgContextOf(c)
+    const parsed = diagnosisInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 201, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        addEncounterDiagnosis(
+          tx,
+          orgId,
+          userId,
+          c.req.param("id"),
+          c.req.param("encounterId"),
+          parsed.data,
+        ),
+      ),
+    )
+  })
+  app.post("/:id/encounters/:encounterId/diagnoses/:diagnosisId/void", async (c) => {
+    const { orgId, userId } = orgContextOf(c)
+    const parsed = reasonInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        voidEncounterDiagnosis(
+          tx,
+          orgId,
+          userId,
+          c.req.param("id"),
+          c.req.param("encounterId"),
+          c.req.param("diagnosisId"),
+          parsed.data,
+        ),
+      ),
+    )
+  })
+  // Lista de problemas del paciente: diagnósticos vigentes y resueltos.
+  app.get("/:id/diagnoses", async (c) => {
+    const { orgId } = orgContextOf(c)
+    const parsed = z
+      .object({ status: z.enum(["activo", "resuelto"]).optional() })
+      .safeParse(c.req.query())
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        listPatientDiagnoses(tx, orgId, c.req.param("id"), parsed.data),
+      ),
+    )
+  })
+  app.patch("/:id/diagnoses/:diagnosisId", async (c) => {
+    const { orgId, userId } = orgContextOf(c)
+    const parsed = diagnosisStatusInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        setDiagnosisStatus(
+          tx,
+          orgId,
+          userId,
+          c.req.param("id"),
+          c.req.param("diagnosisId"),
+          parsed.data.status,
+        ),
       ),
     )
   })

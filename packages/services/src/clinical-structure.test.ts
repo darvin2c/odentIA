@@ -10,6 +10,13 @@ import {
   signConsentDocument,
 } from "./clinical-forms.js"
 import { createContact } from "./contacts.js"
+import {
+  addEncounterDiagnosis,
+  listPatientDiagnoses,
+  setDiagnosisStatus,
+  voidEncounterDiagnosis,
+} from "./encounter-diagnoses.js"
+import { createEncounter } from "./encounters.js"
 import { createPatient, getPatient } from "./patients.js"
 import { grantResponsibility } from "./responsibilities.js"
 import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
@@ -72,26 +79,68 @@ it("antecedentes: categoría de alergia, CIE-10 de la condición y principio act
   )
 })
 
-it("diagnóstico: tipo y pieza exigen código y catálogo", async () => {
+it("diagnóstico: entidad de la atención con tipo, pieza y catálogo; la nota no diagnostica", async () => {
   const patient = await run((tx) => createPatient(tx, "org_a", ACTOR, { displayName: "Dx Tipo" }))
-  const note = await run((tx) =>
-    addClinicalNote(tx, "org_a", ACTOR, patient.id, {
-      note: "Dolor espontáneo nocturno",
-      diagnosisCode: "K04.0",
+  const draft = await run((tx) =>
+    createEncounter(tx, "org_a", ACTOR, patient.id, { reason: "Dolor nocturno" }),
+  )
+  const dx = await run((tx) =>
+    addEncounterDiagnosis(tx, "org_a", ACTOR, patient.id, draft.id, {
+      cie10Code: "K04.0",
       diagnosisType: "presuntivo",
       toothNumber: 46,
+      surfaces: ["occlusal"],
     }),
   )
-  expect(note).toMatchObject({ diagnosisCode: "K04.0", diagnosisType: "presuntivo", toothNumber: 46 })
+  expect(dx).toMatchObject({
+    cie10Code: "K04.0",
+    diagnosisType: "presuntivo",
+    toothNumber: 46,
+    surfaces: ["occlusal"],
+    status: "activo",
+  })
   for (const bad of [
-    { note: "Sin código", diagnosisType: "definitivo" },
-    { note: "Tipo raro", diagnosisCode: "K04.0", diagnosisType: "probable" },
-    { note: "Pieza inexistente", diagnosisCode: "K04.0", toothNumber: 99 },
+    { cie10Code: "K04.0", diagnosisType: "probable" },
+    { cie10Code: "K04.0", diagnosisType: "definitivo", toothNumber: 99 },
+    { cie10Code: "Z99.9", diagnosisType: "definitivo" },
+    { cie10Code: "K04.0", diagnosisType: "definitivo", surfaces: ["occlusal"] },
+    { cie10Code: "K04.0", diagnosisType: "definitivo", toothNumber: 11, surfaces: ["occlusal"] },
   ]) {
     await expect(
-      run((tx) => addClinicalNote(tx, "org_a", ACTOR, patient.id, bad)),
+      run((tx) => addEncounterDiagnosis(tx, "org_a", ACTOR, patient.id, draft.id, bad)),
     ).rejects.toMatchObject({ status: 400 })
   }
+  // Una sola vía para diagnosticar: la nota de evolución no lleva código.
+  await expect(
+    run((tx) =>
+      addClinicalNote(tx, "org_a", ACTOR, patient.id, {
+        note: "Dolor",
+        diagnosisCode: "K04.0",
+        encounterId: draft.id,
+      }),
+    ),
+  ).rejects.toMatchObject({ status: 400 })
+  // Anular en borrador exige motivo y la lista de problemas lo excluye.
+  await expect(
+    run((tx) => voidEncounterDiagnosis(tx, "org_a", ACTOR, patient.id, draft.id, dx.id, { reason: " " })),
+  ).rejects.toMatchObject({ status: 400 })
+  await run((tx) =>
+    voidEncounterDiagnosis(tx, "org_a", ACTOR, patient.id, draft.id, dx.id, {
+      reason: "Pieza equivocada",
+    }),
+  )
+  const kept = await run((tx) =>
+    addEncounterDiagnosis(tx, "org_a", ACTOR, patient.id, draft.id, {
+      cie10Code: "K04.0",
+      diagnosisType: "definitivo",
+      toothNumber: 47,
+    }),
+  )
+  const problems = await run((tx) => listPatientDiagnoses(tx, "org_a", patient.id))
+  expect(problems.map((p) => [p.toothNumber, p.description])).toEqual([[47, "Pulpitis"]])
+  expect(
+    await run((tx) => setDiagnosisStatus(tx, "org_a", ACTOR, patient.id, kept.id, "resuelto")),
+  ).toMatchObject({ status: "resuelto" })
 })
 
 it("consentimiento: firma verificada del paciente o de su representante legal vigente", async () => {

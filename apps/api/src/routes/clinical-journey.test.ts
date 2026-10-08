@@ -142,7 +142,12 @@ async function createEncounter(patientId: string, reason: string): Promise<strin
 }
 
 async function finalizeEncounter(patientId: string, encounterId: string): Promise<void> {
-  // El cierre exige un acto registrado y la evolución clínica.
+  // El cierre exige diagnóstico CIE-10 con tipo y evolución (ADR 0003).
+  const dx = await post(app, `/patients/${patientId}/encounters/${encounterId}/diagnoses`, {
+    cie10Code: "K02.1",
+    diagnosisType: "definitivo",
+  })
+  expect(dx.status).toBe(201)
   const proc = await post(app, `/patients/${patientId}/encounters/${encounterId}/procedures`, {
     description: "Acto de cierre",
   })
@@ -235,6 +240,16 @@ beforeAll(async () => {
   )
   await ownerDb.execute(
     sql`insert into "user" ("id", "name", "email") values ('u-1', 'Doctora', 'doc@test.dev') on conflict do nothing`,
+  )
+  // La doctora de las pruebas es miembro con colegiatura: puede firmar cierres.
+  await ownerDb.execute(
+    sql`insert into "member" ("id", "organization_id", "user_id", "role", "created_at") values ('m-u1-a', 'org_a', 'u-1', 'dentist', now()) on conflict do nothing`,
+  )
+  await ownerDb.execute(
+    sql`insert into "professional_profile" ("organization_id", "user_id", "registration_number") values ('org_a', 'u-1', '12345') on conflict do nothing`,
+  )
+  await ownerDb.execute(
+    sql`insert into "cie10_code" ("code", "description") values ('K02.1', 'Caries de la dentina') on conflict do nothing`,
   )
   await ownerDb.execute(
     sql`insert into "service_catalog" ("id", "organization_id", "source", "code", "name", "specialty", "scope", "price_cents", "currency", "duration_min", "is_active") values

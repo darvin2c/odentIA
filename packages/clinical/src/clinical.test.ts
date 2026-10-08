@@ -407,6 +407,21 @@ describe("color y vigencia", () => {
     expect(activeFindingsAsOf(history, "2024-12-31").map((item) => item.id)).toEqual(["a", "b"])
     expect(activeFindingsAsOf(history, "2024-01-10").map((item) => item.id)).toEqual(["a"])
   })
+
+  it("un hallazgo tratado estuvo vigente hasta su tratamiento y deja de estarlo después", () => {
+    const history = [
+      {
+        id: "caries",
+        toothNumber: 36,
+        condition: "caries",
+        status: "recorded",
+        createdAt: "2026-01-10",
+        resolvedAt: "2026-02-01",
+      },
+    ]
+    expect(activeFindingsAsOf(history, "2026-01-20").map((item) => item.id)).toEqual(["caries"])
+    expect(activeFindingsAsOf(history, "2026-02-02")).toEqual([])
+  })
 })
 
 describe("correcciones y registros no válidos", () => {

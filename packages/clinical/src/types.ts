@@ -82,4 +82,6 @@ export interface FindingRecord {
   needsReview?: boolean
   createdAt?: string | Date
   voidedAt?: string | Date | null
+  /** Tratado: vigente hasta esa fecha, ya no es un problema por tratar. */
+  resolvedAt?: string | Date | null
 }

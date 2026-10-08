@@ -5,6 +5,7 @@ import {
   clinicalNote,
   encounter,
   encounterPlanItem,
+  encounterDiagnosis,
   encounterProcedure,
   encounterTooth,
   odontogramEntry,
@@ -17,7 +18,7 @@ import {
   treatmentPlanItem,
 } from "@odentia/db/schema/clinical"
 import { orgProfile } from "@odentia/db/schema/org"
-import { and, asc, desc, eq, inArray, notInArray, type SQL, sql } from "drizzle-orm"
+import { and, asc, desc, eq, inArray, isNull, notInArray, type SQL, sql } from "drizzle-orm"
 import { getCurrentDocumentContexts, getOdontogram, listPatientDocuments } from "./clinical.js"
 import { decodeCursor, encodeCursor } from "./cursors.js"
 import { validation } from "./errors.js"
@@ -282,16 +283,18 @@ export async function getPatientSummary(tx: Db, orgId: string, patientId: string
           and(
             eq(encounterProcedure.organizationId, orgId),
             eq(encounterProcedure.encounterId, lastEncounter.id),
+            isNull(encounterProcedure.voidedAt),
           ),
         )
         .orderBy(asc(encounterProcedure.createdAt), asc(encounterProcedure.id)),
       tx
-        .select({ diagnosisCode: clinicalNote.diagnosisCode })
-        .from(clinicalNote)
+        .select({ diagnosisCode: encounterDiagnosis.cie10Code })
+        .from(encounterDiagnosis)
         .where(
           and(
-            eq(clinicalNote.organizationId, orgId),
-            eq(clinicalNote.encounterId, lastEncounter.id),
+            eq(encounterDiagnosis.organizationId, orgId),
+            eq(encounterDiagnosis.encounterId, lastEncounter.id),
+            isNull(encounterDiagnosis.voidedAt),
           ),
         ),
     ])
@@ -663,15 +666,20 @@ export async function getTimeline(
           and(
             eq(encounterProcedure.organizationId, orgId),
             inArray(encounterProcedure.encounterId, encounters),
+            isNull(encounterProcedure.voidedAt),
           ),
         ),
       tx
-        .select()
-        .from(clinicalNote)
+        .select({
+          encounterId: encounterDiagnosis.encounterId,
+          diagnosisCode: encounterDiagnosis.cie10Code,
+        })
+        .from(encounterDiagnosis)
         .where(
           and(
-            eq(clinicalNote.organizationId, orgId),
-            inArray(clinicalNote.encounterId, encounters),
+            eq(encounterDiagnosis.organizationId, orgId),
+            inArray(encounterDiagnosis.encounterId, encounters),
+            isNull(encounterDiagnosis.voidedAt),
           ),
         ),
     ])

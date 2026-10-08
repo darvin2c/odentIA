@@ -253,6 +253,13 @@
       "when": 1791432533648,
       "tag": "0035_clinical_structure",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1791475937061,
+      "tag": "0036_encounter_lifecycle",
+      "breakpoints": true
     }
   ]
 }
