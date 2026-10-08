@@ -218,7 +218,7 @@ export function EncounterProcedures({
   }
 
   return (
-    <div className="flex flex-col gap-6 rounded-md bg-card p-6">
+    <div className="flex flex-col gap-6 elevated rounded-xl border bg-card p-6">
       <div className="flex flex-col gap-1.5">
         <div className="font-heading text-base font-medium">
           Procedimientos ({detail.procedures.length})

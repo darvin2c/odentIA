@@ -1,13 +1,13 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
-@import "@fontsource-variable/raleway";
+@import "@fontsource-variable/manrope";
 
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
     --font-heading: var(--font-sans);
-    --font-sans: 'Raleway Variable', sans-serif;
+    --font-sans: 'Manrope Variable', sans-serif;
     --color-sidebar-ring: var(--sidebar-ring);
     --color-sidebar-border: var(--sidebar-border);
     --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -33,12 +33,31 @@
     --color-secondary: var(--secondary);
     --color-primary-foreground: var(--primary-foreground);
     --color-primary: var(--primary);
+    --color-primary-soft: var(--primary-soft);
+    --color-primary-soft-foreground: var(--primary-soft-foreground);
     --color-popover-foreground: var(--popover-foreground);
     --color-popover: var(--popover);
     --color-card-foreground: var(--card-foreground);
     --color-card: var(--card);
     --color-foreground: var(--foreground);
     --color-background: var(--background);
+    --color-canvas: var(--canvas);
+    --color-surface: var(--surface);
+    --color-surface-muted: var(--surface-muted);
+    --color-danger: var(--danger);
+    --color-danger-soft: var(--danger-soft);
+    --color-success: var(--success);
+    --color-success-soft: var(--success-soft);
+    --color-warning: var(--warning);
+    --color-warning-soft: var(--warning-soft);
+    --color-info: var(--info);
+    --color-info-soft: var(--info-soft);
+    --color-agent: var(--agent);
+    --color-agent-soft: var(--agent-soft);
+    --color-agent-border: var(--agent-border);
+    --color-brand-50: var(--brand-50);
+    --color-brand-250: var(--brand-250);
+    --color-brand-650: var(--brand-650);
     --radius-sm: calc(var(--radius) * 0.6);
     --radius-md: calc(var(--radius) * 0.8);
     --radius-lg: var(--radius);
@@ -48,73 +67,117 @@
     --radius-4xl: calc(var(--radius) * 2.6);
 }
 
+/*
+ * Tema clínico: primario cian-teal sobre neutros fríos. Los pares de texto y
+ * fondo cumplen WCAG 2.2 AA (4,5:1). Un tema de color alternativo solo redefine
+ * el bloque «Marca»; superficies, neutros y estados no cambian con él.
+ */
 :root {
-    --background: oklch(1 0 0);
-    --foreground: oklch(0.141 0.005 285.823);
-    --card: oklch(1 0 0);
-    --card-foreground: oklch(0.141 0.005 285.823);
-    --popover: oklch(1 0 0);
-    --popover-foreground: oklch(0.141 0.005 285.823);
-    --primary: oklch(0.488 0.243 264.376);
-    --primary-foreground: oklch(0.97 0.014 254.604);
-    --secondary: oklch(0.967 0.001 286.375);
-    --secondary-foreground: oklch(0.21 0.006 285.885);
-    --muted: oklch(0.967 0.001 286.375);
-    --muted-foreground: oklch(0.50 0.016 285.938);
-    --accent: oklch(0.967 0.001 286.375);
-    --accent-foreground: oklch(0.21 0.006 285.885);
-    --destructive: oklch(0.55 0.225 27.325);
-    --border: oklch(0.92 0.004 286.32);
-    --input: oklch(0.92 0.004 286.32);
-    --ring: oklch(0.50 0.016 285.938);
-    --chart-1: oklch(0.809 0.105 251.813);
-    --chart-2: oklch(0.623 0.214 259.815);
-    --chart-3: oklch(0.546 0.245 262.881);
-    --chart-4: oklch(0.488 0.243 264.376);
-    --chart-5: oklch(0.424 0.199 265.638);
+    /* Superficies y neutros */
+    --canvas: #f6f8fb;
+    --background: #ffffff;
+    --foreground: #0f172a;
+    --card: #ffffff;
+    --card-foreground: #0f172a;
+    --popover: #ffffff;
+    --popover-foreground: #0f172a;
+    --secondary: #e8eef4;
+    --secondary-foreground: #0f172a;
+    --muted: #f1f5f9;
+    --muted-foreground: #475569;
+    --accent: #e8eef4;
+    --accent-foreground: #0f172a;
+    --border: #e2e8f0;
+    --input: #cbd5e1;
     --radius: 0.875rem;
-    --sidebar: oklch(0.985 0 0);
-    --sidebar-foreground: oklch(0.141 0.005 285.823);
-    --sidebar-primary: oklch(0.546 0.245 262.881);
-    --sidebar-primary-foreground: oklch(0.97 0.014 254.604);
-    --sidebar-accent: oklch(0.967 0.001 286.375);
-    --sidebar-accent-foreground: oklch(0.21 0.006 285.885);
-    --sidebar-border: oklch(0.92 0.004 286.32);
-    --sidebar-ring: oklch(0.50 0.016 285.938);
+    --sidebar: #f8fafc;
+    --sidebar-foreground: #1e293b;
+    --sidebar-accent: #e8eef4;
+    --sidebar-accent-foreground: #0f172a;
+    --sidebar-border: #e2e8f0;
+    --surface: var(--card);
+    --surface-muted: var(--muted);
+
+    /* Marca */
+    --primary: #0e7490;
+    --primary-foreground: #ffffff;
+    --primary-soft: #d9eff5;
+    --primary-soft-foreground: #0b5568;
+    --ring: #0e7490;
+    --sidebar-primary: #0e7490;
+    --sidebar-primary-foreground: #ffffff;
+    --sidebar-ring: #0e7490;
+    --chart-1: #a5dbe8;
+    --chart-2: #4fc3d7;
+    --chart-3: #1a9bb5;
+    --chart-4: #0e7490;
+    --chart-5: #0b5568;
+    /* Identidad del agente: lo que propone, ejecuta o deriva comparte este
+     * acento, separado del primario para poder ajustarlo sin tocar acciones. */
+    --agent: var(--primary);
+    --agent-soft: #ecf7fa;
+    --agent-border: #bfe3ec;
+    --brand-50: color-mix(in oklab, var(--primary) 6%, var(--background));
+    --brand-250: color-mix(in oklab, var(--primary) 28%, var(--background));
+    --brand-650: color-mix(in oklab, var(--primary) 86%, black);
+
+    /* Estados: significan lo mismo en cualquier tema de color. */
+    --destructive: #b42323;
+    --danger: var(--destructive);
+    --danger-soft: #fdeaea;
+    --success: #0b6b39;
+    --success-soft: #e3f5ea;
+    --warning: #7a4a00;
+    --warning-soft: #fdf3df;
+    --info: var(--primary-soft-foreground);
+    --info-soft: var(--primary-soft);
 }
 
 .dark {
-    --background: oklch(0.141 0.005 285.823);
-    --foreground: oklch(0.985 0 0);
-    --card: oklch(0.21 0.006 285.885);
-    --card-foreground: oklch(0.985 0 0);
-    --popover: oklch(0.21 0.006 285.885);
-    --popover-foreground: oklch(0.985 0 0);
-    --primary: oklch(0.705 0.18 259.815);
-    --primary-foreground: oklch(0.141 0.005 285.823);
-    --secondary: oklch(0.274 0.006 286.033);
-    --secondary-foreground: oklch(0.985 0 0);
-    --muted: oklch(0.274 0.006 286.033);
-    --muted-foreground: oklch(0.705 0.015 286.067);
-    --accent: oklch(0.274 0.006 286.033);
-    --accent-foreground: oklch(0.985 0 0);
-    --destructive: oklch(0.704 0.191 22.216);
-    --border: oklch(1 0 0 / 10%);
-    --input: oklch(1 0 0 / 15%);
-    --ring: oklch(0.552 0.016 285.938);
-    --chart-1: oklch(0.809 0.105 251.813);
-    --chart-2: oklch(0.623 0.214 259.815);
-    --chart-3: oklch(0.546 0.245 262.881);
-    --chart-4: oklch(0.488 0.243 264.376);
-    --chart-5: oklch(0.424 0.199 265.638);
-    --sidebar: oklch(0.21 0.006 285.885);
-    --sidebar-foreground: oklch(0.985 0 0);
-    --sidebar-primary: oklch(0.705 0.18 259.815);
-    --sidebar-primary-foreground: oklch(0.141 0.005 285.823);
-    --sidebar-accent: oklch(0.274 0.006 286.033);
-    --sidebar-accent-foreground: oklch(0.985 0 0);
-    --sidebar-border: oklch(1 0 0 / 10%);
-    --sidebar-ring: oklch(0.552 0.016 285.938);
+    --canvas: #0c1118;
+    --background: #0c1118;
+    --foreground: #f1f5f9;
+    --card: #171e2b;
+    --card-foreground: #f1f5f9;
+    --popover: #171e2b;
+    --popover-foreground: #f1f5f9;
+    --secondary: #263041;
+    --secondary-foreground: #f1f5f9;
+    --muted: #1e2633;
+    --muted-foreground: #94a3b8;
+    --accent: #263041;
+    --accent-foreground: #f1f5f9;
+    --border: #263041;
+    --input: #3b475a;
+    --sidebar: #111722;
+    --sidebar-foreground: #e2e8f0;
+    --sidebar-accent: #263041;
+    --sidebar-accent-foreground: #f1f5f9;
+    --sidebar-border: #263041;
+
+    --primary: #4fc3d7;
+    --primary-foreground: #03252e;
+    --primary-soft: #143845;
+    --primary-soft-foreground: #8ad8e6;
+    --ring: #4fc3d7;
+    --sidebar-primary: #4fc3d7;
+    --sidebar-primary-foreground: #03252e;
+    --sidebar-ring: #4fc3d7;
+    --chart-1: #8ad8e6;
+    --chart-2: #4fc3d7;
+    --chart-3: #2aa7c0;
+    --chart-4: #1a8ba3;
+    --chart-5: #17687a;
+    --agent-soft: #0f2a35;
+    --agent-border: #1f4d5c;
+    --brand-650: color-mix(in oklab, var(--primary) 70%, black);
+
+    --destructive: #f87171;
+    --danger-soft: #3b1518;
+    --success: #6ee7a8;
+    --success-soft: #0f3323;
+    --warning: #fbbf24;
+    --warning-soft: #3a2a0b;
 }
 
 @layer base {
@@ -129,6 +192,55 @@
     }
 }
 
+/* Entrada de bloques de página: breve y escalonada con `--enter-index`. */
+@utility enter {
+  animation: enter 0.32s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+  animation-delay: calc(var(--enter-index, 0) * 60ms);
+}
+
+/* Tarjeta accionable: sube un punto y gana sombra al pasar el cursor. */
+@utility lift {
+  transition:
+    transform 0.15s ease-out,
+    box-shadow 0.15s ease-out,
+    border-color 0.15s ease-out;
+  &:hover {
+    transform: translateY(-2px);
+    border-color: var(--agent-border);
+    box-shadow: 0 8px 20px rgb(15 23 42 / 0.08);
+  }
+}
+
+/* Elevación de tarjeta: sombra en claro; en oscuro, un filo superior claro,
+ * porque la sombra no se percibe sobre fondo oscuro. */
+@utility elevated {
+  box-shadow: 0 1px 2px rgb(15 23 42 / 0.05);
+  .dark & {
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 0.06),
+      0 1px 2px rgb(0 0 0 / 0.3);
+  }
+}
+
+@keyframes enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-delay: 0ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
 /* Puente de paleta para `@tanstack/charts`: el tema por defecto de la
  * librería pinta con `var(--ts-chart-1..6)`; aquí derivan de `--chart-1..5`
  * del tema, así el modo oscuro funciona sin lógica extra. */
@@ -139,15 +251,4 @@
   --ts-chart-4: var(--chart-4);
   --ts-chart-5: var(--chart-5);
   --ts-chart-6: var(--chart-3);
-}
-
-/* Refuerzo de movimiento reducido dentro de los gráficos (el renderer SVG ya
- * respeta `prefers-reduced-motion` por defecto). */
-@media (prefers-reduced-motion: reduce) {
-  .ts-chart-host *,
-  .ts-chart-host *::before,
-  .ts-chart-host *::after {
-    animation-duration: 0.01ms !important;
-    transition-duration: 0.01ms !important;
-  }
 }

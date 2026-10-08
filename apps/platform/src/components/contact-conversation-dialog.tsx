@@ -180,7 +180,7 @@ export function ContactConversationDialog({
             ) : detail ? (
               <>
                 {isArchived && (
-                  <p className="rounded-md border border-amber-300 bg-amber-50 p-2 text-sm">
+                  <p className="rounded-md border border-warning/30 bg-warning-soft p-2 text-sm">
                     Contacto archivado: reactívalo desde su ficha para iniciar nuevas
                     conversaciones. Las conversaciones existentes siguen accesibles.
                   </p>
@@ -197,9 +197,9 @@ export function ContactConversationDialog({
                     >
                       <span className="flex min-w-0 items-center gap-2 text-sm">
                         {conv.channel === "whatsapp" ? (
-                          <MessageCircle className="size-4 shrink-0 text-green-600" />
+                          <MessageCircle className="size-4 shrink-0 text-success" />
                         ) : (
-                          <Send className="size-4 shrink-0 text-sky-600" />
+                          <Send className="size-4 shrink-0 text-primary" />
                         )}
                         <span className="truncate">
                           {channelLabel(conv.channel)}
@@ -207,7 +207,7 @@ export function ContactConversationDialog({
                         </span>
                         <Badge
                           variant="secondary"
-                          className={conv.status === "open" ? "border-emerald-300 bg-emerald-50 text-emerald-900" : undefined}
+                          className={conv.status === "open" ? "border-success/30 bg-success-soft text-success" : undefined}
                         >
                           {conv.status}
                         </Badge>

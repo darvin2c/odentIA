@@ -780,7 +780,7 @@ function StageColumn({
           </h2>
           <p className="mt-1.5 pl-4.5 text-xs tabular-nums text-muted-foreground">{amount ?? "Sin importe estimado"}</p>
         </div>
-        {kind === "won" && <Check aria-hidden className="size-4 text-emerald-600" />}
+        {kind === "won" && <Check aria-hidden className="size-4 text-success" />}
       </header>
       <div ref={listRef} className="relative flex min-h-32 flex-1 flex-col gap-3 px-0.5 pb-1">
         {incoming && <div
@@ -907,11 +907,11 @@ function CardContents({ card, assignee, title, actions, saving = false, feedback
         {card.assignedUserId ? assignee.split(/\s+/).slice(0, 2).map((part) => part.charAt(0)).join("") : <UserRound aria-hidden className="size-3.5" />}
       </span>
     </div>
-    {card.nextActionAt && <div className={`flex items-start gap-2 border-t border-border/50 pt-3 text-xs ${overdue ? "text-amber-700 dark:text-amber-400" : "text-muted-foreground"}`}>
+    {card.nextActionAt && <div className={`flex items-start gap-2 border-t border-border/50 pt-3 text-xs ${overdue ? "text-warning" : "text-muted-foreground"}`}>
       <CalendarClock aria-hidden className="mt-0.5 size-3.5 shrink-0" />
       <div className="min-w-0"><p className="font-medium">{overdue ? "Vencido · " : ""}{formatDueAt(card.nextActionAt)}</p>{card.nextActionNote && <p className="mt-1 line-clamp-1 text-muted-foreground" title={card.nextActionNote}>{card.nextActionNote}</p>}</div>
     </div>}
-    {(saving || feedback) && <p className={`flex items-center gap-1.5 text-xs font-medium ${feedback?.kind === "returned" ? "text-amber-700 dark:text-amber-400" : saving ? "text-primary" : "text-emerald-700 dark:text-emerald-400"}`}>
+    {(saving || feedback) && <p className={`flex items-center gap-1.5 text-xs font-medium ${feedback?.kind === "returned" ? "text-warning" : saving ? "text-primary" : "text-success"}`}>
       {saving ? <><Loader2 aria-hidden className="size-3 animate-spin motion-reduce:animate-none" /> Guardando en {card.stageName}…</>
         : feedback?.kind === "returned" ? <><Undo2 aria-hidden className="size-3" /> Volvió a {feedback.stageName}</>
         : <><Check aria-hidden className="size-3" /> Guardada en {feedback?.stageName}</>}
@@ -1007,7 +1007,7 @@ function PipelineListView({
           if (!row.original.nextActionAt) return "—"
           const overdue = isOverdue(row.original.nextActionAt)
           return (
-            <span className={overdue ? "font-medium text-red-600" : undefined}>
+            <span className={overdue ? "font-medium text-destructive" : undefined}>
               {overdue ? "Vencida · " : ""}
               {formatDueAt(row.original.nextActionAt)}
               {row.original.nextActionNote ? ` · ${row.original.nextActionNote}` : ""}

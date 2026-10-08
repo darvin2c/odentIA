@@ -1,7 +1,5 @@
 import { canAccess, canAccessAny, platformPathPermission } from "@odentia/auth/permissions"
 import {
-  Avatar,
-  AvatarFallback,
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -26,9 +24,9 @@ import {
 import {
   BarChart3,
   Bot,
+  Building2,
   CalendarDays,
-  ChevronDown,
-  Contact,
+  ChevronsUpDown,
   Home,
   Inbox,
   Kanban,
@@ -36,6 +34,7 @@ import {
   Package,
   Settings,
   Smile,
+  Users,
   Wallet,
   Workflow,
 } from "lucide-react"
@@ -82,35 +81,34 @@ type NavDefinition =
 
 const navDefinitions: NavDefinition[] = [
   { label: "Inicio", to: "/home", icon: Home },
-  { label: "Agenda", to: "/agenda", icon: CalendarDays, permission: "appointments.read" },
   { label: "Bandeja", to: "/inbox", icon: Inbox, permission: "conversations.read" },
-  { label: "Pacientes", to: "/patients", icon: Smile, permission: "patients.read" },
-  {
-    label: "CRM",
-    icon: Contact,
-    children: [
-      { label: "Contactos", to: "/contacts", icon: Contact },
-      { label: "Oportunidades", to: "/pipeline", icon: Kanban },
-    ],
-    permission: "crm.read",
-  },
+  { label: "Agenda", to: "/agenda", icon: CalendarDays, permission: "appointments.read" },
   { label: "Tareas", to: "/tasks", icon: ListTodo, permission: "tasks.read" },
-  { label: "Finanzas", to: "/finance", icon: Wallet, permission: "finance.read" },
-  { label: "Inventario", to: "/inventory", icon: Package, permission: "inventory.read" },
-  { label: "Automatizaciones", to: "/automations", icon: Workflow, permission: "crm.read" },
-  // Aprobaciones operativas separadas de la configuración: quien decide ve
-  // solo Aprobaciones; supervisión y conocimiento piden lectura/administración.
   {
-    label: "IA",
-    icon: Bot,
-    permissionsAny: ["agent.read", "agent.decide"],
+    label: "Personas",
     children: [
-      { label: "Supervisión", to: "/agent", icon: Bot, permission: "agent.read" },
-      { label: "Conocimiento", to: "/agent/knowledge", icon: ListTodo, permission: "agent.write" },
-      { label: "Aprobaciones", to: "/agent/approvals", icon: Inbox, permission: "agent.decide" },
+      { label: "Pacientes", to: "/patients", icon: Smile, permission: "patients.read" },
+      { label: "Contactos", to: "/contacts", icon: Users, permission: "crm.read" },
+      { label: "Oportunidades", to: "/pipeline", icon: Kanban, permission: "crm.read" },
     ],
   },
-  { label: "Reportes", to: "/reports", icon: BarChart3, permission: "reports.read" },
+  // El agente es una sola entrada; sus secciones (aprobaciones, actividad,
+  // conocimiento) son pestañas de página. El destino se resuelve por permiso:
+  // quien solo decide entra directo a Aprobaciones.
+  {
+    label: "Agente",
+    permissionsAny: ["agent.read", "agent.decide"],
+    children: [{ label: "Agente", to: "/agent", icon: Bot }],
+  },
+  {
+    label: "Gestión",
+    children: [
+      { label: "Finanzas", to: "/finance", icon: Wallet, permission: "finance.read" },
+      { label: "Inventario", to: "/inventory", icon: Package, permission: "inventory.read" },
+      { label: "Automatizaciones", to: "/automations", icon: Workflow, permission: "crm.read" },
+      { label: "Reportes", to: "/reports", icon: BarChart3, permission: "reports.read" },
+    ],
+  },
 ]
 
 const orgRouteApi = getRouteApi("/_org")
@@ -122,30 +120,34 @@ function OrgSwitcher() {
     queryFn: async () => (await authClient.organization.list()).data ?? [],
   })
 
-  const chip = (
+  const card = (
     <>
-      <Avatar className="size-5">
-        <AvatarFallback>{org.name.trim().charAt(0).toUpperCase() || "O"}</AvatarFallback>
-      </Avatar>
-      <span className="max-w-40 truncate hidden md:inline">{org.name}</span>
+      <span className="flex size-9 shrink-0 items-center justify-center rounded-[10px] bg-primary-soft text-primary">
+        <Building2 className="size-[18px]" aria-hidden />
+      </span>
+      <span className="flex min-w-0 flex-1 flex-col text-left leading-tight">
+        <span className="truncate text-sm font-semibold">{org.name}</span>
+        <span className="truncate text-xs text-muted-foreground">Organización</span>
+      </span>
     </>
   )
+  const cardClass =
+    "elevated flex min-h-14 w-full items-center gap-2.5 rounded-xl border bg-card px-2.5 py-2"
 
   if (!orgs || orgs.length <= 1) {
-    return (
-      <span className="flex min-w-0 items-center gap-2 rounded-md bg-muted px-2 py-1.5 text-sm font-medium">
-        {chip}
-      </span>
-    )
+    return <div className={cardClass}>{card}</div>
   }
 
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger className="flex min-w-0 items-center gap-2 rounded-md bg-muted px-2 py-1.5 text-sm font-medium hover:bg-muted/70">
-        {chip}
-        <ChevronDown className="size-3.5 text-muted-foreground hidden md:block" />
+      <DropdownMenuTrigger
+        aria-label={`Organización ${org.name}. Cambiar`}
+        className={`${cardClass} transition-colors outline-none hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring`}
+      >
+        {card}
+        <ChevronsUpDown className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
       </DropdownMenuTrigger>
-      <DropdownMenuContent>
+      <DropdownMenuContent align="start" className="w-(--anchor-width) min-w-56">
         {orgs.map((item) => (
           <DropdownMenuItem
             key={item.id}
@@ -177,11 +179,15 @@ function OrgLayout() {
       (!item.permission || canAccess(role, item.permission)) &&
       (!item.permissionsAny || canAccessAny(role, item.permissionsAny))
     if (!item.children) return selfVisible ? [item] : []
-    const children = item.children.filter(
-      (child) => !child.permission || canAccess(role, child.permission),
-    )
+    const children = item.children
+      .filter((child) => !child.permission || canAccess(role, child.permission))
+      .map((child) =>
+        child.to === "/agent" && !canAccess(role, "agent.read")
+          ? { ...child, to: "/agent/approvals" }
+          : child,
+      )
     if (children.length === 0) return []
-    if (selfVisible && children.length === item.children.length) return [item]
+    if (!selfVisible) return []
     return [{ ...item, children }]
   })
   const footerItems = canAccess(role, "settings.read")
@@ -199,26 +205,26 @@ function OrgLayout() {
       pathname={pathname}
       user={{ name: session.name, email: session.email }}
       footerItems={footerItems}
-      brand={<span className="text-base font-semibold">odentIA</span>}
+      brand={
+        <span className="flex items-center gap-2.5">
+          <span className="flex size-[30px] items-center justify-center rounded-[9px] bg-primary text-[15px] font-bold text-primary-foreground shadow-xs">
+            o
+          </span>
+          <span className="text-[17px] font-bold tracking-tight">odentIA</span>
+        </span>
+      }
       brandIcon={
-        <span className="flex size-7 items-center justify-center rounded-md bg-primary text-sm font-semibold text-primary-foreground">
+        <span className="flex size-7 items-center justify-center rounded-md bg-primary text-sm font-bold text-primary-foreground">
           o
         </span>
       }
+      switcher={<OrgSwitcher />}
       onSignOut={async () => {
         await authClient.signOut()
         window.location.assign(panelUrl("/login"))
       }}
     >
-      <HeaderUtilitiesProvider
-        value={
-          <>
-            <WorkspaceNotifications />
-            <span aria-hidden="true" className="mx-1 h-6 w-px shrink-0 bg-border" />
-            <OrgSwitcher />
-          </>
-        }
-      >
+      <HeaderUtilitiesProvider value={<WorkspaceNotifications />}>
         <Outlet />
       </HeaderUtilitiesProvider>
     </AppShell>

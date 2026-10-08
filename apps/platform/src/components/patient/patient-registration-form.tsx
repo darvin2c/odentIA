@@ -1308,7 +1308,7 @@ export function PatientRegistrationForm({
                 branches={branches}
               />
               {config.privacyNotice.trim() ? (
-                <div className="flex flex-col gap-6 rounded-md bg-card p-6">
+                <div className="flex flex-col gap-6 elevated rounded-xl border bg-card p-6">
                   <div className="flex flex-col gap-1.5">
                     <div className="font-heading text-base font-medium">Aviso de privacidad</div>
                   </div>
@@ -1529,7 +1529,7 @@ function ReviewSummary({
     ])
   }
   return (
-    <div className="flex flex-col gap-6 rounded-md bg-card p-6">
+    <div className="flex flex-col gap-6 elevated rounded-xl border bg-card p-6">
       <div className="flex flex-col gap-1.5">
         <div className="font-heading text-base font-medium">Revisa los datos antes de enviar</div>
       </div>

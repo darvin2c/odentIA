@@ -185,7 +185,7 @@ export function ControlesPanel({
     )
 
   return (
-    <div className="flex flex-col gap-4 rounded-md bg-card p-6">
+    <div className="flex flex-col gap-4 elevated rounded-xl border bg-card p-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex flex-col gap-1.5">
           <div className="font-heading text-base font-medium">Controles</div>
@@ -748,7 +748,7 @@ export function RecetasPanel({
     )
 
   return (
-    <div className="flex flex-col gap-4 rounded-md bg-card p-6">
+    <div className="flex flex-col gap-4 elevated rounded-xl border bg-card p-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex flex-col gap-1.5">
           <div className="font-heading text-base font-medium">Recetas</div>

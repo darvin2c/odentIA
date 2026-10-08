@@ -53,7 +53,7 @@ function ReportsPage() {
   </PageShell>
 }
 function ReportSection({ title, description, children }: { title: string; description: string; children: ReactNode }) {
-  return <section className="min-w-0 rounded-md border bg-card p-5"><h2 className="font-semibold">{title}</h2><p className="mb-4 mt-1 text-sm text-muted-foreground">{description}</p>{children}</section>
+  return <section className="min-w-0 elevated rounded-xl border bg-card p-5"><h2 className="font-semibold">{title}</h2><p className="mb-4 mt-1 text-sm text-muted-foreground">{description}</p>{children}</section>
 }
 function SimpleTable({ headers, rows }: { headers: string[]; rows: Array<Array<string | number>> }) {
   return rows.length === 0 ? <EmptyState title="Sin registros" description="No hay registros para este criterio." /> : <Table><TableHeader><TableRow>{headers.map(header => <TableHead key={header} scope="col">{header}</TableHead>)}</TableRow></TableHeader><TableBody>{rows.map(row => <TableRow key={row.map(String).join("|")}>{row.map((cell, index) => <TableCell key={headers[index]} className="tabular-nums">{cell}</TableCell>)}</TableRow>)}</TableBody></Table>

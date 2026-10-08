@@ -216,7 +216,7 @@ function CajaTab() {
                 </span>
                 {shift.status === "cerrada" && shift.differenceCents !== null ? (
                   <span
-                    className={`text-sm font-medium ${shift.differenceCents === 0 ? "text-emerald-700" : "text-destructive"}`}
+                    className={`text-sm font-medium ${shift.differenceCents === 0 ? "text-success" : "text-destructive"}`}
                   >
                     Diferencia {formatCents(shift.differenceCents, shift.currency)}
                   </span>
@@ -404,7 +404,7 @@ function ShiftDetailPanel({
   })
 
   return (
-    <div className="flex flex-col gap-4 rounded-md border bg-card p-4">
+    <div className="flex flex-col gap-4 elevated rounded-xl border bg-card p-4">
       <div className="flex flex-wrap items-center gap-2">
         <h3 className="text-base font-semibold">
           Turno {branchLabel} · {shift.currency}
@@ -449,7 +449,7 @@ function ShiftDetailPanel({
               <Badge>{MOVEMENT_KIND_LABELS[movement.kind] ?? movement.kind}</Badge>
               <span className="text-sm">{movement.concept}</span>
               <span
-                className={`text-sm font-medium ${movement.direction === "ingreso" ? "text-emerald-700" : "text-destructive"}`}
+                className={`text-sm font-medium ${movement.direction === "ingreso" ? "text-success" : "text-destructive"}`}
               >
                 {movement.direction === "ingreso" ? "+" : "−"}
                 {formatCents(movement.amountCents, movement.currency)}

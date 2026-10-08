@@ -381,7 +381,7 @@ function PipelinesPage() {
             </>
           }
         />
-        {error && <p className="text-sm text-red-600">{error}</p>}
+        {error && <p className="text-sm text-destructive">{error}</p>}
         {/* Sin FilterBar: las etapas se muestran en el orden de posición del pipeline y ese orden es el dato
             (subir/bajar lo edita); no hay nada que filtrar ni ordenar. */}
         {/* La fila marcada aquí es la que se está renombrando en línea, no el panel. */}

@@ -344,7 +344,7 @@ function ContactDetailPage() {
           <span className="flex flex-wrap items-center gap-2">
             <Badge
               variant="secondary"
-              className={archived ? undefined : "border-emerald-300 bg-emerald-50 text-emerald-900"}
+              className={archived ? undefined : "border-success/30 bg-success-soft text-success"}
             >
               {archived ? "Archivado" : "Activo"}
             </Badge>
@@ -408,7 +408,7 @@ function ContactDetailPage() {
         }
       />
       {archived && (
-        <p className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm">
+        <p className="rounded-md border border-warning/30 bg-warning-soft p-3 text-sm">
           Contacto archivado: conserva identidades y conversaciones, pero no admite nuevas
           conversaciones, vínculos de pacientes ni envíos de registro. Reactívalo para continuar.
           Las conversaciones existentes siguen accesibles desde la bandeja.
@@ -792,7 +792,7 @@ function ContactDetailPage() {
                   variant="secondary"
                   className={
                     conv.status === "open"
-                      ? "border-emerald-300 bg-emerald-50 text-emerald-900"
+                      ? "border-success/30 bg-success-soft text-success"
                       : undefined
                   }
                 >
@@ -1280,7 +1280,7 @@ function ContactDetailPage() {
             />
           </Field>
           {moveAmbiguous && (
-            <div className="flex flex-col gap-2 rounded-md border border-amber-300 p-2">
+            <div className="flex flex-col gap-2 rounded-md border border-warning/30 p-2">
               <p className="text-sm">
                 Hay historial del canal sin identidad determinable: resuelve cada conversación antes
                 de reintentar. No se mueve nada por conjetura.

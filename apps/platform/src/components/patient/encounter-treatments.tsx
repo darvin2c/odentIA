@@ -74,7 +74,7 @@ export function EncounterTreatments({
   }
 
   return (
-    <div className="flex flex-col gap-4 rounded-md bg-card p-6">
+    <div className="flex flex-col gap-4 elevated rounded-xl border bg-card p-6">
       <div className="flex flex-col gap-1.5">
         <div className="font-heading text-base font-medium">Tratamientos de esta atención</div>
         <p className="text-sm text-muted-foreground">

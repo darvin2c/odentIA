@@ -30,7 +30,7 @@ import {
   TooltipProvider,
   useSidebar,
 } from "@odentia/ui"
-import { ChevronDown, ExternalLink, LogOut } from "lucide-react"
+import { ChevronDown, ChevronLeft, ExternalLink, LogOut } from "lucide-react"
 import { RiSideBarLine } from "@remixicon/react"
 import * as React from "react"
 import { type ThemeMode, ThemeTabs, useTheme } from "./theme.js"
@@ -96,6 +96,8 @@ export interface AppShellProps {
   brand: React.ReactNode
   /** Marca compacta del riel colapsado; al hover troca al icono de expandir. */
   brandIcon?: React.ReactNode
+  /** Selector de contexto (organización) bajo la marca; se oculta en el riel colapsado. */
+  switcher?: React.ReactNode
   sidebarFooter?: React.ReactNode
   /** Ítems de navegación anclados al pie del sidebar, encima del bloque de
    * usuario (ajustes de la organización, por ejemplo). Mismo ítem que el nav
@@ -108,6 +110,19 @@ export function isNavItemActive(pathname: string, to: string): boolean {
   if (to === "/") return pathname === "/"
   if (pathname === to) return true
   return pathname.startsWith(`${to}/`)
+}
+
+/**
+ * Destino activo entre todos los del shell: gana el más específico, así
+ * `/agent/approvals` no marca a la vez `/agent` y su ruta hermana.
+ */
+function resolveActiveTo(pathname: string, items: AppShellNavItem[]): string | undefined {
+  let best: string | undefined
+  for (const item of items) {
+    if (!isNavItemActive(pathname, item.to)) continue
+    if (best === undefined || item.to.length > best.length) best = item.to
+  }
+  return best
 }
 
 function isGroup(entry: AppShellNavEntry): entry is AppShellNavGroup {
@@ -127,26 +142,27 @@ function isGroup(entry: AppShellNavEntry): entry is AppShellNavGroup {
  */
 function NavItemButton({
   item,
-  pathname,
+  activeTo,
   LinkComponent,
 }: {
   item: AppShellNavItem
-  pathname: string
+  activeTo: string | undefined
   LinkComponent: AppShellProps["LinkComponent"]
 }) {
   const { setOpenMobile } = useSidebar()
-  const active = isNavItemActive(pathname, item.to)
+  const active = item.to === activeTo
   return (
     <SidebarMenuItem>
       <SidebarMenuButton
         isActive={active}
         tooltip={item.label}
         aria-current={active ? "page" : undefined}
-        className={
-          active
-            ? "[&>span]:underline [&>span]:underline-offset-4 group-data-[collapsible=icon]:outline-1 group-data-[collapsible=icon]:outline-sidebar-foreground group-data-[collapsible=icon]:outline-offset-[-2px]"
-            : undefined
-        }
+        className={cn(
+          "h-10 [&>svg]:text-muted-foreground",
+          // El activo se distingue por fondo, peso e icono relleno, no solo por color.
+          active &&
+            "data-active:bg-primary-soft data-active:font-semibold data-active:text-primary-soft-foreground hover:bg-primary-soft hover:text-primary-soft-foreground [&>svg]:fill-primary/25 [&>svg]:text-primary",
+        )}
         render={(props) => {
           const { onClick, children, ...rest } = props
           return (
@@ -167,36 +183,39 @@ function NavItemButton({
         <span>{item.label}</span>
         {item.external ? <ExternalLink className="ml-auto size-3 opacity-60" /> : null}
       </SidebarMenuButton>
-      {item.badge ? <SidebarMenuBadge>{item.badge}</SidebarMenuBadge> : null}
+      {item.badge ? (
+        <SidebarMenuBadge className="top-2.5! h-5 min-w-5 rounded-full bg-secondary px-1.5 text-xs font-semibold">
+          {item.badge}
+        </SidebarMenuBadge>
+      ) : null}
     </SidebarMenuItem>
   )
 }
 
 function NavGroup({
   group,
-  pathname,
+  activeTo,
   LinkComponent,
 }: {
   group: AppShellNavGroup
-  pathname: string
+  activeTo: string | undefined
   LinkComponent: AppShellProps["LinkComponent"]
 }) {
   const [open, setOpen] = React.useState(group.defaultOpen ?? true)
-  const Icon = group.icon
   return (
     <SidebarGroup>
       <SidebarGroupLabel
         render={
           <button type="button" aria-expanded={open} onClick={() => setOpen((value) => !value)} />
         }
-        className="w-full justify-between hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+        className="group/label w-full justify-between text-xs font-bold tracking-wider text-muted-foreground uppercase hover:text-sidebar-accent-foreground"
       >
-        <span className="flex min-w-0 items-center gap-2">
-          {Icon ? <Icon className="size-4 shrink-0" /> : null}
-          <span className="truncate">{group.label}</span>
-        </span>
+        <span className="truncate">{group.label}</span>
         <ChevronDown
-          className={cn("size-3.5 shrink-0 opacity-60 transition-transform", !open && "-rotate-90")}
+          className={cn(
+            "size-3.5 shrink-0 opacity-0 transition-[opacity,transform] group-hover/label:opacity-70 group-focus-visible/label:opacity-70",
+            !open && "-rotate-90 opacity-70",
+          )}
         />
       </SidebarGroupLabel>
       {open ? (
@@ -206,7 +225,7 @@ function NavGroup({
               <NavItemButton
                 key={child.to}
                 item={child}
-                pathname={pathname}
+                activeTo={activeTo}
                 LinkComponent={LinkComponent}
               />
             ))}
@@ -224,11 +243,11 @@ function NavGroup({
  */
 function SidebarNav({
   items,
-  pathname,
+  activeTo,
   LinkComponent,
 }: {
   items: AppShellNavEntry[]
-  pathname: string
+  activeTo: string | undefined
   LinkComponent: AppShellProps["LinkComponent"]
 }) {
   const runs: AppShellNavEntry[][] = []
@@ -251,7 +270,7 @@ function SidebarNav({
             <NavGroup
               key={`g-${first.label}-${runIndex}`}
               group={first}
-              pathname={pathname}
+              activeTo={activeTo}
               LinkComponent={LinkComponent}
             />
           )
@@ -266,7 +285,7 @@ function SidebarNav({
                     <NavItemButton
                       key={item.to}
                       item={item}
-                      pathname={pathname}
+                      activeTo={activeTo}
                       LinkComponent={LinkComponent}
                     />
                   )
@@ -290,25 +309,32 @@ function SidebarNav({
 function ShellSidebarHeader({
   brand,
   brandIcon,
+  switcher,
 }: {
   brand: React.ReactNode
   brandIcon?: React.ReactNode
+  switcher?: React.ReactNode
 }) {
   const { toggleSidebar } = useSidebar()
   return (
     <SidebarHeader>
       <div className="flex min-w-0 items-center gap-2 px-1 group-data-[collapsible=icon]:justify-center">
         <div className="min-w-0 flex-1 truncate group-data-[collapsible=icon]:hidden">{brand}</div>
+        {/* Colapsar montado sobre el borde: se encuentra sin buscarlo junto a la marca. */}
         <Tooltip>
           <TooltipTrigger
             render={
-              <SidebarTrigger
+              <button
+                type="button"
+                onClick={() => toggleSidebar()}
                 aria-label="Contraer el panel lateral"
-                className="hidden md:inline-flex group-data-[collapsible=icon]:hidden"
-              />
+                className="elevated absolute top-4 -right-4 z-20 hidden size-8 items-center justify-center rounded-full border bg-card text-muted-foreground transition-colors outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring md:flex group-data-[collapsible=icon]:hidden"
+              >
+                <ChevronLeft className="size-4" />
+              </button>
             }
           />
-          <TooltipContent side="bottom" sideOffset={8}>
+          <TooltipContent side="right" align="center">
             Contraer el panel lateral
           </TooltipContent>
         </Tooltip>
@@ -349,6 +375,7 @@ function ShellSidebarHeader({
           </Tooltip>
         )}
       </div>
+      {switcher ? <div className="group-data-[collapsible=icon]:hidden">{switcher}</div> : null}
     </SidebarHeader>
   )
 }
@@ -369,6 +396,7 @@ export function AppShell(props: AppShellProps): React.JSX.Element {
     onThemeChange,
     brand,
     brandIcon,
+    switcher,
     sidebarFooter,
     footerItems,
     children,
@@ -379,6 +407,10 @@ export function AppShell(props: AppShellProps): React.JSX.Element {
     onChange: onThemeChange,
   })
   const initial = user.name?.trim().charAt(0).toUpperCase() || "U"
+  const activeTo = resolveActiveTo(pathname, [
+    ...items.flatMap((entry) => (isGroup(entry) ? entry.children : [entry])),
+    ...(footerItems ?? []),
+  ])
 
   const userMenuContent = (
     <>
@@ -415,8 +447,8 @@ export function AppShell(props: AppShellProps): React.JSX.Element {
     <TooltipProvider>
       <SidebarProvider>
         <Sidebar collapsible="icon">
-          <ShellSidebarHeader brand={brand} brandIcon={brandIcon} />
-          <SidebarNav items={items} pathname={pathname} LinkComponent={LinkComponent} />
+          <ShellSidebarHeader brand={brand} brandIcon={brandIcon} switcher={switcher} />
+          <SidebarNav items={items} activeTo={activeTo} LinkComponent={LinkComponent} />
           <SidebarFooter>
             {sidebarFooter}
             {footerItems?.length ? (
@@ -426,7 +458,7 @@ export function AppShell(props: AppShellProps): React.JSX.Element {
                     <NavItemButton
                       key={item.to}
                       item={item}
-                      pathname={pathname}
+                      activeTo={activeTo}
                       LinkComponent={LinkComponent}
                     />
                   ))}
@@ -442,7 +474,9 @@ export function AppShell(props: AppShellProps): React.JSX.Element {
               >
                 <Avatar className="size-8">
                   {user.avatarUrl ? <AvatarImage src={user.avatarUrl} alt={user.name} /> : null}
-                  <AvatarFallback>{initial}</AvatarFallback>
+                  <AvatarFallback className="bg-foreground font-semibold text-background">
+                    {initial}
+                  </AvatarFallback>
                 </Avatar>
                 <div className="min-w-0 flex-1 group-data-[collapsible=icon]:hidden">
                   <p className="truncate text-sm font-medium text-sidebar-foreground">

@@ -175,7 +175,7 @@ function TasksPage() {
           if (!row.original.dueAt) return "—"
           const overdue = isOverdue(row.original.dueAt) && row.original.status === "open"
           return (
-            <span className={overdue ? "font-medium text-red-600" : undefined}>
+            <span className={overdue ? "font-medium text-destructive" : undefined}>
               {overdue ? "Vencida · " : ""}
               {formatDueAt(row.original.dueAt)}
             </span>

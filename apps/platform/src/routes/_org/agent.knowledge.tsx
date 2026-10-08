@@ -1,3 +1,4 @@
+import { AgentTabs } from "../../components/agent-tabs"
 import { Badge, Button, Field, FieldLabel, Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Textarea } from "@odentia/ui"
 import { EmptyState, ErrorState, FormDrawer, LoadingState, PageHeader, PageShell } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
@@ -144,9 +145,10 @@ function AgentKnowledgePage() {
     <PageShell className="flex flex-col gap-6">
       <PageDraftGuard dirty={formDirty || saveMutation.isPending} />
       <PageHeader
-        title="Conocimiento del agente"
+        title="Agente"
         subtitle="Respuestas oficiales versionadas: solo lo publicado alimenta al agente"
       />
+      <AgentTabs />
       <div className="flex flex-wrap items-center gap-2">
         <Field className="w-56">
           <FieldLabel htmlFor="filtro-tipo">Tipo</FieldLabel>
@@ -193,7 +195,7 @@ function AgentKnowledgePage() {
       ) : (
         <ul className="flex flex-col gap-3">
           {entries.map((entry) => (
-            <li key={entry.id} className="flex flex-col gap-2 rounded-md bg-card p-6">
+            <li key={entry.id} className="flex flex-col gap-2 elevated rounded-xl border bg-card p-6">
               <div className="flex flex-wrap items-center gap-2">
                 <Badge variant={entry.status === "publicada" ? "success" : "secondary"}>
                   {entry.status === "publicada" ? "Publicada" : "Borrador"}
@@ -274,7 +276,7 @@ function AgentKnowledgePage() {
         </FormDrawer>
       ) : null}
       {revisionsFor ? (
-        <div className="flex flex-col gap-2 rounded-md bg-card p-6">
+        <div className="flex flex-col gap-2 elevated rounded-xl border bg-card p-6">
           <div className="font-heading text-base font-medium">Versiones de “{revisionsFor.title}”</div>
           {revisionsQuery.isPending ? (
             <LoadingState message="Cargando versiones…" />

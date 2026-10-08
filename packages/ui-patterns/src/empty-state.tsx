@@ -78,7 +78,7 @@ export function EmptyState({
               href={learnMoreHref}
               target="_blank"
               rel="noreferrer"
-              className="inline-flex items-center gap-1 text-sm font-medium text-accent transition-colors hover:text-accent-foreground"
+              className="inline-flex items-center gap-1 text-sm font-medium text-primary underline-offset-4 hover:underline"
             >
               {learnMoreLabel}
               <ArrowUpRight className="size-4" aria-hidden />

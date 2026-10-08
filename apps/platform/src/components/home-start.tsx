@@ -33,7 +33,7 @@ export function HomeStart({ data }: { data: WorkspaceHome }) {
     : data.activity.completedToday ? "Hay trabajo registrado hoy y no quedan pendientes en las secciones que puedes consultar. No acredita que todos los casos estén resueltos."
       : data.activity.recorded ? "No hay citas por atender hoy, mensajes por responder ni otros pendientes visibles aquí. Puedes consultar el detalle de tu trabajo."
         : "Aún no hay actividad operativa registrada para tu trabajo. Empieza por el siguiente paso; los ceros no indican que todo esté atendido."
-  return <section aria-label="Siguiente paso" className="rounded-md border bg-card p-5">
+  return <section aria-label="Siguiente paso" className="enter elevated rounded-xl border bg-card p-6">
     {next && <Badge variant="secondary" className="mb-3">{partiallyConfigured ? "Configuración parcial" : "Sin configurar"}</Badge>}
     <h2 className="text-lg font-semibold">{title}</h2>
     <p className="mt-2 max-w-2xl text-sm text-muted-foreground">{description}</p>

@@ -98,7 +98,7 @@ importers:
 
   apps/panel:
     dependencies:
-      '@fontsource-variable/raleway':
+      '@fontsource-variable/manrope':
         specifier: 5.3.0
         version: 5.3.0
       '@odentia/ui':
@@ -174,7 +174,7 @@ importers:
       '@dnd-kit/core':
         specifier: 6.3.1
         version: 6.3.1(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
-      '@fontsource-variable/raleway':
+      '@fontsource-variable/manrope':
         specifier: 5.3.0
         version: 5.3.0
       '@odentia/auth':
@@ -694,7 +694,7 @@ importers:
         specifier: ^19.2.8
         version: 19.3.0(react@19.3.0)
     devDependencies:
-      '@fontsource-variable/raleway':
+      '@fontsource-variable/manrope':
         specifier: 5.3.0
         version: 5.3.0
       '@remixicon/react':
@@ -1782,8 +1782,8 @@ packages:
   '@floating-ui/utils@0.2.12':
     resolution: {integrity: sha512-HpCo8tmWzLVad5s2d19EhAz5zqrrQ6s69qd6moPMQvkOuSwDT1YgRfWSVuc4ennqrgv3OHppiOGMQ7oC13yIww==}
 
-  '@fontsource-variable/raleway@5.3.0':
-    resolution: {integrity: sha512-aSV2k+V6Zz+od0dHpBOzkVxEzmgEdiXcxDfant39jLOx+T89dielQRrZylukwK3Fp+FY255gPqz67ruOfs1rqA==}
+  '@fontsource-variable/manrope@5.3.0':
+    resolution: {integrity: sha512-6D5dgokHsWDDMtmXHznKa0hK229NN+1a4BLPmUCLqcO1Pw5EEhWY5RFt0AcXnVRAljFFPfRtLkJePQj6LSsV6g==}
 
   '@grpc/grpc-js@1.14.4':
     resolution: {integrity: sha512-k9Dj3DV/itK9D06Y8f190Qgop7/Ui+D0njFV3LHMPwPT75DpXLQohE9Wmz0QElrJnzsjB7KPWiKJbOl7IPDArQ==}
@@ -7901,7 +7901,7 @@ snapshots:
 
   '@floating-ui/utils@0.2.12': {}
 
-  '@fontsource-variable/raleway@5.3.0': {}
+  '@fontsource-variable/manrope@5.3.0': {}
 
   '@grpc/grpc-js@1.14.4':
     dependencies:

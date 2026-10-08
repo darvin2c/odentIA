@@ -231,7 +231,7 @@ function WebchatWidget() {
             />
           </label>
           {error ? (
-            <p className="text-sm text-red-600" role="alert">
+            <p className="text-sm text-destructive" role="alert">
               {error}
             </p>
           ) : null}
@@ -283,7 +283,7 @@ function WebchatWidget() {
                 <PromptInputSubmit aria-label="Enviar" disabled={sending} />
               </PromptInput>
               {error ? (
-                <p className="px-1 text-xs text-red-600" role="alert">
+                <p className="px-1 text-xs text-destructive" role="alert">
                   {error}
                 </p>
               ) : null}

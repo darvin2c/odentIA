@@ -231,7 +231,7 @@ function ProfileForm({
       }}
     >
       <PageDraftGuard dirty={dirty} />
-      <section className="flex flex-col gap-4 rounded-md bg-card p-6">
+      <section className="flex flex-col gap-4 elevated rounded-xl border bg-card p-6">
         <h2 className="font-heading text-base font-medium">Identidad</h2>
         <form.Field name="legalName">
           {(field) => (
@@ -314,7 +314,7 @@ function ProfileForm({
         </form.Field>
       </section>
 
-      <section className="flex flex-col gap-4 rounded-md bg-card p-6">
+      <section className="flex flex-col gap-4 elevated rounded-xl border bg-card p-6">
         <h2 className="font-heading text-base font-medium">País y horario</h2>
         <form.Field name="countryCode">
           {(field) => (

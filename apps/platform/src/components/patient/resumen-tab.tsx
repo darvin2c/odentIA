@@ -143,7 +143,7 @@ export function ResumenTab({
           </div>
         </div>
       ) : null}
-      <section className="rounded-md bg-card p-4">
+      <section className="elevated rounded-xl border bg-card p-4">
         <h2 className="font-heading text-lg font-medium">Situación clínica</h2>
         <p className="mb-4 text-sm text-muted-foreground">
           Selecciona una pieza para consultar sus hallazgos, notas, tratamientos e imágenes.
@@ -165,7 +165,7 @@ export function ResumenTab({
         )}
       </section>
 
-      <div className="flex flex-col gap-6 rounded-md bg-card p-6">
+      <div className="flex flex-col gap-6 elevated rounded-xl border bg-card p-6">
         <div className="flex flex-col gap-1.5">
           <div className="font-heading text-base font-medium">Última atención</div>
         </div>
@@ -214,7 +214,7 @@ export function ResumenTab({
           )}
         </div>
       </div>
-      <div className="flex flex-col gap-6 rounded-md bg-card p-6">
+      <div className="flex flex-col gap-6 elevated rounded-xl border bg-card p-6">
         <div className="flex flex-col gap-1.5">
           <div className="font-heading text-base font-medium">Tratamientos y seguimiento</div>
           <p className="text-sm text-muted-foreground">
@@ -258,7 +258,7 @@ export function ResumenTab({
         )}
       </div>
 
-      <div className="flex flex-col gap-6 rounded-md bg-card p-6">
+      <div className="flex flex-col gap-6 elevated rounded-xl border bg-card p-6">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="flex flex-col gap-1.5">
             <div className="font-heading text-base font-medium">Controles pendientes</div>
@@ -300,7 +300,7 @@ export function ResumenTab({
         </div>
       </div>
 
-      <div className="flex flex-col gap-6 rounded-md bg-card p-6">
+      <div className="flex flex-col gap-6 elevated rounded-xl border bg-card p-6">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="flex flex-col gap-1.5">
             <div className="font-heading text-base font-medium">Cuenta</div>
@@ -335,7 +335,7 @@ export function ResumenTab({
 
       <PatientContactSection detail={detail} />
       <Collapsible>
-        <div className="flex flex-col gap-6 rounded-md bg-card p-6">
+        <div className="flex flex-col gap-6 elevated rounded-xl border bg-card p-6">
           <div className="flex flex-col gap-1.5 pb-3">
             <CollapsibleTrigger className="text-base font-semibold">
               <span className="flex items-center gap-1">
