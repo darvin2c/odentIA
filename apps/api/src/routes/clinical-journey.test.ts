@@ -1192,3 +1192,40 @@ it("consentimiento estructurado: firma con profesional, PDF con huella, menor y 
     "revocado",
   )
 })
+
+it("formularios: finalizar con un obligatorio vacío responde 400 nombrando el campo", async () => {
+  const draft = await post(app, "/clinical-forms/form-templates", {
+    title: "Evaluación rápida",
+    schema: {
+      sections: [
+        {
+          id: "examen",
+          title: "Examen",
+          fields: [
+            { id: "hallazgos", label: "Hallazgos", type: "texto_largo", required: true },
+            { id: "pieza", label: "Pieza", type: "pieza" },
+          ],
+        },
+      ],
+    },
+  })
+  expect(draft.status).toBe(201)
+  const draftId = (await json<{ data: { id: string } }>(draft)).data.id
+  const published = await post(app, `/clinical-forms/form-templates/${draftId}/publish`)
+  expect((await json<{ data: { version: number } }>(published)).data.version).toBe(1)
+  const patientId = await createPatient()
+  const created = await post(app, "/clinical-forms/form-responses", {
+    templateId: draftId,
+    patientId,
+    answers: { pieza: 36 },
+  })
+  expect(created.status).toBe(201)
+  const responseId = (await json<{ data: { id: string; templateTitle: string } }>(created)).data.id
+  const finalized = await post(app, `/clinical-forms/form-responses/${responseId}/finalize`)
+  expect(finalized.status).toBe(400)
+  expect((await json<ErrorBody>(finalized)).error.message).toContain("Hallazgos")
+  const discarded = await post(app, `/clinical-forms/form-responses/${responseId}/discard`, {
+    reason: "Paciente equivocado",
+  })
+  expect(discarded.status).toBe(200)
+})

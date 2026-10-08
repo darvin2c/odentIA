@@ -22,6 +22,9 @@ export type FormFieldType =
   | "opcion_multiple"
   | "fecha"
   | "firma"
+  | "pieza"
+  | "escala"
+  | "adjunto"
 
 export interface FormFieldDef {
   id: string
@@ -33,6 +36,8 @@ export interface FormFieldDef {
   min?: number | null
   max?: number | null
   help?: string | null
+  /** Mostrar solo si otro campo anterior tiene ese valor. */
+  showIf?: { field: string; equals: string | boolean } | null
 }
 
 export interface FormSectionDef {
@@ -55,6 +60,7 @@ export interface FormTemplate {
   version: number
   status: "borrador" | "publicado" | "archivado"
   schema: FormSchemaDef
+  respondent: "staff" | "portal"
   publishedAt: string | null
   createdAt: string
   updatedAt: string
@@ -69,9 +75,15 @@ export interface FormResponse {
   patientId: string
   encounterId: string | null
   professionalUserId: string | null
-  status: "borrador" | "finalizado"
+  status: "borrador" | "finalizado" | "descartado"
   answers: Record<string, unknown>
   finalizedAt: string | null
+  /** Título congelado de la plantilla (nulo solo en capturas muy antiguas). */
+  templateTitle: string | null
+  source: "staff" | "portal"
+  submittedAt: string | null
+  discardedAt: string | null
+  discardReason: string | null
   createdAt: string
   updatedAt: string
 }
@@ -254,6 +266,7 @@ export function createFormTemplate(body: {
   title: string
   description?: string | null
   specialtyId?: string | null
+  respondent?: "staff" | "portal"
   schema: FormSchemaDef
 }) {
   return post<FormTemplate>(`${BASE}/form-templates`, body)
@@ -261,7 +274,13 @@ export function createFormTemplate(body: {
 
 export function updateFormTemplate(
   id: string,
-  body: { title?: string; description?: string | null; specialtyId?: string | null; schema?: FormSchemaDef },
+  body: {
+    title?: string
+    description?: string | null
+    specialtyId?: string | null
+    respondent?: "staff" | "portal"
+    schema?: FormSchemaDef
+  },
 ) {
   return patch<FormTemplate>(`${BASE}/form-templates/${id}`, body)
 }
@@ -299,6 +318,10 @@ export function updateFormResponse(
 
 export function finalizeFormResponse(id: string) {
   return post<FormResponse>(`${BASE}/form-responses/${id}/finalize`, {})
+}
+
+export function discardFormResponse(id: string, reason: string) {
+  return post<FormResponse>(`${BASE}/form-responses/${id}/discard`, { reason })
 }
 
 export function fetchFormAddenda(responseId: string) {
@@ -458,6 +481,15 @@ export const FIELD_TYPE_LABELS: Record<FormFieldType, string> = {
   opcion_multiple: "Opción múltiple",
   fecha: "Fecha",
   firma: "Firma manuscrita",
+  pieza: "Pieza dentaria (FDI)",
+  escala: "Escala numérica",
+  adjunto: "Archivo del paciente",
+}
+
+export const FORM_RESPONSE_STATUS_LABELS: Record<FormResponse["status"], string> = {
+  borrador: "Borrador",
+  finalizado: "Finalizado",
+  descartado: "Descartado",
 }
 
 export const ORDER_STATUS_LABELS: Record<ClinicalOrder["status"], string> = {

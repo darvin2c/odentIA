@@ -15,6 +15,7 @@ import {
   createFormTemplate,
   createSpecialty,
   createSuggestedConsentTemplates,
+  discardFormResponse,
   finalizeFormResponse,
   formResponsePatientId,
   getConsentPrint,
@@ -94,6 +95,9 @@ const fieldSchema: z.ZodType<unknown> = z.lazy(() =>
         "opcion_multiple",
         "fecha",
         "firma",
+        "pieza",
+        "escala",
+        "adjunto",
       ]),
       required: z.boolean().optional(),
       options: z.array(z.string()).optional(),
@@ -101,6 +105,10 @@ const fieldSchema: z.ZodType<unknown> = z.lazy(() =>
       min: z.number().nullish(),
       max: z.number().nullish(),
       help: z.string().max(500).nullish(),
+      showIf: z
+        .object({ field: z.string().min(1).max(50), equals: z.union([z.string(), z.boolean()]) })
+        .strict()
+        .nullish(),
     })
     .strict(),
 )
@@ -128,6 +136,7 @@ const formTemplateCreate = z
     title: z.string().trim().min(1).max(200),
     description: z.string().trim().max(2000).nullish(),
     specialtyId: uuid.nullish(),
+    respondent: z.enum(["staff", "portal"]).optional(),
     schema: formSchemaInput,
   })
   .strict()
@@ -137,6 +146,7 @@ const formTemplatePatch = z
     title: z.string().trim().min(1).max(200).optional(),
     description: z.string().trim().max(2000).nullish(),
     specialtyId: uuid.nullish(),
+    respondent: z.enum(["staff", "portal"]).optional(),
     schema: formSchemaInput.optional(),
   })
   .strict()
@@ -549,6 +559,23 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
         finalizeFormResponse(tx, orgId, userId, c.req.param("id")),
+      ),
+    )
+  })
+
+  app.post("/form-responses/:id/discard", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "clinical.write")) {
+      return forbidden(c, "Sin permiso para descartar formularios")
+    }
+    const parsed = z
+      .object({ reason: z.string().trim().min(1).max(2000) })
+      .strict()
+      .safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        discardFormResponse(tx, orgId, userId, c.req.param("id"), parsed.data.reason),
       ),
     )
   })

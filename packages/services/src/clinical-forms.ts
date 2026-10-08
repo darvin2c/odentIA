@@ -2,6 +2,7 @@ import type { Db } from "@odentia/db"
 import {
   type ConsentSections,
   consentSectionsToText,
+  isValidTooth,
   parseConsentSections,
   SUGGESTED_CONSENT_TEMPLATES,
 } from "@odentia/clinical"
@@ -9,6 +10,7 @@ import {
   cie10Code,
   encounter,
   patient,
+  patientDocument,
   serviceCatalog,
   treatmentPlanItem,
 } from "@odentia/db/schema/clinical"
@@ -26,7 +28,7 @@ import {
 } from "@odentia/db/schema/clinical-forms"
 import { member } from "@odentia/db/schema/auth"
 import { auditEvent, orgProfile } from "@odentia/db/schema/org"
-import { and, asc, desc, eq, ilike, sql } from "drizzle-orm"
+import { and, asc, desc, eq, ilike, inArray, isNull, sql } from "drizzle-orm"
 import { isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
 import { requirePatient } from "./patients.js"
 import { requireProfessionalSignature } from "./professional-profiles.js"
@@ -414,8 +416,20 @@ export const FIELD_TYPES = [
   "opcion_multiple",
   "fecha",
   "firma",
+  /** Pieza dentaria en notación FDI (ISO 3950). */
+  "pieza",
+  /** Escala numérica entera con extremos declarados (p. ej. dolor 0–10). */
+  "escala",
+  /** Archivo del paciente ya subido (imagen o documento). */
+  "adjunto",
 ] as const
 export type FieldType = (typeof FIELD_TYPES)[number]
+
+/** Mostrar el campo solo si otro campo anterior tiene ese valor. */
+export interface FieldCondition {
+  field: string
+  equals: string | boolean
+}
 
 export interface FormFieldDef {
   id: string
@@ -427,6 +441,7 @@ export interface FormFieldDef {
   min?: number | null
   max?: number | null
   help?: string | null
+  showIf?: FieldCondition | null
 }
 
 export interface FormSectionDef {
@@ -457,6 +472,7 @@ export function assertFormSchema(raw: unknown): FormSchemaDef {
   }
   const seenSections = new Set<string>()
   const seenFields = new Set<string>()
+  const seenFieldDefs = new Map<string, FormFieldDef>()
   const parsed: FormSectionDef[] = sections.map((s, si) => {
     if (!s || typeof s !== "object") throw validation(`La sección ${si + 1} es inválida`)
     const id: unknown = "id" in s ? s.id : undefined
@@ -487,6 +503,7 @@ export function assertFormSchema(raw: unknown): FormSchemaDef {
         const rawOptions: unknown = "options" in f ? f.options : undefined
         const rawMin: unknown = "min" in f ? f.min : undefined
         const rawMax: unknown = "max" in f ? f.max : undefined
+        const rawShowIf: unknown = "showIf" in f ? f.showIf : undefined
         const fieldId = assertFieldId(typeof rawId === "string" ? rawId : "")
         if (seenFields.has(fieldId)) throw validation(`Campo duplicado: ${fieldId}`)
         seenFields.add(fieldId)
@@ -524,6 +541,34 @@ export function assertFormSchema(raw: unknown): FormSchemaDef {
           }
           field.options = options
         }
+        if (type === "escala") {
+          const min = rawMin ?? 0
+          const max = rawMax ?? 10
+          if (!Number.isInteger(min) || !Number.isInteger(max) || (min as number) >= (max as number)) {
+            throw validation(`La escala "${label}" necesita extremos enteros (mínimo < máximo)`)
+          }
+          if ((max as number) - (min as number) > 100) throw validation(`La escala "${label}" es demasiado amplia`)
+          field.min = min as number
+          field.max = max as number
+        }
+        if (rawShowIf !== undefined && rawShowIf !== null) {
+          if (typeof rawShowIf !== "object" || Array.isArray(rawShowIf))
+            throw validation(`Condición inválida en "${label}"`)
+          const cond = rawShowIf as Record<string, unknown>
+          const target = typeof cond.field === "string" ? cond.field : ""
+          const source = seenFieldDefs.get(target)
+          if (!source)
+            throw validation(`"${label}" depende de un campo anterior que no existe: ${target || "?"}`)
+          if (source.type === "booleano") {
+            if (typeof cond.equals !== "boolean") throw validation(`"${label}": la condición debe ser Sí o No`)
+          } else if (source.type === "opcion_unica" || source.type === "opcion_multiple") {
+            if (typeof cond.equals !== "string" || !source.options?.includes(cond.equals))
+              throw validation(`"${label}": la condición debe ser una opción de "${source.label}"`)
+          } else {
+            throw validation(`"${label}" solo puede depender de un campo Sí/No o de opciones`)
+          }
+          field.showIf = { field: target, equals: cond.equals }
+        }
         if (type === "numero") {
           if (rawMin !== undefined && rawMin !== null) {
             if (typeof rawMin !== "number" || !Number.isFinite(rawMin)) {
@@ -541,11 +586,48 @@ export function assertFormSchema(raw: unknown): FormSchemaDef {
             throw validation(`Rango inválido en "${label}"`)
           }
         }
+        seenFieldDefs.set(fieldId, field)
         return field
       }),
     }
   })
   return { sections: parsed }
+}
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+function conditionMet(condition: FieldCondition, answer: unknown): boolean {
+  if (Array.isArray(answer)) return answer.includes(condition.equals)
+  return answer === condition.equals
+}
+
+/** Los adjuntos deben ser archivos vigentes del mismo paciente. */
+async function assertAttachmentAnswers(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+  schema: FormSchemaDef,
+  answers: Record<string, unknown>,
+): Promise<void> {
+  const ids = schema.sections
+    .flatMap((section) => section.fields)
+    .filter((field) => field.type === "adjunto" && typeof answers[field.id] === "string")
+    .map((field) => answers[field.id] as string)
+  if (ids.length === 0) return
+  const rows = await tx
+    .select({ id: patientDocument.id })
+    .from(patientDocument)
+    .where(
+      and(
+        eq(patientDocument.organizationId, orgId),
+        eq(patientDocument.patientId, patientId),
+        inArray(patientDocument.id, ids),
+        isNull(patientDocument.retiredAt),
+      ),
+    )
+  const found = new Set(rows.map((row) => row.id))
+  const missing = ids.find((id) => !found.has(id))
+  if (missing) throw validation("El archivo adjunto no pertenece al paciente o está retirado")
 }
 
 function isEmptyAnswer(value: unknown): boolean {
@@ -580,6 +662,11 @@ export function assertAnswers(
     for (const field of section.fields) {
       allowed.add(field.id)
       const value: unknown = input[field.id]
+      // Campo oculto por su condición: no se exige y no guarda respuesta.
+      if (field.showIf && !conditionMet(field.showIf, out[field.showIf.field])) {
+        out[field.id] = null
+        continue
+      }
       if (isEmptyAnswer(value)) {
         if (requireAll && field.required) throw validation(`"${field.label}" es obligatorio`)
         out[field.id] = null
@@ -650,11 +737,36 @@ export function assertAnswers(
           break
         }
         case "firma": {
-          // Trazo manuscrito simple: la UI envía { strokes } o base64; aquí solo
-          // se exige presencia si es obligatorio. Sin afirmación de certificación.
-          if (typeof value !== "object" || value === null) {
+          // Trazo manuscrito con su firmante; límites de tamaño y coordenadas
+          // iguales a los del consentimiento. Sin afirmación de certificación.
+          if (typeof value !== "object" || value === null || Array.isArray(value)) {
             throw validation(`"${field.label}" necesita la firma manuscrita`)
           }
+          const raw = value as Record<string, unknown>
+          const signerName = typeof raw.signerName === "string" ? raw.signerName.trim() : ""
+          if (!signerName || signerName.length > 200)
+            throw validation(`"${field.label}" necesita el nombre de quien firma`)
+          const signature = assertSignatureData({ strokes: raw.strokes }, `La firma de "${field.label}"`)
+          out[field.id] = { ...signature, signerName }
+          break
+        }
+        case "pieza": {
+          const tooth = typeof value === "number" ? value : Number(value)
+          if (!Number.isInteger(tooth) || !isValidTooth(tooth))
+            throw validation(`"${field.label}" debe ser una pieza FDI válida`)
+          out[field.id] = tooth
+          break
+        }
+        case "escala": {
+          const num = typeof value === "number" ? value : Number(value)
+          if (!Number.isInteger(num) || num < (field.min ?? 0) || num > (field.max ?? 10))
+            throw validation(`"${field.label}" debe ser un entero de ${field.min ?? 0} a ${field.max ?? 10}`)
+          out[field.id] = num
+          break
+        }
+        case "adjunto": {
+          if (typeof value !== "string" || !UUID_RE.test(value))
+            throw validation(`"${field.label}" debe ser un archivo del paciente`)
           out[field.id] = value
           break
         }
@@ -675,6 +787,22 @@ export interface CreateFormTemplateInput {
   description?: string | null
   specialtyId?: string | null
   schema: unknown
+  /** «portal»: cuestionario que responde el paciente antes de su cita. */
+  respondent?: "staff" | "portal"
+}
+
+function assertRespondent(raw: unknown): "staff" | "portal" {
+  if (raw === undefined || raw === null) return "staff"
+  if (raw !== "staff" && raw !== "portal") throw validation("Destinatario inválido: staff|portal")
+  return raw
+}
+
+/** El paciente no adjunta archivos clínicos desde el portal. */
+function assertPortalSchema(respondent: "staff" | "portal", schema: FormSchemaDef): void {
+  if (respondent !== "portal") return
+  const attachment = schema.sections.flatMap((s) => s.fields).find((f) => f.type === "adjunto")
+  if (attachment)
+    throw validation(`«${attachment.label}»: el cuestionario del portal no admite archivos adjuntos`)
 }
 
 export async function listFormTemplates(
@@ -717,12 +845,15 @@ export async function createFormTemplate(
   }
   // La versión arranca en 1; si la clave ya existe se crea la siguiente versión.
   const existing = await tx
-    .select({ version: clinicalFormTemplate.version })
+    .select({ version: clinicalFormTemplate.version, status: clinicalFormTemplate.status })
     .from(clinicalFormTemplate)
     .where(and(eq(clinicalFormTemplate.organizationId, orgId), eq(clinicalFormTemplate.key, key)))
     .orderBy(desc(clinicalFormTemplate.version))
-    .limit(1)
+  if (existing.some((row) => row.status === "borrador"))
+    throw conflict("DRAFT_EXISTS", "Ya hay un borrador de este formulario: edítalo o publícalo")
   const version = (existing[0]?.version ?? 0) + 1
+  const respondent = assertRespondent(input.respondent)
+  assertPortalSchema(respondent, schema)
   try {
     const [row] = await tx
       .insert(clinicalFormTemplate)
@@ -735,6 +866,7 @@ export async function createFormTemplate(
         version,
         status: "borrador",
         schema: schema as unknown as Record<string, unknown>,
+        respondent,
         createdBy: actorUserId,
       })
       .returning()
@@ -754,6 +886,7 @@ export interface UpdateFormTemplatePatch {
   description?: string | null
   specialtyId?: string | null
   schema?: unknown
+  respondent?: "staff" | "portal"
 }
 
 /** Solo borradores: una versión publicada/archivada es inmutable. */
@@ -789,6 +922,9 @@ export async function updateFormTemplate(
     }
   }
   const schema = patch.schema !== undefined ? assertFormSchema(patch.schema) : current.schema
+  const respondent =
+    patch.respondent !== undefined ? assertRespondent(patch.respondent) : (current.respondent as "staff" | "portal")
+  assertPortalSchema(respondent, schema as FormSchemaDef)
   const [row] = await tx
     .update(clinicalFormTemplate)
     .set({
@@ -796,6 +932,7 @@ export async function updateFormTemplate(
       description,
       specialtyId,
       schema: schema as unknown as Record<string, unknown>,
+      respondent,
       updatedAt: new Date(),
     })
     .where(
@@ -810,9 +947,9 @@ export async function updateFormTemplate(
 }
 
 /**
- * Publica una versión nueva congelando el contenido del borrador: crea una
- * fila `publicado` con el mismo key y versión+1, y archiva el borrador.
- * Republicar nunca altera respuestas ya capturadas (guardan snapshot).
+ * Publica el borrador con su número de versión real y archiva la versión
+ * publicada anterior de la misma clave: «Nuevo formulario» ofrece solo la
+ * vigente. Republicar nunca altera respuestas ya capturadas (snapshot).
  */
 export async function publishFormTemplate(
   tx: Db,
@@ -826,46 +963,36 @@ export async function publishFormTemplate(
     .where(
       and(eq(clinicalFormTemplate.id, templateId), eq(clinicalFormTemplate.organizationId, orgId)),
     )
+    .for("update")
     .limit(1)
   if (!current) throw notFound("Plantilla")
   if (current.status !== "borrador") throw conflict("IMMUTABLE", "Solo un borrador puede publicarse")
-  const schema = assertFormSchema(current.schema)
+  assertFormSchema(current.schema)
   if (current.specialtyId) {
     const specialty = await requireSpecialty(tx, orgId, current.specialtyId)
     if (!specialty.isActive) throw validation("La especialidad está inactiva")
   }
-  const siblings = await tx
-    .select({ version: clinicalFormTemplate.version })
-    .from(clinicalFormTemplate)
-    .where(
-      and(eq(clinicalFormTemplate.organizationId, orgId), eq(clinicalFormTemplate.key, current.key)),
-    )
-    .orderBy(desc(clinicalFormTemplate.version))
-    .limit(1)
-  // La consulta incluye el borrador: la fila publicada usa la siguiente versión.
-  const nextVersion = (siblings[0]?.version ?? 0) + 1
-  const [published] = await tx
-    .insert(clinicalFormTemplate)
-    .values({
-      organizationId: orgId,
-      specialtyId: current.specialtyId,
-      key: current.key,
-      title: current.title,
-      description: current.description,
-      version: nextVersion,
-      status: "publicado",
-      schema: schema as unknown as Record<string, unknown>,
-      createdBy: actorUserId,
-      publishedAt: new Date(),
-    })
-    .returning()
-  await tx
+  const previous = await tx
     .update(clinicalFormTemplate)
     .set({ status: "archivado", updatedAt: new Date() })
+    .where(
+      and(
+        eq(clinicalFormTemplate.organizationId, orgId),
+        eq(clinicalFormTemplate.key, current.key),
+        eq(clinicalFormTemplate.status, "publicado"),
+      ),
+    )
+    .returning({ version: clinicalFormTemplate.version })
+  const [published] = await tx
+    .update(clinicalFormTemplate)
+    .set({ status: "publicado", publishedAt: new Date(), updatedAt: new Date() })
     .where(eq(clinicalFormTemplate.id, current.id))
+    .returning()
+  if (!published) throw notFound("Plantilla")
   await audit(tx, orgId, actorUserId, "form_template.publish", "clinical_form_template", published.id, {
     key: current.key,
     version: published.version,
+    archived: previous.map((row) => row.version),
   })
   return published
 }
@@ -884,6 +1011,7 @@ export async function archiveFormTemplate(
     )
     .limit(1)
   if (!current) throw notFound("Plantilla")
+  if (current.status === "archivado") throw conflict("ARCHIVED", "La plantilla ya está archivada")
   const [row] = await tx
     .update(clinicalFormTemplate)
     .set({ status: "archivado", updatedAt: new Date() })
@@ -964,12 +1092,14 @@ export async function createFormResponse(
     professionalUserId = input.professionalUserId
   }
   const answers = assertAnswers(schema, input.answers ?? {}, { requireAll: false })
+  await assertAttachmentAnswers(tx, orgId, input.patientId, schema, answers)
   const [row] = await tx
     .insert(clinicalFormResponse)
     .values({
       organizationId: orgId,
       templateId: template.id,
       templateVersion: template.version,
+      templateTitle: template.title,
       templateSnapshot: template.schema as unknown as Record<string, unknown>,
       patientId: input.patientId,
       encounterId,
@@ -1002,10 +1132,16 @@ export async function updateFormResponseDraft(
     .limit(1)
   if (!current) throw notFound("Formulario")
   if (current.status !== "borrador") {
-    throw conflict("FINALIZED", "El formulario está finalizado: usa una adenda")
+    throw conflict(
+      "FINALIZED",
+      current.status === "descartado"
+        ? "El formulario está descartado"
+        : "El formulario está finalizado: usa una adenda",
+    )
   }
   const schema = assertFormSchema(current.templateSnapshot)
   const answers = assertAnswers(schema, input.answers, { requireAll: false })
+  await assertAttachmentAnswers(tx, orgId, current.patientId, schema, answers)
   let professionalUserId = current.professionalUserId
   if (input.professionalUserId !== undefined) {
     if (input.professionalUserId === null) {
@@ -1042,10 +1178,15 @@ export async function finalizeFormResponse(
     .for("update")
     .limit(1)
   if (!current) throw notFound("Formulario")
-  if (current.status !== "borrador") throw conflict("FINALIZED", "El formulario ya está finalizado")
+  if (current.status !== "borrador")
+    throw conflict(
+      "FINALIZED",
+      current.status === "descartado" ? "El formulario está descartado" : "El formulario ya está finalizado",
+    )
   const schema = assertFormSchema(current.templateSnapshot)
   // Revalida completitud al cerrar (obligatorios con valor real).
-  assertAnswers(schema, current.answers, { requireAll: true })
+  const answers = assertAnswers(schema, current.answers, { requireAll: true })
+  await assertAttachmentAnswers(tx, orgId, current.patientId, schema, answers)
   const [row] = await tx
     .update(clinicalFormResponse)
     .set({ status: "finalizado", finalizedAt: new Date(), updatedAt: new Date() })
@@ -1056,6 +1197,46 @@ export async function finalizeFormResponse(
   if (!row) throw notFound("Formulario")
   await audit(tx, orgId, actorUserId, "form_response.finalize", "clinical_form_response", row.id, {})
   return row
+}
+
+/** Descarta un borrador con motivo: no cuenta como registro clínico y no se edita más. */
+export async function discardFormResponse(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  responseId: string,
+  reason: string,
+): Promise<FormResponseRow> {
+  const [current] = await tx
+    .select()
+    .from(clinicalFormResponse)
+    .where(
+      and(eq(clinicalFormResponse.id, responseId), eq(clinicalFormResponse.organizationId, orgId)),
+    )
+    .for("update")
+    .limit(1)
+  if (!current) throw notFound("Formulario")
+  if (current.status !== "borrador")
+    throw conflict("FINALIZED", "Solo un borrador se descarta; uno finalizado se corrige con adenda")
+  const clean = (reason ?? "").trim()
+  if (!clean || clean.length > 2000) throw validation("El motivo debe tener 1–2000 caracteres")
+  const [row] = await tx
+    .update(clinicalFormResponse)
+    .set({
+      status: "descartado",
+      discardedAt: new Date(),
+      discardedBy: actorUserId,
+      discardReason: clean,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(eq(clinicalFormResponse.id, responseId), eq(clinicalFormResponse.organizationId, orgId)),
+    )
+    .returning()
+  await audit(tx, orgId, actorUserId, "form_response.discard", "clinical_form_response", responseId, {
+    reason: clean,
+  })
+  return row!
 }
 
 export async function addFormAddendum(

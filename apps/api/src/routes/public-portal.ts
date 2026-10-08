@@ -4,6 +4,7 @@ import {
   decidePortalBudget,
   exchangePortalToken,
   getPortalAccount,
+  getPortalQuestionnaire,
   getPortalAppointments,
   getPortalDocumentUrl,
   getPortalRescheduleSlots,
@@ -14,6 +15,7 @@ import {
   resolvePortalOrgByLinkToken,
   resolvePortalOrgBySessionToken,
   revokePortalSession,
+  savePortalQuestionnaire,
   ServiceError,
   type PortalContext,
   type Storage,
@@ -312,6 +314,17 @@ export function createPublicPortalRoute(deps: {
   })
 
   app.get("/account", async (c) => portalCall(c, (tx, ctx) => getPortalAccount(tx, ctx)))
+
+  // Cuestionario previo a la cita: lo responde quien tiene la sesión.
+  app.get("/questionnaire", async (c) => portalCall(c, (tx, ctx) => getPortalQuestionnaire(tx, ctx)))
+  app.put("/questionnaire", async (c) => {
+    const parsed = z
+      .object({ answers: z.record(z.string(), z.unknown()), submit: z.boolean().optional() })
+      .strict()
+      .safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return portalCall(c, (tx, ctx) => savePortalQuestionnaire(tx, ctx, parsed.data))
+  })
 
   app.post("/session/revoke", async (c) =>
     portalCall(c, async (tx, ctx) => {

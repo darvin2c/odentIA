@@ -207,9 +207,12 @@ function FormTemplatesPanel() {
                         key={version.id}
                         variant={version.status === "publicado" ? "default" : "secondary"}
                       >
-                        v{version.version} · {version.status}
+                        v{version.version} · {FORM_TEMPLATE_STATUS_LABELS[version.status]}
                       </Badge>
                     ))}
+                    {latest.respondent === "portal" ? (
+                      <Badge variant="outline">Lo responde el paciente</Badge>
+                    ) : null}
                   </div>
                 </div>
                 <div className="mt-3 flex flex-wrap gap-2">
@@ -235,7 +238,7 @@ function FormTemplatesPanel() {
                               size="sm"
                               onClick={() => setPublishing(draft)}
                             >
-                              Publicar v{draft.version}
+                              Publicar versión {draft.version}
                             </Button>
                             <Button
                               type="button"
@@ -249,7 +252,7 @@ function FormTemplatesPanel() {
                         ) : null}
                       </div>
                     ))}
-                  {canAdmin && latest.status === "publicado" ? (
+                  {canAdmin && latest.status !== "borrador" ? (
                     <Button
                       type="button"
                       size="sm"
@@ -259,7 +262,7 @@ function FormTemplatesPanel() {
                         setDrawerOpen(true)
                       }}
                     >
-                      Nueva versión desde v{latest.version}
+                      Nueva versión desde la {latest.version}
                     </Button>
                   ) : null}
                 </div>
@@ -292,8 +295,15 @@ function FormTemplatesPanel() {
       <ConfirmDialog
         open={publishing !== null}
         onClose={() => setPublishing(null)}
-        title="Publicar plantilla"
-        description="Se congela una versión nueva publicada; las capturas previas conservan su esquema. Esta acción no se deshace."
+        title={publishing ? `Publicar la versión ${publishing.version}` : "Publicar"}
+        description={(() => {
+          const current = publishing
+            ? templates.find((t) => t.key === publishing.key && t.status === "publicado")
+            : undefined
+          return current
+            ? `La versión ${current.version} se archiva y «Nuevo formulario» ofrecerá la ${publishing?.version}. Las capturas previas conservan su título y esquema.`
+            : "Quedará disponible para capturar en la ficha. Las capturas conservan su título y esquema."
+        })()}
         confirmLabel="Publicar"
         variant="default"
         pending={publishMutation.isPending}
@@ -317,11 +327,12 @@ function TemplateBuilder({
   onError: (e: unknown) => void
 }) {
   const canAdmin = usePermission("settings.write")
-  const isNewVersion = Boolean(initial && initial.status === "publicado")
+  const isNewVersion = Boolean(initial && initial.status !== "borrador")
   const [title, setTitle] = useState(initial?.title ?? "")
   const [key, setKey] = useState(initial?.key ?? "")
   const [description, setDescription] = useState(initial?.description ?? "")
   const [specialtyId, setSpecialtyId] = useState<string>(initial?.specialtyId ?? "")
+  const [respondent, setRespondent] = useState<"staff" | "portal">(initial?.respondent ?? "staff")
   const [sections, setSections] = useState<FormSectionDef[]>(
     initial ? structuredClone(initial.schema.sections) : [{ id: "general", title: "General", fields: [] }],
   )
@@ -341,6 +352,7 @@ function TemplateBuilder({
         ...(key.trim() ? { key: key.trim().toLowerCase() } : {}),
         description: description.trim() ? description.trim() : null,
         specialtyId: specialtyId ? specialtyId : null,
+        respondent,
         schema,
       }
       if (initial && !isNewVersion) return updateFormTemplate(initial.id, body)
@@ -454,6 +466,29 @@ function TemplateBuilder({
         </Select>
       </Field>
 
+      <Field>
+        <FieldLabel htmlFor="tpl-respondent">Quién lo responde</FieldLabel>
+        <Select
+          items={{ staff: "El equipo, desde la ficha o la atención", portal: "El paciente, desde el portal (cuestionario previo)" }}
+          value={respondent}
+          onValueChange={(v) => setRespondent(v === "portal" ? "portal" : "staff")}
+          disabled={!canAdmin}
+        >
+          <SelectTrigger id="tpl-respondent">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="staff">El equipo, desde la ficha o la atención</SelectItem>
+            <SelectItem value="portal">El paciente, desde el portal (cuestionario previo)</SelectItem>
+          </SelectContent>
+        </Select>
+        {respondent === "portal" ? (
+          <p className="text-xs text-muted-foreground">
+            Lo que responde el paciente llega como «declarado»; el profesional lo revisa y lo
+            finaliza.
+          </p>
+        ) : null}
+      </Field>
       {sections.map((section, si) => (
         <section key={section.id} className="rounded-md border p-3">
           <div className="flex items-center gap-2">
@@ -480,6 +515,13 @@ function TemplateBuilder({
               <FieldEditor
                 key={field.id}
                 field={field}
+                previousFields={sections
+                  .flatMap((s) => s.fields)
+                  .slice(
+                    0,
+                    sections.flatMap((s) => s.fields).findIndex((f) => f.id === field.id),
+                  )
+                  .filter((f) => f.type === "booleano" || f.type === "opcion_unica" || f.type === "opcion_multiple")}
                 disabled={!canAdmin}
                 onPatch={(patch) => patchField(section.id, field.id, patch)}
                 onRemove={() =>
@@ -545,15 +587,19 @@ function TemplateBuilder({
 
 function FieldEditor({
   field,
+  previousFields,
   disabled,
   onPatch,
   onRemove,
 }: {
   field: FormFieldDef
+  /** Campos anteriores Sí/No u opciones: los únicos que pueden condicionar este. */
+  previousFields: FormFieldDef[]
   disabled: boolean
   onPatch: (patch: Partial<FormFieldDef>) => void
   onRemove: () => void
 }) {
+  const conditionSource = previousFields.find((f) => f.id === field.showIf?.field)
   return (
     <div className="rounded-md bg-muted/40 p-3">
       <div className="grid gap-2 sm:grid-cols-2">
@@ -576,7 +622,13 @@ function FieldEditor({
           <FieldLabel>Tipo</FieldLabel>
           <Select
             value={field.type}
-            onValueChange={(value) => onPatch({ type: value as FormFieldType })}
+            onValueChange={(value) =>
+              onPatch(
+                value === "escala"
+                  ? { type: "escala", min: field.min ?? 0, max: field.max ?? 10 }
+                  : { type: value as FormFieldType },
+              )
+            }
             disabled={disabled}
           >
             <SelectTrigger aria-label="Tipo de campo">
@@ -647,10 +699,112 @@ function FieldEditor({
             />
           </>
         )}
+        {field.type === "escala" && (
+          <>
+            <Input
+              className="w-24"
+              type="number"
+              step={1}
+              value={field.min ?? 0}
+              disabled={disabled}
+              onChange={(event) => onPatch({ min: Number(event.target.value) })}
+              aria-label="Extremo inferior de la escala"
+            />
+            <span className="text-sm">a</span>
+            <Input
+              className="w-24"
+              type="number"
+              step={1}
+              value={field.max ?? 10}
+              disabled={disabled}
+              onChange={(event) => onPatch({ max: Number(event.target.value) })}
+              aria-label="Extremo superior de la escala"
+            />
+          </>
+        )}
         <Button type="button" size="sm" variant="ghost" disabled={disabled} onClick={onRemove}>
           Quitar campo
         </Button>
       </div>
+      {previousFields.length > 0 ? (
+        <div className="mt-2 flex flex-wrap items-center gap-2 text-sm">
+          <span>Mostrar si</span>
+          <Select
+            items={Object.fromEntries([
+              ["siempre", "siempre"],
+              ...previousFields.map((f) => [f.id, `«${f.label}»`]),
+            ])}
+            value={field.showIf?.field ?? "siempre"}
+            disabled={disabled}
+            onValueChange={(v) => {
+              const source = previousFields.find((f) => f.id === v)
+              onPatch({
+                showIf: source
+                  ? {
+                      field: source.id,
+                      equals: source.type === "booleano" ? true : (source.options?.[0] ?? ""),
+                    }
+                  : null,
+              })
+            }}
+          >
+            <SelectTrigger className="w-56" aria-label="Campo que condiciona">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="siempre">siempre</SelectItem>
+              {previousFields.map((f) => (
+                <SelectItem key={f.id} value={f.id}>
+                  «{f.label}»
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {conditionSource ? (
+            <>
+              <span>es</span>
+              <Select
+                items={Object.fromEntries(
+                  conditionSource.type === "booleano"
+                    ? [
+                        ["true", "Sí"],
+                        ["false", "No"],
+                      ]
+                    : (conditionSource.options ?? []).map((o) => [o, o]),
+                )}
+                value={String(field.showIf?.equals ?? "")}
+                disabled={disabled}
+                onValueChange={(v) =>
+                  onPatch({
+                    showIf: {
+                      field: conditionSource.id,
+                      equals: conditionSource.type === "booleano" ? v === "true" : (v ?? ""),
+                    },
+                  })
+                }
+              >
+                <SelectTrigger className="w-40" aria-label="Valor que muestra el campo">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {conditionSource.type === "booleano" ? (
+                    <>
+                      <SelectItem value="true">Sí</SelectItem>
+                      <SelectItem value="false">No</SelectItem>
+                    </>
+                  ) : (
+                    (conditionSource.options ?? []).map((o) => (
+                      <SelectItem key={o} value={o}>
+                        {o}
+                      </SelectItem>
+                    ))
+                  )}
+                </SelectContent>
+              </Select>
+            </>
+          ) : null}
+        </div>
+      ) : null}
       {(field.type === "opcion_unica" || field.type === "opcion_multiple") && (
         <OptionsEditor
           options={field.options ?? []}
@@ -729,6 +883,12 @@ function OptionsEditor({
 // ---------------------------------------------------------------------------
 // Consentimientos
 // ---------------------------------------------------------------------------
+
+const FORM_TEMPLATE_STATUS_LABELS: Record<FormTemplate["status"], string> = {
+  borrador: "borrador",
+  publicado: "vigente",
+  archivado: "archivada",
+}
 
 function ConsentTemplatesPanel() {
   const queryClient = useQueryClient()

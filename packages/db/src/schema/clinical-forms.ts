@@ -149,6 +149,8 @@ export const clinicalFormTemplate = pgTable(
     status: text("status").notNull().default("borrador"),
     /** Secciones con campos tipados: { sections: [{ id, title, fields: [...] }] }. */
     schema: jsonb("schema").notNull(),
+    /** Quién lo responde: el equipo o el paciente desde el portal (cuestionario previo). */
+    respondent: text("respondent").notNull().default("staff"),
     createdBy: text("created_by").references(() => user.id),
     publishedAt: timestamp("published_at", { withTimezone: true }),
     ...timestamps,
@@ -166,6 +168,10 @@ export const clinicalFormTemplate = pgTable(
       sql`${table.status} in ('borrador','publicado','archivado')`,
     ),
     check("clinical_form_template_version_check", sql`${table.version} >= 1`),
+    check(
+      "clinical_form_template_respondent_check",
+      sql`${table.respondent} in ('staff','portal')`,
+    ),
   ],
 )
 
@@ -195,13 +201,28 @@ export const clinicalFormResponse = pgTable(
     answers: jsonb("answers").notNull().default({}),
     authorUserId: text("author_user_id").references(() => user.id),
     finalizedAt: timestamp("finalized_at", { withTimezone: true }),
+    /** Título de la plantilla al responder: nunca «Formulario v2». */
+    templateTitle: text("template_title"),
+    /** Origen: el equipo o el paciente/representante desde el portal. */
+    source: text("source").notNull().default("staff"),
+    /** Persona que respondió en el portal (paciente o su representante). */
+    respondentContactId: uuid("respondent_contact_id"),
+    /** El paciente envió sus respuestas (declarado); el equipo las revisa y finaliza. */
+    submittedAt: timestamp("submitted_at", { withTimezone: true }),
+    discardedAt: timestamp("discarded_at", { withTimezone: true }),
+    discardedBy: text("discarded_by").references(() => user.id),
+    discardReason: text("discard_reason"),
     ...timestamps,
   },
   (table) => [
     index("clinical_form_response_org_patient_idx").on(table.organizationId, table.patientId),
     index("clinical_form_response_org_encounter_idx").on(table.organizationId, table.encounterId),
     index("clinical_form_response_org_template_idx").on(table.organizationId, table.templateId),
-    check("clinical_form_response_status_check", sql`${table.status} in ('borrador','finalizado')`),
+    check(
+      "clinical_form_response_status_check",
+      sql`${table.status} in ('borrador','finalizado','descartado')`,
+    ),
+    check("clinical_form_response_source_check", sql`${table.source} in ('staff','portal')`),
   ],
 )
 

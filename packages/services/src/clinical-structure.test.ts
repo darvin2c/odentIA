@@ -7,7 +7,14 @@ import {
   cancelConsentDocument,
   createConsentDocument,
   createConsentTemplate,
+  createFormResponse,
+  createFormTemplate,
   createSuggestedConsentTemplates,
+  discardFormResponse,
+  finalizeFormResponse,
+  listFormTemplates,
+  publishFormTemplate,
+  updateFormResponseDraft,
   listConsentTemplates,
   publishConsentTemplate,
   revokeConsentDocument,
@@ -355,4 +362,115 @@ it("bitácora: registra quién consultó qué parte de la ficha, una fila por ho
   await expect(
     withOrgContext(appDb, "org_b", (tx) => listClinicalAccess(tx, "org_b", patient.id)),
   ).rejects.toMatchObject({ status: 404 })
+})
+
+it("formularios: versión real al publicar, título congelado, tipos clínicos, condición y descarte", async () => {
+  const schema = {
+    sections: [
+      {
+        id: "sintomas",
+        title: "Síntomas",
+        fields: [
+          { id: "dolor", label: "¿Hay dolor?", type: "booleano", required: true },
+          {
+            id: "intensidad",
+            label: "Intensidad",
+            type: "escala",
+            min: 0,
+            max: 10,
+            required: true,
+            showIf: { field: "dolor", equals: true },
+          },
+          { id: "pieza", label: "Pieza", type: "pieza" },
+          { id: "hallazgos", label: "Hallazgos", type: "texto_largo", required: true },
+          { id: "foto", label: "Foto", type: "adjunto" },
+          { id: "firma", label: "Firma del profesional", type: "firma" },
+        ],
+      },
+    ],
+  }
+  const v1 = await run(async (tx) => {
+    const draft = await createFormTemplate(tx, "org_a", ACTOR, { title: "Evaluación", schema })
+    return publishFormTemplate(tx, "org_a", ACTOR, draft.id)
+  })
+  expect(v1).toMatchObject({ version: 1, status: "publicado" })
+  // Una condición sobre un campo posterior o inexistente se rechaza.
+  await expect(
+    run((tx) =>
+      createFormTemplate(tx, "org_a", ACTOR, {
+        title: "Mal condicionado",
+        schema: {
+          sections: [
+            {
+              id: "s",
+              title: "S",
+              fields: [{ id: "a", label: "A", type: "texto", showIf: { field: "b", equals: true } }],
+            },
+          ],
+        },
+      }),
+    ),
+  ).rejects.toMatchObject({ status: 400 })
+  const v2 = await run(async (tx) => {
+    const draft = await createFormTemplate(tx, "org_a", ACTOR, {
+      key: v1.key,
+      title: "Evaluación inicial",
+      schema,
+    })
+    // Un segundo borrador de la misma clave no se permite.
+    await expect(
+      createFormTemplate(tx, "org_a", ACTOR, { key: v1.key, title: "Otro", schema }),
+    ).rejects.toMatchObject({ code: "DRAFT_EXISTS" })
+    return publishFormTemplate(tx, "org_a", ACTOR, draft.id)
+  })
+  expect(v2).toMatchObject({ version: 2, status: "publicado" })
+  const published = await run((tx) => listFormTemplates(tx, "org_a", { status: "publicado" }))
+  expect(published.filter((t) => t.key === v1.key).map((t) => t.version)).toEqual([2])
+
+  const patient = await run((tx) => createPatient(tx, "org_a", ACTOR, { displayName: "Forma Paciente" }))
+  const response = await run((tx) =>
+    createFormResponse(tx, "org_a", ACTOR, { templateId: v2.id, patientId: patient.id }),
+  )
+  expect(response.templateTitle).toBe("Evaluación inicial")
+  const save = (answers: Record<string, unknown>) =>
+    run((tx) => updateFormResponseDraft(tx, "org_a", ACTOR, response.id, { answers }))
+  await expect(save({ pieza: 19 })).rejects.toMatchObject({ status: 400 })
+  await expect(save({ dolor: true, intensidad: 11 })).rejects.toMatchObject({ status: 400 })
+  await expect(save({ foto: crypto.randomUUID() })).rejects.toMatchObject({ status: 400 })
+  await expect(save({ firma: { strokes: [[[1, 1], [2, 2]]] } })).rejects.toMatchObject({
+    status: 400,
+  })
+  // Sin dolor, la intensidad queda oculta: no se exige ni se guarda.
+  const saved = await save({ dolor: false, intensidad: 7, pieza: 36 })
+  expect(saved.answers).toMatchObject({ dolor: false, intensidad: null, pieza: 36 })
+  // Finalizar sin un obligatorio nombra el campo.
+  await expect(
+    run((tx) => finalizeFormResponse(tx, "org_a", ACTOR, response.id)),
+  ).rejects.toThrow(/Hallazgos/)
+  await save({
+    dolor: true,
+    intensidad: 6,
+    pieza: 36,
+    hallazgos: "Percusión positiva",
+    firma: { strokes: [[[1, 1], [2, 2]]], signerName: "Dra. Estructura" },
+  })
+  expect(await run((tx) => finalizeFormResponse(tx, "org_a", ACTOR, response.id))).toMatchObject({
+    status: "finalizado",
+  })
+  // Un borrador se descarta con motivo y ya no se edita.
+  const other = await run((tx) =>
+    createFormResponse(tx, "org_a", ACTOR, { templateId: v2.id, patientId: patient.id }),
+  )
+  await expect(
+    run((tx) => discardFormResponse(tx, "org_a", ACTOR, other.id, "")),
+  ).rejects.toMatchObject({ status: 400 })
+  expect(
+    await run((tx) => discardFormResponse(tx, "org_a", ACTOR, other.id, "Paciente equivocado")),
+  ).toMatchObject({ status: "descartado" })
+  await expect(
+    run((tx) => updateFormResponseDraft(tx, "org_a", ACTOR, other.id, { answers: {} })),
+  ).rejects.toMatchObject({ status: 409 })
+  await expect(
+    run((tx) => discardFormResponse(tx, "org_a", ACTOR, response.id, "x")),
+  ).rejects.toMatchObject({ status: 409 })
 })
