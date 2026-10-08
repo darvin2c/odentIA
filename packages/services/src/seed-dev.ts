@@ -1270,6 +1270,8 @@ const endo46 = await addPlanItem(db, ORG_A, ANA_ID, rosaPatientId, {
   toothNumber: 46,
   diagnosisCode: "K04.0",
   detail: "Endodoncia pieza 46",
+  // Endodoncia en dos sesiones (apertura y obturación): ejercita el progreso.
+  plannedSessions: 2,
 })
 const corona46 = await addPlanItem(db, ORG_A, ANA_ID, rosaPatientId, {
   serviceId: serviceIdA("CORONA"),

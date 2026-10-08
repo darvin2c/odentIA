@@ -4,6 +4,7 @@ import {
   registrationAnswersSchema,
   registrationContactInputSchema,
   SURFACES,
+  TREATMENT_PHASES,
 } from "@odentia/clinical"
 import { withOrgContext } from "@odentia/db"
 import {
@@ -64,6 +65,7 @@ import {
   updateEncounterDraft,
   updatePatient,
   updatePlanItem,
+  updatePlanItemPlanning,
   voidEncounter,
   voidEncounterDiagnosis,
   voidEncounterProcedure,
@@ -318,9 +320,22 @@ const planCreateInput = z
     isRecommended: z.boolean().optional(),
     detail: z.string().max(4000).nullish(),
     diagnosisCode: z.string().max(10).nullish(),
+    phase: z.enum(TREATMENT_PHASES).nullish(),
+    plannedSessions: z.number().int().min(1).max(60).nullish(),
     ...planSiteFields,
   })
   .strict()
+/** Planificación: fase, sesiones previstas y orden (sin acto clínico). */
+const planPlanningInput = z
+  .object({
+    phase: z.enum(TREATMENT_PHASES).optional(),
+    plannedSessions: z.number().int().min(1).max(60).optional(),
+    move: z.enum(["up", "down"]).optional(),
+  })
+  .strict()
+  .refine((d) => d.phase || d.plannedSessions || d.move, {
+    message: "Indica la fase, las sesiones previstas o el movimiento",
+  })
 const planPatchInput = z
   .object({
     serviceId: z.uuid().optional(),
@@ -1197,6 +1212,23 @@ export function createPatientsRoute(deps: CrmDeps) {
     return runService(c, 201, () =>
       withOrgContext(deps.db, orgId, (tx) =>
         addPlanItemsBatch(tx, orgId, userId, c.req.param("id"), parsed.data),
+      ),
+    )
+  })
+  app.patch("/:id/plan/items/:itemId/planning", async (c) => {
+    const { orgId, userId } = orgContextOf(c)
+    const parsed = planPlanningInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        updatePlanItemPlanning(
+          tx,
+          orgId,
+          userId,
+          c.req.param("id"),
+          c.req.param("itemId"),
+          parsed.data,
+        ),
       ),
     )
   })

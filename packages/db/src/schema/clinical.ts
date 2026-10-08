@@ -973,12 +973,26 @@ export const treatmentPlanItem = pgTable(
     priceCents: integer("price_cents"),
     currency: char("currency", { length: 3 }).notNull().default("PEN"),
     status: text("status").notNull().default("pendiente"),
+    /** Fase del plan (urgencia → mantenimiento); la propone la especialidad. */
+    phase: text("phase").notNull().default("basica"),
+    /** Orden de ejecución dentro del plan y la fase. */
+    sortOrder: integer("sort_order").notNull().default(0),
+    /** Sesiones previstas; las hechas son sus procedimientos no anulados. */
+    plannedSessions: smallint("planned_sessions").notNull().default(1),
     sourceEncounterId: uuid("source_encounter_id").references(() => encounter.id),
     createdBy: text("created_by").references(() => user.id),
     ...timestamps,
   },
   (table) => [
     index("treatment_plan_item_org_patient_idx").on(table.organizationId, table.patientId),
+    check(
+      "treatment_plan_item_phase_check",
+      sql`${table.phase} IN ('urgencia','basica','quirurgica','rehabilitadora','mantenimiento')`,
+    ),
+    check(
+      "treatment_plan_item_planned_sessions_check",
+      sql`${table.plannedSessions} BETWEEN 1 AND 60`,
+    ),
     index("treatment_plan_item_org_service_idx").on(table.organizationId, table.serviceId),
     index("treatment_plan_item_org_budget_idx").on(table.organizationId, table.budgetId),
     index("treatment_plan_item_org_plan_idx").on(table.organizationId, table.planId),

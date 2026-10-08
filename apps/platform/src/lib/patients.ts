@@ -377,15 +377,15 @@ export interface PlanItem {
   planId: string
   odontogramEntryId?: string | null
   budgetId: string | null
-  decision: "pendiente" | "aceptado" | "rechazado" | "sin_registro"
+  decision: "pendiente" | "aceptado" | "pospuesto" | "rechazado" | "reemplazado"
   /** Decisión clínica vigente del ítem: la indicación manda, el snapshot es evidencia. */
-  decisionStatus:
-    | "pendiente"
-    | "aceptado"
-    | "pospuesto"
-    | "rechazado"
-    | "reemplazado"
-    | "sin_registro"
+  decisionStatus: "pendiente" | "aceptado" | "pospuesto" | "rechazado" | "reemplazado"
+  /** Fase del plan (urgencia → mantenimiento) y orden de ejecución. */
+  phase?: "urgencia" | "basica" | "quirurgica" | "rehabilitadora" | "mantenimiento"
+  sortOrder?: number
+  /** Sesiones previstas y hechas (procedimientos no anulados). */
+  plannedSessions?: number
+  sessionsDone?: number
   decidedAt: string | null
   decidedByContactId: string | null
   decidedByName: string | null

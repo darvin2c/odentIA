@@ -1173,7 +1173,9 @@ export async function checkEncounterClosing(
   try {
     await requireProfessionalSignature(tx, orgId, actorUserId)
   } catch (e) {
-    if (!(e instanceof ServiceError) || e.code !== "PROFILE_INCOMPLETE") throw e
+    // Sin perfil completo, o quien atiende ya no es miembro: no puede firmar.
+    if (!(e instanceof ServiceError) || (e.code !== "PROFILE_INCOMPLETE" && e.status !== 404))
+      throw e
     missing.push("signature")
   }
   return { ready: missing.length === 0, missing }

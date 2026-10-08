@@ -23,6 +23,15 @@ async function openSection(page: Page, ...names: string[]): Promise<void> {
   }
 }
 
+/** Abre un tratamiento del plan por fases (queda «Abierto abajo»). */
+async function openTreatment(page: Page, title: string) {
+  const row = page.getByRole("listitem").filter({ hasText: title }).first()
+  const open = row.getByRole("button", { name: /^(Ver|Abierto abajo)$/ })
+  await expect(open).toBeEnabled()
+  if ((await open.textContent())?.trim() === "Ver") await open.click()
+  await expect(row.getByRole("button", { name: "Abierto abajo" })).toBeVisible()
+}
+
 test("paciente: ficha inicial y hallazgo visibles en el recorrido", async ({ owner }) => {
   const ids = await buildClinicalBase(owner)
   const { page } = owner
@@ -270,7 +279,8 @@ test("paciente: ejecución de la sesión y cierre del tratamiento", async ({ own
     tenant(owner.org.slug, `${patientPath}?tab=plan&planId=${ids.planId}&budgetId=${budgetId}`),
   )
   await openSection(page, "Tratamientos")
-  await page.getByLabel("Tratamiento", { exact: true }).selectOption(ids.itemId)
+  // El plan se lee por fases; abrir un tratamiento muestra su recorrido debajo.
+  await openTreatment(page, "Endodoncia unirradicular")
   const iniciarSesion = page.getByRole("button", { name: "Iniciar sesión", exact: true })
   await expect(iniciarSesion).toBeEnabled()
   await iniciarSesion.click()
@@ -356,9 +366,7 @@ test("paciente: agregación del recorrido, historia y aislamiento", async ({ cre
   // El recorrido del tratamiento reúne lo observado, lo propuesto, lo decidido,
   // la sesión, el control, la receta y el cobro.
   await gotoHydrated(page, tenant(owner.org.slug, `${patientPath}?tab=recorrido&itemId=${ids.itemId}`))
-  const tratamiento = page.getByLabel("Tratamiento", { exact: true })
-  await expect(tratamiento).toBeEnabled()
-  await tratamiento.selectOption(ids.itemId)
+  await openTreatment(page, "Endodoncia unirradicular")
   await expect(page.getByText("Motiva esta indicación el hallazgo")).toBeVisible()
   await expect(page.getByText(/Receta N.º 1/).first()).toBeVisible()
   await expect(page.getByText(/Resultado: Sin dolor/)).toBeVisible()

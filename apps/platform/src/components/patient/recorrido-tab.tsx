@@ -10,6 +10,7 @@ import { surfacesForTooth } from "@odentia/clinical"
 import { Badge, Button, Field, FieldLabel, Textarea } from "@odentia/ui"
 import { EmptyState, FormDrawer } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { useNavigate } from "@tanstack/react-router"
 import { useId, useState } from "react"
 import { apiFetch } from "../../lib/api"
 import { budgetStatusLabel, planDecisionLabel } from "../../lib/budgets"
@@ -41,6 +42,7 @@ import { formatMoney, type ServiceCatalogItem } from "../../lib/services"
 import { Cie10Search } from "./cie10-search"
 import { ControlesPanel, RecetasPanel } from "./clinical-panels"
 import { DocumentOpenButton } from "./document-open-button"
+import { PlanPhases } from "./plan-fases"
 import { ServicePicker } from "./service-picker"
 
 const MAX_TEXT = 2000
@@ -93,6 +95,12 @@ export function RecorridoClinicoTab({
   onTabChange: (tab: RecorridoTarget, target?: RecorridoNavigation) => void
 }): React.JSX.Element {
   const uid = useId()
+  const navigate = useNavigate()
+  const goToEncounter = (encounterId: string) =>
+    void navigate({
+      to: "/patients/$patientId/encounters/$encounterId",
+      params: { patientId, encounterId },
+    })
   const canWrite = usePermission("clinical.write")
   const canRead = usePermission("clinical.read")
   const queryClient = useQueryClient()
@@ -308,9 +316,7 @@ export function RecorridoClinicoTab({
   const runPrimaryAction = async () => {
     if (!item) return
     setError(null)
-    const openEncounter = (encounterId: string) => {
-      window.location.href = `/patients/${patientId}/encounters/${encounterId}`
-    }
+    const openEncounter = goToEncounter
     if (nextAction === "iniciar") {
       setStartingSession(true)
       try {
@@ -375,27 +381,16 @@ export function RecorridoClinicoTab({
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex flex-col gap-3 elevated rounded-xl border bg-card p-6">
-        <Field>
-          <FieldLabel htmlFor={`${uid}-item`}>Tratamiento</FieldLabel>
-          <select
-            id={`${uid}-item`}
-            className="h-9 w-full rounded-md border bg-background px-3 text-sm"
-            value={selectedId}
-            onChange={(event) => {
-              setError(null)
-              onChangeItem(event.target.value)
-            }}
-          >
-            {ordered.map((candidate) => (
-              <option key={candidate.id} value={candidate.id}>
-                {candidate.title} · {siteLabel(candidate)} · {planStatusLabel(candidate.status)} ·{" "}
-                {planDecisionLabel(candidate.decisionStatus)}
-              </option>
-            ))}
-          </select>
-        </Field>
-      </div>
+      <PlanPhases
+        patientId={patientId}
+        items={items}
+        journeys={summary?.treatmentJourneys ?? []}
+        selectedId={selectedId}
+        onSelect={(itemId) => {
+          setError(null)
+          onChangeItem(itemId)
+        }}
+      />
 
       {journey == null ? (
         <p className="text-sm text-muted-foreground">Cargando el recorrido del tratamiento…</p>
@@ -658,9 +653,7 @@ export function RecorridoClinicoTab({
                       type="button"
                       size="sm"
                       variant="outline"
-                      onClick={() =>
-                        (window.location.href = `/patients/${patientId}/encounters/${encounter.id}`)
-                      }
+                      onClick={() => goToEncounter(encounter.id)}
                     >
                       Abrir la atención
                     </Button>
@@ -675,9 +668,7 @@ export function RecorridoClinicoTab({
                     type="button"
                     size="sm"
                     variant="outline"
-                    onClick={() =>
-                      (window.location.href = `/patients/${patientId}/encounters/${openEncounterId}`)
-                    }
+                    onClick={() => goToEncounter(openEncounterId)}
                   >
                     Continuar en la atención abierta
                   </Button>
