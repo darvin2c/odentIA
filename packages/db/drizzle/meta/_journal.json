@@ -281,6 +281,13 @@
       "when": 1791481149705,
       "tag": "0039_identidad_estandar",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1791482724341,
+      "tag": "0040_imagenes_clinicas",
+      "breakpoints": true
     }
   ]
 }

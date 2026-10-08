@@ -11,7 +11,7 @@ import {
   type PatientHealth,
   type PatientSummary,
 } from "../../lib/patients"
-import { categoryLabel } from "./document-labels"
+import { categoryLabel, imageTypeLabel, takenAt } from "./document-labels"
 
 /** Lo que le falta a la atención, dicho para quien no necesariamente la lleva. */
 const MISSING_LABELS: Record<OpenEncounterBrief["missing"][number], string> = {
@@ -215,9 +215,9 @@ function Thumbnail({ patientId, doc }: { patientId: string; doc: RecentDoc }) {
         {doc.label}
       </span>
       <span className="text-xs text-muted-foreground">
-        {categoryLabel(doc.category)}
+        {imageTypeLabel(doc.imageType) ?? categoryLabel(doc.category)}
         {doc.toothNumbers.length > 0 ? ` · ${doc.toothNumbers.join(", ")}` : ""} ·{" "}
-        {new Date(doc.createdAt).toLocaleDateString("es-PE", { day: "2-digit", month: "short" })}
+        {new Date(takenAt(doc)).toLocaleDateString("es-PE", { day: "2-digit", month: "short" })}
       </span>
     </li>
   )

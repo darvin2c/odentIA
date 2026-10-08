@@ -462,6 +462,41 @@ it("presupuestos, contextos versionados y vínculos atención-plan se aíslan po
     ),
   ).rejects.toMatchObject({ cause: { code: "42501" } })
 
+  // Archivo clínico: la app no cambia ni borra el archivo; solo puede retirarlo
+  // con motivo y quien lo retira, y un retiro no se deshace.
+  await expect(
+    withOrgContext(appDb, "org_a", (tx) =>
+      tx.execute(
+        sql`update patient_document set label = 'otro' where id = 'dddddddd-dddd-dddd-dddd-dddddddddddd'`,
+      ),
+    ),
+  ).rejects.toMatchObject({ cause: { code: "42501" } })
+  await expect(
+    withOrgContext(appDb, "org_a", (tx) =>
+      tx.execute(sql`delete from patient_document where id = 'dddddddd-dddd-dddd-dddd-dddddddddddd'`),
+    ),
+  ).rejects.toMatchObject({ cause: { code: "42501" } })
+  await expect(
+    withOrgContext(appDb, "org_a", (tx) =>
+      tx.execute(
+        sql`update patient_document set retired_at = now(), retire_reason = 'x' where id = 'dddddddd-dddd-dddd-dddd-dddddddddddd'`,
+      ),
+    ),
+  ).rejects.toThrow()
+  await ownerDb.execute(sql`insert into "user" (id,name,email) values ('rls-retirer','R','rls-retirer@example.test') on conflict (id) do nothing`)
+  await withOrgContext(appDb, "org_a", (tx) =>
+    tx.execute(
+      sql`update patient_document set retired_at = now(), retired_by = 'rls-retirer', retire_reason = 'Paciente equivocado' where id = 'dddddddd-dddd-dddd-dddd-dddddddddddd'`,
+    ),
+  )
+  await expect(
+    withOrgContext(appDb, "org_a", (tx) =>
+      tx.execute(
+        sql`update patient_document set retired_at = null, retired_by = null, retire_reason = null where id = 'dddddddd-dddd-dddd-dddd-dddddddddddd'`,
+      ),
+    ),
+  ).rejects.toThrow()
+
   // Las indicaciones se cancelan o reemplazan; incluso sin vínculos no se borran.
   await expect(
     withOrgContext(appDb, "org_a", (tx) =>

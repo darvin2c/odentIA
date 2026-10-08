@@ -10,6 +10,7 @@ export * from "./treatment-templates.js"
 export * from "./vitals.js"
 export * from "./medications.js"
 export * from "./identity.js"
+export * from "./documents.js"
 export * from "./patient-registration.js"
 export type {
   FindingColorKind,

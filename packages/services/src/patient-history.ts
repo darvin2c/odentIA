@@ -71,6 +71,8 @@ export interface RecentDocument {
   label: string
   category: string
   contentType: string
+  imageType: string | null
+  capturedAt: Date | null
   encounterId: string | null
   planItemId: string | null
   toothNumbers: number[]
@@ -513,7 +515,13 @@ export async function getPatientSummary(tx: Db, orgId: string, patientId: string
   const docRows = await tx
     .select()
     .from(patientDocument)
-    .where(and(eq(patientDocument.organizationId, orgId), eq(patientDocument.patientId, patientId)))
+    .where(
+      and(
+        eq(patientDocument.organizationId, orgId),
+        eq(patientDocument.patientId, patientId),
+        isNull(patientDocument.retiredAt),
+      ),
+    )
     .orderBy(desc(patientDocument.createdAt), desc(patientDocument.id))
     .limit(8)
   const contexts = await getCurrentDocumentContexts(
@@ -529,6 +537,8 @@ export async function getPatientSummary(tx: Db, orgId: string, patientId: string
       label: doc.label,
       category: doc.category,
       contentType: doc.contentType,
+      imageType: doc.imageType,
+      capturedAt: doc.capturedAt,
       encounterId: ctx?.encounterId ?? null,
       planItemId: ctx?.planItemId ?? null,
       toothNumbers: ctx?.toothNumbers ?? [],

@@ -1,10 +1,14 @@
 import {
   BLOOD_GROUPS,
   DOC_TYPES,
+  DOCUMENT_FORMATS,
   demographicsSchema,
+  IMAGE_TYPES,
+  REPORT_STATUSES,
   registrationAnswersSchema,
   registrationContactInputSchema,
   SURFACES,
+  sniffDocumentMime,
   TREATMENT_PHASES,
 } from "@odentia/clinical"
 import { withOrgContext } from "@odentia/db"
@@ -50,9 +54,10 @@ import {
   PATIENT_AVATAR_MAX_BYTES,
   PATIENT_AVATAR_MIME_EXT,
   PATIENT_DOC_MAX_BYTES,
-  PATIENT_DOC_MIME_EXT,
   registerPatient,
   registerPatientDocument,
+  retirePatientDocument,
+  setDocumentReportStatus,
   removePatientContact,
   requirePatient,
   reviewLegacyEntry,
@@ -429,6 +434,23 @@ const documentLinkInput = z.object({
   paymentId: z.uuid().optional(),
   toothNumbers: jsonArrayField.pipe(z.array(z.number().int()).max(52)).default([]),
   tags: jsonArrayField.pipe(z.array(z.string().min(1).max(200)).max(100)).default([]),
+})
+
+/** Metadatos de imagen en la subida (multipart). */
+const documentImageInput = z.object({
+  imageType: z.enum(IMAGE_TYPES).optional(),
+  capturedAt: z.iso.datetime({ offset: true }).optional(),
+  source: z.string().trim().min(1).max(120).optional(),
+})
+
+const documentListQuery = z.object({
+  category: z.string().max(40).optional(),
+  imageType: z.enum(IMAGE_TYPES).optional(),
+  tooth: z.coerce.number().int().optional(),
+  planItemId: z.uuid().optional(),
+  from: z.iso.date().optional(),
+  to: z.iso.date().optional(),
+  includeRetired: z.enum(["true", "false"]).optional(),
 })
 
 /** Subrutas con datos clínicos: exigen `clinical.read`/`.write`. */
@@ -880,8 +902,16 @@ export function createPatientsRoute(deps: CrmDeps) {
   // --- Documentos ---
   app.get("/:id/documents", async (c) => {
     const { orgId } = orgContextOf(c)
+    const query = documentListQuery.safeParse(c.req.query())
+    if (!query.success) return validationError(c, query.error.issues)
+    const { includeRetired, ...filters } = query.data
     return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) => listPatientDocuments(tx, orgId, c.req.param("id"))),
+      withOrgContext(deps.db, orgId, (tx) =>
+        listPatientDocuments(tx, orgId, c.req.param("id"), {
+          ...filters,
+          includeRetired: includeRetired === "true",
+        }),
+      ),
     )
   })
   app.post("/:id/documents", async (c) => {
@@ -903,24 +933,47 @@ export function createPatientsRoute(deps: CrmDeps) {
       tags: form?.get("tags") || undefined,
     })
     if (!link.success) return validationError(c, link.error.issues)
+    const image = documentImageInput.safeParse({
+      imageType: form?.get("imageType") || undefined,
+      capturedAt: form?.get("capturedAt") || undefined,
+      source: form?.get("source") || undefined,
+    })
+    if (!image.success) return validationError(c, image.error.issues)
     if (!(file instanceof File))
       return c.json(errorBody(c, "VALIDATION", "Adjunta un archivo"), 400)
     if (typeof category !== "string" || typeof label !== "string" || !label.trim()) {
       return c.json(errorBody(c, "VALIDATION", "category y label son obligatorios"), 400)
     }
-    const ext = PATIENT_DOC_MIME_EXT[file.type]
-    if (!ext) return c.json(errorBody(c, "VALIDATION", "Solo se admiten JPG, PNG, WebP o PDF"), 400)
-    if (file.size > PATIENT_DOC_MAX_BYTES) {
-      return c.json(errorBody(c, "VALIDATION", "El archivo no puede superar 10 MB"), 400)
+    if (!file.size || file.size > PATIENT_DOC_MAX_BYTES) {
+      return c.json(errorBody(c, "VALIDATION", "El archivo debe pesar entre 1 byte y 10 MB"), 400)
     }
     const bytes = new Uint8Array(await file.arrayBuffer())
+    // El formato se decide por el contenido: un tipo declarado que no coincide
+    // con los bytes (p. ej. un ejecutable renombrado a .jpg) se rechaza.
+    const contentType = sniffDocumentMime(bytes)
+    if (!contentType)
+      return c.json(
+        errorBody(c, "VALIDATION", "Solo se admiten JPG, PNG, WebP, PDF o DICOM"),
+        400,
+      )
+    const declared = file.type === "application/octet-stream" ? "" : file.type
+    if (declared && declared !== contentType)
+      return c.json(
+        errorBody(
+          c,
+          "VALIDATION",
+          `El contenido del archivo no coincide con su tipo declarado (${declared})`,
+        ),
+        400,
+      )
+    const ext = DOCUMENT_FORMATS[contentType]
     return runService(c, 201, async () => {
       await withOrgContext(deps.db, orgId, (tx) => requirePatient(tx, orgId, patientId))
       const ref = await deps.storage.putPatientDocument({
         orgId,
         patientId,
         bytes,
-        contentType: file.type,
+        contentType,
         ext,
       })
       try {
@@ -929,9 +982,10 @@ export function createPatientsRoute(deps: CrmDeps) {
             category,
             label: label.trim(),
             storageKey: ref.objectKey,
-            contentType: file.type,
+            contentType,
             sizeBytes: file.size,
             ...link.data,
+            ...image.data,
           }),
         )
       } catch (e) {
@@ -939,6 +993,44 @@ export function createPatientsRoute(deps: CrmDeps) {
         throw e
       }
     })
+  })
+  app.post("/:id/documents/:documentId/retire", async (c) => {
+    const { orgId, userId } = orgContextOf(c)
+    const parsed = z
+      .object({ reason: z.string().trim().min(1).max(2000) })
+      .safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        retirePatientDocument(
+          tx,
+          orgId,
+          userId,
+          c.req.param("id"),
+          c.req.param("documentId"),
+          parsed.data,
+        ),
+      ),
+    )
+  })
+  app.patch("/:id/documents/:documentId/report", async (c) => {
+    const { orgId, userId } = orgContextOf(c)
+    const parsed = z
+      .object({ reportStatus: z.enum(REPORT_STATUSES) })
+      .safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        setDocumentReportStatus(
+          tx,
+          orgId,
+          userId,
+          c.req.param("id"),
+          c.req.param("documentId"),
+          parsed.data,
+        ),
+      ),
+    )
   })
   app.get("/:id/documents/:documentId/url", async (c) => {
     const { orgId } = orgContextOf(c)

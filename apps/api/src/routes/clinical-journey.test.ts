@@ -917,13 +917,45 @@ it("documentos: carga con vínculos clínicos y corrección versionada", async (
   const prescriptionId = (await json<{ data: { id: string } }>(prescription)).data.id
 
   const form = new FormData()
-  form.append("file", new Blob([new Uint8Array([1, 2, 3, 4])], { type: "image/png" }), "rx.png")
+  form.append("file", new Blob([new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, 0, 0])], { type: "image/png" }), "rx.png")
   form.append("label", "Radiografía de control")
   form.append("category", "radiografia")
   form.append("planItemId", itemId)
   form.append("followUpId", followUpId)
   form.append("prescriptionId", prescriptionId)
   form.append("toothNumbers", JSON.stringify([36]))
+  form.append("imageType", "periapical")
+  form.append("capturedAt", new Date(Date.now() - 3_600_000).toISOString())
+  form.append("source", "Sensor intraoral · sala 2")
+  // Un archivo cuyo contenido no coincide con su tipo declarado se rechaza.
+  const fake = new FormData()
+  fake.append("file", new Blob([new TextEncoder().encode("MZ ejecutable")], { type: "image/png" }), "rx.png")
+  fake.append("label", "Falsa")
+  fake.append("category", "radiografia")
+  const rejected = await app.request(`/patients/${patientId}/documents`, {
+    method: "POST",
+    body: fake,
+  })
+  expect(rejected.status).toBe(400)
+  // Un JPEG declarado como PNG tampoco pasa: decide el contenido.
+  const mismatch = new FormData()
+  mismatch.append("file", new Blob([new Uint8Array([255, 216, 255, 224, 0])], { type: "image/png" }), "rx.png")
+  mismatch.append("label", "Mal declarada")
+  mismatch.append("category", "radiografia")
+  expect(
+    (await app.request(`/patients/${patientId}/documents`, { method: "POST", body: mismatch }))
+      .status,
+  ).toBe(400)
+  // El subtipo debe corresponder a la categoría.
+  const wrongType = new FormData()
+  wrongType.append("file", new Blob([new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, 0, 0])], { type: "image/png" }), "f.png")
+  wrongType.append("label", "Foto")
+  wrongType.append("category", "foto_clinica")
+  wrongType.append("imageType", "periapical")
+  expect(
+    (await app.request(`/patients/${patientId}/documents`, { method: "POST", body: wrongType }))
+      .status,
+  ).toBe(400)
   const uploaded = await app.request(`/patients/${patientId}/documents`, {
     method: "POST",
     body: form,
@@ -955,12 +987,69 @@ it("documentos: carga con vínculos clínicos y corrección versionada", async (
     expectedVersion: 1,
   })
   expect(stale.status).toBe(409)
+
+  // Filtros del archivo: tipo y pieza.
+  const filtered = await json<{ data: Array<{ id: string; imageType: string; reportStatus: string }> }>(
+    await app.request(`/patients/${patientId}/documents?imageType=periapical&tooth=36`),
+  )
+  expect(filtered.data.map((d) => d.id)).toEqual([created.data.id])
+  expect(filtered.data[0]).toMatchObject({ imageType: "periapical", reportStatus: "pendiente" })
+  const otherTooth = await json<{ data: unknown[] }>(
+    await app.request(`/patients/${patientId}/documents?tooth=11`),
+  )
+  expect(otherTooth.data).toEqual([])
+  const reported = await app.request(
+    `/patients/${patientId}/documents/${created.data.id}/report`,
+    {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ reportStatus: "informado" }),
+    },
+  )
+  expect(reported.status).toBe(200)
+
+  // Retirar: sin motivo no; con motivo deja traza y sale del listado.
+  expect(
+    (await post(app, `/patients/${patientId}/documents/${created.data.id}/retire`, { reason: "" }))
+      .status,
+  ).toBe(400)
+  const retired = await post(app, `/patients/${patientId}/documents/${created.data.id}/retire`, {
+    reason: "Subida al paciente equivocado",
+  })
+  expect(retired.status).toBe(200)
+  expect(
+    (await json<{ data: { retiredAt: string | null; retireReason: string } }>(retired)).data,
+  ).toMatchObject({ retireReason: "Subida al paciente equivocado" })
+  const again = await post(app, `/patients/${patientId}/documents/${created.data.id}/retire`, {
+    reason: "Otra vez",
+  })
+  expect(again.status).toBe(409)
+  const visible = await json<{ data: Array<{ id: string }> }>(
+    await app.request(`/patients/${patientId}/documents`),
+  )
+  expect(visible.data.some((d) => d.id === created.data.id)).toBe(false)
+  const withRetired = await json<{ data: Array<{ id: string }> }>(
+    await app.request(`/patients/${patientId}/documents?includeRetired=true`),
+  )
+  expect(withRetired.data.some((d) => d.id === created.data.id)).toBe(true)
+  const audits = await ownerDb.execute(
+    sql`select action from audit_event where entity_id = ${created.data.id} order by created_at`,
+  )
+  expect(audits.map((r) => (r as { action: string }).action)).toContain("document.retired")
+  // La corrección de contexto ya no aplica a un retirado.
+  expect(
+    (
+      await post(app, `/patients/${patientId}/documents/${created.data.id}/context`, {
+        expectedVersion: 2,
+      })
+    ).status,
+  ).toBe(409)
   // La atención finalizada no admite cargas: el archivo se sube después y se vincula
   // con una revisión de contexto auditada.
   const { encounterId, patientId: owner } = await setupAcceptedItem()
   await finalizeEncounter(owner, encounterId)
   const closedForm = new FormData()
-  closedForm.append("file", new Blob([new Uint8Array([1])], { type: "image/png" }), "rx2.png")
+  closedForm.append("file", new Blob([new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, 0, 0])], { type: "image/png" }), "rx2.png")
   closedForm.append("label", "Radiografía cerrada")
   closedForm.append("category", "radiografia")
   closedForm.append("encounterId", encounterId)

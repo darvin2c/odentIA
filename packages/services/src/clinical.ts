@@ -5,10 +5,16 @@ import {
   type FindingDetails,
   type FindingInput,
   type FindingRecord,
+  IMAGE_TYPE_LABELS,
+  type ImageType,
+  imageTypeCategory,
+  isImageType,
   isValidTooth,
   normalizeTags,
   ODONTOGRAM_STANDARD,
   type RegistrationAnswers,
+  REPORT_STATUSES,
+  type ReportStatus,
   registrationAnswersSchema,
   validateFinding,
 } from "@odentia/clinical"
@@ -37,7 +43,7 @@ import {
   treatmentPlanItem,
 } from "@odentia/db/schema/clinical"
 import { auditEvent } from "@odentia/db/schema/org"
-import { and, asc, desc, eq, inArray, lt, or, sql } from "drizzle-orm"
+import { and, asc, desc, eq, inArray, isNull, lt, or, sql } from "drizzle-orm"
 import { decodeCursor, encodeCursor } from "./cursors.js"
 import { isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
 import { requirePatient } from "./patients.js"
@@ -1492,6 +1498,13 @@ export interface PatientDocumentWithContext {
   sizeBytes: number
   uploadedBy: string | null
   createdAt: Date
+  imageType: string | null
+  capturedAt: Date | null
+  source: string | null
+  reportStatus: string | null
+  retiredAt: Date | null
+  retiredBy: string | null
+  retireReason: string | null
   encounterId: string | null
   planItemId: string | null
   budgetId: string | null
@@ -1618,6 +1631,13 @@ function mergeDocumentContext(
     sizeBytes: doc.sizeBytes,
     uploadedBy: doc.uploadedBy,
     createdAt: doc.createdAt,
+    imageType: doc.imageType,
+    capturedAt: doc.capturedAt,
+    source: doc.source,
+    reportStatus: doc.reportStatus,
+    retiredAt: doc.retiredAt,
+    retiredBy: doc.retiredBy,
+    retireReason: doc.retireReason,
     encounterId: ctx?.encounterId ?? null,
     planItemId: ctx?.planItemId ?? null,
     budgetId: ctx?.budgetId ?? null,
@@ -1702,6 +1722,46 @@ async function validateExtendedDocumentLinks(
   }
 }
 
+/** Metadatos de la imagen diagnóstica al subirla (inmutables después). */
+export interface DocumentImageInput {
+  imageType?: string | null
+  /** Fecha y hora de la toma (ISO 8601); la de subida la pone el servidor. */
+  capturedAt?: string | Date | null
+  source?: string | null
+  reportStatus?: string | null
+}
+
+function normalizeImageInput(category: string, input: DocumentImageInput) {
+  let imageType: ImageType | null = null
+  if (input.imageType) {
+    if (!isImageType(input.imageType)) throw validation(`Tipo de imagen no reconocido: ${input.imageType}`)
+    if (imageTypeCategory(input.imageType) !== category)
+      throw validation(
+        `${IMAGE_TYPE_LABELS[input.imageType]} no corresponde a la categoría ${category}`,
+      )
+    imageType = input.imageType
+  }
+  let capturedAt: Date | null = null
+  if (input.capturedAt) {
+    capturedAt = input.capturedAt instanceof Date ? input.capturedAt : new Date(input.capturedAt)
+    if (Number.isNaN(capturedAt.getTime())) throw validation("La fecha de toma no es válida")
+    // Margen de cinco minutos por relojes de equipos desfasados.
+    if (capturedAt.getTime() > Date.now() + 5 * 60_000)
+      throw validation("La fecha de toma no puede ser futura")
+  }
+  const source = input.source?.trim() || null
+  if (source && source.length > 120) throw validation("El origen debe tener hasta 120 caracteres")
+  let reportStatus: ReportStatus | null = null
+  if (input.reportStatus) {
+    if (!(REPORT_STATUSES as readonly string[]).includes(input.reportStatus))
+      throw validation(`Estado de informe no reconocido: ${input.reportStatus}`)
+    reportStatus = input.reportStatus as ReportStatus
+  } else if (category === "radiografia") {
+    reportStatus = "pendiente"
+  }
+  return { imageType, capturedAt, source, reportStatus }
+}
+
 export async function registerPatientDocument(
   tx: Db,
   orgId: string,
@@ -1713,13 +1773,15 @@ export async function registerPatientDocument(
     storageKey: string
     contentType: string
     sizeBytes: number
-  } & DocumentContextInput,
+  } & DocumentContextInput &
+    DocumentImageInput,
 ): Promise<PatientDocumentWithContext> {
   await requirePatient(tx, orgId, patientId)
   if (!(DOCUMENT_CATEGORIES as readonly string[]).includes(input.category))
     throw validation("category inválida")
   const label = input.label?.trim() ?? ""
   if (!label || label.length > 200) throw validation("label debe tener 1–200 caracteres")
+  const image = normalizeImageInput(input.category, input)
   if (!input.storageKey) throw validation("storageKey es obligatorio")
   const toothNumbers = normalizeDocumentTeeth(input.toothNumbers)
   const tags = normalizeDocumentTags(input.tags)
@@ -1738,6 +1800,7 @@ export async function registerPatientDocument(
       contentType: input.contentType,
       sizeBytes: input.sizeBytes,
       uploadedBy: actorUserId,
+      ...image,
     })
     .returning()
   if (!row) throw new Error("No se pudo registrar el documento")
@@ -1772,6 +1835,7 @@ export async function registerPatientDocument(
   await audit(tx, orgId, actorUserId, "document.uploaded", "patient_document", row.id, {
     patientId,
     category: input.category,
+    imageType: image.imageType,
     contextVersion: 1,
     encounterId: input.encounterId ?? null,
     planItemId: input.planItemId ?? null,
@@ -1801,17 +1865,52 @@ async function latestDocumentContexts(
     .orderBy(patientDocumentContext.documentId, desc(patientDocumentContext.version))
 }
 
+/** Filtros del archivo clínico. Sin `includeRetired` los retirados no aparecen. */
+export interface DocumentListFilters {
+  category?: string
+  imageType?: string
+  tooth?: number
+  planItemId?: string
+  /** Desde/hasta (AAAA-MM-DD) sobre la fecha de toma o, si falta, la de subida. */
+  from?: string
+  to?: string
+  includeRetired?: boolean
+}
+
 export async function listPatientDocuments(
   tx: Db,
   orgId: string,
   patientId: string,
+  filters: DocumentListFilters = {},
 ): Promise<PatientDocumentWithContext[]> {
   await requirePatient(tx, orgId, patientId)
+  const conditions = [
+    eq(patientDocument.patientId, patientId),
+    eq(patientDocument.organizationId, orgId),
+  ]
+  if (!filters.includeRetired) conditions.push(isNull(patientDocument.retiredAt))
+  if (filters.category) conditions.push(eq(patientDocument.category, filters.category))
+  if (filters.imageType) conditions.push(eq(patientDocument.imageType, filters.imageType))
+  const takenAt = sql`coalesce(${patientDocument.capturedAt}, ${patientDocument.createdAt})`
+  for (const [key, value] of [
+    ["from", filters.from],
+    ["to", filters.to],
+  ] as const) {
+    if (!value) continue
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) throw validation(`${key} debe ser AAAA-MM-DD`)
+    conditions.push(
+      key === "from"
+        ? sql`${takenAt} >= ${value}::date`
+        : sql`${takenAt} < (${value}::date + interval '1 day')`,
+    )
+  }
+  if (filters.tooth != null && !isValidTooth(filters.tooth))
+    throw validation(`Pieza FDI inválida: ${filters.tooth}`)
   const docs = await tx
     .select()
     .from(patientDocument)
-    .where(and(eq(patientDocument.patientId, patientId), eq(patientDocument.organizationId, orgId)))
-    .orderBy(desc(patientDocument.createdAt))
+    .where(and(...conditions))
+    .orderBy(desc(takenAt), desc(patientDocument.id))
   if (!docs.length) return []
   const latest = await latestDocumentContexts(
     tx,
@@ -1820,7 +1919,90 @@ export async function listPatientDocuments(
     docs.map((doc) => doc.id),
   )
   const byDocument = new Map(latest.map((ctx) => [ctx.documentId, ctx]))
-  return docs.map((doc) => mergeDocumentContext(doc, byDocument.get(doc.id) ?? null))
+  // Pieza y tratamiento viven en el contexto vigente: se filtran tras fusionar.
+  return docs
+    .map((doc) => mergeDocumentContext(doc, byDocument.get(doc.id) ?? null))
+    .filter(
+      (doc) =>
+        (filters.tooth == null || doc.toothNumbers.includes(filters.tooth)) &&
+        (!filters.planItemId || doc.planItemId === filters.planItemId),
+    )
+}
+
+/**
+ * Retira un archivo cargado por error (paciente equivocado, duplicado,
+ * ilegible). No se borra: sale de la galería, conserva el blob, el contexto y
+ * la traza de quién lo retiró, cuándo y por qué.
+ */
+export async function retirePatientDocument(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  patientId: string,
+  documentId: string,
+  input: { reason: string },
+): Promise<PatientDocumentWithContext> {
+  await requirePatient(tx, orgId, patientId)
+  const reason = input.reason?.trim() ?? ""
+  if (!reason || reason.length > 2000) throw validation("El motivo debe tener 1–2000 caracteres")
+  const [current] = await tx
+    .select()
+    .from(patientDocument)
+    .where(
+      and(
+        eq(patientDocument.id, documentId),
+        eq(patientDocument.organizationId, orgId),
+        eq(patientDocument.patientId, patientId),
+      ),
+    )
+    .for("update")
+  if (!current) throw notFound("Documento")
+  if (current.retiredAt)
+    throw new ServiceError("DOCUMENT_RETIRED", 409, "El archivo ya está retirado")
+  const [row] = await tx
+    .update(patientDocument)
+    .set({ retiredAt: new Date(), retiredBy: actorUserId, retireReason: reason })
+    .where(and(eq(patientDocument.id, documentId), eq(patientDocument.organizationId, orgId)))
+    .returning()
+  await audit(tx, orgId, actorUserId, "document.retired", "patient_document", documentId, {
+    patientId,
+    reason,
+  })
+  return mergeDocumentContext(
+    row!,
+    await currentDocumentContext(tx, orgId, patientId, documentId, false),
+  )
+}
+
+/** Marca el informe de una imagen (pendiente, informada, no requiere). */
+export async function setDocumentReportStatus(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  patientId: string,
+  documentId: string,
+  input: { reportStatus: string },
+): Promise<PatientDocumentWithContext> {
+  await requirePatient(tx, orgId, patientId)
+  if (!(REPORT_STATUSES as readonly string[]).includes(input.reportStatus))
+    throw validation(`Estado de informe no reconocido: ${input.reportStatus}`)
+  const current = await requireDocumentRow(tx, orgId, patientId, documentId)
+  if (current.retiredAt)
+    throw new ServiceError("DOCUMENT_RETIRED", 409, "El archivo está retirado")
+  const [row] = await tx
+    .update(patientDocument)
+    .set({ reportStatus: input.reportStatus })
+    .where(and(eq(patientDocument.id, documentId), eq(patientDocument.organizationId, orgId)))
+    .returning()
+  await audit(tx, orgId, actorUserId, "document.report_status", "patient_document", documentId, {
+    patientId,
+    from: current.reportStatus,
+    to: input.reportStatus,
+  })
+  return mergeDocumentContext(
+    row!,
+    await currentDocumentContext(tx, orgId, patientId, documentId, false),
+  )
 }
 
 export async function getPatientDocument(
@@ -1886,6 +2068,8 @@ export async function correctDocumentContext(
 ): Promise<PatientDocumentWithContext> {
   await requirePatient(tx, orgId, patientId)
   const row = await requireDocumentRow(tx, orgId, patientId, documentId)
+  if (row.retiredAt)
+    throw new ServiceError("DOCUMENT_RETIRED", 409, "El archivo está retirado: su contexto ya no se corrige")
   const current = await currentDocumentContext(tx, orgId, patientId, documentId, true)
   if (!current) throw notFound("Contexto del documento")
   if (!Number.isInteger(input.expectedVersion) || input.expectedVersion < 1) {
@@ -1996,6 +2180,7 @@ export async function listEncounterDocuments(
       and(
         eq(patientDocument.patientId, patientId),
         eq(patientDocument.organizationId, orgId),
+        isNull(patientDocument.retiredAt),
         inArray(
           patientDocument.id,
           current.map((ctx) => ctx.documentId),

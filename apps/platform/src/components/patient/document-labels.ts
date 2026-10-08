@@ -1,3 +1,11 @@
+import {
+  IMAGE_TYPE_LABELS,
+  type ImageType,
+  PHOTO_TYPES,
+  RADIOGRAPH_TYPES,
+  REPORT_STATUS_LABELS,
+  type ReportStatus,
+} from "@odentia/clinical"
 import { timeAgo } from "../../lib/crm"
 import { type Encounter, encounterStatusLabel, type PlanItem } from "../../lib/patients"
 
@@ -17,12 +25,55 @@ const CATEGORY_LABELS: Record<string, string> = {
   otro: "Otro",
 }
 
-export const ACCEPTED_TYPES = ["image/jpeg", "image/png", "image/webp", "application/pdf"]
-export const ACCEPT_ATTR = ACCEPTED_TYPES.join(",")
+export const ACCEPTED_TYPES = [
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "application/pdf",
+  "application/dicom",
+]
+/** DICOM suele llegar sin tipo declarado: se admite por extensión y el servidor
+ * verifica el contenido real de todos los archivos. */
+export const ACCEPT_ATTR = [...ACCEPTED_TYPES, ".dcm"].join(",")
 export const MAX_BYTES = 10 * 1024 * 1024
+
+export function isAcceptedFile(file: File): boolean {
+  return ACCEPTED_TYPES.includes(file.type) || /\.dcm$/i.test(file.name)
+}
 
 export function categoryLabel(category: string): string {
   return CATEGORY_LABELS[category] ?? category
+}
+
+/** Tipos de imagen que admite cada categoría (vacío: no aplica). */
+export function imageTypesFor(category: string): readonly ImageType[] {
+  if (category === "radiografia") return RADIOGRAPH_TYPES
+  if (category === "foto_clinica") return PHOTO_TYPES
+  return []
+}
+
+export function imageTypeLabel(type: string | null | undefined): string | null {
+  if (!type) return null
+  return IMAGE_TYPE_LABELS[type as ImageType] ?? type
+}
+
+export function reportStatusLabel(status: string | null | undefined): string | null {
+  if (!status) return null
+  return REPORT_STATUS_LABELS[status as ReportStatus] ?? status
+}
+
+/** Fecha que cuenta para la historia: la de toma si se registró, si no la de subida. */
+export function takenAt(doc: { capturedAt?: string | null; createdAt: string }): string {
+  return doc.capturedAt ?? doc.createdAt
+}
+
+export function formatTakenAt(doc: { capturedAt?: string | null; createdAt: string }): string {
+  const when = new Date(takenAt(doc)).toLocaleDateString("es-PE", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  })
+  return doc.capturedAt ? `Tomada ${when}` : `Subida ${when}`
 }
 
 export function encounterLabel(e: Encounter): string {

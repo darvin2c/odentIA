@@ -79,6 +79,7 @@ import {
   correctDocumentContext,
   createOdontogramAssessment,
   registerPatientDocument,
+  retirePatientDocument,
   savePatientHealth,
   voidOdontogramEntry,
 } from "./clinical.js"
@@ -1475,6 +1476,9 @@ const docRx = await registerPatientDocument(db, ORG_A, ANA_ID, rosaPatientId, {
   storageKey: rxRef.objectKey,
   contentType: rxRef.mimeType,
   sizeBytes: rxRef.size,
+  imageType: "periapical",
+  capturedAt: new Date(Date.now() - 20 * 60_000),
+  source: "Sensor intraoral · sala 2",
   encounterId: draft.id,
   toothNumbers: [36],
   tags: ["radiografia", "diagnostico-inicial"],
@@ -1497,10 +1501,76 @@ await registerPatientDocument(db, ORG_A, ANA_ID, rosaPatientId, {
   storageKey: fotoRef.objectKey,
   contentType: fotoRef.mimeType,
   sizeBytes: fotoRef.size,
+  imageType: "foto_intraoral",
+  capturedAt: new Date(Date.now() - 15 * 60_000),
   encounterId: draft.id,
   planItemId: endo46.id,
   toothNumbers: [36, 46],
   tags: ["foto-clinica", "seguimiento"],
+})
+// Imágenes previas para comparar y filtrar por tipo y periodo: panorámica de
+// un centro externo e interproximal de control, ya informadas.
+for (const previa of [
+  {
+    imageType: "panoramica",
+    label: "[DEMO] Panorámica inicial",
+    days: 18,
+    source: "Centro radiológico externo",
+    teeth: [] as number[],
+  },
+  {
+    imageType: "bitewing",
+    label: "[DEMO] Interproximal derecha",
+    days: 14,
+    source: "Sensor intraoral · sala 2",
+    teeth: [16, 46],
+  },
+  {
+    imageType: "periapical",
+    label: "[DEMO] Periapical 36 de control previo",
+    days: 200,
+    source: "Sensor intraoral · sala 1",
+    teeth: [36],
+  },
+] as const) {
+  const ref = await storage.putPatientDocument({
+    orgId: ORG_A,
+    patientId: rosaPatientId,
+    bytes: DEMO_PNG,
+    contentType: "image/png",
+    ext: "png",
+  })
+  await registerPatientDocument(db, ORG_A, ANA_ID, rosaPatientId, {
+    category: "radiografia",
+    label: previa.label,
+    storageKey: ref.objectKey,
+    contentType: ref.mimeType,
+    sizeBytes: ref.size,
+    imageType: previa.imageType,
+    capturedAt: new Date(Date.now() - previa.days * 86_400_000),
+    source: previa.source,
+    reportStatus: "informado",
+    toothNumbers: [...previa.teeth],
+  })
+}
+// Una imagen subida al paciente equivocado se retira con motivo; no se borra.
+const erradaRef = await storage.putPatientDocument({
+  orgId: ORG_A,
+  patientId: rosaPatientId,
+  bytes: DEMO_PNG,
+  contentType: "image/png",
+  ext: "png",
+})
+const errada = await registerPatientDocument(db, ORG_A, ANA_ID, rosaPatientId, {
+  category: "radiografia",
+  label: "[DEMO] Periapical de otro paciente",
+  storageKey: erradaRef.objectKey,
+  contentType: erradaRef.mimeType,
+  sizeBytes: erradaRef.size,
+  imageType: "periapical",
+})
+await retirePatientDocument(db, ORG_A, ANA_ID, rosaPatientId, errada.id, {
+  reason: "Subida al paciente equivocado",
 })
 // Cierre con datos útiles: evolución, indicaciones y siguiente paso.
 await updateEncounterDraft(db, ORG_A, ANA_ID, rosaPatientId, draft.id, {

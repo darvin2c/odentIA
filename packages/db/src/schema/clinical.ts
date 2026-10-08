@@ -426,9 +426,36 @@ export const patientDocument = pgTable(
     sizeBytes: integer("size_bytes").notNull(),
     uploadedBy: text("uploaded_by").references(() => user.id),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    /** Subtipo de imagen diagnóstica (@odentia/clinical IMAGE_TYPES). */
+    imageType: text("image_type"),
+    /** Fecha de toma; la de subida es created_at. */
+    capturedAt: timestamp("captured_at", { withTimezone: true }),
+    /** Origen: equipo, sala o centro externo. */
+    source: text("source"),
+    reportStatus: text("report_status"),
+    // Retiro: el archivo nunca se borra; queda fuera de la galería con motivo y traza.
+    retiredAt: timestamp("retired_at", { withTimezone: true }),
+    retiredBy: text("retired_by").references(() => user.id),
+    retireReason: text("retire_reason"),
   },
   (table) => [
     index("patient_document_org_patient_idx").on(table.organizationId, table.patientId),
+    check(
+      "patient_document_image_type_check",
+      sql`${table.imageType} IS NULL OR (${table.category} = 'radiografia' AND ${table.imageType} IN ('periapical','bitewing','oclusal','panoramica','cefalometrica','tomografia')) OR (${table.category} = 'foto_clinica' AND ${table.imageType} IN ('foto_intraoral','foto_extraoral'))`,
+    ),
+    check(
+      "patient_document_report_status_check",
+      sql`${table.reportStatus} IS NULL OR ${table.reportStatus} IN ('pendiente','informado','no_requiere')`,
+    ),
+    check(
+      "patient_document_source_check",
+      sql`${table.source} IS NULL OR char_length(${table.source}) BETWEEN 1 AND 120`,
+    ),
+    check(
+      "patient_document_retired_check",
+      sql`(${table.retiredAt} IS NULL) = (${table.retireReason} IS NULL) AND (${table.retireReason} IS NULL OR char_length(${table.retireReason}) BETWEEN 1 AND 2000)`,
+    ),
     check(
       "patient_document_category_check",
       sql`${table.category} IN ('consentimiento','radiografia','foto_clinica','informe','presupuesto','receta','comprobante_pago','otro')`,

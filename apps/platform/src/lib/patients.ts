@@ -264,6 +264,13 @@ export interface PatientDocument {
   storageKey?: string
   contentType: string
   sizeBytes: number
+  /** Subtipo de imagen diagnóstica (@odentia/clinical IMAGE_TYPES). */
+  imageType?: string | null
+  capturedAt?: string | null
+  source?: string | null
+  reportStatus?: string | null
+  retiredAt?: string | null
+  retireReason?: string | null
   encounterId: string | null
   planItemId: string | null
   /** Vínculos clínico-económicos del contexto vigente (nullable). */
@@ -682,6 +689,8 @@ export interface PatientSummary {
       | "label"
       | "category"
       | "contentType"
+      | "imageType"
+      | "capturedAt"
       | "encounterId"
       | "planItemId"
       | "toothNumbers"
