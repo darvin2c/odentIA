@@ -4,6 +4,7 @@ import { createAppDb, createOwnerDb, type Db, withOrgContext } from "@odentia/db
 import { branch } from "@odentia/db/schema/org"
 import { createChair, secretsKeyFromEnv, setProfessionalSchedule } from "@odentia/services"
 import { createHash } from "node:crypto"
+import sharp from "sharp"
 import { sql } from "drizzle-orm"
 import { migrate } from "drizzle-orm/postgres-js/migrator"
 import type { Context } from "hono"
@@ -1228,4 +1229,34 @@ it("formularios: finalizar con un obligatorio vacío responde 400 nombrando el c
     reason: "Paciente equivocado",
   })
   expect(discarded.status).toBe(200)
+})
+
+it("imágenes: la subida genera miniatura WebP y la URL la sirve con ?variant=thumb", async () => {
+  const patientId = await createPatient()
+  const png = await sharp({
+    create: { width: 1200, height: 800, channels: 3, background: "#777" },
+  })
+    .png()
+    .toBuffer()
+  const form = new FormData()
+  form.append("file", new Blob([new Uint8Array(png)], { type: "image/png" }), "rx.png")
+  form.append("label", "Panorámica")
+  form.append("category", "radiografia")
+  form.append("imageType", "panoramica")
+  const uploaded = await app.request(`/patients/${patientId}/documents`, { method: "POST", body: form })
+  expect(uploaded.status).toBe(201)
+  const doc = (await json<{ data: { id: string; storageKey: string; thumbnailKey: string | null } }>(uploaded)).data
+  expect(doc.thumbnailKey).toMatch(/\.webp$/)
+  const thumbBytes = storedBytes.get(doc.thumbnailKey!)!
+  const meta = await sharp(thumbBytes).metadata()
+  expect(meta).toMatchObject({ format: "webp", width: 320, height: 213 })
+  const thumbUrl = await json<{ data: { url: string; thumbnail: boolean } }>(
+    await app.request(`/patients/${patientId}/documents/${doc.id}/url?variant=thumb`),
+  )
+  expect(thumbUrl.data).toMatchObject({ thumbnail: true })
+  expect(thumbUrl.data.url).toContain(doc.thumbnailKey!)
+  const original = await json<{ data: { url: string; thumbnail: boolean } }>(
+    await app.request(`/patients/${patientId}/documents/${doc.id}/url`),
+  )
+  expect(original.data.url).toContain(doc.storageKey)
 })

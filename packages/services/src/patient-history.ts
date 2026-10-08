@@ -73,6 +73,7 @@ export interface RecentDocument {
   contentType: string
   imageType: string | null
   capturedAt: Date | null
+  hasThumbnail: boolean
   encounterId: string | null
   planItemId: string | null
   toothNumbers: number[]
@@ -539,6 +540,7 @@ export async function getPatientSummary(tx: Db, orgId: string, patientId: string
       contentType: doc.contentType,
       imageType: doc.imageType,
       capturedAt: doc.capturedAt,
+      hasThumbnail: doc.thumbnailKey !== null,
       encounterId: ctx?.encounterId ?? null,
       planItemId: ctx?.planItemId ?? null,
       toothNumbers: ctx?.toothNumbers ?? [],

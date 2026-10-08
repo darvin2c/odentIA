@@ -10,6 +10,7 @@
  * Regla permanente: toda función nueva que añada pantalla o entidad debe
  * extender este archivo con su escenario mínimo en la misma PR.
  */
+import sharp from "sharp"
 import { randomUUID } from "node:crypto"
 import { deflateSync } from "node:zlib"
 import { DEFAULT_REGISTRATION_CONFIG } from "@odentia/clinical"
@@ -115,6 +116,7 @@ import { seedAutomation } from "./seed-automation.js"
 import { seedAvailability } from "./seed-availability.js"
 import { seedChannels } from "./seed-channels.js"
 import { generateConsentPdf } from "./consent-pdf.js"
+import { makeImageThumbnail } from "./thumbnails.js"
 import { seedClinicalForms } from "./seed-clinical-forms.js"
 import { seedCrmActivity } from "./seed-crm-activity.js"
 import { seedCrmAgent } from "./seed-crm-agent.js"
@@ -159,11 +161,52 @@ function storageEnvFromProcess(): {
   }
 }
 const storage = createStorage(storageEnvFromProcess())
-// PNG real mínimo (1x1) para evidencias demo: bytes válidos que sí se almacenan.
-const DEMO_PNG = Buffer.from(
-  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
-  "base64",
-)
+/**
+ * Imagen clínica de demostración (no es de un paciente real): radiografía o
+ * foto esquemática dibujada con SVG para que la galería, el visor y la
+ * comparación se vean como con imágenes reales. `variant` desplaza la lesión.
+ */
+async function demoClinicalImage(kind: "rx" | "foto", variant = 0): Promise<Buffer> {
+  const [w, h] = kind === "rx" ? [640, 480] : [800, 600]
+  const bg = kind === "rx" ? "#1b1b1b" : "#7a2f35"
+  const tooth = kind === "rx" ? "#b9b9b9" : "#f1ead8"
+  const teeth = [120, 300, 480]
+    .map(
+      (x) =>
+        `<rect x="${x}" y="70" width="140" height="260" rx="48" fill="${tooth}"/>` +
+        (kind === "rx"
+          ? `<rect x="${x + 22}" y="320" width="34" height="130" rx="14" fill="#9a9a9a"/><rect x="${x + 84}" y="320" width="34" height="130" rx="14" fill="#9a9a9a"/><ellipse cx="${x + 70}" cy="150" rx="34" ry="40" fill="#e8e8e8"/>`
+          : ""),
+    )
+    .join("")
+  const lesion = `<ellipse cx="${160 + variant * 6}" cy="${120 + variant * 4}" rx="${26 - variant}" ry="${20 - variant}" fill="${kind === "rx" ? "#3d3d3d" : "#4a3420"}"/>`
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}"><rect width="100%" height="100%" fill="${bg}"/>${teeth}${lesion}</svg>`
+  return sharp(Buffer.from(svg)).blur(kind === "rx" ? 2.2 : 0.6).png().toBuffer()
+}
+
+/** Guarda la imagen demo y su miniatura, como hace la subida real. */
+async function putDemoImage(patientId: string, kind: "rx" | "foto", variant = 0) {
+  const bytes = await demoClinicalImage(kind, variant)
+  const ref = await storage.putPatientDocument({
+    orgId: ORG_A,
+    patientId,
+    bytes,
+    contentType: "image/png",
+    ext: "png",
+  })
+  const thumb = await makeImageThumbnail(bytes)
+  const thumbRef = thumb
+    ? await storage.putPatientDocument({
+        orgId: ORG_A,
+        patientId,
+        bytes: thumb,
+        contentType: "image/webp",
+        ext: "webp",
+      })
+    : null
+  return { ...ref, thumbnailKey: thumbRef?.objectKey ?? null }
+}
+
 // Nota de voz demo: WAV PCM mono 8 kHz de un beep corto. Se sintetiza (no hay
 // encoder de audio disponible) y Chrome lo reproduce sin códec adicional.
 function demoVoiceNoteWav(): Buffer {
@@ -1464,19 +1507,14 @@ await voidEncounterDiagnosis(db, ORG_A, ANA_ID, rosaPatientId, draft.id, dxErrad
   reason: "Pieza equivocada: era la 36",
 })
 // Documentos demo con bytes reales en storage (el registro exige borrador).
-const rxRef = await storage.putPatientDocument({
-  orgId: ORG_A,
-  patientId: rosaPatientId,
-  bytes: DEMO_PNG,
-  contentType: "image/png",
-  ext: "png",
-})
+const rxRef = await putDemoImage(rosaPatientId, "rx", 0)
 const docRx = await registerPatientDocument(db, ORG_A, ANA_ID, rosaPatientId, {
   category: "radiografia",
   label: "[DEMO] Radiografía periapical pieza 36",
   storageKey: rxRef.objectKey,
   contentType: rxRef.mimeType,
   sizeBytes: rxRef.size,
+  thumbnailKey: rxRef.thumbnailKey,
   imageType: "periapical",
   capturedAt: new Date(Date.now() - 20 * 60_000),
   source: "Sensor intraoral · sala 2",
@@ -1489,19 +1527,14 @@ await correctDocumentContext(db, ORG_A, ANA_ID, rosaPatientId, docRx.id, {
   expectedVersion: 1,
   tags: ["radiografia", "diagnostico-inicial", "pieza-36"],
 })
-const fotoRef = await storage.putPatientDocument({
-  orgId: ORG_A,
-  patientId: rosaPatientId,
-  bytes: DEMO_PNG,
-  contentType: "image/png",
-  ext: "png",
-})
+const fotoRef = await putDemoImage(rosaPatientId, "foto", 0)
 await registerPatientDocument(db, ORG_A, ANA_ID, rosaPatientId, {
   category: "foto_clinica",
   label: "[DEMO] Foto clínica piezas 36 y 46",
   storageKey: fotoRef.objectKey,
   contentType: fotoRef.mimeType,
   sizeBytes: fotoRef.size,
+  thumbnailKey: fotoRef.thumbnailKey,
   imageType: "foto_intraoral",
   capturedAt: new Date(Date.now() - 15 * 60_000),
   encounterId: draft.id,
@@ -1534,19 +1567,14 @@ for (const previa of [
     teeth: [36],
   },
 ] as const) {
-  const ref = await storage.putPatientDocument({
-    orgId: ORG_A,
-    patientId: rosaPatientId,
-    bytes: DEMO_PNG,
-    contentType: "image/png",
-    ext: "png",
-  })
+  const ref = await putDemoImage(rosaPatientId, "rx", previa.days > 100 ? 5 : 1)
   await registerPatientDocument(db, ORG_A, ANA_ID, rosaPatientId, {
     category: "radiografia",
     label: previa.label,
     storageKey: ref.objectKey,
     contentType: ref.mimeType,
     sizeBytes: ref.size,
+    thumbnailKey: ref.thumbnailKey,
     imageType: previa.imageType,
     capturedAt: new Date(Date.now() - previa.days * 86_400_000),
     source: previa.source,
@@ -1555,19 +1583,14 @@ for (const previa of [
   })
 }
 // Una imagen subida al paciente equivocado se retira con motivo; no se borra.
-const erradaRef = await storage.putPatientDocument({
-  orgId: ORG_A,
-  patientId: rosaPatientId,
-  bytes: DEMO_PNG,
-  contentType: "image/png",
-  ext: "png",
-})
+const erradaRef = await putDemoImage(rosaPatientId, "rx", 3)
 const errada = await registerPatientDocument(db, ORG_A, ANA_ID, rosaPatientId, {
   category: "radiografia",
   label: "[DEMO] Periapical de otro paciente",
   storageKey: erradaRef.objectKey,
   contentType: erradaRef.mimeType,
   sizeBytes: erradaRef.size,
+  thumbnailKey: erradaRef.thumbnailKey,
   imageType: "periapical",
 })
 await retirePatientDocument(db, ORG_A, ANA_ID, rosaPatientId, errada.id, {

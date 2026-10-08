@@ -99,12 +99,15 @@ function monthHeading(iso: string): string {
   return text.charAt(0).toUpperCase() + text.slice(1)
 }
 
-function useSignedUrl(patientId: string, documentId: string) {
+/** URL firmada del archivo; `thumb` pide la miniatura (o el original si no la hay). */
+function useSignedUrl(patientId: string, documentId: string, variant: "original" | "thumb" = "original") {
   const canRead = usePermission("clinical.read")
   return useQuery({
-    queryKey: ["patient-document-url", patientId, documentId],
+    queryKey: ["patient-document-url", patientId, documentId, variant],
     queryFn: () =>
-      apiFetch<{ data: { url: string } }>(`/api/patients/${patientId}/documents/${documentId}/url`),
+      apiFetch<{ data: { url: string } }>(
+        `/api/patients/${patientId}/documents/${documentId}/url${variant === "thumb" ? "?variant=thumb" : ""}`,
+      ),
     staleTime: SIGNED_URL_STALE_MS,
     enabled: canRead,
   })
@@ -579,7 +582,7 @@ function DocCard({
   encounter?: Encounter
   onOpen: () => void
 }) {
-  const urlQuery = useSignedUrl(patientId, doc.id)
+  const urlQuery = useSignedUrl(patientId, doc.id, "thumb")
   const url = urlQuery.data?.data.url ?? null
   const teeth = doc.toothNumbers
   const tags = doc.tags
@@ -1226,7 +1229,7 @@ function ContextDrawer({
 }) {
   const queryClient = useQueryClient()
   const canRead = usePermission("clinical.read")
-  const previewQuery = useSignedUrl(patientId, doc.id)
+  const previewQuery = useSignedUrl(patientId, doc.id, "thumb")
   const [encounterChoice, setEncounterChoice] = useState<string>(doc.encounterId ?? "")
   const [planChoice, setPlanChoice] = useState<string>(doc.planItemId ?? "")
   const [links, setLinks] = useState<DocumentLinkValue>({

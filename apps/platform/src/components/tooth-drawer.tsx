@@ -1773,12 +1773,18 @@ function ToothContext({
   )
 }
 
-function useSignedDocUrl(patientId: string, documentId: string) {
+function useSignedDocUrl(
+  patientId: string,
+  documentId: string,
+  variant: "original" | "thumb" = "original",
+) {
   const canRead = usePermission("clinical.read")
   return useQuery({
-    queryKey: ["patient-document-url", patientId, documentId],
+    queryKey: ["patient-document-url", patientId, documentId, variant],
     queryFn: () =>
-      apiFetch<{ data: { url: string } }>(`/api/patients/${patientId}/documents/${documentId}/url`),
+      apiFetch<{ data: { url: string } }>(
+        `/api/patients/${patientId}/documents/${documentId}/url${variant === "thumb" ? "?variant=thumb" : ""}`,
+      ),
     enabled: canRead,
     staleTime: SIGNED_URL_STALE_MS,
     gcTime: 30 * 60 * 1000,
@@ -1789,13 +1795,15 @@ function ToothImageThumb({ patientId, doc }: { patientId: string; doc: PatientDo
   const urlQuery = useSignedDocUrl(patientId, doc.id)
   const url = urlQuery.data?.data.url ?? null
   const isImage = doc.contentType.startsWith("image/")
+  const thumbQuery = useSignedDocUrl(patientId, doc.id, "thumb")
+  const thumbUrl = thumbQuery.data?.data.url ?? url
 
   return (
     <li className="overflow-hidden rounded-md border">
       {url && isImage ? (
         <a href={url} target="_blank" rel="noreferrer" aria-label={`Ver ${doc.label}`}>
           <img
-            src={url}
+            src={thumbUrl ?? url}
             alt={doc.label}
             loading="lazy"
             className="aspect-square w-full object-cover"

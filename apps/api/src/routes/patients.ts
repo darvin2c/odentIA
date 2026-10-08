@@ -55,6 +55,7 @@ import {
   PATIENT_AVATAR_MIME_EXT,
   PATIENT_DOC_MAX_BYTES,
   registerPatient,
+  makeImageThumbnail,
   registerPatientDocument,
   retirePatientDocument,
   setDocumentReportStatus,
@@ -976,6 +977,19 @@ export function createPatientsRoute(deps: CrmDeps) {
         contentType,
         ext,
       })
+      // Miniatura para la galería; si la imagen no se decodifica, no la hay.
+      const thumbBytes = contentType.startsWith("image/") ? await makeImageThumbnail(bytes) : null
+      const thumb = thumbBytes
+        ? await deps.storage
+            .putPatientDocument({
+              orgId,
+              patientId,
+              bytes: thumbBytes,
+              contentType: "image/webp",
+              ext: "webp",
+            })
+            .catch(() => null)
+        : null
       try {
         return await withOrgContext(deps.db, orgId, (tx) =>
           registerPatientDocument(tx, orgId, userId, patientId, {
@@ -984,12 +998,14 @@ export function createPatientsRoute(deps: CrmDeps) {
             storageKey: ref.objectKey,
             contentType,
             sizeBytes: file.size,
+            thumbnailKey: thumb?.objectKey ?? null,
             ...link.data,
             ...image.data,
           }),
         )
       } catch (e) {
         await deps.storage.deleteAttachment(ref.objectKey).catch(() => {})
+        if (thumb) await deps.storage.deleteAttachment(thumb.objectKey).catch(() => {})
         throw e
       }
     })
@@ -1038,8 +1054,11 @@ export function createPatientsRoute(deps: CrmDeps) {
       const doc = await withOrgContext(deps.db, orgId, (tx) =>
         getPatientDocument(tx, orgId, c.req.param("id"), c.req.param("documentId")),
       )
-      const url = await deps.storage.attachmentUrl(doc.storageKey)
-      return { url }
+      // ?variant=thumb: la miniatura si existe; si no, el original.
+      const key =
+        c.req.query("variant") === "thumb" && doc.thumbnailKey ? doc.thumbnailKey : doc.storageKey
+      const url = await deps.storage.attachmentUrl(key)
+      return { url, thumbnail: key !== doc.storageKey }
     })
   })
 

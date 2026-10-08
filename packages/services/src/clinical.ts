@@ -1502,6 +1502,7 @@ export interface PatientDocumentWithContext {
   capturedAt: Date | null
   source: string | null
   reportStatus: string | null
+  thumbnailKey: string | null
   retiredAt: Date | null
   retiredBy: string | null
   retireReason: string | null
@@ -1635,6 +1636,7 @@ function mergeDocumentContext(
     capturedAt: doc.capturedAt,
     source: doc.source,
     reportStatus: doc.reportStatus,
+    thumbnailKey: doc.thumbnailKey,
     retiredAt: doc.retiredAt,
     retiredBy: doc.retiredBy,
     retireReason: doc.retireReason,
@@ -1773,6 +1775,8 @@ export async function registerPatientDocument(
     storageKey: string
     contentType: string
     sizeBytes: number
+    /** Miniatura ya almacenada (solo imágenes). */
+    thumbnailKey?: string | null
   } & DocumentContextInput &
     DocumentImageInput,
 ): Promise<PatientDocumentWithContext> {
@@ -1800,6 +1804,7 @@ export async function registerPatientDocument(
       contentType: input.contentType,
       sizeBytes: input.sizeBytes,
       uploadedBy: actorUserId,
+      thumbnailKey: input.thumbnailKey ?? null,
       ...image,
     })
     .returning()

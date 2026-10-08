@@ -27,6 +27,7 @@
   },
   "devDependencies": {
     "@types/node": "22.20.2",
+    "sharp": "0.34.4",
     "testcontainers": "12.1.0",
     "tsx": "4.23.13",
     "typescript": "7.0.2",

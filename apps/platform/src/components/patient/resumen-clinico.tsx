@@ -198,9 +198,11 @@ type RecentDoc = PatientSummary["recentDocuments"][number]
 
 function Thumbnail({ patientId, doc }: { patientId: string; doc: RecentDoc }) {
   const signed = useQuery({
-    queryKey: ["patient-document-url", patientId, doc.id],
+    queryKey: ["patient-document-url", patientId, doc.id, "thumb"],
     queryFn: () =>
-      apiFetch<{ data: { url: string } }>(`/api/patients/${patientId}/documents/${doc.id}/url`),
+      apiFetch<{ data: { url: string } }>(
+        `/api/patients/${patientId}/documents/${doc.id}/url?variant=thumb`,
+      ),
     staleTime: 10 * 60 * 1000,
   })
   const url = signed.data?.data.url

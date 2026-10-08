@@ -433,6 +433,8 @@ export const patientDocument = pgTable(
     /** Origen: equipo, sala o centro externo. */
     source: text("source"),
     reportStatus: text("report_status"),
+    /** Miniatura (WebP) generada al subir una imagen; nula en PDF y DICOM. */
+    thumbnailKey: text("thumbnail_key"),
     // Retiro: el archivo nunca se borra; queda fuera de la galería con motivo y traza.
     retiredAt: timestamp("retired_at", { withTimezone: true }),
     retiredBy: text("retired_by").references(() => user.id),
