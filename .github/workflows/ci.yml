@@ -8,7 +8,10 @@ on:
     branches: [main]
 
 concurrency:
-  group: ci-${{ github.ref }}
+  # Una cola por PR. Al fusionar, el evento `closed` llega con `github.ref` de la
+  # rama base: con una cola por ref, la retirada del preview esperaba detrás del
+  # despliegue de main y GitHub la cancelaba si otra fusión entraba en la cola.
+  group: ci-${{ github.event.pull_request.number || github.ref }}
   # No cancelar un deploy productivo ni la retirada de un preview.
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' && github.event.action != 'closed' }}
 
