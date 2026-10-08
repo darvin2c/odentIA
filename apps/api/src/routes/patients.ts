@@ -1,9 +1,9 @@
 import {
-  SURFACES,
   BLOOD_GROUPS,
   demographicsSchema,
-  registrationContactInputSchema,
   registrationAnswersSchema,
+  registrationContactInputSchema,
+  SURFACES,
 } from "@odentia/clinical"
 import { withOrgContext } from "@odentia/db"
 import {
@@ -14,11 +14,12 @@ import {
   addOdontogramEntries,
   addPlanItem,
   addPlanItemsBatch,
+  type ClinicalAccessResource,
   createEncounter,
   createOdontogramAssessment,
-  registerPatient,
   createTreatmentPlan,
   finalizeEncounter,
+  findPatientDuplicates,
   getAnamnesisVersion,
   getEncounterClosing,
   getEncounterDetail,
@@ -29,34 +30,34 @@ import {
   getPatientHealth,
   getPatientSummary,
   getTimeline,
+  getToothHistory,
   getTreatmentCoordination,
-  listClinicalAccess,
-  listPatientDiagnoses,
-  type ClinicalAccessResource,
-  scheduleFollowUpFromCoordination,
   getTreatmentPlanDetail,
   listAnamnesisVersions,
+  listClinicalAccess,
   listClinicalNotes,
   listEncounters,
   listOdontogramAssessments,
+  listPatientDiagnoses,
   listPatientDocuments,
   listPatients,
-  findPatientDuplicates,
-  setPatientContact,
-  removePatientContact,
   listPlanItems,
   listTreatmentPlans,
   PATIENT_AVATAR_MAX_BYTES,
   PATIENT_AVATAR_MIME_EXT,
   PATIENT_DOC_MAX_BYTES,
   PATIENT_DOC_MIME_EXT,
+  registerPatient,
   registerPatientDocument,
+  removePatientContact,
   requirePatient,
   reviewLegacyEntry,
   ServiceError,
   savePatientHealth,
+  scheduleFollowUpFromCoordination,
   setDiagnosisStatus,
   setPatientAvatar,
+  setPatientContact,
   setPlanItemStatus,
   TIMELINE_TYPES,
   takeOverEncounter,
@@ -76,11 +77,11 @@ import { errorBody } from "../lib/error.js"
 import { type CrmDeps, runService, serviceErrorResponse, validationError } from "./helpers.js"
 import { createPatientBudgetsRoute } from "./patient-budgets.js"
 import { createPatientDocumentContextRoute } from "./patient-document-context.js"
-import { createPatientTreatmentsRoute } from "./patient-treatments.js"
 import { createPatientFollowUpsRoute } from "./patient-follow-ups.js"
-import { createPatientPrescriptionsRoute } from "./patient-prescriptions.js"
 import { createPatientPaymentsRoute } from "./patient-payments.js"
+import { createPatientPrescriptionsRoute } from "./patient-prescriptions.js"
 import { createPatientResponsibilitiesRoute } from "./patient-responsibilities.js"
+import { createPatientTreatmentsRoute } from "./patient-treatments.js"
 
 const listQuery = z.object({
   q: z.string().optional(),
@@ -354,9 +355,7 @@ const planBatchInput = z
   })
   .strict()
 const reasonInput = z.object({ reason: z.string().trim().min(1).max(2000) }).strict()
-const finalizeInput = z
-  .object({ endedAt: z.iso.datetime({ offset: true }).nullish() })
-  .strict()
+const finalizeInput = z.object({ endedAt: z.iso.datetime({ offset: true }).nullish() }).strict()
 const diagnosisInput = z
   .object({
     cie10Code: z.string().trim().min(1).max(10),
@@ -478,7 +477,9 @@ export function createPatientsRoute(deps: CrmDeps) {
         errorBody(
           c,
           "FORBIDDEN",
-          write ? "No tienes permiso para modificar este recurso" : "No tienes permiso para ver este recurso",
+          write
+            ? "No tienes permiso para modificar este recurso"
+            : "No tienes permiso para ver este recurso",
         ),
         403,
       )
@@ -716,6 +717,14 @@ export function createPatientsRoute(deps: CrmDeps) {
     const { orgId } = orgContextOf(c)
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) => getOdontogram(tx, orgId, c.req.param("id"))),
+    )
+  })
+  // Historia de una pieza: hallazgos, diagnósticos, actos, controles y documentos.
+  app.get("/:id/odontogram/teeth/:tooth/history", async (c) => {
+    const { orgId } = orgContextOf(c)
+    const tooth = Number(c.req.param("tooth"))
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) => getToothHistory(tx, orgId, c.req.param("id"), tooth)),
     )
   })
   app.post("/:id/odontogram/entries", async (c) => {
@@ -1019,7 +1028,14 @@ export function createPatientsRoute(deps: CrmDeps) {
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
-        voidEncounter(tx, orgId, userId, c.req.param("id"), c.req.param("encounterId"), parsed.data),
+        voidEncounter(
+          tx,
+          orgId,
+          userId,
+          c.req.param("id"),
+          c.req.param("encounterId"),
+          parsed.data,
+        ),
       ),
     )
   })

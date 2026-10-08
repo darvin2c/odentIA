@@ -78,6 +78,7 @@ interface EncounterRow {
   id: string
   status: string
   reason: string | null
+  evolution?: string | null
 }
 
 interface EncounterDetailBody {

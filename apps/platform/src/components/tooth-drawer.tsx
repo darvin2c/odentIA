@@ -39,10 +39,11 @@ import {
   toothTypeLabel,
 } from "../lib/patients"
 import { formatMoney, type ServiceCatalogItem } from "../lib/services"
+import { FindingPicker } from "./finding-picker"
 import { Cie10Search } from "./patient/cie10-search"
 import { ServicePicker } from "./patient/service-picker"
+import { ToothHistory } from "./patient/tooth-history"
 import { ToothSVG } from "./tooth-svg"
-import { FindingPicker } from "./finding-picker"
 
 /** Las URL firmadas expiran: se consideran frescas 10 min y luego se regeneran. */
 const SIGNED_URL_STALE_MS = 10 * 60 * 1000
@@ -1615,6 +1616,8 @@ function ToothContext({
           )}
         </section>
 
+        <ToothHistory patientId={patientId} toothNumber={toothNumber} />
+
         <section aria-label={`Imágenes de la pieza ${toothNumber}`} className="flex flex-col gap-2">
           <h4 className="text-sm font-medium">Imágenes asociadas</h4>
           {docsQuery.isPending && (
@@ -1650,7 +1653,7 @@ function ToothContext({
           aria-label={`Historial de la pieza ${toothNumber}`}
           className="flex flex-col gap-2"
         >
-          <h4 className="text-sm font-medium">Historial de la pieza</h4>
+          <h4 className="text-sm font-medium">Hallazgos del odontograma (con correcciones)</h4>
           {sortedHistory.length === 0 ? (
             <p className="text-sm text-muted-foreground">Sin entradas registradas.</p>
           ) : (
