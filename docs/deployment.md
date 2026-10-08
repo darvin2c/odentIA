@@ -122,8 +122,10 @@ no R2, SMTP ni el modelo: esas integraciones requieren comprobaciones separadas.
 ## Previews automáticos por PR
 
 Cada PR del mismo repositorio tiene su propio entorno de OpenShip. El job
-`preview` de `.github/workflows/ci.yml` corre después de `check` y `docker-build`
-y ejecuta `scripts/preview-environment.mjs up`:
+`preview` de `.github/workflows/preview.yml` corre en paralelo con `check` y
+ejecuta `scripts/preview-environment.mjs up`. Es un workflow aparte de CI: si el
+preview falla (servidor, DNS, OpenShip), CI sigue reflejando solo el código. La
+protección de `main` debe exigir únicamente `check`. Pasos de `up`:
 
 1. Reutiliza el entorno `pr-<número>` o lo crea con
    `openship project environment create` a partir del proyecto productivo, en la
@@ -144,6 +146,10 @@ Al cerrar o fusionar el PR, `preview-teardown` ejecuta
 `scripts/preview-environment.mjs down`, que borra el entorno con
 `--wipe-volumes`. Los registros DNS de Cloudflare no se eliminan con el proyecto;
 apuntan al mismo servidor y se reutilizan si el número de PR reaparece.
+
+OpenShip publica además un check `build:<servicio>` por servicio desplegado y
+marca como fallidos los que no llegaron a desplegarse porque otro falló antes;
+esos checks no los crea el repositorio y no indican un fallo de código.
 
 Los PR desde forks no reciben secretos y no generan preview. Cada preview es un
 stack completo (PostgreSQL, MinIO, Mailpit, API, worker, panel, platform, unos
