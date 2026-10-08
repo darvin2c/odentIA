@@ -4,6 +4,7 @@ import { createAppDb, createOwnerDb, type Db, withOrgContext } from "@odentia/db
 import { branch } from "@odentia/db/schema/org"
 import { createChair, secretsKeyFromEnv, setProfessionalSchedule } from "@odentia/services"
 import { createHash } from "node:crypto"
+import { encodeDemoDicom } from "@odentia/clinical"
 import sharp from "sharp"
 import { sql } from "drizzle-orm"
 import { migrate } from "drizzle-orm/postgres-js/migrator"
@@ -36,6 +37,11 @@ const storageStub = {
     throw new Error("no usado")
   },
   attachmentUrl: async (key: string) => `https://signed.example.com/${key}`,
+  getAttachment: async (key: string) => {
+    const bytes = storedBytes.get(key)
+    if (!bytes) throw new Error("No existe")
+    return bytes
+  },
   deleteAttachment: async () => {},
   putPatientDocument: async ({
     orgId,
@@ -1259,4 +1265,36 @@ it("imágenes: la subida genera miniatura WebP y la URL la sirve con ?variant=th
     await app.request(`/patients/${patientId}/documents/${doc.id}/url`),
   )
   expect(original.data.url).toContain(doc.storageKey)
+})
+
+it("DICOM: se sube como archivo, la API sirve su contenido y rechaza otros formatos", async () => {
+  const patientId = await createPatient()
+  const pixels = new Uint16Array(16 * 8).fill(1000)
+  const dicom = encodeDemoDicom({ width: 16, height: 8, pixels })
+  const form = new FormData()
+  // Los navegadores suelen enviar el DICOM sin tipo: decide el contenido.
+  form.append("file", new Blob([dicom]), "periapical.dcm")
+  form.append("label", "Periapical del sensor")
+  form.append("category", "radiografia")
+  form.append("imageType", "periapical")
+  const uploaded = await app.request(`/patients/${patientId}/documents`, { method: "POST", body: form })
+  expect(uploaded.status).toBe(201)
+  const doc = (await json<{ data: { id: string; contentType: string; thumbnailKey: string | null } }>(uploaded)).data
+  expect(doc).toMatchObject({ contentType: "application/dicom", thumbnailKey: null })
+  const content = await app.request(`/patients/${patientId}/documents/${doc.id}/content`)
+  expect(content.status).toBe(200)
+  expect(content.headers.get("content-type")).toBe("application/dicom")
+  expect(new Uint8Array(await content.arrayBuffer())).toEqual(dicom)
+
+  const png = new FormData()
+  png.append("file", new Blob([new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, 0])], { type: "image/png" }), "a.png")
+  png.append("label", "Foto")
+  png.append("category", "otro")
+  const pngDoc = (await json<{ data: { id: string } }>(
+    await app.request(`/patients/${patientId}/documents`, { method: "POST", body: png }),
+  )).data
+  expect((await app.request(`/patients/${patientId}/documents/${pngDoc.id}/content`)).status).toBe(400)
+  expect(
+    (await app.request(`/patients/${patientId}/documents/${crypto.randomUUID()}/content`)).status,
+  ).toBe(404)
 })

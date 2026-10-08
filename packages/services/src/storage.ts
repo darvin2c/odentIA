@@ -62,6 +62,11 @@ export interface Storage {
   attachmentUrl(objectKey: string, ttlSeconds?: number): Promise<string>
   /** Elimina un objeto del bucket privado por clave (best-effort huérfanos). */
   deleteAttachment(objectKey: string): Promise<void>
+  /**
+   * Bytes de un objeto del bucket privado, para servirlo a través de la API
+   * (visor DICOM) sin depender del CORS del bucket. Opcional en dobles de prueba.
+   */
+  getAttachment?(objectKey: string): Promise<Uint8Array>
   putPatientDocument(input: {
     orgId: string
     patientId: string
@@ -135,6 +140,13 @@ export function createStorage(env: StorageEnv): Storage {
           expiresIn: ttlSeconds,
         },
       )
+    },
+    async getAttachment(objectKey) {
+      const out = await client.send(
+        new GetObjectCommand({ Bucket: env.attachmentsBucket, Key: objectKey }),
+      )
+      if (!out.Body) throw new Error("Objeto vacío")
+      return out.Body.transformToByteArray()
     },
     async deleteAttachment(objectKey) {
       await client.send(new DeleteObjectCommand({ Bucket: env.attachmentsBucket, Key: objectKey }))

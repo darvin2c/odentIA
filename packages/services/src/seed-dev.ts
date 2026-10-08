@@ -10,6 +10,7 @@
  * Regla permanente: toda función nueva que añada pantalla o entidad debe
  * extender este archivo con su escenario mínimo en la misma PR.
  */
+import { encodeDemoDicom } from "@odentia/clinical"
 import sharp from "sharp"
 import { randomUUID } from "node:crypto"
 import { deflateSync } from "node:zlib"
@@ -1580,6 +1581,40 @@ for (const previa of [
     source: previa.source,
     reportStatus: "informado",
     toothNumbers: [...previa.teeth],
+  })
+}
+// Periapical del sensor en DICOM (16 bits, con espaciado del detector) para
+// el visor DICOM; se genera con el codificador de demostración.
+{
+  const { data, info } = await sharp(await demoClinicalImage("rx", 2))
+    .greyscale()
+    .raw()
+    .toBuffer({ resolveWithObject: true })
+  const pixels = new Uint16Array(info.width * info.height)
+  for (let i = 0; i < pixels.length; i++) pixels[i] = Math.round(((data[i] ?? 0) / 255) * 4095)
+  const dicom = encodeDemoDicom({
+    width: info.width,
+    height: info.height,
+    pixels,
+    pixelSpacingMm: [0.04, 0.04],
+  })
+  const ref = await storage.putPatientDocument({
+    orgId: ORG_A,
+    patientId: rosaPatientId,
+    bytes: dicom,
+    contentType: "application/dicom",
+    ext: "dcm",
+  })
+  await registerPatientDocument(db, ORG_A, ANA_ID, rosaPatientId, {
+    category: "radiografia",
+    label: "[DEMO] Periapical 36 del sensor (DICOM)",
+    storageKey: ref.objectKey,
+    contentType: "application/dicom",
+    sizeBytes: ref.size,
+    imageType: "periapical",
+    capturedAt: new Date(Date.now() - 10 * 60_000),
+    source: "Sensor intraoral · sala 2",
+    toothNumbers: [36],
   })
 }
 // Una imagen subida al paciente equivocado se retira con motivo; no se borra.

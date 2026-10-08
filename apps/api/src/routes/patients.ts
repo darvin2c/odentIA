@@ -1048,7 +1048,30 @@ export function createPatientsRoute(deps: CrmDeps) {
       ),
     )
   })
-  app.get("/:id/documents/:documentId/url", async (c) => {
+  // Contenido de un archivo DICOM para el visor (misma autorización que la
+  // URL firmada); solo DICOM: el resto se ve por su URL firmada.
+  app.get("/:id/documents/:documentId/content", async (c) => {
+    const { orgId } = orgContextOf(c)
+    let doc: Awaited<ReturnType<typeof getPatientDocument>>
+    try {
+      doc = await withOrgContext(deps.db, orgId, (tx) =>
+        getPatientDocument(tx, orgId, c.req.param("id"), c.req.param("documentId")),
+      )
+    } catch (e) {
+      // Mismo mapeo de errores del dominio (404, permisos) que el resto de rutas.
+      return runService(c, 200, () => Promise.reject(e))
+    }
+    if (doc.contentType !== "application/dicom")
+      return c.json(errorBody(c, "VALIDATION", "Solo los archivos DICOM se leen por esta vía"), 400)
+    if (!deps.storage.getAttachment)
+      return c.json(errorBody(c, "UNAVAILABLE", "Lectura de archivos no disponible"), 503)
+    const bytes = await deps.storage.getAttachment(doc.storageKey)
+    return c.body(Buffer.from(bytes), 200, {
+      "content-type": "application/dicom",
+      "cache-control": "private, no-store",
+    })
+  })
+    app.get("/:id/documents/:documentId/url", async (c) => {
     const { orgId } = orgContextOf(c)
     return runService(c, 200, async () => {
       const doc = await withOrgContext(deps.db, orgId, (tx) =>

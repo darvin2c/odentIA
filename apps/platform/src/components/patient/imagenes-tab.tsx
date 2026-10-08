@@ -56,6 +56,7 @@ import {
   UPLOAD_CATEGORIES,
 } from "./document-labels"
 import { DocumentLinkSelects, type DocumentLinkValue } from "./document-link-selects"
+import { DicomViewer } from "./dicom-viewer"
 import { DocumentUploadDialog } from "./document-upload-dialog"
 import {
   AdjustedImage,
@@ -798,13 +799,7 @@ function DocumentViewer({
       ) : isPdfDoc(doc) ? (
         <embed src={url} type="application/pdf" className="h-[70vh] w-full rounded-md border" />
       ) : isDicomDoc(doc) ? (
-        <div className="flex flex-col gap-2 rounded-md border p-4 text-sm">
-          <p className="font-medium">Archivo DICOM</p>
-          <p className="text-muted-foreground">
-            Se conserva como archivo externo. Descárgalo para abrirlo en el visor del equipo
-            radiológico; aquí no hay visor volumétrico.
-          </p>
-        </div>
+        <DicomViewer patientId={patientId} documentId={doc.id} label={doc.label} />
       ) : (
         <p className="text-sm text-muted-foreground">
           Vista previa no disponible para este tipo de archivo.

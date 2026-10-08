@@ -61,6 +61,25 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
   return (await response.json()) as T
 }
 
+/** Descarga binaria autenticada (p. ej. un DICOM para el visor). */
+export async function apiFetchBytes(path: string): Promise<ArrayBuffer> {
+  const response = await fetch(`${API_URL}${path}`, {
+    credentials: "include",
+    headers: contextHeaders(),
+  })
+  if (!response.ok) {
+    let shape: ApiErrorShape = {}
+    try {
+      const body = (await response.json()) as { error?: ApiErrorShape }
+      shape = body.error ?? {}
+    } catch {
+      // respuesta no-JSON: shape vacío
+    }
+    throw new ApiError(response.status, shape)
+  }
+  return response.arrayBuffer()
+}
+
 /** POST multipart (adjuntos) con cookies de sesión y slug de tenant del host. */
 export async function apiUpload<T>(path: string, form: FormData): Promise<T> {
   const response = await fetch(`${API_URL}${path}`, {
