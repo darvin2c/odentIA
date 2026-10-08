@@ -101,7 +101,11 @@ export function FiliacionPanel({ detail }: { detail: PatientFull }) {
   const legacy = p.identityLegacy ? Object.values(p.identityLegacy).join(", ") : null
 
   return (
-    <div className="flex min-w-0 flex-col gap-4">
+    <section aria-labelledby="filiacion-titulo" className="flex min-w-0 flex-col gap-4">
+      {/* Jerarquía de la ficha: h1 paciente, h2 sección, h3 bloques. */}
+      <h2 id="filiacion-titulo" className="text-base font-semibold">
+        Filiación
+      </h2>
       <div className="flex flex-wrap items-center gap-2 text-sm">
         <Badge variant="outline">{hcLabel(p.patientNumber)}</Badge>
         {p.identityNeedsReview ? (
@@ -225,6 +229,6 @@ export function FiliacionPanel({ detail }: { detail: PatientFull }) {
           onClose={() => setEditing(null)}
         />
       ) : null}
-    </div>
+    </section>
   )
 }

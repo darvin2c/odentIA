@@ -295,7 +295,7 @@ test("paciente: ejecución de la sesión y cierre del tratamiento", async ({ own
   // Iniciar sesión crea la atención y navega a su página: el registro del
   // procedimiento y el cierre ocurren allí, no en una pestaña del paciente.
   await expect(page).toHaveURL(/\/encounters\//)
-  const agregarServicios = page.getByRole("button", { name: "Agregar Servicios realizados" })
+  const agregarServicios = page.getByRole("button", { name: "Agregar Procedimientos" })
   await expect(
     agregarServicios.or(
       page.getByRole("button", { name: "Registrar procedimiento", exact: true }),
@@ -423,8 +423,9 @@ for (const role of ["reception", "dentist", "cashier"] as const) {
     const slug = owner.org.slug
     const apiPath = patientApiPath(ids.patientId)
     // Menor de 8 años con representante legal: dentición mixta y decisión delegada.
-    await call(page, "PATCH", apiPath, slug, { birthDate: bornYearsAgo(8) })
+    // El representante se registra antes: un menor no queda sin quien decida por él.
     await grantLegalRepresentative(owner, ids)
+    await call(page, "PATCH", apiPath, slug, { birthDate: bornYearsAgo(8) })
     await fixtureDb
       .update(member)
       .set({ role })

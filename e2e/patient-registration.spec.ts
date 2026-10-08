@@ -426,6 +426,8 @@ test("enlace contextual registra a un menor sin duplicar self y luego no está d
           birthDate: "1985-03-20",
           docType: "DNI",
           docNumber: selfDoc,
+          // La configuración publicada exige teléfono también en el alta interna.
+          phone: phoneFromId(nextEventId()),
         },
         respondent: "staff",
         privacyAccepted: false,

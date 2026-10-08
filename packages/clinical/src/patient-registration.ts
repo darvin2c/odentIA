@@ -229,7 +229,8 @@ export function validateRegistrationAnswers(config: RegistrationConfig, answers:
       if (config.fields[field.key] !== "required" || field.step === "salud" || field.step === "odontologicos") continue
       if (needsRepresentative && (field.key === "phone" || field.key === "email") && (data.representative?.phone || data.representative?.email)) continue
       const value = data.demographics[field.key as keyof RegistrationDemographics]
-      if (value === undefined || value === null || value === "") errors[`demographics.${field.key}`] = "Este campo es obligatorio"
+      if (value === undefined || value === null || value === "")
+        errors[`demographics.${field.key}`] = `${field.label}: obligatorio según la configuración del registro`
     }
   }
   return errors
