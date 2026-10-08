@@ -27,6 +27,11 @@ import {
   getPatientHealth,
   getPatientSummary,
   getTimeline,
+  getTreatmentCoordination,
+  listClinicalAccess,
+  recordClinicalAccess,
+  type ClinicalAccessResource,
+  scheduleFollowUpFromCoordination,
   getTreatmentPlanDetail,
   listAnamnesisVersions,
   listClinicalNotes,
@@ -110,6 +115,7 @@ const healthAllergy = z
   .object({
     id: z.uuid().optional(),
     substance: z.string().min(1).max(200),
+    category: z.string().max(20).nullish(),
     reaction: z.string().max(2000).nullish(),
     severity: z.string().min(1).max(20),
     isActive: z.boolean().optional(),
@@ -119,6 +125,7 @@ const healthCondition = z
   .object({
     id: z.uuid().optional(),
     name: z.string().min(1).max(200),
+    cie10Code: z.string().max(10).nullish(),
     status: z.string().min(1).max(20),
     startDate: z.string().max(10).nullish(),
     endDate: z.string().max(10).nullish(),
@@ -129,6 +136,7 @@ const healthMedication = z
   .object({
     id: z.uuid().optional(),
     name: z.string().min(1).max(200),
+    genericName: z.string().max(200).nullish(),
     dose: z.string().max(200).nullish(),
     frequency: z.string().max(200).nullish(),
     startDate: z.string().max(10).nullish(),
@@ -167,6 +175,8 @@ const healthSaveInput = z
 const noteInput = z.object({
   note: z.string().min(1).max(4000),
   diagnosisCode: z.string().max(10).nullish(),
+  diagnosisType: z.string().max(20).nullish(),
+  toothNumber: z.number().int().nullish(),
   encounterId: z.uuid().optional(),
 })
 
@@ -373,6 +383,51 @@ const CLINICAL_SUBPATHS = [
 /** Subrutas de caja: exigen `finance.read`/`.write`. */
 const FINANCE_SUBPATHS = ["/account", "/payments", "/budgets"]
 
+/**
+ * Coordinación del tratamiento: quien agenda ve qué falta reservar o decidir
+ * sin leer la ficha. Exige `appointments.read`/`.write`, no `clinical.*`.
+ */
+const COORDINATION_SUBPATH = "/coordination"
+
+/** Bitácora de consultas a la historia: la lee quien audita (`audit.read`). */
+const ACCESS_LOG_SUBPATH = "/access-log"
+
+/** Lecturas clínicas que dejan traza, por prefijo de subruta. */
+const ACCESS_RESOURCE_BY_PREFIX: Array<[string, ClinicalAccessResource]> = [
+  ["/summary", "resumen"],
+  ["/health", "antecedentes"],
+  ["/anamnesis", "antecedentes"],
+  ["/odontogram", "odontograma"],
+  ["/timeline", "historia"],
+  ["/encounters", "atenciones"],
+  ["/notes", "notas"],
+  ["/plan", "plan"],
+  ["/treatments", "tratamientos"],
+  ["/follow-ups", "controles"],
+  ["/prescriptions", "recetas"],
+  ["/documents", "documentos"],
+]
+
+/** Mismo contrato que la reserva clínica del control (`patient-follow-ups.ts`). */
+const coordinationScheduleInput = z.union([
+  z.object({ appointmentId: z.uuid() }).strict(),
+  z
+    .object({
+      appointment: z
+        .object({
+          branchId: z.uuid().optional(),
+          dentistUserId: z.string().min(1),
+          chairId: z.uuid(),
+          serviceId: z.uuid().optional(),
+          startsAt: z.iso.datetime({ offset: true }),
+          endsAt: z.iso.datetime({ offset: true }).optional(),
+          durationMin: z.number().int().positive().optional(),
+        })
+        .strict(),
+    })
+    .strict(),
+])
+
 export function createPatientsRoute(deps: CrmDeps) {
   const app = new Hono()
   app.use("*", async (c, next) => {
@@ -380,11 +435,15 @@ export function createPatientsRoute(deps: CrmDeps) {
     // `c.req.path` trae el prefijo de montaje (/api/patients...): el resto
     // tras el id clasifica el subdominio (filiación, clínica o caja).
     const remainder = c.req.path.match(/\/patients\/[^/]+(\/.*)?$/)?.[1] ?? ""
-    const domain = CLINICAL_SUBPATHS.some((prefix) => remainder.startsWith(prefix))
-      ? "clinical"
-      : FINANCE_SUBPATHS.some((prefix) => remainder.startsWith(prefix))
-        ? "finance"
-        : "patients"
+    const domain = remainder.startsWith(ACCESS_LOG_SUBPATH)
+      ? "audit"
+      : remainder.startsWith(COORDINATION_SUBPATH)
+        ? "appointments"
+        : CLINICAL_SUBPATHS.some((prefix) => remainder.startsWith(prefix))
+          ? "clinical"
+          : FINANCE_SUBPATHS.some((prefix) => remainder.startsWith(prefix))
+            ? "finance"
+            : "patients"
     const write = !["GET", "HEAD", "OPTIONS"].includes(c.req.method)
     if (!canAccess(memberRole, `${domain}.${write ? "write" : "read"}`)) {
       return c.json(
@@ -397,6 +456,33 @@ export function createPatientsRoute(deps: CrmDeps) {
       )
     }
     await next()
+    // Toda lectura clínica atendida deja traza de quién consultó qué parte de
+    // la ficha. Se registra después de responder bien: una consulta rechazada o
+    // a un paciente inexistente no genera fila, y un fallo de la traza no
+    // convierte una lectura ya servida en error.
+    if (domain !== "clinical" || write || c.res.status !== 200) return
+    const patientId = c.req.path.match(/\/patients\/([0-9a-f-]{36})\//i)?.[1]
+    const resource = ACCESS_RESOURCE_BY_PREFIX.find(([prefix]) => remainder.startsWith(prefix))?.[1]
+    if (!patientId || !resource) return
+    const { orgId, userId } = orgContextOf(c)
+    try {
+      await withOrgContext(deps.db, orgId, (tx) =>
+        recordClinicalAccess(tx, orgId, userId, patientId, resource),
+      )
+    } catch (error) {
+      console.error("No se pudo registrar la consulta a la historia clínica", {
+        patientId,
+        resource,
+        error: error instanceof Error ? error.message : String(error),
+      })
+    }
+  })
+
+  app.get("/:id/access-log", async (c) => {
+    const { orgId } = orgContextOf(c)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) => listClinicalAccess(tx, orgId, c.req.param("id"))),
+    )
   })
 
   app.get("/", async (c) => {
@@ -480,12 +566,13 @@ export function createPatientsRoute(deps: CrmDeps) {
       withOrgContext(deps.db, orgId, async (tx) => {
         const full = await getPatient(tx, orgId, c.req.param("id"))
         // Sin `clinical.read` (recepción/caja): filiación y vínculos sin
-        // registro de salud ni antecedentes/alergias/condiciones/medicación.
+        // registro de salud ni antecedentes/condiciones/medicación. Las
+        // alergias activas solo se conservan con `clinical.alerts`.
         if (canAccess(memberRole, "clinical.read")) return full
         return {
           ...full,
           registration: null,
-          activeAllergies: [],
+          activeAllergies: canAccess(memberRole, "clinical.alerts") ? full.activeAllergies : [],
           activeConditions: [],
           currentMedications: [],
         }
@@ -500,6 +587,33 @@ export function createPatientsRoute(deps: CrmDeps) {
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
         updatePatient(tx, orgId, userId, c.req.param("id"), parsed.data),
+      ),
+    )
+  })
+
+  // --- Coordinación del tratamiento (vista mínima para quien agenda) ---
+  app.get("/:id/coordination", async (c) => {
+    const { orgId } = orgContextOf(c)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        getTreatmentCoordination(tx, orgId, c.req.param("id")),
+      ),
+    )
+  })
+  app.post("/:id/coordination/follow-ups/:followUpId/schedule", async (c) => {
+    const { orgId, userId } = orgContextOf(c)
+    const parsed = coordinationScheduleInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        scheduleFollowUpFromCoordination(
+          tx,
+          orgId,
+          userId,
+          c.req.param("id"),
+          c.req.param("followUpId"),
+          parsed.data,
+        ),
       ),
     )
   })

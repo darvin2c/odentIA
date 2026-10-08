@@ -15,8 +15,12 @@
  * conversaciones). `agent.write` queda reservado a administrar el agente
  * (configuración, conocimiento, simulación); `agent.read` a supervisar.
  *
- * Invariante: lo clínico (`clinical.*`) nunca se entrega a recepción/caja y
- * lo financiero (`finance.*`) nunca a recepción/clínica. `member` es el
+ * `clinical.alerts` es la única excepción acotada: quien recibe al paciente ve
+ * sus alergias activas (declaradas en el registro o validadas), nunca el resto
+ * de la ficha. No implica `clinical.read`.
+ *
+ * Invariante: lo clínico (`clinical.read`/`.write`) nunca se entrega a
+ * recepción/caja y lo financiero (`finance.*`) nunca a recepción/clínica. `member` es el
  * mínimo seguro (solo ver tareas). Falla cerrado: rol o permiso
  * desconocido siempre deniega, incluso para owner/admin.
 
@@ -40,7 +44,10 @@ export const PERMISSION_DOMAINS = [
   "agent",
 ] as const;
 export type PermissionDomain = (typeof PERMISSION_DOMAINS)[number];
-export type Permission = `${PermissionDomain}.${"read" | "write"}` | "agent.decide";
+export type Permission =
+  | `${PermissionDomain}.${"read" | "write"}`
+  | "agent.decide"
+  | "clinical.alerts";
 
 /** Etiquetas en español para la UI de miembros. */
 export const ROLE_LABELS: Record<OrgRole, string> = {
@@ -57,7 +64,7 @@ export const ROLE_DESCRIPTIONS: Record<OrgRole, string> = {
   owner: "Acceso total, incluida la gestión de propietarios.",
   admin: "Acceso total a todos los dominios.",
   reception:
-    "Filiación de pacientes, agenda, CRM, conversaciones y tareas; resuelve decisiones del agente de sus dominios. Sin clínica, caja ni administración del agente.",
+    "Filiación de pacientes, agenda, CRM, conversaciones y tareas; resuelve decisiones del agente de sus dominios. Ve las alergias del paciente, sin el resto de la clínica, caja ni administración del agente.",
   dentist: "Lectura de pacientes, clínica completa, agenda, conversaciones y tareas. Sin caja ni CRM.",
   cashier: "Lectura de pacientes, caja y tareas. Sin clínica ni agenda.",
   member: "Acceso mínimo: solo ver tareas.",
@@ -69,6 +76,7 @@ const ALL_PERMISSIONS: Permission[] = [
     `${domain}.write` as Permission,
   ]),
   "agent.decide",
+  "clinical.alerts",
 ];
 
 /**
@@ -90,6 +98,7 @@ const ROLE_PERMISSIONS: Record<Exclude<OrgRole, "owner" | "admin">, readonly Per
     "tasks.read",
     "tasks.write",
     "agent.decide",
+    "clinical.alerts",
   ],
   dentist: [
     "patients.read",
@@ -112,7 +121,7 @@ function normalizeRole(role: string): OrgRole | null {
 }
 
 function isPermission(permission: string): permission is Permission {
-  if (permission === "agent.decide") return true;
+  if (permission === "agent.decide" || permission === "clinical.alerts") return true;
   const separator = permission.lastIndexOf(".");
   if (separator < 0) return false;
   const domain = permission.slice(0, separator);

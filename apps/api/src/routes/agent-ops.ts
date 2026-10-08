@@ -112,6 +112,7 @@ const simulateInput = z.object({
           status: c.req.query("status"),
           conversationId: c.req.query("conversationId"),
           contactId: c.req.query("contactId"),
+          patientId: c.req.query("patientId"),
           limit: c.req.query("limit") ? Number(c.req.query("limit")) : undefined,
         }),
       ),

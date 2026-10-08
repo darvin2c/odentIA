@@ -2,11 +2,12 @@ import { conditionLabel, surfaceLabel } from "@odentia/clinical"
 import { Badge } from "@odentia/ui"
 import { useQuery } from "@tanstack/react-query"
 import { apiFetch } from "../../lib/api"
-import { usePermission } from "../../lib/crm"
+import { useMemberName, usePermission } from "../../lib/crm"
 import {
   type EncounterDetail,
   encounterStatusLabel,
   type PatientDocument,
+  planStatusLabel,
   statusLabel,
 } from "../../lib/patients"
 import { EncounterAddendumDrawer } from "./encounter-addendum-drawer"
@@ -27,16 +28,20 @@ function formatDateTime(iso: string | null): string {
   })
 }
 
-/** Identificador corto del odontólogo tratante (primeros 8 caracteres). */
-function shortId(id: string): string {
-  return id.length > 8 ? id.slice(0, 8) : id
-}
-
 function isImageDoc(doc: PatientDocument): boolean {
   return doc.contentType.startsWith("image/")
 }
 
-function DocumentAttachment({ patientId, doc }: { patientId: string; doc: PatientDocument }) {
+function DocumentAttachment({
+  patientId,
+  doc,
+  planTitle,
+}: {
+  patientId: string
+  doc: PatientDocument
+  /** Tratamiento del plan al que se vinculó; null si no pertenece a esta atención. */
+  planTitle: string | null
+}) {
   const canRead = usePermission("clinical.read")
   const signed = useQuery({
     queryKey: ["patient-document-url", patientId, doc.id],
@@ -66,7 +71,7 @@ function DocumentAttachment({ patientId, doc }: { patientId: string; doc: Patien
           {doc.toothNumbers.length > 0
             ? ` · ${doc.toothNumbers.map((t) => `Pieza ${t}`).join(", ")}`
             : ""}
-          {doc.planItemId ? ` · Vinculado al presupuesto (${doc.planItemId.slice(0, 8)})` : ""}
+          {doc.planItemId ? ` · ${planTitle ?? "Vinculado a un tratamiento del plan"}` : ""}
           {" · "}
           <time dateTime={doc.createdAt}>{formatDateTime(doc.createdAt)}</time>
         </span>
@@ -127,7 +132,11 @@ export function EncounterDetailView({
   showAddendum?: boolean
 }) {
   const canWrite = usePermission("clinical.write")
+  const memberName = useMemberName()
   const { encounter, teeth, procedures, notes, odontogramEntries, documents, addenda } = detail
+  const planTitle = (planItemId: string | null | undefined): string | null =>
+    [...detail.plannedItems, ...detail.indicatedItems].find((item) => item.id === planItemId)
+      ?.title ?? null
   const canAddendum = showAddendum && encounter.status === "finalizada" && canWrite
 
   return (
@@ -169,7 +178,7 @@ export function EncounterDetailView({
           </div>
           <div>
             <dt className="text-xs font-medium text-muted-foreground">Odontólogo</dt>
-            <dd className="text-sm">{shortId(encounter.dentistUserId)}</dd>
+            <dd className="text-sm">{memberName(encounter.dentistUserId)}</dd>
           </div>
           <div>
             <dt className="text-xs font-medium text-muted-foreground">Estado</dt>
@@ -198,7 +207,7 @@ export function EncounterDetailView({
                 <p className="text-xs text-muted-foreground">
                   {proc.toothNumber != null ? `Pieza ${proc.toothNumber} · ` : ""}
                   {proc.planItemId
-                    ? `Vinculado al presupuesto (${shortId(proc.planItemId)}) · `
+                    ? `Tratamiento del plan: ${planTitle(proc.planItemId) ?? "vinculado"} · `
                     : ""}
                   <time dateTime={proc.createdAt}>{formatDateTime(proc.createdAt)}</time>
                 </p>
@@ -225,7 +234,7 @@ export function EncounterDetailView({
                 </p>
                 <p className="text-xs text-muted-foreground">
                   {item.toothNumber != null ? `Pieza ${item.toothNumber} · ` : ""}
-                  {item.status}
+                  {planStatusLabel(item.status)}
                 </p>
               </li>
             ))}
@@ -283,7 +292,12 @@ export function EncounterDetailView({
         ) : (
           <ul className="flex flex-col gap-3">
             {documents.map((doc) => (
-              <DocumentAttachment key={doc.id} patientId={patientId} doc={doc} />
+              <DocumentAttachment
+                key={doc.id}
+                patientId={patientId}
+                doc={doc}
+                planTitle={planTitle(doc.planItemId)}
+              />
             ))}
           </ul>
         )}

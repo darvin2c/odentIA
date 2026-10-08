@@ -3,45 +3,42 @@ import { Button, Tabs, TabsContent, TabsList, TabsTrigger } from "@odentia/ui"
 import { ErrorState, LoadingState, PageShell } from "@odentia/ui-patterns"
 import { useQuery } from "@tanstack/react-query"
 import { createFileRoute, Outlet, useChildMatches, useNavigate } from "@tanstack/react-router"
+import type { ReactNode } from "react"
+import { AccesosPanel } from "../../components/patient/accesos-panel"
+import { ActividadPanel } from "../../components/patient/actividad-panel"
 import { AntecedentesTab } from "../../components/patient/antecedentes-tab"
+import { CitasPanel } from "../../components/patient/citas-panel"
 import { ControlesPanel, RecetasPanel } from "../../components/patient/clinical-panels"
+import { CoordinacionPanel } from "../../components/patient/coordinacion-panel"
 import { ConsentimientosTab } from "../../components/patient/consentimientos-tab"
 import { CuentaTab } from "../../components/patient/cuenta-tab"
+import { DocumentosPanel } from "../../components/patient/documentos-panel"
+import { FiliacionPanel } from "../../components/patient/filiacion-panel"
 import { FormulariosTab } from "../../components/patient/formularios-tab"
 import { HistoriaTab } from "../../components/patient/historia-tab"
 import { ImagenesTab } from "../../components/patient/imagenes-tab"
 import { OdontogramaTab } from "../../components/patient/odontograma-tab"
 import { OrdenesTab } from "../../components/patient/ordenes-tab"
+import { PatientContactSection } from "../../components/patient/patient-contact-section"
 import { PatientHeader } from "../../components/patient/patient-header"
 import { PlanTab } from "../../components/patient/plan-tab"
 import { RecorridoClinicoTab } from "../../components/patient/recorrido-tab"
 import { ResponsablesTab } from "../../components/patient/responsables-tab"
 import { ResumenTab } from "../../components/patient/resumen-tab"
+import { SeguimientoPanel } from "../../components/patient/seguimiento-panel"
 import { PatientPortalAccessSection } from "../../components/portal/portal-access-section"
 import { apiFetch } from "../../lib/api"
-import { usePermission } from "../../lib/crm"
+import { useCan } from "../../lib/crm"
+import {
+  areaNav,
+  isPatientSectionId,
+  type PatientSectionId,
+  resolveSection,
+  sectionOf,
+  visibleAreas,
+} from "../../lib/patient-areas"
 import type { PatientFull, PatientSummary, PlanItem } from "../../lib/patients"
 import { QueryErrorState } from "../../lib/query-error"
-
-type TabPermission = "clinical.read" | "finance.read" | "patients.read"
-
-const TABS = [
-  { value: "resumen", label: "Resumen", permission: "clinical.read" },
-  { value: "recorrido", label: "Recorrido clínico", permission: "clinical.read" },
-  { value: "antecedentes", label: "Antecedentes", permission: "clinical.read" },
-  { value: "odontograma", label: "Odontograma", permission: "clinical.read" },
-  { value: "historia", label: "Historia", permission: "clinical.read" },
-  { value: "plan", label: "Planes de tratamiento", permission: "clinical.read" },
-  { value: "controles", label: "Controles", permission: "clinical.read" },
-  { value: "recetas", label: "Recetas", permission: "clinical.read" },
-  { value: "formularios", label: "Formularios", permission: "clinical.read" },
-  { value: "consentimientos", label: "Consentimientos", permission: "clinical.read" },
-  { value: "ordenes", label: "Órdenes", permission: "clinical.read" },
-  { value: "cuenta", label: "Cuenta", permission: "finance.read" },
-  { value: "responsables", label: "Responsables", permission: "patients.read" },
-  { value: "imagenes", label: "Imágenes y documentos", permission: "clinical.read" },
-] as const satisfies ReadonlyArray<{ value: string; label: string; permission: TabPermission }>
-type PatientTab = (typeof TABS)[number]["value"]
 
 const searchId = (value: unknown): string | undefined =>
   typeof value === "string" &&
@@ -60,7 +57,8 @@ const FILTER_KEYS = [
   "etiqueta",
 ] as const
 type PatientSearch = {
-  tab?: PatientTab
+  /** Sección abierta. El área se deriva de ella (ver `lib/patient-areas`). */
+  tab?: PatientSectionId
   tooth?: number
   planId?: string
   budgetId?: string
@@ -69,7 +67,7 @@ type PatientSearch = {
 } & Partial<Record<(typeof FILTER_KEYS)[number], string>>
 export const Route = createFileRoute("/_org/patients/$patientId")({
   validateSearch: (search: Record<string, unknown>): PatientSearch => {
-    const tab = TABS.find((item) => item.value === search.tab)?.value
+    const tab = isPatientSectionId(search.tab) ? search.tab : undefined
     const tooth = Number(search.tooth)
     const filters = Object.fromEntries(
       FILTER_KEYS.flatMap((key) =>
@@ -96,23 +94,23 @@ function PatientRoute() {
   return childRoutes.length > 0 ? <Outlet /> : <PatientDetailPage />
 }
 
+/** Áreas: pocas y cortas; pueden envolver. La altura fija de la primitiva se libera para no solapar. */
+const TAB_LIST_CLASS = "group-data-horizontal/tabs:h-auto max-w-full flex-wrap justify-start"
+/** Secciones: una sola fila con scroll horizontal propio; en móvil no empujan ni tapan el contenido. */
+const SECTION_SCROLL_CLASS = "max-w-full overflow-x-auto pb-1"
+const SECTION_LIST_CLASS = "w-max flex-nowrap justify-start"
+
 function PatientDetailPage() {
   const { patientId } = Route.useParams()
-  const { tab = "resumen", tooth, planId, budgetId, documentId, itemId } = Route.useSearch()
+  const { tab, tooth, planId, budgetId, documentId, itemId } = Route.useSearch()
   const navigate = useNavigate({ from: Route.fullPath })
-  const canClinical = usePermission("clinical.read")
-  const canFinance = usePermission("finance.read")
-  const canPatients = usePermission("patients.read")
-  const canTab = (permission: TabPermission) =>
-    permission === "clinical.read" ? canClinical : permission === "finance.read" ? canFinance : canPatients
-  const visibleTabs = TABS.filter((item) => canTab(item.permission))
-  const activeTab = visibleTabs.some((item) => item.value === tab)
-    ? tab
-    : (visibleTabs[0]?.value ?? "responsables")
+  const can = useCan()
+  const canClinical = can("clinical.read")
+  const section = resolveSection(tab, can)
   const detail = useQuery({
     queryKey: ["patient", patientId],
     queryFn: () => apiFetch<{ data: PatientFull }>(`/api/patients/${patientId}`),
-    enabled: canPatients || canClinical || canFinance,
+    enabled: section !== null,
     retry: false,
   })
   const summary = useQuery({
@@ -127,15 +125,9 @@ function PatientDetailPage() {
     enabled: canClinical,
     retry: false,
   })
-  const changeTab = (next: PatientTab, nextTooth?: number) => {
-    void navigate({ search: { tab: next, ...(nextTooth ? { tooth: nextTooth } : {}) } })
-  }
-  const openItem = (nextItemId: string) => {
-    void navigate({ search: { tab: "recorrido", itemId: nextItemId } })
-  }
   const openTab = (
-    next: PatientTab,
-    tooth?: number,
+    next: PatientSectionId,
+    nextTooth?: number,
     nextItemId?: string,
     nextPlanId?: string,
     nextBudgetId?: string,
@@ -143,56 +135,109 @@ function PatientDetailPage() {
     void navigate({
       search: {
         tab: next,
-        ...(tooth ? { tooth } : {}),
+        ...(nextTooth ? { tooth: nextTooth } : {}),
         ...(nextItemId ? { itemId: nextItemId } : {}),
         ...(nextPlanId ? { planId: nextPlanId } : {}),
         ...(nextBudgetId ? { budgetId: nextBudgetId } : {}),
       },
     })
   }
-  if (!canPatients && !canClinical && !canFinance)
-    return <PageShell><ErrorState title="Sin acceso" message="No tienes permiso para consultar esta ficha. Solicita acceso a la administración." /></PageShell>
+  const openItem = (nextItemId: string) => openTab("recorrido", undefined, nextItemId)
+
+  if (section === null)
+    return (
+      <PageShell>
+        <ErrorState
+          title="Sin acceso"
+          message="No tienes permiso para consultar esta ficha. Solicita acceso a la administración."
+        />
+      </PageShell>
+    )
   if (detail.isPending)
-    return <PageShell><LoadingState message="Cargando paciente…" /></PageShell>
+    return (
+      <PageShell>
+        <LoadingState message="Cargando paciente…" />
+      </PageShell>
+    )
   if (detail.isError)
-    return <PageShell><QueryErrorState error={detail.error} onRetry={() => { void detail.refetch() }} notFound="El paciente solicitado no existe o ya no está disponible. Vuelve a la lista de pacientes." /></PageShell>
-  return (
-    <PageShell className="flex min-w-0 flex-col gap-6">
-      <PatientHeader
-        detail={detail.data.data}
-        summary={canClinical && summary.isSuccess ? summary.data.data : undefined}
-        onAntecedentes={() => changeTab("antecedentes")}
-      />
-      <PatientPortalAccessSection patientId={patientId} />
-      {canClinical && summary.isPending ? <LoadingState message="Cargando resumen clínico…" /> : null}
-      {canClinical && summary.isError ? (
-        <QueryErrorState error={summary.error} onRetry={() => { void summary.refetch() }} />
-      ) : null}
-      <Tabs
-        className="min-w-0 w-full"
-        value={activeTab}
-        onValueChange={(value) => {
-          if (visibleTabs.some((item) => item.value === value)) changeTab(value as PatientTab)
-        }}
-      >
-        <div className="max-w-full overflow-x-auto border-b pb-1">
-          <TabsList className="h-auto flex-wrap justify-start" variant="line" aria-label="Ficha del paciente">
-            {visibleTabs.map((item) => (
-              <TabsTrigger key={item.value} value={item.value}>
-                {item.label}
-              </TabsTrigger>
-            ))}
-          </TabsList>
-        </div>
-        <TabsContent value="resumen" className="pt-4">
-          {summary.isSuccess ? <ResumenTab
+    return (
+      <PageShell>
+        <QueryErrorState
+          error={detail.error}
+          onRetry={() => {
+            void detail.refetch()
+          }}
+          notFound="El paciente solicitado no existe o ya no está disponible. Vuelve a la lista de pacientes."
+        />
+      </PageShell>
+    )
+
+  const patient = detail.data.data
+  const current = sectionOf(section)
+  const areas = visibleAreas(can)
+  const entries = areaNav(current.area, can)
+  const entry = entries.find((item) => item.value === (current.group ?? current.id))
+  const openEncounterId = summary.data?.data.openEncounterId ?? undefined
+
+  /** Paneles que listan por tratamiento: esperan el plan y el resumen clínico. */
+  const withPlan = (render: (items: PlanItem[]) => ReactNode): ReactNode => {
+    if (planItems.isPending || summary.isPending)
+      return <LoadingState message="Cargando tratamientos…" />
+    if (planItems.isError)
+      return (
+        <QueryErrorState
+          error={planItems.error}
+          onRetry={() => {
+            void planItems.refetch()
+          }}
+        />
+      )
+    if (summary.isError)
+      return (
+        <QueryErrorState
+          error={summary.error}
+          onRetry={() => {
+            void summary.refetch()
+          }}
+        />
+      )
+    return render(planItems.data.data)
+  }
+  const itemFilterNotice = (label: string, target: PatientSectionId) =>
+    itemId ? (
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-md border p-3 text-sm">
+        <span className="text-muted-foreground">
+          Mostrando solo {label} del tratamiento abierto.
+        </span>
+        <Button type="button" size="sm" variant="outline" onClick={() => openTab(target)}>
+          Ver todo
+        </Button>
+      </div>
+    ) : null
+
+  const content = (): ReactNode => {
+    switch (section) {
+      case "resumen":
+        return (
+          <ResumenTab
             patientId={patientId}
-            detail={detail.data.data}
+            detail={patient}
             summary={summary.data?.data}
             onTabChange={openTab}
-          /> : null}
-        </TabsContent>
-        <TabsContent value="recorrido" className="pt-4">
+          />
+        )
+      case "odontograma":
+        return (
+          <OdontogramaTab
+            patientId={patientId}
+            initialTooth={tooth}
+            birthDate={patient.patient.birthDate}
+            onOpenItem={openItem}
+            onOpenPlans={() => openTab("plan")}
+          />
+        )
+      case "recorrido":
+        return (
           <RecorridoClinicoTab
             patientId={patientId}
             initialItemId={itemId}
@@ -207,91 +252,179 @@ function PatientDetailPage() {
               )
             }
           />
-        </TabsContent>
-        <TabsContent value="antecedentes" className="pt-4">
-          <AntecedentesTab patientId={patientId} />
-        </TabsContent>
-        <TabsContent value="odontograma" className="pt-4">
-          <OdontogramaTab patientId={patientId} initialTooth={tooth} />
-        </TabsContent>
-        <TabsContent value="historia" className="pt-4">
+        )
+      case "plan":
+        return <PlanTab patientId={patientId} initialPlanId={planId} initialBudgetId={budgetId} />
+      case "controles":
+        return (
+          <>
+            {itemFilterNotice("los controles", "controles")}
+            {withPlan((items) => (
+              <ControlesPanel
+                patientId={patientId}
+                itemId={itemId}
+                items={items}
+                encounterId={openEncounterId}
+              />
+            ))}
+          </>
+        )
+      case "historia":
+        return (
           <HistoriaTab
             patientId={patientId}
             initialTooth={tooth}
-            onOdontogramSelect={(next) => changeTab("odontograma", next)}
+            onOdontogramSelect={(next) => openTab("odontograma", next)}
           />
-        </TabsContent>
-        <TabsContent value="plan" className="pt-4">
-          <PlanTab patientId={patientId} initialPlanId={planId} initialBudgetId={budgetId} />
-        </TabsContent>
-        <TabsContent value="controles" className="pt-4">
-          {itemId ? (
-            <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-md border p-3 text-sm">
-              <span className="text-muted-foreground">
-                Mostrando solo los controles del tratamiento abierto en el recorrido.
-              </span>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={() => openTab("controles")}
-              >
-                Ver todos los controles
-              </Button>
-            </div>
-          ) : null}
-          {planItems.isPending ? <LoadingState message="Cargando tratamientos…" /> : planItems.isError ? <QueryErrorState error={planItems.error} onRetry={() => { void planItems.refetch() }} /> : summary.isSuccess ? <ControlesPanel
+        )
+      case "antecedentes":
+        return <AntecedentesTab patientId={patientId} />
+      case "documentos":
+        return (
+          <DocumentosPanel
             patientId={patientId}
-            itemId={itemId}
-            items={planItems.data?.data ?? []}
-            encounterId={summary.data?.data.openEncounterId ?? undefined}
-          /> : null}
-        </TabsContent>
-        <TabsContent value="recetas" className="pt-4">
-          {itemId ? (
-            <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-md border p-3 text-sm">
-              <span className="text-muted-foreground">
-                Mostrando solo las recetas del tratamiento abierto en el recorrido.
-              </span>
-              <Button type="button" size="sm" variant="outline" onClick={() => openTab("recetas")}>
-                Ver todas las recetas
-              </Button>
-            </div>
-          ) : null}
-          {planItems.isPending ? <LoadingState message="Cargando tratamientos…" /> : planItems.isError ? <QueryErrorState error={planItems.error} onRetry={() => { void planItems.refetch() }} /> : summary.isSuccess ? <RecetasPanel
-            patientId={patientId}
-            itemId={itemId}
-            items={planItems.data?.data ?? []}
-            encounterId={summary.data?.data.openEncounterId ?? undefined}
-          /> : null}
-        </TabsContent>
-        <TabsContent value="formularios" className="pt-4">
-          <FormulariosTab
-            patientId={patientId}
-            encounterId={summary.data?.data.openEncounterId ?? undefined}
+            onOpen={(target, nextDocumentId) =>
+              void navigate({
+                search: { tab: target, ...(nextDocumentId ? { documentId: nextDocumentId } : {}) },
+              })
+            }
           />
-        </TabsContent>
-        <TabsContent value="consentimientos" className="pt-4">
+        )
+      case "imagenes":
+        return (
+          <ImagenesTab patientId={patientId} initialTooth={tooth} initialDocumentId={documentId} />
+        )
+      case "recetas":
+        return (
+          <>
+            {itemFilterNotice("las recetas", "recetas")}
+            {withPlan((items) => (
+              <RecetasPanel
+                patientId={patientId}
+                itemId={itemId}
+                items={items}
+                encounterId={openEncounterId}
+              />
+            ))}
+          </>
+        )
+      case "ordenes":
+        return <OrdenesTab patientId={patientId} encounterId={openEncounterId} />
+      case "formularios":
+        return <FormulariosTab patientId={patientId} encounterId={openEncounterId} />
+      case "consentimientos":
+        return (
           <ConsentimientosTab
             patientId={patientId}
-            encounterId={summary.data?.data.openEncounterId ?? undefined}
+            encounterId={openEncounterId}
             planItemId={itemId}
           />
+        )
+      case "actividad":
+        return <ActividadPanel patientId={patientId} detail={patient} onSection={openTab} />
+      case "seguimiento":
+        return <SeguimientoPanel detail={patient} />
+      case "citas":
+        return <CitasPanel patientId={patientId} />
+      case "coordinacion":
+        return <CoordinacionPanel patientId={patientId} />
+      case "contactos":
+        return <PatientContactSection detail={patient} />
+      case "cuenta":
+        return <CuentaTab patientId={patientId} />
+      case "filiacion":
+        return <FiliacionPanel detail={patient} />
+      case "responsables":
+        return <ResponsablesTab patientId={patientId} />
+      case "portal":
+        return <PatientPortalAccessSection patientId={patientId} />
+      case "accesos":
+        return <AccesosPanel patientId={patientId} />
+    }
+  }
+
+  const sectionBody =
+    entry && entry.members.length > 1 ? (
+      <Tabs
+        className="min-w-0 w-full"
+        value={section}
+        onValueChange={(value) => {
+          if (isPatientSectionId(value)) openTab(value)
+        }}
+      >
+        <div className={SECTION_SCROLL_CLASS}>
+          <TabsList
+            className={SECTION_LIST_CLASS}
+            variant="line"
+            aria-label={`Tipo de ${entry.label}`}
+          >
+            {entry.members.map((member) => (
+              <TabsTrigger key={member.id} value={member.id}>
+                {member.label}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </div>
+        <TabsContent value={section} className="pt-4">
+          {content()}
         </TabsContent>
-        <TabsContent value="ordenes" className="pt-4">
-          <OrdenesTab
-            patientId={patientId}
-            encounterId={summary.data?.data.openEncounterId ?? undefined}
-          />
-        </TabsContent>
-        <TabsContent value="cuenta" className="pt-4">
-          <CuentaTab patientId={patientId} />
-        </TabsContent>
-        <TabsContent value="responsables" className="pt-4">
-          <ResponsablesTab patientId={patientId} />
-        </TabsContent>
-        <TabsContent value="imagenes" className="pt-4">
-          <ImagenesTab patientId={patientId} initialTooth={tooth} initialDocumentId={documentId} />
+      </Tabs>
+    ) : (
+      content()
+    )
+
+  return (
+    <PageShell className="flex min-w-0 flex-col gap-6">
+      <PatientHeader
+        detail={patient}
+        summary={canClinical && summary.isSuccess ? summary.data.data : undefined}
+        onAntecedentes={canClinical ? () => openTab("antecedentes") : undefined}
+        onSection={openTab}
+      />
+      <Tabs
+        className="min-w-0 w-full"
+        value={current.area}
+        onValueChange={(value) => {
+          const target = areas.find((area) => area.id === value)?.target
+          if (target) openTab(target)
+        }}
+      >
+        <div className="max-w-full overflow-x-auto border-b pb-1">
+          <TabsList className={TAB_LIST_CLASS} variant="line" aria-label="Áreas de la ficha">
+            {areas.map((area) => (
+              <TabsTrigger key={area.id} value={area.id}>
+                {area.label}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </div>
+        <TabsContent value={current.area} className="pt-4">
+          {entries.length > 1 && entry ? (
+            <Tabs
+              className="min-w-0 w-full gap-4"
+              value={entry.value}
+              onValueChange={(value) => {
+                const target = entries.find((item) => item.value === value)?.target
+                if (target) openTab(target)
+              }}
+            >
+              <div className={SECTION_SCROLL_CLASS}>
+                <TabsList
+                  className={SECTION_LIST_CLASS}
+                  aria-label={`Secciones de ${areas.find((area) => area.id === current.area)?.label ?? "la ficha"}`}
+                >
+                  {entries.map((item) => (
+                    <TabsTrigger key={item.value} value={item.value}>
+                      {item.label}
+                    </TabsTrigger>
+                  ))}
+                </TabsList>
+              </div>
+              <TabsContent value={entry.value}>{sectionBody}</TabsContent>
+            </Tabs>
+          ) : (
+            sectionBody
+          )}
         </TabsContent>
       </Tabs>
     </PageShell>

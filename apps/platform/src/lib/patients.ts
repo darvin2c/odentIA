@@ -37,6 +37,7 @@ export interface Patient {
 export interface Allergy {
   id: string
   substance: string
+  category?: string | null
   reaction?: string | null
   severity: string
   isActive: boolean
@@ -46,6 +47,7 @@ export interface Allergy {
 export interface Condition {
   id: string
   name: string
+  cie10Code?: string | null
   status: string
   startDate?: string | null
   endDate?: string | null
@@ -57,6 +59,7 @@ export interface Condition {
 export interface Medication {
   id: string
   name: string
+  genericName?: string | null
   dose?: string | null
   frequency?: string | null
   startDate?: string | null
@@ -82,6 +85,7 @@ export interface HealthReviewStatus {
 export interface HealthAllergyInput {
   id?: string
   substance: string
+  category?: string | null
   reaction?: string | null
   severity: string
   isActive?: boolean
@@ -90,6 +94,7 @@ export interface HealthAllergyInput {
 export interface HealthConditionInput {
   id?: string
   name: string
+  cie10Code?: string | null
   status: string
   startDate?: string | null
   endDate?: string | null
@@ -99,6 +104,7 @@ export interface HealthConditionInput {
 export interface HealthMedicationInput {
   id?: string
   name: string
+  genericName?: string | null
   dose?: string | null
   frequency?: string | null
   startDate?: string | null
@@ -135,6 +141,23 @@ export interface PatientHealth {
 }
 
 export const ALLERGY_SEVERITIES = ["leve", "moderada", "severa", "desconocida"] as const
+
+/** Tipo de alérgeno; mismo catálogo que valida el servidor. */
+export const ALLERGY_CATEGORY_LABELS: Record<string, string> = {
+  medicamento: "Medicamento",
+  anestesico: "Anestésico",
+  material: "Material (látex, metales, resinas)",
+  alimento: "Alimento",
+  ambiental: "Ambiental",
+  otro: "Otro",
+}
+
+/** Certeza de un diagnóstico codificado. */
+export const DIAGNOSIS_TYPE_LABELS: Record<string, string> = {
+  presuntivo: "Presuntivo",
+  definitivo: "Definitivo",
+  repetido: "Repetido",
+}
 
 export const ALLERGY_SEVERITY_LABELS: Record<string, string> = {
   leve: "Leve",
@@ -191,6 +214,8 @@ export interface ClinicalNote {
   id: string
   note: string
   diagnosisCode?: string | null
+  diagnosisType?: string | null
+  toothNumber?: number | null
   authorUserId?: string
   encounterId?: string | null
   kind?: string

@@ -33,6 +33,7 @@ export function ResponsablesTab({ patientId }: { patientId: string }): React.JSX
   const uid = useId()
   const canWrite = usePermission("patients.write")
   const canRead = usePermission("patients.read")
+  const canDocuments = usePermission("clinical.read")
   const queryClient = useQueryClient()
   const list = useQuery({
     queryKey: ["responsibilities", patientId],
@@ -47,7 +48,7 @@ export function ResponsablesTab({ patientId }: { patientId: string }): React.JSX
   const documents = useQuery({
     queryKey: ["patient-documents", patientId],
     queryFn: () => apiFetch<{ data: PatientDocument[] }>(`/api/patients/${patientId}/documents`),
-    enabled: canRead,
+    enabled: canDocuments,
   })
 
   const [grantOpen, setGrantOpen] = useState(false)

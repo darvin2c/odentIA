@@ -399,7 +399,7 @@ export function ToothDrawer({
   }
 
   const planQuery = useQuery({
-    queryKey: ["plan", patientId],
+    queryKey: ["plan-items", patientId],
     queryFn: () => apiFetch<{ data: PlanItem[] }>(`/api/patients/${patientId}/plan`),
     enabled: canRead,
   })
@@ -598,7 +598,7 @@ export function ToothDrawer({
       setTreatPlanId("")
       setSavedMessage("Tratamiento agregado al plan.")
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["plan", patientId] }),
+        queryClient.invalidateQueries({ queryKey: ["plan-items", patientId] }),
         queryClient.invalidateQueries({ queryKey: ["treatment-plans", patientId] }),
         queryClient.invalidateQueries({ queryKey: ["budgets", patientId] }),
         queryClient.invalidateQueries({ queryKey: ["budget", patientId] }),
@@ -807,6 +807,34 @@ export function ToothDrawer({
       ) : null}
     </div>
   )
+  const toothContexts = (
+    <div className="flex flex-col gap-3 pt-2">
+      {teeth.map((toothNumber) => (
+        <ToothContext
+          key={toothNumber}
+          patientId={patientId}
+          toothNumber={toothNumber}
+          entries={entriesOf(toothNumber)}
+          history={historyOf(toothNumber)}
+          planQuery={planQuery}
+          docsQuery={docsQuery}
+          canMutate={canMutate && !disabled && !busy}
+          voidPending={voidPending}
+          defaultOpen
+          onVoid={(id, label) => {
+            setVoiding({ id, label })
+            setVoidReason("")
+            setVoidError(null)
+          }}
+        />
+      ))}
+    </div>
+  )
+  // Al elegir una sola pieza, primero su estado (hallazgos, plan, imágenes,
+  // historial) y después el registro. Mientras se edita, el contexto baja y se
+  // pliega para no competir con el formulario.
+  const contextFirst =
+    !multi && !draftDirty && (!canMutate || (mode === "diagnosis" && choosingFinding))
   const body = (
     <div className="flex flex-col gap-5">
       {savedMessage && (
@@ -814,6 +842,7 @@ export function ToothDrawer({
           {savedMessage}
         </p>
       )}
+      {contextFirst ? toothContexts : null}
 
       {!canMutate ? (
         <p className="text-sm text-muted-foreground">
@@ -1296,32 +1325,14 @@ export function ToothDrawer({
           </div>
         </div>
       )}
-      <details>
-        <summary className="min-h-11 cursor-pointer py-3 text-sm font-medium">
-          Historial y contexto de las piezas
-        </summary>
-        <div className="flex flex-col gap-3 pt-2">
-          {teeth.map((toothNumber) => (
-            <ToothContext
-              key={toothNumber}
-              patientId={patientId}
-              toothNumber={toothNumber}
-              entries={entriesOf(toothNumber)}
-              history={historyOf(toothNumber)}
-              planQuery={planQuery}
-              docsQuery={docsQuery}
-              canMutate={canMutate && !disabled && !busy}
-              voidPending={voidPending}
-              defaultOpen
-              onVoid={(id, label) => {
-                setVoiding({ id, label })
-                setVoidReason("")
-                setVoidError(null)
-              }}
-            />
-          ))}
-        </div>
-      </details>
+      {contextFirst ? null : (
+        <details>
+          <summary className="min-h-11 cursor-pointer py-3 text-sm font-medium">
+            Historial y contexto de las piezas
+          </summary>
+          {toothContexts}
+        </details>
+      )}
     </div>
   )
   return (

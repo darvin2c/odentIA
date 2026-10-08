@@ -171,6 +171,36 @@ export function scheduleFollowUpApi(
   })
 }
 
+/** Lo mínimo de un control para reservar su cita (vía clínica o coordinación). */
+export type SchedulableControl = Pick<
+  FollowUp,
+  "id" | "patientId" | "title" | "dueAt" | "status" | "appointment" | "legacyScheduledAt"
+>
+
+/** Vista de coordinación: títulos, estados y fechas; sin detalle clínico ni importes. */
+export interface TreatmentCoordination {
+  budgetsAwaitingDecision: Array<{ id: string; title: string; presentedAt: string | null }>
+  followUps: SchedulableControl[]
+  treatments: Array<{ id: string; title: string; status: string; decision: string }>
+}
+
+export function fetchTreatmentCoordination(
+  patientId: string,
+): Promise<{ data: TreatmentCoordination }> {
+  return apiFetch<{ data: TreatmentCoordination }>(`${base(patientId)}/coordination`)
+}
+
+export function scheduleFollowUpFromCoordinationApi(
+  patientId: string,
+  followUpId: string,
+  body: ScheduleFollowUpBody,
+): Promise<{ data: SchedulableControl }> {
+  return apiFetch<{ data: SchedulableControl }>(
+    `${base(patientId)}/coordination/follow-ups/${followUpId}/schedule`,
+    { method: "POST", body: JSON.stringify(body) },
+  )
+}
+
 export function completeFollowUpApi(
   patientId: string,
   followUpId: string,

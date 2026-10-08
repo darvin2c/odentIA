@@ -114,6 +114,33 @@ export async function buildClinicalBase(owner: OwnerFixture): Promise<ClinicalId
   }
 }
 
+/**
+ * Agenda mínima para reservar: un sillón y horario diario del propio usuario.
+ * Sin horario explícito no se puede programar un control.
+ */
+export async function enableAgenda(owner: OwnerFixture): Promise<{ chairId: string }> {
+  const { page } = owner
+  const slug = owner.org.slug
+  const chair = await call<{ id: string }>(
+    page,
+    "POST",
+    "/api/agenda/chairs",
+    slug,
+    { branchId: owner.branchId, name: "Sillón control" },
+    201,
+  )
+  await call(page, "PUT", "/api/agenda/schedules", slug, {
+    branchId: owner.branchId,
+    dentistUserId: owner.user.id,
+    rules: Array.from({ length: 7 }, (_, weekday) => ({
+      weekday,
+      startMin: 8 * 60,
+      endMin: 20 * 60,
+    })),
+  })
+  return { chairId: chair.id }
+}
+
 /** Presupuesto en borrador; la presentación y la decisión las hace cada caso. */
 export async function createDraftBudget(
   owner: OwnerFixture,
@@ -231,7 +258,9 @@ export async function setupAggregation(
   await call(page, "POST", `${apiPath}/prescriptions/${prescription.id}/cancel`, slug, {
     reason: "Alergia registrada",
   })
-  const tomorrow = new Date(now.getTime() + 86_400_000).toISOString()
+  // Mañana a las 10:00 de Lima: dentro del horario del profesional.
+  const tomorrow = `${limaDate(new Date(now.getTime() + 86_400_000))}T15:00:00.000Z`
+  const { chairId } = await enableAgenda(owner)
   const followUp = await call<{ id: string }>(page, "POST", `${apiPath}/follow-ups`, slug, {
     kind: "tratamiento",
     title: "Control post-endodoncia",
@@ -241,8 +270,15 @@ export async function setupAggregation(
     encounterProcedureId: null,
     originEncounterId: ids.encounterId,
   }, 201)
+  // Programar un control reserva una cita real del mismo paciente.
   await call(page, "POST", `${apiPath}/follow-ups/${followUp.id}/schedule`, slug, {
-    scheduledAt: tomorrow,
+    appointment: {
+      branchId: owner.branchId,
+      dentistUserId: owner.user.id,
+      chairId,
+      startsAt: tomorrow,
+      durationMin: 30,
+    },
   })
   await call(page, "POST", `${apiPath}/follow-ups/${followUp.id}/complete`, slug, {
     encounterId: ids.encounterId,

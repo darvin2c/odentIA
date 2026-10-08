@@ -59,6 +59,17 @@ async function requireDraftLink(tx: Db, orgId: string, patientId: string, encoun
 
 const ALLERGY_SEVERITIES = ["leve", "moderada", "severa", "desconocida"] as const
 const CONDITION_STATUSES = ["activa", "resuelta", "inactiva"] as const
+/** Tipo de alérgeno; los anestésicos y materiales importan especialmente en odontología. */
+export const ALLERGY_CATEGORIES = [
+  "medicamento",
+  "anestesico",
+  "material",
+  "alimento",
+  "ambiental",
+  "otro",
+] as const
+/** Certeza de un diagnóstico codificado (registro HIS: P, D, R). */
+export const DIAGNOSIS_TYPES = ["presuntivo", "definitivo", "repetido"] as const
 const HEALTH_REVIEW_STATES = ["unknown", "none", "recorded"] as const
 const DOCUMENT_CATEGORIES = [
   "consentimiento",
@@ -120,6 +131,8 @@ export type HealthReviewState = (typeof HEALTH_REVIEW_STATES)[number]
 export interface HealthAllergyInput {
   id?: string
   substance: string
+  /** Tipo de alérgeno (catálogo); opcional. */
+  category?: string | null
   reaction?: string | null
   /** Obligatoria y explícita: nunca se inventa una gravedad para guardar. */
   severity: string
@@ -129,6 +142,8 @@ export interface HealthAllergyInput {
 export interface HealthConditionInput {
   id?: string
   name: string
+  /** Código CIE-10 que precisa la condición; opcional. */
+  cie10Code?: string | null
   status: string
   startDate?: string | null
   endDate?: string | null
@@ -138,6 +153,8 @@ export interface HealthConditionInput {
 export interface HealthMedicationInput {
   id?: string
   name: string
+  /** Principio activo (denominación común internacional); opcional. */
+  genericName?: string | null
   dose?: string | null
   frequency?: string | null
   startDate?: string | null
@@ -262,6 +279,7 @@ function canonicalJson(value: unknown): string {
 interface ValidatedAllergy {
   id: string | null
   substance: string
+  category: string | null
   reaction: string | null
   severity: string
   isActive: boolean
@@ -270,6 +288,7 @@ interface ValidatedAllergy {
 interface ValidatedCondition {
   id: string | null
   name: string
+  cie10Code: string | null
   status: string
   startDate: string | null
   endDate: string | null
@@ -279,6 +298,7 @@ interface ValidatedCondition {
 interface ValidatedMedication {
   id: string | null
   name: string
+  genericName: string | null
   dose: string | null
   frequency: string | null
   startDate: string | null
@@ -294,9 +314,13 @@ function validateAllergyRow(input: HealthAllergyInput): ValidatedAllergy {
       "severity debe ser leve, moderada, severa o desconocida (explícita, sin default)",
     )
   }
+  const category = input.category?.trim() || null
+  if (category && !(ALLERGY_CATEGORIES as readonly string[]).includes(category))
+    throw validation("category inválida para la alergia")
   return {
     id: input.id ?? null,
     substance,
+    category,
     reaction,
     severity: input.severity,
     isActive: input.isActive ?? true,
@@ -312,7 +336,8 @@ function validateConditionRow(input: HealthConditionInput): ValidatedCondition {
   if (!endDate && input.status === "resuelta") endDate = todayDate()
   assertDateRange(startDate, endDate)
   const notes = assertText(input.notes, 2000, "notes", false)
-  return { id: input.id ?? null, name, status: input.status, startDate, endDate, notes }
+  const cie10Code = input.cie10Code?.trim().toUpperCase() || null
+  return { id: input.id ?? null, name, cie10Code, status: input.status, startDate, endDate, notes }
 }
 
 function validateMedicationRow(input: HealthMedicationInput): ValidatedMedication {
@@ -323,7 +348,8 @@ function validateMedicationRow(input: HealthMedicationInput): ValidatedMedicatio
   const endDate = assertDateStr(input.endDate, "endDate")
   assertDateRange(startDate, endDate)
   const notes = assertText(input.notes, 2000, "notes", false)
-  return { id: input.id ?? null, name, dose, frequency, startDate, endDate, notes }
+  const genericName = assertText(input.genericName, 200, "genericName", false)
+  return { id: input.id ?? null, name, genericName, dose, frequency, startDate, endDate, notes }
 }
 export async function getPatientHealth(
   tx: Db,
@@ -590,6 +616,8 @@ async function persistPatientHealth(
   if (input.dataConsent !== undefined && input.dataConsent !== true) {
     throw validation("dataConsent solo admite true explícito")
   }
+  // Un código CIE-10 inexistente se rechaza antes de escribir nada.
+  for (const row of conditions) if (row.cie10Code) await assertDiagnosisCode(tx, row.cie10Code)
   // Aplicación de diffs (todo ya validado: cualquier fallo revierte todo).
   for (const row of allergies) {
     if (!row.id) {
@@ -597,6 +625,7 @@ async function persistPatientHealth(
         organizationId: orgId,
         patientId,
         substance: row.substance,
+        category: row.category,
         reaction: row.reaction,
         severity: row.severity,
         isActive: row.isActive,
@@ -607,6 +636,7 @@ async function persistPatientHealth(
         .update(patientAllergy)
         .set({
           substance: row.substance,
+          category: row.category,
           reaction: row.reaction,
           severity: row.severity,
           isActive: row.isActive,
@@ -627,6 +657,7 @@ async function persistPatientHealth(
         organizationId: orgId,
         patientId,
         name: row.name,
+        cie10Code: row.cie10Code,
         status: row.status,
         startDate: row.startDate,
         endDate: row.endDate,
@@ -638,6 +669,7 @@ async function persistPatientHealth(
         .update(patientCondition)
         .set({
           name: row.name,
+          cie10Code: row.cie10Code,
           status: row.status,
           startDate: row.startDate,
           endDate: row.endDate,
@@ -659,6 +691,7 @@ async function persistPatientHealth(
         organizationId: orgId,
         patientId,
         name: row.name,
+        genericName: row.genericName,
         dose: row.dose,
         frequency: row.frequency,
         startDate: row.startDate,
@@ -671,6 +704,7 @@ async function persistPatientHealth(
         .update(patientMedication)
         .set({
           name: row.name,
+          genericName: row.genericName,
           dose: row.dose,
           frequency: row.frequency,
           startDate: row.startDate,
@@ -797,13 +831,30 @@ export async function addClinicalNote(
   orgId: string,
   actorUserId: string,
   patientId: string,
-  input: { note: string; diagnosisCode?: string | null; encounterId?: string },
+  input: {
+    note: string
+    diagnosisCode?: string | null
+    /** Certeza del diagnóstico; exige código. Sin indicar, queda sin clasificar. */
+    diagnosisType?: string | null
+    /** Pieza FDI a la que se refiere el diagnóstico. */
+    toothNumber?: number | null
+    encounterId?: string
+  },
 ) {
   await requirePatient(tx, orgId, patientId)
   if (input.encounterId) await requireDraftLink(tx, orgId, patientId, input.encounterId)
   const note = input.note?.trim() ?? ""
   if (note.length < 1 || note.length > 4000) throw validation("note debe tener 1–4000 caracteres")
   if (input.diagnosisCode) await assertDiagnosisCode(tx, input.diagnosisCode)
+  const diagnosisType = input.diagnosisType?.trim() || null
+  if (diagnosisType) {
+    if (!input.diagnosisCode) throw validation("El tipo de diagnóstico exige un código CIE-10")
+    if (!(DIAGNOSIS_TYPES as readonly string[]).includes(diagnosisType))
+      throw validation("Tipo de diagnóstico inválido: presuntivo, definitivo o repetido")
+  }
+  const toothNumber = input.toothNumber ?? null
+  if (toothNumber !== null && (!Number.isInteger(toothNumber) || !isValidTooth(toothNumber)))
+    throw validation("Pieza FDI inválida")
   const [row] = await tx
     .insert(clinicalNote)
     .values({
@@ -812,6 +863,8 @@ export async function addClinicalNote(
       authorUserId: actorUserId,
       note,
       diagnosisCode: input.diagnosisCode ?? null,
+      diagnosisType,
+      toothNumber,
       encounterId: input.encounterId ?? null,
       kind: "evolucion",
     })

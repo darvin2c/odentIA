@@ -200,8 +200,12 @@ it("QR adulto con penicilina y O+: ficha sin revisión, sin vínculo automático
   expect(created.isActive).toBe(true)
 
   const detail = await withOrgContext(appDb, "org_a", (tx) => getPatient(tx, "org_a", created.id))
-  // El teléfono coincidente no reclama ni crea vínculos CRM.
-  expect(detail.contacts).toEqual([])
+  // Todo paciente es una persona, pero el teléfono coincidente no reclama al
+  // contacto existente: su persona es nueva.
+  expect(detail.contacts).toEqual([
+    expect.objectContaining({ relationship: "self", displayName: "Paciente QR Penicilina" }),
+  ])
+  expect(detail.contacts[0]?.contactId).not.toBe(existing.id)
   expect(detail.registration).toMatchObject({ entryPoint: "qr", respondent: "patient", actor: null })
   expect(detail.registration?.answers.health).toMatchObject({
     bloodGroup: "O+",
@@ -270,9 +274,14 @@ it("menor con enlace contextual queda como guardian sin modificar el contacto", 
     registerPatient(tx, "org_a", { kind: "public", token, entryPoint: "public_link" }, { submissionId: randomUUID(), formVersion: linkVersion, answers }),
   )
   const detail = await withOrgContext(appDb, "org_a", (tx) => getPatient(tx, "org_a", created.id))
-  expect(detail.contacts).toEqual([
-    expect.objectContaining({ contactId: person.id, relationship: "guardian", isPreferred: true }),
-  ])
+  // La tutora conserva su vínculo y preferencia; el menor recibe su propia persona.
+  expect(detail.contacts).toHaveLength(2)
+  expect(detail.contacts).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ contactId: person.id, relationship: "guardian", isPreferred: true }),
+      expect.objectContaining({ relationship: "self", isPreferred: false }),
+    ]),
+  )
   expect(detail.registration).toMatchObject({
     entryPoint: "conversation",
     respondent: "representative",

@@ -205,10 +205,12 @@ test("registro público QR en escritorio: conserva borrador, declara salud y no 
     await anonContext.close()
   }
 
-  // El teléfono coincidente no reclama el contacto existente.
+  // El teléfono coincidente no reclama el contacto existente: la persona del
+  // paciente es nueva (todo paciente es una persona).
   const created = await findPatientByName(page, org.slug, patientName)
   const detail = await getPatientDetail(page, org.slug, created.id)
-  expect(detail.contacts).toEqual([])
+  expect(detail.contacts).toEqual([expect.objectContaining({ relationship: "self" })])
+  expect(detail.contacts[0]?.contactId).not.toBe(contactId)
   expect(detail.registration).toMatchObject({ entryPoint: "qr", respondent: "patient" })
   expect(detail.registration?.actor).toBeNull()
   expect(detail.registration?.answers.privacyAccepted).toBe(true)
@@ -280,7 +282,7 @@ test("registro público QR en móvil: flujo completo en 390px sin cuenta", async
   const created = await findPatientByName(page, org.slug, `Paciente Móvil ${org.slug}`)
   const detail = await getPatientDetail(page, org.slug, created.id)
   expect(detail.registration).toMatchObject({ entryPoint: "qr", respondent: "patient" })
-  expect(detail.contacts).toEqual([])
+  expect(detail.contacts).toEqual([expect.objectContaining({ relationship: "self" })])
   expect(detail.activeAllergies).toEqual(
     expect.arrayContaining([expect.objectContaining({ substance: "Penicilina" })]),
   )
@@ -507,9 +509,14 @@ test("enlace contextual registra a un menor sin duplicar self y luego no está d
 
   const minorRow = await findPatientByName(page, org.slug, `Menor Enlace ${org.slug}`)
   const minorDetail = await getPatientDetail(page, org.slug, minorRow.id)
-  expect(minorDetail.contacts).toEqual([
-    expect.objectContaining({ contactId, relationship: "guardian" }),
-  ])
+  // El tutor conserva su vínculo; el menor recibe su propia persona.
+  expect(minorDetail.contacts).toHaveLength(2)
+  expect(minorDetail.contacts).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ contactId, relationship: "guardian" }),
+      expect.objectContaining({ relationship: "self" }),
+    ]),
+  )
   expect(minorDetail.registration).toMatchObject({
     respondent: "representative",
     conversationId,

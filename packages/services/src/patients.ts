@@ -138,8 +138,29 @@ export async function createPatient(
     const constraint = uniqueConstraintOf(e)
     if (constraint.includes("patient_contact_self_")) throw conflict("ALREADY_PATIENT", "El contacto ya tiene una ficha propia")
     if (constraint.includes("patient_org_doc_uidx")) throw conflict("DUPLICATE_DOCUMENT", "Ya existe un paciente con ese documento")
+    if (constraint.includes("contact_org_doc_uidx")) throw conflict("DUPLICATE_DOCUMENT", "Ya existe otra persona con ese documento")
     throw e
   }
+}
+
+/** Persona propia del paciente (su vínculo `self`), o null antes de confirmar el alta. */
+export async function patientPersonId(tx: Db, orgId: string, patientId: string): Promise<string | null> {
+  const [row] = await tx.select({ contactId: patientContact.contactId }).from(patientContact)
+    .where(and(eq(patientContact.organizationId, orgId), eq(patientContact.patientId, patientId), eq(patientContact.relationship, "self"))).limit(1)
+  return row?.contactId ?? null
+}
+
+/**
+ * Una persona creada solo para dar identidad a la ficha, sin canales ni
+ * actividad propia, puede sustituirse por el contacto real de la misma persona.
+ */
+async function isPlaceholderPerson(tx: Db, orgId: string, contactId: string, patientId: string): Promise<boolean> {
+  // La definición vive en la base (`is_placeholder_person`), que también la aplica
+  // a escrituras directas: nada referencia a la persona fuera de esta ficha.
+  const [row] = await tx.execute<{ placeholder: boolean }>(
+    sql`select is_placeholder_person(${orgId}, ${contactId}::uuid, ${patientId}::uuid) as placeholder`,
+  )
+  return row?.placeholder === true
 }
 
 export const PATIENT_LIST_SORTS = [
@@ -418,6 +439,19 @@ export async function setPatientContact(tx: Db, orgId: string, actorUserId: stri
   if (!person.isActive) throw conflict("CONTACT_ARCHIVED", "Reactiva el contacto antes de vincularlo")
   const [record] = await tx.select({ id: patient.id }).from(patient).where(and(eq(patient.organizationId, orgId), eq(patient.id, patientId))).for("update")
   if (!record) throw notFound("Paciente")
+  const currentPerson = await patientPersonId(tx, orgId, patientId)
+  // La propia persona no se degrada a otro vínculo: es la identidad de la ficha.
+  if (currentPerson === link.contactId && link.relationship !== "self")
+    throw conflict("PATIENT_PERSON_REQUIRED", "Esta es la propia persona del paciente; su vínculo no se puede cambiar")
+  // Identificar al paciente con un contacto real sustituye a la persona creada
+  // solo para la ficha; si esta ya tiene actividad, no se fusiona en silencio.
+  if (link.relationship === "self" && currentPerson && currentPerson !== link.contactId) {
+    if (!(await isPlaceholderPerson(tx, orgId, currentPerson, patientId)))
+      throw conflict("PATIENT_PERSON_IN_USE", "El paciente ya está identificado con una persona que tiene canales o actividad. Reasigna el canal desde Contactos en lugar de vincular otra persona.")
+    // La sustitución la hace la base al insertar el nuevo vínculo (trigger
+    // `patient_contact_person_adopt`): aquí solo se valida y se deja traza.
+    await tx.insert(auditEvent).values({ organizationId: orgId, actorUserId, action: "patient.person_replaced", entity: "patient", entityId: patientId, metadata: { fromContactId: currentPerson, toContactId: link.contactId } })
+  }
   try {
     if (link.isPreferred) await tx.update(patientContact).set({ isPreferred: false, updatedAt: new Date() }).where(and(eq(patientContact.organizationId, orgId), eq(patientContact.patientId, patientId), eq(patientContact.isPreferred, true)))
     await tx.insert(patientContact).values({ ...link, organizationId: orgId, patientId, createdBy: actorUserId })
@@ -428,6 +462,7 @@ export async function setPatientContact(tx: Db, orgId: string, actorUserId: stri
     await tx.insert(auditEvent).values({ organizationId: orgId, actorUserId, action: "patient.contact_set", entity: "patient", entityId: patientId, metadata: { contactId: link.contactId, relationship: link.relationship, isPreferred: link.isPreferred } })
   } catch (error) {
     if (isUniqueViolation(error) && uniqueConstraintOf(error).includes("patient_contact_self_")) throw conflict("ALREADY_PATIENT", "El contacto o paciente ya tiene una relación propia")
+    if (isUniqueViolation(error) && uniqueConstraintOf(error).includes("contact_org_doc_uidx")) throw conflict("DUPLICATE_DOCUMENT", "Ya existe otra persona con el documento del paciente")
     throw error
   }
 }
@@ -437,6 +472,8 @@ export async function removePatientContact(tx: Db, orgId: string, actorUserId: s
   if (!person) throw notFound("Contacto")
   const [record] = await tx.select({ id: patient.id }).from(patient).where(and(eq(patient.organizationId, orgId), eq(patient.id, patientId))).for("update")
   if (!record) throw notFound("Paciente")
+  if ((await patientPersonId(tx, orgId, patientId)) === contactId)
+    throw conflict("PATIENT_PERSON_REQUIRED", "Esta es la propia persona del paciente y no se puede desvincular")
   const deleted = await tx.delete(patientContact).where(and(eq(patientContact.organizationId, orgId), eq(patientContact.patientId, patientId), eq(patientContact.contactId, contactId))).returning({ id: patientContact.id })
   if (deleted.length) await tx.insert(auditEvent).values({ organizationId: orgId, actorUserId, action: "patient.contact_removed", entity: "patient", entityId: patientId, metadata: { contactId } })
 }
@@ -517,6 +554,9 @@ export async function updatePatient(
   id: string,
   patch: UpdatePatientPatch,
 ): Promise<PatientRow> {
+  // Mismo orden de bloqueo que la conciliación de identidad: persona y después ficha.
+  const personId = await patientPersonId(tx, orgId, id)
+  if (personId) await tx.select({ id: contact.id }).from(contact).where(and(eq(contact.organizationId, orgId), eq(contact.id, personId))).for("update")
   const current = await requirePatient(tx, orgId, id)
   const { registeredBranchId: _branch, isActive: _active, dataConsent: _consent, ...demographicPatch } = patch
   const demographics = Object.fromEntries(Object.keys(demographicsSchema.shape).map(key => [key, current[key as keyof PatientRow]]))
@@ -557,6 +597,9 @@ export async function updatePatient(
     const c = uniqueConstraintOf(e)
     if (c.includes("patient_org_doc_uidx")) {
       throw conflict("DUPLICATE_DOCUMENT", "Ya existe un paciente con ese documento")
+    }
+    if (c.includes("contact_org_doc_uidx")) {
+      throw conflict("DUPLICATE_DOCUMENT", "Ya existe otra persona con ese documento")
     }
     throw e
   }

@@ -88,11 +88,20 @@ async function contactNames(db: Db): Promise<string[]> {
   return (rows as unknown as { display_name: string }[]).map((r) => r.display_name)
 }
 
-async function insertPatient(db: Db, id: string, orgId: string, contactId: string, number: number) {
+async function insertPatient(
+  db: Db,
+  id: string,
+  orgId: string,
+  contactId: string,
+  number: number,
+  displayName: string,
+) {
   await db.execute(
     sql`insert into "patient" ("id", "organization_id", "display_name", "patient_number")
-        values (${id}::uuid, ${orgId}, ${"Paciente " + number}, ${number})`,
+        values (${id}::uuid, ${orgId}, ${displayName}, ${number})`,
   )
+  // Persona única: el contacto pasa a ser la propia persona del paciente y
+  // comparte su identidad (sustituye a la provisional creada con la ficha).
   await db.execute(
     sql`insert into patient_contact (organization_id, patient_id, contact_id, relationship, is_preferred)
         values (${orgId}, ${id}::uuid, ${contactId}::uuid, 'self', true)`,
@@ -171,6 +180,7 @@ beforeAll(async () => {
     "org_a",
     "33333333-3333-3333-3333-333333333333",
     1,
+    "Paciente Ana",
   )
   await insertPatient(
     ownerDb,
@@ -178,6 +188,7 @@ beforeAll(async () => {
     "org_b",
     "44444444-4444-4444-4444-444444444444",
     1,
+    "Paciente Beto",
   )
 }, 180_000)
 

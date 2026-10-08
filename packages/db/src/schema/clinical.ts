@@ -76,6 +76,11 @@ export const patient = pgTable(
       "patient_blood_group_check",
       sql`${table.bloodGroup} IS NULL OR ${table.bloodGroup} IN ('A+','A-','B+','B-','AB+','AB-','O+','O-','unknown')`,
     ),
+    check(
+      "patient_doc_type_check",
+      sql`${table.docType} IS NULL OR ${table.docType} IN ('DNI','CE','PASAPORTE','OTRO')`,
+    ),
+    check("patient_sex_check", sql`${table.sex} IS NULL OR ${table.sex} IN ('M','F')`),
     uniqueIndex("patient_org_number_uidx").on(table.organizationId, table.patientNumber),
     uniqueIndex("patient_org_doc_uidx")
       .on(table.organizationId, table.docType, table.docNumber)
@@ -230,13 +235,25 @@ export const patientAllergy = pgTable(
       .notNull()
       .references(() => patient.id, { onDelete: "cascade" }),
     substance: text("substance").notNull(),
+    /** Tipo de alérgeno; nulo en registros anteriores o cuando no se precisó. */
+    category: text("category"),
     reaction: text("reaction"),
     severity: text("severity").notNull().default("moderada"),
     isActive: boolean("is_active").notNull().default(true),
     createdBy: text("created_by").references(() => user.id),
     ...timestamps,
   },
-  (table) => [index("patient_allergy_org_patient_idx").on(table.organizationId, table.patientId)],
+  (table) => [
+    index("patient_allergy_org_patient_idx").on(table.organizationId, table.patientId),
+    check(
+      "patient_allergy_severity_check",
+      sql`${table.severity} IN ('leve','moderada','severa','desconocida')`,
+    ),
+    check(
+      "patient_allergy_category_check",
+      sql`${table.category} IS NULL OR ${table.category} IN ('medicamento','anestesico','material','alimento','ambiental','otro')`,
+    ),
+  ],
 )
 
 export const patientCondition = pgTable(
@@ -248,6 +265,8 @@ export const patientCondition = pgTable(
       .notNull()
       .references(() => patient.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
+    /** Código CIE-10 cuando el clínico lo precisa; el nombre declarado se conserva. */
+    cie10Code: text("cie10_code").references(() => cie10Code.code),
     status: text("status").notNull().default("activa"),
     startDate: date("start_date"),
     endDate: date("end_date"),
@@ -255,7 +274,13 @@ export const patientCondition = pgTable(
     createdBy: text("created_by").references(() => user.id),
     ...timestamps,
   },
-  (table) => [index("patient_condition_org_patient_idx").on(table.organizationId, table.patientId)],
+  (table) => [
+    index("patient_condition_org_patient_idx").on(table.organizationId, table.patientId),
+    check(
+      "patient_condition_status_check",
+      sql`${table.status} IN ('activa','resuelta','inactiva')`,
+    ),
+  ],
 )
 
 export const patientMedication = pgTable(
@@ -267,6 +292,8 @@ export const patientMedication = pgTable(
       .notNull()
       .references(() => patient.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
+    /** Denominación común internacional (principio activo), si se conoce. */
+    genericName: text("generic_name"),
     dose: text("dose"),
     frequency: text("frequency"),
     startDate: date("start_date"),
@@ -314,6 +341,10 @@ export const clinicalNote = pgTable(
       .references(() => user.id),
     note: text("note").notNull(),
     diagnosisCode: text("diagnosis_code").references(() => cie10Code.code),
+    /** Certeza del diagnóstico codificado: presuntivo, definitivo o repetido. */
+    diagnosisType: text("diagnosis_type"),
+    /** Pieza FDI a la que se refiere el diagnóstico, si aplica. */
+    toothNumber: smallint("tooth_number"),
     encounterId: uuid("encounter_id").references(() => encounter.id),
     kind: text("kind").notNull().default("evolucion"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -323,6 +354,11 @@ export const clinicalNote = pgTable(
       table.organizationId,
       table.patientId,
       table.createdAt,
+    ),
+    check("clinical_note_kind_check", sql`${table.kind} IN ('evolucion','adenda')`),
+    check(
+      "clinical_note_diagnosis_type_check",
+      sql`${table.diagnosisType} IS NULL OR (${table.diagnosisCode} IS NOT NULL AND ${table.diagnosisType} IN ('presuntivo','definitivo','repetido'))`,
     ),
   ],
 )
@@ -344,7 +380,55 @@ export const patientDocument = pgTable(
     uploadedBy: text("uploaded_by").references(() => user.id),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => [index("patient_document_org_patient_idx").on(table.organizationId, table.patientId)],
+  (table) => [
+    index("patient_document_org_patient_idx").on(table.organizationId, table.patientId),
+    check(
+      "patient_document_category_check",
+      sql`${table.category} IN ('consentimiento','radiografia','foto_clinica','informe','presupuesto','receta','comprobante_pago','otro')`,
+    ),
+  ],
+)
+
+/**
+ * Bitácora de consultas a la historia clínica: quién abrió qué parte de la
+ * ficha de quién. Append-only; una fila por usuario, paciente, recurso y hora
+ * para dejar traza sin registrar cada petición de la misma lectura.
+ */
+export const clinicalAccessLog = pgTable(
+  "clinical_access_log",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    organizationId: orgFk("organization_id"),
+    patientId: uuid("patient_id").notNull(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id),
+    /** Parte de la ficha consultada (subruta clínica normalizada). */
+    resource: text("resource").notNull(),
+    /** Inicio de la hora en que ocurrió la consulta. */
+    bucket: timestamp("bucket", { withTimezone: true }).notNull(),
+    firstAt: timestamp("first_at", { withTimezone: true }).notNull().defaultNow(),
+    lastAt: timestamp("last_at", { withTimezone: true }).notNull().defaultNow(),
+    hits: integer("hits").notNull().default(1),
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.organizationId, table.patientId],
+      foreignColumns: [patient.organizationId, patient.id],
+    }),
+    uniqueIndex("clinical_access_log_bucket_uidx").on(
+      table.organizationId,
+      table.patientId,
+      table.userId,
+      table.resource,
+      table.bucket,
+    ),
+    index("clinical_access_log_org_patient_idx").on(
+      table.organizationId,
+      table.patientId,
+      table.lastAt,
+    ),
+  ],
 )
 
 /** Odontograma FDI NTS 188-MINSA/DGIESP-2022 por pieza/superficie (append-only).
@@ -453,6 +537,7 @@ export const encounter = pgTable(
   (table) => [
     index("encounter_org_patient_idx").on(table.organizationId, table.patientId),
     uniqueIndex("encounter_patient_open_uidx").on(table.patientId).where(sql`status = 'borrador'`),
+    check("encounter_status_check", sql`${table.status} IN ('borrador','finalizada')`),
   ],
 )
 

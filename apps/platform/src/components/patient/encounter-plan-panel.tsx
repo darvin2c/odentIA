@@ -122,7 +122,7 @@ export function EncounterPlanPanel({
     Promise.all([
       queryClient.invalidateQueries({ queryKey: ["treatment-plans", patientId] }),
       queryClient.invalidateQueries({ queryKey: ["treatment-plan", patientId] }),
-      queryClient.invalidateQueries({ queryKey: ["plan", patientId] }),
+      queryClient.invalidateQueries({ queryKey: ["plan-items", patientId] }),
       queryClient.invalidateQueries({ queryKey: ["patient-summary", patientId] }),
     ])
 

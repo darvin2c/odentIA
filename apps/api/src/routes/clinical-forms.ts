@@ -192,6 +192,7 @@ const consentCreate = z
 const consentSign = z
   .object({
     signerKind: z.enum(["paciente", "representante"]),
+    signerContactId: z.uuid().nullish(),
     signerName: z.string().trim().min(1).max(200),
     signerDoc: z.string().trim().max(40).nullish(),
     representativeRelation: z.string().trim().max(120).nullish(),

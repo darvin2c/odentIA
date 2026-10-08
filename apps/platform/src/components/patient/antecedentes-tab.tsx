@@ -166,6 +166,7 @@ function buildDrafts(health: PatientHealth): {
       key: a.id,
       id: a.id,
       substance: a.substance,
+      category: a.category ?? "",
       reaction: a.reaction ?? "",
       severity: a.severity,
       isActive: a.isActive,
@@ -175,6 +176,7 @@ function buildDrafts(health: PatientHealth): {
       key: c.id,
       id: c.id,
       name: c.name,
+      cie10Code: c.cie10Code ?? "",
       status: c.status,
       startDate: c.startDate ?? "",
       endDate: c.endDate ?? "",
@@ -185,6 +187,7 @@ function buildDrafts(health: PatientHealth): {
       key: m.id,
       id: m.id,
       name: m.name,
+      genericName: m.genericName ?? "",
       dose: m.dose ?? "",
       frequency: m.frequency ?? "",
       startDate: m.startDate ?? "",
@@ -278,6 +281,7 @@ export function AntecedentesTab({ patientId }: { patientId: string }): React.JSX
         allergies: allergies.map((a) => ({
           ...(a.id ? { id: a.id } : {}),
           substance: a.substance.trim(),
+          category: a.category ? a.category : null,
           reaction: a.reaction.trim() === "" ? null : a.reaction.trim(),
           severity: a.severity,
           isActive: a.isActive,
@@ -285,6 +289,7 @@ export function AntecedentesTab({ patientId }: { patientId: string }): React.JSX
         conditions: conditions.map((c) => ({
           ...(c.id ? { id: c.id } : {}),
           name: c.name.trim(),
+          cie10Code: c.cie10Code ? c.cie10Code : null,
           status: c.status,
           startDate: c.startDate === "" ? null : c.startDate,
           endDate: c.endDate === "" ? null : c.endDate,
@@ -293,6 +298,7 @@ export function AntecedentesTab({ patientId }: { patientId: string }): React.JSX
         medications: medications.map((m) => ({
           ...(m.id ? { id: m.id } : {}),
           name: m.name.trim(),
+          genericName: m.genericName?.trim() ? m.genericName.trim() : null,
           dose: m.dose.trim() === "" ? null : m.dose.trim(),
           frequency: m.frequency.trim() === "" ? null : m.frequency.trim(),
           startDate: m.startDate === "" ? null : m.startDate,

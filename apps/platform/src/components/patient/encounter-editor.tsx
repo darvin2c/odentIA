@@ -25,7 +25,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useId, useRef, useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
 import { fetchFollowUps, fetchPatientAccount, fetchPrescriptions } from "../../lib/clinical-journey"
-import { usePermission } from "../../lib/crm"
+import { useMemberName, usePermission } from "../../lib/crm"
 import {
   type Encounter,
   type EncounterDetail,
@@ -215,11 +215,6 @@ function toExaminationDraft(examination: Encounter["examination"]): ExaminationD
   return empty ? null : draft
 }
 
-/** Identificador corto del odontólogo tratante (primeros 8 caracteres). */
-export function dentistShortId(id: string): string {
-  return id.length > 8 ? id.slice(0, 8) : id
-}
-
 function saveMessage(err: unknown, fallback: string): string {
   if (err instanceof ApiError && err.shape.message) return err.shape.message
   return err instanceof Error ? err.message : fallback
@@ -253,9 +248,10 @@ export function EncounterEditor({
   const canWrite = usePermission("clinical.write")
   const canRead = usePermission("clinical.read")
   const canReadFinance = usePermission("finance.read")
+  const memberName = useMemberName()
   const uid = useId()
   const accountQuery = useQuery({
-    queryKey: ["account", patientId],
+    queryKey: ["patient-account", patientId],
     queryFn: () => fetchPatientAccount(patientId),
     enabled: canReadFinance,
   })
@@ -660,7 +656,7 @@ export function EncounterEditor({
     await onChanged()
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ["odontogram", patientId] }),
-      queryClient.invalidateQueries({ queryKey: ["plan", patientId] }),
+      queryClient.invalidateQueries({ queryKey: ["plan-items", patientId] }),
     ])
   }
 
@@ -805,6 +801,21 @@ export function EncounterEditor({
       empty: evolution.trim() === "" && indications.trim() === "" && nextStep.trim() === "",
     },
   ]
+
+  // Antes de cerrar: qué queda registrado y qué no, con los mismos resúmenes
+  // que ve el clínico en cada bloque. No bloquea: informa la decisión.
+  const closingSections = sections.filter((section) => section.key !== "consulta")
+  const recorded = closingSections.filter((section) => !section.empty).map((s) => s.summary)
+  const unrecorded = closingSections
+    .filter((section) => section.empty)
+    .map((section) => section.title.toLowerCase())
+  const finalizeDescription = [
+    recorded.length > 0 ? `Registrado: ${recorded.join("; ")}.` : "Solo se registró el motivo.",
+    unrecorded.length > 0 ? `Sin registrar: ${unrecorded.join(", ")}.` : "",
+    "La atención quedará inmutable: solo se podrán agregar adendas. Los actos con tarifa generan sus cargos automáticamente (sin duplicar tratamientos ya cargados). Esta acción no se puede deshacer.",
+  ]
+    .filter(Boolean)
+    .join(" ")
 
   const includedSections = sections.filter(
     (section) => section.key === "consulta" || !section.empty || addedSections.has(section.key),
@@ -1140,6 +1151,7 @@ export function EncounterEditor({
             patientId={patientId}
             state={dentalQuery.data.data}
             compact
+            birthDate={patient.patient.birthDate}
             encounterId={encounterId}
             onChanged={handleChildChanged}
             beforeWrite={flush}
@@ -1252,7 +1264,7 @@ export function EncounterEditor({
           <h1 className="text-xl font-semibold">{patient.patient.displayName}</h1>
           <p className="text-sm text-muted-foreground">
             {hcLabel(patient.patient.patientNumber)} · Odontólogo{" "}
-            {dentistShortId(encounter.dentistUserId)}
+            {memberName(encounter.dentistUserId)}
           </p>
         </div>
         <Badge variant="outline">{encounterStatusLabel(encounter.status)}</Badge>
@@ -1425,7 +1437,7 @@ export function EncounterEditor({
       <ConfirmDialog
         open={confirmOpen}
         title="Finalizar atención"
-        description="La atención quedará inmutable: solo se podrán agregar adendas. Los actos con tarifa generan sus cargos automáticamente (sin duplicar tratamientos ya cargados). Esta acción no se puede deshacer."
+        description={finalizeDescription}
         confirmLabel="Finalizar atención"
         variant="default"
         pending={finalizing}

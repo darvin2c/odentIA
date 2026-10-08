@@ -16,7 +16,7 @@ Cada paquete tiene una responsabilidad; no importar apps desde paquetes ni dupli
 
 ## Contratos particulares
 
-- Better Auth: conservar explícitamente `ownerAc`, `adminAc` y `memberAc` al personalizar roles. Recepción no recibe historia clínica ni caja; odontología no recibe caja. `agent.decide` no implica administrar el agente ni autorizar cualquier acto.
+- Better Auth: conservar explícitamente `ownerAc`, `adminAc` y `memberAc` al personalizar roles. Recepción no recibe historia clínica ni caja; odontología no recibe caja. Única excepción: `clinical.alerts` entrega a recepción las alergias activas del paciente, nunca el resto de la ficha. `agent.decide` no implica administrar el agente ni autorizar cualquier acto.
 - Passwords: scrypt de `better-auth/crypto` (`hashPassword`); no otro hasher.
 - Canales: verificar autenticidad de eventos, normalizar entrada y preservar estados de entrega. No tratar encolado como aceptación del proveedor.
 - Reasignar identidad de canal conserva pacientes, oportunidades y seguimientos comerciales en origen y desvincula el hilo; solo tareas operativas sin oportunidad pueden acompañarlo. Auditar vínculos conciliados.

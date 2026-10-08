@@ -16,7 +16,9 @@ import {
 import { EmptyState, ErrorState, FormDrawer, PageHeader } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useRef, useState } from "react"
-import { ApiError } from "../../lib/api"
+import { ApiError, apiFetch } from "../../lib/api"
+import { fetchResponsibilities } from "../../lib/clinical-journey"
+import { ageFrom, type PatientFull } from "../../lib/patients"
 import {
   CONSENT_STATUS_LABELS,
   createConsent,
@@ -286,7 +288,7 @@ function ConsentDetail({
         </Button>
       </div>
       {document.status === "pendiente" && canWrite ? (
-        <SignForm documentId={document.id} onChanged={onChanged} />
+        <SignForm documentId={document.id} patientId={document.patientId} onChanged={onChanged} />
       ) : null}
       {document.status === "firmado" && canWrite ? (
         <RevokeForm documentId={document.id} onChanged={onChanged} />
@@ -307,7 +309,53 @@ function ConsentDetail({
   )
 }
 
-function SignForm({ documentId, onChanged }: { documentId: string; onChanged: () => void }) {
+/** Firmante elegido: una persona vinculada con facultad, o alguien declarado a mano. */
+type SignerChoice = { kind: "paciente" | "representante"; contactId: string; label: string }
+
+function SignForm({
+  documentId,
+  patientId,
+  onChanged,
+}: {
+  documentId: string
+  patientId: string
+  onChanged: () => void
+}) {
+  const canPatients = usePermission("patients.read")
+  const patientQuery = useQuery({
+    queryKey: ["patient", patientId],
+    queryFn: () => apiFetch<{ data: PatientFull }>(`/api/patients/${patientId}`),
+    enabled: canPatients,
+  })
+  const responsibilitiesQuery = useQuery({
+    queryKey: ["responsibilities", patientId],
+    queryFn: () => fetchResponsibilities(patientId),
+    enabled: canPatients,
+  })
+  const detail = patientQuery.data?.data
+  const own = detail?.contacts.find((link) => link.relationship === "self")
+  const age = Number(ageFrom(detail?.patient.birthDate))
+  const isMinor = detail?.patient.birthDate != null && Number.isFinite(age) && age < 18
+  const representatives = (responsibilitiesQuery.data?.data ?? []).filter(
+    (row) => row.isCurrent && row.kind === "representante_legal",
+  )
+  const choices: SignerChoice[] = [
+    ...representatives.map(
+      (row): SignerChoice => ({
+        kind: "representante",
+        contactId: row.contact.id,
+        label: `${row.contact.displayName} · representante legal`,
+      }),
+    ),
+    // Un menor no firma por sí mismo: solo se ofrece cuando no lo es.
+    ...(own && !isMinor
+      ? [{ kind: "paciente" as const, contactId: own.contactId, label: `${own.displayName} · paciente` }]
+      : []),
+  ]
+  const [choiceId, setChoiceId] = useState<string | null>(null)
+  const selected =
+    choiceId === "manual" ? null : (choices.find((c) => c.contactId === choiceId) ?? choices[0] ?? null)
+  const manual = selected === null
   const [signerKind, setSignerKind] = useState<"paciente" | "representante">("paciente")
   const [signerName, setSignerName] = useState("")
   const [signerDoc, setSignerDoc] = useState("")
@@ -316,13 +364,28 @@ function SignForm({ documentId, onChanged }: { documentId: string; onChanged: ()
   const [error, setError] = useState<string | null>(null)
   const signMutation = useMutation({
     mutationFn: () =>
-      signConsent(documentId, {
-        signerKind,
-        signerName: signerName.trim(),
-        signerDoc: signerDoc.trim() ? signerDoc.trim() : null,
-        representativeRelation: signerKind === "representante" && relation.trim() ? relation.trim() : null,
-        signatureData: { strokes },
-      }),
+      signConsent(
+        documentId,
+        selected
+          ? {
+              signerKind: selected.kind,
+              signerContactId: selected.contactId,
+              // El servidor toma nombre y documento del registro de la persona.
+              signerName: selected.label,
+              signerDoc: signerDoc.trim() ? signerDoc.trim() : null,
+              representativeRelation:
+                selected.kind === "representante" ? relation.trim() || "Representante legal" : null,
+              signatureData: { strokes },
+            }
+          : {
+              signerKind,
+              signerName: signerName.trim(),
+              signerDoc: signerDoc.trim() ? signerDoc.trim() : null,
+              representativeRelation:
+                signerKind === "representante" && relation.trim() ? relation.trim() : null,
+              signatureData: { strokes },
+            },
+      ),
     onSuccess: () => {
       toast.success("Consentimiento firmado")
       onChanged()
@@ -337,7 +400,7 @@ function SignForm({ documentId, onChanged }: { documentId: string; onChanged: ()
       className="flex flex-col gap-3 rounded-md border p-3"
       onSubmit={(event) => {
         event.preventDefault()
-        if (!signerName.trim()) {
+        if (manual && !signerName.trim()) {
           setError("Ingresa el nombre de quien firma")
           return
         }
@@ -350,30 +413,66 @@ function SignForm({ documentId, onChanged }: { documentId: string; onChanged: ()
       }}
     >
       <h4 className="text-sm font-semibold">Firma manuscrita</h4>
+      {isMinor && representatives.length === 0 && responsibilitiesQuery.isSuccess ? (
+        <p className="rounded-md bg-warning-soft p-3 text-sm">
+          El paciente es menor y no tiene representante legal vigente. Regístralo en Datos →
+          Responsables para que pueda firmar por él.
+        </p>
+      ) : null}
       <Field>
-        <FieldLabel>¿Quién firma?</FieldLabel>
-        <Select value={signerKind} onValueChange={(v) => setSignerKind(v as "paciente" | "representante")}>
-          <SelectTrigger aria-label="Firmante">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="paciente">El paciente</SelectItem>
-            <SelectItem value="representante">Representante verificado</SelectItem>
-          </SelectContent>
-        </Select>
+        <FieldLabel htmlFor="signer-person">¿Quién firma?</FieldLabel>
+        <select
+          id="signer-person"
+          className="rounded-md border bg-background px-2 py-1.5 text-sm"
+          value={selected?.contactId ?? "manual"}
+          onChange={(event) => setChoiceId(event.target.value)}
+        >
+          {choices.map((choice) => (
+            <option key={choice.contactId} value={choice.contactId}>
+              {choice.label}
+            </option>
+          ))}
+          <option value="manual">Otra persona (declarar a mano)</option>
+        </select>
       </Field>
-      <Field>
-        <FieldLabel htmlFor="signer-name">Nombre de quien firma</FieldLabel>
-        <Input
-          id="signer-name"
-          value={signerName}
-          onChange={(event) => setSignerName(event.target.value)}
-          maxLength={200}
-        />
-      </Field>
+      {manual ? (
+        <>
+          <Field>
+            <FieldLabel>Firma como</FieldLabel>
+            <Select
+              value={signerKind}
+              onValueChange={(v) => setSignerKind(v as "paciente" | "representante")}
+            >
+              <SelectTrigger aria-label="Firmante">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="paciente">El paciente</SelectItem>
+                <SelectItem value="representante">Representante verificado</SelectItem>
+              </SelectContent>
+            </Select>
+          </Field>
+          <Field>
+            <FieldLabel htmlFor="signer-name">Nombre de quien firma</FieldLabel>
+            <Input
+              id="signer-name"
+              value={signerName}
+              onChange={(event) => setSignerName(event.target.value)}
+              maxLength={200}
+            />
+          </Field>
+        </>
+      ) : (
+        <p className="text-sm text-muted-foreground">
+          Se registrará con el nombre y documento de su ficha; la facultad se verifica al firmar.
+        </p>
+      )}
       <Field>
         <FieldLabel htmlFor="signer-doc">
-          Documento {signerKind === "representante" ? "(verificado, obligatorio)" : "(opcional)"}
+          Documento{" "}
+          {(selected?.kind ?? signerKind) === "representante"
+            ? "(verificado, obligatorio si su ficha no lo tiene)"
+            : "(opcional)"}
         </FieldLabel>
         <Input
           id="signer-doc"
@@ -382,7 +481,7 @@ function SignForm({ documentId, onChanged }: { documentId: string; onChanged: ()
           maxLength={40}
         />
       </Field>
-      {signerKind === "representante" ? (
+      {(selected?.kind ?? signerKind) === "representante" ? (
         <Field>
           <FieldLabel htmlFor="signer-relation">Parentesco o relación verificada</FieldLabel>
           <Input

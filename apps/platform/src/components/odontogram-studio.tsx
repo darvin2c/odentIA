@@ -37,6 +37,7 @@ import {
   useState,
 } from "react"
 import { usePermission } from "../lib/crm"
+import { type Dentition, suggestedDentition } from "../lib/patient-areas"
 import {
   type OdontogramEntry,
   type OdontogramState,
@@ -75,6 +76,10 @@ export function OdontogramStudio({
   disabled = false,
   beforeWrite,
   onPendingChange,
+  birthDate,
+  onSelectionChange,
+  onDirtyChange,
+  belowChart,
 }: {
   patientId: string
   state: OdontogramState
@@ -87,6 +92,14 @@ export function OdontogramStudio({
   disabled?: boolean
   beforeWrite?: () => Promise<void>
   onPendingChange?: (pending: boolean) => void
+  /** Fecha de nacimiento: sugiere la dentición inicial; el clínico puede cambiarla. */
+  birthDate?: string | null
+  /** Piezas seleccionadas, para enlazar otras superficies (p. ej. el plan). */
+  onSelectionChange?: (teeth: number[]) => void
+  /** Hay edición sin guardar en el panel de la pieza. */
+  onDirtyChange?: (dirty: boolean) => void
+  /** Contenido enlazado a la selección, justo bajo el odontograma y antes de actas e historial. */
+  belowChart?: React.ReactNode
 }) {
   const canWrite = usePermission("clinical.write")
   const queryClient = useQueryClient()
@@ -94,9 +107,13 @@ export function OdontogramStudio({
   const { ref: containerRef, wide } = useContainerWide()
   const detailMode = useDetailMode()
   const dirty = useRef(false)
-  const handleDirtyChange = useCallback((value: boolean) => {
-    dirty.current = value
-  }, [])
+  const handleDirtyChange = useCallback(
+    (value: boolean) => {
+      dirty.current = value
+      onDirtyChange?.(value)
+    },
+    [onDirtyChange],
+  )
   const [editorPending, setEditorPending] = useState(false)
   const canChangeSelection = () =>
     !editorPending && (!dirty.current || window.confirm(common.confirm.unsavedMessage))
@@ -104,23 +121,42 @@ export function OdontogramStudio({
     initialTooth && (FDI_ADULT.includes(initialTooth) || FDI_CHILD.includes(initialTooth))
       ? initialTooth
       : null
-  const [dentition, setDentition] = useState<"adult" | "primary">(
-    validInitial && FDI_CHILD.includes(validInitial) ? "primary" : "adult",
-  )
+  // Por edad cuando se conoce; si no, por lo ya registrado: piezas temporales
+  // con hallazgos indican al menos dentición mixta.
+  const suggested: Dentition =
+    suggestedDentition(birthDate) ??
+    (state.history.some((entry) => FDI_CHILD.includes(entry.toothNumber)) ? "mixed" : "adult")
+  const dentitionFor = (tooth: number | null, current: Dentition): Dentition => {
+    if (tooth == null || current === "mixed") return current
+    const primary = FDI_CHILD.includes(tooth)
+    if (primary === (current === "primary")) return current
+    return suggested === "mixed" ? "mixed" : primary ? "primary" : "adult"
+  }
+  const [dentition, setDentition] = useState<Dentition>(() => dentitionFor(validInitial, suggested))
   const [selection, setSelection] = useState<number[]>(validInitial ? [validInitial] : [])
   const [drawerOpen, setDrawerOpen] = useState(Boolean(validInitial))
   const [multiple, setMultiple] = useState(false)
   const [snapshot, setSnapshot] = useState("current")
   const lastInitial = useRef<number | null>(validInitial)
   // El enlace (p. ej. Historia→pieza) actualiza la selección también después del primer mount.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: solo reacciona al enlace; la dentición sugerida es estable por paciente.
   useEffect(() => {
-    if (validInitial && validInitial !== lastInitial.current) {
+    if (!validInitial) {
+      // Sin pieza pedida: pedir después la misma pieza vuelve a seleccionarla.
+      lastInitial.current = null
+      return
+    }
+    if (validInitial !== lastInitial.current) {
       lastInitial.current = validInitial
-      setDentition(FDI_CHILD.includes(validInitial) ? "primary" : "adult")
+      setDentition((current) => dentitionFor(validInitial, current))
       setSelection([validInitial])
+      setDrawerOpen(true)
       setSnapshot("current")
     }
   }, [validInitial])
+  useEffect(() => {
+    onSelectionChange?.(selection)
+  }, [selection, onSelectionChange])
   const dates = useMemo(
     () =>
       [
@@ -174,7 +210,10 @@ export function OdontogramStudio({
     await onChanged()
   }
   const locked = !canWrite || readOnly || historical
-  const rows = dentition === "adult" ? FDI_ADULT_ROWS : FDI_CHILD_ROWS
+  const outerRows = dentition === "primary" ? FDI_CHILD_ROWS : FDI_ADULT_ROWS
+  const innerRows = dentition === "mixed" ? FDI_CHILD_ROWS : null
+  const upperTeeth = [...(outerRows[0] ?? []), ...(innerRows?.[0] ?? [])]
+  const lowerTeeth = [...(outerRows[1] ?? []), ...(innerRows?.[1] ?? [])]
   const entriesOf = (tooth: number): OdontogramEntry[] => byTooth.get(tooth) ?? []
   const historyOf = (tooth: number): OdontogramEntry[] =>
     history.filter(
@@ -194,11 +233,14 @@ export function OdontogramStudio({
       setDrawerOpen(true)
     }
   }
-  const switchDentition = (next: "adult" | "primary") => {
-    if (!canChangeSelection()) return
+  const switchDentition = (next: Dentition) => {
+    if (next === dentition || !canChangeSelection()) return
     setDentition(next)
-    setSelection([])
-    setDrawerOpen(false)
+    // La vista mixta contiene las demás: solo se pierde lo que deja de verse.
+    const visible = next === "mixed" ? null : next === "primary" ? FDI_CHILD : FDI_ADULT
+    const kept = visible ? selection.filter((tooth) => visible.includes(tooth)) : selection
+    setSelection(kept)
+    if (kept.length === 0) setDrawerOpen(false)
   }
   const selectedTooth = selection.length === 1 ? selection[0] : undefined
   const visibleHistory = history
@@ -226,26 +268,34 @@ export function OdontogramStudio({
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h3 className="text-base font-semibold">Odontograma</h3>
             <div className="flex flex-wrap gap-2" aria-label="Dentición">
-              <Button
-                variant={dentition === "adult" ? "default" : "outline"}
-                size="sm"
-                aria-pressed={dentition === "adult"}
-                disabled={disabled}
-                onClick={() => switchDentition("adult")}
-              >
-                Adulta (32)
-              </Button>
-              <Button
-                variant={dentition === "primary" ? "default" : "outline"}
-                size="sm"
-                aria-pressed={dentition === "primary"}
-                disabled={disabled}
-                onClick={() => switchDentition("primary")}
-              >
-                Temporal (20)
-              </Button>
+              {(
+                [
+                  ["adult", "Permanente (32)"],
+                  ["mixed", "Mixta"],
+                  ["primary", "Temporal (20)"],
+                ] as const
+              ).map(([value, label]) => (
+                <Button
+                  key={value}
+                  variant={dentition === value ? "default" : "outline"}
+                  size="sm"
+                  aria-pressed={dentition === value}
+                  disabled={disabled}
+                  onClick={() => switchDentition(value)}
+                >
+                  {label}
+                </Button>
+              ))}
             </div>
           </div>
+          <p className="text-xs text-muted-foreground">
+            {dentition === suggested
+              ? birthDate
+                ? "Dentición sugerida por la edad del paciente."
+                : "Dentición por defecto: no hay fecha de nacimiento registrada."
+              : "Vista cambiada a mano."}
+            {dentition === "mixed" ? " Arco exterior: permanentes. Arco interior: temporales." : ""}
+          </p>
           <div className="flex flex-wrap items-center justify-between gap-2">
             <Button
               size="sm"
@@ -311,7 +361,7 @@ export function OdontogramStudio({
                 variant="outline"
                 disabled={disabled}
                 onClick={() => {
-                  if (canChangeSelection()) setSelection([...(rows[0] ?? [])])
+                  if (canChangeSelection()) setSelection(upperTeeth)
                 }}
               >
                 Arcada superior
@@ -321,7 +371,7 @@ export function OdontogramStudio({
                 variant="outline"
                 disabled={disabled}
                 onClick={() => {
-                  if (canChangeSelection()) setSelection([...(rows[1] ?? [])])
+                  if (canChangeSelection()) setSelection(lowerTeeth)
                 }}
               >
                 Arcada inferior
@@ -339,7 +389,10 @@ export function OdontogramStudio({
             </div>
           )}
           <OdontogramArch
-            teeth={{ upper: rows[0] ?? [], lower: rows[1] ?? [] }}
+            teeth={{ upper: outerRows[0] ?? [], lower: outerRows[1] ?? [] }}
+            inner={
+              innerRows ? { upper: innerRows[0] ?? [], lower: innerRows[1] ?? [] } : undefined
+            }
             entriesOf={entriesOf}
             selected={selection}
             disabled={disabled || editorPending}
@@ -528,6 +581,7 @@ export function OdontogramStudio({
           )}
         </section>
       </div>
+      {belowChart}
       {!compact && (
         <Collapsible>
           <div className="flex flex-col gap-6 rounded-sm bg-card p-6">

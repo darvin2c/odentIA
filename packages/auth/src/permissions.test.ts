@@ -45,6 +45,14 @@ describe("permiso operativo agent.decide", () => {
     }
   })
 
+  it("recepción ve alertas de alergia sin leer la ficha clínica", () => {
+    expect(canAccess("reception", "clinical.alerts")).toBe(true)
+    expect(canAccess("reception", "clinical.read")).toBe(false)
+    expect(canAccess("cashier", "clinical.alerts")).toBe(false)
+    expect(canAccess("member", "clinical.alerts")).toBe(false)
+    expect(ALL_PERMISSIONS).toContain("clinical.alerts")
+  })
+
   it("otros roles operativos no deciden ni administran el agente", () => {
     for (const role of ["dentist", "cashier", "member"]) {
       expect(canAccess(role, "agent.decide")).toBe(false)

@@ -92,9 +92,19 @@ interface ZoneDef {
   points: string
   dot: { cx: number; cy: number }
 }
-function zonesFor(toothNumber: number): ZoneDef[] {
+/**
+ * Zonas de la corona en coordenadas previas a cualquier transformación.
+ *
+ * En cuadrícula (tile) la pieza superior se voltea en vertical, lo que conserva
+ * izquierda/derecha. En el arco la pieza se GIRA siguiendo la herradura (cerca
+ * de 180° arriba), y un giro también invierte izquierda/derecha: en las piezas
+ * superiores mesial y distal se intercambian o se pintarían del lado opuesto.
+ */
+function zonesFor(toothNumber: number, rotatedOnArch = false): ZoneDef[] {
   const quadrant = Math.trunc(toothNumber / 10)
-  const mesialOnRight = quadrant === 1 || quadrant === 4 || quadrant === 5 || quadrant === 8
+  const upper = quadrant === 1 || quadrant === 2 || quadrant === 5 || quadrant === 6
+  const tileMesialOnRight = quadrant === 1 || quadrant === 4 || quadrant === 5 || quadrant === 8
+  const mesialOnRight = rotatedOnArch && upper ? !tileMesialOnRight : tileMesialOnRight
   // Claves en inglés del catálogo; la cara externa/interna/central sale de surfacesForTooth.
   const catalog = surfacesForTooth(toothNumber)
   const innerSurface = catalog.includes("palatal") ? "palatal" : "lingual"
@@ -200,6 +210,7 @@ function symbolFor(
   toothNumber: number,
   markers: Markers,
   surface: OdontogramEntry["surface"],
+  rotatedOnArch = false,
 ): React.ReactNode {
   const marker = `url(#${markerFor(markers, paint)})`
   const stroke = {
@@ -429,7 +440,7 @@ function symbolFor(
       )
     case "sealant": {
       if (details.drawing?.length) return null
-      const zone = zonesFor(toothNumber).find((item) => item.surface === surface)
+      const zone = zonesFor(toothNumber, rotatedOnArch).find((item) => item.surface === surface)
       if (!zone) return null
       const { cx, cy } = zone.dot
       return (
@@ -510,6 +521,8 @@ interface ToothCanvasProps {
   titleText: string
   editLabel: string
   clipId: string
+  /** La pieza se dibuja girada sobre el arco (ver `zonesFor`). */
+  rotatedOnArch?: boolean
 }
 
 /**
@@ -533,13 +546,14 @@ function ToothCanvas({
   titleText,
   editLabel,
   clipId,
+  rotatedOnArch = false,
 }: ToothCanvasProps) {
   const svgRef = useRef<SVGSVGElement | null>(null)
   const [live, setLive] = useState<number[][] | null>(null)
   const drawingRef = useRef(false)
   const liveRef = useRef<number[][]>([])
   const type = toothTypeOf(toothNumber)
-  const zones = zonesFor(toothNumber)
+  const zones = zonesFor(toothNumber, rotatedOnArch)
   const silhouette = silhouetteFor(type)
   const cropped = !showRoots
   const paintMode = (mode === "paint" || mode === "paint-draw") && !disabled
@@ -788,6 +802,7 @@ function ToothCanvas({
             toothNumber,
             markers,
             entry.surface,
+            rotatedOnArch,
           )
           if (!node) return null
           return <g key={`${entry.id}-symbol`}>{node}</g>
@@ -899,6 +914,7 @@ export function ToothSVG({
       titleText={title}
       editLabel={editLabel}
       clipId={clipId}
+      rotatedOnArch={size === "arch"}
     />
   )
 

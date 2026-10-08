@@ -11,6 +11,7 @@ import {
 } from "@odentia/ui"
 import { FormDrawer } from "@odentia/ui-patterns"
 import { useQueryClient } from "@tanstack/react-query"
+import { useNavigate } from "@tanstack/react-router"
 import { useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
 import { useMyUserId, useOrgMembers, usePermission } from "../../lib/crm"
@@ -40,7 +41,12 @@ export function NewEncounterButton({
   const [dentistUserId, setDentistUserId] = useState(myUserId)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const open = (id: string) => window.location.assign(`/patients/${patientId}/encounters/${id}`)
+  const navigate = useNavigate()
+  const open = (id: string) =>
+    void navigate({
+      to: "/patients/$patientId/encounters/$encounterId",
+      params: { patientId, encounterId: id },
+    })
   const start = async () => {
     if (saving || !reason.trim()) return
     setSaving(true)

@@ -1,5 +1,6 @@
 import { canAccess } from "@odentia/auth/permissions"
 import { getRouteApi } from "@tanstack/react-router"
+import { useCallback } from "react"
 
 const orgRouteApi = getRouteApi("/_org")
 
@@ -72,6 +73,8 @@ export interface TaskItem {
   contactId: string | null
   conversationId: string | null
   opportunityId: string | null
+  patientId: string | null
+  patientName: string | null
   kind: "manual" | "opportunity_follow_up"
   contactName: string | null
   opportunityTitle: string | null
@@ -95,6 +98,12 @@ export function usePermission(permission: string): boolean {
   return canAccess(useMyRole(), permission)
 }
 
+/** Comprobador de permisos del usuario para decisiones que dependen de varios a la vez. */
+export function useCan(): (permission: string) => boolean {
+  const role = useMyRole()
+  return useCallback((permission: string) => canAccess(role, permission), [role])
+}
+
 export function useMyUserId(): string {
   const { session } = orgRouteApi.useRouteContext()
   return session.userId
@@ -104,6 +113,16 @@ export function useMyUserId(): string {
 export function useOrgMembers(): Array<{ userId: string; role: string; user: { name: string } }> {
   const { org } = orgRouteApi.useRouteContext()
   return org.members
+}
+
+/**
+ * Nombre de un miembro por su usuario. Quien ya no pertenece a la organización
+ * no se muestra con un identificador: se dice que ya no forma parte del equipo.
+ */
+export function useMemberName(): (userId: string) => string {
+  const members = useOrgMembers()
+  return (userId) =>
+    members.find((member) => member.userId === userId)?.user.name ?? "Profesional fuera del equipo"
 }
 
 /** Hace cuánto (es-PE, corto): "hace 5 min", "ayer", "12/03". */
@@ -148,6 +167,10 @@ export interface ContactPatientLink {
 export interface ContactFull {
   patients: ContactPatientLink[]
   contact: ContactListItem & {
+    docType: string | null
+    docNumber: string | null
+    birthDate: string | null
+    sex: string | null
     notes: string | null
     customFields: Record<string, unknown>
     createdAt: string

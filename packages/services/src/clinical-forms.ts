@@ -17,6 +17,7 @@ import { auditEvent } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, ilike } from "drizzle-orm"
 import { isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
 import { requirePatient } from "./patients.js"
+import { requireDecisionContact, requireLinkedActiveContact } from "./responsibilities.js"
 import { createWorkspaceNotification } from "./workspace.js"
 
 /**
@@ -1377,6 +1378,12 @@ export async function createConsentDocument(
 
 export interface SignConsentInput {
   signerKind: "paciente" | "representante"
+  /**
+   * Persona vinculada que firma: el propio paciente o su representante legal
+   * vigente. Con ella, nombre y documento salen de su registro y la facultad se
+   * verifica; sin ella se conserva la firma declarada (flujo anterior).
+   */
+  signerContactId?: string | null
   signerName: string
   signerDoc?: string | null
   representativeRelation?: string | null
@@ -1429,8 +1436,32 @@ export async function signConsentDocument(
   if (input.signerKind !== "paciente" && input.signerKind !== "representante") {
     throw validation("Firmante inválido: paciente|representante")
   }
-  const signerName = assertName(input.signerName, "Nombre de quien firma", 200)
-  const signerDoc = assertOptionalText(input.signerDoc, "Documento de quien firma", 40)
+  let signerContactId: string | null = null
+  let verified: { displayName: string; docNumber: string | null; docType: string | null } | null = null
+  if (input.signerContactId) {
+    if (input.signerKind === "paciente") {
+      const linked = await requireLinkedActiveContact(tx, orgId, current.patientId, input.signerContactId)
+      if (linked.relationship !== "self")
+        throw conflict("SIGNER_NOT_AUTHORIZED", "Solo la propia persona firma como paciente")
+      verified = linked.contact
+    } else {
+      // Representante: facultad legal vigente sobre este paciente, no un vínculo cualquiera.
+      const person = await requireDecisionContact(tx, orgId, current.patientId, input.signerContactId)
+      const linked = await requireLinkedActiveContact(tx, orgId, current.patientId, input.signerContactId)
+      if (linked.relationship === "self")
+        throw conflict("SIGNER_NOT_AUTHORIZED", "La propia persona firma como paciente, no como representante")
+      verified = person
+    }
+    signerContactId = input.signerContactId
+  }
+  const signerName = assertName(verified?.displayName ?? input.signerName, "Nombre de quien firma", 200)
+  const signerDoc = assertOptionalText(
+    verified?.docNumber
+      ? `${verified.docType ?? ""} ${verified.docNumber}`.trim()
+      : input.signerDoc,
+    "Documento de quien firma",
+    40,
+  )
   let representativeRelation: string | null = null
   if (input.signerKind === "representante") {
     representativeRelation = assertOptionalText(input.representativeRelation, "Parentesco o relación", 120)
@@ -1444,6 +1475,7 @@ export async function signConsentDocument(
     .update(consentDocument)
     .set({
       signerKind: input.signerKind,
+      signerContactId,
       signerName,
       signerDoc,
       representativeRelation,

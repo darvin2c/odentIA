@@ -241,6 +241,8 @@ export interface ListAppointmentsInput {
   chairs?: string[]
   statuses?: string[]
   q?: string
+  /** Solo las citas de este paciente (ficha del paciente). */
+  patientId?: string
 }
 
 export async function listAppointments(
@@ -257,6 +259,7 @@ export async function listAppointments(
     gte(appointment.endsAt, from),
   ]
   if (input.branchId) conditions.push(eq(appointment.branchId, input.branchId))
+  if (input.patientId) conditions.push(eq(appointment.patientId, input.patientId))
   if (input.professionals?.length) {
     conditions.push(inArray(appointment.dentistUserId, input.professionals))
   }

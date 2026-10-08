@@ -14,7 +14,7 @@ import {
   savePatientHealth,
   voidOdontogramEntry,
 } from "./clinical.js"
-import { createContact, getContact } from "./contacts.js"
+import { createContact, getContact, updateContact } from "./contacts.js"
 import {
   createPatient,
   findPatientDuplicates,
@@ -24,6 +24,7 @@ import {
   nextPatientNumber,
   removePatientContact,
   setPatientContact,
+  updatePatient,
 } from "./patients.js"
 import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
 
@@ -90,7 +91,10 @@ it("crear paciente directo y vinculado; segundo self del mismo contacto da 409",
     getPatient(tx, "org_a", direct.id),
   )
   expect(directDetail.patient.displayName).toBe("María Pérez")
-  expect(directDetail.contacts).toEqual([])
+  // Todo paciente es una persona: el alta sin contacto crea la suya.
+  expect(directDetail.contacts).toEqual([
+    expect.objectContaining({ relationship: "self", displayName: "María Pérez", isPreferred: true }),
+  ])
   expect(directDetail.registration).toMatchObject({ entryPoint: "platform", respondent: "staff" })
 
   const contact = await withOrgContext(appDb, "org_a", (tx) =>
@@ -153,7 +157,11 @@ it("María es self de su ficha y guardian de Pedro; el teléfono compartido no b
   const detallePedro = await withOrgContext(appDb, "org_a", (tx) =>
     getPatient(tx, "org_a", pedro.id),
   )
-  expect(detallePedro.contacts).toEqual([
+  expect(detallePedro.contacts).toHaveLength(2)
+  expect(detallePedro.contacts).toContainEqual(
+    expect.objectContaining({ relationship: "self", displayName: "Pedro Hijo", isPreferred: false }),
+  )
+  expect(detallePedro.contacts.filter((link) => link.relationship !== "self")).toEqual([
     expect.objectContaining({
       contactId: maria.id,
       displayName: "María Madre",
@@ -193,7 +201,13 @@ it("eliminar la relación guardian conserva personas e historial", async () => {
   const detalle = await withOrgContext(appDb, "org_a", (tx) =>
     getPatient(tx, "org_a", hijo.id),
   )
-  expect(detalle.contacts).toEqual([])
+  // Queda solo su propia persona, que no se puede desvincular.
+  expect(detalle.contacts).toEqual([expect.objectContaining({ relationship: "self" })])
+  await expect(
+    withOrgContext(appDb, "org_a", (tx) =>
+      removePatientContact(tx, "org_a", ACTOR, hijo.id, detalle.contacts[0]?.contactId ?? ""),
+    ),
+  ).rejects.toMatchObject({ code: "PATIENT_PERSON_REQUIRED", status: 409 })
   // Ni el paciente ni el contacto se borran con la relación.
   expect(detalle.patient.isActive).toBe(true)
   const contactoVivo = await withOrgContext(appDb, "org_a", (tx) =>
@@ -711,4 +725,126 @@ it("inmutabilidad real: UPDATE clinical_note con el rol app es rechazado", async
   expect(err).not.toBeNull()
   // 42501 insufficient_privilege (REVOKE UPDATE a dentalagent_app).
   expect(err?.cause?.code ?? err?.message).toMatch(/42501|permission denied/i)
+})
+it("persona única: una identidad, protegida del agente y sustituible por el contacto real", async () => {
+  const ficha = await withOrgContext(appDb, "org_a", (tx) =>
+    createPatient(tx, "org_a", ACTOR, {
+      displayName: "Rosa Quispe Mamani",
+      docType: "DNI",
+      docNumber: "45550001",
+      phone: "+51955500011",
+    }),
+  )
+  const persona = async () =>
+    (await withOrgContext(appDb, "org_a", (tx) => getPatient(tx, "org_a", ficha.id))).contacts.find(
+      (link) => link.relationship === "self",
+    )
+  const provisional = await persona()
+  if (!provisional) throw new Error("El paciente no recibió su persona")
+
+  // Editar la ficha actualiza a la persona, y editar a la persona actualiza la ficha.
+  await withOrgContext(appDb, "org_a", (tx) =>
+    updatePatient(tx, "org_a", ACTOR, ficha.id, { displayName: "Rosa Quispe de Ríos" }),
+  )
+  const trasFicha = await withOrgContext(appDb, "org_a", (tx) =>
+    getContact(tx, "org_a", provisional.contactId),
+  )
+  expect(trasFicha.contact).toMatchObject({
+    displayName: "Rosa Quispe de Ríos",
+    docType: "DNI",
+    docNumber: "45550001",
+  })
+  await withOrgContext(appDb, "org_a", (tx) =>
+    updateContact(tx, "org_a", provisional.contactId, { birthDate: "1972-03-04", sex: "F" }),
+  )
+  const trasPersona = await withOrgContext(appDb, "org_a", (tx) => getPatient(tx, "org_a", ficha.id))
+  expect(trasPersona.patient).toMatchObject({ birthDate: "1972-03-04", sex: "F" })
+
+  // El agente no cambia la identidad de quien ya es paciente; sí sus etiquetas.
+  await expect(
+    withOrgContext(appDb, "org_a", (tx) =>
+      updateContact(
+        tx,
+        "org_a",
+        provisional.contactId,
+        { displayName: "Rosita" },
+        { userId: null, origin: "agent" },
+      ),
+    ),
+  ).rejects.toMatchObject({ code: "PATIENT_IDENTITY_PROTECTED", status: 409 })
+  await withOrgContext(appDb, "org_a", (tx) =>
+    updateContact(
+      tx,
+      "org_a",
+      provisional.contactId,
+      { tags: ["interesado-ortodoncia"] },
+      { userId: null, origin: "agent" },
+    ),
+  )
+
+  // Un documento es de una sola persona.
+  const otra = await withOrgContext(appDb, "org_a", (tx) =>
+    createContact(tx, "org_a", { displayName: "Otra Persona" }),
+  )
+  await expect(
+    withOrgContext(appDb, "org_a", (tx) =>
+      updateContact(tx, "org_a", otra.id, { docType: "DNI", docNumber: "45550001" }),
+    ),
+  ).rejects.toMatchObject({ code: "DUPLICATE_DOCUMENT", status: 409 })
+
+  // Rosa escribe por WhatsApp desde un contacto nuevo: identificarla con él
+  // sustituye a la persona provisional sin dejar dos identidades.
+  const whatsapp = await withOrgContext(appDb, "org_a", (tx) =>
+    createContact(tx, "org_a", { displayName: "Rosita 🌸", phone: "+51911222333" }),
+  )
+  await withOrgContext(appDb, "org_a", (tx) =>
+    setPatientContact(tx, "org_a", ACTOR, ficha.id, {
+      contactId: whatsapp.id,
+      relationship: "self",
+      isPreferred: true,
+    }),
+  )
+  const definitiva = await persona()
+  expect(definitiva).toMatchObject({ contactId: whatsapp.id, displayName: "Rosa Quispe de Ríos" })
+  // La persona provisional no deja rastro: nada más la referenciaba.
+  await expect(
+    withOrgContext(appDb, "org_a", (tx) => getContact(tx, "org_a", provisional.contactId)),
+  ).rejects.toMatchObject({ status: 404 })
+  const nuevo = await withOrgContext(appDb, "org_a", (tx) => getContact(tx, "org_a", whatsapp.id))
+  expect(nuevo.contact).toMatchObject({ docType: "DNI", docNumber: "45550001" })
+  expect(nuevo.contact.notes).toContain("Teléfono anterior del contacto: +51911222333")
+
+  // Con actividad propia ya no es provisional: no se fusiona en silencio.
+  const tercero = await withOrgContext(appDb, "org_a", (tx) =>
+    createContact(tx, "org_a", { displayName: "Tercero" }),
+  )
+  await withOrgContext(appDb, "org_a", (tx) =>
+    setPatientContact(tx, "org_a", ACTOR, ficha.id, {
+      contactId: tercero.id,
+      relationship: "family",
+      isPreferred: false,
+    }),
+  )
+  await ownerDb.execute(
+    sql`insert into task (organization_id, contact_id, title, created_by) values ('org_a', ${whatsapp.id}, 'Llamar', ${ACTOR})`,
+  )
+  await expect(
+    withOrgContext(appDb, "org_a", (tx) =>
+      setPatientContact(tx, "org_a", ACTOR, ficha.id, {
+        contactId: tercero.id,
+        relationship: "self",
+        isPreferred: false,
+      }),
+    ),
+  ).rejects.toMatchObject({ code: "PATIENT_PERSON_IN_USE", status: 409 })
+  // La propia persona no se degrada a otro vínculo.
+  await expect(
+    withOrgContext(appDb, "org_a", (tx) =>
+      setPatientContact(tx, "org_a", ACTOR, ficha.id, {
+        contactId: whatsapp.id,
+        relationship: "family",
+        isPreferred: true,
+      }),
+    ),
+  ).rejects.toMatchObject({ code: "PATIENT_PERSON_REQUIRED", status: 409 })
 })

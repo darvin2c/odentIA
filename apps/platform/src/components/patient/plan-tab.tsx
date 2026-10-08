@@ -235,7 +235,7 @@ export function PlanTab({
       queryClient.invalidateQueries({ queryKey: ["treatment-plan", patientId] }),
       queryClient.invalidateQueries({ queryKey: ["budgets", patientId] }),
       queryClient.invalidateQueries({ queryKey: ["budget", patientId] }),
-      queryClient.invalidateQueries({ queryKey: ["plan", patientId] }),
+      queryClient.invalidateQueries({ queryKey: ["plan-items", patientId] }),
       queryClient.invalidateQueries({ queryKey: ["patient-summary", patientId] }),
     ])
 
