@@ -1,3 +1,4 @@
+import { label } from "../../lib/glossary"
 import { CONTACT_RELATIONSHIP_LABELS } from "@odentia/clinical"
 import {
   Badge,
@@ -413,9 +414,9 @@ function PatientConversationsDialog({
                         className="flex flex-wrap items-center justify-between gap-2 rounded-md border px-3 py-2"
                       >
                         <span className="text-sm text-muted-foreground">
-                          {conversation.channel}
+                          {label("canal", conversation.channel)}
                           {conversation.connectionName ? ` · ${conversation.connectionName}` : ""}
-                          {` · ${conversation.status}`}
+                          {` · ${label("conversacion", conversation.status)}`}
                           {conversation.lastMessageAt
                             ? ` · ${timeAgo(conversation.lastMessageAt)}`
                             : ""}

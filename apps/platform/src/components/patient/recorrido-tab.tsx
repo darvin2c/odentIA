@@ -6,6 +6,8 @@
  * Cada sección enlaza con la superficie donde se actúa; nada se edita aquí que
  * no corresponda a este tratamiento.
  */
+
+import { label } from "../../lib/glossary"
 import { surfacesForTooth } from "@odentia/clinical"
 import { Badge, Button, Field, FieldLabel, Textarea } from "@odentia/ui"
 import { EmptyState, FormDrawer } from "@odentia/ui-patterns"
@@ -39,6 +41,7 @@ import type {
 } from "../../lib/patients"
 import { planStatusLabel } from "../../lib/patients"
 import { formatMoney, type ServiceCatalogItem } from "../../lib/services"
+import { ChoiceSelect } from "../ui/choice-select"
 import { Cie10Search } from "./cie10-search"
 import { ControlesPanel, RecetasPanel } from "./clinical-panels"
 import { DocumentOpenButton } from "./document-open-button"
@@ -768,7 +771,7 @@ export function RecorridoClinicoTab({
                 {journey.documents.map((document) => (
                   <li key={document.id} className="flex flex-wrap items-center gap-2 text-sm">
                     <span>
-                      {document.label} · {document.category}
+                      {document.label} · {label("documento", document.category)}
                       {document.toothNumbers.length > 0
                         ? ` · piezas ${document.toothNumbers.join(", ")}`
                         : ""}
@@ -928,9 +931,9 @@ export function RecorridoClinicoTab({
           {service?.scope === "quadrant" ? (
             <Field>
               <FieldLabel htmlFor={`${uid}-revise-quadrant`}>Cuadrante</FieldLabel>
-              <select
+              <ChoiceSelect
                 id={`${uid}-revise-quadrant`}
-                className="h-9 w-full rounded-md border bg-background px-3 text-sm"
+                className="w-full"
                 value={quadrant}
                 onChange={(event) => setQuadrant(event.target.value)}
               >
@@ -940,22 +943,22 @@ export function RecorridoClinicoTab({
                     Cuadrante {value}
                   </option>
                 ))}
-              </select>
+              </ChoiceSelect>
             </Field>
           ) : null}
           {service?.scope === "arch" ? (
             <Field>
               <FieldLabel htmlFor={`${uid}-revise-arch`}>Arcada</FieldLabel>
-              <select
+              <ChoiceSelect
                 id={`${uid}-revise-arch`}
-                className="h-9 w-full rounded-md border bg-background px-3 text-sm"
+                className="w-full"
                 value={arch}
                 onChange={(event) => setArch(event.target.value)}
               >
                 <option value="">Elige la arcada</option>
                 <option value="upper">Superior</option>
                 <option value="lower">Inferior</option>
-              </select>
+              </ChoiceSelect>
             </Field>
           ) : null}
           <Field>

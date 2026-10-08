@@ -1,3 +1,4 @@
+import { label } from "../../lib/glossary"
 import {
   Badge,
   Breadcrumb,
@@ -68,7 +69,7 @@ export function clinicalAlerts(
     .filter((a) => !critical(a))
     .map((a) => ({
       id: a.id,
-      label: `${a.kind === "intolerancia" ? "Intolerancia" : "Alergia"}: ${a.substance} (${a.severity})`,
+      label: `${a.kind === "intolerancia" ? "Intolerancia" : "Alergia"}: ${a.substance} (${label("alergia", a.severity).toLowerCase()})`,
       tone: "secondary" as const,
     }))
   const conditions = detail.activeConditions.map((c) => ({

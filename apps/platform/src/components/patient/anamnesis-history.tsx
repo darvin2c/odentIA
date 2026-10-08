@@ -1,4 +1,5 @@
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@odentia/ui"
+import { LoadingState } from "@odentia/ui-patterns"
 import { useQuery } from "@tanstack/react-query"
 import { apiFetch } from "../../lib/api"
 import type { AnamnesisAnswers } from "../../lib/patients"
@@ -96,7 +97,7 @@ export function AnamnesisVersionDialog({
           </DialogDescription>
         </DialogHeader>
         {version.isLoading ? (
-          <p className="text-sm text-muted-foreground">Cargando…</p>
+          <LoadingState message="Cargando antecedentes…" />
         ) : version.isError ? (
           <p role="alert" className="text-sm text-destructive">
             {version.error.message}

@@ -47,6 +47,7 @@ import {
 import { formatMoney } from "../../lib/services"
 import { OdontogramStudio } from "../odontogram-studio"
 import { ProfessionalProfileDrawer } from "../professional-profile-drawer"
+import { ChoiceSelect } from "../ui/choice-select"
 import { ControlesPanel, RecetasPanel } from "./clinical-panels"
 import { EncounterDiagnoses } from "./encounter-diagnoses"
 import { EncounterPlanPanel } from "./encounter-plan-panel"
@@ -1016,9 +1017,9 @@ export function EncounterEditor({
     <div className="flex flex-col gap-3">
       <Field>
         <FieldLabel htmlFor={`${uid}-branch`}>Sucursal de la atención</FieldLabel>
-        <select
+        <ChoiceSelect
           id={`${uid}-branch`}
-          className="h-9 rounded-md border bg-background px-3 text-sm"
+          
           disabled={locked || branchesQuery.isPending}
           value={encounter.branchId ?? ""}
           onChange={async (event) => {
@@ -1044,7 +1045,7 @@ export function EncounterEditor({
               {branch.name}
             </option>
           ))}
-        </select>
+        </ChoiceSelect>
         {branchesQuery.isError && <p role="alert">No se pudieron cargar las sucursales.</p>}
       </Field>
       <Field>

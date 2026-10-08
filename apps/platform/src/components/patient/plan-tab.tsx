@@ -40,6 +40,7 @@ import {
 import { usePermission } from "../../lib/crm"
 import type { PatientFull, PlanItem, TreatmentPlanWithStatus } from "../../lib/patients"
 import { formatMoney } from "../../lib/services"
+import { ChoiceSelect } from "../ui/choice-select"
 
 function mutationMessage(err: unknown): string {
   if (err instanceof ApiError) {
@@ -751,9 +752,9 @@ export function PlanTab({
                             <div className="flex flex-wrap items-center gap-3">
                               <label className="flex items-center gap-2 text-sm">
                                 Alternativa de
-                                <select
+                                <ChoiceSelect
                                   aria-label={`Alternativa de ${item.title}`}
-                                  className="h-9 rounded-md border bg-background px-3 text-sm"
+                                  
                                   disabled={writeBlocked}
                                   value={item.optionGroupId ?? ""}
                                   onChange={(event) =>
@@ -770,7 +771,7 @@ export function PlanTab({
                                       {group.title}
                                     </option>
                                   ))}
-                                </select>
+                                </ChoiceSelect>
                               </label>
                               <label className="flex items-center gap-2 text-sm">
                                 <Checkbox
@@ -1507,7 +1508,7 @@ function DecideBudgetDialog({
       <ul className="flex flex-col gap-2">
         {lines.map((line) => (
           <li key={line.id} className="flex items-start gap-2">
-            <select
+            <ChoiceSelect
               aria-label={`Decisión: ${line.title}`}
               value={decisions[line.planItemId]}
               onChange={(event) =>
@@ -1520,7 +1521,7 @@ function DecideBudgetDialog({
               <option value="aceptado">Aceptado</option>
               <option value="rechazado">Rechazado</option>
               <option value="pospuesto">Pospuesto</option>
-            </select>
+            </ChoiceSelect>
             <span className="flex flex-1 flex-col">
               <span className="text-sm font-medium">{line.title}</span>
               <span className="text-xs text-muted-foreground">
@@ -1535,9 +1536,9 @@ function DecideBudgetDialog({
       </ul>
       <Field>
         <FieldLabel htmlFor={`${uid}-decide-by`}>Quién decide</FieldLabel>
-        <select
+        <ChoiceSelect
           id={`${uid}-decide-by`}
-          className="h-9 w-full rounded-md border bg-background px-3 text-sm"
+          className="w-full"
           value={deciderId}
           onChange={(event) => onDeciderChange(event.target.value)}
         >
@@ -1547,7 +1548,7 @@ function DecideBudgetDialog({
               {decider.label}
             </option>
           ))}
-        </select>
+        </ChoiceSelect>
         {deciders.length === 0 ? (
           <p className="text-xs text-muted-foreground">
             Para registrar quién decide, vincula al paciente y asigna el rol de representante legal

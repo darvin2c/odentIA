@@ -44,6 +44,7 @@ import { Cie10Search } from "./patient/cie10-search"
 import { ServicePicker } from "./patient/service-picker"
 import { ToothHistory } from "./patient/tooth-history"
 import { ToothSVG } from "./tooth-svg"
+import { ChoiceSelect } from "./ui/choice-select"
 
 /** Las URL firmadas expiran: se consideran frescas 10 min y luego se regeneran. */
 const SIGNED_URL_STALE_MS = 10 * 60 * 1000
@@ -1200,9 +1201,9 @@ export function ToothDrawer({
               <FieldLabel htmlFor={`${uid}-source-finding`}>
                 Problema que motiva el tratamiento
               </FieldLabel>
-              <select
+              <ChoiceSelect
                 id={`${uid}-source-finding`}
-                className="min-h-11 rounded-md border bg-background px-3 text-sm"
+                
                 disabled={fieldDisabled}
                 value={sourceFindingId}
                 onChange={(event) => {
@@ -1221,7 +1222,7 @@ export function ToothDrawer({
                     {entry.note ? ` · ${entry.note}` : ""}
                   </option>
                 ))}
-              </select>
+              </ChoiceSelect>
             </Field>
           )}
           <Field className="sm:col-span-2">

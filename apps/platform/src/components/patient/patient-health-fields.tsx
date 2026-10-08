@@ -6,6 +6,7 @@
  * alergias/condiciones/medicación se definen aquí una sola vez; la pantalla
  * clínica y `RegistrationHealthFields` las consumen sin copiarlas.
  */
+
 import {
   BLOOD_GROUPS,
   type BloodGroup,
@@ -40,6 +41,7 @@ import {
   HEALTH_REVIEW_LABELS,
   type HealthReviewState,
 } from "../../lib/patients"
+import { ChoiceSelect } from "../ui/choice-select"
 import { Cie10Search } from "./cie10-search"
 
 export type HealthDeclaration = NonNullable<RegistrationAnswers["health"]>
@@ -377,9 +379,9 @@ export function AllergyRows({
               ).map(([key, text, options, fallback]) => (
                 <Field key={key}>
                   <FieldLabel htmlFor={fid(`alg-${key}-${row.key}`)}>{text}</FieldLabel>
-                  <select
+                  <ChoiceSelect
                     id={fid(`alg-${key}-${row.key}`)}
-                    className="h-9 rounded-md border bg-background px-3 text-sm"
+                    
                     value={row[key] ?? fallback}
                     disabled={readOnly}
                     onChange={(e) => patch(row.key, { [key]: e.target.value })}
@@ -390,7 +392,7 @@ export function AllergyRows({
                         {optionLabel}
                       </option>
                     ))}
-                  </select>
+                  </ChoiceSelect>
                 </Field>
               ))}
             </>

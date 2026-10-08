@@ -1,10 +1,11 @@
 import { Button, Field, FieldLabel, Textarea } from "@odentia/ui"
-import { ConfirmDialog, FormDrawer } from "@odentia/ui-patterns"
+import { ConfirmDialog, FormDrawer, LoadingState } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useId, useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
 import { usePermission } from "../../lib/crm"
 import type { PatientFull } from "../../lib/patients"
+import { ChoiceSelect } from "../ui/choice-select"
 
 interface DataConsent {
   id: string
@@ -87,7 +88,7 @@ export function DataConsentSection({ detail }: { detail: PatientFull }): React.J
     <div className="flex flex-col gap-2 border-t pt-3 text-sm">
       <p className="text-xs font-medium text-muted-foreground">Tratamiento de datos personales</p>
       {query.isPending ? (
-        <p className="text-muted-foreground">Cargando…</p>
+        <LoadingState message="Cargando consentimientos de datos…" />
       ) : current ? (
         <>
           <p>
@@ -153,9 +154,9 @@ export function DataConsentSection({ detail }: { detail: PatientFull }): React.J
         <div className="flex flex-col gap-4">
           <Field>
             <FieldLabel htmlFor={`${uid}-grantor`}>Consintió</FieldLabel>
-            <select
+            <ChoiceSelect
               id={`${uid}-grantor`}
-              className="h-9 rounded-md border bg-background px-3 text-sm"
+              
               value={grantor}
               onChange={(event) => setGrantor(event.target.value)}
             >
@@ -164,7 +165,7 @@ export function DataConsentSection({ detail }: { detail: PatientFull }): React.J
                   {c.displayName} · {c.relationship === "self" ? "el paciente" : "representante"}
                 </option>
               ))}
-            </select>
+            </ChoiceSelect>
           </Field>
           <fieldset className="m-0 flex flex-col gap-2 border-0 p-0">
             <legend className="mb-1 text-sm font-medium">Finalidades aceptadas</legend>

@@ -42,6 +42,7 @@ import {
   type PatientHealth,
   savePatientHealthApi,
 } from "../../lib/patients"
+import { ChoiceSelect } from "../ui/choice-select"
 import { AnamnesisVersionDialog } from "./anamnesis-history"
 import {
   AllergyRows,
@@ -653,9 +654,9 @@ export function AntecedentesTab({ patientId }: { patientId: string }): React.JSX
             </div>
             <Field>
               <FieldLabel htmlFor={fid("asa")}>Clasificación ASA</FieldLabel>
-              <select
+              <ChoiceSelect
                 id={fid("asa")}
-                className="h-9 max-w-md rounded-md border bg-background px-3 text-sm"
+                className="max-w-md"
                 value={asaClass}
                 disabled={saving}
                 onChange={(e) => {
@@ -669,7 +670,7 @@ export function AntecedentesTab({ patientId }: { patientId: string }): React.JSX
                     {optionLabel}
                   </option>
                 ))}
-              </select>
+              </ChoiceSelect>
             </Field>
           </section>
 
@@ -908,9 +909,9 @@ export function AntecedentesTab({ patientId }: { patientId: string }): React.JSX
                       >
                         <Field>
                           <FieldLabel htmlFor={fid(`fam-rel-${row.key}`)}>Parentesco</FieldLabel>
-                          <select
+                          <ChoiceSelect
                             id={fid(`fam-rel-${row.key}`)}
-                            className="h-9 rounded-md border bg-background px-3 text-sm"
+                            
                             value={row.relationship}
                             disabled={!canWrite}
                             onChange={(e) => {
@@ -927,7 +928,7 @@ export function AntecedentesTab({ patientId }: { patientId: string }): React.JSX
                                 {optionLabel}
                               </option>
                             ))}
-                          </select>
+                          </ChoiceSelect>
                         </Field>
                         <Field>
                           <FieldLabel htmlFor={fid(`fam-con-${row.key}`)}>Condición</FieldLabel>

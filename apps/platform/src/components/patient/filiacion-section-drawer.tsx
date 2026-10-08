@@ -13,6 +13,7 @@ import { useId, useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
 import { useOrgProfile } from "../../lib/org"
 import type { Patient } from "../../lib/patients"
+import { ChoiceSelect } from "../ui/choice-select"
 import { UbigeoField } from "./ubigeo-field"
 
 /** Países frecuentes (ISO 3166-1 alfa-2); otro se escribe con su código. */
@@ -241,9 +242,9 @@ export function FiliacionSectionDrawer({
             >
               <FieldLabel htmlFor={id}>{field.label}</FieldLabel>
               {t.kind === "select" ? (
-                <select
+                <ChoiceSelect
                   id={id}
-                  className="h-9 rounded-md border bg-background px-3 text-sm"
+                  
                   value={value}
                   onChange={(event) => set(field.key, event.target.value)}
                 >
@@ -253,7 +254,7 @@ export function FiliacionSectionDrawer({
                       {label}
                     </option>
                   ))}
-                </select>
+                </ChoiceSelect>
               ) : t.kind === "country" ? (
                 <>
                   <Input

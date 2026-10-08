@@ -6,10 +6,12 @@
  * Nada se borra: las correcciones son anulaciones con motivo. Los importes nunca
  * se suman entre monedas distintas.
  */
+
 import { Badge, Button, Field, FieldLabel, Input, Textarea } from "@odentia/ui"
-import { EmptyState, FormDrawer } from "@odentia/ui-patterns"
+import { DataTable, EmptyState, FormDrawer } from "@odentia/ui-patterns"
+import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-table"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { useId, useState } from "react"
+import { useId, useMemo, useState } from "react"
 import { apiFetch } from "../../lib/api"
 import { fetchBudgets } from "../../lib/budgets"
 import {
@@ -34,6 +36,7 @@ import { usePermission } from "../../lib/crm"
 import { fetchShifts } from "../../lib/finance"
 import type { PatientFull, PlanItem } from "../../lib/patients"
 import { formatMoney } from "../../lib/services"
+import { ChoiceSelect } from "../ui/choice-select"
 
 const MAX_TEXT = 2000
 const MAX_REFERENCE = 200
@@ -358,78 +361,31 @@ export function CuentaTab({ patientId }: { patientId: string }): React.JSX.Eleme
       ) : null}
 
       <div className="flex flex-col gap-4 elevated rounded-xl border bg-card p-6">
-        <div className="font-heading text-base font-medium">Cargos</div>
+        <h2 className="font-heading text-base font-medium">Cargos</h2>
         {charges.length === 0 ? (
           <p className="text-sm text-muted-foreground">Sin cargos registrados.</p>
         ) : (
-          <ul className="flex flex-col divide-y">
-            {charges.map(({ charge, pendingCents, appliedCents }) => (
-              <li key={charge.id} className="flex flex-col gap-2 py-3">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="font-medium">{charge.description}</span>
-                  <Badge variant={charge.voidedAt ? "destructive" : "secondary"}>
-                    {charge.voidedAt ? "Anulado" : "Activo"}
-                  </Badge>
-                  <span className="text-sm tabular-nums">
-                    {formatMoney(charge.amountCents, charge.currency)}
-                  </span>
-                </div>
-                <p className="text-sm text-muted-foreground">
-                  Aplicado {formatMoney(appliedCents, charge.currency)} · pendiente{" "}
-                  {formatMoney(pendingCents, charge.currency)}
-                  {charge.dueAt ? ` · vence ${formatDate(charge.dueAt)}` : ""}
-                </p>
-                {charge.voidReason ? (
-                  <p className="text-sm text-muted-foreground">Anulado: {charge.voidReason}</p>
-                ) : null}
-                {canWrite && !charge.voidedAt ? (
-                  <div className="flex flex-wrap gap-2">
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      disabled={appliedCents > 0}
-                      onClick={() => {
-                        setError(null)
-                        setTargetId(charge.id)
-                        setForm("void-charge")
-                      }}
-                    >
-                      Anular cargo
-                    </Button>
-                    {pendingCents > 0 ? (
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        onClick={() => {
-                          setError(null)
-                          setApplyChargeId(charge.id)
-                          setApplyPaymentId(
-                            payments.find((p) => p.availableCents > 0)?.payment.id ?? "",
-                          )
-                          setApplyAmount(String(pendingCents / 100))
-                          setForm("apply")
-                        }}
-                      >
-                        Aplicar un pago
-                      </Button>
-                    ) : null}
-                  </div>
-                ) : null}
-                {canWrite && !charge.voidedAt && appliedCents > 0 ? (
-                  <p className="text-xs text-muted-foreground">
-                    Para anularlo, anula primero sus aplicaciones.
-                  </p>
-                ) : null}
-              </li>
-            ))}
-          </ul>
+          <ChargesTable
+            charges={charges}
+            canWrite={canWrite}
+            onVoid={(chargeId) => {
+              setError(null)
+              setTargetId(chargeId)
+              setForm("void-charge")
+            }}
+            onApply={(chargeId, pendingCents) => {
+              setError(null)
+              setApplyChargeId(chargeId)
+              setApplyPaymentId(payments.find((p) => p.availableCents > 0)?.payment.id ?? "")
+              setApplyAmount(String(pendingCents / 100))
+              setForm("apply")
+            }}
+          />
         )}
       </div>
 
       <div className="flex flex-col gap-4 elevated rounded-xl border bg-card p-6">
-        <div className="font-heading text-base font-medium">Pagos, aplicaciones y devoluciones</div>
+        <h2 className="font-heading text-base font-medium">Pagos, aplicaciones y devoluciones</h2>
         {payments.length === 0 ? (
           <p className="text-sm text-muted-foreground">Sin pagos registrados.</p>
         ) : (
@@ -602,9 +558,9 @@ export function CuentaTab({ patientId }: { patientId: string }): React.JSX.Eleme
           ) : (
             <Field>
               <FieldLabel htmlFor={`${uid}-budget-line`}>Línea aceptada</FieldLabel>
-              <select
+              <ChoiceSelect
                 id={`${uid}-budget-line`}
-                className="h-9 w-full rounded-md border bg-background px-3 text-sm"
+                className="w-full"
                 value={budgetItemId}
                 onChange={(event) => {
                   setBudgetItemId(event.target.value)
@@ -619,7 +575,7 @@ export function CuentaTab({ patientId }: { patientId: string }): React.JSX.Eleme
                     {formatMoney(remainingCents, line.currency)}
                   </option>
                 ))}
-              </select>
+              </ChoiceSelect>
             </Field>
           )}
         </div>
@@ -668,9 +624,9 @@ export function CuentaTab({ patientId }: { patientId: string }): React.JSX.Eleme
           </Field>
           <Field>
             <FieldLabel htmlFor={`${uid}-charge-currency`}>Moneda</FieldLabel>
-            <select
+            <ChoiceSelect
               id={`${uid}-charge-currency`}
-              className="h-9 w-full rounded-md border bg-background px-3 text-sm"
+              className="w-full"
               value={chargeCurrency}
               onChange={(event) => setChargeCurrency(event.target.value)}
             >
@@ -679,13 +635,13 @@ export function CuentaTab({ patientId }: { patientId: string }): React.JSX.Eleme
                   {currency}
                 </option>
               ))}
-            </select>
+            </ChoiceSelect>
           </Field>
           <Field>
             <FieldLabel htmlFor={`${uid}-charge-item`}>Tratamiento</FieldLabel>
-            <select
+            <ChoiceSelect
               id={`${uid}-charge-item`}
-              className="h-9 w-full rounded-md border bg-background px-3 text-sm"
+              className="w-full"
               value={planItemId}
               onChange={(event) => setPlanItemId(event.target.value)}
             >
@@ -696,7 +652,7 @@ export function CuentaTab({ patientId }: { patientId: string }): React.JSX.Eleme
                   {item.toothNumber != null ? ` · Pieza ${item.toothNumber}` : ""}
                 </option>
               ))}
-            </select>
+            </ChoiceSelect>
           </Field>
         </div>
       </FormDrawer>
@@ -731,9 +687,9 @@ export function CuentaTab({ patientId }: { patientId: string }): React.JSX.Eleme
           </Field>
           <Field>
             <FieldLabel htmlFor={`${uid}-payment-currency`}>Moneda</FieldLabel>
-            <select
+            <ChoiceSelect
               id={`${uid}-payment-currency`}
-              className="h-9 w-full rounded-md border bg-background px-3 text-sm"
+              className="w-full"
               value={paymentCurrency}
               onChange={(event) => setPaymentCurrency(event.target.value)}
             >
@@ -742,13 +698,13 @@ export function CuentaTab({ patientId }: { patientId: string }): React.JSX.Eleme
                   {currency}
                 </option>
               ))}
-            </select>
+            </ChoiceSelect>
           </Field>
           <Field>
             <FieldLabel htmlFor={`${uid}-payment-method`}>Medio de pago</FieldLabel>
-            <select
+            <ChoiceSelect
               id={`${uid}-payment-method`}
-              className="h-9 w-full rounded-md border bg-background px-3 text-sm"
+              className="w-full"
               value={paymentMethod}
               onChange={(event) => setPaymentMethod(event.target.value as PaymentMethod)}
             >
@@ -757,13 +713,13 @@ export function CuentaTab({ patientId }: { patientId: string }): React.JSX.Eleme
                   {PAYMENT_METHOD_LABELS[method]}
                 </option>
               ))}
-            </select>
+            </ChoiceSelect>
           </Field>
           <Field>
             <FieldLabel htmlFor={`${uid}-payment-payer`}>Quién paga</FieldLabel>
-            <select
+            <ChoiceSelect
               id={`${uid}-payment-payer`}
-              className="h-9 w-full rounded-md border bg-background px-3 text-sm"
+              className="w-full"
               value={payerContactId}
               onChange={(event) => setPayerContactId(event.target.value)}
             >
@@ -773,7 +729,7 @@ export function CuentaTab({ patientId }: { patientId: string }): React.JSX.Eleme
                   {contact.displayName}
                 </option>
               ))}
-            </select>
+            </ChoiceSelect>
           </Field>
           <Field>
             <FieldLabel htmlFor={`${uid}-payment-reference`}>Referencia</FieldLabel>
@@ -786,9 +742,9 @@ export function CuentaTab({ patientId }: { patientId: string }): React.JSX.Eleme
           </Field>
           <Field>
             <FieldLabel htmlFor={`${uid}-payment-shift`}>Turno de caja (opcional)</FieldLabel>
-            <select
+            <ChoiceSelect
               id={`${uid}-payment-shift`}
-              className="h-9 w-full rounded-md border bg-background px-3 text-sm"
+              className="w-full"
               value={paymentShiftId}
               onChange={(event) => setPaymentShiftId(event.target.value)}
             >
@@ -803,7 +759,7 @@ export function CuentaTab({ patientId }: { patientId: string }): React.JSX.Eleme
                       : " · electrónico, sin arqueo"}
                   </option>
                 ))}
-            </select>
+            </ChoiceSelect>
           </Field>
         </div>
       </FormDrawer>
@@ -834,9 +790,9 @@ export function CuentaTab({ patientId }: { patientId: string }): React.JSX.Eleme
         <div className="flex flex-col gap-4">
           <Field>
             <FieldLabel htmlFor={`${uid}-apply-payment`}>Pago disponible</FieldLabel>
-            <select
+            <ChoiceSelect
               id={`${uid}-apply-payment`}
-              className="h-9 w-full rounded-md border bg-background px-3 text-sm"
+              className="w-full"
               value={applyPaymentId}
               onChange={(event) => setApplyPaymentId(event.target.value)}
             >
@@ -849,13 +805,13 @@ export function CuentaTab({ patientId }: { patientId: string }): React.JSX.Eleme
                     {formatMoney(availableCents, payment.currency)}
                   </option>
                 ))}
-            </select>
+            </ChoiceSelect>
           </Field>
           <Field>
             <FieldLabel htmlFor={`${uid}-apply-charge`}>Cargo pendiente</FieldLabel>
-            <select
+            <ChoiceSelect
               id={`${uid}-apply-charge`}
-              className="h-9 w-full rounded-md border bg-background px-3 text-sm"
+              className="w-full"
               value={applyChargeId}
               onChange={(event) => setApplyChargeId(event.target.value)}
             >
@@ -867,7 +823,7 @@ export function CuentaTab({ patientId }: { patientId: string }): React.JSX.Eleme
                     {charge.description} · pendiente {formatMoney(pendingCents, charge.currency)}
                   </option>
                 ))}
-            </select>
+            </ChoiceSelect>
           </Field>
           <Field>
             <FieldLabel htmlFor={`${uid}-apply-amount`}>Importe a aplicar</FieldLabel>
@@ -906,9 +862,9 @@ export function CuentaTab({ patientId }: { patientId: string }): React.JSX.Eleme
         <div className="flex flex-col gap-4">
           <Field>
             <FieldLabel htmlFor={`${uid}-refund-payment`}>Pago</FieldLabel>
-            <select
+            <ChoiceSelect
               id={`${uid}-refund-payment`}
-              className="h-9 w-full rounded-md border bg-background px-3 text-sm"
+              className="w-full"
               value={refundPaymentId}
               onChange={(event) => {
                 setRefundPaymentId(event.target.value)
@@ -925,7 +881,7 @@ export function CuentaTab({ patientId }: { patientId: string }): React.JSX.Eleme
                     {formatMoney(refundableCents, payment.currency)}
                   </option>
                 ))}
-            </select>
+            </ChoiceSelect>
           </Field>
           <Field>
             <FieldLabel htmlFor={`${uid}-refund-amount`}>Importe a devolver</FieldLabel>
@@ -998,9 +954,9 @@ export function CuentaTab({ patientId }: { patientId: string }): React.JSX.Eleme
             <FieldLabel htmlFor={`${uid}-void-compensate`}>
               Compensación en caja (si su turno ya cerró)
             </FieldLabel>
-            <select
+            <ChoiceSelect
               id={`${uid}-void-compensate`}
-              className="h-9 w-full rounded-md border bg-background px-3 text-sm"
+              className="w-full"
               value={compensateShiftId}
               onChange={(event) => setCompensateShiftId(event.target.value)}
             >
@@ -1010,10 +966,116 @@ export function CuentaTab({ patientId }: { patientId: string }): React.JSX.Eleme
                   Turno {shift.currency} · {shift.id.slice(0, 8)}
                 </option>
               ))}
-            </select>
+            </ChoiceSelect>
           </Field>
         ) : null}
       </FormDrawer>
     </div>
   )
+}
+
+type ChargeRow = ReturnType<typeof chargeAvailability>[number]
+
+/** Cargos con el patrón de tabla común (lista en móvil); acciones por fila. */
+function ChargesTable({
+  charges,
+  canWrite,
+  onVoid,
+  onApply,
+}: {
+  charges: ChargeRow[]
+  canWrite: boolean
+  onVoid: (chargeId: string) => void
+  onApply: (chargeId: string, pendingCents: number) => void
+}) {
+  const columns = useMemo<ColumnDef<ChargeRow>[]>(
+    () => [
+      {
+        id: "concepto",
+        header: "Concepto",
+        meta: { view: { primary: true } },
+        cell: ({ row }) => (
+          <span className="flex min-w-48 max-w-96 flex-col gap-1 whitespace-normal">
+            <span className="flex flex-wrap items-center gap-2">
+              <span className="font-medium">{row.original.charge.description}</span>
+              {row.original.charge.voidedAt ? <Badge variant="destructive">Anulado</Badge> : null}
+            </span>
+            {row.original.charge.dueAt ? (
+              <span className="text-xs text-muted-foreground">
+                Vence {formatDate(row.original.charge.dueAt)}
+              </span>
+            ) : null}
+            {row.original.charge.voidReason ? (
+              <span className="text-xs text-muted-foreground">
+                Motivo de anulación: {row.original.charge.voidReason}
+              </span>
+            ) : null}
+          </span>
+        ),
+      },
+      {
+        id: "importe",
+        header: "Importe",
+        meta: { view: { primary: true } },
+        cell: ({ row }) => (
+          <span className="tabular-nums">
+            {formatMoney(row.original.charge.amountCents, row.original.charge.currency)}
+          </span>
+        ),
+      },
+      {
+        id: "aplicado",
+        header: "Aplicado",
+        cell: ({ row }) => (
+          <span className="tabular-nums">
+            {formatMoney(row.original.appliedCents, row.original.charge.currency)}
+          </span>
+        ),
+      },
+      {
+        id: "pendiente",
+        header: "Pendiente",
+        cell: ({ row }) => (
+          <span className="tabular-nums">
+            {formatMoney(row.original.pendingCents, row.original.charge.currency)}
+          </span>
+        ),
+      },
+      {
+        id: "acciones",
+        header: "Acciones",
+        cell: ({ row }) => {
+          const { charge, appliedCents, pendingCents } = row.original
+          if (!canWrite || charge.voidedAt) return null
+          return (
+            <span className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={appliedCents > 0}
+                title={appliedCents > 0 ? "Para anularlo, anula primero sus aplicaciones" : undefined}
+                onClick={() => onVoid(charge.id)}
+              >
+                Anular cargo
+              </Button>
+              {pendingCents > 0 ? (
+                <Button type="button" size="sm" variant="outline" onClick={() => onApply(charge.id, pendingCents)}>
+                  Aplicar un pago
+                </Button>
+              ) : null}
+            </span>
+          )
+        },
+      },
+    ],
+    [canWrite, onVoid, onApply],
+  )
+  const table = useReactTable({
+    data: charges,
+    columns,
+    getCoreRowModel: getCoreRowModel(),
+    getRowId: (row) => row.charge.id,
+  })
+  return <DataTable table={table} />
 }

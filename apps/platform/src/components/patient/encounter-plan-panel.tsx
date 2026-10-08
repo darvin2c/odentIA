@@ -13,7 +13,7 @@ import {
   SelectValue,
   Textarea,
 } from "@odentia/ui"
-import { FormDrawer } from "@odentia/ui-patterns"
+import { FormDrawer, LoadingState } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useId, useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
@@ -511,7 +511,7 @@ export function EncounterPlanPanel({
           </div>
           <div className="flex flex-col gap-2">
             {detailQuery.isPending ? (
-              <p className="text-sm text-muted-foreground">Cargando…</p>
+              <LoadingState message="Cargando…" />
             ) : items.length === 0 ? (
               <p className="text-sm text-muted-foreground">El plan aún no tiene tratamientos.</p>
             ) : (

@@ -1,3 +1,4 @@
+import { IMAGE_TYPES } from "@odentia/clinical"
 import {
   Attachment,
   AttachmentAction,
@@ -24,16 +25,14 @@ import {
   SelectValue,
   Textarea,
 } from "@odentia/ui"
-import { IMAGE_TYPES } from "@odentia/clinical"
 import {
   ConfirmDialog,
   EmptyState,
   FilterBar,
   type FilterDef,
-  FormDrawer,
+  FormDrawer,LoadingState, 
   type SortOption,
-  useListSearch,
-} from "@odentia/ui-patterns"
+  useListSearch } from "@odentia/ui-patterns"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { FileText, Image as ImageIcon } from "lucide-react"
@@ -398,7 +397,7 @@ export function ImagenesTab({
           </div>
         </details>
 
-        {docsQuery.isPending && <p className="text-sm text-muted-foreground">Cargando…</p>}
+        {docsQuery.isPending && <LoadingState message="Cargando…" />}
         {listError && (
           <div className="flex flex-col gap-2">
             <p className="text-sm text-destructive">{listError}</p>
@@ -767,7 +766,7 @@ function DocumentViewer({
   return (
     <div className="grid min-w-0 grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_20rem]">
       {urlQuery.isPending ? (
-        <p className="text-sm text-muted-foreground">Cargando…</p>
+        <LoadingState message="Cargando…" />
       ) : error || !url ? (
         <div className="flex flex-col gap-2">
           <p className="text-sm text-destructive">{error ?? "No se pudo obtener el documento."}</p>

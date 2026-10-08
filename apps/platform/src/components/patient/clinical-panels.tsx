@@ -5,6 +5,7 @@
  * un tratamiento, donde quedan acotados por tratamiento y atención. Registrar
  * una receta o un control nunca ejecuta ni cobra nada.
  */
+
 import {
   ADMINISTRATION_ROUTES,
   allergyConflicts,
@@ -39,6 +40,7 @@ import {
 } from "../../lib/clinical-journey"
 import { usePermission } from "../../lib/crm"
 import { type Encounter, fetchPatientHealth, type PlanItem } from "../../lib/patients"
+import { ChoiceSelect } from "../ui/choice-select"
 import { Cie10Search } from "./cie10-search"
 import { FollowUpScheduler } from "./follow-up-scheduler"
 
@@ -372,9 +374,9 @@ export function ControlesPanel({
           {itemId ? null : (
             <Field>
               <FieldLabel htmlFor={`${uid}-kind`}>Tipo de control</FieldLabel>
-              <select
+              <ChoiceSelect
                 id={`${uid}-kind`}
-                className="h-9 rounded-md border bg-background px-3 text-sm"
+                
                 value={kind}
                 onChange={(event) => {
                   const next = event.target.value as "tratamiento" | "mantenimiento"
@@ -384,15 +386,15 @@ export function ControlesPanel({
               >
                 <option value="mantenimiento">Mantenimiento</option>
                 <option value="tratamiento">Seguimiento de un tratamiento</option>
-              </select>
+              </ChoiceSelect>
             </Field>
           )}
           {kind === "tratamiento" ? (
             <Field>
               <FieldLabel htmlFor={`${uid}-item`}>Tratamiento</FieldLabel>
-              <select
+              <ChoiceSelect
                 id={`${uid}-item`}
-                className="h-9 rounded-md border bg-background px-3 text-sm"
+                
                 value={planItemId}
                 onChange={(event) => setPlanItemId(event.target.value)}
               >
@@ -403,7 +405,7 @@ export function ControlesPanel({
                     {item.toothNumber != null ? ` · Pieza ${item.toothNumber}` : ""}
                   </option>
                 ))}
-              </select>
+              </ChoiceSelect>
             </Field>
           ) : null}
           <Field>
@@ -471,9 +473,9 @@ export function ControlesPanel({
         <div className="flex flex-col gap-4">
           <Field>
             <FieldLabel htmlFor={`${uid}-complete-encounter`}>Atención finalizada</FieldLabel>
-            <select
+            <ChoiceSelect
               id={`${uid}-complete-encounter`}
-              className="h-9 rounded-md border bg-background px-3 text-sm"
+              
               value={completeEncounterId}
               onChange={(event) => setCompleteEncounterId(event.target.value)}
             >
@@ -483,7 +485,7 @@ export function ControlesPanel({
                   {formatDateTime(encounter.createdAt)} · {encounter.reason || "Atención"}
                 </option>
               ))}
-            </select>
+            </ChoiceSelect>
           </Field>
           <Field>
             <FieldLabel htmlFor={`${uid}-outcome`}>Resultado del control</FieldLabel>
@@ -916,9 +918,9 @@ export function RecetasPanel({
           {itemId ? null : (
             <Field>
               <FieldLabel htmlFor={`${uid}-rx-item`}>Tratamiento</FieldLabel>
-              <select
+              <ChoiceSelect
                 id={`${uid}-rx-item`}
-                className="h-9 rounded-md border bg-background px-3 text-sm"
+                
                 value={planItemId}
                 onChange={(event) => setPlanItemId(event.target.value)}
               >
@@ -929,7 +931,7 @@ export function RecetasPanel({
                     {item.toothNumber != null ? ` · Pieza ${item.toothNumber}` : ""}
                   </option>
                 ))}
-              </select>
+              </ChoiceSelect>
             </Field>
           )}
           {medications.map((medication, index) => (
@@ -975,9 +977,9 @@ export function RecetasPanel({
                 <FieldLabel htmlFor={`${uid}-form-${medication.key}`}>
                   Forma farmacéutica
                 </FieldLabel>
-                <select
+                <ChoiceSelect
                   id={`${uid}-form-${medication.key}`}
-                  className="h-9 rounded-md border bg-background px-3 text-sm"
+                  
                   value={medication.dosageForm}
                   onChange={(event) => patchMedication(index, { dosageForm: event.target.value })}
                 >
@@ -987,7 +989,7 @@ export function RecetasPanel({
                       {form}
                     </option>
                   ))}
-                </select>
+                </ChoiceSelect>
               </Field>
               <Field>
                 <FieldLabel htmlFor={`${uid}-dose-${medication.key}`}>Dosis</FieldLabel>
@@ -1001,9 +1003,9 @@ export function RecetasPanel({
               </Field>
               <Field>
                 <FieldLabel htmlFor={`${uid}-route-${medication.key}`}>Vía</FieldLabel>
-                <select
+                <ChoiceSelect
                   id={`${uid}-route-${medication.key}`}
-                  className="h-9 rounded-md border bg-background px-3 text-sm"
+                  
                   value={medication.route}
                   onChange={(event) => patchMedication(index, { route: event.target.value })}
                 >
@@ -1012,7 +1014,7 @@ export function RecetasPanel({
                       {route}
                     </option>
                   ))}
-                </select>
+                </ChoiceSelect>
               </Field>
               <Field>
                 <FieldLabel htmlFor={`${uid}-frequency-${medication.key}`}>Frecuencia</FieldLabel>

@@ -1,3 +1,4 @@
+import { label } from "../../lib/glossary"
 import { conditionLabel, formatVitals, surfaceLabel } from "@odentia/clinical"
 import { Badge } from "@odentia/ui"
 import { useQuery } from "@tanstack/react-query"
@@ -69,7 +70,7 @@ function DocumentAttachment({
       <div className="flex flex-col gap-1 text-sm">
         <span className="font-medium">{doc.label}</span>
         <span className="text-xs text-muted-foreground">
-          {doc.category}
+          {label("documento", doc.category)}
           {doc.toothNumbers.length > 0
             ? ` · ${doc.toothNumbers.map((t) => `Pieza ${t}`).join(", ")}`
             : ""}

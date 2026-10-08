@@ -107,3 +107,17 @@ export async function fillPatientNames(scope: Page | Locator, fullName: string) 
   await scope.getByLabel(/^Nombres/).fill(given ?? "")
   await scope.getByLabel(/^Apellido paterno/).fill(rest.join(" "))
 }
+
+/**
+ * Elige una opción del selector unificado de la interfaz (`ChoiceSelect` y
+ * `Select` de @odentia/ui): por valor (`data-value`) o por texto visible.
+ */
+export async function chooseOption(trigger: Locator, choice: string | { label: string }) {
+  await trigger.click()
+  const page = trigger.page()
+  const option =
+    typeof choice === "string"
+      ? page.locator(`[role="option"][data-value="${choice}"]`)
+      : page.getByRole("option", { name: choice.label, exact: true })
+  await option.click()
+}

@@ -25,7 +25,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { useId, useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
-import { fetchResponsibilities } from "../../lib/clinical-journey"
 import {
   CONSENT_STATUS_LABELS,
   type ConsentDocument,
@@ -38,6 +37,7 @@ import {
   revokeConsent,
   signConsent,
 } from "../../lib/clinical-forms"
+import { fetchResponsibilities } from "../../lib/clinical-journey"
 import { usePermission } from "../../lib/crm"
 import { ageFrom, type PatientFull } from "../../lib/patients"
 import { Cie10Search } from "./cie10-search"

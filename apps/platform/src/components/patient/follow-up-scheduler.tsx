@@ -25,6 +25,7 @@ import {
 } from "../../lib/clinical-journey"
 import { usePermission } from "../../lib/crm"
 import { AgendaSlotPicker } from "../agenda-slot-picker"
+import { ChoiceSelect } from "../ui/choice-select"
 
 /** Quién reserva: el clínico desde la ficha clínica o quien agenda desde la coordinación. */
 export type FollowUpSchedulerScope = "clinical" | "coordination"
@@ -215,9 +216,9 @@ function ScheduleForm({
         )}
         <Field>
           <FieldLabel htmlFor={`${uid}-mode`}>Cómo programar</FieldLabel>
-          <select
+          <ChoiceSelect
             id={`${uid}-mode`}
-            className="h-9 w-full rounded-md border bg-background px-3 text-sm"
+            className="w-full"
             value={mode}
             onChange={(event) => {
               setMode(event.target.value as "reserve" | "link")
@@ -226,15 +227,15 @@ function ScheduleForm({
           >
             <option value="reserve">Reservar una nueva cita</option>
             <option value="link">Vincular una cita existente del paciente</option>
-          </select>
+          </ChoiceSelect>
         </Field>
         <div hidden={mode !== "reserve"}>
           <fieldset disabled={mode !== "reserve"} className="grid min-w-0 gap-4">
             <Field>
               <FieldLabel htmlFor={`${uid}-service`}>Servicio (opcional)</FieldLabel>
-              <select
+              <ChoiceSelect
                 id={`${uid}-service`}
-                className="h-9 w-full rounded-md border bg-background px-3 text-sm"
+                className="w-full"
                 value={serviceId}
                 onChange={(event) => {
                   setServiceId(event.target.value)
@@ -247,7 +248,7 @@ function ScheduleForm({
                     {service.name}
                   </option>
                 ))}
-              </select>
+              </ChoiceSelect>
               {services.isError && (
                 <p role="alert" className="text-sm">
                   No se pudo cargar el catálogo. Puedes reservar sin servicio o{" "}
@@ -311,9 +312,9 @@ function ScheduleForm({
             ) : (
               <Field>
                 <FieldLabel htmlFor={`${uid}-appointment`}>Cita del paciente</FieldLabel>
-                <select
+                <ChoiceSelect
                   id={`${uid}-appointment`}
-                  className="h-9 w-full rounded-md border bg-background px-3 text-sm"
+                  className="w-full"
                   value={appointmentId}
                   onChange={(event) => setAppointmentId(event.target.value)}
                   required
@@ -328,7 +329,7 @@ function ScheduleForm({
                       {SCHEDULE_STATUS_LABELS[item.status]}
                     </option>
                   ))}
-                </select>
+                </ChoiceSelect>
                 {appointments.data?.length === 0 && (
                   <p className="text-sm text-muted-foreground">
                     Sin citas programadas o confirmadas del paciente en esta sede y fecha. Elige
