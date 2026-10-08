@@ -118,7 +118,9 @@ export function AdjustedImage({
       // El marco desplazable recibe foco para recorrer la imagen ampliada con teclado.
       tabIndex={adjustments.zoom > 1 ? 0 : undefined}
       role={adjustments.zoom > 1 ? "group" : undefined}
-      aria-label={adjustments.zoom > 1 ? `${alt} ampliada; usa las flechas para desplazarte` : undefined}
+      aria-label={
+        adjustments.zoom > 1 ? `${alt} ampliada; usa las flechas para desplazarte` : undefined
+      }
     >
       <img
         src={src}

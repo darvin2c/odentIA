@@ -3,12 +3,14 @@ process.env.DOCKER_HOST ??= "unix:///mnt/wsl/podman-sockets/odentia.sock"
 import { createAppDb, createOwnerDb, type Db, withOrgContext } from "@odentia/db"
 import { branch } from "@odentia/db/schema/org"
 import { createChair, secretsKeyFromEnv, setProfessionalSchedule } from "@odentia/services"
+import { createHash } from "node:crypto"
 import { sql } from "drizzle-orm"
 import { migrate } from "drizzle-orm/postgres-js/migrator"
 import type { Context } from "hono"
 import { Hono, type Next } from "hono"
 import { GenericContainer, type StartedTestContainer, Wait } from "testcontainers"
 import { afterAll, beforeAll, expect, it } from "vitest"
+import { createClinicalFormsRoute } from "./clinical-forms.js"
 import { createContactsRoute } from "./contacts.js"
 import type { CrmDeps } from "./helpers.js"
 import { createPatientsRoute } from "./patients.js"
@@ -19,6 +21,9 @@ const KEY = secretsKeyFromEnv("cc".repeat(32))
 let container: StartedTestContainer
 let ownerDb: Db
 let appDb: Db
+
+/** Bytes subidos por clave (para verificar la huella del PDF). */
+const storedBytes = new Map<string, Uint8Array>()
 
 /** Storage de prueba: firma claves sintéticas, nunca toca S3. */
 const storageStub = {
@@ -43,12 +48,11 @@ const storageStub = {
     bytes: Uint8Array
     contentType: string
     ext: string
-  }) => ({
-    objectKey: `patients/${orgId}/${patientId}/docs/${crypto.randomUUID()}.${ext}`,
-    mimeType: contentType,
-    filename: `documento.${ext}`,
-    size: bytes.byteLength,
-  }),
+  }) => {
+    const objectKey = `patients/${orgId}/${patientId}/docs/${crypto.randomUUID()}.${ext}`
+    storedBytes.set(objectKey, bytes)
+    return { objectKey, mimeType: contentType, filename: `documento.${ext}`, size: bytes.byteLength }
+  },
   putPatientAvatar: async () => {
     throw new Error("no usado")
   },
@@ -75,6 +79,7 @@ function buildApp(role: string, orgId = "org_a"): Hono {
   app.use("*", stubOrg(role, orgId))
   app.route("/patients", createPatientsRoute(deps))
   app.route("/contacts", createContactsRoute(deps))
+  app.route("/clinical-forms", createClinicalFormsRoute(deps))
   return app
 }
 
@@ -1059,4 +1064,131 @@ it("documentos: carga con vínculos clínicos y corrección versionada", async (
   })
   expect(afterClose.status).toBe(409)
   expect((await json<ErrorBody>(afterClose)).error.code).toBe("FINALIZED")
+})
+
+it("consentimiento estructurado: firma con profesional, PDF con huella, menor y anulación", async () => {
+  const sections = {
+    procedure: "Extracción de la pieza 38 con anestesia local.",
+    benefits: ["Eliminar el foco de infección"],
+    risks: ["Dolor e inflamación", "Alveolitis"],
+    alternatives: ["Control periódico"],
+    consequences: "Infecciones repetidas y daño a la pieza vecina.",
+  }
+  const draft = await post(app, "/clinical-forms/consent-templates", {
+    title: "Exodoncia",
+    sections,
+  })
+  expect(draft.status).toBe(201)
+  const draftId = (await json<{ data: { id: string } }>(draft)).data.id
+  const published = await post(app, `/clinical-forms/consent-templates/${draftId}/publish`)
+  expect((await json<{ data: { version: number; status: string } }>(published)).data).toMatchObject({
+    version: 1,
+    status: "publicado",
+  })
+  // Secciones incompletas: el contrato las rechaza.
+  expect(
+    (
+      await post(app, "/clinical-forms/consent-templates", {
+        title: "Incompleto",
+        sections: { ...sections, risks: [] },
+      })
+    ).status,
+  ).toBe(400)
+
+  // Menor de edad con representante legal vigente.
+  const childId = await createPatient()
+  await ownerDb.execute(sql`update patient set birth_date = '2017-04-04' where id = ${childId}`)
+  const guardianId = await linkContact(childId)
+  await ownerDb.execute(sql`update contact set doc_type = 'DNI', doc_number = '44556677' where id = ${guardianId}`)
+  await post(app, `/patients/${childId}/responsibilities`, {
+    contactId: guardianId,
+    kind: "representante_legal",
+    startsAt: new Date().toISOString().slice(0, 10),
+  })
+  const create = async () => {
+    const res = await post(app, "/clinical-forms/consents", {
+      templateId: draftId,
+      patientId: childId,
+      procedureRef: "Exodoncia pieza 85",
+    })
+    expect(res.status).toBe(201)
+    return (await json<{ data: { id: string } }>(res)).data.id
+  }
+  const strokes = { strokes: [[[10, 10], [500, 500], [900, 100]]] }
+  const consentId = await create()
+  // «Otra persona» no existe: sin persona vinculada no hay firma.
+  const withoutSigner = await post(app, `/clinical-forms/consents/${consentId}/sign`, {
+    signerKind: "representante",
+    signatureData: strokes,
+    professionalSignature: strokes,
+    comprehensionConfirmed: true,
+  })
+  expect(withoutSigner.status).toBe(400)
+  const child = await json<{ data: { contacts: Array<{ contactId: string; relationship: string }> } }>(
+    await app.request(`/patients/${childId}`),
+  )
+  const selfId = child.data.contacts.find((c) => c.relationship === "self")!.contactId
+  const minorSelf = await post(app, `/clinical-forms/consents/${consentId}/sign`, {
+    signerKind: "paciente",
+    signerContactId: selfId,
+    signatureData: strokes,
+    professionalSignature: strokes,
+    comprehensionConfirmed: true,
+  })
+  expect(minorSelf.status).toBe(400)
+  const signed = await post(app, `/clinical-forms/consents/${consentId}/sign`, {
+    signerKind: "representante",
+    signerContactId: guardianId,
+    representativeRelation: "Madre",
+    signatureData: strokes,
+    professionalSignature: strokes,
+    comprehensionConfirmed: true,
+  })
+  expect(signed.status).toBe(200)
+  const signedBody = await json<{
+    data: { status: string; pdfDocumentId: string | null; pdfSha256: string | null; informerRegistration: string }
+  }>(signed)
+  expect(signedBody.data).toMatchObject({ status: "firmado", informerRegistration: "COP 12345" })
+  expect(signedBody.data.pdfDocumentId).toBeTruthy()
+  // La huella corresponde a los bytes guardados y el PDF es un documento del paciente.
+  const docs = await json<{ data: Array<{ id: string; storageKey: string; category: string }> }>(
+    await app.request(`/patients/${childId}/documents`),
+  )
+  const pdfDoc = docs.data.find((d) => d.id === signedBody.data.pdfDocumentId)!
+  expect(pdfDoc.category).toBe("consentimiento")
+  const bytes = storedBytes.get(pdfDoc.storageKey)!
+  expect(new TextDecoder().decode(bytes.slice(0, 5))).toBe("%PDF-")
+  expect(createHash("sha256").update(bytes).digest("hex")).toBe(signedBody.data.pdfSha256)
+  // Una segunda generación no reemplaza el PDF.
+  const again = await post(app, `/clinical-forms/consents/${consentId}/pdf`)
+  expect((await json<{ data: { pdfSha256: string } }>(again)).data.pdfSha256).toBe(
+    signedBody.data.pdfSha256,
+  )
+  const print = await json<{ data: { patient: { minor: boolean }; document: { id: string } } }>(
+    await app.request(`/clinical-forms/consents/${consentId}/print`),
+  )
+  expect(print.data.patient.minor).toBe(true)
+
+  // Pendiente anulado con motivo; firmado se revoca, no se anula.
+  const pending = await create()
+  expect((await post(app, `/clinical-forms/consents/${pending}/cancel`, { reason: "" })).status).toBe(400)
+  expect(
+    (await post(app, `/clinical-forms/consents/${pending}/cancel`, { reason: "Duplicado" })).status,
+  ).toBe(200)
+  expect(
+    (await post(app, `/clinical-forms/consents/${consentId}/cancel`, { reason: "x" })).status,
+  ).toBe(409)
+  // Revocar exige quién revoca y su firma.
+  expect(
+    (await post(app, `/clinical-forms/consents/${consentId}/revoke`, { reason: "Cambio" })).status,
+  ).toBe(400)
+  const revoked = await post(app, `/clinical-forms/consents/${consentId}/revoke`, {
+    reason: "Prefiere esperar",
+    revokerContactId: guardianId,
+    signatureData: strokes,
+  })
+  expect(revoked.status).toBe(200)
+  expect((await json<{ data: { status: string; revokerName: string } }>(revoked)).data.status).toBe(
+    "revocado",
+  )
 })

@@ -2,8 +2,11 @@ import { withOrgContext } from "@odentia/db"
 import {
   addFormAddendum,
   advanceClinicalOrder,
+  archiveConsentTemplate,
   archiveFormTemplate,
   archiveSpecialty,
+  attachConsentPdf,
+  cancelConsentDocument,
   consentDocumentPatientId,
   createClinicalOrder,
   createConsentDocument,
@@ -11,8 +14,10 @@ import {
   createFormResponse,
   createFormTemplate,
   createSpecialty,
+  createSuggestedConsentTemplates,
   finalizeFormResponse,
   formResponsePatientId,
+  getConsentPrint,
   getProfessionalProfile,
   listClinicalOrders,
   listConsentDocuments,
@@ -28,6 +33,7 @@ import {
   listSpecialtyProfessionals,
   publishConsentTemplate,
   publishFormTemplate,
+  registerPatientDocument,
   revokeConsentDocument,
   setProfessionalProfile,
   setProfessionalSpecialties,
@@ -40,7 +46,9 @@ import {
 } from "@odentia/services"
 import { type Context, Hono } from "hono"
 import { z } from "zod"
+import { createHash } from "node:crypto"
 import { traceClinicalRead } from "../lib/clinical-trace.js"
+import { renderConsentPdf } from "../lib/consent-pdf.js"
 import { canAccess, orgContextOf } from "../lib/context.js"
 import { errorBody } from "../lib/error.js"
 import { type CrmDeps, runService, validationError } from "./helpers.js"
@@ -168,18 +176,30 @@ const responsePatch = z
 
 const addendumInput = z.object({ text: z.string().trim().min(1).max(5000) }).strict()
 
+const consentSections = z.object({
+  procedure: z.string().trim().min(10).max(4000),
+  benefits: z.array(z.string().trim().min(1).max(500)).min(1).max(20),
+  risks: z.array(z.string().trim().min(1).max(500)).min(1).max(20),
+  alternatives: z.array(z.string().trim().min(1).max(500)).min(1).max(20),
+  consequences: z.string().trim().min(10).max(4000),
+  notes: z.string().trim().max(4000).nullish(),
+})
+
 const consentTemplateCreate = z
   .object({
     key: keySchema,
     title: z.string().trim().min(1).max(200),
-    body: z.string().trim().min(50).max(20000),
+    sections: consentSections.optional(),
+    body: z.string().trim().min(50).max(20000).optional(),
     specialtyId: uuid.nullish(),
   })
   .strict()
+  .refine((d) => d.sections || d.body, { message: "Completa las secciones del consentimiento" })
 
 const consentTemplatePatch = z
   .object({
     title: z.string().trim().min(1).max(200).optional(),
+    sections: consentSections.optional(),
     body: z.string().trim().min(50).max(20000).optional(),
     specialtyId: uuid.nullish(),
   })
@@ -192,24 +212,40 @@ const consentCreate = z
     encounterId: uuid.nullish(),
     planItemId: uuid.nullish(),
     procedureRef: z.string().trim().max(500).nullish(),
+    diagnosisCode: z.string().trim().max(10).nullish(),
   })
   .strict()
 
 const consentSign = z
   .object({
     signerKind: z.enum(["paciente", "representante"]),
-    signerContactId: z.uuid().nullish(),
-    signerName: z.string().trim().min(1).max(200),
+    signerContactId: z.uuid({ message: "Elige a la persona que firma" }),
     signerDoc: z.string().trim().max(40).nullish(),
     representativeRelation: z.string().trim().max(120).nullish(),
     signatureData: z.unknown(),
+    comprehensionConfirmed: z.literal(true, {
+      message: "La persona firmante debe confirmar que comprendió la información",
+    }),
+    professionalSignature: z.unknown(),
+    witness: z
+      .object({ name: z.string().trim().min(1).max(200), doc: z.string().trim().max(40).nullish() })
+      .nullish(),
+    informedAt: z.iso.datetime({ offset: true }).nullish(),
   })
   .strict()
   .refine((d) => d.signatureData !== null && d.signatureData !== undefined, {
     message: "La firma manuscrita es obligatoria",
   })
 
-const consentRevoke = z.object({ reason: z.string().trim().min(1).max(2000) }).strict()
+const consentRevoke = z
+  .object({
+    reason: z.string().trim().min(1).max(2000),
+    revokerContactId: z.uuid({ message: "Indica quién revoca" }),
+    signatureData: z.unknown(),
+  })
+  .strict()
+
+const consentCancel = z.object({ reason: z.string().trim().min(1).max(2000) }).strict()
 
 const orderCreate = z
   .object({
@@ -600,6 +636,66 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
     )
   })
 
+  app.post("/consent-templates/:id/archive", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "settings.write")) {
+      return forbidden(c, "Solo administración archiva consentimientos")
+    }
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        archiveConsentTemplate(tx, orgId, userId, c.req.param("id")),
+      ),
+    )
+  })
+
+  app.post("/consent-templates/suggested", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "settings.write")) {
+      return forbidden(c, "Solo administración diseña consentimientos")
+    }
+    return runService(c, 201, () =>
+      withOrgContext(deps.db, orgId, (tx) => createSuggestedConsentTemplates(tx, orgId, userId)),
+    )
+  })
+
+  /**
+   * Genera el PDF del consentimiento firmado, lo guarda como documento
+   * clínico del paciente y fija su huella SHA-256 (una sola vez).
+   */
+  const generateConsentPdf = async (orgId: string, userId: string, consentId: string) => {
+    const data = await withOrgContext(deps.db, orgId, (tx) => getConsentPrint(tx, orgId, consentId))
+    if (data.document.pdfDocumentId) return data.document
+    const bytes = await renderConsentPdf(data)
+    const sha256 = createHash("sha256").update(bytes).digest("hex")
+    const ref = await deps.storage.putPatientDocument({
+      orgId,
+      patientId: data.document.patientId,
+      bytes,
+      contentType: "application/pdf",
+      ext: "pdf",
+    })
+    try {
+      return await withOrgContext(deps.db, orgId, async (tx) => {
+        const stored = await registerPatientDocument(tx, orgId, userId, data.document.patientId, {
+          category: "consentimiento",
+          label: `Consentimiento firmado: ${data.document.titleSnapshot}`.slice(0, 200),
+          storageKey: ref.objectKey,
+          contentType: "application/pdf",
+          sizeBytes: bytes.byteLength,
+          planItemId: data.document.planItemId,
+          tags: ["consentimiento"],
+        })
+        return attachConsentPdf(tx, orgId, userId, consentId, {
+          pdfDocumentId: stored.id,
+          sha256,
+        })
+      })
+    } catch (e) {
+      await deps.storage.deleteAttachment(ref.objectKey).catch(() => {})
+      throw e
+    }
+  }
+
   app.get("/consents", async (c) => {
     const { orgId, userId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "clinical.read")) return forbidden(c, "Sin acceso clínico")
@@ -635,9 +731,55 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
     }
     const parsed = consentSign.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, async () => {
+      const signed = await withOrgContext(deps.db, orgId, (tx) =>
+        signConsentDocument(tx, orgId, userId, c.req.param("id"), parsed.data),
+      )
+      // El PDF se genera tras la firma; si falla, la firma queda registrada y
+      // el PDF se reintenta con POST …/pdf (no se repite la firma).
+      try {
+        return await generateConsentPdf(orgId, userId, signed.id)
+      } catch (e) {
+        console.error("consent pdf", e)
+        return signed
+      }
+    })
+  })
+
+  app.post("/consents/:id/pdf", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "clinical.write")) {
+      return forbidden(c, "Sin permiso para generar el PDF del consentimiento")
+    }
+    return runService(c, 200, () => generateConsentPdf(orgId, userId, c.req.param("id")))
+  })
+
+  app.get("/consents/:id/print", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "clinical.read")) return forbidden(c, "Sin acceso clínico")
+    let patientId: string | null = null
+    const response = await runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, async (tx) => {
+        const data = await getConsentPrint(tx, orgId, c.req.param("id"))
+        patientId = data.document.patientId
+        return data
+      }),
+    )
+    if (response.status === 200 && patientId)
+      await traceClinicalRead(deps.db, { orgId, userId, patientId, resource: "consentimientos" })
+    return response
+  })
+
+  app.post("/consents/:id/cancel", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "clinical.write")) {
+      return forbidden(c, "Sin permiso para anular consentimientos")
+    }
+    const parsed = consentCancel.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
-        signConsentDocument(tx, orgId, userId, c.req.param("id"), parsed.data),
+        cancelConsentDocument(tx, orgId, userId, c.req.param("id"), parsed.data.reason),
       ),
     )
   })
@@ -651,7 +793,7 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
-        revokeConsentDocument(tx, orgId, userId, c.req.param("id"), parsed.data.reason),
+        revokeConsentDocument(tx, orgId, userId, c.req.param("id"), parsed.data),
       ),
     )
   })

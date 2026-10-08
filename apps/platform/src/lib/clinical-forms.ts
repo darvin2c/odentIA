@@ -1,3 +1,4 @@
+import type { ConsentSections } from "@odentia/clinical"
 import { apiFetch } from "./api"
 
 /** Especialidad creada por la organización (sin catálogo fijo). */
@@ -90,6 +91,8 @@ export interface ConsentTemplate {
   key: string
   title: string
   body: string
+  /** Secciones fijas; nulo en plantillas antiguas de solo texto. */
+  sections: ConsentSections | null
   version: number
   status: "borrador" | "publicado" | "archivado"
   publishedAt: string | null
@@ -114,10 +117,26 @@ export interface ConsentDocument {
   signerDoc: string | null
   representativeRelation: string | null
   signatureData: { strokes?: number[][][]; image?: string } | null
-  status: "pendiente" | "firmado" | "revocado"
+  status: "pendiente" | "firmado" | "revocado" | "anulado"
   signedAt: string | null
   revokedAt: string | null
   revokeReason: string | null
+  sectionsSnapshot: ConsentSections | null
+  diagnosisCode: string | null
+  informedAt: string | null
+  informerName: string | null
+  informerTitle: string | null
+  informerRegistration: string | null
+  professionalSignature: { strokes?: number[][][] } | null
+  comprehensionConfirmed: boolean
+  witnessName: string | null
+  witnessDoc: string | null
+  cancelledAt: string | null
+  cancelReason: string | null
+  revokerName: string | null
+  revokeSignature: { strokes?: number[][][] } | null
+  pdfDocumentId: string | null
+  pdfSha256: string | null
   createdAt: string
   updatedAt: string
 }
@@ -299,7 +318,8 @@ export function fetchConsentTemplates(query: { specialtyId?: string; status?: st
 export function createConsentTemplate(body: {
   key?: string
   title: string
-  body: string
+  sections?: ConsentSections
+  body?: string
   specialtyId?: string | null
 }) {
   return post<ConsentTemplate>(`${BASE}/consent-templates`, body)
@@ -307,13 +327,21 @@ export function createConsentTemplate(body: {
 
 export function updateConsentTemplate(
   id: string,
-  body: { title?: string; body?: string; specialtyId?: string | null },
+  body: { title?: string; sections?: ConsentSections; body?: string; specialtyId?: string | null },
 ) {
   return patch<ConsentTemplate>(`${BASE}/consent-templates/${id}`, body)
 }
 
 export function publishConsentTemplate(id: string) {
   return post<ConsentTemplate>(`${BASE}/consent-templates/${id}/publish`, {})
+}
+
+export function archiveConsentTemplate(id: string) {
+  return post<ConsentTemplate>(`${BASE}/consent-templates/${id}/archive`, {})
+}
+
+export function createSuggestedConsentTemplates() {
+  return post<ConsentTemplate[]>(`${BASE}/consent-templates/suggested`, {})
 }
 
 export function fetchConsents(query: { patientId: string; status?: string }) {
@@ -326,6 +354,7 @@ export function createConsent(body: {
   encounterId?: string | null
   planItemId?: string | null
   procedureRef?: string | null
+  diagnosisCode?: string | null
 }) {
   return post<ConsentDocument>(`${BASE}/consents`, body)
 }
@@ -335,18 +364,55 @@ export function signConsent(
   body: {
     signerKind: "paciente" | "representante"
     /** Persona vinculada que firma; el servidor verifica su facultad y toma su nombre. */
-    signerContactId?: string | null
-    signerName: string
+    signerContactId: string
     signerDoc?: string | null
     representativeRelation?: string | null
-    signatureData: { strokes: number[][][] } | { image: string }
+    signatureData: { strokes: number[][][] }
+    comprehensionConfirmed: true
+    professionalSignature: { strokes: number[][][] }
+    witness?: { name: string; doc?: string | null } | null
   },
 ) {
   return post<ConsentDocument>(`${BASE}/consents/${id}/sign`, body)
 }
 
-export function revokeConsent(id: string, reason: string) {
-  return post<ConsentDocument>(`${BASE}/consents/${id}/revoke`, { reason })
+export function revokeConsent(
+  id: string,
+  body: { reason: string; revokerContactId: string; signatureData: { strokes: number[][][] } },
+) {
+  return post<ConsentDocument>(`${BASE}/consents/${id}/revoke`, body)
+}
+
+export function cancelConsent(id: string, reason: string) {
+  return post<ConsentDocument>(`${BASE}/consents/${id}/cancel`, { reason })
+}
+
+export function generateConsentPdf(id: string) {
+  return post<ConsentDocument>(`${BASE}/consents/${id}/pdf`, {})
+}
+
+export interface ConsentPrint {
+  document: ConsentDocument
+  diagnosisDescription: string | null
+  patient: {
+    displayName: string
+    patientNumber: number
+    docType: string | null
+    docNumber: string | null
+    birthDate: string | null
+    minor: boolean
+  }
+  establishment: {
+    legalName: string | null
+    tradeName: string | null
+    fiscalDocType: string | null
+    fiscalDocNumber: string | null
+    address: string | null
+  } | null
+}
+
+export function fetchConsentPrint(id: string) {
+  return apiFetch<{ data: ConsentPrint }>(`${BASE}/consents/${id}/print`)
 }
 
 export function fetchConsentHistory(id: string) {
@@ -405,4 +471,5 @@ export const CONSENT_STATUS_LABELS: Record<ConsentDocument["status"], string> = 
   pendiente: "Pendiente",
   firmado: "Firmado",
   revocado: "Revocado",
+  anulado: "Anulado",
 }

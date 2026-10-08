@@ -236,6 +236,12 @@ export const consentTemplate = pgTable(
     title: text("title").notNull(),
     /** Texto legal del consentimiento (versión congelada al publicar). */
     body: text("body").notNull(),
+    /**
+     * Secciones fijas (@odentia/clinical ConsentSections): procedimiento,
+     * beneficios, riesgos, alternativas y consecuencias. Nulo en plantillas
+     * anteriores de solo texto; `body` queda como su texto equivalente.
+     */
+    sections: jsonb("sections"),
     version: integer("version").notNull().default(1),
     status: text("status").notNull().default("borrador"),
     createdBy: text("created_by").references(() => user.id),
@@ -258,7 +264,7 @@ export const consentTemplate = pgTable(
   ],
 )
 
-export const CONSENT_STATUSES = ["pendiente", "firmado", "revocado"] as const
+export const CONSENT_STATUSES = ["pendiente", "firmado", "revocado", "anulado"] as const
 export const CONSENT_SIGNER_KINDS = ["paciente", "representante"] as const
 
 /**
@@ -303,6 +309,32 @@ export const consentDocument = pgTable(
     signedAt: timestamp("signed_at", { withTimezone: true }),
     revokedAt: timestamp("revoked_at", { withTimezone: true }),
     revokeReason: text("revoke_reason"),
+    /** Snapshot de las secciones aceptadas (inmutable). */
+    sectionsSnapshot: jsonb("sections_snapshot"),
+    /** CIE-10 que motiva el procedimiento. */
+    diagnosisCode: text("diagnosis_code"),
+    /** Profesional que informa: snapshot de su perfil y firma manuscrita. */
+    informedAt: timestamp("informed_at", { withTimezone: true }),
+    informedBy: text("informed_by").references(() => user.id),
+    informerName: text("informer_name"),
+    informerTitle: text("informer_title"),
+    informerRegistration: text("informer_registration"),
+    professionalSignature: jsonb("professional_signature"),
+    /** La persona firmante confirmó haber comprendido la información. */
+    comprehensionConfirmed: boolean("comprehension_confirmed").notNull().default(false),
+    witnessName: text("witness_name"),
+    witnessDoc: text("witness_doc"),
+    /** Anulación de un pendiente (no cuenta como consentimiento). */
+    cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
+    cancelledBy: text("cancelled_by").references(() => user.id),
+    cancelReason: text("cancel_reason"),
+    /** Quien revoca (la persona firmante o su representante) y su firma. */
+    revokerName: text("revoker_name"),
+    revokerContactId: uuid("revoker_contact_id"),
+    revokeSignature: jsonb("revoke_signature"),
+    /** PDF del documento firmado guardado como documento clínico y su huella. */
+    pdfDocumentId: uuid("pdf_document_id"),
+    pdfSha256: text("pdf_sha256"),
     ...timestamps,
   },
   (table) => [
@@ -311,7 +343,7 @@ export const consentDocument = pgTable(
     index("consent_document_org_template_idx").on(table.organizationId, table.templateId),
     check(
       "consent_document_status_check",
-      sql`${table.status} in ('pendiente','firmado','revocado')`,
+      sql`${table.status} in ('pendiente','firmado','revocado','anulado')`,
     ),
     check(
       "consent_document_signer_check",

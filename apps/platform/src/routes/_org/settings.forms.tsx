@@ -23,11 +23,12 @@ import {
   EmptyState,
   ErrorState,
   FormDrawer,
+  LoadingState,
   PageHeader,
 } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useId, useMemo, useRef, useState } from "react"
 import { ApiError } from "../../lib/api"
 import { usePermission } from "../../lib/crm"
 import {
@@ -37,6 +38,8 @@ import {
   fetchConsentTemplates,
   fetchFormTemplates,
   fetchSpecialties,
+  archiveConsentTemplate,
+  createSuggestedConsentTemplates,
   publishConsentTemplate,
   publishFormTemplate,
   updateConsentTemplate,
@@ -733,7 +736,11 @@ function ConsentTemplatesPanel() {
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [editing, setEditing] = useState<ConsentTemplate | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const consentSubmitRef = useRef<() => void>(() => {})
+  const [confirm, setConfirm] = useState<
+    | { kind: "publish"; draft: ConsentTemplate; current: ConsentTemplate | undefined }
+    | { kind: "archive"; template: ConsentTemplate }
+    | null
+  >(null)
 
   const listQuery = useQuery({
     queryKey: ["consent-templates"],
@@ -747,35 +754,75 @@ function ConsentTemplatesPanel() {
       list.push(item)
       byKey.set(item.key, list)
     }
-    return [...byKey.values()].map((versions) =>
-      versions.sort((a, b) => b.version - a.version),
-    )
+    return [...byKey.values()]
+      .map((versions) => versions.sort((a, b) => b.version - a.version))
+      .sort((a, b) => a[0]!.title.localeCompare(b[0]!.title, "es"))
   }, [templates])
 
   const invalidate = () => {
     void queryClient.invalidateQueries({ queryKey: ["consent-templates"] })
+    void queryClient.invalidateQueries({ queryKey: ["consent-templates-published"] })
   }
   const fail = (e: unknown) => {
     const message =
       e instanceof ApiError ? (e.shape.message ?? "Falló la operación") : "Falló la operación"
     setError(message)
-    toast.error(message)
   }
 
   const publishMutation = useMutation({
     mutationFn: (id: string) => publishConsentTemplate(id),
-    onSuccess: () => {
+    onSuccess: (result) => {
+      setConfirm(null)
       invalidate()
-      toast.success("Consentimiento publicado")
+      toast.success(`Publicada la versión ${result.data.version}`)
+    },
+    onError: (e) => {
+      setConfirm(null)
+      fail(e)
+    },
+  })
+  const archiveMutation = useMutation({
+    mutationFn: (id: string) => archiveConsentTemplate(id),
+    onSuccess: () => {
+      setConfirm(null)
+      invalidate()
+      toast.success("Plantilla archivada")
+    },
+    onError: (e) => {
+      setConfirm(null)
+      fail(e)
+    },
+  })
+  const suggestedMutation = useMutation({
+    mutationFn: () => createSuggestedConsentTemplates(),
+    onSuccess: (result) => {
+      invalidate()
+      toast.success(
+        result.data.length > 0
+          ? `${result.data.length} plantilla(s) sugerida(s) creadas como borrador: revísalas antes de publicar`
+          : "Ya tienes todas las plantillas sugeridas",
+      )
     },
     onError: fail,
   })
 
   return (
     <div className="flex flex-col gap-4">
-      {error ? <ErrorState message={error} onRetry={() => setError(null)} /> : null}
-      <div className="flex justify-end">
-        {canAdmin ? (
+      {error ? (
+        <p role="alert" className="rounded-md border border-destructive/40 p-3 text-sm text-destructive">
+          {error}
+        </p>
+      ) : null}
+      {canAdmin ? (
+        <div className="flex flex-wrap justify-end gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            disabled={suggestedMutation.isPending}
+            onClick={() => suggestedMutation.mutate()}
+          >
+            Añadir plantillas sugeridas
+          </Button>
           <Button
             type="button"
             onClick={() => {
@@ -785,10 +832,10 @@ function ConsentTemplatesPanel() {
           >
             Nueva plantilla
           </Button>
-        ) : null}
-      </div>
-      {listQuery.isLoading ? (
-        <p className="text-sm text-muted-foreground">Cargando…</p>
+        </div>
+      ) : null}
+      {listQuery.isPending ? (
+        <LoadingState message="Cargando consentimientos…" />
       ) : listQuery.isError ? (
         <ErrorState
           message="No se pudieron cargar los consentimientos"
@@ -797,19 +844,24 @@ function ConsentTemplatesPanel() {
       ) : grouped.length === 0 ? (
         <EmptyState
           title="Sin plantillas de consentimiento"
-          description="Redacta el texto informado, publícalo y úsalo por procedimiento o plan en la ficha del paciente."
+          description="Empieza con las plantillas sugeridas por procedimiento o redacta una: procedimiento, beneficios, riesgos, alternativas y consecuencias de no tratarse."
         />
       ) : (
         <ul className="flex flex-col gap-3">
           {grouped.map((versions) => {
             const latest = versions[0]!
             const draft = versions.find((v) => v.status === "borrador")
+            const current = versions.find((v) => v.status === "publicado")
             return (
               <li key={latest.key} className="rounded-md border p-4">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div>
                     <p className="font-medium">{latest.title}</p>
-                    <p className="text-sm text-muted-foreground">Clave «{latest.key}»</p>
+                    <p className="text-sm text-muted-foreground">
+                      {current ? `Vigente: versión ${current.version}` : "Sin versión vigente"}
+                      {draft ? ` · borrador de la versión ${draft.version}` : ""}
+                      {latest.sections ? "" : " · texto libre (anterior a las secciones)"}
+                    </p>
                   </div>
                   <div className="flex flex-wrap gap-1">
                     {versions.map((version) => (
@@ -817,7 +869,7 @@ function ConsentTemplatesPanel() {
                         key={version.id}
                         variant={version.status === "publicado" ? "default" : "secondary"}
                       >
-                        v{version.version} · {version.status}
+                        v{version.version} · {CONSENT_TEMPLATE_STATUS_LABELS[version.status]}
                       </Badge>
                     ))}
                   </div>
@@ -840,9 +892,9 @@ function ConsentTemplatesPanel() {
                         <Button
                           type="button"
                           size="sm"
-                          onClick={() => publishMutation.mutate(draft.id)}
+                          onClick={() => setConfirm({ kind: "publish", draft, current })}
                         >
-                          Publicar
+                          Publicar versión {draft.version}
                         </Button>
                       </>
                     ) : (
@@ -855,9 +907,19 @@ function ConsentTemplatesPanel() {
                           setDrawerOpen(true)
                         }}
                       >
-                        Nueva versión desde v{latest.version}
+                        Nueva versión desde la {latest.version}
                       </Button>
                     )}
+                    {current ? (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => setConfirm({ kind: "archive", template: current })}
+                      >
+                        Archivar…
+                      </Button>
+                    ) : null}
                   </div>
                 ) : null}
               </li>
@@ -865,53 +927,90 @@ function ConsentTemplatesPanel() {
           })}
         </ul>
       )}
-      <FormDrawer
+      <ConsentBuilder
+        key={editing?.id ?? "nuevo"}
         open={drawerOpen}
+        initial={editing}
         onClose={() => setDrawerOpen(false)}
-        title={editing && editing.id ? "Editar consentimiento" : "Nuevo consentimiento"}
-        onSubmit={() => consentSubmitRef.current()}
-        submitLabel="Guardar borrador"
-      >
-        <ConsentBuilder
-          key={editing?.id ?? "nuevo"}
-          initial={editing}
-          registerSubmit={(fn) => {
-            consentSubmitRef.current = fn
-          }}
-          onDone={() => {
-            setDrawerOpen(false)
-            setEditing(null)
-            invalidate()
-          }}
-          onError={fail}
-        />
-      </FormDrawer>
+        onDone={() => {
+          setDrawerOpen(false)
+          setEditing(null)
+          invalidate()
+        }}
+      />
+      <ConfirmDialog
+        open={confirm?.kind === "publish"}
+        variant="default"
+        title={
+          confirm?.kind === "publish" ? `Publicar la versión ${confirm.draft.version}` : "Publicar"
+        }
+        description={
+          confirm?.kind === "publish"
+            ? confirm.current
+              ? `La versión ${confirm.current.version} se archiva: los consentimientos nuevos usarán la ${confirm.draft.version}. Los ya generados conservan su texto.`
+              : "Quedará disponible para generar consentimientos en la ficha."
+            : ""
+        }
+        confirmLabel="Publicar"
+        pending={publishMutation.isPending}
+        onClose={() => setConfirm(null)}
+        onConfirm={() => confirm?.kind === "publish" && publishMutation.mutate(confirm.draft.id)}
+      />
+      <ConfirmDialog
+        open={confirm?.kind === "archive"}
+        title="Archivar plantilla"
+        description="Deja de ofrecerse para consentimientos nuevos. Los documentos ya generados no cambian."
+        confirmLabel="Archivar"
+        pending={archiveMutation.isPending}
+        onClose={() => setConfirm(null)}
+        onConfirm={() => confirm?.kind === "archive" && archiveMutation.mutate(confirm.template.id)}
+      />
     </div>
   )
 }
 
+const CONSENT_TEMPLATE_STATUS_LABELS: Record<ConsentTemplate["status"], string> = {
+  borrador: "borrador",
+  publicado: "vigente",
+  archivado: "archivada",
+}
+
+const toLines = (text: string) =>
+  text
+    .split("\n")
+    .map((line) => line.replace(/^[•\-*]\s*/, "").trim())
+    .filter(Boolean)
+
 function ConsentBuilder({
+  open,
   initial,
-  registerSubmit,
+  onClose,
   onDone,
-  onError,
 }: {
+  open: boolean
   initial: ConsentTemplate | null
-  registerSubmit: (fn: () => void) => void
+  onClose: () => void
   onDone: () => void
-  onError: (e: unknown) => void
 }) {
+  const ids = useId()
   const canAdmin = usePermission("settings.write")
-  const isNewVersion = Boolean(initial && initial.status === "publicado")
+  const isNewVersion = Boolean(initial && initial.status !== "borrador")
+  const base = initial?.sections ?? null
   const [title, setTitle] = useState(initial?.title ?? "")
   const [key, setKey] = useState(isNewVersion ? (initial?.key ?? "") : "")
-  const [body, setBody] = useState(initial?.body ?? "")
+  const [procedure, setProcedure] = useState(base?.procedure ?? "")
+  const [benefits, setBenefits] = useState((base?.benefits ?? []).join("\n"))
+  const [risks, setRisks] = useState((base?.risks ?? []).join("\n"))
+  const [alternatives, setAlternatives] = useState((base?.alternatives ?? []).join("\n"))
+  const [consequences, setConsequences] = useState(base?.consequences ?? "")
+  const [notes, setNotes] = useState(base?.notes ?? "")
   const [specialtyId, setSpecialtyId] = useState<string>(initial?.specialtyId ?? "")
   const [formError, setFormError] = useState<string | null>(null)
 
   const specialtiesQuery = useQuery({
     queryKey: ["specialties-active"],
     queryFn: () => fetchSpecialties({ activeOnly: true }),
+    enabled: open,
   })
 
   const saveMutation = useMutation({
@@ -919,103 +1018,183 @@ function ConsentBuilder({
       const payload = {
         title: title.trim(),
         ...(key.trim() ? { key: key.trim().toLowerCase() } : {}),
-        body: body.trim(),
+        sections: {
+          procedure: procedure.trim(),
+          benefits: toLines(benefits),
+          risks: toLines(risks),
+          alternatives: toLines(alternatives),
+          consequences: consequences.trim(),
+          notes: notes.trim() || null,
+        },
         specialtyId: specialtyId ? specialtyId : null,
       }
       if (initial && !isNewVersion) return updateConsentTemplate(initial.id, payload)
       return createConsentTemplate(payload)
     },
     onSuccess: () => {
-      toast.success("Consentimiento guardado como borrador")
+      toast.success("Plantilla guardada como borrador")
       onDone()
     },
-    onError: (e: unknown) => {
+    onError: (e: unknown) =>
       setFormError(
         e instanceof ApiError ? (e.shape.message ?? "Falló la operación") : "Falló la operación",
-      )
-      onError(e)
-    },
+      ),
   })
 
-  useEffect(() => {
-    registerSubmit(() => {
-      if (!title.trim()) {
-        setFormError("Ingresa el título")
-        return
-      }
-      if (body.trim().length < 50) {
-        setFormError("El texto necesita al menos 50 caracteres")
-        return
-      }
-      setFormError(null)
-      saveMutation.mutate()
-    })
-  })
+  const missing = (): string | null => {
+    if (!title.trim()) return "Ingresa el título"
+    if (procedure.trim().length < 10) return "Describe el procedimiento (mín. 10 caracteres)"
+    if (toLines(benefits).length === 0) return "Indica al menos un beneficio"
+    if (toLines(risks).length === 0) return "Indica al menos un riesgo"
+    if (toLines(alternatives).length === 0) return "Indica al menos una alternativa"
+    if (consequences.trim().length < 10) return "Describe las consecuencias de no tratarse"
+    return null
+  }
 
+  const listHelp = "Uno por línea."
   return (
-    <div className="flex flex-col gap-4">
-      {isNewVersion ? (
-        <p className="rounded-md border p-3 text-sm text-muted-foreground">
-          La v{initial!.version} está publicada e inmutable: al guardar se crea un borrador nuevo.
-        </p>
-      ) : null}
-      <Field>
-        <FieldLabel htmlFor="consent-title">Título</FieldLabel>
-        <Input
-          id="consent-title"
-          value={title}
-          onChange={(event) => setTitle(event.target.value)}
-          maxLength={200}
-          disabled={!canAdmin}
-        />
-      </Field>
-      {(!initial || isNewVersion) && (
+    <FormDrawer
+      open={open}
+      onClose={onClose}
+      title={
+        initial && !isNewVersion
+          ? `Editar borrador · versión ${initial.version}`
+          : initial
+            ? `Nueva versión de «${initial.title}»`
+            : "Nueva plantilla"
+      }
+      description="Secciones fijas del consentimiento informado. El diagnóstico y el profesional que informa se toman de la atención al generarlo."
+      onSubmit={(event) => {
+        event.preventDefault()
+        const problem = missing()
+        setFormError(problem)
+        if (!problem) saveMutation.mutate()
+      }}
+      isSubmitting={saveMutation.isPending}
+      isDirty
+      error={formError}
+      submitLabel="Guardar borrador"
+      submitDisabled={!canAdmin}
+    >
+      <div className="flex flex-col gap-4">
+        {isNewVersion ? (
+          <p className="rounded-md border p-3 text-sm text-muted-foreground">
+            La versión {initial!.version} es inmutable: al guardar se crea un borrador de la
+            siguiente versión.
+          </p>
+        ) : null}
+        {initial && !initial.sections ? (
+          <details className="rounded-md border p-3 text-sm">
+            <summary className="cursor-pointer font-medium">Texto anterior (referencia)</summary>
+            <p className="mt-2 whitespace-pre-wrap text-muted-foreground">{initial.body}</p>
+          </details>
+        ) : null}
         <Field>
-          <FieldLabel htmlFor="consent-key">Clave (opcional)</FieldLabel>
+          <FieldLabel htmlFor={`${ids}-title`}>Título</FieldLabel>
           <Input
-            id="consent-key"
-            value={key}
-            onChange={(event) => setKey(event.target.value)}
-            maxLength={40}
-            disabled={!canAdmin || isNewVersion}
+            id={`${ids}-title`}
+            aria-required="true"
+            value={title}
+            onChange={(event) => setTitle(event.target.value)}
+            maxLength={200}
+            disabled={!canAdmin}
           />
         </Field>
-      )}
-      <Field>
-        <FieldLabel>Especialidad</FieldLabel>
-        <Select
-          value={specialtyId || "ninguna"}
-          onValueChange={(v: string | null) => setSpecialtyId(v === "ninguna" ? "" : (v ?? ""))}
-          disabled={!canAdmin}
-        >
-          <SelectTrigger aria-label="Especialidad">
-            <SelectValue placeholder="Sin especialidad" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="ninguna">Sin especialidad</SelectItem>
-            {(specialtiesQuery.data?.data ?? []).map((s) => (
-              <SelectItem key={s.id} value={s.id}>
-                {s.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </Field>
-      <Field>
-        <FieldLabel htmlFor="consent-body">Texto informado</FieldLabel>
-        <Textarea
-          id="consent-body"
-          value={body}
-          onChange={(event) => setBody(event.target.value)}
-          rows={12}
-          maxLength={20000}
-          disabled={!canAdmin}
-        />
-      </Field>
-      {formError ? <FieldError>{formError}</FieldError> : null}
-      {saveMutation.isPending ? (
-        <p className="text-sm text-muted-foreground">Guardando…</p>
-      ) : null}
-    </div>
+        {!initial ? (
+          <Field>
+            <FieldLabel htmlFor={`${ids}-key`}>Clave (opcional)</FieldLabel>
+            <Input
+              id={`${ids}-key`}
+              value={key}
+              onChange={(event) => setKey(event.target.value)}
+              maxLength={40}
+              disabled={!canAdmin}
+            />
+          </Field>
+        ) : null}
+        <Field>
+          <FieldLabel htmlFor={`${ids}-specialty`}>Especialidad</FieldLabel>
+          <Select
+            items={Object.fromEntries([
+              ["ninguna", "Sin especialidad"],
+              ...(specialtiesQuery.data?.data ?? []).map((s) => [s.id, s.name]),
+            ])}
+            value={specialtyId || "ninguna"}
+            onValueChange={(v: string | null) => setSpecialtyId(v === "ninguna" ? "" : (v ?? ""))}
+            disabled={!canAdmin}
+          >
+            <SelectTrigger id={`${ids}-specialty`}>
+              <SelectValue placeholder="Sin especialidad" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="ninguna">Sin especialidad</SelectItem>
+              {(specialtiesQuery.data?.data ?? []).map((s) => (
+                <SelectItem key={s.id} value={s.id}>
+                  {s.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </Field>
+        <Field>
+          <FieldLabel htmlFor={`${ids}-procedure`}>Procedimiento propuesto</FieldLabel>
+          <Textarea
+            id={`${ids}-procedure`}
+            aria-required="true"
+            value={procedure}
+            onChange={(event) => setProcedure(event.target.value)}
+            rows={3}
+            maxLength={4000}
+            disabled={!canAdmin}
+          />
+        </Field>
+        {(
+          [
+            ["benefits", "Beneficios esperados", benefits, setBenefits],
+            ["risks", "Riesgos y molestias", risks, setRisks],
+            ["alternatives", "Alternativas", alternatives, setAlternatives],
+          ] as const
+        ).map(([id, label, value, set]) => (
+          <Field key={id}>
+            <FieldLabel htmlFor={`${ids}-${id}`}>{label}</FieldLabel>
+            <Textarea
+              id={`${ids}-${id}`}
+              aria-required="true"
+              aria-describedby={`${ids}-${id}-help`}
+              value={value}
+              onChange={(event) => set(event.target.value)}
+              rows={4}
+              disabled={!canAdmin}
+            />
+            <p id={`${ids}-${id}-help`} className="text-xs text-muted-foreground">
+              {listHelp}
+            </p>
+          </Field>
+        ))}
+        <Field>
+          <FieldLabel htmlFor={`${ids}-consequences`}>Consecuencias de no tratarse</FieldLabel>
+          <Textarea
+            id={`${ids}-consequences`}
+            aria-required="true"
+            value={consequences}
+            onChange={(event) => setConsequences(event.target.value)}
+            rows={2}
+            maxLength={4000}
+            disabled={!canAdmin}
+          />
+        </Field>
+        <Field>
+          <FieldLabel htmlFor={`${ids}-notes`}>Información adicional (opcional)</FieldLabel>
+          <Textarea
+            id={`${ids}-notes`}
+            value={notes}
+            onChange={(event) => setNotes(event.target.value)}
+            rows={2}
+            maxLength={4000}
+            disabled={!canAdmin}
+          />
+        </Field>
+      </div>
+    </FormDrawer>
   )
 }

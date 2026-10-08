@@ -4,9 +4,13 @@ import { beforeAll, expect, it } from "vitest"
 import { addClinicalNote, getPatientHealth, savePatientHealth } from "./clinical.js"
 import { listClinicalAccess, recordClinicalAccess } from "./clinical-access.js"
 import {
+  cancelConsentDocument,
   createConsentDocument,
   createConsentTemplate,
+  createSuggestedConsentTemplates,
+  listConsentTemplates,
   publishConsentTemplate,
+  revokeConsentDocument,
   signConsentDocument,
 } from "./clinical-forms.js"
 import { createContact } from "./contacts.js"
@@ -144,13 +148,26 @@ it("diagnóstico: entidad de la atención con tipo, pieza y catálogo; la nota n
 })
 
 it("consentimiento: firma verificada del paciente o de su representante legal vigente", async () => {
+  // Quien informa firma con su colegiatura: miembro con perfil profesional.
+  await ownerDb.execute(sql`insert into "member" ("id", "organization_id", "user_id", "role", "created_at")
+    values ('m-estructura', 'org_a', ${ACTOR}, 'member', now()) on conflict do nothing`)
+  await ownerDb.execute(sql`insert into "professional_profile" ("organization_id", "user_id", "registration_number")
+    values ('org_a', ${ACTOR}, '12345') on conflict do nothing`)
   const template = await run(async (tx) => {
     const draft = await createConsentTemplate(tx, "org_a", ACTOR, {
       title: "Consentimiento de restauración",
-      body: "Autorizo el procedimiento indicado tras recibir la explicación de sus riesgos y alternativas.",
+      sections: {
+        procedure: "Restauración de la pieza con resina compuesta.",
+        benefits: ["Recuperar forma y función"],
+        risks: ["Sensibilidad temporal"],
+        alternatives: ["Control sin tratamiento"],
+        consequences: "Avance de la caries y dolor.",
+      },
     })
     return publishConsentTemplate(tx, "org_a", ACTOR, draft.id)
   })
+  expect(template).toMatchObject({ status: "publicado", version: 1 })
+  expect(template.body).toContain("Riesgos y molestias")
   const mother = await run((tx) =>
     createContact(tx, "org_a", { displayName: "Marta Tutora", phone: "+51944000111" }),
   )
@@ -165,23 +182,30 @@ it("consentimiento: firma verificada del paciente o de su representante legal vi
       ],
     }),
   )
-  const consent = () =>
+  const consent = (patientId = child.id) =>
     run((tx) =>
       createConsentDocument(tx, "org_a", ACTOR, {
         templateId: template.id,
-        patientId: child.id,
+        patientId,
         procedureRef: "Restauración pieza 75",
       }),
     )
-  const sign = (documentId: string, signerContactId: string, signerKind: "paciente" | "representante") =>
+  const sign = (
+    documentId: string,
+    signerContactId: string,
+    signerKind: "paciente" | "representante",
+    extra: Partial<Parameters<typeof signConsentDocument>[4]> = {},
+  ) =>
     run((tx) =>
       signConsentDocument(tx, "org_a", ACTOR, documentId, {
         signerKind,
         signerContactId,
-        signerName: "Nombre escrito a mano",
-        signerDoc: "DNI 00000000",
         representativeRelation: "Madre",
+        signerDoc: "DNI 44556677",
         signatureData: signature,
+        professionalSignature: signature,
+        comprehensionConfirmed: true,
+        ...extra,
       }),
     )
 
@@ -201,31 +225,111 @@ it("consentimiento: firma verificada del paciente o de su representante legal vi
     }),
   )
   await expect(sign(first.id, aunt.id, "representante")).rejects.toMatchObject({ status: 409 })
-  // Con facultad vigente firma, y el nombre sale de su registro, no de lo tecleado.
-  const signed = await sign(first.id, mother.id, "representante")
+  // Sin comprensión confirmada o sin firma del profesional no hay firma.
+  await expect(
+    sign(first.id, mother.id, "representante", { comprehensionConfirmed: false }),
+  ).rejects.toMatchObject({ status: 400 })
+  await expect(
+    sign(first.id, mother.id, "representante", { professionalSignature: null }),
+  ).rejects.toMatchObject({ status: 400 })
+  // Con facultad vigente firma; el nombre sale de su registro, y queda quien informó.
+  const signed = await sign(first.id, mother.id, "representante", {
+    witness: { name: "Luis Testigo", doc: "DNI 11223344" },
+  })
   expect(signed).toMatchObject({
     status: "firmado",
     signerKind: "representante",
     signerContactId: mother.id,
     signerName: "Marta Tutora",
+    informerName: "Dra. Estructura",
+    informerRegistration: "COP 12345",
+    comprehensionConfirmed: true,
+    witnessName: "Luis Testigo",
   })
+  // La persona que firmó no se reemplaza después (trigger).
+  await expect(
+    run((tx) =>
+      tx.execute(sql`update consent_document set signer_contact_id = ${aunt.id} where id = ${first.id}`),
+    ),
+  ).rejects.toThrow()
 
-  // Como paciente solo firma la propia persona.
+  // El menor no firma por sí mismo, ni como «otra persona».
   const second = await consent()
-  await expect(sign(second.id, mother.id, "paciente")).rejects.toMatchObject({
-    code: "SIGNER_NOT_AUTHORIZED",
-  })
   const own = (await run((tx) => getPatient(tx, "org_a", child.id))).contacts.find(
     (link) => link.relationship === "self",
   )
   if (!own) throw new Error("El paciente no tiene persona propia")
+  await expect(sign(second.id, own.contactId, "paciente")).rejects.toMatchObject({ status: 400 })
   await expect(sign(second.id, own.contactId, "representante")).rejects.toMatchObject({
     code: "SIGNER_NOT_AUTHORIZED",
   })
-  expect(await sign(second.id, own.contactId, "paciente")).toMatchObject({
-    signerContactId: own.contactId,
-    signerName: "Niño Paciente",
+  await expect(sign(second.id, "", "representante")).rejects.toMatchObject({ status: 400 })
+  // Un pendiente se anula con motivo; firmado no se anula, se revoca.
+  await expect(
+    run((tx) => cancelConsentDocument(tx, "org_a", ACTOR, second.id, " ")),
+  ).rejects.toMatchObject({ status: 400 })
+  expect(
+    await run((tx) => cancelConsentDocument(tx, "org_a", ACTOR, second.id, "Plantilla equivocada")),
+  ).toMatchObject({ status: "anulado", cancelReason: "Plantilla equivocada" })
+  await expect(
+    run((tx) => cancelConsentDocument(tx, "org_a", ACTOR, first.id, "x")),
+  ).rejects.toMatchObject({ status: 409 })
+
+  // Adulto: firma la propia persona; revoca con su firma.
+  const adult = await run((tx) =>
+    createPatient(tx, "org_a", ACTOR, { displayName: "Adulta Paciente", birthDate: "1980-05-05" }),
+  )
+  const adultSelf = (await run((tx) => getPatient(tx, "org_a", adult.id))).contacts.find(
+    (link) => link.relationship === "self",
+  )!
+  const third = await consent(adult.id)
+  await expect(sign(third.id, mother.id, "paciente")).rejects.toMatchObject({ status: 404 })
+  const adultSigned = await sign(third.id, adultSelf.contactId, "paciente")
+  expect(adultSigned).toMatchObject({ signerName: "Adulta Paciente", status: "firmado" })
+  await expect(
+    run((tx) =>
+      revokeConsentDocument(tx, "org_a", ACTOR, third.id, {
+        reason: "Cambio de opinión",
+        revokerContactId: adultSelf.contactId,
+        signatureData: null,
+      }),
+    ),
+  ).rejects.toMatchObject({ status: 400 })
+  expect(
+    await run((tx) =>
+      revokeConsentDocument(tx, "org_a", ACTOR, third.id, {
+        reason: "Cambio de opinión",
+        revokerContactId: adultSelf.contactId,
+        signatureData: signature,
+      }),
+    ),
+  ).toMatchObject({ status: "revocado", revokerName: "Adulta Paciente" })
+
+  // Publicar una versión nueva archiva la anterior y devuelve el número real.
+  const v2 = await run(async (tx) => {
+    const draft = await createConsentTemplate(tx, "org_a", ACTOR, {
+      key: template.key,
+      title: "Consentimiento de restauración",
+      sections: {
+        procedure: "Restauración de la pieza con resina compuesta o ionómero.",
+        benefits: ["Recuperar forma y función"],
+        risks: ["Sensibilidad temporal", "Fractura de la restauración"],
+        alternatives: ["Control sin tratamiento"],
+        consequences: "Avance de la caries y dolor.",
+      },
+    })
+    return publishConsentTemplate(tx, "org_a", ACTOR, draft.id)
   })
+  expect(v2).toMatchObject({ version: 2, status: "publicado" })
+  const published = await run((tx) =>
+    listConsentTemplates(tx, "org_a", { status: "publicado" }),
+  )
+  expect(published.filter((t) => t.key === template.key).map((t) => t.version)).toEqual([2])
+  // Sugeridas: se crean como borrador, sin duplicar claves existentes.
+  const suggested = await run((tx) => createSuggestedConsentTemplates(tx, "org_a", ACTOR))
+  expect(suggested.length).toBeGreaterThan(5)
+  expect(suggested.every((t) => t.status === "borrador" && t.sections)).toBe(true)
+  expect(await run((tx) => createSuggestedConsentTemplates(tx, "org_a", ACTOR))).toEqual([])
 })
 
 it("bitácora: registra quién consultó qué parte de la ficha, una fila por hora", async () => {

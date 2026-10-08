@@ -1,3 +1,4 @@
+import { type ConsentSections, SUGGESTED_CONSENT_TEMPLATES } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { serviceCatalog } from "@odentia/db/schema/clinical"
 import { eq } from "drizzle-orm"
@@ -113,17 +114,27 @@ export async function seedClinicalForms(
     schema: evaluacionSchema,
   })
 
-  const consentTpl = await upsertConsentTemplate(tx, orgId, ownerUserId, {
-    key: "consentimiento-endodoncia",
-    title: "Consentimiento de tratamiento de conducto",
-    body: [
-      "Declaro que el profesional me explicó el diagnóstico, el tratamiento de conducto propuesto,",
-      "sus beneficios, riesgos (dolor postoperatorio, fractura, necesidad de retratamiento o",
-      "exodoncia) y alternativas (exodoncia, observación). Autorizo la realización del tratamiento",
-      "y el registro de mi firma manuscrita como evidencia de mi aceptación.",
-    ].join(" "),
-    specialtyId: endodoncia.id,
-  })
+  // Plantillas por procedimiento (secciones fijas). En la demo se publican
+  // para poder usarlas; en una organización real quedan en borrador hasta
+  // que alguien las revise.
+  const consentTemplates = new Map<string, Awaited<ReturnType<typeof upsertConsentTemplate>>>()
+  for (const suggestion of SUGGESTED_CONSENT_TEMPLATES) {
+    consentTemplates.set(
+      suggestion.key,
+      await upsertConsentTemplate(tx, orgId, ownerUserId, {
+        key: suggestion.key,
+        title: suggestion.title,
+        sections: suggestion.sections,
+        specialtyId:
+          suggestion.key === "endodoncia"
+            ? endodoncia.id
+            : suggestion.key === "exodoncia" || suggestion.key === "implante"
+              ? cirugia.id
+              : null,
+      }),
+    )
+  }
+  const consentTpl = consentTemplates.get("endodoncia")!
 
   // Captura de ejemplo sobre el paciente semilla (borrador → finalizado).
   const existing = await listFormResponses(tx, orgId, { patientId, templateId: template.id })
@@ -156,9 +167,16 @@ export async function seedClinicalForms(
     })
     await signConsentDocument(tx, orgId, ownerUserId, document.id, {
       signerKind: "paciente",
-      signerName: "Paciente de demostración",
-      signerDoc: "00000000",
-      signatureData: { strokes: [[[0, 0], [10, 12], [20, 4]]] },
+      signerContactId: input.contactId,
+      comprehensionConfirmed: true,
+      signatureData: { strokes: [[[80, 600], [200, 380], [320, 640], [460, 360], [600, 620]]] },
+      professionalSignature: { strokes: [[[100, 500], [300, 300], [500, 520], [700, 320]]] },
+    })
+    // Pendiente de firma para la exodoncia planificada: aparece en el Resumen.
+    await createConsentDocument(tx, orgId, ownerUserId, {
+      templateId: consentTemplates.get("exodoncia")!.id,
+      patientId,
+      procedureRef: "Exodoncia pieza 38",
     })
   }
 
@@ -230,7 +248,7 @@ async function upsertConsentTemplate(
   tx: Db,
   orgId: string,
   actorUserId: string,
-  input: { key: string; title: string; body: string; specialtyId: string },
+  input: { key: string; title: string; sections: ConsentSections; specialtyId: string | null },
 ) {
   const published = (await listConsentTemplates(tx, orgId, { status: "publicado" })).find(
     (t) => t.key === input.key,
