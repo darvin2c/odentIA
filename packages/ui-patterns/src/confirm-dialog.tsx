@@ -7,6 +7,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@odentia/ui"
+import type { ReactNode } from "react"
 import { common } from "./common.js"
 import { SubmitButton } from "./form/submit-button.js"
 
@@ -25,6 +26,10 @@ export interface ConfirmDialogProps {
   cancelLabel?: string
   variant?: ConfirmVariant
   pending?: boolean
+  /** Contenido entre la descripción y las acciones (p. ej. el motivo obligatorio). */
+  children?: ReactNode
+  /** Bloquea la confirmación hasta completar lo que el contrato exige. */
+  confirmDisabled?: boolean
   onConfirm: () => void
   onClose: () => void
 }
@@ -42,6 +47,8 @@ export function ConfirmDialog({
   cancelLabel = common.actions.cancel,
   variant = "destructive",
   pending = false,
+  children,
+  confirmDisabled = false,
   onConfirm,
   onClose,
 }: ConfirmDialogProps) {
@@ -57,6 +64,7 @@ export function ConfirmDialog({
           <AlertDialogTitle>{title}</AlertDialogTitle>
           <AlertDialogDescription>{description}</AlertDialogDescription>
         </AlertDialogHeader>
+        {children ? <div className="flex flex-col gap-3">{children}</div> : null}
         <AlertDialogFooter>
           <AlertDialogCancel disabled={pending}>{cancelLabel}</AlertDialogCancel>
           <SubmitButton
@@ -67,6 +75,7 @@ export function ConfirmDialog({
                 : undefined
             }
             pending={pending}
+            disabled={confirmDisabled}
             onClick={onConfirm}
           >
             {confirmLabel}

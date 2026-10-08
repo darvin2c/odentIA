@@ -4,7 +4,6 @@ import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useId, useState } from "react"
 import { apiFetch } from "../../lib/api"
 import { usePermission } from "../../lib/crm"
-import { Cie10Search } from "./cie10-search"
 
 export function QuickNoteDrawer({
   patientId,
@@ -20,20 +19,17 @@ export function QuickNoteDrawer({
   const id = useId()
   const [open, setOpen] = useState(false)
   const [note, setNote] = useState("")
-  const [code, setCode] = useState("")
   const save = useMutation({
     mutationFn: () =>
       apiFetch(`/api/patients/${patientId}/notes`, {
         method: "POST",
         body: JSON.stringify({
           note: note.trim(),
-          ...(code ? { diagnosisCode: code } : {}),
           ...(encounterId ? { encounterId } : {}),
         }),
       }),
     onSuccess: () => {
       setNote("")
-      setCode("")
       setOpen(false)
       for (const key of ["patient-notes", "timeline", "patient-summary", "encounter"])
         void queryClient.invalidateQueries({ queryKey: [key, patientId] })
@@ -58,7 +54,7 @@ export function QuickNoteDrawer({
           if (!save.isPending) setOpen(false)
         }}
         title="Nota rápida"
-        description="Las notas clínicas son inmutables. Las correcciones se registran en una nueva nota."
+        description="Para lo que ocurre fuera de una atención (una llamada, un aviso). Es inmutable: una corrección va en otra nota. Los diagnósticos se registran en la atención, con su tipo y firma."
         onSubmit={(event) => {
           event.preventDefault()
           if (note.trim()) save.mutate()
@@ -81,7 +77,6 @@ export function QuickNoteDrawer({
               disabled={save.isPending}
             />
           </Field>
-          <Cie10Search value={code} onChange={setCode} disabled={save.isPending} />
         </div>
       </FormDrawer>
     </>

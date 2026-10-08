@@ -15,12 +15,13 @@ import { deflateSync } from "node:zlib"
 import { DEFAULT_REGISTRATION_CONFIG } from "@odentia/clinical"
 import { createOwnerDb } from "@odentia/db"
 import { appointment, scheduleChair } from "@odentia/db/schema/agenda"
-import { account, invitation, member, organization, user } from "@odentia/db/schema/auth"
 import { commercialFollowUpCoordination } from "@odentia/db/schema/agent"
+import { account, invitation, member, organization, user } from "@odentia/db/schema/auth"
 import {
   clinicalFollowUp,
   clinicalNote,
   encounter,
+  encounterDiagnosis,
   encounterPlanItem,
   encounterProcedure,
   encounterTooth,
@@ -52,6 +53,7 @@ import {
   treatmentPlanItem,
   treatmentTemplate,
 } from "@odentia/db/schema/clinical"
+import { professionalProfile } from "@odentia/db/schema/clinical-forms"
 import {
   agentConfig,
   channelConnection,
@@ -67,8 +69,8 @@ import {
 import { auditEvent, branch, orgProfile, patientRegistrationConfig } from "@odentia/db/schema/org"
 import { hashPassword } from "better-auth/crypto"
 import { and, eq, inArray, or, sql } from "drizzle-orm"
-import { upsertAgentConfig } from "./agentConfig.js"
 import { createHandoff } from "./agent-operations.js"
+import { upsertAgentConfig } from "./agentConfig.js"
 import { createAppointment, createChair } from "./appointments.js"
 import { createBudget, decideBudget, presentBudget, reviseBudget } from "./budgets.js"
 import {
@@ -82,6 +84,7 @@ import {
 } from "./clinical.js"
 import { createConnection } from "./connections.js"
 import { createContact, updateContact } from "./contacts.js"
+import { addEncounterDiagnosis, voidEncounterDiagnosis } from "./encounter-diagnoses.js"
 import {
   addEncounterAddendum,
   addEncounterProcedure,
@@ -102,6 +105,7 @@ import { applyPayment, createCharge, createPayment, refundPayment } from "./paym
 import { ensureDefaultPipeline } from "./pipelines.js"
 import { addPlanItem, createOptionGroup, createTreatmentPlan, setPlanItemStatus } from "./plan.js"
 import { cancelPrescription, createPrescription } from "./prescriptions.js"
+import { setProfessionalProfile } from "./professional-profiles.js"
 import { grantResponsibility } from "./responsibilities.js"
 import { secretsKeyFromEnv } from "./secrets.js"
 import { seedAgent } from "./seed-agent.js"
@@ -366,6 +370,7 @@ async function wipeSeed(): Promise<void> {
   await db.delete(encounterProcedure).where(inArray(encounterProcedure.organizationId, SEED_ORGS))
   await db.delete(encounterTooth).where(inArray(encounterTooth.organizationId, SEED_ORGS))
   await db.delete(clinicalNote).where(inArray(clinicalNote.organizationId, SEED_ORGS))
+  await db.delete(encounterDiagnosis).where(inArray(encounterDiagnosis.organizationId, SEED_ORGS))
   // Los ítems del plan referencian el hallazgo que los motivó: se suelta la
   // referencia antes de borrar el odontograma (los ítems se borran después).
   await db
@@ -436,6 +441,7 @@ async function wipeSeed(): Promise<void> {
   await db.delete(branch).where(inArray(branch.organizationId, SEED_ORGS))
   await db.delete(orgProfile).where(inArray(orgProfile.organizationId, SEED_ORGS))
   await db.delete(auditEvent).where(inArray(auditEvent.organizationId, SEED_ORGS))
+  await db.delete(professionalProfile).where(inArray(professionalProfile.organizationId, SEED_ORGS))
   await db.delete(member).where(inArray(member.organizationId, SEED_ORGS))
   await db.delete(invitation).where(inArray(invitation.organizationId, SEED_ORGS))
   await db.delete(organization).where(inArray(organization.id, SEED_ORGS))
@@ -613,6 +619,15 @@ await db.insert(member).values([
     createdAt: new Date(),
   },
 ])
+// Colegiatura con la que firman (ADR 0003). Luis queda sin colegiatura en la
+// clínica B para ejercitar el aviso «falta tu colegiatura» al cerrar.
+await setProfessionalProfile(db, ORG_A, ANA_ID, ANA_ID, {
+  signatureName: "Ana Torres",
+  registrationNumber: "12345",
+  specialtyRegistration: "RNE 1024",
+})
+await setProfessionalProfile(db, ORG_A, ANA_ID, LUIS_ID, { registrationNumber: "23456" })
+await setProfessionalProfile(db, ORG_B, CORA_ID, CORA_ID, { registrationNumber: "34567" })
 await db.insert(orgProfile).values([
   {
     organizationId: ORG_A,
@@ -977,7 +992,8 @@ await upsertAgentConfig(db, ORG_A, {
 await createHandoff(db, ORG_A, null, {
   conversationId: convCarlos.id,
   reason: "Pregunta por precio de extracción y pide hablar con una persona",
-  summary: "Carlos consultó el costo de una extracción de muela del juicio; el agente no da precios inventados y derivó con prioridad alta.",
+  summary:
+    "Carlos consultó el costo de una extracción de muela del juicio; el agente no da precios inventados y derivó con prioridad alta.",
   priority: "alta",
   createdBy: "agent",
 })
@@ -1359,11 +1375,36 @@ await voidOdontogramEntry(
 )
 await addClinicalNote(db, ORG_A, ANA_ID, rosaPatientId, {
   note: "Paciente con dolor a la percusión en pieza 36; se planifica obturación y endodoncia en 46.",
-  diagnosisCode: "K02.1",
-  diagnosisType: "definitivo",
-  toothNumber: 36,
   encounterId: draft.id,
 })
+// Diagnósticos CIE-10 de la atención (ADR 0003): con tipo y sitio dental.
+await addEncounterDiagnosis(db, ORG_A, ANA_ID, rosaPatientId, draft.id, {
+  cie10Code: "K02.1",
+  diagnosisType: "definitivo",
+  toothNumber: 36,
+  surfaces: ["occlusal"],
+  note: "Dolor a la percusión; caries en dentina.",
+})
+await addEncounterDiagnosis(db, ORG_A, ANA_ID, rosaPatientId, draft.id, {
+  cie10Code: "K04.0",
+  diagnosisType: "presuntivo",
+  toothNumber: 46,
+})
+// Un diagnóstico mal registrado se anula con motivo; queda en la traza.
+const dxErrado = await addEncounterDiagnosis(db, ORG_A, ANA_ID, rosaPatientId, draft.id, {
+  cie10Code: "K02.1",
+  diagnosisType: "presuntivo",
+  toothNumber: 37,
+})
+await voidEncounterDiagnosis(
+  db,
+  ORG_A,
+  ANA_ID,
+  rosaPatientId,
+  draft.id,
+  dxErrado.id,
+  { reason: "Pieza equivocada: era la 36" },
+)
 // Documentos demo con bytes reales en storage (el registro exige borrador).
 const rxRef = await storage.putPatientDocument({
   orgId: ORG_A,
@@ -1588,11 +1629,14 @@ await savePatientHealth(db, ORG_A, ANA_ID, elenaPatientId, {
 })
 await addClinicalNote(db, ORG_A, ANA_ID, elenaPatientId, {
   note: "Control de rutina sin hallazgos",
-  diagnosisCode: "Z01.2",
 })
 // Plan de Elena + presupuesto en borrador (sin presentar): ejercita el estado inicial.
 const elenaEval = await createEncounter(db, ORG_A, ANA_ID, elenaPatientId, {
   reason: "Control de rutina",
+})
+await addEncounterDiagnosis(db, ORG_A, ANA_ID, elenaPatientId, elenaEval.id, {
+  cie10Code: "Z01.2",
+  diagnosisType: "definitivo",
 })
 const elenaPlan = await createTreatmentPlan(db, ORG_A, ANA_ID, elenaPatientId, {
   title: "Plan profilaxis",

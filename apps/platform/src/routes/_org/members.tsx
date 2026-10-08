@@ -1,4 +1,10 @@
-import { ORG_ROLES, ROLE_DESCRIPTIONS, ROLE_LABELS, assignableRoles, type OrgRole } from "@odentia/auth/permissions"
+import {
+  assignableRoles,
+  ORG_ROLES,
+  type OrgRole,
+  ROLE_DESCRIPTIONS,
+  ROLE_LABELS,
+} from "@odentia/auth/permissions"
 import {
   Badge,
   Button,
@@ -37,8 +43,14 @@ import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-
 import { Plus } from "lucide-react"
 import { type FormEvent, useMemo, useState } from "react"
 import { z } from "zod"
+import { ProfessionalProfileDrawer } from "../../components/professional-profile-drawer"
 import { authClient } from "../../lib/auth-client"
 import { useMyRole, usePermission } from "../../lib/crm"
+import {
+  fetchProfessionalProfiles,
+  type ProfessionalProfile,
+  registrationLabel,
+} from "../../lib/encounters"
 import { PageDraftGuard } from "../../lib/page-draft-guard"
 
 export const Route = createFileRoute("/_org/members")({
@@ -82,12 +94,23 @@ function MembersPage() {
   const mode = useDetailMode()
   const [formOpen, setFormOpen] = useState(false)
   const [removing, setRemoving] = useState<{ id: string; label: string } | null>(null)
+  const [editingProfile, setEditingProfile] = useState<ProfessionalProfile | null>(null)
 
   const { org: routeOrg, session } = orgRouteApi.useRouteContext()
   const myRole = useMyRole()
   const canView = usePermission("settings.read")
   const canManage = usePermission("settings.write")
   const assignable = useMemo(() => assignableRoles(myRole), [myRole])
+  // Colegiatura con la que firma cada profesional (ADR 0003).
+  const profilesQuery = useQuery({
+    queryKey: ["professional-profiles"],
+    queryFn: fetchProfessionalProfiles,
+    enabled: canView,
+  })
+  const profileByUser = useMemo(
+    () => new Map((profilesQuery.data?.data ?? []).map((p) => [p.userId, p])),
+    [profilesQuery.data],
+  )
 
   const orgQuery = useQuery({
     queryKey: ["full-org", routeOrg.id],
@@ -214,19 +237,52 @@ function MembersPage() {
         ),
       },
       {
+        id: "registration",
+        header: "Colegiatura",
+        cell: ({ row }) => {
+          const profile = profileByUser.get(row.original.userId)
+          const label = profile ? registrationLabel(profile) : null
+          if (label) return label
+          // Solo a quien atiende le falta para firmar; al resto no le aplica.
+          return ["dentist", "owner", "admin"].includes(row.original.role) ? (
+            <span className="text-muted-foreground">Sin registrar</span>
+          ) : (
+            <span className="text-muted-foreground">—</span>
+          )
+        },
+      },
+      {
         id: "actions",
         header: "",
         cell: ({ row }) => {
           const membership = row.original
-          // Sin gestión, sobre uno mismo o siendo propietario único: sin acciones.
-          if (!canManage || membership.userId === session.userId) return null
+          const isSelf = membership.userId === session.userId
+          const profile = profileByUser.get(membership.userId)
+          const profileItem =
+            profile && (canManage || isSelf)
+              ? [
+                  {
+                    key: "profile",
+                    label: isSelf ? "Mi perfil profesional…" : "Perfil profesional…",
+                    onSelect: () => setEditingProfile(profile),
+                  },
+                ]
+              : []
+          // Sin gestión, sobre uno mismo o siendo propietario único: solo el perfil.
           const isLastOwner = membership.role === "owner" && ownerCount <= 1
-          if (isLastOwner) return null
+          if (!canManage || isSelf || isLastOwner) {
+            return profileItem.length > 0 ? (
+              <div className="text-right">
+                <RowActions label={`Acciones de ${membership.user.name}`} items={profileItem} />
+              </div>
+            ) : null
+          }
           return (
             <div className="text-right">
               <RowActions
                 label={`Acciones de ${membership.user.name}`}
                 items={[
+                  ...profileItem,
                   ...assignable.map((role) => ({
                     key: `role-${role}`,
                     label:
@@ -250,7 +306,7 @@ function MembersPage() {
         },
       },
     ],
-    [assignable, canManage, ownerCount, roleMutation, session.userId],
+    [assignable, canManage, ownerCount, roleMutation, session.userId, profileByUser],
   )
   const filteredMembers = useMemo(() => {
     const needle = search.toLowerCase()
@@ -443,7 +499,10 @@ function MembersPage() {
                     >
                       <span>
                         {inv.email}{" "}
-                        <Badge variant="secondary" title={ROLE_DESCRIPTIONS[inv.role as OrgRole] ?? inv.role}>
+                        <Badge
+                          variant="secondary"
+                          title={ROLE_DESCRIPTIONS[inv.role as OrgRole] ?? inv.role}
+                        >
                           {roleLabel(inv.role)}
                         </Badge>
                       </span>
@@ -474,6 +533,16 @@ function MembersPage() {
         <FormDrawer open={formOpen} {...formProps}>
           {formFields}
         </FormDrawer>
+      ) : null}
+
+      {editingProfile ? (
+        <ProfessionalProfileDrawer
+          key={editingProfile.userId}
+          open
+          profile={editingProfile}
+          target={editingProfile.userId === session.userId ? "me" : editingProfile.userId}
+          onClose={() => setEditingProfile(null)}
+        />
       ) : null}
 
       <ConfirmDialog

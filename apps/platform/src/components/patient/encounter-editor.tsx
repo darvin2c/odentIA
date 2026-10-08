@@ -25,7 +25,16 @@ import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useId, useRef, useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
 import { fetchFollowUps, fetchPatientAccount, fetchPrescriptions } from "../../lib/clinical-journey"
-import { useMemberName, usePermission } from "../../lib/crm"
+import { useMemberName, useMyUserId, usePermission } from "../../lib/crm"
+import {
+  CLOSING_REQUIREMENT_LABELS,
+  type ClosingRequirement,
+  fetchEncounterClosing,
+  fetchMyProfessionalProfile,
+  registrationLabel,
+  takeOverEncounterApi,
+  voidEncounterApi,
+} from "../../lib/encounters"
 import {
   type Encounter,
   type EncounterDetail,
@@ -36,6 +45,7 @@ import {
 } from "../../lib/patients"
 import { formatMoney } from "../../lib/services"
 import { OdontogramStudio } from "../odontogram-studio"
+import { ProfessionalProfileDrawer } from "../professional-profile-drawer"
 import { ControlesPanel, RecetasPanel } from "./clinical-panels"
 import { EncounterDiagnoses } from "./encounter-diagnoses"
 import { EncounterPlanPanel } from "./encounter-plan-panel"
@@ -234,6 +244,13 @@ function saveMessage(err: unknown, fallback: string): string {
  * formulario propio usan el detalle de lectura, para no anidar formularios.
  * Finalizar y volver viven en la revisión de cierre, no en un footer suelto.
  */
+function formatClock(iso: string): string {
+  const date = new Date(iso)
+  return Number.isNaN(date.getTime())
+    ? ""
+    : date.toLocaleTimeString("es-PE", { hour: "2-digit", minute: "2-digit" })
+}
+
 export function EncounterEditor({
   patientId,
   detail,
@@ -278,6 +295,27 @@ export function EncounterEditor({
   const [finalizing, setFinalizing] = useState(false)
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [backing, setBacking] = useState(false)
+  // Hora de fin declarada al cerrar (HH:MM local); vacía = ahora.
+  const [endTime, setEndTime] = useState("")
+  const [voidOpen, setVoidOpen] = useState(false)
+  const [voidReason, setVoidReason] = useState("")
+  const [voiding, setVoiding] = useState(false)
+  const [takingOver, setTakingOver] = useState(false)
+  const [profileOpen, setProfileOpen] = useState(false)
+  const myUserId = useMyUserId()
+  // Quien lleva la atención es quien la edita y la firma; otro profesional la
+  // lee y, para continuarla, toma el relevo.
+  const attending = encounter.dentistUserId === myUserId
+  const closingQuery = useQuery({
+    queryKey: ["encounter-closing", patientId, encounterId],
+    queryFn: () => fetchEncounterClosing(patientId, encounterId),
+    enabled: canWrite,
+  })
+  const profileQuery = useQuery({
+    queryKey: ["professional-profile", "me"],
+    queryFn: fetchMyProfessionalProfile,
+    enabled: canWrite,
+  })
 
   // Tratamientos a los que se puede ligar una receta o un control desde esta
   // atención: los vinculados y los indicados aquí, sin repetir.
@@ -599,6 +637,52 @@ export function EncounterEditor({
     }
   }
 
+  const refreshClosing = () =>
+    queryClient.invalidateQueries({ queryKey: ["encounter-closing", patientId, encounterId] })
+
+  /** Hora de fin declarada: hoy a la hora indicada, en la zona del navegador. */
+  const endedAtIso = (): string | null => {
+    if (!endTime) return null
+    const [hours, minutes] = endTime.split(":").map(Number)
+    const at = new Date()
+    at.setHours(hours ?? 0, minutes ?? 0, 0, 0)
+    return at.toISOString()
+  }
+
+  const handleVoid = async () => {
+    if (voiding || !voidReason.trim()) return
+    setVoiding(true)
+    clearTimer()
+    try {
+      await voidEncounterApi(patientId, encounterId, voidReason.trim())
+      setVoidOpen(false)
+      await queryClient.invalidateQueries({ queryKey: ["patient-summary", patientId] })
+      await queryClient.invalidateQueries({ queryKey: ["encounters", patientId] })
+      await onChanged()
+    } catch (err) {
+      if (mountedRef.current) {
+        setSaveError(saveMessage(err, "No se pudo anular la atención."))
+        setVoidOpen(false)
+      }
+    } finally {
+      if (mountedRef.current) setVoiding(false)
+    }
+  }
+
+  const handleTakeOver = async () => {
+    if (takingOver) return
+    setTakingOver(true)
+    try {
+      await takeOverEncounterApi(patientId, encounterId)
+      await onChanged()
+      await refreshClosing()
+    } catch (err) {
+      setSaveError(saveMessage(err, "No se pudo tomar el relevo."))
+    } finally {
+      if (mountedRef.current) setTakingOver(false)
+    }
+  }
+
   const handleConfirmFinalize = async () => {
     if (finalizing || childCountRef.current > 0) return
     if (apptBlocked()) {
@@ -612,11 +696,12 @@ export function EncounterEditor({
     try {
       // Congela: primero todo PATCH pendiente y último dirty, recién después finalize.
       await flush()
+      const endedAt = endedAtIso()
       const result = await apiFetch<{
         data: { charges: Array<{ id: string }> }
       }>(`/api/patients/${patientId}/encounters/${encounterId}/finalize`, {
         method: "POST",
-        body: "{}",
+        body: JSON.stringify(endedAt ? { endedAt } : {}),
       })
       await onFinalized(result.data.charges.length > 0)
     } catch (err) {
@@ -625,6 +710,7 @@ export function EncounterEditor({
         setSaveError(saveMessage(err, "No se pudo finalizar la atención."))
         setSaveState("error")
         setConfirmOpen(false)
+        void refreshClosing()
       }
     } finally {
       if (mountedRef.current) setFinalizing(false)
@@ -657,6 +743,7 @@ export function EncounterEditor({
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ["odontogram", patientId] }),
       queryClient.invalidateQueries({ queryKey: ["plan-items", patientId] }),
+      refreshClosing(),
     ])
   }
 
@@ -668,6 +755,7 @@ export function EncounterEditor({
   )
   const chargeableByCurrency = new Map<string, number>()
   for (const proc of detail.procedures) {
+    if (proc.voidedAt) continue
     if (!proc.serviceId || proc.priceCents === null || proc.priceCents <= 0 || !proc.currency)
       continue
     if (proc.planItemId && coveredItems.has(proc.planItemId)) continue
@@ -683,7 +771,7 @@ export function EncounterEditor({
 
   const mode = useDetailMode()
 
-  const locked = !canWrite || childCount > 0 || finalizing || backing
+  const locked = !canWrite || !attending || childCount > 0 || finalizing || backing || voiding
 
   const prescriptions = (prescriptionsQuery.data?.data ?? []).filter(
     (row) => row.encounterId === encounterId,
@@ -704,6 +792,8 @@ export function EncounterEditor({
    * registrado»: sin contenido y sin agregar explícitamente, el bloque no se
    * muestra; nunca se pinta un bloque vacío por existir en el sistema.
    */
+  const activeDiagnoses = (detail.diagnoses ?? []).filter((dx) => !dx.voidedAt).length
+  const activeProcedures = detail.procedures.filter((proc) => !proc.voidedAt).length
   const sections: Array<{
     key: SectionKey
     title: string
@@ -717,16 +807,6 @@ export function EncounterEditor({
       description: "Motivo, sucursal y piezas evaluadas. Es lo único que la atención requiere.",
       summary: reason.trim() === "" ? "Sin motivo registrado" : reason.trim(),
       empty: reason.trim() === "",
-    },
-    {
-      key: "hallazgos",
-      title: "Diagnósticos",
-      description: "Diagnósticos CIE-10 registrados en esta atención.",
-      summary:
-        detail.notes.length === 0
-          ? "Sin diagnósticos registrados"
-          : `${detail.notes.length} diagnóstico(s) registrado(s)`,
-      empty: detail.notes.length === 0,
     },
     {
       key: "examen",
@@ -746,13 +826,23 @@ export function EncounterEditor({
       empty: detail.odontogramEntries.length === 0,
     },
     {
-      key: "procedimientos",
-      title: "Servicios realizados",
-      description: "Actos ejecutados hoy, con su prestación y tarifa.",
+      key: "hallazgos",
+      title: "Diagnóstico",
+      description: "Diagnósticos CIE-10 con su tipo y pieza. Al menos uno para cerrar.",
       summary:
-        detail.procedures.length === 0
-          ? "Sin actos registrados"
-          : `${detail.procedures.length} acto(s) registrado(s)`,
+        activeDiagnoses === 0
+          ? "Sin diagnósticos registrados"
+          : `${activeDiagnoses} diagnóstico(s) registrado(s)`,
+      empty: activeDiagnoses === 0,
+    },
+    {
+      key: "procedimientos",
+      title: "Procedimientos",
+      description: "Actos ejecutados hoy, con su prestación y tarifa. Se anulan con motivo.",
+      summary:
+        activeProcedures === 0
+          ? "Sin procedimientos registrados"
+          : `${activeProcedures} procedimiento(s) registrado(s)`,
       empty: detail.procedures.length === 0,
     },
     {
@@ -793,7 +883,7 @@ export function EncounterEditor({
     {
       key: "evolucion",
       title: "Evolución e indicaciones",
-      description: "Evolución clínica, indicaciones al paciente y seguimiento sugerido.",
+      description: "Evolución clínica (obligatoria para cerrar), indicaciones y seguimiento.",
       summary:
         evolution.trim() === "" && indications.trim() === "" && nextStep.trim() === ""
           ? "Sin evolución registrada"
@@ -803,16 +893,18 @@ export function EncounterEditor({
   ]
 
   // Antes de cerrar: qué queda registrado y qué no, con los mismos resúmenes
-  // que ve el clínico en cada bloque. No bloquea: informa la decisión.
+  // que ve el clínico en cada bloque.
+  const missing = closingQuery.data?.data.missing ?? []
+  const closingReady = closingQuery.data?.data.ready === true
   const closingSections = sections.filter((section) => section.key !== "consulta")
   const recorded = closingSections.filter((section) => !section.empty).map((s) => s.summary)
   const unrecorded = closingSections
     .filter((section) => section.empty)
     .map((section) => section.title.toLowerCase())
   const finalizeDescription = [
-    recorded.length > 0 ? `Registrado: ${recorded.join("; ")}.` : "Solo se registró el motivo.",
+    recorded.length > 0 ? `Registrado: ${recorded.join("; ")}.` : "",
     unrecorded.length > 0 ? `Sin registrar: ${unrecorded.join(", ")}.` : "",
-    "La atención quedará inmutable: solo se podrán agregar adendas. Los actos con tarifa generan sus cargos automáticamente (sin duplicar tratamientos ya cargados). Esta acción no se puede deshacer.",
+    "Después del cierre solo se agregan adendas. Si vino de una cita, la cita queda atendida.",
   ]
     .filter(Boolean)
     .join(" ")
@@ -1108,16 +1200,6 @@ export function EncounterEditor({
           Seguimiento recomendado; no reserva una cita. Guarda fecha y hora juntas o limpia ambas.
         </p>
       </div>
-      {detail.addenda.length > 0 ? (
-        <div className="flex flex-col gap-2 border-t pt-4">
-          <p className="font-heading text-sm font-medium">Adendas</p>
-          {detail.addenda.map((note) => (
-            <p key={note.id} className="whitespace-pre-wrap text-sm">
-              {note.note}
-            </p>
-          ))}
-        </div>
-      ) : null}
     </div>
   )
 
@@ -1263,12 +1345,28 @@ export function EncounterEditor({
         <div>
           <h1 className="text-xl font-semibold">{patient.patient.displayName}</h1>
           <p className="text-sm text-muted-foreground">
-            {hcLabel(patient.patient.patientNumber)} · Odontólogo{" "}
-            {memberName(encounter.dentistUserId)}
+            {hcLabel(patient.patient.patientNumber)} · Atiende {memberName(encounter.dentistUserId)}
+            {encounter.startedAt ? ` · Inicio ${formatClock(encounter.startedAt)}` : ""}
+            {encounter.appointmentId ? " · Desde la cita de agenda" : ""}
           </p>
         </div>
         <Badge variant="outline">{encounterStatusLabel(encounter.status)}</Badge>
       </div>
+
+      {canWrite && !attending ? (
+        <div
+          role="status"
+          className="flex flex-wrap items-center justify-between gap-3 rounded-xl border bg-card p-4"
+        >
+          <p className="text-sm">
+            Esta atención la lleva {memberName(encounter.dentistUserId)}. Puedes leerla; para
+            continuarla y firmarla, toma el relevo (queda registrado).
+          </p>
+          <Button type="button" disabled={takingOver} onClick={() => void handleTakeOver()}>
+            {takingOver ? "Tomando el relevo…" : "Tomar el relevo"}
+          </Button>
+        </div>
+      ) : null}
 
       <div className="flex flex-wrap items-center gap-3">
         <p role="status" aria-live="polite" className="text-sm text-muted-foreground">
@@ -1336,8 +1434,8 @@ export function EncounterEditor({
             <div className="flex flex-col gap-1">
               <h2 className="font-heading text-base font-medium">Agregar según lo que ocurrió</h2>
               <p className="text-sm text-muted-foreground">
-                Se registra solo lo que la consulta necesita: servicios, odontograma, plan, recetas,
-                controles, documentos o evolución. Nada de esto es obligatorio.
+                Para cerrar bastan el motivo, un diagnóstico y la evolución; el resto se agrega
+                cuando ocurre, en el orden de la historia clínica.
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
@@ -1362,47 +1460,104 @@ export function EncounterEditor({
           className="flex flex-col gap-4 rounded-sm bg-card p-6"
         >
           <div className="flex flex-col gap-1">
-            <h2 className="font-heading text-base font-medium">Revisión para el cierre</h2>
+            <h2 className="font-heading text-base font-medium">Cierre de la atención</h2>
             <p className="text-sm text-muted-foreground">
-              Revisa lo registrado antes de finalizar: el cierre deja la atención inmutable.
+              Al cerrar se firma con tu colegiatura y la atención queda inmutable: después solo se
+              agregan adendas.
             </p>
           </div>
+          <ul className="flex flex-col gap-1.5 text-sm" aria-label="Requisitos para cerrar">
+            {(["reason", "diagnosis", "evolution", "signature"] as ClosingRequirement[]).map(
+              (requirement) => {
+                const done = closingQuery.isSuccess && !missing.includes(requirement)
+                return (
+                  <li key={requirement} className="flex flex-wrap items-center gap-2">
+                    <span
+                      aria-hidden="true"
+                      className={
+                        done
+                          ? "inline-flex size-5 items-center justify-center rounded-full bg-success-soft text-xs font-bold text-success"
+                          : "inline-flex size-5 items-center justify-center rounded-full bg-warning-soft text-xs font-bold text-warning"
+                      }
+                    >
+                      {done ? "✓" : "!"}
+                    </span>
+                    <span>
+                      {CLOSING_REQUIREMENT_LABELS[requirement]}
+                      <span className="sr-only">{done ? ": listo" : ": pendiente"}</span>
+                    </span>
+                    {!done && closingQuery.isSuccess ? (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="link"
+                        className="h-auto p-0"
+                        disabled={!attending}
+                        onClick={() => {
+                          if (requirement === "signature") setProfileOpen(true)
+                          else
+                            addSection(
+                              requirement === "reason"
+                                ? "consulta"
+                                : requirement === "diagnosis"
+                                  ? "hallazgos"
+                                  : "evolucion",
+                            )
+                        }}
+                      >
+                        {requirement === "signature" ? "Completar perfil" : "Registrar"}
+                      </Button>
+                    ) : null}
+                  </li>
+                )
+              },
+            )}
+          </ul>
+          {closingQuery.isError ? (
+            <p role="alert" className="text-sm text-destructive">
+              No se pudo comprobar lo que falta para cerrar.
+            </p>
+          ) : null}
           <div className="flex flex-col gap-2 text-sm">
-            <p>
-              {detail.procedures.length} procedimiento(s) · {detail.notes.length} diagnóstico(s) ·{" "}
+            <p className="text-muted-foreground">
+              {activeProcedures} procedimiento(s) · {activeDiagnoses} diagnóstico(s) ·{" "}
               {detail.odontogramEntries.length} hallazgo(s) de odontograma ·{" "}
               {detail.documents.length} documento(s) · {pendingTreatments} tratamiento(s) por
               ejecutar
             </p>
-            {accountQuery.isSuccess ? (
-              <p className="font-medium">
-                {chargeableText
-                  ? `Cargos nuevos al finalizar: ${chargeableText}. El cierre vuelve a comprobar lo ya cobrado.`
-                  : "Sin cargos nuevos: actos sin costo o tratamientos ya cargados."}
-              </p>
+            {canReadFinance ? (
+              accountQuery.isSuccess ? (
+                <p className="font-medium">
+                  {chargeableText
+                    ? `Cargos nuevos al cerrar: ${chargeableText}. El cierre vuelve a comprobar lo ya cobrado.`
+                    : "Sin cargos nuevos: actos sin costo o tratamientos ya cargados."}
+                </p>
+              ) : (
+                <p className="text-muted-foreground">
+                  {accountQuery.isError
+                    ? "No se pudo consultar la cuenta para estimar los cargos."
+                    : "Consultando cargos existentes…"}
+                </p>
+              )
             ) : (
               <p className="text-muted-foreground">
-                {accountQuery.isError
-                  ? "No se pudo consultar la cuenta para estimar los cargos."
-                  : "Consultando cargos existentes…"}
+                Los actos con tarifa generan sus cargos al cerrar; caja los gestiona.
               </p>
             )}
-            {!reason.trim() && (
-              <p role="alert" className="text-destructive">
-                Falta el motivo de la atención.
-              </p>
-            )}
-            <p className="text-xs text-muted-foreground">
-              Una consulta sin actos se cierra igual: documentarla no obliga a registrar
-              procedimientos ni genera cargos. Los tratamientos vinculados pendientes siguen su
-              flujo en el presupuesto.
-            </p>
           </div>
           <div className="flex flex-wrap items-center justify-between gap-2 border-t pt-4">
-            <p role="status" aria-live="polite" className="text-sm text-muted-foreground">
-              Borrador: {SAVE_LABEL[saveState]}
-              {childCount > 0 ? " · esperando registros vinculados…" : ""}
-            </p>
+            <Button
+              type="button"
+              variant="ghost"
+              className="text-destructive"
+              disabled={locked || explicitSaving}
+              onClick={() => {
+                setVoidReason("")
+                setVoidOpen(true)
+              }}
+            >
+              Anular borrador…
+            </Button>
             <ButtonGroup aria-label="Acciones de la atención">
               <Button
                 type="button"
@@ -1415,20 +1570,28 @@ export function EncounterEditor({
               <Button
                 type="button"
                 variant="outline"
-                disabled={locked || explicitSaving}
+                disabled={backing || finalizing || explicitSaving || childCount > 0}
                 onClick={() => void handleBack()}
               >
                 {backing ? "Guardando…" : "Volver"}
               </Button>
               <Button
                 type="button"
-                disabled={locked || explicitSaving || backing}
-                onClick={() => setConfirmOpen(true)}
+                disabled={locked || explicitSaving || backing || !closingReady}
+                onClick={() => {
+                  setEndTime("")
+                  setConfirmOpen(true)
+                }}
               >
                 Finalizar atención
               </Button>
             </ButtonGroup>
           </div>
+          {!closingReady && closingQuery.isSuccess ? (
+            <p className="text-xs text-muted-foreground">
+              Completa lo pendiente para poder cerrar.
+            </p>
+          ) : null}
         </section>
       </MasterDetail>
 
@@ -1436,16 +1599,73 @@ export function EncounterEditor({
 
       <ConfirmDialog
         open={confirmOpen}
-        title="Finalizar atención"
+        title="Finalizar y firmar la atención"
         description={finalizeDescription}
-        confirmLabel="Finalizar atención"
+        confirmLabel="Finalizar y firmar"
         variant="default"
         pending={finalizing}
         onConfirm={() => void handleConfirmFinalize()}
         onClose={() => {
           if (!finalizing) setConfirmOpen(false)
         }}
-      />
+      >
+        <p className="text-sm">
+          Firmarás como{" "}
+          <strong>
+            {profileQuery.data?.data.signatureName ?? profileQuery.data?.data.accountName ?? "—"}
+          </strong>
+          {profileQuery.data ? ` · ${profileQuery.data.data.professionalTitle}` : ""}
+          {profileQuery.data && registrationLabel(profileQuery.data.data)
+            ? ` · ${registrationLabel(profileQuery.data.data)}`
+            : ""}
+        </p>
+        <Field>
+          <FieldLabel htmlFor={`${uid}-ended`}>Hora de fin</FieldLabel>
+          <Input
+            id={`${uid}-ended`}
+            type="time"
+            className="w-36"
+            value={endTime}
+            onChange={(event) => setEndTime(event.target.value)}
+          />
+          <p className="text-xs text-muted-foreground">Vacía: se registra la hora actual.</p>
+        </Field>
+      </ConfirmDialog>
+
+      <ConfirmDialog
+        open={voidOpen}
+        title="Anular este borrador"
+        description="Queda en la historia como «anulada» con tu nombre, la hora y el motivo. Se anulan sus diagnósticos, procedimientos, hallazgos, recetas y controles; no genera cargos. La cita, si la hay, puede volver a atenderse."
+        confirmLabel="Anular borrador"
+        pending={voiding}
+        confirmDisabled={!voidReason.trim()}
+        onConfirm={() => void handleVoid()}
+        onClose={() => {
+          if (!voiding) setVoidOpen(false)
+        }}
+      >
+        <Field>
+          <FieldLabel htmlFor={`${uid}-void`}>Motivo</FieldLabel>
+          <Textarea
+            id={`${uid}-void`}
+            rows={2}
+            maxLength={2000}
+            placeholder="Ej.: se abrió para el paciente equivocado"
+            value={voidReason}
+            onChange={(event) => setVoidReason(event.target.value)}
+          />
+        </Field>
+      </ConfirmDialog>
+
+      {profileOpen ? (
+        <ProfessionalProfileDrawer
+          open
+          target="me"
+          profile={profileQuery.data?.data ?? null}
+          onClose={() => setProfileOpen(false)}
+          onSaved={() => void refreshClosing()}
+        />
+      ) : null}
     </div>
   )
 }

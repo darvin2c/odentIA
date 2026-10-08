@@ -1,6 +1,7 @@
 /** Tipos espejo de la API de pacientes + helpers puros para la UI. */
 import { activeFindingsAsOf, type FindingDetails } from "@odentia/clinical"
 import { apiFetch } from "./api"
+import type { EncounterDiagnosis } from "./encounters"
 
 export type BloodGroup = "A+" | "A-" | "B+" | "B-" | "AB+" | "AB-" | "O+" | "O-" | "unknown"
 
@@ -314,7 +315,10 @@ export interface Encounter {
   patientId?: string
   branchId: string | null
   dentistUserId: string
+  /** borrador, finalizada o anulada. */
   status: string
+  /** Cita que motivó la atención, si la hubo. */
+  appointmentId?: string | null
   reason: string | null
   evolution: string | null
   indications: string | null
@@ -327,6 +331,16 @@ export interface Encounter {
     higieneOral?: string
   } | null
   finalizedBy: string | null
+  /** Inicio y fin declarados de la atención. */
+  startedAt?: string
+  endedAt?: string | null
+  /** Firma del profesional al cerrar (instantánea del perfil). */
+  signerName?: string | null
+  signerTitle?: string | null
+  signerRegistration?: string | null
+  voidedAt?: string | null
+  voidedBy?: string | null
+  voidReason?: string | null
   createdAt: string
   updatedAt: string
 }
@@ -350,6 +364,9 @@ export interface ProcedureItem {
   currency: string | null
   createdBy?: string | null
   createdAt: string
+  /** Anulado en borrador: sin cargo ni sesión. */
+  voidedAt?: string | null
+  voidReason?: string | null
 }
 
 /** Ítem del plan de tratamiento (decisión derivada de la línea vigente). Fechas como ISO string. */
@@ -425,7 +442,9 @@ export interface EncounterDetail {
   plannedItems: PlanItem[]
   indicatedItems: PlanItem[]
   procedures: ProcedureItem[]
-  /** Notas de evolución (kind='evolucion'), orden ascendente. */
+  /** Diagnósticos CIE-10 de la atención, anulados incluidos. */
+  diagnoses: EncounterDiagnosis[]
+  /** Notas de evolución sin código (kind='evolucion'), orden ascendente. */
   notes: ClinicalNote[]
   odontogramEntries: OdontogramEntry[]
   documents: PatientDocument[]
@@ -693,10 +712,16 @@ export function planStatusLabel(status: string): string {
       return "Pendiente"
     case "programado":
       return "Programado"
+    case "en_curso":
+      return "En curso"
+    case "suspendido":
+      return "Suspendido"
     case "realizado":
       return "Realizado"
     case "cancelado":
       return "Cancelado"
+    case "reemplazado":
+      return "Reemplazado"
     default:
       return status
   }
@@ -705,9 +730,11 @@ export function planStatusLabel(status: string): string {
 export function encounterStatusLabel(status: string): string {
   switch (status) {
     case "borrador":
-      return "Borrador"
+      return "En curso"
     case "finalizada":
       return "Finalizada"
+    case "anulada":
+      return "Anulada"
     default:
       return status
   }
@@ -787,4 +814,3 @@ export function fetchAnamnesisHistory(patientId: string): Promise<{
     data: Array<{ id: string; version: number; createdAt: string; createdBy: string | null }>
   }>(`/api/patients/${patientId}/anamnesis/history`)
 }
-

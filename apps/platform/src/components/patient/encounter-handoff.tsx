@@ -82,11 +82,12 @@ export function EncounterHandoff({
   const outstanding = (account.data?.data.byCurrency ?? []).filter(
     (balance) => balance.outstandingCents > 0,
   )
-  const priced = detail.procedures.length
+  const activeProcedures = detail.procedures.filter((proc) => !proc.voidedAt)
+  const priced = activeProcedures.length
 
   const done: string[] = [
-    `${detail.notes.length} diagnóstico(s)`,
-    `${detail.procedures.length} acto(s) realizado(s)`,
+    `${(detail.diagnoses ?? []).filter((dx) => !dx.voidedAt).length} diagnóstico(s)`,
+    `${activeProcedures.length} acto(s) realizado(s)`,
     `${detail.odontogramEntries.length} hallazgo(s) en el odontograma`,
     `${ownPrescriptions.length} receta(s)`,
     `${ownControls.length} control(es) indicado(s)`,
