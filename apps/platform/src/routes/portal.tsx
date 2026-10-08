@@ -128,10 +128,19 @@ function writeStoredPortalOrg(value: string | null): void {
 function PortalPage() {
   const { token, org } = Route.useSearch()
   const navigate = useNavigate({ from: Route.id })
-  const [sessionToken, setSessionToken] = useState<string | null>(() => readStoredPortalSession())
-  const [storedOrg, setStoredOrg] = useState<string | null>(() => readStoredPortalOrg())
+  // La sesión guardada vive en sessionStorage, que no existe en el servidor:
+  // se lee al montar para que el HTML del servidor y el primer render del
+  // cliente coincidan (sin error de hidratación).
+  const [hydrated, setHydrated] = useState(false)
+  const [sessionToken, setSessionToken] = useState<string | null>(null)
+  const [storedOrg, setStoredOrg] = useState<string | null>(null)
   const [closed, setClosed] = useState(false)
   const [pin, setPin] = useState("")
+  useEffect(() => {
+    setSessionToken(readStoredPortalSession())
+    setStoredOrg(readStoredPortalOrg())
+    setHydrated(true)
+  }, [])
 
   const exchangeMutation = useMutation({
     mutationFn: (code: string) => exchangePortalTokenApi(token ?? "", code),
@@ -168,6 +177,13 @@ function PortalPage() {
     writeStoredPortalSession(null)
     setSessionToken(null)
   }
+
+  if (!hydrated)
+    return (
+      <PageShell maxWidth="md">
+        <LoadingState message="Abriendo tu portal…" />
+      </PageShell>
+    )
 
   if (!sessionToken && (!token || closed)) {
     if (closed) {
@@ -306,7 +322,7 @@ function PortalDashboard({
     <PageShell maxWidth="lg">
       <PageHeader
         title={`Hola, ${info.patientName}`}
-        subtitle={`Tu acceso vence el ${formatPortalDate(info.session.expiresAt)}. No compartas esta pantalla.`}
+        subtitle={`Tu acceso vence el ${formatPortalDate(info.session.expiresAt)}; no compartas esta pantalla.`}
       />
       <GrantSwitcher sessionToken={sessionToken} onSessionToken={onSessionToken} />
       <div className="mb-4 flex flex-wrap items-center gap-2">

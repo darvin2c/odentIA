@@ -5,7 +5,6 @@ import {
   archiveConsentTemplate,
   archiveFormTemplate,
   archiveSpecialty,
-  attachConsentPdf,
   cancelConsentDocument,
   consentDocumentPatientId,
   createClinicalOrder,
@@ -18,6 +17,7 @@ import {
   discardFormResponse,
   finalizeFormResponse,
   formResponsePatientId,
+  generateConsentPdf as generateConsentPdfService,
   getConsentPrint,
   getProfessionalProfile,
   listClinicalOrders,
@@ -34,7 +34,6 @@ import {
   listSpecialtyProfessionals,
   publishConsentTemplate,
   publishFormTemplate,
-  registerPatientDocument,
   revokeConsentDocument,
   setProfessionalProfile,
   setProfessionalSpecialties,
@@ -47,9 +46,7 @@ import {
 } from "@odentia/services"
 import { type Context, Hono } from "hono"
 import { z } from "zod"
-import { createHash } from "node:crypto"
 import { traceClinicalRead } from "../lib/clinical-trace.js"
-import { renderConsentPdf } from "../lib/consent-pdf.js"
 import { canAccess, orgContextOf } from "../lib/context.js"
 import { errorBody } from "../lib/error.js"
 import { type CrmDeps, runService, validationError } from "./helpers.js"
@@ -685,43 +682,14 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
     )
   })
 
-  /**
-   * Genera el PDF del consentimiento firmado, lo guarda como documento
-   * clínico del paciente y fija su huella SHA-256 (una sola vez).
-   */
-  const generateConsentPdf = async (orgId: string, userId: string, consentId: string) => {
-    const data = await withOrgContext(deps.db, orgId, (tx) => getConsentPrint(tx, orgId, consentId))
-    if (data.document.pdfDocumentId) return data.document
-    const bytes = await renderConsentPdf(data)
-    const sha256 = createHash("sha256").update(bytes).digest("hex")
-    const ref = await deps.storage.putPatientDocument({
+  const generateConsentPdf = (orgId: string, userId: string, consentId: string) =>
+    generateConsentPdfService({
+      run: (fn) => withOrgContext(deps.db, orgId, fn),
+      storage: deps.storage,
       orgId,
-      patientId: data.document.patientId,
-      bytes,
-      contentType: "application/pdf",
-      ext: "pdf",
+      userId,
+      consentId,
     })
-    try {
-      return await withOrgContext(deps.db, orgId, async (tx) => {
-        const stored = await registerPatientDocument(tx, orgId, userId, data.document.patientId, {
-          category: "consentimiento",
-          label: `Consentimiento firmado: ${data.document.titleSnapshot}`.slice(0, 200),
-          storageKey: ref.objectKey,
-          contentType: "application/pdf",
-          sizeBytes: bytes.byteLength,
-          planItemId: data.document.planItemId,
-          tags: ["consentimiento"],
-        })
-        return attachConsentPdf(tx, orgId, userId, consentId, {
-          pdfDocumentId: stored.id,
-          sha256,
-        })
-      })
-    } catch (e) {
-      await deps.storage.deleteAttachment(ref.objectKey).catch(() => {})
-      throw e
-    }
-  }
 
   app.get("/consents", async (c) => {
     const { orgId, userId, memberRole } = orgContextOf(c)

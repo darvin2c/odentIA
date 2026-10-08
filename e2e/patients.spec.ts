@@ -198,13 +198,18 @@ test("paciente: cuenta con cargo, pago y aplicación", async ({ owner }) => {
   await payment.getByLabel("Importe", { exact: true }).fill("200")
   await chooseOption(payment.getByLabel("Quién paga", { exact: true }), ids.contactId)
   await payment.getByRole("button", { name: "Registrar pago" }).click()
-  await expect(page.getByText("Disponible sin aplicar: S/ 200.00")).toBeVisible()
+  // Cargos y pagos usan la tabla común: se leen por su sección.
+  const chargesTable = page.getByRole("table").first()
+  const paymentsTable = page.getByRole("table").nth(1)
+  await expect(paymentsTable).toContainText("S/ 200.00")
   await page.getByRole("button", { name: "Aplicar a un cargo" }).first().click()
   const apply = page.getByRole("dialog", { name: "Aplicar pago a un cargo" })
   await apply.getByLabel("Importe a aplicar", { exact: true }).fill("150")
   await apply.getByRole("button", { name: "Aplicar", exact: true }).click()
-  await expect(page.getByText("Aplicado S/ 150.00 · pendiente S/ 300.00").first()).toBeVisible()
-  await expect(page.getByText("Disponible sin aplicar: S/ 50.00")).toBeVisible()
+  await expect(chargesTable).toContainText("S/ 150.00")
+  await expect(chargesTable).toContainText("S/ 300.00")
+  await expect(paymentsTable).toContainText("S/ 50.00")
+  await expect(paymentsTable).toContainText("S/ 150.00 a")
 })
 
 test("paciente: receta vinculada al tratamiento y anulación", async ({ owner }) => {

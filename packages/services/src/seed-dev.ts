@@ -53,7 +53,7 @@ import {
   treatmentPlanItem,
   treatmentTemplate,
 } from "@odentia/db/schema/clinical"
-import { professionalProfile } from "@odentia/db/schema/clinical-forms"
+import { consentDocument, professionalProfile } from "@odentia/db/schema/clinical-forms"
 import {
   agentConfig,
   channelConnection,
@@ -68,7 +68,7 @@ import {
 } from "@odentia/db/schema/crm"
 import { auditEvent, branch, orgProfile, patientRegistrationConfig } from "@odentia/db/schema/org"
 import { hashPassword } from "better-auth/crypto"
-import { and, eq, inArray, or, sql } from "drizzle-orm"
+import { and, eq, inArray, isNull, or, sql } from "drizzle-orm"
 import { createHandoff } from "./agent-operations.js"
 import { upsertAgentConfig } from "./agentConfig.js"
 import { createAppointment, createChair } from "./appointments.js"
@@ -114,6 +114,7 @@ import { seedAgent } from "./seed-agent.js"
 import { seedAutomation } from "./seed-automation.js"
 import { seedAvailability } from "./seed-availability.js"
 import { seedChannels } from "./seed-channels.js"
+import { generateConsentPdf } from "./consent-pdf.js"
 import { seedClinicalForms } from "./seed-clinical-forms.js"
 import { seedCrmActivity } from "./seed-crm-activity.js"
 import { seedCrmAgent } from "./seed-crm-agent.js"
@@ -2248,6 +2249,26 @@ for (const seed of [
   seedRoles,
 ]) {
   await db.transaction((tx) => seed(tx, domainSeed))
+}
+// Consentimientos firmados en la semilla: su PDF con huella, como al firmar
+// desde la API (mismo generador).
+for (const signed of await db
+  .select({ id: consentDocument.id })
+  .from(consentDocument)
+  .where(
+    and(
+      eq(consentDocument.organizationId, ORG_A),
+      eq(consentDocument.status, "firmado"),
+      isNull(consentDocument.pdfDocumentId),
+    ),
+  )) {
+  await generateConsentPdf({
+    run: (fn) => fn(db),
+    storage,
+    orgId: ORG_A,
+    userId: ANA_ID,
+    consentId: signed.id,
+  })
 }
 await db.transaction(async (tx) => {
   const { items } = await listOpportunities(tx, ORG_A, {

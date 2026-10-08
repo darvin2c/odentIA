@@ -3,8 +3,12 @@ import {
   CONSENT_SECTION_LABELS,
   type ConsentSections,
 } from "@odentia/clinical"
-import type { getConsentPrint } from "@odentia/services"
+import { createHash } from "node:crypto"
+import type { Db } from "@odentia/db"
 import { PDFDocument, type PDFFont, type PDFPage, rgb, StandardFonts } from "pdf-lib"
+import { attachConsentPdf, type ConsentDocumentRow, getConsentPrint } from "./clinical-forms.js"
+import { registerPatientDocument } from "./clinical.js"
+import type { Storage } from "./storage.js"
 
 type ConsentPrint = Awaited<ReturnType<typeof getConsentPrint>>
 type Strokes = number[][][]
@@ -232,4 +236,48 @@ export async function renderConsentPdf(data: ConsentPrint): Promise<Uint8Array> 
     { size: 7, color: MUTED },
   )
   return pdf.save({ useObjectStreams: false })
+}
+
+/**
+ * Genera el PDF del consentimiento firmado, lo guarda como documento clínico
+ * del paciente y fija su huella SHA-256, una sola vez. `run` ejecuta cada paso
+ * en el contexto de la organización (RLS); el archivo se sube entre ambos y se
+ * borra si el registro falla. Lo usan la API y la semilla.
+ */
+export async function generateConsentPdf(input: {
+  run: <T>(fn: (tx: Db) => Promise<T>) => Promise<T>
+  storage: Pick<Storage, "putPatientDocument" | "deleteAttachment">
+  orgId: string
+  userId: string
+  consentId: string
+}): Promise<ConsentDocumentRow> {
+  const { run, storage, orgId, userId, consentId } = input
+  const data = await run((tx) => getConsentPrint(tx, orgId, consentId))
+  if (data.document.pdfDocumentId) return data.document
+  const bytes = await renderConsentPdf(data)
+  const sha256 = createHash("sha256").update(bytes).digest("hex")
+  const ref = await storage.putPatientDocument({
+    orgId,
+    patientId: data.document.patientId,
+    bytes,
+    contentType: "application/pdf",
+    ext: "pdf",
+  })
+  try {
+    return await run(async (tx) => {
+      const stored = await registerPatientDocument(tx, orgId, userId, data.document.patientId, {
+        category: "consentimiento",
+        label: `Consentimiento firmado: ${data.document.titleSnapshot}`.slice(0, 200),
+        storageKey: ref.objectKey,
+        contentType: "application/pdf",
+        sizeBytes: bytes.byteLength,
+        planItemId: data.document.planItemId,
+        tags: ["consentimiento"],
+      })
+      return attachConsentPdf(tx, orgId, userId, consentId, { pdfDocumentId: stored.id, sha256 })
+    })
+  } catch (e) {
+    await storage.deleteAttachment(ref.objectKey).catch(() => {})
+    throw e
+  }
 }

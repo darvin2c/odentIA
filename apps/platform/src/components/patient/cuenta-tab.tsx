@@ -389,145 +389,39 @@ export function CuentaTab({ patientId }: { patientId: string }): React.JSX.Eleme
         {payments.length === 0 ? (
           <p className="text-sm text-muted-foreground">Sin pagos registrados.</p>
         ) : (
-          <ul className="flex flex-col divide-y">
-            {payments.map(({ payment, availableCents }) => (
-              <li key={payment.id} className="flex flex-col gap-2 py-3">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="font-medium tabular-nums">
-                    {formatMoney(payment.amountCents, payment.currency)}
-                  </span>
-                  <Badge variant={payment.voidedAt ? "destructive" : "secondary"}>
-                    {payment.voidedAt
-                      ? "Anulado"
-                      : PAYMENT_METHOD_LABELS[payment.method as PaymentMethod]
-                        ? PAYMENT_METHOD_LABELS[payment.method as PaymentMethod]
-                        : payment.method}
-                  </Badge>
-                  <span className="text-sm text-muted-foreground">
-                    {formatDate(payment.paidAt)}
-                    {payment.reference ? ` · ${payment.reference}` : ""}
-                    {contactName(payment.payerContactId)
-                      ? ` · paga ${contactName(payment.payerContactId)}`
-                      : ""}
-                  </span>
-                </div>
-                <p className="text-sm text-muted-foreground">
-                  Disponible sin aplicar: {formatMoney(availableCents, payment.currency)}
-                </p>
-                {(() => {
-                  const applications = data.applications.filter(
-                    (application) => application.paymentId === payment.id && !application.voidedAt,
-                  )
-                  if (applications.length === 0) return null
-                  return (
-                    <ul className="flex flex-col gap-1 text-sm">
-                      {applications.map((application) => {
-                        const charge = data.charges.find(
-                          (candidate) => candidate.id === application.chargeId,
-                        )
-                        return (
-                          <li key={application.id} className="flex flex-wrap items-center gap-2">
-                            <span>
-                              Aplicado {formatMoney(application.amountCents, payment.currency)} a{" "}
-                              {charge?.description ?? "cargo"}
-                            </span>
-                            {canWrite ? (
-                              <Button
-                                type="button"
-                                size="sm"
-                                variant="outline"
-                                onClick={() => {
-                                  setError(null)
-                                  setTargetId(application.id)
-                                  setForm("void-application")
-                                }}
-                              >
-                                Anular aplicación
-                              </Button>
-                            ) : null}
-                          </li>
-                        )
-                      })}
-                    </ul>
-                  )
-                })()}
-                {(() => {
-                  const refunds = data.refunds.filter((refund) => refund.paymentId === payment.id)
-                  if (refunds.length === 0) return null
-                  return (
-                    <ul className="flex flex-col gap-1 text-sm text-muted-foreground">
-                      {refunds.map((refund) => (
-                        <li key={refund.id}>
-                          Devuelto {formatMoney(refund.amountCents, payment.currency)} ·{" "}
-                          {refund.reason} · {formatDate(refund.refundedAt)}
-                        </li>
-                      ))}
-                    </ul>
-                  )
-                })()}
-                {canWrite && !payment.voidedAt ? (
-                  <div className="flex flex-wrap gap-2">
-                    {availableCents > 0 ? (
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        onClick={() => {
-                          setError(null)
-                          setApplyPaymentId(payment.id)
-                          setApplyChargeId(
-                            charges.find(
-                              (entry) =>
-                                entry.pendingCents > 0 &&
-                                entry.charge.currency === payment.currency,
-                            )?.charge.id ?? "",
-                          )
-                          setApplyAmount(String(availableCents / 100))
-                          setForm("apply")
-                        }}
-                      >
-                        Aplicar a un cargo
-                      </Button>
-                    ) : null}
-                    {availableCents > 0 ? (
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        onClick={() => {
-                          setError(null)
-                          setRefundPaymentId(payment.id)
-                          setRefundAmount(String(availableCents / 100))
-                          setForm("refund")
-                        }}
-                      >
-                        Devolver excedente
-                      </Button>
-                    ) : null}
-                    {data.applications.every(
-                      (application) => application.paymentId !== payment.id,
-                    ) && data.refunds.every((refund) => refund.paymentId !== payment.id) ? (
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        onClick={() => {
-                          setError(null)
-                          setTargetId(payment.id)
-                          setForm("void-payment")
-                        }}
-                      >
-                        Anular pago
-                      </Button>
-                    ) : null}
-                  </div>
-                ) : null}
-                {payment.voidReason ? (
-                  <p className="text-sm text-muted-foreground">Anulado: {payment.voidReason}</p>
-                ) : null}
-              </li>
-            ))}
-          </ul>
+          <PaymentsTable
+            payments={payments}
+            account={data}
+            canWrite={canWrite}
+            payerName={contactName}
+            onVoidApplication={(applicationId) => {
+              setError(null)
+              setTargetId(applicationId)
+              setForm("void-application")
+            }}
+            onApply={(payment, availableCents) => {
+              setError(null)
+              setApplyPaymentId(payment.id)
+              setApplyChargeId(
+                charges.find(
+                  (entry) => entry.pendingCents > 0 && entry.charge.currency === payment.currency,
+                )?.charge.id ?? "",
+              )
+              setApplyAmount(String(availableCents / 100))
+              setForm("apply")
+            }}
+            onRefund={(paymentId, availableCents) => {
+              setError(null)
+              setRefundPaymentId(paymentId)
+              setRefundAmount(String(availableCents / 100))
+              setForm("refund")
+            }}
+            onVoidPayment={(paymentId) => {
+              setError(null)
+              setTargetId(paymentId)
+              setForm("void-payment")
+            }}
+          />
         )}
       </div>
 
@@ -1019,6 +913,7 @@ function ChargesTable({
         meta: { view: { primary: true } },
         cell: ({ row }) => (
           <span className="tabular-nums">
+            <span className="md:hidden">Importe </span>
             {formatMoney(row.original.charge.amountCents, row.original.charge.currency)}
           </span>
         ),
@@ -1035,14 +930,17 @@ function ChargesTable({
       {
         id: "pendiente",
         header: "Pendiente",
+        meta: { view: { primary: true } },
         cell: ({ row }) => (
           <span className="tabular-nums">
+            {/* En la lista móvil (<768 px, sin cabeceras) el valor lleva su nombre. */}
+            <span className="md:hidden">Pendiente </span>
             {formatMoney(row.original.pendingCents, row.original.charge.currency)}
           </span>
         ),
       },
       {
-        id: "acciones",
+        id: "actions",
         header: "Acciones",
         cell: ({ row }) => {
           const { charge, appliedCents, pendingCents } = row.original
@@ -1054,13 +952,20 @@ function ChargesTable({
                 size="sm"
                 variant="outline"
                 disabled={appliedCents > 0}
-                title={appliedCents > 0 ? "Para anularlo, anula primero sus aplicaciones" : undefined}
+                title={
+                  appliedCents > 0 ? "Para anularlo, anula primero sus aplicaciones" : undefined
+                }
                 onClick={() => onVoid(charge.id)}
               >
                 Anular cargo
               </Button>
               {pendingCents > 0 ? (
-                <Button type="button" size="sm" variant="outline" onClick={() => onApply(charge.id, pendingCents)}>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => onApply(charge.id, pendingCents)}
+                >
                   Aplicar un pago
                 </Button>
               ) : null}
@@ -1076,6 +981,180 @@ function ChargesTable({
     columns,
     getCoreRowModel: getCoreRowModel(),
     getRowId: (row) => row.charge.id,
+  })
+  return <DataTable table={table} />
+}
+
+type PaymentRow = ReturnType<typeof paymentAvailability>[number]
+type Account = Parameters<typeof paymentAvailability>[0]
+
+/**
+ * Pagos con el patrón de tabla común: cada fila muestra a qué cargos se aplicó
+ * y lo devuelto, con sus acciones; en móvil se lee como lista.
+ */
+function PaymentsTable({
+  payments,
+  account,
+  canWrite,
+  payerName,
+  onVoidApplication,
+  onApply,
+  onRefund,
+  onVoidPayment,
+}: {
+  payments: PaymentRow[]
+  account: Account
+  canWrite: boolean
+  payerName: (contactId: string | null) => string | null | undefined
+  onVoidApplication: (applicationId: string) => void
+  onApply: (payment: PaymentRow["payment"], availableCents: number) => void
+  onRefund: (paymentId: string, availableCents: number) => void
+  onVoidPayment: (paymentId: string) => void
+}) {
+  const columns: ColumnDef<PaymentRow>[] = [
+    {
+      id: "pago",
+      header: "Pago",
+      meta: { view: { primary: true } },
+      cell: ({ row }) => {
+        const { payment } = row.original
+        const method = PAYMENT_METHOD_LABELS[payment.method as PaymentMethod] ?? payment.method
+        return (
+          <span className="flex min-w-40 flex-col gap-1 whitespace-normal">
+            <span className="flex flex-wrap items-center gap-2">
+              <span className="font-medium tabular-nums">
+                {formatMoney(payment.amountCents, payment.currency)}
+              </span>
+              <Badge variant={payment.voidedAt ? "destructive" : "secondary"}>
+                {payment.voidedAt ? "Anulado" : method}
+              </Badge>
+            </span>
+            <span className="text-xs text-muted-foreground">
+              {formatDate(payment.paidAt)}
+              {payment.reference ? ` · ${payment.reference}` : ""}
+            </span>
+            {payment.voidReason ? (
+              <span className="text-xs text-muted-foreground">
+                Motivo de anulación: {payment.voidReason}
+              </span>
+            ) : null}
+          </span>
+        )
+      },
+    },
+    {
+      id: "pagador",
+      header: "Quién paga",
+      cell: ({ row }) => payerName(row.original.payment.payerContactId) ?? "—",
+    },
+    {
+      id: "disponible",
+      header: "Sin aplicar",
+      meta: { view: { primary: true } },
+      cell: ({ row }) => (
+        <span className="tabular-nums">
+          <span className="md:hidden">Sin aplicar </span>
+          {formatMoney(row.original.availableCents, row.original.payment.currency)}
+        </span>
+      ),
+    },
+    {
+      id: "destino",
+      header: "Aplicado a / devuelto",
+      meta: { view: { primary: true } },
+      cell: ({ row }) => {
+        const { payment } = row.original
+        const applications = account.applications.filter(
+          (application) => application.paymentId === payment.id && !application.voidedAt,
+        )
+        const refunds = account.refunds.filter((refund) => refund.paymentId === payment.id)
+        if (applications.length === 0 && refunds.length === 0) return "—"
+        return (
+          <ul className="flex min-w-56 max-w-96 flex-col gap-1 whitespace-normal text-sm">
+            {applications.map((application) => {
+              const charge = account.charges.find(
+                (candidate) => candidate.id === application.chargeId,
+              )
+              return (
+                <li key={application.id} className="flex flex-wrap items-center gap-2">
+                  <span>
+                    {formatMoney(application.amountCents, payment.currency)} a{" "}
+                    {charge?.description ?? "cargo"}
+                  </span>
+                  {canWrite ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => onVoidApplication(application.id)}
+                    >
+                      Anular aplicación
+                    </Button>
+                  ) : null}
+                </li>
+              )
+            })}
+            {refunds.map((refund) => (
+              <li key={refund.id} className="text-muted-foreground">
+                Devuelto {formatMoney(refund.amountCents, payment.currency)} · {refund.reason} ·{" "}
+                {formatDate(refund.refundedAt)}
+              </li>
+            ))}
+          </ul>
+        )
+      },
+    },
+    {
+      id: "actions",
+      header: "Acciones",
+      cell: ({ row }) => {
+        const { payment, availableCents } = row.original
+        if (!canWrite || payment.voidedAt) return null
+        const untouched =
+          account.applications.every((application) => application.paymentId !== payment.id) &&
+          account.refunds.every((refund) => refund.paymentId !== payment.id)
+        return (
+          <span className="flex flex-wrap gap-2">
+            {availableCents > 0 ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => onApply(payment, availableCents)}
+              >
+                Aplicar a un cargo
+              </Button>
+            ) : null}
+            {availableCents > 0 ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => onRefund(payment.id, availableCents)}
+              >
+                Devolver excedente
+              </Button>
+            ) : null}
+            {untouched ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => onVoidPayment(payment.id)}
+              >
+                Anular pago
+              </Button>
+            ) : null}
+          </span>
+        )
+      },
+    },
+  ]
+  const table = useReactTable({
+    data: payments,
+    columns,
+    getCoreRowModel: getCoreRowModel(),
+    getRowId: (row) => row.payment.id,
   })
   return <DataTable table={table} />
 }

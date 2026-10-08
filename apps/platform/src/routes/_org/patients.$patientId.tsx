@@ -405,7 +405,11 @@ function PatientDetailPage() {
         items={Object.fromEntries(
           allSections.map((s) => [
             s.id,
-            s.group ? `${areaLabel(s.area)} · Documentos · ${s.label}` : `${areaLabel(s.area)} · ${s.label}`,
+            s.group
+              ? `${areaLabel(s.area)} · Documentos · ${s.label}`
+              : areaLabel(s.area) === s.label
+                ? s.label
+                : `${areaLabel(s.area)} · ${s.label}`,
           ]),
         )}
         value={section}
