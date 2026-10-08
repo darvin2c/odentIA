@@ -42,6 +42,7 @@ const listQuery = z.object({
   chairs: z.string().optional(),
   status: z.string().optional(),
   q: z.string().max(200).optional(),
+  patientId: z.uuid().optional(),
 })
 
 const createInput = z.object({

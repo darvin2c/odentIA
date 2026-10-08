@@ -221,7 +221,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
 
   const sendReply = tool(
     async ({ text }: { text: string }) => {
-      if (ctx.dryRun) return `[SIMULACIÓN] Se enviaría al paciente: ${text}`
+      if (ctx.dryRun) return `[SIMULACIÓN] Se enviaría al interlocutor: ${text}`
       // WINDOW_CLOSED ya no lanza: llega como `fallida` y propose la traduce
       // a outside_window. Solo infra (429/5xx) lanza y reintenta el turno.
       return propose("enviar_mensaje", { kind: "text", text }, "send_reply")
@@ -229,7 +229,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     {
       name: "send_reply",
       description:
-        "Envía un texto al paciente (propuesta si la política no es directa). Si devuelve outside_window, usa send_template o deriva.",
+        "Envía un texto al interlocutor (propuesta si la política no es directa). Si devuelve outside_window, usa send_template o deriva.",
       schema: z.object({ text: z.string().min(1).max(4000) }),
     },
   )
@@ -492,7 +492,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     {
       name: "proponer_cita",
       description:
-        "Propone reservar una cita con los IDs exactos de un hueco de buscar_huecos (sede, sillón, profesional, inicio). Verifica vínculo del paciente al ejecutar; según la política puede pedir confirmación del paciente o aprobación del equipo.",
+        "Propone reservar una cita con los IDs exactos de un hueco de buscar_huecos (sede, sillón, profesional, inicio). Verifica vínculo del paciente al ejecutar; según la política puede pedir confirmación del interlocutor o aprobación del equipo.",
       schema: z.object({
         patientId: z.string().uuid(),
         dentistUserId: z.string().min(1),

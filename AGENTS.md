@@ -29,6 +29,7 @@ Permitir que cada usuario complete su trabajo con facilidad mediante una experie
 ## Invariantes globales
 
 - La persona es el centro: paciente ≠ interlocutor ≠ responsable. Estar centrado en el cliente no confunde esas identidades. Todos los canales convergen en la misma persona y su única historia clínica; nunca crear fichas paralelas ni verificar identidad por coincidencia de teléfono.
+- Persona única: el contacto es la persona y el paciente su historia clínica; todo paciente es exactamente una persona y comparten identidad (`docs/decisions/0001-persona-unica.md`).
 - Recepción coordina atención; clínicos atienden con contexto autorizado; caja gestiona cobros. Facilitar la tarea de cada rol sin exponer información ajena a sus permisos.
 - Usar estándares internacionales y, cuando corresponda, nacionales. Justificar en el código cualquier desviación; no inventar formatos equivalentes.
 - El núcleo conoce contactos, conversaciones y mensajes; los proveedores son adaptadores intercambiables.

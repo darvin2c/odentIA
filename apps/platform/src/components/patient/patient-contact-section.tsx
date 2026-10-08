@@ -99,6 +99,7 @@ function useInvalidatePatient(patientId: string) {
 export function PatientContactSection({ detail }: { detail: PatientFull }) {
   const canWrite = usePermission("patients.write")
   const canChat = usePermission("conversations.write")
+  const canReadChats = usePermission("conversations.read")
   const navigate = useNavigate()
   const patientId = detail.patient.id
   const invalidate = useInvalidatePatient(patientId)
@@ -149,7 +150,7 @@ export function PatientContactSection({ detail }: { detail: PatientFull }) {
                   Contactar
                 </Button>
               ) : null}
-              {canWrite ? (
+              {canReadChats ? (
                 <Button
                   type="button"
                   size="sm"
@@ -219,7 +220,9 @@ export function PatientContactSection({ detail }: { detail: PatientFull }) {
                             params: { contactId: link.contactId },
                           }),
                       },
-                      ...(canWrite
+                      // La propia persona es la identidad de la ficha: no se
+                      // desvincula ni cambia de relación.
+                      ...(canWrite && link.relationship !== "self"
                         ? [
                             {
                               key: "edit",

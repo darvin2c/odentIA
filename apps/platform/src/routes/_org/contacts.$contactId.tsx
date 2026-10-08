@@ -89,6 +89,10 @@ function ContactDetailPage() {
   const [draftName, setDraftName] = useState("")
   const [draftPhone, setDraftPhone] = useState("")
   const [draftEmail, setDraftEmail] = useState("")
+  const [draftDocType, setDraftDocType] = useState("")
+  const [draftDocNumber, setDraftDocNumber] = useState("")
+  const [draftBirthDate, setDraftBirthDate] = useState("")
+  const [draftSex, setDraftSex] = useState("")
   const [draftNotes, setDraftNotes] = useState("")
   const [draftAssignee, setDraftAssignee] = useState("")
   const [customOpen, setCustomOpen] = useState(false)
@@ -483,6 +487,10 @@ function ContactDetailPage() {
                   setDraftName(detail.contact.displayName)
                   setDraftPhone(detail.contact.phone ?? "")
                   setDraftEmail(detail.contact.email ?? "")
+                  setDraftDocType(detail.contact.docType ?? "")
+                  setDraftDocNumber(detail.contact.docNumber ?? "")
+                  setDraftBirthDate(detail.contact.birthDate ?? "")
+                  setDraftSex(detail.contact.sex ?? "")
                   setDraftNotes(detail.contact.notes ?? "")
                   setDraftAssignee(detail.contact.assignedUserId ?? "")
                   setEditOpen(true)
@@ -505,6 +513,24 @@ function ContactDetailPage() {
               <dt className="w-24 shrink-0 text-muted-foreground">Correo</dt>
               <dd>{detail.contact.email ?? "—"}</dd>
             </div>
+            <div className="flex gap-2">
+              <dt className="w-24 shrink-0 text-muted-foreground">Documento</dt>
+              <dd>
+                {detail.contact.docNumber
+                  ? `${detail.contact.docType ?? ""} ${detail.contact.docNumber}`.trim()
+                  : "—"}
+              </dd>
+            </div>
+            <div className="flex gap-2">
+              <dt className="w-24 shrink-0 text-muted-foreground">Nacimiento</dt>
+              <dd>{detail.contact.birthDate ?? "—"}</dd>
+            </div>
+            {selfLink ? (
+              <p className="rounded-md bg-primary-soft px-3 py-2 text-xs text-primary-soft-foreground">
+                Esta persona es paciente: su nombre, documento, nacimiento, teléfono y correo son
+                los de su ficha clínica y se actualizan en ambos lugares.
+              </p>
+            ) : null}
             <div className="flex gap-2">
               <dt className="w-24 shrink-0 text-muted-foreground">Notas del contacto</dt>
               <dd>{detail.contact.notes || "Sin notas del contacto"}</dd>
@@ -911,6 +937,10 @@ function ContactDetailPage() {
               displayName: draftName.trim() || detail.contact.displayName,
               phone: draftPhone || null,
               email: draftEmail.trim() ? draftEmail.trim() : null,
+              docType: draftDocNumber.trim() ? draftDocType || null : null,
+              docNumber: draftDocNumber.trim() || null,
+              birthDate: draftBirthDate || null,
+              sex: draftSex || null,
               notes: draftNotes.trim(),
               assignedUserId: draftAssignee || null,
             },
@@ -940,6 +970,54 @@ function ContactDetailPage() {
               onChange={(e) => setDraftEmail(e.target.value)}
             />
           </Field>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field>
+              <FieldLabel htmlFor="contact-detail-doc-type">Tipo de documento</FieldLabel>
+              <select
+                id="contact-detail-doc-type"
+                className="rounded-md border bg-background px-2 py-1.5 text-sm"
+                value={draftDocType}
+                onChange={(e) => setDraftDocType(e.target.value)}
+              >
+                <option value="">Sin documento</option>
+                <option value="DNI">DNI</option>
+                <option value="CE">Carné de extranjería</option>
+                <option value="PASAPORTE">Pasaporte</option>
+                <option value="OTRO">Otro</option>
+              </select>
+            </Field>
+            <Field>
+              <FieldLabel htmlFor="contact-detail-doc-number">Número de documento</FieldLabel>
+              <Input
+                id="contact-detail-doc-number"
+                value={draftDocNumber}
+                maxLength={20}
+                onChange={(e) => setDraftDocNumber(e.target.value)}
+              />
+            </Field>
+            <Field>
+              <FieldLabel htmlFor="contact-detail-birth">Fecha de nacimiento</FieldLabel>
+              <Input
+                id="contact-detail-birth"
+                type="date"
+                value={draftBirthDate}
+                onChange={(e) => setDraftBirthDate(e.target.value)}
+              />
+            </Field>
+            <Field>
+              <FieldLabel htmlFor="contact-detail-sex">Sexo</FieldLabel>
+              <select
+                id="contact-detail-sex"
+                className="rounded-md border bg-background px-2 py-1.5 text-sm"
+                value={draftSex}
+                onChange={(e) => setDraftSex(e.target.value)}
+              >
+                <option value="">Sin registrar</option>
+                <option value="F">Femenino</option>
+                <option value="M">Masculino</option>
+              </select>
+            </Field>
+          </div>
           <Field>
             <FieldLabel>Notas del contacto</FieldLabel>
             <Input value={draftNotes} onChange={(e) => setDraftNotes(e.target.value)} />

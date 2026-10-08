@@ -819,6 +819,9 @@ async function listContactTasks(tx: Db, orgId: string, contactId: string): Promi
     contactId: r.task.contactId,
     conversationId: r.task.conversationId,
     opportunityId: r.task.opportunityId,
+    patientId: r.task.patientId,
+    // El contexto comercial no resuelve nombres de pacientes: eso lo hace la ficha.
+    patientName: null,
     kind: r.task.kind === "opportunity_follow_up" ? "opportunity_follow_up" : "manual",
     assigneeUserId: r.task.assigneeUserId,
     dueAt: r.task.dueAt ? r.task.dueAt.toISOString() : null,

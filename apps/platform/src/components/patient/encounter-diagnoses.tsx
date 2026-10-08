@@ -1,10 +1,11 @@
-import { Badge, Button } from "@odentia/ui"
+import { isValidTooth } from "@odentia/clinical"
+import { Badge, Button, Field, FieldLabel, Input } from "@odentia/ui"
 import { FormDrawer } from "@odentia/ui-patterns"
 import { useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
 import { usePermission } from "../../lib/crm"
-import type { EncounterDetail } from "../../lib/patients"
+import { DIAGNOSIS_TYPE_LABELS, type EncounterDetail } from "../../lib/patients"
 import { Cie10Search } from "./cie10-search"
 
 function formatDateTime(iso: string | null): string {
@@ -46,6 +47,9 @@ export function EncounterDiagnoses({
   const [open, setOpen] = useState(false)
   const [code, setCode] = useState("")
   const [description, setDescription] = useState("")
+  // Presuntivo por defecto: afirmar certeza es una decisión explícita del clínico.
+  const [diagnosisType, setDiagnosisType] = useState("presuntivo")
+  const [tooth, setTooth] = useState("")
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -61,6 +65,11 @@ export function EncounterDiagnoses({
     const selectedCode = code.trim()
     if (!selectedCode || saving || disabled) return
     const selectedDescription = description.trim()
+    const toothNumber = tooth.trim() === "" ? null : Number(tooth)
+    if (toothNumber !== null && !isValidTooth(toothNumber)) {
+      setError("Indica una pieza FDI válida (11–48 o 51–85) o deja el campo vacío.")
+      return
+    }
     onPendingChange(true)
     setSaving(true)
     setError(null)
@@ -71,6 +80,8 @@ export function EncounterDiagnoses({
         body: JSON.stringify({
           note: `Dx: ${selectedDescription || selectedCode}`,
           diagnosisCode: selectedCode,
+          diagnosisType,
+          ...(toothNumber !== null ? { toothNumber } : {}),
           encounterId: encounter.id,
         }),
       })
@@ -78,6 +89,8 @@ export function EncounterDiagnoses({
       await onChanged()
       setCode("")
       setDescription("")
+      setDiagnosisType("presuntivo")
+      setTooth("")
       setOpen(false)
     } catch (err) {
       setError(mutationMessage(err))
@@ -93,6 +106,8 @@ export function EncounterDiagnoses({
     if (saving) return
     setCode("")
     setDescription("")
+    setDiagnosisType("presuntivo")
+    setTooth("")
     setError(null)
     setOpen(false)
   }
@@ -113,6 +128,12 @@ export function EncounterDiagnoses({
                   <p className="whitespace-pre-wrap">{note.note}</p>
                   <p className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                     {note.diagnosisCode ? <Badge>{note.diagnosisCode}</Badge> : null}
+                    {note.diagnosisType ? (
+                      <Badge variant={note.diagnosisType === "definitivo" ? "success" : "outline"}>
+                        {DIAGNOSIS_TYPE_LABELS[note.diagnosisType] ?? note.diagnosisType}
+                      </Badge>
+                    ) : null}
+                    {note.toothNumber ? <Badge variant="secondary">Pieza {note.toothNumber}</Badge> : null}
                     <time dateTime={note.createdAt}>{formatDateTime(note.createdAt)}</time>
                   </p>
                 </li>
@@ -161,6 +182,34 @@ export function EncounterDiagnoses({
                   Se registrará como: Dx: {description}
                 </p>
               )}
+              <Field>
+                <FieldLabel htmlFor="dx-type">Tipo de diagnóstico</FieldLabel>
+                <select
+                  id="dx-type"
+                  className="rounded-md border bg-background px-2 py-1.5 text-sm"
+                  value={diagnosisType}
+                  disabled={busy}
+                  onChange={(event) => setDiagnosisType(event.target.value)}
+                >
+                  {Object.entries(DIAGNOSIS_TYPE_LABELS).map(([value, label]) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="dx-tooth">Pieza (opcional)</FieldLabel>
+                <Input
+                  id="dx-tooth"
+                  inputMode="numeric"
+                  maxLength={2}
+                  placeholder="Ej.: 46"
+                  value={tooth}
+                  disabled={busy}
+                  onChange={(event) => setTooth(event.target.value.replace(/\D/g, ""))}
+                />
+              </Field>
             </div>
           </FormDrawer>
         )}

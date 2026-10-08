@@ -109,6 +109,7 @@ export interface ConsentDocument {
   planItemId: string | null
   procedureRef: string | null
   signerKind: "paciente" | "representante"
+  signerContactId?: string | null
   signerName: string
   signerDoc: string | null
   representativeRelation: string | null
@@ -333,6 +334,8 @@ export function signConsent(
   id: string,
   body: {
     signerKind: "paciente" | "representante"
+    /** Persona vinculada que firma; el servidor verifica su facultad y toma su nombre. */
+    signerContactId?: string | null
     signerName: string
     signerDoc?: string | null
     representativeRelation?: string | null

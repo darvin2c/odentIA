@@ -32,6 +32,7 @@ import {
   useListSearch,
 } from "@odentia/ui-patterns"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { Link } from "@tanstack/react-router"
 import { FileText, Image as ImageIcon } from "lucide-react"
 import { useEffect, useId, useMemo, useRef, useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
@@ -139,7 +140,7 @@ export function ImagenesTab({
     enabled: canRead,
   })
   const planQuery = useQuery({
-    queryKey: ["plan", patientId],
+    queryKey: ["plan-items", patientId],
     queryFn: () => apiFetch<{ data: PlanItem[] }>(`/api/patients/${patientId}/plan`),
     enabled: canRead,
   })
@@ -575,9 +576,13 @@ function DocumentViewer({
   const teeth = doc.toothNumbers
   const tags = doc.tags
 
-  const planHref = planItem
-    ? `/patients/${patientId}?tab=plan&planId=${planItem.planId}${planItem.budgetId ? `&budgetId=${planItem.budgetId}` : ""}`
-    : `/patients/${patientId}?tab=plan`
+  const planSearch = planItem
+    ? {
+        tab: "plan" as const,
+        planId: planItem.planId,
+        ...(planItem.budgetId ? { budgetId: planItem.budgetId } : {}),
+      }
+    : { tab: "plan" as const }
   return (
     <div className="grid min-w-0 grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_20rem]">
       {urlQuery.isPending ? (
@@ -631,7 +636,12 @@ function DocumentViewer({
                     size="sm"
                     variant="outline"
                     nativeButton={false}
-                    render={<a href={`/patients/${patientId}/encounters/${doc.encounterId}`} />}
+                    render={
+                      <Link
+                        to="/patients/$patientId/encounters/$encounterId"
+                        params={{ patientId, encounterId: doc.encounterId }}
+                      />
+                    }
                   >
                     {encounter
                       ? `Abrir atención (${timeAgo(encounter.createdAt)})`
@@ -650,7 +660,7 @@ function DocumentViewer({
                     size="sm"
                     variant="outline"
                     nativeButton={false}
-                    render={<a href={planHref} />}
+                    render={<Link to="/patients/$patientId" params={{ patientId }} search={planSearch} />}
                   >
                     {planItem ? `Ver plan: ${planItem.title}` : "Ver plan"}
                   </Button>
@@ -678,7 +688,13 @@ function DocumentViewer({
                     size="sm"
                     variant="outline"
                     nativeButton={false}
-                    render={<a href={`/patients/${patientId}?tab=plan&budgetId=${doc.budgetId}`} />}
+                    render={
+                      <Link
+                        to="/patients/$patientId"
+                        params={{ patientId }}
+                        search={{ tab: "plan", budgetId: doc.budgetId }}
+                      />
+                    }
                   >
                     Ver la propuesta
                   </Button>
@@ -703,7 +719,9 @@ function DocumentViewer({
                     size="sm"
                     variant="outline"
                     nativeButton={false}
-                    render={<a href={`/patients/${patientId}?tab=controles`} />}
+                    render={
+                      <Link to="/patients/$patientId" params={{ patientId }} search={{ tab: "controles" }} />
+                    }
                   >
                     Ver controles
                   </Button>
@@ -720,7 +738,9 @@ function DocumentViewer({
                     size="sm"
                     variant="outline"
                     nativeButton={false}
-                    render={<a href={`/patients/${patientId}?tab=recetas`} />}
+                    render={
+                      <Link to="/patients/$patientId" params={{ patientId }} search={{ tab: "recetas" }} />
+                    }
                   >
                     Ver recetas
                   </Button>
@@ -737,7 +757,9 @@ function DocumentViewer({
                     size="sm"
                     variant="outline"
                     nativeButton={false}
-                    render={<a href={`/patients/${patientId}?tab=cuenta`} />}
+                    render={
+                      <Link to="/patients/$patientId" params={{ patientId }} search={{ tab: "cuenta" }} />
+                    }
                   >
                     Ver cuenta
                   </Button>

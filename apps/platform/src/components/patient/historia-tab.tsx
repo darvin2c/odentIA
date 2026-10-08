@@ -10,9 +10,8 @@ export interface HistoriaTabProps {
 /**
  * Historia clínica: visor cronológico de solo lectura (atenciones
  * finalizadas, notas, anamnesis, documentos y odontograma).
- * Las atenciones se abren desde Evolución/Plan/Presupuesto o desde la
- * imagen vinculada; aquí no hay acción de "nueva atención" para evitar
- * duplicar vías de apertura.
+ * La atención se inicia desde la cabecera de la ficha; aquí no hay acción de
+ * "nueva atención" para evitar duplicar vías de apertura.
  */
 export function HistoriaTab({ patientId, initialTooth, onOdontogramSelect }: HistoriaTabProps) {
   return (

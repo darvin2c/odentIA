@@ -269,6 +269,12 @@ export const consentDocument = pgTable(
     signerName: text("signer_name").notNull(),
     signerDoc: text("signer_doc"),
     representativeRelation: text("representative_relation"),
+    /**
+     * Persona que firmó, cuando se eligió entre los vinculados al paciente (él
+     * mismo o su representante legal vigente). Nulo en firmas anteriores. La FK
+     * compuesta por organización vive en la migración.
+     */
+    signerContactId: uuid("signer_contact_id"),
     /** Trazo manuscrito capturado (JSON de trazos); sin biometría certificada. */
     signatureData: jsonb("signature_data"),
     status: text("status").notNull().default("pendiente"),

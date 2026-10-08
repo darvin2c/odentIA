@@ -91,7 +91,7 @@ export function EncounterProcedures({
   const canOpen = canWrite && !finalized && !disabled
 
   const planQuery = useQuery({
-    queryKey: ["plan", patientId],
+    queryKey: ["plan-items", patientId],
     queryFn: () => apiFetch<{ data: PlanItem[] }>(`/api/patients/${patientId}/plan`),
     enabled: canRead && canWrite && !finalized,
   })
@@ -185,7 +185,7 @@ export function EncounterProcedures({
         body: JSON.stringify(body),
       })
       // El servidor ya marcó el plan realizado: solo refrescar, sin mutación manual.
-      await queryClient.invalidateQueries({ queryKey: ["plan", patientId] })
+      await queryClient.invalidateQueries({ queryKey: ["plan-items", patientId] })
       await queryClient.invalidateQueries({ queryKey: ["patient-summary", patientId] })
       await onChanged()
       setServiceId("")
@@ -270,7 +270,7 @@ export function EncounterProcedures({
                         linked ? (
                           <span className="font-medium">Plan: {linked.title}</span>
                         ) : (
-                          <span>Plan: {proc.planItemId.slice(0, 8)}</span>
+                          <span>Vinculado a un tratamiento del plan</span>
                         )
                       ) : null}
                       <time dateTime={proc.createdAt}>{formatDateTime(proc.createdAt)}</time>

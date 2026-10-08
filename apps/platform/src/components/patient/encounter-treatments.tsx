@@ -8,6 +8,7 @@
  */
 import { Badge, Button } from "@odentia/ui"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
+import { useNavigate } from "@tanstack/react-router"
 import { useState } from "react"
 import { planDecisionLabel } from "../../lib/budgets"
 import { completeTreatmentApi, formatDate, mutationMessage } from "../../lib/clinical-journey"
@@ -38,6 +39,7 @@ export function EncounterTreatments({
 }): React.JSX.Element {
   const canWrite = usePermission("clinical.write")
   const queryClient = useQueryClient()
+  const navigate = useNavigate()
   const [error, setError] = useState<string | null>(null)
   const [completingId, setCompletingId] = useState<string | null>(null)
   const completeMutation = useMutation({
@@ -70,7 +72,11 @@ export function EncounterTreatments({
   }
 
   const openJourney = (itemId: string) => {
-    window.location.assign(`/patients/${patientId}?tab=recorrido&itemId=${itemId}`)
+    void navigate({
+      to: "/patients/$patientId",
+      params: { patientId },
+      search: { tab: "recorrido", itemId },
+    })
   }
 
   return (

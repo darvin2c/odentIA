@@ -12,6 +12,7 @@ const listQuery = z.object({
   contactId: z.string().uuid().optional(),
   conversationId: z.string().uuid().optional(),
   opportunityId: z.string().uuid().optional(),
+  patientId: z.string().uuid().optional(),
   overdue: z.enum(["true", "false"]).optional(),
 })
 
@@ -20,6 +21,7 @@ const createInput = z.object({
   contactId: z.string().uuid().optional(),
   conversationId: z.string().uuid().optional(),
   opportunityId: z.string().uuid().optional(),
+  patientId: z.string().uuid().optional(),
   assigneeUserId: z.string().nullable().optional(),
   dueAt: z.string().optional(),
 })
@@ -40,6 +42,12 @@ const patchInput = z.object({
  */
 function stripCrmNames(item: TaskItem): TaskItem {
   return { ...item, contactName: null, opportunityTitle: null }
+}
+
+/** Nombres según permisos: CRM y filiación se exponen por separado. */
+function visibleTask(memberRole: string, item: TaskItem): TaskItem {
+  const base = canAccess(memberRole, "crm.read") ? item : stripCrmNames(item)
+  return canAccess(memberRole, "patients.read") ? base : { ...base, patientName: null }
 }
 
 export function createTasksRoute(deps: CrmDeps) {
@@ -73,6 +81,12 @@ export function createTasksRoute(deps: CrmDeps) {
         403,
       )
     }
+    if (parsed.data.patientId && !canAccess(memberRole, "patients.read")) {
+      return c.json(
+        errorBody(c, "FORBIDDEN", "Sin permiso de lectura de pacientes para filtrar tareas"),
+        403,
+      )
+    }
     const { overdue, ...rest } = parsed.data
     try {
       const items = await withOrgContext(deps.db, orgId, (tx) =>
@@ -81,7 +95,7 @@ export function createTasksRoute(deps: CrmDeps) {
           overdue: overdue === undefined ? undefined : overdue === "true",
         }),
       )
-      const data = canAccess(memberRole, "crm.read") ? items : items.map(stripCrmNames)
+      const data = items.map((item) => visibleTask(memberRole, item))
       return c.json({ data, nextCursor: null }, 200)
     } catch (e) {
       return serviceErrorResponse(c, e) ?? Promise.reject(e)
@@ -92,7 +106,7 @@ export function createTasksRoute(deps: CrmDeps) {
     const { orgId, memberRole } = orgContextOf(c)
     return runService(c, 200, async () => {
       const item = await withOrgContext(deps.db, orgId, tx => getTask(tx, orgId, c.req.param("id")))
-      return canAccess(memberRole, "crm.read") ? item : stripCrmNames(item)
+      return visibleTask(memberRole, item)
     })
   })
 
@@ -109,11 +123,17 @@ export function createTasksRoute(deps: CrmDeps) {
         403,
       )
     }
+    if (parsed.data.patientId && !canAccess(memberRole, "patients.read")) {
+      return c.json(
+        errorBody(c, "FORBIDDEN", "Sin permiso de lectura de pacientes para vincular tareas"),
+        403,
+      )
+    }
     return runService(c, 201, async () => {
       const created = await withOrgContext(deps.db, orgId, (tx) =>
         createTask(tx, orgId, { ...parsed.data, createdBy: "user" }),
       )
-      return canAccess(memberRole, "crm.read") ? created : stripCrmNames(created)
+      return visibleTask(memberRole, created)
     })
   })
 

@@ -1,3 +1,6 @@
+import { member } from "@odentia/db/schema/auth"
+import type { Page } from "@playwright/test"
+import { and, eq } from "drizzle-orm"
 import { tenant, tenantPattern } from "./env"
 import { api, call, expect, test } from "./fixtures"
 import { gotoHydrated } from "./hydration"
@@ -5,8 +8,20 @@ import {
   buildClinicalBase,
   createAcceptedBudget,
   createDraftBudget,
+  enableAgenda,
+  grantLegalRepresentative,
+  patientApiPath,
   setupAggregation,
 } from "./patients-fixture"
+
+/** Abre una sección de la ficha por su navegación: área, sección y, si aplica, tipo. */
+async function openSection(page: Page, ...names: string[]): Promise<void> {
+  for (const name of names) {
+    const tab = page.getByRole("tab", { name, exact: true })
+    await expect(tab).toBeEnabled()
+    await tab.click()
+  }
+}
 
 test("paciente: ficha inicial y hallazgo visibles en el recorrido", async ({ owner }) => {
   const ids = await buildClinicalBase(owner)
@@ -19,13 +34,38 @@ test("paciente: ficha inicial y hallazgo visibles en el recorrido", async ({ own
   await expect(page.getByText(/HC-\d{6}/)).toBeVisible()
   await expect(page.getByText("Alergia severa: Penicilina")).toBeVisible()
 
-  // El resumen permite consultar el mapa clínico antes de abrir una atención.
-  await expect(page.getByRole("heading", { name: "Situación clínica" })).toBeVisible()
+  // El resumen abre con lo pendiente; el mapa clínico vive en Clínica junto al plan.
+  await expect(page.getByRole("heading", { name: "Pendientes" })).toBeVisible()
+  await openSection(page, "Clínica")
+  await expect(page.getByRole("heading", { name: "Odontograma", exact: true })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Plan de tratamiento" })).toBeVisible()
+  // En el arco la pieza va girada: mesial debe quedar del lado del vecino mesial
+  // también en la arcada superior (16 → hacia 15), no del distal (17).
+  const center = async (selector: string) => {
+    const box = await page.locator(selector).first().boundingBox()
+    if (!box) throw new Error(`sin geometría para ${selector}`)
+    return { x: box.x + box.width / 2, y: box.y + box.height / 2 }
+  }
+  const distance = (a: { x: number; y: number }, b: { x: number; y: number }) =>
+    Math.hypot(a.x - b.x, a.y - b.y)
+  for (const [tooth, mesialNeighbor, distalNeighbor] of [
+    [16, 15, 17],
+    [36, 35, 37],
+  ]) {
+    const zone = await center(`[data-tooth="${tooth}"] [data-surface="mesial"]`)
+    expect(
+      distance(zone, await center(`[data-tooth="${mesialNeighbor}"]`)),
+      `mesial de la pieza ${tooth} mira a la ${mesialNeighbor}`,
+    ).toBeLessThan(distance(zone, await center(`[data-tooth="${distalNeighbor}"]`)))
+  }
 
-  // Recorrido clínico: qué se observó, qué se propuso, qué se decidió.
-  const recorridoTab = page.getByRole("tab", { name: "Recorrido clínico", exact: true })
-  await expect(recorridoTab).toBeEnabled()
-  await recorridoTab.click()
+  // La indicación abierta señala su pieza y la selecciona en el odontograma.
+  await page.getByRole("button", { name: "Ver pieza 36" }).click()
+  await expect(page.locator('[data-tooth="36"][aria-pressed="true"]')).toBeVisible()
+  await page.screenshot({ path: test.info().outputPath("pieza-seleccionada.png"), fullPage: true })
+
+  // Tratamientos: qué se observó, qué se propuso, qué se decidió.
+  await openSection(page, "Tratamientos")
   const recorrido = page.locator("body")
   await expect(recorrido.getByText("1. Qué se observó")).toBeVisible()
   await expect(recorrido.getByText(/caries/).first()).toBeVisible()
@@ -68,9 +108,7 @@ test("paciente: responsabilidad y decisión de la propuesta", async ({ owner }) 
   ).toBeVisible()
 
   // Responsables: el rol vigente habilita registrar quién decide la propuesta.
-  const responsablesTab = page.getByRole("tab", { name: "Responsables", exact: true })
-  await expect(responsablesTab).toBeEnabled()
-  await responsablesTab.click()
+  await openSection(page, "Datos", "Responsables")
   await page.getByRole("button", { name: "Asignar responsabilidad" }).click()
   const responsibility = page.getByRole("dialog", { name: "Asignar responsabilidad" })
   await responsibility.getByLabel("Contacto vinculado", { exact: true }).selectOption(ids.contactId)
@@ -136,18 +174,14 @@ test("paciente: cuenta con cargo, pago y aplicación", async ({ owner }) => {
   await charge.getByRole("button", { name: "Generar cargo", exact: true }).click()
 
   // Pago y aplicación desde la ficha.
-  const recorridoTab = page.getByRole("tab", { name: "Recorrido clínico", exact: true })
-  await expect(recorridoTab).toBeEnabled()
-  await recorridoTab.click()
+  await openSection(page, "Tratamientos")
   await expect(
     page
       .locator("span")
       .filter({ hasText: /^Aceptado$/ })
       .first(),
   ).toBeVisible()
-  const cuentaTab = page.getByRole("tab", { name: "Cuenta", exact: true })
-  await expect(cuentaTab).toBeEnabled()
-  await cuentaTab.click()
+  await openSection(page, "Cuenta")
   await expect(page.getByText("POR COBRAR").first()).toBeVisible()
   await page.getByRole("button", { name: "Registrar pago o anticipo" }).click()
   const payment = page.getByRole("dialog", { name: "Registrar pago o anticipo" })
@@ -170,9 +204,7 @@ test("paciente: receta vinculada al tratamiento y anulación", async ({ owner })
   const patientPath = `/patients/${ids.patientId}`
 
   await gotoHydrated(page, tenant(owner.org.slug, patientPath))
-  const recetasTab = page.getByRole("tab", { name: "Recetas", exact: true })
-  await expect(recetasTab).toBeEnabled()
-  await recetasTab.click()
+  await openSection(page, "Clínica", "Documentos", "Recetas")
   await page.getByRole("button", { name: "Emitir receta" }).click()
   const prescription = page.getByRole("dialog", { name: "Emitir receta" })
   await prescription.getByLabel("Tratamiento", { exact: true }).selectOption(ids.itemId)
@@ -195,14 +227,13 @@ test("paciente: receta vinculada al tratamiento y anulación", async ({ owner })
 
 test("paciente: control indicado, programado y completado", async ({ owner }) => {
   const ids = await buildClinicalBase(owner)
+  await enableAgenda(owner)
   const { page } = owner
   const patientPath = `/patients/${ids.patientId}`
 
   // Controles: indicar, programar y completar contra una atención finalizada.
   await gotoHydrated(page, tenant(owner.org.slug, patientPath))
-  const controlesTab = page.getByRole("tab", { name: "Controles", exact: true })
-  await expect(controlesTab).toBeEnabled()
-  await controlesTab.click()
+  await openSection(page, "Clínica", "Controles")
   await page.getByRole("button", { name: "Indicar control" }).click()
   const followUp = page.getByRole("dialog", { name: "Indicar control" })
   await followUp.getByLabel("Tipo de control", { exact: true }).selectOption("tratamiento")
@@ -210,10 +241,14 @@ test("paciente: control indicado, programado y completado", async ({ owner }) =>
   await followUp.getByLabel("Título del control").fill("Control post-endodoncia")
   await followUp.getByRole("button", { name: "Indicar control", exact: true }).click()
   await expect(page.getByText("Control post-endodoncia")).toBeVisible()
-  await page.getByRole("button", { name: "Programar cita" }).click()
-  const schedule = page.getByRole("dialog", { name: "Programar cita del control" })
-  await schedule.getByRole("button", { name: "Programar", exact: true }).click()
-  await expect(page.getByText("Programado", { exact: true }).first()).toBeVisible()
+  // Programar reserva un hueco real del profesional y lo vincula al control.
+  await page.getByRole("button", { name: "Programar control" }).first().click()
+  const schedule = page.getByRole("dialog", { name: "Programar control" })
+  const slot = schedule.getByRole("button", { name: "Seleccionar" }).first()
+  await expect(slot).toBeVisible({ timeout: 15_000 })
+  await slot.click()
+  await schedule.getByRole("button", { name: "Reservar y vincular control" }).click()
+  await expect(page.getByText(/Cita reservada/)).toBeVisible({ timeout: 15_000 })
   await page.getByRole("button", { name: "Completar control" }).click()
   const complete = page.getByRole("dialog", { name: "Completar control" })
   await complete.getByLabel("Atención finalizada", { exact: true }).selectOption(ids.encounterId)
@@ -234,9 +269,7 @@ test("paciente: ejecución de la sesión y cierre del tratamiento", async ({ own
     page,
     tenant(owner.org.slug, `${patientPath}?tab=plan&planId=${ids.planId}&budgetId=${budgetId}`),
   )
-  const recorridoTab = page.getByRole("tab", { name: "Recorrido clínico", exact: true })
-  await expect(recorridoTab).toBeEnabled()
-  await recorridoTab.click()
+  await openSection(page, "Tratamientos")
   await page.getByLabel("Tratamiento", { exact: true }).selectOption(ids.itemId)
   const iniciarSesion = page.getByRole("button", { name: "Iniciar sesión", exact: true })
   await expect(iniciarSesion).toBeEnabled()
@@ -274,12 +307,30 @@ test("paciente: ejecución de la sesión y cierre del tratamiento", async ({ own
     .getByRole("alertdialog")
     .getByRole("button", { name: "Finalizar atención", exact: true })
     .click()
-  await expect(page).toHaveURL(tenantPattern(owner.org.slug, patientPath))
+  // Al finalizar se permanece en la atención, con su cierre y relevo a la vista.
+  await expect(page).toHaveURL(/\/encounters\//)
+  await expect(page.getByRole("heading", { name: "Cierre y relevo" })).toBeVisible()
+  await expect(page.getByText(/1 acto\(s\) realizado\(s\)/)).toBeVisible()
+  await expect(page.getByText("Solo lectura", { exact: true })).toBeVisible()
+  // El relevo nombra a quién le toca lo siguiente: aquí, caja con el saldo generado.
+  await expect(page.getByText(/Cobrar S\/\s450\.00/)).toBeVisible()
+  await expect(page.getByText("Ir a la cuenta", { exact: true })).toBeVisible()
+  // La atención se lee con nombres, no con identificadores.
+  await expect(page.getByText("Ana Pruebas", { exact: true }).first()).toBeVisible()
+  await expect(page.getByText(/Tratamiento del plan: Endodoncia unirradicular/)).toBeVisible()
+  await page.screenshot({ path: test.info().outputPath("cierre-y-relevo.png"), fullPage: true })
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expect(page.getByRole("heading", { name: "Cierre y relevo" })).toBeVisible()
+  await page.screenshot({
+    path: test.info().outputPath("cierre-y-relevo-movil.png"),
+    fullPage: true,
+  })
+  await page.setViewportSize({ width: 1280, height: 720 })
 
   // El recorrido refleja el cierre del tratamiento y su próximo control.
   await gotoHydrated(page, tenant(owner.org.slug, `${patientPath}?tab=recorrido&itemId=${ids.itemId}`))
   await expect(page.getByText("Ejecución: realizado").first()).toBeVisible()
-  await expect(page.getByText("Programar el control").first()).toBeVisible()
+  await expect(page.getByText("Revisar el control").first()).toBeVisible()
 })
 
 test("paciente: agregación del recorrido, historia y aislamiento", async ({ createOwner }) => {
@@ -303,9 +354,7 @@ test("paciente: agregación del recorrido, historia y aislamiento", async ({ cre
   await expect(page.getByText(/aplicado a este tratamiento S\/\s*150\.00/)).toBeVisible()
 
   // Historia: cada evento del recorrido se abre donde corresponde, no como anamnesis.
-  const historiaTab = page.getByRole("tab", { name: "Historia", exact: true })
-  await expect(historiaTab).toBeEnabled()
-  await historiaTab.click()
+  await openSection(page, "Historia")
   await expect(page.getByText("Presupuesto", { exact: true }).first()).toBeVisible()
   await expect(page.getByText("Pago", { exact: true })).toHaveCount(0)
   await page.getByRole("button", { name: "Ver la propuesta", exact: true }).first().click()
@@ -327,4 +376,219 @@ test("paciente: agregación del recorrido, historia y aislamiento", async ({ cre
   expect(hidden.status).toBe(404)
   const isolated = await call<unknown[]>(other.page, "GET", "/api/patients", other.org.slug)
   expect(isolated).toEqual([])
+})
+/** Fecha de nacimiento que da la edad pedida hoy (calendario local). */
+function bornYearsAgo(years: number): string {
+  const date = new Date()
+  date.setFullYear(date.getFullYear() - years)
+  date.setMonth(date.getMonth() - 1)
+  return date.toISOString().slice(0, 10)
+}
+
+for (const role of ["reception", "dentist", "cashier"] as const) {
+  test(`ficha por rol: ${role} entra a su área y solo ve lo que su permiso autoriza`, async ({
+    owner,
+    fixtureDb,
+  }, info) => {
+    const ids = await buildClinicalBase(owner)
+    const { page } = owner
+    const slug = owner.org.slug
+    const apiPath = patientApiPath(ids.patientId)
+    // Menor de 8 años con representante legal: dentición mixta y decisión delegada.
+    await call(page, "PATCH", apiPath, slug, { birthDate: bornYearsAgo(8) })
+    await grantLegalRepresentative(owner, ids)
+    await fixtureDb
+      .update(member)
+      .set({ role })
+      .where(and(eq(member.organizationId, owner.org.id), eq(member.userId, owner.user.id)))
+
+    await gotoHydrated(page, tenant(slug, `/patients/${ids.patientId}`))
+    await expect(page.getByRole("heading", { name: "Lucía Quispe" })).toBeVisible()
+    await expect(page.getByText("Menor de edad", { exact: true })).toBeVisible()
+    await expect(page.getByText("Representante legal:")).toBeVisible()
+    await expect(page.getByText("Madre de Lucía").first()).toBeVisible()
+
+    const areas = page.getByRole("tablist", { name: "Áreas de la ficha" }).getByRole("tab")
+    const allergy = page.getByText("Alergia severa: Penicilina")
+    const health = await api(page, "GET", `${apiPath}/health`, slug)
+    const account = await api(page, "GET", `${apiPath}/account`, slug)
+
+    if (role === "reception") {
+      await expect(areas).toHaveText(["Resumen", "Relación", "Datos"])
+      await expect(page.getByRole("heading", { name: "Pendientes" })).toBeVisible()
+      // Única excepción clínica: la alerta de alergia, sin el resto de la ficha.
+      await expect(allergy).toBeVisible()
+      expect(health.status).toBe(403)
+      expect(account.status).toBe(403)
+      await expect(page.locator("a", { hasText: "Agendar cita" }).first()).toBeVisible()
+      await expect(page.getByRole("button", { name: "Nueva atención" })).toHaveCount(0)
+      await openSection(page, "Relación", "Citas")
+      await expect(page.getByText("Sin citas", { exact: true })).toBeVisible()
+      await openSection(page, "Datos")
+      await expect(page.getByRole("heading", { name: "Filiación" })).toBeVisible()
+    }
+    if (role === "dentist") {
+      await expect(areas).toHaveText(["Resumen", "Clínica", "Relación", "Datos"])
+      // Entra directo al odontograma con el plan debajo, en la dentición de su edad.
+      await expect(page.getByRole("heading", { name: "Odontograma", exact: true })).toBeVisible()
+      await expect(page.getByRole("heading", { name: "Plan de tratamiento" })).toBeVisible()
+      await expect(page.getByRole("button", { name: "Mixta", exact: true })).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      )
+      await expect(page.locator('[data-tooth="36"]')).toBeVisible()
+      await expect(page.locator('[data-tooth="75"]')).toBeVisible()
+      await expect(allergy).toBeVisible()
+      expect(health.status).toBe(200)
+      expect(account.status).toBe(403)
+      await expect(page.getByRole("button", { name: "Nueva atención" })).toBeVisible()
+    }
+    if (role === "cashier") {
+      await expect(areas).toHaveText(["Resumen", "Cuenta", "Datos"])
+      await expect(page.getByRole("button", { name: "Registrar pago o anticipo" })).toBeVisible()
+      await expect(allergy).toHaveCount(0)
+      expect(health.status).toBe(403)
+      expect(account.status).toBe(200)
+      const detail = await call<{ activeAllergies: unknown[] }>(page, "GET", apiPath, slug)
+      expect(detail.activeAllergies).toEqual([])
+    }
+    await page.screenshot({ path: info.outputPath(`ficha-${role}.png`), fullPage: true })
+    await page.setViewportSize({ width: 390, height: 844 })
+    await expect(page.getByRole("heading", { name: "Lucía Quispe" })).toBeVisible()
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      "la ficha no desborda en horizontal a 390px",
+    ).toBe(true)
+    await page.screenshot({ path: info.outputPath(`ficha-${role}-movil.png`), fullPage: true })
+  })
+}
+test("recepción coordina el control sin leer la ficha clínica", async ({ owner, fixtureDb }) => {
+  const ids = await buildClinicalBase(owner)
+  await enableAgenda(owner)
+  const { page } = owner
+  const slug = owner.org.slug
+  const apiPath = patientApiPath(ids.patientId)
+  await call(
+    page,
+    "POST",
+    `${apiPath}/follow-ups`,
+    slug,
+    {
+      kind: "tratamiento",
+      planItemId: ids.itemId,
+      originEncounterId: ids.encounterId,
+      title: "Control de evolución",
+      instructions: "Indicación clínica reservada",
+      dueAt: new Date(Date.now() + 86_400_000).toISOString(),
+    },
+    201,
+  )
+  await fixtureDb
+    .update(member)
+    .set({ role: "reception" })
+    .where(and(eq(member.organizationId, owner.org.id), eq(member.userId, owner.user.id)))
+
+  await gotoHydrated(page, tenant(slug, `/patients/${ids.patientId}`))
+  // El pendiente llega al resumen de recepción y lleva a la coordinación.
+  await expect(page.getByText("Control por reservar: Control de evolución")).toBeVisible()
+  await page.getByRole("button", { name: "Reservar", exact: true }).click()
+  await expect(page).toHaveURL(/tab=coordinacion/)
+  await expect(page.getByRole("heading", { name: "Controles", exact: true })).toBeVisible()
+  await expect(page.getByText("Endodoncia unirradicular")).toBeVisible()
+  // Sin detalle clínico: ni instrucciones, ni pieza, ni diagnóstico, ni importes.
+  await expect(page.getByText("Indicación clínica reservada")).toHaveCount(0)
+  await expect(page.getByText(/Pieza 36|K02\.1|450\.00/)).toHaveCount(0)
+  const coordination = await api<{ data: unknown }>(page, "GET", `${apiPath}/coordination`, slug)
+  expect(coordination.status).toBe(200)
+  expect(JSON.stringify(coordination.body)).not.toMatch(/instructions|toothNumber|priceCents/)
+  expect((await api(page, "GET", `${apiPath}/follow-ups`, slug)).status).toBe(403)
+
+  // Reserva un hueco real: misma operación que la vía clínica.
+  await page.getByRole("button", { name: "Reservar control" }).click()
+  const dialog = page.getByRole("dialog", { name: "Programar control" })
+  const slot = dialog.getByRole("button", { name: "Seleccionar" }).first()
+  await expect(slot).toBeVisible({ timeout: 15_000 })
+  await slot.click()
+  await dialog.getByRole("button", { name: "Reservar y vincular control" }).click()
+  await expect(page.getByText("Con cita", { exact: true })).toBeVisible({ timeout: 15_000 })
+  await page.screenshot({ path: test.info().outputPath("coordinacion-recepcion.png"), fullPage: true })
+  await openSection(page, "Citas")
+  await expect(page.getByRole("heading", { name: "Próximas citas" })).toBeVisible()
+  await expect(page.getByText("Programada", { exact: true })).toBeVisible()
+})
+
+test("documentos: un solo índice cronológico que abre la gestión de cada tipo", async ({ owner }) => {
+  const ids = await buildClinicalBase(owner)
+  await setupAggregation(owner, ids)
+  const { page } = owner
+  await gotoHydrated(page, tenant(owner.org.slug, `/patients/${ids.patientId}`))
+  await openSection(page, "Clínica", "Documentos")
+  await expect(page).toHaveURL(/tab=documentos/)
+  await expect(page.getByText("Receta N.º 1")).toBeVisible()
+  await expect(page.getByText("Anulada", { exact: true })).toBeVisible()
+  // Nada pendiente de firma, resultado o cierre: el filtro no ofrece resultados vacíos.
+  await expect(page.getByRole("button", { name: "Requieren acción (0)" })).toBeDisabled()
+  await page.screenshot({ path: test.info().outputPath("documentos.png"), fullPage: true })
+  // Cada fila abre su panel de gestión.
+  await page.getByRole("button", { name: "Abrir en recetas" }).click()
+  await expect(page).toHaveURL(/tab=recetas/)
+  await expect(page.getByRole("button", { name: "Emitir receta" })).toBeVisible()
+})
+test("persona única: la ficha y la persona comparten identidad y actividad", async ({ owner }) => {
+  const ids = await buildClinicalBase(owner)
+  const { page } = owner
+  const slug = owner.org.slug
+  const apiPath = patientApiPath(ids.patientId)
+  type Detail = {
+    patient: { displayName: string; docNumber: string | null; birthDate: string | null }
+    contacts: { contactId: string; relationship: string; displayName: string }[]
+  }
+  const before = await call<Detail>(page, "GET", apiPath, slug)
+  const own = before.contacts.find((link) => link.relationship === "self")
+  expect(own, "todo paciente tiene su propia persona").toBeTruthy()
+  expect(own?.contactId).not.toBe(ids.contactId)
+
+  // La identidad se edita en la persona y llega a la ficha.
+  await gotoHydrated(page, tenant(slug, `/contacts/${own?.contactId}`))
+  await expect(page.getByText("Esta persona es paciente", { exact: false })).toBeVisible()
+  await expect(page.getByText("DNI 87654321")).toBeVisible()
+  await page.getByRole("button", { name: "Editar datos" }).click()
+  const edit = page.getByRole("dialog", { name: "Editar datos" })
+  await edit.getByLabel("Fecha de nacimiento").fill("1990-04-05")
+  await edit.getByRole("button", { name: "Guardar", exact: true }).click()
+  await expect(page.getByText("1990-04-05")).toBeVisible()
+  await page.screenshot({ path: test.info().outputPath("persona.png"), fullPage: true })
+  const after = await call<Detail>(page, "GET", apiPath, slug)
+  expect(after.patient.birthDate).toBe("1990-04-05")
+
+  // Desde la ficha: actividad unificada, seguimiento comercial y tareas del paciente.
+  await gotoHydrated(page, tenant(slug, `/patients/${ids.patientId}`))
+  await page.getByRole("button", { name: "Nueva tarea" }).click()
+  const task = page.getByRole("dialog", { name: "Nueva tarea" })
+  await task.getByLabel("Qué hay que hacer").fill("Llamar por el laboratorio")
+  await task.getByRole("button", { name: "Crear tarea" }).click()
+  await expect(page.getByText("Tarea: Llamar por el laboratorio")).toBeVisible()
+  await page.screenshot({ path: test.info().outputPath("resumen-con-tarea.png"), fullPage: true })
+  await openSection(page, "Relación")
+  await expect(page).toHaveURL(/tab=actividad/)
+  await expect(page.getByText("Atención", { exact: true }).first()).toBeVisible()
+  await page.screenshot({ path: test.info().outputPath("actividad.png"), fullPage: true })
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expect(page.getByText("Atención", { exact: true }).first()).toBeVisible()
+  await page.screenshot({ path: test.info().outputPath("actividad-movil.png"), fullPage: true })
+  await page.setViewportSize({ width: 1280, height: 720 })
+  await openSection(page, "Seguimiento")
+  await expect(page.getByRole("region", { name: "Contexto del contacto" })).toBeVisible()
+  await page.screenshot({ path: test.info().outputPath("seguimiento.png"), fullPage: true })
+  // La propia persona no se desvincula; la tutora sí conserva sus acciones.
+  await openSection(page, "Interlocutores")
+  await page.getByRole("button", { name: /^Acciones del contacto Lucía Quispe/ }).click()
+  await expect(page.getByRole("menuitem", { name: "Desvincular" })).toHaveCount(0)
+  await page.keyboard.press("Escape")
+
+  // Quien audita ve quién consultó la historia.
+  await openSection(page, "Datos", "Consultas a la historia")
+  await expect(page.getByRole("heading", { name: "Consultas a la historia clínica" })).toBeVisible()
+  await expect(page.getByRole("cell", { name: "Ana Pruebas" }).first()).toBeVisible()
+  await page.screenshot({ path: test.info().outputPath("consultas-historia.png"), fullPage: true })
 })

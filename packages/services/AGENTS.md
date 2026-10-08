@@ -12,6 +12,10 @@ Objetivo: una operación de negocio coherente para personal, portal y agente, co
 - Contactos/oportunidades: paginación y orden servidor, cursores con microsegundos y totales sobre todos los resultados filtrados, no sobre la página cargada.
 - Una tarea abierta de seguimiento por oportunidad. Completar limpia solo su próxima acción, no una reprogramación posterior; editar/reabrir seguimiento mediante la oportunidad.
 - Controles clínicos: programar reserva o vincula una cita real del mismo paciente y organización en la misma transacción. Mover la cita reprograma el control; cancelarla, inasistencia o atención lo devuelve a pendiente conservando la traza; cancelar el control no cancela la cita. Históricos sin cita conservan `legacyScheduledAt` sin marcarse como reserva verificada.
+- Coordinación del tratamiento (`treatment-coordination.ts`): vista mínima para quien agenda sin leer la ficha —títulos, estados y fechas; nunca diagnósticos, piezas, importes ni instrucciones—. Reservar un control desde ahí es la misma operación que la vía clínica.
+- Persona única: la identidad se edita desde la ficha o desde la persona y la base la mantiene igual en ambas. El agente no cambia la identidad de quien ya es paciente. Identificar al paciente con otro contacto solo sustituye a una persona provisional.
+- Consentimientos: con `signerContactId` firma la propia persona o su representante legal vigente y el nombre sale de su registro; sin él se conserva la firma declarada.
+- Toda lectura clínica atendida deja traza en la bitácora de consultas (`clinical-access.ts`); la leen quienes auditan.
 - Notas operativas y evidencia de propuestas inmutables. Notas operativas distintas de notas clínicas; recepción recibe presupuestos mínimos, no líneas/importes clínicos ni caja.
 - Métricas: primera respuesta desde aceptación real del envío, no encolado/simulación; históricos sin hora conservan duración desconocida. Ejecución no significa resolución, conversión no significa cobro ni causalidad. Sin datos no mostrar éxito del 100 %.
 

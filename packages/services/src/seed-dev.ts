@@ -276,6 +276,8 @@ async function wipeSeed(): Promise<void> {
     "portal_grant",
     "portal_policy",
     "portal_access_log",
+    // La bitácora de consultas referencia paciente, usuario y organización sin cascada.
+    "clinical_access_log",
     "portal_session",
     "portal_link",
     "automation_link_token",
@@ -348,7 +350,6 @@ async function wipeSeed(): Promise<void> {
   await db
     .delete(patientRegistrationLink)
     .where(inArray(patientRegistrationLink.organizationId, SEED_ORGS))
-  await db.delete(patientContact).where(inArray(patientContact.organizationId, SEED_ORGS))
   await db
     .delete(patientRegistrationConfig)
     .where(inArray(patientRegistrationConfig.organizationId, SEED_ORGS))
@@ -419,7 +420,12 @@ async function wipeSeed(): Promise<void> {
         inArray(patientRegistration.actorUserId, SEED_USERS),
       ),
     )
-  await db.delete(patient).where(inArray(patient.organizationId, SEED_ORGS))
+  // Persona única: un paciente no existe sin su propia persona, así que sus
+  // vínculos y la ficha se retiran en la misma transacción.
+  await db.transaction(async (tx) => {
+    await tx.delete(patientContact).where(inArray(patientContact.organizationId, SEED_ORGS))
+    await tx.delete(patient).where(inArray(patient.organizationId, SEED_ORGS))
+  })
   await db.delete(contact).where(inArray(contact.organizationId, SEED_ORGS))
   await db.delete(pipelineStage).where(inArray(pipelineStage.organizationId, SEED_ORGS))
   await db.delete(pipeline).where(inArray(pipeline.organizationId, SEED_ORGS))
@@ -1016,11 +1022,15 @@ const rosaPatientId = patientIdByName.get("Rosa Quispe")!
 const rosaHealthV1 = await savePatientHealth(db, ORG_A, ANA_ID, rosaPatientId, {
   expectedRevision: 0,
   reviewStatus: { allergies: "recorded", conditions: "recorded", medications: "recorded" },
-  allergies: [{ substance: "Penicilina", reaction: "Urticaria", severity: "severa" }],
+  allergies: [
+    { substance: "Penicilina", category: "medicamento", reaction: "Urticaria", severity: "severa" },
+  ],
   conditions: [
     { name: "Hipertensión arterial", status: "activa", notes: "Controlada con medicación" },
   ],
-  medications: [{ name: "Losartán", dose: "50 mg", frequency: "1 vez al día" }],
+  medications: [
+    { name: "Cozaar", genericName: "Losartán", dose: "50 mg", frequency: "1 vez al día" },
+  ],
   anamnesis: {
     expectedVersion: 0,
     answers: {
@@ -1046,6 +1056,7 @@ await savePatientHealth(db, ORG_A, ANA_ID, rosaPatientId, {
   allergies: rosaHealthV1.allergies.map((a) => ({
     id: a.id,
     substance: a.substance,
+    category: a.category,
     reaction: a.reaction,
     severity: a.severity,
   })),
@@ -1059,11 +1070,13 @@ await savePatientHealth(db, ORG_A, ANA_ID, rosaPatientId, {
     ...rosaHealthV1.medications.map((m) => ({
       id: m.id,
       name: m.name,
+      genericName: m.genericName,
       dose: m.dose,
       frequency: m.frequency,
     })),
     {
-      name: "Ácido acetilsalicílico",
+      name: "Aspirina",
+      genericName: "Ácido acetilsalicílico",
       dose: "100 mg",
       frequency: "1 vez al día",
       notes: "Suspendida por indicación médica",
@@ -1347,6 +1360,8 @@ await voidOdontogramEntry(
 await addClinicalNote(db, ORG_A, ANA_ID, rosaPatientId, {
   note: "Paciente con dolor a la percusión en pieza 36; se planifica obturación y endodoncia en 46.",
   diagnosisCode: "K02.1",
+  diagnosisType: "definitivo",
+  toothNumber: 36,
   encounterId: draft.id,
 })
 // Documentos demo con bytes reales en storage (el registro exige borrador).

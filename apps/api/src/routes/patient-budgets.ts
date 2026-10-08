@@ -61,11 +61,16 @@ const budgetRevisionInput = budgetCreateInput.omit({ planId: true }).extend({
 export function createPatientBudgetsRoute(deps: Pick<CrmDeps, "db">) {
   const app = new Hono()
   // Documentos económicos: lectura finance.read, mutaciones finance.write.
-  app.use("*", async (c, next) => {
-    const { memberRole } = orgContextOf(c)
-    if (!canAccess(memberRole, "finance.read")) return forbid(c)
-    await next()
-  })
+  // El guarda se acota a sus rutas: esta app se monta en "/" junto a las demás
+  // subrutas del paciente y un `use("*")` exigiría caja también a controles,
+  // recetas, tratamientos y responsables registrados después.
+  for (const path of ["/:id/budgets", "/:id/budgets/*"]) {
+    app.use(path, async (c, next) => {
+      const { memberRole } = orgContextOf(c)
+      if (!canAccess(memberRole, "finance.read")) return forbid(c)
+      await next()
+    })
+  }
   app.get("/:id/budgets", async (c) => {
     const { orgId } = orgContextOf(c)
     const patientId = c.req.param("id")

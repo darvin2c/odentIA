@@ -1,9 +1,10 @@
 import type { Db } from "@odentia/db"
 import { member } from "@odentia/db/schema/auth"
+import { patient, patientContact } from "@odentia/db/schema/clinical"
 import { contact, conversation, crmTask } from "@odentia/db/schema/crm"
 import { opportunity } from "@odentia/db/schema/opportunities"
 import { auditEvent } from "@odentia/db/schema/org"
-import { and, asc, desc, eq, sql } from "drizzle-orm"
+import { and, asc, desc, eq, or, sql } from "drizzle-orm"
 import { notFound, validation } from "./errors.js"
 
 /** Aviso en vivo para el stream (`org_events`): solo `{ orgId, kind, at }`, sin datos clínicos. */
@@ -22,11 +23,15 @@ export interface TaskItem {
   contactId: string | null
   conversationId: string | null
   opportunityId: string | null
+  /** Paciente al que se refiere la tarea (nulo si es solo comercial u operativa). */
+  patientId: string | null
   kind: TaskKind
   assigneeUserId: string | null
   dueAt: string | null
   status: string
   createdBy: string
+  /** Nombre del paciente (nulo sin patients.read en la API o sin vínculo). */
+  patientName: string | null
   /** Nombre del contacto (nulo sin crm.read en la API o sin vínculo). */
   contactName: string | null
   /** Título de la oportunidad vinculada (nulo sin crm.read en la API o sin vínculo). */
@@ -37,6 +42,7 @@ function toItem(
   row: typeof crmTask.$inferSelect,
   contactName: string | null = null,
   opportunityTitle: string | null = null,
+  patientName: string | null = null,
 ): TaskItem {
   const rawKind: string = row.kind
   const kind: TaskKind = rawKind === "opportunity_follow_up" ? "opportunity_follow_up" : "manual"
@@ -46,11 +52,13 @@ function toItem(
     contactId: row.contactId,
     conversationId: row.conversationId,
     opportunityId: row.opportunityId,
+    patientId: row.patientId,
     kind,
     assigneeUserId: row.assigneeUserId,
     dueAt: row.dueAt ? row.dueAt.toISOString() : null,
     status: row.status,
     createdBy: row.createdBy,
+    patientName,
     contactName,
     opportunityTitle,
   }
@@ -62,6 +70,8 @@ export interface TaskFilters {
   contactId?: string
   conversationId?: string
   opportunityId?: string
+  /** Tareas de la persona: referidas al paciente o al contacto que es su propia persona. */
+  patientId?: string
   /** true = vencidas (dueAt <= ahora y abiertas); false = no vencidas. */
   overdue?: boolean
 }
@@ -161,6 +171,14 @@ async function withNames(
   row: typeof crmTask.$inferSelect,
 ): Promise<TaskItem> {
   const oppId: string | null = row.opportunityId
+  const patientId: string | null = row.patientId
+  const [patientRow] = patientId
+    ? await tx
+        .select({ displayName: patient.displayName })
+        .from(patient)
+        .where(and(eq(patient.id, patientId), eq(patient.organizationId, orgId)))
+        .limit(1)
+    : []
   const [contactRow, oppRow] = await Promise.all([
     row.contactId
       ? tx
@@ -179,7 +197,12 @@ async function withNames(
           .then((r) => r[0] ?? null)
       : Promise.resolve(null),
   ])
-  return toItem(row, contactRow?.displayName ?? null, oppRow?.title ?? null)
+  return toItem(
+    row,
+    contactRow?.displayName ?? null,
+    oppRow?.title ?? null,
+    patientRow?.displayName ?? null,
+  )
 }
 
 export async function getTask(tx: Db, orgId: string, id: string): Promise<TaskItem> {
@@ -209,6 +232,24 @@ export async function listTasks(tx: Db, orgId: string, input: TaskFilters): Prom
     if (!isUuid(input.opportunityId)) throw validation("opportunityId inválido")
     conditions.push(eq(crmTask.opportunityId, input.opportunityId))
   }
+  if (input.patientId) {
+    if (!isUuid(input.patientId)) throw validation("patientId inválido")
+    const [own] = await tx
+      .select({ contactId: patientContact.contactId })
+      .from(patientContact)
+      .where(
+        and(
+          eq(patientContact.organizationId, orgId),
+          eq(patientContact.patientId, input.patientId),
+          eq(patientContact.relationship, "self"),
+        ),
+      )
+      .limit(1)
+    const ofPerson = own
+      ? or(eq(crmTask.patientId, input.patientId), eq(crmTask.contactId, own.contactId))
+      : eq(crmTask.patientId, input.patientId)
+    if (ofPerson) conditions.push(ofPerson)
+  }
   if (input.overdue === true) {
     conditions.push(eq(crmTask.status, "open"))
     conditions.push(sql`${crmTask.dueAt} is not null and ${crmTask.dueAt} <= now()`)
@@ -222,8 +263,10 @@ export async function listTasks(tx: Db, orgId: string, input: TaskFilters): Prom
       task: crmTask,
       contactName: contact.displayName,
       opportunityTitle: opportunity.title,
+      patientName: patient.displayName,
     })
     .from(crmTask)
+    .leftJoin(patient, and(eq(patient.id, crmTask.patientId), eq(patient.organizationId, orgId)))
     .leftJoin(
       contact,
       and(eq(contact.id, crmTask.contactId), eq(contact.organizationId, orgId)),
@@ -234,7 +277,7 @@ export async function listTasks(tx: Db, orgId: string, input: TaskFilters): Prom
     )
     .where(and(...conditions))
     .orderBy(asc(crmTask.dueAt), desc(crmTask.createdAt))
-  return rows.map((r) => toItem(r.task, r.contactName, r.opportunityTitle))
+  return rows.map((r) => toItem(r.task, r.contactName, r.opportunityTitle, r.patientName))
 }
 
 export async function createTask(
@@ -245,6 +288,8 @@ export async function createTask(
     contactId?: string | null
     conversationId?: string | null
     opportunityId?: string | null
+    /** Paciente al que se refiere la tarea; debe ser de la organización. */
+    patientId?: string | null
     assigneeUserId?: string | null
     dueAt?: string | null
     createdBy: string
@@ -272,9 +317,20 @@ export async function createTask(
     conversationId: input.conversationId ?? null,
     opportunityId: input.opportunityId ?? null,
   })
+  const patientId = input.patientId ?? null
+  if (patientId !== null) {
+    if (!isUuid(patientId)) throw validation("patientId inválido")
+    const [row] = await tx
+      .select({ id: patient.id })
+      .from(patient)
+      .where(and(eq(patient.id, patientId), eq(patient.organizationId, orgId)))
+      .limit(1)
+    if (!row) throw notFound("Paciente")
+  }
   const values = {
     organizationId: orgId,
     title,
+    patientId,
     contactId: links.contactId,
     conversationId: links.conversationId,
     opportunityId: links.opportunityId,

@@ -16,27 +16,34 @@ import {
 } from "../../lib/agenda"
 import { apiFetch } from "../../lib/api"
 import {
-  type FollowUp,
   formatDateTime,
   mutationMessage,
+  type SchedulableControl,
   type ScheduleFollowUpBody,
   scheduleFollowUpApi,
+  scheduleFollowUpFromCoordinationApi,
 } from "../../lib/clinical-journey"
 import { usePermission } from "../../lib/crm"
 import { AgendaSlotPicker } from "../agenda-slot-picker"
+
+/** Quién reserva: el clínico desde la ficha clínica o quien agenda desde la coordinación. */
+export type FollowUpSchedulerScope = "clinical" | "coordination"
 
 export function FollowUpScheduler({
   patientId,
   control,
   onClose,
+  scope = "clinical",
 }: {
   patientId: string
-  control: FollowUp
+  control: SchedulableControl
   onClose: () => void
+  scope?: FollowUpSchedulerScope
 }) {
   const canWriteClinical = usePermission("clinical.write")
   const canWriteAppointments = usePermission("appointments.write")
-  const canSchedule = canWriteClinical && canWriteAppointments
+  const canSchedule =
+    canWriteAppointments && (scope === "coordination" || canWriteClinical)
   const resources = useQuery({
     queryKey: ["agenda-resources"],
     queryFn: () => apiFetch<{ data: AgendaResources }>("/api/agenda/resources"),
@@ -49,6 +56,7 @@ export function FollowUpScheduler({
         control={control}
         resources={resources.data.data}
         onClose={onClose}
+        scope={scope}
       />
     )
   return (
@@ -65,7 +73,9 @@ export function FollowUpScheduler({
     >
       {!canSchedule ? (
         <p role="alert">
-          Necesitas permisos de escritura clínica y de agenda para programar este control.
+          {scope === "coordination"
+            ? "Necesitas permiso de agenda para programar este control."
+            : "Necesitas permisos de escritura clínica y de agenda para programar este control."}
         </p>
       ) : resources.isError ? (
         <p role="alert">
@@ -86,11 +96,13 @@ function ScheduleForm({
   control,
   resources,
   onClose,
+  scope,
 }: {
   patientId: string
-  control: FollowUp
+  control: SchedulableControl
   resources: AgendaResources
   onClose: () => void
+  scope: FollowUpSchedulerScope
 }) {
   const uid = useId()
   const client = useQueryClient()
@@ -158,7 +170,9 @@ function ScheduleForm({
           },
         }
       }
-      return scheduleFollowUpApi(patientId, control.id, body)
+      return scope === "coordination"
+        ? scheduleFollowUpFromCoordinationApi(patientId, control.id, body)
+        : scheduleFollowUpApi(patientId, control.id, body)
     },
     onSuccess: async () => {
       await invalidateAppointmentQueries(client)

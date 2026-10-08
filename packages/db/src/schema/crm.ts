@@ -1,6 +1,8 @@
 import { sql } from "drizzle-orm"
 import {
   boolean,
+  check,
+  date,
   foreignKey,
   index,
   integer,
@@ -79,12 +81,22 @@ export const pipelineStage = pgTable(
   ],
 )
 
+/**
+ * Persona que la clínica conoce: quien escribe, paga, representa o se atiende.
+ * Todo paciente es exactamente una persona (su vínculo `self`); la identidad
+ * (nombre, documento, nacimiento, sexo, teléfono, correo) se mantiene igual en
+ * ambos registros por triggers de la migración de persona única.
+ */
 export const contact = pgTable("contact", {
   id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
   organizationId: orgFk("organization_id"),
   displayName: text("display_name").notNull(),
   phone: text("phone"),
   email: text("email"),
+  docType: text("doc_type"),
+  docNumber: text("doc_number"),
+  birthDate: date("birth_date"),
+  sex: text("sex"),
   isActive: boolean("is_active").notNull().default(true),
   notes: text("notes"),
   tags: text("tags").array().notNull().default(sql`'{}'`),
@@ -92,7 +104,18 @@ export const contact = pgTable("contact", {
   assignedUserId: text("assigned_user_id").references(() => user.id),
   lastInteractionAt: timestamp("last_interaction_at", { withTimezone: true }),
   ...timestamps,
-}, table => [uniqueIndex("contact_org_id_uidx").on(table.organizationId, table.id)])
+}, table => [
+  uniqueIndex("contact_org_id_uidx").on(table.organizationId, table.id),
+  // El documento identifica a una sola persona por organización.
+  uniqueIndex("contact_org_doc_uidx")
+    .on(table.organizationId, table.docType, table.docNumber)
+    .where(sql`"doc_number" IS NOT NULL`),
+  check(
+    "contact_doc_type_check",
+    sql`${table.docType} IS NULL OR ${table.docType} IN ('DNI','CE','PASAPORTE','OTRO')`,
+  ),
+  check("contact_sex_check", sql`${table.sex} IS NULL OR ${table.sex} IN ('M','F')`),
+])
 
 export const contactIdentity = pgTable(
   "contact_identity",
@@ -202,6 +225,9 @@ export const crmTask = pgTable(
     // Oportunidad vinculada. Sin FK en TS para evitar el ciclo con opportunities.ts;
     // la migración del coordinador añade la FK con ON DELETE SET NULL.
     opportunityId: uuid("opportunity_id"),
+    // Paciente al que se refiere la tarea. Sin FK en TS para evitar el ciclo con
+    // clinical.ts; la migración añade la FK compuesta por organización.
+    patientId: uuid("patient_id"),
     assigneeUserId: text("assignee_user_id").references(() => user.id),
     title: text("title").notNull(),
     dueAt: timestamp("due_at", { withTimezone: true }),
@@ -224,6 +250,7 @@ export const crmTask = pgTable(
     index("task_org_contact_idx").on(table.organizationId, table.contactId),
     index("task_org_conversation_idx").on(table.organizationId, table.conversationId),
     index("task_org_opportunity_idx").on(table.organizationId, table.opportunityId),
+    index("task_org_patient_idx").on(table.organizationId, table.patientId),
     index("task_org_status_due_idx").on(table.organizationId, table.status, table.dueAt),
   ],
 )

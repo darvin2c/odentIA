@@ -12,6 +12,7 @@ import {
   getClinicInfoSnapshot,
   getContact,
   getOrgLocale,
+  listAgentContextCandidates,
   listContactChannelHistory,
   listContactNotes,
   listMessages,
@@ -50,12 +51,12 @@ function baseSystemPrompt(zone: OrgLocale): string {
     `Eres el asistente virtual de una clínica dental (país ${zone.countryCode}).`,
     `Te comunicas en el idioma configurado por la organización (${zone.locale}), tono cercano y profesional.`,
     `La zona horaria de la clínica es ${zone.timezone}; comunica fechas y horas en la zona de la sede de cada cita.`,
-    "Respondes, cualificas al paciente y ayudas con información general y citas.",
+    "Respondes, cualificas al interlocutor y ayudas con información general y citas. Quien escribe no es necesariamente el paciente: puede ser su representante, un familiar o alguien que aún no se atiende.",
     "NO das diagnósticos ni inventas precios, sedes o disponibilidad: usa ver_sedes_y_servicios, consultar_conocimiento y buscar_huecos.",
     "Antes de buscar huecos confirma la sede real con ver_sedes_y_servicios y usa su ID exacto; reserva con proponer_cita usando los IDs exactos del hueco elegido (sede, sillón, profesional, inicio).",
     "Nunca reveles ni pidas historia clínica: solo filiación mínima con ver_contexto_paciente y vínculo verificado; próximas citas, presupuestos y saldo solo con ver_resumen_paciente y según la facultad del interlocutor.",
     "Las citas se reservan con proponer_cita y se cambian o cancelan con reprogramar_cita y cancelar_cita (id y versión exactos de ver_resumen_paciente); todo se ejecuta solo con confirmación o aprobación según la política.",
-    "Si el paciente pide hablar con un humano, se queja o el caso es clínico, usa request_human_handoff con motivo, resumen factual y prioridad.",
+    "Si el interlocutor pide hablar con un humano, se queja o el caso es clínico, usa request_human_handoff con motivo, resumen factual y prioridad.",
   ].join("\n")
 }
 
@@ -195,6 +196,17 @@ export function compileAgentGraph(
           .filter(Boolean)
           .join("\n")
       : null
+    // Personas a las que este interlocutor está vinculado: mismo listado
+    // autorizado que ver_contexto_paciente (solo nombre y vínculo, sin clínica).
+    const linkedPatients = await withOrgContext(toolCtx.db, toolCtx.orgId, (tx) =>
+      listAgentContextCandidates(tx, toolCtx.orgId, toolCtx.contactId),
+    )
+    const patientsLine = linkedPatients.length
+      ? `Pacientes vinculados a este interlocutor: ${linkedPatients
+          .slice(0, 5)
+          .map((p) => `${p.displayName} (id ${p.patientId}, vínculo: ${p.relationship})`)
+          .join("; ")}${linkedPatients.length > 5 ? "; hay más: usa ver_contexto_paciente" : ""}. Antes de actuar por uno, verifica vínculo y autorización con ver_contexto_paciente.`
+      : "Este interlocutor no está vinculado a ningún paciente."
     const { orgPrompt, policyLine, knowledgeBlock } = await withOrgContext(
       toolCtx.db,
       toolCtx.orgId,
@@ -219,6 +231,7 @@ export function compileAgentGraph(
       orgPrompt,
       toolCtx.runInstruction ? `Instrucción operativa de esta corrida:\n${toolCtx.runInstruction}` : null,
       `Interlocutor: ${contactDetail.displayName}. Etiquetas: ${tagsLine}. Oportunidades abiertas: ${commercialLine}. Seguimientos: ${followupLine}.`,
+      patientsLine,
       notesLine ? `Notas del contacto (internas): ${notesLine}${(contactDetail.notes?.trim().length ?? 0) > 500 ? "… (texto completo en leer_contexto_comercial)" : ""}.` : null,
       notes.items.length ? `Notas operativas recientes (internas; no las reproduzcas al interlocutor):\n${notes.items.map(n => `${n.at}: ${n.body}`).join("\n")}${notes.nextCursor ? "\nHay más notas: usa leer_contexto_comercial con cursor de notas para consultarlas." : ""}` : null,
       customLine ? `Campos (resumen; valores completos en leer_contexto_comercial): ${customLine}.` : null,

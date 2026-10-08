@@ -13,11 +13,19 @@ import {
   DropdownMenuTrigger,
 } from "@odentia/ui"
 import { ConfirmDialog } from "@odentia/ui-patterns"
-import { useMutation, useQueryClient } from "@tanstack/react-query"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
+import { MoreHorizontal } from "lucide-react"
 import { useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
+import { fetchPatientAccount, fetchResponsibilities } from "../../lib/clinical-journey"
 import { usePermission } from "../../lib/crm"
+import {
+  appointmentWhen,
+  nextAppointment,
+  usePatientAppointments,
+} from "../../lib/patient-appointments"
+import type { PatientSectionId } from "../../lib/patient-areas"
 import { ageFrom, hcLabel, type PatientFull, type PatientSummary } from "../../lib/patients"
 import { formatMoney } from "../../lib/services"
 import { FiliacionDrawer } from "./filiacion-drawer"
@@ -118,16 +126,28 @@ export function PatientClinicalStrip({
   )
 }
 
+/**
+ * Cabecera persistente de la ficha: identidad, quién decide por el paciente,
+ * alertas de seguridad, estado operativo y la acción principal del rol.
+ */
 export function PatientHeader({
   detail,
   summary,
   onAntecedentes,
+  onSection,
 }: {
   detail: PatientFull
   summary?: PatientSummary
   onAntecedentes?: () => void
+  onSection: (section: PatientSectionId) => void
 }) {
   const canWrite = usePermission("patients.write")
+  const canRead = usePermission("patients.read")
+  const canEncounter = usePermission("clinical.write")
+  const canAppointments = usePermission("appointments.read")
+  const canBook = usePermission("appointments.write")
+  const canFinance = usePermission("finance.read")
+  const canCharge = usePermission("finance.write")
   const queryClient = useQueryClient()
   const [editing, setEditing] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
@@ -154,7 +174,28 @@ export function PatientHeader({
       )
     },
   })
+  const responsibilities = useQuery({
+    queryKey: ["responsibilities", patient.id],
+    queryFn: () => fetchResponsibilities(patient.id),
+    enabled: canRead,
+  })
+  const appointments = usePatientAppointments(patient.id, canAppointments)
+  const account = useQuery({
+    queryKey: ["patient-account", patient.id],
+    queryFn: () => fetchPatientAccount(patient.id),
+    enabled: canFinance,
+  })
   const age = ageFrom(patient.birthDate)
+  const isMinor = age !== "" && Number(age) < 18
+  const representatives = (responsibilities.data?.data ?? []).filter(
+    (row) => row.isCurrent && row.kind === "representante_legal",
+  )
+  const upcoming = appointments.data ? nextAppointment(appointments.data.data) : null
+  const outstanding = (account.data?.data.byCurrency ?? []).filter(
+    (balance) => balance.outstandingCents > 0,
+  )
+  // Una acción principal: la del trabajo propio del rol. Las demás, secundarias.
+  const primary = canEncounter ? "encounter" : canBook ? "book" : canCharge ? "charge" : null
   const docLabel =
     patient.docType && patient.docNumber
       ? `${patient.docType} ${patient.docNumber}`
@@ -186,6 +227,7 @@ export function PatientHeader({
                   {detail.patient.displayName}
                 </h1>
                 <Badge>{hcLabel(patient.patientNumber)}</Badge>
+                {isMinor ? <Badge variant="warning">Menor de edad</Badge> : null}
                 {!patient.isActive ? <Badge variant="outline">Archivado</Badge> : null}
               </div>
               <p className="text-sm text-muted-foreground">
@@ -200,10 +242,29 @@ export function PatientHeader({
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            {canBook ? (
+              <Button
+                variant={primary === "book" ? "default" : "outline"}
+                nativeButton={false}
+                render={<Link to="/agenda" search={{ patientId: patient.id }} />}
+              >
+                Agendar cita
+              </Button>
+            ) : null}
+            {primary === "charge" ? (
+              <Button onClick={() => onSection("cuenta")}>Registrar pago</Button>
+            ) : null}
+            <NewEncounterButton
+              patientId={patient.id}
+              detail={detail}
+              openEncounterId={summary?.openEncounterId}
+            />
             {canWrite ? (
               <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
-                <DropdownMenuTrigger render={<Button variant="outline" />}>
-                  Datos personales
+                <DropdownMenuTrigger
+                  render={<Button variant="outline" size="icon" aria-label="Más acciones" />}
+                >
+                  <MoreHorizontal aria-hidden />
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
                   <DropdownMenuItem
@@ -214,16 +275,6 @@ export function PatientHeader({
                   >
                     Editar datos personales
                   </DropdownMenuItem>
-                  {onAntecedentes ? (
-                    <DropdownMenuItem
-                      onClick={() => {
-                        setMenuOpen(false)
-                        onAntecedentes()
-                      }}
-                    >
-                      Revisar antecedentes
-                    </DropdownMenuItem>
-                  ) : null}
                   <DropdownMenuItem
                     onClick={() => {
                       setMenuOpen(false)
@@ -236,13 +287,85 @@ export function PatientHeader({
                 </DropdownMenuContent>
               </DropdownMenu>
             ) : null}
-            <NewEncounterButton
-              patientId={patient.id}
-              detail={detail}
-              openEncounterId={summary?.openEncounterId}
-            />
           </div>
         </div>
+        {isMinor || representatives.length > 0 ? (
+          <p className="rounded-lg bg-warning-soft px-3 py-2 text-sm">
+            {representatives.length > 0 ? (
+              <>
+                <span className="font-medium">Representante legal:</span>{" "}
+                {representatives.map((row) => row.contact.displayName).join(", ")}. Decide
+                presupuestos y firma consentimientos por el paciente.
+              </>
+            ) : responsibilities.isSuccess ? (
+              <>
+                <span className="font-medium">Sin representante legal registrado.</span> Un menor
+                no decide presupuestos ni firma consentimientos por sí mismo.{" "}
+                <button
+                  type="button"
+                  className="font-medium underline underline-offset-4"
+                  onClick={() => onSection("responsables")}
+                >
+                  Registrar responsable
+                </button>
+              </>
+            ) : responsibilities.isError ? (
+              "No se pudo consultar quién representa al paciente."
+            ) : (
+              "Consultando responsables…"
+            )}
+          </p>
+        ) : null}
+        <PatientClinicalStrip detail={detail} onAntecedentes={onAntecedentes} />
+        <dl className="flex flex-wrap gap-x-8 gap-y-2 border-t pt-4 text-sm">
+          {canAppointments ? (
+            <div className="flex gap-2">
+              <dt className="text-muted-foreground">Próxima cita</dt>
+              <dd className="font-medium">
+                {appointments.isPending
+                  ? "Consultando…"
+                  : appointments.isError
+                    ? "No disponible"
+                    : upcoming
+                      ? `${appointmentWhen(upcoming)} · ${upcoming.dentistName}`
+                      : "Sin cita reservada"}
+              </dd>
+            </div>
+          ) : null}
+          {summary ? (
+            <>
+              <div className="flex gap-2">
+                <dt className="text-muted-foreground">Última atención</dt>
+                <dd className="font-medium">
+                  {summary.lastEncounter
+                    ? dateLabel(summary.lastEncounter.finalizedAt ?? summary.lastEncounter.createdAt)
+                    : "Sin atenciones"}
+                </dd>
+              </div>
+              {summary.nextAppointmentAt ? (
+                <div className="flex gap-2">
+                  <dt className="text-muted-foreground">Revisión sugerida en la última atención</dt>
+                  <dd className="font-medium">{dateLabel(summary.nextAppointmentAt)}</dd>
+                </div>
+              ) : null}
+            </>
+          ) : null}
+          {canFinance && account.isSuccess ? (
+            <div className="flex gap-2">
+              <dt className="text-muted-foreground">Saldo por cobrar</dt>
+              <dd className="font-medium tabular-nums">
+                {outstanding.length === 0
+                  ? "Sin saldo"
+                  : outstanding
+                      .map((balance) => formatMoney(balance.outstandingCents, balance.currency))
+                      .join(" · ")}
+              </dd>
+            </div>
+          ) : null}
+        </dl>
+        {summary ? (
+          <p className="text-sm text-muted-foreground">Trabajo pendiente: {pendingLine(summary)}</p>
+        ) : null}
       </div>
       <ConfirmDialog
         open={archiveOpen}
@@ -263,23 +386,6 @@ export function PatientHeader({
         pending={archiveMutation.isPending}
         onConfirm={() => archiveMutation.mutate(!patient.isActive)}
       />
-      <PatientClinicalStrip detail={detail} onAntecedentes={onAntecedentes} />
-      <p className="text-sm text-muted-foreground">
-        Última atención:{" "}
-        {summary
-          ? summary.lastEncounter
-            ? dateLabel(summary.lastEncounter.finalizedAt ?? summary.lastEncounter.createdAt)
-            : "Sin atenciones"
-          : "Cargando…"}
-        {" · "}
-        Próxima revisión sugerida:{" "}
-        {summary
-          ? summary.nextAppointmentAt
-            ? dateLabel(summary.nextAppointmentAt)
-            : "No indicada"
-          : "Cargando…"}
-        {summary ? ` · Trabajo pendiente: ${pendingLine(summary)}` : ""}
-      </p>
       <FiliacionDrawer
         patientId={patient.id}
         detail={detail}

@@ -26,7 +26,7 @@ import {
   zonedDateOf,
 } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { createFileRoute } from "@tanstack/react-router"
+import { createFileRoute, Link } from "@tanstack/react-router"
 import { ChevronLeft, ChevronRight, Plus } from "lucide-react"
 import * as React from "react"
 import { AgendaSlotPicker } from "../../components/agenda-slot-picker"
@@ -811,6 +811,18 @@ function AppointmentEditor({
       submitLabel={appointment ? "Guardar cambios" : "Crear cita"}
     >
       <div className="grid gap-4">
+        {/* De la cita a la persona: la ficha conserva el contexto de quien se atiende. */}
+        {(appointment ?? context) ? (
+          <p className="text-sm">
+            <Link
+              to="/patients/$patientId"
+              params={{ patientId: appointment?.patientId ?? context?.patientId ?? "" }}
+              className="font-medium text-primary underline underline-offset-4"
+            >
+              Abrir la ficha de {appointment?.patientName ?? context?.patientName}
+            </Link>
+          </p>
+        ) : null}
         {context ? (
           <div>
             <FieldLabel>Paciente del caso</FieldLabel>
