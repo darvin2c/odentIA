@@ -251,11 +251,11 @@ function ChannelsPage() {
         cell: ({ row }) => (
           <span className="flex items-center gap-2">
             {row.original.channel === "messenger" || row.original.channel === "instagram" ? (
-              <MessageCircle className="size-4 shrink-0 text-blue-600" aria-hidden />
+              <MessageCircle className="size-4 shrink-0 text-primary" aria-hidden />
             ) : row.original.channel === "whatsapp" ? (
-              <MessageCircle className="size-4 shrink-0 text-green-600" aria-hidden />
+              <MessageCircle className="size-4 shrink-0 text-success" aria-hidden />
             ) : (
-              <Send className="size-4 shrink-0 text-sky-600" aria-hidden />
+              <Send className="size-4 shrink-0 text-primary" aria-hidden />
             )}
             <span className="flex flex-col">
               <span className="font-medium">{row.original.displayName}</span>
@@ -578,9 +578,9 @@ function ChannelsPage() {
             ) : null
           }
         />
-        {error && <p className="text-sm text-red-600">{error}</p>}
+        {error && <p className="text-sm text-destructive">{error}</p>}
         {created && (
-          <div className="flex flex-col gap-1 rounded-lg border border-green-300 bg-green-50 p-4 text-sm">
+          <div className="flex flex-col gap-1 rounded-lg border border-success/30 bg-success-soft p-4 text-sm">
             <p className="font-semibold">Conexión creada. Pega estos valores en Meta/Telegram:</p>
             <p className="break-all">Webhook: {created.webhookUrl}</p>
             <p className="break-all">Verify token: {created.webhookSecret}</p>

@@ -211,7 +211,7 @@ export function SelectRow({
 
 export function SectionCard({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="flex flex-col gap-6 rounded-md bg-card p-6">
+    <div className="flex flex-col gap-6 elevated rounded-xl border bg-card p-6">
       <div className="flex flex-col gap-1.5 pb-3">
         <div className="font-heading text-base font-medium">{title}</div>
       </div>

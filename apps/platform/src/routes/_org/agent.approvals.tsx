@@ -3,6 +3,7 @@ import { ConfirmDialog, EmptyState, LoadingState, PageHeader, PageShell, SubmitB
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, Link } from "@tanstack/react-router"
 import { useState } from "react"
+import { AgentTabs } from "../../components/agent-tabs"
 import { ApiError, apiFetch } from "../../lib/api"
 import { ACTION_LABEL, proposalErrorMessage, type AgentHandoff, type AgentProposal } from "../../lib/agent"
 import { channelLabel } from "../../lib/channels"
@@ -111,7 +112,8 @@ function AgentApprovalsPage() {
   const handoffs = handoffsQuery.data?.data ?? []
 
   return <PageShell className="flex flex-col gap-6">
-    <PageHeader title="Decisiones del agente" subtitle="Revisa a quién afecta, el cambio previsto y el resultado antes de volver al caso." />
+    <PageHeader title="Agente" subtitle="Revisa a quién afecta, el cambio previsto y el resultado antes de volver al caso." />
+    <AgentTabs />
     {!canRead ? <EmptyState title="Sin acceso" description="No tienes acceso a las decisiones del agente." /> : <>
       <div className="flex flex-wrap items-end gap-3">
         <Field className="w-56"><FieldLabel htmlFor="filtro-estado">Estado</FieldLabel>
@@ -132,7 +134,7 @@ function AgentApprovalsPage() {
         <p className="text-xs text-muted-foreground">Hasta 100 propuestas recientes. Abre un caso para revisar sus decisiones.</p>
         <ul className="flex flex-col gap-3">{proposals.map(proposal => {
           const authorized = canDecide && (proposal.action === "enviar_mensaje" ? canConversations : ["reservar_cita", "reprogramar_cita", "cancelar_cita"].includes(proposal.action) ? canAgenda : canCrm)
-          return <li key={proposal.id} className="flex min-w-0 flex-col gap-3 rounded-md bg-card p-5">
+          return <li key={proposal.id} className="flex min-w-0 flex-col gap-3 elevated rounded-xl border bg-card p-5">
             <div className="flex flex-wrap items-center gap-2"><Badge variant={proposal.status === "propuesta" ? "default" : "secondary"}>{STATUS_LABEL[proposal.status] ?? proposal.status}</Badge><h2 className="font-medium">{ACTION_LABEL[proposal.action] ?? proposal.action}</h2><span className="text-xs text-muted-foreground">{new Date(proposal.createdAt).toLocaleString("es-PE")}</span></div>
             <p className="font-medium">{proposal.context.contactName ?? "Interlocutor no disponible"}{proposal.context.channel ? ` · ${channelLabel(proposal.context.channel)}` : ""}</p>
             <dl className="grid gap-2 text-sm sm:grid-cols-2">
@@ -163,7 +165,7 @@ function AgentApprovalsPage() {
           </li>
         })}</ul>
       </>}
-      <section className="rounded-md bg-card p-5">
+      <section className="elevated rounded-xl border bg-card p-5">
         <h2 className="font-medium">Derivaciones recientes</h2>
         {handoffsQuery.isPending ? (
           <LoadingState />

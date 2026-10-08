@@ -5,7 +5,7 @@ import { useHeaderUtilities } from "./header-utilities.js"
 /**
  * Header por página: el primer bloque de contenido de cada pantalla.
  *
- * Banda sobre `bg-card` sin borde ni sombra: el título y su
+ * Sin banda propia: el título va directo sobre el lienzo de la página, con su
  * subtítulo a la izquierda y, a la derecha, las utilidades globales que
  * inyecta el layout (`HeaderUtilitiesProvider`: avisos, selector de
  * organización) separadas por un divisor de las acciones propias de la página.
@@ -47,13 +47,13 @@ export function PageHeader({
   return (
     <header
       className={cn(
-        "flex min-w-0 flex-wrap items-center gap-3 rounded-lg bg-card px-4 py-2.5",
+        "flex min-w-0 flex-wrap items-center gap-3",
         className,
       )}
     >
       {navTrigger}
       <div className="min-w-0 flex-1 basis-48">
-        <h1 className="truncate text-lg font-semibold tracking-tight text-foreground">{title}</h1>
+        <h1 className="truncate text-2xl font-bold tracking-tight text-foreground">{title}</h1>
         {subtitle ? <p className="truncate text-sm text-muted-foreground">{subtitle}</p> : null}
       </div>
       {utilities || actions ? (

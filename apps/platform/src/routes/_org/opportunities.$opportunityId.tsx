@@ -262,7 +262,7 @@ function OpportunityDetailPage() {
             </div>
             <div className="flex gap-2">
               <dt className="w-28 shrink-0 text-muted-foreground">Próxima acción</dt>
-              <dd className={detail.nextActionAt && isOverdue(detail.nextActionAt) ? "font-medium text-red-600" : undefined}>
+              <dd className={detail.nextActionAt && isOverdue(detail.nextActionAt) ? "font-medium text-destructive" : undefined}>
                 {detail.nextActionAt ? (
                   <>
                     {isOverdue(detail.nextActionAt) ? "Vencida · " : ""}
@@ -481,7 +481,7 @@ function CloseDialog({
             }
           />
         </label>
-        {error && <p className="text-sm text-red-600">{error}</p>}
+        {error && <p className="text-sm text-destructive">{error}</p>}
         <div className="flex justify-end gap-2">
           <Button type="button" variant="outline" onClick={onClose}>
             Cancelar

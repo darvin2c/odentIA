@@ -4,6 +4,7 @@ import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tansta
 import { createFileRoute, Link } from "@tanstack/react-router"
 import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-table"
 import { useMemo, useState } from "react"
+import { AgentTabs } from "../../components/agent-tabs"
 import { ApiError, apiFetch } from "../../lib/api"
 import { channelLabel } from "../../lib/channels"
 import { type ConversationListItem, usePermission } from "../../lib/crm"
@@ -171,6 +172,7 @@ function AgentSupervisionPage() {
   return (
     <PageShell className="flex flex-col gap-6">
       <PageHeader title="Agente" subtitle="Ejecuciones registradas y simulación sin cambios; una ejecución correcta no equivale a un caso resuelto." />
+      <AgentTabs />
       {statsQuery.isPending ? <LoadingState /> : statsQuery.isError ? <div role="alert"><p>No pudimos cargar la actividad del agente.</p><Button variant="outline" onClick={() => void statsQuery.refetch()}>Volver a intentar</Button></div> : null}
       <div className="grid min-w-0 gap-3 sm:grid-cols-4">
         <KpiCard title="Ejecuciones" value={stats?.total ?? "—"} />
@@ -185,7 +187,7 @@ function AgentSupervisionPage() {
             stats?.totalCostMicros != null ? `Costo acumulado $${(stats.totalCostMicros / 1_000_000).toFixed(2)}` : undefined
           }
         />
-        <div className="rounded-md bg-card p-6">
+        <div className="elevated rounded-xl border bg-card p-6">
           <div className="text-sm font-medium text-muted-foreground">Por estado</div>
           <div className="mt-3 flex flex-wrap gap-1">
             {stats
@@ -199,7 +201,7 @@ function AgentSupervisionPage() {
         </div>
       </div>
       {stats && stats.topTools.length > 0 ? (
-        <div className="rounded-md bg-card p-6">
+        <div className="elevated rounded-xl border bg-card p-6">
           <div className="text-sm font-medium text-muted-foreground">Herramientas más usadas</div>
           <div className="mt-3 flex flex-wrap gap-1">
             {stats.topTools.map((t) => (
@@ -210,7 +212,7 @@ function AgentSupervisionPage() {
           </div>
         </div>
       ) : null}
-      <div className="rounded-md bg-card p-6">
+      <div className="elevated rounded-xl border bg-card p-6">
         <h2 className="font-heading text-base font-medium">Últimas 50 ejecuciones</h2>
         {runsQuery.isPending ? <LoadingState /> : runsQuery.isError ? <div role="alert"><p>No pudimos cargar las ejecuciones.</p><Button variant="outline" onClick={() => void runsQuery.refetch()}>Volver a intentar</Button></div> : runs.length === 0 ? (
           <EmptyState title="Sin ejecuciones" description="Aún no hay actividad registrada." />
@@ -219,7 +221,7 @@ function AgentSupervisionPage() {
         )}
       </div>
       {canWrite ? (
-        <div className="flex flex-col gap-3 rounded-md bg-card p-6">
+        <div className="flex flex-col gap-3 elevated rounded-xl border bg-card p-6">
           <div className="font-heading text-base font-medium">Simular instrucciones</div>
           <p className="text-sm text-muted-foreground">
             Simula un solo turno con el mismo modelo efectivo que la atención de esta organización, sin enviar mensajes

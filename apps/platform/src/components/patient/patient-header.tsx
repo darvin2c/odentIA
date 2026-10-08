@@ -101,7 +101,7 @@ export function PatientClinicalStrip({
                 : "secondary"
           }
           className={
-            alert.tone === "warning" ? "border-amber-300 bg-amber-50 text-amber-900" : undefined
+            alert.tone === "warning" ? "border-warning/30 bg-warning-soft text-warning" : undefined
           }
         >
           {alert.label}
@@ -172,7 +172,7 @@ export function PatientHeader({
           </BreadcrumbItem>
         </BreadcrumbList>
       </Breadcrumb>
-      <div className="flex flex-col gap-6 rounded-md bg-card p-6">
+      <div className="flex flex-col gap-6 elevated rounded-xl border bg-card p-6">
         <div className="flex min-w-0 flex-wrap items-start justify-between gap-4">
           <div className="flex min-w-0 items-center gap-4">
             <PatientAvatar

@@ -186,7 +186,7 @@ function AgentPage() {
           subtitle="Responde, cualifica y propone citas con aprobación"
         />
         {saved ? (
-          <p role="status" className="text-sm text-green-700">
+          <p role="status" className="text-sm text-success">
             Guardado.
           </p>
         ) : null}

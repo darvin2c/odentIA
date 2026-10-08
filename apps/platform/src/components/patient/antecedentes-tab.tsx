@@ -568,7 +568,7 @@ export function AntecedentesTab({ patientId }: { patientId: string }): React.JSX
         className="data-[swipe-axis=x]:sm:[--drawer-content-width:min(48rem,calc(100vw-2rem))]"
       >
         <div className="flex flex-col gap-4">
-      <section aria-label="Grupo sanguíneo" className="flex flex-col gap-4 rounded-md bg-card p-4 sm:p-6">
+      <section aria-label="Grupo sanguíneo" className="flex flex-col gap-4 elevated rounded-xl border bg-card p-4 sm:p-6">
         <div className="flex flex-col gap-1.5">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="font-heading text-base font-medium">Grupo sanguíneo</div>
@@ -690,7 +690,7 @@ export function AntecedentesTab({ patientId }: { patientId: string }): React.JSX
         />
       </ClinicalGroupCard>
 
-      <section aria-label="Entrevista de salud" className="flex flex-col gap-4 rounded-md bg-card p-4 sm:p-6">
+      <section aria-label="Entrevista de salud" className="flex flex-col gap-4 elevated rounded-xl border bg-card p-4 sm:p-6">
         <div className="flex flex-col gap-1.5">
           <h3 className="font-heading text-base font-medium">Entrevista de salud</h3>
           <p className="text-xs text-muted-foreground">Una columna en móvil, dos en tablet y web.</p>
@@ -1021,7 +1021,7 @@ export function AntecedentesTab({ patientId }: { patientId: string }): React.JSX
         </div>
       </section>
 
-      <section aria-label="Consentimiento de datos" className="flex flex-col gap-4 rounded-md bg-card p-4 sm:p-6">
+      <section aria-label="Consentimiento de datos" className="flex flex-col gap-4 elevated rounded-xl border bg-card p-4 sm:p-6">
         <div className="flex flex-col gap-1.5">
           <h3 className="font-heading text-base font-medium">Consentimiento de datos</h3>
         </div>
@@ -1114,7 +1114,7 @@ function AntecedentesSummary({
   ]
   return (
     <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-      <div className="flex flex-col gap-1 rounded-md bg-card p-4">
+      <div className="flex flex-col gap-1 elevated rounded-xl border bg-card p-4">
         <span className="font-heading text-sm font-medium">Grupo sanguíneo</span>
         <span className="text-sm text-muted-foreground">
           {bloodGroup != null && bloodGroup in BLOOD_GROUP_LABELS
@@ -1128,7 +1128,7 @@ function AntecedentesSummary({
         ) : null}
       </div>
       {rows.map((row) => (
-        <div key={row.title} className="flex flex-col gap-1 rounded-md bg-card p-4">
+        <div key={row.title} className="flex flex-col gap-1 elevated rounded-xl border bg-card p-4">
           <span className="font-heading text-sm font-medium">{row.title}</span>
           <span className="text-sm text-muted-foreground">{row.detail}</span>
           <Badge
@@ -1173,7 +1173,7 @@ function ClinicalGroupCard({
   children: ReactNode
 }): React.JSX.Element {
   return (
-    <section aria-label={title} className="flex flex-col gap-4 rounded-md bg-card p-4 sm:p-6">
+    <section aria-label={title} className="flex flex-col gap-4 elevated rounded-xl border bg-card p-4 sm:p-6">
       <div className="flex flex-col gap-1.5">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="font-heading text-base font-medium">{title}</div>

@@ -157,16 +157,16 @@ function MailPage() {
         subtitle="Buzones Gmail y Microsoft 365 para conversar por email"
       />
       {banner.ok && (
-        <p className="rounded-lg border border-green-300 bg-green-50 p-4 text-sm">
+        <p className="rounded-lg border border-success/30 bg-success-soft p-4 text-sm">
           Buzón {banner.ok} conectado: ya puedes conversar desde la bandeja.
         </p>
       )}
       {banner.error && (
-        <p className="rounded-lg border border-red-300 bg-red-50 p-4 text-sm">
+        <p className="rounded-lg border border-destructive/30 bg-danger-soft p-4 text-sm">
           {errorText(banner.error)}
         </p>
       )}
-      {error && <p className="text-sm text-red-600">{error}</p>}
+      {error && <p className="text-sm text-destructive">{error}</p>}
       {mailQuery.isLoading ? (
         <p className="text-sm text-muted-foreground">Cargando buzones…</p>
       ) : (
@@ -181,7 +181,7 @@ function MailPage() {
                 aria-label={provider.label}
               >
                 <div className="flex items-center gap-2">
-                  <Mail className="size-4 shrink-0 text-sky-600" aria-hidden />
+                  <Mail className="size-4 shrink-0 text-primary" aria-hidden />
                   <h2 className="font-medium">{provider.label}</h2>
                   {conn ? (
                     <Badge variant={conn.status === "active" ? "default" : "secondary"}>
@@ -204,7 +204,7 @@ function MailPage() {
                   </div>
                 )}
                 {!provider.configured && !conn && (
-                  <p className="text-sm text-amber-700">
+                  <p className="text-sm text-warning">
                     Proveedor no configurado en este entorno (falta{" "}
                     {ENV_HINT[provider.provider]}): la conexión queda deshabilitada, sin
                     simular nada.

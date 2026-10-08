@@ -511,34 +511,56 @@ function ConversationList({
   onRetry: () => void
 }) {
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto">
+    <div className="elevated flex min-h-0 flex-1 flex-col divide-y overflow-y-auto rounded-xl border bg-card">
       {items.map((item) => {
+        const selected = item.id === selectedId
+        const initials = item.contact.displayName.trim().split(/\s+/).slice(0, 2).map((part) => part.charAt(0).toUpperCase()).join("")
         const ChannelIcon = channelIcon(item.connection.channel)
         return (
         <button
           key={item.id}
           type="button"
           onClick={() => onSelect(item.id)}
-          className={`flex flex-col gap-1 rounded-md bg-card p-3 text-left hover:bg-muted/70 ${
-            item.id === selectedId ? "border border-primary bg-muted/70" : ""
+          aria-current={selected ? "true" : undefined}
+          className={`flex gap-2.5 px-3.5 py-3 text-left transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset ${
+            selected ? "bg-agent-soft shadow-[inset_3px_0_0_0_var(--color-primary)]" : "hover:bg-muted/70"
           }`}
         >
-          <div className="flex items-center justify-between gap-2">
-            <span className="flex min-w-0 items-center gap-1.5">
-              <ChannelIcon
-                className="size-3.5 shrink-0 text-muted-foreground"
-                aria-label={channelLabel(item.connection.channel)}
-              />
-              <span className="truncate text-sm font-medium">{item.contact.displayName}</span>
+          <span
+            aria-hidden
+            className={`flex size-9 shrink-0 items-center justify-center rounded-full text-[13px] font-semibold ${
+              selected ? "bg-primary-soft text-primary-soft-foreground" : "bg-secondary"
+            }`}
+          >
+            {initials || "?"}
+          </span>
+          <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+            <span className="flex items-baseline justify-between gap-2">
+              <span className={`truncate text-sm ${item.unreadCount > 0 ? "font-bold" : "font-semibold"}`}>
+                {item.contact.displayName}
+              </span>
+              <span className="shrink-0 text-xs text-muted-foreground">{timeAgo(item.lastMessageAt)}</span>
             </span>
-            <span className="flex shrink-0 items-center gap-1.5">
-              {item.unreadCount > 0 && <Badge>{item.unreadCount}</Badge>}
-              <span className="text-xs text-muted-foreground">{timeAgo(item.lastMessageAt)}</span>
+            <span className="truncate text-[13px] text-muted-foreground">
+              {item.preview?.body ?? (item.preview ? "[adjunto]" : "—")}
             </span>
-          </div>
-          <span className="truncate text-xs text-muted-foreground">
-            {channelLabel(item.connection.channel)} ·{" "}
-            {item.preview?.body ?? (item.preview ? "[adjunto]" : "—")}
+            <span className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
+              <ChannelIcon className="size-3.5 shrink-0" aria-hidden />
+              <span className="truncate">{channelLabel(item.connection.channel)}</span>
+              {item.agentStatus === "on" && (
+                <span className="flex shrink-0 items-center gap-1 font-semibold text-primary-soft-foreground">
+                  <Bot className="size-3.5" aria-hidden /> Atiende el agente
+                </span>
+              )}
+              {item.unreadCount > 0 && (
+                <span
+                  className="ml-auto flex h-[18px] min-w-[18px] shrink-0 items-center justify-center rounded-full bg-primary px-1 text-xs font-semibold text-primary-foreground"
+                  aria-label={`${item.unreadCount} sin leer`}
+                >
+                  {item.unreadCount}
+                </span>
+              )}
+            </span>
           </span>
         </button>
         )
@@ -550,7 +572,7 @@ function ConversationList({
       )}
       {isError && items.length === 0 && !isLoading && (
         <div className="flex flex-wrap items-center gap-2 p-4">
-          <p className="text-sm text-red-600" role="alert">
+          <p className="text-sm text-destructive" role="alert">
             No se pudieron cargar las conversaciones.
           </p>
           <Button variant="outline" size="sm" onClick={onRetry}>
@@ -832,7 +854,7 @@ function ThreadView({
             <ChevronLeft className="size-4" />
           </Button>
         )}
-        <p className="text-sm text-red-600" role="alert">
+        <p className="text-sm text-destructive" role="alert">
           Esta conversación ya no está disponible o no tienes acceso.
         </p>
         <span className="flex flex-wrap gap-2">
@@ -852,7 +874,7 @@ function ThreadView({
   const assignee = members.find((m) => m.userId === conv.assignedUserId)
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col rounded-md bg-card">
+    <div className="elevated flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border bg-card">
       <div className="flex flex-wrap items-center gap-2 border-b p-3">
         {showBack && (
           <Button variant="ghost" size="icon" onClick={onBack} aria-label="Volver">
@@ -863,21 +885,23 @@ function ThreadView({
           <Link
             to="/contacts/$contactId"
             params={{ contactId: detail.contact.id }}
-            className="block truncate text-sm font-semibold hover:underline"
+            className="block truncate text-[15px] font-bold hover:underline"
           >
             {detail.contact.displayName}
           </Link>
           <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
             <span>{channelLabel(detail.connection.channel)}</span>
             <span>·</span>
-            <Badge
-              variant="secondary"
-              className={closed ? undefined : "border-emerald-300 bg-emerald-50 text-emerald-900"}
-            >
+            <Badge variant={closed ? "secondary" : "soft"}>
               {closed ? "Cerrada" : "Abierta"}
             </Badge>
             {detail.contact.isActive === false && <Badge variant="secondary">Archivado</Badge>}
             {assignee && <span>· {assignee.user.name}</span>}
+            {conv.agentStatus === "on" && (
+              <span className="flex items-center gap-1 font-semibold text-primary-soft-foreground">
+                · <Bot className="size-3.5" aria-hidden /> Atiende el agente
+              </span>
+            )}
           </div>
         </div>
         <div className="flex w-full flex-wrap items-center gap-2">
@@ -895,7 +919,7 @@ function ThreadView({
         )}
         {canWrite && (
           <DropdownMenu>
-            <DropdownMenuTrigger className="rounded-md border bg-background px-3 py-1 text-sm hover:bg-muted">
+            <DropdownMenuTrigger className="inline-flex h-8 items-center rounded-4xl bg-secondary px-3 text-sm font-medium transition-colors outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring">
               {assignee ? assignee.user.name : "Asignar"}
             </DropdownMenuTrigger>
             <DropdownMenuContent>
@@ -955,7 +979,7 @@ function ThreadView({
 
       <MessageScrollerProvider autoScroll defaultScrollPosition="end">
         <MessageScroller className="min-h-0 flex-1">
-          <MessageScrollerViewport preserveScrollOnPrepend className="p-3">
+          <MessageScrollerViewport preserveScrollOnPrepend className="bg-canvas/60 p-4">
             {(olderCursor ?? detail.messagesCursor) && (
               <Button
                 variant="ghost"
@@ -986,7 +1010,7 @@ function ThreadView({
           </p>
         )}
         {registrationError && (
-          <p className="mb-2 text-sm text-red-600" role="alert">
+          <p className="mb-2 text-sm text-destructive" role="alert">
             {registrationError}
           </p>
         )}
@@ -1020,7 +1044,7 @@ function ThreadView({
           </p>
         ) : windowClosed ? (
           <div className="flex flex-col gap-2">
-            <p className="text-sm text-amber-700">
+            <p className="text-sm font-medium text-warning">
               Fuera de la ventana de 24h de WhatsApp: responde con una plantilla autorizada.
             </p>
             {registrationLink && (
@@ -1120,7 +1144,7 @@ function ThreadView({
               </PromptInputFooter>
             </PromptInput>
             {sendError && (
-              <p className="text-sm text-red-600" role="alert">
+              <p className="text-sm text-destructive" role="alert">
                 {sendError}
               </p>
             )}
@@ -1132,11 +1156,11 @@ function ThreadView({
 }
 
 function statusIcon(status: string) {
-  if (status === "read") return <CheckCheck className="size-3.5 text-sky-500" />
+  if (status === "read") return <CheckCheck className="size-3.5 text-primary" />
   if (status === "delivered" || status === "sent")
     return <CheckCheck className="size-3.5 text-muted-foreground" />
-  if (status === "unknown") return <AlertCircle className="size-3.5 text-amber-600" />
-  if (status === "failed") return <AlertCircle className="size-3.5 text-red-500" />
+  if (status === "unknown") return <AlertCircle className="size-3.5 text-warning" />
+  if (status === "failed") return <AlertCircle className="size-3.5 text-destructive" />
   return <Clock className="size-3.5 text-muted-foreground" />
 }
 
@@ -1207,12 +1231,21 @@ function MessageBubble({
   orgSlug: string
 }) {
   const out = msg.direction === "out"
+  const byAgent = msg.senderKind === "agent"
   return (
     <Message from={out ? "user" : "assistant"}>
-      <MessageContent className={out ? undefined : "rounded-lg bg-muted px-4 py-3"}>
-        {!out && msg.senderKind === "agent" && (
-          <div className="flex items-center gap-1 text-xs font-medium text-muted-foreground">
-            <Bot className="size-3" /> Agente
+      <MessageContent
+        className={
+          !out
+            ? "rounded-2xl rounded-bl-md border bg-card px-4 py-2.5"
+            : byAgent
+              ? "group-[.is-user]:rounded-2xl group-[.is-user]:rounded-br-md group-[.is-user]:border group-[.is-user]:border-agent-border group-[.is-user]:bg-agent-soft group-[.is-user]:py-2.5"
+              : "group-[.is-user]:rounded-2xl group-[.is-user]:rounded-br-md group-[.is-user]:py-2.5"
+        }
+      >
+        {byAgent && (
+          <div className="flex items-center gap-1 text-xs font-semibold text-primary-soft-foreground">
+            <Bot className="size-3.5" aria-hidden /> Agente
           </div>
         )}
         {/* WhatsApp muestra la media arriba y el texto (caption o transcripción) abajo. */}

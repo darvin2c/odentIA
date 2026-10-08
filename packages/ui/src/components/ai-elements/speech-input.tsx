@@ -307,7 +307,7 @@ export const SpeechInput = ({
           "relative z-10 rounded-full transition-all duration-300",
           isListening
             ? "bg-destructive text-white hover:bg-destructive/80 hover:text-white"
-            : "bg-primary text-primary-foreground hover:bg-primary/80 hover:text-primary-foreground",
+            : "bg-primary text-primary-foreground hover:bg-[color-mix(in_oklab,var(--primary),black_12%)] hover:text-primary-foreground",
           className
         )}
         disabled={isDisabled}

@@ -758,7 +758,7 @@ function DeclarationGroupShell({
   children: (hasRows: boolean) => ReactNode
 }): React.JSX.Element {
   return (
-    <div className="flex flex-col gap-6 rounded-md bg-card p-6">
+    <div className="flex flex-col gap-6 elevated rounded-xl border bg-card p-6">
       <div className="flex flex-col gap-1.5">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="font-heading text-base font-medium">{title}</div>
@@ -1043,7 +1043,7 @@ export function RegistrationHealthFields({
   return (
     <div className="flex flex-col gap-4">
       {fields.bloodGroup === "hidden" ? null : (
-        <div className="flex flex-col gap-6 rounded-md bg-card p-6">
+        <div className="flex flex-col gap-6 elevated rounded-xl border bg-card p-6">
           <div className="flex flex-col gap-1.5">
             <div className="font-heading text-base font-medium">Grupo sanguíneo</div>
           </div>

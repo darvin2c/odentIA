@@ -210,7 +210,7 @@ function ProfilePage() {
   return (
     <PageShell className="flex max-w-2xl flex-col gap-6">
       <PageHeader title="Mi perfil" subtitle="Administra tu información de cuenta y seguridad" />
-      <div className="flex flex-col gap-6 rounded-md bg-card p-6">
+      <div className="flex flex-col gap-6 elevated rounded-xl border bg-card p-6">
         <div className="flex flex-col gap-1.5">
           <div className="font-heading text-base font-medium">Perfil</div>
           <p className="text-sm text-muted-foreground">Tu información personal en odentIA.</p>
@@ -297,7 +297,7 @@ function ProfilePage() {
           </div>
         </div>
       </div>
-      <div className="flex flex-col gap-6 rounded-md bg-card p-6">
+      <div className="flex flex-col gap-6 elevated rounded-xl border bg-card p-6">
         <div className="flex flex-col gap-1.5">
           <div className="font-heading text-base font-medium">Seguridad</div>
           <p className="text-sm text-muted-foreground">Actualiza tu contraseña de acceso.</p>
@@ -376,7 +376,7 @@ function SessionsCard() {
   const sessions = sessionsQuery.data ?? []
 
   return (
-    <div className="flex flex-col gap-6 rounded-md bg-card p-6">
+    <div className="flex flex-col gap-6 elevated rounded-xl border bg-card p-6">
       <div className="flex flex-col gap-1.5">
         <div className="font-heading text-base font-medium">Sesiones activas</div>
         <p className="text-sm text-muted-foreground">Dispositivos con acceso a tu cuenta.</p>

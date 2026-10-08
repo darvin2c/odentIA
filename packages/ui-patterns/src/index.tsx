@@ -18,6 +18,12 @@ export type {
   NavIcon,
   ShellLinkComponent,
 } from "./app-shell.js"
+export {
+  AgentMark,
+  type AgentMarkProps,
+  AgentSurface,
+  type AgentSurfaceProps,
+} from "./agent-mark.js"
 export { AppShell, isNavItemActive } from "./app-shell.js"
 export { AuthCard } from "./auth-card.js"
 export { AuthSplit } from "./auth-split.js"

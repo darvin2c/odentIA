@@ -17,7 +17,7 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
-    "@fontsource-variable/raleway": "5.3.0",
+    "@fontsource-variable/manrope": "5.3.0",
     "@odentia/ui": "workspace:*",
     "@odentia/ui-patterns": "workspace:*",
     "@tailwindcss/vite": "4.3.3",

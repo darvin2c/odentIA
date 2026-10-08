@@ -148,7 +148,7 @@ function DetailMovementsTable({ detail }: { detail: ProductDetail }) {
         accessorKey: "quantityDelta",
         header: "Cantidad",
         cell: ({ row }) => (
-          <span className={row.original.quantityDelta < 0 ? "text-destructive" : "text-green-700"}>
+          <span className={row.original.quantityDelta < 0 ? "text-destructive" : "text-success"}>
             {row.original.quantityDelta > 0 ? "+" : ""}{row.original.quantityDelta}
           </span>
         ),

@@ -320,7 +320,7 @@ export function FiliacionDrawer({
       className="sm:max-w-4xl"
     >
       <div className="flex flex-col gap-4">
-        <div className="flex flex-col gap-6 rounded-md bg-card p-6">
+        <div className="flex flex-col gap-6 elevated rounded-xl border bg-card p-6">
           <div className="flex flex-col gap-1.5 pb-3">
             <div className="font-heading text-base font-medium">Identidad</div>
           </div>
@@ -333,7 +333,7 @@ export function FiliacionDrawer({
           </div>
         </div>
 
-        <div className="flex flex-col gap-6 rounded-md bg-card p-6">
+        <div className="flex flex-col gap-6 elevated rounded-xl border bg-card p-6">
           <div className="flex flex-col gap-1.5 pb-3">
             <div className="font-heading text-base font-medium">Contacto</div>
           </div>
@@ -344,7 +344,7 @@ export function FiliacionDrawer({
         </div>
 
         <Collapsible open={openAddress} onOpenChange={setOpenAddress}>
-          <div className="flex flex-col gap-6 rounded-md bg-card p-6">
+          <div className="flex flex-col gap-6 elevated rounded-xl border bg-card p-6">
             <div className="flex flex-col gap-1.5 pb-3">
               <CollapsibleTrigger className="text-base font-semibold">
                 <span className="flex items-center gap-1">
@@ -361,7 +361,7 @@ export function FiliacionDrawer({
         </Collapsible>
 
         <Collapsible open={openEmergency} onOpenChange={setOpenEmergency}>
-          <div className="flex flex-col gap-6 rounded-md bg-card p-6">
+          <div className="flex flex-col gap-6 elevated rounded-xl border bg-card p-6">
             <div className="flex flex-col gap-1.5 pb-3">
               <CollapsibleTrigger className="text-base font-semibold">
                 <span className="flex items-center gap-1">
@@ -413,7 +413,7 @@ export function FiliacionDrawer({
         </Collapsible>
 
         <Collapsible open={openInsurance} onOpenChange={setOpenInsurance}>
-          <div className="flex flex-col gap-6 rounded-md bg-card p-6">
+          <div className="flex flex-col gap-6 elevated rounded-xl border bg-card p-6">
             <div className="flex flex-col gap-1.5 pb-3">
               <CollapsibleTrigger className="text-base font-semibold">
                 <span className="flex items-center gap-1">
@@ -430,7 +430,7 @@ export function FiliacionDrawer({
           </div>
         </Collapsible>
         <Collapsible open={openExtra} onOpenChange={setOpenExtra}>
-          <div className="flex flex-col gap-6 rounded-md bg-card p-6">
+          <div className="flex flex-col gap-6 elevated rounded-xl border bg-card p-6">
             <div className="flex flex-col gap-1.5 pb-3">
               <CollapsibleTrigger className="text-base font-semibold">
                 <span className="flex items-center gap-1">
@@ -449,7 +449,7 @@ export function FiliacionDrawer({
           </div>
         </Collapsible>
 
-        <div className="flex flex-col gap-6 rounded-md bg-card p-6">
+        <div className="flex flex-col gap-6 elevated rounded-xl border bg-card p-6">
           <div className="flex flex-col gap-1.5 pb-3">
             <div className="font-heading text-base font-medium">Estado</div>
           </div>
@@ -467,7 +467,7 @@ export function FiliacionDrawer({
           </div>
         </div>
 
-        <div className="flex flex-col gap-6 rounded-md bg-card p-6">
+        <div className="flex flex-col gap-6 elevated rounded-xl border bg-card p-6">
           <div className="flex flex-col gap-1.5 pb-3">
             <div className="font-heading text-base font-medium">Consentimiento de datos</div>
           </div>

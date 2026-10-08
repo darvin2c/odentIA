@@ -1,5 +1,5 @@
-import { Badge } from "@odentia/ui"
-import { ConfirmDialog, DonutChart, EmptyState, FunnelChart, KpiCard, LoadingState, PageHeader, PageShell, SubmitButton, TrendChart } from "@odentia/ui-patterns"
+import { Badge, Button } from "@odentia/ui"
+import { AgentMark, AgentSurface, ConfirmDialog, DonutChart, EmptyState, ErrorState, FunnelChart, KpiCard, LoadingState, PageHeader, PageShell, SubmitButton, TrendChart } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link, createFileRoute } from "@tanstack/react-router"
 import { AlertTriangle, ArrowRight, Bot, CalendarDays, CheckCircle2, CheckSquare, Hand, Inbox, Wallet } from "lucide-react"
@@ -73,6 +73,8 @@ function HomePage() {
   const hasMetrics = Boolean(data && (data.appointmentCounts.some(item => item.count > 0 && item.status !== "cancelada")
     || (data.conversations && (data.conversations.waiting > 0 || data.conversations.unread > 0))
     || (data.taskCount?.open ?? 0) > 0 || data.debt.length > 0))
+  const activeAppointments = data?.appointmentCounts.filter(item => item.status !== "cancelada").reduce((sum, item) => sum + item.count, 0) ?? 0
+  const confirmedAppointments = data?.appointmentCounts.find(item => item.status === "confirmada")?.count ?? 0
   const decideError =
     decideMutation.error instanceof ApiError
       ? (decideMutation.error.shape.message ?? "No pudimos aprobar la propuesta")
@@ -80,63 +82,86 @@ function HomePage() {
         ? "No pudimos aprobar la propuesta"
         : null
   return <PageShell className="flex flex-col gap-6">
-    <PageHeader title="Inicio" subtitle={data ? `Tu jornada · ${data.date} · ${data.timezone}` : "Lo que necesita tu atención hoy"} />
-    {query.isPending ? <LoadingState /> : query.isError ? <p role="alert">No pudimos cargar tu jornada. <button type="button" className="underline" onClick={() => void query.refetch()}>Volver a intentar</button></p> : data ? <>
+    <PageHeader title="Inicio" subtitle={data ? `Tu jornada · ${formatLongDay(data.date, data.locale)}` : "Lo que necesita tu atención hoy"} />
+    {query.isPending ? <LoadingState /> : query.isError ? <ErrorState title="No pudimos cargar tu jornada" message="Comprueba tu conexión y vuelve a intentarlo." retryLabel="Volver a intentar" onRetry={() => void query.refetch()} /> : data ? <>
       {!hasPending && <HomeStart data={data} />}
-      {data.agent && (hasAgentPending || outcome || decideError) && <section aria-label="Pendiente de ti" className="rounded-md border bg-card p-5">
-        <div className="mb-4 flex items-center justify-between gap-3">
-          <h2 className="flex items-center gap-2 font-semibold">Pendiente de ti
-            {data.agent.pendingProposals > 0 && <Badge>{data.agent.pendingProposals} por revisar</Badge>}
-          </h2>
-          <Link to="/agent/approvals" className="inline-flex items-center gap-1 text-sm text-primary hover:underline">Revisar<ArrowRight className="size-4" aria-hidden /></Link>
+      {data.agent && (hasAgentPending || outcome || decideError) && <AgentSurface aria-label="Pendiente de ti" className="enter">
+        <div className="mb-4 flex flex-wrap items-center gap-3">
+          <AgentMark />
+          <div className="min-w-0 flex-1 basis-48">
+            <h2 className="flex flex-wrap items-center gap-2 text-[17px] font-bold tracking-tight">Pendiente de ti
+              {data.agent.pendingProposals > 0 && <Badge variant="soft">{data.agent.pendingProposals} por revisar</Badge>}
+            </h2>
+            <p className="text-sm text-muted-foreground">Propuestas del agente y casos que derivó al equipo.</p>
+          </div>
+          <Link to="/agent/approvals" className="inline-flex min-h-11 shrink-0 items-center gap-1 text-sm font-semibold text-primary hover:underline">Revisar<ArrowRight className="size-4" aria-hidden /></Link>
         </div>
         {decideError ? <p role="alert" className="mb-3 text-sm text-destructive">{decideError}</p> : null}
-        {outcome && <div role="alert" className="mb-3 flex flex-wrap items-center gap-3 rounded-md border p-3 text-sm">
+        {outcome && <div role="alert" className="mb-3 flex flex-wrap items-center gap-3 rounded-lg border border-warning/30 bg-warning-soft p-3 text-sm">
           <p className="min-w-0 flex-1">La propuesta quedó {outcome.status === "expirada" ? "expirada" : "fallida"}.{outcome.detail ? ` ${outcome.detail}` : ""} Gestiona la acción desde el caso.</p>
           <Link to={outcome.conversationId ? "/inbox" : "/agent/approvals"} search={outcome.conversationId ? { conversation: outcome.conversationId } : {}} className="shrink-0 text-primary underline">Volver al caso</Link>
           <button type="button" className="shrink-0 underline" onClick={() => setOutcome(null)}>Descartar</button>
         </div>}
-        {data.agent.proposals.length > 0 && <ul className="flex flex-col gap-3">
-          {data.agent.proposals.map(proposal => <li key={proposal.id} className="flex flex-wrap items-center justify-between gap-3 rounded-md border p-3">
-            <div className="min-w-0">
-              <p className="font-medium">{ACTION_LABEL[proposal.action] ?? proposal.action}</p>
-              <p className="text-sm">{proposal.context.contactName ?? "Interlocutor no disponible"}{proposal.context.patientName ? ` · Paciente: ${proposal.context.patientName}` : ""}</p>
-              {proposal.context.beforeSummary && <p className="text-xs text-muted-foreground">Al proponer: {proposal.context.beforeSummary}</p>}
-              {proposal.context.currentSummary && <p className="text-xs text-muted-foreground">Estado del caso: {proposal.context.currentSummary}</p>}
-              {proposal.summary ? <p className="text-sm text-muted-foreground">{proposal.summary}</p> : null}
-              <p className="text-xs text-muted-foreground">{formatDateTime(proposal.createdAt, data.locale, data.timezone)}</p>
-            </div>
-            {canApprove && proposal.mode === "aprobar_equipo" ? <SubmitButton type="button" size="sm" pending={decideMutation.isPending} onClick={() => setApproving(proposal)}>
-              Revisar y aprobar
-            </SubmitButton> : <Link to="/agent/approvals" search={{ conversationId: proposal.conversationId ?? undefined }} className="text-sm text-primary underline">Revisar caso</Link>}
-          </li>)}
+        {data.agent.proposals.length > 0 && <ul className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+          {data.agent.proposals.map(proposal => {
+            const person = proposal.context.contactName ?? "Interlocutor no disponible"
+            const forTeam = proposal.mode === "aprobar_equipo"
+            return <li key={proposal.id} className="lift elevated flex min-w-0 flex-col gap-3 rounded-lg border bg-card p-4">
+              <div className="flex flex-wrap items-center gap-2.5">
+                <Initials name={person} />
+                <div className="min-w-0 flex-1 basis-32 leading-tight">
+                  <p className="truncate font-semibold">{person}</p>
+                  <p className="truncate text-xs text-muted-foreground">{proposal.context.channel ? `${channelLabel(proposal.context.channel)} · ` : ""}{formatDateTime(proposal.createdAt, data.locale, data.timezone)}</p>
+                </div>
+                <Badge variant={forTeam ? "soft" : "secondary"}>{forTeam ? "Espera tu aprobación" : "Espera al interlocutor"}</Badge>
+              </div>
+              <p className="text-[15px] font-semibold">{ACTION_LABEL[proposal.action] ?? proposal.action}</p>
+              <div className="flex flex-col gap-0.5 rounded-lg bg-muted/60 px-3 py-2.5 text-sm">
+                {proposal.context.patientName && <p>Paciente: {proposal.context.patientName}</p>}
+                {proposal.context.beforeSummary && <p className="text-xs text-muted-foreground">Al proponer: {proposal.context.beforeSummary}</p>}
+                {proposal.context.currentSummary && <p className="text-xs text-muted-foreground">Estado del caso: {proposal.context.currentSummary}</p>}
+                {proposal.summary ? <p>{proposal.summary}</p> : null}
+              </div>
+              <div className="mt-auto flex flex-wrap gap-2">
+                {canApprove && forTeam ? <SubmitButton type="button" pending={decideMutation.isPending} onClick={() => setApproving(proposal)}>
+                  Revisar y aprobar
+                </SubmitButton> : <Button variant="outline" nativeButton={false} render={<Link to="/agent/approvals" search={{ conversationId: proposal.conversationId ?? undefined }} />}>Revisar caso</Button>}
+              </div>
+            </li>
+          })}
         </ul>}
         {data.agent.recentHandoffs.length > 0 && <div className={data.agent.proposals.length > 0 ? "mt-4" : undefined}>
-          <p className="text-sm font-medium">Derivaciones al equipo ({data.agent.recentHandoffs.length})</p>
-          <ul className="mt-2 flex flex-col gap-2">
-            {data.agent.recentHandoffs.map(handoff => <li key={handoff.id}>
-              <Link to={handoff.conversationId ? "/inbox" : "/agent/approvals"} search={handoff.conversationId ? { conversation: handoff.conversationId } : {}} className="flex flex-wrap items-center gap-2 rounded-md border p-3 hover:bg-muted/40">
-                <Badge variant={handoff.priority === "alta" ? "destructive" : "secondary"}>{handoff.priority}</Badge>
-                {handoff.contactName && <span className="text-sm">{handoff.contactName}{handoff.channel ? ` · ${channelLabel(handoff.channel)}` : ""}</span>}
-                <span className="text-sm font-medium">{handoff.reason}</span>
-                <span className="text-xs text-muted-foreground">{formatDateTime(handoff.createdAt, data.locale, data.timezone)}</span>
-              </Link>
-            </li>)}
+          <p className="text-sm font-semibold">Derivaciones al equipo ({data.agent.recentHandoffs.length})</p>
+          <ul className="mt-2 flex flex-wrap gap-2">
+            {data.agent.recentHandoffs.map(handoff => {
+              const high = handoff.priority === "alta"
+              return <li key={handoff.id} className="max-w-full">
+                <Link to={handoff.conversationId ? "/inbox" : "/agent/approvals"} search={handoff.conversationId ? { conversation: handoff.conversationId } : {}} className="flex min-h-11 max-w-full items-center gap-2 rounded-3xl border bg-card px-3.5 py-1.5 text-sm transition-colors hover:bg-accent/60 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary">
+                  <span aria-hidden className={high ? "size-2 shrink-0 rounded-full bg-destructive" : "size-2 shrink-0 rounded-[2px] bg-warning"} />
+                  <span className="min-w-0">{handoff.contactName ? `${handoff.contactName} · ` : ""}{handoff.reason}</span>
+                  <span className={high ? "shrink-0 font-semibold text-destructive" : "shrink-0 font-semibold text-warning"}>Prioridad {handoff.priority}</span>
+                </Link>
+              </li>
+            })}
           </ul>
         </div>}
-      </section>}
-      {hasMetrics && <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        {data.access.appointments && data.appointmentCounts.some(item => item.count > 0 && item.status !== "cancelada") && <Metric title="Citas de hoy" value={data.appointmentCounts.filter(item => item.status !== "cancelada").reduce((sum, item) => sum + item.count, 0)} detail="Abrir agenda" href="/agenda" icon={<CalendarDays className="size-5" />} />}
-        {data.conversations && (data.conversations.waiting > 0 || data.conversations.unread > 0) && <Metric title={data.conversations.waiting > 0 ? "Esperan respuesta" : "Conversaciones sin leer"} value={data.conversations.waiting || data.conversations.unread} detail={`${data.conversations.human} con atención humana · ${data.conversations.unread} sin leer`} href="/inbox" icon={<Inbox className="size-5" />} />}
-        {data.taskCount && data.taskCount.open > 0 && <Metric title="Tareas abiertas" value={data.taskCount.open} detail={`${data.taskCount.overdue} vencidas${data.access.allTasks ? " en el equipo" : " asignadas a ti"}`} href="/tasks" icon={<CheckSquare className="size-5" />} />}
-        {data.access.finance && data.debt.length > 0 && <Metric title="Cuentas con saldo" value={data.debt.reduce((sum, item) => sum + item.patients, 0)} detail="Revisar cobranza · por moneda" href="/finance" icon={<Wallet className="size-5" />} />}
+      </AgentSurface>}
+      {hasMetrics && <div className="enter grid grid-cols-1 gap-4 [--enter-index:1] sm:grid-cols-2 xl:grid-cols-4">
+        {data.access.appointments && data.appointmentCounts.some(item => item.count > 0 && item.status !== "cancelada") && <Metric title="Citas de hoy" value={activeAppointments} meter={{ value: confirmedAppointments, total: activeAppointments }} detail={`${confirmedAppointments} confirmadas · abrir agenda`} href="/agenda" icon={<CalendarDays />} />}
+        {data.conversations && (data.conversations.waiting > 0 || data.conversations.unread > 0) && <Metric title={data.conversations.waiting > 0 ? "Esperan respuesta" : "Conversaciones sin leer"} value={data.conversations.waiting || data.conversations.unread} meter={{ value: data.conversations.unread, total: Math.max(data.conversations.waiting, data.conversations.unread) }} detail={`${data.conversations.human} con atención humana · ${data.conversations.unread} sin leer`} href="/inbox" icon={<Inbox />} />}
+        {data.taskCount && data.taskCount.open > 0 && <Metric title="Tareas abiertas" value={data.taskCount.open} meter={{ value: data.taskCount.overdue, total: data.taskCount.open, tone: "danger" }} detail={`${data.taskCount.overdue} vencidas${data.access.allTasks ? " en el equipo" : " asignadas a ti"}`} href="/tasks" icon={<CheckSquare />} />}
+        {data.access.finance && data.debt.length > 0 && <Metric title="Cuentas con saldo" value={data.debt.reduce((sum, item) => sum + item.patients, 0)} detail="Revisar cobranza · por moneda" href="/finance" icon={<Wallet />} />}
       </div>}
-      {(data.appointments.length > 0 || data.tasks.length > 0 || data.budgets.length > 0 || data.debt.length > 0) && <div className="grid items-start gap-6 xl:grid-cols-2">
+      {(data.appointments.length > 0 || data.tasks.length > 0 || data.budgets.length > 0 || data.debt.length > 0) && <div className="enter grid grid-cols-1 items-start gap-4 [--enter-index:2] xl:grid-cols-2">
         {data.access.appointments && data.appointments.length > 0 && <Section title="Agenda de hoy" href="/agenda" action="Ver agenda">
-          <ul className="divide-y">{data.appointments.map(item => <li key={item.id} className="flex items-center justify-between gap-4 py-3">
-            <div className="min-w-0"><Link to="/patients/$patientId" params={{ patientId: item.patientId }} className="font-medium hover:underline">{item.patientName}</Link><p className="text-sm text-muted-foreground">{item.dentistName} · {item.branchName}</p></div>
-            <div className="shrink-0 text-right"><p className="text-sm font-medium">{new Date(item.startsAt).toLocaleTimeString(data.locale, { timeZone: data.timezone, hour: "2-digit", minute: "2-digit" })}</p><Badge variant="secondary">{stateLabel[item.status] ?? item.status}</Badge></div>
-          </li>)}</ul>
+          <ul className="flex flex-col gap-1.5">{data.appointments.map(item => {
+            const tone = APPOINTMENT_TONE[item.status] ?? APPOINTMENT_TONE.programada
+            return <li key={item.id} className={`flex items-center gap-3 rounded-xl border px-3 py-2.5 ${tone.row}`}>
+              <p className="w-[4.75rem] shrink-0 text-sm font-semibold whitespace-nowrap tabular-nums">{new Date(item.startsAt).toLocaleTimeString(data.locale, { timeZone: data.timezone, hour: "2-digit", minute: "2-digit" })}</p>
+              <div className="min-w-0 flex-1 leading-tight"><Link to="/patients/$patientId" params={{ patientId: item.patientId }} className="font-semibold hover:underline">{item.patientName}</Link><p className="truncate text-xs text-muted-foreground">{item.dentistName} · {item.branchName}</p></div>
+              <span className={`inline-flex shrink-0 items-center gap-1.5 rounded-md bg-card px-2 py-0.5 text-xs font-semibold ${tone.text}`}><span aria-hidden className={`size-1.5 rounded-full ${tone.dot}`} />{stateLabel[item.status] ?? item.status}</span>
+            </li>
+          })}</ul>
         </Section>}
         {data.access.tasks && data.tasks.length > 0 && <Section title={data.access.allTasks ? "Pendientes del equipo" : "Mis pendientes"} href="/tasks" action="Ver tareas">
           <ul className="divide-y">{data.tasks.map(item => <li key={item.id}><Link to={item.href} className="flex justify-between gap-3 rounded-sm py-3 focus-visible:outline-2 focus-visible:outline-primary"><span className="text-sm">{item.title}</span>{item.overdue && <Badge variant="destructive">Vencida</Badge>}</Link></li>)}</ul>
@@ -148,9 +173,9 @@ function HomePage() {
           <ul className="divide-y">{data.debt.map(item => <li key={item.currency} className="py-3"><p className="font-medium">{moneyFromCents(item.outstandingCents, item.currency, data.locale)}</p><p className="text-sm text-muted-foreground">Vencido: {moneyFromCents(item.overdueCents, item.currency, data.locale)}</p></li>)}</ul>
         </Section>}
       </div>}
-      {data.agent && data.agent.today.runs > 0 && <section aria-label="El agente hoy" className="flex flex-col gap-4">
+      {data.agent && data.agent.today.runs > 0 && <section aria-label="El agente hoy" className="enter flex flex-col gap-4 [--enter-index:3]">
         <div className="flex items-center justify-between gap-3">
-          <h2 className="font-semibold">El agente hoy</h2>
+          <h2 className="flex items-center gap-2 text-base font-bold tracking-tight"><AgentMark size="sm" />El agente hoy</h2>
           <Link to={canReadAgent ? "/agent" : "/agent/approvals"} className="inline-flex items-center gap-1 text-sm text-primary hover:underline">{canReadAgent ? "Ver agente" : "Revisar decisiones"}<ArrowRight className="size-4" aria-hidden /></Link>
         </div>
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -253,17 +278,36 @@ function PulseSection({ locale }: { locale: string }) {
   </section>
 }
 
-function Metric({ title, value, detail, href, icon }: { title: string; value: number; detail: string; href: string; icon: ReactNode }) {
-  return <Link to={href} className="rounded-md focus-visible:outline-2 focus-visible:outline-primary"><KpiCard title={title} value={value} description={detail} icon={icon} className="hover:bg-muted/40 transition-colors" /></Link>
+function Metric({ title, value, detail, href, icon, meter }: { title: string; value: number; detail: string; href: string; icon: ReactNode; meter?: { value: number; total: number; tone?: "primary" | "danger" } }) {
+  return <Link to={href} className="rounded-xl focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"><KpiCard title={title} value={value} description={detail} icon={icon} meter={meter} className="lift" /></Link>
 }
 function Section({ title, href, action, children }: { title: string; href: string; action: string; children: ReactNode }) {
-  return <section className="rounded-md border bg-card p-5"><div className="mb-4 flex items-center justify-between gap-3"><h2 className="font-semibold">{title}</h2><Link to={href} className="inline-flex items-center gap-1 text-sm text-primary hover:underline">{action}<ArrowRight className="size-4" aria-hidden /></Link></div>{children}</section>
+  return <section className="elevated rounded-xl border bg-card p-5"><div className="mb-3 flex items-center justify-between gap-3"><h2 className="text-base font-bold tracking-tight">{title}</h2><Link to={href} className="inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline">{action}<ArrowRight className="size-4" aria-hidden /></Link></div>{children}</section>
+}
+/** Fondo, punto y texto por estado de cita; el estado siempre va también escrito. */
+const APPOINTMENT_TONE: Record<string, { row: string; dot: string; text: string }> = {
+  confirmada: { row: "border-agent-border bg-primary-soft/50", dot: "bg-primary", text: "text-primary-soft-foreground" },
+  programada: { row: "border-border bg-muted", dot: "border border-muted-foreground", text: "text-muted-foreground" },
+  atendida: { row: "border-success/20 bg-success-soft", dot: "bg-success", text: "text-success" },
+  no_asistio: { row: "border-warning/25 bg-warning-soft", dot: "bg-warning", text: "text-warning" },
+  cancelada: { row: "border-destructive/20 bg-danger-soft", dot: "bg-destructive", text: "text-destructive" },
+}
+/** Iniciales de la persona: ancla visual de la tarjeta, sin foto ni color propio. */
+function Initials({ name }: { name: string }) {
+  const letters = name.trim().split(/\s+/).slice(0, 2).map(part => part.charAt(0).toUpperCase()).join("")
+  return <span aria-hidden className="flex size-9 shrink-0 items-center justify-center rounded-full bg-secondary text-[13px] font-semibold">{letters || "?"}</span>
 }
 /** Fecha ISO → texto corto en el idioma y zona de la organización. */
 function formatDateTime(value: string, locale: string, timezone: string) {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value
   return date.toLocaleString(locale, { timeZone: timezone, day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })
+}
+/** Día `YYYY-MM-DD` (ya en zona de la org) → «miércoles, 7 de octubre» sin desplazar por zona. */
+function formatLongDay(day: string, locale: string) {
+  const date = new Date(`${day}T12:00:00`)
+  if (Number.isNaN(date.getTime())) return day
+  return date.toLocaleDateString(locale, { weekday: "long", day: "numeric", month: "long" })
 }
 /** Día `YYYY-MM-DD` (ya en zona de la org) → etiqueta corta sin desplazar por zona. */
 function formatDay(day: string, locale: string) {

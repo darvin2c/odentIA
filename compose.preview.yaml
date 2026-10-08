@@ -106,9 +106,22 @@ services:
           echo "Semilla del preview ya inicializada; se conservan los datos."
           exit 0
         fi
-        pnpm --filter @odentia/db seed:cie10
-        pnpm --filter @odentia/db seed:procedures
-        pnpm db:seed
+        # OpenShip no garantiza el orden de `depends_on`: la semilla puede
+        # arrancar antes de que terminen las migraciones (o de que el storage
+        # esté enrutado). Los tres pasos son idempotentes, así que se reintenta
+        # la secuencia completa hasta un límite en vez de fallar al primer intento.
+        attempt=1
+        until pnpm --filter @odentia/db seed:cie10 \
+          && pnpm --filter @odentia/db seed:procedures \
+          && pnpm db:seed; do
+          if [ "$$attempt" -ge 60 ]; then
+            echo "La semilla del preview no pudo completarse tras $$attempt intentos."
+            exit 1
+          fi
+          echo "Semilla incompleta (intento $$attempt); se reintenta en 10 s."
+          attempt=$$((attempt + 1))
+          sleep 10
+        done
         touch /var/lib/odentia-seed/completed
     depends_on:
       migrate:

@@ -363,7 +363,7 @@ export function ContactWorkspace({
   if (contextQuery.isError || !workspace) {
     return (
       <div className="flex flex-col gap-2 p-4">
-        <p className="text-sm text-red-600" role="alert">
+        <p className="text-sm text-destructive" role="alert">
           {contextQuery.error instanceof ApiError
             ? (contextQuery.error.shape.message ?? "No se pudo cargar el contexto")
             : "No se pudo cargar el contexto del contacto."}
@@ -415,7 +415,7 @@ export function ContactWorkspace({
   return (
     <section
       aria-label="Contexto del contacto"
-      className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto rounded-md bg-card p-4"
+      className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto elevated rounded-xl border bg-card p-4"
     >
       <div className="flex items-start gap-2">
         <div className="min-w-0 flex-1">
@@ -450,7 +450,7 @@ export function ContactWorkspace({
       </div>
 
       {mutationError && (
-        <p className="text-sm text-red-600" role="alert">
+        <p className="text-sm text-destructive" role="alert">
           {mutationError}
         </p>
       )}
@@ -465,11 +465,11 @@ export function ContactWorkspace({
           {/* Resultado persistente de la última decisión: visible aunque la
               propuesta salga de pendientes o cambie el estado del agente. */}
           {outcome && (outcome.status === "fallida" || outcome.status === "expirada") && (
-            <div className="flex flex-col gap-1 rounded-md border border-red-300 bg-red-50 p-3" role="alert">
+            <div className="flex flex-col gap-1 rounded-md border border-destructive/30 bg-danger-soft p-3" role="alert">
               <p className="text-sm font-medium">
                 {ACTION_LABEL[outcome.action] ?? outcome.action}: no se pudo ejecutar
               </p>
-              {outcomeError && <p className="text-xs text-red-700">{outcomeError}</p>}
+              {outcomeError && <p className="text-xs text-destructive">{outcomeError}</p>}
               <p className="text-xs text-muted-foreground">
                 Realiza la acción manualmente desde el caso.
               </p>
@@ -544,7 +544,7 @@ export function ContactWorkspace({
                   <p className="text-xs text-muted-foreground">Cargando propuestas…</p>
                 ) : proposalsQuery.isError ? (
                   <div className="flex flex-wrap items-center gap-2">
-                    <p className="text-xs text-red-600" role="alert">
+                    <p className="text-xs text-destructive" role="alert">
                       {proposalsQuery.error instanceof ApiError
                         ? (proposalsQuery.error.shape.message ?? "No se pudieron cargar las propuestas")
                         : "No se pudieron cargar las propuestas."}
@@ -588,12 +588,12 @@ export function ContactWorkspace({
                         </p>
                         <p className="text-xs">Cambio previsto: {ctx.afterSummary}</p>
                         {ctx.isStale === true && p.status === "propuesta" && (
-                          <p className="text-xs text-amber-700" role="status">
+                          <p className="text-xs text-warning" role="status">
                             La situación cambió desde la propuesta: revisa el estado del caso antes de decidir.
                           </p>
                         )}
                         {cardError && (
-                          <p className="text-xs text-red-600" role="alert">
+                          <p className="text-xs text-destructive" role="alert">
                             {cardError}
                           </p>
                         )}
@@ -802,7 +802,7 @@ export function ContactWorkspace({
               <p className="text-xs text-muted-foreground">Cargando oportunidades…</p>
             ) : oppsQuery.isError ? (
               <div className="flex flex-wrap items-center gap-2">
-                <p className="text-xs text-red-600" role="alert">
+                <p className="text-xs text-destructive" role="alert">
                   No se pudieron cargar las oportunidades.
                 </p>
                 <Button variant="ghost" size="sm" onClick={() => void oppsQuery.refetch()}>
@@ -937,12 +937,12 @@ export function ContactWorkspace({
                 }}
               />
               {noteOk && (
-                <p className="text-xs text-emerald-700" role="status">
+                <p className="text-xs text-success" role="status">
                   Nota guardada en la bitácora.
                 </p>
               )}
               {noteDirty && !noteMutation.isPending && (
-                <p className="text-xs text-amber-700" role="status">
+                <p className="text-xs text-warning" role="status">
                   Borrador sin guardar: cambiar de hilo o salir pedirá confirmación. Guárdalo o descártalo.
                 </p>
               )}
@@ -985,7 +985,7 @@ export function ContactWorkspace({
             <p className="text-xs text-muted-foreground">Cargando actividad…</p>
           ) : activityQuery.isError ? (
             <div className="flex flex-wrap items-center gap-2">
-              <p className="text-xs text-red-600" role="alert">
+              <p className="text-xs text-destructive" role="alert">
                 No se pudo cargar la bitácora.
               </p>
               <Button variant="ghost" size="sm" onClick={() => void activityQuery.refetch()}>

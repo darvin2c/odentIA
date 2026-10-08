@@ -29,14 +29,14 @@ export function WorkspaceNotifications() {
       <Button
         type="button"
         variant="ghost"
-        size="icon"
-        className="relative"
+        size="icon-lg"
+        className="elevated relative border border-border bg-card hover:bg-accent/50"
         onClick={() => setOpen(true)}
         aria-label={`Notificaciones${data?.unread ? `: ${data.unread} sin leer` : ""}`}
       >
         <Bell className="size-4" />
         {data && data.unread > 0 && (
-          <span className="absolute -right-0.5 -top-0.5 rounded-full bg-primary px-1 text-[10px] font-medium text-primary-foreground">
+          <span className="absolute -top-1 -right-1 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-foreground px-1 text-xs font-semibold text-background ring-2 ring-canvas">
             {data.unread > 99 ? "99+" : data.unread}
           </span>
         )}

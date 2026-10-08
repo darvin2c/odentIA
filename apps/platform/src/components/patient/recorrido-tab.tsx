@@ -373,7 +373,7 @@ export function RecorridoClinicoTab({
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex flex-col gap-3 rounded-md bg-card p-6">
+      <div className="flex flex-col gap-3 elevated rounded-xl border bg-card p-6">
         <Field>
           <FieldLabel htmlFor={`${uid}-item`}>Tratamiento</FieldLabel>
           <select
@@ -444,7 +444,7 @@ export function RecorridoClinicoTab({
             ) : null}
           </div>
 
-          <div className="flex flex-col gap-3 rounded-md bg-card p-6">
+          <div className="flex flex-col gap-3 elevated rounded-xl border bg-card p-6">
             <div className="font-heading text-base font-medium">1. Qué se observó</div>
             <p className="text-sm text-muted-foreground">
               {journey.originEncounter
@@ -503,7 +503,7 @@ export function RecorridoClinicoTab({
             </div>
           </div>
 
-          <div className="flex flex-col gap-3 rounded-md bg-card p-6">
+          <div className="flex flex-col gap-3 elevated rounded-xl border bg-card p-6">
             <div className="font-heading text-base font-medium">2. Qué se propuso</div>
             {journey.budgetHistory.length === 0 ? (
               <p className="text-sm text-muted-foreground">
@@ -560,7 +560,7 @@ export function RecorridoClinicoTab({
             ) : null}
           </div>
 
-          <div className="flex flex-col gap-3 rounded-md bg-card p-6">
+          <div className="flex flex-col gap-3 elevated rounded-xl border bg-card p-6">
             <div className="font-heading text-base font-medium">3. Qué se decidió</div>
             <div className="flex flex-wrap items-center gap-2 text-sm">
               <Badge variant={decisionBadge(journey.item.decisionStatus)}>
@@ -636,7 +636,7 @@ export function RecorridoClinicoTab({
             ) : null}
           </div>
 
-          <div className="flex flex-col gap-3 rounded-md bg-card p-6">
+          <div className="flex flex-col gap-3 elevated rounded-xl border bg-card p-6">
             <div className="font-heading text-base font-medium">4. Qué se ejecutó</div>
             {journey.procedures.length === 0 ? (
               <p className="text-sm text-muted-foreground">
@@ -764,7 +764,7 @@ export function RecorridoClinicoTab({
             items={items}
           />
 
-          <div className="flex flex-col gap-3 rounded-md bg-card p-6">
+          <div className="flex flex-col gap-3 elevated rounded-xl border bg-card p-6">
             <div className="font-heading text-base font-medium">Documentos del tratamiento</div>
             {journey.documents.length === 0 ? (
               <p className="text-sm text-muted-foreground">
@@ -802,7 +802,7 @@ export function RecorridoClinicoTab({
             </div>
           </div>
 
-          <div className="flex flex-col gap-3 rounded-md bg-card p-6">
+          <div className="flex flex-col gap-3 elevated rounded-xl border bg-card p-6">
             <div className="font-heading text-base font-medium">5. Qué se pagó</div>
             {balances.length === 0 ? (
               <p className="text-sm text-muted-foreground">

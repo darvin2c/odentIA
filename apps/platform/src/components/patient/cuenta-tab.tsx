@@ -282,7 +282,7 @@ export function CuentaTab({ patientId }: { patientId: string }): React.JSX.Eleme
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex flex-col gap-3 rounded-md bg-card p-6">
+      <div className="flex flex-col gap-3 elevated rounded-xl border bg-card p-6">
         <div className="flex flex-col gap-1.5">
           <div className="font-heading text-base font-medium">Cuenta del paciente</div>
           <p className="text-sm text-muted-foreground">
@@ -357,7 +357,7 @@ export function CuentaTab({ patientId }: { patientId: string }): React.JSX.Eleme
         </div>
       ) : null}
 
-      <div className="flex flex-col gap-4 rounded-md bg-card p-6">
+      <div className="flex flex-col gap-4 elevated rounded-xl border bg-card p-6">
         <div className="font-heading text-base font-medium">Cargos</div>
         {charges.length === 0 ? (
           <p className="text-sm text-muted-foreground">Sin cargos registrados.</p>
@@ -428,7 +428,7 @@ export function CuentaTab({ patientId }: { patientId: string }): React.JSX.Eleme
         )}
       </div>
 
-      <div className="flex flex-col gap-4 rounded-md bg-card p-6">
+      <div className="flex flex-col gap-4 elevated rounded-xl border bg-card p-6">
         <div className="font-heading text-base font-medium">Pagos, aplicaciones y devoluciones</div>
         {payments.length === 0 ? (
           <p className="text-sm text-muted-foreground">Sin pagos registrados.</p>

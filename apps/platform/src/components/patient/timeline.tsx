@@ -148,7 +148,7 @@ function NoteCard({
   locale: string
 }) {
   return (
-    <div className="flex flex-col gap-6 rounded-md bg-card p-6">
+    <div className="flex flex-col gap-6 elevated rounded-xl border bg-card p-6">
       <div className="flex flex-col gap-2">
         <CardHeaderRow
           badge={timelineTypeLabel(item.type)}
@@ -180,7 +180,7 @@ function OdontogramCard({
   if (item.surface) meta.push(surfaceLabel(item.surface))
   if (item.status) meta.push(statusLabel(item.status))
   return (
-    <div className="flex flex-col gap-6 rounded-md bg-card p-6">
+    <div className="flex flex-col gap-6 elevated rounded-xl border bg-card p-6">
       <div className="flex flex-col gap-2">
         <CardHeaderRow
           badge={timelineTypeLabel(item.type)}
@@ -261,7 +261,7 @@ function AnamnesisCard({
   onView: (refId: string) => void
 }) {
   return (
-    <div className="flex flex-col gap-6 rounded-md bg-card p-6">
+    <div className="flex flex-col gap-6 elevated rounded-xl border bg-card p-6">
       <div className="flex flex-col gap-2">
         <CardHeaderRow
           badge={timelineTypeLabel(item.type)}
@@ -361,7 +361,7 @@ function JourneyCard({
   })()
 
   return (
-    <div className="flex flex-col gap-2 rounded-md bg-card p-6">
+    <div className="flex flex-col gap-2 elevated rounded-xl border bg-card p-6">
       <CardHeaderRow
         badge={timelineTypeLabel(item.type)}
         context={item.decision ? decisionLabel(item.decision) : null}
