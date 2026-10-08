@@ -10,9 +10,24 @@ export interface Patient {
   organizationId?: string
   patientNumber: number
   displayName: string
+  /** Nombre separado (ADR 0004); el visible se deriva de él. */
+  givenNames?: string | null
+  paternalSurname?: string | null
+  maternalSurname?: string | null
+  identityNeedsReview?: boolean
+  identityLegacy?: Record<string, string> | null
   bloodGroup?: BloodGroup | null
   docType?: string | null
   docNumber?: string | null
+  docCountry?: string | null
+  nationality?: string | null
+  birthPlaceUbigeo?: string | null
+  addressUbigeo?: string | null
+  addressReference?: string | null
+  insurerName?: string | null
+  affiliationNumber?: string | null
+  emergencyContactRelationship?: string | null
+  asaClass?: string | null
   birthDate?: string | null
   sex?: string | null
   phone?: string | null
@@ -41,6 +56,9 @@ export interface Allergy {
   category?: string | null
   reaction?: string | null
   severity: string
+  kind?: string
+  criticality?: string | null
+  verification?: string
   isActive: boolean
   createdAt?: string
 }
@@ -88,8 +106,20 @@ export interface HealthAllergyInput {
   substance: string
   category?: string | null
   reaction?: string | null
-  severity: string
+  /** Sin dato el servidor guarda «desconocida». */
+  severity?: string | null
+  kind?: string | null
+  criticality?: string | null
+  verification?: string | null
   isActive?: boolean
+}
+
+/** Antecedente familiar por parentesco y condición. */
+export interface FamilyHistoryItem {
+  relationship: string
+  condition: string
+  cie10Code?: string | null
+  notes?: string | null
 }
 
 export interface HealthConditionInput {
@@ -119,6 +149,8 @@ export interface SaveHealthInput {
   conditions: HealthConditionInput[]
   medications: HealthMedicationInput[]
   bloodGroup?: BloodGroup | null
+  familyHistory?: FamilyHistoryItem[]
+  asaClass?: string | null
   anamnesis?: { expectedVersion: number; answers: AnamnesisAnswers }
   dataConsent?: true
 }
@@ -130,6 +162,8 @@ export interface PatientHealth {
   conditions: Condition[]
   medications: Medication[]
   bloodGroup: BloodGroup | null
+  asaClass?: string | null
+  familyHistory?: Array<FamilyHistoryItem & { id: string }>
   reviewedAt: string | null
   reviewedBy: string | null
   latestAnamnesis: {

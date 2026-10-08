@@ -1,4 +1,16 @@
 import { z } from "zod"
+import {
+  EDUCATION_LEVELS,
+  FOREIGN_DOC_TYPES,
+  IDENTITY_DOC_TYPES,
+  identityDocumentError,
+  ISO_COUNTRY_RE,
+  KINSHIP,
+  MARITAL_STATUSES,
+  normalizePhone,
+  SEX_CODES,
+  UBIGEO_RE,
+} from "./identity.js"
 
 export const CONTACT_RELATIONSHIPS = ["self", "guardian", "family", "other"] as const
 export type ContactRelationship = (typeof CONTACT_RELATIONSHIPS)[number]
@@ -11,7 +23,7 @@ export type DeclarationState = "unanswered" | "unknown" | "none" | "recorded"
 export const BLOOD_GROUPS = ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-", "unknown"] as const
 export type BloodGroup = (typeof BLOOD_GROUPS)[number]
 export type RegistrationFieldMode = "hidden" | "optional" | "required"
-export const DOC_TYPES = ["DNI", "CE", "PASAPORTE", "OTRO"] as const
+export const DOC_TYPES = IDENTITY_DOC_TYPES
 export const INSURANCE_TYPES = ["PARTICULAR", "SIS", "ESSALUD", "EPS", "OTRO"] as const
 export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
@@ -58,14 +70,21 @@ export const DEFAULT_REGISTRATION_CONFIG: RegistrationConfig = {
 const text = (max: number) => z.string().trim().max(max, `Máximo ${max} caracteres`)
 const optionalText = (max: number) => text(max).nullable().optional()
 const email = text(200).refine(v => !v || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v), "Ingresa un correo válido")
+const codeOrEmpty = <T extends readonly [string, ...string[]]>(values: T) => z.enum([...values, ""]).nullable().optional()
 export const demographicsSchema = z.strictObject({
   displayName: text(200).min(1, "Ingresa el nombre del paciente"),
-  birthDate: optionalText(10), docType: z.enum([...DOC_TYPES, ""]).nullable().optional(),
-  docNumber: optionalText(20), sex: z.enum(["M", "F", ""]).nullable().optional(),
+  /** Nombre separado (ADR 0004); el nombre visible se deriva de él. */
+  givenNames: optionalText(100), paternalSurname: optionalText(100), maternalSurname: optionalText(100),
+  birthDate: optionalText(10), docType: codeOrEmpty(DOC_TYPES),
+  docNumber: optionalText(20), docCountry: optionalText(2), nationality: optionalText(2),
+  sex: codeOrEmpty(SEX_CODES),
   phone: optionalText(50), email: email.nullable().optional(), address: optionalText(500),
-  maritalStatus: optionalText(100), educationLevel: optionalText(100), occupation: optionalText(200),
+  addressUbigeo: optionalText(6), addressReference: optionalText(300), birthPlaceUbigeo: optionalText(6),
+  maritalStatus: codeOrEmpty(MARITAL_STATUSES), educationLevel: codeOrEmpty(EDUCATION_LEVELS), occupation: optionalText(200),
   origin: optionalText(200), emergencyContactName: optionalText(200), emergencyContactPhone: optionalText(50),
-  insuranceType: z.enum([...INSURANCE_TYPES, ""]).nullable().optional(), insuranceDetail: optionalText(500), referralSource: optionalText(500),
+  emergencyContactRelationship: codeOrEmpty(KINSHIP),
+  insuranceType: z.enum([...INSURANCE_TYPES, ""]).nullable().optional(), insuranceDetail: optionalText(500),
+  insurerName: optionalText(200), affiliationNumber: optionalText(50), referralSource: optionalText(500),
 })
 export type RegistrationDemographics = z.infer<typeof demographicsSchema>
 export const healthAllergyDeclarationSchema = z.strictObject({
@@ -91,6 +110,8 @@ export const registrationAnswersSchema = z.strictObject({
   representative: z.strictObject({
     displayName: text(200).min(1), relationship: z.enum(["guardian", "family", "other"]),
     relationshipDetail: text(100), phone: text(50).optional(), email: email.optional(),
+    /** Documento del representante: obligatorio cuando representa a un menor. */
+    docType: z.enum(DOC_TYPES).optional(), docNumber: text(20).optional(), docCountry: text(2).optional(),
   }).optional(),
   health: z.strictObject({
     bloodGroup: z.enum(BLOOD_GROUPS).nullable().optional(),
@@ -130,7 +151,7 @@ export function isMinor(birthDate: string, today: string): boolean {
   return age < 18
 }
 export function documentNumberError(docType: string | null | undefined, docNumber: string | null | undefined): string | null {
-  return docType === "DNI" && !!docNumber?.trim() && !/^\d{8}$/.test(docNumber.trim()) ? "El DNI tiene exactamente 8 dígitos" : null
+  return identityDocumentError(docType, docNumber)
 }
 export function validateDemographics(value: unknown, today?: string): Record<string, string> {
   const errors: Record<string, string> = {}
@@ -146,6 +167,15 @@ export function validateDemographics(value: unknown, today?: string): Record<str
   if (data.docType && !data.docNumber) errors.docNumber = "Indica el número de documento"
   if (data.birthDate && (!isRealDate(data.birthDate) || (today && data.birthDate > today))) errors.birthDate = "Ingresa una fecha real no futura"
   if (data.insuranceDetail && !data.insuranceType) errors.insuranceDetail = "Indica primero el seguro"
+  if (data.docCountry && !ISO_COUNTRY_RE.test(data.docCountry.toUpperCase())) errors.docCountry = "País emisor en código ISO de dos letras (p. ej. VE)"
+  if (data.docType && FOREIGN_DOC_TYPES.includes(data.docType as never) && !data.docCountry) errors.docCountry = "Indica el país que emitió el documento"
+  if (data.nationality && !ISO_COUNTRY_RE.test(data.nationality.toUpperCase())) errors.nationality = "Nacionalidad en código ISO de dos letras (p. ej. PE)"
+  for (const key of ["addressUbigeo", "birthPlaceUbigeo"] as const)
+    if (data[key] && !UBIGEO_RE.test(data[key] as string)) errors[key] = "Ubigeo de seis dígitos (INEI)"
+  for (const key of ["phone", "emergencyContactPhone"] as const)
+    if (data[key] && !normalizePhone(data[key])) errors[key] = "Ingresa el teléfono con código de país (+51…) o un celular de 9 dígitos"
+  if ((data.givenNames || data.maternalSurname) && !data.paternalSurname && !data.maternalSurname) errors.paternalSurname = "Indica al menos un apellido"
+  if ((data.paternalSurname || data.maternalSurname) && !data.givenNames) errors.givenNames = "Indica los nombres"
   return errors
 }
 export function validateRegistrationAnswers(config: RegistrationConfig, answers: RegistrationAnswers, context: { mode: "internal" | "public"; today: string }): Record<string, string> {
@@ -164,6 +194,9 @@ export function validateRegistrationAnswers(config: RegistrationConfig, answers:
     else {
       if (!data.representative.phone && !data.representative.email) errors["representative.phone"] = "Indica teléfono o correo del responsable"
       if (minor && data.representative.relationship !== "guardian") errors["representative.relationship"] = "Para menores corresponde tutor o responsable"
+      if (minor && (!data.representative.docType || !data.representative.docNumber)) errors["representative.docNumber"] = "Indica el documento del representante legal"
+      const repDocError = identityDocumentError(data.representative.docType, data.representative.docNumber)
+      if (repDocError) errors["representative.docNumber"] = repDocError
     }
   } else if (data.representative) errors.representative = "Selecciona registrar a otra persona"
   if (context.mode === "public") {
@@ -188,6 +221,16 @@ export function validateRegistrationAnswers(config: RegistrationConfig, answers:
       if (["allergies", "conditions", "medications"].includes(key) && value === undefined) errors[path] = "Indica una respuesta, incluido Sin responder"
     }
     if (!data.demographics.phone && !data.demographics.email && !(needsRepresentative && (data.representative?.phone || data.representative?.email))) errors["demographics.phone"] = "Indica al menos un medio de contacto"
+  } else if (config.version > 0) {
+    // Alta interna: lo que la clínica configuró como obligatorio también lo es
+    // para recepción (el aviso de privacidad y los campos ocultos no aplican).
+    // Sin configuración guardada rige el alta rápida.
+    for (const field of REGISTRATION_FIELDS) {
+      if (config.fields[field.key] !== "required" || field.step === "salud" || field.step === "odontologicos") continue
+      if (needsRepresentative && (field.key === "phone" || field.key === "email") && (data.representative?.phone || data.representative?.email)) continue
+      const value = data.demographics[field.key as keyof RegistrationDemographics]
+      if (value === undefined || value === null || value === "") errors[`demographics.${field.key}`] = "Este campo es obligatorio"
+    }
   }
   return errors
 }

@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto"
 import type { Db } from "@odentia/db"
 import { account, user as users } from "@odentia/db/schema/auth"
-import { test as base, expect, type BrowserContext, type Page } from "@playwright/test"
+import { test as base, expect, type BrowserContext, type Locator, type Page } from "@playwright/test"
 import { hashPassword } from "better-auth/crypto"
 import { API, PANEL } from "./env"
 import { openFixtureDb } from "./fixture-db"
@@ -97,3 +97,13 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
   },
   owner: async ({ createOwner }, use) => { await use(await createOwner("owner")) },
 })
+
+/**
+ * Llena el nombre separado del registro (ADR 0004): la primera palabra son
+ * los nombres y el resto el apellido paterno; el nombre visible se compone.
+ */
+export async function fillPatientNames(scope: Page | Locator, fullName: string) {
+  const [given, ...rest] = fullName.trim().split(/\s+/)
+  await scope.getByLabel(/^Nombres/).fill(given ?? "")
+  await scope.getByLabel(/^Apellido paterno/).fill(rest.join(" "))
+}

@@ -84,6 +84,7 @@ import {
 } from "./clinical.js"
 import { createConnection } from "./connections.js"
 import { createContact, updateContact } from "./contacts.js"
+import { grantDataConsent } from "./data-consents.js"
 import { addEncounterDiagnosis, voidEncounterDiagnosis } from "./encounter-diagnoses.js"
 import {
   addEncounterAddendum,
@@ -1007,23 +1008,72 @@ await createHandoff(db, ORG_A, null, {
 })
 
 // --- Pacientes + clínica (org A) ---
-const PATIENTS_A = [
+// Identidad estándar (ADR 0004): nombre separado y documento con su tipo; una
+// extranjera con carné de extranjería y otra con pasaporte y país emisor.
+const PATIENTS_A: Array<{
+  name: string
+  doc: string
+  birth: string
+  sex: string
+  docType?: string
+  docCountry?: string
+  nationality?: string
+}> = [
   { name: "Rosa Quispe", doc: "45678901", birth: "1990-05-14", sex: "F" },
-  { name: "Elena Huamán", doc: "45678902", birth: "1985-11-02", sex: "F" },
+  {
+    name: "Elena Huamán",
+    doc: "001234567",
+    birth: "1985-11-02",
+    sex: "F",
+    docType: "CE",
+    nationality: "VE",
+  },
   { name: "Carlos Paredes", doc: "45678903", birth: "1978-03-21", sex: "M" },
   { name: "Lucía Fernández", doc: "45678904", birth: "1995-07-30", sex: "F" },
   { name: "Miguel Torres", doc: "45678905", birth: "1982-01-17", sex: "M" },
-  { name: "Carmen Rojas", doc: "45678906", birth: "1992-09-08", sex: "F" },
+  {
+    name: "Carmen Rojas",
+    doc: "AB1234567",
+    birth: "1992-09-08",
+    sex: "F",
+    docType: "PASAPORTE",
+    docCountry: "CO",
+    nationality: "CO",
+  },
 ]
 const patientIdByName = new Map<string, string>()
 for (const p of PATIENTS_A) {
+  const [given, paternal] = p.name.split(" ")
+  const rosa = p.name === "Rosa Quispe"
   const row = await createPatient(db, ORG_A, ANA_ID, {
     displayName: p.name,
+    givenNames: given,
+    paternalSurname: paternal,
     contacts: [
       { contactId: contactIdByName.get(p.name)!, relationship: "self", isPreferred: true },
     ],
-    docType: "DNI",
+    docType: p.docType ?? "DNI",
     docNumber: p.doc,
+    docCountry: p.docCountry ?? null,
+    nationality: p.nationality ?? "PE",
+    // Filiación completa de la paciente de demostración.
+    ...(rosa
+      ? {
+          maritalStatus: "casado",
+          educationLevel: "superior_universitaria_completa",
+          occupation: "Docente",
+          birthPlaceUbigeo: "080000",
+          address: "Jr. Las Begonias 120, dpto. 302",
+          addressUbigeo: "150000",
+          addressReference: "Frente al parque Kennedy",
+          emergencyContactName: "Carlos Paredes",
+          emergencyContactRelationship: "conyuge",
+          emergencyContactPhone: "+51912345678",
+          insuranceType: "EPS",
+          insurerName: "Pacífico EPS",
+          affiliationNumber: "EPS-00987123",
+        }
+      : {}),
     birthDate: p.birth,
     sex: p.sex,
     phone:
@@ -1039,8 +1089,18 @@ const rosaHealthV1 = await savePatientHealth(db, ORG_A, ANA_ID, rosaPatientId, {
   expectedRevision: 0,
   reviewStatus: { allergies: "recorded", conditions: "recorded", medications: "recorded" },
   allergies: [
-    { substance: "Penicilina", category: "medicamento", reaction: "Urticaria", severity: "severa" },
+    {
+      substance: "Penicilina",
+      category: "medicamento",
+      reaction: "Urticaria",
+      severity: "severa",
+      kind: "alergia",
+      criticality: "alta",
+      verification: "confirmada",
+    },
   ],
+  familyHistory: [{ relationship: "madre", condition: "Hipertensión arterial" }],
+  asaClass: "II",
   conditions: [
     { name: "Hipertensión arterial", status: "activa", notes: "Controlada con medicación" },
   ],
@@ -1398,15 +1458,9 @@ const dxErrado = await addEncounterDiagnosis(db, ORG_A, ANA_ID, rosaPatientId, d
   diagnosisType: "presuntivo",
   toothNumber: 37,
 })
-await voidEncounterDiagnosis(
-  db,
-  ORG_A,
-  ANA_ID,
-  rosaPatientId,
-  draft.id,
-  dxErrado.id,
-  { reason: "Pieza equivocada: era la 36" },
-)
+await voidEncounterDiagnosis(db, ORG_A, ANA_ID, rosaPatientId, draft.id, dxErrado.id, {
+  reason: "Pieza equivocada: era la 36",
+})
 // Documentos demo con bytes reales en storage (el registro exige borrador).
 const rxRef = await storage.putPatientDocument({
   orgId: ORG_A,
@@ -1783,6 +1837,13 @@ await db.transaction((tx) =>
   }),
 )
 const rosaContactId = contactIdByName.get("Rosa Quispe")!
+// Consentimiento de datos (Ley 29733) con la versión vigente del aviso.
+await db.transaction((tx) =>
+  grantDataConsent(tx, ORG_A, ANA_ID, rosaPatientId, {
+    purposes: ["atencion", "recordatorios"],
+    grantedByContactId: rosaContactId,
+  }),
+)
 const telegramConnection = await createConnection(
   db,
   ORG_A,
@@ -1828,13 +1889,22 @@ const pedro = await db.transaction((tx) =>
     {
       submissionId: randomUUID(),
       answers: {
-        demographics: { displayName: "Pedro Quispe", birthDate: "2016-05-20" },
+        demographics: {
+          displayName: "Pedro Quispe",
+          givenNames: "Pedro",
+          paternalSurname: "Quispe",
+          birthDate: "2016-05-20",
+        },
         respondent: "representative",
+        // El alta del menor registra a su representante legal (con documento)
+        // y le asigna la responsabilidad en la misma transacción.
         representative: {
           displayName: "Rosa Quispe",
           relationship: "guardian",
           relationshipDetail: "Madre",
           phone: SHARED_PHONE,
+          docType: "DNI",
+          docNumber: "45678901",
         },
         privacyAccepted: false,
       },
@@ -1849,13 +1919,7 @@ const pedro = await db.transaction((tx) =>
     },
   ),
 )
-// Representante legal vigente: habilita a Rosa para decidir por el menor.
-await grantResponsibility(db, ORG_A, ANA_ID, pedro.id, {
-  contactId: rosaContactId,
-  kind: "representante_legal",
-  startsAt: new Date().toISOString().slice(0, 10),
-  notes: "Madre del menor; autoriza decisiones clínicas y económicas.",
-})
+// Rosa ya es representante legal vigente desde el alta: decide por el menor.
 // Recorrido del menor: la propuesta se presenta y queda SIN decisión a propósito,
 // para ejercitar el selector «Quién decide» (Rosa como representante legal, no el
 // propio paciente) y la revisión de una propuesta ya presentada.

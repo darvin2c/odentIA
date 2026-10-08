@@ -1,5 +1,6 @@
 import {
   BLOOD_GROUPS,
+  DOC_TYPES,
   demographicsSchema,
   registrationAnswersSchema,
   registrationContactInputSchema,
@@ -34,9 +35,11 @@ import {
   getToothHistory,
   getTreatmentCoordination,
   getTreatmentPlanDetail,
+  grantDataConsent,
   listAnamnesisVersions,
   listClinicalAccess,
   listClinicalNotes,
+  listDataConsents,
   listEncounters,
   listOdontogramAssessments,
   listPatientDiagnoses,
@@ -53,6 +56,7 @@ import {
   removePatientContact,
   requirePatient,
   reviewLegacyEntry,
+  revokeDataConsent,
   ServiceError,
   savePatientHealth,
   scheduleFollowUpFromCoordination,
@@ -97,7 +101,7 @@ const patientListQuery = listQuery.extend({
     .transform((value) => value === "true")
     .optional(),
   sex: z.enum(["M", "F"]).optional(),
-  docType: z.enum(["DNI", "CE", "PASAPORTE", "OTRO"]).optional(),
+  docType: z.enum(DOC_TYPES).optional(),
   sort: z.enum(["name", "-name", "created", "-created", "number", "-number"]).optional(),
 })
 
@@ -119,6 +123,8 @@ const patchInput = z.object({
   ...filiation,
   isActive: z.boolean().optional(),
   dataConsent: z.boolean().optional(),
+  /** Recepción confirma el nombre separado tras la migración. */
+  identityConfirmed: z.boolean().optional(),
 })
 
 const healthReviewState = z.enum(["unknown", "none", "recorded"])
@@ -128,8 +134,20 @@ const healthAllergy = z
     substance: z.string().min(1).max(200),
     category: z.string().max(20).nullish(),
     reaction: z.string().max(2000).nullish(),
-    severity: z.string().min(1).max(20),
+    /** Sin dato se guarda «desconocida». */
+    severity: z.string().max(20).nullish(),
+    kind: z.enum(["alergia", "intolerancia"]).nullish(),
+    criticality: z.enum(["baja", "alta", "no_evaluable"]).nullish(),
+    verification: z.enum(["no_confirmada", "confirmada", "descartada"]).nullish(),
     isActive: z.boolean().optional(),
+  })
+  .strict()
+const familyHistoryItem = z
+  .object({
+    relationship: z.string().min(1).max(30),
+    condition: z.string().min(1).max(200),
+    cie10Code: z.string().max(10).nullish(),
+    notes: z.string().max(2000).nullish(),
   })
   .strict()
 const healthCondition = z
@@ -171,6 +189,8 @@ const healthSaveInput = z
     allergies: z.array(healthAllergy).max(200),
     conditions: z.array(healthCondition).max(200),
     medications: z.array(healthMedication).max(200),
+    familyHistory: z.array(familyHistoryItem).max(50).optional(),
+    asaClass: z.enum(["I", "II", "III", "IV", "V", "VI"]).nullish(),
     anamnesis: z
       .object({
         expectedVersion: z.number().int().min(0),
@@ -625,6 +645,51 @@ export function createPatientsRoute(deps: CrmDeps) {
       await traceClinicalRead(deps.db, { orgId, userId, patientId, resource: "antecedentes" })
     }
     return response
+  })
+
+  // --- Consentimiento de datos personales (Ley 29733) ---
+  const dataConsentInput = z
+    .object({
+      purposes: z.array(z.enum(["atencion", "recordatorios", "comunicaciones"])).min(1),
+      grantedByContactId: z.uuid(),
+      channel: z.enum(["presencial", "formulario_publico", "portal"]).optional(),
+    })
+    .strict()
+  app.get("/:id/data-consents", async (c) => {
+    const { orgId } = orgContextOf(c)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) => listDataConsents(tx, orgId, c.req.param("id"))),
+    )
+  })
+  app.post("/:id/data-consents", async (c) => {
+    const { orgId, userId } = orgContextOf(c)
+    const parsed = dataConsentInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 201, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        grantDataConsent(tx, orgId, userId, c.req.param("id"), parsed.data),
+      ),
+    )
+  })
+  app.post("/:id/data-consents/:consentId/revoke", async (c) => {
+    const { orgId, userId } = orgContextOf(c)
+    const parsed = z
+      .object({ reason: z.string().trim().min(1).max(2000) })
+      .strict()
+      .safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        revokeDataConsent(
+          tx,
+          orgId,
+          userId,
+          c.req.param("id"),
+          c.req.param("consentId"),
+          parsed.data,
+        ),
+      ),
+    )
   })
 
   app.patch("/:id", async (c) => {

@@ -567,7 +567,14 @@ it("filiación PATCH valida DNI exacto y pasaporte libre", async () => {
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ docType: "PASAPORTE", docNumber: "AB123456" }),
   })
-  expect(passport.status).toBe(200)
+  // Un pasaporte exige el país que lo emitió (ISO 3166-1).
+  expect(passport.status).toBe(400)
+  const withCountry = await app.request(`/patients/${id}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ docType: "PASAPORTE", docNumber: "AB123456", docCountry: "VE" }),
+  })
+  expect(withCountry.status).toBe(200)
 })
 
 it("relaciones: vincular, preferente, duplicados y desvincular sin borrar personas", async () => {

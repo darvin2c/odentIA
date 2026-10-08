@@ -1,7 +1,7 @@
 import type { Browser, Page } from "@playwright/test"
 import { simulateTelegramInbound } from "./channels"
 import { API, PANEL, tenant } from "./env"
-import { call, expect, test } from "./fixtures"
+import { call, expect, fillPatientNames, test } from "./fixtures"
 import { gotoHydrated } from "./hydration"
 
 /**
@@ -55,7 +55,7 @@ async function anonymousPage(browser: Browser, viewport?: { width: number; heigh
 
 /** Paso "Datos": adulto con nombre y nacimiento, y avanza al siguiente paso. */
 async function fillAdultDatos(page: Page, input: { name: string; birthDate: string }) {
-  await page.getByLabel("Nombre del paciente").fill(input.name)
+  await fillPatientNames(page, input.name)
   await page.getByLabel("Fecha de nacimiento").fill(input.birthDate)
   await page.getByRole("button", { name: "Siguiente", exact: true }).click()
 }
@@ -179,13 +179,13 @@ test("registro público QR en escritorio: conserva borrador, declara salud y no 
     await gotoHydrated(anon, tenant(org.slug, "/registro?via=qr"))
     await expect(anon.getByText(`Registro de paciente · ${org.name}`).first()).toBeVisible()
 
-    await anon.getByLabel("Nombre del paciente").fill(patientName)
+    await fillPatientNames(anon, patientName)
     await anon.getByLabel("Fecha de nacimiento").fill("1990-04-11")
     await anon.getByRole("button", { name: "Siguiente", exact: true }).click()
     await anon.getByLabel(/^Teléfono(?: \*)?$/).fill(sharedPhone)
     // Volver conserva el nombre y reavanzar conserva el teléfono.
     await anon.getByRole("button", { name: "Anterior", exact: true }).click()
-    await expect(anon.getByLabel("Nombre del paciente")).toHaveValue(patientName)
+    await expect(anon.getByLabel(/^Nombres/)).toHaveValue(patientName.split(" ")[0] ?? "")
     await anon.getByRole("button", { name: "Siguiente", exact: true }).click()
     await expect(anon.getByLabel(/^Teléfono(?: \*)?$/)).toHaveValue(
       maskedPhone(sharedPhone),
@@ -455,7 +455,7 @@ test("enlace contextual registra a un menor sin duplicar self y luego no está d
     await expect(
       dup.getByText("Continúa con el registro compartido por la clínica."),
     ).toBeVisible()
-    await dup.getByLabel("Nombre del paciente").fill(`Duplicado Enlace ${org.slug}`)
+    await fillPatientNames(dup, `Duplicado Enlace ${org.slug}`)
     await dup.getByLabel("Fecha de nacimiento").fill("1985-03-20")
     await dup.getByLabel("Tipo de documento").click()
     await dup.getByRole("option", { name: "DNI", exact: true }).click()
@@ -487,12 +487,14 @@ test("enlace contextual registra a un menor sin duplicar self y luego no está d
     await minor.getByLabel("¿Quién completa el registro?").click()
     await minor.getByRole("option", { name: "Registro a otra persona", exact: true }).click()
     const minorName = `Menor Enlace ${org.slug}`
-    await minor.getByLabel("Nombre del paciente").fill(minorName)
+    await fillPatientNames(minor, minorName)
     await minor.getByLabel("Fecha de nacimiento").fill("2018-06-15")
     await minor.getByRole("button", { name: "Siguiente", exact: true }).click()
     // El responsable se pide en "Contacto y filiación" cuando el paciente es menor.
     await minor.getByLabel("Nombre del responsable").fill(`Madre Enlace ${org.slug}`)
     await minor.getByLabel("Detalle de la relación").fill("Madre")
+    // El representante legal de un menor se identifica con su documento.
+    await minor.getByLabel("Documento del representante", { exact: true }).fill("41526374")
     await minor.getByLabel(/^Teléfono del responsable(?: \*)?$/).fill(phoneFromId(nextEventId()))
     await minor.getByLabel(/^Teléfono(?: \*)?$/).fill(phoneFromId(nextEventId()))
     await minor.getByRole("button", { name: "Siguiente", exact: true }).click()
@@ -548,7 +550,7 @@ test("enlace contextual registra a un menor sin duplicar self y luego no está d
   try {
     await gotoHydrated(gone, linkUrl)
     await expect(gone.getByText("Enlace no disponible", { exact: true }).first()).toBeVisible()
-    await expect(gone.getByLabel("Nombre del paciente")).toHaveCount(0)
+    await expect(gone.getByLabel(/^Apellido paterno/)).toHaveCount(0)
   } finally {
     await goneContext.close()
   }

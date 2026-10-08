@@ -31,9 +31,8 @@ import {
   Textarea,
 } from "@odentia/ui"
 import { ConfirmDialog } from "@odentia/ui-patterns"
-import { useId, useState } from "react"
 import type { ReactNode } from "react"
-import { Cie10Search } from "./cie10-search"
+import { useId, useState } from "react"
 import {
   ALLERGY_CATEGORY_LABELS,
   ALLERGY_SEVERITY_LABELS,
@@ -41,6 +40,7 @@ import {
   HEALTH_REVIEW_LABELS,
   type HealthReviewState,
 } from "../../lib/patients"
+import { Cie10Search } from "./cie10-search"
 
 export type HealthDeclaration = NonNullable<RegistrationAnswers["health"]>
 
@@ -231,8 +231,24 @@ export interface AllergyRowValue {
   category?: string
   reaction: string
   severity: string
+  /** Alergia o intolerancia, criticidad y verificación; solo en modo clínico. */
+  kind?: string
+  criticality?: string
+  verification?: string
   isActive: boolean
   persisted?: boolean
+}
+
+const KIND_LABELS: Record<string, string> = { alergia: "Alergia", intolerancia: "Intolerancia" }
+const CRITICALITY_LABELS: Record<string, string> = {
+  baja: "Baja",
+  alta: "Alta",
+  no_evaluable: "No evaluable",
+}
+const VERIFICATION_LABELS: Record<string, string> = {
+  no_confirmada: "No confirmada",
+  confirmada: "Confirmada",
+  descartada: "Descartada",
 }
 
 export interface ConditionRowValue {
@@ -350,17 +366,46 @@ export function AllergyRows({
               ])}
             />
           </Field>
+          {mode === "clinical" ? (
+            <>
+              {(
+                [
+                  ["kind", "Tipo", KIND_LABELS, "alergia"],
+                  ["criticality", "Criticidad", CRITICALITY_LABELS, ""],
+                  ["verification", "Verificación", VERIFICATION_LABELS, "no_confirmada"],
+                ] as const
+              ).map(([key, text, options, fallback]) => (
+                <Field key={key}>
+                  <FieldLabel htmlFor={fid(`alg-${key}-${row.key}`)}>{text}</FieldLabel>
+                  <select
+                    id={fid(`alg-${key}-${row.key}`)}
+                    className="h-9 rounded-md border bg-background px-3 text-sm"
+                    value={row[key] ?? fallback}
+                    disabled={readOnly}
+                    onChange={(e) => patch(row.key, { [key]: e.target.value })}
+                  >
+                    {key === "criticality" ? <option value="">Sin evaluar</option> : null}
+                    {Object.entries(options).map(([value, optionLabel]) => (
+                      <option key={value} value={value}>
+                        {optionLabel}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+              ))}
+            </>
+          ) : null}
           <Field>
             <FieldLabel htmlFor={fid(`alg-sev-${row.key}`)}>Gravedad</FieldLabel>
             <Select
               value={row.severity === "" ? "__elegir__" : row.severity}
-              onValueChange={(v) =>
-                patch(row.key, { severity: !v || v === "__elegir__" ? "" : v })
-              }
+              onValueChange={(v) => patch(row.key, { severity: !v || v === "__elegir__" ? "" : v })}
               disabled={readOnly}
             >
               <SelectTrigger id={fid(`alg-sev-${row.key}`)}>
-                <SelectValue>{ALLERGY_SEVERITY_LABELS[row.severity] ?? "Elige la gravedad"}</SelectValue>
+                <SelectValue>
+                  {ALLERGY_SEVERITY_LABELS[row.severity] ?? "Elige la gravedad"}
+                </SelectValue>
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="__elegir__">Elige la gravedad</SelectItem>
@@ -623,7 +668,9 @@ export function MedicationRows({
           </Field>
           {mode === "clinical" ? (
             <Field>
-              <FieldLabel htmlFor={fid(`med-gen-${row.key}`)}>Principio activo (opcional)</FieldLabel>
+              <FieldLabel htmlFor={fid(`med-gen-${row.key}`)}>
+                Principio activo (opcional)
+              </FieldLabel>
               <Input
                 id={fid(`med-gen-${row.key}`)}
                 value={row.genericName ?? ""}

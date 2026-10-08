@@ -1,4 +1,12 @@
-import { normalizeTags } from "@odentia/clinical"
+import {
+  FOREIGN_DOC_TYPES,
+  IDENTITY_DOC_TYPES,
+  identityDocumentError,
+  ISO_COUNTRY_RE,
+  normalizePhone,
+  normalizeTags,
+  SEX_CODES,
+} from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { patient, patientContact, patientRegistrationLink } from "@odentia/db/schema/clinical"
 import {
@@ -43,8 +51,8 @@ export interface ContactListItem {
 }
 
 /** Identidad documental de la persona; igual a la de su ficha si es paciente. */
-export const PERSON_DOC_TYPES = ["DNI", "CE", "PASAPORTE", "OTRO"] as const
-export const PERSON_SEXES = ["M", "F"] as const
+export const PERSON_DOC_TYPES = IDENTITY_DOC_TYPES
+export const PERSON_SEXES = SEX_CODES
 
 export interface ContactDetail extends ContactListItem {
   docType: string | null
@@ -421,13 +429,17 @@ async function auditContact(
 }
 
 /** Teléfono declarado: se conserva tal cual, sin verificar ni generar identidades. */
+/** Teléfono en E.164 (ADR 0004): +código de país; un celular peruano de 9 dígitos se completa. */
 function cleanContactPhone(input: string | null | undefined): string | null | undefined {
   if (input === undefined) return undefined
   if (input === null) return null
   const value = input.trim()
   if (!value) return null
   if (value.length > 50) throw validation("El teléfono no puede superar 50 caracteres")
-  return value
+  const normalized = normalizePhone(value)
+  if (!normalized)
+    throw validation("Ingresa el teléfono con código de país (+51…) o un celular de 9 dígitos")
+  return normalized
 }
 
 function cleanContactEmail(input: string | null | undefined): string | null | undefined {
@@ -544,10 +556,14 @@ export async function updateContact(
   id: string,
   input: {
     displayName?: string
+    givenNames?: string | null
+    paternalSurname?: string | null
+    maternalSurname?: string | null
     phone?: string | null
     email?: string | null
     docType?: string | null
     docNumber?: string | null
+    docCountry?: string | null
     /** Fecha calendario ISO (AAAA-MM-DD). */
     birthDate?: string | null
     sex?: string | null
@@ -570,6 +586,13 @@ export async function updateContact(
     patch.displayName = displayName
     changed.push("displayName")
   }
+  for (const key of ["givenNames", "paternalSurname", "maternalSurname"] as const) {
+    if (fields[key] === undefined) continue
+    const value = fields[key]?.trim().replace(/\s+/g, " ") || null
+    if (value && value.length > 100) throw validation("Cada parte del nombre admite hasta 100 caracteres")
+    patch[key] = value
+    if (!changed.includes("displayName")) changed.push("displayName")
+  }
   if (fields.phone !== undefined) {
     patch.phone = cleanContactPhone(fields.phone) ?? null
     changed.push("phone")
@@ -585,8 +608,17 @@ export async function updateContact(
       throw validation("Tipo de documento inválido")
     if (docNumber && !docType) throw validation("Indica el tipo de documento")
     if (docNumber && docNumber.length > 20) throw validation("El documento admite hasta 20 caracteres")
+    // Mismo formato que la ficha: «DNI 123» se rechaza también desde Contactos.
+    const formatError = identityDocumentError(docType, docNumber)
+    if (formatError) throw validation(formatError)
+    const docCountry = fields.docCountry?.trim().toUpperCase() || null
+    if (docCountry && !ISO_COUNTRY_RE.test(docCountry))
+      throw validation("País emisor en código ISO de dos letras (p. ej. VE)")
+    if (docNumber && docType && FOREIGN_DOC_TYPES.includes(docType as never) && !docCountry)
+      throw validation("Indica el país que emitió el documento")
     patch.docType = docNumber ? docType : null
     patch.docNumber = docNumber
+    patch.docCountry = docNumber ? docCountry : null
     changed.push("document")
   }
   if (fields.birthDate !== undefined) {

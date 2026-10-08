@@ -38,15 +38,35 @@ export const patient = pgTable(
     id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
     organizationId: orgFk("organization_id"),
     displayName: text("display_name").notNull(),
+    /** Nombre separado (ADR 0004); display_name se deriva de él en la base. */
+    givenNames: text("given_names"),
+    paternalSurname: text("paternal_surname"),
+    maternalSurname: text("maternal_surname"),
+    /** El nombre se separó por heurística al migrar: recepción debe confirmarlo. */
+    identityNeedsReview: boolean("identity_needs_review").notNull().default(false),
+    /** Valores anteriores que no encajaron en un catálogo (nunca se descartan). */
+    identityLegacy: jsonb("identity_legacy"),
     bloodGroup: text("blood_group").$type<BloodGroup>(),
     patientNumber: integer("patient_number").notNull(),
     docType: text("doc_type"),
     docNumber: text("doc_number"),
+    /** País emisor del documento y nacionalidad (ISO 3166-1 alfa-2). */
+    docCountry: char("doc_country", { length: 2 }),
+    nationality: char("nationality", { length: 2 }),
     birthDate: date("birth_date"),
     sex: text("sex"),
     phone: text("phone"),
     email: text("email"),
     avatarStorageKey: text("avatar_storage_key"),
+    /** Ubigeo INEI del lugar de nacimiento y del domicilio. */
+    birthPlaceUbigeo: char("birth_place_ubigeo", { length: 6 }),
+    addressUbigeo: char("address_ubigeo", { length: 6 }),
+    addressReference: text("address_reference"),
+    insurerName: text("insurer_name"),
+    affiliationNumber: text("affiliation_number"),
+    emergencyContactRelationship: text("emergency_contact_relationship"),
+    /** Clasificación del estado físico de la ASA (I–VI). */
+    asaClass: text("asa_class"),
     maritalStatus: text("marital_status"),
     educationLevel: text("education_level"),
     occupation: text("occupation"),
@@ -78,9 +98,22 @@ export const patient = pgTable(
     ),
     check(
       "patient_doc_type_check",
-      sql`${table.docType} IS NULL OR ${table.docType} IN ('DNI','CE','PASAPORTE','OTRO')`,
+      sql`${table.docType} IS NULL OR ${table.docType} IN ('DNI','CE','PASAPORTE','CNV','DIE','OTRO')`,
     ),
-    check("patient_sex_check", sql`${table.sex} IS NULL OR ${table.sex} IN ('M','F')`),
+    // ISO/IEC 5218: M=1, F=2, I(indeterminado)=9, D(desconocido)=0.
+    check("patient_sex_check", sql`${table.sex} IS NULL OR ${table.sex} IN ('M','F','I','D')`),
+    check(
+      "patient_marital_status_check",
+      sql`${table.maritalStatus} IS NULL OR ${table.maritalStatus} IN ('soltero','casado','conviviente','viudo','divorciado','separado')`,
+    ),
+    check(
+      "patient_education_level_check",
+      sql`${table.educationLevel} IS NULL OR ${table.educationLevel} IN ('sin_nivel','inicial','primaria_incompleta','primaria_completa','secundaria_incompleta','secundaria_completa','superior_no_universitaria_incompleta','superior_no_universitaria_completa','superior_universitaria_incompleta','superior_universitaria_completa','posgrado')`,
+    ),
+    check(
+      "patient_asa_class_check",
+      sql`${table.asaClass} IS NULL OR ${table.asaClass} IN ('I','II','III','IV','V','VI')`,
+    ),
     uniqueIndex("patient_org_number_uidx").on(table.organizationId, table.patientNumber),
     uniqueIndex("patient_org_doc_uidx")
       .on(table.organizationId, table.docType, table.docNumber)
@@ -238,7 +271,12 @@ export const patientAllergy = pgTable(
     /** Tipo de alérgeno; nulo en registros anteriores o cuando no se precisó. */
     category: text("category"),
     reaction: text("reaction"),
-    severity: text("severity").notNull().default("moderada"),
+    /** Sin valor por defecto: lo no declarado se guarda como «desconocida». */
+    severity: text("severity").notNull(),
+    /** Alergia (inmunológica) o intolerancia; criticidad y verificación como HL7 FHIR AllergyIntolerance. */
+    kind: text("kind").notNull().default("alergia"),
+    criticality: text("criticality"),
+    verification: text("verification").notNull().default("no_confirmada"),
     isActive: boolean("is_active").notNull().default(true),
     createdBy: text("created_by").references(() => user.id),
     ...timestamps,
@@ -248,6 +286,15 @@ export const patientAllergy = pgTable(
     check(
       "patient_allergy_severity_check",
       sql`${table.severity} IN ('leve','moderada','severa','desconocida')`,
+    ),
+    check("patient_allergy_kind_check", sql`${table.kind} IN ('alergia','intolerancia')`),
+    check(
+      "patient_allergy_criticality_check",
+      sql`${table.criticality} IS NULL OR ${table.criticality} IN ('baja','alta','no_evaluable')`,
+    ),
+    check(
+      "patient_allergy_verification_check",
+      sql`${table.verification} IN ('no_confirmada','confirmada','descartada')`,
     ),
     check(
       "patient_allergy_category_check",
@@ -1120,6 +1167,88 @@ export const cie10Code = pgTable("cie10_code", {
   code: text("code").primaryKey(),
   description: text("description").notNull(),
 })
+
+/**
+ * Ubigeo del INEI (departamento, provincia y distrito). Catálogo global sin
+ * organización ni RLS, como CIE-10: se carga desde la fuente oficial.
+ */
+export const ubigeo = pgTable(
+  "ubigeo",
+  {
+    code: char("code", { length: 6 }).primaryKey(),
+    department: text("department").notNull(),
+    province: text("province"),
+    district: text("district"),
+  },
+  (table) => [
+    check("ubigeo_code_check", sql`${table.code} ~ '^[0-9]{6}$'`),
+    index("ubigeo_department_idx").on(table.department),
+  ],
+)
+
+/**
+ * Consentimiento para el tratamiento de datos personales (Ley 29733): por
+ * versión del aviso, con sus finalidades, quién lo otorga y su revocación.
+ */
+export const patientDataConsent = pgTable(
+  "patient_data_consent",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    organizationId: orgFk("organization_id"),
+    patientId: uuid("patient_id")
+      .notNull()
+      .references(() => patient.id, { onDelete: "cascade" }),
+    noticeVersion: integer("notice_version").notNull(),
+    noticeText: text("notice_text").notNull(),
+    /** Finalidades aceptadas: atencion (siempre), recordatorios, comunicaciones. */
+    purposes: text("purposes").array().notNull(),
+    /** Persona que otorga: el paciente o su representante legal. */
+    grantedByContactId: uuid("granted_by_contact_id").references(() => contact.id),
+    grantedByName: text("granted_by_name").notNull(),
+    channel: text("channel").notNull(),
+    recordedBy: text("recorded_by").references(() => user.id),
+    grantedAt: timestamp("granted_at", { withTimezone: true }).notNull().defaultNow(),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    revokedBy: text("revoked_by").references(() => user.id),
+    revokeReason: text("revoke_reason"),
+  },
+  (table) => [
+    index("patient_data_consent_org_patient_idx").on(table.organizationId, table.patientId),
+    check(
+      "patient_data_consent_channel_check",
+      sql`${table.channel} IN ('presencial','formulario_publico','portal')`,
+    ),
+    check(
+      "patient_data_consent_revoke_check",
+      sql`(${table.revokedAt} IS NULL) = (${table.revokeReason} IS NULL)`,
+    ),
+  ],
+)
+
+/** Antecedentes familiares por parentesco y condición (CIE-10 opcional). */
+export const patientFamilyHistory = pgTable(
+  "patient_family_history",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    organizationId: orgFk("organization_id"),
+    patientId: uuid("patient_id")
+      .notNull()
+      .references(() => patient.id, { onDelete: "cascade" }),
+    relationship: text("relationship").notNull(),
+    condition: text("condition").notNull(),
+    cie10Code: text("cie10_code").references(() => cie10Code.code),
+    notes: text("notes"),
+    createdBy: text("created_by").references(() => user.id),
+    ...timestamps,
+  },
+  (table) => [
+    index("patient_family_history_org_patient_idx").on(table.organizationId, table.patientId),
+    check(
+      "patient_family_history_relationship_check",
+      sql`${table.relationship} IN ('madre','padre','hijo','conyuge','hermano','abuelo','tio','otro_familiar')`,
+    ),
+  ],
+)
 
 /** Controles longitudinales; una cita programada no equivale a un control realizado. */
 export const clinicalFollowUp = pgTable(

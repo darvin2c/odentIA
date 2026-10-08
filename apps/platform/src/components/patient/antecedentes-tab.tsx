@@ -23,8 +23,8 @@ import {
 import { ErrorState, FormDrawer, LoadingState } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { ChevronDown } from "lucide-react"
-import { useEffect, useId, useMemo, useRef, useState } from "react"
 import type { ReactNode } from "react"
+import { useEffect, useId, useMemo, useRef, useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
 import { usePermission } from "../../lib/crm"
 import {
@@ -153,15 +153,52 @@ function legacyTexts(
   return out
 }
 
+interface FamilyDraft {
+  key: string
+  relationship: string
+  condition: string
+  cie10Code: string
+}
+
+const FAMILY_RELATIONSHIP_OPTIONS: Array<[string, string]> = [
+  ["madre", "Madre"],
+  ["padre", "Padre"],
+  ["hijo", "Hijo(a)"],
+  ["conyuge", "Cónyuge o pareja"],
+  ["hermano", "Hermano(a)"],
+  ["abuelo", "Abuelo(a)"],
+  ["tio", "Tío(a)"],
+  ["otro_familiar", "Otro familiar"],
+]
+
+/** Clasificación ASA del estado físico. */
+const ASA_OPTIONS: Array<[string, string]> = [
+  ["I", "ASA I · sano"],
+  ["II", "ASA II · enfermedad sistémica leve"],
+  ["III", "ASA III · enfermedad sistémica grave"],
+  ["IV", "ASA IV · amenaza constante para la vida"],
+  ["V", "ASA V · moribundo"],
+  ["VI", "ASA VI · muerte cerebral (donante)"],
+]
+
 function buildDrafts(health: PatientHealth): {
   allergies: AllergyDraft[]
   conditions: ConditionDraft[]
   medications: MedicationDraft[]
   review: ReviewDraft
   bloodGroup: BloodGroup | null
+  asaClass: string
+  familyHistory: FamilyDraft[]
   interview: AnamnesisAnswers
 } {
   return {
+    asaClass: health.asaClass ?? "",
+    familyHistory: (health.familyHistory ?? []).map((row) => ({
+      key: row.id,
+      relationship: row.relationship,
+      condition: row.condition,
+      cie10Code: row.cie10Code ?? "",
+    })),
     allergies: health.allergies.map((a: Allergy) => ({
       key: a.id,
       id: a.id,
@@ -169,6 +206,9 @@ function buildDrafts(health: PatientHealth): {
       category: a.category ?? "",
       reaction: a.reaction ?? "",
       severity: a.severity,
+      kind: a.kind ?? "alergia",
+      criticality: a.criticality ?? "",
+      verification: a.verification ?? "no_confirmada",
       isActive: a.isActive,
       persisted: true,
     })),
@@ -232,6 +272,8 @@ export function AntecedentesTab({ patientId }: { patientId: string }): React.JSX
     medications: "unknown",
   })
   const [bloodGroup, setBloodGroup] = useState<BloodGroup | null>(null)
+  const [asaClass, setAsaClass] = useState("")
+  const [familyHistory, setFamilyHistory] = useState<FamilyDraft[]>([])
   const [interview, setInterview] = useState<AnamnesisAnswers>({})
   const [interviewDirty, setInterviewDirty] = useState(false)
   const [consent, setConsent] = useState(false)
@@ -261,6 +303,8 @@ export function AntecedentesTab({ patientId }: { patientId: string }): React.JSX
       setMedications(drafts.medications)
       setReview(drafts.review)
       setBloodGroup(drafts.bloodGroup)
+      setAsaClass(drafts.asaClass)
+      setFamilyHistory(drafts.familyHistory)
       setInterview(drafts.interview)
       setInterviewDirty(false)
       setFieldErrors({})
@@ -283,9 +327,20 @@ export function AntecedentesTab({ patientId }: { patientId: string }): React.JSX
           substance: a.substance.trim(),
           category: a.category ? a.category : null,
           reaction: a.reaction.trim() === "" ? null : a.reaction.trim(),
-          severity: a.severity,
+          severity: a.severity || null,
+          kind: a.kind || "alergia",
+          criticality: a.criticality || null,
+          verification: a.verification || "no_confirmada",
           isActive: a.isActive,
         })),
+        familyHistory: familyHistory
+          .filter((row) => row.condition.trim() !== "")
+          .map((row) => ({
+            relationship: row.relationship,
+            condition: row.condition.trim(),
+            cie10Code: row.cie10Code || null,
+          })),
+        asaClass: asaClass || null,
         conditions: conditions.map((c) => ({
           ...(c.id ? { id: c.id } : {}),
           name: c.name.trim(),
@@ -348,11 +403,9 @@ export function AntecedentesTab({ patientId }: { patientId: string }): React.JSX
     for (const row of allergies) {
       if (row.substance.trim() === "")
         take(fid(`alg-sus-${row.key}`), "La sustancia es obligatoria.")
-      if (!SEVERITY_OPTIONS.includes(row.severity))
-        take(
-          fid(`alg-sev-${row.key}`),
-          "Elige la gravedad: si se desconoce, márcala como desconocida.",
-        )
+      // Sin gravedad elegida se guarda «desconocida»: sigue siendo alerta.
+      if (row.severity !== "" && !SEVERITY_OPTIONS.includes(row.severity))
+        take(fid(`alg-sev-${row.key}`), "Gravedad inválida.")
       if (row.reaction.trim().length > 2000)
         take(fid(`alg-rea-${row.key}`), "Máximo 2000 caracteres.")
     }
@@ -574,488 +627,602 @@ export function AntecedentesTab({ patientId }: { patientId: string }): React.JSX
         className="data-[swipe-axis=x]:sm:[--drawer-content-width:min(48rem,calc(100vw-2rem))]"
       >
         <div className="flex flex-col gap-4">
-      <section aria-label="Grupo sanguíneo" className="flex flex-col gap-4 elevated rounded-xl border bg-card p-4 sm:p-6">
-        <div className="flex flex-col gap-1.5">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="font-heading text-base font-medium">Grupo sanguíneo</div>
-            {bloodGroup != null && pendingReview ? (
-              <Badge variant="outline">Declarado · pendiente de revisión</Badge>
-            ) : null}
-          </div>
-        </div>
-        <div>
-          <BloodGroupSelect
-            id={fid("blood")}
-            value={bloodGroup}
-            onChange={(next) => {
-              setBloodGroup(next)
-              markDirty()
-            }}
-            readOnly={saving}
-            declared={bloodGroup != null}
-          />
-        </div>
-      </section>
-
-      <ClinicalGroupCard
-        title="Alergias"
-        review={review.allergies}
-        reviewId={fid("rev-alg")}
-        reviewError={fieldErrors[fid("rev-alg")]}
-        readOnly={saving}
-        onReview={(next) => {
-          setReview((r) => ({ ...r, allergies: next }))
-          markDirty()
-        }}
-        empty={
-          allergies.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              {review.allergies === "none"
-                ? "Ausencia confirmada en este grupo."
-                : "Sin registros. Agrega filas o confirma la ausencia."}
-            </p>
-          ) : null
-        }
-      >
-        <AllergyRows
-          mode="clinical"
-          rows={allergies}
-          onChange={(next) => {
-            setAllergies(restoreIds(allergies, next))
-            markDirty()
-          }}
-          readOnly={saving}
-          errors={fieldErrors}
-          idPrefix={uid}
-        />
-      </ClinicalGroupCard>
-
-      <ClinicalGroupCard
-        title="Condiciones"
-        review={review.conditions}
-        reviewId={fid("rev-con")}
-        reviewError={fieldErrors[fid("rev-con")]}
-        readOnly={saving}
-        onReview={(next) => {
-          setReview((r) => ({ ...r, conditions: next }))
-          markDirty()
-        }}
-        empty={
-          conditions.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              {review.conditions === "none"
-                ? "Ausencia confirmada en este grupo."
-                : "Sin registros. Agrega filas o confirma la ausencia."}
-            </p>
-          ) : null
-        }
-      >
-        <ConditionRows
-          mode="clinical"
-          rows={conditions}
-          onChange={(next) => {
-            setConditions(restoreIds(conditions, next))
-            markDirty()
-          }}
-          readOnly={saving}
-          errors={fieldErrors}
-          idPrefix={uid}
-        />
-      </ClinicalGroupCard>
-
-      <ClinicalGroupCard
-        title="Medicación vigente"
-        review={review.medications}
-        reviewId={fid("rev-med")}
-        reviewError={fieldErrors[fid("rev-med")]}
-        readOnly={saving}
-        onReview={(next) => {
-          setReview((r) => ({ ...r, medications: next }))
-          markDirty()
-        }}
-        empty={
-          medications.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              {review.medications === "none"
-                ? "Ausencia confirmada en este grupo."
-                : "Sin registros. Agrega filas o confirma la ausencia."}
-            </p>
-          ) : null
-        }
-      >
-        <MedicationRows
-          mode="clinical"
-          rows={medications}
-          onChange={(next) => {
-            setMedications(restoreIds(medications, next))
-            markDirty()
-          }}
-          readOnly={saving}
-          errors={fieldErrors}
-          idPrefix={uid}
-        />
-      </ClinicalGroupCard>
-
-      <section aria-label="Entrevista de salud" className="flex flex-col gap-4 elevated rounded-xl border bg-card p-4 sm:p-6">
-        <div className="flex flex-col gap-1.5">
-          <h3 className="font-heading text-base font-medium">Entrevista de salud</h3>
-          <p className="text-xs text-muted-foreground">Una columna en móvil, dos en tablet y web.</p>
-        </div>
-        <div className="flex flex-col gap-4">
-          <Collapsible open={openPersonales} onOpenChange={setOpenPersonales}>
-            <CollapsibleTrigger className="text-sm font-medium">
-              <span className="flex items-center gap-1">
-                Personales <ChevronDown aria-hidden className="size-4" />
-              </span>
-            </CollapsibleTrigger>
-            <CollapsibleContent>
-              <div className="grid gap-4 pt-2 sm:grid-cols-2">
-                <Field>
-                  <FieldLabel htmlFor={fid("ap-hosp")}>Hospitalizaciones</FieldLabel>
-                  <Input
-                    id={fid("ap-hosp")}
-                    value={strOf(personales["hospitalizaciones"])}
-                    disabled={!canWrite}
-                    onChange={(e) =>
-                      updateInterview(
-                        "antecedentesPersonales",
-                        "hospitalizaciones",
-                        e.target.value === "" ? undefined : e.target.value,
-                      )
-                    }
-                  />
-                </Field>
-                <Field>
-                  <FieldLabel htmlFor={fid("ap-cir")}>Cirugías</FieldLabel>
-                  <Input
-                    id={fid("ap-cir")}
-                    value={strOf(personales["cirugias"])}
-                    disabled={!canWrite}
-                    onChange={(e) =>
-                      updateInterview(
-                        "antecedentesPersonales",
-                        "cirugias",
-                        e.target.value === "" ? undefined : e.target.value,
-                      )
-                    }
-                  />
-                </Field>
-                <Field>
-                  <FieldLabel htmlFor={fid("ap-tra")}>Transfusiones</FieldLabel>
-                  <Input
-                    id={fid("ap-tra")}
-                    value={strOf(personales["transfusiones"])}
-                    disabled={!canWrite}
-                    onChange={(e) =>
-                      updateInterview(
-                        "antecedentesPersonales",
-                        "transfusiones",
-                        e.target.value === "" ? undefined : e.target.value,
-                      )
-                    }
-                  />
-                </Field>
-                <Field>
-                  <FieldLabel htmlFor={fid("emb-estado")}>Embarazo</FieldLabel>
-                  <Select
-                    value={
-                      personales["embarazo"] === true
-                        ? "si"
-                        : personales["embarazo"] === false
-                          ? "no"
-                          : "sin-responder"
-                    }
-                    onValueChange={(v) =>
-                      updateInterview(
-                        "antecedentesPersonales",
-                        "embarazo",
-                        v === "si" ? true : v === "no" ? false : undefined,
-                      )
-                    }
-                    disabled={!canWrite}
-                  >
-                    <SelectTrigger id={fid("emb-estado")}>
-                      <SelectValue placeholder="Sin responder" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="sin-responder">Sin responder</SelectItem>
-                      <SelectItem value="si">Sí</SelectItem>
-                      <SelectItem value="no">No</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </Field>
-                {personales["embarazo"] === true ? (
-                  <Field>
-                    <FieldLabel htmlFor={fid("emb-sem")}>Semanas de embarazo (0–42)</FieldLabel>
-                    <Input
-                      id={fid("emb-sem")}
-                      type="number"
-                      min={0}
-                      max={42}
-                      value={strOf(personales["semanasEmbarazo"])}
-                      disabled={!canWrite}
-                      onChange={(e) => {
-                        const t = e.target.value.trim()
-                        updateInterview(
-                          "antecedentesPersonales",
-                          "semanasEmbarazo",
-                          t === "" ? undefined : Number(t),
-                        )
-                      }}
-                    />
-                    {fieldErrors[fid("emb-sem")] ? (
-                      <p className="text-sm text-destructive">{fieldErrors[fid("emb-sem")]}</p>
-                    ) : null}
-                  </Field>
+          <section
+            aria-label="Grupo sanguíneo"
+            className="flex flex-col gap-4 elevated rounded-xl border bg-card p-4 sm:p-6"
+          >
+            <div className="flex flex-col gap-1.5">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="font-heading text-base font-medium">Grupo sanguíneo</div>
+                {bloodGroup != null && pendingReview ? (
+                  <Badge variant="outline">Declarado · pendiente de revisión</Badge>
                 ) : null}
               </div>
-            </CollapsibleContent>
-          </Collapsible>
-        
-          <Collapsible open={openFamiliares} onOpenChange={setOpenFamiliares}>
-            <CollapsibleTrigger className="text-sm font-medium">
-              <span className="flex items-center gap-1">
-                Familiares <ChevronDown aria-hidden className="size-4" />
-              </span>
-            </CollapsibleTrigger>
-            <CollapsibleContent>
-              <Field>
-                <FieldLabel htmlFor={fid("fam")}>Antecedentes familiares</FieldLabel>
-                <Textarea
-                  id={fid("fam")}
-                  rows={2}
-                  value={strOf((interview as Rec)["antecedentesFamiliares"])}
-                  disabled={!canWrite}
-                  onChange={(e) =>
-                    setTopInterview(
-                      "antecedentesFamiliares",
-                      e.target.value === "" ? undefined : e.target.value,
-                    )
-                  }
-                />
-              </Field>
-            </CollapsibleContent>
-          </Collapsible>
-        
-          <Collapsible open={openOdonto} onOpenChange={setOpenOdonto}>
-            <CollapsibleTrigger className="text-sm font-medium">
-              <span className="flex items-center gap-1">
-                Odontológicos y hábitos <ChevronDown aria-hidden className="size-4" />
-              </span>
-            </CollapsibleTrigger>
-            <CollapsibleContent>
-              <div className="grid gap-4 pt-2 sm:grid-cols-2">
-                <Field>
-                  <FieldLabel htmlFor={fid("od-ult")}>Última visita</FieldLabel>
-                  <Input
-                    id={fid("od-ult")}
-                    value={strOf(odontologicos["ultimaVisita"])}
-                    disabled={!canWrite}
-                    onChange={(e) =>
-                      updateInterview(
-                        "antecedentesOdontologicos",
-                        "ultimaVisita",
-                        e.target.value === "" ? undefined : e.target.value,
-                      )
-                    }
-                  />
-                </Field>
-                <Field>
-                  <FieldLabel htmlFor={fid("od-cep")}>Cepillados al día (0–10)</FieldLabel>
-                  <Input
-                    id={fid("od-cep")}
-                    type="number"
-                    min={0}
-                    max={10}
-                    value={strOf(odontologicos["cepilladosAlDia"])}
-                    disabled={!canWrite}
-                    onChange={(e) => {
-                      const t = e.target.value.trim()
-                      updateInterview(
-                        "antecedentesOdontologicos",
-                        "cepilladosAlDia",
-                        t === "" ? undefined : Number(t),
-                      )
-                    }}
-                  />
-                </Field>
-                <Field>
-                  <FieldLabel htmlFor={fid("od-exp")}>Experiencia previa</FieldLabel>
-                  <Select
-                    value={
-                      strOf(odontologicos["experienciaPrevia"]) === ""
-                        ? "sin-indicar"
-                        : strOf(odontologicos["experienciaPrevia"])
-                    }
-                    onValueChange={(v) =>
-                      updateInterview(
-                        "antecedentesOdontologicos",
-                        "experienciaPrevia",
-                        !v || v === "sin-indicar" ? undefined : v,
-                      )
-                    }
-                    disabled={!canWrite}
-                  >
-                    <SelectTrigger id={fid("od-exp")}>
-                      <SelectValue placeholder="Sin indicar" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="sin-indicar">Sin indicar</SelectItem>
-                      <SelectItem value="positiva">Positiva</SelectItem>
-                      <SelectItem value="regular">Regular</SelectItem>
-                      <SelectItem value="traumatica">Traumática</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </Field>
-                <Field>
-                  <FieldLabel htmlFor={fid("od-ans")}>Ansiedad dental</FieldLabel>
-                  <Select
-                    value={
-                      strOf(odontologicos["ansiedadDental"]) === ""
-                        ? "sin-indicar"
-                        : strOf(odontologicos["ansiedadDental"])
-                    }
-                    onValueChange={(v) =>
-                      updateInterview(
-                        "antecedentesOdontologicos",
-                        "ansiedadDental",
-                        !v || v === "sin-indicar" ? undefined : v,
-                      )
-                    }
-                    disabled={!canWrite}
-                  >
-                    <SelectTrigger id={fid("od-ans")}>
-                      <SelectValue placeholder="Sin indicar" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="sin-indicar">Sin indicar</SelectItem>
-                      <SelectItem value="ninguna">Ninguna</SelectItem>
-                      <SelectItem value="leve">Leve</SelectItem>
-                      <SelectItem value="moderada">Moderada</SelectItem>
-                      <SelectItem value="alta">Alta</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </Field>
-                <div className="flex items-center gap-4">
-                  <div className="flex items-center gap-2">
-                    <Checkbox
-                      id={fid("od-hilo")}
-                      checked={odontologicos["hiloDental"] === true}
-                      disabled={!canWrite}
-                      onCheckedChange={(c: boolean) =>
-                        updateInterview(
-                          "antecedentesOdontologicos",
-                          "hiloDental",
-                          c === true ? true : undefined,
-                        )
-                      }
-                    />
-                    <label htmlFor={fid("od-hilo")} className="text-sm">
-                      Hilo dental
-                    </label>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Checkbox
-                      id={fid("od-brux")}
-                      checked={odontologicos["bruxismo"] === true}
-                      disabled={!canWrite}
-                      onCheckedChange={(c: boolean) =>
-                        updateInterview(
-                          "antecedentesOdontologicos",
-                          "bruxismo",
-                          c === true ? true : undefined,
-                        )
-                      }
-                    />
-                    <label htmlFor={fid("od-brux")} className="text-sm">
-                      Bruxismo
-                    </label>
-                  </div>
-                </div>
-                <Field>
-                  <FieldLabel htmlFor={fid("od-hab")}>
-                    Hábitos (separados por coma, máx. 10)
-                  </FieldLabel>
-                  <Input
-                    id={fid("od-hab")}
-                    placeholder="tabaquismo, onicofagia"
-                    value={
-                      Array.isArray(odontologicos["habitos"])
-                        ? (odontologicos["habitos"] as string[]).join(", ")
-                        : ""
-                    }
-                    disabled={!canWrite}
-                    onChange={(e) => {
-                      const items = e.target.value
-                        .split(",")
-                        .map((x) => x.trim())
-                        .filter((x) => x !== "")
-                        .slice(0, 10)
-                      updateInterview(
-                        "antecedentesOdontologicos",
-                        "habitos",
-                        items.length > 0 ? items : undefined,
-                      )
-                    }}
-                  />
-                </Field>
-              </div>
-            </CollapsibleContent>
-          </Collapsible>
-        
-          {legacy.length > 0 ? (
-            <div
-              className="flex flex-col gap-2 rounded-lg border border-dashed p-3"
-              role="note"
-              aria-label="Información previa por conciliar"
-            >
-              <p className="text-sm font-medium">Información previa por conciliar</p>
-              <p className="text-xs text-muted-foreground">
-                Textos de entrevistas anteriores (motivo, examen, diagnóstico o listas libres). Se
-                muestran tal cual; no se convierten automáticamente en registros.
-              </p>
-              <dl className="grid gap-2 text-sm">
-                {legacy.map((entry) => (
-                  <div key={entry.label} className="grid gap-0.5 sm:grid-cols-[12rem_minmax(0,1fr)] sm:gap-2">
-                    <dt className="text-muted-foreground">{entry.label}</dt>
-                    <dd className="whitespace-pre-wrap">{entry.text}</dd>
-                  </div>
-                ))}
-              </dl>
             </div>
-          ) : null}
-        </div>
-      </section>
-
-      <section aria-label="Consentimiento de datos" className="flex flex-col gap-4 elevated rounded-xl border bg-card p-4 sm:p-6">
-        <div className="flex flex-col gap-1.5">
-          <h3 className="font-heading text-base font-medium">Consentimiento de datos</h3>
-        </div>
-        <div>
-          {consentedAt ? (
-            <p className="text-sm text-muted-foreground">
-              Consentimiento de datos registrado
-              {consentedAt ? ` el ${new Date(consentedAt).toLocaleDateString("es-PE")}` : ""}. No se
-              modifica al completar salud.
-            </p>
-          ) : (
-            <div className="flex items-start gap-2">
-              <Checkbox
-                id={fid("consent")}
-                checked={consent}
-                disabled={!canWrite}
-                onCheckedChange={(c: boolean) => {
-                  setConsent(c === true)
+            <div>
+              <BloodGroupSelect
+                id={fid("blood")}
+                value={bloodGroup}
+                onChange={(next) => {
+                  setBloodGroup(next)
                   markDirty()
                 }}
+                readOnly={saving}
+                declared={bloodGroup != null}
               />
-              <label htmlFor={fid("consent")} className="text-sm">
-                El paciente autoriza el tratamiento de sus datos clínicos. Se registra una sola vez.
-              </label>
             </div>
-          )}
-        </div>
-      </section>
+            <Field>
+              <FieldLabel htmlFor={fid("asa")}>Clasificación ASA</FieldLabel>
+              <select
+                id={fid("asa")}
+                className="h-9 max-w-md rounded-md border bg-background px-3 text-sm"
+                value={asaClass}
+                disabled={saving}
+                onChange={(e) => {
+                  setAsaClass(e.target.value)
+                  markDirty()
+                }}
+              >
+                <option value="">Sin clasificar</option>
+                {ASA_OPTIONS.map(([value, optionLabel]) => (
+                  <option key={value} value={value}>
+                    {optionLabel}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          </section>
+
+          <ClinicalGroupCard
+            title="Alergias"
+            review={review.allergies}
+            reviewId={fid("rev-alg")}
+            reviewError={fieldErrors[fid("rev-alg")]}
+            readOnly={saving}
+            onReview={(next) => {
+              setReview((r) => ({ ...r, allergies: next }))
+              markDirty()
+            }}
+            empty={
+              allergies.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  {review.allergies === "none"
+                    ? "Ausencia confirmada en este grupo."
+                    : "Sin registros. Agrega filas o confirma la ausencia."}
+                </p>
+              ) : null
+            }
+          >
+            <AllergyRows
+              mode="clinical"
+              rows={allergies}
+              onChange={(next) => {
+                setAllergies(restoreIds(allergies, next))
+                markDirty()
+              }}
+              readOnly={saving}
+              errors={fieldErrors}
+              idPrefix={uid}
+            />
+          </ClinicalGroupCard>
+
+          <ClinicalGroupCard
+            title="Condiciones"
+            review={review.conditions}
+            reviewId={fid("rev-con")}
+            reviewError={fieldErrors[fid("rev-con")]}
+            readOnly={saving}
+            onReview={(next) => {
+              setReview((r) => ({ ...r, conditions: next }))
+              markDirty()
+            }}
+            empty={
+              conditions.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  {review.conditions === "none"
+                    ? "Ausencia confirmada en este grupo."
+                    : "Sin registros. Agrega filas o confirma la ausencia."}
+                </p>
+              ) : null
+            }
+          >
+            <ConditionRows
+              mode="clinical"
+              rows={conditions}
+              onChange={(next) => {
+                setConditions(restoreIds(conditions, next))
+                markDirty()
+              }}
+              readOnly={saving}
+              errors={fieldErrors}
+              idPrefix={uid}
+            />
+          </ClinicalGroupCard>
+
+          <ClinicalGroupCard
+            title="Medicación vigente"
+            review={review.medications}
+            reviewId={fid("rev-med")}
+            reviewError={fieldErrors[fid("rev-med")]}
+            readOnly={saving}
+            onReview={(next) => {
+              setReview((r) => ({ ...r, medications: next }))
+              markDirty()
+            }}
+            empty={
+              medications.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  {review.medications === "none"
+                    ? "Ausencia confirmada en este grupo."
+                    : "Sin registros. Agrega filas o confirma la ausencia."}
+                </p>
+              ) : null
+            }
+          >
+            <MedicationRows
+              mode="clinical"
+              rows={medications}
+              onChange={(next) => {
+                setMedications(restoreIds(medications, next))
+                markDirty()
+              }}
+              readOnly={saving}
+              errors={fieldErrors}
+              idPrefix={uid}
+            />
+          </ClinicalGroupCard>
+
+          <section
+            aria-label="Entrevista de salud"
+            className="flex flex-col gap-4 elevated rounded-xl border bg-card p-4 sm:p-6"
+          >
+            <div className="flex flex-col gap-1.5">
+              <h3 className="font-heading text-base font-medium">Entrevista de salud</h3>
+              <p className="text-xs text-muted-foreground">
+                Una columna en móvil, dos en tablet y web.
+              </p>
+            </div>
+            <div className="flex flex-col gap-4">
+              <Collapsible open={openPersonales} onOpenChange={setOpenPersonales}>
+                <CollapsibleTrigger className="text-sm font-medium">
+                  <span className="flex items-center gap-1">
+                    Personales <ChevronDown aria-hidden className="size-4" />
+                  </span>
+                </CollapsibleTrigger>
+                <CollapsibleContent>
+                  <div className="grid gap-4 pt-2 sm:grid-cols-2">
+                    <Field>
+                      <FieldLabel htmlFor={fid("ap-hosp")}>Hospitalizaciones</FieldLabel>
+                      <Input
+                        id={fid("ap-hosp")}
+                        value={strOf(personales["hospitalizaciones"])}
+                        disabled={!canWrite}
+                        onChange={(e) =>
+                          updateInterview(
+                            "antecedentesPersonales",
+                            "hospitalizaciones",
+                            e.target.value === "" ? undefined : e.target.value,
+                          )
+                        }
+                      />
+                    </Field>
+                    <Field>
+                      <FieldLabel htmlFor={fid("ap-cir")}>Cirugías</FieldLabel>
+                      <Input
+                        id={fid("ap-cir")}
+                        value={strOf(personales["cirugias"])}
+                        disabled={!canWrite}
+                        onChange={(e) =>
+                          updateInterview(
+                            "antecedentesPersonales",
+                            "cirugias",
+                            e.target.value === "" ? undefined : e.target.value,
+                          )
+                        }
+                      />
+                    </Field>
+                    <Field>
+                      <FieldLabel htmlFor={fid("ap-tra")}>Transfusiones</FieldLabel>
+                      <Input
+                        id={fid("ap-tra")}
+                        value={strOf(personales["transfusiones"])}
+                        disabled={!canWrite}
+                        onChange={(e) =>
+                          updateInterview(
+                            "antecedentesPersonales",
+                            "transfusiones",
+                            e.target.value === "" ? undefined : e.target.value,
+                          )
+                        }
+                      />
+                    </Field>
+                    <Field>
+                      <FieldLabel htmlFor={fid("emb-estado")}>Embarazo</FieldLabel>
+                      <Select
+                        value={
+                          personales["embarazo"] === true
+                            ? "si"
+                            : personales["embarazo"] === false
+                              ? "no"
+                              : "sin-responder"
+                        }
+                        onValueChange={(v) =>
+                          updateInterview(
+                            "antecedentesPersonales",
+                            "embarazo",
+                            v === "si" ? true : v === "no" ? false : undefined,
+                          )
+                        }
+                        disabled={!canWrite}
+                      >
+                        <SelectTrigger id={fid("emb-estado")}>
+                          <SelectValue placeholder="Sin responder" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="sin-responder">Sin responder</SelectItem>
+                          <SelectItem value="si">Sí</SelectItem>
+                          <SelectItem value="no">No</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </Field>
+                    {personales["embarazo"] === true ? (
+                      <Field>
+                        <FieldLabel htmlFor={fid("emb-sem")}>Semanas de embarazo (0–42)</FieldLabel>
+                        <Input
+                          id={fid("emb-sem")}
+                          type="number"
+                          min={0}
+                          max={42}
+                          value={strOf(personales["semanasEmbarazo"])}
+                          disabled={!canWrite}
+                          onChange={(e) => {
+                            const t = e.target.value.trim()
+                            updateInterview(
+                              "antecedentesPersonales",
+                              "semanasEmbarazo",
+                              t === "" ? undefined : Number(t),
+                            )
+                          }}
+                        />
+                        {fieldErrors[fid("emb-sem")] ? (
+                          <p className="text-sm text-destructive">{fieldErrors[fid("emb-sem")]}</p>
+                        ) : null}
+                      </Field>
+                    ) : null}
+                  </div>
+                </CollapsibleContent>
+              </Collapsible>
+
+              <Collapsible open={openFamiliares} onOpenChange={setOpenFamiliares}>
+                <CollapsibleTrigger className="text-sm font-medium">
+                  <span className="flex items-center gap-1">
+                    Familiares <ChevronDown aria-hidden className="size-4" />
+                  </span>
+                </CollapsibleTrigger>
+                <CollapsibleContent>
+                  <div className="flex flex-col gap-3 pt-2">
+                    {familyHistory.map((row, index) => (
+                      <div
+                        key={row.key}
+                        className="grid gap-2 rounded-lg border p-3 sm:grid-cols-[10rem_1fr_auto]"
+                      >
+                        <Field>
+                          <FieldLabel htmlFor={fid(`fam-rel-${row.key}`)}>Parentesco</FieldLabel>
+                          <select
+                            id={fid(`fam-rel-${row.key}`)}
+                            className="h-9 rounded-md border bg-background px-3 text-sm"
+                            value={row.relationship}
+                            disabled={!canWrite}
+                            onChange={(e) => {
+                              setFamilyHistory((prev) =>
+                                prev.map((r, i) =>
+                                  i === index ? { ...r, relationship: e.target.value } : r,
+                                ),
+                              )
+                              markDirty()
+                            }}
+                          >
+                            {FAMILY_RELATIONSHIP_OPTIONS.map(([value, optionLabel]) => (
+                              <option key={value} value={value}>
+                                {optionLabel}
+                              </option>
+                            ))}
+                          </select>
+                        </Field>
+                        <Field>
+                          <FieldLabel htmlFor={fid(`fam-con-${row.key}`)}>Condición</FieldLabel>
+                          <Input
+                            id={fid(`fam-con-${row.key}`)}
+                            value={row.condition}
+                            maxLength={200}
+                            disabled={!canWrite}
+                            placeholder="Ej.: diabetes, hipertensión, cardiopatía"
+                            onChange={(e) => {
+                              setFamilyHistory((prev) =>
+                                prev.map((r, i) =>
+                                  i === index ? { ...r, condition: e.target.value } : r,
+                                ),
+                              )
+                              markDirty()
+                            }}
+                          />
+                        </Field>
+                        {canWrite ? (
+                          <div className="flex items-end">
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              onClick={() => {
+                                setFamilyHistory((prev) => prev.filter((_, i) => i !== index))
+                                markDirty()
+                              }}
+                            >
+                              Quitar
+                            </Button>
+                          </div>
+                        ) : null}
+                      </div>
+                    ))}
+                    {canWrite ? (
+                      <div>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            setFamilyHistory((prev) => [
+                              ...prev,
+                              {
+                                key: `fam-${Date.now()}`,
+                                relationship: "madre",
+                                condition: "",
+                                cie10Code: "",
+                              },
+                            ])
+                            markDirty()
+                          }}
+                        >
+                          Agregar antecedente familiar
+                        </Button>
+                      </div>
+                    ) : null}
+                    {strOf((interview as Rec)["antecedentesFamiliares"]) ? (
+                      <p className="text-xs text-muted-foreground">
+                        Registro anterior en texto:{" "}
+                        {strOf((interview as Rec)["antecedentesFamiliares"])}
+                      </p>
+                    ) : null}
+                  </div>
+                </CollapsibleContent>
+              </Collapsible>
+
+              <Collapsible open={openOdonto} onOpenChange={setOpenOdonto}>
+                <CollapsibleTrigger className="text-sm font-medium">
+                  <span className="flex items-center gap-1">
+                    Odontológicos y hábitos <ChevronDown aria-hidden className="size-4" />
+                  </span>
+                </CollapsibleTrigger>
+                <CollapsibleContent>
+                  <div className="grid gap-4 pt-2 sm:grid-cols-2">
+                    <Field>
+                      <FieldLabel htmlFor={fid("od-ult")}>Última visita</FieldLabel>
+                      <Input
+                        id={fid("od-ult")}
+                        value={strOf(odontologicos["ultimaVisita"])}
+                        disabled={!canWrite}
+                        onChange={(e) =>
+                          updateInterview(
+                            "antecedentesOdontologicos",
+                            "ultimaVisita",
+                            e.target.value === "" ? undefined : e.target.value,
+                          )
+                        }
+                      />
+                    </Field>
+                    <Field>
+                      <FieldLabel htmlFor={fid("od-cep")}>Cepillados al día (0–10)</FieldLabel>
+                      <Input
+                        id={fid("od-cep")}
+                        type="number"
+                        min={0}
+                        max={10}
+                        value={strOf(odontologicos["cepilladosAlDia"])}
+                        disabled={!canWrite}
+                        onChange={(e) => {
+                          const t = e.target.value.trim()
+                          updateInterview(
+                            "antecedentesOdontologicos",
+                            "cepilladosAlDia",
+                            t === "" ? undefined : Number(t),
+                          )
+                        }}
+                      />
+                    </Field>
+                    <Field>
+                      <FieldLabel htmlFor={fid("od-exp")}>Experiencia previa</FieldLabel>
+                      <Select
+                        value={
+                          strOf(odontologicos["experienciaPrevia"]) === ""
+                            ? "sin-indicar"
+                            : strOf(odontologicos["experienciaPrevia"])
+                        }
+                        onValueChange={(v) =>
+                          updateInterview(
+                            "antecedentesOdontologicos",
+                            "experienciaPrevia",
+                            !v || v === "sin-indicar" ? undefined : v,
+                          )
+                        }
+                        disabled={!canWrite}
+                      >
+                        <SelectTrigger id={fid("od-exp")}>
+                          <SelectValue placeholder="Sin indicar" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="sin-indicar">Sin indicar</SelectItem>
+                          <SelectItem value="positiva">Positiva</SelectItem>
+                          <SelectItem value="regular">Regular</SelectItem>
+                          <SelectItem value="traumatica">Traumática</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </Field>
+                    <Field>
+                      <FieldLabel htmlFor={fid("od-ans")}>Ansiedad dental</FieldLabel>
+                      <Select
+                        value={
+                          strOf(odontologicos["ansiedadDental"]) === ""
+                            ? "sin-indicar"
+                            : strOf(odontologicos["ansiedadDental"])
+                        }
+                        onValueChange={(v) =>
+                          updateInterview(
+                            "antecedentesOdontologicos",
+                            "ansiedadDental",
+                            !v || v === "sin-indicar" ? undefined : v,
+                          )
+                        }
+                        disabled={!canWrite}
+                      >
+                        <SelectTrigger id={fid("od-ans")}>
+                          <SelectValue placeholder="Sin indicar" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="sin-indicar">Sin indicar</SelectItem>
+                          <SelectItem value="ninguna">Ninguna</SelectItem>
+                          <SelectItem value="leve">Leve</SelectItem>
+                          <SelectItem value="moderada">Moderada</SelectItem>
+                          <SelectItem value="alta">Alta</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </Field>
+                    <div className="flex items-center gap-4">
+                      <div className="flex items-center gap-2">
+                        <Checkbox
+                          id={fid("od-hilo")}
+                          checked={odontologicos["hiloDental"] === true}
+                          disabled={!canWrite}
+                          onCheckedChange={(c: boolean) =>
+                            updateInterview(
+                              "antecedentesOdontologicos",
+                              "hiloDental",
+                              c === true ? true : undefined,
+                            )
+                          }
+                        />
+                        <label htmlFor={fid("od-hilo")} className="text-sm">
+                          Hilo dental
+                        </label>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Checkbox
+                          id={fid("od-brux")}
+                          checked={odontologicos["bruxismo"] === true}
+                          disabled={!canWrite}
+                          onCheckedChange={(c: boolean) =>
+                            updateInterview(
+                              "antecedentesOdontologicos",
+                              "bruxismo",
+                              c === true ? true : undefined,
+                            )
+                          }
+                        />
+                        <label htmlFor={fid("od-brux")} className="text-sm">
+                          Bruxismo
+                        </label>
+                      </div>
+                    </div>
+                    <Field>
+                      <FieldLabel htmlFor={fid("od-hab")}>
+                        Hábitos (separados por coma, máx. 10)
+                      </FieldLabel>
+                      <Input
+                        id={fid("od-hab")}
+                        placeholder="tabaquismo, onicofagia"
+                        value={
+                          Array.isArray(odontologicos["habitos"])
+                            ? (odontologicos["habitos"] as string[]).join(", ")
+                            : ""
+                        }
+                        disabled={!canWrite}
+                        onChange={(e) => {
+                          const items = e.target.value
+                            .split(",")
+                            .map((x) => x.trim())
+                            .filter((x) => x !== "")
+                            .slice(0, 10)
+                          updateInterview(
+                            "antecedentesOdontologicos",
+                            "habitos",
+                            items.length > 0 ? items : undefined,
+                          )
+                        }}
+                      />
+                    </Field>
+                  </div>
+                </CollapsibleContent>
+              </Collapsible>
+
+              {legacy.length > 0 ? (
+                <div
+                  className="flex flex-col gap-2 rounded-lg border border-dashed p-3"
+                  role="note"
+                  aria-label="Información previa por conciliar"
+                >
+                  <p className="text-sm font-medium">Información previa por conciliar</p>
+                  <p className="text-xs text-muted-foreground">
+                    Textos de entrevistas anteriores (motivo, examen, diagnóstico o listas libres).
+                    Se muestran tal cual; no se convierten automáticamente en registros.
+                  </p>
+                  <dl className="grid gap-2 text-sm">
+                    {legacy.map((entry) => (
+                      <div
+                        key={entry.label}
+                        className="grid gap-0.5 sm:grid-cols-[12rem_minmax(0,1fr)] sm:gap-2"
+                      >
+                        <dt className="text-muted-foreground">{entry.label}</dt>
+                        <dd className="whitespace-pre-wrap">{entry.text}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                </div>
+              ) : null}
+            </div>
+          </section>
+
+          <section
+            aria-label="Consentimiento de datos"
+            className="flex flex-col gap-4 elevated rounded-xl border bg-card p-4 sm:p-6"
+          >
+            <div className="flex flex-col gap-1.5">
+              <h3 className="font-heading text-base font-medium">Consentimiento de datos</h3>
+            </div>
+            <div>
+              {consentedAt ? (
+                <p className="text-sm text-muted-foreground">
+                  Consentimiento de datos registrado
+                  {consentedAt ? ` el ${new Date(consentedAt).toLocaleDateString("es-PE")}` : ""}.
+                  No se modifica al completar salud.
+                </p>
+              ) : (
+                <div className="flex items-start gap-2">
+                  <Checkbox
+                    id={fid("consent")}
+                    checked={consent}
+                    disabled={!canWrite}
+                    onCheckedChange={(c: boolean) => {
+                      setConsent(c === true)
+                      markDirty()
+                    }}
+                  />
+                  <label htmlFor={fid("consent")} className="text-sm">
+                    El paciente autoriza el tratamiento de sus datos clínicos. Se registra una sola
+                    vez.
+                  </label>
+                </div>
+              )}
+            </div>
+          </section>
         </div>
       </FormDrawer>
 
@@ -1138,7 +1305,9 @@ function AntecedentesSummary({
           <span className="font-heading text-sm font-medium">{row.title}</span>
           <span className="text-sm text-muted-foreground">{row.detail}</span>
           <Badge
-            variant={row.state === "recorded" ? "default" : row.state === "none" ? "secondary" : "outline"}
+            variant={
+              row.state === "recorded" ? "default" : row.state === "none" ? "secondary" : "outline"
+            }
             className="mt-1 w-fit"
           >
             {HEALTH_REVIEW_LABELS[row.state]}
@@ -1179,7 +1348,10 @@ function ClinicalGroupCard({
   children: ReactNode
 }): React.JSX.Element {
   return (
-    <section aria-label={title} className="flex flex-col gap-4 elevated rounded-xl border bg-card p-4 sm:p-6">
+    <section
+      aria-label={title}
+      className="flex flex-col gap-4 elevated rounded-xl border bg-card p-4 sm:p-6"
+    >
       <div className="flex flex-col gap-1.5">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="font-heading text-base font-medium">{title}</div>
@@ -1294,8 +1466,8 @@ function RegistrationSnapshotDialog({
         <DialogHeader>
           <DialogTitle>Declaración original del registro</DialogTitle>
           <DialogDescription>
-            Snapshot inmutable de lo declarado al crear la ficha. No se edita: los datos vigentes
-            se corrigen con el editor clínico.
+            Snapshot inmutable de lo declarado al crear la ficha. No se edita: los datos vigentes se
+            corrigen con el editor clínico.
           </DialogDescription>
         </DialogHeader>
         {registration ? (
@@ -1376,8 +1548,7 @@ function RegistrationSnapshotDialog({
                 </dl>
               </section>
             ) : null}
-            {typeof registration.privacyNotice === "string" &&
-            registration.privacyNotice !== "" ? (
+            {typeof registration.privacyNotice === "string" && registration.privacyNotice !== "" ? (
               <section className="flex flex-col gap-1">
                 <h4 className="text-sm font-medium">Aviso de privacidad aceptado</h4>
                 <p className="whitespace-pre-wrap text-xs text-muted-foreground">

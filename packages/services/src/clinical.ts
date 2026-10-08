@@ -26,6 +26,7 @@ import {
   patientAllergy,
   patientAnamnesis,
   patientCondition,
+  patientFamilyHistory,
   patientDocument,
   patientDocumentContext,
   patientMedication,
@@ -59,6 +60,19 @@ async function requireDraftLink(tx: Db, orgId: string, patientId: string, encoun
 }
 
 const ALLERGY_SEVERITIES = ["leve", "moderada", "severa", "desconocida"] as const
+/** Parentescos de los antecedentes familiares. */
+export const FAMILY_RELATIONSHIPS = [
+  "madre",
+  "padre",
+  "hijo",
+  "conyuge",
+  "hermano",
+  "abuelo",
+  "tio",
+  "otro_familiar",
+] as const
+/** Clasificación del estado físico de la American Society of Anesthesiologists. */
+export const ASA_CLASSES: readonly string[] = ["I", "II", "III", "IV", "V", "VI"]
 const CONDITION_STATUSES = ["activa", "resuelta", "inactiva"] as const
 /** Tipo de alérgeno; los anestésicos y materiales importan especialmente en odontología. */
 export const ALLERGY_CATEGORIES = [
@@ -135,9 +149,20 @@ export interface HealthAllergyInput {
   /** Tipo de alérgeno (catálogo); opcional. */
   category?: string | null
   reaction?: string | null
-  /** Obligatoria y explícita: nunca se inventa una gravedad para guardar. */
-  severity: string
+  /** Sin dato se guarda «desconocida»: nunca se inventa una gravedad. */
+  severity?: string | null
+  /** Alergia o intolerancia; criticidad y verificación (HL7 FHIR AllergyIntolerance). */
+  kind?: string | null
+  criticality?: string | null
+  verification?: string | null
   isActive?: boolean
+}
+
+export interface FamilyHistoryInput {
+  relationship: string
+  condition: string
+  cie10Code?: string | null
+  notes?: string | null
 }
 
 export interface HealthConditionInput {
@@ -178,6 +203,10 @@ export interface SavePatientHealthInput {
   anamnesis?: { expectedVersion: number; answers: Record<string, unknown> }
   dataConsent?: true
   bloodGroup?: BloodGroup | null
+  /** Reemplaza los antecedentes familiares cuando se envía. */
+  familyHistory?: FamilyHistoryInput[]
+  /** Clasificación ASA del estado físico (I–VI); null la limpia. */
+  asaClass?: string | null
 }
 
 export type HealthAllergyRow = typeof patientAllergy.$inferSelect
@@ -188,6 +217,8 @@ export type AnamnesisRow = typeof patientAnamnesis.$inferSelect
 export interface PatientHealth {
   revision: number
   bloodGroup: BloodGroup | null
+  asaClass: string | null
+  familyHistory: Array<typeof patientFamilyHistory.$inferSelect>
   reviewedAt: Date | null
   reviewedBy: string | null
   reviewStatus: { allergies: string; conditions: string; medications: string }
@@ -283,6 +314,9 @@ interface ValidatedAllergy {
   category: string | null
   reaction: string | null
   severity: string
+  kind: string
+  criticality: string | null
+  verification: string
   isActive: boolean
 }
 
@@ -310,11 +344,18 @@ interface ValidatedMedication {
 function validateAllergyRow(input: HealthAllergyInput): ValidatedAllergy {
   const substance = assertText(input.substance, 200, "substance", true) as string
   const reaction = assertText(input.reaction, 2000, "reaction", false)
-  if (!(ALLERGY_SEVERITIES as readonly string[]).includes(input.severity)) {
-    throw validation(
-      "severity debe ser leve, moderada, severa o desconocida (explícita, sin default)",
-    )
+  const severity = input.severity?.trim() || "desconocida"
+  if (!(ALLERGY_SEVERITIES as readonly string[]).includes(severity)) {
+    throw validation("severity debe ser leve, moderada, severa o desconocida")
   }
+  const kind = input.kind?.trim() || "alergia"
+  if (!["alergia", "intolerancia"].includes(kind)) throw validation("kind debe ser alergia o intolerancia")
+  const criticality = input.criticality?.trim() || null
+  if (criticality && !["baja", "alta", "no_evaluable"].includes(criticality))
+    throw validation("criticality debe ser baja, alta o no_evaluable")
+  const verification = input.verification?.trim() || "no_confirmada"
+  if (!["no_confirmada", "confirmada", "descartada"].includes(verification))
+    throw validation("verification debe ser no_confirmada, confirmada o descartada")
   const category = input.category?.trim() || null
   if (category && !(ALLERGY_CATEGORIES as readonly string[]).includes(category))
     throw validation("category inválida para la alergia")
@@ -323,7 +364,10 @@ function validateAllergyRow(input: HealthAllergyInput): ValidatedAllergy {
     substance,
     category,
     reaction,
-    severity: input.severity,
+    severity,
+    kind,
+    criticality,
+    verification,
     isActive: input.isActive ?? true,
   }
 }
@@ -363,6 +407,7 @@ export async function getPatientHealth(
       revision: patient.healthRevision,
       reviewStatus: patient.healthReviewStatus,
       bloodGroup: patient.bloodGroup,
+      asaClass: patient.asaClass,
       reviewedAt: patient.healthReviewedAt,
       reviewedBy: patient.healthReviewedBy,
     })
@@ -409,9 +454,21 @@ export async function getPatientHealth(
   const reviewStatus = (header.reviewStatus ?? {}) as Record<string, unknown>
   const stateOf = (value: unknown): string =>
     value === "none" || value === "recorded" ? (value as string) : "unknown"
+  const familyHistory = await tx
+    .select()
+    .from(patientFamilyHistory)
+    .where(
+      and(
+        eq(patientFamilyHistory.organizationId, orgId),
+        eq(patientFamilyHistory.patientId, patientId),
+      ),
+    )
+    .orderBy(asc(patientFamilyHistory.createdAt))
   return {
     revision: header.revision,
     bloodGroup: header.bloodGroup,
+    asaClass: header.asaClass,
+    familyHistory,
     reviewedAt: header.reviewedAt,
     reviewedBy: header.reviewedBy,
     reviewStatus: {
@@ -674,6 +731,9 @@ async function persistPatientHealth(
         category: row.category,
         reaction: row.reaction,
         severity: row.severity,
+        kind: row.kind,
+        criticality: row.criticality,
+        verification: row.verification,
         isActive: row.isActive,
         createdBy: actorUserId,
       })
@@ -685,6 +745,9 @@ async function persistPatientHealth(
           category: row.category,
           reaction: row.reaction,
           severity: row.severity,
+          kind: row.kind,
+          criticality: row.criticality,
+          verification: row.verification,
           isActive: row.isActive,
           updatedAt: new Date(),
         })
@@ -792,10 +855,42 @@ async function persistPatientHealth(
       )
     }
   }
+  // Antecedentes familiares: se reemplazan cuando se envían (parentesco del
+  // catálogo, condición y CIE-10 opcional).
+  if (input.familyHistory !== undefined) {
+    if (!Array.isArray(input.familyHistory) || input.familyHistory.length > 50)
+      throw validation("familyHistory debe ser un arreglo de hasta 50 antecedentes")
+    const rows = input.familyHistory.map((row) => {
+      if (!(FAMILY_RELATIONSHIPS as readonly string[]).includes(row.relationship))
+        throw validation(`Parentesco inválido: ${row.relationship}`)
+      return {
+        relationship: row.relationship,
+        condition: assertText(row.condition, 200, "condition", true) as string,
+        cie10Code: row.cie10Code?.trim() || null,
+        notes: assertText(row.notes, 2000, "notes", false),
+      }
+    })
+    for (const row of rows) if (row.cie10Code) await assertDiagnosisCode(tx, row.cie10Code)
+    await tx
+      .delete(patientFamilyHistory)
+      .where(
+        and(
+          eq(patientFamilyHistory.organizationId, orgId),
+          eq(patientFamilyHistory.patientId, patientId),
+        ),
+      )
+    if (rows.length)
+      await tx.insert(patientFamilyHistory).values(
+        rows.map((row) => ({ ...row, organizationId: orgId, patientId, createdBy: actorUserId })),
+      )
+  }
+  if (input.asaClass !== undefined && input.asaClass !== null && !ASA_CLASSES.includes(input.asaClass))
+    throw validation("Clase ASA inválida (I–VI)")
   const setConsent = input.dataConsent === true && !locked.dataConsentAt
   await tx
     .update(patient)
     .set({
+      ...(input.asaClass !== undefined ? { asaClass: input.asaClass } : {}),
       healthRevision: locked.revision + 1,
       healthReviewStatus: reviewStatus,
       healthReviewedAt: context.kind === "staff" ? new Date() : null,

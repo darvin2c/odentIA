@@ -1,4 +1,11 @@
-import { UUID_RE, validateDemographics } from "@odentia/clinical"
+import {
+  DOC_TYPE_LABELS,
+  IDENTITY_DOC_TYPES,
+  SEX_CODES,
+  SEX_LABELS,
+  UUID_RE,
+  validateDemographics,
+} from "@odentia/clinical"
 import {
   Field,
   FieldError,
@@ -22,16 +29,12 @@ import { type InputHTMLAttributes, useId } from "react"
 
 export const DOC_TYPE_OPTIONS = [
   { value: "", label: "—" },
-  { value: "DNI", label: "DNI" },
-  { value: "CE", label: "CE" },
-  { value: "PASAPORTE", label: "Pasaporte" },
-  { value: "OTRO", label: "Otro" },
+  ...IDENTITY_DOC_TYPES.map((value) => ({ value, label: DOC_TYPE_LABELS[value] })),
 ] as const
 
 export const SEX_OPTIONS = [
   { value: "", label: "—" },
-  { value: "M", label: "Masculino" },
-  { value: "F", label: "Femenino" },
+  ...SEX_CODES.map((value) => ({ value, label: SEX_LABELS[value] })),
 ] as const
 
 export const INSURANCE_OPTIONS = [
@@ -219,4 +222,3 @@ export function SectionCard({ title, children }: { title: string; children: Reac
     </div>
   )
 }
-

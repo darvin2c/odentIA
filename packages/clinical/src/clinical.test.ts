@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest"
 import type { FindingRecord } from "./index.js"
 import {
+  ageLabel,
+  composeDisplayName,
+  identityDocumentError,
+  normalizePhone,
   allergyConflicts,
   formatVitals,
   parseVitals,
@@ -564,5 +568,25 @@ describe("alergias al prescribir", () => {
     expect(allergyConflicts("ibuprofeno", ["Aspirina"])[0]?.reason).toMatch(/cruzada/)
     expect(allergyConflicts("clindamicina", ["Penicilina"])).toEqual([])
     expect(allergyConflicts("paracetamol", ["Látex"])).toEqual([])
+  })
+})
+
+describe("identidad estándar", () => {
+  it("normaliza teléfonos, valida documentos y compone el nombre", () => {
+    expect(normalizePhone("987 654 321")).toBe("+51987654321")
+    expect(normalizePhone("+58 412 1234567")).toBe("+584121234567")
+    expect(normalizePhone("4567890")).toBeNull()
+    expect(normalizePhone("5491122334455")).toBe("+5491122334455")
+    expect(identityDocumentError("DNI", "123")).toMatch(/8 dígitos/)
+    expect(identityDocumentError("CE", "001234567")).toBeNull()
+    expect(
+      composeDisplayName({
+        givenNames: " Rosa  María",
+        paternalSurname: "Quispe",
+        maternalSurname: "Huamán",
+      }),
+    ).toBe("Rosa María Quispe Huamán")
+    expect(ageLabel("2025-12-15", new Date("2026-10-08T12:00:00Z"))).toBe("9 meses")
+    expect(ageLabel("1990-01-01", new Date("2026-10-08T12:00:00Z"))).toBe("36 años")
   })
 })

@@ -43,10 +43,11 @@ export interface GrantResponsibilityInput {
   notes?: string | null
 }
 
-export async function grantResponsibility(tx: Db, orgId: string, actorUserId: string, patientId: string, input: GrantResponsibilityInput) {
+export async function grantResponsibility(tx: Db, orgId: string, actorUserId: string | null, patientId: string, input: GrantResponsibilityInput) {
   await requirePatient(tx, orgId, patientId)
   // Serializa asignaciones concurrentes con la misma persona y rol.
   const linked = await requireLinkedActiveContact(tx, orgId, patientId, input.contactId)
+  if (linked.relationship === "self" && input.kind === "representante_legal") throw validation("El propio paciente no puede ser su representante legal")
   await tx.select({ id: patientContact.id }).from(patientContact).where(and(eq(patientContact.organizationId, orgId), eq(patientContact.patientId, patientId), eq(patientContact.contactId, linked.contact.id))).for("update")
   if (!(RESPONSIBILITY_KINDS as readonly string[]).includes(input.kind)) throw validation("Responsabilidad inválida")
   const startsAt = validDate(input.startsAt)

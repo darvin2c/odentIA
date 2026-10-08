@@ -9,6 +9,7 @@ export { MAX_TAG_LENGTH, MAX_TAGS, normalizeTags } from "./tags.js"
 export * from "./treatment-templates.js"
 export * from "./vitals.js"
 export * from "./medications.js"
+export * from "./identity.js"
 export * from "./patient-registration.js"
 export type {
   FindingColorKind,
