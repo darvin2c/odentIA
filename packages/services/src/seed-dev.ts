@@ -276,6 +276,8 @@ async function wipeSeed(): Promise<void> {
     "portal_grant",
     "portal_policy",
     "portal_access_log",
+    // La bitácora de consultas referencia paciente, usuario y organización sin cascada.
+    "clinical_access_log",
     "portal_session",
     "portal_link",
     "automation_link_token",
