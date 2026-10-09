@@ -18,7 +18,7 @@
     "@maskito/react": "5.4.0",
     "@odentia/ui": "workspace:*",
     "@tanstack/charts": "0.18.0",
-    "@tanstack/react-router": "^1.170.32",
+    "@tanstack/react-router": "^1.170.41",
     "@tanstack/react-table": "^8.21.3",
     "date-fns": "^4.4.0",
     "libphonenumber-js": "1.13.13",
