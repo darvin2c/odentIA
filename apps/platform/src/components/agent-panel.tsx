@@ -1,18 +1,20 @@
 import {
   Badge,
   Button,
+  Drawer,
+  DrawerContent,
+  DrawerDescription,
+  DrawerTitle,
   Field,
   FieldLabel,
   Input,
   ScrollArea,
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetTitle,
   Tabs,
   TabsContent,
   TabsList,
   TabsTrigger,
+  useIsMobile,
+  useSidebar,
 } from "@odentia/ui"
 import {
   AgentMark,
@@ -23,7 +25,7 @@ import {
 } from "@odentia/ui-patterns"
 import { type QueryClient, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link, useRouterState } from "@tanstack/react-router"
-import { ArrowLeft, Bot } from "lucide-react"
+import { Bot } from "lucide-react"
 import {
   createContext,
   type ReactNode,
@@ -52,9 +54,9 @@ import { usePermission } from "../lib/crm"
 /**
  * Panel lateral global del agente: decidir, ver derivadas y actividad desde
  * cualquier pantalla. En pantalla grande es una columna fija a la derecha y la
- * página sigue usable al lado; cuando no cabe se superpone como cajón sin
- * cerrar la página ni sus borradores, y en móvil ocupa la pantalla completa
- * con botón de retorno.
+ * página sigue usable al lado; cuando no cabe se superpone, sin cerrar la
+ * página ni sus borradores, con el mismo cajón que los formularios: lateral en
+ * escritorio y hoja inferior con asa en móvil.
  *
  * El layout de la organización monta el panel una sola vez y suscribe estos
  * eventos en su única conexión SSE; aquí solo se declara qué invalidar.
@@ -91,11 +93,13 @@ export type AgentPanelTab = "decidir" | "derivadas" | "actividad"
  * sidebar abierto; por debajo se superpone como cajón.
  */
 const DOCK_QUERY = "(min-width: 1536px)"
-/** Desde este ancho la Bandeja muestra a la vez hilo, «Contexto» y agente. */
-export const AGENT_PANEL_BESIDE_CONTEXT_QUERY = "(min-width: 1920px)"
+/** Ancho mínimo que la columna deja a la página (lista y hilo de la Bandeja). */
+const PAGE_MIN_WIDTH = 848
+/** Ancho que necesita la Bandeja para mostrar además «Contexto». */
+const PAGE_WITH_CONTEXT_WIDTH = 1248
 const PANEL_ID = "panel-del-agente"
 /** Ancho de la columna en px: ajustable con el tirador y recordado en este navegador. */
-const DOCK_WIDTH = { initial: 384, min: 320, max: 480, step: 16 }
+const DOCK_WIDTH = { initial: 384, min: 320, max: 640, step: 16 }
 const DOCK_WIDTH_KEY = "odentia.agent-panel.width"
 const clampDockWidth = (value: number) =>
   Math.min(DOCK_WIDTH.max, Math.max(DOCK_WIDTH.min, Math.round(value)))
@@ -121,6 +125,9 @@ interface AgentPanelState {
   open: boolean
   /** Abierto como columna fija: la página sigue usable al lado. */
   docked: boolean
+  /** Ancho elegido para la columna, en px. */
+  dockWidth: number
+  setDockWidth: (width: number) => void
   /** Abre o cierra; al abrir puede elegir la pestaña (por defecto «Por decidir»). */
   setOpen: (open: boolean, tab?: AgentPanelTab) => void
   tab: AgentPanelTab
@@ -136,6 +143,8 @@ interface AgentPanelState {
 const AgentPanelContext = createContext<AgentPanelState>({
   open: false,
   docked: false,
+  dockWidth: DOCK_WIDTH.initial,
+  setDockWidth: () => {},
   setOpen: () => {},
   tab: "decidir",
   setTab: () => {},
@@ -148,6 +157,18 @@ const AgentPanelContext = createContext<AgentPanelState>({
 export function useAgentPanel(): Pick<AgentPanelState, "open" | "docked" | "setOpen"> {
   const { open, docked, setOpen } = useContext(AgentPanelContext)
   return { open, docked, setOpen }
+}
+
+/** Ancho real del sidebar: abierto o reducido a iconos. */
+function useSidebarWidth(): number {
+  return useSidebar().state === "expanded" ? 256 : 48
+}
+
+/** La Bandeja pregunta si, con la columna a su ancho actual, cabe además «Contexto». */
+export function useAgentPanelFitsBesideContext(): boolean {
+  const { dockWidth } = useContext(AgentPanelContext)
+  const sidebar = useSidebarWidth()
+  return useMediaQuery(`(min-width: ${sidebar + PAGE_WITH_CONTEXT_WIDTH + dockWidth}px)`)
 }
 
 /**
@@ -209,6 +230,24 @@ export function AgentPanelProvider({ children }: { children: ReactNode }) {
   const [docked, setDocked] = useState(false)
   const dockedRef = useRef(docked)
   dockedRef.current = docked
+  const [dockWidth, setDockWidthState] = useState(DOCK_WIDTH.initial)
+  useEffect(() => {
+    try {
+      const stored = Number(window.localStorage.getItem(DOCK_WIDTH_KEY))
+      if (Number.isFinite(stored) && stored > 0) setDockWidthState(clampDockWidth(stored))
+    } catch {
+      // Sin almacenamiento (modo privado): queda el ancho por defecto.
+    }
+  }, [])
+  const setDockWidth = useCallback((next: number) => {
+    const clamped = clampDockWidth(next)
+    setDockWidthState(clamped)
+    try {
+      window.localStorage.setItem(DOCK_WIDTH_KEY, String(clamped))
+    } catch {
+      // El ancho vale para esta sesión aunque no se pueda recordar.
+    }
+  }, [])
   const setOpen = useCallback((next: boolean, nextTab?: AgentPanelTab) => {
     if (next) {
       const active = document.activeElement
@@ -238,14 +277,25 @@ export function AgentPanelProvider({ children }: { children: ReactNode }) {
   }, [href, setOpen])
   return (
     <AgentPanelContext.Provider
-      value={{ open, docked, setOpen, tab, setTab, buttonRef, openerRef, dockBlockers }}
+      value={{
+        open,
+        docked,
+        dockWidth,
+        setDockWidth,
+        setOpen,
+        tab,
+        setTab,
+        buttonRef,
+        openerRef,
+        dockBlockers,
+      }}
     >
       {/* La estructura no cambia al abrir o cerrar: la página nunca se remonta. */}
       <div className="flex min-w-0 flex-1">
         <div className="flex min-w-0 flex-1 flex-col">{children}</div>
         <DockedAgentPanel />
       </div>
-      <AgentPanelSheet />
+      <AgentPanelDrawer />
     </AgentPanelContext.Provider>
   )
 }
@@ -316,33 +366,50 @@ function headerStatus(data: AgentPanelSummary): string {
   return parts.join(" · ")
 }
 
-/** Cajón: cuando el panel no cabe como columna, y siempre en móvil. */
-function AgentPanelSheet() {
+/**
+ * Cajón: cuando el panel no cabe como columna, y siempre en móvil. Mismo
+ * contenedor y gestos que `FormDrawer`, para que todo lo que se superpone a la
+ * página se abra y se cierre igual.
+ */
+function AgentPanelDrawer() {
   const { open, docked, setOpen, buttonRef, openerRef } = useContext(AgentPanelContext)
+  const isMobile = useIsMobile()
   const canSee = useCanSeePanel()
   const shown = open && !docked
   const summary = useAgentPanelSummary(shown && canSee)
   const data = summary.data?.data
   return (
-    <Sheet open={shown} onOpenChange={(next) => setOpen(next)}>
-      <SheetContent
+    <Drawer
+      open={shown}
+      swipeDirection={isMobile ? "down" : "right"}
+      showSwipeHandle={isMobile}
+      onOpenChange={(next) => setOpen(next)}
+    >
+      <DrawerContent
         id={shown ? PANEL_ID : undefined}
-        side="right"
-        showCloseButton={false}
         finalFocus={() => (openerRef.current?.isConnected ? openerRef.current : buttonRef.current)}
-        className="gap-0 p-0 data-[side=right]:w-full data-[side=right]:sm:w-[400px] data-[side=right]:sm:max-w-md"
+        className="data-[swipe-axis=y]:[--drawer-content-height:calc(100dvh-1rem-env(safe-area-inset-top))] data-[swipe-axis=y]:[--drawer-content-max-height:calc(100dvh-1rem-env(safe-area-inset-top))]"
         aria-label="Agente"
       >
         <PanelHeader data={data} overlay />
         {shown ? <PanelBody summary={data} /> : null}
-      </SheetContent>
-    </Sheet>
+      </DrawerContent>
+    </Drawer>
   )
 }
 
 /** Columna fija a la derecha: no es modal, la página sigue usable al lado. */
 function DockedAgentPanel() {
-  const { open, docked, setOpen, buttonRef, openerRef } = useContext(AgentPanelContext)
+  const {
+    open,
+    docked,
+    setOpen,
+    buttonRef,
+    openerRef,
+    dockWidth: width,
+    setDockWidth: resize,
+  } = useContext(AgentPanelContext)
+  const sidebarWidth = useSidebarWidth()
   const canSee = useCanSeePanel()
   const shown = open && docked && canSee
   const summary = useAgentPanelSummary(shown)
@@ -353,24 +420,6 @@ function DockedAgentPanel() {
   useEffect(() => {
     if (shown) ref.current?.focus({ preventScroll: true })
   }, [shown])
-  const [width, setWidth] = useState(DOCK_WIDTH.initial)
-  useEffect(() => {
-    try {
-      const stored = Number(window.localStorage.getItem(DOCK_WIDTH_KEY))
-      if (Number.isFinite(stored) && stored > 0) setWidth(clampDockWidth(stored))
-    } catch {
-      // Sin almacenamiento (modo privado): queda el ancho por defecto.
-    }
-  }, [])
-  const resize = (next: number) => {
-    const clamped = clampDockWidth(next)
-    setWidth(clamped)
-    try {
-      window.localStorage.setItem(DOCK_WIDTH_KEY, String(clamped))
-    } catch {
-      // El ancho vale para esta sesión aunque no se pueda recordar.
-    }
-  }
   if (!shown) return null
   const close = () => {
     const target = openerRef.current?.isConnected ? openerRef.current : buttonRef.current
@@ -385,11 +434,13 @@ function DockedAgentPanel() {
       id={PANEL_ID}
       aria-label="Agente"
       tabIndex={-1}
-      // El tope depende de la ventana: la página conserva al menos el ancho que
-      // tiene con la columna por defecto y, donde la Bandeja muestra además
-      // «Contexto», el que necesitan sus tres paneles.
-      className="sticky top-0 flex h-svh min-w-80 max-w-[min(480px,calc(100vw-1152px))] shrink-0 flex-col border-l bg-background outline-none min-[1920px]:max-w-[min(480px,calc(100vw-1456px))]"
-      style={{ width }}
+      // El tope depende del espacio real: la página conserva el ancho que
+      // necesitan la lista y el hilo de la Bandeja; reducir el sidebar deja más.
+      className="sticky top-0 flex h-svh min-w-80 shrink-0 flex-col border-l bg-background outline-none"
+      style={{
+        width,
+        maxWidth: `min(${DOCK_WIDTH.max}px, calc(100vw - ${sidebarWidth + PAGE_MIN_WIDTH}px))`,
+      }}
       onKeyDown={(event) => {
         // Solo Esc pulsado dentro de la columna; los diálogos que abre viven en un portal.
         if (event.key !== "Escape" || event.defaultPrevented) return
@@ -463,26 +514,14 @@ function PanelHeader({
   )
   return (
     <div className="flex items-center gap-3 border-b p-4 sm:p-5">
-      {overlay ? (
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-lg"
-          className="sm:hidden"
-          aria-label="Volver"
-          onClick={close}
-        >
-          <ArrowLeft className="size-5" aria-hidden />
-        </Button>
-      ) : null}
       <AgentMark />
       <div className="min-w-0 flex-1 leading-tight">
         {overlay ? (
           <>
-            <SheetTitle className="text-[17px] font-bold tracking-tight">Agente</SheetTitle>
-            <SheetDescription className="flex items-center gap-1.5 text-xs">
+            <DrawerTitle className="text-[17px] font-bold tracking-tight">Agente</DrawerTitle>
+            <DrawerDescription className="flex items-center gap-1.5 text-xs">
               {status}
-            </SheetDescription>
+            </DrawerDescription>
           </>
         ) : (
           <>
@@ -495,7 +534,6 @@ function PanelHeader({
         type="button"
         variant="ghost"
         size="icon-lg"
-        className={overlay ? "hidden sm:inline-flex" : undefined}
         aria-label="Cerrar el panel del agente"
         onClick={close}
       >

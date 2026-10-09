@@ -153,7 +153,7 @@ test("bandeja: el estado del agente por conversación, las vistas con su total y
   const mobilePanel = page.getByRole("dialog", { name: "Agente" })
   await expect(mobilePanel.getByRole("tab", { name: /^Derivadas/ })).toHaveAttribute("aria-selected", "true")
   await expect(mobilePanel.getByText("Pide hablar con una persona")).toBeVisible()
-  await mobilePanel.getByRole("button", { name: "Volver" }).click()
+  await mobilePanel.getByRole("button", { name: "Cerrar el panel del agente" }).click()
   await expect(mobilePanel).toBeHidden()
 
   // Bandeja en móvil: una vista por vez; con el hilo abierto ceden la pantalla vistas y filtros.
@@ -206,8 +206,10 @@ test("panel del agente: columna fija en pantalla grande y cajón cuando no cabe"
   await expect(grip).toHaveAttribute("aria-valuenow", "416")
   expect(await columnWidth()).toBe(416)
   await page.keyboard.press("End")
-  expect(await columnWidth()).toBe(448)
-  await page.mouse.move(1600 - 448, 450)
+  await expect(grip).toHaveAttribute("aria-valuenow", "640")
+  // 1600 de ventana − 256 de sidebar − 848 de página.
+  expect(await columnWidth()).toBe(496)
+  await page.mouse.move(1600 - 496, 450)
   await page.mouse.down()
   await page.mouse.move(1600 - 340, 450, { steps: 4 })
   await page.mouse.up()

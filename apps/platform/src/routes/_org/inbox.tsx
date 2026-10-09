@@ -89,10 +89,9 @@ import {
   useMyUserId,
 } from "../../lib/crm"
 import {
-  AGENT_PANEL_BESIDE_CONTEXT_QUERY,
   useAgentPanel,
   useAgentPanelDockBlocker,
-  useMediaQuery,
+  useAgentPanelFitsBesideContext,
 } from "../../components/agent-panel"
 import { ContactWorkspace } from "../../components/crm/contact-workspace"
 import { ACTION_LABEL, type AgentProposal } from "../../lib/agent"
@@ -329,7 +328,7 @@ function InboxPage() {
   // dos; «Contexto» sigue abierto por debajo y vuelve al cerrar el agente. Con
   // un borrador en «Contexto» el agente se abre como cajón y no lo desmonta.
   const agentPanel = useAgentPanel()
-  const roomForAgentAndContext = useMediaQuery(AGENT_PANEL_BESIDE_CONTEXT_QUERY)
+  const roomForAgentAndContext = useAgentPanelFitsBesideContext()
   const agentCoversContext =
     agentPanel.open && agentPanel.docked && !roomForAgentAndContext && !wsDraft
   useAgentPanelDockBlocker(mode === "panel" && contextOpen && wsDraft && !roomForAgentAndContext)

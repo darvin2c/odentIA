@@ -232,14 +232,15 @@ test("panel del agente: decidir, tomar derivadas y ver actividad desde cualquier
   await expect(page).toHaveURL(tenantPattern(org.slug, `/opportunities/${opportunity.id}`))
   await expect(panel).toBeHidden()
 
-  // Móvil: pantalla completa con retorno.
+  // Móvil: el mismo cajón que los formularios (hoja inferior a casi toda la pantalla).
   await page.setViewportSize({ width: 390, height: 844 })
   await gotoHydrated(page, tenant(org.slug, "/home"))
   await agentButton(page).click()
   const mobilePanel = page.getByRole("dialog", { name: "Agente" })
   await expect(mobilePanel).toBeVisible()
   const box = await mobilePanel.boundingBox()
-  expect(box?.width).toBeGreaterThanOrEqual(380)
+  expect(box?.width).toBeGreaterThanOrEqual(370)
+  expect(box?.height).toBeGreaterThanOrEqual(800)
   await expect(mobilePanel.getByRole("tab", { name: "Por decidir · 1", exact: true })).toBeVisible()
   const cold = mobilePanel.getByRole("listitem").filter({ hasText: "Ortodoncia sin hilo" })
   await expect(cold).toContainText("Espera tu aprobación")
@@ -249,7 +250,7 @@ test("panel del agente: decidir, tomar derivadas y ver actividad desde cualquier
     body: await page.screenshot({ fullPage: false }),
     contentType: "image/png",
   })
-  await mobilePanel.getByRole("button", { name: "Volver" }).click()
+  await mobilePanel.getByRole("button", { name: "Cerrar el panel del agente" }).click()
   await expect(mobilePanel).toBeHidden()
   await expect(agentButton(page)).toBeFocused()
 })
