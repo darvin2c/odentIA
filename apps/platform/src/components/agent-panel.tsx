@@ -94,6 +94,11 @@ const DOCK_QUERY = "(min-width: 1536px)"
 /** Desde este ancho la Bandeja muestra a la vez hilo, «Contexto» y agente. */
 export const AGENT_PANEL_BESIDE_CONTEXT_QUERY = "(min-width: 1920px)"
 const PANEL_ID = "panel-del-agente"
+/** Ancho de la columna en px: ajustable con el tirador y recordado en este navegador. */
+const DOCK_WIDTH = { initial: 384, min: 320, max: 480, step: 16 }
+const DOCK_WIDTH_KEY = "odentia.agent-panel.width"
+const clampDockWidth = (value: number) =>
+  Math.min(DOCK_WIDTH.max, Math.max(DOCK_WIDTH.min, Math.round(value)))
 
 const useEffectBeforePaint: typeof useEffect =
   typeof window === "undefined" ? useEffect : useLayoutEffect
@@ -348,6 +353,24 @@ function DockedAgentPanel() {
   useEffect(() => {
     if (shown) ref.current?.focus({ preventScroll: true })
   }, [shown])
+  const [width, setWidth] = useState(DOCK_WIDTH.initial)
+  useEffect(() => {
+    try {
+      const stored = Number(window.localStorage.getItem(DOCK_WIDTH_KEY))
+      if (Number.isFinite(stored) && stored > 0) setWidth(clampDockWidth(stored))
+    } catch {
+      // Sin almacenamiento (modo privado): queda el ancho por defecto.
+    }
+  }, [])
+  const resize = (next: number) => {
+    const clamped = clampDockWidth(next)
+    setWidth(clamped)
+    try {
+      window.localStorage.setItem(DOCK_WIDTH_KEY, String(clamped))
+    } catch {
+      // El ancho vale para esta sesión aunque no se pueda recordar.
+    }
+  }
   if (!shown) return null
   const close = () => {
     const target = openerRef.current?.isConnected ? openerRef.current : buttonRef.current
@@ -362,7 +385,11 @@ function DockedAgentPanel() {
       id={PANEL_ID}
       aria-label="Agente"
       tabIndex={-1}
-      className="sticky top-0 flex h-svh w-96 shrink-0 flex-col border-l bg-background outline-none"
+      // El tope depende de la ventana: la página conserva al menos el ancho que
+      // tiene con la columna por defecto y, donde la Bandeja muestra además
+      // «Contexto», el que necesitan sus tres paneles.
+      className="sticky top-0 flex h-svh min-w-80 max-w-[min(480px,calc(100vw-1152px))] shrink-0 flex-col border-l bg-background outline-none min-[1920px]:max-w-[min(480px,calc(100vw-1456px))]"
+      style={{ width }}
       onKeyDown={(event) => {
         // Solo Esc pulsado dentro de la columna; los diálogos que abre viven en un portal.
         if (event.key !== "Escape" || event.defaultPrevented) return
@@ -370,6 +397,43 @@ function DockedAgentPanel() {
         close()
       }}
     >
+      {/* Tirador: arrastre, flechas (Inicio/Fin a los extremos) y doble clic para volver al ancho por defecto. */}
+      {/* biome-ignore lint/a11y/useSemanticElements: separador interactivo (patrón «window splitter» de ARIA); <hr> no admite foco ni valor. */}
+      <div
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Ancho del panel del agente"
+        aria-valuenow={width}
+        aria-valuemin={DOCK_WIDTH.min}
+        aria-valuemax={DOCK_WIDTH.max}
+        tabIndex={0}
+        className="absolute inset-y-0 -left-1 z-10 w-2 cursor-col-resize touch-none outline-none after:absolute after:inset-y-0 after:left-1/2 after:w-0.5 after:-translate-x-1/2 after:bg-transparent hover:after:bg-border focus-visible:after:bg-ring active:after:bg-ring"
+        onPointerDown={(event) => {
+          event.preventDefault()
+          event.currentTarget.setPointerCapture(event.pointerId)
+        }}
+        onPointerMove={(event) => {
+          if (!event.currentTarget.hasPointerCapture(event.pointerId)) return
+          // La columna termina en el borde derecho de la ventana.
+          resize(document.documentElement.clientWidth - event.clientX)
+        }}
+        onDoubleClick={() => resize(DOCK_WIDTH.initial)}
+        onKeyDown={(event) => {
+          const next =
+            event.key === "ArrowLeft"
+              ? width + DOCK_WIDTH.step
+              : event.key === "ArrowRight"
+                ? width - DOCK_WIDTH.step
+                : event.key === "Home"
+                  ? DOCK_WIDTH.min
+                  : event.key === "End"
+                    ? DOCK_WIDTH.max
+                    : null
+          if (next === null) return
+          event.preventDefault()
+          resize(next)
+        }}
+      />
       <PanelHeader data={data} onClose={close} />
       <PanelBody summary={data} />
     </aside>

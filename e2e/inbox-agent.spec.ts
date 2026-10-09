@@ -196,6 +196,27 @@ test("panel del agente: columna fija en pantalla grande y cajón cuando no cabe"
   expect(await overflow(page)).toBeLessThanOrEqual(0)
   await info.attach("columna-inicio", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
 
+  // El ancho se ajusta con el tirador (teclado y arrastre) y se recuerda; el
+  // tope deja a la página el ancho que tiene con la columna por defecto.
+  const grip = column.getByRole("separator", { name: "Ancho del panel del agente" })
+  const columnWidth = async () => Math.round((await column.boundingBox())?.width ?? 0)
+  await grip.focus()
+  await page.keyboard.press("ArrowLeft")
+  await page.keyboard.press("ArrowLeft")
+  await expect(grip).toHaveAttribute("aria-valuenow", "416")
+  expect(await columnWidth()).toBe(416)
+  await page.keyboard.press("End")
+  expect(await columnWidth()).toBe(448)
+  await page.mouse.move(1600 - 448, 450)
+  await page.mouse.down()
+  await page.mouse.move(1600 - 340, 450, { steps: 4 })
+  await page.mouse.up()
+  expect(await columnWidth()).toBe(340)
+  expect(await overflow(page)).toBeLessThanOrEqual(0)
+  await gotoHydrated(page, tenant(org.slug, "/home"))
+  await button.click()
+  expect(await columnWidth()).toBe(340)
+
   // No tapa la página: se navega con ella abierta y sigue ahí.
   await page.getByRole("navigation").getByRole("link", { name: "Bandeja", exact: true }).click()
   await expect(page.getByRole("heading", { level: 1, name: "Bandeja" })).toBeVisible()
