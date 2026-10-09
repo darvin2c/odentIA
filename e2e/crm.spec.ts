@@ -149,7 +149,9 @@ test("crm agente: responde al segundo inbound y el operador toma el hilo", async
   await page.getByLabel("Mensaje").press("Enter")
   await expect(page.getByText("Te ayudo por aquí mismo").first()).toBeVisible()
 
-  // Responder cierra el turno: la corrida queda correcta con una sola llamada al modelo.
+  // Responder cierra el turno: una sola corrida correcta con una sola llamada
+  // al modelo. Leyó también el primer mensaje (llegó con el agente apagado) y
+  // deja constancia de haberlo atendido, sin otra llamada.
   await expect
     .poll(
       async () =>
@@ -160,10 +162,15 @@ test("crm agente: responde al segundo inbound y el operador toma el hilo", async
             `/api/agent/runs?conversationId=${conversationId}`,
             org.slug,
           )
-        ).map((run) => ({ status: run.status, llmCalls: run.llmCalls })),
+        )
+          .map((run) => ({ status: run.status, llmCalls: run.llmCalls }))
+          .sort((a, b) => a.status.localeCompare(b.status)),
       { timeout: 30_000 },
     )
-    .toEqual([{ status: "ok", llmCalls: 1 }])
+    .toEqual([
+      { status: "ok", llmCalls: 1 },
+      { status: "omitida", llmCalls: 0 },
+    ])
   // La simulación devuelve lo que se habría enviado, no un texto que nadie recibe.
   const simulation = await call<{ reply: string; replied: boolean }>(
     page,

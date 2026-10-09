@@ -46,6 +46,8 @@ export interface AgentToolCtx {
   runInstruction?: string
   /** Restringe herramientas para disparadores operativos sin mensaje entrante. */
   allowedTools?: readonly string[]
+  /** Herramientas que en este hilo no pueden servir; su esquema no se envía al modelo. */
+  excludedTools?: readonly string[]
   commercialCoordinationId?: string
   /** Una coordinación proactiva ya produjo su único resultado terminal. */
   decisionRecorded: boolean
@@ -126,7 +128,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
    * ProposalLifecycle, que ya no la lanza); se traduce a este texto.
    */
   const OUTSIDE_WINDOW =
-    "outside_window: fuera de la ventana de 24h de WhatsApp. Usa send_template con una plantilla autorizada o deriva a humano."
+    "outside_window: fuera de la ventana de 24h del canal. Si dispones de send_template, úsala con una plantilla autorizada; si no, deriva a humano."
   /**
    * Crea la propuesta comercial con clave estable por trigger + herramienta
    * + payload. En modo directo se ejecuta en el mismo acto; si exige
@@ -256,7 +258,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     {
       name: "send_reply",
       description:
-        "Envía la respuesta completa al interlocutor y cierra el turno: úsala al final, después de cualquier otra acción (queda como propuesta si la política no es directa). Si devuelve outside_window, usa send_template o deriva.",
+        "Envía la respuesta completa al interlocutor y cierra el turno: úsala al final, después de cualquier otra acción (queda como propuesta si la política no es directa). Si devuelve outside_window, sigue su indicación.",
       schema: z.object({ text: z.string().min(1).max(4000) }),
     },
   )
@@ -399,7 +401,8 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     },
     {
       name: "consultar_conocimiento",
-      description: "Busca respuestas oficiales publicadas de la clínica. Cítalas tal cual.",
+      description:
+        "Busca respuestas oficiales publicadas por una palabra o frase literal del título o del texto; para el texto completo de una respuesta recortada pasa su título exacto. Cítalas tal cual.",
       schema: z.object({ pregunta: z.string().min(2).max(300) }),
     },
   )
@@ -892,5 +895,9 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     confirmProposal,
     requestHandoff,
   ]
-  return ctx.allowedTools ? tools.filter((candidate) => ctx.allowedTools?.includes(candidate.name)) : tools
+  return tools.filter(
+    (candidate) =>
+      (!ctx.allowedTools || ctx.allowedTools.includes(candidate.name)) &&
+      !ctx.excludedTools?.includes(candidate.name),
+  )
 }

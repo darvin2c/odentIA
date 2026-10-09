@@ -99,7 +99,15 @@ const queues: QueueDef[] = [
       if (!msg) return false
       await consumeInbound(
         db,
-        { storage, fetch, secretsKey, transcribe: transcribe ?? undefined, webURL: env.WEB_URL, cookieDomain: env.COOKIE_DOMAIN },
+        {
+          storage,
+          fetch,
+          secretsKey,
+          transcribe: transcribe ?? undefined,
+          webURL: env.WEB_URL,
+          cookieDomain: env.COOKIE_DOMAIN,
+          agentBurstWindowSeconds: env.AGENT_BURST_WINDOW_SECONDS,
+        },
         msg,
       )
       console.log(`worker: inbound msg_id=${msg.msg_id}`)

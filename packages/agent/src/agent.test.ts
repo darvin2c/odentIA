@@ -236,13 +236,26 @@ it("handoff por palabra clave apaga el agente y crea tarea", async () => {
   )
 })
 
-it("trigger superseded no genera respuesta", async () => {
+it("una ráfaga la atiende la primera corrida y las demás no repiten la respuesta", async () => {
   const first = await ingestText("tg:ag3", "evt-ag3", "primero")
+  const rest: { conversationId: string; messageId: string }[] = []
   for (let i = 0; i < 6; i++) {
-    await ingestText("tg:ag3", `evt-ag3-${i}`, `mensaje ${i}`)
+    rest.push(await ingestText("tg:ag3", `evt-ag3-${i}`, `mensaje ${i}`))
   }
+  // La corrida del primer mensaje lee los siete y responde una vez.
   expect(await runAgent(first.conversationId, first.messageId)).toBe("done")
-  expect(await agentMessages(first.conversationId)).toEqual([])
+  expect(await agentMessages(first.conversationId)).toEqual([FAKE_REPLY_TEXT])
+  // Las corridas del resto de la ráfaga ya están atendidas: no responden otra vez.
+  for (const item of rest) expect(await runAgent(item.conversationId, item.messageId)).toBe("done")
+  expect(await agentMessages(first.conversationId)).toEqual([FAKE_REPLY_TEXT])
+  const runs = await withOrgContext(appDb, "org_a", (tx) =>
+    tx
+      .select({ status: agentRunLedger.status })
+      .from(agentRunLedger)
+      .where(eq(agentRunLedger.conversationId, first.conversationId)),
+  )
+  expect(runs.filter((r) => r.status === "ok")).toHaveLength(1)
+  expect(runs.filter((r) => r.status === "omitida")).toHaveLength(6)
 })
 
 function emptyUsage(): AgentToolCtx["usage"] {
@@ -356,8 +369,10 @@ it("texto sin herramienta de envío queda como sin_respuesta y avisa al equipo s
       .where(eq(workspaceNotification.userId, receptionId)),
   )
   expect(notices).toEqual([{ title: "El agente no respondió", href: `/inbox?conversation=${conversationId}` }])
-  // Reprocesar el mismo disparador no duplica el aviso.
+  // Una corrida sin respuesta no da el mensaje por atendido: reprocesarlo
+  // vuelve a llamar al modelo, y no duplica el aviso.
   expect(await runScripted(model, conversationId, messageId)).toBe("done")
+  expect(model.seen).toHaveLength(2)
   const again = await withOrgContext(appDb, "org_a", (tx) =>
     tx
       .select({ id: workspaceNotification.id })
@@ -718,8 +733,17 @@ it("una reentrega con el hilo ya respondido no avisa ni queda sin_respuesta", as
   expect(await runScripted(replies, conversationId, messageId)).toBe("done")
   const silent = new ScriptedModel(() => new AIMessage({ content: "Ya respondí antes." }))
   expect(await runScripted(silent, conversationId, messageId)).toBe("done")
+  // El mensaje ya consta como atendido: la reentrega ni llama al modelo ni añade filas.
+  expect(silent.seen).toHaveLength(0)
   expect(await agentMessages(conversationId)).toEqual(["Sí, abrimos mañana."])
-  expect((await ledgerRows(conversationId)).map((r) => r.status)).toEqual(["ok", "ok"])
+  expect((await ledgerRows(conversationId)).map((r) => r.status)).toEqual(["ok"])
+  // Si la corrida cayó antes de anotarse en el libro, la reentrega sí se
+  // ejecuta; como el hilo ya tiene la respuesta, no avisa ni queda sin_respuesta.
+  await ownerDb.delete(agentRunLedger).where(eq(agentRunLedger.conversationId, conversationId))
+  expect(await runScripted(silent, conversationId, messageId)).toBe("done")
+  expect(silent.seen).toHaveLength(1)
+  expect(await agentMessages(conversationId)).toEqual(["Sí, abrimos mañana."])
+  expect((await ledgerRows(conversationId)).map((r) => r.status)).toEqual(["ok"])
   const notices = await withOrgContext(appDb, "org_a", (tx) =>
     tx
       .select({ id: workspaceNotification.id })

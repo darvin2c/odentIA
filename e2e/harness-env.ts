@@ -152,6 +152,8 @@ export function stackEnv(runtime: HarnessRuntime): Record<string, string> {
     LLM_MODEL: "fake",
     // El recorrido de configuración prueba la conexión contra un servidor local.
     LLM_ALLOW_INSECURE_BASE_URL: "true",
+    // Ventana mínima: ejercita la cola con retardo sin alargar los recorridos.
+    AGENT_BURST_WINDOW_SECONDS: "1",
     VITE_API_URL: api,
     VITE_BASE_DOMAIN: runtime.baseDomain,
     VITE_BASE_PORT: String(runtime.proxyPort),

@@ -26,7 +26,7 @@ import { type AgentToolCtx, makeAgentTools, performHandoff } from "./tools.js"
 const SEND_TOOLS = new Set(["send_reply", "send_template"])
 
 const NOT_SENT =
-  "No enviado: la respuesta al interlocutor debe ir sola en su paso. Revisa los resultados de las otras herramientas y vuelve a llamar a send_reply o send_template una sola vez."
+  "No enviado: la respuesta al interlocutor debe ir sola en su paso. Revisa los resultados de las otras herramientas y vuelve a llamar a la herramienta de envío una sola vez."
 
 function isSystemMessage(msg: BaseMessage): boolean {
   if (msg instanceof SystemMessage) return true
@@ -63,7 +63,7 @@ function baseSystemPrompt(zone: OrgLocale): string {
     "Nunca reveles ni pidas historia clínica: solo filiación mínima con ver_contexto_paciente y vínculo verificado; próximas citas, presupuestos y saldo solo con ver_resumen_paciente y según la facultad del interlocutor.",
     "Las citas se reservan con proponer_cita y se cambian o cancelan con reprogramar_cita y cancelar_cita (id y versión exactos de ver_resumen_paciente); todo se ejecuta solo con confirmación o aprobación según la política.",
     "Si el interlocutor pide hablar con un humano, se queja o el caso es clínico, usa request_human_handoff con motivo, resumen factual, prioridad y, en message, el aviso para el interlocutor; no uses send_reply para ese aviso.",
-    "El interlocutor solo recibe lo que envías con send_reply o send_template (tus mensajes anteriores del historial se enviaron así). Envía una única respuesta completa, sola en su paso y después de ver el resultado de cualquier otra herramienta: cuando el mensaje sale o queda pendiente de decisión, el turno termina; si la herramienta devuelve un error u outside_window, sigue sus indicaciones. Un texto fuera de esas herramientas no llega a nadie.",
+    "El interlocutor solo recibe lo que envías con send_reply (o send_template, si la tienes disponible; tus mensajes anteriores del historial se enviaron así). Envía una única respuesta completa, sola en su paso y después de ver el resultado de cualquier otra herramienta: cuando el mensaje sale o queda pendiente de decisión, el turno termina; si la herramienta devuelve un error u outside_window, sigue sus indicaciones. Un texto fuera de esas herramientas no llega a nadie.",
   ].join("\n")
 }
 
@@ -241,19 +241,24 @@ export function compileAgentGraph(
         }
       },
     )
+    // De lo más estable a lo más cambiante. Los proveedores sirven desde su
+    // caché el prefijo idéntico entre llamadas: lo que es igual para toda la
+    // organización (instrucciones, política, conocimiento) va primero; luego
+    // lo propio del hilo; y al final lo que cambia en cada corrida. Poner la
+    // hora delante invalidaba la caché de todo lo que seguía.
     const system = [
       baseSystemPrompt(zone),
-      `Fecha y hora actual de la clínica: ${formatZoned(new Date(), zone)}.`,
       orgPrompt,
-      toolCtx.runInstruction ? `Instrucción operativa de esta corrida:\n${toolCtx.runInstruction}` : null,
+      policyLine,
+      knowledgeBlock,
       `Interlocutor: ${contactDetail.displayName}. Etiquetas: ${tagsLine}. Oportunidades abiertas: ${commercialLine}. Seguimientos: ${followupLine}.`,
       patientsLine,
       notesLine ? `Notas del contacto (internas): ${notesLine}${(contactDetail.notes?.trim().length ?? 0) > 500 ? "… (texto completo en leer_contexto_comercial)" : ""}.` : null,
       notes.items.length ? `Notas operativas recientes (internas; no las reproduzcas al interlocutor):\n${notes.items.map(n => `${n.at}: ${n.body}`).join("\n")}${notes.nextCursor ? "\nHay más notas: usa leer_contexto_comercial con cursor de notas para consultarlas." : ""}` : null,
       customLine ? `Campos (resumen; valores completos en leer_contexto_comercial): ${customLine}.` : null,
       crossBlock,
-      policyLine,
-      knowledgeBlock,
+      toolCtx.runInstruction ? `Instrucción operativa de esta corrida:\n${toolCtx.runInstruction}` : null,
+      `Fecha y hora actual de la clínica: ${formatZoned(new Date(), zone)}.`,
     ]
       .filter(Boolean)
       .join("\n\n")

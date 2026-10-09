@@ -2230,6 +2230,7 @@ export async function countOpenHandoffs(tx: Db, orgId: string): Promise<number> 
 }
 
 export interface AgentRunsToday {
+  /** Corridas que hicieron algo; las omitidas (ráfaga ya atendida, agente apagado) no cuentan. */
   runs: number
   ok: number
   handoff: number
@@ -2248,7 +2249,7 @@ export async function countAgentRunsToday(tx: Db, orgId: string, timezone: strin
     omitida: number
     sin_respuesta: number
   }>(sql`
-    select count(*)::int as runs,
+    select count(*) filter (where status <> 'omitida')::int as runs,
       count(*) filter (where status = 'ok')::int as ok,
       count(*) filter (where status = 'handoff')::int as handoff,
       count(*) filter (where status = 'error')::int as error,

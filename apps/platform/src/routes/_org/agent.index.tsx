@@ -199,8 +199,19 @@ function AgentSupervisionPage() {
       {
         accessorKey: "error",
         header: "Error",
+        // Una corrida omitida no es un fallo: su motivo se explica, no se alarma.
         cell: ({ row }) =>
-          row.original.error ? <span className="text-destructive">{row.original.error}</span> : "—",
+          !row.original.error ? (
+            "—"
+          ) : row.original.status === "omitida" ? (
+            <span className="text-muted-foreground">
+              {row.original.error === "burst-covered"
+                ? "Atendido en la corrida de otro mensaje del hilo"
+                : row.original.error}
+            </span>
+          ) : (
+            <span className="text-destructive">{row.original.error}</span>
+          ),
       },
     ],
     [],

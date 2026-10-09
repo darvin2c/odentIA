@@ -24,6 +24,13 @@ const envSchema = z.object({
   /** Tiempo límite por intento y reintentos del cliente del modelo. */
   LLM_TIMEOUT_MS: z.coerce.number().int().min(1000).max(600_000).default(60_000),
   LLM_MAX_RETRIES: z.coerce.number().int().min(0).max(5).default(2),
+  // Segundos que el agente espera tras un mensaje entrante antes de leer el
+  // hilo: agrupa ráfagas en una sola corrida. 0 responde sin esperar.
+  // Vacío en el .env cuenta como no definido (no como 0, que la desactivaría).
+  AGENT_BURST_WINDOW_SECONDS: z.preprocess(
+    (value) => (value === "" ? undefined : value),
+    z.coerce.number().int().min(0).max(30).default(4),
+  ),
   /** dev/e2e: admite http y destinos privados para servidores locales de prueba. */
   LLM_ALLOW_INSECURE_BASE_URL: z.enum(["true", "false"]).default("false"),
   /** Modelos de decisión (plataforma); vacíos = ese proveedor no está disponible. */

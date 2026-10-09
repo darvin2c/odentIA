@@ -32,6 +32,11 @@ Proveedor de la plataforma: en `infra/dev/.env`, `LLM_MODEL=<nombre que espera
 el endpoint>` (el prefijo `openai:` es opcional), `LLM_API_KEY` y `LLM_BASE_URL`
 con la URL base publicada por el proveedor (incluido `/v1` o el prefijo que
 indique). `LLM_TIMEOUT_MS` y `LLM_MAX_RETRIES` acotan cada llamada.
+`AGENT_BURST_WINDOW_SECONDS` (worker, 4 por defecto, 0–30) es lo que el agente
+espera tras un mensaje entrante antes de leer el hilo: normalmente agrupa una
+ráfaga en una sola corrida y una sola respuesta (mejor esfuerzo; límites en
+`docs/decisions/0005-uso-del-modelo-rafagas-y-prefijo.md`), a cambio de esa
+demora en cada respuesta; `0` responde sin esperar.
 `LLM_ALLOW_INSECURE_BASE_URL=true` solo en dev: admite http y destinos privados
 para un servidor local de prueba; en producción la URL debe ser https y pública.
 

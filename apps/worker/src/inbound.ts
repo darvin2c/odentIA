@@ -19,6 +19,8 @@ export interface IngestDeps {
   transcribe?: TranscribeFn
   webURL?: string
   cookieDomain?: string
+  /** Ventana de ráfaga: retardo de la corrida del agente tras cada entrante. */
+  agentBurstWindowSeconds?: number
 }
 
 /** Máximo de entregas pgmq antes de declarar el mensaje venenoso. */
@@ -99,12 +101,16 @@ export async function processInbound(
         .where(eq(agentConfig.organizationId, orgId))
         .limit(1)
       if (conv?.agentStatus === "on" && cfg?.enabled) {
-        await sendAgentRun(tx, {
-          kind: "inbound_message",
-          orgId,
-          conversationId: result.conversationId,
-          messageId: result.messageId,
-        })
+        await sendAgentRun(
+          tx,
+          {
+            kind: "inbound_message",
+            orgId,
+            conversationId: result.conversationId,
+            messageId: result.messageId,
+          },
+          { delaySeconds: deps.agentBurstWindowSeconds ?? 0 },
+        )
       }
     })
     return "done"
