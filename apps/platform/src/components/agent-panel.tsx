@@ -474,6 +474,15 @@ function ProposalsTab({ when }: { when: WhenFormatter }) {
           >
             {decidable ? "Abrir caso" : "Abrir conversación"}
           </Link>
+        ) : typeof proposal.payload.opportunityId === "string" ? (
+          // Trabajo proactivo sin hilo: el caso es la oportunidad; el hilo se abre al aprobar.
+          <Link
+            to="/opportunities/$opportunityId"
+            params={{ opportunityId: proposal.payload.opportunityId }}
+            className={`text-sm ${INLINE_LINK}`}
+          >
+            Abrir oportunidad
+          </Link>
         ) : null}
       </li>
     )

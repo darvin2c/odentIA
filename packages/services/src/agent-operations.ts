@@ -23,6 +23,7 @@ import {
   agentConfig,
   channelConnection,
   contact,
+  contactIdentity,
   conversation,
   crmTask,
   message as conversationMessage,
@@ -39,7 +40,13 @@ import {
   moveAppointment,
   setAppointmentStatus,
 } from "./appointments.js"
-import { listMessages, sendOutbound, sendTemplateOutbound, setAgentStatus } from "./conversations.js"
+import {
+  listMessages,
+  sendOutbound,
+  sendTemplateOutbound,
+  setAgentStatus,
+  startContactConversation,
+} from "./conversations.js"
 import { isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
 import {
   closeOpportunity,
@@ -64,12 +71,14 @@ const CONFIRM_TTL_MS = CONFIRM_TTL_HOURS * 60 * 60 * 1000
 /**
  * Caducidad perezosa y persistente: marca `expirada` toda propuesta pendiente
  * anterior al umbral. Se llama antes de bloquear (crear), listar, ver,
- * decidir, confirmar y ejecutar —sin jobs ni cron—: la primera
+ * decidir, confirmar y ejecutar —sin job propio—: la primera
  * lectura/escritura que consolida (sin error posterior) persiste la
  * caducidad, y el filtro por tiempo (`createdAt` reciente) impide que una
- * propuesta vieja bloquee aunque su fila aún no se haya marcado.
+ * propuesta vieja bloquee aunque su fila aún no se haya marcado. El tick de
+ * automatizaciones también la invoca para cerrar las coordinaciones
+ * comerciales cuya propuesta nadie decidió.
  */
-async function expireDueProposals(tx: Db, orgId: string, conversationId?: string): Promise<void> {
+export async function expireDueProposals(tx: Db, orgId: string, conversationId?: string): Promise<void> {
   const conditions = [
     eq(agentProposal.organizationId, orgId),
     eq(agentProposal.status, "propuesta"),
@@ -902,6 +911,13 @@ async function enrichProposals(tx: Db, orgId: string, rows: ProposalRow[]): Prom
   ])
   const contactById = new Map(contacts.map((c) => [c.id, c.displayName]))
   const connectionByConv = new Map(convs.map((c) => [c.id, c.connectionId]))
+  // Propuestas sin hilo: el canal es el que abrirían al ejecutarse.
+  for (const row of rows) {
+    const payloadConnection = (row.payload as Record<string, unknown>)["connectionId"]
+    if (!row.conversationId && typeof payloadConnection === "string") {
+      connectionByConv.set(`payload:${row.id}`, payloadConnection)
+    }
+  }
   const oppById = new Map(opps.map((o) => [o.id, o]))
   const apptById = new Map(appts.map((a) => [a.id, a]))
   const patientById = new Map(patients.map((p) => [p.id, p.displayName]))
@@ -944,7 +960,9 @@ async function enrichProposals(tx: Db, orgId: string, rows: ProposalRow[]): Prom
     const patientId = [payload["patientId"], result["patientId"], opp?.patientId].find(
       (v): v is string => typeof v === "string" && !!v,
     )
-    const connectionId = row.conversationId ? connectionByConv.get(row.conversationId) : undefined
+    const connectionId = row.conversationId
+      ? connectionByConv.get(row.conversationId)
+      : connectionByConv.get(`payload:${row.id}`)
     const expected = expectedOf(row)
     let isStale = false
     let currentSummary: string | null = null
@@ -985,7 +1003,31 @@ async function enrichProposals(tx: Db, orgId: string, rows: ProposalRow[]): Prom
     ) {
       isStale = true
     }
-    return baseProposal(row, policy[action] ?? "aprobar_equipo", {
+    // Trabajo proactivo sin hilo: deja de aplicar si el seguimiento que lo
+    // motivó se atendió o se reprogramó (misma regla que al ejecutar).
+    if (
+      action === "enviar_mensaje" &&
+      !row.conversationId &&
+      row.status === "propuesta" &&
+      typeof payload["opportunityId"] === "string"
+    ) {
+      const due = typeof payload["followUpDueAt"] === "string" ? Date.parse(payload["followUpDueAt"]) : null
+      if (!opp || opp.status !== "open") {
+        isStale = true
+        currentSummary = "oportunidad cerrada"
+      } else if (due !== null && opp.nextActionAt?.getTime() !== due) {
+        isStale = true
+        currentSummary = "seguimiento atendido o reprogramado"
+      }
+    }
+    // El modo dice quién resuelve HOY la propuesta. Una pendiente bajo política
+    // directa, o sin hilo (no hay interlocutor que confirme), es del equipo.
+    const policyMode = policy[action] ?? "aprobar_equipo"
+    const mode: AutonomyMode =
+      row.status === "propuesta" && (policyMode === "directo" || !row.conversationId)
+        ? "aprobar_equipo"
+        : policyMode
+    return baseProposal(row, mode, {
       contactName: row.contactId ? (contactById.get(row.contactId) ?? null) : null,
       patientName: patientId ? (patientById.get(patientId) ?? null) : null,
       channel: connectionId ? (channelByConnection.get(connectionId) ?? null) : null,
@@ -1070,6 +1112,17 @@ function validatePayload(action: ProposalAction, payload: Record<string, unknown
           throw validation("params de plantilla inválidos")
         }
       }
+      // Propuesta proactiva sin hilo: el canal a abrir y la oportunidad que la
+      // motiva viajan en el payload (uuids, nunca secretos del proveedor).
+      uuidField(payload, "connectionId", "connectionId", true)
+      uuidField(payload, "identityId", "identityId", true)
+      uuidField(payload, "opportunityId", "opportunityId", true)
+      if (
+        payload["followUpDueAt"] !== undefined &&
+        (typeof payload["followUpDueAt"] !== "string" || Number.isNaN(Date.parse(payload["followUpDueAt"])))
+      ) {
+        throw validation("followUpDueAt inválido")
+      }
       return
     }
     throw validation("kind debe ser text o template")
@@ -1145,7 +1198,12 @@ export async function createProposal(
   tx: Db,
   orgId: string,
   input: {
-    conversationId: string
+    conversationId?: string
+    /**
+     * Propuesta sin hilo (trabajo proactivo): se ancla al contacto y la
+     * conversación se abre solo al ejecutarla. Exige `conversationId` o esto.
+     */
+    contactId?: string
     action: string
     payload: Record<string, unknown>
     reason?: unknown
@@ -1154,6 +1212,11 @@ export async function createProposal(
     actorUserId?: string | null
     /** Clave de secretos para ejecutar plantillas en modo directo. */
     secretsKey?: Buffer
+    /**
+     * Fuerza la decisión del equipo aunque la política sea `directo`: un acto
+     * que el agente inicia por su cuenta nunca se ejecuta sin una persona.
+     */
+    requireTeamDecision?: boolean
   },
 ): Promise<ProposalItem> {
   assertAction(input.action)
@@ -1166,16 +1229,35 @@ export async function createProposal(
   const reason = cleanReason(input.reason)
   const proposedBy = input.proposedBy === "user" ? "user" : "agent"
   let finalKey = key
-  const [lockedConv] = await tx
-    .select({ id: conversation.id, contactId: conversation.contactId })
-    .from(conversation)
-    .where(and(eq(conversation.organizationId, orgId), eq(conversation.id, input.conversationId)))
-    .for("update")
-    .limit(1)
-  if (!lockedConv) throw notFound("Conversación")
-  const conv = lockedConv
+  let conv: { id: string | null; contactId: string | null }
+  if (input.conversationId) {
+    const [lockedConv] = await tx
+      .select({ id: conversation.id, contactId: conversation.contactId })
+      .from(conversation)
+      .where(and(eq(conversation.organizationId, orgId), eq(conversation.id, input.conversationId)))
+      .for("update")
+      .limit(1)
+    if (!lockedConv) throw notFound("Conversación")
+    conv = lockedConv
+  } else if (input.contactId) {
+    // Serializa las propuestas proactivas del contacto sin bloquear su fila:
+    // el tick comparte transacción con el resto de sincronizaciones y un
+    // `FOR UPDATE` frenaría la ingesta de mensajes de esa persona.
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(hashtext(${`proactive-proposal:${orgId}`}), hashtext(${input.contactId}))`,
+    )
+    const [found] = await tx
+      .select({ id: contact.id })
+      .from(contact)
+      .where(and(eq(contact.organizationId, orgId), eq(contact.id, input.contactId)))
+      .limit(1)
+    if (!found) throw notFound("Contacto")
+    conv = { id: null, contactId: found.id }
+  } else {
+    throw validation("conversationId o contactId es obligatorio")
+  }
   // Caducidad perezosa antes de bloquear: las propuestas viejas no frenan el hilo.
-  await expireDueProposals(tx, orgId, input.conversationId)
+  await expireDueProposals(tx, orgId, conv.id ?? undefined)
   const [sameKey] = await tx
     .select()
     .from(agentProposal)
@@ -1194,13 +1276,16 @@ export async function createProposal(
     // solo una esperando confirmación del interlocutor por hilo: un mismo
     // «sí» no puede autorizar dos propuestas distintas. Los mensajes en modo
     // directo o con aprobación del equipo coexisten siempre.
+    // Sin hilo, la unidad es el contacto: una sola propuesta proactiva pendiente.
     const pendings = await tx
       .select({ action: agentProposal.action })
       .from(agentProposal)
       .where(
         and(
           eq(agentProposal.organizationId, orgId),
-          eq(agentProposal.conversationId, input.conversationId),
+          conv.id
+            ? eq(agentProposal.conversationId, conv.id)
+            : and(isNull(agentProposal.conversationId), eq(agentProposal.contactId, conv.contactId ?? "")),
           eq(agentProposal.status, "propuesta"),
           gt(agentProposal.createdAt, new Date(Date.now() - CONFIRM_TTL_MS)),
         ),
@@ -1215,6 +1300,13 @@ export async function createProposal(
       )
     }
     const pendingCommercial = pendings.find((p) => p.action !== "enviar_mensaje")
+    if (!conv.id && pendings.length > 0) {
+      throw new ServiceError(
+        "PROPOSAL_PENDING_APPROVAL",
+        409,
+        "Hay una propuesta proactiva pendiente para este contacto; el equipo debe decidirla antes de crear otra",
+      )
+    }
     if (input.action !== "enviar_mensaje" && pendingCommercial) {
       const awaitingContact = policy[pendingCommercial.action as ProposalAction] === "confirmar_usuario"
       throw new ServiceError(
@@ -1237,12 +1329,13 @@ export async function createProposal(
   const expectedSnapshot = conv.contactId
     ? await captureExpectedState(tx, orgId, input.action, input.payload, conv.contactId)
     : null
+  const direct = mode === "directo" && !input.requireTeamDecision
   try {
     const [row] = await tx
       .insert(agentProposal)
       .values({
         organizationId: orgId,
-        conversationId: input.conversationId,
+        conversationId: conv.id,
         contactId: conv.contactId,
         patientId: await proposalPatientId(tx, orgId, input.payload),
         action: input.action,
@@ -1253,9 +1346,9 @@ export async function createProposal(
         expectedState: expectedSnapshot ?? undefined,
         idempotencyKey: finalKey,
         proposedBy,
-        status: mode === "directo" ? "aprobada" : "propuesta",
-        decidedBy: mode === "directo" ? input.actorUserId ?? "agent" : null,
-        decidedAt: mode === "directo" ? new Date() : null,
+        status: direct ? "aprobada" : "propuesta",
+        decidedBy: direct ? input.actorUserId ?? "agent" : null,
+        decidedAt: direct ? new Date() : null,
       })
       .returning()
     if (!row) throw new Error("No se pudo crear la propuesta")
@@ -1265,14 +1358,14 @@ export async function createProposal(
       action: "agent.proposal_created",
       entity: "agent_proposal",
       entityId: row.id,
-      metadata: { action: input.action, conversationId: input.conversationId, reason },
+      metadata: { action: input.action, conversationId: conv.id, reason },
     })
     await notify(tx, { orgId, kind: "agent.proposal.created", at: new Date().toISOString() })
-    if (mode === "directo") {
+    if (direct) {
       return executeProposal(tx, orgId, input.actorUserId ?? "agent", row.id, { secretsKey: input.secretsKey })
     }
     const created = await enrichProposal(tx, orgId, row)
-    if (mode === "aprobar_equipo") {
+    if (mode === "aprobar_equipo" || input.requireTeamDecision) {
       await notifyApprovers(tx, orgId, created)
     }
     return created
@@ -1449,10 +1542,14 @@ export async function decideProposal(
       metadata: { reason: reason ?? current.reason },
     })
     await notify(tx, { orgId, kind: "agent.proposal.decided", at: new Date().toISOString() })
-    return enrichProposal(tx, orgId, row)
+    const rejected = await enrichProposal(tx, orgId, row)
+    await syncCommercialCoordination(tx, orgId, rejected)
+    return rejected
   }
   const policy = await getAutonomyPolicy(tx, orgId)
-  if (policy[current.action as ProposalAction] === "confirmar_usuario") {
+  // Sin hilo decide el equipo; si la política vigente exige al interlocutor,
+  // la ejecución falla con código estable en vez de dejar la tarjeta sin salida.
+  if (current.conversationId && policy[current.action as ProposalAction] === "confirmar_usuario") {
     throw new ServiceError(
       "PROPOSAL_NEEDS_CONTACT_CONFIRM",
       409,
@@ -1474,7 +1571,25 @@ export async function decideProposal(
     metadata: { reason: reason ?? current.reason },
   })
   await notify(tx, { orgId, kind: "agent.proposal.decided", at: new Date().toISOString() })
-  return executeProposal(tx, orgId, actorUserId, id, opts)
+  const executed = await executeProposal(tx, orgId, actorUserId, id, opts)
+  await syncCommercialCoordination(tx, orgId, executed)
+  return executed
+}
+
+/**
+ * Si la propuesta nació de una coordinación comercial que espera al equipo,
+ * la decisión la cierra: `ejecutada` con `messageId`, `derivada`, u `omitida`
+ * si el seguimiento ya no aplica. Import diferido: `commercial-coordination`
+ * depende de este módulo.
+ */
+async function syncCommercialCoordination(tx: Db, orgId: string, proposal: ProposalItem): Promise<void> {
+  const [row] = await tx.execute<{ id: string }>(sql`
+    select id from commercial_follow_up_coordination
+    where organization_id = ${orgId} and status = 'propuesta' and result->>'proposalId' = ${proposal.id}
+    limit 1`)
+  if (!row) return
+  const { closeProposedCoordination } = await import("./commercial-coordination.js")
+  await closeProposedCoordination(tx, orgId, row.id, proposal)
 }
 
 async function pendingConflict(tx: Db, orgId: string, id: string): Promise<ServiceError> {
@@ -1537,6 +1652,15 @@ export async function confirmProposalByContact(
   if (expired) return expired
   if (current.status !== "propuesta") {
     throw new ServiceError("PROPOSAL_NOT_PENDING", 409, `La propuesta ya está ${current.status}`)
+  }
+  // Sin hilo no existe mensaje del interlocutor que sirva de evidencia: una
+  // propuesta proactiva jamás se ejecuta como «confirmada por el contacto».
+  if (!current.conversationId) {
+    throw new ServiceError(
+      "PROPOSAL_NEEDS_TEAM_APPROVAL",
+      409,
+      "Esta propuesta no tiene conversación: la decide el equipo, no el sí del interlocutor",
+    )
   }
   const policy = await getAutonomyPolicy(tx, orgId)
   const effectiveMode = policy[current.action as ProposalAction] ?? "aprobar_equipo"
@@ -1638,7 +1762,9 @@ export async function executeProposal(
   const zone = await getOrgLocale(tx, orgId)
   // Solo un userId real va a las auditorías de negocio; el resto de la
   // autoridad (agent/contact/staff) queda en decidedBy y en el audit del acto.
-  const teamUserId = /^[0-9a-f-]{36}$/i.test(actorUserId) ? actorUserId : null
+  // Persona que decide: el id de sesión. `agent` y los prefijos `staff:`/
+  // `contact:` (confirmación registrada) no son usuarios del equipo.
+  const teamUserId = actorUserId === "agent" || actorUserId.includes(":") ? null : actorUserId
   // Los efectos corren tras un savepoint: si fallan, se deshacen los
   // parciales pero la marca `fallida` sí persiste en la tx exterior.
   await tx.execute(sql.raw("SAVEPOINT sp_proposal_exec"))
@@ -1726,21 +1852,106 @@ export async function executeProposal(
       const cancelled = await setAppointmentStatus(tx, orgId, actorUserId, appointmentId, "cancelada")
       result = { appointmentId: cancelled.id, status: cancelled.status }
     } else if (action === "enviar_mensaje") {
-      if (!locked.conversationId) throw validation("La propuesta no tiene conversación asociada")
+      let conversationId = locked.conversationId
+      let opened: string | null = null
+      if (!conversationId) {
+        // Propuesta proactiva: el hilo se abre solo ahora, con el canal que el
+        // equipo vio al aprobar; un canal que no admite inicio en frío falla aquí.
+        if (
+          payload["kind"] !== "template" ||
+          typeof payload["connectionId"] !== "string" ||
+          typeof payload["identityId"] !== "string" ||
+          !locked.contactId
+        ) {
+          throw validation("La propuesta no tiene conversación asociada")
+        }
+        // El seguimiento que la motivó debe seguir pendiente: si ya se atendió
+        // o se reprogramó, enviar la plantilla pisaría esa decisión humana.
+        const followUp =
+          typeof payload["opportunityId"] === "string"
+            ? await lockContactOpportunity(tx, orgId, locked.contactId, payload["opportunityId"])
+            : null
+        if (followUp) {
+          const expectedDue =
+            typeof payload["followUpDueAt"] === "string" ? Date.parse(payload["followUpDueAt"]) : null
+          if (followUp.status !== "open") throw staleError("la oportunidad ya se cerró", "oportunidad cerrada")
+          if (expectedDue !== null && followUp.nextActionAt?.getTime() !== expectedDue) {
+            throw staleError(
+              "el seguimiento ya se atendió o se reprogramó",
+              followUp.nextActionAt ? "próxima acción reprogramada" : "sin próxima acción pendiente",
+            )
+          }
+        }
+        // La política y el consentimiento vigentes mandan sobre lo que valía al
+        // proponer: pudieron endurecerse o revocarse mientras esperaba.
+        if ((await getAutonomyPolicy(tx, orgId)).enviar_mensaje === "confirmar_usuario") {
+          throw new ServiceError(
+            "POLICY_REQUIRES_CONTACT_CONFIRM",
+            409,
+            "La política vigente exige la confirmación del interlocutor y este seguimiento no tiene conversación; gestiónalo manualmente",
+          )
+        }
+        const [identity] = await tx
+          .select({ channel: contactIdentity.channel })
+          .from(contactIdentity)
+          .where(
+            and(
+              eq(contactIdentity.organizationId, orgId),
+              eq(contactIdentity.id, payload["identityId"]),
+              eq(contactIdentity.contactId, locked.contactId),
+            ),
+          )
+          .limit(1)
+        if (!identity) throw validation("La identidad de canal ya no pertenece a este contacto")
+        // Import diferido: `automation` depende de este módulo.
+        const { hasConsent } = await import("./automation.js")
+        if (!(await hasConsent(tx, orgId, locked.contactId, "seguimiento", identity.channel))) {
+          throw new ServiceError(
+            "CONSENT_REQUIRED",
+            409,
+            "El contacto ya no tiene consentimiento vigente para seguimiento en ese canal",
+          )
+        }
+        const thread = await startContactConversation(tx, orgId, teamUserId, locked.contactId, {
+          identityId: payload["identityId"],
+          connectionId: payload["connectionId"],
+        })
+        // Se propuso abrir un hilo: si entre tanto ya existe uno, la plantilla
+        // caería en una conversación viva sin las salvaguardas de ese recorrido.
+        if (!thread.created) {
+          throw staleError("el contacto ya tiene una conversación en ese canal", "conversación existente")
+        }
+        conversationId = thread.id
+        opened = thread.id
+        await tx
+          .update(agentProposal)
+          .set({ conversationId, updatedAt: new Date() })
+          .where(eq(agentProposal.id, locked.id))
+        // El caso conserva su hilo: los siguientes seguimientos ya conversan ahí.
+        if (followUp && !followUp.conversationId) {
+          await updateOpportunity(tx, orgId, followUp.id, { conversationId }, { userId: teamUserId })
+        }
+      }
       if (payload["kind"] === "template") {
         if (!opts.secretsKey) throw validation("Falta la clave de secretos para ejecutar la plantilla")
         const sent = await sendTemplateOutbound(tx, orgId, opts.secretsKey, {
-          conversationId: locked.conversationId,
+          conversationId,
           senderKind: "agent",
           senderUserId: teamUserId,
           name: payload["name"] as string,
           language: payload["language"] as string,
           params: Array.isArray(payload["params"]) ? (payload["params"] as string[]) : [],
         })
-        result = { messageId: sent.id, kind: "template", name: payload["name"], language: payload["language"] }
+        result = {
+          messageId: sent.id,
+          kind: "template",
+          name: payload["name"],
+          language: payload["language"],
+          ...(opened ? { conversationId: opened } : {}),
+        }
       } else {
         const sent = await sendOutbound(tx, orgId, {
-          conversationId: locked.conversationId,
+          conversationId,
           senderKind: "agent",
           senderUserId: teamUserId,
           content: { type: "text", text: payload["text"] as string },
@@ -2065,13 +2276,15 @@ export interface PendingProposalCounts {
 /** Propuestas pendientes separadas según quién puede resolverlas con la política vigente. */
 export async function countPendingProposals(tx: Db, orgId: string): Promise<PendingProposalCounts> {
   const policy = await getAutonomyPolicy(tx, orgId)
-  const rows = await tx.execute<{ action: string; count: number }>(sql`
-    select action, count(*)::int as count from agent_proposal
-    where organization_id = ${orgId} and status = 'propuesta' group by action`)
+  const rows = await tx.execute<{ action: string; threadless: boolean; count: number }>(sql`
+    select action, (conversation_id is null) as threadless, count(*)::int as count from agent_proposal
+    where organization_id = ${orgId} and status = 'propuesta' group by action, (conversation_id is null)`)
   const counts = { team: 0, contact: 0 }
   for (const row of rows) {
-    if (policy[row.action as AutonomyAction] === "confirmar_usuario") counts.contact += row.count
-    else counts.team += row.count
+    // Sin hilo no hay interlocutor que confirme: siempre es del equipo.
+    if (!row.threadless && policy[row.action as AutonomyAction] === "confirmar_usuario") {
+      counts.contact += row.count
+    } else counts.team += row.count
   }
   return counts
 }

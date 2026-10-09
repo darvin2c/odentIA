@@ -178,6 +178,20 @@ it.each([
   expect(await response.json()).toMatchObject({ error: { code: "NOT_FOUND" } })
 })
 
+it("la API no crea propuestas sin conversación: el trabajo proactivo nace solo del tick", async () => {
+  const response = await buildApp("owner").request("/agent/proposals", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      contactId: randomUUID(),
+      action: "enviar_mensaje",
+      payload: { kind: "template", name: "seguimiento_presupuesto", language: "es_PE" },
+      idempotencyKey: randomUUID(),
+    }),
+  })
+  expect(response.status).toBe(400)
+})
+
 it("bandeja: lista, detalle y envío dentro de ventana", async () => {
   const app = buildApp("owner")
   const list = await app.request("/conversations")

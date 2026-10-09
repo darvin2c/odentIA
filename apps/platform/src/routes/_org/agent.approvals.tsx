@@ -149,6 +149,7 @@ function AgentApprovalsPage() {
             </dl>
             {proposal.context.isStale === true && proposal.status === "propuesta" && <p role="alert" className="text-sm text-destructive">La situación cambió desde que se propuso; revisa el estado del caso antes de decidir.</p>}
             {proposal.conversationId && <Link to="/inbox" search={{ conversation: proposal.conversationId }} className="text-sm text-primary underline">Abrir conversación y evidencia</Link>}
+            {!proposal.conversationId && typeof proposal.payload.opportunityId === "string" && <Link to="/opportunities/$opportunityId" params={{ opportunityId: proposal.payload.opportunityId }} className="text-sm text-primary underline">Abrir oportunidad</Link>}
             {proposalErrorMessage(proposal) && <p role="alert" className="text-sm text-destructive">{proposalErrorMessage(proposal)}</p>}
             {proposal.status === "ejecutada" && <p role="status" className="text-sm">Cambio ejecutado{proposal.executedAt ? ` · ${new Date(proposal.executedAt).toLocaleString("es-PE")}` : ""}. {typeof proposal.result?.messageId === "string" ? "Mensaje encolado; consulta su estado de entrega en el hilo." : "Consulta el estado actualizado en el caso."}</p>}
             {(proposal.status === "fallida" || proposal.status === "expirada") && <p role="alert" className="text-sm">Esta propuesta no se ejecutó ({STATUS_LABEL[proposal.status] ?? proposal.status}). Gestiona la acción manualmente desde el caso y su conversación; aquí no hay reintento.</p>}

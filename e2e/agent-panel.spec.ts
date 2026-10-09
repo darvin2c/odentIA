@@ -4,7 +4,7 @@ import { member } from "@odentia/db/schema/auth"
 import type { Page } from "@playwright/test"
 import { and, eq } from "drizzle-orm"
 import { simulateTelegramInbound } from "./channels"
-import { API, tenant } from "./env"
+import { API, tenant, tenantPattern } from "./env"
 import { api, call, expect, test } from "./fixtures"
 import { gotoHydrated } from "./hydration"
 
@@ -187,6 +187,51 @@ test("panel del agente: decidir, tomar derivadas y ver actividad desde cualquier
   await gotoHydrated(page, tenant(org.slug, `/patients/${patient.id}`))
   await expect(agentButton(page)).toBeVisible()
 
+  // Trabajo proactivo: propuesta sin hilo (seguimiento vencido) anclada al
+  // contacto y a su oportunidad; el caso que se abre es la oportunidad. Con la
+  // política por defecto de mensajes (directo) sigue siendo decisión del equipo.
+  await call(page, "PUT", "/api/agent/policy", org.slug, { enviar_mensaje: "directo" })
+  const opportunity = await call<{ id: string }>(
+    page,
+    "POST",
+    "/api/opportunities",
+    org.slug,
+    { contactId: conversation.contact.id, title: "Ortodoncia sin hilo" },
+    201,
+  )
+  await fixtureDb.insert(agentProposal).values({
+    organizationId: org.id,
+    contactId: conversation.contact.id,
+    conversationId: null,
+    action: "enviar_mensaje",
+    payload: {
+      kind: "template",
+      name: "seguimiento_presupuesto",
+      language: "es_PE",
+      opportunityId: opportunity.id,
+    },
+    afterSummary: "Plantilla seguimiento_presupuesto",
+    reason: "Seguimiento vencido sin conversación (Ortodoncia sin hilo).",
+    idempotencyKey: randomUUID(),
+  })
+  // Inicio la ofrece al equipo, no como espera del interlocutor.
+  await gotoHydrated(page, tenant(org.slug, "/home"))
+  const homeCard = page.getByRole("listitem").filter({ hasText: "Plantilla seguimiento_presupuesto" })
+  await expect(homeCard).toContainText("Espera tu aprobación")
+  await expect(homeCard.getByRole("button", { name: "Revisar y aprobar" })).toBeVisible()
+  // Aprobaciones permite decidirla y abre la oportunidad como caso.
+  await gotoHydrated(page, tenant(org.slug, "/agent/approvals"))
+  const approvalCard = page.getByRole("listitem").filter({ hasText: "Ortodoncia sin hilo" })
+  await expect(approvalCard.getByRole("button", { name: "Revisar y aprobar" })).toBeVisible()
+  await expect(approvalCard.getByRole("link", { name: "Abrir oportunidad" })).toBeVisible()
+  // Desde el panel, «Abrir oportunidad» navega al caso y el cajón se cierra.
+  await agentButton(page).click()
+  const desktopCold = panel.getByRole("listitem").filter({ hasText: "Ortodoncia sin hilo" })
+  await expect(desktopCold).toContainText("Espera tu aprobación")
+  await desktopCold.getByRole("link", { name: "Abrir oportunidad" }).click()
+  await expect(page).toHaveURL(tenantPattern(org.slug, `/opportunities/${opportunity.id}`))
+  await expect(panel).toBeHidden()
+
   // Móvil: pantalla completa con retorno.
   await page.setViewportSize({ width: 390, height: 844 })
   await gotoHydrated(page, tenant(org.slug, "/home"))
@@ -195,6 +240,11 @@ test("panel del agente: decidir, tomar derivadas y ver actividad desde cualquier
   await expect(mobilePanel).toBeVisible()
   const box = await mobilePanel.boundingBox()
   expect(box?.width).toBeGreaterThanOrEqual(380)
+  await expect(mobilePanel.getByRole("tab", { name: "Por decidir · 1", exact: true })).toBeVisible()
+  const cold = mobilePanel.getByRole("listitem").filter({ hasText: "Ortodoncia sin hilo" })
+  await expect(cold).toContainText("Espera tu aprobación")
+  await expect(cold.getByRole("link", { name: "Abrir oportunidad" })).toBeVisible()
+  await expect(cold.getByRole("link", { name: /Abrir caso|Abrir conversación/ })).toHaveCount(0)
   await info.attach("panel-movil", {
     body: await page.screenshot({ fullPage: false }),
     contentType: "image/png",
