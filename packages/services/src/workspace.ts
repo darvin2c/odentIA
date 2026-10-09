@@ -2,7 +2,13 @@ import type { Db } from "@odentia/db"
 import { member } from "@odentia/db/schema/auth"
 import { workspaceNotification } from "@odentia/db/schema/workspace"
 import { and, desc, eq, inArray, isNull, sql, type SQL } from "drizzle-orm"
-import { listHandoffs, listProposals, type ProposalItem } from "./agent-operations.js"
+import {
+  countAgentRunsToday,
+  countPendingProposals,
+  listHandoffs,
+  listProposals,
+  type ProposalItem,
+} from "./agent-operations.js"
 import { notFound, validation } from "./errors.js"
 import { getOrgLocale } from "./locale.js"
 
@@ -105,23 +111,19 @@ export interface WorkspaceAgentHome {
   today: { runs: number; ok: number; handoff: number; error: number; omitida: number; sinRespuesta: number }
 }
 
-/** Banda del agente para el home: pendientes, derivaciones recientes y corridas de hoy (zona de la org). */
-async function workspaceAgent(tx: Db, orgId: string, start: SQL, end: SQL): Promise<WorkspaceAgentHome> {
+/**
+ * Banda del agente para el home: pendientes (del equipo y del interlocutor,
+ * «por revisar»), derivaciones recientes aún abiertas y corridas de hoy con la
+ * misma definición de «hoy» que el panel del agente.
+ */
+async function workspaceAgent(tx: Db, orgId: string, timezone: string): Promise<WorkspaceAgentHome> {
   const proposalRows = await listProposals(tx, orgId, { status: "propuesta", limit: 3 })
-  const [pending] = await tx.execute<{ count: number }>(sql`
-    select count(*)::int as count from agent_proposal where organization_id=${orgId} and status='propuesta'`)
-  const handoffRows = (await listHandoffs(tx, orgId, { limit: 3 }))
+  const pending = await countPendingProposals(tx, orgId)
+  const handoffRows = (await listHandoffs(tx, orgId, { limit: 3, open: true }))
     .filter(row => Date.parse(row.createdAt) >= Date.now() - 72 * 3_600_000)
-  const [today] = await tx.execute<{ runs: number; ok: number; handoff: number; error: number; omitida: number; sin_respuesta: number }>(sql`
-    select count(*)::int as runs,
-      count(*) filter (where status='ok')::int as ok,
-      count(*) filter (where status='handoff')::int as handoff,
-      count(*) filter (where status='error')::int as error,
-      count(*) filter (where status='omitida')::int as omitida,
-      count(*) filter (where status='sin_respuesta')::int as sin_respuesta
-    from agent_run_ledger where organization_id=${orgId} and started_at >= ${start} and started_at < ${end}`)
+  const today = await countAgentRunsToday(tx, orgId, timezone)
   return {
-    pendingProposals: pending?.count ?? 0,
+    pendingProposals: pending.team + pending.contact,
     proposals: proposalRows.map(row => ({
       id: row.id, action: row.action, summary: row.context.afterSummary,
       createdAt: row.createdAt, conversationId: row.conversationId, mode: row.mode, context: row.context,
@@ -130,10 +132,7 @@ async function workspaceAgent(tx: Db, orgId: string, start: SQL, end: SQL): Prom
       id: row.id, reason: row.reason, priority: row.priority, createdAt: row.createdAt,
       conversationId: row.conversationId, contactName: row.contactName, channel: row.channel,
     })),
-    today: {
-      runs: today?.runs ?? 0, ok: today?.ok ?? 0, handoff: today?.handoff ?? 0,
-      error: today?.error ?? 0, omitida: today?.omitida ?? 0, sinRespuesta: today?.sin_respuesta ?? 0,
-    },
+    today,
   }
 }
 
@@ -398,7 +397,7 @@ export async function getWorkspaceHome(tx: Db, orgId: string, userId: string, ac
     where b.organization_id=${orgId} and b.status in ('presentado','pospuesto')
     order by b.presented_at nulls last, b.id limit 8`) : []
   const debt = access.finance ? await currentDebt(tx, orgId) : []
-  const agent = access.agent ? await workspaceAgent(tx, orgId, start, end) : null
+  const agent = access.agent ? await workspaceAgent(tx, orgId, timezone) : null
   // La puesta en marcha consulta capacidades existentes, no deduce configuración
   // a partir de contadores operativos en cero. Solo administración recibe estos datos.
   const [setup] = access.configure ? await tx.execute<{ availability: boolean; chairs: boolean; patients: boolean }>(sql`

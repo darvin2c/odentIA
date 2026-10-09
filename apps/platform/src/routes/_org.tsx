@@ -38,6 +38,13 @@ import {
   Wallet,
   Workflow,
 } from "lucide-react"
+import {
+  AGENT_PANEL_EVENTS,
+  AgentPanelButton,
+  AgentPanelProvider,
+  invalidateAgentPanelQueries,
+  useAgentPanelSummary,
+} from "../components/agent-panel"
 import { WorkspaceNotifications } from "../components/workspace-notifications"
 import { invalidateAppointmentQueries } from "../lib/agenda"
 import { authClient } from "../lib/auth-client"
@@ -169,9 +176,16 @@ function OrgLayout() {
   const pathname = useRouterState({ select: (state) => state.location.pathname })
   const role = org.members.find((member) => member.userId === session?.userId)?.role ?? "member"
   const queryClient = useQueryClient()
-  useOrgEvents(["appointment.updated", "stream.reconnected"], () => {
-    void invalidateAppointmentQueries(queryClient)
+  // Una sola suscripción SSE para el layout: agenda y panel del agente.
+  useOrgEvents(["appointment.updated", ...AGENT_PANEL_EVENTS], (kind) => {
+    if (kind === "appointment.updated" || kind === "stream.reconnected") {
+      void invalidateAppointmentQueries(queryClient)
+    }
+    if (kind !== "appointment.updated") invalidateAgentPanelQueries(queryClient)
   })
+  // Contador ligero para el badge del agente; la misma consulta alimenta el panel.
+  const agentSummary = useAgentPanelSummary(canAccessAny(role, ["agent.read", "agent.decide"]))
+  const pendingDecisions = agentSummary.data?.data.pendingProposals ?? 0
   // Filtra entradas y subentradas por permiso: el grupo IA muestra solo las
   // hijas autorizadas (Aprobaciones para quien decide, sin configuración).
   const navItems = navDefinitions.flatMap((item): AppShellNavEntry[] => {
@@ -181,11 +195,11 @@ function OrgLayout() {
     if (!item.children) return selfVisible ? [item] : []
     const children = item.children
       .filter((child) => !child.permission || canAccess(role, child.permission))
-      .map((child) =>
-        child.to === "/agent" && !canAccess(role, "agent.read")
-          ? { ...child, to: "/agent/approvals" }
-          : child,
-      )
+      .map((child) => {
+        if (child.to !== "/agent") return child
+        const target = canAccess(role, "agent.read") ? child : { ...child, to: "/agent/approvals" }
+        return pendingDecisions > 0 ? { ...target, badge: pendingDecisions } : target
+      })
     if (children.length === 0) return []
     if (!selfVisible) return []
     return [{ ...item, children }]
@@ -224,9 +238,18 @@ function OrgLayout() {
         window.location.assign(panelUrl("/login"))
       }}
     >
-      <HeaderUtilitiesProvider value={<WorkspaceNotifications />}>
-        <Outlet />
-      </HeaderUtilitiesProvider>
+      <AgentPanelProvider>
+        <HeaderUtilitiesProvider
+          value={
+            <>
+              <WorkspaceNotifications />
+              <AgentPanelButton />
+            </>
+          }
+        >
+          <Outlet />
+        </HeaderUtilitiesProvider>
+      </AgentPanelProvider>
     </AppShell>
   )
 }

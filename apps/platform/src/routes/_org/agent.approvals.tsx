@@ -5,7 +5,7 @@ import { createFileRoute, Link } from "@tanstack/react-router"
 import { useState } from "react"
 import { AgentTabs } from "../../components/agent-tabs"
 import { ApiError, apiFetch } from "../../lib/api"
-import { ACTION_LABEL, proposalErrorMessage, type AgentHandoff, type AgentProposal } from "../../lib/agent"
+import { ACTION_LABEL, permissionForAction, proposalErrorMessage, type AgentHandoff, type AgentProposal } from "../../lib/agent"
 import { channelLabel } from "../../lib/channels"
 import { usePermission } from "../../lib/crm"
 import { useOrgEvents } from "../../lib/org-events"
@@ -133,7 +133,8 @@ function AgentApprovalsPage() {
       {proposalsQuery.isPending ? <LoadingState /> : proposalsQuery.isError ? <div role="alert"><p>No pudimos cargar las propuestas.</p><Button variant="outline" onClick={() => void proposalsQuery.refetch()}>Volver a intentar</Button></div> : proposals.length === 0 ? <EmptyState title="Sin propuestas" description="No hay propuestas en este estado para los casos seleccionados." /> : <>
         <p className="text-xs text-muted-foreground">Hasta 100 propuestas recientes. Abre un caso para revisar sus decisiones.</p>
         <ul className="flex flex-col gap-3">{proposals.map(proposal => {
-          const authorized = canDecide && (proposal.action === "enviar_mensaje" ? canConversations : ["reservar_cita", "reprogramar_cita", "cancelar_cita"].includes(proposal.action) ? canAgenda : canCrm)
+          const needed = permissionForAction(proposal.action)
+          const authorized = canDecide && (needed === "conversations.write" ? canConversations : needed === "appointments.write" ? canAgenda : canCrm)
           return <li key={proposal.id} className="flex min-w-0 flex-col gap-3 elevated rounded-xl border bg-card p-5">
             <div className="flex flex-wrap items-center gap-2"><Badge variant={proposal.status === "propuesta" ? "default" : "secondary"}>{STATUS_LABEL[proposal.status] ?? proposal.status}</Badge><h2 className="font-medium">{ACTION_LABEL[proposal.action] ?? proposal.action}</h2><span className="text-xs text-muted-foreground">{new Date(proposal.createdAt).toLocaleString("es-PE")}</span></div>
             <p className="font-medium">{proposal.context.contactName ?? "Interlocutor no disponible"}{proposal.context.channel ? ` · ${channelLabel(proposal.context.channel)}` : ""}</p>

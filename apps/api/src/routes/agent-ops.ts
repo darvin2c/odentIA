@@ -7,8 +7,10 @@ import {
   decideProposal,
   executeProposal,
   findFreeGaps,
+  getAgentPanelSummary,
   getAgentRunStats,
   getProposal,
+  listAgentActivity,
   listAgentDecisions,
   listAgentRuns,
   listHandoffs,
@@ -208,6 +210,7 @@ const simulateInput = z.object({
         listHandoffs(tx, orgId, {
           conversationId: c.req.query("conversationId"),
           limit: c.req.query("limit") ? Number(c.req.query("limit")) : undefined,
+          open: c.req.query("open") === "1" || c.req.query("open") === "true",
         }),
       ),
     )
@@ -255,6 +258,30 @@ const simulateInput = z.object({
           limit: c.req.query("limit") ? Number(c.req.query("limit")) : undefined,
         }),
       ),
+    )
+  })
+
+  // Resumen y actividad legible del panel: quien decide (recepción) los lee
+  // sin acceder a configuración ni al libro técnico.
+  app.get("/panel", async (c) => {
+    const { orgId, memberRole } = orgContextOf(c)
+    if (!canAccessAny(memberRole, ["agent.read", "agent.decide"]))
+      return forbidden(c, "agent.decide")
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) => getAgentPanelSummary(tx, orgId)),
+    )
+  })
+
+  app.get("/activity", async (c) => {
+    const { orgId, memberRole } = orgContextOf(c)
+    if (!canAccessAny(memberRole, ["agent.read", "agent.decide"]))
+      return forbidden(c, "agent.decide")
+    const parsed = z
+      .object({ limit: z.coerce.number().int().min(1).max(100).optional() })
+      .safeParse(c.req.query())
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) => listAgentActivity(tx, orgId, parsed.data)),
     )
   })
 

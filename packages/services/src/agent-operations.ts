@@ -20,6 +20,7 @@ import {
 } from "@odentia/db/schema/agent"
 import { member, user } from "@odentia/db/schema/auth"
 import {
+  agentConfig,
   channelConnection,
   contact,
   conversation,
@@ -30,7 +31,7 @@ import {
 import { patient, patientResponsibility, treatmentBudget } from "@odentia/db/schema/clinical"
 import { appointment } from "@odentia/db/schema/agenda"
 import { opportunity } from "@odentia/db/schema/opportunities"
-import { and, asc, avg, count, desc, eq, gt, gte, inArray, isNull, lt, lte, ne, or, sql, sum } from "drizzle-orm"
+import { and, asc, avg, count, desc, eq, gt, gte, inArray, isNull, lt, lte, ne, or, type SQL, sql, sum } from "drizzle-orm"
 import { listAvailableSlots } from "./availability.js"
 import {
   createAppointment,
@@ -1886,9 +1887,16 @@ export interface HandoffItem {
   taskId: string | null
   /** Plazo de la tarea de seguimiento según la prioridad (visible en la cola). */
   dueAt: string | null
+  /**
+   * abierta: nadie la tomó; tomada: con responsable; resuelta: su tarea se
+   * completó o canceló. Se deriva de la tarea vinculada, sin estado propio.
+   */
+  status: HandoffStatus
   createdBy: string
   createdAt: string
 }
+
+export type HandoffStatus = "abierta" | "tomada" | "resuelta"
 
 type HandoffRow = typeof agentHandoff.$inferSelect
 
@@ -1909,12 +1917,16 @@ async function enrichHandoffs(tx: Db, rows: HandoffRow[]): Promise<HandoffItem[]
   ])
   const contactById = new Map(contacts.map((c) => [c.id, c.displayName]))
   const dueByTask = new Map<string, Date>()
+  const statusByTask = new Map<string, string>()
   if (taskIds.length) {
     const tasks = await tx
-      .select({ id: crmTask.id, dueAt: crmTask.dueAt })
+      .select({ id: crmTask.id, dueAt: crmTask.dueAt, status: crmTask.status })
       .from(crmTask)
       .where(inArray(crmTask.id, taskIds))
-    for (const t of tasks) if (t.dueAt) dueByTask.set(t.id, t.dueAt)
+    for (const t of tasks) {
+      if (t.dueAt) dueByTask.set(t.id, t.dueAt)
+      statusByTask.set(t.id, t.status)
+    }
   }
   const connectionByConv = new Map(convs.map((c) => [c.id, c.connectionId]))
   const connIds = [...new Set(connectionByConv.values())].filter((v): v is string => !!v)
@@ -1940,10 +1952,127 @@ async function enrichHandoffs(tx: Db, rows: HandoffRow[]): Promise<HandoffItem[]
       assigneeUserId: row.assigneeUserId,
       taskId: row.taskId,
       dueAt: row.taskId ? (dueByTask.get(row.taskId)?.toISOString() ?? null) : null,
+      status:
+        row.taskId &&
+        statusByTask.get(row.taskId) !== undefined &&
+        statusByTask.get(row.taskId) !== "open"
+          ? "resuelta"
+          : row.assigneeUserId
+            ? "tomada"
+            : "abierta",
       createdBy: row.createdBy,
       createdAt: row.createdAt.toISOString(),
     }
   })
+}
+
+/** Derivaciones que siguen abiertas (sin resolver), para contadores ligeros. */
+export async function countOpenHandoffs(tx: Db, orgId: string): Promise<number> {
+  const [row] = await tx.execute<{ count: number }>(sql`
+    select count(*)::int as count
+    from agent_handoff h left join task t on t.id = h.task_id and t.organization_id = h.organization_id
+    where h.organization_id = ${orgId} and (h.task_id is null or t.status = 'open')`)
+  return row?.count ?? 0
+}
+
+export interface AgentRunsToday {
+  runs: number
+  ok: number
+  handoff: number
+  error: number
+  omitida: number
+  sinRespuesta: number
+}
+
+/** Corridas de hoy por estado; «hoy» es el día civil en la zona de la organización. */
+export async function countAgentRunsToday(tx: Db, orgId: string, timezone: string): Promise<AgentRunsToday> {
+  const [row] = await tx.execute<{
+    runs: number
+    ok: number
+    handoff: number
+    error: number
+    omitida: number
+    sin_respuesta: number
+  }>(sql`
+    select count(*)::int as runs,
+      count(*) filter (where status = 'ok')::int as ok,
+      count(*) filter (where status = 'handoff')::int as handoff,
+      count(*) filter (where status = 'error')::int as error,
+      count(*) filter (where status = 'omitida')::int as omitida,
+      count(*) filter (where status = 'sin_respuesta')::int as sin_respuesta
+    from agent_run_ledger
+    where organization_id = ${orgId}
+      and (started_at at time zone ${timezone})::date = (now() at time zone ${timezone})::date`)
+  return {
+    runs: row?.runs ?? 0,
+    ok: row?.ok ?? 0,
+    handoff: row?.handoff ?? 0,
+    error: row?.error ?? 0,
+    omitida: row?.omitida ?? 0,
+    sinRespuesta: row?.sin_respuesta ?? 0,
+  }
+}
+
+export interface PendingProposalCounts {
+  /** Pendientes que el equipo puede aprobar o rechazar. */
+  team: number
+  /** Pendientes cuyo acto exige hoy la confirmación del interlocutor; el equipo no las decide. */
+  contact: number
+}
+
+/** Propuestas pendientes separadas según quién puede resolverlas con la política vigente. */
+export async function countPendingProposals(tx: Db, orgId: string): Promise<PendingProposalCounts> {
+  const policy = await getAutonomyPolicy(tx, orgId)
+  const rows = await tx.execute<{ action: string; count: number }>(sql`
+    select action, count(*)::int as count from agent_proposal
+    where organization_id = ${orgId} and status = 'propuesta' group by action`)
+  const counts = { team: 0, contact: 0 }
+  for (const row of rows) {
+    if (policy[row.action as AutonomyAction] === "confirmar_usuario") counts.contact += row.count
+    else counts.team += row.count
+  }
+  return counts
+}
+
+export interface AgentPanelSummary {
+  enabled: boolean
+  /** Propuestas pendientes que el equipo puede decidir desde el panel. */
+  pendingProposals: number
+  /** Propuestas pendientes que esperan al interlocutor; se ven, no se deciden. */
+  awaitingContact: number
+  openHandoffs: number
+  /** Corridas de hoy que respondieron o derivaron (zona de la organización). */
+  interventionsToday: number
+  /** Corridas de hoy con error o sin respuesta: no se presentan como intervenciones. */
+  failedToday: number
+  locale: string
+  timezone: string
+}
+
+/**
+ * Resumen ligero para el botón y la cabecera del panel del agente: legible
+ * con `agent.decide` (recepción) sin exponer configuración ni modelo.
+ */
+export async function getAgentPanelSummary(tx: Db, orgId: string): Promise<AgentPanelSummary> {
+  await expireDueProposals(tx, orgId)
+  const { locale, timezone } = await getOrgLocale(tx, orgId)
+  const [cfg] = await tx
+    .select({ enabled: agentConfig.enabled })
+    .from(agentConfig)
+    .where(eq(agentConfig.organizationId, orgId))
+    .limit(1)
+  const pending = await countPendingProposals(tx, orgId)
+  const today = await countAgentRunsToday(tx, orgId, timezone)
+  return {
+    enabled: cfg?.enabled ?? false,
+    pendingProposals: pending.team,
+    awaitingContact: pending.contact,
+    openHandoffs: await countOpenHandoffs(tx, orgId),
+    interventionsToday: today.ok + today.handoff,
+    failedToday: today.error + today.sinRespuesta,
+    locale,
+    timezone,
+  }
 }
 
 async function enrichHandoff(tx: Db, row: HandoffRow): Promise<HandoffItem> {
@@ -2215,12 +2344,17 @@ export async function createHandoff(
   return enrichHandoff(tx, row)
 }
 
-export async function listHandoffs(tx: Db, orgId: string, input: { conversationId?: string; limit?: number } = {}): Promise<HandoffItem[]> {
+export async function listHandoffs(
+  tx: Db,
+  orgId: string,
+  input: { conversationId?: string; limit?: number; open?: boolean } = {},
+): Promise<HandoffItem[]> {
   // Escalamiento perezoso (mismo patrón que la caducidad de propuestas):
   // la primera lectura consolida el aviso de vencidas, sin jobs ni duplicados.
   await escalateOverdueHandoffs(tx, orgId)
   const conditions = [eq(agentHandoff.organizationId, orgId)]
   if (input.conversationId) conditions.push(eq(agentHandoff.conversationId, input.conversationId))
+  if (input.open) conditions.push(handoffStillOpen())
   const limit = input.limit === undefined ? 50 : Math.min(Math.max(input.limit, 1), 100)
   const rows = await tx
     .select()
@@ -2237,6 +2371,14 @@ export async function listHandoffs(tx: Db, orgId: string, input: { conversationI
  * vinculada pasa al mismo responsable. Resolverla registra actor y resultado
  * por la vía de tareas; no reactiva el agente implícitamente.
  */
+/**
+ * Derivación sin resolver: sin tarea, o con su tarea aún abierta (resuelta =
+ * tarea completada o cancelada). Misma regla para listar, contar y tomar.
+ */
+function handoffStillOpen(): SQL {
+  return sql`(${agentHandoff.taskId} is null or exists (select 1 from task t where t.id = ${agentHandoff.taskId} and t.organization_id = ${agentHandoff.organizationId} and t.status = 'open'))`
+}
+
 export async function claimHandoff(tx: Db, orgId: string, userId: string, handoffId: string): Promise<HandoffItem> {
   const [membership] = await tx
     .select({ userId: member.userId })
@@ -2252,16 +2394,20 @@ export async function claimHandoff(tx: Db, orgId: string, userId: string, handof
         eq(agentHandoff.id, handoffId),
         eq(agentHandoff.organizationId, orgId),
         isNull(agentHandoff.assigneeUserId),
+        handoffStillOpen(),
       ),
     )
     .returning()
   if (!claimed) {
     const [existing] = await tx
-      .select({ assigneeUserId: agentHandoff.assigneeUserId })
+      .select({ assigneeUserId: agentHandoff.assigneeUserId, taskId: agentHandoff.taskId })
       .from(agentHandoff)
       .where(and(eq(agentHandoff.id, handoffId), eq(agentHandoff.organizationId, orgId)))
       .limit(1)
     if (!existing) throw notFound("Derivación")
+    if (existing.taskId && (await getTask(tx, orgId, existing.taskId)).status !== "open") {
+      throw new ServiceError("HANDOFF_RESOLVED", 409, "La derivación ya se resolvió; no admite responsable")
+    }
     if (existing.assigneeUserId === userId) {
       const [row] = await tx
         .select()
@@ -2273,7 +2419,14 @@ export async function claimHandoff(tx: Db, orgId: string, userId: string, handof
     throw new ServiceError("HANDOFF_ALREADY_CLAIMED", 409, "Otro miembro ya tomó esta derivación")
   }
   if (claimed.taskId) {
-    await updateTask(tx, orgId, claimed.taskId, { assigneeUserId: userId, actorUserId: userId })
+    const task = await getTask(tx, orgId, claimed.taskId)
+    if (task.kind === "opportunity_follow_up" && task.opportunityId) {
+      // El seguimiento comercial toma su responsable de la oportunidad (tasks.ts
+      // rechaza asignarlo directo); asignar la oportunidad resincroniza la tarea.
+      await updateOpportunity(tx, orgId, task.opportunityId, { assignedUserId: userId }, { userId })
+    } else {
+      await updateTask(tx, orgId, claimed.taskId, { assigneeUserId: userId, actorUserId: userId })
+    }
   }
   await tx.insert(auditEvent).values({
     organizationId: orgId,

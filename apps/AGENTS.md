@@ -14,6 +14,7 @@
 - Las rutas hijas de `settings.tsx` y `services.tsx` no añaden otro `PageShell`: lo aporta su layout.
 - Mantener borradores al cargar datos auxiliares. Al cambiar contacto/hilo, limpiar vínculos incompatibles; presupuestos según contacto/paciente efectivos, también al editar.
 - El sidebar debe reenviar el evento de clic al router para conservar navegación SPA y bloqueadores de borradores.
+- Utilidades globales de cabecera (avisos, panel del agente) las aporta `HeaderUtilitiesProvider` en `_org.tsx`; una pantalla sin `PageHeader` (ficha de paciente) las monta ella misma. El panel del agente se monta una sola vez en el layout, comparte la suscripción SSE del layout y se cierra cuando la navegación se confirma, no al clic, para respetar los bloqueadores de borradores.
 - Tablero de oportunidades: scroll único mediante `ScrollArea horizontal`, cabeceras sticky, sin scroll por columna. Movimiento optimista reversible, sin movimientos simultáneos; cerradas no arrastrables y cierre con motivo. Respetar movimiento reducido.
 
 ## Integraciones
