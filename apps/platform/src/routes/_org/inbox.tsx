@@ -88,7 +88,12 @@ import {
   usePermission,
   useMyUserId,
 } from "../../lib/crm"
-import { useAgentPanel } from "../../components/agent-panel"
+import {
+  AGENT_PANEL_BESIDE_CONTEXT_QUERY,
+  useAgentPanel,
+  useAgentPanelDockBlocker,
+  useMediaQuery,
+} from "../../components/agent-panel"
 import { ContactWorkspace } from "../../components/crm/contact-workspace"
 import { ACTION_LABEL, type AgentProposal } from "../../lib/agent"
 import { channelIcon, channelLabel } from "../../lib/channels"
@@ -320,6 +325,15 @@ function InboxPage() {
   }, [listQuery.data, sort])
 
   const mode = useDetailMode()
+  // La columna del agente ocupa el lugar de «Contexto» mientras no quepan los
+  // dos; «Contexto» sigue abierto por debajo y vuelve al cerrar el agente. Con
+  // un borrador en «Contexto» el agente se abre como cajón y no lo desmonta.
+  const agentPanel = useAgentPanel()
+  const roomForAgentAndContext = useMediaQuery(AGENT_PANEL_BESIDE_CONTEXT_QUERY)
+  const agentCoversContext =
+    agentPanel.open && agentPanel.docked && !roomForAgentAndContext && !wsDraft
+  useAgentPanelDockBlocker(mode === "panel" && contextOpen && wsDraft && !roomForAgentAndContext)
+  const contextVisible = contextOpen && !agentCoversContext
 
   // Contacto del hilo seleccionado: sale de la lista; en enlace directo se
   // resuelve con el detalle ya cacheado por ThreadView (misma queryKey).
@@ -359,8 +373,17 @@ function InboxPage() {
       onConsumePrepareRegistration={consumePrepareRegistration}
       onBack={() => selectConversation(null)}
       showBack={mode !== "panel"}
-      onToggleContext={mode === "panel" ? () => (contextOpen ? requestCloseContext() : setContextOpen(true)) : openContextMobile}
-      contextOpen={mode === "panel" ? contextOpen : true}
+      onToggleContext={
+        mode === "panel"
+          ? () => {
+              if (contextVisible) return requestCloseContext()
+              setContextOpen(true)
+              // Pedir «Contexto» con el agente en su lugar cierra el agente.
+              if (agentCoversContext) agentPanel.setOpen(false)
+            }
+          : openContextMobile
+      }
+      contextOpen={mode === "panel" ? contextVisible : true}
       attention={selectedItem?.attention}
       canSeeProposals={canDecideAgent || canReadAgent}
     />
@@ -491,7 +514,7 @@ function InboxPage() {
               />
             )}
           </ResizablePanel>
-          {workspace && contextOpen && (
+          {workspace && contextVisible && (
             <>
               <ResizableHandle withHandle className="mx-1 w-4 bg-transparent" />
               <ResizablePanel
@@ -1143,6 +1166,7 @@ function ThreadView({
           <Button
             variant={contextOpen ? "secondary" : "outline"}
             size="sm"
+            aria-pressed={contextOpen}
             onClick={onToggleContext}
             title="Mostrar el contexto del contacto (persona, oportunidades, agente)"
           >

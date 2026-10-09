@@ -31,6 +31,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
 } from "react"
@@ -50,8 +51,10 @@ import { usePermission } from "../lib/crm"
 
 /**
  * Panel lateral global del agente: decidir, ver derivadas y actividad desde
- * cualquier pantalla. Se superpone como cajón sin cerrar la página ni sus
- * borradores; en móvil ocupa la pantalla completa con botón de retorno.
+ * cualquier pantalla. En pantalla grande es una columna fija a la derecha y la
+ * página sigue usable al lado; cuando no cabe se superpone como cajón sin
+ * cerrar la página ni sus borradores, y en móvil ocupa la pantalla completa
+ * con botón de retorno.
  *
  * El layout de la organización monta el panel una sola vez y suscribe estos
  * eventos en su única conexión SSE; aquí solo se declara qué invalidar.
@@ -83,30 +86,79 @@ export function invalidateAgentPanelQueries(queryClient: QueryClient): void {
 
 export type AgentPanelTab = "decidir" | "derivadas" | "actividad"
 
+/**
+ * Desde este ancho el panel (384 px) cabe como columna junto a la página con el
+ * sidebar abierto; por debajo se superpone como cajón.
+ */
+const DOCK_QUERY = "(min-width: 1536px)"
+/** Desde este ancho la Bandeja muestra a la vez hilo, «Contexto» y agente. */
+export const AGENT_PANEL_BESIDE_CONTEXT_QUERY = "(min-width: 1920px)"
+const PANEL_ID = "panel-del-agente"
+
+const useEffectBeforePaint: typeof useEffect =
+  typeof window === "undefined" ? useEffect : useLayoutEffect
+
+/** Media query en cliente, resuelta antes de pintar para no parpadear. */
+export function useMediaQuery(query: string): boolean {
+  const [matches, setMatches] = useState(false)
+  useEffectBeforePaint(() => {
+    if (typeof window.matchMedia !== "function") return
+    const media = window.matchMedia(query)
+    const apply = () => setMatches(media.matches)
+    apply()
+    media.addEventListener("change", apply)
+    return () => media.removeEventListener("change", apply)
+  }, [query])
+  return matches
+}
+
 interface AgentPanelState {
   open: boolean
+  /** Abierto como columna fija: la página sigue usable al lado. */
+  docked: boolean
   /** Abre o cierra; al abrir puede elegir la pestaña (por defecto «Por decidir»). */
   setOpen: (open: boolean, tab?: AgentPanelTab) => void
-  /** Pestaña con la que se abrió por última vez. */
   tab: AgentPanelTab
-  /** Botón de cabecera, para devolverle el foco al cerrar el cajón. */
+  setTab: (tab: AgentPanelTab) => void
+  /** Botón de cabecera, para devolverle el foco al cerrar el panel. */
   buttonRef: RefObject<HTMLButtonElement | null>
   /** Control desde el que se abrió (cabecera, banda del hilo, Inicio): recibe el foco al cerrar. */
   openerRef: RefObject<HTMLElement | null>
+  /** Páginas que ahora mismo piden cajón en vez de columna. */
+  dockBlockers: RefObject<number>
 }
 
 const AgentPanelContext = createContext<AgentPanelState>({
   open: false,
+  docked: false,
   setOpen: () => {},
   tab: "decidir",
+  setTab: () => {},
   buttonRef: { current: null },
   openerRef: { current: null },
+  dockBlockers: { current: 0 },
 })
 
 /** Abrir o cerrar el panel desde otra superficie (banda del hilo, Inicio). */
-export function useAgentPanel(): Pick<AgentPanelState, "open" | "setOpen"> {
-  const { open, setOpen } = useContext(AgentPanelContext)
-  return { open, setOpen }
+export function useAgentPanel(): Pick<AgentPanelState, "open" | "docked" | "setOpen"> {
+  const { open, docked, setOpen } = useContext(AgentPanelContext)
+  return { open, docked, setOpen }
+}
+
+/**
+ * Mientras `blocked`, el panel se abre como cajón aunque quepa como columna: la
+ * página tiene a la derecha algo que la columna desplazaría y que no debe
+ * desmontarse (un borrador sin guardar).
+ */
+export function useAgentPanelDockBlocker(blocked: boolean): void {
+  const { dockBlockers } = useContext(AgentPanelContext)
+  useEffect(() => {
+    if (!blocked) return
+    dockBlockers.current += 1
+    return () => {
+      dockBlockers.current -= 1
+    }
+  }, [blocked, dockBlockers])
 }
 
 /** Decidir o tomar un caso cambia lo que la bandeja muestra de ese hilo; no se espera al aviso en vivo. */
@@ -142,29 +194,53 @@ export function AgentPanelProvider({ children }: { children: ReactNode }) {
   const [tab, setTab] = useState<AgentPanelTab>("decidir")
   const buttonRef = useRef<HTMLButtonElement | null>(null)
   const openerRef = useRef<HTMLElement | null>(null)
+  const dockBlockers = useRef(0)
+  const wide = useMediaQuery(DOCK_QUERY)
+  const wideRef = useRef(wide)
+  wideRef.current = wide
+  // La presentación se decide al abrir y no cambia sola (salvo que la ventana
+  // se estreche): pasar de cajón a columna a mitad de una decisión desmontaría
+  // el motivo de rechazo a medio escribir.
+  const [docked, setDocked] = useState(false)
+  const dockedRef = useRef(docked)
+  dockedRef.current = docked
   const setOpen = useCallback((next: boolean, nextTab?: AgentPanelTab) => {
     if (next) {
       const active = document.activeElement
-      openerRef.current = active instanceof HTMLElement && active !== document.body ? active : null
+      const inPanel = active instanceof HTMLElement && active.closest(`#${PANEL_ID}`) !== null
+      if (!inPanel) {
+        openerRef.current = active instanceof HTMLElement && active !== document.body ? active : null
+      }
       setTab(nextTab ?? "decidir")
+      setDocked(wideRef.current && dockBlockers.current === 0)
     }
     setOpenState(next)
   }, [])
+  useEffect(() => {
+    if (!wide) setDocked(false)
+  }, [wide])
   // Los enlaces del panel no lo cierran al clic: si la página protege un
-  // borrador y el usuario elige seguir editando, el panel sigue tal cual. Se
-  // cierra cuando la navegación se confirma (cambia la ubicación).
+  // borrador y el usuario elige seguir editando, el panel sigue tal cual. El
+  // cajón se cierra cuando la navegación se confirma (cambia la ubicación); la
+  // columna fija no tapa la página y acompaña la navegación.
   const href = useRouterState({ select: (state) => state.location.href })
   const lastHref = useRef(href)
   useEffect(() => {
     if (lastHref.current !== href) {
       lastHref.current = href
-      setOpen(false)
+      if (!dockedRef.current) setOpen(false)
     }
   }, [href, setOpen])
   return (
-    <AgentPanelContext.Provider value={{ open, setOpen, tab, buttonRef, openerRef }}>
-      {children}
-      <AgentPanel />
+    <AgentPanelContext.Provider
+      value={{ open, docked, setOpen, tab, setTab, buttonRef, openerRef, dockBlockers }}
+    >
+      {/* La estructura no cambia al abrir o cerrar: la página nunca se remonta. */}
+      <div className="flex min-w-0 flex-1">
+        <div className="flex min-w-0 flex-1 flex-col">{children}</div>
+        <DockedAgentPanel />
+      </div>
+      <AgentPanelSheet />
     </AgentPanelContext.Provider>
   )
 }
@@ -178,7 +254,7 @@ function useCanSeePanel(): boolean {
 /** Botón «Agente · N» de la cabecera: abre el panel desde cualquier página. */
 export function AgentPanelButton() {
   const canSee = useCanSeePanel()
-  const { open, setOpen, buttonRef } = useContext(AgentPanelContext)
+  const { open, docked, setOpen, buttonRef } = useContext(AgentPanelContext)
   const summary = useAgentPanelSummary(canSee)
   if (!canSee) return null
   const pending = summary.data?.data.pendingProposals ?? 0
@@ -191,6 +267,7 @@ export function AgentPanelButton() {
       onClick={() => setOpen(!open)}
       aria-label={`Agente${pending > 0 ? `, ${pending} por decidir` : ""}`}
       aria-expanded={open}
+      aria-controls={open && docked ? PANEL_ID : undefined}
     >
       <span
         className={`flex size-7 items-center justify-center rounded-full ${open ? "bg-background text-primary" : "bg-primary text-primary-foreground"}`}
@@ -234,73 +311,150 @@ function headerStatus(data: AgentPanelSummary): string {
   return parts.join(" · ")
 }
 
-function AgentPanel() {
-  const { open, setOpen, tab, buttonRef, openerRef } = useContext(AgentPanelContext)
+/** Cajón: cuando el panel no cabe como columna, y siempre en móvil. */
+function AgentPanelSheet() {
+  const { open, docked, setOpen, buttonRef, openerRef } = useContext(AgentPanelContext)
   const canSee = useCanSeePanel()
-  const summary = useAgentPanelSummary(open && canSee)
+  const shown = open && !docked
+  const summary = useAgentPanelSummary(shown && canSee)
   const data = summary.data?.data
   return (
-    <Sheet open={open} onOpenChange={(next) => setOpen(next)}>
+    <Sheet open={shown} onOpenChange={(next) => setOpen(next)}>
       <SheetContent
+        id={shown ? PANEL_ID : undefined}
         side="right"
         showCloseButton={false}
         finalFocus={() => (openerRef.current?.isConnected ? openerRef.current : buttonRef.current)}
         className="gap-0 p-0 data-[side=right]:w-full data-[side=right]:sm:w-[400px] data-[side=right]:sm:max-w-md"
         aria-label="Agente"
       >
-        <div className="flex items-center gap-3 border-b p-4 sm:p-5">
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-lg"
-            className="sm:hidden"
-            aria-label="Volver"
-            onClick={() => setOpen(false)}
-          >
-            <ArrowLeft className="size-5" aria-hidden />
-          </Button>
-          <AgentMark />
-          <div className="min-w-0 flex-1 leading-tight">
-            <SheetTitle className="text-[17px] font-bold tracking-tight">Agente</SheetTitle>
-            <SheetDescription className="flex items-center gap-1.5 text-xs">
-              <span
-                aria-hidden
-                className={`size-1.5 shrink-0 rounded-full ${data?.enabled ? "bg-success" : "bg-muted-foreground"}`}
-              />
-              {data ? headerStatus(data) : "Cargando…"}
-            </SheetDescription>
-          </div>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-lg"
-            className="hidden sm:inline-flex"
-            aria-label="Cerrar el panel del agente"
-            onClick={() => setOpen(false)}
-          >
-            <span aria-hidden className="text-lg leading-none">
-              ×
-            </span>
-          </Button>
-        </div>
-        {open ? <PanelBody summary={data} initialTab={tab} /> : null}
+        <PanelHeader data={data} overlay />
+        {shown ? <PanelBody summary={data} /> : null}
       </SheetContent>
     </Sheet>
   )
 }
 
-function PanelBody({
-  summary,
-  initialTab,
+/** Columna fija a la derecha: no es modal, la página sigue usable al lado. */
+function DockedAgentPanel() {
+  const { open, docked, setOpen, buttonRef, openerRef } = useContext(AgentPanelContext)
+  const canSee = useCanSeePanel()
+  const shown = open && docked && canSee
+  const summary = useAgentPanelSummary(shown)
+  const data = summary.data?.data
+  const ref = useRef<HTMLElement | null>(null)
+  // Al abrir, el foco entra en la columna: queda después de la página en el
+  // orden de tabulación y quien usa teclado no debe recorrerla entera.
+  useEffect(() => {
+    if (shown) ref.current?.focus({ preventScroll: true })
+  }, [shown])
+  if (!shown) return null
+  const close = () => {
+    const target = openerRef.current?.isConnected ? openerRef.current : buttonRef.current
+    setOpen(false)
+    // Tras el repintado: lo que la página vuelve a mostrar al cerrar (el
+    // «Contexto» de la Bandeja enfoca su título al montarse) no se queda el foco.
+    requestAnimationFrame(() => target?.focus())
+  }
+  return (
+    <aside
+      ref={ref}
+      id={PANEL_ID}
+      aria-label="Agente"
+      tabIndex={-1}
+      className="sticky top-0 flex h-svh w-96 shrink-0 flex-col border-l bg-background outline-none"
+      onKeyDown={(event) => {
+        // Solo Esc pulsado dentro de la columna; los diálogos que abre viven en un portal.
+        if (event.key !== "Escape" || event.defaultPrevented) return
+        if (!event.currentTarget.contains(event.target as Node)) return
+        close()
+      }}
+    >
+      <PanelHeader data={data} onClose={close} />
+      <PanelBody summary={data} />
+    </aside>
+  )
+}
+
+function PanelHeader({
+  data,
+  overlay = false,
+  onClose,
 }: {
-  summary: AgentPanelSummary | undefined
-  initialTab: AgentPanelTab
+  data: AgentPanelSummary | undefined
+  /** Dentro del cajón: título y descripción son los del diálogo. */
+  overlay?: boolean
+  onClose?: () => void
 }) {
+  const { setOpen } = useContext(AgentPanelContext)
+  const close = onClose ?? (() => setOpen(false))
+  const status = (
+    <>
+      <span
+        aria-hidden
+        className={`size-1.5 shrink-0 rounded-full ${data?.enabled ? "bg-success" : "bg-muted-foreground"}`}
+      />
+      {data ? headerStatus(data) : "Cargando…"}
+    </>
+  )
+  return (
+    <div className="flex items-center gap-3 border-b p-4 sm:p-5">
+      {overlay ? (
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-lg"
+          className="sm:hidden"
+          aria-label="Volver"
+          onClick={close}
+        >
+          <ArrowLeft className="size-5" aria-hidden />
+        </Button>
+      ) : null}
+      <AgentMark />
+      <div className="min-w-0 flex-1 leading-tight">
+        {overlay ? (
+          <>
+            <SheetTitle className="text-[17px] font-bold tracking-tight">Agente</SheetTitle>
+            <SheetDescription className="flex items-center gap-1.5 text-xs">
+              {status}
+            </SheetDescription>
+          </>
+        ) : (
+          <>
+            <h2 className="text-[17px] font-bold tracking-tight">Agente</h2>
+            <p className="flex items-center gap-1.5 text-xs text-muted-foreground">{status}</p>
+          </>
+        )}
+      </div>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon-lg"
+        className={overlay ? "hidden sm:inline-flex" : undefined}
+        aria-label="Cerrar el panel del agente"
+        onClick={close}
+      >
+        <span aria-hidden className="text-lg leading-none">
+          ×
+        </span>
+      </Button>
+    </div>
+  )
+}
+
+function PanelBody({ summary }: { summary: AgentPanelSummary | undefined }) {
+  const { tab, setTab } = useContext(AgentPanelContext)
   const pending = summary?.pendingProposals ?? 0
   const openHandoffs = summary?.openHandoffs ?? 0
   const when = whenFormatter(summary)
   return (
-    <Tabs defaultValue={initialTab} className="flex min-h-0 flex-1 flex-col">
+    // Controlada: con la columna abierta, la página puede pedir otra pestaña.
+    <Tabs
+      value={tab}
+      onValueChange={(value) => setTab(value as AgentPanelTab)}
+      className="flex min-h-0 flex-1 flex-col"
+    >
       <TabsList className="mx-4 mt-3 grid grid-cols-3 sm:mx-5">
         <TabsTrigger value="decidir">Por decidir{pending > 0 ? ` · ${pending}` : ""}</TabsTrigger>
         <TabsTrigger value="derivadas">

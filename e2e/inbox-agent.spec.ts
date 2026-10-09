@@ -171,6 +171,67 @@ test("bandeja: el estado del agente por conversación, las vistas con su total y
   await expect(chip("Derivadas · 1")).toBeVisible()
 })
 
+test("panel del agente: columna fija en pantalla grande y cajón cuando no cabe", async ({
+  owner,
+  fixtureDb,
+  nextEventId,
+}, info) => {
+  const { page, org } = owner
+  await seedThreads(owner, fixtureDb, nextEventId)
+  const button = page.locator("header").getByRole("button", { name: /^Agente/ })
+  const column = page.getByRole("complementary", { name: "Agente" })
+  const drawer = page.getByRole("dialog", { name: "Agente" })
+
+  // Pantalla grande: columna a la derecha; la página sigue en el árbol accesible y usable.
+  await page.setViewportSize({ width: 1600, height: 900 })
+  await gotoHydrated(page, tenant(org.slug, "/home"))
+  await button.click()
+  await expect(column).toBeVisible()
+  await expect(drawer).toHaveCount(0)
+  await expect(column).toBeFocused()
+  await expect(page.getByRole("heading", { level: 1, name: "Inicio" })).toBeVisible()
+  const box = await column.boundingBox()
+  expect(box?.width).toBe(384)
+  expect(Math.round((box?.x ?? 0) + (box?.width ?? 0))).toBe(1600)
+  expect(await overflow(page)).toBeLessThanOrEqual(0)
+  await info.attach("columna-inicio", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
+
+  // No tapa la página: se navega con ella abierta y sigue ahí.
+  await page.getByRole("navigation").getByRole("link", { name: "Bandeja", exact: true }).click()
+  await expect(page.getByRole("heading", { level: 1, name: "Bandeja" })).toBeVisible()
+  await expect(column).toBeVisible()
+
+  // En la Bandeja ocupa el lugar de «Contexto»; lo del hilo abierto va primero.
+  await page.getByRole("button").filter({ hasText: WAITING_TEXT }).click()
+  const context = page.getByRole("button", { name: "Contexto", exact: true })
+  await expect(context).toHaveAttribute("aria-pressed", "false")
+  await expect(column.getByRole("tabpanel").getByRole("listitem").first()).toContainText("De esta conversación")
+  expect(await overflow(page)).toBeLessThanOrEqual(0)
+  await info.attach("columna-bandeja", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
+  // La página puede pedir otra pestaña con la columna ya abierta… y pedir «Contexto» la cierra.
+  await context.click()
+  await expect(column).toHaveCount(0)
+  await expect(context).toHaveAttribute("aria-pressed", "true")
+  // «Revisar» la vuelve a abrir; Esc dentro de la columna la cierra y devuelve el foco.
+  const review = page.getByRole("status").filter({ hasText: "El agente propuso" }).getByRole("button", { name: "Revisar" })
+  await review.click()
+  await expect(column).toBeVisible()
+  await expect(context).toHaveAttribute("aria-pressed", "false")
+  await page.keyboard.press("Escape")
+  await expect(column).toHaveCount(0)
+  await expect(review).toBeFocused()
+  await expect(context).toHaveAttribute("aria-pressed", "true")
+
+  // Estrechar la ventana con la columna abierta la convierte en cajón.
+  await review.click()
+  await expect(column).toBeVisible()
+  await page.setViewportSize({ width: 1280, height: 800 })
+  await expect(column).toHaveCount(0)
+  await expect(drawer).toBeVisible()
+  await page.keyboard.press("Escape")
+  await expect(drawer).toBeHidden()
+})
+
 test("bandeja: quien no decide por el agente ve el estado del hilo, no la propuesta", async ({
   owner,
   fixtureDb,
