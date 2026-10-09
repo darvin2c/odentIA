@@ -1,6 +1,6 @@
 {
-  "id": "74146d8c-517c-42ab-b301-c15ae76be5cd",
-  "prevId": "473cb40c-dc9e-40b9-b13a-17139b855763",
+  "id": "53b76e8b-4fad-448f-8282-3b7106590979",
+  "prevId": "9b354a1a-1f31-4a75-837a-2e39247c4a63",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -506,180 +506,6 @@
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.agent_decision_log": {
-      "name": "agent_decision_log",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "organization_id": {
-          "name": "organization_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "conversation_id": {
-          "name": "conversation_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "trigger_message_id": {
-          "name": "trigger_message_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "point": {
-          "name": "point",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "mode": {
-          "name": "mode",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'shadow'"
-        },
-        "provider": {
-          "name": "provider",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "model": {
-          "name": "model",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "state_hash": {
-          "name": "state_hash",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "state_chars": {
-          "name": "state_chars",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "answers": {
-          "name": "answers",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "outcome": {
-          "name": "outcome",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "latency_ms": {
-          "name": "latency_ms",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "input_tokens": {
-          "name": "input_tokens",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "output_tokens": {
-          "name": "output_tokens",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "error": {
-          "name": "error",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "agent_decision_log_org_idx": {
-          "name": "agent_decision_log_org_idx",
-          "columns": [
-            {
-              "expression": "organization_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "created_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "agent_decision_log_conversation_idx": {
-          "name": "agent_decision_log_conversation_idx",
-          "columns": [
-            {
-              "expression": "conversation_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "agent_decision_log_organization_id_organization_id_fk": {
-          "name": "agent_decision_log_organization_id_organization_id_fk",
-          "tableFrom": "agent_decision_log",
-          "tableTo": "organization",
-          "columnsFrom": [
-            "organization_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "agent_decision_log_mode_check": {
-          "name": "agent_decision_log_mode_check",
-          "value": "\"agent_decision_log\".\"mode\" in ('shadow')"
-        }
-      },
       "isRLSEnabled": false
     },
     "public.agent_handoff": {
@@ -1214,6 +1040,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "patient_id": {
+          "name": "patient_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
         "action": {
           "name": "action",
           "type": "text",
@@ -1348,6 +1180,33 @@
           "columns": [
             {
               "expression": "conversation_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "agent_proposal_org_patient_idx": {
+          "name": "agent_proposal_org_patient_idx",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "patient_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "status",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -1507,18 +1366,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "cached_input_tokens": {
-          "name": "cached_input_tokens",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "llm_calls": {
-          "name": "llm_calls",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
         "cost_micros": {
           "name": "cost_micros",
           "type": "integer",
@@ -1611,7 +1458,7 @@
       "checkConstraints": {
         "agent_run_ledger_status_check": {
           "name": "agent_run_ledger_status_check",
-          "value": "\"agent_run_ledger\".\"status\" in ('ok','handoff','error','omitida','sin_respuesta')"
+          "value": "\"agent_run_ledger\".\"status\" in ('ok','handoff','error','omitida')"
         }
       },
       "isRLSEnabled": false
@@ -4832,6 +4679,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "signer_contact_id": {
+          "name": "signer_contact_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
         "signature_data": {
           "name": "signature_data",
           "type": "jsonb",
@@ -5494,6 +5347,157 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "public.professional_profile": {
+      "name": "professional_profile",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "organization_id": {
+          "name": "organization_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "signature_name": {
+          "name": "signature_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "professional_title": {
+          "name": "professional_title",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'Cirujano dentista'"
+        },
+        "registration_body": {
+          "name": "registration_body",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'COP'"
+        },
+        "registration_number": {
+          "name": "registration_number",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "specialty_registration": {
+          "name": "specialty_registration",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "updated_by": {
+          "name": "updated_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "professional_profile_org_user_uidx": {
+          "name": "professional_profile_org_user_uidx",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "professional_profile_organization_id_organization_id_fk": {
+          "name": "professional_profile_organization_id_organization_id_fk",
+          "tableFrom": "professional_profile",
+          "tableTo": "organization",
+          "columnsFrom": [
+            "organization_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "professional_profile_user_id_user_id_fk": {
+          "name": "professional_profile_user_id_user_id_fk",
+          "tableFrom": "professional_profile",
+          "tableTo": "user",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "professional_profile_updated_by_user_id_fk": {
+          "name": "professional_profile_updated_by_user_id_fk",
+          "tableFrom": "professional_profile",
+          "tableTo": "user",
+          "columnsFrom": [
+            "updated_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "professional_profile_lengths_check": {
+          "name": "professional_profile_lengths_check",
+          "value": "length(\"professional_profile\".\"professional_title\") between 1 and 120 and length(\"professional_profile\".\"registration_body\") between 1 and 40 and (\"professional_profile\".\"registration_number\" is null or length(\"professional_profile\".\"registration_number\") between 1 and 20) and (\"professional_profile\".\"signature_name\" is null or length(\"professional_profile\".\"signature_name\") between 1 and 200) and (\"professional_profile\".\"specialty_registration\" is null or length(\"professional_profile\".\"specialty_registration\") between 1 and 40)"
+        }
+      },
+      "isRLSEnabled": false
+    },
     "public.professional_specialty": {
       "name": "professional_specialty",
       "schema": "",
@@ -5795,6 +5799,186 @@
       },
       "indexes": {},
       "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.clinical_access_log": {
+      "name": "clinical_access_log",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "organization_id": {
+          "name": "organization_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "patient_id": {
+          "name": "patient_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "resource": {
+          "name": "resource",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "bucket": {
+          "name": "bucket",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "first_at": {
+          "name": "first_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "last_at": {
+          "name": "last_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "hits": {
+          "name": "hits",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1
+        }
+      },
+      "indexes": {
+        "clinical_access_log_bucket_uidx": {
+          "name": "clinical_access_log_bucket_uidx",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "patient_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "resource",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "bucket",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "clinical_access_log_org_patient_idx": {
+          "name": "clinical_access_log_org_patient_idx",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "patient_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "last_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "clinical_access_log_organization_id_organization_id_fk": {
+          "name": "clinical_access_log_organization_id_organization_id_fk",
+          "tableFrom": "clinical_access_log",
+          "tableTo": "organization",
+          "columnsFrom": [
+            "organization_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "clinical_access_log_user_id_user_id_fk": {
+          "name": "clinical_access_log_user_id_user_id_fk",
+          "tableFrom": "clinical_access_log",
+          "tableTo": "user",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "clinical_access_log_organization_id_patient_id_patient_organization_id_id_fk": {
+          "name": "clinical_access_log_organization_id_patient_id_patient_organization_id_id_fk",
+          "tableFrom": "clinical_access_log",
+          "tableTo": "patient",
+          "columnsFrom": [
+            "organization_id",
+            "patient_id"
+          ],
+          "columnsTo": [
+            "organization_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
@@ -6196,6 +6380,18 @@
           "primaryKey": false,
           "notNull": false
         },
+        "diagnosis_type": {
+          "name": "diagnosis_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "tooth_number": {
+          "name": "tooth_number",
+          "type": "smallint",
+          "primaryKey": false,
+          "notNull": false
+        },
         "encounter_id": {
           "name": "encounter_id",
           "type": "uuid",
@@ -6316,7 +6512,16 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "clinical_note_kind_check": {
+          "name": "clinical_note_kind_check",
+          "value": "\"clinical_note\".\"kind\" IN ('evolucion','adenda')"
+        },
+        "clinical_note_diagnosis_type_check": {
+          "name": "clinical_note_diagnosis_type_check",
+          "value": "\"clinical_note\".\"diagnosis_type\" IS NULL OR (\"clinical_note\".\"diagnosis_code\" IS NOT NULL AND \"clinical_note\".\"diagnosis_type\" IN ('presuntivo','definitivo','repetido'))"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.encounter": {
@@ -6361,6 +6566,12 @@
           "notNull": true,
           "default": "'borrador'"
         },
+        "appointment_id": {
+          "name": "appointment_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
         "reason": {
           "name": "reason",
           "type": "text",
@@ -6397,6 +6608,19 @@
           "primaryKey": false,
           "notNull": false
         },
+        "started_at": {
+          "name": "started_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "ended_at": {
+          "name": "ended_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
         "finalized_at": {
           "name": "finalized_at",
           "type": "timestamp with time zone",
@@ -6405,6 +6629,42 @@
         },
         "finalized_by": {
           "name": "finalized_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "signer_name": {
+          "name": "signer_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "signer_title": {
+          "name": "signer_title",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "signer_registration": {
+          "name": "signer_registration",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "voided_at": {
+          "name": "voided_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "voided_by": {
+          "name": "voided_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "void_reason": {
+          "name": "void_reason",
           "type": "text",
           "primaryKey": false,
           "notNull": false
@@ -6458,6 +6718,28 @@
           ],
           "isUnique": true,
           "where": "status = 'borrador'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "encounter_appointment_active_uidx": {
+          "name": "encounter_appointment_active_uidx",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "appointment_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "appointment_id IS NOT NULL AND status <> 'anulada'",
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -6528,12 +6810,351 @@
           ],
           "onDelete": "no action",
           "onUpdate": "no action"
+        },
+        "encounter_voided_by_user_id_fk": {
+          "name": "encounter_voided_by_user_id_fk",
+          "tableFrom": "encounter",
+          "tableTo": "user",
+          "columnsFrom": [
+            "voided_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "encounter_appointment_fk": {
+          "name": "encounter_appointment_fk",
+          "tableFrom": "encounter",
+          "tableTo": "appointment",
+          "columnsFrom": [
+            "organization_id",
+            "patient_id",
+            "appointment_id"
+          ],
+          "columnsTo": [
+            "organization_id",
+            "patient_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "encounter_status_check": {
+          "name": "encounter_status_check",
+          "value": "\"encounter\".\"status\" IN ('borrador','finalizada','anulada')"
+        },
+        "encounter_void_check": {
+          "name": "encounter_void_check",
+          "value": "(\"encounter\".\"status\" = 'anulada') = (\"encounter\".\"voided_at\" IS NOT NULL) AND (\"encounter\".\"voided_at\" IS NULL) = (\"encounter\".\"void_reason\" IS NULL)"
+        },
+        "encounter_end_check": {
+          "name": "encounter_end_check",
+          "value": "\"encounter\".\"ended_at\" IS NULL OR \"encounter\".\"ended_at\" >= \"encounter\".\"started_at\""
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.encounter_diagnosis": {
+      "name": "encounter_diagnosis",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "organization_id": {
+          "name": "organization_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "patient_id": {
+          "name": "patient_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "encounter_id": {
+          "name": "encounter_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "cie10_code": {
+          "name": "cie10_code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "diagnosis_type": {
+          "name": "diagnosis_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "tooth_number": {
+          "name": "tooth_number",
+          "type": "smallint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "surfaces": {
+          "name": "surfaces",
+          "type": "text[]",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'"
+        },
+        "note": {
+          "name": "note",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'activo'"
+        },
+        "resolved_at": {
+          "name": "resolved_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "legacy_note_id": {
+          "name": "legacy_note_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_by": {
+          "name": "created_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "voided_at": {
+          "name": "voided_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "voided_by": {
+          "name": "voided_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "void_reason": {
+          "name": "void_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "encounter_diagnosis_org_patient_idx": {
+          "name": "encounter_diagnosis_org_patient_idx",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "patient_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "encounter_diagnosis_encounter_idx": {
+          "name": "encounter_diagnosis_encounter_idx",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "encounter_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "encounter_diagnosis_legacy_note_uidx": {
+          "name": "encounter_diagnosis_legacy_note_uidx",
+          "columns": [
+            {
+              "expression": "legacy_note_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "legacy_note_id IS NOT NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "encounter_diagnosis_organization_id_organization_id_fk": {
+          "name": "encounter_diagnosis_organization_id_organization_id_fk",
+          "tableFrom": "encounter_diagnosis",
+          "tableTo": "organization",
+          "columnsFrom": [
+            "organization_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "encounter_diagnosis_encounter_id_encounter_id_fk": {
+          "name": "encounter_diagnosis_encounter_id_encounter_id_fk",
+          "tableFrom": "encounter_diagnosis",
+          "tableTo": "encounter",
+          "columnsFrom": [
+            "encounter_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "encounter_diagnosis_cie10_code_cie10_code_code_fk": {
+          "name": "encounter_diagnosis_cie10_code_cie10_code_code_fk",
+          "tableFrom": "encounter_diagnosis",
+          "tableTo": "cie10_code",
+          "columnsFrom": [
+            "cie10_code"
+          ],
+          "columnsTo": [
+            "code"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "encounter_diagnosis_legacy_note_id_clinical_note_id_fk": {
+          "name": "encounter_diagnosis_legacy_note_id_clinical_note_id_fk",
+          "tableFrom": "encounter_diagnosis",
+          "tableTo": "clinical_note",
+          "columnsFrom": [
+            "legacy_note_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "encounter_diagnosis_created_by_user_id_fk": {
+          "name": "encounter_diagnosis_created_by_user_id_fk",
+          "tableFrom": "encounter_diagnosis",
+          "tableTo": "user",
+          "columnsFrom": [
+            "created_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "encounter_diagnosis_voided_by_user_id_fk": {
+          "name": "encounter_diagnosis_voided_by_user_id_fk",
+          "tableFrom": "encounter_diagnosis",
+          "tableTo": "user",
+          "columnsFrom": [
+            "voided_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "encounter_diagnosis_patient_fk": {
+          "name": "encounter_diagnosis_patient_fk",
+          "tableFrom": "encounter_diagnosis",
+          "tableTo": "patient",
+          "columnsFrom": [
+            "organization_id",
+            "patient_id"
+          ],
+          "columnsTo": [
+            "organization_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "encounter_diagnosis_type_check": {
+          "name": "encounter_diagnosis_type_check",
+          "value": "(\"encounter_diagnosis\".\"diagnosis_type\" IS NULL AND \"encounter_diagnosis\".\"legacy_note_id\" IS NOT NULL) OR \"encounter_diagnosis\".\"diagnosis_type\" IN ('presuntivo','definitivo','repetido')"
+        },
+        "encounter_diagnosis_status_check": {
+          "name": "encounter_diagnosis_status_check",
+          "value": "\"encounter_diagnosis\".\"status\" IN ('activo','resuelto')"
+        },
+        "encounter_diagnosis_void_check": {
+          "name": "encounter_diagnosis_void_check",
+          "value": "(\"encounter_diagnosis\".\"voided_at\" IS NULL) = (\"encounter_diagnosis\".\"void_reason\" IS NULL)"
+        },
+        "encounter_diagnosis_origin_check": {
+          "name": "encounter_diagnosis_origin_check",
+          "value": "\"encounter_diagnosis\".\"encounter_id\" IS NOT NULL OR \"encounter_diagnosis\".\"legacy_note_id\" IS NOT NULL"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.encounter_plan_item": {
@@ -6747,6 +7368,24 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
+        },
+        "voided_at": {
+          "name": "voided_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "voided_by": {
+          "name": "voided_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "void_reason": {
+          "name": "void_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {},
@@ -6828,12 +7467,29 @@
           ],
           "onDelete": "no action",
           "onUpdate": "no action"
+        },
+        "encounter_procedure_voided_by_user_id_fk": {
+          "name": "encounter_procedure_voided_by_user_id_fk",
+          "tableFrom": "encounter_procedure",
+          "tableTo": "user",
+          "columnsFrom": [
+            "voided_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {
+        "encounter_procedure_void_check": {
+          "name": "encounter_procedure_void_check",
+          "value": "(\"encounter_procedure\".\"voided_at\" IS NULL) = (\"encounter_procedure\".\"void_reason\" IS NULL)"
+        },
         "encounter_procedure_price_check": {
           "name": "encounter_procedure_price_check",
           "value": "\"encounter_procedure\".\"price_cents\" IS NULL OR \"encounter_procedure\".\"price_cents\" >= 0"
@@ -7212,6 +7868,24 @@
           "primaryKey": false,
           "notNull": false
         },
+        "resolved_at": {
+          "name": "resolved_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "resolved_by": {
+          "name": "resolved_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "resolved_by_plan_item_id": {
+          "name": "resolved_by_plan_item_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_by": {
           "name": "created_by",
           "type": "text",
@@ -7314,6 +7988,32 @@
           "tableTo": "user",
           "columnsFrom": [
             "voided_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "odontogram_entry_resolved_by_user_id_fk": {
+          "name": "odontogram_entry_resolved_by_user_id_fk",
+          "tableFrom": "odontogram_entry",
+          "tableTo": "user",
+          "columnsFrom": [
+            "resolved_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "odontogram_entry_resolved_by_plan_item_id_treatment_plan_item_id_fk": {
+          "name": "odontogram_entry_resolved_by_plan_item_id_treatment_plan_item_id_fk",
+          "tableFrom": "odontogram_entry",
+          "tableTo": "treatment_plan_item",
+          "columnsFrom": [
+            "resolved_by_plan_item_id"
           ],
           "columnsTo": [
             "id"
@@ -7744,6 +8444,14 @@
         "patient_blood_group_check": {
           "name": "patient_blood_group_check",
           "value": "\"patient\".\"blood_group\" IS NULL OR \"patient\".\"blood_group\" IN ('A+','A-','B+','B-','AB+','AB-','O+','O-','unknown')"
+        },
+        "patient_doc_type_check": {
+          "name": "patient_doc_type_check",
+          "value": "\"patient\".\"doc_type\" IS NULL OR \"patient\".\"doc_type\" IN ('DNI','CE','PASAPORTE','OTRO')"
+        },
+        "patient_sex_check": {
+          "name": "patient_sex_check",
+          "value": "\"patient\".\"sex\" IS NULL OR \"patient\".\"sex\" IN ('M','F')"
         }
       },
       "isRLSEnabled": false
@@ -7776,6 +8484,12 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true
+        },
+        "category": {
+          "name": "category",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
         },
         "reaction": {
           "name": "reaction",
@@ -7885,7 +8599,16 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "patient_allergy_severity_check": {
+          "name": "patient_allergy_severity_check",
+          "value": "\"patient_allergy\".\"severity\" IN ('leve','moderada','severa','desconocida')"
+        },
+        "patient_allergy_category_check": {
+          "name": "patient_allergy_category_check",
+          "value": "\"patient_allergy\".\"category\" IS NULL OR \"patient_allergy\".\"category\" IN ('medicamento','anestesico','material','alimento','ambiental','otro')"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.patient_anamnesis": {
@@ -8336,6 +9059,12 @@
           "primaryKey": false,
           "notNull": true
         },
+        "cie10_code": {
+          "name": "cie10_code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "status": {
           "name": "status",
           "type": "text",
@@ -8432,6 +9161,19 @@
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
+        "patient_condition_cie10_code_cie10_code_code_fk": {
+          "name": "patient_condition_cie10_code_cie10_code_code_fk",
+          "tableFrom": "patient_condition",
+          "tableTo": "cie10_code",
+          "columnsFrom": [
+            "cie10_code"
+          ],
+          "columnsTo": [
+            "code"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
         "patient_condition_created_by_user_id_fk": {
           "name": "patient_condition_created_by_user_id_fk",
           "tableFrom": "patient_condition",
@@ -8449,7 +9191,12 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "patient_condition_status_check": {
+          "name": "patient_condition_status_check",
+          "value": "\"patient_condition\".\"status\" IN ('activa','resuelta','inactiva')"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.patient_contact": {
@@ -8823,7 +9570,12 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "patient_document_category_check": {
+          "name": "patient_document_category_check",
+          "value": "\"patient_document\".\"category\" IN ('consentimiento','radiografia','foto_clinica','informe','presupuesto','receta','comprobante_pago','otro')"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.patient_document_context": {
@@ -9169,6 +9921,12 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true
+        },
+        "generic_name": {
+          "name": "generic_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
         },
         "dose": {
           "name": "dose",
@@ -13361,32 +14119,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "llm_base_url": {
-          "name": "llm_base_url",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "llm_api_key_encrypted": {
-          "name": "llm_api_key_encrypted",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "daily_run_limit": {
-          "name": "daily_run_limit",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 500
-        },
-        "decision_provider": {
-          "name": "decision_provider",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'none'"
-        },
         "system_prompt": {
           "name": "system_prompt",
           "type": "text",
@@ -13442,20 +14174,7 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
-      "checkConstraints": {
-        "agent_config_llm_pair_check": {
-          "name": "agent_config_llm_pair_check",
-          "value": "(\"agent_config\".\"llm_base_url\" is null) = (\"agent_config\".\"llm_api_key_encrypted\" is null)"
-        },
-        "agent_config_daily_run_limit_check": {
-          "name": "agent_config_daily_run_limit_check",
-          "value": "\"agent_config\".\"daily_run_limit\" between 1 and 100000"
-        },
-        "agent_config_decision_provider_check": {
-          "name": "agent_config_decision_provider_check",
-          "value": "\"agent_config\".\"decision_provider\" in ('none','baseline','jev','openai_decisions')"
-        }
-      },
+      "checkConstraints": {},
       "isRLSEnabled": false
     },
     "public.channel_connection": {
@@ -13619,6 +14338,30 @@
           "primaryKey": false,
           "notNull": false
         },
+        "doc_type": {
+          "name": "doc_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "doc_number": {
+          "name": "doc_number",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "birth_date": {
+          "name": "birth_date",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "sex": {
+          "name": "sex",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "is_active": {
           "name": "is_active",
           "type": "boolean",
@@ -13694,6 +14437,34 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "contact_org_doc_uidx": {
+          "name": "contact_org_doc_uidx",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "doc_type",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "doc_number",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"doc_number\" IS NOT NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
@@ -13727,7 +14498,16 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "contact_doc_type_check": {
+          "name": "contact_doc_type_check",
+          "value": "\"contact\".\"doc_type\" IS NULL OR \"contact\".\"doc_type\" IN ('DNI','CE','PASAPORTE','OTRO')"
+        },
+        "contact_sex_check": {
+          "name": "contact_sex_check",
+          "value": "\"contact\".\"sex\" IS NULL OR \"contact\".\"sex\" IN ('M','F')"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.contact_identity": {
@@ -14146,6 +14926,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "patient_id": {
+          "name": "patient_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
         "assignee_user_id": {
           "name": "assignee_user_id",
           "type": "text",
@@ -14324,6 +15110,27 @@
             },
             {
               "expression": "opportunity_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "task_org_patient_idx": {
+          "name": "task_org_patient_idx",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "patient_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"

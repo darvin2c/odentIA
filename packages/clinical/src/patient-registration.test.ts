@@ -12,6 +12,9 @@ describe("contrato de registro", () => {
   it("permite alta interna rápida sin imponer requisitos públicos", () => {
     expect(validateRegistrationAnswers(config, { demographics: { displayName: "Ana" }, respondent: "staff", privacyAccepted: false }, { ...publicContext, mode: "internal" })).toEqual({})
     expect(validateRegistrationAnswers(config, adult, publicContext)).toEqual({})
+    // Con configuración guardada, lo obligatorio también lo es para recepción.
+    const saved = { ...config, version: 1, fields: { ...config.fields, docType: "required" as const, docNumber: "required" as const } }
+    expect(validateRegistrationAnswers(saved, { demographics: { displayName: "Ana", birthDate: "1990-01-01", phone: "+51999999999" }, respondent: "staff", privacyAccepted: false }, { ...publicContext, mode: "internal" })).toHaveProperty("demographics.docNumber")
   })
   it("distingue desconocimiento, ausencia y falta de respuesta sin filas ocultas", () => {
     const required = { ...config, fields: { ...config.fields, allergies: "required" as const } }
@@ -22,7 +25,9 @@ describe("contrato de registro", () => {
   it("exige responsable para menores y acepta su medio de contacto", () => {
     const child: RegistrationAnswers = { ...adult, demographics: { displayName: "Pedro", birthDate: "2016-01-01" }, respondent: "representative" }
     expect(validateRegistrationAnswers(config, child, publicContext)).toHaveProperty("representative")
-    expect(validateRegistrationAnswers(config, { ...child, representative: { displayName: "María", relationship: "guardian", relationshipDetail: "Madre", phone: "+51999999999" } }, publicContext)).toEqual({})
+    expect(validateRegistrationAnswers(config, { ...child, representative: { displayName: "María", relationship: "guardian", relationshipDetail: "Madre", phone: "+51999999999", docType: "DNI", docNumber: "12345678" } }, publicContext)).toEqual({})
+    // El representante legal de un menor se identifica con su documento.
+    expect(validateRegistrationAnswers(config, { ...child, representative: { displayName: "María", relationship: "guardian", relationshipDetail: "Madre", phone: "+51999999999" } }, publicContext)).toHaveProperty("representative.docNumber")
     expect(validateRegistrationAnswers(config, { ...child, respondent: "staff" }, { ...publicContext, mode: "internal" })).toHaveProperty("representative")
   })
   it("valida fecha real y la frontera de mayoría de edad", () => {
@@ -42,6 +47,8 @@ describe("contrato de registro", () => {
     expect(registrationConfigSchema.safeParse({ ...config, fields: { ...config.fields, phone: "hidden" } }).success).toBe(false)
     expect(registrationConfigSchema.safeParse({ ...config, fields: { ...config.fields, docType: "hidden" } }).success).toBe(false)
     expect(validateRegistrationAnswers(config, { ...adult, demographics: { ...adult.demographics, docType: "DNI", docNumber: "123" } }, publicContext)).toHaveProperty("demographics.docNumber")
-    expect(validateRegistrationAnswers(config, { ...adult, demographics: { ...adult.demographics, docType: "PASAPORTE", docNumber: "ABC123" } }, publicContext)).toEqual({})
+    expect(validateRegistrationAnswers(config, { ...adult, demographics: { ...adult.demographics, docType: "PASAPORTE", docNumber: "ABC123", docCountry: "VE" } }, publicContext)).toEqual({})
+    // Un documento emitido fuera del Perú exige el país emisor.
+    expect(validateRegistrationAnswers(config, { ...adult, demographics: { ...adult.demographics, docType: "PASAPORTE", docNumber: "ABC123" } }, publicContext)).toHaveProperty("demographics.docCountry")
   })
 })

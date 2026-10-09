@@ -6,6 +6,7 @@
  * alergias/condiciones/medicación se definen aquí una sola vez; la pantalla
  * clínica y `RegistrationHealthFields` las consumen sin copiarlas.
  */
+
 import {
   BLOOD_GROUPS,
   type BloodGroup,
@@ -31,14 +32,17 @@ import {
   Textarea,
 } from "@odentia/ui"
 import { ConfirmDialog } from "@odentia/ui-patterns"
-import { useId, useState } from "react"
 import type { ReactNode } from "react"
+import { useId, useState } from "react"
 import {
+  ALLERGY_CATEGORY_LABELS,
   ALLERGY_SEVERITY_LABELS,
   CONDITION_STATUS_LABELS,
   HEALTH_REVIEW_LABELS,
   type HealthReviewState,
 } from "../../lib/patients"
+import { ChoiceSelect } from "../ui/choice-select"
+import { Cie10Search } from "./cie10-search"
 
 export type HealthDeclaration = NonNullable<RegistrationAnswers["health"]>
 
@@ -225,15 +229,35 @@ export function ReviewStateSelect({
 export interface AllergyRowValue {
   key: string
   substance: string
+  /** Tipo de alérgeno; solo en modo clínico. */
+  category?: string
   reaction: string
   severity: string
+  /** Alergia o intolerancia, criticidad y verificación; solo en modo clínico. */
+  kind?: string
+  criticality?: string
+  verification?: string
   isActive: boolean
   persisted?: boolean
+}
+
+const KIND_LABELS: Record<string, string> = { alergia: "Alergia", intolerancia: "Intolerancia" }
+const CRITICALITY_LABELS: Record<string, string> = {
+  baja: "Baja",
+  alta: "Alta",
+  no_evaluable: "No evaluable",
+}
+const VERIFICATION_LABELS: Record<string, string> = {
+  no_confirmada: "No confirmada",
+  confirmada: "Confirmada",
+  descartada: "Descartada",
 }
 
 export interface ConditionRowValue {
   key: string
   name: string
+  /** Código CIE-10 que precisa la condición; solo en modo clínico. */
+  cie10Code?: string
   status: string
   startDate: string
   endDate: string
@@ -244,6 +268,8 @@ export interface ConditionRowValue {
 export interface MedicationRowValue {
   key: string
   name: string
+  /** Principio activo (DCI); solo en modo clínico. */
+  genericName?: string
   dose: string
   frequency: string
   startDate: string
@@ -302,6 +328,30 @@ export function AllergyRows({
               ])}
             />
           </Field>
+          {mode === "clinical" ? (
+            <Field>
+              <FieldLabel htmlFor={fid(`alg-cat-${row.key}`)}>Tipo de alérgeno</FieldLabel>
+              <Select
+                value={row.category || "__sin__"}
+                onValueChange={(v) => patch(row.key, { category: !v || v === "__sin__" ? "" : v })}
+                disabled={readOnly}
+              >
+                <SelectTrigger id={fid(`alg-cat-${row.key}`)}>
+                  <SelectValue>
+                    {ALLERGY_CATEGORY_LABELS[row.category ?? ""] ?? "Sin precisar"}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__sin__">Sin precisar</SelectItem>
+                  {Object.entries(ALLERGY_CATEGORY_LABELS).map(([value, label]) => (
+                    <SelectItem key={value} value={value}>
+                      {label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
+          ) : null}
           <Field>
             <FieldLabel htmlFor={fid(`alg-rea-${row.key}`)}>Reacción</FieldLabel>
             <Input
@@ -318,17 +368,46 @@ export function AllergyRows({
               ])}
             />
           </Field>
+          {mode === "clinical" ? (
+            <>
+              {(
+                [
+                  ["kind", "Tipo", KIND_LABELS, "alergia"],
+                  ["criticality", "Criticidad", CRITICALITY_LABELS, ""],
+                  ["verification", "Verificación", VERIFICATION_LABELS, "no_confirmada"],
+                ] as const
+              ).map(([key, text, options, fallback]) => (
+                <Field key={key}>
+                  <FieldLabel htmlFor={fid(`alg-${key}-${row.key}`)}>{text}</FieldLabel>
+                  <ChoiceSelect
+                    id={fid(`alg-${key}-${row.key}`)}
+                    
+                    value={row[key] ?? fallback}
+                    disabled={readOnly}
+                    onChange={(e) => patch(row.key, { [key]: e.target.value })}
+                  >
+                    {key === "criticality" ? <option value="">Sin evaluar</option> : null}
+                    {Object.entries(options).map(([value, optionLabel]) => (
+                      <option key={value} value={value}>
+                        {optionLabel}
+                      </option>
+                    ))}
+                  </ChoiceSelect>
+                </Field>
+              ))}
+            </>
+          ) : null}
           <Field>
             <FieldLabel htmlFor={fid(`alg-sev-${row.key}`)}>Gravedad</FieldLabel>
             <Select
               value={row.severity === "" ? "__elegir__" : row.severity}
-              onValueChange={(v) =>
-                patch(row.key, { severity: !v || v === "__elegir__" ? "" : v })
-              }
+              onValueChange={(v) => patch(row.key, { severity: !v || v === "__elegir__" ? "" : v })}
               disabled={readOnly}
             >
               <SelectTrigger id={fid(`alg-sev-${row.key}`)}>
-                <SelectValue>{ALLERGY_SEVERITY_LABELS[row.severity] ?? "Elige la gravedad"}</SelectValue>
+                <SelectValue>
+                  {ALLERGY_SEVERITY_LABELS[row.severity] ?? "Elige la gravedad"}
+                </SelectValue>
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="__elegir__">Elige la gravedad</SelectItem>
@@ -433,6 +512,26 @@ export function ConditionRows({
               ])}
             />
           </Field>
+          {mode === "clinical" ? (
+            <div className="flex flex-col gap-1">
+              <Cie10Search
+                value={row.cie10Code ?? ""}
+                onChange={(code) => patch(row.key, { cie10Code: code })}
+                label="Código CIE-10 (opcional)"
+                disabled={readOnly}
+              />
+              {row.cie10Code ? (
+                <button
+                  type="button"
+                  className="self-start text-xs text-muted-foreground underline underline-offset-4"
+                  disabled={readOnly}
+                  onClick={() => patch(row.key, { cie10Code: "" })}
+                >
+                  Quitar el código {row.cie10Code}
+                </button>
+              ) : null}
+            </div>
+          ) : null}
           {mode === "clinical" ? (
             <Field>
               <FieldLabel htmlFor={fid(`con-est-${row.key}`)}>Estado</FieldLabel>
@@ -569,6 +668,21 @@ export function MedicationRows({
               ])}
             />
           </Field>
+          {mode === "clinical" ? (
+            <Field>
+              <FieldLabel htmlFor={fid(`med-gen-${row.key}`)}>
+                Principio activo (opcional)
+              </FieldLabel>
+              <Input
+                id={fid(`med-gen-${row.key}`)}
+                value={row.genericName ?? ""}
+                maxLength={200}
+                disabled={readOnly}
+                placeholder="Ej.: losartán"
+                onChange={(e) => patch(row.key, { genericName: e.target.value })}
+              />
+            </Field>
+          ) : null}
           <Field>
             <FieldLabel htmlFor={fid(`med-dos-${row.key}`)}>Dosis</FieldLabel>
             <Input

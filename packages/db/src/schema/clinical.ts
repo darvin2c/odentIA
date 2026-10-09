@@ -38,15 +38,35 @@ export const patient = pgTable(
     id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
     organizationId: orgFk("organization_id"),
     displayName: text("display_name").notNull(),
+    /** Nombre separado (ADR 0004); display_name se deriva de él en la base. */
+    givenNames: text("given_names"),
+    paternalSurname: text("paternal_surname"),
+    maternalSurname: text("maternal_surname"),
+    /** El nombre se separó por heurística al migrar: recepción debe confirmarlo. */
+    identityNeedsReview: boolean("identity_needs_review").notNull().default(false),
+    /** Valores anteriores que no encajaron en un catálogo (nunca se descartan). */
+    identityLegacy: jsonb("identity_legacy"),
     bloodGroup: text("blood_group").$type<BloodGroup>(),
     patientNumber: integer("patient_number").notNull(),
     docType: text("doc_type"),
     docNumber: text("doc_number"),
+    /** País emisor del documento y nacionalidad (ISO 3166-1 alfa-2). */
+    docCountry: char("doc_country", { length: 2 }),
+    nationality: char("nationality", { length: 2 }),
     birthDate: date("birth_date"),
     sex: text("sex"),
     phone: text("phone"),
     email: text("email"),
     avatarStorageKey: text("avatar_storage_key"),
+    /** Ubigeo INEI del lugar de nacimiento y del domicilio. */
+    birthPlaceUbigeo: char("birth_place_ubigeo", { length: 6 }),
+    addressUbigeo: char("address_ubigeo", { length: 6 }),
+    addressReference: text("address_reference"),
+    insurerName: text("insurer_name"),
+    affiliationNumber: text("affiliation_number"),
+    emergencyContactRelationship: text("emergency_contact_relationship"),
+    /** Clasificación del estado físico de la ASA (I–VI). */
+    asaClass: text("asa_class"),
     maritalStatus: text("marital_status"),
     educationLevel: text("education_level"),
     occupation: text("occupation"),
@@ -75,6 +95,24 @@ export const patient = pgTable(
     check(
       "patient_blood_group_check",
       sql`${table.bloodGroup} IS NULL OR ${table.bloodGroup} IN ('A+','A-','B+','B-','AB+','AB-','O+','O-','unknown')`,
+    ),
+    check(
+      "patient_doc_type_check",
+      sql`${table.docType} IS NULL OR ${table.docType} IN ('DNI','CE','PASAPORTE','CNV','DIE','OTRO')`,
+    ),
+    // ISO/IEC 5218: M=1, F=2, I(indeterminado)=9, D(desconocido)=0.
+    check("patient_sex_check", sql`${table.sex} IS NULL OR ${table.sex} IN ('M','F','I','D')`),
+    check(
+      "patient_marital_status_check",
+      sql`${table.maritalStatus} IS NULL OR ${table.maritalStatus} IN ('soltero','casado','conviviente','viudo','divorciado','separado')`,
+    ),
+    check(
+      "patient_education_level_check",
+      sql`${table.educationLevel} IS NULL OR ${table.educationLevel} IN ('sin_nivel','inicial','primaria_incompleta','primaria_completa','secundaria_incompleta','secundaria_completa','superior_no_universitaria_incompleta','superior_no_universitaria_completa','superior_universitaria_incompleta','superior_universitaria_completa','posgrado')`,
+    ),
+    check(
+      "patient_asa_class_check",
+      sql`${table.asaClass} IS NULL OR ${table.asaClass} IN ('I','II','III','IV','V','VI')`,
     ),
     uniqueIndex("patient_org_number_uidx").on(table.organizationId, table.patientNumber),
     uniqueIndex("patient_org_doc_uidx")
@@ -230,13 +268,39 @@ export const patientAllergy = pgTable(
       .notNull()
       .references(() => patient.id, { onDelete: "cascade" }),
     substance: text("substance").notNull(),
+    /** Tipo de alérgeno; nulo en registros anteriores o cuando no se precisó. */
+    category: text("category"),
     reaction: text("reaction"),
-    severity: text("severity").notNull().default("moderada"),
+    /** Sin valor por defecto: lo no declarado se guarda como «desconocida». */
+    severity: text("severity").notNull(),
+    /** Alergia (inmunológica) o intolerancia; criticidad y verificación como HL7 FHIR AllergyIntolerance. */
+    kind: text("kind").notNull().default("alergia"),
+    criticality: text("criticality"),
+    verification: text("verification").notNull().default("no_confirmada"),
     isActive: boolean("is_active").notNull().default(true),
     createdBy: text("created_by").references(() => user.id),
     ...timestamps,
   },
-  (table) => [index("patient_allergy_org_patient_idx").on(table.organizationId, table.patientId)],
+  (table) => [
+    index("patient_allergy_org_patient_idx").on(table.organizationId, table.patientId),
+    check(
+      "patient_allergy_severity_check",
+      sql`${table.severity} IN ('leve','moderada','severa','desconocida')`,
+    ),
+    check("patient_allergy_kind_check", sql`${table.kind} IN ('alergia','intolerancia')`),
+    check(
+      "patient_allergy_criticality_check",
+      sql`${table.criticality} IS NULL OR ${table.criticality} IN ('baja','alta','no_evaluable')`,
+    ),
+    check(
+      "patient_allergy_verification_check",
+      sql`${table.verification} IN ('no_confirmada','confirmada','descartada')`,
+    ),
+    check(
+      "patient_allergy_category_check",
+      sql`${table.category} IS NULL OR ${table.category} IN ('medicamento','anestesico','material','alimento','ambiental','otro')`,
+    ),
+  ],
 )
 
 export const patientCondition = pgTable(
@@ -248,6 +312,8 @@ export const patientCondition = pgTable(
       .notNull()
       .references(() => patient.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
+    /** Código CIE-10 cuando el clínico lo precisa; el nombre declarado se conserva. */
+    cie10Code: text("cie10_code").references(() => cie10Code.code),
     status: text("status").notNull().default("activa"),
     startDate: date("start_date"),
     endDate: date("end_date"),
@@ -255,7 +321,13 @@ export const patientCondition = pgTable(
     createdBy: text("created_by").references(() => user.id),
     ...timestamps,
   },
-  (table) => [index("patient_condition_org_patient_idx").on(table.organizationId, table.patientId)],
+  (table) => [
+    index("patient_condition_org_patient_idx").on(table.organizationId, table.patientId),
+    check(
+      "patient_condition_status_check",
+      sql`${table.status} IN ('activa','resuelta','inactiva')`,
+    ),
+  ],
 )
 
 export const patientMedication = pgTable(
@@ -267,6 +339,8 @@ export const patientMedication = pgTable(
       .notNull()
       .references(() => patient.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
+    /** Denominación común internacional (principio activo), si se conoce. */
+    genericName: text("generic_name"),
     dose: text("dose"),
     frequency: text("frequency"),
     startDate: date("start_date"),
@@ -314,6 +388,10 @@ export const clinicalNote = pgTable(
       .references(() => user.id),
     note: text("note").notNull(),
     diagnosisCode: text("diagnosis_code").references(() => cie10Code.code),
+    /** Certeza del diagnóstico codificado: presuntivo, definitivo o repetido. */
+    diagnosisType: text("diagnosis_type"),
+    /** Pieza FDI a la que se refiere el diagnóstico, si aplica. */
+    toothNumber: smallint("tooth_number"),
     encounterId: uuid("encounter_id").references(() => encounter.id),
     kind: text("kind").notNull().default("evolucion"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -323,6 +401,11 @@ export const clinicalNote = pgTable(
       table.organizationId,
       table.patientId,
       table.createdAt,
+    ),
+    check("clinical_note_kind_check", sql`${table.kind} IN ('evolucion','adenda')`),
+    check(
+      "clinical_note_diagnosis_type_check",
+      sql`${table.diagnosisType} IS NULL OR (${table.diagnosisCode} IS NOT NULL AND ${table.diagnosisType} IN ('presuntivo','definitivo','repetido'))`,
     ),
   ],
 )
@@ -343,8 +426,85 @@ export const patientDocument = pgTable(
     sizeBytes: integer("size_bytes").notNull(),
     uploadedBy: text("uploaded_by").references(() => user.id),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    /** Subtipo de imagen diagnóstica (@odentia/clinical IMAGE_TYPES). */
+    imageType: text("image_type"),
+    /** Fecha de toma; la de subida es created_at. */
+    capturedAt: timestamp("captured_at", { withTimezone: true }),
+    /** Origen: equipo, sala o centro externo. */
+    source: text("source"),
+    reportStatus: text("report_status"),
+    /** Miniatura (WebP) generada al subir una imagen; nula en PDF y DICOM. */
+    thumbnailKey: text("thumbnail_key"),
+    // Retiro: el archivo nunca se borra; queda fuera de la galería con motivo y traza.
+    retiredAt: timestamp("retired_at", { withTimezone: true }),
+    retiredBy: text("retired_by").references(() => user.id),
+    retireReason: text("retire_reason"),
   },
-  (table) => [index("patient_document_org_patient_idx").on(table.organizationId, table.patientId)],
+  (table) => [
+    index("patient_document_org_patient_idx").on(table.organizationId, table.patientId),
+    check(
+      "patient_document_image_type_check",
+      sql`${table.imageType} IS NULL OR (${table.category} = 'radiografia' AND ${table.imageType} IN ('periapical','bitewing','oclusal','panoramica','cefalometrica','tomografia')) OR (${table.category} = 'foto_clinica' AND ${table.imageType} IN ('foto_intraoral','foto_extraoral'))`,
+    ),
+    check(
+      "patient_document_report_status_check",
+      sql`${table.reportStatus} IS NULL OR ${table.reportStatus} IN ('pendiente','informado','no_requiere')`,
+    ),
+    check(
+      "patient_document_source_check",
+      sql`${table.source} IS NULL OR char_length(${table.source}) BETWEEN 1 AND 120`,
+    ),
+    check(
+      "patient_document_retired_check",
+      sql`(${table.retiredAt} IS NULL) = (${table.retireReason} IS NULL) AND (${table.retireReason} IS NULL OR char_length(${table.retireReason}) BETWEEN 1 AND 2000)`,
+    ),
+    check(
+      "patient_document_category_check",
+      sql`${table.category} IN ('consentimiento','radiografia','foto_clinica','informe','presupuesto','receta','comprobante_pago','otro')`,
+    ),
+  ],
+)
+
+/**
+ * Bitácora de consultas a la historia clínica: quién abrió qué parte de la
+ * ficha de quién. Append-only; una fila por usuario, paciente, recurso y hora
+ * para dejar traza sin registrar cada petición de la misma lectura.
+ */
+export const clinicalAccessLog = pgTable(
+  "clinical_access_log",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    organizationId: orgFk("organization_id"),
+    patientId: uuid("patient_id").notNull(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id),
+    /** Parte de la ficha consultada (subruta clínica normalizada). */
+    resource: text("resource").notNull(),
+    /** Inicio de la hora en que ocurrió la consulta. */
+    bucket: timestamp("bucket", { withTimezone: true }).notNull(),
+    firstAt: timestamp("first_at", { withTimezone: true }).notNull().defaultNow(),
+    lastAt: timestamp("last_at", { withTimezone: true }).notNull().defaultNow(),
+    hits: integer("hits").notNull().default(1),
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.organizationId, table.patientId],
+      foreignColumns: [patient.organizationId, patient.id],
+    }),
+    uniqueIndex("clinical_access_log_bucket_uidx").on(
+      table.organizationId,
+      table.patientId,
+      table.userId,
+      table.resource,
+      table.bucket,
+    ),
+    index("clinical_access_log_org_patient_idx").on(
+      table.organizationId,
+      table.patientId,
+      table.lastAt,
+    ),
+  ],
 )
 
 /** Odontograma FDI NTS 188-MINSA/DGIESP-2022 por pieza/superficie (append-only).
@@ -373,6 +533,15 @@ export const odontogramEntry = pgTable(
     voidedAt: timestamp("voided_at", { withTimezone: true }),
     voidedBy: text("voided_by").references(() => user.id),
     voidReason: text("void_reason"),
+    /**
+     * Hallazgo tratado: el tratamiento indicado para él se realizó. Resolver no
+     * es anular: el hallazgo estuvo vigente hasta esa fecha.
+     */
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+    resolvedBy: text("resolved_by").references(() => user.id),
+    resolvedByPlanItemId: uuid("resolved_by_plan_item_id").references(
+      (): AnyPgColumn => treatmentPlanItem.id,
+    ),
     createdBy: text("created_by").references(() => user.id),
     encounterId: uuid("encounter_id").references(() => encounter.id),
     ...timestamps,
@@ -440,19 +609,115 @@ export const encounter = pgTable(
       .notNull()
       .references(() => user.id),
     status: text("status").notNull().default("borrador"),
+    /** Cita que motivó la atención; nula en atenciones sin cita o históricas. */
+    appointmentId: uuid("appointment_id"),
     reason: text("reason"),
+    /** Relato de la enfermedad actual y su tiempo (NTS 139: anamnesis de la consulta). */
+    presentIllness: text("present_illness"),
+    illnessDuration: text("illness_duration"),
+    /** Signos vitales con claves de @odentia/clinical (LOINC y UCUM). */
+    vitals: jsonb("vitals"),
     evolution: text("evolution"),
     indications: text("indications"),
     nextStep: text("next_step"),
+    prognosis: text("prognosis"),
+    /** Exámenes auxiliares solicitados o con resultado. */
+    auxiliaryExams: text("auxiliary_exams"),
     examination: jsonb("examination"),
     nextAppointmentAt: timestamp("next_appointment_at", { withTimezone: true }),
+    /** Hora de inicio declarada (por defecto, al abrir). */
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
+    /** Hora de fin declarada al cerrar. */
+    endedAt: timestamp("ended_at", { withTimezone: true }),
     finalizedAt: timestamp("finalized_at", { withTimezone: true }),
     finalizedBy: text("finalized_by").references(() => user.id),
+    /** Instantánea de la firma del profesional al cerrar (nombre, título y colegiatura). */
+    signerName: text("signer_name"),
+    signerTitle: text("signer_title"),
+    signerRegistration: text("signer_registration"),
+    voidedAt: timestamp("voided_at", { withTimezone: true }),
+    voidedBy: text("voided_by").references(() => user.id),
+    voidReason: text("void_reason"),
     ...timestamps,
   },
   (table) => [
     index("encounter_org_patient_idx").on(table.organizationId, table.patientId),
     uniqueIndex("encounter_patient_open_uidx").on(table.patientId).where(sql`status = 'borrador'`),
+    uniqueIndex("encounter_appointment_active_uidx")
+      .on(table.organizationId, table.appointmentId)
+      .where(sql`appointment_id IS NOT NULL AND status <> 'anulada'`),
+    foreignKey({
+      columns: [table.organizationId, table.patientId, table.appointmentId],
+      foreignColumns: [appointment.organizationId, appointment.patientId, appointment.id],
+      name: "encounter_appointment_fk",
+    }),
+    check("encounter_status_check", sql`${table.status} IN ('borrador','finalizada','anulada')`),
+    check(
+      "encounter_void_check",
+      sql`(${table.status} = 'anulada') = (${table.voidedAt} IS NOT NULL) AND (${table.voidedAt} IS NULL) = (${table.voidReason} IS NULL)`,
+    ),
+    check(
+      "encounter_end_check",
+      sql`${table.endedAt} IS NULL OR ${table.endedAt} >= ${table.startedAt}`,
+    ),
+  ],
+)
+
+/**
+ * Diagnóstico registrado en una atención: CIE-10 con tipo HIS (presuntivo,
+ * definitivo o repetido) y sitio dental. Se anula en borrador con motivo; el
+ * estado activo/resuelto alimenta la lista de problemas del paciente.
+ */
+export const encounterDiagnosis = pgTable(
+  "encounter_diagnosis",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    organizationId: orgFk("organization_id"),
+    patientId: uuid("patient_id").notNull(),
+    /** Nulo solo en diagnósticos históricos registrados fuera de una atención. */
+    encounterId: uuid("encounter_id").references(() => encounter.id),
+    cie10Code: text("cie10_code")
+      .notNull()
+      .references(() => cie10Code.code),
+    /** Nulo solo en históricos migrados sin clasificar. */
+    diagnosisType: text("diagnosis_type"),
+    toothNumber: smallint("tooth_number"),
+    surfaces: text("surfaces").array().notNull().default([]),
+    note: text("note"),
+    status: text("status").notNull().default("activo"),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+    /** Nota de evolución de la que proviene un diagnóstico histórico. */
+    legacyNoteId: uuid("legacy_note_id").references((): AnyPgColumn => clinicalNote.id),
+    createdBy: text("created_by").references(() => user.id),
+    voidedAt: timestamp("voided_at", { withTimezone: true }),
+    voidedBy: text("voided_by").references(() => user.id),
+    voidReason: text("void_reason"),
+    ...timestamps,
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.organizationId, table.patientId],
+      foreignColumns: [patient.organizationId, patient.id],
+      name: "encounter_diagnosis_patient_fk",
+    }),
+    index("encounter_diagnosis_org_patient_idx").on(table.organizationId, table.patientId),
+    index("encounter_diagnosis_encounter_idx").on(table.organizationId, table.encounterId),
+    uniqueIndex("encounter_diagnosis_legacy_note_uidx")
+      .on(table.legacyNoteId)
+      .where(sql`legacy_note_id IS NOT NULL`),
+    check(
+      "encounter_diagnosis_type_check",
+      sql`(${table.diagnosisType} IS NULL AND ${table.legacyNoteId} IS NOT NULL) OR ${table.diagnosisType} IN ('presuntivo','definitivo','repetido')`,
+    ),
+    check("encounter_diagnosis_status_check", sql`${table.status} IN ('activo','resuelto')`),
+    check(
+      "encounter_diagnosis_void_check",
+      sql`(${table.voidedAt} IS NULL) = (${table.voidReason} IS NULL)`,
+    ),
+    check(
+      "encounter_diagnosis_origin_check",
+      sql`${table.encounterId} IS NOT NULL OR ${table.legacyNoteId} IS NOT NULL`,
+    ),
   ],
 )
 
@@ -630,6 +895,8 @@ export const encounterProcedure = pgTable(
     quadrant: smallint("quadrant"),
     arch: text("arch"),
     description: text("description").notNull(),
+    /** Unidades del acto (p. ej. 3 sellantes); el cargo es precio × cantidad. */
+    quantity: smallint("quantity").notNull().default(1),
     diagnosisCode: text("diagnosis_code").references(() => cie10Code.code),
     planItemId: uuid("plan_item_id").references(() => treatmentPlanItem.id),
     // Snapshot del costo al registrar el acto (tarifario o ítem del plan);
@@ -639,8 +906,17 @@ export const encounterProcedure = pgTable(
     codings: jsonb("codings").$type<ProcedureCodingSnapshot[]>().notNull().default([]),
     createdBy: text("created_by").references(() => user.id),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    /** Anulación en borrador: el acto queda en la traza, sin cargo ni sesión. */
+    voidedAt: timestamp("voided_at", { withTimezone: true }),
+    voidedBy: text("voided_by").references(() => user.id),
+    voidReason: text("void_reason"),
   },
   (table) => [
+    check("encounter_procedure_quantity_check", sql`${table.quantity} BETWEEN 1 AND 99`),
+    check(
+      "encounter_procedure_void_check",
+      sql`(${table.voidedAt} IS NULL) = (${table.voidReason} IS NULL)`,
+    ),
     check(
       "encounter_procedure_price_check",
       sql`${table.priceCents} IS NULL OR ${table.priceCents} >= 0`,
@@ -784,12 +1060,26 @@ export const treatmentPlanItem = pgTable(
     priceCents: integer("price_cents"),
     currency: char("currency", { length: 3 }).notNull().default("PEN"),
     status: text("status").notNull().default("pendiente"),
+    /** Fase del plan (urgencia → mantenimiento); la propone la especialidad. */
+    phase: text("phase").notNull().default("basica"),
+    /** Orden de ejecución dentro del plan y la fase. */
+    sortOrder: integer("sort_order").notNull().default(0),
+    /** Sesiones previstas; las hechas son sus procedimientos no anulados. */
+    plannedSessions: smallint("planned_sessions").notNull().default(1),
     sourceEncounterId: uuid("source_encounter_id").references(() => encounter.id),
     createdBy: text("created_by").references(() => user.id),
     ...timestamps,
   },
   (table) => [
     index("treatment_plan_item_org_patient_idx").on(table.organizationId, table.patientId),
+    check(
+      "treatment_plan_item_phase_check",
+      sql`${table.phase} IN ('urgencia','basica','quirurgica','rehabilitadora','mantenimiento')`,
+    ),
+    check(
+      "treatment_plan_item_planned_sessions_check",
+      sql`${table.plannedSessions} BETWEEN 1 AND 60`,
+    ),
     index("treatment_plan_item_org_service_idx").on(table.organizationId, table.serviceId),
     index("treatment_plan_item_org_budget_idx").on(table.organizationId, table.budgetId),
     index("treatment_plan_item_org_plan_idx").on(table.organizationId, table.planId),
@@ -907,6 +1197,88 @@ export const cie10Code = pgTable("cie10_code", {
   description: text("description").notNull(),
 })
 
+/**
+ * Ubigeo del INEI (departamento, provincia y distrito). Catálogo global sin
+ * organización ni RLS, como CIE-10: se carga desde la fuente oficial.
+ */
+export const ubigeo = pgTable(
+  "ubigeo",
+  {
+    code: char("code", { length: 6 }).primaryKey(),
+    department: text("department").notNull(),
+    province: text("province"),
+    district: text("district"),
+  },
+  (table) => [
+    check("ubigeo_code_check", sql`${table.code} ~ '^[0-9]{6}$'`),
+    index("ubigeo_department_idx").on(table.department),
+  ],
+)
+
+/**
+ * Consentimiento para el tratamiento de datos personales (Ley 29733): por
+ * versión del aviso, con sus finalidades, quién lo otorga y su revocación.
+ */
+export const patientDataConsent = pgTable(
+  "patient_data_consent",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    organizationId: orgFk("organization_id"),
+    patientId: uuid("patient_id")
+      .notNull()
+      .references(() => patient.id, { onDelete: "cascade" }),
+    noticeVersion: integer("notice_version").notNull(),
+    noticeText: text("notice_text").notNull(),
+    /** Finalidades aceptadas: atencion (siempre), recordatorios, comunicaciones. */
+    purposes: text("purposes").array().notNull(),
+    /** Persona que otorga: el paciente o su representante legal. */
+    grantedByContactId: uuid("granted_by_contact_id").references(() => contact.id),
+    grantedByName: text("granted_by_name").notNull(),
+    channel: text("channel").notNull(),
+    recordedBy: text("recorded_by").references(() => user.id),
+    grantedAt: timestamp("granted_at", { withTimezone: true }).notNull().defaultNow(),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    revokedBy: text("revoked_by").references(() => user.id),
+    revokeReason: text("revoke_reason"),
+  },
+  (table) => [
+    index("patient_data_consent_org_patient_idx").on(table.organizationId, table.patientId),
+    check(
+      "patient_data_consent_channel_check",
+      sql`${table.channel} IN ('presencial','formulario_publico','portal')`,
+    ),
+    check(
+      "patient_data_consent_revoke_check",
+      sql`(${table.revokedAt} IS NULL) = (${table.revokeReason} IS NULL)`,
+    ),
+  ],
+)
+
+/** Antecedentes familiares por parentesco y condición (CIE-10 opcional). */
+export const patientFamilyHistory = pgTable(
+  "patient_family_history",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    organizationId: orgFk("organization_id"),
+    patientId: uuid("patient_id")
+      .notNull()
+      .references(() => patient.id, { onDelete: "cascade" }),
+    relationship: text("relationship").notNull(),
+    condition: text("condition").notNull(),
+    cie10Code: text("cie10_code").references(() => cie10Code.code),
+    notes: text("notes"),
+    createdBy: text("created_by").references(() => user.id),
+    ...timestamps,
+  },
+  (table) => [
+    index("patient_family_history_org_patient_idx").on(table.organizationId, table.patientId),
+    check(
+      "patient_family_history_relationship_check",
+      sql`${table.relationship} IN ('madre','padre','hijo','conyuge','hermano','abuelo','tio','otro_familiar')`,
+    ),
+  ],
+)
+
 /** Controles longitudinales; una cita programada no equivale a un control realizado. */
 export const clinicalFollowUp = pgTable(
   "clinical_follow_up",
@@ -973,6 +1345,13 @@ export const prescription = pgTable(
     prescriptionNumber: integer("prescription_number").notNull(),
     status: text("status").notNull().default("emitida"),
     notes: text("notes"),
+    /** Diagnóstico que justifica la receta y fecha hasta la que es válida. */
+    diagnosisCode: text("diagnosis_code").references(() => cie10Code.code),
+    validUntil: date("valid_until"),
+    /** Instantánea de quien prescribe (perfil profesional al emitir). */
+    prescriberName: text("prescriber_name"),
+    prescriberTitle: text("prescriber_title"),
+    prescriberRegistration: text("prescriber_registration"),
     issuedBy: text("issued_by").references(() => user.id),
     issuedAt: timestamp("issued_at", { withTimezone: true }).notNull().defaultNow(),
     cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
@@ -1001,6 +1380,13 @@ export const prescriptionItem = pgTable(
       .notNull()
       .references(() => prescription.id, { onDelete: "cascade" }),
     medicationName: text("medication_name").notNull(),
+    /** Denominación Común Internacional, concentración y forma farmacéutica. */
+    genericName: text("generic_name"),
+    brandName: text("brand_name"),
+    strength: text("strength"),
+    dosageForm: text("dosage_form"),
+    /** Código ATC de la OMS cuando la DCI es conocida. */
+    atcCode: text("atc_code"),
     dose: text("dose").notNull(),
     route: text("route").notNull(),
     frequency: text("frequency").notNull(),

@@ -39,10 +39,12 @@ import {
   toothTypeLabel,
 } from "../lib/patients"
 import { formatMoney, type ServiceCatalogItem } from "../lib/services"
+import { FindingPicker } from "./finding-picker"
 import { Cie10Search } from "./patient/cie10-search"
 import { ServicePicker } from "./patient/service-picker"
+import { ToothHistory } from "./patient/tooth-history"
 import { ToothSVG } from "./tooth-svg"
-import { FindingPicker } from "./finding-picker"
+import { ChoiceSelect } from "./ui/choice-select"
 
 /** Las URL firmadas expiran: se consideran frescas 10 min y luego se regeneran. */
 const SIGNED_URL_STALE_MS = 10 * 60 * 1000
@@ -399,7 +401,7 @@ export function ToothDrawer({
   }
 
   const planQuery = useQuery({
-    queryKey: ["plan", patientId],
+    queryKey: ["plan-items", patientId],
     queryFn: () => apiFetch<{ data: PlanItem[] }>(`/api/patients/${patientId}/plan`),
     enabled: canRead,
   })
@@ -598,7 +600,7 @@ export function ToothDrawer({
       setTreatPlanId("")
       setSavedMessage("Tratamiento agregado al plan.")
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["plan", patientId] }),
+        queryClient.invalidateQueries({ queryKey: ["plan-items", patientId] }),
         queryClient.invalidateQueries({ queryKey: ["treatment-plans", patientId] }),
         queryClient.invalidateQueries({ queryKey: ["budgets", patientId] }),
         queryClient.invalidateQueries({ queryKey: ["budget", patientId] }),
@@ -807,6 +809,34 @@ export function ToothDrawer({
       ) : null}
     </div>
   )
+  const toothContexts = (
+    <div className="flex flex-col gap-3 pt-2">
+      {teeth.map((toothNumber) => (
+        <ToothContext
+          key={toothNumber}
+          patientId={patientId}
+          toothNumber={toothNumber}
+          entries={entriesOf(toothNumber)}
+          history={historyOf(toothNumber)}
+          planQuery={planQuery}
+          docsQuery={docsQuery}
+          canMutate={canMutate && !disabled && !busy}
+          voidPending={voidPending}
+          defaultOpen
+          onVoid={(id, label) => {
+            setVoiding({ id, label })
+            setVoidReason("")
+            setVoidError(null)
+          }}
+        />
+      ))}
+    </div>
+  )
+  // Al elegir una sola pieza, primero su estado (hallazgos, plan, imágenes,
+  // historial) y después el registro. Mientras se edita, el contexto baja y se
+  // pliega para no competir con el formulario.
+  const contextFirst =
+    !multi && !draftDirty && (!canMutate || (mode === "diagnosis" && choosingFinding))
   const body = (
     <div className="flex flex-col gap-5">
       {savedMessage && (
@@ -814,6 +844,7 @@ export function ToothDrawer({
           {savedMessage}
         </p>
       )}
+      {contextFirst ? toothContexts : null}
 
       {!canMutate ? (
         <p className="text-sm text-muted-foreground">
@@ -1170,9 +1201,9 @@ export function ToothDrawer({
               <FieldLabel htmlFor={`${uid}-source-finding`}>
                 Problema que motiva el tratamiento
               </FieldLabel>
-              <select
+              <ChoiceSelect
                 id={`${uid}-source-finding`}
-                className="min-h-11 rounded-md border bg-background px-3 text-sm"
+                
                 disabled={fieldDisabled}
                 value={sourceFindingId}
                 onChange={(event) => {
@@ -1191,7 +1222,7 @@ export function ToothDrawer({
                     {entry.note ? ` · ${entry.note}` : ""}
                   </option>
                 ))}
-              </select>
+              </ChoiceSelect>
             </Field>
           )}
           <Field className="sm:col-span-2">
@@ -1296,32 +1327,14 @@ export function ToothDrawer({
           </div>
         </div>
       )}
-      <details>
-        <summary className="min-h-11 cursor-pointer py-3 text-sm font-medium">
-          Historial y contexto de las piezas
-        </summary>
-        <div className="flex flex-col gap-3 pt-2">
-          {teeth.map((toothNumber) => (
-            <ToothContext
-              key={toothNumber}
-              patientId={patientId}
-              toothNumber={toothNumber}
-              entries={entriesOf(toothNumber)}
-              history={historyOf(toothNumber)}
-              planQuery={planQuery}
-              docsQuery={docsQuery}
-              canMutate={canMutate && !disabled && !busy}
-              voidPending={voidPending}
-              defaultOpen
-              onVoid={(id, label) => {
-                setVoiding({ id, label })
-                setVoidReason("")
-                setVoidError(null)
-              }}
-            />
-          ))}
-        </div>
-      </details>
+      {contextFirst ? null : (
+        <details>
+          <summary className="min-h-11 cursor-pointer py-3 text-sm font-medium">
+            Historial y contexto de las piezas
+          </summary>
+          {toothContexts}
+        </details>
+      )}
     </div>
   )
   return (
@@ -1604,6 +1617,8 @@ function ToothContext({
           )}
         </section>
 
+        <ToothHistory patientId={patientId} toothNumber={toothNumber} />
+
         <section aria-label={`Imágenes de la pieza ${toothNumber}`} className="flex flex-col gap-2">
           <h4 className="text-sm font-medium">Imágenes asociadas</h4>
           {docsQuery.isPending && (
@@ -1639,7 +1654,7 @@ function ToothContext({
           aria-label={`Historial de la pieza ${toothNumber}`}
           className="flex flex-col gap-2"
         >
-          <h4 className="text-sm font-medium">Historial de la pieza</h4>
+          <h4 className="text-sm font-medium">Hallazgos del odontograma (con correcciones)</h4>
           {sortedHistory.length === 0 ? (
             <p className="text-sm text-muted-foreground">Sin entradas registradas.</p>
           ) : (
@@ -1758,12 +1773,18 @@ function ToothContext({
   )
 }
 
-function useSignedDocUrl(patientId: string, documentId: string) {
+function useSignedDocUrl(
+  patientId: string,
+  documentId: string,
+  variant: "original" | "thumb" = "original",
+) {
   const canRead = usePermission("clinical.read")
   return useQuery({
-    queryKey: ["patient-document-url", patientId, documentId],
+    queryKey: ["patient-document-url", patientId, documentId, variant],
     queryFn: () =>
-      apiFetch<{ data: { url: string } }>(`/api/patients/${patientId}/documents/${documentId}/url`),
+      apiFetch<{ data: { url: string } }>(
+        `/api/patients/${patientId}/documents/${documentId}/url${variant === "thumb" ? "?variant=thumb" : ""}`,
+      ),
     enabled: canRead,
     staleTime: SIGNED_URL_STALE_MS,
     gcTime: 30 * 60 * 1000,
@@ -1774,13 +1795,15 @@ function ToothImageThumb({ patientId, doc }: { patientId: string; doc: PatientDo
   const urlQuery = useSignedDocUrl(patientId, doc.id)
   const url = urlQuery.data?.data.url ?? null
   const isImage = doc.contentType.startsWith("image/")
+  const thumbQuery = useSignedDocUrl(patientId, doc.id, "thumb")
+  const thumbUrl = thumbQuery.data?.data.url ?? url
 
   return (
     <li className="overflow-hidden rounded-md border">
       {url && isImage ? (
         <a href={url} target="_blank" rel="noreferrer" aria-label={`Ver ${doc.label}`}>
           <img
-            src={url}
+            src={thumbUrl ?? url}
             alt={doc.label}
             loading="lazy"
             className="aspect-square w-full object-cover"

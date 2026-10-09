@@ -1,33 +1,90 @@
+import { common, LoadingState } from "@odentia/ui-patterns"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { apiFetch } from "../../lib/api"
-import type { OdontogramState } from "../../lib/patients"
+import type { OdontogramState, PlanItem } from "../../lib/patients"
+import { QueryErrorState } from "../../lib/query-error"
 import { OdontogramStudio } from "../odontogram-studio"
+import { PlanLinkedPanel } from "./plan-linked-panel"
 
+/**
+ * Centro del trabajo clínico: el odontograma y, debajo, el plan enlazado pieza
+ * por pieza. La pieza es el índice de hallazgos, indicaciones y actos.
+ */
 export function OdontogramaTab({
   patientId,
   initialTooth,
+  birthDate,
+  onOpenItem,
+  onOpenPlans,
 }: {
   patientId: string
   initialTooth?: number
+  birthDate?: string | null
+  onOpenItem: (itemId: string) => void
+  onOpenPlans: () => void
 }) {
   const queryClient = useQueryClient()
+  const [focusTooth, setFocusTooth] = useState(initialTooth)
+  const [selection, setSelection] = useState<number[]>(initialTooth ? [initialTooth] : [])
+  const dirty = useRef(false)
+  // Un enlace nuevo (p. ej. Historia → pieza) manda sobre la selección local.
+  useEffect(() => setFocusTooth(initialTooth), [initialTooth])
+
   const chart = useQuery({
     queryKey: ["odontogram", patientId],
     queryFn: () => apiFetch<{ data: OdontogramState }>(`/api/patients/${patientId}/odontogram`),
   })
-  if (chart.isLoading) return <p className="text-sm text-muted-foreground">Cargando odontograma…</p>
-  if (!chart.data)
-    return (
-      <p role="alert" className="text-sm text-destructive">
-        {chart.error?.message ?? "No se pudo cargar el odontograma."}
-      </p>
+  const plan = useQuery({
+    queryKey: ["plan-items", patientId],
+    queryFn: () => apiFetch<{ data: PlanItem[] }>(`/api/patients/${patientId}/plan`),
+  })
+
+  const handleSelection = useCallback((teeth: number[]) => {
+    setSelection(teeth)
+    // Si el clínico eligió otra pieza en el arco, el foco pedido deja de mandar:
+    // así volver a pedir la misma pieza desde el plan la selecciona otra vez.
+    setFocusTooth((current) =>
+      current != null && teeth.length === 1 && teeth[0] === current ? current : undefined,
     )
+  }, [])
+  const handleDirty = useCallback((value: boolean) => {
+    dirty.current = value
+  }, [])
+  const pickTooth = (tooth: number) => {
+    if (dirty.current && !window.confirm(common.confirm.unsavedMessage)) return
+    setFocusTooth(tooth)
+  }
+
+  if (chart.isPending) return <LoadingState message="Cargando odontograma…" />
+  if (chart.isError)
+    return <QueryErrorState error={chart.error} onRetry={() => void chart.refetch()} />
+
   return (
     <OdontogramStudio
       patientId={patientId}
       state={chart.data.data}
-      initialTooth={initialTooth}
+      initialTooth={focusTooth}
+      birthDate={birthDate}
+      onSelectionChange={handleSelection}
+      onDirtyChange={handleDirty}
       onChanged={() => queryClient.invalidateQueries({ queryKey: ["odontogram", patientId] })}
+      belowChart={
+        plan.isPending ? (
+          <LoadingState message="Cargando plan…" />
+        ) : plan.isError ? (
+          <QueryErrorState error={plan.error} onRetry={() => void plan.refetch()} />
+        ) : (
+          <PlanLinkedPanel
+            items={plan.data.data}
+            state={chart.data.data}
+            selection={selection}
+            onPickTooth={pickTooth}
+            onOpenItem={onOpenItem}
+            onOpenPlans={onOpenPlans}
+          />
+        )
+      }
     />
   )
 }

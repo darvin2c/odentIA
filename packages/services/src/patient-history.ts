@@ -5,6 +5,7 @@ import {
   clinicalNote,
   encounter,
   encounterPlanItem,
+  encounterDiagnosis,
   encounterProcedure,
   encounterTooth,
   odontogramEntry,
@@ -16,11 +17,13 @@ import {
   treatmentBudgetItem,
   treatmentPlanItem,
 } from "@odentia/db/schema/clinical"
+import { consentDocument } from "@odentia/db/schema/clinical-forms"
 import { orgProfile } from "@odentia/db/schema/org"
-import { and, asc, desc, eq, inArray, notInArray, type SQL, sql } from "drizzle-orm"
+import { and, asc, desc, eq, inArray, isNull, notInArray, type SQL, sql } from "drizzle-orm"
 import { getCurrentDocumentContexts, getOdontogram, listPatientDocuments } from "./clinical.js"
 import { decodeCursor, encodeCursor } from "./cursors.js"
 import { validation } from "./errors.js"
+import { checkEncounterClosing, type ClosingRequirement } from "./encounters.js"
 import { requirePatient } from "./patients.js"
 import { listTreatmentJourneys } from "./treatment-journey.js"
 
@@ -67,6 +70,10 @@ export interface RecentDocument {
   id: string
   label: string
   category: string
+  contentType: string
+  imageType: string | null
+  capturedAt: Date | null
+  hasThumbnail: boolean
   encounterId: string | null
   planItemId: string | null
   toothNumbers: number[]
@@ -174,6 +181,18 @@ async function loadPlannedForEncounters(
   return grouped
 }
 
+/** Atención en curso tal como la necesita quien abre la ficha. */
+export interface OpenEncounterBrief {
+  id: string
+  reason: string | null
+  startedAt: Date
+  dentistUserId: string
+  appointmentId: string | null
+  diagnosisCount: number
+  procedureCount: number
+  missing: ClosingRequirement[]
+}
+
 export async function getPatientSummary(tx: Db, orgId: string, patientId: string) {
   await requirePatient(tx, orgId, patientId)
   const [lastEncounter] = await tx
@@ -189,7 +208,7 @@ export async function getPatientSummary(tx: Db, orgId: string, patientId: string
     .orderBy(desc(encounter.finalizedAt), desc(encounter.id))
     .limit(1)
   const [draft] = await tx
-    .select({ id: encounter.id })
+    .select()
     .from(encounter)
     .where(
       and(
@@ -199,6 +218,55 @@ export async function getPatientSummary(tx: Db, orgId: string, patientId: string
       ),
     )
     .limit(1)
+  // Atención en curso: lo que lleva y lo que le falta para cerrarse, con la
+  // firma de quien la atiende (no de quien consulta el resumen).
+  let openEncounter: OpenEncounterBrief | null = null
+  if (draft) {
+    const [[dx], [proc], closing] = await Promise.all([
+      tx
+        .select({ n: sql<number>`count(*)::int` })
+        .from(encounterDiagnosis)
+        .where(
+          and(
+            eq(encounterDiagnosis.organizationId, orgId),
+            eq(encounterDiagnosis.encounterId, draft.id),
+            isNull(encounterDiagnosis.voidedAt),
+          ),
+        ),
+      tx
+        .select({ n: sql<number>`count(*)::int` })
+        .from(encounterProcedure)
+        .where(
+          and(
+            eq(encounterProcedure.organizationId, orgId),
+            eq(encounterProcedure.encounterId, draft.id),
+            isNull(encounterProcedure.voidedAt),
+          ),
+        ),
+      checkEncounterClosing(tx, orgId, draft.dentistUserId, draft),
+    ])
+    openEncounter = {
+      id: draft.id,
+      reason: draft.reason,
+      startedAt: draft.startedAt,
+      dentistUserId: draft.dentistUserId,
+      appointmentId: draft.appointmentId,
+      diagnosisCount: dx?.n ?? 0,
+      procedureCount: proc?.n ?? 0,
+      missing: closing.missing,
+    }
+  }
+  const pendingConsentRows = await tx
+    .select({ id: consentDocument.id, title: consentDocument.titleSnapshot })
+    .from(consentDocument)
+    .where(
+      and(
+        eq(consentDocument.organizationId, orgId),
+        eq(consentDocument.patientId, patientId),
+        eq(consentDocument.status, "pendiente"),
+      ),
+    )
+    .orderBy(asc(consentDocument.createdAt))
   // Trabajo pendiente real: ítems aceptados con estado clínico pendiente o
   // programado, en presupuestos vigentes (nunca presentados sin decisión,
   // rechazados, cancelados ni históricos).
@@ -282,16 +350,18 @@ export async function getPatientSummary(tx: Db, orgId: string, patientId: string
           and(
             eq(encounterProcedure.organizationId, orgId),
             eq(encounterProcedure.encounterId, lastEncounter.id),
+            isNull(encounterProcedure.voidedAt),
           ),
         )
         .orderBy(asc(encounterProcedure.createdAt), asc(encounterProcedure.id)),
       tx
-        .select({ diagnosisCode: clinicalNote.diagnosisCode })
-        .from(clinicalNote)
+        .select({ diagnosisCode: encounterDiagnosis.cie10Code })
+        .from(encounterDiagnosis)
         .where(
           and(
-            eq(clinicalNote.organizationId, orgId),
-            eq(clinicalNote.encounterId, lastEncounter.id),
+            eq(encounterDiagnosis.organizationId, orgId),
+            eq(encounterDiagnosis.encounterId, lastEncounter.id),
+            isNull(encounterDiagnosis.voidedAt),
           ),
         ),
     ])
@@ -446,7 +516,13 @@ export async function getPatientSummary(tx: Db, orgId: string, patientId: string
   const docRows = await tx
     .select()
     .from(patientDocument)
-    .where(and(eq(patientDocument.organizationId, orgId), eq(patientDocument.patientId, patientId)))
+    .where(
+      and(
+        eq(patientDocument.organizationId, orgId),
+        eq(patientDocument.patientId, patientId),
+        isNull(patientDocument.retiredAt),
+      ),
+    )
     .orderBy(desc(patientDocument.createdAt), desc(patientDocument.id))
     .limit(8)
   const contexts = await getCurrentDocumentContexts(
@@ -461,6 +537,10 @@ export async function getPatientSummary(tx: Db, orgId: string, patientId: string
       id: doc.id,
       label: doc.label,
       category: doc.category,
+      contentType: doc.contentType,
+      imageType: doc.imageType,
+      capturedAt: doc.capturedAt,
+      hasThumbnail: doc.thumbnailKey !== null,
       encounterId: ctx?.encounterId ?? null,
       planItemId: ctx?.planItemId ?? null,
       toothNumbers: ctx?.toothNumbers ?? [],
@@ -473,6 +553,8 @@ export async function getPatientSummary(tx: Db, orgId: string, patientId: string
     treatmentJourneys: await listTreatmentJourneys(tx, orgId, patientId, 10),
     lastEncounter: lastEncounter ?? null,
     openEncounterId: draft?.id ?? null,
+    openEncounter,
+    pendingConsents: pendingConsentRows,
     nextAppointmentAt: lastEncounter?.nextAppointmentAt ?? null,
     // Nunca sumar monedas distintas: la UI muestra un total por moneda.
     planPending: {
@@ -663,15 +745,20 @@ export async function getTimeline(
           and(
             eq(encounterProcedure.organizationId, orgId),
             inArray(encounterProcedure.encounterId, encounters),
+            isNull(encounterProcedure.voidedAt),
           ),
         ),
       tx
-        .select()
-        .from(clinicalNote)
+        .select({
+          encounterId: encounterDiagnosis.encounterId,
+          diagnosisCode: encounterDiagnosis.cie10Code,
+        })
+        .from(encounterDiagnosis)
         .where(
           and(
-            eq(clinicalNote.organizationId, orgId),
-            inArray(clinicalNote.encounterId, encounters),
+            eq(encounterDiagnosis.organizationId, orgId),
+            inArray(encounterDiagnosis.encounterId, encounters),
+            isNull(encounterDiagnosis.voidedAt),
           ),
         ),
     ])

@@ -16,27 +16,35 @@ import {
 } from "../../lib/agenda"
 import { apiFetch } from "../../lib/api"
 import {
-  type FollowUp,
   formatDateTime,
   mutationMessage,
+  type SchedulableControl,
   type ScheduleFollowUpBody,
   scheduleFollowUpApi,
+  scheduleFollowUpFromCoordinationApi,
 } from "../../lib/clinical-journey"
 import { usePermission } from "../../lib/crm"
 import { AgendaSlotPicker } from "../agenda-slot-picker"
+import { ChoiceSelect } from "../ui/choice-select"
+
+/** Quién reserva: el clínico desde la ficha clínica o quien agenda desde la coordinación. */
+export type FollowUpSchedulerScope = "clinical" | "coordination"
 
 export function FollowUpScheduler({
   patientId,
   control,
   onClose,
+  scope = "clinical",
 }: {
   patientId: string
-  control: FollowUp
+  control: SchedulableControl
   onClose: () => void
+  scope?: FollowUpSchedulerScope
 }) {
   const canWriteClinical = usePermission("clinical.write")
   const canWriteAppointments = usePermission("appointments.write")
-  const canSchedule = canWriteClinical && canWriteAppointments
+  const canSchedule =
+    canWriteAppointments && (scope === "coordination" || canWriteClinical)
   const resources = useQuery({
     queryKey: ["agenda-resources"],
     queryFn: () => apiFetch<{ data: AgendaResources }>("/api/agenda/resources"),
@@ -49,6 +57,7 @@ export function FollowUpScheduler({
         control={control}
         resources={resources.data.data}
         onClose={onClose}
+        scope={scope}
       />
     )
   return (
@@ -65,7 +74,9 @@ export function FollowUpScheduler({
     >
       {!canSchedule ? (
         <p role="alert">
-          Necesitas permisos de escritura clínica y de agenda para programar este control.
+          {scope === "coordination"
+            ? "Necesitas permiso de agenda para programar este control."
+            : "Necesitas permisos de escritura clínica y de agenda para programar este control."}
         </p>
       ) : resources.isError ? (
         <p role="alert">
@@ -86,11 +97,13 @@ function ScheduleForm({
   control,
   resources,
   onClose,
+  scope,
 }: {
   patientId: string
-  control: FollowUp
+  control: SchedulableControl
   resources: AgendaResources
   onClose: () => void
+  scope: FollowUpSchedulerScope
 }) {
   const uid = useId()
   const client = useQueryClient()
@@ -158,7 +171,9 @@ function ScheduleForm({
           },
         }
       }
-      return scheduleFollowUpApi(patientId, control.id, body)
+      return scope === "coordination"
+        ? scheduleFollowUpFromCoordinationApi(patientId, control.id, body)
+        : scheduleFollowUpApi(patientId, control.id, body)
     },
     onSuccess: async () => {
       await invalidateAppointmentQueries(client)
@@ -201,9 +216,9 @@ function ScheduleForm({
         )}
         <Field>
           <FieldLabel htmlFor={`${uid}-mode`}>Cómo programar</FieldLabel>
-          <select
+          <ChoiceSelect
             id={`${uid}-mode`}
-            className="h-9 w-full rounded-md border bg-background px-3 text-sm"
+            className="w-full"
             value={mode}
             onChange={(event) => {
               setMode(event.target.value as "reserve" | "link")
@@ -212,15 +227,15 @@ function ScheduleForm({
           >
             <option value="reserve">Reservar una nueva cita</option>
             <option value="link">Vincular una cita existente del paciente</option>
-          </select>
+          </ChoiceSelect>
         </Field>
         <div hidden={mode !== "reserve"}>
           <fieldset disabled={mode !== "reserve"} className="grid min-w-0 gap-4">
             <Field>
               <FieldLabel htmlFor={`${uid}-service`}>Servicio (opcional)</FieldLabel>
-              <select
+              <ChoiceSelect
                 id={`${uid}-service`}
-                className="h-9 w-full rounded-md border bg-background px-3 text-sm"
+                className="w-full"
                 value={serviceId}
                 onChange={(event) => {
                   setServiceId(event.target.value)
@@ -233,7 +248,7 @@ function ScheduleForm({
                     {service.name}
                   </option>
                 ))}
-              </select>
+              </ChoiceSelect>
               {services.isError && (
                 <p role="alert" className="text-sm">
                   No se pudo cargar el catálogo. Puedes reservar sin servicio o{" "}
@@ -297,9 +312,9 @@ function ScheduleForm({
             ) : (
               <Field>
                 <FieldLabel htmlFor={`${uid}-appointment`}>Cita del paciente</FieldLabel>
-                <select
+                <ChoiceSelect
                   id={`${uid}-appointment`}
-                  className="h-9 w-full rounded-md border bg-background px-3 text-sm"
+                  className="w-full"
                   value={appointmentId}
                   onChange={(event) => setAppointmentId(event.target.value)}
                   required
@@ -314,7 +329,7 @@ function ScheduleForm({
                       {SCHEDULE_STATUS_LABELS[item.status]}
                     </option>
                   ))}
-                </select>
+                </ChoiceSelect>
                 {appointments.data?.length === 0 && (
                   <p className="text-sm text-muted-foreground">
                     Sin citas programadas o confirmadas del paciente en esta sede y fecha. Elige

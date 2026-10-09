@@ -1,4 +1,11 @@
-import { assertTreatmentSite, TREATMENT_SCOPES, type TreatmentScope } from "@odentia/clinical"
+import {
+  assertTreatmentSite,
+  phaseForSpecialty,
+  TREATMENT_PHASES,
+  TREATMENT_SCOPES,
+  type TreatmentPhase,
+  type TreatmentScope,
+} from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import {
   cie10Code,
@@ -9,17 +16,17 @@ import {
   serviceCatalog,
   treatmentBudget,
   treatmentBudgetItem,
-  treatmentPlan,
   treatmentOptionGroup,
+  treatmentPlan,
   treatmentPlanItem,
   treatmentTemplate,
 } from "@odentia/db/schema/clinical"
 import { auditEvent } from "@odentia/db/schema/org"
-import { and, asc, eq, inArray, isNull } from "drizzle-orm"
+import { and, asc, desc, eq, gt, inArray, isNull, lt, sql } from "drizzle-orm"
 import { notFound, ServiceError, validation } from "./errors.js"
 import { requirePatient } from "./patients.js"
-import { requireServiceForIndication, type ServiceRow } from "./service-catalog.js"
 import { assertExecutableCodings, resolveServiceCodings } from "./procedure-codings.js"
+import { requireServiceForIndication, type ServiceRow } from "./service-catalog.js"
 
 /**
  * Plan clínico longitudinal: existe antes que cualquier presupuesto y puede
@@ -52,7 +59,6 @@ export const PLAN_ITEM_DECISIONS = [
   "pospuesto",
   "rechazado",
   "reemplazado",
-  "sin_registro",
 ] as const
 export type PlanItemDecision = (typeof PLAN_ITEM_DECISIONS)[number]
 
@@ -65,6 +71,9 @@ export type BudgetHeaderRow = typeof treatmentBudget.$inferSelect
 
 /** Ítem con decisión vigente explícita. */
 export type PlanItemWithDecision = PlanItemRow & { decision: PlanItemDecision }
+
+/** Ítem listado con su progreso: sesiones hechas = procedimientos no anulados. */
+export type PlanItemWithProgress = PlanItemWithDecision & { sessionsDone: number }
 
 export type TreatmentPlanStatus = "Sin tratamientos" | "En curso" | "Completado" | "Cancelado"
 
@@ -99,6 +108,10 @@ export interface AddPlanItemInput {
   isRecommended?: boolean
   /** Hallazgo del odontograma que motiva la indicación (mismo paciente, no anulado). */
   odontogramEntryId?: string | null
+  /** Fase del plan; por defecto, la que propone la especialidad del servicio. */
+  phase?: string | null
+  /** Sesiones previstas (1–60); por defecto, una. */
+  plannedSessions?: number | null
 }
 
 export interface UpdatePlanItemPatch {
@@ -229,6 +242,7 @@ async function lockDraftEncounter(
     .limit(1)
     .for("update")
   if (!enc) throw notFound("Atención")
+  if (enc.status === "anulada") throw conflict("VOIDED", "La atención está anulada")
   if (enc.status !== "borrador") throw conflict("FINALIZED", "La atención está finalizada")
 }
 
@@ -347,11 +361,53 @@ export async function itemDecision(
 }
 
 async function withDecisions(
-  _tx: Db,
-  _orgId: string,
+  tx: Db,
+  orgId: string,
   items: PlanItemRow[],
-): Promise<PlanItemWithDecision[]> {
-  return items.map((item) => ({ ...item, decision: item.decisionStatus as PlanItemDecision }))
+): Promise<PlanItemWithProgress[]> {
+  const ids = items.map((item) => item.id)
+  const done = ids.length
+    ? await tx
+        .select({ id: encounterProcedure.planItemId, n: sql<number>`count(*)::int` })
+        .from(encounterProcedure)
+        .where(
+          and(
+            eq(encounterProcedure.organizationId, orgId),
+            inArray(encounterProcedure.planItemId, ids),
+            isNull(encounterProcedure.voidedAt),
+          ),
+        )
+        .groupBy(encounterProcedure.planItemId)
+    : []
+  const sessions = new Map(done.map((row) => [row.id, row.n]))
+  return items.map((item) => ({
+    ...item,
+    decision: item.decisionStatus as PlanItemDecision,
+    sessionsDone: sessions.get(item.id) ?? 0,
+  }))
+}
+
+/** Siguiente posición al final del plan: el orden de indicación es el de partida. */
+async function nextSortOrder(tx: Db, orgId: string, planId: string): Promise<number> {
+  const [row] = await tx
+    .select({ max: sql<number | null>`max(${treatmentPlanItem.sortOrder})` })
+    .from(treatmentPlanItem)
+    .where(and(eq(treatmentPlanItem.organizationId, orgId), eq(treatmentPlanItem.planId, planId)))
+  return (row?.max ?? 0) + 1
+}
+
+function assertPhase(value: string | null | undefined): TreatmentPhase | null {
+  if (value === undefined || value === null) return null
+  if (!(TREATMENT_PHASES as readonly string[]).includes(value))
+    throw validation(`Fase inválida: ${TREATMENT_PHASES.join(", ")}`)
+  return value as TreatmentPhase
+}
+
+function assertPlannedSessions(value: number | null | undefined): number | null {
+  if (value === undefined || value === null) return null
+  if (!Number.isInteger(value) || value < 1 || value > 60)
+    throw validation("Las sesiones previstas van de 1 a 60")
+  return value
 }
 
 /**
@@ -518,7 +574,7 @@ export async function listPlanItems(
   orgId: string,
   patientId: string,
   planId?: string,
-): Promise<PlanItemWithDecision[]> {
+): Promise<PlanItemWithProgress[]> {
   await requirePatient(tx, orgId, patientId)
   const conditions = [
     eq(treatmentPlanItem.patientId, patientId),
@@ -529,7 +585,11 @@ export async function listPlanItems(
     .select()
     .from(treatmentPlanItem)
     .where(and(...conditions))
-    .orderBy(asc(treatmentPlanItem.createdAt), asc(treatmentPlanItem.id))
+    .orderBy(
+      asc(treatmentPlanItem.sortOrder),
+      asc(treatmentPlanItem.createdAt),
+      asc(treatmentPlanItem.id),
+    )
   return withDecisions(tx, orgId, items)
 }
 
@@ -611,6 +671,9 @@ export async function addPlanItem(
   const diagnosisCode = normalizeDiagnosisCode(input.diagnosisCode)
   if (diagnosisCode) await assertDiagnosisCode(tx, diagnosisCode)
   const codings = await resolveServiceCodings(tx, service)
+  const phase = assertPhase(input.phase) ?? phaseForSpecialty(service.specialty)
+  const plannedSessions = assertPlannedSessions(input.plannedSessions) ?? 1
+  const sortOrder = await nextSortOrder(tx, orgId, input.planId.trim())
   const [row] = await tx
     .insert(treatmentPlanItem)
     .values({
@@ -619,6 +682,9 @@ export async function addPlanItem(
       planId: input.planId.trim(),
       serviceId: service.id,
       budgetId: null,
+      phase,
+      plannedSessions,
+      sortOrder,
       optionGroupId: input.optionGroupId ?? null,
       odontogramEntryId: input.odontogramEntryId ?? null,
       isRecommended: input.isRecommended ?? false,
@@ -703,6 +769,7 @@ export async function addPlanItemsBatch(
     throw new ServiceError("SERVICE_UNPRICED", 409, "La prestación aún no tiene tarifa configurada")
   const codings = await resolveServiceCodings(tx, service)
   const rows: PlanItemRow[] = []
+  let sortOrder = await nextSortOrder(tx, orgId, input.planId.trim())
   for (const tooth of teeth) {
     const [row] = await tx
       .insert(treatmentPlanItem)
@@ -712,6 +779,8 @@ export async function addPlanItemsBatch(
         planId: input.planId.trim(),
         serviceId: service.id,
         budgetId: null,
+        phase: phaseForSpecialty(service.specialty),
+        sortOrder: sortOrder++,
         toothNumber: tooth,
         scope,
         surfaces: [],
@@ -1185,3 +1254,109 @@ export async function revisePlanItem(
   return { ...revised, decision: revised.decisionStatus as PlanItemDecision }
 }
 
+export interface PlanItemPlanningInput {
+  phase?: string
+  plannedSessions?: number
+  /** Sube o baja una posición dentro de su fase (alternativa de teclado al arrastre). */
+  move?: "up" | "down"
+}
+
+/**
+ * Planificación del tratamiento: fase, sesiones previstas y orden. No es un
+ * acto clínico (no exige atención abierta) ni cambia la decisión o el estado.
+ */
+export async function updatePlanItemPlanning(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  patientId: string,
+  itemId: string,
+  input: PlanItemPlanningInput,
+): Promise<PlanItemWithProgress> {
+  await requirePatient(tx, orgId, patientId)
+  const [found] = await tx
+    .select({ planId: treatmentPlanItem.planId })
+    .from(treatmentPlanItem)
+    .where(
+      and(
+        eq(treatmentPlanItem.id, itemId),
+        eq(treatmentPlanItem.organizationId, orgId),
+        eq(treatmentPlanItem.patientId, patientId),
+      ),
+    )
+  if (!found) throw notFound("Tratamiento")
+  await lockPlanRow(tx, orgId, patientId, found.planId)
+  const [item] = await tx
+    .select()
+    .from(treatmentPlanItem)
+    .where(and(eq(treatmentPlanItem.id, itemId), eq(treatmentPlanItem.organizationId, orgId)))
+    .for("update")
+  if (!item) throw notFound("Tratamiento")
+  if (CLOSED_STATUSES.includes(item.status))
+    throw new ServiceError("ITEM_CLOSED", 409, "Un tratamiento cerrado ya no se planifica")
+  const phase = assertPhase(input.phase)
+  const plannedSessions = assertPlannedSessions(input.plannedSessions)
+  if (plannedSessions !== null) {
+    const [done] = await withDecisions(tx, orgId, [item])
+    if (done && plannedSessions < done.sessionsDone)
+      throw validation(`Ya se hicieron ${done.sessionsDone} sesiones: no pueden preverse menos`)
+  }
+  const changes: Partial<PlanItemRow> = {}
+  if (phase !== null && phase !== item.phase) {
+    changes.phase = phase
+    // Al cambiar de fase entra al final de la nueva.
+    changes.sortOrder = await nextSortOrder(tx, orgId, item.planId)
+  }
+  if (plannedSessions !== null) changes.plannedSessions = plannedSessions
+  if (Object.keys(changes).length > 0) {
+    await tx
+      .update(treatmentPlanItem)
+      .set({ ...changes, updatedAt: new Date() })
+      .where(eq(treatmentPlanItem.id, item.id))
+  }
+  if (input.move) {
+    const currentOrder = changes.sortOrder ?? item.sortOrder
+    const currentPhase = changes.phase ?? item.phase
+    const [neighbor] = await tx
+      .select({ id: treatmentPlanItem.id, sortOrder: treatmentPlanItem.sortOrder })
+      .from(treatmentPlanItem)
+      .where(
+        and(
+          eq(treatmentPlanItem.organizationId, orgId),
+          eq(treatmentPlanItem.planId, item.planId),
+          eq(treatmentPlanItem.phase, currentPhase),
+          input.move === "up"
+            ? lt(treatmentPlanItem.sortOrder, currentOrder)
+            : gt(treatmentPlanItem.sortOrder, currentOrder),
+        ),
+      )
+      .orderBy(
+        input.move === "up" ? desc(treatmentPlanItem.sortOrder) : asc(treatmentPlanItem.sortOrder),
+      )
+      .limit(1)
+    if (neighbor) {
+      await tx
+        .update(treatmentPlanItem)
+        .set({ sortOrder: currentOrder, updatedAt: new Date() })
+        .where(eq(treatmentPlanItem.id, neighbor.id))
+      await tx
+        .update(treatmentPlanItem)
+        .set({ sortOrder: neighbor.sortOrder, updatedAt: new Date() })
+        .where(eq(treatmentPlanItem.id, item.id))
+    }
+  }
+  await audit(tx, orgId, actorUserId, "plan.item_planned", "treatment_plan_item", item.id, {
+    patientId,
+    planId: item.planId,
+    phase: changes.phase ?? null,
+    plannedSessions: changes.plannedSessions ?? null,
+    move: input.move ?? null,
+  })
+  const [updated] = await tx
+    .select()
+    .from(treatmentPlanItem)
+    .where(eq(treatmentPlanItem.id, item.id))
+  if (!updated) throw notFound("Tratamiento")
+  const [listed] = await withDecisions(tx, orgId, [updated])
+  return listed as PlanItemWithProgress
+}

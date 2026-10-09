@@ -1,30 +1,51 @@
-import { FDI_ADULT, FDI_CHILD } from "@odentia/clinical"
+import { surfaceLabel } from "@odentia/clinical"
 import {
   Badge,
   Button,
   Field,
+  FieldDescription,
   FieldLabel,
+  Input,
   Select,
   SelectContent,
-  SelectGroup,
   SelectItem,
-  SelectLabel,
   SelectTrigger,
   SelectValue,
   Textarea,
 } from "@odentia/ui"
-import { FormDrawer } from "@odentia/ui-patterns"
+import { ConfirmDialog, FormDrawer } from "@odentia/ui-patterns"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useId, useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
 import { usePermission } from "../../lib/crm"
-import { type EncounterDetail, type PlanItem, planStatusLabel } from "../../lib/patients"
-import { formatMoney } from "../../lib/services"
+import { voidProcedureApi } from "../../lib/encounters"
+import {
+  type EncounterDetail,
+  type PlanItem,
+  type ProcedureItem,
+  planStatusLabel,
+} from "../../lib/patients"
+import { formatMoney, type ServiceCatalogItem } from "../../lib/services"
 import { Cie10Search } from "./cie10-search"
 import { ServicePicker } from "./service-picker"
+import { type ToothSite, ToothSiteSelector } from "./tooth-site-selector"
 
-const NO_TOOTH = "__sin-pieza__"
 const NO_PLAN = "__sin-plan__"
+const NO_SITE: ToothSite = { toothNumber: null, surfaces: [] }
+const QUADRANTS = ["1", "2", "3", "4", "5", "6", "7", "8"]
+
+/** «36 · Oclusal», «Cuadrante 2», «Arcada superior» o «General». */
+function procedureSiteLabel(
+  proc: Pick<ProcedureItem, "toothNumber" | "surfaces" | "quadrant" | "arch">,
+) {
+  if (proc.toothNumber != null) {
+    const surfaces = proc.surfaces.map(surfaceLabel).join(", ")
+    return surfaces ? `Pieza ${proc.toothNumber} · ${surfaces}` : `Pieza ${proc.toothNumber}`
+  }
+  if (proc.quadrant != null) return `Cuadrante ${proc.quadrant}`
+  if (proc.arch) return proc.arch === "upper" ? "Arcada superior" : "Arcada inferior"
+  return "General"
+}
 
 /** Tratamiento aceptado que aún admite sesiones: incluye el que ya está en curso. */
 const OPEN_STATUSES: readonly string[] = ["pendiente", "programado", "en_curso"]
@@ -76,22 +97,30 @@ export function EncounterProcedures({
   const queryClient = useQueryClient()
   const uid = useId()
   const [open, setOpen] = useState(false)
-  const [serviceId, setServiceId] = useState("")
+  const [service, setService] = useState<ServiceCatalogItem | null>(null)
+  const serviceId = service?.id ?? ""
   const [freeMode, setFreeMode] = useState(false)
   const [freeDescription, setFreeDescription] = useState("")
-  const [toothSel, setToothSel] = useState<string>(NO_TOOTH)
+  const [site, setSite] = useState<ToothSite>(NO_SITE)
+  const [quadrant, setQuadrant] = useState("")
+  const [quantity, setQuantity] = useState("1")
+  const [arch, setArch] = useState("")
   const [cie, setCie] = useState("")
   const [planSel, setPlanSel] = useState<string>("")
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [voidingProc, setVoidingProc] = useState<ProcedureItem | null>(null)
+  const [voidReason, setVoidReason] = useState("")
+  const [voidError, setVoidError] = useState<string | null>(null)
 
   const encounter = detail.encounter
-  const finalized = encounter.status === "finalizada"
+  // Solo el borrador admite registrar o anular actos.
+  const finalized = encounter.status !== "borrador"
   const busy = disabled || saving
   const canOpen = canWrite && !finalized && !disabled
 
   const planQuery = useQuery({
-    queryKey: ["plan", patientId],
+    queryKey: ["plan-items", patientId],
     queryFn: () => apiFetch<{ data: PlanItem[] }>(`/api/patients/${patientId}/plan`),
     enabled: canRead && canWrite && !finalized,
   })
@@ -103,7 +132,7 @@ export function EncounterProcedures({
     allItems.map((item) => [item.id, item]),
   )
 
-  const tooth = toothSel === NO_TOOTH ? null : Number(toothSel)
+  const tooth = site.toothNumber
   // Al elegir pieza solo caben sus ítems más los generales (sin pieza); el
   // servidor no exige coincidencia, así que los generales siempre aplican.
   const visiblePlans =
@@ -116,22 +145,24 @@ export function EncounterProcedures({
       ? [...visiblePlans, selectedPlan]
       : visiblePlans
 
-  const toothItems: Record<string, string> = { [NO_TOOTH]: "Sin pieza" }
-  for (const n of [...FDI_ADULT, ...FDI_CHILD]) toothItems[String(n)] = `Pieza ${n}`
   const planItems: Record<string, string> = { [NO_PLAN]: "Seleccionar otro servicio del catálogo" }
   for (const item of options) planItems[item.id] = planOptionLabel(item)
 
-  const onToothChange = (value: string | null) => {
-    const next = value ?? NO_TOOTH
-    setToothSel(next)
-    if (planSel) {
-      const linked = planById[planSel] ?? null
-      const nextTooth = next === NO_TOOTH ? null : Number(next)
-      if (linked && linked.toothNumber != null && linked.toothNumber !== nextTooth) {
-        setPlanSel("")
-      }
-    }
-  }
+  // El ámbito del servicio decide qué sitio pide: pieza, superficies,
+  // cuadrante, arcada o nada (general). El acto libre admite pieza opcional.
+  const scope = freeMode ? "tooth-optional" : (service?.scope ?? null)
+  const needsTooth = scope === "tooth" || scope === "surfaces"
+  const siteComplete =
+    Boolean(planSel) ||
+    (scope === "general" || scope === "tooth-optional" || scope === null
+      ? true
+      : scope === "tooth"
+        ? site.toothNumber !== null
+        : scope === "surfaces"
+          ? site.toothNumber !== null && site.surfaces.length > 0
+          : scope === "quadrant"
+            ? quadrant !== ""
+            : arch !== "")
 
   const onPlanChange = (value: string | null) => {
     const next = value ?? NO_PLAN
@@ -142,39 +173,66 @@ export function EncounterProcedures({
     const linked = planById[next]
     if (!linked) return
     setPlanSel(next)
-    setServiceId("")
+    setService(null)
     setCie(linked.diagnosisCode ?? "")
-    setToothSel(linked.toothNumber == null ? NO_TOOTH : String(linked.toothNumber))
+    setSite({ toothNumber: linked.toothNumber, surfaces: linked.surfaces ?? [] })
   }
 
+  const quantityNumber = Number(quantity)
+  const quantityValid =
+    Number.isInteger(quantityNumber) && quantityNumber >= 1 && quantityNumber <= 99
   const canSubmit =
     canWrite &&
     !finalized &&
     !busy &&
+    siteComplete &&
+    quantityValid &&
     (Boolean(selectedPlan) || serviceId !== "" || (freeMode && freeDescription.trim() !== ""))
   const isDirty =
     serviceId !== "" ||
     planSel !== "" ||
     cie.trim() !== "" ||
-    toothSel !== NO_TOOTH ||
+    site.toothNumber !== null ||
     freeDescription.trim() !== ""
+
+  const resetForm = () => {
+    setService(null)
+    setSite(NO_SITE)
+    setQuadrant("")
+    setArch("")
+    setQuantity("1")
+    setCie("")
+    setPlanSel("")
+    setFreeMode(false)
+    setFreeDescription("")
+  }
 
   const onSubmit = async (event: React.FormEvent) => {
     event.preventDefault()
     event.stopPropagation()
     if (!canSubmit) return
     const trimmedCie = cie.trim()
-    const body = freeMode
-      ? {
-          description: freeDescription.trim(),
-          toothNumber: tooth,
-          diagnosisCode: trimmedCie === "" ? null : trimmedCie,
-        }
-      : {
-          ...(selectedPlan ? { planItemId: selectedPlan.id } : { serviceId }),
-          toothNumber: tooth,
-          diagnosisCode: trimmedCie === "" ? null : trimmedCie,
-        }
+    const diagnosisCode = trimmedCie === "" ? null : trimmedCie
+    // El tratamiento del plan conserva su sitio: el servidor lo toma de él.
+    const body = selectedPlan
+      ? { planItemId: selectedPlan.id, diagnosisCode }
+      : freeMode
+        ? {
+            description: freeDescription.trim(),
+            toothNumber: tooth,
+            surfaces: site.surfaces,
+            quantity: quantityNumber,
+            diagnosisCode,
+          }
+        : {
+            serviceId,
+            ...(needsTooth ? { toothNumber: tooth } : {}),
+            ...(scope === "surfaces" ? { surfaces: site.surfaces } : {}),
+            ...(scope === "quadrant" ? { quadrant: Number(quadrant) } : {}),
+            ...(scope === "arch" ? { arch } : {}),
+            quantity: quantityNumber,
+            diagnosisCode,
+          }
     onPendingChange(true)
     setSaving(true)
     setError(null)
@@ -184,16 +242,11 @@ export function EncounterProcedures({
         method: "POST",
         body: JSON.stringify(body),
       })
-      // El servidor ya marcó el plan realizado: solo refrescar, sin mutación manual.
-      await queryClient.invalidateQueries({ queryKey: ["plan", patientId] })
+      // El servidor deja el tratamiento en curso (o realizado si es directo).
+      await queryClient.invalidateQueries({ queryKey: ["plan-items", patientId] })
       await queryClient.invalidateQueries({ queryKey: ["patient-summary", patientId] })
       await onChanged()
-      setServiceId("")
-      setToothSel(NO_TOOTH)
-      setCie("")
-      setPlanSel("")
-      setFreeMode(false)
-      setFreeDescription("")
+      resetForm()
       setOpen(false)
     } catch (err) {
       setError(mutationMessage(err))
@@ -207,21 +260,40 @@ export function EncounterProcedures({
     // Durante el guardado no se cierra: el error y lo elegido se conservan
     // en el drawer y no se pierde la selección del catálogo/presupuesto.
     if (saving) return
-    setServiceId("")
-    setToothSel(NO_TOOTH)
-    setCie("")
-    setPlanSel("")
-    setFreeMode(false)
-    setFreeDescription("")
+    resetForm()
     setError(null)
     setOpen(false)
+  }
+
+  const confirmVoid = async () => {
+    if (!voidingProc || !voidReason.trim() || saving) return
+    onPendingChange(true)
+    setSaving(true)
+    setVoidError(null)
+    try {
+      await beforeWrite()
+      await voidProcedureApi(patientId, encounter.id, voidingProc.id, voidReason.trim())
+      await queryClient.invalidateQueries({ queryKey: ["plan-items", patientId] })
+      await queryClient.invalidateQueries({ queryKey: ["patient-summary", patientId] })
+      await onChanged()
+      setVoidingProc(null)
+    } catch (err) {
+      setVoidError(
+        err instanceof ApiError && err.shape.message
+          ? err.shape.message
+          : "No se pudo anular el procedimiento.",
+      )
+    } finally {
+      setSaving(false)
+      onPendingChange(false)
+    }
   }
 
   return (
     <div className="flex flex-col gap-6 elevated rounded-xl border bg-card p-6">
       <div className="flex flex-col gap-1.5">
         <div className="font-heading text-base font-medium">
-          Procedimientos ({detail.procedures.length})
+          Procedimientos ({detail.procedures.filter((proc) => !proc.voidedAt).length})
         </div>
       </div>
       <div className="flex flex-col gap-3">
@@ -261,27 +333,57 @@ export function EncounterProcedures({
               {detail.procedures.map((proc) => {
                 const linked = proc.planItemId ? planById[proc.planItemId] : undefined
                 return (
-                  <li key={proc.id} className="border-b pb-2 text-sm last:border-0">
-                    <p>{proc.description}</p>
-                    <p className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                      {proc.toothNumber != null ? <span>Pieza {proc.toothNumber}</span> : null}
-                      {proc.diagnosisCode ? <Badge>CIE-10 {proc.diagnosisCode}</Badge> : null}
-                      {proc.planItemId ? (
-                        linked ? (
-                          <span className="font-medium">Plan: {linked.title}</span>
-                        ) : (
-                          <span>Plan: {proc.planItemId.slice(0, 8)}</span>
-                        )
+                  <li
+                    key={proc.id}
+                    className="flex flex-wrap items-start justify-between gap-3 border-b pb-2 text-sm last:border-0"
+                  >
+                    <div className="min-w-0">
+                      <p
+                        className={proc.voidedAt ? "text-muted-foreground line-through" : undefined}
+                      >
+                        {proc.description}
+                      </p>
+                      {proc.voidedAt ? (
+                        <p className="text-xs text-muted-foreground">
+                          Anulado: {proc.voidReason}. No cuenta como sesión ni genera cargo.
+                        </p>
                       ) : null}
-                      <time dateTime={proc.createdAt}>{formatDateTime(proc.createdAt)}</time>
-                      {proc.priceCents != null && proc.currency ? (
-                        <span className="font-medium text-foreground">
-                          {formatMoney(proc.priceCents, proc.currency)}
-                        </span>
-                      ) : (
-                        <span>Sin cargo (acto libre)</span>
-                      )}
-                    </p>
+                      <p className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                        <span>{procedureSiteLabel(proc)}</span>
+                        {(proc.quantity ?? 1) > 1 ? <span>× {proc.quantity}</span> : null}
+                        {proc.diagnosisCode ? <Badge>CIE-10 {proc.diagnosisCode}</Badge> : null}
+                        {proc.planItemId ? (
+                          linked ? (
+                            <span className="font-medium">Plan: {linked.title}</span>
+                          ) : (
+                            <span>Vinculado a un tratamiento del plan</span>
+                          )
+                        ) : null}
+                        <time dateTime={proc.createdAt}>{formatDateTime(proc.createdAt)}</time>
+                        {proc.priceCents != null && proc.currency ? (
+                          <span className="font-medium text-foreground">
+                            {formatMoney(proc.priceCents, proc.currency)}
+                          </span>
+                        ) : (
+                          <span>Sin cargo (acto libre)</span>
+                        )}
+                      </p>
+                    </div>
+                    {canWrite && !finalized && !proc.voidedAt ? (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        disabled={busy}
+                        onClick={() => {
+                          setVoidReason("")
+                          setVoidError(null)
+                          setVoidingProc(proc)
+                        }}
+                      >
+                        Anular…
+                      </Button>
+                    ) : null}
                   </li>
                 )
               })}
@@ -324,8 +426,9 @@ export function EncounterProcedures({
                   disabled={busy}
                   onChange={(event) => {
                     setFreeMode(event.target.checked)
-                    setServiceId("")
+                    setService(null)
                     setPlanSel("")
+                    setSite(NO_SITE)
                   }}
                 />
                 <FieldLabel htmlFor={`${uid}-free`} className="font-normal">
@@ -350,43 +453,97 @@ export function EncounterProcedures({
               {!selectedPlan && !freeMode && (
                 <ServicePicker
                   value={serviceId}
-                  onChange={(service) => setServiceId(service.id)}
+                  onChange={(next) => {
+                    setService(next)
+                    setSite(NO_SITE)
+                    setQuadrant("")
+                    setArch("")
+                  }}
                   disabled={busy}
                 />
               )}
 
-              <Field>
-                <FieldLabel htmlFor={`${uid}-pieza`}>Pieza (FDI, opcional)</FieldLabel>
-                <Select
-                  value={toothSel}
-                  items={toothItems}
-                  onValueChange={onToothChange}
+              {selectedPlan ? (
+                <p className="text-sm text-muted-foreground">
+                  Sitio del tratamiento:{" "}
+                  {procedureSiteLabel({
+                    toothNumber: selectedPlan.toothNumber,
+                    surfaces: selectedPlan.surfaces ?? [],
+                    quadrant: selectedPlan.quadrant,
+                    arch: selectedPlan.arch,
+                  })}
+                </p>
+              ) : freeMode || needsTooth ? (
+                <ToothSiteSelector
+                  value={site}
+                  onChange={setSite}
+                  withSurfaces={freeMode || scope === "surfaces"}
+                  optional={freeMode}
+                  surfacesRequired={scope === "surfaces"}
+                  label={scope === "surfaces" ? "Pieza y superficies" : "Pieza"}
                   disabled={busy}
-                >
-                  <SelectTrigger id={`${uid}-pieza`} aria-label="Pieza (FDI, opcional)">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={NO_TOOTH}>Sin pieza</SelectItem>
-                    <SelectGroup>
-                      <SelectLabel>Permanentes</SelectLabel>
-                      {FDI_ADULT.map((n) => (
-                        <SelectItem key={n} value={String(n)}>
-                          Pieza {n}
+                />
+              ) : scope === "quadrant" ? (
+                <Field>
+                  <FieldLabel htmlFor={`${uid}-quadrant`}>Cuadrante</FieldLabel>
+                  <Select
+                    value={quadrant}
+                    items={Object.fromEntries(QUADRANTS.map((q) => [q, `Cuadrante ${q}`]))}
+                    onValueChange={(value) => setQuadrant(value ?? "")}
+                    disabled={busy}
+                  >
+                    <SelectTrigger id={`${uid}-quadrant`}>
+                      <SelectValue placeholder="Elige el cuadrante" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {QUADRANTS.map((q) => (
+                        <SelectItem key={q} value={q}>
+                          Cuadrante {q}
                         </SelectItem>
                       ))}
-                    </SelectGroup>
-                    <SelectGroup>
-                      <SelectLabel>Temporales</SelectLabel>
-                      {FDI_CHILD.map((n) => (
-                        <SelectItem key={n} value={String(n)}>
-                          Pieza {n}
-                        </SelectItem>
-                      ))}
-                    </SelectGroup>
-                  </SelectContent>
-                </Select>
-              </Field>
+                    </SelectContent>
+                  </Select>
+                </Field>
+              ) : scope === "arch" ? (
+                <Field>
+                  <FieldLabel htmlFor={`${uid}-arch`}>Arcada</FieldLabel>
+                  <Select
+                    value={arch}
+                    items={{ upper: "Arcada superior", lower: "Arcada inferior" }}
+                    onValueChange={(value) => setArch(value ?? "")}
+                    disabled={busy}
+                  >
+                    <SelectTrigger id={`${uid}-arch`}>
+                      <SelectValue placeholder="Elige la arcada" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="upper">Arcada superior</SelectItem>
+                      <SelectItem value="lower">Arcada inferior</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </Field>
+              ) : null}
+
+              {!selectedPlan ? (
+                <Field>
+                  <FieldLabel htmlFor={`${uid}-quantity`}>Cantidad</FieldLabel>
+                  <Input
+                    id={`${uid}-quantity`}
+                    type="number"
+                    inputMode="numeric"
+                    min={1}
+                    max={99}
+                    className="w-24"
+                    value={quantity}
+                    aria-invalid={!quantityValid}
+                    disabled={busy}
+                    onChange={(event) => setQuantity(event.target.value)}
+                  />
+                  <FieldDescription>
+                    Unidades realizadas (p. ej. 3 sellantes); el cargo es precio × cantidad.
+                  </FieldDescription>
+                </Field>
+              ) : null}
 
               <Cie10Search
                 value={cie}
@@ -449,7 +606,7 @@ export function EncounterProcedures({
                   {selectedPlan && (
                     <p className="text-xs text-muted-foreground">
                       Al guardar, «{selectedPlan.title}» queda en curso y vinculado a esta atención.
-                      Completarlo es una decisión aparte en la pestaña Realizado.
+                      Completarlo es una decisión aparte, en Tratamientos.
                     </p>
                   )}
                 </Field>
@@ -458,6 +615,34 @@ export function EncounterProcedures({
           </FormDrawer>
         )}
       </div>
+      <ConfirmDialog
+        open={voidingProc !== null}
+        title="Anular procedimiento"
+        description={`${voidingProc?.description ?? ""}. Queda en la traza como anulado: no cuenta como sesión ni genera cargo al cerrar.`}
+        confirmLabel="Anular procedimiento"
+        pending={saving}
+        confirmDisabled={!voidReason.trim()}
+        onConfirm={() => void confirmVoid()}
+        onClose={() => {
+          if (!saving) setVoidingProc(null)
+        }}
+      >
+        <Field>
+          <FieldLabel htmlFor={`${uid}-void`}>Motivo</FieldLabel>
+          <Textarea
+            id={`${uid}-void`}
+            rows={2}
+            maxLength={2000}
+            value={voidReason}
+            onChange={(event) => setVoidReason(event.target.value)}
+          />
+        </Field>
+        {voidError ? (
+          <p role="alert" className="text-sm text-destructive">
+            {voidError}
+          </p>
+        ) : null}
+      </ConfirmDialog>
     </div>
   )
 }

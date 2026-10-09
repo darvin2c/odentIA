@@ -10,7 +10,7 @@
 import { Badge, Button, Field, FieldLabel, Input, Textarea } from "@odentia/ui"
 import { EmptyState, FormDrawer, PageHeader, PageShell } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { createFileRoute } from "@tanstack/react-router"
+import { createFileRoute, Link } from "@tanstack/react-router"
 import { useEffect, useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
 import { useOrgMembers, usePermission } from "../../lib/crm"
@@ -1126,6 +1126,19 @@ function CobrosTab() {
                 <span className="text-sm font-medium">
                   Falta {formatCents(row.outstandingCents, row.charge.currency)}
                 </span>
+                <Button
+                  variant="ghost"
+                  nativeButton={false}
+                  render={
+                    <Link
+                      to="/patients/$patientId"
+                      params={{ patientId: row.charge.patientId }}
+                      search={{ tab: "cuenta" }}
+                    />
+                  }
+                >
+                  Cuenta del paciente
+                </Button>
                 {canWrite ? (
                   <Button
                     variant="ghost"
@@ -1232,22 +1245,23 @@ function CobrosTab() {
         }}
       >
         <div className="flex flex-col gap-4">
-          <Field>
-            <FieldLabel htmlFor="plan-patient">Identificador del paciente</FieldLabel>
-            <Input
-              id="plan-patient"
-              value={patientId}
-              onChange={(event) => setPatientId(event.target.value)}
-            />
-          </Field>
-          <Field>
-            <FieldLabel htmlFor="plan-charge">Identificador del cargo</FieldLabel>
-            <Input
-              id="plan-charge"
-              value={chargeId}
-              onChange={(event) => setChargeId(event.target.value)}
-            />
-          </Field>
+          {/* El plan nace de un cargo por cobrar de la lista: no se escriben identificadores. */}
+          <div className="rounded-md bg-muted p-3 text-sm">
+            <p className="font-medium">
+              {receivables.find((row) => row.charge.id === chargeId)?.charge.description ??
+                "Elige un cargo en «Por cobrar» para crear su plan de cuotas."}
+            </p>
+            {patientId ? (
+              <Link
+                to="/patients/$patientId"
+                params={{ patientId }}
+                search={{ tab: "cuenta" }}
+                className="text-primary underline underline-offset-4"
+              >
+                Ver la cuenta del paciente
+              </Link>
+            ) : null}
+          </div>
           <Field>
             <FieldLabel htmlFor="plan-count">Cuotas</FieldLabel>
             <Input

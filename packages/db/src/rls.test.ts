@@ -88,11 +88,20 @@ async function contactNames(db: Db): Promise<string[]> {
   return (rows as unknown as { display_name: string }[]).map((r) => r.display_name)
 }
 
-async function insertPatient(db: Db, id: string, orgId: string, contactId: string, number: number) {
+async function insertPatient(
+  db: Db,
+  id: string,
+  orgId: string,
+  contactId: string,
+  number: number,
+  displayName: string,
+) {
   await db.execute(
     sql`insert into "patient" ("id", "organization_id", "display_name", "patient_number")
-        values (${id}::uuid, ${orgId}, ${"Paciente " + number}, ${number})`,
+        values (${id}::uuid, ${orgId}, ${displayName}, ${number})`,
   )
+  // Persona única: el contacto pasa a ser la propia persona del paciente y
+  // comparte su identidad (sustituye a la provisional creada con la ficha).
   await db.execute(
     sql`insert into patient_contact (organization_id, patient_id, contact_id, relationship, is_preferred)
         values (${orgId}, ${id}::uuid, ${contactId}::uuid, 'self', true)`,
@@ -171,6 +180,7 @@ beforeAll(async () => {
     "org_a",
     "33333333-3333-3333-3333-333333333333",
     1,
+    "Paciente Ana",
   )
   await insertPatient(
     ownerDb,
@@ -178,6 +188,7 @@ beforeAll(async () => {
     "org_b",
     "44444444-4444-4444-4444-444444444444",
     1,
+    "Paciente Beto",
   )
 }, 180_000)
 
@@ -283,7 +294,7 @@ it("encuentros y planes de A son invisibles para B; las piezas cerradas no se bo
     ),
   ).rejects.toThrow()
   await ownerDb.execute(
-    sql`update encounter set status='finalizada' where id='bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'`,
+    sql`update encounter set status='finalizada', signer_name='Dra. Prueba', signer_registration='COP 1' where id='bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'`,
   )
   const deleted = await withOrgContext(appDb, "org_a", (tx) =>
     tx.execute(
@@ -450,6 +461,41 @@ it("presupuestos, contextos versionados y vínculos atención-plan se aíslan po
       ),
     ),
   ).rejects.toMatchObject({ cause: { code: "42501" } })
+
+  // Archivo clínico: la app no cambia ni borra el archivo; solo puede retirarlo
+  // con motivo y quien lo retira, y un retiro no se deshace.
+  await expect(
+    withOrgContext(appDb, "org_a", (tx) =>
+      tx.execute(
+        sql`update patient_document set label = 'otro' where id = 'dddddddd-dddd-dddd-dddd-dddddddddddd'`,
+      ),
+    ),
+  ).rejects.toMatchObject({ cause: { code: "42501" } })
+  await expect(
+    withOrgContext(appDb, "org_a", (tx) =>
+      tx.execute(sql`delete from patient_document where id = 'dddddddd-dddd-dddd-dddd-dddddddddddd'`),
+    ),
+  ).rejects.toMatchObject({ cause: { code: "42501" } })
+  await expect(
+    withOrgContext(appDb, "org_a", (tx) =>
+      tx.execute(
+        sql`update patient_document set retired_at = now(), retire_reason = 'x' where id = 'dddddddd-dddd-dddd-dddd-dddddddddddd'`,
+      ),
+    ),
+  ).rejects.toThrow()
+  await ownerDb.execute(sql`insert into "user" (id,name,email) values ('rls-retirer','R','rls-retirer@example.test') on conflict (id) do nothing`)
+  await withOrgContext(appDb, "org_a", (tx) =>
+    tx.execute(
+      sql`update patient_document set retired_at = now(), retired_by = 'rls-retirer', retire_reason = 'Paciente equivocado' where id = 'dddddddd-dddd-dddd-dddd-dddddddddddd'`,
+    ),
+  )
+  await expect(
+    withOrgContext(appDb, "org_a", (tx) =>
+      tx.execute(
+        sql`update patient_document set retired_at = null, retired_by = null, retire_reason = null where id = 'dddddddd-dddd-dddd-dddd-dddddddddddd'`,
+      ),
+    ),
+  ).rejects.toThrow()
 
   // Las indicaciones se cancelan o reemplazan; incluso sin vínculos no se borran.
   await expect(

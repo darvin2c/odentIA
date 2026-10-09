@@ -1,5 +1,5 @@
 {
-  "id": "ea68d850-bcbb-4e5f-973c-b2b7462e10b3",
+  "id": "b4331bcb-ea14-4d0b-81f6-547e371e4f09",
   "prevId": "58ebf22f-e540-4f44-8706-b55bcb6ffc32",
   "version": "7",
   "dialect": "postgresql",
@@ -1040,6 +1040,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "patient_id": {
+          "name": "patient_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
         "action": {
           "name": "action",
           "type": "text",
@@ -1174,6 +1180,33 @@
           "columns": [
             {
               "expression": "conversation_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "agent_proposal_org_patient_idx": {
+          "name": "agent_proposal_org_patient_idx",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "patient_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "status",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -1333,18 +1366,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "cached_input_tokens": {
-          "name": "cached_input_tokens",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "llm_calls": {
-          "name": "llm_calls",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
         "cost_micros": {
           "name": "cost_micros",
           "type": "integer",
@@ -1437,7 +1458,7 @@
       "checkConstraints": {
         "agent_run_ledger_status_check": {
           "name": "agent_run_ledger_status_check",
-          "value": "\"agent_run_ledger\".\"status\" in ('ok','handoff','error','omitida','sin_respuesta')"
+          "value": "\"agent_run_ledger\".\"status\" in ('ok','handoff','error','omitida')"
         }
       },
       "isRLSEnabled": false
@@ -7570,6 +7591,14 @@
         "patient_blood_group_check": {
           "name": "patient_blood_group_check",
           "value": "\"patient\".\"blood_group\" IS NULL OR \"patient\".\"blood_group\" IN ('A+','A-','B+','B-','AB+','AB-','O+','O-','unknown')"
+        },
+        "patient_doc_type_check": {
+          "name": "patient_doc_type_check",
+          "value": "\"patient\".\"doc_type\" IS NULL OR \"patient\".\"doc_type\" IN ('DNI','CE','PASAPORTE','OTRO')"
+        },
+        "patient_sex_check": {
+          "name": "patient_sex_check",
+          "value": "\"patient\".\"sex\" IS NULL OR \"patient\".\"sex\" IN ('M','F')"
         }
       },
       "isRLSEnabled": false
@@ -13406,6 +13435,30 @@
           "primaryKey": false,
           "notNull": false
         },
+        "doc_type": {
+          "name": "doc_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "doc_number": {
+          "name": "doc_number",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "birth_date": {
+          "name": "birth_date",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "sex": {
+          "name": "sex",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "is_active": {
           "name": "is_active",
           "type": "boolean",
@@ -13481,6 +13534,34 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "contact_org_doc_uidx": {
+          "name": "contact_org_doc_uidx",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "doc_type",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "doc_number",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"doc_number\" IS NOT NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
@@ -13514,7 +13595,16 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "contact_doc_type_check": {
+          "name": "contact_doc_type_check",
+          "value": "\"contact\".\"doc_type\" IS NULL OR \"contact\".\"doc_type\" IN ('DNI','CE','PASAPORTE','OTRO')"
+        },
+        "contact_sex_check": {
+          "name": "contact_sex_check",
+          "value": "\"contact\".\"sex\" IS NULL OR \"contact\".\"sex\" IN ('M','F')"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.contact_identity": {
@@ -13933,6 +14023,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "patient_id": {
+          "name": "patient_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
         "assignee_user_id": {
           "name": "assignee_user_id",
           "type": "text",
@@ -14111,6 +14207,27 @@
             },
             {
               "expression": "opportunity_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "task_org_patient_idx": {
+          "name": "task_org_patient_idx",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "patient_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"

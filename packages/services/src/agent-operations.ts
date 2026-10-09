@@ -1244,6 +1244,7 @@ export async function createProposal(
         organizationId: orgId,
         conversationId: input.conversationId,
         contactId: conv.contactId,
+        patientId: await proposalPatientId(tx, orgId, input.payload),
         action: input.action,
         payload: input.payload,
         reason,
@@ -1293,6 +1294,36 @@ async function requireProposal(tx: Db, orgId: string, id: string) {
   return row
 }
 
+/**
+ * Paciente sobre el que actúa la propuesta: el del payload o el de la cita que
+ * se reprograma o cancela. Nulo en actos comerciales sin ficha.
+ */
+async function proposalPatientId(
+  tx: Db,
+  orgId: string,
+  payload: Record<string, unknown>,
+): Promise<string | null> {
+  const uuid = (value: unknown): string | null =>
+    typeof value === "string" && /^[0-9a-f-]{36}$/i.test(value) ? value : null
+  const direct = uuid(payload.patientId)
+  if (direct) {
+    const [row] = await tx
+      .select({ id: patient.id })
+      .from(patient)
+      .where(and(eq(patient.organizationId, orgId), eq(patient.id, direct)))
+      .limit(1)
+    return row?.id ?? null
+  }
+  const appointmentId = uuid(payload.appointmentId)
+  if (!appointmentId) return null
+  const [row] = await tx
+    .select({ patientId: appointment.patientId })
+    .from(appointment)
+    .where(and(eq(appointment.organizationId, orgId), eq(appointment.id, appointmentId)))
+    .limit(1)
+  return row?.patientId ?? null
+}
+
 export async function getProposal(tx: Db, orgId: string, id: string): Promise<ProposalItem> {
   await expireProposalById(tx, orgId, id)
   return enrichProposal(tx, orgId, await requireProposal(tx, orgId, id))
@@ -1301,7 +1332,14 @@ export async function getProposal(tx: Db, orgId: string, id: string): Promise<Pr
 export async function listProposals(
   tx: Db,
   orgId: string,
-  input: { status?: string; conversationId?: string; contactId?: string; limit?: number } = {},
+  input: {
+    status?: string
+    conversationId?: string
+    contactId?: string
+    /** Propuestas que actúan sobre este paciente (ficha). */
+    patientId?: string
+    limit?: number
+  } = {},
 ): Promise<ProposalItem[]> {
   // La lista consolida la caducidad (esta tx normalmente confirma): el home
   // y la bandeja muestran `expirada` sin jobs.
@@ -1315,6 +1353,10 @@ export async function listProposals(
   }
   if (input.conversationId) conditions.push(eq(agentProposal.conversationId, input.conversationId))
   if (input.contactId) conditions.push(eq(agentProposal.contactId, input.contactId))
+  if (input.patientId) {
+    if (!/^[0-9a-f-]{36}$/i.test(input.patientId)) throw validation("patientId inválido")
+    conditions.push(eq(agentProposal.patientId, input.patientId))
+  }
   const limit = input.limit === undefined ? 50 : Math.min(Math.max(input.limit, 1), 100)
   const rows = await tx
     .select()

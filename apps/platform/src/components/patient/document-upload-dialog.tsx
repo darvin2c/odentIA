@@ -27,10 +27,12 @@ import { orgSlugFromHostname } from "../../lib/host"
 import type { Encounter, PlanItem } from "../../lib/patients"
 import {
   ACCEPT_ATTR,
-  ACCEPTED_TYPES,
   basenameWithoutExtension,
   categoryLabel,
   encounterLabel,
+  imageTypeLabel,
+  imageTypesFor,
+  isAcceptedFile,
   MAX_BYTES,
   planItemLabel,
   UPLOAD_CATEGORIES,
@@ -47,6 +49,11 @@ interface QueuedFile {
   previewUrl: string | null
   title: string
   category: string
+  /** Subtipo de imagen (radiografía o foto clínica). */
+  imageType: string
+  /** Fecha y hora de toma (datetime-local); vacía = la de subida. */
+  capturedAt: string
+  source: string
   teeth: number[]
   tags: string[]
   planItemId: string
@@ -90,8 +97,7 @@ function toRow(
   initialTeeth: number[],
   defaultPlanItemId?: string,
 ): QueuedFile | { fileError: string } {
-  if (!ACCEPTED_TYPES.includes(file.type))
-    return { fileError: "Solo se admiten JPG, PNG, WebP o PDF." }
+  if (!isAcceptedFile(file)) return { fileError: "Solo se admiten JPG, PNG, WebP, PDF o DICOM." }
   if (file.size === 0) return { fileError: "El archivo está vacío." }
   if (file.size > MAX_BYTES) return { fileError: "El archivo no puede superar 10 MB." }
   rowSeq += 1
@@ -101,6 +107,9 @@ function toRow(
     previewUrl: file.type.startsWith("image/") ? URL.createObjectURL(file) : null,
     title: basenameWithoutExtension(file.name),
     category: "",
+    imageType: "",
+    capturedAt: "",
+    source: "",
     teeth: [...initialTeeth],
     tags: [],
     planItemId: defaultPlanItemId ?? "",
@@ -213,6 +222,10 @@ export function DocumentUploadDialog({
     if (!title) return "El título es obligatorio."
     if (title.length > 200) return "El título debe tener 1–200 caracteres."
     if (!row.category) return "Elige la categoría."
+    if (imageTypesFor(row.category).length > 0 && !row.imageType)
+      return "Elige el tipo de imagen."
+    if (row.capturedAt && new Date(row.capturedAt).getTime() > Date.now() + 5 * 60_000)
+      return "La fecha de toma no puede ser futura."
     return null
   }
 
@@ -223,6 +236,10 @@ export function DocumentUploadDialog({
       form.append("file", row.file)
       form.append("category", row.category)
       form.append("label", row.title.trim())
+      if (row.imageType && imageTypesFor(row.category).includes(row.imageType as never))
+        form.append("imageType", row.imageType)
+      if (row.capturedAt) form.append("capturedAt", new Date(row.capturedAt).toISOString())
+      if (row.source.trim()) form.append("source", row.source.trim())
       if (encounterChoice) form.append("encounterId", encounterChoice)
       if (row.planItemId) form.append("planItemId", row.planItemId)
       if (row.encounterProcedureId) form.append("encounterProcedureId", row.encounterProcedureId)
@@ -279,7 +296,7 @@ export function DocumentUploadDialog({
       else valid.push(row)
     }
     if (valid.length === 0) {
-      setServerError(invalid > 0 ? "Revisa las filas marcadas: falta título o categoría." : null)
+      setServerError(invalid > 0 ? "Revisa las filas marcadas antes de subir." : null)
       return
     }
     setServerError(null)
@@ -322,7 +339,7 @@ export function DocumentUploadDialog({
       open={open}
       onClose={close}
       title="Subir imágenes o documentos"
-      description="PDF o imagen JPG, PNG o WebP, máx. 10 MB por archivo. Sin atención queda como General."
+      description="JPG, PNG, WebP, PDF o DICOM, máx. 10 MB por archivo. El formato se verifica por contenido. Sin atención queda como General."
       onSubmit={(e) => {
         e.preventDefault()
         void uploadRows(pendingRows)
@@ -400,7 +417,7 @@ export function DocumentUploadDialog({
               <span className="font-medium text-foreground">
                 Arrastra archivos o haz clic para elegirlos
               </span>
-              <span>JPG, PNG, WebP o PDF · máx. 10 MB por archivo</span>
+              <span>JPG, PNG, WebP, PDF o DICOM · máx. 10 MB por archivo</span>
             </label>
           </div>
           {rejected.length > 0 && (
@@ -553,7 +570,15 @@ function QueuedRow({
               <Select
                 items={Object.fromEntries(UPLOAD_CATEGORIES.map((c) => [c, categoryLabel(c)]))}
                 value={row.category}
-                onValueChange={(v) => onPatch({ category: v ?? "", validationError: null })}
+                onValueChange={(v) =>
+                  onPatch({
+                    category: v ?? "",
+                    imageType: imageTypesFor(v ?? "").includes(row.imageType as never)
+                      ? row.imageType
+                      : "",
+                    validationError: null,
+                  })
+                }
               >
                 <SelectTrigger id={categoryId} aria-label={`Categoría de ${row.file.name}`}>
                   <SelectValue placeholder="Elige la categoría" />
@@ -568,6 +593,52 @@ function QueuedRow({
               </Select>
             </Field>
           </div>
+          {imageTypesFor(row.category).length > 0 && (
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              <Field>
+                <FieldLabel htmlFor={`${titleId}-type`}>Tipo de imagen</FieldLabel>
+                <Select
+                  items={Object.fromEntries(
+                    imageTypesFor(row.category).map((t) => [t, imageTypeLabel(t)] as const),
+                  )}
+                  value={row.imageType}
+                  onValueChange={(v) => onPatch({ imageType: v ?? "", validationError: null })}
+                >
+                  <SelectTrigger
+                    id={`${titleId}-type`}
+                    aria-required="true"
+                    aria-label={`Tipo de imagen de ${row.file.name}`}
+                  >
+                    <SelectValue placeholder="Elige el tipo" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {imageTypesFor(row.category).map((t) => (
+                      <SelectItem key={t} value={t}>
+                        {imageTypeLabel(t)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Field>
+              <Field>
+                <FieldLabel htmlFor={`${titleId}-taken`}>Fecha de toma</FieldLabel>
+                <Input
+                  id={`${titleId}-taken`}
+                  type="datetime-local"
+                  value={row.capturedAt}
+                  disabled={busy}
+                  max={new Date(Date.now() - new Date().getTimezoneOffset() * 60_000)
+                    .toISOString()
+                    .slice(0, 16)}
+                  onChange={(e) => onPatch({ capturedAt: e.currentTarget.value, validationError: null })}
+                  aria-describedby={`${titleId}-taken-help`}
+                />
+                <p id={`${titleId}-taken-help`} className="text-xs text-muted-foreground">
+                  Si queda vacía se usa la fecha de subida.
+                </p>
+              </Field>
+            </div>
+          )}
           {row.validationError && <FieldError>{row.validationError}</FieldError>}
 
           <details
@@ -588,6 +659,19 @@ function QueuedRow({
                 : ""}
             </summary>
             <div className="flex flex-col gap-2 pt-2">
+              {imageTypesFor(row.category).length > 0 && (
+                <Field>
+                  <FieldLabel htmlFor={`${titleId}-source`}>Origen (opcional)</FieldLabel>
+                  <Input
+                    id={`${titleId}-source`}
+                    value={row.source}
+                    maxLength={120}
+                    disabled={busy}
+                    placeholder="p. ej. Sensor intraoral · sala 2 o centro externo"
+                    onChange={(e) => onPatch({ source: e.currentTarget.value })}
+                  />
+                </Field>
+              )}
               <Field>
                 <FieldLabel htmlFor={planChoiceId}>Tratamiento (opcional)</FieldLabel>
                 <Select
@@ -658,7 +742,11 @@ function QueuedRow({
         </div>
       ) : (
         <p className="text-xs text-muted-foreground">
-          Guardado en la galería{row.category ? ` como ${categoryLabel(row.category)}` : ""}.
+          Guardado en la galería
+          {row.category
+            ? ` como ${imageTypeLabel(row.imageType) ?? categoryLabel(row.category)}`
+            : ""}
+          .
         </p>
       )}
     </li>

@@ -296,7 +296,7 @@ it("interno: el envelope crea la ficha con snapshot platform/staff", async () =>
     body: JSON.stringify({
       submissionId: crypto.randomUUID(),
       answers: {
-        demographics: { displayName: "Paciente Interno" },
+        demographics: { displayName: "Paciente Interno", birthDate: "1990-01-01", phone: "+51977550001" },
         respondent: "staff",
         privacyAccepted: false,
       },
@@ -318,7 +318,10 @@ it("interno: el envelope crea la ficha con snapshot platform/staff", async () =>
     }
   }
   expect(detailBody.data.patient.displayName).toBe("Paciente Interno")
-  expect(detailBody.data.contacts).toEqual([])
+  // Todo paciente es una persona: el alta interna crea la suya.
+  expect(detailBody.data.contacts).toEqual([
+    expect.objectContaining({ relationship: "self", displayName: "Paciente Interno" }),
+  ])
   expect(detailBody.data.registration).toMatchObject({
     entryPoint: "platform",
     respondent: "staff",
@@ -401,9 +404,11 @@ it("QR público: crea paciente real sin cuenta, sin contacto y sin revisión", a
         eq(patientContact.patientId, snapshots[0]!.patientId),
       ),
     )
-  expect(links).toEqual([])
+  // El registro público no reclama contactos existentes ni crea usuarios: solo
+  // nace la persona del propio paciente.
+  expect(links).toEqual([expect.objectContaining({ relationship: "self" })])
   expect(await countUsers()).toBe(usersBefore)
-  expect(await countContacts(ORG_A)).toBe(contactsBefore)
+  expect(await countContacts(ORG_A)).toBe(contactsBefore + 1)
 
   const detail = await app.request(`/api/patients/${snapshots[0]!.patientId}`, {
     headers: authed("owner", SLUG_A),
@@ -572,13 +577,17 @@ it.each(["https://app.odentia.localhost", "https://app.odentia.localhost:4463"])
   const detailBody = (await detail.json()) as {
     data: { contacts: { contactId: string; relationship: string; isPreferred: boolean }[] }
   }
-  expect(detailBody.data.contacts).toEqual([
-    expect.objectContaining({
-      contactId: person.id,
-      relationship: "family",
-      isPreferred: true,
-    }),
-  ])
+  expect(detailBody.data.contacts).toHaveLength(2)
+  expect(detailBody.data.contacts).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        contactId: person.id,
+        relationship: "family",
+        isPreferred: true,
+      }),
+      expect.objectContaining({ relationship: "self", isPreferred: false }),
+    ]),
+  )
 
   // Reintento idéntico: éxito sin duplicar la ficha.
   const retry = await publicPost(app, SLUG_A, {
@@ -660,7 +669,7 @@ it("spoofing: contactos, pacientes y organización ajenos se rechazan", async ()
     body: JSON.stringify({
       submissionId: crypto.randomUUID(),
       answers: {
-        demographics: { displayName: "Paciente Espía" },
+        demographics: { displayName: "Paciente Espía", birthDate: "1990-01-01", phone: "+51977550002" },
         respondent: "staff",
         privacyAccepted: false,
       },
@@ -698,7 +707,7 @@ it("spoofing: contactos, pacientes y organización ajenos se rechazan", async ()
     body: JSON.stringify({
       submissionId: crypto.randomUUID(),
       answers: {
-        demographics: { displayName: "Paciente Contexto" },
+        demographics: { displayName: "Paciente Contexto", birthDate: "1990-01-01", phone: "+51977550003" },
         respondent: "staff",
         privacyAccepted: false,
       },
@@ -795,7 +804,7 @@ it("recepción opera CRM y member queda en solo tareas (403 sin efectos)", async
     body: JSON.stringify({
       submissionId: crypto.randomUUID(),
       answers: {
-        demographics: { displayName: "Paciente Miembro" },
+        demographics: { displayName: "Paciente Miembro", birthDate: "1990-01-01", phone: "+51977550004" },
         respondent: "staff",
         privacyAccepted: false,
       },

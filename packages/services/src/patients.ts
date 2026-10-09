@@ -1,4 +1,4 @@
-import { demographicsSchema, registrationContactInputSchema, validateDemographics, type RegistrationContactInput } from "@odentia/clinical"
+import { demographicsSchema, isMinor, normalizePhone, registrationContactInputSchema, validateDemographics, type RegistrationContactInput } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import {
   orgCounter,
@@ -8,11 +8,13 @@ import {
   patientMedication,
   patientContact,
   patientRegistration,
+  patientResponsibility,
+  ubigeo,
 } from "@odentia/db/schema/clinical"
 import { contact } from "@odentia/db/schema/crm"
 import { user } from "@odentia/db/schema/auth"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
-import { and, asc, desc, eq, ilike, or, sql } from "drizzle-orm"
+import { and, asc, desc, eq, gte, ilike, isNull, lte, or, sql } from "drizzle-orm"
 import { requireContact } from "./contacts.js"
 import { decodeCursor } from "./cursors.js"
 import { isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
@@ -51,6 +53,17 @@ function uniqueConstraintOf(error: unknown): string {
 
 export interface CreatePatientInput {
   displayName: string
+  givenNames?: string | null
+  paternalSurname?: string | null
+  maternalSurname?: string | null
+  docCountry?: string | null
+  nationality?: string | null
+  birthPlaceUbigeo?: string | null
+  addressUbigeo?: string | null
+  addressReference?: string | null
+  emergencyContactRelationship?: string | null
+  insurerName?: string | null
+  affiliationNumber?: string | null
   contacts?: RegistrationContactInput[]
   docType?: string | null
   docNumber?: string | null
@@ -93,6 +106,30 @@ export async function requirePatient(tx: Db, orgId: string, id: string): Promise
   return row
 }
 
+/**
+ * Filiación lista para guardar: vacíos como null, países en mayúsculas,
+ * teléfonos en E.164 y ubigeos que existan en el catálogo del INEI.
+ */
+async function normalizeDemographics<T extends object>(tx: Db, data: T): Promise<T> {
+  const out = { ...data } as Record<string, unknown>
+  for (const [key, value] of Object.entries(out)) {
+    if (typeof value === "string" && value.trim() === "" && key !== "displayName") out[key] = null
+  }
+  for (const key of ["docCountry", "nationality"]) {
+    if (typeof out[key] === "string") out[key] = (out[key] as string).toUpperCase()
+  }
+  for (const key of ["phone", "emergencyContactPhone"]) {
+    if (typeof out[key] === "string") out[key] = normalizePhone(out[key] as string)
+  }
+  for (const key of ["birthPlaceUbigeo", "addressUbigeo"]) {
+    const code = out[key]
+    if (typeof code !== "string") continue
+    const [known] = await tx.select({ code: ubigeo.code }).from(ubigeo).where(eq(ubigeo.code, code)).limit(1)
+    if (!known) throw validation(`Ubigeo inexistente: ${code}`)
+  }
+  return out as T
+}
+
 export async function createPatient(
   tx: Db,
   orgId: string,
@@ -104,7 +141,7 @@ export async function createPatient(
   const { contacts = [], registeredBranchId, ...demographics } = input
   const errors = validateDemographics(demographics, await patientOrganizationToday(tx, orgId))
   if (Object.keys(errors).length) throw validation(Object.values(errors)[0]!)
-  const clean = demographicsSchema.parse(demographics)
+  const clean = await normalizeDemographics(tx, demographicsSchema.parse(demographics))
   if (registeredBranchId) await assertTenantBranch(tx, orgId, registeredBranchId)
   const links = contacts.map(c => registrationContactInputSchema.parse(c)).sort((a, b) => a.contactId.localeCompare(b.contactId))
   if (new Set(links.map(c => c.contactId)).size !== links.length) throw validation("No repitas un contacto")
@@ -138,8 +175,29 @@ export async function createPatient(
     const constraint = uniqueConstraintOf(e)
     if (constraint.includes("patient_contact_self_")) throw conflict("ALREADY_PATIENT", "El contacto ya tiene una ficha propia")
     if (constraint.includes("patient_org_doc_uidx")) throw conflict("DUPLICATE_DOCUMENT", "Ya existe un paciente con ese documento")
+    if (constraint.includes("contact_org_doc_uidx")) throw conflict("DUPLICATE_DOCUMENT", "Ya existe otra persona con ese documento")
     throw e
   }
+}
+
+/** Persona propia del paciente (su vínculo `self`), o null antes de confirmar el alta. */
+export async function patientPersonId(tx: Db, orgId: string, patientId: string): Promise<string | null> {
+  const [row] = await tx.select({ contactId: patientContact.contactId }).from(patientContact)
+    .where(and(eq(patientContact.organizationId, orgId), eq(patientContact.patientId, patientId), eq(patientContact.relationship, "self"))).limit(1)
+  return row?.contactId ?? null
+}
+
+/**
+ * Una persona creada solo para dar identidad a la ficha, sin canales ni
+ * actividad propia, puede sustituirse por el contacto real de la misma persona.
+ */
+async function isPlaceholderPerson(tx: Db, orgId: string, contactId: string, patientId: string): Promise<boolean> {
+  // La definición vive en la base (`is_placeholder_person`), que también la aplica
+  // a escrituras directas: nada referencia a la persona fuera de esta ficha.
+  const [row] = await tx.execute<{ placeholder: boolean }>(
+    sql`select is_placeholder_person(${orgId}, ${contactId}::uuid, ${patientId}::uuid) as placeholder`,
+  )
+  return row?.placeholder === true
 }
 
 export const PATIENT_LIST_SORTS = [
@@ -418,6 +476,19 @@ export async function setPatientContact(tx: Db, orgId: string, actorUserId: stri
   if (!person.isActive) throw conflict("CONTACT_ARCHIVED", "Reactiva el contacto antes de vincularlo")
   const [record] = await tx.select({ id: patient.id }).from(patient).where(and(eq(patient.organizationId, orgId), eq(patient.id, patientId))).for("update")
   if (!record) throw notFound("Paciente")
+  const currentPerson = await patientPersonId(tx, orgId, patientId)
+  // La propia persona no se degrada a otro vínculo: es la identidad de la ficha.
+  if (currentPerson === link.contactId && link.relationship !== "self")
+    throw conflict("PATIENT_PERSON_REQUIRED", "Esta es la propia persona del paciente; su vínculo no se puede cambiar")
+  // Identificar al paciente con un contacto real sustituye a la persona creada
+  // solo para la ficha; si esta ya tiene actividad, no se fusiona en silencio.
+  if (link.relationship === "self" && currentPerson && currentPerson !== link.contactId) {
+    if (!(await isPlaceholderPerson(tx, orgId, currentPerson, patientId)))
+      throw conflict("PATIENT_PERSON_IN_USE", "El paciente ya está identificado con una persona que tiene canales o actividad. Reasigna el canal desde Contactos en lugar de vincular otra persona.")
+    // La sustitución la hace la base al insertar el nuevo vínculo (trigger
+    // `patient_contact_person_adopt`): aquí solo se valida y se deja traza.
+    await tx.insert(auditEvent).values({ organizationId: orgId, actorUserId, action: "patient.person_replaced", entity: "patient", entityId: patientId, metadata: { fromContactId: currentPerson, toContactId: link.contactId } })
+  }
   try {
     if (link.isPreferred) await tx.update(patientContact).set({ isPreferred: false, updatedAt: new Date() }).where(and(eq(patientContact.organizationId, orgId), eq(patientContact.patientId, patientId), eq(patientContact.isPreferred, true)))
     await tx.insert(patientContact).values({ ...link, organizationId: orgId, patientId, createdBy: actorUserId })
@@ -428,6 +499,7 @@ export async function setPatientContact(tx: Db, orgId: string, actorUserId: stri
     await tx.insert(auditEvent).values({ organizationId: orgId, actorUserId, action: "patient.contact_set", entity: "patient", entityId: patientId, metadata: { contactId: link.contactId, relationship: link.relationship, isPreferred: link.isPreferred } })
   } catch (error) {
     if (isUniqueViolation(error) && uniqueConstraintOf(error).includes("patient_contact_self_")) throw conflict("ALREADY_PATIENT", "El contacto o paciente ya tiene una relación propia")
+    if (isUniqueViolation(error) && uniqueConstraintOf(error).includes("contact_org_doc_uidx")) throw conflict("DUPLICATE_DOCUMENT", "Ya existe otra persona con el documento del paciente")
     throw error
   }
 }
@@ -437,6 +509,8 @@ export async function removePatientContact(tx: Db, orgId: string, actorUserId: s
   if (!person) throw notFound("Contacto")
   const [record] = await tx.select({ id: patient.id }).from(patient).where(and(eq(patient.organizationId, orgId), eq(patient.id, patientId))).for("update")
   if (!record) throw notFound("Paciente")
+  if ((await patientPersonId(tx, orgId, patientId)) === contactId)
+    throw conflict("PATIENT_PERSON_REQUIRED", "Esta es la propia persona del paciente y no se puede desvincular")
   const deleted = await tx.delete(patientContact).where(and(eq(patientContact.organizationId, orgId), eq(patientContact.patientId, patientId), eq(patientContact.contactId, contactId))).returning({ id: patientContact.id })
   if (deleted.length) await tx.insert(auditEvent).values({ organizationId: orgId, actorUserId, action: "patient.contact_removed", entity: "patient", entityId: patientId, metadata: { contactId } })
 }
@@ -458,6 +532,19 @@ export async function findPatientDuplicates(tx: Db, orgId: string, input: { disp
 
 export interface UpdatePatientPatch {
   displayName?: string
+  givenNames?: string | null
+  paternalSurname?: string | null
+  maternalSurname?: string | null
+  docCountry?: string | null
+  nationality?: string | null
+  birthPlaceUbigeo?: string | null
+  addressUbigeo?: string | null
+  addressReference?: string | null
+  emergencyContactRelationship?: string | null
+  insurerName?: string | null
+  affiliationNumber?: string | null
+  /** Recepción confirma el nombre separado tras la migración. */
+  identityConfirmed?: boolean
   docType?: string | null
   docNumber?: string | null
   birthDate?: string | null
@@ -490,6 +577,17 @@ async function assertTenantBranch(tx: Db, orgId: string, branchId: string): Prom
 }
 const PATCH_FIELDS = [
   "displayName",
+  "givenNames",
+  "paternalSurname",
+  "maternalSurname",
+  "docCountry",
+  "nationality",
+  "birthPlaceUbigeo",
+  "addressUbigeo",
+  "addressReference",
+  "emergencyContactRelationship",
+  "insurerName",
+  "affiliationNumber",
   "docType",
   "docNumber",
   "birthDate",
@@ -517,8 +615,11 @@ export async function updatePatient(
   id: string,
   patch: UpdatePatientPatch,
 ): Promise<PatientRow> {
+  // Mismo orden de bloqueo que la conciliación de identidad: persona y después ficha.
+  const personId = await patientPersonId(tx, orgId, id)
+  if (personId) await tx.select({ id: contact.id }).from(contact).where(and(eq(contact.organizationId, orgId), eq(contact.id, personId))).for("update")
   const current = await requirePatient(tx, orgId, id)
-  const { registeredBranchId: _branch, isActive: _active, dataConsent: _consent, ...demographicPatch } = patch
+  const { registeredBranchId: _branch, isActive: _active, dataConsent: _consent, identityConfirmed: _confirmed, ...demographicPatch } = patch
   const demographics = Object.fromEntries(Object.keys(demographicsSchema.shape).map(key => [key, current[key as keyof PatientRow]]))
   const errors = validateDemographics({ ...demographics, ...demographicPatch }, await patientOrganizationToday(tx, orgId))
   if (Object.keys(errors).length) throw validation(Object.values(errors)[0]!)
@@ -526,10 +627,37 @@ export async function updatePatient(
     await assertTenantBranch(tx, orgId, patch.registeredBranchId)
   }
   if (patch.displayName !== undefined) patch = { ...patch, displayName: patch.displayName.trim() }
+  patch = await normalizeDemographics(tx, patch)
+  // Un paciente que pasa a ser menor necesita a su representante legal vigente.
+  if (patch.birthDate && patch.birthDate !== current.birthDate) {
+    const today = await patientOrganizationToday(tx, orgId)
+    if (isMinor(patch.birthDate, today)) {
+      const [representative] = await tx
+        .select({ id: patientResponsibility.id })
+        .from(patientResponsibility)
+        .where(
+          and(
+            eq(patientResponsibility.organizationId, orgId),
+            eq(patientResponsibility.patientId, id),
+            eq(patientResponsibility.kind, "representante_legal"),
+            isNull(patientResponsibility.revokedAt),
+            lte(patientResponsibility.startsAt, today),
+            or(isNull(patientResponsibility.endsAt), gte(patientResponsibility.endsAt, today)),
+          ),
+        )
+        .limit(1)
+      if (!representative)
+        throw conflict(
+          "REPRESENTATIVE_REQUIRED",
+          "Con esa fecha es menor de edad: registra primero a su representante legal",
+        )
+    }
+  }
   const set: Partial<typeof patient.$inferInsert> = { updatedAt: new Date() }
   for (const key of PATCH_FIELDS) {
     if (patch[key] !== undefined) (set as Record<string, unknown>)[key] = patch[key] as unknown
   }
+  if (patch.identityConfirmed === true) set.identityNeedsReview = false
   // Consentimiento: write-once. dataConsent:false se ignora.
   if (patch.dataConsent === true && !current.dataConsentAt) {
     set.dataConsentAt = new Date()
@@ -557,6 +685,9 @@ export async function updatePatient(
     const c = uniqueConstraintOf(e)
     if (c.includes("patient_org_doc_uidx")) {
       throw conflict("DUPLICATE_DOCUMENT", "Ya existe un paciente con ese documento")
+    }
+    if (c.includes("contact_org_doc_uidx")) {
+      throw conflict("DUPLICATE_DOCUMENT", "Ya existe otra persona con ese documento")
     }
     throw e
   }

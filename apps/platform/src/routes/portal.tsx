@@ -14,6 +14,7 @@ import {
   fetchPortalBudgets,
   fetchPortalDocumentUrl,
   fetchPortalDocuments,
+  fetchPortalQuestionnaire,
   fetchPortalSession,
   fetchPublicPortalPolicyApi,
   formatPortalDate,
@@ -23,6 +24,7 @@ import {
   requestPasskeyAuthOptionsApi,
   requestPasskeyRegistrationOptionsApi,
   reschedulePortalAppointmentApi,
+  savePortalQuestionnaireApi,
   fetchPortalRescheduleSlots,
   exchangePortalTokenApi,
   selectPortalGrantApi,
@@ -32,6 +34,7 @@ import {
   type PortalBudget,
 } from "../lib/portal"
 import { orgSlugFromHostname, requestHostname } from "../lib/host"
+import { AnswerInput, isFieldVisible, missingRequired } from "../components/patient/form-fields"
 
 export const Route = createFileRoute("/portal")({
   validateSearch: (search: Record<string, unknown>) => ({
@@ -125,10 +128,19 @@ function writeStoredPortalOrg(value: string | null): void {
 function PortalPage() {
   const { token, org } = Route.useSearch()
   const navigate = useNavigate({ from: Route.id })
-  const [sessionToken, setSessionToken] = useState<string | null>(() => readStoredPortalSession())
-  const [storedOrg, setStoredOrg] = useState<string | null>(() => readStoredPortalOrg())
+  // La sesión guardada vive en sessionStorage, que no existe en el servidor:
+  // se lee al montar para que el HTML del servidor y el primer render del
+  // cliente coincidan (sin error de hidratación).
+  const [hydrated, setHydrated] = useState(false)
+  const [sessionToken, setSessionToken] = useState<string | null>(null)
+  const [storedOrg, setStoredOrg] = useState<string | null>(null)
   const [closed, setClosed] = useState(false)
   const [pin, setPin] = useState("")
+  useEffect(() => {
+    setSessionToken(readStoredPortalSession())
+    setStoredOrg(readStoredPortalOrg())
+    setHydrated(true)
+  }, [])
 
   const exchangeMutation = useMutation({
     mutationFn: (code: string) => exchangePortalTokenApi(token ?? "", code),
@@ -165,6 +177,13 @@ function PortalPage() {
     writeStoredPortalSession(null)
     setSessionToken(null)
   }
+
+  if (!hydrated)
+    return (
+      <PageShell maxWidth="md">
+        <LoadingState message="Abriendo tu portal…" />
+      </PageShell>
+    )
 
   if (!sessionToken && (!token || closed)) {
     if (closed) {
@@ -292,6 +311,7 @@ function PortalDashboard({
   const scope = info.session.scope
   const tabs = [
     scope.appointments && { value: "citas", label: "Citas" },
+    scope.appointments && { value: "cuestionario", label: "Antes de tu cita" },
     scope.budgets && { value: "presupuestos", label: "Presupuestos" },
     scope.documents.length > 0 && { value: "documentos", label: "Documentos" },
     scope.account && { value: "cuenta", label: "Cuenta" },
@@ -302,7 +322,7 @@ function PortalDashboard({
     <PageShell maxWidth="lg">
       <PageHeader
         title={`Hola, ${info.patientName}`}
-        subtitle={`Tu acceso vence el ${formatPortalDate(info.session.expiresAt)}. No compartas esta pantalla.`}
+        subtitle={`Tu acceso vence el ${formatPortalDate(info.session.expiresAt)}; no compartas esta pantalla.`}
       />
       <GrantSwitcher sessionToken={sessionToken} onSessionToken={onSessionToken} />
       <div className="mb-4 flex flex-wrap items-center gap-2">
@@ -319,7 +339,8 @@ function PortalDashboard({
         <EmptyState title="Sin secciones" description="Tu acceso no tiene secciones autorizadas." />
       ) : (
         <Tabs defaultValue={defaultTab}>
-          <TabsList>
+          {/* En móvil las pestañas se desplazan en horizontal: nunca desbordan la página. */}
+          <TabsList className="max-w-full justify-start overflow-x-auto">
             {tabs.map((t) => (
               <TabsTrigger key={t.value} value={t.value}>{t.label}</TabsTrigger>
             ))}
@@ -327,6 +348,11 @@ function PortalDashboard({
           {scope.appointments && (
             <TabsContent value="citas">
               <AppointmentsTab sessionToken={sessionToken} />
+            </TabsContent>
+          )}
+          {scope.appointments && (
+            <TabsContent value="cuestionario">
+              <QuestionnaireTab sessionToken={sessionToken} />
             </TabsContent>
           )}
           {scope.budgets && (
@@ -535,6 +561,133 @@ function RescheduleSlots({
         Huecos reales con tu mismo profesional y sillón (Agenda).
       </p>
     </div>
+  )
+}
+
+/**
+ * Cuestionario previo a la cita, por pasos (una sección por paso). Se guarda
+ * el avance al cambiar de paso; al enviarlo, el equipo lo revisa contigo.
+ */
+function QuestionnaireTab({ sessionToken }: { sessionToken: string }) {
+  const queryClient = useQueryClient()
+  const query = useQuery({
+    queryKey: ["portal-questionnaire", sessionToken],
+    queryFn: () => fetchPortalQuestionnaire(sessionToken),
+  })
+  const [answers, setAnswers] = useState<Record<string, unknown> | null>(null)
+  const [step, setStep] = useState(0)
+  const [error, setError] = useState<string | null>(null)
+  const save = useMutation({
+    mutationFn: (submit: boolean) =>
+      savePortalQuestionnaireApi(sessionToken, { answers: answers ?? {}, submit }),
+    onSuccess: (data) => {
+      setError(null)
+      queryClient.setQueryData(["portal-questionnaire", sessionToken], data)
+    },
+    onError: (e) => setError(portalErrorMessage(e)),
+  })
+  if (query.isPending) return <LoadingState message="Cargando tu cuestionario…" />
+  if (query.isError) return <ErrorState message={portalErrorMessage(query.error)} />
+  const { template, response, respondent } = query.data
+  if (!template)
+    return (
+      <EmptyState
+        title="No hay cuestionario pendiente"
+        description="Tu clínica no te ha pedido completar información antes de la cita."
+      />
+    )
+  if (response?.submittedAt)
+    return (
+      <EmptyState
+        title="Gracias, recibimos tus respuestas"
+        description={`Las enviaste el ${formatPortalDate(response.submittedAt)}; tu odontólogo las revisará contigo en la cita.`}
+      />
+    )
+  const current = answers ?? response?.answers ?? {}
+  const sections = template.schema.sections
+  const section = sections[Math.min(step, sections.length - 1)]!
+  const last = step >= sections.length - 1
+  const sectionMissing = missingRequired({ sections: [section] }, current)
+  const goTo = async (next: number) => {
+    if (answers) await save.mutateAsync(false).catch(() => {})
+    setStep(next)
+    window.scrollTo({ top: 0 })
+  }
+  return (
+    <section aria-labelledby="questionnaire-title" className="mx-auto flex w-full max-w-xl flex-col gap-4">
+      <div>
+        <h2 id="questionnaire-title" className="text-lg font-semibold">
+          {template.title}
+        </h2>
+        <p className="text-sm text-muted-foreground">
+          Respondes por: {respondent.name}
+          {respondent.relationship === "self" ? " (tú)" : ""}
+        </p>
+        <p className="mt-1 text-sm font-medium" aria-live="polite">
+          Paso {step + 1} de {sections.length} · {section.title}
+        </p>
+      </div>
+      <div className="flex flex-col gap-4">
+        {section.fields
+          .filter((field) => isFieldVisible(field, current))
+          .map((field) => (
+            <AnswerInput
+              key={field.id}
+              field={field}
+              value={current[field.id]}
+              onChange={(value) => {
+                setError(null)
+                setAnswers({ ...current, [field.id]: value })
+              }}
+            />
+          ))}
+      </div>
+      <p className="text-xs text-muted-foreground">
+        Tu odontólogo revisará estas respuestas contigo en la cita. Guardamos tu avance; puedes
+        continuar más tarde desde el mismo enlace.
+      </p>
+      {error ? (
+        <p role="alert" className="text-sm text-destructive">
+          {error}
+        </p>
+      ) : null}
+      <div className="flex justify-between gap-2">
+        <Button type="button" variant="outline" disabled={step === 0 || save.isPending} onClick={() => void goTo(step - 1)}>
+          Atrás
+        </Button>
+        {last ? (
+          <Button
+            type="button"
+            disabled={save.isPending}
+            onClick={() => {
+              const pending = missingRequired(template.schema, current)
+              if (pending.length > 0) {
+                setError(`Falta responder: ${pending.map((f) => f.label).join(", ")}`)
+                return
+              }
+              save.mutate(true)
+            }}
+          >
+            {save.isPending ? "Enviando…" : "Enviar respuestas"}
+          </Button>
+        ) : (
+          <Button
+            type="button"
+            disabled={save.isPending}
+            onClick={() => {
+              if (sectionMissing.length > 0) {
+                setError(`Falta responder: ${sectionMissing.map((f) => f.label).join(", ")}`)
+                return
+              }
+              setError(null)
+              void goTo(step + 1)
+            }}
+          >
+            Continuar
+          </Button>
+        )}
+      </div>
+    </section>
   )
 }
 

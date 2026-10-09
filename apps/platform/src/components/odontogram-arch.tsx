@@ -6,8 +6,11 @@ const CX = 50
 const CY = 50
 const RX = 38
 const RY = 38
-const LABEL_RX = RX + 8
-const LABEL_RY = RY + 6
+/** Arco interior (temporales en dentición mixta): mismo centro, radio menor. */
+const INNER_RX = 22
+const INNER_RY = 23
+const LABEL_OFFSET_X = 8
+const LABEL_OFFSET_Y = 6
 /** Inset angular de los extremos: los molares terminales superior e inferior
  *  nunca comparten coordenadas y queda un hueco real al centro (herradura). */
 const END_INSET = 10
@@ -19,19 +22,25 @@ function point(phiDeg: number, rx: number, ry: number): { left: number; top: num
 
 export function OdontogramArch({
   teeth,
+  inner,
   entriesOf,
   selected,
   disabled = false,
   onToggle,
 }: {
   teeth: { upper: readonly number[]; lower: readonly number[] }
+  /** Segundo arco concéntrico; sus números van hacia el centro. */
+  inner?: { upper: readonly number[]; lower: readonly number[] }
   entriesOf: (tooth: number) => OdontogramEntry[]
   selected: number[]
   disabled?: boolean
   onToggle: (tooth: number, additive: boolean) => void
 }): React.JSX.Element {
-  const renderArch = (row: readonly number[], lower: boolean) =>
+  const renderArch = (row: readonly number[], lower: boolean, innerRing = false) =>
     row.map((tooth, i) => {
+      const rx = innerRing ? INNER_RX : RX
+      const ry = innerRing ? INNER_RY : RY
+      const labelSign = innerRing ? -1 : 1
       const span = 180 - END_INSET * 2
       const phi =
         row.length <= 1
@@ -41,12 +50,12 @@ export function OdontogramArch({
           : lower
             ? 180 - END_INSET - (i / (row.length - 1)) * span
             : 180 + END_INSET + (i / (row.length - 1)) * span
-      const pos = point(phi, RX, RY)
-      const label = point(phi, LABEL_RX, LABEL_RY)
+      const pos = point(phi, rx, ry)
+      const label = point(phi, rx + labelSign * LABEL_OFFSET_X, ry + labelSign * LABEL_OFFSET_Y)
       const rotation = phi - 90
       // Envolvente proporcional al ancho: el diente llena su wrapper y el
       // wrapper escala con el contenedor (también a 320px móvil).
-      const wrapWidth = row.length > 12 ? 8 : 11
+      const wrapWidth = innerRing ? 6.5 : row.length > 12 ? 8 : 11
       return (
         <Fragment key={tooth}>
           <div
@@ -99,6 +108,8 @@ export function OdontogramArch({
       />
       {renderArch(teeth.upper, false)}
       {renderArch(teeth.lower, true)}
+      {inner ? renderArch(inner.upper, false, true) : null}
+      {inner ? renderArch(inner.lower, true, true) : null}
     </div>
   )
 }

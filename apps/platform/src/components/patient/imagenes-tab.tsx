@@ -1,3 +1,4 @@
+import { IMAGE_TYPES } from "@odentia/clinical"
 import {
   Attachment,
   AttachmentAction,
@@ -22,16 +23,18 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
+  Textarea,
 } from "@odentia/ui"
 import {
+  ConfirmDialog,
   EmptyState,
   FilterBar,
   type FilterDef,
-  FormDrawer,
+  FormDrawer,LoadingState, 
   type SortOption,
-  useListSearch,
-} from "@odentia/ui-patterns"
+  useListSearch } from "@odentia/ui-patterns"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { Link } from "@tanstack/react-router"
 import { FileText, Image as ImageIcon } from "lucide-react"
 import { useEffect, useId, useMemo, useRef, useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
@@ -42,9 +45,26 @@ import type {
   PatientDocumentContext,
   PlanItem,
 } from "../../lib/patients"
-import { categoryLabel, encounterLabel, planItemLabel, UPLOAD_CATEGORIES } from "./document-labels"
+import {
+  categoryLabel,
+  encounterLabel,
+  formatTakenAt,
+  imageTypeLabel,
+  planItemLabel,
+  reportStatusLabel,
+  takenAt,
+  UPLOAD_CATEGORIES,
+} from "./document-labels"
 import { DocumentLinkSelects, type DocumentLinkValue } from "./document-link-selects"
+import { DicomViewer } from "./dicom-viewer"
 import { DocumentUploadDialog } from "./document-upload-dialog"
+import {
+  AdjustedImage,
+  DEFAULT_ADJUSTMENTS,
+  ImageAdjustControls,
+  type ImageAdjustments,
+  ImageCompare,
+} from "./image-viewer"
 import { TagsInput } from "./tags-input"
 import { ToothSelector } from "./tooth-selector"
 
@@ -63,12 +83,32 @@ function isPdfDoc(doc: PatientDocument): boolean {
   return doc.contentType === "application/pdf"
 }
 
-function useSignedUrl(patientId: string, documentId: string) {
+function isDicomDoc(doc: PatientDocument): boolean {
+  return doc.contentType === "application/dicom"
+}
+
+/** Periodos del filtro, en días hacia atrás desde hoy. */
+const PERIODS: Record<string, { label: string; days: number }> = {
+  "30d": { label: "Últimos 30 días", days: 30 },
+  "6m": { label: "Últimos 6 meses", days: 183 },
+  "12m": { label: "Últimos 12 meses", days: 365 },
+  "24m": { label: "Últimos 24 meses", days: 730 },
+}
+
+function monthHeading(iso: string): string {
+  const text = new Date(iso).toLocaleDateString("es-PE", { month: "long", year: "numeric" })
+  return text.charAt(0).toUpperCase() + text.slice(1)
+}
+
+/** URL firmada del archivo; `thumb` pide la miniatura (o el original si no la hay). */
+function useSignedUrl(patientId: string, documentId: string, variant: "original" | "thumb" = "original") {
   const canRead = usePermission("clinical.read")
   return useQuery({
-    queryKey: ["patient-document-url", patientId, documentId],
+    queryKey: ["patient-document-url", patientId, documentId, variant],
     queryFn: () =>
-      apiFetch<{ data: { url: string } }>(`/api/patients/${patientId}/documents/${documentId}/url`),
+      apiFetch<{ data: { url: string } }>(
+        `/api/patients/${patientId}/documents/${documentId}/url${variant === "thumb" ? "?variant=thumb" : ""}`,
+      ),
     staleTime: SIGNED_URL_STALE_MS,
     enabled: canRead,
   })
@@ -113,9 +153,14 @@ export function ImagenesTab({
     if (initialTooth != null) setTeeth([initialTooth])
   }, [initialTooth])
 
+  // Los retirados no están en la galería; se consultan aparte con su motivo.
+  const showRetired = listSearch.get("estado") === "retirados"
   const docsQuery = useQuery({
-    queryKey: ["patient-documents", patientId],
-    queryFn: () => apiFetch<{ data: DocView[] }>(`/api/patients/${patientId}/documents`),
+    queryKey: ["patient-documents", patientId, showRetired ? "con-retirados" : "activos"],
+    queryFn: () =>
+      apiFetch<{ data: DocView[] }>(
+        `/api/patients/${patientId}/documents${showRetired ? "?includeRetired=true" : ""}`,
+      ),
     enabled: canRead,
   })
 
@@ -139,7 +184,7 @@ export function ImagenesTab({
     enabled: canRead,
   })
   const planQuery = useQuery({
-    queryKey: ["plan", patientId],
+    queryKey: ["plan-items", patientId],
     queryFn: () => apiFetch<{ data: PlanItem[] }>(`/api/patients/${patientId}/plan`),
     enabled: canRead,
   })
@@ -164,6 +209,8 @@ export function ImagenesTab({
   const atencionParam = listSearch.get("atencion")
   const planParam = listSearch.get("tratamiento")
   const etiquetaParam = listSearch.get("etiqueta")
+  const tipoParam = listSearch.get("tipo")
+  const periodoParam = listSearch.get("periodo")
   const sortParam = listSearch.get("sort")
   const sort: SortKey = sortParam === "antiguos" || sortParam === "titulo" ? sortParam : "recientes"
   // En una atención, el filtro prefiere esa atención salvo "todas" explícito.
@@ -176,6 +223,18 @@ export function ImagenesTab({
         label: "Categoría",
         type: "select",
         options: UPLOAD_CATEGORIES.map((c) => ({ value: c, label: categoryLabel(c) })),
+      },
+      {
+        key: "tipo",
+        label: "Tipo",
+        type: "select",
+        options: IMAGE_TYPES.map((t) => ({ value: t, label: imageTypeLabel(t) ?? t })),
+      },
+      {
+        key: "periodo",
+        label: "Periodo",
+        type: "select",
+        options: Object.entries(PERIODS).map(([value, p]) => ({ value, label: p.label })),
       },
       {
         key: "atencion",
@@ -204,14 +263,21 @@ export function ImagenesTab({
         placement: "overflow",
         options: allTags.map((t) => ({ value: t, label: t })),
       },
+      {
+        key: "estado",
+        label: "Estado",
+        type: "select",
+        placement: "overflow",
+        options: [{ value: "retirados", label: "Retirados" }],
+      },
     ],
     [encounterId, encounters, planItems, allTags],
   )
 
   const sortOptions: SortOption[] = useMemo(
     () => [
-      { value: "recientes", label: "Más recientes" },
-      { value: "antiguos", label: "Más antiguos" },
+      { value: "recientes", label: "Toma más reciente" },
+      { value: "antiguos", label: "Toma más antigua" },
       { value: "titulo", label: "Título A–Z" },
     ],
     [],
@@ -219,9 +285,16 @@ export function ImagenesTab({
 
   const filtered = useMemo(() => {
     const teethSet = new Set(teeth)
+    const since =
+      periodoParam && PERIODS[periodoParam]
+        ? Date.now() - PERIODS[periodoParam]!.days * 86_400_000
+        : null
     const list = allDocs.filter((d) => {
+      if (showRetired !== Boolean(d.retiredAt)) return false
       if (searchText && !d.label.toLowerCase().includes(searchText)) return false
       if (categoryParam && d.category !== categoryParam) return false
+      if (tipoParam && d.imageType !== tipoParam) return false
+      if (since != null && new Date(takenAt(d)).getTime() < since) return false
       if (teeth.length > 0 && !d.toothNumbers.some((t) => teethSet.has(t))) return false
       if (atencion === "ninguna") {
         if (d.encounterId) return false
@@ -237,11 +310,36 @@ export function ImagenesTab({
       return true
     })
     return [...list].sort((a, b) => {
-      if (sort === "antiguos") return a.createdAt.localeCompare(b.createdAt)
+      if (sort === "antiguos") return takenAt(a).localeCompare(takenAt(b))
       if (sort === "titulo") return a.label.localeCompare(b.label, "es")
-      return b.createdAt.localeCompare(a.createdAt)
+      return takenAt(b).localeCompare(takenAt(a))
     })
-  }, [allDocs, searchText, categoryParam, teeth, atencion, planParam, etiquetaParam, sort])
+  }, [
+    allDocs,
+    showRetired,
+    searchText,
+    categoryParam,
+    tipoParam,
+    periodoParam,
+    teeth,
+    atencion,
+    planParam,
+    etiquetaParam,
+    sort,
+  ])
+
+  // Por fecha de toma, agrupado por mes; por título, lista única.
+  const groups = useMemo(() => {
+    if (sort === "titulo") return [{ heading: null as string | null, docs: filtered }]
+    const out: Array<{ heading: string | null; docs: DocView[] }> = []
+    for (const doc of filtered) {
+      const heading = monthHeading(takenAt(doc))
+      const last = out[out.length - 1]
+      if (last && last.heading === heading) last.docs.push(doc)
+      else out.push({ heading, docs: [doc] })
+    }
+    return out
+  }, [filtered, sort])
 
   const viewing = viewingId ? (allDocs.find((d) => d.id === viewingId) ?? null) : null
   const viewingIndex = viewing ? filtered.findIndex((d) => d.id === viewing.id) : -1
@@ -279,8 +377,7 @@ export function ImagenesTab({
       >
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-sm font-semibold">
-            Archivos ({filtered.length}
-            {filtered.length !== allDocs.length ? ` de ${allDocs.length}` : ""})
+            {showRetired ? "Archivos retirados" : "Imágenes y archivos"} ({filtered.length})
           </h2>
           {!readOnly && canWrite && (
             <Button size="sm" disabled={disabled} onClick={() => setUploadOpen(true)}>
@@ -304,7 +401,7 @@ export function ImagenesTab({
           </div>
         </details>
 
-        {docsQuery.isPending && <p className="text-sm text-muted-foreground">Cargando…</p>}
+        {docsQuery.isPending && <LoadingState message="Cargando…" />}
         {listError && (
           <div className="flex flex-col gap-2">
             <p className="text-sm text-destructive">{listError}</p>
@@ -325,22 +422,34 @@ export function ImagenesTab({
             }
           />
         )}
-        {filtered.length > 0 && (
-          <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-            {filtered.map((doc) => (
-              <DocCard
-                key={doc.id}
-                patientId={patientId}
-                doc={doc}
-                planItem={doc.planItemId ? planById.get(doc.planItemId) : undefined}
-                encounter={doc.encounterId ? encounterById.get(doc.encounterId) : undefined}
-                onOpen={() => openViewing(doc.id)}
-              />
-            ))}
-          </ul>
+        {groups.map((group) =>
+          group.docs.length === 0 ? null : (
+            <section
+              key={group.heading ?? "todos"}
+              aria-label={group.heading ?? "Archivos"}
+              className="flex flex-col gap-2"
+            >
+              {group.heading && (
+                <h3 className="text-xs font-medium text-muted-foreground">{group.heading}</h3>
+              )}
+              <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+                {group.docs.map((doc) => (
+                  <DocCard
+                    key={doc.id}
+                    patientId={patientId}
+                    doc={doc}
+                    planItem={doc.planItemId ? planById.get(doc.planItemId) : undefined}
+                    encounter={doc.encounterId ? encounterById.get(doc.encounterId) : undefined}
+                    onOpen={() => openViewing(doc.id)}
+                  />
+                ))}
+              </ul>
+            </section>
+          ),
         )}
         <p className="text-xs text-muted-foreground">
-          Los archivos se conservan como parte de la historia clínica: no se pueden eliminar.
+          Los archivos forman parte de la historia clínica: no se borran. Uno subido por error se
+          retira con motivo y queda en «Estado: Retirados».
         </p>
       </section>
 
@@ -363,7 +472,9 @@ export function ImagenesTab({
                 <div className="min-w-0 flex-1">
                   <DialogTitle>{viewing.label}</DialogTitle>
                   <DialogDescription>
-                    {categoryLabel(viewing.category)} · {timeAgo(viewing.createdAt)}
+                    {imageTypeLabel(viewing.imageType) ?? categoryLabel(viewing.category)} ·{" "}
+                    {formatTakenAt(viewing)}
+                    {viewing.toothNumbers.length > 0 ? ` · Pieza ${viewing.toothNumbers.join(", ")}` : ""}
                     {filtered.length > 1 ? ` · ${viewingIndex + 1} de ${filtered.length}` : ""}
                   </DialogDescription>
                 </div>
@@ -394,10 +505,18 @@ export function ImagenesTab({
               doc={viewing}
               planItem={viewing.planItemId ? planById.get(viewing.planItemId) : undefined}
               encounter={viewing.encounterId ? encounterById.get(viewing.encounterId) : undefined}
-              canEdit={!readOnly && canWrite && !disabled}
+              canEdit={!readOnly && canWrite && !disabled && !viewing.retiredAt}
               onEditContext={() => {
                 setResumeId(viewingId)
                 setContextDoc(viewing)
+              }}
+              compareCandidates={allDocs.filter(
+                (d) => d.id !== viewing.id && !d.retiredAt && isImageDoc(d),
+              )}
+              onChanged={invalidateAfterChange}
+              onRetired={async () => {
+                setViewingId(null)
+                await invalidateAfterChange()
               }}
             />
           </DialogContent>
@@ -464,7 +583,7 @@ function DocCard({
   encounter?: Encounter
   onOpen: () => void
 }) {
-  const urlQuery = useSignedUrl(patientId, doc.id)
+  const urlQuery = useSignedUrl(patientId, doc.id, "thumb")
   const url = urlQuery.data?.data.url ?? null
   const teeth = doc.toothNumbers
   const tags = doc.tags
@@ -495,14 +614,23 @@ function DocCard({
               )}
             </span>
           )}
-          <Badge variant="secondary" className="absolute top-1.5 left-1.5">
-            {categoryLabel(doc.category)}
+          <Badge variant="secondary" className="absolute top-1.5 left-1.5 max-w-[90%] truncate">
+            {imageTypeLabel(doc.imageType) ?? categoryLabel(doc.category)}
           </Badge>
+          {doc.retiredAt ? (
+            <Badge variant="destructive" className="absolute right-1.5 bottom-1.5">
+              Retirado
+            </Badge>
+          ) : doc.reportStatus === "pendiente" ? (
+            <Badge variant="outline" className="absolute right-1.5 bottom-1.5 bg-background">
+              Sin informar
+            </Badge>
+          ) : null}
         </span>
         <span className="flex min-w-0 flex-col gap-1 px-0.5 pb-0.5">
           <span className="truncate text-sm font-medium">{doc.label}</span>
           <span className="text-xs text-muted-foreground">
-            {timeAgo(doc.createdAt)}
+            {formatTakenAt(doc)}
             {teeth.length > 0 &&
               ` · ${teeth.length === 1 ? `Pieza ${teeth[0]}` : `${teeth.length} piezas`}`}
           </span>
@@ -519,6 +647,7 @@ function DocCard({
           <span className="text-xs text-muted-foreground">
             {encounter ? `Atención · ${timeAgo(encounter.createdAt)}` : "Sin atención"}
             {planItem ? ` · ${planItem.title}` : ""}
+            {doc.source ? ` · ${doc.source}` : ""}
           </span>
           {tags.length > 0 && (
             <span className="flex flex-wrap gap-1" aria-label={`Etiquetas: ${tags.join(", ")}`}>
@@ -543,6 +672,9 @@ function DocumentViewer({
   encounter,
   canEdit,
   onEditContext,
+  compareCandidates,
+  onChanged,
+  onRetired,
 }: {
   patientId: string
   doc: DocView
@@ -550,10 +682,63 @@ function DocumentViewer({
   encounter?: Encounter
   canEdit: boolean
   onEditContext: () => void
+  /** Otras imágenes activas del paciente para comparar. */
+  compareCandidates: DocView[]
+  onChanged: () => Promise<void>
+  onRetired: () => Promise<void>
 }) {
   const canRead = usePermission("clinical.read")
   const urlQuery = useSignedUrl(patientId, doc.id)
   const url = urlQuery.data?.data.url ?? null
+  const [adjustments, setAdjustments] = useState<ImageAdjustments>(DEFAULT_ADJUSTMENTS)
+  const [compareId, setCompareId] = useState<string>("")
+  const [retireOpen, setRetireOpen] = useState(false)
+  const [retireReason, setRetireReason] = useState("")
+  const [actionPending, setActionPending] = useState(false)
+  const [actionError, setActionError] = useState<string | null>(null)
+  const retireId = useId()
+  const compareSelectId = useId()
+  useEffect(() => {
+    setAdjustments(DEFAULT_ADJUSTMENTS)
+    setCompareId("")
+    setActionError(null)
+  }, [doc.id])
+  // Primero las del mismo tipo y que comparten pieza: es la comparación útil.
+  const rankedCandidates = useMemo(() => {
+    const score = (d: DocView) =>
+      (d.imageType && d.imageType === doc.imageType ? 2 : 0) +
+      (d.toothNumbers.some((t) => doc.toothNumbers.includes(t)) ? 1 : 0)
+    return [...compareCandidates].sort(
+      (a, b) => score(b) - score(a) || takenAt(b).localeCompare(takenAt(a)),
+    )
+  }, [compareCandidates, doc.imageType, doc.toothNumbers])
+  const compareDoc = compareId ? rankedCandidates.find((d) => d.id === compareId) : undefined
+  const compareUrlQuery = useSignedUrl(patientId, compareId || doc.id)
+  const compareUrl = compareId ? (compareUrlQuery.data?.data.url ?? null) : null
+
+  const runAction = async (fn: () => Promise<unknown>, after: () => Promise<void>) => {
+    setActionPending(true)
+    setActionError(null)
+    try {
+      await fn()
+      await after()
+      return true
+    } catch (e) {
+      setActionError(e instanceof ApiError ? (e.shape.message ?? e.message) : "No se pudo guardar.")
+      return false
+    } finally {
+      setActionPending(false)
+    }
+  }
+  const setReport = (reportStatus: string) =>
+    runAction(
+      () =>
+        apiFetch(`/api/patients/${patientId}/documents/${doc.id}/report`, {
+          method: "PATCH",
+          body: JSON.stringify({ reportStatus }),
+        }),
+      onChanged,
+    )
   const error =
     urlQuery.error instanceof ApiError
       ? (urlQuery.error.shape.message ?? "No se pudo obtener el documento.")
@@ -575,13 +760,17 @@ function DocumentViewer({
   const teeth = doc.toothNumbers
   const tags = doc.tags
 
-  const planHref = planItem
-    ? `/patients/${patientId}?tab=plan&planId=${planItem.planId}${planItem.budgetId ? `&budgetId=${planItem.budgetId}` : ""}`
-    : `/patients/${patientId}?tab=plan`
+  const planSearch = planItem
+    ? {
+        tab: "plan" as const,
+        planId: planItem.planId,
+        ...(planItem.budgetId ? { budgetId: planItem.budgetId } : {}),
+      }
+    : { tab: "plan" as const }
   return (
     <div className="grid min-w-0 grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_20rem]">
       {urlQuery.isPending ? (
-        <p className="text-sm text-muted-foreground">Cargando…</p>
+        <LoadingState message="Cargando…" />
       ) : error || !url ? (
         <div className="flex flex-col gap-2">
           <p className="text-sm text-destructive">{error ?? "No se pudo obtener el documento."}</p>
@@ -589,10 +778,28 @@ function DocumentViewer({
             Reintentar
           </Button>
         </div>
+      ) : isImageDoc(doc) && compareDoc && compareUrl ? (
+        <ImageCompare
+          before={
+            takenAt(compareDoc) <= takenAt(doc)
+              ? { url: compareUrl, label: compareDoc.label, caption: formatTakenAt(compareDoc) }
+              : { url, label: doc.label, caption: formatTakenAt(doc) }
+          }
+          after={
+            takenAt(compareDoc) <= takenAt(doc)
+              ? { url, label: doc.label, caption: formatTakenAt(doc) }
+              : { url: compareUrl, label: compareDoc.label, caption: formatTakenAt(compareDoc) }
+          }
+        />
       ) : isImageDoc(doc) ? (
-        <img src={url} alt={doc.label} className="max-h-[70vh] w-full rounded-md object-contain" />
+        <div className="flex min-w-0 flex-col gap-3">
+          <AdjustedImage src={url} alt={doc.label} adjustments={adjustments} className="max-h-[65vh]" />
+          <ImageAdjustControls value={adjustments} onChange={setAdjustments} />
+        </div>
       ) : isPdfDoc(doc) ? (
         <embed src={url} type="application/pdf" className="h-[70vh] w-full rounded-md border" />
+      ) : isDicomDoc(doc) ? (
+        <DicomViewer patientId={patientId} documentId={doc.id} label={doc.label} />
       ) : (
         <p className="text-sm text-muted-foreground">
           Vista previa no disponible para este tipo de archivo.
@@ -600,9 +807,106 @@ function DocumentViewer({
       )}
       {/* Visor arriba; columna de metadata (plegable en móvil) debajo/al lado. */}
       <div className="flex min-w-0 flex-col gap-3">
+        {doc.retiredAt && (
+          <div role="status" className="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm">
+            <p className="font-medium">Retirado {timeAgo(doc.retiredAt)}</p>
+            <p className="text-muted-foreground">Motivo: {doc.retireReason}</p>
+          </div>
+        )}
+        {isImageDoc(doc) && rankedCandidates.length > 0 && (
+          <Field>
+            <FieldLabel htmlFor={compareSelectId}>Comparar con</FieldLabel>
+            <Select
+              items={Object.fromEntries([
+                ["", "Sin comparar"],
+                ...rankedCandidates.map((d) => [
+                  d.id,
+                  `${imageTypeLabel(d.imageType) ?? d.label} · ${formatTakenAt(d)}`,
+                ]),
+              ])}
+              value={compareId}
+              onValueChange={(v) => setCompareId(v ?? "")}
+            >
+              <SelectTrigger id={compareSelectId}>
+                <SelectValue placeholder="Sin comparar" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="">Sin comparar</SelectItem>
+                {rankedCandidates.map((d) => (
+                  <SelectItem key={d.id} value={d.id}>
+                    {imageTypeLabel(d.imageType) ?? d.label} · {formatTakenAt(d)}
+                    {d.toothNumbers.length > 0 ? ` · ${d.toothNumbers.join(", ")}` : ""}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </Field>
+        )}
         <details open className="rounded-md border px-3 py-2">
           <summary className="cursor-pointer text-sm font-medium">Detalles del archivo</summary>
           <dl className="grid grid-cols-1 gap-x-4 gap-y-2 pt-2 text-sm">
+            <div>
+              <dt className="text-xs text-muted-foreground">Tipo</dt>
+              <dd>{imageTypeLabel(doc.imageType) ?? categoryLabel(doc.category)}</dd>
+            </div>
+            <div>
+              <dt className="text-xs text-muted-foreground">Fecha de toma</dt>
+              <dd>
+                {doc.capturedAt
+                  ? new Date(doc.capturedAt).toLocaleString("es-PE", {
+                      dateStyle: "medium",
+                      timeStyle: "short",
+                    })
+                  : "No registrada"}{" "}
+                <span className="text-muted-foreground">
+                  (subida{" "}
+                  {new Date(doc.createdAt).toLocaleString("es-PE", {
+                    dateStyle: "medium",
+                    timeStyle: "short",
+                  })}
+                  )
+                </span>
+              </dd>
+            </div>
+            {doc.source && (
+              <div>
+                <dt className="text-xs text-muted-foreground">Origen</dt>
+                <dd>{doc.source}</dd>
+              </div>
+            )}
+            {doc.reportStatus && (
+              <div>
+                <dt className="text-xs text-muted-foreground">Informe</dt>
+                <dd className="flex flex-wrap items-center gap-2">
+                  {reportStatusLabel(doc.reportStatus)}
+                  {canEdit && doc.reportStatus === "pendiente" && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={actionPending}
+                      onClick={() => void setReport("informado")}
+                    >
+                      Marcar como informada
+                    </Button>
+                  )}
+                  {canEdit && doc.reportStatus === "informado" && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={actionPending}
+                      onClick={() => void setReport("pendiente")}
+                    >
+                      Volver a pendiente
+                    </Button>
+                  )}
+                </dd>
+                {doc.reportStatus === "pendiente" && (
+                  <p className="pt-1 text-xs text-muted-foreground">
+                    El informe se escribe en la atención, en «Exámenes auxiliares».
+                  </p>
+                )}
+              </div>
+            )}
             <div>
               <dt className="text-xs text-muted-foreground">Piezas</dt>
               <dd>{teeth.length > 0 ? teeth.join(", ") : "Sin piezas vinculadas"}</dd>
@@ -631,7 +935,12 @@ function DocumentViewer({
                     size="sm"
                     variant="outline"
                     nativeButton={false}
-                    render={<a href={`/patients/${patientId}/encounters/${doc.encounterId}`} />}
+                    render={
+                      <Link
+                        to="/patients/$patientId/encounters/$encounterId"
+                        params={{ patientId, encounterId: doc.encounterId }}
+                      />
+                    }
                   >
                     {encounter
                       ? `Abrir atención (${timeAgo(encounter.createdAt)})`
@@ -650,7 +959,7 @@ function DocumentViewer({
                     size="sm"
                     variant="outline"
                     nativeButton={false}
-                    render={<a href={planHref} />}
+                    render={<Link to="/patients/$patientId" params={{ patientId }} search={planSearch} />}
                   >
                     {planItem ? `Ver plan: ${planItem.title}` : "Ver plan"}
                   </Button>
@@ -678,7 +987,13 @@ function DocumentViewer({
                     size="sm"
                     variant="outline"
                     nativeButton={false}
-                    render={<a href={`/patients/${patientId}?tab=plan&budgetId=${doc.budgetId}`} />}
+                    render={
+                      <Link
+                        to="/patients/$patientId"
+                        params={{ patientId }}
+                        search={{ tab: "plan", budgetId: doc.budgetId }}
+                      />
+                    }
                   >
                     Ver la propuesta
                   </Button>
@@ -703,7 +1018,9 @@ function DocumentViewer({
                     size="sm"
                     variant="outline"
                     nativeButton={false}
-                    render={<a href={`/patients/${patientId}?tab=controles`} />}
+                    render={
+                      <Link to="/patients/$patientId" params={{ patientId }} search={{ tab: "controles" }} />
+                    }
                   >
                     Ver controles
                   </Button>
@@ -720,7 +1037,9 @@ function DocumentViewer({
                     size="sm"
                     variant="outline"
                     nativeButton={false}
-                    render={<a href={`/patients/${patientId}?tab=recetas`} />}
+                    render={
+                      <Link to="/patients/$patientId" params={{ patientId }} search={{ tab: "recetas" }} />
+                    }
                   >
                     Ver recetas
                   </Button>
@@ -737,7 +1056,9 @@ function DocumentViewer({
                     size="sm"
                     variant="outline"
                     nativeButton={false}
-                    render={<a href={`/patients/${patientId}?tab=cuenta`} />}
+                    render={
+                      <Link to="/patients/$patientId" params={{ patientId }} search={{ tab: "cuenta" }} />
+                    }
                   >
                     Ver cuenta
                   </Button>
@@ -813,8 +1134,65 @@ function DocumentViewer({
               </Button>
             </>
           )}
+          {canEdit && !doc.retiredAt && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="text-destructive"
+              onClick={() => {
+                setRetireReason("")
+                setRetireOpen(true)
+              }}
+            >
+              Retirar…
+            </Button>
+          )}
         </div>
+        {actionError && (
+          <p role="alert" className="text-sm text-destructive">
+            {actionError}
+          </p>
+        )}
       </div>
+      <ConfirmDialog
+        open={retireOpen}
+        title="Retirar archivo"
+        description="Sale de la galería, de la historia por pieza y del resumen. No se borra: queda en «Retirados» con tu nombre, la fecha y el motivo. No se puede deshacer."
+        confirmLabel="Retirar"
+        pending={actionPending}
+        confirmDisabled={!retireReason.trim()}
+        onClose={() => setRetireOpen(false)}
+        onConfirm={() =>
+          void runAction(
+            () =>
+              apiFetch(`/api/patients/${patientId}/documents/${doc.id}/retire`, {
+                method: "POST",
+                body: JSON.stringify({ reason: retireReason.trim() }),
+              }),
+            async () => {
+              setRetireOpen(false)
+              await onRetired()
+            },
+          )
+        }
+      >
+        <Field>
+          <FieldLabel htmlFor={retireId}>Motivo</FieldLabel>
+          <Textarea
+            id={retireId}
+            aria-required="true"
+            value={retireReason}
+            maxLength={2000}
+            placeholder="p. ej. Subida al paciente equivocado"
+            onChange={(e) => setRetireReason(e.currentTarget.value)}
+          />
+        </Field>
+        {actionError && (
+          <p role="alert" className="text-sm text-destructive">
+            {actionError}
+          </p>
+        )}
+      </ConfirmDialog>
     </div>
   )
 }
@@ -846,7 +1224,7 @@ function ContextDrawer({
 }) {
   const queryClient = useQueryClient()
   const canRead = usePermission("clinical.read")
-  const previewQuery = useSignedUrl(patientId, doc.id)
+  const previewQuery = useSignedUrl(patientId, doc.id, "thumb")
   const [encounterChoice, setEncounterChoice] = useState<string>(doc.encounterId ?? "")
   const [planChoice, setPlanChoice] = useState<string>(doc.planItemId ?? "")
   const [links, setLinks] = useState<DocumentLinkValue>({

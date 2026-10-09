@@ -132,6 +132,17 @@ it("crea una cita con duración del servicio y la lista con nombres resueltos", 
     dentistName: "Dra. Agenda Uno",
     chairName: "Sillón Uno",
   })
+
+  const own = await run((tx) => listAppointments(tx, ORG, { from: FROM, to: TO, patientId }))
+  expect(own.map((item) => item.id)).toContain(created.id)
+  const other = await run((tx) =>
+    listAppointments(tx, ORG, {
+      from: FROM,
+      to: TO,
+      patientId: "00000000-0000-4000-8000-000000000000",
+    }),
+  )
+  expect(other).toEqual([])
 })
 
 it("rechaza profesional ajeno, paciente ajeno y sillón inexistente", async () => {

@@ -2,6 +2,7 @@ import {
   DEFAULT_REGISTRATION_CONFIG,
   isMinor,
   isRealDate,
+  normalizePhone,
   registrationAnswersSchema,
   registrationConfigSchema,
   validateRegistrationAnswers,
@@ -14,6 +15,7 @@ import type { Db } from "@odentia/db"
 import {
   patient,
   patientContact,
+  patientDataConsent,
   patientRegistration,
   patientRegistrationLink,
 } from "@odentia/db/schema/clinical"
@@ -24,6 +26,7 @@ import { and, eq, sql, type SQL } from "drizzle-orm"
 import { notFound, ServiceError, validation } from "./errors.js"
 import { createPatient, patientOrganizationToday, requirePatient, type PatientRow } from "./patients.js"
 import { initializeDeclaredPatientHealth } from "./clinical.js"
+import { grantResponsibility } from "./responsibilities.js"
 import { isDirectThread, lockRegistrationContacts } from "./contacts.js"
 
 const LINK_TTL_MS = 72 * 60 * 60 * 1000
@@ -570,25 +573,7 @@ export async function registerPatient(
   }
 
   // 5. Alta: createPatient es el único escritor inicial del snapshot.
-  const {
-    displayName,
-    docType,
-    docNumber,
-    birthDate,
-    sex,
-    phone,
-    email,
-    maritalStatus,
-    educationLevel,
-    occupation,
-    address,
-    origin,
-    emergencyContactName,
-    emergencyContactPhone,
-    insuranceType,
-    insuranceDetail,
-    referralSource,
-  } = answers.demographics
+  const demographics = answers.demographics
   const provenance = {
     submissionId: input.submissionId,
     payloadHash,
@@ -608,23 +593,7 @@ export async function registerPatient(
       orgId,
       actorUserId,
       {
-        displayName,
-        docType,
-        docNumber,
-        birthDate,
-        sex,
-        phone,
-        email,
-        maritalStatus,
-        educationLevel,
-        occupation,
-        address,
-        origin,
-        emergencyContactName,
-        emergencyContactPhone,
-        insuranceType,
-        insuranceDetail,
-        referralSource,
+        ...demographics,
         ...(isPublic ? {} : { registeredBranchId: input.registeredBranchId ?? null }),
         ...(links.length ? { contacts: links } : {}),
       },
@@ -646,12 +615,67 @@ export async function registerPatient(
     await initializeDeclaredPatientHealth(tx, orgId, created.id, answers.health, actorUserId)
   }
 
-  // 7. Consentimiento atribuido en servidor (operador interno o null público).
+  // 6b. Representante del menor (o de quien declara por otro): persona con su
+  // documento, vínculo y responsabilidad de representante legal, en la misma
+  // transacción. Si el enlace ya lo vinculó, solo se le asigna el rol.
+  const minorPatient =
+    !!demographics.birthDate && isRealDate(demographics.birthDate) && isMinor(demographics.birthDate, today)
+  if (answers.representative && minorPatient) {
+    const linkedGuardian = links.find((l) => l.relationship === "guardian")
+    let representativeId = linkedGuardian?.contactId ?? null
+    if (!representativeId) {
+      const rep = answers.representative
+      const [person] = await tx
+        .insert(contact)
+        .values({
+          organizationId: orgId,
+          displayName: rep.displayName,
+          phone: rep.phone ? normalizePhone(rep.phone) : null,
+          email: rep.email || null,
+          docType: rep.docType ?? null,
+          docNumber: rep.docNumber || null,
+          docCountry: rep.docCountry?.toUpperCase() || null,
+        })
+        .returning({ id: contact.id })
+      if (!person) throw new Error("No se pudo crear al representante")
+      representativeId = person.id
+      await tx.insert(patientContact).values({
+        organizationId: orgId,
+        patientId: created.id,
+        contactId: person.id,
+        relationship: "guardian",
+        relationshipDetail: rep.relationshipDetail || null,
+        isPreferred: false,
+        createdBy: actorUserId,
+      })
+    }
+    await grantResponsibility(tx, orgId, actorUserId, created.id, {
+      contactId: representativeId,
+      kind: "representante_legal",
+      startsAt: today,
+    })
+  }
+
+  // 7. Consentimiento de datos (Ley 29733) con la versión del aviso aceptada y
+  // quién lo otorga; se atribuye en servidor (operador interno o null público).
   if (answers.privacyAccepted) {
     await tx
       .update(patient)
       .set({ dataConsentAt: new Date(), dataConsentBy: actorUserId, updatedAt: new Date() })
       .where(and(eq(patient.id, created.id), eq(patient.organizationId, orgId)))
+    await tx.insert(patientDataConsent).values({
+      organizationId: orgId,
+      patientId: created.id,
+      noticeVersion: config.version,
+      noticeText: config.privacyNotice || "Aviso de privacidad de la organización.",
+      purposes: ["atencion"],
+      grantedByName:
+        answers.respondent === "representative" && answers.representative
+          ? answers.representative.displayName
+          : created.displayName,
+      channel: isPublic ? "formulario_publico" : "presencial",
+      recordedBy: actorUserId,
+    })
   }
 
   // 8. Consumir el enlace solo tras el alta exitosa, en la misma transacción.

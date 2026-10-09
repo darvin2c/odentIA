@@ -9,9 +9,14 @@ import { useEffect, useRef, useState } from "react"
 export function FirmaPad({
   onChange,
   disabled = false,
+  label = "Área de firma manuscrita",
+  describedBy,
 }: {
   onChange: (strokes: number[][][]) => void
   disabled?: boolean
+  /** Nombre accesible del recuadro (p. ej. «Firma de la paciente»). */
+  label?: string
+  describedBy?: string
 }): React.JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const drawing = useRef<number[][] | null>(null)
@@ -51,8 +56,11 @@ export function FirmaPad({
     <div>
       <canvas
         ref={canvasRef}
-        className="h-40 w-full touch-none rounded-md border bg-white"
-        aria-label="Área de firma manuscrita"
+        // Proporción fija (la del PDF): el trazo se guarda normalizado y no se deforma.
+        className="aspect-[22/7] w-full touch-none rounded-md border bg-white"
+        role="img"
+        aria-label={label}
+        aria-describedby={describedBy}
         onPointerDown={(event) => {
           if (disabled) return
           event.preventDefault()
@@ -116,7 +124,13 @@ function redraw(
 }
 
 /** Vista estática del trazo guardado (historial e impresión). */
-export function FirmaView({ strokes }: { strokes: number[][][] }): React.JSX.Element {
+export function FirmaView({
+  strokes,
+  label = "Firma registrada",
+}: {
+  strokes: number[][][]
+  label?: string
+}): React.JSX.Element {
   const ref = useRef<HTMLCanvasElement | null>(null)
   useEffect(() => {
     const canvas = ref.current
@@ -136,8 +150,9 @@ export function FirmaView({ strokes }: { strokes: number[][][] }): React.JSX.Ele
   return (
     <canvas
       ref={ref}
-      className="h-28 w-full rounded-md border bg-white"
-      aria-label="Firma registrada"
+      className="aspect-[22/7] w-full rounded-md border bg-white"
+      role="img"
+      aria-label={label}
     />
   )
 }

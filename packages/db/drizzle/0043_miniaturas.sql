@@ -1,0 +1,1 @@
+ALTER TABLE "patient_document" ADD COLUMN "thumbnail_key" text;

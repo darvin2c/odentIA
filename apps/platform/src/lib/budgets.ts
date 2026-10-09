@@ -36,7 +36,7 @@ export const BUDGET_STATUSES: readonly BudgetStatus[] = [
   "historico",
 ]
 
-export type PlanDecision = "pendiente" | "aceptado" | "rechazado" | "sin_registro"
+export type PlanDecision = "pendiente" | "aceptado" | "pospuesto" | "rechazado" | "reemplazado"
 
 export interface Budget {
   id: string
@@ -116,8 +116,10 @@ export function planDecisionLabel(decision: string | null | undefined): string {
       return "Aceptado"
     case "rechazado":
       return "Rechazado"
-    case "sin_registro":
-      return "Sin registro"
+    case "pospuesto":
+      return "Pospuesto"
+    case "reemplazado":
+      return "Reemplazado"
     case "pendiente":
     case null:
     case undefined:

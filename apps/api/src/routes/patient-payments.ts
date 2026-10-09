@@ -22,11 +22,22 @@ const paymentVoidInput = z.object({ reason: z.string().trim().min(1).max(2000), 
 export function createPatientPaymentsRoute(deps: Pick<CrmDeps, "db">) {
   const app = new Hono()
   // La cuenta exige finance.read; cada mutación exige además finance.write.
-  app.use("*", async (c, next) => {
-    const { memberRole } = orgContextOf(c)
-    if (!canAccess(memberRole, "finance.read")) return forbid(c)
-    await next()
-  })
+  // Guarda acotado a las rutas de caja: montada en "/", un `use("*")` también
+  // exigiría caja a las subrutas del paciente registradas después (responsables).
+  for (const path of [
+    "/:id/account",
+    "/:id/charges",
+    "/:id/charges/*",
+    "/:id/payments",
+    "/:id/payments/*",
+    "/:id/payment-applications/*",
+  ]) {
+    app.use(path, async (c, next) => {
+      const { memberRole } = orgContextOf(c)
+      if (!canAccess(memberRole, "finance.read")) return forbid(c)
+      await next()
+    })
+  }
   app.get("/:id/account", async c => {
     const { orgId } = orgContextOf(c)
     const params = z.object({id:z.uuid()}).safeParse(c.req.param())

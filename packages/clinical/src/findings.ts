@@ -524,8 +524,8 @@ function timeOf(value: string | Date | null | undefined): number | undefined {
 /**
  * Hallazgos vigentes a la fecha de corte (ISO; por defecto ahora).
  * El registro es append-only: coexisten todas las entradas válidas registradas
- * hasta la fecha; se excluyen las pendientes de revisión y las anuladas a esa
- * fecha (voidedAt o estado voided). Sin latest-wins por cara. Orden
+ * hasta la fecha; se excluyen las pendientes de revisión, las anuladas a esa
+ * fecha (voidedAt o estado voided) y las tratadas a esa fecha (resolvedAt). Sin latest-wins por cara. Orden
  * determinista por creación e identificador.
  */
 export function activeFindingsAsOf<T extends FindingRecord>(
@@ -548,6 +548,11 @@ export function activeFindingsAsOf<T extends FindingRecord>(
       }
       // voidedAt presente pero ilegible: exclusión conservadora del gráfico.
       if (hasVoidedAt && (voided === undefined || voided <= cutoff)) return false
+      // Tratado: estuvo vigente hasta que se realizó su tratamiento.
+      if (record.resolvedAt !== undefined && record.resolvedAt !== null) {
+        const resolved = timeOf(record.resolvedAt)
+        if (resolved === undefined || resolved <= cutoff) return false
+      }
       return true
     })
     .sort((a, b) => {

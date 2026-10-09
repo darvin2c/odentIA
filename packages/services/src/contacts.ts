@@ -1,4 +1,12 @@
-import { normalizeTags } from "@odentia/clinical"
+import {
+  FOREIGN_DOC_TYPES,
+  IDENTITY_DOC_TYPES,
+  identityDocumentError,
+  ISO_COUNTRY_RE,
+  normalizePhone,
+  normalizeTags,
+  SEX_CODES,
+} from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { patient, patientContact, patientRegistrationLink } from "@odentia/db/schema/clinical"
 import {
@@ -12,7 +20,7 @@ import {
 import { auditEvent } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, gt, ilike, inArray, isNotNull, lt, or, sql } from "drizzle-orm"
 import { opportunity } from "@odentia/db/schema/opportunities"
-import { notFound, ServiceError, validation } from "./errors.js"
+import { isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
 
 /** Aviso en vivo mínimo para refresco CRM: solo `{ orgId, kind, at }`, sin PII. */
 async function notifyCrm(tx: Db, orgId: string, kind: string): Promise<void> {
@@ -42,7 +50,15 @@ export interface ContactListItem {
   openOpportunityCount: number
 }
 
+/** Identidad documental de la persona; igual a la de su ficha si es paciente. */
+export const PERSON_DOC_TYPES = IDENTITY_DOC_TYPES
+export const PERSON_SEXES = SEX_CODES
+
 export interface ContactDetail extends ContactListItem {
+  docType: string | null
+  docNumber: string | null
+  birthDate: string | null
+  sex: string | null
   notes: string | null
   customFields: Record<string, unknown>
   createdAt: string
@@ -336,6 +352,10 @@ export async function getContact(tx: Db, orgId: string, id: string): Promise<Con
   return {
     contact: {
       ...toListItem(row, [...new Set(identities.map((i) => i.channel))]),
+      docType: row.docType,
+      docNumber: row.docNumber,
+      birthDate: row.birthDate,
+      sex: row.sex,
       notes: row.notes,
       customFields,
       createdAt: row.createdAt.toISOString(),
@@ -409,13 +429,17 @@ async function auditContact(
 }
 
 /** Teléfono declarado: se conserva tal cual, sin verificar ni generar identidades. */
+/** Teléfono en E.164 (ADR 0004): +código de país; un celular peruano de 9 dígitos se completa. */
 function cleanContactPhone(input: string | null | undefined): string | null | undefined {
   if (input === undefined) return undefined
   if (input === null) return null
   const value = input.trim()
   if (!value) return null
   if (value.length > 50) throw validation("El teléfono no puede superar 50 caracteres")
-  return value
+  const normalized = normalizePhone(value)
+  if (!normalized)
+    throw validation("Ingresa el teléfono con código de país (+51…) o un celular de 9 dígitos")
+  return normalized
 }
 
 function cleanContactEmail(input: string | null | undefined): string | null | undefined {
@@ -532,8 +556,17 @@ export async function updateContact(
   id: string,
   input: {
     displayName?: string
+    givenNames?: string | null
+    paternalSurname?: string | null
+    maternalSurname?: string | null
     phone?: string | null
     email?: string | null
+    docType?: string | null
+    docNumber?: string | null
+    docCountry?: string | null
+    /** Fecha calendario ISO (AAAA-MM-DD). */
+    birthDate?: string | null
+    sex?: string | null
     /** Archivar/reactivar: la ruta lo restringe a owner/admin. */
     isActive?: boolean
     notes?: string | null
@@ -553,6 +586,13 @@ export async function updateContact(
     patch.displayName = displayName
     changed.push("displayName")
   }
+  for (const key of ["givenNames", "paternalSurname", "maternalSurname"] as const) {
+    if (fields[key] === undefined) continue
+    const value = fields[key]?.trim().replace(/\s+/g, " ") || null
+    if (value && value.length > 100) throw validation("Cada parte del nombre admite hasta 100 caracteres")
+    patch[key] = value
+    if (!changed.includes("displayName")) changed.push("displayName")
+  }
   if (fields.phone !== undefined) {
     patch.phone = cleanContactPhone(fields.phone) ?? null
     changed.push("phone")
@@ -560,6 +600,63 @@ export async function updateContact(
   if (fields.email !== undefined) {
     patch.email = cleanContactEmail(fields.email) ?? null
     changed.push("email")
+  }
+  if (fields.docType !== undefined || fields.docNumber !== undefined) {
+    const docNumber = (fields.docNumber ?? "").trim() || null
+    const docType = (fields.docType ?? "").trim() || null
+    if (docType && !(PERSON_DOC_TYPES as readonly string[]).includes(docType))
+      throw validation("Tipo de documento inválido")
+    if (docNumber && !docType) throw validation("Indica el tipo de documento")
+    if (docNumber && docNumber.length > 20) throw validation("El documento admite hasta 20 caracteres")
+    // Mismo formato que la ficha: «DNI 123» se rechaza también desde Contactos.
+    const formatError = identityDocumentError(docType, docNumber)
+    if (formatError) throw validation(formatError)
+    const docCountry = fields.docCountry?.trim().toUpperCase() || null
+    if (docCountry && !ISO_COUNTRY_RE.test(docCountry))
+      throw validation("País emisor en código ISO de dos letras (p. ej. VE)")
+    if (docNumber && docType && FOREIGN_DOC_TYPES.includes(docType as never) && !docCountry)
+      throw validation("Indica el país que emitió el documento")
+    patch.docType = docNumber ? docType : null
+    patch.docNumber = docNumber
+    patch.docCountry = docNumber ? docCountry : null
+    changed.push("document")
+  }
+  if (fields.birthDate !== undefined) {
+    const birthDate = fields.birthDate?.trim() || null
+    if (birthDate && (!/^\d{4}-\d{2}-\d{2}$/.test(birthDate) || Number.isNaN(Date.parse(birthDate))))
+      throw validation("Fecha de nacimiento inválida")
+    if (birthDate && birthDate > new Date().toISOString().slice(0, 10))
+      throw validation("La fecha de nacimiento no puede ser futura")
+    patch.birthDate = birthDate
+    changed.push("birthDate")
+  }
+  if (fields.sex !== undefined) {
+    const sex = fields.sex?.trim() || null
+    if (sex && !(PERSON_SEXES as readonly string[]).includes(sex)) throw validation("Sexo inválido")
+    patch.sex = sex
+    changed.push("sex")
+  }
+  // La identidad de quien ya es paciente es la de su ficha clínica: la cambia
+  // el equipo, nunca el agente por su cuenta.
+  const IDENTITY_FIELDS = ["displayName", "phone", "email", "document", "birthDate", "sex"]
+  if (actor?.origin === "agent" && changed.some((field) => IDENTITY_FIELDS.includes(field))) {
+    const [own] = await tx
+      .select({ id: patientContact.id })
+      .from(patientContact)
+      .where(
+        and(
+          eq(patientContact.organizationId, orgId),
+          eq(patientContact.contactId, id),
+          eq(patientContact.relationship, "self"),
+        ),
+      )
+      .limit(1)
+    if (own)
+      throw new ServiceError(
+        "PATIENT_IDENTITY_PROTECTED",
+        409,
+        "Esta persona es paciente: su identidad solo la modifica el equipo de la clínica",
+      )
   }
   if (fields.notes !== undefined) {
     patch.notes = fields.notes
@@ -579,10 +676,21 @@ export async function updateContact(
   }
   if (isActive !== undefined) await applyContactActive(tx, orgId, id, isActive, actor)
   if (changed.length > 0) {
-    await tx
-      .update(contact)
-      .set(patch)
-      .where(and(eq(contact.id, id), eq(contact.organizationId, orgId)))
+    try {
+      await tx
+        .update(contact)
+        .set(patch)
+        .where(and(eq(contact.id, id), eq(contact.organizationId, orgId)))
+    } catch (error) {
+      // El documento identifica a una sola persona (y a una sola ficha).
+      if (isUniqueViolation(error))
+        throw new ServiceError(
+          "DUPLICATE_DOCUMENT",
+          409,
+          "Ya existe otra persona o paciente con ese documento",
+        )
+      throw error
+    }
     await auditContact(tx, orgId, actor, "contact.updated", id, {
       fields: changed,
       ...(actor?.origin ? { origin: actor.origin } : {}),

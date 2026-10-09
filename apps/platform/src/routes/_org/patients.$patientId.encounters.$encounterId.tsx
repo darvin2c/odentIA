@@ -14,9 +14,15 @@ import { ClipboardList } from "lucide-react"
 import { ControlesPanel, RecetasPanel } from "../../components/patient/clinical-panels"
 import { EncounterDetailView } from "../../components/patient/encounter-detail-view"
 import { EncounterEditor } from "../../components/patient/encounter-editor"
+import { EncounterHandoff } from "../../components/patient/encounter-handoff"
 import { apiFetch } from "../../lib/api"
 import { usePermission } from "../../lib/crm"
-import { type EncounterDetail, hcLabel, type PatientFull } from "../../lib/patients"
+import {
+  type EncounterDetail,
+  encounterStatusLabel,
+  hcLabel,
+  type PatientFull,
+} from "../../lib/patients"
 
 export const Route = createFileRoute("/_org/patients/$patientId/encounters/$encounterId")({
   component: EncounterPage,
@@ -79,18 +85,22 @@ function EncounterPage() {
     navigate({ to: "/patients/$patientId", params: { patientId }, search: { tab: "historia" } })
   const changed = () =>
     queryClient.invalidateQueries({ queryKey: ["encounter", patientId, encounterId] })
-  const finalized = async (hasCharges: boolean) => {
+  const finalized = async (_hasCharges: boolean) => {
+    // Al finalizar se permanece en la atención, ya de solo lectura: su bloque de
+    // cierre y relevo muestra qué recibe cada rol (cobro, control, seguimiento).
     await Promise.all(
-      ["encounter", "patient-summary", "timeline", "plan", "account"].map((key) =>
-        queryClient.invalidateQueries({ queryKey: [key, patientId] }),
-      ),
+      [
+        "encounter",
+        "patient-summary",
+        "timeline",
+        "plan-items",
+        "patient-account",
+        "follow-ups",
+        "prescriptions",
+        "consents",
+        "treatment-coordination",
+      ].map((key) => queryClient.invalidateQueries({ queryKey: [key, patientId] })),
     )
-    // Con cargos generados, el siguiente paso natural es la cuenta (cobrar).
-    await navigate({
-      to: "/patients/$patientId",
-      params: { patientId },
-      search: { tab: hasCharges ? "cuenta" : "historia" },
-    })
   }
 
   if (patientQuery.isLoading || encounterQuery.isLoading) {
@@ -124,7 +134,8 @@ function EncounterPage() {
   const detail = encounterQuery.data.data
   if (detail.encounter.status === "borrador" && canWrite) {
     return (
-      <PageShell>
+      <PageShell className="flex flex-col gap-4">
+        <EncounterBreadcrumb patientId={patientId} patientName={patient.patient.displayName} />
         <EncounterEditor
           key={encounterId}
           patientId={patientId}
@@ -141,10 +152,13 @@ function EncounterPage() {
     <PageShell className="flex flex-col gap-6">
       <EncounterBreadcrumb patientId={patientId} patientName={patient.patient.displayName} />
       <PageHeader
-        title={`Atención ${detail.encounter.status === "finalizada" ? "finalizada" : "en curso"}`}
+        title={`Atención ${encounterStatusLabel(detail.encounter.status).toLowerCase()}`}
         subtitle={`${patient.patient.displayName} · ${hcLabel(patient.patient.patientNumber)}`}
         actions={<Badge variant="outline">Solo lectura</Badge>}
       />
+      {detail.encounter.status === "finalizada" ? (
+        <EncounterHandoff patientId={patientId} detail={detail} />
+      ) : null}
       <EncounterDetailView patientId={patientId} detail={detail} />
       <RecetasPanel
         patientId={patientId}

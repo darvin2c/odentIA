@@ -21,6 +21,7 @@ import {
   savePatientRegistrationConfig,
   type RegistrationInput,
 } from "./patient-registration.js"
+import { listResponsibilities } from "./responsibilities.js"
 import { secretsKeyFromEnv } from "./secrets.js"
 import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
 import { sql } from "drizzle-orm"
@@ -200,8 +201,12 @@ it("QR adulto con penicilina y O+: ficha sin revisión, sin vínculo automático
   expect(created.isActive).toBe(true)
 
   const detail = await withOrgContext(appDb, "org_a", (tx) => getPatient(tx, "org_a", created.id))
-  // El teléfono coincidente no reclama ni crea vínculos CRM.
-  expect(detail.contacts).toEqual([])
+  // Todo paciente es una persona, pero el teléfono coincidente no reclama al
+  // contacto existente: su persona es nueva.
+  expect(detail.contacts).toEqual([
+    expect.objectContaining({ relationship: "self", displayName: "Paciente QR Penicilina" }),
+  ])
+  expect(detail.contacts[0]?.contactId).not.toBe(existing.id)
   expect(detail.registration).toMatchObject({ entryPoint: "qr", respondent: "patient", actor: null })
   expect(detail.registration?.answers.health).toMatchObject({
     bloodGroup: "O+",
@@ -262,6 +267,8 @@ it("menor con enlace contextual queda como guardian sin modificar el contacto", 
       relationship: "guardian",
       relationshipDetail: "Madre",
       phone: "+51977000100",
+      docType: "DNI",
+      docNumber: "41526374",
     },
     health: emptyClinical(),
     privacyAccepted: true,
@@ -270,15 +277,27 @@ it("menor con enlace contextual queda como guardian sin modificar el contacto", 
     registerPatient(tx, "org_a", { kind: "public", token, entryPoint: "public_link" }, { submissionId: randomUUID(), formVersion: linkVersion, answers }),
   )
   const detail = await withOrgContext(appDb, "org_a", (tx) => getPatient(tx, "org_a", created.id))
-  expect(detail.contacts).toEqual([
-    expect.objectContaining({ contactId: person.id, relationship: "guardian", isPreferred: true }),
-  ])
+  // La tutora conserva su vínculo y preferencia; el menor recibe su propia persona.
+  expect(detail.contacts).toHaveLength(2)
+  expect(detail.contacts).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ contactId: person.id, relationship: "guardian", isPreferred: true }),
+      expect.objectContaining({ relationship: "self", isPreferred: false }),
+    ]),
+  )
   expect(detail.registration).toMatchObject({
     entryPoint: "conversation",
     respondent: "representative",
     contextContactId: person.id,
     conversationId: threadId,
   })
+  // La tutora queda como representante legal vigente en la misma alta.
+  const responsibilities = await withOrgContext(appDb, "org_a", (tx) =>
+    listResponsibilities(tx, "org_a", created.id),
+  )
+  expect(responsibilities).toEqual([
+    expect.objectContaining({ contactId: person.id, kind: "representante_legal", isCurrent: true }),
+  ])
   // El contacto existente conserva sus datos: lo público no lo actualiza.
   const untouched = await withOrgContext(appDb, "org_a", (tx) => getContact(tx, "org_a", person.id))
   expect(untouched.contact.displayName).toBe("Madre Enlace")
@@ -568,7 +587,7 @@ it("conflictos públicos neutros; internos específicos; sin cruce de tenant", a
         {
           submissionId: randomUUID(),
           answers: {
-            demographics: { displayName: "Paciente Vínculo Foráneo" },
+            demographics: { displayName: "Paciente Vínculo Foráneo", birthDate: ADULT_BIRTH, phone: "+51977555001" },
             respondent: "staff",
             privacyAccepted: false,
           },
@@ -594,7 +613,7 @@ it("interno exige el contacto contextual en los vínculos y lo público rechaza 
         { kind: "internal", userId: ACTOR, contactId: person.id },
         {
           submissionId: randomUUID(),
-          answers: { demographics: { displayName: "Paciente Sin Vínculo" }, respondent: "staff", privacyAccepted: false },
+          answers: { demographics: { displayName: "Paciente Sin Vínculo", birthDate: ADULT_BIRTH, phone: "+51977555002" }, respondent: "staff", privacyAccepted: false },
         },
       ),
     ),
@@ -607,7 +626,7 @@ it("interno exige el contacto contextual en los vínculos y lo público rechaza 
       { kind: "internal", userId: ACTOR, contactId: person.id },
       {
         submissionId: randomUUID(),
-        answers: { demographics: { displayName: "Paciente Contextual" }, respondent: "staff", privacyAccepted: false },
+        answers: { demographics: { displayName: "Paciente Contextual", birthDate: ADULT_BIRTH, phone: "+51977555003" }, respondent: "staff", privacyAccepted: false },
         contacts: [{ contactId: person.id, relationship: "self", isPreferred: true }],
       },
     ),

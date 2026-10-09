@@ -13,6 +13,7 @@ import {
   listPatientDocuments,
   registerPatientDocument,
 } from "./clinical.js"
+import { makeSigner, readyToClose } from "./clinical-test-fixture.js"
 import { addEncounterProcedure, createEncounter, finalizeEncounter } from "./encounters.js"
 import { createPatient } from "./patients.js"
 import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
@@ -26,6 +27,8 @@ async function seedUser(): Promise<void> {
     sql`insert into "user" ("id", "name", "email") values (${ACTOR}, 'Tests', 'tests@example.com')
         on conflict ("id") do nothing`,
   )
+  await makeSigner("org_a", ACTOR)
+  await makeSigner("org_b", ACTOR)
 }
 
 async function seedPatient(org: string, name: string) {
@@ -92,6 +95,7 @@ async function seedClosedEncounter(
       encounterId: draft.id,
     }),
   )
+  await readyToClose(org, ACTOR, patientId, draft.id)
   const closed = await withOrgContext(appDb, org, (tx) =>
     finalizeEncounter(tx, org, ACTOR, patientId, draft.id),
   )
@@ -305,8 +309,11 @@ it("listEncounterDocuments e hidratación por lote siguen el contexto vigente", 
     await addEncounterProcedure(tx, "org_a", ACTOR, p.id, encounterA.id, {
       description: "Revisión clínica",
     })
-    await finalizeEncounter(tx, "org_a", ACTOR, p.id, encounterA.id)
   })
+  await readyToClose("org_a", ACTOR, p.id, encounterA.id)
+  await withOrgContext(appDb, "org_a", (tx) =>
+    finalizeEncounter(tx, "org_a", ACTOR, p.id, encounterA.id),
+  )
   const encounterB = await withOrgContext(appDb, "org_a", (tx) =>
     createEncounter(tx, "org_a", ACTOR, p.id, { reason: "B" }),
   )

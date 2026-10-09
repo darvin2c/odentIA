@@ -4,6 +4,7 @@
 
 - `panel`: acceso a la cuenta, registro/verificación, invitaciones, onboarding y perfil. Facilitar entrar en la organización correcta; no implementar reglas clínicas.
 - `platform`: operación del CRM por organización y entradas públicas (portal, widget, confirmación/baja). Conservar los vínculos entre caso, interlocutor, paciente y oportunidad; distinguir explícitamente superficies autenticadas y públicas.
+  En la ficha: códigos del dominio a pantalla solo vía `apps/platform/src/lib/glossary.ts` (o las etiquetas de su dominio), selectores con `ChoiceSelect`/`Select` de `@odentia/ui` (no `<select>` nativo) y un solo `h1` por página.
 - `api`: frontera HTTP, autenticación/autorización, validación, webhooks y SSE. Abre `withOrgContext` y delega negocio en services; no convertir errores de infraestructura en 404 de dominio.
 - `worker`: ingesta, envío, automatizaciones y agente. Ejecuta servicios con contexto de organización, idempotencia y política de autonomía; no crea una segunda implementación del negocio.
 
@@ -12,6 +13,8 @@
 - Consultar la skill `odentia-ux` y las reglas de `packages/ui-patterns` al cambiar pantallas. Las apps no importan `@tanstack/charts` directamente.
 - Estado remoto en React Query; `useOrgEvents` invalida consultas, no crea una copia paralela del estado. Respetar permisos canónicos también en navegación.
 - Las rutas hijas de `settings.tsx` y `services.tsx` no añaden otro `PageShell`: lo aporta su layout.
+- Ficha del paciente: cinco áreas (`lib/patient-areas.ts`) con entrada por rol; `?tab=` identifica la sección y el área se deriva. Una sección nueva se declara ahí con su permiso, no en la ruta.
+- Las subapps de Hono montadas en "/" acotan sus guardas a sus propias rutas: un `use("*")` alcanza a todas las subrutas registradas después.
 - Mantener borradores al cargar datos auxiliares. Al cambiar contacto/hilo, limpiar vínculos incompatibles; presupuestos según contacto/paciente efectivos, también al editar.
 - El sidebar debe reenviar el evento de clic al router para conservar navegación SPA y bloqueadores de borradores.
 - Utilidades globales de cabecera (avisos, panel del agente) las aporta `HeaderUtilitiesProvider` en `_org.tsx`; una pantalla sin `PageHeader` (ficha de paciente) las monta ella misma. El panel del agente se monta una sola vez en el layout, comparte la suscripción SSE del layout y se cierra cuando la navegación se confirma, no al clic, para respetar los bloqueadores de borradores.

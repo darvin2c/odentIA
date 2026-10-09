@@ -167,7 +167,9 @@ it("pacientes: POST 201 y GET 200", async () => {
     }
   }
   expect(detailBody.data.patient.displayName).toBe("María Pérez")
-  expect(detailBody.data.contacts).toEqual([])
+  expect(detailBody.data.contacts).toEqual([
+    expect.objectContaining({ relationship: "self", displayName: "María Pérez" }),
+  ])
   expect(detailBody.data.registration).toMatchObject({
     entryPoint: "platform",
     respondent: "staff",
@@ -186,15 +188,83 @@ it("cross-org: paciente de B responde 404 en A con rol legítimo; member 403", a
   expect(denied.status).toBe(403)
 })
 
+it("cada subruta del paciente exige solo el permiso de su dominio", async () => {
+  const get = (role: string, path: string) =>
+    buildApp(role).request(`/patients/${patientId}${path}`, { method: "GET" })
+  // Los guardas de caja no alcanzan a las subrutas clínicas ni de filiación.
+  expect((await get("reception", "/responsibilities")).status).toBe(200)
+  expect((await get("dentist", "/responsibilities")).status).toBe(200)
+  expect((await get("dentist", "/follow-ups")).status).toBe(200)
+  expect((await get("dentist", "/prescriptions")).status).toBe(200)
+  // Caja sigue cerrada para quien no cobra, y clínica para quien no atiende.
+  for (const role of ["reception", "dentist"]) {
+    expect((await get(role, "/account")).status).toBe(403)
+    expect((await get(role, "/budgets")).status).toBe(403)
+    const charge = await buildApp(role).request(`/patients/${patientId}/charges`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ description: "Cargo", amountCents: 1000, currency: "PEN" }),
+    })
+    expect(charge.status).toBe(403)
+  }
+  // Coordinación: quien agenda la consulta sin leer la ficha; caja no.
+  const coordination = await get("reception", "/coordination")
+  expect(coordination.status).toBe(200)
+  expect(Object.keys(((await coordination.json()) as { data: object }).data).sort()).toEqual([
+    "budgetsAwaitingDecision",
+    "followUps",
+    "treatments",
+  ])
+  expect((await get("dentist", "/coordination")).status).toBe(200)
+  expect((await get("cashier", "/coordination")).status).toBe(403)
+  // Cada lectura clínica atendida deja traza; la lee solo quien audita. Todos
+  // los roles de prueba comparten usuario: se compara el contador de la franja.
+  const readLog = async () => {
+    const log = await buildApp("admin").request(`/patients/${patientId}/access-log`, {
+      method: "GET",
+    })
+    expect(log.status).toBe(200)
+    return ((await log.json()) as { data: { resource: string; hits: number }[] }).data
+  }
+  const hitsOf = (entries: { resource: string; hits: number }[], resource: string) =>
+    entries.find((entry) => entry.resource === resource)?.hits ?? 0
+  // La ficha completa lleva antecedentes para quien atiende: deja traza; para
+  // recepción llega sin salud y no la deja.
+  const before = hitsOf(await readLog(), "antecedentes")
+  expect((await get("dentist", "")).status).toBe(200)
+  const afterDentist = hitsOf(await readLog(), "antecedentes")
+  expect(afterDentist).toBe(before + 1)
+  expect((await get("reception", "")).status).toBe(200)
+  const entries = await readLog()
+  expect(hitsOf(entries, "antecedentes")).toBe(afterDentist)
+  expect(entries.map((entry) => entry.resource).sort()).toEqual([
+    "antecedentes",
+    "controles",
+    "recetas",
+  ])
+  expect((await get("dentist", "/access-log")).status).toBe(403)
+  expect((await get("reception", "/access-log")).status).toBe(403)
+  expect((await get("cashier", "/account")).status).toBe(200)
+  expect((await get("cashier", "/follow-ups")).status).toBe(403)
+  expect((await get("reception", "/follow-ups")).status).toBe(403)
+})
+
 it("POST /:id/notes como admin responde 201; como member 403 FORBIDDEN", async () => {
   const admin = buildApp("admin")
   const member = buildApp("member")
   const res = await admin.request(`/patients/${patientId}/notes`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ note: "Se indica endodoncia", diagnosisCode: "K04.0" }),
+    body: JSON.stringify({ note: "Se indica endodoncia" }),
   })
   expect(res.status).toBe(201)
+  // El diagnóstico se registra en la atención, no en una nota suelta.
+  const coded = await admin.request(`/patients/${patientId}/notes`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ note: "Se indica endodoncia", diagnosisCode: "K04.0" }),
+  })
+  expect(coded.status).toBe(400)
   const denied = await member.request(`/patients/${patientId}/notes`, {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -243,6 +313,22 @@ it("salud PUT guarda el agregado; claves viejas de entrevista y endpoints retira
   const readBody = (await read.json()) as { data: { revision: number; allergies: unknown[] } }
   expect(readBody.data.revision).toBe(1)
   expect(readBody.data.allergies).toHaveLength(1)
+
+  // Recepción recibe solo la alerta de alergias; caja, nada clínico.
+  type Trimmed = {
+    data: { registration: unknown; activeAllergies: { substance: string }[]; activeConditions: unknown[] }
+  }
+  const asReception = await buildApp("reception").request(`/patients/${patientId}`, { method: "GET" })
+  const receptionBody = (await asReception.json()) as Trimmed
+  expect(receptionBody.data.activeAllergies.map((item) => item.substance)).toEqual(["Penicilina"])
+  expect(receptionBody.data.registration).toBeNull()
+  expect(receptionBody.data.activeConditions).toEqual([])
+  const receptionHealth = await buildApp("reception").request(`/patients/${patientId}/health`, {
+    method: "GET",
+  })
+  expect(receptionHealth.status).toBe(403)
+  const asCashier = await buildApp("cashier").request(`/patients/${patientId}`, { method: "GET" })
+  expect(((await asCashier.json()) as Trimmed).data.activeAllergies).toEqual([])
 
   // Motivo/examen/diagnóstico ya no pertenecen a la entrevista.
   const forbidden = await app.request(`/patients/${patientId}/health`, {
@@ -396,7 +482,7 @@ it("avatar privado: subida y URL firmada; rechaza tipo y tamaño inválidos", as
   ).toBe(400)
 })
 
-it("filiación PATCH edita el nombre del paciente sin tocar el contacto CRM", async () => {
+it("filiación PATCH edita el nombre del paciente y el de su propia persona", async () => {
   const app = buildApp("admin")
   const contact = await withOrgContext(appDb, "org_a", (tx) =>
     createContact(tx, "org_a", { displayName: "Contacto Original" }),
@@ -439,11 +525,11 @@ it("filiación PATCH edita el nombre del paciente sin tocar el contacto CRM", as
   }
   expect(detail.data.patient.displayName).toBe("Nombre Editado")
   expect(detail.data.patient.phone).toBe("+51999333444")
-  // El nombre del contacto CRM no se arrastra con la edición del paciente.
+  // Persona única: su propia persona comparte la identidad de la ficha.
   expect(detail.data.contacts).toEqual([
     expect.objectContaining({
       contactId: contact.id,
-      displayName: "Contacto Original",
+      displayName: "Nombre Editado",
       relationship: "self",
     }),
   ])
@@ -481,7 +567,14 @@ it("filiación PATCH valida DNI exacto y pasaporte libre", async () => {
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ docType: "PASAPORTE", docNumber: "AB123456" }),
   })
-  expect(passport.status).toBe(200)
+  // Un pasaporte exige el país que lo emitió (ISO 3166-1).
+  expect(passport.status).toBe(400)
+  const withCountry = await app.request(`/patients/${id}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ docType: "PASAPORTE", docNumber: "AB123456", docCountry: "VE" }),
+  })
+  expect(withCountry.status).toBe(200)
 })
 
 it("relaciones: vincular, preferente, duplicados y desvincular sin borrar personas", async () => {

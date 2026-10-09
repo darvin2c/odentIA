@@ -3,12 +3,16 @@ process.env.DOCKER_HOST ??= "unix:///mnt/wsl/podman-sockets/odentia.sock"
 import { createAppDb, createOwnerDb, type Db, withOrgContext } from "@odentia/db"
 import { branch } from "@odentia/db/schema/org"
 import { createChair, secretsKeyFromEnv, setProfessionalSchedule } from "@odentia/services"
+import { createHash } from "node:crypto"
+import { encodeDemoDicom } from "@odentia/clinical"
+import sharp from "sharp"
 import { sql } from "drizzle-orm"
 import { migrate } from "drizzle-orm/postgres-js/migrator"
 import type { Context } from "hono"
 import { Hono, type Next } from "hono"
 import { GenericContainer, type StartedTestContainer, Wait } from "testcontainers"
 import { afterAll, beforeAll, expect, it } from "vitest"
+import { createClinicalFormsRoute } from "./clinical-forms.js"
 import { createContactsRoute } from "./contacts.js"
 import type { CrmDeps } from "./helpers.js"
 import { createPatientsRoute } from "./patients.js"
@@ -20,6 +24,9 @@ let container: StartedTestContainer
 let ownerDb: Db
 let appDb: Db
 
+/** Bytes subidos por clave (para verificar la huella del PDF). */
+const storedBytes = new Map<string, Uint8Array>()
+
 /** Storage de prueba: firma claves sintéticas, nunca toca S3. */
 const storageStub = {
   putAvatar: async () => {
@@ -30,6 +37,11 @@ const storageStub = {
     throw new Error("no usado")
   },
   attachmentUrl: async (key: string) => `https://signed.example.com/${key}`,
+  getAttachment: async (key: string) => {
+    const bytes = storedBytes.get(key)
+    if (!bytes) throw new Error("No existe")
+    return bytes
+  },
   deleteAttachment: async () => {},
   putPatientDocument: async ({
     orgId,
@@ -43,12 +55,11 @@ const storageStub = {
     bytes: Uint8Array
     contentType: string
     ext: string
-  }) => ({
-    objectKey: `patients/${orgId}/${patientId}/docs/${crypto.randomUUID()}.${ext}`,
-    mimeType: contentType,
-    filename: `documento.${ext}`,
-    size: bytes.byteLength,
-  }),
+  }) => {
+    const objectKey = `patients/${orgId}/${patientId}/docs/${crypto.randomUUID()}.${ext}`
+    storedBytes.set(objectKey, bytes)
+    return { objectKey, mimeType: contentType, filename: `documento.${ext}`, size: bytes.byteLength }
+  },
   putPatientAvatar: async () => {
     throw new Error("no usado")
   },
@@ -75,6 +86,7 @@ function buildApp(role: string, orgId = "org_a"): Hono {
   app.use("*", stubOrg(role, orgId))
   app.route("/patients", createPatientsRoute(deps))
   app.route("/contacts", createContactsRoute(deps))
+  app.route("/clinical-forms", createClinicalFormsRoute(deps))
   return app
 }
 
@@ -142,7 +154,12 @@ async function createEncounter(patientId: string, reason: string): Promise<strin
 }
 
 async function finalizeEncounter(patientId: string, encounterId: string): Promise<void> {
-  // El cierre exige un acto registrado y la evolución clínica.
+  // El cierre exige diagnóstico CIE-10 con tipo y evolución (ADR 0003).
+  const dx = await post(app, `/patients/${patientId}/encounters/${encounterId}/diagnoses`, {
+    cie10Code: "K02.1",
+    diagnosisType: "definitivo",
+  })
+  expect(dx.status).toBe(201)
   const proc = await post(app, `/patients/${patientId}/encounters/${encounterId}/procedures`, {
     description: "Acto de cierre",
   })
@@ -235,6 +252,16 @@ beforeAll(async () => {
   )
   await ownerDb.execute(
     sql`insert into "user" ("id", "name", "email") values ('u-1', 'Doctora', 'doc@test.dev') on conflict do nothing`,
+  )
+  // La doctora de las pruebas es miembro con colegiatura: puede firmar cierres.
+  await ownerDb.execute(
+    sql`insert into "member" ("id", "organization_id", "user_id", "role", "created_at") values ('m-u1-a', 'org_a', 'u-1', 'dentist', now()) on conflict do nothing`,
+  )
+  await ownerDb.execute(
+    sql`insert into "professional_profile" ("organization_id", "user_id", "registration_number") values ('org_a', 'u-1', '12345') on conflict do nothing`,
+  )
+  await ownerDb.execute(
+    sql`insert into "cie10_code" ("code", "description") values ('K02.1', 'Caries de la dentina') on conflict do nothing`,
   )
   await ownerDb.execute(
     sql`insert into "service_catalog" ("id", "organization_id", "source", "code", "name", "specialty", "scope", "price_cents", "currency", "duration_min", "is_active") values
@@ -355,17 +382,21 @@ it("recetas: emisión con medicamentos, detalle y anulación con motivo", async 
     notes: "Solo si hay dolor",
     items: [
       {
-        medicationName: "Ibuprofeno 400 mg",
-        dose: "400 mg",
-        route: "Oral",
+        genericName: "ibuprofeno",
+        strength: "400 mg",
+        dosageForm: "tableta",
+        dose: "1 tableta",
+        route: "oral",
         frequency: "Cada 8 horas",
         duration: "3 días",
         quantity: 9,
       },
       {
-        medicationName: "Clorhexidina 0.12%",
-        dose: "15 ml",
-        route: "Enjuague",
+        genericName: "clorhexidina",
+        strength: "0,12 %",
+        dosageForm: "colutorio",
+        dose: "15 mL",
+        route: "bucal tópica",
         frequency: "Cada 12 horas",
         duration: "5 días",
       },
@@ -381,7 +412,33 @@ it("recetas: emisión con medicamentos, detalle y anulación con motivo", async 
   const body = await json<{ data: { items: Array<{ medicationName: string }> } }>(detail)
   expect(
     body.data.items.map((item) => item.medicationName).sort((a, b) => a.localeCompare(b, "es")),
-  ).toEqual(["Clorhexidina 0.12%", "Ibuprofeno 400 mg"])
+  ).toEqual(["clorhexidina 0,12 % colutorio", "ibuprofeno 400 mg tableta"])
+
+  // La hoja impresa lleva el prescriptor con su colegiatura y el paciente.
+  const print = await app.request(`/patients/${patientId}/prescriptions/${prescriptionId}/print`)
+  expect(print.status).toBe(200)
+  const sheet = await json<{
+    data: {
+      prescription: { prescriberRegistration: string | null }
+      patient: { patientNumber: number }
+    }
+  }>(print)
+  expect(sheet.data.prescription.prescriberRegistration).toMatch(/^COP /)
+  expect(sheet.data.patient.patientNumber).toBeGreaterThan(0)
+
+  // Sin DCI la receta no se emite.
+  const noDci = await post(app, `/patients/${patientId}/prescriptions`, {
+    items: [
+      {
+        medicationName: "Ibuprofeno",
+        dose: "1",
+        route: "oral",
+        frequency: "c/8h",
+        duration: "2 días",
+      },
+    ],
+  })
+  expect(noDci.status).toBe(400)
 
   // Sin medicamentos la receta no existe.
   const empty = await post(app, `/patients/${patientId}/prescriptions`, { items: [] })
@@ -749,12 +806,26 @@ it("recorrido: hallazgo de origen, sesiones y saldo del tratamiento; aislado por
       item: { odontogramEntryId: string | null }
       originEncounter: { id: string } | null
       originFinding: { id: string; condition: string } | null
-      balances: unknown[]
+      finance: { balances: unknown[] } | null
     }
   }>(journey)
   expect(body.data.item.odontogramEntryId).toBe(findingId)
   expect(body.data.originEncounter?.id).toBe(encounterId)
   expect(body.data.originFinding).toMatchObject({ id: findingId, condition: "caries" })
+  expect(body.data.finance?.balances).toEqual([])
+
+  // Odontología recorre el tratamiento sin caja: la ruta es clínica, pero
+  // cargos, pagos y saldos solo viajan con `finance.read`.
+  const clinicalOnly = await buildApp("dentist").request(
+    `/patients/${patientId}/treatments/${linkedItemId}/journey`,
+  )
+  expect(clinicalOnly.status).toBe(200)
+  const clinicalBody = await json<{ data: Record<string, unknown> }>(clinicalOnly)
+  expect(clinicalBody.data.finance).toBeNull()
+  expect(clinicalBody.data.originFinding).toMatchObject({ id: findingId })
+  for (const key of ["charges", "payments", "applications", "refunds", "balances"]) {
+    expect(clinicalBody.data).not.toHaveProperty(key)
+  }
 
   // El hallazgo de otro paciente no puede motivar la indicación.
   const foreignFinding = await post(app, `/patients/${patientId}/plan/items`, {
@@ -845,9 +916,11 @@ it("documentos: carga con vínculos clínicos y corrección versionada", async (
     planItemId: itemId,
     items: [
       {
-        medicationName: "Ibuprofeno",
-        dose: "400 mg",
-        route: "Oral",
+        genericName: "ibuprofeno",
+        strength: "400 mg",
+        dosageForm: "tableta",
+        dose: "1 tableta",
+        route: "oral",
         frequency: "Cada 8 horas",
         duration: "2 días",
       },
@@ -856,13 +929,45 @@ it("documentos: carga con vínculos clínicos y corrección versionada", async (
   const prescriptionId = (await json<{ data: { id: string } }>(prescription)).data.id
 
   const form = new FormData()
-  form.append("file", new Blob([new Uint8Array([1, 2, 3, 4])], { type: "image/png" }), "rx.png")
+  form.append("file", new Blob([new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, 0, 0])], { type: "image/png" }), "rx.png")
   form.append("label", "Radiografía de control")
   form.append("category", "radiografia")
   form.append("planItemId", itemId)
   form.append("followUpId", followUpId)
   form.append("prescriptionId", prescriptionId)
   form.append("toothNumbers", JSON.stringify([36]))
+  form.append("imageType", "periapical")
+  form.append("capturedAt", new Date(Date.now() - 3_600_000).toISOString())
+  form.append("source", "Sensor intraoral · sala 2")
+  // Un archivo cuyo contenido no coincide con su tipo declarado se rechaza.
+  const fake = new FormData()
+  fake.append("file", new Blob([new TextEncoder().encode("MZ ejecutable")], { type: "image/png" }), "rx.png")
+  fake.append("label", "Falsa")
+  fake.append("category", "radiografia")
+  const rejected = await app.request(`/patients/${patientId}/documents`, {
+    method: "POST",
+    body: fake,
+  })
+  expect(rejected.status).toBe(400)
+  // Un JPEG declarado como PNG tampoco pasa: decide el contenido.
+  const mismatch = new FormData()
+  mismatch.append("file", new Blob([new Uint8Array([255, 216, 255, 224, 0])], { type: "image/png" }), "rx.png")
+  mismatch.append("label", "Mal declarada")
+  mismatch.append("category", "radiografia")
+  expect(
+    (await app.request(`/patients/${patientId}/documents`, { method: "POST", body: mismatch }))
+      .status,
+  ).toBe(400)
+  // El subtipo debe corresponder a la categoría.
+  const wrongType = new FormData()
+  wrongType.append("file", new Blob([new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, 0, 0])], { type: "image/png" }), "f.png")
+  wrongType.append("label", "Foto")
+  wrongType.append("category", "foto_clinica")
+  wrongType.append("imageType", "periapical")
+  expect(
+    (await app.request(`/patients/${patientId}/documents`, { method: "POST", body: wrongType }))
+      .status,
+  ).toBe(400)
   const uploaded = await app.request(`/patients/${patientId}/documents`, {
     method: "POST",
     body: form,
@@ -894,12 +999,69 @@ it("documentos: carga con vínculos clínicos y corrección versionada", async (
     expectedVersion: 1,
   })
   expect(stale.status).toBe(409)
+
+  // Filtros del archivo: tipo y pieza.
+  const filtered = await json<{ data: Array<{ id: string; imageType: string; reportStatus: string }> }>(
+    await app.request(`/patients/${patientId}/documents?imageType=periapical&tooth=36`),
+  )
+  expect(filtered.data.map((d) => d.id)).toEqual([created.data.id])
+  expect(filtered.data[0]).toMatchObject({ imageType: "periapical", reportStatus: "pendiente" })
+  const otherTooth = await json<{ data: unknown[] }>(
+    await app.request(`/patients/${patientId}/documents?tooth=11`),
+  )
+  expect(otherTooth.data).toEqual([])
+  const reported = await app.request(
+    `/patients/${patientId}/documents/${created.data.id}/report`,
+    {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ reportStatus: "informado" }),
+    },
+  )
+  expect(reported.status).toBe(200)
+
+  // Retirar: sin motivo no; con motivo deja traza y sale del listado.
+  expect(
+    (await post(app, `/patients/${patientId}/documents/${created.data.id}/retire`, { reason: "" }))
+      .status,
+  ).toBe(400)
+  const retired = await post(app, `/patients/${patientId}/documents/${created.data.id}/retire`, {
+    reason: "Subida al paciente equivocado",
+  })
+  expect(retired.status).toBe(200)
+  expect(
+    (await json<{ data: { retiredAt: string | null; retireReason: string } }>(retired)).data,
+  ).toMatchObject({ retireReason: "Subida al paciente equivocado" })
+  const again = await post(app, `/patients/${patientId}/documents/${created.data.id}/retire`, {
+    reason: "Otra vez",
+  })
+  expect(again.status).toBe(409)
+  const visible = await json<{ data: Array<{ id: string }> }>(
+    await app.request(`/patients/${patientId}/documents`),
+  )
+  expect(visible.data.some((d) => d.id === created.data.id)).toBe(false)
+  const withRetired = await json<{ data: Array<{ id: string }> }>(
+    await app.request(`/patients/${patientId}/documents?includeRetired=true`),
+  )
+  expect(withRetired.data.some((d) => d.id === created.data.id)).toBe(true)
+  const audits = await ownerDb.execute(
+    sql`select action from audit_event where entity_id = ${created.data.id} order by created_at`,
+  )
+  expect(audits.map((r) => (r as { action: string }).action)).toContain("document.retired")
+  // La corrección de contexto ya no aplica a un retirado.
+  expect(
+    (
+      await post(app, `/patients/${patientId}/documents/${created.data.id}/context`, {
+        expectedVersion: 2,
+      })
+    ).status,
+  ).toBe(409)
   // La atención finalizada no admite cargas: el archivo se sube después y se vincula
   // con una revisión de contexto auditada.
   const { encounterId, patientId: owner } = await setupAcceptedItem()
   await finalizeEncounter(owner, encounterId)
   const closedForm = new FormData()
-  closedForm.append("file", new Blob([new Uint8Array([1])], { type: "image/png" }), "rx2.png")
+  closedForm.append("file", new Blob([new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, 0, 0])], { type: "image/png" }), "rx2.png")
   closedForm.append("label", "Radiografía cerrada")
   closedForm.append("category", "radiografia")
   closedForm.append("encounterId", encounterId)
@@ -909,4 +1071,230 @@ it("documentos: carga con vínculos clínicos y corrección versionada", async (
   })
   expect(afterClose.status).toBe(409)
   expect((await json<ErrorBody>(afterClose)).error.code).toBe("FINALIZED")
+})
+
+it("consentimiento estructurado: firma con profesional, PDF con huella, menor y anulación", async () => {
+  const sections = {
+    procedure: "Extracción de la pieza 38 con anestesia local.",
+    benefits: ["Eliminar el foco de infección"],
+    risks: ["Dolor e inflamación", "Alveolitis"],
+    alternatives: ["Control periódico"],
+    consequences: "Infecciones repetidas y daño a la pieza vecina.",
+  }
+  const draft = await post(app, "/clinical-forms/consent-templates", {
+    title: "Exodoncia",
+    sections,
+  })
+  expect(draft.status).toBe(201)
+  const draftId = (await json<{ data: { id: string } }>(draft)).data.id
+  const published = await post(app, `/clinical-forms/consent-templates/${draftId}/publish`)
+  expect((await json<{ data: { version: number; status: string } }>(published)).data).toMatchObject({
+    version: 1,
+    status: "publicado",
+  })
+  // Secciones incompletas: el contrato las rechaza.
+  expect(
+    (
+      await post(app, "/clinical-forms/consent-templates", {
+        title: "Incompleto",
+        sections: { ...sections, risks: [] },
+      })
+    ).status,
+  ).toBe(400)
+
+  // Menor de edad con representante legal vigente.
+  const childId = await createPatient()
+  await ownerDb.execute(sql`update patient set birth_date = '2017-04-04' where id = ${childId}`)
+  const guardianId = await linkContact(childId)
+  await ownerDb.execute(sql`update contact set doc_type = 'DNI', doc_number = '44556677' where id = ${guardianId}`)
+  await post(app, `/patients/${childId}/responsibilities`, {
+    contactId: guardianId,
+    kind: "representante_legal",
+    startsAt: new Date().toISOString().slice(0, 10),
+  })
+  const create = async () => {
+    const res = await post(app, "/clinical-forms/consents", {
+      templateId: draftId,
+      patientId: childId,
+      procedureRef: "Exodoncia pieza 85",
+    })
+    expect(res.status).toBe(201)
+    return (await json<{ data: { id: string } }>(res)).data.id
+  }
+  const strokes = { strokes: [[[10, 10], [500, 500], [900, 100]]] }
+  const consentId = await create()
+  // «Otra persona» no existe: sin persona vinculada no hay firma.
+  const withoutSigner = await post(app, `/clinical-forms/consents/${consentId}/sign`, {
+    signerKind: "representante",
+    signatureData: strokes,
+    professionalSignature: strokes,
+    comprehensionConfirmed: true,
+  })
+  expect(withoutSigner.status).toBe(400)
+  const child = await json<{ data: { contacts: Array<{ contactId: string; relationship: string }> } }>(
+    await app.request(`/patients/${childId}`),
+  )
+  const selfId = child.data.contacts.find((c) => c.relationship === "self")!.contactId
+  const minorSelf = await post(app, `/clinical-forms/consents/${consentId}/sign`, {
+    signerKind: "paciente",
+    signerContactId: selfId,
+    signatureData: strokes,
+    professionalSignature: strokes,
+    comprehensionConfirmed: true,
+  })
+  expect(minorSelf.status).toBe(400)
+  const signed = await post(app, `/clinical-forms/consents/${consentId}/sign`, {
+    signerKind: "representante",
+    signerContactId: guardianId,
+    representativeRelation: "Madre",
+    signatureData: strokes,
+    professionalSignature: strokes,
+    comprehensionConfirmed: true,
+  })
+  expect(signed.status).toBe(200)
+  const signedBody = await json<{
+    data: { status: string; pdfDocumentId: string | null; pdfSha256: string | null; informerRegistration: string }
+  }>(signed)
+  expect(signedBody.data).toMatchObject({ status: "firmado", informerRegistration: "COP 12345" })
+  expect(signedBody.data.pdfDocumentId).toBeTruthy()
+  // La huella corresponde a los bytes guardados y el PDF es un documento del paciente.
+  const docs = await json<{ data: Array<{ id: string; storageKey: string; category: string }> }>(
+    await app.request(`/patients/${childId}/documents`),
+  )
+  const pdfDoc = docs.data.find((d) => d.id === signedBody.data.pdfDocumentId)!
+  expect(pdfDoc.category).toBe("consentimiento")
+  const bytes = storedBytes.get(pdfDoc.storageKey)!
+  expect(new TextDecoder().decode(bytes.slice(0, 5))).toBe("%PDF-")
+  expect(createHash("sha256").update(bytes).digest("hex")).toBe(signedBody.data.pdfSha256)
+  // Una segunda generación no reemplaza el PDF.
+  const again = await post(app, `/clinical-forms/consents/${consentId}/pdf`)
+  expect((await json<{ data: { pdfSha256: string } }>(again)).data.pdfSha256).toBe(
+    signedBody.data.pdfSha256,
+  )
+  const print = await json<{ data: { patient: { minor: boolean }; document: { id: string } } }>(
+    await app.request(`/clinical-forms/consents/${consentId}/print`),
+  )
+  expect(print.data.patient.minor).toBe(true)
+
+  // Pendiente anulado con motivo; firmado se revoca, no se anula.
+  const pending = await create()
+  expect((await post(app, `/clinical-forms/consents/${pending}/cancel`, { reason: "" })).status).toBe(400)
+  expect(
+    (await post(app, `/clinical-forms/consents/${pending}/cancel`, { reason: "Duplicado" })).status,
+  ).toBe(200)
+  expect(
+    (await post(app, `/clinical-forms/consents/${consentId}/cancel`, { reason: "x" })).status,
+  ).toBe(409)
+  // Revocar exige quién revoca y su firma.
+  expect(
+    (await post(app, `/clinical-forms/consents/${consentId}/revoke`, { reason: "Cambio" })).status,
+  ).toBe(400)
+  const revoked = await post(app, `/clinical-forms/consents/${consentId}/revoke`, {
+    reason: "Prefiere esperar",
+    revokerContactId: guardianId,
+    signatureData: strokes,
+  })
+  expect(revoked.status).toBe(200)
+  expect((await json<{ data: { status: string; revokerName: string } }>(revoked)).data.status).toBe(
+    "revocado",
+  )
+})
+
+it("formularios: finalizar con un obligatorio vacío responde 400 nombrando el campo", async () => {
+  const draft = await post(app, "/clinical-forms/form-templates", {
+    title: "Evaluación rápida",
+    schema: {
+      sections: [
+        {
+          id: "examen",
+          title: "Examen",
+          fields: [
+            { id: "hallazgos", label: "Hallazgos", type: "texto_largo", required: true },
+            { id: "pieza", label: "Pieza", type: "pieza" },
+          ],
+        },
+      ],
+    },
+  })
+  expect(draft.status).toBe(201)
+  const draftId = (await json<{ data: { id: string } }>(draft)).data.id
+  const published = await post(app, `/clinical-forms/form-templates/${draftId}/publish`)
+  expect((await json<{ data: { version: number } }>(published)).data.version).toBe(1)
+  const patientId = await createPatient()
+  const created = await post(app, "/clinical-forms/form-responses", {
+    templateId: draftId,
+    patientId,
+    answers: { pieza: 36 },
+  })
+  expect(created.status).toBe(201)
+  const responseId = (await json<{ data: { id: string; templateTitle: string } }>(created)).data.id
+  const finalized = await post(app, `/clinical-forms/form-responses/${responseId}/finalize`)
+  expect(finalized.status).toBe(400)
+  expect((await json<ErrorBody>(finalized)).error.message).toContain("Hallazgos")
+  const discarded = await post(app, `/clinical-forms/form-responses/${responseId}/discard`, {
+    reason: "Paciente equivocado",
+  })
+  expect(discarded.status).toBe(200)
+})
+
+it("imágenes: la subida genera miniatura WebP y la URL la sirve con ?variant=thumb", async () => {
+  const patientId = await createPatient()
+  const png = await sharp({
+    create: { width: 1200, height: 800, channels: 3, background: "#777" },
+  })
+    .png()
+    .toBuffer()
+  const form = new FormData()
+  form.append("file", new Blob([new Uint8Array(png)], { type: "image/png" }), "rx.png")
+  form.append("label", "Panorámica")
+  form.append("category", "radiografia")
+  form.append("imageType", "panoramica")
+  const uploaded = await app.request(`/patients/${patientId}/documents`, { method: "POST", body: form })
+  expect(uploaded.status).toBe(201)
+  const doc = (await json<{ data: { id: string; storageKey: string; thumbnailKey: string | null } }>(uploaded)).data
+  expect(doc.thumbnailKey).toMatch(/\.webp$/)
+  const thumbBytes = storedBytes.get(doc.thumbnailKey!)!
+  const meta = await sharp(thumbBytes).metadata()
+  expect(meta).toMatchObject({ format: "webp", width: 320, height: 213 })
+  const thumbUrl = await json<{ data: { url: string; thumbnail: boolean } }>(
+    await app.request(`/patients/${patientId}/documents/${doc.id}/url?variant=thumb`),
+  )
+  expect(thumbUrl.data).toMatchObject({ thumbnail: true })
+  expect(thumbUrl.data.url).toContain(doc.thumbnailKey!)
+  const original = await json<{ data: { url: string; thumbnail: boolean } }>(
+    await app.request(`/patients/${patientId}/documents/${doc.id}/url`),
+  )
+  expect(original.data.url).toContain(doc.storageKey)
+})
+
+it("DICOM: se sube como archivo, la API sirve su contenido y rechaza otros formatos", async () => {
+  const patientId = await createPatient()
+  const pixels = new Uint16Array(16 * 8).fill(1000)
+  const dicom = encodeDemoDicom({ width: 16, height: 8, pixels })
+  const form = new FormData()
+  // Los navegadores suelen enviar el DICOM sin tipo: decide el contenido.
+  form.append("file", new Blob([dicom]), "periapical.dcm")
+  form.append("label", "Periapical del sensor")
+  form.append("category", "radiografia")
+  form.append("imageType", "periapical")
+  const uploaded = await app.request(`/patients/${patientId}/documents`, { method: "POST", body: form })
+  expect(uploaded.status).toBe(201)
+  const doc = (await json<{ data: { id: string; contentType: string; thumbnailKey: string | null } }>(uploaded)).data
+  expect(doc).toMatchObject({ contentType: "application/dicom", thumbnailKey: null })
+  const content = await app.request(`/patients/${patientId}/documents/${doc.id}/content`)
+  expect(content.status).toBe(200)
+  expect(content.headers.get("content-type")).toBe("application/dicom")
+  expect(new Uint8Array(await content.arrayBuffer())).toEqual(dicom)
+
+  const png = new FormData()
+  png.append("file", new Blob([new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, 0])], { type: "image/png" }), "a.png")
+  png.append("label", "Foto")
+  png.append("category", "otro")
+  const pngDoc = (await json<{ data: { id: string } }>(
+    await app.request(`/patients/${patientId}/documents`, { method: "POST", body: png }),
+  )).data
+  expect((await app.request(`/patients/${patientId}/documents/${pngDoc.id}/content`)).status).toBe(400)
+  expect(
+    (await app.request(`/patients/${patientId}/documents/${crypto.randomUUID()}/content`)).status,
+  ).toBe(404)
 })

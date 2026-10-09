@@ -1,11 +1,8 @@
 import {
   Badge,
   Button,
-  Checkbox,
   Field,
-  FieldError,
   FieldLabel,
-  Input,
   Select,
   SelectContent,
   SelectItem,
@@ -14,31 +11,71 @@ import {
   Textarea,
   toast,
 } from "@odentia/ui"
-import { EmptyState, ErrorState, FormDrawer, PageHeader } from "@odentia/ui-patterns"
+import {
+  ConfirmDialog,
+  EmptyState,
+  ErrorState,
+  FormDrawer,
+  LoadingState,
+} from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { useEffect, useMemo, useRef, useState } from "react"
-import { ApiError } from "../../lib/api"
+import { useEffect, useId, useMemo, useRef, useState } from "react"
+import { ApiError, apiFetch } from "../../lib/api"
 import {
   addFormAddendum,
   createFormResponse,
+  discardFormResponse,
+  FORM_RESPONSE_STATUS_LABELS,
+  type FormResponse,
+  type FormTemplate,
   fetchFormAddenda,
   fetchFormResponses,
   fetchFormTemplates,
   fetchSpecialties,
   finalizeFormResponse,
   updateFormResponse,
-  type FormFieldDef,
-  type FormResponse,
-  type FormSchemaDef,
-  type FormTemplate,
 } from "../../lib/clinical-forms"
-import { useOrgMembers, usePermission } from "../../lib/crm"
-import { FirmaPad, FirmaView } from "./firma-pad"
+import { useMemberName, useOrgMembers, usePermission } from "../../lib/crm"
+import type { PatientDocument } from "../../lib/patients"
+import { imageTypeLabel } from "./document-labels"
+import {
+  AnswerInput,
+  type AttachmentOption,
+  answersForServer,
+  isFieldVisible,
+  missingRequired,
+} from "./form-fields"
+
+const errorMessage = (e: unknown) =>
+  e instanceof ApiError
+    ? (e.shape.message ?? "No se pudo completar la acción")
+    : "No se pudo completar la acción"
+
+const when = (value: string | null | undefined) =>
+  value ? new Date(value).toLocaleDateString("es-PE", { dateStyle: "medium" }) : "—"
+
+function statusOf(response: FormResponse): {
+  label: string
+  tone: "default" | "secondary" | "outline"
+} {
+  if (response.status === "borrador" && response.submittedAt)
+    return { label: "Declarado por el paciente", tone: "secondary" }
+  return {
+    label: FORM_RESPONSE_STATUS_LABELS[response.status],
+    tone:
+      response.status === "finalizado"
+        ? "default"
+        : response.status === "descartado"
+          ? "outline"
+          : "secondary",
+  }
+}
 
 /**
- * Formularios clínicos del paciente: captura por plantilla publicada con
- * profesional responsable, estados borrador/finalizado y adendas.
- * Publicar una versión nueva no altera estas capturas (guardan snapshot).
+ * Formularios clínicos del paciente: lista con fecha, atención y profesional y
+ * el detalle al lado. El borrador se guarda solo; «Finalizar» guarda, valida
+ * lo obligatorio y confirma (después, solo adendas). Un borrador se descarta
+ * con motivo. Lo enviado desde el portal llega como «declarado» y se revisa.
  */
 export function FormulariosTab({
   patientId,
@@ -50,11 +87,12 @@ export function FormulariosTab({
   const queryClient = useQueryClient()
   const canRead = usePermission("clinical.read")
   const canWrite = usePermission("clinical.write")
-  const [templateId, setTemplateId] = useState("")
+  const ids = useId()
   const [specialtyId, setSpecialtyId] = useState("")
+  const [statusFilter, setStatusFilter] = useState("")
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [drawerOpen, setDrawerOpen] = useState(false)
-  const submitRef = useRef<() => void>(() => {})
+  const memberName = useMemberName()
 
   const templatesQuery = useQuery({
     queryKey: ["form-templates-published"],
@@ -71,37 +109,60 @@ export function FormulariosTab({
     queryFn: () => fetchFormResponses({ patientId }),
     enabled: canRead,
   })
-
-  const templates = useMemo(() => {
-    const all = templatesQuery.data?.data ?? []
-    return specialtyId ? all.filter((t) => t.specialtyId === specialtyId) : all
-  }, [templatesQuery.data, specialtyId])
-  const responses = responsesQuery.data?.data ?? []
-  const selected = responses.find((r) => r.id === selectedId) ?? null
-  const invalidate = () => {
-    void queryClient.invalidateQueries({ queryKey: ["form-responses", patientId] })
+  const templates = useMemo(() => templatesQuery.data?.data ?? [], [templatesQuery.data])
+  const templateById = useMemo(() => new Map(templates.map((t) => [t.id, t])), [templates])
+  const responses = useMemo(() => {
+    const all = responsesQuery.data?.data ?? []
+    return all.filter((r) => {
+      if (statusFilter === "declarado") return r.status === "borrador" && r.submittedAt
+      if (statusFilter && r.status !== statusFilter) return false
+      if (specialtyId) {
+        const t = templateById.get(r.templateId)
+        if (!t || t.specialtyId !== specialtyId) return false
+      }
+      return true
+    })
+  }, [responsesQuery.data, statusFilter, specialtyId, templateById])
+  const selected = (responsesQuery.data?.data ?? []).find((r) => r.id === selectedId) ?? null
+  const invalidate = async () => {
+    await queryClient.invalidateQueries({ queryKey: ["form-responses", patientId] })
   }
 
   return (
-    <div className="flex flex-col gap-4">
-      <PageHeader
-        title="Formularios clínicos"
-        subtitle="Captura estructurada por especialidad, con validación y cierre."
-        actions={
-          canWrite && templates.length > 0 ? (
-            <Button type="button" onClick={() => setDrawerOpen(true)}>
-              Nuevo formulario
-            </Button>
-          ) : undefined
-        }
-      />
+    <section aria-labelledby={`${ids}-title`} className="flex flex-col gap-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <h2 id={`${ids}-title`} className="text-base font-semibold">
+            Formularios clínicos
+          </h2>
+          <p className="text-sm text-muted-foreground">
+            Evaluaciones estructuradas por especialidad y cuestionarios del paciente.
+          </p>
+        </div>
+        {canWrite ? (
+          <Button
+            type="button"
+            disabled={templates.length === 0}
+            onClick={() => setDrawerOpen(true)}
+          >
+            Nuevo formulario
+          </Button>
+        ) : null}
+      </div>
       <div className="flex flex-wrap gap-2">
-        <Select value={specialtyId || "todas"} onValueChange={(v: string | null) => setSpecialtyId(v === "todas" ? "" : (v ?? ""))}>
-          <SelectTrigger className="w-56" aria-label="Filtrar por especialidad">
+        <Select
+          items={Object.fromEntries([
+            ["", "Todas las especialidades"],
+            ...(specialtiesQuery.data?.data ?? []).map((s) => [s.id, s.name]),
+          ])}
+          value={specialtyId}
+          onValueChange={(v) => setSpecialtyId(v ?? "")}
+        >
+          <SelectTrigger className="w-56" aria-label="Especialidad">
             <SelectValue placeholder="Todas las especialidades" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="todas">Todas las especialidades</SelectItem>
+            <SelectItem value="">Todas las especialidades</SelectItem>
             {(specialtiesQuery.data?.data ?? []).map((s) => (
               <SelectItem key={s.id} value={s.id}>
                 {s.name}
@@ -109,193 +170,210 @@ export function FormulariosTab({
             ))}
           </SelectContent>
         </Select>
+        <Select
+          items={{
+            "": "Todos los estados",
+            borrador: "Borrador",
+            declarado: "Declarado por el paciente",
+            finalizado: "Finalizado",
+            descartado: "Descartado",
+          }}
+          value={statusFilter}
+          onValueChange={(v) => setStatusFilter(v ?? "")}
+        >
+          <SelectTrigger className="w-56" aria-label="Estado">
+            <SelectValue placeholder="Todos los estados" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="">Todos los estados</SelectItem>
+            <SelectItem value="borrador">Borrador</SelectItem>
+            <SelectItem value="declarado">Declarado por el paciente</SelectItem>
+            <SelectItem value="finalizado">Finalizado</SelectItem>
+            <SelectItem value="descartado">Descartado</SelectItem>
+          </SelectContent>
+        </Select>
       </div>
-      {responsesQuery.isLoading ? (
-        <p className="text-sm text-muted-foreground">Cargando…</p>
+      {responsesQuery.isPending ? (
+        <LoadingState message="Cargando formularios…" />
       ) : responsesQuery.isError ? (
-        <ErrorState message="No se pudieron cargar los formularios" onRetry={() => void responsesQuery.refetch()} />
+        <ErrorState
+          message="No se pudieron cargar los formularios"
+          onRetry={() => void responsesQuery.refetch()}
+        />
       ) : responses.length === 0 ? (
         <EmptyState
-          title="Sin formularios capturados"
+          title="Sin formularios"
           description={
             templates.length === 0
-              ? "Aún no hay plantillas publicadas para esta especialidad."
-              : "Inicia el primero con el botón Nuevo formulario."
+              ? "No hay plantillas publicadas. Se diseñan en Configuración → Formularios y consentimientos."
+              : (responsesQuery.data?.data ?? []).length > 0
+                ? "Ningún formulario coincide con los filtros."
+                : "Inicia el primero con «Nuevo formulario»."
           }
         />
       ) : (
-        <ul className="flex flex-col gap-2">
-          {responses.map((response) => (
-            <li key={response.id} className="rounded-md border p-3">
-              <button
-                type="button"
-                className="flex w-full flex-wrap items-center justify-between gap-2 text-left"
-                onClick={() => setSelectedId(response.id)}
-              >
-                <span className="text-sm font-medium">{templateTitle(templates, response)}</span>
-                <span className="flex items-center gap-2">
-                  <Badge variant={response.status === "finalizado" ? "default" : "secondary"}>
-                    {response.status} · v{response.templateVersion}
-                  </Badge>
-                </span>
-              </button>
-              {selected?.id === response.id ? (
-                <ResponseDetail response={selected} canWrite={canWrite} onChanged={invalidate} />
-              ) : null}
-            </li>
-          ))}
-        </ul>
+        <div className="grid min-w-0 gap-4 lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]">
+          <ul aria-label="Formularios del paciente" className="flex flex-col gap-2">
+            {responses.map((response) => {
+              const status = statusOf(response)
+              const active = response.id === selectedId
+              return (
+                <li key={response.id}>
+                  <button
+                    type="button"
+                    aria-current={active ? "true" : undefined}
+                    className={`flex w-full flex-col gap-1 rounded-md border p-3 text-left transition-colors hover:border-primary ${active ? "border-primary bg-primary/5" : ""}`}
+                    onClick={() => setSelectedId(response.id)}
+                  >
+                    <span className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="text-sm font-medium">
+                        {response.templateTitle ??
+                          templateById.get(response.templateId)?.title ??
+                          "Formulario"}{" "}
+                        <span className="text-muted-foreground">
+                          · versión {response.templateVersion}
+                        </span>
+                      </span>
+                      <Badge variant={status.tone}>{status.label}</Badge>
+                    </span>
+                    <span className="text-xs text-muted-foreground">
+                      {response.source === "portal"
+                        ? "Respondido desde el portal"
+                        : response.professionalUserId
+                          ? memberName(response.professionalUserId)
+                          : "Sin profesional asignado"}
+                      {response.encounterId ? " · en atención" : ""} · actualizado{" "}
+                      {when(response.updatedAt)}
+                    </span>
+                  </button>
+                </li>
+              )
+            })}
+          </ul>
+          <div className="min-w-0">
+            {selected ? (
+              <ResponseDetail
+                key={selected.id}
+                response={selected}
+                canWrite={canWrite}
+                onChanged={invalidate}
+              />
+            ) : (
+              <p className="rounded-md border border-dashed p-6 text-center text-sm text-muted-foreground">
+                Elige un formulario para ver o continuar su captura.
+              </p>
+            )}
+          </div>
+        </div>
       )}
-      <FormDrawer
+      <NewResponseDrawer
         open={drawerOpen}
         onClose={() => setDrawerOpen(false)}
-        title="Nuevo formulario"
-        onSubmit={() => submitRef.current()}
-        submitLabel="Crear borrador"
-      >
-        <div className="flex flex-col gap-4">
-          <Field>
-            <FieldLabel>Plantilla publicada</FieldLabel>
-            <Select value={templateId} onValueChange={(v: string | null) => setTemplateId(v ?? "")}>
-              <SelectTrigger aria-label="Plantilla">
-                <SelectValue placeholder="Elige una plantilla" />
-              </SelectTrigger>
-              <SelectContent>
-                {templates.map((t) => (
-                  <SelectItem key={t.id} value={t.id}>
-                    {t.title} (v{t.version})
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </Field>
-          {templateId ? (
-            <NewResponseForm
-              patientId={patientId}
-              encounterId={encounterId}
-              template={templates.find((t) => t.id === templateId)!}
-              registerSubmit={(fn) => {
-                submitRef.current = fn
-              }}
-              onDone={(id) => {
-                setDrawerOpen(false)
-                setTemplateId("")
-                setSelectedId(id)
-                invalidate()
-              }}
-            />
-          ) : null}
-        </div>
-      </FormDrawer>
-    </div>
+        templates={templates.filter((t) => t.respondent !== "portal")}
+        patientId={patientId}
+        encounterId={encounterId}
+        onCreated={async (id) => {
+          setDrawerOpen(false)
+          setSelectedId(id)
+          await invalidate()
+        }}
+      />
+    </section>
   )
 }
 
-function templateTitle(templates: FormTemplate[], response: FormResponse): string {
-  const found = templates.find((t) => t.id === response.templateId)
-  return found ? found.title : `Formulario v${response.templateVersion}`
-}
-
-function snapshotOf(response: FormResponse): FormSchemaDef {
-  return response.templateSnapshot
-}
-
-function ResponseDetail({
-  response,
-  canWrite,
-  onChanged,
+function NewResponseDrawer({
+  open,
+  onClose,
+  templates,
+  patientId,
+  encounterId,
+  onCreated,
 }: {
-  response: FormResponse
-  canWrite: boolean
-  onChanged: () => void
+  open: boolean
+  onClose: () => void
+  templates: FormTemplate[]
+  patientId: string
+  encounterId?: string
+  onCreated: (id: string) => Promise<void>
 }) {
-  const queryClient = useQueryClient()
-  const [answers, setAnswers] = useState<Record<string, unknown>>({ ...response.answers })
-  const [professionalUserId, setProfessionalUserId] = useState<string>(
-    response.professionalUserId ?? "",
-  )
-  const [addendum, setAddendum] = useState("")
+  const ids = useId()
   const members = useOrgMembers()
-  const schema = snapshotOf(response)
-  const fields = useMemo(() => schema.sections.flatMap((s) => s.fields), [schema])
-
-
-  const addendaQuery = useQuery({
-    queryKey: ["form-addenda", response.id],
-    queryFn: () => fetchFormAddenda(response.id),
-    enabled: response.status === "finalizado",
-  })
-
-  const fail = (e: unknown) =>
-    toast.error(e instanceof ApiError ? (e.shape.message ?? "Falló la operación") : "Falló la operación")
-
-  const saveMutation = useMutation({
+  const [templateId, setTemplateId] = useState("")
+  const [professionalUserId, setProfessionalUserId] = useState("")
+  const [error, setError] = useState<string | null>(null)
+  const create = useMutation({
     mutationFn: () =>
-      updateFormResponse(response.id, {
-        answers,
-        professionalUserId: professionalUserId ? professionalUserId : null,
+      createFormResponse({
+        templateId,
+        patientId,
+        encounterId: encounterId ?? null,
+        professionalUserId: professionalUserId || null,
+        answers: {},
       }),
-    onSuccess: () => {
-      onChanged()
-      toast.success("Borrador guardado")
+    onSuccess: async (result) => {
+      setTemplateId("")
+      await onCreated(result.data.id)
     },
-    onError: fail,
+    onError: (e) => setError(errorMessage(e)),
   })
-
-  const finalizeMutation = useMutation({
-    mutationFn: () => finalizeFormResponse(response.id),
-    onSuccess: () => {
-      onChanged()
-      void queryClient.invalidateQueries({ queryKey: ["form-addenda", response.id] })
-      toast.success("Formulario finalizado")
-    },
-    onError: fail,
-  })
-
-  const addendumMutation = useMutation({
-    mutationFn: () => addFormAddendum(response.id, addendum),
-    onSuccess: () => {
-      setAddendum("")
-      void queryClient.invalidateQueries({ queryKey: ["form-addenda", response.id] })
-      toast.success("Adenda registrada")
-    },
-    onError: fail,
-  })
-
-  const readOnly = response.status === "finalizado" || !canWrite
-
   return (
-    <div className="mt-3 flex flex-col gap-4 border-t pt-3">
-      {schema.sections.map((section) => (
-        <section key={section.id}>
-          <h4 className="text-sm font-semibold">{section.title}</h4>
-          <div className="mt-2 grid gap-3">
-            {section.fields.map((field) => (
-              <AnswerInput
-                key={field.id}
-                field={field}
-                value={answers[field.id]}
-                disabled={readOnly}
-                onChange={(value) => setAnswers((prev) => ({ ...prev, [field.id]: value }))}
-              />
-            ))}
-          </div>
-        </section>
-      ))}
-      {readOnly ? (
-        <ProfessionalLine userId={response.professionalUserId} members={members} />
-      ) : (
+    <FormDrawer
+      open={open}
+      onClose={() => {
+        setError(null)
+        onClose()
+      }}
+      title="Nuevo formulario"
+      description="Solo se ofrece la versión vigente de cada plantilla. La captura se guarda sola mientras la completas."
+      onSubmit={(event) => {
+        event.preventDefault()
+        if (!templateId) {
+          setError("Elige el formulario")
+          return
+        }
+        setError(null)
+        create.mutate()
+      }}
+      isSubmitting={create.isPending}
+      error={error}
+      submitLabel="Empezar"
+    >
+      <div className="flex flex-col gap-4">
         <Field>
-          <FieldLabel>Profesional responsable</FieldLabel>
+          <FieldLabel htmlFor={`${ids}-template`}>Formulario</FieldLabel>
           <Select
-            value={professionalUserId || "ninguno"}
-            onValueChange={(v: string | null) => setProfessionalUserId(v === "ninguno" ? "" : (v ?? ""))}
+            items={Object.fromEntries(templates.map((t) => [t.id, t.title]))}
+            value={templateId}
+            onValueChange={(v) => setTemplateId(v ?? "")}
           >
-            <SelectTrigger aria-label="Profesional responsable">
+            <SelectTrigger id={`${ids}-template`} aria-required="true">
+              <SelectValue placeholder="Elige el formulario" />
+            </SelectTrigger>
+            <SelectContent>
+              {templates.map((t) => (
+                <SelectItem key={t.id} value={t.id}>
+                  {t.title}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </Field>
+        <Field>
+          <FieldLabel htmlFor={`${ids}-pro`}>Profesional responsable</FieldLabel>
+          <Select
+            items={Object.fromEntries([
+              ["", "Sin asignar"],
+              ...members.map((m) => [m.userId, m.user.name]),
+            ])}
+            value={professionalUserId}
+            onValueChange={(v) => setProfessionalUserId(v ?? "")}
+          >
+            <SelectTrigger id={`${ids}-pro`}>
               <SelectValue placeholder="Sin asignar" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="ninguno">Sin asignar</SelectItem>
+              <SelectItem value="">Sin asignar</SelectItem>
               {members.map((m) => (
                 <SelectItem key={m.userId} value={m.userId}>
                   {m.user.name}
@@ -304,317 +382,299 @@ function ResponseDetail({
             </SelectContent>
           </Select>
         </Field>
-      )}
-      {!readOnly ? (
-        <div className="flex flex-wrap gap-2">
-          <Button type="button" variant="outline" disabled={saveMutation.isPending} onClick={() => saveMutation.mutate()}>
-            Guardar borrador
+      </div>
+    </FormDrawer>
+  )
+}
+
+type SaveState = "guardado" | "pendiente" | "guardando" | "error"
+
+function ResponseDetail({
+  response,
+  canWrite,
+  onChanged,
+}: {
+  response: FormResponse
+  canWrite: boolean
+  onChanged: () => Promise<void>
+}) {
+  const ids = useId()
+  const queryClient = useQueryClient()
+  const memberName = useMemberName()
+  const schema = response.templateSnapshot
+  const editable = response.status === "borrador" && canWrite
+  const [answers, setAnswers] = useState<Record<string, unknown>>({ ...response.answers })
+  const [saveState, setSaveState] = useState<SaveState>("guardado")
+  const [saveError, setSaveError] = useState<string | null>(null)
+  const [finalizeOpen, setFinalizeOpen] = useState(false)
+  const [missing, setMissing] = useState<string[]>([])
+  const [discardOpen, setDiscardOpen] = useState(false)
+  const [discardReason, setDiscardReason] = useState("")
+  const [addendum, setAddendum] = useState("")
+  const dirty = useRef(false)
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const documentsQuery = useQuery({
+    queryKey: ["patient-documents", response.patientId, "activos"],
+    queryFn: () =>
+      apiFetch<{ data: PatientDocument[] }>(`/api/patients/${response.patientId}/documents`),
+    enabled: editable && schema.sections.some((s) => s.fields.some((f) => f.type === "adjunto")),
+  })
+  const attachments: AttachmentOption[] = (documentsQuery.data?.data ?? []).map((d) => ({
+    id: d.id,
+    label: `${d.label} · ${imageTypeLabel(d.imageType) ?? d.category}`,
+  }))
+
+  const save = async (): Promise<boolean> => {
+    if (timer.current) clearTimeout(timer.current)
+    if (!dirty.current) return true
+    setSaveState("guardando")
+    try {
+      await updateFormResponse(response.id, { answers: answersForServer(schema, answers) })
+      dirty.current = false
+      setSaveState("guardado")
+      setSaveError(null)
+      return true
+    } catch (e) {
+      setSaveState("error")
+      setSaveError(errorMessage(e))
+      return false
+    }
+  }
+  // Guardado automático 1,2 s después del último cambio.
+  useEffect(() => {
+    if (!dirty.current || !editable) return
+    if (timer.current) clearTimeout(timer.current)
+    timer.current = setTimeout(() => void save(), 1200)
+    return () => {
+      if (timer.current) clearTimeout(timer.current)
+    }
+    // biome-ignore lint/correctness/useExhaustiveDependencies: guarda al cambiar respuestas
+  }, [answers])
+  // Al cambiar de formulario o salir, se guarda lo pendiente.
+  useEffect(
+    () => () => {
+      if (dirty.current)
+        void updateFormResponse(response.id, {
+          answers: answersForServer(schema, answersRef.current),
+        })
+    },
+    // biome-ignore lint/correctness/useExhaustiveDependencies: solo al desmontar
+    [],
+  )
+  const answersRef = useRef(answers)
+  answersRef.current = answers
+
+  const finalize = useMutation({
+    mutationFn: () => finalizeFormResponse(response.id),
+    onSuccess: async () => {
+      setFinalizeOpen(false)
+      toast.success("Formulario finalizado")
+      await onChanged()
+    },
+    onError: (e) => {
+      setFinalizeOpen(false)
+      setSaveError(errorMessage(e))
+    },
+  })
+  const discard = useMutation({
+    mutationFn: () => discardFormResponse(response.id, discardReason.trim()),
+    onSuccess: async () => {
+      setDiscardOpen(false)
+      toast.success("Borrador descartado")
+      await onChanged()
+    },
+    onError: (e) => setSaveError(errorMessage(e)),
+  })
+  const addendaQuery = useQuery({
+    queryKey: ["form-addenda", response.id],
+    queryFn: () => fetchFormAddenda(response.id),
+    enabled: response.status === "finalizado",
+  })
+  const addAddendum = useMutation({
+    mutationFn: () => addFormAddendum(response.id, addendum.trim()),
+    onSuccess: async () => {
+      setAddendum("")
+      await queryClient.invalidateQueries({ queryKey: ["form-addenda", response.id] })
+      toast.success("Adenda registrada")
+    },
+    onError: (e) => setSaveError(errorMessage(e)),
+  })
+  const status = statusOf(response)
+
+  return (
+    <article aria-labelledby={`${ids}-title`} className="flex flex-col gap-4 rounded-md border p-4">
+      <header className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <h3 id={`${ids}-title`} className="text-base font-semibold">
+            {response.templateTitle ?? "Formulario"} · versión {response.templateVersion}
+          </h3>
+          <p className="text-xs text-muted-foreground">
+            {response.source === "portal"
+              ? `Respondido por el paciente desde el portal${response.submittedAt ? ` el ${when(response.submittedAt)}` : " (en curso)"}`
+              : response.professionalUserId
+                ? memberName(response.professionalUserId)
+                : "Sin profesional asignado"}
+            {response.finalizedAt ? ` · finalizado ${when(response.finalizedAt)}` : ""}
+          </p>
+        </div>
+        <span className="flex items-center gap-2">
+          <Badge variant={status.tone}>{status.label}</Badge>
+          {editable ? (
+            <span aria-live="polite" className="text-xs text-muted-foreground">
+              {saveState === "guardando"
+                ? "Guardando…"
+                : saveState === "pendiente"
+                  ? "Cambios sin guardar"
+                  : saveState === "error"
+                    ? "No se guardó"
+                    : "Guardado"}
+            </span>
+          ) : null}
+        </span>
+      </header>
+      {response.source === "portal" && response.status === "borrador" && response.submittedAt ? (
+        <p role="status" className="rounded-md bg-muted p-3 text-sm">
+          Respuestas declaradas por el paciente. Revísalas con él en la consulta y finaliza para
+          incorporarlas a la historia.
+        </p>
+      ) : null}
+      {response.status === "descartado" ? (
+        <p className="rounded-md bg-muted p-3 text-sm">
+          Descartado {when(response.discardedAt)} · {response.discardReason}
+        </p>
+      ) : null}
+      {schema.sections.map((section) => (
+        <section key={section.id} className="flex flex-col gap-3">
+          <h4 className="text-sm font-semibold">{section.title}</h4>
+          {section.fields
+            .filter((field) => isFieldVisible(field, answers))
+            .map((field) => (
+              <AnswerInput
+                key={field.id}
+                field={field}
+                value={answers[field.id]}
+                disabled={!editable}
+                attachments={attachments}
+                onChange={(value) => {
+                  dirty.current = true
+                  setSaveState("pendiente")
+                  setAnswers((prev) => ({ ...prev, [field.id]: value }))
+                }}
+              />
+            ))}
+        </section>
+      ))}
+      {saveError ? (
+        <p role="alert" className="text-sm text-destructive">
+          {saveError}
+        </p>
+      ) : null}
+      {editable ? (
+        <div className="flex flex-wrap justify-between gap-2 border-t pt-3">
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={() => {
+              setDiscardReason("")
+              setDiscardOpen(true)
+            }}
+          >
+            Descartar borrador…
           </Button>
-          <Button type="button" disabled={finalizeMutation.isPending} onClick={() => finalizeMutation.mutate()}>
-            Finalizar
+          <Button
+            type="button"
+            onClick={async () => {
+              const pending = missingRequired(schema, answers)
+              setMissing(pending.map((f) => f.label))
+              if (pending.length > 0) {
+                setSaveError(
+                  `Completa antes de finalizar: ${pending.map((f) => f.label).join(", ")}`,
+                )
+                return
+              }
+              if (await save()) setFinalizeOpen(true)
+            }}
+          >
+            Finalizar…
           </Button>
         </div>
       ) : null}
       {response.status === "finalizado" ? (
-        <div className="flex flex-col gap-2">
+        <section aria-label="Adendas" className="flex flex-col gap-2 border-t pt-3">
           <h4 className="text-sm font-semibold">Adendas</h4>
-          {(addendaQuery.data?.data ?? []).map((item) => (
-            <p key={item.id} className="rounded-md border p-2 text-sm">
-              {item.text}
-            </p>
-          ))}
-          {(addendaQuery.data?.data ?? []).length === 0 && !addendaQuery.isLoading ? (
+          {(addendaQuery.data?.data ?? []).length === 0 && !addendaQuery.isPending ? (
             <p className="text-sm text-muted-foreground">Sin adendas.</p>
           ) : null}
+          {(addendaQuery.data?.data ?? []).map((item) => (
+            <div key={item.id} className="rounded-md border p-2 text-sm">
+              <p className="text-xs text-muted-foreground">
+                {item.createdBy ? memberName(item.createdBy) : "—"} ·{" "}
+                {new Date(item.createdAt).toLocaleString("es-PE", {
+                  dateStyle: "medium",
+                  timeStyle: "short",
+                })}
+              </p>
+              <p className="whitespace-pre-wrap">{item.text}</p>
+            </div>
+          ))}
           {canWrite ? (
-            <div className="flex flex-col gap-2">
+            <Field>
+              <FieldLabel htmlFor={`${ids}-addendum`}>Nueva adenda</FieldLabel>
               <Textarea
+                id={`${ids}-addendum`}
                 value={addendum}
                 onChange={(event) => setAddendum(event.target.value)}
                 rows={2}
                 maxLength={5000}
-                placeholder="Corrección o alcance posterior (no modifica lo finalizado)"
-                aria-label="Nueva adenda"
+                placeholder="Corrección o alcance posterior; no modifica lo finalizado"
               />
               <Button
                 type="button"
                 size="sm"
                 variant="outline"
-                disabled={!addendum.trim() || addendumMutation.isPending}
-                onClick={() => addendumMutation.mutate()}
+                className="self-start"
+                disabled={!addendum.trim() || addAddendum.isPending}
+                onClick={() => addAddendum.mutate()}
               >
                 Agregar adenda
               </Button>
-            </div>
+            </Field>
           ) : null}
-        </div>
-      ) : null}
-      {fields.length === 0 ? <p className="text-sm text-muted-foreground">Sin campos.</p> : null}
-    </div>
-  )
-}
-
-function ProfessionalLine({
-  userId,
-  members,
-}: {
-  userId: string | null
-  members: Array<{ userId: string; user: { name: string } }>
-}) {
-  if (!userId) return <p className="text-sm text-muted-foreground">Sin profesional asignado.</p>
-  const found = members.find((m) => m.userId === userId)
-  return (
-    <p className="text-sm text-muted-foreground">
-      Profesional: {found ? found.user.name : userId}
-    </p>
-  )
-}
-
-function NewResponseForm({
-  patientId,
-  encounterId,
-  template,
-  registerSubmit,
-  onDone,
-}: {
-  patientId: string
-  encounterId?: string
-  template: FormTemplate
-  registerSubmit: (fn: () => void) => void
-  onDone: (id: string) => void
-}) {
-  const members = useOrgMembers()
-  const [answers, setAnswers] = useState<Record<string, unknown>>({})
-  const [professionalUserId, setProfessionalUserId] = useState("")
-  const [error, setError] = useState<string | null>(null)
-  const createMutation = useMutation({
-    mutationFn: () =>
-      createFormResponse({
-        templateId: template.id,
-        patientId,
-        encounterId: encounterId ?? null,
-        professionalUserId: professionalUserId ? professionalUserId : null,
-        answers,
-      }),
-    onSuccess: (result) => {
-      toast.success("Formulario creado como borrador")
-      onDone(result.data.id)
-    },
-    onError: (e: unknown) => {
-      setError(e instanceof ApiError ? (e.shape.message ?? "Falló la operación") : "Falló la operación")
-    },
-  })
-
-  useEffect(() => {
-    registerSubmit(() => {
-      setError(null)
-      createMutation.mutate()
-    })
-  })
-
-  return (
-    <div className="flex flex-col gap-4">
-      {template.schema.sections.map((section) => (
-        <section key={section.id}>
-          <h4 className="text-sm font-semibold">{section.title}</h4>
-          <div className="mt-2 grid gap-3">
-            {section.fields.map((field) => (
-              <AnswerInput
-                key={field.id}
-                field={field}
-                value={answers[field.id]}
-                onChange={(value) => setAnswers((prev) => ({ ...prev, [field.id]: value }))}
-              />
-            ))}
-          </div>
         </section>
-      ))}
-      <Field>
-        <FieldLabel>Profesional responsable</FieldLabel>
-        <Select
-          value={professionalUserId || "ninguno"}
-          onValueChange={(v: string | null) => setProfessionalUserId(v === "ninguno" ? "" : (v ?? ""))}
-        >
-          <SelectTrigger aria-label="Profesional responsable">
-            <SelectValue placeholder="Sin asignar" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="ninguno">Sin asignar</SelectItem>
-            {members.map((m) => (
-              <SelectItem key={m.userId} value={m.userId}>
-                {m.user.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </Field>
-      {error ? <FieldError>{error}</FieldError> : null}
-      {createMutation.isPending ? (
-        <p className="text-sm text-muted-foreground">Creando…</p>
       ) : null}
-    </div>
-  )
-}
-
-function isStrokes(raw: unknown): raw is number[][][] {
-  return (
-    Array.isArray(raw) &&
-    raw.every(
-      (stroke: unknown) =>
-        Array.isArray(stroke) &&
-        stroke.every(
-          (point: unknown) =>
-            Array.isArray(point) && point.every((n: unknown) => typeof n === "number"),
-        ),
-    )
-  )
-}
-
-export function AnswerInput({
-  field,
-  value,
-  disabled = false,
-  onChange,
-}: {
-  field: FormFieldDef
-  value: unknown
-  disabled?: boolean
-  onChange: (value: unknown) => void
-}): React.JSX.Element {
-  const label = `${field.label}${field.required ? " *" : ""}${field.unit ? ` (${field.unit})` : ""}`
-  switch (field.type) {
-    case "texto":
-      return (
+      <ConfirmDialog
+        open={finalizeOpen}
+        variant="default"
+        title="Finalizar formulario"
+        description="Quedará inmutable en la historia clínica. Las correcciones posteriores se hacen con adendas."
+        confirmLabel="Finalizar"
+        pending={finalize.isPending}
+        confirmDisabled={missing.length > 0}
+        onClose={() => setFinalizeOpen(false)}
+        onConfirm={() => finalize.mutate()}
+      />
+      <ConfirmDialog
+        open={discardOpen}
+        title="Descartar borrador"
+        description="No cuenta como registro clínico y ya no se podrá editar. Queda la traza con el motivo."
+        confirmLabel="Descartar"
+        pending={discard.isPending}
+        confirmDisabled={!discardReason.trim()}
+        onClose={() => setDiscardOpen(false)}
+        onConfirm={() => discard.mutate()}
+      >
         <Field>
-          <FieldLabel>{label}</FieldLabel>
-          <Input
-            value={typeof value === "string" ? value : ""}
-            maxLength={500}
-            disabled={disabled}
-            onChange={(event) => onChange(event.target.value)}
-          />
-          {field.help ? <p className="text-xs text-muted-foreground">{field.help}</p> : null}
-        </Field>
-      )
-    case "texto_largo":
-      return (
-        <Field>
-          <FieldLabel>{label}</FieldLabel>
+          <FieldLabel htmlFor={`${ids}-discard`}>Motivo</FieldLabel>
           <Textarea
-            value={typeof value === "string" ? value : ""}
-            rows={3}
-            maxLength={5000}
-            disabled={disabled}
-            onChange={(event) => onChange(event.target.value)}
-          />
-          {field.help ? <p className="text-xs text-muted-foreground">{field.help}</p> : null}
-        </Field>
-      )
-    case "numero":
-      return (
-        <Field>
-          <FieldLabel>{label}</FieldLabel>
-          <Input
-            type="number"
-            value={typeof value === "number" ? value : ""}
-            min={field.min ?? undefined}
-            max={field.max ?? undefined}
-            disabled={disabled}
-            onChange={(event) =>
-              onChange(event.target.value === "" ? null : Number(event.target.value))
-            }
+            id={`${ids}-discard`}
+            aria-required="true"
+            value={discardReason}
+            maxLength={2000}
+            onChange={(event) => setDiscardReason(event.target.value)}
           />
         </Field>
-      )
-    case "booleano":
-      return (
-        <label className="flex items-center gap-2 text-sm">
-          <Checkbox
-            checked={value === true}
-            disabled={disabled}
-            onCheckedChange={(checked) => onChange(checked === true)}
-          />
-          {label}
-        </label>
-      )
-    case "opcion_unica":
-      return (
-        <Field>
-          <FieldLabel>{label}</FieldLabel>
-          <Select
-            value={typeof value === "string" ? value : ""}
-            onValueChange={onChange}
-            disabled={disabled}
-          >
-            <SelectTrigger aria-label={field.label}>
-              <SelectValue placeholder="Elige una opción" />
-            </SelectTrigger>
-            <SelectContent>
-              {(field.options ?? []).map((option) => (
-                <SelectItem key={option} value={option}>
-                  {option}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </Field>
-      )
-    case "opcion_multiple": {
-      const selected = Array.isArray(value) ? (value as string[]) : []
-      return (
-        <fieldset>
-          <legend className="text-sm font-medium">{label}</legend>
-          <div className="mt-1 flex flex-col gap-1">
-            {(field.options ?? []).map((option) => (
-              <label key={option} className="flex items-center gap-2 text-sm">
-                <Checkbox
-                  checked={selected.includes(option)}
-                  disabled={disabled}
-                  onCheckedChange={(checked) =>
-                    onChange(
-                      checked === true
-                        ? [...selected, option]
-                        : selected.filter((v) => v !== option),
-                    )
-                  }
-                />
-                {option}
-              </label>
-            ))}
-          </div>
-        </fieldset>
-      )
-    }
-    case "fecha":
-      return (
-        <Field>
-          <FieldLabel>{label}</FieldLabel>
-          <Input
-            type="date"
-            value={typeof value === "string" ? value : ""}
-            disabled={disabled}
-            onChange={(event) => onChange(event.target.value || null)}
-          />
-        </Field>
-      )
-    case "firma": {
-      const rawStrokes: unknown =
-        value && typeof value === "object" && "strokes" in value ? value.strokes : undefined
-      const strokes: number[][][] = isStrokes(rawStrokes) ? rawStrokes : []
-      return (
-        <div>
-          <p className="text-sm font-medium">{label}</p>
-          {disabled ? (
-            strokes.length > 0 ? (
-              <FirmaView strokes={strokes} />
-            ) : (
-              <p className="text-sm text-muted-foreground">Sin firma registrada.</p>
-            )
-          ) : (
-            <FirmaPad onChange={(next) => onChange({ strokes: next })} />
-          )}
-        </div>
-      )
-    }
-  }
+      </ConfirmDialog>
+    </article>
+  )
 }

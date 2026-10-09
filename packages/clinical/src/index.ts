@@ -7,6 +7,12 @@ export * from "./catalog.js"
 export * from "./findings.js"
 export { MAX_TAG_LENGTH, MAX_TAGS, normalizeTags } from "./tags.js"
 export * from "./treatment-templates.js"
+export * from "./vitals.js"
+export * from "./medications.js"
+export * from "./identity.js"
+export * from "./documents.js"
+export * from "./dicom-demo.js"
+export * from "./consent.js"
 export * from "./patient-registration.js"
 export type {
   FindingColorKind,

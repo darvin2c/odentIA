@@ -6,10 +6,13 @@
  * Cada sección enlaza con la superficie donde se actúa; nada se edita aquí que
  * no corresponda a este tratamiento.
  */
+
+import { label } from "../../lib/glossary"
 import { surfacesForTooth } from "@odentia/clinical"
 import { Badge, Button, Field, FieldLabel, Textarea } from "@odentia/ui"
 import { EmptyState, FormDrawer } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { useNavigate } from "@tanstack/react-router"
 import { useId, useState } from "react"
 import { apiFetch } from "../../lib/api"
 import { budgetStatusLabel, planDecisionLabel } from "../../lib/budgets"
@@ -38,9 +41,11 @@ import type {
 } from "../../lib/patients"
 import { planStatusLabel } from "../../lib/patients"
 import { formatMoney, type ServiceCatalogItem } from "../../lib/services"
+import { ChoiceSelect } from "../ui/choice-select"
 import { Cie10Search } from "./cie10-search"
 import { ControlesPanel, RecetasPanel } from "./clinical-panels"
 import { DocumentOpenButton } from "./document-open-button"
+import { PlanPhases } from "./plan-fases"
 import { ServicePicker } from "./service-picker"
 
 const MAX_TEXT = 2000
@@ -93,6 +98,12 @@ export function RecorridoClinicoTab({
   onTabChange: (tab: RecorridoTarget, target?: RecorridoNavigation) => void
 }): React.JSX.Element {
   const uid = useId()
+  const navigate = useNavigate()
+  const goToEncounter = (encounterId: string) =>
+    void navigate({
+      to: "/patients/$patientId/encounters/$encounterId",
+      params: { patientId, encounterId },
+    })
   const canWrite = usePermission("clinical.write")
   const canRead = usePermission("clinical.read")
   const queryClient = useQueryClient()
@@ -267,7 +278,9 @@ export function RecorridoClinicoTab({
     )
   }
 
-  const balances = journey ? journeyBalances(journey) : []
+  // Caja del tratamiento: el servidor solo la entrega con `finance.read`.
+  const finance = journey?.finance ?? null
+  const balances = finance ? journeyBalances(finance) : []
   const activeFindings = (odontogramQuery.data?.data.history ?? []).filter(
     (entry: OdontogramEntry) =>
       !entry.voidedAt && item?.toothNumber != null && entry.toothNumber === item.toothNumber,
@@ -306,9 +319,7 @@ export function RecorridoClinicoTab({
   const runPrimaryAction = async () => {
     if (!item) return
     setError(null)
-    const openEncounter = (encounterId: string) => {
-      window.location.href = `/patients/${patientId}/encounters/${encounterId}`
-    }
+    const openEncounter = goToEncounter
     if (nextAction === "iniciar") {
       setStartingSession(true)
       try {
@@ -373,27 +384,16 @@ export function RecorridoClinicoTab({
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex flex-col gap-3 elevated rounded-xl border bg-card p-6">
-        <Field>
-          <FieldLabel htmlFor={`${uid}-item`}>Tratamiento</FieldLabel>
-          <select
-            id={`${uid}-item`}
-            className="h-9 w-full rounded-md border bg-background px-3 text-sm"
-            value={selectedId}
-            onChange={(event) => {
-              setError(null)
-              onChangeItem(event.target.value)
-            }}
-          >
-            {ordered.map((candidate) => (
-              <option key={candidate.id} value={candidate.id}>
-                {candidate.title} · {siteLabel(candidate)} · {planStatusLabel(candidate.status)} ·{" "}
-                {planDecisionLabel(candidate.decisionStatus)}
-              </option>
-            ))}
-          </select>
-        </Field>
-      </div>
+      <PlanPhases
+        patientId={patientId}
+        items={items}
+        journeys={summary?.treatmentJourneys ?? []}
+        selectedId={selectedId}
+        onSelect={(itemId) => {
+          setError(null)
+          onChangeItem(itemId)
+        }}
+      />
 
       {journey == null ? (
         <p className="text-sm text-muted-foreground">Cargando el recorrido del tratamiento…</p>
@@ -656,9 +656,7 @@ export function RecorridoClinicoTab({
                       type="button"
                       size="sm"
                       variant="outline"
-                      onClick={() =>
-                        (window.location.href = `/patients/${patientId}/encounters/${encounter.id}`)
-                      }
+                      onClick={() => goToEncounter(encounter.id)}
                     >
                       Abrir la atención
                     </Button>
@@ -673,9 +671,7 @@ export function RecorridoClinicoTab({
                     type="button"
                     size="sm"
                     variant="outline"
-                    onClick={() =>
-                      (window.location.href = `/patients/${patientId}/encounters/${openEncounterId}`)
-                    }
+                    onClick={() => goToEncounter(openEncounterId)}
                   >
                     Continuar en la atención abierta
                   </Button>
@@ -775,7 +771,7 @@ export function RecorridoClinicoTab({
                 {journey.documents.map((document) => (
                   <li key={document.id} className="flex flex-wrap items-center gap-2 text-sm">
                     <span>
-                      {document.label} · {document.category}
+                      {document.label} · {label("documento", document.category)}
                       {document.toothNumbers.length > 0
                         ? ` · piezas ${document.toothNumbers.join(", ")}`
                         : ""}
@@ -804,7 +800,12 @@ export function RecorridoClinicoTab({
 
           <div className="flex flex-col gap-3 elevated rounded-xl border bg-card p-6">
             <div className="font-heading text-base font-medium">5. Qué se pagó</div>
-            {balances.length === 0 ? (
+            {finance === null ? (
+              <p className="text-sm text-muted-foreground">
+                Los cobros de este tratamiento los gestiona caja: tu permiso no incluye cargos,
+                pagos ni saldos.
+              </p>
+            ) : balances.length === 0 ? (
               <p className="text-sm text-muted-foreground">
                 Este tratamiento no tiene cargos: aceptar la propuesta no genera cargos.
               </p>
@@ -826,9 +827,9 @@ export function RecorridoClinicoTab({
                 ))}
               </dl>
             )}
-            {journey.charges.length > 0 ? (
+            {finance && finance.charges.length > 0 ? (
               <ul className="flex flex-col gap-1 text-sm">
-                {journey.charges.map((charge) => (
+                {finance.charges.map((charge) => (
                   <li key={charge.id}>
                     {charge.description} · {formatMoney(charge.amountCents, charge.currency)}
                     {charge.voidedAt ? " · anulado" : ""}
@@ -836,10 +837,10 @@ export function RecorridoClinicoTab({
                 ))}
               </ul>
             ) : null}
-            {journey.payments.length > 0 ? (
+            {finance && finance.payments.length > 0 ? (
               <ul className="flex flex-col gap-1 text-sm">
-                {journey.payments.map((payment) => {
-                  const applied = journey.applications
+                {finance.payments.map((payment) => {
+                  const applied = finance.applications
                     .filter(
                       (application) =>
                         application.paymentId === payment.id && !application.voidedAt,
@@ -855,16 +856,18 @@ export function RecorridoClinicoTab({
                 })}
               </ul>
             ) : null}
-            <div>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={() => onTabChange("cuenta", { itemId: journey.item.id })}
-              >
-                Gestionar la cuenta del paciente
-              </Button>
-            </div>
+            {finance ? (
+              <div>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => onTabChange("cuenta", { itemId: journey.item.id })}
+                >
+                  Gestionar la cuenta del paciente
+                </Button>
+              </div>
+            ) : null}
           </div>
         </>
       )}
@@ -928,9 +931,9 @@ export function RecorridoClinicoTab({
           {service?.scope === "quadrant" ? (
             <Field>
               <FieldLabel htmlFor={`${uid}-revise-quadrant`}>Cuadrante</FieldLabel>
-              <select
+              <ChoiceSelect
                 id={`${uid}-revise-quadrant`}
-                className="h-9 w-full rounded-md border bg-background px-3 text-sm"
+                className="w-full"
                 value={quadrant}
                 onChange={(event) => setQuadrant(event.target.value)}
               >
@@ -940,22 +943,22 @@ export function RecorridoClinicoTab({
                     Cuadrante {value}
                   </option>
                 ))}
-              </select>
+              </ChoiceSelect>
             </Field>
           ) : null}
           {service?.scope === "arch" ? (
             <Field>
               <FieldLabel htmlFor={`${uid}-revise-arch`}>Arcada</FieldLabel>
-              <select
+              <ChoiceSelect
                 id={`${uid}-revise-arch`}
-                className="h-9 w-full rounded-md border bg-background px-3 text-sm"
+                className="w-full"
                 value={arch}
                 onChange={(event) => setArch(event.target.value)}
               >
                 <option value="">Elige la arcada</option>
                 <option value="upper">Superior</option>
                 <option value="lower">Inferior</option>
-              </select>
+              </ChoiceSelect>
             </Field>
           ) : null}
           <Field>

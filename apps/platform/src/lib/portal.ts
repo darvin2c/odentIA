@@ -1,3 +1,4 @@
+import type { FormSchemaDef } from "./clinical-forms"
 import type {
   AuthenticationResponseJSON,
   PublicKeyCredentialCreationOptionsJSON,
@@ -315,6 +316,33 @@ export async function fetchPortalDocumentUrl(
 
 export async function fetchPortalAccount(sessionToken: string): Promise<PortalAccount> {
   const res = await portalFetch<{ data: PortalAccount }>(sessionToken, "/account")
+  return res.data
+}
+
+export interface PortalQuestionnaire {
+  template: { id: string; title: string; version: number; schema: FormSchemaDef } | null
+  response: {
+    id: string
+    answers: Record<string, unknown>
+    submittedAt: string | null
+    status: string
+  } | null
+  respondent: { name: string; relationship: string }
+}
+
+export async function fetchPortalQuestionnaire(sessionToken: string): Promise<PortalQuestionnaire> {
+  const res = await portalFetch<{ data: PortalQuestionnaire }>(sessionToken, "/questionnaire")
+  return res.data
+}
+
+export async function savePortalQuestionnaireApi(
+  sessionToken: string,
+  input: { answers: Record<string, unknown>; submit?: boolean },
+): Promise<PortalQuestionnaire> {
+  const res = await portalFetch<{ data: PortalQuestionnaire }>(sessionToken, "/questionnaire", {
+    method: "PUT",
+    body: JSON.stringify(input),
+  })
   return res.data
 }
 

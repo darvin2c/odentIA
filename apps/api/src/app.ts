@@ -14,35 +14,36 @@ import { z } from "zod"
 import { canAccess, orgContextOf, requireOrgContext, requireSession } from "./lib/context.js"
 import { errorBody } from "./lib/error.js"
 import { createAgentRoute } from "./routes/agent.js"
+import { createAgentKnowledgeRoute } from "./routes/agent-knowledge.js"
+import { createAgentOpsRoute } from "./routes/agent-ops.js"
 import { createAgendaRoute, createAppointmentsRoute } from "./routes/appointments.js"
+import { createAutomationsRoute, createPublicAutomationsRoute } from "./routes/automations.js"
 import { createCie10Route } from "./routes/cie10.js"
+import { createClinicalFormsRoute } from "./routes/clinical-forms.js"
 import { createConnectionsRoute } from "./routes/connections.js"
 import { createContactsRoute } from "./routes/contacts.js"
 import { createConversationsRoute } from "./routes/conversations.js"
+import { createCrmWorkspaceRoute } from "./routes/crm-workspace.js"
 import { createFieldsRoute } from "./routes/fields.js"
+import { createFinanceRoute } from "./routes/finance.js"
+import { createInventoryRoute } from "./routes/inventory.js"
+import { createMailboxesRoute } from "./routes/mailboxes.js"
+import { createOpportunitiesRoute } from "./routes/opportunities.js"
 import { createPatientRegistrationRoute } from "./routes/patient-registration.js"
 import { createPatientsRoute } from "./routes/patients.js"
 import { createPipelinesRoute } from "./routes/pipelines.js"
+import { createPortalRoute } from "./routes/portal.js"
 import {
   createPublicPatientRegistrationRoute,
   type RegistrationRemoteAddress,
 } from "./routes/public-patient-registration.js"
+import { createPublicPortalRoute } from "./routes/public-portal.js"
 import { createServicesRoute } from "./routes/services.js"
 import { createTasksRoute } from "./routes/tasks.js"
+import { createUbigeoRoute } from "./routes/ubigeo.js"
+import { createWebchatAdminRoute, createWebchatPublicRoute } from "./routes/webchat.js"
 import { createWebhooksRoute } from "./routes/webhooks.js"
 import { createWorkspaceRoute } from "./routes/workspace.js"
-import { createInventoryRoute } from "./routes/inventory.js"
-import { createOpportunitiesRoute } from "./routes/opportunities.js"
-import { createAgentKnowledgeRoute } from "./routes/agent-knowledge.js"
-import { createAgentOpsRoute } from "./routes/agent-ops.js"
-import { createFinanceRoute } from "./routes/finance.js"
-import { createAutomationsRoute, createPublicAutomationsRoute } from "./routes/automations.js"
-import { createClinicalFormsRoute } from "./routes/clinical-forms.js"
-import { createPortalRoute } from "./routes/portal.js"
-import { createPublicPortalRoute } from "./routes/public-portal.js"
-import { createWebchatPublicRoute, createWebchatAdminRoute } from "./routes/webchat.js"
-import { createMailboxesRoute } from "./routes/mailboxes.js"
-import { createCrmWorkspaceRoute } from "./routes/crm-workspace.js"
 
 export interface AppDeps {
   auth: Auth
@@ -203,10 +204,37 @@ export function createApp(deps: AppDeps) {
       remoteAddress: deps.registrationRemoteAddress,
     }),
   )
-  app.route("/api/public/portal", createPublicPortalRoute({ db, ownerDb: deps.ownerDb, storage: deps.storage, webURL: deps.webURL, cookieDomain: deps.cookieDomain }))
+  app.route(
+    "/api/public/portal",
+    createPublicPortalRoute({
+      db,
+      ownerDb: deps.ownerDb,
+      storage: deps.storage,
+      webURL: deps.webURL,
+      cookieDomain: deps.cookieDomain,
+    }),
+  )
   app.route("/api/public/automations", createPublicAutomationsRoute({ db, ownerDb: deps.ownerDb }))
-  app.route("/api/webchat", createWebchatPublicRoute({ ownerDb: deps.ownerDb, db, secretsKey: deps.secretsKey, cookieDomain: deps.cookieDomain }))
-  app.route("/api/mail", createMailboxesRoute({ auth, db, ownerDb: deps.ownerDb, secretsKey: deps.secretsKey, webUrl: deps.webURL, mailbox: deps.mailbox ?? {} }))
+  app.route(
+    "/api/webchat",
+    createWebchatPublicRoute({
+      ownerDb: deps.ownerDb,
+      db,
+      secretsKey: deps.secretsKey,
+      cookieDomain: deps.cookieDomain,
+    }),
+  )
+  app.route(
+    "/api/mail",
+    createMailboxesRoute({
+      auth,
+      db,
+      ownerDb: deps.ownerDb,
+      secretsKey: deps.secretsKey,
+      webUrl: deps.webURL,
+      mailbox: deps.mailbox ?? {},
+    }),
+  )
 
   // Rutas de usuario (sin contexto de organización).
   const userScoped = new Hono()
@@ -500,7 +528,11 @@ export function createApp(deps: AppDeps) {
   }
   guarded.route(
     "/",
-    createPatientRegistrationRoute({ ...crmDeps, cookieDomain: deps.cookieDomain, webURL: deps.webURL }),
+    createPatientRegistrationRoute({
+      ...crmDeps,
+      cookieDomain: deps.cookieDomain,
+      webURL: deps.webURL,
+    }),
   )
   guarded.route("/conversations", createConversationsRoute(crmDeps))
   guarded.route("/contacts", createContactsRoute(crmDeps))
@@ -508,6 +540,7 @@ export function createApp(deps: AppDeps) {
   guarded.route("/patients", createPatientsRoute(crmDeps))
   guarded.route("/services", createServicesRoute(crmDeps))
   guarded.route("/cie10", createCie10Route(crmDeps))
+  guarded.route("/ubigeo", createUbigeoRoute(crmDeps))
   guarded.route("/pipelines", createPipelinesRoute(crmDeps))
   guarded.route("/channels/connections", createConnectionsRoute(crmDeps))
   const llm: PlatformLlm = deps.llm ?? { modelName: "fake" }
@@ -524,7 +557,10 @@ export function createApp(deps: AppDeps) {
   guarded.route("/finance", createFinanceRoute(crmDeps))
   guarded.route("/automations", createAutomationsRoute(crmDeps))
   guarded.route("/clinical-forms", createClinicalFormsRoute(crmDeps))
-  guarded.route("/portal", createPortalRoute({ db, webURL: deps.webURL, cookieDomain: deps.cookieDomain }))
+  guarded.route(
+    "/portal",
+    createPortalRoute({ db, webURL: deps.webURL, cookieDomain: deps.cookieDomain }),
+  )
   guarded.route("/channels/webchat", createWebchatAdminRoute(crmDeps))
   app.route("/api", guarded)
   return app

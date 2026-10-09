@@ -74,7 +74,7 @@ it("traza alternativas, propuesta versionada, representante, sesiones y evidenci
   )
   expect(fromFinding.odontogramEntryId).toBe(finding?.id)
   const findingJourney = await f.run((tx) =>
-    getTreatmentJourney(tx, "org_a", f.patient.id, fromFinding.id),
+    getTreatmentJourney(tx, "org_a", f.patient.id, fromFinding.id, { finance: true }),
   )
   expect(findingJourney.originFinding).toMatchObject({ id: finding?.id, condition: "caries" })
   // Un hallazgo de otro paciente no puede motivar la indicación.
@@ -132,13 +132,20 @@ it("traza alternativas, propuesta versionada, representante, sesiones y evidenci
   await f.run((tx) => addEncounterProcedure(tx, ...f.args, f.encounter.id, { planItemId: a.id }))
   await ownerDb
     .update(encounter)
-    .set({ status: "finalizada", finalizedAt: new Date() })
+    .set({
+      status: "finalizada",
+      finalizedAt: new Date(),
+      signerName: "Clínico",
+      signerRegistration: "COP 12345",
+    })
     .where(eq(encounter.id, f.encounter.id))
   const second = await f.run((tx) =>
     createEncounter(tx, ...f.args, { reason: "Segunda sesión", planItemIds: [a.id] }),
   )
   await f.run((tx) => addEncounterProcedure(tx, ...f.args, second.id, { planItemId: a.id }))
-  const during = await f.run((tx) => getTreatmentJourney(tx, "org_a", f.patient.id, a.id))
+  const during = await f.run((tx) =>
+    getTreatmentJourney(tx, "org_a", f.patient.id, a.id, { finance: true }),
+  )
   expect(during.item.status).toBe("en_curso")
   expect(during.procedures.map((p) => p.encounter.id)).toEqual([f.encounter.id, second.id])
   await f.run((tx) =>
@@ -167,9 +174,11 @@ it("traza alternativas, propuesta versionada, representante, sesiones y evidenci
       encounterId: second.id,
       items: [
         {
-          medicationName: "Medicamento",
+          genericName: "paracetamol",
+          strength: "500 mg",
+          dosageForm: "tableta",
           dose: "Dosis",
-          route: "Oral",
+          route: "oral",
           frequency: "Indicada",
           duration: "Indicada",
         },
@@ -188,7 +197,9 @@ it("traza alternativas, propuesta versionada, representante, sesiones y evidenci
       budgetId: revision.id,
     }),
   )
-  const journey = await f.run((tx) => getTreatmentJourney(tx, "org_a", f.patient.id, a.id))
+  const journey = await f.run((tx) =>
+    getTreatmentJourney(tx, "org_a", f.patient.id, a.id, { finance: true }),
+  )
   expect(journey.documents.map((d) => d.id)).toContain(doc.id)
   expect(journey.prescriptions.map((p) => p.id)).toContain(rx.id)
   expect(journey.followUps.map((c) => c.id)).toContain(followUp.id)
@@ -198,7 +209,9 @@ it("traza alternativas, propuesta versionada, representante, sesiones y evidenci
     (await f.run((tx) => getTimeline(tx, "org_a", f.patient.id))).data.map((e) => e.type),
   ).toEqual(expect.arrayContaining(["plan", "budget", "prescription", "follow_up"]))
   await expect(
-    withOrgContext(appDb, "org_b", (tx) => getTreatmentJourney(tx, "org_b", f.patient.id, a.id)),
+    withOrgContext(appDb, "org_b", (tx) =>
+      getTreatmentJourney(tx, "org_b", f.patient.id, a.id, { finance: true }),
+    ),
   ).rejects.toMatchObject({ status: 404 })
   await f.run((tx) =>
     revokeResponsibility(tx, ...f.args, role.id, { reason: "Fin de representación" }),

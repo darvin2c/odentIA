@@ -1,24 +1,33 @@
 import {
-  SURFACES,
   BLOOD_GROUPS,
+  DOC_TYPES,
+  DOCUMENT_FORMATS,
   demographicsSchema,
-  registrationContactInputSchema,
+  IMAGE_TYPES,
+  REPORT_STATUSES,
   registrationAnswersSchema,
+  registrationContactInputSchema,
+  SURFACES,
+  sniffDocumentMime,
+  TREATMENT_PHASES,
 } from "@odentia/clinical"
 import { withOrgContext } from "@odentia/db"
 import {
   addClinicalNote,
   addEncounterAddendum,
+  addEncounterDiagnosis,
   addEncounterProcedure,
   addOdontogramEntries,
   addPlanItem,
   addPlanItemsBatch,
+  type ClinicalAccessResource,
   createEncounter,
   createOdontogramAssessment,
-  registerPatient,
   createTreatmentPlan,
   finalizeEncounter,
+  findPatientDuplicates,
   getAnamnesisVersion,
+  getEncounterClosing,
   getEncounterDetail,
   getLatestAnamnesis,
   getOdontogram,
@@ -27,47 +36,64 @@ import {
   getPatientHealth,
   getPatientSummary,
   getTimeline,
+  getToothHistory,
+  getTreatmentCoordination,
   getTreatmentPlanDetail,
+  grantDataConsent,
   listAnamnesisVersions,
+  listClinicalAccess,
   listClinicalNotes,
+  listDataConsents,
   listEncounters,
   listOdontogramAssessments,
+  listPatientDiagnoses,
   listPatientDocuments,
   listPatients,
-  findPatientDuplicates,
-  setPatientContact,
-  removePatientContact,
   listPlanItems,
   listTreatmentPlans,
   PATIENT_AVATAR_MAX_BYTES,
   PATIENT_AVATAR_MIME_EXT,
   PATIENT_DOC_MAX_BYTES,
-  PATIENT_DOC_MIME_EXT,
+  registerPatient,
+  makeImageThumbnail,
   registerPatientDocument,
+  retirePatientDocument,
+  setDocumentReportStatus,
+  removePatientContact,
   requirePatient,
   reviewLegacyEntry,
+  revokeDataConsent,
   ServiceError,
   savePatientHealth,
+  scheduleFollowUpFromCoordination,
+  setDiagnosisStatus,
   setPatientAvatar,
+  setPatientContact,
   setPlanItemStatus,
   TIMELINE_TYPES,
+  takeOverEncounter,
   updateEncounterDraft,
   updatePatient,
   updatePlanItem,
+  updatePlanItemPlanning,
+  voidEncounter,
+  voidEncounterDiagnosis,
+  voidEncounterProcedure,
   voidOdontogramEntry,
 } from "@odentia/services"
 import { Hono } from "hono"
 import { z } from "zod"
+import { traceClinicalRead } from "../lib/clinical-trace.js"
 import { canAccess, orgContextOf } from "../lib/context.js"
 import { errorBody } from "../lib/error.js"
 import { type CrmDeps, runService, serviceErrorResponse, validationError } from "./helpers.js"
 import { createPatientBudgetsRoute } from "./patient-budgets.js"
 import { createPatientDocumentContextRoute } from "./patient-document-context.js"
-import { createPatientTreatmentsRoute } from "./patient-treatments.js"
 import { createPatientFollowUpsRoute } from "./patient-follow-ups.js"
-import { createPatientPrescriptionsRoute } from "./patient-prescriptions.js"
 import { createPatientPaymentsRoute } from "./patient-payments.js"
+import { createPatientPrescriptionsRoute } from "./patient-prescriptions.js"
 import { createPatientResponsibilitiesRoute } from "./patient-responsibilities.js"
+import { createPatientTreatmentsRoute } from "./patient-treatments.js"
 
 const listQuery = z.object({
   q: z.string().optional(),
@@ -81,7 +107,7 @@ const patientListQuery = listQuery.extend({
     .transform((value) => value === "true")
     .optional(),
   sex: z.enum(["M", "F"]).optional(),
-  docType: z.enum(["DNI", "CE", "PASAPORTE", "OTRO"]).optional(),
+  docType: z.enum(DOC_TYPES).optional(),
   sort: z.enum(["name", "-name", "created", "-created", "number", "-number"]).optional(),
 })
 
@@ -103,6 +129,8 @@ const patchInput = z.object({
   ...filiation,
   isActive: z.boolean().optional(),
   dataConsent: z.boolean().optional(),
+  /** Recepción confirma el nombre separado tras la migración. */
+  identityConfirmed: z.boolean().optional(),
 })
 
 const healthReviewState = z.enum(["unknown", "none", "recorded"])
@@ -110,15 +138,29 @@ const healthAllergy = z
   .object({
     id: z.uuid().optional(),
     substance: z.string().min(1).max(200),
+    category: z.string().max(20).nullish(),
     reaction: z.string().max(2000).nullish(),
-    severity: z.string().min(1).max(20),
+    /** Sin dato se guarda «desconocida». */
+    severity: z.string().max(20).nullish(),
+    kind: z.enum(["alergia", "intolerancia"]).nullish(),
+    criticality: z.enum(["baja", "alta", "no_evaluable"]).nullish(),
+    verification: z.enum(["no_confirmada", "confirmada", "descartada"]).nullish(),
     isActive: z.boolean().optional(),
+  })
+  .strict()
+const familyHistoryItem = z
+  .object({
+    relationship: z.string().min(1).max(30),
+    condition: z.string().min(1).max(200),
+    cie10Code: z.string().max(10).nullish(),
+    notes: z.string().max(2000).nullish(),
   })
   .strict()
 const healthCondition = z
   .object({
     id: z.uuid().optional(),
     name: z.string().min(1).max(200),
+    cie10Code: z.string().max(10).nullish(),
     status: z.string().min(1).max(20),
     startDate: z.string().max(10).nullish(),
     endDate: z.string().max(10).nullish(),
@@ -129,6 +171,7 @@ const healthMedication = z
   .object({
     id: z.uuid().optional(),
     name: z.string().min(1).max(200),
+    genericName: z.string().max(200).nullish(),
     dose: z.string().max(200).nullish(),
     frequency: z.string().max(200).nullish(),
     startDate: z.string().max(10).nullish(),
@@ -152,6 +195,8 @@ const healthSaveInput = z
     allergies: z.array(healthAllergy).max(200),
     conditions: z.array(healthCondition).max(200),
     medications: z.array(healthMedication).max(200),
+    familyHistory: z.array(familyHistoryItem).max(50).optional(),
+    asaClass: z.enum(["I", "II", "III", "IV", "V", "VI"]).nullish(),
     anamnesis: z
       .object({
         expectedVersion: z.number().int().min(0),
@@ -167,6 +212,8 @@ const healthSaveInput = z
 const noteInput = z.object({
   note: z.string().min(1).max(4000),
   diagnosisCode: z.string().max(10).nullish(),
+  diagnosisType: z.string().max(20).nullish(),
+  toothNumber: z.number().int().nullish(),
   encounterId: z.uuid().optional(),
 })
 
@@ -234,6 +281,8 @@ const timelineQuery = listQuery.extend({
 const encounterCreateInput = z.object({
   // El motivo es obligatorio al abrir la atención (decisión de diseño).
   reason: z.string().trim().min(1).max(2000),
+  /** Cita que motiva la atención: hereda sede y profesional. */
+  appointmentId: z.uuid().nullish(),
   branchId: z.uuid().nullish(),
   /** Profesional que atiende; por defecto quien abre la atención. */
   dentistUserId: z.string().nullish(),
@@ -256,9 +305,16 @@ const encounterPatchInput = z.object({
     })
     .strict()
     .nullish(),
+  presentIllness: z.string().max(4000).nullish(),
+  illnessDuration: z.string().max(200).nullish(),
+  /** Claves y rangos de @odentia/clinical (VITAL_SIGNS); el servicio valida. */
+  vitals: z.record(z.string(), z.union([z.number(), z.string().max(10), z.null()])).nullish(),
+  prognosis: z.string().max(2000).nullish(),
+  auxiliaryExams: z.string().max(4000).nullish(),
 })
 const procedureInput = z
   .object({
+    quantity: z.number().int().min(1).max(99).nullish(),
     serviceId: z.uuid().nullish(),
     toothNumber: z.number().int().nullish(),
     surfaces: z.array(z.string().min(1).max(20)).max(5).nullish(),
@@ -268,6 +324,8 @@ const procedureInput = z
     planItemId: z.uuid().nullish(),
     /** Acto libre (sin servicio ni tratamiento): descripción obligatoria. */
     description: z.string().trim().min(1).max(2000).nullish(),
+    /** Hallazgo que trata un servicio directo; queda tratado al cerrar la atención. */
+    odontogramEntryId: z.uuid().nullish(),
   })
   .strict()
   .refine((d) => !(d.serviceId && d.planItemId), {
@@ -295,9 +353,22 @@ const planCreateInput = z
     isRecommended: z.boolean().optional(),
     detail: z.string().max(4000).nullish(),
     diagnosisCode: z.string().max(10).nullish(),
+    phase: z.enum(TREATMENT_PHASES).nullish(),
+    plannedSessions: z.number().int().min(1).max(60).nullish(),
     ...planSiteFields,
   })
   .strict()
+/** Planificación: fase, sesiones previstas y orden (sin acto clínico). */
+const planPlanningInput = z
+  .object({
+    phase: z.enum(TREATMENT_PHASES).optional(),
+    plannedSessions: z.number().int().min(1).max(60).optional(),
+    move: z.enum(["up", "down"]).optional(),
+  })
+  .strict()
+  .refine((d) => d.phase || d.plannedSessions || d.move, {
+    message: "Indica la fase, las sesiones previstas o el movimiento",
+  })
 const planPatchInput = z
   .object({
     serviceId: z.uuid().optional(),
@@ -331,6 +402,18 @@ const planBatchInput = z
     diagnosisCode: z.string().max(10).nullish(),
   })
   .strict()
+const reasonInput = z.object({ reason: z.string().trim().min(1).max(2000) }).strict()
+const finalizeInput = z.object({ endedAt: z.iso.datetime({ offset: true }).nullish() }).strict()
+const diagnosisInput = z
+  .object({
+    cie10Code: z.string().trim().min(1).max(10),
+    diagnosisType: z.enum(["presuntivo", "definitivo", "repetido"]),
+    toothNumber: z.number().int().nullish(),
+    surfaces: z.array(z.string().min(1).max(20)).max(5).nullish(),
+    note: z.string().max(2000).nullish(),
+  })
+  .strict()
+const diagnosisStatusInput = z.object({ status: z.enum(["activo", "resuelto"]) }).strict()
 const treatmentPlanCreateInput = z
   .object({ title: z.string().trim().min(1).max(200), originEncounterId: z.uuid() })
   .strict()
@@ -354,9 +437,27 @@ const documentLinkInput = z.object({
   tags: jsonArrayField.pipe(z.array(z.string().min(1).max(200)).max(100)).default([]),
 })
 
+/** Metadatos de imagen en la subida (multipart). */
+const documentImageInput = z.object({
+  imageType: z.enum(IMAGE_TYPES).optional(),
+  capturedAt: z.iso.datetime({ offset: true }).optional(),
+  source: z.string().trim().min(1).max(120).optional(),
+})
+
+const documentListQuery = z.object({
+  category: z.string().max(40).optional(),
+  imageType: z.enum(IMAGE_TYPES).optional(),
+  tooth: z.coerce.number().int().optional(),
+  planItemId: z.uuid().optional(),
+  from: z.iso.date().optional(),
+  to: z.iso.date().optional(),
+  includeRetired: z.enum(["true", "false"]).optional(),
+})
+
 /** Subrutas con datos clínicos: exigen `clinical.read`/`.write`. */
 const CLINICAL_SUBPATHS = [
   "/encounters",
+  "/diagnoses",
   "/plan",
   "/treatments",
   "/prescriptions",
@@ -373,6 +474,52 @@ const CLINICAL_SUBPATHS = [
 /** Subrutas de caja: exigen `finance.read`/`.write`. */
 const FINANCE_SUBPATHS = ["/account", "/payments", "/budgets"]
 
+/**
+ * Coordinación del tratamiento: quien agenda ve qué falta reservar o decidir
+ * sin leer la ficha. Exige `appointments.read`/`.write`, no `clinical.*`.
+ */
+const COORDINATION_SUBPATH = "/coordination"
+
+/** Bitácora de consultas a la historia: la lee quien audita (`audit.read`). */
+const ACCESS_LOG_SUBPATH = "/access-log"
+
+/** Lecturas clínicas que dejan traza, por prefijo de subruta. */
+const ACCESS_RESOURCE_BY_PREFIX: Array<[string, ClinicalAccessResource]> = [
+  ["/summary", "resumen"],
+  ["/health", "antecedentes"],
+  ["/anamnesis", "antecedentes"],
+  ["/odontogram", "odontograma"],
+  ["/timeline", "historia"],
+  ["/encounters", "atenciones"],
+  ["/diagnoses", "diagnosticos"],
+  ["/notes", "notas"],
+  ["/plan", "plan"],
+  ["/treatments", "tratamientos"],
+  ["/follow-ups", "controles"],
+  ["/prescriptions", "recetas"],
+  ["/documents", "documentos"],
+]
+
+/** Mismo contrato que la reserva clínica del control (`patient-follow-ups.ts`). */
+const coordinationScheduleInput = z.union([
+  z.object({ appointmentId: z.uuid() }).strict(),
+  z
+    .object({
+      appointment: z
+        .object({
+          branchId: z.uuid().optional(),
+          dentistUserId: z.string().min(1),
+          chairId: z.uuid(),
+          serviceId: z.uuid().optional(),
+          startsAt: z.iso.datetime({ offset: true }),
+          endsAt: z.iso.datetime({ offset: true }).optional(),
+          durationMin: z.number().int().positive().optional(),
+        })
+        .strict(),
+    })
+    .strict(),
+])
+
 export function createPatientsRoute(deps: CrmDeps) {
   const app = new Hono()
   app.use("*", async (c, next) => {
@@ -380,23 +527,44 @@ export function createPatientsRoute(deps: CrmDeps) {
     // `c.req.path` trae el prefijo de montaje (/api/patients...): el resto
     // tras el id clasifica el subdominio (filiación, clínica o caja).
     const remainder = c.req.path.match(/\/patients\/[^/]+(\/.*)?$/)?.[1] ?? ""
-    const domain = CLINICAL_SUBPATHS.some((prefix) => remainder.startsWith(prefix))
-      ? "clinical"
-      : FINANCE_SUBPATHS.some((prefix) => remainder.startsWith(prefix))
-        ? "finance"
-        : "patients"
+    const domain = remainder.startsWith(ACCESS_LOG_SUBPATH)
+      ? "audit"
+      : remainder.startsWith(COORDINATION_SUBPATH)
+        ? "appointments"
+        : CLINICAL_SUBPATHS.some((prefix) => remainder.startsWith(prefix))
+          ? "clinical"
+          : FINANCE_SUBPATHS.some((prefix) => remainder.startsWith(prefix))
+            ? "finance"
+            : "patients"
     const write = !["GET", "HEAD", "OPTIONS"].includes(c.req.method)
     if (!canAccess(memberRole, `${domain}.${write ? "write" : "read"}`)) {
       return c.json(
         errorBody(
           c,
           "FORBIDDEN",
-          write ? "No tienes permiso para modificar este recurso" : "No tienes permiso para ver este recurso",
+          write
+            ? "No tienes permiso para modificar este recurso"
+            : "No tienes permiso para ver este recurso",
         ),
         403,
       )
     }
     await next()
+    // Toda lectura clínica atendida deja traza de quién consultó qué parte de
+    // la ficha (`traceClinicalRead`: solo tras responder bien).
+    if (domain !== "clinical" || write || c.res.status !== 200) return
+    const patientId = c.req.path.match(/\/patients\/([0-9a-f-]{36})\//i)?.[1]
+    const resource = ACCESS_RESOURCE_BY_PREFIX.find(([prefix]) => remainder.startsWith(prefix))?.[1]
+    if (!patientId || !resource) return
+    const { orgId, userId } = orgContextOf(c)
+    await traceClinicalRead(deps.db, { orgId, userId, patientId, resource })
+  })
+
+  app.get("/:id/access-log", async (c) => {
+    const { orgId } = orgContextOf(c)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) => listClinicalAccess(tx, orgId, c.req.param("id"))),
+    )
   })
 
   app.get("/", async (c) => {
@@ -475,21 +643,75 @@ export function createPatientsRoute(deps: CrmDeps) {
   })
 
   app.get("/:id", async (c) => {
-    const { orgId, memberRole } = orgContextOf(c)
-    return runService(c, 200, () =>
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    const clinical = canAccess(memberRole, "clinical.read")
+    const response = await runService(c, 200, () =>
       withOrgContext(deps.db, orgId, async (tx) => {
         const full = await getPatient(tx, orgId, c.req.param("id"))
         // Sin `clinical.read` (recepción/caja): filiación y vínculos sin
-        // registro de salud ni antecedentes/alergias/condiciones/medicación.
-        if (canAccess(memberRole, "clinical.read")) return full
+        // registro de salud ni antecedentes/condiciones/medicación. Las
+        // alergias activas solo se conservan con `clinical.alerts`.
+        if (clinical) return full
         return {
           ...full,
           registration: null,
-          activeAllergies: [],
+          activeAllergies: canAccess(memberRole, "clinical.alerts") ? full.activeAllergies : [],
           activeConditions: [],
           currentMedications: [],
         }
       }),
+    )
+    // La ficha completa entrega condiciones, medicación y registro de salud:
+    // es una lectura de antecedentes y deja la misma traza que `/health`.
+    if (clinical && response.status === 200) {
+      const patientId = c.req.param("id")
+      await traceClinicalRead(deps.db, { orgId, userId, patientId, resource: "antecedentes" })
+    }
+    return response
+  })
+
+  // --- Consentimiento de datos personales (Ley 29733) ---
+  const dataConsentInput = z
+    .object({
+      purposes: z.array(z.enum(["atencion", "recordatorios", "comunicaciones"])).min(1),
+      grantedByContactId: z.uuid(),
+      channel: z.enum(["presencial", "formulario_publico", "portal"]).optional(),
+    })
+    .strict()
+  app.get("/:id/data-consents", async (c) => {
+    const { orgId } = orgContextOf(c)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) => listDataConsents(tx, orgId, c.req.param("id"))),
+    )
+  })
+  app.post("/:id/data-consents", async (c) => {
+    const { orgId, userId } = orgContextOf(c)
+    const parsed = dataConsentInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 201, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        grantDataConsent(tx, orgId, userId, c.req.param("id"), parsed.data),
+      ),
+    )
+  })
+  app.post("/:id/data-consents/:consentId/revoke", async (c) => {
+    const { orgId, userId } = orgContextOf(c)
+    const parsed = z
+      .object({ reason: z.string().trim().min(1).max(2000) })
+      .strict()
+      .safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        revokeDataConsent(
+          tx,
+          orgId,
+          userId,
+          c.req.param("id"),
+          c.req.param("consentId"),
+          parsed.data,
+        ),
+      ),
     )
   })
 
@@ -500,6 +722,33 @@ export function createPatientsRoute(deps: CrmDeps) {
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
         updatePatient(tx, orgId, userId, c.req.param("id"), parsed.data),
+      ),
+    )
+  })
+
+  // --- Coordinación del tratamiento (vista mínima para quien agenda) ---
+  app.get("/:id/coordination", async (c) => {
+    const { orgId } = orgContextOf(c)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        getTreatmentCoordination(tx, orgId, c.req.param("id")),
+      ),
+    )
+  })
+  app.post("/:id/coordination/follow-ups/:followUpId/schedule", async (c) => {
+    const { orgId, userId } = orgContextOf(c)
+    const parsed = coordinationScheduleInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        scheduleFollowUpFromCoordination(
+          tx,
+          orgId,
+          userId,
+          c.req.param("id"),
+          c.req.param("followUpId"),
+          parsed.data,
+        ),
       ),
     )
   })
@@ -580,6 +829,14 @@ export function createPatientsRoute(deps: CrmDeps) {
       withOrgContext(deps.db, orgId, (tx) => getOdontogram(tx, orgId, c.req.param("id"))),
     )
   })
+  // Historia de una pieza: hallazgos, diagnósticos, actos, controles y documentos.
+  app.get("/:id/odontogram/teeth/:tooth/history", async (c) => {
+    const { orgId } = orgContextOf(c)
+    const tooth = Number(c.req.param("tooth"))
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) => getToothHistory(tx, orgId, c.req.param("id"), tooth)),
+    )
+  })
   app.post("/:id/odontogram/entries", async (c) => {
     const { orgId, userId } = orgContextOf(c)
     const parsed = odontogramInput.safeParse(await c.req.json().catch(() => null))
@@ -646,8 +903,16 @@ export function createPatientsRoute(deps: CrmDeps) {
   // --- Documentos ---
   app.get("/:id/documents", async (c) => {
     const { orgId } = orgContextOf(c)
+    const query = documentListQuery.safeParse(c.req.query())
+    if (!query.success) return validationError(c, query.error.issues)
+    const { includeRetired, ...filters } = query.data
     return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) => listPatientDocuments(tx, orgId, c.req.param("id"))),
+      withOrgContext(deps.db, orgId, (tx) =>
+        listPatientDocuments(tx, orgId, c.req.param("id"), {
+          ...filters,
+          includeRetired: includeRetired === "true",
+        }),
+      ),
     )
   })
   app.post("/:id/documents", async (c) => {
@@ -669,51 +934,154 @@ export function createPatientsRoute(deps: CrmDeps) {
       tags: form?.get("tags") || undefined,
     })
     if (!link.success) return validationError(c, link.error.issues)
+    const image = documentImageInput.safeParse({
+      imageType: form?.get("imageType") || undefined,
+      capturedAt: form?.get("capturedAt") || undefined,
+      source: form?.get("source") || undefined,
+    })
+    if (!image.success) return validationError(c, image.error.issues)
     if (!(file instanceof File))
       return c.json(errorBody(c, "VALIDATION", "Adjunta un archivo"), 400)
     if (typeof category !== "string" || typeof label !== "string" || !label.trim()) {
       return c.json(errorBody(c, "VALIDATION", "category y label son obligatorios"), 400)
     }
-    const ext = PATIENT_DOC_MIME_EXT[file.type]
-    if (!ext) return c.json(errorBody(c, "VALIDATION", "Solo se admiten JPG, PNG, WebP o PDF"), 400)
-    if (file.size > PATIENT_DOC_MAX_BYTES) {
-      return c.json(errorBody(c, "VALIDATION", "El archivo no puede superar 10 MB"), 400)
+    if (!file.size || file.size > PATIENT_DOC_MAX_BYTES) {
+      return c.json(errorBody(c, "VALIDATION", "El archivo debe pesar entre 1 byte y 10 MB"), 400)
     }
     const bytes = new Uint8Array(await file.arrayBuffer())
+    // El formato se decide por el contenido: un tipo declarado que no coincide
+    // con los bytes (p. ej. un ejecutable renombrado a .jpg) se rechaza.
+    const contentType = sniffDocumentMime(bytes)
+    if (!contentType)
+      return c.json(
+        errorBody(c, "VALIDATION", "Solo se admiten JPG, PNG, WebP, PDF o DICOM"),
+        400,
+      )
+    const declared = file.type === "application/octet-stream" ? "" : file.type
+    if (declared && declared !== contentType)
+      return c.json(
+        errorBody(
+          c,
+          "VALIDATION",
+          `El contenido del archivo no coincide con su tipo declarado (${declared})`,
+        ),
+        400,
+      )
+    const ext = DOCUMENT_FORMATS[contentType]
     return runService(c, 201, async () => {
       await withOrgContext(deps.db, orgId, (tx) => requirePatient(tx, orgId, patientId))
       const ref = await deps.storage.putPatientDocument({
         orgId,
         patientId,
         bytes,
-        contentType: file.type,
+        contentType,
         ext,
       })
+      // Miniatura para la galería; si la imagen no se decodifica, no la hay.
+      const thumbBytes = contentType.startsWith("image/") ? await makeImageThumbnail(bytes) : null
+      const thumb = thumbBytes
+        ? await deps.storage
+            .putPatientDocument({
+              orgId,
+              patientId,
+              bytes: thumbBytes,
+              contentType: "image/webp",
+              ext: "webp",
+            })
+            .catch(() => null)
+        : null
       try {
         return await withOrgContext(deps.db, orgId, (tx) =>
           registerPatientDocument(tx, orgId, userId, patientId, {
             category,
             label: label.trim(),
             storageKey: ref.objectKey,
-            contentType: file.type,
+            contentType,
             sizeBytes: file.size,
+            thumbnailKey: thumb?.objectKey ?? null,
             ...link.data,
+            ...image.data,
           }),
         )
       } catch (e) {
         await deps.storage.deleteAttachment(ref.objectKey).catch(() => {})
+        if (thumb) await deps.storage.deleteAttachment(thumb.objectKey).catch(() => {})
         throw e
       }
     })
   })
-  app.get("/:id/documents/:documentId/url", async (c) => {
+  app.post("/:id/documents/:documentId/retire", async (c) => {
+    const { orgId, userId } = orgContextOf(c)
+    const parsed = z
+      .object({ reason: z.string().trim().min(1).max(2000) })
+      .safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        retirePatientDocument(
+          tx,
+          orgId,
+          userId,
+          c.req.param("id"),
+          c.req.param("documentId"),
+          parsed.data,
+        ),
+      ),
+    )
+  })
+  app.patch("/:id/documents/:documentId/report", async (c) => {
+    const { orgId, userId } = orgContextOf(c)
+    const parsed = z
+      .object({ reportStatus: z.enum(REPORT_STATUSES) })
+      .safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        setDocumentReportStatus(
+          tx,
+          orgId,
+          userId,
+          c.req.param("id"),
+          c.req.param("documentId"),
+          parsed.data,
+        ),
+      ),
+    )
+  })
+  // Contenido de un archivo DICOM para el visor (misma autorización que la
+  // URL firmada); solo DICOM: el resto se ve por su URL firmada.
+  app.get("/:id/documents/:documentId/content", async (c) => {
+    const { orgId } = orgContextOf(c)
+    let doc: Awaited<ReturnType<typeof getPatientDocument>>
+    try {
+      doc = await withOrgContext(deps.db, orgId, (tx) =>
+        getPatientDocument(tx, orgId, c.req.param("id"), c.req.param("documentId")),
+      )
+    } catch (e) {
+      // Mismo mapeo de errores del dominio (404, permisos) que el resto de rutas.
+      return runService(c, 200, () => Promise.reject(e))
+    }
+    if (doc.contentType !== "application/dicom")
+      return c.json(errorBody(c, "VALIDATION", "Solo los archivos DICOM se leen por esta vía"), 400)
+    if (!deps.storage.getAttachment)
+      return c.json(errorBody(c, "UNAVAILABLE", "Lectura de archivos no disponible"), 503)
+    const bytes = await deps.storage.getAttachment(doc.storageKey)
+    return c.body(Buffer.from(bytes), 200, {
+      "content-type": "application/dicom",
+      "cache-control": "private, no-store",
+    })
+  })
+    app.get("/:id/documents/:documentId/url", async (c) => {
     const { orgId } = orgContextOf(c)
     return runService(c, 200, async () => {
       const doc = await withOrgContext(deps.db, orgId, (tx) =>
         getPatientDocument(tx, orgId, c.req.param("id"), c.req.param("documentId")),
       )
-      const url = await deps.storage.attachmentUrl(doc.storageKey)
-      return { url }
+      // ?variant=thumb: la miniatura si existe; si no, el original.
+      const key =
+        c.req.query("variant") === "thumb" && doc.thumbnailKey ? doc.thumbnailKey : doc.storageKey
+      const url = await deps.storage.attachmentUrl(key)
+      return { url, thumbnail: key !== doc.storageKey }
     })
   })
 
@@ -795,7 +1163,7 @@ export function createPatientsRoute(deps: CrmDeps) {
   app.get("/:id/encounters", async (c) => {
     const { orgId } = orgContextOf(c)
     const parsed = listQuery
-      .extend({ status: z.enum(["borrador", "finalizada"]).optional() })
+      .extend({ status: z.enum(["borrador", "finalizada", "anulada"]).optional() })
       .safeParse(c.req.query())
     if (!parsed.success) return validationError(c, parsed.error.issues)
     try {
@@ -849,11 +1217,137 @@ export function createPatientsRoute(deps: CrmDeps) {
       ),
     )
   })
-  app.post("/:id/encounters/:encounterId/finalize", async (c) => {
+  app.get("/:id/encounters/:encounterId/closing", async (c) => {
     const { orgId, userId } = orgContextOf(c)
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
-        finalizeEncounter(tx, orgId, userId, c.req.param("id"), c.req.param("encounterId")),
+        getEncounterClosing(tx, orgId, userId, c.req.param("id"), c.req.param("encounterId")),
+      ),
+    )
+  })
+  app.post("/:id/encounters/:encounterId/finalize", async (c) => {
+    const { orgId, userId } = orgContextOf(c)
+    const body = await c.req.json().catch(() => ({}))
+    const parsed = finalizeInput.safeParse(body ?? {})
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        finalizeEncounter(
+          tx,
+          orgId,
+          userId,
+          c.req.param("id"),
+          c.req.param("encounterId"),
+          parsed.data,
+        ),
+      ),
+    )
+  })
+  app.post("/:id/encounters/:encounterId/void", async (c) => {
+    const { orgId, userId } = orgContextOf(c)
+    const parsed = reasonInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        voidEncounter(
+          tx,
+          orgId,
+          userId,
+          c.req.param("id"),
+          c.req.param("encounterId"),
+          parsed.data,
+        ),
+      ),
+    )
+  })
+  app.post("/:id/encounters/:encounterId/take-over", async (c) => {
+    const { orgId, userId } = orgContextOf(c)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        takeOverEncounter(tx, orgId, userId, c.req.param("id"), c.req.param("encounterId")),
+      ),
+    )
+  })
+  app.post("/:id/encounters/:encounterId/procedures/:procedureId/void", async (c) => {
+    const { orgId, userId } = orgContextOf(c)
+    const parsed = reasonInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        voidEncounterProcedure(
+          tx,
+          orgId,
+          userId,
+          c.req.param("id"),
+          c.req.param("encounterId"),
+          c.req.param("procedureId"),
+          parsed.data,
+        ),
+      ),
+    )
+  })
+  app.post("/:id/encounters/:encounterId/diagnoses", async (c) => {
+    const { orgId, userId } = orgContextOf(c)
+    const parsed = diagnosisInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 201, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        addEncounterDiagnosis(
+          tx,
+          orgId,
+          userId,
+          c.req.param("id"),
+          c.req.param("encounterId"),
+          parsed.data,
+        ),
+      ),
+    )
+  })
+  app.post("/:id/encounters/:encounterId/diagnoses/:diagnosisId/void", async (c) => {
+    const { orgId, userId } = orgContextOf(c)
+    const parsed = reasonInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        voidEncounterDiagnosis(
+          tx,
+          orgId,
+          userId,
+          c.req.param("id"),
+          c.req.param("encounterId"),
+          c.req.param("diagnosisId"),
+          parsed.data,
+        ),
+      ),
+    )
+  })
+  // Lista de problemas del paciente: diagnósticos vigentes y resueltos.
+  app.get("/:id/diagnoses", async (c) => {
+    const { orgId } = orgContextOf(c)
+    const parsed = z
+      .object({ status: z.enum(["activo", "resuelto"]).optional() })
+      .safeParse(c.req.query())
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        listPatientDiagnoses(tx, orgId, c.req.param("id"), parsed.data),
+      ),
+    )
+  })
+  app.patch("/:id/diagnoses/:diagnosisId", async (c) => {
+    const { orgId, userId } = orgContextOf(c)
+    const parsed = diagnosisStatusInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        setDiagnosisStatus(
+          tx,
+          orgId,
+          userId,
+          c.req.param("id"),
+          c.req.param("diagnosisId"),
+          parsed.data.status,
+        ),
       ),
     )
   })
@@ -924,6 +1418,23 @@ export function createPatientsRoute(deps: CrmDeps) {
     return runService(c, 201, () =>
       withOrgContext(deps.db, orgId, (tx) =>
         addPlanItemsBatch(tx, orgId, userId, c.req.param("id"), parsed.data),
+      ),
+    )
+  })
+  app.patch("/:id/plan/items/:itemId/planning", async (c) => {
+    const { orgId, userId } = orgContextOf(c)
+    const parsed = planPlanningInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        updatePlanItemPlanning(
+          tx,
+          orgId,
+          userId,
+          c.req.param("id"),
+          c.req.param("itemId"),
+          parsed.data,
+        ),
       ),
     )
   })

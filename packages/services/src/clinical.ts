@@ -1,27 +1,30 @@
 import {
   activeFindingsAsOf,
   BLOOD_GROUPS,
-  registrationAnswersSchema,
   type BloodGroup,
-  type RegistrationAnswers,
   type FindingDetails,
   type FindingInput,
   type FindingRecord,
+  IMAGE_TYPE_LABELS,
+  type ImageType,
+  imageTypeCategory,
+  isImageType,
   isValidTooth,
   normalizeTags,
   ODONTOGRAM_STANDARD,
+  type RegistrationAnswers,
+  REPORT_STATUSES,
+  type ReportStatus,
+  registrationAnswersSchema,
   validateFinding,
 } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import {
   cie10Code,
+  clinicalFollowUp,
   clinicalNote,
   encounter,
   encounterProcedure,
-  clinicalFollowUp,
-  prescription,
-  patientPayment,
-  treatmentBudget,
   encounterTooth,
   odontogramAssessment,
   odontogramEntry,
@@ -29,14 +32,18 @@ import {
   patientAllergy,
   patientAnamnesis,
   patientCondition,
+  patientFamilyHistory,
   patientDocument,
   patientDocumentContext,
   patientMedication,
+  patientPayment,
   patientRegistration,
+  prescription,
+  treatmentBudget,
   treatmentPlanItem,
 } from "@odentia/db/schema/clinical"
 import { auditEvent } from "@odentia/db/schema/org"
-import { and, asc, desc, eq, inArray, lt, or, sql } from "drizzle-orm"
+import { and, asc, desc, eq, inArray, isNull, lt, or, sql } from "drizzle-orm"
 import { decodeCursor, encodeCursor } from "./cursors.js"
 import { isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
 import { requirePatient } from "./patients.js"
@@ -54,11 +61,36 @@ async function requireDraftLink(tx: Db, orgId: string, patientId: string, encoun
     )
     .for("update")
   if (!row) throw notFound("Atención")
+  if (row.status === "anulada") throw conflict("VOIDED", "La atención está anulada")
   if (row.status !== "borrador") throw conflict("FINALIZED", "La atención está finalizada")
 }
 
 const ALLERGY_SEVERITIES = ["leve", "moderada", "severa", "desconocida"] as const
+/** Parentescos de los antecedentes familiares. */
+export const FAMILY_RELATIONSHIPS = [
+  "madre",
+  "padre",
+  "hijo",
+  "conyuge",
+  "hermano",
+  "abuelo",
+  "tio",
+  "otro_familiar",
+] as const
+/** Clasificación del estado físico de la American Society of Anesthesiologists. */
+export const ASA_CLASSES: readonly string[] = ["I", "II", "III", "IV", "V", "VI"]
 const CONDITION_STATUSES = ["activa", "resuelta", "inactiva"] as const
+/** Tipo de alérgeno; los anestésicos y materiales importan especialmente en odontología. */
+export const ALLERGY_CATEGORIES = [
+  "medicamento",
+  "anestesico",
+  "material",
+  "alimento",
+  "ambiental",
+  "otro",
+] as const
+/** Certeza de un diagnóstico codificado (registro HIS: P, D, R). */
+export const DIAGNOSIS_TYPES = ["presuntivo", "definitivo", "repetido"] as const
 const HEALTH_REVIEW_STATES = ["unknown", "none", "recorded"] as const
 const DOCUMENT_CATEGORIES = [
   "consentimiento",
@@ -120,15 +152,30 @@ export type HealthReviewState = (typeof HEALTH_REVIEW_STATES)[number]
 export interface HealthAllergyInput {
   id?: string
   substance: string
+  /** Tipo de alérgeno (catálogo); opcional. */
+  category?: string | null
   reaction?: string | null
-  /** Obligatoria y explícita: nunca se inventa una gravedad para guardar. */
-  severity: string
+  /** Sin dato se guarda «desconocida»: nunca se inventa una gravedad. */
+  severity?: string | null
+  /** Alergia o intolerancia; criticidad y verificación (HL7 FHIR AllergyIntolerance). */
+  kind?: string | null
+  criticality?: string | null
+  verification?: string | null
   isActive?: boolean
+}
+
+export interface FamilyHistoryInput {
+  relationship: string
+  condition: string
+  cie10Code?: string | null
+  notes?: string | null
 }
 
 export interface HealthConditionInput {
   id?: string
   name: string
+  /** Código CIE-10 que precisa la condición; opcional. */
+  cie10Code?: string | null
   status: string
   startDate?: string | null
   endDate?: string | null
@@ -138,6 +185,8 @@ export interface HealthConditionInput {
 export interface HealthMedicationInput {
   id?: string
   name: string
+  /** Principio activo (denominación común internacional); opcional. */
+  genericName?: string | null
   dose?: string | null
   frequency?: string | null
   startDate?: string | null
@@ -160,6 +209,10 @@ export interface SavePatientHealthInput {
   anamnesis?: { expectedVersion: number; answers: Record<string, unknown> }
   dataConsent?: true
   bloodGroup?: BloodGroup | null
+  /** Reemplaza los antecedentes familiares cuando se envía. */
+  familyHistory?: FamilyHistoryInput[]
+  /** Clasificación ASA del estado físico (I–VI); null la limpia. */
+  asaClass?: string | null
 }
 
 export type HealthAllergyRow = typeof patientAllergy.$inferSelect
@@ -170,6 +223,8 @@ export type AnamnesisRow = typeof patientAnamnesis.$inferSelect
 export interface PatientHealth {
   revision: number
   bloodGroup: BloodGroup | null
+  asaClass: string | null
+  familyHistory: Array<typeof patientFamilyHistory.$inferSelect>
   reviewedAt: Date | null
   reviewedBy: string | null
   reviewStatus: { allergies: string; conditions: string; medications: string }
@@ -262,14 +317,19 @@ function canonicalJson(value: unknown): string {
 interface ValidatedAllergy {
   id: string | null
   substance: string
+  category: string | null
   reaction: string | null
   severity: string
+  kind: string
+  criticality: string | null
+  verification: string
   isActive: boolean
 }
 
 interface ValidatedCondition {
   id: string | null
   name: string
+  cie10Code: string | null
   status: string
   startDate: string | null
   endDate: string | null
@@ -279,6 +339,7 @@ interface ValidatedCondition {
 interface ValidatedMedication {
   id: string | null
   name: string
+  genericName: string | null
   dose: string | null
   frequency: string | null
   startDate: string | null
@@ -289,16 +350,30 @@ interface ValidatedMedication {
 function validateAllergyRow(input: HealthAllergyInput): ValidatedAllergy {
   const substance = assertText(input.substance, 200, "substance", true) as string
   const reaction = assertText(input.reaction, 2000, "reaction", false)
-  if (!(ALLERGY_SEVERITIES as readonly string[]).includes(input.severity)) {
-    throw validation(
-      "severity debe ser leve, moderada, severa o desconocida (explícita, sin default)",
-    )
+  const severity = input.severity?.trim() || "desconocida"
+  if (!(ALLERGY_SEVERITIES as readonly string[]).includes(severity)) {
+    throw validation("severity debe ser leve, moderada, severa o desconocida")
   }
+  const kind = input.kind?.trim() || "alergia"
+  if (!["alergia", "intolerancia"].includes(kind)) throw validation("kind debe ser alergia o intolerancia")
+  const criticality = input.criticality?.trim() || null
+  if (criticality && !["baja", "alta", "no_evaluable"].includes(criticality))
+    throw validation("criticality debe ser baja, alta o no_evaluable")
+  const verification = input.verification?.trim() || "no_confirmada"
+  if (!["no_confirmada", "confirmada", "descartada"].includes(verification))
+    throw validation("verification debe ser no_confirmada, confirmada o descartada")
+  const category = input.category?.trim() || null
+  if (category && !(ALLERGY_CATEGORIES as readonly string[]).includes(category))
+    throw validation("category inválida para la alergia")
   return {
     id: input.id ?? null,
     substance,
+    category,
     reaction,
-    severity: input.severity,
+    severity,
+    kind,
+    criticality,
+    verification,
     isActive: input.isActive ?? true,
   }
 }
@@ -312,7 +387,8 @@ function validateConditionRow(input: HealthConditionInput): ValidatedCondition {
   if (!endDate && input.status === "resuelta") endDate = todayDate()
   assertDateRange(startDate, endDate)
   const notes = assertText(input.notes, 2000, "notes", false)
-  return { id: input.id ?? null, name, status: input.status, startDate, endDate, notes }
+  const cie10Code = input.cie10Code?.trim().toUpperCase() || null
+  return { id: input.id ?? null, name, cie10Code, status: input.status, startDate, endDate, notes }
 }
 
 function validateMedicationRow(input: HealthMedicationInput): ValidatedMedication {
@@ -323,7 +399,8 @@ function validateMedicationRow(input: HealthMedicationInput): ValidatedMedicatio
   const endDate = assertDateStr(input.endDate, "endDate")
   assertDateRange(startDate, endDate)
   const notes = assertText(input.notes, 2000, "notes", false)
-  return { id: input.id ?? null, name, dose, frequency, startDate, endDate, notes }
+  const genericName = assertText(input.genericName, 200, "genericName", false)
+  return { id: input.id ?? null, name, genericName, dose, frequency, startDate, endDate, notes }
 }
 export async function getPatientHealth(
   tx: Db,
@@ -336,6 +413,7 @@ export async function getPatientHealth(
       revision: patient.healthRevision,
       reviewStatus: patient.healthReviewStatus,
       bloodGroup: patient.bloodGroup,
+      asaClass: patient.asaClass,
       reviewedAt: patient.healthReviewedAt,
       reviewedBy: patient.healthReviewedBy,
     })
@@ -382,9 +460,21 @@ export async function getPatientHealth(
   const reviewStatus = (header.reviewStatus ?? {}) as Record<string, unknown>
   const stateOf = (value: unknown): string =>
     value === "none" || value === "recorded" ? (value as string) : "unknown"
+  const familyHistory = await tx
+    .select()
+    .from(patientFamilyHistory)
+    .where(
+      and(
+        eq(patientFamilyHistory.organizationId, orgId),
+        eq(patientFamilyHistory.patientId, patientId),
+      ),
+    )
+    .orderBy(asc(patientFamilyHistory.createdAt))
   return {
     revision: header.revision,
     bloodGroup: header.bloodGroup,
+    asaClass: header.asaClass,
+    familyHistory,
     reviewedAt: header.reviewedAt,
     reviewedBy: header.reviewedBy,
     reviewStatus: {
@@ -426,28 +516,52 @@ function assertReviewStatus(input: HealthReviewStatusInput): {
 }
 export type DeclaredPatientHealthInput = NonNullable<RegistrationAnswers["health"]>
 
-export async function initializeDeclaredPatientHealth(tx: Db, orgId: string, patientId: string, input: DeclaredPatientHealthInput, actorUserId: string | null): Promise<PatientHealth> {
+export async function initializeDeclaredPatientHealth(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+  input: DeclaredPatientHealthInput,
+  actorUserId: string | null,
+): Promise<PatientHealth> {
   const parsed = registrationAnswersSchema.shape.health.safeParse(input)
   if (!parsed.success || !parsed.data) throw validation("Declaración de salud inválida")
   const declared = parsed.data
-  const hasData = declared.bloodGroup != null ||
-    [declared.allergies, declared.conditions, declared.medications].some(group => group && group.state !== "unanswered") ||
+  const hasData =
+    declared.bloodGroup != null ||
+    [declared.allergies, declared.conditions, declared.medications].some(
+      (group) => group && group.state !== "unanswered",
+    ) ||
     Object.values(declared.dental ?? {}).some(Boolean)
   if (!hasData) return getPatientHealth(tx, orgId, patientId)
-  const state = (value: string | undefined) => value === "none" || value === "recorded" ? value : "unknown"
-  const dental = Object.fromEntries(Object.entries(declared.dental ?? {}).filter(([, value]) => value !== ""))
+  const state = (value: string | undefined) =>
+    value === "none" || value === "recorded" ? value : "unknown"
+  const dental = Object.fromEntries(
+    Object.entries(declared.dental ?? {}).filter(([, value]) => value !== ""),
+  )
   return persistPatientHealth(tx, orgId, { kind: "declaration", userId: actorUserId }, patientId, {
     expectedRevision: 0,
     bloodGroup: declared.bloodGroup,
-    reviewStatus: { allergies: state(declared.allergies?.state), conditions: state(declared.conditions?.state), medications: state(declared.medications?.state) },
-    allergies: (declared.allergies?.items ?? []).map(item => ({ ...item, isActive: true })),
-    conditions: (declared.conditions?.items ?? []).map(item => ({ ...item, status: "activa" })),
+    reviewStatus: {
+      allergies: state(declared.allergies?.state),
+      conditions: state(declared.conditions?.state),
+      medications: state(declared.medications?.state),
+    },
+    allergies: (declared.allergies?.items ?? []).map((item) => ({ ...item, isActive: true })),
+    conditions: (declared.conditions?.items ?? []).map((item) => ({ ...item, status: "activa" })),
     medications: declared.medications?.items ?? [],
-    ...(Object.keys(dental).length ? { anamnesis: { expectedVersion: 0, answers: { antecedentesOdontologicos: dental } } } : {}),
+    ...(Object.keys(dental).length
+      ? { anamnesis: { expectedVersion: 0, answers: { antecedentesOdontologicos: dental } } }
+      : {}),
   })
 }
 
-export async function savePatientHealth(tx: Db, orgId: string, actorUserId: string, patientId: string, input: SavePatientHealthInput): Promise<PatientHealth> {
+export async function savePatientHealth(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  patientId: string,
+  input: SavePatientHealthInput,
+): Promise<PatientHealth> {
   return persistPatientHealth(tx, orgId, { kind: "staff", userId: actorUserId }, patientId, input)
 }
 
@@ -459,7 +573,8 @@ async function persistPatientHealth(
   input: SavePatientHealthInput,
 ): Promise<PatientHealth> {
   const actorUserId = context.userId
-  if (input.bloodGroup != null && !(BLOOD_GROUPS as readonly string[]).includes(input.bloodGroup)) throw validation("Grupo sanguíneo inválido")
+  if (input.bloodGroup != null && !(BLOOD_GROUPS as readonly string[]).includes(input.bloodGroup))
+    throw validation("Grupo sanguíneo inválido")
   await requirePatient(tx, orgId, patientId)
   // Lock del paciente: serializa revisiones concurrentes del agregado.
   const [locked] = await tx
@@ -480,9 +595,29 @@ async function persistPatientHealth(
     )
   }
   if (context.kind === "declaration") {
-    const [registration] = await tx.select({ id: patientRegistration.id }).from(patientRegistration).where(and(eq(patientRegistration.organizationId, orgId), eq(patientRegistration.patientId, patientId))).limit(1)
+    const [registration] = await tx
+      .select({ id: patientRegistration.id })
+      .from(patientRegistration)
+      .where(
+        and(
+          eq(patientRegistration.organizationId, orgId),
+          eq(patientRegistration.patientId, patientId),
+        ),
+      )
+      .limit(1)
     const previous = await getPatientHealth(tx, orgId, patientId)
-    if (!registration || locked.revision !== 0 || previous.latestAnamnesis || previous.allergies.length || previous.conditions.length || previous.medications.length) throw conflict("HEALTH_ALREADY_INITIALIZED", "La declaración inicial requiere una ficha nueva sin antecedentes")
+    if (
+      !registration ||
+      locked.revision !== 0 ||
+      previous.latestAnamnesis ||
+      previous.allergies.length ||
+      previous.conditions.length ||
+      previous.medications.length
+    )
+      throw conflict(
+        "HEALTH_ALREADY_INITIALIZED",
+        "La declaración inicial requiere una ficha nueva sin antecedentes",
+      )
   }
   if (
     !Array.isArray(input.allergies) ||
@@ -590,6 +725,8 @@ async function persistPatientHealth(
   if (input.dataConsent !== undefined && input.dataConsent !== true) {
     throw validation("dataConsent solo admite true explícito")
   }
+  // Un código CIE-10 inexistente se rechaza antes de escribir nada.
+  for (const row of conditions) if (row.cie10Code) await assertDiagnosisCode(tx, row.cie10Code)
   // Aplicación de diffs (todo ya validado: cualquier fallo revierte todo).
   for (const row of allergies) {
     if (!row.id) {
@@ -597,8 +734,12 @@ async function persistPatientHealth(
         organizationId: orgId,
         patientId,
         substance: row.substance,
+        category: row.category,
         reaction: row.reaction,
         severity: row.severity,
+        kind: row.kind,
+        criticality: row.criticality,
+        verification: row.verification,
         isActive: row.isActive,
         createdBy: actorUserId,
       })
@@ -607,8 +748,12 @@ async function persistPatientHealth(
         .update(patientAllergy)
         .set({
           substance: row.substance,
+          category: row.category,
           reaction: row.reaction,
           severity: row.severity,
+          kind: row.kind,
+          criticality: row.criticality,
+          verification: row.verification,
           isActive: row.isActive,
           updatedAt: new Date(),
         })
@@ -627,6 +772,7 @@ async function persistPatientHealth(
         organizationId: orgId,
         patientId,
         name: row.name,
+        cie10Code: row.cie10Code,
         status: row.status,
         startDate: row.startDate,
         endDate: row.endDate,
@@ -638,6 +784,7 @@ async function persistPatientHealth(
         .update(patientCondition)
         .set({
           name: row.name,
+          cie10Code: row.cie10Code,
           status: row.status,
           startDate: row.startDate,
           endDate: row.endDate,
@@ -659,6 +806,7 @@ async function persistPatientHealth(
         organizationId: orgId,
         patientId,
         name: row.name,
+        genericName: row.genericName,
         dose: row.dose,
         frequency: row.frequency,
         startDate: row.startDate,
@@ -671,6 +819,7 @@ async function persistPatientHealth(
         .update(patientMedication)
         .set({
           name: row.name,
+          genericName: row.genericName,
           dose: row.dose,
           frequency: row.frequency,
           startDate: row.startDate,
@@ -712,10 +861,42 @@ async function persistPatientHealth(
       )
     }
   }
+  // Antecedentes familiares: se reemplazan cuando se envían (parentesco del
+  // catálogo, condición y CIE-10 opcional).
+  if (input.familyHistory !== undefined) {
+    if (!Array.isArray(input.familyHistory) || input.familyHistory.length > 50)
+      throw validation("familyHistory debe ser un arreglo de hasta 50 antecedentes")
+    const rows = input.familyHistory.map((row) => {
+      if (!(FAMILY_RELATIONSHIPS as readonly string[]).includes(row.relationship))
+        throw validation(`Parentesco inválido: ${row.relationship}`)
+      return {
+        relationship: row.relationship,
+        condition: assertText(row.condition, 200, "condition", true) as string,
+        cie10Code: row.cie10Code?.trim() || null,
+        notes: assertText(row.notes, 2000, "notes", false),
+      }
+    })
+    for (const row of rows) if (row.cie10Code) await assertDiagnosisCode(tx, row.cie10Code)
+    await tx
+      .delete(patientFamilyHistory)
+      .where(
+        and(
+          eq(patientFamilyHistory.organizationId, orgId),
+          eq(patientFamilyHistory.patientId, patientId),
+        ),
+      )
+    if (rows.length)
+      await tx.insert(patientFamilyHistory).values(
+        rows.map((row) => ({ ...row, organizationId: orgId, patientId, createdBy: actorUserId })),
+      )
+  }
+  if (input.asaClass !== undefined && input.asaClass !== null && !ASA_CLASSES.includes(input.asaClass))
+    throw validation("Clase ASA inválida (I–VI)")
   const setConsent = input.dataConsent === true && !locked.dataConsentAt
   await tx
     .update(patient)
     .set({
+      ...(input.asaClass !== undefined ? { asaClass: input.asaClass } : {}),
       healthRevision: locked.revision + 1,
       healthReviewStatus: reviewStatus,
       healthReviewedAt: context.kind === "staff" ? new Date() : null,
@@ -725,17 +906,25 @@ async function persistPatientHealth(
       updatedAt: new Date(),
     })
     .where(and(eq(patient.id, patientId), eq(patient.organizationId, orgId)))
-  await audit(tx, orgId, actorUserId, context.kind === "staff" ? "health.saved" : "health.declared", "patient", patientId, {
-    revision: { before: locked.revision, after: locked.revision + 1 },
-    reviewStatus,
-    counts: {
-      allergies: allergies.length,
-      conditions: conditions.length,
-      medications: medications.length,
+  await audit(
+    tx,
+    orgId,
+    actorUserId,
+    context.kind === "staff" ? "health.saved" : "health.declared",
+    "patient",
+    patientId,
+    {
+      revision: { before: locked.revision, after: locked.revision + 1 },
+      reviewStatus,
+      counts: {
+        allergies: allergies.length,
+        conditions: conditions.length,
+        medications: medications.length,
+      },
+      newInterviewVersion: newVersion,
+      dataConsent: setConsent,
     },
-    newInterviewVersion: newVersion,
-    dataConsent: setConsent,
-  })
+  )
   return getPatientHealth(tx, orgId, patientId)
 }
 
@@ -797,13 +986,29 @@ export async function addClinicalNote(
   orgId: string,
   actorUserId: string,
   patientId: string,
-  input: { note: string; diagnosisCode?: string | null; encounterId?: string },
+  input: {
+    note: string
+    diagnosisCode?: string | null
+    /** Certeza del diagnóstico; exige código. Sin indicar, queda sin clasificar. */
+    diagnosisType?: string | null
+    /** Pieza FDI a la que se refiere el diagnóstico. */
+    toothNumber?: number | null
+    encounterId?: string
+  },
 ) {
   await requirePatient(tx, orgId, patientId)
   if (input.encounterId) await requireDraftLink(tx, orgId, patientId, input.encounterId)
   const note = input.note?.trim() ?? ""
   if (note.length < 1 || note.length > 4000) throw validation("note debe tener 1–4000 caracteres")
-  if (input.diagnosisCode) await assertDiagnosisCode(tx, input.diagnosisCode)
+  // Una sola vía para diagnosticar: el diagnóstico es una entidad de la
+  // atención (`addEncounterDiagnosis`), no un campo de una nota suelta.
+  if (input.diagnosisCode || input.diagnosisType?.trim()) {
+    throw validation("Registra el diagnóstico en la sección Diagnóstico de la atención")
+  }
+  const diagnosisType = null
+  const toothNumber = input.toothNumber ?? null
+  if (toothNumber !== null && (!Number.isInteger(toothNumber) || !isValidTooth(toothNumber)))
+    throw validation("Pieza FDI inválida")
   const [row] = await tx
     .insert(clinicalNote)
     .values({
@@ -812,6 +1017,8 @@ export async function addClinicalNote(
       authorUserId: actorUserId,
       note,
       diagnosisCode: input.diagnosisCode ?? null,
+      diagnosisType,
+      toothNumber,
       encounterId: input.encounterId ?? null,
       kind: "evolucion",
     })
@@ -1291,6 +1498,14 @@ export interface PatientDocumentWithContext {
   sizeBytes: number
   uploadedBy: string | null
   createdAt: Date
+  imageType: string | null
+  capturedAt: Date | null
+  source: string | null
+  reportStatus: string | null
+  thumbnailKey: string | null
+  retiredAt: Date | null
+  retiredBy: string | null
+  retireReason: string | null
   encounterId: string | null
   planItemId: string | null
   budgetId: string | null
@@ -1417,6 +1632,14 @@ function mergeDocumentContext(
     sizeBytes: doc.sizeBytes,
     uploadedBy: doc.uploadedBy,
     createdAt: doc.createdAt,
+    imageType: doc.imageType,
+    capturedAt: doc.capturedAt,
+    source: doc.source,
+    reportStatus: doc.reportStatus,
+    thumbnailKey: doc.thumbnailKey,
+    retiredAt: doc.retiredAt,
+    retiredBy: doc.retiredBy,
+    retireReason: doc.retireReason,
     encounterId: ctx?.encounterId ?? null,
     planItemId: ctx?.planItemId ?? null,
     budgetId: ctx?.budgetId ?? null,
@@ -1448,15 +1671,24 @@ async function requireDocumentRow(tx: Db, orgId: string, patientId: string, docu
 
 function extendedDocumentLinks(input: DocumentContextInput, current?: DocumentContextRow) {
   return {
-    budgetId: input.budgetId === undefined ? current?.budgetId ?? null : input.budgetId,
-    encounterProcedureId: input.encounterProcedureId === undefined ? current?.encounterProcedureId ?? null : input.encounterProcedureId,
-    prescriptionId: input.prescriptionId === undefined ? current?.prescriptionId ?? null : input.prescriptionId,
-    followUpId: input.followUpId === undefined ? current?.followUpId ?? null : input.followUpId,
-    paymentId: input.paymentId === undefined ? current?.paymentId ?? null : input.paymentId,
+    budgetId: input.budgetId === undefined ? (current?.budgetId ?? null) : input.budgetId,
+    encounterProcedureId:
+      input.encounterProcedureId === undefined
+        ? (current?.encounterProcedureId ?? null)
+        : input.encounterProcedureId,
+    prescriptionId:
+      input.prescriptionId === undefined ? (current?.prescriptionId ?? null) : input.prescriptionId,
+    followUpId: input.followUpId === undefined ? (current?.followUpId ?? null) : input.followUpId,
+    paymentId: input.paymentId === undefined ? (current?.paymentId ?? null) : input.paymentId,
   }
 }
 
-async function validateExtendedDocumentLinks(tx: Db, orgId: string, patientId: string, input: DocumentContextInput) {
+async function validateExtendedDocumentLinks(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+  input: DocumentContextInput,
+) {
   for (const [id, table, label] of [
     [input.budgetId, treatmentBudget, "Presupuesto"],
     [input.prescriptionId, prescription, "Receta"],
@@ -1464,17 +1696,72 @@ async function validateExtendedDocumentLinks(tx: Db, orgId: string, patientId: s
     [input.paymentId, patientPayment, "Pago"],
   ] as const) {
     if (!id) continue
-    const [row] = await tx.select({ id: table.id }).from(table)
+    const [row] = await tx
+      .select({ id: table.id })
+      .from(table)
       .where(and(eq(table.id, id), eq(table.organizationId, orgId), eq(table.patientId, patientId)))
     if (!row) throw notFound(label)
   }
   if (input.encounterProcedureId) {
-    const [row] = await tx.select({ id: encounterProcedure.id }).from(encounterProcedure)
-      .innerJoin(encounter, and(eq(encounter.id, encounterProcedure.encounterId),
-        eq(encounter.organizationId, orgId), eq(encounter.patientId, patientId)))
-      .where(and(eq(encounterProcedure.id, input.encounterProcedureId), eq(encounterProcedure.organizationId, orgId)))
+    const [row] = await tx
+      .select({ id: encounterProcedure.id })
+      .from(encounterProcedure)
+      .innerJoin(
+        encounter,
+        and(
+          eq(encounter.id, encounterProcedure.encounterId),
+          eq(encounter.organizationId, orgId),
+          eq(encounter.patientId, patientId),
+        ),
+      )
+      .where(
+        and(
+          eq(encounterProcedure.id, input.encounterProcedureId),
+          eq(encounterProcedure.organizationId, orgId),
+        ),
+      )
     if (!row) throw notFound("Procedimiento")
   }
+}
+
+/** Metadatos de la imagen diagnóstica al subirla (inmutables después). */
+export interface DocumentImageInput {
+  imageType?: string | null
+  /** Fecha y hora de la toma (ISO 8601); la de subida la pone el servidor. */
+  capturedAt?: string | Date | null
+  source?: string | null
+  reportStatus?: string | null
+}
+
+function normalizeImageInput(category: string, input: DocumentImageInput) {
+  let imageType: ImageType | null = null
+  if (input.imageType) {
+    if (!isImageType(input.imageType)) throw validation(`Tipo de imagen no reconocido: ${input.imageType}`)
+    if (imageTypeCategory(input.imageType) !== category)
+      throw validation(
+        `${IMAGE_TYPE_LABELS[input.imageType]} no corresponde a la categoría ${category}`,
+      )
+    imageType = input.imageType
+  }
+  let capturedAt: Date | null = null
+  if (input.capturedAt) {
+    capturedAt = input.capturedAt instanceof Date ? input.capturedAt : new Date(input.capturedAt)
+    if (Number.isNaN(capturedAt.getTime())) throw validation("La fecha de toma no es válida")
+    // Margen de cinco minutos por relojes de equipos desfasados.
+    if (capturedAt.getTime() > Date.now() + 5 * 60_000)
+      throw validation("La fecha de toma no puede ser futura")
+  }
+  const source = input.source?.trim() || null
+  if (source && source.length > 120) throw validation("El origen debe tener hasta 120 caracteres")
+  let reportStatus: ReportStatus | null = null
+  if (input.reportStatus) {
+    if (!(REPORT_STATUSES as readonly string[]).includes(input.reportStatus))
+      throw validation(`Estado de informe no reconocido: ${input.reportStatus}`)
+    reportStatus = input.reportStatus as ReportStatus
+  } else if (category === "radiografia") {
+    reportStatus = "pendiente"
+  }
+  return { imageType, capturedAt, source, reportStatus }
 }
 
 export async function registerPatientDocument(
@@ -1488,13 +1775,17 @@ export async function registerPatientDocument(
     storageKey: string
     contentType: string
     sizeBytes: number
-  } & DocumentContextInput,
+    /** Miniatura ya almacenada (solo imágenes). */
+    thumbnailKey?: string | null
+  } & DocumentContextInput &
+    DocumentImageInput,
 ): Promise<PatientDocumentWithContext> {
   await requirePatient(tx, orgId, patientId)
   if (!(DOCUMENT_CATEGORIES as readonly string[]).includes(input.category))
     throw validation("category inválida")
   const label = input.label?.trim() ?? ""
   if (!label || label.length > 200) throw validation("label debe tener 1–200 caracteres")
+  const image = normalizeImageInput(input.category, input)
   if (!input.storageKey) throw validation("storageKey es obligatorio")
   const toothNumbers = normalizeDocumentTeeth(input.toothNumbers)
   const tags = normalizeDocumentTags(input.tags)
@@ -1513,6 +1804,8 @@ export async function registerPatientDocument(
       contentType: input.contentType,
       sizeBytes: input.sizeBytes,
       uploadedBy: actorUserId,
+      thumbnailKey: input.thumbnailKey ?? null,
+      ...image,
     })
     .returning()
   if (!row) throw new Error("No se pudo registrar el documento")
@@ -1547,6 +1840,7 @@ export async function registerPatientDocument(
   await audit(tx, orgId, actorUserId, "document.uploaded", "patient_document", row.id, {
     patientId,
     category: input.category,
+    imageType: image.imageType,
     contextVersion: 1,
     encounterId: input.encounterId ?? null,
     planItemId: input.planItemId ?? null,
@@ -1576,17 +1870,52 @@ async function latestDocumentContexts(
     .orderBy(patientDocumentContext.documentId, desc(patientDocumentContext.version))
 }
 
+/** Filtros del archivo clínico. Sin `includeRetired` los retirados no aparecen. */
+export interface DocumentListFilters {
+  category?: string
+  imageType?: string
+  tooth?: number
+  planItemId?: string
+  /** Desde/hasta (AAAA-MM-DD) sobre la fecha de toma o, si falta, la de subida. */
+  from?: string
+  to?: string
+  includeRetired?: boolean
+}
+
 export async function listPatientDocuments(
   tx: Db,
   orgId: string,
   patientId: string,
+  filters: DocumentListFilters = {},
 ): Promise<PatientDocumentWithContext[]> {
   await requirePatient(tx, orgId, patientId)
+  const conditions = [
+    eq(patientDocument.patientId, patientId),
+    eq(patientDocument.organizationId, orgId),
+  ]
+  if (!filters.includeRetired) conditions.push(isNull(patientDocument.retiredAt))
+  if (filters.category) conditions.push(eq(patientDocument.category, filters.category))
+  if (filters.imageType) conditions.push(eq(patientDocument.imageType, filters.imageType))
+  const takenAt = sql`coalesce(${patientDocument.capturedAt}, ${patientDocument.createdAt})`
+  for (const [key, value] of [
+    ["from", filters.from],
+    ["to", filters.to],
+  ] as const) {
+    if (!value) continue
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) throw validation(`${key} debe ser AAAA-MM-DD`)
+    conditions.push(
+      key === "from"
+        ? sql`${takenAt} >= ${value}::date`
+        : sql`${takenAt} < (${value}::date + interval '1 day')`,
+    )
+  }
+  if (filters.tooth != null && !isValidTooth(filters.tooth))
+    throw validation(`Pieza FDI inválida: ${filters.tooth}`)
   const docs = await tx
     .select()
     .from(patientDocument)
-    .where(and(eq(patientDocument.patientId, patientId), eq(patientDocument.organizationId, orgId)))
-    .orderBy(desc(patientDocument.createdAt))
+    .where(and(...conditions))
+    .orderBy(desc(takenAt), desc(patientDocument.id))
   if (!docs.length) return []
   const latest = await latestDocumentContexts(
     tx,
@@ -1595,7 +1924,90 @@ export async function listPatientDocuments(
     docs.map((doc) => doc.id),
   )
   const byDocument = new Map(latest.map((ctx) => [ctx.documentId, ctx]))
-  return docs.map((doc) => mergeDocumentContext(doc, byDocument.get(doc.id) ?? null))
+  // Pieza y tratamiento viven en el contexto vigente: se filtran tras fusionar.
+  return docs
+    .map((doc) => mergeDocumentContext(doc, byDocument.get(doc.id) ?? null))
+    .filter(
+      (doc) =>
+        (filters.tooth == null || doc.toothNumbers.includes(filters.tooth)) &&
+        (!filters.planItemId || doc.planItemId === filters.planItemId),
+    )
+}
+
+/**
+ * Retira un archivo cargado por error (paciente equivocado, duplicado,
+ * ilegible). No se borra: sale de la galería, conserva el blob, el contexto y
+ * la traza de quién lo retiró, cuándo y por qué.
+ */
+export async function retirePatientDocument(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  patientId: string,
+  documentId: string,
+  input: { reason: string },
+): Promise<PatientDocumentWithContext> {
+  await requirePatient(tx, orgId, patientId)
+  const reason = input.reason?.trim() ?? ""
+  if (!reason || reason.length > 2000) throw validation("El motivo debe tener 1–2000 caracteres")
+  const [current] = await tx
+    .select()
+    .from(patientDocument)
+    .where(
+      and(
+        eq(patientDocument.id, documentId),
+        eq(patientDocument.organizationId, orgId),
+        eq(patientDocument.patientId, patientId),
+      ),
+    )
+    .for("update")
+  if (!current) throw notFound("Documento")
+  if (current.retiredAt)
+    throw new ServiceError("DOCUMENT_RETIRED", 409, "El archivo ya está retirado")
+  const [row] = await tx
+    .update(patientDocument)
+    .set({ retiredAt: new Date(), retiredBy: actorUserId, retireReason: reason })
+    .where(and(eq(patientDocument.id, documentId), eq(patientDocument.organizationId, orgId)))
+    .returning()
+  await audit(tx, orgId, actorUserId, "document.retired", "patient_document", documentId, {
+    patientId,
+    reason,
+  })
+  return mergeDocumentContext(
+    row!,
+    await currentDocumentContext(tx, orgId, patientId, documentId, false),
+  )
+}
+
+/** Marca el informe de una imagen (pendiente, informada, no requiere). */
+export async function setDocumentReportStatus(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  patientId: string,
+  documentId: string,
+  input: { reportStatus: string },
+): Promise<PatientDocumentWithContext> {
+  await requirePatient(tx, orgId, patientId)
+  if (!(REPORT_STATUSES as readonly string[]).includes(input.reportStatus))
+    throw validation(`Estado de informe no reconocido: ${input.reportStatus}`)
+  const current = await requireDocumentRow(tx, orgId, patientId, documentId)
+  if (current.retiredAt)
+    throw new ServiceError("DOCUMENT_RETIRED", 409, "El archivo está retirado")
+  const [row] = await tx
+    .update(patientDocument)
+    .set({ reportStatus: input.reportStatus })
+    .where(and(eq(patientDocument.id, documentId), eq(patientDocument.organizationId, orgId)))
+    .returning()
+  await audit(tx, orgId, actorUserId, "document.report_status", "patient_document", documentId, {
+    patientId,
+    from: current.reportStatus,
+    to: input.reportStatus,
+  })
+  return mergeDocumentContext(
+    row!,
+    await currentDocumentContext(tx, orgId, patientId, documentId, false),
+  )
 }
 
 export async function getPatientDocument(
@@ -1661,6 +2073,8 @@ export async function correctDocumentContext(
 ): Promise<PatientDocumentWithContext> {
   await requirePatient(tx, orgId, patientId)
   const row = await requireDocumentRow(tx, orgId, patientId, documentId)
+  if (row.retiredAt)
+    throw new ServiceError("DOCUMENT_RETIRED", 409, "El archivo está retirado: su contexto ya no se corrige")
   const current = await currentDocumentContext(tx, orgId, patientId, documentId, true)
   if (!current) throw notFound("Contexto del documento")
   if (!Number.isInteger(input.expectedVersion) || input.expectedVersion < 1) {
@@ -1771,6 +2185,7 @@ export async function listEncounterDocuments(
       and(
         eq(patientDocument.patientId, patientId),
         eq(patientDocument.organizationId, orgId),
+        isNull(patientDocument.retiredAt),
         inArray(
           patientDocument.id,
           current.map((ctx) => ctx.documentId),
@@ -1788,12 +2203,35 @@ export async function listEncounterDocuments(
     .map((entry) => mergeDocumentContext(entry.doc, entry.ctx))
 }
 
+/**
+ * Búsqueda por código o descripción. Cada fila dice si es una categoría de
+ * tres caracteres con subcódigos: esas no se registran como diagnóstico, se
+ * usa el subcódigo más específico (regla de codificación de la CIE-10).
+ */
 export async function searchCie10(tx: Db, q: string, limit = 20) {
   const like = `%${q}%`
   return tx
-    .select()
+    .select({
+      code: cie10Code.code,
+      description: cie10Code.description,
+      isCategory: sql<boolean>`exists (select 1 from ${cie10Code} as sub where sub.code like ${cie10Code.code} || '.%')`,
+    })
     .from(cie10Code)
     .where(sql`${cie10Code.code} ilike ${like} or ${cie10Code.description} ilike ${like}`)
     .orderBy(asc(cie10Code.code))
     .limit(Math.min(Math.max(limit, 1), 50))
+}
+
+/** Falla si el código es una categoría con subcódigos (no es codificable). */
+export async function assertCodableCie10(tx: Db, code: string): Promise<void> {
+  if (code.includes(".")) return
+  const [sub] = await tx
+    .select({ code: cie10Code.code })
+    .from(cie10Code)
+    .where(sql`${cie10Code.code} like ${`${code}.%`}`)
+    .limit(1)
+  if (sub)
+    throw validation(
+      `${code} es una categoría: registra el subcódigo más específico (p. ej. ${sub.code})`,
+    )
 }

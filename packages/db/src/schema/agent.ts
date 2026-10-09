@@ -128,6 +128,12 @@ export const agentProposal = pgTable(
     organizationId: orgFk("organization_id"),
     conversationId: uuid("conversation_id").references(() => conversation.id),
     contactId: uuid("contact_id").references(() => contact.id),
+    /**
+     * Paciente sobre el que actúa la propuesta (nulo en actos comerciales sin
+     * ficha). Columna propia para listarlas en la ficha; la FK compuesta por
+     * organización vive en la migración (evita el ciclo con clinical.ts).
+     */
+    patientId: uuid("patient_id"),
     action: text("action").notNull(),
     status: text("status").notNull().default("propuesta"),
     payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
@@ -155,6 +161,7 @@ export const agentProposal = pgTable(
   (table) => [
     index("agent_proposal_org_idx").on(table.organizationId, table.status, table.createdAt),
     index("agent_proposal_conversation_idx").on(table.conversationId),
+    index("agent_proposal_org_patient_idx").on(table.organizationId, table.patientId, table.status),
     uniqueIndex("agent_proposal_org_key_uidx").on(table.organizationId, table.idempotencyKey),
     check(
       "agent_proposal_action_check",

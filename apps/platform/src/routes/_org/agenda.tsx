@@ -26,10 +26,11 @@ import {
   zonedDateOf,
 } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { createFileRoute } from "@tanstack/react-router"
+import { createFileRoute, Link } from "@tanstack/react-router"
 import { ChevronLeft, ChevronRight, Plus } from "lucide-react"
 import * as React from "react"
 import { AgendaSlotPicker } from "../../components/agenda-slot-picker"
+import { NewEncounterButton } from "../../components/patient/new-encounter-button"
 import type {
   AgendaAppointment,
   AgendaResources,
@@ -811,6 +812,34 @@ function AppointmentEditor({
       submitLabel={appointment ? "Guardar cambios" : "Crear cita"}
     >
       <div className="grid gap-4">
+        {/* De la cita a la persona: la ficha conserva el contexto de quien se atiende. */}
+        {(appointment ?? context) ? (
+          <p className="text-sm">
+            <Link
+              to="/patients/$patientId"
+              params={{ patientId: appointment?.patientId ?? context?.patientId ?? "" }}
+              className="font-medium text-primary underline underline-offset-4"
+            >
+              Abrir la ficha de {appointment?.patientName ?? context?.patientName}
+            </Link>
+          </p>
+        ) : null}
+        {appointment && ["programada", "confirmada"].includes(appointment.status) ? (
+          <div className="flex flex-wrap items-center gap-3">
+            <NewEncounterButton
+              patientId={appointment.patientId}
+              appointment={{
+                id: appointment.id,
+                dentistUserId: appointment.dentistUserId,
+                reason: appointment.reason,
+                serviceName: appointment.serviceName,
+              }}
+            />
+            <span className="text-xs text-muted-foreground">
+              Abre la atención clínica vinculada a esta cita.
+            </span>
+          </div>
+        ) : null}
         {context ? (
           <div>
             <FieldLabel>Paciente del caso</FieldLabel>

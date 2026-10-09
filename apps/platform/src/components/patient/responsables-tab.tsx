@@ -5,6 +5,7 @@
  * Solo los contactos ya vinculados al paciente pueden recibir un rol; la
  * responsabilidad se revoca con motivo y se conserva en la historia.
  */
+
 import { Badge, Button, Field, FieldLabel, Input, Textarea } from "@odentia/ui"
 import { EmptyState, FormDrawer } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
@@ -22,6 +23,7 @@ import {
 } from "../../lib/clinical-journey"
 import { usePermission } from "../../lib/crm"
 import type { PatientDocument, PatientFull } from "../../lib/patients"
+import { ChoiceSelect } from "../ui/choice-select"
 
 const MAX_TEXT = 2000
 
@@ -33,6 +35,7 @@ export function ResponsablesTab({ patientId }: { patientId: string }): React.JSX
   const uid = useId()
   const canWrite = usePermission("patients.write")
   const canRead = usePermission("patients.read")
+  const canDocuments = usePermission("clinical.read")
   const queryClient = useQueryClient()
   const list = useQuery({
     queryKey: ["responsibilities", patientId],
@@ -47,7 +50,7 @@ export function ResponsablesTab({ patientId }: { patientId: string }): React.JSX
   const documents = useQuery({
     queryKey: ["patient-documents", patientId],
     queryFn: () => apiFetch<{ data: PatientDocument[] }>(`/api/patients/${patientId}/documents`),
-    enabled: canRead,
+    enabled: canDocuments,
   })
 
   const [grantOpen, setGrantOpen] = useState(false)
@@ -218,9 +221,9 @@ export function ResponsablesTab({ patientId }: { patientId: string }): React.JSX
         <div className="flex flex-col gap-4">
           <Field>
             <FieldLabel htmlFor={`${uid}-resp-contact`}>Contacto vinculado</FieldLabel>
-            <select
+            <ChoiceSelect
               id={`${uid}-resp-contact`}
-              className="h-9 w-full rounded-md border bg-background px-3 text-sm"
+              className="w-full"
               value={contactId}
               onChange={(event) => setContactId(event.target.value)}
             >
@@ -230,13 +233,13 @@ export function ResponsablesTab({ patientId }: { patientId: string }): React.JSX
                   {contact.displayName}
                 </option>
               ))}
-            </select>
+            </ChoiceSelect>
           </Field>
           <Field>
             <FieldLabel htmlFor={`${uid}-resp-kind`}>Responsabilidad</FieldLabel>
-            <select
+            <ChoiceSelect
               id={`${uid}-resp-kind`}
-              className="h-9 w-full rounded-md border bg-background px-3 text-sm"
+              className="w-full"
               value={kind}
               onChange={(event) => setKind(event.target.value as ResponsibilityKind)}
             >
@@ -245,7 +248,7 @@ export function ResponsablesTab({ patientId }: { patientId: string }): React.JSX
                   {RESPONSIBILITY_KIND_LABELS[value]}
                 </option>
               ))}
-            </select>
+            </ChoiceSelect>
           </Field>
           <Field>
             <FieldLabel htmlFor={`${uid}-resp-start`}>Vigente desde</FieldLabel>
@@ -267,9 +270,9 @@ export function ResponsablesTab({ patientId }: { patientId: string }): React.JSX
           </Field>
           <Field>
             <FieldLabel htmlFor={`${uid}-resp-evidence`}>Documento de respaldo</FieldLabel>
-            <select
+            <ChoiceSelect
               id={`${uid}-resp-evidence`}
-              className="h-9 w-full rounded-md border bg-background px-3 text-sm"
+              className="w-full"
               value={evidenceDocumentId}
               onChange={(event) => setEvidenceDocumentId(event.target.value)}
             >
@@ -279,7 +282,7 @@ export function ResponsablesTab({ patientId }: { patientId: string }): React.JSX
                   {document.label}
                 </option>
               ))}
-            </select>
+            </ChoiceSelect>
           </Field>
           <Field>
             <FieldLabel htmlFor={`${uid}-resp-notes`}>Notas</FieldLabel>
