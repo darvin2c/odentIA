@@ -185,18 +185,22 @@ for (const viewport of [
       if (viewport.width >= 1280) {
         const separator = page.getByRole("separator", { name: "Redimensionar panel", exact: true })
         const beforeValue = Number(await separator.getAttribute("aria-valuenow"))
-        const master = page.locator("#master")
-        const beforeWidth = await master.evaluate(
+        // El formulario va en la columna lateral del layout, a todo el alto.
+        const column = page.getByRole("complementary", { name: "Panel lateral", exact: true })
+        const beforeWidth = await column.evaluate(
           (element) => element.getBoundingClientRect().width,
+        )
+        expect(await column.evaluate((element) => element.getBoundingClientRect().height)).toBe(
+          viewport.height,
         )
         await separator.focus()
         await separator.press("ArrowRight")
         await expect
-          .poll(() => master.evaluate((element) => element.getBoundingClientRect().width))
-          .toBeGreaterThan(beforeWidth)
+          .poll(() => column.evaluate((element) => element.getBoundingClientRect().width))
+          .toBeLessThan(beforeWidth)
         await expect
           .poll(async () => Number(await separator.getAttribute("aria-valuenow")))
-          .toBeGreaterThan(beforeValue)
+          .toBeLessThan(beforeValue)
         await separator.press("Escape")
         await expect(dialog).not.toBeVisible()
         await expect(create).toBeFocused()

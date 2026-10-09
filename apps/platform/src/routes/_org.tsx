@@ -12,6 +12,7 @@ import {
   type AppShellNavItem,
   HeaderUtilitiesProvider,
   LoadingState,
+  SideDockProvider,
 } from "@odentia/ui-patterns"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import {
@@ -238,18 +239,20 @@ function OrgLayout() {
         window.location.assign(panelUrl("/login"))
       }}
     >
-      <AgentPanelProvider>
-        <HeaderUtilitiesProvider
-          value={
-            <>
-              <WorkspaceNotifications />
-              <AgentPanelButton />
-            </>
-          }
-        >
-          <Outlet />
-        </HeaderUtilitiesProvider>
-      </AgentPanelProvider>
+      <SideDockProvider>
+        <AgentPanelProvider>
+          <HeaderUtilitiesProvider
+            value={
+              <>
+                <WorkspaceNotifications />
+                <AgentPanelButton />
+              </>
+            }
+          >
+            <Outlet />
+          </HeaderUtilitiesProvider>
+        </AgentPanelProvider>
+      </SideDockProvider>
     </AppShell>
   )
 }

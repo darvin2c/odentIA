@@ -1,5 +1,13 @@
 import { cn, ResizableHandle, ResizablePanel, ResizablePanelGroup, usePanelRef } from "@odentia/ui"
 import * as React from "react"
+import { common } from "./common.js"
+import {
+  SideColumn,
+  type SideColumnWidth,
+  SideDockPortal,
+  useSideColumnWidth,
+  useSideDock,
+} from "./side-dock.js"
 
 /** Corte del modo panel: el ancho donde tabla y tarjeta caben a la vez. */
 const PANEL_QUERY = "(min-width: 1280px)"
@@ -41,6 +49,15 @@ const PANEL_SIZES: Record<DetailPanelSize, { default: string; min: string; max: 
   lg: { default: "32rem", min: "26rem", max: "40rem" },
   xl: { default: "40rem", min: "32rem", max: "52rem" },
 }
+
+/** Los mismos anchos, en px, cuando el detalle va en la columna del layout. */
+const DOCK_SIZES: Record<DetailPanelSize, SideColumnWidth> = {
+  md: { initial: 384, min: 320, max: 512 },
+  lg: { initial: 512, min: 416, max: 640 },
+  xl: { initial: 640, min: 512, max: 832 },
+}
+/** Ancho que el detalle deja a la lista: el mínimo de la columna maestra. */
+const MASTER_MIN_WIDTH = 512
 
 // Corrige el modo antes del primer paint (sin flash drawer→panel); en el
 // servidor cae a `useEffect` para no emitir el aviso de `useLayoutEffect`.
@@ -157,6 +174,12 @@ export interface MasterDetailProps {
  *
  * Con `prefers-reduced-motion: reduce` no se anima nada: ni el ancho ni el
  * deslizamiento.
+ *
+ * Con columna lateral en el layout (`SideDockProvider`), el detalle no va en
+ * un group dentro de la página: se monta en esa columna, a todo el alto de la
+ * ventana y pegado al borde derecho, igual que el panel del agente. La lista
+ * queda como en modo `drawer` (ancho completo, scroll de página) y
+ * `listScroll` no aplica. El detalle se desmonta al cerrar.
  */
 export function MasterDetail({
   children,
@@ -166,6 +189,11 @@ export function MasterDetail({
   className,
 }: MasterDetailProps) {
   const mode = useDetailMode()
+  const dock = useSideDock()
+  const [dockWidth, resizeDock] = useSideColumnWidth(
+    `odentia.side-panel.${panelSize}`,
+    DOCK_SIZES[panelSize],
+  )
   const open = panel != null
   const pageScroll = listScroll === "page"
   const size = PANEL_SIZES[panelSize]
@@ -238,8 +266,28 @@ export function MasterDetail({
     }
   }, [mode, open])
 
-  if (mode === "drawer") {
-    return <div className={cn("flex min-w-0 flex-col gap-6", className)}>{children}</div>
+  if (mode === "drawer" || dock.available) {
+    return (
+      <>
+        <div className={cn("flex min-w-0 flex-col gap-6", className)}>{children}</div>
+        {mode === "panel" && open ? (
+          <SideDockPortal>
+            <SideColumn
+              aria-label={common.sidePanel.label}
+              width={dockWidth}
+              onResize={resizeDock}
+              bounds={DOCK_SIZES[panelSize]}
+              pageMinWidth={MASTER_MIN_WIDTH}
+              resizeLabel={common.sidePanel.resize}
+            >
+              <div ref={detailContentRef} className="flex h-full min-h-0 flex-col">
+                {panel}
+              </div>
+            </SideColumn>
+          </SideDockPortal>
+        ) : null}
+      </>
+    )
   }
 
   return (

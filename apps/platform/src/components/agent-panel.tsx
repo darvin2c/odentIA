@@ -14,14 +14,18 @@ import {
   TabsList,
   TabsTrigger,
   useIsMobile,
-  useSidebar,
 } from "@odentia/ui"
 import {
   AgentMark,
   ConfirmDialog,
   EmptyState,
   LoadingState,
+  SideColumn,
+  SideDockSlot,
   SubmitButton,
+  useSideColumnWidth,
+  useSideDock,
+  useSidebarWidth,
 } from "@odentia/ui-patterns"
 import { type QueryClient, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link, useRouterState } from "@tanstack/react-router"
@@ -99,10 +103,8 @@ const PAGE_MIN_WIDTH = 848
 const PAGE_WITH_CONTEXT_WIDTH = 1248
 const PANEL_ID = "panel-del-agente"
 /** Ancho de la columna en px: ajustable con el tirador y recordado en este navegador. */
-const DOCK_WIDTH = { initial: 384, min: 320, max: 640, step: 16 }
+const DOCK_WIDTH = { initial: 384, min: 320, max: 640 }
 const DOCK_WIDTH_KEY = "odentia.agent-panel.width"
-const clampDockWidth = (value: number) =>
-  Math.min(DOCK_WIDTH.max, Math.max(DOCK_WIDTH.min, Math.round(value)))
 
 const useEffectBeforePaint: typeof useEffect =
   typeof window === "undefined" ? useEffect : useLayoutEffect
@@ -157,11 +159,6 @@ const AgentPanelContext = createContext<AgentPanelState>({
 export function useAgentPanel(): Pick<AgentPanelState, "open" | "docked" | "setOpen"> {
   const { open, docked, setOpen } = useContext(AgentPanelContext)
   return { open, docked, setOpen }
-}
-
-/** Ancho real del sidebar: abierto o reducido a iconos. */
-function useSidebarWidth(): number {
-  return useSidebar().state === "expanded" ? 256 : 48
 }
 
 /** La Bandeja pregunta si, con la columna a su ancho actual, cabe además «Contexto». */
@@ -230,24 +227,13 @@ export function AgentPanelProvider({ children }: { children: ReactNode }) {
   const [docked, setDocked] = useState(false)
   const dockedRef = useRef(docked)
   dockedRef.current = docked
-  const [dockWidth, setDockWidthState] = useState(DOCK_WIDTH.initial)
-  useEffect(() => {
-    try {
-      const stored = Number(window.localStorage.getItem(DOCK_WIDTH_KEY))
-      if (Number.isFinite(stored) && stored > 0) setDockWidthState(clampDockWidth(stored))
-    } catch {
-      // Sin almacenamiento (modo privado): queda el ancho por defecto.
-    }
-  }, [])
-  const setDockWidth = useCallback((next: number) => {
-    const clamped = clampDockWidth(next)
-    setDockWidthState(clamped)
-    try {
-      window.localStorage.setItem(DOCK_WIDTH_KEY, String(clamped))
-    } catch {
-      // El ancho vale para esta sesión aunque no se pueda recordar.
-    }
-  }, [])
+  const [dockWidth, setDockWidth] = useSideColumnWidth(DOCK_WIDTH_KEY, DOCK_WIDTH)
+  // La columna del layout es una sola: si una página ya tiene ahí un formulario
+  // o un detalle, el agente se abre como cajón; y si lo abre con el agente en
+  // la columna, el agente le cede el sitio.
+  const { occupied } = useSideDock()
+  const occupiedRef = useRef(occupied)
+  occupiedRef.current = occupied
   const setOpen = useCallback((next: boolean, nextTab?: AgentPanelTab) => {
     if (next) {
       const active = document.activeElement
@@ -256,13 +242,16 @@ export function AgentPanelProvider({ children }: { children: ReactNode }) {
         openerRef.current = active instanceof HTMLElement && active !== document.body ? active : null
       }
       setTab(nextTab ?? "decidir")
-      setDocked(wideRef.current && dockBlockers.current === 0)
+      setDocked(wideRef.current && dockBlockers.current === 0 && !occupiedRef.current)
     }
     setOpenState(next)
   }, [])
   useEffect(() => {
     if (!wide) setDocked(false)
   }, [wide])
+  useEffect(() => {
+    if (occupied && dockedRef.current) setOpenState(false)
+  }, [occupied])
   // Los enlaces del panel no lo cierran al clic: si la página protege un
   // borrador y el usuario elige seguir editando, el panel sigue tal cual. El
   // cajón se cierra cuando la navegación se confirma (cambia la ubicación); la
@@ -293,6 +282,7 @@ export function AgentPanelProvider({ children }: { children: ReactNode }) {
       {/* La estructura no cambia al abrir o cerrar: la página nunca se remonta. */}
       <div className="flex min-w-0 flex-1">
         <div className="flex min-w-0 flex-1 flex-col">{children}</div>
+        <SideDockSlot />
         <DockedAgentPanel />
       </div>
       <AgentPanelDrawer />
@@ -409,7 +399,6 @@ function DockedAgentPanel() {
     dockWidth: width,
     setDockWidth: resize,
   } = useContext(AgentPanelContext)
-  const sidebarWidth = useSidebarWidth()
   const canSee = useCanSeePanel()
   const shown = open && docked && canSee
   const summary = useAgentPanelSummary(shown)
@@ -429,18 +418,17 @@ function DockedAgentPanel() {
     requestAnimationFrame(() => target?.focus())
   }
   return (
-    <aside
+    <SideColumn
       ref={ref}
       id={PANEL_ID}
       aria-label="Agente"
       tabIndex={-1}
-      // El tope depende del espacio real: la página conserva el ancho que
-      // necesitan la lista y el hilo de la Bandeja; reducir el sidebar deja más.
-      className="sticky top-0 flex h-svh min-w-80 shrink-0 flex-col border-l bg-background outline-none"
-      style={{
-        width,
-        maxWidth: `min(${DOCK_WIDTH.max}px, calc(100vw - ${sidebarWidth + PAGE_MIN_WIDTH}px))`,
-      }}
+      width={width}
+      onResize={resize}
+      bounds={DOCK_WIDTH}
+      // La página conserva lo que necesitan la lista y el hilo de la Bandeja.
+      pageMinWidth={PAGE_MIN_WIDTH}
+      resizeLabel="Ancho del panel del agente"
       onKeyDown={(event) => {
         // Solo Esc pulsado dentro de la columna; los diálogos que abre viven en un portal.
         if (event.key !== "Escape" || event.defaultPrevented) return
@@ -448,46 +436,9 @@ function DockedAgentPanel() {
         close()
       }}
     >
-      {/* Tirador: arrastre, flechas (Inicio/Fin a los extremos) y doble clic para volver al ancho por defecto. */}
-      {/* biome-ignore lint/a11y/useSemanticElements: separador interactivo (patrón «window splitter» de ARIA); <hr> no admite foco ni valor. */}
-      <div
-        role="separator"
-        aria-orientation="vertical"
-        aria-label="Ancho del panel del agente"
-        aria-valuenow={width}
-        aria-valuemin={DOCK_WIDTH.min}
-        aria-valuemax={DOCK_WIDTH.max}
-        tabIndex={0}
-        className="absolute inset-y-0 -left-1 z-10 w-2 cursor-col-resize touch-none outline-none after:absolute after:inset-y-0 after:left-1/2 after:w-0.5 after:-translate-x-1/2 after:bg-transparent hover:after:bg-border focus-visible:after:bg-ring active:after:bg-ring"
-        onPointerDown={(event) => {
-          event.preventDefault()
-          event.currentTarget.setPointerCapture(event.pointerId)
-        }}
-        onPointerMove={(event) => {
-          if (!event.currentTarget.hasPointerCapture(event.pointerId)) return
-          // La columna termina en el borde derecho de la ventana.
-          resize(document.documentElement.clientWidth - event.clientX)
-        }}
-        onDoubleClick={() => resize(DOCK_WIDTH.initial)}
-        onKeyDown={(event) => {
-          const next =
-            event.key === "ArrowLeft"
-              ? width + DOCK_WIDTH.step
-              : event.key === "ArrowRight"
-                ? width - DOCK_WIDTH.step
-                : event.key === "Home"
-                  ? DOCK_WIDTH.min
-                  : event.key === "End"
-                    ? DOCK_WIDTH.max
-                    : null
-          if (next === null) return
-          event.preventDefault()
-          resize(next)
-        }}
-      />
       <PanelHeader data={data} onClose={close} />
       <PanelBody summary={data} />
-    </aside>
+    </SideColumn>
   )
 }
 

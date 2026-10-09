@@ -67,6 +67,17 @@ export {
   useDetailMode,
 } from "./master-detail.js"
 export { PageHeader, type PageHeaderProps } from "./page-header.js"
+export {
+  SideColumn,
+  type SideColumnProps,
+  type SideColumnWidth,
+  SideDockPortal,
+  SideDockProvider,
+  SideDockSlot,
+  useSideColumnWidth,
+  useSideDock,
+  useSidebarWidth,
+} from "./side-dock.js"
 export { PageShell, type PageShellProps } from "./page-shell.js"
 export * from "./phone/index.js"
 export {

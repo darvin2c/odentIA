@@ -206,8 +206,8 @@ test("panel del agente: columna fija en pantalla grande y cajón cuando no cabe"
   await expect(grip).toHaveAttribute("aria-valuenow", "416")
   expect(await columnWidth()).toBe(416)
   await page.keyboard.press("End")
-  await expect(grip).toHaveAttribute("aria-valuenow", "640")
   // 1600 de ventana − 256 de sidebar − 848 de página.
+  await expect(grip).toHaveAttribute("aria-valuenow", "496")
   expect(await columnWidth()).toBe(496)
   await page.mouse.move(1600 - 496, 450)
   await page.mouse.down()

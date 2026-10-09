@@ -1,9 +1,11 @@
 // @vitest-environment jsdom
 
 import { cleanup, render, screen } from "@testing-library/react"
+import type * as React from "react"
 import { afterEach, beforeAll, describe, expect, it } from "vitest"
 
 import { MasterDetail, useDetailMode } from "./master-detail.js"
+import { SideDockProvider, SideDockSlot, useSideDock } from "./side-dock.js"
 
 // react-resizable-panels mide el group con ResizeObserver; jsdom no lo trae.
 beforeAll(() => {
@@ -115,5 +117,49 @@ describe("MasterDetail", () => {
     expect(panels[1]?.textContent).toContain("formulario")
     const contenido = panels[1]?.querySelector("[data-closed]")
     expect(contenido?.getAttribute("inert")).toBe("")
+  })
+
+  describe("con columna lateral en el layout", () => {
+    function Occupied() {
+      return <output data-testid="ocupada">{String(useSideDock().occupied)}</output>
+    }
+    const layout = (panel: React.ReactNode) => (
+      <SideDockProvider>
+        <div data-testid="pagina">
+          <MasterDetail panel={panel}>
+            <div>tabla</div>
+          </MasterDetail>
+        </div>
+        <div data-testid="columna">
+          <SideDockSlot />
+        </div>
+        <Occupied />
+      </SideDockProvider>
+    )
+
+    it("monta el detalle en la columna del layout, fuera de la página, y la marca ocupada", () => {
+      mockMatchMedia(true)
+      const utils = render(layout(<div>formulario</div>))
+      expect(document.querySelector('[data-slot="resizable-panel-group"]')).toBeNull()
+      expect(screen.getByTestId("pagina").textContent).toBe("tabla")
+      const column = screen.getByTestId("columna")
+      expect(column.textContent).toContain("formulario")
+      expect(column.querySelector("aside [role=separator]")).not.toBeNull()
+      expect(screen.getByTestId("ocupada").textContent).toBe("true")
+
+      // Al cerrar, la columna desaparece y queda libre; la lista no se remonta.
+      const table = screen.getByText("tabla")
+      utils.rerender(layout(null))
+      expect(column.querySelector("aside")).toBeNull()
+      expect(screen.getByTestId("ocupada").textContent).toBe("false")
+      expect(screen.getByText("tabla")).toBe(table)
+    })
+
+    it("en ventana estrecha no usa la columna: el formulario es cosa del drawer de la página", () => {
+      mockMatchMedia(false)
+      render(layout(<div>formulario</div>))
+      expect(screen.queryByText("formulario")).toBeNull()
+      expect(screen.getByTestId("ocupada").textContent).toBe("false")
+    })
   })
 })
