@@ -9,6 +9,7 @@ import {
   listProposals,
   type ProposalItem,
 } from "./agent-operations.js"
+import { countConversationViews } from "./conversations.js"
 import { notFound, validation } from "./errors.js"
 import { getOrgLocale } from "./locale.js"
 
@@ -106,6 +107,8 @@ async function workspaceZone(tx: Db, orgId: string) {
 
 export interface WorkspaceAgentHome {
   pendingProposals: number
+  /** Conversaciones abiertas con una derivación sin resolver (el chip «Derivadas» de la bandeja). */
+  derivedConversations: number
   proposals: Array<{ id: string; action: string; summary: string; createdAt: string; conversationId: string | null; mode: string; context: ProposalItem["context"] }>
   recentHandoffs: Array<{ id: string; reason: string; priority: string; createdAt: string; conversationId: string | null; contactName: string | null; channel: string | null }>
   today: { runs: number; ok: number; handoff: number; error: number; omitida: number; sinRespuesta: number }
@@ -122,8 +125,11 @@ async function workspaceAgent(tx: Db, orgId: string, timezone: string): Promise<
   const handoffRows = (await listHandoffs(tx, orgId, { limit: 3, open: true }))
     .filter(row => Date.parse(row.createdAt) >= Date.now() - 72 * 3_600_000)
   const today = await countAgentRunsToday(tx, orgId, timezone)
+  // Abiertas, como la vista «Derivadas» de la bandeja con su estado por defecto.
+  const derived = await countConversationViews(tx, orgId, { status: "open" }, ["handoff"])
   return {
     pendingProposals: pending.team + pending.contact,
+    derivedConversations: derived.handoff,
     proposals: proposalRows.map(row => ({
       id: row.id, action: row.action, summary: row.context.afterSummary,
       createdAt: row.createdAt, conversationId: row.conversationId, mode: row.mode, context: row.context,

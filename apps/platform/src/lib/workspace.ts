@@ -19,6 +19,8 @@ export interface WorkspaceHome {
 }
 export interface WorkspaceAgentHome {
   pendingProposals: number
+  /** Conversaciones con una derivación sin resolver (misma cuenta que la bandeja). */
+  derivedConversations: number
   proposals: Array<{ id: string; action: string; summary: string; createdAt: string; conversationId: string | null; mode: string; context: AgentProposal["context"] }>
   recentHandoffs: Array<{ id: string; reason: string; priority: string; createdAt: string; conversationId: string | null; contactName: string | null; channel: string | null }>
   today: { runs: number; ok: number; handoff: number; error: number; omitida: number; sinRespuesta: number }

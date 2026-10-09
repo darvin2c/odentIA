@@ -12,6 +12,18 @@ export interface ConversationPreview {
   createdAt: string
 }
 
+/** Lo que una conversación espera del equipo o del agente (lo calcula el servidor). */
+export interface ConversationAttention {
+  /** El agente atiende hoy el hilo: abierto, encendido en el hilo y en la organización. */
+  agentAttending: boolean
+  /** Propuestas pendientes del hilo que decide el equipo. */
+  pendingTeam: number
+  /** Propuestas pendientes que esperan al interlocutor. */
+  pendingContact: number
+  /** Prioridad más alta entre sus derivaciones sin resolver. */
+  handoffPriority: "alta" | "media" | "baja" | null
+}
+
 export interface ConversationListItem {
   id: string
   status: string
@@ -22,6 +34,16 @@ export interface ConversationListItem {
   contact: { id: string; displayName: string }
   connection: { id: string; channel: string; provider: string; displayName: string }
   preview: ConversationPreview | null
+  /** Ausente en respuestas antiguas en caché: tratar como sin estado. */
+  attention?: ConversationAttention
+}
+
+/** Totales de las vistas de la bandeja para los filtros vigentes. */
+export interface InboxSummary {
+  all: number
+  waiting: number
+  withAgent: number
+  handoffs: number
 }
 
 export interface ChatMessage {
@@ -41,6 +63,8 @@ export interface ChatMessage {
 }
 
 export interface ConversationDetail {
+  /** Atención del hilo según el servidor (no depende de la página cargada de la lista). */
+  attention?: ConversationAttention
   conversation: {
     id: string
     status: string

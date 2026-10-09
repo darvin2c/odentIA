@@ -61,10 +61,11 @@ import { createTask, getTask, updateTask } from "./tasks.js"
 import { createWorkspaceNotification } from "./workspace.js"
 import { auditEvent, branch } from "@odentia/db/schema/org"
 import { getPatientBalanceForPortal } from "./finance.js"
+import { handoffOpenSql } from "./handoff-state.js"
+import { CONFIRM_TTL_HOURS } from "./proposal-state.js"
 import { formatZoned, getOrgLocale, type OrgLocale } from "./locale.js"
 
-/** Plazo de confirmación por el interlocutor antes de expirar la propuesta. */
-const CONFIRM_TTL_HOURS = 48
+export { CONFIRM_TTL_HOURS }
 /** Ventana en ms derivada del plazo (una sola fuente de verdad). */
 const CONFIRM_TTL_MS = CONFIRM_TTL_HOURS * 60 * 60 * 1000
 
@@ -1024,7 +1025,7 @@ async function enrichProposals(tx: Db, orgId: string, rows: ProposalRow[]): Prom
     // directa, o sin hilo (no hay interlocutor que confirme), es del equipo.
     const policyMode = policy[action] ?? "aprobar_equipo"
     const mode: AutonomyMode =
-      row.status === "propuesta" && (policyMode === "directo" || !row.conversationId)
+      row.status === "propuesta" && pendingProposalDecider(policy, action, row.conversationId !== null) === "team"
         ? "aprobar_equipo"
         : policyMode
     return baseProposal(row, mode, {
@@ -2223,8 +2224,8 @@ async function enrichHandoffs(tx: Db, rows: HandoffRow[]): Promise<HandoffItem[]
 export async function countOpenHandoffs(tx: Db, orgId: string): Promise<number> {
   const [row] = await tx.execute<{ count: number }>(sql`
     select count(*)::int as count
-    from agent_handoff h left join task t on t.id = h.task_id and t.organization_id = h.organization_id
-    where h.organization_id = ${orgId} and (h.task_id is null or t.status = 'open')`)
+    from agent_handoff h
+    where h.organization_id = ${orgId} and ${handoffOpenSql(sql.raw("h"))}`)
   return row?.count ?? 0
 }
 
@@ -2273,6 +2274,20 @@ export interface PendingProposalCounts {
   contact: number
 }
 
+/**
+ * Quién resuelve HOY una propuesta pendiente: el interlocutor solo cuando la
+ * política vigente lo exige y existe un hilo donde pueda confirmar; en
+ * cualquier otro caso (política directa, aprobación del equipo o sin hilo),
+ * el equipo. Única regla para el modo, los contadores y la bandeja.
+ */
+export function pendingProposalDecider(
+  policy: AutonomyPolicy,
+  action: string,
+  hasThread: boolean,
+): "team" | "contact" {
+  return hasThread && policy[action as AutonomyAction] === "confirmar_usuario" ? "contact" : "team"
+}
+
 /** Propuestas pendientes separadas según quién puede resolverlas con la política vigente. */
 export async function countPendingProposals(tx: Db, orgId: string): Promise<PendingProposalCounts> {
   const policy = await getAutonomyPolicy(tx, orgId)
@@ -2280,12 +2295,7 @@ export async function countPendingProposals(tx: Db, orgId: string): Promise<Pend
     select action, (conversation_id is null) as threadless, count(*)::int as count from agent_proposal
     where organization_id = ${orgId} and status = 'propuesta' group by action, (conversation_id is null)`)
   const counts = { team: 0, contact: 0 }
-  for (const row of rows) {
-    // Sin hilo no hay interlocutor que confirme: siempre es del equipo.
-    if (!row.threadless && policy[row.action as AutonomyAction] === "confirmar_usuario") {
-      counts.contact += row.count
-    } else counts.team += row.count
-  }
+  for (const row of rows) counts[pendingProposalDecider(policy, row.action, !row.threadless)] += row.count
   return counts
 }
 
@@ -2631,7 +2641,7 @@ export async function listHandoffs(
  * tarea completada o cancelada). Misma regla para listar, contar y tomar.
  */
 function handoffStillOpen(): SQL {
-  return sql`(${agentHandoff.taskId} is null or exists (select 1 from task t where t.id = ${agentHandoff.taskId} and t.organization_id = ${agentHandoff.organizationId} and t.status = 'open'))`
+  return handoffOpenSql(sql.raw('"agent_handoff"'))
 }
 
 export async function claimHandoff(tx: Db, orgId: string, userId: string, handoffId: string): Promise<HandoffItem> {

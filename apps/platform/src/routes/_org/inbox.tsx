@@ -54,6 +54,7 @@ import {
 } from "@odentia/ui/components/ai-elements/prompt-input"
 import { SpeechInput } from "@odentia/ui/components/ai-elements/speech-input"
 import {
+  AgentMark,
   ConfirmDialog,
   EmptyState,
   FilterBar,
@@ -79,13 +80,17 @@ import { ApiError, apiFetch, apiUpload } from "../../lib/api"
 import { API_URL } from "../../lib/auth-client"
 import {
   type ChatMessage,
+  type ConversationAttention,
   type ConversationDetail,
   type ConversationListItem,
+  type InboxSummary,
   timeAgo,
   usePermission,
   useMyUserId,
 } from "../../lib/crm"
+import { useAgentPanel } from "../../components/agent-panel"
 import { ContactWorkspace } from "../../components/crm/contact-workspace"
+import { ACTION_LABEL, type AgentProposal } from "../../lib/agent"
 import { channelIcon, channelLabel } from "../../lib/channels"
 import { useOrgEvents } from "../../lib/org-events"
 import { createRegistrationLink } from "../../lib/patient-registration"
@@ -123,6 +128,29 @@ const CHANNEL_FILTER_OPTIONS = [
   "webchat",
 ] as const
 
+/**
+ * Vistas de trabajo de la bandeja (filtrado SQL en el servidor, antes de
+ * paginar). Solo valen las que tienen chip: una vista sin control visible
+ * dejaría la lista filtrada sin forma de verlo ni de salir.
+ */
+const VIEW_CHIPS = [
+  { value: undefined, label: "Todas", total: "all" },
+  { value: "unanswered", label: "Esperan respuesta", total: "waiting" },
+  { value: "agent", label: "Con el agente", total: "withAgent" },
+  { value: "handoff", label: "Derivadas", total: "handoffs" },
+] as const satisfies readonly { value?: string; label: string; total: keyof InboxSummary }[]
+const CHIP_VIEWS: readonly (string | undefined)[] = VIEW_CHIPS.map((chip) => chip.value)
+const DEFAULT_SUBTITLE = "Todas las conversaciones de la clínica"
+
+/** Total de la bandeja entera; con filtros activos la cifra la da el chip, no el subtítulo. */
+function waitingSubtitle(summary: InboxSummary | undefined): string {
+  if (!summary) return DEFAULT_SUBTITLE
+  if (summary.waiting === 0) return "Ninguna conversación espera respuesta"
+  return summary.waiting === 1
+    ? "1 conversación espera respuesta"
+    : `${summary.waiting} conversaciones esperan respuesta`
+}
+
 function InboxPage() {
   const queryClient = useQueryClient()
   const { org } = orgRouteApi.useRouteContext()
@@ -140,6 +168,8 @@ function InboxPage() {
   // Vistas de trabajo (filtrado SQL en el servidor, antes de paginar):
   // `unanswered` sin responder, `human` necesita al equipo, `approval` por aprobar.
   const view = listSearch.get("view")
+  const canDecideAgent = usePermission("agent.decide")
+  const canReadAgent = usePermission("agent.read")
   const routeSearch = Route.useSearch()
   const showContext = routeSearch.contexto === true
   // La selección deriva solo de la URL: navegar es lo único que cambia el
@@ -185,18 +215,32 @@ function InboxPage() {
     })
   }
 
-  const listParams = useMemo(() => {
+  // Filtros sin la vista: los comparten la lista y los totales de los chips.
+  const filterParams = useMemo(() => {
     const params = new URLSearchParams()
     if (status !== "all") params.set("status", status)
     if (channel) params.set("channel", channel)
     if (assigned === "me") params.set("assigned", myUserId)
     else if (assigned === "none") params.set("assigned", "none")
     if (search.trim()) params.set("q", search.trim())
-    if (view === "unanswered" || view === "human" || view === "approval") {
-      params.set("view", view)
-    }
     return params.toString()
-  }, [status, channel, assigned, search, myUserId, view])
+  }, [status, channel, assigned, search, myUserId])
+  const activeView = view && CHIP_VIEWS.includes(view) ? view : undefined
+  // El subtítulo habla de toda la bandeja: con filtros no afirma un total parcial.
+  const narrowed = status !== "open" || Boolean(channel) || Boolean(assigned) || search.trim() !== ""
+  const listParams = useMemo(() => {
+    const params = new URLSearchParams(filterParams)
+    if (activeView) params.set("view", activeView)
+    return params.toString()
+  }, [filterParams, activeView])
+
+  // La clave empieza por `conversations`: se invalida junto con la lista.
+  const summaryQuery = useQuery({
+    queryKey: ["conversations", "summary", filterParams],
+    queryFn: () => apiFetch<{ data: InboxSummary }>(`/api/conversations/summary?${filterParams}`),
+    enabled: canRead,
+  })
+  const summary = summaryQuery.data?.data
 
   const listQuery = useInfiniteQuery({
     queryKey: ["conversations", listParams],
@@ -317,6 +361,8 @@ function InboxPage() {
       showBack={mode !== "panel"}
       onToggleContext={mode === "panel" ? () => (contextOpen ? requestCloseContext() : setContextOpen(true)) : openContextMobile}
       contextOpen={mode === "panel" ? contextOpen : true}
+      attention={selectedItem?.attention}
+      canSeeProposals={canDecideAgent || canReadAgent}
     />
   ) : null
 
@@ -350,8 +396,29 @@ function InboxPage() {
 
   return (
     <PageShell fill className="gap-4">
-      <PageHeader title="Bandeja" subtitle="Todas las conversaciones de la clínica" />
-      <FilterBar
+      <PageHeader title="Bandeja" subtitle={narrowed ? DEFAULT_SUBTITLE : waitingSubtitle(summary)} />
+      {/* En angosto, con un hilo abierto, la pantalla es del hilo: vistas y filtros vuelven con la lista. */}
+      <fieldset className={mode !== "panel" && selectedId ? "hidden" : "flex min-w-0 flex-wrap gap-1.5"}>
+        <legend className="sr-only">Vista de la bandeja</legend>
+        {VIEW_CHIPS.map((chip) => {
+          const pressed = activeView === chip.value
+          return (
+            <Button
+              key={chip.label}
+              type="button"
+              size="sm"
+              variant={pressed ? "default" : "outline"}
+              aria-pressed={pressed}
+              className="min-h-11 rounded-full sm:min-h-9"
+              onClick={() => listSearch.setParam("view", chip.value, { replace: true })}
+            >
+              {chip.label}
+              {summary ? ` · ${summary[chip.total]}` : ""}
+            </Button>
+          )
+        })}
+      </fieldset>
+      {mode === "panel" || !selectedId ? <FilterBar
         filters={[
           {
             key: "status",
@@ -381,23 +448,14 @@ function InboxPage() {
               { value: "none", label: "Sin asignar" },
             ],
           },
-          {
-            key: "view",
-            label: "Vista",
-            type: "select",
-            options: [
-              { value: "unanswered", label: "Sin responder" },
-              { value: "human", label: "Necesita al equipo" },
-              { value: "approval", label: "Por aprobar" },
-            ],
-          },
         ]}
         sortOptions={[
           { value: "actividad", label: "Actividad reciente" },
           { value: "noleidos", label: "No leídos primero" },
         ]}
         searchPlaceholder="Buscar contacto"
-      />
+        resetKeys={["status", "channel", "assigned", "q"]}
+      /> : null}
       {/* PageShell `fill` acota al viewport: el hilo ocupa el alto restante y el
           composer queda fijo como footer suyo. En escritorio hay tres paneles
           (lista, hilo, contexto); en angosto se muestra una vista por vez y la
@@ -421,6 +479,7 @@ function InboxPage() {
               onSelect={(id) => selectConversation(id)}
               onFetchNextPage={() => void listQuery.fetchNextPage()}
               onRetry={() => void listQuery.refetch()}
+              canDecide={canDecideAgent}
             />
           </ResizablePanel>
           <ResizableHandle withHandle className="mx-1 w-4 bg-transparent" />
@@ -460,6 +519,7 @@ function InboxPage() {
               onSelect={(id) => selectConversation(id)}
               onFetchNextPage={() => void listQuery.fetchNextPage()}
               onRetry={() => void listQuery.refetch()}
+              canDecide={canDecideAgent}
             />
           ) : showContext ? (
             (workspace ?? (
@@ -488,6 +548,115 @@ function InboxPage() {
 
 const NO_TEMPLATE = "__ninguna__"
 
+/**
+ * Lo que la conversación espera, en una sola etiqueta y con la misma
+ * precedencia que el panel de contexto: una decisión del equipo, después una
+ * derivación sin resolver y, si no, quién la atiende. El estado nunca se
+ * comunica solo con color: lleva texto y una marca de forma distinta.
+ */
+function needsTeam(item: ConversationListItem): boolean {
+  const attention = item.attention
+  return Boolean(attention && (attention.pendingTeam > 0 || attention.pendingContact > 0 || attention.handoffPriority))
+}
+
+function AttentionLabel({ item, canDecide }: { item: ConversationListItem; canDecide: boolean }) {
+  const attention = item.attention
+  if (!attention) return null
+  if (attention.pendingTeam > 0) {
+    return (
+      <span className="flex min-w-0 items-center gap-1 font-semibold text-primary-soft-foreground">
+        <Bot className="size-3.5 shrink-0" aria-hidden />
+        <span className="truncate">{canDecide ? "Espera tu aprobación" : "Espera aprobación del equipo"}</span>
+      </span>
+    )
+  }
+  if (attention.handoffPriority) {
+    const high = attention.handoffPriority === "alta"
+    return (
+      <span className={`flex min-w-0 items-center gap-1.5 font-semibold ${high ? "text-destructive" : "text-warning"}`}>
+        <span aria-hidden className={high ? "size-2 shrink-0 rounded-full bg-destructive" : "size-2 shrink-0 rounded-[2px] bg-warning"} />
+        <span className="truncate">Derivada · prioridad {attention.handoffPriority}</span>
+      </span>
+    )
+  }
+  if (attention.pendingContact > 0) {
+    return <span className="truncate font-semibold">Espera al interlocutor</span>
+  }
+  if (attention.agentAttending) {
+    return (
+      <span className="flex shrink-0 items-center gap-1 font-semibold text-primary-soft-foreground">
+        <Bot className="size-3.5" aria-hidden /> Atiende el agente
+      </span>
+    )
+  }
+  return null
+}
+
+/**
+ * Banda del hilo: el agente dejó algo a la espera en esta conversación. Dice
+ * qué y deja claro que nada se ejecuta solo; «Revisar» abre el panel del
+ * agente, donde esa propuesta aparece primero.
+ */
+function AgentPendingBand({
+  conversationId,
+  attention,
+  canSeeProposals,
+}: {
+  conversationId: string
+  /** Lo que dice la lista; ausente si el hilo se abrió por enlace y no está en la página cargada. */
+  attention: ConversationAttention | undefined
+  canSeeProposals: boolean
+}) {
+  const { setOpen } = useAgentPanel()
+  const hinted = attention ? attention.pendingTeam + attention.pendingContact : null
+  // Misma clave y petición que el panel de contexto: comparten la caché.
+  const query = useQuery({
+    queryKey: ["agent-proposals", "workspace", conversationId],
+    queryFn: () =>
+      apiFetch<{ data: AgentProposal[] }>(
+        `/api/agent/proposals?status=propuesta&conversationId=${encodeURIComponent(conversationId)}`,
+      ),
+    enabled: canSeeProposals && hinted !== 0,
+  })
+  const proposals = query.data?.data ?? []
+  // Sin la lista (enlace directo) manda lo que devuelve la consulta del hilo.
+  const pendingTeam = attention?.pendingTeam ?? proposals.filter((p) => p.mode !== "confirmar_usuario").length
+  const pendingContact = attention?.pendingContact ?? proposals.filter((p) => p.mode === "confirmar_usuario").length
+  const total = pendingTeam + pendingContact
+  if (total === 0) return null
+  const first = proposals.find((p) => p.mode !== "confirmar_usuario") ?? proposals[0]
+  const label = first ? (ACTION_LABEL[first.action] ?? first.action) : null
+  const what =
+    total > 1 ? `${total} cambios` : label ? label.charAt(0).toLowerCase() + label.slice(1) : "un cambio"
+  // Cada frase concuerda con lo que hay: del equipo, del interlocutor o de ambos.
+  const outcome =
+    pendingTeam > 0 && pendingContact > 0
+      ? `${pendingTeam} ${pendingTeam === 1 ? "espera" : "esperan"} la aprobación del equipo y ${pendingContact} la confirmación del interlocutor.`
+      : pendingTeam > 0
+        ? total === 1
+          ? "No se ejecuta hasta que alguien lo apruebe."
+          : "No se ejecutan hasta que alguien los apruebe."
+        : total === 1
+          ? "Espera la confirmación del interlocutor en este hilo."
+          : "Esperan la confirmación del interlocutor en este hilo."
+  return (
+    <div
+      role="status"
+      className="flex flex-wrap items-center gap-2.5 border-t border-agent-border bg-agent-soft px-3.5 py-2.5 text-[13px]"
+    >
+      <AgentMark size="sm" />
+      <p className="min-w-0 flex-1 basis-48">
+        El agente propuso <span className="font-semibold">{what}</span>. {outcome}
+      </p>
+      {canSeeProposals ? (
+        <Button type="button" size="sm" variant="outline" className="min-h-11 rounded-full sm:min-h-9" onClick={() => setOpen(true)}>
+          Revisar
+        </Button>
+      ) : null}
+    </div>
+  )
+}
+
 /** Listado de conversaciones: filas, vacío y paginación por cursor. */
 function ConversationList({
   items,
@@ -499,6 +668,7 @@ function ConversationList({
   onSelect,
   onFetchNextPage,
   onRetry,
+  canDecide,
 }: {
   items: ConversationListItem[]
   selectedId: string | null
@@ -509,6 +679,7 @@ function ConversationList({
   onSelect: (id: string) => void
   onFetchNextPage: () => void
   onRetry: () => void
+  canDecide: boolean
 }) {
   return (
     <div className="elevated flex min-h-0 flex-1 flex-col divide-y overflow-y-auto rounded-xl border bg-card">
@@ -522,7 +693,7 @@ function ConversationList({
           type="button"
           onClick={() => onSelect(item.id)}
           aria-current={selected ? "true" : undefined}
-          className={`flex gap-2.5 px-3.5 py-3 text-left transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset ${
+          className={`relative flex gap-2.5 px-3.5 py-3 text-left transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset ${
             selected ? "bg-agent-soft shadow-[inset_3px_0_0_0_var(--color-primary)]" : "hover:bg-muted/70"
           }`}
         >
@@ -546,12 +717,9 @@ function ConversationList({
             </span>
             <span className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
               <ChannelIcon className="size-3.5 shrink-0" aria-hidden />
-              <span className="truncate">{channelLabel(item.connection.channel)}</span>
-              {item.agentStatus === "on" && (
-                <span className="flex shrink-0 items-center gap-1 font-semibold text-primary-soft-foreground">
-                  <Bot className="size-3.5" aria-hidden /> Atiende el agente
-                </span>
-              )}
+              {/* Con algo pendiente, el canal queda en su icono: el estado no debe recortarse. */}
+              <span className={needsTeam(item) ? "sr-only" : "truncate"}>{channelLabel(item.connection.channel)}</span>
+              <AttentionLabel item={item} canDecide={canDecide} />
               {item.unreadCount > 0 && (
                 <span
                   className="ml-auto flex h-[18px] min-w-[18px] shrink-0 items-center justify-center rounded-full bg-primary px-1 text-xs font-semibold text-primary-foreground"
@@ -618,6 +786,8 @@ function ThreadView({
   showBack,
   onToggleContext,
   contextOpen,
+  attention,
+  canSeeProposals,
 }: {
   id: string
   members: Member[]
@@ -632,6 +802,9 @@ function ThreadView({
   showBack?: boolean
   onToggleContext?: () => void
   contextOpen?: boolean
+  /** Estado de atención del hilo según la lista; ausente si se abrió por enlace y aún no está en la página cargada. */
+  attention?: ConversationAttention
+  canSeeProposals: boolean
 }) {
   const queryClient = useQueryClient()
   const [composer, setComposer] = useState("")
@@ -871,6 +1044,9 @@ function ThreadView({
 
   const conv = detail.conversation
   const closed = conv.status === "closed"
+  // La atención del propio hilo manda; la de la lista solo adelanta el dato
+  // mientras llega el detalle. Sin ninguna, la cabecera calla: no se deduce aquí.
+  const threadAttention = detail.attention ?? attention
   const assignee = members.find((m) => m.userId === conv.assignedUserId)
 
   return (
@@ -897,7 +1073,7 @@ function ThreadView({
             </Badge>
             {detail.contact.isActive === false && <Badge variant="secondary">Archivado</Badge>}
             {assignee && <span>· {assignee.user.name}</span>}
-            {conv.agentStatus === "on" && (
+            {threadAttention?.agentAttending && (
               <span className="flex items-center gap-1 font-semibold text-primary-soft-foreground">
                 · <Bot className="size-3.5" aria-hidden /> Atiende el agente
               </span>
@@ -1002,6 +1178,7 @@ function ThreadView({
         </MessageScroller>
       </MessageScrollerProvider>
 
+      <AgentPendingBand conversationId={id} attention={threadAttention} canSeeProposals={canSeeProposals} />
       <div className="border-t p-3">
         {detail.contact.isActive === false && (
           <p className="mb-2 text-xs text-muted-foreground">

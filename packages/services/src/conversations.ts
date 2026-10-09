@@ -8,7 +8,7 @@ import {
   message,
 } from "@odentia/db/schema/crm"
 import { auditEvent } from "@odentia/db/schema/org"
-import { and, asc, desc, eq, ilike, lt, or, sql } from "drizzle-orm"
+import { and, asc, desc, eq, ilike, lt, or, type SQL, sql } from "drizzle-orm"
 import {
   findChannelIdentity,
   isDirectThread,
@@ -18,6 +18,8 @@ import {
 } from "./contacts.js"
 import { decodeCursor, encodeCursor } from "./cursors.js"
 import { notFound, ServiceError, validation } from "./errors.js"
+import { handoffOpenSql } from "./handoff-state.js"
+import { proposalPendingSql } from "./proposal-state.js"
 import { createOpportunity } from "./opportunities.js"
 import { decryptConfig } from "./secrets.js"
 import type { AttachmentRef, Storage } from "./storage.js"
@@ -628,22 +630,19 @@ export interface ConversationListItem {
   connection: { id: string; channel: string; provider: string; displayName: string }
   preview: { body: string | null; direction: string; senderKind: string; createdAt: string } | null
 }
-export type ConversationView = "unanswered" | "human" | "approval"
-export async function listConversations(
-  tx: Db,
-  orgId: string,
-  input: {
-    status?: string
-    channel?: string
-    assigned?: string
-    q?: string
-    view?: ConversationView
-    cursor?: string
-    limit?: number
-  },
-): Promise<{ items: ConversationListItem[]; nextCursor: string | null }> {
-  const limit = Math.min(Math.max(input.limit ?? 30, 1), 100)
-  const conditions = [eq(conversation.organizationId, orgId)]
+export const CONVERSATION_VIEWS = ["unanswered", "human", "approval", "agent", "handoff"] as const
+export type ConversationView = (typeof CONVERSATION_VIEWS)[number]
+
+export interface ConversationFilters {
+  status?: string
+  channel?: string
+  assigned?: string
+  q?: string
+}
+
+/** Filtros de la bandeja sobre `conversation` + `contact` + `channel_connection`. */
+function conversationFilterConditions(orgId: string, input: ConversationFilters): SQL[] {
+  const conditions: SQL[] = [eq(conversation.organizationId, orgId)]
   if (input.status) conditions.push(eq(conversation.status, input.status))
   if (input.channel) conditions.push(eq(channelConnection.channel, input.channel))
   if (input.assigned === "none") {
@@ -652,48 +651,108 @@ export async function listConversations(
     conditions.push(eq(conversation.assignedUserId, input.assigned))
   }
   if (input.q) conditions.push(ilike(contact.displayName, `%${input.q}%`))
-  if (input.view !== undefined) {
-    if (input.view !== "unanswered" && input.view !== "human" && input.view !== "approval") {
-      throw validation("Vista inválida (unanswered|human|approval)")
-    }
-    if (input.view === "human") {
-      conditions.push(eq(conversation.agentStatus, "off"))
-      conditions.push(eq(conversation.status, "open"))
-    } else if (input.view === "approval") {
-      conditions.push(
-        sql`exists (select 1 from "agent_proposal" where "agent_proposal"."conversation_id" = "conversation"."id" and "agent_proposal"."organization_id" = ${orgId} and "agent_proposal"."status" = 'propuesta')`,
-      )
-    } else {
-      conditions.push(
-        sql`exists (select 1 from "message" as "m_in" where "m_in"."conversation_id" = "conversation"."id" and "m_in"."organization_id" = ${orgId} and "m_in"."direction" = 'in')`,
-      )
-      conditions.push(
-        sql`(
-          not exists (
-            select 1 from "message" as "m_out"
-            where "m_out"."conversation_id" = "conversation"."id"
-              and "m_out"."organization_id" = ${orgId}
-              and "m_out"."direction" = 'out'
-              and "m_out"."status" in ('sent', 'delivered', 'read')
-              and coalesce("m_out"."external_id", '') not like 'mock-%'
-          )
-          or (
-            (select max("m_in2"."created_at") from "message" as "m_in2"
-              where "m_in2"."conversation_id" = "conversation"."id"
-                and "m_in2"."organization_id" = ${orgId}
-                and "m_in2"."direction" = 'in')
-            >
-            (select max("m_out2"."created_at") from "message" as "m_out2"
-              where "m_out2"."conversation_id" = "conversation"."id"
-                and "m_out2"."organization_id" = ${orgId}
-                and "m_out2"."direction" = 'out'
-                and "m_out2"."status" in ('sent', 'delivered', 'read')
-                and coalesce("m_out2"."external_id", '') not like 'mock-%')
-          )
-        )`,
-      )
-    }
+  return conditions
+}
+
+/**
+ * Condiciones de cada vista de la bandeja; lista y contadores comparten esta
+ * única definición.
+ * - `unanswered`: hay un entrante posterior al último saliente aceptado.
+ * - `human`: una persona tomó el hilo (agente apagado en una abierta).
+ * - `approval`: tiene una propuesta del agente pendiente.
+ * - `agent`: la atiende el agente (abierta, encendido en el hilo y en la organización).
+ * - `handoff`: tiene una derivación sin resolver.
+ */
+function conversationViewConditions(orgId: string, view: ConversationView): SQL[] {
+  if (!(CONVERSATION_VIEWS as readonly string[]).includes(view)) {
+    throw validation(`Vista inválida (${CONVERSATION_VIEWS.join("|")})`)
   }
+  if (view === "human") {
+    return [eq(conversation.agentStatus, "off"), eq(conversation.status, "open")]
+  }
+  if (view === "agent") {
+    return [
+      eq(conversation.agentStatus, "on"),
+      eq(conversation.status, "open"),
+      sql`exists (select 1 from "agent_config" where "agent_config"."organization_id" = ${orgId} and "agent_config"."enabled")`,
+    ]
+  }
+  if (view === "handoff") {
+    return [
+      sql`exists (select 1 from "agent_handoff" as "h_open" where "h_open"."conversation_id" = "conversation"."id" and "h_open"."organization_id" = ${orgId} and ${handoffOpenSql(sql.raw('"h_open"'))})`,
+    ]
+  }
+  if (view === "approval") {
+    return [
+      sql`exists (select 1 from "agent_proposal" where "agent_proposal"."conversation_id" = "conversation"."id" and "agent_proposal"."organization_id" = ${orgId} and ${proposalPendingSql(sql.raw('"agent_proposal"'))})`,
+    ]
+  }
+  return [
+    sql`exists (select 1 from "message" as "m_in" where "m_in"."conversation_id" = "conversation"."id" and "m_in"."organization_id" = ${orgId} and "m_in"."direction" = 'in')`,
+    sql`(
+      not exists (
+        select 1 from "message" as "m_out"
+        where "m_out"."conversation_id" = "conversation"."id"
+          and "m_out"."organization_id" = ${orgId}
+          and "m_out"."direction" = 'out'
+          and "m_out"."status" in ('sent', 'delivered', 'read')
+          and coalesce("m_out"."external_id", '') not like 'mock-%'
+      )
+      or (
+        (select max("m_in2"."created_at") from "message" as "m_in2"
+          where "m_in2"."conversation_id" = "conversation"."id"
+            and "m_in2"."organization_id" = ${orgId}
+            and "m_in2"."direction" = 'in')
+        >
+        (select max("m_out2"."created_at") from "message" as "m_out2"
+          where "m_out2"."conversation_id" = "conversation"."id"
+            and "m_out2"."organization_id" = ${orgId}
+            and "m_out2"."direction" = 'out'
+            and "m_out2"."status" in ('sent', 'delivered', 'read')
+            and coalesce("m_out2"."external_id", '') not like 'mock-%')
+      )
+    )`,
+  ]
+}
+
+/**
+ * Totales de la bandeja con los filtros dados: todas las que cumplen los
+ * filtros y, de ellas, cuántas caen en cada vista pedida. Se cuenta en
+ * servidor sobre todo el resultado, no sobre la página cargada.
+ */
+export async function countConversationViews<V extends ConversationView>(
+  tx: Db,
+  orgId: string,
+  input: ConversationFilters,
+  views: readonly V[],
+): Promise<{ all: number } & Record<V, number>> {
+  const selection: Record<string, SQL<number>> = { all: sql<number>`count(*)::int` }
+  for (const view of views) {
+    selection[view] = sql<number>`(count(*) filter (where ${and(...conversationViewConditions(orgId, view))}))::int`
+  }
+  const [row] = await tx
+    .select(selection)
+    .from(conversation)
+    .innerJoin(contact, eq(conversation.contactId, contact.id))
+    .innerJoin(channelConnection, eq(conversation.channelConnectionId, channelConnection.id))
+    .where(and(...conversationFilterConditions(orgId, input)))
+  const totals: Record<string, number> = { all: row?.all ?? 0 }
+  for (const view of views) totals[view] = row?.[view] ?? 0
+  return totals as { all: number } & Record<V, number>
+}
+
+export async function listConversations(
+  tx: Db,
+  orgId: string,
+  input: ConversationFilters & {
+    view?: ConversationView
+    cursor?: string
+    limit?: number
+  },
+): Promise<{ items: ConversationListItem[]; nextCursor: string | null }> {
+  const limit = Math.min(Math.max(input.limit ?? 30, 1), 100)
+  const conditions = conversationFilterConditions(orgId, input)
+  if (input.view !== undefined) conditions.push(...conversationViewConditions(orgId, input.view))
   const activityAt = sql`coalesce(${conversation.lastMessageAt}, ${conversation.createdAt})`
   if (input.cursor) {
     const decoded = conversationCursor(input.cursor)

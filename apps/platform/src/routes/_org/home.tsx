@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link, createFileRoute } from "@tanstack/react-router"
 import { AlertTriangle, ArrowRight, Bot, CalendarDays, CheckCircle2, CheckSquare, Hand, Inbox, Wallet } from "lucide-react"
 import { useState, type ReactNode } from "react"
+import { type AgentPanelTab, useAgentPanel } from "../../components/agent-panel"
 import { PerformanceSummary } from "../../components/crm/performance-summary"
 import { HomeStart } from "../../components/home-start"
 import { ACTION_LABEL, proposalErrorMessage, type AgentProposal } from "../../lib/agent"
@@ -34,10 +35,37 @@ const HOME_EVENTS = [
   "stream.reconnected",
 ]
 
+/** Resumen de lo que el agente dejó en manos del equipo; omite lo que está en cero. */
+function agentPendingSummary(pending: number, derived: number): string {
+  const parts = [
+    pending > 0 ? `${pending} ${pending === 1 ? "cambio" : "cambios"} del agente` : null,
+    derived > 0 ? `${derived} ${derived === 1 ? "conversación derivada" : "conversaciones derivadas"}` : null,
+  ].filter((part): part is string => part !== null)
+  return parts.length > 0 ? `${parts.join(" y ")}.` : "Propuestas del agente y casos que derivó al equipo."
+}
+
+/**
+ * En móvil se ve una sola cosa (la primera propuesta o, si no hay, la primera
+ * derivación reciente); esto dice cuánto queda oculto, cómo nombrarlo y en qué
+ * pestaña del panel está, para que el enlace lleve a lo que promete.
+ */
+function agentPendingRest(agent: NonNullable<WorkspaceHome["agent"]>): { rest: number; label: string; tab: AgentPanelTab } {
+  const shown = agent.proposals.length > 0 || agent.recentHandoffs.length > 0 ? 1 : 0
+  const derived = Math.max(agent.derivedConversations, agent.recentHandoffs.length)
+  const rest = Math.max(agent.pendingProposals + derived - shown, 0)
+  const proposalsLeft = agent.pendingProposals - (agent.proposals.length > 0 ? 1 : 0)
+  const label =
+    shown === 0
+      ? rest === 1 ? "Ver la pendiente" : `Ver las ${rest} pendientes`
+      : rest === 1 ? "Ver la otra" : `Ver las otras ${rest}`
+  return { rest, label, tab: proposalsLeft > 0 ? "decidir" : "derivadas" }
+}
+
 function HomePage() {
   const queryClient = useQueryClient()
   const canApprove = usePermission("agent.decide")
   const canReadAgent = usePermission("agent.read")
+  const agentPanel = useAgentPanel()
   const [approving, setApproving] = useState<NonNullable<WorkspaceHome["agent"]>["proposals"][number] | null>(null)
   // Un 200 con `fallida`/`expirada` saca la propuesta de pendientes: el
   // resultado queda fijo en pantalla junto a la vuelta al caso.
@@ -67,7 +95,8 @@ function HomePage() {
     },
   })
   const data = query.data?.data
-  const hasAgentPending = Boolean(data?.agent && (data.agent.pendingProposals > 0 || data.agent.recentHandoffs.length > 0))
+  const hasAgentPending = Boolean(data?.agent && (data.agent.pendingProposals > 0 || data.agent.derivedConversations > 0 || data.agent.recentHandoffs.length > 0))
+  const agentRest = data?.agent ? agentPendingRest(data.agent) : null
   const hasPending = Boolean(data && (hasAgentPending || data.appointments.length > 0 || (data.taskCount?.open ?? 0) > 0
     || (data.conversations && (data.conversations.waiting > 0 || data.conversations.unread > 0))
     || data.budgets.length > 0 || data.debt.length > 0
@@ -94,7 +123,7 @@ function HomePage() {
             <h2 className="flex flex-wrap items-center gap-2 text-[17px] font-bold tracking-tight">Pendiente de ti
               {data.agent.pendingProposals > 0 && <Badge variant="soft">{data.agent.pendingProposals} por revisar</Badge>}
             </h2>
-            <p className="text-sm text-muted-foreground">Propuestas del agente y casos que derivó al equipo.</p>
+            <p className="text-sm text-muted-foreground">{agentPendingSummary(data.agent.pendingProposals, data.agent.derivedConversations)}</p>
           </div>
           <Link to="/agent/approvals" className="inline-flex min-h-11 shrink-0 items-center gap-1 text-sm font-semibold text-primary hover:underline">Revisar<ArrowRight className="size-4" aria-hidden /></Link>
         </div>
@@ -105,10 +134,12 @@ function HomePage() {
           <button type="button" className="shrink-0 underline" onClick={() => setOutcome(null)}>Descartar</button>
         </div>}
         {data.agent.proposals.length > 0 && <ul className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-          {data.agent.proposals.map(proposal => {
+          {/* Primero lo que decide el equipo: es lo único que el móvil enseña. */}
+          {[...data.agent.proposals].sort((a, b) => Number(b.mode === "aprobar_equipo") - Number(a.mode === "aprobar_equipo")).map((proposal, index) => {
             const person = proposal.context.contactName ?? "Interlocutor no disponible"
             const forTeam = proposal.mode === "aprobar_equipo"
-            return <li key={proposal.id} className="lift elevated flex min-w-0 flex-col gap-3 rounded-lg border bg-card p-4">
+            // En móvil, una sola tarjeta: el resto se abre en el panel del agente.
+            return <li key={proposal.id} className={`lift elevated min-w-0 flex-col gap-3 rounded-lg border bg-card p-4 ${index === 0 ? "flex" : "hidden sm:flex"}`}>
               <div className="flex flex-wrap items-center gap-2.5">
                 <Initials name={person} />
                 <div className="min-w-0 flex-1 basis-32 leading-tight">
@@ -132,12 +163,12 @@ function HomePage() {
             </li>
           })}
         </ul>}
-        {data.agent.recentHandoffs.length > 0 && <div className={data.agent.proposals.length > 0 ? "mt-4" : undefined}>
-          <p className="text-sm font-semibold">Derivaciones al equipo ({data.agent.recentHandoffs.length})</p>
+        {data.agent.recentHandoffs.length > 0 && <div className={data.agent.proposals.length > 0 ? "mt-4 hidden sm:block" : undefined}>
+          <p className="text-sm font-semibold">Derivaciones recientes</p>
           <ul className="mt-2 flex flex-wrap gap-2">
-            {data.agent.recentHandoffs.map(handoff => {
+            {data.agent.recentHandoffs.map((handoff, index) => {
               const high = handoff.priority === "alta"
-              return <li key={handoff.id} className="max-w-full">
+              return <li key={handoff.id} className={index === 0 ? "max-w-full" : "hidden max-w-full sm:list-item"}>
                 <Link to={handoff.conversationId ? "/inbox" : "/agent/approvals"} search={handoff.conversationId ? { conversation: handoff.conversationId } : {}} className="flex min-h-11 max-w-full items-center gap-2 rounded-3xl border bg-card px-3.5 py-1.5 text-sm transition-colors hover:bg-accent/60 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary">
                   <span aria-hidden className={high ? "size-2 shrink-0 rounded-full bg-destructive" : "size-2 shrink-0 rounded-[2px] bg-warning"} />
                   <span className="min-w-0">{handoff.contactName ? `${handoff.contactName} · ` : ""}{handoff.reason}</span>
@@ -147,6 +178,10 @@ function HomePage() {
             })}
           </ul>
         </div>}
+        {agentRest && agentRest.rest > 0 && <button type="button" onClick={() => agentPanel.setOpen(true, agentRest.tab)} className="mt-3 flex min-h-11 w-full items-center justify-between rounded-lg text-left text-sm font-semibold text-primary hover:underline sm:hidden">
+          {agentRest.label}
+          <ArrowRight className="size-4" aria-hidden />
+        </button>}
       </AgentSurface>}
       {hasMetrics && <div className="enter grid grid-cols-1 gap-4 [--enter-index:1] sm:grid-cols-2 xl:grid-cols-4">
         {data.access.appointments && data.appointmentCounts.some(item => item.count > 0 && item.status !== "cancelada") && <Metric title="Citas de hoy" value={activeAppointments} meter={{ value: confirmedAppointments, total: activeAppointments }} detail={`${confirmedAppointments} confirmadas · abrir agenda`} href="/agenda" icon={<CalendarDays />} />}

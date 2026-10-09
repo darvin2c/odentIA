@@ -28,6 +28,7 @@ import {
   createContext,
   type ReactNode,
   type RefObject,
+  useCallback,
   useContext,
   useEffect,
   useRef,
@@ -80,18 +81,52 @@ export function invalidateAgentPanelQueries(queryClient: QueryClient): void {
   for (const key of PANEL_KEYS) void queryClient.invalidateQueries({ queryKey: [key] })
 }
 
+export type AgentPanelTab = "decidir" | "derivadas" | "actividad"
+
 interface AgentPanelState {
   open: boolean
-  setOpen: (open: boolean) => void
+  /** Abre o cierra; al abrir puede elegir la pestaña (por defecto «Por decidir»). */
+  setOpen: (open: boolean, tab?: AgentPanelTab) => void
+  /** Pestaña con la que se abrió por última vez. */
+  tab: AgentPanelTab
   /** Botón de cabecera, para devolverle el foco al cerrar el cajón. */
   buttonRef: RefObject<HTMLButtonElement | null>
+  /** Control desde el que se abrió (cabecera, banda del hilo, Inicio): recibe el foco al cerrar. */
+  openerRef: RefObject<HTMLElement | null>
 }
 
 const AgentPanelContext = createContext<AgentPanelState>({
   open: false,
   setOpen: () => {},
+  tab: "decidir",
   buttonRef: { current: null },
+  openerRef: { current: null },
 })
+
+/** Abrir o cerrar el panel desde otra superficie (banda del hilo, Inicio). */
+export function useAgentPanel(): Pick<AgentPanelState, "open" | "setOpen"> {
+  const { open, setOpen } = useContext(AgentPanelContext)
+  return { open, setOpen }
+}
+
+/** Decidir o tomar un caso cambia lo que la bandeja muestra de ese hilo; no se espera al aviso en vivo. */
+function invalidateAfterAgentDecision(queryClient: QueryClient): void {
+  invalidateAgentPanelQueries(queryClient)
+  void queryClient.invalidateQueries({ queryKey: ["conversations"] })
+  void queryClient.invalidateQueries({ queryKey: ["conversation"] })
+}
+
+/** Conversación abierta en la Bandeja, si es la pantalla que hay debajo del panel. */
+function useOpenConversationId(): string | null {
+  return useRouterState({
+    select: (state) => {
+      const conversation = (state.location.search as Record<string, unknown>).conversation
+      return state.location.pathname.endsWith("/inbox") && typeof conversation === "string"
+        ? conversation
+        : null
+    },
+  })
+}
 
 export function useAgentPanelSummary(enabled: boolean) {
   return useQuery({
@@ -103,8 +138,18 @@ export function useAgentPanelSummary(enabled: boolean) {
 }
 
 export function AgentPanelProvider({ children }: { children: ReactNode }) {
-  const [open, setOpen] = useState(false)
+  const [open, setOpenState] = useState(false)
+  const [tab, setTab] = useState<AgentPanelTab>("decidir")
   const buttonRef = useRef<HTMLButtonElement | null>(null)
+  const openerRef = useRef<HTMLElement | null>(null)
+  const setOpen = useCallback((next: boolean, nextTab?: AgentPanelTab) => {
+    if (next) {
+      const active = document.activeElement
+      openerRef.current = active instanceof HTMLElement && active !== document.body ? active : null
+      setTab(nextTab ?? "decidir")
+    }
+    setOpenState(next)
+  }, [])
   // Los enlaces del panel no lo cierran al clic: si la página protege un
   // borrador y el usuario elige seguir editando, el panel sigue tal cual. Se
   // cierra cuando la navegación se confirma (cambia la ubicación).
@@ -115,9 +160,9 @@ export function AgentPanelProvider({ children }: { children: ReactNode }) {
       lastHref.current = href
       setOpen(false)
     }
-  }, [href])
+  }, [href, setOpen])
   return (
-    <AgentPanelContext.Provider value={{ open, setOpen, buttonRef }}>
+    <AgentPanelContext.Provider value={{ open, setOpen, tab, buttonRef, openerRef }}>
       {children}
       <AgentPanel />
     </AgentPanelContext.Provider>
@@ -190,16 +235,16 @@ function headerStatus(data: AgentPanelSummary): string {
 }
 
 function AgentPanel() {
-  const { open, setOpen, buttonRef } = useContext(AgentPanelContext)
+  const { open, setOpen, tab, buttonRef, openerRef } = useContext(AgentPanelContext)
   const canSee = useCanSeePanel()
   const summary = useAgentPanelSummary(open && canSee)
   const data = summary.data?.data
   return (
-    <Sheet open={open} onOpenChange={setOpen}>
+    <Sheet open={open} onOpenChange={(next) => setOpen(next)}>
       <SheetContent
         side="right"
         showCloseButton={false}
-        finalFocus={buttonRef}
+        finalFocus={() => (openerRef.current?.isConnected ? openerRef.current : buttonRef.current)}
         className="gap-0 p-0 data-[side=right]:w-full data-[side=right]:sm:w-[400px] data-[side=right]:sm:max-w-md"
         aria-label="Agente"
       >
@@ -238,18 +283,24 @@ function AgentPanel() {
             </span>
           </Button>
         </div>
-        {open ? <PanelBody summary={data} /> : null}
+        {open ? <PanelBody summary={data} initialTab={tab} /> : null}
       </SheetContent>
     </Sheet>
   )
 }
 
-function PanelBody({ summary }: { summary: AgentPanelSummary | undefined }) {
+function PanelBody({
+  summary,
+  initialTab,
+}: {
+  summary: AgentPanelSummary | undefined
+  initialTab: AgentPanelTab
+}) {
   const pending = summary?.pendingProposals ?? 0
   const openHandoffs = summary?.openHandoffs ?? 0
   const when = whenFormatter(summary)
   return (
-    <Tabs defaultValue="decidir" className="flex min-h-0 flex-1 flex-col">
+    <Tabs defaultValue={initialTab} className="flex min-h-0 flex-1 flex-col">
       <TabsList className="mx-4 mt-3 grid grid-cols-3 sm:mx-5">
         <TabsTrigger value="decidir">Por decidir{pending > 0 ? ` · ${pending}` : ""}</TabsTrigger>
         <TabsTrigger value="derivadas">
@@ -290,6 +341,7 @@ const TOUCH_SM = "min-h-11 sm:min-h-8"
 
 function ProposalsTab({ when }: { when: WhenFormatter }) {
   const queryClient = useQueryClient()
+  const openConversationId = useOpenConversationId()
   const canDecide = usePermission("agent.decide")
   const canConversations = usePermission("conversations.write")
   const canAgenda = usePermission("appointments.write")
@@ -322,7 +374,7 @@ function ProposalsTab({ when }: { when: WhenFormatter }) {
       setApproving(null)
       setRejecting(null)
       setReason("")
-      invalidateAgentPanelQueries(queryClient)
+      invalidateAfterAgentDecision(queryClient)
     },
   })
   const error =
@@ -352,10 +404,16 @@ function ProposalsTab({ when }: { when: WhenFormatter }) {
     )
   // El equipo decide todo lo que no exige confirmación del interlocutor; esas
   // se muestran aparte para que no parezcan decisiones pendientes de nadie.
+  // Lo del hilo que hay abierto debajo va primero: es lo que se está mirando.
   const proposals = query.data.data
-  const forTeam = proposals.filter((p) => p.mode !== "confirmar_usuario")
-  const forContact = proposals.filter((p) => p.mode === "confirmar_usuario")
+  const ofOpenThread = (p: AgentProposal) => openConversationId !== null && p.conversationId === openConversationId
+  const decidedByTeam = (p: AgentProposal) => p.mode !== "confirmar_usuario"
+  const fromOpenThread = proposals.filter(ofOpenThread)
+  const forTeam = proposals.filter((p) => decidedByTeam(p) && !ofOpenThread(p))
+  const forContact = proposals.filter((p) => !decidedByTeam(p) && !ofOpenThread(p))
+  const nothingForTeam = !proposals.some(decidedByTeam)
   const renderProposal = (proposal: AgentProposal, decidable: boolean) => {
+    const here = ofOpenThread(proposal)
     const person = proposal.context.contactName ?? "Interlocutor no disponible"
     const patient =
       proposal.context.patientName && proposal.context.patientName !== proposal.context.contactName
@@ -367,6 +425,7 @@ function ProposalsTab({ when }: { when: WhenFormatter }) {
         className={`flex flex-col gap-3 rounded-2xl border p-4 ${decidable ? "border-primary/30 bg-primary-soft/40" : "bg-card"}`}
       >
         <div className="flex flex-wrap items-center gap-2 text-xs">
+          {here ? <Badge>De esta conversación</Badge> : null}
           <Badge variant={decidable ? "soft" : "secondary"}>
             {decidable ? "Espera tu aprobación" : "Espera al interlocutor"}
           </Badge>
@@ -466,7 +525,7 @@ function ProposalsTab({ when }: { when: WhenFormatter }) {
             </div>
           )
         ) : null}
-        {proposal.conversationId ? (
+        {here ? null : proposal.conversationId ? (
           <Link
             to="/inbox"
             search={{ conversation: proposal.conversationId }}
@@ -502,13 +561,16 @@ function ProposalsTab({ when }: { when: WhenFormatter }) {
           {error}
         </p>
       ) : null}
-      {forTeam.length === 0 ? (
+      {nothingForTeam ? (
         <EmptyState
           title="Nada por decidir"
           description="Cuando el agente prepare un cambio que necesite tu aprobación, aparecerá aquí."
         />
       ) : null}
-      <ul className="flex flex-col gap-3">{forTeam.map((p) => renderProposal(p, true))}</ul>
+      <ul className="flex flex-col gap-3">
+        {fromOpenThread.map((p) => renderProposal(p, decidedByTeam(p)))}
+        {forTeam.map((p) => renderProposal(p, true))}
+      </ul>
       {forContact.length > 0 ? (
         <section aria-label="Esperan al interlocutor" className="flex flex-col gap-3">
           <h3 className="text-xs font-semibold text-muted-foreground">
@@ -547,7 +609,7 @@ function HandoffsTab({ when }: { when: WhenFormatter }) {
   const claim = useMutation({
     mutationFn: (id: string) =>
       apiFetch<{ data: AgentHandoff }>(`/api/agent/handoffs/${id}/claim`, { method: "POST" }),
-    onSuccess: () => invalidateAgentPanelQueries(queryClient),
+    onSuccess: () => invalidateAfterAgentDecision(queryClient),
   })
   if (query.isPending) return <LoadingState />
   if (query.isError)
