@@ -259,8 +259,20 @@ export interface AgentConfig {
   organizationId: string
   enabled: boolean
   model: string | null
+  /** URL base del proveedor propio; null = el de odentIA. */
+  llmBaseUrl: string | null
+  /** La clave existe en el servidor; su valor nunca llega al cliente. */
+  hasLlmApiKey: boolean
+  dailyRunLimit: number
   systemPrompt: string
   handoffKeywords: string[]
   maxTurns: number
+}
+
+export interface LlmConnectionTest {
+  ok: boolean
+  latencyMs: number
+  model: string | null
+  error: string | null
 }
 

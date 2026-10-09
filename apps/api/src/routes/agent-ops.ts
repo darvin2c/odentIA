@@ -1,4 +1,4 @@
-import { simulateAgentTurn } from "@odentia/agent"
+import { describeProviderProblem, isProviderConfigError, type PlatformLlm, simulateAgentTurn } from "@odentia/agent"
 import { withOrgContext } from "@odentia/db"
 import {
   confirmProposalByContact,
@@ -7,7 +7,6 @@ import {
   decideProposal,
   executeProposal,
   findFreeGaps,
-  getAgentConfig,
   getAgentRunStats,
   getProposal,
   listAgentRuns,
@@ -24,10 +23,8 @@ import { errorBody } from "../lib/error.js"
 import { type CrmDeps, runService, validationError } from "./helpers.js"
 
 export interface AgentOpsDeps extends CrmDeps {
-  /** Modelo del servidor (env LLM_MODEL del API); la config de la org prevalece. */
-  defaultModelName?: string
-  llmApiKey?: string
-  llmBaseUrl?: string
+  /** Proveedor de la plataforma; la configuración de la organización prevalece. */
+  llm: PlatformLlm
 }
 
 export function createAgentOpsRoute(deps: AgentOpsDeps) {
@@ -270,16 +267,24 @@ const simulateInput = z.object({
     if (!canAccess(memberRole, "agent.write")) return forbidden(c, "agent.write")
     const parsed = simulateInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
-    return runService(c, 200, async () => {
-      const model = await withOrgContext(deps.db, orgId, (tx) =>
-        getAgentConfig(tx, orgId).then((cfg) => cfg.model ?? deps.defaultModelName ?? "fake"),
+    try {
+      return await runService(c, 200, () =>
+        simulateAgentTurn(
+          deps.db,
+          { secretsKey: deps.secretsKey, platform: deps.llm },
+          { orgId, conversationId: parsed.data.conversationId, text: parsed.data.text },
+        ),
       )
-      return simulateAgentTurn(
-        deps.db,
-        { secretsKey: deps.secretsKey, modelName: model, apiKey: deps.llmApiKey, baseUrl: deps.llmBaseUrl },
-        { orgId, conversationId: parsed.data.conversationId, text: parsed.data.text, model },
-      )
-    })
+    } catch (error) {
+      // Proveedor inutilizable (configuración, credencial, cuota): es un
+      // estado de la organización, no un error del servidor, y nunca se
+      // reenvía el cuerpo crudo del proveedor.
+      if (isProviderConfigError(error)) {
+        const problem = describeProviderProblem(error)
+        return c.json(errorBody(c, "LLM_CONFIG", `El agente no puede usar el modelo (${problem.detail})`), 409)
+      }
+      throw error
+    }
   })
 
   return app

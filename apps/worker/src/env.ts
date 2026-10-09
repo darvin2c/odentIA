@@ -17,13 +17,18 @@ const envSchema = z.object({
   MICROSOFT_MAIL_TENANT: z.string().default("common"),
   MAILBOX_POLL_INTERVAL_MS: z.coerce.number().int().min(1000).default(60000),
   CHANNEL_SENDER_MODE: z.enum(["mock", "live"]).default("mock"),
-  /** Formato initChatModel (p.ej. openai:gpt-4o-mini); fake = determinista. */
+  /** Modelo del endpoint compatible con OpenAI (prefijo openai: opcional); fake = determinista. */
   LLM_MODEL: z.string().min(1).default("fake"),
   LLM_API_KEY: z.string().optional().default(""),
   LLM_BASE_URL: z.string().url().optional(),
+  /** Tiempo límite por intento y reintentos del cliente del modelo. */
+  LLM_TIMEOUT_MS: z.coerce.number().int().min(1000).max(600_000).default(60_000),
+  LLM_MAX_RETRIES: z.coerce.number().int().min(0).max(5).default(2),
+  /** dev/e2e: admite http y destinos privados para servidores locales de prueba. */
+  LLM_ALLOW_INSECURE_BASE_URL: z.enum(["true", "false"]).default("false"),
   /** Transcripción de notas de voz inbound (endpoint OpenAI-compatible); vacío = desactivada. */
   TRANSCRIBE_MODEL: z.string().optional().default(""),
-  /** Cae a LLM_API_KEY si vacía. */
+  /** Cae a LLM_API_KEY solo si TRANSCRIBE_BASE_URL apunta al mismo host que LLM_BASE_URL. */
   TRANSCRIBE_API_KEY: z.string().optional(),
   TRANSCRIBE_BASE_URL: z.string().url().optional(),
   LANGFUSE_PUBLIC_KEY: z.string().optional(),

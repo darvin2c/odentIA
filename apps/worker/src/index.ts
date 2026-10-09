@@ -35,8 +35,14 @@ await checkpointer.setup()
 await setupAgentMemory(ownerDb)
 const agentRuntime: AgentRuntime = {
   checkpointer,
-  modelName: env.LLM_MODEL,
-  llm: { apiKey: env.LLM_API_KEY, baseUrl: env.LLM_BASE_URL },
+  platform: {
+    modelName: env.LLM_MODEL,
+    apiKey: env.LLM_API_KEY || undefined,
+    baseUrl: env.LLM_BASE_URL,
+    timeoutMs: env.LLM_TIMEOUT_MS,
+    maxRetries: env.LLM_MAX_RETRIES,
+    allowInsecureBaseUrl: env.LLM_ALLOW_INSECURE_BASE_URL === "true",
+  },
   secretsKey,
   callbacks: await langfuseCallbacks(),
 }

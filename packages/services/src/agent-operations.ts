@@ -1996,6 +1996,56 @@ async function notifyApprovers(tx: Db, orgId: string, proposal: ProposalItem) {
 }
 
 /**
+ * Corridas de hoy (zona de la organización) que llamaron al modelo: es lo
+ * que acota el tope diario. Las filas sin `llm_calls` (anteriores a la
+ * métrica) no cuentan.
+ */
+export async function countAgentModelRunsToday(tx: Db, orgId: string): Promise<number> {
+  const { timezone } = await getOrgLocale(tx, orgId)
+  const [row] = await tx.execute<{ count: number }>(sql`
+    select count(*)::int as count from agent_run_ledger
+    where organization_id = ${orgId} and llm_calls > 0
+      and (started_at at time zone ${timezone})::date = (now() at time zone ${timezone})::date`)
+  return row?.count ?? 0
+}
+
+/**
+ * El proveedor del modelo no sirve (configuración, credencial rechazada,
+ * tope diario): aviso a quien administra el agente, uno por problema y día,
+ * con enlace a la configuración. No lleva la clave ni datos del interlocutor.
+ */
+export async function notifyAgentProviderProblem(
+  tx: Db,
+  orgId: string,
+  problem: { code: string; detail: string },
+): Promise<void> {
+  const rows = await tx
+    .select({ userId: member.userId })
+    .from(member)
+    .where(and(eq(member.organizationId, orgId), inArray(member.role, ["owner", "admin"])))
+    .limit(20)
+  const { timezone } = await getOrgLocale(tx, orgId)
+  const day = new Intl.DateTimeFormat("en-CA", { timeZone: timezone }).format(new Date())
+  await notifyUsers(
+    tx,
+    orgId,
+    rows.map((r) => r.userId),
+    {
+      dedupeKey: `agent-provider:${problem.code}:${day}`,
+      title:
+        problem.code === "DAILY_LIMIT"
+          ? "El agente alcanzó su tope diario"
+          : problem.code === "PROVIDER_QUOTA"
+            ? "El proveedor del agente no tiene saldo"
+            : "El agente no puede usar el modelo",
+      body: `${problem.detail.slice(0, 900)} Mientras tanto, los casos pasan al equipo.`,
+      href: "/settings/agent",
+      permission: "agent.write",
+    },
+  )
+}
+
+/**
  * La corrida por un mensaje entrante terminó sin responder ni derivar.
  * Devuelve si el hilo quedó de verdad sin respuesta: no lo está cuando ya
  * hay un envío posterior al disparador, o uno a la espera de decisión

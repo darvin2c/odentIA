@@ -146,6 +146,8 @@ export function stackEnv(runtime: HarnessRuntime): Record<string, string> {
     CHANNEL_VALIDATE_EXTERNAL: "false",
     CHANNEL_SENDER_MODE: "mock",
     LLM_MODEL: "fake",
+    // El recorrido de configuración prueba la conexión contra un servidor local.
+    LLM_ALLOW_INSECURE_BASE_URL: "true",
     VITE_API_URL: api,
     VITE_BASE_DOMAIN: runtime.baseDomain,
     VITE_BASE_PORT: String(runtime.proxyPort),

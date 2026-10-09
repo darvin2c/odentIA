@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm"
 import {
   boolean,
+  check,
   foreignKey,
   index,
   integer,
@@ -243,18 +244,39 @@ export const customFieldDef = pgTable(
   (table) => [uniqueIndex("custom_field_def_org_key_uidx").on(table.organizationId, table.key)],
 )
 
-export const agentConfig = pgTable("agent_config", {
-  organizationId: text("organization_id")
-    .primaryKey()
-    .references(() => organization.id),
-  enabled: boolean("enabled").notNull().default(false),
-  model: text("model"),
-  systemPrompt: text("system_prompt").notNull().default(""),
-  handoffKeywords: text("handoff_keywords").array().notNull().default(sql`'{}'`),
-  maxTurns: integer("max_turns").notNull().default(10),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-})
+/**
+ * Configuración del agente por organización. El proveedor LLM propio es un
+ * par atómico (URL base + clave cifrada): nunca se combina una URL de la
+ * organización con la clave de la plataforma.
+ */
+export const agentConfig = pgTable(
+  "agent_config",
+  {
+    organizationId: text("organization_id")
+      .primaryKey()
+      .references(() => organization.id),
+    enabled: boolean("enabled").notNull().default(false),
+    model: text("model"),
+    /** URL base de un endpoint compatible con OpenAI propio de la organización. */
+    llmBaseUrl: text("llm_base_url"),
+    /** Clave del proveedor propio, cifrada con AES-256-GCM (nunca sale a la UI). */
+    llmApiKeyEncrypted: text("llm_api_key_encrypted"),
+    /** Corridas con llamada al modelo permitidas por día (zona de la organización). */
+    dailyRunLimit: integer("daily_run_limit").notNull().default(500),
+    systemPrompt: text("system_prompt").notNull().default(""),
+    handoffKeywords: text("handoff_keywords").array().notNull().default(sql`'{}'`),
+    maxTurns: integer("max_turns").notNull().default(10),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check(
+      "agent_config_llm_pair_check",
+      sql`(${table.llmBaseUrl} is null) = (${table.llmApiKeyEncrypted} is null)`,
+    ),
+    check("agent_config_daily_run_limit_check", sql`${table.dailyRunLimit} between 1 and 100000`),
+  ],
+)
 
 /**
  * Ledger de dedupe de eventos inbound. SIN org_id y SIN RLS: el webhook aún

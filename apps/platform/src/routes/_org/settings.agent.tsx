@@ -1,4 +1,4 @@
-import { Badge, Button, Checkbox, Field, FieldLabel, Input, Textarea } from "@odentia/ui"
+import { Badge, Button, Checkbox, Field, FieldDescription, FieldLabel, Input, Textarea } from "@odentia/ui"
 import {
   EmptyState,
   FormDrawer,
@@ -11,8 +11,56 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { type FormEvent, useEffect, useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
-import { type AgentConfig, usePermission } from "../../lib/crm"
+import { type AgentConfig, type LlmConnectionTest, usePermission } from "../../lib/crm"
 import { PageDraftGuard, sameDraft } from "../../lib/page-draft-guard"
+
+/** Borrador del formulario: la clave viaja solo si se escribe; null la borra. */
+interface ConfigDraft extends AgentConfig {
+  ownProvider: boolean
+  llmApiKey?: string | null
+}
+
+function toDraft(config: AgentConfig): ConfigDraft {
+  return { ...config, ownProvider: config.llmBaseUrl !== null }
+}
+
+/**
+ * Solo viaja lo que cambió del proveedor: así guardar otro campo no vuelve
+ * a validar la URL guardada, y la clave solo se envía si se escribió.
+ */
+function toPatch(draft: ConfigDraft, baseline: ConfigDraft | null): Partial<AgentConfig> & { llmApiKey?: string | null } {
+  const { ownProvider, llmApiKey, llmBaseUrl, hasLlmApiKey: _has, organizationId: _org, ...rest } = draft
+  if (!ownProvider) return baseline?.ownProvider === false ? rest : { ...rest, llmBaseUrl: null, llmApiKey: null }
+  const urlChanged = llmBaseUrl !== (baseline?.ownProvider ? baseline.llmBaseUrl : null)
+  return {
+    ...rest,
+    ...(urlChanged ? { llmBaseUrl } : {}),
+    ...(llmApiKey ? { llmApiKey } : {}),
+  }
+}
+
+/** Por qué no se puede guardar o probar todavía; null si está completo. */
+function providerIssue(draft: ConfigDraft, baseline: ConfigDraft | null): string | null {
+  if (!draft.ownProvider) return null
+  if (!draft.llmBaseUrl) return "Indica la URL base del proveedor."
+  if (!draft.model) return "Indica el modelo que espera ese proveedor."
+  const urlChanged = draft.llmBaseUrl !== (baseline?.ownProvider ? baseline.llmBaseUrl : null)
+  if (!draft.llmApiKey && (!draft.hasLlmApiKey || urlChanged)) {
+    return urlChanged && draft.hasLlmApiKey
+      ? "Al cambiar la URL vuelve a escribir la clave: la guardada no se envía a otro proveedor."
+      : "Indica la clave de API del proveedor."
+  }
+  return null
+}
+
+function providerHost(baseUrl: string | null): string {
+  if (!baseUrl) return "odentIA"
+  try {
+    return new URL(baseUrl).host
+  } catch {
+    return baseUrl
+  }
+}
 
 export const Route = createFileRoute("/_org/settings/agent")({
   component: AgentPage,
@@ -25,7 +73,7 @@ function AgentPage() {
   const [formOpen, setFormOpen] = useState(false)
   const [saved, setSaved] = useState(false)
   const [policyDirty, setPolicyDirty] = useState(false)
-  const [baseline, setBaseline] = useState<AgentConfig | null>(null)
+  const [baseline, setBaseline] = useState<ConfigDraft | null>(null)
 
   const configQuery = useQuery({
     queryKey: ["agent-config"],
@@ -33,19 +81,30 @@ function AgentPage() {
   })
 
   // El detalle muestra lo guardado; el formulario edita una copia en memoria.
-  const [form, setForm] = useState<AgentConfig | null>(null)
+  const [form, setForm] = useState<ConfigDraft | null>(null)
   const config = configQuery.data?.data ?? null
-  const current = form ?? config
+  const current = form ?? (config ? toDraft(config) : null)
   const configDirty = formOpen && !sameDraft(form, baseline)
 
   const saveMutation = useMutation({
-    mutationFn: (patch: Partial<AgentConfig>) =>
-      apiFetch("/api/agent/config", { method: "PUT", body: JSON.stringify(patch) }),
+    mutationFn: (draft: ConfigDraft) =>
+      apiFetch("/api/agent/config", { method: "PUT", body: JSON.stringify(toPatch(draft, baseline)) }),
     onSuccess: () => {
       setSaved(true)
       closeForm()
       void queryClient.invalidateQueries({ queryKey: ["agent-config"] })
     },
+  })
+  const testMutation = useMutation({
+    mutationFn: (draft: ConfigDraft) =>
+      apiFetch<{ data: LlmConnectionTest }>("/api/agent/config/llm/test", {
+        method: "POST",
+        body: JSON.stringify({
+          model: draft.model,
+          llmBaseUrl: draft.ownProvider ? draft.llmBaseUrl : null,
+          ...(draft.ownProvider && draft.llmApiKey ? { llmApiKey: draft.llmApiKey } : {}),
+        }),
+      }),
   })
 
   if (!canWrite) {
@@ -66,10 +125,17 @@ function AgentPage() {
     )
   }
 
-  const set = (patch: Partial<AgentConfig>) => {
+  const set = (patch: Partial<ConfigDraft>) => {
     setSaved(false)
-    setForm({ ...current, ...patch })
+    testMutation.reset()
+    const next = { ...current, ...patch }
+    // Una propiedad con undefined ensuciaría el borrador aunque no cambie nada.
+    for (const key of Object.keys(next) as Array<keyof ConfigDraft>) {
+      if (next[key] === undefined) delete next[key]
+    }
+    setForm(next)
   }
+  const issue = providerIssue(current, baseline)
 
   const error =
     saveMutation.error instanceof ApiError
@@ -79,9 +145,12 @@ function AgentPage() {
         : null
 
   function openForm() {
+    if (!config) return
     setSaved(false)
-    setForm(config)
-    setBaseline(config)
+    testMutation.reset()
+    const draft = toDraft(config)
+    setForm(draft)
+    setBaseline(draft)
     setFormOpen(true)
   }
 
@@ -89,7 +158,16 @@ function AgentPage() {
   function closeForm() {
     setFormOpen(false)
     setForm(null)
+    testMutation.reset()
   }
+
+  const test = testMutation.data?.data ?? null
+  const testError =
+    testMutation.error instanceof ApiError
+      ? (testMutation.error.shape.message ?? "No pudimos probar la conexión")
+      : testMutation.error
+        ? "No pudimos probar la conexión"
+        : null
 
   const formFields = (
     <div className="flex flex-col gap-4">
@@ -106,16 +184,96 @@ function AgentPage() {
           Agente habilitado
         </label>
       </Field>
+      <fieldset className="flex flex-col gap-4 rounded-sm border p-4">
+        <legend className="px-1 text-sm font-medium">Proveedor del modelo</legend>
+        <Field>
+          <label htmlFor="agente-proveedor-propio" className="flex cursor-pointer items-center gap-2 text-sm">
+            <Checkbox
+              id="agente-proveedor-propio"
+              checked={current.ownProvider}
+              onCheckedChange={(value) => set({ ownProvider: value === true })}
+            />
+            Usar la cuenta propia de la clínica
+          </label>
+          <FieldDescription>
+            Sin marcar, el agente usa el proveedor de odentIA. Con cuenta propia, los mensajes de la clínica van a
+            ese proveedor con su clave y su modelo.
+          </FieldDescription>
+        </Field>
+        {current.ownProvider ? (
+          <>
+            <Field>
+              <FieldLabel htmlFor="agente-url-base">URL base del proveedor</FieldLabel>
+              <Input
+                id="agente-url-base"
+                type="url"
+                value={current.llmBaseUrl ?? ""}
+                placeholder="https://api.proveedor.com/v1"
+                onChange={(e) => set({ llmBaseUrl: e.target.value || null })}
+              />
+              <FieldDescription>Endpoint compatible con OpenAI, con https. Incluye el prefijo que indique el proveedor (p. ej. /v1).</FieldDescription>
+            </Field>
+            <Field>
+              <FieldLabel htmlFor="agente-clave">Clave de API</FieldLabel>
+              <Input
+                id="agente-clave"
+                type="password"
+                autoComplete="off"
+                value={current.llmApiKey ?? ""}
+                placeholder={current.hasLlmApiKey ? "Guardada · escribe una nueva para reemplazarla" : "sk-…"}
+                onChange={(e) => set({ llmApiKey: e.target.value || undefined })}
+              />
+              <FieldDescription>Se guarda cifrada y no vuelve a mostrarse.</FieldDescription>
+            </Field>
+          </>
+        ) : null}
+        <Field>
+          <FieldLabel htmlFor="agente-modelo">
+            {current.ownProvider ? "Modelo" : "Modelo (vacío = el de odentIA)"}
+          </FieldLabel>
+          <Input
+            id="agente-modelo"
+            value={current.model ?? ""}
+            placeholder="gpt-4o-mini"
+            onChange={(e) => set({ model: e.target.value || null })}
+          />
+          <FieldDescription>El nombre tal como lo espera el proveedor; debe admitir llamadas a herramientas.</FieldDescription>
+        </Field>
+        <div className="flex flex-col gap-2">
+          <div>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={testMutation.isPending || issue !== null}
+              onClick={() => testMutation.mutate(current)}
+            >
+              {testMutation.isPending ? "Probando…" : "Probar conexión"}
+            </Button>
+          </div>
+          {issue ? <FieldDescription>{issue}</FieldDescription> : null}
+          {testError ? (
+            <p role="alert" className="text-sm text-destructive">{testError}</p>
+          ) : test?.ok ? (
+            <p role="status" className="text-sm text-success">
+              El proveedor respondió en {(test.latencyMs / 1000).toFixed(1)} s{test.model ? ` con ${test.model}` : ""}. No acredita calidad ni soporte de herramientas.
+            </p>
+          ) : test ? (
+            <p role="alert" className="text-sm text-destructive">Sin conexión: {test.error}</p>
+          ) : null}
+        </div>
+      </fieldset>
       <Field>
-        <FieldLabel htmlFor="agente-modelo">
-          Modelo (vacío = el de `LLM_MODEL` del servidor)
-        </FieldLabel>
+        <FieldLabel htmlFor="agente-tope">Tope diario de corridas con el modelo</FieldLabel>
         <Input
-          id="agente-modelo"
-          value={current.model ?? ""}
-          placeholder="openai:gpt-4o-mini"
-          onChange={(e) => set({ model: e.target.value || null })}
+          id="agente-tope"
+          type="number"
+          min={1}
+          max={100000}
+          value={current.dailyRunLimit}
+          onChange={(e) => set({ dailyRunLimit: Math.min(100_000, Math.max(1, Math.floor(Number(e.target.value) || 1))) })}
         />
+        <FieldDescription>Al alcanzarlo, los casos pasan al equipo y se avisa a quien administra el agente.</FieldDescription>
       </Field>
       <Field>
         <FieldLabel htmlFor="agente-instrucciones">Instrucciones extra de la clínica</FieldLabel>
@@ -207,8 +365,23 @@ function AgentPage() {
               </dd>
             </div>
             <div>
+              <dt className="text-xs font-medium text-muted-foreground">Proveedor del modelo</dt>
+              <dd className="text-sm">
+                {config.llmBaseUrl ? `Cuenta propia · ${providerHost(config.llmBaseUrl)}` : "odentIA"}
+                {config.llmBaseUrl ? (
+                  <Badge variant={config.hasLlmApiKey ? "success" : "destructive"} className="ml-2">
+                    {config.hasLlmApiKey ? "Clave guardada" : "Sin clave"}
+                  </Badge>
+                ) : null}
+              </dd>
+            </div>
+            <div>
               <dt className="text-xs font-medium text-muted-foreground">Modelo</dt>
-              <dd className="text-sm">{config.model ?? "El del servidor (LLM_MODEL)"}</dd>
+              <dd className="text-sm">{config.model ?? "El de odentIA"}</dd>
+            </div>
+            <div>
+              <dt className="text-xs font-medium text-muted-foreground">Tope diario de corridas</dt>
+              <dd className="text-sm">{config.dailyRunLimit}</dd>
             </div>
             <div>
               <dt className="text-xs font-medium text-muted-foreground">

@@ -77,8 +77,9 @@ function buildApp(role: string): Hono {
   app.route("/contacts", createContactsRoute(deps))
   app.route("/pipelines", createPipelinesRoute(deps))
   app.route("/channels/connections", createConnectionsRoute(deps))
-  app.route("/agent", createAgentRoute(deps))
-  app.route("/agent", createAgentOpsRoute(deps))
+  const llm = { modelName: "fake", allowInsecureBaseUrl: true }
+  app.route("/agent", createAgentRoute({ ...deps, llm }))
+  app.route("/agent", createAgentOpsRoute({ ...deps, llm }))
   app.route("/tasks", createTasksRoute(deps))
   app.route("/fields", createFieldsRoute(deps))
   return app

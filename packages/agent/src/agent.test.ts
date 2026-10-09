@@ -1,5 +1,7 @@
 process.env.DOCKER_HOST ??= "unix:///mnt/wsl/podman-sockets/odentia.sock"
 
+import { once } from "node:events"
+import { createServer } from "node:http"
 import { PostgresSaver } from "@langchain/langgraph-checkpoint-postgres"
 import { telegramBotApiAdapter } from "@odentia/channels"
 import { createAppDb, createOwnerDb, type Db, setupAgentMemory, withOrgContext } from "@odentia/db"
@@ -16,6 +18,8 @@ import {
   claimHandoff,
   createHandoff,
   updateTask,
+  getAgentConfig,
+  getAgentLlmSecrets,
   getAutonomyPolicy,
   ingestInbound,
   listHandoffs,
@@ -152,7 +156,7 @@ beforeAll(async () => {
   const checkpointer = PostgresSaver.fromConnString(ownerUri)
   await checkpointer.setup()
   await setupAgentMemory(ownerDb)
-  runtime = { checkpointer, modelName: "fake", secretsKey: KEY }
+  runtime = { checkpointer, platform: { modelName: "fake", allowInsecureBaseUrl: true }, secretsKey: KEY }
   const created = await withOrgContext(appDb, "org_a", (tx) =>
     createConnection(
       tx,
@@ -440,6 +444,219 @@ it("derivar con aviso envía el mensaje y registra la derivación en una sola ll
   expect(await ledgerRows(conversationId)).toEqual([
     { status: "handoff", llmCalls: 1, toolsUsed: ["request_human_handoff"] },
   ])
+})
+
+/** Servidor compatible con OpenAI que siempre rechaza la credencial. */
+async function rejectingProvider() {
+  let hits = 0
+  const server = createServer((_request, response) => {
+    hits += 1
+    response.writeHead(401, { "content-type": "application/json" })
+    response.end(JSON.stringify({ error: { message: "Incorrect API key provided" } }))
+  })
+  server.listen(0, "127.0.0.1")
+  await once(server, "listening")
+  const address = server.address()
+  if (!address || typeof address === "string") throw new Error("El servidor de prueba no abrió un puerto")
+  return {
+    baseUrl: `http://127.0.0.1:${address.port}/v1`,
+    hits: () => hits,
+    close: async () => {
+      server.closeAllConnections()
+      await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())))
+    },
+  }
+}
+
+it("el proveedor propio se guarda cifrado como par URL+clave, se audita y nunca sale a la lectura", async () => {
+  await expect(
+    withOrgContext(appDb, "org_a", (tx) =>
+      upsertAgentConfig(tx, "org_a", { llmApiKey: "sk-propia" }, { secretsKey: KEY, allowInsecureBaseUrl: true }),
+    ),
+  ).rejects.toThrow(/URL base/)
+  await expect(
+    withOrgContext(appDb, "org_a", (tx) =>
+      upsertAgentConfig(tx, "org_a", { llmBaseUrl: "https://10.0.0.5/v1", llmApiKey: "sk-propia" }, { secretsKey: KEY }),
+    ),
+  ).rejects.toThrow(/privada/)
+  const saved = await withOrgContext(appDb, "org_a", (tx) =>
+    upsertAgentConfig(
+      tx,
+      "org_a",
+      { llmBaseUrl: "https://proveedor.example/v1", llmApiKey: "sk-propia", model: "modelo-propio" },
+      { secretsKey: KEY, actorUserId: null },
+    ),
+  )
+  expect(saved).toMatchObject({ llmBaseUrl: "https://proveedor.example/v1", hasLlmApiKey: true, model: "modelo-propio" })
+  expect(JSON.stringify(saved)).not.toContain("sk-propia")
+  const secrets = await withOrgContext(appDb, "org_a", (tx) => getAgentLlmSecrets(tx, "org_a", KEY))
+  expect(secrets).toEqual({ baseUrl: "https://proveedor.example/v1", apiKey: "sk-propia" })
+  const audited = await withOrgContext(appDb, "org_a", (tx) =>
+    tx
+      .select({ metadata: auditEvent.metadata })
+      .from(auditEvent)
+      .where(and(eq(auditEvent.organizationId, "org_a"), eq(auditEvent.action, "agent.config_updated"))),
+  )
+  expect(audited.length).toBeGreaterThan(0)
+  expect(JSON.stringify(audited)).not.toContain("sk-propia")
+  // Cambiar la URL sin reescribir la clave se rechaza: la guardada no viaja a otro host.
+  await expect(
+    withOrgContext(appDb, "org_a", (tx) =>
+      upsertAgentConfig(tx, "org_a", { llmBaseUrl: "https://otro.example/v1" }, { secretsKey: KEY }),
+    ),
+  ).rejects.toThrow(/vuelve a indicar su clave/)
+  // Un proveedor propio sin modelo tampoco se acepta.
+  await expect(
+    withOrgContext(appDb, "org_a", (tx) =>
+      upsertAgentConfig(tx, "org_a", { llmBaseUrl: "https://otro.example/v1", llmApiKey: "sk-2", model: null }, { secretsKey: KEY }),
+    ),
+  ).rejects.toThrow(/modelo/)
+  // Quitar la URL también quita la clave: el par nunca queda a medias.
+  const cleared = await withOrgContext(appDb, "org_a", (tx) =>
+    upsertAgentConfig(tx, "org_a", { llmBaseUrl: null, model: null }, { secretsKey: KEY }),
+  )
+  expect(cleared).toMatchObject({ llmBaseUrl: null, hasLlmApiKey: false })
+  expect(await withOrgContext(appDb, "org_a", (tx) => getAgentLlmSecrets(tx, "org_a", KEY))).toBeNull()
+})
+
+it("una credencial rechazada no reintenta: deriva, avisa una vez a quien administra y queda como error", async () => {
+  const provider = await rejectingProvider()
+  const stamp = Date.now()
+  const adminId = `agent-admin-${stamp}`
+  await ownerDb.insert(user).values({ id: adminId, name: "Admin", email: `admin-${stamp}@example.test` })
+  await ownerDb.execute(sql`
+    insert into "member" ("id", "organization_id", "user_id", "role", "created_at") values
+      (${`m-${adminId}`}, 'org_a', ${adminId}, 'admin', now())`)
+  try {
+    await withOrgContext(appDb, "org_a", (tx) =>
+      upsertAgentConfig(
+        tx,
+        "org_a",
+        { llmBaseUrl: provider.baseUrl, llmApiKey: "clave-rechazada", model: "modelo-propio" },
+        { secretsKey: KEY, allowInsecureBaseUrl: true },
+      ),
+    )
+    const first = await ingestText("tg:ag-401", "evt-ag-401", "Hola")
+    expect(await runAgent(first.conversationId, first.messageId)).toBe("done")
+    expect(provider.hits()).toBe(1)
+    expect(await agentStatusOf(first.conversationId)).toBe("off")
+    expect(await agentMessages(first.conversationId)).toEqual([])
+    const rows = await ledgerRows(first.conversationId)
+    expect(rows).toHaveLength(1)
+    expect(rows[0]?.status).toBe("error")
+    const [ledgerRow] = await withOrgContext(appDb, "org_a", (tx) =>
+      tx
+        .select({ error: agentRunLedger.error, model: agentRunLedger.model })
+        .from(agentRunLedger)
+        .where(eq(agentRunLedger.conversationId, first.conversationId)),
+    )
+    expect(ledgerRow?.error).toMatch(/^PROVIDER_REJECTED: HTTP 401: Incorrect API key provided$/)
+    expect(ledgerRow?.model).toBe("modelo-propio")
+    // El motivo que ve recepción es fijo: nunca el cuerpo de la respuesta del proveedor.
+    const [handoff] = await withOrgContext(appDb, "org_a", (tx) =>
+      tx
+        .select({ reason: agentHandoff.reason, summary: agentHandoff.summary })
+        .from(agentHandoff)
+        .where(eq(agentHandoff.conversationId, first.conversationId)),
+    )
+    expect(handoff?.reason).toBe("El agente no puede usar el proveedor del modelo; revisa Configuración › Agente")
+    expect(handoff?.summary).not.toContain("Incorrect API key")
+    // Segunda conversación el mismo día: otra derivación, pero un solo aviso.
+    const second = await ingestText("tg:ag-401-b", "evt-ag-401-b", "Buenas")
+    expect(await runAgent(second.conversationId, second.messageId)).toBe("done")
+    const notices = await withOrgContext(appDb, "org_a", (tx) =>
+      tx
+        .select({ title: workspaceNotification.title, href: workspaceNotification.href })
+        .from(workspaceNotification)
+        .where(and(eq(workspaceNotification.userId, adminId), eq(workspaceNotification.href, "/settings/agent"))),
+    )
+    // Las derivaciones generan sus propios avisos; el del proveedor es uno solo.
+    expect(notices).toEqual([{ title: "El agente no puede usar el modelo", href: "/settings/agent" }])
+  } finally {
+    await provider.close()
+    await withOrgContext(appDb, "org_a", (tx) =>
+      upsertAgentConfig(tx, "org_a", { llmBaseUrl: null, model: null }, { secretsKey: KEY }),
+    )
+  }
+})
+
+it("una cuota agotada (402) tampoco reintenta y avisa con su propio título", async () => {
+  let hits = 0
+  const server = createServer((_request, response) => {
+    hits += 1
+    response.writeHead(402, { "content-type": "application/json" })
+    response.end(JSON.stringify({ error: { message: "Insufficient credits", code: "insufficient_quota" } }))
+  })
+  server.listen(0, "127.0.0.1")
+  await once(server, "listening")
+  const address = server.address()
+  if (!address || typeof address === "string") throw new Error("El servidor de prueba no abrió un puerto")
+  try {
+    await withOrgContext(appDb, "org_a", (tx) =>
+      upsertAgentConfig(
+        tx,
+        "org_a",
+        { llmBaseUrl: `http://127.0.0.1:${address.port}/v1`, llmApiKey: "clave", model: "modelo-propio" },
+        { secretsKey: KEY, allowInsecureBaseUrl: true },
+      ),
+    )
+    const { conversationId, messageId } = await ingestText("tg:ag-402", "evt-ag-402", "Hola")
+    expect(await runAgent(conversationId, messageId)).toBe("done")
+    expect(hits).toBe(1)
+    expect(await agentStatusOf(conversationId)).toBe("off")
+    const [row] = await withOrgContext(appDb, "org_a", (tx) =>
+      tx.select({ error: agentRunLedger.error }).from(agentRunLedger).where(eq(agentRunLedger.conversationId, conversationId)),
+    )
+    expect(row?.error).toMatch(/^PROVIDER_QUOTA: HTTP 402/)
+    const notices = await withOrgContext(appDb, "org_a", (tx) =>
+      tx
+        .select({ title: workspaceNotification.title })
+        .from(workspaceNotification)
+        .where(and(eq(workspaceNotification.href, "/settings/agent"), eq(workspaceNotification.title, "El proveedor del agente no tiene saldo"))),
+    )
+    expect(notices.length).toBeGreaterThan(0)
+  } finally {
+    server.closeAllConnections()
+    await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())))
+    await withOrgContext(appDb, "org_a", (tx) =>
+      upsertAgentConfig(tx, "org_a", { llmBaseUrl: null, model: null }, { secretsKey: KEY }),
+    )
+  }
+})
+
+it("al alcanzar el tope diario el caso pasa al equipo sin llamar al modelo", async () => {
+  await withOrgContext(appDb, "org_a", (tx) => upsertAgentConfig(tx, "org_a", { dailyRunLimit: 1 }))
+  try {
+    // La primera corrida del día consume el tope; la segunda ya no llama al modelo.
+    const first = await ingestText("tg:ag-tope-1", "evt-ag-tope-1", "Hola")
+    const used = new ScriptedModel(() => toolCall("send_reply", { text: "Hola, dime." }, "call-1"))
+    await withOrgContext(appDb, "org_a", (tx) => upsertAgentConfig(tx, "org_a", { dailyRunLimit: 100_000 }))
+    expect(await runScripted(used, first.conversationId, first.messageId)).toBe("done")
+    expect(used.seen.length).toBe(1)
+    await withOrgContext(appDb, "org_a", (tx) => upsertAgentConfig(tx, "org_a", { dailyRunLimit: 1 }))
+    const { conversationId, messageId } = await ingestText("tg:ag-tope", "evt-ag-tope", "Hola")
+    const model = new ScriptedModel(() => toolCall("send_reply", { text: "No debería enviarse." }, "call-1"))
+    expect(await runScripted(model, conversationId, messageId)).toBe("done")
+    expect(model.seen.length).toBe(0)
+    expect(await agentMessages(conversationId)).toEqual([])
+    expect(await agentStatusOf(conversationId)).toBe("off")
+    const [row] = await withOrgContext(appDb, "org_a", (tx) =>
+      tx
+        .select({ status: agentRunLedger.status, error: agentRunLedger.error })
+        .from(agentRunLedger)
+        .where(eq(agentRunLedger.conversationId, conversationId)),
+    )
+    expect(row).toMatchObject({ status: "error" })
+    expect(row?.error).toMatch(/^DAILY_LIMIT/)
+  } finally {
+    await withOrgContext(appDb, "org_a", (tx) => upsertAgentConfig(tx, "org_a", { dailyRunLimit: 500 }))
+  }
+})
+
+it("la configuración por defecto no expone la clave y el resolvedor usa la plataforma", async () => {
+  const cfg = await withOrgContext(appDb, "org_a", (tx) => getAgentConfig(tx, "org_a"))
+  expect(cfg).toMatchObject({ llmBaseUrl: null, hasLlmApiKey: false, dailyRunLimit: 500 })
+  expect("llmApiKeyEncrypted" in cfg).toBe(false)
 })
 
 it("una reentrega con el hilo ya respondido no avisa ni queda sin_respuesta", async () => {

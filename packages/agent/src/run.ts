@@ -6,26 +6,76 @@ import { type AgentRunJob, type Db, type QueueMessage, withOrgContext } from "@o
 import { conversation, message } from "@odentia/db/schema/crm"
 import { auditEvent } from "@odentia/db/schema/org"
 import {
+  type AgentConfig,
   beginCommercialFollowUpCoordination,
+  countAgentModelRunsToday,
   deriveCommercialFollowUpCoordination,
   getAgentConfig,
+  getAgentLlmSecrets,
+  notifyAgentProviderProblem,
   type RecordRunInput,
   recordAgentRun,
   reportAgentNoReply,
 } from "@odentia/services"
 import { and, desc, eq, sql } from "drizzle-orm"
 import { compileAgentGraph } from "./graph.js"
-import { createConfiguredChatModel, type LlmCredentials } from "./llm.js"
+import {
+  createConfiguredChatModel,
+  describeProviderProblem,
+  isProviderConfigError,
+  LlmConfigError,
+  type LlmSpec,
+  type OrgLlmSecrets,
+  type PlatformLlm,
+  resolveLlmSpec,
+} from "./llm.js"
 import { type AgentToolCtx, performHandoff } from "./tools.js"
 export interface AgentRuntime {
   checkpointer: PostgresSaver
-  modelName: string
-  /** Credenciales del proveedor por llamada (sin entorno global). */
-  llm?: LlmCredentials
+  /** Proveedor de la plataforma; la organización puede traer el suyo. */
+  platform: PlatformLlm
   /** Sustituye la construcción del modelo (pruebas con un modelo guionizado). */
-  createModel?: (modelName: string) => Promise<Runnable<BaseMessage[], AIMessage>>
+  createModel?: (spec: LlmSpec) => Promise<Runnable<BaseMessage[], AIMessage>>
   secretsKey: Buffer
   callbacks?: Callbacks
+}
+
+/**
+ * Modelo efectivo de la organización: proveedor propio descifrado o el de la
+ * plataforma. Lanza LlmConfigError si la configuración no sirve.
+ */
+export async function resolveOrgLlm(
+  tx: Db,
+  orgId: string,
+  cfg: AgentConfig,
+  runtime: Pick<AgentRuntime, "platform" | "secretsKey">,
+  override?: string | null,
+): Promise<LlmSpec> {
+  let secrets: OrgLlmSecrets | null = null
+  if (cfg.hasLlmApiKey) {
+    try {
+      secrets = await getAgentLlmSecrets(tx, orgId, runtime.secretsKey)
+    } catch {
+      // Clave de cifrado rotada o fila corrupta: es configuración, no un fallo transitorio.
+      throw new LlmConfigError("API_KEY_UNREADABLE", "No se pudo leer la clave guardada del proveedor: vuelve a guardarla")
+    }
+  }
+  return resolveLlmSpec(cfg, secrets, runtime.platform, override)
+}
+
+/** Problema del proveedor que no se arregla reintentando. */
+type ProviderProblem = ReturnType<typeof describeProviderProblem>
+
+/** Motivo de la derivación: fijo por tipo de problema, nunca el texto del proveedor. */
+function handoffReasonFor(problem: ProviderProblem): string {
+  switch (problem.code) {
+    case "DAILY_LIMIT":
+      return "El agente alcanzó su tope diario de corridas"
+    case "PROVIDER_QUOTA":
+      return "El proveedor del modelo del agente no tiene saldo o cuota"
+    default:
+      return "El agente no puede usar el proveedor del modelo; revisa Configuración › Agente"
+  }
 }
 
 function matchesHandoff(text: string | null, keywords: string[]): boolean {
@@ -101,10 +151,24 @@ export async function processAgentRun(
   const startedAt = new Date()
   // Uso de la corrida en curso, para registrarlo también si termina en error.
   let runUsage: AgentToolCtx["usage"] | null = null
+  // Modelo resuelto, para registrarlo aunque falle antes o después.
+  let effectiveModel = runtime.platform.modelName
+  let configProblem: ProviderProblem | null = null
   try {
     let prepared:
       | { skip: { reason: string; model: string } }
-      | { toolCtx: AgentToolCtx; effectiveModel: string }
+      | { toolCtx: AgentToolCtx; spec: LlmSpec; cfg: AgentConfig }
+    // La configuración del proveedor es estado de la organización: su fallo
+    // no debe reintentarse ni derivar en silencio.
+    const resolveLlm = async (tx: Db, cfg: AgentConfig): Promise<LlmSpec | null> => {
+      try {
+        return await resolveOrgLlm(tx, orgId, cfg, runtime)
+      } catch (error) {
+        if (!(error instanceof LlmConfigError)) throw error
+        configProblem = describeProviderProblem(error)
+        return null
+      }
+    }
     if (msg.message.kind === "inbound_message") {
       const inboundJob = msg.message
       prepared = await withOrgContext(db, orgId, async (tx) => {
@@ -113,12 +177,12 @@ export async function processAgentRun(
           .from(conversation)
           .where(and(eq(conversation.id, conversationId), eq(conversation.organizationId, orgId)))
           .limit(1)
-        if (!conv) return { skip: { reason: "missing-conversation", model: runtime.modelName } }
+        if (!conv) return { skip: { reason: "missing-conversation", model: effectiveModel } }
         if (conv.agentStatus !== "on") {
-          return { skip: { reason: "agent-off", model: runtime.modelName } }
+          return { skip: { reason: "agent-off", model: effectiveModel } }
         }
         const cfg = await getAgentConfig(tx, orgId)
-        const effectiveModel = cfg.model?.trim() ? cfg.model.trim() : runtime.modelName
+        if (cfg.model?.trim()) effectiveModel = cfg.model.trim()
         if (!cfg.enabled) return { skip: { reason: "agent-disabled", model: effectiveModel } }
         const [trigger] = await tx
           .select()
@@ -142,11 +206,14 @@ export async function processAgentRun(
         if (!recent.some((row) => row.id === inboundJob.messageId)) {
           return { skip: { reason: "superseded", model: effectiveModel } }
         }
+        const spec = await resolveLlm(tx, cfg)
+        if (!spec) return { skip: { reason: "llm-config", model: effectiveModel } }
         return {
           toolCtx: baseToolCtx(db, orgId, conversationId, conv.contactId, runtime.secretsKey, {
             triggerId: inboundJob.messageId,
           }),
-          effectiveModel,
+          spec,
+          cfg,
         }
       })
     } else {
@@ -159,7 +226,7 @@ export async function processAgentRun(
           new Date(),
         )
         const cfg = await getAgentConfig(tx, orgId)
-        const effectiveModel = cfg.model?.trim() ? cfg.model.trim() : runtime.modelName
+        if (cfg.model?.trim()) effectiveModel = cfg.model.trim()
         if (!coordination.run) {
           return {
             skip: {
@@ -168,7 +235,11 @@ export async function processAgentRun(
             },
           }
         }
+        const spec = await resolveLlm(tx, cfg)
+        if (!spec) return { skip: { reason: "llm-config", model: effectiveModel } }
         return {
+          spec,
+          cfg,
           toolCtx: baseToolCtx(
             db,
             orgId,
@@ -190,9 +261,13 @@ export async function processAgentRun(
               commercialCoordinationId: coordination.coordinationId,
             },
           ),
-          effectiveModel,
         }
       })
+    }
+    if ("skip" in prepared && configProblem) {
+      // Sin modelo utilizable: el interlocutor pasa a una persona y quien
+      // administra el agente recibe un único aviso por problema y día.
+      return finishWithProviderProblem(configProblem)
     }
     if ("skip" in prepared) {
       await ledger(db, orgId, {
@@ -209,11 +284,19 @@ export async function processAgentRun(
       })
       return "done"
     }
-    const { toolCtx, effectiveModel } = prepared
+    const { toolCtx, spec, cfg } = prepared
+    effectiveModel = spec.modelName
     runUsage = toolCtx.usage
-    const model = runtime.createModel
-      ? await runtime.createModel(effectiveModel)
-      : await createConfiguredChatModel(effectiveModel, runtime.llm)
+    // Tope diario: acota el gasto ante ráfagas o abuso del canal público. Al
+    // alcanzarlo, el caso pasa a una persona y se avisa una vez por día.
+    const usedToday = await withOrgContext(db, orgId, (tx) => countAgentModelRunsToday(tx, orgId))
+    if (usedToday >= cfg.dailyRunLimit) {
+      return finishWithProviderProblem({
+        code: "DAILY_LIMIT",
+        detail: `Se alcanzó el tope diario de ${cfg.dailyRunLimit} corridas del agente`,
+      })
+    }
+    const model = runtime.createModel ? await runtime.createModel(spec) : await createConfiguredChatModel(spec)
     const graph = compileAgentGraph(model, toolCtx, runtime.checkpointer)
     await graph.invoke(
       { messages: [], turnCount: 0 },
@@ -260,19 +343,18 @@ export async function processAgentRun(
     })
     return "done"
   } catch (error) {
+    if (isProviderConfigError(error)) return finishWithProviderProblem(describeProviderProblem(error))
     if (msg.read_ct >= 2) {
       const detail = error instanceof Error ? error.message : String(error)
-      const effectiveModel = await withOrgContext(db, orgId, async (tx) => {
-        await tx.insert(auditEvent).values({
+      await withOrgContext(db, orgId, (tx) =>
+        tx.insert(auditEvent).values({
           organizationId: orgId,
           action: "agent.error",
           entity: "conversation",
           entityId: conversationId,
           metadata: { error: detail.slice(0, 500) },
-        })
-        const cfg = await getAgentConfig(tx, orgId)
-        return cfg.model?.trim() ? cfg.model.trim() : runtime.modelName
-      }).catch(() => runtime.modelName)
+        }),
+      ).catch(() => {})
       const toolCtx = baseToolCtx(db, orgId, conversationId, "", runtime.secretsKey, {
         triggerId: inboundMessageId ?? coordinationId,
         ...(coordinationId ? { commercialCoordinationId: coordinationId } : {}),
@@ -295,6 +377,32 @@ export async function processAgentRun(
       return "done"
     }
     return "retry"
+  }
+
+  /**
+   * Proveedor inutilizable (configuración, credencial rechazada, tope
+   * diario): no se reintenta, el caso pasa a una persona y el aviso a quien
+   * administra el agente se deduplica por problema y día.
+   */
+  async function finishWithProviderProblem(problem: ProviderProblem): Promise<"done"> {
+    await withOrgContext(db, orgId, (tx) => notifyAgentProviderProblem(tx, orgId, problem)).catch(() => {})
+    const toolCtx = baseToolCtx(db, orgId, conversationId, "", runtime.secretsKey, {
+      triggerId: inboundMessageId ?? coordinationId,
+      ...(coordinationId ? { commercialCoordinationId: coordinationId } : {}),
+    })
+    await performHandoff(toolCtx, handoffReasonFor(problem)).catch(() => {})
+    await ledger(db, orgId, {
+      conversationId,
+      triggerMessageId: inboundMessageId,
+      model: effectiveModel,
+      status: "error",
+      startedAt,
+      endedAt: new Date(),
+      latencyMs: Date.now() - startedAt.getTime(),
+      llmCalls: runUsage?.calls ?? 0,
+      error: `${problem.code}: ${problem.detail}`.slice(0, 500),
+    })
+    return "done"
   }
 }
 
@@ -350,30 +458,29 @@ function messageText(msg: BaseMessage): string {
  */
 export async function simulateAgentTurn(
   db: Db,
-  deps: { secretsKey: Buffer; modelName?: string; apiKey?: string; baseUrl?: string },
+  deps: Pick<AgentRuntime, "platform" | "secretsKey">,
   input: { orgId: string; conversationId: string; text: string; model?: string },
 ): Promise<SimulationResult> {
   const { orgId, conversationId } = input
   const text = input.text.trim()
   if (!text) throw new Error("El mensaje a simular es obligatorio")
   const startedAt = new Date()
-  const { contactId, modelName } = await withOrgContext(db, orgId, async (tx) => {
+  const { contactId, spec } = await withOrgContext(db, orgId, async (tx) => {
     const [conv] = await tx
       .select({ contactId: conversation.contactId })
       .from(conversation)
       .where(and(eq(conversation.id, conversationId), eq(conversation.organizationId, orgId)))
       .limit(1)
     if (!conv) throw new Error("Conversación no encontrada")
-    // Modelo efectivo único: parámetro explícito, config de la org y default,
-    // igual que la corrida real. Se reporta el efectivo.
+    // Mismo resolvedor que la corrida real; el parámetro solo cambia el nombre.
     const cfg = await getAgentConfig(tx, orgId)
-    const resolved = input.model?.trim() || cfg.model?.trim() || deps.modelName || "fake"
-    return { contactId: conv.contactId, modelName: resolved }
+    return { contactId: conv.contactId, spec: await resolveOrgLlm(tx, orgId, cfg, deps, input.model) }
   })
+  const modelName = spec.modelName
   const toolCtx = baseToolCtx(db, orgId, conversationId, contactId, deps.secretsKey)
   toolCtx.dryRun = true
   toolCtx.draftText = text.slice(0, 4000)
-  const model = await createConfiguredChatModel(modelName, { apiKey: deps.apiKey, baseUrl: deps.baseUrl })
+  const model = await createConfiguredChatModel(spec)
   const graph = compileAgentGraph(model, toolCtx)
   const state = (await graph.invoke(
     { messages: [], turnCount: 0 },
