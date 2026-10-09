@@ -40,6 +40,7 @@ import {
 import { usePermission } from "../../lib/crm"
 import type { PatientFull, PlanItem, TreatmentPlanWithStatus } from "../../lib/patients"
 import { formatMoney } from "../../lib/services"
+import { ChoiceSelect } from "../ui/choice-select"
 
 function mutationMessage(err: unknown): string {
   if (err instanceof ApiError) {
@@ -101,6 +102,10 @@ export function PlanTab({
   const queryClient = useQueryClient()
   const canWrite = usePermission("clinical.write")
   const canRead = usePermission("clinical.read")
+  // Los presupuestos son documentos de caja: sin `finance.read` el plan se
+  // muestra con la decisión de cada tratamiento y sin importes ni propuestas.
+  const canFinance = usePermission("finance.read")
+  const canFinanceWrite = usePermission("finance.write")
   const uid = useId()
 
   const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null)
@@ -150,7 +155,7 @@ export function PlanTab({
   const budgetsQuery = useQuery({
     queryKey: ["budgets", patientId],
     queryFn: () => fetchBudgets(patientId),
-    enabled: canRead,
+    enabled: canRead && canFinance,
   })
   const planDetailQuery = useQuery({
     queryKey: ["treatment-plan", patientId, selectedPlanId],
@@ -170,7 +175,7 @@ export function PlanTab({
   const budgetDetailQuery = useQuery({
     queryKey: ["budget", patientId, selectedBudgetId],
     queryFn: () => fetchBudgetDetail(patientId, selectedBudgetId as string),
-    enabled: canRead && selectedBudgetId != null,
+    enabled: canRead && canFinance && selectedBudgetId != null,
   })
 
   const plans = useMemo(() => plansQuery.data?.data ?? [], [plansQuery.data])
@@ -589,15 +594,15 @@ export function PlanTab({
     getCoreRowModel: getCoreRowModel(),
   })
 
-  if (plansQuery.isPending || budgetsQuery.isPending) return <LoadingState />
-  const loadError = plansQuery.error ?? budgetsQuery.error
+  if (plansQuery.isPending || (canFinance && budgetsQuery.isPending)) return <LoadingState />
+  const loadError = plansQuery.error ?? (canFinance ? budgetsQuery.error : null)
   if (loadError) {
     return (
       <ErrorState
         error={loadError instanceof ApiError ? loadError.shape : null}
         onRetry={() => {
           void plansQuery.refetch()
-          void budgetsQuery.refetch()
+          if (canFinance) void budgetsQuery.refetch()
         }}
       />
     )
@@ -747,9 +752,9 @@ export function PlanTab({
                             <div className="flex flex-wrap items-center gap-3">
                               <label className="flex items-center gap-2 text-sm">
                                 Alternativa de
-                                <select
+                                <ChoiceSelect
                                   aria-label={`Alternativa de ${item.title}`}
-                                  className="h-9 rounded-md border bg-background px-3 text-sm"
+                                  
                                   disabled={writeBlocked}
                                   value={item.optionGroupId ?? ""}
                                   onChange={(event) =>
@@ -766,7 +771,7 @@ export function PlanTab({
                                       {group.title}
                                     </option>
                                   ))}
-                                </select>
+                                </ChoiceSelect>
                               </label>
                               <label className="flex items-center gap-2 text-sm">
                                 <Checkbox
@@ -798,7 +803,7 @@ export function PlanTab({
               <section aria-label="Presupuestos del plan">
                 <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                   <h4 className="text-sm font-semibold">Presupuestos</h4>
-                  {canWrite && eligibleItems.length > 0 ? (
+                  {canFinanceWrite && eligibleItems.length > 0 ? (
                     <Button
                       type="button"
                       size="sm"
@@ -815,7 +820,12 @@ export function PlanTab({
                     </Button>
                   ) : null}
                 </div>
-                {planBudgets.length === 0 ? (
+                {!canFinance ? (
+                  <p className="text-sm text-muted-foreground">
+                    Los presupuestos los prepara y decide caja: tu permiso no incluye importes ni
+                    propuestas. La decisión de cada tratamiento se ve en la tabla de arriba.
+                  </p>
+                ) : planBudgets.length === 0 ? (
                   <p className="text-sm text-muted-foreground">
                     Este plan aún no tiene presupuestos.
                   </p>
@@ -851,7 +861,7 @@ export function PlanTab({
               {selectedBudget ? (
                 <BudgetDetail
                   budget={selectedBudget}
-                  canWrite={canWrite}
+                  canWrite={canFinanceWrite}
                   writeBlocked={writeBlocked}
                   onEdit={() => {
                     setEditTitle(selectedBudget.title)
@@ -1498,7 +1508,7 @@ function DecideBudgetDialog({
       <ul className="flex flex-col gap-2">
         {lines.map((line) => (
           <li key={line.id} className="flex items-start gap-2">
-            <select
+            <ChoiceSelect
               aria-label={`Decisión: ${line.title}`}
               value={decisions[line.planItemId]}
               onChange={(event) =>
@@ -1511,7 +1521,7 @@ function DecideBudgetDialog({
               <option value="aceptado">Aceptado</option>
               <option value="rechazado">Rechazado</option>
               <option value="pospuesto">Pospuesto</option>
-            </select>
+            </ChoiceSelect>
             <span className="flex flex-1 flex-col">
               <span className="text-sm font-medium">{line.title}</span>
               <span className="text-xs text-muted-foreground">
@@ -1526,9 +1536,9 @@ function DecideBudgetDialog({
       </ul>
       <Field>
         <FieldLabel htmlFor={`${uid}-decide-by`}>Quién decide</FieldLabel>
-        <select
+        <ChoiceSelect
           id={`${uid}-decide-by`}
-          className="h-9 w-full rounded-md border bg-background px-3 text-sm"
+          className="w-full"
           value={deciderId}
           onChange={(event) => onDeciderChange(event.target.value)}
         >
@@ -1538,7 +1548,7 @@ function DecideBudgetDialog({
               {decider.label}
             </option>
           ))}
-        </select>
+        </ChoiceSelect>
         {deciders.length === 0 ? (
           <p className="text-xs text-muted-foreground">
             Para registrar quién decide, vincula al paciente y asigna el rol de representante legal

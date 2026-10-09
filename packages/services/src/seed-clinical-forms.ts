@@ -1,5 +1,7 @@
+import { type ConsentSections, SUGGESTED_CONSENT_TEMPLATES } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { serviceCatalog } from "@odentia/db/schema/clinical"
+import { clinicalFormResponse } from "@odentia/db/schema/clinical-forms"
 import { eq } from "drizzle-orm"
 import {
   advanceClinicalOrder,
@@ -113,17 +115,27 @@ export async function seedClinicalForms(
     schema: evaluacionSchema,
   })
 
-  const consentTpl = await upsertConsentTemplate(tx, orgId, ownerUserId, {
-    key: "consentimiento-endodoncia",
-    title: "Consentimiento de tratamiento de conducto",
-    body: [
-      "Declaro que el profesional me explicó el diagnóstico, el tratamiento de conducto propuesto,",
-      "sus beneficios, riesgos (dolor postoperatorio, fractura, necesidad de retratamiento o",
-      "exodoncia) y alternativas (exodoncia, observación). Autorizo la realización del tratamiento",
-      "y el registro de mi firma manuscrita como evidencia de mi aceptación.",
-    ].join(" "),
-    specialtyId: endodoncia.id,
-  })
+  // Plantillas por procedimiento (secciones fijas). En la demo se publican
+  // para poder usarlas; en una organización real quedan en borrador hasta
+  // que alguien las revise.
+  const consentTemplates = new Map<string, Awaited<ReturnType<typeof upsertConsentTemplate>>>()
+  for (const suggestion of SUGGESTED_CONSENT_TEMPLATES) {
+    consentTemplates.set(
+      suggestion.key,
+      await upsertConsentTemplate(tx, orgId, ownerUserId, {
+        key: suggestion.key,
+        title: suggestion.title,
+        sections: suggestion.sections,
+        specialtyId:
+          suggestion.key === "endodoncia"
+            ? endodoncia.id
+            : suggestion.key === "exodoncia" || suggestion.key === "implante"
+              ? cirugia.id
+              : null,
+      }),
+    )
+  }
+  const consentTpl = consentTemplates.get("endodoncia")!
 
   // Captura de ejemplo sobre el paciente semilla (borrador → finalizado).
   const existing = await listFormResponses(tx, orgId, { patientId, templateId: template.id })
@@ -147,6 +159,93 @@ export async function seedClinicalForms(
     await finalizeFormResponse(tx, orgId, ownerUserId, response.id)
   }
 
+  // Cuestionario previo que el paciente responde desde el portal; Rosa ya lo
+  // envió y queda «declarado» para que la profesional lo revise.
+  const previo = await upsertFormTemplate(tx, orgId, ownerUserId, {
+    key: "cuestionario-previo",
+    title: "Cuestionario previo a la cita",
+    description: "Lo completa el paciente o su representante antes de la cita.",
+    specialtyId: null,
+    respondent: "portal",
+    schema: {
+      sections: [
+        {
+          id: "motivo",
+          title: "Motivo",
+          fields: [
+            { id: "motivo", label: "¿Por qué vienes a la consulta?", type: "texto_largo", required: true },
+            {
+              id: "dolor",
+              label: "¿Tienes dolor ahora?",
+              type: "booleano",
+              required: true,
+            },
+            {
+              id: "intensidad",
+              label: "¿Cuánto te duele? (0 sin dolor, 10 el peor dolor)",
+              type: "escala",
+              min: 0,
+              max: 10,
+              required: true,
+              showIf: { field: "dolor", equals: true },
+            },
+          ],
+        },
+        {
+          id: "salud",
+          title: "Salud",
+          fields: [
+            {
+              id: "alergia",
+              label: "¿Eres alérgica o alérgico a algún medicamento, material o alimento?",
+              type: "booleano",
+              required: true,
+            },
+            {
+              id: "alergia_cual",
+              label: "¿A qué y qué te pasó?",
+              type: "texto",
+              required: true,
+              showIf: { field: "alergia", equals: true },
+            },
+            { id: "medicamentos", label: "¿Tomas algún medicamento? ¿Cuál y cuánto?", type: "texto_largo" },
+            {
+              id: "enfermedades",
+              label: "¿Te han diagnosticado alguna enfermedad?",
+              type: "opcion_multiple",
+              help: "Por ejemplo presión alta, diabetes, problemas del corazón o de coagulación.",
+              options: ["Presión alta", "Diabetes", "Corazón", "Coagulación", "Ninguna", "Otra"],
+            },
+          ],
+        },
+      ],
+    },
+  })
+  const declared = await listFormResponses(tx, orgId, { patientId, templateId: previo.id })
+  if (declared.length === 0) {
+    await tx.insert(clinicalFormResponse).values({
+      organizationId: orgId,
+      templateId: previo.id,
+      templateVersion: previo.version,
+      templateTitle: previo.title,
+      templateSnapshot: previo.schema,
+      patientId,
+      status: "borrador",
+      source: "portal",
+      respondentContactId: input.contactId,
+      submittedAt: new Date(),
+      answers: {
+        motivo: "Me duele una muela de abajo al tomar frío.",
+        dolor: true,
+        intensidad: 6,
+        alergia: true,
+        alergia_cual: "Penicilina: ronchas en la piel",
+        medicamentos: "Losartán 50 mg cada mañana",
+        enfermedades: ["Presión alta"],
+      },
+    })
+  }
+
   const consents = await listConsentDocuments(tx, orgId, { patientId })
   if (consents.length === 0) {
     const document = await createConsentDocument(tx, orgId, ownerUserId, {
@@ -156,9 +255,16 @@ export async function seedClinicalForms(
     })
     await signConsentDocument(tx, orgId, ownerUserId, document.id, {
       signerKind: "paciente",
-      signerName: "Paciente de demostración",
-      signerDoc: "00000000",
-      signatureData: { strokes: [[[0, 0], [10, 12], [20, 4]]] },
+      signerContactId: input.contactId,
+      comprehensionConfirmed: true,
+      signatureData: { strokes: [[[80, 600], [200, 380], [320, 640], [460, 360], [600, 620]]] },
+      professionalSignature: { strokes: [[[100, 500], [300, 300], [500, 520], [700, 320]]] },
+    })
+    // Pendiente de firma para la exodoncia planificada: aparece en el Resumen.
+    await createConsentDocument(tx, orgId, ownerUserId, {
+      templateId: consentTemplates.get("exodoncia")!.id,
+      patientId,
+      procedureRef: "Exodoncia pieza 38",
     })
   }
 
@@ -214,8 +320,9 @@ async function upsertFormTemplate(
     key: string
     title: string
     description: string
-    specialtyId: string
+    specialtyId: string | null
     schema: FormSchemaDef
+    respondent?: "staff" | "portal"
   },
 ) {
   const published = (await listFormTemplates(tx, orgId, { status: "publicado" })).find(
@@ -230,7 +337,7 @@ async function upsertConsentTemplate(
   tx: Db,
   orgId: string,
   actorUserId: string,
-  input: { key: string; title: string; body: string; specialtyId: string },
+  input: { key: string; title: string; sections: ConsentSections; specialtyId: string | null },
 ) {
   const published = (await listConsentTemplates(tx, orgId, { status: "publicado" })).find(
     (t) => t.key === input.key,

@@ -253,6 +253,62 @@
       "when": 1791432533648,
       "tag": "0035_clinical_structure",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1791475937061,
+      "tag": "0036_encounter_lifecycle",
+      "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1791479423306,
+      "tag": "0037_plan_phases",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1791480172877,
+      "tag": "0038_nota_normativa_receta",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1791481149705,
+      "tag": "0039_identidad_estandar",
+      "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1791482724341,
+      "tag": "0040_imagenes_clinicas",
+      "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1791483616046,
+      "tag": "0041_consentimiento_estructurado",
+      "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1791484723333,
+      "tag": "0042_formularios_portal",
+      "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1791488055325,
+      "tag": "0043_miniaturas",
+      "breakpoints": true
     }
   ]
 }

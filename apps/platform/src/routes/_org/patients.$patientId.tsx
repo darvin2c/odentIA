@@ -1,5 +1,18 @@
 import { FDI_ADULT, FDI_CHILD } from "@odentia/clinical"
-import { Button, Tabs, TabsContent, TabsList, TabsTrigger } from "@odentia/ui"
+import {
+  Button,
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectTrigger,
+  SelectValue,
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "@odentia/ui"
 import { ErrorState, LoadingState, PageShell } from "@odentia/ui-patterns"
 import { useQuery } from "@tanstack/react-query"
 import { createFileRoute, Outlet, useChildMatches, useNavigate } from "@tanstack/react-router"
@@ -7,10 +20,11 @@ import type { ReactNode } from "react"
 import { AccesosPanel } from "../../components/patient/accesos-panel"
 import { ActividadPanel } from "../../components/patient/actividad-panel"
 import { AntecedentesTab } from "../../components/patient/antecedentes-tab"
+import { AtencionesTab } from "../../components/patient/atenciones-tab"
 import { CitasPanel } from "../../components/patient/citas-panel"
 import { ControlesPanel, RecetasPanel } from "../../components/patient/clinical-panels"
-import { CoordinacionPanel } from "../../components/patient/coordinacion-panel"
 import { ConsentimientosTab } from "../../components/patient/consentimientos-tab"
+import { CoordinacionPanel } from "../../components/patient/coordinacion-panel"
 import { CuentaTab } from "../../components/patient/cuenta-tab"
 import { DocumentosPanel } from "../../components/patient/documentos-panel"
 import { FiliacionPanel } from "../../components/patient/filiacion-panel"
@@ -34,9 +48,13 @@ import {
   isPatientSectionId,
   type PatientSectionId,
   resolveSection,
+  PATIENT_AREAS,
   sectionOf,
   visibleAreas,
+  visibleSections,
 } from "../../lib/patient-areas"
+
+const areaLabel = (id: string) => PATIENT_AREAS.find((area) => area.id === id)?.label ?? id
 import type { PatientFull, PatientSummary, PlanItem } from "../../lib/patients"
 import { QueryErrorState } from "../../lib/query-error"
 
@@ -269,6 +287,8 @@ function PatientDetailPage() {
             ))}
           </>
         )
+      case "atenciones":
+        return <AtencionesTab patientId={patientId} />
       case "historia":
         return (
           <HistoriaTab
@@ -352,7 +372,7 @@ function PatientDetailPage() {
           if (isPatientSectionId(value)) openTab(value)
         }}
       >
-        <div className={SECTION_SCROLL_CLASS}>
+        <div className={`hidden sm:block ${SECTION_SCROLL_CLASS}`}>
           <TabsList
             className={SECTION_LIST_CLASS}
             variant="line"
@@ -373,6 +393,51 @@ function PatientDetailPage() {
       content()
     )
 
+  // En móvil las tres filas de pestañas ocupan media pantalla: un único
+  // selector de sección agrupado por área las reemplaza (mismo ?tab=).
+  const allSections = visibleSections(can)
+  const mobileNav = (
+    <div className="sm:hidden">
+      <label htmlFor="patient-section-mobile" className="mb-1 block text-xs font-medium text-muted-foreground">
+        Sección de la ficha
+      </label>
+      <Select
+        items={Object.fromEntries(
+          allSections.map((s) => [
+            s.id,
+            s.group
+              ? `${areaLabel(s.area)} · Documentos · ${s.label}`
+              : areaLabel(s.area) === s.label
+                ? s.label
+                : `${areaLabel(s.area)} · ${s.label}`,
+          ]),
+        )}
+        value={section}
+        onValueChange={(value) => {
+          if (isPatientSectionId(value)) openTab(value)
+        }}
+      >
+        <SelectTrigger id="patient-section-mobile" className="w-full">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {areas.map((area) => (
+            <SelectGroup key={area.id}>
+              <SelectLabel>{area.label}</SelectLabel>
+              {allSections
+                .filter((s) => s.area === area.id)
+                .map((s) => (
+                  <SelectItem key={s.id} value={s.id}>
+                    {s.group ? `Documentos · ${s.label}` : s.label}
+                  </SelectItem>
+                ))}
+            </SelectGroup>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
+  )
+
   return (
     <PageShell className="flex min-w-0 flex-col gap-6">
       <PatientHeader
@@ -389,7 +454,8 @@ function PatientDetailPage() {
           if (target) openTab(target)
         }}
       >
-        <div className="max-w-full overflow-x-auto border-b pb-1">
+        {mobileNav}
+        <div className="hidden max-w-full overflow-x-auto border-b pb-1 sm:block">
           <TabsList className={TAB_LIST_CLASS} variant="line" aria-label="Áreas de la ficha">
             {areas.map((area) => (
               <TabsTrigger key={area.id} value={area.id}>
@@ -408,7 +474,7 @@ function PatientDetailPage() {
                 if (target) openTab(target)
               }}
             >
-              <div className={SECTION_SCROLL_CLASS}>
+              <div className={`hidden sm:block ${SECTION_SCROLL_CLASS}`}>
                 <TabsList
                   className={SECTION_LIST_CLASS}
                   aria-label={`Secciones de ${areas.find((area) => area.id === current.area)?.label ?? "la ficha"}`}

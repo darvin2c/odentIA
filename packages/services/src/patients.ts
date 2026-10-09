@@ -1,4 +1,4 @@
-import { demographicsSchema, registrationContactInputSchema, validateDemographics, type RegistrationContactInput } from "@odentia/clinical"
+import { demographicsSchema, isMinor, normalizePhone, registrationContactInputSchema, validateDemographics, type RegistrationContactInput } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import {
   orgCounter,
@@ -8,11 +8,13 @@ import {
   patientMedication,
   patientContact,
   patientRegistration,
+  patientResponsibility,
+  ubigeo,
 } from "@odentia/db/schema/clinical"
 import { contact } from "@odentia/db/schema/crm"
 import { user } from "@odentia/db/schema/auth"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
-import { and, asc, desc, eq, ilike, or, sql } from "drizzle-orm"
+import { and, asc, desc, eq, gte, ilike, isNull, lte, or, sql } from "drizzle-orm"
 import { requireContact } from "./contacts.js"
 import { decodeCursor } from "./cursors.js"
 import { isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
@@ -51,6 +53,17 @@ function uniqueConstraintOf(error: unknown): string {
 
 export interface CreatePatientInput {
   displayName: string
+  givenNames?: string | null
+  paternalSurname?: string | null
+  maternalSurname?: string | null
+  docCountry?: string | null
+  nationality?: string | null
+  birthPlaceUbigeo?: string | null
+  addressUbigeo?: string | null
+  addressReference?: string | null
+  emergencyContactRelationship?: string | null
+  insurerName?: string | null
+  affiliationNumber?: string | null
   contacts?: RegistrationContactInput[]
   docType?: string | null
   docNumber?: string | null
@@ -93,6 +106,30 @@ export async function requirePatient(tx: Db, orgId: string, id: string): Promise
   return row
 }
 
+/**
+ * Filiación lista para guardar: vacíos como null, países en mayúsculas,
+ * teléfonos en E.164 y ubigeos que existan en el catálogo del INEI.
+ */
+async function normalizeDemographics<T extends object>(tx: Db, data: T): Promise<T> {
+  const out = { ...data } as Record<string, unknown>
+  for (const [key, value] of Object.entries(out)) {
+    if (typeof value === "string" && value.trim() === "" && key !== "displayName") out[key] = null
+  }
+  for (const key of ["docCountry", "nationality"]) {
+    if (typeof out[key] === "string") out[key] = (out[key] as string).toUpperCase()
+  }
+  for (const key of ["phone", "emergencyContactPhone"]) {
+    if (typeof out[key] === "string") out[key] = normalizePhone(out[key] as string)
+  }
+  for (const key of ["birthPlaceUbigeo", "addressUbigeo"]) {
+    const code = out[key]
+    if (typeof code !== "string") continue
+    const [known] = await tx.select({ code: ubigeo.code }).from(ubigeo).where(eq(ubigeo.code, code)).limit(1)
+    if (!known) throw validation(`Ubigeo inexistente: ${code}`)
+  }
+  return out as T
+}
+
 export async function createPatient(
   tx: Db,
   orgId: string,
@@ -104,7 +141,7 @@ export async function createPatient(
   const { contacts = [], registeredBranchId, ...demographics } = input
   const errors = validateDemographics(demographics, await patientOrganizationToday(tx, orgId))
   if (Object.keys(errors).length) throw validation(Object.values(errors)[0]!)
-  const clean = demographicsSchema.parse(demographics)
+  const clean = await normalizeDemographics(tx, demographicsSchema.parse(demographics))
   if (registeredBranchId) await assertTenantBranch(tx, orgId, registeredBranchId)
   const links = contacts.map(c => registrationContactInputSchema.parse(c)).sort((a, b) => a.contactId.localeCompare(b.contactId))
   if (new Set(links.map(c => c.contactId)).size !== links.length) throw validation("No repitas un contacto")
@@ -495,6 +532,19 @@ export async function findPatientDuplicates(tx: Db, orgId: string, input: { disp
 
 export interface UpdatePatientPatch {
   displayName?: string
+  givenNames?: string | null
+  paternalSurname?: string | null
+  maternalSurname?: string | null
+  docCountry?: string | null
+  nationality?: string | null
+  birthPlaceUbigeo?: string | null
+  addressUbigeo?: string | null
+  addressReference?: string | null
+  emergencyContactRelationship?: string | null
+  insurerName?: string | null
+  affiliationNumber?: string | null
+  /** Recepción confirma el nombre separado tras la migración. */
+  identityConfirmed?: boolean
   docType?: string | null
   docNumber?: string | null
   birthDate?: string | null
@@ -527,6 +577,17 @@ async function assertTenantBranch(tx: Db, orgId: string, branchId: string): Prom
 }
 const PATCH_FIELDS = [
   "displayName",
+  "givenNames",
+  "paternalSurname",
+  "maternalSurname",
+  "docCountry",
+  "nationality",
+  "birthPlaceUbigeo",
+  "addressUbigeo",
+  "addressReference",
+  "emergencyContactRelationship",
+  "insurerName",
+  "affiliationNumber",
   "docType",
   "docNumber",
   "birthDate",
@@ -558,7 +619,7 @@ export async function updatePatient(
   const personId = await patientPersonId(tx, orgId, id)
   if (personId) await tx.select({ id: contact.id }).from(contact).where(and(eq(contact.organizationId, orgId), eq(contact.id, personId))).for("update")
   const current = await requirePatient(tx, orgId, id)
-  const { registeredBranchId: _branch, isActive: _active, dataConsent: _consent, ...demographicPatch } = patch
+  const { registeredBranchId: _branch, isActive: _active, dataConsent: _consent, identityConfirmed: _confirmed, ...demographicPatch } = patch
   const demographics = Object.fromEntries(Object.keys(demographicsSchema.shape).map(key => [key, current[key as keyof PatientRow]]))
   const errors = validateDemographics({ ...demographics, ...demographicPatch }, await patientOrganizationToday(tx, orgId))
   if (Object.keys(errors).length) throw validation(Object.values(errors)[0]!)
@@ -566,10 +627,37 @@ export async function updatePatient(
     await assertTenantBranch(tx, orgId, patch.registeredBranchId)
   }
   if (patch.displayName !== undefined) patch = { ...patch, displayName: patch.displayName.trim() }
+  patch = await normalizeDemographics(tx, patch)
+  // Un paciente que pasa a ser menor necesita a su representante legal vigente.
+  if (patch.birthDate && patch.birthDate !== current.birthDate) {
+    const today = await patientOrganizationToday(tx, orgId)
+    if (isMinor(patch.birthDate, today)) {
+      const [representative] = await tx
+        .select({ id: patientResponsibility.id })
+        .from(patientResponsibility)
+        .where(
+          and(
+            eq(patientResponsibility.organizationId, orgId),
+            eq(patientResponsibility.patientId, id),
+            eq(patientResponsibility.kind, "representante_legal"),
+            isNull(patientResponsibility.revokedAt),
+            lte(patientResponsibility.startsAt, today),
+            or(isNull(patientResponsibility.endsAt), gte(patientResponsibility.endsAt, today)),
+          ),
+        )
+        .limit(1)
+      if (!representative)
+        throw conflict(
+          "REPRESENTATIVE_REQUIRED",
+          "Con esa fecha es menor de edad: registra primero a su representante legal",
+        )
+    }
+  }
   const set: Partial<typeof patient.$inferInsert> = { updatedAt: new Date() }
   for (const key of PATCH_FIELDS) {
     if (patch[key] !== undefined) (set as Record<string, unknown>)[key] = patch[key] as unknown
   }
+  if (patch.identityConfirmed === true) set.identityNeedsReview = false
   // Consentimiento: write-once. dataConsent:false se ignora.
   if (patch.dataConsent === true && !current.dataConsentAt) {
     set.dataConsentAt = new Date()

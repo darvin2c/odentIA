@@ -17,7 +17,12 @@ import { EncounterEditor } from "../../components/patient/encounter-editor"
 import { EncounterHandoff } from "../../components/patient/encounter-handoff"
 import { apiFetch } from "../../lib/api"
 import { usePermission } from "../../lib/crm"
-import { type EncounterDetail, hcLabel, type PatientFull } from "../../lib/patients"
+import {
+  type EncounterDetail,
+  encounterStatusLabel,
+  hcLabel,
+  type PatientFull,
+} from "../../lib/patients"
 
 export const Route = createFileRoute("/_org/patients/$patientId/encounters/$encounterId")({
   component: EncounterPage,
@@ -129,7 +134,8 @@ function EncounterPage() {
   const detail = encounterQuery.data.data
   if (detail.encounter.status === "borrador" && canWrite) {
     return (
-      <PageShell>
+      <PageShell className="flex flex-col gap-4">
+        <EncounterBreadcrumb patientId={patientId} patientName={patient.patient.displayName} />
         <EncounterEditor
           key={encounterId}
           patientId={patientId}
@@ -146,7 +152,7 @@ function EncounterPage() {
     <PageShell className="flex flex-col gap-6">
       <EncounterBreadcrumb patientId={patientId} patientName={patient.patient.displayName} />
       <PageHeader
-        title={`Atención ${detail.encounter.status === "finalizada" ? "finalizada" : "en curso"}`}
+        title={`Atención ${encounterStatusLabel(detail.encounter.status).toLowerCase()}`}
         subtitle={`${patient.patient.displayName} · ${hcLabel(patient.patient.patientNumber)}`}
         actions={<Badge variant="outline">Solo lectura</Badge>}
       />

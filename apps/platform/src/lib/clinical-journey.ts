@@ -233,6 +233,11 @@ export const PRESCRIPTION_STATUS_LABELS: Record<string, string> = {
 export interface PrescriptionItem {
   id: string
   medicationName: string
+  genericName?: string | null
+  brandName?: string | null
+  strength?: string | null
+  dosageForm?: string | null
+  atcCode?: string | null
   dose: string
   route: string
   frequency: string
@@ -254,11 +259,45 @@ export interface Prescription {
   issuedAt: string
   cancelledAt: string | null
   cancelReason: string | null
+  diagnosisCode?: string | null
+  validUntil?: string | null
+  prescriberName?: string | null
+  prescriberTitle?: string | null
+  prescriberRegistration?: string | null
   items?: PrescriptionItem[]
 }
 
+/** Datos de la hoja impresa de una receta. */
+export interface PrescriptionPrint {
+  prescription: Prescription
+  diagnosisDescription: string | null
+  patient: {
+    displayName: string
+    patientNumber: number
+    docType: string | null
+    docNumber: string | null
+    birthDate: string | null
+  }
+  establishment: {
+    legalName: string
+    tradeName: string | null
+    fiscalDocType: string
+    fiscalDocNumber: string | null
+    address: string | null
+  } | null
+}
+
+export function fetchPrescriptionPrint(patientId: string, prescriptionId: string) {
+  return apiFetch<{ data: PrescriptionPrint }>(
+    `${base(patientId)}/prescriptions/${prescriptionId}/print`,
+  )
+}
+
 export interface PrescriptionMedicationBody {
-  medicationName: string
+  genericName: string
+  brandName?: string | null
+  strength: string
+  dosageForm: string
   dose: string
   route: string
   frequency: string
@@ -284,6 +323,9 @@ export function createPrescriptionApi(
     encounterId?: string | null
     planItemId?: string | null
     notes?: string | null
+    diagnosisCode?: string | null
+    validUntil?: string | null
+    acknowledgeAllergies?: boolean
     items: PrescriptionMedicationBody[]
   },
 ): Promise<{ data: Prescription }> {
@@ -651,12 +693,18 @@ export interface TreatmentJourney {
   followUps: FollowUp[]
   prescriptions: Array<Prescription & { items: PrescriptionItem[] }>
   documents: PatientDocument[]
+  /** Caja del tratamiento; `null` cuando quien consulta no tiene `finance.read`. */
+  finance: TreatmentFinance | null
+  /** Derivada con el tratamiento completo a la vista; null si está cerrado. */
+  nextAction: TreatmentNextAction | null
+}
+
+export interface TreatmentFinance {
   charges: Charge[]
   payments: Payment[]
   applications: PaymentApplication[]
   refunds: PaymentRefund[]
-  /** Derivada con el tratamiento completo a la vista; null si está cerrado. */
-  nextAction: TreatmentNextAction | null
+  balances: AccountBalance[]
 }
 
 export function fetchTreatmentJourney(
@@ -757,7 +805,7 @@ export function createOptionGroupApi(
 
 /** Saldo del tratamiento por moneda; nunca se suman monedas distintas. */
 export function journeyBalances(
-  journey: Pick<TreatmentJourney, "charges" | "applications">,
+  journey: Pick<TreatmentFinance, "charges" | "applications">,
 ): AccountBalance[] {
   const active = journey.charges.filter((charge) => !charge.voidedAt)
   const units = [...new Set(active.map((charge) => charge.currency))].sort()

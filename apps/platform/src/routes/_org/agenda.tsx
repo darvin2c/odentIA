@@ -30,6 +30,7 @@ import { createFileRoute, Link } from "@tanstack/react-router"
 import { ChevronLeft, ChevronRight, Plus } from "lucide-react"
 import * as React from "react"
 import { AgendaSlotPicker } from "../../components/agenda-slot-picker"
+import { NewEncounterButton } from "../../components/patient/new-encounter-button"
 import type {
   AgendaAppointment,
   AgendaResources,
@@ -822,6 +823,22 @@ function AppointmentEditor({
               Abrir la ficha de {appointment?.patientName ?? context?.patientName}
             </Link>
           </p>
+        ) : null}
+        {appointment && ["programada", "confirmada"].includes(appointment.status) ? (
+          <div className="flex flex-wrap items-center gap-3">
+            <NewEncounterButton
+              patientId={appointment.patientId}
+              appointment={{
+                id: appointment.id,
+                dentistUserId: appointment.dentistUserId,
+                reason: appointment.reason,
+                serviceName: appointment.serviceName,
+              }}
+            />
+            <span className="text-xs text-muted-foreground">
+              Abre la atención clínica vinculada a esta cita.
+            </span>
+          </div>
         ) : null}
         {context ? (
           <div>

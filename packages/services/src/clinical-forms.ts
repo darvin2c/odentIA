@@ -1,5 +1,19 @@
 import type { Db } from "@odentia/db"
-import { encounter, patient, serviceCatalog, treatmentPlanItem } from "@odentia/db/schema/clinical"
+import {
+  type ConsentSections,
+  consentSectionsToText,
+  isValidTooth,
+  parseConsentSections,
+  SUGGESTED_CONSENT_TEMPLATES,
+} from "@odentia/clinical"
+import {
+  cie10Code,
+  encounter,
+  patient,
+  patientDocument,
+  serviceCatalog,
+  treatmentPlanItem,
+} from "@odentia/db/schema/clinical"
 import {
   clinicalFormAddendum,
   clinicalFormResponse,
@@ -13,10 +27,11 @@ import {
   serviceSpecialty,
 } from "@odentia/db/schema/clinical-forms"
 import { member } from "@odentia/db/schema/auth"
-import { auditEvent } from "@odentia/db/schema/org"
-import { and, asc, desc, eq, ilike } from "drizzle-orm"
+import { auditEvent, orgProfile } from "@odentia/db/schema/org"
+import { and, asc, desc, eq, ilike, inArray, isNull, sql } from "drizzle-orm"
 import { isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
 import { requirePatient } from "./patients.js"
+import { requireProfessionalSignature } from "./professional-profiles.js"
 import { requireDecisionContact, requireLinkedActiveContact } from "./responsibilities.js"
 import { createWorkspaceNotification } from "./workspace.js"
 
@@ -401,8 +416,20 @@ export const FIELD_TYPES = [
   "opcion_multiple",
   "fecha",
   "firma",
+  /** Pieza dentaria en notación FDI (ISO 3950). */
+  "pieza",
+  /** Escala numérica entera con extremos declarados (p. ej. dolor 0–10). */
+  "escala",
+  /** Archivo del paciente ya subido (imagen o documento). */
+  "adjunto",
 ] as const
 export type FieldType = (typeof FIELD_TYPES)[number]
+
+/** Mostrar el campo solo si otro campo anterior tiene ese valor. */
+export interface FieldCondition {
+  field: string
+  equals: string | boolean
+}
 
 export interface FormFieldDef {
   id: string
@@ -414,6 +441,7 @@ export interface FormFieldDef {
   min?: number | null
   max?: number | null
   help?: string | null
+  showIf?: FieldCondition | null
 }
 
 export interface FormSectionDef {
@@ -444,6 +472,7 @@ export function assertFormSchema(raw: unknown): FormSchemaDef {
   }
   const seenSections = new Set<string>()
   const seenFields = new Set<string>()
+  const seenFieldDefs = new Map<string, FormFieldDef>()
   const parsed: FormSectionDef[] = sections.map((s, si) => {
     if (!s || typeof s !== "object") throw validation(`La sección ${si + 1} es inválida`)
     const id: unknown = "id" in s ? s.id : undefined
@@ -474,6 +503,7 @@ export function assertFormSchema(raw: unknown): FormSchemaDef {
         const rawOptions: unknown = "options" in f ? f.options : undefined
         const rawMin: unknown = "min" in f ? f.min : undefined
         const rawMax: unknown = "max" in f ? f.max : undefined
+        const rawShowIf: unknown = "showIf" in f ? f.showIf : undefined
         const fieldId = assertFieldId(typeof rawId === "string" ? rawId : "")
         if (seenFields.has(fieldId)) throw validation(`Campo duplicado: ${fieldId}`)
         seenFields.add(fieldId)
@@ -511,6 +541,34 @@ export function assertFormSchema(raw: unknown): FormSchemaDef {
           }
           field.options = options
         }
+        if (type === "escala") {
+          const min = rawMin ?? 0
+          const max = rawMax ?? 10
+          if (!Number.isInteger(min) || !Number.isInteger(max) || (min as number) >= (max as number)) {
+            throw validation(`La escala "${label}" necesita extremos enteros (mínimo < máximo)`)
+          }
+          if ((max as number) - (min as number) > 100) throw validation(`La escala "${label}" es demasiado amplia`)
+          field.min = min as number
+          field.max = max as number
+        }
+        if (rawShowIf !== undefined && rawShowIf !== null) {
+          if (typeof rawShowIf !== "object" || Array.isArray(rawShowIf))
+            throw validation(`Condición inválida en "${label}"`)
+          const cond = rawShowIf as Record<string, unknown>
+          const target = typeof cond.field === "string" ? cond.field : ""
+          const source = seenFieldDefs.get(target)
+          if (!source)
+            throw validation(`"${label}" depende de un campo anterior que no existe: ${target || "?"}`)
+          if (source.type === "booleano") {
+            if (typeof cond.equals !== "boolean") throw validation(`"${label}": la condición debe ser Sí o No`)
+          } else if (source.type === "opcion_unica" || source.type === "opcion_multiple") {
+            if (typeof cond.equals !== "string" || !source.options?.includes(cond.equals))
+              throw validation(`"${label}": la condición debe ser una opción de "${source.label}"`)
+          } else {
+            throw validation(`"${label}" solo puede depender de un campo Sí/No o de opciones`)
+          }
+          field.showIf = { field: target, equals: cond.equals }
+        }
         if (type === "numero") {
           if (rawMin !== undefined && rawMin !== null) {
             if (typeof rawMin !== "number" || !Number.isFinite(rawMin)) {
@@ -528,11 +586,48 @@ export function assertFormSchema(raw: unknown): FormSchemaDef {
             throw validation(`Rango inválido en "${label}"`)
           }
         }
+        seenFieldDefs.set(fieldId, field)
         return field
       }),
     }
   })
   return { sections: parsed }
+}
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+function conditionMet(condition: FieldCondition, answer: unknown): boolean {
+  if (Array.isArray(answer)) return answer.includes(condition.equals)
+  return answer === condition.equals
+}
+
+/** Los adjuntos deben ser archivos vigentes del mismo paciente. */
+async function assertAttachmentAnswers(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+  schema: FormSchemaDef,
+  answers: Record<string, unknown>,
+): Promise<void> {
+  const ids = schema.sections
+    .flatMap((section) => section.fields)
+    .filter((field) => field.type === "adjunto" && typeof answers[field.id] === "string")
+    .map((field) => answers[field.id] as string)
+  if (ids.length === 0) return
+  const rows = await tx
+    .select({ id: patientDocument.id })
+    .from(patientDocument)
+    .where(
+      and(
+        eq(patientDocument.organizationId, orgId),
+        eq(patientDocument.patientId, patientId),
+        inArray(patientDocument.id, ids),
+        isNull(patientDocument.retiredAt),
+      ),
+    )
+  const found = new Set(rows.map((row) => row.id))
+  const missing = ids.find((id) => !found.has(id))
+  if (missing) throw validation("El archivo adjunto no pertenece al paciente o está retirado")
 }
 
 function isEmptyAnswer(value: unknown): boolean {
@@ -567,6 +662,11 @@ export function assertAnswers(
     for (const field of section.fields) {
       allowed.add(field.id)
       const value: unknown = input[field.id]
+      // Campo oculto por su condición: no se exige y no guarda respuesta.
+      if (field.showIf && !conditionMet(field.showIf, out[field.showIf.field])) {
+        out[field.id] = null
+        continue
+      }
       if (isEmptyAnswer(value)) {
         if (requireAll && field.required) throw validation(`"${field.label}" es obligatorio`)
         out[field.id] = null
@@ -637,11 +737,36 @@ export function assertAnswers(
           break
         }
         case "firma": {
-          // Trazo manuscrito simple: la UI envía { strokes } o base64; aquí solo
-          // se exige presencia si es obligatorio. Sin afirmación de certificación.
-          if (typeof value !== "object" || value === null) {
+          // Trazo manuscrito con su firmante; límites de tamaño y coordenadas
+          // iguales a los del consentimiento. Sin afirmación de certificación.
+          if (typeof value !== "object" || value === null || Array.isArray(value)) {
             throw validation(`"${field.label}" necesita la firma manuscrita`)
           }
+          const raw = value as Record<string, unknown>
+          const signerName = typeof raw.signerName === "string" ? raw.signerName.trim() : ""
+          if (!signerName || signerName.length > 200)
+            throw validation(`"${field.label}" necesita el nombre de quien firma`)
+          const signature = assertSignatureData({ strokes: raw.strokes }, `La firma de "${field.label}"`)
+          out[field.id] = { ...signature, signerName }
+          break
+        }
+        case "pieza": {
+          const tooth = typeof value === "number" ? value : Number(value)
+          if (!Number.isInteger(tooth) || !isValidTooth(tooth))
+            throw validation(`"${field.label}" debe ser una pieza FDI válida`)
+          out[field.id] = tooth
+          break
+        }
+        case "escala": {
+          const num = typeof value === "number" ? value : Number(value)
+          if (!Number.isInteger(num) || num < (field.min ?? 0) || num > (field.max ?? 10))
+            throw validation(`"${field.label}" debe ser un entero de ${field.min ?? 0} a ${field.max ?? 10}`)
+          out[field.id] = num
+          break
+        }
+        case "adjunto": {
+          if (typeof value !== "string" || !UUID_RE.test(value))
+            throw validation(`"${field.label}" debe ser un archivo del paciente`)
           out[field.id] = value
           break
         }
@@ -662,6 +787,22 @@ export interface CreateFormTemplateInput {
   description?: string | null
   specialtyId?: string | null
   schema: unknown
+  /** «portal»: cuestionario que responde el paciente antes de su cita. */
+  respondent?: "staff" | "portal"
+}
+
+function assertRespondent(raw: unknown): "staff" | "portal" {
+  if (raw === undefined || raw === null) return "staff"
+  if (raw !== "staff" && raw !== "portal") throw validation("Destinatario inválido: staff|portal")
+  return raw
+}
+
+/** El paciente no adjunta archivos clínicos desde el portal. */
+function assertPortalSchema(respondent: "staff" | "portal", schema: FormSchemaDef): void {
+  if (respondent !== "portal") return
+  const attachment = schema.sections.flatMap((s) => s.fields).find((f) => f.type === "adjunto")
+  if (attachment)
+    throw validation(`«${attachment.label}»: el cuestionario del portal no admite archivos adjuntos`)
 }
 
 export async function listFormTemplates(
@@ -704,12 +845,15 @@ export async function createFormTemplate(
   }
   // La versión arranca en 1; si la clave ya existe se crea la siguiente versión.
   const existing = await tx
-    .select({ version: clinicalFormTemplate.version })
+    .select({ version: clinicalFormTemplate.version, status: clinicalFormTemplate.status })
     .from(clinicalFormTemplate)
     .where(and(eq(clinicalFormTemplate.organizationId, orgId), eq(clinicalFormTemplate.key, key)))
     .orderBy(desc(clinicalFormTemplate.version))
-    .limit(1)
+  if (existing.some((row) => row.status === "borrador"))
+    throw conflict("DRAFT_EXISTS", "Ya hay un borrador de este formulario: edítalo o publícalo")
   const version = (existing[0]?.version ?? 0) + 1
+  const respondent = assertRespondent(input.respondent)
+  assertPortalSchema(respondent, schema)
   try {
     const [row] = await tx
       .insert(clinicalFormTemplate)
@@ -722,6 +866,7 @@ export async function createFormTemplate(
         version,
         status: "borrador",
         schema: schema as unknown as Record<string, unknown>,
+        respondent,
         createdBy: actorUserId,
       })
       .returning()
@@ -741,6 +886,7 @@ export interface UpdateFormTemplatePatch {
   description?: string | null
   specialtyId?: string | null
   schema?: unknown
+  respondent?: "staff" | "portal"
 }
 
 /** Solo borradores: una versión publicada/archivada es inmutable. */
@@ -776,6 +922,9 @@ export async function updateFormTemplate(
     }
   }
   const schema = patch.schema !== undefined ? assertFormSchema(patch.schema) : current.schema
+  const respondent =
+    patch.respondent !== undefined ? assertRespondent(patch.respondent) : (current.respondent as "staff" | "portal")
+  assertPortalSchema(respondent, schema as FormSchemaDef)
   const [row] = await tx
     .update(clinicalFormTemplate)
     .set({
@@ -783,6 +932,7 @@ export async function updateFormTemplate(
       description,
       specialtyId,
       schema: schema as unknown as Record<string, unknown>,
+      respondent,
       updatedAt: new Date(),
     })
     .where(
@@ -797,9 +947,9 @@ export async function updateFormTemplate(
 }
 
 /**
- * Publica una versión nueva congelando el contenido del borrador: crea una
- * fila `publicado` con el mismo key y versión+1, y archiva el borrador.
- * Republicar nunca altera respuestas ya capturadas (guardan snapshot).
+ * Publica el borrador con su número de versión real y archiva la versión
+ * publicada anterior de la misma clave: «Nuevo formulario» ofrece solo la
+ * vigente. Republicar nunca altera respuestas ya capturadas (snapshot).
  */
 export async function publishFormTemplate(
   tx: Db,
@@ -813,46 +963,36 @@ export async function publishFormTemplate(
     .where(
       and(eq(clinicalFormTemplate.id, templateId), eq(clinicalFormTemplate.organizationId, orgId)),
     )
+    .for("update")
     .limit(1)
   if (!current) throw notFound("Plantilla")
   if (current.status !== "borrador") throw conflict("IMMUTABLE", "Solo un borrador puede publicarse")
-  const schema = assertFormSchema(current.schema)
+  assertFormSchema(current.schema)
   if (current.specialtyId) {
     const specialty = await requireSpecialty(tx, orgId, current.specialtyId)
     if (!specialty.isActive) throw validation("La especialidad está inactiva")
   }
-  const siblings = await tx
-    .select({ version: clinicalFormTemplate.version })
-    .from(clinicalFormTemplate)
-    .where(
-      and(eq(clinicalFormTemplate.organizationId, orgId), eq(clinicalFormTemplate.key, current.key)),
-    )
-    .orderBy(desc(clinicalFormTemplate.version))
-    .limit(1)
-  // La consulta incluye el borrador: la fila publicada usa la siguiente versión.
-  const nextVersion = (siblings[0]?.version ?? 0) + 1
-  const [published] = await tx
-    .insert(clinicalFormTemplate)
-    .values({
-      organizationId: orgId,
-      specialtyId: current.specialtyId,
-      key: current.key,
-      title: current.title,
-      description: current.description,
-      version: nextVersion,
-      status: "publicado",
-      schema: schema as unknown as Record<string, unknown>,
-      createdBy: actorUserId,
-      publishedAt: new Date(),
-    })
-    .returning()
-  await tx
+  const previous = await tx
     .update(clinicalFormTemplate)
     .set({ status: "archivado", updatedAt: new Date() })
+    .where(
+      and(
+        eq(clinicalFormTemplate.organizationId, orgId),
+        eq(clinicalFormTemplate.key, current.key),
+        eq(clinicalFormTemplate.status, "publicado"),
+      ),
+    )
+    .returning({ version: clinicalFormTemplate.version })
+  const [published] = await tx
+    .update(clinicalFormTemplate)
+    .set({ status: "publicado", publishedAt: new Date(), updatedAt: new Date() })
     .where(eq(clinicalFormTemplate.id, current.id))
+    .returning()
+  if (!published) throw notFound("Plantilla")
   await audit(tx, orgId, actorUserId, "form_template.publish", "clinical_form_template", published.id, {
     key: current.key,
     version: published.version,
+    archived: previous.map((row) => row.version),
   })
   return published
 }
@@ -871,6 +1011,7 @@ export async function archiveFormTemplate(
     )
     .limit(1)
   if (!current) throw notFound("Plantilla")
+  if (current.status === "archivado") throw conflict("ARCHIVED", "La plantilla ya está archivada")
   const [row] = await tx
     .update(clinicalFormTemplate)
     .set({ status: "archivado", updatedAt: new Date() })
@@ -951,12 +1092,14 @@ export async function createFormResponse(
     professionalUserId = input.professionalUserId
   }
   const answers = assertAnswers(schema, input.answers ?? {}, { requireAll: false })
+  await assertAttachmentAnswers(tx, orgId, input.patientId, schema, answers)
   const [row] = await tx
     .insert(clinicalFormResponse)
     .values({
       organizationId: orgId,
       templateId: template.id,
       templateVersion: template.version,
+      templateTitle: template.title,
       templateSnapshot: template.schema as unknown as Record<string, unknown>,
       patientId: input.patientId,
       encounterId,
@@ -989,10 +1132,16 @@ export async function updateFormResponseDraft(
     .limit(1)
   if (!current) throw notFound("Formulario")
   if (current.status !== "borrador") {
-    throw conflict("FINALIZED", "El formulario está finalizado: usa una adenda")
+    throw conflict(
+      "FINALIZED",
+      current.status === "descartado"
+        ? "El formulario está descartado"
+        : "El formulario está finalizado: usa una adenda",
+    )
   }
   const schema = assertFormSchema(current.templateSnapshot)
   const answers = assertAnswers(schema, input.answers, { requireAll: false })
+  await assertAttachmentAnswers(tx, orgId, current.patientId, schema, answers)
   let professionalUserId = current.professionalUserId
   if (input.professionalUserId !== undefined) {
     if (input.professionalUserId === null) {
@@ -1029,10 +1178,15 @@ export async function finalizeFormResponse(
     .for("update")
     .limit(1)
   if (!current) throw notFound("Formulario")
-  if (current.status !== "borrador") throw conflict("FINALIZED", "El formulario ya está finalizado")
+  if (current.status !== "borrador")
+    throw conflict(
+      "FINALIZED",
+      current.status === "descartado" ? "El formulario está descartado" : "El formulario ya está finalizado",
+    )
   const schema = assertFormSchema(current.templateSnapshot)
   // Revalida completitud al cerrar (obligatorios con valor real).
-  assertAnswers(schema, current.answers, { requireAll: true })
+  const answers = assertAnswers(schema, current.answers, { requireAll: true })
+  await assertAttachmentAnswers(tx, orgId, current.patientId, schema, answers)
   const [row] = await tx
     .update(clinicalFormResponse)
     .set({ status: "finalizado", finalizedAt: new Date(), updatedAt: new Date() })
@@ -1043,6 +1197,46 @@ export async function finalizeFormResponse(
   if (!row) throw notFound("Formulario")
   await audit(tx, orgId, actorUserId, "form_response.finalize", "clinical_form_response", row.id, {})
   return row
+}
+
+/** Descarta un borrador con motivo: no cuenta como registro clínico y no se edita más. */
+export async function discardFormResponse(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  responseId: string,
+  reason: string,
+): Promise<FormResponseRow> {
+  const [current] = await tx
+    .select()
+    .from(clinicalFormResponse)
+    .where(
+      and(eq(clinicalFormResponse.id, responseId), eq(clinicalFormResponse.organizationId, orgId)),
+    )
+    .for("update")
+    .limit(1)
+  if (!current) throw notFound("Formulario")
+  if (current.status !== "borrador")
+    throw conflict("FINALIZED", "Solo un borrador se descarta; uno finalizado se corrige con adenda")
+  const clean = (reason ?? "").trim()
+  if (!clean || clean.length > 2000) throw validation("El motivo debe tener 1–2000 caracteres")
+  const [row] = await tx
+    .update(clinicalFormResponse)
+    .set({
+      status: "descartado",
+      discardedAt: new Date(),
+      discardedBy: actorUserId,
+      discardReason: clean,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(eq(clinicalFormResponse.id, responseId), eq(clinicalFormResponse.organizationId, orgId)),
+    )
+    .returning()
+  await audit(tx, orgId, actorUserId, "form_response.discard", "clinical_form_response", responseId, {
+    reason: clean,
+  })
+  return row!
 }
 
 export async function addFormAddendum(
@@ -1093,19 +1287,29 @@ export async function listFormResponses(
     .orderBy(desc(clinicalFormResponse.createdAt))
 }
 
-export async function listFormAddenda(
+/** Paciente dueño de un formulario: para dejar traza de su lectura (404 si no existe). */
+export async function formResponsePatientId(
   tx: Db,
   orgId: string,
   responseId: string,
-): Promise<(typeof clinicalFormAddendum.$inferSelect)[]> {
+): Promise<string> {
   const [current] = await tx
-    .select({ id: clinicalFormResponse.id })
+    .select({ patientId: clinicalFormResponse.patientId })
     .from(clinicalFormResponse)
     .where(
       and(eq(clinicalFormResponse.id, responseId), eq(clinicalFormResponse.organizationId, orgId)),
     )
     .limit(1)
   if (!current) throw notFound("Formulario")
+  return current.patientId
+}
+
+export async function listFormAddenda(
+  tx: Db,
+  orgId: string,
+  responseId: string,
+): Promise<(typeof clinicalFormAddendum.$inferSelect)[]> {
+  await formResponsePatientId(tx, orgId, responseId)
   return tx
     .select()
     .from(clinicalFormAddendum)
@@ -1128,7 +1332,10 @@ export type ConsentDocumentRow = typeof consentDocument.$inferSelect
 export interface CreateConsentTemplateInput {
   key?: string | null
   title: string
-  body: string
+  /** Secciones fijas; con ellas `body` se deriva. */
+  sections?: unknown
+  /** Texto libre (plantillas anteriores sin secciones). */
+  body?: string | null
   specialtyId?: string | null
 }
 
@@ -1161,6 +1368,23 @@ function assertConsentBody(raw: string | null | undefined): string {
   return body
 }
 
+/** Secciones validadas y su texto equivalente; sin secciones, el texto libre. */
+function consentContent(input: { sections?: unknown; body?: string | null }): {
+  sections: ConsentSections | null
+  body: string
+} {
+  if (input.sections !== undefined && input.sections !== null) {
+    let sections: ConsentSections
+    try {
+      sections = parseConsentSections(input.sections)
+    } catch (e) {
+      throw validation(e instanceof Error ? e.message : "Secciones inválidas")
+    }
+    return { sections, body: assertConsentBody(consentSectionsToText(sections)) }
+  }
+  return { sections: null, body: assertConsentBody(input.body) }
+}
+
 export async function createConsentTemplate(
   tx: Db,
   orgId: string,
@@ -1168,7 +1392,7 @@ export async function createConsentTemplate(
   input: CreateConsentTemplateInput,
 ): Promise<ConsentTemplateRow> {
   const title = assertName(input.title, "Título del consentimiento", 200)
-  const body = assertConsentBody(input.body)
+  const { sections, body } = consentContent(input)
   const key = input.key ? assertKey(input.key, "Clave") : assertKey(slugify(title) || null, "Clave")
   let specialtyId: string | null = null
   if (input.specialtyId) {
@@ -1177,11 +1401,12 @@ export async function createConsentTemplate(
     specialtyId = specialty.id
   }
   const existing = await tx
-    .select({ version: consentTemplate.version })
+    .select({ version: consentTemplate.version, status: consentTemplate.status })
     .from(consentTemplate)
     .where(and(eq(consentTemplate.organizationId, orgId), eq(consentTemplate.key, key)))
     .orderBy(desc(consentTemplate.version))
-    .limit(1)
+  if (existing.some((row) => row.status === "borrador"))
+    throw conflict("DRAFT_EXISTS", "Ya hay un borrador de esta plantilla: edítalo o publícalo")
   const version = (existing[0]?.version ?? 0) + 1
   try {
     const [row] = await tx
@@ -1192,6 +1417,7 @@ export async function createConsentTemplate(
         key,
         title,
         body,
+        sections,
         version,
         status: "borrador",
         createdBy: actorUserId,
@@ -1213,7 +1439,7 @@ export async function updateConsentTemplate(
   orgId: string,
   actorUserId: string,
   templateId: string,
-  patch: { title?: string; body?: string; specialtyId?: string | null },
+  patch: { title?: string; body?: string; sections?: unknown; specialtyId?: string | null },
 ): Promise<ConsentTemplateRow> {
   const [current] = await tx
     .select()
@@ -1225,14 +1451,17 @@ export async function updateConsentTemplate(
     throw conflict("IMMUTABLE", "Solo un borrador puede editarse: publica una versión nueva")
   }
   const title = patch.title !== undefined ? assertName(patch.title, "Título del consentimiento", 200) : current.title
-  const body = patch.body !== undefined ? assertConsentBody(patch.body) : current.body
+  const content =
+    patch.sections !== undefined || patch.body !== undefined
+      ? consentContent({ sections: patch.sections, body: patch.body ?? current.body })
+      : { sections: current.sections as ConsentSections | null, body: current.body }
   let specialtyId = current.specialtyId
   if (patch.specialtyId !== undefined) {
     specialtyId = patch.specialtyId === null ? null : (await requireSpecialty(tx, orgId, patch.specialtyId)).id
   }
   const [row] = await tx
     .update(consentTemplate)
-    .set({ title, body, specialtyId, updatedAt: new Date() })
+    .set({ title, body: content.body, sections: content.sections, specialtyId, updatedAt: new Date() })
     .where(and(eq(consentTemplate.id, templateId), eq(consentTemplate.organizationId, orgId)))
     .returning()
   if (!row) throw notFound("Plantilla de consentimiento")
@@ -1240,7 +1469,51 @@ export async function updateConsentTemplate(
   return row
 }
 
+/**
+ * Publica el borrador con el número de versión real y archiva la versión
+ * publicada anterior de la misma clave: solo una versión vigente por plantilla.
+ */
 export async function publishConsentTemplate(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  templateId: string,
+): Promise<ConsentTemplateRow> {
+  const [current] = await tx
+    .select()
+    .from(consentTemplate)
+    .where(and(eq(consentTemplate.id, templateId), eq(consentTemplate.organizationId, orgId)))
+    .for("update")
+    .limit(1)
+  if (!current) throw notFound("Plantilla de consentimiento")
+  if (current.status !== "borrador") throw conflict("IMMUTABLE", "Solo un borrador puede publicarse")
+  const previous = await tx
+    .update(consentTemplate)
+    .set({ status: "archivado", updatedAt: new Date() })
+    .where(
+      and(
+        eq(consentTemplate.organizationId, orgId),
+        eq(consentTemplate.key, current.key),
+        eq(consentTemplate.status, "publicado"),
+      ),
+    )
+    .returning({ id: consentTemplate.id, version: consentTemplate.version })
+  const [published] = await tx
+    .update(consentTemplate)
+    .set({ status: "publicado", publishedAt: new Date(), updatedAt: new Date() })
+    .where(eq(consentTemplate.id, current.id))
+    .returning()
+  if (!published) throw notFound("Plantilla de consentimiento")
+  await audit(tx, orgId, actorUserId, "consent_template.publish", "consent_template", published.id, {
+    key: current.key,
+    version: published.version,
+    archived: previous.map((row) => row.version),
+  })
+  return published
+}
+
+/** Retira una plantilla: deja de ofrecerse; los documentos generados no cambian. */
+export async function archiveConsentTemplate(
   tx: Db,
   orgId: string,
   actorUserId: string,
@@ -1252,37 +1525,45 @@ export async function publishConsentTemplate(
     .where(and(eq(consentTemplate.id, templateId), eq(consentTemplate.organizationId, orgId)))
     .limit(1)
   if (!current) throw notFound("Plantilla de consentimiento")
-  if (current.status !== "borrador") throw conflict("IMMUTABLE", "Solo un borrador puede publicarse")
-  const siblings = await tx
-    .select({ version: consentTemplate.version })
-    .from(consentTemplate)
-    .where(and(eq(consentTemplate.organizationId, orgId), eq(consentTemplate.key, current.key)))
-    .orderBy(desc(consentTemplate.version))
-    .limit(1)
-  const version = Math.max(current.version + 1, (siblings[0]?.version ?? 0) + 1)
-  const [published] = await tx
-    .insert(consentTemplate)
-    .values({
-      organizationId: orgId,
-      specialtyId: current.specialtyId,
-      key: current.key,
-      title: current.title,
-      body: current.body,
-      version,
-      status: "publicado",
-      createdBy: actorUserId,
-      publishedAt: new Date(),
-    })
-    .returning()
-  await tx
+  if (current.status === "archivado") throw conflict("ARCHIVED", "La plantilla ya está archivada")
+  const [row] = await tx
     .update(consentTemplate)
     .set({ status: "archivado", updatedAt: new Date() })
-    .where(eq(consentTemplate.id, current.id))
-  await audit(tx, orgId, actorUserId, "consent_template.publish", "consent_template", published.id, {
+    .where(eq(consentTemplate.id, templateId))
+    .returning()
+  await audit(tx, orgId, actorUserId, "consent_template.archive", "consent_template", templateId, {
     key: current.key,
-    version: published.version,
+    version: current.version,
   })
-  return published
+  return row!
+}
+
+/**
+ * Crea como borrador las plantillas sugeridas por procedimiento que la
+ * organización aún no tiene (por clave). Nunca publica: el texto se revisa.
+ */
+export async function createSuggestedConsentTemplates(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+): Promise<ConsentTemplateRow[]> {
+  const existing = await tx
+    .select({ key: consentTemplate.key })
+    .from(consentTemplate)
+    .where(eq(consentTemplate.organizationId, orgId))
+  const known = new Set(existing.map((row) => row.key))
+  const created: ConsentTemplateRow[] = []
+  for (const suggestion of SUGGESTED_CONSENT_TEMPLATES) {
+    if (known.has(suggestion.key)) continue
+    created.push(
+      await createConsentTemplate(tx, orgId, actorUserId, {
+        key: suggestion.key,
+        title: suggestion.title,
+        sections: suggestion.sections,
+      }),
+    )
+  }
+  return created
 }
 
 export interface CreateConsentDocumentInput {
@@ -1291,6 +1572,8 @@ export interface CreateConsentDocumentInput {
   encounterId?: string | null
   planItemId?: string | null
   procedureRef?: string | null
+  /** CIE-10 que motiva el procedimiento; por defecto, el del tratamiento. */
+  diagnosisCode?: string | null
 }
 
 export async function createConsentDocument(
@@ -1317,9 +1600,14 @@ export async function createConsentDocument(
     encounterId = input.encounterId
   }
   let planItemId: string | null = null
+  let planDiagnosis: string | null = null
   if (input.planItemId) {
     const [item] = await tx
-      .select({ id: treatmentPlanItem.id, patientId: treatmentPlanItem.patientId })
+      .select({
+        id: treatmentPlanItem.id,
+        patientId: treatmentPlanItem.patientId,
+        diagnosisCode: treatmentPlanItem.diagnosisCode,
+      })
       .from(treatmentPlanItem)
       .where(
         and(
@@ -1332,11 +1620,20 @@ export async function createConsentDocument(
       throw validation("El tratamiento no pertenece al paciente")
     }
     planItemId = item.id
+    planDiagnosis = item.diagnosisCode
   }
   if (!encounterId && !planItemId && !input.procedureRef?.trim()) {
     throw validation("Indica la atención, el tratamiento o el procedimiento al que aplica")
   }
   const procedureRef = assertOptionalText(input.procedureRef, "Procedimiento", 500)
+  const diagnosisCode = input.diagnosisCode?.trim() || planDiagnosis
+  if (diagnosisCode) {
+    const [known] = await tx
+      .select({ code: cie10Code.code })
+      .from(cie10Code)
+      .where(eq(cie10Code.code, diagnosisCode))
+    if (!known) throw validation(`Código CIE-10 inexistente: ${diagnosisCode}`)
+  }
   const [row] = await tx
     .insert(consentDocument)
     .values({
@@ -1345,6 +1642,8 @@ export async function createConsentDocument(
       templateVersion: template.version,
       bodySnapshot: template.body,
       titleSnapshot: template.title,
+      sectionsSnapshot: template.sections,
+      diagnosisCode: diagnosisCode ?? null,
       patientId: input.patientId,
       encounterId,
       planItemId,
@@ -1380,41 +1679,74 @@ export interface SignConsentInput {
   signerKind: "paciente" | "representante"
   /**
    * Persona vinculada que firma: el propio paciente o su representante legal
-   * vigente. Con ella, nombre y documento salen de su registro y la facultad se
-   * verifica; sin ella se conserva la firma declarada (flujo anterior).
+   * vigente. Obligatoria: nombre y documento salen de su registro y la
+   * facultad se verifica; no hay firmante declarado a mano.
    */
-  signerContactId?: string | null
-  signerName: string
+  signerContactId: string
+  /** Solo si el registro de la persona no tiene documento. */
   signerDoc?: string | null
   representativeRelation?: string | null
-  /** Trazo manuscrito capturado en el navegador (trazos o imagen). */
+  /** Trazo manuscrito de quien firma. */
   signatureData: unknown
+  /** La persona firmante confirmó haber comprendido la información. */
+  comprehensionConfirmed: boolean
+  /** Firma manuscrita del profesional que informa (el actor). */
+  professionalSignature: unknown
+  witness?: { name: string; doc?: string | null } | null
+  /** Hora en que se informó; por defecto, ahora. */
+  informedAt?: string | null
 }
 
-function assertSignatureData(raw: unknown): Record<string, unknown> {
+function assertSignatureData(raw: unknown, label = "La firma manuscrita"): Record<string, unknown> {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
-    throw validation("La firma manuscrita es obligatoria")
+    throw validation(`${label} es obligatoria`)
   }
   const strokes: unknown = "strokes" in raw ? raw.strokes : undefined
   const image: unknown = "image" in raw ? raw.image : undefined
   if (strokes !== undefined) {
     if (!Array.isArray(strokes) || strokes.length === 0) {
-      throw validation("La firma manuscrita está vacía")
+      throw validation(`${label} está vacía`)
     }
-    if (strokes.length > 2000) throw validation("La firma supera el tamaño permitido")
-  } else if (typeof image !== "string" || image.length < 100) {
-    throw validation("La firma manuscrita está vacía")
-  } else if (image.length > 500_000) {
-    throw validation("La firma supera el tamaño permitido")
+    if (strokes.length > 500) throw validation(`${label} supera el tamaño permitido`)
+    let points = 0
+    for (const stroke of strokes) {
+      if (!Array.isArray(stroke) || stroke.length < 2 || stroke.length > 5000)
+        throw validation(`${label} tiene un trazo inválido`)
+      for (const point of stroke) {
+        if (
+          !Array.isArray(point) ||
+          point.length !== 2 ||
+          !point.every((n) => typeof n === "number" && Number.isFinite(n) && n >= 0 && n <= 1000)
+        )
+          throw validation(`${label} tiene coordenadas fuera del recuadro`)
+      }
+      points += stroke.length
+    }
+    if (points > 20000) throw validation(`${label} supera el tamaño permitido`)
+    return { strokes }
   }
-  // Copia tipada del trazo manuscrito (contenido validado arriba).
-  return Object.fromEntries(Object.entries(raw))
+  if (typeof image !== "string" || image.length < 100) {
+    throw validation(`${label} está vacía`)
+  }
+  if (image.length > 500_000) throw validation(`${label} supera el tamaño permitido`)
+  if (!image.startsWith("data:image/png;base64,"))
+    throw validation(`${label} debe ser una imagen PNG`)
+  return { image }
+}
+
+/** Edad cumplida en años a una fecha (AAAA-MM-DD). */
+function ageOn(birthDate: string, on: Date): number {
+  const [y, m, d] = birthDate.split("-").map(Number) as [number, number, number]
+  let age = on.getUTCFullYear() - y
+  const month = on.getUTCMonth() + 1
+  if (month < m || (month === m && on.getUTCDate() < d)) age -= 1
+  return age
 }
 
 /**
- * Firma manuscrita del consentimiento. Quien firma es el paciente o su
- * representante verificado en recepción (parentesco/relación registrada);
- * el sistema no certifica identidad digital: guarda autor y evidencia.
+ * Firma del consentimiento: firma la propia persona (si es mayor de edad) o
+ * su representante legal vigente, y firma el profesional que informa. El
+ * sistema no certifica identidad digital: guarda autor, firmantes y evidencia.
  */
 export async function signConsentDocument(
   tx: Db,
@@ -1436,67 +1768,109 @@ export async function signConsentDocument(
   if (input.signerKind !== "paciente" && input.signerKind !== "representante") {
     throw validation("Firmante inválido: paciente|representante")
   }
-  let signerContactId: string | null = null
-  let verified: { displayName: string; docNumber: string | null; docType: string | null } | null = null
-  if (input.signerContactId) {
-    if (input.signerKind === "paciente") {
-      const linked = await requireLinkedActiveContact(tx, orgId, current.patientId, input.signerContactId)
-      if (linked.relationship !== "self")
-        throw conflict("SIGNER_NOT_AUTHORIZED", "Solo la propia persona firma como paciente")
-      verified = linked.contact
-    } else {
-      // Representante: facultad legal vigente sobre este paciente, no un vínculo cualquiera.
-      const person = await requireDecisionContact(tx, orgId, current.patientId, input.signerContactId)
-      const linked = await requireLinkedActiveContact(tx, orgId, current.patientId, input.signerContactId)
-      if (linked.relationship === "self")
-        throw conflict("SIGNER_NOT_AUTHORIZED", "La propia persona firma como paciente, no como representante")
-      verified = person
-    }
-    signerContactId = input.signerContactId
+  if (!input.signerContactId)
+    throw validation("Elige a la persona que firma: el paciente o su representante legal vigente")
+  if (input.comprehensionConfirmed !== true)
+    throw validation("La persona firmante debe confirmar que comprendió la información")
+  const subject = await requirePatient(tx, orgId, current.patientId)
+  const now = new Date()
+  const minor = subject.birthDate ? ageOn(subject.birthDate, now) < 18 : false
+  if (minor && input.signerKind !== "representante")
+    throw validation("El paciente es menor de edad: firma su representante legal vigente")
+  let verified: { displayName: string; docNumber: string | null; docType: string | null }
+  if (input.signerKind === "paciente") {
+    const linked = await requireLinkedActiveContact(tx, orgId, current.patientId, input.signerContactId)
+    if (linked.relationship !== "self")
+      throw conflict("SIGNER_NOT_AUTHORIZED", "Solo la propia persona firma como paciente")
+    verified = linked.contact
+  } else {
+    const linked = await requireLinkedActiveContact(tx, orgId, current.patientId, input.signerContactId)
+    if (linked.relationship === "self")
+      throw conflict("SIGNER_NOT_AUTHORIZED", "La propia persona firma como paciente, no como representante")
+    // Facultad legal vigente sobre este paciente, no un vínculo cualquiera.
+    verified = await requireDecisionContact(tx, orgId, current.patientId, input.signerContactId)
   }
-  const signerName = assertName(verified?.displayName ?? input.signerName, "Nombre de quien firma", 200)
+  const signerName = assertName(verified.displayName, "Nombre de quien firma", 200)
   const signerDoc = assertOptionalText(
-    verified?.docNumber
-      ? `${verified.docType ?? ""} ${verified.docNumber}`.trim()
-      : input.signerDoc,
+    verified.docNumber ? `${verified.docType ?? ""} ${verified.docNumber}`.trim() : input.signerDoc,
     "Documento de quien firma",
     40,
   )
   let representativeRelation: string | null = null
   if (input.signerKind === "representante") {
-    representativeRelation = assertOptionalText(input.representativeRelation, "Parentesco o relación", 120)
-    if (!representativeRelation) {
-      throw validation("El representante necesita parentesco o relación verificada")
-    }
-    if (!signerDoc) throw validation("El representante necesita documento verificado")
+    representativeRelation =
+      assertOptionalText(input.representativeRelation, "Parentesco o relación", 120) ??
+      "Representante legal"
+    if (!signerDoc) throw validation("El representante necesita documento de identidad")
   }
   const signatureData = assertSignatureData(input.signatureData)
+  const professionalSignature = assertSignatureData(
+    input.professionalSignature,
+    "La firma del profesional",
+  )
+  const informer = await requireProfessionalSignature(tx, orgId, actorUserId)
+  let informedAt = now
+  if (input.informedAt) {
+    informedAt = new Date(input.informedAt)
+    if (Number.isNaN(informedAt.getTime()) || informedAt.getTime() > now.getTime() + 60_000)
+      throw validation("La hora en que se informó no es válida")
+    if (informedAt < current.createdAt)
+      throw validation("No se puede informar antes de generar el documento")
+  }
+  let witnessName: string | null = null
+  let witnessDoc: string | null = null
+  if (input.witness) {
+    witnessName = assertName(input.witness.name, "Nombre del testigo", 200)
+    witnessDoc = assertOptionalText(input.witness.doc, "Documento del testigo", 40)
+  }
   const [row] = await tx
     .update(consentDocument)
     .set({
       signerKind: input.signerKind,
-      signerContactId,
+      signerContactId: input.signerContactId,
       signerName,
       signerDoc,
       representativeRelation,
-      signatureData: signatureData as unknown as Record<string, unknown>,
+      signatureData,
+      comprehensionConfirmed: true,
+      professionalSignature,
+      informedAt,
+      informedBy: actorUserId,
+      informerName: informer.name,
+      informerTitle: informer.title,
+      informerRegistration: informer.registration,
+      witnessName,
+      witnessDoc,
       status: "firmado",
-      signedAt: new Date(),
-      updatedAt: new Date(),
+      signedAt: now,
+      updatedAt: now,
     })
     .where(and(eq(consentDocument.id, documentId), eq(consentDocument.organizationId, orgId)))
     .returning()
   if (!row) throw notFound("Consentimiento")
-  await tx.insert(consentEvent).values({
-    organizationId: orgId,
-    documentId,
-    fromStatus: "pendiente",
-    toStatus: "firmado",
-    actorUserId,
-    reason: `${input.signerKind}: ${signerName}`,
-  })
+  await tx.insert(consentEvent).values([
+    {
+      organizationId: orgId,
+      documentId,
+      fromStatus: "pendiente",
+      toStatus: "informado",
+      actorUserId,
+      reason: `${informer.name} · ${informer.registration}`,
+      createdAt: informedAt,
+    },
+    {
+      organizationId: orgId,
+      documentId,
+      fromStatus: "pendiente",
+      toStatus: "firmado",
+      actorUserId,
+      reason: `${input.signerKind}: ${signerName}${witnessName ? ` · testigo ${witnessName}` : ""}`,
+    },
+  ])
   await audit(tx, orgId, actorUserId, "consent.sign", "consent_document", documentId, {
     signerKind: input.signerKind,
+    minor,
+    witness: Boolean(witnessName),
   })
   // Si quien recabó la firma no es el autor, se avisa al autor del documento.
   if (row.authorUserId && row.authorUserId !== actorUserId) {
@@ -1510,7 +1884,8 @@ export async function signConsentDocument(
   return row
 }
 
-export async function revokeConsentDocument(
+/** Anula un pendiente: desaparece de los pendientes y no cuenta como consentimiento. */
+export async function cancelConsentDocument(
   tx: Db,
   orgId: string,
   actorUserId: string,
@@ -1524,15 +1899,87 @@ export async function revokeConsentDocument(
     .for("update")
     .limit(1)
   if (!current) throw notFound("Consentimiento")
-  if (current.status !== "firmado") {
-    throw validation("Solo un consentimiento firmado puede revocarse")
-  }
+  if (current.status !== "pendiente")
+    throw conflict("CONSENT_STATUS", "Solo un consentimiento pendiente se anula; uno firmado se revoca")
   const clean = (reason ?? "").trim()
-  if (!clean) throw validation("La revocación necesita un motivo")
-  if (clean.length > 2000) throw validation("El motivo supera 2000 caracteres")
+  if (!clean || clean.length > 2000) throw validation("El motivo debe tener 1–2000 caracteres")
   const [row] = await tx
     .update(consentDocument)
-    .set({ status: "revocado", revokedAt: new Date(), revokeReason: clean, updatedAt: new Date() })
+    .set({
+      status: "anulado",
+      cancelledAt: new Date(),
+      cancelledBy: actorUserId,
+      cancelReason: clean,
+      updatedAt: new Date(),
+    })
+    .where(and(eq(consentDocument.id, documentId), eq(consentDocument.organizationId, orgId)))
+    .returning()
+  await tx.insert(consentEvent).values({
+    organizationId: orgId,
+    documentId,
+    fromStatus: "pendiente",
+    toStatus: "anulado",
+    actorUserId,
+    reason: clean,
+  })
+  await audit(tx, orgId, actorUserId, "consent.cancel", "consent_document", documentId, {})
+  return row!
+}
+
+export interface RevokeConsentInput {
+  reason: string
+  /** Quien revoca: la propia persona o su representante legal vigente. */
+  revokerContactId: string
+  signatureData: unknown
+}
+
+/**
+ * Revocación: la decide la persona (o su representante legal vigente), con
+ * motivo y su firma. El documento firmado no se altera; el tratamiento vuelve
+ * a requerir consentimiento.
+ */
+export async function revokeConsentDocument(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  documentId: string,
+  input: RevokeConsentInput,
+): Promise<ConsentDocumentRow> {
+  const [current] = await tx
+    .select()
+    .from(consentDocument)
+    .where(and(eq(consentDocument.id, documentId), eq(consentDocument.organizationId, orgId)))
+    .for("update")
+    .limit(1)
+  if (!current) throw notFound("Consentimiento")
+  if (current.status !== "firmado") {
+    throw conflict("CONSENT_STATUS", "Solo un consentimiento firmado puede revocarse")
+  }
+  const clean = (input.reason ?? "").trim()
+  if (!clean) throw validation("La revocación necesita un motivo")
+  if (clean.length > 2000) throw validation("El motivo supera 2000 caracteres")
+  if (!input.revokerContactId) throw validation("Indica quién revoca")
+  const subject = await requirePatient(tx, orgId, current.patientId)
+  const minor = subject.birthDate ? ageOn(subject.birthDate, new Date()) < 18 : false
+  const linked = await requireLinkedActiveContact(tx, orgId, current.patientId, input.revokerContactId)
+  if (linked.relationship === "self" && minor)
+    throw validation("El paciente es menor de edad: revoca su representante legal vigente")
+  const revoker =
+    linked.relationship === "self"
+      ? linked.contact
+      : await requireDecisionContact(tx, orgId, current.patientId, input.revokerContactId)
+  const revokeSignature = assertSignatureData(input.signatureData, "La firma de quien revoca")
+  const [row] = await tx
+    .update(consentDocument)
+    .set({
+      status: "revocado",
+      revokedAt: new Date(),
+      revokeReason: clean,
+      revokerName: revoker.displayName,
+      revokerContactId: input.revokerContactId,
+      revokeSignature,
+      updatedAt: new Date(),
+    })
     .where(and(eq(consentDocument.id, documentId), eq(consentDocument.organizationId, orgId)))
     .returning()
   if (!row) throw notFound("Consentimiento")
@@ -1542,10 +1989,85 @@ export async function revokeConsentDocument(
     fromStatus: "firmado",
     toStatus: "revocado",
     actorUserId,
-    reason: clean,
+    reason: `${revoker.displayName}: ${clean}`,
   })
   await audit(tx, orgId, actorUserId, "consent.revoke", "consent_document", documentId, {})
   return row
+}
+
+/** Asocia el PDF generado (documento clínico) y su huella SHA-256, una sola vez. */
+export async function attachConsentPdf(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  documentId: string,
+  input: { pdfDocumentId: string; sha256: string },
+): Promise<ConsentDocumentRow> {
+  const [current] = await tx
+    .select()
+    .from(consentDocument)
+    .where(and(eq(consentDocument.id, documentId), eq(consentDocument.organizationId, orgId)))
+    .for("update")
+    .limit(1)
+  if (!current) throw notFound("Consentimiento")
+  if (current.status !== "firmado" && current.status !== "revocado")
+    throw conflict("CONSENT_STATUS", "Solo un consentimiento firmado genera PDF")
+  if (current.pdfDocumentId) throw conflict("PDF_EXISTS", "El consentimiento ya tiene su PDF")
+  if (!/^[0-9a-f]{64}$/.test(input.sha256)) throw validation("Huella SHA-256 inválida")
+  const [row] = await tx
+    .update(consentDocument)
+    .set({ pdfDocumentId: input.pdfDocumentId, pdfSha256: input.sha256, updatedAt: new Date() })
+    .where(and(eq(consentDocument.id, documentId), eq(consentDocument.organizationId, orgId)))
+    .returning()
+  await audit(tx, orgId, actorUserId, "consent.pdf", "consent_document", documentId, {
+    pdfDocumentId: input.pdfDocumentId,
+    sha256: input.sha256,
+  })
+  return row!
+}
+
+/** Datos del documento para imprimir o generar el PDF. */
+export async function getConsentPrint(tx: Db, orgId: string, documentId: string) {
+  const [doc] = await tx
+    .select()
+    .from(consentDocument)
+    .where(and(eq(consentDocument.id, documentId), eq(consentDocument.organizationId, orgId)))
+    .limit(1)
+  if (!doc) throw notFound("Consentimiento")
+  const [person] = await tx
+    .select({
+      displayName: patient.displayName,
+      patientNumber: patient.patientNumber,
+      docType: patient.docType,
+      docNumber: patient.docNumber,
+      birthDate: patient.birthDate,
+    })
+    .from(patient)
+    .where(and(eq(patient.id, doc.patientId), eq(patient.organizationId, orgId)))
+  if (!person) throw notFound("Paciente")
+  const [org] = await tx
+    .select({
+      legalName: orgProfile.legalName,
+      tradeName: orgProfile.tradeName,
+      fiscalDocType: orgProfile.fiscalDocType,
+      fiscalDocNumber: orgProfile.fiscalDocNumber,
+      address: orgProfile.fiscalAddress,
+    })
+    .from(orgProfile)
+    .where(eq(orgProfile.organizationId, orgId))
+  const [dx] = doc.diagnosisCode
+    ? await tx
+        .select({ description: cie10Code.description })
+        .from(cie10Code)
+        .where(eq(cie10Code.code, doc.diagnosisCode))
+    : []
+  const minor = person.birthDate ? ageOn(person.birthDate, new Date()) < 18 : false
+  return {
+    document: doc,
+    diagnosisDescription: dx?.description ?? null,
+    patient: { ...person, minor },
+    establishment: org ?? null,
+  }
 }
 
 export async function listConsentDocuments(
@@ -1559,8 +2081,8 @@ export async function listConsentDocuments(
     eq(consentDocument.patientId, query.patientId),
   ]
   if (query.status) {
-    if (!["pendiente", "firmado", "revocado"].includes(query.status)) {
-      throw validation("Estado inválido: pendiente|firmado|revocado")
+    if (!["pendiente", "firmado", "revocado", "anulado"].includes(query.status)) {
+      throw validation("Estado inválido: pendiente|firmado|revocado|anulado")
     }
     conditions.push(eq(consentDocument.status, query.status))
   }
@@ -1571,22 +2093,36 @@ export async function listConsentDocuments(
     .orderBy(desc(consentDocument.createdAt))
 }
 
+/** Paciente dueño de un consentimiento: para dejar traza de su lectura (404 si no existe). */
+export async function consentDocumentPatientId(
+  tx: Db,
+  orgId: string,
+  documentId: string,
+): Promise<string> {
+  const [doc] = await tx
+    .select({ patientId: consentDocument.patientId })
+    .from(consentDocument)
+    .where(and(eq(consentDocument.id, documentId), eq(consentDocument.organizationId, orgId)))
+    .limit(1)
+  if (!doc) throw notFound("Consentimiento")
+  return doc.patientId
+}
+
 export async function listConsentEvents(
   tx: Db,
   orgId: string,
   documentId: string,
 ): Promise<(typeof consentEvent.$inferSelect)[]> {
-  const [doc] = await tx
-    .select({ id: consentDocument.id })
-    .from(consentDocument)
-    .where(and(eq(consentDocument.id, documentId), eq(consentDocument.organizationId, orgId)))
-    .limit(1)
-  if (!doc) throw notFound("Consentimiento")
+  await consentDocumentPatientId(tx, orgId, documentId)
   return tx
     .select()
     .from(consentEvent)
     .where(and(eq(consentEvent.organizationId, orgId), eq(consentEvent.documentId, documentId)))
-    .orderBy(asc(consentEvent.createdAt))
+    // A igual hora, el orden del flujo: informar precede a firmar.
+    .orderBy(
+      asc(consentEvent.createdAt),
+      sql`array_position(array['pendiente','informado','firmado','revocado','anulado'], ${consentEvent.toStatus})`,
+    )
 }
 
 // ---------------------------------------------------------------------------

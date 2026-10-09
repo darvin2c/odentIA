@@ -1,6 +1,7 @@
 /** Tipos espejo de la API de pacientes + helpers puros para la UI. */
 import { activeFindingsAsOf, type FindingDetails } from "@odentia/clinical"
 import { apiFetch } from "./api"
+import type { EncounterDiagnosis } from "./encounters"
 
 export type BloodGroup = "A+" | "A-" | "B+" | "B-" | "AB+" | "AB-" | "O+" | "O-" | "unknown"
 
@@ -9,9 +10,24 @@ export interface Patient {
   organizationId?: string
   patientNumber: number
   displayName: string
+  /** Nombre separado (ADR 0004); el visible se deriva de él. */
+  givenNames?: string | null
+  paternalSurname?: string | null
+  maternalSurname?: string | null
+  identityNeedsReview?: boolean
+  identityLegacy?: Record<string, string> | null
   bloodGroup?: BloodGroup | null
   docType?: string | null
   docNumber?: string | null
+  docCountry?: string | null
+  nationality?: string | null
+  birthPlaceUbigeo?: string | null
+  addressUbigeo?: string | null
+  addressReference?: string | null
+  insurerName?: string | null
+  affiliationNumber?: string | null
+  emergencyContactRelationship?: string | null
+  asaClass?: string | null
   birthDate?: string | null
   sex?: string | null
   phone?: string | null
@@ -40,6 +56,9 @@ export interface Allergy {
   category?: string | null
   reaction?: string | null
   severity: string
+  kind?: string
+  criticality?: string | null
+  verification?: string
   isActive: boolean
   createdAt?: string
 }
@@ -87,8 +106,20 @@ export interface HealthAllergyInput {
   substance: string
   category?: string | null
   reaction?: string | null
-  severity: string
+  /** Sin dato el servidor guarda «desconocida». */
+  severity?: string | null
+  kind?: string | null
+  criticality?: string | null
+  verification?: string | null
   isActive?: boolean
+}
+
+/** Antecedente familiar por parentesco y condición. */
+export interface FamilyHistoryItem {
+  relationship: string
+  condition: string
+  cie10Code?: string | null
+  notes?: string | null
 }
 
 export interface HealthConditionInput {
@@ -118,6 +149,8 @@ export interface SaveHealthInput {
   conditions: HealthConditionInput[]
   medications: HealthMedicationInput[]
   bloodGroup?: BloodGroup | null
+  familyHistory?: FamilyHistoryItem[]
+  asaClass?: string | null
   anamnesis?: { expectedVersion: number; answers: AnamnesisAnswers }
   dataConsent?: true
 }
@@ -129,6 +162,8 @@ export interface PatientHealth {
   conditions: Condition[]
   medications: Medication[]
   bloodGroup: BloodGroup | null
+  asaClass?: string | null
+  familyHistory?: Array<FamilyHistoryItem & { id: string }>
   reviewedAt: string | null
   reviewedBy: string | null
   latestAnamnesis: {
@@ -229,6 +264,13 @@ export interface PatientDocument {
   storageKey?: string
   contentType: string
   sizeBytes: number
+  /** Subtipo de imagen diagnóstica (@odentia/clinical IMAGE_TYPES). */
+  imageType?: string | null
+  capturedAt?: string | null
+  source?: string | null
+  reportStatus?: string | null
+  retiredAt?: string | null
+  retireReason?: string | null
   encounterId: string | null
   planItemId: string | null
   /** Vínculos clínico-económicos del contexto vigente (nullable). */
@@ -314,8 +356,17 @@ export interface Encounter {
   patientId?: string
   branchId: string | null
   dentistUserId: string
+  /** borrador, finalizada o anulada. */
   status: string
+  /** Cita que motivó la atención, si la hubo. */
+  appointmentId?: string | null
   reason: string | null
+  /** Nota normativa: enfermedad actual, signos vitales, pronóstico y exámenes. */
+  presentIllness?: string | null
+  illnessDuration?: string | null
+  vitals?: Record<string, number> | null
+  prognosis?: string | null
+  auxiliaryExams?: string | null
   evolution: string | null
   indications: string | null
   nextStep: string | null
@@ -327,6 +378,16 @@ export interface Encounter {
     higieneOral?: string
   } | null
   finalizedBy: string | null
+  /** Inicio y fin declarados de la atención. */
+  startedAt?: string
+  endedAt?: string | null
+  /** Firma del profesional al cerrar (instantánea del perfil). */
+  signerName?: string | null
+  signerTitle?: string | null
+  signerRegistration?: string | null
+  voidedAt?: string | null
+  voidedBy?: string | null
+  voidReason?: string | null
   createdAt: string
   updatedAt: string
 }
@@ -334,6 +395,8 @@ export interface Encounter {
 /** Procedimiento realizado durante una atención. Fechas como ISO string. */
 export interface ProcedureItem {
   id: string
+  /** Unidades del acto; el cargo es precio unitario × cantidad. */
+  quantity?: number
   organizationId?: string
   encounterId: string
   serviceId: string | null
@@ -350,6 +413,9 @@ export interface ProcedureItem {
   currency: string | null
   createdBy?: string | null
   createdAt: string
+  /** Anulado en borrador: sin cargo ni sesión. */
+  voidedAt?: string | null
+  voidReason?: string | null
 }
 
 /** Ítem del plan de tratamiento (decisión derivada de la línea vigente). Fechas como ISO string. */
@@ -360,15 +426,15 @@ export interface PlanItem {
   planId: string
   odontogramEntryId?: string | null
   budgetId: string | null
-  decision: "pendiente" | "aceptado" | "rechazado" | "sin_registro"
+  decision: "pendiente" | "aceptado" | "pospuesto" | "rechazado" | "reemplazado"
   /** Decisión clínica vigente del ítem: la indicación manda, el snapshot es evidencia. */
-  decisionStatus:
-    | "pendiente"
-    | "aceptado"
-    | "pospuesto"
-    | "rechazado"
-    | "reemplazado"
-    | "sin_registro"
+  decisionStatus: "pendiente" | "aceptado" | "pospuesto" | "rechazado" | "reemplazado"
+  /** Fase del plan (urgencia → mantenimiento) y orden de ejecución. */
+  phase?: "urgencia" | "basica" | "quirurgica" | "rehabilitadora" | "mantenimiento"
+  sortOrder?: number
+  /** Sesiones previstas y hechas (procedimientos no anulados). */
+  plannedSessions?: number
+  sessionsDone?: number
   decidedAt: string | null
   decidedByContactId: string | null
   decidedByName: string | null
@@ -425,7 +491,9 @@ export interface EncounterDetail {
   plannedItems: PlanItem[]
   indicatedItems: PlanItem[]
   procedures: ProcedureItem[]
-  /** Notas de evolución (kind='evolucion'), orden ascendente. */
+  /** Diagnósticos CIE-10 de la atención, anulados incluidos. */
+  diagnoses: EncounterDiagnosis[]
+  /** Notas de evolución sin código (kind='evolucion'), orden ascendente. */
   notes: ClinicalNote[]
   odontogramEntries: OdontogramEntry[]
   documents: PatientDocument[]
@@ -547,9 +615,24 @@ export interface TreatmentJourneySummary {
 }
 
 /** Resumen del paciente: última atención finalizada, borrador abierto y plan pendiente. */
+/** Atención en curso con lo que lleva y lo que le falta para cerrarse. */
+export interface OpenEncounterBrief {
+  id: string
+  reason: string | null
+  startedAt: string
+  dentistUserId: string
+  appointmentId: string | null
+  diagnosisCount: number
+  procedureCount: number
+  missing: Array<"reason" | "diagnosis" | "evolution" | "signature">
+}
+
 export interface PatientSummary {
   lastEncounter: Encounter | null
   openEncounterId: string | null
+  openEncounter?: OpenEncounterBrief | null
+  /** Consentimientos emitidos y aún sin firmar. */
+  pendingConsents?: Array<{ id: string; title: string }>
   nextAppointmentAt: string | null
   treatmentJourneys: TreatmentJourneySummary[]
   planPending: {
@@ -605,6 +688,9 @@ export interface PatientSummary {
       | "id"
       | "label"
       | "category"
+      | "contentType"
+      | "imageType"
+      | "capturedAt"
       | "encounterId"
       | "planItemId"
       | "toothNumbers"
@@ -693,10 +779,16 @@ export function planStatusLabel(status: string): string {
       return "Pendiente"
     case "programado":
       return "Programado"
+    case "en_curso":
+      return "En curso"
+    case "suspendido":
+      return "Suspendido"
     case "realizado":
       return "Realizado"
     case "cancelado":
       return "Cancelado"
+    case "reemplazado":
+      return "Reemplazado"
     default:
       return status
   }
@@ -705,9 +797,11 @@ export function planStatusLabel(status: string): string {
 export function encounterStatusLabel(status: string): string {
   switch (status) {
     case "borrador":
-      return "Borrador"
+      return "En curso"
     case "finalizada":
       return "Finalizada"
+    case "anulada":
+      return "Anulada"
     default:
       return status
   }
@@ -787,4 +881,3 @@ export function fetchAnamnesisHistory(patientId: string): Promise<{
     data: Array<{ id: string; version: number; createdAt: string; createdBy: string | null }>
   }>(`/api/patients/${patientId}/anamnesis/history`)
 }
-

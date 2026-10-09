@@ -44,6 +44,10 @@ const createInput = z.object({
 
 const patchInput = z.object({
   displayName: z.string().min(1).max(200).optional(),
+  givenNames: z.string().max(100).nullable().optional(),
+  paternalSurname: z.string().max(100).nullable().optional(),
+  maternalSurname: z.string().max(100).nullable().optional(),
+  docCountry: z.string().max(2).nullable().optional(),
   phone: z.string().max(50).nullable().optional(),
   email: z.string().max(200).nullable().optional(),
   docType: z.string().max(20).nullable().optional(),

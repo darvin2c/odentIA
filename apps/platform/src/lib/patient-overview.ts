@@ -1,3 +1,4 @@
+import { SEX_LABELS } from "@odentia/clinical"
 /** Presentación del perfil/listado de pacientes (filtros, orden y anamnesis legible). */
 import type { FilterDef, SortOption } from "@odentia/ui-patterns"
 import type { Patient } from "./patients"
@@ -46,9 +47,7 @@ export const PATIENT_FILTERS: FilterDef[] = [
 ]
 
 export function sexLabel(sex: string | null | undefined): string {
-  if (sex === "M") return "Masculino"
-  if (sex === "F") return "Femenino"
-  return "No registrado"
+  return sex && sex in SEX_LABELS ? SEX_LABELS[sex as keyof typeof SEX_LABELS] : "No registrado"
 }
 
 export function documentCategoryLabel(category: string): string {
@@ -135,4 +134,3 @@ function recordOf(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null
   return value as Record<string, unknown>
 }
-

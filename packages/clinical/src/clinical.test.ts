@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest"
 import type { FindingRecord } from "./index.js"
 import {
+  ageLabel,
+  composeDisplayName,
+  identityDocumentError,
+  normalizePhone,
+  allergyConflicts,
+  formatVitals,
+  parseVitals,
   activeFindingsAsOf,
   conditionLabel,
   FINDINGS,
@@ -407,6 +414,21 @@ describe("color y vigencia", () => {
     expect(activeFindingsAsOf(history, "2024-12-31").map((item) => item.id)).toEqual(["a", "b"])
     expect(activeFindingsAsOf(history, "2024-01-10").map((item) => item.id)).toEqual(["a"])
   })
+
+  it("un hallazgo tratado estuvo vigente hasta su tratamiento y deja de estarlo después", () => {
+    const history = [
+      {
+        id: "caries",
+        toothNumber: 36,
+        condition: "caries",
+        status: "recorded",
+        createdAt: "2026-01-10",
+        resolvedAt: "2026-02-01",
+      },
+    ]
+    expect(activeFindingsAsOf(history, "2026-01-20").map((item) => item.id)).toEqual(["caries"])
+    expect(activeFindingsAsOf(history, "2026-02-02")).toEqual([])
+  })
 })
 
 describe("correcciones y registros no válidos", () => {
@@ -516,5 +538,55 @@ describe("normalizeTags", () => {
   it("el límite cuenta únicas canónicas, no crudas", () => {
     const twenty = Array.from({ length: MAX_TAGS }, (_, i) => `tag-${i}`)
     expect(normalizeTags([...twenty, " TAG_0 "])).toEqual(twenty)
+  })
+})
+
+describe("signos vitales", () => {
+  it("normaliza decimales y exige presión completa y plausible", () => {
+    expect(parseVitals({ temperatura: "36.54", frecuenciaCardiaca: 72 })).toEqual({
+      ok: true,
+      value: { temperatura: 36.5, frecuenciaCardiaca: 72 },
+    })
+    expect(parseVitals({ presionSistolica: 120 })).toMatchObject({ ok: false })
+    expect(parseVitals({ presionSistolica: 80, presionDiastolica: 120 })).toMatchObject({
+      ok: false,
+    })
+    expect(parseVitals({ temperatura: 50 })).toMatchObject({ ok: false })
+    expect(parseVitals({ glucosa: 90 })).toMatchObject({ ok: false })
+    expect(parseVitals({ temperatura: "" })).toEqual({ ok: true, value: null })
+    expect(formatVitals({ presionSistolica: 120, presionDiastolica: 80, temperatura: 36.5 })).toBe(
+      "PA 120/80 mmHg · T 36.5 °C",
+    )
+  })
+})
+
+describe("alergias al prescribir", () => {
+  it("advierte la misma sustancia, el mismo grupo y la reactividad cruzada", () => {
+    expect(allergyConflicts("Amoxicilina", ["Amoxicilina"])[0]?.reason).toBe("misma sustancia")
+    expect(allergyConflicts("amoxicilina", ["Penicilina"])[0]?.reason).toMatch(/mismo grupo/)
+    expect(allergyConflicts("cefalexina", ["penicilina G"])[0]?.reason).toMatch(/cruzada/)
+    expect(allergyConflicts("ibuprofeno", ["Aspirina"])[0]?.reason).toMatch(/cruzada/)
+    expect(allergyConflicts("clindamicina", ["Penicilina"])).toEqual([])
+    expect(allergyConflicts("paracetamol", ["Látex"])).toEqual([])
+  })
+})
+
+describe("identidad estándar", () => {
+  it("normaliza teléfonos, valida documentos y compone el nombre", () => {
+    expect(normalizePhone("987 654 321")).toBe("+51987654321")
+    expect(normalizePhone("+58 412 1234567")).toBe("+584121234567")
+    expect(normalizePhone("4567890")).toBeNull()
+    expect(normalizePhone("5491122334455")).toBe("+5491122334455")
+    expect(identityDocumentError("DNI", "123")).toMatch(/8 dígitos/)
+    expect(identityDocumentError("CE", "001234567")).toBeNull()
+    expect(
+      composeDisplayName({
+        givenNames: " Rosa  María",
+        paternalSurname: "Quispe",
+        maternalSurname: "Huamán",
+      }),
+    ).toBe("Rosa María Quispe Huamán")
+    expect(ageLabel("2025-12-15", new Date("2026-10-08T12:00:00Z"))).toBe("9 meses")
+    expect(ageLabel("1990-01-01", new Date("2026-10-08T12:00:00Z"))).toBe("36 años")
   })
 })

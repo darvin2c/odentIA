@@ -711,10 +711,7 @@ it("inmutabilidad real: UPDATE clinical_note con el rol app es rechazado", async
     createPatient(tx, "org_a", ACTOR, { displayName: "Inmutable I" }),
   )
   const note = await withOrgContext(appDb, "org_a", (tx) =>
-    addClinicalNote(tx, "org_a", ACTOR, p.id, {
-      note: "Evolución inicial",
-      diagnosisCode: "K04.0",
-    }),
+    addClinicalNote(tx, "org_a", ACTOR, p.id, { note: "Evolución inicial" }),
   )
   const err = await withOrgContext(appDb, "org_a", (tx) =>
     tx.execute(sql`update "clinical_note" set "note" = 'hack' where "id" = ${note.id}::uuid`),

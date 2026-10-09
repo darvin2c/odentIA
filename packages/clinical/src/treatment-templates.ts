@@ -23,9 +23,49 @@ export const TREATMENT_SPECIALTIES = [
 ] as const
 export type TreatmentSpecialty = (typeof TREATMENT_SPECIALTIES)[number]
 
+/**
+ * Fases del plan de tratamiento odontológico, en el orden en que se ejecutan:
+ * urgencia (dolor, infección, trauma), básica o higiénica (control de caries y
+ * periodonto), quirúrgica, rehabilitadora y mantenimiento.
+ */
+export const TREATMENT_PHASES = [
+  "urgencia",
+  "basica",
+  "quirurgica",
+  "rehabilitadora",
+  "mantenimiento",
+] as const
+export type TreatmentPhase = (typeof TREATMENT_PHASES)[number]
+
+export const TREATMENT_PHASE_LABELS: Record<TreatmentPhase, string> = {
+  urgencia: "Urgencia",
+  basica: "Básica o higiénica",
+  quirurgica: "Quirúrgica",
+  rehabilitadora: "Rehabilitadora",
+  mantenimiento: "Mantenimiento",
+}
+
+/**
+ * Fase propuesta por la especialidad del servicio; el clínico la cambia. La
+ * urgencia nunca se infiere: es un juicio sobre el paciente, no sobre el acto.
+ */
+export function phaseForSpecialty(specialty: string | null | undefined): TreatmentPhase {
+  switch (specialty) {
+    case "cirugia":
+    case "implantologia":
+      return "quirurgica"
+    case "protesis":
+    case "ortodoncia":
+    case "estetica":
+    case "disfuncion":
+      return "rehabilitadora"
+    default:
+      return "basica"
+  }
+}
+
 export const TREATMENT_SCOPES = ["general", "tooth", "surfaces", "quadrant", "arch"] as const
 export type TreatmentScope = (typeof TREATMENT_SCOPES)[number]
-
 
 /**
  * Snapshot congelado de codificaciones en plan/presupuesto/atención.
@@ -37,7 +77,6 @@ export interface ProcedureCodingSnapshot {
   version: string
   display: string
 }
-
 
 export interface TreatmentSiteInput {
   toothNumber?: number | null

@@ -3,7 +3,7 @@ import { writeFile } from "node:fs/promises"
 import AxeBuilder from "@axe-core/playwright"
 import type { Page, TestInfo } from "@playwright/test"
 import { PANEL, tenant, tenantPattern } from "./env"
-import { expect, test } from "./fixtures"
+import { expect, fillPatientNames, test } from "./fixtures"
 import { gotoHydrated } from "./hydration"
 import { latestLinkFor } from "./mailpit"
 
@@ -206,7 +206,7 @@ for (const viewport of [
       await dialog.getByRole("button", { name: "Siguiente", exact: true }).click()
       await expect(dialog.getByRole("alert").first()).toBeVisible()
       await audit(page, info, "alta-paciente-error")
-      await dialog.getByLabel("Nombre del paciente").fill("Paciente accesible")
+      await fillPatientNames(dialog, "Paciente accesible")
       await dialog.getByRole("button", { name: "Siguiente", exact: true }).click()
       await audit(page, info, "alta-paciente-contacto")
       for (const surface of ["salud", "salud-dental", "revision"]) {

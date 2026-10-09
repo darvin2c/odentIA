@@ -89,7 +89,7 @@ async function auditPortal(
   })
 }
 
-async function logAccess(
+export async function logAccess(
   tx: Db,
   orgId: string,
   sessionId: string,
@@ -867,7 +867,7 @@ export async function requirePortalSession(tx: Db, orgId: string, rawSessionToke
   return { orgId, session: effectiveRow, patientName: patientRow.displayName }
 }
 
-function requireScope(session: PortalSessionRow, key: "appointments" | "budgets" | "account"): void {
+export function requireScope(session: PortalSessionRow, key: "appointments" | "budgets" | "account"): void {
   if (session.scope?.[key] !== true) {
     throw new ServiceError("PORTAL_FORBIDDEN", 404, "Esta sección no está autorizada en tu acceso")
   }

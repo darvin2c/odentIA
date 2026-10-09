@@ -23,6 +23,13 @@ import {
   verifyPasskeyRegistration,
 } from "./portal-access.js"
 import { exchangePortalToken, issuePortalLink, requirePortalSession } from "./portal.js"
+import { getPortalQuestionnaire, savePortalQuestionnaire } from "./portal-questionnaire.js"
+import {
+  createFormTemplate,
+  finalizeFormResponse,
+  listFormResponses,
+  publishFormTemplate,
+} from "./clinical-forms.js"
 import { recordPortalPinFailure, upsertPortalPolicy } from "./portal-policy.js"
 import { ServiceError } from "./errors.js"
 import { listTasks } from "./tasks.js"
@@ -536,4 +543,69 @@ it("passkeys: registro con sesión Bearer; respuestas inválidas no crean nada",
   await expect(
     withOrgContext(appDb, ORG, (tx) => verifyPasskeyAuth(tx, ORG, authentication.challengeId, { id: "falsa" }, rp)),
   ).rejects.toThrow()
+})
+
+it("cuestionario previo: lo responde quien tiene la sesión, se envía completo y el equipo lo finaliza", async () => {
+  await withOrgContext(appDb, ORG, async (tx) => {
+    const draft = await createFormTemplate(tx, ORG, ACTOR, {
+      title: "Cuestionario previo",
+      respondent: "portal",
+      schema: {
+        sections: [
+          {
+            id: "salud",
+            title: "Salud",
+            fields: [
+              { id: "alergia", label: "¿Eres alérgica a algún medicamento?", type: "booleano", required: true },
+              { id: "cual", label: "¿A cuál?", type: "texto", required: true, showIf: { field: "alergia", equals: true } },
+              { id: "medicamentos", label: "Medicamentos que tomas", type: "texto_largo" },
+            ],
+          },
+        ],
+      },
+    })
+    await publishFormTemplate(tx, ORG, ACTOR, draft.id)
+  })
+  await withOrgContext(appDb, ORG, (tx) =>
+    createPortalGrant(tx, ORG, ACTOR, {
+      patientId: patient3Id,
+      contactId,
+      relationship: "family",
+      scope: { appointments: true },
+      verifiedMethod: "presencial_documento",
+      evidenceNote: "DNI revisado en recepción.",
+    }),
+  )
+  const { raw } = await insertPendingLink(patient3Id)
+  const opened = await withOrgContext(appDb, ORG, (tx) => exchangePortalToken(tx, ORG, raw, { pin: "123456" }))
+  const inPortal = <T>(fn: (tx: typeof appDb, ctx: Awaited<ReturnType<typeof requirePortalSession>>) => Promise<T>) =>
+    withOrgContext(appDb, ORG, async (tx) => fn(tx, await requirePortalSession(tx, ORG, opened.sessionToken)))
+
+  const first = await inPortal((tx, ctx) => getPortalQuestionnaire(tx, ctx))
+  expect(first.template?.title).toBe("Cuestionario previo")
+  expect(first.respondent).toMatchObject({ name: "Contacto Portal" })
+  expect(first.response).toBeNull()
+  // Guardar avance acepta respuestas parciales.
+  const partial = await inPortal((tx, ctx) => savePortalQuestionnaire(tx, ctx, { answers: { alergia: true } }))
+  expect(partial.response?.submittedAt).toBeNull()
+  // Enviar exige lo obligatorio visible y nombra el campo.
+  await expect(
+    inPortal((tx, ctx) => savePortalQuestionnaire(tx, ctx, { answers: { alergia: true }, submit: true })),
+  ).rejects.toThrow(/¿A cuál\?/)
+  const sent = await inPortal((tx, ctx) =>
+    savePortalQuestionnaire(tx, ctx, { answers: { alergia: true, cual: "Penicilina" }, submit: true }),
+  )
+  expect(sent.response?.submittedAt).toBeTruthy()
+  expect(sent.response?.id).toBe(partial.response?.id)
+  expect(
+    await errorCode(
+      inPortal((tx, ctx) => savePortalQuestionnaire(tx, ctx, { answers: { alergia: false } })),
+    ),
+  ).toBe("ALREADY_SUBMITTED")
+  // El equipo lo ve como declarado por el portal y lo finaliza tras revisarlo.
+  const responses = await withOrgContext(appDb, ORG, (tx) => listFormResponses(tx, ORG, { patientId: patient3Id }))
+  expect(responses[0]).toMatchObject({ source: "portal", respondentContactId: contactId, status: "borrador" })
+  expect(
+    await withOrgContext(appDb, ORG, (tx) => finalizeFormResponse(tx, ORG, ACTOR, responses[0]!.id)),
+  ).toMatchObject({ status: "finalizado" })
 })

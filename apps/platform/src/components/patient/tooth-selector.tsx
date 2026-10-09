@@ -1,5 +1,5 @@
-import { FDI_ADULT_ROWS, FDI_CHILD_ROWS } from "@odentia/clinical"
-import { Button } from "@odentia/ui"
+import { FDI_ADULT_ROWS, FDI_CHILD_ROWS, isValidTooth } from "@odentia/clinical"
+import { Button, Input } from "@odentia/ui"
 import { useId, useState } from "react"
 import { OdontogramArch } from "../odontogram-arch"
 
@@ -8,6 +8,8 @@ export interface ToothSelectorProps {
   onChange: (value: number[]) => void
   disabled?: boolean
   label?: string
+  /** Una sola pieza (campo «pieza» de formularios): sin selección rápida. */
+  single?: boolean
 }
 
 type Dentition = "adulta" | "temporal"
@@ -44,8 +46,38 @@ function addAll(teeth: number[], add: readonly number[]): number[] {
  * sin reemplazar la selección. Cambiar de dentición solo cambia la vista y
  * conserva las piezas ya seleccionadas.
  */
-export function ToothSelector({ value, onChange, disabled = false, label }: ToothSelectorProps) {
+export function ToothSelector({
+  value,
+  onChange,
+  disabled = false,
+  label,
+  single = false,
+}: ToothSelectorProps) {
   const groupId = useId()
+  const typedId = useId()
+  const [typed, setTyped] = useState("")
+  const [typedError, setTypedError] = useState<string | null>(null)
+  const select = (tooth: number) => {
+    if (single) {
+      onChange(value.includes(tooth) ? [] : [tooth])
+      return
+    }
+    const next = value.includes(tooth) ? value.filter((t) => t !== tooth) : [...value, tooth]
+    onChange([...new Set(next)].sort((a, b) => a - b))
+  }
+  // Alternativa al clic: escribir el número FDI (teclado y lectores de pantalla).
+  const addTyped = () => {
+    const tooth = Number(typed.trim())
+    if (!Number.isInteger(tooth) || !isValidTooth(tooth)) {
+      setTypedError(`«${typed}» no es una pieza FDI (11–48 o 51–85)`)
+      return
+    }
+    setTypedError(null)
+    setTyped("")
+    setDentition(tooth >= 50 ? "temporal" : "adulta")
+    if (single) onChange([tooth])
+    else if (!value.includes(tooth)) onChange([...value, tooth].sort((a, b) => a - b))
+  }
   const [dentition, setDentition] = useState<Dentition>(() =>
     value.some((t) => t >= 50) ? "temporal" : "adulta",
   )
@@ -86,12 +118,44 @@ export function ToothSelector({ value, onChange, disabled = false, label }: Toot
         disabled={disabled}
         onToggle={(tooth) => {
           if (disabled) return
-          const next = value.includes(tooth) ? value.filter((t) => t !== tooth) : [...value, tooth]
-          onChange([...new Set(next)].sort((a, b) => a - b))
+          select(tooth)
         }}
       />
 
-      <div className="flex flex-wrap gap-1.5" aria-label="Selección rápida">
+      <div className="flex flex-wrap items-center gap-1.5">
+        <label htmlFor={typedId} className="text-xs text-muted-foreground">
+          Escribir pieza FDI
+        </label>
+        <Input
+          id={typedId}
+          className="h-8 w-20"
+          inputMode="numeric"
+          maxLength={2}
+          value={typed}
+          disabled={disabled}
+          aria-invalid={typedError ? true : undefined}
+          onChange={(event) => {
+            setTyped(event.target.value.replace(/\D/g, ""))
+            setTypedError(null)
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.preventDefault()
+              addTyped()
+            }
+          }}
+        />
+        <Button type="button" size="sm" variant="outline" disabled={disabled || !typed} onClick={addTyped}>
+          {single ? "Elegir" : "Agregar"}
+        </Button>
+        {typedError ? (
+          <span role="alert" className="text-xs text-destructive">
+            {typedError}
+          </span>
+        ) : null}
+      </div>
+
+      <div className={single ? "hidden" : "flex flex-wrap gap-1.5"} aria-label="Selección rápida">
         <Button
           type="button"
           size="sm"

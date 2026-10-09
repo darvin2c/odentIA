@@ -13,17 +13,17 @@ import {
   Textarea,
   toast,
 } from "@odentia/ui"
-import { EmptyState, ErrorState, FormDrawer, PageHeader } from "@odentia/ui-patterns"
+import { EmptyState, ErrorState, FormDrawer, LoadingState } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { ApiError } from "../../lib/api"
 import {
   advanceOrder,
+  type ClinicalOrder,
   createOrder,
   fetchOrders,
   fetchSpecialties,
   ORDER_STATUS_LABELS,
-  type ClinicalOrder,
 } from "../../lib/clinical-forms"
 import { usePermission } from "../../lib/crm"
 
@@ -58,17 +58,19 @@ export function OrdenesTab({
 
   return (
     <div className="flex flex-col gap-4">
-      <PageHeader
-        title="Órdenes clínicas"
-        subtitle="Laboratorio e interconsultas con seguimiento de estado y resultado."
-        actions={
-          canWrite ? (
-            <Button type="button" onClick={() => setDrawerOpen(true)}>
-              Nueva orden
-            </Button>
-          ) : undefined
-        }
-      />
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <h2 className="text-base font-semibold">Órdenes clínicas</h2>
+          <p className="text-sm text-muted-foreground">
+            Laboratorio e interconsultas con seguimiento de estado y resultado.
+          </p>
+        </div>
+        {canWrite ? (
+          <Button type="button" onClick={() => setDrawerOpen(true)}>
+            Nueva orden
+          </Button>
+        ) : null}
+      </div>
       <div className="flex flex-wrap gap-2">
         <Select value={kindFilter || "todas"} onValueChange={(v: string | null) => setKindFilter(v === "todas" ? "" : (v ?? ""))}>
           <SelectTrigger className="w-56" aria-label="Filtrar por tipo">
@@ -82,7 +84,7 @@ export function OrdenesTab({
         </Select>
       </div>
       {listQuery.isLoading ? (
-        <p className="text-sm text-muted-foreground">Cargando…</p>
+        <LoadingState message="Cargando órdenes…" />
       ) : listQuery.isError ? (
         <ErrorState message="No se pudieron cargar las órdenes" onRetry={() => void listQuery.refetch()} />
       ) : orders.length === 0 ? (

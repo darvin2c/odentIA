@@ -1,4 +1,6 @@
-import { EmptyState, LoadingState } from "@odentia/ui-patterns"
+import { DataTable, EmptyState, LoadingState } from "@odentia/ui-patterns"
+import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-table"
+import { useMemo } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { ShieldCheck } from "lucide-react"
 import { apiFetch } from "../../lib/api"
@@ -22,12 +24,16 @@ const RESOURCE_LABELS: Record<string, string> = {
   odontograma: "Odontograma",
   historia: "Historia",
   atenciones: "Atenciones",
+  diagnosticos: "Diagnósticos",
   notas: "Notas clínicas",
   plan: "Plan de tratamiento",
   tratamientos: "Tratamientos",
   controles: "Controles",
   recetas: "Recetas",
   documentos: "Imágenes y documentos",
+  formularios: "Formularios",
+  consentimientos: "Consentimientos",
+  ordenes: "Órdenes",
 }
 
 /**
@@ -66,36 +72,42 @@ export function AccesosPanel({ patientId }: { patientId: string }) {
         Las {rows.length} consultas más recientes, agrupadas por persona, parte de la ficha y hora.
         Los cambios se auditan aparte, en Configuración → Auditoría.
       </p>
-      <div className="mt-4 overflow-x-auto">
-        <table className="w-full min-w-[32rem] text-left text-sm">
-          <thead className="text-xs uppercase tracking-wide text-muted-foreground">
-            <tr>
-              <th scope="col" className="py-2 pr-4 font-medium">
-                Quién
-              </th>
-              <th scope="col" className="py-2 pr-4 font-medium">
-                Qué consultó
-              </th>
-              <th scope="col" className="py-2 pr-4 font-medium">
-                Última consulta
-              </th>
-              <th scope="col" className="py-2 text-right font-medium">
-                Veces en la hora
-              </th>
-            </tr>
-          </thead>
-          <tbody className="divide-y">
-            {rows.map((row) => (
-              <tr key={row.id}>
-                <td className="py-2 pr-4 font-medium">{row.userName ?? "Usuario sin nombre"}</td>
-                <td className="py-2 pr-4">{RESOURCE_LABELS[row.resource] ?? row.resource}</td>
-                <td className="py-2 pr-4 tabular-nums">{formatDateTime(row.lastAt)}</td>
-                <td className="py-2 text-right tabular-nums">{row.hits}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      <div className="mt-4">
+        <AccessTable rows={rows} />
       </div>
     </section>
   )
+}
+
+/** Tabla del patrón común: lista en móvil, tabla desde 768 px. */
+function AccessTable({ rows }: { rows: AccessItem[] }) {
+  const columns = useMemo<ColumnDef<AccessItem>[]>(
+    () => [
+      {
+        id: "quien",
+        header: "Quién",
+        meta: { view: { primary: true } },
+        cell: ({ row }) => row.original.userName ?? "Usuario sin nombre",
+      },
+      {
+        id: "que",
+        header: "Qué consultó",
+        meta: { view: { primary: true } },
+        cell: ({ row }) => RESOURCE_LABELS[row.original.resource] ?? row.original.resource,
+      },
+      {
+        id: "cuando",
+        header: "Última consulta",
+        cell: ({ row }) => <span className="tabular-nums">{formatDateTime(row.original.lastAt)}</span>,
+      },
+      {
+        id: "veces",
+        header: "Veces en la hora",
+        cell: ({ row }) => <span className="tabular-nums">{row.original.hits}</span>,
+      },
+    ],
+    [],
+  )
+  const table = useReactTable({ data: rows, columns, getCoreRowModel: getCoreRowModel() })
+  return <DataTable table={table} />
 }

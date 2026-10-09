@@ -1,3 +1,4 @@
+import { label } from "../../lib/glossary"
 import {
   Badge,
   Breadcrumb,
@@ -28,7 +29,7 @@ import {
 import type { PatientSectionId } from "../../lib/patient-areas"
 import { ageFrom, hcLabel, type PatientFull, type PatientSummary } from "../../lib/patients"
 import { formatMoney } from "../../lib/services"
-import { FiliacionDrawer } from "./filiacion-drawer"
+import { FiliacionSectionDrawer } from "./filiacion-section-drawer"
 import { NewEncounterButton } from "./new-encounter-button"
 import { PatientAvatar } from "./patient-avatar"
 
@@ -54,18 +55,21 @@ function pendingLine(summary: PatientSummary): string {
 export function clinicalAlerts(
   detail: PatientFull,
 ): Array<{ id: string; label: string; tone: "destructive" | "warning" | "secondary" }> {
-  const severe = detail.activeAllergies
-    .filter((a) => a.severity === "severa")
+  // Criticidad alta (riesgo de reacción grave) o gravedad severa encabezan;
+  // una alergia descartada ya no alerta.
+  const allergies = detail.activeAllergies.filter((a) => a.verification !== "descartada")
+  const critical = (a: (typeof allergies)[number]) =>
+    a.severity === "severa" || a.criticality === "alta"
+  const severe = allergies.filter(critical).map((a) => ({
+    id: a.id,
+    label: `${a.kind === "intolerancia" ? "Intolerancia" : "Alergia"} ${a.severity === "severa" ? "severa" : "de criticidad alta"}: ${a.substance}`,
+    tone: "destructive" as const,
+  }))
+  const other = allergies
+    .filter((a) => !critical(a))
     .map((a) => ({
       id: a.id,
-      label: `Alergia severa: ${a.substance}`,
-      tone: "destructive" as const,
-    }))
-  const other = detail.activeAllergies
-    .filter((a) => a.severity !== "severa")
-    .map((a) => ({
-      id: a.id,
-      label: `Alergia: ${a.substance} (${a.severity})`,
+      label: `${a.kind === "intolerancia" ? "Intolerancia" : "Alergia"}: ${a.substance} (${label("alergia", a.severity).toLowerCase()})`,
       tone: "secondary" as const,
     }))
   const conditions = detail.activeConditions.map((c) => ({
@@ -299,8 +303,8 @@ export function PatientHeader({
               </>
             ) : responsibilities.isSuccess ? (
               <>
-                <span className="font-medium">Sin representante legal registrado.</span> Un menor
-                no decide presupuestos ni firma consentimientos por sí mismo.{" "}
+                <span className="font-medium">Sin representante legal registrado.</span> Un menor no
+                decide presupuestos ni firma consentimientos por sí mismo.{" "}
                 <button
                   type="button"
                   className="font-medium underline underline-offset-4"
@@ -338,7 +342,9 @@ export function PatientHeader({
                 <dt className="text-muted-foreground">Última atención</dt>
                 <dd className="font-medium">
                   {summary.lastEncounter
-                    ? dateLabel(summary.lastEncounter.finalizedAt ?? summary.lastEncounter.createdAt)
+                    ? dateLabel(
+                        summary.lastEncounter.finalizedAt ?? summary.lastEncounter.createdAt,
+                      )
                     : "Sin atenciones"}
                 </dd>
               </div>
@@ -386,12 +392,14 @@ export function PatientHeader({
         pending={archiveMutation.isPending}
         onConfirm={() => archiveMutation.mutate(!patient.isActive)}
       />
-      <FiliacionDrawer
-        patientId={patient.id}
-        detail={detail}
-        open={editing}
-        onOpenChange={setEditing}
-      />
+      {editing ? (
+        <FiliacionSectionDrawer
+          patient={patient}
+          section="identidad"
+          open
+          onClose={() => setEditing(false)}
+        />
+      ) : null}
     </header>
   )
 }

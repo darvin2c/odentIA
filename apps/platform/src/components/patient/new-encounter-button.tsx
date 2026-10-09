@@ -17,28 +17,39 @@ import { ApiError, apiFetch } from "../../lib/api"
 import { useMyUserId, useOrgMembers, usePermission } from "../../lib/crm"
 import type { Encounter, PatientFull, PatientSummary } from "../../lib/patients"
 
+/** Cita de agenda desde la que se atiende: fija sede y profesional. */
+export interface AttendedAppointment {
+  id: string
+  dentistUserId: string
+  reason: string | null
+  serviceName: string | null
+}
+
 /**
  * Nueva y reanudada abren el mismo espacio clínico. La apertura exige el
  * motivo de la visita y el profesional que atiende (por defecto quien abre);
- * la puede crear recepción o el propio médico.
+ * la puede crear recepción o el propio médico. Desde la agenda («Atender»)
+ * la atención queda vinculada a la cita, que se marca atendida al cerrar.
  */
 export function NewEncounterButton({
   patientId,
   openEncounterId,
   initialPlanItemIds,
+  appointment,
 }: {
   patientId: string
   detail?: PatientFull
   openEncounterId?: string | null
   initialPlanItemIds?: string[]
+  appointment?: AttendedAppointment
 }) {
   const canWrite = usePermission("clinical.write")
   const myUserId = useMyUserId()
   const members = useOrgMembers()
   const queryClient = useQueryClient()
   const [drawerOpen, setDrawerOpen] = useState(false)
-  const [reason, setReason] = useState("")
-  const [dentistUserId, setDentistUserId] = useState(myUserId)
+  const [reason, setReason] = useState(appointment?.reason ?? "")
+  const [dentistUserId, setDentistUserId] = useState(appointment?.dentistUserId ?? myUserId)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const navigate = useNavigate()
@@ -57,13 +68,18 @@ export function NewEncounterButton({
         body: JSON.stringify({
           reason: reason.trim(),
           dentistUserId,
+          ...(appointment ? { appointmentId: appointment.id } : {}),
           planItemIds: [...new Set(initialPlanItemIds ?? [])],
         }),
       })
       await queryClient.invalidateQueries({ queryKey: ["patient-summary", patientId] })
       open(result.data.id)
     } catch (err) {
-      if (err instanceof ApiError && err.shape.code === "DRAFT_OPEN") {
+      // Ya hay una atención abierta (del paciente o de esta cita): se retoma.
+      if (
+        err instanceof ApiError &&
+        (err.shape.code === "DRAFT_OPEN" || err.shape.code === "APPOINTMENT_HAS_ENCOUNTER")
+      ) {
         try {
           const summary = await apiFetch<{ data: PatientSummary }>(
             `/api/patients/${patientId}/summary`,
@@ -96,13 +112,17 @@ export function NewEncounterButton({
           setDrawerOpen(true)
         }}
       >
-        Nueva atención
+        {appointment ? "Atender" : "Nueva atención"}
       </Button>
       <FormDrawer
         open={drawerOpen}
         onClose={() => setDrawerOpen(false)}
-        title="Nueva atención"
-        description="Registra por qué viene el paciente y quién lo atiende. La atención se abre en borrador."
+        title={appointment ? "Atender la cita" : "Nueva atención"}
+        description={
+          appointment
+            ? `Confirma el motivo con el paciente${appointment.serviceName ? ` (cita para ${appointment.serviceName})` : ""}. La atención se abre en curso y la cita se marca atendida al cerrarla.`
+            : "Registra por qué viene el paciente y quién lo atiende. La atención se abre en curso."
+        }
         onSubmit={(event) => {
           event.preventDefault()
           void start()

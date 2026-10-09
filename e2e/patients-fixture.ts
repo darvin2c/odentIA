@@ -102,6 +102,16 @@ export async function buildClinicalBase(owner: OwnerFixture): Promise<ClinicalId
   await call(page, "PATCH", `${apiPath}/encounters/${encounter.id}`, slug, {
     evolution: "Se evalúa pieza 36 con caries oclusal; se indica endodoncia.",
   })
+  // El cierre exige diagnóstico CIE-10 con tipo y la colegiatura de quien firma (ADR 0003).
+  await call(page, "POST", `${apiPath}/encounters/${encounter.id}/diagnoses`, slug, {
+    cie10Code: "K02.1",
+    diagnosisType: "definitivo",
+    toothNumber: 36,
+    surfaces: ["occlusal"],
+  }, 201)
+  await call(page, "PUT", "/api/clinical-forms/professionals/me/profile", slug, {
+    registrationNumber: "12345",
+  })
   await call(page, "POST", `${apiPath}/encounters/${encounter.id}/finalize`, slug, {})
   return {
     contactId: contact.id,
@@ -211,9 +221,11 @@ export async function grantLegalRepresentative(
 
 const PRESCRIPTION_ITEMS = [
   {
-    medicationName: "Ibuprofeno 400 mg",
-    dose: "400 mg",
-    route: "Oral",
+    genericName: "ibuprofeno",
+    strength: "400 mg",
+    dosageForm: "tableta",
+    dose: "1 tableta",
+    route: "oral",
     frequency: "Cada 8 horas",
     duration: "3 días",
     quantity: null,

@@ -296,7 +296,7 @@ it("interno: el envelope crea la ficha con snapshot platform/staff", async () =>
     body: JSON.stringify({
       submissionId: crypto.randomUUID(),
       answers: {
-        demographics: { displayName: "Paciente Interno" },
+        demographics: { displayName: "Paciente Interno", birthDate: "1990-01-01", phone: "+51977550001" },
         respondent: "staff",
         privacyAccepted: false,
       },
@@ -669,7 +669,7 @@ it("spoofing: contactos, pacientes y organización ajenos se rechazan", async ()
     body: JSON.stringify({
       submissionId: crypto.randomUUID(),
       answers: {
-        demographics: { displayName: "Paciente Espía" },
+        demographics: { displayName: "Paciente Espía", birthDate: "1990-01-01", phone: "+51977550002" },
         respondent: "staff",
         privacyAccepted: false,
       },
@@ -707,7 +707,7 @@ it("spoofing: contactos, pacientes y organización ajenos se rechazan", async ()
     body: JSON.stringify({
       submissionId: crypto.randomUUID(),
       answers: {
-        demographics: { displayName: "Paciente Contexto" },
+        demographics: { displayName: "Paciente Contexto", birthDate: "1990-01-01", phone: "+51977550003" },
         respondent: "staff",
         privacyAccepted: false,
       },
@@ -804,7 +804,7 @@ it("recepción opera CRM y member queda en solo tareas (403 sin efectos)", async
     body: JSON.stringify({
       submissionId: crypto.randomUUID(),
       answers: {
-        demographics: { displayName: "Paciente Miembro" },
+        demographics: { displayName: "Paciente Miembro", birthDate: "1990-01-01", phone: "+51977550004" },
         respondent: "staff",
         privacyAccepted: false,
       },

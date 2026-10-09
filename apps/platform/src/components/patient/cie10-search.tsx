@@ -17,6 +17,8 @@ import { apiFetch } from "../../lib/api"
 interface Cie10Result {
   code: string
   description: string
+  /** Categoría de tres caracteres con subcódigos: se codifica con el subcódigo. */
+  isCategory?: boolean
 }
 
 export function Cie10Search({
@@ -116,10 +118,16 @@ export function Cie10Search({
                   <ComboboxItem
                     key={item.code}
                     value={item}
+                    disabled={item.isCategory}
                     className="flex-col items-start gap-0 py-2"
                   >
                     <span className="font-medium">{item.code}</span>
                     <span className="text-muted-foreground">{item.description}</span>
+                    {item.isCategory ? (
+                      <span className="text-xs text-muted-foreground">
+                        Categoría: elige uno de sus subcódigos
+                      </span>
+                    ) : null}
                   </ComboboxItem>
                 ))}
               </ComboboxList>

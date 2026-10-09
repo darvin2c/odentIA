@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm"
 import {
   boolean,
+  char,
   check,
   date,
   foreignKey,
@@ -91,6 +92,12 @@ export const contact = pgTable("contact", {
   id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
   organizationId: orgFk("organization_id"),
   displayName: text("display_name").notNull(),
+  /** Nombre separado (ADR 0004); display_name se deriva de él en la base. */
+  givenNames: text("given_names"),
+  paternalSurname: text("paternal_surname"),
+  maternalSurname: text("maternal_surname"),
+  /** País emisor del documento (ISO 3166-1 alfa-2). */
+  docCountry: char("doc_country", { length: 2 }),
   phone: text("phone"),
   email: text("email"),
   docType: text("doc_type"),
@@ -112,9 +119,10 @@ export const contact = pgTable("contact", {
     .where(sql`"doc_number" IS NOT NULL`),
   check(
     "contact_doc_type_check",
-    sql`${table.docType} IS NULL OR ${table.docType} IN ('DNI','CE','PASAPORTE','OTRO')`,
+    sql`${table.docType} IS NULL OR ${table.docType} IN ('DNI','CE','PASAPORTE','CNV','DIE','OTRO')`,
   ),
-  check("contact_sex_check", sql`${table.sex} IS NULL OR ${table.sex} IN ('M','F')`),
+  // ISO/IEC 5218: M=1, F=2, I(indeterminado)=9, D(desconocido)=0.
+  check("contact_sex_check", sql`${table.sex} IS NULL OR ${table.sex} IN ('M','F','I','D')`),
 ])
 
 export const contactIdentity = pgTable(

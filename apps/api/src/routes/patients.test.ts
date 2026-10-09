@@ -217,11 +217,31 @@ it("cada subruta del paciente exige solo el permiso de su dominio", async () => 
   ])
   expect((await get("dentist", "/coordination")).status).toBe(200)
   expect((await get("cashier", "/coordination")).status).toBe(403)
-  // Cada lectura clínica atendida deja traza; la lee solo quien audita.
-  const log = await buildApp("admin").request(`/patients/${patientId}/access-log`, { method: "GET" })
-  expect(log.status).toBe(200)
-  const entries = ((await log.json()) as { data: { resource: string; hits: number }[] }).data
-  expect(entries.map((entry) => entry.resource).sort()).toEqual(["controles", "recetas"])
+  // Cada lectura clínica atendida deja traza; la lee solo quien audita. Todos
+  // los roles de prueba comparten usuario: se compara el contador de la franja.
+  const readLog = async () => {
+    const log = await buildApp("admin").request(`/patients/${patientId}/access-log`, {
+      method: "GET",
+    })
+    expect(log.status).toBe(200)
+    return ((await log.json()) as { data: { resource: string; hits: number }[] }).data
+  }
+  const hitsOf = (entries: { resource: string; hits: number }[], resource: string) =>
+    entries.find((entry) => entry.resource === resource)?.hits ?? 0
+  // La ficha completa lleva antecedentes para quien atiende: deja traza; para
+  // recepción llega sin salud y no la deja.
+  const before = hitsOf(await readLog(), "antecedentes")
+  expect((await get("dentist", "")).status).toBe(200)
+  const afterDentist = hitsOf(await readLog(), "antecedentes")
+  expect(afterDentist).toBe(before + 1)
+  expect((await get("reception", "")).status).toBe(200)
+  const entries = await readLog()
+  expect(hitsOf(entries, "antecedentes")).toBe(afterDentist)
+  expect(entries.map((entry) => entry.resource).sort()).toEqual([
+    "antecedentes",
+    "controles",
+    "recetas",
+  ])
   expect((await get("dentist", "/access-log")).status).toBe(403)
   expect((await get("reception", "/access-log")).status).toBe(403)
   expect((await get("cashier", "/account")).status).toBe(200)
@@ -235,9 +255,16 @@ it("POST /:id/notes como admin responde 201; como member 403 FORBIDDEN", async (
   const res = await admin.request(`/patients/${patientId}/notes`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ note: "Se indica endodoncia", diagnosisCode: "K04.0" }),
+    body: JSON.stringify({ note: "Se indica endodoncia" }),
   })
   expect(res.status).toBe(201)
+  // El diagnóstico se registra en la atención, no en una nota suelta.
+  const coded = await admin.request(`/patients/${patientId}/notes`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ note: "Se indica endodoncia", diagnosisCode: "K04.0" }),
+  })
+  expect(coded.status).toBe(400)
   const denied = await member.request(`/patients/${patientId}/notes`, {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -540,7 +567,14 @@ it("filiación PATCH valida DNI exacto y pasaporte libre", async () => {
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ docType: "PASAPORTE", docNumber: "AB123456" }),
   })
-  expect(passport.status).toBe(200)
+  // Un pasaporte exige el país que lo emitió (ISO 3166-1).
+  expect(passport.status).toBe(400)
+  const withCountry = await app.request(`/patients/${id}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ docType: "PASAPORTE", docNumber: "AB123456", docCountry: "VE" }),
+  })
+  expect(withCountry.status).toBe(200)
 })
 
 it("relaciones: vincular, preferente, duplicados y desvincular sin borrar personas", async () => {

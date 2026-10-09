@@ -1,9 +1,11 @@
-import { conditionLabel, surfaceLabel } from "@odentia/clinical"
+import { label } from "../../lib/glossary"
+import { conditionLabel, formatVitals, surfaceLabel } from "@odentia/clinical"
 import { Badge } from "@odentia/ui"
 import { useQuery } from "@tanstack/react-query"
 import { apiFetch } from "../../lib/api"
 import { useMemberName, usePermission } from "../../lib/crm"
 import {
+  DIAGNOSIS_TYPE_LABELS,
   type EncounterDetail,
   encounterStatusLabel,
   type PatientDocument,
@@ -11,6 +13,7 @@ import {
   statusLabel,
 } from "../../lib/patients"
 import { EncounterAddendumDrawer } from "./encounter-addendum-drawer"
+import { diagnosisSiteLabel } from "./encounter-diagnoses"
 
 /** Las URL firmadas expiran: se consideran frescas 10 min y luego se regeneran. */
 const SIGNED_URL_STALE_MS = 10 * 60 * 1000
@@ -67,7 +70,7 @@ function DocumentAttachment({
       <div className="flex flex-col gap-1 text-sm">
         <span className="font-medium">{doc.label}</span>
         <span className="text-xs text-muted-foreground">
-          {doc.category}
+          {label("documento", doc.category)}
           {doc.toothNumbers.length > 0
             ? ` · ${doc.toothNumbers.map((t) => `Pieza ${t}`).join(", ")}`
             : ""}
@@ -138,9 +141,32 @@ export function EncounterDetailView({
     [...detail.plannedItems, ...detail.indicatedItems].find((item) => item.id === planItemId)
       ?.title ?? null
   const canAddendum = showAddendum && encounter.status === "finalizada" && canWrite
+  const diagnoses = detail.diagnoses ?? []
+  const activeDiagnoses = diagnoses.filter((dx) => !dx.voidedAt)
+  const voidedDiagnoses = diagnoses.filter((dx) => dx.voidedAt)
+  const activeProcedures = procedures.filter((proc) => !proc.voidedAt)
 
   return (
     <div className="flex min-w-0 flex-col gap-4">
+      {encounter.status === "anulada" ? (
+        <section
+          role="status"
+          aria-label="Atención anulada"
+          className="rounded-lg border border-destructive/40 p-4 text-sm"
+        >
+          <p className="font-medium">Atención anulada</p>
+          <p className="text-muted-foreground">
+            {encounter.voidedBy ? memberName(encounter.voidedBy) : "—"} ·{" "}
+            <time dateTime={encounter.voidedAt ?? undefined}>
+              {formatDateTime(encounter.voidedAt ?? null)}
+            </time>
+            {encounter.voidReason ? ` · Motivo: ${encounter.voidReason}` : ""}
+          </p>
+          <p className="text-muted-foreground">
+            Se conserva como traza: no generó cargos ni cuenta en la historia activa.
+          </p>
+        </section>
+      ) : null}
       <section
         aria-label="Datos de la atención"
         className="flex flex-col gap-3 rounded-lg border p-4"
@@ -150,6 +176,33 @@ export function EncounterDetailView({
             <dt className="text-xs font-medium text-muted-foreground">Motivo</dt>
             <dd className="whitespace-pre-wrap text-sm">{encounter.reason ?? "—"}</dd>
           </div>
+          {encounter.presentIllness || encounter.illnessDuration ? (
+            <div>
+              <dt className="text-xs font-medium text-muted-foreground">Enfermedad actual</dt>
+              <dd className="whitespace-pre-wrap text-sm">
+                {encounter.illnessDuration ? `Tiempo: ${encounter.illnessDuration}. ` : ""}
+                {encounter.presentIllness ?? ""}
+              </dd>
+            </div>
+          ) : null}
+          {encounter.vitals && Object.keys(encounter.vitals).length > 0 ? (
+            <div>
+              <dt className="text-xs font-medium text-muted-foreground">Signos vitales</dt>
+              <dd className="text-sm">{formatVitals(encounter.vitals)}</dd>
+            </div>
+          ) : null}
+          {encounter.auxiliaryExams ? (
+            <div>
+              <dt className="text-xs font-medium text-muted-foreground">Exámenes auxiliares</dt>
+              <dd className="whitespace-pre-wrap text-sm">{encounter.auxiliaryExams}</dd>
+            </div>
+          ) : null}
+          {encounter.prognosis ? (
+            <div>
+              <dt className="text-xs font-medium text-muted-foreground">Pronóstico</dt>
+              <dd className="whitespace-pre-wrap text-sm">{encounter.prognosis}</dd>
+            </div>
+          ) : null}
           <div>
             <dt className="text-xs font-medium text-muted-foreground">Evolución</dt>
             <dd className="whitespace-pre-wrap text-sm">{encounter.evolution ?? "—"}</dd>
@@ -181,11 +234,28 @@ export function EncounterDetailView({
             <dd className="text-sm">{memberName(encounter.dentistUserId)}</dd>
           </div>
           <div>
+            <dt className="text-xs font-medium text-muted-foreground">Inicio y fin</dt>
+            <dd className="text-sm">
+              {formatDateTime(encounter.startedAt ?? encounter.createdAt)}
+              {encounter.endedAt ? ` – ${formatDateTime(encounter.endedAt)}` : ""}
+            </dd>
+          </div>
+          <div>
             <dt className="text-xs font-medium text-muted-foreground">Estado</dt>
             <dd className="text-sm">
               <Badge variant="outline">{encounterStatusLabel(encounter.status)}</Badge>
             </dd>
           </div>
+          {encounter.signerName ? (
+            <div>
+              <dt className="text-xs font-medium text-muted-foreground">Firmado por</dt>
+              <dd className="text-sm">
+                {encounter.signerName}
+                {encounter.signerTitle ? ` · ${encounter.signerTitle}` : ""}
+                {encounter.signerRegistration ? ` · ${encounter.signerRegistration}` : ""}
+              </dd>
+            </div>
+          ) : null}
           <div>
             <dt className="text-xs font-medium text-muted-foreground">Piezas tratadas</dt>
             <dd className="text-sm">
@@ -195,17 +265,66 @@ export function EncounterDetailView({
         </dl>
       </section>
 
+      <section aria-label="Diagnóstico">
+        <h4 className="mb-2 text-sm font-medium">Diagnóstico ({activeDiagnoses.length})</h4>
+        {activeDiagnoses.length === 0 ? (
+          <p className="text-sm text-muted-foreground">Sin diagnósticos registrados.</p>
+        ) : (
+          <ul className="flex flex-col gap-2">
+            {activeDiagnoses.map((dx) => (
+              <li key={dx.id} className="border-b pb-2 text-sm last:border-0">
+                <p>
+                  <span className="font-semibold">{dx.cie10Code}</span>
+                  {dx.note ? <span className="text-muted-foreground"> · {dx.note}</span> : null}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {dx.diagnosisType
+                    ? (DIAGNOSIS_TYPE_LABELS[dx.diagnosisType] ?? dx.diagnosisType)
+                    : "Sin tipo (histórico)"}{" "}
+                  · {diagnosisSiteLabel(dx)}
+                  {dx.status === "resuelto" ? " · Resuelto" : ""}
+                </p>
+              </li>
+            ))}
+          </ul>
+        )}
+        {voidedDiagnoses.length > 0 ? (
+          <details className="mt-2 text-sm">
+            <summary className="cursor-pointer text-muted-foreground">
+              Anulados ({voidedDiagnoses.length})
+            </summary>
+            <ul className="mt-2 flex flex-col gap-1 text-muted-foreground">
+              {voidedDiagnoses.map((dx) => (
+                <li key={dx.id}>
+                  <span className="line-through">{dx.cie10Code}</span> · {diagnosisSiteLabel(dx)} ·
+                  Motivo: {dx.voidReason}
+                </li>
+              ))}
+            </ul>
+          </details>
+        ) : null}
+      </section>
+
       <section aria-label="Procedimientos">
-        <h4 className="mb-2 text-sm font-medium">Procedimientos ({procedures.length})</h4>
+        <h4 className="mb-2 text-sm font-medium">Procedimientos ({activeProcedures.length})</h4>
         {procedures.length === 0 ? (
           <p className="text-sm text-muted-foreground">Sin procedimientos registrados.</p>
         ) : (
           <ul className="flex flex-col gap-2">
             {procedures.map((proc) => (
               <li key={proc.id} className="border-b pb-2 text-sm last:border-0">
-                <p>{proc.description}</p>
+                <p className={proc.voidedAt ? "text-muted-foreground line-through" : undefined}>
+                  {proc.description}
+                </p>
+                {proc.voidedAt ? (
+                  <p className="text-xs text-muted-foreground">Anulado: {proc.voidReason}</p>
+                ) : null}
                 <p className="text-xs text-muted-foreground">
+                  {(proc.quantity ?? 1) > 1 ? `× ${proc.quantity} · ` : ""}
                   {proc.toothNumber != null ? `Pieza ${proc.toothNumber} · ` : ""}
+                  {proc.surfaces.length > 0
+                    ? `${proc.surfaces.map(surfaceLabel).join(", ")} · `
+                    : ""}
                   {proc.planItemId
                     ? `Tratamiento del plan: ${planTitle(proc.planItemId) ?? "vinculado"} · `
                     : ""}

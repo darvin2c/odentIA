@@ -78,6 +78,7 @@ interface EncounterRow {
   id: string
   status: string
   reason: string | null
+  evolution?: string | null
 }
 
 interface EncounterDetailBody {
@@ -212,6 +213,26 @@ async function decideBudget(
   expect(res.status).toBe(200)
 }
 
+// Mínimo clínico para cerrar (ADR 0003): diagnóstico CIE-10 con tipo y evolución.
+async function prepareClosing(app: Hono, patientId: string, encounterId: string): Promise<void> {
+  const dx = await app.request(`/patients/${patientId}/encounters/${encounterId}/diagnoses`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ cie10Code: "K02.1", diagnosisType: "definitivo" }),
+  })
+  expect(dx.status).toBe(201)
+  const detail = await app.request(`/patients/${patientId}/encounters/${encounterId}`)
+  const body = (await detail.json()) as EncounterDetailBody
+  if (!body.data.encounter.evolution) {
+    const patched = await app.request(`/patients/${patientId}/encounters/${encounterId}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ evolution: "Evolución favorable" }),
+    })
+    expect(patched.status).toBe(200)
+  }
+}
+
 // Cierra una atención con procedimiento y evolución para comprobar sus bloqueos.
 async function finalizeWithEvolution(
   app: Hono,
@@ -230,6 +251,7 @@ async function finalizeWithEvolution(
     body: JSON.stringify({ evolution: "Evolución de cierre" }),
   })
   expect(patched.status).toBe(200)
+  await prepareClosing(app, patientId, encounterId)
   const finalized = await app.request(`/patients/${patientId}/encounters/${encounterId}/finalize`, {
     method: "POST",
   })
@@ -268,6 +290,13 @@ beforeAll(async () => {
   )
   await ownerDb.execute(
     sql`insert into "user" ("id", "name", "email") values ('u-1', 'Doctora', 'doc@test.dev') on conflict do nothing`,
+  )
+  // La doctora de las pruebas es miembro con colegiatura: puede firmar cierres.
+  await ownerDb.execute(
+    sql`insert into "member" ("id", "organization_id", "user_id", "role", "created_at") values ('m-u1-a', 'org_a', 'u-1', 'dentist', now()) on conflict do nothing`,
+  )
+  await ownerDb.execute(
+    sql`insert into "professional_profile" ("organization_id", "user_id", "registration_number") values ('org_a', 'u-1', '12345') on conflict do nothing`,
   )
   await ownerDb.execute(
     sql`insert into "cie10_code" ("code", "description") values
@@ -398,6 +427,7 @@ it("encounters: la consulta sin actos se finaliza sin generar cargos", async () 
   expect(created.status).toBe(201)
   const encounterId = ((await created.json()) as { data: EncounterRow }).data.id
 
+  await prepareClosing(app, patientId, encounterId)
   const finalized = await app.request(`/patients/${patientId}/encounters/${encounterId}/finalize`, {
     method: "POST",
   })
@@ -584,6 +614,7 @@ it("encounters: finalize frente a PATCH concurrentes se serializa sin mutación 
   })
   expect(evolved.status).toBe(200)
 
+  await prepareClosing(app, patientId, encounterId)
   const [patchRes, finalizeRes] = await Promise.all([
     app.request(`/patients/${patientId}/encounters/${encounterId}`, {
       method: "PATCH",
@@ -663,6 +694,7 @@ it("encounters: crear con planItemIds aceptados vincula sin marcar realizado", a
     body: JSON.stringify({ evolution: "Evaluación completa" }),
   })
   expect(evolved.status).toBe(200)
+  await prepareClosing(app, patientId, ctx.encounterId)
   const finalized = await app.request(
     `/patients/${patientId}/encounters/${ctx.encounterId}/finalize`,
     { method: "POST" },
@@ -891,6 +923,7 @@ it("encounters: servicio directo se realiza en el acto y el cierre lo cobra una 
     body: JSON.stringify({ evolution: "Corona cementada" }),
   })
   expect(evolved.status).toBe(200)
+  await prepareClosing(app, patientId, encounterId)
   const finalized = await app.request(`/patients/${patientId}/encounters/${encounterId}/finalize`, {
     method: "POST",
   })
@@ -957,6 +990,7 @@ it.each(["antes", "después"] as const)(
       body: JSON.stringify({ evolution: "Primera sesión" }),
     })
     expect(evolved.status).toBe(200)
+    await prepareClosing(app, patientId, ctx.encounterId)
     const finalized = await app.request(
       `/patients/${patientId}/encounters/${ctx.encounterId}/finalize`,
       { method: "POST" },
@@ -979,3 +1013,84 @@ it.each(["antes", "después"] as const)(
     expect(balance.data.charges.map((charge) => charge.amountCents)).toEqual([90000])
   },
 )
+
+it("encounters: cierre guiado por requisitos, diagnósticos anulables, anulación y relevo", async () => {
+  const app = buildApp("admin")
+  const patientId = await createFreshPatient(app, "Ciclo Completo")
+  const created = await postEncounter(app, patientId, { reason: "Dolor" })
+  const encounterId = ((await created.json()) as { data: EncounterRow }).data.id
+
+  const closing = await app.request(`/patients/${patientId}/encounters/${encounterId}/closing`)
+  expect(closing.status).toBe(200)
+  expect(((await closing.json()) as { data: { missing: string[] } }).data.missing).toEqual([
+    "diagnosis",
+    "evolution",
+  ])
+  const early = await app.request(`/patients/${patientId}/encounters/${encounterId}/finalize`, {
+    method: "POST",
+  })
+  expect(early.status).toBe(409)
+  expect(((await early.json()) as ErrorBody).error.code).toBe("CLOSING_INCOMPLETE")
+
+  const badType = await app.request(`/patients/${patientId}/encounters/${encounterId}/diagnoses`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ cie10Code: "K02.1", diagnosisType: "probable" }),
+  })
+  expect(badType.status).toBe(400)
+  const dx = await app.request(`/patients/${patientId}/encounters/${encounterId}/diagnoses`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ cie10Code: "K04.0", diagnosisType: "presuntivo", toothNumber: 46 }),
+  })
+  expect(dx.status).toBe(201)
+  const dxId = ((await dx.json()) as { data: { id: string } }).data.id
+  const voided = await app.request(
+    `/patients/${patientId}/encounters/${encounterId}/diagnoses/${dxId}/void`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ reason: "Pieza equivocada" }),
+    },
+  )
+  expect(voided.status).toBe(200)
+  const problems = await app.request(`/patients/${patientId}/diagnoses`)
+  expect(((await problems.json()) as { data: unknown[] }).data).toEqual([])
+  // Recepción no diagnostica ni lee diagnósticos.
+  expect((await buildApp("reception").request(`/patients/${patientId}/diagnoses`)).status).toBe(
+    403,
+  )
+
+  // Otro profesional (otro usuario) toma el relevo antes de continuar.
+  const takeOver = await app.request(
+    `/patients/${patientId}/encounters/${encounterId}/take-over`,
+    { method: "POST" },
+  )
+  expect(takeOver.status).toBe(200)
+
+  const voidMissingReason = await app.request(
+    `/patients/${patientId}/encounters/${encounterId}/void`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ reason: "" }),
+    },
+  )
+  expect(voidMissingReason.status).toBe(400)
+  const voidedEncounter = await app.request(
+    `/patients/${patientId}/encounters/${encounterId}/void`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ reason: "Abierta por error" }),
+    },
+  )
+  expect(voidedEncounter.status).toBe(200)
+  expect(((await voidedEncounter.json()) as { data: EncounterRow }).data.status).toBe("anulada")
+  const listed = await app.request(`/patients/${patientId}/encounters?status=anulada`)
+  expect(((await listed.json()) as { data: EncounterRow[] }).data.map((e) => e.id)).toEqual([
+    encounterId,
+  ])
+  // Anulada, ya no bloquea abrir otra atención.
+  expect((await postEncounter(app, patientId, { reason: "Atención correcta" })).status).toBe(201)
+})

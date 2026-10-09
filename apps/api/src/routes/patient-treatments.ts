@@ -8,7 +8,7 @@ import {
 } from "@odentia/services"
 import { Hono } from "hono"
 import { z } from "zod"
-import { orgContextOf } from "../lib/context.js"
+import { canAccess, orgContextOf } from "../lib/context.js"
 import { type CrmDeps, runService, validationError } from "./helpers.js"
 
 const groupInput = z.object({ title: z.string().trim().min(1).max(200) }).strict()
@@ -53,12 +53,14 @@ export function createPatientTreatmentsRoute(deps: Pick<CrmDeps, "db">) {
     )
   })
   app.get("/:id/treatments/:itemId/journey", async (c) => {
-    const { orgId } = orgContextOf(c)
+    const { orgId, memberRole } = orgContextOf(c)
     const params = itemParams.safeParse(c.req.param())
     if (!params.success) return validationError(c, params.error.issues)
+    // Ruta clínica (`clinical.read`); la caja del tratamiento solo viaja con `finance.read`.
+    const finance = canAccess(memberRole, "finance.read")
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
-        getTreatmentJourney(tx, orgId, params.data.id, params.data.itemId),
+        getTreatmentJourney(tx, orgId, params.data.id, params.data.itemId, { finance }),
       ),
     )
   })

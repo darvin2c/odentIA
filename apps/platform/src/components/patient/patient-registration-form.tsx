@@ -12,20 +12,27 @@
 import {
   type BloodGroup,
   CONTACT_RELATIONSHIP_LABELS,
+  composeDisplayName,
   type DeclarationState,
   type DOC_TYPES,
+  EDUCATION_LEVEL_LABELS,
+  EDUCATION_LEVELS,
+  FOREIGN_DOC_TYPES,
   type HealthAllergyDeclaration,
   type HealthConditionDeclaration,
   type HealthMedicationDeclaration,
   type INSURANCE_TYPES,
   isMinor,
   isRealDate,
+  MARITAL_STATUS_LABELS,
+  MARITAL_STATUSES,
   type RegistrationAnswers,
   type RegistrationConfig,
   type RegistrationContactInput,
   type RegistrationDemographics,
   type RegistrationFieldKey,
   type RegistrationRespondent,
+  SEX_LABELS,
   validateRegistrationAnswers,
 } from "@odentia/clinical"
 import {
@@ -136,7 +143,7 @@ const DENTAL_KEYS = [
 type RepresentativeValue = NonNullable<RegistrationAnswers["representative"]>
 type HealthValue = NonNullable<RegistrationAnswers["health"]>
 type DocTypeValue = (typeof DOC_TYPES)[number] | ""
-type SexValue = "M" | "F" | ""
+type SexValue = "M" | "F" | "I" | "D" | ""
 type InsuranceValue = (typeof INSURANCE_TYPES)[number] | ""
 
 interface RegistrationFormValues {
@@ -152,7 +159,18 @@ const EMPTY_REPRESENTATIVE: RepresentativeValue = {
   displayName: "",
   relationship: "guardian",
   relationshipDetail: "",
+  docType: "DNI",
+  docNumber: "",
 }
+
+const MARITAL_OPTIONS = [
+  { value: "", label: "—" },
+  ...MARITAL_STATUSES.map((value) => ({ value, label: MARITAL_STATUS_LABELS[value] })),
+]
+const EDUCATION_OPTIONS = [
+  { value: "", label: "—" },
+  ...EDUCATION_LEVELS.map((value) => ({ value, label: EDUCATION_LEVEL_LABELS[value] })),
+]
 
 function emptyGroup<T>(): { state: DeclarationState; items: T[] } {
   return { state: "unanswered", items: [] }
@@ -195,9 +213,13 @@ function buildDefaults(
     answers: {
       demographics: {
         displayName: "",
+        givenNames: "",
+        paternalSurname: "",
+        maternalSurname: "",
         birthDate: "",
         docType: "",
         docNumber: "",
+        docCountry: "",
         sex: "",
         phone: "",
         email: "",
@@ -306,6 +328,12 @@ function buildAnswers(
           relationshipDetail: trim(representative.relationshipDetail),
           ...(trim(representative.phone) ? { phone: trim(representative.phone) } : {}),
           ...(trim(representative.email) ? { email: trim(representative.email) } : {}),
+          ...(trim(representative.docNumber)
+            ? {
+                docType: representative.docType ?? "DNI",
+                docNumber: trim(representative.docNumber),
+              }
+            : {}),
         }
       : undefined,
     health: keptHealth as HealthValue,
@@ -315,9 +343,12 @@ function buildAnswers(
 
 const FIELD_ORDER: string[] = [
   "demographics.displayName",
+  "demographics.paternalSurname",
+  "demographics.givenNames",
   "demographics.birthDate",
   "demographics.docType",
   "demographics.docNumber",
+  "demographics.docCountry",
   "demographics.sex",
   "respondent",
   ...CONTACTO_KEYS.map((key) => `demographics.${key}`),
@@ -325,6 +356,7 @@ const FIELD_ORDER: string[] = [
   "representative.displayName",
   "representative.relationship",
   "representative.relationshipDetail",
+  "representative.docNumber",
   "representative.phone",
   "representative.email",
   "health.bloodGroup",
@@ -734,25 +766,45 @@ export function PatientRegistrationForm({
                   </div>
                 ) : null}
                 {visible("displayName") ? (
-                  <div data-reg-field="demographics.displayName" className="min-w-0">
-                    <form.Field name="answers.demographics.displayName">
-                      {(field) => (
-                        <TextRow
-                          label={label("Nombre del paciente", "displayName")}
-                          value={field.state.value}
-                          error={errors["demographics.displayName"]}
-                          inputProps={{
-                            "aria-label": "Nombre del paciente",
-                            placeholder: "Nombres y apellidos",
-                          }}
-                          onChange={(next) => {
-                            field.handleChange(next)
-                            clearError("demographics.displayName")
-                          }}
-                        />
-                      )}
-                    </form.Field>
-                  </div>
+                  <>
+                    {(
+                      [
+                        ["paternalSurname", "Apellido paterno"],
+                        ["maternalSurname", "Apellido materno"],
+                        ["givenNames", "Nombres"],
+                      ] as const
+                    ).map(([key, text]) => (
+                      <div key={key} data-reg-field="demographics.displayName" className="min-w-0">
+                        <form.Field name={`answers.demographics.${key}`}>
+                          {(field) => (
+                            <TextRow
+                              // Hay personas con un solo apellido: el materno no es obligatorio.
+                              label={key === "maternalSurname" ? text : label(text, "displayName")}
+                              value={field.state.value ?? ""}
+                              error={
+                                key === "givenNames"
+                                  ? (errors["demographics.givenNames"] ??
+                                    errors["demographics.displayName"])
+                                  : errors[`demographics.${key}`]
+                              }
+                              inputProps={{ "aria-label": text, maxLength: 100 }}
+                              onChange={(next) => {
+                                field.handleChange(next)
+                                // El nombre visible se compone del nombre separado.
+                                const parts = form.state.values.answers.demographics
+                                form.setFieldValue(
+                                  "answers.demographics.displayName",
+                                  composeDisplayName({ ...parts, [key]: next }),
+                                )
+                                clearError("demographics.displayName")
+                                clearError(`demographics.${key}`)
+                              }}
+                            />
+                          )}
+                        </form.Field>
+                      </div>
+                    ))}
+                  </>
                 ) : null}
                 {visible("birthDate") ? (
                   <div data-reg-field="demographics.birthDate" className="min-w-0">
@@ -801,7 +853,7 @@ export function PatientRegistrationForm({
                           label={label("Número de documento", "docNumber")}
                           value={field.state.value ?? ""}
                           error={errors["demographics.docNumber"]}
-                          inputProps={{ "aria-label": "Número de documento", inputMode: "numeric" }}
+                          inputProps={{ "aria-label": "Número de documento" }}
                           onChange={(next) => {
                             field.handleChange(next)
                             clearError("demographics.docNumber")
@@ -810,6 +862,30 @@ export function PatientRegistrationForm({
                       )}
                     </form.Field>
                   </div>
+                ) : null}
+                {visible("docNumber") ? (
+                  <form.Subscribe selector={(state) => state.values.answers.demographics.docType}>
+                    {(docType) =>
+                      docType && FOREIGN_DOC_TYPES.includes(docType as never) ? (
+                        <div data-reg-field="demographics.docCountry" className="min-w-0">
+                          <form.Field name="answers.demographics.docCountry">
+                            {(field) => (
+                              <TextRow
+                                label="País emisor (código ISO, p. ej. VE) *"
+                                value={field.state.value ?? ""}
+                                error={errors["demographics.docCountry"]}
+                                inputProps={{ "aria-label": "País emisor", maxLength: 2 }}
+                                onChange={(next) => {
+                                  field.handleChange(next.toUpperCase())
+                                  clearError("demographics.docCountry")
+                                }}
+                              />
+                            )}
+                          </form.Field>
+                        </div>
+                      ) : null
+                    }
+                  </form.Subscribe>
                 ) : null}
                 {visible("sex") ? (
                   <div data-reg-field="demographics.sex" className="min-w-0">
@@ -900,6 +976,42 @@ export function PatientRegistrationForm({
                       )}
                     </form.Field>
                   </div>
+                  {status.minor ? (
+                    <>
+                      <div data-reg-field="representative.docType" className="min-w-0">
+                        <form.Field name="answers.representative.docType">
+                          {(field) => (
+                            <SelectRow
+                              label="Documento del representante *"
+                              value={field.state.value ?? "DNI"}
+                              error={errors["representative.docType"]}
+                              options={DOC_TYPE_OPTIONS.filter((option) => option.value !== "")}
+                              onChange={(next) => field.handleChange(next as never)}
+                            />
+                          )}
+                        </form.Field>
+                      </div>
+                      <div data-reg-field="representative.docNumber" className="min-w-0">
+                        <form.Field name="answers.representative.docNumber">
+                          {(field) => (
+                            <TextRow
+                              label="Número de documento del representante *"
+                              value={field.state.value ?? ""}
+                              error={errors["representative.docNumber"]}
+                              inputProps={{
+                                "aria-label": "Documento del representante",
+                                maxLength: 20,
+                              }}
+                              onChange={(next) => {
+                                field.handleChange(next)
+                                clearError("representative.docNumber")
+                              }}
+                            />
+                          )}
+                        </form.Field>
+                      </div>
+                    </>
+                  ) : null}
                   <div data-reg-field="representative.phone" className="min-w-0">
                     <form.Field name="answers.representative.phone">
                       {(field) => (
@@ -1006,13 +1118,13 @@ export function PatientRegistrationForm({
                   <div data-reg-field="demographics.maritalStatus" className="min-w-0">
                     <form.Field name="answers.demographics.maritalStatus">
                       {(field) => (
-                        <TextRow
+                        <SelectRow
                           label={label("Estado civil", "maritalStatus")}
                           value={field.state.value ?? ""}
                           error={errors["demographics.maritalStatus"]}
-                          inputProps={{ "aria-label": "Estado civil" }}
+                          options={MARITAL_OPTIONS}
                           onChange={(next) => {
-                            field.handleChange(next)
+                            field.handleChange(next as never)
                             clearError("demographics.maritalStatus")
                           }}
                         />
@@ -1024,13 +1136,13 @@ export function PatientRegistrationForm({
                   <div data-reg-field="demographics.educationLevel" className="min-w-0">
                     <form.Field name="answers.demographics.educationLevel">
                       {(field) => (
-                        <TextRow
+                        <SelectRow
                           label={label("Grado de instrucción", "educationLevel")}
                           value={field.state.value ?? ""}
                           error={errors["demographics.educationLevel"]}
-                          inputProps={{ "aria-label": "Grado de instrucción" }}
+                          options={EDUCATION_OPTIONS}
                           onChange={(next) => {
-                            field.handleChange(next)
+                            field.handleChange(next as never)
                             clearError("demographics.educationLevel")
                           }}
                         />
@@ -1431,12 +1543,25 @@ function ReviewSummary({
       "Documento",
       [trim(demographics.docType), trim(demographics.docNumber)].filter(Boolean).join(" ") || "—",
     ],
-    ["Sexo", demographics.sex === "M" ? "Masculino" : demographics.sex === "F" ? "Femenino" : "—"],
+    [
+      "Sexo",
+      demographics.sex ? (SEX_LABELS[demographics.sex as keyof typeof SEX_LABELS] ?? "—") : "—",
+    ],
     ["Teléfono", trim(demographics.phone) || "—"],
     ["Correo", trim(demographics.email) || "—"],
     ["Dirección", trim(demographics.address) || "—"],
-    ["Estado civil", trim(demographics.maritalStatus) || "—"],
-    ["Grado de instrucción", trim(demographics.educationLevel) || "—"],
+    [
+      "Estado civil",
+      demographics.maritalStatus
+        ? MARITAL_STATUS_LABELS[demographics.maritalStatus as keyof typeof MARITAL_STATUS_LABELS]
+        : "—",
+    ],
+    [
+      "Grado de instrucción",
+      demographics.educationLevel
+        ? EDUCATION_LEVEL_LABELS[demographics.educationLevel as keyof typeof EDUCATION_LEVEL_LABELS]
+        : "—",
+    ],
     ["Ocupación", trim(demographics.occupation) || "—"],
     ["Procedencia", trim(demographics.origin) || "—"],
     [

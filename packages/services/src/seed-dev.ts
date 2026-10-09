@@ -10,17 +10,20 @@
  * Regla permanente: toda función nueva que añada pantalla o entidad debe
  * extender este archivo con su escenario mínimo en la misma PR.
  */
+import { encodeDemoDicom } from "@odentia/clinical"
+import sharp from "sharp"
 import { randomUUID } from "node:crypto"
 import { deflateSync } from "node:zlib"
 import { DEFAULT_REGISTRATION_CONFIG } from "@odentia/clinical"
 import { createOwnerDb } from "@odentia/db"
 import { appointment, scheduleChair } from "@odentia/db/schema/agenda"
-import { account, invitation, member, organization, user } from "@odentia/db/schema/auth"
 import { commercialFollowUpCoordination } from "@odentia/db/schema/agent"
+import { account, invitation, member, organization, user } from "@odentia/db/schema/auth"
 import {
   clinicalFollowUp,
   clinicalNote,
   encounter,
+  encounterDiagnosis,
   encounterPlanItem,
   encounterProcedure,
   encounterTooth,
@@ -52,6 +55,7 @@ import {
   treatmentPlanItem,
   treatmentTemplate,
 } from "@odentia/db/schema/clinical"
+import { consentDocument, professionalProfile } from "@odentia/db/schema/clinical-forms"
 import {
   agentConfig,
   channelConnection,
@@ -66,9 +70,9 @@ import {
 } from "@odentia/db/schema/crm"
 import { auditEvent, branch, orgProfile, patientRegistrationConfig } from "@odentia/db/schema/org"
 import { hashPassword } from "better-auth/crypto"
-import { and, eq, inArray, or, sql } from "drizzle-orm"
-import { upsertAgentConfig } from "./agentConfig.js"
+import { and, eq, inArray, isNull, or, sql } from "drizzle-orm"
 import { createHandoff } from "./agent-operations.js"
+import { upsertAgentConfig } from "./agentConfig.js"
 import { createAppointment, createChair } from "./appointments.js"
 import { createBudget, decideBudget, presentBudget, reviseBudget } from "./budgets.js"
 import {
@@ -77,11 +81,14 @@ import {
   correctDocumentContext,
   createOdontogramAssessment,
   registerPatientDocument,
+  retirePatientDocument,
   savePatientHealth,
   voidOdontogramEntry,
 } from "./clinical.js"
 import { createConnection } from "./connections.js"
 import { createContact, updateContact } from "./contacts.js"
+import { grantDataConsent } from "./data-consents.js"
+import { addEncounterDiagnosis, voidEncounterDiagnosis } from "./encounter-diagnoses.js"
 import {
   addEncounterAddendum,
   addEncounterProcedure,
@@ -102,12 +109,15 @@ import { applyPayment, createCharge, createPayment, refundPayment } from "./paym
 import { ensureDefaultPipeline } from "./pipelines.js"
 import { addPlanItem, createOptionGroup, createTreatmentPlan, setPlanItemStatus } from "./plan.js"
 import { cancelPrescription, createPrescription } from "./prescriptions.js"
+import { setProfessionalProfile } from "./professional-profiles.js"
 import { grantResponsibility } from "./responsibilities.js"
 import { secretsKeyFromEnv } from "./secrets.js"
 import { seedAgent } from "./seed-agent.js"
 import { seedAutomation } from "./seed-automation.js"
 import { seedAvailability } from "./seed-availability.js"
 import { seedChannels } from "./seed-channels.js"
+import { generateConsentPdf } from "./consent-pdf.js"
+import { makeImageThumbnail } from "./thumbnails.js"
 import { seedClinicalForms } from "./seed-clinical-forms.js"
 import { seedCrmActivity } from "./seed-crm-activity.js"
 import { seedCrmAgent } from "./seed-crm-agent.js"
@@ -152,11 +162,52 @@ function storageEnvFromProcess(): {
   }
 }
 const storage = createStorage(storageEnvFromProcess())
-// PNG real mínimo (1x1) para evidencias demo: bytes válidos que sí se almacenan.
-const DEMO_PNG = Buffer.from(
-  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
-  "base64",
-)
+/**
+ * Imagen clínica de demostración (no es de un paciente real): radiografía o
+ * foto esquemática dibujada con SVG para que la galería, el visor y la
+ * comparación se vean como con imágenes reales. `variant` desplaza la lesión.
+ */
+async function demoClinicalImage(kind: "rx" | "foto", variant = 0): Promise<Buffer> {
+  const [w, h] = kind === "rx" ? [640, 480] : [800, 600]
+  const bg = kind === "rx" ? "#1b1b1b" : "#7a2f35"
+  const tooth = kind === "rx" ? "#b9b9b9" : "#f1ead8"
+  const teeth = [120, 300, 480]
+    .map(
+      (x) =>
+        `<rect x="${x}" y="70" width="140" height="260" rx="48" fill="${tooth}"/>` +
+        (kind === "rx"
+          ? `<rect x="${x + 22}" y="320" width="34" height="130" rx="14" fill="#9a9a9a"/><rect x="${x + 84}" y="320" width="34" height="130" rx="14" fill="#9a9a9a"/><ellipse cx="${x + 70}" cy="150" rx="34" ry="40" fill="#e8e8e8"/>`
+          : ""),
+    )
+    .join("")
+  const lesion = `<ellipse cx="${160 + variant * 6}" cy="${120 + variant * 4}" rx="${26 - variant}" ry="${20 - variant}" fill="${kind === "rx" ? "#3d3d3d" : "#4a3420"}"/>`
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}"><rect width="100%" height="100%" fill="${bg}"/>${teeth}${lesion}</svg>`
+  return sharp(Buffer.from(svg)).blur(kind === "rx" ? 2.2 : 0.6).png().toBuffer()
+}
+
+/** Guarda la imagen demo y su miniatura, como hace la subida real. */
+async function putDemoImage(patientId: string, kind: "rx" | "foto", variant = 0) {
+  const bytes = await demoClinicalImage(kind, variant)
+  const ref = await storage.putPatientDocument({
+    orgId: ORG_A,
+    patientId,
+    bytes,
+    contentType: "image/png",
+    ext: "png",
+  })
+  const thumb = await makeImageThumbnail(bytes)
+  const thumbRef = thumb
+    ? await storage.putPatientDocument({
+        orgId: ORG_A,
+        patientId,
+        bytes: thumb,
+        contentType: "image/webp",
+        ext: "webp",
+      })
+    : null
+  return { ...ref, thumbnailKey: thumbRef?.objectKey ?? null }
+}
+
 // Nota de voz demo: WAV PCM mono 8 kHz de un beep corto. Se sintetiza (no hay
 // encoder de audio disponible) y Chrome lo reproduce sin códec adicional.
 function demoVoiceNoteWav(): Buffer {
@@ -366,6 +417,7 @@ async function wipeSeed(): Promise<void> {
   await db.delete(encounterProcedure).where(inArray(encounterProcedure.organizationId, SEED_ORGS))
   await db.delete(encounterTooth).where(inArray(encounterTooth.organizationId, SEED_ORGS))
   await db.delete(clinicalNote).where(inArray(clinicalNote.organizationId, SEED_ORGS))
+  await db.delete(encounterDiagnosis).where(inArray(encounterDiagnosis.organizationId, SEED_ORGS))
   // Los ítems del plan referencian el hallazgo que los motivó: se suelta la
   // referencia antes de borrar el odontograma (los ítems se borran después).
   await db
@@ -436,6 +488,7 @@ async function wipeSeed(): Promise<void> {
   await db.delete(branch).where(inArray(branch.organizationId, SEED_ORGS))
   await db.delete(orgProfile).where(inArray(orgProfile.organizationId, SEED_ORGS))
   await db.delete(auditEvent).where(inArray(auditEvent.organizationId, SEED_ORGS))
+  await db.delete(professionalProfile).where(inArray(professionalProfile.organizationId, SEED_ORGS))
   await db.delete(member).where(inArray(member.organizationId, SEED_ORGS))
   await db.delete(invitation).where(inArray(invitation.organizationId, SEED_ORGS))
   await db.delete(organization).where(inArray(organization.id, SEED_ORGS))
@@ -613,6 +666,15 @@ await db.insert(member).values([
     createdAt: new Date(),
   },
 ])
+// Colegiatura con la que firman (ADR 0003). Luis queda sin colegiatura en la
+// clínica B para ejercitar el aviso «falta tu colegiatura» al cerrar.
+await setProfessionalProfile(db, ORG_A, ANA_ID, ANA_ID, {
+  signatureName: "Ana Torres",
+  registrationNumber: "12345",
+  specialtyRegistration: "RNE 1024",
+})
+await setProfessionalProfile(db, ORG_A, ANA_ID, LUIS_ID, { registrationNumber: "23456" })
+await setProfessionalProfile(db, ORG_B, CORA_ID, CORA_ID, { registrationNumber: "34567" })
 await db.insert(orgProfile).values([
   {
     organizationId: ORG_A,
@@ -977,7 +1039,8 @@ await upsertAgentConfig(db, ORG_A, {
 await createHandoff(db, ORG_A, null, {
   conversationId: convCarlos.id,
   reason: "Pregunta por precio de extracción y pide hablar con una persona",
-  summary: "Carlos consultó el costo de una extracción de muela del juicio; el agente no da precios inventados y derivó con prioridad alta.",
+  summary:
+    "Carlos consultó el costo de una extracción de muela del juicio; el agente no da precios inventados y derivó con prioridad alta.",
   priority: "alta",
   createdBy: "agent",
 })
@@ -991,23 +1054,72 @@ await createHandoff(db, ORG_A, null, {
 })
 
 // --- Pacientes + clínica (org A) ---
-const PATIENTS_A = [
+// Identidad estándar (ADR 0004): nombre separado y documento con su tipo; una
+// extranjera con carné de extranjería y otra con pasaporte y país emisor.
+const PATIENTS_A: Array<{
+  name: string
+  doc: string
+  birth: string
+  sex: string
+  docType?: string
+  docCountry?: string
+  nationality?: string
+}> = [
   { name: "Rosa Quispe", doc: "45678901", birth: "1990-05-14", sex: "F" },
-  { name: "Elena Huamán", doc: "45678902", birth: "1985-11-02", sex: "F" },
+  {
+    name: "Elena Huamán",
+    doc: "001234567",
+    birth: "1985-11-02",
+    sex: "F",
+    docType: "CE",
+    nationality: "VE",
+  },
   { name: "Carlos Paredes", doc: "45678903", birth: "1978-03-21", sex: "M" },
   { name: "Lucía Fernández", doc: "45678904", birth: "1995-07-30", sex: "F" },
   { name: "Miguel Torres", doc: "45678905", birth: "1982-01-17", sex: "M" },
-  { name: "Carmen Rojas", doc: "45678906", birth: "1992-09-08", sex: "F" },
+  {
+    name: "Carmen Rojas",
+    doc: "AB1234567",
+    birth: "1992-09-08",
+    sex: "F",
+    docType: "PASAPORTE",
+    docCountry: "CO",
+    nationality: "CO",
+  },
 ]
 const patientIdByName = new Map<string, string>()
 for (const p of PATIENTS_A) {
+  const [given, paternal] = p.name.split(" ")
+  const rosa = p.name === "Rosa Quispe"
   const row = await createPatient(db, ORG_A, ANA_ID, {
     displayName: p.name,
+    givenNames: given,
+    paternalSurname: paternal,
     contacts: [
       { contactId: contactIdByName.get(p.name)!, relationship: "self", isPreferred: true },
     ],
-    docType: "DNI",
+    docType: p.docType ?? "DNI",
     docNumber: p.doc,
+    docCountry: p.docCountry ?? null,
+    nationality: p.nationality ?? "PE",
+    // Filiación completa de la paciente de demostración.
+    ...(rosa
+      ? {
+          maritalStatus: "casado",
+          educationLevel: "superior_universitaria_completa",
+          occupation: "Docente",
+          birthPlaceUbigeo: "080000",
+          address: "Jr. Las Begonias 120, dpto. 302",
+          addressUbigeo: "150000",
+          addressReference: "Frente al parque Kennedy",
+          emergencyContactName: "Carlos Paredes",
+          emergencyContactRelationship: "conyuge",
+          emergencyContactPhone: "+51912345678",
+          insuranceType: "EPS",
+          insurerName: "Pacífico EPS",
+          affiliationNumber: "EPS-00987123",
+        }
+      : {}),
     birthDate: p.birth,
     sex: p.sex,
     phone:
@@ -1023,8 +1135,18 @@ const rosaHealthV1 = await savePatientHealth(db, ORG_A, ANA_ID, rosaPatientId, {
   expectedRevision: 0,
   reviewStatus: { allergies: "recorded", conditions: "recorded", medications: "recorded" },
   allergies: [
-    { substance: "Penicilina", category: "medicamento", reaction: "Urticaria", severity: "severa" },
+    {
+      substance: "Penicilina",
+      category: "medicamento",
+      reaction: "Urticaria",
+      severity: "severa",
+      kind: "alergia",
+      criticality: "alta",
+      verification: "confirmada",
+    },
   ],
+  familyHistory: [{ relationship: "madre", condition: "Hipertensión arterial" }],
+  asaClass: "II",
   conditions: [
     { name: "Hipertensión arterial", status: "activa", notes: "Controlada con medicación" },
   ],
@@ -1254,6 +1376,8 @@ const endo46 = await addPlanItem(db, ORG_A, ANA_ID, rosaPatientId, {
   toothNumber: 46,
   diagnosisCode: "K04.0",
   detail: "Endodoncia pieza 46",
+  // Endodoncia en dos sesiones (apertura y obturación): ejercita el progreso.
+  plannedSessions: 2,
 })
 const corona46 = await addPlanItem(db, ORG_A, ANA_ID, rosaPatientId, {
   serviceId: serviceIdA("CORONA"),
@@ -1359,25 +1483,42 @@ await voidOdontogramEntry(
 )
 await addClinicalNote(db, ORG_A, ANA_ID, rosaPatientId, {
   note: "Paciente con dolor a la percusión en pieza 36; se planifica obturación y endodoncia en 46.",
-  diagnosisCode: "K02.1",
-  diagnosisType: "definitivo",
-  toothNumber: 36,
   encounterId: draft.id,
 })
-// Documentos demo con bytes reales en storage (el registro exige borrador).
-const rxRef = await storage.putPatientDocument({
-  orgId: ORG_A,
-  patientId: rosaPatientId,
-  bytes: DEMO_PNG,
-  contentType: "image/png",
-  ext: "png",
+// Diagnósticos CIE-10 de la atención (ADR 0003): con tipo y sitio dental.
+await addEncounterDiagnosis(db, ORG_A, ANA_ID, rosaPatientId, draft.id, {
+  cie10Code: "K02.1",
+  diagnosisType: "definitivo",
+  toothNumber: 36,
+  surfaces: ["occlusal"],
+  note: "Dolor a la percusión; caries en dentina.",
 })
+await addEncounterDiagnosis(db, ORG_A, ANA_ID, rosaPatientId, draft.id, {
+  cie10Code: "K04.0",
+  diagnosisType: "presuntivo",
+  toothNumber: 46,
+})
+// Un diagnóstico mal registrado se anula con motivo; queda en la traza.
+const dxErrado = await addEncounterDiagnosis(db, ORG_A, ANA_ID, rosaPatientId, draft.id, {
+  cie10Code: "K02.1",
+  diagnosisType: "presuntivo",
+  toothNumber: 37,
+})
+await voidEncounterDiagnosis(db, ORG_A, ANA_ID, rosaPatientId, draft.id, dxErrado.id, {
+  reason: "Pieza equivocada: era la 36",
+})
+// Documentos demo con bytes reales en storage (el registro exige borrador).
+const rxRef = await putDemoImage(rosaPatientId, "rx", 0)
 const docRx = await registerPatientDocument(db, ORG_A, ANA_ID, rosaPatientId, {
   category: "radiografia",
   label: "[DEMO] Radiografía periapical pieza 36",
   storageKey: rxRef.objectKey,
   contentType: rxRef.mimeType,
   sizeBytes: rxRef.size,
+  thumbnailKey: rxRef.thumbnailKey,
+  imageType: "periapical",
+  capturedAt: new Date(Date.now() - 20 * 60_000),
+  source: "Sensor intraoral · sala 2",
   encounterId: draft.id,
   toothNumbers: [36],
   tags: ["radiografia", "diagnostico-inicial"],
@@ -1387,23 +1528,108 @@ await correctDocumentContext(db, ORG_A, ANA_ID, rosaPatientId, docRx.id, {
   expectedVersion: 1,
   tags: ["radiografia", "diagnostico-inicial", "pieza-36"],
 })
-const fotoRef = await storage.putPatientDocument({
-  orgId: ORG_A,
-  patientId: rosaPatientId,
-  bytes: DEMO_PNG,
-  contentType: "image/png",
-  ext: "png",
-})
+const fotoRef = await putDemoImage(rosaPatientId, "foto", 0)
 await registerPatientDocument(db, ORG_A, ANA_ID, rosaPatientId, {
   category: "foto_clinica",
   label: "[DEMO] Foto clínica piezas 36 y 46",
   storageKey: fotoRef.objectKey,
   contentType: fotoRef.mimeType,
   sizeBytes: fotoRef.size,
+  thumbnailKey: fotoRef.thumbnailKey,
+  imageType: "foto_intraoral",
+  capturedAt: new Date(Date.now() - 15 * 60_000),
   encounterId: draft.id,
   planItemId: endo46.id,
   toothNumbers: [36, 46],
   tags: ["foto-clinica", "seguimiento"],
+})
+// Imágenes previas para comparar y filtrar por tipo y periodo: panorámica de
+// un centro externo e interproximal de control, ya informadas.
+for (const previa of [
+  {
+    imageType: "panoramica",
+    label: "[DEMO] Panorámica inicial",
+    days: 18,
+    source: "Centro radiológico externo",
+    teeth: [] as number[],
+  },
+  {
+    imageType: "bitewing",
+    label: "[DEMO] Interproximal derecha",
+    days: 14,
+    source: "Sensor intraoral · sala 2",
+    teeth: [16, 46],
+  },
+  {
+    imageType: "periapical",
+    label: "[DEMO] Periapical 36 de control previo",
+    days: 200,
+    source: "Sensor intraoral · sala 1",
+    teeth: [36],
+  },
+] as const) {
+  const ref = await putDemoImage(rosaPatientId, "rx", previa.days > 100 ? 5 : 1)
+  await registerPatientDocument(db, ORG_A, ANA_ID, rosaPatientId, {
+    category: "radiografia",
+    label: previa.label,
+    storageKey: ref.objectKey,
+    contentType: ref.mimeType,
+    sizeBytes: ref.size,
+    thumbnailKey: ref.thumbnailKey,
+    imageType: previa.imageType,
+    capturedAt: new Date(Date.now() - previa.days * 86_400_000),
+    source: previa.source,
+    reportStatus: "informado",
+    toothNumbers: [...previa.teeth],
+  })
+}
+// Periapical del sensor en DICOM (16 bits, con espaciado del detector) para
+// el visor DICOM; se genera con el codificador de demostración.
+{
+  const { data, info } = await sharp(await demoClinicalImage("rx", 2))
+    .greyscale()
+    .raw()
+    .toBuffer({ resolveWithObject: true })
+  const pixels = new Uint16Array(info.width * info.height)
+  for (let i = 0; i < pixels.length; i++) pixels[i] = Math.round(((data[i] ?? 0) / 255) * 4095)
+  const dicom = encodeDemoDicom({
+    width: info.width,
+    height: info.height,
+    pixels,
+    pixelSpacingMm: [0.04, 0.04],
+  })
+  const ref = await storage.putPatientDocument({
+    orgId: ORG_A,
+    patientId: rosaPatientId,
+    bytes: dicom,
+    contentType: "application/dicom",
+    ext: "dcm",
+  })
+  await registerPatientDocument(db, ORG_A, ANA_ID, rosaPatientId, {
+    category: "radiografia",
+    label: "[DEMO] Periapical 36 del sensor (DICOM)",
+    storageKey: ref.objectKey,
+    contentType: "application/dicom",
+    sizeBytes: ref.size,
+    imageType: "periapical",
+    capturedAt: new Date(Date.now() - 10 * 60_000),
+    source: "Sensor intraoral · sala 2",
+    toothNumbers: [36],
+  })
+}
+// Una imagen subida al paciente equivocado se retira con motivo; no se borra.
+const erradaRef = await putDemoImage(rosaPatientId, "rx", 3)
+const errada = await registerPatientDocument(db, ORG_A, ANA_ID, rosaPatientId, {
+  category: "radiografia",
+  label: "[DEMO] Periapical de otro paciente",
+  storageKey: erradaRef.objectKey,
+  contentType: erradaRef.mimeType,
+  sizeBytes: erradaRef.size,
+  thumbnailKey: erradaRef.thumbnailKey,
+  imageType: "periapical",
+})
+await retirePatientDocument(db, ORG_A, ANA_ID, rosaPatientId, errada.id, {
+  reason: "Subida al paciente equivocado",
 })
 // Cierre con datos útiles: evolución, indicaciones y siguiente paso.
 await updateEncounterDraft(db, ORG_A, ANA_ID, rosaPatientId, draft.id, {
@@ -1515,11 +1741,14 @@ await cancelFollowUp(db, ORG_A, ANA_ID, rosaPatientId, controlEndo.id, {
 await createPrescription(db, ORG_A, ANA_ID, rosaPatientId, {
   planItemId: obt36.id,
   notes: "Solo si aparece dolor no controlado.",
+  diagnosisCode: "K02.1",
   items: [
     {
-      medicationName: "Ibuprofeno 400 mg",
-      dose: "400 mg",
-      route: "Oral",
+      genericName: "ibuprofeno",
+      strength: "400 mg",
+      dosageForm: "tableta",
+      dose: "1 tableta",
+      route: "oral",
       frequency: "Cada 8 horas",
       duration: "3 días",
       quantity: 9,
@@ -1527,12 +1756,16 @@ await createPrescription(db, ORG_A, ANA_ID, rosaPatientId, {
     },
   ],
 })
+// Se emitió confirmando el aviso de alergia por error y se anula: queda la traza.
 const recetaAnulada = await createPrescription(db, ORG_A, ANA_ID, rosaPatientId, {
+  acknowledgeAllergies: true,
   items: [
     {
-      medicationName: "Amoxicilina 500 mg",
-      dose: "500 mg",
-      route: "Oral",
+      genericName: "amoxicilina",
+      strength: "500 mg",
+      dosageForm: "cápsula",
+      dose: "1 cápsula",
+      route: "oral",
       frequency: "Cada 8 horas",
       duration: "7 días",
       quantity: 21,
@@ -1588,11 +1821,14 @@ await savePatientHealth(db, ORG_A, ANA_ID, elenaPatientId, {
 })
 await addClinicalNote(db, ORG_A, ANA_ID, elenaPatientId, {
   note: "Control de rutina sin hallazgos",
-  diagnosisCode: "Z01.2",
 })
 // Plan de Elena + presupuesto en borrador (sin presentar): ejercita el estado inicial.
 const elenaEval = await createEncounter(db, ORG_A, ANA_ID, elenaPatientId, {
   reason: "Control de rutina",
+})
+await addEncounterDiagnosis(db, ORG_A, ANA_ID, elenaPatientId, elenaEval.id, {
+  cie10Code: "Z01.2",
+  diagnosisType: "definitivo",
 })
 const elenaPlan = await createTreatmentPlan(db, ORG_A, ANA_ID, elenaPatientId, {
   title: "Plan profilaxis",
@@ -1730,6 +1966,13 @@ await db.transaction((tx) =>
   }),
 )
 const rosaContactId = contactIdByName.get("Rosa Quispe")!
+// Consentimiento de datos (Ley 29733) con la versión vigente del aviso.
+await db.transaction((tx) =>
+  grantDataConsent(tx, ORG_A, ANA_ID, rosaPatientId, {
+    purposes: ["atencion", "recordatorios"],
+    grantedByContactId: rosaContactId,
+  }),
+)
 const telegramConnection = await createConnection(
   db,
   ORG_A,
@@ -1775,13 +2018,22 @@ const pedro = await db.transaction((tx) =>
     {
       submissionId: randomUUID(),
       answers: {
-        demographics: { displayName: "Pedro Quispe", birthDate: "2016-05-20" },
+        demographics: {
+          displayName: "Pedro Quispe",
+          givenNames: "Pedro",
+          paternalSurname: "Quispe",
+          birthDate: "2016-05-20",
+        },
         respondent: "representative",
+        // El alta del menor registra a su representante legal (con documento)
+        // y le asigna la responsabilidad en la misma transacción.
         representative: {
           displayName: "Rosa Quispe",
           relationship: "guardian",
           relationshipDetail: "Madre",
           phone: SHARED_PHONE,
+          docType: "DNI",
+          docNumber: "45678901",
         },
         privacyAccepted: false,
       },
@@ -1796,13 +2048,7 @@ const pedro = await db.transaction((tx) =>
     },
   ),
 )
-// Representante legal vigente: habilita a Rosa para decidir por el menor.
-await grantResponsibility(db, ORG_A, ANA_ID, pedro.id, {
-  contactId: rosaContactId,
-  kind: "representante_legal",
-  startsAt: new Date().toISOString().slice(0, 10),
-  notes: "Madre del menor; autoriza decisiones clínicas y económicas.",
-})
+// Rosa ya es representante legal vigente desde el alta: decide por el menor.
 // Recorrido del menor: la propuesta se presenta y queda SIN decisión a propósito,
 // para ejercitar el selector «Quién decide» (Rosa como representante legal, no el
 // propio paciente) y la revisión de una propuesta ya presentada.
@@ -2061,6 +2307,26 @@ for (const seed of [
   seedRoles,
 ]) {
   await db.transaction((tx) => seed(tx, domainSeed))
+}
+// Consentimientos firmados en la semilla: su PDF con huella, como al firmar
+// desde la API (mismo generador).
+for (const signed of await db
+  .select({ id: consentDocument.id })
+  .from(consentDocument)
+  .where(
+    and(
+      eq(consentDocument.organizationId, ORG_A),
+      eq(consentDocument.status, "firmado"),
+      isNull(consentDocument.pdfDocumentId),
+    ),
+  )) {
+  await generateConsentPdf({
+    run: (fn) => fn(db),
+    storage,
+    orgId: ORG_A,
+    userId: ANA_ID,
+    consentId: signed.id,
+  })
 }
 await db.transaction(async (tx) => {
   const { items } = await listOpportunities(tx, ORG_A, {

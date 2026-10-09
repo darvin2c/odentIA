@@ -1,6 +1,6 @@
 import type { Browser, Page } from "@playwright/test"
 import { tenant, tenantPattern } from "./env"
-import { expect, type OwnerFixture, test } from "./fixtures"
+import { expect, fillPatientNames, type OwnerFixture, test } from "./fixtures"
 import { gotoHydrated } from "./hydration"
 
 const SETTINGS_SECTIONS = [
@@ -49,7 +49,7 @@ test("móvil: el alta de paciente mantiene las acciones operables", async ({ own
     const dialog = page.getByRole("dialog", { name: "Nuevo paciente" })
     await expect(dialog).toBeVisible()
 
-    await dialog.getByLabel("Nombre del paciente").fill("Paciente móvil")
+    await fillPatientNames(dialog, "Paciente móvil")
     const next = dialog.getByRole("button", { name: "Siguiente", exact: true })
     await expect(next).toBeInViewport()
     await next.tap()

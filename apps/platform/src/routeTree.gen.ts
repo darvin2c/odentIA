@@ -55,6 +55,8 @@ import { Route as OrgSettingsPipelinesRouteImport } from './routes/_org/settings
 import { Route as OrgSettingsSpecialtiesRouteImport } from './routes/_org/settings.specialties'
 import { Route as OrgSettingsWebchatRouteImport } from './routes/_org/settings.webchat'
 import { Route as OrgPatientsPatientIdEncountersEncounterIdRouteImport } from './routes/_org/patients.$patientId.encounters.$encounterId'
+import { Route as OrgPatientsPatientIdConsentsConsentIdPrintRouteImport } from './routes/_org/patients.$patientId.consents.$consentId.print'
+import { Route as OrgPatientsPatientIdPrescriptionsPrescriptionIdPrintRouteImport } from './routes/_org/patients.$patientId.prescriptions.$prescriptionId.print'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -289,6 +291,18 @@ const OrgPatientsPatientIdEncountersEncounterIdRoute =
     path: '/encounters/$encounterId',
     getParentRoute: () => OrgPatientsPatientIdRoute,
   } as any)
+const OrgPatientsPatientIdConsentsConsentIdPrintRoute =
+  OrgPatientsPatientIdConsentsConsentIdPrintRouteImport.update({
+    id: '/consents/$consentId/print',
+    path: '/consents/$consentId/print',
+    getParentRoute: () => OrgPatientsPatientIdRoute,
+  } as any)
+const OrgPatientsPatientIdPrescriptionsPrescriptionIdPrintRoute =
+  OrgPatientsPatientIdPrescriptionsPrescriptionIdPrintRouteImport.update({
+    id: '/prescriptions/$prescriptionId/print',
+    path: '/prescriptions/$prescriptionId/print',
+    getParentRoute: () => OrgPatientsPatientIdRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -336,6 +350,8 @@ export interface FileRoutesByFullPath {
   '/services/': typeof OrgServicesIndexRoute
   '/settings/': typeof OrgSettingsIndexRoute
   '/patients/$patientId/encounters/$encounterId': typeof OrgPatientsPatientIdEncountersEncounterIdRoute
+  '/patients/$patientId/consents/$consentId/print': typeof OrgPatientsPatientIdConsentsConsentIdPrintRoute
+  '/patients/$patientId/prescriptions/$prescriptionId/print': typeof OrgPatientsPatientIdPrescriptionsPrescriptionIdPrintRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -381,6 +397,8 @@ export interface FileRoutesByTo {
   '/services': typeof OrgServicesIndexRoute
   '/settings': typeof OrgSettingsIndexRoute
   '/patients/$patientId/encounters/$encounterId': typeof OrgPatientsPatientIdEncountersEncounterIdRoute
+  '/patients/$patientId/consents/$consentId/print': typeof OrgPatientsPatientIdConsentsConsentIdPrintRoute
+  '/patients/$patientId/prescriptions/$prescriptionId/print': typeof OrgPatientsPatientIdPrescriptionsPrescriptionIdPrintRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -430,6 +448,8 @@ export interface FileRoutesById {
   '/_org/services/': typeof OrgServicesIndexRoute
   '/_org/settings/': typeof OrgSettingsIndexRoute
   '/_org/patients/$patientId/encounters/$encounterId': typeof OrgPatientsPatientIdEncountersEncounterIdRoute
+  '/_org/patients/$patientId/consents/$consentId/print': typeof OrgPatientsPatientIdConsentsConsentIdPrintRoute
+  '/_org/patients/$patientId/prescriptions/$prescriptionId/print': typeof OrgPatientsPatientIdPrescriptionsPrescriptionIdPrintRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -479,6 +499,8 @@ export interface FileRouteTypes {
     | '/services/'
     | '/settings/'
     | '/patients/$patientId/encounters/$encounterId'
+    | '/patients/$patientId/consents/$consentId/print'
+    | '/patients/$patientId/prescriptions/$prescriptionId/print'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -524,6 +546,8 @@ export interface FileRouteTypes {
     | '/services'
     | '/settings'
     | '/patients/$patientId/encounters/$encounterId'
+    | '/patients/$patientId/consents/$consentId/print'
+    | '/patients/$patientId/prescriptions/$prescriptionId/print'
   id:
     | '__root__'
     | '/'
@@ -572,6 +596,8 @@ export interface FileRouteTypes {
     | '/_org/services/'
     | '/_org/settings/'
     | '/_org/patients/$patientId/encounters/$encounterId'
+    | '/_org/patients/$patientId/consents/$consentId/print'
+    | '/_org/patients/$patientId/prescriptions/$prescriptionId/print'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -908,6 +934,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof OrgPatientsPatientIdEncountersEncounterIdRouteImport
       parentRoute: typeof OrgPatientsPatientIdRoute
     }
+    '/_org/patients/$patientId/consents/$consentId/print': {
+      id: '/_org/patients/$patientId/consents/$consentId/print'
+      path: '/consents/$consentId/print'
+      fullPath: '/patients/$patientId/consents/$consentId/print'
+      preLoaderRoute: typeof OrgPatientsPatientIdConsentsConsentIdPrintRouteImport
+      parentRoute: typeof OrgPatientsPatientIdRoute
+    }
+    '/_org/patients/$patientId/prescriptions/$prescriptionId/print': {
+      id: '/_org/patients/$patientId/prescriptions/$prescriptionId/print'
+      path: '/prescriptions/$prescriptionId/print'
+      fullPath: '/patients/$patientId/prescriptions/$prescriptionId/print'
+      preLoaderRoute: typeof OrgPatientsPatientIdPrescriptionsPrescriptionIdPrintRouteImport
+      parentRoute: typeof OrgPatientsPatientIdRoute
+    }
   }
 }
 
@@ -975,11 +1015,17 @@ const OrgSettingsRouteWithChildren = OrgSettingsRoute._addFileChildren(
 
 interface OrgPatientsPatientIdRouteChildren {
   OrgPatientsPatientIdEncountersEncounterIdRoute: typeof OrgPatientsPatientIdEncountersEncounterIdRoute
+  OrgPatientsPatientIdConsentsConsentIdPrintRoute: typeof OrgPatientsPatientIdConsentsConsentIdPrintRoute
+  OrgPatientsPatientIdPrescriptionsPrescriptionIdPrintRoute: typeof OrgPatientsPatientIdPrescriptionsPrescriptionIdPrintRoute
 }
 
 const OrgPatientsPatientIdRouteChildren: OrgPatientsPatientIdRouteChildren = {
   OrgPatientsPatientIdEncountersEncounterIdRoute:
     OrgPatientsPatientIdEncountersEncounterIdRoute,
+  OrgPatientsPatientIdConsentsConsentIdPrintRoute:
+    OrgPatientsPatientIdConsentsConsentIdPrintRoute,
+  OrgPatientsPatientIdPrescriptionsPrescriptionIdPrintRoute:
+    OrgPatientsPatientIdPrescriptionsPrescriptionIdPrintRoute,
 }
 
 const OrgPatientsPatientIdRouteWithChildren =

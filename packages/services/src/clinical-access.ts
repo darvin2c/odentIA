@@ -18,12 +18,16 @@ export const CLINICAL_ACCESS_RESOURCES = [
   "odontograma",
   "historia",
   "atenciones",
+  "diagnosticos",
   "notas",
   "plan",
   "tratamientos",
   "controles",
   "recetas",
   "documentos",
+  "formularios",
+  "consentimientos",
+  "ordenes",
 ] as const
 export type ClinicalAccessResource = (typeof CLINICAL_ACCESS_RESOURCES)[number]
 
