@@ -46,6 +46,40 @@ interface RunItem {
   error: string | null
 }
 
+interface DecisionItem {
+  id: string
+  conversationId: string | null
+  point: string
+  provider: string
+  model: string | null
+  answers: Array<{ id: string; kind: string; probability?: number; choice?: string; score?: number; confidence?: number | null }>
+  outcome: Record<string, unknown> | null
+  latencyMs: number | null
+  error: string | null
+  createdAt: string
+}
+
+const PROVIDER_LABEL: Record<string, string> = {
+  baseline: "Línea base",
+  jev: "Jev",
+  openai_decisions: "OpenAI Decisions",
+  fake: "Demostración",
+}
+
+/** Resumen legible de una decisión en sombra: respuesta y confianza por pregunta. */
+function describeAnswers(item: DecisionItem): string {
+  if (item.error) return `Sin respuesta: ${item.error}`
+  const pct = (value: number) => `${Math.round(value * 100)} %`
+  return item.answers
+    .map((a) => {
+      if (a.kind === "yesno" && typeof a.probability === "number") return `${a.id}: ${a.probability >= 0.5 ? "sí" : "no"} (${pct(a.probability)})`
+      if (a.kind === "choice") return `${a.id}: ${a.choice}${typeof a.confidence === "number" ? ` (${pct(a.confidence)})` : ""}`
+      if (a.kind === "score" && typeof a.score === "number") return `${a.id}: nivel ${Math.round(a.score)}${typeof a.confidence === "number" ? ` (${pct(a.confidence)})` : ""}`
+      return `${a.id}: sin respuesta`
+    })
+    .join(" · ")
+}
+
 interface Simulation {
   reply: string
   replied: boolean
@@ -90,8 +124,8 @@ function AgentSupervisionPage() {
     enabled: canWrite,
   })
   const conversations = conversationsQuery.data?.pages.flatMap(page => page.data) ?? []
-  useOrgEvents(["agent.run.recorded", "conversation.updated", "message.created", "stream.reconnected"], () => {
-    for (const key of ["agent-runs", "agent-run-stats", "simulation-conversations"]) {
+  useOrgEvents(["agent.run.recorded", "agent.decision.recorded", "conversation.updated", "message.created", "stream.reconnected"], () => {
+    for (const key of ["agent-runs", "agent-run-stats", "agent-decisions", "simulation-conversations"]) {
       void queryClient.invalidateQueries({ queryKey: [key] })
     }
   })
@@ -104,6 +138,11 @@ function AgentSupervisionPage() {
   const runsQuery = useQuery({
     queryKey: ["agent-runs"],
     queryFn: () => apiFetch<{ data: RunItem[] }>("/api/agent/runs?limit=50"),
+    enabled: canRead,
+  })
+  const decisionsQuery = useQuery({
+    queryKey: ["agent-decisions"],
+    queryFn: () => apiFetch<{ data: DecisionItem[] }>("/api/agent/decisions?limit=50"),
     enabled: canRead,
   })
   const simulateMutation = useMutation({
@@ -245,6 +284,35 @@ function AgentSupervisionPage() {
           <DataTable table={runsTable} />
         )}
       </div>
+      <section aria-label="Decisiones en sombra" className="elevated rounded-xl border bg-card p-6">
+        <h2 className="font-heading text-base font-medium">Decisiones en sombra</h2>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Qué habría decidido el modelo de decisión sobre cada mensaje entrante y con qué confianza. Solo se registra:
+          no cambia lo que hizo el agente ni acredita acierto.
+        </p>
+        {decisionsQuery.isPending ? <LoadingState /> : decisionsQuery.isError ? <div role="alert"><p>No pudimos cargar las decisiones.</p><Button variant="outline" onClick={() => void decisionsQuery.refetch()}>Volver a intentar</Button></div> : decisionsQuery.data.data.length === 0 ? (
+          <EmptyState title="Sin decisiones registradas" description="Elige un modelo de decisión en Configuración › Agente; cada mensaje entrante dejará aquí su triaje." />
+        ) : (
+          <ul className="mt-3 flex flex-col divide-y">
+            {decisionsQuery.data.data.map((item) => (
+              <li key={item.id} className="flex flex-col gap-1 py-3 text-sm">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant="secondary">{PROVIDER_LABEL[item.provider] ?? item.provider}</Badge>
+                  <span className="text-xs text-muted-foreground">
+                    {item.point}{item.model ? ` · ${item.model}` : ""}{item.latencyMs != null ? ` · ${item.latencyMs} ms` : ""}
+                  </span>
+                  {item.conversationId ? (
+                    <Link to="/inbox" search={{ conversation: item.conversationId }} className="text-xs text-primary underline">
+                      Abrir conversación
+                    </Link>
+                  ) : null}
+                </div>
+                <p className={item.error ? "text-destructive" : undefined}>{describeAnswers(item)}</p>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
       {canWrite ? (
         <div className="flex flex-col gap-3 elevated rounded-xl border bg-card p-6">
           <div className="font-heading text-base font-medium">Simular instrucciones</div>

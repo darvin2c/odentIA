@@ -19,6 +19,8 @@ export {
   testLlmConnection,
 } from "./llm.js"
 export { assertSafeBaseUrl, createPinnedDispatcher, isPrivateAddress, parseLlmBaseUrl, parseSafeBaseUrl } from "./llm-endpoint.js"
+export * from "./decision/index.js"
+export { runShadowTriage } from "./decision/shadow.js"
 export {
   type AgentRuntime,
   consumeAgentRun,

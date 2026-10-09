@@ -6,7 +6,7 @@ import { PostgresSaver } from "@langchain/langgraph-checkpoint-postgres"
 import { telegramBotApiAdapter } from "@odentia/channels"
 import { createAppDb, createOwnerDb, type Db, setupAgentMemory, withOrgContext } from "@odentia/db"
 import { contactIdentity, conversation, crmTask, message } from "@odentia/db/schema/crm"
-import { agentHandoff, agentRunLedger } from "@odentia/db/schema/agent"
+import { agentDecisionLog, agentHandoff, agentRunLedger } from "@odentia/db/schema/agent"
 import {
   addContactIdentity,
   createChair,
@@ -621,6 +621,59 @@ it("una cuota agotada (402) tampoco reintenta y avisa con su propio título", as
     await withOrgContext(appDb, "org_a", (tx) =>
       upsertAgentConfig(tx, "org_a", { llmBaseUrl: null, model: null }, { secretsKey: KEY }),
     )
+  }
+})
+
+it("el modelo de decisión en sombra registra su triaje sin cambiar la corrida", async () => {
+  await withOrgContext(appDb, "org_a", (tx) => upsertAgentConfig(tx, "org_a", { decisionProvider: "baseline" }))
+  try {
+    const { conversationId, messageId } = await ingestText("tg:ag-sombra", "evt-ag-sombra", "Quiero hablar con una persona, me duele mucho")
+    const model = new ScriptedModel(() => toolCall("send_reply", { text: "Te paso con el equipo." }, "call-1"))
+    expect(await runScripted(model, conversationId, messageId)).toBe("done")
+    // La corrida es la de siempre: una llamada, respuesta enviada, agente activo.
+    expect(model.seen.length).toBe(1)
+    expect(await agentMessages(conversationId)).toEqual(["Te paso con el equipo."])
+    expect(await agentStatusOf(conversationId)).toBe("on")
+    const rows = await withOrgContext(appDb, "org_a", (tx) =>
+      tx
+        .select({ point: agentDecisionLog.point, provider: agentDecisionLog.provider, outcome: agentDecisionLog.outcome, stateChars: agentDecisionLog.stateChars, error: agentDecisionLog.error })
+        .from(agentDecisionLog)
+        .where(eq(agentDecisionLog.conversationId, conversationId)),
+    )
+    // Con LLM_MODEL=fake la línea base es el modelo de decisión falso.
+    expect(rows).toEqual([
+      expect.objectContaining({ point: "triage.v1", provider: "fake", error: null, outcome: expect.objectContaining({ wouldHandoff: true }) }),
+    ])
+    expect(rows[0]!.stateChars).toBeGreaterThan(0)
+    // Las filas no guardan el texto: solo la huella.
+    const [raw] = await ownerDb.execute(sql`select state_hash, answers::text as answers from agent_decision_log where conversation_id = ${conversationId}`) as unknown as Array<{ state_hash: string; answers: string }>
+    expect(raw?.state_hash).toMatch(/^[0-9a-f]{64}$/)
+    expect(raw?.answers).not.toContain("me duele")
+    // Un proveedor que falla queda como fila con error, sin tocar la corrida.
+    const broken = { provider: "jev" as const, reportsProbabilities: true, decide: async () => { throw new Error("caído") } }
+    const second = await ingestText("tg:ag-sombra-2", "evt-ag-sombra-2", "Hola")
+    expect(
+      await processAgentRun(appDb, { ...runtime, createModel: async () => model, createDecisionModel: () => broken }, {
+        msg_id: 2,
+        read_ct: 0,
+        message: { kind: "inbound_message", orgId: "org_a", conversationId: second.conversationId, messageId: second.messageId },
+      }),
+    ).toBe("done")
+    const failed = await withOrgContext(appDb, "org_a", (tx) =>
+      tx.select({ error: agentDecisionLog.error }).from(agentDecisionLog).where(eq(agentDecisionLog.conversationId, second.conversationId)),
+    )
+    expect(failed[0]?.error).toContain("fallo inesperado")
+    expect(await ledgerRows(second.conversationId)).toEqual([{ status: "ok", llmCalls: 1, toolsUsed: ["send_reply"] }])
+    // Un proveedor elegido sin credenciales de plataforma también queda a la vista.
+    await withOrgContext(appDb, "org_a", (tx) => upsertAgentConfig(tx, "org_a", { decisionProvider: "jev" }))
+    const third = await ingestText("tg:ag-sombra-3", "evt-ag-sombra-3", "Hola")
+    expect(await runScripted(model, third.conversationId, third.messageId)).toBe("done")
+    const missing = await withOrgContext(appDb, "org_a", (tx) =>
+      tx.select({ provider: agentDecisionLog.provider, error: agentDecisionLog.error }).from(agentDecisionLog).where(eq(agentDecisionLog.conversationId, third.conversationId)),
+    )
+    expect(missing).toEqual([{ provider: "jev", error: expect.stringContaining("CONFIG") }])
+  } finally {
+    await withOrgContext(appDb, "org_a", (tx) => upsertAgentConfig(tx, "org_a", { decisionProvider: "none" }))
   }
 })
 

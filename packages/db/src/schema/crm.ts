@@ -263,6 +263,8 @@ export const agentConfig = pgTable(
     llmApiKeyEncrypted: text("llm_api_key_encrypted"),
     /** Corridas con llamada al modelo permitidas por día (zona de la organización). */
     dailyRunLimit: integer("daily_run_limit").notNull().default(500),
+    /** Modelo de decisión (none | baseline | jev | openai_decisions); solo en sombra por ahora. */
+    decisionProvider: text("decision_provider").notNull().default("none"),
     systemPrompt: text("system_prompt").notNull().default(""),
     handoffKeywords: text("handoff_keywords").array().notNull().default(sql`'{}'`),
     maxTurns: integer("max_turns").notNull().default(10),
@@ -275,6 +277,10 @@ export const agentConfig = pgTable(
       sql`(${table.llmBaseUrl} is null) = (${table.llmApiKeyEncrypted} is null)`,
     ),
     check("agent_config_daily_run_limit_check", sql`${table.dailyRunLimit} between 1 and 100000`),
+    check(
+      "agent_config_decision_provider_check",
+      sql`${table.decisionProvider} in ('none','baseline','jev','openai_decisions')`,
+    ),
   ],
 )
 

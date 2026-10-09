@@ -45,7 +45,8 @@ test("configuración del agente: proveedor propio con clave cifrada, prueba de c
     await page.getByRole("checkbox", { name: "Usar la cuenta propia de la clínica" }).check()
     await page.getByLabel("URL base del proveedor").fill(provider.baseUrl)
     await page.getByLabel("Clave de API").fill("sk-e2e-secreta")
-    await page.getByLabel(/^Modelo/).fill("modelo-controlado")
+    await page.getByLabel("Modelo", { exact: true }).fill("modelo-controlado")
+    await page.getByLabel("Modelo de decisión (en sombra)").selectOption("baseline")
     await page.getByRole("button", { name: "Probar conexión" }).click()
     await expect(page.getByRole("status").filter({ hasText: "El proveedor respondió" })).toBeVisible()
     expect(provider.seen).toEqual(["Bearer sk-e2e-secreta"])
@@ -57,13 +58,13 @@ test("configuración del agente: proveedor propio con clave cifrada, prueba de c
     await info.attach("proveedor-guardado", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" })
 
     // La lectura nunca devuelve la clave; la prueba sin reescribirla usa la guardada.
-    const config = await call<{ llmBaseUrl: string | null; hasLlmApiKey: boolean; model: string | null }>(
+    const config = await call<{ llmBaseUrl: string | null; hasLlmApiKey: boolean; model: string | null; decisionProvider: string }>(
       page,
       "GET",
       "/api/agent/config",
       org.slug,
     )
-    expect(config).toMatchObject({ llmBaseUrl: provider.baseUrl, hasLlmApiKey: true, model: "modelo-controlado" })
+    expect(config).toMatchObject({ llmBaseUrl: provider.baseUrl, hasLlmApiKey: true, model: "modelo-controlado", decisionProvider: "baseline" })
     expect(JSON.stringify(config)).not.toContain("sk-e2e")
     const retest = await call<{ ok: boolean }>(page, "POST", "/api/agent/config/llm/test", org.slug, {})
     expect(retest.ok).toBe(true)

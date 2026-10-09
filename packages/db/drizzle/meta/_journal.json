@@ -253,6 +253,13 @@
       "when": 1791503237012,
       "tag": "0035_mute_shard",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1791520830674,
+      "tag": "0036_striped_praxagora",
+      "breakpoints": true
     }
   ]
 }

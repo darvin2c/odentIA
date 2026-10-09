@@ -15,10 +15,15 @@ export interface AgentConfig {
   /** La clave existe; su valor nunca sale del servidor. */
   hasLlmApiKey: boolean
   dailyRunLimit: number
+  /** Modelo de decisión en sombra: none | baseline | jev | openai_decisions. */
+  decisionProvider: DecisionProvider
   systemPrompt: string
   handoffKeywords: string[]
   maxTurns: number
 }
+
+export const DECISION_PROVIDERS = ["none", "baseline", "jev", "openai_decisions"] as const
+export type DecisionProvider = (typeof DECISION_PROVIDERS)[number]
 
 const DEFAULTS = {
   enabled: false,
@@ -26,6 +31,7 @@ const DEFAULTS = {
   llmBaseUrl: null as string | null,
   llmApiKeyEncrypted: null as string | null,
   dailyRunLimit: 500,
+  decisionProvider: "none" as DecisionProvider,
   systemPrompt: "",
   handoffKeywords: [] as string[],
   maxTurns: 10,
@@ -39,6 +45,9 @@ function toConfig(row: typeof agentConfig.$inferSelect): AgentConfig {
     llmBaseUrl: row.llmBaseUrl,
     hasLlmApiKey: row.llmApiKeyEncrypted !== null,
     dailyRunLimit: row.dailyRunLimit,
+    decisionProvider: (DECISION_PROVIDERS as readonly string[]).includes(row.decisionProvider)
+      ? (row.decisionProvider as DecisionProvider)
+      : "none",
     systemPrompt: row.systemPrompt,
     handoffKeywords: row.handoffKeywords,
     maxTurns: row.maxTurns,
@@ -90,6 +99,7 @@ export interface UpsertAgentConfigInput {
   /** Texto nuevo reemplaza la clave; null retira el proveedor propio; ausente la conserva. */
   llmApiKey?: string | null
   dailyRunLimit?: number
+  decisionProvider?: DecisionProvider
   systemPrompt?: string
   handoffKeywords?: string[]
   maxTurns?: number
@@ -132,6 +142,9 @@ export async function upsertAgentConfig(
     input.handoffKeywords.some((k) => typeof k !== "string")
   ) {
     throw validation("handoffKeywords debe ser lista de texto")
+  }
+  if (input.decisionProvider !== undefined && !(DECISION_PROVIDERS as readonly string[]).includes(input.decisionProvider)) {
+    throw validation("decisionProvider inválido")
   }
   const [current] = await tx
     .select()
@@ -198,6 +211,9 @@ export async function upsertAgentConfig(
   if (patch.dailyRunLimit !== undefined && patch.dailyRunLimit !== (current?.dailyRunLimit ?? DEFAULTS.dailyRunLimit)) {
     changed.push("dailyRunLimit")
   }
+  if (patch.decisionProvider !== undefined && patch.decisionProvider !== (current?.decisionProvider ?? "none")) {
+    changed.push("decisionProvider")
+  }
   if (changed.length > 0) {
     await tx.insert(auditEvent).values({
       organizationId: orgId,
@@ -205,7 +221,7 @@ export async function upsertAgentConfig(
       action: "agent.config_updated",
       entity: "agent_config",
       entityId: orgId,
-      metadata: { changed, llmBaseUrl: row.llmBaseUrl, model: row.model, dailyRunLimit: row.dailyRunLimit },
+      metadata: { changed, llmBaseUrl: row.llmBaseUrl, model: row.model, dailyRunLimit: row.dailyRunLimit, decisionProvider: row.decisionProvider },
     })
   }
   return toConfig(row)

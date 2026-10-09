@@ -9,6 +9,7 @@ import {
   findFreeGaps,
   getAgentRunStats,
   getProposal,
+  listAgentDecisions,
   listAgentRuns,
   listHandoffs,
   claimHandoff,
@@ -67,6 +68,11 @@ const gapsInput = z.object({
   dentistUserId: z.string().optional(),
   chairId: z.string().uuid().optional(),
   serviceId: z.string().uuid().optional(),
+})
+
+const decisionsQuery = z.object({
+  conversationId: z.string().uuid().optional(),
+  limit: z.coerce.number().int().min(1).max(200).optional(),
 })
 
 const simulateInput = z.object({
@@ -249,6 +255,16 @@ const simulateInput = z.object({
           limit: c.req.query("limit") ? Number(c.req.query("limit")) : undefined,
         }),
       ),
+    )
+  })
+
+  app.get("/decisions", async (c) => {
+    const { orgId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "agent.read")) return forbidden(c, "agent.read")
+    const parsed = decisionsQuery.safeParse(c.req.query())
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) => listAgentDecisions(tx, orgId, parsed.data)),
     )
   })
 

@@ -310,6 +310,46 @@ export const agentRunLedger = pgTable(
   ],
 )
 
+export const DECISION_MODES = ["shadow"] as const
+
+/**
+ * Libro de decisiones del modelo de decisión (append-only). Guarda ids,
+ * huella del estado, pregunta versionada y respuestas con probabilidades;
+ * nunca el texto del interlocutor. En modo `shadow` no tiene efecto sobre la
+ * corrida: solo se compara.
+ */
+export const agentDecisionLog = pgTable(
+  "agent_decision_log",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    organizationId: orgFk("organization_id"),
+    conversationId: uuid("conversation_id"),
+    triggerMessageId: uuid("trigger_message_id"),
+    /** Punto de decisión y versión de sus preguntas (p. ej. triage.v1). */
+    point: text("point").notNull(),
+    mode: text("mode").notNull().default("shadow"),
+    provider: text("provider").notNull(),
+    /** Identificador versionado que reportó el proveedor. */
+    model: text("model"),
+    /** SHA-256 del estado enviado, para correlacionar sin guardar el texto. */
+    stateHash: text("state_hash").notNull(),
+    stateChars: integer("state_chars").notNull(),
+    answers: jsonb("answers").$type<unknown[]>().notNull(),
+    /** Qué habría hecho cada punto con los umbrales ilustrativos; solo informativo. */
+    outcome: jsonb("outcome").$type<Record<string, unknown>>(),
+    latencyMs: integer("latency_ms"),
+    inputTokens: integer("input_tokens"),
+    outputTokens: integer("output_tokens"),
+    error: text("error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("agent_decision_log_org_idx").on(table.organizationId, table.createdAt),
+    index("agent_decision_log_conversation_idx").on(table.conversationId),
+    check("agent_decision_log_mode_check", sql`${table.mode} in ('shadow')`),
+  ],
+)
+
 /** El agente nunca lee historia clínica completa: solo este contexto mínimo verificado. */
 export interface AgentPatientContext {
   patientId: string

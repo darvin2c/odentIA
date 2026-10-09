@@ -125,7 +125,8 @@ test("crm agente: responde al segundo inbound y el operador toma el hilo", async
   await waitForInboundText(page, org.slug, conversation.id, "Hola, quiero una cita")
   const conversationId = conversation.id
 
-  await call(page, "PUT", "/api/agent/config", org.slug, { enabled: true })
+  // Con el modelo falso, «línea base» es el modelo de decisión de demostración: la sombra queda registrada.
+  await call(page, "PUT", "/api/agent/config", org.slug, { enabled: true, decisionProvider: "baseline" })
   await call(page, "POST", `/api/conversations/${conversationId}/agent`, org.slug, {
     enabled: true,
   })
@@ -175,6 +176,17 @@ test("crm agente: responde al segundo inbound y el operador toma el hilo", async
   await gotoHydrated(page, tenant(org.slug, "/agent"))
   await expect(page.getByRole("columnheader", { name: "Llamadas al modelo" })).toBeVisible()
   await expect(page.getByRole("row").filter({ hasText: "Ejecución correcta" })).toContainText("send_reply")
+  // La decisión en sombra se registró sin cambiar la corrida y se ve con su respuesta y confianza.
+  const decisions = await call<Array<{ point: string; provider: string; error: string | null }>>(
+    page,
+    "GET",
+    `/api/agent/decisions?conversationId=${conversationId}`,
+    org.slug,
+  )
+  expect(decisions).toEqual([expect.objectContaining({ point: "triage.v1", provider: "fake", error: null })])
+  const shadow = page.getByRole("region", { name: "Decisiones en sombra" })
+  await expect(shadow).toBeVisible()
+  await expect(shadow).toContainText("requires_reply: sí")
 })
 
 test("crm agente: una corrida que no respondió queda a la vista para revisión", async ({

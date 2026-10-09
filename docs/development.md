@@ -42,6 +42,15 @@ El modelo elegido debe admitir llamadas a herramientas (`tools`/`tool_calls`).
 API y worker leen las mismas variables; reiniciarlos tras cambiarlas. Nunca
 poner la key en una variable `VITE_*`, un campo de conversación ni el repositorio.
 
+### Modelo de decisión (solo en sombra)
+
+Ver `docs/decisions/0002-capa-de-decision-en-sombra.md`. Solo el worker lee
+`JEV_API_KEY`/`JEV_BASE_URL` y `OPENAI_DECISIONS_API_KEY`/`OPENAI_DECISIONS_BASE_URL`;
+sin ellas, elegir ese proveedor en Configuración → Agente deja cada triaje como
+fila con error en Agente › Actividad. `pnpm --filter @odentia/agent eval:decisions
+-- --provider=jev` compara un proveedor con los ejemplos propios de
+`packages/agent/eval/`; no enviar mensajes reales de pacientes sin autorización.
+
 En producción, usar las mismas variables en los secretos de despliegue de API y
 worker o en `infra/prod/.env`. `CHANNEL_SENDER_MODE=mock` sigue impidiendo envíos
 reales aunque el LLM sea real; habilitar `live` y validación externa de conexiones

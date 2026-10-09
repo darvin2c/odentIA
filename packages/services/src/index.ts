@@ -7,6 +7,7 @@
  * varias operaciones en una sola transacción).
  */
 export * from "./agentConfig.js"
+export * from "./agent-decisions.js"
 export * from "./llm-endpoint.js"
 export * from "./appointments.js"
 export * from "./budgets.js"

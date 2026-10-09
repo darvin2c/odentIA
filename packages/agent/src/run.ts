@@ -18,6 +18,8 @@ import {
   reportAgentNoReply,
 } from "@odentia/services"
 import { and, desc, eq, sql } from "drizzle-orm"
+import { createDecisionModel, type DecisionModel, type DecisionProvider, type PlatformDecisions } from "./decision/index.js"
+import { recordShadowUnavailable, runShadowTriage } from "./decision/shadow.js"
 import { compileAgentGraph } from "./graph.js"
 import {
   createConfiguredChatModel,
@@ -36,6 +38,10 @@ export interface AgentRuntime {
   platform: PlatformLlm
   /** Sustituye la construcción del modelo (pruebas con un modelo guionizado). */
   createModel?: (spec: LlmSpec) => Promise<Runnable<BaseMessage[], AIMessage>>
+  /** Credenciales de plataforma de los modelos de decisión (sombra). */
+  decisions?: PlatformDecisions
+  /** Sustituye el modelo de decisión (pruebas). */
+  createDecisionModel?: (provider: DecisionProvider) => DecisionModel | null
   secretsKey: Buffer
   callbacks?: Callbacks
 }
@@ -341,6 +347,25 @@ export async function processAgentRun(
       llmCalls: toolCtx.usage.calls,
       toolsUsed: toolCtx.toolsUsed,
     })
+    // Sombra: el modelo de decisión opina sobre el mensaje disparador después
+    // de la corrida y solo se registra; nunca cambia el turno ni lo reintenta.
+    if (inboundMessageId !== null && cfg.decisionProvider !== "none") {
+      const shadow = { conversationId, triggerMessageId: inboundMessageId }
+      let decision: DecisionModel | null = null
+      try {
+        decision = runtime.createDecisionModel
+          ? runtime.createDecisionModel(cfg.decisionProvider)
+          : await createDecisionModel(cfg.decisionProvider, runtime.decisions ?? {}, spec)
+      } catch (error) {
+        // Sin credenciales de plataforma para ese proveedor: queda a la vista en Actividad.
+        await recordShadowUnavailable(db, orgId, cfg.decisionProvider, shadow, error).catch(() => {})
+      }
+      if (decision) {
+        await runShadowTriage(db, orgId, decision, shadow).catch((error: unknown) => {
+          console.error(`agent: sombra de decisión omitida (${error instanceof Error ? error.message : String(error)})`)
+        })
+      }
+    }
     return "done"
   } catch (error) {
     if (isProviderConfigError(error)) return finishWithProviderProblem(describeProviderProblem(error))

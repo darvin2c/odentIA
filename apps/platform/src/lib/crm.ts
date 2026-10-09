@@ -264,6 +264,8 @@ export interface AgentConfig {
   /** La clave existe en el servidor; su valor nunca llega al cliente. */
   hasLlmApiKey: boolean
   dailyRunLimit: number
+  /** Modelo de decisión en sombra: none | baseline | jev | openai_decisions. */
+  decisionProvider: "none" | "baseline" | "jev" | "openai_decisions"
   systemPrompt: string
   handoffKeywords: string[]
   maxTurns: number

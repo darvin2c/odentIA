@@ -15,6 +15,7 @@ const putInput = z.object({
   /** Solo se envía para cambiarla; null la borra. Nunca se devuelve. */
   llmApiKey: z.string().max(500).nullable().optional(),
   dailyRunLimit: z.number().int().min(1).max(100_000).optional(),
+  decisionProvider: z.enum(["none", "baseline", "jev", "openai_decisions"]).optional(),
   systemPrompt: z.string().max(8000).optional(),
   handoffKeywords: z.array(z.string().max(60)).max(30).optional(),
   maxTurns: z.number().int().min(1).max(50).optional(),

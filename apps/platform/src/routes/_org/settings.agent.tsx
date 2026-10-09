@@ -264,6 +264,26 @@ function AgentPage() {
         </div>
       </fieldset>
       <Field>
+        <FieldLabel htmlFor="agente-decision">Modelo de decisión (en sombra)</FieldLabel>
+        <select
+          id="agente-decision"
+          className="rounded-sm border p-2 text-sm"
+          value={current.decisionProvider}
+          onChange={(e) => set({ decisionProvider: e.target.value as AgentConfig["decisionProvider"] })}
+        >
+          {DECISION_PROVIDER_LABEL.map((item) => (
+            <option key={item.value} value={item.value}>
+              {item.label}
+            </option>
+          ))}
+        </select>
+        <FieldDescription>
+          Opina sobre cada mensaje entrante (¿requiere respuesta?, ¿derivar?, urgencia, intención) y solo se registra
+          en Agente › Actividad: no cambia lo que hace el agente. Los proveedores externos reciben el último mensaje
+          y dos turnos previos, sin datos del contacto.
+        </FieldDescription>
+      </Field>
+      <Field>
         <FieldLabel htmlFor="agente-tope">Tope diario de corridas con el modelo</FieldLabel>
         <Input
           id="agente-tope"
@@ -384,6 +404,12 @@ function AgentPage() {
               <dd className="text-sm">{config.dailyRunLimit}</dd>
             </div>
             <div>
+              <dt className="text-xs font-medium text-muted-foreground">Modelo de decisión (en sombra)</dt>
+              <dd className="text-sm">
+                {DECISION_PROVIDER_LABEL.find((item) => item.value === config.decisionProvider)?.label ?? config.decisionProvider}
+              </dd>
+            </div>
+            <div>
               <dt className="text-xs font-medium text-muted-foreground">
                 Máximo de turnos por conversación
               </dt>
@@ -432,6 +458,13 @@ function AgentPage() {
     </div>
   )
 }
+
+const DECISION_PROVIDER_LABEL: Array<{ value: AgentConfig["decisionProvider"]; label: string }> = [
+  { value: "none", label: "Desactivado" },
+  { value: "baseline", label: "Línea base (el mismo modelo de conversación)" },
+  { value: "jev", label: "Jev (TypeSafe AI)" },
+  { value: "openai_decisions", label: "OpenAI Decisions" },
+]
 
 const DIRECT_WRITES = [
   {

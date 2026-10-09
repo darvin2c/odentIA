@@ -1,5 +1,5 @@
 import type { Db } from "@odentia/db"
-import { agentHandoff, agentKnowledgeEntry, agentKnowledgeRevision, agentPolicy, agentProposal, agentRunLedger } from "@odentia/db/schema/agent"
+import { agentDecisionLog, agentHandoff, agentKnowledgeEntry, agentKnowledgeRevision, agentPolicy, agentProposal, agentRunLedger } from "@odentia/db/schema/agent"
 import { appointment, scheduleChair } from "@odentia/db/schema/agenda"
 import { patientContact } from "@odentia/db/schema/clinical"
 import { conversation } from "@odentia/db/schema/crm"
@@ -204,5 +204,30 @@ export async function seedAgent(
         })
         .onConflictDoNothing({ target: agentRunLedger.id })
     }
+    // Decisiones en sombra de demostración (modelo falso): visibles en Actividad.
+    await tx
+      .insert(agentDecisionLog)
+      .values({
+        id: "00000000-0000-4000-8000-00000000d001",
+        organizationId: orgId,
+        conversationId: first.id,
+        point: "triage.v1",
+        provider: "fake",
+        model: "fake-decision",
+        stateHash: "0".repeat(64),
+        stateChars: 64,
+        answers: [
+          { id: "requires_reply", kind: "yesno", probability: 0.92 },
+          { id: "handoff", kind: "yesno", probability: 0.08 },
+          { id: "urgency", kind: "score", score: 1, probabilities: [0.1, 0.85, 0.05], confidence: 0.8 },
+          { id: "intent", kind: "choice", choice: "appointment_request", probabilities: { appointment_request: 0.85, other: 0.15 }, confidence: 0.8 },
+          { id: "unsubscribe", kind: "yesno", probability: 0.03 },
+        ],
+        outcome: { wouldSkipReply: false, wouldHandoff: false, urgencyLevel: 1, intent: "appointment_request", wouldFlagUnsubscribe: false },
+        latencyMs: 210,
+        inputTokens: 64,
+        outputTokens: 0,
+      })
+      .onConflictDoNothing({ target: agentDecisionLog.id })
   }
 }
