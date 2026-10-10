@@ -1,6 +1,12 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { Button, FieldLabel, Input, toast } from "@odentia/ui"
-import { FormDrawer, PageHeader, minutesToInstant } from "@odentia/ui-patterns"
+import {
+  DatePickerButton,
+  FormDrawer,
+  formatDateLong,
+  minutesToInstant,
+  PageHeader,
+} from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import * as React from "react"
 import { ApiError, apiFetch } from "../../lib/api"
@@ -11,10 +17,18 @@ import {
   type ProfessionalSchedule,
   type ScheduleBlock,
 } from "../../lib/agenda"
+import { ChairForm } from "../../components/agenda/chair-form"
+import { BranchSwitcher } from "../../components/branch-switcher"
+import { ChoiceSelect } from "../../components/ui/choice-select"
+import { useActiveBranch } from "../../lib/active-branch"
 import { usePermission } from "../../lib/crm"
 import { sameDraft, usePageDraftGuard } from "../../lib/page-draft-guard"
 
 export const Route = createFileRoute("/_org/settings/availability")({
+  validateSearch: (search: Record<string, unknown>): { branch?: string } => ({
+    ...search,
+    branch: typeof search.branch === "string" ? search.branch : undefined,
+  }),
   component: AvailabilityPage,
 })
 
@@ -39,9 +53,15 @@ function toMinutes(label: string): number {
 function AvailabilityPage() {
   const queryClient = useQueryClient()
   const canConfigure = usePermission("settings.write")
+  // La misma sede que la Agenda: la del enlace o la última elegida.
+  const sede = useActiveBranch()
   const resourcesQuery = useQuery({
-    queryKey: ["agenda-resources"],
-    queryFn: () => apiFetch<{ data: AgendaResources }>("/api/agenda/resources"),
+    queryKey: ["agenda-resources", sede.branchId ?? null],
+    enabled: sede.ready,
+    queryFn: () =>
+      apiFetch<{ data: AgendaResources }>(
+        `/api/agenda/resources${sede.branchId ? `?branchId=${encodeURIComponent(sede.branchId)}` : ""}`,
+      ),
   })
   const resources = resourcesQuery.data?.data
   const [dentistId, setDentistId] = React.useState("")
@@ -111,6 +131,7 @@ function AvailabilityPage() {
       ),
   })
   const [blockForm, setBlockForm] = React.useState(false)
+  const [chairForm, setChairForm] = React.useState(false)
   const invalidateBlocks = () => queryClient.invalidateQueries({ queryKey: ["schedule-blocks"] })
 
   return (
@@ -119,9 +140,27 @@ function AvailabilityPage() {
       <PageHeader
         title="Horarios y bloqueos"
         subtitle={
-          resources
-            ? `${resources.branchName} · zona ${resources.timeZone}`
-            : "Horario semanal por profesional, bloqueos y ausencias de la sede."
+          resources ? (
+            <>
+              <BranchSwitcher
+                branches={sede.branches}
+                value={resources.branchId}
+                fallbackName={resources.branchName}
+                onChange={(id) =>
+                  draftGuard.requestLeave(() => {
+                    sede.choose(id)
+                    setDentistId("")
+                    setLoadedFor("")
+                    setTurns([])
+                    setBaseline([])
+                  })
+                }
+              />
+              <span className="truncate">, zona {resources.timeZone}</span>
+            </>
+          ) : (
+            "Horario semanal por profesional, bloqueos y ausencias de la sede."
+          )
         }
       />
       {!resources ? (
@@ -131,9 +170,9 @@ function AvailabilityPage() {
           <section className="grid gap-3 rounded-xl border bg-background p-3 sm:p-4">
             <div className="flex flex-wrap items-center gap-2">
               <h2 className="font-medium">Horario semanal</h2>
-              <select
+              <ChoiceSelect
                 aria-label="Profesional"
-                className="h-8 rounded-md border bg-background px-2 text-sm"
+                className="w-auto min-w-48"
                 value={professionalId}
                 onChange={(event) => {
                   const nextId = event.target.value
@@ -150,7 +189,7 @@ function AvailabilityPage() {
                     {item.label}
                   </option>
                 ))}
-              </select>
+              </ChoiceSelect>
               <span className="text-xs text-muted-foreground">
                 Sin turnos guardados, el profesional no ofrece huecos.
               </span>
@@ -237,6 +276,31 @@ function AvailabilityPage() {
 
           <section className="grid gap-3 rounded-xl border bg-background p-3 sm:p-4">
             <div className="flex flex-wrap items-center gap-2">
+              <h2 className="font-medium">Sillones</h2>
+              <span className="text-xs text-muted-foreground">Cada cita ocupa un sillón.</span>
+              {canConfigure && (
+                <Button variant="outline" size="sm" onClick={() => setChairForm(true)}>
+                  Añadir sillón
+                </Button>
+              )}
+            </div>
+            {resources.chairs.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                Esta sede aún no tiene sillones: sin al menos uno no se puede reservar.
+              </p>
+            ) : (
+              <ul className="flex flex-wrap gap-2">
+                {resources.chairs.map((chair) => (
+                  <li key={chair.id} className="rounded-lg border px-3 py-1.5 text-sm">
+                    {chair.label}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+
+          <section className="grid gap-3 rounded-xl border bg-background p-3 sm:p-4">
+            <div className="flex flex-wrap items-center gap-2">
               <h2 className="font-medium">Bloqueos y ausencias</h2>
               <span className="text-xs text-muted-foreground">Próximos 14 días.</span>
               {canConfigure && (
@@ -262,6 +326,18 @@ function AvailabilityPage() {
             )}
           </section>
         </>
+      )}
+      {chairForm && resources && (
+        <ChairForm
+          branchId={resources.branchId}
+          branchName={resources.branchName}
+          suggestedName={`Sillón ${resources.chairs.length + 1}`}
+          onClose={() => setChairForm(false)}
+          onSaved={async () => {
+            setChairForm(false)
+            await queryClient.invalidateQueries({ queryKey: ["agenda-resources"] })
+          }}
+        />
       )}
       {blockForm && resources && (
         <BlockEditor
@@ -387,9 +463,8 @@ function BlockEditor({
       <div className="grid gap-4">
         <div className="grid gap-2">
           <FieldLabel htmlFor="bloqueo-profesional">Profesional (vacío = toda la sede)</FieldLabel>
-          <select
+          <ChoiceSelect
             id="bloqueo-profesional"
-            className="h-9 rounded-md border bg-background px-2 text-sm"
             value={dentistUserId}
             onChange={(event) => setDentistUserId(event.target.value)}
           >
@@ -399,13 +474,12 @@ function BlockEditor({
                 {item.label}
               </option>
             ))}
-          </select>
+          </ChoiceSelect>
         </div>
         <div className="grid gap-2">
           <FieldLabel htmlFor="bloqueo-sillon">Sillón (vacío = todos)</FieldLabel>
-          <select
+          <ChoiceSelect
             id="bloqueo-sillon"
-            className="h-9 rounded-md border bg-background px-2 text-sm"
             value={chairId}
             onChange={(event) => setChairId(event.target.value)}
           >
@@ -415,30 +489,30 @@ function BlockEditor({
                 {item.label}
               </option>
             ))}
-          </select>
+          </ChoiceSelect>
         </div>
         <div className="grid gap-2">
           <FieldLabel htmlFor="bloqueo-tipo">Tipo</FieldLabel>
-          <select
+          <ChoiceSelect
             id="bloqueo-tipo"
-            className="h-9 rounded-md border bg-background px-2 text-sm"
             value={kind}
             onChange={(event) => setKind(event.target.value)}
           >
             <option value="bloqueo">Bloqueo</option>
             <option value="ausencia">Ausencia</option>
-          </select>
+          </ChoiceSelect>
         </div>
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-          <div className="grid gap-2">
+        <div className="grid grid-cols-2 gap-3">
+          <div className="col-span-2 grid gap-2">
             <FieldLabel htmlFor="bloqueo-fecha">Fecha</FieldLabel>
-            <Input
+            <DatePickerButton
               id="bloqueo-fecha"
-              type="date"
-              required
+              className="justify-start font-normal"
               value={date}
-              onChange={(event) => setDate(event.target.value)}
-            />
+              onChange={setDate}
+            >
+              {formatDateLong(date)}
+            </DatePickerButton>
           </div>
           <div className="grid gap-2">
             <FieldLabel htmlFor="bloqueo-inicio">Inicio</FieldLabel>

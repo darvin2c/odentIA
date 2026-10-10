@@ -136,14 +136,14 @@ export function AppointmentSearch({
                   const date = zonedDateOf(appointment.startsAt, timeZone)
                   const what = appointment.serviceName ?? appointment.reason ?? "Cita"
                   return (
-                    <button
+                    <Button
                       key={appointment.id}
-                      type="button"
+                      variant="ghost"
                       onClick={() => {
                         close()
                         onOpen(appointment)
                       }}
-                      className="flex min-h-11 items-center gap-3 rounded-lg px-2.5 text-left outline-none hover:bg-muted focus-visible:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
+                      className="h-auto min-h-11 w-full justify-start gap-3 rounded-lg px-2.5 text-left font-normal"
                     >
                       <span className="flex w-30 shrink-0 items-baseline gap-2">
                         <span className="w-17 text-[13px] font-semibold first-letter:uppercase">
@@ -162,7 +162,7 @@ export function AppointmentSearch({
                         <StatusIcon status={appointment.status} className="size-3.5" />
                         {SCHEDULE_AGENDA_LABELS[appointment.status]}
                       </span>
-                    </button>
+                    </Button>
                   )
                 })}
                 {person.appointments.length === 0 ? (

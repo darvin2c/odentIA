@@ -1,4 +1,13 @@
-import { Button, Checkbox, cn, FieldLabel, Input, toast } from "@odentia/ui"
+import {
+  Button,
+  Checkbox,
+  cn,
+  FieldLabel,
+  Input,
+  RadioGroup,
+  RadioGroupItem,
+  toast,
+} from "@odentia/ui"
 import {
   ConfirmDialog,
   DetailDrawer,
@@ -92,6 +101,7 @@ export function AppointmentDrawer({
   const [cancelNote, setCancelNote] = React.useState("")
   const [offerSlot, setOfferSlot] = React.useState(false)
   const offerId = React.useId()
+  const reasonId = React.useId()
 
   const setStatus = useMutation({
     mutationFn: (status: AppointmentStatus) =>
@@ -432,27 +442,29 @@ export function AppointmentDrawer({
         onConfirm={() => setStatus.mutate("cancelada")}
       >
         <div className="grid gap-3 text-left">
-          <fieldset className="grid gap-2 border-0 p-0">
-            <legend className="mb-1.5 p-0 text-sm font-medium">Motivo</legend>
-            {CANCEL_REASONS.map((option) => (
-              <label
-                key={option.id}
-                className={cn(
-                  "flex min-h-11 cursor-pointer items-center gap-2.5 rounded-xl border px-3 text-sm",
-                  cancelReason === option.id && "border-primary bg-primary-soft",
-                )}
-              >
-                <input
-                  type="radio"
-                  name="cita-cancelar-motivo"
-                  className="size-4 accent-primary"
-                  checked={cancelReason === option.id}
-                  onChange={() => setCancelReason(option.id)}
-                />
-                {option.label}
-              </label>
-            ))}
-          </fieldset>
+          <div className="grid gap-2">
+            <span id={reasonId} className="text-sm font-medium">
+              Motivo
+            </span>
+            <RadioGroup
+              aria-labelledby={reasonId}
+              value={cancelReason}
+              onValueChange={(next) => setCancelReason(next as CancelReason)}
+            >
+              {CANCEL_REASONS.map((option) => (
+                <FieldLabel
+                  key={option.id}
+                  className={cn(
+                    "flex min-h-11 cursor-pointer items-center gap-2.5 rounded-xl border px-3 text-sm font-normal",
+                    cancelReason === option.id && "border-primary bg-primary-soft",
+                  )}
+                >
+                  <RadioGroupItem value={option.id} />
+                  {option.label}
+                </FieldLabel>
+              ))}
+            </RadioGroup>
+          </div>
           <Input
             aria-label="Nota, si hace falta"
             placeholder="Nota, si hace falta"

@@ -23,6 +23,11 @@ export interface ScheduleToolbarProps {
   context?: React.ReactNode
   /** Periodo visible, ya rotulado («Lunes 21 de setiembre»). */
   rangeLabel: string
+  /**
+   * Control que ocupa el lugar del rótulo cuando el periodo se puede elegir
+   * (un botón con el mismo texto que abre el calendario).
+   */
+  rangeControl?: React.ReactNode
   /** Lo que conviene saber del periodo («18 citas · 5 por confirmar»). */
   summary?: string
   onPrevious?: () => void
@@ -46,6 +51,7 @@ export interface ScheduleToolbarProps {
 export function ScheduleToolbar({
   context,
   rangeLabel,
+  rangeControl,
   summary,
   onPrevious,
   onNext,
@@ -98,7 +104,9 @@ export function ScheduleToolbar({
       ) : null}
 
       <div className="flex min-w-0 flex-wrap items-baseline gap-x-3">
-        <span className="min-w-0 truncate text-lg font-bold tracking-tight">{rangeLabel}</span>
+        {rangeControl ?? (
+          <span className="min-w-0 truncate text-lg font-bold tracking-tight">{rangeLabel}</span>
+        )}
         {summary ? <span className="text-sm text-muted-foreground">{summary}</span> : null}
       </div>
 

@@ -1,5 +1,6 @@
 import { Button, FieldLabel, Input, toast } from "@odentia/ui"
 import {
+  DatePickerButton,
   FormDrawer,
   ResourceSelect,
   type ResourceSelectOption,
@@ -12,7 +13,7 @@ import { useMutation, useQuery } from "@tanstack/react-query"
 import * as React from "react"
 import type { AgendaAppointment, AgendaServiceOption } from "../../lib/agenda"
 import { apiFetch } from "../../lib/api"
-import { errorMessage, shortName, useAgendaSlots, whenSaid } from "./shared"
+import { dayShort, errorMessage, shortName, useAgendaSlots, whenSaid } from "./shared"
 
 /** Con qué se abre «Nueva cita»: nada, un hueco tocado en la rejilla o un paciente. */
 export interface BookingSeed {
@@ -225,18 +226,19 @@ export function BookingDrawer({
           value={chosen}
           onChange={(choice) => setChosen(choice.id)}
           action={
-            <Input
-              type="date"
-              aria-label="Buscar huecos desde"
-              className="h-8 w-auto"
+            <DatePickerButton
+              size="sm"
+              align="end"
+              aria-label="Buscar huecos desde otra fecha"
               min={today}
               value={fromDate}
-              onChange={(event) => {
-                if (!/^\d{4}-\d{2}-\d{2}$/.test(event.target.value)) return
-                setFromDate(event.target.value)
+              onChange={(next) => {
+                setFromDate(next)
                 setChosen(null)
               }}
-            />
+            >
+              {fromDate === today ? "Desde hoy" : `Desde el ${dayShort(fromDate)}`}
+            </DatePickerButton>
           }
           emptyLabel={
             team.length === 0

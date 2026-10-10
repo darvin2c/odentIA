@@ -6,26 +6,30 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-  Input,
   toast,
 } from "@odentia/ui"
 import {
   addDays,
   conflictLabel,
+  DatePickerButton,
   dayMinutesIn,
   dayRangeOf,
   daySegments,
+  EmptyState,
+  ErrorState,
   findScheduleConflicts,
   formatDateLong,
   formatSpan,
   freeMinutesOf,
   hourLabel,
+  LoadingState,
   type MinuteRange,
   minutesToInstant,
   PageHeader,
   PageShell,
   type RowActionItem,
   ResourceAvatar,
+  SCHEDULE_AGENDA_LABELS,
   SCHEDULE_DEFAULT_WINDOW,
   SCHEDULE_SMALL_QUERY,
   type ScheduleAgendaItem,
@@ -53,8 +57,16 @@ import {
   zonedDateOf,
 } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { createFileRoute, Link } from "@tanstack/react-router"
-import { ChevronDown, Clock, Plus } from "lucide-react"
+import { createFileRoute, useNavigate } from "@tanstack/react-router"
+import {
+  Armchair,
+  CalendarClock,
+  CalendarDays,
+  CalendarX2,
+  ChevronDown,
+  Clock,
+  Plus,
+} from "lucide-react"
 import * as React from "react"
 import {
   AppointmentDrawer,
@@ -62,8 +74,11 @@ import {
 } from "../../components/agenda/appointment-drawer"
 import { AppointmentSearch } from "../../components/agenda/appointment-search"
 import { BookingDrawer, type BookingSeed } from "../../components/agenda/booking-drawer"
+import { ChairForm } from "../../components/agenda/chair-form"
 import { dayShort, errorMessage, shortName } from "../../components/agenda/shared"
 import { useWaitlist, WaitlistDrawer } from "../../components/agenda/waitlist"
+import { BranchSwitcher } from "../../components/branch-switcher"
+import { useActiveBranch } from "../../lib/active-branch"
 import type {
   AgendaAppointment,
   AgendaAvailability,
@@ -146,25 +161,22 @@ function AgendaPage() {
   const { get, setParam, setParams } = useListSearch()
   const small = useMediaQuery(SCHEDULE_SMALL_QUERY)
   const canWrite = usePermission("appointments.write")
+  const canConfigure = usePermission("settings.write")
+  const navigate = useNavigate()
   const requested = Route.useSearch()
 
-  const branchParam = get("branch")
+  const sede = useActiveBranch()
   const resourcesQuery = useQuery({
-    queryKey: ["agenda-resources", branchParam ?? null],
+    queryKey: ["agenda-resources", sede.branchId ?? null],
+    enabled: sede.ready,
     queryFn: () =>
       apiFetch<{ data: AgendaResources }>(
-        `/api/agenda/resources${branchParam ? `?branchId=${encodeURIComponent(branchParam)}` : ""}`,
+        `/api/agenda/resources${sede.branchId ? `?branchId=${encodeURIComponent(sede.branchId)}` : ""}`,
       ),
   })
   const resources = resourcesQuery.data?.data
   const branchId = resources?.branchId
   const TZ = resources?.timeZone ?? "America/Lima"
-  const branchesQuery = useQuery({
-    queryKey: ["agenda-branches"],
-    queryFn: () =>
-      apiFetch<{ data: Array<{ id: string; name: string; isActive: boolean }> }>("/api/branches"),
-  })
-  const branches = (branchesQuery.data?.data ?? []).filter((item) => item.isActive)
 
   const now = useScheduleNow()
   const today = zonedDateOf(now, TZ)
@@ -184,6 +196,7 @@ function AgendaPage() {
     null,
   )
   const [waitlistOpen, setWaitlistOpen] = React.useState(false)
+  const [chairForm, setChairForm] = React.useState(false)
   const [message, setMessage] = React.useState("")
 
   // ----- Datos -----
@@ -202,7 +215,7 @@ function AgendaPage() {
       apiFetch<{ data: AgendaAppointment[] }>(
         `/api/appointments?branchId=${branchId ?? ""}&from=${encodeURIComponent(range.from)}&to=${encodeURIComponent(range.to)}`,
       ),
-    placeholderData: (previous) => previous,
+    placeholderData: (previous, last) => (last?.queryKey[1] === branchId ? previous : undefined),
   })
   const appointments = React.useMemo(
     () => appointmentsQuery.data?.data ?? [],
@@ -215,7 +228,7 @@ function AgendaPage() {
       apiFetch<{ data: AgendaAvailability }>(
         `/api/agenda/availability?branchId=${branchId ?? ""}&from=${encodeURIComponent(range.from)}&to=${encodeURIComponent(range.to)}`,
       ),
-    placeholderData: (previous) => previous,
+    placeholderData: (previous, last) => (last?.queryKey[1] === branchId ? previous : undefined),
   })
   const availability = availabilityQuery.data?.data
   const waitlist = useWaitlist(branchId)
@@ -242,13 +255,13 @@ function AgendaPage() {
     const linked = linkedAppointment.data?.data
     if (!linked || !resources || openedAppointment.current === linked.id) return
     if (resources.branchId !== linked.branchId) {
-      setParam("branch", linked.branchId)
+      sede.choose(linked.branchId)
       return
     }
     openedAppointment.current = linked.id
     setParam("date", zonedDateOf(linked.startsAt, resources.timeZone))
     setDetail({ id: linked.id, mode: "view" })
-  }, [requested.appointmentId, linkedAppointment.data, resources, setParam])
+  }, [requested.appointmentId, linkedAppointment.data, resources, setParam, sede.choose])
 
   const contextualPatient = useQuery({
     queryKey: ["crm-context", requested.contactId, requested.conversationId ?? "todas"],
@@ -539,7 +552,7 @@ function AgendaPage() {
       const text =
         result.data.status === "confirmada"
           ? `Cita de ${result.data.patientName} confirmada`
-          : `Cita de ${result.data.patientName}: ${result.data.status === "no_asistio" ? "no asistió" : result.data.status}`
+          : `Cita de ${result.data.patientName}: ${SCHEDULE_AGENDA_LABELS[result.data.status].toLocaleLowerCase("es")}`
       toast.success(text)
       setMessage(text)
       await invalidate()
@@ -638,6 +651,8 @@ function AgendaPage() {
   const goTo = (date: string) => setParam("date", date === today ? undefined : date)
   const dayTitle =
     day === today ? `Hoy, ${formatDateLong(day).toLocaleLowerCase("es")}` : formatDateLong(day)
+  const rangeLabel =
+    view === "semana" ? weekLabel(weekDays) : small ? capitalize(dayTitle) : formatDateLong(day)
   const selected = detail
     ? (byId.get(detail.id) ??
       (linkedAppointment.data?.data.id === detail.id ? linkedAppointment.data.data : null))
@@ -709,6 +724,89 @@ function AgendaPage() {
   const loading = !resources || availabilityQuery.isLoading || appointmentsQuery.isLoading
   const noSchedules =
     resources != null && availability != null && availability.professionals.length === 0
+  const noChairs = resources != null && resources.chairs.length === 0
+  const failed = resourcesQuery.isError || appointmentsQuery.isError || availabilityQuery.isError
+  // Falta lo básico para reservar y no hay nada que mostrar: se dice qué falta y cómo resolverlo.
+  const setupMissing = (noChairs || noSchedules) && appointments.length === 0
+  /** Primer día con atención después del que se mira, para no dejar a nadie ante un día vacío. */
+  const nextOpenDay =
+    (availability?.open ?? [])
+      .map((item) => zonedDateOf(item.startsAt, TZ))
+      .filter((date) => date > day)
+      .sort()[0] ??
+    (availability?.professionals ?? [])
+      .flatMap((item) => (item.nextFree ? [zonedDateOf(item.nextFree.startsAt, TZ)] : []))
+      .filter((date) => date > day)
+      .sort()[0] ??
+    null
+  // Los estados traen su propio marco: aquí solo ocupan el alto de la agenda.
+  const framed = (content: React.ReactNode) => (
+    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto [&>*]:flex-1">{content}</div>
+  )
+  const setupState = noChairs ? (
+    <EmptyState
+      icon={Armchair}
+      title="Esta sede aún no tiene sillones"
+      description={
+        canConfigure
+          ? "Añade al menos uno: cada cita ocupa un sillón."
+          : "Cada cita ocupa un sillón. Pide a quien administra la clínica que añada uno."
+      }
+      actionLabel={canConfigure ? "Añadir sillón" : undefined}
+      onAction={canConfigure ? () => setChairForm(true) : undefined}
+    />
+  ) : (
+    <EmptyState
+      icon={CalendarClock}
+      title="Falta el horario de atención"
+      description={
+        canConfigure
+          ? `Ningún profesional tiene horario en ${resources?.branchName ?? "esta sede"}. Con el horario, la agenda muestra los huecos y deja reservar.`
+          : `Ningún profesional tiene horario en ${resources?.branchName ?? "esta sede"}. Pide a quien administra la clínica que lo configure.`
+      }
+      actionLabel={canConfigure ? "Configurar horarios" : undefined}
+      onAction={
+        canConfigure
+          ? () => void navigate({ to: "/settings/availability", search: { branch: branchId } })
+          : undefined
+      }
+    />
+  )
+  const emptyDay = (
+    <EmptyState
+      icon={CalendarX2}
+      title={`Nadie atiende el ${formatDateLong(day).toLocaleLowerCase("es")}`}
+      description={
+        nextOpenDay
+          ? `El próximo día con atención es el ${formatDateLong(nextOpenDay).toLocaleLowerCase("es")}.`
+          : "No hay atención programada en los días siguientes."
+      }
+      actionLabel={nextOpenDay ? `Ir al ${dayShort(nextOpenDay)}` : undefined}
+      onAction={nextOpenDay ? () => goTo(nextOpenDay) : undefined}
+      secondaryActionLabel={canWrite ? "Nueva cita" : undefined}
+      onSecondaryAction={canWrite ? () => openBooking() : undefined}
+    />
+  )
+  const filtered = Boolean(statusFilter || filter)
+  const emptyList = (
+    <EmptyState
+      icon={CalendarDays}
+      title={filtered ? "No hay citas con ese filtro" : "No hay citas este día"}
+      description={
+        filtered
+          ? "Quita el filtro para ver todas las citas del día."
+          : "Cuando se reserve una cita para este día aparecerá aquí."
+      }
+      actionLabel={filtered ? "Quitar filtros" : canWrite ? "Nueva cita" : undefined}
+      onAction={
+        filtered
+          ? () => setParams({ status: undefined, who: undefined })
+          : canWrite
+            ? () => openBooking()
+            : undefined
+      }
+    />
+  )
 
   const grid = (
     <ScheduleGrid
@@ -773,13 +871,7 @@ function AgendaPage() {
               })
           : undefined
       }
-      emptyLabel={
-        loading
-          ? "Cargando agenda…"
-          : noSchedules
-            ? "Ningún profesional tiene horario en esta sede. Configúralo en Ajustes › Disponibilidad para ver y reservar huecos."
-            : "Nadie atiende este día en la sede."
-      }
+      emptyLabel="Nadie atiende este día en la sede."
     />
   )
 
@@ -787,7 +879,18 @@ function AgendaPage() {
     <PageShell fill className="gap-3 text-foreground">
       <PageHeader
         title="Agenda"
-        subtitle={resources ? resources.branchName : "Cargando…"}
+        subtitle={
+          resources ? (
+            <BranchSwitcher
+              branches={sede.branches}
+              value={resources.branchId}
+              fallbackName={resources.branchName}
+              onChange={(id) => sede.choose(id, { who: undefined, group: undefined })}
+            />
+          ) : (
+            "Cargando…"
+          )
+        }
         actions={
           <>
             {resources ? (
@@ -829,50 +932,20 @@ function AgendaPage() {
           </Button>
         </p>
       )}
-      {appointmentsQuery.isError || availabilityQuery.isError || resourcesQuery.isError ? (
-        <p role="alert" className="text-sm text-destructive">
-          No se pudo cargar la agenda.{" "}
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              void resourcesQuery.refetch()
-              void appointmentsQuery.refetch()
-              void availabilityQuery.refetch()
-            }}
-          >
-            Reintentar
-          </Button>
-        </p>
-      ) : null}
 
       <ScheduleToolbar
-        context={
-          branches.length > 1 && resources ? (
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                render={
-                  <Button variant="ghost" size="sm" className="gap-1 text-muted-foreground">
-                    {resources.branchName}
-                    <ChevronDown aria-hidden />
-                  </Button>
-                }
-              />
-              <DropdownMenuContent align="start">
-                {branches.map((item) => (
-                  <DropdownMenuItem
-                    key={item.id}
-                    onClick={() => setParams({ branch: item.id, who: undefined, group: undefined })}
-                  >
-                    {item.name}
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
-          ) : undefined
-        }
-        rangeLabel={
-          view === "semana" ? weekLabel(weekDays) : small ? capitalize(dayTitle) : formatDateLong(day)
+        rangeLabel={rangeLabel}
+        rangeControl={
+          <DatePickerButton
+            value={day}
+            onChange={goTo}
+            variant="ghost"
+            aria-label={`${rangeLabel}. Ir a otra fecha`}
+            className="-mx-2 h-9 min-w-0 gap-1.5 px-2 text-lg font-bold tracking-tight"
+          >
+            <span className="truncate">{rangeLabel}</span>
+            <ChevronDown aria-hidden className="shrink-0" />
+          </DatePickerButton>
         }
         summary={
           view === "semana" ? undefined : `${dayStanding} ${dayStanding === 1 ? "cita" : "citas"}`
@@ -900,15 +973,6 @@ function AgendaPage() {
                   {pending} por confirmar
                 </Button>
               ) : null}
-              <Input
-                type="date"
-                aria-label="Ir a fecha"
-                className="w-auto"
-                value={day}
-                onChange={(event) => {
-                  if (DATE.test(event.target.value)) goTo(event.target.value)
-                }}
-              />
               {view === "semana"
                 ? resourceMenu(focus, team, pickWho, null)
                 : resourceMenu(
@@ -934,16 +998,17 @@ function AgendaPage() {
       ) : null}
 
       {small && view === "dia" && chairs.length > 0 ? (
-        <button
-          type="button"
-          className="-mb-1.5 flex items-center gap-1 self-start text-[13px] font-bold text-muted-foreground"
+        <Button
+          variant="ghost"
+          size="sm"
+          className="-mb-1.5 -ml-2.5 h-7 gap-1 self-start px-2.5 text-[13px] font-bold text-muted-foreground"
           onClick={() =>
             setParams({ group: group === "chairs" ? undefined : "chairs", who: undefined })
           }
         >
           {group === "chairs" ? "Sillones" : "Profesionales"}
           <span className="font-normal">· cambiar</span>
-        </button>
+        </Button>
       ) : null}
       {small ? (
         <ScheduleResourceChips
@@ -960,13 +1025,31 @@ function AgendaPage() {
         />
       ) : null}
 
-      {view === "lista" ? (
+      {failed ? (
+        framed(
+          <ErrorState
+            title="No se pudo cargar la agenda"
+            onRetry={() => {
+              void resourcesQuery.refetch()
+              void appointmentsQuery.refetch()
+              void availabilityQuery.refetch()
+            }}
+          />,
+        )
+      ) : loading ? (
+        framed(<LoadingState message="Cargando agenda…" />)
+      ) : setupMissing ? (
+        framed(setupState)
+      ) : view === "lista" ? (
         <div className="-mr-2 flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pr-2">
           <ScheduleStatusSummary
             counts={counts}
             value={statusFilter}
             onChange={(next) => setParam("status", next ?? undefined)}
           />
+          {listItems.length === 0 ? (
+            framed(emptyList)
+          ) : (
           <ScheduleAgendaList
             items={listItems}
             timeZone={TZ}
@@ -995,14 +1078,8 @@ function AgendaPage() {
               return null
             }}
             menuItems={({ entry }) => menuFor(entry)}
-            emptyLabel={
-              loading
-                ? "Cargando agenda…"
-                : statusFilter || filter
-                  ? "No hay citas con ese filtro este día."
-                  : "No hay citas este día."
-            }
           />
+          )}
         </div>
       ) : small && view === "semana" ? (
         <div className="flex min-h-0 flex-1 flex-col gap-2.5 overflow-y-auto">
@@ -1018,21 +1095,23 @@ function AgendaPage() {
             onSelect={(date) => setParams({ date: date === today ? undefined : date, view: undefined })}
           />
         </div>
+      ) : view === "dia" && dayLanes.length === 0 ? (
+        framed(emptyDay)
       ) : (
         grid
       )}
 
-      {!small && view === "dia" && group === "professionals" && absent.length > 0 ? (
+      {!small &&
+      !failed &&
+      !loading &&
+      !setupMissing &&
+      view === "dia" &&
+      group === "professionals" &&
+      dayLanes.length > 0 &&
+      absent.length > 0 ? (
         <p className="shrink-0 text-xs text-muted-foreground">
           No {absent.length === 1 ? "atiende" : "atienden"} este día:{" "}
           {absent.map((item) => item.label).join(", ")}
-        </p>
-      ) : null}
-      {noSchedules && canWrite ? (
-        <p className="shrink-0 text-xs text-muted-foreground">
-          <Link to="/settings/availability" className="font-medium text-primary underline">
-            Configurar horarios de atención
-          </Link>
         </p>
       ) : null}
 
@@ -1098,6 +1177,19 @@ function AgendaPage() {
           onRebook={(patient) => {
             closeDetail()
             openBooking({ patient })
+          }}
+        />
+      ) : null}
+
+      {chairForm && resources && branchId ? (
+        <ChairForm
+          branchId={branchId}
+          branchName={resources.branchName}
+          suggestedName={`Sillón ${resources.chairs.length + 1}`}
+          onClose={() => setChairForm(false)}
+          onSaved={async () => {
+            setChairForm(false)
+            await invalidate()
           }}
         />
       ) : null}

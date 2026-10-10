@@ -92,6 +92,7 @@ export {
   type RowActionsProps,
   type RowActionTone,
 } from "./row-actions.js"
+export { DatePickerButton, type DatePickerButtonProps } from "./date-picker-button.js"
 export * from "./schedule/index.js"
 export {
   SectionNav,

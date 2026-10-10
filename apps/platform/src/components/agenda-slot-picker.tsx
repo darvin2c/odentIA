@@ -1,5 +1,12 @@
 import { Button, Field, FieldLabel, Input } from "@odentia/ui"
-import { dayMinutesIn, hourLabel, minutesToInstant, ResourceSelect } from "@odentia/ui-patterns"
+import {
+  DatePickerButton,
+  dayMinutesIn,
+  formatDateLong,
+  hourLabel,
+  minutesToInstant,
+  ResourceSelect,
+} from "@odentia/ui-patterns"
 import { useQuery } from "@tanstack/react-query"
 import { useId, useState } from "react"
 import type { AvailableSlot, AvailableSlotsResult } from "../lib/agenda"
@@ -67,16 +74,17 @@ export function AgendaSlotPicker({
       <div className="grid gap-3 sm:grid-cols-2">
         <Field>
           <FieldLabel htmlFor={`${uid}-date`}>Fecha de búsqueda</FieldLabel>
-          <Input
+          <DatePickerButton
             id={`${uid}-date`}
-            type="date"
-            required
+            className="justify-start font-normal"
             value={date}
-            onChange={(event) => {
-              setDate(event.target.value)
+            onChange={(next) => {
+              setDate(next)
               onCriteriaChange?.()
             }}
-          />
+          >
+            {formatDateLong(date)}
+          </DatePickerButton>
         </Field>
         <ResourceSelect
           id={`${uid}-professional`}

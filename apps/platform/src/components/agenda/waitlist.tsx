@@ -9,8 +9,10 @@ import type {
   WaitlistEntry,
   WaitlistPriority,
 } from "../../lib/agenda"
+import { WAITLIST_PRIORITY_LABELS } from "../../lib/agenda"
 import { apiFetch } from "../../lib/api"
 import { AgendaSlotPicker } from "../agenda-slot-picker"
+import { ChoiceSelect } from "../ui/choice-select"
 import { errorMessage } from "./shared"
 
 const PRIORITY_OPTIONS: WaitlistPriority[] = ["alta", "normal", "baja"]
@@ -140,7 +142,9 @@ function WaitlistRow({
     <li className="grid gap-1 rounded-lg border p-2 text-sm">
       <div className="flex flex-wrap items-center gap-2">
         <span className="font-medium">{subject}</span>
-        <span className="text-xs text-muted-foreground">Prioridad {entry.priority}</span>
+        <span className="text-xs text-muted-foreground">
+          Prioridad {WAITLIST_PRIORITY_LABELS[entry.priority].toLocaleLowerCase("es")}
+        </span>
         <span className="text-xs text-muted-foreground">
           {entry.status === "ofrecida" ? "Hueco ofrecido" : "En espera"}
         </span>
@@ -278,18 +282,17 @@ function WaitlistForm({
         />
         <div className="grid gap-2">
           <FieldLabel htmlFor="espera-prioridad">Prioridad</FieldLabel>
-          <select
+          <ChoiceSelect
             id="espera-prioridad"
-            className="h-9 rounded-md border bg-background px-2 text-sm"
             value={priority}
             onChange={(event) => setPriority(event.target.value as WaitlistPriority)}
           >
             {PRIORITY_OPTIONS.map((option) => (
               <option key={option} value={option}>
-                {option === "alta" ? "Alta" : option === "baja" ? "Baja" : "Normal"}
+                {WAITLIST_PRIORITY_LABELS[option]}
               </option>
             ))}
-          </select>
+          </ChoiceSelect>
         </div>
         <div className="grid gap-2">
           <FieldLabel htmlFor="espera-notas">Notas (opcional)</FieldLabel>

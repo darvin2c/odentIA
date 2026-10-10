@@ -250,7 +250,7 @@ test("agenda: reservar un hueco real, confirmarlo y encontrarlo al buscar", asyn
     .click()
   await page.getByRole("button", { name: "Cancelar cita" }).click()
   const cancel = page.getByRole("alertdialog")
-  await cancel.getByLabel("Lo pidió la clínica").check()
+  await cancel.getByRole("radio", { name: "Lo pidió la clínica" }).click()
   await cancel.getByLabel("Nota, si hace falta").fill("Se reprograma por viaje")
   await cancel.getByText("Ofrecer el hueco a la lista de espera").click()
   await shot("cancelar")
@@ -304,6 +304,68 @@ test("agenda: reservar un hueco real, confirmarlo y encontrarlo al buscar", asyn
   await gotoHydrated(page, tenant(owner.org.slug, "/agenda"))
   await expect(page.getByRole("region", { name: /^Agenda del/ })).toBeVisible()
   await shot("dia-oscuro")
+})
+
+test("agenda: lo que falta se dice con su acción, y la sede se elige en un solo sitio", async ({
+  createOwner,
+}, info) => {
+  const owner = await createOwner("agenda-vacia")
+  const { page } = owner
+  const shot = async (name: string) =>
+    info.attach(name, { body: await page.screenshot(), contentType: "image/png" })
+  await page.setViewportSize({ width: 1440, height: 900 })
+
+  // Sin sillones: la agenda lo dice y deja añadir uno ahí mismo.
+  await gotoHydrated(page, tenant(owner.org.slug, "/agenda"))
+  await expect(page.getByText("Esta sede aún no tiene sillones")).toBeVisible()
+  await shot("vacio-sin-sillones")
+  await page.getByRole("button", { name: "Añadir sillón" }).click()
+  await page.getByRole("button", { name: "Añadir sillón" }).last().click()
+
+  // Con sillón pero sin horario: lleva a configurarlo, en la misma sede.
+  await expect(page.getByText("Falta el horario de atención")).toBeVisible()
+  await shot("vacio-sin-horario")
+  await page.getByRole("button", { name: "Configurar horarios" }).click()
+  await expect(page).toHaveURL(tenantPattern(owner.org.slug, "/settings/availability"))
+  await expect(page.getByRole("heading", { name: "Sillones" })).toBeVisible()
+  await expect(page.getByText("Sillón 1", { exact: true })).toBeVisible()
+
+  // Atiende solo mañana: hoy la agenda ofrece ir al próximo día con atención.
+  const tomorrow = new Date(Date.now() - 5 * 3_600_000 + 86_400_000)
+  await call(
+    page,
+    "PUT",
+    "/api/agenda/schedules",
+    owner.org.slug,
+    {
+      branchId: owner.branchId,
+      dentistUserId: owner.user.id,
+      rules: [{ weekday: tomorrow.getUTCDay(), startMin: 8 * 60, endMin: 20 * 60 }],
+    },
+    200,
+  )
+  await gotoHydrated(page, tenant(owner.org.slug, "/agenda"))
+  await expect(page.getByText(/^Nadie atiende el /)).toBeVisible()
+  await shot("vacio-nadie-atiende")
+  await page.getByRole("button", { name: /^Ir al / }).click()
+  await expect(page.getByRole("region", { name: /^Agenda del/ })).toBeVisible()
+
+  // La fecha se elige con el calendario estándar, desde el propio rótulo.
+  await page.getByRole("button", { name: /Ir a otra fecha/ }).click()
+  await expect(page.getByRole("grid")).toBeVisible()
+  await shot("calendario")
+  await page.keyboard.press("Escape")
+
+  // Dos sedes: se elige bajo el título y la elección vale también en Horarios y bloqueos.
+  await call(page, "POST", "/api/branches", owner.org.slug, { name: "Sede Norte" }, 201)
+  await gotoHydrated(page, tenant(owner.org.slug, "/agenda"))
+  await page.getByRole("button", { name: "Sede Central" }).click()
+  await page.getByRole("menuitem", { name: "Sede Norte" }).click()
+  await expect(page.getByRole("button", { name: "Sede Norte" })).toBeVisible()
+  await expect(page.getByText("Esta sede aún no tiene sillones")).toBeVisible()
+  await shot("sede-elegida")
+  await gotoHydrated(page, tenant(owner.org.slug, "/settings/availability"))
+  await expect(page.getByRole("button", { name: "Sede Norte" })).toBeVisible()
 })
 
 test("agenda: solape responde 409 y movimiento con versión", async ({ createOwner }) => {
