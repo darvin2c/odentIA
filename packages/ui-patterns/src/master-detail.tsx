@@ -1,12 +1,22 @@
-import { cn, ResizableHandle, ResizablePanel, ResizablePanelGroup, usePanelRef } from "@odentia/ui"
+import {
+  cn,
+  Drawer,
+  DrawerContent,
+  ResizableHandle,
+  ResizablePanel,
+  ResizablePanelGroup,
+  usePanelRef,
+} from "@odentia/ui"
 import * as React from "react"
 import { common } from "./common.js"
 import {
   SideColumn,
   type SideColumnWidth,
   SideDockPortal,
+  SideDockScopeProvider,
   useSideColumnWidth,
   useSideDock,
+  useSideDockScope,
 } from "./side-dock.js"
 
 /** Corte del modo panel: el ancho donde tabla y tarjeta caben a la vez. */
@@ -70,11 +80,16 @@ const useEffectBeforePaint: typeof React.useEffect =
  * tarjeta lateral a la vez, `drawer` en el resto. El estado inicial es el
  * estrecho a propósito, igual que `useResolvedView`.
  *
+ * Dentro de la columna lateral o de un cajón responde siempre `drawer`: lo que
+ * se abre desde ahí se apila encima, nunca compite por la columna (ver las
+ * reglas de `side-dock`).
+ *
  * No usa `useIsMobile` (corta en 768px): tabla + panel de 24rem necesitan
  * bastante más. Vive aquí y no en `packages/ui` porque el corte debe coincidir
  * con lo que la página renderiza como alternativa (`FormDrawer`).
  */
 export function useDetailMode(): DetailMode {
+  const scope = useSideDockScope()
   const [isWide, setIsWide] = React.useState(false)
 
   useEffectBeforePaint(() => {
@@ -86,7 +101,7 @@ export function useDetailMode(): DetailMode {
     return () => query.removeEventListener("change", apply)
   }, [])
 
-  return isWide ? "panel" : "drawer"
+  return isWide && scope === "page" ? "panel" : "drawer"
 }
 
 /**
@@ -271,7 +286,18 @@ export function MasterDetail({
       <>
         <div className={cn("flex min-w-0 flex-col gap-6", className)}>{children}</div>
         {mode === "panel" && open ? (
-          <SideDockPortal>
+          <SideDockPortal
+            // Columna ocupada por otro detalle: este sale como cajón. Lo cierran
+            // los controles del propio formulario (la página no sabe que cayó
+            // aquí), por eso el cajón no se descarta por fuera.
+            fallback={
+              <Drawer open swipeDirection="right" disablePointerDismissal>
+                <DrawerContent aria-label={common.sidePanel.label}>
+                  <SideDockScopeProvider value="overlay">{panel}</SideDockScopeProvider>
+                </DrawerContent>
+              </Drawer>
+            }
+          >
             <SideColumn
               aria-label={common.sidePanel.label}
               width={dockWidth}

@@ -4,6 +4,7 @@ import { cleanup, render, screen } from "@testing-library/react"
 import type * as React from "react"
 import { afterEach, beforeAll, describe, expect, it } from "vitest"
 
+import { FormDrawer } from "./form/form-drawer.js"
 import { MasterDetail, useDetailMode } from "./master-detail.js"
 import { SideDockProvider, SideDockSlot, useSideDock } from "./side-dock.js"
 
@@ -153,6 +154,71 @@ describe("MasterDetail", () => {
       expect(column.querySelector("aside")).toBeNull()
       expect(screen.getByTestId("ocupada").textContent).toBe("false")
       expect(screen.getByText("tabla")).toBe(table)
+    })
+
+    it("lo que se abre desde la columna es un cajón: ahí dentro el modo es drawer", () => {
+      mockMatchMedia(true)
+      render(
+        layout(
+          <div>
+            formulario <ModeProbe />
+          </div>,
+        ),
+      )
+      const column = screen.getByTestId("columna")
+      expect(column.querySelector("output")?.textContent).toBe("drawer")
+    })
+
+    it("dentro de un cajón el modo también es drawer aunque la ventana sea ancha", () => {
+      mockMatchMedia(true)
+      render(
+        <SideDockProvider>
+          <ModeProbe />
+          <FormDrawer open title="Primero" onClose={() => {}} onSubmit={() => {}}>
+            <span data-testid="anidado">
+              <ModeProbe />
+            </span>
+          </FormDrawer>
+        </SideDockProvider>,
+      )
+      expect(screen.getByTestId("anidado").textContent).toBe("drawer")
+      expect(screen.getAllByText("panel").length).toBe(1)
+    })
+
+    it("la columna es de quien la pide primero: el segundo sale como cajón y no la desplaza", () => {
+      mockMatchMedia(true)
+      const errors: unknown[] = []
+      const original = console.error
+      console.error = (...args: unknown[]) => errors.push(args[0])
+      try {
+        const twice = (second: React.ReactNode) => (
+          <SideDockProvider>
+            <MasterDetail panel={<div>primero</div>}>
+              <div>tabla uno</div>
+            </MasterDetail>
+            <MasterDetail panel={second}>
+              <div>tabla dos</div>
+            </MasterDetail>
+            <div data-testid="columna">
+              <SideDockSlot />
+            </div>
+          </SideDockProvider>
+        )
+        const utils = render(twice(<div>segundo</div>))
+        const column = screen.getByTestId("columna")
+        expect(column.querySelectorAll("aside").length).toBe(1)
+        expect(column.textContent).toContain("primero")
+        expect(column.textContent).not.toContain("segundo")
+        const fallback = document.querySelector("[data-slot='drawer-popup']")
+        expect(fallback?.textContent).toContain("segundo")
+        expect(errors.some((message) => String(message).includes("SideDock"))).toBe(true)
+
+        // Al cerrarse el segundo, el primero sigue en su sitio.
+        utils.rerender(twice(null))
+        expect(column.textContent).toContain("primero")
+      } finally {
+        console.error = original
+      }
     })
 
     it("en ventana estrecha no usa la columna: el formulario es cosa del drawer de la página", () => {

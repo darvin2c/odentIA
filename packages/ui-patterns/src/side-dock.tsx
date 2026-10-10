@@ -13,28 +13,60 @@ import { createPortal } from "react-dom"
  * - `SideDockPortal` lleva contenido de una página a la columna sin sacarlo de
  *   su árbol de React (estado y contexto siguen siendo los de la página).
  * - `SideColumn` es la columna en sí, con su tirador.
+ *
+ * Reglas, que este módulo hace cumplir (no dependen de que cada pantalla las
+ * recuerde):
+ *
+ * 1. Una sola columna. La ocupa quien la pide primero y la conserva hasta que
+ *    se cierra; nadie se la quita.
+ * 2. Lo que se abre DESDE la columna o desde un cajón es siempre un cajón:
+ *    dentro de ellos `useDetailMode()` responde `drawer`, así que un
+ *    formulario que abre otro formulario lo apila encima sin tocar el primero.
+ * 3. Quien pide la columna estando ocupada no se queda sin mostrar: su
+ *    contenido sale en el `fallback` (un cajón). Es una red de seguridad, no
+ *    un recorrido previsto, y en desarrollo se avisa por consola.
+ * 4. El panel del agente no es un formulario: cede la columna si alguien la
+ *    pide y se abre como cajón si ya está ocupada (lo decide la app).
  */
 
 interface SideDockState {
   slot: HTMLElement | null
   setSlot: (element: HTMLElement | null) => void
-  occupied: boolean
-  claim: () => () => void
+  /** Quienes pidieron la columna, por orden de llegada; el primero la tiene. */
+  owners: readonly string[]
+  claim: (id: string) => () => void
+}
+
+/** Dónde se está renderizando: la página, la columna lateral o un cajón. */
+export type SideDockScope = "page" | "column" | "overlay"
+
+const SideDockScopeContext = React.createContext<SideDockScope>("page")
+
+/** Marca lo que hay dentro de la columna o de un cajón (regla 2). */
+export function SideDockScopeProvider({
+  value,
+  children,
+}: {
+  value: SideDockScope
+  children: React.ReactNode
+}) {
+  return <SideDockScopeContext.Provider value={value}>{children}</SideDockScopeContext.Provider>
+}
+
+export function useSideDockScope(): SideDockScope {
+  return React.useContext(SideDockScopeContext)
 }
 
 const SideDockContext = React.createContext<SideDockState | null>(null)
 
 export function SideDockProvider({ children }: { children: React.ReactNode }) {
   const [slot, setSlot] = React.useState<HTMLElement | null>(null)
-  const [claims, setClaims] = React.useState(0)
-  const claim = React.useCallback(() => {
-    setClaims((count) => count + 1)
-    return () => setClaims((count) => count - 1)
+  const [owners, setOwners] = React.useState<readonly string[]>([])
+  const claim = React.useCallback((id: string) => {
+    setOwners((current) => (current.includes(id) ? current : [...current, id]))
+    return () => setOwners((current) => current.filter((owner) => owner !== id))
   }, [])
-  const value = React.useMemo(
-    () => ({ slot, setSlot, occupied: claims > 0, claim }),
-    [slot, claims, claim],
-  )
+  const value = React.useMemo(() => ({ slot, setSlot, owners, claim }), [slot, owners, claim])
   return <SideDockContext.Provider value={value}>{children}</SideDockContext.Provider>
 }
 
@@ -44,7 +76,7 @@ export function SideDockProvider({ children }: { children: React.ReactNode }) {
  */
 export function useSideDock(): { available: boolean; occupied: boolean } {
   const dock = React.useContext(SideDockContext)
-  return { available: dock !== null, occupied: dock?.occupied ?? false }
+  return { available: dock !== null, occupied: (dock?.owners.length ?? 0) > 0 }
 }
 
 /** Lugar de la columna dentro de la fila del layout, a la derecha de la página. */
@@ -53,12 +85,34 @@ export function SideDockSlot() {
   return <div ref={dock?.setSlot} className="contents" />
 }
 
-/** Monta `children` en la columna del layout y la marca ocupada mientras viva. */
-export function SideDockPortal({ children }: { children: React.ReactNode }) {
+/**
+ * Pide la columna del layout mientras viva y monta ahí `children`. Si otro la
+ * tiene, monta `fallback` en su lugar (regla 3): quien llega segundo nunca
+ * desplaza al primero ni se queda sin mostrarse.
+ */
+export function SideDockPortal({
+  children,
+  fallback = null,
+}: {
+  children: React.ReactNode
+  fallback?: React.ReactNode
+}) {
   const dock = React.useContext(SideDockContext)
+  const id = React.useId()
   const claim = dock?.claim
-  React.useEffect(() => claim?.(), [claim])
-  return dock?.slot ? createPortal(children, dock.slot) : null
+  React.useEffect(() => claim?.(id), [claim, id])
+  const owner = dock?.owners[0]
+  const denied = owner !== undefined && owner !== id
+  React.useEffect(() => {
+    if (denied && process.env.NODE_ENV !== "production") {
+      console.error(
+        "SideDock: la columna lateral ya está ocupada; este contenido se muestra como cajón. " +
+          "Un formulario que se abre con otro ya abierto debe montarse como FormDrawer.",
+      )
+    }
+  }, [denied])
+  if (!dock?.slot || owner === undefined) return null
+  return denied ? fallback : createPortal(children, dock.slot)
 }
 
 export interface SideColumnWidth {
@@ -204,7 +258,7 @@ export function SideColumn({
           apply(next)
         }}
       />
-      {children}
+      <SideDockScopeProvider value="column">{children}</SideDockScopeProvider>
     </aside>
   )
 }

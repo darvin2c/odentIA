@@ -1,5 +1,6 @@
 import { Drawer, DrawerContent, cn, useIsMobile } from "@odentia/ui"
 import * as React from "react"
+import { SideDockScopeProvider } from "../side-dock.js"
 import type { DetailPanelSize } from "../master-detail.js"
 import { useCloseGuard } from "../surface.js"
 import { DetailSurface } from "./detail-surface.js"
@@ -60,7 +61,9 @@ export function DetailDrawer({
         aria-labelledby={titleId}
         aria-describedby={surface.description ? descriptionId : undefined}
       >
-        <DetailSurface {...surface} titleId={titleId} descriptionId={descriptionId} onClose={handleClose} />
+        <SideDockScopeProvider value="overlay">
+          <DetailSurface {...surface} titleId={titleId} descriptionId={descriptionId} onClose={handleClose} />
+        </SideDockScopeProvider>
       </DrawerContent>
     </Drawer>
   )

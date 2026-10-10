@@ -1,5 +1,6 @@
 import { cn, Drawer, DrawerContent, useIsMobile } from "@odentia/ui"
 import * as React from "react"
+import { SideDockScopeProvider } from "../side-dock.js"
 import { useCloseGuard } from "../surface.js"
 import { FormSurface } from "./form-surface.js"
 
@@ -74,24 +75,26 @@ export function FormDrawer({
         aria-labelledby={titleId}
         aria-describedby={description ? descriptionId : undefined}
       >
-        <FormSurface
-          title={title}
-          description={description}
-          headerContent={headerContent}
-          titleId={titleId}
-          descriptionId={descriptionId}
-          onCancel={handleClose}
-          onSubmit={onSubmit}
-          isSubmitting={isSubmitting}
-          isLoading={isLoading}
-          error={error}
-          submitLabel={submitLabel}
-          cancelLabel={cancelLabel}
-          submitDisabled={submitDisabled}
-          hideSubmit={hideSubmit}
-        >
-          {children}
-        </FormSurface>
+        <SideDockScopeProvider value="overlay">
+          <FormSurface
+            title={title}
+            description={description}
+            headerContent={headerContent}
+            titleId={titleId}
+            descriptionId={descriptionId}
+            onCancel={handleClose}
+            onSubmit={onSubmit}
+            isSubmitting={isSubmitting}
+            isLoading={isLoading}
+            error={error}
+            submitLabel={submitLabel}
+            cancelLabel={cancelLabel}
+            submitDisabled={submitDisabled}
+            hideSubmit={hideSubmit}
+          >
+            {children}
+          </FormSurface>
+        </SideDockScopeProvider>
       </DrawerContent>
     </Drawer>
   )

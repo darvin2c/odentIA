@@ -73,9 +73,12 @@ export {
   type SideColumnWidth,
   SideDockPortal,
   SideDockProvider,
+  type SideDockScope,
+  SideDockScopeProvider,
   SideDockSlot,
   useSideColumnWidth,
   useSideDock,
+  useSideDockScope,
   useSidebarWidth,
 } from "./side-dock.js"
 export { PageShell, type PageShellProps } from "./page-shell.js"
