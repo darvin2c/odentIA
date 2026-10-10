@@ -2,7 +2,7 @@
 
 ## Responsabilidades
 
-- `panel`: acceso a la cuenta, registro/verificación, invitaciones, onboarding y perfil. Facilitar entrar en la organización correcta; no implementar reglas clínicas.
+- `panel`: acceso a la cuenta, registro/verificación, invitaciones, onboarding y perfil. Facilitar entrar en la organización correcta; no implementar reglas clínicas. Su layout ofrece la misma columna lateral que `platform` (`SideDockProvider` + aviso de cambios sin guardar): los formularios del perfil no necesitan nada propio.
 - `platform`: operación del CRM por organización y entradas públicas (portal, widget, confirmación/baja). Conservar los vínculos entre caso, interlocutor, paciente y oportunidad; distinguir explícitamente superficies autenticadas y públicas.
   En la ficha: códigos del dominio a pantalla solo vía `apps/platform/src/lib/glossary.ts` (o las etiquetas de su dominio), selectores con `ChoiceSelect`/`Select` de `@odentia/ui` (no `<select>` nativo) y un solo `h1` por página.
 - `api`: frontera HTTP, autenticación/autorización, validación, webhooks y SSE. Abre `withOrgContext` y delega negocio en services; no convertir errores de infraestructura en 404 de dominio.

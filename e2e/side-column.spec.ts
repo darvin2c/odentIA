@@ -1,4 +1,4 @@
-import { tenant } from "./env"
+import { PANEL, tenant } from "./env"
 import { expect, test } from "./fixtures"
 import { gotoHydrated } from "./hydration"
 
@@ -36,6 +36,21 @@ test("formularios: columna lateral en ventana ancha, cajón en estrecha y aviso 
   await agent.getByRole("button", { name: "Cerrar el panel del agente" }).click()
   await expect(agent).toBeHidden()
   await expect(sku).toHaveValue("COL-1")
+
+  // Elegir en un desplegable también cuenta como cambio sin guardar.
+  await gotoHydrated(page, tenant(org.slug, "/inventory"))
+  await open()
+  await column.locator("#inv-kind").click()
+  await page.getByRole("option", { name: "Producto", exact: true }).click()
+  await page.getByRole("navigation").getByRole("link", { name: "Inicio", exact: true }).click()
+  await expect(leave).toContainText("Salir sin guardar")
+  await leave.getByRole("button", { name: "Descartar y salir" }).click()
+  await expect(page).toHaveURL(/\/home/)
+
+  // La app de cuenta tiene la misma columna: el perfil se edita al lado.
+  await gotoHydrated(page, `${PANEL}/profile?edit=password`)
+  await expect(column.getByRole("region", { name: "Cambiar contraseña" })).toBeVisible()
+  await expect(page.getByRole("dialog")).toHaveCount(0)
 
   // Estrecha: el mismo formulario es un cajón.
   await page.setViewportSize({ width: 1100, height: 800 })

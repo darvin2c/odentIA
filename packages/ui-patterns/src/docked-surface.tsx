@@ -12,6 +12,18 @@ import {
 } from "./side-dock.js"
 import { OPEN_POPUP_SELECTOR } from "./surface.js"
 
+/**
+ * Controles que cambian un valor sin emitir `input` (desplegables, casillas,
+ * interruptores de Base UI). Sus listas viven en un portal, pero el evento de
+ * React sube igual por el árbol hasta la columna.
+ */
+const CHOICE_SELECTOR =
+  "[role=option],[role=checkbox],[role=switch],[role=radio],[role=menuitemcheckbox],[role=menuitemradio]"
+
+function isChoice(target: EventTarget | null): boolean {
+  return target instanceof Element && target.closest(CHOICE_SELECTOR) !== null
+}
+
 /** Un cajón más ancho que esto es una vista inmersiva (visor, comparador): no va a la columna. */
 const MAX_DOCKED_WIDTH = 672
 
@@ -131,6 +143,16 @@ function DockedColumn({
           setTouched(false)
         }}
         onInputCapture={() => {
+          setArmed(true)
+          setTouched(true)
+        }}
+        onClickCapture={(event) => {
+          if (!isChoice(event.target)) return
+          setArmed(true)
+          setTouched(true)
+        }}
+        onKeyDownCapture={(event) => {
+          if ((event.key !== "Enter" && event.key !== " ") || !isChoice(event.target)) return
           setArmed(true)
           setTouched(true)
         }}
