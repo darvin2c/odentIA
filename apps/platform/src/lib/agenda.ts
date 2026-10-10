@@ -7,8 +7,11 @@ export async function invalidateAppointmentQueries(client: QueryClient): Promise
     [
       "agenda",
       "agenda-appointment",
+      "agenda-availability",
       "agenda-resources",
+      "agenda-search",
       "agenda-slots",
+      "agenda-waitlist",
       "follow-up-appointments",
       "follow-ups",
       "patient-appointments",
@@ -100,6 +103,26 @@ export interface ScheduleBlock {
   reason: string | null
   startsAt: string
   endsAt: string
+}
+
+/** Lo que la agenda pinta como reservable (`GET /api/agenda/availability`). */
+export interface AgendaAvailability {
+  branchId: string
+  timeZone: string
+  professionals: {
+    id: string
+    label: string
+    nextFree: { startsAt: string; endsAt: string; chairId: string | null } | null
+  }[]
+  open: { dentistUserId: string; startsAt: string; endsAt: string }[]
+  blocks: ScheduleBlock[]
+}
+
+/** Persona encontrada al buscar una cita, con sus próximas citas en pie. */
+export interface AgendaSearchPerson {
+  patientId: string
+  patientName: string
+  appointments: AgendaAppointment[]
 }
 
 export type WaitlistPriority = "alta" | "normal" | "baja"

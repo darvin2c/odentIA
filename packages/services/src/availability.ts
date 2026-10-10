@@ -561,6 +561,10 @@ export interface SlotsQuery {
   durationMin?: number
   timeZone?: string
   stepMin?: number
+  /** Descarta los huecos que empiezan antes de este instante (lo ya pasado no se ofrece). */
+  notBefore?: string
+  /** Solo el primer hueco de cada profesional: responde «quién puede atender primero». */
+  firstPerDentist?: boolean
 }
 
 export interface AvailableSlot {
@@ -644,8 +648,15 @@ export async function listAvailableSlots(
     .from(professionalSchedule)
     .innerJoin(user, eq(user.id, professionalSchedule.dentistUserId))
     .where(and(...scheduleConditions))
-    .orderBy(asc(professionalSchedule.dentistUserId), asc(professionalSchedule.weekday))
+    .orderBy(
+      asc(professionalSchedule.dentistUserId),
+      asc(professionalSchedule.weekday),
+      asc(professionalSchedule.startMin),
+    )
   if (rules.length === 0) return { slots: [], truncated: false, timeZone }
+  const notBefore = input.notBefore ? parseInstant(input.notBefore, "notBefore") : null
+  const dentistsWithRules = new Set(rules.map((entry) => entry.rule.dentistUserId))
+  const found = new Set<string>()
 
   const chairs = await tx
     .select({ id: scheduleChair.id, name: scheduleChair.name })
@@ -705,10 +716,12 @@ export async function listAvailableSlots(
     ).getUTCDay()
     for (const entry of rules) {
       if (entry.rule.weekday !== weekday) continue
+      if (input.firstPerDentist && found.has(entry.rule.dentistUserId)) continue
       for (let minute = entry.rule.startMin; minute + slotMin <= entry.rule.endMin; minute += step) {
         const startUtc = zonedTimeToUtc(dayLabel, minute, resolved.timeZone)
         const endUtc = new Date(startUtc.getTime() + slotMin * 60000)
         if (endUtc <= from || startUtc >= to) continue
+        if (notBefore && startUtc < notBefore) continue
         const dentistBusy = busyAppointments.some(
           (item) =>
             item.dentistUserId === entry.rule.dentistUserId &&
@@ -760,6 +773,13 @@ export async function listAvailableSlots(
           timeZone,
         })
         if (slots.length >= MAX_SLOTS) return { slots, truncated: true, timeZone }
+        if (input.firstPerDentist) {
+          found.add(entry.rule.dentistUserId)
+          break
+        }
+      }
+      if (input.firstPerDentist && found.size === dentistsWithRules.size) {
+        return { slots, truncated: false, timeZone }
       }
     }
     if (dayEnd >= to) break
@@ -770,6 +790,107 @@ export async function listAvailableSlots(
     dayLabel = nextLabel
   }
   return { slots, truncated: false, timeZone }
+}
+
+/* Disponibilidad a la vista de la agenda */
+
+const NEXT_FREE_DAYS = 14
+
+export interface AgendaAvailability {
+  branchId: string
+  timeZone: string
+  /** Quienes atienden en la sede (tienen horario), con su próximo hueco reservable. */
+  professionals: Array<{
+    id: string
+    label: string
+    nextFree: { startsAt: string; endsAt: string; chairId: string | null } | null
+  }>
+  /** Tramos de atención del rango, ya como instantes. */
+  open: Array<{ dentistUserId: string; startsAt: string; endsAt: string }>
+  blocks: ScheduleBlockItem[]
+}
+
+/**
+ * Lo que la agenda necesita para pintar qué se puede reservar: horario de cada
+ * profesional materializado en el rango, bloqueos y el primer hueco libre de
+ * cada uno desde `now`. Sale de las mismas reglas que valida la reserva.
+ */
+export async function getAgendaAvailability(
+  tx: Db,
+  orgId: string,
+  input: { branchId: string; from: string; to: string; now?: Date },
+): Promise<AgendaAvailability> {
+  const resolved = await requireBranch(tx, orgId, input.branchId)
+  const from = parseInstant(input.from, "from")
+  const to = parseInstant(input.to, "to")
+  if (to <= from) throw validation("El rango de agenda es inválido")
+  if (to.getTime() - from.getTime() > MAX_RANGE_DAYS * 86_400_000) {
+    throw validation(`El rango máximo es de ${MAX_RANGE_DAYS} días`)
+  }
+  const now = input.now ?? new Date()
+  const rules = await tx
+    .select({ rule: professionalSchedule, dentistName: user.name })
+    .from(professionalSchedule)
+    .innerJoin(user, eq(user.id, professionalSchedule.dentistUserId))
+    .where(
+      and(
+        eq(professionalSchedule.organizationId, orgId),
+        eq(professionalSchedule.branchId, input.branchId),
+        eq(professionalSchedule.isActive, true),
+      ),
+    )
+    .orderBy(asc(user.name), asc(professionalSchedule.weekday), asc(professionalSchedule.startMin))
+
+  const open: AgendaAvailability["open"] = []
+  const startParts = zonedPartsOf(from, resolved.timeZone)
+  let dayLabel = toISODate(startParts.year, startParts.month, startParts.day)
+  for (let dayIndex = 0; dayIndex < MAX_RANGE_DAYS + 1; dayIndex++) {
+    const dayStart = zonedDayStartUtc(dayLabel, resolved.timeZone)
+    if (dayStart >= to) break
+    const weekday = new Date(`${dayLabel}T12:00:00Z`).getUTCDay()
+    for (const entry of rules) {
+      if (entry.rule.weekday !== weekday) continue
+      open.push({
+        dentistUserId: entry.rule.dentistUserId,
+        startsAt: zonedTimeToUtc(dayLabel, entry.rule.startMin, resolved.timeZone).toISOString(),
+        endsAt: zonedTimeToUtc(dayLabel, entry.rule.endMin, resolved.timeZone).toISOString(),
+      })
+    }
+    // 26 h después del inicio cae siempre en el día local siguiente, también con cambio de hora.
+    const nextParts = zonedPartsOf(new Date(dayStart.getTime() + 93_600_000), resolved.timeZone)
+    const nextLabel = toISODate(nextParts.year, nextParts.month, nextParts.day)
+    if (nextLabel <= dayLabel) break
+    dayLabel = nextLabel
+  }
+
+  const [blocks, next] = await Promise.all([
+    listScheduleBlocks(tx, orgId, { branchId: input.branchId, from: input.from, to: input.to }),
+    listAvailableSlots(tx, orgId, {
+      branchId: input.branchId,
+      from: now.toISOString(),
+      to: new Date(now.getTime() + NEXT_FREE_DAYS * 86_400_000).toISOString(),
+      notBefore: now.toISOString(),
+      firstPerDentist: true,
+    }),
+  ])
+  const nextByDentist = new Map(next.slots.map((slot) => [slot.dentistUserId, slot]))
+  const professionals = new Map<string, AgendaAvailability["professionals"][number]>()
+  for (const entry of rules) {
+    if (professionals.has(entry.rule.dentistUserId)) continue
+    const slot = nextByDentist.get(entry.rule.dentistUserId)
+    professionals.set(entry.rule.dentistUserId, {
+      id: entry.rule.dentistUserId,
+      label: entry.dentistName,
+      nextFree: slot ? { startsAt: slot.startsAt, endsAt: slot.endsAt, chairId: slot.chairId } : null,
+    })
+  }
+  return {
+    branchId: input.branchId,
+    timeZone: resolved.timeZone,
+    professionals: [...professionals.values()],
+    open,
+    blocks,
+  }
 }
 
 /* Lista de espera */

@@ -2236,6 +2236,35 @@ const agendaSeed: Array<{
     service: "ENDODONCIA",
     status: "programada",
   },
+  // Tarde de hoy: la agenda muestra «lo que viene», huecos entre citas y por confirmar.
+  {
+    patient: "Carmen Rojas",
+    dentist: ANA_ID,
+    chair: 0,
+    day: 0,
+    start: "15:00",
+    end: "15:45",
+    service: "LIMPIEZA",
+    status: "confirmada",
+  },
+  {
+    patient: "Carlos Paredes",
+    dentist: LUIS_ID,
+    chair: 1,
+    day: 0,
+    start: "15:30",
+    end: "16:30",
+    service: "ENDODONCIA",
+  },
+  {
+    patient: "Elena Huamán",
+    dentist: LUIS_ID,
+    chair: 1,
+    day: 0,
+    start: "17:00",
+    end: "17:30",
+    service: "ORTODONCIA_CTRL",
+  },
   // Ayer: ejecutada, ausencia y cancelación (estas dos últimas liberan recurso).
   {
     patient: "Elena Huamán",

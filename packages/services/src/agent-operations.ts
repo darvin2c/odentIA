@@ -469,6 +469,8 @@ export async function findFreeGaps(tx: Db, orgId: string, input: FreeGapInput): 
     from: from.toISOString(),
     to: to.toISOString(),
     durationMin,
+    // El agente nunca ofrece una hora que ya pasó.
+    notBefore: new Date().toISOString(),
   })
   return {
     gaps: slots.slice(0, 20).map((s) => ({

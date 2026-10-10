@@ -25,6 +25,7 @@ import {
   invalidateAppointmentTokens,
 } from "./automation.js"
 import { isExclusionViolation, notFound, ServiceError, validation } from "./errors.js"
+import { listPatients } from "./patients.js"
 
 function conflict(code: string, message: string): ServiceError {
   return new ServiceError(code, 409, message)
@@ -243,6 +244,8 @@ export interface ListAppointmentsInput {
   q?: string
   /** Solo las citas de este paciente (ficha del paciente). */
   patientId?: string
+  /** Citas de varios pacientes a la vez (búsqueda de la agenda). */
+  patientIds?: string[]
 }
 
 export async function listAppointments(
@@ -260,6 +263,7 @@ export async function listAppointments(
   ]
   if (input.branchId) conditions.push(eq(appointment.branchId, input.branchId))
   if (input.patientId) conditions.push(eq(appointment.patientId, input.patientId))
+  if (input.patientIds?.length) conditions.push(inArray(appointment.patientId, input.patientIds))
   if (input.professionals?.length) {
     conditions.push(inArray(appointment.dentistUserId, input.professionals))
   }
@@ -295,6 +299,46 @@ export async function listAppointments(
     .where(and(...conditions))
     .orderBy(asc(appointment.startsAt))
   return rows.map(toItem)
+}
+
+const SEARCH_PEOPLE = 6
+const SEARCH_APPOINTMENTS_PER_PERSON = 3
+
+export interface AgendaSearchPerson {
+  patientId: string
+  patientName: string
+  /** Próximas citas en pie, de la más cercana a la más lejana. */
+  appointments: AppointmentItem[]
+}
+
+/**
+ * «¿Cuándo es mi cita?»: personas que coinciden con lo escrito (nombre,
+ * documento o teléfono, la misma búsqueda de Pacientes) y sus próximas citas
+ * en pie en cualquier sede.
+ */
+export async function searchAgendaPatients(
+  tx: Db,
+  orgId: string,
+  input: { q: string; now?: Date },
+): Promise<AgendaSearchPerson[]> {
+  const q = input.q.trim()
+  if (q.length < 2) return []
+  const people = await listPatients(tx, orgId, { q, limit: SEARCH_PEOPLE, sort: "name" })
+  if (people.items.length === 0) return []
+  const now = input.now ?? new Date()
+  const upcoming = await listAppointments(tx, orgId, {
+    from: now.toISOString(),
+    to: new Date(now.getTime() + 366 * 86_400_000).toISOString(),
+    statuses: ["programada", "confirmada"],
+    patientIds: people.items.map((item) => item.id),
+  })
+  return people.items.map((item) => ({
+    patientId: item.id,
+    patientName: item.displayName,
+    appointments: upcoming
+      .filter((appointment) => appointment.patientId === item.id)
+      .slice(0, SEARCH_APPOINTMENTS_PER_PERSON),
+  }))
 }
 
 /** Profesionales = miembros de la org; sillones = activos de la sucursal. */
@@ -612,17 +656,36 @@ export async function updateAppointment(
   }
 }
 
-/** Transición explícita; cancelada y no_asistio liberan el recurso en DB. */
+/** Quién pidió cancelar: lo que recepción anota al liberar el hueco. */
+export const APPOINTMENT_CANCEL_REASONS = ["paciente", "clinica", "otro"] as const
+export type AppointmentCancelReason = (typeof APPOINTMENT_CANCEL_REASONS)[number]
+
+/**
+ * Transición explícita; cancelada y no_asistio liberan el recurso en DB. Al
+ * cancelar, el motivo y la nota (opcionales) quedan en la auditoría de la cita.
+ */
 export async function setAppointmentStatus(
   tx: Db,
   orgId: string,
   actorUserId: string,
   id: string,
   status: string,
+  detail?: { cancelReason?: string; cancelNote?: string },
 ): Promise<AppointmentItem> {
   const next = assertStatus(status)
   const current = await requireAppointment(tx, orgId, id)
   if (current.status === next) return getAppointment(tx, orgId, id)
+  const metadata: Record<string, unknown> = { from: current.status }
+  if (next === "cancelada") {
+    if (detail?.cancelReason !== undefined) {
+      if (!(APPOINTMENT_CANCEL_REASONS as readonly string[]).includes(detail.cancelReason)) {
+        throw validation(`Motivo de cancelación inválido: ${detail.cancelReason}`)
+      }
+      metadata.cancelReason = detail.cancelReason
+    }
+    const note = detail?.cancelNote?.trim()
+    if (note) metadata.cancelNote = note.slice(0, 500)
+  }
   try {
     const [updated] = await tx
       .update(appointment)
@@ -630,9 +693,7 @@ export async function setAppointmentStatus(
       .where(and(eq(appointment.organizationId, orgId), eq(appointment.id, id)))
       .returning({ id: appointment.id })
     if (!updated) throw notFound("Cita")
-    await audit(tx, orgId, actorUserId, `appointment.status_${next}`, id, {
-      from: current.status,
-    })
+    await audit(tx, orgId, actorUserId, `appointment.status_${next}`, id, metadata)
     await cancelPendingForAppointment(tx, orgId, id, `cita ${next}`)
     await invalidateAppointmentTokens(tx, orgId, id)
     await notify(tx, { orgId, kind: "appointment.updated", at: new Date().toISOString() })

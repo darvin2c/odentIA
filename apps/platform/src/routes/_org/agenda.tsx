@@ -1,49 +1,80 @@
-import { Button, FieldLabel, FieldLegend, FieldSet, Input, toast } from "@odentia/ui"
+import {
+  Badge,
+  Button,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+  Input,
+  toast,
+} from "@odentia/ui"
 import {
   addDays,
   conflictLabel,
   dayMinutesIn,
-  FilterBar,
-  type FilterDef,
-  FormDrawer,
+  dayRangeOf,
+  daySegments,
   findScheduleConflicts,
-  formatDayShort,
+  formatDateLong,
+  formatSpan,
+  freeMinutesOf,
   hourLabel,
+  type MinuteRange,
   minutesToInstant,
   PageHeader,
   PageShell,
-  ResourceSelect,
-  type ResourceSelectOption,
-  SCHEDULE_STATUS_LABELS,
+  type RowActionItem,
+  ResourceAvatar,
+  SCHEDULE_DEFAULT_WINDOW,
+  SCHEDULE_SMALL_QUERY,
+  type ScheduleAgendaItem,
+  ScheduleAgendaList,
+  type ScheduleAvailability,
+  type ScheduleBlocked,
   type ScheduleColumn,
+  ScheduleDayStrip,
   type ScheduleEntry,
-  ScheduleTimeline,
-  type ScheduleTimelineApi,
-  StatusDot,
+  ScheduleGrid,
+  type ScheduleLane,
+  ScheduleOccupancyLegend,
+  type SchedulePreview,
+  ScheduleResourceChips,
+  type ScheduleStatus,
+  ScheduleStatusSummary,
+  ScheduleToolbar,
+  ScheduleWeekOverview,
+  scheduleToneAt,
   useListSearch,
+  useMediaQuery,
   useScheduleNow,
   weekDates,
+  windowCovering,
   zonedDateOf,
 } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, Link } from "@tanstack/react-router"
-import { ChevronLeft, ChevronRight, Plus } from "lucide-react"
+import { ChevronDown, Clock, Plus } from "lucide-react"
 import * as React from "react"
-import { AgendaSlotPicker } from "../../components/agenda-slot-picker"
-import { NewEncounterButton } from "../../components/patient/new-encounter-button"
+import {
+  AppointmentDrawer,
+  type AppointmentDrawerMode,
+} from "../../components/agenda/appointment-drawer"
+import { AppointmentSearch } from "../../components/agenda/appointment-search"
+import { BookingDrawer, type BookingSeed } from "../../components/agenda/booking-drawer"
+import { dayShort, errorMessage, shortName } from "../../components/agenda/shared"
+import { useWaitlist, WaitlistDrawer } from "../../components/agenda/waitlist"
 import type {
   AgendaAppointment,
+  AgendaAvailability,
   AgendaResources,
-  AgendaServiceOption,
   AppointmentStatus,
-  AvailableSlot,
-  WaitlistEntry,
-  WaitlistPriority,
 } from "../../lib/agenda"
 import { invalidateAppointmentQueries } from "../../lib/agenda"
-import { ApiError, apiFetch } from "../../lib/api"
+import { apiFetch } from "../../lib/api"
 import { usePermission } from "../../lib/crm"
 import { fetchCrmContext } from "../../lib/crm-workspace"
+
 export const Route = createFileRoute("/_org/agenda")({
   validateSearch: (
     search: Record<string, unknown>,
@@ -62,51 +93,60 @@ export const Route = createFileRoute("/_org/agenda")({
   component: AgendaPage,
 })
 
+type AgendaView = "dia" | "semana" | "lista"
 type GroupMode = "professionals" | "chairs"
-interface AppointmentContext {
-  patientId: string
-  patientName: string
-  conversationId?: string
+
+const VIEWS = [
+  { id: "dia", label: "Día" },
+  { id: "semana", label: "Semana" },
+  { id: "lista", label: "Lista" },
+]
+const DATE = /^\d{4}-\d{2}-\d{2}$/
+const STATUSES: AppointmentStatus[] = [
+  "programada",
+  "confirmada",
+  "atendida",
+  "no_asistio",
+  "cancelada",
+]
+
+/** Lo cancelado o no asistido deja el sitio libre: no ocupa la rejilla. */
+const occupies = (status: AppointmentStatus) => status !== "cancelada" && status !== "no_asistio"
+const standing = (status: AppointmentStatus) => status === "programada" || status === "confirmada"
+const capitalize = (text: string) => text.charAt(0).toLocaleUpperCase("es") + text.slice(1)
+
+function rangesOn(
+  items: Array<{ columnId: string; start: string; end: string }>,
+  columnId: string,
+  date: string,
+  timeZone: string,
+): MinuteRange[] {
+  return items
+    .filter((item) => item.columnId === columnId)
+    .flatMap((item): MinuteRange[] => {
+      const range = dayRangeOf(item.start, item.end, date, timeZone)
+      return range ? [range] : []
+    })
 }
 
-const FILTER_KEYS = ["professionals", "chairs", "status"] as const
-const SELECT =
-  "h-8 shrink-0 rounded-md border bg-background px-2 text-sm focus-visible:outline-2 focus-visible:outline-ring"
-
-/** Filtro multi: sin valor = todos, "none" = ninguno, CSV = subconjunto. */
-function matchesResourceFilter(selected: string | null | undefined, id: string): boolean {
-  if (!selected) return true
-  if (selected === "none") return false
-  return selected.split(",").includes(id)
-}
-
-const weekAround = (date: string) =>
-  Array.from({ length: 15 }, (_, index) => addDays(date, index - 7))
-
-const STATUS_OPTIONS = (Object.keys(SCHEDULE_STATUS_LABELS) as AppointmentStatus[]).map(
-  (value) => ({
-    value,
-    label: SCHEDULE_STATUS_LABELS[value],
-    leading: <StatusDot status={value} />,
-  }),
-)
-
-/** Intervalo de la ventana cargada: una semana antes y después del día visible. */
-function windowRange(day: string, timeZone: string): { from: string; to: string } {
-  return {
-    from: minutesToInstant(addDays(day, -7), 0, timeZone),
-    to: minutesToInstant(addDays(day, 8), 0, timeZone),
-  }
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof ApiError ? (error.shape.message ?? error.message) : String(error)
+/** «12 al 17 de octubre», o con los dos meses si la semana los cruza. */
+function weekLabel(dates: string[]): string {
+  const first = dates[0] ?? ""
+  const last = dates[dates.length - 1] ?? first
+  const said = (date: string) => formatDateLong(date).split(" ").slice(1)
+  const [firstDay = "", , firstMonth = ""] = said(first)
+  const [lastDay = "", , lastMonth = ""] = said(last)
+  return firstMonth === lastMonth
+    ? `${firstDay} al ${lastDay} de ${lastMonth}`
+    : `${firstDay} de ${firstMonth} al ${lastDay} de ${lastMonth}`
 }
 
 function AgendaPage() {
   const queryClient = useQueryClient()
   const { get, setParam, setParams } = useListSearch()
-  const [zoom, setZoom] = React.useState(150)
+  const small = useMediaQuery(SCHEDULE_SMALL_QUERY)
+  const canWrite = usePermission("appointments.write")
+  const requested = Route.useSearch()
 
   const branchParam = get("branch")
   const resourcesQuery = useQuery({
@@ -119,26 +159,74 @@ function AgendaPage() {
   const resources = resourcesQuery.data?.data
   const branchId = resources?.branchId
   const TZ = resources?.timeZone ?? "America/Lima"
+  const branchesQuery = useQuery({
+    queryKey: ["agenda-branches"],
+    queryFn: () =>
+      apiFetch<{ data: Array<{ id: string; name: string; isActive: boolean }> }>("/api/branches"),
+  })
+  const branches = (branchesQuery.data?.data ?? []).filter((item) => item.isActive)
 
   const now = useScheduleNow()
   const today = zonedDateOf(now, TZ)
-  const day = /^\d{4}-\d{2}-\d{2}$/.test(get("date") ?? "") ? (get("date") as string) : today
-  const group: GroupMode = get("group") === "chairs" ? "chairs" : "professionals"
-  const [dates, setDates] = React.useState<string[]>(() => weekAround(day))
-  const [editor, setEditor] = React.useState<{
-    appointment?: AgendaAppointment
-    context?: AppointmentContext
-  } | null>(null)
+  const dateParam = get("date") ?? ""
+  const day = DATE.test(dateParam) ? dateParam : today
+  const viewParam = get("view")
+  const view: AgendaView = viewParam === "semana" || viewParam === "lista" ? viewParam : "dia"
+  const group: GroupMode =
+    view === "dia" && get("group") === "chairs" ? "chairs" : "professionals"
+  const who = get("who") ?? null
+  const statusParam = get("status")
+  const statusFilter = STATUSES.find((item) => item === statusParam) ?? null
+
+  const [booking, setBooking] = React.useState<BookingSeed | null>(null)
+  const [preview, setPreview] = React.useState<SchedulePreview | null>(null)
+  const [detail, setDetail] = React.useState<{ id: string; mode: AppointmentDrawerMode } | null>(
+    null,
+  )
+  const [waitlistOpen, setWaitlistOpen] = React.useState(false)
   const [message, setMessage] = React.useState("")
-  const [navigation, setNavigation] = React.useState(0)
-  const scrolledDay = React.useRef<string | null>(null)
-  const navigating = React.useRef(true)
-  const previousSurface = React.useRef("")
-  const targetDay = React.useRef(day)
-  const previousNavigation = React.useRef(navigation)
-  targetDay.current = day
-  const canWrite = usePermission("appointments.write")
-  const requested = Route.useSearch()
+
+  // ----- Datos -----
+  const week = React.useMemo(() => weekDates(day), [day])
+  const range = React.useMemo(
+    () => ({
+      from: minutesToInstant(week[0] ?? day, 0, TZ),
+      to: minutesToInstant(addDays(week[6] ?? day, 1), 0, TZ),
+    }),
+    [week, day, TZ],
+  )
+  const appointmentsQuery = useQuery({
+    queryKey: ["agenda", branchId, range.from, range.to],
+    enabled: branchId != null,
+    queryFn: () =>
+      apiFetch<{ data: AgendaAppointment[] }>(
+        `/api/appointments?branchId=${branchId ?? ""}&from=${encodeURIComponent(range.from)}&to=${encodeURIComponent(range.to)}`,
+      ),
+    placeholderData: (previous) => previous,
+  })
+  const appointments = React.useMemo(
+    () => appointmentsQuery.data?.data ?? [],
+    [appointmentsQuery.data],
+  )
+  const availabilityQuery = useQuery({
+    queryKey: ["agenda-availability", branchId, range.from, range.to],
+    enabled: branchId != null,
+    queryFn: () =>
+      apiFetch<{ data: AgendaAvailability }>(
+        `/api/agenda/availability?branchId=${branchId ?? ""}&from=${encodeURIComponent(range.from)}&to=${encodeURIComponent(range.to)}`,
+      ),
+    placeholderData: (previous) => previous,
+  })
+  const availability = availabilityQuery.data?.data
+  const waitlist = useWaitlist(branchId)
+  const waiting = waitlist.data?.data.length ?? 0
+
+  const invalidate = React.useCallback(
+    () => invalidateAppointmentQueries(queryClient),
+    [queryClient],
+  )
+
+  // ----- Enlaces que llegan de otras pantallas -----
   const linkedAppointment = useQuery({
     queryKey: ["agenda-appointment", requested.appointmentId],
     enabled: Boolean(requested.appointmentId),
@@ -159,32 +247,46 @@ function AgendaPage() {
     }
     openedAppointment.current = linked.id
     setParam("date", zonedDateOf(linked.startsAt, resources.timeZone))
-    setMessage(`Cita de ${linked.patientName}: ${SCHEDULE_STATUS_LABELS[linked.status]}.`)
-    if (canWrite) setEditor({ appointment: linked })
-  }, [requested.appointmentId, linkedAppointment.data, resources, canWrite, setParam])
+    setDetail({ id: linked.id, mode: "view" })
+  }, [requested.appointmentId, linkedAppointment.data, resources, setParam])
+
   const contextualPatient = useQuery({
     queryKey: ["crm-context", requested.contactId, requested.conversationId ?? "todas"],
     enabled: canWrite && !!requested.contactId && !!requested.patientId,
-    queryFn: () => fetchCrmContext(requested.contactId!, requested.conversationId),
+    queryFn: () => fetchCrmContext(requested.contactId ?? "", requested.conversationId),
   })
   const patientLink = contextualPatient.data?.data.contact.patients.find(
     (item) => item.id === requested.patientId,
   )
+  const soloPatient = useQuery({
+    queryKey: ["agenda-patient", requested.patientId],
+    enabled: canWrite && !!requested.patientId && !requested.contactId,
+    queryFn: () =>
+      apiFetch<{ data: { patient: { id: string; displayName: string } } }>(
+        `/api/patients/${requested.patientId}`,
+      ),
+  })
   const openedRequest = React.useRef<string | null>(null)
   React.useEffect(() => {
+    // Desde la ficha llega solo el paciente: la reserva se abre con esa persona.
+    const solo = soloPatient.data?.data.patient
+    if (requested.patientId && !requested.contactId && solo && resources && canWrite) {
+      if (openedRequest.current === solo.id) return
+      openedRequest.current = solo.id
+      setBooking({ patient: { id: solo.id, name: solo.displayName }, lockedPatient: true })
+      return
+    }
     const key =
       requested.contactId && requested.patientId
         ? `${requested.contactId}:${requested.patientId}:${requested.conversationId ?? ""}`
         : null
-    if (!key) openedRequest.current = null
+    if (!key && !requested.patientId) openedRequest.current = null
     if (key && key !== openedRequest.current && patientLink && resources && canWrite) {
       openedRequest.current = key
-      setEditor({
-        context: {
-          patientId: patientLink.id,
-          patientName: patientLink.displayName,
-          conversationId: requested.conversationId,
-        },
+      setBooking({
+        patient: { id: patientLink.id, name: patientLink.displayName },
+        lockedPatient: true,
+        conversationId: requested.conversationId,
       })
     }
   }, [
@@ -192,33 +294,60 @@ function AgendaPage() {
     requested.patientId,
     requested.conversationId,
     patientLink,
+    soloPatient.data,
     resources,
     canWrite,
   ])
-  const closeEditor = () => {
-    setEditor(null)
-    if (requested.appointmentId) setParam("appointmentId", undefined)
-    if (editor?.context)
+
+  const closeBooking = () => {
+    if (booking?.lockedPatient) {
       setParams({ patientId: undefined, contactId: undefined, conversationId: undefined })
+    }
+    setBooking(null)
+  }
+  const closeDetail = () => {
+    setDetail(null)
+    if (requested.appointmentId) setParam("appointmentId", undefined)
+  }
+  const openBooking = (seed: BookingSeed = {}) => {
+    if (!canWrite) return
+    setDetail(null)
+    setBooking({ date: day, ...seed })
   }
 
-  const range = React.useMemo(() => windowRange(day, TZ), [day, TZ])
-  const appointmentsQuery = useQuery({
-    queryKey: ["agenda", branchId, range.from, range.to],
-    enabled: branchId != null,
-    queryFn: () =>
-      apiFetch<{ data: AgendaAppointment[] }>(
-        `/api/appointments?branchId=${branchId ?? ""}&from=${encodeURIComponent(range.from)}&to=${encodeURIComponent(range.to)}`,
-      ),
-    placeholderData: (previous) => previous,
-  })
-  const appointments = React.useMemo(() => appointmentsQuery.data?.data ?? [], [appointmentsQuery])
+  // ----- Recursos -----
+  const toneOf = React.useMemo(() => {
+    const index = new Map((resources?.professionals ?? []).map((item, at) => [item.id, at]))
+    return (id: string) => scheduleToneAt(index.get(id) ?? 0)
+  }, [resources])
+  /** Quienes atienden en la sede, más quien tenga citas esta semana sin horario. */
+  const team = React.useMemo((): ScheduleColumn[] => {
+    const known = new Map<string, string>()
+    for (const item of availability?.professionals ?? []) known.set(item.id, item.label)
+    for (const item of appointments) {
+      if (!known.has(item.dentistUserId)) known.set(item.dentistUserId, item.dentistName)
+    }
+    return [...known].map(([id, label]) => ({ id, label, tone: toneOf(id) }))
+  }, [availability, appointments, toneOf])
+  const chairs = React.useMemo(
+    (): ScheduleColumn[] =>
+      (resources?.chairs ?? []).map((item, index) => ({
+        id: item.id,
+        label: item.label,
+        tone: scheduleToneAt(index),
+      })),
+    [resources],
+  )
+  const nextFreeOf = React.useMemo(
+    () => new Map((availability?.professionals ?? []).map((item) => [item.id, item.nextFree])),
+    [availability],
+  )
+
+  // ----- Citas -----
   const byId = React.useMemo(
     () => new Map(appointments.map((appointment) => [appointment.id, appointment])),
     [appointments],
   )
-
-  // Los conflictos se calculan antes de filtrar: una cita oculta sigue ocupando.
   const conflicts = React.useMemo(
     () =>
       findScheduleConflicts(
@@ -233,18 +362,193 @@ function AgendaPage() {
       ),
     [appointments],
   )
-  const resourceWarnings = React.useMemo(() => {
-    const counts = new Map<string, number>()
-    for (const item of appointments) {
-      if (zonedDateOf(item.startsAt, TZ) !== day || !conflicts.has(item.id)) continue
-      counts.set(item.dentistUserId, (counts.get(item.dentistUserId) ?? 0) + 1)
-      counts.set(item.chairId, (counts.get(item.chairId) ?? 0) + 1)
+  const entries = React.useMemo(
+    () =>
+      appointments.map(
+        (item): ScheduleEntry => ({
+          id: item.id,
+          columnId: group === "chairs" ? item.chairId : item.dentistUserId,
+          title: item.patientName,
+          subtitle: item.serviceName ?? item.reason ?? undefined,
+          start: item.startsAt,
+          end: item.endsAt,
+          status: item.status,
+          warning: conflictLabel(conflicts.get(item.id)),
+        }),
+      ),
+    [appointments, group, conflicts],
+  )
+  const active = React.useMemo(() => entries.filter((entry) => occupies(entry.status)), [entries])
+  const dayAppointments = appointments.filter((item) => zonedDateOf(item.startsAt, TZ) === day)
+  const dayStanding = dayAppointments.filter((item) => occupies(item.status)).length
+  const pending = dayAppointments.filter((item) => item.status === "programada").length
+
+  const open = React.useMemo(
+    (): ScheduleAvailability[] =>
+      (availability?.open ?? []).map((item) => ({
+        columnId: item.dentistUserId,
+        start: item.startsAt,
+        end: item.endsAt,
+      })),
+    [availability],
+  )
+  const blocked = React.useMemo((): ScheduleBlocked[] => {
+    const targets = group === "chairs" ? chairs : team
+    return (availability?.blocks ?? []).flatMap((block) => {
+      // Un bloqueo de sillón no cierra al profesional, ni al revés.
+      const scoped = group === "chairs" ? block.dentistUserId : block.chairId
+      if (scoped) return []
+      const own = group === "chairs" ? block.chairId : block.dentistUserId
+      const label = block.reason ?? (block.kind === "ausencia" ? "Ausencia" : "No disponible")
+      return (own ? [own] : targets.map((item) => item.id)).map((columnId) => ({
+        id: `${block.id}:${columnId}`,
+        columnId,
+        start: block.startsAt,
+        end: block.endsAt,
+        label,
+      }))
+    })
+  }, [availability, group, chairs, team])
+
+  const attends = (id: string, date: string) =>
+    rangesOn(open, id, date, TZ).length > 0 ||
+    appointments.some(
+      (item) => item.dentistUserId === id && zonedDateOf(item.startsAt, TZ) === date,
+    )
+  const dayTeam = team.filter((item) => attends(item.id, day))
+  const absent = team.filter((item) => !dayTeam.includes(item))
+  const dayColumns = group === "chairs" ? chairs : dayTeam
+  /** Semana, y Día en teléfono: de quién es la agenda. */
+  const focus =
+    (who && team.some((item) => item.id === who) ? who : null) ??
+    dayTeam[0]?.id ??
+    team[0]?.id ??
+    null
+  const dayFocus = dayColumns.find((item) => item.id === who)?.id ?? dayColumns[0]?.id ?? null
+  /** Día y Lista en escritorio: a quién se ve (null = todos). */
+  const filter = who && dayColumns.some((item) => item.id === who) ? who : null
+
+  const freeLabel = (id: string, brief: boolean): string | undefined => {
+    const next = nextFreeOf.get(id)
+    if (!next || day < today) return undefined
+    const date = zonedDateOf(next.startsAt, TZ)
+    const hour = hourLabel(dayMinutesIn(next.startsAt, TZ))
+    if (date === day) return brief ? `Libre ${hour}` : `Libre a las ${hour}`
+    return brief ? `Libre ${dayShort(date)}` : `Libre ${dayShort(date)}, ${hour}`
+  }
+  const bookNextFree = (id: string) => {
+    const next = nextFreeOf.get(id)
+    if (!next) return
+    openBooking({
+      dentistUserId: id,
+      startsAt: next.startsAt,
+      date: zonedDateOf(next.startsAt, TZ),
+    })
+  }
+
+  // ----- Carriles -----
+  const dayLanes: ScheduleLane[] = (
+    small ? dayColumns.filter((item) => item.id === dayFocus) : dayColumns
+  )
+    .filter((item) => small || !filter || item.id === filter)
+    .map((item) => {
+      const label = group === "professionals" ? freeLabel(item.id, false) : undefined
+      return {
+        id: item.id,
+        columnId: item.id,
+        date: day,
+        label: item.label,
+        tone: item.tone,
+        detail:
+          group === "professionals" && !label && nextFreeOf.has(item.id) && day >= today
+            ? "Sin huecos próximos"
+            : undefined,
+        action:
+          canWrite && label && !small
+            ? { label, onSelect: () => bookNextFree(item.id) }
+            : undefined,
+      }
+    })
+
+  const focusEntries = active.filter((entry) => entry.columnId === focus)
+  const weekDays = week.filter(
+    (date, index) =>
+      index < 6 ||
+      (focus !== null &&
+        (rangesOn(open, focus, date, TZ).length > 0 ||
+          focusEntries.some((entry) => zonedDateOf(entry.start, TZ) === date))),
+  )
+  const weekWindow = windowCovering(
+    weekDays.flatMap((date) =>
+      focus ? [...rangesOn(open, focus, date, TZ), ...rangesOn(focusEntries, focus, date, TZ)] : [],
+    ),
+    SCHEDULE_DEFAULT_WINDOW,
+  )
+  const weekModel = weekDays.map((date) => {
+    const openRanges = focus ? rangesOn(open, focus, date, TZ) : []
+    const blocks = blocked.filter(
+      (item) => item.columnId === focus && dayRangeOf(item.start, item.end, date, TZ),
+    )
+    const segments = daySegments({
+      window: weekWindow,
+      open: openRanges,
+      busy: focus ? rangesOn(focusEntries, focus, date, TZ) : [],
+      blocked: focus ? rangesOn(blocked, focus, date, TZ) : [],
+      nowMinutes:
+        date === today
+          ? dayMinutesIn(now, TZ)
+          : date < today
+            ? weekWindow.endMinutes
+            : undefined,
+    })
+    const free = freeMinutesOf(segments)
+    return {
+      date,
+      count: focusEntries.filter((entry) => zonedDateOf(entry.start, TZ) === date).length,
+      segments,
+      note: blocks[0]?.label?.toLocaleLowerCase("es"),
+      summary:
+        openRanges.length === 0
+          ? "Sin atención"
+          : date < today
+            ? undefined
+            : free >= 15
+              ? `${formatSpan(Math.floor(free / 15) * 15)} libres`
+              : "Sin sitio",
     }
-    return counts
-  }, [appointments, conflicts, day, TZ])
+  })
+  const weekLanes: ScheduleLane[] = focus
+    ? weekModel.map((item) => ({
+        id: item.date,
+        columnId: focus,
+        date: item.date,
+        label: capitalize(dayShort(item.date)),
+        kind: "day",
+        summary: item.summary,
+      }))
+    : []
 
-  const invalidate = () => invalidateAppointmentQueries(queryClient)
-
+  // ----- Acciones -----
+  const statusMutation = useMutation({
+    mutationFn: (input: { id: string; status: AppointmentStatus }) =>
+      apiFetch<{ data: AgendaAppointment }>(`/api/appointments/${input.id}/status`, {
+        method: "POST",
+        body: JSON.stringify({ status: input.status }),
+      }),
+    onSuccess: async (result) => {
+      const text =
+        result.data.status === "confirmada"
+          ? `Cita de ${result.data.patientName} confirmada`
+          : `Cita de ${result.data.patientName}: ${result.data.status === "no_asistio" ? "no asistió" : result.data.status}`
+      toast.success(text)
+      setMessage(text)
+      await invalidate()
+    },
+    onError: async (error) => {
+      toast.error(errorMessage(error))
+      await invalidate()
+    },
+  })
   const moveMutation = useMutation({
     mutationFn: (input: {
       id: string
@@ -265,1041 +569,550 @@ function AgendaPage() {
         }),
       }),
     onSuccess: async (result) => {
-      setMessage(`Cita de ${result.data.patientName} reprogramada.`)
+      const text = `Cita de ${result.data.patientName} reprogramada`
+      toast.success(text)
+      setMessage(text)
       await invalidate()
     },
+    // El servicio rechazó el hueco: se dice por qué y la cita vuelve a su sitio.
     onError: async (error) => {
       toast.error(errorMessage(error))
       await invalidate()
     },
   })
 
-  const filters: FilterDef[] = React.useMemo(
-    () => [
+  const started = (item: AgendaAppointment) => Date.parse(item.startsAt) <= Date.parse(now)
+  const menuFor = (entry: ScheduleEntry): RowActionItem[] => {
+    const item = byId.get(entry.id)
+    if (!item || !canWrite || !standing(item.status)) return []
+    return [
       {
-        key: "professionals",
-        label: "Profesionales",
-        type: "multi",
-        emptyMeansAll: true,
-        options: (resources?.professionals ?? []).map((item) => ({
-          value: item.id,
-          label: item.label,
-        })),
+        key: "mover",
+        label: "Reprogramar",
+        onSelect: () => setDetail({ id: item.id, mode: "move" }),
       },
+      ...(started(item)
+        ? [
+            {
+              key: "ausente",
+              label: "No asistió",
+              onSelect: () => statusMutation.mutate({ id: item.id, status: "no_asistio" }),
+            },
+          ]
+        : []),
       {
-        key: "chairs",
-        label: "Sillones",
-        type: "multi",
-        options: (resources?.chairs ?? []).map((item) => ({
-          value: item.id,
-          label: item.label,
-        })),
+        key: "cancelar",
+        label: "Cancelar cita",
+        tone: "danger" as const,
+        onSelect: () => setDetail({ id: item.id, mode: "cancel" }),
       },
-      { key: "status", label: "Estado", type: "select", options: STATUS_OPTIONS },
-    ],
-    [resources],
-  )
-  const professionalsFilter = get("professionals")
-  const chairsFilter = get("chairs")
-  const status = get("status")
-
-  const visible = React.useMemo(
-    () =>
-      appointments
-        .filter(
-          (item) =>
-            matchesResourceFilter(professionalsFilter, item.dentistUserId) &&
-            matchesResourceFilter(chairsFilter, item.chairId) &&
-            (!status || item.status === status),
-        )
-        .map((item): ScheduleEntry => {
-          const conflict = conflicts.get(item.id)
-          const context = [item.serviceName ?? item.reason, item.dentistName, item.chairName]
-            .filter(Boolean)
-            .join(" · ")
-          return {
-            id: item.id,
-            columnId: group === "professionals" ? item.dentistUserId : item.chairId,
-            title: item.patientName,
-            subtitle: context,
-            start: item.startsAt,
-            end: item.endsAt,
-            status: item.status,
-            warning: conflictLabel(conflict),
-          }
-        }),
-    [appointments, professionalsFilter, chairsFilter, status, conflicts, group],
-  )
-  const daily = visible.filter((entry) => zonedDateOf(entry.start, TZ) === day)
-
-  const columns = React.useMemo((): ScheduleColumn[] => {
-    const base =
-      group === "professionals"
-        ? (resources?.professionals ?? []).map((item) => ({ id: item.id, label: item.label }))
-        : (resources?.chairs ?? []).map((item) => ({ id: item.id, label: item.label }))
-    return base
-      .filter((column) =>
-        matchesResourceFilter(
-          group === "professionals" ? professionalsFilter : chairsFilter,
-          column.id,
-        ),
-      )
-      .map((column) => ({
-        ...column,
-        warning: resourceWarnings.has(column.id)
-          ? `${resourceWarnings.get(column.id)} citas con solapamiento este día`
-          : undefined,
-      }))
-  }, [group, resources, professionalsFilter, chairsFilter, resourceWarnings])
-  const hasColumns = columns.length > 0
-  // Un montaje nuevo informa su origen antes de aplicar la fecha pedida; se ignora.
-  if (previousSurface.current !== `${group}:${hasColumns}`) navigating.current = true
-  const dateLoaded = dates.includes(day)
-  const api = React.useRef<ScheduleTimelineApi | null>(null)
-  const navigate = (date: string) => {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return
-    navigating.current = true
-    scrolledDay.current = null
-    if (date === day) setNavigation((value) => value + 1)
-    else setParam("date", date)
+    ]
   }
-  const reportVisibleDay = React.useCallback(
-    (date: string) => {
-      if (navigating.current || date === targetDay.current) return
-      scrolledDay.current = date
-      setParam("date", date, { replace: true })
-    },
-    [setParam],
-  )
-  React.useEffect(() => {
-    const requested = previousNavigation.current !== navigation
-    previousNavigation.current = navigation
-    const surface = `${group}:${hasColumns}`
-    const changedSurface = previousSurface.current !== surface
-    previousSurface.current = surface
-    if (!dateLoaded) {
-      navigating.current = true
-      setDates(weekAround(day))
-      return
-    }
-    if (!hasColumns) {
-      navigating.current = true
-      return
-    }
-    if (requested || scrolledDay.current !== day || changedSurface) {
-      api.current?.scrollToDate(day, undefined, "auto")
-    }
-    scrolledDay.current = null
-    navigating.current = false
-  }, [day, group, hasColumns, navigation, dateLoaded])
-  const extend = React.useCallback(
-    (edge: "start" | "end") => {
-      setDates((current) =>
-        edge === "start"
-          ? [addDays(current[0] ?? day, -2), addDays(current[0] ?? day, -1), ...current]
-          : [
-              ...current,
-              addDays(current[current.length - 1] ?? day, 1),
-              addDays(current[current.length - 1] ?? day, 2),
-            ],
-      )
-    },
-    [day],
+
+  const listItems: ScheduleAgendaItem[] = dayAppointments
+    .filter((item) => !filter || item.dentistUserId === filter)
+    .filter((item) => !statusFilter || item.status === statusFilter)
+    .map((item) => ({
+      entry: {
+        id: item.id,
+        columnId: item.dentistUserId,
+        title: item.patientName,
+        subtitle: item.serviceName ?? item.reason ?? undefined,
+        start: item.startsAt,
+        end: item.endsAt,
+        status: item.status,
+      },
+      resourceLabel: item.dentistName,
+      resourceShortLabel: shortName(item.dentistName),
+      resourceTone: toneOf(item.dentistUserId),
+      resourceDetail: item.chairName,
+    }))
+  const counts: Partial<Record<ScheduleStatus, number>> = {}
+  for (const item of dayAppointments) {
+    if (filter && item.dentistUserId !== filter) continue
+    counts[item.status] = (counts[item.status] ?? 0) + 1
+  }
+
+  // ----- Composición -----
+  const step = view === "semana" ? 7 : 1
+  const goTo = (date: string) => setParam("date", date === today ? undefined : date)
+  const dayTitle =
+    day === today ? `Hoy, ${formatDateLong(day).toLocaleLowerCase("es")}` : formatDateLong(day)
+  const selected = detail
+    ? (byId.get(detail.id) ??
+      (linkedAppointment.data?.data.id === detail.id ? linkedAppointment.data.data : null))
+    : null
+
+  const resourceMenu = (
+    current: string | null,
+    options: ScheduleColumn[],
+    onPick: (id: string | null) => void,
+    allLabel: string | null,
+  ) => {
+    const chosen = options.find((item) => item.id === current)
+    return (
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          render={
+            <Button variant="outline" className="gap-2">
+              {chosen ? (
+                <ResourceAvatar
+                  label={chosen.label}
+                  tone={chosen.tone}
+                  size="sm"
+                  className="-ml-1.5"
+                />
+              ) : null}
+              {chosen ? chosen.label : (allLabel ?? "Elegir")}
+              <ChevronDown aria-hidden />
+            </Button>
+          }
+        />
+        <DropdownMenuContent align="end">
+          {allLabel ? (
+            <DropdownMenuItem onClick={() => onPick(null)}>{allLabel}</DropdownMenuItem>
+          ) : null}
+          {options.map((item) => (
+            <DropdownMenuItem key={item.id} onClick={() => onPick(item.id)}>
+              <ResourceAvatar label={item.label} tone={item.tone} size="sm" />
+              {item.label}
+            </DropdownMenuItem>
+          ))}
+          {view === "dia" && chairs.length > 0 ? (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                onClick={() =>
+                  setParams({
+                    group: group === "chairs" ? undefined : "chairs",
+                    who: undefined,
+                  })
+                }
+              >
+                {group === "chairs" ? "Ver por profesional" : "Ver por sillón"}
+              </DropdownMenuItem>
+            </>
+          ) : null}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    )
+  }
+  const pickWho = (id: string | null) => setParam("who", id ?? undefined)
+
+  const newButton = canWrite ? (
+    <Button onClick={() => openBooking()} className={small ? "h-12 w-full text-base" : undefined}>
+      <Plus aria-hidden />
+      Nueva cita
+    </Button>
+  ) : null
+
+  const loading = !resources || availabilityQuery.isLoading || appointmentsQuery.isLoading
+  const noSchedules =
+    resources != null && availability != null && availability.professionals.length === 0
+
+  const grid = (
+    <ScheduleGrid
+      className="min-h-0 flex-1"
+      label={
+        view === "dia" ? `Agenda del ${formatDateLong(day)}` : `Semana del ${weekLabel(weekDays)}`
+      }
+      lanes={view === "dia" ? dayLanes : weekLanes}
+      timeZone={TZ}
+      entries={active}
+      availability={group === "chairs" ? undefined : open}
+      blocked={blocked}
+      window={view === "semana" ? weekWindow : undefined}
+      hourHeight={small ? 88 : view === "semana" ? 96 : 72}
+      minLaneWidth={view === "semana" ? 132 : 168}
+      hideHeader={small && view === "dia"}
+      now={now}
+      selectedEntryId={detail?.id}
+      preview={view === "dia" && group === "chairs" ? null : preview}
+      onEntryClick={(entry) => setDetail({ id: entry.id, mode: "view" })}
+      onEntryMove={
+        canWrite
+          ? (entry, move) => {
+              const item = byId.get(entry.id)
+              if (!item) return
+              moveMutation.mutate({
+                id: item.id,
+                expectedVersion: item.version,
+                startsAt: move.start,
+                endsAt: move.end,
+                dentistUserId:
+                  group === "professionals" && move.columnId !== item.dentistUserId
+                    ? move.columnId
+                    : undefined,
+                chairId:
+                  group === "chairs" && move.columnId !== item.chairId ? move.columnId : undefined,
+              })
+            }
+          : undefined
+      }
+      onEntryResize={
+        canWrite
+          ? (entry, resize) => {
+              const item = byId.get(entry.id)
+              if (!item) return
+              moveMutation.mutate({
+                id: item.id,
+                expectedVersion: item.version,
+                startsAt: resize.start,
+                endsAt: resize.end,
+              })
+            }
+          : undefined
+      }
+      onCreate={
+        canWrite && group === "professionals"
+          ? (target) =>
+              openBooking({
+                dentistUserId: target.columnId,
+                startsAt: target.start,
+                date: target.date,
+              })
+          : undefined
+      }
+      emptyLabel={
+        loading
+          ? "Cargando agenda…"
+          : noSchedules
+            ? "Ningún profesional tiene horario en esta sede. Configúralo en Ajustes › Disponibilidad para ver y reservar huecos."
+            : "Nadie atiende este día en la sede."
+      }
+    />
   )
 
   return (
     <PageShell fill className="gap-3 text-foreground">
       <PageHeader
         title="Agenda"
-        subtitle={
-          resources ? `${resources.branchName} · ${formatDayShort(day)}` : "Cargando recursos…"
-        }
+        subtitle={resources ? resources.branchName : "Cargando…"}
         actions={
-          canWrite ? (
-            <Button aria-label="Nueva cita" onClick={() => setEditor({})}>
-              <Plus className="size-4" />
-              <span className="hidden sm:inline">Nueva cita</span>
-            </Button>
-          ) : undefined
+          <>
+            {resources ? (
+              <AppointmentSearch
+                compact={small}
+                timeZone={TZ}
+                today={today}
+                canBook={canWrite}
+                onOpen={(appointment) => setParam("appointmentId", appointment.id)}
+                onBook={(patient) => openBooking({ patient })}
+              />
+            ) : null}
+            {small ? null : (
+              <>
+                <Button variant="outline" onClick={() => setWaitlistOpen(true)}>
+                  Lista de espera
+                  {waiting > 0 ? <Badge variant="soft">{waiting}</Badge> : null}
+                </Button>
+                {newButton}
+              </>
+            )}
+          </>
         }
       />
+
       {requested.patientId &&
-        (contextualPatient.error || (contextualPatient.isSuccess && !patientLink)) && (
-          <p role="alert" className="px-4 text-sm text-destructive">
+        (contextualPatient.error ||
+          soloPatient.isError ||
+          (contextualPatient.isSuccess && !patientLink)) && (
+          <p role="alert" className="text-sm text-destructive">
             No se pudo preparar la cita: comprueba el vínculo del paciente y vuelve a abrir el caso.
           </p>
         )}
       {linkedAppointment.isError && (
-        <p role="alert" className="px-4 text-sm text-destructive">
+        <p role="alert" className="text-sm text-destructive">
           No se pudo cargar la cita vinculada.{" "}
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => void linkedAppointment.refetch()}
-          >
+          <Button variant="outline" size="sm" onClick={() => void linkedAppointment.refetch()}>
             Reintentar
           </Button>
         </p>
       )}
-      <div className="flex min-w-0 shrink-0 flex-wrap items-center gap-2 rounded-xl border bg-background px-3 py-2 sm:px-4">
-        <div className="flex items-center gap-1">
+      {appointmentsQuery.isError || availabilityQuery.isError || resourcesQuery.isError ? (
+        <p role="alert" className="text-sm text-destructive">
+          No se pudo cargar la agenda.{" "}
           <Button
             variant="outline"
-            size="icon-sm"
-            aria-label="Día anterior"
-            onClick={() => navigate(addDays(day, -1))}
+            size="sm"
+            onClick={() => {
+              void resourcesQuery.refetch()
+              void appointmentsQuery.refetch()
+              void availabilityQuery.refetch()
+            }}
           >
-            <ChevronLeft />
+            Reintentar
           </Button>
-          <Button variant="outline" size="sm" onClick={() => navigate(today)}>
-            Hoy
-          </Button>
-          <Button
-            variant="outline"
-            size="icon-sm"
-            aria-label="Día siguiente"
-            onClick={() => navigate(addDays(day, 1))}
-          >
-            <ChevronRight />
-          </Button>
-        </div>
-        <input
-          className={SELECT}
-          type="date"
-          aria-label="Ir a fecha"
-          value={day}
-          onChange={(event) => navigate(event.target.value)}
-        />
-        <select
-          aria-label="Ver por"
-          className={SELECT}
-          value={group}
-          onChange={(event) => setParams({ group: event.target.value })}
-        >
-          <option value="professionals">Por profesional</option>
-          <option value="chairs">Por sillón</option>
-        </select>
-        <select
-          aria-label="Escala"
-          className={SELECT}
-          value={zoom}
-          onChange={(event) => setZoom(Number(event.target.value))}
-        >
-          <option value={90}>Escala compacta</option>
-          <option value={150}>Escala normal</option>
-          <option value={240}>Escala ampliada</option>
-        </select>
-        <FilterBar
-          filters={filters}
-          sortOptions={[]}
-          showSearch={false}
-          resetKeys={[...FILTER_KEYS]}
-          inlineFrom="lg"
-          className="ml-auto min-w-0 bg-transparent p-0 lg:min-w-[480px] lg:flex-1"
-        />
-      </div>
-      <main className="flex min-h-0 min-w-0 flex-1 flex-col gap-2">
-        {!resources ? (
-          <div className="grid min-h-0 flex-1 place-content-center rounded-xl border border-dashed p-6 text-sm text-muted-foreground">
-            Cargando agenda…
-          </div>
-        ) : !hasColumns ? (
-          <div className="grid min-h-0 flex-1 place-content-center gap-3 overflow-auto rounded-xl border border-dashed p-6 text-center">
-            <h3 className="font-medium">No hay recursos seleccionados</h3>
-            <p className="text-sm text-muted-foreground">
-              Ajusta los filtros o crea sillones y profesionales en la sucursal.
-            </p>
-          </div>
-        ) : (
-          <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-            <ScheduleTimeline
-              className="max-h-full min-h-0"
-              mobileLayout="focus"
-              dates={dates}
-              columns={columns}
-              entries={visible}
-              timeZone={TZ}
-              now={now}
-              hourWidth={zoom}
-              rowHeight={104}
-              autoScrollToNow={false}
-              apiRef={api}
-              onVisibleDateChange={reportVisibleDay}
-              onDateRequest={navigate}
-              onExtendDays={extend}
-              onEntryClick={(entry) => {
-                const appointment = byId.get(entry.id)
-                if (appointment) setEditor({ appointment })
-              }}
-              onEntryMove={(entry, move) => {
-                const appointment = byId.get(entry.id)
-                if (!appointment) return
-                moveMutation.mutate({
-                  id: appointment.id,
-                  expectedVersion: appointment.version,
-                  startsAt: move.start,
-                  endsAt: move.end,
-                  dentistUserId:
-                    group === "professionals" && move.columnId !== appointment.dentistUserId
-                      ? move.columnId
-                      : undefined,
-                  chairId:
-                    group === "chairs" && move.columnId !== appointment.chairId
-                      ? move.columnId
-                      : undefined,
-                })
-              }}
-              onEntryResize={(entry, resize) => {
-                const appointment = byId.get(entry.id)
-                if (!appointment) return
-                moveMutation.mutate({
-                  id: appointment.id,
-                  expectedVersion: appointment.version,
-                  startsAt: resize.start,
-                  endsAt: resize.end,
-                })
-              }}
-            />
-          </div>
-        )}
-        {hasColumns && daily.length === 0 && !appointmentsQuery.isLoading && (
-          <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 rounded-lg border border-dashed p-3 text-sm">
-            <span>
-              {professionalsFilter || chairsFilter || status
-                ? "No hay citas para este día con los filtros actuales."
-                : "No hay citas para este día."}
-            </span>
-            {professionalsFilter || chairsFilter || status ? (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() =>
-                  setParams(Object.fromEntries(FILTER_KEYS.map((key) => [key, undefined])))
+        </p>
+      ) : null}
+
+      <ScheduleToolbar
+        context={
+          branches.length > 1 && resources ? (
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                render={
+                  <Button variant="ghost" size="sm" className="gap-1 text-muted-foreground">
+                    {resources.branchName}
+                    <ChevronDown aria-hidden />
+                  </Button>
                 }
-              >
-                Restablecer filtros
-              </Button>
-            ) : null}
-          </div>
-        )}
-      </main>
-      {resources && branchId && (
-        <WaitlistPanel
-          branchId={branchId}
-          timeZone={TZ}
-          resources={resources}
-          day={day}
-          onChanged={async () => {
-            await invalidate()
-          }}
+              />
+              <DropdownMenuContent align="start">
+                {branches.map((item) => (
+                  <DropdownMenuItem
+                    key={item.id}
+                    onClick={() => setParams({ branch: item.id, who: undefined, group: undefined })}
+                  >
+                    {item.name}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : undefined
+        }
+        rangeLabel={
+          view === "semana" ? weekLabel(weekDays) : small ? capitalize(dayTitle) : formatDateLong(day)
+        }
+        summary={
+          view === "semana" ? undefined : `${dayStanding} ${dayStanding === 1 ? "cita" : "citas"}`
+        }
+        onPrevious={small && view !== "semana" ? undefined : () => goTo(addDays(day, -step))}
+        onNext={small && view !== "semana" ? undefined : () => goTo(addDays(day, step))}
+        onToday={small ? undefined : () => goTo(today)}
+        previousLabel={view === "semana" ? "Semana anterior" : "Día anterior"}
+        nextLabel={view === "semana" ? "Semana siguiente" : "Día siguiente"}
+        views={VIEWS}
+        view={view}
+        onViewChange={(next) =>
+          setParams({ view: next === "dia" ? undefined : next, status: undefined })
+        }
+        stretchViews={small}
+        filters={
+          small ? undefined : (
+            <>
+              {view !== "semana" && pending > 0 ? (
+                <Button
+                  variant="outline"
+                  onClick={() => setParams({ view: "lista", status: "programada" })}
+                >
+                  <Clock aria-hidden className="text-warning-foreground" />
+                  {pending} por confirmar
+                </Button>
+              ) : null}
+              <Input
+                type="date"
+                aria-label="Ir a fecha"
+                className="w-auto"
+                value={day}
+                onChange={(event) => {
+                  if (DATE.test(event.target.value)) goTo(event.target.value)
+                }}
+              />
+              {view === "semana"
+                ? resourceMenu(focus, team, pickWho, null)
+                : resourceMenu(
+                    filter,
+                    dayColumns,
+                    pickWho,
+                    group === "chairs" ? "Sillones: todos" : "Profesionales: todos",
+                  )}
+            </>
+          )
+        }
+      />
+
+      {small && view !== "semana" ? (
+        <ScheduleDayStrip
+          dates={week.slice(0, 6).includes(day) ? week.slice(0, 6) : week}
+          value={day}
+          today={today}
+          onChange={goTo}
+          onPrevious={() => goTo(addDays(day, -7))}
+          onNext={() => goTo(addDays(day, 7))}
         />
+      ) : null}
+
+      {small && view === "dia" && chairs.length > 0 ? (
+        <button
+          type="button"
+          className="-mb-1.5 flex items-center gap-1 self-start text-[13px] font-bold text-muted-foreground"
+          onClick={() =>
+            setParams({ group: group === "chairs" ? undefined : "chairs", who: undefined })
+          }
+        >
+          {group === "chairs" ? "Sillones" : "Profesionales"}
+          <span className="font-normal">· cambiar</span>
+        </button>
+      ) : null}
+      {small ? (
+        <ScheduleResourceChips
+          label={group === "chairs" ? "Sillones" : "Profesionales"}
+          resources={view === "semana" ? team : view === "dia" ? dayColumns : dayTeam}
+          formatLabel={(item) => (group === "chairs" ? item.label : shortName(item.label))}
+          detailOf={
+            view === "lista" || group === "chairs" ? undefined : (item) => freeLabel(item.id, true)
+          }
+          value={view === "lista" ? filter : view === "semana" ? focus : dayFocus}
+          allLabel={view === "lista" ? "Todos" : undefined}
+          onChange={pickWho}
+          className="-mx-4 px-4"
+        />
+      ) : null}
+
+      {view === "lista" ? (
+        <div className="-mr-2 flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pr-2">
+          <ScheduleStatusSummary
+            counts={counts}
+            value={statusFilter}
+            onChange={(next) => setParam("status", next ?? undefined)}
+          />
+          <ScheduleAgendaList
+            items={listItems}
+            timeZone={TZ}
+            now={day === today ? now : undefined}
+            onOpen={(entry) => setDetail({ id: entry.id, mode: "view" })}
+            primaryAction={({ entry }) => {
+              if (!canWrite) return null
+              if (entry.status === "programada") {
+                return {
+                  label: "Confirmar",
+                  pending:
+                    statusMutation.isPending && statusMutation.variables?.id === entry.id,
+                  onSelect: () => statusMutation.mutate({ id: entry.id, status: "confirmada" }),
+                }
+              }
+              if (entry.status === "no_asistio") {
+                const item = byId.get(entry.id)
+                return item
+                  ? {
+                      label: "Reagendar",
+                      onSelect: () =>
+                        openBooking({ patient: { id: item.patientId, name: item.patientName } }),
+                    }
+                  : null
+              }
+              return null
+            }}
+            menuItems={({ entry }) => menuFor(entry)}
+            emptyLabel={
+              loading
+                ? "Cargando agenda…"
+                : statusFilter || filter
+                  ? "No hay citas con ese filtro este día."
+                  : "No hay citas este día."
+            }
+          />
+        </div>
+      ) : small && view === "semana" ? (
+        <div className="flex min-h-0 flex-1 flex-col gap-2.5 overflow-y-auto">
+          <div className="flex items-center gap-2">
+            <ScheduleOccupancyLegend className="flex-1" />
+            <span className="text-xs font-semibold text-muted-foreground tabular-nums">
+              {hourLabel(weekWindow.startMinutes)} a {hourLabel(weekWindow.endMinutes)}
+            </span>
+          </div>
+          <ScheduleWeekOverview
+            days={weekModel}
+            today={today}
+            onSelect={(date) => setParams({ date: date === today ? undefined : date, view: undefined })}
+          />
+        </div>
+      ) : (
+        grid
       )}
+
+      {!small && view === "dia" && group === "professionals" && absent.length > 0 ? (
+        <p className="shrink-0 text-xs text-muted-foreground">
+          No {absent.length === 1 ? "atiende" : "atienden"} este día:{" "}
+          {absent.map((item) => item.label).join(", ")}
+        </p>
+      ) : null}
+      {noSchedules && canWrite ? (
+        <p className="shrink-0 text-xs text-muted-foreground">
+          <Link to="/settings/availability" className="font-medium text-primary underline">
+            Configurar horarios de atención
+          </Link>
+        </p>
+      ) : null}
+
+      {small ? (
+        <div className="flex shrink-0 gap-2">
+          <Button variant="outline" className="h-12" onClick={() => setWaitlistOpen(true)}>
+            Espera
+            {waiting > 0 ? <Badge variant="soft">{waiting}</Badge> : null}
+          </Button>
+          <div className="min-w-0 flex-1">{newButton}</div>
+        </div>
+      ) : null}
+
       <span role="status" className="sr-only">
         {message}
       </span>
-      {editor && resources && (
-        <AppointmentEditor
-          key={editor.appointment?.id ?? "new"}
-          appointment={editor.appointment}
-          context={editor.context}
-          day={day}
+
+      {booking && resources && branchId ? (
+        <BookingDrawer
+          key={`${booking.patient?.id ?? ""}:${booking.startsAt ?? ""}:${booking.dentistUserId ?? ""}`}
+          seed={booking}
+          branchId={branchId}
           timeZone={TZ}
-          resources={resources}
-          onClose={closeEditor}
-          onSaved={async (text) => {
-            setMessage(text)
-            closeEditor()
+          today={today}
+          team={(availability?.professionals ?? []).map((item) => ({
+            id: item.id,
+            label: item.label,
+            tone: toneOf(item.id),
+          }))}
+          onPreview={setPreview}
+          onClose={closeBooking}
+          onSaved={async (created) => {
+            setMessage(`Cita de ${created.patientName} reservada`)
+            closeBooking()
+            // Se va al día de la cita: quien reserva ve lo que acaba de reservar.
+            const date = zonedDateOf(created.startsAt, TZ)
+            if (date !== day) goTo(date)
             await invalidate()
             await queryClient.invalidateQueries({ queryKey: ["crm-context"] })
           }}
         />
-      )}
-    </PageShell>
-  )
-}
+      ) : null}
 
-interface DraftValues {
-  patientId: string
-  dentistUserId: string
-  chairId: string
-  serviceId: string
-  date: string
-  from: string
-  to: string
-  reason: string
-  status: AppointmentStatus
-}
-
-function AppointmentEditor({
-  appointment,
-  context,
-  day,
-  timeZone,
-  resources,
-  onClose,
-  onSaved,
-}: {
-  appointment?: AgendaAppointment
-  context?: AppointmentContext
-  day: string
-  timeZone: string
-  resources: AgendaResources
-  onClose: () => void
-  onSaved: (message: string) => Promise<void>
-}) {
-  const initial = React.useMemo((): DraftValues => {
-    if (appointment) {
-      return {
-        patientId: appointment.patientId,
-        dentistUserId: appointment.dentistUserId,
-        chairId: appointment.chairId,
-        serviceId: appointment.serviceId ?? "",
-        date: zonedDateOf(appointment.startsAt, timeZone),
-        from: hourLabel(dayMinutesIn(appointment.startsAt, timeZone)),
-        to: hourLabel(dayMinutesIn(appointment.endsAt, timeZone)),
-        reason: appointment.reason ?? "",
-        status: appointment.status,
-      }
-    }
-    const nowMinutes = dayMinutesIn(new Date().toISOString(), timeZone)
-    const from = Math.min(Math.max(Math.ceil(nowMinutes / 30) * 30, 8 * 60), 19 * 60)
-    return {
-      patientId: context?.patientId ?? "",
-      dentistUserId: resources.professionals[0]?.id ?? "",
-      chairId: resources.chairs[0]?.id ?? "",
-      serviceId: "",
-      date: day,
-      from: hourLabel(from),
-      to: hourLabel(from + 30),
-      reason: "",
-      status: "programada",
-    }
-  }, [appointment, context, day, timeZone, resources])
-  const [values, setValues] = React.useState(initial)
-  const [error, setError] = React.useState("")
-  const [patientQuery, setPatientQuery] = React.useState("")
-
-  const patientsQuery = useQuery({
-    queryKey: ["patients", "agenda-picker", patientQuery],
-    queryFn: () =>
-      apiFetch<{ data: { id: string; displayName: string }[] }>(
-        `/api/patients?q=${encodeURIComponent(patientQuery)}&limit=20`,
-      ),
-    placeholderData: (previous) => previous,
-  })
-  const servicesQuery = useQuery({
-    queryKey: ["services", "agenda-picker"],
-    queryFn: () => apiFetch<{ data: AgendaServiceOption[] }>("/api/services?limit=100"),
-  })
-
-  const patientOptions = React.useMemo((): ResourceSelectOption[] => {
-    const options = (patientsQuery.data?.data ?? []).map((patient) => ({
-      id: patient.id,
-      label: patient.displayName,
-    }))
-    // La cita abierta conserva su paciente aunque la búsqueda no lo devuelva.
-    if (appointment && !options.some((option) => option.id === appointment.patientId)) {
-      options.unshift({ id: appointment.patientId, label: appointment.patientName })
-    }
-    if (context && !options.some((option) => option.id === context.patientId)) {
-      options.unshift({ id: context.patientId, label: context.patientName })
-    }
-    return options
-  }, [patientsQuery.data, appointment, context])
-
-  const professionalOptions = resources.professionals.map((item) => ({
-    id: item.id,
-    label: item.label,
-  }))
-  const chairOptions = resources.chairs.map((item) => ({
-    id: item.id,
-    label: item.label,
-    detail: "Sede actual",
-  }))
-  const serviceOptions = (servicesQuery.data?.data ?? []).map((service) => ({
-    id: service.id,
-    label: service.name,
-    detail: service.durationMin ? `${service.durationMin} min` : undefined,
-  }))
-
-  const save = useMutation({
-    mutationFn: async () => {
-      const parseMinutes = (label: string) => {
-        const [hours = 0, minutes = 0] = label.split(":").map(Number)
-        return hours * 60 + minutes
-      }
-      const startMinutes = parseMinutes(values.from)
-      const endMinutes = parseMinutes(values.to)
-      if (!values.patientId) throw new Error("Elige un paciente.")
-      if (!values.dentistUserId) throw new Error("Elige un profesional.")
-      if (!values.chairId) throw new Error("Elige un sillón.")
-      if (endMinutes <= startMinutes) throw new Error("El fin debe ser posterior al inicio.")
-      const startsAt = minutesToInstant(values.date, startMinutes, timeZone)
-      const endsAt = minutesToInstant(values.date, endMinutes, timeZone)
-      const reason = values.reason.trim() || undefined
-      const serviceId = values.serviceId || null
-      if (appointment) {
-        let version = appointment.version
-        const timeChanged = startsAt !== appointment.startsAt || endsAt !== appointment.endsAt
-        const resourceChanged =
-          values.dentistUserId !== appointment.dentistUserId ||
-          values.chairId !== appointment.chairId
-        if (timeChanged || resourceChanged) {
-          const moved = await apiFetch<{ data: AgendaAppointment }>(
-            `/api/appointments/${appointment.id}/move`,
-            {
-              method: "POST",
-              body: JSON.stringify({
-                expectedVersion: version,
-                startsAt,
-                endsAt,
-                dentistUserId: values.dentistUserId,
-                chairId: values.chairId,
-              }),
-            },
-          )
-          version = moved.data.version
-        }
-        await apiFetch(`/api/appointments/${appointment.id}`, {
-          method: "PATCH",
-          body: JSON.stringify({
-            expectedVersion: version,
-            reason: reason ?? null,
-            serviceId,
-            status: values.status,
-          }),
-        })
-        return "Cita actualizada."
-      }
-      await apiFetch("/api/appointments", {
-        method: "POST",
-        body: JSON.stringify({
-          patientId: values.patientId,
-          dentistUserId: values.dentistUserId,
-          chairId: values.chairId,
-          serviceId: serviceId ?? undefined,
-          startsAt,
-          durationMin: endMinutes - startMinutes,
-          reason,
-          conversationId: context?.conversationId,
-          source: context?.conversationId ? "conversacion" : "recepcion",
-        }),
-      })
-      return "Cita creada."
-    },
-    onSuccess: async (text) => {
-      toast.success(text)
-      await onSaved(text)
-    },
-    onError: (cause) => setError(errorMessage(cause)),
-  })
-
-  return (
-    <FormDrawer
-      open
-      title={appointment ? "Detalle de la cita" : "Nueva cita"}
-      description="Registra o ajusta una cita de la sede."
-      onClose={onClose}
-      onSubmit={(event) => {
-        event.preventDefault()
-        setError("")
-        save.mutate()
-      }}
-      isSubmitting={save.isPending}
-      isDirty
-      error={error || null}
-      submitLabel={appointment ? "Guardar cambios" : "Crear cita"}
-    >
-      <div className="grid gap-4">
-        {/* De la cita a la persona: la ficha conserva el contexto de quien se atiende. */}
-        {(appointment ?? context) ? (
-          <p className="text-sm">
-            <Link
-              to="/patients/$patientId"
-              params={{ patientId: appointment?.patientId ?? context?.patientId ?? "" }}
-              className="font-medium text-primary underline underline-offset-4"
-            >
-              Abrir la ficha de {appointment?.patientName ?? context?.patientName}
-            </Link>
-          </p>
-        ) : null}
-        {appointment && ["programada", "confirmada"].includes(appointment.status) ? (
-          <div className="flex flex-wrap items-center gap-3">
-            <NewEncounterButton
-              patientId={appointment.patientId}
-              appointment={{
-                id: appointment.id,
-                dentistUserId: appointment.dentistUserId,
-                reason: appointment.reason,
-                serviceName: appointment.serviceName,
-              }}
-            />
-            <span className="text-xs text-muted-foreground">
-              Abre la atención clínica vinculada a esta cita.
-            </span>
-          </div>
-        ) : null}
-        {context ? (
-          <div>
-            <FieldLabel>Paciente del caso</FieldLabel>
-            <p className="text-sm font-medium">{context.patientName}</p>
-          </div>
-        ) : (
-          <ResourceSelect
-            id="cita-paciente"
-            label="Paciente"
-            options={patientOptions}
-            value={values.patientId}
-            onChange={(patientId) => setValues((prev) => ({ ...prev, patientId }))}
-            onQueryChange={setPatientQuery}
-          />
-        )}
-        <ResourceSelect
-          id="cita-profesional"
-          label="Profesional"
-          options={professionalOptions}
-          value={values.dentistUserId}
-          onChange={(dentistUserId) => setValues((prev) => ({ ...prev, dentistUserId }))}
-        />
-        <ResourceSelect
-          id="cita-sillon"
-          label="Sillón"
-          options={chairOptions}
-          value={values.chairId}
-          onChange={(chairId) => setValues((prev) => ({ ...prev, chairId }))}
-        />
-        <ResourceSelect
-          id="cita-servicio"
-          label="Servicio (opcional)"
-          options={serviceOptions}
-          value={values.serviceId}
-          onChange={(serviceId) => setValues((prev) => ({ ...prev, serviceId }))}
-        />
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-          <div className="grid gap-2">
-            <FieldLabel htmlFor="cita-fecha">Fecha</FieldLabel>
-            <Input
-              id="cita-fecha"
-              type="date"
-              required
-              value={values.date}
-              onChange={(event) => setValues((prev) => ({ ...prev, date: event.target.value }))}
-            />
-          </div>
-          <div className="grid gap-2">
-            <FieldLabel htmlFor="cita-inicio">Inicio</FieldLabel>
-            <Input
-              id="cita-inicio"
-              type="time"
-              required
-              step={300}
-              value={values.from}
-              onChange={(event) => setValues((prev) => ({ ...prev, from: event.target.value }))}
-            />
-          </div>
-          <div className="grid gap-2">
-            <FieldLabel htmlFor="cita-fin">Fin</FieldLabel>
-            <Input
-              id="cita-fin"
-              type="time"
-              required
-              step={300}
-              value={values.to}
-              onChange={(event) => setValues((prev) => ({ ...prev, to: event.target.value }))}
-            />
-          </div>
-        </div>
-        <div className="grid gap-2">
-          <FieldLabel htmlFor="cita-motivo">Motivo (opcional)</FieldLabel>
-          <Input
-            id="cita-motivo"
-            value={values.reason}
-            maxLength={500}
-            onChange={(event) => setValues((prev) => ({ ...prev, reason: event.target.value }))}
-          />
-        </div>
-        {appointment && (
-          <FieldSet className="grid gap-2">
-            <FieldLegend className="text-sm font-medium">Estado</FieldLegend>
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-              {(Object.keys(SCHEDULE_STATUS_LABELS) as AppointmentStatus[]).map((option) => (
-                <FieldLabel
-                  key={option}
-                  className={`flex items-center gap-2 rounded-lg border p-2 text-sm ${
-                    values.status === option ? "border-primary bg-primary/5" : ""
-                  }`}
-                >
-                  <input
-                    type="radio"
-                    name="appointment-status"
-                    className="size-4"
-                    checked={values.status === option}
-                    onChange={() => setValues((prev) => ({ ...prev, status: option }))}
-                  />
-                  <StatusDot status={option} />
-                  {SCHEDULE_STATUS_LABELS[option]}
-                </FieldLabel>
-              ))}
-            </div>
-          </FieldSet>
-        )}
-      </div>
-    </FormDrawer>
-  )
-}
-
-const PRIORITY_OPTIONS: WaitlistPriority[] = ["alta", "normal", "baja"]
-
-/** Lista de espera de la sede: registro, ofrecimiento de huecos y reserva. */
-function WaitlistPanel({
-  branchId,
-  timeZone,
-  resources,
-  day,
-  onChanged,
-}: {
-  branchId: string
-  timeZone: string
-  resources: AgendaResources
-  day: string
-  onChanged: () => Promise<void>
-}) {
-  const canOperate = usePermission("appointments.write")
-  const [open, setOpen] = React.useState(false)
-  const [offerFor, setOfferFor] = React.useState<WaitlistEntry | null>(null)
-  const [formOpen, setFormOpen] = React.useState(false)
-  const waitlistQuery = useQuery({
-    queryKey: ["agenda-waitlist", branchId],
-    queryFn: () =>
-      apiFetch<{ data: WaitlistEntry[] }>(
-        `/api/agenda/waitlist?branchId=${branchId}&status=en_espera,ofrecida`,
-      ),
-  })
-  const entries = waitlistQuery.data?.data ?? []
-  return (
-    <section className="shrink-0 rounded-xl border bg-background">
-      <div className="flex flex-wrap items-center gap-2 p-3 sm:px-4">
-        <h2 className="font-medium">Lista de espera</h2>
-        <span className="text-xs text-muted-foreground">
-          {entries.length === 0 ? "Sin pendientes" : `${entries.length} en espera`}
-        </span>
-        <div className="ml-auto flex items-center gap-2">
-          {canOperate && (
-            <Button variant="outline" size="sm" onClick={() => setFormOpen(true)}>
-              Añadir
-            </Button>
-          )}
-          <Button variant="ghost" size="sm" onClick={() => setOpen((value) => !value)}>
-            {open ? "Ocultar" : "Ver"}
-          </Button>
-        </div>
-      </div>
-      {open && (
-        <ul className="grid gap-2 border-t p-3 sm:px-4">
-          {entries.length === 0 && (
-            <li className="text-sm text-muted-foreground">No hay pacientes en espera.</li>
-          )}
-          {entries.map((entry) => (
-            <WaitlistRow
-              key={entry.id}
-              entry={entry}
-              timeZone={timeZone}
-              canOperate={canOperate}
-              onOffer={() => setOfferFor(entry)}
-              onChanged={async () => {
-                await waitlistQuery.refetch()
-                await onChanged()
-              }}
-            />
-          ))}
-        </ul>
-      )}
-      {formOpen && (
-        <WaitlistForm
-          branchId={branchId}
+      {selected && resources ? (
+        <AppointmentDrawer
+          key={`${selected.id}:${detail?.mode ?? "view"}`}
+          appointment={selected}
+          initialMode={detail?.mode}
+          canWrite={canWrite}
+          timeZone={TZ}
+          today={today}
+          now={now}
           resources={resources}
-          onClose={() => setFormOpen(false)}
-          onSaved={async () => {
-            setFormOpen(false)
-            await waitlistQuery.refetch()
-          }}
-        />
-      )}
-      {offerFor && (
-        <SlotOfferPicker
-          entry={offerFor}
-          branchId={branchId}
-          timeZone={timeZone}
-          day={day}
-          professionals={resources.professionals}
-          onClose={() => setOfferFor(null)}
-          onSaved={async () => {
-            setOfferFor(null)
-            await waitlistQuery.refetch()
-            await onChanged()
-          }}
-        />
-      )}
-    </section>
-  )
-}
-
-function WaitlistRow({
-  entry,
-  timeZone,
-  canOperate,
-  onOffer,
-  onChanged,
-}: {
-  entry: WaitlistEntry
-  timeZone: string
-  canOperate: boolean
-  onOffer: () => void
-  onChanged: () => Promise<void>
-}) {
-  const [error, setError] = React.useState("")
-  const run = useMutation({
-    mutationFn: (action: "book" | "cancel") =>
-      apiFetch(`/api/agenda/waitlist/${entry.id}/${action}`, { method: "POST", body: "{}" }),
-    onSuccess: async (_data, action) => {
-      toast.success(action === "book" ? "Cita confirmada." : "Espera cancelada.")
-      await onChanged()
-    },
-    onError: (cause) => setError(errorMessage(cause)),
-  })
-  const subject = entry.patientName ?? entry.contactName ?? "Sin nombre"
-  return (
-    <li className="grid gap-1 rounded-lg border p-2 text-sm">
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="font-medium">{subject}</span>
-        <span className="text-xs text-muted-foreground">Prioridad {entry.priority}</span>
-        <span className="text-xs text-muted-foreground">
-          {entry.status === "ofrecida" ? "Hueco ofrecido" : "En espera"}
-        </span>
-        {entry.serviceName && <span className="text-xs">{entry.serviceName}</span>}
-        {entry.dentistName && (
-          <span className="text-xs text-muted-foreground">{entry.dentistName}</span>
-        )}
-      </div>
-      {entry.notes && <p className="text-xs text-muted-foreground">{entry.notes}</p>}
-      {entry.offeredStartsAt && entry.offeredEndsAt && (
-        <p className="text-xs">
-          Ofrecido: {new Date(entry.offeredStartsAt).toLocaleString("es-PE", { timeZone })} →{" "}
-          {new Date(entry.offeredEndsAt).toLocaleTimeString("es-PE", { timeZone })}
-        </p>
-      )}
-      {canOperate && (
-        <div className="flex flex-wrap items-center gap-2">
-          <Button variant="outline" size="sm" onClick={onOffer}>
-            Ofrecer hueco
-          </Button>
-          {entry.status === "ofrecida" && (
-            <Button variant="outline" size="sm" onClick={() => run.mutate("book")}>
-              Confirmar reserva
-            </Button>
-          )}
-          <Button variant="ghost" size="sm" onClick={() => run.mutate("cancel")}>
-            Cancelar espera
-          </Button>
-        </div>
-      )}
-      {error && <p className="text-xs text-destructive">{error}</p>}
-    </li>
-  )
-}
-
-function WaitlistForm({
-  branchId,
-  resources,
-  onClose,
-  onSaved,
-}: {
-  branchId: string
-  resources: AgendaResources
-  onClose: () => void
-  onSaved: () => Promise<void>
-}) {
-  const [patientId, setPatientId] = React.useState("")
-  const [patientQuery, setPatientQuery] = React.useState("")
-  const [dentistUserId, setDentistUserId] = React.useState("")
-  const [serviceId, setServiceId] = React.useState("")
-  const [priority, setPriority] = React.useState<WaitlistPriority>("normal")
-  const [notes, setNotes] = React.useState("")
-  const [error, setError] = React.useState("")
-  const patientsQuery = useQuery({
-    queryKey: ["patients", "waitlist-picker", patientQuery],
-    queryFn: () =>
-      apiFetch<{ data: { id: string; displayName: string }[] }>(
-        `/api/patients?q=${encodeURIComponent(patientQuery)}&limit=20`,
-      ),
-    placeholderData: (previous) => previous,
-  })
-  const servicesQuery = useQuery({
-    queryKey: ["services", "waitlist-picker"],
-    queryFn: () => apiFetch<{ data: AgendaServiceOption[] }>("/api/services?limit=100"),
-  })
-  const save = useMutation({
-    mutationFn: async () => {
-      if (!patientId) throw new Error("Elige un paciente.")
-      await apiFetch("/api/agenda/waitlist", {
-        method: "POST",
-        body: JSON.stringify({
-          branchId,
-          patientId,
-          dentistUserId: dentistUserId || null,
-          serviceId: serviceId || null,
-          priority,
-          notes: notes.trim() || undefined,
-        }),
-      })
-    },
-    onSuccess: async () => {
-      toast.success("Espera registrada.")
-      await onSaved()
-    },
-    onError: (cause) => setError(errorMessage(cause)),
-  })
-  return (
-    <FormDrawer
-      open
-      title="Añadir a lista de espera"
-      description="Registra un paciente pendiente de hueco en esta sede."
-      onClose={onClose}
-      onSubmit={(event) => {
-        event.preventDefault()
-        setError("")
-        save.mutate()
-      }}
-      isSubmitting={save.isPending}
-      isDirty
-      error={error || null}
-      submitLabel="Registrar espera"
-    >
-      <div className="grid gap-4">
-        <ResourceSelect
-          id="espera-paciente"
-          label="Paciente"
-          options={(patientsQuery.data?.data ?? []).map((patient) => ({
-            id: patient.id,
-            label: patient.displayName,
+          team={(availability?.professionals ?? []).map((item) => ({
+            id: item.id,
+            label: item.label,
+            tone: toneOf(item.id),
           }))}
-          value={patientId}
-          onChange={setPatientId}
-          onQueryChange={setPatientQuery}
+          waiting={waiting}
+          onClose={closeDetail}
+          onChanged={invalidate}
+          onOfferWaitlist={() => setWaitlistOpen(true)}
+          onRebook={(patient) => {
+            closeDetail()
+            openBooking({ patient })
+          }}
         />
-        <ResourceSelect
-          id="espera-profesional"
-          label="Profesional preferido (opcional)"
-          options={[{ id: "", label: "Sin preferencia" }].concat(
-            resources.professionals.map((item) => ({ id: item.id, label: item.label })),
-          )}
-          value={dentistUserId}
-          onChange={setDentistUserId}
-        />
-        <ResourceSelect
-          id="espera-servicio"
-          label="Servicio (opcional)"
-          options={[{ id: "", label: "Sin servicio" }].concat(
-            (servicesQuery.data?.data ?? []).map((service) => ({
-              id: service.id,
-              label: service.name,
-            })),
-          )}
-          value={serviceId}
-          onChange={setServiceId}
-        />
-        <div className="grid gap-2">
-          <FieldLabel htmlFor="espera-prioridad">Prioridad</FieldLabel>
-          <select
-            id="espera-prioridad"
-            className="h-9 rounded-md border bg-background px-2 text-sm"
-            value={priority}
-            onChange={(event) => setPriority(event.target.value as WaitlistPriority)}
-          >
-            {PRIORITY_OPTIONS.map((option) => (
-              <option key={option} value={option}>
-                {option === "alta" ? "Alta" : option === "baja" ? "Baja" : "Normal"}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="grid gap-2">
-          <FieldLabel htmlFor="espera-notas">Notas (opcional)</FieldLabel>
-          <Input
-            id="espera-notas"
-            value={notes}
-            maxLength={500}
-            onChange={(event) => setNotes(event.target.value)}
-          />
-        </div>
-      </div>
-    </FormDrawer>
-  )
-}
+      ) : null}
 
-/** Busca huecos reales y ofrece uno a la espera con el mismo servicio. */
-function SlotOfferPicker({
-  entry,
-  branchId,
-  timeZone,
-  day,
-  professionals,
-  onClose,
-  onSaved,
-}: {
-  entry: WaitlistEntry
-  branchId: string
-  timeZone: string
-  day: string
-  professionals: { id: string; label: string }[]
-  onClose: () => void
-  onSaved: () => Promise<void>
-}) {
-  const [error, setError] = React.useState("")
-  const offer = useMutation({
-    mutationFn: (slot: AvailableSlot) =>
-      apiFetch(`/api/agenda/waitlist/${entry.id}/offer`, {
-        method: "POST",
-        body: JSON.stringify({
-          startsAt: slot.startsAt,
-          endsAt: slot.endsAt,
-          dentistUserId: slot.dentistUserId,
-          chairId: slot.chairId,
-        }),
-      }),
-    onSuccess: async () => {
-      toast.success("Hueco ofrecido.")
-      await onSaved()
-    },
-    onError: (cause) => setError(errorMessage(cause)),
-  })
-  return (
-    <FormDrawer
-      open
-      title="Ofrecer hueco"
-      description={`Huecos reales para ${entry.patientName ?? entry.contactName ?? "la espera"}${entry.serviceName ? ` · ${entry.serviceName}` : ""}.`}
-      onClose={onClose}
-      onSubmit={(event) => event.preventDefault()}
-      isSubmitting={offer.isPending}
-      isDirty={false}
-      error={error || null}
-      submitLabel="Cerrar"
-    >
-      <AgendaSlotPicker
-        branchId={branchId}
-        timeZone={timeZone}
-        day={day}
-        professionals={professionals}
-        serviceId={entry.serviceId}
-        initialProfessionalId={entry.dentistUserId}
-        disabled={offer.isPending}
-        actionLabel="Ofrecer"
-        onSelect={(slot) => {
-          setError("")
-          offer.mutate(slot)
-        }}
-      />
-    </FormDrawer>
+      {waitlistOpen && resources && branchId ? (
+        <WaitlistDrawer
+          branchId={branchId}
+          timeZone={TZ}
+          resources={resources}
+          day={day}
+          canOperate={canWrite}
+          onClose={() => setWaitlistOpen(false)}
+          onChanged={invalidate}
+        />
+      ) : null}
+    </PageShell>
   )
 }

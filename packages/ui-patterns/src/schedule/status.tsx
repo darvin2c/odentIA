@@ -6,6 +6,7 @@
  */
 
 import { cn } from "@odentia/ui"
+import { Ban, Check, CheckCheck, Clock, UserX } from "lucide-react"
 
 import type { ScheduleStatus } from "./types.js"
 
@@ -37,21 +38,81 @@ export function StatusDot({ status, className }: { status: ScheduleStatus; class
 }
 
 /**
- * Clases del bloque de cita: fondo suave con borde al color del estado; lo
- * cancelado se lee como tachado y atenuado, no como otro color más.
+ * El estado como se dice en la agenda: «programada» se nombra por lo que le
+ * falta, que es lo que recepción necesita saber de un vistazo.
  */
-export function statusBlockClasses(status: ScheduleStatus): string {
+export const SCHEDULE_AGENDA_LABELS: Record<ScheduleStatus, string> = {
+  programada: "Por confirmar",
+  confirmada: "Confirmada",
+  atendida: "Atendida",
+  no_asistio: "No asistió",
+  cancelada: "Cancelada",
+}
+
+/** Orden en que se leen los estados en resúmenes y filtros. */
+export const SCHEDULE_STATUS_ORDER: ScheduleStatus[] = [
+  "programada",
+  "confirmada",
+  "atendida",
+  "no_asistio",
+  "cancelada",
+]
+
+const STATUS_ICONS = {
+  programada: Clock,
+  confirmada: Check,
+  atendida: CheckCheck,
+  no_asistio: UserX,
+  cancelada: Ban,
+} as const
+
+/** Color del icono y del texto de estado, con los tokens semánticos del tema. */
+export function statusTextClass(status: ScheduleStatus): string {
   return cn(
-    "border",
-    status === "programada" &&
-      "border-sky-300 bg-sky-50 text-sky-950 dark:border-sky-800 dark:bg-sky-950/60 dark:text-sky-100",
-    status === "confirmada" &&
-      "border-emerald-300 bg-emerald-50 text-emerald-950 dark:border-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-100",
-    status === "atendida" && "border-primary/40 bg-primary/10 text-foreground",
-    status === "no_asistio" &&
-      "border-amber-300 bg-amber-50 text-amber-950 dark:border-amber-800 dark:bg-amber-950/60 dark:text-amber-100",
+    status === "programada" && "text-warning",
+    status === "confirmada" && "text-success",
+    status === "atendida" && "text-muted-foreground",
+    status === "no_asistio" && "text-destructive",
+    status === "cancelada" && "text-muted-foreground",
+  )
+}
+
+/**
+ * Superficie de la cita en rejilla y lista: el fondo dice el estado de un
+ * vistazo (verde confirmada, ámbar por confirmar, gris atendida) y el icono lo
+ * repite, para que nunca dependa solo del color.
+ */
+export function statusSurfaceClass(status: ScheduleStatus): string {
+  return cn(
+    status === "programada" && "bg-warning-soft text-foreground",
+    status === "confirmada" && "bg-success-soft text-foreground",
+    status === "atendida" && "bg-secondary text-muted-foreground",
+    status === "no_asistio" && "bg-danger-soft text-foreground",
     status === "cancelada" &&
-      "border-dashed border-destructive/40 bg-muted/40 text-muted-foreground line-through decoration-destructive/60",
+      "border border-dashed border-border bg-transparent text-muted-foreground line-through",
+  )
+}
+
+/** Icono del estado; decorativo salvo que se le dé nombre. */
+export function StatusIcon({
+  status,
+  label,
+  className,
+}: {
+  status: ScheduleStatus
+  /** Nombre accesible cuando el icono va solo, sin el texto del estado al lado. */
+  label?: string
+  className?: string
+}) {
+  const Icon = STATUS_ICONS[status]
+  return (
+    <Icon
+      aria-hidden={label ? undefined : true}
+      aria-label={label}
+      role={label ? "img" : undefined}
+      data-status={status}
+      className={cn("size-4 shrink-0", statusTextClass(status), className)}
+    />
   )
 }
 

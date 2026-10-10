@@ -11,12 +11,14 @@ import {
   listAppointments,
   listScheduleResources,
   moveAppointment,
+  searchAgendaPatients,
   setAppointmentStatus,
   updateAppointment,
 } from "./appointments.js"
 import {
   addWaitlistEntry,
   createScheduleBlock,
+  getAgendaAvailability,
   listAvailableSlots,
   offerWaitlistSlot,
   setProfessionalSchedule,
@@ -385,4 +387,100 @@ it("la espera ofrece un hueco y lo reserva con el mismo servicio", async () => {
   const booked = await run((tx) => bookWaitlistEntry(tx, ORG, ACTOR, entry.id, {}))
   expect(booked.status).toBe("confirmada")
   expect(booked.serviceName).toBe("Limpieza Agenda")
+})
+
+it("la disponibilidad de la agenda materializa el horario y dice el próximo hueco de cada profesional", async () => {
+  // Miércoles 2026-10-07 10:20 Lima: lo anterior ya pasó.
+  const now = new Date("2026-10-07T15:20:00Z")
+  const view = await run((tx) =>
+    getAgendaAvailability(tx, ORG, {
+      branchId,
+      from: "2026-10-07T05:00:00Z",
+      to: "2026-10-08T05:00:00Z",
+      now,
+    }),
+  )
+  expect(view.timeZone).toBe("America/Lima")
+  expect(view.professionals.map((item) => item.id).sort()).toEqual([DENTIST, DENTIST_2].sort())
+  // Dos turnos por profesional ese día: 09:00–13:00 y 14:00–18:00.
+  expect(view.open.filter((item) => item.dentistUserId === DENTIST)).toEqual([
+    { dentistUserId: DENTIST, startsAt: "2026-10-07T14:00:00.000Z", endsAt: "2026-10-07T18:00:00.000Z" },
+    { dentistUserId: DENTIST, startsAt: "2026-10-07T19:00:00.000Z", endsAt: "2026-10-07T23:00:00.000Z" },
+  ])
+  for (const professional of view.professionals) {
+    // El primer hueco nunca es anterior a «ahora» y cae en el paso de 15 minutos.
+    expect(professional.nextFree?.startsAt).toBe("2026-10-07T15:30:00.000Z")
+    expect(professional.nextFree?.chairId).toBeTruthy()
+  }
+})
+
+it("los huecos descartan lo ya pasado cuando se indica el corte", async () => {
+  const result = await run((tx) =>
+    listAvailableSlots(tx, ORG, {
+      branchId,
+      dentistUserId: DENTIST,
+      from: "2026-10-07T05:00:00Z",
+      to: "2026-10-08T05:00:00Z",
+      notBefore: "2026-10-07T20:10:00Z",
+    }),
+  )
+  expect(result.slots[0]?.startsAt).toBe("2026-10-07T20:15:00.000Z")
+})
+
+it("la búsqueda de la agenda devuelve a la persona con sus próximas citas en pie", async () => {
+  const [other] = await ownerDb
+    .insert(patient)
+    .values({ organizationId: ORG, displayName: "Zoila Sin Cita", patientNumber: 9102 })
+    .returning({ id: patient.id })
+  const booked = await run((tx) =>
+    createAppointment(tx, ORG, ACTOR, {
+      patientId: other!.id,
+      dentistUserId: DENTIST,
+      chairId,
+      startsAt: "2026-10-08T21:00:00Z",
+      durationMin: 30,
+    }),
+  )
+  const now = new Date("2026-10-07T15:20:00Z")
+  const found = await run((tx) => searchAgendaPatients(tx, ORG, { q: "zoila", now }))
+  expect(found).toHaveLength(1)
+  expect(found[0]?.appointments.map((item) => item.id)).toEqual([booked.id])
+
+  await run((tx) => setAppointmentStatus(tx, ORG, ACTOR, booked.id, "cancelada"))
+  const after = await run((tx) => searchAgendaPatients(tx, ORG, { q: "zoila", now }))
+  expect(after[0]?.appointments).toEqual([])
+  // Con menos de dos caracteres no se busca.
+  expect(await run((tx) => searchAgendaPatients(tx, ORG, { q: "z", now }))).toEqual([])
+})
+
+it("cancelar deja el motivo y la nota en la auditoría, y rechaza un motivo desconocido", async () => {
+  const booked = await run((tx) =>
+    createAppointment(tx, ORG, ACTOR, {
+      patientId,
+      dentistUserId: DENTIST_2,
+      chairId: chair2Id,
+      startsAt: "2026-10-09T21:00:00Z",
+      durationMin: 30,
+    }),
+  )
+  await expect(
+    run((tx) =>
+      setAppointmentStatus(tx, ORG, ACTOR, booked.id, "cancelada", { cancelReason: "porque sí" }),
+    ),
+  ).rejects.toMatchObject({ status: 400 })
+  await run((tx) =>
+    setAppointmentStatus(tx, ORG, ACTOR, booked.id, "cancelada", {
+      cancelReason: "clinica",
+      cancelNote: "  El doctor no viene  ",
+    }),
+  )
+  const rows = await ownerDb.execute(
+    sql`select metadata from audit_event
+        where entity_id = ${booked.id} and action = ${"appointment.status_cancelada"}`,
+  )
+  expect(rows[0]?.metadata).toMatchObject({
+    from: "programada",
+    cancelReason: "clinica",
+    cancelNote: "El doctor no viene",
+  })
 })

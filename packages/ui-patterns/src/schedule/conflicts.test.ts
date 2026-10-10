@@ -1,6 +1,16 @@
 import { describe, expect, it } from "vitest"
 import { findScheduleConflicts } from "./conflicts.js"
-import type { DemoAppointment } from "./resource-demo.js"
+import type { ScheduleStatus } from "./types.js"
+
+interface DemoAppointment {
+  id: string
+  title: string
+  professionalId: string
+  chairId: string
+  start: string
+  end: string
+  status: ScheduleStatus
+}
 
 const base: DemoAppointment = {
   id: "a",

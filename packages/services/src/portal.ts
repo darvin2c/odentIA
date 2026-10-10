@@ -1082,6 +1082,8 @@ export async function getPortalRescheduleSlots(
     from: input.from,
     to: input.to,
     durationMin: current.durationMin,
+    // Al paciente no se le ofrece una hora que ya pasó.
+    notBefore: new Date().toISOString(),
   })
   await logAccess(tx, ctx.orgId, ctx.session.id, "appointment.slots_viewed", "appointment", current.id)
   return slots

@@ -26,6 +26,12 @@ export interface ScheduleEntry {
   warning?: string
 }
 
+/**
+ * Color categórico del recurso: lo identifica en iniciales y fichas a lo largo
+ * de todas las vistas. No significa estado (eso lo dicen los colores de cita).
+ */
+export type ScheduleTone = 0 | 1 | 2 | 3 | 4
+
 /** Recurso de la agenda: profesional en la línea de tiempo, día en la semana. */
 export interface ScheduleColumn {
   id: string
@@ -34,6 +40,59 @@ export interface ScheduleColumn {
   detail?: string
   /** Aviso del recurso para la fecha consultada, incluso con citas ocultas. */
   warning?: string
+  /** Color de identidad del recurso; sin él se usa el primero. */
+  tone?: ScheduleTone
+}
+
+/**
+ * Carril de la rejilla: un recurso en un día. La vista Día pone varios
+ * recursos del mismo día; la vista Semana, un recurso en varios días.
+ */
+export interface ScheduleLane {
+  /** Identidad del carril: el recurso en Día, la fecha en Semana. */
+  id: string
+  /** Recurso al que pertenecen las citas del carril. */
+  columnId: string
+  /** Día civil del carril («2026-09-21»). */
+  date: string
+  label: string
+  /** Segunda línea de la cabecera: horario de atención del día. */
+  detail?: string
+  /** Dato que conviene ver de un vistazo («1 h 30 libres»). */
+  summary?: string
+  /** Iniciales con color solo cuando el carril es un recurso. */
+  tone?: ScheduleTone
+  kind?: "resource" | "day"
+  warning?: string
+  /** Próximo hueco del recurso, como botón («Libre a las 11:00»): reservarlo es un clic. */
+  action?: { label: string; onSelect: () => void }
+}
+
+/** Tramo de atención de un recurso: dentro se puede reservar, fuera no. */
+export interface ScheduleAvailability {
+  columnId: string
+  start: string
+  end: string
+}
+
+/**
+ * Punto libre que la persona tocó para reservar. Es una intención: quién
+ * valida el hueco y reserva es el servicio.
+ */
+export interface ScheduleCreateTarget {
+  columnId: string
+  date: string
+  start: string
+  end: string
+}
+
+/** Cita aún sin reservar que el formulario propone y la rejilla deja ver. */
+export interface SchedulePreview {
+  columnId: string
+  start: string
+  end: string
+  title: string
+  subtitle?: string
 }
 
 /** Tramo no disponible de un recurso (almuerzo, feriado, mantenimiento). */
@@ -79,5 +138,3 @@ export interface ScheduleResize {
   end: string
 }
 export type ScheduleResizeHandler = (entry: ScheduleEntry, resize: ScheduleResize) => void
-/** Extensión de la ventana por scroll infinito, hacia el borde tocado. */
-export type ScheduleExtendHandler = (edge: "start" | "end") => void

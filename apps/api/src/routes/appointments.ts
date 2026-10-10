@@ -7,6 +7,7 @@ import {
   createChair,
   createScheduleBlock,
   deleteScheduleBlock,
+  getAgendaAvailability,
   getAppointment,
   getProfessionalSchedule,
   listAppointments,
@@ -16,6 +17,7 @@ import {
   listWaitlistEntries,
   moveAppointment,
   offerWaitlistSlot,
+  searchAgendaPatients,
   setAppointmentStatus,
   setProfessionalSchedule,
   updateAppointment,
@@ -77,7 +79,11 @@ const moveInput = z.object({
   chairId: z.uuid().optional(),
 })
 
-const statusInput = z.object({ status: z.enum(STATUS) })
+const statusInput = z.object({
+  status: z.enum(STATUS),
+  cancelReason: z.enum(["paciente", "clinica", "otro"]).optional(),
+  cancelNote: z.string().max(500).optional(),
+})
 
 const chairInput = z.object({
   branchId: z.uuid(),
@@ -117,6 +123,14 @@ const slotsQuery = z.object({
   timeZone: z.string().max(60).optional(),
   stepMin: z.coerce.number().int().min(5).max(120).optional(),
 })
+
+const availabilityQuery = z.object({
+  branchId: z.uuid(),
+  from: z.iso.datetime({ offset: true }),
+  to: z.iso.datetime({ offset: true }),
+})
+
+const searchQuery = z.object({ q: z.string().trim().min(2).max(200) })
 
 const waitlistInput = z.object({
   branchId: z.uuid(),
@@ -180,7 +194,40 @@ export function createAgendaRoute(deps: CrmDeps) {
     const parsed = slotsQuery.safeParse(c.req.query())
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) => listAvailableSlots(tx, orgId, parsed.data)),
+      withOrgContext(deps.db, orgId, (tx) =>
+        // Lo ya pasado no se ofrece: el corte lo pone el servidor, no el reloj del cliente.
+        listAvailableSlots(tx, orgId, { ...parsed.data, notBefore: new Date().toISOString() }),
+      ),
+    )
+  })
+
+  // Lo que la agenda pinta como reservable: horario, bloqueos y próximo hueco por profesional.
+  app.get("/availability", async (c) => {
+    const { orgId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "appointments.read")) {
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para ver la agenda"), 403)
+    }
+    const parsed = availabilityQuery.safeParse(c.req.query())
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) => getAgendaAvailability(tx, orgId, parsed.data)),
+    )
+  })
+
+  // Búsqueda de la cita de un paciente: personas y sus próximas citas en pie.
+  app.get("/search", async (c) => {
+    const { orgId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "appointments.read")) {
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para ver la agenda"), 403)
+    }
+    // Busca por documento y teléfono: exige también poder ver pacientes.
+    if (!canAccess(memberRole, "patients.read")) {
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para buscar pacientes"), 403)
+    }
+    const parsed = searchQuery.safeParse(c.req.query())
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) => searchAgendaPatients(tx, orgId, parsed.data)),
     )
   })
 
@@ -419,7 +466,10 @@ export function createAppointmentsRoute(deps: CrmDeps) {
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
-        setAppointmentStatus(tx, orgId, userId, c.req.param("id"), parsed.data.status),
+        setAppointmentStatus(tx, orgId, userId, c.req.param("id"), parsed.data.status, {
+          cancelReason: parsed.data.cancelReason,
+          cancelNote: parsed.data.cancelNote,
+        }),
       ),
     )
   })
