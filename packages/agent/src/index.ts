@@ -5,5 +5,27 @@
 export type { QueueMessage } from "@odentia/db"
 export { FAKE_REPLY_TEXT, FakeChatModel } from "./fake-model.js"
 export { compileAgentGraph } from "./graph.js"
-export { createConfiguredChatModel, providerOf, type LlmCredentials } from "./llm.js"
-export { type AgentRuntime, consumeAgentRun, processAgentRun, simulateAgentTurn, type SimulationResult } from "./run.js"
+export {
+  createConfiguredChatModel,
+  describeProviderProblem,
+  isProviderConfigError,
+  LlmConfigError,
+  type LlmConnectionTest,
+  type LlmSpec,
+  type OrgLlmSecrets,
+  type PlatformLlm,
+  resolveLlmSpec,
+  resolveModelName,
+  testLlmConnection,
+} from "./llm.js"
+export { assertSafeBaseUrl, createPinnedDispatcher, isPrivateAddress, parseLlmBaseUrl, parseSafeBaseUrl } from "./llm-endpoint.js"
+export * from "./decision/index.js"
+export { runShadowTriage } from "./decision/shadow.js"
+export {
+  type AgentRuntime,
+  consumeAgentRun,
+  processAgentRun,
+  resolveOrgLlm,
+  simulateAgentTurn,
+  type SimulationResult,
+} from "./run.js"

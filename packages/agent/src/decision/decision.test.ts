@@ -1,0 +1,221 @@
+import { once } from "node:events"
+import { createServer, type Server } from "node:http"
+import { BaseChatModel } from "@langchain/core/language_models/chat_models"
+import { AIMessage, type BaseMessage } from "@langchain/core/messages"
+import type { ChatResult } from "@langchain/core/outputs"
+import { expect, it } from "vitest"
+import { createBaselineDecisionModel } from "./baseline.js"
+import { createFakeDecisionModel } from "./fake.js"
+import { createJevDecisionModel } from "./jev.js"
+import { createOpenAiDecisionModel } from "./openai.js"
+import { TRIAGE_QUESTIONS, triageOutcome, triageState } from "./points.js"
+import { answerOf, choiceConfidence, DecisionError } from "./port.js"
+
+async function mockProvider(handler: (body: unknown) => { status: number; body: unknown }) {
+  const seen: Array<{ url: string; authorization: string | undefined; body: unknown }> = []
+  const server: Server = createServer(async (request, response) => {
+    let raw = ""
+    for await (const chunk of request) raw += chunk
+    const body = JSON.parse(raw)
+    seen.push({ url: request.url ?? "", authorization: request.headers.authorization, body })
+    const reply = handler(body)
+    response.writeHead(reply.status, { "content-type": "application/json" })
+    response.end(JSON.stringify(reply.body))
+  })
+  server.listen(0, "127.0.0.1")
+  await once(server, "listening")
+  const address = server.address()
+  if (!address || typeof address === "string") throw new Error("sin puerto")
+  return {
+    baseUrl: `http://127.0.0.1:${address.port}`,
+    seen,
+    close: () => new Promise<void>((resolve) => server.close(() => resolve())),
+  }
+}
+
+it("el adaptador de Jev envía el contrato documentado y traduce noul/choice/score", async () => {
+  const provider = await mockProvider(() => ({
+    status: 200,
+    body: {
+      model: "jev-1.13.0",
+      answers: {
+        requires_reply: { type: "noul", noul: 0.93 },
+        handoff: { type: "noul", noul: 0.05 },
+        urgency: { type: "score", score: 1.2, legend: ["low", "medium", "high"], probabilities: { "0": 0.1, "1": 0.6, "2": 0.3 }, confidence: 0.55 },
+        intent: { type: "choice", choice: "appointment_request", probabilities: { appointment_request: 0.9, other: 0.1 }, confidence: 0.88 },
+      },
+      usage: { input_tokens: 120, output_tokens: 20 },
+    },
+  }))
+  try {
+    const jev = createJevDecisionModel({ apiKey: "clave-jev", baseUrl: provider.baseUrl, model: "jev-1.13.0" })
+    const result = await jev.decide("Contact (latest): quiero una cita mañana", TRIAGE_QUESTIONS)
+    expect(provider.seen[0]?.url).toBe("/v1/systemone")
+    expect(provider.seen[0]?.authorization).toBe("Bearer clave-jev")
+    const sent = provider.seen[0]?.body as { model: string; state: string; questions: Record<string, { type: string; criteria?: unknown }> }
+    expect(sent.model).toBe("jev-1.13.0")
+    expect(sent.questions.requires_reply?.type).toBe("noul")
+    expect(sent.questions.intent?.type).toBe("choice")
+    expect(Object.keys(sent.questions.intent?.criteria as Record<string, unknown>)).toContain("other")
+    expect(sent.questions.urgency?.type).toBe("score")
+    expect(Array.isArray(sent.questions.urgency?.criteria)).toBe(true)
+    expect(answerOf(result, "requires_reply", "yesno")?.probability).toBe(0.93)
+    expect(answerOf(result, "intent", "choice")).toMatchObject({ choice: "appointment_request", confidence: 0.88 })
+    expect(answerOf(result, "urgency", "score")).toMatchObject({ score: 1.2, probabilities: [0.1, 0.6, 0.3] })
+    // Una pregunta sin respuesta nunca se inventa.
+    expect(answerOf(result, "unsubscribe", "yesno")).toBeNull()
+    expect(result.answers.find((a) => a.id === "unsubscribe")?.kind).toBe("declined")
+    expect(result).toMatchObject({ model: "jev-1.13.0", usage: { inputTokens: 120, outputTokens: 20 } })
+  } finally {
+    await provider.close()
+  }
+})
+
+it("el adaptador de OpenAI Decisions envía predicate/choice/score y respeta refusal", async () => {
+  const provider = await mockProvider(() => ({
+    status: 200,
+    body: {
+      model: "gpt-6-luna",
+      answers: [
+        { type: "predicate", name: "requires_reply", probability: 0.97 },
+        { type: "refusal", name: "handoff" },
+        { type: "score", name: "urgency", score: 2.0, probabilities: [{ value: 0, label: "low", probability: 0.02 }, { value: 1, label: "medium", probability: 0.08 }, { value: 2, label: "high", probability: 0.9 }], confidence: 0.85 },
+        { type: "choice", name: "intent", choice: "clinical_question", probabilities: [{ value: "clinical_question", probability: 0.8 }, { value: "other", probability: 0.2 }] },
+        { type: "predicate", name: "unsubscribe", probability: 0.01 },
+      ],
+      usage: { input_tokens: 90, output_tokens: 0 },
+    },
+  }))
+  try {
+    const openai = createOpenAiDecisionModel({ apiKey: "clave-openai", baseUrl: `${provider.baseUrl}/v1`, model: "gpt-6-luna" })
+    const result = await openai.decide("Contact (latest): me sangra la encía", TRIAGE_QUESTIONS)
+    expect(provider.seen[0]?.url).toBe("/v1/decisions")
+    const sent = provider.seen[0]?.body as { model: string; input: string; questions: Array<{ type: string; name: string; choices?: unknown[]; levels?: unknown[] }> }
+    expect(sent.model).toBe("gpt-6-luna")
+    expect(sent.questions.map((q) => q.type)).toEqual(["predicate", "predicate", "score", "choice", "predicate"])
+    expect(sent.questions[3]?.choices).toHaveLength(8)
+    expect(sent.questions[2]?.levels).toHaveLength(3)
+    expect(answerOf(result, "requires_reply", "yesno")?.probability).toBe(0.97)
+    expect(result.answers.find((a) => a.id === "handoff")?.kind).toBe("declined")
+    expect(answerOf(result, "urgency", "score")).toMatchObject({ score: 2, confidence: 0.85 })
+    // Sin confianza del proveedor se deriva de la distribución.
+    expect(answerOf(result, "intent", "choice")?.confidence).toBeCloseTo(choiceConfidence({ clinical_question: 0.8, other: 0.2 }))
+    expect(triageOutcome(result)).toMatchObject({ wouldSkipReply: false, wouldHandoff: null, urgencyLevel: 2, intent: "clinical_question", wouldFlagUnsubscribe: false })
+  } finally {
+    await provider.close()
+  }
+})
+
+it("un rechazo del proveedor no reintenta, no lanza el cuerpo y se clasifica como configuración", async () => {
+  const provider = await mockProvider(() => ({ status: 401, body: { error: { message: "bad key sk-secreta" } } }))
+  try {
+    const jev = createJevDecisionModel({ apiKey: "x", baseUrl: provider.baseUrl })
+    const failure = await jev.decide("estado", TRIAGE_QUESTIONS).then(() => null, (e: unknown) => e as DecisionError)
+    expect(failure).toBeInstanceOf(DecisionError)
+    expect(failure?.code).toBe("CONFIG")
+    expect(failure?.message).not.toContain("sk-secreta")
+    expect(provider.seen).toHaveLength(1)
+  } finally {
+    await provider.close()
+  }
+})
+
+it("una respuesta de tipo distinto a la pregunta o fuera de sus opciones rompe el contrato (SHAPE)", async () => {
+  const provider = await mockProvider(() => ({
+    status: 200,
+    body: { model: "jev-1.13.0", answers: { urgency: { type: "noul", noul: 0.3 } } },
+  }))
+  try {
+    const jev = createJevDecisionModel({ apiKey: "x", baseUrl: provider.baseUrl })
+    const failure = await jev.decide("estado", TRIAGE_QUESTIONS).then(() => null, (e: unknown) => e as DecisionError)
+    expect(failure?.code).toBe("SHAPE")
+  } finally {
+    await provider.close()
+  }
+  const second = await mockProvider(() => ({
+    status: 200,
+    body: { model: "gpt-6-luna", answers: [{ type: "choice", name: "intent", choice: "inventada", probabilities: [{ value: "inventada", probability: 1 }] }] },
+  }))
+  try {
+    const openai = createOpenAiDecisionModel({ apiKey: "x", baseUrl: `${second.baseUrl}/v1` })
+    const failure = await openai.decide("estado", TRIAGE_QUESTIONS).then(() => null, (e: unknown) => e as DecisionError)
+    expect(failure?.code).toBe("SHAPE")
+  } finally {
+    await second.close()
+  }
+})
+
+it("respuestas sin nombre solo se emparejan por orden cuando hay una por pregunta", async () => {
+  const provider = await mockProvider(() => ({
+    status: 200,
+    // Cuatro respuestas sin nombre para cinco preguntas: no se desplazan unas sobre otras.
+    body: { model: "gpt-6-luna", answers: [{ type: "predicate", name: null, probability: 0.9 }, { type: "predicate", name: null, probability: 0.1 }, { type: "choice", name: null, choice: "other" }, { type: "predicate", name: null, probability: 0 }] },
+  }))
+  try {
+    const openai = createOpenAiDecisionModel({ apiKey: "x", baseUrl: `${provider.baseUrl}/v1` })
+    const result = await openai.decide("estado", TRIAGE_QUESTIONS)
+    expect(result.answers.every((a) => a.kind === "declined")).toBe(true)
+  } finally {
+    await provider.close()
+  }
+})
+
+it("el plazo cubre también la lectura del cuerpo: un proveedor que no termina la respuesta no cuelga", async () => {
+  const server = createServer((_request, response) => {
+    response.writeHead(200, { "content-type": "application/json" })
+    response.write("{\"model\":\"jev-1.13.0\",")
+    // Nunca cierra la respuesta.
+  })
+  server.listen(0, "127.0.0.1")
+  await once(server, "listening")
+  const address = server.address()
+  if (!address || typeof address === "string") throw new Error("sin puerto")
+  try {
+    const jev = createJevDecisionModel({ apiKey: "x", baseUrl: `http://127.0.0.1:${address.port}`, timeoutMs: 300 })
+    const startedAt = Date.now()
+    const failure = await jev.decide("estado", TRIAGE_QUESTIONS).then(() => null, (e: unknown) => e as DecisionError)
+    expect(failure?.code).toBe("PROVIDER")
+    expect(Date.now() - startedAt).toBeLessThan(5_000)
+  } finally {
+    server.closeAllConnections()
+    await new Promise<void>((resolve) => server.close(() => resolve()))
+  }
+})
+
+/** LLM guionizado que devuelve JSON fijo. */
+class JsonModel extends BaseChatModel {
+  constructor(private readonly json: string) {
+    super({})
+  }
+  _llmType(): string {
+    return "json-chat"
+  }
+  async _generate(_messages: BaseMessage[]): Promise<ChatResult> {
+    const message = new AIMessage({ content: this.json })
+    return { generations: [{ text: this.json, message }] }
+  }
+}
+
+it("la línea base responde sin probabilidades y descarta valores fuera de las opciones", async () => {
+  const baseline = createBaselineDecisionModel(
+    new JsonModel('{"requires_reply": true, "handoff": false, "urgency": 1, "intent": "price_or_service_info", "unsubscribe": "no"}'),
+    "modelo-prueba",
+  )
+  expect(baseline.reportsProbabilities).toBe(false)
+  const result = await baseline.decide("Contact (latest): ¿cuánto cuesta una limpieza?", TRIAGE_QUESTIONS)
+  expect(answerOf(result, "requires_reply", "yesno")?.probability).toBe(1)
+  expect(answerOf(result, "intent", "choice")).toMatchObject({ choice: "price_or_service_info", probabilities: null, confidence: null })
+  expect(answerOf(result, "urgency", "score")?.score).toBe(1)
+  expect(result.answers.find((a) => a.id === "unsubscribe")?.kind).toBe("declined")
+})
+
+it("el modelo falso es determinista y el estado del triaje no lleva datos del contacto", () => {
+  const state = triageState([{ direction: "out", body: "Hola, ¿en qué te ayudo?" }], "Quiero hablar con una persona, me duele mucho")
+  expect(state).toBe("Clinic: Hola, ¿en qué te ayudo?\nContact (latest): Quiero hablar con una persona, me duele mucho")
+  return createFakeDecisionModel()
+    .decide(state, TRIAGE_QUESTIONS)
+    .then((result) => {
+      expect(answerOf(result, "handoff", "yesno")?.probability).toBeGreaterThan(0.7)
+      expect(triageOutcome(result)).toMatchObject({ wouldHandoff: true, wouldSkipReply: false })
+    })
+})

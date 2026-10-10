@@ -1,4 +1,9 @@
-import { AppShell, type AppShellNavEntry } from "@odentia/ui-patterns"
+import {
+  AppShell,
+  type AppShellNavEntry,
+  SideDockProvider,
+  SideDockSlot,
+} from "@odentia/ui-patterns"
 import {
   createFileRoute,
   getRouteApi,
@@ -9,6 +14,7 @@ import {
 } from "@tanstack/react-router"
 import { Building2, KeyRound, UserRound } from "lucide-react"
 import { authClient } from "../lib/auth-client"
+import { DraftGuard } from "../lib/draft-guard"
 import { requireVerifiedSession } from "../lib/guards"
 
 export const Route = createFileRoute("/_app")({
@@ -73,7 +79,16 @@ function AppLayout() {
         await navigate({ to: "/login" })
       }}
     >
-      <Outlet />
+      {/* Columna lateral del layout: los formularios del perfil se abren ahí
+          en ventana ancha, igual que en el platform. */}
+      <SideDockProvider draftGuard={DraftGuard}>
+        <div className="flex min-w-0 flex-1">
+          <div className="flex min-w-0 flex-1 flex-col">
+            <Outlet />
+          </div>
+          <SideDockSlot />
+        </div>
+      </SideDockProvider>
     </AppShell>
   )
 }

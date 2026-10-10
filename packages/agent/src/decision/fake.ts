@@ -1,0 +1,43 @@
+import type { DecisionModel, DecisionResult } from "./port.js"
+
+/**
+ * Modelo de decisión determinista para dev/e2e/tests: decide por palabras
+ * clave del estado. No acredita calidad de ningún proveedor.
+ */
+export function createFakeDecisionModel(): DecisionModel {
+  return {
+    provider: "fake",
+    reportsProbabilities: true,
+    async decide(state, questions) {
+      const text = state.toLowerCase()
+      const has = (...words: string[]) => words.some((w) => text.includes(w))
+      const answers = questions.map((q): DecisionResult["answers"][number] => {
+        if (q.kind === "yesno") {
+          const yes =
+            q.id === "handoff"
+              ? has("humano", "persona", "queja", "dolor fuerte", "urgente", "sangra")
+              : q.id === "unsubscribe"
+                ? has("no me escriban", "dejen de", "baja")
+                : q.id === "requires_reply"
+                  ? !has("gracias", "ok", "listo")
+                  : false
+          return { id: q.id, kind: "yesno", probability: yes ? 0.92 : 0.08 }
+        }
+        if (q.kind === "choice") {
+          const pick =
+            has("cita", "turno", "agendar") && q.options.some((o) => o.value === "appointment_request")
+              ? "appointment_request"
+              : has("precio", "cuesta", "costo") && q.options.some((o) => o.value === "price_or_service_info")
+                ? "price_or_service_info"
+                : (q.options.find((o) => o.value === "other")?.value ?? q.options[0]!.value)
+          const probabilities = Object.fromEntries(q.options.map((o) => [o.value, o.value === pick ? 0.85 : 0.15 / Math.max(1, q.options.length - 1)]))
+          return { id: q.id, kind: "choice", choice: pick, probabilities, confidence: 0.8 }
+        }
+        const level = has("dolor fuerte", "urgente", "sangra") ? q.levels.length - 1 : 0
+        const probabilities = q.levels.map((_, i) => (i === level ? 0.9 : 0.1 / Math.max(1, q.levels.length - 1)))
+        return { id: q.id, kind: "score", score: level, probabilities, confidence: 0.85 }
+      })
+      return { answers, model: "fake-decision", usage: { inputTokens: state.length, outputTokens: 0 }, latencyMs: 1 }
+    },
+  }
+}

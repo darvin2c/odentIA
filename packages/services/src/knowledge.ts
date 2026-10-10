@@ -6,7 +6,7 @@ import {
   type KnowledgeStatus,
 } from "@odentia/db/schema/agent"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
-import { and, asc, desc, eq, ilike, or } from "drizzle-orm"
+import { and, asc, desc, eq, ilike, or, sql } from "drizzle-orm"
 import { notFound, validation } from "./errors.js"
 import { listServices } from "./service-catalog.js"
 
@@ -266,7 +266,13 @@ export async function searchPublishedKnowledge(tx: Db, orgId: string, q: string,
         or(ilike(agentKnowledgeEntry.title, like), ilike(agentKnowledgeEntry.body, like))!,
       ),
     )
-    .orderBy(asc(agentKnowledgeEntry.title), asc(agentKnowledgeEntry.id))
+    // La coincidencia exacta de título va primero: es como se pide el texto
+    // completo de una respuesta que el prompt mostró recortada.
+    .orderBy(
+      desc(sql`lower(${agentKnowledgeEntry.title}) = lower(${query})`),
+      asc(agentKnowledgeEntry.title),
+      asc(agentKnowledgeEntry.id),
+    )
     .limit(Math.min(Math.max(limit, 1), 10))
   return rows.map(({ entry, branchName }) => toItem(entry, branchName))
 }
@@ -318,6 +324,13 @@ export async function getClinicInfoSnapshot(tx: Db, orgId: string): Promise<Clin
   }
 }
 
+/**
+ * Tope por respuesta oficial dentro del prompt. El bloque viaja en cada
+ * llamada al modelo; una respuesta extensa (un protocolo pegado entero) se
+ * recorta con aviso y su texto completo se pide con `consultar_conocimiento`.
+ */
+export const KNOWLEDGE_PROMPT_ENTRY_CHARS = 600
+
 /** Bloque de sistema con conocimiento vigente + catálogo + sedes. */
 export function formatKnowledgeForPrompt(snapshot: ClinicInfoSnapshot, faqs: KnowledgeEntryItem[]): string {
   const lines = [`Clínica: ${snapshot.clinicName}.`]
@@ -341,8 +354,15 @@ export function formatKnowledgeForPrompt(snapshot: ClinicInfoSnapshot, faqs: Kno
   }
   const published = faqs.filter((f) => f.status === "publicada")
   if (published.length) {
-    lines.push("Respuestas oficiales (cítalas tal cual):")
-    for (const f of published.slice(0, 10)) lines.push(`- ${f.title}: ${f.body}`)
+    lines.push(
+      "Respuestas oficiales (cítalas tal cual; si una aparece recortada, pide su texto completo a consultar_conocimiento con su título exacto antes de citarla):",
+    )
+    for (const f of published.slice(0, 10)) {
+      // El corte no deja medio carácter (un emoji ocupa dos unidades).
+      const cut = f.body.slice(0, KNOWLEDGE_PROMPT_ENTRY_CHARS).replace(/[\uD800-\uDBFF]$/, "")
+      const body = f.body.length > KNOWLEDGE_PROMPT_ENTRY_CHARS ? `${cut.trimEnd()}… (recortada)` : f.body
+      lines.push(`- ${f.title}: ${body}`)
+    }
   }
   return lines.join("\n")
 }

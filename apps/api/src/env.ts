@@ -31,10 +31,14 @@ const envSchema = z.object({
   MICROSOFT_MAIL_CLIENT_SECRET: z.string().default(""),
   MICROSOFT_MAIL_REDIRECT_URI: z.string().default(""),
   MICROSOFT_MAIL_TENANT: z.string().default("common"),
-  /** Formato initChatModel (p.ej. openai:gpt-4o-mini); fake = determinista. */
+  /** Modelo del endpoint compatible con OpenAI (prefijo openai: opcional); fake = determinista. */
   LLM_MODEL: z.string().min(1).default("fake"),
   LLM_API_KEY: z.string().optional(),
   LLM_BASE_URL: z.string().url().optional(),
+  LLM_TIMEOUT_MS: z.coerce.number().int().min(1000).max(600_000).default(60_000),
+  LLM_MAX_RETRIES: z.coerce.number().int().min(0).max(5).default(2),
+  /** dev/e2e: admite http y destinos privados para servidores locales de prueba. */
+  LLM_ALLOW_INSECURE_BASE_URL: z.enum(["true", "false"]).default("false"),
   PORT: z.coerce.number().int().default(3001),
 })
 

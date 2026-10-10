@@ -46,13 +46,32 @@ export interface AgentToolCtx {
   runInstruction?: string
   /** Restringe herramientas para disparadores operativos sin mensaje entrante. */
   allowedTools?: readonly string[]
+  /** Herramientas que en este hilo no pueden servir; su esquema no se envía al modelo. */
+  excludedTools?: readonly string[]
   commercialCoordinationId?: string
   /** Una coordinación proactiva ya produjo su único resultado terminal. */
   decisionRecorded: boolean
+  /**
+   * La respuesta al interlocutor quedó enviada o pendiente de decisión: el
+   * grafo termina el turno sin volver a llamar al modelo.
+   */
+  replySettled: boolean
+  /** Texto que la simulación habría enviado (no se persiste). */
+  simulatedReply?: string
   /** Nombres de herramientas usadas en la corrida (supervisión). */
   toolsUsed: string[]
-  /** Tokens acumulados solo si el proveedor los reporta. */
-  usage: { inputTokens: number; outputTokens: number; reported: boolean }
+  /**
+   * Tokens acumulados solo si el proveedor los reporta; `calls` cuenta las
+   * llamadas al modelo siempre.
+   */
+  usage: {
+    inputTokens: number
+    outputTokens: number
+    cachedInputTokens: number
+    calls: number
+    reported: boolean
+    cacheReported: boolean
+  }
 }
 
 /**
@@ -109,7 +128,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
    * ProposalLifecycle, que ya no la lanza); se traduce a este texto.
    */
   const OUTSIDE_WINDOW =
-    "outside_window: fuera de la ventana de 24h de WhatsApp. Usa send_template con una plantilla autorizada o deriva a humano."
+    "outside_window: fuera de la ventana de 24h del canal. Si dispones de send_template, úsala con una plantilla autorizada; si no, deriva a humano."
   /**
    * Crea la propuesta comercial con clave estable por trigger + herramienta
    * + payload. En modo directo se ejecuta en el mismo acto; si exige
@@ -159,6 +178,11 @@ export function makeAgentTools(ctx: AgentToolCtx) {
         return "Ya hay una propuesta pendiente de decisión del equipo en este hilo. Informa al interlocutor de que el equipo la está revisando y espera su decisión; un sí del interlocutor no sustituye esa aprobación."
       }
       throw e
+    }
+    // Un mensaje enviado o a la espera de decisión cierra el turno; si falló
+    // o expiró, el modelo aún debe cambiar a plantilla, reproponer o derivar.
+    if (action === "enviar_mensaje" && proposal.status !== "fallida" && proposal.status !== "expirada") {
+      ctx.replySettled = true
     }
     if (proposal.status === "ejecutada") return `Ejecutado en modo directo (propuesta ${proposal.id}).`
     if (proposal.status === "fallida") {
@@ -221,28 +245,37 @@ export function makeAgentTools(ctx: AgentToolCtx) {
 
   const sendReply = tool(
     async ({ text }: { text: string }) => {
-      if (ctx.dryRun) return `[SIMULACIÓN] Se enviaría al interlocutor: ${text}`
+      if (ctx.dryRun) {
+        ctx.replySettled = true
+        ctx.simulatedReply = text
+        return `[SIMULACIÓN] Se enviaría al interlocutor: ${text}`
+      }
       // WINDOW_CLOSED ya no lanza: llega como `fallida` y propose la traduce
-      // a outside_window. Solo infra (429/5xx) lanza y reintenta el turno.
+      // a outside_window. Lo que sí lanza (infra 429/5xx incluida) no
+      // reintenta la corrida: ToolNode lo devuelve al modelo como mensaje.
       return propose("enviar_mensaje", { kind: "text", text }, "send_reply")
     },
     {
       name: "send_reply",
       description:
-        "Envía un texto al interlocutor (propuesta si la política no es directa). Si devuelve outside_window, usa send_template o deriva.",
+        "Envía la respuesta completa al interlocutor y cierra el turno: úsala al final, después de cualquier otra acción (queda como propuesta si la política no es directa). Si devuelve outside_window, sigue su indicación.",
       schema: z.object({ text: z.string().min(1).max(4000) }),
     },
   )
 
   const sendTemplate = tool(
     async ({ name, language, params }: { name: string; language: string; params: string[] }) => {
-      if (ctx.dryRun) return `[SIMULACIÓN] Se enviaría plantilla ${name} (${language}).`
+      if (ctx.dryRun) {
+        ctx.replySettled = true
+        ctx.simulatedReply = `[plantilla ${name} · ${language}]`
+        return `[SIMULACIÓN] Se enviaría plantilla ${name} (${language}).`
+      }
       return propose("enviar_mensaje", { kind: "template", name, language, params }, "send_template")
     },
     {
       name: "send_template",
       description:
-        "Envía una plantilla de WhatsApp autorizada (propuesta si la política no es directa; solo fuera de ventana o primer contacto).",
+        "Envía una plantilla de WhatsApp autorizada y cierra el turno (propuesta si la política no es directa; solo fuera de ventana o primer contacto).",
       schema: z.object({
         name: z.string().min(1),
         language: z.string().min(1),
@@ -368,7 +401,8 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     },
     {
       name: "consultar_conocimiento",
-      description: "Busca respuestas oficiales publicadas de la clínica. Cítalas tal cual.",
+      description:
+        "Busca respuestas oficiales publicadas por una palabra o frase literal del título o del texto; para el texto completo de una respuesta recortada pasa su título exacto. Cítalas tal cual.",
       schema: z.object({ pregunta: z.string().min(2).max(300) }),
     },
   )
@@ -570,7 +604,10 @@ export function makeAgentTools(ctx: AgentToolCtx) {
         if (e instanceof ServiceError && e.code === "PROPOSAL_NOT_CONTACT_CONFIRMABLE") return e.message
         throw e
       }
-      if (proposal.status === "ejecutada") return `Confirmado y ejecutado (propuesta ${proposal.id}).`
+      if (proposal.status === "ejecutada") {
+        if (proposal.action === "enviar_mensaje") ctx.replySettled = true
+        return `Confirmado y ejecutado (propuesta ${proposal.id}).`
+      }
       if (proposal.status === "fallida") {
         const rawError = proposal.error?.trim() ?? ""
         if (rawError.startsWith("WINDOW_CLOSED") || proposal.result?.errorCode === "WINDOW_CLOSED") return OUTSIDE_WINDOW
@@ -783,9 +820,14 @@ export function makeAgentTools(ctx: AgentToolCtx) {
   )
 
   const requestHandoff = tool(
-    async ({ reason, summary, priority, assigneeUserId }: { reason: string; summary?: string; priority?: string; assigneeUserId?: string }) => {
+    async ({ reason, summary, priority, assigneeUserId, message }: { reason: string; summary?: string; priority?: string; assigneeUserId?: string; message?: string }) => {
+      const notice = message?.trim()
       if (ctx.dryRun) {
         await performHandoff(ctx, reason, summary)
+        if (notice) {
+          ctx.replySettled = true
+          ctx.simulatedReply = notice
+        }
         return `[SIMULACIÓN] Se derivaría a humano: ${reason}.`
       }
       if (ctx.commercialCoordinationId) {
@@ -805,17 +847,25 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       )
       ctx.handedOff = true
       const destino = handoff.assigneeUserId ? "con responsable asignado" : "en la cola del equipo por recoger"
-      return `Derivado a humano (${destino}, plazo ${handoff.dueAt ?? "sin plazo"}). No envíes más mensajes.`
+      // El aviso sale después de crear la derivación: si esta falla, no se le
+      // promete al interlocutor una atención que nadie registró.
+      let noticeResult = ""
+      if (notice) {
+        const outcome = await propose("enviar_mensaje", { kind: "text", text: notice }, "request_human_handoff")
+        noticeResult = ctx.replySettled ? " Aviso al interlocutor registrado." : ` El aviso al interlocutor no salió: ${outcome}`
+      }
+      return `Derivado a humano (${destino}, plazo ${handoff.dueAt ?? "sin plazo"}).${noticeResult} No envíes más mensajes.`
     },
     {
       name: "request_human_handoff",
       description:
-        "Deriva a un humano con motivo, resumen factual de lo conversado y prioridad (alta/media/baja); sin assigneeUserId queda en la cola del equipo con plazo según prioridad. Apaga el agente.",
+        "Deriva a un humano con motivo, resumen factual de lo conversado y prioridad (alta/media/baja); sin assigneeUserId queda en la cola del equipo con plazo según prioridad. Apaga el agente y cierra el turno: pon en message el aviso breve para el interlocutor (por ejemplo, que una persona continuará la atención), porque después no podrás enviarle nada.",
       schema: z.object({
         reason: z.string().min(1).max(300),
         summary: z.string().min(1).max(2000),
         priority: z.enum(["alta", "media", "baja"]).default("media"),
         assigneeUserId: z.string().optional(),
+        message: z.string().min(1).max(4000).optional(),
       }),
     },
   )
@@ -845,5 +895,9 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     confirmProposal,
     requestHandoff,
   ]
-  return ctx.allowedTools ? tools.filter((candidate) => ctx.allowedTools?.includes(candidate.name)) : tools
+  return tools.filter(
+    (candidate) =>
+      (!ctx.allowedTools || ctx.allowedTools.includes(candidate.name)) &&
+      !ctx.excludedTools?.includes(candidate.name),
+  )
 }

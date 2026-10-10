@@ -997,6 +997,7 @@ export function RecorridoClinicoTab({
       </FormDrawer>
 
       <FormDrawer
+        dock={false}
         open={form === "suspend" || form === "cancel"}
         title={form === "cancel" ? "Cancelar tratamiento" : "Suspender tratamiento"}
         description={

@@ -23,18 +23,41 @@ Infra definida en `infra/dev/compose.yaml`: PostgreSQL :5432, MinIO :9000/:9001 
 
 ### Modelo real con API compatible
 
-En `infra/dev/.env`, configurar `LLM_MODEL=openai:<identificador-del-modelo>`,
-`LLM_API_KEY` y `LLM_BASE_URL` con la URL base publicada por el proveedor
-(incluido `/v1` o el prefijo que este indique). `openai:` selecciona el protocolo:
-con una URL de otro proveedor no se envían las peticiones a OpenAI. El adaptador
-`@langchain/openai` está incluido; otros protocolos nativos requieren su SDK.
+El agente habla un solo protocolo: cualquier endpoint compatible con OpenAI
+(OpenAI, OpenRouter, DeepSeek, Groq, Mistral, Ollama, vLLM, pasarela propia).
+Otros prefijos (`anthropic:`, `google-genai:`…) se rechazan con un error
+explícito; ver `docs/decisions/0001-proveedor-llm-por-organizacion.md`.
+
+Proveedor de la plataforma: en `infra/dev/.env`, `LLM_MODEL=<nombre que espera
+el endpoint>` (el prefijo `openai:` es opcional), `LLM_API_KEY` y `LLM_BASE_URL`
+con la URL base publicada por el proveedor (incluido `/v1` o el prefijo que
+indique). `LLM_TIMEOUT_MS` y `LLM_MAX_RETRIES` acotan cada llamada.
+`AGENT_BURST_WINDOW_SECONDS` (worker, 4 por defecto, 0–30) es lo que el agente
+espera tras un mensaje entrante antes de leer el hilo: normalmente agrupa una
+ráfaga en una sola corrida y una sola respuesta (mejor esfuerzo; límites en
+`docs/decisions/0005-uso-del-modelo-rafagas-y-prefijo.md`), a cambio de esa
+demora en cada respuesta; `0` responde sin esperar.
+`LLM_ALLOW_INSECURE_BASE_URL=true` solo en dev: admite http y destinos privados
+para un servidor local de prueba; en producción la URL debe ser https y pública.
+
+Proveedor propio de una organización: en Configuración → Agente, «Usar la
+cuenta propia de la clínica» con URL base, clave y modelo; «Probar conexión»
+hace una petición mínima. La clave se guarda cifrada y no vuelve a mostrarse;
+los cambios quedan auditados. El campo Modelo sin cuenta propia sobrescribe
+`LLM_MODEL` contra el endpoint de la plataforma.
 
 El modelo elegido debe admitir llamadas a herramientas (`tools`/`tool_calls`).
-API y worker usan las mismas credenciales de servidor; reiniciarlos tras cambiar
-la configuración. El campo Modelo de Configuración → Agente puede sobrescribir
-`LLM_MODEL` para una organización: dejarlo vacío para usar el del servidor o
-poner un identificador compatible con el mismo endpoint. Nunca poner la key en
-una variable `VITE_*`, un campo de conversación ni el repositorio.
+API y worker leen las mismas variables; reiniciarlos tras cambiarlas. Nunca
+poner la key en una variable `VITE_*`, un campo de conversación ni el repositorio.
+
+### Modelo de decisión (solo en sombra)
+
+Ver `docs/decisions/0002-capa-de-decision-en-sombra.md`. Solo el worker lee
+`JEV_API_KEY`/`JEV_BASE_URL` y `OPENAI_DECISIONS_API_KEY`/`OPENAI_DECISIONS_BASE_URL`;
+sin ellas, elegir ese proveedor en Configuración → Agente deja cada triaje como
+fila con error en Agente › Actividad. `pnpm --filter @odentia/agent eval:decisions
+-- --provider=jev` compara un proveedor con los ejemplos propios de
+`packages/agent/eval/`; no enviar mensajes reales de pacientes sin autorización.
 
 En producción, usar las mismas variables en los secretos de despliegue de API y
 worker o en `infra/prod/.env`. `CHANNEL_SENDER_MODE=mock` sigue impidiendo envíos

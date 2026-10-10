@@ -1,5 +1,23 @@
-import { cn, ResizableHandle, ResizablePanel, ResizablePanelGroup, usePanelRef } from "@odentia/ui"
+import {
+  cn,
+  Drawer,
+  DrawerContent,
+  ResizableHandle,
+  ResizablePanel,
+  ResizablePanelGroup,
+  usePanelRef,
+} from "@odentia/ui"
 import * as React from "react"
+import { common } from "./common.js"
+import {
+  SideColumn,
+  type SideColumnWidth,
+  SideDockPortal,
+  SideDockScopeProvider,
+  useSideColumnWidth,
+  useSideDock,
+  useSideDockScope,
+} from "./side-dock.js"
 
 /** Corte del modo panel: el ancho donde tabla y tarjeta caben a la vez. */
 const PANEL_QUERY = "(min-width: 1280px)"
@@ -42,6 +60,24 @@ const PANEL_SIZES: Record<DetailPanelSize, { default: string; min: string; max: 
   xl: { default: "40rem", min: "32rem", max: "52rem" },
 }
 
+/** Los mismos anchos, en px, cuando el detalle va en la columna del layout. */
+export const DOCK_SIZES: Record<DetailPanelSize, SideColumnWidth> = {
+  md: { initial: 384, min: 320, max: 512 },
+  lg: { initial: 512, min: 416, max: 640 },
+  xl: { initial: 640, min: 512, max: 832 },
+}
+/** Ancho que el detalle deja a la lista: el mínimo de la columna maestra. */
+export const MASTER_MIN_WIDTH = 512
+
+/** Lectura directa del corte, para decidir en el mismo render en que algo se abre. */
+export function detailPanelFits(): boolean {
+  return (
+    typeof window !== "undefined" &&
+    typeof window.matchMedia === "function" &&
+    window.matchMedia(PANEL_QUERY).matches
+  )
+}
+
 // Corrige el modo antes del primer paint (sin flash drawer→panel); en el
 // servidor cae a `useEffect` para no emitir el aviso de `useLayoutEffect`.
 // Mismo patrón que `useResolvedView` de data-table-view.
@@ -53,11 +89,16 @@ const useEffectBeforePaint: typeof React.useEffect =
  * tarjeta lateral a la vez, `drawer` en el resto. El estado inicial es el
  * estrecho a propósito, igual que `useResolvedView`.
  *
+ * Dentro de la columna lateral o de un cajón responde siempre `drawer`: lo que
+ * se abre desde ahí se apila encima, nunca compite por la columna (ver las
+ * reglas de `side-dock`).
+ *
  * No usa `useIsMobile` (corta en 768px): tabla + panel de 24rem necesitan
  * bastante más. Vive aquí y no en `packages/ui` porque el corte debe coincidir
  * con lo que la página renderiza como alternativa (`FormDrawer`).
  */
 export function useDetailMode(): DetailMode {
+  const scope = useSideDockScope()
   const [isWide, setIsWide] = React.useState(false)
 
   useEffectBeforePaint(() => {
@@ -69,7 +110,7 @@ export function useDetailMode(): DetailMode {
     return () => query.removeEventListener("change", apply)
   }, [])
 
-  return isWide ? "panel" : "drawer"
+  return isWide && scope === "page" ? "panel" : "drawer"
 }
 
 /**
@@ -157,6 +198,12 @@ export interface MasterDetailProps {
  *
  * Con `prefers-reduced-motion: reduce` no se anima nada: ni el ancho ni el
  * deslizamiento.
+ *
+ * Con columna lateral en el layout (`SideDockProvider`), el detalle no va en
+ * un group dentro de la página: se monta en esa columna, a todo el alto de la
+ * ventana y pegado al borde derecho, igual que el panel del agente. La lista
+ * queda como en modo `drawer` (ancho completo, scroll de página) y
+ * `listScroll` no aplica. El detalle se desmonta al cerrar.
  */
 export function MasterDetail({
   children,
@@ -166,6 +213,11 @@ export function MasterDetail({
   className,
 }: MasterDetailProps) {
   const mode = useDetailMode()
+  const dock = useSideDock()
+  const [dockWidth, resizeDock] = useSideColumnWidth(
+    `odentia.side-panel.${panelSize}`,
+    DOCK_SIZES[panelSize],
+  )
   const open = panel != null
   const pageScroll = listScroll === "page"
   const size = PANEL_SIZES[panelSize]
@@ -238,8 +290,39 @@ export function MasterDetail({
     }
   }, [mode, open])
 
-  if (mode === "drawer") {
-    return <div className={cn("flex min-w-0 flex-col gap-6", className)}>{children}</div>
+  if (mode === "drawer" || dock.available) {
+    return (
+      <>
+        <div className={cn("flex min-w-0 flex-col gap-6", className)}>{children}</div>
+        {mode === "panel" && open ? (
+          <SideDockPortal
+            // Columna ocupada por otro detalle: este sale como cajón. Lo cierran
+            // los controles del propio formulario (la página no sabe que cayó
+            // aquí), por eso el cajón no se descarta por fuera.
+            fallback={
+              <Drawer open swipeDirection="right" disablePointerDismissal>
+                <DrawerContent aria-label={common.sidePanel.label}>
+                  <SideDockScopeProvider value="overlay">{panel}</SideDockScopeProvider>
+                </DrawerContent>
+              </Drawer>
+            }
+          >
+            <SideColumn
+              aria-label={common.sidePanel.label}
+              width={dockWidth}
+              onResize={resizeDock}
+              bounds={DOCK_SIZES[panelSize]}
+              pageMinWidth={MASTER_MIN_WIDTH}
+              resizeLabel={common.sidePanel.resize}
+            >
+              <div ref={detailContentRef} className="flex h-full min-h-0 flex-col">
+                {panel}
+              </div>
+            </SideColumn>
+          </SideDockPortal>
+        ) : null}
+      </>
+    )
   }
 
   return (

@@ -14,7 +14,7 @@ import {
 } from "lucide-react"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
-import { ACTION_LABEL, proposalErrorMessage, type AgentProposal } from "../../lib/agent"
+import { ACTION_LABEL, permissionForAction, proposalErrorMessage, type AgentProposal } from "../../lib/agent"
 import { channelIcon, channelLabel } from "../../lib/channels"
 import { timeAgo, usePermission, type OpportunityListItem, type TaskItem } from "../../lib/crm"
 import {
@@ -42,18 +42,6 @@ export interface ContactWorkspaceProps {
   onClose?: () => void
   /** Informa a la bandeja si hay borrador sin guardar (para guardar el cierre del panel). */
   onDraftChange?: (dirty: boolean) => void
-}
-
-/**
- * Permiso operativo que exige cada acción comercial además de agent.decide
- * (el servidor refuerza la matriz con 403; aquí solo se oculta la acción).
- */
-function permissionForAction(action: string): string {
-  if (action === "reservar_cita" || action === "reprogramar_cita" || action === "cancelar_cita") {
-    return "appointments.write"
-  }
-  if (action === "enviar_mensaje") return "conversations.write"
-  return "crm.write"
 }
 
 

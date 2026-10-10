@@ -297,6 +297,7 @@ export function ResponsablesTab({ patientId }: { patientId: string }): React.JSX
       </FormDrawer>
 
       <FormDrawer
+        dock={false}
         open={revoking != null}
         title="Revocar responsabilidad"
         description="El rol deja de estar vigente y se conserva en la historia con su motivo."

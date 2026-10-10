@@ -2,7 +2,14 @@ import type { Db } from "@odentia/db"
 import { member } from "@odentia/db/schema/auth"
 import { workspaceNotification } from "@odentia/db/schema/workspace"
 import { and, desc, eq, inArray, isNull, sql, type SQL } from "drizzle-orm"
-import { listHandoffs, listProposals, type ProposalItem } from "./agent-operations.js"
+import {
+  countAgentRunsToday,
+  countPendingProposals,
+  listHandoffs,
+  listProposals,
+  type ProposalItem,
+} from "./agent-operations.js"
+import { countConversationViews } from "./conversations.js"
 import { notFound, validation } from "./errors.js"
 import { getOrgLocale } from "./locale.js"
 
@@ -100,27 +107,29 @@ async function workspaceZone(tx: Db, orgId: string) {
 
 export interface WorkspaceAgentHome {
   pendingProposals: number
+  /** Conversaciones abiertas con una derivación sin resolver (el chip «Derivadas» de la bandeja). */
+  derivedConversations: number
   proposals: Array<{ id: string; action: string; summary: string; createdAt: string; conversationId: string | null; mode: string; context: ProposalItem["context"] }>
   recentHandoffs: Array<{ id: string; reason: string; priority: string; createdAt: string; conversationId: string | null; contactName: string | null; channel: string | null }>
-  today: { runs: number; ok: number; handoff: number; error: number; omitida: number }
+  today: { runs: number; ok: number; handoff: number; error: number; omitida: number; sinRespuesta: number }
 }
 
-/** Banda del agente para el home: pendientes, derivaciones recientes y corridas de hoy (zona de la org). */
-async function workspaceAgent(tx: Db, orgId: string, start: SQL, end: SQL): Promise<WorkspaceAgentHome> {
+/**
+ * Banda del agente para el home: pendientes (del equipo y del interlocutor,
+ * «por revisar»), derivaciones recientes aún abiertas y corridas de hoy con la
+ * misma definición de «hoy» que el panel del agente.
+ */
+async function workspaceAgent(tx: Db, orgId: string, timezone: string): Promise<WorkspaceAgentHome> {
   const proposalRows = await listProposals(tx, orgId, { status: "propuesta", limit: 3 })
-  const [pending] = await tx.execute<{ count: number }>(sql`
-    select count(*)::int as count from agent_proposal where organization_id=${orgId} and status='propuesta'`)
-  const handoffRows = (await listHandoffs(tx, orgId, { limit: 3 }))
+  const pending = await countPendingProposals(tx, orgId)
+  const handoffRows = (await listHandoffs(tx, orgId, { limit: 3, open: true }))
     .filter(row => Date.parse(row.createdAt) >= Date.now() - 72 * 3_600_000)
-  const [today] = await tx.execute<{ runs: number; ok: number; handoff: number; error: number; omitida: number }>(sql`
-    select count(*)::int as runs,
-      count(*) filter (where status='ok')::int as ok,
-      count(*) filter (where status='handoff')::int as handoff,
-      count(*) filter (where status='error')::int as error,
-      count(*) filter (where status='omitida')::int as omitida
-    from agent_run_ledger where organization_id=${orgId} and started_at >= ${start} and started_at < ${end}`)
+  const today = await countAgentRunsToday(tx, orgId, timezone)
+  // Abiertas, como la vista «Derivadas» de la bandeja con su estado por defecto.
+  const derived = await countConversationViews(tx, orgId, { status: "open" }, ["handoff"])
   return {
-    pendingProposals: pending?.count ?? 0,
+    pendingProposals: pending.team + pending.contact,
+    derivedConversations: derived.handoff,
     proposals: proposalRows.map(row => ({
       id: row.id, action: row.action, summary: row.context.afterSummary,
       createdAt: row.createdAt, conversationId: row.conversationId, mode: row.mode, context: row.context,
@@ -129,17 +138,14 @@ async function workspaceAgent(tx: Db, orgId: string, start: SQL, end: SQL): Prom
       id: row.id, reason: row.reason, priority: row.priority, createdAt: row.createdAt,
       conversationId: row.conversationId, contactName: row.contactName, channel: row.channel,
     })),
-    today: {
-      runs: today?.runs ?? 0, ok: today?.ok ?? 0, handoff: today?.handoff ?? 0,
-      error: today?.error ?? 0, omitida: today?.omitida ?? 0,
-    },
+    today,
   }
 }
 
 export interface WorkspacePulse {
   funnel: { stage: string; count: number; amountCents: string; currency: string }[] | null
   channels: { channel: string; count: number }[] | null
-  execution: Array<{ day: string; ok: number; handoff: number; error: number }> | null
+  execution: Array<{ day: string; ok: number; handoff: number; error: number; sinRespuesta: number }> | null
   collections: { day: string; currency: string; amountCents: string }[] | null
   performance: CrmPerformance
 }
@@ -314,14 +320,15 @@ export async function getWorkspacePulse(tx: Db, orgId: string, access: Workspace
     from conversation c join channel_connection cc on cc.id = c.channel_connection_id and cc.organization_id = ${orgId}
     where c.organization_id = ${orgId} and c.status = 'open'
     group by cc.channel order by cc.channel`) : null
-  const execution = access.agent ? await tx.execute<{ day: string; ok: number; handoff: number; error: number }>(sql`
+  const execution = access.agent ? await tx.execute<{ day: string; ok: number; handoff: number; error: number; sinRespuesta: number }>(sql`
     with days as (
       select to_char((now() at time zone ${timezone}) - (n || ' days')::interval, 'YYYY-MM-DD') as day
       from generate_series(0, 29) n
     ) select days.day as day,
       count(l.id) filter (where l.status = 'ok')::int as ok,
       count(l.id) filter (where l.status = 'handoff')::int as handoff,
-      count(l.id) filter (where l.status = 'error')::int as error
+      count(l.id) filter (where l.status = 'error')::int as error,
+      count(l.id) filter (where l.status = 'sin_respuesta')::int as "sinRespuesta"
     from days left join agent_run_ledger l
       on l.organization_id = ${orgId} and to_char(l.started_at at time zone ${timezone}, 'YYYY-MM-DD') = days.day
     group by days.day order by days.day`) : null
@@ -396,7 +403,7 @@ export async function getWorkspaceHome(tx: Db, orgId: string, userId: string, ac
     where b.organization_id=${orgId} and b.status in ('presentado','pospuesto')
     order by b.presented_at nulls last, b.id limit 8`) : []
   const debt = access.finance ? await currentDebt(tx, orgId) : []
-  const agent = access.agent ? await workspaceAgent(tx, orgId, start, end) : null
+  const agent = access.agent ? await workspaceAgent(tx, orgId, timezone) : null
   // La puesta en marcha consulta capacidades existentes, no deduce configuración
   // a partir de contadores operativos en cero. Solo administración recibe estos datos.
   const [setup] = access.configure ? await tx.execute<{ availability: boolean; chairs: boolean; patients: boolean }>(sql`

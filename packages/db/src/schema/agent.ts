@@ -274,12 +274,17 @@ export const commercialFollowUpCoordination = pgTable(
   ],
 )
 
-export const AGENT_RUN_STATUSES = ["ok", "handoff", "error", "omitida"] as const
+/**
+ * `sin_respuesta`: la corrida por mensaje entrante terminó sin enviar ni
+ * proponer una respuesta y sin derivar; no es una ejecución correcta.
+ */
+export const AGENT_RUN_STATUSES = ["ok", "handoff", "error", "omitida", "sin_respuesta"] as const
 export type AgentRunStatus = (typeof AGENT_RUN_STATUSES)[number]
 
 /**
  * Libro de corridas reales del agente (supervisión). Tokens y coste solo se
  * registran si el proveedor los entrega; coste en micro-unidades enteras.
+ * `llm_calls` cuenta las llamadas al modelo de la corrida, lo reporte o no.
  */
 export const agentRunLedger = pgTable(
   "agent_run_ledger",
@@ -295,6 +300,9 @@ export const agentRunLedger = pgTable(
     latencyMs: integer("latency_ms"),
     inputTokens: integer("input_tokens"),
     outputTokens: integer("output_tokens"),
+    /** Parte de `input_tokens` servida desde la caché del proveedor. */
+    cachedInputTokens: integer("cached_input_tokens"),
+    llmCalls: integer("llm_calls"),
     costMicros: integer("cost_micros"),
     toolsUsed: text("tools_used").array().notNull().default(sql`'{}'`),
     error: text("error"),
@@ -304,8 +312,48 @@ export const agentRunLedger = pgTable(
     index("agent_run_ledger_conversation_idx").on(table.conversationId),
     check(
       "agent_run_ledger_status_check",
-      sql`${table.status} in ('ok','handoff','error','omitida')`,
+      sql`${table.status} in ('ok','handoff','error','omitida','sin_respuesta')`,
     ),
+  ],
+)
+
+export const DECISION_MODES = ["shadow"] as const
+
+/**
+ * Libro de decisiones del modelo de decisión (append-only). Guarda ids,
+ * huella del estado, pregunta versionada y respuestas con probabilidades;
+ * nunca el texto del interlocutor. En modo `shadow` no tiene efecto sobre la
+ * corrida: solo se compara.
+ */
+export const agentDecisionLog = pgTable(
+  "agent_decision_log",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    organizationId: orgFk("organization_id"),
+    conversationId: uuid("conversation_id"),
+    triggerMessageId: uuid("trigger_message_id"),
+    /** Punto de decisión y versión de sus preguntas (p. ej. triage.v1). */
+    point: text("point").notNull(),
+    mode: text("mode").notNull().default("shadow"),
+    provider: text("provider").notNull(),
+    /** Identificador versionado que reportó el proveedor. */
+    model: text("model"),
+    /** SHA-256 del estado enviado, para correlacionar sin guardar el texto. */
+    stateHash: text("state_hash").notNull(),
+    stateChars: integer("state_chars").notNull(),
+    answers: jsonb("answers").$type<unknown[]>().notNull(),
+    /** Qué habría hecho cada punto con los umbrales ilustrativos; solo informativo. */
+    outcome: jsonb("outcome").$type<Record<string, unknown>>(),
+    latencyMs: integer("latency_ms"),
+    inputTokens: integer("input_tokens"),
+    outputTokens: integer("output_tokens"),
+    error: text("error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("agent_decision_log_org_idx").on(table.organizationId, table.createdAt),
+    index("agent_decision_log_conversation_idx").on(table.conversationId),
+    check("agent_decision_log_mode_check", sql`${table.mode} in ('shadow')`),
   ],
 )
 

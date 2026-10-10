@@ -43,9 +43,10 @@ export type AgentRunJob =
       coordinationId: string
     }
 
-async function sendTo(db: Db, queue: string, payload: unknown): Promise<string> {
+async function sendTo(db: Db, queue: string, payload: unknown, delaySeconds = 0): Promise<string> {
+  const delay = Math.max(0, Math.floor(delaySeconds))
   const rows = await db.execute<{ send: number | string }>(
-    sql`select pgmq.send(${queue}, ${JSON.stringify(payload)}::jsonb)`,
+    sql`select pgmq.send(${queue}, ${JSON.stringify(payload)}::jsonb, ${delay}::integer)`,
   )
   const first = Array.isArray(rows) ? rows[0] : (rows as unknown as { send: number | string }[])[0]
   return String(first.send)
@@ -66,7 +67,15 @@ export function sendOutboundMessage(db: Db, payload: OutboundMessageJob): Promis
   return sendTo(db, "outbound_messages", payload)
 }
 
-/** Encola una corrida del agente sobre una conversación. */
-export function sendAgentRun(db: Db, payload: AgentRunJob): Promise<string> {
-  return sendTo(db, "agent_runs", payload)
+/**
+ * Encola una corrida del agente sobre una conversación. `delaySeconds` la
+ * hace visible más tarde: es la ventana para que una ráfaga de mensajes del
+ * interlocutor llegue completa antes de que el agente la lea.
+ */
+export function sendAgentRun(
+  db: Db,
+  payload: AgentRunJob,
+  options: { delaySeconds?: number } = {},
+): Promise<string> {
+  return sendTo(db, "agent_runs", payload, options.delaySeconds)
 }

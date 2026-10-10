@@ -77,8 +77,9 @@ function buildApp(role: string): Hono {
   app.route("/contacts", createContactsRoute(deps))
   app.route("/pipelines", createPipelinesRoute(deps))
   app.route("/channels/connections", createConnectionsRoute(deps))
-  app.route("/agent", createAgentRoute(deps))
-  app.route("/agent", createAgentOpsRoute(deps))
+  const llm = { modelName: "fake", allowInsecureBaseUrl: true }
+  app.route("/agent", createAgentRoute({ ...deps, llm }))
+  app.route("/agent", createAgentOpsRoute({ ...deps, llm }))
   app.route("/tasks", createTasksRoute(deps))
   app.route("/fields", createFieldsRoute(deps))
   return app
@@ -175,6 +176,20 @@ it.each([
   })
   expect(response.status).toBe(404)
   expect(await response.json()).toMatchObject({ error: { code: "NOT_FOUND" } })
+})
+
+it("la API no crea propuestas sin conversación: el trabajo proactivo nace solo del tick", async () => {
+  const response = await buildApp("owner").request("/agent/proposals", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      contactId: randomUUID(),
+      action: "enviar_mensaje",
+      payload: { kind: "template", name: "seguimiento_presupuesto", language: "es_PE" },
+      idempotencyKey: randomUUID(),
+    }),
+  })
+  expect(response.status).toBe(400)
 })
 
 it("bandeja: lista, detalle y envío dentro de ventana", async () => {

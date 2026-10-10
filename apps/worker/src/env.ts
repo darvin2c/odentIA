@@ -17,13 +17,34 @@ const envSchema = z.object({
   MICROSOFT_MAIL_TENANT: z.string().default("common"),
   MAILBOX_POLL_INTERVAL_MS: z.coerce.number().int().min(1000).default(60000),
   CHANNEL_SENDER_MODE: z.enum(["mock", "live"]).default("mock"),
-  /** Formato initChatModel (p.ej. openai:gpt-4o-mini); fake = determinista. */
+  /** Modelo del endpoint compatible con OpenAI (prefijo openai: opcional); fake = determinista. */
   LLM_MODEL: z.string().min(1).default("fake"),
   LLM_API_KEY: z.string().optional().default(""),
   LLM_BASE_URL: z.string().url().optional(),
+  /** Tiempo límite por intento y reintentos del cliente del modelo. */
+  LLM_TIMEOUT_MS: z.coerce.number().int().min(1000).max(600_000).default(60_000),
+  LLM_MAX_RETRIES: z.coerce.number().int().min(0).max(5).default(2),
+  // Segundos que el agente espera tras un mensaje entrante antes de leer el
+  // hilo: agrupa ráfagas en una sola corrida. 0 responde sin esperar.
+  // Vacío en el .env cuenta como no definido (no como 0, que la desactivaría).
+  AGENT_BURST_WINDOW_SECONDS: z.preprocess(
+    (value) => (value === "" ? undefined : value),
+    z.coerce.number().int().min(0).max(30).default(4),
+  ),
+  /** dev/e2e: admite http y destinos privados para servidores locales de prueba. */
+  LLM_ALLOW_INSECURE_BASE_URL: z.enum(["true", "false"]).default("false"),
+  /** Modelos de decisión (plataforma); vacíos = ese proveedor no está disponible. */
+  JEV_API_KEY: z.string().optional().default(""),
+  JEV_BASE_URL: z.string().url().optional(),
+  JEV_MODEL: z.string().optional().default("jev-1.13.0"),
+  OPENAI_DECISIONS_API_KEY: z.string().optional().default(""),
+  OPENAI_DECISIONS_BASE_URL: z.string().url().optional(),
+  OPENAI_DECISIONS_MODEL: z.string().optional().default("gpt-6-luna"),
+  /** Plazo de la sombra, por debajo de la visibilidad de la cola (30 s). */
+  DECISIONS_TIMEOUT_MS: z.coerce.number().int().min(500).max(20_000).default(5_000),
   /** Transcripción de notas de voz inbound (endpoint OpenAI-compatible); vacío = desactivada. */
   TRANSCRIBE_MODEL: z.string().optional().default(""),
-  /** Cae a LLM_API_KEY si vacía. */
+  /** Cae a LLM_API_KEY solo si TRANSCRIBE_BASE_URL apunta al mismo host que LLM_BASE_URL. */
   TRANSCRIBE_API_KEY: z.string().optional(),
   TRANSCRIBE_BASE_URL: z.string().url().optional(),
   LANGFUSE_PUBLIC_KEY: z.string().optional(),

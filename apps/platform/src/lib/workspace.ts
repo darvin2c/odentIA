@@ -19,15 +19,17 @@ export interface WorkspaceHome {
 }
 export interface WorkspaceAgentHome {
   pendingProposals: number
+  /** Conversaciones con una derivación sin resolver (misma cuenta que la bandeja). */
+  derivedConversations: number
   proposals: Array<{ id: string; action: string; summary: string; createdAt: string; conversationId: string | null; mode: string; context: AgentProposal["context"] }>
   recentHandoffs: Array<{ id: string; reason: string; priority: string; createdAt: string; conversationId: string | null; contactName: string | null; channel: string | null }>
-  today: { runs: number; ok: number; handoff: number; error: number; omitida: number }
+  today: { runs: number; ok: number; handoff: number; error: number; omitida: number; sinRespuesta: number }
 }
 /** Foto agregada de los últimos 30 días; cada sección es null sin su permiso. */
 export interface WorkspacePulse {
   funnel: Array<{ stage: string; count: number; amountCents: string; currency: string }> | null
   channels: Array<{ channel: string; count: number }> | null
-  execution: Array<{ day: string; ok: number; handoff: number; error: number }> | null
+  execution: Array<{ day: string; ok: number; handoff: number; error: number; sinRespuesta: number }> | null
   collections: Array<{ day: string; currency: string; amountCents: string }> | null
   performance: CrmPerformance
 }
