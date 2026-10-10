@@ -2,6 +2,7 @@ import { tenant } from "./env"
 import { call, expect, test } from "./fixtures"
 import { gotoHydrated } from "./hydration"
 import { buildClinicalBase } from "./patients-fixture"
+import { surface } from "./surface"
 
 interface FollowUpItem {
   id: string
@@ -63,7 +64,7 @@ test("control clínico: reserva real, mover reprograma y cancelaciones coherente
   const patientPath = `/patients/${ids.patientId}`
   await gotoHydrated(page, tenant(slug, `${patientPath}?tab=controles`))
   await page.getByRole("button", { name: "Programar control" }).first().click()
-  const dialog = page.getByRole("dialog", { name: "Programar control" })
+  const dialog = surface(page, { name: "Programar control" })
   const slot = dialog.getByRole("button", { name: "Seleccionar" }).first()
   await expect(slot).toBeVisible({ timeout: 15_000 })
   await slot.click()

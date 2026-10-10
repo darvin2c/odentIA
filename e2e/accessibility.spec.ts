@@ -6,6 +6,7 @@ import { PANEL, tenant, tenantPattern } from "./env"
 import { expect, fillPatientNames, test } from "./fixtures"
 import { gotoHydrated } from "./hydration"
 import { latestLinkFor } from "./mailpit"
+import { surface } from "./surface"
 
 // Axe mide colores computados: un panel a mitad de su animación de entrada
 // produce contrastes intermedios que el usuario no ve al terminar.

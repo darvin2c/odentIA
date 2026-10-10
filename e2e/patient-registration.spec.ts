@@ -3,6 +3,7 @@ import { simulateTelegramInbound } from "./channels"
 import { API, PANEL, tenant } from "./env"
 import { call, expect, fillPatientNames, test } from "./fixtures"
 import { gotoHydrated } from "./hydration"
+import { surface } from "./surface"
 
 /**
  * Registro directo de pacientes: wizard público anónimo (QR genérico y enlace
@@ -564,7 +565,7 @@ test("vista previa de configuración no crea pacientes", async ({ createOwner })
   await gotoHydrated(page, tenant(org.slug, "/settings/patient-registration"))
   await expect(page.getByRole("button", { name: "Vista previa", exact: true })).toBeEnabled()
   await page.getByRole("button", { name: "Vista previa", exact: true }).click()
-  const dialog = page.getByRole("dialog", { name: "Vista previa del formulario" })
+  const dialog = surface(page, { name: "Vista previa del formulario" })
   await expect(dialog).toBeVisible()
   // Datos ficticios en memoria: avanzar hasta finalizar sin POST.
   await dialog.getByRole("button", { name: "Siguiente", exact: true }).click()

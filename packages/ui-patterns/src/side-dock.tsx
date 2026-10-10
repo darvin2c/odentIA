@@ -23,8 +23,9 @@ import { createPortal } from "react-dom"
  *    dentro de ellos `useDetailMode()` responde `drawer`, así que un
  *    formulario que abre otro formulario lo apila encima sin tocar el primero.
  * 3. Quien pide la columna estando ocupada no se queda sin mostrar: su
- *    contenido sale en el `fallback` (un cajón). Es una red de seguridad, no
- *    un recorrido previsto, y en desarrollo se avisa por consola.
+ *    contenido sale en el `fallback` (un cajón). La decisión se toma al abrir y
+ *    no cambia hasta cerrar: pasar de cajón a columna a mitad de una edición
+ *    remontaría el formulario.
  * 4. El panel del agente no es un formulario: cede la columna si alguien la
  *    pide y se abre como cajón si ya está ocupada (lo decide la app).
  */
@@ -35,10 +36,21 @@ interface SideDockState {
   /** Quienes pidieron la columna, por orden de llegada; el primero la tiene. */
   owners: readonly string[]
   claim: (id: string) => () => void
+  draftGuard: DraftGuardComponent | null
 }
 
-/** Dónde se está renderizando: la página, la columna lateral o un cajón. */
-export type SideDockScope = "page" | "column" | "overlay"
+/**
+ * Aviso de «salir sin guardar» de la app (depende de su router): lo monta la
+ * superficie de la columna mientras tiene cambios pendientes.
+ */
+export type DraftGuardComponent = React.ComponentType<{ dirty: boolean }>
+
+/**
+ * Dónde se está renderizando: la página, la columna lateral, un cajón, o una
+ * pantalla `fixed` que no puede ceder ancho (ya reparte la ventana en sus
+ * propios paneles, como la Bandeja) y por eso abre todo en cajón.
+ */
+export type SideDockScope = "page" | "column" | "overlay" | "fixed"
 
 const SideDockScopeContext = React.createContext<SideDockScope>("page")
 
@@ -59,14 +71,23 @@ export function useSideDockScope(): SideDockScope {
 
 const SideDockContext = React.createContext<SideDockState | null>(null)
 
-export function SideDockProvider({ children }: { children: React.ReactNode }) {
+export function SideDockProvider({
+  children,
+  draftGuard = null,
+}: {
+  children: React.ReactNode
+  draftGuard?: DraftGuardComponent | null
+}) {
   const [slot, setSlot] = React.useState<HTMLElement | null>(null)
   const [owners, setOwners] = React.useState<readonly string[]>([])
   const claim = React.useCallback((id: string) => {
     setOwners((current) => (current.includes(id) ? current : [...current, id]))
     return () => setOwners((current) => current.filter((owner) => owner !== id))
   }, [])
-  const value = React.useMemo(() => ({ slot, setSlot, owners, claim }), [slot, owners, claim])
+  const value = React.useMemo(
+    () => ({ slot, setSlot, owners, claim, draftGuard }),
+    [slot, owners, claim, draftGuard],
+  )
   return <SideDockContext.Provider value={value}>{children}</SideDockContext.Provider>
 }
 
@@ -77,6 +98,10 @@ export function SideDockProvider({ children }: { children: React.ReactNode }) {
 export function useSideDock(): { available: boolean; occupied: boolean } {
   const dock = React.useContext(SideDockContext)
   return { available: dock !== null, occupied: (dock?.owners.length ?? 0) > 0 }
+}
+
+export function useSideDockDraftGuard(): DraftGuardComponent | null {
+  return React.useContext(SideDockContext)?.draftGuard ?? null
 }
 
 /** Lugar de la columna dentro de la fila del layout, a la derecha de la página. */
@@ -100,19 +125,31 @@ export function SideDockPortal({
   const dock = React.useContext(SideDockContext)
   const id = React.useId()
   const claim = dock?.claim
-  React.useEffect(() => claim?.(id), [claim, id])
-  const owner = dock?.owners[0]
-  const denied = owner !== undefined && owner !== id
+  const release = React.useRef<(() => void) | null>(null)
+  const [decision, setDecision] = React.useState<"column" | "fallback" | null>(null)
   React.useEffect(() => {
-    if (denied && process.env.NODE_ENV !== "production") {
-      console.error(
-        "SideDock: la columna lateral ya está ocupada; este contenido se muestra como cajón. " +
-          "Un formulario que se abre con otro ya abierto debe montarse como FormDrawer.",
-      )
+    if (!claim) return
+    const undo = claim(id)
+    release.current = undo
+    return undo
+  }, [claim, id])
+  // Se decide con la lista ya asentada (su propio turno registrado): en el
+  // mismo commit puede estar cerrándose quien tenía la columna.
+  const registered = dock?.owners.includes(id) ?? false
+  const owner = dock?.owners[0]
+  React.useEffect(() => {
+    if (decision !== null || !registered) return
+    if (owner === id) {
+      setDecision("column")
+      return
     }
-  }, [denied])
-  if (!dock?.slot || owner === undefined) return null
-  return denied ? fallback : createPortal(children, dock.slot)
+    // No le tocó: suelta su turno para no retener la columna desde un cajón.
+    setDecision("fallback")
+    release.current?.()
+  }, [decision, registered, owner, id])
+  // Sin columna en el layout (o sin su hueco montado) no hay dónde ir.
+  if (!dock?.slot || decision === "fallback") return fallback
+  return decision === "column" ? createPortal(children, dock.slot) : null
 }
 
 export interface SideColumnWidth {

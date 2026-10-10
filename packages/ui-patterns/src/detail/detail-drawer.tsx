@@ -1,10 +1,11 @@
 import { Drawer, DrawerContent, cn, useIsMobile } from "@odentia/ui"
 import * as React from "react"
 import { SideDockScopeProvider } from "../side-dock.js"
-import type { DetailPanelSize } from "../master-detail.js"
+import { DockedSurface, useDockDecision } from "../docked-surface.js"
+import { DOCK_SIZES, type DetailPanelSize } from "../master-detail.js"
 import { useCloseGuard } from "../surface.js"
 import { DetailSurface } from "./detail-surface.js"
-import type { DetailContainerProps } from "./detail-panel.js"
+import { type DetailContainerProps, DetailPanel } from "./detail-panel.js"
 
 /**
  * Ancho del drawer por tamaño. `md` no fija nada: el drawer ya mide 24rem desde
@@ -43,10 +44,11 @@ export function DetailDrawer({
   const handleClose = useCloseGuard({ isSubmitting, isDirty, onClose })
   const titleId = React.useId()
   const descriptionId = React.useId()
+  const dockBounds = useDockDecision(open, { bounds: DOCK_SIZES[size] })
 
-  return (
+  const drawer = (drawerOpen: boolean) => (
     <Drawer
-      open={open}
+      open={drawerOpen}
       swipeDirection={isMobile ? "down" : "right"}
       showSwipeHandle={isMobile}
       onOpenChange={(nextOpen) => {
@@ -67,4 +69,14 @@ export function DetailDrawer({
       </DrawerContent>
     </Drawer>
   )
+
+  // Con columna lateral y ventana ancha, el detalle va ahí (ver `FormDrawer`).
+  if (open && dockBounds) {
+    return (
+      <DockedSurface bounds={dockBounds} dirty={isDirty && !isSubmitting} fallback={drawer(true)}>
+        <DetailPanel {...surface} onClose={onClose} isDirty={isDirty} isSubmitting={isSubmitting} />
+      </DockedSurface>
+    )
+  }
+  return drawer(open)
 }

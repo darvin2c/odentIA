@@ -5,6 +5,7 @@ import { simulateTelegramInbound, simulateWhatsAppInbound } from "./channels"
 import { API, tenant } from "./env"
 import { call, expect, test } from "./fixtures"
 import { gotoHydrated } from "./hydration"
+import { surface } from "./surface"
 
 const FAKE_REPLY = "Gracias por escribir. Te atiendo enseguida."
 
@@ -303,7 +304,7 @@ test("crm pipeline: mover una oportunidad no mueve las otras de la misma persona
 
   await gotoHydrated(page, tenant(org.slug, "/pipeline"))
   await page.getByRole("button", { name: "Nueva oportunidad" }).click()
-  const dialog = page.getByRole("dialog")
+  const dialog = surface(page)
   await dialog.getByPlaceholder("Buscar por nombre, teléfono o correo").fill(conversation.contact.displayName)
   await dialog.getByRole("button", { name: conversation.contact.displayName, exact: true }).click()
   await page.getByLabel("Título", { exact: true }).fill("Evaluación de ortodoncia")

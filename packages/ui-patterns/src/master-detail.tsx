@@ -61,13 +61,22 @@ const PANEL_SIZES: Record<DetailPanelSize, { default: string; min: string; max: 
 }
 
 /** Los mismos anchos, en px, cuando el detalle va en la columna del layout. */
-const DOCK_SIZES: Record<DetailPanelSize, SideColumnWidth> = {
+export const DOCK_SIZES: Record<DetailPanelSize, SideColumnWidth> = {
   md: { initial: 384, min: 320, max: 512 },
   lg: { initial: 512, min: 416, max: 640 },
   xl: { initial: 640, min: 512, max: 832 },
 }
 /** Ancho que el detalle deja a la lista: el mínimo de la columna maestra. */
-const MASTER_MIN_WIDTH = 512
+export const MASTER_MIN_WIDTH = 512
+
+/** Lectura directa del corte, para decidir en el mismo render en que algo se abre. */
+export function detailPanelFits(): boolean {
+  return (
+    typeof window !== "undefined" &&
+    typeof window.matchMedia === "function" &&
+    window.matchMedia(PANEL_QUERY).matches
+  )
+}
 
 // Corrige el modo antes del primer paint (sin flash drawer→panel); en el
 // servidor cae a `useEffect` para no emitir el aviso de `useLayoutEffect`.

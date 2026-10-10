@@ -66,8 +66,10 @@ export {
   type MasterDetailProps,
   useDetailMode,
 } from "./master-detail.js"
+export { DockedSurface, type DockedSurfaceProps, useDockDecision } from "./docked-surface.js"
 export { PageHeader, type PageHeaderProps } from "./page-header.js"
 export {
+  type DraftGuardComponent,
   SideColumn,
   type SideColumnProps,
   type SideColumnWidth,

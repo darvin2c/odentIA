@@ -52,6 +52,7 @@ import { authClient } from "../lib/auth-client"
 import { requireVerifiedSession, ssrFetchOptions } from "../lib/guards"
 import { orgSlugFromHostname, panelUrl, requestHostname, tenantUrl } from "../lib/host"
 import { useOrgEvents } from "../lib/org-events"
+import { PageDraftGuard } from "../lib/page-draft-guard"
 import { RouterLink } from "../lib/router-link"
 
 export const Route = createFileRoute("/_org")({
@@ -239,7 +240,7 @@ function OrgLayout() {
         window.location.assign(panelUrl("/login"))
       }}
     >
-      <SideDockProvider>
+      <SideDockProvider draftGuard={PageDraftGuard}>
         <AgentPanelProvider>
           <HeaderUtilitiesProvider
             value={

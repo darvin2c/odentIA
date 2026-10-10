@@ -60,6 +60,7 @@ import {
   FilterBar,
   PageHeader,
   PageShell,
+  SideDockScopeProvider,
   useDetailMode,
   useListSearch,
 } from "@odentia/ui-patterns"
@@ -417,6 +418,9 @@ function InboxPage() {
   }
 
   return (
+    // La Bandeja ya reparte la ventana en lista, hilo y «Contexto»: lo que se
+    // abre desde aquí va en cajón, no en la columna lateral.
+    <SideDockScopeProvider value="fixed">
     <PageShell fill className="gap-4">
       <PageHeader title="Bandeja" subtitle={narrowed ? DEFAULT_SUBTITLE : waitingSubtitle(summary)} />
       {/* En angosto, con un hilo abierto, la pantalla es del hilo: vistas y filtros vuelven con la lista. */}
@@ -565,6 +569,7 @@ function InboxPage() {
         }}
       />
     </PageShell>
+    </SideDockScopeProvider>
   )
 }
 

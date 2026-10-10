@@ -211,7 +211,6 @@ describe("MasterDetail", () => {
         expect(column.textContent).not.toContain("segundo")
         const fallback = document.querySelector("[data-slot='drawer-popup']")
         expect(fallback?.textContent).toContain("segundo")
-        expect(errors.some((message) => String(message).includes("SideDock"))).toBe(true)
 
         // Al cerrarse el segundo, el primero sigue en su sitio.
         utils.rerender(twice(null))
@@ -219,6 +218,84 @@ describe("MasterDetail", () => {
       } finally {
         console.error = original
       }
+    })
+
+    describe("FormDrawer", () => {
+      const form = (title: string, children?: React.ReactNode) => (
+        <FormDrawer open title={title} onClose={() => {}} onSubmit={() => {}}>
+          {children ?? <span>campos de {title}</span>}
+        </FormDrawer>
+      )
+      const withColumn = (content: React.ReactNode) => (
+        <SideDockProvider>
+          {content}
+          <div data-testid="columna">
+            <SideDockSlot />
+          </div>
+        </SideDockProvider>
+      )
+      const popups = () => document.querySelectorAll("[data-slot='drawer-popup']")
+
+      it("en ventana ancha se abre en la columna del layout, sin cajón", () => {
+        mockMatchMedia(true)
+        render(withColumn(form("Nueva tarea")))
+        const column = screen.getByTestId("columna")
+        expect(column.querySelector("aside section")?.textContent).toContain("campos de Nueva tarea")
+        expect(popups().length).toBe(0)
+      })
+
+      it("en ventana estrecha sigue siendo cajón", () => {
+        mockMatchMedia(false)
+        render(withColumn(form("Nueva tarea")))
+        expect(screen.getByTestId("columna").querySelector("aside")).toBeNull()
+        expect(popups().length).toBe(1)
+      })
+
+      it("un formulario abierto desde otro se apila como cajón y el primero sigue en la columna", () => {
+        mockMatchMedia(true)
+        render(withColumn(form("Primero", form("Segundo"))))
+        const column = screen.getByTestId("columna")
+        expect(column.querySelectorAll("aside").length).toBe(1)
+        expect(column.querySelector("aside")?.textContent).toContain("Primero")
+        expect(popups().length).toBe(1)
+        expect(popups()[0]?.textContent).toContain("campos de Segundo")
+      })
+
+      it("con la columna ocupada, otro formulario de la página se abre como cajón", () => {
+        mockMatchMedia(true)
+        const utils = render(withColumn(form("Primero")))
+        utils.rerender(
+          withColumn(
+            <>
+              {form("Primero")}
+              {form("Otro")}
+            </>,
+          ),
+        )
+        const column = screen.getByTestId("columna")
+        expect(column.querySelectorAll("aside").length).toBe(1)
+        expect(column.textContent).toContain("campos de Primero")
+        expect(popups()[0]?.textContent).toContain("campos de Otro")
+      })
+
+      it("un cajón pensado como vista inmersiva (muy ancho) no va a la columna", () => {
+        mockMatchMedia(true)
+        render(
+          withColumn(
+            <FormDrawer
+              open
+              title="Visor"
+              onClose={() => {}}
+              onSubmit={() => {}}
+              className="data-[swipe-axis=x]:sm:[--drawer-content-width:min(72rem,calc(100vw-2rem))]"
+            >
+              <span>visor</span>
+            </FormDrawer>,
+          ),
+        )
+        expect(screen.getByTestId("columna").querySelector("aside")).toBeNull()
+        expect(popups().length).toBe(1)
+      })
     })
 
     it("en ventana estrecha no usa la columna: el formulario es cosa del drawer de la página", () => {

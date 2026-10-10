@@ -2,6 +2,7 @@ import type { Page, Route } from "@playwright/test"
 import { tenant } from "./env"
 import { api, call, expect, test } from "./fixtures"
 import { gotoHydrated } from "./hydration"
+import { surface as sideSurface } from "./surface"
 
 // Solo se inyectan fallos de transporte; los datos y las recuperaciones usan la API real.
 async function failResponse(page: Page, route: Route, status: number) {
@@ -151,7 +152,7 @@ test("conocimiento: rechazo conserva campos y permite corregir sin filtrar el er
   })
   await gotoHydrated(page, tenant(org.slug, "/agent/knowledge"))
   await page.getByRole("button", { name: "Nueva entrada", exact: true }).click()
-  const drawer = page.getByRole("dialog", { name: "Nueva entrada", exact: true })
+  const drawer = sideSurface(page, { name: "Nueva entrada", exact: true })
   await drawer.getByLabel("Título", { exact: true }).fill("Política de citas")
   await drawer.getByLabel("Contenido (se cita tal cual)", { exact: true }).fill("Confirma tu cita con recepción.")
   await drawer.getByRole("button", { name: "Guardar", exact: true }).click()
@@ -187,7 +188,7 @@ for (const surface of ["knowledge", "product"] as const) {
     })
     await gotoHydrated(page, tenant(org.slug, surface === "knowledge" ? "/agent/knowledge" : "/inventory"))
     await page.getByRole("button", { name: surface === "knowledge" ? "Nueva entrada" : "Producto", exact: true }).click()
-    const drawer = page.getByRole("dialog", { name: surface === "knowledge" ? "Nueva entrada" : "Nuevo producto", exact: true })
+    const drawer = sideSurface(page, { name: surface === "knowledge" ? "Nueva entrada" : "Nuevo producto", exact: true })
     if (surface === "knowledge") {
       await drawer.getByLabel("Título", { exact: true }).fill("Entrada confirmada en servidor")
       await drawer.getByLabel("Contenido (se cita tal cual)", { exact: true }).fill("No duplicar esta entrada.")

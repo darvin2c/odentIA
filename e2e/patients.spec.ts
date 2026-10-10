@@ -13,6 +13,7 @@ import {
   patientApiPath,
   setupAggregation,
 } from "./patients-fixture"
+import { surface } from "./surface"
 
 /** Abre una sección de la ficha por su navegación: área, sección y, si aplica, tipo. */
 async function openSection(page: Page, ...names: string[]): Promise<void> {
@@ -119,7 +120,7 @@ test("paciente: responsabilidad y decisión de la propuesta", async ({ owner }) 
   // Responsables: el rol vigente habilita registrar quién decide la propuesta.
   await openSection(page, "Datos", "Responsables")
   await page.getByRole("button", { name: "Asignar responsabilidad" }).click()
-  const responsibility = page.getByRole("dialog", { name: "Asignar responsabilidad" })
+  const responsibility = surface(page, { name: "Asignar responsabilidad" })
   await chooseOption(responsibility.getByLabel("Contacto vinculado", { exact: true }), ids.contactId)
   await chooseOption(
     responsibility.getByLabel("Responsabilidad", { exact: true }),
@@ -151,7 +152,7 @@ test("paciente: responsabilidad y decisión de la propuesta", async ({ owner }) 
 
   // Alternativas: la agrupación y la recomendación se registran desde la ficha.
   await page.getByRole("button", { name: "Crear agrupación", exact: true }).click()
-  const groupDrawer = page.getByRole("dialog", { name: "Crear agrupación de alternativas" })
+  const groupDrawer = surface(page, { name: "Crear agrupación de alternativas" })
   await groupDrawer.getByLabel("Título de la agrupación").fill("Resina o corona")
   await groupDrawer.getByRole("button", { name: "Crear agrupación", exact: true }).click()
   await expect(page.getByText("Resina o corona").first()).toBeVisible()
@@ -180,7 +181,7 @@ test("paciente: cuenta con cargo, pago y aplicación", async ({ owner }) => {
   const generarCargo = page.getByRole("button", { name: "Generar cargo", exact: true }).first()
   await expect(generarCargo).toBeEnabled()
   await generarCargo.click()
-  const charge = page.getByRole("dialog", { name: /Generar cargo/ })
+  const charge = surface(page, { name: /Generar cargo/ })
   await charge.getByRole("button", { name: "Generar cargo", exact: true }).click()
 
   // Pago y aplicación desde la ficha.
@@ -194,7 +195,7 @@ test("paciente: cuenta con cargo, pago y aplicación", async ({ owner }) => {
   await openSection(page, "Cuenta")
   await expect(page.getByText("POR COBRAR").first()).toBeVisible()
   await page.getByRole("button", { name: "Registrar pago o anticipo" }).click()
-  const payment = page.getByRole("dialog", { name: "Registrar pago o anticipo" })
+  const payment = surface(page, { name: "Registrar pago o anticipo" })
   await payment.getByLabel("Importe", { exact: true }).fill("200")
   await chooseOption(payment.getByLabel("Quién paga", { exact: true }), ids.contactId)
   await payment.getByRole("button", { name: "Registrar pago" }).click()
@@ -203,7 +204,7 @@ test("paciente: cuenta con cargo, pago y aplicación", async ({ owner }) => {
   const paymentsTable = page.getByRole("table").nth(1)
   await expect(paymentsTable).toContainText("S/ 200.00")
   await page.getByRole("button", { name: "Aplicar a un cargo" }).first().click()
-  const apply = page.getByRole("dialog", { name: "Aplicar pago a un cargo" })
+  const apply = surface(page, { name: "Aplicar pago a un cargo" })
   await apply.getByLabel("Importe a aplicar", { exact: true }).fill("150")
   await apply.getByRole("button", { name: "Aplicar", exact: true }).click()
   await expect(chargesTable).toContainText("S/ 150.00")
@@ -221,7 +222,7 @@ test("paciente: receta vinculada al tratamiento y anulación", async ({ owner })
   await gotoHydrated(page, tenant(owner.org.slug, patientPath))
   await openSection(page, "Clínica", "Documentos", "Recetas")
   await page.getByRole("button", { name: "Emitir receta" }).click()
-  const prescription = page.getByRole("dialog", { name: "Emitir receta" })
+  const prescription = surface(page, { name: "Emitir receta" })
   await chooseOption(prescription.getByLabel("Tratamiento", { exact: true }), ids.itemId)
   await prescription.getByLabel("DCI (denominación común)", { exact: true }).fill("ibuprofeno")
   await prescription.getByLabel("Concentración", { exact: true }).fill("400 mg")
@@ -236,7 +237,7 @@ test("paciente: receta vinculada al tratamiento y anulación", async ({ owner })
     .first()
     .click()
   await page.getByRole("button", { name: "Anular receta" }).click()
-  const cancel = page.getByRole("dialog", { name: "Anular receta" })
+  const cancel = surface(page, { name: "Anular receta" })
   await cancel.getByLabel("Motivo de anulación", { exact: true }).fill("Alergia registrada")
   await cancel.getByRole("button", { name: "Anular receta", exact: true }).click()
   await expect(page.getByText(/Anulada/).first()).toBeVisible()
@@ -252,7 +253,7 @@ test("paciente: control indicado, programado y completado", async ({ owner }) =>
   await gotoHydrated(page, tenant(owner.org.slug, patientPath))
   await openSection(page, "Clínica", "Controles")
   await page.getByRole("button", { name: "Indicar control" }).click()
-  const followUp = page.getByRole("dialog", { name: "Indicar control" })
+  const followUp = surface(page, { name: "Indicar control" })
   await chooseOption(followUp.getByLabel("Tipo de control", { exact: true }), "tratamiento")
   await chooseOption(followUp.getByLabel("Tratamiento", { exact: true }), ids.itemId)
   await followUp.getByLabel("Título del control").fill("Control post-endodoncia")
@@ -260,14 +261,14 @@ test("paciente: control indicado, programado y completado", async ({ owner }) =>
   await expect(page.getByText("Control post-endodoncia")).toBeVisible()
   // Programar reserva un hueco real del profesional y lo vincula al control.
   await page.getByRole("button", { name: "Programar control" }).first().click()
-  const schedule = page.getByRole("dialog", { name: "Programar control" })
+  const schedule = surface(page, { name: "Programar control" })
   const slot = schedule.getByRole("button", { name: "Seleccionar" }).first()
   await expect(slot).toBeVisible({ timeout: 15_000 })
   await slot.click()
   await schedule.getByRole("button", { name: "Reservar y vincular control" }).click()
   await expect(page.getByText(/Cita reservada/)).toBeVisible({ timeout: 15_000 })
   await page.getByRole("button", { name: "Completar control" }).click()
-  const complete = page.getByRole("dialog", { name: "Completar control" })
+  const complete = surface(page, { name: "Completar control" })
   await chooseOption(complete.getByLabel("Atención finalizada", { exact: true }), ids.encounterId)
   await complete.getByLabel("Resultado del control").fill("Sin dolor; oclusión estable")
   await complete.getByRole("button", { name: "Completar", exact: true }).click()
@@ -307,7 +308,7 @@ test("paciente: ejecución de la sesión y cierre del tratamiento", async ({ own
   const registrar = page.getByRole("button", { name: "Registrar procedimiento", exact: true }).first()
   await expect(registrar).toBeEnabled()
   await registrar.click()
-  const procedureDrawer = page.getByRole("dialog", { name: "Registrar procedimiento" })
+  const procedureDrawer = surface(page, { name: "Registrar procedimiento" })
   await expect(procedureDrawer).toBeVisible()
   await procedureDrawer.getByLabel("Tratamiento del presupuesto").click()
   await page.getByRole("option", { name: /Endodoncia unirradicular/ }).click()
@@ -392,7 +393,7 @@ test("paciente: agregación del recorrido, historia y aislamiento", async ({ cre
   // El formulario clínico respeta el tratamiento abierto en el recorrido.
   await gotoHydrated(page, tenant(owner.org.slug, `${patientPath}?tab=recorrido&itemId=${ids.itemId}`))
   await page.getByRole("button", { name: "Emitir receta", exact: true }).click()
-  const scopedPrescription = page.getByRole("dialog", { name: "Emitir receta" })
+  const scopedPrescription = surface(page, { name: "Emitir receta" })
   await expect(scopedPrescription.getByText(/^Tratamiento: /)).toBeVisible()
   await scopedPrescription.getByRole("button", { name: "Cancelar", exact: true }).click()
 
@@ -539,7 +540,7 @@ test("recepción coordina el control sin leer la ficha clínica", async ({ owner
 
   // Reserva un hueco real: misma operación que la vía clínica.
   await page.getByRole("button", { name: "Reservar control" }).click()
-  const dialog = page.getByRole("dialog", { name: "Programar control" })
+  const dialog = surface(page, { name: "Programar control" })
   const slot = dialog.getByRole("button", { name: "Seleccionar" }).first()
   await expect(slot).toBeVisible({ timeout: 15_000 })
   await slot.click()
@@ -587,7 +588,7 @@ test("persona única: la ficha y la persona comparten identidad y actividad", as
   await expect(page.getByText("Esta persona es paciente", { exact: false })).toBeVisible()
   await expect(page.getByText("DNI 87654321")).toBeVisible()
   await page.getByRole("button", { name: "Editar datos" }).click()
-  const edit = page.getByRole("dialog", { name: "Editar datos" })
+  const edit = surface(page, { name: "Editar datos" })
   await edit.getByLabel("Fecha de nacimiento").fill("1990-04-05")
   await edit.getByRole("button", { name: "Guardar", exact: true }).click()
   await expect(page.getByText("1990-04-05")).toBeVisible()
@@ -598,7 +599,7 @@ test("persona única: la ficha y la persona comparten identidad y actividad", as
   // Desde la ficha: actividad unificada, seguimiento comercial y tareas del paciente.
   await gotoHydrated(page, tenant(slug, `/patients/${ids.patientId}`))
   await page.getByRole("button", { name: "Nueva tarea" }).click()
-  const task = page.getByRole("dialog", { name: "Nueva tarea" })
+  const task = surface(page, { name: "Nueva tarea" })
   await task.getByLabel("Qué hay que hacer").fill("Llamar por el laboratorio")
   await task.getByRole("button", { name: "Crear tarea" }).click()
   await expect(page.getByText("Tarea: Llamar por el laboratorio")).toBeVisible()
