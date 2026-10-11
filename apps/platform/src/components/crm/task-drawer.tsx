@@ -1,4 +1,4 @@
-import { Button, Field, FieldLabel, Input } from "@odentia/ui"
+import { Button, Field, FieldLabel, Input, Spinner } from "@odentia/ui"
 import { FormDrawer } from "@odentia/ui-patterns"
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useMemo, useState } from "react"
@@ -355,12 +355,26 @@ export function TaskDrawer({
               </p>
             ) : (
               <>
-                <Input
-                  id="task-drawer-contact-search"
-                  value={contactSearch}
-                  onChange={(e) => setContactSearch(e.target.value)}
-                  placeholder="Buscar por nombre, teléfono o correo"
-                />
+                <div className="relative">
+                  <Input
+                    id="task-drawer-contact-search"
+                    value={contactSearch}
+                    onChange={(e) => setContactSearch(e.target.value)}
+                    placeholder="Buscar por nombre, teléfono o correo"
+                    aria-busy={contactsQuery.isFetching}
+                    className={contactsQuery.isFetching ? "pr-9" : undefined}
+                  />
+                  {contactsQuery.isFetching ? (
+                    <span className="pointer-events-none absolute inset-y-0 right-2 flex items-center text-[var(--identity-accent)]">
+                      <Spinner className="size-4" aria-hidden />
+                    </span>
+                  ) : null}
+                </div>
+                {contactsQuery.isFetching ? (
+                  <p className="text-xs text-muted-foreground" role="status">
+                    Buscando contactos…
+                  </p>
+                ) : null}
                 <div className="mt-1 flex max-h-36 flex-col gap-1 overflow-y-auto">
                   {contactOptions.map((c) => (
                     <Button
@@ -388,7 +402,14 @@ export function TaskDrawer({
                     disabled={contactsQuery.isFetchingNextPage}
                     onClick={() => void contactsQuery.fetchNextPage()}
                   >
-                    {contactsQuery.isFetchingNextPage ? "Cargando…" : "Cargar más contactos"}
+                    {contactsQuery.isFetchingNextPage ? (
+                      <>
+                        <Spinner className="size-6" aria-hidden />
+                        Cargar más contactos
+                      </>
+                    ) : (
+                      "Cargar más contactos"
+                    )}
                   </Button>
                 ) : null}
                 {contactsQuery.isError ? (
@@ -445,12 +466,26 @@ export function TaskDrawer({
         ) : (
           <Field>
             <FieldLabel htmlFor="task-drawer-conv-search">Hilo (opcional)</FieldLabel>
-            <Input
-              id="task-drawer-conv-search"
-              value={convSearch}
-              onChange={(e) => setConvSearch(e.target.value)}
-              placeholder="Buscar hilo por persona o texto"
-            />
+            <div className="relative">
+              <Input
+                id="task-drawer-conv-search"
+                value={convSearch}
+                onChange={(e) => setConvSearch(e.target.value)}
+                placeholder="Buscar hilo por persona o texto"
+                aria-busy={convsQuery.isFetching}
+                className={convsQuery.isFetching ? "pr-9" : undefined}
+              />
+              {convsQuery.isFetching ? (
+                <span className="pointer-events-none absolute inset-y-0 right-2 flex items-center text-[var(--identity-accent)]">
+                  <Spinner className="size-4" aria-hidden />
+                </span>
+              ) : null}
+            </div>
+            {convsQuery.isFetching ? (
+              <p className="text-xs text-muted-foreground" role="status">
+                Buscando hilos…
+              </p>
+            ) : null}
             <div className="mt-1 flex max-h-36 flex-col gap-1 overflow-y-auto">
               {convOptions.map((c) => (
                 <Button
@@ -482,7 +517,14 @@ export function TaskDrawer({
                 disabled={convsQuery.isFetchingNextPage}
                 onClick={() => void convsQuery.fetchNextPage()}
               >
-                {convsQuery.isFetchingNextPage ? "Cargando…" : "Cargar más hilos"}
+                {convsQuery.isFetchingNextPage ? (
+                  <>
+                    <Spinner className="size-6" aria-hidden />
+                    Cargar más hilos
+                  </>
+                ) : (
+                  "Cargar más hilos"
+                )}
               </Button>
             ) : null}
             {convsQuery.isError ? (
@@ -506,12 +548,26 @@ export function TaskDrawer({
           <Field>
             <FieldLabel htmlFor="task-drawer-opp-search">Oportunidad (opcional)</FieldLabel>
             {effectiveContactId === "" ? (
-              <Input
-                id="task-drawer-opp-search"
-                value={oppSearch}
-                onChange={(e) => setOppSearch(e.target.value)}
-                placeholder="Buscar por título o interés"
-              />
+              <div className="relative">
+                <Input
+                  id="task-drawer-opp-search"
+                  value={oppSearch}
+                  onChange={(e) => setOppSearch(e.target.value)}
+                  placeholder="Buscar por título o interés"
+                  aria-busy={oppsQuery.isFetching}
+                  className={oppsQuery.isFetching ? "pr-9" : undefined}
+                />
+                {oppsQuery.isFetching ? (
+                  <span className="pointer-events-none absolute inset-y-0 right-2 flex items-center text-[var(--identity-accent)]">
+                    <Spinner className="size-4" aria-hidden />
+                  </span>
+                ) : null}
+              </div>
+            ) : null}
+            {oppsQuery.isFetching && !oppsQuery.isFetchingNextPage ? (
+              <p className="text-xs text-muted-foreground" role="status">
+                Buscando oportunidades…
+              </p>
             ) : null}
             <div className="mt-1 flex max-h-36 flex-col gap-1 overflow-y-auto">
               {oppOptions.map((o) => (
@@ -536,7 +592,14 @@ export function TaskDrawer({
                 disabled={oppsQuery.isFetchingNextPage}
                 onClick={() => void oppsQuery.fetchNextPage()}
               >
-                {oppsQuery.isFetchingNextPage ? "Cargando…" : "Cargar más oportunidades"}
+                {oppsQuery.isFetchingNextPage ? (
+                  <>
+                    <Spinner className="size-6" aria-hidden />
+                    Cargar más oportunidades
+                  </>
+                ) : (
+                  "Cargar más oportunidades"
+                )}
               </Button>
             ) : null}
             {oppsQuery.isError ? (

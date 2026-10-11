@@ -619,7 +619,7 @@ export function ScheduleTimeline({
             ) : null}
             {extending ? (
               <div className="absolute top-1 left-1/2 z-10">
-                <Spinner className="size-4" />
+                <Spinner className="size-6" />
               </div>
             ) : null}
 

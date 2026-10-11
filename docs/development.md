@@ -97,6 +97,22 @@ del modelo no demuestra entrega del canal ni sustituye la observación humana.
 - En Inicio y Reportes, derivaciones usan cohorte por creación; controles y tareas usan cohorte por vencimiento. Cancelaciones no cuentan como éxito y los históricos sin evento suficiente permanecen desconocidos.
 - Los modos fake/mock prueban contratos internos, no entrega de proveedor, calidad de un LLM real ni observación con usuarios. El cierre de una validación integral exige proveedor/modelo reales identificados, datos consentidos o sintéticos y observación de recepción, clínico y caja.
 
+## Identidad visual y temas
+
+La única firma vigente es `Odentia[32]`: O mayúscula, IBM Plex Mono Regular y separación ajustada; el isotipo independiente conserva `[32]`. `Brand` en `@odentia/ui-patterns` sirve la firma y su variante `compact`. Los activos canónicos viven en `assets/brand/`: maestros SVG con curvas editables, PNG transparentes, PDF vectoriales RGB, favicon SVG/ICO, licencia, guía y ZIP. Panel y plataforma importan los favicons de esa carpeta mediante Vite. No se mantienen propuestas descartadas en `refs/`.
+
+Los colores de identidad usan `--identity-accent` y `--identity-ink`, separados de `--primary`: las organizaciones pueden cambiar el color de sus acciones sin recolorear la marca de la plataforma. Claro: cian `#0e7490` y tinta `#0f172a`; oscuro: cian `#4fc3d7` y tinta `#f1f5f9`. No redefinir los tokens de identidad en paletas de organización. La marca de una clínica y la de la plataforma son identidades distintas.
+
+Para comprobar la firma, el isotipo y su independencia del primario, ejecutar `pnpm --filter @odentia/ui-patterns storybook` y abrir `Identidad/Marca/Temas`. `Identidad/Marca/Acceso` muestra la composición de autenticación en escritorio y móvil; `Patrones/AppShell` permite comprobar la cabecera expandida y el riel colapsado.
+
+`Identidad/Cargas/Recorridos` y `Recorridos oscuros` presentan la variante B elegida (corchetes y barrido luminoso del 32) sobre tabla, acciones, drawer, inputs y cambio de contexto. La tabla permite crear/editar datos sintéticos y observar el guardado y la recarga como operaciones separadas; «Fallar recarga tras guardar» demuestra cómo reintentar solo la lista sin repetir la mutación. También se muestra invalidación por evento externo, primera consulta con skeleton, búsqueda con debounce de 300 ms, opciones dependientes, carga incremental y vista previa.
+
+La variante B es la primitiva `Spinner` de `@odentia/ui`: corchetes y barrido luminoso, sin giro del logo; respeta movimiento reducido. `SubmitButton` la muestra solo durante `pending`, conserva su nombre y bloquea el botón, sin reservar espacio en reposo. `SearchInput.isFetching` y `FilterBar.searchPending` representan la lectura real del servidor sin bloquear escritura ni limpieza.
+
+`DataTable.isFetching` añade el estado fijo de actualización sin sustituir filas. La primera consulta usa `DataTableSkeleton`; `LoadingState` usa skeleton por defecto y acepta `kind="indeterminate"` para preparar documentos o esperar sin estructura conocida. Una revalidación fallida conserva los datos recibidos y ofrece reintentar la lectura; un guardado confirmado no se repite porque falle esa lectura. La firma global permanece estática. Subidas y descargas con progreso medido conservan su progreso real.
+
+Las stories consumen los componentes reales; únicamente sus demoras, almacén sintético y respuestas son de demostración y no pertenecen al producto.
+
 ## Herramientas de contexto
 
 - TypeScript del workspace y `typescript-language-server` son dependencias de desarrollo raíz. `pnpm install` instala el servidor; OMP lo detecta por binario local y marcador de proyecto. Tras instalar, recargar LSP (`reload`, `file: "*"`).

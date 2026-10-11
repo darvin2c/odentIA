@@ -69,6 +69,11 @@ export interface FilterBarProps {
   sortOptions: SortOption[]
   searchPlaceholder?: string
   showSearch?: boolean
+  /**
+   * Búsqueda revalidando (p. ej. `isFetching` de React Query): muestra el
+   * Spinner B dentro del `SearchInput` sin bloquearlo.
+   */
+  searchPending?: boolean
   className?: string
   /** Limita Limpiar a estas claves; conserva fecha, vista y agrupación. */
   resetKeys?: string[]
@@ -81,6 +86,7 @@ export function FilterBar({
   sortOptions,
   searchPlaceholder = common.filters.search,
   showSearch = true,
+  searchPending = false,
   className,
   resetKeys,
   inlineFrom = "md",
@@ -130,7 +136,7 @@ export function FilterBar({
           inlineFrom === "lg" ? "lg:flex justify-end" : "md:flex",
         )}
       >
-        {showSearch && <SearchInput placeholder={searchPlaceholder} expandable />}
+        {showSearch && <SearchInput placeholder={searchPlaceholder} expandable isFetching={searchPending} />}
         {primaryFilters.map((filter) => (
           <FilterControl key={`${filter.type}:${filter.key}`} filter={filter} layout="popover" />
         ))}
@@ -174,7 +180,7 @@ export function FilterBar({
         )}
       >
         {showSearch && (
-          <SearchInput placeholder={searchPlaceholder} className="min-w-0 flex-1 sm:max-w-64" />
+          <SearchInput placeholder={searchPlaceholder} className="min-w-0 flex-1 sm:max-w-64" isFetching={searchPending} />
         )}
         <Button
           type="button"

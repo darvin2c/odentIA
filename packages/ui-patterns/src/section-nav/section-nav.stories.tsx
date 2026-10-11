@@ -1,6 +1,7 @@
 import { RiCalendarLine, RiSettings3Line, RiUserLine } from "@remixicon/react"
 import type { Meta, StoryObj } from "@storybook/react"
 import { AppShell } from "../app-shell.js"
+import { Brand } from "../brand.js"
 import { PageShell } from "../page-shell.js"
 import { SectionNav } from "./index.js"
 import { configuracion, destinos, SectionBody, StoryLink, secciones } from "./story-fixtures.js"
@@ -96,7 +97,8 @@ export const DieciseisDestinos: Story = {
       LinkComponent={StoryLink}
       pathname="/settings/audit"
       user={{ name: "Ada Lovelace", email: "ada@odentia.localhost" }}
-      brand={<span className="text-base font-semibold">odentIA</span>}
+      brand={<Brand />}
+      brandIcon={<Brand compact />}
       footerItems={[{ label: "Configuración", to: "/settings", icon: RiSettings3Line }]}
       onSignOut={() => {}}
     >
@@ -132,7 +134,8 @@ export const DentroDelAppShell: Story = {
       LinkComponent={StoryLink}
       pathname="/pacientes/123/historia"
       user={{ name: "Ada Lovelace", email: "ada@odentia.localhost" }}
-      brand={<span className="text-base font-semibold">odentIA</span>}
+      brand={<Brand />}
+      brandIcon={<Brand compact />}
       footerItems={[{ label: "Configuración", to: "/settings", icon: RiSettings3Line }]}
       onSignOut={() => {}}
     >

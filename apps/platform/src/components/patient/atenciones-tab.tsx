@@ -1,4 +1,4 @@
-import { Badge, Button } from "@odentia/ui"
+import { Badge, Button, Spinner } from "@odentia/ui"
 import { DataTable, DataTableSkeleton, EmptyState } from "@odentia/ui-patterns"
 import { useInfiniteQuery } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
@@ -169,19 +169,14 @@ export function AtencionesTab({ patientId }: { patientId: string }): React.JSX.E
       </fieldset>
       {query.isLoading ? (
         <DataTableSkeleton columnCount={6} rowCount={4} label="Cargando atenciones…" />
-      ) : query.isError ? (
-        <p role="alert" className="text-sm text-destructive">
-          {query.error.message}
-        </p>
-      ) : rows.length === 0 ? (
-        <EmptyState
-          icon={ClipboardList}
-          title={status ? "Sin atenciones con este estado" : "Sin atenciones"}
-          description="Las atenciones se abren desde la cabecera de la ficha o al atender una cita."
-        />
-      ) : (
+      ) : rows.length > 0 ? (
         <>
-          <DataTable table={table} onRowClick={(row) => open(row.id)} />
+          {query.isError ? (
+            <p role="alert" className="text-sm text-destructive">
+              No pudimos actualizar la lista. Conservamos las últimas atenciones recibidas.
+            </p>
+          ) : null}
+          <DataTable table={table} onRowClick={(row) => open(row.id)} isFetching={query.isFetching} refreshMessage="Actualizando atenciones…" />
           {query.hasNextPage ? (
             <div>
               <Button
@@ -190,11 +185,21 @@ export function AtencionesTab({ patientId }: { patientId: string }): React.JSX.E
                 disabled={query.isFetchingNextPage}
                 onClick={() => void query.fetchNextPage()}
               >
-                {query.isFetchingNextPage ? "Cargando…" : "Cargar más"}
+                {query.isFetchingNextPage ? <span className="inline-flex items-center gap-2"><Spinner className="size-6" aria-hidden /><span>Cargar más</span></span> : "Cargar más"}
               </Button>
             </div>
           ) : null}
         </>
+      ) : query.isError ? (
+        <p role="alert" className="text-sm text-destructive">
+          {query.error.message}
+        </p>
+      ) : (
+        <EmptyState
+          icon={ClipboardList}
+          title={status ? "Sin atenciones con este estado" : "Sin atenciones"}
+          description="Las atenciones se abren desde la cabecera de la ficha o al atender una cita."
+        />
       )}
     </div>
   )

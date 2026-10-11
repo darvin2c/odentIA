@@ -10,10 +10,12 @@ import {
   Field,
   FieldLabel,
   Input,
+  Spinner,
   Textarea,
 } from "@odentia/ui"
 import {
   ConfirmDialog,
+  DataRefreshMarker,
   EmptyState,
   FormDrawer,
   normalizeCountry,
@@ -296,7 +298,9 @@ function ContactDetailPage() {
     },
   })
 
-  if (detailQuery.isLoading) {
+  // Sin ficha aún no hay estructura que anticipar; con ficha en caché el
+  // refetch (post-guardado o por eventos) nunca la retira ni oculta el error.
+  if (detailQuery.isPending && !detail) {
     return (
       <PageShell>
         <p className="text-sm text-muted-foreground">Cargando…</p>
@@ -306,7 +310,22 @@ function ContactDetailPage() {
   if (!detail) {
     return (
       <PageShell>
-        <EmptyState title="No encontrado" description="El contacto ya no existe." />
+        {detailQuery.isError ? (
+          <div className="flex flex-col gap-2">
+            <p role="alert" className="text-sm text-destructive">
+              {detailQuery.error instanceof Error
+                ? detailQuery.error.message
+                : "No se pudo cargar el contacto."}
+            </p>
+            <div>
+              <Button type="button" variant="outline" onClick={() => void detailQuery.refetch()}>
+                Reintentar
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <EmptyState title="No encontrado" description="El contacto ya no existe." />
+        )}
       </PageShell>
     )
   }
@@ -330,6 +349,22 @@ function ContactDetailPage() {
 
   return (
     <PageShell className="flex flex-col gap-6">
+      {detailQuery.isFetching && !detailQuery.isPending ? <DataRefreshMarker /> : null}
+      {detailQuery.isError ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <p role="alert" className="text-sm text-destructive">
+            No se pudo actualizar la ficha; se conservan los datos cargados.{" "}
+            <Button
+              type="button"
+              variant="link"
+              size="sm"
+              onClick={() => void detailQuery.refetch()}
+            >
+              Reintentar solo la ficha
+            </Button>
+          </p>
+        </div>
+      ) : null}
       <Breadcrumb>
         <BreadcrumbList>
           <BreadcrumbItem>
@@ -538,9 +573,9 @@ function ContactDetailPage() {
             <div className="flex gap-2">
               <dt className="w-24 shrink-0 text-muted-foreground">Oportunidades</dt>
               <dd className="flex flex-col gap-1">
-                {opportunitiesQuery.isLoading ? (
+                {opportunitiesQuery.isLoading && contactOpportunities.length === 0 ? (
                   <span className="text-muted-foreground">Cargando…</span>
-                ) : opportunitiesQuery.isError ? (
+                ) : opportunitiesQuery.isError && contactOpportunities.length === 0 ? (
                   <span className="text-destructive">
                     No se pudieron cargar.{" "}
                     <Button
@@ -554,6 +589,19 @@ function ContactDetailPage() {
                   </span>
                 ) : (
                   <>
+                    {opportunitiesQuery.isError ? (
+                      <span className="text-destructive">
+                        No se pudieron actualizar; se conservan las cargadas.{" "}
+                        <Button
+                          type="button"
+                          variant="link"
+                          size="sm"
+                          onClick={() => opportunitiesQuery.refetch()}
+                        >
+                          Reintentar
+                        </Button>
+                      </span>
+                    ) : null}
                     {contactOpportunities.length === 0 && <span>Sin oportunidades</span>}
                     {contactOpportunities.map((o) => (
                       <span key={o.id} className="flex items-center gap-1.5">
@@ -581,9 +629,14 @@ function ContactDetailPage() {
                         disabled={opportunitiesQuery.isFetchingNextPage}
                         onClick={() => void opportunitiesQuery.fetchNextPage()}
                       >
-                        {opportunitiesQuery.isFetchingNextPage
-                          ? "Cargando…"
-                          : `Cargar más (${contactOpportunities.length})`}
+                        {opportunitiesQuery.isFetchingNextPage ? (
+                          <>
+                            <Spinner className="size-6" aria-hidden />
+                            Cargar más ({contactOpportunities.length})
+                          </>
+                        ) : (
+                          `Cargar más (${contactOpportunities.length})`
+                        )}
                       </Button>
                     ) : null}
                   </>
@@ -752,9 +805,9 @@ function ContactDetailPage() {
           Bitácora del caso escrita por el equipo; distinta de las notas del contacto de arriba.
           Se crean desde la bandeja y aquí solo se leen.
         </p>
-        {notesQuery.isLoading ? (
+        {notesQuery.isLoading && operationalNotes.length === 0 ? (
           <p className="text-sm text-muted-foreground">Cargando notas…</p>
-        ) : notesQuery.isError ? (
+        ) : notesQuery.isError && operationalNotes.length === 0 ? (
           <span className="text-sm text-destructive">
             No se pudieron cargar las notas operativas.{" "}
             <Button
@@ -771,7 +824,21 @@ function ContactDetailPage() {
             Sin notas operativas todavía. Las notas del contacto, si existen, están en Datos.
           </p>
         ) : (
-          <ul className="flex flex-col gap-2">
+          <>
+            {notesQuery.isError ? (
+              <span className="text-sm text-destructive">
+                No se pudieron actualizar las notas; se conservan las cargadas.{" "}
+                <Button
+                  type="button"
+                  variant="link"
+                  size="sm"
+                  onClick={() => notesQuery.refetch()}
+                >
+                  Reintentar
+                </Button>
+              </span>
+            ) : null}
+            <ul className="flex flex-col gap-2">
             {operationalNotes.map((noteItem) => (
               <li key={noteItem.id} className="flex flex-col gap-1 rounded-sm px-2 py-1.5">
                 <span className="text-xs text-muted-foreground">
@@ -781,7 +848,8 @@ function ContactDetailPage() {
                 <span className="whitespace-pre-wrap text-sm">{noteItem.body ?? noteItem.title}</span>
               </li>
             ))}
-          </ul>
+            </ul>
+          </>
         )}
         {detail.conversations.length > 0 && (
           <Button
@@ -1186,14 +1254,41 @@ function ContactDetailPage() {
           </p>
           <Field>
             <FieldLabel>Buscar paciente</FieldLabel>
-            <Input
-              value={linkSearch}
-              onChange={(e) => {
-                setLinkSearch(e.target.value)
-                setLinkChoice(null)
-              }}
-              placeholder="Nombre del paciente"
-            />
+            <div className="relative">
+              <Input
+                value={linkSearch}
+                onChange={(e) => {
+                  setLinkSearch(e.target.value)
+                  setLinkChoice(null)
+                }}
+                placeholder="Nombre del paciente"
+                aria-busy={patientSearchQuery.isFetching}
+                className={patientSearchQuery.isFetching ? "pr-9" : undefined}
+              />
+              {patientSearchQuery.isFetching ? (
+                <span className="pointer-events-none absolute inset-y-0 right-2 flex items-center text-[var(--identity-accent)]">
+                  <Spinner className="size-4" aria-hidden />
+                </span>
+              ) : null}
+            </div>
+            {patientSearchQuery.isFetching ? (
+              <p className="text-xs text-muted-foreground" role="status">
+                Buscando pacientes…
+              </p>
+            ) : null}
+            {patientSearchQuery.isError ? (
+              <p role="alert" className="text-sm text-destructive">
+                No se pudieron buscar pacientes.{" "}
+                <Button
+                  type="button"
+                  variant="link"
+                  size="sm"
+                  onClick={() => void patientSearchQuery.refetch()}
+                >
+                  Reintentar
+                </Button>
+              </p>
+            ) : null}
           </Field>
           {patientSearchQuery.data?.data.map((p) => (
             <Button
@@ -1325,14 +1420,41 @@ function ContactDetailPage() {
           </p>
           <Field>
             <FieldLabel>Buscar contacto destino</FieldLabel>
-            <Input
-              value={destSearch}
-              onChange={(e) => {
-                setDestSearch(e.target.value)
-                setDestChoice(null)
-              }}
-              placeholder="Nombre, teléfono o correo"
-            />
+            <div className="relative">
+              <Input
+                value={destSearch}
+                onChange={(e) => {
+                  setDestSearch(e.target.value)
+                  setDestChoice(null)
+                }}
+                placeholder="Nombre, teléfono o correo"
+                aria-busy={destSearchQuery.isFetching}
+                className={destSearchQuery.isFetching ? "pr-9" : undefined}
+              />
+              {destSearchQuery.isFetching ? (
+                <span className="pointer-events-none absolute inset-y-0 right-2 flex items-center text-[var(--identity-accent)]">
+                  <Spinner className="size-4" aria-hidden />
+                </span>
+              ) : null}
+            </div>
+            {destSearchQuery.isFetching ? (
+              <p className="text-xs text-muted-foreground" role="status">
+                Buscando contactos…
+              </p>
+            ) : null}
+            {destSearchQuery.isError ? (
+              <p role="alert" className="text-sm text-destructive">
+                No se pudieron buscar contactos.{" "}
+                <Button
+                  type="button"
+                  variant="link"
+                  size="sm"
+                  onClick={() => void destSearchQuery.refetch()}
+                >
+                  Reintentar
+                </Button>
+              </p>
+            ) : null}
           </Field>
           {destSearchQuery.data?.data
             .filter((c) => c.id !== contactId)

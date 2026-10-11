@@ -1,5 +1,6 @@
 import { CalendarCheck, MessagesSquare, ShieldCheck } from "lucide-react"
 import type { ReactNode } from "react"
+import { Brand } from "./brand.js"
 
 const HIGHLIGHTS = [
   { icon: CalendarCheck, text: "Agenda por profesional, recurso y horario" },
@@ -8,7 +9,7 @@ const HIGHLIGHTS = [
 ] as const
 
 /**
- * Layout de autenticación a página completa: branding odentIA ocupa toda la
+ * Layout de autenticación a página completa: branding odentia32 ocupa toda la
  * columna izquierda (solo `md:` en adelante; en móvil se oculta y el
  * formulario ocupa todo) con fondo animado por dos blobs que derivan
  * lentamente (CSS puro, sin JS). Columna derecha: formulario centrado.
@@ -41,7 +42,7 @@ export function AuthSplit({
         </span>
         {/* El plano de lectura limita el fondo en cualquier fotograma del degradado. */}
         <div className="relative flex h-full flex-col gap-10 bg-card/95 p-12">
-          <span className="text-xl font-semibold text-foreground">odentIA</span>
+          <Brand className="w-52" />
           <div className="flex flex-col gap-3">
             <h2 className="max-w-md text-3xl font-semibold tracking-tight text-foreground">
               La operación de tu clínica, en un solo lugar
@@ -64,6 +65,7 @@ export function AuthSplit({
       </aside>
       <main className="flex items-center justify-center p-6">
         <div className="w-full max-w-sm">
+          <div className="mb-6 md:hidden"><Brand /></div>
           <div className="flex flex-col gap-1.5">
             <h1 className="text-base leading-snug font-medium">{title}</h1>
             {description ? <p className="text-sm text-muted-foreground">{description}</p> : null}

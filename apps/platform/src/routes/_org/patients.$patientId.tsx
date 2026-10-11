@@ -13,7 +13,7 @@ import {
   TabsList,
   TabsTrigger,
 } from "@odentia/ui"
-import { ErrorState, LoadingState, PageShell } from "@odentia/ui-patterns"
+import { DataRefreshMarker, ErrorState, LoadingState, PageShell } from "@odentia/ui-patterns"
 import { useQuery } from "@tanstack/react-query"
 import { createFileRoute, Outlet, useChildMatches, useNavigate } from "@tanstack/react-router"
 import type { ReactNode } from "react"
@@ -171,13 +171,16 @@ function PatientDetailPage() {
         />
       </PageShell>
     )
-  if (detail.isPending)
+  // Sin ficha aún la estructura se anticipa con skeleton; con ficha en caché
+  // el refetch (post-guardado o por eventos) nunca la retira ni oculta el error.
+  const patient = detail.data?.data ?? null
+  if (detail.isPending && !patient)
     return (
       <PageShell>
         <LoadingState message="Cargando paciente…" />
       </PageShell>
     )
-  if (detail.isError)
+  if (detail.isError && !patient)
     return (
       <PageShell>
         <QueryErrorState
@@ -189,8 +192,18 @@ function PatientDetailPage() {
         />
       </PageShell>
     )
-
-  const patient = detail.data.data
+  if (!patient)
+    return (
+      <PageShell>
+        <QueryErrorState
+          error={detail.error}
+          onRetry={() => {
+            void detail.refetch()
+          }}
+          notFound="El paciente solicitado no existe o ya no está disponible. Vuelve a la lista de pacientes."
+        />
+      </PageShell>
+    )
   const current = sectionOf(section)
   const areas = visibleAreas(can)
   const entries = areaNav(current.area, can)
@@ -198,28 +211,54 @@ function PatientDetailPage() {
   const openEncounterId = summary.data?.data.openEncounterId ?? undefined
 
   /** Paneles que listan por tratamiento: esperan el plan y el resumen clínico. */
+  const planRows = planItems.data?.data ?? null
   const withPlan = (render: (items: PlanItem[]) => ReactNode): ReactNode => {
-    if (planItems.isPending || summary.isPending)
+    if ((planItems.isPending || summary.isPending) && !planRows)
       return <LoadingState message="Cargando tratamientos…" />
-    if (planItems.isError)
-      return (
-        <QueryErrorState
-          error={planItems.error}
-          onRetry={() => {
-            void planItems.refetch()
-          }}
-        />
-      )
-    if (summary.isError)
-      return (
-        <QueryErrorState
-          error={summary.error}
-          onRetry={() => {
-            void summary.refetch()
-          }}
-        />
-      )
-    return render(planItems.data.data)
+    if (!planRows) {
+      if (planItems.isError)
+        return (
+          <QueryErrorState
+            error={planItems.error}
+            onRetry={() => {
+              void planItems.refetch()
+            }}
+          />
+        )
+      if (summary.isError)
+        return (
+          <QueryErrorState
+            error={summary.error}
+            onRetry={() => {
+              void summary.refetch()
+            }}
+          />
+        )
+      return <LoadingState message="Cargando tratamientos…" />
+    }
+    return (
+      <>
+        {planItems.isError || summary.isError ? (
+          <div className="mb-3 flex flex-wrap items-center gap-2">
+            <p role="alert" className="text-sm text-destructive">
+              No se pudieron actualizar los tratamientos; se conservan los cargados.
+            </p>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                void planItems.refetch()
+                void summary.refetch()
+              }}
+            >
+              Reintentar
+            </Button>
+          </div>
+        ) : null}
+        {render(planRows)}
+      </>
+    )
   }
   const itemFilterNotice = (label: string, target: PatientSectionId) =>
     itemId ? (
@@ -440,6 +479,22 @@ function PatientDetailPage() {
 
   return (
     <PageShell className="flex min-w-0 flex-col gap-6">
+      {detail.isFetching && !detail.isPending ? <DataRefreshMarker /> : null}
+      {detail.isError ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <p role="alert" className="text-sm text-destructive">
+            No se pudo actualizar la ficha; se conservan los datos cargados.{" "}
+            <Button
+              type="button"
+              variant="link"
+              size="sm"
+              onClick={() => void detail.refetch()}
+            >
+              Reintentar solo la ficha
+            </Button>
+          </p>
+        </div>
+      ) : null}
       <PatientHeader
         detail={patient}
         summary={canClinical && summary.isSuccess ? summary.data.data : undefined}

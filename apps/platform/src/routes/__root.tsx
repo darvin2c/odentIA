@@ -2,6 +2,8 @@ import { Toaster } from "@odentia/ui"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { createRootRoute, HeadContent, Outlet, Scripts } from "@tanstack/react-router"
 import { type ReactNode, useEffect } from "react"
+import favicon from "../../../../assets/brand/favicon.svg?url"
+import faviconIco from "../../../../assets/brand/favicon.ico?url"
 import appCss from "../styles/app.css?url"
 
 export const Route = createRootRoute({
@@ -9,9 +11,13 @@ export const Route = createRootRoute({
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "odentIA" },
+      { title: "Odentia32" },
     ],
-    links: [{ rel: "stylesheet", href: appCss }],
+    links: [
+      { rel: "stylesheet", href: appCss },
+      { rel: "icon", href: faviconIco, sizes: "16x16 32x32 48x48 64x64" },
+      { rel: "icon", href: favicon, type: "image/svg+xml" },
+    ],
   }),
   component: RootComponent,
 })

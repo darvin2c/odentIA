@@ -1,4 +1,4 @@
-import { Badge, Button, Field, FieldError, FieldLabel, Input } from "@odentia/ui"
+import { Badge, Button, Field, FieldError, FieldLabel, Input, Spinner } from "@odentia/ui"
 import {
   ConfirmDialog,
   common,
@@ -477,10 +477,11 @@ function ContactsPage() {
             { value: "actividad", label: "Última actividad" },
           ]}
           searchPlaceholder="Buscar por nombre, teléfono o correo"
+          searchPending={contactsQuery.isFetching && !contactsQuery.isFetchingNextPage}
         />
-        {contactsQuery.isLoading ? (
+        {contactsQuery.isLoading && visibleContacts.length === 0 ? (
           <DataTableSkeleton />
-        ) : contactsQuery.isError ? (
+        ) : contactsQuery.isError && visibleContacts.length === 0 ? (
           <ErrorState
             error={
               contactsQuery.error instanceof Error
@@ -500,7 +501,23 @@ function ContactsPage() {
           />
         ) : (
           <>
-            <DataTable table={table} />
+            <DataTable
+              table={table}
+              isFetching={contactsQuery.isFetching && !contactsQuery.isFetchingNextPage}
+            />
+            {contactsQuery.isError ? (
+              <p role="alert" className="text-sm text-destructive">
+                No se pudo actualizar la lista; se conservan los contactos cargados.{" "}
+                <Button
+                  type="button"
+                  variant="link"
+                  size="sm"
+                  onClick={() => void contactsQuery.refetch()}
+                >
+                  Reintentar solo la lista
+                </Button>
+              </p>
+            ) : null}
             <div className="flex items-center gap-3">
               <p className="text-sm text-muted-foreground" role="status">
                 Mostrando {visibleContacts.length} contacto{visibleContacts.length === 1 ? "" : "s"}
@@ -513,7 +530,14 @@ function ContactsPage() {
                   disabled={contactsQuery.isFetchingNextPage}
                   onClick={() => void contactsQuery.fetchNextPage()}
                 >
-                  {contactsQuery.isFetchingNextPage ? "Cargando…" : "Cargar más"}
+                  {contactsQuery.isFetchingNextPage ? (
+                    <>
+                      <Spinner className="size-6" aria-hidden />
+                      Cargar más
+                    </>
+                  ) : (
+                    "Cargar más"
+                  )}
                 </Button>
               ) : null}
             </div>

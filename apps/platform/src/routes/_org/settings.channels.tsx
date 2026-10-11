@@ -13,6 +13,7 @@ import {
 } from "@odentia/ui"
 import {
   DataTable,
+  DataTableSkeleton,
   EmptyState,
   FilterBar,
   FormDrawer,
@@ -615,7 +616,9 @@ function ChannelsPage() {
           ]}
           searchPlaceholder="Buscar conexión"
         />
-        {items.length === 0 && !listQuery.isLoading ? (
+        {listQuery.isPending ? (
+          <DataTableSkeleton columnCount={5} rowCount={4} label="Cargando conexiones…" />
+        ) : items.length === 0 ? (
           <EmptyState
             title="Sin conexiones"
             description="Conecta WhatsApp, Telegram, Messenger o Instagram. Cada conexión se valida contra su proveedor: sin credenciales válidas no se activa."
@@ -632,7 +635,7 @@ function ChannelsPage() {
         ) : (
           /* En modo panel el maestro en cards queda apretado: tabla mientras el
              formulario vive al costado. */
-          <DataTable table={table} view={mode === "panel" ? "table" : "card"} />
+          <DataTable table={table} view={mode === "panel" ? "table" : "card"} isFetching={listQuery.isFetching} refreshMessage="Actualizando conexiones…" />
         )}
       </MasterDetail>
     

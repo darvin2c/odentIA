@@ -14,6 +14,7 @@ import {
 import {
   ConfirmDialog,
   DataTable,
+  DataTableSkeleton,
   EmptyState,
   FormDrawer,
   FormPanel,
@@ -385,7 +386,11 @@ function PipelinesPage() {
         {/* Sin FilterBar: las etapas se muestran en el orden de posición del pipeline y ese orden es el dato
             (subir/bajar lo edita); no hay nada que filtrar ni ordenar. */}
         {/* La fila marcada aquí es la que se está renombrando en línea, no el panel. */}
-        <DataTable table={table} isRowActive={(row) => editing?.id === row.id} />
+        {listQuery.isPending ? (
+          <DataTableSkeleton columnCount={3} rowCount={4} label="Cargando etapas…" />
+        ) : (
+          <DataTable table={table} isRowActive={(row) => editing?.id === row.id} isFetching={listQuery.isFetching} refreshMessage="Actualizando etapas…" />
+        )}
       </MasterDetail>
     
       {/* Un solo contenedor montado a la vez: montar panel y drawer juntos

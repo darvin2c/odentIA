@@ -25,7 +25,7 @@ function ConsentPrintPage() {
   if (query.isPending)
     return (
       <PageShell>
-        <LoadingState message="Preparando el consentimiento…" />
+        <LoadingState kind="indeterminate" message="Preparando el consentimiento…" />
       </PageShell>
     )
   if (query.isError)

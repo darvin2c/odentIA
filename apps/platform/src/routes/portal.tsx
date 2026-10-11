@@ -181,7 +181,7 @@ function PortalPage() {
   if (!hydrated)
     return (
       <PageShell maxWidth="md">
-        <LoadingState message="Abriendo tu portal…" />
+        <LoadingState kind="indeterminate" message="Abriendo tu portal…" />
       </PageShell>
     )
 

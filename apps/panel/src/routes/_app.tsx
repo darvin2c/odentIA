@@ -1,6 +1,7 @@
 import {
   AppShell,
   type AppShellNavEntry,
+  Brand,
   SideDockProvider,
   SideDockSlot,
 } from "@odentia/ui-patterns"
@@ -73,7 +74,8 @@ function AppLayout() {
           search: { edit: "password" },
         },
       ]}
-      brand={<span className="text-base font-semibold">odentIA</span>}
+      brand={<Brand />}
+      brandIcon={<Brand compact />}
       onSignOut={async () => {
         await authClient.signOut()
         await navigate({ to: "/login" })

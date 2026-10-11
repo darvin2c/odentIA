@@ -49,9 +49,9 @@ export function AccesosPanel({ patientId }: { patientId: string }) {
     retry: false,
   })
   if (query.isPending) return <LoadingState message="Cargando consultas…" />
-  if (query.isError)
+  if (query.isError && !query.data)
     return <QueryErrorState error={query.error} onRetry={() => void query.refetch()} />
-  const rows = query.data.data
+  const rows = query.data?.data ?? []
   if (rows.length === 0)
     return (
       <EmptyState
@@ -72,15 +72,20 @@ export function AccesosPanel({ patientId }: { patientId: string }) {
         Las {rows.length} consultas más recientes, agrupadas por persona, parte de la ficha y hora.
         Los cambios se auditan aparte, en Configuración → Auditoría.
       </p>
+      {query.isError ? (
+        <div className="mt-4">
+          <QueryErrorState error={query.error} onRetry={() => void query.refetch()} />
+        </div>
+      ) : null}
       <div className="mt-4">
-        <AccessTable rows={rows} />
+        <AccessTable rows={rows} isFetching={query.isFetching} />
       </div>
     </section>
   )
 }
 
 /** Tabla del patrón común: lista en móvil, tabla desde 768 px. */
-function AccessTable({ rows }: { rows: AccessItem[] }) {
+function AccessTable({ rows, isFetching }: { rows: AccessItem[]; isFetching: boolean }) {
   const columns = useMemo<ColumnDef<AccessItem>[]>(
     () => [
       {
@@ -109,5 +114,5 @@ function AccessTable({ rows }: { rows: AccessItem[] }) {
     [],
   )
   const table = useReactTable({ data: rows, columns, getCoreRowModel: getCoreRowModel() })
-  return <DataTable table={table} />
+  return <DataTable table={table} isFetching={isFetching} refreshMessage="Actualizando consultas…" />
 }

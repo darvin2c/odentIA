@@ -54,7 +54,7 @@ function AcceptInvitationPage() {
   if (state.kind === "loading") {
     return (
       <AuthCard title="Aceptando invitación">
-        <LoadingState message="Aceptando invitación…" />
+        <LoadingState kind="indeterminate" message="Aceptando invitación…" />
       </AuthCard>
     )
   }

@@ -1,4 +1,4 @@
-import { cn, InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from "@odentia/ui"
+import { cn, InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput, Spinner } from "@odentia/ui"
 import { Search, X } from "lucide-react"
 import * as React from "react"
 import { common } from "../common.js"
@@ -7,12 +7,18 @@ import { useListSearch } from "./list-search.js"
 export interface SearchInputProps {
   placeholder?: string
   expandable?: boolean
+  /**
+   * Revalidación en curso (p. ej. `isFetching` de React Query): muestra el
+   * Spinner B dentro del input sin bloquear escritura ni limpieza.
+   */
+  isFetching?: boolean
   className?: string
 }
 
 export function SearchInput({
   placeholder = common.filters.search,
   expandable = false,
+  isFetching = false,
   className,
 }: SearchInputProps) {
   const { get, setParam } = useListSearch()
@@ -50,8 +56,10 @@ export function SearchInput({
           onChange={(event: React.ChangeEvent<HTMLInputElement>) => setValue(event.target.value)}
           placeholder={placeholder}
           aria-label={placeholder}
+          aria-busy={isFetching}
         />
         <InputGroupAddon align="inline-end">
+          {isFetching ? <Spinner className="size-6" aria-label={common.states.loading} /> : null}
           {value ? (
             <InputGroupButton
               size="icon-xs"

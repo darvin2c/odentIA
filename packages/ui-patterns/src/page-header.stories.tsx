@@ -20,6 +20,7 @@ import {
 } from "lucide-react"
 import type { ReactNode } from "react"
 import { AppShell, type AppShellNavEntry, type AppShellNavItem } from "./app-shell.js"
+import { Brand } from "./brand.js"
 import { PageHeader } from "./page-header.js"
 import { PageShell } from "./page-shell.js"
 import { DemoPage } from "./story-fixtures.js"
@@ -227,7 +228,8 @@ export const EnElShell: Story = {
       pathname="/patients"
       user={{ name: "Lucía Ramos", email: "recepcion@clinicasur.pe" }}
       footerItems={FOOTER_ITEMS}
-      brand={<span className="text-base font-semibold">odentIA</span>}
+      brand={<Brand />}
+      brandIcon={<Brand compact />}
       onSignOut={noop}
     >
       <PageShell className="flex flex-col gap-6">
