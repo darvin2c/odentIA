@@ -5,7 +5,6 @@ import { branch } from "@odentia/db/schema/org"
 import { sql } from "drizzle-orm"
 import { beforeAll, expect, it } from "vitest"
 import {
-  bookWaitlistEntry,
   createAppointment,
   createChair,
   listAppointments,
@@ -17,11 +16,9 @@ import {
   updateAppointment,
 } from "./appointments.js"
 import {
-  addWaitlistEntry,
   createScheduleBlock,
   getAgendaAvailability,
   listAvailableSlots,
-  offerWaitlistSlot,
   setProfessionalSchedule,
 } from "./availability.js"
 import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
@@ -362,32 +359,6 @@ it("ofrece huecos dentro del horario y respeta bloqueos", async () => {
     }),
   )
   expect(blocked.slots.some((slot) => slot.startsAt === "2026-10-05T15:30:00.000Z")).toBe(false)
-})
-
-it("la espera ofrece un hueco y lo reserva con el mismo servicio", async () => {
-  const entry = await run((tx) =>
-    addWaitlistEntry(tx, ORG, ACTOR, {
-      branchId,
-      patientId,
-      dentistUserId: DENTIST_2,
-      serviceId,
-      priority: "alta",
-      notes: "Prueba",
-    }),
-  )
-  expect(entry.status).toBe("en_espera")
-  const offered = await run((tx) =>
-    offerWaitlistSlot(tx, ORG, ACTOR, entry.id, {
-      startsAt: "2026-10-06T17:00:00Z",
-      endsAt: "2026-10-06T17:45:00Z",
-      dentistUserId: DENTIST_2,
-      chairId: chair2Id,
-    }),
-  )
-  expect(offered.status).toBe("ofrecida")
-  const booked = await run((tx) => bookWaitlistEntry(tx, ORG, ACTOR, entry.id, {}))
-  expect(booked.status).toBe("confirmada")
-  expect(booked.serviceName).toBe("Limpieza Agenda")
 })
 
 it("la disponibilidad de la agenda materializa el horario y dice el próximo hueco de cada profesional", async () => {

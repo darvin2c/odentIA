@@ -1,8 +1,5 @@
 import { withOrgContext } from "@odentia/db"
 import {
-  addWaitlistEntry,
-  bookWaitlistEntry,
-  cancelWaitlistEntry,
   createAppointment,
   createChair,
   createScheduleBlock,
@@ -14,9 +11,7 @@ import {
   listAvailableSlots,
   listScheduleBlocks,
   listScheduleResources,
-  listWaitlistEntries,
   moveAppointment,
-  offerWaitlistSlot,
   searchAgendaPatients,
   setAppointmentStatus,
   setBranchDefaultDuration,
@@ -141,30 +136,7 @@ const availabilityQuery = z.object({
 
 const searchQuery = z.object({ q: z.string().trim().min(2).max(200) })
 
-const waitlistInput = z.object({
-  branchId: z.uuid(),
-  patientId: z.uuid().optional(),
-  contactId: z.uuid().optional(),
-  dentistUserId: z.string().min(1).nullable().optional(),
-  serviceId: z.uuid().nullable().optional(),
-  priority: z.enum(["alta", "normal", "baja"]).optional(),
-  notes: z.string().max(500).optional(),
-})
-
-const offerInput = z.object({
-  startsAt: z.iso.datetime({ offset: true }),
-  endsAt: z.iso.datetime({ offset: true }),
-  dentistUserId: z.string().min(1).optional(),
-  chairId: z.uuid().optional(),
-})
-
-const bookInput = z.object({
-  startsAt: z.iso.datetime({ offset: true }).optional(),
-  endsAt: z.iso.datetime({ offset: true }).optional(),
-  chairId: z.uuid().optional(),
-})
-
-/** Agenda: recursos, huecos, horarios, bloqueos y lista de espera. */
+/** Agenda: recursos, huecos, horarios y bloqueos. */
 export function createAgendaRoute(deps: CrmDeps) {
   const app = new Hono()
 
@@ -335,76 +307,6 @@ export function createAgendaRoute(deps: CrmDeps) {
         await deleteScheduleBlock(tx, orgId, c.req.param("id"))
         return { ok: true }
       }),
-    )
-  })
-
-  // Lista de espera: ver.
-  app.get("/waitlist", async (c) => {
-    const { orgId, memberRole } = orgContextOf(c)
-    if (!canAccess(memberRole, "appointments.read")) {
-      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para ver la agenda"), 403)
-    }
-    const branchId = c.req.query("branchId")
-    const status = c.req.query("status")
-    if (branchId && !z.uuid().safeParse(branchId).success) {
-      return c.json(errorBody(c, "VALIDATION", "branchId inválido"), 400)
-    }
-    return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) =>
-        listWaitlistEntries(tx, orgId, { branchId: branchId ?? undefined, status: status ?? undefined }),
-      ),
-    )
-  })
-
-  app.post("/waitlist", async (c) => {
-    const { orgId, userId, memberRole } = orgContextOf(c)
-    if (!canAccess(memberRole, "appointments.write")) {
-      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para gestionar la lista de espera"), 403)
-    }
-    const parsed = waitlistInput.safeParse(await c.req.json().catch(() => null))
-    if (!parsed.success) return validationError(c, parsed.error.issues)
-    return runService(c, 201, () =>
-      withOrgContext(deps.db, orgId, (tx) => addWaitlistEntry(tx, orgId, userId, parsed.data)),
-    )
-  })
-
-  app.post("/waitlist/:id/offer", async (c) => {
-    const { orgId, userId, memberRole } = orgContextOf(c)
-    if (!canAccess(memberRole, "appointments.write")) {
-      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para gestionar la lista de espera"), 403)
-    }
-    const parsed = offerInput.safeParse(await c.req.json().catch(() => null))
-    if (!parsed.success) return validationError(c, parsed.error.issues)
-    return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) =>
-        offerWaitlistSlot(tx, orgId, userId, c.req.param("id"), parsed.data),
-      ),
-    )
-  })
-
-  app.post("/waitlist/:id/book", async (c) => {
-    const { orgId, userId, memberRole } = orgContextOf(c)
-    if (!canAccess(memberRole, "appointments.write")) {
-      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para gestionar la lista de espera"), 403)
-    }
-    const parsed = bookInput.safeParse(await c.req.json().catch(() => null))
-    if (!parsed.success) return validationError(c, parsed.error.issues)
-    return runService(c, 201, () =>
-      withOrgContext(deps.db, orgId, (tx) =>
-        bookWaitlistEntry(tx, orgId, userId, c.req.param("id"), parsed.data),
-      ),
-    )
-  })
-
-  app.post("/waitlist/:id/cancel", async (c) => {
-    const { orgId, userId, memberRole } = orgContextOf(c)
-    if (!canAccess(memberRole, "appointments.write")) {
-      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para gestionar la lista de espera"), 403)
-    }
-    return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) =>
-        cancelWaitlistEntry(tx, orgId, userId, c.req.param("id")),
-      ),
     )
   })
 

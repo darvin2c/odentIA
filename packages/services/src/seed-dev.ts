@@ -375,7 +375,6 @@ async function wipeSeed(): Promise<void> {
     "warehouse",
     "supplier",
     "mailbox_oauth_state",
-    "waitlist_entry",
     "schedule_block",
     "professional_schedule",
   ]) {

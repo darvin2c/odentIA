@@ -3,7 +3,6 @@ import {
   boolean,
   check,
   index,
-  integer,
   pgTable,
   smallint,
   text,
@@ -13,20 +12,11 @@ import {
 } from "drizzle-orm/pg-core"
 import { scheduleChair } from "./agenda.js"
 import { user } from "./auth.js"
-import { patient, serviceCatalog } from "./clinical.js"
-import { contact, orgFk, timestamps } from "./crm.js"
+import { orgFk, timestamps } from "./crm.js"
 import { branch } from "./org.js"
 
 /** Días de semana: 0 = domingo … 6 = sábado (coincide con getUTCDay trasladado a zona). */
 export const SCHEDULE_WEEKDAYS = [0, 1, 2, 3, 4, 5, 6] as const
-
-/** Prioridades de la lista de espera. */
-export const WAITLIST_PRIORITIES = ["alta", "normal", "baja"] as const
-export type WaitlistPriority = (typeof WAITLIST_PRIORITIES)[number]
-
-/** Estados de la lista de espera. */
-export const WAITLIST_STATUSES = ["en_espera", "ofrecida", "confirmada", "cancelada"] as const
-export type WaitlistStatus = (typeof WAITLIST_STATUSES)[number]
 
 /** Bloqueos y ausencias comparten tabla; el motivo distingue el caso. */
 export const SCHEDULE_BLOCK_KINDS = ["bloqueo", "ausencia"] as const
@@ -101,52 +91,5 @@ export const scheduleBlock = pgTable(
     ),
     check("schedule_block_range_check", sql`${table.endsAt} > ${table.startsAt}`),
     check("schedule_block_kind_check", sql`${table.kind} in ('bloqueo','ausencia')`),
-  ],
-)
-
-/**
- * Lista de espera por sede. `contactId` cubre el caso de interesado aún sin
- * ficha de paciente; `serviceId` conserva el servicio ofrecido para reservar
- * con la misma prestación al confirmar.
- */
-export const waitlistEntry = pgTable(
-  "waitlist_entry",
-  {
-    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
-    organizationId: orgFk("organization_id"),
-    branchId: uuid("branch_id")
-      .notNull()
-      .references(() => branch.id),
-    patientId: uuid("patient_id").references(() => patient.id),
-    contactId: uuid("contact_id").references(() => contact.id),
-    dentistUserId: text("dentist_user_id").references(() => user.id),
-    serviceId: uuid("service_id").references(() => serviceCatalog.id),
-    serviceName: text("service_name"),
-    priority: text("priority").notNull().default("normal"),
-    status: text("status").notNull().default("en_espera"),
-    notes: text("notes"),
-    offeredStartsAt: timestamp("offered_starts_at", { withTimezone: true }),
-    offeredEndsAt: timestamp("offered_ends_at", { withTimezone: true }),
-    offeredChairId: uuid("offered_chair_id").references(() => scheduleChair.id),
-    confirmedAppointmentId: uuid("confirmed_appointment_id"),
-    createdBy: text("created_by").references(() => user.id),
-    ...timestamps,
-  },
-  (table) => [
-    uniqueIndex("waitlist_entry_org_id_uidx").on(table.organizationId, table.id),
-    index("waitlist_entry_org_branch_status_idx").on(
-      table.organizationId,
-      table.branchId,
-      table.status,
-    ),
-    check("waitlist_entry_priority_check", sql`${table.priority} in ('alta','normal','baja')`),
-    check(
-      "waitlist_entry_status_check",
-      sql`${table.status} in ('en_espera','ofrecida','confirmada','cancelada')`,
-    ),
-    check(
-      "waitlist_entry_subject_check",
-      sql`${table.patientId} is not null or ${table.contactId} is not null`,
-    ),
   ],
 )

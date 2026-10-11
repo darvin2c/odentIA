@@ -1,6 +1,5 @@
 import {
   Button,
-  Checkbox,
   cn,
   FieldLabel,
   Input,
@@ -67,11 +66,9 @@ export function AppointmentDrawer({
   now,
   resources,
   toneOf,
-  waiting,
   onClose,
   onChanged,
   onRebook,
-  onOfferWaitlist,
 }: {
   appointment: AgendaAppointment
   initialMode?: AppointmentDrawerMode
@@ -82,14 +79,10 @@ export function AppointmentDrawer({
   resources: AgendaResources
   /** El color de cada profesional, el mismo que en la rejilla. */
   toneOf: (id: string) => ScheduleColumn["tone"]
-  /** Personas en la lista de espera de la sede. */
-  waiting: number
   onClose: () => void
   onChanged: () => Promise<void>
   /** Reagendar a quien canceló o no vino: abre «Nueva cita» con la persona. */
   onRebook: (patient: { id: string; name: string }) => void
-  /** Tras cancelar, abrir la lista de espera para ofrecer el hueco liberado. */
-  onOfferWaitlist: () => void
 }) {
   const [mode, setMode] = React.useState<AppointmentDrawerMode | "edit">(initialMode)
   const [error, setError] = React.useState("")
@@ -99,8 +92,6 @@ export function AppointmentDrawer({
   // ----- Cancelar -----
   const [cancelReason, setCancelReason] = React.useState<CancelReason>("paciente")
   const [cancelNote, setCancelNote] = React.useState("")
-  const [offerSlot, setOfferSlot] = React.useState(false)
-  const offerId = React.useId()
   const reasonId = React.useId()
 
   const setStatus = useMutation({
@@ -119,7 +110,6 @@ export function AppointmentDrawer({
       await onChanged()
       if (result.data.status === "cancelada") {
         onClose()
-        if (offerSlot) onOfferWaitlist()
       }
     },
     onError: (cause) => {
@@ -473,24 +463,6 @@ export function AppointmentDrawer({
             value={cancelNote}
             onChange={(event) => setCancelNote(event.target.value)}
           />
-          {waiting > 0 ? (
-            <label htmlFor={offerId} className="flex cursor-pointer items-start gap-2.5 text-sm">
-              <Checkbox
-                id={offerId}
-                className="mt-0.5"
-                checked={offerSlot}
-                onCheckedChange={(checked) => setOfferSlot(checked === true)}
-              />
-              <span className="grid">
-                Ofrecer el hueco a la lista de espera
-                <span className="text-xs text-muted-foreground">
-                  {waiting === 1
-                    ? "1 persona espera hueco en esta sede."
-                    : `${waiting} personas esperan hueco en esta sede.`}
-                </span>
-              </span>
-            </label>
-          ) : null}
         </div>
       </ConfirmDialog>
     </>

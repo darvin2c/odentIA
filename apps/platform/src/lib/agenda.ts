@@ -11,7 +11,6 @@ export async function invalidateAppointmentQueries(client: QueryClient): Promise
       "agenda-resources",
       "agenda-search",
       "agenda-slots",
-      "agenda-waitlist",
       "follow-up-appointments",
       "follow-ups",
       "patient-appointments",
@@ -130,43 +129,7 @@ export interface AgendaSearchPerson {
   appointments: AgendaAppointment[]
 }
 
-export type WaitlistPriority = "alta" | "normal" | "baja"
-export type WaitlistStatus = "en_espera" | "ofrecida" | "confirmada" | "cancelada"
-
-export interface WaitlistEntry {
-  id: string
-  branchId: string
-  patientId: string | null
-  patientName: string | null
-  contactId: string | null
-  contactName: string | null
-  dentistUserId: string | null
-  dentistName: string | null
-  serviceId: string | null
-  serviceName: string | null
-  priority: WaitlistPriority
-  status: WaitlistStatus
-  notes: string | null
-  offeredStartsAt: string | null
-  offeredEndsAt: string | null
-  offeredChairId: string | null
-  createdAt: string
-}
-
 export const WEEKDAY_LABELS = ["Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb"]
-
-export const WAITLIST_PRIORITY_LABELS: Record<WaitlistPriority, string> = {
-  alta: "Alta",
-  normal: "Normal",
-  baja: "Baja",
-}
-
-export const WAITLIST_STATUS_LABELS: Record<WaitlistStatus, string> = {
-  en_espera: "En espera",
-  ofrecida: "Ofrecida",
-  confirmada: "Confirmada",
-  cancelada: "Cancelada",
-}
 
 /** Minutos → "HH:MM" para los turnos del horario semanal. */
 export function minutesLabel(minutes: number): string {

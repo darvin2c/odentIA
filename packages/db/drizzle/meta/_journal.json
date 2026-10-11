@@ -323,6 +323,13 @@
       "when": 1791680601447,
       "tag": "0045_agenda_duracion_regular",
       "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "7",
+      "when": 1791694488742,
+      "tag": "0046_agenda_sin_lista_de_espera",
+      "breakpoints": true
     }
   ]
 }

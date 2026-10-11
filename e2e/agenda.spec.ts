@@ -273,35 +273,27 @@ test("agenda: reservar un hueco real, confirmarlo y encontrarlo al buscar", asyn
     .poll(async () => Date.parse((await appointmentOf()).startsAt) - Date.parse(moved.startsAt))
     .toBe(delta > 0 ? 3_600_000 : -3_600_000)
 
-  // Lista de espera: se registra a la persona y el botón lleva la cuenta.
-  await page.getByRole("button", { name: /^Lista de espera/ }).click()
-  await page.getByRole("button", { name: "Añadir a la lista" }).click()
-  await page.getByLabel("Paciente", { exact: true }).fill("Mica")
-  await page.getByRole("option", { name: /Micaela Ríos/ }).click()
-  await page.getByRole("button", { name: "Registrar espera" }).click()
-  await expect(page.getByText("Prioridad normal")).toBeVisible()
-  await shot("lista-de-espera")
-  await page.getByRole("button", { name: "Cerrar" }).click()
-  await expect(page.getByRole("button", { name: /^Lista de espera/ })).toContainText("1")
-
-  // Cancelar: pide el motivo y, si se marca, abre la lista de espera para ofrecer el hueco.
-  await page
-    .getByRole("region", { name: /^Agenda del/ })
-    .getByRole("button", { name: /^Cita de Micaela Ríos/ })
-    .click()
+  // Cancelar: pide el motivo y la cita sale de la agenda. Justo después de soltar una cita,
+  // la rejilla ignora un instante los clics (el clic fantasma del arrastre): se reintenta.
+  await expect(async () => {
+    await page
+      .getByRole("region", { name: /^Agenda del/ })
+      .getByRole("button", { name: /^Cita de Micaela Ríos/ })
+      .click()
+    await expect(page.getByRole("button", { name: "Cancelar cita" })).toBeVisible({ timeout: 1500 })
+  }).toPass()
   await page.getByRole("button", { name: "Cancelar cita" }).click()
   const cancel = page.getByRole("alertdialog")
   await cancel.getByRole("radio", { name: "Lo pidió la clínica" }).click()
   await cancel.getByLabel("Nota, si hace falta").fill("Se reprograma por viaje")
-  await cancel.getByText("Ofrecer el hueco a la lista de espera").click()
   await shot("cancelar")
   await cancel.getByRole("button", { name: "Cancelar cita" }).click()
-  await expect(page.getByRole("button", { name: "Ofrecer hueco" })).toBeVisible()
-  expect((await appointmentOf()).status).toBe("cancelada")
+  await expect.poll(async () => (await appointmentOf()).status).toBe("cancelada")
   await expect(
     page.getByRole("region", { name: /^Agenda del/ }).getByRole("button", { name: /^Cita de Micaela Ríos/ }),
   ).toHaveCount(0)
-  await page.getByRole("button", { name: "Cerrar" }).click()
+  // La lista de espera ya no existe: ni en la cabecera ni al cancelar.
+  await expect(page.getByRole("button", { name: /espera/i })).toHaveCount(0)
 
   // Lista y Semana.
   await page.getByRole("button", { name: "Lista", exact: true }).click()

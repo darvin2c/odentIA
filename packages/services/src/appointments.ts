@@ -16,7 +16,7 @@ import {
 import { member, user } from "@odentia/db/schema/auth"
 import { patient, patientContact, serviceCatalog } from "@odentia/db/schema/clinical"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
-import { scheduleBlock, waitlistEntry } from "@odentia/db/schema/availability"
+import { scheduleBlock } from "@odentia/db/schema/availability"
 import { conversation } from "@odentia/db/schema/crm"
 import { and, asc, eq, gt, gte, ilike, inArray, lt, ne, or, sql } from "drizzle-orm"
 import { validateAvailability } from "./availability.js"
@@ -841,57 +841,5 @@ export async function createChair(
     .values({ organizationId: orgId, branchId: input.branchId, name })
     .returning({ id: scheduleChair.id })
   if (!created) throw new Error("No se pudo crear el sillón")
-  return created
-}
-
-/**
- * Confirma una espera ofreciendo reserva con el mismo servicio registrado.
- * Crea la cita (con toda la validación de disponibilidad) y marca la espera
- * como confirmada con el vínculo a la cita generada.
- */
-export async function bookWaitlistEntry(
-  tx: Db,
-  orgId: string,
-  actorUserId: string,
-  id: string,
-  input: { chairId?: string; startsAt?: string; endsAt?: string },
-): Promise<AppointmentItem> {
-  const [entry] = await tx
-    .select()
-    .from(waitlistEntry)
-    .where(and(eq(waitlistEntry.organizationId, orgId), eq(waitlistEntry.id, id)))
-    .limit(1)
-  if (!entry) throw notFound("Espera")
-  if (entry.status === "confirmada") throw validation("La espera ya generó su cita")
-  if (entry.status === "cancelada") throw validation("La espera está cancelada")
-  if (!entry.patientId) throw validation("La espera necesita un paciente para reservar")
-  const startsAt = input.startsAt ?? entry.offeredStartsAt?.toISOString()
-  const endsAt = input.endsAt ?? entry.offeredEndsAt?.toISOString()
-  const chairId = input.chairId ?? entry.offeredChairId
-  if (!startsAt || !endsAt) throw validation("La confirmación necesita el hueco ofrecido")
-  if (!chairId) throw validation("La confirmación necesita un sillón")
-  if (!entry.dentistUserId) throw validation("La confirmación necesita un profesional")
-  const created = await createAppointment(tx, orgId, actorUserId, {
-    branchId: entry.branchId,
-    patientId: entry.patientId,
-    dentistUserId: entry.dentistUserId,
-    chairId,
-    serviceId: entry.serviceId ?? undefined,
-    startsAt,
-    endsAt,
-    status: "confirmada",
-    source: "lista_espera",
-  })
-  await tx
-    .update(waitlistEntry)
-    .set({
-      status: "confirmada",
-      confirmedAppointmentId: created.id,
-      updatedAt: new Date(),
-    })
-    .where(and(eq(waitlistEntry.organizationId, orgId), eq(waitlistEntry.id, id)))
-  await audit(tx, orgId, actorUserId, "waitlist.confirmed", id, {
-    appointmentId: created.id,
-  })
   return created
 }

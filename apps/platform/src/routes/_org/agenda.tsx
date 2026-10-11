@@ -1,5 +1,4 @@
 import {
-  Badge,
   Button,
   DropdownMenu,
   DropdownMenuContent,
@@ -78,7 +77,6 @@ import { BookingDrawer, type BookingSeed } from "../../components/agenda/booking
 import { ScheduleDrawer } from "../../components/agenda/schedule-editor"
 import { ChairForm } from "../../components/agenda/chair-form"
 import { dayShort, errorMessage, shortName } from "../../components/agenda/shared"
-import { useWaitlist, WaitlistDrawer } from "../../components/agenda/waitlist"
 import { BranchSwitcher } from "../../components/branch-switcher"
 import { useActiveBranch } from "../../lib/active-branch"
 import type {
@@ -203,7 +201,6 @@ function AgendaPage() {
   const [detail, setDetail] = React.useState<{ id: string; mode: AppointmentDrawerMode } | null>(
     null,
   )
-  const [waitlistOpen, setWaitlistOpen] = React.useState(false)
   const [chairForm, setChairForm] = React.useState(false)
   const [scheduleForm, setScheduleForm] = React.useState(false)
   const [message, setMessage] = React.useState("")
@@ -240,8 +237,6 @@ function AgendaPage() {
     placeholderData: (previous, last) => (last?.queryKey[1] === branchId ? previous : undefined),
   })
   const availability = availabilityQuery.data?.data
-  const waitlist = useWaitlist(branchId)
-  const waiting = waitlist.data?.data.length ?? 0
 
   const invalidate = React.useCallback(
     () => invalidateAppointmentQueries(queryClient),
@@ -928,15 +923,7 @@ function AgendaPage() {
                 onBook={(patient) => openBooking({ patient })}
               />
             ) : null}
-            {small ? null : (
-              <>
-                <Button variant="outline" onClick={() => setWaitlistOpen(true)}>
-                  Lista de espera
-                  {waiting > 0 ? <Badge variant="soft">{waiting}</Badge> : null}
-                </Button>
-                {newButton}
-              </>
-            )}
+            {small ? null : newButton}
           </>
         }
       />
@@ -1147,15 +1134,7 @@ function AgendaPage() {
         </p>
       ) : null}
 
-      {small ? (
-        <div className="flex shrink-0 gap-2">
-          <Button variant="outline" className="h-12" onClick={() => setWaitlistOpen(true)}>
-            Espera
-            {waiting > 0 ? <Badge variant="soft">{waiting}</Badge> : null}
-          </Button>
-          <div className="min-w-0 flex-1">{newButton}</div>
-        </div>
-      ) : null}
+      {small ? <div className="shrink-0">{newButton}</div> : null}
 
       <span role="status" className="sr-only">
         {message}
@@ -1196,10 +1175,8 @@ function AgendaPage() {
           now={now}
           resources={resources}
           toneOf={toneOf}
-          waiting={waiting}
           onClose={closeDetail}
           onChanged={invalidate}
-          onOfferWaitlist={() => setWaitlistOpen(true)}
           onRebook={(patient) => {
             closeDetail()
             openBooking({ patient })
@@ -1231,18 +1208,6 @@ function AgendaPage() {
             setChairForm(false)
             await invalidate()
           }}
-        />
-      ) : null}
-
-      {waitlistOpen && resources && branchId ? (
-        <WaitlistDrawer
-          branchId={branchId}
-          timeZone={TZ}
-          resources={resources}
-          day={day}
-          canOperate={canWrite}
-          onClose={() => setWaitlistOpen(false)}
-          onChanged={invalidate}
         />
       ) : null}
     </PageShell>
