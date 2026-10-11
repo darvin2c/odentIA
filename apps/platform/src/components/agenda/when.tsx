@@ -186,7 +186,9 @@ export function useWhen(input: WhenInput): WhenState {
         .sort((a, b) => a.start - b.start)
       const fits = sameDay.filter((item) => item.end - item.start >= minutes * 60000)
       // Mover suele ser «un poco más tarde»: primero lo que viene después de la cita.
-      const pick = fits.find((item) => item.start >= movingTo) ?? fits[0] ?? sameDay[0]
+      // Una cita que se mueve no se encoge: si no cabe entera, no se propone nada.
+      const pick =
+        fits.find((item) => item.start >= movingTo) ?? fits[0] ?? (moving ? undefined : sameDay[0])
       if (!pick) return null
       return {
         columnId: pick.columnId,
@@ -194,7 +196,7 @@ export function useWhen(input: WhenInput): WhenState {
         end: new Date(Math.min(pick.start + minutes * 60000, pick.end)).toISOString(),
       }
     },
-    [free, timeZone, movingDentist, movingFrom, movingTo],
+    [free, timeZone, moving, movingDentist, movingFrom, movingTo],
   )
   // Mientras la persona no haya movido el bloque, se propone el primer hueco de lo que mira.
   const touched = React.useRef(Boolean(input.startsAt && input.dentistUserId))
@@ -306,24 +308,48 @@ export function useWhen(input: WhenInput): WhenState {
   }
 }
 
-/** Los campos del «cuándo»: profesional, días de la semana, horas libres y lo elegido en una línea. */
+/**
+ * Los campos del «cuándo»: profesional, días de la semana, horas libres y lo
+ * elegido en una línea. Al reprogramar, el profesional y la duración ya están
+ * decididos: solo se elige día y hora, y cambiar de profesional queda a un toque.
+ */
 export function WhenFields({ when }: { when: WhenState }) {
   const { timeZone, today, now, duration } = when.input
   const { date, week, shown, state, professional } = when
+  const moving = when.input.moving != null
+  const [changing, setChanging] = React.useState(false)
+  const current = when.team.find((item) => item.id === when.input.moving?.dentistUserId)
   return (
     <>
-      <div className="grid gap-2">
-        <span className="text-sm font-medium">Profesional</span>
-        <ScheduleResourceChips
-          wrap
-          label="Profesional"
-          resources={when.team}
-          formatLabel={(item) => shortName(item.label)}
-          value={when.dentistFilter}
-          allLabel="Cualquiera"
-          onChange={when.pickDentist}
-        />
-      </div>
+      {moving && !changing ? (
+        <div className="flex flex-wrap items-center gap-x-2">
+          <span className="min-w-0 flex-1 text-sm">
+            <span className="text-muted-foreground">Con </span>
+            <span className="font-semibold">{current?.label ?? "su profesional"}</span>
+          </span>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="-mr-2.5 text-primary"
+            onClick={() => setChanging(true)}
+          >
+            Cambiar de profesional
+          </Button>
+        </div>
+      ) : (
+        <div className="grid gap-2">
+          <span className="text-sm font-medium">Profesional</span>
+          <ScheduleResourceChips
+            wrap
+            label="Profesional"
+            resources={when.team}
+            formatLabel={(item) => shortName(item.label)}
+            value={when.dentistFilter}
+            allLabel="Cualquiera"
+            onChange={when.pickDentist}
+          />
+        </div>
+      )}
 
       <div className="grid gap-2">
         <div className="flex items-center gap-2">
@@ -365,6 +391,7 @@ export function WhenFields({ when }: { when: WhenState }) {
             value={shown}
             onChange={when.choose}
             defaultMinutes={duration}
+            resizable={!moving}
             marker={when.marker}
             now={now}
           />
@@ -372,36 +399,42 @@ export function WhenFields({ when }: { when: WhenState }) {
         {shown ? (
           <div className="flex items-center gap-2">
             <span className="min-w-0 flex-1 text-sm">
-              <span className="font-bold">{rangeSaid(shown.start, shown.end, timeZone, today)}</span>{" "}
+              <span className="font-bold">
+                {rangeSaid(shown.start, shown.end, timeZone, today)}
+              </span>{" "}
               <span className="text-muted-foreground">con {professional?.label}</span>
             </span>
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                render={
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    aria-label={`Dura ${formatSpan(when.chosenMinutes)}. Cambiar la duración`}
-                  />
-                }
-              >
-                {formatSpan(when.chosenMinutes)}
-                <ChevronDown aria-hidden />
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                {DURATIONS.map((minutes) => (
-                  <DropdownMenuItem key={minutes} onClick={() => when.resize(minutes)}>
-                    {formatSpan(minutes)}
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
+            {moving ? null : (
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  render={
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      aria-label={`Dura ${formatSpan(when.chosenMinutes)}. Cambiar la duración`}
+                    />
+                  }
+                >
+                  {formatSpan(when.chosenMinutes)}
+                  <ChevronDown aria-hidden />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  {DURATIONS.map((minutes) => (
+                    <DropdownMenuItem key={minutes} onClick={() => when.resize(minutes)}>
+                      {formatSpan(minutes)}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
           </div>
         ) : (
           <p className="text-sm text-muted-foreground">
             {when.loading
               ? "Buscando horas libres…"
-              : "No queda nada libre este día. Prueba otro día u otro profesional."}
+              : moving
+                ? "Ese día no queda un hueco donde quepa la cita. Prueba otro día."
+                : "No queda nada libre este día. Prueba otro día u otro profesional."}
           </p>
         )}
         {state === "taken" ? (

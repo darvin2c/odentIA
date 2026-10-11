@@ -81,6 +81,11 @@ export interface ScheduleRangePickerProps {
   onChange: (value: ScheduleRangeValue) => void
   /** Duración que toma el bloque al tocar un hueco. */
   defaultMinutes: number
+  /**
+   * Falso cuando la duración ya está decidida (reprogramar): el bloque se mueve
+   * pero no se estira, y al tocar un hueco conserva su duración.
+   */
+  resizable?: boolean
   /** Referencia visible bajo el bloque; no se puede tocar ni cambia qué está libre. */
   marker?: ScheduleRangeMarker
   now?: string
@@ -108,6 +113,7 @@ export function ScheduleRangePicker({
   value,
   onChange,
   defaultMinutes,
+  resizable = true,
   marker,
   now,
   hourHeight = 44,
@@ -192,7 +198,11 @@ export function ScheduleRangePicker({
     } else if (session.mode === "start") {
       emit(value.columnId, Math.min(session.start + delta, session.end - snapMinutes), session.end)
     } else {
-      emit(value.columnId, session.start, Math.max(session.end + delta, session.start + snapMinutes))
+      emit(
+        value.columnId,
+        session.start,
+        Math.max(session.end + delta, session.start + snapMinutes),
+      )
     }
   }
   const endDrag = (event: React.PointerEvent<HTMLElement>) => {
@@ -204,11 +214,13 @@ export function ScheduleRangePicker({
     if (!value || !chosen) return
     const length = chosen.endMinutes - chosen.startMinutes
     const index = lanes.findIndex((lane) => lane.id === value.columnId)
-    const step = event.key === "ArrowDown" ? snapMinutes : event.key === "ArrowUp" ? -snapMinutes : 0
+    const step =
+      event.key === "ArrowDown" ? snapMinutes : event.key === "ArrowUp" ? -snapMinutes : 0
     if (step !== 0) {
       event.preventDefault()
-      if (event.shiftKey) emit(value.columnId, chosen.startMinutes, chosen.endMinutes + step)
-      else {
+      if (event.shiftKey) {
+        if (resizable) emit(value.columnId, chosen.startMinutes, chosen.endMinutes + step)
+      } else {
         const start = Math.max(
           window.startMinutes,
           Math.min(chosen.startMinutes + step, window.endMinutes - length),
@@ -300,9 +312,10 @@ export function ScheduleRangePicker({
                   (range) => range.startMinutes <= start && range.endMinutes > start,
                 )
                 // En un hueco más corto que la cita habitual, el bloque toma el hueco.
-                const length = room
-                  ? Math.max(snapMinutes, Math.min(defaultMinutes, room.endMinutes - start))
-                  : defaultMinutes
+                const length =
+                  room && resizable
+                    ? Math.max(snapMinutes, Math.min(defaultMinutes, room.endMinutes - start))
+                    : defaultMinutes
                 emit(lane.id, start, start + length)
               }}
             >
@@ -362,24 +375,26 @@ export function ScheduleRangePicker({
                     height: blockHeight,
                   }}
                 >
-                  <div
-                    aria-hidden
-                    className={cn(
-                      "flex shrink-0 cursor-ns-resize items-center justify-center",
-                      compact ? "h-1" : "h-2",
-                    )}
-                    onPointerDown={startDrag("start")}
-                    onPointerMove={moveDrag}
-                    onPointerUp={endDrag}
-                    onPointerCancel={endDrag}
-                  >
-                    {compact ? null : (
-                      <span className="h-[3px] w-5 rounded-full bg-current opacity-70" />
-                    )}
-                  </div>
+                  {resizable ? (
+                    <div
+                      aria-hidden
+                      className={cn(
+                        "flex shrink-0 cursor-ns-resize items-center justify-center",
+                        compact ? "h-1" : "h-2",
+                      )}
+                      onPointerDown={startDrag("start")}
+                      onPointerMove={moveDrag}
+                      onPointerUp={endDrag}
+                      onPointerCancel={endDrag}
+                    >
+                      {compact ? null : (
+                        <span className="h-[3px] w-5 rounded-full bg-current opacity-70" />
+                      )}
+                    </div>
+                  ) : null}
                   <button
                     type="button"
-                    aria-label={`De ${hourLabel(visible.startMinutes)} a ${hourLabel(visible.endMinutes)} con ${chosenLane?.label ?? lane.label}. Flechas para mover; Mayús con flechas para cambiar la duración`}
+                    aria-label={`De ${hourLabel(visible.startMinutes)} a ${hourLabel(visible.endMinutes)} con ${chosenLane?.label ?? lane.label}. ${resizable ? "Flechas para mover; Mayús con flechas para cambiar la duración" : "Flechas para mover"}`}
                     className="min-h-0 flex-1 cursor-grab overflow-hidden rounded-[6px] text-center text-xs leading-none font-bold tabular-nums outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
                     onKeyDown={onKeyDown}
                     onPointerDown={startDrag("move")}
@@ -389,21 +404,23 @@ export function ScheduleRangePicker({
                   >
                     {hourLabel(visible.startMinutes)}
                   </button>
-                  <div
-                    aria-hidden
-                    className={cn(
-                      "flex shrink-0 cursor-ns-resize items-center justify-center",
-                      compact ? "h-1" : "h-2",
-                    )}
-                    onPointerDown={startDrag("end")}
-                    onPointerMove={moveDrag}
-                    onPointerUp={endDrag}
-                    onPointerCancel={endDrag}
-                  >
-                    {compact ? null : (
-                      <span className="h-[3px] w-5 rounded-full bg-current opacity-70" />
-                    )}
-                  </div>
+                  {resizable ? (
+                    <div
+                      aria-hidden
+                      className={cn(
+                        "flex shrink-0 cursor-ns-resize items-center justify-center",
+                        compact ? "h-1" : "h-2",
+                      )}
+                      onPointerDown={startDrag("end")}
+                      onPointerMove={moveDrag}
+                      onPointerUp={endDrag}
+                      onPointerCancel={endDrag}
+                    >
+                      {compact ? null : (
+                        <span className="h-[3px] w-5 rounded-full bg-current opacity-70" />
+                      )}
+                    </div>
+                  ) : null}
                 </div>
               ) : null}
             </div>

@@ -131,6 +131,27 @@ describe("ScheduleRangePicker", () => {
     expect(container.querySelector("[data-range-block]")).toBeNull()
   })
 
+  it("con la duración ya decidida, el bloque se mueve pero no se estira", () => {
+    const onChange = vi.fn()
+    const { container } = render(
+      <ScheduleRangePicker
+        {...props}
+        resizable={false}
+        value={{ columnId: "ana", start: at(12), end: at(13) }}
+        onChange={onChange}
+      />,
+    )
+    expect(container.querySelectorAll("[data-range-block] > div")).toHaveLength(0)
+    const block = screen.getByRole("button", { name: /^De 12:00 a 13:00 con Dra. Ana Torres\. Flechas para mover$/ })
+    fireEvent.keyDown(block, { key: "ArrowUp", shiftKey: true })
+    expect(onChange).not.toHaveBeenCalled()
+    fireEvent.keyDown(block, { key: "ArrowDown" })
+    expect(onChange).toHaveBeenLastCalledWith({ columnId: "ana", start: at(12, 15), end: at(13, 15) })
+    // Al tocar un hueco corto conserva su hora entera: no se encoge para caber.
+    fireEvent.click(lane(container, "ana"), { clientY: 3 * 60 })
+    expect(onChange).toHaveBeenLastCalledWith({ columnId: "ana", start: at(11), end: at(12) })
+  })
+
   it("arrastrar el borde inferior cambia la duración", () => {
     const onChange = vi.fn()
     const { container } = render(

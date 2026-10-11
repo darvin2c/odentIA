@@ -231,14 +231,20 @@ test("agenda: reservar un hueco real, confirmarlo y encontrarlo al buscar", asyn
   await page.getByRole("button", { name: "Guardar cambios" }).click()
   await expect(page.getByText("Dolor en una muela", { exact: true })).toBeVisible()
 
-  // Reprogramar: el mismo «cuándo» que al reservar. Se ve dónde está la cita y el bloque
-  // ya viene puesto en el hueco que le sigue.
+  // Reprogramar es cambiar de día y hora: mismo profesional y misma duración. Se ve dónde
+  // está la cita y el bloque ya viene puesto en el hueco que le sigue.
   const booked = await appointmentOf()
   await page.getByRole("button", { name: "Reprogramar" }).click()
   const moveHours = page.getByRole("region", { name: /^Horas del/ })
   await expect(moveHours.getByText(/^Ahora está aquí, \d\d:\d\d$/)).toBeVisible()
   await expect(moveHours.getByRole("button", { name: /^De \d\d:\d\d a \d\d:\d\d con / })).toBeVisible()
+  // Ni duración ni lista de profesionales: eso ya estaba decidido.
+  await expect(page.getByRole("button", { name: /^Dura / })).toHaveCount(0)
+  await expect(page.getByRole("group", { name: "Profesional" })).toHaveCount(0)
   await shot("reprogramar")
+  // Cambiar de profesional queda a un toque, para cuando el suyo no puede.
+  await page.getByRole("button", { name: "Cambiar de profesional" }).click()
+  await expect(page.getByRole("group", { name: "Profesional" })).toBeVisible()
   await page.getByRole("button", { name: /^Mover (a|al) / }).click()
   await expect(page.getByRole("button", { name: "Reprogramar" })).toBeVisible()
   const moved = await appointmentOf()
