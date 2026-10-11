@@ -3,14 +3,16 @@ import {
   agentKnowledgeEntry,
   agentKnowledgeGap,
   agentKnowledgeRevision,
+  agentLesson,
   KNOWLEDGE_GAP_STATUSES,
   type KnowledgeGapStatus,
   type KnowledgeKind,
   type KnowledgeStatus,
 } from "@odentia/db/schema/agent"
+import { serviceCatalog } from "@odentia/db/schema/clinical"
 import { message } from "@odentia/db/schema/crm"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
-import { and, asc, desc, eq, gt, ilike, inArray, or, sql } from "drizzle-orm"
+import { and, asc, count, desc, eq, gt, ilike, inArray, ne, or, sql } from "drizzle-orm"
 import { notFound, validation } from "./errors.js"
 import { getOrgLocale } from "./locale.js"
 import { listServices } from "./service-catalog.js"
@@ -78,6 +80,14 @@ export interface KnowledgeEntryItem {
   createdBy: string | null
   createdAt: string
   updatedAt: string
+}
+
+/** Una respuesta en la lista de la clínica, con lo que «Aprender» sabe de ella. */
+export interface KnowledgeEntryListItem extends KnowledgeEntryItem {
+  /** Lección propuesta que cambiaría esta respuesta: hay un cambio por aprobar. */
+  pendingLessonId: string | null
+  /** Si la creó o la cambió una corrección aprobada, y cuántas veces se usó desde entonces. */
+  learned: { uses: number } | null
 }
 
 type EntryRow = typeof agentKnowledgeEntry.$inferSelect
@@ -362,7 +372,7 @@ export interface ListKnowledgeInput {
   limit?: number
 }
 
-export async function listKnowledgeEntries(tx: Db, orgId: string, input: ListKnowledgeInput = {}): Promise<KnowledgeEntryItem[]> {
+export async function listKnowledgeEntries(tx: Db, orgId: string, input: ListKnowledgeInput = {}): Promise<KnowledgeEntryListItem[]> {
   const conditions = [eq(agentKnowledgeEntry.organizationId, orgId)]
   if (input.kind) {
     assertKind(input.kind)
@@ -387,7 +397,36 @@ export async function listKnowledgeEntries(tx: Db, orgId: string, input: ListKno
     .orderBy(desc(agentKnowledgeEntry.updatedAt), asc(agentKnowledgeEntry.id))
     .limit(limit)
   const today = await orgToday(tx, orgId)
-  return rows.map(({ entry, branchName }) => toItem(entry, today, branchName))
+  // Lo que «Aprender» sabe de cada respuesta: la lección propuesta que la
+  // cambiaría (la más reciente) y las activas que la crearon o la cambiaron.
+  const ids = rows.map(({ entry }) => entry.id)
+  const lessons = ids.length
+    ? await tx
+        .select({ id: agentLesson.id, entryId: agentLesson.knowledgeEntryId, status: agentLesson.status, uses: agentLesson.uses })
+        .from(agentLesson)
+        .where(
+          and(
+            eq(agentLesson.organizationId, orgId),
+            eq(agentLesson.kind, "respuesta_oficial"),
+            inArray(agentLesson.status, ["propuesta", "activa"]),
+            inArray(agentLesson.knowledgeEntryId, ids),
+          ),
+        )
+        .orderBy(desc(agentLesson.createdAt), asc(agentLesson.id))
+    : []
+  const pending = new Map<string, string>()
+  const learned = new Map<string, number>()
+  for (const lesson of lessons) {
+    if (!lesson.entryId) continue
+    if (lesson.status === "propuesta") {
+      if (!pending.has(lesson.entryId)) pending.set(lesson.entryId, lesson.id)
+    } else learned.set(lesson.entryId, (learned.get(lesson.entryId) ?? 0) + lesson.uses)
+  }
+  return rows.map(({ entry, branchName }) => ({
+    ...toItem(entry, today, branchName),
+    pendingLessonId: pending.get(entry.id) ?? null,
+    learned: learned.has(entry.id) ? { uses: learned.get(entry.id) ?? 0 } : null,
+  }))
 }
 
 export async function listKnowledgeRevisions(tx: Db, orgId: string, entryId: string) {
@@ -542,6 +581,34 @@ export async function getClinicInfoSnapshot(tx: Db, orgId: string): Promise<Clin
       durationMin: s.durationMin,
     })),
   }
+}
+
+export interface KnowledgeDataSources {
+  /** Servicios activos con tarifa mayor que cero: de ahí salen los precios que da el agente. */
+  pricedServices: number
+  /** Servicios activos, con o sin costo. */
+  services: number
+  /** Sedes activas. */
+  branches: number
+}
+
+/**
+ * Cuánto hay en el sistema de lo que el agente lee en el momento. Cuenta todo,
+ * sin el tope del bloque del prompt (`getClinicInfoSnapshot`).
+ */
+export async function getKnowledgeDataSources(tx: Db, orgId: string): Promise<KnowledgeDataSources> {
+  const [services] = await tx
+    .select({
+      total: count(),
+      priced: sql<number>`count(*) filter (where ${serviceCatalog.priceCents} > 0)::int`,
+    })
+    .from(serviceCatalog)
+    .where(and(eq(serviceCatalog.organizationId, orgId), eq(serviceCatalog.isActive, true), ne(serviceCatalog.source, "legacy")))
+  const [branches] = await tx
+    .select({ total: count() })
+    .from(branch)
+    .where(and(eq(branch.organizationId, orgId), eq(branch.isActive, true)))
+  return { pricedServices: services?.priced ?? 0, services: services?.total ?? 0, branches: branches?.total ?? 0 }
 }
 
 /** Importe con su moneda: nunca se presenta como soles una tarifa en otra moneda. */
@@ -702,6 +769,7 @@ export async function getKnowledgeBasics(tx: Db, orgId: string): Promise<Knowled
 
 const GAP_QUESTION_CHARS = 500
 const GAP_DEDUPE_MS = 24 * 60 * 60 * 1000
+const GAP_WEEK_MS = 7 * 24 * 60 * 60 * 1000
 const UUID = /^[0-9a-f-]{36}$/i
 
 /**
@@ -748,6 +816,8 @@ export interface KnowledgeGapItem {
   ids: string[]
   question: string
   count: number
+  /** De esas veces, cuántas en los últimos siete días. */
+  weekCount: number
   lastAt: string
   conversationId: string
   status: KnowledgeGapStatus
@@ -787,12 +857,15 @@ export async function listKnowledgeGaps(
     .orderBy(desc(agentKnowledgeGap.createdAt), asc(agentKnowledgeGap.id))
     .limit(300)
   const groups = new Map<string, KnowledgeGapItem>()
+  const weekStart = Date.now() - GAP_WEEK_MS
   for (const row of rows) {
     const key = normalizeForSearch(row.question)
     const group = groups.get(key)
+    const thisWeek = row.createdAt.getTime() > weekStart ? 1 : 0
     if (group) {
       group.ids.push(row.id)
       group.count += 1
+      group.weekCount += thisWeek
       group.teamAnswer ??= row.teamAnswer
       continue
     }
@@ -800,6 +873,7 @@ export async function listKnowledgeGaps(
       ids: [row.id],
       question: row.question,
       count: 1,
+      weekCount: thisWeek,
       lastAt: row.createdAt.toISOString(),
       conversationId: row.conversationId,
       status: status as KnowledgeGapStatus,

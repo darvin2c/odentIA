@@ -232,7 +232,9 @@ export function createContactsRoute(deps: CrmDeps) {
   app.get("/:id/agent-memory", async (c) => {
     const { orgId, memberRole } = orgContextOf(c)
     if (!canAccessAny(memberRole, [...memoryReaders])) return c.json(errorBody(c, "FORBIDDEN", "Sin acceso a esta persona"), 403)
-    return runService(c, 200, () => withOrgContext(deps.db, orgId, (tx) => getPersonMemory(tx, orgId, c.req.param("id"))))
+    // «La última vez» incluye su cita solo para quien ve la agenda.
+    const lastTime = { appointments: canAccess(memberRole, "appointments.read") }
+    return runService(c, 200, () => withOrgContext(deps.db, orgId, (tx) => getPersonMemory(tx, orgId, c.req.param("id"), { lastTime })))
   })
 
   app.post("/:id/agent-memory", async (c) => {

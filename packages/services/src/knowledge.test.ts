@@ -1,7 +1,9 @@
 import type { ChannelAdapter, NormalizedInbound } from "@odentia/channels"
 import { type Db, type InboundMessageJob, withOrgContext } from "@odentia/db"
-import { agentKnowledgeEntry, agentKnowledgeGap } from "@odentia/db/schema/agent"
+import { agentKnowledgeEntry, agentKnowledgeGap, agentLesson } from "@odentia/db/schema/agent"
 import { member, user } from "@odentia/db/schema/auth"
+import { serviceCatalog } from "@odentia/db/schema/clinical"
+import { branch } from "@odentia/db/schema/org"
 import { eq, sql } from "drizzle-orm"
 import { beforeAll, describe, expect, it } from "vitest"
 import { createConnection } from "./connections.js"
@@ -14,6 +16,7 @@ import {
   formatKnowledgeForPrompt,
   formatServicePrice,
   getKnowledgeBasics,
+  getKnowledgeDataSources,
   getKnowledgeEntry,
   KNOWLEDGE_BASICS,
   type KnowledgeEntryItem,
@@ -235,6 +238,45 @@ it("lo básico de una clínica cuenta lo cubierto por respuestas vigentes y por 
   expect(before.items.find((item) => item.key === "servicios")?.dataSource).toBe("Servicios activos")
 })
 
+it("la lista dice qué respuesta tiene un cambio por aprobar y cuál salió de una corrección", async () => {
+  const plain = await publish({ kind: "faq", title: "Wifi para pacientes", body: "Sí, pide la clave en recepción." })
+  const changing = await publish({ kind: "faq", title: "Atención a bebés", body: "Desde los tres años." })
+  const learned = await publish({ kind: "faq", title: "Sala de espera", body: "Tiene juegos para niños." })
+  const lesson = { organizationId: ORG, kind: "respuesta_oficial" as const, scope: "clinica", proposedBy: OWNER }
+  const [proposed] = await ownerDb.insert(agentLesson).values([
+    { ...lesson, title: "Atención a bebés", body: "Desde el primer diente.", status: "propuesta", knowledgeEntryId: changing.id },
+    { ...lesson, title: "Sala de espera", body: "Tiene juegos para niños.", status: "activa", knowledgeEntryId: learned.id, uses: 4 },
+    { ...lesson, title: "Sala de espera", body: "Tiene juegos.", status: "activa", knowledgeEntryId: learned.id, uses: 5 },
+    // Ni lo descartado ni lo retirado dicen nada de la respuesta.
+    { ...lesson, title: "Wifi", body: "No hay.", status: "descartada", knowledgeEntryId: plain.id },
+    { ...lesson, title: "Wifi", body: "No hay.", status: "retirada", knowledgeEntryId: plain.id, uses: 2 },
+  ]).returning({ id: agentLesson.id })
+  const listed = await run((tx) => listKnowledgeEntries(tx, ORG, { limit: 100 }))
+  const byId = (id: string) => listed.find((entry) => entry.id === id)
+  expect(byId(plain.id)).toMatchObject({ pendingLessonId: null, learned: null })
+  expect(byId(changing.id)).toMatchObject({ pendingLessonId: proposed!.id, learned: null })
+  expect(byId(learned.id)).toMatchObject({ pendingLessonId: null, learned: { uses: 9 } })
+})
+
+it("lo que toma de tus datos cuenta servicios activos con tarifa y sedes activas", async () => {
+  const before = await run((tx) => getKnowledgeDataSources(tx, ORG))
+  await ownerDb.insert(serviceCatalog).values([
+    { organizationId: ORG, name: "Limpieza Fuentes", source: "custom", priceCents: 9000, currency: "PEN" },
+    { organizationId: ORG, name: "Evaluación Fuentes", source: "custom", priceCents: 0, currency: "PEN" },
+    { organizationId: ORG, name: "Retirado Fuentes", source: "custom", priceCents: 5000, currency: "PEN", isActive: false },
+  ])
+  await ownerDb.insert(branch).values([
+    { organizationId: ORG, name: "Sede Fuentes", timezone: "America/Lima" },
+    { organizationId: ORG, name: "Sede Cerrada Fuentes", timezone: "America/Lima", isActive: false },
+    { organizationId: OTHER, name: "Sede Ajena Fuentes", timezone: "America/Lima" },
+  ])
+  expect(await run((tx) => getKnowledgeDataSources(tx, ORG))).toEqual({
+    pricedServices: before.pricedServices + 1,
+    services: before.services + 2,
+    branches: before.branches + 1,
+  })
+})
+
 it("lo que no supo responder se agrupa, muestra lo que respondió el equipo y se cierra con una respuesta oficial", async () => {
   const first = await openConversation("gap-1")
   const second = await openConversation("gap-2")
@@ -252,7 +294,10 @@ it("lo que no supo responder se agrupa, muestra lo que respondió el equipo y se
   }))
   const open = await run((tx) => listKnowledgeGaps(tx, ORG))
   const group = open.find((item) => item.question === question)
-  expect(group).toMatchObject({ count: 2, teamAnswer: "Sí, hay un bicicletero en la entrada.", status: "abierta" })
+  expect(group).toMatchObject({ count: 2, weekCount: 2, teamAnswer: "Sí, hay un bicicletero en la entrada.", status: "abierta" })
+  // «Esta semana» cuenta solo los últimos siete días; el total sigue contando todo.
+  await ownerDb.update(agentKnowledgeGap).set({ createdAt: new Date(Date.now() - 8 * 86_400_000) }).where(eq(agentKnowledgeGap.id, one!))
+  expect((await run((tx) => listKnowledgeGaps(tx, ORG))).find((item) => item.question === question)).toMatchObject({ count: 2, weekCount: 1 })
   expect(open.find((item) => item.question === "¿Venden cepillos?")).toMatchObject({ count: 1, teamAnswer: null })
 
   // Guardar como respuesta oficial: queda publicada y recuerda cómo se preguntó.

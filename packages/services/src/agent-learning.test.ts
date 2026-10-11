@@ -162,6 +162,18 @@ describe("por revisar", () => {
     await expect(run((tx) => markReviewOk(tx, ORG, OWNER, item.id))).rejects.toMatchObject({ code: "REVIEW_NOT_PENDING" })
     expect(await ownerDb.select().from(agentLesson).where(eq(agentLesson.reviewItemId, item.id))).toEqual([])
   })
+
+  it("«estuvo bien» como ejemplo propone la respuesta tal cual y dice que sale de una respuesta buena", async () => {
+    const asked = await inbound("ejemplo-bueno", "¿Aceptan pago con tarjeta?")
+    const traceId = await agentReplies(asked.conversationId, asked.messageId, "Sí, aceptamos tarjeta de crédito y débito.")
+    const item = await run((tx) => flagAnswerForReview(tx, ORG, OWNER, traceId))
+    const lesson = await run((tx) => markReviewOk(tx, ORG, OWNER, item.id, { asExample: true }))
+    expect(lesson).toMatchObject({
+      kind: "ejemplo", scope: "recepcion", agent: "recepcion", status: "propuesta",
+      origin: "respuesta_buena", contactName: "ejemplo-bueno", body: "Sí, aceptamos tarjeta de crédito y débito.",
+    })
+    await run((tx) => discardLesson(tx, ORG, OWNER, lesson!.id))
+  })
 })
 
 describe("corregir propone una lección; nada cambia hasta aprobarla", () => {
@@ -175,6 +187,8 @@ describe("corregir propone una lección; nada cambia hasta aprobarla", () => {
       kind: "respuesta_oficial", scope: "clinica", status: "propuesta",
       title: "¿Tienen bicicletero en la sede?", originalReply: "No tengo ese dato.",
       knowledgeEntryId: null, proposedByName: "Carmen",
+      // De dónde sale: una corrección a una respuesta de Recepción, la que recibió esa persona.
+      agent: "recepcion", origin: "correccion", contactName: "mateo",
     })
     expect((await reviewOf(traceId))?.status).toBe("corregida")
     // La misma respuesta no se corrige dos veces.
@@ -327,6 +341,10 @@ describe("aprobar con edición", () => {
     })
     const [item] = await ownerDb.select().from(agentReviewItem).where(eq(agentReviewItem.id, lesson!.reviewItemId!))
     expect(item).toMatchObject({ reason: "editada", status: "corregida", teamReply: edited })
+    // Es de toda la clínica, pero nació de un borrador de Recepción que el equipo cambió.
+    expect(await run((tx) => getLesson(tx, ORG, lesson!.id))).toMatchObject({
+      scope: "clinica", agent: "recepcion", origin: "borrador_editado", contactName: "editada",
+    })
 
     // Aprobar sin cambiar nada no propone ninguna lección.
     const same = await run((tx) => createProposal(tx, ORG, {

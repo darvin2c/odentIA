@@ -1,5 +1,4 @@
 import {
-  Badge,
   Button,
   Checkbox,
   Field,
@@ -13,119 +12,37 @@ import {
   SelectValue,
   Textarea,
 } from "@odentia/ui"
-import {
-  DetailDrawer,
-  EmptyState,
-  ErrorState,
-  FormDrawer,
-  LoadingState,
-  PageHeader,
-  PageShell,
-} from "@odentia/ui-patterns"
+import { ErrorState, FormDrawer, PageHeader, PageShell } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, Link } from "@tanstack/react-router"
-import { CircleCheck, CircleHelp, Database, MessageCircleQuestion } from "lucide-react"
-import { type FormEvent, useMemo, useState } from "react"
+import { type FormEvent, useState } from "react"
+import { KnowledgeAnswers } from "../../components/agent/knowledge-answers"
+import { KnowledgeBasics } from "../../components/agent/knowledge-basics"
+import { KnowledgeDetail } from "../../components/agent/knowledge-detail"
+import { KnowledgeGaps } from "../../components/agent/knowledge-gaps"
+import {
+  type KnowledgeBasicItem,
+  type KnowledgeBasics as Basics,
+  type KnowledgeEntry,
+  type KnowledgeGap as Gap,
+  type KnowledgeSources as Sources,
+  TOUCH,
+} from "../../components/agent/knowledge-model"
+import { KnowledgeSources } from "../../components/agent/knowledge-sources"
+import { LessonDrawer } from "../../components/agent/lesson-drawer"
 import { AgentTabs } from "../../components/agent-tabs"
 import { apiFetch } from "../../lib/api"
 import { usePermission } from "../../lib/crm"
 import { PageDraftGuard, sameDraft } from "../../lib/page-draft-guard"
-import { isAmbiguousMutationError, mutationErrorMessage, QueryErrorState } from "../../lib/query-error"
+import { isAmbiguousMutationError, mutationErrorMessage } from "../../lib/query-error"
 
 export const Route = createFileRoute("/_org/agent/knowledge")({
   component: AgentKnowledgePage,
 })
 
-type KnowledgeState = "borrador" | "programada" | "vigente" | "vencida"
-
-interface KnowledgeEntry {
-  id: string
-  kind: string
-  title: string
-  body: string
-  branchId: string | null
-  branchName: string | null
-  status: string
-  state: KnowledgeState
-  validFrom: string | null
-  validUntil: string | null
-  askForms: string[]
-  basicKey: string | null
-  version: number
-  updatedAt: string
-}
-
-interface Revision {
-  version: number
-  title: string
-  body: string
-  createdAt: string
-}
-
-interface BasicItem {
-  key: string
-  question: string
-  covered: boolean
-  coveredBy: "respuesta" | "datos" | null
-  entryId: string | null
-  dataSource: string | null
-}
-
-interface Basics {
-  items: BasicItem[]
-  covered: number
-  total: number
-}
-
-interface Gap {
-  ids: string[]
-  question: string
-  count: number
-  lastAt: string
-  conversationId: string
-  teamAnswer: string | null
-}
-
 const KIND_LABEL: Record<string, string> = { faq: "Pregunta frecuente", info_sede: "Información de sede", politica: "Política" }
-
-const STATE_LABEL: Record<KnowledgeState, string> = {
-  vigente: "Vigente",
-  programada: "Programada",
-  vencida: "Vencida",
-  borrador: "Borrador",
-}
-const STATE_VARIANT: Record<KnowledgeState, "success" | "soft" | "destructive" | "secondary"> = {
-  vigente: "success",
-  programada: "soft",
-  vencida: "destructive",
-  borrador: "secondary",
-}
-
-const FILTERS: Array<{ value: "todas" | KnowledgeState; label: string }> = [
-  { value: "todas", label: "Todas" },
-  { value: "vigente", label: "Vigentes" },
-  { value: "borrador", label: "Borradores" },
-  { value: "vencida", label: "Vencidas" },
-  { value: "programada", label: "Programadas" },
-]
-
-/** Fecha de la clínica (AAAA-MM-DD) tal cual, sin pasar por la zona del navegador. */
-function dayLabel(day: string): string {
-  const [year, month, date] = day.split("-").map(Number)
-  return new Date(Date.UTC(year ?? 0, (month ?? 1) - 1, date ?? 1)).toLocaleDateString("es-PE", {
-    timeZone: "UTC",
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-  })
-}
-
-function validityLabel(entry: Pick<KnowledgeEntry, "validFrom" | "validUntil">): string {
-  if (entry.validFrom && entry.validUntil) return `Del ${dayLabel(entry.validFrom)} al ${dayLabel(entry.validUntil)}`
-  if (entry.validFrom) return `Desde el ${dayLabel(entry.validFrom)}`
-  if (entry.validUntil) return `Hasta el ${dayLabel(entry.validUntil)}`
-  return "Sin fecha de fin"
-}
+/** Límite del título de una respuesta en el servidor. */
+const TITLE_CHARS = 200
 
 interface Draft {
   kind: string
@@ -154,23 +71,21 @@ const EMPTY_DRAFT: Draft = {
   existingId: "",
 }
 
-/** Preguntas básicas pendientes a la vista; el resto, bajo demanda para no enterrar las respuestas. */
-const MISSING_PREVIEW = 5
-/** Botones compactos en escritorio, de 44 px en móvil. */
-const TOUCH = "min-h-11 sm:min-h-8"
+function basicDraft(item: KnowledgeBasicItem): Draft {
+  return { ...EMPTY_DRAFT, title: item.question, basicKey: item.key }
+}
 
 function AgentKnowledgePage() {
   const queryClient = useQueryClient()
   const canRead = usePermission("agent.read")
   const canWrite = usePermission("agent.write")
-  const [filter, setFilter] = useState<"todas" | KnowledgeState>("todas")
-  const [search, setSearch] = useState("")
+  const [detailId, setDetailId] = useState<string | null>(null)
+  const [lessonId, setLessonId] = useState<string | null>(null)
   const [editing, setEditing] = useState<KnowledgeEntry | null>(null)
   const [creating, setCreating] = useState(false)
   const [answering, setAnswering] = useState<Gap | null>(null)
-  const [revisionsFor, setRevisionsFor] = useState<KnowledgeEntry | null>(null)
-  const [showCovered, setShowCovered] = useState(false)
-  const [showAllMissing, setShowAllMissing] = useState(false)
+  /** «Responder las que faltan»: al guardar una pregunta básica se pasa a la siguiente. */
+  const [basicsRun, setBasicsRun] = useState(false)
   const [form, setForm] = useState<Draft>(EMPTY_DRAFT)
   const [baseline, setBaseline] = useState<Draft>(EMPTY_DRAFT)
   const formOpen = creating || editing !== null || answering !== null
@@ -194,16 +109,16 @@ function AgentKnowledgePage() {
     enabled: canRead,
     retry: false,
   })
+  const sourcesQuery = useQuery({
+    queryKey: ["agent-knowledge-sources"],
+    queryFn: () => apiFetch<{ data: Sources }>("/api/agent/knowledge/sources"),
+    enabled: canRead,
+    retry: false,
+  })
   const branchesQuery = useQuery({
     queryKey: ["branches"],
-    queryFn: () => apiFetch<{ data: Array<{ id: string; name: string }> }>("/api/branches"),
-    enabled: canWrite && formOpen,
-  })
-  const revisionsQuery = useQuery({
-    queryKey: ["agent-knowledge-revisions", revisionsFor?.id],
-    queryFn: () => apiFetch<{ data: Revision[] }>(`/api/agent/knowledge/${revisionsFor?.id}/revisions`),
-    enabled: canRead && revisionsFor !== null,
-    retry: false,
+    queryFn: () => apiFetch<{ data: Array<{ id: string; name: string; isActive?: boolean }> }>("/api/branches"),
+    enabled: canRead,
   })
 
   const invalidate = () => {
@@ -214,7 +129,8 @@ function AgentKnowledgePage() {
 
   const saveMutation = useMutation({
     retry: false,
-    mutationFn: async () => {
+    // `next`: la pregunta básica que sigue cuando se están respondiendo las que faltan.
+    mutationFn: async (_input: { next: Draft | null }) => {
       if (answering) {
         const answer = form.existingId
           ? { ids: answering.ids, entryId: form.existingId }
@@ -245,8 +161,12 @@ function AgentKnowledgePage() {
       }
       return created
     },
-    onSuccess: () => {
-      closeForm()
+    onSuccess: (_data, input) => {
+      if (input.next) {
+        saveMutation.reset()
+        setForm(input.next)
+        setBaseline(input.next)
+      } else closeForm()
       invalidate()
     },
     // Si el alta salió y la publicación no, la respuesta existe como borrador: se refleja ya.
@@ -263,27 +183,32 @@ function AgentKnowledgePage() {
     onSuccess: () => invalidate(),
   })
 
+  // Lo que el equipo ya respondió se guarda tal cual. Repetirlo es seguro: una
+  // pregunta ya cerrada no se cierra dos veces ni crea otra respuesta.
+  const quickSaveMutation = useMutation({
+    retry: false,
+    mutationFn: (gap: Gap) =>
+      apiFetch("/api/agent/knowledge/gaps/answer", {
+        method: "POST",
+        body: JSON.stringify({ ids: gap.ids, title: gap.question, body: gap.teamAnswer }),
+      }),
+    onSettled: () => invalidate(),
+  })
+
   const discardMutation = useMutation({
     retry: false,
     mutationFn: (gap: Gap) =>
       apiFetch("/api/agent/knowledge/gaps/discard", { method: "POST", body: JSON.stringify({ ids: gap.ids }) }),
-    onSuccess: () => invalidate(),
+    onSuccess: () => {
+      closeForm()
+      invalidate()
+    },
   })
 
   const entries = entriesQuery.data?.data ?? []
   const basics = basicsQuery.data?.data ?? null
   const gaps = gapsQuery.data?.data ?? []
-  const visible = useMemo(() => {
-    const wanted = search.trim().toLowerCase()
-    return entries.filter(
-      (entry) =>
-        (filter === "todas" || entry.state === filter) &&
-        (!wanted ||
-          entry.title.toLowerCase().includes(wanted) ||
-          entry.body.toLowerCase().includes(wanted) ||
-          entry.askForms.some((formText) => formText.toLowerCase().includes(wanted))),
-    )
-  }, [entries, filter, search])
+  const branches = (branchesQuery.data?.data ?? []).filter((branch) => branch.isActive !== false)
 
   if (!canRead) {
     return (
@@ -295,19 +220,29 @@ function AgentKnowledgePage() {
 
   const error = mutationErrorMessage(saveMutation.error)
   const missing = basics?.items.filter((item) => !item.covered) ?? []
-  const covered = basics?.items.filter((item) => item.covered) ?? []
+  const detail = entries.find((entry) => entry.id === detailId) ?? null
 
-  function open(next: Draft, target: { entry?: KnowledgeEntry; gap?: Gap }) {
+  function open(next: Draft, target: { entry?: KnowledgeEntry; gap?: Gap; basicsRun?: boolean }) {
     saveMutation.reset()
+    discardMutation.reset()
+    setDetailId(null)
     setForm(next)
     setBaseline(next)
     setEditing(target.entry ?? null)
     setAnswering(target.gap ?? null)
     setCreating(!target.entry && !target.gap)
+    setBasicsRun(target.basicsRun === true)
   }
 
-  function openCreate(preset: Partial<Draft> = {}) {
-    open({ ...EMPTY_DRAFT, ...preset }, {})
+  function openCreate() {
+    open(EMPTY_DRAFT, {})
+  }
+
+  /** Responder lo básico: empieza por la primera que falta y sigue con las demás. */
+  function startBasics() {
+    const first = missing[0]
+    if (first) open(basicDraft(first), { basicsRun: true })
+    else openCreate()
   }
 
   function openEdit(entry: KnowledgeEntry) {
@@ -329,380 +264,179 @@ function AgentKnowledgePage() {
   }
 
   function openAnswer(gap: Gap) {
-    open({ ...EMPTY_DRAFT, title: gap.question, body: gap.teamAnswer ?? "" }, { gap })
+    quickSaveMutation.reset()
+    open({ ...EMPTY_DRAFT, title: gap.question.slice(0, TITLE_CHARS), body: gap.teamAnswer ?? "" }, { gap })
+  }
+
+  function quickSave(gap: Gap) {
+    // Una pregunta más larga que un título se acorta a mano, no a ciegas.
+    if (gap.question.length > TITLE_CHARS) openAnswer(gap)
+    else quickSaveMutation.mutate(gap)
   }
 
   function closeForm() {
     setEditing(null)
     setCreating(false)
     setAnswering(null)
+    setBasicsRun(false)
   }
+
+  // En «Responder las que faltan», la que sigue a la que se está respondiendo.
+  const runRest = basicsRun ? missing.filter((item) => item.key !== form.basicKey) : []
+  const runIndex = missing.findIndex((item) => item.key === form.basicKey)
+  const runNext = runRest.length > 0 ? (missing.slice(runIndex + 1).find((item) => item.key !== form.basicKey) ?? runRest[0]) : undefined
 
   function submit(event: FormEvent) {
     event.preventDefault()
     if (saveMutation.isPending || isAmbiguousMutationError(saveMutation.error)) return
-    saveMutation.mutate()
+    saveMutation.mutate({ next: runNext ? basicDraft(runNext) : null })
   }
 
   const usesExisting = answering !== null && form.existingId !== ""
   const incomplete = usesExisting ? false : !form.title.trim() || !form.body.trim()
   const publishedEntries = entries.filter((entry) => entry.status === "publicada")
+  const branchOptions = editing?.branchId && editing.branchName && !branches.some((branch) => branch.id === editing.branchId)
+    ? [...branches, { id: editing.branchId, name: editing.branchName }]
+    : branches
 
   return (
-    <PageShell className="flex flex-col gap-6">
+    <PageShell className={`flex flex-col gap-6 ${canWrite ? "max-sm:pb-24" : ""}`}>
       <PageDraftGuard dirty={formDirty || saveMutation.isPending} />
-      <PageHeader title="Agente" subtitle="Lo que el agente sabe de tu clínica: solo responde con lo publicado y vigente, o con tus datos." />
+      <PageHeader title="Agente" subtitle="Solo responde con lo que está aquí. Si un dato falta, lo dice y pasa a una persona." />
       <AgentTabs />
 
-      <div className="grid min-w-0 items-start gap-4 xl:grid-cols-2">
-        <section aria-labelledby="sin-respuesta" className="elevated flex min-w-0 flex-col gap-3 rounded-xl border bg-card p-5 sm:p-6">
-          <div className="flex items-start gap-3">
-            <span className="mt-0.5 shrink-0 text-warning [&>svg]:size-5">
-              <MessageCircleQuestion aria-hidden />
-            </span>
-            <div className="min-w-0">
-              <h2 id="sin-respuesta" className="font-heading text-base font-semibold">
-                No supo responder{gaps.length > 0 ? ` · ${gaps.length}` : ""}
-              </h2>
-              <p className="text-sm text-muted-foreground">
-                Preguntas para las que buscó una respuesta oficial y no la encontró.
-              </p>
-            </div>
-          </div>
-          {gapsQuery.isPending ? (
-            <LoadingState message="Cargando preguntas…" />
-          ) : gapsQuery.isError ? (
-            <QueryErrorState error={gapsQuery.error} onRetry={() => void gapsQuery.refetch()} />
-          ) : gaps.length === 0 ? (
-            <p className="rounded-lg bg-muted/60 px-3 py-2 text-sm">
-              Nada pendiente: encontró respuesta para todo lo que buscó.
-            </p>
-          ) : (
-            <ul className="flex flex-col gap-3">
-              {gaps.map((gap) => (
-                <li key={gap.ids[0]} className="flex flex-col gap-2 rounded-xl border p-4">
-                  <p className="font-semibold">«{gap.question}»</p>
-                  <p className="text-xs text-muted-foreground">
-                    {gap.count === 1 ? "La preguntó 1 persona" : `La preguntaron ${gap.count} veces`} ·{" "}
-                    <Link to="/inbox" search={{ conversation: gap.conversationId }} className="font-semibold text-primary hover:underline">
-                      Ver la conversación
-                    </Link>
-                  </p>
-                  {gap.teamAnswer ? (
-                    <p className="rounded-lg bg-muted/60 px-3 py-2 text-sm">
-                      <span className="font-semibold">Tu equipo respondió:</span> {gap.teamAnswer}
-                    </p>
-                  ) : (
-                    <p className="text-sm text-muted-foreground">Nadie del equipo respondió todavía en esa conversación.</p>
-                  )}
-                  {canWrite ? (
-                    <div className="flex flex-wrap gap-2">
-                      <Button type="button" size="sm" className={TOUCH} onClick={() => openAnswer(gap)}>
-                        Guardar como respuesta oficial
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        className={TOUCH}
-                        disabled={discardMutation.isPending}
-                        onClick={() => discardMutation.mutate(gap)}
-                      >
-                        Descartar
-                      </Button>
-                    </div>
-                  ) : null}
-                </li>
-              ))}
-            </ul>
-          )}
-          {discardMutation.isError ? (
-            <p role="alert" className="text-sm text-destructive">
-              {mutationErrorMessage(discardMutation.error) ?? "No pudimos descartar la pregunta."}
-            </p>
-          ) : null}
-        </section>
-
-        <section aria-labelledby="lo-basico" className="elevated flex min-w-0 flex-col gap-3 rounded-xl border bg-card p-5 sm:p-6">
-          <div className="flex items-start gap-3">
-            <span className="mt-0.5 shrink-0 text-primary-soft-foreground [&>svg]:size-5">
-              <CircleHelp aria-hidden />
-            </span>
-            <div className="min-w-0 flex-1">
-              <h2 id="lo-basico" className="font-heading text-base font-semibold">
-                Lo básico de una clínica{basics ? ` · ${basics.covered} de ${basics.total}` : ""}
-              </h2>
-              <p className="text-sm text-muted-foreground">Lo que casi todos preguntan. Conviene tenerlo respondido antes de dejarlo atender solo.</p>
-            </div>
-          </div>
-          {basicsQuery.isPending ? (
-            <LoadingState message="Cargando…" />
-          ) : basicsQuery.isError || !basics ? (
-            <QueryErrorState error={basicsQuery.error} onRetry={() => void basicsQuery.refetch()} />
-          ) : (
-            <>
-              <div
-                role="progressbar"
-                aria-label="Preguntas básicas respondidas"
-                aria-valuemin={0}
-                aria-valuemax={basics.total}
-                aria-valuenow={basics.covered}
-                className="h-2 overflow-hidden rounded-full bg-muted"
-              >
-                <div className="h-full rounded-full bg-primary" style={{ width: `${(basics.covered / basics.total) * 100}%` }} />
-              </div>
-              {missing.length === 0 ? (
-                <p className="rounded-lg bg-success-soft px-3 py-2 text-sm text-success">Todo lo básico está respondido.</p>
-              ) : (
-                <ul className="flex flex-col divide-y">
-                  {(showAllMissing ? missing : missing.slice(0, MISSING_PREVIEW)).map((item) => (
-                    <li key={item.key} className="flex flex-wrap items-center gap-2 py-2">
-                      <span className="min-w-0 flex-1 text-sm">{item.question}</span>
-                      {canWrite ? (
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          className={TOUCH}
-                          onClick={() => openCreate({ title: item.question, basicKey: item.key })}
-                        >
-                          Responder
-                        </Button>
-                      ) : null}
-                    </li>
-                  ))}
-                </ul>
-              )}
-              {missing.length > MISSING_PREVIEW ? (
-                <Button
-                  type="button"
-                  variant="link"
-                  size="sm"
-                  className={`h-auto justify-start p-0 ${TOUCH}`}
-                  aria-expanded={showAllMissing}
-                  onClick={() => setShowAllMissing((value) => !value)}
-                >
-                  {showAllMissing ? "Ver menos" : `Ver las ${missing.length} que faltan`}
-                </Button>
-              ) : null}
-              {covered.length > 0 ? (
-                <div className="flex flex-col gap-2">
-                  <Button
-                    type="button"
-                    variant="link"
-                    size="sm"
-                    className={`h-auto justify-start p-0 ${TOUCH}`}
-                    aria-expanded={showCovered}
-                    onClick={() => setShowCovered((value) => !value)}
-                  >
-                    {showCovered
-                      ? "Ocultar las respondidas"
-                      : covered.length === 1
-                        ? "Ver la respondida"
-                        : `Ver las ${covered.length} respondidas`}
-                  </Button>
-                  {showCovered ? (
-                    <ul className="flex flex-col gap-1.5">
-                      {covered.map((item) => (
-                        <li key={item.key} className="flex items-start gap-2 text-sm">
-                          <span className="mt-0.5 shrink-0 text-success [&>svg]:size-4">
-                            <CircleCheck aria-hidden />
-                          </span>
-                          <span className="min-w-0">
-                            {item.question}{" "}
-                            <span className="text-muted-foreground">
-                              · {item.coveredBy === "datos" ? `Con tus datos: ${item.dataSource ?? "sistema"}` : "Con una respuesta oficial"}
-                            </span>
-                          </span>
-                        </li>
-                      ))}
-                    </ul>
-                  ) : null}
-                </div>
-              ) : null}
-            </>
-          )}
-        </section>
+      <div className="grid min-w-0 items-stretch gap-4 xl:grid-cols-2">
+        <KnowledgeGaps
+          gaps={gaps}
+          isPending={gapsQuery.isPending}
+          error={gapsQuery.isError ? gapsQuery.error : null}
+          onRetry={() => void gapsQuery.refetch()}
+          canWrite={canWrite}
+          savingId={quickSaveMutation.isPending ? (quickSaveMutation.variables?.ids[0] ?? null) : null}
+          blocked={quickSaveMutation.isPending}
+          saveError={mutationErrorMessage(quickSaveMutation.error)}
+          onSave={quickSave}
+          onEdit={openAnswer}
+        />
+        <KnowledgeBasics
+          basics={basics}
+          isPending={basicsQuery.isPending}
+          error={basicsQuery.isError ? basicsQuery.error : null}
+          onRetry={() => void basicsQuery.refetch()}
+          canWrite={canWrite}
+          onAnswerMissing={startBasics}
+        />
       </div>
 
-      <section aria-labelledby="respuestas" className="flex min-w-0 flex-col gap-3">
-        <div className="flex flex-wrap items-end gap-3">
-          <div className="min-w-0 flex-1">
-            <h2 id="respuestas" className="font-heading text-base font-semibold">
-              Respuestas oficiales{entries.length > 0 ? ` · ${entries.length}` : ""}
-            </h2>
-            <p className="text-sm text-muted-foreground">El agente las cita tal cual. Una respuesta vencida deja de usarse sola.</p>
-          </div>
-          {canWrite ? (
-            <Button type="button" className="min-h-11 sm:min-h-9" onClick={() => openCreate()}>
-              Nueva respuesta
-            </Button>
-          ) : null}
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <Field className="w-full sm:w-64">
-            <FieldLabel htmlFor="buscar-respuesta" className="sr-only">
-              Buscar en las respuestas
-            </FieldLabel>
-            <Input
-              id="buscar-respuesta"
-              type="search"
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder="Buscar en las respuestas…"
-            />
-          </Field>
-          <fieldset className="m-0 min-w-0 border-0 p-0 flex flex-wrap gap-1.5" aria-label="Estado de la respuesta">
-            {FILTERS.map((option) => {
-              const total = option.value === "todas" ? entries.length : entries.filter((entry) => entry.state === option.value).length
-              if (option.value !== "todas" && option.value !== "vigente" && total === 0) return null
-              return (
-                <Button
-                  key={option.value}
-                  type="button"
-                  size="sm"
-                  variant={filter === option.value ? "default" : "outline"}
-                  className={`rounded-full ${TOUCH}`}
-                  aria-pressed={filter === option.value}
-                  onClick={() => setFilter(option.value)}
-                >
-                  {option.label} · {total}
-                </Button>
-              )
-            })}
-          </fieldset>
-        </div>
-        {statusMutation.isError ? (
-          <ErrorState
-            title="No pudimos confirmar el cambio de estado"
-            message={mutationErrorMessage(statusMutation.error) ?? undefined}
-            onRetry={() => {
-              void entriesQuery.refetch().then((result) => {
-                if (result.isSuccess) statusMutation.reset()
-              })
-            }}
-            retryLabel="Consultar estado actual"
-          />
-        ) : null}
-        {entriesQuery.isPending ? (
-          <LoadingState message="Cargando respuestas…" />
-        ) : entriesQuery.isError ? (
-          <QueryErrorState error={entriesQuery.error} onRetry={() => void entriesQuery.refetch()} />
-        ) : entries.length === 0 ? (
-          <EmptyState
-            title="Todavía no hay respuestas oficiales"
-            description="Sin ellas, el agente solo puede responder con tus sedes, servicios y agenda."
-            {...(canWrite ? { actionLabel: "Escribir la primera respuesta", onAction: () => openCreate() } : {})}
-          />
-        ) : visible.length === 0 ? (
-          <EmptyState
-            title="Sin resultados"
-            description="Ninguna respuesta coincide con la búsqueda o el estado elegido."
-            actionLabel="Ver todas"
-            onAction={() => {
-              setFilter("todas")
-              setSearch("")
-            }}
-          />
-        ) : (
-          <ul className="flex flex-col gap-3">
-            {visible.map((entry) => (
-              <li key={entry.id} className="elevated flex flex-col gap-2 rounded-xl border bg-card p-5 sm:p-6">
-                <div className="flex flex-wrap items-center gap-2">
-                  <Badge variant={STATE_VARIANT[entry.state]}>{STATE_LABEL[entry.state]}</Badge>
-                  <span className="text-xs text-muted-foreground">
-                    {KIND_LABEL[entry.kind] ?? entry.kind} · {entry.branchName ? `Solo ${entry.branchName}` : "Todas las sedes"} ·{" "}
-                    {validityLabel(entry)}
-                  </span>
-                </div>
-                <h3 className="font-semibold">{entry.title}</h3>
-                <p className="line-clamp-3 whitespace-pre-wrap text-sm text-muted-foreground">{entry.body}</p>
-                {entry.askForms.length > 0 ? (
-                  <p className="text-xs text-muted-foreground">
-                    También la encuentra como: {entry.askForms.slice(0, 3).map((text) => `«${text}»`).join(", ")}
-                    {entry.askForms.length > 3 ? ` y ${entry.askForms.length - 3} más` : ""}
-                  </p>
-                ) : null}
-                <div className="flex flex-wrap gap-2">
-                  {canWrite ? (
-                    <>
-                      <Button type="button" variant="outline" size="sm" className={TOUCH} onClick={() => openEdit(entry)}>
-                        Editar
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        className={TOUCH}
-                        onClick={() => statusMutation.mutate(entry)}
-                        disabled={statusMutation.isPending || isAmbiguousMutationError(statusMutation.error)}
-                      >
-                        {entry.status === "publicada" ? "Despublicar" : "Publicar"}
-                      </Button>
-                    </>
-                  ) : null}
-                  <Button type="button" variant="ghost" size="sm" className={TOUCH} onClick={() => setRevisionsFor(entry)}>
-                    Ver versiones · v{entry.version}
-                  </Button>
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
+      <KnowledgeAnswers
+        entries={entries}
+        isPending={entriesQuery.isPending}
+        error={entriesQuery.isError ? entriesQuery.error : null}
+        onRetry={() => void entriesQuery.refetch()}
+        branches={branches}
+        canWrite={canWrite}
+        canStartBasics={missing.length > 0}
+        activeId={detailId}
+        onOpen={(entry) => {
+          statusMutation.reset()
+          setDetailId(entry.id)
+        }}
+        onCreate={openCreate}
+        onStartBasics={startBasics}
+      />
 
-      <section aria-labelledby="tus-datos" className="elevated flex min-w-0 flex-col gap-3 rounded-xl border bg-card p-5 sm:p-6">
-        <div className="flex items-start gap-3">
-          <span className="mt-0.5 shrink-0 text-primary-soft-foreground [&>svg]:size-5">
-            <Database aria-hidden />
-          </span>
-          <div className="min-w-0">
-            <h2 id="tus-datos" className="font-heading text-base font-semibold">
-              Lo que toma de tus datos
-            </h2>
-            <p className="text-sm text-muted-foreground">No hace falta escribirlo: lo lee en el momento, así que un cambio vale desde la siguiente respuesta.</p>
-          </div>
+      <KnowledgeSources sources={sourcesQuery.data?.data ?? null} />
+
+      {canWrite ? (
+        // En teléfono, la acción principal queda fija al pie.
+        <div className="fixed inset-x-0 bottom-0 z-10 border-t bg-canvas px-4 py-3 sm:hidden">
+          <Button type="button" className="h-12 w-full text-base" onClick={openCreate}>
+            Nueva respuesta
+          </Button>
         </div>
-        <ul className="grid gap-2 sm:grid-cols-3">
-          {[
-            { to: "/services", title: "Servicios y tarifas", detail: "Qué ofreces y cuánto cuesta, con su moneda." },
-            { to: "/branches", title: "Sedes", detail: "Dirección, teléfono y cómo llegar." },
-            { to: "/settings/availability", title: "Disponibilidad", detail: "Los horarios reales para ofrecer citas." },
-          ].map((source) => (
-            <li key={source.to}>
-              <Link to={source.to} className="lift flex min-h-11 flex-col rounded-xl border p-3 hover:bg-accent/60">
-                <span className="text-sm font-semibold text-primary">{source.title}</span>
-                <span className="text-sm text-muted-foreground">{source.detail}</span>
-              </Link>
-            </li>
-          ))}
-        </ul>
-      </section>
+      ) : null}
+
+      <KnowledgeDetail
+        entry={detail}
+        canWrite={canWrite}
+        statusPending={statusMutation.isPending}
+        statusBlocked={isAmbiguousMutationError(statusMutation.error)}
+        statusError={mutationErrorMessage(statusMutation.error)}
+        onCheckStatus={() => {
+          void entriesQuery.refetch().then((result) => {
+            if (result.isSuccess) statusMutation.reset()
+          })
+        }}
+        onClose={() => setDetailId(null)}
+        onEdit={openEdit}
+        onToggleStatus={(entry) => statusMutation.mutate(entry)}
+        onOpenLesson={setLessonId}
+      />
+
+      <LessonDrawer lessonId={lessonId} canWrite={canWrite} onClose={() => setLessonId(null)} />
 
       {canWrite ? (
         <FormDrawer
           open={formOpen}
           onClose={closeForm}
-          title={answering ? "Guardar como respuesta oficial" : editing ? "Editar respuesta" : "Nueva respuesta"}
+          title={
+            answering
+              ? "Guardar como respuesta oficial"
+              : editing
+                ? "Editar respuesta"
+                : basicsRun
+                  ? "Responder lo básico"
+                  : "Nueva respuesta"
+          }
           description={
             answering
               ? "La próxima vez que lo pregunten, el agente responderá con esto."
-              : "El agente la cita tal cual. Escríbela como se la dirías a un paciente."
+              : basicsRun
+                ? runNext
+                  ? `Faltan ${missing.length}. Al guardar pasas a la siguiente.`
+                  : "Es la última que falta."
+                : "El agente la cita tal cual. Escríbela como se la dirías a un paciente."
           }
           onSubmit={submit}
           isSubmitting={saveMutation.isPending}
           isDirty={formDirty}
           error={error}
-          submitLabel={answering ? "Guardar y publicar" : "Guardar"}
+          submitLabel={answering ? "Guardar y publicar" : runNext ? "Guardar y seguir" : "Guardar"}
           cancelLabel="Cancelar"
           submitDisabled={incomplete || isAmbiguousMutationError(saveMutation.error)}
         >
           {answering ? (
             <>
-              <p className="rounded-lg bg-muted/60 px-3 py-2 text-sm">
-                <span className="font-semibold">Preguntaron:</span> «{answering.question}»
-                {answering.count > 1 ? ` · ${answering.count} veces` : ""}
-              </p>
+              <div className="flex flex-col gap-2 rounded-lg bg-muted/60 px-3 py-2 text-sm">
+                <p className="[overflow-wrap:anywhere]">
+                  <span className="font-semibold">Preguntaron:</span> «{answering.question}»
+                  {answering.count > 1 ? ` · ${answering.count} veces` : ""}
+                </p>
+                <div className="flex flex-wrap items-center gap-x-4">
+                  <Link
+                    to="/inbox"
+                    search={{ conversation: answering.conversationId }}
+                    className="inline-flex min-h-11 items-center font-semibold text-primary hover:underline sm:min-h-8"
+                  >
+                    Ver la conversación
+                  </Link>
+                  <Button
+                    type="button"
+                    variant="link"
+                    size="sm"
+                    className={`h-auto p-0 text-muted-foreground ${TOUCH}`}
+                    disabled={discardMutation.isPending || saveMutation.isPending}
+                    onClick={() => discardMutation.mutate(answering)}
+                  >
+                    No hace falta responderla: descartar
+                  </Button>
+                </div>
+                {discardMutation.isError ? (
+                  <p role="alert" className="text-destructive">
+                    {mutationErrorMessage(discardMutation.error) ?? "No pudimos descartar la pregunta."}
+                  </p>
+                ) : null}
+              </div>
               {publishedEntries.length > 0 ? (
                 <Field>
                   <FieldLabel htmlFor="nc-existente">¿Ya tienes una respuesta para esto?</FieldLabel>
@@ -710,8 +444,10 @@ function AgentKnowledgePage() {
                     value={form.existingId || "nueva"}
                     onValueChange={(value) => setForm({ ...form, existingId: !value || value === "nueva" ? "" : value })}
                   >
-                    <SelectTrigger id="nc-existente" aria-label="Respuesta existente">
-                      <SelectValue />
+                    <SelectTrigger id="nc-existente" aria-label="Respuesta existente" className="w-full">
+                      <SelectValue>
+                        {publishedEntries.find((entry) => entry.id === form.existingId)?.title ?? "No, escribir una nueva"}
+                      </SelectValue>
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="nueva">No, escribir una nueva</SelectItem>
@@ -729,19 +465,48 @@ function AgentKnowledgePage() {
               ) : null}
             </>
           ) : null}
+          {basicsRun && missing.length > 1 ? (
+            <Field>
+              <FieldLabel htmlFor="nc-falta">Pregunta básica</FieldLabel>
+              <Select
+                value={form.basicKey}
+                onValueChange={(value) => {
+                  const item = missing.find((candidate) => candidate.key === value)
+                  if (!item) return
+                  // Cambiar de pregunta conserva lo escrito en la respuesta.
+                  setForm({ ...form, title: item.question, basicKey: item.key })
+                  setBaseline({ ...baseline, title: item.question, basicKey: item.key })
+                }}
+              >
+                <SelectTrigger id="nc-falta" aria-label="Pregunta básica" className="w-full">
+                  <SelectValue>{missing.find((item) => item.key === form.basicKey)?.question ?? "Elige una pregunta"}</SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  {missing.map((item) => (
+                    <SelectItem key={item.key} value={item.key}>
+                      {item.question}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <FieldDescription>Puedes responderlas en el orden que quieras.</FieldDescription>
+            </Field>
+          ) : null}
           {usesExisting ? null : (
             <>
-              {creating ? (
+              {creating && !basicsRun ? (
                 <Field>
                   <FieldLabel htmlFor="nc-tipo">Tipo</FieldLabel>
                   <Select value={form.kind} onValueChange={(value) => setForm({ ...form, kind: value ?? "faq" })}>
-                    <SelectTrigger id="nc-tipo" aria-label="Tipo">
-                      <SelectValue />
+                    <SelectTrigger id="nc-tipo" aria-label="Tipo" className="w-full">
+                      <SelectValue>{KIND_LABEL[form.kind] ?? form.kind}</SelectValue>
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="faq">Pregunta frecuente</SelectItem>
-                      <SelectItem value="info_sede">Información de sede</SelectItem>
-                      <SelectItem value="politica">Política</SelectItem>
+                      {Object.entries(KIND_LABEL).map(([value, label]) => (
+                        <SelectItem key={value} value={value}>
+                          {label}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </Field>
@@ -751,6 +516,7 @@ function AgentKnowledgePage() {
                 <Input
                   id="nc-titulo"
                   value={form.title}
+                  maxLength={TITLE_CHARS}
                   onChange={(event) => setForm({ ...form, title: event.target.value })}
                   placeholder="¿Atienden sin cita?"
                 />
@@ -786,12 +552,16 @@ function AgentKnowledgePage() {
                   value={form.branchId || "todas"}
                   onValueChange={(value) => setForm({ ...form, branchId: !value || value === "todas" ? "" : value })}
                 >
-                  <SelectTrigger id="nc-sede" aria-label="Sede">
-                    <SelectValue />
+                  <SelectTrigger id="nc-sede" aria-label="Sede" className="w-full">
+                    <SelectValue>
+                      {form.branchId
+                        ? `Solo ${branchOptions.find((branch) => branch.id === form.branchId)?.name ?? "una sede"}`
+                        : "Todas las sedes"}
+                    </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="todas">Todas las sedes</SelectItem>
-                    {(branchesQuery.data?.data ?? []).map((branch) => (
+                    {branchOptions.map((branch) => (
                       <SelectItem key={branch.id} value={branch.id}>
                         Solo {branch.name}
                       </SelectItem>
@@ -823,25 +593,29 @@ function AgentKnowledgePage() {
               <p className="-mt-2 text-sm text-muted-foreground">
                 Déjalas vacías si vale siempre. Pasada la fecha, el agente deja de usarla sin que hagas nada.
               </p>
-              <Field>
-                <FieldLabel htmlFor="nc-basica">Pregunta básica que cubre</FieldLabel>
-                <Select
-                  value={form.basicKey || "ninguna"}
-                  onValueChange={(value) => setForm({ ...form, basicKey: !value || value === "ninguna" ? "" : value })}
-                >
-                  <SelectTrigger id="nc-basica" aria-label="Pregunta básica">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="ninguna">Ninguna</SelectItem>
-                    {(basics?.items ?? []).map((item) => (
-                      <SelectItem key={item.key} value={item.key}>
-                        {item.question}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </Field>
+              {basicsRun ? null : (
+                <Field>
+                  <FieldLabel htmlFor="nc-basica">Pregunta básica que cubre</FieldLabel>
+                  <Select
+                    value={form.basicKey || "ninguna"}
+                    onValueChange={(value) => setForm({ ...form, basicKey: !value || value === "ninguna" ? "" : value })}
+                  >
+                    <SelectTrigger id="nc-basica" aria-label="Pregunta básica" className="w-full">
+                      <SelectValue>
+                        {(basics?.items ?? []).find((item) => item.key === form.basicKey)?.question ?? "Ninguna"}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="ninguna">Ninguna</SelectItem>
+                      {(basics?.items ?? []).map((item) => (
+                        <SelectItem key={item.key} value={item.key}>
+                          {item.question}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </Field>
+              )}
               {creating ? (
                 <Field>
                   <label htmlFor="nc-publicar" className="flex min-h-11 cursor-pointer items-center gap-2 text-sm">
@@ -859,32 +633,6 @@ function AgentKnowledgePage() {
           )}
         </FormDrawer>
       ) : null}
-
-      <DetailDrawer
-        open={revisionsFor !== null}
-        title="Versiones"
-        description={revisionsFor?.title}
-        onClose={() => setRevisionsFor(null)}
-      >
-        {revisionsQuery.isPending ? (
-          <LoadingState message="Cargando versiones…" />
-        ) : revisionsQuery.isError ? (
-          <QueryErrorState error={revisionsQuery.error} onRetry={() => void revisionsQuery.refetch()} />
-        ) : (
-          <ul className="flex flex-col gap-4">
-            {(revisionsQuery.data?.data ?? []).map((revision) => (
-              <li key={revision.version} className="flex flex-col gap-1 text-sm">
-                <p>
-                  <span className="font-semibold">Versión {revision.version}</span>{" "}
-                  <span className="text-muted-foreground">· {new Date(revision.createdAt).toLocaleString("es-PE")}</span>
-                </p>
-                <p className="font-medium">{revision.title}</p>
-                <p className="whitespace-pre-wrap text-muted-foreground">{revision.body}</p>
-              </li>
-            ))}
-          </ul>
-        )}
-      </DetailDrawer>
     </PageShell>
   )
 }

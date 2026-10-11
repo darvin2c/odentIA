@@ -65,10 +65,18 @@ export interface ReviewItem {
   createdAt: string
 }
 
+/** De dónde sale una lección: una corrección, un borrador cambiado al aprobar o una respuesta que se dio por buena. */
+export type LessonOrigin = "correccion" | "borrador_editado" | "respuesta_buena"
+
 export interface LessonItem {
   id: string
   kind: LessonKind
   scope: string
+  /** El agente cuya respuesta la originó; una respuesta oficial es de toda la clínica (`scope`), pero nace de uno. */
+  agent: string
+  origin: LessonOrigin
+  /** Quien recibió la respuesta que la originó. */
+  contactName: string | null
   title: string
   question: string
   body: string
@@ -378,28 +386,52 @@ async function toLessonItems(tx: Db, orgId: string, rows: Array<typeof agentLess
         .where(and(eq(agentKnowledgeEntry.organizationId, orgId), inArray(agentKnowledgeEntry.id, entryIds)))
     : []
   const entryById = new Map(entries.map((entry) => [entry.id, { title: entry.title, body: entry.body }]))
-  return rows.map((row) => ({
-    id: row.id,
-    kind: row.kind,
-    scope: row.scope,
-    title: row.title,
-    question: row.question,
-    body: row.body,
-    failure: row.failure,
-    originalReply: row.originalReply,
-    status: row.status,
-    conversationId: row.conversationId,
-    knowledgeEntryId: row.knowledgeEntryId,
-    knowledgeEntry: row.knowledgeEntryId ? (entryById.get(row.knowledgeEntryId) ?? null) : null,
-    previousBody: row.previousBody,
-    uses: row.uses,
-    lastUsedAt: row.lastUsedAt?.toISOString() ?? null,
-    proposedByName: names.get(row.proposedBy) ?? null,
-    approvedByName: row.approvedBy ? (names.get(row.approvedBy) ?? null) : null,
-    approvedAt: row.approvedAt?.toISOString() ?? null,
-    withdrawnAt: row.withdrawnAt?.toISOString() ?? null,
-    createdAt: row.createdAt.toISOString(),
-  }))
+  // De dónde sale: la respuesta revisada dice de qué agente era y si fue un borrador cambiado al aprobar.
+  const reviewIds = rows.map((row) => row.reviewItemId).filter((id): id is string => id !== null)
+  const reviews = reviewIds.length
+    ? await tx
+        .select({ id: agentReviewItem.id, agent: agentReviewItem.agent, reason: agentReviewItem.reason })
+        .from(agentReviewItem)
+        .where(and(eq(agentReviewItem.organizationId, orgId), inArray(agentReviewItem.id, reviewIds)))
+    : []
+  const reviewById = new Map(reviews.map((review) => [review.id, review]))
+  const conversationIds = [...new Set(rows.map((row) => row.conversationId).filter((id): id is string => id !== null))]
+  const contacts = conversationIds.length
+    ? await tx
+        .select({ id: conversation.id, name: contact.displayName })
+        .from(conversation)
+        .leftJoin(contact, eq(contact.id, conversation.contactId))
+        .where(and(eq(conversation.organizationId, orgId), inArray(conversation.id, conversationIds)))
+    : []
+  const contactByConversation = new Map(contacts.map((row) => [row.id, row.name]))
+  return rows.map((row) => {
+    const review = row.reviewItemId ? reviewById.get(row.reviewItemId) : undefined
+    return {
+      id: row.id,
+      kind: row.kind,
+      scope: row.scope,
+      agent: row.scope !== "clinica" ? row.scope : (review?.agent ?? "recepcion"),
+      origin: (review?.reason === "editada" ? "borrador_editado" : row.failure === null ? "respuesta_buena" : "correccion") as LessonOrigin,
+      contactName: row.conversationId ? (contactByConversation.get(row.conversationId) ?? null) : null,
+      title: row.title,
+      question: row.question,
+      body: row.body,
+      failure: row.failure,
+      originalReply: row.originalReply,
+      status: row.status,
+      conversationId: row.conversationId,
+      knowledgeEntryId: row.knowledgeEntryId,
+      knowledgeEntry: row.knowledgeEntryId ? (entryById.get(row.knowledgeEntryId) ?? null) : null,
+      previousBody: row.previousBody,
+      uses: row.uses,
+      lastUsedAt: row.lastUsedAt?.toISOString() ?? null,
+      proposedByName: names.get(row.proposedBy) ?? null,
+      approvedByName: row.approvedBy ? (names.get(row.approvedBy) ?? null) : null,
+      approvedAt: row.approvedAt?.toISOString() ?? null,
+      withdrawnAt: row.withdrawnAt?.toISOString() ?? null,
+      createdAt: row.createdAt.toISOString(),
+    }
+  })
 }
 
 async function lockLesson(tx: Db, orgId: string, id: string): Promise<typeof agentLesson.$inferSelect> {

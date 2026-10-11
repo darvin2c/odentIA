@@ -4,6 +4,7 @@ import {
   createKnowledgeEntry,
   discardKnowledgeGaps,
   getKnowledgeBasics,
+  getKnowledgeDataSources,
   getKnowledgeEntry,
   listKnowledgeEntries,
   listKnowledgeGaps,
@@ -76,6 +77,13 @@ export function createAgentKnowledgeRoute(deps: CrmDeps) {
     const { orgId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "agent.read")) return c.json(errorBody(c, "FORBIDDEN", "Sin acceso al agente"), 403)
     return runService(c, 200, () => withOrgContext(deps.db, orgId, (tx) => getKnowledgeBasics(tx, orgId)))
+  })
+
+  /** Cuánto hay en el sistema de lo que el agente lee en el momento (servicios con tarifa, sedes). */
+  app.get("/sources", async (c) => {
+    const { orgId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "agent.read")) return c.json(errorBody(c, "FORBIDDEN", "Sin acceso al agente"), 403)
+    return runService(c, 200, () => withOrgContext(deps.db, orgId, (tx) => getKnowledgeDataSources(tx, orgId)))
   })
 
   /** Lo que el agente no supo responder, agrupado, con lo que respondió el equipo. */

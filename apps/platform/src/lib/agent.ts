@@ -342,10 +342,18 @@ export function lessonScopeLabel(scope: string): string {
   return scope
 }
 
+/** De dónde sale una lección: una corrección, un borrador cambiado al aprobar o una respuesta que se dio por buena. */
+export type LessonOrigin = "correccion" | "borrador_editado" | "respuesta_buena"
+
 export interface LessonItem {
   id: string
   kind: LessonKind
   scope: string
+  /** El agente cuya respuesta la originó. */
+  agent: string
+  origin: LessonOrigin
+  /** Quien recibió la respuesta que la originó. */
+  contactName: string | null
   title: string
   question: string
   body: string
@@ -393,4 +401,62 @@ export function impactSummary(impact: LessonImpact): string {
   if (impact.total === 1) return touched === 0 ? "Tu caso de prueba no toca este tema: queda igual." : "Tu caso de prueba toca este tema y puede cambiar."
   if (touched === 0) return `Ninguno de tus ${impact.total} casos de prueba toca este tema: quedan igual.`
   return `De tus ${impact.total} casos de prueba, ${touched} ${touched === 1 ? "toca este tema y puede cambiar" : "tocan este tema y pueden cambiar"}; ${rest} ${rest === 1 ? "queda igual" : "quedan igual"}.`
+}
+
+const AGENT_NAME: Record<string, string> = {
+  recepcion: "Recepción",
+  asistente_clinico: "Asistente clínico",
+  clinico: "Asistente clínico",
+  asesor: "Asesor",
+  ayuda: "Ayuda",
+}
+
+/** Nombre del agente para la clínica; un identificador desconocido se muestra tal cual. */
+export function agentName(agent: string): string {
+  return AGENT_NAME[agent] ?? agent
+}
+
+/** Alcance de una lección como etiqueta corta: «Toda la clínica» o el agente. */
+export function lessonScopeChip(scope: string): string {
+  return scope === "clinica" ? "Toda la clínica" : agentName(scope)
+}
+
+/** Alcance de una lección como frase: «Para toda la clínica» o «Solo para Recepción». */
+export function lessonScopeFor(scope: string): string {
+  return scope === "clinica" ? "Para toda la clínica" : `Solo para ${agentName(scope)}`
+}
+
+const UNUSED_AFTER_MS = 30 * 86_400_000
+
+/**
+ * Cuánto se usa una lección activa. «Sin usar en 30 días» solo se dice cuando
+ * las fechas lo respaldan: su último uso —o su aprobación, si nunca se usó—
+ * tiene 30 días o más.
+ */
+export function lessonUsage(lesson: Pick<LessonItem, "kind" | "uses" | "lastUsedAt" | "approvedAt">, now = Date.now()): { text: string; stale: boolean } {
+  const since = lesson.lastUsedAt ?? lesson.approvedAt
+  if (since && now - Date.parse(since) >= UNUSED_AFTER_MS) return { text: "Sin usar en 30 días", stale: true }
+  if (lesson.uses === 0) return { text: "Sin usar todavía", stale: false }
+  const times = `${lesson.uses} ${lesson.uses === 1 ? "vez" : "veces"}`
+  return { text: lesson.kind === "regla" ? `Aplicada ${times}` : lesson.kind === "ejemplo" ? `Usado ${times}` : `Usada ${times}`, stale: false }
+}
+
+/**
+ * Resultado de probar una lección, contado. Solo se vuelven a responder las
+ * preguntas que tocan su tema; los demás casos de prueba no reciben nada
+ * distinto y cuentan como iguales.
+ */
+export function previewCounts(preview: LessonPreview): { total: number; same: number; changed: number; answered: number } {
+  const changed = preview.cases.filter((item) => !item.same).length
+  const total = preview.cases.length + Math.max(0, preview.total - preview.touched)
+  return { total, same: total - changed, changed, answered: preview.cases.length }
+}
+
+/** «22 responden igual y 2 cambian.» */
+export function previewSummary(counts: { same: number; changed: number }): string {
+  const same = `${counts.same} ${counts.same === 1 ? "responde igual" : "responden igual"}`
+  const changed = `${counts.changed} ${counts.changed === 1 ? "cambia" : "cambian"}`
+  if (counts.changed === 0) return counts.same === 1 ? "Responde igual." : `Las ${counts.same} responden igual.`
+  if (counts.same === 0) return counts.changed === 1 ? "Cambia." : `Las ${counts.changed} cambian.`
+  return `${same} y ${changed}.`
 }

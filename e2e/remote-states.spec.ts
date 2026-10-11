@@ -77,6 +77,8 @@ test("conocimiento: error de consulta y de versiones se recuperan sin inventar u
     if (failVersions) return route.abort("failed")
     await route.continue()
   })
+  // Las versiones se piden desde el detalle de la respuesta.
+  await page.getByRole("listitem").filter({ hasText: "Horario de atención" }).getByRole("button").first().click()
   await page.getByRole("button", { name: /^Ver versiones/ }).click()
   await expect(page.getByRole("button", { name: "Reintentar", exact: true })).toBeVisible()
   await expect(page.getByText("Sin versiones", { exact: true })).toBeHidden()

@@ -1,14 +1,14 @@
 import type { Db } from "@odentia/db"
-import { appointment } from "@odentia/db/schema/agenda"
-import { agentPersonFact } from "@odentia/db/schema/agent"
+import { appointment, OCCUPYING_STATUSES } from "@odentia/db/schema/agenda"
+import { agentHandoff, agentPersonFact } from "@odentia/db/schema/agent"
 import { user } from "@odentia/db/schema/auth"
 import { channelConnection, conversation } from "@odentia/db/schema/crm"
 import { auditEvent, branch } from "@odentia/db/schema/org"
-import { and, asc, desc, eq, inArray, ne } from "drizzle-orm"
+import { and, asc, desc, eq, gte, inArray, isNotNull, lt, ne, or } from "drizzle-orm"
 import { requireContact } from "./contacts.js"
 import { notFound, ServiceError, validation } from "./errors.js"
 import { normalizeForSearch } from "./knowledge.js"
-import type { OrgLocale } from "./locale.js"
+import { getOrgLocale, type OrgLocale } from "./locale.js"
 import { listPatientsByContact } from "./patients.js"
 
 /* ---------- Memoria de la persona: lo que el agente recuerda entre conversaciones ---------- */
@@ -49,12 +49,38 @@ export interface PersonFact {
   createdAt: string
 }
 
+/**
+ * La última vez que se supo de la persona, con lo que el sistema ya guarda y
+ * sin modelo: cuándo escribió, su cita y si su caso pasó a alguien del equipo.
+ * Nada clínico: de la cita solo cuándo, dónde y con quién, nunca el servicio
+ * ni el motivo.
+ */
+export interface PersonLastTime {
+  /** Zona y formato de la organización, para escribir las fechas. */
+  timezone: string
+  locale: string
+  /** Su último mensaje, en cualquiera de sus conversaciones. */
+  wrote: { at: string; channel: string } | null
+  /** Su próxima cita en pie o, si no tiene, la última que ya pasó. Nulo también si quien lee no ve la agenda. */
+  appointment: {
+    startsAt: string
+    status: string
+    upcoming: boolean
+    branchName: string
+    dentistName: string | null
+  } | null
+  /** La última vez que su caso pasó a una persona. El motivo se omite si parece información de salud. */
+  handoff: { at: string; reason: string | null } | null
+}
+
 export interface PersonMemory {
   contactId: string
   /** Datos guardados: los únicos que se pueden corregir o quitar aquí. */
   facts: PersonFact[]
-  /** Lo que sale de datos que ya están en el sistema; se cambia en su fuente. */
-  derived: Array<{ label: string; text: string; origin: string }>
+  /** Lo que sale de datos que ya están en el sistema; se cambia en su fuente (`managedIn`). */
+  derived: Array<{ label: string; text: string; origin: string; managedIn: "ficha" | "agenda" }>
+  /** Solo cuando se pide (la pantalla); el agente no lo recibe por esta vía. */
+  lastTime?: PersonLastTime
 }
 
 function cleanFact(value: unknown): string {
@@ -222,8 +248,81 @@ const RELATIONSHIP_LABEL: Record<string, string> = {
   hija: "su madre o padre",
 }
 
-/** Lo que el agente recuerda de una persona: sus datos guardados y lo que sale de vínculos y citas. */
-export async function getPersonMemory(tx: Db, orgId: string, contactId: string): Promise<PersonMemory> {
+/** Ver `PersonLastTime`. `ownPatientId` es la ficha de la propia persona, si la tiene y quien lee ve la agenda. */
+async function getPersonLastTime(tx: Db, orgId: string, contactId: string, ownPatientId: string | null): Promise<PersonLastTime> {
+  const zone = await getOrgLocale(tx, orgId)
+  const [thread] = await tx
+    .select({ at: conversation.lastInboundAt, channel: channelConnection.channel })
+    .from(conversation)
+    .innerJoin(channelConnection, eq(channelConnection.id, conversation.channelConnectionId))
+    .where(and(eq(conversation.organizationId, orgId), eq(conversation.contactId, contactId), isNotNull(conversation.lastInboundAt)))
+    .orderBy(desc(conversation.lastInboundAt))
+    .limit(1)
+
+  let visit: PersonLastTime["appointment"] = null
+  if (ownPatientId) {
+    const now = new Date()
+    const fields = { startsAt: appointment.startsAt, status: appointment.status, branchName: branch.name, dentistName: user.name }
+    const mine = and(eq(appointment.organizationId, orgId), eq(appointment.patientId, ownPatientId))
+    const [next] = await tx
+      .select(fields)
+      .from(appointment)
+      .innerJoin(branch, eq(branch.id, appointment.branchId))
+      .leftJoin(user, eq(user.id, appointment.dentistUserId))
+      .where(and(mine, inArray(appointment.status, [...OCCUPYING_STATUSES]), gte(appointment.startsAt, now)))
+      .orderBy(asc(appointment.startsAt))
+      .limit(1)
+    const [row] = next
+      ? [next]
+      : await tx
+          .select(fields)
+          .from(appointment)
+          .innerJoin(branch, eq(branch.id, appointment.branchId))
+          .leftJoin(user, eq(user.id, appointment.dentistUserId))
+          .where(and(mine, ne(appointment.status, "cancelada"), lt(appointment.startsAt, now)))
+          .orderBy(desc(appointment.startsAt))
+          .limit(1)
+    if (row) {
+      visit = {
+        startsAt: row.startsAt.toISOString(),
+        status: row.status,
+        upcoming: next !== undefined,
+        branchName: row.branchName,
+        dentistName: row.dentistName,
+      }
+    }
+  }
+
+  const [passed] = await tx
+    .select({ at: agentHandoff.createdAt, reason: agentHandoff.reason })
+    .from(agentHandoff)
+    .leftJoin(conversation, eq(conversation.id, agentHandoff.conversationId))
+    .where(and(eq(agentHandoff.organizationId, orgId), or(eq(agentHandoff.contactId, contactId), eq(conversation.contactId, contactId))))
+    .orderBy(desc(agentHandoff.createdAt))
+    .limit(1)
+
+  return {
+    timezone: zone.timezone,
+    locale: zone.locale,
+    wrote: thread?.at ? { at: thread.at.toISOString(), channel: thread.channel } : null,
+    appointment: visit,
+    handoff: passed
+      ? { at: passed.at.toISOString(), reason: passed.reason.trim() && !looksClinical(passed.reason) ? passed.reason.trim() : null }
+      : null,
+  }
+}
+
+/**
+ * Lo que el agente recuerda de una persona: sus datos guardados y lo que sale
+ * de vínculos y citas. La pantalla pide además «la última vez»
+ * (`options.lastTime`), diciendo si quien lee ve la agenda.
+ */
+export async function getPersonMemory(
+  tx: Db,
+  orgId: string,
+  contactId: string,
+  options: { lastTime?: { appointments: boolean } } = {},
+): Promise<PersonMemory> {
   await requireContact(tx, orgId, contactId)
   const facts = await listPersonFacts(tx, orgId, contactId)
   const derived: PersonMemory["derived"] = []
@@ -235,6 +334,7 @@ export async function getPersonMemory(tx: Db, orgId: string, contactId: string):
       label: "Por quién escribe",
       text: `También escribe por ${link.displayName}${whom ? `, ${whom}` : ""}`,
       origin: "Vínculo registrado por tu equipo",
+      managedIn: "ficha",
     })
   }
   const own = links.find((link) => link.relationship === "self")
@@ -258,10 +358,13 @@ export async function getPersonMemory(tx: Db, orgId: string, contactId: string):
         label: "Sede",
         text: `Suele atenderse en la sede ${first.branchName}`,
         origin: `Por sus ${USUAL_BRANCH_VISITS} últimas citas`,
+        managedIn: "agenda",
       })
     }
   }
-  return { contactId, facts, derived }
+  if (!options.lastTime) return { contactId, facts, derived }
+  const lastTime = await getPersonLastTime(tx, orgId, contactId, options.lastTime.appointments && own?.isActive ? own.id : null)
+  return { contactId, facts, derived, lastTime }
 }
 
 const CHANNEL_NAME: Record<string, string> = {
