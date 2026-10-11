@@ -10,7 +10,6 @@ export async function invalidateAppointmentQueries(client: QueryClient): Promise
       "agenda-availability",
       "agenda-resources",
       "agenda-search",
-      "agenda-slots",
       "follow-up-appointments",
       "follow-ups",
       "patient-appointments",
@@ -61,22 +60,6 @@ export interface AgendaServiceOption {
   id: string
   name: string
   durationMin: number | null
-}
-
-export interface AvailableSlot {
-  startsAt: string
-  endsAt: string
-  dentistUserId: string
-  dentistName: string
-  chairId: string | null
-  chairName: string | null
-  timeZone: string
-}
-
-export interface AvailableSlotsResult {
-  slots: AvailableSlot[]
-  truncated: boolean
-  timeZone: string
 }
 
 export interface ScheduleRule {

@@ -262,10 +262,11 @@ test("paciente: control indicado, programado y completado", async ({ owner }) =>
   // Programar reserva un hueco real del profesional y lo vincula al control.
   await page.getByRole("button", { name: "Programar control" }).first().click()
   const schedule = surface(page, { name: "Programar control" })
-  const slot = schedule.getByRole("button", { name: "Seleccionar" }).first()
-  await expect(slot).toBeVisible({ timeout: 15_000 })
-  await slot.click()
-  await schedule.getByRole("button", { name: "Reservar y vincular control" }).click()
+  // El mismo «cuándo» de Nueva cita: el bloque ya viene puesto en el primer hueco.
+  await expect(
+    schedule.getByRole("button", { name: /^De \d\d:\d\d a \d\d:\d\d con / }),
+  ).toBeVisible({ timeout: 15_000 })
+  await schedule.getByRole("button", { name: /^Reservar (hoy|mañana|el )/ }).click()
   await expect(page.getByText(/Cita reservada/)).toBeVisible({ timeout: 15_000 })
   await page.getByRole("button", { name: "Completar control" }).click()
   const complete = surface(page, { name: "Completar control" })
@@ -541,10 +542,11 @@ test("recepción coordina el control sin leer la ficha clínica", async ({ owner
   // Reserva un hueco real: misma operación que la vía clínica.
   await page.getByRole("button", { name: "Reservar control" }).click()
   const dialog = surface(page, { name: "Programar control" })
-  const slot = dialog.getByRole("button", { name: "Seleccionar" }).first()
-  await expect(slot).toBeVisible({ timeout: 15_000 })
-  await slot.click()
-  await dialog.getByRole("button", { name: "Reservar y vincular control" }).click()
+  // El mismo «cuándo» de Nueva cita: el bloque ya viene puesto en el primer hueco.
+  await expect(
+    dialog.getByRole("button", { name: /^De \d\d:\d\d a \d\d:\d\d con / }),
+  ).toBeVisible({ timeout: 15_000 })
+  await dialog.getByRole("button", { name: /^Reservar (hoy|mañana|el )/ }).click()
   await expect(page.getByText("Con cita", { exact: true })).toBeVisible({ timeout: 15_000 })
   await page.screenshot({ path: test.info().outputPath("coordinacion-recepcion.png"), fullPage: true })
   await openSection(page, "Citas")
