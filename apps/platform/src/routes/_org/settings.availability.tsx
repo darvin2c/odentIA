@@ -1,11 +1,11 @@
 import { createFileRoute } from '@tanstack/react-router'
-import { Button, FieldLabel, Input, toast } from "@odentia/ui"
+import { Button, Input, toast } from "@odentia/ui"
 import {
-  DatePickerButton,
-  FormDrawer,
+  dayMinutesIn,
   formatDateLong,
-  minutesToInstant,
+  hourLabel,
   PageHeader,
+  zonedDateOf,
 } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import * as React from "react"
@@ -17,6 +17,7 @@ import {
   type ProfessionalSchedule,
   type ScheduleBlock,
 } from "../../lib/agenda"
+import { AbsenceForm } from "../../components/agenda/absence-form"
 import { ChairForm } from "../../components/agenda/chair-form"
 import { BranchSwitcher } from "../../components/branch-switcher"
 import { ChoiceSelect } from "../../components/ui/choice-select"
@@ -121,7 +122,7 @@ function AvailabilityPage() {
   })
 
   const weekFrom = React.useMemo(() => new Date().toISOString(), [])
-  const weekTo = React.useMemo(() => new Date(Date.now() + 14 * 86_400_000).toISOString(), [])
+  const weekTo = React.useMemo(() => new Date(Date.now() + 60 * 86_400_000).toISOString(), [])
   const blocksQuery = useQuery({
     queryKey: ["schedule-blocks", resources?.branchId],
     enabled: Boolean(resources?.branchId),
@@ -301,16 +302,18 @@ function AvailabilityPage() {
 
           <section className="grid gap-3 rounded-xl border bg-background p-3 sm:p-4">
             <div className="flex flex-wrap items-center gap-2">
-              <h2 className="font-medium">Bloqueos y ausencias</h2>
-              <span className="text-xs text-muted-foreground">Próximos 14 días.</span>
+              <h2 className="font-medium">Ausencias y bloqueos</h2>
+              <span className="text-xs text-muted-foreground">
+                Vacaciones, permisos, feriados y cierres de los próximos 60 días.
+              </span>
               {canConfigure && (
                 <Button variant="outline" size="sm" onClick={() => setBlockForm(true)}>
-                  Nuevo bloqueo
+                  Nueva ausencia
                 </Button>
               )}
             </div>
             {(blocksQuery.data?.data ?? []).length === 0 ? (
-              <p className="text-sm text-muted-foreground">Sin bloqueos en el período.</p>
+              <p className="text-sm text-muted-foreground">Sin ausencias en el período.</p>
             ) : (
               <ul className="grid gap-2">
                 {(blocksQuery.data?.data ?? []).map((block) => (
@@ -340,9 +343,10 @@ function AvailabilityPage() {
         />
       )}
       {blockForm && resources && (
-        <BlockEditor
+        <AbsenceForm
           branchId={resources.branchId}
           timeZone={resources.timeZone}
+          today={zonedDateOf(new Date().toISOString(), resources.timeZone)}
           professionals={resources.professionals}
           chairs={resources.chairs}
           onClose={() => setBlockForm(false)}
@@ -354,6 +358,24 @@ function AvailabilityPage() {
       )}
     </div>
   )
+}
+
+/** «Del lunes 12 de octubre al viernes 16 de octubre» o «Lunes 12 de octubre, de 12:00 a 14:00». */
+function blockWhen(block: ScheduleBlock, timeZone: string): string {
+  const first = zonedDateOf(block.startsAt, timeZone)
+  const last = zonedDateOf(new Date(Date.parse(block.endsAt) - 1).toISOString(), timeZone)
+  const startMinutes = dayMinutesIn(block.startsAt, timeZone)
+  const endMinutes = dayMinutesIn(block.endsAt, timeZone)
+  const wholeDays = startMinutes === 0 && endMinutes === 0
+  if (first === last) {
+    return wholeDays
+      ? `${formatDateLong(first)}, todo el día`
+      : `${formatDateLong(first)}, de ${hourLabel(startMinutes)} a ${hourLabel(endMinutes)}`
+  }
+  const lower = (text: string) => text.toLocaleLowerCase("es")
+  return wholeDays
+    ? `Del ${lower(formatDateLong(first))} al ${lower(formatDateLong(last))}`
+    : `Del ${lower(formatDateLong(first))} ${hourLabel(startMinutes)} al ${lower(formatDateLong(last))} ${hourLabel(endMinutes)}`
 }
 
 function BlockRow({
@@ -373,16 +395,15 @@ function BlockRow({
     onSuccess: async () => onDeleted(),
     onError: (cause) => setError(errorMessage(cause)),
   })
-  const scope = block.dentistName ?? (block.chairId ? "Sillón" : "Toda la sede")
+  const scope = block.dentistName ?? (block.chairId ? "Un sillón" : "Toda la sede")
   return (
-    <li className="flex flex-wrap items-center gap-2 rounded-lg border p-2 text-sm">
-      <span className="font-medium">{block.kind === "ausencia" ? "Ausencia" : "Bloqueo"}</span>
-      <span className="text-muted-foreground">{scope}</span>
-      <span>
-        {new Date(block.startsAt).toLocaleString("es-PE", { timeZone })} →{" "}
-        {new Date(block.endsAt).toLocaleString("es-PE", { timeZone })}
+    <li className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border p-2 text-sm">
+      <span className="font-medium">
+        {block.reason ?? (block.kind === "ausencia" ? "Ausencia" : "Bloqueo")}
       </span>
-      {block.reason && <span className="text-muted-foreground">· {block.reason}</span>}
+      <span>{scope}</span>
+      <span className="text-muted-foreground">{blockWhen(block, timeZone)}</span>
+      <span className="flex-1" />
       {canConfigure && (
         <Button variant="ghost" size="sm" onClick={() => deleteMutation.mutate()}>
           Eliminar
@@ -390,161 +411,5 @@ function BlockRow({
       )}
       {error && <span className="text-xs text-destructive">{error}</span>}
     </li>
-  )
-}
-
-function BlockEditor({
-  branchId,
-  timeZone,
-  professionals,
-  chairs,
-  onClose,
-  onSaved,
-}: {
-  branchId: string
-  timeZone: string
-  professionals: { id: string; label: string }[]
-  chairs: { id: string; label: string }[]
-  onClose: () => void
-  onSaved: () => Promise<void>
-}) {
-  const [dentistUserId, setDentistUserId] = React.useState("")
-  const [chairId, setChairId] = React.useState("")
-  const [kind, setKind] = React.useState("bloqueo")
-  const [reason, setReason] = React.useState("")
-  const [date, setDate] = React.useState(new Date().toISOString().slice(0, 10))
-  const [from, setFrom] = React.useState("12:00")
-  const [to, setTo] = React.useState("14:00")
-  const [error, setError] = React.useState("")
-  const save = useMutation({
-    mutationFn: async () => {
-      const parseMinutes = (label: string) => {
-        const [hours = 0, minutes = 0] = label.split(":").map(Number)
-        return hours * 60 + minutes
-      }
-      const startsAt = minutesToInstant(date, parseMinutes(from), timeZone)
-      const endsAt = minutesToInstant(date, parseMinutes(to), timeZone)
-      if (endsAt <= startsAt) throw new Error("El fin debe ser posterior al inicio.")
-      await apiFetch("/api/agenda/blocks", {
-        method: "POST",
-        body: JSON.stringify({
-          branchId,
-          dentistUserId: dentistUserId || null,
-          chairId: chairId || null,
-          kind,
-          reason: reason.trim() || undefined,
-          startsAt,
-          endsAt,
-        }),
-      })
-    },
-    onSuccess: async () => {
-      toast.success("Bloqueo creado.")
-      await onSaved()
-    },
-    onError: (cause) => setError(errorMessage(cause)),
-  })
-  return (
-    <FormDrawer
-      open
-      title="Nuevo bloqueo"
-      description="Cierra la agenda de un profesional, un sillón o toda la sede."
-      onClose={onClose}
-      onSubmit={(event) => {
-        event.preventDefault()
-        setError("")
-        save.mutate()
-      }}
-      isSubmitting={save.isPending}
-      isDirty
-      error={error || null}
-      submitLabel="Crear bloqueo"
-    >
-      <div className="grid gap-4">
-        <div className="grid gap-2">
-          <FieldLabel htmlFor="bloqueo-profesional">Profesional (vacío = toda la sede)</FieldLabel>
-          <ChoiceSelect
-            id="bloqueo-profesional"
-            value={dentistUserId}
-            onChange={(event) => setDentistUserId(event.target.value)}
-          >
-            <option value="">Toda la sede</option>
-            {professionals.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.label}
-              </option>
-            ))}
-          </ChoiceSelect>
-        </div>
-        <div className="grid gap-2">
-          <FieldLabel htmlFor="bloqueo-sillon">Sillón (vacío = todos)</FieldLabel>
-          <ChoiceSelect
-            id="bloqueo-sillon"
-            value={chairId}
-            onChange={(event) => setChairId(event.target.value)}
-          >
-            <option value="">Todos</option>
-            {chairs.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.label}
-              </option>
-            ))}
-          </ChoiceSelect>
-        </div>
-        <div className="grid gap-2">
-          <FieldLabel htmlFor="bloqueo-tipo">Tipo</FieldLabel>
-          <ChoiceSelect
-            id="bloqueo-tipo"
-            value={kind}
-            onChange={(event) => setKind(event.target.value)}
-          >
-            <option value="bloqueo">Bloqueo</option>
-            <option value="ausencia">Ausencia</option>
-          </ChoiceSelect>
-        </div>
-        <div className="grid grid-cols-2 gap-3">
-          <div className="col-span-2 grid gap-2">
-            <FieldLabel htmlFor="bloqueo-fecha">Fecha</FieldLabel>
-            <DatePickerButton
-              id="bloqueo-fecha"
-              className="justify-start font-normal"
-              value={date}
-              onChange={setDate}
-            >
-              {formatDateLong(date)}
-            </DatePickerButton>
-          </div>
-          <div className="grid gap-2">
-            <FieldLabel htmlFor="bloqueo-inicio">Inicio</FieldLabel>
-            <Input
-              id="bloqueo-inicio"
-              type="time"
-              required
-              value={from}
-              onChange={(event) => setFrom(event.target.value)}
-            />
-          </div>
-          <div className="grid gap-2">
-            <FieldLabel htmlFor="bloqueo-fin">Fin</FieldLabel>
-            <Input
-              id="bloqueo-fin"
-              type="time"
-              required
-              value={to}
-              onChange={(event) => setTo(event.target.value)}
-            />
-          </div>
-        </div>
-        <div className="grid gap-2">
-          <FieldLabel htmlFor="bloqueo-motivo">Motivo (opcional)</FieldLabel>
-          <Input
-            id="bloqueo-motivo"
-            value={reason}
-            maxLength={500}
-            onChange={(event) => setReason(event.target.value)}
-          />
-        </div>
-      </div>
-    </FormDrawer>
   )
 }

@@ -356,17 +356,6 @@ export function ScheduleGrid({
                       {lane.summary}
                     </div>
                   ) : null}
-                  {lane.action ? (
-                    <button
-                      type="button"
-                      data-lane-action
-                      onClick={lane.action.onSelect}
-                      className="mt-1 flex h-7 max-w-full items-center gap-1 rounded-full bg-primary-soft pr-3 pl-2 text-[13px] font-bold text-primary-soft-foreground outline-none hover:bg-primary-soft/70 focus-visible:ring-2 focus-visible:ring-ring"
-                    >
-                      <Plus aria-hidden className="size-3.5 shrink-0" strokeWidth={3} />
-                      <span className="truncate">{lane.action.label}</span>
-                    </button>
-                  ) : null}
                 </div>
               </div>
             ))}

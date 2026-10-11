@@ -158,15 +158,14 @@ test("agenda: reservar un hueco real, confirmarlo y encontrarlo al buscar", asyn
   await page.setViewportSize({ width: 1440, height: 900 })
   await gotoHydrated(page, tenant(owner.org.slug, "/agenda"))
   const grid = page.getByRole("region", { name: /^Agenda del/ })
-  // La cabecera del profesional dice su próximo hueco y lo ofrece como botón.
-  const nextFree = grid.getByRole("button", { name: /^Libre / })
-  await expect(nextFree).toBeVisible()
+  await expect(grid.getByRole("group", { name: owner.user.name })).toBeVisible()
   await shot("dia-escritorio-vacio")
 
   // Reservar: paciente y hueco; ni fecha ni hora escritas a mano.
-  await nextFree.click()
+  await page.getByRole("button", { name: "Nueva cita" }).click()
   await page.getByLabel("Paciente", { exact: true }).fill("Mica")
   await page.getByRole("option", { name: /Micaela Ríos/ }).click()
+  await page.getByRole("group", { name: /^(Hoy|Mañana), / }).first().getByRole("button").first().click()
   const reserve = page.getByRole("button", { name: /^Reservar (hoy|mañana|el )/ })
   await expect(reserve).toBeEnabled()
   await shot("nueva-cita")
@@ -366,6 +365,115 @@ test("agenda: lo que falta se dice con su acción, y la sede se elige en un solo
   await shot("sede-elegida")
   await gotoHydrated(page, tenant(owner.org.slug, "/settings/availability"))
   await expect(page.getByRole("button", { name: "Sede Norte" })).toBeVisible()
+})
+
+test("agenda: una ausencia de varios días avisa de sus citas y saca al profesional", async ({
+  createOwner,
+}, info) => {
+  const owner = await createOwner("agenda-ausencia")
+  const { page } = owner
+  const shot = async (name: string) =>
+    info.attach(name, { body: await page.screenshot(), contentType: "image/png" })
+  /** Día de Lima (UTC−5 fijo) a `offset` días de hoy. */
+  const limaDay = (offset: number) =>
+    new Date(Date.now() - 5 * 3_600_000 + offset * 86_400_000).toISOString().slice(0, 10)
+  const tomorrow = limaDay(1)
+  const dayAfter = limaDay(2)
+  const chair = await call<{ id: string }>(
+    page,
+    "POST",
+    "/api/agenda/chairs",
+    owner.org.slug,
+    { branchId: owner.branchId, name: "Sillón 1" },
+    201,
+  )
+  const patient = await call<{ id: string }>(
+    page,
+    "POST",
+    "/api/patients",
+    owner.org.slug,
+    {
+      submissionId: randomUUID(),
+      answers: {
+        demographics: { displayName: "Micaela Ríos", docType: "DNI", docNumber: "45678901" },
+        respondent: "staff",
+        privacyAccepted: false,
+      },
+    },
+    201,
+  )
+  await call(
+    page,
+    "PUT",
+    "/api/agenda/schedules",
+    owner.org.slug,
+    {
+      branchId: owner.branchId,
+      dentistUserId: owner.user.id,
+      rules: [0, 1, 2, 3, 4, 5, 6].map((weekday) => ({ weekday, startMin: 8 * 60, endMin: 20 * 60 })),
+    },
+    200,
+  )
+  // Una cita mañana a las 10:00 de Lima, que quedará dentro de la ausencia.
+  await call(
+    page,
+    "POST",
+    "/api/appointments",
+    owner.org.slug,
+    {
+      patientId: patient.id,
+      dentistUserId: owner.user.id,
+      chairId: chair.id,
+      startsAt: `${tomorrow}T15:00:00.000Z`,
+      durationMin: 30,
+    },
+    201,
+  )
+
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await gotoHydrated(page, tenant(owner.org.slug, "/settings/availability"))
+  await page.getByRole("button", { name: "Nueva ausencia" }).click()
+  const form = page.getByRole("form").or(page.locator("form")).last()
+  await form.getByRole("button", { name: owner.user.name.split(" ").slice(0, 2).join(" ") }).click()
+  // «Hasta» pasado mañana: tres días de vacaciones en un solo paso.
+  await form.getByLabel("Hasta").click()
+  const [year = 0, month = 1, date = 1] = dayAfter.split("-").map(Number)
+  const dayKey = await page.evaluate(
+    ([y, m, d]) => new Date(y ?? 0, (m ?? 1) - 1, d ?? 1).toLocaleDateString("es"),
+    [year, month, date],
+  )
+  const dayButton = page.locator(`[data-day="${dayKey}"]`)
+  if ((await dayButton.count()) === 0) await page.locator(".rdp-button_next").click()
+  await dayButton.click()
+  await expect(form.getByText("1 cita queda dentro de la ausencia")).toBeVisible()
+  await expect(form.getByText(/Micaela Ríos/)).toBeVisible()
+  await shot("ausencia-con-citas-dentro")
+  await form.getByRole("button", { name: "Guardar ausencia" }).click()
+  await expect(page.getByText(/^Del .* al /)).toBeVisible()
+
+  // Durante la ausencia no se ofrece ningún hueco.
+  const slots = await call<{ slots: unknown[] }>(
+    page,
+    "GET",
+    `/api/agenda/slots?branchId=${owner.branchId}&from=${tomorrow}T05:00:00.000Z&to=${dayAfter}T05:00:00.000Z&durationMin=30`,
+    owner.org.slug,
+  )
+  expect(slots.slots).toHaveLength(0)
+
+  // Mañana: como aún tiene una cita, sigue en la rejilla y la cita avisa de que hay que moverla.
+  await gotoHydrated(page, tenant(owner.org.slug, `/agenda?date=${tomorrow}`))
+  await expect(
+    page
+      .getByRole("region", { name: /^Agenda del/ })
+      .getByRole("button", { name: /Micaela Ríos.*Dentro de una ausencia: Vacaciones/ }),
+  ).toBeVisible()
+  await shot("ausencia-cita-por-mover")
+
+  // Pasado mañana: sin citas, ya no es una columna vacía sino un motivo.
+  await gotoHydrated(page, tenant(owner.org.slug, `/agenda?date=${dayAfter}`))
+  await expect(page.getByText(/no atiende el /)).toBeVisible()
+  await expect(page.getByText(/^Vacaciones\./)).toBeVisible()
+  await shot("ausencia-dia-sin-atencion")
 })
 
 test("agenda: solape responde 409 y movimiento con versión", async ({ createOwner }) => {

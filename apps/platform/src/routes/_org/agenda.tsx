@@ -49,6 +49,7 @@ import {
   ScheduleToolbar,
   ScheduleWeekOverview,
   scheduleToneAt,
+  subtractRanges,
   useListSearch,
   useMediaQuery,
   useScheduleNow,
@@ -98,6 +99,13 @@ export const Route = createFileRoute("/_org/agenda")({
     contactId?: string
     conversationId?: string
     appointmentId?: string
+    /** Vista, fecha, sede y filtros: los lee `useListSearch`; aquí solo se tipan para los enlaces. */
+    view?: string
+    date?: string
+    branch?: string
+    who?: string
+    group?: string
+    status?: string
   } => ({
     ...search,
     patientId: typeof search.patientId === "string" ? search.patientId : undefined,
@@ -375,23 +383,6 @@ function AgendaPage() {
       ),
     [appointments],
   )
-  const entries = React.useMemo(
-    () =>
-      appointments.map(
-        (item): ScheduleEntry => ({
-          id: item.id,
-          columnId: group === "chairs" ? item.chairId : item.dentistUserId,
-          title: item.patientName,
-          subtitle: item.serviceName ?? item.reason ?? undefined,
-          start: item.startsAt,
-          end: item.endsAt,
-          status: item.status,
-          warning: conflictLabel(conflicts.get(item.id)),
-        }),
-      ),
-    [appointments, group, conflicts],
-  )
-  const active = React.useMemo(() => entries.filter((entry) => occupies(entry.status)), [entries])
   const dayAppointments = appointments.filter((item) => zonedDateOf(item.startsAt, TZ) === day)
   const dayStanding = dayAppointments.filter((item) => occupies(item.status)).length
   const pending = dayAppointments.filter((item) => item.status === "programada").length
@@ -405,31 +396,94 @@ function AgendaPage() {
       })),
     [availability],
   )
-  const blocked = React.useMemo((): ScheduleBlocked[] => {
-    const targets = group === "chairs" ? chairs : team
-    return (availability?.blocks ?? []).flatMap((block) => {
-      // Un bloqueo de sillón no cierra al profesional, ni al revés.
-      const scoped = group === "chairs" ? block.dentistUserId : block.chairId
-      if (scoped) return []
-      const own = group === "chairs" ? block.chairId : block.dentistUserId
-      const label = block.reason ?? (block.kind === "ausencia" ? "Ausencia" : "No disponible")
-      return (own ? [own] : targets.map((item) => item.id)).map((columnId) => ({
-        id: `${block.id}:${columnId}`,
-        columnId,
-        start: block.startsAt,
-        end: block.endsAt,
-        label,
-      }))
-    })
-  }, [availability, group, chairs, team])
+  const blocksBy = React.useCallback(
+    (kind: GroupMode): ScheduleBlocked[] => {
+      const targets = kind === "chairs" ? chairs : team
+      return (availability?.blocks ?? []).flatMap((block) => {
+        // Un bloqueo de sillón no cierra al profesional, ni al revés.
+        const scoped = kind === "chairs" ? block.dentistUserId : block.chairId
+        if (scoped) return []
+        const own = kind === "chairs" ? block.chairId : block.dentistUserId
+        const label = block.reason ?? (block.kind === "ausencia" ? "Ausencia" : "No disponible")
+        return (own ? [own] : targets.map((item) => item.id)).map((columnId) => ({
+          id: `${block.id}:${columnId}`,
+          columnId,
+          start: block.startsAt,
+          end: block.endsAt,
+          label,
+        }))
+      })
+    },
+    [availability, chairs, team],
+  )
+  /** Ausencias y cierres de cada profesional, sea cual sea la vista. */
+  const absences = React.useMemo(() => blocksBy("professionals"), [blocksBy])
+  const blocked = React.useMemo(
+    () => (group === "chairs" ? blocksBy("chairs") : absences),
+    [group, blocksBy, absences],
+  )
+  /** Si una ausencia cubre todo el horario de alguien ese día: el motivo y hasta cuándo. */
+  const absenceOn = (id: string, date: string): { label: string; until: string | null } | null => {
+    const hours = rangesOn(open, id, date, TZ)
+    if (hours.length === 0) return null
+    const own = absences.filter((item) => item.columnId === id)
+    if (subtractRanges(hours, rangesOn(own, id, date, TZ)).length > 0) return null
+    const cover = own.find((item) => dayRangeOf(item.start, item.end, date, TZ))
+    if (!cover) return null
+    const last = zonedDateOf(new Date(Date.parse(cover.end) - 1).toISOString(), TZ)
+    return { label: cover.label ?? "Ausencia", until: last > date ? last : null }
+  }
+  /** Citas en pie que quedaron dentro de una ausencia: hay que moverlas. */
+  const insideAbsence = (item: AgendaAppointment): string | undefined => {
+    if (!standing(item.status)) return undefined
+    const hit = absences.find(
+      (block) =>
+        block.columnId === item.dentistUserId &&
+        Date.parse(block.start) < Date.parse(item.endsAt) &&
+        Date.parse(block.end) > Date.parse(item.startsAt),
+    )
+    return hit ? `Dentro de una ausencia: ${hit.label ?? "sin motivo"}` : undefined
+  }
+
+  const entries = appointments.map(
+    (item): ScheduleEntry => ({
+      id: item.id,
+      columnId: group === "chairs" ? item.chairId : item.dentistUserId,
+      title: item.patientName,
+      subtitle: item.serviceName ?? item.reason ?? undefined,
+      start: item.startsAt,
+      end: item.endsAt,
+      status: item.status,
+      warning: conflictLabel(conflicts.get(item.id)) ?? insideAbsence(item),
+    }),
+  )
+  const active = entries.filter((entry) => occupies(entry.status))
 
   const attends = (id: string, date: string) =>
     rangesOn(open, id, date, TZ).length > 0 ||
     appointments.some(
       (item) => item.dentistUserId === id && zonedDateOf(item.startsAt, TZ) === date,
     )
-  const dayTeam = team.filter((item) => attends(item.id, day))
-  const absent = team.filter((item) => !dayTeam.includes(item))
+  const hasAppointments = (id: string, date: string) =>
+    appointments.some(
+      (item) =>
+        item.dentistUserId === id &&
+        occupies(item.status) &&
+        zonedDateOf(item.startsAt, TZ) === date,
+    )
+  // Quien está ausente todo el día sale de la rejilla, salvo que aún tenga citas que mover.
+  const dayTeam = team.filter(
+    (item) =>
+      attends(item.id, day) && (absenceOn(item.id, day) === null || hasAppointments(item.id, day)),
+  )
+  const absent = team
+    .filter((item) => !dayTeam.includes(item))
+    .map((item) => ({ ...item, absence: absenceOn(item.id, day) }))
+  /** Todos los que atendían ese día están ausentes por lo mismo (feriado, cierre de la sede). */
+  const closedReason =
+    absent.length > 0 && absent.every((item) => item.absence !== null)
+      ? (absent[0]?.absence?.label ?? null)
+      : null
   const dayColumns = group === "chairs" ? chairs : dayTeam
   /** Semana, y Día en teléfono: de quién es la agenda. */
   const focus =
@@ -441,22 +495,14 @@ function AgendaPage() {
   /** Día y Lista en escritorio: a quién se ve (null = todos). */
   const filter = who && dayColumns.some((item) => item.id === who) ? who : null
 
-  const freeLabel = (id: string, brief: boolean): string | undefined => {
+  /** En teléfono solo se ve a un profesional: su ficha dice cuándo tiene el próximo hueco. */
+  const freeLabel = (id: string): string | undefined => {
     const next = nextFreeOf.get(id)
     if (!next || day < today) return undefined
     const date = zonedDateOf(next.startsAt, TZ)
-    const hour = hourLabel(dayMinutesIn(next.startsAt, TZ))
-    if (date === day) return brief ? `Libre ${hour}` : `Libre a las ${hour}`
-    return brief ? `Libre ${dayShort(date)}` : `Libre ${dayShort(date)}, ${hour}`
-  }
-  const bookNextFree = (id: string) => {
-    const next = nextFreeOf.get(id)
-    if (!next) return
-    openBooking({
-      dentistUserId: id,
-      startsAt: next.startsAt,
-      date: zonedDateOf(next.startsAt, TZ),
-    })
+    return date === day
+      ? `Libre ${hourLabel(dayMinutesIn(next.startsAt, TZ))}`
+      : `Libre ${dayShort(date)}`
   }
 
   // ----- Carriles -----
@@ -464,24 +510,13 @@ function AgendaPage() {
     small ? dayColumns.filter((item) => item.id === dayFocus) : dayColumns
   )
     .filter((item) => small || !filter || item.id === filter)
-    .map((item) => {
-      const label = group === "professionals" ? freeLabel(item.id, false) : undefined
-      return {
-        id: item.id,
-        columnId: item.id,
-        date: day,
-        label: item.label,
-        tone: item.tone,
-        detail:
-          group === "professionals" && !label && nextFreeOf.has(item.id) && day >= today
-            ? "Sin huecos próximos"
-            : undefined,
-        action:
-          canWrite && label && !small
-            ? { label, onSelect: () => bookNextFree(item.id) }
-            : undefined,
-      }
-    })
+    .map((item) => ({
+      id: item.id,
+      columnId: item.id,
+      date: day,
+      label: item.label,
+      tone: item.tone,
+    }))
 
   const focusEntries = active.filter((entry) => entry.columnId === focus)
   const weekDays = week.filter(
@@ -523,6 +558,8 @@ function AgendaPage() {
       summary:
         openRanges.length === 0
           ? "Sin atención"
+          : focus && absenceOn(focus, date)
+            ? (absenceOn(focus, date)?.label ?? "Ausencia")
           : date < today
             ? undefined
             : free >= 15
@@ -730,13 +767,13 @@ function AgendaPage() {
   const setupMissing = (noChairs || noSchedules) && appointments.length === 0
   /** Primer día con atención después del que se mira, para no dejar a nadie ante un día vacío. */
   const nextOpenDay =
-    (availability?.open ?? [])
-      .map((item) => zonedDateOf(item.startsAt, TZ))
-      .filter((date) => date > day)
-      .sort()[0] ??
     (availability?.professionals ?? [])
       .flatMap((item) => (item.nextFree ? [zonedDateOf(item.nextFree.startsAt, TZ)] : []))
       .filter((date) => date > day)
+      .sort()[0] ??
+    (availability?.open ?? [])
+      .map((item) => zonedDateOf(item.startsAt, TZ))
+      .filter((date) => date > day && team.some((item) => absenceOn(item.id, date) === null))
       .sort()[0] ??
     null
   // Los estados traen su propio marco: aquí solo ocupan el alto de la agenda.
@@ -775,12 +812,16 @@ function AgendaPage() {
   const emptyDay = (
     <EmptyState
       icon={CalendarX2}
-      title={`Nadie atiende el ${formatDateLong(day).toLocaleLowerCase("es")}`}
-      description={
+      title={
+        closedReason
+          ? `La sede no atiende el ${formatDateLong(day).toLocaleLowerCase("es")}`
+          : `Nadie atiende el ${formatDateLong(day).toLocaleLowerCase("es")}`
+      }
+      description={`${closedReason ? `${closedReason}. ` : ""}${
         nextOpenDay
           ? `El próximo día con atención es el ${formatDateLong(nextOpenDay).toLocaleLowerCase("es")}.`
           : "No hay atención programada en los días siguientes."
-      }
+      }`}
       actionLabel={nextOpenDay ? `Ir al ${dayShort(nextOpenDay)}` : undefined}
       onAction={nextOpenDay ? () => goTo(nextOpenDay) : undefined}
       secondaryActionLabel={canWrite ? "Nueva cita" : undefined}
@@ -1016,7 +1057,7 @@ function AgendaPage() {
           resources={view === "semana" ? team : view === "dia" ? dayColumns : dayTeam}
           formatLabel={(item) => (group === "chairs" ? item.label : shortName(item.label))}
           detailOf={
-            view === "lista" || group === "chairs" ? undefined : (item) => freeLabel(item.id, true)
+            view === "lista" || group === "chairs" ? undefined : (item) => freeLabel(item.id)
           }
           value={view === "lista" ? filter : view === "semana" ? focus : dayFocus}
           allLabel={view === "lista" ? "Todos" : undefined}
@@ -1111,7 +1152,17 @@ function AgendaPage() {
       absent.length > 0 ? (
         <p className="shrink-0 text-xs text-muted-foreground">
           No {absent.length === 1 ? "atiende" : "atienden"} este día:{" "}
-          {absent.map((item) => item.label).join(", ")}
+          {absent
+            .map((item) =>
+              item.absence
+                ? `${item.label} (${item.absence.label.toLocaleLowerCase("es")}${
+                    item.absence.until
+                      ? ` hasta el ${formatDateLong(item.absence.until).toLocaleLowerCase("es")}`
+                      : ""
+                  })`
+                : item.label,
+            )
+            .join(", ")}
         </p>
       ) : null}
 

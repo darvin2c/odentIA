@@ -64,8 +64,6 @@ export interface ScheduleLane {
   tone?: ScheduleTone
   kind?: "resource" | "day"
   warning?: string
-  /** Próximo hueco del recurso, como botón («Libre a las 11:00»): reservarlo es un clic. */
-  action?: { label: string; onSelect: () => void }
 }
 
 /** Tramo de atención de un recurso: dentro se puede reservar, fuera no. */

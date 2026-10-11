@@ -303,16 +303,6 @@ describe("ScheduleGrid", () => {
     expect(next.container.querySelector("[data-past]")).toBeNull()
   })
 
-  it("la cabecera ofrece el próximo hueco del recurso como botón", () => {
-    const onSelect = vi.fn()
-    const lanes = LANES.map((item, index) =>
-      index === 0 ? { ...item, action: { label: "Libre a las 11:00", onSelect } } : item,
-    )
-    render(<ScheduleGrid {...baseProps} lanes={lanes} />)
-    fireEvent.click(screen.getByRole("button", { name: "Libre a las 11:00" }))
-    expect(onSelect).toHaveBeenCalledTimes(1)
-  })
-
   it("sin carriles lo dice", () => {
     render(<ScheduleGrid {...baseProps} lanes={[]} />)
     expect(screen.getByText("No hay a quién mostrar en la agenda")).toBeTruthy()
