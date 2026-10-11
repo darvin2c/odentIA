@@ -82,9 +82,17 @@ test("bandeja: cada respuesta del agente dice en qué se basó", async ({ owner,
   await link.click()
   const sources = detail.getByRole("listitem")
   await expect(sources.filter({ hasText: "Agenda: horarios disponibles" }).first()).toContainText("3 horarios")
-  await expect(sources.filter({ hasText: "Precio: S/ 150" })).toContainText("Está en: Sedes, servicios y tarifas")
-  await expect(sources.filter({ hasText: "Hora: 9:00 a. m." })).toContainText("Está en: Agenda: horarios disponibles")
+  // Lo comprobado se dice como un veredicto, no dato por dato; y la ficha sigue el orden del diseño.
+  await expect(detail).toContainText("Comprobado antes de enviar")
+  await expect(detail).toContainText("El precio y la hora coinciden con los datos que usó.")
+  await expect(detail.getByRole("heading", { level: 3 })).toHaveText(["Datos que usó", "Lecciones que aplicó", "Lo que hizo y lo que espera"])
+  await expect(detail).toContainText("Envió esta respuesta.")
   await info.attach("traza-con-fuentes", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
+  // Quien atiende conversaciones dice si estuvo bien; repetirlo no hace falta.
+  await expect(detail).toContainText("¿Estuvo bien esta respuesta?")
+  await detail.getByRole("button", { name: "Sí, estuvo bien" }).click()
+  await expect(detail.getByRole("status")).toHaveText("Quedó marcada como una buena respuesta.")
+  await expect(detail.getByRole("button", { name: "Sí, estuvo bien" })).toBeHidden()
   await page.keyboard.press("Escape")
 
   // Teléfono: mismo contenido en una hoja inferior, con objetivo táctil suficiente.
@@ -93,8 +101,8 @@ test("bandeja: cada respuesta del agente dice en qué se basó", async ({ owner,
   await expect(link).toBeVisible()
   expect((await link.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44)
   await link.click()
-  await expect(detail).toContainText("Precio: S/ 150")
-  await expect(detail).toContainText("El resto del texto no se revisa")
+  await expect(detail).toContainText("Comprobado antes de enviar")
+  await expect(detail.getByRole("button", { name: "Corregir" })).toBeVisible()
   expect(await overflow(page)).toBeLessThanOrEqual(0)
   await info.attach("traza-movil", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
   await detail.getByRole("button", { name: "Cerrar" }).click()

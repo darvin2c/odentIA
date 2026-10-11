@@ -12,7 +12,7 @@ import {
   type AnswerTraceOutcome,
 } from "@odentia/db/schema/agent"
 import { conversation, message } from "@odentia/db/schema/crm"
-import { and, count, desc, eq, or, sql } from "drizzle-orm"
+import { and, count, desc, eq, inArray, or, sql } from "drizzle-orm"
 import { CONFIRM_TTL_HOURS, listProposals, PROPOSAL_ACTION_LABEL } from "./agent-operations.js"
 import { notFound, validation } from "./errors.js"
 import { formatZoned, type OrgLocale } from "./locale.js"
@@ -279,6 +279,7 @@ export async function recordAnswerTrace(tx: Db, orgId: string, input: RecordAnsw
     kind: item.kind.slice(0, 40),
     label: item.label.slice(0, 160),
     ...(item.detail ? { detail: item.detail.slice(0, 300) } : {}),
+    ...(isUuid(item.ref) ? { ref: item.ref } : {}),
   }))
   const checks = input.checks
     .filter((item) => (ANSWER_CHECK_KINDS as readonly string[]).includes(item.kind))
@@ -316,6 +317,8 @@ export interface AnswerTraceItem {
   proposalId: string | null
   agent: string
   outcome: AnswerTraceOutcome
+  /** Lo que escribió la persona y originó la respuesta; nulo si no vino de un mensaje. */
+  question: string | null
   replyText: string
   basis: AnswerBasisItem[]
   checks: AnswerCheck[]
@@ -323,9 +326,20 @@ export interface AnswerTraceItem {
   createdAt: string
 }
 
+/** El texto del mensaje que originó cada traza, por id de mensaje. */
+async function triggerBodies(tx: Db, orgId: string, rows: AnswerTraceRow[]): Promise<Map<string, string>> {
+  const ids = [...new Set(rows.map((row) => row.triggerMessageId).filter(isUuid))]
+  if (ids.length === 0) return new Map()
+  const found = await tx
+    .select({ id: message.id, body: message.body })
+    .from(message)
+    .where(and(eq(message.organizationId, orgId), inArray(message.id, ids)))
+  return new Map(found.filter((item) => item.body?.trim()).map((item) => [item.id, item.body as string]))
+}
+
 type AnswerTraceRow = typeof agentAnswerTrace.$inferSelect
 
-function toTraceItem(row: AnswerTraceRow, messageId: string | null): AnswerTraceItem {
+function toTraceItem(row: AnswerTraceRow, messageId: string | null, questions: Map<string, string>): AnswerTraceItem {
   return {
     id: row.id,
     conversationId: row.conversationId,
@@ -333,6 +347,7 @@ function toTraceItem(row: AnswerTraceRow, messageId: string | null): AnswerTrace
     proposalId: row.proposalId,
     agent: row.agent,
     outcome: row.outcome as AnswerTraceOutcome,
+    question: row.triggerMessageId ? (questions.get(row.triggerMessageId) ?? null) : null,
     replyText: row.replyText,
     basis: row.basis,
     checks: row.checks,
@@ -367,7 +382,7 @@ export async function getAnswerTraceForMessage(
     )
     .orderBy(desc(agentAnswerTrace.createdAt))
     .limit(1)
-  return row ? toTraceItem(row.trace, messageId) : null
+  return row ? toTraceItem(row.trace, messageId, await triggerBodies(tx, orgId, [row.trace])) : null
 }
 
 /**
@@ -392,8 +407,9 @@ export async function listAnswerTraces(
     .where(and(eq(agentAnswerTrace.organizationId, orgId), eq(agentAnswerTrace.conversationId, conversationId)))
     .orderBy(desc(agentAnswerTrace.createdAt))
     .limit(limit)
+  const questions = await triggerBodies(tx, orgId, rows.map((row) => row.trace))
   return rows.map((row) => {
     const viaProposal = row.result?.["messageId"]
-    return toTraceItem(row.trace, row.trace.messageId ?? (isUuid(viaProposal) ? viaProposal : null))
+    return toTraceItem(row.trace, row.trace.messageId ?? (isUuid(viaProposal) ? viaProposal : null), questions)
   })
 }

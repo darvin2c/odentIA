@@ -5,6 +5,8 @@ import { Link, createFileRoute } from "@tanstack/react-router"
 import { AlertTriangle, ArrowRight, Bot, CalendarDays, CheckCircle2, CheckSquare, Hand, Inbox, Wallet } from "lucide-react"
 import { useState, type ReactNode } from "react"
 import { AdvisorSection } from "../../components/agent/advisor"
+import { ApproveMessageDrawer, messageDraftOf } from "../../components/agent/approve-message-drawer"
+import { CaseBriefDrawer } from "../../components/agent/case-brief"
 import { HandoffUrgency } from "../../components/agent/handoff-badges"
 import { type AgentPanelTab, useAgentPanel } from "../../components/agent-panel"
 import { PerformanceSummary } from "../../components/crm/performance-summary"
@@ -84,8 +86,11 @@ function HomePage() {
         method: "POST",
         body: JSON.stringify({ decision: "aprobada" }),
       }),
-    onSuccess: (response) => {
+    onSuccess: (response) => settle(response),
+  })
+  function settle(response: { data: AgentProposal }) {
       setApproving(null)
+      setMessage(null)
       const proposal = response.data
       setOutcome(
         proposal.status === "fallida" || proposal.status === "expirada"
@@ -94,8 +99,26 @@ function HomePage() {
       )
       void queryClient.invalidateQueries({ queryKey: ["workspace-home"] })
       void queryClient.invalidateQueries({ queryKey: ["workspace-pulse"] })
-    },
-  })
+  }
+  // Un mensaje se revisa y se edita en su cajón, igual que en Aprobaciones; el
+  // resumen de Inicio no trae el borrador, así que se pide al abrirlo.
+  const [message, setMessage] = useState<AgentProposal | null>(null)
+  const [briefFor, setBriefFor] = useState<{ conversationId: string; name: string } | null>(null)
+  const canClaim = usePermission("tasks.write")
+  const review = async (proposal: NonNullable<typeof approving>) => {
+    if (proposal.action === "enviar_mensaje") {
+      try {
+        const full = await apiFetch<{ data: AgentProposal }>(`/api/agent/proposals/${proposal.id}`)
+        if (messageDraftOf(full.data) !== null) {
+          setMessage(full.data)
+          return
+        }
+      } catch {
+        // Sin el borrador se decide con la confirmación de siempre.
+      }
+    }
+    setApproving(proposal)
+  }
   const data = query.data?.data
   const hasAgentPending = Boolean(data?.agent && (data.agent.pendingProposals > 0 || data.agent.derivedConversations > 0 || data.agent.recentHandoffs.length > 0))
   const agentRest = data?.agent ? agentPendingRest(data.agent) : null
@@ -159,7 +182,7 @@ function HomePage() {
                 {proposal.summary ? <p>{proposal.summary}</p> : null}
               </div>
               <div className="mt-auto flex flex-wrap gap-2">
-                {canApprove && forTeam ? <SubmitButton type="button" pending={decideMutation.isPending} onClick={() => setApproving(proposal)}>
+                {canApprove && forTeam ? <SubmitButton type="button" pending={decideMutation.isPending} onClick={() => void review(proposal)}>
                   Revisar y aprobar
                 </SubmitButton> : <Button variant="outline" nativeButton={false} render={<Link to="/agent/approvals" search={{ conversationId: proposal.conversationId ?? undefined }} />}>Revisar caso</Button>}
               </div>
@@ -171,11 +194,18 @@ function HomePage() {
           <ul className="mt-2 flex flex-wrap gap-2">
             {data.agent.recentHandoffs.map((handoff, index) => {
               return <li key={handoff.id} className={index === 0 ? "max-w-full" : "hidden max-w-full sm:list-item"}>
-                <Link to={handoff.conversationId ? "/inbox" : "/agent/approvals"} search={handoff.conversationId ? { conversation: handoff.conversationId } : {}} className="flex min-h-11 max-w-full items-center gap-2 rounded-3xl border bg-card px-3.5 py-1.5 text-sm transition-colors hover:bg-accent/60 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary">
-                  <HandoffUrgency priority={handoff.priority} />
-                  <span className="min-w-0">{handoff.contactName ? `${handoff.contactName} · ` : ""}{handoff.reason}</span>
-                  
-                </Link>
+                {handoff.conversationId ? (
+                  <button type="button" aria-label={`Ver el caso de ${handoff.contactName ?? "esta persona"}: ${handoff.reason}`} onClick={() => setBriefFor({ conversationId: handoff.conversationId as string, name: handoff.contactName ?? "Interlocutor" })} className="flex min-h-11 max-w-full items-center gap-2 rounded-3xl border bg-card px-3.5 py-1.5 text-left text-sm transition-colors hover:bg-accent/60 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary">
+                    <HandoffUrgency priority={handoff.priority} />
+                    <span className="min-w-0">{handoff.contactName ? `${handoff.contactName} · ` : ""}{handoff.reason}</span>
+                    <span className="shrink-0 font-semibold text-primary">Ver el caso</span>
+                  </button>
+                ) : (
+                  <Link to="/agent/approvals" className="flex min-h-11 max-w-full items-center gap-2 rounded-3xl border bg-card px-3.5 py-1.5 text-sm transition-colors hover:bg-accent/60 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary">
+                    <HandoffUrgency priority={handoff.priority} />
+                    <span className="min-w-0">{handoff.contactName ? `${handoff.contactName} · ` : ""}{handoff.reason}</span>
+                  </Link>
+                )}
               </li>
             })}
           </ul>
@@ -227,6 +257,8 @@ function HomePage() {
       <PulseSection locale={data.locale} />
       {!Object.entries(data.access).some(([key, value]) => key !== "allTasks" && key !== "configure" && value) && <EmptyState title="Sin permisos operativos" description="Pide a la administración los permisos necesarios para tu trabajo." />}
     </> : null}
+    <ApproveMessageDrawer proposal={message} onClose={() => setMessage(null)} onDecided={settle} />
+    <CaseBriefDrawer conversationId={briefFor?.conversationId ?? null} name={briefFor?.name ?? "Interlocutor"} canClaim={canClaim} onClose={() => setBriefFor(null)} onClaimed={() => void queryClient.invalidateQueries({ queryKey: ["workspace-home"] })} />
     <ConfirmDialog open={approving !== null} title="Aprobar y ejecutar el cambio" description={approving ? `${approving.context.contactName ?? "Interlocutor"}: ${approving.context.afterSummary}` : ""} confirmLabel="Aprobar y ejecutar" variant="default" pending={decideMutation.isPending} onClose={() => { if (!decideMutation.isPending) setApproving(null) }} onConfirm={() => approving && decideMutation.mutate(approving.id)} />
   </PageShell>
 }

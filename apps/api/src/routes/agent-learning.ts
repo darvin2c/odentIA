@@ -8,6 +8,7 @@ import {
   getLesson,
   lessonImpact,
   listTestCases,
+  markAnswerOk,
   markReviewOk,
   restoreLesson,
   updateLesson,
@@ -73,9 +74,20 @@ export function createAgentLearningRoute(deps: AgentLearningDeps) {
     }))
   })
 
+  // Marcar una respuesta desde la Bandeja (bien o por corregir) es de quien
+  // atiende conversaciones; lo que se aprende lo aprueba quien administra.
+  app.post("/answers/:traceId/ok", async (c) => {
+    const { orgId, memberRole, userId } = orgContextOf(c)
+    if (!canAccessAny(memberRole, ["conversations.write", "agent.decide", "agent.write"])) return forbidden(c)
+    return runService(c, 200, async () => {
+      await withOrgContext(deps.db, orgId, (tx) => markAnswerOk(tx, orgId, userId, c.req.param("traceId")))
+      return { ok: true }
+    })
+  })
+
   app.post("/corrections", async (c) => {
     const { orgId, memberRole, userId } = orgContextOf(c)
-    if (!canAccessAny(memberRole, ["agent.decide", "agent.write"])) return forbidden(c)
+    if (!canAccessAny(memberRole, ["conversations.write", "agent.decide", "agent.write"])) return forbidden(c)
     const parsed = correctionInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 201, () => withOrgContext(deps.db, orgId, (tx) => correctAnswer(tx, orgId, userId, parsed.data)))

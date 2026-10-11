@@ -673,7 +673,7 @@ export function compileAgentGraph(
     if (prefetched) toolCtx.basis.push({ kind: prefetched.source.kind, label: prefetched.source.label, detail: "Consultado antes de responder" })
     // Cada lección que tocó el tema queda en «En qué se basó», para poder retirarla desde ahí.
     for (const lesson of lessons.matched) {
-      toolCtx.basis.push({ kind: "leccion", label: `${lesson.kind === "regla" ? "Regla" : "Ejemplo"} que aprobó tu clínica`, detail: lesson.title })
+      toolCtx.basis.push({ kind: "leccion", label: `${lesson.kind === "regla" ? "Regla" : "Ejemplo"} que aprobó tu clínica`, detail: lesson.title, ref: lesson.id })
     }
     toolCtx.checkFailures = 0
     const history = historyToMessages(items, zone)

@@ -99,6 +99,8 @@ import {
 } from "../../components/agent-panel"
 import { AnswerTraceDrawer } from "../../components/agent/answer-trace"
 import { CaseBriefDrawer } from "../../components/agent/case-brief"
+import { urgencyLabel } from "../../components/agent/handoff-badges"
+import { LessonDrawer } from "../../components/agent/lesson-drawer"
 import { CorrectDrawer, type CorrectionTarget } from "../../components/agent/correct-drawer"
 import type { AnswerTrace } from "../../lib/agent"
 import { ContactWorkspace } from "../../components/crm/contact-workspace"
@@ -616,7 +618,7 @@ function AttentionLabel({ item, canDecide }: { item: ConversationListItem; canDe
     return (
       <span className={`flex min-w-0 items-center gap-1.5 font-semibold ${high ? "text-destructive" : "text-warning"}`}>
         <span aria-hidden className={high ? "size-2 shrink-0 rounded-full bg-destructive" : "size-2 shrink-0 rounded-[2px] bg-warning"} />
-        <span className="truncate">Derivada · prioridad {attention.handoffPriority}</span>
+        <span className="truncate">Derivada · {urgencyLabel(attention.handoffPriority).toLowerCase()}</span>
       </span>
     )
   }
@@ -916,8 +918,13 @@ function ThreadView({
     return map
   }, [tracesQuery.data])
   const [openTrace, setOpenTrace] = useState<AnswerTrace | null>(null)
-  // Corregir una respuesta del agente desde el hilo: lo hace quien decide por él o lo administra.
-  const canCorrectAgent = usePermission("agent.decide")
+  // Marcar una respuesta del agente (bien o por corregir) es de quien atiende
+  // conversaciones; lo que se aprende lo aprueba quien administra el agente.
+  const canDecideAgent = usePermission("agent.decide")
+  const canWriteConversations = usePermission("conversations.write")
+  const canCorrectAgent = canDecideAgent || canWriteConversations
+  const canManageAgent = usePermission("agent.write")
+  const [lessonId, setLessonId] = useState<string | null>(null)
   const [correcting, setCorrecting] = useState<CorrectionTarget | null>(null)
   // Resumen del caso para quien lo toma; guarda la conversación para que no siga abierto al cambiar de hilo.
   const canClaimCase = usePermission("tasks.write")
@@ -1310,12 +1317,22 @@ function ThreadView({
         conversationId={briefFor === conv.id ? conv.id : null}
         name={detail.contact.displayName}
         canClaim={canClaimCase}
+        inConversation
         onClose={() => setBriefFor(null)}
         onClaimed={() => void detailQuery.refetch()}
       />
       <AnswerTraceDrawer
         trace={openTrace}
         onClose={() => setOpenTrace(null)}
+        canMark={canCorrectAgent}
+        onOpenLesson={
+          canManageAgent
+            ? (id) => {
+                setOpenTrace(null)
+                setLessonId(id)
+              }
+            : undefined
+        }
         onCorrect={
           canCorrectAgent
             ? (trace) => {
@@ -1323,12 +1340,13 @@ function ThreadView({
                 const at = messages.findIndex((item) => item.id === trace.messageId)
                 const asked = at > 0 ? [...messages.slice(0, at)].reverse().find((item) => item.direction === "in") : undefined
                 setOpenTrace(null)
-                setCorrecting({ traceId: trace.id, question: asked?.body ?? "", reply: trace.replyText, teamReply: null, basis: trace.basis })
+                setCorrecting({ traceId: trace.id, question: trace.question ?? asked?.body ?? "", reply: trace.replyText, teamReply: null, basis: trace.basis })
               }
             : undefined
         }
       />
       <CorrectDrawer target={correcting} onClose={() => setCorrecting(null)} />
+      <LessonDrawer lessonId={lessonId} canWrite={canManageAgent} onClose={() => setLessonId(null)} />
       <AgentPendingBand conversationId={id} attention={threadAttention} canSeeProposals={canSeeProposals} />
       <div className="border-t p-3">
         {detail.contact.isActive === false && (

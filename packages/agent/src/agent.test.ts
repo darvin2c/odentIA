@@ -2113,7 +2113,7 @@ it("una corrección aprobada llega a la siguiente respuesta, queda en su traza y
   const taught = await promptFor("tg:aprende-3", "evt-aprende-3", "¿Tienen cita para el domingo?")
   expect(taught.system).toContain(`- ${RULE}`)
   const [taughtTrace] = await inOrg((tx) => listAnswerTraces(tx, "org_a", taught.conversationId))
-  expect(taughtTrace?.basis).toContainEqual({ kind: "leccion", label: "Regla que aprobó tu clínica", detail: lesson.title })
+  expect(taughtTrace?.basis).toContainEqual({ kind: "leccion", label: "Regla que aprobó tu clínica", detail: lesson.title, ref: lesson.id })
   expect((await inOrg((tx) => getLesson(tx, "org_a", lesson.id))).uses).toBe(1)
   // En otro tema la regla sigue en el prompt, pero no cuenta como usada.
   const other = await promptFor("tg:aprende-4", "evt-aprende-4", "¿Aceptan tarjeta?")
@@ -2320,7 +2320,10 @@ it("decidir antes de escribir: el camino se elige primero, derivar no llama al q
       }
     }
     const notice = "Ana, ya pasé tu caso a una persona del equipo, que te va a responder por aquí."
-    const notifier = () => new ScriptedModel(() => toolCall("request_human_handoff", { reason: "Aviso al interlocutor", summary: "Aviso al interlocutor", message: notice }, "aviso"))
+    const notifier = () => new ScriptedModel(() => toolCall("request_human_handoff", {
+      reason: "Aviso al interlocutor", summary: "Aviso al interlocutor", message: notice,
+      asks: "Hablar con una persona por una queja", pending: "Saber de qué es la queja",
+    }, "aviso"))
     const asks = notifier()
     const handoff = await derive("tg:camino-derivar", "evt-camino-derivar", "Tengo una queja y quiero hablar con una persona", asks)
     expect(asks.offered).toEqual([["request_human_handoff"]])
@@ -2332,6 +2335,10 @@ it("decidir antes de escribir: el camino se elige primero, derivar no llama al q
       reason: "Pide hablar con una persona",
       priority: "baja",
       summary: "Escribió: «Tengo una queja y quiero hablar con una persona»",
+      // Lo que lee quien toma el caso: qué pide, qué falta y el aviso que de verdad salió.
+      asks: "Hablar con una persona por una queja",
+      pending: "Saber de qué es la queja",
+      notice,
     })
     expect(handoff.sent).toEqual([notice])
 
@@ -2343,6 +2350,7 @@ it("decidir antes de escribir: el camino se elige primero, derivar no llama al q
     const silent = await derive("tg:camino-mudo", "evt-camino-mudo", "Quiero hablar con una persona", new ScriptedModel(() => new AIMessage({ content: "No sé qué decir." })))
     expect(silent.handoffs).toHaveLength(1)
     expect(silent.sent).toEqual(["Recibimos tu mensaje. Una persona del equipo te va a responder por aquí."])
+    expect(silent.handoffs[0]).toMatchObject({ asks: null, pending: null, notice: "Recibimos tu mensaje. Una persona del equipo te va a responder por aquí." })
     const failing_writer = await derive("tg:camino-caido", "evt-camino-caido", "Quiero hablar con una persona", new ScriptedModel(() => { throw new Error("proveedor caído") }))
     expect(failing_writer.handoffs).toHaveLength(1)
     expect(failing_writer.sent).toEqual(["Recibimos tu mensaje. Una persona del equipo te va a responder por aquí."])

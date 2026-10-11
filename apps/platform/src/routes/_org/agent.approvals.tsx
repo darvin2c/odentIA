@@ -1,9 +1,11 @@
-import { Badge, Button, Field, FieldDescription, FieldLabel, Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Textarea } from "@odentia/ui"
+import { Badge, Button, Field, FieldLabel, Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@odentia/ui"
 import { ConfirmDialog, EmptyState, LoadingState, PageHeader, PageShell, SubmitButton } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, Link } from "@tanstack/react-router"
 import { useState } from "react"
-import { HandoffSummary, HandoffUrgency } from "../../components/agent/handoff-badges"
+import { ApproveMessageDrawer, messageDraftOf } from "../../components/agent/approve-message-drawer"
+import { CaseBriefDrawer } from "../../components/agent/case-brief"
+import { HandoffNotice } from "../../components/agent/handoff-badges"
 import { AgentTabs } from "../../components/agent-tabs"
 import { ApiError, apiFetch } from "../../lib/api"
 import { ACTION_LABEL, permissionForAction, proposalErrorMessage, type AgentHandoff, type AgentProposal } from "../../lib/agent"
@@ -50,8 +52,10 @@ function AgentApprovalsPage() {
   const status = search.status ?? "propuesta"
   const [rejectReason, setRejectReason] = useState<Record<string, string>>({})
   const [confirm, setConfirm] = useState<AgentProposal | null>(null)
-  // Texto del mensaje tal como lo deja el equipo antes de aprobar, por propuesta.
-  const [edits, setEdits] = useState<Record<string, string>>({})
+  // El mensaje que se está revisando para aprobar, y el caso cuyo resumen está abierto.
+  const [approving, setApproving] = useState<AgentProposal | null>(null)
+  const [briefFor, setBriefFor] = useState<AgentHandoff | null>(null)
+  const canClaim = usePermission("tasks.write")
   const [outcome, setOutcome] = useState<DecisionOutcome | null>(null)
   const proposalsQuery = useQuery({
     queryKey: ["agent-proposals", status, search.conversationId],
@@ -85,6 +89,7 @@ function AgentApprovalsPage() {
       setOutcome(null)
     }
     setConfirm(null)
+    setApproving(null)
     invalidate()
   }
   const decideMutation = useMutation({
@@ -111,14 +116,6 @@ function AgentApprovalsPage() {
     onSuccess: invalidate,
   })
   const mutationError = decideMutation.error ?? executeMutation.error ?? confirmMutation.error ?? claimMutation.error
-  // Borrador de un mensaje de texto (lo único que se puede editar al aprobar) y lo que el equipo cambió.
-  const draftOf = (proposal: AgentProposal): string | null =>
-    proposal.action === "enviar_mensaje" && proposal.payload.kind !== "template" && typeof proposal.payload.text === "string" ? proposal.payload.text : null
-  const editedOf = (proposal: AgentProposal): string | null => {
-    const draft = draftOf(proposal)
-    const edited = edits[proposal.id]
-    return draft !== null && edited !== undefined && edited.trim() && edited.trim() !== draft.trim() ? edited.trim() : null
-  }
   const proposals = proposalsQuery.data?.data ?? []
   const handoffs = handoffsQuery.data?.data ?? []
 
@@ -167,17 +164,14 @@ function AgentApprovalsPage() {
             {authorized && canConversations && proposal.status === "propuesta" && proposal.mode === "confirmar_usuario" && <div className="flex flex-wrap gap-2">
               <SubmitButton size="sm" pending={confirmMutation.isPending} disabled={!proposal.contactId} onClick={() => { confirmMutation.reset(); confirmMutation.mutate(proposal) }}>Registrar confirmación del interlocutor</SubmitButton>
             </div>}
-            {authorized && proposal.status === "propuesta" && proposal.mode === "aprobar_equipo" && draftOf(proposal) !== null && <Field>
-              <FieldLabel htmlFor={`texto-${proposal.id}`}>Mensaje que saldrá</FieldLabel>
-              <Textarea id={`texto-${proposal.id}`} rows={3} maxLength={4000} value={edits[proposal.id] ?? draftOf(proposal) ?? ""} onChange={event => setEdits({ ...edits, [proposal.id]: event.target.value })} />
-              {editedOf(proposal) !== null
-                ? <FieldDescription>Lo editaste. Al enviar se propondrá guardar tu texto para la próxima vez; lo aprueba quien administra el agente. <Button type="button" variant="link" size="sm" className="h-auto p-0" onClick={() => setEdits({ ...edits, [proposal.id]: draftOf(proposal) ?? "" })}>Volver al borrador del agente</Button></FieldDescription>
-                : <FieldDescription>Es el borrador del agente. Puedes corregirlo antes de aprobar.</FieldDescription>}
-            </Field>}
-            {authorized && proposal.status === "propuesta" && proposal.mode === "aprobar_equipo" && <div className="flex flex-col gap-2">
+            {/* Un mensaje se revisa, se edita y se decide en su cajón; el resto de cambios, aquí. */}
+            {authorized && proposal.status === "propuesta" && proposal.mode === "aprobar_equipo" && messageDraftOf(proposal) !== null && <div className="flex flex-wrap gap-2">
+              <Button size="sm" className="min-h-11 sm:min-h-8" onClick={() => setApproving(proposal)}>Revisar y aprobar</Button>
+            </div>}
+            {authorized && proposal.status === "propuesta" && proposal.mode === "aprobar_equipo" && messageDraftOf(proposal) === null && <div className="flex flex-col gap-2">
               <Field><FieldLabel htmlFor={`rechazo-${proposal.id}`}>Motivo para rechazar</FieldLabel><Input id={`rechazo-${proposal.id}`} value={rejectReason[proposal.id] ?? ""} onChange={event => setRejectReason({ ...rejectReason, [proposal.id]: event.target.value })} maxLength={2000} /></Field>
               <div className="flex flex-wrap gap-2">
-                <Button size="sm" disabled={decideMutation.isPending || (draftOf(proposal) !== null && !(edits[proposal.id] ?? draftOf(proposal) ?? "").trim())} onClick={() => { decideMutation.reset(); setConfirm(proposal) }}>Revisar y aprobar</Button>
+                <Button size="sm" disabled={decideMutation.isPending} onClick={() => { decideMutation.reset(); setConfirm(proposal) }}>Revisar y aprobar</Button>
                 <SubmitButton size="sm" variant="outline" pending={decideMutation.isPending} disabled={!(rejectReason[proposal.id] ?? "").trim()} onClick={() => decideMutation.mutate({ id: proposal.id, decision: "rechazada", reason: rejectReason[proposal.id] })}>Rechazar</SubmitButton>
               </div>
             </div>}
@@ -201,21 +195,12 @@ function AgentApprovalsPage() {
         ) : (
           <ul className="mt-3 flex flex-col gap-4">
             {handoffs.map((handoff) => (
-              <li key={handoff.id} className="flex flex-col gap-1 text-sm">
-                <div className="flex flex-wrap gap-2">
-                  <HandoffUrgency priority={handoff.priority} />
-                  <strong>
-                    {handoff.contactName ?? "Interlocutor no disponible"}
-                    {handoff.channel ? ` · ${channelLabel(handoff.channel)}` : ""}
-                  </strong>
-                </div>
-                <p className="font-semibold">{handoff.reason}</p>
-                <HandoffSummary reason={handoff.reason} summary={handoff.summary} />
-                <p className="text-muted-foreground">
-                  {handoff.assigneeUserId ? "Responsable asignado" : "En cola por recoger"}
-                  {handoff.dueAt ? ` · vence ${new Date(handoff.dueAt).toLocaleString("es-PE")}` : ""}
-                </p>
-                <div className="flex flex-wrap items-center gap-3">
+              <li key={handoff.id} className="border-b pb-4 last:border-b-0 last:pb-0">
+                <HandoffNotice handoff={handoff} onOpenCase={setBriefFor}>
+                  <span className="text-sm text-muted-foreground">
+                    {handoff.assigneeUserId ? "Responsable asignado" : "En cola por recoger"}
+                    {handoff.dueAt ? ` · vence ${new Date(handoff.dueAt).toLocaleString("es-PE")}` : ""}
+                  </span>
                   {handoff.conversationId ? (
                     <Link
                       to="/inbox"
@@ -240,13 +225,21 @@ function AgentApprovalsPage() {
                       Tomar caso
                     </SubmitButton>
                   ) : null}
-                </div>
+                </HandoffNotice>
               </li>
             ))}
           </ul>
         )}
       </section>
-      <ConfirmDialog open={confirm !== null} title="Aprobar y ejecutar el cambio" description={confirm ? `${confirm.context.contactName ?? "Interlocutor"}: ${editedOf(confirm) ?? confirm.context.afterSummary}` : ""} confirmLabel="Aprobar y ejecutar" variant="default" pending={decideMutation.isPending} onClose={() => { if (!decideMutation.isPending) setConfirm(null) }} onConfirm={() => { if (!confirm) return; const editedText = editedOf(confirm); decideMutation.mutate({ id: confirm.id, decision: "aprobada", ...(editedText !== null ? { editedText } : {}) }) }} />
+      <ConfirmDialog open={confirm !== null} title="Aprobar y ejecutar el cambio" description={confirm ? `${confirm.context.contactName ?? "Interlocutor"}: ${confirm.context.afterSummary}` : ""} confirmLabel="Aprobar y ejecutar" variant="default" pending={decideMutation.isPending} onClose={() => { if (!decideMutation.isPending) setConfirm(null) }} onConfirm={() => { if (!confirm) return; decideMutation.mutate({ id: confirm.id, decision: "aprobada" }) }} />
+      <ApproveMessageDrawer proposal={approving} onClose={() => setApproving(null)} onDecided={settleProposal} />
+      <CaseBriefDrawer
+        conversationId={briefFor?.conversationId ?? null}
+        name={briefFor?.contactName ?? "Interlocutor"}
+        canClaim={canClaim}
+        onClose={() => setBriefFor(null)}
+        onClaimed={invalidate}
+      />
     </>}
   </PageShell>
 }

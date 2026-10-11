@@ -1,10 +1,11 @@
 import type { Db } from "@odentia/db"
-import { conversation, message } from "@odentia/db/schema/crm"
+import { channelConnection, contact, conversation, message } from "@odentia/db/schema/crm"
 import { and, desc, eq } from "drizzle-orm"
 import { getAgentCaseState } from "./agent-case.js"
 import { type HandoffItem, listHandoffs } from "./agent-operations.js"
 import { getPersonMemory } from "./agent-person-memory.js"
 import { notFound } from "./errors.js"
+import { listPatientsByContact } from "./patients.js"
 
 /**
  * Resumen del caso para quien lo toma: lo que la persona escribió, lo que ya
@@ -18,10 +19,15 @@ export interface CaseBrief {
   conversationId: string
   contactId: string
   /** La derivación sin resolver más reciente de la conversación, si la hay. */
-  handoff: Pick<HandoffItem, "id" | "reason" | "summary" | "priority" | "status" | "dueAt" | "createdAt"> | null
+  handoff: Pick<HandoffItem, "id" | "reason" | "summary" | "priority" | "status" | "dueAt" | "createdAt" | "asks" | "pending" | "notice"> | null
+  contactName: string | null
+  /** Canal de la conversación. */
+  channel: string | null
   /** Lo que la persona escribió seguido antes de pasar el caso, del más antiguo al más reciente. */
   said: string[]
   known: Array<{
+    /** De qué es el dato, cuando el sistema lo sabe (los que salen de la ficha). */
+    label: string | null
     text: string
     /** De dónde sale: de esta conversación, de lo que se recuerda de la persona o de su ficha. */
     origin: "caso" | "persona" | "ficha"
@@ -91,11 +97,21 @@ export async function getCaseBrief(
     said = run
   }
 
-  const known: CaseBrief["known"] = state.notes.map((note) => ({ text: note.text, origin: "caso", channel: null, notedBy: null, at: note.at }))
+  const [person] = await tx
+    .select({ displayName: contact.displayName, channel: channelConnection.channel })
+    .from(conversation)
+    .innerJoin(contact, eq(contact.id, conversation.contactId))
+    .leftJoin(channelConnection, eq(channelConnection.id, conversation.channelConnectionId))
+    .where(and(eq(conversation.organizationId, orgId), eq(conversation.id, conversationId)))
+    .limit(1)
+
+  const known: CaseBrief["known"] = state.notes.map((note) => ({ label: null, text: note.text, origin: "caso", channel: null, notedBy: null, at: note.at }))
   if (options.includePerson !== false) {
     const memory = await getPersonMemory(tx, orgId, conv.contactId)
-    for (const fact of memory.facts) known.push({ text: fact.text, origin: "persona", channel: fact.channel, notedBy: fact.source, at: fact.createdAt })
-    for (const item of memory.derived) known.push({ text: item.text, origin: "ficha", channel: null, notedBy: null, at: null })
+    for (const fact of memory.facts) known.push({ label: null, text: fact.text, origin: "persona", channel: fact.channel, notedBy: fact.source, at: fact.createdAt })
+    const own = (await listPatientsByContact(tx, orgId, conv.contactId)).find((link) => link.relationship === "self" && link.isActive)
+    if (own) known.push({ label: "Paciente", text: own.displayName, origin: "ficha", channel: null, notedBy: null, at: null })
+    for (const item of memory.derived) known.push({ label: item.label, text: item.text, origin: "ficha", channel: null, notedBy: null, at: null })
   }
 
   return {
@@ -110,8 +126,13 @@ export async function getCaseBrief(
           status: open.status,
           dueAt: open.dueAt,
           createdAt: open.createdAt,
+          asks: open.asks,
+          pending: open.pending,
+          notice: open.notice,
         }
       : null,
+    contactName: person?.displayName ?? null,
+    channel: person?.channel ?? null,
     said,
     known,
     proposals: [...state.pending, ...state.recent].map((proposal) => ({

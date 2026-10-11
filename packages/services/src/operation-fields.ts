@@ -146,6 +146,8 @@ export const OPERATIONS = {
       priority: { kind: "enum", values: ["alta", "media", "baja"], default: "media", label: "Prioridad", description: "Alta si hay dolor, urgencia o una queja.", body: "optional", agent: "fills" },
       assigneeUserId: { kind: "text", max: 200, label: "Responsable", description: "A quién del equipo va; sin él queda en la cola.", body: "optional", agent: "fills" },
       message: { kind: "text", min: 1, max: 4000, label: "Aviso al interlocutor", description: "Aviso breve de que una persona continuará: después el agente ya no puede escribirle.", body: "none", agent: "fills" },
+      asks: { kind: "text", min: 1, max: 400, label: "Qué pide", description: "Una frase con lo que la persona pide, con hechos que ella dijo. Para quien toma el caso; nunca un consejo clínico.", body: "none", agent: "fills" },
+      pending: { kind: "text", min: 1, max: 400, label: "Lo que falta", description: "Lo que aún no se le preguntó o falta hacer para atenderla, en una frase. Vacío si no falta nada.", body: "none", agent: "fills" },
     },
   },
   "persona.recordar": {

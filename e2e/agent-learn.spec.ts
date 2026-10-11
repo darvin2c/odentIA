@@ -134,17 +134,24 @@ test("aprender: revisar, corregir, aprobar la lección, retirarla y aprobar un m
   await send(andres, "¿Tienen estacionamiento?")
   await expect.poll(async () => (await conversations()).length, { timeout: 30_000 }).toBe(2)
   await gotoHydrated(page, tenant(org.slug, "/agent/approvals"))
-  const draft = page.getByLabel("Mensaje que saldrá")
-  await expect(draft).toHaveValue(FAKE_REPLY, { timeout: 45_000 })
+  // Un mensaje se revisa en su cajón: lo que escribió la persona, el borrador y las tres decisiones.
+  await page.getByRole("button", { name: "Revisar y aprobar" }).click({ timeout: 45_000 })
+  const approve = sideSurface(page, { name: "Aprobar un mensaje" })
+  await expect(approve).toContainText("¿Tienen estacionamiento?")
+  const draft = approve.getByLabel("Borrador del agente")
+  await expect(draft).toHaveValue(FAKE_REPLY)
+  await expect(approve.getByRole("button", { name: "Responder yo" })).toBeVisible()
+  await expect(approve.getByRole("button", { name: "Rechazar" })).toBeVisible()
+  await expect(approve).toContainText("Nada sale a la persona hasta que apruebes.")
   const edited = "En Miraflores tenemos estacionamiento gratis para pacientes."
   await draft.fill(edited)
-  await expect(page.getByText("Lo editaste.")).toBeVisible()
+  await expect(approve.getByText("Lo editaste")).toBeVisible()
+  await expect(approve).toContainText("se propondrá guardar tu texto como respuesta oficial")
+  await approve.getByRole("button", { name: "Ver lo que había escrito el agente" }).click()
+  await expect(approve.getByText(FAKE_REPLY, { exact: true })).toBeVisible()
   await info.attach("aprobar-con-edicion", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
-  await page.getByRole("button", { name: "Revisar y aprobar" }).click()
-  const confirm = page.getByRole("alertdialog", { name: "Aprobar y ejecutar el cambio" })
-  await expect(confirm).toContainText(edited)
-  await confirm.getByRole("button", { name: "Aprobar y ejecutar" }).click()
-  await expect(confirm).toBeHidden()
+  await approve.getByRole("button", { name: "Aprobar y enviar" }).click()
+  await expect(approve).toBeHidden()
   const second = (await conversations()).find((row) => row.id !== conversationId)!.id
   await expect
     .poll(async () => {
@@ -161,7 +168,7 @@ test("aprender: revisar, corregir, aprobar la lección, retirarla y aprobar un m
   await page.getByRole("button", { name: "En qué se basó" }).click()
   const trace = page.getByRole("dialog", { name: "En qué se basó" })
   // Esa respuesta ya se corrigió: el servidor lo dice al intentar otra vez.
-  await trace.getByRole("button", { name: "Corregir esta respuesta" }).click()
+  await trace.getByRole("button", { name: "Corregir", exact: true }).click()
   const fromInbox = page.getByRole("dialog", { name: "Corregir una respuesta" })
   await expect(fromInbox).toContainText(QUESTION)
   await fromInbox.getByRole("button", { name: "El tono" }).click()

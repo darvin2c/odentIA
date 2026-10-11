@@ -1,5 +1,5 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto"
-import { agentProposal, agentRunLedger } from "@odentia/db/schema/agent"
+import { agentHandoff, agentProposal, agentRunLedger } from "@odentia/db/schema/agent"
 import { appointment, appointmentBookingLink } from "@odentia/db/schema/agenda"
 import type { Page } from "@playwright/test"
 import { eq } from "drizzle-orm"
@@ -242,6 +242,7 @@ test("crm agente: una corrida que no respondió queda a la vista para revisión"
 test("crm derivación: recepción ve plazo y toma un caso de la cola", async ({
   owner,
   nextEventId,
+  fixtureDb,
 }, info) => {
   const { page, org } = owner
   const tg = await createTelegramConnection(page, org.slug)
@@ -268,16 +269,30 @@ test("crm derivación: recepción ve plazo y toma un caso de la cola", async ({
   expect(handoff.assigneeUserId).toBeNull()
   expect(handoff.dueAt).toBeTruthy()
 
-  // En la Bandeja, quien abre el caso ve el resumen sin releer el hilo: lo que escribió y lo que ya se sabe.
+  // Lo que el agente deja escrito al pasar el caso: qué pide, qué falta y el aviso que recibió la persona.
+  await fixtureDb.update(agentHandoff).set({
+    asks: "Que la atiendan hoy: tiene la cara hinchada desde anoche.",
+    pending: "Saber si puede venir hoy y darle una hora.",
+    notice: "Ya avisé al equipo como urgencia; una persona te escribe en los próximos minutos.",
+  }).where(eq(agentHandoff.id, handoff.id))
+
+  // En la Bandeja, quien abre el caso ve el resumen sin releer el hilo: qué pide, lo que ya se sabe y lo que falta.
   await call(page, "POST", `/api/contacts/${conversation.contact.id}/agent-memory`, org.slug, { text: "Prefiere citas por la tarde" }, 201)
   await gotoHydrated(page, tenant(org.slug, `/inbox?conversation=${conversation.id}`))
   await page.getByRole("button", { name: "Resumen del caso" }).click()
   const brief = surface(page, { name: "Resumen del caso" })
   await expect(brief).toContainText("Ahora")
   await expect(brief).toContainText("El interlocutor pidió atención humana")
+  await expect(brief.getByRole("heading", { level: 3 })).toHaveText(["Qué pide", "Lo que ya se sabe", "Lo que ya hizo el agente", "Lo que falta"])
+  await expect(brief).toContainText("Que la atiendan hoy: tiene la cara hinchada desde anoche.")
+  // Sus mensajes quedan a un toque, en orden.
+  await brief.getByRole("button", { name: "Ver sus 3 mensajes" }).click()
   await expect(brief.getByRole("list").first().getByRole("listitem")).toHaveText(["Hola", "Tengo la cara hinchada desde anoche", "Necesito hablar con recepción"])
   await expect(brief).toContainText("Prefiere citas por la tarde")
+  await expect(brief).toContainText("Le dijo: «Ya avisé al equipo como urgencia; una persona te escribe en los próximos minutos.»")
+  await expect(brief).toContainText("Saber si puede venir hoy y darle una hora.")
   await expect(brief.getByRole("button", { name: "Tomar el caso" })).toBeVisible()
+  await expect(brief.getByRole("button", { name: "Ver la conversación completa" })).toBeVisible()
   await info.attach("resumen-del-caso", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
   await page.setViewportSize({ width: 390, height: 844 })
   await gotoHydrated(page, tenant(org.slug, `/inbox?conversation=${conversation.id}`))
@@ -295,7 +310,15 @@ test("crm derivación: recepción ve plazo y toma un caso de la cola", async ({
   await expect(queueItem).toContainText("Ahora")
   await expect(queueItem).toContainText("Escribió 3 mensajes seguidos")
   await expect(queueItem.getByRole("list").getByRole("listitem")).toHaveText(["Hola", "Tengo la cara hinchada desde anoche", "Necesito hablar con recepción"])
+  await expect(queueItem).toContainText("Se le dijo: «Ya avisé al equipo como urgencia")
   await info.attach("derivacion-aprobaciones", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
+  // «Ver el caso» abre el resumen desde el propio aviso, sin entrar a la conversación.
+  await queueItem.getByRole("button", { name: "Ver el caso" }).click()
+  const fromNotice = surface(page, { name: "Resumen del caso" })
+  await expect(fromNotice).toContainText("Saber si puede venir hoy y darle una hora.")
+  await expect(fromNotice.getByRole("button", { name: "Ver la conversación completa" })).toBeVisible()
+  await page.keyboard.press("Escape")
+  await expect(fromNotice).toBeHidden()
   await queueItem.getByRole("button", { name: "Tomar caso" }).click()
   await expect(queueItem).toContainText("Responsable asignado")
   await expect(queueItem.getByRole("button", { name: "Tomar caso" })).toHaveCount(0)

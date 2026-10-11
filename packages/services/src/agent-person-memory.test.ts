@@ -21,7 +21,7 @@ import {
 } from "./agent-person-memory.js"
 import { addAgentCaseNote } from "./agent-case.js"
 import { getCaseBrief, parseHandoffSaid } from "./agent-case-brief.js"
-import { createHandoff } from "./agent-operations.js"
+import { annotateHandoff, createHandoff, listHandoffs } from "./agent-operations.js"
 import { createChair } from "./appointments.js"
 import { setProfessionalSchedule } from "./availability.js"
 import { createBookingLink, getBookingLinkView, listBookingLinkSlots, reserveBookingLink, startBookingLinkRegistration } from "./booking-links.js"
@@ -224,8 +224,18 @@ describe("resumen del caso para quien lo toma", () => {
         priority: "alta",
         createdBy: "agent",
       }))
+    const created = await run((tx) => listHandoffs(tx, ORG, { conversationId: ana.conversationId }))
+    // Lo que se sabe después de registrarla se completa sin tocar motivo ni prioridad; lo vacío no borra nada.
+    await run((tx) => annotateHandoff(tx, ORG, created[0]!.id, { asks: "Que la atiendan hoy", pending: "  ", notice: "Ya avisé al equipo." }))
+    await run((tx) => annotateHandoff(tx, ORG, created[0]!.id, { pending: "Saber si puede venir hoy" }))
+    await run((tx) => annotateHandoff(tx, OTHER, created[0]!.id, { asks: "Otra clínica no la cambia" }), OTHER)
     const brief = await run((tx) => getCaseBrief(tx, ORG, ana.conversationId))
-    expect(brief.handoff).toMatchObject({ reason: "Urgencia clínica", priority: "alta", status: "abierta" })
+    expect(brief.handoff).toMatchObject({
+      reason: "Urgencia clínica", priority: "alta", status: "abierta",
+      asks: "Que la atiendan hoy", pending: "Saber si puede venir hoy", notice: "Ya avisé al equipo.",
+    })
+    expect(brief.channel).toBe("telegram")
+    expect(brief.contactName).toBeTruthy()
     expect(brief.said).toEqual(["Hola", "Tengo la cara hinchada desde anoche", "¿Me pueden atender?"])
     expect(brief.known.map((item) => [item.origin, item.text, item.channel])).toEqual([
       ["caso", "La cita es para ella; sede Miraflores", null],

@@ -54,7 +54,7 @@ export interface PersonMemory {
   /** Datos guardados: los únicos que se pueden corregir o quitar aquí. */
   facts: PersonFact[]
   /** Lo que sale de datos que ya están en el sistema; se cambia en su fuente. */
-  derived: Array<{ text: string; origin: string }>
+  derived: Array<{ label: string; text: string; origin: string }>
 }
 
 function cleanFact(value: unknown): string {
@@ -232,6 +232,7 @@ export async function getPersonMemory(tx: Db, orgId: string, contactId: string):
     if (link.relationship === "self" || !link.isActive) continue
     const whom = RELATIONSHIP_LABEL[link.relationship]
     derived.push({
+      label: "Por quién escribe",
       text: `También escribe por ${link.displayName}${whom ? `, ${whom}` : ""}`,
       origin: "Vínculo registrado por tu equipo",
     })
@@ -254,6 +255,7 @@ export async function getPersonMemory(tx: Db, orgId: string, contactId: string):
     const [first] = visits
     if (first && visits.length === USUAL_BRANCH_VISITS && visits.every((visit) => visit.branchId === first.branchId)) {
       derived.push({
+        label: "Sede",
         text: `Suele atenderse en la sede ${first.branchName}`,
         origin: `Por sus ${USUAL_BRANCH_VISITS} últimas citas`,
       })

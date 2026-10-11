@@ -62,6 +62,12 @@ export interface AgentHandoff {
   reason: string
   summary: string
   priority: string
+  /** Qué pide la persona, en una frase, si quien derivó lo dejó escrito. */
+  asks: string | null
+  /** Lo que falta preguntar o hacer. */
+  pending: string | null
+  /** El aviso que recibió la persona al pasar su caso. */
+  notice: string | null
   assigneeUserId: string | null
   taskId: string | null
   /** Plazo de recogida/resolución según la prioridad. */
@@ -129,6 +135,8 @@ export interface AnswerBasisItem {
   kind: string
   label: string
   detail?: string
+  /** Id de lo consultado cuando se puede abrir (la lección aplicada). */
+  ref?: string
 }
 
 /** Comprobación de un precio, fecha u hora de la respuesta contra lo consultado. */
@@ -148,6 +156,8 @@ export interface AnswerTrace {
   proposalId: string | null
   agent: string
   outcome: "enviada" | "pendiente" | "bloqueada" | "fallida"
+  /** Lo que escribió la persona y originó la respuesta. */
+  question: string | null
   replyText: string
   basis: AnswerBasisItem[]
   checks: AnswerCheck[]

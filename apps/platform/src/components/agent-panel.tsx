@@ -30,7 +30,9 @@ import {
 import { type QueryClient, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link, useRouterState } from "@tanstack/react-router"
 import { Bot } from "lucide-react"
-import { HandoffSummary, HandoffUrgency } from "./agent/handoff-badges"
+import { ApproveMessageDrawer, messageDraftOf } from "./agent/approve-message-drawer"
+import { CaseBriefDrawer } from "./agent/case-brief"
+import { HandoffNotice } from "./agent/handoff-badges"
 import {
   createContext,
   type ReactNode,
@@ -555,6 +557,8 @@ function ProposalsTab({ when }: { when: WhenFormatter }) {
   const canAgenda = usePermission("appointments.write")
   const canCrm = usePermission("crm.write")
   const [approving, setApproving] = useState<AgentProposal | null>(null)
+  // Un mensaje se revisa y se edita en su cajón, igual que en Aprobaciones.
+  const [message, setMessage] = useState<AgentProposal | null>(null)
   const [rejecting, setRejecting] = useState<string | null>(null)
   const [reason, setReason] = useState("")
   const [outcome, setOutcome] = useState<string | null>(null)
@@ -569,7 +573,9 @@ function ProposalsTab({ when }: { when: WhenFormatter }) {
         method: "POST",
         body: JSON.stringify(input),
       }),
-    onSuccess: (response) => {
+    onSuccess: (response) => settle(response),
+  })
+  function settle(response: { data: AgentProposal }) {
       const proposal = response.data
       // Un desenlace que ya no figura en la lista se dice, no se silencia.
       setOutcome(
@@ -580,11 +586,11 @@ function ProposalsTab({ when }: { when: WhenFormatter }) {
             : approvalOutcomeMessage(proposal),
       )
       setApproving(null)
+      setMessage(null)
       setRejecting(null)
       setReason("")
       invalidateAfterAgentDecision(queryClient)
-    },
-  })
+  }
   const error =
     decide.error instanceof ApiError
       ? decide.error.shape.message
@@ -714,7 +720,8 @@ function ProposalsTab({ when }: { when: WhenFormatter }) {
                 disabled={decide.isPending}
                 onClick={() => {
                   decide.reset()
-                  setApproving(proposal)
+                  if (messageDraftOf(proposal) !== null) setMessage(proposal)
+                  else setApproving(proposal)
                 }}
               >
                 Revisar y aprobar
@@ -803,6 +810,7 @@ function ProposalsTab({ when }: { when: WhenFormatter }) {
         }}
         onConfirm={() => approving && decide.mutate({ id: approving.id, decision: "aprobada" })}
       />
+      <ApproveMessageDrawer proposal={message} onClose={() => setMessage(null)} onDecided={settle} />
     </div>
   )
 }
@@ -810,6 +818,7 @@ function ProposalsTab({ when }: { when: WhenFormatter }) {
 function HandoffsTab({ when }: { when: WhenFormatter }) {
   const queryClient = useQueryClient()
   const canTasks = usePermission("tasks.write")
+  const [briefFor, setBriefFor] = useState<AgentHandoff | null>(null)
   const query = useQuery({
     queryKey: ["agent-panel-handoffs"],
     queryFn: () => apiFetch<{ data: AgentHandoff[] }>("/api/agent/handoffs?open=1&limit=50"),
@@ -856,27 +865,11 @@ function HandoffsTab({ when }: { when: WhenFormatter }) {
               key={handoff.id}
               className="flex flex-col gap-2 rounded-2xl border bg-card p-4 text-sm"
             >
-              <div className="flex flex-wrap items-center gap-2">
-                <HandoffUrgency priority={handoff.priority} />
-                <Badge variant="secondary">
+              <HandoffNotice handoff={handoff} onOpenCase={setBriefFor}>
+                <span className="text-xs text-muted-foreground">
                   {handoff.status === "tomada" ? "Responsable asignado" : "En cola por recoger"}
-                </Badge>
-              </div>
-              <p className="font-semibold">
-                {handoff.contactName ?? "Interlocutor no disponible"}
-                {handoff.channel ? (
-                  <span className="font-normal text-muted-foreground">
-                    {" "}
-                    · {channelLabel(handoff.channel)}
-                  </span>
-                ) : null}
-              </p>
-              <p className="font-semibold">{handoff.reason}</p>
-              <HandoffSummary reason={handoff.reason} summary={handoff.summary} />
-              {handoff.dueAt ? (
-                <p className="text-xs text-muted-foreground">Vence {when(handoff.dueAt)}</p>
-              ) : null}
-              <div className="flex flex-wrap items-center gap-3">
+                  {handoff.dueAt ? ` · vence ${when(handoff.dueAt)}` : ""}
+                </span>
                 {handoff.status === "abierta" && canTasks ? (
                   <SubmitButton
                     size="sm"
@@ -901,11 +894,18 @@ function HandoffsTab({ when }: { when: WhenFormatter }) {
                     Abrir pendiente
                   </Link>
                 ) : null}
-              </div>
+              </HandoffNotice>
             </li>
           )
         })}
       </ul>
+      <CaseBriefDrawer
+        conversationId={briefFor?.conversationId ?? null}
+        name={briefFor?.contactName ?? "Interlocutor"}
+        canClaim={canTasks}
+        onClose={() => setBriefFor(null)}
+        onClaimed={() => invalidateAfterAgentDecision(queryClient)}
+      />
     </div>
   )
 }

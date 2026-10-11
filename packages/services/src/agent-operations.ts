@@ -2170,6 +2170,12 @@ export interface HandoffItem {
   reason: string
   summary: string
   priority: HandoffPriority
+  /** Qué pide la persona, en una frase; nulo si quien derivó no lo dejó escrito. */
+  asks: string | null
+  /** Lo que falta preguntar o hacer; nulo si no se dejó escrito. */
+  pending: string | null
+  /** El aviso que recibió la persona; nulo si no salió ninguno. */
+  notice: string | null
   assigneeUserId: string | null
   taskId: string | null
   /** Plazo de la tarea de seguimiento según la prioridad (visible en la cola). */
@@ -2236,6 +2242,9 @@ async function enrichHandoffs(tx: Db, rows: HandoffRow[]): Promise<HandoffItem[]
       reason: row.reason,
       summary: row.summary,
       priority: row.priority as HandoffPriority,
+      asks: row.asks,
+      pending: row.pending,
+      notice: row.notice,
       assigneeUserId: row.assigneeUserId,
       taskId: row.taskId,
       dueAt: row.taskId ? (dueByTask.get(row.taskId)?.toISOString() ?? null) : null,
@@ -2564,6 +2573,8 @@ export async function createHandoff(
     /** Reutiliza el pendiente origen; no crea una segunda tarea. */
     taskId?: string
     createdBy?: string
+    asks?: string | null
+    pending?: string | null
   },
 ): Promise<HandoffItem> {
   const conv = await requireConversationInOrg(tx, orgId, input.conversationId)
@@ -2614,6 +2625,8 @@ export async function createHandoff(
       reason,
       summary,
       priority,
+      asks: cleanReason(input.asks ?? "", HANDOFF_BRIEF_CHARS) || null,
+      pending: cleanReason(input.pending ?? "", HANDOFF_BRIEF_CHARS) || null,
       assigneeUserId,
       taskId: task.id,
       createdBy,
@@ -2641,6 +2654,34 @@ export async function createHandoff(
   }
   await notify(tx, { orgId, kind: "agent.handoff.created", at: new Date().toISOString() })
   return enrichHandoff(tx, row)
+}
+
+const HANDOFF_BRIEF_CHARS = 400
+const HANDOFF_NOTICE_CHARS = 4000
+
+/**
+ * Completa una derivación ya registrada con lo que se sabe después de crearla:
+ * qué pide la persona, qué falta y el aviso que recibió. Solo escribe lo que
+ * llega con texto; no cambia motivo, prioridad ni responsable.
+ */
+export async function annotateHandoff(
+  tx: Db,
+  orgId: string,
+  handoffId: string,
+  input: { asks?: string | null; pending?: string | null; notice?: string | null },
+): Promise<void> {
+  const patch: { asks?: string; pending?: string; notice?: string } = {}
+  const asks = cleanReason(input.asks ?? "", HANDOFF_BRIEF_CHARS)
+  if (asks) patch.asks = asks
+  const pending = cleanReason(input.pending ?? "", HANDOFF_BRIEF_CHARS)
+  if (pending) patch.pending = pending
+  const notice = (input.notice ?? "").trim().slice(0, HANDOFF_NOTICE_CHARS)
+  if (notice) patch.notice = notice
+  if (Object.keys(patch).length === 0) return
+  await tx
+    .update(agentHandoff)
+    .set(patch)
+    .where(and(eq(agentHandoff.id, handoffId), eq(agentHandoff.organizationId, orgId)))
 }
 
 export async function listHandoffs(

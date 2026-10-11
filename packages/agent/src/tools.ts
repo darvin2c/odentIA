@@ -12,6 +12,7 @@ import {
   confirmProposalByContact,
   BOOKING_LINK_TTL_HOURS,
   createBookingLink,
+  annotateHandoff,
   createHandoff,
   createProposal,
   createTask,
@@ -136,6 +137,8 @@ export interface AgentToolCtx {
   secretsKey: Buffer
   /** La herramienta de handoff lo marca; el grafo termina el turno. */
   handedOff: boolean
+  /** La derivación registrada en esta corrida, para completarla con el aviso que recibió la persona. */
+  handoffId?: string
   /** Simulación: las herramientas no escriben nada, solo describen. */
   dryRun: boolean
   /** Mensaje hipotético solo para simulación (no se persiste). */
@@ -237,13 +240,14 @@ export async function performHandoff(
       )
       return
     }
-    await createHandoff(tx, ctx.orgId, null, {
+    const handoff = await createHandoff(tx, ctx.orgId, null, {
       conversationId: ctx.conversationId,
       reason,
       summary: summary?.trim() ? summary : reason,
       priority,
       createdBy: "agent",
     })
+    ctx.handoffId = handoff.id
   })
   ctx.decisionRecorded = true
   ctx.handedOff = true
@@ -1206,8 +1210,15 @@ export function makeAgentTools(ctx: AgentToolCtx) {
   )
 
   const requestHandoff = tool(
-    async ({ reason, summary, priority, assigneeUserId, message }: { reason: string; summary?: string; priority?: string; assigneeUserId?: string; message?: string }) => {
+    async ({ reason, summary, priority, assigneeUserId, message, asks, pending }: { reason: string; summary?: string; priority?: string; assigneeUserId?: string; message?: string; asks?: string; pending?: string }) => {
       const notice = message?.trim()
+      // Lo que queda escrito para quien toma el caso: qué pide, qué falta y el
+      // aviso que de verdad salió (no el que se intentó).
+      const annotate = (sent: boolean) => {
+        const handoffId = ctx.handoffId
+        if (!handoffId) return Promise.resolve()
+        return inOrg((tx) => annotateHandoff(tx, ctx.orgId, handoffId, { asks, pending, notice: sent ? notice : null }))
+      }
       if (ctx.dryRun) {
         await performHandoff(ctx, reason, summary)
         if (notice) {
@@ -1225,6 +1236,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
         // no se registra otra derivación, solo sale el aviso al interlocutor.
         if (!notice) return "El caso ya pasó a una persona. Falta el aviso al interlocutor: llama de nuevo con message."
         const outcome = await propose("enviar_mensaje", { kind: "text", text: notice }, "request_human_handoff")
+        await annotate(ctx.replySettled === true)
         return ctx.replySettled
           ? "Aviso al interlocutor registrado. No envíes más mensajes."
           : `El aviso al interlocutor no salió: ${outcome}`
@@ -1238,9 +1250,12 @@ export function makeAgentTools(ctx: AgentToolCtx) {
           priority: validPriority,
           ...(assigneeUserId ? { assigneeUserId } : {}),
           createdBy: "agent",
+          asks,
+          pending,
         }),
       )
       ctx.handedOff = true
+      ctx.handoffId = handoff.id
       const destino = handoff.assigneeUserId ? "con responsable asignado" : "en la cola del equipo por recoger"
       // El aviso sale después de crear la derivación: si esta falla, no se le
       // promete al interlocutor una atención que nadie registró.
@@ -1248,6 +1263,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       if (notice) {
         const outcome = await propose("enviar_mensaje", { kind: "text", text: notice }, "request_human_handoff")
         noticeResult = ctx.replySettled ? " Aviso al interlocutor registrado." : ` El aviso al interlocutor no salió: ${outcome}`
+        if (ctx.replySettled) await annotate(true)
       }
       return `Derivado a humano (${destino}, plazo ${handoff.dueAt ?? "sin plazo"}).${noticeResult} No envíes más mensajes.`
     },

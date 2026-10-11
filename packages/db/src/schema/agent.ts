@@ -247,6 +247,12 @@ export const agentHandoff = pgTable(
     reason: text("reason").notNull(),
     summary: text("summary").notNull(),
     priority: text("priority").notNull().default("media"),
+    /** Qué pide la persona, en una frase, cuando quien deriva lo deja escrito. */
+    asks: text("asks"),
+    /** Lo que aún no se le preguntó o falta hacer para atenderla. */
+    pending: text("pending"),
+    /** El aviso que recibió la persona al pasar su caso. */
+    notice: text("notice"),
     assigneeUserId: text("assignee_user_id"),
     taskId: uuid("task_id"),
     createdBy: text("created_by").notNull().default("agent"),
@@ -464,6 +470,8 @@ export interface AnswerBasisItem {
   kind: string
   label: string
   detail?: string
+  /** Id de lo consultado cuando se puede abrir desde la ficha (hoy, la lección aplicada). */
+  ref?: string
 }
 
 export const ANSWER_CHECK_KINDS = ["precio", "hora", "fecha"] as const

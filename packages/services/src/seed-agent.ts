@@ -208,6 +208,9 @@ export async function seedAgent(
         contactId: first.contactId,
         reason: "La persona pide hablar con un humano",
         summary: "Escribió: «Hola» · «Prefiero que me atienda una persona para ver mi cita» · «¿Me pueden llamar?»",
+        asks: "Que una persona la llame para ver su cita.",
+        pending: "Saber a qué hora le viene bien la llamada.",
+        notice: "Claro. Dejé tu pedido a recepción y una persona te va a llamar hoy.",
         priority: "media",
         createdBy: "agent",
       })

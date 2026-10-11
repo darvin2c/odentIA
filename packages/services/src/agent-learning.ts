@@ -308,6 +308,17 @@ export async function markReviewOk(
   return getLesson(tx, orgId, lesson.id)
 }
 
+/**
+ * «Sí, estuvo bien» desde la ficha de una respuesta en la Bandeja. Si la
+ * respuesta esperaba revisión, sale de la lista; si no, queda registrada como
+ * revisada y bien. Repetirlo no cambia nada.
+ */
+export async function markAnswerOk(tx: Db, orgId: string, actorUserId: string, traceId: string): Promise<void> {
+  const item = await flagAnswerForReview(tx, orgId, actorUserId, traceId)
+  if (item.status !== "pendiente") return
+  await markReviewOk(tx, orgId, actorUserId, item.id)
+}
+
 /** Una persona marca una respuesta desde la Bandeja para corregirla; devuelve su entrada en la lista. */
 export async function flagAnswerForReview(tx: Db, orgId: string, actorUserId: string, traceId: string): Promise<ReviewItem> {
   const [trace] = await tx
