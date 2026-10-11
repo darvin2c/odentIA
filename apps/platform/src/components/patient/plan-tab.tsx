@@ -1,3 +1,4 @@
+import { formatMoney, parseMoney } from "@odentia/clinical"
 import { Badge, Button, Checkbox, Field, FieldLabel, Input, Textarea } from "@odentia/ui"
 import {
   ConfirmDialog,
@@ -10,36 +11,38 @@ import {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { type ColumnDef, getCoreRowModel, type Table, useReactTable } from "@tanstack/react-table"
 import { useEffect, useId, useMemo, useRef, useState } from "react"
-import { ApiError, apiFetch } from "../../lib/api"
+import { ApiError, apiFetch, apiFetchBytes } from "../../lib/api"
 import {
+  type AdjustBudgetLineBody,
   type BudgetLine,
   type BudgetWithTotals,
+  adjustBudgetLinesApi,
   budgetNumberLabel,
   budgetStatusLabel,
   cancelBudgetApi,
   createBudgetApi,
   type DecideBudgetBody,
   decideBudgetApi,
+  deliverBudgetApi,
   fetchBudgetDetail,
   fetchBudgets,
   fetchTreatmentPlanDetail,
   fetchTreatmentPlans,
   planDecisionLabel,
-  presentBudgetApi,
   reviseBudgetApi,
   updateBudgetApi,
 } from "../../lib/budgets"
 import {
-  centsFromInput,
-  createChargeApi,
   createOptionGroupApi,
   fetchResponsibilities,
-  mutationMessage as journeyMessage,
   setItemAlternativeApi,
 } from "../../lib/clinical-journey"
 import { usePermission } from "../../lib/crm"
+import { useOrgProfile } from "../../lib/org"
+import { useOrgEvents } from "../../lib/org-events"
 import type { PatientFull, PlanItem, TreatmentPlanWithStatus } from "../../lib/patients"
-import { formatMoney } from "../../lib/services"
+import { fetchPromotions, type Promotion } from "../../lib/promotions"
+import { SendFinancialDocument } from "../finance-documents/SendFinancialDocument"
 import { ChoiceSelect } from "../ui/choice-select"
 
 function mutationMessage(err: unknown): string {
@@ -102,16 +105,21 @@ export function PlanTab({
   const queryClient = useQueryClient()
   const canWrite = usePermission("clinical.write")
   const canRead = usePermission("clinical.read")
-  // Los presupuestos son documentos de caja: sin `finance.read` el plan se
-  // muestra con la decisión de cada tratamiento y sin importes ni propuestas.
-  const canFinance = usePermission("finance.read")
-  const canFinanceWrite = usePermission("finance.write")
+  // Presupuestos con permiso propio: el odontólogo prepara, ajusta e imprime
+  // los de su plan sin caja; caja decide desde la cuenta sin clínica. Sin
+  // `budgets.read` el plan muestra decisiones sin importes ni propuestas.
+  const canBudgets = usePermission("budgets.read")
+  const canBudgetsWrite = usePermission("budgets.write")
+  const canDecide = usePermission("budgets.decide")
+  const profile = useOrgProfile()
+  const locale = profile.data?.locale
+  const money = (cents: number | null, currency: string): string =>
+    cents == null || !locale ? "…" : formatMoney(cents, currency, locale)
   const uid = useId()
 
   const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null)
   const [selectedBudgetId, setSelectedBudgetId] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
-
   const [prepareOpen, setPrepareOpen] = useState(false)
   const [prepareIds, setPrepareIds] = useState<string[]>([])
   const [prepareTitle, setPrepareTitle] = useState("")
@@ -123,17 +131,15 @@ export function PlanTab({
   const [editNotes, setEditNotes] = useState("")
   const [editError, setEditError] = useState<string | null>(null)
 
-  const [presenting, setPresenting] = useState(false)
+  const [adjustOpen, setAdjustOpen] = useState(false)
+  const [adjustError, setAdjustError] = useState<string | null>(null)
+  const [printing, setPrinting] = useState(false)
   const [cancellingBudget, setCancellingBudget] = useState<BudgetWithTotals | null>(null)
 
   const [reviseOpen, setReviseOpen] = useState(false)
   const [reviseIds, setReviseIds] = useState<string[]>([])
   const [reviseReason, setReviseReason] = useState("")
   const [reviseError, setReviseError] = useState<string | null>(null)
-
-  const [chargeLine, setChargeLine] = useState<BudgetLine | null>(null)
-  const [chargeAmount, setChargeAmount] = useState("")
-  const [chargeError, setChargeError] = useState<string | null>(null)
 
   const [decisionOpen, setDecisionOpen] = useState(false)
   const [acceptedIds, setAcceptedIds] = useState<string[]>([])
@@ -155,7 +161,7 @@ export function PlanTab({
   const budgetsQuery = useQuery({
     queryKey: ["budgets", patientId],
     queryFn: () => fetchBudgets(patientId),
-    enabled: canRead && canFinance,
+    enabled: canRead && canBudgets,
   })
   const planDetailQuery = useQuery({
     queryKey: ["treatment-plan", patientId, selectedPlanId],
@@ -175,9 +181,17 @@ export function PlanTab({
   const budgetDetailQuery = useQuery({
     queryKey: ["budget", patientId, selectedBudgetId],
     queryFn: () => fetchBudgetDetail(patientId, selectedBudgetId as string),
-    enabled: canRead && canFinance && selectedBudgetId != null,
+    enabled: canRead && canBudgets && selectedBudgetId != null,
   })
-
+  const promotionsQuery = useQuery({
+    queryKey: ["promotions", "vigentes"],
+    queryFn: () => fetchPromotions({ scope: "vigentes" }),
+    enabled: canRead && canBudgetsWrite,
+  })
+  useOrgEvents(["budget.updated", "encounter.finalized", "patient.account.updated"], () => {
+    void queryClient.invalidateQueries({ queryKey: ["budgets", patientId] })
+    void queryClient.invalidateQueries({ queryKey: ["budget", patientId] })
+  })
   const plans = useMemo(() => plansQuery.data?.data ?? [], [plansQuery.data])
   const budgets = useMemo(() => budgetsQuery.data?.data ?? [], [budgetsQuery.data])
   const budgetsById = useMemo(() => new Map(budgets.map((b) => [b.id, b])), [budgets])
@@ -297,17 +311,69 @@ export function PlanTab({
     onError: (err) => setEditError(mutationMessage(err)),
   })
 
-  const presentMutation = useMutation({
-    mutationFn: () => writeBudget(() => presentBudgetApi(patientId, selectedBudget!.id)),
+  const adjustMutation = useMutation({
+    mutationFn: (lines: AdjustBudgetLineBody[]) =>
+      writeBudget(() => adjustBudgetLinesApi(patientId, selectedBudget!.id, { lines })),
     onSuccess: () => {
-      setPresenting(false)
+      setAdjustOpen(false)
+      setAdjustError(null)
       setActionError(null)
     },
-    onError: (err) => {
-      setActionError(mutationMessage(err))
-      setPresenting(false)
-    },
+    onError: (err) => setAdjustError(mutationMessage(err)),
   })
+
+  const pdfPath = (budgetId: string) =>
+    `/api/patients/${patientId}/financial-document-pdf?documentType=budget&documentId=${budgetId}`
+
+  const openPdfBytes = (win: Window | null, bytes: ArrayBuffer) => {
+    const url = URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }))
+    if (win && !win.closed) {
+      win.location.href = url
+    } else {
+      window.open(url, "_blank", "noopener")
+    }
+  }
+
+  /**
+   * Imprimir y entregar: el PDF real se genera ANTES de transicionar; si la
+   * generación falla no se marca entregado. La ventana se abre en la
+   * interacción (sin bloqueo) y recibe el blob con la copia ya entregada.
+   */
+  const handleDeliverPrint = async () => {
+    if (!selectedBudget || writeBlocked || printing) return
+    const budgetId = selectedBudget.id
+    const win = window.open("", "_blank", "noopener")
+    setPrinting(true)
+    setActionError(null)
+    try {
+      await apiFetchBytes(pdfPath(budgetId))
+      await writeBudget(() => deliverBudgetApi(patientId, budgetId))
+      const bytes = await apiFetchBytes(pdfPath(budgetId))
+      openPdfBytes(win, bytes)
+    } catch (err) {
+      if (win && !win.closed) win.close()
+      setActionError(mutationMessage(err))
+    } finally {
+      setPrinting(false)
+    }
+  }
+
+  /** Reimprimir un presupuesto ya entregado con el documento del servidor. */
+  const handleReprint = async () => {
+    if (!selectedBudget || writeBlocked || printing) return
+    const win = window.open("", "_blank", "noopener")
+    setPrinting(true)
+    setActionError(null)
+    try {
+      const bytes = await apiFetchBytes(pdfPath(selectedBudget.id))
+      openPdfBytes(win, bytes)
+    } catch (err) {
+      if (win && !win.closed) win.close()
+      setActionError(mutationMessage(err))
+    } finally {
+      setPrinting(false)
+    }
+  }
 
   const decideMutation = useMutation({
     mutationFn: (body: DecideBudgetBody) =>
@@ -352,22 +418,6 @@ export function PlanTab({
     onError: (err) => setReviseError(mutationMessage(err)),
   })
 
-  const chargeMutation = useMutation({
-    mutationFn: () =>
-      writeBudget(() =>
-        createChargeApi(patientId, {
-          budgetItemId: chargeLine!.id,
-          amountCents: centsFromInput(chargeAmount) ?? undefined,
-        }),
-      ),
-    onSuccess: () => {
-      setChargeLine(null)
-      setChargeAmount("")
-      setChargeError(null)
-    },
-    onError: (err) => setChargeError(journeyMessage(err)),
-  })
-
   const groupMutation = useMutation({
     mutationFn: () =>
       writeBudget(() =>
@@ -399,11 +449,11 @@ export function PlanTab({
     updateMutation.isPending ||
     decideMutation.isPending ||
     cancelMutation.isPending ||
-    presentMutation.isPending ||
+    adjustMutation.isPending ||
     reviseMutation.isPending ||
     groupMutation.isPending ||
     alternativeMutation.isPending ||
-    chargeMutation.isPending
+    printing
   const writeBlocked = disabled || busy
 
   const openPlan = (id: string) => {
@@ -478,7 +528,7 @@ export function PlanTab({
             <span className="text-muted-foreground">Sin tarifa</span>
           ) : (
             <span className="whitespace-nowrap tabular-nums">
-              {formatMoney(row.original.priceCents, row.original.currency)}
+              {money(row.original.priceCents, row.original.currency)}
             </span>
           ),
       },
@@ -523,7 +573,7 @@ export function PlanTab({
         cell: ({ row }) => <Badge variant="outline">{row.original.status}</Badge>,
       },
     ],
-    [budgetsById],
+    [budgetsById, locale],
   )
   const itemTable = useReactTable({
     data: planItems,
@@ -536,27 +586,48 @@ export function PlanTab({
       {
         accessorKey: "title",
         header: "Tratamiento",
-        cell: ({ row }) => (
-          <span className="flex flex-col">
-            <span className="font-medium">{row.original.title}</span>
-            <span className="text-xs text-muted-foreground">
-              {treatmentSiteLabel(row.original)}
+        cell: ({ row }) => {
+          const line = row.original
+          return (
+            <span className="flex flex-col">
+              <span className="font-medium">{line.title}</span>
+              <span className="text-xs text-muted-foreground">{treatmentSiteLabel(line)}</span>
+              {line.billingMode === "session" ? (
+                <span className="text-xs text-muted-foreground">
+                  Por sesión{line.sessionsPlanned != null ? ` · ${line.sessionsPlanned} visitas` : ""}
+                </span>
+              ) : null}
+              {line.promotionName ? (
+                <span className="text-xs text-muted-foreground">Promoción: {line.promotionName}</span>
+              ) : null}
             </span>
-          </span>
-        ),
+          )
+        },
       },
       {
         accessorKey: "priceCents",
-        header: "Cotizado",
+        header: "Precio acordado",
         meta: { view: { primary: true } },
-        cell: ({ row }) =>
-          row.original.priceCents == null ? (
-            <span className="text-muted-foreground">Sin tarifa</span>
-          ) : (
-            <span className="whitespace-nowrap tabular-nums">
-              {formatMoney(row.original.priceCents, row.original.currency)}
+        cell: ({ row }) => {
+          const line = row.original
+          if (line.priceCents == null) {
+            return <span className="text-muted-foreground">Sin tarifa</span>
+          }
+          const discounted =
+            line.tariffPriceCents != null && line.tariffPriceCents > line.priceCents
+          return (
+            <span className="flex flex-col items-end">
+              <span className="whitespace-nowrap tabular-nums">
+                {money(line.priceCents, line.currency)}
+              </span>
+              {discounted ? (
+                <span className="whitespace-nowrap text-xs text-muted-foreground tabular-nums">
+                  Tarifa {money(line.tariffPriceCents, line.currency)}
+                </span>
+              ) : null}
             </span>
-          ),
+          )
+        },
       },
       {
         accessorKey: "decision",
@@ -572,11 +643,7 @@ export function PlanTab({
                   : "secondary"
             }
           >
-            {row.original.decision === "pendiente"
-              ? "Pendiente"
-              : row.original.decision === "aceptado"
-                ? "Aceptado"
-                : "Rechazado"}
+            {planDecisionLabel(row.original.decision)}
           </Badge>
         ),
       },
@@ -586,7 +653,7 @@ export function PlanTab({
         cell: ({ row }) => <Badge variant="outline">{row.original.itemStatus}</Badge>,
       },
     ],
-    [],
+    [locale],
   )
   const lineTable = useReactTable({
     data: selectedBudget?.items ?? [],
@@ -594,15 +661,15 @@ export function PlanTab({
     getCoreRowModel: getCoreRowModel(),
   })
 
-  if (plansQuery.isPending || (canFinance && budgetsQuery.isPending)) return <LoadingState />
-  const loadError = plansQuery.error ?? (canFinance ? budgetsQuery.error : null)
+  if (plansQuery.isPending || (canBudgets && budgetsQuery.isPending)) return <LoadingState />
+  const loadError = plansQuery.error ?? (canBudgets ? budgetsQuery.error : null)
   if (loadError) {
     return (
       <ErrorState
         error={loadError instanceof ApiError ? loadError.shape : null}
         onRetry={() => {
           void plansQuery.refetch()
-          if (canFinance) void budgetsQuery.refetch()
+          if (canBudgets) void budgetsQuery.refetch()
         }}
       />
     )
@@ -803,7 +870,7 @@ export function PlanTab({
               <section aria-label="Presupuestos del plan">
                 <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                   <h4 className="text-sm font-semibold">Presupuestos</h4>
-                  {canFinanceWrite && eligibleItems.length > 0 ? (
+                  {canBudgetsWrite && eligibleItems.length > 0 ? (
                     <Button
                       type="button"
                       size="sm"
@@ -820,10 +887,11 @@ export function PlanTab({
                     </Button>
                   ) : null}
                 </div>
-                {!canFinance ? (
+                {!canBudgets ? (
                   <p className="text-sm text-muted-foreground">
-                    Los presupuestos los prepara y decide caja: tu permiso no incluye importes ni
-                    propuestas. La decisión de cada tratamiento se ve en la tabla de arriba.
+                    Los presupuestos los prepara el odontólogo de este plan: tu permiso no incluye
+                    importes ni propuestas. La decisión de cada tratamiento se ve en la tabla de
+                    arriba.
                   </p>
                 ) : planBudgets.length === 0 ? (
                   <p className="text-sm text-muted-foreground">
@@ -847,8 +915,11 @@ export function PlanTab({
                               {budgetStatusLabel(b.status)} · {b.items.length} tratamiento
                               {b.items.length === 1 ? "" : "s"}
                               {b.totalCents != null
-                                ? ` · ${formatMoney(b.totalCents, b.currency)}`
+                                ? ` · ${money(b.totalCents, b.currency)}`
                                 : " · total con tarifas pendientes"}
+                              {b.discountCents != null && b.discountCents > 0
+                                ? ` · descuento ${money(b.discountCents, b.currency)}`
+                                : ""}
                             </span>
                           </span>
                         </Button>
@@ -861,17 +932,33 @@ export function PlanTab({
               {selectedBudget ? (
                 <BudgetDetail
                   budget={selectedBudget}
-                  canWrite={canFinanceWrite}
+                  patientId={patientId}
+                  canWrite={canBudgetsWrite}
+                  canDecide={canDecide}
                   writeBlocked={writeBlocked}
+                  money={money}
                   onEdit={() => {
                     setEditTitle(selectedBudget.title)
                     setEditNotes(selectedBudget.notes ?? "")
                     setEditError(null)
                     setEditOpen(true)
                   }}
-                  onPresent={() => setPresenting(true)}
+                  onAdjust={() => {
+                    setAdjustError(null)
+                    setAdjustOpen(true)
+                  }}
+                  onDeliver={() => void handleDeliverPrint()}
+                  onPrint={() => void handleReprint()}
+                  onSent={() => {
+                    void queryClient.invalidateQueries({ queryKey: ["budgets", patientId] })
+                    void queryClient.invalidateQueries({ queryKey: ["budget", patientId] })
+                  }}
                   onDecide={() => {
-                    setAcceptedIds(selectedBudget.items.map((i) => i.planItemId))
+                    setAcceptedIds(
+                      selectedBudget.items
+                        .filter((i) => i.decision === "aceptado")
+                        .map((i) => i.planItemId),
+                    )
                     setAcceptedBy(selectedBudget.acceptedByName ?? "")
                     setDecisionNote(selectedBudget.decisionNote ?? "")
                     setDecisionByContactId(selectedBudget.decisionContactId ?? "")
@@ -885,14 +972,12 @@ export function PlanTab({
                     setReviseError(null)
                     setReviseOpen(true)
                   }}
-                  onCharge={(line) => {
-                    setChargeAmount(String((line.priceCents ?? 0) / 100))
-                    setChargeError(null)
-                    setChargeLine(line)
-                  }}
+                  delivering={printing}
+                  printing={printing}
                   revisionAvailable={["presentado", "aceptado", "parcial", "pospuesto"].includes(
                     selectedBudget.status,
                   )}
+                  decidable={["presentado", "parcial", "pospuesto"].includes(selectedBudget.status)}
                   lineTable={lineTable}
                 />
               ) : null}
@@ -909,6 +994,7 @@ export function PlanTab({
           initialIds={prepareIds}
           initialTitle={prepareTitle}
           initialNotes={prepareNotes}
+          money={money}
           error={prepareError}
           pending={createBudgetMutation.isPending}
           onClose={() => setPrepareOpen(false)}
@@ -973,6 +1059,7 @@ export function PlanTab({
           initialNote={decisionNote}
           deciders={deciders}
           deciderId={decisionByContactId}
+          money={money}
           onDeciderChange={setDecisionByContactId}
           error={decisionError}
           pending={decideMutation.isPending}
@@ -987,21 +1074,19 @@ export function PlanTab({
         />
       ) : null}
 
-      <ConfirmDialog
-        open={presenting}
-        title="Presentar presupuesto"
-        description={
-          selectedBudget
-            ? `Se presentará ${budgetNumberLabel(selectedBudget.budgetNumber)} «${selectedBudget.title}» con ${selectedBudget.items.length} tratamiento${selectedBudget.items.length === 1 ? "" : "s"}. La cotización quedará congelada y el borrador ya no será editable.`
-            : "Se presentará el presupuesto."
-        }
-        confirmLabel="Presentar"
-        onConfirm={() => presentMutation.mutate()}
-        pending={presentMutation.isPending}
-        onClose={() => {
-          if (!presentMutation.isPending) setPresenting(false)
-        }}
-      />
+      {adjustOpen && selectedBudget ? (
+        <AdjustBudgetDialog
+          budget={selectedBudget}
+          promotions={promotionsQuery.data?.data ?? []}
+          money={money}
+          locale={locale}
+          error={adjustError}
+          pending={adjustMutation.isPending}
+          onClose={() => setAdjustOpen(false)}
+          onSubmit={(lines) => adjustMutation.mutate(lines)}
+        />
+      ) : null}
+
 
       <ConfirmDialog
         open={cancellingBudget != null}
@@ -1076,70 +1161,55 @@ export function PlanTab({
         </Field>
       </FormDrawer>
 
-      <FormDrawer
-        open={chargeLine != null}
-        title={`Generar cargo: ${chargeLine?.title ?? ""}`}
-        description="El cargo conserva la línea de la propuesta y su tratamiento, y no puede superar el importe pendiente de esa línea."
-        error={chargeLine ? chargeError : null}
-        isSubmitting={chargeMutation.isPending}
-        submitLabel="Generar cargo"
-        onClose={() => {
-          if (!chargeMutation.isPending) setChargeLine(null)
-        }}
-        onSubmit={(event) => {
-          event.preventDefault()
-          if (centsFromInput(chargeAmount) == null) {
-            setChargeError("Indica un importe positivo con hasta dos decimales.")
-            return
-          }
-          chargeMutation.mutate()
-        }}
-      >
-        <Field>
-          <FieldLabel htmlFor={`${uid}-charge-amount`}>Importe del cargo</FieldLabel>
-          <Input
-            id={`${uid}-charge-amount`}
-            value={chargeAmount}
-            onChange={(event) => setChargeAmount(event.target.value)}
-          />
-        </Field>
-      </FormDrawer>
     </div>
   )
 }
 
 function BudgetDetail({
   budget,
+  patientId,
   canWrite,
+  canDecide,
   writeBlocked,
+  money,
   onEdit,
-  onPresent,
+  onAdjust,
+  onDeliver,
+  onPrint,
+  onSent,
   onDecide,
   onCancel,
   onRevise,
-  onCharge,
+  delivering,
+  printing,
   revisionAvailable,
+  decidable,
   lineTable,
 }: {
   budget: BudgetWithTotals
+  patientId: string
   canWrite: boolean
+  canDecide: boolean
   writeBlocked: boolean
+  money: (cents: number | null, currency: string) => string
   onEdit: () => void
-  onPresent: () => void
+  onAdjust: () => void
+  onDeliver: () => void
+  onPrint: () => void
+  onSent: () => void
   onDecide: () => void
   onCancel: () => void
   onRevise: () => void
-  onCharge: (line: BudgetLine) => void
-  /** Revisión vigente o decisiones ya tomadas: la revisión se ofrece después de presentar. */
+  delivering: boolean
+  printing: boolean
+  /** Revisión vigente o decisiones ya tomadas: la revisión se ofrece después de entregar. */
   revisionAvailable: boolean
+  decidable: boolean
   lineTable: Table<BudgetLine>
 }) {
   const isDraft = budget.status === "borrador"
-  const isPresented = budget.status === "presentado"
-  const canCancel = isDraft || isPresented
-  const acceptedLines = budget.items.filter(
-    (line) => line.decision === "aceptado" && line.priceCents != null,
-  )
+  const canCancel = isDraft || budget.status === "presentado"
+  const sessionLines = budget.items.filter((line) => line.billingMode === "session")
   return (
     <section
       aria-label="Detalle del presupuesto"
@@ -1153,7 +1223,7 @@ function BudgetDetail({
           variant={
             isDraft
               ? "secondary"
-              : isPresented
+              : budget.status === "presentado"
                 ? "default"
                 : budget.status === "cancelado"
                   ? "destructive"
@@ -1165,14 +1235,23 @@ function BudgetDetail({
       </div>
       <div className="flex flex-wrap gap-x-6 gap-y-1 text-sm text-muted-foreground">
         <span>
+          Según tarifa:{" "}
+          {budget.tariffTotalCents == null
+            ? "con tarifas pendientes"
+            : money(budget.tariffTotalCents, budget.currency)}
+        </span>
+        {budget.discountCents != null && budget.discountCents > 0 ? (
+          <span>Descuento: −{money(budget.discountCents, budget.currency)}</span>
+        ) : null}
+        <span className="font-medium text-foreground">
           Total:{" "}
           {budget.totalCents == null
             ? "con tarifas pendientes"
-            : formatMoney(budget.totalCents, budget.currency)}
+            : money(budget.totalCents, budget.currency)}
         </span>
         <span>
           Aceptado:{" "}
-          {budget.acceptedCents == null ? "—" : formatMoney(budget.acceptedCents, budget.currency)}
+          {budget.acceptedCents == null ? "—" : money(budget.acceptedCents, budget.currency)}
         </span>
         {budget.decidedAt ? (
           <span>
@@ -1180,87 +1259,264 @@ function BudgetDetail({
           </span>
         ) : null}
       </div>
+      {sessionLines.length > 0 ? (
+        <p className="text-sm text-muted-foreground">
+          Por sesión: cada visita atendida genera su cargo al precio de sesión; lo no atendido
+          todavía no es deuda.
+        </p>
+      ) : null}
       {budget.notes ? <p className="text-sm">{budget.notes}</p> : null}
       {budget.decisionNote ? (
         <p className="text-sm text-muted-foreground">Decisión: {budget.decisionNote}</p>
       ) : null}
       <DataTable table={lineTable} />
-      {canWrite && acceptedLines.length > 0 ? (
-        <div className="flex flex-col gap-2 rounded-lg border p-3">
-          <span className="text-sm font-medium">Cargos desde líneas aceptadas</span>
-          <p className="text-xs text-muted-foreground">
-            Aceptar la propuesta no genera cargos: cada cargo se emite explícitamente y conserva la
-            línea y el tratamiento de su origen.
-          </p>
-          <ul className="flex flex-col gap-2">
-            {acceptedLines.map((line) => (
-              <li key={line.id} className="flex flex-wrap items-center gap-2 text-sm">
-                <span>{line.title}</span>
-                <span className="tabular-nums text-muted-foreground">
-                  {formatMoney(line.priceCents ?? 0, line.currency)}
-                </span>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  disabled={writeBlocked}
-                  onClick={() => onCharge(line)}
-                >
-                  Generar cargo
-                </Button>
-              </li>
-            ))}
-          </ul>
-        </div>
-      ) : null}
-      {canWrite ? (
-        <div className="flex flex-wrap gap-2">
-          {isDraft ? (
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              disabled={writeBlocked}
-              onClick={onEdit}
-            >
-              Editar borrador
-            </Button>
-          ) : null}
-          {isDraft ? (
-            <Button type="button" size="sm" disabled={writeBlocked} onClick={onPresent}>
-              Presentar
-            </Button>
-          ) : null}
-          {isPresented ? (
-            <Button type="button" size="sm" disabled={writeBlocked} onClick={onDecide}>
-              Registrar decisión
-            </Button>
-          ) : null}
-          {revisionAvailable ? (
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              disabled={writeBlocked}
-              onClick={onRevise}
-            >
-              Crear revisión
-            </Button>
-          ) : null}
-          {canCancel ? (
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              disabled={writeBlocked}
-              onClick={onCancel}
-            >
-              Cancelar
-            </Button>
-          ) : null}
-        </div>
-      ) : null}
+      <div className="flex flex-wrap gap-2">
+        {canWrite && isDraft ? (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={writeBlocked}
+            onClick={onEdit}
+          >
+            Editar borrador
+          </Button>
+        ) : null}
+        {canWrite && isDraft ? (
+          <Button type="button" size="sm" variant="outline" disabled={writeBlocked} onClick={onAdjust}>
+            Ajustar precios
+          </Button>
+        ) : null}
+        {canWrite && isDraft ? (
+          <Button
+            type="button"
+            size="sm"
+            disabled={writeBlocked || delivering}
+            onClick={onDeliver}
+          >
+            {delivering ? "Entregando…" : "Imprimir y entregar"}
+          </Button>
+        ) : null}
+        {canWrite && !isDraft ? (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={writeBlocked || printing}
+            onClick={onPrint}
+          >
+            {printing ? "Abriendo…" : "Imprimir"}
+          </Button>
+        ) : null}
+        {canWrite ? (
+          <SendFinancialDocument
+            patientId={patientId}
+            documentType="budget"
+            documentId={budget.id}
+            onSent={onSent}
+          />
+        ) : null}
+        {canDecide && decidable ? (
+          <Button type="button" size="sm" disabled={writeBlocked} onClick={onDecide}>
+            Registrar decisión
+          </Button>
+        ) : null}
+        {canWrite && revisionAvailable ? (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={writeBlocked}
+            onClick={onRevise}
+          >
+            Crear revisión
+          </Button>
+        ) : null}
+        {canWrite && canCancel ? (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={writeBlocked}
+            onClick={onCancel}
+          >
+            Cancelar
+          </Button>
+        ) : null}
+      </div>
     </section>
+  )
+}
+function AdjustBudgetDialog({
+  budget,
+  promotions,
+  money,
+  locale,
+  error,
+  pending,
+  onClose,
+  onSubmit,
+}: {
+  budget: BudgetWithTotals
+  promotions: Promotion[]
+  money: (cents: number | null, currency: string) => string
+  locale: string | undefined
+  error: string | null
+  pending: boolean
+  onClose: () => void
+  onSubmit: (lines: AdjustBudgetLineBody[]) => void
+}) {
+  const [rows, setRows] = useState(
+    budget.items.map((line) => ({
+      planItemId: line.planItemId,
+      priceText: "",
+      reasonText: line.priceReason ?? "",
+      promoId: line.promotionId ?? "",
+    })),
+  )
+  const [localError, setLocalError] = useState<string | null>(null)
+  const setRow = (planItemId: string, patch: Partial<(typeof rows)[number]>) =>
+    setRows((current) => current.map((row) => (row.planItemId === planItemId ? { ...row, ...patch } : row)))
+  const promosFor = (serviceId: string | null) =>
+    serviceId == null ? [] : promotions.filter((p) => p.items.some((i) => i.serviceId === serviceId))
+  const submit = () => {
+    if (!locale) {
+      setLocalError("Sin formato de moneda de la clínica; inténtalo de nuevo.")
+      return
+    }
+    const lines: AdjustBudgetLineBody[] = []
+    for (const line of budget.items) {
+      const row = rows.find((r) => r.planItemId === line.planItemId)
+      if (!row) continue
+      const body: AdjustBudgetLineBody = { planItemId: line.planItemId }
+      let changed = false
+      const text = row.priceText.trim()
+      if (text !== "") {
+        try {
+          body.priceCents = parseMoney(text, line.currency, locale)
+        } catch {
+          setLocalError(`Importe inválido en «${line.title}».`)
+          return
+        }
+        changed = true
+      }
+      if (row.reasonText.trim() !== (line.priceReason ?? "")) {
+        body.reason = row.reasonText.trim() || null
+        changed = true
+      }
+      if ((row.promoId || null) !== line.promotionId) {
+        body.promotionId = row.promoId || null
+        const promo = promotions.find((p) => p.id === row.promoId)
+        const item = promo?.items.find((i) => i.serviceId === line.serviceId)
+        if (item?.mode === "from") {
+          body.promotionFinalPriceCents = body.priceCents ?? line.priceCents ?? null
+        }
+        changed = true
+      }
+      if (changed) lines.push(body)
+    }
+    if (lines.length === 0) {
+      setLocalError("Sin cambios: ajusta un precio, un motivo o una promoción.")
+      return
+    }
+    setLocalError(null)
+    onSubmit(lines)
+  }
+  return (
+    <div
+      role="dialog"
+      aria-label="Ajustar precios"
+      className="flex flex-col gap-3 rounded-xl border p-4"
+    >
+      <h4 className="font-semibold">Ajustar precios</h4>
+      <p className="text-sm text-muted-foreground">
+        Precio acordado por tratamiento con motivo cuando baja de la tarifa (o del mínimo
+        anunciado). Vacío = sin cambio. La promoción se aplica aquí; la persona decide si
+        corresponde.
+      </p>
+      <ul className="flex flex-col gap-3">
+        {budget.items.map((line) => {
+          const row = rows.find((r) => r.planItemId === line.planItemId)
+          const options = promosFor(line.serviceId)
+          const selected = promotions.find((p) => p.id === row?.promoId)
+          const selectedItem = selected?.items.find((i) => i.serviceId === line.serviceId)
+          return (
+            <li key={line.id} className="flex flex-col gap-2 rounded-lg border p-3">
+              <span className="text-sm font-medium">{line.title}</span>
+              <span className="text-xs text-muted-foreground">
+                {treatmentSiteLabel(line)} · Tarifa {money(line.tariffPriceCents, line.currency)}
+                {line.billingMode === "session" ? " por sesión" : ""} · Acordado{" "}
+                {money(line.priceCents, line.currency)}
+              </span>
+              <Field>
+                <FieldLabel htmlFor={`adjust-price-${line.id}`}>Precio acordado</FieldLabel>
+                <Input
+                  id={`adjust-price-${line.id}`}
+                  value={row?.priceText ?? ""}
+                  inputMode="decimal"
+                  placeholder={money(line.priceCents, line.currency)}
+                  onChange={(e) => setRow(line.planItemId, { priceText: e.currentTarget.value })}
+                />
+              </Field>
+              <Field>
+                <FieldLabel htmlFor={`adjust-reason-${line.id}`}>
+                  Motivo (obligatorio si baja de la referencia)
+                </FieldLabel>
+                <Input
+                  id={`adjust-reason-${line.id}`}
+                  value={row?.reasonText ?? ""}
+                  maxLength={500}
+                  onChange={(e) => setRow(line.planItemId, { reasonText: e.currentTarget.value })}
+                />
+              </Field>
+              {options.length > 0 ? (
+                <Field>
+                  <FieldLabel htmlFor={`adjust-promo-${line.id}`}>Promoción</FieldLabel>
+                  <ChoiceSelect
+                    id={`adjust-promo-${line.id}`}
+                    className="w-full"
+                    value={row?.promoId ?? ""}
+                    onChange={(e) => setRow(line.planItemId, { promoId: e.target.value })}
+                  >
+                    <option value="">Sin promoción</option>
+                    {options.map((promo) => {
+                      const item = promo.items.find((i) => i.serviceId === line.serviceId)
+                      return (
+                        <option key={promo.id} value={promo.id}>
+                          {promo.name} ·{" "}
+                          {item?.mode === "fixed"
+                            ? money(item.priceCents, item.currency)
+                            : `desde ${money(item?.priceCents ?? null, item?.currency ?? line.currency)}`}
+                        </option>
+                      )
+                    })}
+                  </ChoiceSelect>
+                  {selectedItem?.mode === "from" ? (
+                    <p className="text-xs text-muted-foreground">
+                      Precio «desde»: el final lo pones arriba; solo pide motivo si baja de{" "}
+                      {money(selectedItem.priceCents, selectedItem.currency)}.
+                    </p>
+                  ) : null}
+                </Field>
+              ) : null}
+            </li>
+          )
+        })}
+      </ul>
+      {localError ?? error ? (
+        <p role="alert" className="text-sm text-destructive">
+          {localError ?? error}
+        </p>
+      ) : null}
+      <div className="flex justify-end gap-2">
+        <Button type="button" variant="outline" onClick={onClose}>
+          Cancelar
+        </Button>
+        <Button type="button" disabled={pending} onClick={submit}>
+          {pending ? "Guardando…" : "Guardar ajustes"}
+        </Button>
+      </div>
+    </div>
   )
 }
 
@@ -1271,6 +1527,7 @@ function PrepareBudgetDialog({
   initialIds,
   initialTitle,
   initialNotes,
+  money,
   error,
   pending,
   onClose,
@@ -1282,6 +1539,7 @@ function PrepareBudgetDialog({
   initialIds: string[]
   initialTitle: string
   initialNotes: string
+  money: (cents: number | null, currency: string) => string
   error: string | null
   pending: boolean
   onClose: () => void
@@ -1293,12 +1551,23 @@ function PrepareBudgetDialog({
   const toggle = (id: string) => {
     setChecked((prev) => (prev.includes(id) ? prev.filter((v) => v !== id) : [...prev, id]))
   }
-  const total = eligible
-    .filter((i) => checked.includes(i.id))
-    .reduce<number | null>(
-      (acc, i) => (acc == null || i.priceCents == null ? null : acc + i.priceCents),
-      0,
+  // Totales por moneda (nunca se mezclan; cada moneda con la suya, sin ??PEN).
+  const totalsByCurrency = new Map<string, number | null>()
+  for (const item of eligible.filter((i) => checked.includes(i.id))) {
+    const prev = totalsByCurrency.get(item.currency)
+    totalsByCurrency.set(
+      item.currency,
+      prev === null || item.priceCents == null ? null : (prev ?? 0) + item.priceCents,
     )
+  }
+  const totalsText =
+    totalsByCurrency.size === 0
+      ? "Elige al menos un tratamiento."
+      : [...totalsByCurrency.entries()]
+          .map(([currency, total]) =>
+            total == null ? `${currency}: con tarifas pendientes` : money(total, currency),
+          )
+          .join(" · ")
   return (
     <div
       role="dialog"
@@ -1322,9 +1591,7 @@ function PrepareBudgetDialog({
               <span className="text-sm font-medium">{item.title}</span>
               <span className="text-xs text-muted-foreground">
                 {treatmentSiteLabel(item)} ·{" "}
-                {item.priceCents == null
-                  ? "Sin tarifa"
-                  : formatMoney(item.priceCents, item.currency)}{" "}
+                {item.priceCents == null ? "Sin tarifa" : money(item.priceCents, item.currency)}{" "}
                 ·{" "}
                 {!item.budgetId
                   ? "Sin presupuestar"
@@ -1356,10 +1623,7 @@ function PrepareBudgetDialog({
         />
       </Field>
       <p className="text-sm font-semibold tabular-nums">
-        Total:{" "}
-        {total == null
-          ? "con tarifas pendientes"
-          : formatMoney(total, eligible[0]?.currency ?? "PEN")}
+        Total: {totalsText}
       </p>
       {error ? (
         <p role="alert" className="text-sm text-destructive">
@@ -1465,6 +1729,7 @@ function DecideBudgetDialog({
   initialNote,
   deciders,
   deciderId,
+  money,
   onDeciderChange,
   error,
   pending,
@@ -1478,6 +1743,7 @@ function DecideBudgetDialog({
   /** Quién puede asumir la decisión: el paciente o su representante legal vigente. */
   deciders: Array<{ id: string; label: string }>
   deciderId: string
+  money: (cents: number | null, currency: string) => string
   onDeciderChange: (contactId: string) => void
   error: string | null
   pending: boolean
@@ -1490,7 +1756,11 @@ function DecideBudgetDialog({
     Object.fromEntries(
       lines.map((line) => [
         line.planItemId,
-        initialAccepted.includes(line.planItemId) ? "aceptado" : "pospuesto",
+        line.decision === "aceptado" || line.decision === "rechazado"
+          ? line.decision
+          : initialAccepted.includes(line.planItemId)
+            ? "aceptado"
+            : "pospuesto",
       ]),
     ),
   )
@@ -1506,33 +1776,37 @@ function DecideBudgetDialog({
         Registra una decisión por tratamiento. La aceptación no equivale a ejecución ni cobro.
       </p>
       <ul className="flex flex-col gap-2">
-        {lines.map((line) => (
-          <li key={line.id} className="flex items-start gap-2">
-            <ChoiceSelect
-              aria-label={`Decisión: ${line.title}`}
-              value={decisions[line.planItemId]}
-              onChange={(event) =>
-                setDecisions((current) => ({
-                  ...current,
-                  [line.planItemId]: event.target.value as "aceptado" | "rechazado" | "pospuesto",
-                }))
-              }
-            >
-              <option value="aceptado">Aceptado</option>
-              <option value="rechazado">Rechazado</option>
-              <option value="pospuesto">Pospuesto</option>
-            </ChoiceSelect>
-            <span className="flex flex-1 flex-col">
-              <span className="text-sm font-medium">{line.title}</span>
-              <span className="text-xs text-muted-foreground">
-                {treatmentSiteLabel(line)} ·{" "}
-                {line.priceCents == null
-                  ? "Sin tarifa"
-                  : formatMoney(line.priceCents, line.currency)}
+        {lines.map((line) => {
+          const locked = line.decision === "aceptado" || line.decision === "rechazado"
+          return (
+            <li key={line.id} className="flex items-start gap-2">
+              <ChoiceSelect
+                aria-label={`Decisión: ${line.title}`}
+                value={decisions[line.planItemId]}
+                disabled={locked}
+                onChange={(event) =>
+                  setDecisions((current) => ({
+                    ...current,
+                    [line.planItemId]: event.target.value as "aceptado" | "rechazado" | "pospuesto",
+                  }))
+                }
+              >
+                <option value="aceptado">Aceptado</option>
+                <option value="rechazado">Rechazado</option>
+                <option value="pospuesto">Pospuesto</option>
+              </ChoiceSelect>
+              <span className="flex flex-1 flex-col">
+                <span className="text-sm font-medium">{line.title}</span>
+                <span className="text-xs text-muted-foreground">
+                  {treatmentSiteLabel(line)} ·{" "}
+                  {line.priceCents == null ? "Sin tarifa" : money(line.priceCents, line.currency)}
+                  {line.promotionName ? ` · Promoción: ${line.promotionName}` : ""}
+                  {locked ? " · Decidido (no se reescribe)" : ""}
+                </span>
               </span>
-            </span>
-          </li>
-        ))}
+            </li>
+          )
+        })}
       </ul>
       <Field>
         <FieldLabel htmlFor={`${uid}-decide-by`}>Quién decide</FieldLabel>

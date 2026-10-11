@@ -21,6 +21,12 @@ export interface OrgProfile {
   currency: string
   timezone: string
   locale: string
+  /** Ancho del ticket térmico: 58 o 80 mm. */
+  receiptWidth: string
+  /** Tamaño de hoja para el presupuesto: A4 o Letter. */
+  sheetSize: string
+  /** Frase al pie del ticket (recibo interno por defecto). */
+  ticketFooter: string
 }
 
 export interface OrgProfileInput {
@@ -34,6 +40,11 @@ export interface OrgProfileInput {
   currency?: string
   timezone?: string
   locale?: string
+  receiptWidth?: string
+  sheetSize?: string
+  ticketFooter?: string
+  /** Al cambiar de país propone moneda/formato/papel; todo se puede cambiar. */
+  applyCountryPreset?: boolean
 }
 
 export async function fetchOrgProfile(): Promise<OrgProfile | null> {

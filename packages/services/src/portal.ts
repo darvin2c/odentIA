@@ -1095,6 +1095,8 @@ export interface PortalBudgetLineView {
   scope: string | null
   toothNumber: number | null
   priceCents: number | null
+  tariffCents: number | null
+  promotionName: string | null
   currency: string
   decision: string
   itemStatus: string
@@ -1140,6 +1142,8 @@ function toPortalBudget(budget: BudgetWithTotals): PortalBudgetView {
       scope: line.scope,
       toothNumber: line.toothNumber,
       priceCents: line.priceCents,
+      tariffCents: line.tariffPriceCents ?? line.priceCents,
+      promotionName: line.promotionName,
       currency: line.currency,
       decision: line.decision,
       itemStatus: line.itemStatus,
@@ -1173,7 +1177,12 @@ export async function decidePortalBudget(
 ): Promise<{ budget: PortalBudgetView; replay: boolean }> {
   requireScope(ctx.session, "budgets")
   const current = await getBudgetDetail(tx, ctx.orgId, ctx.session.patientId, budgetId)
-  if (current.status !== "presentado") {
+  // Responder después: parcial/pospuesto admite completar lo pospuesto con la
+  // misma autoridad (el contacto que decidió); otra autoridad no pisa.
+  const followUp =
+    (current.status === "parcial" || current.status === "pospuesto") &&
+    current.decisionContactId === ctx.session.contactId
+  if (current.status !== "presentado" && !followUp) {
     const decided = ["aceptado", "parcial", "rechazado", "pospuesto"].includes(current.status)
     if (decided && current.decisionContactId === ctx.session.contactId) {
       await logAccess(tx, ctx.orgId, ctx.session.id, "budget.decision_replayed", "treatment_budget", budgetId)
@@ -1190,7 +1199,7 @@ export async function decidePortalBudget(
       decisions: input.decisions,
       decidedByContactId: ctx.session.contactId,
       decisionNote: input.decisionNote ?? null,
-    })
+    }, { skipOwnPlan: true })
   } catch (error) {
     if (error instanceof ServiceError && error.code === "BUDGET_STATUS") {
       const current = await getBudgetDetail(tx, ctx.orgId, ctx.session.patientId, budgetId)

@@ -185,8 +185,8 @@ async function addPlanItem(
   return ((await res.json()) as { data: PlanItemRow }).data
 }
 
-async function presentBudget(app: Hono, patientId: string, budgetId: string): Promise<void> {
-  const res = await app.request(`/patients/${patientId}/budgets/${budgetId}/present`, {
+async function deliverBudget(app: Hono, patientId: string, budgetId: string): Promise<void> {
+  const res = await app.request(`/patients/${patientId}/budgets/${budgetId}/deliver`, {
     method: "POST",
   })
   expect(res.status).toBe(200)
@@ -489,7 +489,7 @@ it("encounters: las sesiones mantienen en curso hasta completar explícitamente"
     toothNumber: 36,
   })
   const budgetId = await createBudget(app, patientId, ctx.planId, [item.id])
-  await presentBudget(app, patientId, budgetId)
+  await deliverBudget(app, patientId, budgetId)
   await decideBudget(app, patientId, budgetId, [item.id])
   const itemId = item.id
 
@@ -675,7 +675,7 @@ it("encounters: crear con planItemIds aceptados vincula sin marcar realizado", a
     toothNumber: 37,
   })
   const budgetId = await createBudget(app, patientId, ctx.planId, [first.id, second.id])
-  await presentBudget(app, patientId, budgetId)
+  await deliverBudget(app, patientId, budgetId)
   await decideBudget(app, patientId, budgetId, [first.id, second.id])
   // La atención de origen se cierra para abrir la siguiente (un solo borrador);
   // el cierre exige un acto registrado.
@@ -733,7 +733,7 @@ it("encounters: crear con planItemIds pendientes sin decidir responde 409 ITEM_N
     toothNumber: 36,
   })
   const budgetId = await createBudget(app, patientId, ctx.planId, [item.id])
-  await presentBudget(app, patientId, budgetId)
+  await deliverBudget(app, patientId, budgetId)
 
   const denied = await postEncounter(app, patientId, {
     reason: "Sin decidir",
@@ -758,7 +758,7 @@ it("encounters: crear con planItemIds de otro paciente responde 404", async () =
     toothNumber: 36,
   })
   const budgetB = await createBudget(app, patientB, ctxB.planId, [itemB.id])
-  await presentBudget(app, patientB, budgetB)
+  await deliverBudget(app, patientB, budgetB)
   await decideBudget(app, patientB, budgetB, [itemB.id])
 
   const cross = await postEncounter(app, patientA, { reason: "Cruce", planItemIds: [itemB.id] })
@@ -775,7 +775,7 @@ it("encounters: procedure con tratamiento no aceptado responde 409 ITEM_NOT_ACCE
     toothNumber: 36,
   })
   const budgetId = await createBudget(app, patientId, ctx.planId, [item.id])
-  await presentBudget(app, patientId, budgetId)
+  await deliverBudget(app, patientId, budgetId)
 
   const proc = await app.request(
     `/patients/${patientId}/encounters/${ctx.encounterId}/procedures`,
@@ -804,7 +804,7 @@ it("encounters: dentist lee 200, member ni lee ni registra procedimiento (403 si
     toothNumber: 36,
   })
   const budgetId = await createBudget(admin, patientId, ctx.planId, [item.id])
-  await presentBudget(admin, patientId, budgetId)
+  await deliverBudget(admin, patientId, budgetId)
   await decideBudget(admin, patientId, budgetId, [item.id])
 
   const read = await dentist.request(`/patients/${patientId}/encounters/${ctx.encounterId}`)
@@ -939,9 +939,9 @@ it("encounters: servicio directo se realiza en el acto y el cierre lo cobra una 
 
   const account = await app.request(`/patients/${patientId}/account`)
   const accountBody = (await account.json()) as {
-    data: { charges: Array<{ id: string; amountCents: number }> }
+    data: { pendiente: Array<{ chargeId: string; saldoCents: number }> }
   }
-  expect(accountBody.data.charges.map((row) => row.id)).toContain(closed.data.charges[0].id)
+  expect(accountBody.data.pendiente.map((row) => row.chargeId)).toContain(closed.data.charges[0].id)
 
   // Re-cerrar no es posible ni duplica el cargo.
   const again = await app.request(`/patients/${patientId}/encounters/${encounterId}/finalize`, {
@@ -961,7 +961,7 @@ it.each(["antes", "después"] as const)(
       toothNumber: 36,
     })
     const budgetId = await createBudget(app, patientId, ctx.planId, [item.id])
-    await presentBudget(app, patientId, budgetId)
+    await deliverBudget(app, patientId, budgetId)
     await decideBudget(app, patientId, budgetId, [item.id])
     const budgetDetail = (await (
       await app.request(`/patients/${patientId}/budgets/${budgetId}`)
@@ -1009,8 +1009,8 @@ it.each(["antes", "después"] as const)(
       expect(((await duplicated.json()) as ErrorBody).error.code).toBe("CHARGE_EXCEEDS_BUDGET")
     }
     const account = await app.request(`/patients/${patientId}/account`)
-    const balance = (await account.json()) as { data: { charges: Array<{ amountCents: number }> } }
-    expect(balance.data.charges.map((charge) => charge.amountCents)).toEqual([90000])
+    const balance = (await account.json()) as { data: { pendiente: Array<{ saldoCents: number }> } }
+    expect(balance.data.pendiente.map((charge) => charge.saldoCents)).toEqual([90000])
   },
 )
 

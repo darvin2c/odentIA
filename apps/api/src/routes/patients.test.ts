@@ -197,9 +197,9 @@ it("cada subruta del paciente exige solo el permiso de su dominio", async () => 
   expect((await get("dentist", "/follow-ups")).status).toBe(200)
   expect((await get("dentist", "/prescriptions")).status).toBe(200)
   // Caja sigue cerrada para quien no cobra, y clínica para quien no atiende.
+  // Presupuestos tienen permiso propio: el odontólogo lee los de su plan.
   for (const role of ["reception", "dentist"]) {
     expect((await get(role, "/account")).status).toBe(403)
-    expect((await get(role, "/budgets")).status).toBe(403)
     const charge = await buildApp(role).request(`/patients/${patientId}/charges`, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -207,6 +207,8 @@ it("cada subruta del paciente exige solo el permiso de su dominio", async () => 
     })
     expect(charge.status).toBe(403)
   }
+  expect((await get("reception", "/budgets")).status).toBe(403)
+  expect((await get("dentist", "/budgets")).status).toBe(200)
   // Coordinación: quien agenda la consulta sin leer la ficha; caja no.
   const coordination = await get("reception", "/coordination")
   expect(coordination.status).toBe(200)

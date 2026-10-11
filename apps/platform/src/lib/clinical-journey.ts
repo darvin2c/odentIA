@@ -347,228 +347,6 @@ export function cancelPrescriptionApi(
   )
 }
 
-// --- Cuenta económica -------------------------------------------------------
-
-export const PAYMENT_METHODS = [
-  "efectivo",
-  "tarjeta",
-  "transferencia",
-  "yape",
-  "plin",
-  "otro",
-] as const
-export type PaymentMethod = (typeof PAYMENT_METHODS)[number]
-
-export const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
-  efectivo: "Efectivo",
-  tarjeta: "Tarjeta",
-  transferencia: "Transferencia",
-  yape: "Yape",
-  plin: "Plin",
-  otro: "Otro",
-}
-
-/** Cargo generado desde una línea aceptada, desde un procedimiento o manual. */
-export interface Charge {
-  id: string
-  patientId: string
-  planItemId: string | null
-  budgetItemId: string | null
-  encounterProcedureId: string | null
-  description: string
-  amountCents: number
-  currency: string
-  dueAt: string | null
-  notes: string | null
-  createdAt: string
-  voidedAt: string | null
-  voidReason: string | null
-}
-
-/** Pago o anticipo: un anticipo es un pago aún sin aplicaciones. */
-export interface Payment {
-  id: string
-  patientId: string
-  payerContactId: string | null
-  amountCents: number
-  currency: string
-  paidAt: string
-  method: string
-  reference: string | null
-  notes: string | null
-  createdAt: string
-  voidedAt: string | null
-  voidReason: string | null
-}
-
-export interface PaymentApplication {
-  id: string
-  patientId: string
-  paymentId: string
-  chargeId: string
-  amountCents: number
-  createdAt: string
-  voidedAt: string | null
-  voidReason: string | null
-}
-
-export interface PaymentRefund {
-  id: string
-  patientId: string
-  paymentId: string
-  amountCents: number
-  refundedAt: string
-  reason: string
-}
-
-/** Totales por moneda: nunca se suman importes de monedas distintas. */
-export interface AccountBalance {
-  currency: string
-  agreedCents: number
-  chargedCents: number
-  paidCents: number
-  appliedCents: number
-  refundedCents: number
-  outstandingCents: number
-  availableCreditCents: number
-}
-
-export interface PatientAccount {
-  byCurrency: AccountBalance[]
-  charges: Charge[]
-  payments: Payment[]
-  applications: PaymentApplication[]
-  refunds: PaymentRefund[]
-}
-
-export function fetchPatientAccount(patientId: string): Promise<{ data: PatientAccount }> {
-  return apiFetch<{ data: PatientAccount }>(`${base(patientId)}/account`)
-}
-
-export function createChargeApi(
-  patientId: string,
-  body: {
-    budgetItemId?: string | null
-    encounterProcedureId?: string | null
-    planItemId?: string | null
-    description?: string
-    amountCents?: number
-    currency?: string
-    dueAt?: string | null
-    notes?: string | null
-  },
-): Promise<{ data: Charge }> {
-  return apiFetch<{ data: Charge }>(`${base(patientId)}/charges`, {
-    method: "POST",
-    body: JSON.stringify(body),
-  })
-}
-
-export function voidChargeApi(
-  patientId: string,
-  chargeId: string,
-  body: { reason: string },
-): Promise<{ data: Charge }> {
-  return apiFetch<{ data: Charge }>(`${base(patientId)}/charges/${chargeId}/void`, {
-    method: "POST",
-    body: JSON.stringify(body),
-  })
-}
-
-export function createPaymentApi(
-  patientId: string,
-  body: {
-    payerContactId?: string | null
-    amountCents: number
-    currency: string
-    paidAt: string
-    method: PaymentMethod
-    reference?: string | null
-    notes?: string | null
-    shiftId?: string | null
-  },
-): Promise<{ data: Payment }> {
-  return apiFetch<{ data: Payment }>(`${base(patientId)}/payments`, {
-    method: "POST",
-    body: JSON.stringify(body),
-  })
-}
-
-export function applyPaymentApi(
-  patientId: string,
-  paymentId: string,
-  body: { chargeId: string; amountCents: number },
-): Promise<{ data: PaymentApplication }> {
-  return apiFetch<{ data: PaymentApplication }>(
-    `${base(patientId)}/payments/${paymentId}/applications`,
-    { method: "POST", body: JSON.stringify(body) },
-  )
-}
-
-export function voidPaymentApplicationApi(
-  patientId: string,
-  applicationId: string,
-  body: { reason: string },
-): Promise<{ data: PaymentApplication }> {
-  return apiFetch<{ data: PaymentApplication }>(
-    `${base(patientId)}/payment-applications/${applicationId}/void`,
-    { method: "POST", body: JSON.stringify(body) },
-  )
-}
-
-export function refundPaymentApi(
-  patientId: string,
-  paymentId: string,
-  body: { amountCents: number; reason: string; refundedAt?: string },
-): Promise<{ data: PaymentRefund }> {
-  return apiFetch<{ data: PaymentRefund }>(`${base(patientId)}/payments/${paymentId}/refunds`, {
-    method: "POST",
-    body: JSON.stringify(body),
-  })
-}
-
-export function voidPaymentApi(
-  patientId: string,
-  paymentId: string,
-  body: { reason: string; compensateShiftId?: string | null },
-): Promise<{ data: Payment }> {
-  return apiFetch<{ data: Payment }>(`${base(patientId)}/payments/${paymentId}/void`, {
-    method: "POST",
-    body: JSON.stringify(body),
-  })
-}
-
-/** Disponibilidad real de cada pago y cargo activos (lo que la UI puede ofrecer). */
-export function paymentAvailability(account: PatientAccount) {
-  return account.payments
-    .filter((payment) => !payment.voidedAt)
-    .map((payment) => {
-      const applied = account.applications
-        .filter((a) => a.paymentId === payment.id && !a.voidedAt)
-        .reduce((sum, a) => sum + a.amountCents, 0)
-      const refunded = account.refunds
-        .filter((r) => r.paymentId === payment.id)
-        .reduce((sum, r) => sum + r.amountCents, 0)
-      return {
-        payment,
-        availableCents: payment.amountCents - applied - refunded,
-        refundableCents: payment.amountCents - applied - refunded,
-      }
-    })
-}
-
-/** Saldo pendiente real de cada cargo activo. */
-export function chargeAvailability(account: PatientAccount) {
-  return account.charges
-    .filter((charge) => !charge.voidedAt)
-    .map((charge) => {
-      const applied = account.applications
-        .filter((a) => a.chargeId === charge.id && !a.voidedAt)
-        .reduce((sum, a) => sum + a.amountCents, 0)
-      return { charge, appliedCents: applied, pendingCents: charge.amountCents - applied }
-    })
-}
-
 // --- Responsables -----------------------------------------------------------
 
 export const RESPONSIBILITY_KINDS = [
@@ -700,14 +478,48 @@ export interface TreatmentJourney {
   nextAction: TreatmentNextAction | null
 }
 
-export interface TreatmentFinance {
-  charges: Charge[]
-  payments: Payment[]
-  applications: PaymentApplication[]
-  refunds: PaymentRefund[]
-  balances: AccountBalance[]
+/** Caja del tratamiento tal como la sirve el recorrido (filas de cargo/pago). */
+export interface JourneyCharge {
+  id: string
+  description: string
+  amountCents: number
+  currency: string
+  voidedAt: string | null
 }
 
+export interface JourneyPayment {
+  id: string
+  paidAt: string
+  amountCents: number
+  currency: string
+}
+
+export interface JourneyApplication {
+  paymentId: string
+  chargeId: string
+  amountCents: number
+  voidedAt: string | null
+}
+
+export interface JourneyRefund {
+  paymentId: string
+  amountCents: number
+}
+
+export interface JourneyBalance {
+  currency: string
+  chargedCents: number
+  appliedCents: number
+  outstandingCents: number
+}
+
+export interface TreatmentFinance {
+  charges: JourneyCharge[]
+  payments: JourneyPayment[]
+  applications: JourneyApplication[]
+  refunds: JourneyRefund[]
+  balances: JourneyBalance[]
+}
 export function fetchTreatmentJourney(
   patientId: string,
   itemId: string,
@@ -807,7 +619,7 @@ export function createOptionGroupApi(
 /** Saldo del tratamiento por moneda; nunca se suman monedas distintas. */
 export function journeyBalances(
   journey: Pick<TreatmentFinance, "charges" | "applications">,
-): AccountBalance[] {
+): JourneyBalance[] {
   const active = journey.charges.filter((charge) => !charge.voidedAt)
   const units = [...new Set(active.map((charge) => charge.currency))].sort()
   return units.map((currency) => {
@@ -817,16 +629,7 @@ export function journeyBalances(
     const appliedCents = journey.applications
       .filter((a) => !a.voidedAt && ids.has(a.chargeId))
       .reduce((sum, a) => sum + a.amountCents, 0)
-    return {
-      currency,
-      agreedCents: chargedCents,
-      chargedCents,
-      paidCents: 0,
-      appliedCents,
-      refundedCents: 0,
-      outstandingCents: chargedCents - appliedCents,
-      availableCreditCents: 0,
-    }
+    return { currency, chargedCents, appliedCents, outstandingCents: chargedCents - appliedCents }
   })
 }
 

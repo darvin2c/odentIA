@@ -16,6 +16,7 @@ import {
   conversation,
   crmTask,
   customFieldDef,
+  PREFERRED_CHANNELS,
 } from "@odentia/db/schema/crm"
 import { auditEvent } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, gt, ilike, inArray, isNotNull, lt, or, sql } from "drizzle-orm"
@@ -41,6 +42,8 @@ export interface ContactListItem {
   displayName: string
   phone: string | null
   email: string | null
+  /** Medio preferido para avisos y documentos; nulo = sin preferencia. */
+  preferredChannel: string | null
   isActive: boolean
   tags: string[]
   assignedUserId: string | null
@@ -78,6 +81,7 @@ function toListItem(
     displayName: row.displayName,
     phone: row.phone,
     email: row.email,
+    preferredChannel: row.preferredChannel,
     isActive: row.isActive,
     tags: row.tags,
     assignedUserId: row.assignedUserId,
@@ -561,6 +565,8 @@ export async function updateContact(
     maternalSurname?: string | null
     phone?: string | null
     email?: string | null
+    /** Medio preferido para avisos y documentos; nulo = sin preferencia. */
+    preferredChannel?: string | null
     docType?: string | null
     docNumber?: string | null
     docCountry?: string | null
@@ -600,6 +606,13 @@ export async function updateContact(
   if (fields.email !== undefined) {
     patch.email = cleanContactEmail(fields.email) ?? null
     changed.push("email")
+  }
+  if (fields.preferredChannel !== undefined) {
+    const preferred = fields.preferredChannel?.trim() || null
+    if (preferred && !PREFERRED_CHANNELS.includes(preferred as (typeof PREFERRED_CHANNELS)[number]))
+      throw validation("Medio preferido inválido: solo email, whatsapp, telegram, messenger o instagram")
+    patch.preferredChannel = preferred
+    changed.push("preferredChannel")
   }
   if (fields.docType !== undefined || fields.docNumber !== undefined) {
     const docNumber = (fields.docNumber ?? "").trim() || null

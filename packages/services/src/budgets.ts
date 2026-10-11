@@ -1,7 +1,9 @@
 import type { Db } from "@odentia/db"
+import { user } from "@odentia/db/schema/auth"
 import {
   orgCounter,
   encounterProcedure,
+  patient,
   patientCharge,
   patientPaymentApplication,
   treatmentBudget,
@@ -9,11 +11,13 @@ import {
   treatmentPlan,
   treatmentPlanItem,
 } from "@odentia/db/schema/clinical"
-import { auditEvent } from "@odentia/db/schema/org"
+import { auditEvent, orgProfile } from "@odentia/db/schema/org"
 import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm"
 import { notFound, ServiceError, validation } from "./errors.js"
 import { requirePatient } from "./patients.js"
 import type { PlanItemDecision } from "./plan.js"
+import { requireProfessionalSignature } from "./professional-profiles.js"
+import { requirePromotionPrice } from "./promotions.js"
 
 import { requireDecisionContact } from "./responsibilities.js"
 import { assertExecutableCodings } from "./procedure-codings.js"
@@ -48,8 +52,92 @@ export type BudgetLineWithStatus = BudgetLineRow & { itemStatus: string }
 /** Presupuesto con líneas snapshot y totales enteros (null = precio desconocido). */
 export type BudgetWithTotals = BudgetRow & {
   items: BudgetLineWithStatus[]
+  /** Suma de precios finales acordados. */
   totalCents: number | null
   acceptedCents: number | null
+  /** Suma de tarifas originales (referencia del descuento). */
+  tariffTotalCents: number | null
+  /** Rebaja total acordada (tarifa − final; null si algún precio es desconocido). */
+  discountCents: number | null
+}
+
+/** Quién actúa en la ruta: el servidor limita al odontólogo a su plan propio. */
+export interface BudgetActorOpts {
+  memberRole?: string
+}
+
+/** Aviso en vivo (`org_events`): solo `{ orgId, kind, at }`, sin datos clínicos. */
+async function notifyBudget(tx: Db, orgId: string): Promise<void> {
+  await tx.execute(
+    sql`select pg_notify('org_events', ${JSON.stringify({ orgId, kind: "budget.updated", at: new Date().toISOString() })})`,
+  )
+}
+
+/**
+ * Plan propio del odontólogo: el plan lo creó él (`treatmentPlan.createdBy`).
+ * Administración/propietario no tienen esta restricción; caja no escribe
+ * presupuestos (la ruta exige `budgets.write`, que caja no tiene).
+ */
+function assertOwnPlan(
+  plan: typeof treatmentPlan.$inferSelect,
+  actorUserId: string,
+  memberRole?: string,
+): void {
+  if ((memberRole ?? "").trim().toLowerCase() !== "dentist") return
+  if (plan.createdBy !== actorUserId) {
+    throw new ServiceError(
+      "BUDGET_NOT_OWN_PLAN",
+      403,
+      "Solo puedes presupuestar el plan que indicaste tú",
+    )
+  }
+}
+
+/**
+ * Plan propio del odontólogo para reutilizar fuera de presupuestos (p. ej.
+ * envío de ya entregados): misma semántica `BUDGET_NOT_OWN_PLAN`.
+ */
+export async function requireOwnPlan(
+  tx: Db,
+  orgId: string,
+  planId: string,
+  actorUserId: string,
+  memberRole?: string,
+): Promise<void> {
+  if ((memberRole ?? "").trim().toLowerCase() !== "dentist") return
+  const [plan] = await tx
+    .select({ createdBy: treatmentPlan.createdBy })
+    .from(treatmentPlan)
+    .where(and(eq(treatmentPlan.id, planId), eq(treatmentPlan.organizationId, orgId)))
+    .limit(1)
+  if (!plan || plan.createdBy !== actorUserId) {
+    throw new ServiceError(
+      "BUDGET_NOT_OWN_PLAN",
+      403,
+      "Solo puedes actuar sobre presupuestos de tu propio plan",
+    )
+  }
+}
+/**
+ * Modo de cobro congelado por servicio (`treatment` una vez, `session` por
+ * visita). La columna `service_catalog.billing_mode` es obligatoria (migración
+ * del integrador): sin ella la consulta falla y no hay repliegue silencioso.
+ */
+export async function readBillingModes(
+  tx: Db,
+  orgId: string,
+  serviceIds: string[],
+): Promise<Record<string, string>> {
+  const out: Record<string, string> = {}
+  const ids = [...new Set(serviceIds.filter((id) => typeof id === "string" && id))].sort()
+  if (ids.length === 0) return out
+  const rows = await tx.execute(
+    sql`select "id", "billing_mode" from "service_catalog" where "organization_id" = ${orgId} and "id" in (${sql.join(ids.map((id) => sql`${id}`), sql`, `)})`,
+  )
+  for (const row of rows as unknown as Array<{ id: string; billing_mode: string }>) {
+    out[row.id] = row.billing_mode === "session" ? "session" : "treatment"
+  }
+  return out
 }
 
 export interface CreateBudgetInput {
@@ -217,11 +305,18 @@ function sumCents(items: Array<{ priceCents: number | null }>): number | null {
 }
 
 function withTotals(budget: BudgetRow, items: BudgetLineWithStatus[]): BudgetWithTotals {
+  const totalCents = sumCents(items)
+  const tariffTotalCents = sumCents(
+    items.map((item) => ({ priceCents: item.tariffPriceCents ?? item.priceCents })),
+  )
   return {
     ...budget,
     items,
-    totalCents: sumCents(items),
+    totalCents,
     acceptedCents: sumCents(items.filter((item) => item.decision === "aceptado")),
+    tariffTotalCents,
+    discountCents:
+      totalCents == null || tariffTotalCents == null ? null : tariffTotalCents - totalCents,
   }
 }
 
@@ -371,12 +466,19 @@ export async function createBudget(
   actorUserId: string,
   patientId: string,
   input: CreateBudgetInput,
+  opts: BudgetActorOpts = {},
 ): Promise<BudgetWithTotals> {
   await requirePatient(tx, orgId, patientId)
   if (!input.planId?.trim())
     throw validation("planId es obligatorio: el presupuesto pertenece a un plan")
   const plan = await lockPlan(tx, orgId, patientId, input.planId.trim())
+  assertOwnPlan(plan, actorUserId, opts.memberRole)
   const items = await requireQuotableItems(tx, orgId, patientId, plan.id, input.itemIds)
+  const billingModes = await readBillingModes(
+    tx,
+    orgId,
+    items.map((item) => item.serviceId).filter((id): id is string => id !== null),
+  )
   const currency = items[0]?.currency ?? "PEN"
   const title = assertTitle(input.title, plan.title)
   const notes = assertNotes(input.notes) ?? null
@@ -412,6 +514,13 @@ export async function createBudget(
       arch: item.arch,
       codings: item.codings,
       priceCents: item.priceCents,
+      tariffPriceCents: item.priceCents,
+      priceReason: null,
+      promotionId: null,
+      promotionName: null,
+      promotionMode: null,
+      billingMode: item.serviceId ? (billingModes[item.serviceId] ?? "treatment") : "treatment",
+      sessionsPlanned: item.plannedSessions,
       currency: item.currency,
       decision: "pendiente",
       createdBy: actorUserId,
@@ -434,6 +543,7 @@ export async function createBudget(
     currency,
     itemCount: items.length,
   })
+  await notifyBudget(tx, orgId)
   const lines = await listBudgetLines(tx, orgId, patientId, budget.id)
   return withTotals(budget, lines)
 }
@@ -445,6 +555,7 @@ export async function updateBudgetDraft(
   patientId: string,
   budgetId: string,
   input: UpdateBudgetDraftInput,
+  opts: BudgetActorOpts = {},
 ): Promise<BudgetRow> {
   await requirePatient(tx, orgId, patientId)
   const [prev] = await tx
@@ -459,7 +570,7 @@ export async function updateBudgetDraft(
     )
     .limit(1)
   if (!prev) throw notFound("Presupuesto")
-  await lockPlan(tx, orgId, patientId, prev.planId)
+  assertOwnPlan(await lockPlan(tx, orgId, patientId, prev.planId), actorUserId, opts.memberRole)
   const current = await lockBudgetRow(tx, orgId, patientId, budgetId)
   if (current.status !== "borrador") {
     throw conflict("BUDGET_STATUS", "Solo un presupuesto en borrador puede editarse")
@@ -488,15 +599,22 @@ export async function updateBudgetDraft(
     .returning()
   if (!updated) throw notFound("Presupuesto")
   await audit(tx, orgId, actorUserId, "budget.updated", budgetId, { patientId, fields })
+  await notifyBudget(tx, orgId)
   return updated
 }
 
-export async function presentBudget(
+/**
+ * Entregar el presupuesto (sustituye a `presentBudget`): imprimir o enviar lo
+ * entrega en la misma transacción. No hay paso «presentar» aparte. Exige
+ * borrador con líneas y plan propio para el odontólogo.
+ */
+export async function deliverBudget(
   tx: Db,
   orgId: string,
   actorUserId: string,
   patientId: string,
   budgetId: string,
+  opts: BudgetActorOpts = {},
 ): Promise<BudgetRow> {
   await requirePatient(tx, orgId, patientId)
   const [prev] = await tx
@@ -511,10 +629,10 @@ export async function presentBudget(
     )
     .limit(1)
   if (!prev) throw notFound("Presupuesto")
-  await lockPlan(tx, orgId, patientId, prev.planId)
+  assertOwnPlan(await lockPlan(tx, orgId, patientId, prev.planId), actorUserId, opts.memberRole)
   const current = await lockBudgetRow(tx, orgId, patientId, budgetId)
   if (current.status !== "borrador") {
-    throw conflict("BUDGET_STATUS", "Solo un presupuesto en borrador puede presentarse")
+    throw conflict("BUDGET_STATUS", "Solo un presupuesto en borrador puede entregarse")
   }
   const lines = await listBudgetLines(tx, orgId, patientId, budgetId)
   if (lines.length === 0) throw validation("El presupuesto no tiene ítems")
@@ -542,12 +660,146 @@ export async function presentBudget(
       .where(and(eq(treatmentPlanItem.organizationId, orgId), eq(treatmentPlanItem.patientId, patientId),
         inArray(treatmentPlanItem.id, lines.map(l => l.planItemId))))
   }
-  await audit(tx, orgId, actorUserId, "budget.presented", budgetId, {
+  await audit(tx, orgId, actorUserId, "budget.delivered", budgetId, {
     patientId,
     itemCount: lines.length,
   })
+  await notifyBudget(tx, orgId)
   return updated
 }
+export interface AdjustBudgetLineInput {
+  planItemId: string
+  /** Precio final acordado por unidad; undefined = sin cambio. */
+  priceCents?: number | null
+  /** Motivo del ajuste; obligatorio si el final baja de la referencia. */
+  reason?: string | null
+  /** Promoción a aplicar; null = quitarla; undefined = sin cambio. */
+  promotionId?: string | null
+  /** Precio final con promoción «desde» (el final lo pone quien presupuesta). */
+  promotionFinalPriceCents?: number | null
+}
+
+export interface AdjustBudgetLinesInput {
+  lines: AdjustBudgetLineInput[]
+}
+
+function assertPriceReason(reason: string | null | undefined): string {
+  const value = reason?.trim() ?? ""
+  if (!value || value.length > 500) throw validation("El motivo debe tener 1–500 caracteres")
+  return value
+}
+
+/**
+ * Precio acordado por línea con motivo + promoción opt-in (solo borrador).
+ * `priceCents` queda como precio final; la tarifa original congelada es la
+ * referencia del descuento, salvo promoción «desde», donde la referencia es
+ * su mínimo anunciado. La promoción se valida vigente con la misma regla que
+ * usa caja (`requirePromotionPrice`); la UI nunca calcula descuentos.
+ */
+export async function adjustBudgetLines(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  patientId: string,
+  budgetId: string,
+  input: AdjustBudgetLinesInput,
+  opts: BudgetActorOpts = {},
+): Promise<BudgetWithTotals> {
+  await requirePatient(tx, orgId, patientId)
+  const budget = await requireBudget(tx, orgId, patientId, budgetId)
+  assertOwnPlan(await lockPlan(tx, orgId, patientId, budget.planId), actorUserId, opts.memberRole)
+  const current = await lockBudgetRow(tx, orgId, patientId, budgetId)
+  if (current.status !== "borrador") {
+    throw conflict("BUDGET_STATUS", "Solo un presupuesto en borrador admite ajuste de precio")
+  }
+  if (!Array.isArray(input.lines) || input.lines.length < 1 || input.lines.length > 200) {
+    throw validation("lines debe tener entre 1 y 200 ajustes")
+  }
+  const seen: Record<string, true> = {}
+  for (const line of input.lines) {
+    if (seen[line.planItemId]) throw validation("Cada tratamiento se ajusta una sola vez")
+    seen[line.planItemId] = true
+  }
+  const lines = await listBudgetLines(tx, orgId, patientId, budgetId)
+  const byItem: Record<string, (typeof lines)[number]> = {}
+  for (const line of lines) byItem[line.planItemId] = line
+  const now = new Date()
+  for (const patch of input.lines) {
+    const line = byItem[patch.planItemId]
+    if (!line) throw notFound("Línea del presupuesto")
+    let priceCents = line.priceCents
+    let priceReason = line.priceReason
+    let promotionId = line.promotionId
+    let promotionName = line.promotionName
+    let promotionMode = line.promotionMode
+    if (patch.promotionId !== undefined) {
+      if (patch.promotionId === null) {
+        promotionId = null
+        promotionName = null
+        promotionMode = null
+      } else {
+        if (!line.serviceId) {
+          throw conflict("PROMOTION_NO_SERVICE", "La línea no tiene servicio para promocionar")
+        }
+        const snapshot = await requirePromotionPrice(
+          tx,
+          orgId,
+          patch.promotionId,
+          line.serviceId,
+          patch.promotionFinalPriceCents ?? patch.priceCents ?? undefined,
+        )
+        if (snapshot.currency !== line.currency) {
+          throw conflict("CURRENCY_MISMATCH", "La promoción usa otra moneda")
+        }
+        promotionId = snapshot.promotionId
+        promotionName = snapshot.promotionName
+        promotionMode = snapshot.mode
+        priceCents = snapshot.priceCents
+        priceReason = patch.reason?.trim() ? assertPriceReason(patch.reason) : null
+      }
+    }
+    if (patch.priceCents !== undefined && patch.priceCents !== null) {
+      if (!Number.isSafeInteger(patch.priceCents) || patch.priceCents < 0 || patch.priceCents > 2147483647) {
+        throw validation("priceCents debe ser un entero >= 0")
+      }
+      priceCents = patch.priceCents
+    }
+    if (priceCents == null) throw validation("La línea no tiene precio acordado")
+    if (promotionMode === "fixed" && promotionId && line.serviceId) {
+      const snapshot = await requirePromotionPrice(tx, orgId, promotionId, line.serviceId, undefined)
+      if (priceCents !== snapshot.priceCents) {
+        throw conflict("PROMOTION_FIXED_PRICE", "El precio fijo de la promoción no se negocia")
+      }
+    }
+    const reference =
+      promotionMode === "from" && promotionId && line.serviceId
+        ? (await requirePromotionPrice(tx, orgId, promotionId, line.serviceId, priceCents)).floorCents ?? line.tariffPriceCents
+        : (line.tariffPriceCents ?? priceCents)
+    if (promotionId === null || promotionMode === "from") {
+      if (priceCents < (reference ?? priceCents)) {
+        priceReason = assertPriceReason(patch.reason ?? priceReason)
+      } else if (patch.reason !== undefined) {
+        priceReason = patch.reason?.trim() ? assertPriceReason(patch.reason) : null
+      }
+    }
+    await tx
+      .update(treatmentBudgetItem)
+      .set({ priceCents, priceReason, promotionId, promotionName, promotionMode, updatedAt: now })
+      .where(
+        and(
+          eq(treatmentBudgetItem.id, line.id),
+          eq(treatmentBudgetItem.organizationId, orgId),
+        ),
+      )
+  }
+  await audit(tx, orgId, actorUserId, "budget.prices_adjusted", budgetId, {
+    patientId,
+    lineCount: input.lines.length,
+  })
+  await notifyBudget(tx, orgId)
+  return withTotals(await requireBudget(tx, orgId, patientId, budgetId), await listBudgetLines(tx, orgId, patientId, budgetId))
+}
+
 
 export async function decideBudget(
   tx: Db,
@@ -556,6 +808,7 @@ export async function decideBudget(
   patientId: string,
   budgetId: string,
   input: DecideBudgetInput,
+  opts: BudgetActorOpts & { skipOwnPlan?: boolean } = {},
 ): Promise<BudgetWithTotals> {
   await requirePatient(tx, orgId, patientId)
   const [prev] = await tx
@@ -570,10 +823,17 @@ export async function decideBudget(
     )
     .limit(1)
   if (!prev) throw notFound("Presupuesto")
-  await lockPlan(tx, orgId, patientId, prev.planId)
+  if (!opts.skipOwnPlan) {
+    assertOwnPlan(await lockPlan(tx, orgId, patientId, prev.planId), actorUserId, opts.memberRole)
+  } else {
+    await lockPlan(tx, orgId, patientId, prev.planId)
+  }
   await lockBudgetRow(tx, orgId, patientId, budgetId)
   const current = await requireBudget(tx, orgId, patientId, budgetId)
-  if (current.status !== "presentado") {
+  // Responder después: un parcial/pospuesto admite completar lo pospuesto sin
+  // reescribir lo ya decidido; otra autoridad no pisa la decisión registrada.
+  const isFollowUp = current.status === "parcial" || current.status === "pospuesto"
+  if (current.status !== "presentado" && !isFollowUp) {
     throw conflict("BUDGET_STATUS", "Solo un presupuesto presentado puede decidirse")
   }
   const decisionNote = assertNotes(input.decisionNote) ?? null
@@ -588,6 +848,19 @@ export async function decideBudget(
   }
   const representative = input.decidedByContactId
     ? await requireDecisionContact(tx, orgId, patientId, input.decidedByContactId) : null
+  if (isFollowUp) {
+    if (current.decisionContactId && representative && current.decisionContactId !== representative.id) {
+      throw conflict("BUDGET_DECISION_OWNER", "Solo quien decidió puede completar su respuesta")
+    }
+    for (const line of lines) {
+      if (line.decision !== "pospuesto") {
+        const next = decisions.get(line.planItemId)
+        if (next !== line.decision) {
+          throw conflict("BUDGET_DECISION_FINAL", "Lo ya decidido no se reescribe al completar")
+        }
+      }
+    }
+  }
   const items = await tx.select().from(treatmentPlanItem).where(and(
     eq(treatmentPlanItem.organizationId, orgId), eq(treatmentPlanItem.patientId, patientId),
     eq(treatmentPlanItem.planId, current.planId),
@@ -643,6 +916,7 @@ export async function decideBudget(
   await audit(tx, orgId, actorUserId, "budget.decision", budgetId, {
     patientId, status, acceptedCount, decisionContactId: representative?.id ?? null,
   })
+  await notifyBudget(tx, orgId)
   return withTotals(updated, await listBudgetLines(tx, orgId, patientId, budgetId))
 }
 
@@ -652,6 +926,7 @@ export async function cancelBudget(
   actorUserId: string,
   patientId: string,
   budgetId: string,
+  opts: BudgetActorOpts = {},
 ): Promise<BudgetRow> {
   await requirePatient(tx, orgId, patientId)
   const [prev] = await tx
@@ -666,7 +941,7 @@ export async function cancelBudget(
     )
     .limit(1)
   if (!prev) throw notFound("Presupuesto")
-  await lockPlan(tx, orgId, patientId, prev.planId)
+  assertOwnPlan(await lockPlan(tx, orgId, patientId, prev.planId), actorUserId, opts.memberRole)
   const current = await lockBudgetRow(tx, orgId, patientId, budgetId)
   if (current.status !== "borrador" && current.status !== "presentado") {
     throw conflict("BUDGET_STATUS", "Solo un presupuesto en borrador o presentado puede cancelarse")
@@ -710,7 +985,31 @@ export async function cancelBudget(
     from: current.status,
     itemCount: lines.length,
   })
+  await notifyBudget(tx, orgId)
   return updated
+}
+
+/**
+ * Planes propios del odontólogo (restricción objeto de lectura): el
+ * odontólogo solo ve presupuestos de planes que creó él. Caja y
+ * administración ven todos (la ruta ya exige `budgets.read`).
+ */
+async function assertOwnBudget(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  memberRole: string | undefined,
+  planId: string,
+): Promise<void> {
+  if ((memberRole ?? "").trim().toLowerCase() !== "dentist") return
+  const [plan] = await tx
+    .select({ createdBy: treatmentPlan.createdBy })
+    .from(treatmentPlan)
+    .where(and(eq(treatmentPlan.id, planId), eq(treatmentPlan.organizationId, orgId)))
+    .limit(1)
+  if (!plan || plan.createdBy !== actorUserId) {
+    throw new ServiceError("BUDGET_NOT_OWN_PLAN", 403, "Solo puedes ver presupuestos de tu plan")
+  }
 }
 
 export async function listBudgets(
@@ -718,6 +1017,7 @@ export async function listBudgets(
   orgId: string,
   patientId: string,
   planId?: string,
+  opts: BudgetActorOpts & { actorUserId?: string } = {},
 ): Promise<BudgetWithTotals[]> {
   await requirePatient(tx, orgId, patientId)
   const conditions = [
@@ -725,6 +1025,19 @@ export async function listBudgets(
     eq(treatmentBudget.organizationId, orgId),
   ]
   if (planId) conditions.push(eq(treatmentBudget.planId, planId))
+  if ((opts.memberRole ?? "").trim().toLowerCase() === "dentist" && opts.actorUserId) {
+    const ownPlans = tx
+      .select({ id: treatmentPlan.id })
+      .from(treatmentPlan)
+      .where(
+        and(
+          eq(treatmentPlan.organizationId, orgId),
+          eq(treatmentPlan.patientId, patientId),
+          eq(treatmentPlan.createdBy, opts.actorUserId),
+        ),
+      )
+    conditions.push(sql`${treatmentBudget.planId} IN (${ownPlans})`)
+  }
   const budgets = await tx
     .select()
     .from(treatmentBudget)
@@ -742,8 +1055,10 @@ export async function getBudgetDetail(
   orgId: string,
   patientId: string,
   budgetId: string,
+  opts: BudgetActorOpts & { actorUserId?: string } = {},
 ): Promise<BudgetWithTotals> {
   const budget = await requireBudget(tx, orgId, patientId, budgetId)
+  if (opts.actorUserId) await assertOwnBudget(tx, orgId, opts.actorUserId, opts.memberRole, budget.planId)
   return withTotals(budget, await listBudgetLines(tx, orgId, patientId, budgetId))
 }
 
@@ -766,10 +1081,11 @@ async function assertRetainedExecutedItems(tx: Db, orgId: string, patientId: str
 
 export async function reviseBudget(
   tx: Db, orgId: string, actorUserId: string, patientId: string, budgetId: string, input: ReviseBudgetInput,
+  opts: BudgetActorOpts = {},
 ): Promise<BudgetWithTotals> {
   await requirePatient(tx, orgId, patientId)
   const previous = await requireBudget(tx, orgId, patientId, budgetId)
-  await lockPlan(tx, orgId, patientId, previous.planId)
+  assertOwnPlan(await lockPlan(tx, orgId, patientId, previous.planId), actorUserId, opts.memberRole)
   const current = await lockBudgetRow(tx, orgId, patientId, budgetId)
   if (!["presentado", "aceptado", "parcial", "pospuesto"].includes(current.status)) {
     throw conflict("BUDGET_STATUS", "Esta propuesta no admite revisión")
@@ -804,14 +1120,161 @@ export async function reviseBudget(
   const oldLines = await listBudgetLines(tx, orgId, patientId, current.id)
   for (const item of items) {
     const snapshot = oldLines.find(l => l.planItemId === item.id) ?? item
+    const carried = "tariffPriceCents" in snapshot ? snapshot as BudgetLineWithStatus : null
     await tx.insert(treatmentBudgetItem).values({
       organizationId: orgId, patientId, planId: current.planId, budgetId: revision.id,
       planItemId: item.id, serviceId: snapshot.serviceId, title: snapshot.title,
       scope: snapshot.scope, toothNumber: snapshot.toothNumber, surfaces: snapshot.surfaces,
       quadrant: snapshot.quadrant, arch: snapshot.arch, codings: snapshot.codings,
-      priceCents: snapshot.priceCents, currency: snapshot.currency, createdBy: actorUserId,
+      priceCents: snapshot.priceCents,
+      tariffPriceCents: carried?.tariffPriceCents ?? item.priceCents,
+      priceReason: carried?.priceReason ?? null,
+      promotionId: carried?.promotionId ?? null,
+      promotionName: carried?.promotionName ?? null,
+      promotionMode: carried?.promotionMode ?? null,
+      billingMode: carried?.billingMode ?? "treatment",
+      sessionsPlanned: carried?.sessionsPlanned ?? item.plannedSessions,
+      currency: snapshot.currency, createdBy: actorUserId,
     })
   }
   await audit(tx, orgId, actorUserId, "budget.revised", revision.id, { patientId, reason, supersedesBudgetId: current.id })
+  await notifyBudget(tx, orgId)
   return withTotals(revision, await listBudgetLines(tx, orgId, patientId, revision.id))
+}
+
+export interface BudgetPrintLine {
+  title: string
+  detail: string | null
+  tariffCents: number | null
+  priceCents: number | null
+  discountCents: number | null
+  promotionName: string | null
+  billingMode: string
+  sessionsPlanned: number | null
+  decision: string
+}
+
+export interface BudgetPrintPayload {
+  /** UN/CEFACT 1001: 310 = oferta/cotización. */
+  quotationCode: "310"
+  /** Hoja del presupuesto: A4 (ISO 216). */
+  paper: "A4"
+  budgetNumber: number
+  revisionNumber: number
+  title: string
+  planTitle: string
+  status: string
+  isDraft: boolean
+  currency: string
+  locale: string
+  timezone: string
+  issuedAt: Date
+  clinic: { name: string; address: string | null; phone: string | null }
+  patient: { displayName: string; docType: string | null; docNumber: string | null }
+  professional: { name: string; title: string | null; registration: string | null } | null
+  lines: BudgetPrintLine[]
+  subtotalCents: number | null
+  discountCents: number | null
+  totalCents: number | null
+  paymentNote: string
+  fiscalNote: string
+}
+
+/**
+ * Payload estructurado para imprimir el presupuesto (plantilla A4 del
+ * servidor o PDF de Documentos): precios finales acordados, tarifa de
+ * referencia y código de cotización 310. Moneda/locale/zona salen del perfil
+ * de la organización, nunca fijos en el código.
+ */
+export async function getBudgetPrintPayload(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+  budgetId: string,
+  opts: BudgetActorOpts & { actorUserId?: string } = {},
+): Promise<BudgetPrintPayload> {
+  const budget = await getBudgetDetail(tx, orgId, patientId, budgetId, opts)
+  const [profile] = await tx
+    .select()
+    .from(orgProfile)
+    .where(eq(orgProfile.organizationId, orgId))
+    .limit(1)
+  const [patientRow] = await tx
+    .select({
+      displayName: patient.displayName,
+      docType: patient.docType,
+      docNumber: patient.docNumber,
+    })
+    .from(patient)
+    .where(and(eq(patient.id, patientId), eq(patient.organizationId, orgId)))
+    .limit(1)
+  if (!patientRow) throw notFound("Paciente")
+  const [planRow] = await tx
+    .select({ title: treatmentPlan.title, createdBy: treatmentPlan.createdBy })
+    .from(treatmentPlan)
+    .where(and(eq(treatmentPlan.id, budget.planId), eq(treatmentPlan.organizationId, orgId)))
+    .limit(1)
+  let professional: BudgetPrintPayload["professional"] = null
+  if (planRow?.createdBy) {
+    const [author] = await tx
+      .select({ name: user.name })
+      .from(user)
+      .where(eq(user.id, planRow.createdBy))
+      .limit(1)
+    if (author) {
+      let signature: { title?: string | null; registration?: string | null } | null = null
+      try {
+        signature = await requireProfessionalSignature(tx, orgId, planRow.createdBy)
+      } catch {
+        signature = null
+      }
+      professional = {
+        name: author.name,
+        title: signature?.title ?? null,
+        registration: signature?.registration ?? null,
+      }
+    }
+  }
+  const lines: BudgetPrintLine[] = budget.items.map((line) => ({
+    title: line.title,
+    detail: line.scope ?? (line.toothNumber != null ? `Pieza ${line.toothNumber}` : null),
+    tariffCents: line.tariffPriceCents ?? line.priceCents,
+    priceCents: line.priceCents,
+    discountCents:
+      line.tariffPriceCents != null && line.priceCents != null
+        ? line.tariffPriceCents - line.priceCents
+        : null,
+    promotionName: line.promotionName,
+    billingMode: line.billingMode,
+    sessionsPlanned: line.sessionsPlanned,
+    decision: line.decision,
+  }))
+  return {
+    quotationCode: "310",
+    paper: "A4",
+    budgetNumber: budget.budgetNumber,
+    revisionNumber: budget.revisionNumber,
+    title: budget.title,
+    planTitle: planRow?.title ?? budget.title,
+    status: budget.status,
+    isDraft: budget.status === "borrador",
+    currency: budget.currency,
+    locale: profile?.locale ?? "es-PE",
+    timezone: profile?.timezone ?? "America/Lima",
+    issuedAt: budget.presentedAt ?? budget.createdAt,
+    clinic: {
+      name: profile?.tradeName || profile?.legalName || "",
+      address: profile?.fiscalAddress ?? null,
+      phone: null,
+    },
+    patient: patientRow,
+    professional,
+    lines,
+    subtotalCents: budget.tariffTotalCents,
+    discountCents: budget.discountCents,
+    totalCents: budget.totalCents,
+    paymentNote:
+      "Cada tratamiento se paga cuando se realiza. Puede dejar un adelanto, que se descuenta de lo siguiente que deba.",
+    fiscalNote: "Este presupuesto no es un documento fiscal.",
+  }
 }

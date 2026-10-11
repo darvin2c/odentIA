@@ -43,17 +43,16 @@ import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-
 import { ChevronDown, Plus, Tag } from "lucide-react"
 import { type FormEvent, type ReactNode, useCallback, useEffect, useMemo, useState } from "react"
 import { z } from "zod"
+import { formatMoney, formatMoneyInput, parseMoney } from "@odentia/clinical"
 import { ApiError } from "../../lib/api"
 import { usePermission } from "../../lib/crm"
+import { useOrgProfile } from "../../lib/org"
 import { PageDraftGuard } from "../../lib/page-draft-guard"
 import {
   createServiceApi,
   fetchServices,
   fetchTreatmentTemplate,
   fetchTreatmentTemplates,
-  formatMoney,
-  formatPriceInput,
-  parsePriceToCents,
   type ServiceCatalogItem,
   SPECIALTY_FILTER_OPTIONS,
   TREATMENT_SCOPE_LABELS,
@@ -105,6 +104,7 @@ function TarifarioPage() {
   const canManage = usePermission("settings.write")
   const canViewTariff =
     canManage ||
+    usePermission("catalog.read") ||
     usePermission("clinical.read") ||
     usePermission("appointments.read") ||
     usePermission("finance.read")
@@ -116,7 +116,10 @@ function TarifarioPage() {
   const estadoFilter = listSearch.get("estado") ?? "active"
   const sortParam = listSearch.get("sort") ?? ""
   const mode = useDetailMode()
-  /** Superficie lateral: la oferta abierta o el alta; `null` = nunca abierta. */
+  /** Moneda y formato de la clínica: los importes se leen con su locale. */
+  const profileQuery = useOrgProfile()
+  const profileLocale = profileQuery.data?.locale
+  const profileCurrency = profileQuery.data?.currency
   const [target, setTarget] = useState<EditorTarget | null>(null)
   /** Se cierra sin desmontar: el drawer necesita su salida y `MasterDetail` su colapso. */
   const [surfaceOpen, setSurfaceOpen] = useState(false)
@@ -240,16 +243,19 @@ function TarifarioPage() {
         accessorKey: "priceCents",
         header: "Precio",
         meta: { view: { primary: true } },
-        cell: ({ row }) => formatMoney(row.original.priceCents, row.original.currency),
+        cell: ({ row }) =>
+          profileLocale === undefined ? (
+            <span className="text-muted-foreground">…</span>
+          ) : (
+            formatMoney(row.original.priceCents, row.original.currency, profileLocale)
+          ),
       },
       {
-        accessorKey: "isActive",
-        header: "Activa",
-        cell: ({ getValue }) => (
-          <Badge variant={getValue<boolean>() ? "success" : "secondary"}>
-            {getValue<boolean>() ? "Sí" : "No"}
-          </Badge>
-        ),
+        accessorKey: "billingMode",
+        header: "Se cobra",
+        meta: { view: { primary: true } },
+        cell: ({ row }) =>
+          row.original.billingMode === "session" ? "Por sesión" : "Por tratamiento",
       },
       {
         id: "actions",
@@ -285,7 +291,7 @@ function TarifarioPage() {
           ) : null,
       },
     ],
-    [canManage, openOffer],
+    [canManage, openOffer, profileLocale],
   )
 
   const hasFilters = search.trim() !== "" || specialtyFilter !== "todas" || sortParam !== ""
@@ -296,8 +302,24 @@ function TarifarioPage() {
    * La `key` remonta el formulario al cambiar de oferta (estado y errores
    * propios de cada una).
    */
+  const profileReady = profileLocale !== undefined && profileCurrency !== undefined
   const editor =
-    target?.kind === "create" ? (
+    !profileReady ? (
+      <DetailPanel
+        title="Tarifario de la clínica"
+        headerContent={null}
+        onClose={closeOffer}
+      >
+        {profileQuery.isError ? (
+          <ErrorState
+            message="No se pudo cargar la configuración regional"
+            onRetry={() => void profileQuery.refetch()}
+          />
+        ) : (
+          <LoadingState />
+        )}
+      </DetailPanel>
+    ) : target?.kind === "create" ? (
       <OfferEditor
         key="alta"
         offer={null}
@@ -305,6 +327,8 @@ function TarifarioPage() {
         open={surfaceOpen}
         canWrite={canManage}
         onClose={closeOffer}
+        orgCurrency={profileCurrency}
+        orgLocale={profileLocale}
       />
     ) : editing ? (
       <OfferEditor
@@ -314,6 +338,8 @@ function TarifarioPage() {
         open={surfaceOpen}
         canWrite={canManage}
         onClose={closeOffer}
+        orgCurrency={profileCurrency}
+        orgLocale={profileLocale}
       />
     ) : null
   const editorVisible = surfaceOpen && editor !== null
@@ -460,19 +486,14 @@ function GroupTable({
 const offerSchema = z.object({
   name: z.string().min(1, "Ingresa el nombre").max(200, "Máximo 200 caracteres"),
   code: z.string().max(40, "Máximo 40 caracteres"),
-  price: z.string().refine(
-    (value) => {
-      // La tarifa es obligatoria: 0 significa "incluida sin costo".
-      if (value.trim() === "") return false
-      try {
-        parsePriceToCents(value)
-        return true
-      } catch {
-        return false
-      }
-    },
-    { message: "Indica la tarifa (usa 0 si va incluida sin costo), con hasta 2 decimales" },
-  ),
+  price: z
+    .string()
+    .refine((value) => value.trim() !== "", {
+      message: "Indica la tarifa (usa 0 si va incluida sin costo)",
+    })
+    .refine((value) => /^\d+([.,]\d+)?$/.test(value.trim()), {
+      message: "Tarifa inválida: usa números",
+    }),
   durationMin: z.string().refine(
     (value) => {
       if (value.trim() === "") return true
@@ -483,6 +504,7 @@ const offerSchema = z.object({
   ),
   specialty: z.string().min(1, "Elige la especialidad"),
   scope: z.string().min(1, "Elige el ámbito"),
+  billingMode: z.enum(["treatment", "session"]),
 })
 
 type OfferFormValues = z.infer<typeof offerSchema>
@@ -494,18 +516,20 @@ const emptyOfferValues: OfferFormValues = {
   durationMin: "",
   specialty: "",
   scope: "",
+  billingMode: "treatment",
 }
 
 /** Valores del formulario para una oferta; `null` = alta de una prestación propia. */
-function offerValues(offer: ServiceCatalogItem | null): OfferFormValues {
+function offerValues(offer: ServiceCatalogItem | null, locale: string): OfferFormValues {
   if (!offer) return emptyOfferValues
   return {
     name: offer.name,
     code: offer.code ?? "",
-    price: formatPriceInput(offer.priceCents),
+    price: formatMoneyInput(offer.priceCents, offer.currency, locale),
     durationMin: offer.durationMin === null ? "" : String(offer.durationMin),
     specialty: offer.specialty ?? "",
     scope: offer.scope ?? "",
+    billingMode: offer.billingMode ?? "treatment",
   }
 }
 
@@ -518,9 +542,10 @@ function useOfferForm(
   offer: ServiceCatalogItem | null,
   open: boolean,
   onSubmit: (value: OfferFormValues) => Promise<void>,
+  locale: string,
 ) {
   const form = useForm({
-    defaultValues: offerValues(offer),
+    defaultValues: offerValues(offer, locale),
     validators: { onSubmit: offerSchema },
     onSubmit: async ({ value }) => {
       await onSubmit(value)
@@ -533,7 +558,6 @@ function useOfferForm(
 
   return form
 }
-
 type OfferForm = ReturnType<typeof useOfferForm>
 
 function sourceLabel(offer: ServiceCatalogItem): string {
@@ -555,17 +579,29 @@ interface OfferEditorProps {
   open: boolean
   canWrite: boolean
   onClose: () => void
+  /** Moneda y formato de la clínica (perfil ya cargado por la página). */
+  orgCurrency: string
+  orgLocale: string
 }
-
 /**
  * Superficie del tarifario: el mismo formulario en panel lateral o drawer, y el
  * detalle de lectura para quien no escribe. Un solo contenedor por vez —montar
  * panel y drawer juntos duplicaría los `id`/`htmlFor` de los campos— y el shell
  * aporta cabecera, scroll y pie de acciones (Cancelar + Guardar).
  */
-function OfferEditor({ offer, asPanel, open, canWrite, onClose }: OfferEditorProps) {
+function OfferEditor({
+  offer,
+  asPanel,
+  open,
+  canWrite,
+  onClose,
+  orgCurrency,
+  orgLocale,
+}: OfferEditorProps) {
   const queryClient = useQueryClient()
   const [resolveMode, setResolveMode] = useState<"plantilla" | "propia">("plantilla")
+  /** La tarifa se escribe y lee con la moneda y el formato de la clínica. */
+  const currency = offer?.currency ?? orgCurrency
   const templateId = offer?.templateId ?? null
   const isTemplate = offer?.source === "template"
   const isLegacy = offer?.source === "legacy"
@@ -599,8 +635,9 @@ function OfferEditor({ offer, asPanel, open, canWrite, onClose }: OfferEditorPro
       const body = {
         name: values.name.trim(),
         code: values.code.trim() === "" ? null : values.code.trim(),
-        priceCents: parsePriceToCents(values.price),
+        priceCents: parseMoney(values.price, currency, orgLocale),
         durationMin: values.durationMin.trim() === "" ? null : Number(values.durationMin),
+        billingMode: values.billingMode,
       }
       if (!offer) {
         return createServiceApi({ ...body, specialty: values.specialty, scope: values.scope })
@@ -627,7 +664,7 @@ function OfferEditor({ offer, asPanel, open, canWrite, onClose }: OfferEditorPro
 
   const form = useOfferForm(offer, open, async (value) => {
     await saveMutation.mutateAsync(value)
-  })
+  }, orgLocale)
   // Suscripción explícita: la página no se entera de los cambios de meta del
   // formulario por sí sola, y el cierre protegido necesita saber si hay cambios.
   const isDirty = useStore(form.store, (state) => !state.isDefaultValue)
@@ -706,7 +743,7 @@ function OfferEditor({ offer, asPanel, open, canWrite, onClose }: OfferEditorPro
             form={form}
             offer={offer}
             allowSpecialtyScope={!isTemplate}
-            currency={offer?.currency ?? null}
+            currency={currency ?? null}
           />
           {offer ? <OfferDetails offer={offer} linkedCoding={linkedCoding} /> : null}
         </>
@@ -719,11 +756,11 @@ function OfferEditor({ offer, asPanel, open, canWrite, onClose }: OfferEditorPro
   if (offer && !canWrite) {
     return asPanel ? (
       <DetailPanel title={offer.name} headerContent={headerContent} onClose={onClose}>
-        <OfferReadOnly offer={offer} linkedCoding={linkedCoding} />
+        <OfferReadOnly offer={offer} linkedCoding={linkedCoding} locale={orgLocale} />
       </DetailPanel>
     ) : (
       <DetailDrawer open={open} title={offer.name} headerContent={headerContent} onClose={onClose}>
-        <OfferReadOnly offer={offer} linkedCoding={linkedCoding} />
+        <OfferReadOnly offer={offer} linkedCoding={linkedCoding} locale={orgLocale} />
       </DetailDrawer>
     )
   }
@@ -782,9 +819,11 @@ function LegacyNote({ children }: { children?: ReactNode }) {
 function OfferReadOnly({
   offer,
   linkedCoding,
+  locale,
 }: {
   offer: ServiceCatalogItem
   linkedCoding: TreatmentTemplateItem["codings"][number] | null
+  locale: string
 }) {
   return (
     <div className="flex flex-col gap-4">
@@ -797,7 +836,10 @@ function OfferReadOnly({
           </DetailField>
         ) : null}
         <DetailField label={`Tarifa (${offer.currency})`}>
-          {formatMoney(offer.priceCents, offer.currency)}
+          {formatMoney(offer.priceCents, offer.currency, locale)}
+        </DetailField>
+        <DetailField label="Se cobra">
+          {offer.billingMode === "session" ? "Por sesión" : "Por tratamiento"}
         </DetailField>
         <DetailField label="Duración">
           {offer.durationMin === null ? null : `${offer.durationMin} min`}
@@ -981,6 +1023,35 @@ function OfferFields({
           )}
         </form.Field>
       </div>
+      <form.Field name="billingMode" validators={{ onChange: offerSchema.shape.billingMode }}>
+        {(field) => (
+          <Field>
+            <FieldLabel>Cómo se cobra</FieldLabel>
+            <div className="flex gap-2" role="radiogroup" aria-label="Cómo se cobra">
+              <Button
+                type="button"
+                size="sm"
+                variant={field.state.value === "treatment" ? "default" : "outline"}
+                onClick={() => field.handleChange("treatment")}
+              >
+                Por tratamiento
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant={field.state.value === "session" ? "default" : "outline"}
+                onClick={() => field.handleChange("session")}
+              >
+                Por sesión
+              </Button>
+            </div>
+            <FieldError errors={fieldErrorMessages(field.state.meta.errors)} />
+            <p className="text-xs text-muted-foreground">
+              Por sesión: se cobra el precio en cada visita atendida.
+            </p>
+          </Field>
+        )}
+      </form.Field>
       <form.Field name="code" validators={{ onChange: offerSchema.shape.code }}>
         {(field) => (
           <Field>

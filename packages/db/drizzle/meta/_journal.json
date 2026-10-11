@@ -330,6 +330,27 @@
       "when": 1791694488742,
       "tag": "0046_agenda_sin_lista_de_espera",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1791751080428,
+      "tag": "0047_finanzas_integradas",
+      "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1791751162039,
+      "tag": "0048_invariantes_financieras",
+      "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1791751798177,
+      "tag": "0049_precios_promocionales_activos",
+      "breakpoints": true
     }
   ]
 }

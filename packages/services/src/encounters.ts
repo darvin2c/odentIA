@@ -15,6 +15,7 @@ import {
   patientCharge,
   prescription,
   treatmentBudget,
+  treatmentBudgetItem,
   treatmentPlan,
   treatmentPlanItem,
 } from "@odentia/db/schema/clinical"
@@ -1154,14 +1155,59 @@ export async function addEncounterProcedure(
 /** Cargo omitido al cerrar: queda registrado para mostrarlo en el resumen. */
 export interface SkippedCharge {
   procedureId: string
-  reason: "covered" | "free_act" | "zero_price"
+  reason: "covered" | "free_act" | "zero_price" | "sessions_complete"
+}
+
+/** Línea del diálogo de cierre: qué quedó por cobrar y qué no. */
+export interface FinalizeBillingLine {
+  procedureId: string
+  description: string
+  amountCents: number | null
+  currency: string | null
+  status: "charged" | "skipped"
+  reason: SkippedCharge["reason"] | null
 }
 
 export interface FinalizeEncounterResult {
   encounter: EncounterRow
   /** Cargos generados automáticamente desde los actos con servicio. */
-  charges: Array<Awaited<ReturnType<typeof createCharge>>>
+  charges: Array<typeof patientCharge.$inferSelect>
   skippedCharges: SkippedCharge[]
+  /** Resumen para el diálogo de cierre y caja (con moneda del primer cargo). */
+  billing: { chargedCents: number; currency: string | null; lines: FinalizeBillingLine[] }
+}
+
+/** Aviso en vivo (`org_events`): solo `{ orgId, kind, at }`, sin datos clínicos. */
+async function notifyClose(tx: Db, orgId: string, kind: string): Promise<void> {
+  await tx.execute(sql`select pg_notify('org_events', ${JSON.stringify({ orgId, kind, at: new Date().toISOString() })})`)
+}
+
+/**
+ * Línea aceptada vigente de un tratamiento (presupuesto aceptado/parcial con
+ * decisión aceptada): trae precio final acordado y modo de cobro congelados.
+ */
+async function acceptedBudgetLine(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+  planItemId: string,
+): Promise<typeof treatmentBudgetItem.$inferSelect | null> {
+  const [found] = await tx
+    .select({ line: treatmentBudgetItem })
+    .from(treatmentBudgetItem)
+    .innerJoin(treatmentBudget, eq(treatmentBudget.id, treatmentBudgetItem.budgetId))
+    .where(
+      and(
+        eq(treatmentBudgetItem.organizationId, orgId),
+        eq(treatmentBudgetItem.patientId, patientId),
+        eq(treatmentBudgetItem.planItemId, planItemId),
+        eq(treatmentBudgetItem.decision, "aceptado"),
+        sql`${treatmentBudget.status} IN ('aceptado','parcial')`,
+      ),
+    )
+    .orderBy(desc(treatmentBudget.decidedAt), desc(treatmentBudget.createdAt))
+    .limit(1)
+  return found?.line ?? null
 }
 
 /** Lo que falta para cerrar una atención, en el orden de la historia clínica. */
@@ -1300,24 +1346,112 @@ export async function finalizeEncounter(
   if (!row) throw notFound("Atención")
   await resolveTreatedFindings(tx, orgId, actorUserId, patientId, encounterId, now)
   if (row.appointmentId) await closeAppointment(tx, orgId, actorUserId, patientId, row, now)
-  // Los cargos caen solos al finalizar: un cargo por acto con servicio y
-  // precio > 0 que no esté ya cubierto por un cargo activo del mismo
-  // tratamiento (anti-doble-cobro; el límite por tratamiento sigue en
-  // createCharge como candado).
+  // Los cargos caen solos al finalizar, con el precio final acordado:
+  // - Modo `treatment`: un cargo por tratamiento (anti-doble-cobro por cargo
+  //   activo del mismo tratamiento; el importe respeta el total acordado).
+  // - Modo `session`: un cargo por visita atendida al precio de sesión
+  //   acordado, con tope de visitas previstas y sin duplicar el acto
+  //   (anti-doble-cargo por procedimiento). La deuda nace por visita.
   const charges: FinalizeEncounterResult["charges"] = []
   const skippedCharges: SkippedCharge[] = []
+  const billingLines: FinalizeBillingLine[] = []
+  const skip = (
+    proc: { id: string; description: string; currency: string | null },
+    reason: SkippedCharge["reason"],
+  ): void => {
+    skippedCharges.push({ procedureId: proc.id, reason })
+    billingLines.push({
+      procedureId: proc.id,
+      description: proc.description,
+      amountCents: null,
+      currency: proc.currency,
+      status: "skipped",
+      reason,
+    })
+  }
   for (const proc of procedures) {
     if (!proc.serviceId) {
-      skippedCharges.push({ procedureId: proc.id, reason: "free_act" })
+      skip(proc, "free_act")
+      continue
+    }
+    const line = proc.planItemId
+      ? await acceptedBudgetLine(tx, orgId, patientId, proc.planItemId)
+      : null
+    const sessionMode = line?.billingMode === "session"
+    if (sessionMode && proc.planItemId) {
+      const [duplicate] = await tx
+        .select({ id: patientCharge.id })
+        .from(patientCharge)
+        .where(
+          and(
+            eq(patientCharge.organizationId, orgId),
+            eq(patientCharge.patientId, patientId),
+            eq(patientCharge.encounterProcedureId, proc.id),
+            isNull(patientCharge.voidedAt),
+          ),
+        )
+        .limit(1)
+      if (duplicate) {
+        skip(proc, "covered")
+        continue
+      }
+      const visits = await tx
+        .select({ id: patientCharge.id })
+        .from(patientCharge)
+        .where(
+          and(
+            eq(patientCharge.organizationId, orgId),
+            eq(patientCharge.patientId, patientId),
+            eq(patientCharge.planItemId, proc.planItemId),
+            isNotNull(patientCharge.encounterProcedureId),
+            isNull(patientCharge.voidedAt),
+          ),
+        )
+      const [planItem] = proc.planItemId
+        ? await tx
+            .select({ plannedSessions: treatmentPlanItem.plannedSessions })
+            .from(treatmentPlanItem)
+            .where(
+              and(
+                eq(treatmentPlanItem.id, proc.planItemId),
+                eq(treatmentPlanItem.organizationId, orgId),
+              ),
+            )
+            .limit(1)
+        : []
+      const cap = line?.sessionsPlanned ?? planItem?.plannedSessions ?? 1
+      if (visits.length >= cap) {
+        skip(proc, "sessions_complete")
+        continue
+      }
+      const amount = line?.priceCents ?? proc.priceCents
+      if (amount === null || amount <= 0) {
+        skip(proc, "zero_price")
+        continue
+      }
+      const charge = await createCharge(tx, orgId, actorUserId, patientId, {
+        encounterProcedureId: proc.id,
+        amountCents: amount,
+        promotionId: line?.promotionId ?? undefined,
+      })
+      charges.push(charge)
+      billingLines.push({
+        procedureId: proc.id,
+        description: charge.description,
+        amountCents: charge.amountCents,
+        currency: charge.currency,
+        status: "charged",
+        reason: null,
+      })
       continue
     }
     if (proc.priceCents === null || proc.priceCents <= 0) {
-      skippedCharges.push({ procedureId: proc.id, reason: "zero_price" })
+      skip(proc, "zero_price")
       continue
     }
     if (proc.planItemId) {
-      const [existing] = await tx
-        .select({ id: patientCharge.id })
+      const active = await tx
+        .select({ amountCents: patientCharge.amountCents })
         .from(patientCharge)
         .where(
           and(
@@ -1327,24 +1461,77 @@ export async function finalizeEncounter(
             isNull(patientCharge.voidedAt),
           ),
         )
-        .limit(1)
-      if (existing) {
-        skippedCharges.push({ procedureId: proc.id, reason: "covered" })
+      const agreed = line?.priceCents ?? proc.priceCents
+      const charged = active.reduce((sum, c) => sum + c.amountCents, 0)
+      const remaining = agreed - charged
+      if (remaining <= 0) {
+        skip(proc, "covered")
         continue
       }
-    }
-    charges.push(
-      await createCharge(tx, orgId, actorUserId, patientId, {
+      const amount = Math.min(proc.priceCents, remaining)
+      const charge = await createCharge(tx, orgId, actorUserId, patientId, {
         encounterProcedureId: proc.id,
-      }),
-    )
+        amountCents: amount,
+        promotionId: line?.promotionId ?? undefined,
+      })
+      charges.push(charge)
+      billingLines.push({
+        procedureId: proc.id,
+        description: charge.description,
+        amountCents: charge.amountCents,
+        currency: charge.currency,
+        status: "charged",
+        reason: null,
+      })
+      continue
+    }
+    const [duplicate] = await tx
+      .select({ id: patientCharge.id })
+      .from(patientCharge)
+      .where(
+        and(
+          eq(patientCharge.organizationId, orgId),
+          eq(patientCharge.patientId, patientId),
+          eq(patientCharge.encounterProcedureId, proc.id),
+          isNull(patientCharge.voidedAt),
+        ),
+      )
+      .limit(1)
+    if (duplicate) {
+      skip(proc, "covered")
+      continue
+    }
+    const charge = await createCharge(tx, orgId, actorUserId, patientId, {
+      encounterProcedureId: proc.id,
+    })
+    charges.push(charge)
+    billingLines.push({
+      procedureId: proc.id,
+      description: charge.description,
+      amountCents: charge.amountCents,
+      currency: charge.currency,
+      status: "charged",
+      reason: null,
+    })
   }
+  const chargedCents = billingLines.reduce((sum, line) => sum + (line.amountCents ?? 0), 0)
   await audit(tx, orgId, actorUserId, "encounter.finalized", "encounter", encounterId, {
     patientId,
     charges: charges.length,
     skippedCharges: skippedCharges.length,
   })
-  return { encounter: row, charges, skippedCharges }
+  await notifyClose(tx, orgId, "encounter.finalized")
+  await notifyClose(tx, orgId, "patient.account.updated")
+  return {
+    encounter: row,
+    charges,
+    skippedCharges,
+    billing: {
+      chargedCents,
+      currency: charges[0]?.currency ?? procedures[0]?.currency ?? null,
+      lines: billingLines,
+    },
+  }
 }
 
 export async function addEncounterAddendum(

@@ -1,4 +1,4 @@
-import { Badge, Button, Checkbox, toast } from "@odentia/ui"
+import { Badge, Button, Checkbox, Input, toast } from "@odentia/ui"
 import {
   common,
   DataTable,
@@ -16,8 +16,10 @@ import { createFileRoute } from "@tanstack/react-router"
 import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-table"
 import { Library } from "lucide-react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { parseMoney } from "@odentia/clinical"
 import { ApiError } from "../../lib/api"
 import { usePermission } from "../../lib/crm"
+import { useOrgProfile } from "../../lib/org"
 import {
   fetchServices,
   fetchTreatmentTemplates,
@@ -25,6 +27,7 @@ import {
   SPECIALTY_FILTER_OPTIONS,
   TREATMENT_SCOPE_LABELS,
   TREATMENT_SPECIALTY_LABELS,
+  type FromTemplateItemBody,
   type TreatmentTemplateCatalog,
   type TreatmentTemplateItem,
 } from "../../lib/services"
@@ -55,14 +58,15 @@ async function fetchAllOwnedTemplateIds(): Promise<Set<string>> {
 }
 
 /**
- * Biblioteca de prestaciones: el catálogo oficial completo, sin precios. Lo que
- * se incorpora entra al tarifario inactivo y con tarifa 0, para revisar el monto
- * y activarlo allí.
+ * Biblioteca de prestaciones: el catálogo oficial completo, sin precios. Se
+ * elige de la biblioteca, se pone el precio aquí mismo y lo que se guarda
+ * queda activo en el tarifario.
  */
 function BibliotecaPage() {
   const canIncorporate = usePermission("settings.write")
   const canViewLibrary =
     canIncorporate ||
+    usePermission("catalog.read") ||
     usePermission("clinical.read") ||
     usePermission("appointments.read") ||
     usePermission("finance.read")
@@ -73,6 +77,14 @@ function BibliotecaPage() {
   const cursor = listSearch.get("cursor")
   const [previousCursors, setPreviousCursors] = useState<string[]>([])
   const [checked, setChecked] = useState<string[]>([])
+  /** Tarifa explícita por prestación elegida (unidad menor al guardar; 0 = sin costo). */
+  const [prices, setPrices] = useState<Record<string, string>>({})
+  /** Cómo se cobra cada elegida: por tratamiento o por sesión. */
+  const [modes, setModes] = useState<Record<string, "treatment" | "session">>({})
+  /** Moneda y formato de la clínica para escribir las tarifas. */
+  const profileQuery = useOrgProfile()
+  const orgCurrency = profileQuery.data?.currency
+  const orgLocale = profileQuery.data?.locale
 
   useEffect(() => {
     if (!cursor) setPreviousCursors([])
@@ -117,15 +129,34 @@ function BibliotecaPage() {
   const selectable = rows.filter((row) => !owned.has(row.id))
   /** Selección acumulada de todas las páginas visitadas (ya incorporadas excluidas). */
   const checkedPending = checked.filter((id) => !owned.has(id))
+  /** Elegidas con precio escrito: listas para guardar y activar. */
+  const readyCount = checkedPending.filter((id) => (prices[id] ?? "").trim() !== "").length
   const incorporateMutation = useMutation({
-    mutationFn: (templateIds: string[]) => incorporateTemplatesApi(templateIds),
+    mutationFn: async () => {
+      if (orgCurrency === undefined || orgLocale === undefined) {
+        throw new Error("Cargando la configuración de la clínica…")
+      }
+      const items: FromTemplateItemBody[] = []
+      for (const id of checkedPending) {
+        const raw = (prices[id] ?? "").trim()
+        if (!raw) throw new Error("Pon el precio de cada prestación elegida (usa 0 si va incluida)")
+        items.push({
+          templateId: id,
+          priceCents: parseMoney(raw, orgCurrency, orgLocale),
+          billingMode: modes[id] ?? "treatment",
+        })
+      }
+      return incorporateTemplatesApi(items)
+    },
     onSuccess: async (result) => {
       setChecked([])
+      setPrices({})
+      setModes({})
       await queryClient.invalidateQueries({ queryKey: ["services"] })
       const created = result.data.created.length
       toast.success(
         created > 0
-          ? `${created} prestación(es) incorporada(s) inactiva(s): revisa sus tarifas y actívalas`
+          ? `${created} prestación(es) guardada(s) y activa(s) en tu tarifario`
           : "Esas prestaciones ya estaban en tu tarifario",
       )
     },
@@ -236,6 +267,54 @@ function BibliotecaPage() {
         },
       },
       {
+        id: "precio",
+        header: `Precio${orgCurrency ? ` (${orgCurrency})` : ""}`,
+        meta: { view: { primary: true } },
+        cell: ({ row }) => {
+          const incorporated = owned.has(row.original.id)
+          const selected = checked.includes(row.original.id)
+          return (
+            <Input
+              className="w-28"
+              inputMode="decimal"
+              placeholder="0.00"
+              aria-label={`Precio de ${row.original.name}`}
+              disabled={!canIncorporate || incorporated || !selected}
+              value={prices[row.original.id] ?? ""}
+              onChange={(event) =>
+                setPrices((prev) => ({ ...prev, [row.original.id]: event.target.value }))
+              }
+            />
+          )
+        },
+      },
+      {
+        id: "cobro",
+        header: "Se cobra",
+        cell: ({ row }) => {
+          const incorporated = owned.has(row.original.id)
+          const selected = checked.includes(row.original.id)
+          const mode = modes[row.original.id] ?? "treatment"
+          return (
+            <select
+              className="rounded-md border bg-background px-2 py-1.5 text-sm"
+              aria-label={`Cómo se cobra ${row.original.name}`}
+              disabled={!canIncorporate || incorporated || !selected}
+              value={mode}
+              onChange={(event) =>
+                setModes((prev) => ({
+                  ...prev,
+                  [row.original.id]: event.target.value as "treatment" | "session",
+                }))
+              }
+            >
+              <option value="treatment">Por tratamiento</option>
+              <option value="session">Por sesión</option>
+            </select>
+          )
+        },
+      },
+      {
         id: "estado",
         header: "Estado",
         cell: ({ row }) =>
@@ -256,9 +335,9 @@ function BibliotecaPage() {
               items={[
                 {
                   key: "incorporar",
-                  label: "Incorporar a mi tarifario",
-                  disabled: incorporated || !canIncorporate || incorporateMutation.isPending,
-                  onSelect: () => incorporateMutation.mutate([row.original.id]),
+                  label: "Elegir y ponerle precio",
+                  disabled: incorporated || !canIncorporate,
+                  onSelect: () => toggle(row.original.id),
                 },
               ]}
             />
@@ -270,9 +349,10 @@ function BibliotecaPage() {
       allSelected,
       canIncorporate,
       checked,
-      incorporateMutation.isPending,
-      incorporateMutation.mutate,
+      modes,
+      orgCurrency,
       owned,
+      prices,
       selectable,
       toggle,
       togglePage,
@@ -300,7 +380,7 @@ function BibliotecaPage() {
       <div className="flex flex-col gap-4">
         <PageHeader
           title="Biblioteca de prestaciones"
-          subtitle="Catálogo oficial sin precios: lo que se incorpora se tarifa en el tarifario"
+          subtitle="Elige de la biblioteca, pon el precio aquí mismo y lo que guardes queda activo"
         />
         <EmptyState
           title="Sin acceso"
@@ -314,7 +394,7 @@ function BibliotecaPage() {
     <div className="flex flex-col gap-4">
       <PageHeader
         title="Biblioteca de prestaciones"
-        subtitle="Catálogo oficial sin precios: lo que se incorpora se tarifa en el tarifario"
+        subtitle="Elige de la biblioteca, pon el precio aquí mismo y lo que guardes queda activo"
       />
       <FilterBar
         filters={[
@@ -363,17 +443,20 @@ function BibliotecaPage() {
             type="button"
             disabled={checkedPending.length === 0}
             pending={incorporateMutation.isPending}
-            onClick={() => incorporateMutation.mutate(checkedPending)}
+            onClick={() => incorporateMutation.mutate()}
           >
             <Library aria-hidden />
-            {checkedPending.length > 0
-              ? `Incorporar a mi tarifario (${checkedPending.length})`
-              : "Incorporar a mi tarifario"}
+            {readyCount > 0
+              ? `Guardar y activar ${readyCount}`
+              : checkedPending.length > 0
+                ? `Incorporar a mi tarifario (${checkedPending.length})`
+                : "Incorporar a mi tarifario"}
           </SubmitButton>
           {checkedPending.length > 0 ? (
             <p className="text-xs text-muted-foreground">
-              La selección se conserva al cambiar de página (máximo {MAX_SELECTION} por envío). Se
-              incorporan inactivas a tarifa 0; revisa sus precios y actívalas antes de usarlas.
+              {readyCount} listas · {checkedPending.length - readyCount} sin precio. La selección
+              se conserva al cambiar de página (máximo {MAX_SELECTION} por envío). Lo que guardes
+              queda activo.
             </p>
           ) : null}
         </div>
@@ -402,9 +485,8 @@ function BibliotecaPage() {
           <p className="text-sm text-muted-foreground">
             Denominación oficial completa con su código único
             {catalog ? ` (${catalog.system} · edición ${catalog.version})` : ""}, sin precios
-            propuestos. Al incorporarlas quedan inactivas con tarifa 0; revisa cada monto y
-            actívalas en el tarifario. El nombre incorporado es comercial y editable; el código
-            oficial no se altera.
+            propuestos. Elige, pon el precio y el modo de cobro, y lo que guardes queda activo.
+            El nombre incorporado es comercial y editable; el código oficial no se altera.
           </p>
           <DataTable table={table} />
           <div className="flex flex-wrap items-center justify-between gap-2 py-2">

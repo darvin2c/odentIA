@@ -25,7 +25,8 @@ import {
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useId, useRef, useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
-import { fetchFollowUps, fetchPatientAccount, fetchPrescriptions } from "../../lib/clinical-journey"
+import { fetchFollowUps, fetchPrescriptions } from "../../lib/clinical-journey"
+import { fetchPatientAccount3 } from "../../lib/finance-collect"
 import { useMemberName, useMyUserId, usePermission } from "../../lib/crm"
 import {
   CLOSING_REQUIREMENT_LABELS,
@@ -44,7 +45,8 @@ import {
   type OdontogramState,
   type PatientFull,
 } from "../../lib/patients"
-import { formatMoney } from "../../lib/services"
+import { formatMoney } from "@odentia/clinical"
+import { useOrgProfile } from "../../lib/org"
 import { OdontogramStudio } from "../odontogram-studio"
 import { ProfessionalProfileDrawer } from "../professional-profile-drawer"
 import { ChoiceSelect } from "../ui/choice-select"
@@ -271,6 +273,35 @@ function formatClock(iso: string): string {
     : date.toLocaleTimeString("es-PE", { hour: "2-digit", minute: "2-digit" })
 }
 
+/** Resumen económico del cierre: qué quedó por cobrar y qué no. */
+export interface FinalizeBilling {
+  chargedCents: number
+  currency: string | null
+  lines: Array<{
+    procedureId: string
+    description: string
+    amountCents: number | null
+    currency: string | null
+    status: "charged" | "skipped"
+    reason: string | null
+  }>
+}
+
+function skippedReasonLabel(reason: string | null): string {
+  switch (reason) {
+    case "covered":
+      return "Ya cubierto por un cargo"
+    case "free_act":
+      return "Acto libre sin servicio"
+    case "zero_price":
+      return "Sin precio"
+    case "sessions_complete":
+      return "Sesiones previstas completas"
+    default:
+      return "No genera cargo"
+  }
+}
+
 export function EncounterEditor({
   patientId,
   detail,
@@ -286,10 +317,11 @@ export function EncounterEditor({
   const canRead = usePermission("clinical.read")
   const canReadFinance = usePermission("finance.read")
   const memberName = useMemberName()
+  const orgLocale = useOrgProfile().data?.locale
   const uid = useId()
   const accountQuery = useQuery({
     queryKey: ["patient-account", patientId],
-    queryFn: () => fetchPatientAccount(patientId),
+    queryFn: () => fetchPatientAccount3(patientId),
     enabled: canReadFinance,
   })
 
@@ -323,6 +355,7 @@ export function EncounterEditor({
   const [explicitSaving, setExplicitSaving] = useState(false)
   const [finalizing, setFinalizing] = useState(false)
   const [confirmOpen, setConfirmOpen] = useState(false)
+  const [finalizedBilling, setFinalizedBilling] = useState<FinalizeBilling | null>(null)
   const [backing, setBacking] = useState(false)
   // Hora de fin declarada al cerrar (HH:MM local); vacía = ahora.
   const [endTime, setEndTime] = useState("")
@@ -760,12 +793,17 @@ export function EncounterEditor({
       await flush()
       const endedAt = endedAtIso()
       const result = await apiFetch<{
-        data: { charges: Array<{ id: string }> }
+        data: {
+          charges: Array<{ id: string }>
+          skippedCharges: Array<{ procedureId: string; reason: string }>
+          billing: FinalizeBilling
+        }
       }>(`/api/patients/${patientId}/encounters/${encounterId}/finalize`, {
         method: "POST",
         body: JSON.stringify(endedAt ? { endedAt } : {}),
       })
-      await onFinalized(result.data.charges.length > 0)
+      setConfirmOpen(false)
+      setFinalizedBilling(result.data.billing)
     } catch (err) {
       // Falla: se conserva el borrador intacto y se muestra el error real.
       if (mountedRef.current) {
@@ -809,12 +847,8 @@ export function EncounterEditor({
     ])
   }
 
-  // Una sola tarifa por tratamiento; los cargos activos ya emitidos lo cubren.
-  const coveredItems = new Set(
-    (accountQuery.data?.data.charges ?? [])
-      .filter((charge) => !charge.voidedAt && charge.planItemId)
-      .map((charge) => charge.planItemId),
-  )
+  // Una sola tarifa por tratamiento; los cargos vivos ya emitidos lo cubren.
+  const coveredItems = new Set(accountQuery.data?.data.conCargo ?? [])
   const chargeableByCurrency = new Map<string, number>()
   for (const proc of detail.procedures) {
     if (proc.voidedAt) continue
@@ -828,7 +862,7 @@ export function EncounterEditor({
     )
   }
   const chargeableText = [...chargeableByCurrency.entries()]
-    .map(([currency, cents]) => formatMoney(cents, currency))
+    .map(([currency, cents]) => (orgLocale ? formatMoney(cents, currency, orgLocale) : "…"))
     .join(" · ")
 
   const mode = useDetailMode()
@@ -1772,6 +1806,60 @@ export function EncounterEditor({
           <p className="text-xs text-muted-foreground">Vacía: se registra la hora actual.</p>
         </Field>
       </ConfirmDialog>
+
+      {finalizedBilling ? (
+        <div
+          role="dialog"
+          aria-label="Atención finalizada"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+        >
+          <div className="flex max-h-[85vh] w-full max-w-lg flex-col gap-3 overflow-auto rounded-xl bg-card p-6">
+            <h3 className="font-heading text-lg font-semibold">Atención finalizada</h3>
+            <p className="text-sm text-muted-foreground">
+              Quedó por cobrar{" "}
+              <strong className="tabular-nums">
+                {finalizedBilling.currency && orgLocale
+                  ? formatMoney(finalizedBilling.chargedCents, finalizedBilling.currency, orgLocale)
+                  : "…"}
+              </strong>
+              . Caja ya lo ve en su lista de por cobrar.
+            </p>
+            <ul className="flex flex-col gap-2">
+              {finalizedBilling.lines.map((line) => (
+                <li
+                  key={line.procedureId}
+                  className="flex flex-wrap items-center justify-between gap-2 text-sm"
+                >
+                  <span className="font-medium">{line.description}</span>
+                  {line.status === "charged" ? (
+                    <span className="tabular-nums">
+                      {line.currency && orgLocale && line.amountCents != null
+                        ? formatMoney(line.amountCents, line.currency, orgLocale)
+                        : "…"}
+                    </span>
+                  ) : (
+                    <span className="text-xs text-muted-foreground">
+                      {skippedReasonLabel(line.reason)} · no se cobra
+                    </span>
+                  )}
+                </li>
+              ))}
+            </ul>
+            <div className="flex justify-end">
+              <Button
+                type="button"
+                onClick={() => {
+                  const hadCharges = finalizedBilling.lines.some((line) => line.status === "charged")
+                  setFinalizedBilling(null)
+                  void onFinalized(hadCharges)
+                }}
+              >
+                Listo
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       <ConfirmDialog
         open={voidOpen}

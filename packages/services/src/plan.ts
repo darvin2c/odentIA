@@ -27,6 +27,7 @@ import { notFound, ServiceError, validation } from "./errors.js"
 import { requirePatient } from "./patients.js"
 import { assertExecutableCodings, resolveServiceCodings } from "./procedure-codings.js"
 import { requireServiceForIndication, type ServiceRow } from "./service-catalog.js"
+import { readBillingModes } from "./budgets.js"
 
 /**
  * Plan clínico longitudinal: existe antes que cualquier presupuesto y puede
@@ -973,6 +974,11 @@ export async function updatePlanItem(
     // La línea del borrador es snapshot: se actualiza en la misma transacción.
     // Solo el borrador sigue a la nueva indicación; presentados/decididos son
     // históricos inmutables (updatePlanItem ya rechazó budget no-borrador).
+    // Cambiar de indicación re-congela la tarifa y el modo de cobro, y limpia
+    // precio acordado y promoción (eran del servicio anterior).
+    const modes = updated.serviceId
+      ? await readBillingModes(tx, orgId, [updated.serviceId])
+      : {}
     await tx
       .update(treatmentBudgetItem)
       .set({
@@ -985,6 +991,13 @@ export async function updatePlanItem(
         arch: updated.arch,
         codings: updated.codings,
         priceCents: updated.priceCents,
+        tariffPriceCents: updated.priceCents,
+        priceReason: null,
+        promotionId: null,
+        promotionName: null,
+        promotionMode: null,
+        billingMode: updated.serviceId ? (modes[updated.serviceId] ?? "treatment") : "treatment",
+        sessionsPlanned: updated.plannedSessions,
         currency: updated.currency,
         updatedAt: new Date(),
       })

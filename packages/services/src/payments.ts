@@ -7,16 +7,21 @@ import {
   patientPayment,
   patientPaymentApplication,
   patientPaymentRefund,
+  paymentTicket,
+  ticketCounter,
   treatmentBudget,
   treatmentBudgetItem,
   treatmentPlan,
   treatmentPlanItem,
 } from "@odentia/db/schema/clinical"
-import { cashMovement, cashShift } from "@odentia/db/schema/finance"
 import { auditEvent } from "@odentia/db/schema/org"
+import { branch, orgProfile } from "@odentia/db/schema/org"
+import { user } from "@odentia/db/schema/auth"
 import { and, asc, eq, isNull, sql } from "drizzle-orm"
 import { notFound, ServiceError, validation } from "./errors.js"
-import { linkPaymentToShift, refreshPlansForCharge, voidPlansForCharge } from "./finance.js"
+import { ensureOpenShift, recordCashEgreso, recordCashIncome, requireBranch, reverseCashIncome } from "./finance.js"
+import { isCashLike, requirePaymentMethod } from "./payment-methods.js"
+import { requirePromotionPrice } from "./promotions.js"
 import { requirePatient } from "./patients.js"
 import { requireLinkedActiveContact } from "./responsibilities.js"
 
@@ -25,14 +30,6 @@ async function notify(tx: Db, payload: { orgId: string; kind: string; at: string
   await tx.execute(sql`select pg_notify('org_events', ${JSON.stringify(payload)})`)
 }
 
-export const PAYMENT_METHODS = [
-  "efectivo",
-  "tarjeta",
-  "transferencia",
-  "yape",
-  "plin",
-  "otro",
-] as const
 export function assertPositiveCents(value: number): number {
   if (!Number.isSafeInteger(value) || value <= 0 || value > 2147483647)
     throw validation("El importe debe ser un entero positivo de centavos")
@@ -86,21 +83,6 @@ async function audit(
     .insert(auditEvent)
     .values({ organizationId: orgId, actorUserId, entity, entityId: id, action })
 }
-async function paymentRow(tx: Db, orgId: string, patientId: string, id: string) {
-  const [row] = await tx
-    .select()
-    .from(patientPayment)
-    .where(
-      and(
-        eq(patientPayment.id, id),
-        eq(patientPayment.organizationId, orgId),
-        eq(patientPayment.patientId, patientId),
-      ),
-    )
-  if (!row) throw notFound("Pago")
-  if (row.voidedAt) throw conflict("PAYMENT_VOIDED", "El pago está anulado")
-  return row
-}
 async function chargeRow(tx: Db, orgId: string, patientId: string, id: string) {
   const [row] = await tx
     .select()
@@ -116,43 +98,14 @@ async function chargeRow(tx: Db, orgId: string, patientId: string, id: string) {
   if (row.voidedAt) throw conflict("CHARGE_VOIDED", "El cargo está anulado")
   return row
 }
-async function paymentBalance(
-  tx: Db,
-  orgId: string,
-  patientId: string,
-  payment: typeof patientPayment.$inferSelect,
-) {
-  const applications = await tx
-    .select()
-    .from(patientPaymentApplication)
-    .where(
-      and(
-        eq(patientPaymentApplication.organizationId, orgId),
-        eq(patientPaymentApplication.patientId, patientId),
-        eq(patientPaymentApplication.paymentId, payment.id),
-        isNull(patientPaymentApplication.voidedAt),
-      ),
-    )
-  const refunds = await tx
-    .select()
-    .from(patientPaymentRefund)
-    .where(
-      and(
-        eq(patientPaymentRefund.organizationId, orgId),
-        eq(patientPaymentRefund.patientId, patientId),
-        eq(patientPaymentRefund.paymentId, payment.id),
-      ),
-    )
-  return {
-    available: payment.amountCents - sum(applications) - sum(refunds),
-    applications,
-    refunds,
-  }
-}
 export interface CreateChargeInput {
   budgetItemId?: string | null
   encounterProcedureId?: string | null
   planItemId?: string | null
+  /** Sede del concepto manual (los de acto/presupuesto la heredan de su fuente). */
+  branchId?: string | null
+  /** Promoción para un acto con servicio (la línea presupuestaria ya trae la suya). */
+  promotionId?: string | null
   description?: string
   amountCents?: number
   currency?: string
@@ -166,6 +119,7 @@ export async function createCharge(
   patientId: string,
   input: CreateChargeInput,
 ) {
+  const orgUnit = await lockOrgCurrency(tx, orgId)
   await lockAccount(tx, orgId, patientId)
   if (input.budgetItemId && input.encounterProcedureId)
     throw validation("Seleccione una sola fuente del cargo")
@@ -173,6 +127,10 @@ export async function createCharge(
   let description = input.description?.trim() ?? ""
   let amountCents = input.amountCents
   let unit = input.currency
+  let branchId = input.branchId ?? null
+  let promotionId: string | null = null
+  let promotionName: string | null = null
+  if (branchId) await requireBranch(tx, orgId, branchId)
   if (input.budgetItemId) {
     const [source] = await tx
       .select({ line: treatmentBudgetItem, budget: treatmentBudget })
@@ -214,6 +172,11 @@ export async function createCharge(
     if (planItemId && planItemId !== source.line.planItemId)
       throw validation("El cargo conserva el tratamiento de su fuente")
     planItemId = source.line.planItemId
+    // La promoción se acordó al presupuestar con la misma regla: el cargo hereda el snapshot.
+    if (input.promotionId && input.promotionId !== source.line.promotionId)
+      throw validation("La promoción del cargo es la de su línea presupuestaria")
+    promotionId = source.line.promotionId
+    promotionName = source.line.promotionName
     const [pricedItem] = await tx
       .select({ priceCents: treatmentPlanItem.priceCents })
       .from(treatmentPlanItem)
@@ -229,10 +192,15 @@ export async function createCharge(
     unit = source.line.currency
     if (input.currency && input.currency !== unit)
       throw conflict("CURRENCY_MISMATCH", "La moneda no coincide con la propuesta")
-    // El límite es por tratamiento, no por línea: una revisión crea otra línea
-    // del mismo tratamiento y no puede volver a cobrarse lo ya cargado.
+    // El cargo respeta el precio acordado de la línea, no la tarifa: una
+    // revisión crea otra línea del mismo tratamiento y solo habilita la
+    // diferencia. En modo sesión cada visita cobra el precio por sesión con
+    // tope de visitas planificadas.
     const generated = await tx
-      .select({ amountCents: patientCharge.amountCents })
+      .select({
+        amountCents: patientCharge.amountCents,
+        encounterProcedureId: patientCharge.encounterProcedureId,
+      })
       .from(patientCharge)
       .where(
         and(
@@ -243,18 +211,36 @@ export async function createCharge(
           isNull(patientCharge.voidedAt),
         ),
       )
-    const remaining = Math.max(source.line.priceCents ?? 0, itemPrice ?? 0) - sum(generated)
-    if (remaining <= 0)
-      throw conflict("CHARGE_EXCEEDS_BUDGET", "El tratamiento ya tiene cargado el importe acordado")
-    amountCents ??= remaining
-    if (source.line.priceCents == null || amountCents > remaining)
-      throw conflict(
-        "CHARGE_EXCEEDS_BUDGET",
-        "El cargo supera el importe pendiente de generar de este tratamiento",
-      )
+    // En sesión cada visita atendida cuenta (acto no nulo), igual que el cierre clínico.
+    const visitCount = generated.filter((g) => g.encounterProcedureId !== null).length
+    if (source.line.billingMode === "session") {
+      const planned = source.line.sessionsPlanned ?? 1
+      if (visitCount >= planned)
+        throw conflict("CHARGE_EXCEEDS_BUDGET", "El tratamiento ya tiene cobradas sus visitas planificadas")
+      const sessionPrice = source.line.priceCents ?? itemPrice ?? 0
+      if (sessionPrice <= 0)
+        throw conflict("CHARGE_EXCEEDS_BUDGET", "La línea no tiene precio por sesión acordado")
+      amountCents ??= sessionPrice
+      if (amountCents > sessionPrice)
+        throw conflict(
+          "CHARGE_EXCEEDS_BUDGET",
+          "El cargo supera el precio por sesión acordado",
+        )
+    } else {
+      const agreed = source.line.priceCents ?? itemPrice ?? 0
+      const remaining = agreed - sum(generated)
+      if (remaining <= 0)
+        throw conflict("CHARGE_EXCEEDS_BUDGET", "El tratamiento ya tiene cargado el importe acordado")
+      amountCents ??= remaining
+      if (amountCents > remaining)
+        throw conflict(
+          "CHARGE_EXCEEDS_BUDGET",
+          "El cargo supera el importe pendiente de generar de este tratamiento",
+        )
+    }
   } else if (input.encounterProcedureId) {
     const [source] = await tx
-      .select({ procedure: encounterProcedure })
+      .select({ procedure: encounterProcedure, branchId: encounter.branchId })
       .from(encounterProcedure)
       .innerJoin(
         encounter,
@@ -277,12 +263,30 @@ export async function createCharge(
     }
     if (planItemId && planItemId !== source.procedure.planItemId)
       throw validation("El cargo conserva el tratamiento de su fuente")
+    if (branchId && branchId !== source.branchId)
+      throw validation("El cargo conserva la sede de su atención")
+    branchId = source.branchId
     planItemId = source.procedure.planItemId
     description = source.procedure.description
     // El costo viaja con el acto: importe y moneda del snapshot registrado.
     amountCents ??= source.procedure.priceCents ?? undefined
     unit ??= source.procedure.currency ?? undefined
+    // Promoción al cobrar un servicio incluido: exige precio final si es «desde» (misma regla).
+    if (input.promotionId) {
+      const snapshot = await requirePromotionPrice(
+        tx,
+        orgId,
+        input.promotionId,
+        source.procedure.serviceId,
+        amountCents,
+      )
+      promotionId = input.promotionId
+      promotionName = snapshot.promotionName
+    }
   }
+  if (!input.budgetItemId && !input.encounterProcedureId) unit ??= orgUnit
+  if (input.promotionId && !input.budgetItemId && !input.encounterProcedureId)
+    throw validation("La promoción requiere un concepto con servicio: aplícala con update al concepto")
   if (planItemId) {
     const [item] = await tx
       .select({ id: treatmentPlanItem.id })
@@ -306,8 +310,11 @@ export async function createCharge(
       organizationId: orgId,
       patientId,
       planItemId,
+      branchId,
       budgetItemId: input.budgetItemId,
       encounterProcedureId: input.encounterProcedureId,
+      promotionId,
+      promotionName,
       description,
       amountCents: assertPositiveCents(amountCents),
       currency: currency(unit),
@@ -360,70 +367,184 @@ export async function voidCharge(
     )
     .returning()
   await audit(tx, orgId, actorUserId, "patient_charge", id, "charge.voided")
-  await voidPlansForCharge(tx, orgId, actorUserId, id)
   return row
 }
-export interface CreatePaymentInput {
-  payerContactId?: string | null
-  amountCents: number
-  currency: string
-  paidAt: string
-  method: (typeof PAYMENT_METHODS)[number]
-  reference?: string | null
-  notes?: string | null
-  /**
-   * Turno abierto donde ingresa el cobro (una sola vez por pago). El medio
-   * distingue el arqueo: efectivo suma al contado; tarjeta/transferencia y
-   * billeteras quedan trazadas como electrónicas sin entrar al contado.
-   */
-  shiftId?: string | null
+// --- Edición de conceptos (corrige lo que quedó por cobrar, con motivo) -----------------
+
+export interface UpdateChargeInput {
+  amountCents?: number
+  description?: string
+  /** Promoción a aplicar al cobrar (exige servicio en el concepto). */
+  promotionId?: string | null
+  reason: string
 }
-export async function createPayment(
+
+/**
+ * Cambia el importe o la descripción de un concepto sin aplicaciones activas.
+ * Con aplicaciones, el concepto se cobra parcial y el resto queda por cobrar:
+ * no se reescribe. El motivo queda en auditoría (`editReason`).
+ */
+export async function updateCharge(
   tx: Db,
   orgId: string,
   actorUserId: string,
   patientId: string,
-  input: CreatePaymentInput,
+  id: string,
+  input: UpdateChargeInput,
 ) {
   await lockAccount(tx, orgId, patientId)
-  if (!(PAYMENT_METHODS as readonly string[]).includes(input.method))
-    throw validation("Medio de pago inválido")
-  if (input.payerContactId)
-    await requireLinkedActiveContact(tx, orgId, patientId, input.payerContactId)
-  const { shiftId, ...payment } = input
+  await chargeRow(tx, orgId, patientId, id)
+  const [application] = await tx
+    .select({ id: patientPaymentApplication.id })
+    .from(patientPaymentApplication)
+    .where(
+      and(
+        eq(patientPaymentApplication.organizationId, orgId),
+        eq(patientPaymentApplication.patientId, patientId),
+        eq(patientPaymentApplication.chargeId, id),
+        isNull(patientPaymentApplication.voidedAt),
+      ),
+    )
+    .limit(1)
+  if (application)
+    throw conflict("CHARGE_HAS_APPLICATIONS", "El concepto ya tiene cobros aplicados: no se edita")
+  const patch: Partial<typeof patientCharge.$inferInsert> = {}
+  if (input.amountCents !== undefined) patch.amountCents = assertPositiveCents(input.amountCents)
+  if (input.description !== undefined) {
+    const text = input.description.trim()
+    if (!text || text.length > 2000) throw validation("La descripción debe tener 1–2000 caracteres")
+    patch.description = text
+  }
+  if (input.promotionId !== undefined && input.promotionId !== null) {
+    const current = await chargeRow(tx, orgId, patientId, id)
+    // La promoción exige servicio: línea presupuestaria o acto con servicio.
+    let serviceId: string | null = null
+    if (current.budgetItemId) {
+      const [line] = await tx
+        .select({ serviceId: treatmentBudgetItem.serviceId })
+        .from(treatmentBudgetItem)
+        .where(
+          and(
+            eq(treatmentBudgetItem.id, current.budgetItemId),
+            eq(treatmentBudgetItem.organizationId, orgId),
+          ),
+        )
+      serviceId = line?.serviceId ?? null
+    } else if (current.encounterProcedureId) {
+      const [procedure] = await tx
+        .select({ serviceId: encounterProcedure.serviceId })
+        .from(encounterProcedure)
+        .where(
+          and(
+            eq(encounterProcedure.id, current.encounterProcedureId),
+            eq(encounterProcedure.organizationId, orgId),
+          ),
+        )
+      serviceId = procedure?.serviceId ?? null
+    }
+    if (!serviceId)
+      throw validation("La promoción solo aplica a conceptos con servicio")
+    const snapshot = await requirePromotionPrice(
+      tx,
+      orgId,
+      input.promotionId,
+      serviceId,
+      patch.amountCents,
+    )
+    patch.amountCents = snapshot.priceCents
+    patch.promotionId = snapshot.promotionId
+    patch.promotionName = snapshot.promotionName
+  }
+  if (patch.amountCents === undefined && patch.description === undefined)
+    throw validation("Indique el nuevo importe, la nueva descripción o una promoción")
+  patch.editReason = reason(input.reason)
   const [row] = await tx
-    .insert(patientPayment)
-    .values({
-      ...payment,
-      organizationId: orgId,
-      patientId,
-      amountCents: assertPositiveCents(input.amountCents),
-      currency: currency(input.currency),
-      paidAt: instant(input.paidAt),
-      createdBy: actorUserId,
-    })
+    .update(patientCharge)
+    .set({ ...patch, updatedAt: new Date() })
+    .where(
+      and(
+        eq(patientCharge.id, id),
+        eq(patientCharge.organizationId, orgId),
+        eq(patientCharge.patientId, patientId),
+      ),
+    )
     .returning()
-  await audit(tx, orgId, actorUserId, "patient_payment", row.id, "payment.created")
-  if (shiftId) await linkPaymentToShift(tx, orgId, actorUserId, shiftId, row)
-  await notify(tx, { orgId, kind: "payment.created", at: new Date().toISOString() })
+  await audit(tx, orgId, actorUserId, "patient_charge", id, "charge.edited")
   return row
 }
 
-export async function applyPayment(
+
+// --- Cobro atómico -----------------------------------------------------------------------
+
+/** Medio efectivo que acepta la clínica (catálogo de Configuración, congelado al cobrar). */
+const CASH_TYPE_CODE = "10"
+
+function uuid(value: string, field = "El identificador"): string {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value))
+    throw validation(`${field} debe ser un UUID`)
+  return value
+}
+
+/** Moneda de la clínica con bloqueo compartido: orden perfil→cuenta/caja, sin deadlocks con el cambio de región. */
+async function lockOrgCurrency(tx: Db, orgId: string): Promise<string> {
+  const [profile] = await tx
+    .select({ currency: orgProfile.currency })
+    .from(orgProfile)
+    .where(eq(orgProfile.organizationId, orgId))
+    .for("share")
+  return profile?.currency ?? "PEN"
+}
+
+/** Siguiente número de ticket de la organización, sin saltos: vive en la misma transacción. */
+async function nextTicketNumber(tx: Db, orgId: string): Promise<number> {
+  const [current] = await tx
+    .select()
+    .from(ticketCounter)
+    .where(eq(ticketCounter.organizationId, orgId))
+    .for("update")
+  if (!current) {
+    await tx.insert(ticketCounter).values({ organizationId: orgId, nextNumber: 2 })
+    return 1
+  }
+  await tx
+    .update(ticketCounter)
+    .set({ nextNumber: current.nextNumber + 1 })
+    .where(eq(ticketCounter.organizationId, orgId))
+  return current.nextNumber
+}
+
+export interface CollectMethodInput {
+  paymentMethodId: string
+  amountCents: number
+  reference?: string | null
+}
+
+export interface CollectInput {
+  branchId: string
+  payerContactId?: string | null
+  /** Conceptos a pagar. Omitido = todo lo pendiente empezando por lo más antiguo. */
+  chargeIds?: string[]
+  /** Adelanto puro (sin conceptos): todo lo cobrado queda a favor. Excluyente con chargeIds. */
+  advanceCents?: number
+  /** Medios del cobro. Vacío = solo saldo a favor (el crédito debe cubrir la deuda). */
+  payments?: CollectMethodInput[]
+  /** Solo con medio en efectivo: lo recibido; el vuelto es recibido − parte en efectivo. */
+  cashReceivedCents?: number
+  /** Clave de idempotencia del cobro: reintentar devuelve el mismo ticket. */
+  requestId: string
+}
+
+interface OutstandingCharge {
+  charge: typeof patientCharge.$inferSelect
+  outstanding: number
+}
+
+/** Aplicado vigente por concepto (para resolver conceptos elegidos). */
+async function liveAppliedByCharge(
   tx: Db,
   orgId: string,
-  actorUserId: string,
   patientId: string,
-  paymentId: string,
-  input: { chargeId: string; amountCents: number },
-) {
-  await lockAccount(tx, orgId, patientId)
-  const amount = assertPositiveCents(input.amountCents)
-  const payment = await paymentRow(tx, orgId, patientId, paymentId)
-  const charge = await chargeRow(tx, orgId, patientId, input.chargeId)
-  if (payment.currency !== charge.currency)
-    throw conflict("CURRENCY_MISMATCH", "No puede aplicar un pago en otra moneda")
-  const balance = await paymentBalance(tx, orgId, patientId, payment)
+): Promise<Record<string, number>> {
   const applications = await tx
     .select()
     .from(patientPaymentApplication)
@@ -431,195 +552,843 @@ export async function applyPayment(
       and(
         eq(patientPaymentApplication.organizationId, orgId),
         eq(patientPaymentApplication.patientId, patientId),
-        eq(patientPaymentApplication.chargeId, charge.id),
         isNull(patientPaymentApplication.voidedAt),
       ),
     )
-  if (amount > balance.available || amount > charge.amountCents - sum(applications))
-    throw conflict(
-      "INSUFFICIENT_BALANCE",
-      "La aplicación supera el saldo disponible del pago o del cargo",
+  const applied: Record<string, number> = {}
+  for (const app of applications)
+    applied[app.chargeId] = (applied[app.chargeId] ?? 0) + app.amountCents
+  return applied
+}
+
+async function outstandingCharges(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+  unit: string,
+): Promise<OutstandingCharge[]> {
+  const charges = await tx
+    .select()
+    .from(patientCharge)
+    .where(
+      and(
+        eq(patientCharge.organizationId, orgId),
+        eq(patientCharge.patientId, patientId),
+        eq(patientCharge.currency, unit),
+        isNull(patientCharge.voidedAt),
+      ),
     )
-  const [row] = await tx
-    .insert(patientPaymentApplication)
-    .values({
-      organizationId: orgId,
-      patientId,
-      paymentId,
-      chargeId: charge.id,
-      amountCents: amount,
-      createdBy: actorUserId,
-    })
-    .returning()
-  await audit(tx, orgId, actorUserId, "patient_payment_application", row.id, "payment.applied")
-  await refreshPlansForCharge(tx, orgId, actorUserId, charge.id)
-  return row
-}
-export async function voidPaymentApplication(
-  tx: Db,
-  orgId: string,
-  actorUserId: string,
-  patientId: string,
-  id: string,
-  input: { reason: string },
-) {
-  await lockAccount(tx, orgId, patientId)
-  const where = and(
-    eq(patientPaymentApplication.id, id),
-    eq(patientPaymentApplication.organizationId, orgId),
-    eq(patientPaymentApplication.patientId, patientId),
-  )
-  const [current] = await tx.select().from(patientPaymentApplication).where(where)
-  if (!current) throw notFound("Aplicación de pago")
-  if (current.voidedAt) throw conflict("APPLICATION_VOIDED", "La aplicación ya está anulada")
-  const [row] = await tx
-    .update(patientPaymentApplication)
-    .set({ voidedAt: new Date(), voidedBy: actorUserId, voidReason: reason(input.reason) })
-    .where(where)
-    .returning()
-  await audit(
-    tx,
-    orgId,
-    actorUserId,
-    "patient_payment_application",
-    id,
-    "payment.application_voided",
-  )
-  await refreshPlansForCharge(tx, orgId, actorUserId, current.chargeId)
-  return row
-}
-export async function refundPayment(
-  tx: Db,
-  orgId: string,
-  actorUserId: string,
-  patientId: string,
-  paymentId: string,
-  input: { amountCents: number; reason: string; refundedAt?: string },
-) {
-  await lockAccount(tx, orgId, patientId)
-  const amount = assertPositiveCents(input.amountCents)
-  const payment = await paymentRow(tx, orgId, patientId, paymentId)
-  const balance = await paymentBalance(tx, orgId, patientId, payment)
-  if (amount > balance.available)
-    throw conflict("INSUFFICIENT_CREDIT", "Solo puede devolver el excedente no aplicado")
-  const [row] = await tx
-    .insert(patientPaymentRefund)
-    .values({
-      organizationId: orgId,
-      patientId,
-      paymentId,
-      amountCents: amount,
-      reason: reason(input.reason),
-      refundedAt: input.refundedAt ? instant(input.refundedAt) : new Date(),
-      createdBy: actorUserId,
-    })
-    .returning()
-  await audit(tx, orgId, actorUserId, "patient_payment_refund", row.id, "payment.refunded")
-  const applied = await tx
-    .select({ chargeId: patientPaymentApplication.chargeId })
+    .orderBy(asc(patientCharge.createdAt), asc(patientCharge.id))
+  const applications = await tx
+    .select()
     .from(patientPaymentApplication)
     .where(
       and(
         eq(patientPaymentApplication.organizationId, orgId),
         eq(patientPaymentApplication.patientId, patientId),
-        eq(patientPaymentApplication.paymentId, paymentId),
         isNull(patientPaymentApplication.voidedAt),
       ),
     )
-  for (const chargeId of new Set(applied.map((a) => a.chargeId))) {
-    await refreshPlansForCharge(tx, orgId, actorUserId, chargeId)
+  const applied = new Map<string, number>()
+  for (const app of applications)
+    applied.set(app.chargeId, (applied.get(app.chargeId) ?? 0) + app.amountCents)
+  const result: OutstandingCharge[] = []
+  for (const charge of charges) {
+    const rest = charge.amountCents - (applied.get(charge.id) ?? 0)
+    if (rest > 0) result.push({ charge, outstanding: rest })
   }
-  return row
+  return result
 }
-export async function voidPayment(
+
+interface CreditPayment {
+  payment: typeof patientPayment.$inferSelect
+  available: number
+}
+
+/** Saldo a favor real (pagado − aplicado − devuelto), de lo más antiguo. */
+async function availableCredit(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+  unit: string,
+): Promise<CreditPayment[]> {
+  const payments = await tx
+    .select()
+    .from(patientPayment)
+    .where(
+      and(
+        eq(patientPayment.organizationId, orgId),
+        eq(patientPayment.patientId, patientId),
+        eq(patientPayment.currency, unit),
+        isNull(patientPayment.voidedAt),
+      ),
+    )
+    .orderBy(asc(patientPayment.paidAt), asc(patientPayment.id))
+  const applications = await tx
+    .select()
+    .from(patientPaymentApplication)
+    .where(
+      and(
+        eq(patientPaymentApplication.organizationId, orgId),
+        eq(patientPaymentApplication.patientId, patientId),
+        isNull(patientPaymentApplication.voidedAt),
+      ),
+    )
+  const refunds = await tx
+    .select()
+    .from(patientPaymentRefund)
+    .where(
+      and(
+        eq(patientPaymentRefund.organizationId, orgId),
+        eq(patientPaymentRefund.patientId, patientId),
+      ),
+    )
+  const applied = new Map<string, number>()
+  for (const app of applications)
+    applied.set(app.paymentId, (applied.get(app.paymentId) ?? 0) + app.amountCents)
+  const refunded = new Map<string, number>()
+  for (const refund of refunds)
+    refunded.set(refund.paymentId, (refunded.get(refund.paymentId) ?? 0) + refund.amountCents)
+  const result: CreditPayment[] = []
+  for (const payment of payments) {
+    const rest = payment.amountCents - (applied.get(payment.id) ?? 0) - (refunded.get(payment.id) ?? 0)
+    if (rest > 0) result.push({ payment, available: rest })
+  }
+  return result
+}
+
+/**
+ * Cobra en una sola transacción: crea el ticket numerado, un pago por medio,
+ * aplica el saldo a favor y reparte lo nuevo empezando por lo más antiguo,
+ * y deja todo en la caja de la sede. Todo o nada. Idempotente por requestId;
+ * el número del ticket es único por organización y sin saltos (contador bajo
+ * lock en la misma transacción; la caja y el correlativo se serializan junto
+ * al paciente para impedir duplicados concurrentes).
+ */
+export async function collectCharge(
   tx: Db,
   orgId: string,
   actorUserId: string,
   patientId: string,
-  paymentId: string,
-  input: { reason: string; compensateShiftId?: string | null },
+  input: CollectInput,
+) {
+  // Misma clave de idempotencia = misma transacción lógica: se serializa antes
+  // de leer (sin catch de carrera: el lock transaccional ordena los reintentos).
+  await tx.execute(
+    sql`select pg_advisory_xact_lock(hashtext('collect:' || ${orgId} || ':' || ${input.requestId}))`,
+  )
+  const orgUnit = await lockOrgCurrency(tx, orgId)
+  await lockAccount(tx, orgId, patientId)
+  const requestId = uuid(input.requestId, "La clave de idempotencia")
+  const fingerprint = JSON.stringify({
+    branchId: input.branchId,
+    payerContactId: input.payerContactId ?? null,
+    chargeIds: input.chargeIds ? [...input.chargeIds].sort() : null,
+    advanceCents: input.advanceCents ?? null,
+    payments: (input.payments ?? []).map((p) => ({
+      paymentMethodId: p.paymentMethodId,
+      amountCents: p.amountCents,
+      reference: p.reference?.trim() || null,
+    })),
+    cashReceivedCents: input.cashReceivedCents ?? null,
+  })
+  const [replay] = await tx
+    .select()
+    .from(paymentTicket)
+    .where(and(eq(paymentTicket.organizationId, orgId), eq(paymentTicket.requestId, requestId)))
+  if (replay) {
+    // La clave no se reusa entre pacientes ni entre cobros distintos.
+    const snapshot = replay.snapshot as { request?: string } | null
+    if (replay.patientId !== patientId || snapshot?.request !== fingerprint)
+      throw conflict("REQUEST_ID_CONFLICT", "La clave de idempotencia ya se usó en otro cobro")
+    return { ticket: replay, duplicate: true as const, account: await getAccountSummary(tx, orgId, patientId) }
+  }
+  const branchRow = await requireBranch(tx, orgId, input.branchId)
+  if (input.payerContactId)
+    await requireLinkedActiveContact(tx, orgId, patientId, input.payerContactId)
+  if (input.advanceCents !== undefined && input.chargeIds?.length)
+    throw validation("El adelanto no se combina con conceptos")
+  const methods = []
+  for (const item of input.payments ?? []) {
+    const amount = assertPositiveCents(item.amountCents)
+    const method = await requirePaymentMethod(tx, orgId, item.paymentMethodId)
+    methods.push({
+      paymentMethodId: method.id,
+      name: method.name,
+      typeCode: method.typeCode,
+      amountCents: amount,
+      reference: item.reference?.trim() ? item.reference.trim().slice(0, 200) : null,
+    })
+  }
+  const totalNew = sum(methods)
+  // Manda la moneda de la clínica: los conceptos en otra moneda no entran al cobro.
+  const unit = orgUnit
+  let targets: OutstandingCharge[]
+  if (input.advanceCents !== undefined) {
+    const advance = assertPositiveCents(input.advanceCents)
+    if (advance !== totalNew)
+      throw validation("El adelanto coincide con la suma de los medios")
+    targets = []
+  } else if (input.chargeIds?.length) {
+    const wanted = input.chargeIds
+    const selected = await tx
+      .select()
+      .from(patientCharge)
+      .where(
+        and(
+          eq(patientCharge.organizationId, orgId),
+          eq(patientCharge.patientId, patientId),
+          isNull(patientCharge.voidedAt),
+        ),
+      )
+      .orderBy(asc(patientCharge.createdAt), asc(patientCharge.id))
+    const byId: Record<string, (typeof selected)[number]> = {}
+    for (const charge of selected) byId[charge.id] = charge
+    const missing = wanted.filter((id) => !byId[id])
+    if (missing.length) throw notFound("Cargo")
+    const picked = wanted.map((id) => byId[id])
+    if (picked.some((c) => c.currency !== unit))
+      throw conflict("CURRENCY_MISMATCH", "Los conceptos son de otra moneda que la clínica")
+    const applied = await liveAppliedByCharge(tx, orgId, patientId)
+    targets = picked
+      .map((charge) => ({ charge, outstanding: charge.amountCents - (applied[charge.id] ?? 0) }))
+      .filter((t) => t.outstanding > 0)
+    if (!targets.length) throw conflict("NOTHING_DUE", "Los conceptos ya están cobrados")
+  } else {
+    targets = await outstandingCharges(tx, orgId, patientId, unit)
+    if (!targets.length) throw conflict("NOTHING_DUE", "El paciente no tiene conceptos por cobrar")
+  }
+  const cashTotal = sum(methods.filter((m) => isCashLike(m.typeCode)))
+  let cashReceived: number | null = null
+  let change: number | null = null
+  if (input.cashReceivedCents !== undefined) {
+    if (cashTotal <= 0) throw validation("Lo recibido solo aplica con medio en efectivo")
+    cashReceived = assertPositiveCents(input.cashReceivedCents)
+    if (cashReceived < cashTotal)
+      throw validation("Lo recibido no cubre la parte en efectivo")
+    change = cashReceived - cashTotal
+  }
+  const need = sum(targets.map((t) => ({ amountCents: t.outstanding })))
+  // El saldo a favor se usa solo, empezando por lo más antiguo.
+  const credit = await availableCredit(tx, orgId, patientId, unit)
+  let creditApplied = 0
+  const applicationValues: Array<typeof patientPaymentApplication.$inferInsert> = []
+  {
+    let rest = need
+    for (const { payment, available } of credit) {
+      if (rest <= 0) break
+      let fromPayment = Math.min(available, rest)
+      for (const target of targets) {
+        if (fromPayment <= 0 || target.outstanding <= 0) continue
+        const take = Math.min(fromPayment, target.outstanding)
+        applicationValues.push({
+          organizationId: orgId,
+          patientId,
+          paymentId: payment.id,
+          chargeId: target.charge.id,
+          amountCents: take,
+          createdBy: actorUserId,
+        })
+        target.outstanding -= take
+        fromPayment -= take
+        rest -= take
+        creditApplied += take
+      }
+    }
+  }
+  // Sin dinero nuevo vale el crédito que cubre: el cobro puede ser solo a favor.
+  if (totalNew === 0 && creditApplied === 0)
+    throw validation("No hay saldo a favor ni medios para cobrar")
+  const ticketNumber = await nextTicketNumber(tx, orgId)
+  const [person] = await tx
+    .select({ displayName: patient.displayName })
+    .from(patient)
+    .where(and(eq(patient.id, patientId), eq(patient.organizationId, orgId)))
+  const [issuer] = await tx
+    .select({ name: user.name })
+    .from(user)
+    .where(eq(user.id, actorUserId))
+  const [profile] = await tx
+    .select()
+    .from(orgProfile)
+    .where(eq(orgProfile.organizationId, orgId))
+  const paidAt = new Date()
+  // Reparte lo nuevo empezando por lo más antiguo; el excedente queda a favor.
+  // Las líneas del ticket reflejan lo realmente pagado por este cobro.
+  const newAppliedByCharge: Record<string, number> = {}
+  {
+    let pool = totalNew
+    for (const target of targets) {
+      if (pool <= 0 || target.outstanding <= 0) continue
+      const take = Math.min(pool, target.outstanding)
+      newAppliedByCharge[target.charge.id] = take
+      target.outstanding -= take
+      pool -= take
+    }
+  }
+  const creditAppliedByCharge: Record<string, number> = {}
+  for (const value of applicationValues) {
+    if (value.chargeId)
+      creditAppliedByCharge[value.chargeId] = (creditAppliedByCharge[value.chargeId] ?? 0) + value.amountCents
+  }
+  const lines: Array<{
+    chargeId: string | null
+    description: string
+    amountCents: number
+    appliedCents: number
+    promotion: string | null
+  }> = targets
+    .filter((t) => (creditAppliedByCharge[t.charge.id] ?? 0) + (newAppliedByCharge[t.charge.id] ?? 0) > 0)
+    .map((t) => ({
+      chargeId: t.charge.id,
+      description: t.charge.description,
+      amountCents: t.charge.amountCents,
+      appliedCents: (creditAppliedByCharge[t.charge.id] ?? 0) + (newAppliedByCharge[t.charge.id] ?? 0),
+      promotion: t.charge.promotionName,
+    }))
+  if (input.advanceCents !== undefined)
+    lines.push({
+      chargeId: null,
+      description: "Adelanto (saldo a favor)",
+      amountCents: totalNew,
+      appliedCents: 0,
+      promotion: null,
+    })
+  const [ticket] = await tx
+    .insert(paymentTicket)
+    .values({
+      organizationId: orgId,
+      patientId,
+      branchId: branchRow.id,
+      ticketNumber,
+      currency: unit,
+      totalCents: totalNew,
+      creditAppliedCents: creditApplied,
+      cashReceivedCents: cashReceived,
+      changeCents: change,
+      payerContactId: input.payerContactId ?? null,
+      requestId,
+      snapshot: {
+        request: fingerprint,
+        patient: { id: patientId, displayName: person?.displayName ?? "" },
+        issuer: { userId: actorUserId, name: issuer?.name ?? "" },
+        clinic: {
+          legalName: profile?.legalName ?? "",
+          tradeName: profile?.tradeName ?? null,
+          fiscalAddress: profile?.fiscalAddress ?? null,
+          locale: profile?.locale ?? "es-PE",
+          currency: profile?.currency ?? unit,
+          timezone: profile?.timezone ?? "America/Lima",
+        },
+        branch: { id: branchRow.id, name: branchRow.name },
+        lines,
+        methods: methods.map((m) => ({
+          paymentMethodId: m.paymentMethodId,
+          name: m.name,
+          typeCode: m.typeCode,
+          amountCents: m.amountCents,
+          reference: m.reference,
+        })),
+        notice: profile?.ticketFooter ?? "Recibo interno. No es un documento fiscal.",
+      },
+      createdBy: actorUserId,
+    })
+    .returning()
+  if (!ticket) throw new ServiceError("INTERNAL", 500, "No se pudo registrar el cobro")
+  const payments = []
+  for (const item of methods) {
+    const [payment] = await tx
+      .insert(patientPayment)
+      .values({
+        organizationId: orgId,
+        patientId,
+        ticketId: ticket.id,
+        branchId: branchRow.id,
+        paymentMethodId: item.paymentMethodId,
+        methodName: item.name,
+        methodTypeCode: item.typeCode,
+        payerContactId: input.payerContactId ?? null,
+        amountCents: item.amountCents,
+        currency: unit,
+        paidAt,
+        method: item.name,
+        reference: item.reference,
+        createdBy: actorUserId,
+      })
+      .returning()
+    payments.push(payment)
+    await audit(tx, orgId, actorUserId, "patient_payment", payment.id, "payment.created")
+  }
+  // Las aplicaciones del dinero nuevo usan los pagos recién creados.
+  {
+    const fresh = [...payments]
+    for (const target of targets) {
+      const pending = newAppliedByCharge[target.charge.id] ?? 0
+      if (pending <= 0) continue
+      let rest = pending
+      for (const payment of fresh) {
+        if (rest <= 0) break
+        const used = sum(
+          applicationValues
+            .filter((a) => a.paymentId === payment.id)
+            .map((a) => ({ amountCents: a.amountCents })),
+        )
+        const free = payment.amountCents - used
+        if (free <= 0) continue
+        const take = Math.min(free, rest)
+        applicationValues.push({
+          organizationId: orgId,
+          patientId,
+          paymentId: payment.id,
+          chargeId: target.charge.id,
+          ticketId: ticket.id,
+          amountCents: take,
+          createdBy: actorUserId,
+        })
+        rest -= take
+      }
+    }
+  }
+  for (const value of applicationValues) {
+    if (!value.ticketId) value.ticketId = ticket.id
+    const [app] = await tx.insert(patientPaymentApplication).values(value).returning()
+    await audit(tx, orgId, actorUserId, "patient_payment_application", app.id, "payment.applied")
+  }
+  // Todo cobro queda en la caja de su sede: la caja se crea sola, nunca se abre.
+  const shift = await ensureOpenShift(tx, orgId, actorUserId, branchRow.id, unit)
+  for (const payment of payments) {
+    await recordCashIncome(tx, orgId, actorUserId, shift.id, {
+      paymentId: payment.id,
+      amountCents: payment.amountCents,
+      currency: payment.currency,
+      methodName: payment.methodName ?? payment.method,
+      methodTypeCode: payment.methodTypeCode,
+      concept: `Ticket ${ticketNumber}`,
+    })
+  }
+  await audit(tx, orgId, actorUserId, "payment_ticket", ticket.id, "ticket.created")
+  await notify(tx, { orgId, kind: "payment.created", at: new Date().toISOString() })
+  const remaining = sum(targets.map((t) => ({ amountCents: t.outstanding })))
+  return {
+    ticket,
+    payments,
+    creditAppliedCents: creditApplied,
+    remainingCents: remaining,
+    duplicate: false as const,
+    account: await getAccountSummary(tx, orgId, patientId),
+  }
+}
+
+// --- Anulación del cobro (una sola acción) -------------------------------------------------
+
+export interface VoidTicketInput {
+  reason: string
+  /** Permiso finance.admin ya comprobado en ruta: exige administración tras el cierre. */
+  allowPostClose: boolean
+}
+
+/**
+ * Anula el ticket completo: revierte sus aplicaciones (incluido el crédito
+ * previo que consumió), sus pagos y su ingreso a caja. Si la ventana ya
+ * cerró, la caja queda intacta y el dinero sale de la caja del día
+ * (requiere `allowPostClose`). El ticket queda marcado, nunca se borra.
+ */
+export async function voidTicket(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  patientId: string,
+  ticketId: string,
+  input: VoidTicketInput,
 ) {
   await lockAccount(tx, orgId, patientId)
-  const payment = await paymentRow(tx, orgId, patientId, paymentId)
-  const balance = await paymentBalance(tx, orgId, patientId, payment)
-  if (balance.applications.length || balance.refunds.length)
-    throw conflict("PAYMENT_HAS_MOVEMENTS", "El pago tiene aplicaciones activas o devoluciones")
-  const voidReason = reason(input.reason)
-  const [movement] = await tx
+  const [ticket] = await tx
     .select()
-    .from(cashMovement)
+    .from(paymentTicket)
     .where(
       and(
-        eq(cashMovement.organizationId, orgId),
-        eq(cashMovement.patientPaymentId, paymentId),
-        isNull(cashMovement.voidedAt),
+        eq(paymentTicket.id, ticketId),
+        eq(paymentTicket.organizationId, orgId),
+        eq(paymentTicket.patientId, patientId),
       ),
     )
-  if (movement) {
-    const [shift] = await tx
-      .select()
-      .from(cashShift)
-      .where(and(eq(cashShift.id, movement.shiftId), eq(cashShift.organizationId, orgId)))
-    if (!shift) throw notFound("Turno de caja")
-    if (shift.status === "abierta") {
-      await tx
-        .update(cashMovement)
-        .set({ voidedAt: new Date(), voidedBy: actorUserId, voidReason })
-        .where(eq(cashMovement.id, movement.id))
-      await audit(tx, orgId, actorUserId, "cash_movement", movement.id, "cash.movement_voided")
-    } else {
-      // Turno cerrado e inmutable: no se reescribe; el dinero sale con una
-      // compensación nueva en un turno abierto de la misma sede y moneda.
-      const compensateId = input.compensateShiftId
-      if (!compensateId)
-        throw conflict(
-          "SHIFT_CLOSED_NEEDS_COMPENSATION",
-          "El turno donde ingresó el cobro ya cerró y no se modifica: indica un turno abierto de la misma sede y moneda para registrar la compensación",
-        )
-      const [target] = await tx
-        .select()
-        .from(cashShift)
-        .where(and(eq(cashShift.id, compensateId), eq(cashShift.organizationId, orgId)))
-      if (!target) throw notFound("Turno de caja")
-      if (target.status !== "abierta")
-        throw conflict("SHIFT_CLOSED", "El turno de compensación no está abierto")
-      if (target.branchId !== shift.branchId || target.currency !== payment.currency)
-        throw conflict(
-          "COMPENSATION_MISMATCH",
-          "La compensación debe ir a un turno abierto de la misma sede y moneda",
-        )
-      const [compensation] = await tx
-        .insert(cashMovement)
+  if (!ticket) throw notFound("Ticket")
+  if (ticket.voidedAt) throw conflict("TICKET_VOIDED", "El ticket ya está anulado")
+  const voidReason = reason(input.reason)
+  const payments = await tx
+    .select()
+    .from(patientPayment)
+    .where(
+      and(
+        eq(patientPayment.organizationId, orgId),
+        eq(patientPayment.patientId, patientId),
+        eq(patientPayment.ticketId, ticket.id),
+        isNull(patientPayment.voidedAt),
+      ),
+    )
+  for (const payment of payments) {
+    const refunds = await tx
+      .select({ id: patientPaymentRefund.id })
+      .from(patientPaymentRefund)
+      .where(
+        and(
+          eq(patientPaymentRefund.organizationId, orgId),
+          eq(patientPaymentRefund.patientId, patientId),
+          eq(patientPaymentRefund.paymentId, payment.id),
+        ),
+      )
+      .limit(1)
+    if (refunds.length)
+      throw conflict("TICKET_HAS_REFUNDS", "El ticket tiene devoluciones: no se puede anular")
+  }
+  const applications = await tx
+    .select()
+    .from(patientPaymentApplication)
+    .where(
+      and(
+        eq(patientPaymentApplication.organizationId, orgId),
+        eq(patientPaymentApplication.patientId, patientId),
+        eq(patientPaymentApplication.ticketId, ticket.id),
+        isNull(patientPaymentApplication.voidedAt),
+      ),
+    )
+  let compensated = false
+  for (const payment of payments) {
+    compensated = (await reverseCashIncome(tx, orgId, actorUserId, payment, voidReason, input.allowPostClose)) || compensated
+  }
+  for (const app of applications) {
+    await tx
+      .update(patientPaymentApplication)
+      .set({ voidedAt: new Date(), voidedBy: actorUserId, voidReason })
+      .where(eq(patientPaymentApplication.id, app.id))
+    await audit(tx, orgId, actorUserId, "patient_payment_application", app.id, "payment.application_voided")
+  }
+  for (const payment of payments) {
+    await tx
+      .update(patientPayment)
+      .set({ voidedAt: new Date(), voidedBy: actorUserId, voidReason, updatedAt: new Date() })
+      .where(eq(patientPayment.id, payment.id))
+    await audit(tx, orgId, actorUserId, "patient_payment", payment.id, "payment.voided")
+  }
+  const [row] = await tx
+    .update(paymentTicket)
+    .set({ voidedAt: new Date(), voidedBy: actorUserId, voidReason })
+    .where(eq(paymentTicket.id, ticket.id))
+    .returning()
+  await audit(tx, orgId, actorUserId, "payment_ticket", ticket.id, "ticket.voided")
+  await notify(tx, { orgId, kind: "payment.voided", at: new Date().toISOString() })
+  return { ticket: row, voidedPayments: payments.length, voidedApplications: applications.length, compensated, account: await getAccountSummary(tx, orgId, patientId) }
+}
+
+// --- Devolución del saldo a favor ----------------------------------------------------------
+
+export interface RefundCreditInput {
+  branchId: string
+  amountCents: number
+  /** Cómo se lo devuelven (snapshot para la constancia). El dinero sale del efectivo de la caja. */
+  paymentMethodId?: string | null
+  reason: string
+  currency?: string
+}
+
+/**
+ * Devuelve dinero del saldo a favor: solo lo no aplicado. El egreso sale del
+ * efectivo de la caja del día (auto). Responde la constancia imprimible.
+ * Para devolver algo ya cobrado a un concepto, primero se anula ese cobro.
+ */
+export async function refundCredit(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  patientId: string,
+  input: RefundCreditInput,
+) {
+  const orgUnit = await lockOrgCurrency(tx, orgId)
+  await lockAccount(tx, orgId, patientId)
+  const amount = assertPositiveCents(input.amountCents)
+  const branchRow = await requireBranch(tx, orgId, input.branchId)
+  const unit = input.currency ?? orgUnit
+  const credit = await availableCredit(tx, orgId, patientId, unit)
+  const total = sum(credit.map((c) => ({ amountCents: c.available })))
+  if (amount > total)
+    throw conflict("INSUFFICIENT_CREDIT", "Solo se devuelve lo que está a favor")
+  let methodName = "Efectivo"
+  let methodTypeCode: string | null = CASH_TYPE_CODE
+  if (input.paymentMethodId) {
+    const method = await requirePaymentMethod(tx, orgId, input.paymentMethodId)
+    methodName = method.name
+    methodTypeCode = method.typeCode
+  }
+  const at = new Date()
+  const refunds = []
+  {
+    let rest = amount
+    for (const { payment, available } of credit) {
+      if (rest <= 0) break
+      const take = Math.min(available, rest)
+      const [refund] = await tx
+        .insert(patientPaymentRefund)
         .values({
           organizationId: orgId,
-          shiftId: target.id,
-          direction: "egreso",
-          kind: "devolucion",
-          amountCents: payment.amountCents,
-          currency: payment.currency,
-          method: payment.method,
-          concept: `Compensación por anulación de cobro ${payment.method}`,
+          patientId,
+          paymentId: payment.id,
+          amountCents: take,
+          refundedAt: at,
+          reason: reason(input.reason),
           createdBy: actorUserId,
         })
         .returning()
-      await audit(
-        tx,
-        orgId,
-        actorUserId,
-        "cash_movement",
-        compensation.id,
-        "cash.compensation_created",
-      )
+      refunds.push(refund)
+      await audit(tx, orgId, actorUserId, "patient_payment_refund", refund.id, "payment.refunded")
+      rest -= take
     }
   }
-  const [row] = await tx
-    .update(patientPayment)
-    .set({
-      voidedAt: new Date(),
-      voidedBy: actorUserId,
-      voidReason,
-      updatedAt: new Date(),
+  const shift = await ensureOpenShift(tx, orgId, actorUserId, branchRow.id, unit)
+  await recordCashEgreso(tx, orgId, actorUserId, shift.id, {
+    kind: "devolucion",
+    amountCents: amount,
+    currency: unit,
+    methodName,
+    methodTypeCode,
+    concept: `Devolución a favor`,
+  })
+  await notify(tx, { orgId, kind: "payment.refunded", at: at.toISOString() })
+  return {
+    refunds,
+    amountCents: amount,
+    currency: unit,
+    branchId: branchRow.id,
+    methodName,
+    refundedAt: at,
+    account: await getAccountSummary(tx, orgId, patientId),
+  }
+}
+
+// --- Cuenta del paciente (tres cifras) ------------------------------------------------------
+
+export interface AccountPending {
+  chargeId: string
+  description: string
+  currency: string
+  totalCents: number
+  paidCents: number
+  saldoCents: number
+  since: Date | null
+  budgetItemId: string | null
+  planItemId: string | null
+  encounterProcedureId: string | null
+  promotionName: string | null
+}
+
+/**
+ * Cuenta nueva: tres cifras por moneda (por cobrar, pagado, a favor),
+ * pendiente por concepto y cobros (tickets con estado). Sin selector de
+ * moneda: cada fila trae la suya.
+ */
+export async function getAccountSummary(tx: Db, orgId: string, patientId: string) {
+  await requirePatient(tx, orgId, patientId)
+  const charges = await tx
+    .select()
+    .from(patientCharge)
+    .where(and(eq(patientCharge.organizationId, orgId), eq(patientCharge.patientId, patientId)))
+    .orderBy(asc(patientCharge.createdAt), asc(patientCharge.id))
+  const payments = await tx
+    .select()
+    .from(patientPayment)
+    .where(and(eq(patientPayment.organizationId, orgId), eq(patientPayment.patientId, patientId)))
+    .orderBy(asc(patientPayment.paidAt), asc(patientPayment.id))
+  const applications = await tx
+    .select()
+    .from(patientPaymentApplication)
+    .where(
+      and(
+        eq(patientPaymentApplication.organizationId, orgId),
+        eq(patientPaymentApplication.patientId, patientId),
+      ),
+    )
+  const refunds = await tx
+    .select()
+    .from(patientPaymentRefund)
+    .where(
+      and(
+        eq(patientPaymentRefund.organizationId, orgId),
+        eq(patientPaymentRefund.patientId, patientId),
+      ),
+    )
+  const tickets = await tx
+    .select()
+    .from(paymentTicket)
+    .where(and(eq(paymentTicket.organizationId, orgId), eq(paymentTicket.patientId, patientId)))
+    .orderBy(asc(paymentTicket.createdAt), asc(paymentTicket.id))
+  const appliedByCharge: Record<string, number> = {}
+  for (const app of applications) {
+    if (app.voidedAt) continue
+    appliedByCharge[app.chargeId] = (appliedByCharge[app.chargeId] ?? 0) + app.amountCents
+  }
+  const appliedByPayment: Record<string, number> = {}
+  for (const app of applications) {
+    if (app.voidedAt) continue
+    appliedByPayment[app.paymentId] = (appliedByPayment[app.paymentId] ?? 0) + app.amountCents
+  }
+  const refundedByPayment: Record<string, number> = {}
+  for (const refund of refunds)
+    refundedByPayment[refund.paymentId] = (refundedByPayment[refund.paymentId] ?? 0) + refund.amountCents
+  const liveCharges = charges.filter((c) => !c.voidedAt)
+  const livePayments = payments.filter((p) => !p.voidedAt)
+  const units = [...new Set([...liveCharges.map((c) => c.currency), ...livePayments.map((p) => p.currency)])].sort()
+  const byCurrency = units.map((unit) => {
+    const charged = sum(liveCharges.filter((c) => c.currency === unit))
+    const paid = sum(livePayments.filter((p) => p.currency === unit))
+    const applied = sum(
+      applications.filter((a) => {
+        if (a.voidedAt) return false
+        const payment = livePayments.find((p) => p.id === a.paymentId)
+        return payment?.currency === unit
+      }),
+    )
+    const refunded = sum(
+      refunds.filter((r) => livePayments.find((p) => p.id === r.paymentId)?.currency === unit),
+    )
+    return {
+      currency: unit,
+      porCobrar: charged - applied,
+      // Neto que conserva la clínica: lo cobrado menos lo devuelto.
+      pagado: paid - refunded,
+      aFavor: paid - applied - refunded,
+    }
+  })
+  const pendiente: AccountPending[] = liveCharges
+    .map((charge) => {
+      const paid = appliedByCharge[charge.id] ?? 0
+      return {
+        chargeId: charge.id,
+        description: charge.description,
+        currency: charge.currency,
+        totalCents: charge.amountCents,
+        paidCents: paid,
+        saldoCents: charge.amountCents - paid,
+        since: charge.createdAt,
+        budgetItemId: charge.budgetItemId,
+        planItemId: charge.planItemId,
+        encounterProcedureId: charge.encounterProcedureId,
+        promotionName: charge.promotionName,
+      }
     })
+    .filter((row) => row.saldoCents > 0)
+  const ticketPayments: Record<string, typeof payments> = {}
+  for (const payment of payments) {
+    if (!payment.ticketId) continue
+    if (!ticketPayments[payment.ticketId]) ticketPayments[payment.ticketId] = []
+    ticketPayments[payment.ticketId].push(payment)
+  }
+  const cobros = tickets.map((ticket) => ({
+    ticketId: ticket.id,
+    number: ticket.ticketNumber,
+    currency: ticket.currency,
+    totalCents: ticket.totalCents,
+    creditAppliedCents: ticket.creditAppliedCents,
+    status: ticket.voidedAt ? ("anulado" as const) : ("vigente" as const),
+    voidReason: ticket.voidReason,
+    createdAt: ticket.createdAt,
+    snapshot: ticket.snapshot,
+    payments: (ticketPayments[ticket.id] ?? []).map((p) => ({
+      id: p.id,
+      methodName: p.methodName ?? p.method,
+      amountCents: p.amountCents,
+      voidedAt: p.voidedAt,
+    })),
+  }))
+  // Historial anterior sin ticket (nunca se borra ni se inventa sede): filas
+  // de solo lectura, marcadas como histórico. Solo se imprimen con evidencia.
+  const historico = payments
+    .filter((p) => !p.ticketId)
+    .map((p) => ({
+      paymentId: p.id,
+      currency: p.currency,
+      methodName: p.methodName ?? p.method,
+      methodTypeCode: p.methodTypeCode,
+      amountCents: p.amountCents,
+      appliedCents: appliedByPayment[p.id] ?? 0,
+      refundedCents: refundedByPayment[p.id] ?? 0,
+      paidAt: p.paidAt,
+      status: p.voidedAt ? ("anulado" as const) : ("vigente" as const),
+      voidReason: p.voidReason,
+      origin: "historico" as const,
+    }))
+  return { patientId, byCurrency, pendiente, cobros, historico, conCargo: coveredPlanItems(liveCharges) }
+}
+
+/** Tratamientos con cargo vivo (cobrado o no): una sola tarifa por tratamiento. */
+function coveredPlanItems(charges: Array<{ planItemId: string | null }>): string[] {
+  return [...new Set(charges.filter((c) => c.planItemId).map((c) => c.planItemId as string))].sort()
+}
+
+/**
+ * Snapshot del ticket para el PDF y la impresión (Documentos): ticket
+ * inmutable con sus pagos, aplicaciones vigentes, conceptos, sede y moneda.
+ * Solo lectura.
+ */
+export async function getTicketReceipt(tx: Db, orgId: string, patientId: string, ticketId: string) {
+  const [ticket] = await tx
+    .select()
+    .from(paymentTicket)
+    .where(
+      and(
+        eq(paymentTicket.id, ticketId),
+        eq(paymentTicket.organizationId, orgId),
+        eq(paymentTicket.patientId, patientId),
+      ),
+    )
+  if (!ticket) throw notFound("Ticket")
+  const payments = await tx
+    .select()
+    .from(patientPayment)
+    .where(
+      and(
+        eq(patientPayment.organizationId, orgId),
+        eq(patientPayment.patientId, patientId),
+        eq(patientPayment.ticketId, ticket.id),
+      ),
+    )
+  const applications = await tx
+    .select()
+    .from(patientPaymentApplication)
+    .where(
+      and(
+        eq(patientPaymentApplication.organizationId, orgId),
+        eq(patientPaymentApplication.patientId, patientId),
+        eq(patientPaymentApplication.ticketId, ticket.id),
+      ),
+    )
+  const paymentIds = payments.map((p) => p.id)
+  const charges = paymentIds.length
+    ? await tx
+        .select()
+        .from(patientCharge)
+        .where(
+          and(
+            eq(patientCharge.organizationId, orgId),
+            eq(patientCharge.patientId, patientId),
+          ),
+        )
+    : []
+  const chargeById: Record<string, (typeof charges)[number]> = {}
+  for (const charge of charges) chargeById[charge.id] = charge
+  const [branchRow] = await tx
+    .select()
+    .from(branch)
+    .where(and(eq(branch.id, ticket.branchId), eq(branch.organizationId, orgId)))
+  const [profile] = await tx
+    .select()
+    .from(orgProfile)
+    .where(eq(orgProfile.organizationId, orgId))
+  return { ticket, payments, applications, chargeById, branch: branchRow ?? null, orgProfile: profile ?? null }
+}
+/** Receipt desde un pago suelto (Fase 7): resuelve su ticket y delega. */
+export async function getTicketReceiptByPayment(tx: Db, orgId: string, patientId: string, paymentId: string) {
+  const [payment] = await tx
+    .select({ ticketId: patientPayment.ticketId })
+    .from(patientPayment)
     .where(
       and(
         eq(patientPayment.id, paymentId),
@@ -627,11 +1396,11 @@ export async function voidPayment(
         eq(patientPayment.patientId, patientId),
       ),
     )
-    .returning()
-  await audit(tx, orgId, actorUserId, "patient_payment", paymentId, "payment.voided")
-  await notify(tx, { orgId, kind: "payment.voided", at: new Date().toISOString() })
-  return row
+  if (!payment?.ticketId) throw notFound("Ticket")
+  return getTicketReceipt(tx, orgId, patientId, payment.ticketId)
 }
+
+
 export async function getPatientAccount(tx: Db, orgId: string, patientId: string) {
   await requirePatient(tx, orgId, patientId)
   const charges = await tx

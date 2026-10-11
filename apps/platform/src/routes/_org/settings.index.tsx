@@ -1,4 +1,4 @@
-import { Button, Field, FieldDescription, FieldError, FieldLabel, Input, toast } from "@odentia/ui"
+import { Button, Field, FieldDescription, FieldError, FieldLabel, Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, toast } from "@odentia/ui"
 import {
   type CountryCode,
   CountrySelect,
@@ -61,6 +61,10 @@ const profileSchema = z.object({
   currency: z.string().length(3, "Moneda de 3 letras"),
   timezone: z.string().min(1, "Elige una zona horaria"),
   locale: z.string().min(2, "Elige el idioma y formato"),
+  receiptWidth: z.enum(["58", "80"]),
+  sheetSize: z.enum(["A4", "Letter"]),
+  ticketFooter: z.string().min(1, "Escribe la frase al pie del ticket").max(280),
+  applyCountryPreset: z.boolean(),
 })
 
 type ProfileValues = z.infer<typeof profileSchema>
@@ -77,6 +81,10 @@ const emptyValues: ProfileValues = {
   currency: "PEN",
   timezone: "America/Lima",
   locale: "es-PE",
+  receiptWidth: "80",
+  sheetSize: "A4",
+  ticketFooter: "Recibo interno. No es un documento fiscal.",
+  applyCountryPreset: true,
 }
 
 function toValues(profile: {
@@ -90,6 +98,9 @@ function toValues(profile: {
   currency: string
   timezone: string
   locale: string
+  receiptWidth: string | null
+  sheetSize: string | null
+  ticketFooter: string | null
 }): ProfileValues {
   return {
     legalName: profile.legalName,
@@ -102,6 +113,10 @@ function toValues(profile: {
     currency: profile.currency,
     timezone: profile.timezone,
     locale: profile.locale,
+    receiptWidth: profile.receiptWidth === "58" ? "58" : "80",
+    sheetSize: profile.sheetSize === "Letter" ? "Letter" : "A4",
+    ticketFooter: profile.ticketFooter ?? "Recibo interno. No es un documento fiscal.",
+    applyCountryPreset: false,
   }
 }
 
@@ -118,6 +133,10 @@ function toInput(values: ProfileValues): OrgProfileInput {
     currency: values.currency.trim().toUpperCase(),
     timezone: values.timezone,
     locale: values.locale.trim(),
+    receiptWidth: values.receiptWidth,
+    sheetSize: values.sheetSize,
+    ticketFooter: values.ticketFooter.trim(),
+    ...(values.applyCountryPreset ? { applyCountryPreset: true } : {}),
   }
 }
 
@@ -367,6 +386,10 @@ function ProfileForm({
                   maxLength={3}
                   onChange={(event) => field.handleChange(event.target.value.toUpperCase())}
                 />
+                <FieldDescription>
+                  Código ISO 4217. Si la clínica ya tiene movimientos, no se puede
+                  cambiar sin una migración explícita: los históricos no se convierten.
+                </FieldDescription>
                 <FieldError>{fieldErrorMessages(field.state.meta.errors)[0] ?? null}</FieldError>
               </Field>
             )}
@@ -386,6 +409,91 @@ function ProfileForm({
             )}
           </form.Field>
         </div>
+        <form.Field name="applyCountryPreset">
+          {(field) => (
+            <Field orientation="horizontal">
+              <input
+                id="org-apply-preset"
+                type="checkbox"
+                checked={field.state.value}
+                onChange={(event) => field.handleChange(event.target.checked)}
+              />
+              <div>
+                <FieldLabel htmlFor="org-apply-preset">
+                  Proponer moneda, formato, papel y medios al cambiar de país
+                </FieldLabel>
+                <FieldDescription>
+                  Todo se puede cambiar después; los medios se inicializan solo si la
+                  clínica aún no tiene ninguno.
+                </FieldDescription>
+              </div>
+            </Field>
+          )}
+        </form.Field>
+      </section>
+
+      <section className="flex flex-col gap-4 elevated rounded-xl border bg-card p-6">
+        <h2 className="font-heading text-base font-medium">Impresión</h2>
+        <FieldDescription>
+          De aquí salen la moneda, los formatos y el papel. El ticket y la hoja de
+          cierre salen en térmica; el presupuesto, en hoja.
+        </FieldDescription>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <form.Field name="receiptWidth">
+            {(field) => (
+              <Field>
+                <FieldLabel htmlFor="org-receipt-width">Ticket y cierre en</FieldLabel>
+                <Select
+                  value={field.state.value}
+                  onValueChange={(next) => field.handleChange(next as "58" | "80")}
+                >
+                  <SelectTrigger id="org-receipt-width">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="80">Térmica de 80 mm</SelectItem>
+                    <SelectItem value="58">Térmica de 58 mm</SelectItem>
+                  </SelectContent>
+                </Select>
+                <FieldError>{fieldErrorMessages(field.state.meta.errors)[0] ?? null}</FieldError>
+              </Field>
+            )}
+          </form.Field>
+          <form.Field name="sheetSize">
+            {(field) => (
+              <Field>
+                <FieldLabel htmlFor="org-sheet-size">Tamaño de hoja, para el presupuesto</FieldLabel>
+                <Select
+                  value={field.state.value}
+                  onValueChange={(next) => field.handleChange(next as "A4" | "Letter")}
+                >
+                  <SelectTrigger id="org-sheet-size">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="A4">A4 · 210 × 297 mm</SelectItem>
+                    <SelectItem value="Letter">Carta · 216 × 279 mm</SelectItem>
+                  </SelectContent>
+                </Select>
+                <FieldError>{fieldErrorMessages(field.state.meta.errors)[0] ?? null}</FieldError>
+              </Field>
+            )}
+          </form.Field>
+        </div>
+        <form.Field name="ticketFooter">
+          {(field) => (
+            <Field>
+              <FieldLabel htmlFor="org-ticket-footer">Frase al pie del ticket</FieldLabel>
+              <Input
+                id="org-ticket-footer"
+                value={field.state.value}
+                maxLength={280}
+                onChange={(event) => field.handleChange(event.target.value)}
+              />
+              <FieldError>{fieldErrorMessages(field.state.meta.errors)[0] ?? null}</FieldError>
+            </Field>
+          )}
+        </form.Field>
       </section>
 
       <div className="flex justify-end gap-3">

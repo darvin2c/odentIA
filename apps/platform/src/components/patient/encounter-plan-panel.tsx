@@ -25,12 +25,14 @@ import {
 } from "../../lib/budgets"
 import { createOptionGroupApi } from "../../lib/clinical-journey"
 import { usePermission } from "../../lib/crm"
+import { formatMoney } from "@odentia/clinical"
+import { useOrgProfile } from "../../lib/org"
 import type { OdontogramState, PlanItem } from "../../lib/patients"
-import { formatMoney, type ServiceCatalogItem, TREATMENT_SCOPE_LABELS } from "../../lib/services"
+import { type ServiceCatalogItem, TREATMENT_SCOPE_LABELS } from "../../lib/services"
+import { ToothSelector } from "./tooth-selector"
 import { Cie10Search } from "./cie10-search"
 import { treatmentSiteLabel } from "./plan-tab"
 import { ServicePicker } from "./service-picker"
-import { ToothSelector } from "./tooth-selector"
 
 const QUADRANT_LABELS: Record<string, string> = {
   "1": "Cuadrante 1 · superior derecho",
@@ -71,6 +73,7 @@ export function EncounterPlanPanel({
   const queryClient = useQueryClient()
   const canWrite = usePermission("clinical.write")
   const canRead = usePermission("clinical.read")
+  const orgLocale = useOrgProfile().data?.locale
   const uid = useId()
   const [planId, setPlanId] = useState("")
   const [newTitle, setNewTitle] = useState("Plan de tratamiento")
@@ -413,7 +416,8 @@ export function EncounterPlanPanel({
           />
           {service ? (
             <p className="text-sm text-muted-foreground" aria-live="polite">
-              Tarifa de solo lectura: {formatMoney(service.priceCents, service.currency)}
+              Tarifa de solo lectura:{" "}
+              {orgLocale ? formatMoney(service.priceCents, service.currency, orgLocale) : "…"}
               {service.scope ? ` · ${TREATMENT_SCOPE_LABELS[service.scope] ?? service.scope}` : ""}
             </p>
           ) : null}
@@ -526,7 +530,7 @@ export function EncounterPlanPanel({
                       <span className="text-xs text-muted-foreground">
                         {treatmentSiteLabel(item)} ·{" "}
                         {item.priceCents != null
-                          ? formatMoney(item.priceCents, item.currency)
+                          ? (orgLocale ? formatMoney(item.priceCents, item.currency, orgLocale) : "…")
                           : "sin tarifa"}
                       </span>
                     </span>

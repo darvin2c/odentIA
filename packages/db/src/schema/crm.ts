@@ -88,6 +88,14 @@ export const pipelineStage = pgTable(
  * (nombre, documento, nacimiento, sexo, teléfono, correo) se mantiene igual en
  * ambos registros por triggers de la migración de persona única.
  */
+/**
+ * Medio preferido de la persona para avisos y documentos (Fase 7 Finanzas).
+ * Solo entre canales conectables; la UI ofrece únicamente los canales con
+ * conexión activa. No crea identidades ni conversaciones por sí solo.
+ */
+export const PREFERRED_CHANNELS = ["email", "whatsapp", "telegram", "messenger", "instagram"] as const
+export type PreferredChannel = (typeof PREFERRED_CHANNELS)[number]
+
 export const contact = pgTable("contact", {
   id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
   organizationId: orgFk("organization_id"),
@@ -100,6 +108,8 @@ export const contact = pgTable("contact", {
   docCountry: char("doc_country", { length: 2 }),
   phone: text("phone"),
   email: text("email"),
+  /** Medio preferido para avisos y documentos; nulo = sin preferencia. */
+  preferredChannel: text("preferred_channel"),
   docType: text("doc_type"),
   docNumber: text("doc_number"),
   birthDate: date("birth_date"),
@@ -117,6 +127,10 @@ export const contact = pgTable("contact", {
   uniqueIndex("contact_org_doc_uidx")
     .on(table.organizationId, table.docType, table.docNumber)
     .where(sql`"doc_number" IS NOT NULL`),
+  check(
+    "contact_preferred_channel_check",
+    sql`${table.preferredChannel} IS NULL OR ${table.preferredChannel} IN ('email','whatsapp','telegram','messenger','instagram')`,
+  ),
   check(
     "contact_doc_type_check",
     sql`${table.docType} IS NULL OR ${table.docType} IN ('DNI','CE','PASAPORTE','CNV','DIE','OTRO')`,

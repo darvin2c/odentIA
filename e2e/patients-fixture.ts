@@ -151,7 +151,7 @@ export async function enableAgenda(owner: OwnerFixture): Promise<{ chairId: stri
   return { chairId: chair.id }
 }
 
-/** Presupuesto en borrador; la presentación y la decisión las hace cada caso. */
+/** Presupuesto en borrador; la entrega y la decisión las hace cada caso. */
 export async function createDraftBudget(
   owner: OwnerFixture,
   ids: ClinicalIds,
@@ -169,7 +169,7 @@ export async function createDraftBudget(
 }
 
 /**
- * Presupuesto presentado y aceptado por API. `budgetLineId` es la línea
+ * Presupuesto entregado y aceptado por API. `budgetLineId` es la línea
  * económica (treatment_budget_item.id), no el planItemId.
  */
 export async function createAcceptedBudget(
@@ -181,7 +181,7 @@ export async function createAcceptedBudget(
   const slug = owner.org.slug
   const apiPath = patientApiPath(ids.patientId)
   const { budgetId } = await createDraftBudget(owner, ids, title)
-  await call(page, "POST", `${apiPath}/budgets/${budgetId}/present`, slug, {})
+  await call(page, "POST", `${apiPath}/budgets/${budgetId}/deliver`, slug, {})
   await call(page, "POST", `${apiPath}/budgets/${budgetId}/decision`, slug, {
     decisions: [{ planItemId: ids.itemId, decision: "aceptado" }],
     decidedByContactId: null,
@@ -250,18 +250,17 @@ export async function setupAggregation(
   const charge = await call<{ id: string }>(page, "POST", `${apiPath}/charges`, slug, {
     budgetItemId: accepted.budgetLineId,
   }, 201)
-  const payment = await call<{ id: string }>(page, "POST", `${apiPath}/payments`, slug, {
-    amountCents: 20000,
-    currency: "PEN",
-    paidAt: now.toISOString(),
-    method: "efectivo",
-    reference: null,
+  const methods = await call<Array<{ id: string; typeCode: string }>>(page, "GET", "/api/org/payment-methods?activeOnly=1", slug)
+  const cash = methods.find((method) => method.typeCode === "10")
+  expect(cash, "la clínica ofrece efectivo").toBeTruthy()
+  const collected = await call<{ ticket: { id: string }; payments: Array<{ id: string }> }>(page, "POST", `${apiPath}/collect`, slug, {
+    branchId: owner.branchId,
+    chargeIds: [charge.id],
+    payments: [{ paymentMethodId: cash!.id, amountCents: 15000 }],
     payerContactId: ids.contactId,
+    requestId: crypto.randomUUID(),
   }, 201)
-  await call(page, "POST", `${apiPath}/payments/${payment.id}/applications`, slug, {
-    chargeId: charge.id,
-    amountCents: 15000,
-  })
+  const payment = { id: collected.payments[0]!.id }
   const prescription = await call<{ id: string }>(page, "POST", `${apiPath}/prescriptions`, slug, {
     planItemId: ids.itemId,
     notes: null,

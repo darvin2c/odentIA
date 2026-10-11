@@ -95,3 +95,38 @@ describe("permiso operativo agent.decide", () => {
     expect(canAccessAny("owner", platformPathPermission("/agent/knowledge") ?? [])).toBe(true)
   })
 })
+
+describe("fronteras económicas por rol", () => {
+  it("odontología presupuesta y consulta sus comisiones sin acceso a caja", () => {
+    for (const permission of ["budgets.read", "budgets.write", "budgets.decide", "commissions.read"]) {
+      expect(canAccess("dentist", permission)).toBe(true)
+    }
+    for (const permission of ["finance.read", "finance.write", "finance.close", "finance.admin", "commissions.write"]) {
+      expect(canAccess("dentist", permission)).toBe(false)
+    }
+  })
+
+  it("caja cierra y anota respuestas, sin cambiar presupuestos ni administrar comisiones", () => {
+    for (const permission of ["finance.close", "budgets.read", "budgets.decide"]) {
+      expect(canAccess("cashier", permission)).toBe(true)
+    }
+    for (const permission of ["budgets.write", "finance.admin", "commissions.read", "commissions.write"]) {
+      expect(canAccess("cashier", permission)).toBe(false)
+    }
+  })
+
+  it("recepción consulta el tarifario sin ver cuentas, presupuestos económicos ni comisiones", () => {
+    expect(canAccess("reception", "catalog.read")).toBe(true)
+    for (const permission of ["budgets.read", "budgets.write", "budgets.decide", "commissions.read"]) {
+      expect(canAccess("reception", permission)).toBe(false)
+    }
+    expect(canAccess("member", "catalog.read")).toBe(false)
+  })
+
+  it("la entrada de comisiones no concede acceso a otros dominios", () => {
+    expect(canAccessAny("dentist", platformPathPermission("/commissions") ?? [])).toBe(true)
+    expect(canAccessAny("dentist", platformPathPermission("/finance") ?? [])).toBe(false)
+    expect(canAccessAny("cashier", platformPathPermission("/commissions") ?? [])).toBe(false)
+    expect(canAccess("owner", "budgets.delete")).toBe(false)
+  })
+})

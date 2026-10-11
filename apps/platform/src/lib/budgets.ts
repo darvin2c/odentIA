@@ -3,13 +3,16 @@
  * Contrato servidor: `packages/services/src/budgets.ts`.
  * - GET /api/patients/:id/budgets?planId= -> { data: BudgetWithTotals[] }
  * - GET /api/patients/:id/budgets/:budgetId -> { data: BudgetWithTotals }
+ * - GET /api/patients/:id/budgets/:budgetId/print -> payload A4 (quotation 310)
  * - POST /api/patients/:id/budgets { planId, itemIds, title?, notes? } -> 201
  * - PATCH /api/patients/:id/budgets/:budgetId { title?, notes? } (solo borrador)
- * - POST /api/patients/:id/budgets/:budgetId/present {} (borrador->presentado)
+ * - POST /api/patients/:id/budgets/:budgetId/lines { lines } (precio+promo, borrador)
+ * - POST /api/patients/:id/budgets/:budgetId/deliver {} (borrador->presentado)
  * - POST /api/patients/:id/budgets/:budgetId/decision { decisions, decidedByContactId?, decisionNote? }
  * - POST /api/patients/:id/budgets/:budgetId/cancel {}
  * - POST /api/patients/:id/plan/items exige planId + atención borrador de origen.
  * - GET/POST /api/patients/:id/plans para el plan clínico longitudinal.
+ * - PDF servidor: /api/patients/:id/financial-document-pdf?documentType=budget&documentId=
  *
  * Aquí solo tipos de vista y fetch: nunca se recalculan totales ni se
  * reinterpretan estados; el servidor es la fuente (totalCents/acceptedCents).
@@ -72,17 +75,28 @@ export interface BudgetLine {
   surfaces: string[]
   quadrant: number | null
   arch: string | null
+  /** Precio final acordado por unidad (total o por sesión según billingMode). */
   priceCents: number | null
+  /** Tarifa original al cotizar (referencia del descuento). */
+  tariffPriceCents: number | null
+  priceReason: string | null
+  promotionId: string | null
+  promotionName: string | null
+  promotionMode: string | null
+  /** 'treatment' una vez, 'session' por visita atendida. */
+  billingMode: string
+  sessionsPlanned: number | null
   currency: string
   decision: PlanDecision
   itemStatus: string
 }
 
-
 export interface BudgetWithTotals extends Budget {
   items: BudgetLine[]
   totalCents: number | null
   acceptedCents: number | null
+  tariffTotalCents: number | null
+  discountCents: number | null
 }
 
 
@@ -186,11 +200,78 @@ export function updateBudgetApi(
   })
 }
 
-export function presentBudgetApi(patientId: string, budgetId: string): Promise<{ data: Budget }> {
-  return apiFetch<{ data: Budget }>(`${budgetsBase(patientId)}/${budgetId}/present`, {
+/** Entregar el presupuesto: imprimir o enviar lo entrega (no hay paso presentar). */
+export function deliverBudgetApi(patientId: string, budgetId: string): Promise<{ data: Budget }> {
+  return apiFetch<{ data: Budget }>(`${budgetsBase(patientId)}/${budgetId}/deliver`, {
     method: "POST",
     body: JSON.stringify({}),
   })
+}
+
+export interface AdjustBudgetLineBody {
+  planItemId: string
+  priceCents?: number | null
+  reason?: string | null
+  promotionId?: string | null
+  promotionFinalPriceCents?: number | null
+}
+
+/** Precio acordado por línea con motivo + promoción opt-in (solo borrador). */
+export function adjustBudgetLinesApi(
+  patientId: string,
+  budgetId: string,
+  body: { lines: AdjustBudgetLineBody[] },
+): Promise<{ data: BudgetWithTotals }> {
+  return apiFetch<{ data: BudgetWithTotals }>(`${budgetsBase(patientId)}/${budgetId}/lines`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  })
+}
+
+export interface BudgetPrintPayload {
+  quotationCode: "310"
+  paper: "A4"
+  budgetNumber: number
+  revisionNumber: number
+  title: string
+  planTitle: string
+  status: string
+  isDraft: boolean
+  currency: string
+  locale: string
+  timezone: string
+  issuedAt: string
+  clinic: { name: string; address: string | null; phone: string | null }
+  patient: { displayName: string; docType: string | null; docNumber: string | null }
+  professional: { name: string; title: string | null; registration: string | null } | null
+  lines: Array<{
+    title: string
+    detail: string | null
+    tariffCents: number | null
+    priceCents: number | null
+    discountCents: number | null
+    promotionName: string | null
+    billingMode: string
+    sessionsPlanned: number | null
+    decision: string
+  }>
+  subtotalCents: number | null
+  discountCents: number | null
+  totalCents: number | null
+  paymentNote: string
+  fiscalNote: string
+}
+
+export function fetchBudgetPrint(
+  patientId: string,
+  budgetId: string,
+): Promise<{ data: BudgetPrintPayload }> {
+  return apiFetch<{ data: BudgetPrintPayload }>(`${budgetsBase(patientId)}/${budgetId}/print`)
+}
+
+/** Documento PDF del servidor (mismo que se envía al paciente). */
+export function budgetPdfUrl(patientId: string, budgetId: string): string {
+  return `/api/patients/${patientId}/financial-document-pdf?documentType=budget&documentId=${budgetId}`
 }
 
 export interface DecideBudgetBody {

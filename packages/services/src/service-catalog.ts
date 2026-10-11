@@ -88,13 +88,29 @@ function assertSpecialty(specialty: string | null | undefined): TreatmentSpecial
   return value as TreatmentSpecialty
 }
 
-function assertScope(scope: string | null | undefined): TreatmentScope {
-  const value = (scope ?? "").trim().toLowerCase()
-  if (!(TREATMENT_SCOPES as readonly string[]).includes(value)) {
-    throw validation("scope inválido: general|tooth|surfaces|quadrant|arch")
+export const BILLING_MODES = ["treatment", "session"] as const
+export type BillingMode = (typeof BILLING_MODES)[number]
+
+/**
+ * Cómo se cobra la oferta: 'treatment' una vez por tratamiento, 'session' el
+ * precio en cada visita atendida. Lo que está en curso usa el snapshot
+ * congelado; cambiar el modo solo afecta lo nuevo.
+ */
+export function assertBillingMode(mode: string | null | undefined): BillingMode {
+  const value = (mode ?? "treatment").trim().toLowerCase()
+  if (value !== "treatment" && value !== "session") {
+    throw validation("billingMode inválido: treatment|session")
   }
-  return value as TreatmentScope
+  return value
 }
+
+function assertScope(scope: string | null | undefined): TreatmentScope {
+   const value = (scope ?? "").trim().toLowerCase()
+   if (!(TREATMENT_SCOPES as readonly string[]).includes(value)) {
+     throw validation("scope inválido: general|tooth|surfaces|quadrant|arch")
+   }
+   return value as TreatmentScope
+ }
 
 /**
  * Toda oferta tiene tarifa explícita: 0 = incluido sin costo. Nunca null.
@@ -440,6 +456,7 @@ export interface CreateServiceInput {
   priceCents?: number | null
   currency?: string | null
   durationMin?: number | null
+  billingMode?: string | null
   isActive?: boolean
 }
 
@@ -476,6 +493,7 @@ export async function createService(
       priceCents: assertPrice(input.priceCents),
       currency: assertCurrency(input.currency, currencyDefault),
       durationMin: assertDuration(input.durationMin),
+      billingMode: assertBillingMode(input.billingMode),
       isActive: input.isActive ?? true,
     }
   } else {
@@ -490,6 +508,7 @@ export async function createService(
       priceCents: assertPrice(input.priceCents),
       currency: assertCurrency(input.currency, currencyDefault),
       durationMin: assertDuration(input.durationMin),
+      billingMode: assertBillingMode(input.billingMode),
       isActive: input.isActive ?? true,
     }
   }
@@ -521,6 +540,7 @@ export interface UpdateServicePatch {
   priceCents?: number | null
   currency?: string
   durationMin?: number | null
+  billingMode?: string
   isActive?: boolean
 }
 
@@ -601,6 +621,10 @@ export async function updateService(
     set.durationMin = assertDuration(patch.durationMin)
     fields.push("durationMin")
   }
+  if (patch.billingMode !== undefined) {
+    set.billingMode = assertBillingMode(patch.billingMode)
+    fields.push("billingMode")
+  }
   if (patch.isActive !== undefined) {
     set.isActive = patch.isActive
     fields.push("isActive")
@@ -644,34 +668,45 @@ export interface FromTemplatesResult {
   existing: ServiceRow[]
 }
 
+export interface FromTemplateItem {
+  templateId: string
+  /** Tarifa explícita en unidad menor; 0 = incluido sin costo. Nunca null. */
+  priceCents: number
+  billingMode?: string | null
+  durationMin?: number | null
+}
+
 /**
- * Incorpora ofertas base desde la biblioteca: crea solo las faltantes con
- * tarifa cero e inactivas hasta su revisión, sin pisar variantes ni precios existentes.
+ * Carga rápida del tarifario en una pantalla: se eligen prestaciones de la
+ * biblioteca con su precio y quedan activas en el mismo acto. Sin alta
+ * diferida: no se crean ofertas inactivas con tarifa 0.
  * Serializa en la fila de organización para evitar duplicados concurrentes.
  */
 export async function fromTemplates(
   tx: Db,
   orgId: string,
   actorUserId: string,
-  templateIds: string[],
+  items: FromTemplateItem[],
 ): Promise<FromTemplatesResult> {
-  if (!Array.isArray(templateIds) || templateIds.length < 1 || templateIds.length > 100) {
-    throw validation("templateIds debe tener entre 1 y 100 identificadores")
+  if (!Array.isArray(items) || items.length < 1 || items.length > 100) {
+    throw validation("items debe tener entre 1 y 100 prestaciones con su tarifa")
   }
-  if (new Set(templateIds).size !== templateIds.length) {
-    throw validation("templateIds no debe repetirse")
+  const ids = items.map((item) => item.templateId)
+  if (new Set(ids).size !== ids.length) {
+    throw validation("templateId no debe repetirse")
   }
   await tx.execute(sql`select "id" from "organization" where "id" = ${orgId} for update`)
   const templates = await tx
     .select()
     .from(treatmentTemplate)
-    .where(inArray(treatmentTemplate.id, templateIds))
-  if (templates.length !== templateIds.length) throw notFound("Prestación de la biblioteca")
+    .where(inArray(treatmentTemplate.id, ids))
+  if (templates.length !== ids.length) throw notFound("Prestación de la biblioteca")
   for (const tpl of templates) {
     if (!tpl.isActive)
       throw conflict("TEMPLATE_INACTIVE", "La prestación de la biblioteca ya no está vigente")
     await resolveSingleTemplateCoding(tx, tpl.id)
   }
+  const byId = new Map(templates.map((tpl) => [tpl.id, tpl]))
   const owned = await tx
     .select()
     .from(serviceCatalog)
@@ -679,14 +714,16 @@ export async function fromTemplates(
       and(
         eq(serviceCatalog.organizationId, orgId),
         eq(serviceCatalog.source, "template"),
-        inArray(serviceCatalog.templateId, templateIds),
+        inArray(serviceCatalog.templateId, ids),
       ),
     )
   const ownedIds = new Set(owned.map((row) => row.templateId))
   const currencyDefault = await orgCurrency(tx, orgId)
-  const missing = templates.filter((tpl) => !ownedIds.has(tpl.id))
   const created: ServiceRow[] = []
-  for (const tpl of missing) {
+  for (const item of items) {
+    if (ownedIds.has(item.templateId)) continue
+    const tpl = byId.get(item.templateId)
+    if (!tpl) throw notFound("Prestación de la biblioteca")
     const [row] = await tx
       .insert(serviceCatalog)
       .values({
@@ -697,11 +734,11 @@ export async function fromTemplates(
         name: tpl.name,
         specialty: tpl.specialty,
         scope: tpl.scope,
-        // Nace inactiva con tarifa 0: pendiente de tarifa real antes de indicarse.
-        priceCents: 0,
+        priceCents: assertPrice(item.priceCents),
         currency: currencyDefault,
-        durationMin: null,
-        isActive: false,
+        durationMin: assertDuration(item.durationMin),
+        billingMode: assertBillingMode(item.billingMode),
+        isActive: true,
       })
       .returning()
     if (!row) throw new Error("No se pudo incorporar la prestación")
@@ -710,9 +747,63 @@ export async function fromTemplates(
       source: "template",
       templateId: tpl.id,
       fromLibrary: true,
+      priceCents: row.priceCents,
+      billingMode: row.billingMode,
     })
   }
   return { created, existing: owned }
+}
+
+export interface MostUsedService {
+  service: ServiceRow
+  indications: number
+}
+
+/**
+ * Punto de partida para una clínica nueva: las ofertas activas más indicadas,
+ * agrupadas por concepto de uso real (treatment_plan_item), no por el código
+ * de un país. `specialty` opcional filtra el concepto (consulta, profilaxis…).
+ */
+export async function listMostUsedServices(
+  tx: Db,
+  orgId: string,
+  options: { specialty?: string; limit?: number } = {},
+): Promise<MostUsedService[]> {
+  const limit = options.limit ?? 8
+  if (!Number.isInteger(limit) || limit < 1 || limit > 50) {
+    throw validation("limit debe ser un entero entre 1 y 50")
+  }
+  const specialty = options.specialty?.trim() ? assertSpecialty(options.specialty) : null
+  const rows = await tx.execute<{ id: string; indications: number }>(sql`
+    select sc."id" as "id", count(tpi."id")::int as "indications"
+    from "service_catalog" sc
+    left join "treatment_plan_item" tpi
+      on tpi."service_id" = sc."id" and tpi."organization_id" = sc."organization_id"
+    where sc."organization_id" = ${orgId}
+      and sc."is_active" = true and sc."source" <> 'legacy'
+      ${specialty ? sql`and sc."specialty" = ${specialty}` : sql``}
+    group by sc."id"
+    order by count(tpi."id") desc, sc."name" asc, sc."id" asc
+    limit ${limit}`)
+  const services = await tx
+    .select()
+    .from(serviceCatalog)
+    .where(
+      and(
+        eq(serviceCatalog.organizationId, orgId),
+        inArray(
+          serviceCatalog.id,
+          rows.map((row) => row.id),
+        ),
+      ),
+    )
+  const byId = new Map(services.map((service) => [service.id, service]))
+  const ordered: MostUsedService[] = []
+  for (const row of rows) {
+    const service = byId.get(row.id)
+    if (service) ordered.push({ service, indications: row.indications })
+  }
+  return ordered
 }
 
 

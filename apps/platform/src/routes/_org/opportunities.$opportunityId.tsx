@@ -23,6 +23,7 @@ import {
   usePermission,
 } from "../../lib/crm"
 import { useOrgEvents } from "../../lib/org-events"
+import { useOrgProfile } from "../../lib/org"
 import { formatMoney } from "./pipeline"
 export const Route = createFileRoute("/_org/opportunities/$opportunityId")({
   component: OpportunityDetailPage,
@@ -42,6 +43,9 @@ function OpportunityDetailPage() {
   const queryClient = useQueryClient()
   const members = useOrgMembers()
   const canWrite = usePermission("crm.write")
+  // Formato de la clínica para el importe histórico (moneda congelada del registro).
+  const profile = useOrgProfile()
+  const orgLocale = profile.data?.locale
   const [closeOpen, setCloseOpen] = useState<"won" | "lost" | null>(null)
   const [editOpen, setEditOpen] = useState(false)
 
@@ -151,7 +155,7 @@ function OpportunityDetailPage() {
     )
   }
 
-  const money = formatMoney(detail.amountCents, detail.currency)
+  const money = formatMoney(detail.amountCents, detail.currency, orgLocale)
   const isOpen = detail.status === "open"
 
   return (
@@ -282,7 +286,7 @@ function OpportunityDetailPage() {
             </div>
             <div className="flex gap-2">
               <dt className="w-28 shrink-0 text-muted-foreground">Valor</dt>
-              <dd>{money ?? "—"}</dd>
+              <dd>{money ?? (profile.isPending ? "…" : "—")}</dd>
             </div>
             <div className="flex gap-2">
               <dt className="w-28 shrink-0 text-muted-foreground">Asignado</dt>

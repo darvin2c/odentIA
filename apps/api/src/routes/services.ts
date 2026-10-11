@@ -3,6 +3,7 @@ import {
   createService,
   fromTemplates,
   getTemplate,
+  listMostUsedServices,
   listServices,
   listTemplates,
   updateService,
@@ -48,6 +49,7 @@ const createInput = z
       .regex(/^[A-Z]{3}$/)
       .nullish(),
     durationMin: z.number().int().min(1).max(1440).nullish(),
+    billingMode: z.enum(["treatment", "session"]).nullish(),
     isActive: z.boolean().optional(),
   })
   .strict()
@@ -65,12 +67,27 @@ const patchInput = z
       .regex(/^[A-Z]{3}$/)
       .optional(),
     durationMin: z.number().int().min(1).max(1440).nullish(),
+    billingMode: z.enum(["treatment", "session"]).optional(),
     isActive: z.boolean().optional(),
   })
   .strict()
 
 const fromTemplatesInput = z
-  .object({ templateIds: z.array(z.string().uuid()).min(1).max(100) })
+  .object({
+    items: z
+      .array(
+        z
+          .object({
+            templateId: z.string().uuid(),
+            priceCents: z.number().int().min(0).max(2147483647),
+            billingMode: z.enum(["treatment", "session"]).nullish(),
+            durationMin: z.number().int().min(1).max(1440).nullish(),
+          })
+          .strict(),
+      )
+      .min(1)
+      .max(100),
+  })
   .strict()
 
 export function createServicesRoute(deps: CrmDeps) {
@@ -78,12 +95,7 @@ export function createServicesRoute(deps: CrmDeps) {
 
   app.get("/", async (c) => {
     const { orgId, memberRole } = orgContextOf(c)
-    if (
-      !canAccess(memberRole, "clinical.read") &&
-      !canAccess(memberRole, "appointments.read") &&
-      !canAccess(memberRole, "settings.read") &&
-      !canAccess(memberRole, "finance.read")
-    ) {
+    if (!canAccess(memberRole, "catalog.read")) {
       return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para ver el tarifario"), 403)
     }
     const parsed = offersQuery.safeParse(c.req.query())
@@ -104,14 +116,35 @@ export function createServicesRoute(deps: CrmDeps) {
     }
   })
 
+  app.get("/most-used", async (c) => {
+    const { orgId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "catalog.read")) {
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para ver el tarifario"), 403)
+    }
+    const parsed = z
+      .object({
+        specialty: z.string().max(40).optional(),
+        limit: z.coerce.number().int().min(1).max(50).optional(),
+      })
+      .strict()
+      .safeParse(c.req.query())
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    try {
+      const data = await withOrgContext(deps.db, orgId, (tx) =>
+        listMostUsedServices(tx, orgId, {
+          specialty: parsed.data.specialty,
+          limit: parsed.data.limit,
+        }),
+      )
+      return c.json({ data })
+    } catch (e) {
+      return serviceErrorResponse(c, e) ?? Promise.reject(e)
+    }
+  })
+
   app.get("/templates", async (c) => {
     const { orgId, memberRole } = orgContextOf(c)
-    if (
-      !canAccess(memberRole, "clinical.read") &&
-      !canAccess(memberRole, "appointments.read") &&
-      !canAccess(memberRole, "settings.read") &&
-      !canAccess(memberRole, "finance.read")
-    ) {
+    if (!canAccess(memberRole, "catalog.read")) {
       return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para ver el tarifario"), 403)
     }
     const parsed = templatesQuery.safeParse(c.req.query())
@@ -133,12 +166,7 @@ export function createServicesRoute(deps: CrmDeps) {
 
   app.get("/templates/:id", async (c) => {
     const { orgId, memberRole } = orgContextOf(c)
-    if (
-      !canAccess(memberRole, "clinical.read") &&
-      !canAccess(memberRole, "appointments.read") &&
-      !canAccess(memberRole, "settings.read") &&
-      !canAccess(memberRole, "finance.read")
-    ) {
+    if (!canAccess(memberRole, "catalog.read")) {
       return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para ver el tarifario"), 403)
     }
     try {
@@ -161,7 +189,7 @@ export function createServicesRoute(deps: CrmDeps) {
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 201, () =>
       withOrgContext(deps.db, orgId, (tx) =>
-        fromTemplates(tx, orgId, userId, parsed.data.templateIds),
+        fromTemplates(tx, orgId, userId, parsed.data.items),
       ),
     )
   })
@@ -184,6 +212,7 @@ export function createServicesRoute(deps: CrmDeps) {
           priceCents: parsed.data.priceCents,
           currency: parsed.data.currency,
           durationMin: parsed.data.durationMin,
+          billingMode: parsed.data.billingMode,
           isActive: parsed.data.isActive,
         }),
       ),
@@ -208,6 +237,7 @@ export function createServicesRoute(deps: CrmDeps) {
           priceCents: parsed.data.priceCents,
           currency: parsed.data.currency,
           durationMin: parsed.data.durationMin,
+          billingMode: parsed.data.billingMode,
           isActive: parsed.data.isActive,
         }),
       ),

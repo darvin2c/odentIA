@@ -1,170 +1,230 @@
 /**
- * Finanzas comportamental: caja de un solo turno por sede/moneda, cada cobro
- * entra una sola vez, el arqueo cuenta solo efectivo, las cuotas se
- * actualizan solas al aplicar/anular y una fuente no se comisiona dos veces.
- * (Escrito sin ejecutar: lo corre la verificación conjunta del padre.)
+ * Caja automática: se crea al cobrar, el arqueo cuenta solo efectivo, el
+ * cierre congela hoja inmutable con diferencia notificada, gastos con salida
+ * de caja, deudas por sede y resumen sin contar la apertura como ingreso.
+ * (Escrito sin ejecutar: lo corre la verificación conjunta del integrador.)
  */
 import { randomUUID } from "node:crypto"
-import { member } from "@odentia/db/schema/auth"
+import type { Db } from "@odentia/db"
 import { branch } from "@odentia/db/schema/org"
+import { member, user } from "@odentia/db/schema/auth"
 import { expect, it } from "vitest"
 import { clinicalFixture } from "./clinical-test-fixture.js"
 import {
-  closeShift,
-  createInstallmentPlan,
-  getShiftDetail,
-  listInstallmentPlans,
-  openShift,
-  registerPaymentInShift,
-  settleCommissions,
-  upsertCommissionRule,
+  closeCashWindow,
+  createExpense,
+  getCashState,
+  getDayMovements,
+  getDebts,
+  getFinanceOverview,
+  listExpenses,
 } from "./finance.js"
-import { applyPayment, createCharge, createPayment, voidPaymentApplication } from "./payments.js"
-import { ownerDb } from "./test-setup.js"
-import { setupTestDb } from "./test-setup.js"
+import { collectCharge, createCharge } from "./payments.js"
+import { createPaymentMethod } from "./payment-methods.js"
+import { ownerDb, setupTestDb } from "./test-setup.js"
 setupTestDb()
 
-async function seedBranch(): Promise<string> {
-  const [row] = await ownerDb
+interface Fixture {
+  actor: string
+  patient: { id: string }
+  run: <T>(fn: (tx: Db) => Promise<T>) => Promise<T>
+}
+
+async function seedCashbox(f: Fixture) {
+  const [branchRow] = await ownerDb
     .insert(branch)
     .values({ organizationId: "org_a", name: `Sede caja ${randomUUID()}` })
     .returning()
-  return row.id
+  const cash = await f.run((tx) =>
+    createPaymentMethod(tx, "org_a", f.actor, { name: "Efectivo", typeCode: "10" }),
+  )
+  const card = await f.run((tx) =>
+    createPaymentMethod(tx, "org_a", f.actor, { name: "Tarjeta", typeCode: "48" }),
+  )
+  return { branchId: branchRow.id, cash, card }
 }
 
-it("caja integra cada cobro una sola vez y el arqueo cuenta solo efectivo", async () => {
+it("la caja se crea al cobrar y el arqueo cuenta solo efectivo", async () => {
   const f = await clinicalFixture()
-  const branchId = await seedBranch()
-  const shift = await f.run((tx) =>
-    openShift(tx, "org_a", f.actor, { branchId, currency: "PEN", openingCents: 50000 }),
-  )
-  await expect(
-    f.run((tx) => openShift(tx, "org_a", f.actor, { branchId, currency: "PEN" })),
-  ).rejects.toMatchObject({ code: "SHIFT_ALREADY_OPEN" })
-
-  const charge = await f.run((tx) =>
-    createCharge(tx, ...f.args, {
-      description: "Obturación caja",
-      amountCents: 30000,
-      currency: "PEN",
-    }),
-  )
-  const cash = await f.run((tx) =>
-    createPayment(tx, ...f.args, {
-      amountCents: 30000,
-      currency: "PEN",
-      paidAt: "2026-02-10T12:00:00Z",
-      method: "efectivo",
-      shiftId: shift.id,
-    }),
-  )
-  await expect(
-    f.run((tx) => registerPaymentInShift(tx, "org_a", f.actor, shift.id, cash.id)),
-  ).rejects.toMatchObject({ code: "PAYMENT_ALREADY_IN_SHIFT" })
-
+  const { branchId, cash, card } = await seedCashbox(f)
   await f.run((tx) =>
-    createPayment(tx, ...f.args, {
-      amountCents: 10000,
-      currency: "PEN",
-      paidAt: "2026-02-10T13:00:00Z",
-      method: "transferencia",
-      shiftId: shift.id,
+    createCharge(tx, ...f.args, { description: "Obturación", amountCents: 30000, currency: "PEN" }),
+  )
+  await f.run((tx) =>
+    collectCharge(tx, ...f.args, {
+      branchId,
+      payments: [
+        { paymentMethodId: cash.id, amountCents: 30000 },
+        { paymentMethodId: card.id, amountCents: 10000, reference: "OP-7" },
+      ],
+      requestId: randomUUID(),
     }),
   )
-  const detail = await f.run((tx) => getShiftDetail(tx, "org_a", shift.id))
-  expect(detail.esperadoCents).toBe(80000)
-  expect(detail.electronicosCents).toBe(10000)
-
+  const state = await f.run((tx) => getCashState(tx, "org_a", { branchId }))
+  expect(state.cashOnHandCents).toBe(30000)
+  expect(state.byMethod).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ name: "Efectivo", amountCents: 30000 }),
+      expect.objectContaining({ name: "Tarjeta", amountCents: 10000 }),
+    ]),
+  )
   const closed = await f.run((tx) =>
-    closeShift(tx, "org_a", f.actor, shift.id, { countedCents: 80000 }),
+    closeCashWindow(tx, "org_a", f.actor, {
+      branchId,
+      countedCents: 30000,
+      retainedCents: 5000,
+      deliveredCents: 25000,
+    }),
   )
   expect(closed.differenceCents).toBe(0)
-  const replay = await f.run((tx) =>
-    closeShift(tx, "org_a", f.actor, shift.id, { countedCents: 0 }),
-  )
-  expect(replay.id).toBe(shift.id)
-  expect(replay.status).toBe("cerrada")
-  expect(replay.countedCents).toBe(80000)
-  void charge
+  expect(closed.retainedCents).toBe(5000)
+  // La ventana siguiente abre sola con lo que quedó.
+  const next = await f.run((tx) => getCashState(tx, "org_a", { branchId }))
+  expect(next.cashOnHandCents).toBe(5000)
 })
 
-it("las cuotas se actualizan solas y una fuente no se comisiona dos veces", async () => {
+it("el gasto con salida de caja descuenta el contado y el directo no", async () => {
   const f = await clinicalFixture()
-  // Fechas relativas a hoy: el periodo siempre contiene la aplicación y el
-  // primer vencimiento siempre es futuro (pendiente estable tras anular).
-  const day = (offset: number): string =>
-    new Date(Date.now() + offset * 86_400_000).toISOString().slice(0, 10)
-  const from = day(-60)
-  const to = day(60)
-  const firstDueAt = day(30)
-  const charge = await f.run((tx) =>
-    createCharge(tx, ...f.args, {
-      description: "Corona cuotas",
-      amountCents: 30000,
-      currency: "PEN",
+  const { branchId, cash } = await seedCashbox(f)
+  await f.run((tx) =>
+    createCharge(tx, ...f.args, { description: "Consulta", amountCents: 20000, currency: "PEN", branchId }),
+  )
+  await f.run((tx) =>
+    collectCharge(tx, ...f.args, {
+      branchId,
+      payments: [{ paymentMethodId: cash.id, amountCents: 20000 }],
+      requestId: randomUUID(),
     }),
   )
   await f.run((tx) =>
-    createInstallmentPlan(tx, ...f.args, {
-      chargeId: charge.id,
-      installments: 3,
-      firstDueAt,
+    createExpense(tx, "org_a", f.actor, {
+      branchId,
+      category: "Materiales",
+      concept: "Guantes y mascarillas",
+      amountCents: 8550,
+      fromCash: true,
     }),
   )
-  const payment = await f.run((tx) =>
-    createPayment(tx, ...f.args, {
-      amountCents: 10000,
-      currency: "PEN",
-      paidAt: "2026-03-05T12:00:00Z",
-      method: "efectivo",
+  await f.run((tx) =>
+    createExpense(tx, "org_a", f.actor, {
+      branchId,
+      category: "Alquiler",
+      concept: "Alquiler del local",
+      amountCents: 350000,
     }),
   )
-  const application = await f.run((tx) =>
-    applyPayment(tx, ...f.args, payment.id, { chargeId: charge.id, amountCents: 10000 }),
+  const state = await f.run((tx) => getCashState(tx, "org_a", { branchId }))
+  expect(state.cashOnHandCents).toBe(11450)
+  const materials = await f.run((tx) =>
+    listExpenses(tx, "org_a", { branchId, category: "Materiales" }),
   )
-  const advanced = await f.run((tx) => listInstallmentPlans(tx, "org_a", { patientId: f.patient.id }))
-  const quotas = advanced.find((p) => p.plan.chargeId === charge.id)?.quotas ?? []
-  expect(quotas[0]?.status).toBe("pagada")
-  await f.run((tx) => voidPaymentApplication(tx, ...f.args, application.id, { reason: "Prueba" }))
-  const reverted = await f.run((tx) => listInstallmentPlans(tx, "org_a", { patientId: f.patient.id }))
-  expect(reverted.find((p) => p.plan.chargeId === charge.id)?.quotas[0]?.status).toBe("pendiente")
+  expect(materials).toHaveLength(1)
+})
 
+it("las deudas agrupan por persona y el resumen no cuenta la apertura", async () => {
+  const f = await clinicalFixture()
+  const { branchId, cash } = await seedCashbox(f)
+  await f.run((tx) =>
+    createCharge(tx, ...f.args, { description: "Endodoncia", amountCents: 60000, currency: "PEN", branchId }),
+  )
+  const debts = await f.run((tx) => getDebts(tx, "org_a", { branchId }))
+  expect(debts).toHaveLength(1)
+  expect(debts[0]).toMatchObject({ totalCents: 60000, chargesCount: 1, currency: "PEN" })
+  await f.run((tx) =>
+    collectCharge(tx, ...f.args, {
+      branchId,
+      payments: [{ paymentMethodId: cash.id, amountCents: 60000 }],
+      requestId: randomUUID(),
+    }),
+  )
+  await f.run((tx) =>
+    closeCashWindow(tx, "org_a", f.actor, {
+      branchId,
+      countedCents: 60000,
+      retainedCents: 60000,
+      deliveredCents: 0,
+    }),
+  )
+  const overview = await f.run((tx) => getFinanceOverview(tx, "org_a", { branchId }))
+  const pen = overview.byCurrency.find((c) => c.currency === "PEN")
+  // 60000 cobrados una sola vez: la apertura de la ventana nueva (60000 que
+  // quedaron) no suma como ingreso nuevo.
+  expect(pen?.ingresosCents).toBe(60000)
+  const today = new Date().toISOString().slice(0, 10)
+  const movements = await f.run((tx) =>
+    getDayMovements(tx, "org_a", { branchId, day: today }),
+  )
+  expect(movements.movements.length).toBeGreaterThan(0)
+})
+
+it("la diferencia del cierre avisa a administración", async () => {
+  const f = await clinicalFixture()
+  const { branchId, cash } = await seedCashbox(f)
+  const adminId = randomUUID()
+  await ownerDb.insert(user).values({ id: adminId, name: "Admin", email: `${adminId}@example.test` })
   await ownerDb.insert(member).values({
     id: randomUUID(),
     organizationId: "org_a",
-    userId: f.actor,
-    role: "dentist",
+    userId: adminId,
+    role: "admin",
     createdAt: new Date(),
   })
   await f.run((tx) =>
-    upsertCommissionRule(tx, "org_a", f.actor, {
-      professionalUserId: f.actor,
-      base: "cobrado",
-      rateBps: 1000,
-    }),
+    createCharge(tx, ...f.args, { description: "Control", amountCents: 15000, currency: "PEN" }),
   )
   await f.run((tx) =>
-    applyPayment(tx, ...f.args, payment.id, { chargeId: charge.id, amountCents: 10000 }),
-  )
-  const settled = await f.run((tx) =>
-    settleCommissions(tx, "org_a", f.actor, {
-      professionalUserId: f.actor,
-      base: "cobrado",
-      from,
-      to,
-      currency: "PEN",
+    collectCharge(tx, ...f.args, {
+      branchId,
+      payments: [{ paymentMethodId: cash.id, amountCents: 15000 }],
+      requestId: randomUUID(),
     }),
   )
-  expect(settled.commissionCents).toBe(1000)
+  const closed = await f.run((tx) =>
+    closeCashWindow(tx, "org_a", f.actor, {
+      branchId,
+      countedCents: 14500,
+      retainedCents: 4500,
+      deliveredCents: 10000,
+    }),
+  )
+  expect(closed.differenceCents).toBe(-500)
+})
+
+it("el egreso nunca deja la caja en negativo", async () => {
+  const f = await clinicalFixture()
+  const { branchId, cash } = await seedCashbox(f)
+  await f.run((tx) =>
+    createCharge(tx, ...f.args, { description: "Apertura", amountCents: 5000, currency: "PEN" }),
+  )
+  await f.run((tx) =>
+    collectCharge(tx, ...f.args, {
+      branchId,
+      payments: [{ paymentMethodId: cash.id, amountCents: 5000 }],
+      requestId: randomUUID(),
+    }),
+  )
+  // Gasto de 8550 con 5000 en caja se rechaza.
   await expect(
     f.run((tx) =>
-      settleCommissions(tx, "org_a", f.actor, {
-        professionalUserId: f.actor,
-        base: "cobrado",
-        from,
-        to,
-        currency: "PEN",
+      createExpense(tx, "org_a", f.actor, {
+        branchId,
+        category: "Materiales",
+        concept: "Guantes",
+        amountCents: 8550,
+        fromCash: true,
       }),
     ),
-  ).rejects.toMatchObject({ code: "SETTLEMENT_EMPTY" })
+  ).rejects.toMatchObject({ code: "INSUFFICIENT_CASH" })
+  // El gasto exacto sí pasa y deja la caja en cero.
+  await f.run((tx) =>
+    createExpense(tx, "org_a", f.actor, {
+      branchId,
+      category: "Materiales",
+      concept: "Guantes",
+      amountCents: 5000,
+      fromCash: true,
+    }),
+  )
+  const state = await f.run((tx) => getCashState(tx, "org_a", { branchId }))
+  expect(state.cashOnHandCents).toBe(0)
 })

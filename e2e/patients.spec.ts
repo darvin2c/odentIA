@@ -103,13 +103,9 @@ test("paciente: responsabilidad y decisión de la propuesta", async ({ owner }) 
     page,
     tenant(owner.org.slug, `${patientPath}?tab=plan&planId=${ids.planId}&budgetId=${budgetId}`),
   )
-  const presentar = page.getByRole("button", { name: "Presentar", exact: true })
-  await expect(presentar).toBeEnabled()
-  await presentar.click()
-  await page
-    .getByRole("alertdialog")
-    .getByRole("button", { name: "Presentar", exact: true })
-    .click()
+  const entregar = page.getByRole("button", { name: "Imprimir y entregar", exact: true })
+  await expect(entregar).toBeEnabled()
+  await entregar.click()
   await expect(
     page
       .locator("span")
@@ -167,50 +163,31 @@ test("paciente: responsabilidad y decisión de la propuesta", async ({ owner }) 
   await expect(recommended).toBeChecked()
 })
 
-test("paciente: cuenta con cargo, pago y aplicación", async ({ owner }) => {
+test("paciente: cuenta con cargo, cobro parcial y ticket", async ({ owner }) => {
   const ids = await buildClinicalBase(owner)
-  const { budgetId } = await createAcceptedBudget(owner, ids)
+  const { budgetLineId } = await createAcceptedBudget(owner, ids)
   const { page } = owner
   const patientPath = `/patients/${ids.patientId}`
+  const apiPath = patientApiPath(ids.patientId)
 
-  // Cargo explícito desde la línea aceptada: aceptar no cobra por sí solo.
-  await gotoHydrated(
-    page,
-    tenant(owner.org.slug, `${patientPath}?tab=plan&planId=${ids.planId}&budgetId=${budgetId}`),
-  )
-  const generarCargo = page.getByRole("button", { name: "Generar cargo", exact: true }).first()
-  await expect(generarCargo).toBeEnabled()
-  await generarCargo.click()
-  const charge = surface(page, { name: /Generar cargo/ })
-  await charge.getByRole("button", { name: "Generar cargo", exact: true }).click()
+  // Aceptar no cobra por sí solo: el cargo nace de la línea aceptada.
+  await call(page, "POST", `${apiPath}/charges`, owner.org.slug, {
+    budgetItemId: budgetLineId,
+  }, 201)
 
-  // Pago y aplicación desde la ficha.
-  await openSection(page, "Tratamientos")
-  await expect(
-    page
-      .locator("span")
-      .filter({ hasText: /^Aceptado$/ })
-      .first(),
-  ).toBeVisible()
-  await openSection(page, "Cuenta")
+  // Cobro parcial en un paso: el resto queda por cobrar, sin aplicar a mano.
+  await gotoHydrated(page, tenant(owner.org.slug, `${patientPath}?tab=cuenta`))
   await expect(page.getByText("POR COBRAR").first()).toBeVisible()
-  await page.getByRole("button", { name: "Registrar pago o anticipo" }).click()
-  const payment = surface(page, { name: "Registrar pago o anticipo" })
-  await payment.getByLabel("Importe", { exact: true }).fill("200")
-  await chooseOption(payment.getByLabel("Quién paga", { exact: true }), ids.contactId)
-  await payment.getByRole("button", { name: "Registrar pago" }).click()
-  // Cargos y pagos usan la tabla común: se leen por su sección.
-  const chargesTable = page.getByRole("table").first()
-  const paymentsTable = page.getByRole("table").nth(1)
-  await expect(paymentsTable).toContainText("S/ 200.00")
-  await page.getByRole("button", { name: "Aplicar a un cargo" }).first().click()
-  const apply = surface(page, { name: "Aplicar pago a un cargo" })
-  await apply.getByLabel("Importe a aplicar", { exact: true }).fill("150")
-  await apply.getByRole("button", { name: "Aplicar", exact: true }).click()
-  await expect(chargesTable).toContainText("S/ 150.00")
-  await expect(chargesTable).toContainText("S/ 300.00")
-  await expect(paymentsTable).toContainText("S/ 50.00")
-  await expect(paymentsTable).toContainText("S/ 150.00 a")
+  await page.getByRole("button", { name: /Cobrar S\/\s*450\.00/ }).click()
+  const drawer = surface(page, { name: /Cobrar ·/ })
+  await drawer.getByLabel("Importe", { exact: true }).fill("200")
+  await drawer.getByLabel("Efectivo recibido").fill("200")
+  await drawer.getByRole("button", { name: /Cobrar S\/\s*200\.00/ }).click()
+  await expect(page.getByText(/TICKET N.º/)).toBeVisible()
+  await gotoHydrated(page, tenant(owner.org.slug, `${patientPath}?tab=cuenta`))
+  await expect(page.getByText("POR COBRAR").first()).toBeVisible()
+  await expect(page.getByText(/200\.00/).first()).toBeVisible()
+  await expect(page.getByText(/250\.00/).first()).toBeVisible()
 })
 
 test("paciente: receta vinculada al tratamiento y anulación", async ({ owner }) => {
@@ -339,6 +316,10 @@ test("paciente: ejecución de la sesión y cierre del tratamiento", async ({ own
   const firma = page.getByRole("alertdialog")
   await expect(firma.getByText(/COP 12345/)).toBeVisible()
   await firma.getByRole("button", { name: "Finalizar y firmar", exact: true }).click()
+  // El diálogo dice qué quedó por cobrar; al confirmarlo llega el relevo.
+  const dialogo = page.getByRole("dialog", { name: "Atención finalizada" })
+  await expect(dialogo.getByText("Quedó por cobrar")).toBeVisible()
+  await dialogo.getByRole("button", { name: "Listo", exact: true }).click()
   // Al finalizar se permanece en la atención, con su cierre y relevo a la vista.
   await expect(page).toHaveURL(/\/encounters\//)
   await expect(page.getByRole("heading", { name: "Cierre y relevo" })).toBeVisible()
@@ -481,7 +462,7 @@ for (const role of ["reception", "dentist", "cashier"] as const) {
     }
     if (role === "cashier") {
       await expect(areas).toHaveText(["Resumen", "Cuenta", "Datos"])
-      await expect(page.getByRole("button", { name: "Registrar pago o anticipo" })).toBeVisible()
+      await expect(page.getByRole("button", { name: /Cobrar S\// })).toBeVisible()
       await expect(allergy).toHaveCount(0)
       expect(health.status).toBe(403)
       expect(account.status).toBe(200)

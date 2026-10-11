@@ -1,46 +1,37 @@
 /**
- * Finanzas: caja por sede/turno, gastos y proveedores, cuentas por cobrar con
- * planes de cuotas, comisiones y resúmenes. Lectura con `finance.read`,
- * escritura con `finance.write` (owner/admin/cashier según matriz de Roles).
+ * Finanzas: caja automática por sede y moneda, gastos cortos, deudas y
+ * cierres inmutables. Lectura con `finance.read`, escritura con
+ * `finance.write`, cierre con `finance.close` (cashier+admin). Comisiones y
+ * resultado del mes viven en `routes/commissions.ts` (`/api/commissions`).
  *
  * Sin emisor fiscal ni pasarela: no hay endpoints de emisión de comprobantes
  * ni de cobro online.
  */
 import { withOrgContext } from "@odentia/db"
 import { Hono } from "hono"
+import type { Context } from "hono"
 import { z } from "zod"
 import { canAccess, orgContextOf } from "../lib/context.js"
 import { errorBody } from "../lib/error.js"
 import { type CrmDeps, runService, validationError } from "./helpers.js"
 import {
   addShiftMovement,
-  closeShift,
+  closeCashWindow,
   createExpense,
-  createInstallmentPlan,
-  createSupplier,
+  getCashState,
+  getClosureSheet,
+  getDayMovements,
+  getDebts,
   getFinanceOverview,
   getPatientBalanceForPortal,
   getReceivables,
-  getSettlementDetail,
   getShiftDetail,
-  listCommissionRules,
+  listClosures,
   listExpenses,
-  listInstallmentPlans,
-  listSettlements,
   listShifts,
-  listSuppliers,
-  openShift,
-  previewCommissions,
-  refreshInstallmentPlan,
-  registerPaymentInShift,
-  settleCommissions,
-  upsertCommissionRule,
   voidExpense,
-  voidInstallmentPlan,
   voidMovement,
-  voidSettlement,
 } from "@odentia/services"
-import type { Context } from "hono"
 
 function forbid(c: Context) {
   return c.json(errorBody(c, "FORBIDDEN", "No tienes acceso a finanzas"), 403)
@@ -74,24 +65,6 @@ export function createFinanceRoute(deps: Pick<CrmDeps, "db">) {
     )
   })
 
-  app.post("/shifts", async (c) => {
-    const { orgId, userId, memberRole } = orgContextOf(c)
-    if (!canAccess(memberRole, "finance.write")) return forbid(c)
-    const parsed = z
-      .object({
-        branchId: z.uuid(),
-        currency,
-        openingCents: z.number().int().min(0).max(2147483647).optional(),
-        notes: z.string().max(2000).nullish(),
-      })
-      .strict()
-      .safeParse(await c.req.json().catch(() => null))
-    if (!parsed.success) return validationError(c, parsed.error.issues)
-    return runService(c, 201, () =>
-      withOrgContext(deps.db, orgId, (tx) => openShift(tx, orgId, userId, parsed.data)),
-    )
-  })
-
   app.get("/shifts/:id", async (c) => {
     const { orgId } = orgContextOf(c)
     return runService(c, 200, () =>
@@ -99,16 +72,16 @@ export function createFinanceRoute(deps: Pick<CrmDeps, "db">) {
     )
   })
 
+  // Ingresar o retirar efectivo de la ventana abierta (único movimiento manual).
   app.post("/shifts/:id/movements", async (c) => {
     const { orgId, userId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "finance.write")) return forbid(c)
     const parsed = z
       .object({
         direction: z.enum(["ingreso", "egreso"]),
-        kind: z.enum(["aporte", "retiro", "ajuste", "devolucion"]),
+        kind: z.enum(["aporte", "retiro"]),
         amountCents: cents,
         concept: z.string().trim().min(1).max(500),
-        method: z.string().max(60).nullish(),
       })
       .strict()
       .safeParse(await c.req.json().catch(() => null))
@@ -120,38 +93,83 @@ export function createFinanceRoute(deps: Pick<CrmDeps, "db">) {
     )
   })
 
-  app.post("/shifts/:id/payments", async (c) => {
+  // Cerrar caja: cuenta el efectivo, dice cuánto queda y cuánto entrega.
+  // Cierra quien cobra (`finance.close`); la diferencia avisa a administración.
+  app.post("/closures", async (c) => {
     const { orgId, userId, memberRole } = orgContextOf(c)
-    if (!canAccess(memberRole, "finance.write")) return forbid(c)
-    const parsed = z.object({ paymentId: z.uuid() }).strict().safeParse(await c.req.json().catch(() => null))
-    if (!parsed.success) return validationError(c, parsed.error.issues)
-    return runService(c, 201, () =>
-      withOrgContext(deps.db, orgId, (tx) =>
-        registerPaymentInShift(tx, orgId, userId, c.req.param("id"), parsed.data.paymentId),
-      ),
-    )
-  })
-
-  app.post("/shifts/:id/close", async (c) => {
-    const { orgId, userId, memberRole } = orgContextOf(c)
-    // El cierre con arqueo lo supervisa dueño/admin; el cajero opera el turno.
-    if (memberRole !== "owner" && memberRole !== "admin")
-      return c.json(errorBody(c, "FORBIDDEN", "Solo dueño/admin pueden cerrar el turno"), 403)
+    if (!canAccess(memberRole, "finance.close")) return forbid(c)
     const parsed = z
       .object({
+        branchId: z.uuid(),
+        currency: currency.optional(),
         countedCents: z.number().int().min(0).max(2147483647),
+        retainedCents: z.number().int().min(0).max(2147483647),
+        deliveredCents: z.number().int().min(0).max(2147483647),
         notes: z.string().max(2000).nullish(),
       })
       .strict()
       .safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 201, () =>
+      withOrgContext(deps.db, orgId, (tx) => closeCashWindow(tx, orgId, userId, parsed.data)),
+    )
+  })
+
+  app.get("/closures", async (c) => {
+    const { orgId } = orgContextOf(c)
+    const parsed = z
+      .object({
+        branchId: z.uuid().optional(),
+        limit: z.coerce.number().int().min(1).max(100).optional(),
+      })
+      .safeParse(c.req.query())
+    if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) =>
-        closeShift(tx, orgId, userId, c.req.param("id"), {
-          countedCents: parsed.data.countedCents,
-          notes: parsed.data.notes,
-        }),
-      ),
+      withOrgContext(deps.db, orgId, (tx) => listClosures(tx, orgId, parsed.data)),
+    )
+  })
+
+  app.get("/closures/:id", async (c) => {
+    const { orgId } = orgContextOf(c)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) => getClosureSheet(tx, orgId, c.req.param("id"))),
+    )
+  })
+
+  // Caja del día por sede: efectivo, totales por medio y ventana abierta.
+  app.get("/cash", async (c) => {
+    const { orgId } = orgContextOf(c)
+    const parsed = z
+      .object({ branchId: z.uuid(), currency: currency.optional() })
+      .safeParse(c.req.query())
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) => getCashState(tx, orgId, parsed.data)),
+    )
+  })
+
+  app.get("/debts", async (c) => {
+    const { orgId } = orgContextOf(c)
+    const parsed = z.object({ branchId: z.uuid().optional() }).safeParse(c.req.query())
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) => getDebts(tx, orgId, parsed.data)),
+    )
+  })
+
+  app.get("/movements", async (c) => {
+    const { orgId } = orgContextOf(c)
+    const parsed = z
+      .object({
+        branchId: z.uuid(),
+        currency: currency.optional(),
+        day: isoDay,
+        timezone: z.string().max(60).optional(),
+      })
+      .safeParse(c.req.query())
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) => getDayMovements(tx, orgId, parsed.data)),
     )
   })
 
@@ -167,39 +185,13 @@ export function createFinanceRoute(deps: Pick<CrmDeps, "db">) {
     )
   })
 
-  // --- Proveedores y gastos ------------------------------------------------------
-  app.get("/suppliers", async (c) => {
-    const { orgId } = orgContextOf(c)
-    return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) => listSuppliers(tx, orgId)),
-    )
-  })
-
-  app.post("/suppliers", async (c) => {
-    const { orgId, userId, memberRole } = orgContextOf(c)
-    if (!canAccess(memberRole, "finance.write")) return forbid(c)
-    const parsed = z
-      .object({
-        name: z.string().trim().min(1).max(200),
-        docType: z.enum(["RUC", "DNI", "CE", "pasaporte", "otro"]).optional(),
-        docNumber: z.string().max(40).nullish(),
-        email: z.string().max(200).nullish(),
-        phone: z.string().max(40).nullish(),
-        address: z.string().max(500).nullish(),
-      })
-      .strict()
-      .safeParse(await c.req.json().catch(() => null))
-    if (!parsed.success) return validationError(c, parsed.error.issues)
-    return runService(c, 201, () =>
-      withOrgContext(deps.db, orgId, (tx) => createSupplier(tx, orgId, userId, parsed.data)),
-    )
-  })
-
+  // --- Gastos cortos (los proveedores quedan solo en Inventario) -------------------------
   app.get("/expenses", async (c) => {
     const { orgId } = orgContextOf(c)
     const parsed = z
       .object({
         branchId: z.uuid().optional(),
+        category: z.string().max(60).optional(),
         from: isoDay.optional(),
         to: isoDay.optional(),
         limit: z.coerce.number().int().min(1).max(200).optional(),
@@ -217,15 +209,15 @@ export function createFinanceRoute(deps: Pick<CrmDeps, "db">) {
     const parsed = z
       .object({
         branchId: z.uuid(),
-        supplierId: z.uuid().nullish(),
+        category: z.string().max(60).optional(),
         concept: z.string().trim().min(1).max(500),
         amountCents: cents,
-        currency,
+        currency: currency.optional(),
         spentAt: isoDateTime.nullish(),
-        receiptKind: z.enum(["boleta", "factura", "recibo", "nota", "ninguno"]).optional(),
+        receiptKind: z.string().trim().min(1).max(60).optional(),
         receiptNumber: z.string().max(60).nullish(),
         notes: z.string().max(2000).nullish(),
-        shiftId: z.uuid().nullish(),
+        fromCash: z.boolean().optional(),
       })
       .strict()
       .safeParse(await c.req.json().catch(() => null))
@@ -250,7 +242,7 @@ export function createFinanceRoute(deps: Pick<CrmDeps, "db">) {
   // --- Cuentas por cobrar ----------------------------------------------------------
   app.get("/receivables", async (c) => {
     const { orgId } = orgContextOf(c)
-    const parsed = z.object({ patientId: z.uuid().optional() }).safeParse(c.req.query())
+    const parsed = z.object({ patientId: z.uuid().optional(), branchId: z.uuid().optional() }).safeParse(c.req.query())
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) => getReceivables(tx, orgId, parsed.data)),
@@ -262,156 +254,6 @@ export function createFinanceRoute(deps: Pick<CrmDeps, "db">) {
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
         getPatientBalanceForPortal(tx, orgId, c.req.param("id")),
-      ),
-    )
-  })
-
-  // --- Planes de cuotas ---------------------------------------------------------------
-  app.get("/installment-plans", async (c) => {
-    const { orgId } = orgContextOf(c)
-    const parsed = z.object({ patientId: z.uuid().optional() }).safeParse(c.req.query())
-    if (!parsed.success) return validationError(c, parsed.error.issues)
-    return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) => listInstallmentPlans(tx, orgId, parsed.data)),
-    )
-  })
-
-  app.post("/installment-plans", async (c) => {
-    const { orgId, userId, memberRole } = orgContextOf(c)
-    if (!canAccess(memberRole, "finance.write")) return forbid(c)
-    const parsed = z
-      .object({
-        patientId: z.uuid(),
-        chargeId: z.uuid(),
-        installments: z.number().int().min(1).max(60),
-        firstDueAt: isoDay,
-        notes: z.string().max(2000).nullish(),
-      })
-      .strict()
-      .safeParse(await c.req.json().catch(() => null))
-    if (!parsed.success) return validationError(c, parsed.error.issues)
-    const { patientId, ...rest } = parsed.data
-    return runService(c, 201, () =>
-      withOrgContext(deps.db, orgId, (tx) =>
-        createInstallmentPlan(tx, orgId, userId, patientId, rest),
-      ),
-    )
-  })
-
-  app.post("/installment-plans/:id/refresh", async (c) => {
-    const { orgId, userId, memberRole } = orgContextOf(c)
-    if (!canAccess(memberRole, "finance.write")) return forbid(c)
-    return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) =>
-        refreshInstallmentPlan(tx, orgId, userId, c.req.param("id")),
-      ),
-    )
-  })
-
-  app.post("/installment-plans/:id/void", async (c) => {
-    const { orgId, userId, memberRole } = orgContextOf(c)
-    if (!canAccess(memberRole, "finance.write")) return forbid(c)
-    const parsed = reasonInput.safeParse(await c.req.json().catch(() => null))
-    if (!parsed.success) return validationError(c, parsed.error.issues)
-    return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) =>
-        voidInstallmentPlan(tx, orgId, userId, c.req.param("id"), parsed.data),
-      ),
-    )
-  })
-
-  // --- Comisiones -------------------------------------------------------------------------
-  app.get("/commission-rules", async (c) => {
-    const { orgId } = orgContextOf(c)
-    const parsed = z.object({ professionalUserId: z.string().optional() }).safeParse(c.req.query())
-    if (!parsed.success) return validationError(c, parsed.error.issues)
-    return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) => listCommissionRules(tx, orgId, parsed.data)),
-    )
-  })
-
-  app.post("/commission-rules", async (c) => {
-    const { orgId, userId, memberRole } = orgContextOf(c)
-    if (!canAccess(memberRole, "finance.write")) return forbid(c)
-    const parsed = z
-      .object({
-        professionalUserId: z.string().min(1),
-        base: z.enum(["cobrado", "produccion"]),
-        rateBps: z.number().int().min(0).max(10000),
-        serviceId: z.uuid().nullish(),
-        branchId: z.uuid().nullish(),
-        validFrom: isoDay.nullish(),
-        validTo: isoDay.nullish(),
-      })
-      .strict()
-      .safeParse(await c.req.json().catch(() => null))
-    if (!parsed.success) return validationError(c, parsed.error.issues)
-    return runService(c, 201, () =>
-      withOrgContext(deps.db, orgId, (tx) => upsertCommissionRule(tx, orgId, userId, parsed.data)),
-    )
-  })
-
-  app.get("/commissions/preview", async (c) => {
-    const { orgId } = orgContextOf(c)
-    const parsed = z
-      .object({
-        professionalUserId: z.string().min(1),
-        base: z.enum(["cobrado", "produccion"]),
-        from: isoDay,
-        to: isoDay,
-        currency,
-      })
-      .safeParse(c.req.query())
-    if (!parsed.success) return validationError(c, parsed.error.issues)
-    return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) => previewCommissions(tx, orgId, parsed.data)),
-    )
-  })
-
-  app.post("/commissions/settle", async (c) => {
-    const { orgId, userId, memberRole } = orgContextOf(c)
-    if (!canAccess(memberRole, "finance.write")) return forbid(c)
-    const parsed = z
-      .object({
-        professionalUserId: z.string().min(1),
-        base: z.enum(["cobrado", "produccion"]),
-        from: isoDay,
-        to: isoDay,
-        currency,
-        notes: z.string().max(2000).nullish(),
-      })
-      .strict()
-      .safeParse(await c.req.json().catch(() => null))
-    if (!parsed.success) return validationError(c, parsed.error.issues)
-    return runService(c, 201, () =>
-      withOrgContext(deps.db, orgId, (tx) => settleCommissions(tx, orgId, userId, parsed.data)),
-    )
-  })
-
-  app.get("/settlements", async (c) => {
-    const { orgId } = orgContextOf(c)
-    const parsed = z.object({ professionalUserId: z.string().optional() }).safeParse(c.req.query())
-    if (!parsed.success) return validationError(c, parsed.error.issues)
-    return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) => listSettlements(tx, orgId, parsed.data)),
-    )
-  })
-
-  app.get("/settlements/:id", async (c) => {
-    const { orgId } = orgContextOf(c)
-    return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) => getSettlementDetail(tx, orgId, c.req.param("id"))),
-    )
-  })
-
-  app.post("/settlements/:id/void", async (c) => {
-    const { orgId, userId, memberRole } = orgContextOf(c)
-    if (!canAccess(memberRole, "finance.write")) return forbid(c)
-    const parsed = reasonInput.safeParse(await c.req.json().catch(() => null))
-    if (!parsed.success) return validationError(c, parsed.error.issues)
-    return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) =>
-        voidSettlement(tx, orgId, userId, c.req.param("id"), parsed.data),
       ),
     )
   })

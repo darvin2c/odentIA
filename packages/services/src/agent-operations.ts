@@ -323,10 +323,10 @@ export interface AgentPatientSummary {
 
 /**
  * Resumen mínimo del paciente según la facultad del interlocutor, sin leer
- * historia clínica: próximas citas y estado de presupuestos para
- * self/representante/autorizado; saldo solo para self, representante legal o
- * responsable económico vigente. Siempre del paciente verificado, nunca de
- * otro.
+ * historia clínica: próximas citas y estado de presupuestos presentados o
+ * decididos (nunca borradores) para self/representante/autorizado; saldo
+ * solo para self, representante legal o responsable económico vigente.
+ * Siempre del paciente verificado, nunca de otro.
  */
 export async function getAgentPatientSummary(
   tx: Db,
@@ -367,7 +367,7 @@ export async function getAgentPatientSummary(
       status: treatmentBudget.status,
     })
     .from(treatmentBudget)
-    .where(and(eq(treatmentBudget.organizationId, orgId), eq(treatmentBudget.patientId, patientId)))
+    .where(and(eq(treatmentBudget.organizationId, orgId), eq(treatmentBudget.patientId, patientId), ne(treatmentBudget.status, "borrador")))
     .orderBy(desc(treatmentBudget.budgetNumber))
     .limit(3)
   let balance: AgentPatientSummary["balance"] = null

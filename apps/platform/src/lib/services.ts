@@ -13,6 +13,8 @@ export interface ServiceCatalogItem {
   priceCents: number
   currency: string
   durationMin: number | null
+  /** Cómo se cobra: 'treatment' una vez, 'session' en cada visita atendida. */
+  billingMode: "treatment" | "session"
   isActive: boolean
 }
 
@@ -94,39 +96,6 @@ export const SPECIALTY_FILTER_OPTIONS = [
 /** Máximo entero admitido por la columna PG integer. */
 export const MAX_PRICE_CENTS = 2147483647
 
-/** Formatea centavos a moneda legible (es-PE). Solo lectura: nunca edita tarifas. */
-export function formatMoney(cents: number, currency: string): string {
-  return new Intl.NumberFormat("es-PE", {
-    style: "currency",
-    currency,
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(cents / 100)
-}
-
-/**
- * Convierte una tarifa escrita ("120", "120.50", "120,50") a centavos enteros.
- * Estricto: el vacío NO está permitido al guardar (lanza "Ingresa la tarifa").
- */
-export function parsePriceToCents(raw: string): number {
-  const value = raw.trim().replace(",", ".")
-  if (!value) throw new Error("Ingresa la tarifa")
-  if (!/^\d+(\.\d{1,2})?$/.test(value)) {
-    throw new Error("Tarifa inválida: usa números con hasta 2 decimales")
-  }
-  const cents = Math.round(Number(value) * 100)
-  if (!Number.isSafeInteger(cents) || cents < 0) {
-    throw new Error("Tarifa inválida: debe ser mayor o igual a 0")
-  }
-  if (cents > MAX_PRICE_CENTS) throw new Error("Tarifa demasiado alta")
-  return cents
-}
-
-/** Presenta centavos como texto editable ("120.00"). */
-export function formatPriceInput(cents: number): string {
-  return (cents / 100).toFixed(2)
-}
-
 export interface ServicesQuery {
   q?: string
   specialty?: string
@@ -194,6 +163,7 @@ export interface CreateServiceBody {
   priceCents: number
   currency?: string | null
   durationMin?: number | null
+  billingMode?: "treatment" | "session" | null
   isActive?: boolean
 }
 
@@ -213,6 +183,7 @@ export interface UpdateServiceBody {
   priceCents?: number
   currency?: string | null
   durationMin?: number | null
+  billingMode?: "treatment" | "session"
   isActive?: boolean
 }
 
@@ -226,15 +197,44 @@ export function updateServiceApi(
   })
 }
 
-/** Incorpora prestaciones de la biblioteca al tarifario (tarifa nula). */
+export interface FromTemplateItemBody {
+  templateId: string
+  /** Tarifa explícita en unidad menor; 0 = incluido sin costo. */
+  priceCents: number
+  billingMode?: "treatment" | "session" | null
+  durationMin?: number | null
+}
+
+/**
+ * Carga rápida del tarifario: las elegidas entran con su precio y activas en
+ * el mismo acto. Sin alta diferida inactiva con tarifa 0.
+ */
 export function incorporateTemplatesApi(
-  templateIds: string[],
+  items: FromTemplateItemBody[],
 ): Promise<{ data: { created: ServiceCatalogItem[]; existing: ServiceCatalogItem[] } }> {
   return apiFetch<{ data: { created: ServiceCatalogItem[]; existing: ServiceCatalogItem[] } }>(
     "/api/services/from-templates",
     {
       method: "POST",
-      body: JSON.stringify({ templateIds }),
+      body: JSON.stringify({ items }),
     },
+  )
+}
+
+export interface MostUsedServiceItem {
+  service: ServiceCatalogItem
+  indications: number
+}
+
+/** Ofertas activas más indicadas, por concepto de uso real. */
+export function fetchMostUsedServices(
+  query: { specialty?: string; limit?: number } = {},
+): Promise<{ data: MostUsedServiceItem[] }> {
+  const params = new URLSearchParams()
+  if (query.specialty) params.set("specialty", query.specialty)
+  if (query.limit) params.set("limit", String(query.limit))
+  const qs = params.toString()
+  return apiFetch<{ data: MostUsedServiceItem[] }>(
+    `/api/services/most-used${qs ? `?${qs}` : ""}`,
   )
 }

@@ -383,12 +383,20 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       for (const s of snapshot.services.slice(0, 50)) {
         lines.push(`- Servicio ${s.name} (id ${s.id}): S/ ${(s.priceCents / 100).toFixed(2)}${s.durationMin ? ` (${s.durationMin} min)` : ""}`)
       }
+      if (snapshot.paymentMethods.length) {
+        lines.push("Medios de pago aceptados por la clínica (los mismos que ofrece caja):")
+        for (const m of snapshot.paymentMethods) lines.push(`- ${m.name}`)
+      }
+      if (snapshot.promotions.length) {
+        lines.push("Promociones vigentes (el precio «desde» es un mínimo: el final sale del presupuesto):")
+        for (const p of snapshot.promotions) lines.push(`- ${p.name}`)
+      }
       return lines.join("\n")
     },
     {
       name: "ver_sedes_y_servicios",
       description:
-        "Sedes (con id) y servicios con tarifas oficiales. Úsalo antes de hablar de precios, sedes o disponibilidad.",
+        "Sedes (con id), servicios con tarifas oficiales, medios de pago aceptados y promociones vigentes. Úsalo antes de hablar de precios, sedes, medios, promociones o disponibilidad.",
       schema: z.object({}),
     },
   )

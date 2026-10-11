@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto"
 import { withOrgContext } from "@odentia/db"
 import { agentHandoff, agentProposal, agentRunLedger } from "@odentia/db/schema/agent"
 import { member, user } from "@odentia/db/schema/auth"
-import { patient, patientCharge, patientPayment } from "@odentia/db/schema/clinical"
+import { encounter, encounterProcedure, patient, patientCharge, patientPayment, patientPaymentRefund } from "@odentia/db/schema/clinical"
 import { channelConnection, contact, conversation, crmTask, message, pipeline, pipelineStage } from "@odentia/db/schema/crm"
 import { opportunity } from "@odentia/db/schema/opportunities"
 import { eq, sql } from "drizzle-orm"
@@ -312,4 +312,35 @@ it("el primer inicio excluye caducadas del contador completo, no solo de la mues
   expect(home.agent?.proposals.map(row => row.id)).not.toContain(expiredId)
   const [expired] = await ownerDb.select({ status: agentProposal.status }).from(agentProposal).where(eq(agentProposal.id, expiredId))
   expect(expired?.status).toBe("expirada")
+})
+
+it("el pulso descuenta las devoluciones del gráfico de cobros", async () => {
+  const orgId = randomUUID()
+  await insertOrg(ownerDb, orgId, `pulso-neto-${orgId.slice(0, 8)}`)
+  const [account] = await ownerDb.insert(patient).values({ organizationId: orgId, displayName: "Cuenta neta", patientNumber: 1 }).returning({ id: patient.id })
+  const [payment] = await ownerDb.insert(patientPayment).values({ organizationId: orgId, patientId: account!.id, amountCents: 20000, currency: "PEN", paidAt: new Date(), method: "yape" }).returning({ id: patientPayment.id })
+  await ownerDb.insert(patientPaymentRefund).values({ organizationId: orgId, patientId: account!.id, paymentId: payment!.id, amountCents: 5000, refundedAt: new Date(), reason: "Devolución parcial" })
+  const pulse = await withOrgContext(appDb, orgId, tx => getWorkspacePulse(tx, orgId, full))
+  const pen = pulse.collections!.filter(item => item.currency === "PEN")
+  expect(pen.reduce((sum, item) => sum + Number(item.amountCents), 0)).toBe(15000)
+})
+
+it("la producción clínica excluye los actos anulados", async () => {
+  const orgId = randomUUID()
+  await insertOrg(ownerDb, orgId, `produccion-${orgId.slice(0, 8)}`)
+  const dentist = randomUUID()
+  await ownerDb.insert(user).values({ id: dentist, name: "Dentista fase cero", email: `${dentist}@fase0.test`, emailVerified: true })
+  const [account] = await ownerDb.insert(patient).values({ organizationId: orgId, displayName: "Paciente producción", patientNumber: 1 }).returning({ id: patient.id })
+  // Ciclo real: borrador → actos (+ anulación en borrador) → cierre con firma.
+  // Insertar actos en una atención ya finalizada viola encounter_child_draft_only.
+  const [visit] = await ownerDb.insert(encounter).values({ organizationId: orgId, patientId: account!.id, dentistUserId: dentist }).returning({ id: encounter.id })
+  const procedures = await ownerDb.insert(encounterProcedure).values([
+    { organizationId: orgId, encounterId: visit!.id, description: "Resina vigente", priceCents: 30000, currency: "PEN" },
+    { organizationId: orgId, encounterId: visit!.id, description: "Acto duplicado", priceCents: 99999, currency: "PEN" },
+  ]).returning({ id: encounterProcedure.id, description: encounterProcedure.description })
+  const anulado = procedures.find(procedure => procedure.description === "Acto duplicado")
+  await ownerDb.update(encounterProcedure).set({ voidedAt: new Date(), voidReason: "Registro duplicado" }).where(eq(encounterProcedure.id, anulado!.id))
+  await ownerDb.update(encounter).set({ status: "finalizada", finalizedAt: new Date(), finalizedBy: dentist, signerName: "Dentista fase cero", signerRegistration: "12345" }).where(eq(encounter.id, visit!.id))
+  const report = await withOrgContext(appDb, orgId, tx => getManagementReport(tx, orgId, "2026-01-01", "2026-12-31", full))
+  expect(report.clinicalProduction).toEqual([{ name: "Dentista fase cero", currency: "PEN", procedures: 1, amountCents: "30000" }])
 })

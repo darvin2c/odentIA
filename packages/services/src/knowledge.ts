@@ -8,7 +8,9 @@ import {
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, ilike, or, sql } from "drizzle-orm"
 import { notFound, validation } from "./errors.js"
+import { listPaymentMethods } from "./payment-methods.js"
 import { listServices } from "./service-catalog.js"
+import { listClinicPromotionSummaries } from "./promotions.js"
 
 const KINDS = ["faq", "info_sede", "politica"] as const
 const STATUSES = ["borrador", "publicada"] as const
@@ -282,11 +284,16 @@ export interface ClinicInfoSnapshot {
   timezone: string
   branches: Array<{ id: string; name: string; address: string | null; phone: string | null; mapsUrl: string | null; timezone: string | null }>
   services: Array<{ id: string; name: string; code: string | null; specialty: string | null; priceCents: number; currency: string; durationMin: number | null }>
+  paymentMethods: Array<{ id: string; name: string; typeCode: string }>
+  /** Promociones vigentes: el agente las nombra sin inventar precios finales. */
+  promotions: Array<{ id: string; name: string; endsAt: string | null }>
 }
 
 /**
  * Información de la clínica desde catálogo y sedes (fuente de verdad para el
- * agente: nunca inventa precios ni direcciones).
+ * agente: nunca inventa precios ni direcciones). Incluye los medios de pago
+ * activos y las promociones vigentes: el agente responde con estas mismas
+ * listas que ofrece caja.
  */
 export async function getClinicInfoSnapshot(tx: Db, orgId: string): Promise<ClinicInfoSnapshot> {
   const [profile] = await tx
@@ -308,6 +315,8 @@ export async function getClinicInfoSnapshot(tx: Db, orgId: string): Promise<Clin
     .orderBy(asc(branch.name), asc(branch.id))
     .limit(20)
   const { data } = await listServices(tx, orgId, { state: "active", limit: 50 })
+  const methods = await listPaymentMethods(tx, orgId, { activeOnly: true })
+  const promos = await listClinicPromotionSummaries(tx, orgId)
   return {
     clinicName: profile?.tradeName ?? profile?.legalName ?? "la clínica",
     timezone: profile?.timezone ?? "America/Lima",
@@ -321,6 +330,8 @@ export async function getClinicInfoSnapshot(tx: Db, orgId: string): Promise<Clin
       currency: s.currency,
       durationMin: s.durationMin,
     })),
+    paymentMethods: methods.map((m) => ({ id: m.id, name: m.name, typeCode: m.typeCode })),
+    promotions: promos.map((p) => ({ id: p.id, name: p.name, endsAt: p.endsAt ? p.endsAt.toISOString() : null })),
   }
 }
 

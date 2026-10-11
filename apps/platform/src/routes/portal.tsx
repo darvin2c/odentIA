@@ -728,13 +728,16 @@ function BudgetCard({ sessionToken, budget, onDecided }: { sessionToken: string;
       decidePortalBudgetApi(sessionToken, budget.id, {
         decisions: budget.items.map((item) => ({
           planItemId: item.planItemId,
-          decision: decisions[item.planItemId] ?? "pospuesto",
+          decision: decisions[item.planItemId] ?? (item.decision === "aceptado" || item.decision === "rechazado" ? item.decision : "pospuesto"),
         })),
         decisionNote: note.trim() || null,
       }),
     onSuccess: onDecided,
   })
-  const decidable = budget.status === "presentado"
+  // Responder después: parcial/pospuesto admite completar lo pospuesto con la
+  // misma autoridad; lo ya decidido no se reescribe (lo aplica el servidor).
+  const decidable =
+    budget.status === "presentado" || budget.status === "parcial" || budget.status === "pospuesto"
 
   return (
     <div className="rounded-md border p-4">
@@ -748,29 +751,48 @@ function BudgetCard({ sessionToken, budget, onDecided }: { sessionToken: string;
       </div>
       {budget.notes && <p className="mt-1 text-sm text-muted-foreground">{budget.notes}</p>}
       <ul className="mt-2 grid gap-1">
-        {budget.items.map((item) => (
-          <li key={item.planItemId} className="flex flex-wrap items-center gap-2 text-sm">
-            <span className="flex-1">{item.title}</span>
-            <span className="font-medium">{formatPortalMoney(item.priceCents, item.currency)}</span>
-            {decidable ? (
-              <Select
-                value={decisions[item.planItemId] ?? "pospuesto"}
-                onValueChange={(v) => {
-                  if (v !== "aceptado" && v !== "rechazado" && v !== "pospuesto") return
-                  setDecisions((prev) => ({ ...prev, [item.planItemId]: v }))
-                }}
-              >
-                <SelectTrigger className="w-36">
-                  <SelectValue />
-                </SelectTrigger>
-              </Select>
-            ) : (
-              <Badge variant="secondary">{DECISION_LABEL[item.decision] ?? item.decision}</Badge>
-            )}
-          </li>
-        ))}
+        {budget.items.map((item) => {
+          const locked = item.decision === "aceptado" || item.decision === "rechazado"
+          return (
+            <li key={item.planItemId} className="flex flex-wrap items-center gap-2 text-sm">
+              <span className="flex-1">
+                {item.title}
+                {item.promotionName ? (
+                  <span className="text-xs text-muted-foreground"> · Promoción: {item.promotionName}</span>
+                ) : null}
+                {item.tariffCents != null && item.priceCents != null && item.tariffCents > item.priceCents ? (
+                  <span className="text-xs text-muted-foreground">
+                    {" "}· antes {formatPortalMoney(item.tariffCents, item.currency)}
+                  </span>
+                ) : null}
+              </span>
+              <span className="font-medium">{formatPortalMoney(item.priceCents, item.currency)}</span>
+              {decidable && !locked ? (
+                <Select
+                  value={decisions[item.planItemId] ?? "pospuesto"}
+                  onValueChange={(v) => {
+                    if (v !== "aceptado" && v !== "rechazado" && v !== "pospuesto") return
+                    setDecisions((prev) => ({ ...prev, [item.planItemId]: v }))
+                  }}
+                >
+                  <SelectTrigger className="w-36" aria-label={`Decisión para ${item.title}`}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(["aceptado", "rechazado", "pospuesto"] as const).map((value) => (
+                      <SelectItem key={value} value={value}>
+                        {DECISION_LABEL[value]}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              ) : (
+                <Badge variant="secondary">{DECISION_LABEL[item.decision] ?? item.decision}</Badge>
+              )}
+            </li>
+          )
+        })}
       </ul>
-      <p className="mt-2 text-sm font-medium">Total: {formatPortalMoney(budget.totalCents, budget.currency)}</p>
       {budget.decidedAt && (
         <p className="mt-1 text-xs text-muted-foreground">
           Decidido el {formatPortalDate(budget.decidedAt)}

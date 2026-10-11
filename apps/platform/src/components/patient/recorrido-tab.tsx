@@ -40,7 +40,9 @@ import type {
   TreatmentNextAction,
 } from "../../lib/patients"
 import { planStatusLabel } from "../../lib/patients"
-import { formatMoney, type ServiceCatalogItem } from "../../lib/services"
+import { formatMoney } from "@odentia/clinical"
+import { useOrgProfile } from "../../lib/org"
+import { type ServiceCatalogItem } from "../../lib/services"
 import { ChoiceSelect } from "../ui/choice-select"
 import { Cie10Search } from "./cie10-search"
 import { ControlesPanel, RecetasPanel } from "./clinical-panels"
@@ -107,6 +109,11 @@ export function RecorridoClinicoTab({
   const canWrite = usePermission("clinical.write")
   const canRead = usePermission("clinical.read")
   const queryClient = useQueryClient()
+  // Formato de la clínica para importes históricos (moneda congelada de cada registro).
+  const profile = useOrgProfile()
+  const orgLocale = profile.data?.locale
+  const money = (cents: number, currency: string): string =>
+    orgLocale ? formatMoney(cents, currency, orgLocale) : "…"
 
   const itemsQuery = useQuery({
     queryKey: ["plan-items", patientId],
@@ -522,7 +529,7 @@ export function RecorridoClinicoTab({
                     <span className="tabular-nums">
                       {line.priceCents == null
                         ? "sin tarifa"
-                        : formatMoney(line.priceCents, line.currency)}
+                        : money(line.priceCents, line.currency)}
                     </span>
                     <span className="text-muted-foreground">
                       Decisión de esta línea: {planDecisionLabel(line.decision)}
@@ -817,11 +824,11 @@ export function RecorridoClinicoTab({
                       Por cobrar ({balance.currency})
                     </dt>
                     <dd className="text-lg font-semibold tabular-nums">
-                      {formatMoney(balance.outstandingCents, balance.currency)}
+                      {money(balance.outstandingCents, balance.currency)}
                     </dd>
                     <dd className="text-xs text-muted-foreground">
-                      cargado {formatMoney(balance.chargedCents, balance.currency)} · aplicado{" "}
-                      {formatMoney(balance.appliedCents, balance.currency)}
+                      cargado {money(balance.chargedCents, balance.currency)} · aplicado{" "}
+                      {money(balance.appliedCents, balance.currency)}
                     </dd>
                   </div>
                 ))}
@@ -831,7 +838,7 @@ export function RecorridoClinicoTab({
               <ul className="flex flex-col gap-1 text-sm">
                 {finance.charges.map((charge) => (
                   <li key={charge.id}>
-                    {charge.description} · {formatMoney(charge.amountCents, charge.currency)}
+                    {charge.description} · {money(charge.amountCents, charge.currency)}
                     {charge.voidedAt ? " · anulado" : ""}
                   </li>
                 ))}
@@ -849,8 +856,8 @@ export function RecorridoClinicoTab({
                   return (
                     <li key={payment.id}>
                       Pago del {formatDate(payment.paidAt)} ·{" "}
-                      {formatMoney(payment.amountCents, payment.currency)} · aplicado a este
-                      tratamiento {formatMoney(applied, payment.currency)}
+                      {money(payment.amountCents, payment.currency)} · aplicado a este
+                      tratamiento {money(applied, payment.currency)}
                     </li>
                   )
                 })}

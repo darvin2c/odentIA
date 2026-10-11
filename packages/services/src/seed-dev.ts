@@ -75,7 +75,7 @@ import { createHandoff } from "./agent-operations.js"
 import { upsertAgentConfig } from "./agentConfig.js"
 import { createAppointment, createChair } from "./appointments.js"
 import { createScheduleBlock } from "./availability.js"
-import { createBudget, decideBudget, presentBudget, reviseBudget } from "./budgets.js"
+import { adjustBudgetLines, createBudget, decideBudget, deliverBudget, reviseBudget } from "./budgets.js"
 import {
   addClinicalNote,
   addOdontogramEntries,
@@ -99,6 +99,7 @@ import {
 } from "./encounters.js"
 import { createFieldDef } from "./fields.js"
 import { cancelFollowUp, completeFollowUp, createFollowUp, scheduleFollowUp } from "./follow-ups.js"
+import { setCommissionRate } from "./finance.js"
 import { closeOpportunity, createOpportunity, listOpportunities } from "./opportunities.js"
 import {
   createPatientRegistrationLink,
@@ -106,11 +107,13 @@ import {
   savePatientRegistrationConfig,
 } from "./patient-registration.js"
 import { createPatient, updatePatient } from "./patients.js"
-import { applyPayment, createCharge, createPayment, refundPayment } from "./payments.js"
+import { collectCharge, createCharge, refundCredit } from "./payments.js"
+import { ensureDefaultPaymentMethods, listPaymentMethods } from "./payment-methods.js"
 import { ensureDefaultPipeline } from "./pipelines.js"
 import { addPlanItem, createOptionGroup, createTreatmentPlan, setPlanItemStatus } from "./plan.js"
 import { cancelPrescription, createPrescription } from "./prescriptions.js"
 import { setProfessionalProfile } from "./professional-profiles.js"
+import { createPromotion } from "./promotions.js"
 import { grantResponsibility } from "./responsibilities.js"
 import { secretsKeyFromEnv } from "./secrets.js"
 import { seedAgent } from "./seed-agent.js"
@@ -362,8 +365,7 @@ async function wipeSeed(): Promise<void> {
     "commission_settlement_line",
     "commission_settlement",
     "commission_rule",
-    "installment_quota",
-    "installment_plan",
+    "cash_closure",
     "cash_movement",
     "expense",
     "cash_shift",
@@ -392,6 +394,9 @@ async function wipeSeed(): Promise<void> {
     .where(inArray(patientPaymentRefund.organizationId, SEED_ORGS))
   await db.delete(patientCharge).where(inArray(patientCharge.organizationId, SEED_ORGS))
   await db.delete(patientPayment).where(inArray(patientPayment.organizationId, SEED_ORGS))
+  await db.execute(sql`delete from payment_ticket where organization_id in (${ORG_A}, ${ORG_B})`)
+  await db.execute(sql`delete from ticket_counter where organization_id in (${ORG_A}, ${ORG_B})`)
+  await db.execute(sql`delete from organization_payment_method where organization_id in (${ORG_A}, ${ORG_B})`)
   await db.delete(prescriptionItem).where(inArray(prescriptionItem.organizationId, SEED_ORGS))
   await db.delete(prescription).where(inArray(prescription.organizationId, SEED_ORGS))
   await db.delete(clinicalFollowUp).where(inArray(clinicalFollowUp.organizationId, SEED_ORGS))
@@ -461,6 +466,8 @@ async function wipeSeed(): Promise<void> {
   await db.delete(treatmentPlan).where(inArray(treatmentPlan.organizationId, SEED_ORGS))
   await db.delete(scheduleChair).where(inArray(scheduleChair.organizationId, SEED_ORGS))
   await db.delete(encounter).where(inArray(encounter.organizationId, SEED_ORGS))
+  await db.execute(sql`delete from promotion_service_price where organization_id in (${ORG_A}, ${ORG_B})`)
+  await db.execute(sql`delete from promotion where organization_id in (${ORG_A}, ${ORG_B})`)
   await db.delete(serviceCatalog).where(inArray(serviceCatalog.organizationId, SEED_ORGS))
   // El snapshot del registro referencia `user`, `patient`, `contact` y `branch`
   // sin cascada: sin borrarlo primero, la baja del usuario semilla falla por FK.
@@ -699,6 +706,10 @@ await db.insert(orgProfile).values([
     timezone: "America/Lima",
   },
 ])
+await db.transaction(async (tx) => {
+  await ensureDefaultPaymentMethods(tx, ORG_A, ANA_ID, "PE")
+  await ensureDefaultPaymentMethods(tx, ORG_B, CORA_ID, "PE")
+})
 const [miraflores] = await db
   .insert(branch)
   .values([
@@ -795,6 +806,9 @@ for (let i = 0; i < CONTACTS_A.length; i++) {
     { displayName: c.name, phone: c.phone, notes },
     { userId: ANA_ID },
   )
+  if (c.name === "Rosa Quispe") {
+    await updateContact(db, ORG_A, created.id, { preferredChannel: "whatsapp" }, { userId: ANA_ID })
+  }
   const historicalStage = pipeA.stages[i % pipeA.stages.length]!
   const openStage = pipeA.stages.find((stage) => stage.kind === "open")!
   const commercial = await createOpportunity(
@@ -1236,6 +1250,7 @@ const seedOffers: Array<{
   scope: string
   priceCents: number
   durationMin: number
+  billingMode?: "treatment" | "session"
 }> = [
   {
     code: "OBTURACION",
@@ -1284,6 +1299,7 @@ const seedOffers: Array<{
     scope: "general",
     priceCents: 10000,
     durationMin: 30,
+    billingMode: "session",
   },
 ]
 const catalogA: Array<Awaited<ReturnType<typeof createService>>> = []
@@ -1296,6 +1312,23 @@ const serviceIdA = (code: string): string => {
   if (!found) throw new Error(`Servicio ${code} ausente del catálogo semilla`)
   return found.id
 }
+await db.transaction(async (tx) => {
+  await createPromotion(tx, ORG_A, ANA_ID, {
+    name: "Profilaxis preventiva demo",
+    startsAt: daysAgo(1).toISOString(),
+    endsAt: new Date(Date.now() + 30 * 86_400_000).toISOString(),
+    conditions: "Precio promocional para la profilaxis del tarifario.",
+    items: [{ serviceId: serviceIdA("LIMPIEZA"), mode: "fixed", priceCents: 7900 }],
+  })
+  await createPromotion(tx, ORG_A, ANA_ID, {
+    name: "Corona desde un precio acordado",
+    startsAt: daysAgo(1).toISOString(),
+    conditions: "El odontólogo confirma el precio final en el presupuesto.",
+    items: [{ serviceId: serviceIdA("CORONA"), mode: "from", priceCents: 65000 }],
+  })
+  await setCommissionRate(tx, ORG_A, ANA_ID, { professionalUserId: ANA_ID, rateBps: 4000 })
+  await setCommissionRate(tx, ORG_A, ANA_ID, { professionalUserId: LUIS_ID, rateBps: 3500 })
+})
 // Oferta oficial precisa: resina posterior de una superficie (CPMS D2391).
 // El mismo snapshot se conserva en plan, presupuesto y atención.
 const [resinaTemplate] = await db
@@ -1398,7 +1431,7 @@ const budgetRestaurador = await createBudget(db, ORG_A, ANA_ID, rosaPatientId, {
   title: "Plan restaurador molar",
   notes: "Obturación 36 + endodoncia 46; corona diferida a segunda etapa.",
 })
-await presentBudget(db, ORG_A, ANA_ID, rosaPatientId, budgetRestaurador.id)
+await deliverBudget(db, ORG_A, ANA_ID, rosaPatientId, budgetRestaurador.id)
 await decideBudget(db, ORG_A, ANA_ID, rosaPatientId, budgetRestaurador.id, {
   decisions: [
     { planItemId: obt36.id, decision: "aceptado" },
@@ -1433,7 +1466,7 @@ const budgetEstetica = await createBudget(db, ORG_A, ANA_ID, rosaPatientId, {
   title: "Plan estética dental",
   notes: "Pendiente de decisión de la paciente.",
 })
-await presentBudget(db, ORG_A, ANA_ID, rosaPatientId, budgetEstetica.id)
+await deliverBudget(db, ORG_A, ANA_ID, rosaPatientId, budgetEstetica.id)
 // Tratamiento suspendido con motivo y sin decisión: demuestra que suspender no es
 // un callejón (el recorrido ofrece «Reanudar tratamiento») y que la suspensión es
 // independiente del carril económico.
@@ -1457,7 +1490,7 @@ const budgetOrto = await createBudget(db, ORG_A, ANA_ID, rosaPatientId, {
   itemIds: [ctrlOrto.id],
   title: "Plan ortodoncia",
 })
-await presentBudget(db, ORG_A, ANA_ID, rosaPatientId, budgetOrto.id)
+await deliverBudget(db, ORG_A, ANA_ID, rosaPatientId, budgetOrto.id)
 await decideBudget(db, ORG_A, ANA_ID, rosaPatientId, budgetOrto.id, {
   decisions: [{ planItemId: ctrlOrto.id, decision: "rechazado" }],
   decisionNote: "Rechaza ortodoncia por ahora; reevaluar en 6 meses.",
@@ -1779,31 +1812,38 @@ await cancelPrescription(db, ORG_A, ANA_ID, rosaPatientId, recetaAnulada.id, {
   reason: "Alergia a penicilina registrada; se retira la prescripción.",
 })
 
-// Cuenta económica: el cargo de la obturación ya lo generó el cierre; aquí se
-// añade un cargo manual, el pago con aplicación parcial y la devolución.
+// Cobro parcial y adelanto con devolución: todos pasan por el mismo servicio de caja.
 const cargoObt = cierreRosa.charges[0]
 if (!cargoObt) throw new Error("El cierre no generó el cargo de la obturación")
 await createCharge(db, ORG_A, ANA_ID, rosaPatientId, {
+  branchId: miraflores.id,
   description: "Control post-obturación",
   amountCents: 5000,
   currency: "PEN",
 })
 const rosaSelfContactId = contactIdByName.get("Rosa Quispe")!
-const pagoRosa = await createPayment(db, ORG_A, ANA_ID, rosaPatientId, {
-  payerContactId: rosaSelfContactId,
-  amountCents: 15000,
-  currency: "PEN",
-  paidAt: new Date().toISOString(),
-  method: "yape",
-  reference: "YAPE-SEED-001",
-})
-await applyPayment(db, ORG_A, ANA_ID, rosaPatientId, pagoRosa.id, {
-  chargeId: cargoObt.id,
-  amountCents: 10000,
-})
-await refundPayment(db, ORG_A, ANA_ID, rosaPatientId, pagoRosa.id, {
-  amountCents: 2000,
-  reason: "Ajuste de tarifa acordado en recepción.",
+await db.transaction(async (tx) => {
+  const methods = await listPaymentMethods(tx, ORG_A)
+  const wallet = methods.find((method) => method.name === "Yape")
+  const cash = methods.find((method) => method.typeCode === "10")
+  if (!wallet || !cash) throw new Error("Faltan medios de pago de la clínica demo")
+  await collectCharge(tx, ORG_A, ANA_ID, rosaPatientId, {
+    branchId: miraflores.id,
+    payerContactId: rosaSelfContactId,
+    chargeIds: [cargoObt.id],
+    requestId: "50206010-0000-4000-8000-000000000003",
+    payments: [{ paymentMethodId: wallet.id, amountCents: 10000, reference: "YAPE-SEED-001" }],
+  })
+  await collectCharge(tx, ORG_A, ANA_ID, rosaPatientId, {
+    branchId: miraflores.id,
+    advanceCents: 5000,
+    requestId: "50206010-0000-4000-8000-000000000004",
+    payments: [{ paymentMethodId: cash.id, amountCents: 5000 }],
+  })
+  await refundCredit(tx, ORG_A, ANA_ID, rosaPatientId, {
+    branchId: miraflores.id, amountCents: 2000, paymentMethodId: cash.id,
+    reason: "Devolución parcial del adelanto solicitada por la paciente.",
+  })
 })
 
 // Responsabilidad: Rosa es titular económica de su propia cuenta.
@@ -1843,11 +1883,14 @@ const elenaItem = await addPlanItem(db, ORG_A, ANA_ID, elenaPatientId, {
   sourceEncounterId: elenaEval.id,
   detail: "Limpieza dental (profilaxis)",
 })
-await createBudget(db, ORG_A, ANA_ID, elenaPatientId, {
+const elenaBudget = await createBudget(db, ORG_A, ANA_ID, elenaPatientId, {
   planId: elenaPlan.id,
   itemIds: [elenaItem.id],
   title: "Plan profilaxis",
 })
+await db.transaction((tx) => adjustBudgetLines(tx, ORG_A, ANA_ID, elenaPatientId, elenaBudget.id, {
+  lines: [{ planItemId: elenaItem.id, priceCents: 10000, reason: "Precio acordado para la demostración" }],
+}))
 
 // --- Volumen para paginación: 40 contactos+pacientes ---
 for (let i = 1; i <= 40; i++) {
@@ -2074,7 +2117,7 @@ const presupuestoPedro = await createBudget(db, ORG_A, ANA_ID, pedro.id, {
   title: "Plan preventivo infantil",
   notes: "Profilaxis; se evalúa sellante según hallazgo.",
 })
-await presentBudget(db, ORG_A, ANA_ID, pedro.id, presupuestoPedro.id)
+await deliverBudget(db, ORG_A, ANA_ID, pedro.id, presupuestoPedro.id)
 // La revisión 2 agrega la obturación decidua y deja la revisión 1 sustituida.
 const obtPedro = await addPlanItem(db, ORG_A, ANA_ID, pedro.id, {
   serviceId: serviceIdA("OBTURACION"),
@@ -2088,7 +2131,7 @@ const revisionPedro = await reviseBudget(db, ORG_A, ANA_ID, pedro.id, presupuest
   itemIds: [limpiezaPedro.id, obtPedro.id],
   reason: "Se agrega la obturación de la pieza 75 tras el hallazgo en la consulta.",
 })
-await presentBudget(db, ORG_A, ANA_ID, pedro.id, revisionPedro.id)
+await deliverBudget(db, ORG_A, ANA_ID, pedro.id, revisionPedro.id)
 
 await db.transaction((tx) =>
   registerPatient(

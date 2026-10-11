@@ -125,6 +125,8 @@ export interface PortalBudgetLine {
   scope: string | null
   toothNumber: number | null
   priceCents: number | null
+  tariffCents: number | null
+  promotionName: string | null
   currency: string
   decision: string
   itemStatus: string

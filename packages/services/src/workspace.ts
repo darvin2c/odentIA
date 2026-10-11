@@ -333,12 +333,21 @@ export async function getWorkspacePulse(tx: Db, orgId: string, access: Workspace
       on l.organization_id = ${orgId} and to_char(l.started_at at time zone ${timezone}, 'YYYY-MM-DD') = days.day
     group by days.day order by days.day`) : null
   const collections = access.finance ? await tx.execute<{ day: string; currency: string; amountCents: string }>(sql`
-    select to_char(paid_at at time zone ${timezone}, 'YYYY-MM-DD') as day,
-      currency, sum(amount_cents)::text as "amountCents"
-    from patient_payment
-    where organization_id = ${orgId} and voided_at is null
-      and paid_at >= (((to_char(now() at time zone ${timezone}, 'YYYY-MM-DD'))::date - 29)::timestamp at time zone ${timezone})
-    group by day, currency order by day, currency`) : null
+    with movements as (
+      select to_char(paid_at at time zone ${timezone}, 'YYYY-MM-DD') as day,
+        currency, amount_cents::bigint as amount
+      from patient_payment
+      where organization_id = ${orgId} and voided_at is null
+        and paid_at >= (((to_char(now() at time zone ${timezone}, 'YYYY-MM-DD'))::date - 29)::timestamp at time zone ${timezone})
+      union all
+      select to_char(r.refunded_at at time zone ${timezone}, 'YYYY-MM-DD') as day,
+        p.currency, -r.amount_cents::bigint as amount
+      from patient_payment_refund r
+      join patient_payment p on p.id = r.payment_id and p.organization_id = ${orgId} and p.voided_at is null
+      where r.organization_id = ${orgId}
+        and r.refunded_at >= (((to_char(now() at time zone ${timezone}, 'YYYY-MM-DD'))::date - 29)::timestamp at time zone ${timezone})
+    ) select day, currency, sum(amount)::text as "amountCents"
+    from movements group by day, currency order by day, currency`) : null
   const start = sql`((now() at time zone ${timezone})::date - 29)::timestamp at time zone ${timezone}`
   return { funnel, channels, execution, collections, performance: await crmPerformance(tx, orgId, access, start, sql`now()`) }
 }
@@ -485,7 +494,7 @@ export async function getManagementReport(tx: Db, orgId: string, from: string, t
       coalesce(sum(p.price_cents),0)::text as "amountCents"
     from encounter_procedure p join encounter e on e.id=p.encounter_id and e.organization_id=${orgId}
     join "user" u on u.id=e.dentist_user_id
-    where p.organization_id=${orgId} and e.status='finalizada'
+    where p.organization_id=${orgId} and e.status='finalizada' and p.voided_at is null
       and e.finalized_at >= ${start} and e.finalized_at < ${end}
     group by e.dentist_user_id, u.name, p.currency order by u.name, p.currency`)
   const opportunities = await tx.execute<{ status: string; currency: string; count: number; amountCents: string }>(sql`

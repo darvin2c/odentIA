@@ -225,13 +225,14 @@ it("services: incorporar otra vez una plantilla conserva su tarifa configurada",
   const first = await app.request("/services/from-templates", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ templateIds: [tpl] }),
+    body: JSON.stringify({ items: [{ templateId: tpl, priceCents: 12000, billingMode: "treatment" }] }),
   })
   expect(first.status).toBe(201)
   const firstBody = (await first.json()) as {
     data: { created: ServiceItem[]; existing: ServiceItem[] }
   }
   expect(firstBody.data.created).toHaveLength(1)
+  expect(firstBody.data.created[0]).toMatchObject({ priceCents: 12000, isActive: true })
 
   const withPrice = await app.request(`/services/${firstBody.data.created[0]?.id}`, {
     method: "PATCH",
@@ -243,7 +244,7 @@ it("services: incorporar otra vez una plantilla conserva su tarifa configurada",
   const second = await app.request("/services/from-templates", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ templateIds: [tpl] }),
+    body: JSON.stringify({ items: [{ templateId: tpl, priceCents: 9000, billingMode: "treatment" }] }),
   })
   expect(second.status).toBe(201)
   const secondBody = (await second.json()) as {

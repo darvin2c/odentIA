@@ -91,3 +91,17 @@ export interface ChannelAdapter {
     deps: ChannelAdapterDeps,
   ): Promise<{ externalId: string; displayName: string }>
 }
+
+/**
+ * Asunto/cuerpo del envío de correo en frío (`to: mail:<destino>`): la
+ * primera línea no vacía del texto es el asunto, el resto el cuerpo.
+ * Lo genera el servicio de documentos (caption con asunto primero).
+ */
+export function splitColdSubject(caption: string): { subject: string; body: string } {
+  const lines = caption.split("\n")
+  const first = lines.findIndex((l) => l.trim().length > 0)
+  if (first === -1) throw new Error("El texto del mensaje es obligatorio")
+  const subject = lines[first]!.trim().slice(0, 200)
+  const body = lines.slice(first + 1).join("\n").trim()
+  return { subject, body }
+}

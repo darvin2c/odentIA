@@ -1,6 +1,6 @@
 import { PageShell, SectionNav, type SectionNavItem } from "@odentia/ui-patterns"
 import { createFileRoute, Outlet, useRouterState } from "@tanstack/react-router"
-import { Library, Tag } from "lucide-react"
+import { BadgePercent, Library, Tag } from "lucide-react"
 import { RouterLink } from "../../lib/router-link"
 
 export const Route = createFileRoute("/_org/services")({
@@ -10,6 +10,7 @@ export const Route = createFileRoute("/_org/services")({
 const secciones: SectionNavItem[] = [
   { label: "Tarifario de la clínica", to: "/services", icon: Tag },
   { label: "Biblioteca de prestaciones", to: "/services/biblioteca", icon: Library },
+  { label: "Promociones", to: "/services/promotions", icon: BadgePercent },
 ]
 
 /**

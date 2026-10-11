@@ -19,7 +19,8 @@ import { Link } from "@tanstack/react-router"
 import { MoreHorizontal } from "lucide-react"
 import { useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
-import { fetchPatientAccount, fetchResponsibilities } from "../../lib/clinical-journey"
+import { fetchResponsibilities } from "../../lib/clinical-journey"
+import { fetchPatientAccount3 } from "../../lib/finance-collect"
 import { usePermission } from "../../lib/crm"
 import {
   appointmentWhen,
@@ -28,22 +29,25 @@ import {
 } from "../../lib/patient-appointments"
 import type { PatientSectionId } from "../../lib/patient-areas"
 import { ageFrom, hcLabel, type PatientFull, type PatientSummary } from "../../lib/patients"
-import { formatMoney } from "../../lib/services"
+import { formatMoney } from "@odentia/clinical"
+import { useOrgProfile } from "../../lib/org"
 import { FiliacionSectionDrawer } from "./filiacion-section-drawer"
 import { NewEncounterButton } from "./new-encounter-button"
 import { PatientAvatar } from "./patient-avatar"
 
 const dateLabel = (value: string) =>
   new Date(value).toLocaleString("es-PE", { dateStyle: "medium", timeStyle: "short" })
-
-function pendingLine(summary: PatientSummary): string {
+function pendingLine(summary: PatientSummary, locale: string | undefined): string {
   const accepted = summary.planPending.count
   const proposed = summary.proposedBudgets.length
   const parts = [`${accepted} tratamiento(s) aceptado(s) por ejecutar`]
   if (proposed > 0) parts.push("Presupuestos por revisar")
-  const totals = summary.planPending.totals
-    .map((total) => `${formatMoney(total.totalCents, total.currency)}`)
-    .join(" · ")
+  // Sin formato de la clínica no se inventa importe: la cuenta muestra el saldo real.
+  const totals = locale
+    ? summary.planPending.totals
+        .map((total) => `${formatMoney(total.totalCents, total.currency, locale)}`)
+        .join(" · ")
+    : ""
   // Lo acordado por ejecutar no es deuda: el saldo real vive en la pestaña Cuenta.
   if (totals) parts.push(`acordado por ejecutar: ${totals} (no es saldo pendiente)`)
   if (summary.planPending.unpricedCount)
@@ -155,6 +159,9 @@ export function PatientHeader({
   const canFinance = usePermission("finance.read")
   const canCharge = usePermission("finance.write")
   const queryClient = useQueryClient()
+  // Formato de la clínica para saldos y totales históricos (moneda de cada registro).
+  const profile = useOrgProfile()
+  const orgLocale = profile.data?.locale
   const [editing, setEditing] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
   const [archiveOpen, setArchiveOpen] = useState(false)
@@ -188,7 +195,7 @@ export function PatientHeader({
   const appointments = usePatientAppointments(patient.id, canAppointments)
   const account = useQuery({
     queryKey: ["patient-account", patient.id],
-    queryFn: () => fetchPatientAccount(patient.id),
+    queryFn: () => fetchPatientAccount3(patient.id),
     enabled: canFinance,
   })
   const age = ageFrom(patient.birthDate)
@@ -198,9 +205,8 @@ export function PatientHeader({
   )
   const upcoming = appointments.data ? nextAppointment(appointments.data.data) : null
   const outstanding = (account.data?.data.byCurrency ?? []).filter(
-    (balance) => balance.outstandingCents > 0,
+    (balance) => balance.porCobrar > 0,
   )
-  // Una acción principal: la del trabajo propio del rol. Las demás, secundarias.
   const primary = canEncounter ? "encounter" : canBook ? "book" : canCharge ? "charge" : null
   const docLabel =
     patient.docType && patient.docNumber
@@ -369,15 +375,19 @@ export function PatientHeader({
               <dd className="font-medium tabular-nums">
                 {outstanding.length === 0
                   ? "Sin saldo"
-                  : outstanding
-                      .map((balance) => formatMoney(balance.outstandingCents, balance.currency))
-                      .join(" · ")}
+                  : !orgLocale
+                    ? "…"
+                    : outstanding
+                        .map((balance) =>
+                          formatMoney(balance.porCobrar, balance.currency, orgLocale),
+                        )
+                        .join(" · ")}
               </dd>
             </div>
           ) : null}
         </dl>
         {summary ? (
-          <p className="text-sm text-muted-foreground">Trabajo pendiente: {pendingLine(summary)}</p>
+          <p className="text-sm text-muted-foreground">Trabajo pendiente: {pendingLine(summary, orgLocale)}</p>
         ) : null}
       </div>
       <ConfirmDialog

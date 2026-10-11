@@ -3,6 +3,7 @@ import { sql } from "drizzle-orm"
 import {
   boolean,
   char,
+  check,
   index,
   integer,
   jsonb,
@@ -28,9 +29,19 @@ export const orgProfile = pgTable("org_profile", {
   currency: char("currency", { length: 3 }).notNull().default("PEN"),
   timezone: text("timezone").notNull().default("America/Lima"),
   locale: text("locale").notNull().default("es-PE"),
+  // Impresión del ticket y hoja de cierre: térmica de 58 o 80 mm.
+  receiptWidth: text("receipt_width").notNull().default("80"),
+  // Tamaño de hoja para el presupuesto: A4 (ISO 216) o Carta.
+  sheetSize: text("sheet_size").notNull().default("A4"),
+  // Frase al pie del ticket; por defecto recibo interno sin validez fiscal.
+  ticketFooter: text("ticket_footer").notNull().default("Recibo interno. No es un documento fiscal."),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-})
+}, (table) => [
+  check("org_profile_receipt_width_check", sql`${table.receiptWidth} IN ('58','80')`),
+  check("org_profile_sheet_size_check", sql`${table.sheetSize} IN ('A4','Letter')`),
+  check("org_profile_ticket_footer_check", sql`length(trim(${table.ticketFooter})) BETWEEN 1 AND 280`),
+])
 
 export const patientRegistrationConfig = pgTable("patient_registration_config", {
   organizationId: text("organization_id").primaryKey().references(() => organization.id),

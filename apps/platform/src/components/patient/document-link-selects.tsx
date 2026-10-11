@@ -18,11 +18,12 @@ import { useQuery } from "@tanstack/react-query"
 import { fetchBudgets } from "../../lib/budgets"
 import {
   fetchFollowUps,
-  fetchPatientAccount,
   fetchPrescriptions,
   formatDate,
 } from "../../lib/clinical-journey"
-import { formatMoney } from "../../lib/services"
+import { fetchPatientAccount3 } from "../../lib/finance-collect"
+import { formatMoney } from "@odentia/clinical"
+import { useOrgProfile } from "../../lib/org"
 
 /** Vínculos soportados por la API; cadena vacía = sin vínculo. */
 export interface DocumentLinkValue {
@@ -48,6 +49,9 @@ export function DocumentLinkSelects({
   /** Procedimientos de la atención elegida: sin atención no hay ninguno que vincular. */
   procedures?: Array<{ id: string; description: string }>
 }): React.JSX.Element {
+  // Formato de la clínica para los importes históricos (moneda congelada del pago).
+  const profile = useOrgProfile()
+  const orgLocale = profile.data?.locale
   const budgets = useQuery({
     queryKey: ["budgets", patientId],
     queryFn: () => fetchBudgets(patientId),
@@ -62,13 +66,34 @@ export function DocumentLinkSelects({
   })
   const account = useQuery({
     queryKey: ["patient-account", patientId],
-    queryFn: () => fetchPatientAccount(patientId),
+    queryFn: () => fetchPatientAccount3(patientId),
   })
 
   const budgetList = budgets.data?.data ?? []
   const followUpList = followUps.data?.data ?? []
   const prescriptionList = prescriptions.data?.data ?? []
-  const paymentList = (account.data?.data.payments ?? []).filter((payment) => !payment.voidedAt)
+  // Cobros con ticket + historial anterior sin ticket (nunca se esconde).
+  const summary = account.data?.data ?? null
+  const paymentList = [
+    ...(summary?.cobros ?? []).flatMap((ticket) =>
+      ticket.payments
+        .filter((payment) => !payment.voidedAt)
+        .map((payment) => ({
+          id: payment.id,
+          paidAt: ticket.createdAt,
+          amountCents: payment.amountCents,
+          currency: ticket.currency,
+        })),
+    ),
+    ...(summary?.historico ?? [])
+      .filter((row) => row.status === "vigente")
+      .map((row) => ({
+        id: row.paymentId,
+        paidAt: row.paidAt,
+        amountCents: row.amountCents,
+        currency: row.currency,
+      })),
+  ]
 
   return (
     <div className="grid gap-3 sm:grid-cols-2">
@@ -166,7 +191,8 @@ export function DocumentLinkSelects({
           <SelectContent>
             {paymentList.map((payment) => (
               <SelectItem key={payment.id} value={payment.id}>
-                {formatDate(payment.paidAt)} · {formatMoney(payment.amountCents, payment.currency)}
+                {formatDate(payment.paidAt)} ·{" "}
+                {orgLocale ? formatMoney(payment.amountCents, payment.currency, orgLocale) : "…"}
               </SelectItem>
             ))}
           </SelectContent>

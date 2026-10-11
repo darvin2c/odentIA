@@ -170,6 +170,7 @@ export interface ContactListItem {
   displayName: string
   phone: string | null
   email: string | null
+  preferredChannel: string | null
   isActive: boolean
   tags: string[]
   assignedUserId: string | null
