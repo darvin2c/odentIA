@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link, createFileRoute } from "@tanstack/react-router"
 import { AlertTriangle, ArrowRight, Bot, CalendarDays, CheckCircle2, CheckSquare, Hand, Inbox, Wallet } from "lucide-react"
 import { useState, type ReactNode } from "react"
+import { AdvisorSection } from "../../components/agent/advisor"
 import { type AgentPanelTab, useAgentPanel } from "../../components/agent-panel"
 import { PerformanceSummary } from "../../components/crm/performance-summary"
 import { HomeStart } from "../../components/home-start"
@@ -116,6 +117,7 @@ function HomePage() {
     <PageHeader title="Inicio" subtitle={data ? `Tu jornada · ${formatLongDay(data.date, data.locale)}` : "Lo que necesita tu atención hoy"} />
     {query.isPending ? <LoadingState /> : query.isError ? <ErrorState title="No pudimos cargar tu jornada" message="Comprueba tu conexión y vuelve a intentarlo." retryLabel="Volver a intentar" onRetry={() => void query.refetch()} /> : data ? <>
       {!hasPending && <HomeStart data={data} />}
+      <AdvisorSection />
       {data.agent && (hasAgentPending || outcome || decideError) && <AgentSurface aria-label="Pendiente de ti" className="enter">
         <div className="mb-4 flex flex-wrap items-center gap-3">
           <AgentMark />

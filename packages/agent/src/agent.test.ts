@@ -15,10 +15,28 @@ import {
   decideProposal,
   createAppointment,
   moveAppointment,
+  approveLesson,
   claimHandoff,
+  correctAnswer,
+  discardLesson,
+  getLesson,
+  withdrawLesson,
   createHandoff,
+  createKnowledgeEntry,
+  setKnowledgeStatus,
   updateTask,
+  getAgentCaseState,
   getAgentConfig,
+  getAnswerTraceForMessage,
+  listAnswerTraces,
+  listKnowledgeGaps,
+  listPersonFacts,
+  removePersonFact,
+  operationAgentFields,
+  READ_TOOLS,
+  roleTools,
+  TOOL_OPERATION,
+  TOOLS_WITHOUT_OPERATION,
   getAgentLlmSecrets,
   getAutonomyPolicy,
   ingestInbound,
@@ -38,9 +56,11 @@ import { and, eq, sql } from "drizzle-orm"
 import { migrate } from "drizzle-orm/postgres-js/migrator"
 import { GenericContainer, type StartedTestContainer, Wait } from "testcontainers"
 import { afterAll, beforeAll, expect, it } from "vitest"
+import { createFakeDecisionModel, type DecisionModel } from "./decision/index.js"
 import { FAKE_REPLY_TEXT } from "./fake-model.js"
-import { type AgentRuntime, processAgentRun } from "./run.js"
+import { type AgentRuntime, previewLesson, processAgentRun, simulateAgentSandbox } from "./run.js"
 import { compileAgentGraph } from "./graph.js"
+import { extractDictation } from "./dictation.js"
 import { makeAgentTools, type AgentToolCtx } from "./tools.js"
 import { BaseChatModel } from "@langchain/core/language_models/chat_models"
 import { AIMessage, SystemMessage, type BaseMessage } from "@langchain/core/messages"
@@ -271,11 +291,17 @@ class ScriptedModel extends BaseChatModel {
   _llmType(): string {
     return "scripted-chat"
   }
-  override bindTools(): this {
+  /** Herramientas que el grafo le ofreció en esta corrida. */
+  tools: string[] = []
+  override bindTools(tools: unknown[] = []): this {
+    this.tools = tools.map((tool) => (tool as { name: string }).name)
     return this
   }
+  /** Herramientas que tenía a la vista en cada llamada. */
+  offered: string[][] = []
   async _generate(messages: BaseMessage[]): Promise<ChatResult> {
     this.seen.push(messages)
+    this.offered.push([...this.tools])
     const message = this.script(messages, this.seen.length)
     return { generations: [{ text: String(message.content), message }] }
   }
@@ -640,7 +666,8 @@ it("una cuota agotada (402) tampoco reintenta y avisa con su propio título", as
 })
 
 it("el modelo de decisión en sombra registra su triaje sin cambiar la corrida", async () => {
-  await withOrgContext(appDb, "org_a", (tx) => upsertAgentConfig(tx, "org_a", { decisionProvider: "baseline" }))
+  // Con «elegir el camino» apagado, el modelo de decisión solo opina.
+  await withOrgContext(appDb, "org_a", (tx) => upsertAgentConfig(tx, "org_a", { decisionProvider: "baseline", decisionRoutingEnabled: false }))
   try {
     const { conversationId, messageId } = await ingestText("tg:ag-sombra", "evt-ag-sombra", "Quiero hablar con una persona, me duele mucho")
     const model = new ScriptedModel(() => toolCall("send_reply", { text: "Te paso con el equipo." }, "call-1"))
@@ -657,7 +684,7 @@ it("el modelo de decisión en sombra registra su triaje sin cambiar la corrida",
     )
     // Con LLM_MODEL=fake la línea base es el modelo de decisión falso.
     expect(rows).toEqual([
-      expect.objectContaining({ point: "triage.v1", provider: "fake", error: null, outcome: expect.objectContaining({ wouldHandoff: true }) }),
+      expect.objectContaining({ point: "triage.v2", provider: "fake", error: null, outcome: expect.objectContaining({ wouldHandoff: true }) }),
     ])
     expect(rows[0]!.stateChars).toBeGreaterThan(0)
     // Las filas no guardan el texto: solo la huella.
@@ -688,7 +715,7 @@ it("el modelo de decisión en sombra registra su triaje sin cambiar la corrida",
     )
     expect(missing).toEqual([{ provider: "jev", error: expect.stringContaining("CONFIG") }])
   } finally {
-    await withOrgContext(appDb, "org_a", (tx) => upsertAgentConfig(tx, "org_a", { decisionProvider: "none" }))
+    await withOrgContext(appDb, "org_a", (tx) => upsertAgentConfig(tx, "org_a", { decisionProvider: "none", decisionRoutingEnabled: true }))
   }
 })
 
@@ -1437,4 +1464,911 @@ it("la derivación tiene plazo, toma atómica de la cola y escalamiento único a
   const [conv] = await withOrgContext(appDb, "org_a", (tx) =>
     tx.select({ agentStatus: conversation.agentStatus }).from(conversation).where(eq(conversation.id, conversationId)))
   expect(conv!.agentStatus).toBe("off")
+})
+
+/** Sede con sillón, horario y un paciente vinculado al interlocutor del hilo: lo mínimo para reservar. */
+async function bookingFixture(conversationId: string, label: string) {
+  const [createdBranch] = await ownerDb
+    .insert(branch)
+    .values({ organizationId: "org_a", name: `Sede ${label}`, timezone: "America/Lima" })
+    .returning({ id: branch.id })
+  const branchId = createdBranch!.id
+  const stamp = Date.now()
+  const actorId = `actor-${label}-${stamp}`
+  const dentistId = `dentista-${label}-${stamp}`
+  await ownerDb.insert(user).values([
+    { id: actorId, name: `Actor ${label}`, email: `actor-${label}-${stamp}@example.test` },
+    { id: dentistId, name: `Dentista ${label}`, email: `dentista-${label}-${stamp}@example.test` },
+  ])
+  await ownerDb.execute(sql`
+    insert into "member" ("id", "organization_id", "user_id", "role", "created_at") values
+      (${`m-${actorId}`}, 'org_a', ${actorId}, 'owner', now()),
+      (${`m-${dentistId}`}, 'org_a', ${dentistId}, 'member', now())`)
+  const chair = await withOrgContext(appDb, "org_a", (tx) => createChair(tx, "org_a", { branchId, name: `Sillón ${label}` }))
+  await withOrgContext(appDb, "org_a", (tx) =>
+    setProfessionalSchedule(tx, "org_a", actorId, {
+      branchId,
+      dentistUserId: dentistId,
+      rules: [1, 2, 3, 4, 5].map((weekday) => ({ weekday, startMin: 9 * 60, endMin: 13 * 60 })),
+    }))
+  const [conv] = await withOrgContext(appDb, "org_a", (tx) =>
+    tx.select({ contactId: conversation.contactId }).from(conversation).where(eq(conversation.id, conversationId)))
+  const contactId = conv!.contactId
+  const patientNumber = await withOrgContext(appDb, "org_a", (tx) => nextPatientNumber(tx, "org_a"))
+  const [createdPatient] = await ownerDb
+    .insert(patient)
+    .values({ organizationId: "org_a", displayName: `Paciente ${label}`, patientNumber })
+    .returning({ id: patient.id })
+  const patientId = createdPatient!.id
+  await withOrgContext(appDb, "org_a", (tx) =>
+    setPatientContact(tx, "org_a", actorId, patientId, { contactId, relationship: "self", isPreferred: true }))
+  return { branchId, chairId: chair!.id, dentistId, actorId, patientId, contactId }
+}
+
+/** Próximo lunes con al menos tres días de margen, a medianoche de Lima. */
+function upcomingMonday(): Date {
+  const day = new Date(Date.now() + 3 * 86_400_000)
+  day.setUTCHours(5, 0, 0, 0)
+  while (day.getUTCDay() !== 1) day.setUTCDate(day.getUTCDate() + 1)
+  return day
+}
+
+const ISO_INSTANT = /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z/
+
+it("el sí del interlocutor en el turno siguiente ejecuta la reserva propuesta, sin volver a buscar", async () => {
+  const first = await ingestText("tg:dos-turnos", "evt-dos-turnos-1", "Quiero una cita")
+  const { conversationId } = first
+  const fx = await bookingFixture(conversationId, "dos-turnos")
+  const prevPolicy = await withOrgContext(appDb, "org_a", (tx) => getAutonomyPolicy(tx, "org_a"))
+  await withOrgContext(appDb, "org_a", (tx) =>
+    updateAutonomyPolicy(tx, "org_a", fx.actorId, { reservar_cita: "confirmar_usuario", enviar_mensaje: "directo" }))
+  try {
+    const day = upcomingMonday()
+    const turnOne = new ScriptedModel((messages, call) => {
+      if (call === 1) {
+        return toolCall(
+          "buscar_huecos",
+          { branchId: fx.branchId, from: day.toISOString(), to: new Date(day.getTime() + 86_400_000).toISOString(), durationMin: 45 },
+          "t1-huecos",
+        )
+      }
+      if (call === 2) {
+        const line = String(messages[messages.length - 1]?.content ?? "").split("\n")[0] ?? ""
+        return toolCall(
+          "proponer_cita",
+          {
+            patientId: fx.patientId,
+            dentistUserId: line.match(/profesional (\S+)/)?.[1],
+            chairId: line.match(/sillón ([0-9a-f-]{36})/i)?.[1],
+            startsAt: line.match(ISO_INSTANT)?.[0],
+            branchId: fx.branchId,
+            durationMin: 45,
+          },
+          "t1-propuesta",
+        )
+      }
+      if (call === 3) {
+        return toolCall("anotar_caso", { nota: "La cita es para Paciente dos-turnos; prefiere las mañanas." }, "t1-nota")
+      }
+      return toolCall("send_reply", { text: "Tengo un espacio el lunes a las 9:00 a. m. ¿Confirmas la cita?" }, "t1-envio")
+    })
+    expect(await runScripted(turnOne, conversationId, first.messageId)).toBe("done")
+    const pending = await withOrgContext(appDb, "org_a", (tx) =>
+      listProposals(tx, "org_a", { conversationId, status: "propuesta" }))
+    expect(pending.map((p) => p.action)).toEqual(["reservar_cita"])
+
+    const second = await ingestText("tg:dos-turnos", "evt-dos-turnos-2", "Sí")
+    // El modelo del segundo turno solo sabe lo que recibe: confirma si el id de
+    // la propuesta pendiente está a la vista; si no, solo puede volver a preguntar.
+    const turnTwo = new ScriptedModel((messages, call) => {
+      if (call > 1) return toolCall("send_reply", { text: "Listo, tu cita quedó reservada." }, "t2-envio")
+      const visible = messages.map((m) => String(m.content)).join("\n")
+      const proposalId = /propuesta[^\n]*\bid ([0-9a-f-]{36})/i.exec(visible)?.[1]
+      return proposalId
+        ? toolCall("confirmar_propuesta", { proposalId }, "t2-confirma")
+        : toolCall("send_reply", { text: "¿Me confirmas la cita, por favor?" }, "t2-repregunta")
+    })
+    // Aunque el modelo de decisión lea ese «Sí» como un saludo, con una propuesta
+    // por confirmar el turno recibe todas las herramientas: sin confirmar_propuesta
+    // a la vista, el sí se perdería.
+    const greeting: DecisionModel = {
+      provider: "fake",
+      reportsProbabilities: true,
+      decide: async (_state, questions) => ({
+        answers: questions.map((q): Awaited<ReturnType<DecisionModel["decide"]>>["answers"][number] =>
+          q.kind === "yesno"
+            ? { id: q.id, kind: "yesno", probability: 0.02 }
+            : q.kind === "choice"
+              ? q.id === "intent"
+                ? { id: q.id, kind: "choice", choice: "greeting_or_thanks", probabilities: { greeting_or_thanks: 0.95 }, confidence: 0.9 }
+                : { id: q.id, kind: "choice", choice: "none", probabilities: { none: 0.95 }, confidence: 0.9 }
+              : { id: q.id, kind: "score", score: 0, probabilities: null, confidence: null }),
+        model: "guion",
+        usage: null,
+        latencyMs: 1,
+      }),
+    }
+    await withOrgContext(appDb, "org_a", (tx) => upsertAgentConfig(tx, "org_a", { decisionProvider: "baseline" }))
+    try {
+      expect(await processAgentRun(appDb, { ...runtime, createModel: async () => turnTwo, createDecisionModel: () => greeting }, {
+        msg_id: 1, read_ct: 0, message: { kind: "inbound_message", orgId: "org_a", conversationId, messageId: second.messageId },
+      })).toBe("done")
+    } finally {
+      await withOrgContext(appDb, "org_a", (tx) => upsertAgentConfig(tx, "org_a", { decisionProvider: "none" }))
+    }
+    expect(systemTextOf(turnTwo.seen[0] ?? [])).toContain("Camino de este turno, elegido por lo que escribió el interlocutor: un saludo")
+    expect(turnTwo.offered[0]).toContain("confirmar_propuesta")
+    expect(turnTwo.offered[0]).not.toContain("ampliar_herramientas")
+    // El segundo turno recibió lo que dejó el primero: la nota, la consulta de
+    // agenda y cuándo escribió el interlocutor.
+    const seen = turnTwo.seen[0] ?? []
+    const system = systemTextOf(seen)
+    expect(system).toContain("Propuesta pendiente de que el interlocutor confirme: Reservar cita")
+    expect(system).toContain("- La cita es para Paciente dos-turnos; prefiere las mañanas.")
+    expect(system).toContain("[buscar_huecos · ")
+    expect(String(seen[seen.length - 1]?.content)).toMatch(/^\[[^\]]+\] Sí$/)
+    const booked = await withOrgContext(appDb, "org_a", (tx) =>
+      tx.select({ status: appointment.status }).from(appointment).where(eq(appointment.patientId, fx.patientId)))
+    expect(booked).toEqual([{ status: "programada" }])
+    const runs = await ledgerRows(conversationId)
+    expect(runs[runs.length - 1]?.toolsUsed).toEqual(["confirmar_propuesta", "send_reply"])
+    expect(await agentMessages(conversationId)).toContain("Listo, tu cita quedó reservada.")
+    // Lo hecho queda en el estado del caso y cada respuesta dice en qué se basó.
+    const state = await withOrgContext(appDb, "org_a", (tx) => getAgentCaseState(tx, "org_a", conversationId))
+    expect(state.pending).toEqual([])
+    expect(state.recent.map((item) => `${item.action}:${item.status}`)).toEqual(["reservar_cita:ejecutada"])
+    const traces = await withOrgContext(appDb, "org_a", (tx) => listAnswerTraces(tx, "org_a", conversationId))
+    expect(traces.map((trace) => trace.outcome)).toEqual(["enviada", "enviada"])
+    const offered = traces[1]!
+    expect(offered.basis).toEqual([{ kind: "agenda", label: "Agenda: horarios disponibles", detail: expect.stringMatching(/horarios?$/) }])
+    expect(offered.checks).toEqual([{ kind: "hora", value: "9:00 a. m.", ok: true, source: "Agenda: horarios disponibles" }])
+    expect(offered.messageId).toBeTruthy()
+    const byMessage = await withOrgContext(appDb, "org_a", (tx) =>
+      getAnswerTraceForMessage(tx, "org_a", offered.messageId!))
+    expect(byMessage?.id).toBe(offered.id)
+  } finally {
+    await withOrgContext(appDb, "org_a", (tx) =>
+      updateAutonomyPolicy(tx, "org_a", fx.actorId, {
+        reservar_cita: prevPolicy.reservar_cita,
+        enviar_mensaje: prevPolicy.enviar_mensaje,
+      }))
+  }
+})
+
+it("una respuesta con un precio que no está en lo consultado no sale y, a la segunda, el caso pasa a una persona", async () => {
+  const { conversationId, messageId } = await ingestText("tg:precio-inventado", "evt-precio-1", "¿Cuánto cuesta la limpieza?")
+  const model = new ScriptedModel(() => toolCall("send_reply", { text: "La limpieza cuesta S/ 99." }, `envio-${Date.now()}`))
+  expect(await runScripted(model, conversationId, messageId)).toBe("done")
+  // Dos intentos: el primero vuelve al modelo con el dato que falta; el segundo deriva.
+  expect(model.seen).toHaveLength(2)
+  const feedback = String(model.seen[1]?.[model.seen[1].length - 1]?.content)
+  expect(feedback).toContain("No enviado: precio «S/ 99»")
+  expect(await agentMessages(conversationId)).toEqual([])
+  expect(await agentStatusOf(conversationId)).toBe("off")
+  expect((await ledgerRows(conversationId)).map((r) => r.status)).toEqual(["handoff"])
+  const traces = await withOrgContext(appDb, "org_a", (tx) => listAnswerTraces(tx, "org_a", conversationId))
+  expect(traces.map((trace) => trace.outcome)).toEqual(["bloqueada", "bloqueada"])
+  expect(traces[0]?.checks).toEqual([{ kind: "precio", value: "S/ 99", ok: false, source: null }])
+  expect(traces[0]?.messageId).toBeNull()
+  const [handoff] = await withOrgContext(appDb, "org_a", (tx) =>
+    tx.select({ reason: agentHandoff.reason, summary: agentHandoff.summary }).from(agentHandoff)
+      .where(eq(agentHandoff.conversationId, conversationId)))
+  expect(handoff?.reason).toBe("El agente no pudo sustentar un dato de su respuesta")
+  expect(handoff?.summary).toContain("S/ 99")
+})
+
+it("un precio de una respuesta oficial sale y deja constancia de en qué se basó", async () => {
+  const entry = await withOrgContext(appDb, "org_a", (tx) =>
+    createKnowledgeEntry(tx, "org_a", null, { kind: "faq", title: "Precio de la profilaxis", body: "La profilaxis cuesta S/ 135.00." }))
+  await withOrgContext(appDb, "org_a", (tx) => setKnowledgeStatus(tx, "org_a", null, entry.id, "publicada"))
+  try {
+    const { conversationId, messageId } = await ingestText("tg:precio-oficial", "evt-precio-2", "¿Cuánto cuesta la profilaxis?")
+    const model = new ScriptedModel((_messages, call) =>
+      call === 1
+        ? toolCall("consultar_conocimiento", { pregunta: "profilaxis" }, "busca")
+        : toolCall("send_reply", { text: "La profilaxis cuesta S/ 135." }, "envia"))
+    expect(await runScripted(model, conversationId, messageId)).toBe("done")
+    expect(await agentMessages(conversationId)).toEqual(["La profilaxis cuesta S/ 135."])
+    const [trace] = await withOrgContext(appDb, "org_a", (tx) => listAnswerTraces(tx, "org_a", conversationId))
+    expect(trace?.outcome).toBe("enviada")
+    expect(trace?.basis).toContainEqual({
+      kind: "conocimiento",
+      label: "Respuestas oficiales de la clínica",
+      detail: "Precio de la profilaxis",
+    })
+    expect(trace?.checks).toEqual([
+      { kind: "precio", value: "S/ 135", ok: true, source: expect.stringContaining("clínica") },
+    ])
+    expect(trace?.model).toBe("fake")
+  } finally {
+    await withOrgContext(appDb, "org_a", (tx) => setKnowledgeStatus(tx, "org_a", null, entry.id, "borrador"))
+  }
+})
+
+it("con la comprobación apagada la respuesta sale sin revisar y la traza no afirma ninguna comprobación", async () => {
+  await withOrgContext(appDb, "org_a", (tx) => upsertAgentConfig(tx, "org_a", { replyCheckEnabled: false }))
+  try {
+    const { conversationId, messageId } = await ingestText("tg:sin-comprobar", "evt-precio-3", "¿Cuánto cuesta?")
+    const model = new ScriptedModel(() => toolCall("send_reply", { text: "Cuesta S/ 77." }, "envia"))
+    expect(await runScripted(model, conversationId, messageId)).toBe("done")
+    expect(await agentMessages(conversationId)).toEqual(["Cuesta S/ 77."])
+    const [trace] = await withOrgContext(appDb, "org_a", (tx) => listAnswerTraces(tx, "org_a", conversationId))
+    expect(trace?.outcome).toBe("enviada")
+    expect(trace?.checks).toEqual([])
+  } finally {
+    await withOrgContext(appDb, "org_a", (tx) => upsertAgentConfig(tx, "org_a", { replyCheckEnabled: true }))
+  }
+})
+
+it("en un hilo largo el contexto avisa de lo que no ve y la simulación comprueba sin dejar rastro", async () => {
+  const first = await ingestText("tg:hilo-largo", "evt-largo-0", "mensaje 0")
+  for (let i = 1; i <= 22; i++) await ingestText("tg:hilo-largo", `evt-largo-${i}`, `mensaje ${i}`)
+  const [conv] = await withOrgContext(appDb, "org_a", (tx) =>
+    tx.select({ contactId: conversation.contactId }).from(conversation).where(eq(conversation.id, first.conversationId)))
+  const toolCtx: AgentToolCtx = {
+    db: appDb, orgId: "org_a", conversationId: first.conversationId, contactId: conv!.contactId,
+    triggerId: null, secretsKey: KEY, dryRun: true, handedOff: false, decisionRecorded: false, replySettled: false,
+    toolsUsed: [], usage: emptyUsage(), draftText: "¿y cuánto cuesta?",
+  }
+  const model = new ScriptedModel((_messages, call) =>
+    call === 1
+      ? toolCall("anotar_caso", { nota: "Pregunta por precios." }, "nota")
+      : toolCall("send_reply", { text: "Cuesta S/ 61." }, `envia-${call}`))
+  await compileAgentGraph(model, toolCtx).invoke({ messages: [], turnCount: 0 }, { configurable: { thread_id: "sim-largo" } })
+  expect(systemTextOf(model.seen[0] ?? [])).toContain("Solo ves los últimos 20 mensajes de 23")
+  expect(toolCtx.lastChecks).toEqual([{ kind: "precio", value: "S/ 61", ok: false, source: null }])
+  expect(toolCtx.handedOff).toBe(true)
+  // Simulación: ni nota, ni traza, ni derivación real.
+  const state = await withOrgContext(appDb, "org_a", (tx) => getAgentCaseState(tx, "org_a", first.conversationId))
+  expect(state.notes).toEqual([])
+  expect(await withOrgContext(appDb, "org_a", (tx) => listAnswerTraces(tx, "org_a", first.conversationId))).toEqual([])
+  expect(await agentStatusOf(first.conversationId)).toBe("on")
+})
+
+async function publishKnowledge(input: { title: string; body: string; validUntil?: string; askForms?: string[] }) {
+  const entry = await withOrgContext(appDb, "org_a", (tx) => createKnowledgeEntry(tx, "org_a", null, { kind: "faq", ...input }))
+  await withOrgContext(appDb, "org_a", (tx) => setKnowledgeStatus(tx, "org_a", null, entry.id, "publicada"))
+  return entry.id
+}
+
+async function unpublishKnowledge(ids: string[]) {
+  for (const id of ids) await withOrgContext(appDb, "org_a", (tx) => setKnowledgeStatus(tx, "org_a", null, id, "borrador"))
+}
+
+it("el agente recibe todas las respuestas vigentes, no la vencida, y anota lo que no supo responder", async () => {
+  const yesterday = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Lima" }).format(new Date(Date.now() - 86_400_000))
+  const ids: string[] = []
+  for (let i = 1; i <= 14; i++) ids.push(await publishKnowledge({ title: `Tema completo ${i}`, body: `Respuesta completa ${i}.` }))
+  ids.push(await publishKnowledge({ title: "Promoción vencida", body: "Dos limpiezas por una.", validUntil: yesterday }))
+  try {
+    const question = "¿Tienen estacionamiento para motos?"
+    const { conversationId, messageId } = await ingestText("tg:conoc-todo", "evt-conoc-1", question)
+    let found = ""
+    const model = new ScriptedModel((messages, call) => {
+      if (call === 1) return toolCall("consultar_conocimiento", { pregunta: "Promoción vencida" }, "busca-vencida")
+      if (call === 2) {
+        found = String(messages[messages.length - 1]?.content)
+        return toolCall("consultar_conocimiento", { pregunta: "estacionamiento motos" }, "busca-motos")
+      }
+      return toolCall("send_reply", { text: "No tengo ese dato; lo consulto con el equipo." }, "envia")
+    })
+    expect(await runScripted(model, conversationId, messageId)).toBe("done")
+    const system = systemTextOf(model.seen[0] ?? [])
+    // Las catorce, no solo las diez más recientes.
+    for (let i = 1; i <= 14; i++) expect(system).toContain(`- Tema completo ${i}: Respuesta completa ${i}.`)
+    expect(system).not.toContain("Promoción vencida")
+    expect(found).toContain("Sin respuesta oficial")
+    const gaps = await withOrgContext(appDb, "org_a", (tx) => listKnowledgeGaps(tx, "org_a"))
+    const mine = gaps.filter((gap) => gap.conversationId === conversationId)
+    // Una entrada por pregunta del interlocutor, aunque el agente buscara dos veces.
+    expect(mine).toMatchObject([{ question, count: 1, teamAnswer: null }])
+  } finally {
+    await unpublishKnowledge(ids)
+  }
+})
+
+it("con modelo de decisión el contexto lleva el índice y solo el tema elegido; si duda o falla, van todas", async () => {
+  const ids = [
+    await publishKnowledge({ title: "Selección: medios de pago", body: "Aceptamos efectivo y tarjeta." }),
+    await publishKnowledge({ title: "Selección: atención a menores", body: "Atendemos niños desde los 3 años." }),
+  ]
+  await withOrgContext(appDb, "org_a", (tx) => upsertAgentConfig(tx, "org_a", { decisionProvider: "baseline" }))
+  const fake = createFakeDecisionModel()
+  const runWith = async (decision: DecisionModel, thread: string, eventId: string) => {
+    const { conversationId, messageId } = await ingestText(thread, eventId, "¿Atienden a menores de edad?")
+    const model = new ScriptedModel(() => toolCall("send_reply", { text: "Sí, atendemos niños." }, `envia-${eventId}`))
+    const verdict = await processAgentRun(
+      appDb,
+      { ...runtime, createModel: async () => model, createDecisionModel: () => decision },
+      { msg_id: 1, read_ct: 0, message: { kind: "inbound_message", orgId: "org_a", conversationId, messageId } },
+    )
+    expect(verdict).toBe("done")
+    const retrieval = await withOrgContext(appDb, "org_a", (tx) =>
+      tx.select().from(agentDecisionLog)
+        .where(and(eq(agentDecisionLog.conversationId, conversationId), eq(agentDecisionLog.mode, "retrieval"))))
+    return { conversationId, system: systemTextOf(model.seen[0] ?? []), retrieval }
+  }
+  try {
+    // Seguro: índice en el bloque de la clínica y solo el tema elegido con su texto.
+    const sure = await runWith(fake, "tg:seleccion-1", "evt-sel-1")
+    expect(sure.system).toContain("Índice de las 2 respuestas oficiales")
+    expect(sure.system).toContain("Respuestas oficiales que aplican a este mensaje")
+    expect(sure.system).toContain("- Selección: atención a menores: Atendemos niños desde los 3 años.")
+    expect(sure.system).not.toContain("- Selección: medios de pago: Aceptamos efectivo y tarjeta.")
+    expect(sure.retrieval).toHaveLength(1)
+    expect(sure.retrieval[0]).toMatchObject({
+      point: "knowledge.v1",
+      provider: "fake",
+      outcome: { verdict: "seguro", picked: ["Selección: atención a menores"], candidates: 2 },
+    })
+    const [trace] = await withOrgContext(appDb, "org_a", (tx) => listAnswerTraces(tx, "org_a", sure.conversationId))
+    expect(trace?.basis).toContainEqual({
+      kind: "conocimiento",
+      label: "Respuestas oficiales elegidas para este mensaje",
+      detail: "Selección: atención a menores",
+    })
+
+    // Duda: probabilidades planas. Se paga más solo aquí: van todas las respuestas.
+    const flat: DecisionModel = {
+      ...fake,
+      async decide(state, questions, opts) {
+        const [first] = questions
+        if (first?.id !== "topic" || first.kind !== "choice") return fake.decide(state, questions, opts)
+        const options = first.options
+        return {
+          answers: [{
+            id: "topic", kind: "choice", choice: options[0]?.value ?? "none",
+            probabilities: Object.fromEntries(options.map((option) => [option.value, 1 / options.length])), confidence: 0,
+          }],
+          model: "plano", usage: null, latencyMs: 1,
+        }
+      },
+    }
+    const doubt = await runWith(flat, "tg:seleccion-2", "evt-sel-2")
+    expect(doubt.system).toContain("Respuestas oficiales completas (no quedó claro cuál aplica")
+    expect(doubt.system).toContain("- Selección: medios de pago: Aceptamos efectivo y tarjeta.")
+    expect(doubt.system).toContain("- Selección: atención a menores: Atendemos niños desde los 3 años.")
+    expect(doubt.retrieval[0]?.outcome).toMatchObject({ verdict: "duda" })
+
+    // Fallo del modelo de decisión: el turno sigue, con todas las respuestas, y el fallo queda registrado.
+    const broken: DecisionModel = {
+      ...fake,
+      async decide(state, questions, opts) {
+        if (questions[0]?.id === "topic") throw new Error("proveedor caído")
+        return fake.decide(state, questions, opts)
+      },
+    }
+    const failed = await runWith(broken, "tg:seleccion-3", "evt-sel-3")
+    expect(failed.system).toContain("Respuestas oficiales completas")
+    expect(failed.retrieval).toMatchObject([{ error: "fallo inesperado del modelo de decisión", answers: [] }])
+    expect(await agentMessages(failed.conversationId)).toEqual(["Sí, atendemos niños."])
+  } finally {
+    await withOrgContext(appDb, "org_a", (tx) => upsertAgentConfig(tx, "org_a", { decisionProvider: "none" }))
+    await unpublishKnowledge(ids)
+  }
+})
+
+it("la ficha de Recepción declara exactamente las herramientas que el agente tiene", async () => {
+  const { conversationId } = await ingestText("tg:ficha", "evt-ficha", "Hola")
+  const [conv] = await withOrgContext(appDb, "org_a", (tx) =>
+    tx.select({ contactId: conversation.contactId }).from(conversation).where(eq(conversation.id, conversationId)))
+  const ctx: AgentToolCtx = {
+    db: appDb, orgId: "org_a", conversationId, contactId: conv!.contactId,
+    triggerId: null, secretsKey: KEY, dryRun: true, handedOff: false, decisionRecorded: false, replySettled: false,
+    toolsUsed: [], usage: emptyUsage(),
+  }
+  // Una herramienta nueva sin sitio en la ficha, o una función que nombra una
+  // herramienta que no existe, rompe esta igualdad.
+  expect(makeAgentTools(ctx).map((tool) => tool.name).sort()).toEqual(roleTools("recepcion").sort())
+
+  // Ninguna herramienta declara campos por su cuenta: o toma los de la
+  // operación que comparte con la pantalla, o solo lee, o figura con su motivo
+  // entre las excepciones. Una herramienta nueva fuera de las tres listas, o
+  // cuyos campos no coincidan con la declaración, no pasa.
+  for (const tool of makeAgentTools(ctx)) {
+    const operation = TOOL_OPERATION[tool.name]
+    if (!operation) {
+      expect(READ_TOOLS.includes(tool.name) || tool.name in TOOLS_WITHOUT_OPERATION, `${tool.name} no declara de dónde salen sus campos`).toBe(true)
+      continue
+    }
+    const shape = (tool.schema as unknown as { shape: Record<string, { description?: string }> }).shape
+    const declared = operationAgentFields(operation)
+    expect(Object.keys(shape).sort(), tool.name).toEqual(declared.map((field) => field.name).sort())
+    for (const field of declared) expect(shape[field.name]?.description, `${tool.name}.${field.name}`).toBe(field.description)
+  }
+  // Y ninguna figura en dos listas a la vez.
+  for (const name of Object.keys(TOOL_OPERATION)) {
+    expect(READ_TOOLS.includes(name) || name in TOOLS_WITHOUT_OPERATION, name).toBe(false)
+  }
+})
+
+it("apagar una función le quita sus herramientas y deja dicho qué hacer cuando se la piden", async () => {
+  const all = async (thread: string, eventId: string) => {
+    const { conversationId, messageId } = await ingestText(thread, eventId, "Quiero una cita")
+    const model = new ScriptedModel(() => toolCall("send_reply", { text: "Con gusto te ayudo." }, `e-${eventId}`))
+    expect(await runScripted(model, conversationId, messageId)).toBe("done")
+    return { tools: model.tools, system: systemTextOf(model.seen[0] ?? []) }
+  }
+  const before = await all("tg:funciones-0", "evt-fn-0")
+  expect(before.tools).toEqual(expect.arrayContaining(["buscar_huecos", "proponer_cita", "consultar_conocimiento", "create_opportunity"]))
+  expect(before.system).toContain("reserva con proponer_cita")
+  await withOrgContext(appDb, "org_a", (tx) =>
+    upsertAgentConfig(tx, "org_a", {
+      disabledFunctions: ["agendar", "seguimiento"],
+      functionNotes: { informar: "En ortodoncia, pregunta primero si ya tiene evaluación." },
+    }))
+  try {
+    const off = await all("tg:funciones-1", "evt-fn-1")
+    for (const tool of ["buscar_huecos", "proponer_cita", "reprogramar_cita", "cancelar_cita", "create_opportunity", "move_to_stage"]) {
+      expect(off.tools).not.toContain(tool)
+    }
+    // Lo que otra función encendida necesita, y lo fijo, se queda.
+    expect(off.tools).toEqual(expect.arrayContaining(["ver_sedes_y_servicios", "consultar_conocimiento", "request_human_handoff", "anotar_caso", "send_reply"]))
+    expect(off.system).toContain("No reservas, mueves ni cancelas citas: si lo piden, pasa el caso a una persona.")
+    expect(off.system).toContain("No creas ni cambias oportunidades ni seguimientos comerciales.")
+    expect(off.system).not.toContain("reserva con proponer_cita")
+    expect(off.system).toContain("Indicación de la clínica para «Informar»: En ortodoncia, pregunta primero si ya tiene evaluación.")
+    // Sin «Informar» tampoco recibe tarifas ni respuestas oficiales.
+    const entry = await publishKnowledge({ title: "Función: horario", body: "Atendemos de 9 a 19." })
+    try {
+      expect((await all("tg:funciones-2", "evt-fn-2")).system).toContain("- Función: horario: Atendemos de 9 a 19.")
+      await withOrgContext(appDb, "org_a", (tx) => upsertAgentConfig(tx, "org_a", { disabledFunctions: ["informar"] }))
+      const silent = await all("tg:funciones-3", "evt-fn-3")
+      expect(silent.tools).not.toContain("consultar_conocimiento")
+      expect(silent.tools).toContain("ver_sedes_y_servicios")
+      expect(silent.system).not.toContain("Función: horario")
+      expect(silent.system).toContain("No respondes preguntas de información general")
+    } finally {
+      await unpublishKnowledge([entry])
+    }
+    // Una función fija no se puede apagar.
+    await expect(withOrgContext(appDb, "org_a", (tx) => upsertAgentConfig(tx, "org_a", { disabledFunctions: ["derivar"] })))
+      .rejects.toMatchObject({ code: "VALIDATION" })
+  } finally {
+    await withOrgContext(appDb, "org_a", (tx) => upsertAgentConfig(tx, "org_a", { disabledFunctions: [], functionNotes: {} }))
+  }
+})
+
+it("la voz de la clínica entra en el prompt solo cuando se configura", async () => {
+  const promptOf = async (thread: string, eventId: string) => {
+    const { conversationId, messageId } = await ingestText(thread, eventId, "Hola")
+    const model = new ScriptedModel(() => toolCall("send_reply", { text: "Hola." }, `e-${eventId}`))
+    expect(await runScripted(model, conversationId, messageId)).toBe("done")
+    return systemTextOf(model.seen[0] ?? [])
+  }
+  const plain = await promptOf("tg:voz-0", "evt-voz-0")
+  expect(plain).toContain("tono cercano y profesional")
+  expect(plain).toContain("Responde solo con datos reales. Si no tiene el dato, lo dice.")
+  expect(plain).not.toContain("Te presentas como")
+  expect(plain).not.toContain("Tratas de")
+  await withOrgContext(appDb, "org_a", (tx) =>
+    upsertAgentConfig(tx, "org_a", {
+      personaName: "Sofi", treatment: "usted", tone: "formal",
+      about: "Clínica familiar con dos sedes. No presionamos para vender tratamientos.",
+    }))
+  try {
+    const voiced = await promptOf("tg:voz-1", "evt-voz-1")
+    expect(voiced).toContain("Te presentas como Sofi, asistente virtual de la clínica.")
+    expect(voiced).toContain("Tratas de usted al interlocutor.")
+    expect(voiced).toContain("tono formal y respetuoso")
+    expect(voiced).toContain("Sobre la clínica: Clínica familiar con dos sedes.")
+  } finally {
+    await withOrgContext(appDb, "org_a", (tx) =>
+      upsertAgentConfig(tx, "org_a", { personaName: null, treatment: null, tone: "cercano", about: "" }))
+  }
+})
+
+it("fuera de sus canales o de su horario el agente no responde y el hilo queda para el equipo", async () => {
+  const attempt = async (thread: string, eventId: string) => {
+    const { conversationId, messageId } = await ingestText(thread, eventId, "Hola")
+    const model = new ScriptedModel(() => toolCall("send_reply", { text: "Hola." }, `e-${eventId}`))
+    expect(await runScripted(model, conversationId, messageId)).toBe("done")
+    const rows = await withOrgContext(appDb, "org_a", (tx) =>
+      tx.select({ status: agentRunLedger.status, error: agentRunLedger.error }).from(agentRunLedger)
+        .where(eq(agentRunLedger.conversationId, conversationId)))
+    return { calls: model.seen.length, replies: await agentMessages(conversationId), rows, status: await agentStatusOf(conversationId) }
+  }
+  const nowMin = (() => {
+    const parts = new Intl.DateTimeFormat("en-GB", { timeZone: "America/Lima", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(new Date())
+    const pick = (type: string) => Number(parts.find((part) => part.type === type)?.value ?? 0)
+    return pick("hour") * 60 + pick("minute")
+  })()
+  try {
+    // Solo WhatsApp: un hilo de Telegram no lo atiende.
+    await withOrgContext(appDb, "org_a", (tx) => upsertAgentConfig(tx, "org_a", { channels: ["whatsapp"] }))
+    const offChannel = await attempt("tg:limite-canal", "evt-lim-1")
+    expect(offChannel).toMatchObject({ calls: 0, replies: [], status: "on", rows: [{ status: "omitida", error: "canal-no-atendido" }] })
+    await withOrgContext(appDb, "org_a", (tx) => upsertAgentConfig(tx, "org_a", { channels: ["telegram"] }))
+    expect((await attempt("tg:limite-canal-ok", "evt-lim-2")).replies).toEqual(["Hola."])
+
+    // Franja que empieza dentro de una hora: ahora está fuera.
+    await withOrgContext(appDb, "org_a", (tx) =>
+      upsertAgentConfig(tx, "org_a", { channels: null, activeFromMin: (nowMin + 60) % 1440, activeUntilMin: ((nowMin + 120) % 1440) || 1440 }))
+    const offHours = await attempt("tg:limite-hora", "evt-lim-3")
+    expect(offHours).toMatchObject({ calls: 0, replies: [], rows: [{ status: "omitida", error: "fuera-de-horario" }] })
+    // Franja que cruza la medianoche y contiene este momento.
+    await withOrgContext(appDb, "org_a", (tx) =>
+      upsertAgentConfig(tx, "org_a", { activeFromMin: (nowMin + 1380) % 1440, activeUntilMin: ((nowMin + 60) % 1440) || 1440 }))
+    expect((await attempt("tg:limite-hora-ok", "evt-lim-4")).replies).toEqual(["Hola."])
+    await expect(withOrgContext(appDb, "org_a", (tx) => upsertAgentConfig(tx, "org_a", { activeFromMin: 600, activeUntilMin: null })))
+      .rejects.toMatchObject({ code: "VALIDATION" })
+  } finally {
+    await withOrgContext(appDb, "org_a", (tx) =>
+      upsertAgentConfig(tx, "org_a", { channels: null, activeFromMin: null, activeUntilMin: null }))
+  }
+})
+
+it("probar: una conversación de prueba reserva en dos turnos sin tocar la base", async () => {
+  // La sede y su horario son reales (la agenda se lee de verdad); el paciente de la prueba, no.
+  const seed = await ingestText("tg:prueba-sede", "evt-prueba-sede", "Hola")
+  const fx = await bookingFixture(seed.conversationId, "prueba")
+  const count = async () => {
+    const [row] = await ownerDb.execute<{ appointments: number; messages: number; runs: number; traces: number; memory: number }>(sql`
+      select (select count(*)::int from appointment) as appointments,
+             (select count(*)::int from message) as messages,
+             (select count(*)::int from agent_run_ledger) as runs,
+             (select count(*)::int from agent_answer_trace) as traces,
+             (select count(*)::int from agent_case_memory) as memory`)
+    return row
+  }
+  const before = await count()
+  const day = upcomingMonday()
+  const turnOne = new ScriptedModel((messages, call) => {
+    if (call === 1) {
+      return toolCall(
+        "buscar_huecos",
+        { branchId: fx.branchId, from: day.toISOString(), to: new Date(day.getTime() + 86_400_000).toISOString(), durationMin: 45 },
+        "p1-huecos",
+      )
+    }
+    if (call === 2) {
+      const line = String(messages[messages.length - 1]?.content ?? "").split("\n")[0] ?? ""
+      return toolCall(
+        "proponer_cita",
+        {
+          patientId: "00000000-0000-4000-8000-0000000000aa",
+          dentistUserId: line.match(/profesional (\S+)/)?.[1],
+          chairId: line.match(/sillón ([0-9a-f-]{36})/i)?.[1],
+          startsAt: line.match(ISO_INSTANT)?.[0],
+          branchId: fx.branchId,
+          durationMin: 45,
+        },
+        "p1-propuesta",
+      )
+    }
+    return toolCall("send_reply", { text: "Tengo un espacio el lunes a las 9:00 a. m. ¿Confirmas la cita?" }, "p1-envio")
+  })
+  const deps = { platform: runtime.platform, secretsKey: KEY }
+  const first = await simulateAgentSandbox(appDb, { ...deps, createModel: async () => turnOne }, {
+    orgId: "org_a", transcript: [], message: "Quiero una cita para una limpieza",
+  })
+  expect(first.replied).toBe(true)
+  expect(first.reply).toContain("¿Confirmas la cita?")
+  expect(first.did).toEqual(["Buscó huecos reales en la agenda.", "Propuso reservar una cita."])
+  expect(first.checks).toEqual([{ kind: "hora", value: "9:00 a. m.", ok: true, source: "Agenda: horarios disponibles" }])
+  expect(first.state.pending).toMatchObject([{ action: "reservar_cita", decider: "contact", status: "propuesta" }])
+  expect(first.waiting[0]).toContain("espera el sí del paciente")
+  // El hilo de la prueba no nombra a nadie real ni trae historial previo.
+  const system = systemTextOf(turnOne.seen[0] ?? [])
+  expect(system).toContain("Interlocutor: Paciente de prueba.")
+  expect(turnOne.seen[0]?.length).toBe(2)
+
+  const turnTwo = new ScriptedModel((messages, call) => {
+    if (call > 1) return toolCall("send_reply", { text: "Listo, tu cita quedó reservada." }, "p2-envio")
+    const visible = messages.map((m) => String(m.content)).join("\n")
+    const proposalId = /propuesta[^\n]*\bid ([0-9a-f-]{36})/i.exec(visible)?.[1]
+    return proposalId
+      ? toolCall("confirmar_propuesta", { proposalId }, "p2-confirma")
+      : toolCall("send_reply", { text: "¿Me confirmas la cita, por favor?" }, "p2-repregunta")
+  })
+  const second = await simulateAgentSandbox(appDb, { ...deps, createModel: async () => turnTwo }, {
+    orgId: "org_a",
+    transcript: [
+      { role: "contact", text: "Quiero una cita para una limpieza" },
+      { role: "agent", text: first.reply },
+    ],
+    message: "Sí",
+    state: first.state,
+  })
+  expect(second.reply).toBe("Listo, tu cita quedó reservada.")
+  expect(second.did).toEqual(["Ejecutó lo que el paciente confirmó."])
+  expect(second.state.pending).toEqual([])
+  expect(second.state.recent).toMatchObject([{ action: "reservar_cita", status: "ejecutada" }])
+  expect(second.waiting).toEqual([])
+  // El segundo turno recibió el historial de la prueba y la consulta de agenda del primero.
+  const seen = turnTwo.seen[0] ?? []
+  expect(seen.length).toBe(4)
+  expect(systemTextOf(seen)).toContain("[buscar_huecos · ")
+  // Nada quedó escrito: ni cita, ni mensaje, ni corrida, ni traza, ni memoria.
+  expect(await count()).toEqual(before)
+})
+
+it("una corrección aprobada llega a la siguiente respuesta, queda en su traza y retirarla la quita", async () => {
+  const stamp = Date.now()
+  const adminId = `u-aprende-${stamp}`
+  await ownerDb.insert(user).values({ id: adminId, name: "Carmen", email: `carmen-${stamp}@example.test` })
+  const inOrg = <T>(fn: Parameters<typeof withOrgContext<T>>[2]) => withOrgContext(appDb, "org_a", fn)
+  const RULE = "No ofrezcas citas en domingo: la clínica no atiende ese día."
+  const promptFor = async (thread: string, eventId: string, text: string) => {
+    const { conversationId, messageId } = await ingestText(thread, eventId, text)
+    const model = new ScriptedModel(() => toolCall("send_reply", { text: "De acuerdo." }, `e-${eventId}`))
+    expect(await runScripted(model, conversationId, messageId)).toBe("done")
+    return { conversationId, system: systemTextOf(model.seen[0] ?? []) }
+  }
+
+  // El agente responde algo que no debía.
+  const first = await ingestText("tg:aprende-1", "evt-aprende-1", "¿Tienen cita el domingo?")
+  const wrong = new ScriptedModel(() => toolCall("send_reply", { text: "Sí, tengo el domingo libre." }, "ap-1"))
+  expect(await runScripted(wrong, first.conversationId, first.messageId)).toBe("done")
+  const [trace] = await inOrg((tx) => listAnswerTraces(tx, "org_a", first.conversationId))
+  const lesson = await inOrg((tx) =>
+    correctAnswer(tx, "org_a", adminId, { traceId: trace!.id, failure: "no_debio_responder", correctedReply: RULE }))
+  expect(lesson).toMatchObject({ kind: "regla", status: "propuesta", question: "¿Tienen cita el domingo?" })
+
+  // Propuesta: todavía no cambia nada.
+  expect((await promptFor("tg:aprende-2", "evt-aprende-2", "¿Tienen cita para el domingo?")).system).not.toContain(RULE)
+
+  // Aprobada: la siguiente respuesta a esa pregunta ya la recibe, y su traza lo dice.
+  await inOrg((tx) => approveLesson(tx, "org_a", adminId, lesson.id))
+  const taught = await promptFor("tg:aprende-3", "evt-aprende-3", "¿Tienen cita para el domingo?")
+  expect(taught.system).toContain(`- ${RULE}`)
+  const [taughtTrace] = await inOrg((tx) => listAnswerTraces(tx, "org_a", taught.conversationId))
+  expect(taughtTrace?.basis).toContainEqual({ kind: "leccion", label: "Regla que aprobó tu clínica", detail: lesson.title })
+  expect((await inOrg((tx) => getLesson(tx, "org_a", lesson.id))).uses).toBe(1)
+  // En otro tema la regla sigue en el prompt, pero no cuenta como usada.
+  const other = await promptFor("tg:aprende-4", "evt-aprende-4", "¿Aceptan tarjeta?")
+  expect(other.system).toContain(RULE)
+  expect((await inOrg((tx) => getLesson(tx, "org_a", lesson.id))).uses).toBe(1)
+
+  // Probar qué pasa si se retira: responde con y sin la regla, sin escribir nada.
+  const deps = { platform: runtime.platform, secretsKey: KEY }
+  const depends = () =>
+    new ScriptedModel((messages) =>
+      toolCall("send_reply", { text: systemTextOf(messages).includes(RULE) ? "Los domingos no atendemos." : "Tengo el domingo libre." }, "pv"))
+  const preview = await previewLesson(appDb, { ...deps, createModel: async () => depends() }, { orgId: "org_a", lessonId: lesson.id })
+  expect(preview.cases[0]).toMatchObject({
+    question: "¿Tienen cita el domingo?", before: "Los domingos no atendemos.", after: "Tengo el domingo libre.", same: false,
+  })
+  expect((await inOrg((tx) => getLesson(tx, "org_a", lesson.id))).uses).toBe(1)
+
+  // Retirada: deja de usarse al instante.
+  await inOrg((tx) => withdrawLesson(tx, "org_a", adminId, lesson.id, { withdrawCase: true }))
+  expect((await promptFor("tg:aprende-5", "evt-aprende-5", "¿Tienen cita para el domingo?")).system).not.toContain(RULE)
+})
+
+it("probar una respuesta oficial propuesta la da por publicada solo en la prueba", async () => {
+  const stamp = Date.now()
+  const adminId = `u-aprende-b-${stamp}`
+  await ownerDb.insert(user).values({ id: adminId, name: "Carmen", email: `carmen-b-${stamp}@example.test` })
+  const inOrg = <T>(fn: Parameters<typeof withOrgContext<T>>[2]) => withOrgContext(appDb, "org_a", fn)
+  const ANSWER = "Sí, hay un bicicletero techado en la entrada."
+  const asked = await ingestText("tg:aprende-b1", "evt-aprende-b1", "¿Tienen bicicletero?")
+  const model = new ScriptedModel(() => toolCall("send_reply", { text: "No tengo ese dato." }, "apb-1"))
+  expect(await runScripted(model, asked.conversationId, asked.messageId)).toBe("done")
+  const [trace] = await inOrg((tx) => listAnswerTraces(tx, "org_a", asked.conversationId))
+  const lesson = await inOrg((tx) => correctAnswer(tx, "org_a", adminId, { traceId: trace!.id, failure: "falto_dato", correctedReply: ANSWER }))
+  expect(lesson.kind).toBe("respuesta_oficial")
+
+  const deps = { platform: runtime.platform, secretsKey: KEY }
+  const depends = () =>
+    new ScriptedModel((messages) =>
+      toolCall("send_reply", { text: systemTextOf(messages).includes(ANSWER) ? ANSWER : "No tengo ese dato." }, "pvb"))
+  const preview = await previewLesson(appDb, { ...deps, createModel: async () => depends() }, { orgId: "org_a", lessonId: lesson.id })
+  expect(preview.cases).toEqual([
+    { question: "¿Tienen bicicletero?", expected: null, before: "No tengo ese dato.", after: ANSWER, same: false },
+  ])
+  // La prueba no publicó nada: una conversación real sigue sin el dato.
+  const next = await ingestText("tg:aprende-b2", "evt-aprende-b2", "¿Tienen bicicletero?")
+  const real = new ScriptedModel(() => toolCall("send_reply", { text: "De acuerdo." }, "apb-2"))
+  expect(await runScripted(real, next.conversationId, next.messageId)).toBe("done")
+  expect(systemTextOf(real.seen[0] ?? [])).not.toContain(ANSWER)
+  await inOrg((tx) => discardLesson(tx, "org_a", adminId, lesson.id))
+})
+
+it("un dato de la persona dicho hoy llega a su siguiente conversación; lo clínico no se guarda y quitarlo deja de usarlo", async () => {
+  const stamp = Date.now()
+  const adminId = `u-memoria-${stamp}`
+  await ownerDb.insert(user).values({ id: adminId, name: "Carmen", email: `carmen-m-${stamp}@example.test` })
+  const inOrg = <T>(fn: Parameters<typeof withOrgContext<T>>[2]) => withOrgContext(appDb, "org_a", fn)
+  const thread = "tg:memoria-1"
+
+  // Hoy: la persona dice una preferencia y, de paso, algo de salud.
+  const first = await ingestText(thread, "evt-memoria-1", "Prefiero las citas por la tarde. Y me duele una muela.")
+  const toolReplies: string[] = []
+  const listening = new ScriptedModel((messages, call) => {
+    const last = messages[messages.length - 1]
+    if (call > 1) toolReplies.push(String(last?.content ?? ""))
+    if (call === 1) return toolCall("recordar_dato", { text: "Prefiere citas por la tarde" }, "m-1")
+    if (call === 2) return toolCall("recordar_dato", { text: "Le duele una muela" }, "m-2")
+    return toolCall("send_reply", { text: "Anotado. ¿Te busco un horario por la tarde?" }, "m-3")
+  })
+  expect(await runScripted(listening, first.conversationId, first.messageId)).toBe("done")
+  expect(toolReplies[0]).toContain("Guardado para próximas conversaciones")
+  // El dato de salud no entra: el modelo recibe por qué y la corrida sigue.
+  expect(toolReplies[1]).toContain("No se guardó: Eso parece información de salud")
+  const [conv] = await inOrg((tx) =>
+    tx.select({ contactId: conversation.contactId }).from(conversation).where(eq(conversation.id, first.conversationId)))
+  const facts = await inOrg((tx) => listPersonFacts(tx, "org_a", conv!.contactId))
+  expect(facts.map((fact) => fact.text)).toEqual(["Prefiere citas por la tarde"])
+  expect(facts[0]).toMatchObject({ source: "agente", channel: "telegram" })
+
+  // Otro día: el contexto del turno ya trae lo que recuerda, con su origen.
+  const promptOf = async (eventId: string) => {
+    const next = await ingestText(thread, eventId, "Hola, quiero otra cita")
+    const model = new ScriptedModel(() => toolCall("send_reply", { text: "Claro." }, `e-${eventId}`))
+    expect(await runScripted(model, next.conversationId, next.messageId)).toBe("done")
+    return systemTextOf(model.seen[0] ?? [])
+  }
+  const later = await promptOf("evt-memoria-2")
+  expect(later).toContain("Lo que recuerdas de esta persona de conversaciones anteriores")
+  expect(later).toContain(`- Prefiere citas por la tarde (id ${facts[0]!.id}; lo dijo por Telegram el `)
+  expect(later).not.toContain("muela")
+
+  // El equipo lo quita: el agente deja de usarlo.
+  await inOrg((tx) => removePersonFact(tx, "org_a", adminId, conv!.contactId, facts[0]!.id))
+  expect(await promptOf("evt-memoria-3")).not.toContain("Prefiere citas por la tarde")
+})
+
+it("decidir antes de escribir: el camino se elige primero, derivar no llama al que escribe y apagado vuelve a la sombra", async () => {
+  await withOrgContext(appDb, "org_a", (tx) => upsertAgentConfig(tx, "org_a", { decisionProvider: "baseline" }))
+  const decision = createFakeDecisionModel()
+  const turn = async (thread: string, eventId: string, text: string) => {
+    const { conversationId, messageId } = await ingestText(thread, eventId, text)
+    const model = new ScriptedModel(() => toolCall("send_reply", { text: "Listo." }, `e-${eventId}`))
+    const verdict = await processAgentRun(
+      appDb,
+      { ...runtime, createModel: async () => model, createDecisionModel: () => decision },
+      { msg_id: 1, read_ct: 0, message: { kind: "inbound_message", orgId: "org_a", conversationId, messageId } },
+    )
+    expect(verdict).toBe("done")
+    const decisions = await withOrgContext(appDb, "org_a", (tx) =>
+      tx.select({ point: agentDecisionLog.point, mode: agentDecisionLog.mode, outcome: agentDecisionLog.outcome, error: agentDecisionLog.error })
+        .from(agentDecisionLog).where(eq(agentDecisionLog.conversationId, conversationId)))
+    return { conversationId, calls: model.seen.length, offered: model.offered, system: systemTextOf(model.seen[0] ?? []), decisions, ledger: await ledgerRows(conversationId) }
+  }
+  try {
+    // Información: el que escribe recibe el camino y resuelve en una sola llamada.
+    const info = await turn("tg:camino-info", "evt-camino-info", "¿Cuánto cuesta una limpieza?")
+    expect(info.system).toContain("Camino de este turno, elegido por lo que escribió el interlocutor: pide información.")
+    expect(info.system).toContain("Responde ahora con send_reply, en este mismo paso y sin llamar otras herramientas.")
+    expect(info.decisions).toEqual([
+      expect.objectContaining({ point: "route.v2", mode: "route", error: null, outcome: expect.objectContaining({ path: "informacion", intent: "price_or_service_info" }) }),
+    ])
+    expect(info.ledger).toEqual([{ status: "ok", llmCalls: 1, toolsUsed: ["send_reply"] }])
+    // Con el camino elegido solo se le enseñan las herramientas de ese camino, más la que le devuelve el resto.
+    expect([...(info.offered[0] ?? [])].sort()).toEqual(
+      ["ampliar_herramientas", "consultar_conocimiento", "request_human_handoff", "send_reply", "send_template", "ver_sedes_y_servicios"],
+    )
+
+    // Si el camino no alcanza, pide el resto y lo recibe en el paso siguiente.
+    const wide = await ingestText("tg:camino-ampliar", "evt-camino-ampliar", "¿Cuánto cuesta una limpieza? De paso quiero reservar")
+    const widening = new ScriptedModel((_messages, call) =>
+      call === 1 ? toolCall("ampliar_herramientas", { motivo: "Quiere reservar" }, "amplia") : toolCall("send_reply", { text: "Listo." }, "amplia-envio"))
+    expect(await processAgentRun(appDb, { ...runtime, createModel: async () => widening, createDecisionModel: () => decision }, {
+      msg_id: 1, read_ct: 0, message: { kind: "inbound_message", orgId: "org_a", conversationId: wide.conversationId, messageId: wide.messageId },
+    })).toBe("done")
+    expect(widening.offered[0]).not.toContain("proponer_cita")
+    expect(widening.offered[1]).toContain("proponer_cita")
+    expect(widening.offered[1]).not.toContain("ampliar_herramientas")
+    expect(await ledgerRows(wide.conversationId)).toEqual([{ status: "ok", llmCalls: 2, toolsUsed: ["ampliar_herramientas", "send_reply"] }])
+    // El camino va al final, con lo del turno: lo estable de la organización queda delante y sigue igual.
+    expect(info.system.indexOf("Camino de este turno")).toBeGreaterThan(info.system.indexOf("Política de autonomía"))
+
+    // Seguro de que hace falta una persona: pasa el caso sin llamar al modelo que escribe.
+    const handoff = await turn("tg:camino-derivar", "evt-camino-derivar", "Tengo una queja y quiero hablar con una persona")
+    expect(handoff.calls).toBe(0)
+    expect(handoff.ledger).toEqual([{ status: "handoff", llmCalls: 0, toolsUsed: [] }])
+    expect(handoff.decisions).toEqual([expect.objectContaining({ mode: "route", outcome: expect.objectContaining({ path: "derivar" }) })])
+    expect(await agentStatusOf(handoff.conversationId)).toBe("off")
+    const [derived] = await withOrgContext(appDb, "org_a", (tx) => listHandoffs(tx, "org_a", { conversationId: handoff.conversationId }))
+    expect(derived?.reason).toBe("El mensaje pide a una persona o describe algo que el agente no debe atender")
+
+    // Varios mensajes seguidos: lo que importa está en el primero y el camino lo tiene en cuenta.
+    await ingestText("tg:camino-rafaga", "evt-rafaga-1", "Tengo una queja y quiero hablar con una persona")
+    await ingestText("tg:camino-rafaga", "evt-rafaga-2", "Buenas")
+    await ingestText("tg:camino-rafaga", "evt-rafaga-3", "Sigo esperando")
+    const burst = await turn("tg:camino-rafaga", "evt-rafaga-4", "¿Me ayudan?")
+    expect(burst.calls).toBe(0)
+    expect(burst.decisions.filter((row) => row.mode === "route")).toEqual([
+      expect.objectContaining({ outcome: expect.objectContaining({ path: "derivar" }) }),
+    ])
+
+    // Si no reconoce la intención, el turno es el de siempre: sin indicación de camino.
+    const open = await turn("tg:camino-abierto", "evt-camino-abierto", "Les escribo por lo del otro día")
+    expect(open.system).not.toContain("Camino de este turno")
+    expect(open.decisions[0]?.outcome).toMatchObject({ path: "abierto" })
+    expect(open.offered[0]).toContain("proponer_cita")
+    expect(open.offered[0]).not.toContain("ampliar_herramientas")
+
+    // Un modelo de decisión que falla no detiene el turno: camino abierto y el error queda a la vista.
+    const broken: DecisionModel = { provider: "jev", reportsProbabilities: true, decide: async () => { throw new Error("caído") } }
+    const failing = await ingestText("tg:camino-falla", "evt-camino-falla", "¿Cuánto cuesta una limpieza?")
+    const writer = new ScriptedModel(() => toolCall("send_reply", { text: "Listo." }, "e-falla"))
+    expect(await processAgentRun(appDb, { ...runtime, createModel: async () => writer, createDecisionModel: () => broken }, {
+      msg_id: 1, read_ct: 0, message: { kind: "inbound_message", orgId: "org_a", conversationId: failing.conversationId, messageId: failing.messageId },
+    })).toBe("done")
+    expect(systemTextOf(writer.seen[0] ?? [])).not.toContain("Camino de este turno")
+    expect(await ledgerRows(failing.conversationId)).toEqual([{ status: "ok", llmCalls: 1, toolsUsed: ["send_reply"] }])
+
+    // Apagado: no elige camino ni deriva; su opinión queda en sombra, como antes.
+    await withOrgContext(appDb, "org_a", (tx) => upsertAgentConfig(tx, "org_a", { decisionRoutingEnabled: false }))
+    const shadow = await turn("tg:camino-apagado", "evt-camino-apagado", "Tengo una queja y quiero hablar con una persona")
+    expect(shadow.calls).toBe(1)
+    expect(shadow.system).not.toContain("Camino de este turno")
+    expect(shadow.decisions).toEqual([expect.objectContaining({ point: "triage.v2", mode: "shadow", outcome: expect.objectContaining({ wouldHandoff: true }) })])
+  } finally {
+    await withOrgContext(appDb, "org_a", (tx) => upsertAgentConfig(tx, "org_a", { decisionProvider: "none", decisionRoutingEnabled: true }))
+  }
+})
+
+it("al cambiar una cita, el código trae antes las citas del paciente y quedan en la traza", async () => {
+  const seed = await ingestText("tg:camino-cita", "evt-camino-cita-0", "Hola")
+  const fx = await bookingFixture(seed.conversationId, "camino")
+  await withOrgContext(appDb, "org_a", (tx) => upsertAgentConfig(tx, "org_a", { decisionProvider: "baseline" }))
+  try {
+    const { conversationId, messageId } = await ingestText("tg:camino-cita", "evt-camino-cita-1", "Necesito reprogramar mi cita, por favor")
+    const model = new ScriptedModel(() => toolCall("send_reply", { text: "Claro, ¿qué día te viene bien?" }, "camino-cita"))
+    expect(await processAgentRun(
+      appDb,
+      { ...runtime, createModel: async () => model, createDecisionModel: () => createFakeDecisionModel() },
+      { msg_id: 1, read_ct: 0, message: { kind: "inbound_message", orgId: "org_a", conversationId, messageId } },
+    )).toBe("done")
+    const system = systemTextOf(model.seen[0] ?? [])
+    expect(system).toContain("Camino de este turno, elegido por lo que escribió el interlocutor: cambiar o cancelar una cita.")
+    expect(system).toContain("Esto se consultó ahora mismo y no hace falta volver a pedirlo:")
+    expect(system).toContain("Paciente: Paciente camino (vínculo")
+    expect(fx.patientId).toBeTruthy()
+    // Una sola llamada: no tuvo que pedir el resumen del paciente. (El «Hola» anterior queda cubierto por esta corrida.)
+    expect((await ledgerRows(conversationId)).filter((row) => row.status !== "omitida")).toEqual([
+      { status: "ok", llmCalls: 1, toolsUsed: ["send_reply"] },
+    ])
+    const [trace] = await withOrgContext(appDb, "org_a", (tx) => listAnswerTraces(tx, "org_a", conversationId))
+    expect(trace?.basis).toContainEqual({ kind: "persona", label: "Citas, presupuestos y saldo del paciente", detail: "Consultado antes de responder" })
+  } finally {
+    await withOrgContext(appDb, "org_a", (tx) => upsertAgentConfig(tx, "org_a", { decisionProvider: "none" }))
+  }
+})
+
+it("el asistente clínico ordena el dictado con el esquema de la atención y no inventa si el modelo no responde bien", async () => {
+  const deps = { platform: runtime.platform, secretsKey: KEY }
+  const seen: BaseMessage[][] = []
+  const answering = (args: Record<string, unknown> | null) => ({
+    bindTools(tools: Array<{ name: string }>) {
+      // El esquema que recibe el modelo sale de la declaración de campos de cada operación.
+      expect(tools.map((tool) => tool.name)).toEqual(["registrar_dictado"])
+      return {
+        invoke: async (messages: BaseMessage[]) => {
+          seen.push(messages)
+          return args ? toolCall("registrar_dictado", args, "dictado-1") : new AIMessage({ content: "No entendí." })
+        },
+      }
+    },
+  })
+  const extract = (args: Record<string, unknown> | null) =>
+    extractDictation(appDb, { ...deps, createModel: async () => answering(args) as never }, {
+      orgId: "org_a",
+      transcript: "Viene por dolor al masticar. En la dieciséis hay caries en dentina, le ponemos una resina.",
+    })
+
+  const ok = await extract({
+    nota: { reason: "Dolor al masticar", dicho: "Viene por dolor al masticar." },
+    diagnosticos: [{ cie10Code: "K02.1", diagnosisType: "presuntivo", toothNumber: 16, dicho: "En la dieciséis hay caries en dentina" }],
+    indicaciones: [{ service: "resina", toothNumber: 16 }],
+    controles: [],
+  })
+  expect(ok.drafts).toEqual([
+    { kind: "nota", payload: { reason: "Dolor al masticar" }, sourceText: "Viene por dolor al masticar." },
+    { kind: "diagnostico", payload: { cie10Code: "K02.1", diagnosisType: "presuntivo", toothNumber: 16 }, sourceText: "En la dieciséis hay caries en dentina" },
+    { kind: "plan", payload: { service: "resina", toothNumber: 16 }, sourceText: "" },
+  ])
+  const system = systemTextOf(seen[0] ?? [])
+  expect(system).toContain("Registra solo lo que el odontólogo dijo.")
+  expect(system).toContain("No diagnostica, no receta y no decide por el profesional.")
+
+  // Un tipo de diagnóstico que no existe, o ninguna llamada: no se ordena nada a medias.
+  await expect(extract({ diagnosticos: [{ cie10Code: "K02.1", diagnosisType: "seguro" }] })).rejects.toMatchObject({ code: "DICTATION_UNREADABLE" })
+  await expect(extract(null)).rejects.toMatchObject({ code: "DICTATION_UNREADABLE" })
+  await expect(extractDictation(appDb, deps, { orgId: "org_a", transcript: "  " })).rejects.toMatchObject({ code: "VALIDATION" })
+  // Con el modelo de demostración responde por reglas, sin proveedor.
+  expect((await extractDictation(appDb, deps, { orgId: "org_a", transcript: "Control en 3 meses." })).drafts[0]).toMatchObject({ kind: "control" })
 })

@@ -32,7 +32,12 @@ import { Route as CTokenRouteImport } from './routes/c.$token'
 import { Route as EmbedConnectionIdRouteImport } from './routes/embed.$connectionId'
 import { Route as OrgAgentIndexRouteImport } from './routes/_org/agent.index'
 import { Route as OrgAgentApprovalsRouteImport } from './routes/_org/agent.approvals'
+import { Route as OrgAgentAsesorRouteImport } from './routes/_org/agent.asesor'
+import { Route as OrgAgentAsistenteClinicoRouteImport } from './routes/_org/agent.asistente-clinico'
 import { Route as OrgAgentKnowledgeRouteImport } from './routes/_org/agent.knowledge'
+import { Route as OrgAgentLearnRouteImport } from './routes/_org/agent.learn'
+import { Route as OrgAgentRecepcionRouteImport } from './routes/_org/agent.recepcion'
+import { Route as OrgAgentRegistroRouteImport } from './routes/_org/agent.registro'
 import { Route as OrgContactsIndexRouteImport } from './routes/_org/contacts.index'
 import { Route as OrgContactsContactIdRouteImport } from './routes/_org/contacts.$contactId'
 import { Route as OrgInventoryProductIdRouteImport } from './routes/_org/inventory.$productId'
@@ -172,9 +177,35 @@ const OrgAgentApprovalsRoute = OrgAgentApprovalsRouteImport.update({
   path: '/agent/approvals',
   getParentRoute: () => OrgRoute,
 } as any)
+const OrgAgentAsesorRoute = OrgAgentAsesorRouteImport.update({
+  id: '/agent/asesor',
+  path: '/agent/asesor',
+  getParentRoute: () => OrgRoute,
+} as any)
+const OrgAgentAsistenteClinicoRoute =
+  OrgAgentAsistenteClinicoRouteImport.update({
+    id: '/agent/asistente-clinico',
+    path: '/agent/asistente-clinico',
+    getParentRoute: () => OrgRoute,
+  } as any)
 const OrgAgentKnowledgeRoute = OrgAgentKnowledgeRouteImport.update({
   id: '/agent/knowledge',
   path: '/agent/knowledge',
+  getParentRoute: () => OrgRoute,
+} as any)
+const OrgAgentLearnRoute = OrgAgentLearnRouteImport.update({
+  id: '/agent/learn',
+  path: '/agent/learn',
+  getParentRoute: () => OrgRoute,
+} as any)
+const OrgAgentRecepcionRoute = OrgAgentRecepcionRouteImport.update({
+  id: '/agent/recepcion',
+  path: '/agent/recepcion',
+  getParentRoute: () => OrgRoute,
+} as any)
+const OrgAgentRegistroRoute = OrgAgentRegistroRouteImport.update({
+  id: '/agent/registro',
+  path: '/agent/registro',
   getParentRoute: () => OrgRoute,
 } as any)
 const OrgContactsIndexRoute = OrgContactsIndexRouteImport.update({
@@ -326,7 +357,12 @@ export interface FileRoutesByFullPath {
   '/c/$token': typeof CTokenRoute
   '/embed/$connectionId': typeof EmbedConnectionIdRoute
   '/agent/approvals': typeof OrgAgentApprovalsRoute
+  '/agent/asesor': typeof OrgAgentAsesorRoute
+  '/agent/asistente-clinico': typeof OrgAgentAsistenteClinicoRoute
   '/agent/knowledge': typeof OrgAgentKnowledgeRoute
+  '/agent/learn': typeof OrgAgentLearnRoute
+  '/agent/recepcion': typeof OrgAgentRecepcionRoute
+  '/agent/registro': typeof OrgAgentRegistroRoute
   '/contacts/$contactId': typeof OrgContactsContactIdRoute
   '/inventory/$productId': typeof OrgInventoryProductIdRoute
   '/opportunities/$opportunityId': typeof OrgOpportunitiesOpportunityIdRoute
@@ -373,7 +409,12 @@ export interface FileRoutesByTo {
   '/c/$token': typeof CTokenRoute
   '/embed/$connectionId': typeof EmbedConnectionIdRoute
   '/agent/approvals': typeof OrgAgentApprovalsRoute
+  '/agent/asesor': typeof OrgAgentAsesorRoute
+  '/agent/asistente-clinico': typeof OrgAgentAsistenteClinicoRoute
   '/agent/knowledge': typeof OrgAgentKnowledgeRoute
+  '/agent/learn': typeof OrgAgentLearnRoute
+  '/agent/recepcion': typeof OrgAgentRecepcionRoute
+  '/agent/registro': typeof OrgAgentRegistroRoute
   '/contacts/$contactId': typeof OrgContactsContactIdRoute
   '/inventory/$productId': typeof OrgInventoryProductIdRoute
   '/opportunities/$opportunityId': typeof OrgOpportunitiesOpportunityIdRoute
@@ -424,7 +465,12 @@ export interface FileRoutesById {
   '/c/$token': typeof CTokenRoute
   '/embed/$connectionId': typeof EmbedConnectionIdRoute
   '/_org/agent/approvals': typeof OrgAgentApprovalsRoute
+  '/_org/agent/asesor': typeof OrgAgentAsesorRoute
+  '/_org/agent/asistente-clinico': typeof OrgAgentAsistenteClinicoRoute
   '/_org/agent/knowledge': typeof OrgAgentKnowledgeRoute
+  '/_org/agent/learn': typeof OrgAgentLearnRoute
+  '/_org/agent/recepcion': typeof OrgAgentRecepcionRoute
+  '/_org/agent/registro': typeof OrgAgentRegistroRoute
   '/_org/contacts/$contactId': typeof OrgContactsContactIdRoute
   '/_org/inventory/$productId': typeof OrgInventoryProductIdRoute
   '/_org/opportunities/$opportunityId': typeof OrgOpportunitiesOpportunityIdRoute
@@ -475,7 +521,12 @@ export interface FileRouteTypes {
     | '/c/$token'
     | '/embed/$connectionId'
     | '/agent/approvals'
+    | '/agent/asesor'
+    | '/agent/asistente-clinico'
     | '/agent/knowledge'
+    | '/agent/learn'
+    | '/agent/recepcion'
+    | '/agent/registro'
     | '/contacts/$contactId'
     | '/inventory/$productId'
     | '/opportunities/$opportunityId'
@@ -522,7 +573,12 @@ export interface FileRouteTypes {
     | '/c/$token'
     | '/embed/$connectionId'
     | '/agent/approvals'
+    | '/agent/asesor'
+    | '/agent/asistente-clinico'
     | '/agent/knowledge'
+    | '/agent/learn'
+    | '/agent/recepcion'
+    | '/agent/registro'
     | '/contacts/$contactId'
     | '/inventory/$productId'
     | '/opportunities/$opportunityId'
@@ -572,7 +628,12 @@ export interface FileRouteTypes {
     | '/c/$token'
     | '/embed/$connectionId'
     | '/_org/agent/approvals'
+    | '/_org/agent/asesor'
+    | '/_org/agent/asistente-clinico'
     | '/_org/agent/knowledge'
+    | '/_org/agent/learn'
+    | '/_org/agent/recepcion'
+    | '/_org/agent/registro'
     | '/_org/contacts/$contactId'
     | '/_org/inventory/$productId'
     | '/_org/opportunities/$opportunityId'
@@ -773,11 +834,46 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof OrgAgentApprovalsRouteImport
       parentRoute: typeof OrgRoute
     }
+    '/_org/agent/asesor': {
+      id: '/_org/agent/asesor'
+      path: '/agent/asesor'
+      fullPath: '/agent/asesor'
+      preLoaderRoute: typeof OrgAgentAsesorRouteImport
+      parentRoute: typeof OrgRoute
+    }
+    '/_org/agent/asistente-clinico': {
+      id: '/_org/agent/asistente-clinico'
+      path: '/agent/asistente-clinico'
+      fullPath: '/agent/asistente-clinico'
+      preLoaderRoute: typeof OrgAgentAsistenteClinicoRouteImport
+      parentRoute: typeof OrgRoute
+    }
     '/_org/agent/knowledge': {
       id: '/_org/agent/knowledge'
       path: '/agent/knowledge'
       fullPath: '/agent/knowledge'
       preLoaderRoute: typeof OrgAgentKnowledgeRouteImport
+      parentRoute: typeof OrgRoute
+    }
+    '/_org/agent/learn': {
+      id: '/_org/agent/learn'
+      path: '/agent/learn'
+      fullPath: '/agent/learn'
+      preLoaderRoute: typeof OrgAgentLearnRouteImport
+      parentRoute: typeof OrgRoute
+    }
+    '/_org/agent/recepcion': {
+      id: '/_org/agent/recepcion'
+      path: '/agent/recepcion'
+      fullPath: '/agent/recepcion'
+      preLoaderRoute: typeof OrgAgentRecepcionRouteImport
+      parentRoute: typeof OrgRoute
+    }
+    '/_org/agent/registro': {
+      id: '/_org/agent/registro'
+      path: '/agent/registro'
+      fullPath: '/agent/registro'
+      preLoaderRoute: typeof OrgAgentRegistroRouteImport
       parentRoute: typeof OrgRoute
     }
     '/_org/contacts/': {
@@ -1047,7 +1143,12 @@ interface OrgRouteChildren {
   OrgSettingsRoute: typeof OrgSettingsRouteWithChildren
   OrgTasksRoute: typeof OrgTasksRoute
   OrgAgentApprovalsRoute: typeof OrgAgentApprovalsRoute
+  OrgAgentAsesorRoute: typeof OrgAgentAsesorRoute
+  OrgAgentAsistenteClinicoRoute: typeof OrgAgentAsistenteClinicoRoute
   OrgAgentKnowledgeRoute: typeof OrgAgentKnowledgeRoute
+  OrgAgentLearnRoute: typeof OrgAgentLearnRoute
+  OrgAgentRecepcionRoute: typeof OrgAgentRecepcionRoute
+  OrgAgentRegistroRoute: typeof OrgAgentRegistroRoute
   OrgContactsContactIdRoute: typeof OrgContactsContactIdRoute
   OrgOpportunitiesOpportunityIdRoute: typeof OrgOpportunitiesOpportunityIdRoute
   OrgPatientsPatientIdRoute: typeof OrgPatientsPatientIdRouteWithChildren
@@ -1072,7 +1173,12 @@ const OrgRouteChildren: OrgRouteChildren = {
   OrgSettingsRoute: OrgSettingsRouteWithChildren,
   OrgTasksRoute: OrgTasksRoute,
   OrgAgentApprovalsRoute: OrgAgentApprovalsRoute,
+  OrgAgentAsesorRoute: OrgAgentAsesorRoute,
+  OrgAgentAsistenteClinicoRoute: OrgAgentAsistenteClinicoRoute,
   OrgAgentKnowledgeRoute: OrgAgentKnowledgeRoute,
+  OrgAgentLearnRoute: OrgAgentLearnRoute,
+  OrgAgentRecepcionRoute: OrgAgentRecepcionRoute,
+  OrgAgentRegistroRoute: OrgAgentRegistroRoute,
   OrgContactsContactIdRoute: OrgContactsContactIdRoute,
   OrgOpportunitiesOpportunityIdRoute: OrgOpportunitiesOpportunityIdRoute,
   OrgPatientsPatientIdRoute: OrgPatientsPatientIdRouteWithChildren,

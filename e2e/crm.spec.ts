@@ -181,20 +181,26 @@ test("crm agente: responde al segundo inbound y el operador toma el hilo", async
     { conversationId, text: "¿Atienden los sábados?" },
   )
   expect(simulation).toMatchObject({ reply: FAKE_REPLY, replied: true })
-  await gotoHydrated(page, tenant(org.slug, "/agent"))
+  await gotoHydrated(page, tenant(org.slug, "/agent/registro"))
   await expect(page.getByRole("columnheader", { name: "Llamadas al modelo" })).toBeVisible()
   await expect(page.getByRole("row").filter({ hasText: "Ejecución correcta" })).toContainText("send_reply")
-  // La decisión en sombra se registró sin cambiar la corrida y se ve con su respuesta y confianza.
-  const decisions = await call<Array<{ point: string; provider: string; error: string | null }>>(
+  // Antes de escribir, el modelo de decisión eligió el camino: quedó registrado con su respuesta y confianza.
+  // Ve también los dos mensajes anteriores del interlocutor, y el primero pedía una cita.
+  const decisions = await call<Array<{ point: string; mode: string; provider: string; error: string | null; outcome: { path: string } | null }>>(
     page,
     "GET",
     `/api/agent/decisions?conversationId=${conversationId}`,
     org.slug,
   )
-  expect(decisions).toEqual([expect.objectContaining({ point: "triage.v1", provider: "fake", error: null })])
-  const shadow = page.getByRole("region", { name: "Decisiones en sombra" })
+  expect(decisions).toEqual([
+    expect.objectContaining({ point: "route.v2", mode: "route", provider: "fake", error: null, outcome: expect.objectContaining({ path: "cita" }) }),
+  ])
+  const shadow = page.getByRole("region", { name: "Decisiones del modelo de decisión" })
   await expect(shadow).toBeVisible()
+  await expect(shadow).toContainText("Camino: pedir una cita")
   await expect(shadow).toContainText("requires_reply: sí")
+  // Y el gasto se puede comparar por camino.
+  await expect(page.getByRole("region", { name: "Llamadas por camino" })).toContainText("Pedir una cita")
 })
 
 test("crm agente: una corrida que no respondió queda a la vista para revisión", async ({
@@ -213,7 +219,7 @@ test("crm agente: una corrida que no respondió queda a la vista para revisión"
     llmCalls: 1,
   })
 
-  await gotoHydrated(page, tenant(org.slug, "/agent"))
+  await gotoHydrated(page, tenant(org.slug, "/agent/registro"))
   const run = page.getByRole("row").filter({ hasText: "Terminó sin responder" })
   await expect(run).toBeVisible()
   await expect(run).not.toContainText("Ejecución correcta")

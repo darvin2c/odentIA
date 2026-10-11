@@ -96,6 +96,9 @@ import {
   useAgentPanelDockBlocker,
   useAgentPanelFitsBesideContext,
 } from "../../components/agent-panel"
+import { AnswerTraceDrawer } from "../../components/agent/answer-trace"
+import { CorrectDrawer, type CorrectionTarget } from "../../components/agent/correct-drawer"
+import type { AnswerTrace } from "../../lib/agent"
 import { ContactWorkspace } from "../../components/crm/contact-workspace"
 import { ACTION_LABEL, type AgentProposal } from "../../lib/agent"
 import { channelIcon, channelLabel } from "../../lib/channels"
@@ -276,6 +279,7 @@ function InboxPage() {
       void queryClient.invalidateQueries({ queryKey: ["conversations"] })
       if (current) {
         void queryClient.invalidateQueries({ queryKey: ["conversation", current] })
+        void queryClient.invalidateQueries({ queryKey: ["agent-answer-traces", current] })
         void queryClient.invalidateQueries({ queryKey: ["crm-context"] })
         void queryClient.invalidateQueries({ queryKey: ["crm-activity"] })
       }
@@ -294,6 +298,7 @@ function InboxPage() {
       "agent.proposal.decided",
       "agent.proposal.executed",
       "agent.handoff.created",
+      "agent.run.recorded",
       "stream.reconnected",
     ],
     handleOrgEvent,
@@ -894,6 +899,25 @@ function ThreadView({
   const detail = detailQuery.data?.data
   const messages = useMemo(() => [...older, ...(detail?.messages ?? [])], [older, detail?.messages])
 
+  // En qué se basó cada respuesta del agente: solo se ofrece en los mensajes que la tienen.
+  const tracesQuery = useQuery({
+    queryKey: ["agent-answer-traces", id],
+    queryFn: () => apiFetch<{ data: AnswerTrace[] }>(`/api/agent/answer-traces?conversationId=${id}`),
+    enabled: canRead,
+  })
+  const traceByMessage = useMemo(() => {
+    const map = new Map<string, AnswerTrace>()
+    // Llegan de la más reciente a la más antigua: la primera de cada mensaje es la vigente.
+    for (const trace of tracesQuery.data?.data ?? []) {
+      if (trace.messageId && !map.has(trace.messageId)) map.set(trace.messageId, trace)
+    }
+    return map
+  }, [tracesQuery.data])
+  const [openTrace, setOpenTrace] = useState<AnswerTrace | null>(null)
+  // Corregir una respuesta del agente desde el hilo: lo hace quien decide por él o lo administra.
+  const canCorrectAgent = usePermission("agent.decide")
+  const [correcting, setCorrecting] = useState<CorrectionTarget | null>(null)
+
   useEffect(() => {
     setOlder([])
     setOlderCursor(null)
@@ -904,6 +928,8 @@ function ThreadView({
     setRegistrationError(null)
     setSendError(null)
     setCopied(false)
+    setOpenTrace(null)
+    setCorrecting(null)
   }, [id])
 
   useEffect(() => {
@@ -1254,7 +1280,14 @@ function ThreadView({
             <MessageScrollerContent className="gap-2">
               {messages.map((msg) => (
                 <MessageScrollerItem key={msg.id} messageId={msg.id}>
-                  <MessageBubble msg={msg} conversationId={id} orgSlug={orgSlug} />
+                  <MessageBubble
+                    msg={msg}
+                    conversationId={id}
+                    orgSlug={orgSlug}
+                    onShowTrace={
+                      traceByMessage.has(msg.id) ? () => setOpenTrace(traceByMessage.get(msg.id) ?? null) : undefined
+                    }
+                  />
                 </MessageScrollerItem>
               ))}
             </MessageScrollerContent>
@@ -1262,6 +1295,22 @@ function ThreadView({
         </MessageScroller>
       </MessageScrollerProvider>
 
+      <AnswerTraceDrawer
+        trace={openTrace}
+        onClose={() => setOpenTrace(null)}
+        onCorrect={
+          canCorrectAgent
+            ? (trace) => {
+                // La pregunta es el último mensaje del interlocutor antes de esa respuesta.
+                const at = messages.findIndex((item) => item.id === trace.messageId)
+                const asked = at > 0 ? [...messages.slice(0, at)].reverse().find((item) => item.direction === "in") : undefined
+                setOpenTrace(null)
+                setCorrecting({ traceId: trace.id, question: asked?.body ?? "", reply: trace.replyText, teamReply: null, basis: trace.basis })
+              }
+            : undefined
+        }
+      />
+      <CorrectDrawer target={correcting} onClose={() => setCorrecting(null)} />
       <AgentPendingBand conversationId={id} attention={threadAttention} canSeeProposals={canSeeProposals} />
       <div className="border-t p-3">
         {detail.contact.isActive === false && (
@@ -1486,10 +1535,13 @@ function MessageBubble({
   msg,
   conversationId,
   orgSlug,
+  onShowTrace,
 }: {
   msg: ChatMessage
   conversationId: string
   orgSlug: string
+  /** Presente solo si el mensaje tiene traza: abre «En qué se basó». */
+  onShowTrace?: () => void
 }) {
   const out = msg.direction === "out"
   const byAgent = msg.senderKind === "agent"
@@ -1527,6 +1579,17 @@ function MessageBubble({
           })}
           {out && statusIcon(msg.status)}
         </div>
+        {onShowTrace ? (
+          <Button
+            type="button"
+            variant="link"
+            size="sm"
+            className="h-auto min-h-11 justify-end self-end p-0 text-xs font-semibold sm:min-h-0"
+            onClick={onShowTrace}
+          >
+            En qué se basó
+          </Button>
+        ) : null}
       </MessageContent>
     </Message>
   )

@@ -1,396 +1,373 @@
-import { Badge, Button, Field, FieldLabel, Input, Textarea } from "@odentia/ui"
-import { DataTable, EmptyState, KpiCard, LoadingState, PageHeader, PageShell, SubmitButton } from "@odentia/ui-patterns"
-import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { createFileRoute, Link } from "@tanstack/react-router"
-import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-table"
-import { useMemo, useState } from "react"
+import { Badge, Button } from "@odentia/ui"
+import { Switch } from "@odentia/ui/components/switch"
+import { ConfirmDialog, ErrorState, LoadingState, PageHeader, PageShell } from "@odentia/ui-patterns"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { createFileRoute, getRouteApi, Link, useNavigate } from "@tanstack/react-router"
+import { ArrowRight, BookOpen, CircleHelp, Lightbulb, MessageCircle, Mic, ShieldCheck } from "lucide-react"
+import { type ReactNode, useState } from "react"
+import type { AdvisorSettings } from "../../components/agent/advisor"
+import { AgentBaseDrawer } from "../../components/agent/base-drawer"
+import { TurnOnDrawer } from "../../components/agent/turn-on-drawer"
 import { AgentTabs } from "../../components/agent-tabs"
-import { ApiError, apiFetch } from "../../lib/api"
+import { type AgentOverview, type AgentRole, type AgentRoles, LEVEL_LABEL } from "../../lib/agent"
+import { apiFetch } from "../../lib/api"
 import { channelLabel } from "../../lib/channels"
-import { type ConversationListItem, usePermission } from "../../lib/crm"
+import { type AgentConfig, usePermission } from "../../lib/crm"
 import { useOrgEvents } from "../../lib/org-events"
+import { mutationErrorMessage, QueryErrorState } from "../../lib/query-error"
 
 export const Route = createFileRoute("/_org/agent/")({
-  validateSearch: (search: Record<string, unknown>): { conversation?: string } => ({
-    conversation: typeof search.conversation === "string" ? search.conversation : undefined,
-  }),
-  component: AgentSupervisionPage,
+  component: AgentSummaryPage,
 })
+const orgRouteApi = getRouteApi("/_org")
 
-interface RunStats {
-  total: number
-  byStatus: Record<string, number>
-  avgLatencyMs: number | null
-  totalInputTokens: number | null
-  totalOutputTokens: number | null
-  totalCachedInputTokens: number | null
-  totalLlmCalls: number | null
-  runsWithLlmCalls: number
-  totalCostMicros: number | null
-  topTools: Array<{ tool: string; uses: number }>
+const ROLE_ICON: Record<AgentRole["id"], ReactNode> = {
+  recepcion: <MessageCircle aria-hidden />,
+  asistente_clinico: <Mic aria-hidden />,
+  asesor: <Lightbulb aria-hidden />,
+  ayuda: <CircleHelp aria-hidden />,
 }
 
-interface RunItem {
-  id: string
-  conversationId: string | null
-  model: string
-  status: string
-  startedAt: string
-  latencyMs: number | null
-  inputTokens: number | null
-  outputTokens: number | null
-  cachedInputTokens: number | null
-  llmCalls: number | null
-  costMicros: number | null
-  toolsUsed: string[]
-  error: string | null
+function NeedTile({ count, title, pending, done, to }: { count: number; title: string; pending: string; done: string; to: string }) {
+  return (
+    <Link
+      to={to}
+      className={`lift flex min-h-24 flex-col gap-1 rounded-xl border p-4 hover:bg-accent/60 ${count > 0 ? "border-primary/30 bg-primary-soft/40" : "bg-card"}`}
+    >
+      <span className="font-heading text-2xl font-bold tabular-nums">{count}</span>
+      <span className="font-semibold">{title}</span>
+      <span className="text-sm text-muted-foreground">{count > 0 ? pending : done}</span>
+    </Link>
+  )
 }
 
-interface DecisionItem {
-  id: string
-  conversationId: string | null
-  point: string
-  provider: string
-  model: string | null
-  answers: Array<{ id: string; kind: string; probability?: number; choice?: string; score?: number; confidence?: number | null }>
-  outcome: Record<string, unknown> | null
-  latencyMs: number | null
-  error: string | null
-  createdAt: string
-}
-
-const PROVIDER_LABEL: Record<string, string> = {
-  baseline: "Línea base",
-  jev: "Jev",
-  openai_decisions: "OpenAI Decisions",
-  fake: "Demostración",
-}
-
-/** Resumen legible de una decisión en sombra: respuesta y confianza por pregunta. */
-function describeAnswers(item: DecisionItem): string {
-  if (item.error) return `Sin respuesta: ${item.error}`
-  const pct = (value: number) => `${Math.round(value * 100)} %`
-  return item.answers
-    .map((a) => {
-      if (a.kind === "yesno" && typeof a.probability === "number") return `${a.id}: ${a.probability >= 0.5 ? "sí" : "no"} (${pct(a.probability)})`
-      if (a.kind === "choice") return `${a.id}: ${a.choice}${typeof a.confidence === "number" ? ` (${pct(a.confidence)})` : ""}`
-      if (a.kind === "score" && typeof a.score === "number") return `${a.id}: nivel ${Math.round(a.score)}${typeof a.confidence === "number" ? ` (${pct(a.confidence)})` : ""}`
-      return `${a.id}: sin respuesta`
-    })
-    .join(" · ")
-}
-
-interface Simulation {
-  reply: string
-  replied: boolean
-  toolsUsed: string[]
-  handedOff: boolean
-  inputTokens: number | null
-  outputTokens: number | null
-  model: string
-  latencyMs: number
-}
-
-const STATUS_LABEL: Record<string, string> = {
-  ok: "Ejecución correcta",
-  handoff: "Pidió atención del equipo",
-  error: "Con error",
-  omitida: "Sin ejecutar",
-  sin_respuesta: "Terminó sin responder",
-}
-
-/** Estados que alguien del equipo debe revisar. */
-const NEEDS_REVIEW = new Set(["error", "sin_respuesta"])
-
-function AgentSupervisionPage() {
+function AgentSummaryPage() {
+  const queryClient = useQueryClient()
+  const navigate = useNavigate()
+  const { org } = orgRouteApi.useRouteContext()
   const canRead = usePermission("agent.read")
   const canWrite = usePermission("agent.write")
-  const search = Route.useSearch()
-  const navigate = Route.useNavigate()
-  const conversationId = search.conversation ?? ""
-  const [conversationSearch, setConversationSearch] = useState("")
-  const [draft, setDraft] = useState("")
-  const queryClient = useQueryClient()
-  const conversationsQuery = useInfiniteQuery({
-    queryKey: ["simulation-conversations", conversationSearch],
-    initialPageParam: null as string | null,
-    queryFn: ({ pageParam }) => {
-      const params = new URLSearchParams({ limit: "30" })
-      if (conversationSearch.trim()) params.set("q", conversationSearch.trim())
-      if (pageParam) params.set("cursor", pageParam)
-      return apiFetch<{ data: ConversationListItem[]; nextCursor: string | null }>(`/api/conversations?${params}`)
-    },
-    getNextPageParam: page => page.nextCursor,
-    enabled: canWrite,
-  })
-  const conversations = conversationsQuery.data?.pages.flatMap(page => page.data) ?? []
-  useOrgEvents(["agent.run.recorded", "agent.decision.recorded", "conversation.updated", "message.created", "stream.reconnected"], () => {
-    for (const key of ["agent-runs", "agent-run-stats", "agent-decisions", "simulation-conversations"]) {
-      void queryClient.invalidateQueries({ queryKey: [key] })
-    }
-  })
+  const [baseOpen, setBaseOpen] = useState(false)
+  const [turnOnOpen, setTurnOnOpen] = useState(false)
+  const [turnOffOpen, setTurnOffOpen] = useState(false)
 
-  const statsQuery = useQuery({
-    queryKey: ["agent-run-stats"],
-    queryFn: () => apiFetch<{ data: RunStats }>("/api/agent/runs/stats"),
+  const overviewQuery = useQuery({
+    queryKey: ["agent-overview"],
+    queryFn: () => apiFetch<{ data: AgentOverview }>("/api/agent/overview"),
+    enabled: canRead,
+    retry: false,
+  })
+  const rolesQuery = useQuery({
+    queryKey: ["agent-roles"],
+    queryFn: () => apiFetch<{ data: AgentRoles }>("/api/agent/roles"),
+    enabled: canRead,
+    staleTime: Number.POSITIVE_INFINITY,
+  })
+  const configQuery = useQuery({
+    queryKey: ["agent-config"],
+    queryFn: () => apiFetch<{ data: AgentConfig }>("/api/agent/config"),
     enabled: canRead,
   })
-  const runsQuery = useQuery({
-    queryKey: ["agent-runs"],
-    queryFn: () => apiFetch<{ data: RunItem[] }>("/api/agent/runs?limit=50"),
+  // El Asesor se enciende aparte: su estado sale de sus propios ajustes.
+  const advisorQuery = useQuery({
+    queryKey: ["agent-advisor-settings"],
+    queryFn: () => apiFetch<{ data: AdvisorSettings }>("/api/agent/advisor/settings"),
     enabled: canRead,
+    retry: false,
   })
-  const decisionsQuery = useQuery({
-    queryKey: ["agent-decisions"],
-    queryFn: () => apiFetch<{ data: DecisionItem[] }>("/api/agent/decisions?limit=50"),
-    enabled: canRead,
-  })
-  const simulateMutation = useMutation({
-    mutationFn: () =>
-      apiFetch<{ data: Simulation }>("/api/agent/simulate", {
-        method: "POST",
-        body: JSON.stringify({ conversationId, text: draft }),
-      }),
-  })
-
-  const runColumns = useMemo<ColumnDef<RunItem>[]>(
-    () => [
-      {
-        accessorKey: "status",
-        header: "Estado",
-        cell: ({ row }) => (
-          <Badge variant={NEEDS_REVIEW.has(row.original.status) ? "destructive" : "secondary"}>
-            {STATUS_LABEL[row.original.status] ?? row.original.status}
-          </Badge>
-        ),
-      },
-      { accessorKey: "model", header: "Modelo" },
-      {
-        id: "conversation",
-        header: "Caso",
-        cell: ({ row }) => row.original.conversationId
-          ? <Link to="/inbox" search={{ conversation: row.original.conversationId }} className="text-primary underline">Abrir conversación</Link>
-          : "Sin conversación",
-      },
-      {
-        accessorKey: "latencyMs",
-        header: "Latencia",
-        cell: ({ row }) =>
-          row.original.latencyMs != null ? `${(row.original.latencyMs / 1000).toFixed(1)} s` : "—",
-      },
-      {
-        id: "tokens",
-        header: "Tokens",
-        cell: ({ row }) =>
-          row.original.inputTokens != null
-            ? `${row.original.inputTokens}/${row.original.outputTokens ?? 0}${row.original.cachedInputTokens != null ? ` · ${row.original.cachedInputTokens} en caché` : ""}`
-            : "—",
-      },
-      {
-        accessorKey: "llmCalls",
-        header: "Llamadas al modelo",
-        cell: ({ row }) => row.original.llmCalls ?? "—",
-      },
-      {
-        id: "herramientas",
-        header: "Herramientas",
-        cell: ({ row }) => (row.original.toolsUsed.length > 0 ? row.original.toolsUsed.join(", ") : "—"),
-      },
-      {
-        accessorKey: "error",
-        header: "Error",
-        // Una corrida omitida no es un fallo: su motivo se explica, no se alarma.
-        cell: ({ row }) =>
-          !row.original.error ? (
-            "—"
-          ) : row.original.status === "omitida" ? (
-            <span className="text-muted-foreground">
-              {row.original.error === "burst-covered"
-                ? "Atendido en la corrida de otro mensaje del hilo"
-                : row.original.error}
-            </span>
-          ) : (
-            <span className="text-destructive">{row.original.error}</span>
-          ),
-      },
-    ],
-    [],
+  const advisorOn = advisorQuery.data?.data.enabled === true
+  useOrgEvents(
+    ["agent.run.recorded", "agent.proposal.created", "agent.proposal.decided", "agent.handoff.created", "stream.reconnected"],
+    () => void queryClient.invalidateQueries({ queryKey: ["agent-overview"] }),
   )
-  const runs = runsQuery.data?.data ?? []
-  const runsTable = useReactTable({ data: runs, columns: runColumns, getCoreRowModel: getCoreRowModel() })
+
+  const turnOff = useMutation({
+    retry: false,
+    mutationFn: () => apiFetch("/api/agent/config", { method: "PUT", body: JSON.stringify({ enabled: false }) }),
+    onSuccess: () => {
+      for (const key of ["agent-config", "agent-overview", "agent-panel"]) {
+        void queryClient.invalidateQueries({ queryKey: [key] })
+      }
+      setTurnOffOpen(false)
+    },
+  })
 
   if (!canRead) {
     return (
       <PageShell>
-        <EmptyState title="Sin acceso" description="No tienes acceso a la supervisión del agente." />
+        <ErrorState title="Sin acceso" message="No tienes acceso al resumen del agente. Si decides sus propuestas, entra por Aprobaciones." />
       </PageShell>
     )
   }
 
-  const stats = statsQuery.data?.data ?? null
-  const simulation = simulateMutation.data?.data ?? null
-  const simError =
-    simulateMutation.error instanceof ApiError
-      ? (simulateMutation.error.shape.message ?? "No pudimos simular")
-      : simulateMutation.error
-        ? "No pudimos simular"
-        : null
+  const overview = overviewQuery.data?.data
+  const roles = rolesQuery.data?.data
+  const config = configQuery.data?.data
+  const limitReached = overview ? overview.usage.runsToday >= overview.usage.dailyRunLimit : false
 
   return (
     <PageShell className="flex flex-col gap-6">
-      <PageHeader title="Agente" subtitle="Ejecuciones registradas y simulación sin cambios; una ejecución correcta no equivale a un caso resuelto." />
+      <PageHeader title="Agente" subtitle="Cómo va y qué necesita de ti." />
       <AgentTabs />
-      {statsQuery.isPending ? <LoadingState /> : statsQuery.isError ? <div role="alert"><p>No pudimos cargar la actividad del agente.</p><Button variant="outline" onClick={() => void statsQuery.refetch()}>Volver a intentar</Button></div> : null}
-      <div className="grid min-w-0 gap-3 sm:grid-cols-4">
-        <KpiCard
-          title="Ejecuciones"
-          value={stats?.total ?? "—"}
-          description={
-            stats?.totalLlmCalls != null
-              ? `${stats.totalLlmCalls} ${stats.totalLlmCalls === 1 ? "llamada" : "llamadas"} al modelo en ${stats.runsWithLlmCalls} ${stats.runsWithLlmCalls === 1 ? "ejecución medida" : "ejecuciones medidas"}`
-              : undefined
-          }
-        />
-        <KpiCard
-          title="Latencia media"
-          value={stats?.avgLatencyMs == null ? "—" : `${(stats.avgLatencyMs / 1000).toFixed(1)} s`}
-        />
-        <KpiCard
-          title="Tokens (entrada/salida)"
-          value={stats?.totalInputTokens == null ? "—" : `${stats.totalInputTokens}/${stats.totalOutputTokens ?? 0}`}
-          description={
-            stats?.totalCostMicros != null ? `Costo acumulado $${(stats.totalCostMicros / 1_000_000).toFixed(2)}` : undefined
-          }
-        />
-        <div className="elevated rounded-xl border bg-card p-6">
-          <div className="text-sm font-medium text-muted-foreground">Por estado</div>
-          <div className="mt-3 flex flex-wrap gap-1">
-            {stats
-              ? Object.entries(stats.byStatus).map(([status, total]) => (
-                  <Badge key={status} variant="secondary">
-                    {STATUS_LABEL[status] ?? status}: {total}
-                  </Badge>
-                ))
-              : "—"}
-          </div>
-        </div>
-      </div>
-      {stats && stats.topTools.length > 0 ? (
-        <div className="elevated rounded-xl border bg-card p-6">
-          <div className="text-sm font-medium text-muted-foreground">Herramientas más usadas</div>
-          <div className="mt-3 flex flex-wrap gap-1">
-            {stats.topTools.map((t) => (
-              <Badge key={t.tool} variant="secondary">
-                {t.tool}: {t.uses}
-              </Badge>
-            ))}
-          </div>
-        </div>
-      ) : null}
-      <div className="elevated rounded-xl border bg-card p-6">
-        <h2 className="font-heading text-base font-medium">Últimas 50 ejecuciones</h2>
-        {runsQuery.isPending ? <LoadingState /> : runsQuery.isError ? <div role="alert"><p>No pudimos cargar las ejecuciones.</p><Button variant="outline" onClick={() => void runsQuery.refetch()}>Volver a intentar</Button></div> : runs.length === 0 ? (
-          <EmptyState title="Sin ejecuciones" description="Aún no hay actividad registrada." />
-        ) : (
-          <DataTable table={runsTable} />
-        )}
-      </div>
-      <section aria-label="Decisiones en sombra" className="elevated rounded-xl border bg-card p-6">
-        <h2 className="font-heading text-base font-medium">Decisiones en sombra</h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Qué habría decidido el modelo de decisión sobre cada mensaje entrante y con qué confianza. Solo se registra:
-          no cambia lo que hizo el agente ni acredita acierto.
-        </p>
-        {decisionsQuery.isPending ? <LoadingState /> : decisionsQuery.isError ? <div role="alert"><p>No pudimos cargar las decisiones.</p><Button variant="outline" onClick={() => void decisionsQuery.refetch()}>Volver a intentar</Button></div> : decisionsQuery.data.data.length === 0 ? (
-          <EmptyState title="Sin decisiones registradas" description="Elige un modelo de decisión en Configuración › Agente; cada mensaje entrante dejará aquí su triaje." />
-        ) : (
-          <ul className="mt-3 flex flex-col divide-y">
-            {decisionsQuery.data.data.map((item) => (
-              <li key={item.id} className="flex flex-col gap-1 py-3 text-sm">
-                <div className="flex flex-wrap items-center gap-2">
-                  <Badge variant="secondary">{PROVIDER_LABEL[item.provider] ?? item.provider}</Badge>
-                  <span className="text-xs text-muted-foreground">
-                    {item.point}{item.model ? ` · ${item.model}` : ""}{item.latencyMs != null ? ` · ${item.latencyMs} ms` : ""}
-                  </span>
-                  {item.conversationId ? (
-                    <Link to="/inbox" search={{ conversation: item.conversationId }} className="text-xs text-primary underline">
-                      Abrir conversación
-                    </Link>
-                  ) : null}
-                </div>
-                <p className={item.error ? "text-destructive" : undefined}>{describeAnswers(item)}</p>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-      {canWrite ? (
-        <div className="flex flex-col gap-3 elevated rounded-xl border bg-card p-6">
-          <div className="font-heading text-base font-medium">Simular instrucciones</div>
-          <p className="text-sm text-muted-foreground">
-            Simula un solo turno con el mismo modelo efectivo que la atención de esta organización, sin enviar mensajes
-            ni cambiar citas, oportunidades, tareas o derivaciones. No reproduce activaciones ni derivaciones previas ni la
-            memoria de la atención real: el resultado es orientativo, no una equivalencia total. El resultado muestra el modelo usado.
-          </p>
-          <Field>
-            <FieldLabel htmlFor="sim-busqueda">Buscar conversación por persona</FieldLabel>
-            <Input id="sim-busqueda" type="search" value={conversationSearch} onChange={event => setConversationSearch(event.target.value)} placeholder="Nombre del interlocutor…" />
-          </Field>
-          <Field>
-            <FieldLabel htmlFor="sim-conversacion">Conversación y canal</FieldLabel>
-            <select id="sim-conversacion" className="min-w-0 rounded-md border bg-background p-2 text-sm" value={conversationId} onChange={event => {
-              simulateMutation.reset()
-              void navigate({ search: { conversation: event.target.value || undefined }, replace: true })
-            }}>
-              <option value="">Elige una conversación…</option>
-              {conversationId && !conversations.some(item => item.id === conversationId) && <option value={conversationId}>Caso seleccionado desde la bandeja</option>}
-              {conversations.map(item => <option key={item.id} value={item.id}>{item.contact.displayName} · {channelLabel(item.connection.channel)} · {item.connection.displayName}</option>)}
-            </select>
-            {conversationsQuery.isPending ? <p className="text-sm text-muted-foreground">Cargando conversaciones…</p> : conversationsQuery.isError ? <p role="alert" className="text-sm">No pudimos cargar las conversaciones. <button type="button" className="underline" onClick={() => void conversationsQuery.refetch()}>Volver a intentar</button></p> : conversations.length === 0 ? <p className="text-sm text-muted-foreground">No hay conversaciones para esta búsqueda.</p> : null}
-            {conversationsQuery.hasNextPage && <Button type="button" variant="outline" disabled={conversationsQuery.isFetchingNextPage} onClick={() => void conversationsQuery.fetchNextPage()}>Cargar más conversaciones</Button>}
-            {conversationId && <Link to="/inbox" search={{ conversation: conversationId }} className="text-sm text-primary underline">Abrir el caso real</Link>}
-          </Field>
-          <Field>
-            <FieldLabel htmlFor="sim-mensaje">Mensaje hipotético del interlocutor</FieldLabel>
-            <Textarea
-              id="sim-mensaje"
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              placeholder="Hola, ¿tienen cita mañana?"
-            />
-          </Field>
-          {simError ? <p role="alert" className="text-sm text-destructive">{simError}</p> : null}
-          <div>
-            <SubmitButton
-              type="button"
-              onClick={() => simulateMutation.mutate()}
-              pending={simulateMutation.isPending}
-              disabled={!conversationId || !draft.trim()}
-            >
-              Simular
-            </SubmitButton>
-          </div>
-          {simulation ? (
-            <div className="flex flex-col gap-2 rounded-md bg-muted p-3 text-sm">
-              <p className="whitespace-pre-wrap">{simulation.reply}</p>
-              {!simulation.replied && !simulation.handedOff && (
-                <p role="status" className="text-sm font-medium text-destructive">
-                  El modelo no usó la herramienta de envío: en una conversación real este texto no llegaría al interlocutor y la ejecución quedaría como «Terminó sin responder».
-                </p>
-              )}
-              {simulation.model === "fake" && <p className="text-sm text-muted-foreground">Demostración determinista: no acredita inteligencia ni calidad de un proveedor real.</p>}
-              <p className="text-xs text-muted-foreground">
-                Modelo {simulation.model} · {(simulation.latencyMs / 1000).toFixed(1)} s
-                {simulation.inputTokens != null
-                  ? ` · ${simulation.inputTokens}/${simulation.outputTokens ?? 0} tokens`
-                  : " · el proveedor no reportó tokens"}
-                {simulation.toolsUsed.length > 0 ? ` · herramientas: ${simulation.toolsUsed.join(", ")}` : ""}
-                {simulation.handedOff ? " · derivaría a humano" : ""}
-              </p>
+      {overviewQuery.isPending || rolesQuery.isPending ? (
+        <LoadingState message="Cargando el resumen…" />
+      ) : overviewQuery.isError || !overview ? (
+        <QueryErrorState error={overviewQuery.error} onRetry={() => void overviewQuery.refetch()} />
+      ) : (
+        <>
+          {limitReached && overview.enabled ? (
+            <div role="status" className="flex flex-wrap items-center gap-3 rounded-xl border border-warning/40 bg-warning-soft p-4 text-sm">
+              <span className="min-w-0 flex-1">
+                <span className="font-semibold">Llegó al tope de hoy ({overview.usage.dailyRunLimit} respuestas).</span> Lo que entre
+                desde ahora pasa a tu equipo hasta mañana.
+              </span>
+              {canWrite ? (
+                <Link to="/settings/agent" className="inline-flex min-h-11 items-center font-semibold text-primary hover:underline sm:min-h-8">
+                  Cambiar el tope
+                </Link>
+              ) : null}
             </div>
           ) : null}
-        </div>
-      ) : null}
+
+          <section aria-labelledby="necesita" className="flex flex-col gap-3">
+            <div>
+              <h2 id="necesita" className="font-heading text-base font-semibold">
+                Necesita de ti
+              </h2>
+              <p className="text-sm text-muted-foreground">Lo que solo una persona puede decidir.</p>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              <NeedTile
+                count={overview.needsYou.approvals}
+                title="Aprobaciones"
+                pending="Esperan tu visto bueno."
+                done="Nada espera tu aprobación."
+                to="/agent/approvals"
+              />
+              <NeedTile
+                count={overview.needsYou.gaps}
+                title="Preguntas sin respuesta"
+                pending="Lo que le preguntaron y no sabía."
+                done="Encontró respuesta a todo lo que buscó."
+                to="/agent/knowledge"
+              />
+              <NeedTile
+                count={overview.needsYou.basicsMissing}
+                title="Preguntas básicas por responder"
+                pending={`Tiene ${overview.knows.basicsCovered} de ${overview.knows.basicsTotal}.`}
+                done="Lo básico de tu clínica está completo."
+                to="/agent/knowledge"
+              />
+              <NeedTile
+                count={overview.needsYou.review + overview.needsYou.lessons}
+                title="Por revisar y aprender"
+                pending={`${overview.needsYou.review} ${overview.needsYou.review === 1 ? "respuesta" : "respuestas"} por revisar y ${overview.needsYou.lessons} ${overview.needsYou.lessons === 1 ? "lección" : "lecciones"} por aprobar.`}
+                done="Nada dudoso ni lecciones esperando."
+                to="/agent/learn"
+              />
+            </div>
+          </section>
+
+          <section aria-labelledby="tus-agentes" className="elevated flex flex-col rounded-xl border bg-card">
+            <h2 id="tus-agentes" className="px-5 pt-5 font-heading text-base font-semibold sm:px-6">
+              Tus agentes
+            </h2>
+            <div className="mx-5 mt-3 flex flex-wrap items-center gap-3 rounded-xl bg-muted/60 p-4 sm:mx-6">
+              <span className="shrink-0 text-primary-soft-foreground [&>svg]:size-5">
+                <ShieldCheck aria-hidden />
+              </span>
+              <div className="min-w-0 flex-1 basis-48">
+                <p className="font-semibold">La base que comparten</p>
+                <p className="text-sm text-muted-foreground">Lo que fija odentIA y la voz de tu clínica. Lo demás es de cada agente y no se mezcla.</p>
+              </div>
+              <Button type="button" variant="outline" size="sm" className="min-h-11 sm:min-h-8" onClick={() => setBaseOpen(true)} disabled={!config || !roles}>
+                Ver la base
+              </Button>
+            </div>
+            <ul className="flex flex-col divide-y">
+              {(roles?.roles ?? []).map((role) => {
+                const isReception = role.id === "recepcion"
+                return (
+                  <li key={role.id} className="flex flex-wrap items-center gap-3 px-5 py-4 sm:px-6">
+                    <span
+                      className={`flex size-10 shrink-0 items-center justify-center rounded-xl [&>svg]:size-5 ${isReception && overview.enabled ? "bg-primary-soft text-primary-soft-foreground" : "bg-muted text-muted-foreground"}`}
+                    >
+                      {ROLE_ICON[role.id]}
+                    </span>
+                    <div className="min-w-0 flex-1 basis-56">
+                      <p className="flex flex-wrap items-center gap-2 font-semibold">
+                        {role.name}
+                        {isReception ? (
+                          <Badge variant={overview.enabled ? "success" : "secondary"}>{overview.enabled ? "Encendido" : "Apagado"}</Badge>
+                        ) : role.id === "asesor" && role.available ? (
+                          <Badge variant={advisorOn ? "success" : "secondary"}>{advisorOn ? "Encendido" : "Apagado"}</Badge>
+                        ) : role.id === "ayuda" && role.available ? (
+                          <Badge variant="success">Siempre disponible</Badge>
+                        ) : role.id === "asistente_clinico" && role.available ? (
+                          <Badge variant={config?.clinicalAssistantEnabled ? "success" : "secondary"}>
+                            {config?.clinicalAssistantEnabled ? "Encendido" : "Apagado"}
+                          </Badge>
+                        ) : (
+                          <Badge variant="secondary">Aún no disponible</Badge>
+                        )}
+                      </p>
+                      <p className="text-sm text-muted-foreground">
+                        {isReception && overview.enabled
+                          ? `Nivel ${LEVEL_LABEL[overview.level]} · ${
+                              config?.channels?.length
+                                ? config.channels.map((channel) => channelLabel(channel)).join(", ")
+                                : overview.readiness.channels.length
+                                  ? overview.readiness.channels.map((channel) => channelLabel(channel)).join(", ")
+                                  : "sin canal conectado"
+                            }`
+                          : role.role}
+                      </p>
+                    </div>
+                    {isReception ? (
+                      <div className="flex flex-wrap items-center gap-2">
+                        {canWrite ? (
+                          <Link
+                            to="/agent/recepcion"
+                            hash="probar"
+                            className="inline-flex min-h-11 items-center rounded-lg border px-3 text-sm font-semibold hover:bg-accent/60 sm:min-h-9"
+                          >
+                            Probar
+                          </Link>
+                        ) : null}
+                        <Link
+                          to="/agent/recepcion"
+                          className="inline-flex min-h-11 items-center rounded-lg border px-3 text-sm font-semibold hover:bg-accent/60 sm:min-h-9"
+                        >
+                          {canWrite ? "Configurar" : "Ver"}
+                        </Link>
+                        {canWrite ? (
+                          <Switch
+                            checked={overview.enabled}
+                            aria-label={overview.enabled ? "Apagar Recepción" : "Encender Recepción"}
+                            onCheckedChange={(next) => (next ? setTurnOnOpen(true) : setTurnOffOpen(true))}
+                          />
+                        ) : null}
+                      </div>
+                    ) : role.id === "asistente_clinico" && role.available ? (
+                      <Link
+                        to="/agent/asistente-clinico"
+                        className="inline-flex min-h-11 items-center rounded-lg border px-3 text-sm font-semibold hover:bg-accent/60 sm:min-h-9"
+                      >
+                        {canWrite ? "Configurar" : "Ver"}
+                      </Link>
+                    ) : role.id === "asesor" && role.available ? (
+                      <Link
+                        to="/agent/asesor"
+                        className="inline-flex min-h-11 items-center rounded-lg border px-3 text-sm font-semibold hover:bg-accent/60 sm:min-h-9"
+                      >
+                        {canWrite ? "Configurar" : "Ver"}
+                      </Link>
+                    ) : null}
+                  </li>
+                )
+              })}
+            </ul>
+          </section>
+
+          <section aria-labelledby="semana" className="elevated flex flex-col gap-3 rounded-xl border bg-card p-5 sm:p-6">
+            <div>
+              <h2 id="semana" className="font-heading text-base font-semibold">
+                Cómo le fue esta semana
+              </h2>
+              <p className="text-sm text-muted-foreground">
+                {overview.week.attended > 0
+                  ? `${overview.week.attended} ${overview.week.attended === 1 ? "conversación atendida" : "conversaciones atendidas"}. Cuenta conversaciones, no mensajes.`
+                  : overview.enabled
+                    ? "Todavía no atendió ninguna conversación esta semana."
+                    : "Está apagado: no atendió conversaciones esta semana."}
+              </p>
+            </div>
+            {overview.week.attended > 0 ? (
+              <>
+                <div
+                  className="flex h-3 overflow-hidden rounded-full bg-muted"
+                  role="img"
+                  aria-label={`${overview.week.alone} las llevó sola y ${overview.week.passed} las pasó a una persona`}
+                >
+                  <div className="bg-primary" style={{ width: `${(overview.week.alone / overview.week.attended) * 100}%` }} />
+                  <div className="bg-warning" style={{ width: `${(overview.week.passed / overview.week.attended) * 100}%` }} />
+                </div>
+                <dl className="grid gap-2 text-sm sm:grid-cols-2">
+                  <div className="flex items-center gap-2">
+                    <span aria-hidden className="size-2.5 shrink-0 rounded-full bg-primary" />
+                    <dt className="flex-1">Las llevó sin intervención de tu equipo</dt>
+                    <dd className="font-semibold tabular-nums">{overview.week.alone}</dd>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span aria-hidden className="size-2.5 shrink-0 rounded-[3px] bg-warning" />
+                    <dt className="flex-1">Las pasó a una persona o alguien intervino</dt>
+                    <dd className="font-semibold tabular-nums">{overview.week.passed}</dd>
+                  </div>
+                </dl>
+                <p className="text-sm">
+                  {overview.week.booked > 0
+                    ? `Reservó ${overview.week.booked} ${overview.week.booked === 1 ? "cita" : "citas"} sin que nadie de tu equipo interviniera.`
+                    : "No reservó citas por su cuenta esta semana."}
+                </p>
+                <p className="text-xs text-muted-foreground">Que no interviniera nadie no prueba que el caso quedara bien resuelto.</p>
+              </>
+            ) : !overview.enabled && canWrite ? (
+              <Button type="button" className="min-h-11 self-start sm:min-h-9" onClick={() => setTurnOnOpen(true)}>
+                Encender Recepción
+              </Button>
+            ) : null}
+          </section>
+
+          <div className="flex flex-wrap gap-x-6 gap-y-1">
+            <Link to="/agent/knowledge" className="inline-flex min-h-11 items-center gap-1.5 text-sm font-semibold text-primary hover:underline sm:min-h-8">
+              <BookOpen className="size-4" aria-hidden /> Lo que sabe: {overview.knows.answers} {overview.knows.answers === 1 ? "respuesta oficial" : "respuestas oficiales"}
+            </Link>
+            <Link to="/agent/registro" className="inline-flex min-h-11 items-center gap-1.5 text-sm font-semibold text-primary hover:underline sm:min-h-8">
+              Registro técnico: ejecuciones, costo y proveedor del modelo <ArrowRight className="size-4" aria-hidden />
+            </Link>
+          </div>
+
+          {config && roles ? (
+            <AgentBaseDrawer
+              open={baseOpen}
+              onClose={() => setBaseOpen(false)}
+              config={config}
+              principles={roles.principles}
+              clinicName={org.name}
+              canWrite={canWrite}
+            />
+          ) : null}
+          {roles ? (
+            <TurnOnDrawer
+              open={turnOnOpen}
+              onClose={() => setTurnOnOpen(false)}
+              overview={overview}
+              levels={roles.levels}
+              onTest={() => {
+                setTurnOnOpen(false)
+                void navigate({ to: "/agent/recepcion", hash: "probar" })
+              }}
+            />
+          ) : null}
+          <ConfirmDialog
+            open={turnOffOpen}
+            title="Apagar Recepción"
+            description="Deja de responder en todos los canales. Las conversaciones abiertas y lo que esté a medias quedan para tu equipo."
+            confirmLabel="Apagar"
+            pending={turnOff.isPending}
+            onClose={() => {
+              if (!turnOff.isPending) setTurnOffOpen(false)
+            }}
+            onConfirm={() => turnOff.mutate()}
+          >
+            {turnOff.isError ? (
+              <p role="alert" className="text-sm text-destructive">
+                {mutationErrorMessage(turnOff.error) ?? "No pudimos apagarlo."}
+              </p>
+            ) : null}
+          </ConfirmDialog>
+        </>
+      )}
     </PageShell>
   )
 }

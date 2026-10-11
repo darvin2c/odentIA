@@ -1,6 +1,6 @@
 # 0002 · Capa de decisión detrás de un puerto propio, primero en sombra
 
-Fecha: 2026-10-08 · Estado: aceptada
+Fecha: 2026-10-08 · Estado: sustituida por [0007](0007-modelo-de-decision-elige-el-conocimiento.md), que conserva el puerto, el estado mínimo y el triaje en sombra, y añade un uso fuera de la sombra
 
 ## Problema
 

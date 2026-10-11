@@ -10,6 +10,8 @@ export interface RecordDecisionInput {
   conversationId?: string | null
   triggerMessageId?: string | null
   point: string
+  /** `shadow` (por defecto): solo se compara. `retrieval`: eligió conocimiento. `route`: eligió el camino del turno. */
+  mode?: "shadow" | "retrieval" | "route"
   provider: string
   model?: string | null
   /** Texto enviado al proveedor: solo se guarda su huella y longitud. */
@@ -33,7 +35,7 @@ export async function recordAgentDecision(tx: Db, orgId: string, input: RecordDe
       conversationId: input.conversationId ?? null,
       triggerMessageId: input.triggerMessageId ?? null,
       point: input.point,
-      mode: "shadow",
+      mode: input.mode ?? "shadow",
       provider: input.provider,
       model: input.model ?? null,
       stateHash: createHash("sha256").update(input.state).digest("hex"),

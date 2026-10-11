@@ -3,8 +3,9 @@ import { Link, useRouterState } from "@tanstack/react-router"
 import { usePermission } from "../lib/crm"
 
 const TABS = [
+  { label: "Resumen", to: "/agent", permission: "read" },
   { label: "Aprobaciones", to: "/agent/approvals", permission: "decide" },
-  { label: "Actividad", to: "/agent", permission: "read" },
+  { label: "Aprender", to: "/agent/learn", permission: "read" },
   { label: "Conocimiento", to: "/agent/knowledge", permission: "write" },
 ] as const
 

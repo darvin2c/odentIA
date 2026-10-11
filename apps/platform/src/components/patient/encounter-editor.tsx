@@ -25,6 +25,7 @@ import {
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useId, useRef, useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
+import { DictationPanel, type DictationSuggestion } from "./dictation-panel"
 import { fetchFollowUps, fetchPatientAccount, fetchPrescriptions } from "../../lib/clinical-journey"
 import { useMemberName, useMyUserId, usePermission } from "../../lib/crm"
 import {
@@ -323,6 +324,8 @@ export function EncounterEditor({
   const [explicitSaving, setExplicitSaving] = useState(false)
   const [finalizing, setFinalizing] = useState(false)
   const [confirmOpen, setConfirmOpen] = useState(false)
+  // Sugerencias del dictado que el odontólogo aún no confirmó ni descartó.
+  const [dictationPending, setDictationPending] = useState(0)
   const [backing, setBacking] = useState(false)
   // Hora de fin declarada al cerrar (HH:MM local); vacía = ahora.
   const [endTime, setEndTime] = useState("")
@@ -656,6 +659,34 @@ export function EncounterEditor({
     setNextStep(value)
     markEdited("nextStep")
   }
+  /**
+   * Una sugerencia del dictado ya confirmada: el servidor la guardó con la
+   * operación de siempre y aquí se refleja. Los textos de la nota pasan por los
+   * mismos editores que al escribir, para que el borrador local no los pise.
+   */
+  const applyDictation = (item: DictationSuggestion) => {
+    if (item.kind === "nota") {
+      const text = (key: string) => (typeof item.payload[key] === "string" ? (item.payload[key] as string) : null)
+      const reasonText = text("reason")
+      if (reasonText !== null) editReason(reasonText)
+      const evolutionText = text("evolution")
+      if (evolutionText !== null) editEvolution(evolutionText)
+      const indicationsText = text("indications")
+      if (indicationsText !== null) editIndications(indicationsText)
+      const nextStepText = text("nextStep")
+      if (nextStepText !== null) editNextStep(nextStepText)
+      for (const key of ["presentIllness", "illnessDuration", "prognosis", "auxiliaryExams"] as NoteKey[]) {
+        const value = text(key)
+        if (value !== null) editNote(key, value)
+      }
+    }
+    void queryClient.invalidateQueries({ queryKey: ["plan-items", patientId] })
+    void queryClient.invalidateQueries({ queryKey: ["follow-ups", patientId] })
+    void queryClient.invalidateQueries({ queryKey: ["odontogram", patientId] })
+    void refreshClosing()
+    void onChanged()
+  }
+
   const editApptDate = (value: string) => {
     valuesRef.current.apptDate = value
     setApptDate(value)
@@ -756,6 +787,11 @@ export function EncounterEditor({
     setApptError(null)
     setFinalizing(true)
     try {
+      // Lo que quedó sugerido sin confirmar no entra a la historia: se descarta antes de firmar.
+      if (dictationPending > 0) {
+        await apiFetch(`/api/patients/${patientId}/encounters/${encounterId}/dictation/discard-pending`, { method: "POST" })
+        await queryClient.invalidateQueries({ queryKey: ["encounter-dictation", patientId, encounterId] })
+      }
       // Congela: primero todo PATCH pendiente y último dirty, recién después finalize.
       await flush()
       const endedAt = endedAtIso()
@@ -1530,6 +1566,15 @@ export function EncounterEditor({
         </p>
       )}
 
+      {canWrite && attending ? (
+        <DictationPanel
+          patientId={patientId}
+          encounterId={encounterId}
+          onApplied={applyDictation}
+          onPendingChange={setDictationPending}
+        />
+      ) : null}
+
       <MasterDetail panelSize="xl" panel={mode === "panel" ? sectionDetail("panel") : null}>
         <div className="flex flex-col gap-4">
           {includedSections.map((section) => (
@@ -1742,7 +1787,7 @@ export function EncounterEditor({
         open={confirmOpen}
         title="Finalizar y firmar la atención"
         description={finalizeDescription}
-        confirmLabel="Finalizar y firmar"
+        confirmLabel={dictationPending > 0 ? "Descartar y firmar" : "Finalizar y firmar"}
         variant="default"
         pending={finalizing}
         onConfirm={() => void handleConfirmFinalize()}
@@ -1750,6 +1795,19 @@ export function EncounterEditor({
           if (!finalizing) setConfirmOpen(false)
         }}
       >
+        {dictationPending > 0 ? (
+          <div role="alert" className="flex flex-col gap-2 rounded-xl border border-warning/40 bg-warning-soft p-3 text-sm">
+            <p>
+              <span className="font-semibold">
+                {dictationPending === 1 ? "Queda 1 sugerencia del dictado sin revisar." : `Quedan ${dictationPending} sugerencias del dictado sin revisar.`}
+              </span>{" "}
+              Lo que no confirmes no entra a la historia.
+            </p>
+            <Button type="button" variant="outline" size="sm" className="min-h-11 self-start sm:min-h-8" disabled={finalizing} onClick={() => setConfirmOpen(false)}>
+              Revisar ahora
+            </Button>
+          </div>
+        ) : null}
         <p className="text-sm">
           Firmarás como{" "}
           <strong>
