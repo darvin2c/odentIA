@@ -46,6 +46,7 @@ export {
   windowCovering,
 } from "./occupancy.js"
 export {
+  type ScheduleRangeMarker,
   ScheduleRangePicker,
   type ScheduleRangePickerProps,
   type ScheduleRangeState,
@@ -54,11 +55,6 @@ export {
 } from "./range-picker.js"
 export { ScheduleResourceChips, type ScheduleResourceChipsProps } from "./resource-chips.js"
 export { ResourceSelect, type ResourceSelectOption } from "./resource-select.js"
-export {
-  type ScheduleSlotChoice,
-  ScheduleSlotChoices,
-  type ScheduleSlotChoicesProps,
-} from "./slot-choices.js"
 export {
   SCHEDULE_AGENDA_LABELS,
   SCHEDULE_STATUS_LABELS,

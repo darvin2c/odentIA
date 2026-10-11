@@ -1,30 +1,28 @@
-import { createFileRoute } from '@tanstack/react-router'
-import { Button, FieldLabel, Input, RadioGroup, RadioGroupItem, cn, toast } from "@odentia/ui"
+import { createFileRoute, Link } from "@tanstack/react-router"
+import { Badge, Button, FieldLabel, RadioGroup, RadioGroupItem, cn, toast } from "@odentia/ui"
 import {
   dayMinutesIn,
   formatDateLong,
   formatSpan,
   hourLabel,
   PageHeader,
+  ScheduleResourceChips,
+  scheduleToneAt,
   zonedDateOf,
 } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { Plus } from "lucide-react"
 import * as React from "react"
-import { ApiError, apiFetch } from "../../lib/api"
-import {
-  WEEKDAY_LABELS,
-  minutesLabel,
-  type AgendaResources,
-  type ProfessionalSchedule,
-  type ScheduleBlock,
-} from "../../lib/agenda"
-import { AbsenceForm } from "../../components/agenda/absence-form"
+import { apiFetch } from "../../lib/api"
+import type { AgendaAppointment, AgendaResources, ScheduleBlock } from "../../lib/agenda"
+import { AbsenceForm, type AbsenceScope } from "../../components/agenda/absence-form"
 import { ChairForm } from "../../components/agenda/chair-form"
+import { useWeeklySchedule, WeeklyScheduleFields } from "../../components/agenda/schedule-editor"
+import { errorMessage, shortName } from "../../components/agenda/shared"
 import { BranchSwitcher } from "../../components/branch-switcher"
-import { ChoiceSelect } from "../../components/ui/choice-select"
 import { useActiveBranch } from "../../lib/active-branch"
 import { usePermission } from "../../lib/crm"
-import { sameDraft, usePageDraftGuard } from "../../lib/page-draft-guard"
+import { usePageDraftGuard } from "../../lib/page-draft-guard"
 
 export const Route = createFileRoute("/_org/settings/availability")({
   validateSearch: (search: Record<string, unknown>): { branch?: string } => ({
@@ -34,27 +32,37 @@ export const Route = createFileRoute("/_org/settings/availability")({
   component: AvailabilityPage,
 })
 
-interface TurnDraft {
-  key: number
-  weekday: number
-  from: string
-  to: string
-}
-
-let turnSeq = 1
-
-function errorMessage(error: unknown): string {
-  return error instanceof ApiError ? (error.shape.message ?? error.message) : String(error)
-}
-
 /** Duraciones que se ofrecen para una cita regular (las mismas que valida el servicio). */
 const REGULAR_MINUTES = [15, 30, 45, 60, 90, 120]
 
-function toMinutes(label: string): number {
-  const [hours = 0, minutes = 0] = label.split(":").map(Number)
-  return hours * 60 + minutes
+/** Hasta cuándo se listan ausencias, feriados y cierres. */
+const AHEAD_DAYS = 60
+
+const CARD = "grid content-start gap-3 rounded-xl border bg-background p-3 sm:p-4"
+
+function GroupTitle({ title, hint }: { title: string; hint: string }) {
+  return (
+    <div className="mt-2 grid gap-0.5">
+      <h2 className="text-lg font-bold">{title}</h2>
+      <p className="text-sm text-muted-foreground">{hint}</p>
+    </div>
+  )
 }
 
+function CardHead({ title, action }: { title: string; action?: React.ReactNode }) {
+  return (
+    <div className="flex min-h-9 flex-wrap items-center gap-2">
+      <h3 className="min-w-0 flex-1 font-semibold">{title}</h3>
+      {action}
+    </div>
+  )
+}
+
+/**
+ * Horarios y ausencias de una sede, en dos grupos: lo de cada profesional (su
+ * horario de la semana y los días que no viene) y lo de la sede (sillones,
+ * duración de una cita regular, feriados y cierres).
+ */
 function AvailabilityPage() {
   const queryClient = useQueryClient()
   const canConfigure = usePermission("settings.write")
@@ -69,75 +77,70 @@ function AvailabilityPage() {
       ),
   })
   const resources = resourcesQuery.data?.data
+  const professionals = React.useMemo(
+    () =>
+      (resources?.professionals ?? []).map((item, index) => ({
+        id: item.id,
+        label: item.label,
+        tone: scheduleToneAt(index),
+      })),
+    [resources],
+  )
   const [dentistId, setDentistId] = React.useState("")
-  const professionalId = dentistId || resources?.professionals[0]?.id || ""
+  const professional = professionals.find((item) => item.id === dentistId) ?? professionals[0]
+  const professionalId = professional?.id ?? ""
 
-  const scheduleQuery = useQuery({
-    queryKey: ["professional-schedule", resources?.branchId, professionalId],
-    enabled: Boolean(resources?.branchId && professionalId),
-    queryFn: () =>
-      apiFetch<{ data: ProfessionalSchedule }>(
-        `/api/agenda/schedules?branchId=${resources?.branchId}&dentistUserId=${professionalId}`,
-      ),
-  })
-  const [turns, setTurns] = React.useState<TurnDraft[]>([])
-  const [loadedFor, setLoadedFor] = React.useState("")
-  const [baseline, setBaseline] = React.useState<TurnDraft[]>([])
-  const draftGuard = usePageDraftGuard(!sameDraft(
-    turns.map(({ weekday, from, to }) => ({ weekday, from, to })),
-    baseline.map(({ weekday, from, to }) => ({ weekday, from, to })),
-  ))
-  const loadedKey = `${resources?.branchId}:${professionalId}`
-  React.useEffect(() => {
-    const rules = scheduleQuery.data?.data.rules
-    if (!rules || loadedFor === loadedKey) return
-    const loadedTurns = rules.map((rule) => ({
-      key: turnSeq++,
-      weekday: rule.weekday,
-      from: minutesLabel(rule.startMin),
-      to: minutesLabel(rule.endMin),
-    }))
-    setTurns(loadedTurns)
-    setBaseline(loadedTurns)
-    setLoadedFor(loadedKey)
-  }, [scheduleQuery.data, loadedFor, loadedKey])
+  const schedule = useWeeklySchedule({ branchId: resources?.branchId, dentistUserId: professionalId })
+  const draftGuard = usePageDraftGuard(schedule.dirty)
 
-  const [error, setError] = React.useState("")
-  const saveMutation = useMutation({
-    mutationFn: (submitted: TurnDraft[]) => {
-      const rules = submitted.map((turn) => {
-        const startMin = toMinutes(turn.from)
-        const endMin = toMinutes(turn.to)
-        if (endMin <= startMin) throw new Error("Cada turno debe terminar después de iniciar.")
-        return { weekday: turn.weekday, startMin, endMin }
-      })
-      return apiFetch("/api/agenda/schedules", {
-        method: "PUT",
-        body: JSON.stringify({ branchId: resources?.branchId, dentistUserId: professionalId, rules }),
-      })
-    },
-    onSuccess: async (_result, submitted) => {
-      setBaseline(submitted)
-      toast.success("Horario guardado.")
-      setError("")
-      await queryClient.invalidateQueries({ queryKey: ["professional-schedule"] })
-    },
-    onError: (cause) => setError(errorMessage(cause)),
-  })
-
-  const weekFrom = React.useMemo(() => new Date().toISOString(), [])
-  const weekTo = React.useMemo(() => new Date(Date.now() + 60 * 86_400_000).toISOString(), [])
+  const range = React.useMemo(
+    () => ({
+      from: new Date().toISOString(),
+      to: new Date(Date.now() + AHEAD_DAYS * 86_400_000).toISOString(),
+    }),
+    [],
+  )
   const blocksQuery = useQuery({
     queryKey: ["schedule-blocks", resources?.branchId],
     enabled: Boolean(resources?.branchId),
     queryFn: () =>
       apiFetch<{ data: ScheduleBlock[] }>(
-        `/api/agenda/blocks?branchId=${resources?.branchId}&from=${encodeURIComponent(weekFrom)}&to=${encodeURIComponent(weekTo)}`,
+        `/api/agenda/blocks?branchId=${resources?.branchId}&from=${encodeURIComponent(range.from)}&to=${encodeURIComponent(range.to)}`,
       ),
   })
-  const [blockForm, setBlockForm] = React.useState(false)
+  const blocks = blocksQuery.data?.data ?? []
+  const absences = blocks.filter((block) => block.dentistUserId === professionalId)
+  const closures = blocks.filter((block) => block.dentistUserId === null)
+  // Citas en pie del profesional: las que caen en una ausencia hay que moverlas.
+  const standingQuery = useQuery({
+    queryKey: ["agenda", "ausencias", resources?.branchId, professionalId, range.from],
+    enabled: Boolean(resources?.branchId && professionalId && absences.length > 0),
+    queryFn: () => {
+      const params = new URLSearchParams({
+        branchId: resources?.branchId ?? "",
+        from: range.from,
+        to: range.to,
+        status: "programada,confirmada",
+        professionals: professionalId,
+      })
+      return apiFetch<{ data: AgendaAppointment[] }>(`/api/appointments?${params}`)
+    },
+  })
+  const insideOf = (block: ScheduleBlock) =>
+    (standingQuery.data?.data ?? []).filter(
+      (item) =>
+        Date.parse(item.endsAt) > Date.parse(block.startsAt) &&
+        Date.parse(item.startsAt) < Date.parse(block.endsAt),
+    )
+
+  const [absenceForm, setAbsenceForm] = React.useState<AbsenceScope | null>(null)
   const [chairForm, setChairForm] = React.useState(false)
-  const invalidateBlocks = () => queryClient.invalidateQueries({ queryKey: ["schedule-blocks"] })
+  const invalidateBlocks = async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["schedule-blocks"] }),
+      queryClient.invalidateQueries({ queryKey: ["agenda-availability"] }),
+    ])
+  }
 
   const durationMutation = useMutation({
     mutationFn: (minutes: number) =>
@@ -162,7 +165,7 @@ function AvailabilityPage() {
     <div className="grid gap-4">
       {draftGuard.dialog}
       <PageHeader
-        title="Horarios y bloqueos"
+        title="Horarios y ausencias"
         subtitle={
           resources ? (
             <>
@@ -174,208 +177,223 @@ function AvailabilityPage() {
                   draftGuard.requestLeave(() => {
                     sede.choose(id)
                     setDentistId("")
-                    setLoadedFor("")
-                    setTurns([])
-                    setBaseline([])
                   })
                 }
               />
               <span className="truncate">, zona {resources.timeZone}</span>
             </>
           ) : (
-            "Horario semanal por profesional, bloqueos y ausencias de la sede."
+            "El horario y las ausencias de cada profesional, y lo que vale para toda la sede."
           )
         }
       />
       {!resources ? (
-        <p className="text-sm text-muted-foreground">Cargando recursos…</p>
+        <p className="text-sm text-muted-foreground">Cargando…</p>
       ) : (
         <>
-          <section className="grid gap-3 rounded-xl border bg-background p-3 sm:p-4">
-            <div className="flex flex-wrap items-center gap-2">
-              <h2 className="font-medium">Horario semanal</h2>
-              <ChoiceSelect
-                aria-label="Profesional"
-                className="w-auto min-w-48"
+          <GroupTitle
+            title="De cada profesional"
+            hint="Su horario de la semana y los días que no viene."
+          />
+          {professional ? (
+            <>
+              <ScheduleResourceChips
+                wrap
+                label="Profesional"
+                resources={professionals}
+                formatLabel={(item) => shortName(item.label)}
                 value={professionalId}
-                onChange={(event) => {
-                  const nextId = event.target.value
-                  draftGuard.requestLeave(() => {
-                    setDentistId(nextId)
-                    setLoadedFor("")
-                    setTurns([])
-                    setBaseline([])
-                  })
+                onChange={(next) => {
+                  if (!next || next === professionalId) return
+                  draftGuard.requestLeave(() => setDentistId(next))
                 }}
-              >
-                {resources.professionals.map((item) => (
-                  <option key={item.id} value={item.id}>
-                    {item.label}
-                  </option>
-                ))}
-              </ChoiceSelect>
-              <span className="text-xs text-muted-foreground">
-                Sin turnos guardados, el profesional no ofrece huecos.
-              </span>
-            </div>
-            {WEEKDAY_LABELS.map((label, weekday) => (
-              <div key={label} className="grid gap-2 border-t pt-2 first:border-t-0 first:pt-0">
-                <div className="flex items-center gap-2">
-                  <span className="w-10 text-sm font-medium">{label}</span>
-                  {canConfigure && (
+              />
+
+              <section className={CARD}>
+                <CardHead title={`Horario semanal de ${professional.label}`} />
+                <WeeklyScheduleFields schedule={schedule} canEdit={canConfigure} />
+                {schedule.error ? (
+                  <p role="alert" className="text-sm text-destructive">
+                    {schedule.error}
+                  </p>
+                ) : null}
+                {canConfigure ? (
+                  <div>
                     <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() =>
-                        setTurns((current) => [
-                          ...current,
-                          { key: turnSeq++, weekday, from: "09:00", to: "13:00" },
-                        ])
-                      }
+                      disabled={!schedule.dirty || schedule.saving}
+                      onClick={() => schedule.save()}
                     >
-                      Añadir turno
+                      Guardar horario
                     </Button>
-                  )}
-                </div>
-                {turns.filter((turn) => turn.weekday === weekday).length === 0 && (
-                  <p className="text-xs text-muted-foreground">Sin atención.</p>
-                )}
-                {turns
-                  .filter((turn) => turn.weekday === weekday)
-                  .map((turn) => (
-                    <div key={turn.key} className="flex items-center gap-2">
-                      <Input
-                        aria-label={`Inicio ${label}`}
-                        type="time"
-                        className="h-8 w-32"
-                        disabled={!canConfigure}
-                        value={turn.from}
-                        onChange={(event) =>
-                          setTurns((current) =>
-                            current.map((item) =>
-                              item.key === turn.key ? { ...item, from: event.target.value } : item,
-                            ),
-                          )
+                  </div>
+                ) : null}
+              </section>
+
+              <section className={CARD}>
+                <CardHead
+                  title={`Ausencias de ${professional.label}`}
+                  action={
+                    canConfigure ? (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() =>
+                          setAbsenceForm({
+                            kind: "person",
+                            dentistUserId: professional.id,
+                            name: professional.label,
+                          })
                         }
-                      />
-                      <span className="text-sm text-muted-foreground">a</span>
-                      <Input
-                        aria-label={`Fin ${label}`}
-                        type="time"
-                        className="h-8 w-32"
-                        disabled={!canConfigure}
-                        value={turn.to}
-                        onChange={(event) =>
-                          setTurns((current) =>
-                            current.map((item) =>
-                              item.key === turn.key ? { ...item, to: event.target.value } : item,
-                            ),
-                          )
-                        }
-                      />
-                      {canConfigure && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() =>
-                            setTurns((current) => current.filter((item) => item.key !== turn.key))
+                      >
+                        <Plus aria-hidden />
+                        Nueva ausencia
+                      </Button>
+                    ) : null
+                  }
+                />
+                {absences.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">
+                    Sin vacaciones ni permisos en los próximos {AHEAD_DAYS} días.
+                  </p>
+                ) : (
+                  <ul className="grid">
+                    {absences.map((block) => {
+                      const inside = insideOf(block)
+                      const first = inside[0]
+                      return (
+                        <BlockRow
+                          key={block.id}
+                          block={block}
+                          timeZone={resources.timeZone}
+                          canConfigure={canConfigure}
+                          onDeleted={invalidateBlocks}
+                          note={
+                            first ? (
+                              <Link
+                                to="/agenda"
+                                search={{
+                                  view: "lista",
+                                  date: zonedDateOf(first.startsAt, resources.timeZone),
+                                  who: professional.id,
+                                  branch: resources.branchId,
+                                }}
+                                className="text-sm font-bold text-warning-foreground underline-offset-4 hover:underline"
+                              >
+                                {inside.length === 1
+                                  ? "1 cita por mover"
+                                  : `${inside.length} citas por mover`}
+                              </Link>
+                            ) : null
                           }
-                        >
-                          Quitar
-                        </Button>
-                      )}
-                    </div>
-                  ))}
-              </div>
-            ))}
-            {error && <p className="text-sm text-destructive">{error}</p>}
-            {canConfigure && (
-              <div>
-                <Button disabled={saveMutation.isPending} onClick={() => saveMutation.mutate(turns)}>
-                  Guardar horario
-                </Button>
-              </div>
-            )}
-          </section>
-
-          <section className="grid gap-3 rounded-xl border bg-background p-3 sm:p-4">
-            <h2 id="duracion-regular" className="font-medium">
-              Duración de una cita regular
-            </h2>
-            <RadioGroup
-              aria-labelledby="duracion-regular"
-              className="flex flex-wrap gap-2"
-              disabled={!canConfigure || durationMutation.isPending}
-              value={String(regularMinutes)}
-              onValueChange={(next) => durationMutation.mutate(Number(next))}
-            >
-              {REGULAR_MINUTES.map((minutes) => (
-                <FieldLabel
-                  key={minutes}
-                  className={cn(
-                    "flex h-10 w-auto cursor-pointer items-center gap-2 rounded-xl border px-3 text-sm font-normal",
-                    regularMinutes === minutes && "border-primary bg-primary-soft",
-                  )}
-                >
-                  <RadioGroupItem value={String(minutes)} />
-                  {formatSpan(minutes)}
-                </FieldLabel>
-              ))}
-            </RadioGroup>
+                        />
+                      )
+                    })}
+                  </ul>
+                )}
+              </section>
+            </>
+          ) : (
             <p className="text-sm text-muted-foreground">
-              Es lo que dura una cita en esta sede cuando no lleva servicio. Si lleva servicio,
-              manda la duración del servicio. Al reservar se puede cambiar estirando el bloque.
+              Esta sede aún no tiene profesionales. Añádelos en Equipo y permisos.
             </p>
-          </section>
+          )}
 
-          <section className="grid gap-3 rounded-xl border bg-background p-3 sm:p-4">
-            <div className="flex flex-wrap items-center gap-2">
-              <h2 className="font-medium">Sillones</h2>
-              <span className="text-xs text-muted-foreground">Cada cita ocupa un sillón.</span>
-              {canConfigure && (
-                <Button variant="outline" size="sm" onClick={() => setChairForm(true)}>
-                  Añadir sillón
-                </Button>
+          <GroupTitle
+            title="De la sede"
+            hint={`Vale para todos los profesionales de ${resources.branchName}.`}
+          />
+          <div className="grid gap-4 lg:grid-cols-2">
+            <section className={CARD}>
+              <CardHead
+                title="Sillones"
+                action={
+                  canConfigure ? (
+                    <Button variant="outline" size="sm" onClick={() => setChairForm(true)}>
+                      <Plus aria-hidden />
+                      Añadir sillón
+                    </Button>
+                  ) : null
+                }
+              />
+              {resources.chairs.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  Esta sede aún no tiene sillones: sin al menos uno no se puede reservar.
+                </p>
+              ) : (
+                <ul className="flex flex-wrap items-start gap-2">
+                  {resources.chairs.map((chair) => (
+                    <li key={chair.id} className="rounded-lg border px-3 py-1.5 text-sm">
+                      {chair.label}
+                    </li>
+                  ))}
+                </ul>
               )}
-            </div>
-            {resources.chairs.length === 0 ? (
+            </section>
+
+            <section className={CARD}>
+              <h3 id="duracion-regular" className="flex min-h-9 items-center font-semibold">
+                Duración de una cita regular
+              </h3>
+              <RadioGroup
+                aria-labelledby="duracion-regular"
+                className="flex flex-wrap gap-2"
+                disabled={!canConfigure || durationMutation.isPending}
+                value={String(regularMinutes)}
+                onValueChange={(next) => durationMutation.mutate(Number(next))}
+              >
+                {REGULAR_MINUTES.map((minutes) => (
+                  <FieldLabel
+                    key={minutes}
+                    className={cn(
+                      "flex h-10 w-auto cursor-pointer items-center gap-2 rounded-xl border px-3 text-sm font-normal",
+                      regularMinutes === minutes && "border-primary bg-primary-soft",
+                    )}
+                  >
+                    <RadioGroupItem value={String(minutes)} />
+                    {formatSpan(minutes)}
+                  </FieldLabel>
+                ))}
+              </RadioGroup>
               <p className="text-sm text-muted-foreground">
-                Esta sede aún no tiene sillones: sin al menos uno no se puede reservar.
+                Lo que dura una cita sin servicio. Con servicio manda su duración, y al reservar se
+                puede cambiar estirando el bloque.
+              </p>
+            </section>
+          </div>
+
+          <section className={CARD}>
+            <CardHead
+              title="Feriados y cierres"
+              action={
+                canConfigure ? (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setAbsenceForm({ kind: "branch", name: resources.branchName })}
+                  >
+                    <Plus aria-hidden />
+                    Nuevo feriado o cierre
+                  </Button>
+                ) : null
+              }
+            />
+            {closures.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                Sin feriados ni cierres en los próximos {AHEAD_DAYS} días.
               </p>
             ) : (
-              <ul className="flex flex-wrap gap-2">
-                {resources.chairs.map((chair) => (
-                  <li key={chair.id} className="rounded-lg border px-3 py-1.5 text-sm">
-                    {chair.label}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
-
-          <section className="grid gap-3 rounded-xl border bg-background p-3 sm:p-4">
-            <div className="flex flex-wrap items-center gap-2">
-              <h2 className="font-medium">Ausencias y bloqueos</h2>
-              <span className="text-xs text-muted-foreground">
-                Vacaciones, permisos, feriados y cierres de los próximos 60 días.
-              </span>
-              {canConfigure && (
-                <Button variant="outline" size="sm" onClick={() => setBlockForm(true)}>
-                  Nueva ausencia
-                </Button>
-              )}
-            </div>
-            {(blocksQuery.data?.data ?? []).length === 0 ? (
-              <p className="text-sm text-muted-foreground">Sin ausencias en el período.</p>
-            ) : (
-              <ul className="grid gap-2">
-                {(blocksQuery.data?.data ?? []).map((block) => (
+              <ul className="grid">
+                {closures.map((block) => (
                   <BlockRow
                     key={block.id}
                     block={block}
                     timeZone={resources.timeZone}
                     canConfigure={canConfigure}
                     onDeleted={invalidateBlocks}
+                    scope={
+                      resources.chairs.find((chair) => chair.id === block.chairId)?.label ??
+                      "toda la sede"
+                    }
                   />
                 ))}
               </ul>
@@ -383,7 +401,7 @@ function AvailabilityPage() {
           </section>
         </>
       )}
-      {chairForm && resources && (
+      {chairForm && resources ? (
         <ChairForm
           branchId={resources.branchId}
           branchName={resources.branchName}
@@ -394,21 +412,21 @@ function AvailabilityPage() {
             await queryClient.invalidateQueries({ queryKey: ["agenda-resources"] })
           }}
         />
-      )}
-      {blockForm && resources && (
+      ) : null}
+      {absenceForm && resources ? (
         <AbsenceForm
           branchId={resources.branchId}
           timeZone={resources.timeZone}
           today={zonedDateOf(new Date().toISOString(), resources.timeZone)}
-          professionals={resources.professionals}
+          scope={absenceForm}
           chairs={resources.chairs}
-          onClose={() => setBlockForm(false)}
+          onClose={() => setAbsenceForm(null)}
           onSaved={async () => {
-            setBlockForm(false)
+            setAbsenceForm(null)
             await invalidateBlocks()
           }}
         />
-      )}
+      ) : null}
     </div>
   )
 }
@@ -436,11 +454,17 @@ function BlockRow({
   timeZone,
   canConfigure,
   onDeleted,
+  scope,
+  note,
 }: {
   block: ScheduleBlock
   timeZone: string
   canConfigure: boolean
   onDeleted: () => Promise<void>
+  /** A qué alcanza un cierre: toda la sede o un sillón. */
+  scope?: string
+  /** Aviso de la fila: citas que quedaron dentro. */
+  note?: React.ReactNode
 }) {
   const [error, setError] = React.useState("")
   const deleteMutation = useMutation({
@@ -448,21 +472,33 @@ function BlockRow({
     onSuccess: async () => onDeleted(),
     onError: (cause) => setError(errorMessage(cause)),
   })
-  const scope = block.dentistName ?? (block.chairId ? "Un sillón" : "Toda la sede")
+  const reason = block.reason ?? (block.kind === "ausencia" ? "Ausencia" : "Cierre")
+  const when = blockWhen(block, timeZone)
   return (
-    <li className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border p-2 text-sm">
-      <span className="font-medium">
-        {block.reason ?? (block.kind === "ausencia" ? "Ausencia" : "Bloqueo")}
+    <li className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b py-2 text-sm last:border-b-0">
+      <Badge variant="soft">{reason}</Badge>
+      <span className="min-w-0 flex-1">
+        <span className="font-semibold">{when}</span>
+        {scope ? <span className="text-muted-foreground"> · {scope}</span> : null}
       </span>
-      <span>{scope}</span>
-      <span className="text-muted-foreground">{blockWhen(block, timeZone)}</span>
-      <span className="flex-1" />
-      {canConfigure && (
-        <Button variant="ghost" size="sm" onClick={() => deleteMutation.mutate()}>
-          Eliminar
+      {note}
+      {canConfigure ? (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="text-muted-foreground"
+          aria-label={`Quitar ${reason}: ${when}`}
+          disabled={deleteMutation.isPending}
+          onClick={() => deleteMutation.mutate()}
+        >
+          Quitar
         </Button>
-      )}
-      {error && <span className="text-xs text-destructive">{error}</span>}
+      ) : null}
+      {error ? (
+        <span role="alert" className="w-full text-xs text-destructive">
+          {error}
+        </span>
+      ) : null}
     </li>
   )
 }

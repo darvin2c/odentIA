@@ -14,8 +14,6 @@ import {
   FormDrawer,
   formatDateLong,
   minutesToInstant,
-  ScheduleResourceChips,
-  scheduleToneAt,
   zonedDateOf,
 } from "@odentia/ui-patterns"
 import { useMutation, useQuery } from "@tanstack/react-query"
@@ -25,17 +23,28 @@ import * as React from "react"
 import type { AgendaAppointment } from "../../lib/agenda"
 import { apiFetch } from "../../lib/api"
 import { ChoiceSelect } from "../ui/choice-select"
-import { errorMessage, shortName } from "./shared"
+import { errorMessage } from "./shared"
 
-type ReasonId = "vacaciones" | "permiso" | "feriado" | "otro"
+type ReasonId = "vacaciones" | "permiso" | "feriado" | "cierre" | "otro"
+type Reason = { id: ReasonId; label: string; kind: "ausencia" | "bloqueo" }
 
-/** Motivos habituales; el tipo es el que guarda la agenda (ausencia de alguien o cierre). */
-const REASONS: Array<{ id: ReasonId; label: string; kind: "ausencia" | "bloqueo" }> = [
+/** Motivos habituales de una persona; el tipo es el que guarda la agenda. */
+const PERSON_REASONS: Reason[] = [
   { id: "vacaciones", label: "Vacaciones", kind: "ausencia" },
   { id: "permiso", label: "Permiso", kind: "ausencia" },
+  { id: "otro", label: "Otro", kind: "ausencia" },
+]
+/** Motivos habituales de la sede entera o de un sillón. */
+const BRANCH_REASONS: Reason[] = [
   { id: "feriado", label: "Feriado", kind: "bloqueo" },
+  { id: "cierre", label: "Cierre", kind: "bloqueo" },
   { id: "otro", label: "Otro", kind: "bloqueo" },
 ]
+
+/** De quién es: de un profesional (vacaciones, permisos) o de la sede (feriados, cierres). */
+export type AbsenceScope =
+  | { kind: "person"; dentistUserId: string; name: string }
+  | { kind: "branch"; name: string }
 
 function toMinutes(label: string): number {
   const [hours = 0, minutes = 0] = label.split(":").map(Number)
@@ -52,15 +61,15 @@ function namesSaid(names: string[]): string {
 }
 
 /**
- * Días en que no se atiende: vacaciones, un permiso, un feriado o un cierre.
- * Va de una fecha a otra en un solo paso y avisa de las citas que quedan
- * dentro, que no se cancelan solas.
+ * Días en que no se atiende: las vacaciones o el permiso de un profesional, o
+ * un feriado o cierre de la sede. Va de una fecha a otra en un solo paso y
+ * avisa de las citas que quedan dentro, que no se cancelan solas.
  */
 export function AbsenceForm({
   branchId,
   timeZone,
   today,
-  professionals,
+  scope,
   chairs,
   onClose,
   onSaved,
@@ -68,13 +77,16 @@ export function AbsenceForm({
   branchId: string
   timeZone: string
   today: string
-  professionals: { id: string; label: string }[]
+  scope: AbsenceScope
+  /** Sillones de la sede: un cierre puede ser de uno solo (mantenimiento). */
   chairs: { id: string; label: string }[]
   onClose: () => void
   onSaved: () => Promise<void>
 }) {
-  const [who, setWho] = React.useState<string | null>(null)
-  const [reason, setReason] = React.useState<ReasonId>("vacaciones")
+  const person = scope.kind === "person"
+  const who = person ? scope.dentistUserId : null
+  const reasons = person ? PERSON_REASONS : BRANCH_REASONS
+  const [reason, setReason] = React.useState<ReasonId>(reasons[0]?.id ?? "otro")
   const [other, setOther] = React.useState("")
   const [from, setFrom] = React.useState(today)
   const [to, setTo] = React.useState(today)
@@ -83,7 +95,6 @@ export function AbsenceForm({
   const [toTime, setToTime] = React.useState("14:00")
   const [chairId, setChairId] = React.useState("")
   const [error, setError] = React.useState("")
-  const whoId = React.useId()
   const reasonId = React.useId()
   const allDayId = React.useId()
 
@@ -117,7 +128,7 @@ export function AbsenceForm({
   )
   const firstAffected = affected[0]
 
-  const chosen = REASONS.find((item) => item.id === reason) ?? REASONS[0]
+  const chosen = reasons.find((item) => item.id === reason) ?? reasons[0]
   const save = useMutation({
     mutationFn: () => {
       if (!valid) throw new Error("El fin debe ser posterior al inicio.")
@@ -136,7 +147,7 @@ export function AbsenceForm({
       })
     },
     onSuccess: async () => {
-      toast.success("Ausencia guardada")
+      toast.success(person ? "Ausencia guardada" : "Feriado o cierre guardado")
       await onSaved()
     },
     onError: (cause) => setError(errorMessage(cause)),
@@ -145,8 +156,12 @@ export function AbsenceForm({
   return (
     <FormDrawer
       open
-      title="Nueva ausencia"
-      description="Días u horas en que no se atiende. Esos huecos dejan de ofrecerse."
+      title={person ? "Nueva ausencia" : "Nuevo feriado o cierre"}
+      description={
+        person
+          ? `Días u horas en que ${scope.name} no atiende. Esos huecos dejan de ofrecerse.`
+          : `Días u horas en que ${scope.name} no atiende. Vale para todos los profesionales.`
+      }
       onClose={onClose}
       onSubmit={(event) => {
         event.preventDefault()
@@ -157,28 +172,9 @@ export function AbsenceForm({
       isDirty
       error={error || null}
       submitDisabled={!valid}
-      submitLabel="Guardar ausencia"
+      submitLabel={person ? "Guardar ausencia" : "Guardar"}
     >
       <div className="grid gap-4">
-        <div className="grid gap-2">
-          <span id={whoId} className="text-sm font-medium">
-            Quién no atiende
-          </span>
-          <ScheduleResourceChips
-            wrap
-            label="Quién no atiende"
-            resources={professionals.map((item, index) => ({
-              id: item.id,
-              label: item.label,
-              tone: scheduleToneAt(index),
-            }))}
-            formatLabel={(item) => shortName(item.label)}
-            value={who}
-            allLabel="Toda la sede"
-            onChange={setWho}
-          />
-        </div>
-
         <div className="grid gap-2">
           <span id={reasonId} className="text-sm font-medium">
             Motivo
@@ -189,7 +185,7 @@ export function AbsenceForm({
             value={reason}
             onValueChange={(next) => setReason(next as ReasonId)}
           >
-            {REASONS.map((option) => (
+            {reasons.map((option) => (
               <FieldLabel
                 key={option.id}
                 className={cn(
@@ -204,8 +200,8 @@ export function AbsenceForm({
           </RadioGroup>
           {reason === "otro" ? (
             <Input
-              aria-label="Motivo de la ausencia"
-              placeholder="Capacitación, mantenimiento…"
+              aria-label="Motivo"
+              placeholder={person ? "Capacitación, congreso…" : "Mantenimiento, inventario…"}
               maxLength={500}
               value={other}
               onChange={(event) => setOther(event.target.value)}
@@ -277,15 +273,15 @@ export function AbsenceForm({
           Todo el día
         </FieldLabel>
 
-        {chairs.length > 0 ? (
+        {!person && chairs.length > 0 ? (
           <div className="grid gap-2">
-            <FieldLabel htmlFor="ausencia-sillon">Sillón (opcional)</FieldLabel>
+            <FieldLabel htmlFor="ausencia-sillon">Qué se cierra</FieldLabel>
             <ChoiceSelect
               id="ausencia-sillon"
               value={chairId}
               onChange={(event) => setChairId(event.target.value)}
             >
-              <option value="">Todos los sillones</option>
+              <option value="">Toda la sede</option>
               {chairs.map((item) => (
                 <option key={item.id} value={item.id}>
                   {item.label}
@@ -300,8 +296,8 @@ export function AbsenceForm({
             <span className="flex items-center gap-1.5 text-sm font-bold text-warning-foreground">
               <TriangleAlert aria-hidden className="size-4" />
               {affected.length === 1
-                ? "1 cita queda dentro de la ausencia"
-                : `${affected.length} citas quedan dentro de la ausencia`}
+                ? `1 cita queda dentro ${person ? "de la ausencia" : "del cierre"}`
+                : `${affected.length} citas quedan dentro ${person ? "de la ausencia" : "del cierre"}`}
             </span>
             <span className="text-sm">
               {namesSaid([...new Set(affected.map((item) => item.patientName))])}. No se cancelan

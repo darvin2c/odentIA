@@ -18,7 +18,7 @@ import { patient, patientContact, serviceCatalog } from "@odentia/db/schema/clin
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import { scheduleBlock, waitlistEntry } from "@odentia/db/schema/availability"
 import { conversation } from "@odentia/db/schema/crm"
-import { and, asc, eq, gt, gte, ilike, inArray, lt, or, sql } from "drizzle-orm"
+import { and, asc, eq, gt, gte, ilike, inArray, lt, ne, or, sql } from "drizzle-orm"
 import { validateAvailability } from "./availability.js"
 import {
   cancelPendingForAppointment,
@@ -419,6 +419,8 @@ async function pickFreeChair(
   dentistUserId: string,
   startsAt: Date,
   endsAt: Date,
+  /** Al mover una cita: no cuenta su propia ocupación y, si sigue libre, conserva su sillón. */
+  moving?: { appointmentId: string; chairId: string },
 ): Promise<string> {
   const chairs = await tx
     .select({ id: scheduleChair.id })
@@ -444,6 +446,7 @@ async function pickFreeChair(
           inArray(appointment.status, ["programada", "confirmada"]),
           lt(appointment.startsAt, endsAt),
           gt(appointment.endsAt, startsAt),
+          moving ? ne(appointment.id, moving.appointmentId) : undefined,
         ),
       ),
     tx
@@ -465,7 +468,9 @@ async function pickFreeChair(
       .filter((row) => row.dentistUserId === null || row.dentistUserId === dentistUserId)
       .map((row) => row.chairId),
   ])
-  const free = chairs.find((chair) => !unavailable.has(chair.id))
+  const free =
+    chairs.find((chair) => chair.id === moving?.chairId && !unavailable.has(chair.id)) ??
+    chairs.find((chair) => !unavailable.has(chair.id))
   if (!free) throw conflict("NO_CHAIR", "No hay un sillón libre a esa hora")
   return free.id
 }
@@ -619,7 +624,16 @@ export async function moveAppointment(
     : new Date(startsAt.getTime() + durationMs)
   if (endsAt <= startsAt) throw validation("La cita debe terminar después de iniciar")
   const dentistUserId = input.dentistUserId ?? current.dentistUserId
-  const chairId = input.chairId ?? current.chairId
+  const active = current.status === "programada" || current.status === "confirmada"
+  // Sin sillón indicado la cita conserva el suyo; si a la nueva hora está ocupado, pasa a uno libre.
+  const chairId =
+    input.chairId ??
+    (active
+      ? await pickFreeChair(tx, orgId, current.branchId, dentistUserId, startsAt, endsAt, {
+          appointmentId: id,
+          chairId: current.chairId,
+        })
+      : current.chairId)
   if (dentistUserId !== current.dentistUserId) await requireDentist(tx, orgId, dentistUserId)
   if (chairId !== current.chairId) {
     const chair = await requireChair(tx, orgId, chairId)
@@ -627,7 +641,7 @@ export async function moveAppointment(
       throw validation("El sillón no pertenece a la sucursal de la cita")
     }
   }
-  if (current.status === "programada" || current.status === "confirmada") {
+  if (active) {
     await validateAvailability(tx, orgId, {
       branchId: current.branchId,
       dentistUserId,

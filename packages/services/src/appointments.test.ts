@@ -582,3 +582,66 @@ it("la duración de una cita regular se configura por sede", async () => {
   expect(booked.durationMin).toBe(30)
   await run((tx) => setBranchDefaultDuration(tx, ORG, ACTOR, { branchId, minutes: 60 }))
 })
+
+it("al reprogramar, el hueco de la propia cita cuenta como libre y el sillón se reasigna si hace falta", async () => {
+  // Martes 2026-11-17: DENTIST 10:00–11:00 en el sillón 1; DENTIST_2 11:00–12:00 también en el sillón 1.
+  const mine = await run((tx) =>
+    createAppointment(tx, ORG, ACTOR, {
+      branchId,
+      patientId,
+      dentistUserId: DENTIST,
+      chairId,
+      startsAt: "2026-11-17T15:00:00Z",
+      endsAt: "2026-11-17T16:00:00Z",
+    }),
+  )
+  await run((tx) =>
+    createAppointment(tx, ORG, ACTOR, {
+      branchId,
+      patientId,
+      dentistUserId: DENTIST_2,
+      chairId,
+      startsAt: "2026-11-17T16:00:00Z",
+      endsAt: "2026-11-17T17:00:00Z",
+    }),
+  )
+  const range = {
+    branchId,
+    from: "2026-11-17T05:00:00Z",
+    to: "2026-11-18T05:00:00Z",
+    now: new Date("2026-11-01T12:00:00Z"),
+  }
+  // Para los demás, su mañana se corta a las 10:00; para quien mueve esa cita, no.
+  const others = await run((tx) => getAgendaAvailability(tx, ORG, range))
+  expect(others.free.filter((item) => item.dentistUserId === DENTIST)[0]).toEqual({
+    dentistUserId: DENTIST,
+    startsAt: "2026-11-17T14:00:00.000Z",
+    endsAt: "2026-11-17T15:00:00.000Z",
+  })
+  const moving = await run((tx) =>
+    getAgendaAvailability(tx, ORG, { ...range, ignoreAppointmentId: mine.id }),
+  )
+  expect(moving.free.filter((item) => item.dentistUserId === DENTIST)[0]).toEqual({
+    dentistUserId: DENTIST,
+    startsAt: "2026-11-17T14:00:00.000Z",
+    endsAt: "2026-11-17T18:00:00.000Z",
+  })
+
+  // A las 11:00 su sillón lo ocupa otra cita: la cita se mueve y pasa al sillón libre.
+  const moved = await run((tx) =>
+    moveAppointment(tx, ORG, ACTOR, mine.id, {
+      expectedVersion: mine.version,
+      startsAt: "2026-11-17T16:00:00Z",
+    }),
+  )
+  expect(moved.startsAt).toBe("2026-11-17T16:00:00.000Z")
+  expect(moved.chairId).toBe(chair2Id)
+  // Media hora después sigue libre su sillón de ahora: lo conserva.
+  const again = await run((tx) =>
+    moveAppointment(tx, ORG, ACTOR, mine.id, {
+      expectedVersion: moved.version,
+      startsAt: "2026-11-17T19:00:00Z",
+    }),
+  )
+  expect(again.chairId).toBe(chair2Id)
+})

@@ -6,7 +6,6 @@ import { type ScheduleAgendaItem, ScheduleAgendaList } from "./agenda-list.js"
 import { ScheduleDayStrip } from "./day-strip.js"
 import { daySegments } from "./occupancy.js"
 import { ScheduleResourceChips } from "./resource-chips.js"
-import { type ScheduleSlotChoice, ScheduleSlotChoices } from "./slot-choices.js"
 import { ScheduleStatusSummary } from "./status-summary.js"
 import { setupScheduleDom } from "./test-utils.js"
 import { addDays, minutesToInstant, zonedDateOf } from "./time.js"
@@ -139,71 +138,6 @@ describe("ScheduleAgendaList", () => {
   it("sin citas lo dice", () => {
     render(<ScheduleAgendaList items={[]} timeZone={TZ} emptyLabel="No hay citas este día." />)
     expect(screen.getByText("No hay citas este día.")).toBeTruthy()
-  })
-})
-
-function slot(date: string, minutes: number, resource: string): ScheduleSlotChoice {
-  return {
-    id: `${date}T${minutes}:${resource}`,
-    start: minutesToInstant(date, minutes, TZ),
-    end: minutesToInstant(date, minutes + 30, TZ),
-    resourceLabel: resource,
-  }
-}
-
-describe("ScheduleSlotChoices", () => {
-  const tomorrow = addDays(AGENDA_TODAY, 1)
-  const slots = [
-    ...[660, 675, 690, 705, 720, 735].map((minutes) => slot(AGENDA_TODAY, minutes, "Dr. Luis")),
-    slot(AGENDA_TODAY, 660, "Dra. Ana"),
-    slot(tomorrow, 480, "Dra. Ana"),
-  ]
-
-  it("agrupa por día, dice hoy y mañana y recorta con «+N»", () => {
-    const onChange = vi.fn()
-    render(
-      <ScheduleSlotChoices
-        slots={slots}
-        timeZone={TZ}
-        today={AGENDA_TODAY}
-        value={null}
-        onChange={onChange}
-      />,
-    )
-    const today = within(screen.getByRole("group", { name: "Hoy, lunes 12" }))
-    // Siete huecos hoy: tres a la vista y el resto tras «+4».
-    expect(today.getAllByRole("button")).toHaveLength(4)
-    expect(screen.getByRole("group", { name: "Mañana, martes 13" })).toBeTruthy()
-    fireEvent.click(today.getByRole("button", { name: /Ver 4 huecos más/ }))
-    expect(today.getAllByRole("button")).toHaveLength(7)
-    fireEvent.click(today.getAllByRole("button")[1] as HTMLElement)
-    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ id: `${AGENDA_TODAY}T660:Dra. Ana` }))
-  })
-
-  it("sin recurso fijado ofrece una sola opción por hora y conserva la elegida", () => {
-    const chosen = `${AGENDA_TODAY}T660:Dra. Ana`
-    render(
-      <ScheduleSlotChoices
-        slots={slots}
-        timeZone={TZ}
-        today={AGENDA_TODAY}
-        value={chosen}
-        onChange={() => {}}
-        distinctTimes
-        perDay={8}
-      />,
-    )
-    const today = within(screen.getByRole("group", { name: "Hoy, lunes 12" }))
-    // Seis horas distintas; a las 11:00 queda la que la persona eligió.
-    expect(today.getAllByRole("button")).toHaveLength(6)
-    const pressed = today.getByRole("button", { pressed: true })
-    expect(pressed.textContent).toContain("11:00")
-    expect(pressed.textContent).toContain("Dra. Ana")
-  })
-
-  it("sin huecos lo dice en vez de quedarse en blanco", () => {
-    render(<ScheduleSlotChoices slots={[]} timeZone={TZ} value={null} onChange={() => {}} />)
-    expect(screen.getByText(/No hay huecos en los próximos días/)).toBeTruthy()
   })
 })
 

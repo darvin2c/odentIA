@@ -58,7 +58,7 @@ import {
   zonedDateOf,
 } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { createFileRoute, useNavigate } from "@tanstack/react-router"
+import { createFileRoute, } from "@tanstack/react-router"
 import {
   Armchair,
   CalendarClock,
@@ -75,6 +75,7 @@ import {
 } from "../../components/agenda/appointment-drawer"
 import { AppointmentSearch } from "../../components/agenda/appointment-search"
 import { BookingDrawer, type BookingSeed } from "../../components/agenda/booking-drawer"
+import { ScheduleDrawer } from "../../components/agenda/schedule-editor"
 import { ChairForm } from "../../components/agenda/chair-form"
 import { dayShort, errorMessage, shortName } from "../../components/agenda/shared"
 import { useWaitlist, WaitlistDrawer } from "../../components/agenda/waitlist"
@@ -170,7 +171,6 @@ function AgendaPage() {
   const small = useMediaQuery(SCHEDULE_SMALL_QUERY)
   const canWrite = usePermission("appointments.write")
   const canConfigure = usePermission("settings.write")
-  const navigate = useNavigate()
   const requested = Route.useSearch()
 
   const sede = useActiveBranch()
@@ -205,6 +205,7 @@ function AgendaPage() {
   )
   const [waitlistOpen, setWaitlistOpen] = React.useState(false)
   const [chairForm, setChairForm] = React.useState(false)
+  const [scheduleForm, setScheduleForm] = React.useState(false)
   const [message, setMessage] = React.useState("")
 
   // ----- Datos -----
@@ -787,12 +788,8 @@ function AgendaPage() {
           ? `Ningún profesional tiene horario en ${resources?.branchName ?? "esta sede"}. Con el horario, la agenda muestra los huecos y deja reservar.`
           : `Ningún profesional tiene horario en ${resources?.branchName ?? "esta sede"}. Pide a quien administra la clínica que lo configure.`
       }
-      actionLabel={canConfigure ? "Configurar horarios" : undefined}
-      onAction={
-        canConfigure
-          ? () => void navigate({ to: "/settings/availability", search: { branch: branchId } })
-          : undefined
-      }
+      actionLabel={canConfigure ? "Configurar horario" : undefined}
+      onAction={canConfigure ? () => setScheduleForm(true) : undefined}
     />
   )
   const emptyDay = (
@@ -1198,11 +1195,7 @@ function AgendaPage() {
           today={today}
           now={now}
           resources={resources}
-          team={(availability?.professionals ?? []).map((item) => ({
-            id: item.id,
-            label: item.label,
-            tone: toneOf(item.id),
-          }))}
+          toneOf={toneOf}
           waiting={waiting}
           onClose={closeDetail}
           onChanged={invalidate}
@@ -1211,6 +1204,20 @@ function AgendaPage() {
             closeDetail()
             openBooking({ patient })
           }}
+        />
+      ) : null}
+
+      {scheduleForm && resources && branchId ? (
+        <ScheduleDrawer
+          branchId={branchId}
+          branchName={resources.branchName}
+          professionals={resources.professionals.map((item) => ({
+            id: item.id,
+            label: item.label,
+            tone: toneOf(item.id),
+          }))}
+          onClose={() => setScheduleForm(false)}
+          onSaved={invalidate}
         />
       ) : null}
 

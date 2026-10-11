@@ -116,6 +116,21 @@ describe("ScheduleRangePicker", () => {
     expect(scheduleRangeState(picked, { free: FREE, open: OPEN, timeZone: TZ })).toBe("outside")
   })
 
+  it("señala dónde está la cita que se mueve, sin que estorbe al tocar", () => {
+    const onChange = vi.fn()
+    const { container } = render(
+      <ScheduleRangePicker
+        {...props}
+        value={null}
+        onChange={onChange}
+        marker={{ columnId: "ana", start: at(11), end: at(11, 30), label: "Ahora está aquí, 11:00" }}
+      />,
+    )
+    expect(screen.getByText("Ahora está aquí, 11:00")).toBeTruthy()
+    expect(lane(container, "luis").querySelector("[data-range-marker]")).toBeNull()
+    expect(container.querySelector("[data-range-block]")).toBeNull()
+  })
+
   it("arrastrar el borde inferior cambia la duración", () => {
     const onChange = vi.fn()
     const { container } = render(

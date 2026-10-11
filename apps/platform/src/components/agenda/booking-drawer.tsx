@@ -5,48 +5,31 @@ import {
   DialogDescription,
   DialogHeader,
   DialogTitle,
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
   FieldLabel,
   Input,
   toast,
 } from "@odentia/ui"
 import {
-  addDays,
-  DatePickerButton,
   dayMinutesIn,
-  dayRangeOf,
   FormDrawer,
-  formatDateLong,
-  formatSpan,
   hourLabel,
-  minutesToInstant,
   normalizeCountry,
   PhoneInput,
   ResourceSelect,
   type ResourceSelectOption,
-  type ScheduleAvailability,
   type ScheduleColumn,
-  ScheduleDayStrip,
   type SchedulePreview,
-  ScheduleRangePicker,
   type ScheduleRangeValue,
-  ScheduleResourceChips,
-  scheduleRangeState,
-  weekDates,
-  zonedDateOf,
 } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
-import { CalendarDays, ChevronDown } from "lucide-react"
 import * as React from "react"
-import type { AgendaAppointment, AgendaAvailability, AgendaServiceOption } from "../../lib/agenda"
+import type { AgendaAppointment, AgendaServiceOption } from "../../lib/agenda"
 import { apiFetch } from "../../lib/api"
 import { usePermission } from "../../lib/crm"
 import { useOrgProfile } from "../../lib/org"
-import { errorMessage, rangeSaid, shortName, whenSaid } from "./shared"
+import { errorMessage, whenSaid } from "./shared"
+import { useWhen, WhenFields } from "./when"
 
 /** Con qué se abre «Nueva cita»: nada, un hueco tocado en la rejilla o un paciente. */
 export interface BookingSeed {
@@ -61,19 +44,11 @@ export interface BookingSeed {
   date?: string
 }
 
-/** El bloque se mueve de cuarto en cuarto de hora, como en la rejilla. */
-const SNAP_MS = 15 * 60000
-
-/** Duraciones que ofrece el menú, la vía para cambiarla sin arrastrar. */
-const DURATIONS = [15, 30, 45, 60, 90, 120]
-
-const minutesBetween = (start: string, end: string) =>
-  Math.round((Date.parse(end) - Date.parse(start)) / 60000)
-
 /**
- * Nueva cita: a quién y cuándo. El «cuándo» se elige sobre las horas del día:
- * lo blanco está libre, y el bloque se arrastra y se estira. El sillón lo pone
- * la agenda. Quien aún no es paciente se registra aquí mismo con lo mínimo.
+ * Nueva cita: a quién y cuándo. El «cuándo» es el mismo de reprogramar
+ * (`useWhen`): lo blanco está libre, y el bloque se arrastra y se estira. El
+ * sillón lo pone la agenda. Quien aún no es paciente se registra aquí mismo
+ * con lo mínimo.
  */
 export function BookingDrawer({
   seed,
@@ -166,152 +141,18 @@ export function BookingDrawer({
   const duration = service?.durationMin ?? defaultMinutes
 
   // ----- Cuándo -----
-  const [dentistFilter, setDentistFilter] = React.useState<string | null>(
-    seed.dentistUserId ?? null,
-  )
-  const [date, setDate] = React.useState(seed.date && seed.date > today ? seed.date : today)
-  const [value, setValue] = React.useState<ScheduleRangeValue | null>(() =>
-    seed.startsAt && seed.dentistUserId
-      ? {
-          columnId: seed.dentistUserId,
-          start: seed.startsAt,
-          end: new Date(Date.parse(seed.startsAt) + defaultMinutes * 60000).toISOString(),
-        }
-      : null,
-  )
-  const week = React.useMemo(() => weekDates(date), [date])
-  const from = minutesToInstant(week[0] ?? date, 0, timeZone)
-  const to = minutesToInstant(addDays(week[6] ?? date, 1), 0, timeZone)
-  const availabilityQuery = useQuery({
-    queryKey: ["agenda-availability", branchId, from, to],
-    queryFn: () =>
-      apiFetch<{ data: AgendaAvailability }>(
-        `/api/agenda/availability?branchId=${branchId}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
-      ),
-    placeholderData: (previous) => previous,
+  const when = useWhen({
+    branchId,
+    timeZone,
+    today,
+    now,
+    toneOf,
+    duration,
+    date: seed.date,
+    dentistUserId: seed.dentistUserId,
+    startsAt: seed.startsAt,
   })
-  const availability = availabilityQuery.data?.data
-  const team = React.useMemo(
-    (): ScheduleColumn[] =>
-      (availability?.professionals ?? []).map((item) => ({
-        id: item.id,
-        label: item.label,
-        tone: toneOf(item.id),
-      })),
-    [availability, toneOf],
-  )
-  const lanes = React.useMemo(
-    () => (dentistFilter ? team.filter((item) => item.id === dentistFilter) : team),
-    [team, dentistFilter],
-  )
-  const free = React.useMemo(
-    (): ScheduleAvailability[] =>
-      (availability?.free ?? []).map((item) => ({
-        columnId: item.dentistUserId,
-        start: item.startsAt,
-        end: item.endsAt,
-      })),
-    [availability],
-  )
-  const open = React.useMemo(
-    (): ScheduleAvailability[] =>
-      (availability?.open ?? []).map((item) => ({
-        columnId: item.dentistUserId,
-        start: item.startsAt,
-        end: item.endsAt,
-      })),
-    [availability],
-  )
-
-  /** Primer hueco del día donde cabe la cita entre quienes se están viendo; si no cabe entera, el primero que haya. */
-  const firstFit = React.useCallback(
-    (day: string, columns: ScheduleColumn[], minutes: number): ScheduleRangeValue | null => {
-      const ids = new Set(columns.map((item) => item.id))
-      const sameDay = free
-        .filter((item) => ids.has(item.columnId) && dayRangeOf(item.start, item.end, day, timeZone))
-        // Lo libre de hoy empieza «ahora»: el bloque arranca en el siguiente cuarto de hora.
-        .map((item) => ({
-          columnId: item.columnId,
-          start: Math.ceil(Date.parse(item.start) / SNAP_MS) * SNAP_MS,
-          end: Date.parse(item.end),
-        }))
-        .filter((item) => item.end - item.start >= SNAP_MS)
-        .sort((a, b) => a.start - b.start)
-      const pick = sameDay.find((item) => item.end - item.start >= minutes * 60000) ?? sameDay[0]
-      if (!pick) return null
-      return {
-        columnId: pick.columnId,
-        start: new Date(pick.start).toISOString(),
-        end: new Date(Math.min(pick.start + minutes * 60000, pick.end)).toISOString(),
-      }
-    },
-    [free, timeZone],
-  )
-  // Mientras la persona no haya movido el bloque, se propone el primer hueco de lo que mira.
-  const touched = React.useRef(Boolean(seed.startsAt && seed.dentistUserId))
-  const seedPending = React.useRef(touched.current)
-  const autoDate = React.useRef(!touched.current)
-  React.useEffect(() => {
-    if (!availability) return
-    if (seedPending.current) {
-      // El hueco tocado en la rejilla puede ser más corto que una cita regular: el bloque toma el hueco.
-      seedPending.current = false
-      setValue((current) => {
-        if (!current) return current
-        const room = free.find(
-          (item) =>
-            item.columnId === current.columnId &&
-            item.start <= current.start &&
-            item.end > current.start,
-        )
-        return room && room.end < current.end ? { ...current, end: room.end } : current
-      })
-      return
-    }
-    if (touched.current) return
-    const fit = firstFit(date, lanes, duration)
-    if (!fit && autoDate.current && date === today) {
-      // Al abrir, si ese día ya no queda nada, se va al próximo día con hueco.
-      autoDate.current = false
-      const ids = new Set(lanes.map((item) => item.id))
-      const next = availability.professionals
-        .flatMap((item) => (ids.has(item.id) && item.nextFree ? [item.nextFree.startsAt] : []))
-        .sort()[0]
-      const nextDate = next ? zonedDateOf(next, timeZone) : date
-      if (nextDate !== date) {
-        setDate(nextDate)
-        return
-      }
-    }
-    autoDate.current = false
-    setValue(fit)
-  }, [availability, free, date, lanes, duration, firstFit, timeZone, today])
-
-  const choose = (next: ScheduleRangeValue | null) => {
-    touched.current = true
-    setValue(next)
-  }
-  const goToDate = (next: string) => {
-    touched.current = false
-    setDate(next)
-  }
-  const setDuration = (minutes: number) => {
-    if (!value) return
-    choose({
-      ...value,
-      end: new Date(Date.parse(value.start) + minutes * 60000).toISOString(),
-    })
-  }
-  // El bloque de otro día o de alguien que ya no se mira deja de valer.
-  const shown =
-    value &&
-    zonedDateOf(value.start, timeZone) === date &&
-    lanes.some((item) => item.id === value.columnId)
-      ? value
-      : null
-  const state = shown ? scheduleRangeState(shown, { free, open, timeZone }) : null
-  const professional = team.find((item) => item.id === shown?.columnId)
-  const chosenMinutes = shown ? minutesBetween(shown.start, shown.end) : duration
+  const { shown, state, professional, chosenMinutes, nextFree, hoursThatDay, free } = when
 
   React.useEffect(() => {
     onPreview(
@@ -395,23 +236,13 @@ export function BookingDrawer({
       setUrgent(false)
       setError(errorMessage(cause))
       // Si alguien tomó el hueco, lo libre se vuelve a pedir.
-      void availabilityQuery.refetch()
+      when.refetch()
     },
   })
 
   const hasPatient = registering
     ? Boolean(newPatient.givenNames.trim() && newPatient.surname.trim())
     : Boolean(patientId)
-  const nextFree = availability?.professionals.find((item) => item.id === shown?.columnId)?.nextFree
-  const hoursThatDay = shown
-    ? open
-        .filter((item) => item.columnId === shown.columnId)
-        .flatMap((item) => {
-          const range = dayRangeOf(item.start, item.end, date, timeZone)
-          return range ? [`${hourLabel(range.startMinutes)} a ${hourLabel(range.endMinutes)}`] : []
-        })
-    : []
-
   const submitLabel = !shown
     ? "Reservar cita"
     : registering
@@ -579,135 +410,11 @@ export function BookingDrawer({
               const minutes =
                 (servicesQuery.data?.data ?? []).find((item) => item.id === next)?.durationMin ??
                 defaultMinutes
-              if (value) {
-                setValue({
-                  ...value,
-                  end: new Date(Date.parse(value.start) + minutes * 60000).toISOString(),
-                })
-              }
+              when.resize(minutes)
             }}
           />
 
-          <div className="grid gap-2">
-            <span className="text-sm font-medium">Profesional</span>
-            <ScheduleResourceChips
-              wrap
-              label="Profesional"
-              resources={team}
-              formatLabel={(item) => shortName(item.label)}
-              value={dentistFilter}
-              allLabel="Cualquiera"
-              onChange={(next) => {
-                touched.current = false
-                setDentistFilter(next)
-              }}
-            />
-          </div>
-
-          <div className="grid gap-2">
-            <div className="flex items-center gap-2">
-              <span className="flex-1 text-sm font-medium">Cuándo</span>
-              <DatePickerButton
-                size="sm"
-                align="end"
-                min={today}
-                value={date}
-                onChange={goToDate}
-                aria-label="Ir a otra fecha"
-              >
-                <CalendarDays aria-hidden />
-                <span className="first-letter:uppercase">
-                  {formatDateLong(date).split(" ").slice(-1)[0]}
-                </span>
-              </DatePickerButton>
-            </div>
-            <ScheduleDayStrip
-              dates={week.slice(0, 6).includes(date) ? week.slice(0, 6) : week}
-              value={date}
-              today={today}
-              onChange={goToDate}
-              onPrevious={() => goToDate(addDays(date, -7) < today ? today : addDays(date, -7))}
-              onNext={() => goToDate(addDays(date, 7))}
-            />
-            {team.length === 0 && availability ? (
-              <p className="rounded-xl border border-dashed p-3 text-sm text-muted-foreground">
-                Ningún profesional tiene horario en esta sede. Configúralo en Ajustes, Horarios y
-                bloqueos, para poder reservar.
-              </p>
-            ) : (
-              <ScheduleRangePicker
-                label={`Horas del ${formatDateLong(date).toLocaleLowerCase("es")}`}
-                lanes={lanes}
-                date={date}
-                timeZone={timeZone}
-                free={free}
-                open={open}
-                value={shown}
-                onChange={choose}
-                defaultMinutes={duration}
-                now={now}
-              />
-            )}
-            {shown ? (
-              <div className="flex items-center gap-2">
-                <span className="min-w-0 flex-1 text-sm">
-                  <span className="font-bold">
-                    {rangeSaid(shown.start, shown.end, timeZone, today)}
-                  </span>{" "}
-                  <span className="text-muted-foreground">con {professional?.label}</span>
-                </span>
-                <DropdownMenu>
-                  <DropdownMenuTrigger
-                    render={
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        aria-label={`Dura ${formatSpan(chosenMinutes)}. Cambiar la duración`}
-                      />
-                    }
-                  >
-                    {formatSpan(chosenMinutes)}
-                    <ChevronDown aria-hidden />
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    {DURATIONS.map((minutes) => (
-                      <DropdownMenuItem key={minutes} onClick={() => setDuration(minutes)}>
-                        {formatSpan(minutes)}
-                      </DropdownMenuItem>
-                    ))}
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </div>
-            ) : (
-              <p className="text-sm text-muted-foreground">
-                {availabilityQuery.isLoading || availabilityQuery.isPlaceholderData
-                  ? "Buscando horas libres…"
-                  : "No queda nada libre este día. Prueba otro día u otro profesional."}
-              </p>
-            )}
-            {state === "taken" ? (
-              <p role="alert" className="text-sm text-destructive">
-                A esa hora {professional?.label} ya está ocupado. Mueve el bloque a una zona blanca.
-              </p>
-            ) : state === "outside" ? (
-              <p className="text-sm text-warning-foreground">
-                Esa hora queda fuera del horario de {professional?.label}.
-              </p>
-            ) : null}
-            {availabilityQuery.isError ? (
-              <p role="alert" className="text-sm text-destructive">
-                No se pudo consultar la disponibilidad.{" "}
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => void availabilityQuery.refetch()}
-                >
-                  Reintentar
-                </Button>
-              </p>
-            ) : null}
-          </div>
+          <WhenFields when={when} />
 
           <div className="grid gap-2">
             <FieldLabel htmlFor="cita-motivo">Motivo (opcional)</FieldLabel>

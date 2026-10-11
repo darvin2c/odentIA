@@ -22,7 +22,7 @@ import { member, user } from "@odentia/db/schema/auth"
 import { patient, serviceCatalog } from "@odentia/db/schema/clinical"
 import { contact, orgFk, timestamps } from "@odentia/db/schema/crm"
 import { branch, orgProfile } from "@odentia/db/schema/org"
-import { and, asc, eq, gt, gte, inArray, isNull, lt, or } from "drizzle-orm"
+import { and, asc, eq, gt, gte, inArray, isNull, lt, ne, or } from "drizzle-orm"
 import { notFound, ServiceError, validation } from "./errors.js"
 import { createWorkspaceNotification } from "./workspace.js"
 
@@ -873,7 +873,14 @@ export interface AgendaAvailability {
 export async function getAgendaAvailability(
   tx: Db,
   orgId: string,
-  input: { branchId: string; from: string; to: string; now?: Date },
+  input: {
+    branchId: string
+    from: string
+    to: string
+    now?: Date
+    /** Al reprogramar: el hueco de esa cita cuenta como libre en los tramos (`free`). */
+    ignoreAppointmentId?: string
+  },
 ): Promise<AgendaAvailability> {
   const resolved = await requireBranch(tx, orgId, input.branchId)
   const from = parseInstant(input.from, "from")
@@ -955,6 +962,7 @@ export async function getAgendaAvailability(
           inArray(appointment.status, ["programada", "confirmada"]),
           lt(appointment.startsAt, to),
           gt(appointment.endsAt, from),
+          input.ignoreAppointmentId ? ne(appointment.id, input.ignoreAppointmentId) : undefined,
         ),
       ),
     tx

@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto"
 import { tenant, tenantPattern } from "./env"
+import type { Page } from "@playwright/test"
 import { api, call, expect, test, type OwnerFixture } from "./fixtures"
 import { gotoHydrated } from "./hydration"
 
@@ -7,6 +8,19 @@ import { gotoHydrated } from "./hydration"
 function limaToday(): { date: string; startsAt: string; endsAt: string } {
   const date = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Lima" }).format(new Date())
   return { date, startsAt: `${date}T23:00:00.000Z`, endsAt: `${date}T23:45:00.000Z` }
+}
+
+/**
+ * Abre «Nueva cita» y espera al bloque ya colocado. En escritorio el formulario se
+ * acomoda en la columna lateral nada más abrirse: lo escrito antes de eso se pierde.
+ */
+async function openBooking(page: Page): Promise<void> {
+  await page.getByRole("button", { name: "Nueva cita" }).click()
+  await expect(
+    page
+      .getByRole("region", { name: /^Horas del/ })
+      .getByRole("button", { name: /^De \d\d:\d\d a \d\d:\d\d con / }),
+  ).toBeVisible()
 }
 
 async function prepareAppointment(owner: OwnerFixture): Promise<{
@@ -163,7 +177,7 @@ test("agenda: reservar un hueco real, confirmarlo y encontrarlo al buscar", asyn
 
   // Reservar: paciente y horas libres; el bloque ya viene puesto en el primer hueco
   // y dura lo que una cita regular (1 h). Ni fecha ni hora escritas a mano.
-  await page.getByRole("button", { name: "Nueva cita" }).click()
+  await openBooking(page)
   await page.getByLabel("Paciente", { exact: true }).fill("Mica")
   await page.getByRole("option", { name: /Micaela Ríos/ }).click()
   const hours = page.getByRole("region", { name: /^Horas del/ })
@@ -217,19 +231,19 @@ test("agenda: reservar un hueco real, confirmarlo y encontrarlo al buscar", asyn
   await page.getByRole("button", { name: "Guardar cambios" }).click()
   await expect(page.getByText("Dolor en una muela", { exact: true })).toBeVisible()
 
-  // Reprogramar: se elige otro hueco real y la cita cambia de hora.
+  // Reprogramar: el mismo «cuándo» que al reservar. Se ve dónde está la cita y el bloque
+  // ya viene puesto en el hueco que le sigue.
   const booked = await appointmentOf()
   await page.getByRole("button", { name: "Reprogramar" }).click()
-  // Los huecos se ofrecen desde el día de la cita, que puede no ser hoy.
-  const choices = page
-    .getByRole("group", { name: /^(Hoy|Mañana|Lunes|Martes|Miércoles|Jueves|Viernes|Sábado|Domingo)/ })
-    .first()
-  await choices.getByRole("button").nth(1).click()
+  const moveHours = page.getByRole("region", { name: /^Horas del/ })
+  await expect(moveHours.getByText(/^Ahora está aquí, \d\d:\d\d$/)).toBeVisible()
+  await expect(moveHours.getByRole("button", { name: /^De \d\d:\d\d a \d\d:\d\d con / })).toBeVisible()
   await shot("reprogramar")
-  await page.getByRole("button", { name: "Mover cita" }).click()
+  await page.getByRole("button", { name: /^Mover (a|al) / }).click()
   await expect(page.getByRole("button", { name: "Reprogramar" })).toBeVisible()
   const moved = await appointmentOf()
-  expect(moved.startsAt).not.toBe(booked.startsAt)
+  // Una hora más tarde: justo después de donde estaba, con la misma duración.
+  expect(Date.parse(moved.startsAt) - Date.parse(booked.startsAt)).toBe(3_600_000)
 
   // Arrastrar: con el puntero, la cita se mueve una hora y el servidor lo acepta.
   await gotoHydrated(page, tenant(owner.org.slug, `/agenda?date=${lima(moved.startsAt).date}`))
@@ -344,11 +358,33 @@ test("agenda: lo que falta se dice con su acción, y la sede se elige en un solo
   await page.getByRole("button", { name: "Añadir sillón" }).click()
   await page.getByRole("button", { name: "Añadir sillón" }).last().click()
 
-  // Con sillón pero sin horario: lleva a configurarlo, en la misma sede.
+  // Con sillón pero sin horario: se configura ahí mismo, igual que el sillón.
   await expect(page.getByText("Falta el horario de atención")).toBeVisible()
   await shot("vacio-sin-horario")
-  await page.getByRole("button", { name: "Configurar horarios" }).click()
+  await page.getByRole("button", { name: "Configurar horario" }).click()
+  await expect(page.getByRole("heading", { name: "Horario de atención" })).toBeVisible()
+  for (const day of ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]) {
+    await page.getByRole("button", { name: `Añadir turno el ${day}` }).click()
+  }
+  // Horario partido: el segundo turno del día propone la tarde.
+  await page.getByRole("button", { name: "Añadir turno el lunes" }).click()
+  await expect(page.getByLabel("lunes, desde").nth(1)).toHaveValue("15:00")
+  await expect(page.getByLabel("lunes, hasta").nth(1)).toHaveValue("19:00")
+  await page.getByRole("button", { name: "Guardar horario" }).click()
+  // La agenda se llena al lado, sin haber salido de ella.
+  await expect(page.getByRole("region", { name: /^Agenda del/ })).toBeVisible()
+  await expect(page).toHaveURL(tenantPattern(owner.org.slug, "/agenda"))
+  await shot("horario-en-agenda")
+  // La pantalla completa queda a un enlace, en la misma sede y con lo recién guardado.
+  await page.getByRole("link", { name: "Ver toda la configuración" }).click()
   await expect(page).toHaveURL(tenantPattern(owner.org.slug, "/settings/availability"))
+  await expect(page.getByRole("heading", { name: "De cada profesional" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "De la sede" })).toBeVisible()
+  await expect(
+    page.getByRole("heading", { name: `Horario semanal de ${owner.user.name}` }),
+  ).toBeVisible()
+  await expect(page.getByLabel("lunes, desde").first()).toHaveValue("09:00")
+  await expect(page.getByLabel("lunes, desde")).toHaveCount(2)
   await expect(page.getByRole("heading", { name: "Sillones" })).toBeVisible()
   await expect(page.getByText("Sillón 1", { exact: true })).toBeVisible()
 
@@ -378,7 +414,7 @@ test("agenda: lo que falta se dice con su acción, y la sede se elige en un solo
   await shot("calendario")
   await page.keyboard.press("Escape")
 
-  // Dos sedes: se elige bajo el título y la elección vale también en Horarios y bloqueos.
+  // Dos sedes: se elige bajo el título y la elección vale también en Horarios y ausencias.
   await call(page, "POST", "/api/branches", owner.org.slug, { name: "Sede Norte" }, 201)
   await gotoHydrated(page, tenant(owner.org.slug, "/agenda"))
   await page.getByRole("button", { name: "Sede Central" }).click()
@@ -455,9 +491,10 @@ test("agenda: una ausencia de varios días avisa de sus citas y saca al profesio
 
   await page.setViewportSize({ width: 1440, height: 900 })
   await gotoHydrated(page, tenant(owner.org.slug, "/settings/availability"))
+  // Las ausencias de alguien están con su horario: no hay que decir de quién son.
+  await expect(page.getByRole("heading", { name: `Ausencias de ${owner.user.name}` })).toBeVisible()
   await page.getByRole("button", { name: "Nueva ausencia" }).click()
   const form = page.getByRole("form").or(page.locator("form")).last()
-  await form.getByRole("button", { name: owner.user.name.split(" ").slice(0, 2).join(" ") }).click()
   // «Hasta» pasado mañana: tres días de vacaciones en un solo paso.
   await form.getByLabel("Hasta").click()
   const [year = 0, month = 1, date = 1] = dayAfter.split("-").map(Number)
@@ -473,6 +510,17 @@ test("agenda: una ausencia de varios días avisa de sus citas y saca al profesio
   await shot("ausencia-con-citas-dentro")
   await form.getByRole("button", { name: "Guardar ausencia" }).click()
   await expect(page.getByText(/^Del .* al /)).toBeVisible()
+  await expect(page.getByRole("link", { name: "1 cita por mover" })).toBeVisible()
+
+  // Un feriado es de la sede, no de una persona: va en su propio grupo.
+  await page.getByRole("button", { name: "Nuevo feriado o cierre" }).click()
+  await page.getByRole("button", { name: "Guardar", exact: true }).click()
+  const closures = page.locator("section", { has: page.getByRole("heading", { name: "Feriados y cierres" }) })
+  await expect(closures.getByText("Feriado", { exact: true })).toBeVisible()
+  await expect(closures.getByText(/toda la sede/)).toBeVisible()
+  await shot("configuracion-dos-grupos")
+  await closures.getByRole("button", { name: /^Quitar Feriado/ }).click()
+  await expect(closures.getByText("Sin feriados ni cierres", { exact: false })).toBeVisible()
 
   // Durante la ausencia no se ofrece ningún hueco.
   const slots = await call<{ slots: unknown[] }>(
@@ -540,7 +588,7 @@ test("agenda: duración de una cita regular, paciente nuevo y urgencia fuera de 
 
   // Paciente nuevo: se registra con lo mínimo sin salir de «Nueva cita».
   await gotoHydrated(page, tenant(owner.org.slug, "/agenda"))
-  await page.getByRole("button", { name: "Nueva cita" }).click()
+  await openBooking(page)
   await page.getByLabel("Paciente", { exact: true }).fill("Rosa Quispe")
   await page.getByRole("button", { name: "Registrar paciente nuevo" }).click()
   // Lo tecleado al buscar ya viene puesto.
@@ -567,7 +615,7 @@ test("agenda: duración de una cita regular, paciente nuevo y urgencia fuera de 
   expect(people.map((person) => person.displayName)).toEqual(["Rosa Quispe"])
 
   // Urgencia: fuera del horario no se reserva sin más; se pregunta y queda dicho.
-  await page.getByRole("button", { name: "Nueva cita" }).click()
+  await openBooking(page)
   await page.getByLabel("Paciente", { exact: true }).fill("Rosa")
   await page.getByRole("option", { name: /Rosa Quispe/ }).click()
   // Se abre en el día que se estaba viendo: el primer hueco es el que sigue a su cita.

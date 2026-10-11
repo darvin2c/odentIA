@@ -16,8 +16,6 @@ import {
   ResourceSelect,
   SCHEDULE_AGENDA_LABELS,
   type ScheduleColumn,
-  ScheduleResourceChips,
-  ScheduleSlotChoices,
   StatusIcon,
   statusSurfaceClass,
   statusTextClass,
@@ -36,7 +34,8 @@ import type {
 } from "../../lib/agenda"
 import { apiFetch } from "../../lib/api"
 import { NewEncounterButton } from "../patient/new-encounter-button"
-import { errorMessage, rangeSaid, shortName, useAgendaSlots, whenSaid } from "./shared"
+import { errorMessage, rangeSaid, whenSaid } from "./shared"
+import { useWhen, WhenFields } from "./when"
 
 export type AppointmentDrawerMode = "view" | "move" | "cancel"
 
@@ -67,7 +66,7 @@ export function AppointmentDrawer({
   today,
   now,
   resources,
-  team,
+  toneOf,
   waiting,
   onClose,
   onChanged,
@@ -81,7 +80,8 @@ export function AppointmentDrawer({
   today: string
   now: string
   resources: AgendaResources
-  team: ScheduleColumn[]
+  /** El color de cada profesional, el mismo que en la rejilla. */
+  toneOf: (id: string) => ScheduleColumn["tone"]
   /** Personas en la lista de espera de la sede. */
   waiting: number
   onClose: () => void
@@ -131,31 +131,49 @@ export function AppointmentDrawer({
   })
 
   // ----- Reprogramar -----
-  const [moveDentist, setMoveDentist] = React.useState<string>(appointment.dentistUserId)
-  const appointmentDate = zonedDateOf(appointment.startsAt, timeZone)
-  const [chosen, setChosen] = React.useState<string | null>(null)
-  const slots = useAgendaSlots({
+  // El mismo «cuándo» de Nueva cita: se abre en el día y con el profesional de la cita.
+  const moving = React.useMemo(
+    () => ({
+      id: appointment.id,
+      dentistUserId: appointment.dentistUserId,
+      startsAt: appointment.startsAt,
+      endsAt: appointment.endsAt,
+    }),
+    [appointment.id, appointment.dentistUserId, appointment.startsAt, appointment.endsAt],
+  )
+  const when = useWhen({
     branchId: appointment.branchId,
     timeZone,
-    fromDate: appointmentDate > today ? appointmentDate : today,
-    dentistUserId: moveDentist,
-    durationMin: Math.round(
+    today,
+    now,
+    toneOf,
+    duration: Math.round(
       (Date.parse(appointment.endsAt) - Date.parse(appointment.startsAt)) / 60000,
     ),
+    date: zonedDateOf(appointment.startsAt, timeZone),
+    dentistUserId: appointment.dentistUserId,
+    moving,
     enabled: mode === "move",
   })
-  const slot = slots.slotOf(chosen)
+  const target = when.shown
+  /** El bloque sigue donde ya está la cita: no hay nada que mover. */
+  const unmoved =
+    target != null &&
+    target.columnId === appointment.dentistUserId &&
+    Date.parse(target.start) === Date.parse(appointment.startsAt) &&
+    Date.parse(target.end) === Date.parse(appointment.endsAt)
+  const targetSaid = target ? whenSaid(target.start, timeZone, today) : ""
   const move = useMutation({
     mutationFn: () => {
-      if (!slot?.chairId) throw new Error("Elige un hueco.")
+      if (!target) throw new Error("Elige una hora libre.")
+      // Sin sillón: la cita conserva el suyo o pasa a uno libre a la nueva hora.
       return apiFetch<{ data: AgendaAppointment }>(`/api/appointments/${appointment.id}/move`, {
         method: "POST",
         body: JSON.stringify({
           expectedVersion: appointment.version,
-          startsAt: slot.startsAt,
-          endsAt: slot.endsAt,
-          dentistUserId: slot.dentistUserId,
-          chairId: slot.chairId,
+          startsAt: target.start,
+          endsAt: target.end,
+          dentistUserId: target.columnId,
         }),
       })
     },
@@ -164,14 +182,13 @@ export function AppointmentDrawer({
         `Cita de ${result.data.patientName} movida ${whenSaid(result.data.startsAt, timeZone, today)}`,
       )
       setError("")
-      setChosen(null)
       setMode("view")
       await onChanged()
     },
     onError: async (cause) => {
       setError(errorMessage(cause))
-      setChosen(null)
-      slots.refetch()
+      // Si alguien tomó el hueco, lo libre se vuelve a pedir.
+      when.refetch()
       await onChanged()
     },
   })
@@ -224,8 +241,15 @@ export function AppointmentDrawer({
         <Button variant="outline" onClick={back}>
           Volver
         </Button>
-        <Button disabled={!slot || move.isPending} onClick={() => move.mutate()}>
-          Mover cita
+        <Button
+          disabled={!target || unmoved || when.state !== "free" || move.isPending}
+          onClick={() => move.mutate()}
+        >
+          {!target || unmoved
+            ? "Mover cita"
+            : targetSaid.startsWith("el ")
+              ? `Mover al ${targetSaid.slice(3)}`
+              : `Mover a ${targetSaid}`}
         </Button>
       </>
     ) : mode === "edit" ? (
@@ -271,30 +295,7 @@ export function AppointmentDrawer({
       >
         {mode === "move" ? (
           <div className="grid gap-4">
-            <div className="grid gap-2">
-              <span className="text-sm font-medium">Profesional</span>
-              <ScheduleResourceChips
-                wrap
-                label="Profesional"
-                resources={team}
-                formatLabel={(item) => shortName(item.label)}
-                value={moveDentist}
-                onChange={(next) => {
-                  if (!next) return
-                  setMoveDentist(next)
-                  setChosen(null)
-                }}
-              />
-            </div>
-            <ScheduleSlotChoices
-              label="Próximos huecos"
-              slots={slots.choices}
-              timeZone={timeZone}
-              today={today}
-              loading={slots.isLoading}
-              value={chosen}
-              onChange={(choice) => setChosen(choice.id)}
-            />
+            <WhenFields when={when} />
           </div>
         ) : mode === "edit" ? (
           <div className="grid gap-4">

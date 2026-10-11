@@ -28,6 +28,14 @@ export interface ScheduleRangeValue {
   end: string
 }
 
+/** Un tramo que se señala sin elegirlo: dónde está ahora la cita que se mueve. */
+export interface ScheduleRangeMarker {
+  columnId: string
+  start: string
+  end: string
+  label: string
+}
+
 /** Cómo queda la elección: reservable, dentro del horario pero ocupada, o fuera del horario. */
 export type ScheduleRangeState = "free" | "taken" | "outside"
 
@@ -73,6 +81,8 @@ export interface ScheduleRangePickerProps {
   onChange: (value: ScheduleRangeValue) => void
   /** Duración que toma el bloque al tocar un hueco. */
   defaultMinutes: number
+  /** Referencia visible bajo el bloque; no se puede tocar ni cambia qué está libre. */
+  marker?: ScheduleRangeMarker
   now?: string
   /** Píxeles por hora. */
   hourHeight?: number
@@ -98,6 +108,7 @@ export function ScheduleRangePicker({
   value,
   onChange,
   defaultMinutes,
+  marker,
   now,
   hourHeight = 44,
   snapMinutes = 15,
@@ -117,6 +128,7 @@ export function ScheduleRangePicker({
   const today = now !== undefined && zonedDateOf(now, timeZone) === date
   const nowMinutes = now === undefined ? 0 : dayMinutesIn(now, timeZone)
   const chosen = value ? dayRangeOf(value.start, value.end, date, timeZone) : null
+  const marked = marker ? dayRangeOf(marker.start, marker.end, date, timeZone) : null
 
   const window = React.useMemo(() => {
     const hours = lanes.flatMap((lane) => rangesOf(open, lane.id, date, timeZone))
@@ -317,6 +329,23 @@ export function ScheduleRangePicker({
                   />
                 ),
               )}
+              {marker && marked && marker.columnId === lane.id ? (
+                <div
+                  data-range-marker
+                  className="pointer-events-none absolute inset-x-[3px] z-[1] flex items-center justify-center overflow-hidden rounded-[9px] border-[1.5px] border-dashed border-muted-foreground bg-card px-1 text-xs leading-none font-semibold whitespace-nowrap text-foreground"
+                  style={{
+                    top: topOf(Math.max(marked.startMinutes, window.startMinutes)),
+                    height: Math.max(
+                      (Math.min(marked.endMinutes, window.endMinutes) -
+                        Math.max(marked.startMinutes, window.startMinutes)) *
+                        px,
+                      16,
+                    ),
+                  }}
+                >
+                  {marker.label}
+                </div>
+              ) : null}
               {visible ? (
                 <div
                   data-range-block
