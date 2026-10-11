@@ -622,11 +622,12 @@ test("reserva por enlace: quien recién se contacta elige su hora, completa sus 
     await gotoHydrated(anon, tenant(org.slug, `/reserva?token=${token}`))
     await expect(anon.getByRole("heading", { name: "Elige tu cita" })).toBeVisible()
     // Tres pasos: elegir, sus datos y listo.
-    await expect(anon.getByRole("list", { name: "Pasos" }).getByRole("listitem")).toHaveText(["1 · Elige día y hora", "2 · Tus datos", "3 · Listo"])
+    await expect(anon.getByText(/paso 1 de 3/)).toBeVisible()
     await anon.getByRole("group", { name: /Mañana|Tarde/ }).first().getByRole("button").first().click()
     await anon.getByRole("button", { name: "Continuar con mis datos" }).click()
 
     await expect(anon.getByRole("heading", { name: "Tus datos" })).toBeVisible()
+    await expect(anon.getByText(/paso 2 de 3/)).toBeVisible()
     await expect(anon.getByRole("button", { name: "Cambiar horario" })).toBeVisible()
     expect(await anon.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0)
     await info.attach("reserva-tus-datos", { body: await anon.screenshot({ fullPage: true }), contentType: "image/png" })

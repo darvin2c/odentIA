@@ -1,5 +1,5 @@
 import { Button, Field, FieldLabel, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@odentia/ui"
-import { EmptyState, ErrorState, LoadingState, PageShell, SubmitButton } from "@odentia/ui-patterns"
+import { ConfirmDialog, EmptyState, ErrorState, LoadingState, PageShell, SubmitButton } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { CalendarCheck, ChevronLeft, ChevronRight } from "lucide-react"
@@ -10,6 +10,8 @@ import { ApiError } from "../lib/api"
 import {
   type BookingAppointment,
   type BookingSlot,
+  cancelBooking,
+  changeBooking,
   fetchBookingLink,
   fetchBookingSlots,
   reserveBooking,
@@ -23,7 +25,9 @@ import { fetchPublicRegistration, submitPublicRegistration } from "../lib/patien
  * viendo los horarios libres y reserva su cita. Es pública y personal a la
  * vez: no hay sesión, y todo lo que se puede hacer lo decide el enlace. No
  * muestra tarifas ni nada de la historia. En pantalla ancha la semana se ve
- * entera, un día por columna; en teléfono, un día a la vez. Quien aún no es
+ * entera, un día por columna; en teléfono, un día a la vez y el botón que
+ * avanza fijo abajo. Con la cita ya reservada, el mismo enlace la muestra y
+ * deja cambiarla de horario o cancelarla. Quien aún no es
  * paciente completa sus datos entre elegir y reservar, con el mismo formulario
  * de registro de la clínica.
  */
@@ -67,6 +71,14 @@ function longDay(instant: string, timeZone: string): string {
   return capital(new Intl.DateTimeFormat("es-PE", { timeZone, weekday: "long", day: "numeric", month: "long" }).format(new Date(instant)))
 }
 
+function shortDay(instant: string, timeZone: string): string {
+  return new Intl.DateTimeFormat("es-PE", { timeZone, weekday: "long", day: "numeric" }).format(new Date(instant))
+}
+
+function monthName(instant: string, timeZone: string): string {
+  return new Intl.DateTimeFormat("es-PE", { timeZone, month: "long" }).format(new Date(instant)).toLowerCase()
+}
+
 function dayParts(instant: string, timeZone: string): { weekday: string; number: string } {
   const parts = new Intl.DateTimeFormat("es-PE", { timeZone, weekday: "long", day: "numeric" }).formatToParts(new Date(instant))
   return {
@@ -85,7 +97,7 @@ function Steps({ current, withData }: { current: Step; withData: boolean }) {
     { id: "listo", label: "Listo" },
   ]
   return (
-    <ol className="flex flex-wrap items-center gap-2" aria-label="Pasos">
+    <ol className="hidden flex-wrap items-center gap-2 lg:flex" aria-label="Pasos">
       {steps.map((step, index) => (
         <li
           key={step.id}
@@ -103,14 +115,39 @@ function Steps({ current, withData }: { current: Step; withData: boolean }) {
   )
 }
 
-function Heading({ clinicName, title, current, withData }: { clinicName: string; title: string; current: Step; withData: boolean }) {
+/** Cabecera de la página. En pantalla ancha los pasos van como píldoras; en teléfono, «paso 1 de 3» junto a la clínica. */
+function Heading({
+  clinicName,
+  title,
+  current,
+  withData,
+  progress,
+  hideSteps = false,
+}: {
+  clinicName: string
+  title: string
+  current: Step
+  withData: boolean
+  progress?: { number: number; total: number } | null
+  hideSteps?: boolean
+}) {
+  const total = withData ? 3 : 2
+  const number = progress?.number ?? (current === "elegir" ? 1 : current === "datos" ? 2 : total)
   return (
     <header className="mb-6 flex flex-wrap items-end justify-between gap-3">
       <div className="flex min-w-0 flex-col gap-1">
-        <p className="text-sm font-semibold text-muted-foreground">{clinicName}</p>
+        <p className="text-sm font-semibold text-muted-foreground">
+          {clinicName}
+          {hideSteps ? null : (
+            <span className="lg:hidden">
+              {" "}
+              · paso {number} de {total}
+            </span>
+          )}
+        </p>
         <h1 className="text-xl font-semibold">{title}</h1>
       </div>
-      <Steps current={current} withData={withData} />
+      {hideSteps ? null : <Steps current={current} withData={withData} />}
     </header>
   )
 }
@@ -205,27 +242,86 @@ function Unavailable() {
   )
 }
 
-function Booked({ clinicName, firstName, appointment, withData }: { clinicName: string; firstName: string | null; appointment: BookingAppointment; withData: boolean }) {
+/** La cita como archivo de calendario (iCalendar, RFC 5545): lo abre el calendario del teléfono o del computador. */
+function calendarFile(clinicName: string, appointment: BookingAppointment): string {
+  const stamp = (instant: string | Date) => new Date(instant).toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "")
+  const text = (value: string) => value.replace(/\\/g, "\\\\").replace(/([,;])/g, "\\$1").replace(/\r?\n/g, "\\n")
+  const where = [`Sede ${appointment.branchName}`, appointment.branchAddress].filter(Boolean).join(", ")
+  return [
+    "BEGIN:VCALENDAR",
+    "VERSION:2.0",
+    "PRODID:-//odentIA//Reserva//ES",
+    "BEGIN:VEVENT",
+    `UID:${stamp(appointment.startsAt)}-${crypto.randomUUID()}@odentia`,
+    `DTSTAMP:${stamp(new Date())}`,
+    `DTSTART:${stamp(appointment.startsAt)}`,
+    `DTEND:${stamp(appointment.endsAt)}`,
+    `SUMMARY:${text(`${appointment.serviceName ?? "Cita"} · ${clinicName}`)}`,
+    `LOCATION:${text(where)}`,
+    `DESCRIPTION:${text(`Con ${appointment.dentistName}`)}`,
+    "END:VEVENT",
+    "END:VCALENDAR",
+  ].join("\r\n")
+}
+
+function Booked({
+  clinicName,
+  firstName,
+  appointment,
+  withData,
+  cancelling,
+  cancelError,
+  onChange,
+  onCancel,
+}: {
+  clinicName: string
+  firstName: string | null
+  appointment: BookingAppointment
+  withData: boolean
+  cancelling: boolean
+  cancelError: string | null
+  onChange: () => void
+  onCancel: () => void
+}) {
+  const [managing, setManaging] = useState(false)
+  const [confirming, setConfirming] = useState(false)
+  const addToCalendar = () => {
+    const url = URL.createObjectURL(new Blob([calendarFile(clinicName, appointment)], { type: "text/calendar;charset=utf-8" }))
+    const link = document.createElement("a")
+    link.href = url
+    link.download = "mi-cita.ics"
+    link.click()
+    URL.revokeObjectURL(url)
+  }
+  if (appointment.cancelled) {
+    return (
+      <PageShell maxWidth="md">
+        <Heading clinicName={clinicName} title="Tu cita quedó cancelada" current="listo" withData={withData} />
+        <EmptyState
+          title={`${longDay(appointment.startsAt, appointment.timeZone)}, ${timeLabel(appointment.startsAt, appointment.timeZone)}`}
+          description="Esa cita ya no está en la agenda. Si quieres otra, escríbenos por el chat y te enviamos un enlace nuevo."
+        />
+      </PageShell>
+    )
+  }
   return (
     <PageShell maxWidth="md">
       <Heading clinicName={clinicName} title="Tu cita quedó reservada" current="listo" withData={withData} />
       <div className="flex flex-col gap-6">
-        <div role="status" className="flex flex-col items-center gap-2 rounded-2xl bg-success-soft p-6 text-center">
-          <CalendarCheck className="size-8 text-success" aria-hidden />
-          <p className="text-lg font-semibold">{longDay(appointment.startsAt, appointment.timeZone)}</p>
-          <p className="text-lg font-semibold">{timeLabel(appointment.startsAt, appointment.timeZone)}</p>
+        <div role="status" className="flex flex-col items-center gap-1 rounded-2xl bg-success-soft p-6 text-center">
+          <CalendarCheck className="mb-1 size-8 text-success" aria-hidden />
+          <p className="text-lg font-semibold">
+            {longDay(appointment.startsAt, appointment.timeZone)}, {timeLabel(appointment.startsAt, appointment.timeZone)}
+          </p>
+          <p className="text-sm">
+            {[appointment.serviceName ?? "Consulta", `${appointment.durationMin} minutos`].join(" · ")}
+          </p>
         </div>
         <dl className="flex flex-col divide-y rounded-2xl border bg-card text-sm">
           {firstName ? (
             <div className="grid grid-cols-[6rem_minmax(0,1fr)] gap-3 p-3">
               <dt className="text-muted-foreground">Para</dt>
               <dd>{firstName}</dd>
-            </div>
-          ) : null}
-          {appointment.serviceName ? (
-            <div className="grid grid-cols-[6rem_minmax(0,1fr)] gap-3 p-3">
-              <dt className="text-muted-foreground">Cita</dt>
-              <dd>{appointment.serviceName}</dd>
             </div>
           ) : null}
           <div className="grid grid-cols-[6rem_minmax(0,1fr)] gap-3 p-3">
@@ -240,12 +336,56 @@ function Booked({ clinicName, firstName, appointment, withData }: { clinicName: 
             </dd>
           </div>
         </dl>
-        <p className="text-sm text-muted-foreground">
-          Te lo confirmamos también por el chat. Si necesitas cambiarla o cancelarla, escríbenos por ahí.
-        </p>
+        <p className="text-sm text-muted-foreground">Te lo confirmamos también por el chat. Ya puedes volver a la conversación.</p>
+        <div className="flex flex-col gap-2">
+          <Button type="button" className="min-h-11 w-full" onClick={addToCalendar}>
+            Agregar al calendario
+          </Button>
+          {appointment.canChange ? (
+            <Button type="button" variant="outline" className="min-h-11 w-full" aria-expanded={managing} onClick={() => setManaging(!managing)}>
+              Cambiar o cancelar
+            </Button>
+          ) : null}
+          {managing && appointment.canChange ? (
+            <div className="flex flex-col gap-2 rounded-2xl border bg-card p-3">
+              <Button type="button" variant="outline" className="min-h-11 w-full" onClick={onChange}>
+                Cambiar de día u hora
+              </Button>
+              <Button type="button" variant="outline" className="min-h-11 w-full text-destructive" onClick={() => setConfirming(true)}>
+                Cancelar la cita
+              </Button>
+              {cancelError ? (
+                <p role="alert" className="text-sm text-destructive">
+                  {cancelError}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
       </div>
+      <ConfirmDialog
+        open={confirming}
+        title="¿Cancelar tu cita?"
+        description={`${longDay(appointment.startsAt, appointment.timeZone)}, ${timeLabel(appointment.startsAt, appointment.timeZone)}. El horario queda libre para otra persona.`}
+        confirmLabel="Sí, cancelar"
+        cancelLabel="No, conservarla"
+        variant="destructive"
+        pending={cancelling}
+        onClose={() => {
+          if (!cancelling) setConfirming(false)
+        }}
+        onConfirm={onCancel}
+      />
     </PageShell>
   )
+}
+
+/** El lunes de la semana que se mira, en la hora del dispositivo. */
+function weekStart(offset: number): Date {
+  const start = new Date()
+  start.setHours(0, 0, 0, 0)
+  start.setDate(start.getDate() - ((start.getDay() + 6) % 7) + offset * WEEK_DAYS)
+  return start
 }
 
 function BookingLinkPage() {
@@ -263,28 +403,46 @@ function BookingLinkPage() {
   const view = viewQuery.data?.data
 
   const [branchChoice, setBranchChoice] = useState<string | null>(null)
-  const branch = view?.branches.find((item) => item.id === (branchChoice ?? view.branchId)) ?? (view?.branches.length === 1 ? view.branches[0] : undefined)
   const [dentist, setDentist] = useState<string>(ANYONE)
   const [week, setWeek] = useState(0)
   const [day, setDay] = useState<string | null>(null)
   const [chosen, setChosen] = useState<BookingSlot | null>(null)
   const [booked, setBooked] = useState<BookingAppointment | null>(null)
+  // Con la cita ya reservada, el mismo enlace sirve para elegirle otro horario.
+  const [changing, setChanging] = useState(false)
+  // En teléfono, la sede y el profesional se abren con «Cambiar».
+  const [editing, setEditing] = useState(false)
   // Quien aún no es paciente pasa por «Tus datos» antes de reservar.
   const [registrationToken, setRegistrationToken] = useState<string | null>(null)
   const [registered, setRegistered] = useState(false)
 
-  // La semana que se mira: siete días desde hoy, y de ahí hacia adelante.
+  const current = booked ?? view?.appointment ?? null
+  const branch = changing && current
+    ? (view?.branches.find((item) => item.id === current.branchId) ?? {
+        id: current.branchId,
+        name: current.branchName,
+        address: current.branchAddress,
+        timeZone: current.timeZone,
+        defaultMinutes: current.durationMin,
+      })
+    : (view?.branches.find((item) => item.id === (branchChoice ?? view.branchId)) ?? (view?.branches.length === 1 ? view.branches[0] : undefined))
+
+  // La semana que se mira: de lunes a domingo, sin lo que ya pasó.
   const range = useMemo(() => {
-    const start = new Date()
-    start.setMinutes(0, 0, 0)
-    const from = new Date(start.getTime() + week * WEEK_DAYS * DAY_MS)
-    return { from: from.toISOString(), to: new Date(from.getTime() + WEEK_DAYS * DAY_MS).toISOString() }
+    const start = weekStart(week)
+    const now = new Date()
+    now.setMinutes(0, 0, 0)
+    return {
+      start: start.toISOString(),
+      from: new Date(Math.max(start.getTime(), now.getTime())).toISOString(),
+      to: new Date(start.getTime() + WEEK_DAYS * DAY_MS).toISOString(),
+    }
   }, [week])
 
   const slotsQuery = useQuery({
     queryKey: ["booking-slots", slug, token ?? null, branch?.id ?? null, range.from],
-    queryFn: () => fetchBookingSlots(slug ?? "", token ?? "", { branchId: branch?.id ?? "", ...range }),
-    enabled: ready && view?.status === "abierto" && branch !== undefined && booked === null,
+    queryFn: () => fetchBookingSlots(slug ?? "", token ?? "", { branchId: branch?.id ?? "", from: range.from, to: range.to }),
+    enabled: ready && branch !== undefined && (changing || (view?.status === "abierto" && current === null)),
     retry: false,
   })
   const timeZone = slotsQuery.data?.data.timeZone ?? branch?.timeZone ?? "America/Lima"
@@ -299,6 +457,7 @@ function BookingLinkPage() {
   const dentistFilter = dentists.some((item) => item.id === dentist) ? dentist : ANYONE
 
   // Un horario por hora de inicio: sin preferencia, si varios profesionales lo tienen libre se ofrece una sola vez.
+  // Se muestran los días de la semana que aún no pasaron; sábado y domingo, solo si la clínica atiende.
   const days = useMemo(() => {
     const byDay = new Map<string, BookingSlot[]>()
     const seen = new Set<string>()
@@ -309,14 +468,22 @@ function BookingLinkPage() {
       const key = dayKey(slot.startsAt, timeZone)
       byDay.set(key, [...(byDay.get(key) ?? []), slot])
     }
+    const today = dayKey(new Date().toISOString(), timeZone)
     return Array.from({ length: WEEK_DAYS }, (_, index) => {
-      const instant = new Date(new Date(range.from).getTime() + index * DAY_MS).toISOString()
+      // Al mediodía, para que el día no cambie al pasarlo a la zona de la sede.
+      const instant = new Date(new Date(range.start).getTime() + index * DAY_MS + DAY_MS / 2).toISOString()
       const key = dayKey(instant, timeZone)
-      return { key, instant, slots: byDay.get(key) ?? [] }
-    })
-  }, [allSlots, dentistFilter, range.from, timeZone])
+      return { key, instant, weekend: index >= 5, slots: byDay.get(key) ?? [] }
+    }).filter((item) => item.key >= today && (!item.weekend || item.slots.length > 0))
+  }, [allSlots, dentistFilter, range.start, timeZone])
   const activeDay = days.find((item) => item.key === day && item.slots.length > 0) ?? days.find((item) => item.slots.length > 0)
 
+  const refreshSlots = () => {
+    // Ese horario pudo ocuparse mientras elegía: se vuelve a pedir lo libre.
+    setChosen(null)
+    setRegistrationToken(null)
+    void queryClient.invalidateQueries({ queryKey: ["booking-slots", slug, token ?? null] })
+  }
   const reserve = useMutation({
     retry: false,
     mutationFn: (slot: BookingSlot) =>
@@ -328,12 +495,28 @@ function BookingLinkPage() {
         ...(slot.chairId ? { chairId: slot.chairId } : {}),
       }),
     onSuccess: (result) => setBooked(result.data),
-    onError: () => {
-      // Ese horario pudo ocuparse mientras elegía: se vuelve a pedir lo libre.
+    onError: refreshSlots,
+  })
+  const change = useMutation({
+    retry: false,
+    mutationFn: (slot: BookingSlot) =>
+      changeBooking(slug ?? "", {
+        token: token ?? "",
+        startsAt: slot.startsAt,
+        dentistUserId: slot.dentistUserId,
+        ...(slot.chairId ? { chairId: slot.chairId } : {}),
+      }),
+    onSuccess: (result) => {
+      setBooked(result.data)
+      setChanging(false)
       setChosen(null)
-      setRegistrationToken(null)
-      void queryClient.invalidateQueries({ queryKey: ["booking-slots", slug, token ?? null] })
     },
+    onError: refreshSlots,
+  })
+  const cancel = useMutation({
+    retry: false,
+    mutationFn: () => cancelBooking(slug ?? "", token ?? ""),
+    onSuccess: (result) => setBooked(result.data),
   })
   const startRegistration = useMutation({
     retry: false,
@@ -358,24 +541,58 @@ function BookingLinkPage() {
     )
   }
   const withData = view.needsRegistration || registered
-  if (booked) return <Booked clinicName={view.clinicName} firstName={view.patientFirstName} appointment={booked} withData={withData} />
-  if (view.status === "usado" && view.appointment) return <Booked clinicName={view.clinicName} firstName={view.patientFirstName} appointment={view.appointment} withData={false} />
-  if (view.status !== "abierto") return <Unavailable />
-  const needsData = view.needsRegistration && !registered
+  if (current && !changing) {
+    return (
+      <Booked
+        clinicName={view.clinicName}
+        firstName={view.patientFirstName}
+        appointment={current}
+        withData={booked !== null && withData}
+        cancelling={cancel.isPending}
+        cancelError={
+          cancel.error instanceof ApiError
+            ? (cancel.error.shape.message ?? "No pudimos cancelar la cita. Escríbenos por el chat.")
+            : cancel.error
+              ? "No pudimos cancelar la cita. Revisa tu conexión y vuelve a intentarlo."
+              : null
+        }
+        onChange={() => {
+          setWeek(0)
+          setDay(null)
+          setChosen(null)
+          setDentist(ANYONE)
+          setChanging(true)
+        }}
+        onCancel={() => cancel.mutate()}
+      />
+    )
+  }
+  if (!changing && view.status !== "abierto") return <Unavailable />
+  const needsData = !changing && view.needsRegistration && !registered
 
-  const minutes = view.service?.durationMin ?? branch?.defaultMinutes ?? null
-  const reserveError =
-    reserve.error instanceof ApiError
-      ? reserve.error.shape.code === "BOOKING_LINK_USED" || reserve.error.shape.code === "BOOKING_LINK_EXPIRED"
-        ? (reserve.error.shape.message ?? "Este enlace ya no está disponible.")
+  const serviceName = (changing ? current?.serviceName : view.service?.name) ?? "Consulta"
+  const minutes = changing ? (current?.durationMin ?? null) : (view.service?.durationMin ?? branch?.defaultMinutes ?? null)
+  const acting = changing ? change : reserve
+  const actionError =
+    acting.error instanceof ApiError
+      ? ["BOOKING_LINK_USED", "BOOKING_LINK_EXPIRED", "BOOKING_NOT_CHANGEABLE"].includes(acting.error.shape.code ?? "")
+        ? (acting.error.shape.message ?? "Este enlace ya no está disponible.")
         : "Ese horario acaba de ocuparse. Elige otro de la lista."
-      : reserve.error
+      : acting.error
         ? "No pudimos reservar. Revisa tu conexión y vuelve a intentarlo."
         : null
   const morning = activeDay?.slots.filter((slot) => hourOf(slot.startsAt, timeZone) < 12) ?? []
   const afternoon = activeDay?.slots.filter((slot) => hourOf(slot.startsAt, timeZone) >= 12) ?? []
-  const lastDay = new Date(new Date(range.to).getTime() - DAY_MS).toISOString()
   const withWhom = dentistFilter === ANYONE ? null : (dentists.find((item) => item.id === dentistFilter)?.name ?? null)
+  // El título nombra la semana de calendario (de lunes a viernes, o hasta el fin de semana si se atiende),
+  // aunque de la semana en curso ya no se muestren los días que pasaron.
+  const monday = new Date(new Date(range.start).getTime() + DAY_MS / 2).toISOString()
+  const lastShown = days[days.length - 1]
+  const weekEnd = lastShown?.weekend ? lastShown.instant : new Date(new Date(monday).getTime() + 4 * DAY_MS).toISOString()
+  const weekTitle = `Semana del ${dayParts(monday, timeZone).number} al ${dayParts(weekEnd, timeZone).number} de ${monthName(weekEnd, timeZone)}`
+  const emptyDays = days.filter((item) => item.slots.length === 0).map((item) => longDay(item.instant, timeZone).split(" de ")[0]?.toLowerCase() ?? "")
+  const chosenLabel = chosen ? `${shortDay(chosen.startsAt, timeZone)}, ${timeLabel(chosen.startsAt, timeZone)}` : null
+  const steps = { number: 1, total: withData ? 3 : 2 }
 
   const pick = (slot: BookingSlot) => {
     setDay(dayKey(slot.startsAt, timeZone))
@@ -402,6 +619,39 @@ function BookingLinkPage() {
       </Button>
     )
   }
+  /** El botón que avanza: reservar, cambiar la cita o seguir a «Tus datos». En teléfono dice el horario elegido. */
+  const mainAction = (withTime: boolean) => {
+    const suffix = withTime && chosenLabel ? ` ${chosenLabel}` : ""
+    if (needsData) {
+      return (
+        <SubmitButton type="button" className="min-h-11 w-full" pending={startRegistration.isPending} disabled={chosen === null} onClick={() => startRegistration.mutate()}>
+          Continuar con mis datos
+        </SubmitButton>
+      )
+    }
+    return (
+      <SubmitButton type="button" className="min-h-11 w-full" pending={acting.isPending} disabled={chosen === null} onClick={() => chosen && acting.mutate(chosen)}>
+        {changing ? `Cambiar a${suffix || " este horario"}` : `Reservar${suffix}`}
+      </SubmitButton>
+    )
+  }
+  const errors = (
+    <>
+      {actionError ? (
+        <p role="alert" className="text-sm text-destructive">
+          {actionError}
+        </p>
+      ) : null}
+      {startRegistration.isError ? (
+        <p role="alert" className="text-sm text-destructive">
+          No pudimos abrir el formulario de tus datos. Inténtalo de nuevo o escríbenos por el chat.
+        </p>
+      ) : null}
+    </>
+  )
+  const closingNote = needsData
+    ? "Es tu primera cita: después de elegir te pedimos unos datos y reservamos."
+    : "Podrás cambiarla o cancelarla desde este mismo enlace."
 
   // Paso «Tus datos»: con el horario ya elegido, la persona completa su registro y la página reserva.
   if (needsData && registrationToken !== null && chosen !== null && slug !== null) {
@@ -415,7 +665,7 @@ function BookingLinkPage() {
                 {longDay(chosen.startsAt, timeZone)} · {timeLabel(chosen.startsAt, timeZone)}
               </p>
               <p className="text-sm">
-                {[view.service?.name ?? "Consulta", branch ? `Sede ${branch.name}` : null, chosen.dentistName].filter(Boolean).join(" · ")}
+                {[serviceName, branch ? `Sede ${branch.name}` : null, chosen.dentistName].filter(Boolean).join(" · ")}
               </p>
             </div>
             <Button type="button" variant="outline" className="min-h-11" onClick={() => setRegistrationToken(null)}>
@@ -441,73 +691,99 @@ function BookingLinkPage() {
 
   return (
     <PageShell>
-      <div className="mx-auto w-full max-w-7xl">
-        <Heading clinicName={view.clinicName} title="Elige tu cita" current="elegir" withData={withData} />
+      {/* En teléfono el botón que avanza queda fijo abajo: el contenido deja ese espacio. */}
+      <div className="mx-auto w-full max-w-7xl pb-36 lg:pb-0">
+        <Heading
+          clinicName={view.clinicName}
+          title={changing ? "Cambia tu cita" : "Elige tu cita"}
+          current="elegir"
+          withData={withData}
+          progress={changing ? null : steps}
+          hideSteps={changing}
+        />
 
         <div className="grid gap-5 lg:grid-cols-[16rem_minmax(0,1fr)_17rem] lg:items-start">
           <section aria-label="Para qué es la cita" className="flex flex-col gap-4 rounded-2xl border bg-card p-4">
-            <div className="flex flex-col gap-1">
-              <p className="text-sm font-semibold text-muted-foreground">Para qué es la cita</p>
-              <p className="font-semibold">{view.service?.name ?? "Consulta"}</p>
-              <p className="text-sm text-muted-foreground">
-                {[minutes ? `${minutes} minutos` : null, view.patientFirstName ? `para ${view.patientFirstName}` : null].filter(Boolean).join(" · ")}
-              </p>
-            </div>
-            {view.branches.length > 1 ? (
-              <Field>
-                <FieldLabel htmlFor="reserva-sede">Sede</FieldLabel>
-                <Select
-                  value={branch?.id ?? ""}
-                  onValueChange={(value) => {
-                    setBranchChoice(value)
-                    setDentist(ANYONE)
-                    setDay(null)
-                    setChosen(null)
-                  }}
-                >
-                  <SelectTrigger id="reserva-sede" className="min-h-11 w-full">
-                    <SelectValue placeholder="Elige una sede">{branch?.name}</SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    {view.branches.map((item) => (
-                      <SelectItem key={item.id} value={item.id}>
-                        {item.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </Field>
-            ) : branch ? (
-              <div className="flex flex-col text-sm">
-                <span className="font-semibold">Sede {branch.name}</span>
-                {branch.address ? <span className="text-muted-foreground">{branch.address}</span> : null}
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex min-w-0 flex-col gap-1">
+                <p className="hidden text-sm font-semibold text-muted-foreground lg:block">Para qué es la cita</p>
+                <p className="font-semibold">{serviceName}</p>
+                <p className="text-sm text-muted-foreground">
+                  {[
+                    minutes ? `${minutes} minutos` : null,
+                    branch ? `sede ${branch.name}` : null,
+                    view.patientFirstName ? `para ${view.patientFirstName}` : null,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </p>
+                {changing && current ? (
+                  <p className="text-sm text-muted-foreground">
+                    Hoy la tienes el {longDay(current.startsAt, current.timeZone).toLowerCase()}, {timeLabel(current.startsAt, current.timeZone)}.
+                  </p>
+                ) : null}
               </div>
-            ) : null}
-            {branch !== undefined && dentists.length > 0 ? (
-              <Field>
-                <FieldLabel htmlFor="reserva-profesional">Profesional</FieldLabel>
-                <Select
-                  value={dentistFilter}
-                  onValueChange={(value) => {
-                    setDentist(value ?? ANYONE)
-                    setDay(null)
-                    setChosen(null)
-                  }}
-                >
-                  <SelectTrigger id="reserva-profesional" className="min-h-11 w-full">
-                    <SelectValue>{dentistFilter === ANYONE ? "Cualquier profesional" : (dentists.find((item) => item.id === dentistFilter)?.name ?? "")}</SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={ANYONE}>Cualquier profesional</SelectItem>
-                    {dentists.map((item) => (
-                      <SelectItem key={item.id} value={item.id}>
-                        {item.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </Field>
-            ) : null}
+              <Button type="button" variant="link" className="h-auto min-h-11 shrink-0 p-0 lg:hidden" aria-expanded={editing} onClick={() => setEditing(!editing)}>
+                {editing ? "Listo" : "Cambiar"}
+              </Button>
+            </div>
+            <div className={`${editing ? "flex" : "hidden"} flex-col gap-4 lg:flex`}>
+              {!changing && view.branches.length > 1 ? (
+                <Field>
+                  <FieldLabel htmlFor="reserva-sede">Sede</FieldLabel>
+                  <Select
+                    value={branch?.id ?? ""}
+                    onValueChange={(value) => {
+                      setBranchChoice(value)
+                      setDentist(ANYONE)
+                      setDay(null)
+                      setChosen(null)
+                    }}
+                  >
+                    <SelectTrigger id="reserva-sede" className="min-h-11 w-full">
+                      <SelectValue placeholder="Elige una sede">{branch?.name}</SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      {view.branches.map((item) => (
+                        <SelectItem key={item.id} value={item.id}>
+                          {[item.name, item.address].filter(Boolean).join(" · ")}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </Field>
+              ) : branch ? (
+                <div className="flex flex-col text-sm">
+                  <span className="font-semibold">Sede {branch.name}</span>
+                  {branch.address ? <span className="text-muted-foreground">{branch.address}</span> : null}
+                </div>
+              ) : null}
+              {branch !== undefined && dentists.length > 0 ? (
+                <Field>
+                  <FieldLabel htmlFor="reserva-profesional">Profesional</FieldLabel>
+                  <Select
+                    value={dentistFilter}
+                    onValueChange={(value) => {
+                      setDentist(value ?? ANYONE)
+                      setDay(null)
+                      setChosen(null)
+                    }}
+                  >
+                    <SelectTrigger id="reserva-profesional" className="min-h-11 w-full">
+                      <SelectValue>{dentistFilter === ANYONE ? "Cualquier profesional" : (dentists.find((item) => item.id === dentistFilter)?.name ?? "")}</SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={ANYONE}>Cualquier profesional</SelectItem>
+                      {dentists.map((item) => (
+                        <SelectItem key={item.id} value={item.id}>
+                          {item.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </Field>
+              ) : null}
+            </div>
           </section>
 
           {branch === undefined ? (
@@ -516,11 +792,9 @@ function BookingLinkPage() {
             <section aria-label="Horarios libres" className="flex min-w-0 flex-col gap-4 rounded-2xl border bg-card p-4">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="flex min-w-0 flex-col">
-                  <p className="font-semibold">
-                    {longDay(range.from, timeZone)} — {longDay(lastDay, timeZone)}
-                  </p>
+                  <p className="font-semibold">{weekTitle}</p>
                   <p className="text-sm text-muted-foreground">
-                    {[withWhom ? `Con ${withWhom}` : "Con quien tenga libre", minutes ? `citas de ${minutes} minutos` : null].filter(Boolean).join(" · ")}
+                    {[withWhom ? `Con ${withWhom}` : "Con quien tenga libre", minutes ? `horarios de ${minutes} minutos` : null].filter(Boolean).join(" · ")}
                   </p>
                 </div>
                 <div className="flex gap-2">
@@ -547,7 +821,7 @@ function BookingLinkPage() {
               ) : (
                 <>
                   {/* Pantalla ancha: la semana entera, un día por columna. */}
-                  <div className="hidden grid-cols-7 gap-2 lg:grid" data-testid="semana">
+                  <div className="hidden gap-2 lg:grid" style={{ gridTemplateColumns: `repeat(${Math.max(days.length, 5)}, minmax(0, 1fr))` }} data-testid="semana">
                     {days.map((item) => {
                       const parts = dayParts(item.instant, timeZone)
                       const selected = chosen !== null && dayKey(chosen.startsAt, timeZone) === item.key
@@ -558,7 +832,7 @@ function BookingLinkPage() {
                             <span className="text-lg font-semibold">{parts.number}</span>
                           </div>
                           {item.slots.length === 0 ? (
-                            <p className="rounded-xl border border-dashed p-2 text-center text-xs text-muted-foreground">Sin horarios</p>
+                            <p className="rounded-xl border border-dashed p-2 text-center text-xs text-muted-foreground">No quedan horarios</p>
                           ) : (
                             item.slots.map((slot) => slotButton(slot, true))
                           )}
@@ -567,9 +841,9 @@ function BookingLinkPage() {
                     })}
                   </div>
 
-                  {/* Teléfono: un día a la vez. */}
+                  {/* Teléfono: un día a la vez, con los días en una sola fila. */}
                   <div className="flex flex-col gap-4 lg:hidden">
-                    <fieldset className="m-0 grid min-w-0 grid-cols-4 gap-2 border-0 p-0 sm:grid-cols-7" aria-label="Día">
+                    <fieldset className="m-0 flex min-w-0 gap-2 overflow-x-auto border-0 p-0 pb-1" aria-label="Día">
                       {days.map((item) => {
                         const parts = dayParts(item.instant, timeZone)
                         const empty = item.slots.length === 0
@@ -579,10 +853,10 @@ function BookingLinkPage() {
                             key={item.key}
                             type="button"
                             variant={active ? "default" : "outline"}
-                            className="flex h-16 flex-col gap-0.5"
+                            className="flex h-16 min-w-14 max-w-24 flex-1 flex-col gap-0.5 px-1"
                             disabled={empty}
                             aria-pressed={active}
-                            aria-label={`${longDay(item.instant, timeZone)}${empty ? ", sin horarios" : ""}`}
+                            aria-label={`${longDay(item.instant, timeZone)}${empty ? ", no quedan horarios" : ""}`}
                             onClick={() => {
                               setDay(item.key)
                               setChosen(null)
@@ -594,6 +868,13 @@ function BookingLinkPage() {
                         )
                       })}
                     </fieldset>
+                    {emptyDays.length > 0 ? (
+                      <p className="text-sm text-muted-foreground">
+                        {emptyDays.length === 1
+                          ? `El ${emptyDays[0]} no quedan horarios.`
+                          : `El ${emptyDays.slice(0, -1).join(", el ")} y el ${emptyDays[emptyDays.length - 1]} no quedan horarios.`}
+                      </p>
+                    ) : null}
                     {[
                       { label: "Mañana", slots: morning },
                       { label: "Tarde", slots: afternoon },
@@ -605,6 +886,7 @@ function BookingLinkPage() {
                           <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">{group.slots.map((slot) => slotButton(slot, false))}</div>
                         </fieldset>
                       ))}
+                    {chosen ? <p className="text-sm text-muted-foreground">Con {chosen.dentistName}.</p> : null}
                   </div>
                   <p className="text-sm text-muted-foreground">Solo se muestran los horarios libres. Si alguien toma uno mientras eliges, te avisamos antes de reservar.</p>
                 </>
@@ -612,48 +894,42 @@ function BookingLinkPage() {
             </section>
           )}
 
-          <aside aria-label="Tu cita" className="flex flex-col gap-3 rounded-2xl border bg-card p-4 lg:sticky lg:top-6">
+          <aside aria-label="Tu cita" className="hidden flex-col gap-3 rounded-2xl border bg-card p-4 lg:sticky lg:top-6 lg:flex">
             <p className="font-semibold">Tu cita</p>
             {chosen ? (
               <div className="flex flex-col gap-0.5 rounded-xl bg-primary-soft p-3 text-primary-soft-foreground">
                 <p className="font-semibold">{longDay(chosen.startsAt, timeZone)}</p>
                 <p className="font-semibold">{timeLabel(chosen.startsAt, timeZone)}</p>
-                <p className="text-sm">
-                  {[view.service?.name ?? "Consulta", minutes ? `${minutes} minutos` : null].filter(Boolean).join(" · ")}
-                </p>
-                <p className="text-sm">
-                  {[branch ? `Sede ${branch.name}` : null, chosen.dentistName].filter(Boolean).join(" · ")}
-                </p>
+                <p className="text-sm">{[serviceName, minutes ? `${minutes} minutos` : null].filter(Boolean).join(" · ")}</p>
+                <p className="text-sm">{[branch ? `Sede ${branch.name}` : null, chosen.dentistName].filter(Boolean).join(" · ")}</p>
               </div>
             ) : (
-              <p className="text-sm text-muted-foreground">Elige un día y una hora para reservar.</p>
+              <p className="text-sm text-muted-foreground">Elige un día y una hora para {changing ? "cambiarla" : "reservar"}.</p>
             )}
-            {reserveError ? (
-              <p role="alert" className="text-sm text-destructive">
-                {reserveError}
-              </p>
+            {view.patientFirstName && !needsData ? <p className="text-sm text-muted-foreground">Para {view.patientFirstName}. Ya tenemos tus datos: no te pedimos nada más.</p> : null}
+            {errors}
+            {mainAction(false)}
+            {changing ? (
+              <Button type="button" variant="outline" className="min-h-11 w-full" onClick={() => setChanging(false)}>
+                Conservar mi cita
+              </Button>
             ) : null}
-            {startRegistration.isError ? (
-              <p role="alert" className="text-sm text-destructive">
-                No pudimos abrir el formulario de tus datos. Inténtalo de nuevo o escríbenos por el chat.
-              </p>
-            ) : null}
-            {needsData ? (
-              <SubmitButton type="button" className="min-h-11 w-full" pending={startRegistration.isPending} disabled={chosen === null} onClick={() => startRegistration.mutate()}>
-                Continuar con mis datos
-              </SubmitButton>
-            ) : (
-              <SubmitButton type="button" className="min-h-11 w-full" pending={reserve.isPending} disabled={chosen === null} onClick={() => chosen && reserve.mutate(chosen)}>
-                Reservar
-              </SubmitButton>
-            )}
-            <p className="text-sm text-muted-foreground">
-              {needsData
-                ? "Es tu primera cita: después de elegir te pedimos unos datos y reservamos."
-                : "Te confirmamos la cita por el chat. Para cambiarla o cancelarla, escríbenos por ahí."}
-            </p>
+            <p className="text-sm text-muted-foreground">{closingNote}</p>
           </aside>
         </div>
+      </div>
+
+      {/* Teléfono: el botón que avanza, fijo abajo y con el horario elegido. */}
+      <div className="fixed inset-x-0 bottom-0 z-10 flex flex-col gap-2 border-t bg-background p-4 lg:hidden">
+        {errors}
+        {mainAction(true)}
+        {changing ? (
+          <Button type="button" variant="outline" className="min-h-11 w-full" onClick={() => setChanging(false)}>
+            Conservar mi cita
+          </Button>
+        ) : (
+          <p className="text-center text-sm text-muted-foreground">{chosen ? closingNote : "Elige un día y una hora para reservar."}</p>
+        )}
       </div>
     </PageShell>
   )

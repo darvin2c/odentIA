@@ -1,7 +1,15 @@
 import { getConnInfo } from "@hono/node-server/conninfo"
 import { type Db, withOrgContext } from "@odentia/db"
 import { organization } from "@odentia/db/schema/auth"
-import { getBookingLinkView, listBookingLinkSlots, reserveBookingLink, ServiceError, startBookingLinkRegistration } from "@odentia/services"
+import {
+  cancelBookingLinkAppointment,
+  changeBookingLinkAppointment,
+  getBookingLinkView,
+  listBookingLinkSlots,
+  reserveBookingLink,
+  ServiceError,
+  startBookingLinkRegistration,
+} from "@odentia/services"
 import { eq } from "drizzle-orm"
 import { type Context, Hono } from "hono"
 import { bodyLimit } from "hono/body-limit"
@@ -128,6 +136,34 @@ export function createPublicBookingRoute(deps: { db: Db; secretsKey: Buffer; rem
           { secretsKey: deps.secretsKey },
         ),
       ),
+    )
+  })
+
+  // Con la cita ya reservada, el mismo enlace la cambia de horario o la cancela mientras no haya empezado.
+  app.post("/:slug/change", async (c) => {
+    const body = reserveBody.omit({ branchId: true }).safeParse(await c.req.json().catch(() => null))
+    if (!body.success) return c.json(errorBody(c, "VALIDATION", "Revisa el horario elegido"), 400)
+    const org = c.get("bookingOrganization")
+    const { token: linkToken, ...choice } = body.data
+    return answer(c, 200, () =>
+      withOrgContext(deps.db, org.id, (tx) =>
+        changeBookingLinkAppointment(
+          tx,
+          org.id,
+          linkToken,
+          { startsAt: choice.startsAt, dentistUserId: choice.dentistUserId, ...(choice.chairId ? { chairId: choice.chairId } : {}) },
+          { secretsKey: deps.secretsKey },
+        ),
+      ),
+    )
+  })
+
+  app.post("/:slug/cancel", async (c) => {
+    const body = z.strictObject({ token }).safeParse(await c.req.json().catch(() => null))
+    if (!body.success) return unavailable(c)
+    const org = c.get("bookingOrganization")
+    return answer(c, 200, () =>
+      withOrgContext(deps.db, org.id, (tx) => cancelBookingLinkAppointment(tx, org.id, body.data.token, { secretsKey: deps.secretsKey })),
     )
   })
 

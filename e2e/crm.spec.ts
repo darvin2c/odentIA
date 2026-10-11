@@ -560,26 +560,35 @@ test("reserva por enlace: la persona elige su cita viendo los horarios libres, s
   await gotoHydrated(page, tenant(org.slug, `/reserva?token=${token}`))
   await expect(page.getByRole("heading", { name: "Elige tu cita" })).toBeVisible()
   await expect(page.getByRole("region", { name: "Para qué es la cita" })).toContainText("para Eva")
-  // Se puede elegir con quién: cualquier profesional o uno en concreto.
+  // En teléfono el contexto va en una tarjeta compacta; «Cambiar» abre con quién: cualquier profesional o uno en concreto.
+  await expect(page.getByText(/paso 1 de 2/)).toBeVisible()
+  await expect(page.getByLabel("Profesional")).toBeHidden()
+  await page.getByRole("button", { name: "Cambiar", exact: true }).click()
   await expect(page.getByLabel("Profesional")).toBeVisible()
+  await page.getByRole("button", { name: "Listo", exact: true }).click()
   const slots = page.getByRole("group", { name: /Mañana|Tarde/ }).first()
   await expect(slots.getByRole("button").first()).toBeVisible()
   // La página no muestra tarifas.
   expect(await page.locator("body").innerText()).not.toMatch(/S\/|precio|tarifa/i)
   expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0)
   await slots.getByRole("button").first().click()
-  await info.attach("reserva-movil", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" })
+  // El botón que reserva queda fijo abajo y dice el horario elegido.
+  await expect(page.getByRole("button", { name: /^Reservar \S+ \d+, / })).toBeInViewport()
+  await info.attach("reserva-movil", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
 
   // Web: la misma página, con el resumen al lado.
   await page.setViewportSize({ width: 1280, height: 800 })
   // En pantalla ancha la semana se ve entera, un día por columna; se puede elegir otra hora ahí mismo.
   const semana = page.getByTestId("semana")
-  await expect(semana.getByRole("group")).toHaveCount(7)
-  await semana.getByRole("group").nth(1).getByRole("button").first().click()
+  // Se ve la semana de calendario, sin los días que ya pasaron.
+  await expect(page.getByRole("region", { name: "Horarios libres" })).toContainText(/Semana del \d+ al \d+ de /)
+  await semana.getByRole("group").last().getByRole("button").first().click()
   await expect(page.getByRole("complementary", { name: "Tu cita" })).toContainText("Consulta")
   await info.attach("reserva-web", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
-  await page.getByRole("button", { name: "Reservar" }).click()
+  await expect(page.getByRole("complementary", { name: "Tu cita" })).toContainText("Podrás cambiarla o cancelarla desde este mismo enlace.")
+  await page.getByRole("complementary", { name: "Tu cita" }).getByRole("button", { name: "Reservar" }).click()
   await expect(page.getByRole("heading", { name: "Tu cita quedó reservada" })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Agregar al calendario" })).toBeVisible()
   await info.attach("reserva-lista", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
 
   // Queda en la agenda como cualquier cita, con su origen, y la confirmación va a la conversación.
@@ -590,9 +599,32 @@ test("reserva por enlace: la persona elige su cita viendo los horarios libres, s
     expect.stringMatching(/^Listo: tu cita quedó para el /),
   ])
 
-  // El enlace no reserva dos veces: al volver muestra la cita. Uno desconocido no existe.
+  // El enlace no reserva dos veces: al volver muestra la cita, y desde ahí se cambia o se cancela.
+  await page.setViewportSize({ width: 390, height: 844 })
   await gotoHydrated(page, tenant(org.slug, `/reserva?token=${token}`))
   await expect(page.getByRole("heading", { name: "Tu cita quedó reservada" })).toBeVisible()
+  const firstStart = rows[0]!.startsAt.toISOString()
+  await page.getByRole("button", { name: "Cambiar o cancelar" }).click()
+  await page.getByRole("button", { name: "Cambiar de día u hora" }).click()
+  await expect(page.getByRole("heading", { name: "Cambia tu cita" })).toBeVisible()
+  await page.getByRole("group", { name: /Mañana|Tarde/ }).first().getByRole("button").first().click()
+  // En teléfono el botón que avanza queda fijo abajo y dice el horario elegido.
+  const changeTo = page.getByRole("button", { name: /^Cambiar a \S+ \d+, / })
+  await expect(changeTo).toBeInViewport()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0)
+  await info.attach("reserva-cambiar-movil", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
+  await changeTo.click()
+  await expect(page.getByRole("heading", { name: "Tu cita quedó reservada" })).toBeVisible()
+  const movedRows = await fixtureDb.select().from(appointment).where(eq(appointment.patientId, patient.id))
+  expect(movedRows.map((row) => [row.id, row.status])).toEqual([[rows[0]!.id, "programada"]])
+  expect(movedRows[0]!.startsAt.toISOString()).not.toBe(firstStart)
+
+  await page.getByRole("button", { name: "Cambiar o cancelar" }).click()
+  await page.getByRole("button", { name: "Cancelar la cita" }).click()
+  await page.getByRole("alertdialog", { name: "¿Cancelar tu cita?" }).getByRole("button", { name: "Sí, cancelar" }).click()
+  await expect(page.getByRole("heading", { name: "Tu cita quedó cancelada" })).toBeVisible()
+  await info.attach("reserva-cancelada-movil", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
+  expect((await fixtureDb.select().from(appointment).where(eq(appointment.patientId, patient.id))).map((row) => row.status)).toEqual(["cancelada"])
   await gotoHydrated(page, tenant(org.slug, `/reserva?token=${"0".repeat(64)}`))
   await expect(page.getByText("Este enlace ya no está disponible")).toBeVisible()
 })

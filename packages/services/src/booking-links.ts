@@ -8,7 +8,7 @@ import { branch } from "@odentia/db/schema/org"
 import { and, asc, eq, isNull } from "drizzle-orm"
 import { addAgentCaseNote } from "./agent-case.js"
 import { createProposal } from "./agent-operations.js"
-import { createAppointment } from "./appointments.js"
+import { createAppointment, moveAppointment, setAppointmentStatus } from "./appointments.js"
 import { listAvailableSlots } from "./availability.js"
 import { notFound, ServiceError, validation } from "./errors.js"
 import { createPatientRegistrationLink, getPatientRegistrationConfig } from "./patient-registration.js"
@@ -18,8 +18,9 @@ import { listPatientsByContact } from "./patients.js"
  * Reservar desde un enlace: la persona de una conversación elige ella misma
  * el día y la hora viendo los horarios libres, sin ir y venir por el chat. Es
  * una opción junto a reservar conversando, no la única vía. El enlace es
- * personal (una conversación y su persona), efímero y de un solo uso; solo se
- * guarda su huella. Sirve a quien ya es paciente y a quien recién se contacta:
+ * personal (una conversación y su persona), efímero y de una sola cita; solo se
+ * guarda su huella. Con la cita ya reservada, el mismo enlace sirve para
+ * cambiarla de horario o cancelarla hasta que empiece. Sirve a quien ya es paciente y a quien recién se contacta:
  * este completa antes sus datos con el registro de pacientes de la clínica,
  * que es quien crea la ficha. La reserva usa la misma operación de Agenda que
  * recepción y el agente, así que valen las mismas reglas de disponibilidad.
@@ -149,10 +150,22 @@ export interface BookingLinkAppointment {
   startsAt: string
   endsAt: string
   timeZone: string
+  /** Minutos de la cita. */
+  durationMin: number
+  /** La sede de la cita: para cambiar de horario solo se ofrecen los de esa sede. */
+  branchId: string
+  cancelled: boolean
+  /** Aún se puede cambiar de horario o cancelar desde el enlace: no empezó y sigue en pie. */
+  canChange: boolean
   branchName: string
   branchAddress: string | null
   dentistName: string
   serviceName: string | null
+}
+
+/** Una cita se puede cambiar o cancelar desde su enlace mientras siga en pie y no haya empezado. */
+function isChangeable(row: { status: string; startsAt: Date }): boolean {
+  return (row.status === "programada" || row.status === "confirmada") && row.startsAt.getTime() > Date.now()
 }
 
 async function appointmentView(tx: Db, orgId: string, appointmentId: string): Promise<BookingLinkAppointment | null> {
@@ -160,6 +173,8 @@ async function appointmentView(tx: Db, orgId: string, appointmentId: string): Pr
     .select({
       startsAt: appointment.startsAt,
       endsAt: appointment.endsAt,
+      status: appointment.status,
+      branchId: appointment.branchId,
       serviceName: appointment.serviceName,
       branchName: branch.name,
       branchAddress: branch.addressLine1,
@@ -176,6 +191,10 @@ async function appointmentView(tx: Db, orgId: string, appointmentId: string): Pr
     startsAt: row.startsAt.toISOString(),
     endsAt: row.endsAt.toISOString(),
     timeZone: row.branchTimeZone ?? "America/Lima",
+    durationMin: Math.round((row.endsAt.getTime() - row.startsAt.getTime()) / 60_000),
+    branchId: row.branchId,
+    cancelled: row.status === "cancelada",
+    canChange: isChangeable(row),
     branchName: row.branchName,
     branchAddress: row.branchAddress,
     dentistName: row.dentistName,
@@ -256,6 +275,20 @@ function requireOpen(link: LinkRow): void {
   if (status === "vencido") throw new ServiceError("BOOKING_LINK_EXPIRED", 409, "Este enlace ya no está disponible")
 }
 
+/** La cita reservada con el enlace, si aún se puede cambiar o cancelar. */
+async function reservedAppointment(tx: Db, orgId: string, link: LinkRow): Promise<{ id: string; version: number; branchId: string }> {
+  const [row] = link.appointmentId
+    ? await tx
+        .select({ id: appointment.id, version: appointment.version, branchId: appointment.branchId, status: appointment.status, startsAt: appointment.startsAt })
+        .from(appointment)
+        .where(and(eq(appointment.organizationId, orgId), eq(appointment.id, link.appointmentId)))
+        .limit(1)
+    : []
+  if (!row) throw new ServiceError("BOOKING_LINK_EXPIRED", 409, "Este enlace ya no está disponible")
+  if (!isChangeable(row)) throw new ServiceError("BOOKING_NOT_CHANGEABLE", 409, "Esta cita ya no se puede cambiar desde aquí. Escríbenos por el chat.")
+  return row
+}
+
 /** Horarios libres para el enlace: los mismos huecos reales que ve recepción, sin lo que ya pasó. */
 export async function listBookingLinkSlots(
   tx: Db,
@@ -264,8 +297,14 @@ export async function listBookingLinkSlots(
   input: { branchId: string; from: string; to: string },
 ): Promise<{ slots: BookingLinkSlot[]; timeZone: string; truncated: boolean }> {
   const link = await findLink(tx, orgId, token)
-  requireOpen(link)
-  if (link.branchId && link.branchId !== input.branchId) throw validation("Este enlace es para otra sede")
+  // Con la cita ya reservada se siguen viendo horarios libres, para cambiarla: solo los de su sede.
+  if (stateOf(link) === "usado") {
+    const current = await reservedAppointment(tx, orgId, link)
+    if (current.branchId !== input.branchId) throw validation("La cita es en otra sede")
+  } else {
+    requireOpen(link)
+    if (link.branchId && link.branchId !== input.branchId) throw validation("Este enlace es para otra sede")
+  }
   const from = new Date(input.from)
   const to = new Date(input.to)
   if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime()) || to <= from) throw validation("Rango de fechas inválido")
@@ -385,5 +424,97 @@ export async function reserveBookingLink(
     // La cita ya está reservada: que el aviso no salga no la deshace. Queda la nota del caso.
     if (!(error instanceof ServiceError)) throw error
   })
+  return view
+}
+
+/** Deja constancia en el caso y avisa por la conversación, con la misma política que cualquier mensaje del agente. */
+async function tellConversation(
+  tx: Db,
+  orgId: string,
+  link: LinkRow,
+  input: { note: string; message: string; key: string; reason: string },
+  deps: { secretsKey?: Buffer },
+): Promise<void> {
+  await addAgentCaseNote(tx, orgId, link.conversationId, input.note)
+  await createProposal(tx, orgId, {
+    conversationId: link.conversationId,
+    action: "enviar_mensaje",
+    payload: { kind: "text", text: input.message },
+    reason: input.reason,
+    idempotencyKey: input.key,
+    ...(deps.secretsKey ? { secretsKey: deps.secretsKey } : {}),
+  }).catch((error: unknown) => {
+    // El cambio ya está hecho: que el aviso no salga no lo deshace. Queda la nota del caso.
+    if (!(error instanceof ServiceError)) throw error
+  })
+}
+
+/**
+ * Cambia de horario la cita reservada con el enlace. Es mover la cita en la
+ * Agenda (`moveAppointment`): misma sede y mismo servicio, con las mismas
+ * reglas de disponibilidad; la cita no se cancela ni se crea otra.
+ */
+export async function changeBookingLinkAppointment(
+  tx: Db,
+  orgId: string,
+  token: string,
+  input: { startsAt: string; dentistUserId: string; chairId?: string },
+  deps: { secretsKey?: Buffer } = {},
+): Promise<BookingLinkAppointment> {
+  const link = await findLink(tx, orgId, token, true)
+  const current = await reservedAppointment(tx, orgId, link)
+  await moveAppointment(tx, orgId, `contact:${link.contactId}`, current.id, {
+    expectedVersion: current.version,
+    startsAt: input.startsAt,
+    dentistUserId: input.dentistUserId,
+    ...(input.chairId ? { chairId: input.chairId } : {}),
+  })
+  const view = await appointmentView(tx, orgId, current.id)
+  if (!view) throw notFound("Cita")
+  const when = whenText(view.startsAt, view.timeZone)
+  await tellConversation(
+    tx,
+    orgId,
+    link,
+    {
+      note: `Cambió su cita desde el enlace: ahora es el ${when} en ${view.branchName}, con ${view.dentistName}.`,
+      message: `Listo: tu cita quedó cambiada para el ${when} en ${view.branchName}, con ${view.dentistName}.`,
+      key: `enlace-cambio:${link.id}:${view.startsAt}`,
+      reason: "La persona cambió su cita desde el enlace",
+    },
+    deps,
+  )
+  return view
+}
+
+/** Cancela la cita reservada con el enlace: el mismo cambio de estado de la Agenda, con el motivo «paciente». */
+export async function cancelBookingLinkAppointment(
+  tx: Db,
+  orgId: string,
+  token: string,
+  deps: { secretsKey?: Buffer } = {},
+): Promise<BookingLinkAppointment> {
+  const link = await findLink(tx, orgId, token, true)
+  const current = await reservedAppointment(tx, orgId, link)
+  const before = await appointmentView(tx, orgId, current.id)
+  await setAppointmentStatus(tx, orgId, `contact:${link.contactId}`, current.id, "cancelada", {
+    cancelReason: "paciente",
+    cancelNote: "La canceló la persona desde su enlace de reserva",
+  })
+  const view = await appointmentView(tx, orgId, current.id)
+  if (!view || !before) throw notFound("Cita")
+  const when = whenText(before.startsAt, before.timeZone)
+  await tellConversation(
+    tx,
+    orgId,
+    link,
+    {
+      note: `Canceló desde el enlace su cita del ${when} en ${before.branchName}.`,
+      message: `Tu cita del ${when} quedó cancelada. Si quieres otra, escríbeme y la vemos.`,
+      key: `enlace-cancela:${link.id}`,
+      reason: "La persona canceló su cita desde el enlace",
+    },
+    deps,
+  )
   return view
 }

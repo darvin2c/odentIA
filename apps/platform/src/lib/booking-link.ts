@@ -5,6 +5,11 @@ export interface BookingAppointment {
   startsAt: string
   endsAt: string
   timeZone: string
+  durationMin: number
+  branchId: string
+  cancelled: boolean
+  /** Aún se puede cambiar de horario o cancelar desde el enlace. */
+  canChange: boolean
   branchName: string
   branchAddress: string | null
   dentistName: string
@@ -76,4 +81,17 @@ export function reserveBooking(
   input: { token: string; branchId: string; startsAt: string; dentistUserId: string; chairId?: string },
 ): Promise<{ data: BookingAppointment }> {
   return publicFetch(`${base(slug)}/reserve`, { method: "POST", body: JSON.stringify(input) })
+}
+
+/** Cambia de horario la cita ya reservada con el enlace. */
+export function changeBooking(
+  slug: string,
+  input: { token: string; startsAt: string; dentistUserId: string; chairId?: string },
+): Promise<{ data: BookingAppointment }> {
+  return publicFetch(`${base(slug)}/change`, { method: "POST", body: JSON.stringify(input) })
+}
+
+/** Cancela la cita ya reservada con el enlace. */
+export function cancelBooking(slug: string, token: string): Promise<{ data: BookingAppointment }> {
+  return publicFetch(`${base(slug)}/cancel`, { method: "POST", body: JSON.stringify({ token }) })
 }
