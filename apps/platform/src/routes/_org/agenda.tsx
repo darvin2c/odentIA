@@ -359,10 +359,6 @@ function AgendaPage() {
       })),
     [resources],
   )
-  const nextFreeOf = React.useMemo(
-    () => new Map((availability?.professionals ?? []).map((item) => [item.id, item.nextFree])),
-    [availability],
-  )
 
   // ----- Citas -----
   const byId = React.useMemo(
@@ -494,16 +490,6 @@ function AgendaPage() {
   const dayFocus = dayColumns.find((item) => item.id === who)?.id ?? dayColumns[0]?.id ?? null
   /** Día y Lista en escritorio: a quién se ve (null = todos). */
   const filter = who && dayColumns.some((item) => item.id === who) ? who : null
-
-  /** En teléfono solo se ve a un profesional: su ficha dice cuándo tiene el próximo hueco. */
-  const freeLabel = (id: string): string | undefined => {
-    const next = nextFreeOf.get(id)
-    if (!next || day < today) return undefined
-    const date = zonedDateOf(next.startsAt, TZ)
-    return date === day
-      ? `Libre ${hourLabel(dayMinutesIn(next.startsAt, TZ))}`
-      : `Libre ${dayShort(date)}`
-  }
 
   // ----- Carriles -----
   const dayLanes: ScheduleLane[] = (
@@ -1057,9 +1043,6 @@ function AgendaPage() {
           label={group === "chairs" ? "Sillones" : "Profesionales"}
           resources={view === "semana" ? team : view === "dia" ? dayColumns : dayTeam}
           formatLabel={(item) => (group === "chairs" ? item.label : shortName(item.label))}
-          detailOf={
-            view === "lista" || group === "chairs" ? undefined : (item) => freeLabel(item.id)
-          }
           value={view === "lista" ? filter : view === "semana" ? focus : dayFocus}
           allLabel={view === "lista" ? "Todos" : undefined}
           onChange={pickWho}

@@ -257,20 +257,6 @@ describe("recursos y días", () => {
     expect(onChange).toHaveBeenCalledWith("ana")
   })
 
-  it("la ficha puede decir el próximo hueco de cada recurso", () => {
-    render(
-      <ScheduleResourceChips
-        label="Profesionales"
-        resources={AGENDA_PROFESSIONALS.slice(0, 2)}
-        value="ana"
-        onChange={() => {}}
-        detailOf={(resource) => (resource.id === "luis" ? "Libre 10:45" : undefined)}
-      />,
-    )
-    expect(screen.getByRole("button", { name: /Dr. Luis Vega.*Libre 10:45/ })).toBeTruthy()
-    expect(screen.getByRole("button", { name: /Dra. Ana Torres/ }).textContent).not.toContain("Libre")
-  })
-
   it("las iniciales salen del nombre, no del título, y el tono es estable", () => {
     expect(initialsOf("Dra. Ana Torres")).toBe("AT")
     expect(initialsOf("Dr. Luis Vega")).toBe("LV")

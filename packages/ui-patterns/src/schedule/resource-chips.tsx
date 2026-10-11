@@ -23,8 +23,6 @@ export interface ScheduleResourceChipsProps {
   wrap?: boolean
   /** Texto de la ficha cuando el nombre completo no cabe («Ana»). Las iniciales no cambian. */
   formatLabel?: (resource: ScheduleColumn) => string
-  /** Segunda línea de la ficha: lo que conviene comparar entre recursos («Libre 11:00»). */
-  detailOf?: (resource: ScheduleColumn) => string | undefined
   className?: string
 }
 
@@ -36,7 +34,6 @@ export function ScheduleResourceChips({
   label,
   wrap = false,
   formatLabel,
-  detailOf,
   className,
 }: ScheduleResourceChipsProps) {
   const chip = "flex h-11 shrink-0 items-center gap-2 rounded-full border text-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring"
@@ -65,7 +62,6 @@ export function ScheduleResourceChips({
       ) : null}
       {resources.map((resource) => {
         const chosen = resource.id === value
-        const detail = detailOf?.(resource)
         return (
           <button
             key={resource.id}
@@ -81,15 +77,8 @@ export function ScheduleResourceChips({
               size="sm"
               className={cn(chosen && "ring-2 ring-card")}
             />
-            <span className="flex flex-col items-start whitespace-nowrap">
-              <span className={cn(detail && "leading-[17px]")}>
-                {formatLabel ? formatLabel(resource) : resource.label}
-              </span>
-              {detail ? (
-                <span className="text-xs leading-[14px] font-semibold text-primary-soft-foreground">
-                  {detail}
-                </span>
-              ) : null}
+            <span className="whitespace-nowrap">
+              {formatLabel ? formatLabel(resource) : resource.label}
             </span>
           </button>
         )

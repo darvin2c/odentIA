@@ -292,10 +292,11 @@ test("agenda: reservar un hueco real, confirmarlo y encontrarlo al buscar", asyn
   await expect(page.getByRole("region", { name: /^Semana del/ })).toBeVisible()
   await shot("semana-escritorio")
 
-  // Teléfono: un profesional a la vez, con su próximo hueco en la ficha.
+  // Teléfono: un profesional a la vez; lo libre se ve en la rejilla, no en la ficha.
   await page.setViewportSize({ width: 390, height: 844 })
   await page.getByRole("button", { name: "Día", exact: true }).click()
-  await expect(page.getByRole("group", { name: "Profesionales" })).toContainText("Libre")
+  await expect(page.getByRole("group", { name: "Profesionales" })).toContainText("Ana")
+  await expect(page.getByRole("group", { name: "Profesionales" })).not.toContainText("Libre")
   await expect(page.getByRole("region", { name: /^Agenda del/ })).toBeVisible()
   await shot("dia-telefono")
   // En teléfono también se puede ver por sillón.
@@ -303,7 +304,7 @@ test("agenda: reservar un hueco real, confirmarlo y encontrarlo al buscar", asyn
   await expect(page.getByRole("group", { name: "Sillones" })).toContainText("Sillón 1")
   await shot("dia-telefono-sillones")
   await page.getByRole("button", { name: /^Sillones/ }).click()
-  await expect(page.getByRole("group", { name: "Profesionales" })).toContainText("Libre")
+  await expect(page.getByRole("group", { name: "Profesionales" })).toBeVisible()
   await page.getByRole("button", { name: "Lista", exact: true }).click()
   await expect(page.getByRole("button", { name: /Todas/ })).toBeVisible()
   await shot("lista-telefono")

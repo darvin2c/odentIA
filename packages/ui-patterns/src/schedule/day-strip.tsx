@@ -31,12 +31,12 @@ export function ScheduleDayStrip({
   className,
 }: ScheduleDayStripProps) {
   const arrow =
-    "flex h-14 w-9 shrink-0 items-center justify-center rounded-xl text-muted-foreground outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
+    "flex h-[50px] w-[26px] shrink-0 items-center justify-center rounded-md text-muted-foreground outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
   return (
     <nav aria-label="Días de la semana" className={cn("flex items-center gap-1", className)}>
       {onPrevious ? (
         <button type="button" aria-label="Semana anterior" onClick={onPrevious} className={arrow}>
-          <ChevronLeft aria-hidden className="size-5" />
+          <ChevronLeft aria-hidden className="size-[18px]" />
         </button>
       ) : null}
       {dates.map((date) => {
@@ -50,7 +50,7 @@ export function ScheduleDayStrip({
             aria-current={chosen ? "date" : undefined}
             onClick={() => onChange(date)}
             className={cn(
-              "relative flex h-14 min-w-0 flex-1 flex-col items-center justify-center gap-0.5 rounded-2xl border outline-none transition-colors",
+              "relative flex h-[50px] min-w-0 flex-1 basis-0 flex-col items-center justify-center gap-px rounded-lg border outline-none transition-colors",
               "focus-visible:ring-2 focus-visible:ring-ring",
               chosen
                 ? "border-primary bg-primary text-primary-foreground"
@@ -59,28 +59,23 @@ export function ScheduleDayStrip({
           >
             <span
               className={cn(
-                "text-xs font-semibold capitalize",
+                "text-[11px] leading-[15px] font-semibold capitalize",
                 !chosen && "text-muted-foreground",
               )}
             >
               {weekday.replace(".", "")}
             </span>
-            <span className="text-[17px] leading-5 font-bold tabular-nums">{number}</span>
-            {date === today ? (
-              <span
-                aria-hidden
-                className={cn(
-                  "absolute bottom-1 size-1 rounded-full",
-                  chosen ? "bg-primary-foreground" : "bg-primary",
-                )}
-              />
+            <span className="text-base leading-[19px] font-bold tabular-nums">{number}</span>
+            {/* Hoy solo se marca cuando se mira otro día: elegido ya se distingue. */}
+            {date === today && !chosen ? (
+              <span aria-hidden className="absolute bottom-[3px] size-1 rounded-full bg-primary" />
             ) : null}
           </button>
         )
       })}
       {onNext ? (
         <button type="button" aria-label="Semana siguiente" onClick={onNext} className={arrow}>
-          <ChevronRight aria-hidden className="size-5" />
+          <ChevronRight aria-hidden className="size-[18px]" />
         </button>
       ) : null}
     </nav>
