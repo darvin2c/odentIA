@@ -19,7 +19,8 @@ export const DEFAULT_SLOT_MINUTES = 30
 const SEARCH_DAYS = 7
 
 export function errorMessage(error: unknown): string {
-  return error instanceof ApiError ? (error.shape.message ?? error.message) : String(error)
+  if (error instanceof ApiError) return error.shape.message ?? error.message
+  return error instanceof Error ? error.message : String(error)
 }
 
 /** «Dra. Ana Torres» → «Dra. Ana»: lo que cabe en una ficha. */

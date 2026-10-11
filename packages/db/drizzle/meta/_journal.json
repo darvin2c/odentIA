@@ -316,6 +316,13 @@
       "when": 1791548269118,
       "tag": "0044_agente_llm_decisiones",
       "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1791680601447,
+      "tag": "0045_agenda_duracion_regular",
+      "breakpoints": true
     }
   ]
 }

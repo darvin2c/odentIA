@@ -1,0 +1,1 @@
+ALTER TABLE "branch" ADD COLUMN "appointment_default_minutes" integer DEFAULT 60 NOT NULL;

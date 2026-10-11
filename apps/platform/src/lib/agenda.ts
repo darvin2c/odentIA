@@ -54,6 +54,8 @@ export interface AgendaResources {
   timeZone: string
   professionals: { id: string; label: string }[]
   chairs: { id: string; label: string }[]
+  /** Lo que dura una cita regular en la sede, en minutos. */
+  defaultDurationMin: number
 }
 
 export interface AgendaServiceOption {
@@ -114,7 +116,10 @@ export interface AgendaAvailability {
     label: string
     nextFree: { startsAt: string; endsAt: string; chairId: string | null } | null
   }[]
+  defaultDurationMin: number
   open: { dentistUserId: string; startsAt: string; endsAt: string }[]
+  /** Tramos en que cada profesional puede recibir una cita: su horario menos lo ocupado. */
+  free: { dentistUserId: string; startsAt: string; endsAt: string }[]
   blocks: ScheduleBlock[]
 }
 

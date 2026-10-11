@@ -45,6 +45,13 @@ export {
   subtractRanges,
   windowCovering,
 } from "./occupancy.js"
+export {
+  ScheduleRangePicker,
+  type ScheduleRangePickerProps,
+  type ScheduleRangeState,
+  type ScheduleRangeValue,
+  scheduleRangeState,
+} from "./range-picker.js"
 export { ScheduleResourceChips, type ScheduleResourceChipsProps } from "./resource-chips.js"
 export { ResourceSelect, type ResourceSelectOption } from "./resource-select.js"
 export {

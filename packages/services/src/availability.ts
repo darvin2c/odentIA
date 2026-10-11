@@ -145,6 +145,7 @@ async function requireBranch(tx: Db, orgId: string, branchId: string) {
       name: branch.name,
       timezone: branch.timezone,
       orgTimezone: orgProfile.timezone,
+      defaultMinutes: branch.appointmentDefaultMinutes,
     })
     .from(branch)
     .leftJoin(orgProfile, eq(orgProfile.organizationId, branch.organizationId))
@@ -424,6 +425,8 @@ export interface AvailabilityCheck {
   startsAt: Date
   endsAt: Date
   ignoreAppointmentId?: string
+  /** Urgencia: se reserva aunque el horario del profesional no cubra ese momento. */
+  allowOutsideSchedule?: boolean
 }
 
 async function overlappingBlocks(
@@ -505,7 +508,7 @@ export async function validateAvailability(
         eq(professionalSchedule.isActive, true),
       ),
     )
-  if (rules.length === 0) {
+  if (rules.length === 0 && !check.allowOutsideSchedule) {
     throw validation("El profesional no tiene horario configurado en esta sede")
   }
   // Parte el intervalo por días locales y exige un turno que cubra cada tramo.
@@ -524,7 +527,7 @@ export async function validateAvailability(
         endParts.weekday === startParts.weekday &&
         endParts.minutes < rule.endMin,
     )
-    if (!covered) {
+    if (!covered && !check.allowOutsideSchedule) {
       throw validation("El horario del profesional no cubre ese momento en esta sede")
     }
     if (segmentEnd >= check.endsAt) break
@@ -625,7 +628,8 @@ export async function listAvailableSlots(
     if (!service) throw notFound("Servicio")
     duration ??= service.durationMin ?? undefined
   }
-  duration ??= 30
+  // Sin servicio ni duración pedida: lo que dura una cita regular en la sede.
+  duration ??= resolved.defaultMinutes
   if (!Number.isInteger(duration) || (duration as number) <= 0 || (duration as number) > 480) {
     throw validation("La duración debe estar entre 1 y 480 minutos")
   }
@@ -681,9 +685,10 @@ export async function listAvailableSlots(
       })
       .from(appointment)
       .where(
+        // De toda la organización: quien atiende en dos sedes no está libre en esta
+        // mientras tiene una cita en la otra.
         and(
           eq(appointment.organizationId, orgId),
-          eq(appointment.branchId, input.branchId),
           inArray(appointment.status, ["programada", "confirmada"]),
           lt(appointment.startsAt, to),
           gte(appointment.endsAt, from),
@@ -796,9 +801,59 @@ export async function listAvailableSlots(
 
 const NEXT_FREE_DAYS = 14
 
+type Span = [start: number, end: number]
+
+/** Une tramos solapados o contiguos. */
+function mergeSpans(spans: Span[]): Span[] {
+  const sorted = spans.filter(([a, b]) => b > a).sort((x, y) => x[0] - y[0])
+  const out: Span[] = []
+  for (const [a, b] of sorted) {
+    const last = out[out.length - 1]
+    if (last && a <= last[1]) last[1] = Math.max(last[1], b)
+    else out.push([a, b])
+  }
+  return out
+}
+
+/** Lo que queda de `base` al quitarle `cuts`. */
+function subtractSpans(base: Span[], cuts: Span[]): Span[] {
+  let rest = mergeSpans(base)
+  for (const [from, to] of mergeSpans(cuts)) {
+    rest = rest.flatMap(([a, b]): Span[] => {
+      if (to <= a || from >= b) return [[a, b]]
+      const parts: Span[] = []
+      if (from > a) parts.push([a, from])
+      if (to < b) parts.push([to, b])
+      return parts
+    })
+  }
+  return rest
+}
+
+/** Lo común a dos listas de tramos. */
+function intersectSpans(first: Span[], second: Span[]): Span[] {
+  const out: Span[] = []
+  for (const [a, b] of mergeSpans(first)) {
+    for (const [c, d] of mergeSpans(second)) {
+      const start = Math.max(a, c)
+      const end = Math.min(b, d)
+      if (end > start) out.push([start, end])
+    }
+  }
+  return out
+}
+
 export interface AgendaAvailability {
   branchId: string
   timeZone: string
+  /** Minutos de una cita regular en la sede (sin servicio). */
+  defaultDurationMin: number
+  /**
+   * Tramos en que cada profesional puede recibir una cita: su horario menos
+   * ausencias, citas en pie (en cualquier sede) y lo ya pasado, y solo mientras
+   * queda algún sillón libre.
+   */
+  free: Array<{ dentistUserId: string; startsAt: string; endsAt: string }>
   /** Quienes atienden en la sede (tienen horario), con su próximo hueco reservable. */
   professionals: Array<{
     id: string
@@ -884,12 +939,74 @@ export async function getAgendaAvailability(
       nextFree: slot ? { startsAt: slot.startsAt, endsAt: slot.endsAt, chairId: slot.chairId } : null,
     })
   }
+  // Tramos reservables por profesional, con las mismas reglas que valida la reserva.
+  const [busy, chairRows] = await Promise.all([
+    tx
+      .select({
+        dentistUserId: appointment.dentistUserId,
+        chairId: appointment.chairId,
+        startsAt: appointment.startsAt,
+        endsAt: appointment.endsAt,
+      })
+      .from(appointment)
+      .where(
+        and(
+          eq(appointment.organizationId, orgId),
+          inArray(appointment.status, ["programada", "confirmada"]),
+          lt(appointment.startsAt, to),
+          gt(appointment.endsAt, from),
+        ),
+      ),
+    tx
+      .select({ id: scheduleChair.id })
+      .from(scheduleChair)
+      .where(
+        and(
+          eq(scheduleChair.organizationId, orgId),
+          eq(scheduleChair.branchId, input.branchId),
+          eq(scheduleChair.isActive, true),
+        ),
+      ),
+  ])
+  const whole: Span[] = [[from.getTime(), to.getTime()]]
+  const spanOf = (item: { startsAt: Date | string; endsAt: Date | string }): Span => [
+    new Date(item.startsAt).getTime(),
+    new Date(item.endsAt).getTime(),
+  ]
+  const free: AgendaAvailability["free"] = []
+  for (const professional of professionals.values()) {
+    const mine = (dentistUserId: string | null) =>
+      dentistUserId === null || dentistUserId === professional.id
+    const hours = open.filter((item) => item.dentistUserId === professional.id).map(spanOf)
+    const taken: Span[] = [
+      ...blocks.filter((block) => block.chairId === null && mine(block.dentistUserId)).map(spanOf),
+      ...busy.filter((item) => item.dentistUserId === professional.id).map(spanOf),
+      [0, now.getTime()],
+    ]
+    const chairFree = chairRows.flatMap((chair) =>
+      subtractSpans(whole, [
+        ...busy.filter((item) => item.chairId === chair.id).map(spanOf),
+        ...blocks
+          .filter((block) => block.chairId === chair.id && mine(block.dentistUserId))
+          .map(spanOf),
+      ]),
+    )
+    for (const [start, end] of intersectSpans(subtractSpans(hours, taken), chairFree)) {
+      free.push({
+        dentistUserId: professional.id,
+        startsAt: new Date(start).toISOString(),
+        endsAt: new Date(end).toISOString(),
+      })
+    }
+  }
   return {
     branchId: input.branchId,
     timeZone: resolved.timeZone,
+    defaultDurationMin: resolved.defaultMinutes,
     professionals: [...professionals.values()],
     open,
     blocks,
+    free,
   }
 }
 

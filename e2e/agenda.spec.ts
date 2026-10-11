@@ -161,11 +161,30 @@ test("agenda: reservar un hueco real, confirmarlo y encontrarlo al buscar", asyn
   await expect(grid.getByRole("group", { name: owner.user.name })).toBeVisible()
   await shot("dia-escritorio-vacio")
 
-  // Reservar: paciente y hueco; ni fecha ni hora escritas a mano.
+  // Reservar: paciente y horas libres; el bloque ya viene puesto en el primer hueco
+  // y dura lo que una cita regular (1 h). Ni fecha ni hora escritas a mano.
   await page.getByRole("button", { name: "Nueva cita" }).click()
   await page.getByLabel("Paciente", { exact: true }).fill("Mica")
   await page.getByRole("option", { name: /Micaela Ríos/ }).click()
-  await page.getByRole("group", { name: /^(Hoy|Mañana), / }).first().getByRole("button").first().click()
+  const hours = page.getByRole("region", { name: /^Horas del/ })
+  await expect(hours).toBeVisible()
+  // Con el día casi acabado no cabe una cita entera: se pasa a la semana siguiente.
+  if (lima(new Date().toISOString()).hour >= 18) {
+    await page.getByRole("button", { name: "Semana siguiente" }).click()
+  }
+  const block = hours.getByRole("button", { name: /^De \d\d:\d\d a \d\d:\d\d con / })
+  await expect(block).toBeVisible()
+  await expect(page.getByRole("button", { name: /^Dura 1 h\./ })).toBeVisible()
+  // Con teclado: la flecha lo baja un cuarto de hora y Mayús con flecha lo acorta.
+  const firstHour = await block.textContent()
+  await block.press("ArrowDown")
+  await expect(block).not.toHaveText(firstHour ?? "")
+  await block.press("Shift+ArrowUp")
+  await expect(page.getByRole("button", { name: /^Dura 45 min\./ })).toBeVisible()
+  // El menú deja la duración como estaba.
+  await page.getByRole("button", { name: /^Dura 45 min\./ }).click()
+  await page.getByRole("menuitem", { name: "1 h", exact: true }).click()
+  await expect(page.getByRole("button", { name: /^Dura 1 h\./ })).toBeVisible()
   const reserve = page.getByRole("button", { name: /^Reservar (hoy|mañana|el )/ })
   await expect(reserve).toBeEnabled()
   await shot("nueva-cita")
@@ -201,7 +220,10 @@ test("agenda: reservar un hueco real, confirmarlo y encontrarlo al buscar", asyn
   // Reprogramar: se elige otro hueco real y la cita cambia de hora.
   const booked = await appointmentOf()
   await page.getByRole("button", { name: "Reprogramar" }).click()
-  const choices = page.getByRole("group", { name: /^(Hoy|Mañana), / }).first()
+  // Los huecos se ofrecen desde el día de la cita, que puede no ser hoy.
+  const choices = page
+    .getByRole("group", { name: /^(Hoy|Mañana|Lunes|Martes|Miércoles|Jueves|Viernes|Sábado|Domingo)/ })
+    .first()
   await choices.getByRole("button").nth(1).click()
   await shot("reprogramar")
   await page.getByRole("button", { name: "Mover cita" }).click()
@@ -474,6 +496,114 @@ test("agenda: una ausencia de varios días avisa de sus citas y saca al profesio
   await expect(page.getByText(/no atiende el /)).toBeVisible()
   await expect(page.getByText(/^Vacaciones\./)).toBeVisible()
   await shot("ausencia-dia-sin-atencion")
+})
+
+test("agenda: duración de una cita regular, paciente nuevo y urgencia fuera de horario", async ({
+  createOwner,
+}, info) => {
+  const owner = await createOwner("agenda-casos")
+  const { page } = owner
+  const shot = async (name: string) =>
+    info.attach(name, { body: await page.screenshot(), contentType: "image/png" })
+  await call(page, "POST", "/api/agenda/chairs", owner.org.slug, { branchId: owner.branchId, name: "Sillón 1" }, 201)
+  // Atiende todos los días de 09:00 a 13:00.
+  await call(
+    page,
+    "PUT",
+    "/api/agenda/schedules",
+    owner.org.slug,
+    {
+      branchId: owner.branchId,
+      dentistUserId: owner.user.id,
+      rules: [0, 1, 2, 3, 4, 5, 6].map((weekday) => ({ weekday, startMin: 9 * 60, endMin: 13 * 60 })),
+    },
+    200,
+  )
+  await page.setViewportSize({ width: 1440, height: 900 })
+
+  // Ajustes: una cita regular dura 1 h hasta que la sede dice otra cosa.
+  await gotoHydrated(page, tenant(owner.org.slug, "/settings/availability"))
+  const regular = page.getByRole("radiogroup", { name: "Duración de una cita regular" })
+  await expect(regular.getByRole("radio", { name: "1 h", exact: true })).toBeChecked()
+  await regular.getByRole("radio", { name: "30 min" }).click()
+  await expect(page.getByText("Una cita regular dura 30 min")).toBeVisible()
+  await expect(regular.getByRole("radio", { name: "30 min" })).toBeChecked()
+  await shot("duracion-regular")
+  const resources = await call<{ defaultDurationMin: number }>(
+    page,
+    "GET",
+    `/api/agenda/resources?branchId=${owner.branchId}`,
+    owner.org.slug,
+  )
+  expect(resources.defaultDurationMin).toBe(30)
+
+  // Paciente nuevo: se registra con lo mínimo sin salir de «Nueva cita».
+  await gotoHydrated(page, tenant(owner.org.slug, "/agenda"))
+  await page.getByRole("button", { name: "Nueva cita" }).click()
+  await page.getByLabel("Paciente", { exact: true }).fill("Rosa Quispe")
+  await page.getByRole("button", { name: "Registrar paciente nuevo" }).click()
+  // Lo tecleado al buscar ya viene puesto.
+  await expect(page.getByLabel("Nombres", { exact: true })).toHaveValue("Rosa")
+  await expect(page.getByLabel("Apellidos", { exact: true })).toHaveValue("Quispe")
+  await page.getByLabel("Teléfono", { exact: true }).fill("+51999123456")
+  // Una semana después el día entero está libre, sea la hora que sea hoy.
+  await page.getByRole("button", { name: "Semana siguiente" }).click()
+  const hours = page.getByRole("region", { name: /^Horas del/ })
+  const block = hours.getByRole("button", { name: /^De \d\d:\d\d a \d\d:\d\d con / })
+  // El bloque toma la duración regular recién configurada.
+  await expect(block).toHaveAccessibleName(/^De 09:00 a 09:30 con /)
+  await expect(page.getByRole("button", { name: /^Dura 30 min\./ })).toBeVisible()
+  await shot("nueva-cita-paciente-nuevo")
+  await page.getByRole("button", { name: /^Registrar y reservar / }).click()
+  const grid = page.getByRole("region", { name: /^Agenda del/ })
+  await expect(grid.getByRole("button", { name: /^Cita de Rosa Quispe/ })).toHaveCount(1)
+  const people = await call<{ id: string; displayName: string }[]>(
+    page,
+    "GET",
+    "/api/patients?q=Rosa&limit=5",
+    owner.org.slug,
+  )
+  expect(people.map((person) => person.displayName)).toEqual(["Rosa Quispe"])
+
+  // Urgencia: fuera del horario no se reserva sin más; se pregunta y queda dicho.
+  await page.getByRole("button", { name: "Nueva cita" }).click()
+  await page.getByLabel("Paciente", { exact: true }).fill("Rosa")
+  await page.getByRole("option", { name: /Rosa Quispe/ }).click()
+  // Se abre en el día que se estaba viendo: el primer hueco es el que sigue a su cita.
+  await expect(block).toHaveAccessibleName(/^De 09:30 a 10:00 con /)
+  // Encima de su propia cita no deja reservar.
+  await block.press("ArrowUp")
+  await expect(page.getByText(/ya está ocupado/)).toBeVisible()
+  await expect(page.getByRole("button", { name: /^Reservar (hoy|mañana|el )/ })).toBeDisabled()
+  // Antes de que abra, sí: como urgencia.
+  for (let step = 0; step < 5; step++) await block.press("ArrowUp")
+  await expect(block).toHaveAccessibleName(/^De 08:00 a 08:30 con /)
+  await expect(page.getByText(/queda fuera del horario/)).toBeVisible()
+  await page.getByRole("button", { name: /^Reservar (hoy|mañana|el )/ }).click()
+  const urgent = page.getByRole("dialog", { name: /no atiende a esa hora/ })
+  await expect(urgent).toContainText("atiende de 09:00 a 13:00")
+  await shot("urgencia-fuera-de-horario")
+  await urgent.getByRole("button", { name: "Reservar igual a las 08:00" }).click()
+  await expect(grid.getByRole("button", { name: /^Cita de Rosa Quispe/ })).toHaveCount(2)
+  const from = new Date(Date.now() - 86_400_000).toISOString()
+  const to = new Date(Date.now() + 16 * 86_400_000).toISOString()
+  const rows = await call<{ startsAt: string; endsAt: string }[]>(
+    page,
+    "GET",
+    `/api/appointments?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
+    owner.org.slug,
+  )
+  // 08:00 y 09:00 de Lima (UTC−5 fijo), media hora cada una.
+  expect(rows.map((row) => row.startsAt.slice(11, 16)).sort()).toEqual(["13:00", "14:00"])
+  for (const row of rows) expect(Date.parse(row.endsAt) - Date.parse(row.startsAt)).toBe(30 * 60_000)
+
+  // Teléfono: el mismo «cuándo», con los días arriba y las horas debajo.
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.getByRole("button", { name: "Nueva cita" }).click()
+  await expect(page.getByRole("navigation", { name: "Días de la semana" })).toBeVisible()
+  await expect(hours).toBeVisible()
+  await hours.scrollIntoViewIfNeeded()
+  await shot("nueva-cita-telefono")
 })
 
 test("agenda: solape responde 409 y movimiento con versión", async ({ createOwner }) => {

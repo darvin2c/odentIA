@@ -864,6 +864,7 @@ function AgendaPage() {
       hourHeight={small ? 88 : view === "semana" ? 96 : 72}
       minLaneWidth={view === "semana" ? 132 : 168}
       hideHeader={small && view === "dia"}
+      createMinutes={resources?.defaultDurationMin}
       now={now}
       selectedEntryId={detail?.id}
       preview={view === "dia" && group === "chairs" ? null : preview}
@@ -1187,11 +1188,9 @@ function AgendaPage() {
           branchId={branchId}
           timeZone={TZ}
           today={today}
-          team={(availability?.professionals ?? []).map((item) => ({
-            id: item.id,
-            label: item.label,
-            tone: toneOf(item.id),
-          }))}
+          now={now}
+          defaultMinutes={resources.defaultDurationMin}
+          toneOf={toneOf}
           onPreview={setPreview}
           onClose={closeBooking}
           onSaved={async (created) => {

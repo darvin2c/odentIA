@@ -1,8 +1,9 @@
 import { createFileRoute } from '@tanstack/react-router'
-import { Button, Input, toast } from "@odentia/ui"
+import { Button, FieldLabel, Input, RadioGroup, RadioGroupItem, cn, toast } from "@odentia/ui"
 import {
   dayMinutesIn,
   formatDateLong,
+  formatSpan,
   hourLabel,
   PageHeader,
   zonedDateOf,
@@ -45,6 +46,9 @@ let turnSeq = 1
 function errorMessage(error: unknown): string {
   return error instanceof ApiError ? (error.shape.message ?? error.message) : String(error)
 }
+
+/** Duraciones que se ofrecen para una cita regular (las mismas que valida el servicio). */
+const REGULAR_MINUTES = [15, 30, 45, 60, 90, 120]
 
 function toMinutes(label: string): number {
   const [hours = 0, minutes = 0] = label.split(":").map(Number)
@@ -134,6 +138,25 @@ function AvailabilityPage() {
   const [blockForm, setBlockForm] = React.useState(false)
   const [chairForm, setChairForm] = React.useState(false)
   const invalidateBlocks = () => queryClient.invalidateQueries({ queryKey: ["schedule-blocks"] })
+
+  const durationMutation = useMutation({
+    mutationFn: (minutes: number) =>
+      apiFetch("/api/agenda/settings", {
+        method: "PUT",
+        body: JSON.stringify({ branchId: resources?.branchId, defaultDurationMin: minutes }),
+      }),
+    onSuccess: async (_result, minutes) => {
+      toast.success(`Una cita regular dura ${formatSpan(minutes)}`)
+      await queryClient.invalidateQueries({ queryKey: ["agenda-resources"] })
+      await queryClient.invalidateQueries({ queryKey: ["agenda-availability"] })
+    },
+    onError: (error) => toast.error(errorMessage(error)),
+  })
+  // Mientras se guarda se muestra lo elegido; si falla, vuelve lo que hay en el servidor.
+  const regularMinutes =
+    durationMutation.isPending && durationMutation.variables !== undefined
+      ? durationMutation.variables
+      : (resources?.defaultDurationMin ?? 60)
 
   return (
     <div className="grid gap-4">
@@ -273,6 +296,36 @@ function AvailabilityPage() {
                 </Button>
               </div>
             )}
+          </section>
+
+          <section className="grid gap-3 rounded-xl border bg-background p-3 sm:p-4">
+            <h2 id="duracion-regular" className="font-medium">
+              Duración de una cita regular
+            </h2>
+            <RadioGroup
+              aria-labelledby="duracion-regular"
+              className="flex flex-wrap gap-2"
+              disabled={!canConfigure || durationMutation.isPending}
+              value={String(regularMinutes)}
+              onValueChange={(next) => durationMutation.mutate(Number(next))}
+            >
+              {REGULAR_MINUTES.map((minutes) => (
+                <FieldLabel
+                  key={minutes}
+                  className={cn(
+                    "flex h-10 w-auto cursor-pointer items-center gap-2 rounded-xl border px-3 text-sm font-normal",
+                    regularMinutes === minutes && "border-primary bg-primary-soft",
+                  )}
+                >
+                  <RadioGroupItem value={String(minutes)} />
+                  {formatSpan(minutes)}
+                </FieldLabel>
+              ))}
+            </RadioGroup>
+            <p className="text-sm text-muted-foreground">
+              Es lo que dura una cita en esta sede cuando no lleva servicio. Si lleva servicio,
+              manda la duración del servicio. Al reservar se puede cambiar estirando el bloque.
+            </p>
           </section>
 
           <section className="grid gap-3 rounded-xl border bg-background p-3 sm:p-4">

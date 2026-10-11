@@ -13,6 +13,7 @@ import {
   moveAppointment,
   searchAgendaPatients,
   setAppointmentStatus,
+  setBranchDefaultDuration,
   updateAppointment,
 } from "./appointments.js"
 import {
@@ -483,4 +484,101 @@ it("cancelar deja el motivo y la nota en la auditoría, y rechaza un motivo desc
     cancelReason: "clinica",
     cancelNote: "El doctor no viene",
   })
+})
+
+it("sin sillón indicado la agenda pone uno libre, y los tramos libres descuentan la cita", async () => {
+  // Lunes 2026-11-09, 10:00–11:00 de Lima.
+  const booked = await run((tx) =>
+    createAppointment(tx, ORG, ACTOR, {
+      branchId,
+      patientId,
+      dentistUserId: DENTIST,
+      startsAt: "2026-11-09T15:00:00Z",
+    }),
+  )
+  // Sin servicio ni duración: lo que dura una cita regular en la sede (1 h).
+  expect(booked.durationMin).toBe(60)
+  expect([chairId, chair2Id]).toContain(booked.chairId)
+
+  const view = await run((tx) =>
+    getAgendaAvailability(tx, ORG, {
+      branchId,
+      from: "2026-11-09T05:00:00Z",
+      to: "2026-11-10T05:00:00Z",
+      now: new Date("2026-11-01T12:00:00Z"),
+    }),
+  )
+  expect(view.defaultDurationMin).toBe(60)
+  expect(view.free.filter((item) => item.dentistUserId === DENTIST)).toEqual([
+    { dentistUserId: DENTIST, startsAt: "2026-11-09T14:00:00.000Z", endsAt: "2026-11-09T15:00:00.000Z" },
+    { dentistUserId: DENTIST, startsAt: "2026-11-09T16:00:00.000Z", endsAt: "2026-11-09T18:00:00.000Z" },
+    { dentistUserId: DENTIST, startsAt: "2026-11-09T19:00:00.000Z", endsAt: "2026-11-09T23:00:00.000Z" },
+  ])
+  // A quien no tiene citas le queda libre todo su horario.
+  expect(view.free.filter((item) => item.dentistUserId === DENTIST_2)).toEqual([
+    { dentistUserId: DENTIST_2, startsAt: "2026-11-09T14:00:00.000Z", endsAt: "2026-11-09T18:00:00.000Z" },
+    { dentistUserId: DENTIST_2, startsAt: "2026-11-09T19:00:00.000Z", endsAt: "2026-11-09T23:00:00.000Z" },
+  ])
+
+  // Con los dos sillones ocupados a esa hora, nadie más queda libre ni se puede reservar.
+  await run((tx) =>
+    createAppointment(tx, ORG, ACTOR, {
+      branchId,
+      patientId,
+      dentistUserId: DENTIST_2,
+      startsAt: "2026-11-09T15:00:00Z",
+    }),
+  )
+  await expect(
+    run((tx) =>
+      createAppointment(tx, ORG, ACTOR, {
+        branchId,
+        patientId,
+        dentistUserId: ACTOR,
+        startsAt: "2026-11-09T15:00:00Z",
+        outsideSchedule: true,
+      }),
+    ),
+  ).rejects.toMatchObject({ code: "NO_CHAIR" })
+})
+
+it("fuera de horario solo se reserva como urgencia", async () => {
+  // Sábado 2026-11-14: nadie tiene turno.
+  const saturday = {
+    branchId,
+    patientId,
+    dentistUserId: DENTIST,
+    startsAt: "2026-11-14T15:00:00Z",
+    durationMin: 30,
+  }
+  await expect(run((tx) => createAppointment(tx, ORG, ACTOR, saturday))).rejects.toMatchObject({
+    status: 400,
+  })
+  const urgent = await run((tx) =>
+    createAppointment(tx, ORG, ACTOR, { ...saturday, outsideSchedule: true }),
+  )
+  expect(urgent.status).toBe("programada")
+  // La urgencia no salta lo demás: a la misma hora, el mismo profesional sigue ocupado.
+  await expect(
+    run((tx) => createAppointment(tx, ORG, ACTOR, { ...saturday, outsideSchedule: true })),
+  ).rejects.toMatchObject({ code: "APPOINTMENT_CONFLICT" })
+})
+
+it("la duración de una cita regular se configura por sede", async () => {
+  await expect(
+    run((tx) => setBranchDefaultDuration(tx, ORG, ACTOR, { branchId, minutes: 50 })),
+  ).rejects.toMatchObject({ status: 400 })
+  await run((tx) => setBranchDefaultDuration(tx, ORG, ACTOR, { branchId, minutes: 30 }))
+  const resources = await run((tx) => listScheduleResources(tx, ORG, { branchId }))
+  expect(resources.defaultDurationMin).toBe(30)
+  const booked = await run((tx) =>
+    createAppointment(tx, ORG, ACTOR, {
+      branchId,
+      patientId,
+      dentistUserId: DENTIST,
+      startsAt: "2026-11-10T15:00:00Z",
+    }),
+  )
+  expect(booked.durationMin).toBe(30)
+  await run((tx) => setBranchDefaultDuration(tx, ORG, ACTOR, { branchId, minutes: 60 }))
 })

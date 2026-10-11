@@ -19,6 +19,7 @@ import {
   offerWaitlistSlot,
   searchAgendaPatients,
   setAppointmentStatus,
+  setBranchDefaultDuration,
   setProfessionalSchedule,
   updateAppointment,
 } from "@odentia/services"
@@ -51,7 +52,7 @@ const createInput = z.object({
   branchId: z.uuid().optional(),
   patientId: z.uuid(),
   dentistUserId: z.string().min(1),
-  chairId: z.uuid(),
+  chairId: z.uuid().optional(),
   serviceId: z.uuid().optional(),
   startsAt: z.iso.datetime({ offset: true }),
   endsAt: z.iso.datetime({ offset: true }).optional(),
@@ -60,6 +61,12 @@ const createInput = z.object({
   reason: z.string().max(500).optional(),
   source: z.string().max(40).optional(),
   conversationId: z.uuid().optional(),
+  outsideSchedule: z.boolean().optional(),
+})
+
+const settingsInput = z.object({
+  branchId: z.uuid(),
+  defaultDurationMin: z.number().int().positive().max(480),
 })
 
 const patchInput = z.object({
@@ -170,6 +177,24 @@ export function createAgendaRoute(deps: CrmDeps) {
     }
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) => listScheduleResources(tx, orgId, { branchId })),
+    )
+  })
+
+  // Lo que dura una cita regular en la sede (la que se reserva sin servicio).
+  app.put("/settings", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "settings.write")) {
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para configurar la agenda"), 403)
+    }
+    const parsed = settingsInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        setBranchDefaultDuration(tx, orgId, userId, {
+          branchId: parsed.data.branchId,
+          minutes: parsed.data.defaultDurationMin,
+        }),
+      ),
     )
   })
 
