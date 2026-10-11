@@ -1,7 +1,8 @@
-import { Badge, Button } from "@odentia/ui"
+import { Badge, Button, Spinner } from "@odentia/ui"
 import {
   ConfirmDialog,
   DataTable,
+  DataTableSkeleton,
   EmptyState,
   FilterBar,
   MasterDetail,
@@ -11,7 +12,7 @@ import {
   useDetailMode,
   useListSearch,
 } from "@odentia/ui-patterns"
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import {
   type ColumnDef,
@@ -104,7 +105,14 @@ function PatientsPage() {
       )
     },
     enabled: canView,
+    // La página anterior sigue visible mientras llega la siguiente o el
+    // refetch automático: el refetch no vacía el padrón ya cargado.
+    placeholderData: keepPreviousData,
   })
+  // Placeholder activo: las filas visibles son de la consulta anterior,
+  // no de los filtros actuales. Se señaliza y se bloquean las acciones de
+  // fila hasta recibir la respuesta nueva.
+  const showingPrevious = patientsQuery.isPlaceholderData === true
 
   const columns = useMemo<ColumnDef<PatientListRow>[]>(
     () => [
@@ -170,6 +178,7 @@ function PatientsPage() {
               {
                 key: "open",
                 label: "Abrir ficha",
+                disabled: showingPrevious,
                 onSelect: () =>
                   void navigate({
                     to: "/patients/$patientId",
@@ -182,6 +191,7 @@ function PatientsPage() {
                       key: "archive",
                       label: row.original.isActive ? "Archivar" : "Reactivar",
                       tone: row.original.isActive ? ("danger" as const) : undefined,
+                      disabled: showingPrevious,
                       onSelect: () => {
                         setArchiveError(null)
                         setArchiving(row.original)
@@ -194,7 +204,7 @@ function PatientsPage() {
         ),
       },
     ],
-    [canAdmin, navigate],
+    [canAdmin, navigate, showingPrevious],
   )
 
   const rows = patientsQuery.data?.data ?? []
@@ -276,11 +286,12 @@ function PatientsPage() {
             filters={PATIENT_FILTERS}
             sortOptions={PATIENT_SORT_OPTIONS}
             searchPlaceholder="Buscar por nombre, documento, teléfono o correo"
+            searchPending={patientsQuery.isFetching}
           />
         </div>
-        {patientsQuery.isPending ? (
-          <p className="text-sm text-muted-foreground">Cargando pacientes…</p>
-        ) : patientsQuery.isError ? (
+        {patientsQuery.isPending && rows.length === 0 ? (
+          <DataTableSkeleton label="Cargando pacientes…" />
+        ) : patientsQuery.isError && rows.length === 0 ? (
           <div className="flex flex-col gap-2">
             <p role="alert" className="text-sm text-destructive">
               {patientsQuery.error.message}
@@ -305,7 +316,29 @@ function PatientsPage() {
           )
         ) : (
           <>
-            <DataTable table={table} />
+            {showingPrevious ? (
+              <p className="text-xs text-muted-foreground" role="status">
+                Actualizando a los filtros actuales
+                {search.trim() ? ` · búsqueda «${search.trim()}»` : ""}
+                {sort ? ` · orden ${sort}` : ""} · mostrando resultados anteriores…
+              </p>
+            ) : null}
+            <div aria-busy={showingPrevious}>
+              <DataTable table={table} isFetching={patientsQuery.isFetching} />
+            </div>
+            {patientsQuery.isError ? (
+              <p role="alert" className="text-sm text-destructive">
+                No se pudo actualizar la lista; se conserva la página cargada.{" "}
+                <Button
+                  type="button"
+                  variant="link"
+                  size="sm"
+                  onClick={() => void patientsQuery.refetch()}
+                >
+                  Reintentar solo la lista
+                </Button>
+              </p>
+            ) : null}
             <div className="flex flex-wrap items-center justify-between gap-2 py-2">
               <p className="text-xs text-muted-foreground">
                 Página {pageNumber} · {rows.length} paciente(s)
@@ -328,7 +361,14 @@ function PatientsPage() {
                   disabled={!nextCursor || patientsQuery.isFetching}
                   onClick={goNext}
                 >
-                  {patientsQuery.isFetching ? "Cargando…" : "Siguiente"}
+                  {patientsQuery.isFetching ? (
+                    <>
+                      <Spinner className="size-6" aria-hidden />
+                      Siguiente
+                    </>
+                  ) : (
+                    "Siguiente"
+                  )}
                 </Button>
               </div>
             </div>

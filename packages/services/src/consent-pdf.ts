@@ -148,7 +148,7 @@ export async function renderConsentPdf(data: ConsentPrint): Promise<Uint8Array> 
   const pdf = await PDFDocument.create()
   pdf.setTitle(safe(doc.titleSnapshot))
   pdf.setSubject(`Consentimiento informado ${doc.id}`)
-  pdf.setProducer("odentIA")
+  pdf.setProducer("Odentia32")
   pdf.setCreationDate(doc.signedAt ?? new Date())
   const w = new Writer(
     pdf,

@@ -41,6 +41,7 @@ function OrgsPage() {
       <div className="mt-8">
         {orgsQuery.isLoading || orgs.length === 0 ? (
           <LoadingState
+            kind={!orgsQuery.isLoading && orgs.length === 0 ? "indeterminate" : "skeleton"}
             message={orgs.length === 0 ? "Preparando tu espacio…" : "Cargando organizaciones…"}
           />
         ) : (

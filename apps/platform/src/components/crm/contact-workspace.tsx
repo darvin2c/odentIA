@@ -1,4 +1,4 @@
-import { Badge, Button, Input, Separator, Tabs, TabsContent, TabsList, TabsTrigger, Textarea } from "@odentia/ui"
+import { Badge, Button, Input, Separator, Spinner, Tabs, TabsContent, TabsList, TabsTrigger, Textarea } from "@odentia/ui"
 import { ConfirmDialog, EmptyState } from "@odentia/ui-patterns"
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link, useBlocker } from "@tanstack/react-router"
@@ -6,7 +6,6 @@ import {
   Bot,
   CheckCircle2,
   Copy,
-  Loader2,
   Plus,
   RefreshCw,
   UserPlus,
@@ -540,9 +539,9 @@ export function ContactWorkspace({
                   <p className="text-xs text-muted-foreground">
                     Hay propuestas esperando decisión del equipo.
                   </p>
-                ) : proposalsQuery.isLoading ? (
+                ) : proposalsQuery.isLoading && proposals.length === 0 ? (
                   <p className="text-xs text-muted-foreground">Cargando propuestas…</p>
-                ) : proposalsQuery.isError ? (
+                ) : proposalsQuery.isError && proposals.length === 0 ? (
                   <div className="flex flex-wrap items-center gap-2">
                     <p className="text-xs text-destructive" role="alert">
                       {proposalsQuery.error instanceof ApiError
@@ -558,7 +557,18 @@ export function ContactWorkspace({
                     Las propuestas ya fueron atendidas o no están visibles.
                   </p>
                 ) : (
-                  proposals.map((p) => {
+                  <>
+                    {proposalsQuery.isError ? (
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="text-xs text-destructive" role="alert">
+                          No se pudieron actualizar las propuestas; se conservan las cargadas.
+                        </p>
+                        <Button variant="ghost" size="sm" onClick={() => void proposalsQuery.refetch()}>
+                          Reintentar
+                        </Button>
+                      </div>
+                    ) : null}
+                  {proposals.map((p) => {
                     const allowed = canDecide && hasActionPermission(p.action)
                     const ctx = p.context
                     const ctxLine = ctx
@@ -621,9 +631,14 @@ export function ContactWorkspace({
                               disabled={confirmMutation.isPending}
                               onClick={() => confirmMutation.mutate(p.id)}
                             >
-                              {confirmMutation.isPending
-                                ? "Registrando…"
-                                : "Registrar confirmación del interlocutor"}
+                              {confirmMutation.isPending ? (
+                                <>
+                                  <Spinner className="size-6" aria-hidden />
+                                  Registrar confirmación del interlocutor
+                                </>
+                              ) : (
+                                "Registrar confirmación del interlocutor"
+                              )}
                             </Button>
                           ) : (
                             <p className="text-xs text-muted-foreground">
@@ -669,7 +684,7 @@ export function ContactWorkspace({
                         )}
                       </div>
                     )
-                  })
+                  })}</>
                 )}
               </div>
             )}
@@ -798,9 +813,9 @@ export function ContactWorkspace({
                 Nueva
               </Button>
             </div>
-            {oppsQuery.isLoading ? (
+            {oppsQuery.isLoading && opps.length === 0 ? (
               <p className="text-xs text-muted-foreground">Cargando oportunidades…</p>
-            ) : oppsQuery.isError ? (
+            ) : oppsQuery.isError && opps.length === 0 ? (
               <div className="flex flex-wrap items-center gap-2">
                 <p className="text-xs text-destructive" role="alert">
                   No se pudieron cargar las oportunidades.
@@ -812,6 +827,17 @@ export function ContactWorkspace({
             ) : opps.length === 0 ? (
               <p className="text-xs text-muted-foreground">Sin oportunidades para este contacto.</p>
             ) : (
+              <>
+                {oppsQuery.isError ? (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="text-xs text-destructive" role="alert">
+                      No se pudieron actualizar las oportunidades; se conservan las cargadas.
+                    </p>
+                    <Button variant="ghost" size="sm" onClick={() => void oppsQuery.refetch()}>
+                      Reintentar
+                    </Button>
+                  </div>
+                ) : null}
               <ul className="flex flex-col gap-1.5">
                 {opps.map((opp) => (
                   <li
@@ -844,6 +870,7 @@ export function ContactWorkspace({
                   </li>
                 ))}
               </ul>
+              </>
             )}
             {oppsQuery.hasNextPage && (
               <Button
@@ -853,7 +880,14 @@ export function ContactWorkspace({
                 disabled={oppsQuery.isFetchingNextPage}
                 onClick={() => void oppsQuery.fetchNextPage()}
               >
-                {oppsQuery.isFetchingNextPage ? "Cargando…" : "Cargar más"}
+                {oppsQuery.isFetchingNextPage ? (
+                  <>
+                    <Spinner className="size-6" aria-hidden />
+                    Cargar más
+                  </>
+                ) : (
+                  "Cargar más"
+                )}
               </Button>
             )}
           </div>
@@ -955,8 +989,8 @@ export function ContactWorkspace({
                 >
                   {noteMutation.isPending ? (
                     <>
-                      <Loader2 className="size-3.5 animate-spin" aria-hidden />
-                      Guardando…
+                      <Spinner className="size-6" aria-hidden />
+                      Guardar nota
                     </>
                   ) : (
                     "Guardar nota"
@@ -981,9 +1015,9 @@ export function ContactWorkspace({
         </TabsContent>
 
         <TabsContent value="actividad" className="flex flex-col gap-2">
-          {activityQuery.isLoading ? (
+          {activityQuery.isLoading && activity.length === 0 ? (
             <p className="text-xs text-muted-foreground">Cargando actividad…</p>
-          ) : activityQuery.isError ? (
+          ) : activityQuery.isError && activity.length === 0 ? (
             <div className="flex flex-wrap items-center gap-2">
               <p className="text-xs text-destructive" role="alert">
                 No se pudo cargar la bitácora.
@@ -998,11 +1032,23 @@ export function ContactWorkspace({
               description="Mensajes, notas, tareas y movimientos del caso aparecen aquí."
             />
           ) : (
-            <ol className="flex flex-col gap-2">
-              {activity.map((item) => (
-                <ActivityRow key={item.id} item={item} />
-              ))}
-            </ol>
+            <>
+              {activityQuery.isError ? (
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="text-xs text-destructive" role="alert">
+                    No se pudo actualizar la bitácora; se conserva la actividad cargada.
+                  </p>
+                  <Button variant="ghost" size="sm" onClick={() => void activityQuery.refetch()}>
+                    Reintentar
+                  </Button>
+                </div>
+              ) : null}
+              <ol className="flex flex-col gap-2">
+                {activity.map((item) => (
+                  <ActivityRow key={item.id} item={item} />
+                ))}
+              </ol>
+            </>
           )}
           {activityQuery.hasNextPage && (
             <Button
@@ -1012,7 +1058,14 @@ export function ContactWorkspace({
               disabled={activityQuery.isFetchingNextPage}
               onClick={() => void activityQuery.fetchNextPage()}
             >
-              {activityQuery.isFetchingNextPage ? "Cargando…" : "Cargar anteriores"}
+              {activityQuery.isFetchingNextPage ? (
+                <>
+                  <Spinner className="size-6" aria-hidden />
+                  Cargar anteriores
+                </>
+              ) : (
+                "Cargar anteriores"
+              )}
             </Button>
           )}
         </TabsContent>

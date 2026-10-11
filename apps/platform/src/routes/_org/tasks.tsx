@@ -328,9 +328,9 @@ function TasksPage() {
         ]}
         searchPlaceholder="Buscar tarea"
       />
-      {tasksQuery.isLoading ? (
+      {tasksQuery.isLoading && visibleTasks.length === 0 ? (
         <DataTableSkeleton />
-      ) : tasksQuery.isError ? (
+      ) : tasksQuery.isError && visibleTasks.length === 0 ? (
         <ErrorState
           error={tasksQuery.error instanceof Error ? tasksQuery.error : String(tasksQuery.error)}
           onRetry={() => void tasksQuery.refetch()}
@@ -346,7 +346,22 @@ function TasksPage() {
         />
       ) : (
         <div className="flex flex-col gap-2">
-          <DataTable table={table} />
+          {/* La búsqueda `q` filtra en cliente sobre lo ya cargado: no hay
+              fetch de búsqueda que representar, solo el refetch de la lista. */}
+          <DataTable table={table} isFetching={tasksQuery.isFetching} />
+          {tasksQuery.isError ? (
+            <p role="alert" className="text-sm text-destructive">
+              No se pudo actualizar la lista; se conservan las tareas cargadas.{" "}
+              <Button
+                type="button"
+                variant="link"
+                size="sm"
+                onClick={() => void tasksQuery.refetch()}
+              >
+                Reintentar solo la lista
+              </Button>
+            </p>
+          ) : null}
           <p className="text-sm text-muted-foreground" role="status">
             Mostrando {visibleTasks.length} tarea{visibleTasks.length === 1 ? "" : "s"}
           </p>

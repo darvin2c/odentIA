@@ -98,6 +98,10 @@
     --surface: var(--card);
     --surface-muted: var(--muted);
 
+    /* Identidad odentia32: estable entre temas de organización; solo cambia por modo claro/oscuro. */
+    --identity-accent: #0e7490;
+    --identity-ink: #0f172a;
+
     /* Marca */
     --primary: #0e7490;
     --primary-foreground: #ffffff;
@@ -154,6 +158,9 @@
     --sidebar-accent: #263041;
     --sidebar-accent-foreground: #f1f5f9;
     --sidebar-border: #263041;
+
+    --identity-accent: #4fc3d7;
+    --identity-ink: #f1f5f9;
 
     --primary: #4fc3d7;
     --primary-foreground: #03252e;
@@ -251,4 +258,40 @@
   --ts-chart-4: var(--chart-4);
   --ts-chart-5: var(--chart-5);
   --ts-chart-6: var(--chart-3);
+}
+
+/* Loading B: el isotipo no gira; solo se iluminan sus trazados. */
+.brand-loading { display: block; overflow: visible; }
+.brand-loading-bracket {
+  stroke-dasharray: 100;
+  stroke-dashoffset: 100;
+  animation: brand-bracket-draw 1.8s linear infinite;
+  filter: drop-shadow(0 0 2px currentColor);
+}
+.brand-loading-bracket-right { animation-delay: -.9s; }
+.brand-loading-numbers { opacity: .78; }
+.brand-loading-scan {
+  fill: color-mix(in srgb, currentColor 25%, white);
+  filter: drop-shadow(0 0 2px currentColor);
+  animation: brand-number-scan 1.8s linear infinite;
+}
+@keyframes brand-bracket-draw {
+  0% { stroke-dashoffset: 100; opacity: .45; }
+  38%, 52% { stroke-dashoffset: 0; opacity: 1; }
+  90%, 100% { stroke-dashoffset: -100; opacity: .45; }
+}
+@keyframes brand-number-scan {
+  0%, 12% { transform: translateX(0); }
+  82%, 100% { transform: translateX(164px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .brand-loading-bracket, .brand-loading-scan {
+    animation: none;
+    transition: none;
+    filter: none;
+    opacity: 1;
+    stroke-dashoffset: 0;
+  }
+  .brand-loading-numbers { opacity: 1; }
+  .brand-loading-scan { display: none; }
 }

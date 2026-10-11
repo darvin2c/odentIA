@@ -91,7 +91,7 @@ function configureVariables(project, base) {
     TRUSTED_ORIGINS: `https://app.${base},https://api.${base},https://*.${base}`,
     SMTP_HOST: "mailpit",
     SMTP_PORT: "1025",
-    SMTP_FROM: `odentIA preview <no-reply@${base}>`,
+    SMTP_FROM: `Odentia32 preview <no-reply@${base}>`,
     S3_ENDPOINT: `https://storage.${base}`,
     S3_REGION: "us-east-1",
     S3_ACCESS_KEY: "preview",

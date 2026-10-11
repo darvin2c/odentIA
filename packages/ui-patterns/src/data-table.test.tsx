@@ -5,7 +5,6 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest"
 import { DataTable, DataTableSkeleton } from "./data-table.js"
 import type { DataTableView } from "./data-table-view.js"
-import { DataRefreshMarker } from "./loading-state.js"
 
 type Person = { id: string; name: string }
 const rows: Person[] = [
@@ -66,6 +65,11 @@ function ActiveTable({ activeId }: { activeId: string }) {
   return <DataTable table={table} isRowActive={(row) => row.id === activeId} />
 }
 
+function FetchingTable({ isFetching = false, refreshMessage }: { isFetching?: boolean; refreshMessage?: string }) {
+  const table = useReactTable({ data: rows, columns, getCoreRowModel: getCoreRowModel() })
+  return <DataTable table={table} isFetching={isFetching} refreshMessage={refreshMessage} />
+}
+
 describe("DataTable", () => {
   it("renderiza celdas y entrega la fila pulsada", () => {
     const onRowClick = vi.fn()
@@ -120,15 +124,18 @@ describe("DataTable", () => {
     expect(container.querySelectorAll("[data-slot='item']")).toHaveLength(2)
   })
 
-  it("muestra el Marker oficial con shimmer durante una actualización", () => {
-    render(<DataRefreshMarker />)
-    const status = screen.getByRole("status")
-    const content = screen.getByText("Actualizando…")
+  it("sin revalidación no muestra indicador y conserva las filas", () => {
+    render(<FetchingTable />)
+    expect(screen.getByText("Ana")).toBeTruthy()
+    expect(screen.getByText("Bruno")).toBeTruthy()
+    expect(screen.queryByRole("status")).toBeNull()
+  })
 
-    expect(status).toBeTruthy()
-    expect(content.classList.contains("shimmer")).toBe(true)
-    expect(content.classList.contains("shimmer-color-accent/60")).toBe(true)
-    expect(content.classList.contains("motion-reduce:shimmer-none")).toBe(true)
+  it("en revalidación conserva las filas y muestra el indicador B con mensaje", () => {
+    render(<FetchingTable isFetching refreshMessage="Sincronizando lista…" />)
+    expect(screen.getByText("Ana")).toBeTruthy()
+    expect(screen.getByText("Bruno")).toBeTruthy()
+    expect(screen.getByRole("status").textContent).toContain("Sincronizando lista…")
   })
 })
 

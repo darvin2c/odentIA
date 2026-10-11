@@ -70,7 +70,7 @@ function LoginPage() {
   return (
     <AuthSplit
       title="Inicia sesión"
-      description="Accede a tu espacio de odentIA"
+      description="Accede a tu espacio de Odentia32"
       footer={
         <>
           ¿Sin cuenta?{" "}

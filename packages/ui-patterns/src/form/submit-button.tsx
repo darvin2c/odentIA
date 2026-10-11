@@ -1,6 +1,5 @@
 import { Button, Spinner } from "@odentia/ui"
 import type { ComponentProps, ReactNode } from "react"
-import { common } from "../common.js"
 
 /**
  * Botón de mutación: deshabilita + muestra Spinner manteniendo el label.
@@ -43,7 +42,7 @@ export function SubmitButton({
     >
       {pending ? (
         <span className="inline-flex items-center gap-2">
-          <Spinner className="size-4" aria-label={common.states.loading} />
+          <Spinner className="size-6" aria-hidden />
           <span>{children}</span>
         </span>
       ) : (

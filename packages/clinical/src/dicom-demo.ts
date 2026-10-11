@@ -80,7 +80,7 @@ export function encodeDemoDicom(input: DemoDicomInput): Uint8Array {
     element(0x0008, 0x0018, text("UI", uid)),
     element(0x0008, 0x0020, text("DA", input.studyDate ?? "20261008")),
     element(0x0008, 0x0060, text("CS", "IO")),
-    element(0x0008, 0x0070, text("LO", "DEMO odentIA")),
+    element(0x0008, 0x0070, text("LO", "DEMO Odentia32")),
     element(0x0010, 0x0010, text("PN", "DEMO^PACIENTE")),
     element(0x0018, 0x1164, text("DS", `${rowMm}\\${colMm}`)),
     element(0x0028, 0x0002, us(1)),

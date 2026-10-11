@@ -3,8 +3,9 @@ import {
   useDndContext, useDraggable, useDroppable, useSensor, useSensors,
   type DragEndEvent, type KeyboardCoordinateGetter,
 } from "@dnd-kit/core"
-import { Badge, Button, Field, FieldLabel, Input, ScrollArea } from "@odentia/ui"
+import { Badge, Button, Field, FieldLabel, Input, ScrollArea, Spinner } from "@odentia/ui"
 import {
+  DataRefreshMarker,
   DataTable,
   DataTableSkeleton,
   EmptyState,
@@ -17,9 +18,9 @@ import {
   type RowActionItem,
   useListSearch,
 } from "@odentia/ui-patterns"
-import { type InfiniteData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { type InfiniteData, useInfiniteQuery, useIsFetching, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, Link } from "@tanstack/react-router"
-import { ArrowRight, CalendarClock, Check, Circle, Columns3, GripVertical, List, Loader2, Undo2, UserRound } from "lucide-react"
+import { ArrowRight, CalendarClock, Check, Circle, Columns3, GripVertical, List, Undo2, UserRound } from "lucide-react"
 import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-table"
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { formatDueAt, isOverdue } from "../../components/crm/crm-helpers"
@@ -66,7 +67,10 @@ function PipelinePage() {
   const vista = listSearch.get("vista") === "lista" ? "lista" : "tablero"
   const onlyMine = listSearch.get("asignado") === "mias"
   const onlyDue = listSearch.get("seguimiento") === "pendiente"
-
+  // Fetching real de tarjetas visibles (tablero por etapa y vista lista):
+  // alimenta el indicador de búsqueda sin reglas nuevas de debounce.
+  const boardFetching = useIsFetching({ queryKey: ["pipeline-cards"] })
+  const listFetching = useIsFetching({ queryKey: ["pipeline-list"] })
   const [createOpen, setCreateOpen] = useState(false)
   const [closeTarget, setCloseTarget] = useState<{ opp: OpportunityListItem; outcome: "won" | "lost" } | null>(
     null,
@@ -314,6 +318,7 @@ function PipelinePage() {
         ]}
         sortOptions={[]}
         searchPlaceholder="Buscar por título o interés…"
+        searchPending={boardFetching + listFetching > 0}
         resetKeys={["q", "asignado", "seguimiento"]}
       />
         <div role="group" aria-label="Vista de oportunidades" className="flex shrink-0 gap-0.5 rounded-lg bg-muted/70 p-1">
@@ -632,8 +637,10 @@ function StageLoader({
       feedback={feedback}
       cards={cards}
       total={total}
-      isLoading={cardsQuery.isLoading}
+      isLoading={cardsQuery.isLoading && cards.length === 0}
+      isRefreshing={cardsQuery.isFetching && !cardsQuery.isLoading && !cardsQuery.isFetchingNextPage}
       isError={cardsQuery.isError}
+      hasCards={cards.length > 0}
       onRetry={() => void cardsQuery.refetch()}
       hasNextPage={cardsQuery.hasNextPage}
       isFetchingNextPage={cardsQuery.isFetchingNextPage}
@@ -709,8 +716,8 @@ function CloseWithReasonDialog({
 }
 
 function StageColumn({
-  stageId, name, kind, stageIndex, amount, cards, total, isLoading, isError,
-  onRetry, hasNextPage, isFetchingNextPage, onLoadMore, memberName, stages,
+  stageId, name, kind, stageIndex, amount, cards, total, isLoading, isRefreshing, isError,
+  hasCards, onRetry, hasNextPage, isFetchingNextPage, onLoadMore, memberName, stages,
   canMove, onMoveRequest, onReopenRequest, movePending, pendingId, feedback,
 }: {
   stageId: string
@@ -721,7 +728,9 @@ function StageColumn({
   cards: OpportunityListItem[]
   total: number | undefined
   isLoading: boolean
+  isRefreshing: boolean
   isError: boolean
+  hasCards: boolean
   onRetry: () => void
   hasNextPage: boolean
   isFetchingNextPage: boolean
@@ -791,13 +800,17 @@ function StageColumn({
           <span className="font-medium">Soltar en {name}</span>
           {kind !== "open" && <span className="text-xs text-muted-foreground">Después indica el motivo del cierre</span>}
         </div>}
+        {isRefreshing ? <DataRefreshMarker /> : null}
         {isLoading ? <div aria-label="Cargando oportunidades" className="flex flex-col gap-3">
           {[0, 1, 2].map((row) => <div key={row} className="h-36 rounded-xl bg-background/70 p-4 motion-safe:animate-pulse"><div className="h-3 w-3/4 rounded bg-muted" /><div className="mt-3 h-2.5 w-1/2 rounded bg-muted" /><div className="mt-8 h-3 w-1/3 rounded bg-muted" /></div>)}
-        </div> : isError ? <div role="alert" className="rounded-xl bg-background p-4 text-sm">
+        </div> : isError && !hasCards ? <div role="alert" className="rounded-xl bg-background p-4 text-sm">
           <p>No se pudo cargar esta etapa.</p><Button variant="link" size="sm" onClick={onRetry}>Reintentar</Button>
         </div> : !cards.length && !incoming ? <div className="flex min-h-36 flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-border/80 px-4 text-center">
           <Circle aria-hidden className="size-5 text-muted-foreground/40" />
           <p className="text-xs text-muted-foreground">{active ? "Arrastra la tarjeta aquí" : "Todavía no hay oportunidades"}</p>
+        </div> : null}
+        {isError && hasCards ? <div role="alert" className="rounded-xl bg-background p-4 text-sm">
+          <p>No se pudo actualizar esta etapa; se conservan las tarjetas cargadas.</p><Button variant="link" size="sm" onClick={onRetry}>Reintentar solo la etapa</Button>
         </div> : null}
         {cards.map((card) => <DraggableCard
           key={card.id} card={card} memberName={memberName} stages={stages} canMove={canMove}
@@ -806,7 +819,14 @@ function StageColumn({
           feedback={feedback?.id === card.id ? feedback : null}
         />)}
         {hasNextPage && <Button type="button" variant="ghost" size="sm" disabled={isFetchingNextPage} onClick={onLoadMore}>
-          {isFetchingNextPage ? "Cargando…" : `Cargar más · ${cards.length} visibles`}
+          {isFetchingNextPage ? (
+            <>
+              <Spinner className="size-6" aria-hidden />
+              Cargar más · {cards.length} visibles
+            </>
+          ) : (
+            `Cargar más · ${cards.length} visibles`
+          )}
         </Button>}
       </div>
     </section>
@@ -894,7 +914,7 @@ function CardContents({ card, assignee, title, actions, saving = false, feedback
   return <div className="flex min-w-0 flex-col gap-3">
     <div className="flex items-start justify-between gap-2">
       <h3 className="min-w-0 break-words text-sm font-semibold leading-snug">{title ?? card.title}</h3>
-      {saving ? <span className="flex h-8 w-16 shrink-0 items-center justify-end" aria-label="Guardando movimiento"><Loader2 className="size-4 animate-spin text-primary motion-reduce:animate-none" /></span> : actions}
+      {saving ? <span className="flex h-8 w-16 shrink-0 items-center justify-end" aria-label="Guardando movimiento"><Spinner className="size-4 text-[var(--identity-accent)]" aria-hidden /></span> : actions}
     </div>
     <div className="min-w-0 space-y-1">
       <p className="truncate text-xs text-muted-foreground" title={card.contactName}>{card.contactName}</p>
@@ -912,7 +932,7 @@ function CardContents({ card, assignee, title, actions, saving = false, feedback
       <div className="min-w-0"><p className="font-medium">{overdue ? "Vencido · " : ""}{formatDueAt(card.nextActionAt)}</p>{card.nextActionNote && <p className="mt-1 line-clamp-1 text-muted-foreground" title={card.nextActionNote}>{card.nextActionNote}</p>}</div>
     </div>}
     {(saving || feedback) && <p className={`flex items-center gap-1.5 text-xs font-medium ${feedback?.kind === "returned" ? "text-warning" : saving ? "text-primary" : "text-success"}`}>
-      {saving ? <><Loader2 aria-hidden className="size-3 animate-spin motion-reduce:animate-none" /> Guardando en {card.stageName}…</>
+      {saving ? <><Spinner aria-hidden className="size-3 text-[var(--identity-accent)]" /> Guardando en {card.stageName}…</>
         : feedback?.kind === "returned" ? <><Undo2 aria-hidden className="size-3" /> Volvió a {feedback.stageName}</>
         : <><Check aria-hidden className="size-3" /> Guardada en {feedback?.stageName}</>}
     </p>}
@@ -1047,8 +1067,8 @@ function PipelineListView({
   )
   const table = useReactTable({ data: rows, columns, getCoreRowModel: getCoreRowModel() })
 
-  if (listQuery.isLoading) return <DataTableSkeleton />
-  if (listQuery.isError) {
+  if (listQuery.isLoading && rows.length === 0) return <DataTableSkeleton />
+  if (listQuery.isError && rows.length === 0) {
     return (
       <ErrorState
         error={listQuery.error instanceof Error ? listQuery.error : String(listQuery.error)}
@@ -1066,7 +1086,23 @@ function PipelineListView({
   }
   return (
     <div className="flex flex-col gap-2">
-      <DataTable table={table} />
+      <DataTable
+        table={table}
+        isFetching={listQuery.isFetching && !listQuery.isFetchingNextPage}
+      />
+      {listQuery.isError ? (
+        <p role="alert" className="text-sm text-destructive">
+          No se pudo actualizar la lista; se conservan las oportunidades cargadas.{" "}
+          <Button
+            type="button"
+            variant="link"
+            size="sm"
+            onClick={() => void listQuery.refetch()}
+          >
+            Reintentar solo la lista
+          </Button>
+        </p>
+      ) : null}
       <div className="flex items-center gap-3">
         <p className="text-sm text-muted-foreground" role="status">
           Mostrando {rows.length} oportunidad{rows.length === 1 ? "" : "es"}
@@ -1079,7 +1115,14 @@ function PipelineListView({
             disabled={listQuery.isFetchingNextPage}
             onClick={() => void listQuery.fetchNextPage()}
           >
-            {listQuery.isFetchingNextPage ? "Cargando…" : "Cargar más"}
+            {listQuery.isFetchingNextPage ? (
+              <>
+                <Spinner className="size-6" aria-hidden />
+                Cargar más
+              </>
+            ) : (
+              "Cargar más"
+            )}
           </Button>
         ) : null}
       </div>

@@ -7,6 +7,7 @@ import {
 } from "@odentia/ui"
 import {
   AppShell,
+  Brand,
   type AppShellNavEntry,
   type AppShellNavGroup,
   type AppShellNavItem,
@@ -205,19 +206,8 @@ function OrgLayout() {
       pathname={pathname}
       user={{ name: session.name, email: session.email }}
       footerItems={footerItems}
-      brand={
-        <span className="flex items-center gap-2.5">
-          <span className="flex size-[30px] items-center justify-center rounded-[9px] bg-primary text-[15px] font-bold text-primary-foreground shadow-xs">
-            o
-          </span>
-          <span className="text-[17px] font-bold tracking-tight">odentIA</span>
-        </span>
-      }
-      brandIcon={
-        <span className="flex size-7 items-center justify-center rounded-md bg-primary text-sm font-bold text-primary-foreground">
-          o
-        </span>
-      }
+      brand={<Brand />}
+      brandIcon={<Brand compact />}
       switcher={<OrgSwitcher />}
       onSignOut={async () => {
         await authClient.signOut()

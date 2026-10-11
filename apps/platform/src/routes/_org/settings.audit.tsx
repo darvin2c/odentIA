@@ -1,4 +1,4 @@
-import { Button, Input } from "@odentia/ui"
+import { Button, Input, Spinner } from "@odentia/ui"
 import { DataTable, LoadingState, PageHeader } from "@odentia/ui-patterns"
 import { useInfiniteQuery } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
@@ -34,8 +34,11 @@ function AuditPage() {
   return <div className="flex flex-col gap-5"><PageHeader title="Auditoría" subtitle="Acciones registradas y autoría. El historial no se puede editar desde esta pantalla." />
     {!allowed ? <p>No tienes permiso para consultar la auditoría.</p> : <>
       <form className="flex flex-wrap items-end gap-3" onSubmit={event => { event.preventDefault(); setAction(input.trim()) }}><div className="flex flex-col gap-1"><label htmlFor="audit-action" className="text-sm">Acción exacta (opcional)</label><Input id="audit-action" value={input} maxLength={120} placeholder="Ej.: appointment.created" onChange={event => setInput(event.target.value)} /></div><Button type="submit">Filtrar</Button></form>
-      {query.isPending ? <LoadingState /> : query.isError ? <p role="alert">No pudimos cargar la auditoría.</p> : items.length === 0 ? <p className="text-sm text-muted-foreground">Sin eventos para este filtro.</p> : <DataTable table={table} />}
-      {query.hasNextPage && <Button type="button" variant="outline" disabled={query.isFetchingNextPage} onClick={() => void query.fetchNextPage()}>{query.isFetchingNextPage ? "Cargando…" : "Ver eventos anteriores"}</Button>}
+      {query.isPending ? <LoadingState /> : items.length > 0 ? <>
+        {query.isError ? <p role="alert" className="text-sm text-destructive">No pudimos actualizar la auditoría. Conservamos los últimos eventos recibidos. <Button type="button" variant="link" className="h-auto p-0 text-sm" onClick={() => void query.refetch()}>Reintentar</Button></p> : null}
+        <DataTable table={table} isFetching={query.isFetching} refreshMessage="Actualizando auditoría…" />
+      </> : query.isError ? <p role="alert">No pudimos cargar la auditoría.</p> : <p className="text-sm text-muted-foreground">Sin eventos para este filtro.</p>}
+      {query.hasNextPage && <Button type="button" variant="outline" disabled={query.isFetchingNextPage} onClick={() => void query.fetchNextPage()}>{query.isFetchingNextPage ? <span className="inline-flex items-center gap-2"><Spinner className="size-6" aria-hidden /><span>Ver eventos anteriores</span></span> : "Ver eventos anteriores"}</Button>}
     </>}
   </div>
 }

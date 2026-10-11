@@ -5,6 +5,7 @@ import { KeyRound, UserRound } from "lucide-react"
 import type { ReactNode } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { AppShell } from "./app-shell.js"
+import { Brand } from "./brand.js"
 
 afterEach(() => {
   cleanup()
@@ -45,7 +46,8 @@ function shellWithMenu(onSignOut: () => void) {
         },
       ]}
       onSignOut={onSignOut}
-      brand={<span>odentIA</span>}
+      brand={<Brand />}
+      brandIcon={<Brand compact />}
     >
       <p>contenido</p>
     </AppShell>,
@@ -100,7 +102,8 @@ describe("AppShell footerItems", () => {
         user={{ name: "Ada", email: "ada@x.com" }}
         footerItems={[{ label: "Configuración", icon: KeyRound, to: "/settings" }]}
         onSignOut={() => {}}
-        brand={<span>odentIA</span>}
+        brand={<Brand />}
+        brandIcon={<Brand compact />}
       >
         <p>contenido</p>
       </AppShell>,
@@ -121,7 +124,8 @@ describe("AppShell footerItems", () => {
         pathname="/"
         user={{ name: "Ada", email: "ada@x.com" }}
         onSignOut={() => {}}
-        brand={<span>odentIA</span>}
+        brand={<Brand />}
+        brandIcon={<Brand compact />}
       >
         <p>contenido</p>
       </AppShell>,
@@ -148,7 +152,8 @@ it("la navegación lateral permite cancelar la salida antes de perder cambios", 
       LinkComponent={({ to, children, ...props }) => <Link to={to} {...props}>{children}</Link>}
       pathname="/"
       user={{ name: "Operadora", email: "operadora@example.test" }}
-      brand={<span>odentIA</span>}
+      brand={<Brand />}
+      brandIcon={<Brand compact />}
       onSignOut={() => {}}
     ><Outlet /></AppShell>,
   })

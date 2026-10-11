@@ -6,8 +6,9 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
   Input,
+  Spinner,
 } from "@odentia/ui"
-import { EmptyState, PageHeader, PageShell } from "@odentia/ui-patterns"
+import { DataRefreshMarker, EmptyState, PageHeader, PageShell } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, Link } from "@tanstack/react-router"
 import { MoreHorizontal } from "lucide-react"
@@ -115,28 +116,34 @@ function OpportunityDetailPage() {
     onSuccess: invalidate,
   })
 
-  if (detailQuery.isLoading) {
+  // Sin ficha aún no hay estructura que anticipar; con ficha en caché el
+  // refetch (post-guardado o por eventos) nunca la retira ni oculta el error.
+  if (detailQuery.isPending && !detail) {
     return (
       <PageShell>
         <p className="text-sm text-muted-foreground">Cargando oportunidad…</p>
       </PageShell>
     )
   }
-  if (detailQuery.isError) {
-    return (
-      <PageShell>
-        <EmptyState
-          title="No se pudo cargar"
-          description={
-            detailQuery.error instanceof Error
-              ? detailQuery.error.message
-              : "La oportunidad no se pudo cargar."
-          }
-        />
-      </PageShell>
-    )
-  }
   if (!detail) {
+    if (detailQuery.isError) {
+      return (
+        <PageShell>
+          <div className="flex flex-col gap-2">
+            <p role="alert" className="text-sm text-destructive">
+              {detailQuery.error instanceof Error
+                ? detailQuery.error.message
+                : "La oportunidad no se pudo cargar."}
+            </p>
+            <div>
+              <Button type="button" variant="outline" onClick={() => void detailQuery.refetch()}>
+                Reintentar
+              </Button>
+            </div>
+          </div>
+        </PageShell>
+      )
+    }
     return (
       <PageShell>
         <EmptyState title="No encontrada" description="La oportunidad no existe." />
@@ -149,6 +156,20 @@ function OpportunityDetailPage() {
 
   return (
     <PageShell className="flex min-h-0 flex-1 flex-col gap-4">
+      {detailQuery.isFetching && !detailQuery.isPending ? <DataRefreshMarker /> : null}
+      {detailQuery.isError ? (
+        <p role="alert" className="rounded-md border border-destructive/40 p-2 text-sm text-destructive">
+          No se pudo actualizar la ficha; se conservan los datos cargados.{" "}
+          <Button
+            type="button"
+            variant="link"
+            size="sm"
+            onClick={() => void detailQuery.refetch()}
+          >
+            Reintentar solo la ficha
+          </Button>
+        </p>
+      ) : null}
       <PageHeader
         title={detail.title}
         subtitle={`${detail.stageName} · ${detail.contactName}`}
@@ -180,7 +201,14 @@ function OpportunityDetailPage() {
                 onClick={() => reopenMutation.mutate()}
                 disabled={reopenMutation.isPending}
               >
-                Reabrir
+                {reopenMutation.isPending ? (
+                  <>
+                    <Spinner className="size-6" aria-hidden />
+                    Reabrir
+                  </>
+                ) : (
+                  "Reabrir"
+                )}
               </Button>
               <DropdownMenu>
                 <DropdownMenuTrigger

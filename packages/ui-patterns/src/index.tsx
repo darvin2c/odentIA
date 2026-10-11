@@ -27,6 +27,7 @@ export {
 export { AppShell, isNavItemActive } from "./app-shell.js"
 export { AuthCard } from "./auth-card.js"
 export { AuthSplit } from "./auth-split.js"
+export { Brand } from "./brand.js"
 export {
   BarChart,
   type ChartPoint,

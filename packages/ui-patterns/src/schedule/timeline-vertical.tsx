@@ -352,7 +352,7 @@ export function ScheduleTimelineVertical({
       ) : null}
       {extending ? (
         <div className="sticky top-10 z-20 flex justify-center">
-          <Spinner className="size-4" />
+          <Spinner className="size-6" />
         </div>
       ) : null}
 

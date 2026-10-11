@@ -19,6 +19,7 @@ import type { Cell, Column, Row, Table as TanStackTable } from "@tanstack/react-
 import { flexRender } from "@tanstack/react-table"
 import * as React from "react"
 import { common } from "./common.js"
+import { DataRefreshMarker } from "./loading-state.js"
 import {
   columnLabel,
   type DataTableView,
@@ -42,6 +43,14 @@ export interface DataTableProps<TData> {
    * se renderiza `list`, aunque aquí se pida `table` o `card`. Default `table`.
    */
   view?: DataTableView
+  /**
+   * Revalidación con datos en pantalla (p. ej. `isFetching` de React Query):
+   * muestra el `DataRefreshMarker` en la barra fija de estado sin retirar
+   * las filas. Default `false`: sin indicador.
+   */
+  isFetching?: boolean
+  /** Texto del indicador de revalidación. Default `Actualizando…`. */
+  refreshMessage?: string
   className?: string
 }
 
@@ -77,6 +86,8 @@ interface LayoutProps<TData> {
   table: TanStackTable<TData>
   onRowClick?: (row: TData) => void
   isRowActive?: (row: TData) => boolean
+  isFetching: boolean
+  refreshMessage?: string
   className?: string
 }
 
@@ -101,6 +112,8 @@ export function DataTable<TData>({
   onRowClick,
   isRowActive,
   view = "table",
+  isFetching = false,
+  refreshMessage,
   className,
 }: DataTableProps<TData>) {
   const resolved = useResolvedView(view)
@@ -111,6 +124,8 @@ export function DataTable<TData>({
         table={table}
         onRowClick={onRowClick}
         isRowActive={isRowActive}
+        isFetching={isFetching}
+        refreshMessage={refreshMessage}
         className={className}
       />
     )
@@ -121,6 +136,8 @@ export function DataTable<TData>({
         table={table}
         onRowClick={onRowClick}
         isRowActive={isRowActive}
+        isFetching={isFetching}
+        refreshMessage={refreshMessage}
         className={className}
       />
     )
@@ -130,14 +147,31 @@ export function DataTable<TData>({
       table={table}
       onRowClick={onRowClick}
       isRowActive={isRowActive}
+      isFetching={isFetching}
+      refreshMessage={refreshMessage}
       className={className}
     />
   )
 }
 
-function TableLayout<TData>({ table, onRowClick, isRowActive, className }: LayoutProps<TData>) {
+/**
+ * Barra fija de estado sobre las filas: solo visible durante la
+ * revalidación con datos. Las filas nunca se retiran; el caller decide la
+ * primera carga con `DataTableSkeleton` según `isPending`.
+ */
+function RefreshBar({ isFetching, refreshMessage }: { isFetching: boolean; refreshMessage?: string }) {
+  if (!isFetching) return null
+  return (
+    <div className="flex items-center gap-2 border-b border-border px-3 py-2">
+      <DataRefreshMarker message={refreshMessage} />
+    </div>
+  )
+}
+
+function TableLayout<TData>({ table, onRowClick, isRowActive, isFetching, refreshMessage, className }: LayoutProps<TData>) {
   return (
     <div className={cn("overflow-hidden rounded-md bg-card", className)}>
+      <RefreshBar isFetching={isFetching} refreshMessage={refreshMessage} />
       {/* La tabla que no entra se recorre con la barra del sistema de diseño:
           el contenedor del registry deja de scrollear (`overflow-visible`) para
           que el desborde llegue al área, que solo scrollea en horizontal. Con
@@ -187,11 +221,12 @@ function TableLayout<TData>({ table, onRowClick, isRowActive, className }: Layou
   )
 }
 
-function ListLayout<TData>({ table, onRowClick, isRowActive, className }: LayoutProps<TData>) {
+function ListLayout<TData>({ table, onRowClick, isRowActive, isFetching, refreshMessage, className }: LayoutProps<TData>) {
   const columns = resolveViewColumns(table)
 
   return (
     <div className={cn("flex flex-col gap-2", className)}>
+      <RefreshBar isFetching={isFetching} refreshMessage={refreshMessage} />
       <SelectionBar table={table} columns={columns} />
       <div className="flex flex-col gap-2">
         {table.getRowModel().rows.map((row) => {
@@ -246,7 +281,7 @@ function ListLayout<TData>({ table, onRowClick, isRowActive, className }: Layout
   )
 }
 
-function CardLayout<TData>({ table, onRowClick, isRowActive, className }: LayoutProps<TData>) {
+function CardLayout<TData>({ table, onRowClick, isRowActive, isFetching, refreshMessage, className }: LayoutProps<TData>) {
   const columns = resolveViewColumns(table)
   // Los campos de resumen suben a la cabecera (identidad + datos de un vistazo)
   // y no se repiten en la ficha: lo que queda abajo es el resto de campos.
@@ -255,6 +290,7 @@ function CardLayout<TData>({ table, onRowClick, isRowActive, className }: Layout
 
   return (
     <div className={cn("flex flex-col gap-2", className)}>
+      <RefreshBar isFetching={isFetching} refreshMessage={refreshMessage} />
       <SelectionBar table={table} columns={columns} />
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {table.getRowModel().rows.map((row) => {

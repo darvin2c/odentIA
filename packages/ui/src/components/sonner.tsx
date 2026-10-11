@@ -1,6 +1,7 @@
 import { useTheme } from "next-themes"
 import { Toaster as Sonner, type ToasterProps } from "sonner"
-import { RiCheckboxCircleLine, RiInformationLine, RiErrorWarningLine, RiCloseCircleLine, RiLoaderLine } from "@remixicon/react"
+import { RiCheckboxCircleLine, RiInformationLine, RiErrorWarningLine, RiCloseCircleLine } from "@remixicon/react"
+import { Spinner } from "./spinner.js"
 
 const Toaster = ({ ...props }: ToasterProps) => {
   const { theme = "system" } = useTheme()
@@ -23,7 +24,7 @@ const Toaster = ({ ...props }: ToasterProps) => {
           <RiCloseCircleLine className="size-4" />
         ),
         loading: (
-          <RiLoaderLine className="size-4 animate-spin" />
+          <Spinner className="size-6" aria-hidden />
         ),
       }}
       style={

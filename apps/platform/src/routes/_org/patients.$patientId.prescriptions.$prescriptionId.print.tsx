@@ -100,7 +100,7 @@ function PrescriptionPrintPage() {
   if (query.isPending)
     return (
       <PageShell>
-        <LoadingState message="Preparando la receta…" />
+        <LoadingState kind="indeterminate" message="Preparando la receta…" />
       </PageShell>
     )
   if (query.isError)

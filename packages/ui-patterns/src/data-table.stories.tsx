@@ -1,4 +1,4 @@
-import { Checkbox } from "@odentia/ui"
+import { Button, Checkbox } from "@odentia/ui"
 import type { Meta, StoryObj } from "@storybook/react"
 import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-table"
 import { useMemo, useState } from "react"
@@ -202,3 +202,17 @@ export const CargandoEnCard: Story = {
     </DemoPage>
   ),
 }
+
+function RefreshWithData() {
+  const table = useDemoTable(BASE_COLUMNS)
+  const [refreshing, setRefreshing] = useState(true)
+  return <DemoPage>
+    <Button variant="outline" onClick={() => setRefreshing(!refreshing)}>
+      {refreshing ? "Terminar actualización de demo" : "Simular revalidación"}
+    </Button>
+    <DataTable table={table} isFetching={refreshing} refreshMessage="Sincronizando lista…" />
+  </DemoPage>
+}
+
+/** El mismo componente de producción mantiene las filas durante una revalidación. */
+export const ActualizacionConDatos: Story = { render: () => <RefreshWithData /> }

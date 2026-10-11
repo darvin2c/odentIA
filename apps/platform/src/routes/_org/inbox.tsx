@@ -19,6 +19,7 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
+  Spinner,
 } from "@odentia/ui"
 import {
   Attachment,
@@ -55,6 +56,7 @@ import {
 import { SpeechInput } from "@odentia/ui/components/ai-elements/speech-input"
 import {
   ConfirmDialog,
+  DataRefreshMarker,
   EmptyState,
   FilterBar,
   PageHeader,
@@ -397,6 +399,7 @@ function InboxPage() {
           { value: "noleidos", label: "No leídos primero" },
         ]}
         searchPlaceholder="Buscar contacto"
+        searchPending={listQuery.isFetching && !listQuery.isFetchingNextPage}
       />
       {/* PageShell `fill` acota al viewport: el hilo ocupa el alto restante y el
           composer queda fijo como footer suyo. En escritorio hay tres paneles
@@ -414,8 +417,10 @@ function InboxPage() {
             <ConversationList
               items={items}
               selectedId={selectedId}
-              isLoading={listQuery.isLoading}
+              isLoading={listQuery.isLoading && items.length === 0}
+              isRefreshing={listQuery.isFetching && !listQuery.isLoading && !listQuery.isFetchingNextPage}
               isError={listQuery.isError}
+              hasItems={items.length > 0}
               hasNextPage={listQuery.hasNextPage ?? false}
               isFetchingNextPage={listQuery.isFetchingNextPage}
               onSelect={(id) => selectConversation(id)}
@@ -453,8 +458,10 @@ function InboxPage() {
             <ConversationList
               items={items}
               selectedId={selectedId}
-              isLoading={listQuery.isLoading}
+              isLoading={listQuery.isLoading && items.length === 0}
+              isRefreshing={listQuery.isFetching && !listQuery.isLoading && !listQuery.isFetchingNextPage}
               isError={listQuery.isError}
+              hasItems={items.length > 0}
               hasNextPage={listQuery.hasNextPage ?? false}
               isFetchingNextPage={listQuery.isFetchingNextPage}
               onSelect={(id) => selectConversation(id)}
@@ -493,7 +500,9 @@ function ConversationList({
   items,
   selectedId,
   isLoading,
+  isRefreshing,
   isError,
+  hasItems,
   hasNextPage,
   isFetchingNextPage,
   onSelect,
@@ -503,7 +512,9 @@ function ConversationList({
   items: ConversationListItem[]
   selectedId: string | null
   isLoading: boolean
+  isRefreshing: boolean
   isError: boolean
+  hasItems: boolean
   hasNextPage: boolean
   isFetchingNextPage: boolean
   onSelect: (id: string) => void
@@ -565,12 +576,17 @@ function ConversationList({
         </button>
         )
       })}
-      {isLoading && items.length === 0 && (
+      {isRefreshing && hasItems ? (
+        <div className="p-2">
+          <DataRefreshMarker />
+        </div>
+      ) : null}
+      {isLoading && !hasItems && (
         <p className="p-4 text-sm text-muted-foreground" role="status">
           Cargando conversaciones…
         </p>
       )}
-      {isError && items.length === 0 && !isLoading && (
+      {isError && !hasItems && !isLoading && (
         <div className="flex flex-wrap items-center gap-2 p-4">
           <p className="text-sm text-destructive" role="alert">
             No se pudieron cargar las conversaciones.
@@ -580,9 +596,19 @@ function ConversationList({
           </Button>
         </div>
       )}
-      {!isError && items.length === 0 && !isLoading && (
+      {!isError && !hasItems && !isLoading && (
         <EmptyState title="Sin conversaciones" description="Los mensajes entrantes aparecen aquí." />
       )}
+      {isError && hasItems ? (
+        <div className="flex flex-wrap items-center gap-2 p-4">
+          <p className="text-sm text-destructive" role="alert">
+            No se pudo actualizar la lista; se conservan las conversaciones cargadas.
+          </p>
+          <Button variant="outline" size="sm" onClick={onRetry}>
+            Reintentar solo la lista
+          </Button>
+        </div>
+      ) : null}
       {hasNextPage && (
         <Button
           variant="ghost"
@@ -591,7 +617,14 @@ function ConversationList({
           disabled={isFetchingNextPage}
           onClick={onFetchNextPage}
         >
-          {isFetchingNextPage ? "Cargando…" : "Cargar más"}
+          {isFetchingNextPage ? (
+            <>
+              <Spinner className="size-6" aria-hidden />
+              Cargar más
+            </>
+          ) : (
+            "Cargar más"
+          )}
         </Button>
       )}
     </div>
@@ -843,10 +876,12 @@ function ThreadView({
     }
   }
 
-  if (detailQuery.isLoading) {
+  // Sin detalle aún no hay estructura que anticipar; con detalle en caché el
+  // refetch (automático o manual) nunca lo retira: sigue visible abajo.
+  if (detailQuery.isPending && !detail) {
     return <p className="p-4 text-sm text-muted-foreground">Cargando…</p>
   }
-  if (detailQuery.isError || !detail) {
+  if (!detail) {
     return (
       <div className="flex flex-col gap-2 p-4">
         {showBack && (
@@ -875,6 +910,16 @@ function ThreadView({
 
   return (
     <div className="elevated flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border bg-card">
+      {detailQuery.isError ? (
+        <div className="flex flex-wrap items-center gap-2 border-b px-3 py-2">
+          <p className="text-xs text-destructive" role="alert">
+            No se pudo actualizar el hilo; se conserva la conversación cargada.
+          </p>
+          <Button variant="link" size="sm" onClick={() => void detailQuery.refetch()}>
+            Reintentar solo el hilo
+          </Button>
+        </div>
+      ) : null}
       <div className="flex flex-wrap items-center gap-2 border-b p-3">
         {showBack && (
           <Button variant="ghost" size="icon" onClick={onBack} aria-label="Volver">
@@ -913,8 +958,12 @@ function ThreadView({
             onClick={() => registrationMutation.mutate(detail.contact.id)}
             title="Genera un enlace y prepara el mensaje para revisión; no se envía solo"
           >
-            <UserPlus className="size-4" />
-            {registrationMutation.isPending ? "Generando…" : "Enviar registro"}
+            {registrationMutation.isPending ? (
+              <Spinner className="size-6" aria-hidden />
+            ) : (
+              <UserPlus className="size-4" />
+            )}
+            Enviar registro
           </Button>
         )}
         {canWrite && (
@@ -988,7 +1037,14 @@ function ThreadView({
                 onClick={loadOlder}
                 disabled={loadingOlder}
               >
-                {loadingOlder ? "Cargando…" : "Cargar anteriores"}
+                {loadingOlder ? (
+                  <>
+                    <Spinner className="size-6" aria-hidden />
+                    Cargar anteriores
+                  </>
+                ) : (
+                  "Cargar anteriores"
+                )}
               </Button>
             )}
             <MessageScrollerContent className="gap-2">

@@ -58,27 +58,27 @@ function layout(title: string, bodyHtml: string, ctaUrl: string, ctaLabel: strin
 
 export function verifyEmailTemplate({ url }: { url: string }): MailTemplate {
   return {
-    subject: "Verifica tu correo — odentIA",
+    subject: "Verifica tu correo — Odentia32",
     html: layout(
       "Verifica tu correo",
-      "Gracias por registrarte en odentIA. Confirma tu dirección de correo para activar tu cuenta.",
+      "Gracias por registrarte en Odentia32. Confirma tu dirección de correo para activar tu cuenta.",
       url,
       "Verificar correo",
     ),
-    text: `Verifica tu correo en odentIA: ${url}`,
+    text: `Verifica tu correo en Odentia32: ${url}`,
   }
 }
 
 export function changeEmailVerificationTemplate({ url }: { url: string }): MailTemplate {
   return {
-    subject: "Confirma tu nuevo correo — odentIA",
+    subject: "Confirma tu nuevo correo — Odentia32",
     html: layout(
       "Confirma tu nuevo correo",
       "Recibimos una solicitud para cambiar el correo de tu cuenta. Confirma esta nueva dirección para completar el cambio. Si no fuiste tú, ignora este mensaje.",
       url,
       "Confirmar correo",
     ),
-    text: `Confirma tu nuevo correo en odentIA: ${url}`,
+    text: `Confirma tu nuevo correo en Odentia32: ${url}`,
   }
 }
 
@@ -90,27 +90,27 @@ export function changeEmailConfirmationTemplate({
   url: string
 }): MailTemplate {
   return {
-    subject: "Solicitud de cambio de correo — odentIA",
+    subject: "Solicitud de cambio de correo — Odentia32",
     html: layout(
       "Solicitud de cambio de correo",
       `Recibimos una solicitud para cambiar el correo de tu cuenta a <strong>${newEmail}</strong>. Autoriza el cambio para continuar. Si no fuiste tú, ignora este mensaje y tu cuenta seguirá protegida.`,
       url,
       "Autorizar cambio",
     ),
-    text: `Autoriza el cambio de correo a ${newEmail} en odentIA: ${url}`,
+    text: `Autoriza el cambio de correo a ${newEmail} en Odentia32: ${url}`,
   }
 }
 
 export function resetPasswordTemplate({ url }: { url: string }): MailTemplate {
   return {
-    subject: "Restablece tu contraseña — odentIA",
+    subject: "Restablece tu contraseña — Odentia32",
     html: layout(
       "Restablece tu contraseña",
       "Recibimos una solicitud para restablecer tu contraseña. Si no fuiste tú, ignora este mensaje.",
       url,
       "Restablecer contraseña",
     ),
-    text: `Restablece tu contraseña en odentIA: ${url}`,
+    text: `Restablece tu contraseña en Odentia32: ${url}`,
   }
 }
 
@@ -124,13 +124,13 @@ export function invitationTemplate({
   url: string
 }): MailTemplate {
   return {
-    subject: `Invitación a ${organizationName} — odentIA`,
+    subject: `Invitación a ${organizationName} — Odentia32`,
     html: layout(
       `Te invitaron a ${organizationName}`,
-      `${inviterName} te invitó a unirte a <strong>${organizationName}</strong> en odentIA.`,
+      `${inviterName} te invitó a unirte a <strong>${organizationName}</strong> en Odentia32.`,
       url,
       "Aceptar invitación",
     ),
-    text: `${inviterName} te invitó a ${organizationName} en odentIA. Acepta aquí: ${url}`,
+    text: `${inviterName} te invitó a ${organizationName} en Odentia32. Acepta aquí: ${url}`,
   }
 }

@@ -1,4 +1,4 @@
-import { AppShell, type AppShellNavEntry } from "@odentia/ui-patterns"
+import { AppShell, type AppShellNavEntry, Brand } from "@odentia/ui-patterns"
 import {
   createFileRoute,
   getRouteApi,
@@ -67,7 +67,8 @@ function AppLayout() {
           search: { edit: "password" },
         },
       ]}
-      brand={<span className="text-base font-semibold">odentIA</span>}
+      brand={<Brand />}
+      brandIcon={<Brand compact />}
       onSignOut={async () => {
         await authClient.signOut()
         await navigate({ to: "/login" })

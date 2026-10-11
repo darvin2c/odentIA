@@ -11,6 +11,7 @@ import {
 import { Contact, Inbox, Kanban, Plus, Smile, Tag } from "lucide-react"
 import { useMemo, type ReactNode } from "react"
 import { AppShell, type AppShellNavEntry } from "./app-shell.js"
+import { Brand } from "./brand.js"
 import { KpiCard } from "./kpi-card.js"
 import { FilterBar, type FilterDef, type SortOption } from "./list-filtering/index.js"
 import { PageHeader } from "./page-header.js"
@@ -108,7 +109,8 @@ function Shell({ children }: { children: ReactNode }) {
       LinkComponent={AnchorLink}
       pathname="/contacts"
       user={{ name: "Ana Torres", email: "ana@odentia.dev" }}
-      brand={<span className="text-base font-semibold">odentIA</span>}
+      brand={<Brand />}
+      brandIcon={<Brand compact />}
       onSignOut={() => {}}
     >
       {children}

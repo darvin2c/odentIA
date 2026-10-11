@@ -49,7 +49,7 @@ export function createAuth({
   googleClientSecret,
 }: CreateAuthOptions) {
   return betterAuth({
-    appName: "odentIA",
+    appName: "Odentia32",
     secret,
     baseURL,
     database: drizzleAdapter(db, { provider: "pg" }),

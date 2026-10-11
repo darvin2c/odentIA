@@ -13,6 +13,7 @@ import {
 import {
   ConfirmDialog,
   DataTable,
+  DataTableSkeleton,
   EmptyState,
   FilterBar,
   FormDrawer,
@@ -305,7 +306,9 @@ function FieldsPage() {
           ]}
           searchPlaceholder="Buscar por clave o label"
         />
-        {rows.length === 0 && !listQuery.isLoading ? (
+        {listQuery.isPending ? (
+          <DataTableSkeleton columnCount={5} rowCount={4} label="Cargando campos…" />
+        ) : rows.length === 0 ? (
           <EmptyState
             title="Sin campos"
             description="Define el primero, p.ej. alergias o sede preferida."
@@ -320,7 +323,7 @@ function FieldsPage() {
             }
           />
         ) : (
-          <DataTable table={table} />
+          <DataTable table={table} isFetching={listQuery.isFetching} refreshMessage="Actualizando campos…" />
         )}
       </MasterDetail>
     

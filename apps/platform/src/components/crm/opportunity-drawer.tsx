@@ -1,4 +1,4 @@
-import { Button, Field, FieldLabel, Input } from "@odentia/ui"
+import { Button, Field, FieldLabel, Input, Spinner } from "@odentia/ui"
 import { FormDrawer } from "@odentia/ui-patterns"
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
@@ -386,12 +386,28 @@ export function OpportunityDrawer({
         ) : (
           <Field>
             <FieldLabel htmlFor="opp-drawer-contact-search">Contacto</FieldLabel>
-            <Input
-              id="opp-drawer-contact-search"
-              value={contactSearch}
-              onChange={(e) => setContactSearch(e.target.value)}
-              placeholder="Buscar por nombre, teléfono o correo"
-            />
+            {/* El input nunca se deshabilita por la búsqueda: sigue editable
+                mientras el fetching real se indica dentro del campo. */}
+            <div className="relative">
+              <Input
+                id="opp-drawer-contact-search"
+                value={contactSearch}
+                onChange={(e) => setContactSearch(e.target.value)}
+                placeholder="Buscar por nombre, teléfono o correo"
+                aria-busy={contactsQuery.isFetching}
+                className={contactsQuery.isFetching ? "pr-9" : undefined}
+              />
+              {contactsQuery.isFetching ? (
+                <span className="pointer-events-none absolute inset-y-0 right-2 flex items-center text-[var(--identity-accent)]">
+                  <Spinner className="size-4" aria-hidden />
+                </span>
+              ) : null}
+            </div>
+            {contactsQuery.isFetching ? (
+              <p className="text-xs text-muted-foreground" role="status">
+                Buscando contactos{contactSearch.trim() ? ` «${contactSearch.trim()}»` : ""}…
+              </p>
+            ) : null}
             {contactSearch.trim() === "" && !showAllContacts ? (
               <Button
                 type="button"
@@ -431,7 +447,14 @@ export function OpportunityDrawer({
                 disabled={contactsQuery.isFetchingNextPage}
                 onClick={() => void contactsQuery.fetchNextPage()}
               >
-                {contactsQuery.isFetchingNextPage ? "Cargando…" : "Cargar más contactos"}
+                {contactsQuery.isFetchingNextPage ? (
+                  <>
+                    <Spinner className="size-6" aria-hidden />
+                    Cargar más contactos
+                  </>
+                ) : (
+                  "Cargar más contactos"
+                )}
               </Button>
             ) : null}
             {contactsQuery.isError ? (
@@ -534,12 +557,26 @@ export function OpportunityDrawer({
               </p>
             ) : (
               <>
-                <Input
-                  id="opp-drawer-service-search"
-                  value={serviceSearch}
-                  onChange={(e) => setServiceSearch(e.target.value)}
-                  placeholder="Buscar en el tarifario"
-                />
+                <div className="relative">
+                  <Input
+                    id="opp-drawer-service-search"
+                    value={serviceSearch}
+                    onChange={(e) => setServiceSearch(e.target.value)}
+                    placeholder="Buscar en el tarifario"
+                    aria-busy={servicesQuery.isFetching}
+                    className={servicesQuery.isFetching ? "pr-9" : undefined}
+                  />
+                  {servicesQuery.isFetching ? (
+                    <span className="pointer-events-none absolute inset-y-0 right-2 flex items-center text-[var(--identity-accent)]">
+                      <Spinner className="size-4" aria-hidden />
+                    </span>
+                  ) : null}
+                </div>
+                {servicesQuery.isFetching ? (
+                  <p className="text-xs text-muted-foreground" role="status">
+                    Buscando en el tarifario…
+                  </p>
+                ) : null}
                 {serviceSearch.trim() !== "" ? (
                   <div className="mt-1 flex max-h-40 flex-col gap-1 overflow-y-auto">
                     {serviceOptions
@@ -574,8 +611,28 @@ export function OpportunityDrawer({
                     disabled={servicesQuery.isFetchingNextPage}
                     onClick={() => void servicesQuery.fetchNextPage()}
                   >
-                    {servicesQuery.isFetchingNextPage ? "Cargando…" : "Cargar más servicios"}
+                    {servicesQuery.isFetchingNextPage ? (
+                      <>
+                        <Spinner className="size-6" aria-hidden />
+                        Cargar más servicios
+                      </>
+                    ) : (
+                      "Cargar más servicios"
+                    )}
                   </Button>
+                ) : null}
+                {servicesQuery.isError ? (
+                  <p role="alert" className="text-sm text-destructive">
+                    No se pudo buscar en el tarifario.{" "}
+                    <Button
+                      type="button"
+                      variant="link"
+                      size="sm"
+                      onClick={() => void servicesQuery.refetch()}
+                    >
+                      Reintentar
+                    </Button>
+                  </p>
                 ) : null}
               </>
             )}
@@ -701,8 +758,11 @@ export function OpportunityDrawer({
                 ))}
               </select>
             ) : (
-              <p className="text-sm text-muted-foreground">
-                No se pudieron cargar los presupuestos vinculados.
+              <p role="alert" className="text-sm text-destructive">
+                No se pudieron cargar los presupuestos vinculados.{" "}
+                <Button type="button" variant="link" size="sm" onClick={() => void budgetQuery.refetch()}>
+                  Reintentar
+                </Button>
               </p>
             )}
           </Field>
