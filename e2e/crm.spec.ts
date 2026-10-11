@@ -1,9 +1,11 @@
 import { randomUUID } from "node:crypto"
+import { agentRunLedger } from "@odentia/db/schema/agent"
 import type { Page } from "@playwright/test"
 import { simulateTelegramInbound, simulateWhatsAppInbound } from "./channels"
 import { API, tenant } from "./env"
 import { call, expect, test } from "./fixtures"
 import { gotoHydrated } from "./hydration"
+import { surface } from "./surface"
 
 const FAKE_REPLY = "Gracias por escribir. Te atiendo enseguida."
 
@@ -124,7 +126,8 @@ test("crm agente: responde al segundo inbound y el operador toma el hilo", async
   await waitForInboundText(page, org.slug, conversation.id, "Hola, quiero una cita")
   const conversationId = conversation.id
 
-  await call(page, "PUT", "/api/agent/config", org.slug, { enabled: true })
+  // Con el modelo falso, «línea base» es el modelo de decisión de demostración: la sombra queda registrada.
+  await call(page, "PUT", "/api/agent/config", org.slug, { enabled: true, decisionProvider: "baseline" })
   await call(page, "POST", `/api/conversations/${conversationId}/agent`, org.slug, {
     enabled: true,
   })
@@ -146,6 +149,86 @@ test("crm agente: responde al segundo inbound y el operador toma el hilo", async
   await page.getByLabel("Mensaje").fill("Te ayudo por aquí mismo")
   await page.getByLabel("Mensaje").press("Enter")
   await expect(page.getByText("Te ayudo por aquí mismo").first()).toBeVisible()
+
+  // Responder cierra el turno: una sola corrida correcta con una sola llamada
+  // al modelo. Leyó también el primer mensaje (llegó con el agente apagado) y
+  // deja constancia de haberlo atendido, sin otra llamada.
+  await expect
+    .poll(
+      async () =>
+        (
+          await call<Array<{ status: string; llmCalls: number | null }>>(
+            page,
+            "GET",
+            `/api/agent/runs?conversationId=${conversationId}`,
+            org.slug,
+          )
+        )
+          .map((run) => ({ status: run.status, llmCalls: run.llmCalls }))
+          .sort((a, b) => a.status.localeCompare(b.status)),
+      { timeout: 30_000 },
+    )
+    .toEqual([
+      { status: "ok", llmCalls: 1 },
+      { status: "omitida", llmCalls: 0 },
+    ])
+  // La simulación devuelve lo que se habría enviado, no un texto que nadie recibe.
+  const simulation = await call<{ reply: string; replied: boolean }>(
+    page,
+    "POST",
+    "/api/agent/simulate",
+    org.slug,
+    { conversationId, text: "¿Atienden los sábados?" },
+  )
+  expect(simulation).toMatchObject({ reply: FAKE_REPLY, replied: true })
+  await gotoHydrated(page, tenant(org.slug, "/agent"))
+  await expect(page.getByRole("columnheader", { name: "Llamadas al modelo" })).toBeVisible()
+  await expect(page.getByRole("row").filter({ hasText: "Ejecución correcta" })).toContainText("send_reply")
+  // La decisión en sombra se registró sin cambiar la corrida y se ve con su respuesta y confianza.
+  const decisions = await call<Array<{ point: string; provider: string; error: string | null }>>(
+    page,
+    "GET",
+    `/api/agent/decisions?conversationId=${conversationId}`,
+    org.slug,
+  )
+  expect(decisions).toEqual([expect.objectContaining({ point: "triage.v1", provider: "fake", error: null })])
+  const shadow = page.getByRole("region", { name: "Decisiones en sombra" })
+  await expect(shadow).toBeVisible()
+  await expect(shadow).toContainText("requires_reply: sí")
+})
+
+test("crm agente: una corrida que no respondió queda a la vista para revisión", async ({
+  owner,
+  fixtureDb,
+}, info) => {
+  const { page, org } = owner
+  // Corrida real ya registrada; no hay proveedor que la produzca en este entorno.
+  await fixtureDb.insert(agentRunLedger).values({
+    organizationId: org.id,
+    model: "controlado",
+    status: "sin_respuesta",
+    startedAt: new Date(),
+    endedAt: new Date(),
+    latencyMs: 1200,
+    llmCalls: 1,
+  })
+
+  await gotoHydrated(page, tenant(org.slug, "/agent"))
+  const run = page.getByRole("row").filter({ hasText: "Terminó sin responder" })
+  await expect(run).toBeVisible()
+  await expect(run).not.toContainText("Ejecución correcta")
+  await info.attach("actividad-sin-respuesta", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" })
+
+  const home = await call<{ agent: { today: { runs: number; ok: number; sinRespuesta: number } } | null }>(
+    page,
+    "GET",
+    "/api/workspace/home",
+    org.slug,
+  )
+  expect(home.agent?.today).toMatchObject({ runs: 1, ok: 0, sinRespuesta: 1 })
+  await gotoHydrated(page, tenant(org.slug, "/home"))
+  await expect(page.getByRole("region", { name: "El agente hoy" })).toContainText("Necesitan revisión")
+  await info.attach("inicio-sin-respuesta", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" })
 })
 
 test("crm derivación: recepción ve plazo y toma un caso de la cola", async ({
@@ -221,7 +304,7 @@ test("crm pipeline: mover una oportunidad no mueve las otras de la misma persona
 
   await gotoHydrated(page, tenant(org.slug, "/pipeline"))
   await page.getByRole("button", { name: "Nueva oportunidad" }).click()
-  const dialog = page.getByRole("dialog")
+  const dialog = surface(page)
   await dialog.getByPlaceholder("Buscar por nombre, teléfono o correo").fill(conversation.contact.displayName)
   await dialog.getByRole("button", { name: conversation.contact.displayName, exact: true }).click()
   await page.getByLabel("Título", { exact: true }).fill("Evaluación de ortodoncia")

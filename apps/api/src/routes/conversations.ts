@@ -2,9 +2,10 @@ import { withOrgContext } from "@odentia/db"
 import {
   assignConversation,
   attachmentUrl,
+  CONVERSATION_VIEWS,
   closeConversation,
-  getConversationDetail,
-  listConversations,
+  getInboxConversationDetail,
+  listInboxConversations,
   listMessages,
   markRead,
   OUTBOUND_MEDIA_MAX_BYTES,
@@ -14,6 +15,7 @@ import {
   sendOutbound,
   sendTemplateOutbound,
   setAgentStatus,
+  summarizeInbox,
 } from "@odentia/services"
 import { Hono } from "hono"
 import { z } from "zod"
@@ -21,12 +23,15 @@ import { canAccess, orgContextOf } from "../lib/context.js"
 import { errorBody } from "../lib/error.js"
 import { type CrmDeps, runService, serviceErrorResponse, validationError } from "./helpers.js"
 
-const listQuery = z.object({
+const filtersQuery = z.object({
   status: z.string().optional(),
   channel: z.string().optional(),
   assigned: z.string().optional(),
   q: z.string().optional(),
-  view: z.enum(["unanswered", "human", "approval"]).optional(),
+})
+
+const listQuery = filtersQuery.extend({
+  view: z.enum(CONVERSATION_VIEWS).optional(),
   cursor: z.string().optional(),
   limit: z.coerce.number().int().min(1).max(100).optional(),
 })
@@ -72,7 +77,7 @@ export function createConversationsRoute(deps: CrmDeps) {
     if (!parsed.success) return validationError(c, parsed.error.issues)
     try {
       const { items, nextCursor } = await withOrgContext(deps.db, orgId, (tx) =>
-        listConversations(tx, orgId, parsed.data),
+        listInboxConversations(tx, orgId, parsed.data),
       )
       return c.json({ data: items, nextCursor })
     } catch (e) {
@@ -80,10 +85,21 @@ export function createConversationsRoute(deps: CrmDeps) {
     }
   })
 
+  // Totales de las vistas de la bandeja con los mismos filtros que la lista.
+  // Registrado antes de `/:id` para que «summary» no se lea como un id.
+  app.get("/summary", async (c) => {
+    const { orgId } = orgContextOf(c)
+    const parsed = filtersQuery.safeParse(c.req.query())
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) => summarizeInbox(tx, orgId, parsed.data)),
+    )
+  })
+
   app.get("/:id", async (c) => {
     const { orgId } = orgContextOf(c)
     return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) => getConversationDetail(tx, orgId, c.req.param("id"))),
+      withOrgContext(deps.db, orgId, (tx) => getInboxConversationDetail(tx, orgId, c.req.param("id"))),
     )
   })
 

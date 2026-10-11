@@ -67,7 +67,23 @@ export {
   type MasterDetailProps,
   useDetailMode,
 } from "./master-detail.js"
+export { DockedSurface, type DockedSurfaceProps, useDockDecision } from "./docked-surface.js"
 export { PageHeader, type PageHeaderProps } from "./page-header.js"
+export {
+  type DraftGuardComponent,
+  SideColumn,
+  type SideColumnProps,
+  type SideColumnWidth,
+  SideDockPortal,
+  SideDockProvider,
+  type SideDockScope,
+  SideDockScopeProvider,
+  SideDockSlot,
+  useSideColumnWidth,
+  useSideDock,
+  useSideDockScope,
+  useSidebarWidth,
+} from "./side-dock.js"
 export { PageShell, type PageShellProps } from "./page-shell.js"
 export * from "./phone/index.js"
 export {

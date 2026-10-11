@@ -336,6 +336,7 @@ async function wipeSeed(): Promise<void> {
     "automation_consent",
     "automation_rule",
     "commercial_follow_up_coordination",
+    "agent_decision_log",
     "agent_run_ledger",
     "agent_proposal",
     "agent_handoff",

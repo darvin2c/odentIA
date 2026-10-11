@@ -1377,6 +1377,7 @@ export function ToothDrawer({
         </FormDrawer>
       )}
       <FormDrawer
+        dock={false}
         open={open && voiding !== null}
         onClose={cancelVoid}
         title="Anular registro odontológico"

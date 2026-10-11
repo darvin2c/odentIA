@@ -1,6 +1,9 @@
 import { cn, Drawer, DrawerContent, useIsMobile } from "@odentia/ui"
 import * as React from "react"
+import { SideDockScopeProvider } from "../side-dock.js"
+import { DockedSurface, useDockDecision } from "../docked-surface.js"
 import { useCloseGuard } from "../surface.js"
+import { FormPanel } from "./form-panel.js"
 import { FormSurface } from "./form-surface.js"
 
 export interface FormDrawerProps {
@@ -23,6 +26,12 @@ export interface FormDrawerProps {
   hideSubmit?: boolean
   /** Layout extra del panel (p. ej. ancho mayor para formularios extensos). */
   className?: string
+  /**
+   * `false`: siempre cajón modal, aunque haya columna lateral. Para lo que
+   * exige decidir antes de seguir —anular, eliminar, revocar, reasignar—: no
+   * debe quedarse abierto al lado mientras la página cambia por debajo.
+   */
+  dock?: boolean
 }
 
 /**
@@ -30,6 +39,11 @@ export interface FormDrawerProps {
  * (shell compartido con `FormPanel` vía `FormSurface`). Es el contenedor modal —
  * overlay, focus-trap y Esc los aporta Base UI — y el único correcto donde no
  * hay lista que mantener a la vista.
+ *
+ * Con columna lateral en el layout y ventana ancha, el mismo formulario se abre
+ * en esa columna (no modal, a todo el alto) en vez de en el cajón: lo decide
+ * `useDockDecision` al abrir, con las reglas de `side-dock`. La pantalla no
+ * cambia nada: sigue montando `FormDrawer`.
  */
 export function FormDrawer({
   open,
@@ -48,15 +62,17 @@ export function FormDrawer({
   submitDisabled = false,
   hideSubmit = false,
   className,
+  dock = true,
 }: FormDrawerProps) {
   const isMobile = useIsMobile()
   const handleClose = useCloseGuard({ isSubmitting, isDirty, onClose })
   const titleId = React.useId()
   const descriptionId = React.useId()
+  const dockBounds = useDockDecision(open, { className, disabled: !dock })
 
-  return (
+  const drawer = (drawerOpen: boolean) => (
     <Drawer
-      open={open}
+      open={drawerOpen}
       swipeDirection={isMobile ? "down" : "right"}
       showSwipeHandle={isMobile}
       onOpenChange={(nextOpen) => {
@@ -74,14 +90,44 @@ export function FormDrawer({
         aria-labelledby={titleId}
         aria-describedby={description ? descriptionId : undefined}
       >
-        <FormSurface
+        <SideDockScopeProvider value="overlay">
+          <FormSurface
+            title={title}
+            description={description}
+            headerContent={headerContent}
+            titleId={titleId}
+            descriptionId={descriptionId}
+            onCancel={handleClose}
+            onSubmit={onSubmit}
+            isSubmitting={isSubmitting}
+            isLoading={isLoading}
+            error={error}
+            submitLabel={submitLabel}
+            cancelLabel={cancelLabel}
+            submitDisabled={submitDisabled}
+            hideSubmit={hideSubmit}
+          >
+            {children}
+          </FormSurface>
+        </SideDockScopeProvider>
+      </DrawerContent>
+    </Drawer>
+  )
+
+  if (open && dockBounds) {
+    return (
+      <DockedSurface
+        bounds={dockBounds}
+        dirty={isDirty && !isSubmitting}
+        fallback={drawer(true)}
+      >
+        <FormPanel
           title={title}
           description={description}
           headerContent={headerContent}
-          titleId={titleId}
-          descriptionId={descriptionId}
-          onCancel={handleClose}
+          onClose={onClose}
           onSubmit={onSubmit}
+          isDirty={isDirty}
           isSubmitting={isSubmitting}
           isLoading={isLoading}
           error={error}
@@ -91,8 +137,9 @@ export function FormDrawer({
           hideSubmit={hideSubmit}
         >
           {children}
-        </FormSurface>
-      </DrawerContent>
-    </Drawer>
-  )
+        </FormPanel>
+      </DockedSurface>
+    )
+  }
+  return drawer(open)
 }

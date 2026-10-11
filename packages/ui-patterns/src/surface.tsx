@@ -146,7 +146,7 @@ export function useCloseGuard({
 
 // Base UI monta el popup de dialog/drawer/alert-dialog mientras está abierto;
 // con uno encima, el Esc le pertenece a ese popup y no al panel.
-const OPEN_POPUP_SELECTOR = "[role='dialog'],[role='alertdialog'],[data-slot='drawer-popup']"
+export const OPEN_POPUP_SELECTOR = "[role='dialog'],[role='alertdialog'],[data-slot='drawer-popup']"
 
 /**
  * Esc propio de una superficie no modal (el panel). El drawer no lo usa: ahí

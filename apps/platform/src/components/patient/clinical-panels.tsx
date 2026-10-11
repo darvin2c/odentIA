@@ -500,6 +500,7 @@ export function ControlesPanel({
       </FormDrawer>
 
       <FormDrawer
+        dock={false}
         open={cancelling != null}
         title="Cancelar control"
         description="El control se conserva con su motivo. Cancelar el control NO cancela la cita: cualquier reserva vigente permanece en agenda."
@@ -658,6 +659,7 @@ function PrescriptionEntry({
         ) : null}
       </div>
       <FormDrawer
+        dock={false}
         open={cancelling}
         title="Anular receta"
         description="La receta conserva su contenido original y el motivo de anulación."

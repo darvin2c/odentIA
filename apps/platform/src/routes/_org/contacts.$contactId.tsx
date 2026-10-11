@@ -1384,6 +1384,7 @@ function ContactDetailPage() {
         </div>
       </FormDrawer>
       <FormDrawer
+        dock={false}
         open={moveIdentityId !== null}
         onClose={() => {
           if (!moveMutation.isPending) {

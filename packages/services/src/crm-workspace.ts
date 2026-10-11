@@ -17,7 +17,9 @@ import { and, asc, desc, eq, inArray, or, sql, type SQL, type SQLWrapper } from 
 import { getAgentConfig } from "./agentConfig.js"
 import { getContact, requireContact, type ContactFull } from "./contacts.js"
 import { notFound, validation } from "./errors.js"
+import { handoffOpenSql } from "./handoff-state.js"
 import { listOpportunities, type OpportunityListItem } from "./opportunities.js"
+import { proposalPendingSql } from "./proposal-state.js"
 import type { TaskItem } from "./tasks.js"
 
 /* ------------------------------------------------------------------ */
@@ -220,7 +222,8 @@ async function resolveAgentState(
       and(
         eq(agentProposal.organizationId, orgId),
         eq(agentProposal.conversationId, convRow.id),
-        eq(agentProposal.status, "propuesta"),
+        // Misma vigencia que la bandeja: una vencida sin marcar ya no espera a nadie.
+        proposalPendingSql(sql.raw('"agent_proposal"')),
       ),
     )
     .limit(10)
@@ -233,44 +236,19 @@ async function resolveAgentState(
       pendingProposalIds: caps.agent ? pending.map((p) => p.id) : [],
     }
   }
-  const handoffs = await tx
-    .select()
-    .from(agentHandoff)
-    .where(
-      and(eq(agentHandoff.organizationId, orgId), eq(agentHandoff.conversationId, convRow.id)),
-    )
-    .orderBy(desc(agentHandoff.createdAt))
-    .limit(5)
-  if (handoffs.length > 0) {
-    const taskIds = handoffs.map((h) => h.taskId).filter((v): v is string => !!v)
-    if (taskIds.length === 0) {
-      return {
-        state: "handoff",
-        enabled: cfg.enabled,
-        conversationId: convRow.id,
-        reason: "Derivado al equipo",
-        pendingProposalIds: [],
-      }
-    }
-    const [openTask] = await tx
-      .select({ id: crmTask.id })
-      .from(crmTask)
-      .where(
-        and(
-          eq(crmTask.organizationId, orgId),
-          inArray(crmTask.id, taskIds),
-          eq(crmTask.status, "open"),
-        ),
-      )
-      .limit(1)
-    if (openTask) {
-      return {
-        state: "handoff",
-        enabled: cfg.enabled,
-        conversationId: convRow.id,
-        reason: "Derivado al equipo; seguimiento pendiente",
-        pendingProposalIds: [],
-      }
+  // «Derivación sin resolver» con la definición única que usan la bandeja, el
+  // panel y los contadores: sin tarea, o con su tarea aún abierta.
+  const [handoffs] = await tx.execute<{ open: boolean; with_task: boolean }>(sql`
+    select count(*) > 0 as open, coalesce(bool_or(h.task_id is not null), false) as with_task
+    from agent_handoff h
+    where h.organization_id = ${orgId} and h.conversation_id = ${convRow.id} and ${handoffOpenSql(sql.raw("h"))}`)
+  if (handoffs?.open) {
+    return {
+      state: "handoff",
+      enabled: cfg.enabled,
+      conversationId: convRow.id,
+      reason: handoffs.with_task ? "Derivado al equipo; seguimiento pendiente" : "Derivado al equipo",
+      pendingProposalIds: [],
     }
   }
   if (convRow.agentStatus === "off") {

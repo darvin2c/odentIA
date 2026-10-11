@@ -8,6 +8,7 @@ import { opportunity } from "@odentia/db/schema/opportunities"
 import { eq, sql } from "drizzle-orm"
 import { beforeAll, expect, it } from "vitest"
 import { appDb, insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
+import { getAgentRunStats, listAgentRuns } from "./agent-operations.js"
 import { createWorkspaceNotification, getManagementReport, getWorkspaceHome, getWorkspacePulse, listWorkspaceAudit, listWorkspaceNotifications, readWorkspaceNotification, type WorkspaceAccess } from "./workspace.js"
 
 setupTestDb()
@@ -81,6 +82,7 @@ beforeAll(async () => {
     { organizationId: "org_a", model: "prueba", status: "ok", startedAt: new Date() },
     { organizationId: "org_a", model: "prueba", status: "ok", startedAt: new Date() },
     { organizationId: "org_a", model: "prueba", status: "handoff", startedAt: new Date() },
+    { organizationId: "org_a", model: "prueba", status: "sin_respuesta", startedAt: new Date(), llmCalls: 2 },
     { organizationId: "org_a", model: "prueba", status: "error", startedAt: new Date(Date.now() - 5 * 86_400_000) },
   ])
 
@@ -185,7 +187,18 @@ it("el inicio muestra la banda del agente con pendientes, derivaciones y corrida
   // Solo derivaciones de las últimas 72 horas.
   expect(home.agent!.recentHandoffs).toHaveLength(1)
   expect(home.agent!.recentHandoffs[0]).toMatchObject({ reason: "Reciente", priority: "alta" })
-  expect(home.agent!.today).toEqual({ runs: 3, ok: 2, handoff: 1, error: 0, omitida: 0 })
+  expect(home.agent!.today).toEqual({ runs: 4, ok: 2, handoff: 1, error: 0, omitida: 0, sinRespuesta: 1 })
+})
+
+it("el libro de corridas cuenta las que terminaron sin responder y las llamadas medidas", async () => {
+  const stats = await withOrgContext(appDb, "org_a", tx => getAgentRunStats(tx, "org_a"))
+  expect(stats.byStatus).toMatchObject({ ok: 2, handoff: 1, error: 1, sin_respuesta: 1 })
+  // Solo una fila registró llamadas: el total no se reparte entre las cinco.
+  expect(stats.totalLlmCalls).toBe(2)
+  expect(stats.runsWithLlmCalls).toBe(1)
+  const unanswered = await withOrgContext(appDb, "org_a", tx => listAgentRuns(tx, "org_a", { status: "sin_respuesta" }))
+  expect(unanswered).toHaveLength(1)
+  expect(unanswered[0]).toMatchObject({ status: "sin_respuesta", llmCalls: 2, cachedInputTokens: null })
 })
 
 it("el inicio oculta la banda del agente sin el permiso", async () => {
@@ -215,6 +228,7 @@ it("las ejecuciones correctas no incluyen derivaciones ni errores y se ocultan s
   expect(pulse.execution!.reduce((sum, item) => sum + item.ok, 0)).toBe(2)
   expect(pulse.execution!.reduce((sum, item) => sum + item.handoff, 0)).toBe(1)
   expect(pulse.execution!.reduce((sum, item) => sum + item.error, 0)).toBe(1)
+  expect(pulse.execution!.reduce((sum, item) => sum + item.sinRespuesta, 0)).toBe(1)
   const gated = await withOrgContext(appDb, "org_a", tx => getWorkspacePulse(tx, "org_a", { ...full, agent: false }))
   expect(gated.execution).toBeNull()
 })

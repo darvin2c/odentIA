@@ -2,6 +2,7 @@ import type { Browser, Page } from "@playwright/test"
 import { tenant, tenantPattern } from "./env"
 import { expect, fillPatientNames, type OwnerFixture, test } from "./fixtures"
 import { gotoHydrated } from "./hydration"
+import { surface } from "./surface"
 
 const SETTINGS_SECTIONS = [
   "Organización",
@@ -46,7 +47,7 @@ test("móvil: el alta de paciente mantiene las acciones operables", async ({ own
     await gotoHydrated(page, tenant(owner.org.slug, "/patients"))
 
     await page.getByRole("button", { name: "Nuevo paciente", exact: true }).tap()
-    const dialog = page.getByRole("dialog", { name: "Nuevo paciente" })
+    const dialog = surface(page, { name: "Nuevo paciente" })
     await expect(dialog).toBeVisible()
 
     await fillPatientNames(dialog, "Paciente móvil")

@@ -13,7 +13,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@odentia/ui"
-import { ConfirmDialog } from "@odentia/ui-patterns"
+import { ConfirmDialog, useHeaderUtilities } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { MoreHorizontal } from "lucide-react"
@@ -146,6 +146,8 @@ export function PatientHeader({
   onSection: (section: PatientSectionId) => void
 }) {
   const canWrite = usePermission("patients.write")
+  // La ficha no usa PageHeader; las utilidades globales (avisos, agente) van aquí.
+  const utilities = useHeaderUtilities()
   const canRead = usePermission("patients.read")
   const canEncounter = usePermission("clinical.write")
   const canAppointments = usePermission("appointments.read")
@@ -206,17 +208,22 @@ export function PatientHeader({
       : (patient.docNumber ?? null)
   return (
     <header className="flex min-w-0 flex-col gap-3">
-      <Breadcrumb>
-        <BreadcrumbList>
-          <BreadcrumbItem>
-            <BreadcrumbLink render={<Link to="/patients" />}>Pacientes</BreadcrumbLink>
-          </BreadcrumbItem>
-          <BreadcrumbSeparator />
-          <BreadcrumbItem>
-            <BreadcrumbPage>{detail.patient.displayName}</BreadcrumbPage>
-          </BreadcrumbItem>
-        </BreadcrumbList>
-      </Breadcrumb>
+      <div className="flex min-w-0 flex-wrap items-center gap-3">
+        <Breadcrumb className="min-w-0 flex-1">
+          <BreadcrumbList>
+            <BreadcrumbItem>
+              <BreadcrumbLink render={<Link to="/patients" />}>Pacientes</BreadcrumbLink>
+            </BreadcrumbItem>
+            <BreadcrumbSeparator />
+            <BreadcrumbItem>
+              <BreadcrumbPage>{detail.patient.displayName}</BreadcrumbPage>
+            </BreadcrumbItem>
+          </BreadcrumbList>
+        </Breadcrumb>
+        {utilities ? (
+          <div className="ml-auto flex shrink-0 items-center gap-1">{utilities}</div>
+        ) : null}
+      </div>
       <div className="flex flex-col gap-6 elevated rounded-xl border bg-card p-6">
         <div className="flex min-w-0 flex-wrap items-start justify-between gap-4">
           <div className="flex min-w-0 items-center gap-4">

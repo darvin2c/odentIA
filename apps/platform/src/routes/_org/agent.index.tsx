@@ -23,6 +23,9 @@ interface RunStats {
   avgLatencyMs: number | null
   totalInputTokens: number | null
   totalOutputTokens: number | null
+  totalCachedInputTokens: number | null
+  totalLlmCalls: number | null
+  runsWithLlmCalls: number
   totalCostMicros: number | null
   topTools: Array<{ tool: string; uses: number }>
 }
@@ -36,13 +39,50 @@ interface RunItem {
   latencyMs: number | null
   inputTokens: number | null
   outputTokens: number | null
+  cachedInputTokens: number | null
+  llmCalls: number | null
   costMicros: number | null
   toolsUsed: string[]
   error: string | null
 }
 
+interface DecisionItem {
+  id: string
+  conversationId: string | null
+  point: string
+  provider: string
+  model: string | null
+  answers: Array<{ id: string; kind: string; probability?: number; choice?: string; score?: number; confidence?: number | null }>
+  outcome: Record<string, unknown> | null
+  latencyMs: number | null
+  error: string | null
+  createdAt: string
+}
+
+const PROVIDER_LABEL: Record<string, string> = {
+  baseline: "Línea base",
+  jev: "Jev",
+  openai_decisions: "OpenAI Decisions",
+  fake: "Demostración",
+}
+
+/** Resumen legible de una decisión en sombra: respuesta y confianza por pregunta. */
+function describeAnswers(item: DecisionItem): string {
+  if (item.error) return `Sin respuesta: ${item.error}`
+  const pct = (value: number) => `${Math.round(value * 100)} %`
+  return item.answers
+    .map((a) => {
+      if (a.kind === "yesno" && typeof a.probability === "number") return `${a.id}: ${a.probability >= 0.5 ? "sí" : "no"} (${pct(a.probability)})`
+      if (a.kind === "choice") return `${a.id}: ${a.choice}${typeof a.confidence === "number" ? ` (${pct(a.confidence)})` : ""}`
+      if (a.kind === "score" && typeof a.score === "number") return `${a.id}: nivel ${Math.round(a.score)}${typeof a.confidence === "number" ? ` (${pct(a.confidence)})` : ""}`
+      return `${a.id}: sin respuesta`
+    })
+    .join(" · ")
+}
+
 interface Simulation {
   reply: string
+  replied: boolean
   toolsUsed: string[]
   handedOff: boolean
   inputTokens: number | null
@@ -56,7 +96,11 @@ const STATUS_LABEL: Record<string, string> = {
   handoff: "Pidió atención del equipo",
   error: "Con error",
   omitida: "Sin ejecutar",
+  sin_respuesta: "Terminó sin responder",
 }
+
+/** Estados que alguien del equipo debe revisar. */
+const NEEDS_REVIEW = new Set(["error", "sin_respuesta"])
 
 function AgentSupervisionPage() {
   const canRead = usePermission("agent.read")
@@ -80,8 +124,8 @@ function AgentSupervisionPage() {
     enabled: canWrite,
   })
   const conversations = conversationsQuery.data?.pages.flatMap(page => page.data) ?? []
-  useOrgEvents(["conversation.updated", "message.created", "stream.reconnected"], () => {
-    for (const key of ["agent-runs", "agent-run-stats", "simulation-conversations"]) {
+  useOrgEvents(["agent.run.recorded", "agent.decision.recorded", "conversation.updated", "message.created", "stream.reconnected"], () => {
+    for (const key of ["agent-runs", "agent-run-stats", "agent-decisions", "simulation-conversations"]) {
       void queryClient.invalidateQueries({ queryKey: [key] })
     }
   })
@@ -94,6 +138,11 @@ function AgentSupervisionPage() {
   const runsQuery = useQuery({
     queryKey: ["agent-runs"],
     queryFn: () => apiFetch<{ data: RunItem[] }>("/api/agent/runs?limit=50"),
+    enabled: canRead,
+  })
+  const decisionsQuery = useQuery({
+    queryKey: ["agent-decisions"],
+    queryFn: () => apiFetch<{ data: DecisionItem[] }>("/api/agent/decisions?limit=50"),
     enabled: canRead,
   })
   const simulateMutation = useMutation({
@@ -110,7 +159,7 @@ function AgentSupervisionPage() {
         accessorKey: "status",
         header: "Estado",
         cell: ({ row }) => (
-          <Badge variant={row.original.status === "error" ? "destructive" : "secondary"}>
+          <Badge variant={NEEDS_REVIEW.has(row.original.status) ? "destructive" : "secondary"}>
             {STATUS_LABEL[row.original.status] ?? row.original.status}
           </Badge>
         ),
@@ -133,7 +182,14 @@ function AgentSupervisionPage() {
         id: "tokens",
         header: "Tokens",
         cell: ({ row }) =>
-          row.original.inputTokens != null ? `${row.original.inputTokens}/${row.original.outputTokens ?? 0}` : "—",
+          row.original.inputTokens != null
+            ? `${row.original.inputTokens}/${row.original.outputTokens ?? 0}${row.original.cachedInputTokens != null ? ` · ${row.original.cachedInputTokens} en caché` : ""}`
+            : "—",
+      },
+      {
+        accessorKey: "llmCalls",
+        header: "Llamadas al modelo",
+        cell: ({ row }) => row.original.llmCalls ?? "—",
       },
       {
         id: "herramientas",
@@ -143,8 +199,19 @@ function AgentSupervisionPage() {
       {
         accessorKey: "error",
         header: "Error",
+        // Una corrida omitida no es un fallo: su motivo se explica, no se alarma.
         cell: ({ row }) =>
-          row.original.error ? <span className="text-destructive">{row.original.error}</span> : "—",
+          !row.original.error ? (
+            "—"
+          ) : row.original.status === "omitida" ? (
+            <span className="text-muted-foreground">
+              {row.original.error === "burst-covered"
+                ? "Atendido en la corrida de otro mensaje del hilo"
+                : row.original.error}
+            </span>
+          ) : (
+            <span className="text-destructive">{row.original.error}</span>
+          ),
       },
     ],
     [],
@@ -175,7 +242,15 @@ function AgentSupervisionPage() {
       <AgentTabs />
       {statsQuery.isPending ? <LoadingState /> : statsQuery.isError ? <div role="alert"><p>No pudimos cargar la actividad del agente.</p><Button variant="outline" onClick={() => void statsQuery.refetch()}>Volver a intentar</Button></div> : null}
       <div className="grid min-w-0 gap-3 sm:grid-cols-4">
-        <KpiCard title="Ejecuciones" value={stats?.total ?? "—"} />
+        <KpiCard
+          title="Ejecuciones"
+          value={stats?.total ?? "—"}
+          description={
+            stats?.totalLlmCalls != null
+              ? `${stats.totalLlmCalls} ${stats.totalLlmCalls === 1 ? "llamada" : "llamadas"} al modelo en ${stats.runsWithLlmCalls} ${stats.runsWithLlmCalls === 1 ? "ejecución medida" : "ejecuciones medidas"}`
+              : undefined
+          }
+        />
         <KpiCard
           title="Latencia media"
           value={stats?.avgLatencyMs == null ? "—" : `${(stats.avgLatencyMs / 1000).toFixed(1)} s`}
@@ -220,6 +295,35 @@ function AgentSupervisionPage() {
           <DataTable table={runsTable} />
         )}
       </div>
+      <section aria-label="Decisiones en sombra" className="elevated rounded-xl border bg-card p-6">
+        <h2 className="font-heading text-base font-medium">Decisiones en sombra</h2>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Qué habría decidido el modelo de decisión sobre cada mensaje entrante y con qué confianza. Solo se registra:
+          no cambia lo que hizo el agente ni acredita acierto.
+        </p>
+        {decisionsQuery.isPending ? <LoadingState /> : decisionsQuery.isError ? <div role="alert"><p>No pudimos cargar las decisiones.</p><Button variant="outline" onClick={() => void decisionsQuery.refetch()}>Volver a intentar</Button></div> : decisionsQuery.data.data.length === 0 ? (
+          <EmptyState title="Sin decisiones registradas" description="Elige un modelo de decisión en Configuración › Agente; cada mensaje entrante dejará aquí su triaje." />
+        ) : (
+          <ul className="mt-3 flex flex-col divide-y">
+            {decisionsQuery.data.data.map((item) => (
+              <li key={item.id} className="flex flex-col gap-1 py-3 text-sm">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant="secondary">{PROVIDER_LABEL[item.provider] ?? item.provider}</Badge>
+                  <span className="text-xs text-muted-foreground">
+                    {item.point}{item.model ? ` · ${item.model}` : ""}{item.latencyMs != null ? ` · ${item.latencyMs} ms` : ""}
+                  </span>
+                  {item.conversationId ? (
+                    <Link to="/inbox" search={{ conversation: item.conversationId }} className="text-xs text-primary underline">
+                      Abrir conversación
+                    </Link>
+                  ) : null}
+                </div>
+                <p className={item.error ? "text-destructive" : undefined}>{describeAnswers(item)}</p>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
       {canWrite ? (
         <div className="flex flex-col gap-3 elevated rounded-xl border bg-card p-6">
           <div className="font-heading text-base font-medium">Simular instrucciones</div>
@@ -269,6 +373,11 @@ function AgentSupervisionPage() {
           {simulation ? (
             <div className="flex flex-col gap-2 rounded-md bg-muted p-3 text-sm">
               <p className="whitespace-pre-wrap">{simulation.reply}</p>
+              {!simulation.replied && !simulation.handedOff && (
+                <p role="status" className="text-sm font-medium text-destructive">
+                  El modelo no usó la herramienta de envío: en una conversación real este texto no llegaría al interlocutor y la ejecución quedaría como «Terminó sin responder».
+                </p>
+              )}
               {simulation.model === "fake" && <p className="text-sm text-muted-foreground">Demostración determinista: no acredita inteligencia ni calidad de un proveedor real.</p>}
               <p className="text-xs text-muted-foreground">
                 Modelo {simulation.model} · {(simulation.latencyMs / 1000).toFixed(1)} s

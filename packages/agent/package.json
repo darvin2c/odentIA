@@ -9,7 +9,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.json --noEmit",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "eval:decisions": "tsx --env-file-if-exists=../../infra/dev/.env src/decision/eval.ts"
   },
   "dependencies": {
     "@langchain/core": "1.2.11",
@@ -21,6 +22,7 @@
     "@odentia/services": "workspace:*",
     "drizzle-orm": "0.45.2",
     "langchain": "1.2.2",
+    "undici": "8.10.2",
     "zod": "4.6.2"
   },
   "devDependencies": {

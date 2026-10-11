@@ -1,3 +1,4 @@
+import type { PlatformLlm } from "@odentia/agent"
 import type { Auth } from "@odentia/auth"
 import { type Db, sendDemoTask, withOrgContext } from "@odentia/db"
 import { message } from "@odentia/db/schema/crm"
@@ -65,9 +66,8 @@ export interface AppDeps {
   /** Conexión dedicada LISTEN (postgres.js crudo). */
   listenUrl: string
   registrationRemoteAddress?: RegistrationRemoteAddress
-  agentModelName?: string
-  llmApiKey?: string
-  llmBaseUrl?: string
+  /** Proveedor LLM de la plataforma (LLM_*); la organización puede traer el suyo. */
+  llm?: PlatformLlm
   mailbox?: MailboxEnv
 }
 const branchInput = z.object({
@@ -543,7 +543,8 @@ export function createApp(deps: AppDeps) {
   guarded.route("/ubigeo", createUbigeoRoute(crmDeps))
   guarded.route("/pipelines", createPipelinesRoute(crmDeps))
   guarded.route("/channels/connections", createConnectionsRoute(crmDeps))
-  guarded.route("/agent", createAgentRoute(crmDeps))
+  const llm: PlatformLlm = deps.llm ?? { modelName: "fake" }
+  guarded.route("/agent", createAgentRoute({ ...crmDeps, llm }))
   guarded.route("/tasks", createTasksRoute(crmDeps))
   guarded.route("/agenda", createAgendaRoute(crmDeps))
   guarded.route("/appointments", createAppointmentsRoute(crmDeps))
@@ -552,15 +553,7 @@ export function createApp(deps: AppDeps) {
   guarded.route("/inventory", createInventoryRoute(crmDeps))
   guarded.route("/opportunities", createOpportunitiesRoute(crmDeps))
   guarded.route("/agent/knowledge", createAgentKnowledgeRoute(crmDeps))
-  guarded.route(
-    "/agent",
-    createAgentOpsRoute({
-      ...crmDeps,
-      defaultModelName: deps.agentModelName,
-      llmApiKey: deps.llmApiKey,
-      llmBaseUrl: deps.llmBaseUrl,
-    }),
-  )
+  guarded.route("/agent", createAgentOpsRoute({ ...crmDeps, llm }))
   guarded.route("/finance", createFinanceRoute(crmDeps))
   guarded.route("/automations", createAutomationsRoute(crmDeps))
   guarded.route("/clinical-forms", createClinicalFormsRoute(crmDeps))

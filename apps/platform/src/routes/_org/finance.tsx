@@ -621,6 +621,7 @@ function ShiftDetailPanel({
       </FormDrawer>
 
       <FormDrawer
+        dock={false}
         open={voidId !== null}
         title="Anular movimiento"
         description="La anulación queda auditada con motivo; el turno cerrado no se modifica."
@@ -1012,6 +1013,7 @@ function GastosTab() {
       </FormDrawer>
 
       <FormDrawer
+        dock={false}
         open={voidId !== null}
         title="Anular gasto"
         description="Si el turno sigue abierto también se anula su movimiento; si ya cerró, el movimiento queda como histórico."
@@ -1284,6 +1286,7 @@ function CobrosTab() {
       </FormDrawer>
 
       <FormDrawer
+        dock={false}
         open={voidId !== null}
         title="Anular plan de cuotas"
         description="El cargo original se conserva; solo se anula su calendarización."
@@ -1609,6 +1612,7 @@ function ComisionesTab({ onDirtyChange }: { onDirtyChange: (dirty: boolean) => v
       </section>
 
       <FormDrawer
+        dock={false}
         open={voidSettlement}
         title="Anular liquidación"
         description="Las líneas congeladas se conservan como histórico de la anulación."

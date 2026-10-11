@@ -1,4 +1,4 @@
-import { simulateAgentTurn } from "@odentia/agent"
+import { describeProviderProblem, isProviderConfigError, type PlatformLlm, simulateAgentTurn } from "@odentia/agent"
 import { withOrgContext } from "@odentia/db"
 import {
   confirmProposalByContact,
@@ -7,9 +7,11 @@ import {
   decideProposal,
   executeProposal,
   findFreeGaps,
-  getAgentConfig,
+  getAgentPanelSummary,
   getAgentRunStats,
   getProposal,
+  listAgentActivity,
+  listAgentDecisions,
   listAgentRuns,
   listHandoffs,
   claimHandoff,
@@ -24,10 +26,8 @@ import { errorBody } from "../lib/error.js"
 import { type CrmDeps, runService, validationError } from "./helpers.js"
 
 export interface AgentOpsDeps extends CrmDeps {
-  /** Modelo del servidor (env LLM_MODEL del API); la config de la org prevalece. */
-  defaultModelName?: string
-  llmApiKey?: string
-  llmBaseUrl?: string
+  /** Proveedor de la plataforma; la configuración de la organización prevalece. */
+  llm: PlatformLlm
 }
 
 export function createAgentOpsRoute(deps: AgentOpsDeps) {
@@ -70,6 +70,11 @@ const gapsInput = z.object({
   dentistUserId: z.string().optional(),
   chairId: z.string().uuid().optional(),
   serviceId: z.string().uuid().optional(),
+})
+
+const decisionsQuery = z.object({
+  conversationId: z.string().uuid().optional(),
+  limit: z.coerce.number().int().min(1).max(200).optional(),
 })
 
 const simulateInput = z.object({
@@ -206,6 +211,7 @@ const simulateInput = z.object({
         listHandoffs(tx, orgId, {
           conversationId: c.req.query("conversationId"),
           limit: c.req.query("limit") ? Number(c.req.query("limit")) : undefined,
+          open: c.req.query("open") === "1" || c.req.query("open") === "true",
         }),
       ),
     )
@@ -256,6 +262,40 @@ const simulateInput = z.object({
     )
   })
 
+  // Resumen y actividad legible del panel: quien decide (recepción) los lee
+  // sin acceder a configuración ni al libro técnico.
+  app.get("/panel", async (c) => {
+    const { orgId, memberRole } = orgContextOf(c)
+    if (!canAccessAny(memberRole, ["agent.read", "agent.decide"]))
+      return forbidden(c, "agent.decide")
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) => getAgentPanelSummary(tx, orgId)),
+    )
+  })
+
+  app.get("/activity", async (c) => {
+    const { orgId, memberRole } = orgContextOf(c)
+    if (!canAccessAny(memberRole, ["agent.read", "agent.decide"]))
+      return forbidden(c, "agent.decide")
+    const parsed = z
+      .object({ limit: z.coerce.number().int().min(1).max(100).optional() })
+      .safeParse(c.req.query())
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) => listAgentActivity(tx, orgId, parsed.data)),
+    )
+  })
+
+  app.get("/decisions", async (c) => {
+    const { orgId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "agent.read")) return forbidden(c, "agent.read")
+    const parsed = decisionsQuery.safeParse(c.req.query())
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) => listAgentDecisions(tx, orgId, parsed.data)),
+    )
+  })
+
   app.get("/runs/stats", async (c) => {
     const { orgId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "agent.read")) return forbidden(c, "agent.read")
@@ -271,16 +311,24 @@ const simulateInput = z.object({
     if (!canAccess(memberRole, "agent.write")) return forbidden(c, "agent.write")
     const parsed = simulateInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
-    return runService(c, 200, async () => {
-      const model = await withOrgContext(deps.db, orgId, (tx) =>
-        getAgentConfig(tx, orgId).then((cfg) => cfg.model ?? deps.defaultModelName ?? "fake"),
+    try {
+      return await runService(c, 200, () =>
+        simulateAgentTurn(
+          deps.db,
+          { secretsKey: deps.secretsKey, platform: deps.llm },
+          { orgId, conversationId: parsed.data.conversationId, text: parsed.data.text },
+        ),
       )
-      return simulateAgentTurn(
-        deps.db,
-        { secretsKey: deps.secretsKey, modelName: model, apiKey: deps.llmApiKey, baseUrl: deps.llmBaseUrl },
-        { orgId, conversationId: parsed.data.conversationId, text: parsed.data.text, model },
-      )
-    })
+    } catch (error) {
+      // Proveedor inutilizable (configuración, credencial, cuota): es un
+      // estado de la organización, no un error del servidor, y nunca se
+      // reenvía el cuerpo crudo del proveedor.
+      if (isProviderConfigError(error)) {
+        const problem = describeProviderProblem(error)
+        return c.json(errorBody(c, "LLM_CONFIG", `El agente no puede usar el modelo (${problem.detail})`), 409)
+      }
+      throw error
+    }
   })
 
   return app

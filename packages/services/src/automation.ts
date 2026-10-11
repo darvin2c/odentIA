@@ -37,6 +37,9 @@ import {
   lte,
   sql,
 } from "drizzle-orm"
+import { createProposal, getAutonomyPolicy } from "./agent-operations.js"
+import { reconcileProposedCoordinations } from "./commercial-coordination.js"
+import { getConnectionTemplates } from "./connections.js"
 import { sendOutbound, sendTemplateOutbound, startContactConversation } from "./conversations.js"
 import { notFound, ServiceError, validation } from "./errors.js"
 import { createWorkspaceNotification } from "./workspace.js"
@@ -409,7 +412,7 @@ export async function cancelJob(
  * Destinatario del aviso de fallo: creador de la regla si sigue en la
  * organización; si no, el primer owner/admin. Null si nadie califica.
  */
-async function failureRecipient(
+export async function failureRecipient(
   tx: Db,
   orgId: string,
   createdBy: string | null,
@@ -762,16 +765,115 @@ export interface SyncSummary {
 const COMMERCIAL_QUIET_START = "20:00"
 const COMMERCIAL_QUIET_END = "08:00"
 
+export interface TemplateChannel {
+  identityId: string
+  connectionId: string
+  channel: string
+  template: { name: string; language: string }
+}
+
+/**
+ * Convención: la plantilla con la que se retoma un seguimiento en frío es la
+ * aprobada cuyo nombre lo dice («seguimiento…», «follow_up…») y no lleva
+ * variables (se envía sin parámetros). Sin una así no se propone nada: jamás
+ * se sustituye por otra plantilla de la conexión.
+ */
+const FOLLOW_UP_TEMPLATE = /seguimiento|follow[-_ ]?up/i
+
+/**
+ * Canal por el que la clínica puede iniciar un hilo en frío con este contacto:
+ * contacto activo con identidad de WhatsApp (el único canal que abre
+ * conversación sin mensaje previo, siempre con plantilla), consentimiento
+ * vigente para la finalidad, conexión activa con una plantilla de seguimiento
+ * aprobada y ningún hilo previo con esa persona en la conexión (si ya conversa,
+ * no es un inicio en frío: decide una persona). No crea nada.
+ */
+export async function findTemplateChannel(
+  tx: Db,
+  orgId: string,
+  contactId: string,
+  purpose: ConsentPurpose,
+  secretsKey: Buffer,
+): Promise<TemplateChannel | null> {
+  const [person] = await tx
+    .select({ isActive: contact.isActive })
+    .from(contact)
+    .where(and(eq(contact.organizationId, orgId), eq(contact.id, contactId)))
+    .limit(1)
+  if (!person?.isActive) return null
+  const [identity] = await tx
+    .select()
+    .from(contactIdentity)
+    .where(
+      and(
+        eq(contactIdentity.organizationId, orgId),
+        eq(contactIdentity.contactId, contactId),
+        eq(contactIdentity.channel, "whatsapp"),
+      ),
+    )
+    .orderBy(desc(contactIdentity.isPrimary), asc(contactIdentity.createdAt), asc(contactIdentity.id))
+    .limit(1)
+  if (!identity) return null
+  if (!(await hasConsent(tx, orgId, contactId, purpose, identity.channel))) return null
+  const connections = await tx
+    .select({ id: channelConnection.id })
+    .from(channelConnection)
+    .where(
+      and(
+        eq(channelConnection.organizationId, orgId),
+        eq(channelConnection.channel, identity.channel),
+        eq(channelConnection.status, "active"),
+      ),
+    )
+    .orderBy(asc(channelConnection.createdAt), asc(channelConnection.id))
+    .limit(5)
+  for (const connection of connections) {
+    const [thread] = await tx
+      .select({ id: conversation.id })
+      .from(conversation)
+      .where(
+        and(
+          eq(conversation.organizationId, orgId),
+          eq(conversation.contactId, contactId),
+          eq(conversation.contactIdentityId, identity.id),
+          eq(conversation.channelConnectionId, connection.id),
+        ),
+      )
+      .limit(1)
+    if (thread) return null
+    let templates: { name: string; language: string }[]
+    try {
+      templates = await getConnectionTemplates(tx, orgId, connection.id, secretsKey)
+    } catch {
+      // Configuración ilegible (clave rotada, dato corrupto): esa conexión no
+      // sirve, pero no puede tumbar el tick de la organización.
+      continue
+    }
+    const template = templates.find((t) => FOLLOW_UP_TEMPLATE.test(t.name))
+    if (template) {
+      return { identityId: identity.id, connectionId: connection.id, channel: identity.channel, template }
+    }
+  }
+  return null
+}
+
 /**
  * Convierte una próxima acción comercial vencida en una sola decisión durable.
  * No agenda otra reiteración: una nueva coordinación exige que una persona
  * vuelva a fijar `nextActionAt`.
+ *
+ * Sin conversación vinculada, el agente no conversa: si existe un canal con
+ * plantillas y consentimiento, propone al equipo abrir el hilo con la plantilla
+ * aprobada (sin modelo, determinista) y la propuesta espera en el panel; si no,
+ * deriva a una persona como siempre.
  */
 export async function syncOverdueCommercialFollowUps(
   tx: Db,
   orgId: string,
   now: Date,
+  opts: { secretsKey?: Buffer } = {},
 ): Promise<SyncSummary> {
+  await reconcileProposedCoordinations(tx, orgId)
   const rows = await tx
     .select({
       taskId: crmTask.id,
@@ -816,6 +918,12 @@ export async function syncOverdueCommercialFollowUps(
         lte(crmTask.dueAt, now),
         eq(opportunity.status, "open"),
         sql`${opportunity.nextActionAt} = ${crmTask.dueAt}`,
+        // Lo ya coordinado para este vencimiento no vuelve a ocupar el lote:
+        // con atraso acumulado, los 25 más antiguos taparían a los nuevos.
+        sql`not exists (
+          select 1 from commercial_follow_up_coordination c
+          where c.organization_id = ${crmTask.organizationId} and c.task_id = ${crmTask.id}
+            and c.trigger_due_at = date_trunc('milliseconds', ${crmTask.dueAt}))`,
       ),
     )
     .orderBy(asc(crmTask.dueAt), asc(crmTask.id))
@@ -823,6 +931,8 @@ export async function syncOverdueCommercialFollowUps(
   const timeZone = await timezoneOf(tx, orgId)
   let programados = 0
   let omitidos = 0
+  // Sin hilo no hay interlocutor que confirme: con esa política se deriva.
+  let coldAllowed: boolean | null = null
   for (const row of rows) {
     if (!row.opportunityId || !row.dueAt) continue
     if (
@@ -836,14 +946,23 @@ export async function syncOverdueCommercialFollowUps(
       continue
     }
     let reason: string | null = null
-    if (!row.conversationId) reason = "La próxima acción no tiene una conversación vinculada"
-    else if (row.agentStatus !== "on") reason = "El agente está desactivado en la conversación"
+    let cold: TemplateChannel | null = null
+    if (!row.conversationId) {
+      reason = "La próxima acción no tiene una conversación vinculada"
+      if (row.contactId && row.agentEnabled && opts.secretsKey) {
+        coldAllowed ??= (await getAutonomyPolicy(tx, orgId)).enviar_mensaje !== "confirmar_usuario"
+        if (coldAllowed) {
+          cold = await findTemplateChannel(tx, orgId, row.contactId, "seguimiento", opts.secretsKey)
+        }
+      }
+    } else if (row.agentStatus !== "on") reason = "El agente está desactivado en la conversación"
     else if (!row.agentEnabled) reason = "El agente está desactivado en la organización"
     else if (!row.channel || row.connectionStatus !== "active") reason = "El canal no está disponible"
     else if (!row.contactId || !(await hasConsent(tx, orgId, row.contactId, "seguimiento", row.channel))) {
       reason = "No existe consentimiento vigente para seguimiento en el canal"
     }
-    const recipient = reason ? await failureRecipient(tx, orgId, row.assigneeUserId) : null
+    const derive = reason !== null && cold === null
+    const recipient = derive ? await failureRecipient(tx, orgId, row.assigneeUserId) : null
     const [created] = await tx
       .insert(commercialFollowUpCoordination)
       .values({
@@ -852,24 +971,37 @@ export async function syncOverdueCommercialFollowUps(
         opportunityId: row.opportunityId,
         conversationId: row.conversationId,
         triggerDueAt: row.dueAt,
-        status: reason ? "derivada" : "pendiente",
-        reason,
-        result: reason ? { code: "HUMAN_REQUIRED" } : null,
-        nextResponsibleKind: reason ? (recipient ? "user" : "team") : "agent",
+        status: derive ? "derivada" : cold ? "propuesta" : "pendiente",
+        reason: derive ? reason : null,
+        result: derive ? { code: "HUMAN_REQUIRED" } : null,
+        nextResponsibleKind: derive ? (recipient ? "user" : "team") : cold ? "team" : "agent",
         nextResponsibleUserId: recipient,
-        decidedAt: reason ? now : null,
+        decidedAt: derive ? now : null,
       })
       .onConflictDoNothing()
       .returning({ id: commercialFollowUpCoordination.id })
     if (!created) continue
-    if (reason) {
+    const deriveCreated = async (why: string) => {
       omitidos++
-      if (recipient) {
+      const who = recipient ?? (await failureRecipient(tx, orgId, row.assigneeUserId))
+      await tx
+        .update(commercialFollowUpCoordination)
+        .set({
+          status: "derivada",
+          reason: why,
+          result: { code: "HUMAN_REQUIRED" },
+          nextResponsibleKind: who ? "user" : "team",
+          nextResponsibleUserId: who,
+          decidedAt: now,
+          updatedAt: now,
+        })
+        .where(eq(commercialFollowUpCoordination.id, created.id))
+      if (who) {
         await createWorkspaceNotification(tx, orgId, {
-          userId: recipient,
+          userId: who,
           dedupeKey: `commercial-coordination:${created.id}`,
           title: "Seguimiento comercial requiere intervención",
-          body: reason,
+          body: why,
           href: `/tasks?task=${row.taskId}`,
           permission: "tasks.read",
         })
@@ -877,8 +1009,58 @@ export async function syncOverdueCommercialFollowUps(
       await audit(tx, orgId, null, "commercial_follow_up.derived", created.id, {
         taskId: row.taskId,
         opportunityId: row.opportunityId,
-        reason,
+        reason: why,
       })
+    }
+    if (derive) {
+      await deriveCreated(reason as string)
+      continue
+    }
+    if (cold) {
+      // Propuesta determinista al equipo: nada sale hasta que una persona la aprueba.
+      const [opp] = await tx
+        .select({ title: opportunity.title, note: opportunity.nextActionNote })
+        .from(opportunity)
+        .where(and(eq(opportunity.id, row.opportunityId), eq(opportunity.organizationId, orgId)))
+        .limit(1)
+      try {
+        const proposal = await createProposal(tx, orgId, {
+          contactId: row.contactId as string,
+          action: "enviar_mensaje",
+          payload: {
+            kind: "template",
+            name: cold.template.name,
+            language: cold.template.language,
+            connectionId: cold.connectionId,
+            identityId: cold.identityId,
+            opportunityId: row.opportunityId,
+            followUpDueAt: row.dueAt.toISOString(),
+          },
+          reason: `Seguimiento vencido sin conversación (${opp?.title ?? "oportunidad"}${opp?.note ? `: ${opp.note}` : ""}). Abrir WhatsApp con la plantilla aprobada «${cold.template.name}».`,
+          idempotencyKey: `commercial-coordination:${created.id}`,
+          requireTeamDecision: true,
+        })
+        await tx
+          .update(commercialFollowUpCoordination)
+          .set({
+            reason: proposal.reason,
+            result: { proposalId: proposal.id, proposalStatus: proposal.status },
+            updatedAt: now,
+          })
+          .where(eq(commercialFollowUpCoordination.id, created.id))
+        await audit(tx, orgId, null, "commercial_follow_up.proposed", created.id, {
+          taskId: row.taskId,
+          opportunityId: row.opportunityId,
+          proposalId: proposal.id,
+        })
+        programados++
+      } catch (error) {
+        // Regla de dominio (p. ej. otra propuesta proactiva pendiente para el
+        // contacto): deriva. Un conflicto de clave nace de un error SQL que ya
+        // abortó la transacción: se propaga y el siguiente tick lo reintenta.
+        if (!(error instanceof ServiceError) || error.code === "PROPOSAL_CONFLICT") throw error
+        await deriveCreated(`${reason}. ${error.message}`)
+      }
       continue
     }
     if (!row.conversationId) throw new Error("La coordinación encolable perdió su conversación")
@@ -2027,7 +2209,9 @@ export async function tickAutomations(
     // Secuencial: las sincronizaciones comparten la transacción del tenant.
     const synced = await withOrgContext(appDb, orgId, async (tx) => {
       let total = 0
-      const commercial = await syncOverdueCommercialFollowUps(tx, orgId, now)
+      const commercial = await syncOverdueCommercialFollowUps(tx, orgId, now, {
+        secretsKey: deps.secretsKey,
+      })
       total += (await syncAppointmentReminders(tx, orgId, now, deps.publicBaseUrl)).programados
       total += (await syncBudgetFollowUps(tx, orgId, now)).programados
       total += (await syncVisitFollowUps(tx, orgId, now)).programados

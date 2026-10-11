@@ -33,6 +33,10 @@ export const common = {
     search: "Buscar ciudad o zona horaria…",
     empty: "Sin coincidencias",
   },
+  sidePanel: {
+    label: "Panel lateral",
+    resize: "Redimensionar panel",
+  },
   confirm: {
     unsavedMessage: "Tienes cambios sin guardar. ¿Deseas descartarlos?",
   },
