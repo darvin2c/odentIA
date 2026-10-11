@@ -5,6 +5,7 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
+  Skeleton,
   toast,
 } from "@odentia/ui"
 import {
@@ -740,11 +741,24 @@ function AgendaPage() {
     </Button>
   ) : null
 
-  const loading = !resources || availabilityQuery.isLoading || appointmentsQuery.isLoading
+  const loading =
+    !resources || appointmentsQuery.data == null || availabilityQuery.data == null
   const noSchedules =
     resources != null && availability != null && availability.professionals.length === 0
   const noChairs = resources != null && resources.chairs.length === 0
-  const failed = resourcesQuery.isError || appointmentsQuery.isError || availabilityQuery.isError
+  const hasData = resources != null && appointmentsQuery.data != null && availability != null
+  const readFailed =
+    resourcesQuery.isError || appointmentsQuery.isError || availabilityQuery.isError
+  // Si falla una recarga se conserva lo que ya estaba en pantalla y se ofrece reintentar.
+  const failed = readFailed && !hasData
+  const stale = readFailed && hasData
+  const refreshing =
+    hasData && !readFailed && (appointmentsQuery.isFetching || availabilityQuery.isFetching)
+  const retry = () => {
+    void resourcesQuery.refetch()
+    void appointmentsQuery.refetch()
+    void availabilityQuery.refetch()
+  }
   // Falta lo básico para reservar y no hay nada que mostrar: se dice qué falta y cómo resolverlo.
   const setupMissing = (noChairs || noSchedules) && appointments.length === 0
   /** Primer día con atención después del que se mira, para no dejar a nadie ante un día vacío. */
@@ -908,7 +922,7 @@ function AgendaPage() {
               onChange={(id) => sede.choose(id, { who: undefined, group: undefined })}
             />
           ) : (
-            "Cargando…"
+            <Skeleton className="h-4 w-28" />
           )
         }
         actions={
@@ -962,6 +976,7 @@ function AgendaPage() {
         summary={
           view === "semana" ? undefined : `${dayStanding} ${dayStanding === 1 ? "cita" : "citas"}`
         }
+        refreshing={refreshing}
         onPrevious={small && view !== "semana" ? undefined : () => goTo(addDays(day, -step))}
         onNext={small && view !== "semana" ? undefined : () => goTo(addDays(day, step))}
         onToday={small ? undefined : () => goTo(today)}
@@ -1034,15 +1049,20 @@ function AgendaPage() {
         />
       ) : null}
 
+      {stale ? (
+        <p role="alert" className="text-sm text-destructive">
+          No se pudo actualizar la agenda; se muestra lo último que se cargó.{" "}
+          <Button variant="outline" size="sm" onClick={retry}>
+            Reintentar
+          </Button>
+        </p>
+      ) : null}
+
       {failed ? (
         framed(
           <ErrorState
             title="No se pudo cargar la agenda"
-            onRetry={() => {
-              void resourcesQuery.refetch()
-              void appointmentsQuery.refetch()
-              void availabilityQuery.refetch()
-            }}
+            onRetry={retry}
           />,
         )
       ) : loading ? (

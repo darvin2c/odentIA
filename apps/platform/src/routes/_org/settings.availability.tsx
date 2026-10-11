@@ -1,13 +1,25 @@
 import { createFileRoute, Link } from "@tanstack/react-router"
-import { Badge, Button, FieldLabel, RadioGroup, RadioGroupItem, cn, toast } from "@odentia/ui"
 import {
+  Badge,
+  Button,
+  cn,
+  FieldLabel,
+  RadioGroup,
+  RadioGroupItem,
+  Skeleton,
+  toast,
+} from "@odentia/ui"
+import {
+  DataRefreshMarker,
   dayMinutesIn,
   formatDateLong,
   formatSpan,
   hourLabel,
+  LoadingState,
   PageHeader,
   ScheduleResourceChips,
   scheduleToneAt,
+  SubmitButton,
   zonedDateOf,
 } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
@@ -188,7 +200,7 @@ function AvailabilityPage() {
         }
       />
       {!resources ? (
-        <p className="text-sm text-muted-foreground">Cargando…</p>
+        <LoadingState message="Cargando horarios y ausencias…" />
       ) : (
         <>
           <GroupTitle
@@ -219,12 +231,13 @@ function AvailabilityPage() {
                 ) : null}
                 {canConfigure ? (
                   <div>
-                    <Button
-                      disabled={!schedule.dirty || schedule.saving}
+                    <SubmitButton
+                      disabled={!schedule.dirty}
+                      pending={schedule.saving}
                       onClick={() => schedule.save()}
                     >
                       Guardar horario
-                    </Button>
+                    </SubmitButton>
                   </div>
                 ) : null}
               </section>
@@ -251,7 +264,9 @@ function AvailabilityPage() {
                     ) : null
                   }
                 />
-                {absences.length === 0 ? (
+                {blocksQuery.isPending ? (
+                  <Skeleton className="h-9 w-full" />
+                ) : absences.length === 0 ? (
                   <p className="text-sm text-muted-foreground">
                     Sin vacaciones ni permisos en los próximos {AHEAD_DAYS} días.
                   </p>
@@ -331,9 +346,12 @@ function AvailabilityPage() {
             </section>
 
             <section className={CARD}>
-              <h3 id="duracion-regular" className="flex min-h-9 items-center font-semibold">
-                Duración de una cita regular
-              </h3>
+              <div className="flex min-h-9 flex-wrap items-center gap-x-3">
+                <h3 id="duracion-regular" className="min-w-0 flex-1 font-semibold">
+                  Duración de una cita regular
+                </h3>
+                {durationMutation.isPending ? <DataRefreshMarker message="Guardando…" /> : null}
+              </div>
               <RadioGroup
                 aria-labelledby="duracion-regular"
                 className="flex flex-wrap gap-2"
@@ -377,7 +395,9 @@ function AvailabilityPage() {
                 ) : null
               }
             />
-            {closures.length === 0 ? (
+            {blocksQuery.isPending ? (
+              <Skeleton className="h-9 w-full" />
+            ) : closures.length === 0 ? (
               <p className="text-sm text-muted-foreground">
                 Sin feriados ni cierres en los próximos {AHEAD_DAYS} días.
               </p>
@@ -483,16 +503,18 @@ function BlockRow({
       </span>
       {note}
       {canConfigure ? (
-        <Button
+        <SubmitButton
           variant="ghost"
           size="sm"
           className="text-muted-foreground"
-          aria-label={`Quitar ${reason}: ${when}`}
-          disabled={deleteMutation.isPending}
+          pending={deleteMutation.isPending}
           onClick={() => deleteMutation.mutate()}
         >
           Quitar
-        </Button>
+          <span className="sr-only">
+            {reason}: {when}
+          </span>
+        </SubmitButton>
       ) : null}
       {error ? (
         <span role="alert" className="w-full text-xs text-destructive">

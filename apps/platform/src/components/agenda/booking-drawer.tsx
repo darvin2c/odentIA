@@ -20,6 +20,7 @@ import {
   type ScheduleColumn,
   type SchedulePreview,
   type ScheduleRangeValue,
+  SubmitButton,
 } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
@@ -240,6 +241,12 @@ export function BookingDrawer({
     },
   })
 
+  const startRegistering = () => {
+    // Lo que ya se tecleó al buscar sirve de punto de partida.
+    const [first = "", ...rest] = patientQuery.trim().split(/\s+/)
+    setNewPatient({ givenNames: first, surname: rest.join(" ") })
+    setRegistering(true)
+  }
   const hasPatient = registering
     ? Boolean(newPatient.givenNames.trim() && newPatient.surname.trim())
     : Boolean(patientId)
@@ -376,18 +383,23 @@ export function BookingDrawer({
                   setPatientId(next)
                 }}
                 onQueryChange={setPatientQuery}
+                empty={
+                  canRegister && patientQuery.trim().length >= 2 ? (
+                    <span className="grid w-full gap-1.5 px-2">
+                      <span>Nadie se llama así.</span>
+                      <Button variant="outline" size="sm" onClick={startRegistering}>
+                        Registrar a {patientQuery.trim()}
+                      </Button>
+                    </span>
+                  ) : undefined
+                }
               />
               {canRegister ? (
                 <Button
                   variant="ghost"
                   size="sm"
                   className="-ml-2.5 justify-self-start text-primary"
-                  onClick={() => {
-                    // Lo que ya se tecleó al buscar sirve de punto de partida.
-                    const [first = "", ...rest] = patientQuery.trim().split(/\s+/)
-                    setNewPatient({ givenNames: first, surname: rest.join(" ") })
-                    setRegistering(true)
-                  }}
+                  onClick={startRegistering}
                 >
                   Registrar paciente nuevo
                 </Button>
@@ -446,9 +458,10 @@ export function BookingDrawer({
           </DialogHeader>
           <div className="grid gap-2">
             {nextFree && shown ? (
-              <Button
+              <SubmitButton
                 className="h-11"
                 disabled={save.isPending}
+                pending={save.isPending && !save.variables?.outsideSchedule}
                 onClick={() =>
                   save.mutate({
                     range: {
@@ -471,7 +484,7 @@ export function BookingDrawer({
                 }
               >
                 Reservar {whenSaid(nextFree.startsAt, timeZone, today)}
-              </Button>
+              </SubmitButton>
             ) : null}
             <Button variant="outline" className="h-11" onClick={() => setUrgent(false)}>
               Ver otros huecos
@@ -479,14 +492,15 @@ export function BookingDrawer({
           </div>
           <div className="flex items-center gap-2 border-t pt-3">
             <span className="flex-1 text-sm text-muted-foreground">¿Es una urgencia?</span>
-            <Button
+            <SubmitButton
               variant="ghost"
               className="text-warning-foreground"
               disabled={save.isPending}
+              pending={save.isPending && save.variables?.outsideSchedule === true}
               onClick={() => shown && save.mutate({ range: shown, outsideSchedule: true })}
             >
               Reservar igual a las {shown ? hourLabel(dayMinutesIn(shown.start, timeZone)) : ""}
-            </Button>
+            </SubmitButton>
           </div>
         </DialogContent>
       </Dialog>

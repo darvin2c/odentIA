@@ -18,6 +18,7 @@ import {
   StatusIcon,
   statusSurfaceClass,
   statusTextClass,
+  SubmitButton,
   timeRangeLabel,
   zonedDateOf,
 } from "@odentia/ui-patterns"
@@ -231,8 +232,9 @@ export function AppointmentDrawer({
         <Button variant="outline" onClick={back}>
           Volver
         </Button>
-        <Button
-          disabled={!target || unmoved || when.state !== "free" || move.isPending}
+        <SubmitButton
+          disabled={!target || unmoved || when.state !== "free"}
+          pending={move.isPending}
           onClick={() => move.mutate()}
         >
           {!target || unmoved
@@ -240,16 +242,16 @@ export function AppointmentDrawer({
             : targetSaid.startsWith("el ")
               ? `Mover al ${targetSaid.slice(3)}`
               : `Mover a ${targetSaid}`}
-        </Button>
+        </SubmitButton>
       </>
     ) : mode === "edit" ? (
       <>
         <Button variant="outline" onClick={back}>
           Volver
         </Button>
-        <Button disabled={!dirty || save.isPending} onClick={() => save.mutate()}>
+        <SubmitButton disabled={!dirty} pending={save.isPending} onClick={() => save.mutate()}>
           Guardar cambios
-        </Button>
+        </SubmitButton>
       </>
     ) : canWrite ? (
       <>
@@ -338,33 +340,40 @@ export function AppointmentDrawer({
                 {SCHEDULE_AGENDA_LABELS[appointment.status]}
               </span>
               {canWrite && active && !started && appointment.status === "programada" ? (
-                <Button
+                <SubmitButton
                   className="h-11"
                   disabled={busy}
+                  pending={setStatus.isPending && setStatus.variables === "confirmada"}
                   onClick={() => setStatus.mutate("confirmada")}
                 >
-                  <Check aria-hidden />
+                  {setStatus.isPending && setStatus.variables === "confirmada" ? null : (
+                    <Check aria-hidden />
+                  )}
                   Confirmar cita
-                </Button>
+                </SubmitButton>
               ) : null}
               {canWrite && active && started ? (
                 <div className="grid grid-cols-2 gap-2">
-                  <Button
+                  <SubmitButton
                     className="h-11"
                     disabled={busy}
+                    pending={setStatus.isPending && setStatus.variables === "atendida"}
                     onClick={() => setStatus.mutate("atendida")}
                   >
-                    <Check aria-hidden />
+                    {setStatus.isPending && setStatus.variables === "atendida" ? null : (
+                      <Check aria-hidden />
+                    )}
                     Atendida
-                  </Button>
-                  <Button
+                  </SubmitButton>
+                  <SubmitButton
                     variant="outline"
                     className="h-11 bg-card"
                     disabled={busy}
+                    pending={setStatus.isPending && setStatus.variables === "no_asistio"}
                     onClick={() => setStatus.mutate("no_asistio")}
                   >
                     No asistió
-                  </Button>
+                  </SubmitButton>
                 </div>
               ) : null}
               {canWrite && (appointment.status === "no_asistio" || appointment.status === "cancelada") ? (

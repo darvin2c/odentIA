@@ -6,10 +6,11 @@
  * tras el menú. La fila entera abre el detalle.
  */
 
-import { Button, cn } from "@odentia/ui"
+import { cn } from "@odentia/ui"
 import { ChevronDown, ChevronRight } from "lucide-react"
 import * as React from "react"
 
+import { SubmitButton } from "../form/submit-button.js"
 import { type RowActionItem, RowActions } from "../row-actions.js"
 import { formatSpan } from "./occupancy.js"
 import { SCHEDULE_AGENDA_LABELS, StatusIcon, statusSurfaceClass, statusTextClass } from "./status.js"
@@ -164,15 +165,14 @@ function AgendaRow({
       {action || menu.length > 0 ? (
         <div className="relative z-10 flex shrink-0 items-center justify-end gap-1 sm:w-44">
           {action ? (
-            <Button
-              type="button"
+            <SubmitButton
               variant="outline"
               className="h-10 bg-card font-bold text-primary-soft-foreground shadow-xs hover:bg-card/80"
-              disabled={action.pending}
+              pending={action.pending}
               onClick={action.onSelect}
             >
               {action.label}
-            </Button>
+            </SubmitButton>
           ) : null}
           {/* En teléfono, con paso siguiente a la vista, el resto está al abrir la cita. */}
           {menu.length > 0 ? (

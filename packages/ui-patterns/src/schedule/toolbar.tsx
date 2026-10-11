@@ -12,6 +12,7 @@ import { Button, cn } from "@odentia/ui"
 import { ChevronLeft, ChevronRight } from "lucide-react"
 import type * as React from "react"
 
+import { DataRefreshMarker } from "../loading-state.js"
 export interface ScheduleViewOption {
   id: string
   label: string
@@ -30,6 +31,8 @@ export interface ScheduleToolbarProps {
   rangeControl?: React.ReactNode
   /** Lo que conviene saber del periodo («18 citas · 5 por confirmar»). */
   summary?: string
+  /** Se están volviendo a pedir datos que ya están en pantalla: lo dice sin quitarlos. */
+  refreshing?: boolean
   onPrevious?: () => void
   onNext?: () => void
   onToday?: () => void
@@ -53,6 +56,7 @@ export function ScheduleToolbar({
   rangeLabel,
   rangeControl,
   summary,
+  refreshing = false,
   onPrevious,
   onNext,
   onToday,
@@ -108,6 +112,7 @@ export function ScheduleToolbar({
           <span className="min-w-0 truncate text-lg font-bold tracking-tight">{rangeLabel}</span>
         )}
         {summary ? <span className="text-sm text-muted-foreground">{summary}</span> : null}
+        {refreshing ? <DataRefreshMarker /> : null}
       </div>
 
       {hasViews ? (

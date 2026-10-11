@@ -1,4 +1,10 @@
-import { Button, cn, Input, toast } from "@odentia/ui"
+import {
+  Button,
+  cn,
+  Input,
+  Skeleton,
+  toast,
+} from "@odentia/ui"
 import {
   ConfirmDialog,
   FormDrawer,
@@ -167,7 +173,13 @@ export function WeeklyScheduleFields({
   stacked?: boolean
 }) {
   if (!schedule.ready) {
-    return <p className="text-sm text-muted-foreground">Cargando el horario…</p>
+    return (
+      <div role="status" aria-label="Cargando el horario…" className="grid gap-2 py-2">
+        {WEEK.map((day) => (
+          <Skeleton key={day.weekday} className="h-10 w-full" />
+        ))}
+      </div>
+    )
   }
   return (
     <div className="grid">

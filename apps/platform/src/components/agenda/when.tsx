@@ -4,9 +4,11 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
+  Skeleton,
 } from "@odentia/ui"
 import {
   addDays,
+  DataRefreshMarker,
   DatePickerButton,
   dayRangeOf,
   formatDateLong,
@@ -19,9 +21,9 @@ import {
   type ScheduleRangeMarker,
   ScheduleRangePicker,
   type ScheduleRangeState,
+  scheduleRangeState,
   type ScheduleRangeValue,
   ScheduleResourceChips,
-  scheduleRangeState,
   weekDates,
   zonedDateOf,
 } from "@odentia/ui-patterns"
@@ -376,7 +378,9 @@ export function WhenFields({ when }: { when: WhenState }) {
           onPrevious={() => when.goToDate(addDays(date, -7) < today ? today : addDays(date, -7))}
           onNext={() => when.goToDate(addDays(date, 7))}
         />
-        {when.team.length === 0 && when.ready ? (
+        {!when.ready && !when.failed ? (
+          <Skeleton className="h-56 w-full rounded-2xl" />
+        ) : when.team.length === 0 && when.ready ? (
           <p className="rounded-xl border border-dashed p-3 text-sm text-muted-foreground">
             Ningún profesional tiene horario en esta sede. Sin horario no se puede reservar.
           </p>
@@ -428,13 +432,13 @@ export function WhenFields({ when }: { when: WhenState }) {
               </DropdownMenu>
             )}
           </div>
+        ) : when.loading ? (
+          <DataRefreshMarker message="Buscando horas libres…" />
         ) : (
           <p className="text-sm text-muted-foreground">
-            {when.loading
-              ? "Buscando horas libres…"
-              : moving
-                ? "Ese día no queda un hueco donde quepa la cita. Prueba otro día."
-                : "No queda nada libre este día. Prueba otro día u otro profesional."}
+            {moving
+              ? "Ese día no queda un hueco donde quepa la cita. Prueba otro día."
+              : "No queda nada libre este día. Prueba otro día u otro profesional."}
           </p>
         )}
         {state === "taken" ? (

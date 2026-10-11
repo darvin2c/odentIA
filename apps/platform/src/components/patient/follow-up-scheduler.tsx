@@ -1,8 +1,10 @@
 import { Button } from "@odentia/ui"
 import {
   FormDrawer,
+  LoadingState,
   ResourceSelect,
   scheduleToneAt,
+  SubmitButton,
   useScheduleNow,
   zonedDateOf,
 } from "@odentia/ui-patterns"
@@ -89,7 +91,7 @@ export function FollowUpScheduler({
           </Button>
         </p>
       ) : (
-        <p role="status">Cargando recursos de agenda…</p>
+        <LoadingState message="Cargando la agenda…" />
       )}
     </FormDrawer>
   )
@@ -234,19 +236,24 @@ function ScheduleForm({
               </span>{" "}
               <span className="text-muted-foreground">con {shortName(item.dentistName)}</span>
             </span>
-            <Button
+            <SubmitButton
               variant="outline"
               size="sm"
               className="bg-card"
               disabled={schedule.isPending}
-              aria-label={`Usar la cita de ${whenSaid(item.startsAt, timeZone, today)} para este control`}
+              pending={
+                schedule.isPending &&
+                schedule.variables !== undefined &&
+                "appointmentId" in schedule.variables &&
+                schedule.variables.appointmentId === item.id
+              }
               onClick={() => {
                 setError(null)
                 schedule.mutate({ appointmentId: item.id })
               }}
             >
               Usar esa cita
-            </Button>
+            </SubmitButton>
           </div>
         ))}
         <ResourceSelect

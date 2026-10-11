@@ -27,6 +27,7 @@ export function ResourceSelect({
   value,
   onChange,
   onQueryChange,
+  empty,
 }: {
   id: string
   label: string
@@ -35,6 +36,12 @@ export function ResourceSelect({
   onChange: (value: string) => void
   /** Opcional: avisa del texto de búsqueda para recargar opciones en servidor. */
   onQueryChange?: (query: string) => void
+  /**
+   * Lo que se ofrece cuando la búsqueda no encuentra a nadie, en lugar de «Sin
+   * resultados.»: la lista vacía tapa lo que hay debajo del campo, así que la
+   * salida (p. ej. registrar a quien se busca) tiene que ir dentro.
+   */
+  empty?: React.ReactNode
 }) {
   // Lo elegido se conserva aunque la búsqueda en servidor deje de devolverlo. Sin esto,
   // el campo se vacía, la búsqueda vuelve a traerlo y el campo se rellena, sin fin.
@@ -61,7 +68,7 @@ export function ResourceSelect({
       >
         <ComboboxInput id={id} placeholder={`Buscar ${label.toLocaleLowerCase("es")}…`} />
         <ComboboxContent>
-          <ComboboxEmpty>Sin resultados.</ComboboxEmpty>
+          <ComboboxEmpty>{empty ?? "Sin resultados."}</ComboboxEmpty>
           <ComboboxList>
             {(item: ResourceSelectOption) => (
               <ComboboxItem key={item.id} value={item}>

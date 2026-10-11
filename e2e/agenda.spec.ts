@@ -587,8 +587,10 @@ test("agenda: duración de una cita regular, paciente nuevo y urgencia fuera de 
   // Paciente nuevo: se registra con lo mínimo sin salir de «Nueva cita».
   await gotoHydrated(page, tenant(owner.org.slug, "/agenda"))
   await openBooking(page)
+  await expect(page.getByRole("button", { name: "Registrar paciente nuevo" })).toBeVisible()
   await page.getByLabel("Paciente", { exact: true }).fill("Rosa Quispe")
-  await page.getByRole("button", { name: "Registrar paciente nuevo" }).click()
+  // Si no existe, registrarla se ofrece ahí mismo, donde antes solo decía «Sin resultados».
+  await page.getByRole("button", { name: "Registrar a Rosa Quispe" }).click()
   // Lo tecleado al buscar ya viene puesto.
   await expect(page.getByLabel("Nombres", { exact: true })).toHaveValue("Rosa")
   await expect(page.getByLabel("Apellidos", { exact: true })).toHaveValue("Quispe")
