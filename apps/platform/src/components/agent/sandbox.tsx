@@ -1,5 +1,5 @@
 import { Button, Field, FieldLabel, Textarea } from "@odentia/ui"
-import { SubmitButton } from "@odentia/ui-patterns"
+import { DataRefreshMarker, SubmitButton } from "@odentia/ui-patterns"
 import { useMutation } from "@tanstack/react-query"
 import { CircleAlert, CircleCheck } from "lucide-react"
 import { type FormEvent, useState } from "react"
@@ -135,7 +135,11 @@ export function AgentSandbox({ onTested }: { onTested?: () => void }) {
               {turn.result ? <TurnDetail result={turn.result} /> : null}
             </li>
           ))}
-          {send.isPending ? <li className="text-sm text-muted-foreground">El agente está respondiendo…</li> : null}
+          {send.isPending ? (
+            <li>
+              <DataRefreshMarker message="El agente está respondiendo…" />
+            </li>
+          ) : null}
         </ol>
       )}
 

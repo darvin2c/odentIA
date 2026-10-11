@@ -133,7 +133,7 @@ export function RecommendationDrawer({ recommendationKey, onClose }: { recommend
   return (
     <DetailDrawer open title="Recomendación del asesor" description={item?.title} onClose={close} isSubmitting={createTasks.isPending}>
       {query.isPending ? (
-        <LoadingState message="Calculando con tus datos de ahora…" />
+        <LoadingState kind="indeterminate" message="Calculando con tus datos de ahora…" />
       ) : query.isError || !item ? (
         <QueryErrorState error={query.error} onRetry={() => void query.refetch()} />
       ) : (
@@ -338,7 +338,7 @@ export function AdvisorPreview() {
     queryFn: () => apiFetch<{ data: AdvisorView }>("/api/agent/advisor/preview"),
     retry: false,
   })
-  if (query.isPending) return <LoadingState message="Calculando con tus datos de ahora…" />
+  if (query.isPending) return <LoadingState kind="indeterminate" message="Calculando con tus datos de ahora…" />
   if (query.isError) return <QueryErrorState error={query.error} onRetry={() => void query.refetch()} />
   const items = query.data.data.recommendations
   return (

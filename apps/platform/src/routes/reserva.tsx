@@ -131,7 +131,7 @@ function BookingRegistration({ slug, registrationToken, onRegistered }: { slug: 
     retry: false,
     staleTime: 30_000,
   })
-  if (infoQuery.isPending) return <LoadingState message="Cargando el formulario…" />
+  if (infoQuery.isPending) return <LoadingState kind="indeterminate" message="Cargando el formulario…" />
   if (infoQuery.isError) {
     return <ErrorState title="No pudimos cargar el formulario" message="Vuelve a intentarlo en un momento." onRetry={() => void infoQuery.refetch()} />
   }
@@ -345,7 +345,7 @@ function BookingLinkPage() {
   if (viewQuery.isPending) {
     return (
       <PageShell maxWidth="md">
-        <LoadingState message="Cargando los horarios…" />
+        <LoadingState kind="indeterminate" message="Abriendo tu enlace…" />
       </PageShell>
     )
   }
@@ -534,7 +534,7 @@ function BookingLinkPage() {
               </div>
 
               {slotsQuery.isPending ? (
-                <LoadingState message="Buscando horarios libres…" />
+                <LoadingState kind="indeterminate" message="Buscando horarios libres…" />
               ) : slotsQuery.isError ? (
                 <ErrorState title="No pudimos cargar los horarios" message="Vuelve a intentarlo en un momento." onRetry={() => void slotsQuery.refetch()} />
               ) : activeDay === undefined ? (

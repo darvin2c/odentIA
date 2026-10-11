@@ -1,5 +1,5 @@
 import { Button, Checkbox, Field, FieldLabel, Input, Textarea } from "@odentia/ui"
-import { FormDrawer } from "@odentia/ui-patterns"
+import { FormDrawer, SubmitButton } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { type FormEvent, useEffect, useState } from "react"
 import {
@@ -269,16 +269,16 @@ export function LessonDrawer({ lessonId, canWrite, onClose }: { lessonId: string
                   </ul>
                 ) : canWrite ? (
                   <>
-                    <Button
+                    <SubmitButton
                       type="button"
                       variant="outline"
                       size="sm"
                       className="min-h-11 self-start sm:min-h-8"
-                      disabled={preview.isPending}
+                      pending={preview.isPending}
                       onClick={() => preview.mutate()}
                     >
-                      {preview.isPending ? "Respondiendo…" : active ? "Ver cómo respondería sin ella" : "Ver cómo respondería con ella"}
-                    </Button>
+                      {active ? "Ver cómo respondería sin ella" : "Ver cómo respondería con ella"}
+                    </SubmitButton>
                     <p className="text-xs text-muted-foreground">
                       Vuelve a responder la pregunta que la originó y los casos que tocan el tema. Usa el modelo: tarda unos segundos.
                     </p>

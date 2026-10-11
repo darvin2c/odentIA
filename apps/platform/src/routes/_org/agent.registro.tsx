@@ -413,7 +413,7 @@ function AgentSupervisionPage() {
               {conversationId && !conversations.some(item => item.id === conversationId) && <option value={conversationId}>Caso seleccionado desde la bandeja</option>}
               {conversations.map(item => <option key={item.id} value={item.id}>{item.contact.displayName} · {channelLabel(item.connection.channel)} · {item.connection.displayName}</option>)}
             </select>
-            {conversationsQuery.isPending ? <p className="text-sm text-muted-foreground">Cargando conversaciones…</p> : conversationsQuery.isError ? <p role="alert" className="text-sm">No pudimos cargar las conversaciones. <button type="button" className="underline" onClick={() => void conversationsQuery.refetch()}>Volver a intentar</button></p> : conversations.length === 0 ? <p className="text-sm text-muted-foreground">No hay conversaciones para esta búsqueda.</p> : null}
+            {conversationsQuery.isPending ? <LoadingState message="Cargando conversaciones…" /> : conversationsQuery.isError ? <p role="alert" className="text-sm">No pudimos cargar las conversaciones. <button type="button" className="underline" onClick={() => void conversationsQuery.refetch()}>Volver a intentar</button></p> : conversations.length === 0 ? <p className="text-sm text-muted-foreground">No hay conversaciones para esta búsqueda.</p> : null}
             {conversationsQuery.hasNextPage && <Button type="button" variant="outline" disabled={conversationsQuery.isFetchingNextPage} onClick={() => void conversationsQuery.fetchNextPage()}>Cargar más conversaciones</Button>}
             {conversationId && <Link to="/inbox" search={{ conversation: conversationId }} className="text-sm text-primary underline">Abrir el caso real</Link>}
           </Field>
