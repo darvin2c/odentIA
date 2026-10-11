@@ -81,7 +81,7 @@ describe("la guía coincide con el código", () => {
     expect(first("¿dónde veo el stock de insumos?")).toBe("inventario")
     expect(first("¿cómo enciendo el agente?")).toBe("agente")
     // Una pregunta frecuente responde con su texto, no con el propósito de la pantalla.
-    expect(matchHelpTopics("¿Cómo bloqueo un horario?")[0]?.faq?.a).toContain("Bloquear horario")
+    expect(matchHelpTopics("¿Cómo bloqueo un horario?")[0]?.faq?.a).toContain("registra una ausencia del profesional")
     // Lo que no está en la guía no se inventa.
     expect(matchHelpTopics("¿Cómo exporto mis pacientes a Excel?")).toEqual([])
     expect(matchHelpTopics("¿Qué tiempo hará mañana?")).toEqual([])

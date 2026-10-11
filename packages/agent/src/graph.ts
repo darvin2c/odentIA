@@ -176,7 +176,7 @@ function receptionPrompt(zone: OrgLocale, cfg: AgentConfig): string {
       : "NO das diagnósticos ni inventas precios, sedes o disponibilidad.",
     on("informar") ? null : whenOff("informar"),
     on("agendar")
-      ? "Para buscar huecos usa el id exacto de la sede que figura en «Sedes» (si no aparece ahí, consúltalo con ver_sedes_y_servicios); reserva con proponer_cita usando los IDs exactos del hueco elegido (sede, sillón, profesional, inicio)."
+      ? "Para buscar huecos usa el id exacto de la sede que figura en «Sedes» (si no aparece ahí, consúltalo con ver_sedes_y_servicios); reserva con proponer_cita usando los IDs exactos del hueco elegido (sede, sillón, profesional, inicio). Si tienes enviar_enlace_cita, ofrece también a quien pide una cita, sea ya paciente o recién se contacte, elegir él mismo el día y la hora en el enlace; es una opción, no una obligación."
       : whenOff("agendar"),
     "Nunca reveles ni pidas historia clínica: solo filiación mínima con ver_contexto_paciente y vínculo verificado; próximas citas, presupuestos y saldo solo con ver_resumen_paciente y según la facultad del interlocutor.",
     on("agendar")
@@ -293,7 +293,7 @@ export function compileAgentGraph(
   // camino más la que le devuelve el resto. La ejecución admite todas: esto
   // acota lo que se envía en cada llamada, no lo que el agente puede hacer.
   const routeTools = toolCtx.route ? ROUTE_TOOLS[toolCtx.route.path] : undefined
-  const widen = routeTools && toolCtx.route
+  const widen = routeTools && toolCtx.route && toolCtx.route.path !== "derivar"
     ? tool(
         async () => {
           toolCtx.widened = true
@@ -302,7 +302,7 @@ export function compileAgentGraph(
         { name: WIDEN_TOOL, description: widenDescription(toolCtx.route.path), schema: z.object({ motivo: z.string().max(200).describe("Qué pide el interlocutor que este camino no cubre.") }) },
       )
     : null
-  const narrowTools = routeTools && widen ? [...tools.filter((item) => routeTools.includes(item.name)), widen] : null
+  const narrowTools = routeTools ? [...tools.filter((item) => routeTools.includes(item.name)), ...(widen ? [widen] : [])] : null
   const bind = (list: unknown[]): Runnable<BaseMessage[], AIMessage> =>
     typeof (model as { bindTools?: unknown }).bindTools === "function"
       ? (model as unknown as { bindTools: (t: unknown[]) => Runnable<BaseMessage[], AIMessage> }).bindTools(list)
@@ -311,7 +311,9 @@ export function compileAgentGraph(
   let bound: Runnable<BaseMessage[], AIMessage> = model
   /** El modelo con la lista del paso: la del camino mientras alcance; todas si pidió el resto o hay una propuesta por confirmar. */
   const modelForStep = (): Runnable<BaseMessage[], AIMessage> => {
-    const want = narrowTools && !toolCtx.widened && !toolCtx.casePending ? "camino" : "todas"
+    // Derivado ya el caso, el turno solo deja el aviso aunque haya una propuesta pendiente.
+    const narrow = toolCtx.route?.path === "derivar" || (!toolCtx.widened && !toolCtx.casePending)
+    const want = narrowTools && narrow ? "camino" : "todas"
     if (boundAs !== want) {
       bound = bind(want === "camino" && narrowTools ? narrowTools : tools)
       boundAs = want

@@ -28,6 +28,8 @@ export interface AgentRoute {
   handoff: number | null
   /** Probabilidad de la intención elegida; nulo si el proveedor no entrega distribución. */
   confidence: number | null
+  /** Urgencia de 0 (sin apuro) a 2 (ahora); nulo si el proveedor no la entrega. */
+  urgency: number | null
 }
 
 const PATH_BY_INTENT: Record<string, RoutePath> = {
@@ -41,17 +43,19 @@ const PATH_BY_INTENT: Record<string, RoutePath> = {
 export function readRoute(result: DecisionResult): AgentRoute {
   const handoffAnswer = answerOf(result, "handoff", "yesno")
   const intentAnswer = answerOf(result, "intent", "choice")
+  const urgencyAnswer = answerOf(result, "urgency", "score")
+  const urgency = urgencyAnswer ? urgencyAnswer.score : null
   const handoff = handoffAnswer ? handoffAnswer.probability : null
   const intent = intentAnswer?.choice ?? null
   const confidence = intentAnswer?.probabilities ? (intentAnswer.probabilities[intentAnswer.choice] ?? null) : null
-  if (handoff !== null && handoff >= ROUTE_HANDOFF) return { path: "derivar", intent, handoff, confidence }
+  if (handoff !== null && handoff >= ROUTE_HANDOFF) return { path: "derivar", intent, handoff, confidence, urgency }
   const path = intent !== null && confidence !== null && confidence >= ROUTE_INTENT ? (PATH_BY_INTENT[intent] ?? "abierto") : "abierto"
-  return { path, intent, handoff, confidence }
+  return { path, intent, handoff, confidence, urgency }
 }
 
 /** Qué se decidió, para el libro de decisiones. Nunca lleva el texto del interlocutor. */
 export function routeOutcome(route: AgentRoute): Record<string, unknown> {
-  return { path: route.path, intent: route.intent, handoff: route.handoff, confidence: route.confidence }
+  return { path: route.path, intent: route.intent, handoff: route.handoff, confidence: route.confidence, urgency: route.urgency }
 }
 
 /**
@@ -64,11 +68,13 @@ export function routeOutcome(route: AgentRoute): Record<string, unknown> {
  */
 const ALWAYS = ["send_reply", "send_template", "request_human_handoff"] as const
 export const ROUTE_TOOLS: Partial<Record<RoutePath, readonly string[]>> = {
+  // El caso ya está derivado: solo queda el aviso, y nada más puede hacerse en este turno.
+  derivar: ["request_human_handoff"],
   informacion: [...ALWAYS, "consultar_conocimiento", "ver_sedes_y_servicios"],
   saludo: [...ALWAYS],
   clinico: [...ALWAYS],
   cita: [
-    ...ALWAYS, "ver_sedes_y_servicios", "consultar_conocimiento", "buscar_huecos", "proponer_cita", "confirmar_propuesta",
+    ...ALWAYS, "ver_sedes_y_servicios", "consultar_conocimiento", "buscar_huecos", "proponer_cita", "enviar_enlace_cita", "confirmar_propuesta",
     "ver_contexto_paciente", "ver_resumen_paciente", "anotar_caso", "recordar_dato",
   ],
   cambio_cita: [
@@ -94,8 +100,34 @@ export function widenDescription(path: RoutePath): string {
   return `Este turno trae solo las herramientas del camino elegido, y con ellas se resuelve casi siempre. Llama a esta, sola en su paso, únicamente si lo que pide el interlocutor es otra cosa (${NOT_IN_PATH[path] ?? "algo que estas herramientas no cubren"}): en el siguiente paso tendrás todas.`
 }
 
-/** Motivo de la derivación por decisión, tal como lo ve el equipo. */
-export const ROUTE_HANDOFF_REASON = "El mensaje pide a una persona o describe algo que el agente no debe atender"
+/**
+ * Cómo llega al equipo un caso que el modelo de decisión pasó a una persona:
+ * qué clase de caso es y con qué prioridad. La urgencia y la intención salen
+ * de lo que la persona escribió; quien toma el caso puede cambiarlas. Un
+ * reclamo nunca entra por debajo de «media».
+ */
+export function routeHandoff(route: AgentRoute): { reason: string; priority: "alta" | "media" | "baja" } {
+  const urgent = route.urgency !== null && route.urgency >= 1.5
+  const reason =
+    route.intent === "complaint"
+      ? "Reclamo"
+      : route.intent === "clinical_question"
+        ? urgent
+          ? "Urgencia clínica"
+          : "Consulta clínica"
+        : urgent
+          ? "Urgencia"
+          : "Pide hablar con una persona"
+  const priority = urgent ? "alta" : route.urgency !== null && route.urgency < 0.5 && route.intent !== "complaint" ? "baja" : "media"
+  return { reason, priority }
+}
+
+/** Aviso que recibe la persona si el modelo que escribe no pudo redactar el suyo: nunca queda sin respuesta. */
+export function handoffFallbackNotice(treatment: "tu" | "usted" | null): string {
+  return treatment === "usted"
+    ? "Recibimos su mensaje. Una persona del equipo le va a responder por aquí."
+    : "Recibimos tu mensaje. Una persona del equipo te va a responder por aquí."
+}
 
 /**
  * Lo que se le dice al modelo que escribe sobre el camino del turno. Va con lo
@@ -110,6 +142,9 @@ export function routeInstruction(path: RoutePath, prefetched?: string | null): s
   }
   if (path === "saludo") {
     return `${head} un saludo, un agradecimiento o un cierre. Responde en este mismo paso con send_reply, breve, sin consultar nada.`
+  }
+  if (path === "derivar") {
+    return `${head} el caso ya pasó a una persona del equipo y el equipo ya recibió el aviso. En este mismo paso llama a request_human_handoff solo para dejar en message el aviso al interlocutor (no se crea otra derivación; en reason y summary basta «Aviso al interlocutor»). El aviso dice, con sus palabras y según lo que contó, que una persona del equipo continuará la atención y qué va a pasar ahora; no le pidas que repita lo que ya escribió; no des consejo clínico ni diagnóstico; no prometas una hora ni un plazo que no figure en este contexto (si aquí están el horario de atención o el teléfono de la sede y vienen al caso, puedes decirlos tal cual).`
   }
   if (path === "clinico") {
     return `${head} una consulta clínica. No des consejo clínico ni diagnóstico. En este mismo paso, pasa el caso a una persona con request_human_handoff y avisa al interlocutor en su campo message.`

@@ -83,7 +83,7 @@ export const AGENT_ROLES: Record<AgentRoleId, AgentRole> = {
         label: "Agendar, mover y cancelar citas",
         description: "Busca horarios reales, reserva con el sí del paciente, reprograma y cancela.",
         fixed: false,
-        tools: ["ver_sedes_y_servicios", "buscar_huecos", "proponer_cita", "reprogramar_cita", "cancelar_cita"],
+        tools: ["ver_sedes_y_servicios", "buscar_huecos", "proponer_cita", "enviar_enlace_cita", "reprogramar_cita", "cancelar_cita"],
         steps: [
           "Confirma la sede y el servicio.",
           "Busca huecos reales en la agenda.",

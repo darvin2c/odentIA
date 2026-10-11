@@ -207,7 +207,7 @@ export async function seedAgent(
         conversationId: first.id,
         contactId: first.contactId,
         reason: "La persona pide hablar con un humano",
-        summary: "Derivación semilla: la persona prefiere atención humana para su cita.",
+        summary: "Escribió: «Hola» · «Prefiero que me atienda una persona para ver mi cita» · «¿Me pueden llamar?»",
         priority: "media",
         createdBy: "agent",
       })

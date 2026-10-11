@@ -89,7 +89,7 @@ test("ayuda: dónde está cada cosa, por qué no puedo, y lo que no sabe se env�
   await mobileButton.click()
   const sheet = page.getByRole("dialog", { name: "Ayuda" })
   await sheet.getByRole("button", { name: "¿Cómo bloqueo un horario?" }).click()
-  await expect(sheet).toContainText("usa «Bloquear horario»")
+  await expect(sheet).toContainText("registra una ausencia del profesional")
   expect(await overflow(page)).toBeLessThanOrEqual(0)
   await info.attach("ayuda-movil", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
 

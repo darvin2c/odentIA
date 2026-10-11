@@ -71,6 +71,7 @@ import { createFileRoute, getRouteApi, Link, useNavigate } from "@tanstack/react
 import {
   AlertCircle,
   Bot,
+  ClipboardList,
   CheckCheck,
   ChevronLeft,
   Clock,
@@ -97,6 +98,7 @@ import {
   useAgentPanelFitsBesideContext,
 } from "../../components/agent-panel"
 import { AnswerTraceDrawer } from "../../components/agent/answer-trace"
+import { CaseBriefDrawer } from "../../components/agent/case-brief"
 import { CorrectDrawer, type CorrectionTarget } from "../../components/agent/correct-drawer"
 import type { AnswerTrace } from "../../lib/agent"
 import { ContactWorkspace } from "../../components/crm/contact-workspace"
@@ -917,6 +919,9 @@ function ThreadView({
   // Corregir una respuesta del agente desde el hilo: lo hace quien decide por él o lo administra.
   const canCorrectAgent = usePermission("agent.decide")
   const [correcting, setCorrecting] = useState<CorrectionTarget | null>(null)
+  // Resumen del caso para quien lo toma; guarda la conversación para que no siga abierto al cambiar de hilo.
+  const canClaimCase = usePermission("tasks.write")
+  const [briefFor, setBriefFor] = useState<string | null>(null)
 
   useEffect(() => {
     setOlder([])
@@ -1219,6 +1224,12 @@ function ThreadView({
             </DropdownMenuContent>
           </DropdownMenu>
         )}
+        {threadAttention?.handoffPriority ? (
+          <Button variant="outline" size="sm" onClick={() => setBriefFor(conv.id)}>
+            <ClipboardList className="size-4" />
+            Resumen del caso
+          </Button>
+        ) : null}
         {canWrite && (
           <Button
             variant="outline"
@@ -1295,6 +1306,13 @@ function ThreadView({
         </MessageScroller>
       </MessageScrollerProvider>
 
+      <CaseBriefDrawer
+        conversationId={briefFor === conv.id ? conv.id : null}
+        name={detail.contact.displayName}
+        canClaim={canClaimCase}
+        onClose={() => setBriefFor(null)}
+        onClaimed={() => void detailQuery.refetch()}
+      />
       <AnswerTraceDrawer
         trace={openTrace}
         onClose={() => setOpenTrace(null)}

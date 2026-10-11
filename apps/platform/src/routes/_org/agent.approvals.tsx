@@ -3,6 +3,7 @@ import { ConfirmDialog, EmptyState, LoadingState, PageHeader, PageShell, SubmitB
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, Link } from "@tanstack/react-router"
 import { useState } from "react"
+import { HandoffSummary, HandoffUrgency } from "../../components/agent/handoff-badges"
 import { AgentTabs } from "../../components/agent-tabs"
 import { ApiError, apiFetch } from "../../lib/api"
 import { ACTION_LABEL, permissionForAction, proposalErrorMessage, type AgentHandoff, type AgentProposal } from "../../lib/agent"
@@ -202,16 +203,14 @@ function AgentApprovalsPage() {
             {handoffs.map((handoff) => (
               <li key={handoff.id} className="flex flex-col gap-1 text-sm">
                 <div className="flex flex-wrap gap-2">
-                  <Badge variant={handoff.priority === "alta" ? "destructive" : "secondary"}>
-                    {handoff.priority}
-                  </Badge>
+                  <HandoffUrgency priority={handoff.priority} />
                   <strong>
                     {handoff.contactName ?? "Interlocutor no disponible"}
                     {handoff.channel ? ` · ${channelLabel(handoff.channel)}` : ""}
                   </strong>
                 </div>
-                <p>{handoff.reason}</p>
-                <p className="whitespace-pre-wrap text-muted-foreground">{handoff.summary}</p>
+                <p className="font-semibold">{handoff.reason}</p>
+                <HandoffSummary reason={handoff.reason} summary={handoff.summary} />
                 <p className="text-muted-foreground">
                   {handoff.assigneeUserId ? "Responsable asignado" : "En cola por recoger"}
                   {handoff.dueAt ? ` · vence ${new Date(handoff.dueAt).toLocaleString("es-PE")}` : ""}

@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto"
 import { tool } from "@langchain/core/tools"
 import { type Db, withOrgContext } from "@odentia/db"
+import { organization } from "@odentia/db/schema/auth"
+import { eq } from "drizzle-orm"
 import type { AgentCaseNote, AnswerBasisItem, AnswerCheck, AnswerTraceOutcome, ProposalAction } from "@odentia/db/schema/agent"
 import {
   addAgentCaseNote,
@@ -8,6 +10,8 @@ import {
   type AgentCaseProposal,
   buildAgentProposalKey,
   confirmProposalByContact,
+  BOOKING_LINK_TTL_HOURS,
+  createBookingLink,
   createHandoff,
   createProposal,
   createTask,
@@ -95,6 +99,7 @@ export const TOOL_ACTION_LABEL: Record<string, string> = {
   reprogramar_cita: "Propuso mover una cita.",
   cancelar_cita: "Propuso cancelar una cita.",
   confirmar_propuesta: "Ejecutó lo que el paciente confirmó.",
+  enviar_enlace_cita: "Envió un enlace para que la persona elija su cita.",
   create_opportunity: "Propuso registrar una oportunidad.",
   update_followup: "Propuso programar un seguimiento.",
   close_opportunity: "Propuso cerrar una oportunidad.",
@@ -141,6 +146,11 @@ export interface AgentToolCtx {
   lessonOverrides?: LessonOverrides
   /** Camino que eligió el modelo de decisión para este turno; ausente = camino abierto. */
   route?: AgentRoute | null
+  /**
+   * Dirección pública de la plataforma, para armar enlaces que la persona abre
+   * (reservar su cita). Sin ella el agente no tiene la herramienta del enlace.
+   */
+  publicUrl?: { webURL: string; cookieDomain: string }
   /** Hay una propuesta esperando el sí del interlocutor: el turno recibe todas las herramientas, sea cual sea el camino. */
   casePending?: boolean
   /** El modelo que escribe pidió el resto de herramientas en este turno. */
@@ -205,7 +215,12 @@ export interface AgentToolCtx {
  * tarea), apaga el agente y avisa al equipo. Misma vía para keyword, tool y
  * maxTurns.
  */
-export async function performHandoff(ctx: AgentToolCtx, reason: string, summary?: string): Promise<void> {
+export async function performHandoff(
+  ctx: AgentToolCtx,
+  reason: string,
+  summary?: string,
+  priority: "alta" | "media" | "baja" = "media",
+): Promise<void> {
   if (ctx.dryRun) {
     ctx.decisionRecorded = true
     ctx.handedOff = true
@@ -226,7 +241,7 @@ export async function performHandoff(ctx: AgentToolCtx, reason: string, summary?
       conversationId: ctx.conversationId,
       reason,
       summary: summary?.trim() ? summary : reason,
-      priority: "media",
+      priority,
       createdBy: "agent",
     })
   })
@@ -761,7 +776,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       branchId: string
       from: string
       to: string
-      durationMin: number
+      durationMin?: number
       dentistUserId?: string
       chairId?: string
       serviceId?: string
@@ -771,7 +786,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       const lines = gaps.map((g) => {
         const chair = g.chairId ?? "sin sillón asignado: filtra por un sillón real o deriva"
         return (
-          `- ${g.startsAt} → ${g.endsAt} (${input.durationMin} min, zona ${timeZone})` +
+          `- ${g.startsAt} → ${g.endsAt} (${Math.round((Date.parse(g.endsAt) - Date.parse(g.startsAt)) / 60_000)} min, zona ${timeZone})` +
           ` · sede ${input.branchId} · sillón ${chair} · profesional ${g.dentistUserId}`
         )
       })
@@ -784,15 +799,58 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     {
       name: "buscar_huecos",
       description:
-        "Huecos reales de agenda según horario del profesional y citas ocupantes. Antes de usarla confirma la sede real con ver_sedes_y_servicios y usa su ID exacto: branchId, from/to ISO y durationMin obligatorios. Cada hueco devuelve sede, sillón, profesional, inicio, fin, zona y duración para proponer_cita.",
+        "Huecos reales de agenda según horario del profesional, ausencias, feriados y citas ocupantes. Usa el id exacto de la sede (branchId) y from/to en ISO. No indiques durationMin: con serviceId se usa la duración del servicio y, sin servicio, la de una cita regular en esa sede; indícala solo si el interlocutor pide otra duración. Cada hueco devuelve sede, sillón, profesional, inicio, fin, zona y duración para proponer_cita.",
       schema: z.object({
         branchId: z.string().uuid(),
         from: z.string().min(1),
         to: z.string().min(1),
-        durationMin: z.number().int().min(10).max(480),
+        durationMin: z.number().int().min(10).max(480).optional(),
         dentistUserId: z.string().optional(),
         chairId: z.string().uuid().optional(),
         serviceId: z.string().uuid().optional(),
+      }),
+    },
+  )
+
+  const bookingLink = tool(
+    async (input: { patientId?: string; serviceId?: string; branchId?: string }) => {
+      if (ctx.dryRun) return "[SIMULACIÓN] Se crearía un enlace para que la persona elija su cita. Dile que lo recibirá y ofrece también seguir por aquí."
+      const publicUrl = ctx.publicUrl
+      if (!publicUrl) return "El enlace de reserva no está disponible: propón horarios por aquí con buscar_huecos."
+      try {
+        const { link, slug } = await inOrg(async (tx) => {
+          const [org] = await tx.select({ slug: organization.slug }).from(organization).where(eq(organization.id, ctx.orgId)).limit(1)
+          return { link: await createBookingLink(tx, ctx.orgId, { conversationId: ctx.conversationId, ...input }), slug: org?.slug ?? null }
+        })
+        if (!slug) return "La clínica no tiene dirección pública: propón horarios por aquí con buscar_huecos."
+        const url = new URL(publicUrl.webURL)
+        url.hostname = `${slug}.${publicUrl.cookieDomain.replace(/^\./, "")}`
+        url.pathname = "/reserva"
+        url.search = ""
+        url.hash = ""
+        url.searchParams.set("token", link.token)
+        const who = link.patientName ?? "la persona"
+        const data = link.needsRegistration ? " Como aún no es paciente, la página le pedirá sus datos antes de reservar: díselo." : ""
+        return `Enlace para que ${who} elija su cita viendo los horarios libres (es personal y vale ${BOOKING_LINK_TTL_HOURS} horas): ${url.toString()}\nEnvíalo tal cual con send_reply, en un solo mensaje, y ofrece también seguir por aquí si lo prefiere.${data} Cuando reserve, el sistema se lo confirma en esta conversación y queda en el estado del caso: no vuelvas a proponer horarios.`
+      } catch (error) {
+        if (error instanceof ServiceError && error.code === "BOOKING_NEEDS_PATIENT") {
+          return "La persona aún no es paciente y la clínica no tiene activo el registro de pacientes en línea: no puede reservar desde un enlace. Sigue por aquí o pasa el caso a una persona para completar sus datos."
+        }
+        if (error instanceof ServiceError && error.code === "BOOKING_PATIENT_AMBIGUOUS") {
+          return "La persona tiene varios pacientes vinculados: pregunta para quién es la cita y vuelve a llamar con su patientId (de ver_contexto_paciente)."
+        }
+        if (error instanceof ServiceError) return `No se pudo crear el enlace: ${error.message}. Propón horarios por aquí.`
+        throw error
+      }
+    },
+    {
+      name: "enviar_enlace_cita",
+      description:
+        "Crea un enlace personal para que la persona elija ella misma el día y la hora de su cita viendo los horarios libres, en vez de ir y venir por el chat. Sirve a quien ya es paciente y a quien recién se contacta (este completa sus datos en la misma página). Es una opción: también puedes reservar por aquí. Indica serviceId y branchId si ya se habló de un servicio o una sede (ids exactos de «Sedes» y «Servicios»); patientId solo si tiene varios pacientes vinculados. La página no muestra precios. No reserva nada por sí sola: la cita la crea la persona al elegir.",
+      schema: z.object({
+        patientId: z.string().uuid().optional(),
+        serviceId: z.string().uuid().optional(),
+        branchId: z.string().uuid().optional(),
       }),
     },
   )
@@ -1162,6 +1220,15 @@ export function makeAgentTools(ctx: AgentToolCtx) {
         await performHandoff(ctx, reason, summary)
         return "Derivado a una persona usando el pendiente existente. No envíes más mensajes."
       }
+      if (ctx.handedOff) {
+        // El caso ya pasó a una persona en esta corrida (lo decidió el camino):
+        // no se registra otra derivación, solo sale el aviso al interlocutor.
+        if (!notice) return "El caso ya pasó a una persona. Falta el aviso al interlocutor: llama de nuevo con message."
+        const outcome = await propose("enviar_mensaje", { kind: "text", text: notice }, "request_human_handoff")
+        return ctx.replySettled
+          ? "Aviso al interlocutor registrado. No envíes más mensajes."
+          : `El aviso al interlocutor no salió: ${outcome}`
+      }
       const validPriority = priority === "alta" || priority === "baja" ? priority : "media"
       const handoff = await inOrg((tx) =>
         createHandoff(tx, ctx.orgId, null, {
@@ -1211,6 +1278,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     patientContext,
     patientSummary,
     availability,
+    bookingLink,
     proposeBooking,
     rescheduleAppointment,
     cancelAppointmentProposal,
@@ -1222,6 +1290,8 @@ export function makeAgentTools(ctx: AgentToolCtx) {
   return tools.filter(
     (candidate) =>
       (!ctx.allowedTools || ctx.allowedTools.includes(candidate.name)) &&
-      !ctx.excludedTools?.includes(candidate.name),
+      !ctx.excludedTools?.includes(candidate.name) &&
+      // Sin dirección pública configurada no hay página que abrir.
+      (candidate.name !== "enviar_enlace_cita" || Boolean(ctx.publicUrl) || ctx.dryRun),
   )
 }

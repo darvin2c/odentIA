@@ -212,10 +212,14 @@ async function directConversation(tx: Db, orgId: string, conversationId: string,
   return !!row && isDirectThread(row.channel, row.thread, row.sender)
 }
 
+/**
+ * `actorUserId` es quien del equipo lo envía; `null` cuando lo emite el sistema
+ * para que la persona complete sus datos al reservar desde su enlace de cita.
+ */
 export async function createPatientRegistrationLink(
   tx: Db,
   orgId: string,
-  actorUserId: string,
+  actorUserId: string | null,
   input: CreateRegistrationLinkInput,
 ): Promise<{ token: string; expiresAt: Date }> {
   if (!UUID_RE.test(input.contactId) || !UUID_RE.test(input.conversationId)) {

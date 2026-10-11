@@ -1,4 +1,8 @@
+import { createHash, randomBytes } from "node:crypto"
+import { appointment, appointmentBookingLink } from "@odentia/db/schema/agenda"
+import { patientContact } from "@odentia/db/schema/clinical"
 import type { Browser, Page } from "@playwright/test"
+import { eq } from "drizzle-orm"
 import { simulateTelegramInbound } from "./channels"
 import { API, PANEL, tenant } from "./env"
 import { call, expect, fillPatientNames, test } from "./fixtures"
@@ -576,4 +580,71 @@ test("vista previa de configuración no crea pacientes", async ({ createOwner })
   await dialog.getByRole("button", { name: "Cerrar", exact: true }).click()
 
   expect(await call<unknown[]>(page, "GET", "/api/patients", org.slug)).toEqual([])
+})
+
+test("reserva por enlace: quien recién se contacta elige su hora, completa sus datos y queda reservado", async ({
+  owner,
+  browser,
+  nextEventId,
+  fixtureDb,
+}, info) => {
+  const { page, org } = owner
+  // La clínica tiene activo su registro de pacientes: de ahí salen los datos que se piden y el aviso de privacidad.
+  await publishConfig(page, org.slug)
+  await call(page, "POST", "/api/agenda/chairs", org.slug, { branchId: owner.branchId, name: "Sillón 1" }, 201)
+  await call(page, "PUT", "/api/agenda/schedules", org.slug, {
+    branchId: owner.branchId,
+    dentistUserId: owner.user.id,
+    rules: [0, 1, 2, 3, 4, 5, 6].map((weekday) => ({ weekday, startMin: 7 * 60, endMin: 22 * 60 })),
+  }, 200)
+  const tgConn = await call<{ id: string; webhookSecret: string }>(page, "POST", "/api/channels/connections", org.slug, {
+    channel: "telegram", provider: "telegram_bot_api", displayName: "Bot E2E", config: { botToken: "e2e" },
+  }, 201)
+  const tgUser = nextEventId()
+  expect(await simulateTelegramInbound(page, API, tgConn.id, tgConn.webhookSecret, { fromId: tgUser, chatId: tgUser, text: "Hola, quiero una cita", updateId: nextEventId() })).toBe(200)
+  await expect
+    .poll(async () => (await call<{ connection: { id: string } }[]>(page, "GET", "/api/conversations", org.slug)).some((c) => c.connection.id === tgConn.id), { timeout: 30_000 })
+    .toBe(true)
+  const conversation = (await call<{ id: string; contact: { id: string }; connection: { id: string } }[]>(page, "GET", "/api/conversations", org.slug)).find((c) => c.connection.id === tgConn.id)!
+
+  // El enlace que entrega el agente a alguien que aún no es paciente: nace sin ficha.
+  const token = randomBytes(32).toString("hex")
+  await fixtureDb.insert(appointmentBookingLink).values({
+    organizationId: org.id,
+    conversationId: conversation.id,
+    contactId: conversation.contact.id,
+    tokenHash: createHash("sha256").update(token).digest("hex"),
+    expiresAt: new Date(Date.now() + 3_600_000),
+  })
+
+  const { context, page: anon } = await anonymousPage(browser, { width: 390, height: 844 })
+  try {
+    await gotoHydrated(anon, tenant(org.slug, `/reserva?token=${token}`))
+    await expect(anon.getByRole("heading", { name: "Elige tu cita" })).toBeVisible()
+    // Tres pasos: elegir, sus datos y listo.
+    await expect(anon.getByRole("list", { name: "Pasos" }).getByRole("listitem")).toHaveText(["1 · Elige día y hora", "2 · Tus datos", "3 · Listo"])
+    await anon.getByRole("group", { name: /Mañana|Tarde/ }).first().getByRole("button").first().click()
+    await anon.getByRole("button", { name: "Continuar con mis datos" }).click()
+
+    await expect(anon.getByRole("heading", { name: "Tus datos" })).toBeVisible()
+    await expect(anon.getByRole("button", { name: "Cambiar horario" })).toBeVisible()
+    expect(await anon.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0)
+    await info.attach("reserva-tus-datos", { body: await anon.screenshot({ fullPage: true }), contentType: "image/png" })
+    await fillAdultDatos(anon, { name: "Carla Núñez", birthDate: "1990-05-01" })
+    await fillContacto(anon, phoneFromId(nextEventId()))
+    await anon.getByRole("button", { name: "Siguiente", exact: true }).click()
+    await acceptAndSubmit(anon)
+
+    // Con sus datos guardados, la página reserva el horario que ya había elegido.
+    await expect(anon.getByRole("heading", { name: "Tu cita quedó reservada" })).toBeVisible({ timeout: 20_000 })
+    await info.attach("reserva-nuevo-lista", { body: await anon.screenshot({ fullPage: false }), contentType: "image/png" })
+  } finally {
+    await context.close()
+  }
+
+  // La ficha la creó el registro, vinculada a esa persona, y la cita quedó en la agenda con su origen.
+  const rows = await fixtureDb.select().from(appointment).where(eq(appointment.conversationId, conversation.id))
+  expect(rows.map((row) => [row.status, row.source])).toEqual([["programada", "enlace"]])
+  const linked = await fixtureDb.select({ patientId: patientContact.patientId, relationship: patientContact.relationship }).from(patientContact).where(eq(patientContact.contactId, conversation.contact.id))
+  expect(linked).toEqual([{ patientId: rows[0]!.patientId, relationship: "self" }])
 })

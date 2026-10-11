@@ -30,6 +30,7 @@ import {
 import { type QueryClient, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link, useRouterState } from "@tanstack/react-router"
 import { Bot } from "lucide-react"
+import { HandoffSummary, HandoffUrgency } from "./agent/handoff-badges"
 import {
   createContext,
   type ReactNode,
@@ -850,24 +851,13 @@ function HandoffsTab({ when }: { when: WhenFormatter }) {
       ) : null}
       <ul className="flex flex-col gap-3">
         {handoffs.map((handoff) => {
-          const high = handoff.priority === "alta"
           return (
             <li
               key={handoff.id}
               className="flex flex-col gap-2 rounded-2xl border bg-card p-4 text-sm"
             >
               <div className="flex flex-wrap items-center gap-2">
-                <span
-                  aria-hidden
-                  className={
-                    high ? "size-2 rounded-full bg-destructive" : "size-2 rounded-[2px] bg-warning"
-                  }
-                />
-                <span
-                  className={`text-xs font-semibold ${high ? "text-destructive" : "text-warning"}`}
-                >
-                  Prioridad {handoff.priority}
-                </span>
+                <HandoffUrgency priority={handoff.priority} />
                 <Badge variant="secondary">
                   {handoff.status === "tomada" ? "Responsable asignado" : "En cola por recoger"}
                 </Badge>
@@ -881,7 +871,8 @@ function HandoffsTab({ when }: { when: WhenFormatter }) {
                   </span>
                 ) : null}
               </p>
-              <p>{handoff.reason}</p>
+              <p className="font-semibold">{handoff.reason}</p>
+              <HandoffSummary reason={handoff.reason} summary={handoff.summary} />
               {handoff.dueAt ? (
                 <p className="text-xs text-muted-foreground">Vence {when(handoff.dueAt)}</p>
               ) : null}

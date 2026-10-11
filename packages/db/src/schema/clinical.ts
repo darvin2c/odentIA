@@ -173,9 +173,8 @@ export const patientRegistrationLink = pgTable(
     contactId: uuid("contact_id").notNull(),
     conversationId: uuid("conversation_id").notNull(),
     tokenHash: text("token_hash").notNull(),
-    createdBy: text("created_by")
-      .notNull()
-      .references(() => user.id),
+    /** Quién del equipo lo creó; vacío si lo emitió el sistema para un enlace de reserva. */
+    createdBy: text("created_by").references(() => user.id),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
     consumedAt: timestamp("consumed_at", { withTimezone: true }),
     revokedAt: timestamp("revoked_at", { withTimezone: true }),

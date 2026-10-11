@@ -5,6 +5,7 @@ import { Link, createFileRoute } from "@tanstack/react-router"
 import { AlertTriangle, ArrowRight, Bot, CalendarDays, CheckCircle2, CheckSquare, Hand, Inbox, Wallet } from "lucide-react"
 import { useState, type ReactNode } from "react"
 import { AdvisorSection } from "../../components/agent/advisor"
+import { HandoffUrgency } from "../../components/agent/handoff-badges"
 import { type AgentPanelTab, useAgentPanel } from "../../components/agent-panel"
 import { PerformanceSummary } from "../../components/crm/performance-summary"
 import { HomeStart } from "../../components/home-start"
@@ -169,12 +170,11 @@ function HomePage() {
           <p className="text-sm font-semibold">Derivaciones recientes</p>
           <ul className="mt-2 flex flex-wrap gap-2">
             {data.agent.recentHandoffs.map((handoff, index) => {
-              const high = handoff.priority === "alta"
               return <li key={handoff.id} className={index === 0 ? "max-w-full" : "hidden max-w-full sm:list-item"}>
                 <Link to={handoff.conversationId ? "/inbox" : "/agent/approvals"} search={handoff.conversationId ? { conversation: handoff.conversationId } : {}} className="flex min-h-11 max-w-full items-center gap-2 rounded-3xl border bg-card px-3.5 py-1.5 text-sm transition-colors hover:bg-accent/60 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary">
-                  <span aria-hidden className={high ? "size-2 shrink-0 rounded-full bg-destructive" : "size-2 shrink-0 rounded-[2px] bg-warning"} />
+                  <HandoffUrgency priority={handoff.priority} />
                   <span className="min-w-0">{handoff.contactName ? `${handoff.contactName} · ` : ""}{handoff.reason}</span>
-                  <span className={high ? "shrink-0 font-semibold text-destructive" : "shrink-0 font-semibold text-warning"}>Prioridad {handoff.priority}</span>
+                  
                 </Link>
               </li>
             })}

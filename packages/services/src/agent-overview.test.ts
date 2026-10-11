@@ -95,7 +95,7 @@ describe("fichas de los agentes", () => {
   it("una herramienta compartida sigue mientras alguna función encendida la traiga", () => {
     expect(toolsDisabledBy("recepcion", ["informar"])).toEqual(["consultar_conocimiento"])
     expect(toolsDisabledBy("recepcion", ["agendar"]).sort()).toEqual(
-      ["buscar_huecos", "cancelar_cita", "proponer_cita", "reprogramar_cita"].sort(),
+      ["buscar_huecos", "cancelar_cita", "enviar_enlace_cita", "proponer_cita", "reprogramar_cita"].sort(),
     )
     expect(toolsDisabledBy("recepcion", ["informar", "agendar"])).toContain("ver_sedes_y_servicios")
   })

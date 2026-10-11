@@ -2209,6 +2209,57 @@ it("un dato de la persona dicho hoy llega a su siguiente conversación; lo clín
   expect(await promptOf("evt-memoria-3")).not.toContain("Prefiere citas por la tarde")
 })
 
+it("el agente entrega un enlace para elegir la cita solo a quien ya es paciente, y solo si hay dirección pública", async () => {
+  const withPatient = await ingestText("tg:enlace-paciente", "evt-enlace-1", "Quiero una cita")
+  const fx = await bookingFixture(withPatient.conversationId, "enlace")
+  const ctxFor = (conversationId: string, contactId: string, publicUrl = true): AgentToolCtx => ({
+    db: appDb, orgId: "org_a", conversationId, contactId,
+    triggerId: null, secretsKey: KEY, dryRun: false, handedOff: false, decisionRecorded: false, replySettled: false,
+    toolsUsed: [], usage: emptyUsage(),
+    ...(publicUrl ? { publicUrl: { webURL: "https://app.odentia.test", cookieDomain: ".odentia.test" } } : {}),
+  })
+  // Sin dirección pública no existe la herramienta: no hay página que abrir.
+  expect(makeAgentTools(ctxFor(withPatient.conversationId, fx.contactId, false)).map((item) => item.name)).not.toContain("enviar_enlace_cita")
+  const link = makeAgentTools(ctxFor(withPatient.conversationId, fx.contactId)).find((item) => item.name === "enviar_enlace_cita")!
+  const sent = String(await link.invoke({ branchId: fx.branchId }))
+  // El enlace va a la dirección de la clínica, es personal y no lleva nada que la comprobación de respuestas lea como hora, fecha o precio.
+  const url = /https:\/\/norte\.odentia\.test\/reserva\?token=([0-9a-f]{64})/.exec(sent)
+  expect(url).not.toBeNull()
+  expect(sent).toContain("Paciente enlace")
+  expect(sent).toContain("vale 24 horas")
+  // Quien aún no es paciente tampoco recibe enlace mientras la clínica no active su registro en línea.
+  const stranger = await ingestText("tg:enlace-nuevo", "evt-enlace-2", "Hola")
+  const [conv] = await withOrgContext(appDb, "org_a", (tx) => tx.select({ contactId: conversation.contactId }).from(conversation).where(eq(conversation.id, stranger.conversationId)))
+  const refused = String(await makeAgentTools(ctxFor(stranger.conversationId, conv!.contactId)).find((item) => item.name === "enviar_enlace_cita")!.invoke({}))
+  expect(refused).toContain("no tiene activo el registro de pacientes en línea")
+})
+
+it("mientras la persona sigue escribiendo la corrida se pospone, y el tope evita esperar de más", async () => {
+  const { conversationId, messageId } = await ingestText("tg:espera", "evt-espera-1", "Hola")
+  const second = await ingestText("tg:espera", "evt-espera-2", "quiero saber si atienden el viernes")
+  const model = new ScriptedModel(() => toolCall("send_reply", { text: "Claro, dime." }, "espera"))
+  const job = (id: string) => ({ msg_id: 1, read_ct: 0, message: { kind: "inbound_message" as const, orgId: "org_a", conversationId, messageId: id } })
+  const queued = async () => {
+    const rows = (await ownerDb.execute(
+      sql`select count(*)::int as n from pgmq.q_agent_runs where message->>'conversationId' = ${conversationId}`,
+    )) as unknown as { n: number }[]
+    return rows[0]?.n ?? 0
+  }
+  // Acaba de escribir: ni llama al modelo ni deja fila; la corrida vuelve a la cola para después.
+  const waiting = { ...runtime, createModel: async () => model, burst: { quietMs: 60_000, maxWaitMs: 300_000 } }
+  expect(await processAgentRun(appDb, waiting, job(messageId))).toBe("done")
+  expect(model.seen).toHaveLength(0)
+  expect(await ledgerRows(conversationId)).toEqual([])
+  expect(await queued()).toBe(1)
+  // Pasado el tope desde el primer mensaje, responde con lo que haya: una sola respuesta para los dos.
+  const capped = { ...runtime, createModel: async () => model, burst: { quietMs: 60_000, maxWaitMs: 0 } }
+  expect(await processAgentRun(appDb, capped, job(second.messageId))).toBe("done")
+  expect(model.seen).toHaveLength(1)
+  expect(await agentMessages(conversationId)).toEqual(["Claro, dime."])
+  expect((await ledgerRows(conversationId)).map((row) => row.status).sort()).toEqual(["ok", "omitida"])
+  await ownerDb.execute(sql`select pgmq.purge_queue('agent_runs')`)
+})
+
 it("decidir antes de escribir: el camino se elige primero, derivar no llama al que escribe y apagado vuelve a la sombra", async () => {
   await withOrgContext(appDb, "org_a", (tx) => upsertAgentConfig(tx, "org_a", { decisionProvider: "baseline" }))
   const decision = createFakeDecisionModel()
@@ -2254,24 +2305,58 @@ it("decidir antes de escribir: el camino se elige primero, derivar no llama al q
     // El camino va al final, con lo del turno: lo estable de la organización queda delante y sigue igual.
     expect(info.system.indexOf("Camino de este turno")).toBeGreaterThan(info.system.indexOf("Política de autonomía"))
 
-    // Seguro de que hace falta una persona: pasa el caso sin llamar al modelo que escribe.
-    const handoff = await turn("tg:camino-derivar", "evt-camino-derivar", "Tengo una queja y quiero hablar con una persona")
-    expect(handoff.calls).toBe(0)
-    expect(handoff.ledger).toEqual([{ status: "handoff", llmCalls: 0, toolsUsed: [] }])
-    expect(handoff.decisions).toEqual([expect.objectContaining({ mode: "route", outcome: expect.objectContaining({ path: "derivar" }) })])
+    // Seguro de que hace falta una persona: el caso pasa al equipo con su clase, su prioridad y lo que la
+    // persona escribió, y el que escribe solo deja el aviso (no crea otra derivación ni puede hacer nada más).
+    const derive = async (thread: string, eventId: string, text: string, model: ScriptedModel) => {
+      const { conversationId, messageId } = await ingestText(thread, eventId, text)
+      expect(await processAgentRun(appDb, { ...runtime, createModel: async () => model, createDecisionModel: () => decision }, {
+        msg_id: 1, read_ct: 0, message: { kind: "inbound_message", orgId: "org_a", conversationId, messageId },
+      })).toBe("done")
+      return {
+        conversationId,
+        handoffs: await withOrgContext(appDb, "org_a", (tx) => listHandoffs(tx, "org_a", { conversationId })),
+        ledger: await ledgerRows(conversationId),
+        sent: await agentMessages(conversationId),
+      }
+    }
+    const notice = "Ana, ya pasé tu caso a una persona del equipo, que te va a responder por aquí."
+    const notifier = () => new ScriptedModel(() => toolCall("request_human_handoff", { reason: "Aviso al interlocutor", summary: "Aviso al interlocutor", message: notice }, "aviso"))
+    const asks = notifier()
+    const handoff = await derive("tg:camino-derivar", "evt-camino-derivar", "Tengo una queja y quiero hablar con una persona", asks)
+    expect(asks.offered).toEqual([["request_human_handoff"]])
+    expect(systemTextOf(asks.seen[0] ?? [])).toContain("el caso ya pasó a una persona del equipo y el equipo ya recibió el aviso")
+    expect(handoff.ledger).toEqual([{ status: "handoff", llmCalls: 1, toolsUsed: ["request_human_handoff"] }])
     expect(await agentStatusOf(handoff.conversationId)).toBe("off")
-    const [derived] = await withOrgContext(appDb, "org_a", (tx) => listHandoffs(tx, "org_a", { conversationId: handoff.conversationId }))
-    expect(derived?.reason).toBe("El mensaje pide a una persona o describe algo que el agente no debe atender")
+    expect(handoff.handoffs).toHaveLength(1)
+    expect(handoff.handoffs[0]).toMatchObject({
+      reason: "Pide hablar con una persona",
+      priority: "baja",
+      summary: "Escribió: «Tengo una queja y quiero hablar con una persona»",
+    })
+    expect(handoff.sent).toEqual([notice])
+
+    // Con urgencia entra como prioridad alta.
+    const urgent = await derive("tg:camino-urgente", "evt-camino-urgente", "Tengo un dolor fuerte y sangra mucho, necesito a una persona", notifier())
+    expect(urgent.handoffs.map((item) => [item.reason, item.priority])).toEqual([["Urgencia", "alta"]])
+
+    // Si el que escribe no deja el aviso, sale uno fijo: la persona nunca queda sin respuesta.
+    const silent = await derive("tg:camino-mudo", "evt-camino-mudo", "Quiero hablar con una persona", new ScriptedModel(() => new AIMessage({ content: "No sé qué decir." })))
+    expect(silent.handoffs).toHaveLength(1)
+    expect(silent.sent).toEqual(["Recibimos tu mensaje. Una persona del equipo te va a responder por aquí."])
+    const failing_writer = await derive("tg:camino-caido", "evt-camino-caido", "Quiero hablar con una persona", new ScriptedModel(() => { throw new Error("proveedor caído") }))
+    expect(failing_writer.handoffs).toHaveLength(1)
+    expect(failing_writer.sent).toEqual(["Recibimos tu mensaje. Una persona del equipo te va a responder por aquí."])
 
     // Varios mensajes seguidos: lo que importa está en el primero y el camino lo tiene en cuenta.
     await ingestText("tg:camino-rafaga", "evt-rafaga-1", "Tengo una queja y quiero hablar con una persona")
     await ingestText("tg:camino-rafaga", "evt-rafaga-2", "Buenas")
     await ingestText("tg:camino-rafaga", "evt-rafaga-3", "Sigo esperando")
-    const burst = await turn("tg:camino-rafaga", "evt-rafaga-4", "¿Me ayudan?")
-    expect(burst.calls).toBe(0)
-    expect(burst.decisions.filter((row) => row.mode === "route")).toEqual([
-      expect.objectContaining({ outcome: expect.objectContaining({ path: "derivar" }) }),
+    const burst = await derive("tg:camino-rafaga", "evt-rafaga-4", "¿Me ayudan?", notifier())
+    // Quien toma el caso recibe todo lo que escribió, en orden, no solo lo último.
+    expect(burst.handoffs.map((item) => item.summary)).toEqual([
+      "Escribió: «Tengo una queja y quiero hablar con una persona» · «Buenas» · «Sigo esperando» · «¿Me ayudan?»",
     ])
+    expect(burst.sent).toEqual([notice])
 
     // Si no reconoce la intención, el turno es el de siempre: sin indicación de camino.
     const open = await turn("tg:camino-abierto", "evt-camino-abierto", "Les escribo por lo del otro día")

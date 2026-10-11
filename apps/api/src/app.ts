@@ -40,6 +40,7 @@ import {
   createPublicPatientRegistrationRoute,
   type RegistrationRemoteAddress,
 } from "./routes/public-patient-registration.js"
+import { createPublicBookingRoute } from "./routes/public-booking.js"
 import { createPublicPortalRoute } from "./routes/public-portal.js"
 import { createServicesRoute } from "./routes/services.js"
 import { createTasksRoute } from "./routes/tasks.js"
@@ -218,6 +219,10 @@ export function createApp(deps: AppDeps) {
     }),
   )
   app.route("/api/public/automations", createPublicAutomationsRoute({ db, ownerDb: deps.ownerDb }))
+  app.route(
+    "/api/public/booking",
+    createPublicBookingRoute({ db: deps.db, secretsKey: deps.secretsKey, remoteAddress: deps.registrationRemoteAddress }),
+  )
   app.route(
     "/api/webchat",
     createWebchatPublicRoute({

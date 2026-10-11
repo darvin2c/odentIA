@@ -13,6 +13,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as OrgRouteImport } from './routes/_org'
 import { Route as PortalRouteImport } from './routes/portal'
 import { Route as RegistroRouteImport } from './routes/registro'
+import { Route as ReservaRouteImport } from './routes/reserva'
 import { Route as OrgAgendaRouteImport } from './routes/_org/agenda'
 import { Route as OrgAutomationsRouteImport } from './routes/_org/automations'
 import { Route as OrgBranchesRouteImport } from './routes/_org/branches'
@@ -80,6 +81,11 @@ const PortalRoute = PortalRouteImport.update({
 const RegistroRoute = RegistroRouteImport.update({
   id: '/registro',
   path: '/registro',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ReservaRoute = ReservaRouteImport.update({
+  id: '/reserva',
+  path: '/reserva',
   getParentRoute: () => rootRouteImport,
 } as any)
 const OrgAgendaRoute = OrgAgendaRouteImport.update({
@@ -339,6 +345,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/portal': typeof PortalRoute
   '/registro': typeof RegistroRoute
+  '/reserva': typeof ReservaRoute
   '/agenda': typeof OrgAgendaRoute
   '/automations': typeof OrgAutomationsRoute
   '/branches': typeof OrgBranchesRoute
@@ -393,6 +400,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/portal': typeof PortalRoute
   '/registro': typeof RegistroRoute
+  '/reserva': typeof ReservaRoute
   '/agenda': typeof OrgAgendaRoute
   '/automations': typeof OrgAutomationsRoute
   '/branches': typeof OrgBranchesRoute
@@ -447,6 +455,7 @@ export interface FileRoutesById {
   '/_org': typeof OrgRouteWithChildren
   '/portal': typeof PortalRoute
   '/registro': typeof RegistroRoute
+  '/reserva': typeof ReservaRoute
   '/_org/agenda': typeof OrgAgendaRoute
   '/_org/automations': typeof OrgAutomationsRoute
   '/_org/branches': typeof OrgBranchesRoute
@@ -503,6 +512,7 @@ export interface FileRouteTypes {
     | '/'
     | '/portal'
     | '/registro'
+    | '/reserva'
     | '/agenda'
     | '/automations'
     | '/branches'
@@ -557,6 +567,7 @@ export interface FileRouteTypes {
     | '/'
     | '/portal'
     | '/registro'
+    | '/reserva'
     | '/agenda'
     | '/automations'
     | '/branches'
@@ -610,6 +621,7 @@ export interface FileRouteTypes {
     | '/_org'
     | '/portal'
     | '/registro'
+    | '/reserva'
     | '/_org/agenda'
     | '/_org/automations'
     | '/_org/branches'
@@ -666,6 +678,7 @@ export interface RootRouteChildren {
   OrgRoute: typeof OrgRouteWithChildren
   PortalRoute: typeof PortalRoute
   RegistroRoute: typeof RegistroRoute
+  ReservaRoute: typeof ReservaRoute
   BajaTokenRoute: typeof BajaTokenRoute
   CTokenRoute: typeof CTokenRoute
   EmbedConnectionIdRoute: typeof EmbedConnectionIdRoute
@@ -699,6 +712,13 @@ declare module '@tanstack/react-router' {
       path: '/registro'
       fullPath: '/registro'
       preLoaderRoute: typeof RegistroRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/reserva': {
+      id: '/reserva'
+      path: '/reserva'
+      fullPath: '/reserva'
+      preLoaderRoute: typeof ReservaRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_org/agenda': {
@@ -1194,6 +1214,7 @@ const rootRouteChildren: RootRouteChildren = {
   OrgRoute: OrgRouteWithChildren,
   PortalRoute: PortalRoute,
   RegistroRoute: RegistroRoute,
+  ReservaRoute: ReservaRoute,
   BajaTokenRoute: BajaTokenRoute,
   CTokenRoute: CTokenRoute,
   EmbedConnectionIdRoute: EmbedConnectionIdRoute,

@@ -3,7 +3,7 @@ import { AIMessage, type BaseMessage } from "@langchain/core/messages"
 import type { Runnable } from "@langchain/core/runnables"
 import type { PostgresSaver } from "@langchain/langgraph-checkpoint-postgres"
 import { channelAdapters } from "@odentia/channels"
-import { type AgentRunJob, type Db, type QueueMessage, withOrgContext } from "@odentia/db"
+import { type AgentRunJob, type Db, type QueueMessage, sendAgentRun, withOrgContext } from "@odentia/db"
 import { agentRunLedger, type AnswerBasisItem, type AnswerCheck } from "@odentia/db/schema/agent"
 import { channelConnection, conversation, message } from "@odentia/db/schema/crm"
 import { auditEvent } from "@odentia/db/schema/org"
@@ -27,7 +27,7 @@ import {
 import { and, desc, eq, inArray, or, sql } from "drizzle-orm"
 import { createDecisionModel, type DecisionModel, type DecisionProvider, type PlatformDecisions } from "./decision/index.js"
 import { BURST_HORIZON_MS, triageState } from "./decision/points.js"
-import { readRoute, ROUTE_HANDOFF_REASON, ROUTE_QUESTIONS } from "./decision/route.js"
+import { handoffFallbackNotice, readRoute, ROUTE_QUESTIONS, routeHandoff } from "./decision/route.js"
 import { decideRoute, recordShadowUnavailable, runShadowTriage } from "./decision/shadow.js"
 import { compileAgentGraph } from "./graph.js"
 import {
@@ -40,7 +40,7 @@ import {
   type PlatformLlm,
   resolveLlmSpec,
 } from "./llm.js"
-import { type AgentSandboxState, type AgentToolCtx, type LessonOverrides, performHandoff, SANDBOX_NIL_ID, TOOL_ACTION_LABEL } from "./tools.js"
+import { type AgentSandboxState, type AgentToolCtx, type LessonOverrides, makeAgentTools, performHandoff, SANDBOX_NIL_ID, TOOL_ACTION_LABEL } from "./tools.js"
 export interface AgentRuntime {
   checkpointer: PostgresSaver
   /** Proveedor de la plataforma; la organización puede traer el suyo. */
@@ -51,6 +51,14 @@ export interface AgentRuntime {
   decisions?: PlatformDecisions
   /** Sustituye el modelo de decisión (pruebas). */
   createDecisionModel?: (provider: DecisionProvider) => DecisionModel | null
+  /**
+   * Espera a que la persona termine de escribir: la corrida no empieza hasta
+   * que lleva `quietMs` sin enviar nada, con un tope de `maxWaitMs` desde su
+   * primer mensaje sin responder. Sin indicar, no espera.
+   */
+  burst?: { quietMs: number; maxWaitMs: number }
+  /** Dirección pública de la plataforma, para los enlaces que el agente entrega (reservar una cita). */
+  publicUrl?: { webURL: string; cookieDomain: string }
   secretsKey: Buffer
   callbacks?: Callbacks
 }
@@ -101,6 +109,8 @@ function matchesHandoff(text: string | null, keywords: string[]): boolean {
 
 /** Motivo en el libro de un mensaje que otra corrida leyó y atendió. */
 const BURST_COVERED = "burst-covered"
+/** La corrida se pospuso porque la persona seguía escribiendo; no deja fila en el libro. */
+const BURST_WAITING = "burst-waiting"
 
 /**
  * Herramientas que en esta organización no pueden servir: la de plantillas
@@ -226,6 +236,8 @@ export async function processAgentRun(
   // y el resto de la ráfaga se anota al terminar para que sus corridas no repitan.
   let inboundMessageId = msg.message.kind === "inbound_message" ? msg.message.messageId : null
   let coveredMessageIds: string[] = []
+  // Lo que la persona escribió seguido, del más antiguo al más reciente: es lo que recibe quien toma el caso.
+  let burstTexts: string[] = []
   const coordinationId =
     msg.message.kind === "overdue_opportunity_follow_up" ? msg.message.coordinationId : null
   const startedAt = new Date()
@@ -312,10 +324,26 @@ export async function processAgentRun(
           .orderBy(desc(message.createdAt), desc(message.id))
           .limit(20)
         const horizon = Date.now() - BURST_HORIZON_MS
-        const pendingTail: { id: string; body: string | null }[] = []
+        const pendingTail: { id: string; body: string | null; createdAt: Date }[] = []
         for (const item of recent) {
           if (item.direction !== "in" || item.createdAt.getTime() < horizon) break
           pendingTail.push(item)
+        }
+        // La persona sigue escribiendo: responder ahora daría una respuesta a
+        // medias y otra corrida enseguida. Se vuelve a encolar esta misma
+        // corrida para cuando lleve un rato en silencio, sin pasar del tope
+        // desde su primer mensaje. Reencolar (y no descartar) garantiza que
+        // alguna corrida atienda la ráfaga aunque no llegue nada más.
+        const newest = pendingTail[0]
+        const oldest = pendingTail[pendingTail.length - 1]
+        if (runtime.burst && newest && oldest) {
+          const sinceLast = Date.now() - newest.createdAt.getTime()
+          const waited = Date.now() - oldest.createdAt.getTime()
+          const remaining = Math.min(runtime.burst.quietMs - sinceLast, runtime.burst.maxWaitMs - waited)
+          if (remaining > 0) {
+            await sendAgentRun(tx, msg.message, { delaySeconds: Math.max(1, Math.ceil(remaining / 1000)) })
+            return { skip: { reason: BURST_WAITING, model: effectiveModel, silent: true } }
+          }
         }
         const burst = pendingTail.some((item) => item.id === trigger.id)
           ? pendingTail
@@ -323,6 +351,7 @@ export async function processAgentRun(
         const latestId = burst[0]?.id ?? trigger.id
         inboundMessageId = latestId
         coveredMessageIds = burst.map((item) => item.id).filter((id) => id !== latestId)
+        burstTexts = [...burst].reverse().map((item) => (item.body ?? "").trim()).filter(Boolean)
         const keyword = burst.find((item) => matchesHandoff(item.body, cfg.handoffKeywords))
         if (keyword) {
           const toolCtx = baseToolCtx(db, orgId, conversationId, conv.contactId, runtime.secretsKey, {
@@ -399,7 +428,7 @@ export async function processAgentRun(
       return finishWithProviderProblem(configProblem)
     }
     if ("skip" in prepared && prepared.skip.silent) {
-      // Ya consta en el libro quién lo atendió: otra fila solo añadiría ruido.
+      // Ya consta en el libro quién lo atendió, o la corrida quedó pospuesta: otra fila solo añadiría ruido.
       return "done"
     }
     if ("skip" in prepared) {
@@ -421,6 +450,7 @@ export async function processAgentRun(
     effectiveModel = spec.modelName
     toolCtx.modelName = spec.modelName
     toolCtx.verifyReplies = cfg.replyCheckEnabled
+    if (runtime.publicUrl) toolCtx.publicUrl = runtime.publicUrl
     runUsage = toolCtx.usage
     // Tope diario: acota el gasto ante ráfagas o abuso del canal público. Al
     // alcanzarlo, el caso pasa a una persona y se avisa una vez por día.
@@ -454,9 +484,7 @@ export async function processAgentRun(
     if (routing && decision && inboundMessageId !== null) {
       toolCtx.route = await decideRoute(db, orgId, decision, { conversationId, triggerMessageId: inboundMessageId })
     }
-    if (toolCtx.route?.path === "derivar") {
-      await performHandoff(toolCtx, ROUTE_HANDOFF_REASON)
-    } else {
+    const invokeGraph = async () => {
       const model = runtime.createModel ? await runtime.createModel(spec) : await createConfiguredChatModel(spec)
       const graph = compileAgentGraph(model, toolCtx, runtime.checkpointer)
       await graph.invoke(
@@ -466,6 +494,30 @@ export async function processAgentRun(
           ...(runtime.callbacks ? { callbacks: runtime.callbacks } : {}),
         },
       )
+    }
+    if (toolCtx.route?.path === "derivar") {
+      // Primero el equipo: el caso queda registrado al instante, con su clase,
+      // su prioridad y lo que la persona escribió. Después el aviso a la
+      // persona, redactado según lo que contó; si el modelo que escribe falla
+      // o no lo deja, sale un aviso fijo: nunca queda sin respuesta.
+      const { reason, priority } = routeHandoff(toolCtx.route)
+      const said = burstTexts.slice(-8).map((text) => `«${text.slice(0, 300)}»`).join(" · ")
+      await performHandoff(toolCtx, reason, said ? `Escribió: ${said}` : reason, priority)
+      try {
+        await invokeGraph()
+      } catch (error) {
+        console.error(`agent: el aviso de derivación no se pudo redactar (${error instanceof Error ? error.message : String(error)})`)
+      }
+      if (!toolCtx.replySettled) {
+        const notify = makeAgentTools(toolCtx).find((item) => item.name === "request_human_handoff")
+        await notify
+          ?.invoke({ reason, summary: reason, message: handoffFallbackNotice(cfg.treatment) })
+          .catch((error: unknown) =>
+            console.error(`agent: el aviso fijo de derivación no salió (${error instanceof Error ? error.message : String(error)})`),
+          )
+      }
+    } else {
+      await invokeGraph()
     }
     if (coordinationId && !toolCtx.decisionRecorded) {
       await withOrgContext(db, orgId, (tx) =>

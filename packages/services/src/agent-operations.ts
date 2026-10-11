@@ -421,7 +421,8 @@ async function hasEconomicRole(tx: Db, orgId: string, patientId: string, contact
 export interface FreeGapInput {
   from: string
   to: string
-  durationMin: number
+  /** Sin indicar, la del servicio y, si no hay servicio, la de una cita regular en la sede. */
+  durationMin?: number
   branchId?: string
   dentistUserId?: string
   chairId?: string
@@ -456,8 +457,8 @@ export async function findFreeGaps(tx: Db, orgId: string, input: FreeGapInput): 
   if (to.getTime() - from.getTime() > 8 * 24 * 60 * 60 * 1000) {
     throw validation("El rango máximo de búsqueda es 8 días")
   }
-  const durationMin = Math.floor(input.durationMin)
-  if (!Number.isInteger(durationMin) || durationMin < 10 || durationMin > 480) {
+  const durationMin = input.durationMin === undefined ? undefined : Math.floor(input.durationMin)
+  if (durationMin !== undefined && (!Number.isInteger(durationMin) || durationMin < 10 || durationMin > 480)) {
     throw validation("durationMin debe ser entero entre 10 y 480")
   }
   if (!input.branchId?.trim()) throw validation("branchId es obligatoria para buscar huecos")
@@ -468,7 +469,7 @@ export async function findFreeGaps(tx: Db, orgId: string, input: FreeGapInput): 
     serviceId: input.serviceId,
     from: from.toISOString(),
     to: to.toISOString(),
-    durationMin,
+    ...(durationMin === undefined ? {} : { durationMin }),
     // El agente nunca ofrece una hora que ya pasó.
     notBefore: new Date().toISOString(),
   })
