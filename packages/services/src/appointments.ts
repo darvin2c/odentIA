@@ -16,15 +16,16 @@ import {
 import { member, user } from "@odentia/db/schema/auth"
 import { patient, patientContact, serviceCatalog } from "@odentia/db/schema/clinical"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
-import { waitlistEntry } from "@odentia/db/schema/availability"
+import { scheduleBlock } from "@odentia/db/schema/availability"
 import { conversation } from "@odentia/db/schema/crm"
-import { and, asc, eq, gte, ilike, inArray, lt, or, sql } from "drizzle-orm"
+import { and, asc, eq, gt, gte, ilike, inArray, lt, ne, or, sql } from "drizzle-orm"
 import { validateAvailability } from "./availability.js"
 import {
   cancelPendingForAppointment,
   invalidateAppointmentTokens,
 } from "./automation.js"
 import { isExclusionViolation, notFound, ServiceError, validation } from "./errors.js"
+import { listPatients } from "./patients.js"
 
 function conflict(code: string, message: string): ServiceError {
   return new ServiceError(code, 409, message)
@@ -34,8 +35,6 @@ function conflict(code: string, message: string): ServiceError {
 async function notify(tx: Db, payload: { orgId: string; kind: string; at: string }): Promise<void> {
   await tx.execute(sql`select pg_notify('org_events', ${JSON.stringify(payload)})`)
 }
-
-const DEFAULT_DURATION_MIN = 30
 
 export interface AppointmentItem {
   id: string
@@ -62,6 +61,8 @@ export interface ScheduleResources {
   branchId: string
   branchName: string
   timeZone: string
+  /** Minutos de una cita regular en la sede (sin servicio). */
+  defaultDurationMin: number
   professionals: Array<{ id: string; label: string }>
   chairs: Array<{ id: string; label: string }>
 }
@@ -76,6 +77,7 @@ async function resolveBranch(tx: Db, orgId: string, branchId?: string) {
       name: branch.name,
       timezone: branch.timezone,
       orgTimezone: orgProfile.timezone,
+      defaultMinutes: branch.appointmentDefaultMinutes,
     })
     .from(branch)
     .leftJoin(orgProfile, eq(orgProfile.organizationId, branch.organizationId))
@@ -243,6 +245,8 @@ export interface ListAppointmentsInput {
   q?: string
   /** Solo las citas de este paciente (ficha del paciente). */
   patientId?: string
+  /** Citas de varios pacientes a la vez (búsqueda de la agenda). */
+  patientIds?: string[]
 }
 
 export async function listAppointments(
@@ -260,6 +264,7 @@ export async function listAppointments(
   ]
   if (input.branchId) conditions.push(eq(appointment.branchId, input.branchId))
   if (input.patientId) conditions.push(eq(appointment.patientId, input.patientId))
+  if (input.patientIds?.length) conditions.push(inArray(appointment.patientId, input.patientIds))
   if (input.professionals?.length) {
     conditions.push(inArray(appointment.dentistUserId, input.professionals))
   }
@@ -297,6 +302,46 @@ export async function listAppointments(
   return rows.map(toItem)
 }
 
+const SEARCH_PEOPLE = 6
+const SEARCH_APPOINTMENTS_PER_PERSON = 3
+
+export interface AgendaSearchPerson {
+  patientId: string
+  patientName: string
+  /** Próximas citas en pie, de la más cercana a la más lejana. */
+  appointments: AppointmentItem[]
+}
+
+/**
+ * «¿Cuándo es mi cita?»: personas que coinciden con lo escrito (nombre,
+ * documento o teléfono, la misma búsqueda de Pacientes) y sus próximas citas
+ * en pie en cualquier sede.
+ */
+export async function searchAgendaPatients(
+  tx: Db,
+  orgId: string,
+  input: { q: string; now?: Date },
+): Promise<AgendaSearchPerson[]> {
+  const q = input.q.trim()
+  if (q.length < 2) return []
+  const people = await listPatients(tx, orgId, { q, limit: SEARCH_PEOPLE, sort: "name" })
+  if (people.items.length === 0) return []
+  const now = input.now ?? new Date()
+  const upcoming = await listAppointments(tx, orgId, {
+    from: now.toISOString(),
+    to: new Date(now.getTime() + 366 * 86_400_000).toISOString(),
+    statuses: ["programada", "confirmada"],
+    patientIds: people.items.map((item) => item.id),
+  })
+  return people.items.map((item) => ({
+    patientId: item.id,
+    patientName: item.displayName,
+    appointments: upcoming
+      .filter((appointment) => appointment.patientId === item.id)
+      .slice(0, SEARCH_APPOINTMENTS_PER_PERSON),
+  }))
+}
+
 /** Profesionales = miembros de la org; sillones = activos de la sucursal. */
 export async function listScheduleResources(
   tx: Db,
@@ -327,16 +372,115 @@ export async function listScheduleResources(
     branchId: resolved.id,
     branchName: resolved.name,
     timeZone: resolved.timeZone,
+    defaultDurationMin: resolved.defaultMinutes,
     professionals,
     chairs,
   }
+}
+
+/** Duraciones que se ofrecen para una cita regular. */
+export const APPOINTMENT_DEFAULT_MINUTES = [15, 30, 45, 60, 90, 120] as const
+
+/** Cambia lo que dura una cita regular en la sede: la que se reserva sin servicio. */
+export async function setBranchDefaultDuration(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  input: { branchId: string; minutes: number },
+): Promise<{ branchId: string; defaultDurationMin: number }> {
+  if (!(APPOINTMENT_DEFAULT_MINUTES as readonly number[]).includes(input.minutes)) {
+    throw validation(`La duración debe ser una de: ${APPOINTMENT_DEFAULT_MINUTES.join(", ")} minutos`)
+  }
+  const [updated] = await tx
+    .update(branch)
+    .set({ appointmentDefaultMinutes: input.minutes, updatedAt: new Date() })
+    .where(and(eq(branch.organizationId, orgId), eq(branch.id, input.branchId)))
+    .returning({ id: branch.id })
+  if (!updated) throw notFound("Sucursal")
+  await tx.insert(auditEvent).values({
+    organizationId: orgId,
+    actorUserId,
+    action: "branch.appointment_default_minutes",
+    entity: "branch",
+    entityId: input.branchId,
+    metadata: { minutes: input.minutes },
+  })
+  return { branchId: input.branchId, defaultDurationMin: input.minutes }
+}
+
+/**
+ * Primer sillón libre de la sede para ese tramo: quien reserva elige persona y
+ * hora, y el sillón lo pone la agenda.
+ */
+async function pickFreeChair(
+  tx: Db,
+  orgId: string,
+  branchId: string,
+  dentistUserId: string,
+  startsAt: Date,
+  endsAt: Date,
+  /** Al mover una cita: no cuenta su propia ocupación y, si sigue libre, conserva su sillón. */
+  moving?: { appointmentId: string; chairId: string },
+): Promise<string> {
+  const chairs = await tx
+    .select({ id: scheduleChair.id })
+    .from(scheduleChair)
+    .where(
+      and(
+        eq(scheduleChair.organizationId, orgId),
+        eq(scheduleChair.branchId, branchId),
+        eq(scheduleChair.isActive, true),
+      ),
+    )
+    .orderBy(asc(scheduleChair.name))
+  if (chairs.length === 0) throw validation("La sede no tiene sillones: añade uno para reservar")
+  const ids = chairs.map((chair) => chair.id)
+  const [taken, blocked] = await Promise.all([
+    tx
+      .select({ chairId: appointment.chairId })
+      .from(appointment)
+      .where(
+        and(
+          eq(appointment.organizationId, orgId),
+          inArray(appointment.chairId, ids),
+          inArray(appointment.status, ["programada", "confirmada"]),
+          lt(appointment.startsAt, endsAt),
+          gt(appointment.endsAt, startsAt),
+          moving ? ne(appointment.id, moving.appointmentId) : undefined,
+        ),
+      ),
+    tx
+      .select({ chairId: scheduleBlock.chairId, dentistUserId: scheduleBlock.dentistUserId })
+      .from(scheduleBlock)
+      .where(
+        and(
+          eq(scheduleBlock.organizationId, orgId),
+          eq(scheduleBlock.branchId, branchId),
+          inArray(scheduleBlock.chairId, ids),
+          lt(scheduleBlock.startsAt, endsAt),
+          gt(scheduleBlock.endsAt, startsAt),
+        ),
+      ),
+  ])
+  const unavailable = new Set<string | null>([
+    ...taken.map((row) => row.chairId),
+    ...blocked
+      .filter((row) => row.dentistUserId === null || row.dentistUserId === dentistUserId)
+      .map((row) => row.chairId),
+  ])
+  const free =
+    chairs.find((chair) => chair.id === moving?.chairId && !unavailable.has(chair.id)) ??
+    chairs.find((chair) => !unavailable.has(chair.id))
+  if (!free) throw conflict("NO_CHAIR", "No hay un sillón libre a esa hora")
+  return free.id
 }
 
 export interface CreateAppointmentInput {
   branchId?: string
   patientId: string
   dentistUserId: string
-  chairId: string
+  /** Sin sillón, la agenda pone el primero libre de la sede. */
+  chairId?: string
   serviceId?: string
   startsAt: string
   endsAt?: string
@@ -345,6 +489,8 @@ export interface CreateAppointmentInput {
   reason?: string
   source?: string
   conversationId?: string
+  /** Urgencia: reservar aunque el horario del profesional no cubra esa hora. */
+  outsideSchedule?: boolean
 }
 
 export async function createAppointment(
@@ -355,13 +501,18 @@ export async function createAppointment(
 ): Promise<AppointmentItem> {
   const startsAt = parseInstant(input.startsAt, "startsAt")
   const service = input.serviceId ? await requireService(tx, orgId, input.serviceId) : null
+  const chair = input.chairId ? await requireChair(tx, orgId, input.chairId) : null
+  const resolved = await resolveBranch(tx, orgId, input.branchId ?? chair?.branchId)
+  if (chair && chair.branchId !== resolved.id) {
+    throw validation("El sillón no pertenece a la sucursal de la cita")
+  }
 
   const duration =
     input.durationMin ??
     service?.durationMin ??
     (input.endsAt
       ? Math.round((parseInstant(input.endsAt, "endsAt").getTime() - startsAt.getTime()) / 60000)
-      : DEFAULT_DURATION_MIN)
+      : resolved.defaultMinutes)
   if (!Number.isInteger(duration) || duration <= 0) {
     throw validation("La duración debe ser un número positivo de minutos")
   }
@@ -369,12 +520,6 @@ export async function createAppointment(
     ? parseInstant(input.endsAt, "endsAt")
     : new Date(startsAt.getTime() + duration * 60000)
   if (endsAt <= startsAt) throw validation("La cita debe terminar después de iniciar")
-
-  const chair = await requireChair(tx, orgId, input.chairId)
-  const resolved = await resolveBranch(tx, orgId, input.branchId ?? chair.branchId)
-  if (chair.branchId !== resolved.id) {
-    throw validation("El sillón no pertenece a la sucursal de la cita")
-  }
   await requireAppointmentPatient(tx, orgId, input.patientId)
   await requireDentist(tx, orgId, input.dentistUserId)
   if (input.conversationId) {
@@ -389,20 +534,27 @@ export async function createAppointment(
     if (!linked) throw validation("La conversación no corresponde a un interlocutor del paciente")
   }
   const status = assertStatus(input.status ?? "programada")
-  if (status === "programada" || status === "confirmada") {
-    // Serializar altas por recurso, siempre profesional → sillón. Dos inserciones
-    // simultáneas pueden interbloquear las exclusiones antes de devolver 23P01.
-    const lockScope = `appointment:${orgId}`
+  const standing = status === "programada" || status === "confirmada"
+  // Serializar altas por recurso, siempre profesional → sillón. Dos inserciones
+  // simultáneas pueden interbloquear las exclusiones antes de devolver 23P01.
+  const lockScope = `appointment:${orgId}`
+  if (standing) {
     await tx.execute(sql`select pg_advisory_xact_lock(
       hashtext(${lockScope}), hashtext(${"dentist:" + input.dentistUserId}))`)
+  }
+  const chairId =
+    chair?.id ??
+    (await pickFreeChair(tx, orgId, resolved.id, input.dentistUserId, startsAt, endsAt))
+  if (standing) {
     await tx.execute(sql`select pg_advisory_xact_lock(
-      hashtext(${lockScope}), hashtext(${"chair:" + input.chairId}))`)
+      hashtext(${lockScope}), hashtext(${"chair:" + chairId}))`)
     await validateAvailability(tx, orgId, {
       branchId: resolved.id,
       dentistUserId: input.dentistUserId,
-      chairId: input.chairId,
+      chairId,
       startsAt,
       endsAt,
+      allowOutsideSchedule: input.outsideSchedule === true,
     })
   }
 
@@ -414,7 +566,7 @@ export async function createAppointment(
         branchId: resolved.id,
         patientId: input.patientId,
         dentistUserId: input.dentistUserId,
-        chairId: input.chairId,
+        chairId,
         serviceId: service?.id ?? null,
         serviceName: service?.name ?? null,
         startsAt,
@@ -431,8 +583,9 @@ export async function createAppointment(
     await audit(tx, orgId, actorUserId, "appointment.created", created.id, {
       patientId: input.patientId,
       dentistUserId: input.dentistUserId,
-      chairId: input.chairId,
+      chairId,
       startsAt: startsAt.toISOString(),
+      ...(input.outsideSchedule ? { outsideSchedule: true } : {}),
     })
     await notify(tx, { orgId, kind: "appointment.updated", at: new Date().toISOString() })
     return await getAppointment(tx, orgId, created.id)
@@ -471,7 +624,16 @@ export async function moveAppointment(
     : new Date(startsAt.getTime() + durationMs)
   if (endsAt <= startsAt) throw validation("La cita debe terminar después de iniciar")
   const dentistUserId = input.dentistUserId ?? current.dentistUserId
-  const chairId = input.chairId ?? current.chairId
+  const active = current.status === "programada" || current.status === "confirmada"
+  // Sin sillón indicado la cita conserva el suyo; si a la nueva hora está ocupado, pasa a uno libre.
+  const chairId =
+    input.chairId ??
+    (active
+      ? await pickFreeChair(tx, orgId, current.branchId, dentistUserId, startsAt, endsAt, {
+          appointmentId: id,
+          chairId: current.chairId,
+        })
+      : current.chairId)
   if (dentistUserId !== current.dentistUserId) await requireDentist(tx, orgId, dentistUserId)
   if (chairId !== current.chairId) {
     const chair = await requireChair(tx, orgId, chairId)
@@ -479,7 +641,7 @@ export async function moveAppointment(
       throw validation("El sillón no pertenece a la sucursal de la cita")
     }
   }
-  if (current.status === "programada" || current.status === "confirmada") {
+  if (active) {
     await validateAvailability(tx, orgId, {
       branchId: current.branchId,
       dentistUserId,
@@ -612,17 +774,36 @@ export async function updateAppointment(
   }
 }
 
-/** Transición explícita; cancelada y no_asistio liberan el recurso en DB. */
+/** Quién pidió cancelar: lo que recepción anota al liberar el hueco. */
+export const APPOINTMENT_CANCEL_REASONS = ["paciente", "clinica", "otro"] as const
+export type AppointmentCancelReason = (typeof APPOINTMENT_CANCEL_REASONS)[number]
+
+/**
+ * Transición explícita; cancelada y no_asistio liberan el recurso en DB. Al
+ * cancelar, el motivo y la nota (opcionales) quedan en la auditoría de la cita.
+ */
 export async function setAppointmentStatus(
   tx: Db,
   orgId: string,
   actorUserId: string,
   id: string,
   status: string,
+  detail?: { cancelReason?: string; cancelNote?: string },
 ): Promise<AppointmentItem> {
   const next = assertStatus(status)
   const current = await requireAppointment(tx, orgId, id)
   if (current.status === next) return getAppointment(tx, orgId, id)
+  const metadata: Record<string, unknown> = { from: current.status }
+  if (next === "cancelada") {
+    if (detail?.cancelReason !== undefined) {
+      if (!(APPOINTMENT_CANCEL_REASONS as readonly string[]).includes(detail.cancelReason)) {
+        throw validation(`Motivo de cancelación inválido: ${detail.cancelReason}`)
+      }
+      metadata.cancelReason = detail.cancelReason
+    }
+    const note = detail?.cancelNote?.trim()
+    if (note) metadata.cancelNote = note.slice(0, 500)
+  }
   try {
     const [updated] = await tx
       .update(appointment)
@@ -630,9 +811,7 @@ export async function setAppointmentStatus(
       .where(and(eq(appointment.organizationId, orgId), eq(appointment.id, id)))
       .returning({ id: appointment.id })
     if (!updated) throw notFound("Cita")
-    await audit(tx, orgId, actorUserId, `appointment.status_${next}`, id, {
-      from: current.status,
-    })
+    await audit(tx, orgId, actorUserId, `appointment.status_${next}`, id, metadata)
     await cancelPendingForAppointment(tx, orgId, id, `cita ${next}`)
     await invalidateAppointmentTokens(tx, orgId, id)
     await notify(tx, { orgId, kind: "appointment.updated", at: new Date().toISOString() })
@@ -662,57 +841,5 @@ export async function createChair(
     .values({ organizationId: orgId, branchId: input.branchId, name })
     .returning({ id: scheduleChair.id })
   if (!created) throw new Error("No se pudo crear el sillón")
-  return created
-}
-
-/**
- * Confirma una espera ofreciendo reserva con el mismo servicio registrado.
- * Crea la cita (con toda la validación de disponibilidad) y marca la espera
- * como confirmada con el vínculo a la cita generada.
- */
-export async function bookWaitlistEntry(
-  tx: Db,
-  orgId: string,
-  actorUserId: string,
-  id: string,
-  input: { chairId?: string; startsAt?: string; endsAt?: string },
-): Promise<AppointmentItem> {
-  const [entry] = await tx
-    .select()
-    .from(waitlistEntry)
-    .where(and(eq(waitlistEntry.organizationId, orgId), eq(waitlistEntry.id, id)))
-    .limit(1)
-  if (!entry) throw notFound("Espera")
-  if (entry.status === "confirmada") throw validation("La espera ya generó su cita")
-  if (entry.status === "cancelada") throw validation("La espera está cancelada")
-  if (!entry.patientId) throw validation("La espera necesita un paciente para reservar")
-  const startsAt = input.startsAt ?? entry.offeredStartsAt?.toISOString()
-  const endsAt = input.endsAt ?? entry.offeredEndsAt?.toISOString()
-  const chairId = input.chairId ?? entry.offeredChairId
-  if (!startsAt || !endsAt) throw validation("La confirmación necesita el hueco ofrecido")
-  if (!chairId) throw validation("La confirmación necesita un sillón")
-  if (!entry.dentistUserId) throw validation("La confirmación necesita un profesional")
-  const created = await createAppointment(tx, orgId, actorUserId, {
-    branchId: entry.branchId,
-    patientId: entry.patientId,
-    dentistUserId: entry.dentistUserId,
-    chairId,
-    serviceId: entry.serviceId ?? undefined,
-    startsAt,
-    endsAt,
-    status: "confirmada",
-    source: "lista_espera",
-  })
-  await tx
-    .update(waitlistEntry)
-    .set({
-      status: "confirmada",
-      confirmedAppointmentId: created.id,
-      updatedAt: new Date(),
-    })
-    .where(and(eq(waitlistEntry.organizationId, orgId), eq(waitlistEntry.id, id)))
-  await audit(tx, orgId, actorUserId, "waitlist.confirmed", id, {
-    appointmentId: created.id,
-  })
   return created
 }

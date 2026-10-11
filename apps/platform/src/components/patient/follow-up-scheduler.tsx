@@ -1,17 +1,19 @@
-import { Button, Field, FieldLabel, Input } from "@odentia/ui"
+import { Button } from "@odentia/ui"
 import {
   FormDrawer,
-  minutesToInstant,
-  SCHEDULE_STATUS_LABELS,
+  LoadingState,
+  ResourceSelect,
+  scheduleToneAt,
+  SubmitButton,
+  useScheduleNow,
   zonedDateOf,
 } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { useId, useState } from "react"
+import { useMemo, useState } from "react"
 import {
   type AgendaAppointment,
   type AgendaResources,
   type AgendaServiceOption,
-  type AvailableSlot,
   invalidateAppointmentQueries,
 } from "../../lib/agenda"
 import { apiFetch } from "../../lib/api"
@@ -24,8 +26,11 @@ import {
   scheduleFollowUpFromCoordinationApi,
 } from "../../lib/clinical-journey"
 import { usePermission } from "../../lib/crm"
-import { AgendaSlotPicker } from "../agenda-slot-picker"
-import { ChoiceSelect } from "../ui/choice-select"
+import { rangeSaid, shortName, whenSaid } from "../agenda/shared"
+import { useWhen, WhenFields } from "../agenda/when"
+
+/** Hasta cuándo se miran las citas en pie del paciente para ofrecer «Usar esa cita». */
+const STANDING_DAYS = 90
 
 /** Quién reserva: el clínico desde la ficha clínica o quien agenda desde la coordinación. */
 export type FollowUpSchedulerScope = "clinical" | "coordination"
@@ -86,12 +91,16 @@ export function FollowUpScheduler({
           </Button>
         </p>
       ) : (
-        <p role="status">Cargando recursos de agenda…</p>
+        <LoadingState message="Cargando la agenda…" />
       )}
     </FormDrawer>
   )
 }
 
+/**
+ * Programar un control es asignarle una cita: el mismo «cuándo» de Nueva cita.
+ * Si la persona ya tiene una cita en pie, se ofrece usarla en vez de reservar otra.
+ */
 function ScheduleForm({
   patientId,
   control,
@@ -105,71 +114,62 @@ function ScheduleForm({
   onClose: () => void
   scope: FollowUpSchedulerScope
 }) {
-  const uid = useId()
   const client = useQueryClient()
-  const [mode, setMode] = useState<"reserve" | "link">("reserve")
+  const timeZone = resources.timeZone
+  const now = useScheduleNow()
+  const today = zonedDateOf(now, timeZone)
   const [serviceId, setServiceId] = useState("")
-  const [slot, setSlot] = useState<AvailableSlot | null>(null)
-  const [appointmentId, setAppointmentId] = useState("")
-  const [date, setDate] = useState(() => {
-    const today = zonedDateOf(new Date().toISOString(), resources.timeZone)
-    const due = zonedDateOf(control.dueAt, resources.timeZone)
-    return due > today ? due : today
-  })
   const [error, setError] = useState<string | null>(null)
   const services = useQuery({
     queryKey: ["services", "agenda-picker"],
     queryFn: () => apiFetch<{ data: AgendaServiceOption[] }>("/api/services?limit=100"),
   })
-  const appointments = useQuery({
-    queryKey: ["follow-up-appointments", patientId, resources.branchId, date],
-    enabled: mode === "link" && /^\d{4}-\d{2}-\d{2}$/.test(date),
-    queryFn: async () => {
+  const service = (services.data?.data ?? []).find((item) => item.id === serviceId)
+  const toneOf = useMemo(() => {
+    const index = new Map(resources.professionals.map((item, at) => [item.id, at]))
+    return (id: string) => scheduleToneAt(index.get(id) ?? 0)
+  }, [resources])
+  const when = useWhen({
+    branchId: resources.branchId,
+    timeZone,
+    today,
+    now,
+    toneOf,
+    duration: service?.durationMin ?? resources.defaultDurationMin,
+    // Se abre en el día en que toca el control, si aún no pasó.
+    date: zonedDateOf(control.dueAt, timeZone),
+  })
+  // Si ya tiene citas en pie, se ofrece usar una en vez de reservar otra.
+  const [range] = useState(() => ({
+    from: new Date().toISOString(),
+    to: new Date(Date.now() + STANDING_DAYS * 86_400_000).toISOString(),
+  }))
+  const standing = useQuery({
+    queryKey: ["follow-up-appointments", patientId, resources.branchId, range.from],
+    queryFn: () => {
       const params = new URLSearchParams({
         branchId: resources.branchId,
-        from: minutesToInstant(date, 0, resources.timeZone),
-        to: minutesToInstant(date, 1440, resources.timeZone),
+        from: range.from,
+        to: range.to,
+        status: "programada,confirmada",
+        patientId,
       })
-      const response = await apiFetch<{ data: AgendaAppointment[] }>(`/api/appointments?${params}`)
-      return response.data.filter(
-        (item) =>
-          item.patientId === patientId &&
-          (item.status === "programada" || item.status === "confirmada"),
-      )
+      return apiFetch<{ data: AgendaAppointment[] }>(`/api/appointments?${params}`)
     },
   })
+  const existing = (standing.data?.data ?? [])
+    .filter((item) => item.patientId === patientId)
+    .sort((a, b) => a.startsAt.localeCompare(b.startsAt))
+    .slice(0, 3)
+
   const schedule = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (body: ScheduleFollowUpBody) => {
       if (
         control.patientId !== patientId ||
         control.status !== "pendiente" ||
         control.appointment?.status === "atendida"
       ) {
         throw new Error("El control cambió. Revisa su situación actual antes de programarlo.")
-      }
-      let body: ScheduleFollowUpBody
-      if (mode === "link") {
-        if (
-          !appointmentId ||
-          appointments.isFetching ||
-          appointments.isError ||
-          !appointments.data?.some((item) => item.id === appointmentId)
-        )
-          throw new Error("Selecciona una cita vigente de este paciente.")
-        body = { appointmentId }
-      } else {
-        if (!slot?.chairId)
-          throw new Error("Selecciona un hueco disponible con profesional y sillón.")
-        body = {
-          appointment: {
-            branchId: resources.branchId,
-            dentistUserId: slot.dentistUserId,
-            chairId: slot.chairId,
-            serviceId: serviceId || undefined,
-            startsAt: slot.startsAt,
-            endsAt: slot.endsAt,
-          },
-        }
       }
       return scope === "coordination"
         ? scheduleFollowUpFromCoordinationApi(patientId, control.id, body)
@@ -181,10 +181,12 @@ function ScheduleForm({
     },
     onError: (cause) => {
       setError(mutationMessage(cause))
-      void client.invalidateQueries({ queryKey: ["agenda-slots"] })
+      // Si alguien tomó el hueco, lo libre se vuelve a pedir.
+      when.refetch()
       void client.invalidateQueries({ queryKey: ["follow-up-appointments", patientId] })
     },
   })
+  const target = when.shown
   return (
     <FormDrawer
       open
@@ -193,154 +195,90 @@ function ScheduleForm({
       error={error}
       isSubmitting={schedule.isPending}
       isDirty
-      submitLabel={mode === "reserve" ? "Reservar y vincular control" : "Vincular cita al control"}
+      submitDisabled={!target || when.state !== "free"}
+      submitLabel={target ? `Reservar ${whenSaid(target.start, timeZone, today)}` : "Reservar cita"}
       onClose={() => {
         if (!schedule.isPending) onClose()
       }}
       onSubmit={(event) => {
         event.preventDefault()
         setError(null)
-        schedule.mutate()
+        if (!target) return
+        // Sin sillón: lo asigna la agenda, como en Nueva cita.
+        schedule.mutate({
+          appointment: {
+            branchId: resources.branchId,
+            dentistUserId: target.columnId,
+            serviceId: serviceId || undefined,
+            startsAt: target.start,
+            endsAt: target.end,
+          },
+        })
       }}
     >
-      <fieldset disabled={schedule.isPending} className="grid min-w-0 gap-4">
-        <p className="text-sm text-muted-foreground">
-          La reserva no completa el control. Su cierre requiere una atención finalizada y un
-          resultado clínico.
-        </p>
+      <div className="grid min-w-0 gap-4">
         {control.legacyScheduledAt && !control.appointment && (
           <p role="status" className="text-sm">
-            Sin reserva verificada. Fecha histórica: {formatDateTime(control.legacyScheduledAt)}.
-            Concilia el control reservando o vinculando una cita explícitamente.
+            Este control tenía una fecha anotada a mano, {formatDateTime(control.legacyScheduledAt)},
+            sin cita en la agenda. Asígnale una cita para que quede programado.
           </p>
         )}
-        <Field>
-          <FieldLabel htmlFor={`${uid}-mode`}>Cómo programar</FieldLabel>
-          <ChoiceSelect
-            id={`${uid}-mode`}
-            className="w-full"
-            value={mode}
-            onChange={(event) => {
-              setMode(event.target.value as "reserve" | "link")
-              setError(null)
-            }}
+        {existing.map((item) => (
+          <div
+            key={item.id}
+            className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5 rounded-2xl border bg-muted/40 p-3"
           >
-            <option value="reserve">Reservar una nueva cita</option>
-            <option value="link">Vincular una cita existente del paciente</option>
-          </ChoiceSelect>
-        </Field>
-        <div hidden={mode !== "reserve"}>
-          <fieldset disabled={mode !== "reserve"} className="grid min-w-0 gap-4">
-            <Field>
-              <FieldLabel htmlFor={`${uid}-service`}>Servicio (opcional)</FieldLabel>
-              <ChoiceSelect
-                id={`${uid}-service`}
-                className="w-full"
-                value={serviceId}
-                onChange={(event) => {
-                  setServiceId(event.target.value)
-                  setSlot(null)
-                }}
-              >
-                <option value="">Sin servicio · elegir duración</option>
-                {(services.data?.data ?? []).map((service) => (
-                  <option key={service.id} value={service.id}>
-                    {service.name}
-                  </option>
-                ))}
-              </ChoiceSelect>
-              {services.isError && (
-                <p role="alert" className="text-sm">
-                  No se pudo cargar el catálogo. Puedes reservar sin servicio o{" "}
-                  <button
-                    type="button"
-                    className="underline"
-                    onClick={() => void services.refetch()}
-                  >
-                    reintentar
-                  </button>
-                  .
-                </p>
-              )}
-            </Field>
-            <AgendaSlotPicker
-              branchId={resources.branchId}
-              timeZone={resources.timeZone}
-              day={date}
-              professionals={resources.professionals}
-              serviceId={serviceId}
-              selected={slot}
-              onSelect={setSlot}
-              onCriteriaChange={() => setSlot(null)}
+            <span className="min-w-0 flex-1 text-sm">
+              <span className="text-muted-foreground">Ya tiene una cita</span>
+              <br />
+              <span className="font-bold">
+                {rangeSaid(item.startsAt, item.endsAt, timeZone, today)}
+              </span>{" "}
+              <span className="text-muted-foreground">con {shortName(item.dentistName)}</span>
+            </span>
+            <SubmitButton
+              variant="outline"
+              size="sm"
+              className="bg-card"
               disabled={schedule.isPending}
-            />
-            {slot && (
-              <p role="status" className="text-sm">
-                Selección:{" "}
-                {new Date(slot.startsAt).toLocaleString("es-PE", { timeZone: resources.timeZone })}{" "}
-                · {slot.dentistName} · {slot.chairName}. La disponibilidad se confirma al reservar.
-              </p>
-            )}
-          </fieldset>
-        </div>
-        {mode === "link" && (
-          <div className="grid gap-4">
-            <Field>
-              <FieldLabel htmlFor={`${uid}-date`}>
-                Fecha de la cita · {resources.timeZone}
-              </FieldLabel>
-              <Input
-                id={`${uid}-date`}
-                type="date"
-                required
-                value={date}
-                onChange={(event) => {
-                  setDate(event.target.value)
-                  setAppointmentId("")
-                }}
-              />
-            </Field>
-            {appointments.isFetching ? (
-              <p role="status">Buscando citas del paciente…</p>
-            ) : appointments.isError ? (
-              <p role="alert">
-                No se pudieron cargar las citas.{" "}
-                <Button type="button" variant="outline" onClick={() => void appointments.refetch()}>
-                  Reintentar
-                </Button>
-              </p>
-            ) : (
-              <Field>
-                <FieldLabel htmlFor={`${uid}-appointment`}>Cita del paciente</FieldLabel>
-                <ChoiceSelect
-                  id={`${uid}-appointment`}
-                  className="w-full"
-                  value={appointmentId}
-                  onChange={(event) => setAppointmentId(event.target.value)}
-                  required
-                >
-                  <option value="">Seleccionar cita explícitamente</option>
-                  {(appointments.data ?? []).map((item) => (
-                    <option key={item.id} value={item.id}>
-                      {new Date(item.startsAt).toLocaleTimeString("es-PE", {
-                        timeZone: resources.timeZone,
-                      })}{" "}
-                      · {item.dentistName} · {item.chairName} ·{" "}
-                      {SCHEDULE_STATUS_LABELS[item.status]}
-                    </option>
-                  ))}
-                </ChoiceSelect>
-                {appointments.data?.length === 0 && (
-                  <p className="text-sm text-muted-foreground">
-                    Sin citas programadas o confirmadas del paciente en esta sede y fecha. Elige
-                    otro día o reserva una nueva cita.
-                  </p>
-                )}
-              </Field>
-            )}
+              pending={
+                schedule.isPending &&
+                schedule.variables !== undefined &&
+                "appointmentId" in schedule.variables &&
+                schedule.variables.appointmentId === item.id
+              }
+              onClick={() => {
+                setError(null)
+                schedule.mutate({ appointmentId: item.id })
+              }}
+            >
+              Usar esa cita
+            </SubmitButton>
           </div>
-        )}
-      </fieldset>
+        ))}
+        <ResourceSelect
+          id="control-servicio"
+          label="Servicio (opcional)"
+          options={(services.data?.data ?? []).map((item) => ({
+            id: item.id,
+            label: item.name,
+            detail: item.durationMin ? `${item.durationMin} min` : undefined,
+          }))}
+          value={serviceId}
+          onChange={(next) => {
+            setServiceId(next)
+            // Con servicio, el bloque toma lo que dura el servicio.
+            when.resize(
+              (services.data?.data ?? []).find((item) => item.id === next)?.durationMin ??
+                resources.defaultDurationMin,
+            )
+          }}
+        />
+        <WhenFields when={when} />
+        <p className="text-xs text-muted-foreground">
+          Reservar no cierra el control: se cierra cuando se atiende a la persona.
+        </p>
+      </div>
     </FormDrawer>
   )
 }

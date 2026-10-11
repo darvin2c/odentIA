@@ -65,10 +65,17 @@ test("control clínico: reserva real, mover reprograma y cancelaciones coherente
   await gotoHydrated(page, tenant(slug, `${patientPath}?tab=controles`))
   await page.getByRole("button", { name: "Programar control" }).first().click()
   const dialog = surface(page, { name: "Programar control" })
-  const slot = dialog.getByRole("button", { name: "Seleccionar" }).first()
-  await expect(slot).toBeVisible({ timeout: 15_000 })
-  await slot.click()
-  await dialog.getByRole("button", { name: "Reservar y vincular control" }).click()
+  // El mismo «cuándo» de Nueva cita: el bloque ya viene puesto en el primer hueco.
+  await expect(
+    dialog.getByRole("button", { name: /^De \d\d:\d\d a \d\d:\d\d con / }),
+  ).toBeVisible({ timeout: 15_000 })
+  // Sin elegir «cómo»: programar un control es asignarle una cita.
+  await expect(dialog.getByText("Cómo programar")).toHaveCount(0)
+  await test.info().attach("programar-control", {
+    body: await page.screenshot(),
+    contentType: "image/png",
+  })
+  await dialog.getByRole("button", { name: /^Reservar (hoy|mañana|el )/ }).click()
   await expect(page.getByText(/Cita reservada/)).toBeVisible({ timeout: 15_000 })
 
   // El vínculo lleva a la cita concreta en la agenda.

@@ -74,6 +74,7 @@ import { and, eq, inArray, isNull, or, sql } from "drizzle-orm"
 import { createHandoff } from "./agent-operations.js"
 import { upsertAgentConfig } from "./agentConfig.js"
 import { createAppointment, createChair } from "./appointments.js"
+import { createScheduleBlock } from "./availability.js"
 import { createBudget, decideBudget, presentBudget, reviseBudget } from "./budgets.js"
 import {
   addClinicalNote,
@@ -374,7 +375,6 @@ async function wipeSeed(): Promise<void> {
     "warehouse",
     "supplier",
     "mailbox_oauth_state",
-    "waitlist_entry",
     "schedule_block",
     "professional_schedule",
   ]) {
@@ -417,8 +417,9 @@ async function wipeSeed(): Promise<void> {
   await db.delete(contactIdentity).where(inArray(contactIdentity.organizationId, SEED_ORGS))
   await db.delete(encounterProcedure).where(inArray(encounterProcedure.organizationId, SEED_ORGS))
   await db.delete(encounterTooth).where(inArray(encounterTooth.organizationId, SEED_ORGS))
-  await db.delete(clinicalNote).where(inArray(clinicalNote.organizationId, SEED_ORGS))
+  // Los diagnósticos migrados desde notas antiguas las referencian (`legacy_note_id`): van antes.
   await db.delete(encounterDiagnosis).where(inArray(encounterDiagnosis.organizationId, SEED_ORGS))
+  await db.delete(clinicalNote).where(inArray(clinicalNote.organizationId, SEED_ORGS))
   // Los ítems del plan referencian el hallazgo que los motivó: se suelta la
   // referencia antes de borrar el odontograma (los ítems se borran después).
   await db
@@ -703,7 +704,8 @@ const [miraflores] = await db
   .values([
     // Miraflores hereda la zona de la organización (`timezone` en null).
     { organizationId: ORG_A, name: "Sede Miraflores", ubigeo: "150122" },
-    // Surco ejercita el camino contrario: teléfono y zona propios.
+    // Surco ejercita el camino contrario: teléfono y zona propios. Queda sin sillones
+    // ni horarios: es la sede limpia para probar la configuración desde cero.
     {
       organizationId: ORG_A,
       name: "Sede Surco",
@@ -2147,7 +2149,6 @@ const chairsMiraflores = await Promise.all(
     createChair(db, ORG_A, { branchId: miraflores.id, name }),
   ),
 )
-await createChair(db, ORG_A, { branchId: surco.id, name: "Sillón único" })
 const domainSeed = {
   orgId: ORG_A,
   ownerUserId: ANA_ID,
@@ -2156,8 +2157,9 @@ const domainSeed = {
   contactId: rosaContactId,
   conversationId: convRosa.id,
 }
+// Solo Miraflores lleva agenda: Surco se deja limpia (sin sillones, horarios ni ausencias)
+// para ver los estados de «falta configurar» y montar una sede desde la propia agenda.
 await db.transaction((tx) => seedAvailability(tx, domainSeed))
-await db.transaction((tx) => seedAvailability(tx, { ...domainSeed, branchId: surco.id }))
 const chairA = (index: number): string => {
   const chair = chairsMiraflores[index]
   if (!chair) throw new Error("Faltan sillones semilla")
@@ -2168,6 +2170,18 @@ const lima = (dayOffset: number, hhmm: string): string => {
   const base = new Date()
   base.setUTCDate(base.getUTCDate() + dayOffset)
   return `${base.toISOString().slice(0, 10)}T${hhmm}:00-05:00`
+}
+// Ausencias claras en Miraflores, lejos de las citas sembradas (ayer, hoy y mañana):
+// un permiso y unas vacaciones de dos profesionales, un feriado de toda la sede y un
+// sillón en mantenimiento.
+const limaDay = (dayOffset: number): string => lima(dayOffset, "00:00")
+for (const block of [
+  { dentistUserId: ANA_ID, kind: "ausencia", reason: "Permiso", startsAt: lima(4, "15:00"), endsAt: lima(4, "18:00") },
+  { dentistUserId: LUIS_ID, kind: "ausencia", reason: "Vacaciones", startsAt: limaDay(6), endsAt: limaDay(9) },
+  { kind: "bloqueo", reason: "Feriado", startsAt: limaDay(12), endsAt: limaDay(13) },
+  { chairId: chairA(2), kind: "bloqueo", reason: "Mantenimiento", startsAt: lima(3, "09:00"), endsAt: lima(3, "12:00") },
+]) {
+  await createScheduleBlock(db, ORG_A, ANA_ID, { branchId: miraflores.id, ...block })
 }
 const agendaSeed: Array<{
   patient: string
@@ -2235,6 +2249,35 @@ const agendaSeed: Array<{
     end: "10:00",
     service: "ENDODONCIA",
     status: "programada",
+  },
+  // Tarde de hoy: la agenda muestra «lo que viene», huecos entre citas y por confirmar.
+  {
+    patient: "Carmen Rojas",
+    dentist: ANA_ID,
+    chair: 0,
+    day: 0,
+    start: "15:00",
+    end: "15:45",
+    service: "LIMPIEZA",
+    status: "confirmada",
+  },
+  {
+    patient: "Carlos Paredes",
+    dentist: LUIS_ID,
+    chair: 1,
+    day: 0,
+    start: "15:30",
+    end: "16:30",
+    service: "ENDODONCIA",
+  },
+  {
+    patient: "Elena Huamán",
+    dentist: LUIS_ID,
+    chair: 1,
+    day: 0,
+    start: "17:00",
+    end: "17:30",
+    service: "ORTODONCIA_CTRL",
   },
   // Ayer: ejecutada, ausencia y cancelación (estas dos últimas liberan recurso).
   {

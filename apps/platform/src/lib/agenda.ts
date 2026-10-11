@@ -7,8 +7,9 @@ export async function invalidateAppointmentQueries(client: QueryClient): Promise
     [
       "agenda",
       "agenda-appointment",
+      "agenda-availability",
       "agenda-resources",
-      "agenda-slots",
+      "agenda-search",
       "follow-up-appointments",
       "follow-ups",
       "patient-appointments",
@@ -51,28 +52,14 @@ export interface AgendaResources {
   timeZone: string
   professionals: { id: string; label: string }[]
   chairs: { id: string; label: string }[]
+  /** Lo que dura una cita regular en la sede, en minutos. */
+  defaultDurationMin: number
 }
 
 export interface AgendaServiceOption {
   id: string
   name: string
   durationMin: number | null
-}
-
-export interface AvailableSlot {
-  startsAt: string
-  endsAt: string
-  dentistUserId: string
-  dentistName: string
-  chairId: string | null
-  chairName: string | null
-  timeZone: string
-}
-
-export interface AvailableSlotsResult {
-  slots: AvailableSlot[]
-  truncated: boolean
-  timeZone: string
 }
 
 export interface ScheduleRule {
@@ -102,43 +89,30 @@ export interface ScheduleBlock {
   endsAt: string
 }
 
-export type WaitlistPriority = "alta" | "normal" | "baja"
-export type WaitlistStatus = "en_espera" | "ofrecida" | "confirmada" | "cancelada"
-
-export interface WaitlistEntry {
-  id: string
+/** Lo que la agenda pinta como reservable (`GET /api/agenda/availability`). */
+export interface AgendaAvailability {
   branchId: string
-  patientId: string | null
-  patientName: string | null
-  contactId: string | null
-  contactName: string | null
-  dentistUserId: string | null
-  dentistName: string | null
-  serviceId: string | null
-  serviceName: string | null
-  priority: WaitlistPriority
-  status: WaitlistStatus
-  notes: string | null
-  offeredStartsAt: string | null
-  offeredEndsAt: string | null
-  offeredChairId: string | null
-  createdAt: string
+  timeZone: string
+  professionals: {
+    id: string
+    label: string
+    nextFree: { startsAt: string; endsAt: string; chairId: string | null } | null
+  }[]
+  defaultDurationMin: number
+  open: { dentistUserId: string; startsAt: string; endsAt: string }[]
+  /** Tramos en que cada profesional puede recibir una cita: su horario menos lo ocupado. */
+  free: { dentistUserId: string; startsAt: string; endsAt: string }[]
+  blocks: ScheduleBlock[]
+}
+
+/** Persona encontrada al buscar una cita, con sus próximas citas en pie. */
+export interface AgendaSearchPerson {
+  patientId: string
+  patientName: string
+  appointments: AgendaAppointment[]
 }
 
 export const WEEKDAY_LABELS = ["Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb"]
-
-export const WAITLIST_PRIORITY_LABELS: Record<WaitlistPriority, string> = {
-  alta: "Alta",
-  normal: "Normal",
-  baja: "Baja",
-}
-
-export const WAITLIST_STATUS_LABELS: Record<WaitlistStatus, string> = {
-  en_espera: "En espera",
-  ofrecida: "Ofrecida",
-  confirmada: "Confirmada",
-  cancelada: "Cancelada",
-}
 
 /** Minutos → "HH:MM" para los turnos del horario semanal. */
 export function minutesLabel(minutes: number): string {

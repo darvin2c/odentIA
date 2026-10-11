@@ -1013,10 +1013,14 @@ it("buscar_huecos entrega una opción completa que proponer_cita ejecuta como ci
   const tools = makeAgentTools(ctx)
   const gaps = tools.find((t) => t.name === "buscar_huecos")
   expect(gaps).toBeDefined()
+  // Lunes de la semana que viene (día completo en Lima): el agente no ofrece horas pasadas.
+  const monday = new Date(Date.now() + 7 * 86_400_000)
+  monday.setUTCDate(monday.getUTCDate() + ((8 - monday.getUTCDay()) % 7))
+  const from = `${monday.toISOString().slice(0, 10)}T05:00:00Z`
   const out = String(await gaps!.invoke({
     branchId,
-    from: "2026-10-05T05:00:00Z",
-    to: "2026-10-06T05:00:00Z",
+    from,
+    to: new Date(Date.parse(from) + 86_400_000).toISOString(),
     durationMin: 45,
   }))
   const firstLine = out.split("\n")[0] ?? ""

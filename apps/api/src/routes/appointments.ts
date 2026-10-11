@@ -1,22 +1,20 @@
 import { withOrgContext } from "@odentia/db"
 import {
-  addWaitlistEntry,
-  bookWaitlistEntry,
-  cancelWaitlistEntry,
   createAppointment,
   createChair,
   createScheduleBlock,
   deleteScheduleBlock,
+  getAgendaAvailability,
   getAppointment,
   getProfessionalSchedule,
   listAppointments,
   listAvailableSlots,
   listScheduleBlocks,
   listScheduleResources,
-  listWaitlistEntries,
   moveAppointment,
-  offerWaitlistSlot,
+  searchAgendaPatients,
   setAppointmentStatus,
+  setBranchDefaultDuration,
   setProfessionalSchedule,
   updateAppointment,
 } from "@odentia/services"
@@ -49,7 +47,7 @@ const createInput = z.object({
   branchId: z.uuid().optional(),
   patientId: z.uuid(),
   dentistUserId: z.string().min(1),
-  chairId: z.uuid(),
+  chairId: z.uuid().optional(),
   serviceId: z.uuid().optional(),
   startsAt: z.iso.datetime({ offset: true }),
   endsAt: z.iso.datetime({ offset: true }).optional(),
@@ -58,6 +56,12 @@ const createInput = z.object({
   reason: z.string().max(500).optional(),
   source: z.string().max(40).optional(),
   conversationId: z.uuid().optional(),
+  outsideSchedule: z.boolean().optional(),
+})
+
+const settingsInput = z.object({
+  branchId: z.uuid(),
+  defaultDurationMin: z.number().int().positive().max(480),
 })
 
 const patchInput = z.object({
@@ -77,7 +81,11 @@ const moveInput = z.object({
   chairId: z.uuid().optional(),
 })
 
-const statusInput = z.object({ status: z.enum(STATUS) })
+const statusInput = z.object({
+  status: z.enum(STATUS),
+  cancelReason: z.enum(["paciente", "clinica", "otro"]).optional(),
+  cancelNote: z.string().max(500).optional(),
+})
 
 const chairInput = z.object({
   branchId: z.uuid(),
@@ -118,30 +126,17 @@ const slotsQuery = z.object({
   stepMin: z.coerce.number().int().min(5).max(120).optional(),
 })
 
-const waitlistInput = z.object({
+const availabilityQuery = z.object({
   branchId: z.uuid(),
-  patientId: z.uuid().optional(),
-  contactId: z.uuid().optional(),
-  dentistUserId: z.string().min(1).nullable().optional(),
-  serviceId: z.uuid().nullable().optional(),
-  priority: z.enum(["alta", "normal", "baja"]).optional(),
-  notes: z.string().max(500).optional(),
+  from: z.iso.datetime({ offset: true }),
+  to: z.iso.datetime({ offset: true }),
+  // Al reprogramar: el hueco de esa cita cuenta como libre.
+  ignoreAppointmentId: z.uuid().optional(),
 })
 
-const offerInput = z.object({
-  startsAt: z.iso.datetime({ offset: true }),
-  endsAt: z.iso.datetime({ offset: true }),
-  dentistUserId: z.string().min(1).optional(),
-  chairId: z.uuid().optional(),
-})
+const searchQuery = z.object({ q: z.string().trim().min(2).max(200) })
 
-const bookInput = z.object({
-  startsAt: z.iso.datetime({ offset: true }).optional(),
-  endsAt: z.iso.datetime({ offset: true }).optional(),
-  chairId: z.uuid().optional(),
-})
-
-/** Agenda: recursos, huecos, horarios, bloqueos y lista de espera. */
+/** Agenda: recursos, huecos, horarios y bloqueos. */
 export function createAgendaRoute(deps: CrmDeps) {
   const app = new Hono()
 
@@ -156,6 +151,24 @@ export function createAgendaRoute(deps: CrmDeps) {
     }
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) => listScheduleResources(tx, orgId, { branchId })),
+    )
+  })
+
+  // Lo que dura una cita regular en la sede (la que se reserva sin servicio).
+  app.put("/settings", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "settings.write")) {
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para configurar la agenda"), 403)
+    }
+    const parsed = settingsInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        setBranchDefaultDuration(tx, orgId, userId, {
+          branchId: parsed.data.branchId,
+          minutes: parsed.data.defaultDurationMin,
+        }),
+      ),
     )
   })
 
@@ -180,7 +193,40 @@ export function createAgendaRoute(deps: CrmDeps) {
     const parsed = slotsQuery.safeParse(c.req.query())
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) => listAvailableSlots(tx, orgId, parsed.data)),
+      withOrgContext(deps.db, orgId, (tx) =>
+        // Lo ya pasado no se ofrece: el corte lo pone el servidor, no el reloj del cliente.
+        listAvailableSlots(tx, orgId, { ...parsed.data, notBefore: new Date().toISOString() }),
+      ),
+    )
+  })
+
+  // Lo que la agenda pinta como reservable: horario, bloqueos y próximo hueco por profesional.
+  app.get("/availability", async (c) => {
+    const { orgId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "appointments.read")) {
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para ver la agenda"), 403)
+    }
+    const parsed = availabilityQuery.safeParse(c.req.query())
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) => getAgendaAvailability(tx, orgId, parsed.data)),
+    )
+  })
+
+  // Búsqueda de la cita de un paciente: personas y sus próximas citas en pie.
+  app.get("/search", async (c) => {
+    const { orgId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "appointments.read")) {
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para ver la agenda"), 403)
+    }
+    // Busca por documento y teléfono: exige también poder ver pacientes.
+    if (!canAccess(memberRole, "patients.read")) {
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para buscar pacientes"), 403)
+    }
+    const parsed = searchQuery.safeParse(c.req.query())
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) => searchAgendaPatients(tx, orgId, parsed.data)),
     )
   })
 
@@ -261,76 +307,6 @@ export function createAgendaRoute(deps: CrmDeps) {
         await deleteScheduleBlock(tx, orgId, c.req.param("id"))
         return { ok: true }
       }),
-    )
-  })
-
-  // Lista de espera: ver.
-  app.get("/waitlist", async (c) => {
-    const { orgId, memberRole } = orgContextOf(c)
-    if (!canAccess(memberRole, "appointments.read")) {
-      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para ver la agenda"), 403)
-    }
-    const branchId = c.req.query("branchId")
-    const status = c.req.query("status")
-    if (branchId && !z.uuid().safeParse(branchId).success) {
-      return c.json(errorBody(c, "VALIDATION", "branchId inválido"), 400)
-    }
-    return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) =>
-        listWaitlistEntries(tx, orgId, { branchId: branchId ?? undefined, status: status ?? undefined }),
-      ),
-    )
-  })
-
-  app.post("/waitlist", async (c) => {
-    const { orgId, userId, memberRole } = orgContextOf(c)
-    if (!canAccess(memberRole, "appointments.write")) {
-      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para gestionar la lista de espera"), 403)
-    }
-    const parsed = waitlistInput.safeParse(await c.req.json().catch(() => null))
-    if (!parsed.success) return validationError(c, parsed.error.issues)
-    return runService(c, 201, () =>
-      withOrgContext(deps.db, orgId, (tx) => addWaitlistEntry(tx, orgId, userId, parsed.data)),
-    )
-  })
-
-  app.post("/waitlist/:id/offer", async (c) => {
-    const { orgId, userId, memberRole } = orgContextOf(c)
-    if (!canAccess(memberRole, "appointments.write")) {
-      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para gestionar la lista de espera"), 403)
-    }
-    const parsed = offerInput.safeParse(await c.req.json().catch(() => null))
-    if (!parsed.success) return validationError(c, parsed.error.issues)
-    return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) =>
-        offerWaitlistSlot(tx, orgId, userId, c.req.param("id"), parsed.data),
-      ),
-    )
-  })
-
-  app.post("/waitlist/:id/book", async (c) => {
-    const { orgId, userId, memberRole } = orgContextOf(c)
-    if (!canAccess(memberRole, "appointments.write")) {
-      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para gestionar la lista de espera"), 403)
-    }
-    const parsed = bookInput.safeParse(await c.req.json().catch(() => null))
-    if (!parsed.success) return validationError(c, parsed.error.issues)
-    return runService(c, 201, () =>
-      withOrgContext(deps.db, orgId, (tx) =>
-        bookWaitlistEntry(tx, orgId, userId, c.req.param("id"), parsed.data),
-      ),
-    )
-  })
-
-  app.post("/waitlist/:id/cancel", async (c) => {
-    const { orgId, userId, memberRole } = orgContextOf(c)
-    if (!canAccess(memberRole, "appointments.write")) {
-      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para gestionar la lista de espera"), 403)
-    }
-    return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) =>
-        cancelWaitlistEntry(tx, orgId, userId, c.req.param("id")),
-      ),
     )
   })
 
@@ -419,7 +395,10 @@ export function createAppointmentsRoute(deps: CrmDeps) {
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
-        setAppointmentStatus(tx, orgId, userId, c.req.param("id"), parsed.data.status),
+        setAppointmentStatus(tx, orgId, userId, c.req.param("id"), parsed.data.status, {
+          cancelReason: parsed.data.cancelReason,
+          cancelNote: parsed.data.cancelNote,
+        }),
       ),
     )
   })

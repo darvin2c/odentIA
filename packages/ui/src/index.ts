@@ -92,6 +92,7 @@ export { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, Di
 export { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectScrollDownButton, SelectScrollUpButton, SelectSeparator, SelectTrigger, SelectValue } from "./components/select.js";
 export { Textarea } from "./components/textarea.js";
 export { Checkbox } from "./components/checkbox.js";
+export { RadioGroup, RadioGroupItem } from "./components/radio-group.js";
 export {
   Sidebar,
   SidebarContent,

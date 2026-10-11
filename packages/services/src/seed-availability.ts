@@ -1,6 +1,6 @@
 /**
  * Semilla de disponibilidad: horarios explícitos por profesional/sede,
- * un bloqueo demostrativo y lista de espera inicial. Determinista e
+ * y un bloqueo demostrativo. Determinista e
  * idempotente (reemplaza lo existente de la sede). El padre la invoca por
  * sede antes de sembrar citas, para que la validación estricta no rechace
  * el seed histórico.
@@ -10,7 +10,6 @@ import { member } from "@odentia/db/schema/auth"
 import {
   professionalSchedule,
   scheduleBlock,
-  waitlistEntry,
 } from "@odentia/db/schema/availability"
 import { and, eq, inArray } from "drizzle-orm"
 import { setProfessionalSchedule, zonedTimeToUtc } from "./availability.js"
@@ -82,40 +81,4 @@ export async function seedAvailability(
     endsAt: zonedTimeToUtc(tomorrow, 14 * 60, "America/Lima"),
     createdBy: input.ownerUserId,
   })
-  await tx
-    .delete(waitlistEntry)
-    .where(
-      and(
-        eq(waitlistEntry.organizationId, input.orgId),
-        eq(waitlistEntry.branchId, input.branchId),
-      ),
-    )
-  await tx.insert(waitlistEntry).values([
-    {
-      organizationId: input.orgId,
-      branchId: input.branchId,
-      patientId: input.patientId,
-      contactId: null,
-      dentistUserId: members[0]?.userId ?? input.ownerUserId,
-      serviceId: null,
-      serviceName: "Limpieza",
-      priority: "alta",
-      status: "en_espera",
-      notes: "Prefiere mañanas (demo)",
-      createdBy: input.ownerUserId,
-    },
-    {
-      organizationId: input.orgId,
-      branchId: input.branchId,
-      patientId: null,
-      contactId: input.contactId,
-      dentistUserId: null,
-      serviceId: null,
-      serviceName: "Ortodoncia",
-      priority: "normal",
-      status: "en_espera",
-      notes: "Interesado sin ficha (demo)",
-      createdBy: input.ownerUserId,
-    },
-  ])
 }

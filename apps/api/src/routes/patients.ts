@@ -509,7 +509,7 @@ const coordinationScheduleInput = z.union([
         .object({
           branchId: z.uuid().optional(),
           dentistUserId: z.string().min(1),
-          chairId: z.uuid(),
+          chairId: z.uuid().optional(),
           serviceId: z.uuid().optional(),
           startsAt: z.iso.datetime({ offset: true }),
           endsAt: z.iso.datetime({ offset: true }).optional(),

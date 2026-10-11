@@ -23,8 +23,11 @@ import { useHeaderUtilities } from "./header-utilities.js"
 export interface PageHeaderProps {
   /** Título de la página. Es el `h1` del bloque, no un rótulo de sección. */
   title: string
-  /** Línea de contexto bajo el título (recuento, procedencia, antigüedad). */
-  subtitle?: string
+  /**
+   * Línea de contexto bajo el título (recuento, procedencia, antigüedad). Admite
+   * un control cuando el contexto se elige ahí mismo, como la sede de la pantalla.
+   */
+  subtitle?: React.ReactNode
   /** Acciones de la página, alineadas a la derecha y sin partirse de línea. */
   actions?: React.ReactNode
   className?: string
@@ -54,7 +57,11 @@ export function PageHeader({
       {navTrigger}
       <div className="min-w-0 flex-1 basis-48">
         <h1 className="truncate text-2xl font-bold tracking-tight text-foreground">{title}</h1>
-        {subtitle ? <p className="truncate text-sm text-muted-foreground">{subtitle}</p> : null}
+        {typeof subtitle === "string" ? (
+          <p className="truncate text-sm text-muted-foreground">{subtitle}</p>
+        ) : subtitle ? (
+          <div className="flex min-w-0 items-center text-sm text-muted-foreground">{subtitle}</div>
+        ) : null}
       </div>
       {utilities || actions ? (
         <div className="ml-auto flex shrink-0 items-center gap-1">

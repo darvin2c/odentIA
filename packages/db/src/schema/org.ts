@@ -59,6 +59,8 @@ export const branch = pgTable("branch", {
   mapsUrl: text("maps_url"),
   // null = hereda la zona horaria de la organización
   timezone: text("timezone"),
+  // Minutos de una cita regular en la sede: lo que dura cuando no lleva servicio.
+  appointmentDefaultMinutes: integer("appointment_default_minutes").notNull().default(60),
   isActive: boolean("is_active").notNull().default(true),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),

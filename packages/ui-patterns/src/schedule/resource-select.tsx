@@ -12,6 +12,7 @@ import {
   ComboboxList,
   FieldLabel,
 } from "@odentia/ui"
+import * as React from "react"
 
 export interface ResourceSelectOption {
   id: string
@@ -26,6 +27,7 @@ export function ResourceSelect({
   value,
   onChange,
   onQueryChange,
+  empty,
 }: {
   id: string
   label: string
@@ -34,21 +36,39 @@ export function ResourceSelect({
   onChange: (value: string) => void
   /** Opcional: avisa del texto de búsqueda para recargar opciones en servidor. */
   onQueryChange?: (query: string) => void
+  /**
+   * Lo que se ofrece cuando la búsqueda no encuentra a nadie, en lugar de «Sin
+   * resultados.»: la lista vacía tapa lo que hay debajo del campo, así que la
+   * salida (p. ej. registrar a quien se busca) tiene que ir dentro.
+   */
+  empty?: React.ReactNode
 }) {
+  // Lo elegido se conserva aunque la búsqueda en servidor deje de devolverlo. Sin esto,
+  // el campo se vacía, la búsqueda vuelve a traerlo y el campo se rellena, sin fin.
+  const [picked, setPicked] = React.useState<ResourceSelectOption | null>(null)
+  const selected =
+    options.find((item) => item.id === value) ?? (picked?.id === value ? picked : null)
+  const items =
+    selected && !options.some((item) => item.id === selected.id)
+      ? [selected, ...options]
+      : options
   return (
     <div className="grid gap-2">
       <FieldLabel htmlFor={id}>{label}</FieldLabel>
       <Combobox
-        items={options}
-        value={options.find((item) => item.id === value) ?? null}
+        items={items}
+        value={selected}
         isItemEqualToValue={(a, b) => a.id === b.id}
         itemToStringLabel={(item) => item.label}
-        onValueChange={(item) => onChange(item?.id ?? "")}
+        onValueChange={(item) => {
+          setPicked(item)
+          onChange(item?.id ?? "")
+        }}
         onInputValueChange={(text) => onQueryChange?.(text)}
       >
         <ComboboxInput id={id} placeholder={`Buscar ${label.toLocaleLowerCase("es")}…`} />
         <ComboboxContent>
-          <ComboboxEmpty>Sin resultados.</ComboboxEmpty>
+          <ComboboxEmpty>{empty ?? "Sin resultados."}</ComboboxEmpty>
           <ComboboxList>
             {(item: ResourceSelectOption) => (
               <ComboboxItem key={item.id} value={item}>

@@ -1,7 +1,7 @@
 /**
- * Barra de la agenda: contexto (sede y zona horaria ya rotuladas), rango
- * visible, navegación por flechas y «Hoy», conmutador de vista y UNA acción
- * principal. Una acción sólida por pantalla, la regla de UX del repo.
+ * Barra de la agenda: cuándo se está mirando (flechas, «Hoy» y el periodo
+ * rotulado con su resumen) y cómo (conmutador de vista y filtros). Lo que más
+ * se usa, a la izquierda; lo que se cambia poco, a la derecha.
  *
  * El conmutador es un fieldset de botones con `aria-pressed`: `@odentia/ui`
  * no exporta el ToggleGroup del registry, así que la alternativa semántica
@@ -12,6 +12,7 @@ import { Button, cn } from "@odentia/ui"
 import { ChevronLeft, ChevronRight } from "lucide-react"
 import type * as React from "react"
 
+import { DataRefreshMarker } from "../loading-state.js"
 export interface ScheduleViewOption {
   id: string
   label: string
@@ -21,14 +22,30 @@ export interface ScheduleViewOption {
 export interface ScheduleToolbarProps {
   /** Contexto de la vista: sede y zona, ya rotulados. */
   context?: React.ReactNode
-  /** Rango visible, ya rotulado («Lunes 21 de setiembre»). */
+  /** Periodo visible, ya rotulado («Lunes 21 de setiembre»). */
   rangeLabel: string
+  /**
+   * Control que ocupa el lugar del rótulo cuando el periodo se puede elegir
+   * (un botón con el mismo texto que abre el calendario).
+   */
+  rangeControl?: React.ReactNode
+  /** Lo que conviene saber del periodo («18 citas · 5 por confirmar»). */
+  summary?: string
+  /** Se están volviendo a pedir datos que ya están en pantalla: lo dice sin quitarlos. */
+  refreshing?: boolean
   onPrevious?: () => void
   onNext?: () => void
   onToday?: () => void
+  /** Nombres de las flechas según el periodo («Día anterior», «Semana siguiente»). */
+  previousLabel?: string
+  nextLabel?: string
   views?: ScheduleViewOption[]
   view?: string
   onViewChange?: (id: string) => void
+  /** El conmutador ocupa todo el ancho (teléfono). */
+  stretchViews?: boolean
+  /** Filtros de la vista, tras el conmutador. */
+  filters?: React.ReactNode
   /** La única acción sólida de la pantalla («Nueva cita»). */
   action?: React.ReactNode
   className?: string
@@ -37,73 +54,106 @@ export interface ScheduleToolbarProps {
 export function ScheduleToolbar({
   context,
   rangeLabel,
+  rangeControl,
+  summary,
+  refreshing = false,
   onPrevious,
   onNext,
   onToday,
+  previousLabel = "Anterior",
+  nextLabel = "Siguiente",
   views,
   view,
   onViewChange,
+  stretchViews = false,
+  filters,
   action,
   className,
 }: ScheduleToolbarProps) {
+  const hasViews = views != null && views.length > 0
   return (
-    <div className={cn("flex flex-wrap items-center gap-x-3 gap-y-2", className)}>
+    <div className={cn("flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2", className)}>
       {context ? <div className="flex min-w-0 flex-col gap-0.5">{context}</div> : null}
 
-      <div className="flex items-center gap-1">
-        {onPrevious ? (
-          <Button
-            type="button"
-            variant="outline"
-            size="icon-sm"
-            onClick={onPrevious}
-            aria-label="Anterior"
-          >
-            <ChevronLeft />
-          </Button>
-        ) : null}
-        <span className="min-w-0 truncate px-1 text-sm font-medium">{rangeLabel}</span>
-        {onNext ? (
-          <Button
-            type="button"
-            variant="outline"
-            size="icon-sm"
-            onClick={onNext}
-            aria-label="Siguiente"
-          >
-            <ChevronRight />
-          </Button>
-        ) : null}
-        {onToday ? (
-          <Button type="button" variant="outline" size="sm" onClick={onToday}>
-            Hoy
-          </Button>
-        ) : null}
+      {onPrevious || onNext || onToday ? (
+        <div className="flex shrink-0 items-center gap-1">
+          {onPrevious ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              onClick={onPrevious}
+              aria-label={previousLabel}
+            >
+              <ChevronLeft />
+            </Button>
+          ) : null}
+          {onToday ? (
+            <Button type="button" variant="outline" onClick={onToday}>
+              Hoy
+            </Button>
+          ) : null}
+          {onNext ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              onClick={onNext}
+              aria-label={nextLabel}
+            >
+              <ChevronRight />
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
+
+      <div className="flex min-w-0 flex-wrap items-baseline gap-x-3">
+        {rangeControl ?? (
+          <span className="min-w-0 truncate text-lg font-bold tracking-tight">{rangeLabel}</span>
+        )}
+        {summary ? <span className="text-sm text-muted-foreground">{summary}</span> : null}
+        {refreshing ? <DataRefreshMarker /> : null}
       </div>
 
-      {views && views.length > 0 ? (
-        <fieldset className="ml-auto flex min-w-0 gap-0.5 border-0 p-0">
+      {hasViews ? (
+        <fieldset
+          className={cn(
+            "flex min-w-0 gap-0.5 rounded-xl border-0 bg-secondary p-[3px]",
+            stretchViews ? "w-full" : "ml-auto",
+          )}
+        >
           <legend className="sr-only">Vista de la agenda</legend>
           {views.map((option) => {
             const active = option.id === view
             return (
-              <Button
+              <button
                 key={option.id}
                 type="button"
-                variant={active ? "secondary" : "ghost"}
-                size="sm"
                 aria-pressed={active}
                 onClick={() => onViewChange?.(option.id)}
+                className={cn(
+                  "flex items-center justify-center gap-1.5 rounded-[9px] px-4 text-[13px] font-semibold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
+                  stretchViews ? "h-10 flex-1" : "h-[30px]",
+                  active
+                    ? "bg-card text-foreground shadow-xs"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
               >
                 {option.icon}
-                <span className="hidden sm:inline">{option.label}</span>
-              </Button>
+                {option.label}
+              </button>
             )
           })}
         </fieldset>
       ) : null}
 
-      {action ? <div className={views && views.length > 0 ? "" : "ml-auto"}>{action}</div> : null}
+      {filters ? (
+        <div className={cn("flex min-w-0 items-center gap-2", !hasViews && "ml-auto")}>
+          {filters}
+        </div>
+      ) : null}
+
+      {action ? <div className={hasViews || filters ? "" : "ml-auto"}>{action}</div> : null}
     </div>
   )
 }

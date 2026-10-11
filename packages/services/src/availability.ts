@@ -9,22 +9,15 @@ import type { Db } from "@odentia/db"
 import { appointment, scheduleChair } from "@odentia/db/schema/agenda"
 import {
   SCHEDULE_BLOCK_KINDS,
-  WAITLIST_PRIORITIES,
-  WAITLIST_STATUSES,
   professionalSchedule,
   scheduleBlock,
-  waitlistEntry,
   type ScheduleBlockKind,
-  type WaitlistPriority,
-  type WaitlistStatus,
 } from "@odentia/db/schema/availability"
 import { member, user } from "@odentia/db/schema/auth"
-import { patient, serviceCatalog } from "@odentia/db/schema/clinical"
-import { contact, orgFk, timestamps } from "@odentia/db/schema/crm"
+import { serviceCatalog } from "@odentia/db/schema/clinical"
 import { branch, orgProfile } from "@odentia/db/schema/org"
-import { and, asc, eq, gt, gte, inArray, isNull, lt, or } from "drizzle-orm"
+import { and, asc, eq, gt, gte, inArray, isNull, lt, ne, or } from "drizzle-orm"
 import { notFound, ServiceError, validation } from "./errors.js"
-import { createWorkspaceNotification } from "./workspace.js"
 
 const FALLBACK_TZ = "America/Lima"
 const MAX_RANGE_DAYS = 62
@@ -145,6 +138,7 @@ async function requireBranch(tx: Db, orgId: string, branchId: string) {
       name: branch.name,
       timezone: branch.timezone,
       orgTimezone: orgProfile.timezone,
+      defaultMinutes: branch.appointmentDefaultMinutes,
     })
     .from(branch)
     .leftJoin(orgProfile, eq(orgProfile.organizationId, branch.organizationId))
@@ -187,20 +181,6 @@ function assertBlockKind(kind: string): ScheduleBlockKind {
     throw validation(`Tipo de bloqueo inválido: ${kind}`)
   }
   return kind as ScheduleBlockKind
-}
-
-function assertPriority(priority: string): WaitlistPriority {
-  if (!(WAITLIST_PRIORITIES as readonly string[]).includes(priority)) {
-    throw validation(`Prioridad inválida: ${priority}`)
-  }
-  return priority as WaitlistPriority
-}
-
-function assertWaitlistStatus(status: string): WaitlistStatus {
-  if (!(WAITLIST_STATUSES as readonly string[]).includes(status)) {
-    throw validation(`Estado de espera inválido: ${status}`)
-  }
-  return status as WaitlistStatus
 }
 
 /* Horarios semanales */
@@ -424,6 +404,8 @@ export interface AvailabilityCheck {
   startsAt: Date
   endsAt: Date
   ignoreAppointmentId?: string
+  /** Urgencia: se reserva aunque el horario del profesional no cubra ese momento. */
+  allowOutsideSchedule?: boolean
 }
 
 async function overlappingBlocks(
@@ -505,7 +487,7 @@ export async function validateAvailability(
         eq(professionalSchedule.isActive, true),
       ),
     )
-  if (rules.length === 0) {
+  if (rules.length === 0 && !check.allowOutsideSchedule) {
     throw validation("El profesional no tiene horario configurado en esta sede")
   }
   // Parte el intervalo por días locales y exige un turno que cubra cada tramo.
@@ -524,7 +506,7 @@ export async function validateAvailability(
         endParts.weekday === startParts.weekday &&
         endParts.minutes < rule.endMin,
     )
-    if (!covered) {
+    if (!covered && !check.allowOutsideSchedule) {
       throw validation("El horario del profesional no cubre ese momento en esta sede")
     }
     if (segmentEnd >= check.endsAt) break
@@ -561,6 +543,10 @@ export interface SlotsQuery {
   durationMin?: number
   timeZone?: string
   stepMin?: number
+  /** Descarta los huecos que empiezan antes de este instante (lo ya pasado no se ofrece). */
+  notBefore?: string
+  /** Solo el primer hueco de cada profesional: responde «quién puede atender primero». */
+  firstPerDentist?: boolean
 }
 
 export interface AvailableSlot {
@@ -621,7 +607,8 @@ export async function listAvailableSlots(
     if (!service) throw notFound("Servicio")
     duration ??= service.durationMin ?? undefined
   }
-  duration ??= 30
+  // Sin servicio ni duración pedida: lo que dura una cita regular en la sede.
+  duration ??= resolved.defaultMinutes
   if (!Number.isInteger(duration) || (duration as number) <= 0 || (duration as number) > 480) {
     throw validation("La duración debe estar entre 1 y 480 minutos")
   }
@@ -644,8 +631,15 @@ export async function listAvailableSlots(
     .from(professionalSchedule)
     .innerJoin(user, eq(user.id, professionalSchedule.dentistUserId))
     .where(and(...scheduleConditions))
-    .orderBy(asc(professionalSchedule.dentistUserId), asc(professionalSchedule.weekday))
+    .orderBy(
+      asc(professionalSchedule.dentistUserId),
+      asc(professionalSchedule.weekday),
+      asc(professionalSchedule.startMin),
+    )
   if (rules.length === 0) return { slots: [], truncated: false, timeZone }
+  const notBefore = input.notBefore ? parseInstant(input.notBefore, "notBefore") : null
+  const dentistsWithRules = new Set(rules.map((entry) => entry.rule.dentistUserId))
+  const found = new Set<string>()
 
   const chairs = await tx
     .select({ id: scheduleChair.id, name: scheduleChair.name })
@@ -670,9 +664,10 @@ export async function listAvailableSlots(
       })
       .from(appointment)
       .where(
+        // De toda la organización: quien atiende en dos sedes no está libre en esta
+        // mientras tiene una cita en la otra.
         and(
           eq(appointment.organizationId, orgId),
-          eq(appointment.branchId, input.branchId),
           inArray(appointment.status, ["programada", "confirmada"]),
           lt(appointment.startsAt, to),
           gte(appointment.endsAt, from),
@@ -705,10 +700,12 @@ export async function listAvailableSlots(
     ).getUTCDay()
     for (const entry of rules) {
       if (entry.rule.weekday !== weekday) continue
+      if (input.firstPerDentist && found.has(entry.rule.dentistUserId)) continue
       for (let minute = entry.rule.startMin; minute + slotMin <= entry.rule.endMin; minute += step) {
         const startUtc = zonedTimeToUtc(dayLabel, minute, resolved.timeZone)
         const endUtc = new Date(startUtc.getTime() + slotMin * 60000)
         if (endUtc <= from || startUtc >= to) continue
+        if (notBefore && startUtc < notBefore) continue
         const dentistBusy = busyAppointments.some(
           (item) =>
             item.dentistUserId === entry.rule.dentistUserId &&
@@ -760,6 +757,13 @@ export async function listAvailableSlots(
           timeZone,
         })
         if (slots.length >= MAX_SLOTS) return { slots, truncated: true, timeZone }
+        if (input.firstPerDentist) {
+          found.add(entry.rule.dentistUserId)
+          break
+        }
+      }
+      if (input.firstPerDentist && found.size === dentistsWithRules.size) {
+        return { slots, truncated: false, timeZone }
       }
     }
     if (dayEnd >= to) break
@@ -772,273 +776,223 @@ export async function listAvailableSlots(
   return { slots, truncated: false, timeZone }
 }
 
-/* Lista de espera */
+/* Disponibilidad a la vista de la agenda */
 
-export interface WaitlistItem {
-  id: string
-  branchId: string
-  patientId: string | null
-  patientName: string | null
-  contactId: string | null
-  contactName: string | null
-  dentistUserId: string | null
-  dentistName: string | null
-  serviceId: string | null
-  serviceName: string | null
-  priority: WaitlistPriority
-  status: WaitlistStatus
-  notes: string | null
-  offeredStartsAt: string | null
-  offeredEndsAt: string | null
-  offeredChairId: string | null
-  createdAt: string
+const NEXT_FREE_DAYS = 14
+
+type Span = [start: number, end: number]
+
+/** Une tramos solapados o contiguos. */
+function mergeSpans(spans: Span[]): Span[] {
+  const sorted = spans.filter(([a, b]) => b > a).sort((x, y) => x[0] - y[0])
+  const out: Span[] = []
+  for (const [a, b] of sorted) {
+    const last = out[out.length - 1]
+    if (last && a <= last[1]) last[1] = Math.max(last[1], b)
+    else out.push([a, b])
+  }
+  return out
 }
 
-export interface AddWaitlistInput {
-  branchId: string
-  patientId?: string
-  contactId?: string
-  dentistUserId?: string | null
-  serviceId?: string | null
-  priority?: string
-  notes?: string
-}
-
-const PRIORITY_RANK: Record<WaitlistPriority, number> = { alta: 0, normal: 1, baja: 2 }
-
-function toWaitlistItem(row: {
-  entry: typeof waitlistEntry.$inferSelect
-  patientName: string | null
-  contactName: string | null
-  dentistName: string | null
-}): WaitlistItem {
-  return {
-    id: row.entry.id,
-    branchId: row.entry.branchId,
-    patientId: row.entry.patientId,
-    patientName: row.patientName,
-    contactId: row.entry.contactId,
-    contactName: row.contactName,
-    dentistUserId: row.entry.dentistUserId,
-    dentistName: row.dentistName,
-    serviceId: row.entry.serviceId,
-    serviceName: row.entry.serviceName,
-    priority: assertPriority(row.entry.priority),
-    status: assertWaitlistStatus(row.entry.status),
-    notes: row.entry.notes,
-    offeredStartsAt: row.entry.offeredStartsAt?.toISOString() ?? null,
-    offeredEndsAt: row.entry.offeredEndsAt?.toISOString() ?? null,
-    offeredChairId: row.entry.offeredChairId,
-    createdAt: row.entry.createdAt.toISOString(),
-  }
-}
-
-export async function listWaitlistEntries(
-  tx: Db,
-  orgId: string,
-  input: { branchId?: string; status?: string },
-): Promise<WaitlistItem[]> {
-  const conditions = [eq(waitlistEntry.organizationId, orgId)]
-  if (input.branchId) {
-    await requireBranch(tx, orgId, input.branchId)
-    conditions.push(eq(waitlistEntry.branchId, input.branchId))
-  }
-  if (input.status) {
-    const statuses = input.status
-      .split(",")
-      .map((item) => item.trim())
-      .filter(Boolean)
-    for (const status of statuses) assertWaitlistStatus(status)
-    if (statuses.length > 0) conditions.push(inArray(waitlistEntry.status, statuses))
-  }
-  const rows = await tx
-    .select({
-      entry: waitlistEntry,
-      patientName: patient.displayName,
-      contactName: contact.displayName,
-      dentistName: user.name,
+/** Lo que queda de `base` al quitarle `cuts`. */
+function subtractSpans(base: Span[], cuts: Span[]): Span[] {
+  let rest = mergeSpans(base)
+  for (const [from, to] of mergeSpans(cuts)) {
+    rest = rest.flatMap(([a, b]): Span[] => {
+      if (to <= a || from >= b) return [[a, b]]
+      const parts: Span[] = []
+      if (from > a) parts.push([a, from])
+      if (to < b) parts.push([to, b])
+      return parts
     })
-    .from(waitlistEntry)
-    .leftJoin(
-      patient,
-      and(eq(patient.organizationId, orgId), eq(patient.id, waitlistEntry.patientId)),
-    )
-    .leftJoin(
-      contact,
-      and(eq(contact.organizationId, orgId), eq(contact.id, waitlistEntry.contactId)),
-    )
-    .leftJoin(user, eq(user.id, waitlistEntry.dentistUserId))
-    .where(and(...conditions))
-    .orderBy(asc(waitlistEntry.createdAt))
-  return rows
-    .map(toWaitlistItem)
-    .sort((a, b) => PRIORITY_RANK[a.priority] - PRIORITY_RANK[b.priority])
+  }
+  return rest
 }
 
-export async function addWaitlistEntry(
-  tx: Db,
-  orgId: string,
-  actorUserId: string,
-  input: AddWaitlistInput,
-): Promise<WaitlistItem> {
-  await requireBranch(tx, orgId, input.branchId)
-  if (!input.patientId && !input.contactId) {
-    throw validation("La espera necesita un paciente o un contacto")
+/** Lo común a dos listas de tramos. */
+function intersectSpans(first: Span[], second: Span[]): Span[] {
+  const out: Span[] = []
+  for (const [a, b] of mergeSpans(first)) {
+    for (const [c, d] of mergeSpans(second)) {
+      const start = Math.max(a, c)
+      const end = Math.min(b, d)
+      if (end > start) out.push([start, end])
+    }
   }
-  if (input.patientId) {
-    const [row] = await tx
-      .select({ id: patient.id })
-      .from(patient)
-      .where(and(eq(patient.organizationId, orgId), eq(patient.id, input.patientId)))
-      .limit(1)
-    if (!row) throw notFound("Paciente")
-  }
-  if (input.contactId) {
-    const [row] = await tx
-      .select({ id: contact.id })
-      .from(contact)
-      .where(and(eq(contact.organizationId, orgId), eq(contact.id, input.contactId)))
-      .limit(1)
-    if (!row) throw notFound("Contacto")
-  }
-  if (input.dentistUserId) await requireDentist(tx, orgId, input.dentistUserId)
-  let service: { id: string; name: string } | null = null
-  if (input.serviceId) {
-    const [row] = await tx
-      .select({ id: serviceCatalog.id, name: serviceCatalog.name })
-      .from(serviceCatalog)
-      .where(
-        and(
-          eq(serviceCatalog.organizationId, orgId),
-          eq(serviceCatalog.id, input.serviceId),
-          eq(serviceCatalog.isActive, true),
-        ),
-      )
-      .limit(1)
-    if (!row) throw notFound("Servicio")
-    service = row
-  }
-  const priority = assertPriority(input.priority ?? "normal")
-  const [created] = await tx
-    .insert(waitlistEntry)
-    .values({
-      organizationId: orgId,
-      branchId: input.branchId,
-      patientId: input.patientId ?? null,
-      contactId: input.contactId ?? null,
-      dentistUserId: input.dentistUserId ?? null,
-      serviceId: service?.id ?? null,
-      serviceName: service?.name ?? null,
-      priority,
-      status: "en_espera",
-      notes: input.notes?.trim() || null,
-      createdBy: actorUserId,
-    })
-    .returning({ id: waitlistEntry.id })
-  if (!created) throw new Error("No se pudo registrar la espera")
-  return getWaitlistItem(tx, orgId, created.id)
+  return out
 }
 
-async function requireWaitlistEntry(tx: Db, orgId: string, id: string) {
-  const [row] = await tx
-    .select()
-    .from(waitlistEntry)
-    .where(and(eq(waitlistEntry.organizationId, orgId), eq(waitlistEntry.id, id)))
-    .limit(1)
-  if (!row) throw notFound("Espera")
-  return row
+export interface AgendaAvailability {
+  branchId: string
+  timeZone: string
+  /** Minutos de una cita regular en la sede (sin servicio). */
+  defaultDurationMin: number
+  /**
+   * Tramos en que cada profesional puede recibir una cita: su horario menos
+   * ausencias, citas en pie (en cualquier sede) y lo ya pasado, y solo mientras
+   * queda algún sillón libre.
+   */
+  free: Array<{ dentistUserId: string; startsAt: string; endsAt: string }>
+  /** Quienes atienden en la sede (tienen horario), con su próximo hueco reservable. */
+  professionals: Array<{
+    id: string
+    label: string
+    nextFree: { startsAt: string; endsAt: string; chairId: string | null } | null
+  }>
+  /** Tramos de atención del rango, ya como instantes. */
+  open: Array<{ dentistUserId: string; startsAt: string; endsAt: string }>
+  blocks: ScheduleBlockItem[]
 }
 
 /**
- * Ofrece un hueco concreto de la lista de espera usando el mismo servicio
- * registrado. Valida disponibilidad real antes de marcarla como ofrecida y
- * avisa al profesional destinatario.
+ * Lo que la agenda necesita para pintar qué se puede reservar: horario de cada
+ * profesional materializado en el rango, bloqueos y el primer hueco libre de
+ * cada uno desde `now`. Sale de las mismas reglas que valida la reserva.
  */
-export async function offerWaitlistSlot(
+export async function getAgendaAvailability(
   tx: Db,
   orgId: string,
-  actorUserId: string,
-  id: string,
-  input: { startsAt: string; endsAt: string; dentistUserId?: string; chairId?: string },
-): Promise<WaitlistItem> {
-  const entry = await requireWaitlistEntry(tx, orgId, id)
-  if (entry.status !== "en_espera" && entry.status !== "ofrecida") {
-    throw validation("Solo se puede ofrecer una espera pendiente")
+  input: {
+    branchId: string
+    from: string
+    to: string
+    now?: Date
+    /** Al reprogramar: el hueco de esa cita cuenta como libre en los tramos (`free`). */
+    ignoreAppointmentId?: string
+  },
+): Promise<AgendaAvailability> {
+  const resolved = await requireBranch(tx, orgId, input.branchId)
+  const from = parseInstant(input.from, "from")
+  const to = parseInstant(input.to, "to")
+  if (to <= from) throw validation("El rango de agenda es inválido")
+  if (to.getTime() - from.getTime() > MAX_RANGE_DAYS * 86_400_000) {
+    throw validation(`El rango máximo es de ${MAX_RANGE_DAYS} días`)
   }
-  if (!entry.patientId) throw validation("La espera necesita un paciente para ofrecer un hueco")
-  const startsAt = parseInstant(input.startsAt, "startsAt")
-  const endsAt = parseInstant(input.endsAt, "endsAt")
-  const dentistUserId = input.dentistUserId ?? entry.dentistUserId
-  if (!dentistUserId) throw validation("La oferta necesita un profesional")
-  const chairId = input.chairId ?? entry.offeredChairId
-  if (!chairId) throw validation("La oferta necesita un sillón")
-  await validateAvailability(tx, orgId, {
-    branchId: entry.branchId,
-    dentistUserId,
-    chairId,
-    startsAt,
-    endsAt,
-  })
-  await tx
-    .update(waitlistEntry)
-    .set({
-      dentistUserId,
-      offeredStartsAt: startsAt,
-      offeredEndsAt: endsAt,
-      offeredChairId: chairId,
-      status: "ofrecida",
-      updatedAt: new Date(),
-    })
-    .where(and(eq(waitlistEntry.organizationId, orgId), eq(waitlistEntry.id, id)))
-  await createWorkspaceNotification(tx, orgId, {
-    userId: dentistUserId,
-    dedupeKey: `waitlist-offer-${id}`,
-    title: "Hueco ofrecido de lista de espera",
-    body: `Hay un hueco ofrecido en agenda pendiente de confirmación.`,
-    href: "/agenda",
-    permission: "appointments.read",
-  })
-  return getWaitlistItem(tx, orgId, id)
-}
-
-async function getWaitlistItem(tx: Db, orgId: string, id: string): Promise<WaitlistItem> {
-  const [item] = await tx
-    .select({
-      entry: waitlistEntry,
-      patientName: patient.displayName,
-      contactName: contact.displayName,
-      dentistName: user.name,
-    })
-    .from(waitlistEntry)
-    .leftJoin(
-      patient,
-      and(eq(patient.organizationId, orgId), eq(patient.id, waitlistEntry.patientId)),
+  const now = input.now ?? new Date()
+  const rules = await tx
+    .select({ rule: professionalSchedule, dentistName: user.name })
+    .from(professionalSchedule)
+    .innerJoin(user, eq(user.id, professionalSchedule.dentistUserId))
+    .where(
+      and(
+        eq(professionalSchedule.organizationId, orgId),
+        eq(professionalSchedule.branchId, input.branchId),
+        eq(professionalSchedule.isActive, true),
+      ),
     )
-    .leftJoin(
-      contact,
-      and(eq(contact.organizationId, orgId), eq(contact.id, waitlistEntry.contactId)),
+    .orderBy(asc(user.name), asc(professionalSchedule.weekday), asc(professionalSchedule.startMin))
+
+  const open: AgendaAvailability["open"] = []
+  const startParts = zonedPartsOf(from, resolved.timeZone)
+  let dayLabel = toISODate(startParts.year, startParts.month, startParts.day)
+  for (let dayIndex = 0; dayIndex < MAX_RANGE_DAYS + 1; dayIndex++) {
+    const dayStart = zonedDayStartUtc(dayLabel, resolved.timeZone)
+    if (dayStart >= to) break
+    const weekday = new Date(`${dayLabel}T12:00:00Z`).getUTCDay()
+    for (const entry of rules) {
+      if (entry.rule.weekday !== weekday) continue
+      open.push({
+        dentistUserId: entry.rule.dentistUserId,
+        startsAt: zonedTimeToUtc(dayLabel, entry.rule.startMin, resolved.timeZone).toISOString(),
+        endsAt: zonedTimeToUtc(dayLabel, entry.rule.endMin, resolved.timeZone).toISOString(),
+      })
+    }
+    // 26 h después del inicio cae siempre en el día local siguiente, también con cambio de hora.
+    const nextParts = zonedPartsOf(new Date(dayStart.getTime() + 93_600_000), resolved.timeZone)
+    const nextLabel = toISODate(nextParts.year, nextParts.month, nextParts.day)
+    if (nextLabel <= dayLabel) break
+    dayLabel = nextLabel
+  }
+
+  const [blocks, next] = await Promise.all([
+    listScheduleBlocks(tx, orgId, { branchId: input.branchId, from: input.from, to: input.to }),
+    listAvailableSlots(tx, orgId, {
+      branchId: input.branchId,
+      from: now.toISOString(),
+      to: new Date(now.getTime() + NEXT_FREE_DAYS * 86_400_000).toISOString(),
+      notBefore: now.toISOString(),
+      firstPerDentist: true,
+    }),
+  ])
+  const nextByDentist = new Map(next.slots.map((slot) => [slot.dentistUserId, slot]))
+  const professionals = new Map<string, AgendaAvailability["professionals"][number]>()
+  for (const entry of rules) {
+    if (professionals.has(entry.rule.dentistUserId)) continue
+    const slot = nextByDentist.get(entry.rule.dentistUserId)
+    professionals.set(entry.rule.dentistUserId, {
+      id: entry.rule.dentistUserId,
+      label: entry.dentistName,
+      nextFree: slot ? { startsAt: slot.startsAt, endsAt: slot.endsAt, chairId: slot.chairId } : null,
+    })
+  }
+  // Tramos reservables por profesional, con las mismas reglas que valida la reserva.
+  const [busy, chairRows] = await Promise.all([
+    tx
+      .select({
+        dentistUserId: appointment.dentistUserId,
+        chairId: appointment.chairId,
+        startsAt: appointment.startsAt,
+        endsAt: appointment.endsAt,
+      })
+      .from(appointment)
+      .where(
+        and(
+          eq(appointment.organizationId, orgId),
+          inArray(appointment.status, ["programada", "confirmada"]),
+          lt(appointment.startsAt, to),
+          gt(appointment.endsAt, from),
+          input.ignoreAppointmentId ? ne(appointment.id, input.ignoreAppointmentId) : undefined,
+        ),
+      ),
+    tx
+      .select({ id: scheduleChair.id })
+      .from(scheduleChair)
+      .where(
+        and(
+          eq(scheduleChair.organizationId, orgId),
+          eq(scheduleChair.branchId, input.branchId),
+          eq(scheduleChair.isActive, true),
+        ),
+      ),
+  ])
+  const whole: Span[] = [[from.getTime(), to.getTime()]]
+  const spanOf = (item: { startsAt: Date | string; endsAt: Date | string }): Span => [
+    new Date(item.startsAt).getTime(),
+    new Date(item.endsAt).getTime(),
+  ]
+  const free: AgendaAvailability["free"] = []
+  for (const professional of professionals.values()) {
+    const mine = (dentistUserId: string | null) =>
+      dentistUserId === null || dentistUserId === professional.id
+    const hours = open.filter((item) => item.dentistUserId === professional.id).map(spanOf)
+    const taken: Span[] = [
+      ...blocks.filter((block) => block.chairId === null && mine(block.dentistUserId)).map(spanOf),
+      ...busy.filter((item) => item.dentistUserId === professional.id).map(spanOf),
+      [0, now.getTime()],
+    ]
+    const chairFree = chairRows.flatMap((chair) =>
+      subtractSpans(whole, [
+        ...busy.filter((item) => item.chairId === chair.id).map(spanOf),
+        ...blocks
+          .filter((block) => block.chairId === chair.id && mine(block.dentistUserId))
+          .map(spanOf),
+      ]),
     )
-    .leftJoin(user, eq(user.id, waitlistEntry.dentistUserId))
-    .where(and(eq(waitlistEntry.organizationId, orgId), eq(waitlistEntry.id, id)))
-    .limit(1)
-  if (!item) throw new Error("No se pudo leer la espera")
-  return toWaitlistItem(item)
+    for (const [start, end] of intersectSpans(subtractSpans(hours, taken), chairFree)) {
+      free.push({
+        dentistUserId: professional.id,
+        startsAt: new Date(start).toISOString(),
+        endsAt: new Date(end).toISOString(),
+      })
+    }
+  }
+  return {
+    branchId: input.branchId,
+    timeZone: resolved.timeZone,
+    defaultDurationMin: resolved.defaultMinutes,
+    professionals: [...professionals.values()],
+    open,
+    blocks,
+    free,
+  }
 }
-
-/** La espera ofrecida vuelve a pendiente (el hueco se libera para otros). */
-export async function cancelWaitlistEntry(
-  tx: Db,
-  orgId: string,
-  actorUserId: string,
-  id: string,
-): Promise<WaitlistItem> {
-  const entry = await requireWaitlistEntry(tx, orgId, id)
-  if (entry.status === "confirmada") throw validation("La espera confirmada ya generó su cita")
-  await tx
-    .update(waitlistEntry)
-    .set({ status: "cancelada", updatedAt: new Date() })
-    .where(and(eq(waitlistEntry.organizationId, orgId), eq(waitlistEntry.id, id)))
-  return getWaitlistItem(tx, orgId, id)
-}
-
-export type { ScheduleBlockKind, WaitlistPriority, WaitlistStatus }
