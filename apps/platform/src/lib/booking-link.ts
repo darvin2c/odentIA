@@ -1,3 +1,4 @@
+import type { RegistrationAnswers, RegistrationConfig } from "@odentia/clinical"
 import { ApiError } from "./api"
 import { API_URL } from "./auth-client"
 
@@ -71,9 +72,25 @@ export function fetchBookingSlots(
   return publicFetch(`${base(slug)}/slots?${query.toString()}`)
 }
 
-/** Abre el registro de pacientes para quien aún no lo es; devuelve el enlace con el que se pide y se envía el formulario. */
-export function startBookingRegistration(slug: string, token: string): Promise<{ data: { registrationToken: string } }> {
-  return publicFetch(`${base(slug)}/registration`, { method: "POST", body: JSON.stringify({ token }) })
+export interface BookingRegistrationForm {
+  /** El registro de pacientes vigente de la clínica: versión y aviso de privacidad. */
+  config: RegistrationConfig
+  today: string
+  /** El celular de la conversación, solo si el sistema lo conoce (WhatsApp). */
+  phone: string | null
+}
+
+/** Lo que hace falta para pedir sus datos a quien aún no es paciente. */
+export function fetchBookingRegistrationForm(slug: string, token: string): Promise<{ data: BookingRegistrationForm }> {
+  return publicFetch(`${base(slug)}/registration?token=${encodeURIComponent(token)}`)
+}
+
+/** Registra a la persona con los datos esenciales para reservar; la ficha la crea el registro de pacientes. */
+export function submitBookingRegistration(
+  slug: string,
+  input: { token: string; submissionId: string; formVersion: number; answers: RegistrationAnswers },
+): Promise<{ data: { registered: boolean } }> {
+  return publicFetch(`${base(slug)}/registration`, { method: "POST", body: JSON.stringify(input) })
 }
 
 export function reserveBooking(

@@ -11,7 +11,8 @@ Quien administra una clínica mediana no tiene tiempo de recorrer agenda, presup
 - **Cada detección es una consulta a la base de datos**, escrita y probada: controles vencidos sin cita, presupuestos aceptados sin cita, atenciones sin firmar, seguimientos sin responsable y cobranza vencida. El título, la cifra, la lista y «cómo se calculó» salen del mismo resultado. No interviene ningún modelo, así que no cuesta por uso ni puede inventar un número.
 - **Se calcula al leer**, con los datos de ese momento; no hay una foto diaria que pueda quedar vieja ni un proceso que mantener.
 - **Los permisos son los de quien lee.** Cada detección declara el permiso de su dominio y el servicio solo calcula las que ese rol puede ver. Leer recomendaciones no exige permiso del agente; encender el asesor, apagar una detección, cambiar su umbral o posponerla es administrar el agente.
-- **Solo recomienda.** La acción preparada —una tarea por persona de la lista— la pide y la confirma una persona, y repetirla el mismo día no duplica nada. El asesor no envía mensajes ni enciende automatizaciones.
+- **Solo recomienda.** La acción preparada —una tarea por persona de la lista— la pide y la confirma una persona, y repetirla el mismo día no duplica nada. El asesor no envía mensajes ni enciende automatizaciones por su cuenta.
+- **Donde hay una automatización real, la ofrece; no la ejecuta.** Una detección puede declarar la automatización que evita que su lista vuelva a llenarse (hoy solo «Controles vencidos» → recordatorio de control). El asesor lee su estado con el listado de reglas de Automatizaciones y lo muestra solo a quien puede verlas (`crm.read`). «Encender recordatorio» es la misma operación de esa pantalla (`/api/automations/rules`, permiso `crm.write`), la pide una persona y se confirma; crear las tareas queda como acción secundaria. El texto dice lo que la regla hace de verdad: avisa antes de la fecha y no escribe a quienes ya la pasaron.
 - **Pocas y ordenadas**: tres a la vez en Inicio, en orden fijo; el resto, a pedido. Cada una se apaga para toda la clínica, se oculta una semana o cambia su umbral.
 - **Se puede ver antes de encender**: la página del asesor muestra lo que recomendaría hoy.
 
@@ -26,7 +27,7 @@ Quien administra una clínica mediana no tiene tiempo de recorrer agenda, presup
 - Beneficio: toda cifra se abre y muestra quiénes son; el asesor funciona igual con cualquier proveedor de modelo, o sin ninguno.
 - Sacrificio: no descubre nada que no se haya escrito como detección, y el texto de cada recomendación es fijo. Una detección nueva es código, con su prueba.
 - Las consultas corren en cada visita a Inicio; se revisa su coste si alguna clínica acumula miles de filas pendientes.
-- Pendiente: la acción de «encender el recordatorio de control» que muestra el diseño depende de las automatizaciones y no está en esta entrega; hoy la acción es crear las tareas.
+- Pendiente: el diseño muestra que encender el recordatorio escribe a quienes ya tienen el control vencido y crea tareas para quienes no dieron su consentimiento. La regla actual solo avisa de controles próximos; cubrir los vencidos es un cambio de las automatizaciones, no del asesor. Las otras cuatro detecciones no tienen una automatización equivalente.
 
 ## Referencias
 

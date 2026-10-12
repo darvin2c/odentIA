@@ -3,9 +3,8 @@ import { ConfirmDialog, EmptyState, ErrorState, LoadingState, PageShell, SubmitB
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { CalendarCheck, ChevronLeft, ChevronRight } from "lucide-react"
-import type { RegistrationAnswers } from "@odentia/clinical"
 import { useMemo, useState } from "react"
-import { PatientRegistrationForm } from "../components/patient/patient-registration-form"
+import { type BookingDataDraft, BookingDataForm, emptyBookingDataDraft } from "../components/booking-data-form"
 import { ApiError } from "../lib/api"
 import {
   type BookingAppointment,
@@ -15,10 +14,8 @@ import {
   fetchBookingLink,
   fetchBookingSlots,
   reserveBooking,
-  startBookingRegistration,
 } from "../lib/booking-link"
 import { orgSlugFromHostname, requestHostname } from "../lib/host"
-import { fetchPublicRegistration, submitPublicRegistration } from "../lib/patient-registration"
 
 /**
  * Página del enlace de reserva: quien recibió el enlace elige el día y la hora
@@ -28,8 +25,9 @@ import { fetchPublicRegistration, submitPublicRegistration } from "../lib/patien
  * entera, un día por columna; en teléfono, un día a la vez y el botón que
  * avanza fijo abajo. Con la cita ya reservada, el mismo enlace la muestra y
  * deja cambiarla de horario o cancelarla. Quien aún no es
- * paciente completa sus datos entre elegir y reservar, con el mismo formulario
- * de registro de la clínica.
+ * paciente deja sus datos esenciales entre elegir y reservar, en una sola
+ * pantalla; la ficha la crea el registro de pacientes de la clínica y lo
+ * demás se completa allí.
  */
 export const Route = createFileRoute("/reserva")({
   validateSearch: (search: Record<string, unknown>) => ({
@@ -149,85 +147,6 @@ function Heading({
       </div>
       {hideSteps ? null : <Steps current={current} withData={withData} />}
     </header>
-  )
-}
-
-/**
- * «Tus datos»: el formulario de registro de pacientes de la clínica, con sus
- * campos y su aviso de privacidad. La ficha la crea ese registro; al terminar,
- * la página reserva el horario ya elegido.
- */
-function BookingRegistration({ slug, registrationToken, onRegistered }: { slug: string; registrationToken: string; onRegistered: () => void }) {
-  const [submissionId] = useState(() => crypto.randomUUID())
-  const [retainedDraft, setRetainedDraft] = useState<Partial<RegistrationAnswers> | undefined>(undefined)
-  const [submitError, setSubmitError] = useState<string | null>(null)
-  const queryClient = useQueryClient()
-  const infoQuery = useQuery({
-    queryKey: ["public-registration", slug, registrationToken],
-    queryFn: () => fetchPublicRegistration(slug, registrationToken),
-    retry: false,
-    staleTime: 30_000,
-  })
-  if (infoQuery.isPending) return <LoadingState kind="indeterminate" message="Cargando el formulario…" />
-  if (infoQuery.isError) {
-    return <ErrorState title="No pudimos cargar el formulario" message="Vuelve a intentarlo en un momento." onRetry={() => void infoQuery.refetch()} />
-  }
-  const info = infoQuery.data.data
-  return (
-    <div className="flex flex-col gap-4">
-      {submitError ? (
-        <p role="alert" className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm">
-          {submitError}
-        </p>
-      ) : null}
-      <PatientRegistrationForm
-        mode="public"
-        config={info.config}
-        today={info.today}
-        context={{ kind: "conversation" }}
-        initialValues={retainedDraft}
-        onSubmit={async (draft) => {
-          setSubmitError(null)
-          setRetainedDraft({ ...draft.answers })
-          try {
-            const result = await submitPublicRegistration(slug, {
-              submissionId,
-              formVersion: info.config.version,
-              token: registrationToken,
-              entryPoint: "public_link",
-              answers: draft.answers,
-            })
-            if (result.data.registered) onRegistered()
-          } catch (error) {
-            const shape = error instanceof ApiError ? error.shape : null
-            if (shape?.code === "FORM_CHANGED") {
-              await queryClient.invalidateQueries({ queryKey: ["public-registration", slug, registrationToken] })
-              setSubmitError("El formulario cambió: revisa los campos y vuelve a enviar.")
-              return
-            }
-            setSubmitError(shape?.message ?? "No pudimos guardar tus datos. Inténtalo de nuevo o escríbenos por el chat.")
-          }
-        }}
-      >
-        {(form) => (
-          <form onSubmit={form.onSubmit} className="space-y-6">
-            {form.progress}
-            {form.body}
-            <div className="flex flex-col gap-3">
-              {form.error ? (
-                <p role="alert" className="text-sm text-destructive">
-                  {form.error}
-                </p>
-              ) : null}
-              <SubmitButton type="submit" pending={form.isSubmitting} disabled={form.submitDisabled} className="min-h-11 w-full">
-                {form.submitLabel}
-              </SubmitButton>
-              {form.previous}
-            </div>
-          </form>
-        )}
-      </PatientRegistrationForm>
-    </div>
   )
 }
 
@@ -412,8 +331,11 @@ function BookingLinkPage() {
   const [changing, setChanging] = useState(false)
   // En teléfono, la sede y el profesional se abren con «Cambiar».
   const [editing, setEditing] = useState(false)
-  // Quien aún no es paciente pasa por «Tus datos» antes de reservar.
-  const [registrationToken, setRegistrationToken] = useState<string | null>(null)
+  // Quien aún no es paciente pasa por «Tus datos» antes de reservar. Lo que
+  // escribe vive aquí: no se pierde al volver a cambiar de horario.
+  const [enteringData, setEnteringData] = useState(false)
+  const [dataDraft, setDataDraft] = useState<BookingDataDraft>(emptyBookingDataDraft)
+  const [submissionId] = useState(() => crypto.randomUUID())
   const [registered, setRegistered] = useState(false)
 
   const current = booked ?? view?.appointment ?? null
@@ -481,7 +403,7 @@ function BookingLinkPage() {
   const refreshSlots = () => {
     // Ese horario pudo ocuparse mientras elegía: se vuelve a pedir lo libre.
     setChosen(null)
-    setRegistrationToken(null)
+    setEnteringData(false)
     void queryClient.invalidateQueries({ queryKey: ["booking-slots", slug, token ?? null] })
   }
   const reserve = useMutation({
@@ -518,12 +440,6 @@ function BookingLinkPage() {
     mutationFn: () => cancelBooking(slug ?? "", token ?? ""),
     onSuccess: (result) => setBooked(result.data),
   })
-  const startRegistration = useMutation({
-    retry: false,
-    mutationFn: () => startBookingRegistration(slug ?? "", token ?? ""),
-    onSuccess: (result) => setRegistrationToken(result.data.registrationToken),
-  })
-
   if (!ready && typeof window !== "undefined") return <Unavailable />
   if (viewQuery.isPending) {
     return (
@@ -624,9 +540,9 @@ function BookingLinkPage() {
     const suffix = withTime && chosenLabel ? ` ${chosenLabel}` : ""
     if (needsData) {
       return (
-        <SubmitButton type="button" className="min-h-11 w-full" pending={startRegistration.isPending} disabled={chosen === null} onClick={() => startRegistration.mutate()}>
+        <Button type="button" className="min-h-11 w-full" disabled={chosen === null} onClick={() => setEnteringData(true)}>
           Continuar con mis datos
-        </SubmitButton>
+        </Button>
       )
     }
     return (
@@ -635,52 +551,53 @@ function BookingLinkPage() {
       </SubmitButton>
     )
   }
-  const errors = (
-    <>
-      {actionError ? (
-        <p role="alert" className="text-sm text-destructive">
-          {actionError}
-        </p>
-      ) : null}
-      {startRegistration.isError ? (
-        <p role="alert" className="text-sm text-destructive">
-          No pudimos abrir el formulario de tus datos. Inténtalo de nuevo o escríbenos por el chat.
-        </p>
-      ) : null}
-    </>
-  )
+  const errors = actionError ? (
+    <p role="alert" className="text-sm text-destructive">
+      {actionError}
+    </p>
+  ) : null
   const closingNote = needsData
     ? "Es tu primera cita: después de elegir te pedimos unos datos y reservamos."
     : "Podrás cambiarla o cancelarla desde este mismo enlace."
 
-  // Paso «Tus datos»: con el horario ya elegido, la persona completa su registro y la página reserva.
-  if (needsData && registrationToken !== null && chosen !== null && slug !== null) {
+  // Paso «Tus datos»: con el horario ya elegido, la persona deja lo esencial y la página reserva enseguida.
+  // Mientras se reserva sigue a la vista; si el horario se ocupó, vuelve a elegir con sus datos ya guardados.
+  if (enteringData && chosen !== null && slug !== null && token !== undefined && (needsData || (registered && reserve.isPending))) {
     return (
       <PageShell maxWidth="md">
         <Heading clinicName={view.clinicName} title="Tus datos" current="datos" withData />
-        <div className="flex flex-col gap-5">
-          <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-primary-soft p-4 text-primary-soft-foreground">
-            <div className="flex min-w-0 flex-col">
+        <div className="flex flex-col gap-4">
+          <div className="flex items-center gap-3 rounded-2xl bg-primary-soft px-4 py-3 text-primary-soft-foreground">
+            <div className="flex min-w-0 flex-1 flex-col">
               <p className="font-semibold">
-                {longDay(chosen.startsAt, timeZone)} · {timeLabel(chosen.startsAt, timeZone)}
+                {capital(shortDay(chosen.startsAt, timeZone))}, {timeLabel(chosen.startsAt, timeZone)} · {serviceName}
               </p>
-              <p className="text-sm">
-                {[serviceName, branch ? `Sede ${branch.name}` : null, chosen.dentistName].filter(Boolean).join(" · ")}
-              </p>
+              <p className="text-sm">{[branch ? `Sede ${branch.name}` : null, chosen.dentistName].filter(Boolean).join(" · ")}</p>
             </div>
-            <Button type="button" variant="outline" className="min-h-11" onClick={() => setRegistrationToken(null)}>
-              Cambiar horario
+            <Button
+              type="button"
+              variant="link"
+              className="h-auto min-h-11 shrink-0 p-0"
+              aria-label="Cambiar horario"
+              disabled={reserve.isPending}
+              onClick={() => setEnteringData(false)}
+            >
+              Cambiar
             </Button>
           </div>
           <p className="text-sm text-muted-foreground">
-            Es tu primera cita con nosotros. Completa tus datos y reservamos el horario que elegiste.
+            Es tu primera cita con nosotros. Solo pedimos lo necesario para reservarla; lo demás se completa en la clínica.
           </p>
-          <BookingRegistration
+          <BookingDataForm
             slug={slug}
-            registrationToken={registrationToken}
+            token={token}
+            submissionId={submissionId}
+            draft={dataDraft}
+            onDraftChange={setDataDraft}
+            reserving={reserve.isPending}
             onRegistered={() => {
               setRegistered(true)
-              void queryClient.invalidateQueries({ queryKey: ["booking-link", slug, token ?? null] })
+              void queryClient.invalidateQueries({ queryKey: ["booking-link", slug, token] })
               reserve.mutate(chosen)
             }}
           />

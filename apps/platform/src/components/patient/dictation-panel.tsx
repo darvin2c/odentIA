@@ -1,386 +1,187 @@
-import { Badge, Button, Field, FieldDescription, FieldLabel, Input, Textarea } from "@odentia/ui"
+import { Button, Field, FieldDescription, FieldLabel, Textarea } from "@odentia/ui"
 import { AgentMark, AgentSurface, SubmitButton } from "@odentia/ui-patterns"
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { Mic, Square } from "lucide-react"
-import { useEffect, useRef, useState } from "react"
-import { ApiError, apiFetch } from "../../lib/api"
+import { Mic, Pause, Play, Square } from "lucide-react"
+import { useState } from "react"
+import { dictationClock, dictationErrorText, type DictationSession, highlightTranscript } from "./dictation-session"
 
-export type DictationKind = "nota" | "diagnostico" | "plan" | "control"
+export type { DictationKind, DictationSuggestion } from "./dictation-session"
 
-export interface DictationSuggestion {
-  id: string
-  kind: DictationKind
-  payload: Record<string, unknown>
-  sourceText: string
-  status: "lista" | "por_revisar" | "confirmada" | "descartada"
-  note: string | null
-  summary: string
-}
+const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`
 
-const KIND_LABEL: Record<DictationKind, string> = {
-  nota: "Consulta",
-  diagnostico: "Diagnóstico",
-  plan: "Plan de tratamiento",
-  control: "Controles",
-}
-const KIND_ORDER: DictationKind[] = ["nota", "diagnostico", "plan", "control"]
+const confirmReadyLabel = (ready: number) => (ready === 1 ? "Confirmar 1 lista" : `Confirmar las ${ready} listas`)
 
-/** Campos que el odontólogo puede corregir a mano en una sugerencia, con su rótulo. */
-const EDITABLE: Record<DictationKind, Array<{ key: string; label: string; long?: boolean; number?: boolean }>> = {
-  nota: [
-    { key: "reason", label: "Motivo de consulta", long: true },
-    { key: "presentIllness", label: "Enfermedad actual", long: true },
-    { key: "illnessDuration", label: "Tiempo de enfermedad" },
-    { key: "evolution", label: "Evolución", long: true },
-    { key: "indications", label: "Indicaciones", long: true },
-    { key: "nextStep", label: "Siguiente paso", long: true },
-    { key: "prognosis", label: "Pronóstico" },
-    { key: "auxiliaryExams", label: "Exámenes auxiliares", long: true },
-  ],
-  diagnostico: [
-    { key: "cie10Code", label: "Código CIE-10" },
-    { key: "toothNumber", label: "Pieza", number: true },
-    { key: "note", label: "Nota", long: true },
-  ],
-  plan: [
-    { key: "toothNumber", label: "Pieza", number: true },
-    { key: "detail", label: "Detalle", long: true },
-  ],
-  control: [
-    { key: "title", label: "Control" },
-    { key: "instructions", label: "Indicaciones", long: true },
-  ],
-}
-
-interface SpeechLike {
-  lang: string
-  continuous: boolean
-  interimResults: boolean
-  start: () => void
-  stop: () => void
-  onresult: ((event: { resultIndex: number; results: ArrayLike<ArrayLike<{ transcript: string }> & { isFinal: boolean }> }) => void) | null
-  onend: (() => void) | null
-  onerror: ((event: { error: string }) => void) | null
-}
-
-/** El reconocimiento de voz del navegador, si lo tiene. Sin él, el dictado se escribe o se pega. */
-function speechRecognition(): (new () => SpeechLike) | null {
-  if (typeof window === "undefined") return null
-  const scope = window as unknown as { SpeechRecognition?: new () => SpeechLike; webkitSpeechRecognition?: new () => SpeechLike }
-  return scope.SpeechRecognition ?? scope.webkitSpeechRecognition ?? null
-}
-
-const money = (cents: number, currency: string) => `${currency === "PEN" ? "S/" : currency} ${(cents / 100).toFixed(2)}`
-
-function errorText(error: unknown, fallback: string): string | null {
-  if (error == null) return null
-  if (error instanceof ApiError && error.shape.message && error.status < 500) return error.shape.message
-  return fallback
-}
-
-function SuggestionCard({
-  item,
-  base,
-  onDecided,
-}: {
-  item: DictationSuggestion
-  base: string
-  onDecided: (item: DictationSuggestion, outcome: "confirmada" | "descartada" | "editada") => void
-}) {
-  const [editing, setEditing] = useState(false)
-  const [draft, setDraft] = useState<Record<string, string>>({})
-  const act = useMutation({
-    retry: false,
-    mutationFn: (input: { action: "confirm" | "discard" } | { patch: Record<string, unknown> }) =>
-      "patch" in input
-        ? apiFetch(`${base}/${item.id}`, { method: "PATCH", body: JSON.stringify(input.patch) })
-        : apiFetch(`${base}/${item.id}/${input.action}`, { method: "POST" }),
-    onSuccess: (_data, input) => {
-      setEditing(false)
-      onDecided(item, "patch" in input ? "editada" : input.action === "confirm" ? "confirmada" : "descartada")
-    },
-  })
-  const fields = EDITABLE[item.kind].filter((field) => item.kind !== "nota" || item.payload[field.key] !== undefined)
-  const candidates = Array.isArray(item.payload["candidates"])
-    ? (item.payload["candidates"] as Array<{ id: string; name: string; priceCents: number; currency: string }>)
-    : []
-  const ready = item.status === "lista"
-
-  function openEdit() {
-    act.reset()
-    setDraft(Object.fromEntries(fields.map((field) => [field.key, item.payload[field.key] == null ? "" : String(item.payload[field.key])])))
-    setEditing(true)
-  }
-  function saveEdit() {
-    const patch: Record<string, unknown> = {}
-    for (const field of fields) {
-      const value = (draft[field.key] ?? "").trim()
-      patch[field.key] = value === "" ? null : field.number ? Number(value) : value
-    }
-    act.mutate({ patch })
-  }
-
-  return (
-    <li className="flex flex-col gap-2 rounded-xl border bg-card p-3 text-sm">
-      <div className="flex flex-wrap items-start gap-2">
-        <p className="min-w-0 flex-1 basis-48 whitespace-pre-wrap font-medium">{item.summary || KIND_LABEL[item.kind]}</p>
-        <Badge variant={ready ? "secondary" : "default"}>{ready ? "Sugerido" : "Por revisar"}</Badge>
-      </div>
-      {item.note ? <p className="text-foreground">{item.note}</p> : null}
-      {item.sourceText ? <p className="text-muted-foreground">Lo que dijiste: «{item.sourceText}»</p> : null}
-
-      {candidates.length > 0 ? (
-        <fieldset className="m-0 min-w-0 border-0 p-0 flex flex-wrap gap-2" aria-label="Elige la prestación">
-          {candidates.map((candidate) => (
-            <Button
-              key={candidate.id}
-              type="button"
-              variant="outline"
-              size="sm"
-              className="min-h-11 sm:min-h-8"
-              disabled={act.isPending}
-              onClick={() => act.mutate({ patch: { serviceId: candidate.id } })}
-            >
-              {candidate.name} · {money(candidate.priceCents, candidate.currency)}
-            </Button>
-          ))}
-        </fieldset>
-      ) : null}
-
-      {editing ? (
-        <div className="flex flex-col gap-3">
-          {fields.map((field) => (
-            <Field key={field.key}>
-              <FieldLabel htmlFor={`dictado-${item.id}-${field.key}`}>{field.label}</FieldLabel>
-              {field.long ? (
-                <Textarea
-                  id={`dictado-${item.id}-${field.key}`}
-                  rows={2}
-                  value={draft[field.key] ?? ""}
-                  onChange={(event) => setDraft({ ...draft, [field.key]: event.target.value })}
-                />
-              ) : (
-                <Input
-                  id={`dictado-${item.id}-${field.key}`}
-                  type={field.number ? "number" : "text"}
-                  value={draft[field.key] ?? ""}
-                  onChange={(event) => setDraft({ ...draft, [field.key]: event.target.value })}
-                />
-              )}
-            </Field>
-          ))}
-          <div className="flex flex-wrap gap-2">
-            <SubmitButton type="button" size="sm" className="min-h-11 sm:min-h-8" pending={act.isPending} onClick={saveEdit}>
-              Guardar cambios
-            </SubmitButton>
-            <Button type="button" variant="ghost" size="sm" className="min-h-11 sm:min-h-8" onClick={() => setEditing(false)}>
-              Cancelar
-            </Button>
-          </div>
-        </div>
-      ) : (
-        <div className="flex flex-wrap gap-2">
-          {ready ? (
-            <SubmitButton type="button" size="sm" className="min-h-11 sm:min-h-8" pending={act.isPending} onClick={() => act.mutate({ action: "confirm" })}>
-              Confirmar
-            </SubmitButton>
-          ) : null}
-          <Button type="button" variant="outline" size="sm" className="min-h-11 sm:min-h-8" disabled={act.isPending} onClick={openEdit}>
-            Editar
-          </Button>
-          <Button type="button" variant="ghost" size="sm" className="min-h-11 sm:min-h-8" disabled={act.isPending} onClick={() => act.mutate({ action: "discard" })}>
-            Descartar
-          </Button>
-        </div>
-      )}
-      {act.isError ? (
-        <p role="alert" className="text-destructive">
-          {errorText(act.error, "No pude guardar esto. Revísalo y vuelve a intentarlo.")}
-        </p>
-      ) : null}
-    </li>
-  )
+/** «5 listas y 1 por revisar», con lo que haya. */
+function readiness(session: DictationSession): string {
+  const review = session.pending - session.ready
+  return [session.ready > 0 ? plural(session.ready, "lista", "listas") : "", review > 0 ? `${review} por revisar` : ""].filter(Boolean).join(" y ")
 }
 
 /**
- * Dictado del asistente clínico dentro de una atención en borrador. El
- * odontólogo dicta (o escribe) y lo dicho se ordena en sugerencias; nada entra
- * a la historia hasta que confirma cada una. No se muestra si la clínica no
- * encendió el asistente.
+ * Barra del dictado del asistente clínico, encima de los bloques de la
+ * atención. Mientras se dicta dice cuánto lleva y deja pausar o terminar; al
+ * terminar resume las sugerencias, que viven dentro de cada bloque. Nada entra
+ * a la historia hasta que el odontólogo confirma. No se muestra si la clínica
+ * no encendió el asistente.
  */
 export function DictationPanel({
-  patientId,
-  encounterId,
-  onApplied,
-  onPendingChange,
+  session,
+  onStart,
+  onFinish,
+  onShowTranscript,
 }: {
-  patientId: string
-  encounterId: string
-  /** Una sugerencia entró a la historia: la pantalla refresca lo que muestra. */
-  onApplied: (item: DictationSuggestion) => void
-  /** Cuántas sugerencias quedan sin decidir, para avisar antes de firmar. */
-  onPendingChange: (pending: number) => void
+  session: DictationSession
+  /** Empieza o se reanuda el dictado: la pantalla despeja lo que tape la atención. */
+  onStart: () => void
+  onFinish: () => void
+  onShowTranscript: () => void
 }) {
-  const queryClient = useQueryClient()
-  const base = `/api/patients/${patientId}/encounters/${encounterId}/dictation`
-  const key = ["encounter-dictation", patientId, encounterId]
-  const [open, setOpen] = useState(false)
-  const [transcript, setTranscript] = useState("")
-  const [listening, setListening] = useState(false)
-  const [seconds, setSeconds] = useState(0)
-  const [micError, setMicError] = useState<string | null>(null)
-  const [demo, setDemo] = useState(false)
-  const recognition = useRef<SpeechLike | null>(null)
-  const wanted = useRef(false)
-  const canListen = speechRecognition() !== null
+  const [typing, setTyping] = useState(false)
+  const [typed, setTyped] = useState("")
+  if (!session.enabled) return null
+  const { mode, pending, ready } = session
+  const listening = mode === "listening"
 
-  const query = useQuery({
-    queryKey: key,
-    queryFn: () => apiFetch<{ data: { enabled: boolean; suggestions: DictationSuggestion[] } }>(base),
-    retry: false,
-  })
-  const suggestions = query.data?.data.suggestions ?? []
-  const pending = suggestions.length
-  useEffect(() => {
-    onPendingChange(pending)
-  }, [pending, onPendingChange])
-
-  useEffect(() => {
-    if (!listening) return
-    const timer = window.setInterval(() => setSeconds((value) => value + 1), 1000)
-    return () => window.clearInterval(timer)
-  }, [listening])
-  // Al salir de la pantalla el micrófono se apaga: nunca escucha sin que se haya pulsado Dictar.
-  useEffect(
-    () => () => {
-      wanted.current = false
-      recognition.current?.stop()
-    },
-    [],
+  const status = (
+    <>
+      {session.micError ? (
+        <p role="alert" className="text-sm text-destructive">
+          {session.micError}
+        </p>
+      ) : null}
+      {session.organizeError ? (
+        <div role="alert" className="flex flex-wrap items-center gap-2 text-sm text-destructive">
+          <p className="min-w-0 flex-1 basis-48">{session.organizeError}</p>
+          <Button type="button" variant="outline" size="sm" className="min-h-11 sm:min-h-8" onClick={() => void session.retryOrganize()}>
+            Reintentar
+          </Button>
+        </div>
+      ) : null}
+      {session.confirmReady.isError ? (
+        <p role="alert" className="text-sm text-destructive">
+          {dictationErrorText(session.confirmReady.error, "Alguna no se pudo confirmar. Revisa las que siguen en su bloque.")}
+        </p>
+      ) : null}
+      {session.demo ? (
+        <p className="text-xs text-muted-foreground">
+          Modelo de demostración: reconoce solo unas pocas frases y no dice cómo entendería un dictado un proveedor real.
+        </p>
+      ) : null}
+    </>
   )
 
-  const organize = useMutation({
-    retry: false,
-    mutationFn: () => apiFetch<{ data: { suggestions: DictationSuggestion[]; model: string } }>(base, { method: "POST", body: JSON.stringify({ transcript: transcript.trim() }) }),
-    onSuccess: (response) => {
-      setDemo(response.data.model === "fake")
-      setTranscript("")
-      void queryClient.invalidateQueries({ queryKey: key })
-    },
-  })
-  const confirmReady = useMutation({
-    retry: false,
-    mutationFn: async () => {
-      const done: DictationSuggestion[] = []
-      for (const item of suggestions.filter((entry) => entry.status === "lista")) {
-        await apiFetch(`${base}/${item.id}/confirm`, { method: "POST" })
-        done.push(item)
-      }
-      return done
-    },
-    onSettled: (done) => {
-      for (const item of done ?? []) onApplied(item)
-      void queryClient.invalidateQueries({ queryKey: key })
-    },
-  })
-
-  function listen() {
-    const Recognition = speechRecognition()
-    if (!Recognition) return
-    setMicError(null)
-    const instance = new Recognition()
-    instance.lang = "es-PE"
-    instance.continuous = true
-    instance.interimResults = false
-    instance.onresult = (event) => {
-      let heard = ""
-      for (let index = event.resultIndex; index < event.results.length; index += 1) {
-        const result = event.results[index]
-        if (result?.isFinal) heard += result[0]?.transcript ?? ""
-      }
-      if (heard.trim()) setTranscript((current) => `${current}${current && !current.endsWith(" ") ? " " : ""}${heard.trim()}`)
-    }
-    instance.onerror = (event) => {
-      wanted.current = false
-      setListening(false)
-      setMicError(
-        event.error === "not-allowed" || event.error === "service-not-allowed"
-          ? "El navegador no tiene permiso para usar el micrófono. Actívalo o escribe lo dictado."
-          : "No pude seguir escuchando. Vuelve a pulsar Dictar o escribe lo dictado.",
-      )
-    }
-    // El navegador corta el reconocimiento tras un silencio: se reanuda mientras siga el dictado.
-    instance.onend = () => {
-      if (wanted.current) instance.start()
-      else setListening(false)
-    }
-    recognition.current = instance
-    wanted.current = true
-    setSeconds(0)
-    setListening(true)
-    instance.start()
+  if (session.dictating) {
+    return (
+      <AgentSurface aria-label="Dictado en curso" className="flex flex-col gap-3">
+        <div className="flex flex-wrap items-center gap-3">
+          <span aria-hidden="true" className="inline-flex size-9 shrink-0 items-center justify-center rounded-xl bg-primary-soft text-primary-soft-foreground">
+            <Mic className="size-5" />
+          </span>
+          <div className="min-w-0 flex-1 basis-48">
+            <h2 className="font-heading text-base font-semibold">
+              {listening ? "Escuchando" : "En pausa"} <span className="tabular-nums">{dictationClock(session.seconds)}</span>
+            </h2>
+            <p className="text-sm text-muted-foreground">
+              <span className="max-sm:hidden">Lo que dictas aparece abajo como sugerencias. </span>Nada entra a la historia hasta que confirmes.
+            </p>
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            className="min-h-11 max-sm:size-11 sm:min-h-9"
+            aria-label={listening ? "Pausar el dictado" : "Reanudar el dictado"}
+            onClick={() => {
+              if (listening) session.pause()
+              else {
+                onStart()
+                session.resume()
+              }
+            }}
+          >
+            {listening ? <Pause className="size-4" aria-hidden /> : <Play className="size-4" aria-hidden />}
+            <span className="max-sm:hidden">{listening ? "Pausar" : "Reanudar"}</span>
+          </Button>
+          <Button type="button" className="min-h-11 max-sm:hidden sm:min-h-9" onClick={onFinish}>
+            <Square className="size-4" aria-hidden /> Terminar dictado
+          </Button>
+        </div>
+        <p role="status" className="text-sm">
+          {pending === 0 && !session.organizing ? "Aún no hay sugerencias." : null}
+          {pending > 0 ? plural(pending, "sugerencia", "sugerencias") : null}
+          {session.organizing ? (pending > 0 ? " y ordenando lo último que dijiste" : "Ordenando lo que dijiste…") : null}
+        </p>
+        {session.interim ? <p className="rounded-lg border border-dashed border-agent-border px-3 py-2 text-sm text-muted-foreground">Escuchando: «…{session.interim}»</p> : null}
+        <p className="text-xs text-muted-foreground sm:hidden">Para corregir, dilo: «no, es la veintiséis» o «quita la endodoncia».</p>
+        {status}
+      </AgentSurface>
+    )
   }
-  function stop() {
-    wanted.current = false
-    recognition.current?.stop()
-    setListening(false)
-  }
-
-  if (!query.data?.data.enabled) return null
-  const ready = suggestions.filter((item) => item.status === "lista").length
-  const clock = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`
 
   return (
-    <AgentSurface aria-label="Dictado de la atención" className="flex flex-col gap-4">
+    <AgentSurface aria-label={pending > 0 ? "Sugerencias por revisar" : "Dictado de la atención"} className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center gap-3">
         <AgentMark />
         <div className="min-w-0 flex-1 basis-48">
-          <h2 className="font-heading text-base font-semibold">{listening ? `Escuchando ${clock}` : "Dictar la atención"}</h2>
-          <p className="text-sm text-muted-foreground">Lo que dictas aparece abajo como sugerencias. Nada entra a la historia hasta que confirmes.</p>
+          <h2 className="font-heading text-base font-semibold">
+            {pending > 0 ? `Dictado terminado: ${plural(pending, "sugerencia", "sugerencias")}` : "Dictar la atención"}
+          </h2>
+          <p className="text-sm text-muted-foreground">
+            {pending > 0 ? (
+              <>
+                {readiness(session)}. Todavía no hay nada en la historia.<span className="sm:hidden"> Toca una sugerencia para editarla.</span>
+              </>
+            ) : (
+              "Lo que dictas aparece como sugerencias dentro de cada bloque. Nada entra a la historia hasta que confirmes."
+            )}
+          </p>
         </div>
-        {listening ? (
-          <Button type="button" variant="outline" className="min-h-11 sm:min-h-9" onClick={stop}>
-            <Square className="size-4" aria-hidden /> Terminar dictado
-          </Button>
-        ) : canListen ? (
-          <Button
-            type="button"
-            className="min-h-11 sm:min-h-9"
-            onClick={() => {
-              setOpen(true)
-              listen()
-            }}
-          >
-            <Mic className="size-4" aria-hidden /> Dictar
-          </Button>
-        ) : null}
-        {!open && !listening ? (
-          <Button type="button" variant="outline" className="min-h-11 sm:min-h-9" onClick={() => setOpen(true)}>
-            Escribir lo dictado
-          </Button>
-        ) : null}
+        <div className="flex flex-wrap gap-2">
+          {session.canListen ? (
+            <Button
+              type="button"
+              variant={pending > 0 ? "outline" : "default"}
+              className="min-h-11 sm:min-h-9"
+              onClick={() => {
+                setTyping(false)
+                onStart()
+                session.start()
+              }}
+            >
+              <Mic className="size-4" aria-hidden /> {pending > 0 ? "Seguir dictando" : "Dictar"}
+            </Button>
+          ) : null}
+          {!typing ? (
+            <Button type="button" variant={session.canListen ? "ghost" : "outline"} className="min-h-11 sm:min-h-9" onClick={() => setTyping(true)}>
+              Escribir lo dictado
+            </Button>
+          ) : null}
+          {session.transcript ? (
+            <Button type="button" variant="ghost" className="min-h-11 sm:min-h-9" onClick={onShowTranscript}>
+              Ver lo dictado
+            </Button>
+          ) : null}
+          {ready > 0 ? (
+            <SubmitButton type="button" className="min-h-11 max-sm:hidden sm:min-h-9" pending={session.confirmReady.isPending} onClick={() => session.confirmReady.mutate()}>
+              {confirmReadyLabel(ready)}
+            </SubmitButton>
+          ) : null}
+        </div>
       </div>
-      {micError ? (
-        <p role="alert" className="text-sm text-destructive">
-          {micError}
-        </p>
-      ) : null}
 
-      {open || listening || transcript ? (
+      {typing ? (
         <div className="flex flex-col gap-2">
           <Field>
-            <FieldLabel htmlFor={`dictado-${encounterId}`}>Lo dictado</FieldLabel>
+            <FieldLabel htmlFor="dictado-escrito">Escribe lo dictado</FieldLabel>
             <Textarea
-              id={`dictado-${encounterId}`}
+              id="dictado-escrito"
               rows={4}
               maxLength={12_000}
-              value={transcript}
-              onChange={(event) => setTranscript(event.target.value)}
+              value={typed}
+              onChange={(event) => setTyped(event.target.value)}
               placeholder="En la dieciséis hay caries en dentina, le ponemos una resina en la cara oclusal…"
             />
             <FieldDescription>
-              {canListen
-                ? "Es tu respaldo: puedes corregirlo antes de ordenarlo. Para corregir al dictar, dilo: «no, es la veintiséis»."
+              {session.canListen
+                ? "Si prefieres no usar el micrófono, escribe o pega aquí lo que dictarías."
                 : "Este navegador no reconoce la voz: escribe o pega aquí lo dictado."}
             </FieldDescription>
           </Field>
@@ -388,74 +189,121 @@ export function DictationPanel({
             <SubmitButton
               type="button"
               className="min-h-11 sm:min-h-9"
-              pending={organize.isPending}
-              disabled={transcript.trim().length < 3 || listening}
-              onClick={() => organize.mutate()}
+              pending={session.organizing}
+              disabled={typed.trim().length < 3}
+              onClick={() => {
+                session.submitTyped(typed)
+                setTyped("")
+                setTyping(false)
+              }}
             >
               Ordenar lo dictado
             </SubmitButton>
-            {!listening && !transcript ? (
-              <Button type="button" variant="ghost" className="min-h-11 sm:min-h-9" onClick={() => setOpen(false)}>
-                Cerrar
-              </Button>
-            ) : null}
+            <Button type="button" variant="ghost" className="min-h-11 sm:min-h-9" onClick={() => setTyping(false)}>
+              Cerrar
+            </Button>
           </div>
-          {organize.isError ? (
-            <p role="alert" className="text-sm text-destructive">
-              {errorText(organize.error, "No pudimos ordenar el dictado. Tu texto sigue aquí: vuelve a intentarlo.")}
-            </p>
-          ) : null}
         </div>
       ) : null}
-
-      {pending > 0 ? (
-        <section aria-label="Sugerencias del dictado" className="flex flex-col gap-3">
-          <div className="flex flex-wrap items-center gap-3">
-            <p className="min-w-0 flex-1 basis-48 text-sm">
-              <span className="font-semibold">
-                {pending} {pending === 1 ? "sugerencia" : "sugerencias"}
-              </span>
-              : {ready} {ready === 1 ? "lista" : "listas"}
-              {pending - ready > 0 ? ` y ${pending - ready} por revisar` : ""}. Todavía no hay nada en la historia.
-            </p>
-            {ready > 1 ? (
-              <SubmitButton type="button" variant="outline" className="min-h-11 sm:min-h-9" pending={confirmReady.isPending} onClick={() => confirmReady.mutate()}>
-                Confirmar las {ready} listas
-              </SubmitButton>
-            ) : null}
-          </div>
-          {confirmReady.isError ? (
-            <p role="alert" className="text-sm text-destructive">
-              {errorText(confirmReady.error, "Alguna no se pudo confirmar. Revisa las que siguen en la lista.")}
-            </p>
-          ) : null}
-          {KIND_ORDER.filter((kind) => suggestions.some((item) => item.kind === kind)).map((kind) => (
-            <div key={kind} className="flex flex-col gap-2">
-              <h3 className="text-sm font-semibold">{KIND_LABEL[kind]}</h3>
-              <ul className="flex flex-col gap-2">
-                {suggestions
-                  .filter((item) => item.kind === kind)
-                  .map((item) => (
-                    <SuggestionCard
-                      key={item.id}
-                      item={item}
-                      base={base}
-                      onDecided={(decided, outcome) => {
-                        if (outcome === "confirmada") onApplied(decided)
-                        void queryClient.invalidateQueries({ queryKey: key })
-                      }}
-                    />
-                  ))}
-              </ul>
-            </div>
-          ))}
-          {demo ? (
-            <p className="text-xs text-muted-foreground">
-              Modelo de demostración: reconoce solo unas pocas frases y no dice cómo entendería un dictado un proveedor real.
-            </p>
-          ) : null}
-        </section>
+      {session.organizing ? (
+        <p role="status" className="text-sm text-muted-foreground">
+          Ordenando lo dictado…
+        </p>
       ) : null}
+      {status}
     </AgentSurface>
+  )
+}
+
+/**
+ * «Lo dictado»: el respaldo del odontólogo mientras dicta. Vive solo en esta
+ * pantalla (el servidor no guarda el dictado); lo resaltado dio lugar a una
+ * sugerencia.
+ */
+export function DictationTranscript({ session }: { session: DictationSession }) {
+  const parts = highlightTranscript(session.transcript, session.highlights)
+  const marked = parts.some((part) => part.marked)
+  return (
+    <div className="flex flex-col gap-4 text-sm">
+      {session.transcript ? (
+        <p className="whitespace-pre-wrap leading-relaxed">
+          {parts.map((part, index) =>
+            part.marked ? (
+              // biome-ignore lint/suspicious/noArrayIndexKey: los trozos no se reordenan
+              <mark key={index} className="rounded bg-primary-soft px-0.5 text-primary-soft-foreground">
+                {part.text}
+              </mark>
+            ) : (
+              // biome-ignore lint/suspicious/noArrayIndexKey: los trozos no se reordenan
+              <span key={index}>{part.text}</span>
+            ),
+          )}
+        </p>
+      ) : (
+        <p className="text-muted-foreground">Todavía no hay nada dictado.</p>
+      )}
+      {session.transcript && !marked && session.pending > 0 ? (
+        <p className="text-xs text-muted-foreground">No pude ubicar en el texto qué frase originó cada sugerencia; ábrela para ver lo que dijiste.</p>
+      ) : null}
+      {session.mode === "listening" ? (
+        <p role="status" className="text-muted-foreground">
+          Escuchando…{session.interim ? ` «${session.interim}»` : ""}
+        </p>
+      ) : null}
+      <div className="flex flex-col gap-1 rounded-xl border bg-muted/40 p-3">
+        <p className="font-semibold">Para corregir, dilo</p>
+        <p>«No, es la veintiséis» cambia la última sugerencia.</p>
+        <p>«Quita la endodoncia» la descarta.</p>
+        <p className="text-muted-foreground">También puedes tocar cualquier sugerencia y editarla a mano.</p>
+      </div>
+    </div>
+  )
+}
+
+/** ¿Hay barra fija al pie en teléfono? La pantalla deja sitio para que no tape el final. */
+export function dictationMobileBarVisible(session: DictationSession): boolean {
+  return session.enabled && (session.dictating || session.pending > 0)
+}
+
+/**
+ * En teléfono, las acciones del dictado quedan fijas al pie: mientras se dicta,
+ * ver el respaldo y terminar; al revisar, firmar y confirmar lo que está listo.
+ */
+export function DictationMobileBar({
+  session,
+  onShowTranscript,
+  onFinish,
+  onSign,
+}: {
+  session: DictationSession
+  onShowTranscript: () => void
+  onFinish: () => void
+  onSign: () => void
+}) {
+  if (!dictationMobileBarVisible(session)) return null
+  return (
+    <div className="fixed inset-x-0 bottom-0 z-10 flex gap-2 border-t bg-canvas px-4 py-3 sm:hidden">
+      {session.dictating ? (
+        <>
+          <Button type="button" variant="outline" className="h-12 min-w-0 flex-1" onClick={onShowTranscript}>
+            Ver lo dictado
+          </Button>
+          <Button type="button" className="h-12 min-w-0 flex-1" onClick={onFinish}>
+            Terminar dictado
+          </Button>
+        </>
+      ) : (
+        <>
+          <Button type="button" variant="outline" className="h-12 min-w-0 flex-1" disabled={session.busy} onClick={onSign}>
+            Firmar
+          </Button>
+          {session.ready > 0 ? (
+            <SubmitButton type="button" className="h-12 min-w-0 flex-[2]" pending={session.confirmReady.isPending} onClick={() => session.confirmReady.mutate()}>
+              {confirmReadyLabel(session.ready)}
+            </SubmitButton>
+          ) : null}
+        </>
+      )}
+    </div>
   )
 }

@@ -1,4 +1,5 @@
 import { getConnInfo } from "@hono/node-server/conninfo"
+import { registrationAnswersSchema } from "@odentia/clinical"
 import { type Db, withOrgContext } from "@odentia/db"
 import { organization } from "@odentia/db/schema/auth"
 import {
@@ -7,8 +8,9 @@ import {
   getBookingLinkView,
   listBookingLinkSlots,
   reserveBookingLink,
+  getBookingLinkRegistrationForm,
+  registerFromBookingLink,
   ServiceError,
-  startBookingLinkRegistration,
 } from "@odentia/services"
 import { eq } from "drizzle-orm"
 import { type Context, Hono } from "hono"
@@ -26,6 +28,12 @@ const reserveBody = z.strictObject({
   startsAt: z.iso.datetime({ offset: true }),
   dentistUserId: z.string().min(1).max(200),
   chairId: z.uuid().optional(),
+})
+const registrationBody = z.strictObject({
+  token,
+  submissionId: z.uuid(),
+  formVersion: z.number().int().nonnegative(),
+  answers: registrationAnswersSchema,
 })
 export type BookingRemoteAddress = (c: Context) => string | undefined
 
@@ -113,12 +121,20 @@ export function createPublicBookingRoute(deps: { db: Db; secretsKey: Buffer; rem
     return answer(c, 200, () => withOrgContext(deps.db, org.id, (tx) => listBookingLinkSlots(tx, org.id, linkToken, range)))
   })
 
-  // Quien aún no es paciente pide aquí su registro: el formulario y el envío son los del registro de pacientes.
-  app.post("/:slug/registration", async (c) => {
-    const body = z.strictObject({ token }).safeParse(await c.req.json().catch(() => null))
-    if (!body.success) return unavailable(c)
+  // Quien aún no es paciente deja aquí sus datos esenciales: la ficha la crea el registro de pacientes.
+  app.get("/:slug/registration", async (c) => {
+    const query = z.strictObject({ token }).safeParse(c.req.query())
+    if (!query.success) return unavailable(c)
     const org = c.get("bookingOrganization")
-    return answer(c, 201, () => withOrgContext(deps.db, org.id, (tx) => startBookingLinkRegistration(tx, org.id, body.data.token)))
+    return answer(c, 200, () => withOrgContext(deps.db, org.id, (tx) => getBookingLinkRegistrationForm(tx, org.id, query.data.token)))
+  })
+
+  app.post("/:slug/registration", async (c) => {
+    const body = registrationBody.safeParse(await c.req.json().catch(() => null))
+    if (!body.success) return c.json(errorBody(c, "VALIDATION", "Revisa tus datos"), 400)
+    const org = c.get("bookingOrganization")
+    const { token: linkToken, ...input } = body.data
+    return answer(c, 201, () => withOrgContext(deps.db, org.id, (tx) => registerFromBookingLink(tx, org.id, linkToken, input)))
   })
 
   app.post("/:slug/reserve", async (c) => {

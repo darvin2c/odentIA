@@ -2,12 +2,16 @@ import { describeProviderProblem, extractDictation, isProviderConfigError, type 
 import { withOrgContext } from "@odentia/db"
 import {
   confirmDictationSuggestion,
+  countConfirmedDictation,
+  dictationModelLabel,
+  dictationSegmentSeen,
   discardDictationSuggestion,
   discardPendingDictation,
   getAgentConfig,
   listDictationSuggestions,
   requireClinicalAssistant,
-  saveDictationSuggestions,
+  saveDictationSegment,
+  undoDictationVoiceCorrection,
   updateDictationSuggestion,
 } from "@odentia/services"
 import { Hono } from "hono"
@@ -18,7 +22,15 @@ import { type CrmDeps, runService, validationError } from "./helpers.js"
 
 const params = z.object({ id: z.uuid(), encounterId: z.uuid() })
 const suggestionParams = params.extend({ suggestionId: z.uuid() })
-const dictateInput = z.object({ transcript: z.string().trim().min(3).max(12_000) }).strict()
+// Un tramo del dictado: lo nuevo, lo último ya ordenado (solo para entenderlo) y su identidad,
+// para que reenviar el mismo tramo no duplique sugerencias.
+const dictateInput = z
+  .object({
+    transcript: z.string().trim().min(3).max(12_000),
+    context: z.string().max(2_000).optional(),
+    segmentId: z.uuid().optional(),
+  })
+  .strict()
 // Lo que el odontólogo puede corregir de una sugerencia; el servicio vuelve a validarla contra su operación.
 const patchInput = z.record(z.string().max(40), z.union([z.string().max(10_000), z.number(), z.array(z.string().max(20)).max(5), z.null()]))
 
@@ -45,29 +57,56 @@ export function createEncounterDictationRoute(deps: EncounterDictationDeps) {
       withOrgContext(deps.db, orgId, async (tx) => ({
         enabled: (await getAgentConfig(tx, orgId)).clinicalAssistantEnabled,
         suggestions: await listDictationSuggestions(tx, orgId, at.data.id, at.data.encounterId),
+        // Para decir, antes de firmar, cuántas ya entraron a la atención.
+        confirmed: await countConfirmedDictation(tx, orgId, at.data.id, at.data.encounterId),
       })),
     )
   })
 
-  /** Ordena un dictado en sugerencias. Llama al modelo; nada entra a la historia. */
+  /**
+   * Ordena un tramo del dictado en sugerencias. Llama al modelo una vez; nada
+   * entra a la historia. Mientras se dicta llega un tramo por pausa: el modelo
+   * recibe además las sugerencias de este dictado que siguen sin decidir, para
+   * entender una corrección dicha en voz alta.
+   */
   app.post(base, async (c) => {
     const { orgId, userId } = orgContextOf(c)
     const at = params.safeParse(c.req.param())
     if (!at.success) return validationError(c, at.error.issues)
     const parsed = dictateInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
+    const { transcript, context, segmentId } = parsed.data
     try {
       return await runService(c, 201, async () => {
-        // Antes de gastar una llamada al modelo: encendido y atención propia en borrador.
-        await withOrgContext(deps.db, orgId, async (tx) => {
+        // Antes de gastar una llamada al modelo: encendido, atención propia en borrador y tramo nuevo.
+        const before = await withOrgContext(deps.db, orgId, async (tx) => {
           await requireClinicalAssistant(tx, orgId)
-          await saveDictationSuggestions(tx, orgId, userId, at.data.id, at.data.encounterId, [])
+          await saveDictationSegment(tx, orgId, userId, at.data.id, at.data.encounterId, { drafts: [] })
+          if (segmentId && (await dictationSegmentSeen(tx, orgId, at.data.id, at.data.encounterId, segmentId))) return null
+          return listDictationSuggestions(tx, orgId, at.data.id, at.data.encounterId)
         })
-        const extracted = await extractDictation(deps.db, { secretsKey: deps.secretsKey, platform: deps.llm }, { orgId, transcript: parsed.data.transcript })
-        const suggestions = await withOrgContext(deps.db, orgId, (tx) =>
-          saveDictationSuggestions(tx, orgId, userId, at.data.id, at.data.encounterId, extracted.drafts),
+        if (!before) return { suggestions: [], corrected: [], removed: [], sources: [], repeated: true, model: null }
+        const extracted = await extractDictation(
+          deps.db,
+          { secretsKey: deps.secretsKey, platform: deps.llm },
+          { orgId, transcript, context, pending: before.map((item) => ({ label: dictationModelLabel(item) })) },
         )
-        return { suggestions, model: extracted.model }
+        // El número que usó el modelo es la posición en la lista que se le dio.
+        const target = (index: number) => before[index]?.id
+        const saved = await withOrgContext(deps.db, orgId, (tx) =>
+          saveDictationSegment(tx, orgId, userId, at.data.id, at.data.encounterId, {
+            drafts: extracted.drafts,
+            corrections: extracted.corrections.flatMap((item) => {
+              const suggestionId = target(item.index)
+              return suggestionId ? [{ suggestionId, changes: item.changes }] : []
+            }),
+            removals: extracted.removals.flatMap((item) => target(item.index) ?? []),
+            segmentId,
+          }),
+        )
+        // Los fragmentos de este tramo que dieron lugar a algo: la pantalla los resalta en su respaldo.
+        const sources = [...extracted.drafts, ...extracted.corrections, ...extracted.removals].map((item) => item.sourceText ?? "").filter(Boolean)
+        return { ...saved, sources, model: extracted.model }
       })
     } catch (error) {
       if (isProviderConfigError(error)) {
@@ -98,6 +137,18 @@ export function createEncounterDictationRoute(deps: EncounterDictationDeps) {
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
         confirmDictationSuggestion(tx, orgId, userId, at.data.id, at.data.encounterId, at.data.suggestionId),
+      ),
+    )
+  })
+
+  /** Deshace una corrección dicha en voz alta: la sugerencia vuelve a como estaba. */
+  app.post(`${base}/:suggestionId/undo-voice`, async (c) => {
+    const { orgId, userId } = orgContextOf(c)
+    const at = suggestionParams.safeParse(c.req.param())
+    if (!at.success) return validationError(c, at.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        undoDictationVoiceCorrection(tx, orgId, userId, at.data.id, at.data.encounterId, at.data.suggestionId),
       ),
     )
   })

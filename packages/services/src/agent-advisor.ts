@@ -1,7 +1,9 @@
 import type { Db } from "@odentia/db"
 import { type AgentAdvisorSettings, agentConfig, crmTask } from "@odentia/db/schema/crm"
 import { auditEvent } from "@odentia/db/schema/org"
+import type { AutomationKind } from "@odentia/db/schema/automation"
 import { and, eq, sql } from "drizzle-orm"
+import { CHECKUP_REMINDER_WINDOW_HOURS, listRules } from "./automation.js"
 import { notFound, ServiceError, validation } from "./errors.js"
 import { getOrgLocale, type OrgLocale } from "./locale.js"
 import { createTask } from "./tasks.js"
@@ -31,6 +33,31 @@ export interface AdvisorDetection {
   defaultDays: number | null
   /** Título de la tarea que se crea por cada persona de la lista. */
   taskTitle: (item: AdvisorItem) => string
+  /** Cómo se llama esa tarea en el botón: «tarea de llamada», «tarea». */
+  taskNoun: { one: string; many: string }
+  /**
+   * Automatización real que evita que la lista vuelva a llenarse, si existe.
+   * El asesor solo la ofrece: encenderla es la operación de Automatizaciones,
+   * la pide una persona y exige su permiso (`crm.write`).
+   */
+  automation: { kind: AutomationKind; label: string; shortLabel: string; reach: string } | null
+}
+
+const CALL_TASK = { one: "tarea de llamada", many: "tareas de llamada" }
+const PLAIN_TASK = { one: "tarea", many: "tareas" }
+
+/** Lo que el asesor sabe de la automatización ligada a una recomendación. */
+export interface AdvisorAutomation {
+  kind: AutomationKind
+  /** «recordatorio de control»: nombre para «Encender el …». */
+  label: string
+  shortLabel: string
+  /** A quién escribe y a quién no, tal como funciona hoy la regla. */
+  reach: string
+  /** Regla que se enciende; null si la clínica todavía no la tiene. */
+  ruleId: string | null
+  enabled: boolean
+  channel: string
 }
 
 export interface AdvisorItem {
@@ -56,6 +83,9 @@ export interface AdvisorRecommendation {
   days: number | null
   /** Momento del cálculo: los datos son de ahora, no de una foto antigua. */
   computedAt: string
+  taskNoun: { one: string; many: string }
+  /** Solo para quien puede ver las automatizaciones (`crm.read`). */
+  automation: AdvisorAutomation | null
 }
 
 export const ADVISOR_DETECTIONS: readonly AdvisorDetection[] = [
@@ -67,6 +97,14 @@ export const ADVISOR_DETECTIONS: readonly AdvisorDetection[] = [
     permission: "appointments.read",
     defaultDays: null,
     taskTitle: (item) => `Llamar a ${item.personName} para agendar su control`,
+    taskNoun: CALL_TASK,
+    automation: {
+      kind: "recordatorio_control",
+      label: "recordatorio de control",
+      shortLabel: "recordatorio",
+      // La regla avisa antes de la fecha (`syncCheckupReminders`); no escribe a quien ya la pasó.
+      reach: `a quien tiene un control en las próximas ${CHECKUP_REMINDER_WINDOW_HOURS} horas y dio su consentimiento para recordatorios. No escribe a quienes ya se les pasó la fecha`,
+    },
   },
   {
     key: "presupuestos_sin_cita",
@@ -76,6 +114,9 @@ export const ADVISOR_DETECTIONS: readonly AdvisorDetection[] = [
     permission: "appointments.read",
     defaultDays: 7,
     taskTitle: (item) => `Llamar a ${item.personName} para agendar su tratamiento`,
+    taskNoun: CALL_TASK,
+    // «Seguimiento de presupuesto» escribe por presupuestos presentados sin decisión, no por los aceptados sin cita.
+    automation: null,
   },
   {
     key: "atenciones_sin_firmar",
@@ -85,6 +126,8 @@ export const ADVISOR_DETECTIONS: readonly AdvisorDetection[] = [
     permission: "clinical.read",
     defaultDays: null,
     taskTitle: (item) => `Revisar y firmar la atención de ${item.personName}`,
+    taskNoun: PLAIN_TASK,
+    automation: null,
   },
   {
     key: "seguimientos_sin_responsable",
@@ -94,6 +137,8 @@ export const ADVISOR_DETECTIONS: readonly AdvisorDetection[] = [
     permission: "crm.read",
     defaultDays: null,
     taskTitle: (item) => `Asignar responsable al seguimiento de ${item.personName}`,
+    taskNoun: PLAIN_TASK,
+    automation: null,
   },
   {
     key: "cobranza_vencida",
@@ -103,6 +148,8 @@ export const ADVISOR_DETECTIONS: readonly AdvisorDetection[] = [
     permission: "finance.read",
     defaultDays: null,
     taskTitle: (item) => `Llamar a ${item.personName} por su cuota vencida`,
+    taskNoun: CALL_TASK,
+    automation: null,
   },
 ] as const
 
@@ -383,12 +430,34 @@ async function runDetection(tx: Db, orgId: string, key: string, zone: OrgLocale,
   throw notFound("Recomendación")
 }
 
-function toRecommendation(detection: AdvisorDetection, result: DetectionResult, days: number | null, limit: number): AdvisorRecommendation {
+/**
+ * Estado de la automatización de una detección, leído con el mismo listado de
+ * reglas que usa Automatizaciones. No cambia nada: encender es de esa pantalla.
+ */
+async function automationOf(tx: Db, orgId: string, detection: AdvisorDetection, can: (permission: string) => boolean): Promise<AdvisorAutomation | null> {
+  if (!detection.automation || !can("crm.read")) return null
+  const rules = (await listRules(tx, orgId)).filter((rule) => rule.kind === detection.automation?.kind)
+  const active = rules.find((rule) => rule.enabled)
+  const rule = active ?? rules[0]
+  return { ...detection.automation, ruleId: rule?.id ?? null, enabled: active !== undefined, channel: rule?.channel ?? "whatsapp" }
+}
+
+function toRecommendation(
+  detection: AdvisorDetection,
+  result: DetectionResult,
+  days: number | null,
+  limit: number,
+  automation: AdvisorAutomation | null,
+): AdvisorRecommendation {
+  // Apagada, nadie recibe el aviso previo: se dice en la tarjeta, como dato y no como causa.
+  const off = automation && !automation.enabled ? `El ${automation.label} está apagado.` : ""
   return {
     key: detection.key,
     area: detection.area,
     title: result.title,
-    detail: result.detail,
+    detail: [off, result.detail].filter(Boolean).join(" "),
+    taskNoun: detection.taskNoun,
+    automation,
     how: result.how,
     total: result.total,
     items: result.items.slice(0, limit),
@@ -424,7 +493,7 @@ export async function getAdvisorRecommendations(
     const own = settings.detections.find((item) => item.key === detection.key)
     if (!own?.on || own.snoozedUntil || !can(detection.permission)) continue
     const result = await runDetection(tx, orgId, detection.key, zone, own.days)
-    if (result.total > 0) found.push(toRecommendation(detection, result, own.days, ADVISOR_PREVIEW_ITEMS))
+    if (result.total > 0) found.push(toRecommendation(detection, result, own.days, ADVISOR_PREVIEW_ITEMS, await automationOf(tx, orgId, detection, can)))
   }
   const shown = opts.all ? found : found.slice(0, ADVISOR_MAX_RECOMMENDATIONS)
   return { enabled: settings.enabled, recommendations: shown, more: found.length - shown.length }
@@ -443,7 +512,7 @@ export async function getAdvisorRecommendation(
   const own = settings.detections.find((item) => item.key === key)
   const zone = await getOrgLocale(tx, orgId)
   const days = own?.days ?? detection.defaultDays
-  return toRecommendation(detection, await runDetection(tx, orgId, key, zone, days), days, ADVISOR_LIST_LIMIT)
+  return toRecommendation(detection, await runDetection(tx, orgId, key, zone, days), days, ADVISOR_LIST_LIMIT, await automationOf(tx, orgId, detection, can))
 }
 
 /**

@@ -44,6 +44,23 @@ const extraction = z.object({
     .max(5)
     .default([])
     .describe("Un elemento por cada control que pidió."),
+  // Los campos de una corrección son los de la operación de esa sugerencia: el servicio los valida, aquí no se declaran.
+  correcciones: z
+    .array(
+      z.object({
+        sugerencia: z.number().int().min(1).describe("El número de la sugerencia pendiente que corrige."),
+        cambios: z.record(z.string(), z.unknown()).describe("Solo los campos que cambian, con los mismos nombres que al registrarla (por ejemplo, toothNumber)."),
+        dicho: said,
+      }),
+    )
+    .max(10)
+    .default([])
+    .describe("Correcciones que dijo sobre sugerencias pendientes ya numeradas. Vacío si no corrigió ninguna."),
+  quitar: z
+    .array(z.object({ sugerencia: z.number().int().min(1).describe("El número de la sugerencia pendiente que pidió quitar."), dicho: said }))
+    .max(10)
+    .default([])
+    .describe("Sugerencias pendientes que pidió quitar. Vacío si no pidió quitar ninguna."),
 })
 type Extraction = z.infer<typeof extraction>
 
@@ -55,6 +72,7 @@ function systemPrompt(input: { services: string[]; today: string; timezone: stri
     `Principios que no cambian: ${AGENT_BASE_PRINCIPLES.join(" ")}`,
     "Registra solo lo que el odontólogo dijo. No añadas diagnósticos, piezas, superficies ni tratamientos que no nombró, ni completes lo que falta con lo que sería habitual.",
     "Si se corrige («en la veinticinco… no, es la veintiséis»), vale lo último que dijo. Si pide quitar algo («quita la endodoncia»), no lo registres.",
+    "Si recibes sugerencias pendientes numeradas y lo nuevo corrige o quita una de ellas, usa `correcciones` o `quitar` con su número en vez de registrarla otra vez. Lo marcado como ya ordenado sirve para entender lo nuevo: no lo registres de nuevo.",
     "Las piezas van en numeración FDI como número (dieciséis = 16, cuarenta y seis = 46).",
     "En las indicaciones, pon en `service` la prestación con las palabras del odontólogo: el sistema la busca en los servicios de la clínica. No inventes precios.",
     input.services.length
@@ -65,11 +83,31 @@ function systemPrompt(input: { services: string[]; today: string; timezone: stri
   ].join("\n")
 }
 
-function toDrafts(result: Extraction): DictationDraft[] {
+const loose = (text: string) => text.toLowerCase().replace(/\s+/g, " ").trim()
+
+/**
+ * El fragmento que el modelo dice haber oído solo vale si de verdad está en lo
+ * dictado: la pantalla lo muestra como «lo que dijiste» y lo resalta. Lo que no
+ * aparece tal cual se descarta, frase por frase; nunca se muestra una cita
+ * que el odontólogo no dijo.
+ */
+export function groundSource(said: string | undefined, transcript: string): string {
+  const fragment = (said ?? "").trim()
+  if (!fragment) return ""
+  const heard = loose(transcript)
+  if (heard.includes(loose(fragment))) return fragment
+  return fragment
+    .split(/(?<=[.;!?])\s+/)
+    .map((sentence) => sentence.trim())
+    .filter((sentence) => sentence.length >= 3 && heard.includes(loose(sentence)))
+    .join(" ")
+}
+
+function toDrafts(result: Extraction, transcript: string): DictationDraft[] {
   const drafts: DictationDraft[] = []
   const split = <T extends { dicho?: string | undefined }>(item: T) => {
     const { dicho, ...payload } = item
-    return { payload: payload as Record<string, unknown>, sourceText: dicho ?? "" }
+    return { payload: payload as Record<string, unknown>, sourceText: groundSource(dicho, transcript) }
   }
   if (result.nota) {
     const { payload, sourceText } = split(result.nota)
@@ -159,9 +197,49 @@ export function demoExtraction(transcript: string, services: string[], now: Date
   return drafts
 }
 
+/** Una sugerencia que sigue sin decidir, como se le nombra al asistente; su posición es su número. */
+export interface DictationPending {
+  label: string
+}
+
 export interface DictationExtraction {
   drafts: DictationDraft[]
+  /** Correcciones dichas sobre sugerencias pendientes; `index` es la posición en `pending`. */
+  corrections: Array<{ index: number; changes: Record<string, unknown>; sourceText: string }>
+  /** Sugerencias pendientes que pidió quitar, por su posición en `pending`. */
+  removals: Array<{ index: number; sourceText: string }>
   model: string
+}
+
+/**
+ * Lo mismo que `demoExtraction` cuando el odontólogo sigue dictando: además
+ * reconoce «no, es la veintiséis» (cambia la pieza de la última sugerencia) y
+ * «quita la endodoncia» (descarta la pendiente que lleva esa palabra).
+ */
+export function demoSegment(transcript: string, services: string[], now: Date, pending: DictationPending[]): Omit<DictationExtraction, "model"> {
+  // Una frase que corrige o quita algo no es, además, un registro nuevo («quita la endodoncia»).
+  const order = (sentence: string) => /^(no,? es |quita)/.test(plain(sentence))
+  const drafts = demoExtraction(transcript, services, now).filter((draft) => !order(draft.sourceText ?? ""))
+  const corrections: DictationExtraction["corrections"] = []
+  const removals: DictationExtraction["removals"] = []
+  for (const sentence of transcript.split(/(?<=[.;!?])\s+|\n+/).map((item) => item.trim()).filter(Boolean)) {
+    const text = plain(sentence)
+    const fix = /^no,? es (?:en )?la\b/.test(text) ? toothIn(sentence) : null
+    if (fix) {
+      // Lo último que se dijo: una sugerencia de este mismo tramo o, si no hay, la última pendiente.
+      const last = [...drafts].reverse().find((draft) => draft.kind === "plan" || draft.kind === "diagnostico")
+      if (last) last.payload = { ...last.payload, toothNumber: fix }
+      else if (pending.length) corrections.push({ index: pending.length - 1, changes: { toothNumber: fix }, sourceText: sentence })
+      continue
+    }
+    const drop = /^quita(?:r)? (?:la |el |los |las )?([a-z]{4,})/.exec(text)
+    if (drop?.[1]) {
+      const word = drop[1]
+      const index = pending.findIndex((item) => plain(item.label).includes(word))
+      if (index >= 0) removals.push({ index, sourceText: sentence })
+    }
+  }
+  return { drafts, corrections, removals }
 }
 
 /**
@@ -172,7 +250,14 @@ export interface DictationExtraction {
 export async function extractDictation(
   db: Db,
   deps: Pick<AgentRuntime, "platform" | "secretsKey" | "createModel">,
-  input: { orgId: string; transcript: string },
+  input: {
+    orgId: string
+    transcript: string
+    /** Lo último que ya se ordenó de este dictado: ayuda a entender lo nuevo y no se registra otra vez. */
+    context?: string | undefined
+    /** Sugerencias de este dictado que el odontólogo aún no decide, para corregirlas o quitarlas por voz. */
+    pending?: DictationPending[] | undefined
+  },
 ): Promise<DictationExtraction> {
   const transcript = input.transcript.trim()
   if (transcript.length < 3) throw new ServiceError("VALIDATION", 400, "Dicta o escribe algo para ordenar")
@@ -188,7 +273,20 @@ export async function extractDictation(
     }
   })
   const now = new Date()
-  if (spec.modelName === "fake" && !deps.createModel) return { drafts: demoExtraction(transcript, services, now), model: spec.modelName }
+  const pending = (input.pending ?? []).slice(0, 40)
+  if (spec.modelName === "fake" && !deps.createModel) return { ...demoSegment(transcript, services, now, pending), model: spec.modelName }
+  // Con dictado en curso, lo nuevo va al final y separado de lo que solo da contexto.
+  const context = (input.context ?? "").trim().slice(-600)
+  const human =
+    context || pending.length
+      ? [
+          context ? `Ya ordenado antes en este dictado (no lo registres otra vez):\n«${context}»` : "",
+          pending.length ? `Sugerencias pendientes de este dictado:\n${pending.map((item, index) => `${index + 1}. ${item.label}`).join("\n")}` : "",
+          `Lo nuevo que dictó:\n«${transcript}»`,
+        ]
+          .filter(Boolean)
+          .join("\n\n")
+      : transcript
 
   const record = tool(async () => "registrado", {
     name: TOOL_NAME,
@@ -202,7 +300,7 @@ export async function extractDictation(
   const today = new Intl.DateTimeFormat("es-PE", { timeZone: zone.timezone, dateStyle: "full" }).format(now)
   const reply = await bound.invoke([
     new SystemMessage({ content: systemPrompt({ services, today: `${today}, ${now.toISOString()}`, timezone: zone.timezone }) }),
-    new HumanMessage({ content: transcript }),
+    new HumanMessage({ content: human }),
   ])
   const call = reply instanceof AIMessage || "tool_calls" in reply ? (reply as AIMessage).tool_calls?.find((item) => item.name === TOOL_NAME) : undefined
   const parsed = call ? extraction.safeParse(call.args) : null
@@ -210,5 +308,12 @@ export async function extractDictation(
     // El proveedor respondió, pero no con algo que se pueda ordenar: no se inventa nada.
     throw new ServiceError("DICTATION_UNREADABLE", 502, "El asistente no pudo ordenar ese dictado. Vuelve a intentarlo o regístralo a mano.")
   }
-  return { drafts: toDrafts(parsed.data), model: spec.modelName }
+  // Un número que no corresponde a ninguna pendiente se ignora: no se adivina a cuál se refería.
+  const known = <T extends { sugerencia: number }>(item: T) => item.sugerencia <= pending.length
+  return {
+    drafts: toDrafts(parsed.data, transcript),
+    corrections: parsed.data.correcciones.filter(known).map((item) => ({ index: item.sugerencia - 1, changes: item.cambios, sourceText: groundSource(item.dicho, transcript) })),
+    removals: parsed.data.quitar.filter(known).map((item) => ({ index: item.sugerencia - 1, sourceText: groundSource(item.dicho, transcript) })),
+    model: spec.modelName,
+  }
 }

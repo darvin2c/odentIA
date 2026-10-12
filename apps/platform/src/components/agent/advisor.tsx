@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
+import { channelLabel } from "../../lib/channels"
 import { usePermission } from "../../lib/crm"
 import { mutationErrorMessage, QueryErrorState } from "../../lib/query-error"
 
@@ -26,6 +27,17 @@ export interface AdvisorRecommendation {
   items: AdvisorItem[]
   days: number | null
   computedAt: string
+  taskNoun: { one: string; many: string }
+  /** Automatización que se puede encender desde aquí; null si no hay o el rol no las ve. */
+  automation: {
+    kind: string
+    label: string
+    shortLabel: string
+    reach: string
+    ruleId: string | null
+    enabled: boolean
+    channel: string
+  } | null
 }
 
 export interface AdvisorView {
@@ -58,6 +70,7 @@ const WHERE: Record<string, { to: string; label: string }> = {
 }
 
 const PREVIEW = 4
+const capitalize = (text: string) => text.charAt(0).toUpperCase() + text.slice(1)
 const hour = (iso: string) => new Date(iso).toLocaleTimeString("es-PE", { hour: "2-digit", minute: "2-digit" })
 /** La hora como cierre de frase: «p. m.» ya trae su punto. */
 const hourEnd = (iso: string) => {
@@ -66,7 +79,7 @@ const hourEnd = (iso: string) => {
 }
 
 function refreshAdvisor(queryClient: ReturnType<typeof useQueryClient>) {
-  for (const key of ["agent-advisor", "agent-advisor-settings", "agent-advisor-preview", "tasks", "workspace-home"]) {
+  for (const key of ["agent-advisor", "agent-advisor-settings", "agent-advisor-preview", "tasks", "workspace-home", "automation-rules"]) {
     void queryClient.invalidateQueries({ queryKey: [key] })
   }
 }
@@ -79,8 +92,10 @@ export function RecommendationDrawer({ recommendationKey, onClose }: { recommend
   const queryClient = useQueryClient()
   const canTasks = usePermission("tasks.write")
   const canAdmin = usePermission("agent.write")
+  const canAutomate = usePermission("crm.write")
   const [showAll, setShowAll] = useState(false)
   const [confirmTasks, setConfirmTasks] = useState(false)
+  const [confirmTurnOn, setConfirmTurnOn] = useState(false)
   const [done, setDone] = useState<string | null>(null)
 
   const query = useQuery({
@@ -103,6 +118,23 @@ export function RecommendationDrawer({ recommendationKey, onClose }: { recommend
       refreshAdvisor(queryClient)
     },
   })
+  // Encender es la operación de Automatizaciones (misma ruta y mismo permiso):
+  // activar la regla que ya existe o crearla con los valores por defecto del servidor.
+  const turnOn = useMutation({
+    retry: false,
+    mutationFn: (automation: NonNullable<AdvisorRecommendation["automation"]>) =>
+      automation.ruleId
+        ? apiFetch(`/api/automations/rules/${automation.ruleId}`, { method: "PATCH", body: JSON.stringify({ enabled: true }) })
+        : apiFetch("/api/automations/rules", {
+            method: "POST",
+            body: JSON.stringify({ name: capitalize(automation.label), kind: automation.kind, enabled: true }),
+          }),
+    onSuccess: (_response, automation) => {
+      setDone(`${capitalize(automation.label)} encendido. Verás cada mensaje en Automatizaciones.`)
+      setConfirmTurnOn(false)
+      refreshAdvisor(queryClient)
+    },
+  })
   const hide = useMutation({
     retry: false,
     mutationFn: () =>
@@ -120,7 +152,9 @@ export function RecommendationDrawer({ recommendationKey, onClose }: { recommend
     setShowAll(false)
     setDone(null)
     setConfirmTasks(false)
+    setConfirmTurnOn(false)
     createTasks.reset()
+    turnOn.reset()
     hide.reset()
     onClose()
   }
@@ -129,9 +163,15 @@ export function RecommendationDrawer({ recommendationKey, onClose }: { recommend
   const item = query.data?.data
   const where = WHERE[recommendationKey]
   const rows = item ? (showAll ? item.items : item.items.slice(0, PREVIEW)) : []
+  const automation = item?.automation ?? null
+  // La automatización es la acción principal solo si está apagada y este rol puede encenderla.
+  const offerTurnOn = automation !== null && !automation.enabled && canAutomate
+  const taskCount = item?.items.length ?? 0
+  const taskLabel = item ? `${taskCount} ${taskCount === 1 ? item.taskNoun.one : item.taskNoun.many}` : ""
+  const reach = automation ? `Avisa por ${channelLabel(automation.channel)} ${automation.reach}` : ""
 
   return (
-    <DetailDrawer open title="Recomendación del asesor" description={item?.title} onClose={close} isSubmitting={createTasks.isPending}>
+    <DetailDrawer open title="Recomendación del asesor" description={item?.title} onClose={close} isSubmitting={createTasks.isPending || turnOn.isPending}>
       {query.isPending ? (
         <LoadingState kind="indeterminate" message="Calculando con tus datos de ahora…" />
       ) : query.isError || !item ? (
@@ -139,8 +179,10 @@ export function RecommendationDrawer({ recommendationKey, onClose }: { recommend
       ) : (
         <div className="flex flex-col gap-6">
           <DetailSection title="Cómo se calculó">
-            <p className="text-sm">{item.how}</p>
-            <p className="text-sm text-muted-foreground">Con tus datos de hoy a las {hourEnd(item.computedAt)} Los números salen de la base de datos, no de un modelo.</p>
+            <div className="flex flex-col gap-1 rounded-xl bg-muted px-3.5 py-3 text-sm">
+              <p>{item.how}</p>
+              <p className="text-muted-foreground">Con tus datos de hoy a las {hourEnd(item.computedAt)} Los números salen de la base de datos, no de un modelo.</p>
+            </div>
           </DetailSection>
 
           <DetailSection title="Quiénes son">
@@ -181,16 +223,49 @@ export function RecommendationDrawer({ recommendationKey, onClose }: { recommend
                 {done}
               </p>
             ) : null}
-            {item.total > 0 && canTasks ? (
-              <div className="flex flex-col gap-1.5 rounded-xl border bg-card p-3">
-                <p className="text-sm font-semibold">
-                  Crear {item.items.length} {item.items.length === 1 ? "tarea" : "tareas"}, una por persona
-                </p>
-                <p className="text-sm text-muted-foreground">Quedan abiertas en Tareas para que tu equipo las tome. No se envía ningún mensaje.</p>
-                <Button type="button" className="min-h-11 self-start sm:min-h-9" disabled={createTasks.isPending} onClick={() => setConfirmTasks(true)}>
-                  Crear las tareas
+            {automation && offerTurnOn ? (
+              <div className="flex flex-col gap-2.5 rounded-xl border border-agent-border bg-agent-soft p-3.5">
+                <div className="flex flex-col gap-0.5">
+                  <p className="text-[15px] font-bold">Encender el {automation.label}</p>
+                  <p className="text-sm">
+                    {reach}
+                    {item.total > 0 && canTasks ? `: para ${taskCount === 1 ? "la persona" : `las ${taskCount} personas`} de esta lista, crea ${taskCount === 1 ? "la tarea" : "las tareas"}.` : "."}
+                  </p>
+                </div>
+                <Button type="button" className="min-h-11 w-full" disabled={turnOn.isPending} onClick={() => setConfirmTurnOn(true)}>
+                  Encender {automation.shortLabel}
                 </Button>
+                <p className="text-[13px] text-muted-foreground">
+                  Nada se envía hasta que lo enciendas. Podrás ver cada mensaje en{" "}
+                  <Link to="/automations" className="font-semibold text-primary underline-offset-2 hover:underline">
+                    Automatizaciones
+                  </Link>
+                  .
+                </p>
               </div>
+            ) : automation ? (
+              <p className="text-sm text-muted-foreground">
+                {automation.enabled
+                  ? `El ${automation.label} ya está encendido. ${reach}.`
+                  : `El ${automation.label} está apagado. Lo enciende quien administra las automatizaciones.`}
+              </p>
+            ) : null}
+            {item.total > 0 && canTasks ? (
+              offerTurnOn ? (
+                <Button type="button" variant="outline" className="min-h-11 w-full" disabled={createTasks.isPending} onClick={() => setConfirmTasks(true)}>
+                  Solo crear {taskLabel}
+                </Button>
+              ) : (
+                <div className="flex flex-col gap-2.5 rounded-xl border border-agent-border bg-agent-soft p-3.5">
+                  <div className="flex flex-col gap-0.5">
+                    <p className="text-[15px] font-bold">Crear {taskLabel}, una por persona</p>
+                    <p className="text-sm">Quedan abiertas en Tareas para que tu equipo las tome. No se envía ningún mensaje.</p>
+                  </div>
+                  <Button type="button" className="min-h-11 w-full" disabled={createTasks.isPending} onClick={() => setConfirmTasks(true)}>
+                    Crear {taskLabel}
+                  </Button>
+                </div>
+              )
             ) : null}
             {where ? (
               <Link to={where.to} className="inline-flex min-h-11 items-center text-sm font-semibold text-primary hover:underline sm:min-h-8">
@@ -204,25 +279,50 @@ export function RecommendationDrawer({ recommendationKey, onClose }: { recommend
                   : mutationErrorMessage(createTasks.error)}
               </p>
             ) : null}
+            {turnOn.isError ? (
+              <p role="alert" className="text-sm text-destructive">
+                {turnOn.error instanceof ApiError && turnOn.error.status === 403
+                  ? "Tu rol no puede encender automatizaciones."
+                  : mutationErrorMessage(turnOn.error)}
+              </p>
+            ) : null}
           </DetailSection>
 
           {canAdmin ? (
-            <DetailSection title="¿No te sirve esta recomendación?">
-              <p className="text-sm text-muted-foreground">Deja de aparecer para toda la clínica. La vuelves a encender en Agente › Asesor.</p>
-              <Button type="button" variant="outline" className="min-h-11 self-start sm:min-h-9" disabled={hide.isPending} onClick={() => hide.mutate()}>
-                No volver a mostrar
-              </Button>
+            <div className="flex flex-col gap-2 border-t pt-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="min-w-0 flex-1 basis-48 text-[13px] text-muted-foreground">
+                  ¿No te sirve esta recomendación? Deja de aparecer para toda la clínica; la vuelves a encender en Agente › Asesor.
+                </p>
+                <Button type="button" variant="outline" className="min-h-11 sm:min-h-10" disabled={hide.isPending} onClick={() => hide.mutate()}>
+                  No volver a mostrar
+                </Button>
+              </div>
               {hide.isError ? (
                 <p role="alert" className="text-sm text-destructive">
                   {mutationErrorMessage(hide.error)}
                 </p>
               ) : null}
-            </DetailSection>
+            </div>
           ) : null}
 
+          {automation ? (
+            <ConfirmDialog
+              open={confirmTurnOn}
+              title={`Encender el ${automation.label}`}
+              description={`${reach}. Empieza a enviar desde que lo enciendes y lo pausas cuando quieras en Automatizaciones.`}
+              confirmLabel={`Encender ${automation.shortLabel}`}
+              variant="default"
+              pending={turnOn.isPending}
+              onClose={() => {
+                if (!turnOn.isPending) setConfirmTurnOn(false)
+              }}
+              onConfirm={() => turnOn.mutate(automation)}
+            />
+          ) : null}
           <ConfirmDialog
             open={confirmTasks}
-            title={`Crear ${item.items.length} ${item.items.length === 1 ? "tarea" : "tareas"}`}
+            title={`Crear ${taskLabel}`}
             description="Una tarea abierta por cada persona de la lista, sin responsable. Si hoy ya se crearon, no se repiten."
             confirmLabel="Crear las tareas"
             variant="default"
@@ -276,7 +376,8 @@ export function AdvisorSection() {
         <div className="min-w-0 flex-1 basis-48">
           <h2 className="text-[17px] font-bold tracking-tight">Para atender hoy</h2>
           <p className="text-sm text-muted-foreground">
-            {count} {count === 1 ? "recomendación" : "recomendaciones"} del asesor, con tus datos de hoy a las {hourEnd(view.recommendations[0]?.computedAt ?? new Date().toISOString())}
+            {count} {count === 1 ? "recomendación" : "recomendaciones"} del asesor
+            <span className="hidden sm:inline">, con tus datos de hoy a las {hourEnd(view.recommendations[0]?.computedAt ?? new Date().toISOString())}</span>
           </p>
         </div>
         {view.more > 0 ? (
@@ -288,11 +389,12 @@ export function AdvisorSection() {
       <ul className="grid gap-3 lg:grid-cols-3">
         {view.recommendations.map((item) => (
           <li key={item.key} className="flex min-w-0 flex-col gap-2 rounded-xl border bg-card p-4">
-            <p className="text-xs font-semibold uppercase tracking-wide text-primary-soft-foreground">{item.area}</p>
-            <p className="font-semibold">{item.title}</p>
+            <p className="hidden text-xs font-semibold uppercase tracking-wide text-primary-soft-foreground sm:block">{item.area}</p>
+            <h3 className="font-semibold">{item.title}</h3>
             {item.detail ? <p className="text-sm text-muted-foreground">{item.detail}</p> : null}
-            <div className="mt-auto flex flex-wrap gap-2 pt-1">
-              <Button type="button" size="sm" className="min-h-11 sm:min-h-8" onClick={() => setOpen(item.key)}>
+            {/* Sin «No me interesa» (solo quien administra), «Revisar y decidir» ocupa la fila en teléfono. */}
+            <div className="mt-auto flex flex-wrap gap-1 pt-1 sm:gap-2">
+              <Button type="button" size="sm" className="min-h-11 flex-1 sm:min-h-8 sm:flex-none" onClick={() => setOpen(item.key)}>
                 Revisar y decidir
               </Button>
               {canAdmin ? (

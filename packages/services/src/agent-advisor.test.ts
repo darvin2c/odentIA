@@ -16,6 +16,7 @@ import {
   getAdvisorSettings,
   updateAdvisorSettings,
 } from "./agent-advisor.js"
+import { createRule, listRules, updateRule } from "./automation.js"
 import { createContact } from "./contacts.js"
 import { createOpportunity } from "./opportunities.js"
 import { nextPatientNumber } from "./patients.js"
@@ -108,8 +109,37 @@ describe("detecciones", () => {
     expect(found.items.map((item) => item.personName)).toEqual(["Mariana Soto", "Andrés Vargas"])
     expect(found.items[0]?.line).toMatch(/^Control de ortodoncia · venció el \d+ de /)
     expect(found.title).toBe("2 controles vencidos de pacientes sin cita")
-    expect(found.detail).toBe("1 venció hace más de 30 días.")
+    expect(found.detail).toBe("El recordatorio de control está apagado. 1 venció hace más de 30 días.")
     expect(found.how).toContain("no tienen una cita programada o confirmada")
+    expect(found.taskNoun).toEqual({ one: "tarea de llamada", many: "tareas de llamada" })
+  })
+
+  it("controles vencidos: dice si el recordatorio de control está encendido, sin encenderlo y solo a quien ve automatizaciones", async () => {
+    const read = () => run((tx) => getAdvisorRecommendation(tx, ORG, all, "controles_vencidos"))
+    // Sin regla: se ofrece crearla (ruleId null) y la tarjeta dice que está apagado.
+    expect((await read()).automation).toMatchObject({ kind: "recordatorio_control", label: "recordatorio de control", ruleId: null, enabled: false, channel: "whatsapp" })
+    expect((await read()).automation?.reach).toContain("próximas 48 horas")
+    expect((await read()).automation?.reach).toContain("No escribe a quienes ya se les pasó la fecha")
+    // Con la regla pausada: es esa la que se enciende. Leer la recomendación no la cambia.
+    const rule = await run((tx) => createRule(tx, ORG, OWNER, { name: "Recordatorio de control", kind: "recordatorio_control", channel: "telegram", enabled: false }))
+    expect((await read()).automation).toMatchObject({ ruleId: rule.id, enabled: false, channel: "telegram" })
+    expect((await run((tx) => listRules(tx, ORG))).find((item) => item.id === rule.id)?.enabled).toBe(false)
+    // Encendida con la operación de Automatizaciones: la tarjeta deja de decir «apagado».
+    await run((tx) => updateRule(tx, ORG, OWNER, rule.id, { enabled: true }))
+    const on = await read()
+    expect(on.automation).toMatchObject({ ruleId: rule.id, enabled: true })
+    expect(on.detail).toBe("1 venció hace más de 30 días.")
+    // Quien no ve automatizaciones (crm.read) recibe la lista, no el estado de la regla.
+    const reception = (permission: string) => permission === "appointments.read"
+    const hidden = await run((tx) => getAdvisorRecommendation(tx, ORG, reception, "controles_vencidos"))
+    expect(hidden.automation).toBeNull()
+    expect(hidden.detail).toBe("1 venció hace más de 30 días.")
+    await run((tx) => updateRule(tx, ORG, OWNER, rule.id, { enabled: false }))
+  })
+
+  it("las demás detecciones no tienen una automatización equivalente: su acción son las tareas", async () => {
+    expect(ADVISOR_DETECTIONS.filter((item) => item.automation !== null).map((item) => item.key)).toEqual(["controles_vencidos"])
+    expect(ADVISOR_DETECTIONS.find((item) => item.key === "atenciones_sin_firmar")?.taskNoun.many).toBe("tareas")
   })
 
   it("presupuestos aceptados sin cita: respeta el umbral de días y no muestra importes", async () => {

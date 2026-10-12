@@ -10,9 +10,14 @@ import {
   confirmDictationSuggestion,
   discardDictationSuggestion,
   discardPendingDictation,
+  countConfirmedDictation,
+  dictationModelLabel,
+  dictationSegmentSeen,
   listDictationSuggestions,
   previewDictationSuggestions,
+  saveDictationSegment,
   saveDictationSuggestions,
+  undoDictationVoiceCorrection,
   updateDictationSuggestion,
 } from "./encounter-dictation.js"
 import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
@@ -175,6 +180,78 @@ describe("dictado en la atención", () => {
     ]))
     expect(preview.map((item) => item.status)).toEqual(["lista", "lista"])
     expect((await ownerDb.select({ id: encounterDictationSuggestion.id }).from(encounterDictationSuggestion)).length).toBe(before)
+    await enable(false)
+  })
+
+  it("mientras se dicta: un tramo no se guarda dos veces, una corrección por voz se puede deshacer y lo que se pide quitar se descarta", async () => {
+    await enable(true)
+    const fx = await openSession("Pulpotomía de urgencia")
+    const segment = (input: Parameters<typeof saveDictationSegment>[5]) => fx.run((tx) => saveDictationSegment(tx, ...fx.args, fx.encounter.id, input))
+    const list = () => fx.run((tx) => listDictationSuggestions(tx, ORG, fx.patient.id, fx.encounter.id))
+    const first = randomUUID()
+    const drafts = [
+      { kind: "plan" as const, payload: { service: "Pulpotomía de urgencia", toothNumber: 25 }, sourceText: "En la veinticinco hacemos pulpotomía." },
+      { kind: "diagnostico" as const, payload: { cie10Code: "K02.1", diagnosisType: "presuntivo", toothNumber: 16 } },
+    ]
+    const saved = await segment({ drafts, segmentId: first })
+    expect(saved).toMatchObject({ repeated: false, corrected: [], removed: [] })
+    const [plan, diagnosis] = saved.suggestions
+    // Los datos del tramo no salen del servicio ni ensucian lo que entraría a la historia.
+    expect(plan?.payload).not.toHaveProperty("_meta")
+    expect(plan).toMatchObject({ voice: null, payload: { serviceScope: "tooth" } })
+    // Al asistente se le nombra sin tarifa.
+    expect(dictationModelLabel(plan!)).toBe("Plan de tratamiento: Pulpotomía de urgencia, Pieza 25")
+    expect(dictationModelLabel(diagnosis!)).toBe("Diagnóstico: K02.1 Caries de la dentina, Pieza 16")
+
+    // El mismo tramo reenviado (la respuesta se perdió): no duplica.
+    expect(await fx.run((tx) => dictationSegmentSeen(tx, ORG, fx.patient.id, fx.encounter.id, first))).toBe(true)
+    expect(await segment({ drafts, segmentId: first })).toEqual({ suggestions: [], corrected: [], removed: [], repeated: true })
+    expect(await list()).toHaveLength(2)
+
+    // «No, es la veintiséis»: cambia la sugerencia y recuerda cómo estaba.
+    const fixed = await segment({
+      drafts: [],
+      segmentId: randomUUID(),
+      corrections: [
+        { suggestionId: plan!.id, changes: { toothNumber: 26 } },
+        // Lo que no encaja en la operación, lo que no cambia nada o apunta a otra atención se ignora.
+        { suggestionId: diagnosis!.id, changes: { diagnosisType: "seguro" } },
+        { suggestionId: diagnosis!.id, changes: { toothNumber: 16, inventado: "x" } },
+        { suggestionId: randomUUID(), changes: { toothNumber: 11 } },
+      ],
+    })
+    expect(fixed).toMatchObject({ suggestions: [], corrected: [plan!.id], removed: [] })
+    const now = await list()
+    const corrected = now.find((item) => item.id === plan!.id)
+    const untouched = now.find((item) => item.id === diagnosis!.id)
+    expect(corrected).toMatchObject({ status: "lista", payload: { toothNumber: 26, serviceId: fx.service.id }, voice: { before: "pieza 25" } })
+    expect(untouched).toMatchObject({ payload: { diagnosisType: "presuntivo", toothNumber: 16 }, voice: null })
+
+    // Deshacer vuelve a la pieza dictada primero; no hay nada más que deshacer.
+    const undone = await fx.run((tx) => undoDictationVoiceCorrection(tx, ...fx.args, fx.encounter.id, plan!.id))
+    expect(undone).toMatchObject({ payload: { toothNumber: 25 }, voice: null })
+    await expect(fx.run((tx) => undoDictationVoiceCorrection(tx, ...fx.args, fx.encounter.id, plan!.id))).rejects.toMatchObject({ code: "NO_VOICE_CORRECTION" })
+
+    // Corregida por voz y luego editada a mano: ya no se ofrece deshacer.
+    await segment({ drafts: [], corrections: [{ suggestionId: plan!.id, changes: { toothNumber: 26 } }] })
+    const edited = await fx.run((tx) => updateDictationSuggestion(tx, ...fx.args, fx.encounter.id, plan!.id, { detail: "Con aislamiento" }))
+    expect(edited).toMatchObject({ payload: { toothNumber: 26, detail: "Con aislamiento" }, voice: null })
+
+    // «Quita el diagnóstico»: sale de la lista sin entrar a la historia.
+    expect(await segment({ drafts: [], removals: [diagnosis!.id, randomUUID()] })).toMatchObject({ removed: [diagnosis!.id] })
+    expect((await list()).map((item) => item.id)).toEqual([plan!.id])
+    expect(await ownerDb.select().from(encounterDiagnosis).where(eq(encounterDiagnosis.encounterId, fx.encounter.id))).toEqual([])
+
+    // Confirmar lleva a la operación los campos de la sugerencia, sin sus metadatos.
+    expect(await fx.run((tx) => countConfirmedDictation(tx, ORG, fx.patient.id, fx.encounter.id))).toBe(0)
+    await fx.run((tx) => confirmDictationSuggestion(tx, ...fx.args, fx.encounter.id, plan!.id))
+    expect(await ownerDb.select().from(treatmentPlanItem).where(eq(treatmentPlanItem.planId, fx.plan.id))).toEqual([
+      expect.objectContaining({ serviceId: fx.service.id, toothNumber: 26, detail: "Con aislamiento" }),
+    ])
+    expect(await fx.run((tx) => countConfirmedDictation(tx, ORG, fx.patient.id, fx.encounter.id))).toBe(1)
+    // La auditoría cuenta correcciones y descartes, sin texto.
+    const audits = await ownerDb.select().from(auditEvent).where(and(eq(auditEvent.entityId, fx.encounter.id), eq(auditEvent.action, "encounter.dictation_suggested")))
+    expect(audits.map((row) => row.metadata)).toEqual(expect.arrayContaining([expect.objectContaining({ count: 0, corrected: 1, removed: 0 }), expect.objectContaining({ removed: 1 })]))
     await enable(false)
   })
 })

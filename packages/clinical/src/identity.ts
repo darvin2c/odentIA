@@ -151,6 +151,21 @@ export function composeDisplayName(parts: {
 }
 
 /**
+ * Reparte «Apellidos» escritos en un solo campo. Con exactamente dos palabras
+ * son paterno y materno; con una, o con más (apellidos compuestos como «De la
+ * Cruz»), no se adivina: todo queda como primer apellido y lo separa quien
+ * revisa la identidad en la clínica.
+ */
+export function splitSurnames(raw: string | null | undefined): {
+  paternalSurname: string
+  maternalSurname: string
+} {
+  const words = (raw ?? "").trim().split(/\s+/).filter(Boolean)
+  if (words.length === 2) return { paternalSurname: words[0]!, maternalSurname: words[1]! }
+  return { paternalSurname: words.join(" "), maternalSurname: "" }
+}
+
+/**
  * Normaliza un teléfono a E.164 (+código de país y número). Un número
  * peruano sin prefijo se reconoce: celular de 9 dígitos que empieza por 9.
  * Devuelve null si no puede asegurar el formato; nunca inventa un país.

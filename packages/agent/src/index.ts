@@ -36,4 +36,4 @@ export {
   type SimulationResult,
 } from "./run.js"
 export type { AgentSandboxState } from "./tools.js"
-export { demoExtraction, type DictationExtraction, extractDictation } from "./dictation.js"
+export { demoExtraction, demoSegment, type DictationExtraction, type DictationPending, extractDictation, groundSource } from "./dictation.js"

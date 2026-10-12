@@ -2458,6 +2458,30 @@ it("el asistente clínico ordena el dictado con el esquema de la atención y no 
   expect(system).toContain("Registra solo lo que el odontólogo dijo.")
   expect(system).toContain("No diagnostica, no receta y no decide por el profesional.")
 
+  // Dictado en curso: recibe lo pendiente numerado y devuelve correcciones solo sobre números que existen;
+  // una cita que no está en lo dictado no se conserva.
+  const live = await extractDictation(appDb, {
+    ...deps,
+    createModel: async () =>
+      answering({
+        indicaciones: [{ service: "resina", dicho: "El paciente pidió una resina" }],
+        correcciones: [{ sugerencia: 1, cambios: { toothNumber: 26 }, dicho: "No, es la veintiséis" }, { sugerencia: 7, cambios: { toothNumber: 11 } }],
+        quitar: [{ sugerencia: 2 }, { sugerencia: 3 }],
+      }) as never,
+  }, {
+    orgId: "org_a",
+    transcript: "No, es la veintiséis, y le ponemos una resina.",
+    context: "En la veinticinco hacemos endodoncia.",
+    pending: [{ label: "Plan de tratamiento: Endodoncia, Pieza 25" }, { label: "Controles: Control en 6 meses" }],
+  })
+  expect(live.corrections).toEqual([{ index: 0, changes: { toothNumber: 26 }, sourceText: "No, es la veintiséis" }])
+  expect(live.removals).toEqual([{ index: 1, sourceText: "" }])
+  expect(live.drafts).toEqual([{ kind: "plan", payload: { service: "resina" }, sourceText: "" }])
+  const asked = String(seen.at(-1)?.at(-1)?.content)
+  expect(asked).toContain("1. Plan de tratamiento: Endodoncia, Pieza 25")
+  expect(asked).toContain("Ya ordenado antes en este dictado")
+  expect(asked).toContain("Lo nuevo que dictó:")
+
   // Un tipo de diagnóstico que no existe, o ninguna llamada: no se ordena nada a medias.
   await expect(extract({ diagnosticos: [{ cie10Code: "K02.1", diagnosisType: "seguro" }] })).rejects.toMatchObject({ code: "DICTATION_UNREADABLE" })
   await expect(extract(null)).rejects.toMatchObject({ code: "DICTATION_UNREADABLE" })

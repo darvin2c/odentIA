@@ -562,6 +562,8 @@ test("reserva por enlace: la persona elige su cita viendo los horarios libres, s
   await expect(page.getByRole("region", { name: "Para qué es la cita" })).toContainText("para Eva")
   // En teléfono el contexto va en una tarjeta compacta; «Cambiar» abre con quién: cualquier profesional o uno en concreto.
   await expect(page.getByText(/paso 1 de 2/)).toBeVisible()
+  // La semana siguiente siempre tiene horarios: la de hoy depende del día y la hora en que corre la prueba.
+  await page.getByRole("button", { name: "Semana siguiente", exact: true }).click()
   await expect(page.getByLabel("Profesional")).toBeHidden()
   await page.getByRole("button", { name: "Cambiar", exact: true }).click()
   await expect(page.getByLabel("Profesional")).toBeVisible()
@@ -607,6 +609,7 @@ test("reserva por enlace: la persona elige su cita viendo los horarios libres, s
   await page.getByRole("button", { name: "Cambiar o cancelar" }).click()
   await page.getByRole("button", { name: "Cambiar de día u hora" }).click()
   await expect(page.getByRole("heading", { name: "Cambia tu cita" })).toBeVisible()
+  await page.getByRole("button", { name: "Semana siguiente", exact: true }).click()
   await page.getByRole("group", { name: /Mañana|Tarde/ }).first().getByRole("button").first().click()
   // En teléfono el botón que avanza queda fijo abajo y dice el horario elegido.
   const changeTo = page.getByRole("button", { name: /^Cambiar a \S+ \d+, / })

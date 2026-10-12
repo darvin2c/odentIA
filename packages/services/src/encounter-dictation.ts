@@ -9,7 +9,7 @@ import {
   treatmentPlan,
 } from "@odentia/db/schema/clinical"
 import { auditEvent } from "@odentia/db/schema/org"
-import { and, asc, desc, eq, inArray, ne } from "drizzle-orm"
+import { and, asc, desc, eq, inArray, ne, sql } from "drizzle-orm"
 import { getAgentConfig } from "./agentConfig.js"
 import { addEncounterDiagnosis } from "./encounter-diagnoses.js"
 import { assertOpenDraft, lockEncounter, updateEncounterDraft, type UpdateEncounterDraftPatch } from "./encounters.js"
@@ -64,7 +64,31 @@ export interface DictationSuggestion {
   note: string | null
   /** Texto corto de lo que entraría a la historia. */
   summary: string
+  /** Corregida por voz al seguir dictando: qué decía antes, para poder deshacerlo. */
+  voice: { before: string } | null
   createdAt: string
+}
+
+/**
+ * Datos de la sugerencia que no son de su operación: de qué tramo del dictado
+ * salió (para no ordenarlo dos veces) y cómo estaba antes de una corrección por
+ * voz. Van dentro de `payload` bajo `_meta` y nunca salen de este módulo ni
+ * llegan a la operación al confirmar.
+ */
+interface SuggestionMeta {
+  segments?: string[]
+  voice?: { payload: Record<string, unknown>; status: "lista" | "por_revisar"; note: string | null; before: string } | undefined
+}
+const META = "_meta"
+
+function splitMeta(payload: Record<string, unknown>): { data: Record<string, unknown>; meta: SuggestionMeta } {
+  const { [META]: meta, ...data } = payload
+  return { data, meta: meta && typeof meta === "object" ? (meta as SuggestionMeta) : {} }
+}
+
+function withMeta(data: Record<string, unknown>, meta: SuggestionMeta): Record<string, unknown> {
+  const kept = Object.fromEntries(Object.entries(meta).filter(([, value]) => value !== undefined && !(Array.isArray(value) && value.length === 0)))
+  return Object.keys(kept).length ? { ...data, [META]: kept } : data
 }
 
 /** ¿El asistente clínico está encendido en esta clínica? */
@@ -202,16 +226,36 @@ function summarize(kind: DictationKind, payload: Record<string, unknown>): strin
 }
 
 function toItem(row: typeof encounterDictationSuggestion.$inferSelect): DictationSuggestion {
+  const { data, meta } = splitMeta(row.payload)
   return {
     id: row.id,
     kind: row.kind,
-    payload: row.payload,
+    payload: data,
     sourceText: row.sourceText,
     status: row.status as DictationSuggestion["status"],
     note: row.note,
-    summary: summarize(row.kind, row.payload),
+    summary: summarize(row.kind, data),
+    voice: meta.voice ? { before: meta.voice.before } : null,
     createdAt: row.createdAt.toISOString(),
   }
+}
+
+/**
+ * Cómo se le nombra una sugerencia pendiente al asistente cuando el odontólogo
+ * sigue dictando, para que entienda «no, es la veintiséis» o «quita la
+ * endodoncia». Solo lo que salió del propio dictado: sin tarifas.
+ */
+export function dictationModelLabel(item: Pick<DictationSuggestion, "kind" | "payload">): string {
+  const payload = item.payload
+  const what =
+    item.kind === "nota"
+      ? Object.keys(payload).map((key) => NOTE_LABEL[key] ?? key).join(", ")
+      : item.kind === "diagnostico"
+        ? [`${payload["cie10Code"] ?? ""}${payload["description"] ? ` ${payload["description"]}` : ""}`, site(payload)].filter(Boolean).join(", ")
+        : item.kind === "plan"
+          ? [String(payload["serviceName"] ?? payload["service"] ?? ""), site(payload)].filter(Boolean).join(", ")
+          : String(payload["title"] ?? "Control")
+  return `${DICTATION_KIND_LABEL[item.kind]}: ${what}`
 }
 
 /**
@@ -251,7 +295,7 @@ async function prepare(
   if (draft.kind === "plan") {
     const spoken = String(payload["service"] ?? "")
     const { match, candidates } = matchService(spoken, services)
-    if (match) return fitToScope({ ...payload, serviceId: match.id, serviceName: match.name, priceCents: match.priceCents, currency: match.currency }, match.scope)
+    if (match) return fitToScope({ ...payload, serviceId: match.id, serviceName: match.name, priceCents: match.priceCents, currency: match.currency, serviceScope: match.scope }, match.scope)
     return {
       payload: { ...payload, candidates },
       status: "por_revisar",
@@ -292,10 +336,215 @@ async function lockOwnDraft(tx: Db, orgId: string, actorUserId: string, patientI
   return locked
 }
 
+type Prepared = { payload: Record<string, unknown>; status: "lista" | "por_revisar"; note: string | null }
+
+/**
+ * Aplica un cambio a una sugerencia —a mano o dicho en voz alta— y la vuelve a
+ * validar como al crearla. `null`: quedó vacía.
+ */
+async function revise(
+  tx: Db,
+  kind: DictationKind,
+  current: Record<string, unknown>,
+  patch: Record<string, unknown>,
+  services: ServiceOption[],
+): Promise<Prepared | null> {
+  // Un campo que llega vacío se quita de la sugerencia: el odontólogo lo borró.
+  let payload: Record<string, unknown> = Object.fromEntries(
+    Object.entries({ ...current, ...patch }).filter(([, value]) => value !== null && value !== ""),
+  )
+  if (kind === "plan" && typeof patch["serviceId"] === "string") {
+    // Elegir la prestación a mano resuelve lo que el asistente no pudo ubicar.
+    const chosen = services.find((service) => service.id === patch["serviceId"])
+    if (!chosen) throw validation("Esa prestación no está activa en tus servicios")
+    const { candidates: _candidates, ...rest } = payload
+    payload = { ...rest, service: chosen.name, serviceId: chosen.id, serviceName: chosen.name, priceCents: chosen.priceCents, currency: chosen.currency, serviceScope: chosen.scope }
+  } else if (kind === "plan" && typeof patch["service"] === "string" && patch["service"] !== current["service"]) {
+    // Se nombró otra prestación: se busca de nuevo en el tarifario, no se conserva la anterior.
+    for (const key of ["serviceId", "serviceName", "priceCents", "currency", "serviceScope", "candidates"]) delete payload[key]
+  }
+  const chosenService = kind === "plan" && typeof payload["serviceId"] === "string" ? services.find((service) => service.id === payload["serviceId"]) : undefined
+  if (chosenService) {
+    const fitted = normalizeSite(payload)
+    return fitted.invalid
+      ? { payload: fitted.payload, status: "por_revisar", note: `La pieza ${String(payload["toothNumber"])} no existe en la numeración FDI. Corrígela.` }
+      : fitToScope(fitted.payload, chosenService.scope)
+  }
+  return prepare(tx, { kind, payload }, services)
+}
+
+const FIELD_LABEL = Object.fromEntries(
+  DICTATION_KINDS.map((kind) => [
+    kind,
+    Object.fromEntries(Object.entries(OPERATIONS[DICTATION_OPERATION[kind]].fields).map(([key, field]) => [key, field.label])),
+  ]),
+) as Record<DictationKind, Record<string, string>>
+
+/** Qué decía la sugerencia antes de una corrección por voz, en pocas palabras. `null`: no cambió nada. */
+function describeBefore(kind: DictationKind, before: Record<string, unknown>, after: Record<string, unknown>, keys: string[]): string | null {
+  const parts: string[] = []
+  for (const key of keys) {
+    if (JSON.stringify(before[key] ?? null) === JSON.stringify(after[key] ?? null)) continue
+    const old = before[key]
+    if (key === "toothNumber") parts.push(typeof old === "number" ? `pieza ${old}` : "sin pieza")
+    else if (key === "surfaces") parts.push(Array.isArray(old) && old.length ? `cara ${(old as string[]).map((surface) => surfaceLabel(surface).toLowerCase()).join(", ")}` : "sin caras")
+    else if (key === "service") parts.push(String(before["serviceName"] ?? old ?? "otra prestación"))
+    else if (key === "cie10Code" || key === "title" || key === "diagnosisType") parts.push(String(old ?? "sin dato"))
+    else parts.push(`otro texto en ${(FIELD_LABEL[kind][key] ?? key).toLowerCase()}`)
+  }
+  return parts.length ? parts.join(", ") : null
+}
+
+/** Una corrección dicha en voz alta sobre una sugerencia que sigue sin decidir. */
+export interface DictationVoiceCorrection {
+  suggestionId: string
+  /** Solo los campos que cambian, con los nombres de la operación. */
+  changes: Record<string, unknown>
+}
+
+export interface DictationSegment {
+  drafts: DictationDraft[]
+  corrections?: DictationVoiceCorrection[]
+  /** Sugerencias que el odontólogo pidió quitar en voz alta. */
+  removals?: string[]
+  /** Identidad del tramo: el mismo tramo no se guarda dos veces. */
+  segmentId?: string | undefined
+}
+
+export interface DictationSegmentResult {
+  suggestions: DictationSuggestion[]
+  corrected: string[]
+  removed: string[]
+  /** El tramo ya se había guardado: no se hizo nada. */
+  repeated: boolean
+}
+
+/** ¿Ese tramo del dictado ya dejó algo en esta atención? */
+export async function dictationSegmentSeen(tx: Db, orgId: string, patientId: string, encounterId: string, segmentId: string): Promise<boolean> {
+  const [row] = await tx
+    .select({ id: encounterDictationSuggestion.id })
+    .from(encounterDictationSuggestion)
+    .where(
+      and(
+        eq(encounterDictationSuggestion.organizationId, orgId),
+        eq(encounterDictationSuggestion.patientId, patientId),
+        eq(encounterDictationSuggestion.encounterId, encounterId),
+        sql`${encounterDictationSuggestion.payload} @> ${JSON.stringify({ [META]: { segments: [segmentId] } })}::jsonb`,
+      ),
+    )
+    .limit(1)
+  return Boolean(row)
+}
+
+/**
+ * Guarda un tramo del dictado: sugerencias nuevas y, si el odontólogo siguió
+ * hablando, lo que corrigió o pidió quitar de las que aún no decide. Solo quien
+ * lleva la atención en borrador puede dictar en ella. Nada entra a la historia
+ * aquí. Una corrección que no encaja en su operación, o que apunta a una
+ * sugerencia ya decidida, se ignora: nunca se adivina.
+ */
+export async function saveDictationSegment(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  patientId: string,
+  encounterId: string,
+  segment: DictationSegment,
+): Promise<DictationSegmentResult> {
+  await requireClinicalAssistant(tx, orgId)
+  // El bloqueo de la atención ordena dos envíos del mismo tramo: el segundo ya lo ve guardado.
+  await lockOwnDraft(tx, orgId, actorUserId, patientId, encounterId)
+  const segmentId = segment.segmentId
+  if (segmentId && (await dictationSegmentSeen(tx, orgId, patientId, encounterId, segmentId))) {
+    return { suggestions: [], corrected: [], removed: [], repeated: true }
+  }
+  const stamp = (meta: SuggestionMeta): SuggestionMeta => (segmentId ? { ...meta, segments: [...(meta.segments ?? []), segmentId] } : meta)
+  const services = await activeServices(tx, orgId)
+  const pendingRow = async (id: string) => {
+    const [row] = await tx
+      .select()
+      .from(encounterDictationSuggestion)
+      .where(
+        and(
+          eq(encounterDictationSuggestion.organizationId, orgId),
+          eq(encounterDictationSuggestion.patientId, patientId),
+          eq(encounterDictationSuggestion.encounterId, encounterId),
+          eq(encounterDictationSuggestion.id, id),
+          inArray(encounterDictationSuggestion.status, ["lista", "por_revisar"]),
+        ),
+      )
+      .for("update")
+      .limit(1)
+    return row
+  }
+
+  const corrected: string[] = []
+  for (const correction of (segment.corrections ?? []).slice(0, DICTATION_MAX_SUGGESTIONS)) {
+    const row = await pendingRow(correction.suggestionId)
+    if (!row) continue
+    const { data, meta } = splitMeta(row.payload)
+    const schema = operationAgentSchema(DICTATION_OPERATION[row.kind])
+    const patch = Object.fromEntries(Object.entries(correction.changes).filter(([key, value]) => key in schema.shape && value !== undefined && value !== null))
+    if (Object.keys(patch).length === 0 || !schema.safeParse({ ...data, ...patch }).success) continue
+    const ready = await revise(tx, row.kind, data, patch, services)
+    if (!ready) continue
+    const before = describeBefore(row.kind, data, ready.payload, Object.keys(patch))
+    if (!before) continue
+    // Se conserva cómo estaba antes de la primera corrección: deshacer vuelve ahí.
+    const voice = meta.voice ?? { payload: data, status: row.status as "lista" | "por_revisar", note: row.note, before }
+    await tx
+      .update(encounterDictationSuggestion)
+      .set({ payload: withMeta(ready.payload, stamp({ ...meta, voice })), status: ready.status, note: ready.note, updatedAt: new Date() })
+      .where(eq(encounterDictationSuggestion.id, row.id))
+    corrected.push(row.id)
+  }
+
+  const removed: string[] = []
+  for (const id of (segment.removals ?? []).slice(0, DICTATION_MAX_SUGGESTIONS)) {
+    const row = await pendingRow(id)
+    if (!row) continue
+    const { data, meta } = splitMeta(row.payload)
+    await tx
+      .update(encounterDictationSuggestion)
+      .set({ payload: withMeta(data, stamp(meta)), status: "descartada", decidedBy: actorUserId, decidedAt: new Date(), updatedAt: new Date() })
+      .where(eq(encounterDictationSuggestion.id, row.id))
+    removed.push(row.id)
+  }
+
+  const rows: Array<typeof encounterDictationSuggestion.$inferInsert> = []
+  for (const draft of segment.drafts.slice(0, DICTATION_MAX_SUGGESTIONS)) {
+    const ready = await prepare(tx, draft, services)
+    if (!ready) continue
+    rows.push({
+      organizationId: orgId,
+      patientId,
+      encounterId,
+      dentistUserId: actorUserId,
+      kind: draft.kind,
+      payload: withMeta(ready.payload, stamp({})),
+      sourceText: (draft.sourceText ?? "").slice(0, SOURCE_CHARS),
+      status: ready.status,
+      note: ready.note,
+    })
+  }
+  const inserted = rows.length ? await tx.insert(encounterDictationSuggestion).values(rows).returning() : []
+  if (inserted.length + corrected.length + removed.length > 0) {
+    await tx.insert(auditEvent).values({
+      organizationId: orgId,
+      actorUserId,
+      action: "encounter.dictation_suggested",
+      entity: "encounter",
+      entityId: encounterId,
+      // Sin texto clínico en la auditoría: cuántas y de qué clase.
+      metadata: { patientId, count: inserted.length, kinds: [...new Set(inserted.map((row) => row.kind))], corrected: corrected.length, removed: removed.length },
+    })
+  }
+  return { suggestions: inserted.map(toItem), corrected, removed, repeated: false }
+}
+
 /**
  * Guarda lo que el asistente entendió de un dictado como sugerencias de esa
- * atención. Solo quien lleva la atención en borrador puede dictar en ella.
- * Nada entra a la historia aquí.
+ * atención. Es `saveDictationSegment` sin correcciones ni identidad de tramo.
  */
 export async function saveDictationSuggestions(
   tx: Db,
@@ -305,37 +554,23 @@ export async function saveDictationSuggestions(
   encounterId: string,
   drafts: DictationDraft[],
 ): Promise<DictationSuggestion[]> {
-  await requireClinicalAssistant(tx, orgId)
-  await lockOwnDraft(tx, orgId, actorUserId, patientId, encounterId)
-  const services = await activeServices(tx, orgId)
-  const rows: Array<typeof encounterDictationSuggestion.$inferInsert> = []
-  for (const draft of drafts.slice(0, DICTATION_MAX_SUGGESTIONS)) {
-    const ready = await prepare(tx, draft, services)
-    if (!ready) continue
-    rows.push({
-      organizationId: orgId,
-      patientId,
-      encounterId,
-      dentistUserId: actorUserId,
-      kind: draft.kind,
-      payload: ready.payload,
-      sourceText: (draft.sourceText ?? "").slice(0, SOURCE_CHARS),
-      status: ready.status,
-      note: ready.note,
-    })
-  }
-  if (rows.length === 0) return []
-  const inserted = await tx.insert(encounterDictationSuggestion).values(rows).returning()
-  await tx.insert(auditEvent).values({
-    organizationId: orgId,
-    actorUserId,
-    action: "encounter.dictation_suggested",
-    entity: "encounter",
-    entityId: encounterId,
-    // Sin texto clínico en la auditoría: cuántas y de qué clase.
-    metadata: { patientId, count: inserted.length, kinds: [...new Set(inserted.map((row) => row.kind))] },
-  })
-  return inserted.map(toItem)
+  return (await saveDictationSegment(tx, orgId, actorUserId, patientId, encounterId, { drafts })).suggestions
+}
+
+/** Cuántas sugerencias de esta atención ya confirmó el odontólogo: se firman con ella. */
+export async function countConfirmedDictation(tx: Db, orgId: string, patientId: string, encounterId: string): Promise<number> {
+  const rows = await tx
+    .select({ id: encounterDictationSuggestion.id })
+    .from(encounterDictationSuggestion)
+    .where(
+      and(
+        eq(encounterDictationSuggestion.organizationId, orgId),
+        eq(encounterDictationSuggestion.patientId, patientId),
+        eq(encounterDictationSuggestion.encounterId, encounterId),
+        eq(encounterDictationSuggestion.status, "confirmada"),
+      ),
+    )
+  return rows.length
 }
 
 /** Sugerencias de una atención que aún esperan decisión, más las ya resueltas en esta sesión de trabajo. */
@@ -390,34 +625,38 @@ export async function updateDictationSuggestion(
   await lockOwnDraft(tx, orgId, actorUserId, patientId, encounterId)
   const row = await lockSuggestion(tx, orgId, patientId, encounterId, id)
   const services = await activeServices(tx, orgId)
-  // Un campo que llega vacío se quita de la sugerencia: el odontólogo lo borró.
-  let payload: Record<string, unknown> = Object.fromEntries(
-    Object.entries({ ...row.payload, ...patch }).filter(([, value]) => value !== null && value !== ""),
-  )
-  // Elegir la prestación a mano resuelve lo que el asistente no pudo ubicar.
-  if (row.kind === "plan" && typeof patch["serviceId"] === "string") {
-    const chosen = services.find((service) => service.id === patch["serviceId"])
-    if (!chosen) throw validation("Esa prestación no está activa en tus servicios")
-    const { candidates: _candidates, ...rest } = payload
-    payload = { ...rest, service: chosen.name, serviceId: chosen.id, serviceName: chosen.name, priceCents: chosen.priceCents, currency: chosen.currency }
-  }
-  const chosenService = row.kind === "plan" && typeof payload["serviceId"] === "string" ? services.find((service) => service.id === payload["serviceId"]) : undefined
-  let ready: Awaited<ReturnType<typeof prepare>>
-  if (chosenService) {
-    const fitted = normalizeSite(payload)
-    ready = fitted.invalid
-      ? { payload: fitted.payload, status: "por_revisar", note: `La pieza ${String(payload["toothNumber"])} no existe en la numeración FDI. Corrígela.` }
-      : fitToScope(fitted.payload, chosenService.scope)
-  } else {
-    ready = await prepare(tx, { kind: row.kind, payload }, services)
-  }
+  const { data, meta } = splitMeta(row.payload)
+  const ready = await revise(tx, row.kind, data, patch, services)
   if (!ready) throw validation("La sugerencia quedó vacía; descártala si no aplica")
+  // Editada a mano, ya no es «corregida por voz»: no queda nada que deshacer.
   const [updated] = await tx
     .update(encounterDictationSuggestion)
-    .set({ payload: ready.payload, status: ready.status, note: ready.note, updatedAt: new Date() })
+    .set({ payload: withMeta(ready.payload, { ...meta, voice: undefined }), status: ready.status, note: ready.note, updatedAt: new Date() })
     .where(eq(encounterDictationSuggestion.id, id))
     .returning()
   if (!updated) throw new Error("No se pudo actualizar la sugerencia")
+  return toItem(updated)
+}
+
+/** Deshace una corrección dicha en voz alta: la sugerencia vuelve a como estaba antes de ella. */
+export async function undoDictationVoiceCorrection(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  patientId: string,
+  encounterId: string,
+  id: string,
+): Promise<DictationSuggestion> {
+  await lockOwnDraft(tx, orgId, actorUserId, patientId, encounterId)
+  const row = await lockSuggestion(tx, orgId, patientId, encounterId, id)
+  const { meta } = splitMeta(row.payload)
+  if (!meta.voice) throw conflict("NO_VOICE_CORRECTION", "Esta sugerencia no tiene una corrección por voz que deshacer")
+  const [updated] = await tx
+    .update(encounterDictationSuggestion)
+    .set({ payload: withMeta(meta.voice.payload, { ...meta, voice: undefined }), status: meta.voice.status, note: meta.voice.note, updatedAt: new Date() })
+    .where(eq(encounterDictationSuggestion.id, id))
+    .returning()
+  if (!updated) throw new Error("No se pudo deshacer la corrección")
   return toItem(updated)
 }
 
@@ -453,7 +692,8 @@ export async function confirmDictationSuggestion(
   await lockOwnDraft(tx, orgId, actorUserId, patientId, encounterId)
   const row = await lockSuggestion(tx, orgId, patientId, encounterId, id)
   if (row.status === "por_revisar") throw conflict("SUGGESTION_NEEDS_REVIEW", row.note ?? "Revisa la sugerencia antes de confirmarla")
-  const payload = row.payload
+  // La operación recibe los campos de la sugerencia, no sus metadatos.
+  const payload = splitMeta(row.payload).data
   let entityId: string | null = null
   if (row.kind === "nota") {
     const fields = Object.keys(OPERATIONS["atencion.nota"].fields)
@@ -534,9 +774,9 @@ export async function discardPendingDictation(tx: Db, orgId: string, actorUserId
  * Lo mismo que `saveDictationSuggestions`, sin guardar nada: para el dictado
  * de práctica. Valida contra los servicios y el catálogo reales de la clínica.
  */
-export async function previewDictationSuggestions(tx: Db, orgId: string, drafts: DictationDraft[]): Promise<Array<Omit<DictationSuggestion, "id" | "createdAt">>> {
+export async function previewDictationSuggestions(tx: Db, orgId: string, drafts: DictationDraft[]): Promise<Array<Omit<DictationSuggestion, "id" | "createdAt" | "voice">>> {
   const services = await activeServices(tx, orgId)
-  const out: Array<Omit<DictationSuggestion, "id" | "createdAt">> = []
+  const out: Array<Omit<DictationSuggestion, "id" | "createdAt" | "voice">> = []
   for (const draft of drafts.slice(0, DICTATION_MAX_SUGGESTIONS)) {
     const ready = await prepare(tx, draft, services)
     if (!ready) continue

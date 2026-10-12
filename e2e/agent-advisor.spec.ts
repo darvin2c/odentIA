@@ -83,6 +83,10 @@ test("asesor: vista previa, encenderlo, recomendación en Inicio con su lista y 
   await expect(today).toContainText("2 recomendaciones del asesor")
   const card = today.getByRole("listitem").filter({ hasText: "1 control vencido de un paciente sin cita" })
   await expect(card).toContainText("Controles")
+  // La tarjeta dice el estado real de la automatización, sin haber tocado nada.
+  await expect(card).toContainText("El recordatorio de control está apagado.")
+  const rules = () => call<Array<{ kind: string; enabled: boolean; name: string }>>(page, "GET", "/api/automations/rules", org.slug)
+  expect(await rules()).toEqual([])
   await info.attach("inicio-asesor", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" })
   await card.getByRole("button", { name: "Revisar y decidir" }).click()
   const drawer = sideSurface(page, { name: "Recomendación del asesor", exact: true })
@@ -90,37 +94,106 @@ test("asesor: vista previa, encenderlo, recomendación en Inicio con su lista y 
   await expect(drawer).toContainText("Los números salen de la base de datos, no de un modelo.")
   await expect(drawer.getByRole("link", { name: "Mariana Soto" })).toBeVisible()
   await expect(drawer).toContainText("Control de ortodoncia · venció el")
+  // Acción principal: encender la automatización; crear tareas queda como secundaria.
+  await expect(drawer).toContainText("Encender el recordatorio de control")
+  await expect(drawer).toContainText("No escribe a quienes ya se les pasó la fecha")
+  await expect(drawer).toContainText("Nada se envía hasta que lo enciendas. Podrás ver cada mensaje en Automatizaciones.")
+  await expect(drawer.getByRole("button", { name: "Encender recordatorio" })).toBeVisible()
+  await expect(drawer.getByRole("button", { name: "No volver a mostrar" })).toBeVisible()
   await info.attach("recomendacion", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
 
   // Nada se crea hasta que alguien lo pide y lo confirma.
   const tasks = () => call<Array<{ title: string }>>(page, "GET", "/api/tasks?status=open", org.slug)
   expect(await tasks()).toEqual([])
-  await drawer.getByRole("button", { name: "Crear las tareas" }).click()
-  const confirm = page.getByRole("alertdialog", { name: "Crear 1 tarea" })
+  await drawer.getByRole("button", { name: "Solo crear 1 tarea de llamada" }).click()
+  const confirm = page.getByRole("alertdialog", { name: "Crear 1 tarea de llamada" })
   await confirm.getByRole("button", { name: "Crear las tareas" }).click()
   await expect(drawer.getByRole("status")).toContainText("1 tarea creada")
   expect((await tasks()).map((task) => task.title)).toEqual(["Llamar a Mariana Soto para agendar su control"])
   // Repetirlo el mismo día no duplica.
-  await drawer.getByRole("button", { name: "Crear las tareas" }).click()
-  await page.getByRole("alertdialog", { name: "Crear 1 tarea" }).getByRole("button", { name: "Crear las tareas" }).click()
+  await drawer.getByRole("button", { name: "Solo crear 1 tarea de llamada" }).click()
+  await page.getByRole("alertdialog", { name: "Crear 1 tarea de llamada" }).getByRole("button", { name: "Crear las tareas" }).click()
   await expect(drawer.getByRole("status")).toContainText("ya estaban creadas hoy")
   expect(await tasks()).toHaveLength(1)
+  // Crear tareas no enciende nada.
+  expect(await rules()).toEqual([])
   await drawer.getByRole("button", { name: "Cerrar" }).click()
   await expect(drawer).toBeHidden()
 
+  // --- Teléfono (390 px): tarjetas, detalle y encender el recordatorio, sin desbordes ---
+  await page.setViewportSize({ width: 390, height: 844 })
+  await gotoHydrated(page, tenant(org.slug, "/home"))
+  const review = card.getByRole("button", { name: "Revisar y decidir" })
+  expect((await review.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44)
+  expect((await card.getByRole("button", { name: "No me interesa" }).boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44)
+  expect(await overflow(page)).toBeLessThanOrEqual(0)
+  await info.attach("inicio-asesor-movil", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" })
+  await review.click()
+  const turnOn = drawer.getByRole("button", { name: "Encender recordatorio" })
+  await expect(turnOn).toBeVisible()
+  for (const button of [turnOn, drawer.getByRole("button", { name: "Solo crear 1 tarea de llamada" }), drawer.getByRole("button", { name: "No volver a mostrar" })]) {
+    expect((await button.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44)
+  }
+  expect(await overflow(page)).toBeLessThanOrEqual(0)
+  expect(await drawer.evaluate((node) => node.scrollWidth - node.clientWidth)).toBeLessThanOrEqual(0)
+  await info.attach("recomendacion-movil", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
+  // Encender es un acto de la persona y se confirma: hasta entonces no hay regla.
+  await turnOn.click()
+  const confirmOn = page.getByRole("alertdialog", { name: "Encender el recordatorio de control" })
+  await expect(confirmOn).toContainText("Avisa por WhatsApp a quien tiene un control en las próximas 48 horas")
+  expect(await rules()).toEqual([])
+  await confirmOn.getByRole("button", { name: "Encender recordatorio" }).click()
+  await expect(drawer.getByRole("status")).toContainText("Recordatorio de control encendido")
+  expect((await rules()).map((rule) => ({ kind: rule.kind, enabled: rule.enabled }))).toEqual([{ kind: "recordatorio_control", enabled: true }])
+  // Encendido, crear las tareas pasa a ser la acción principal.
+  await expect(drawer).toContainText("El recordatorio de control ya está encendido.")
+  await expect(drawer.getByRole("button", { name: "Encender recordatorio" })).toHaveCount(0)
+  await expect(drawer.getByRole("button", { name: "Crear 1 tarea de llamada", exact: true })).toBeVisible()
+  await info.attach("recomendacion-encendido-movil", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
+  await drawer.getByRole("button", { name: "Cerrar" }).click()
+  await expect(drawer).toBeHidden()
+  await expect(card).not.toContainText("está apagado")
+
+  // Pausada desde Automatizaciones (misma regla), el detalle vuelve a ofrecer encenderla.
+  const [rule] = await call<Array<{ id: string }>>(page, "GET", "/api/automations/rules", org.slug)
+  await call(page, "PATCH", `/api/automations/rules/${rule?.id}`, org.slug, { enabled: false })
+
+  // Recepción no administra el agente: ve la tarjeta completa, sin «No me interesa» ni huecos.
+  await fixtureDb.update(member).set({ role: "reception" })
+    .where(and(eq(member.organizationId, org.id), eq(member.userId, owner.user.id)))
+  await gotoHydrated(page, tenant(org.slug, "/home"))
+  await expect(card).toContainText("El recordatorio de control está apagado.")
+  await expect(today.getByRole("button", { name: "No me interesa" })).toHaveCount(0)
+  const alone = card.getByRole("button", { name: "Revisar y decidir" })
+  const [aloneBox, cardBox] = [await alone.boundingBox(), await card.boundingBox()]
+  // El botón ocupa el ancho útil de la tarjeta (su relleno es de 16 px por lado).
+  expect(aloneBox?.width ?? 0).toBeGreaterThanOrEqual((cardBox?.width ?? 0) - 36)
+  expect(await overflow(page)).toBeLessThanOrEqual(0)
+  await info.attach("inicio-recepcion-movil", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" })
+  await alone.click()
+  await expect(drawer.getByRole("button", { name: "Encender recordatorio" })).toBeVisible()
+  await expect(drawer.getByRole("button", { name: "No volver a mostrar" })).toHaveCount(0)
+  await expect(drawer).not.toContainText("¿No te sirve esta recomendación?")
+  await info.attach("recomendacion-recepcion-movil", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
+  await drawer.getByRole("button", { name: "Cerrar" }).click()
+  await expect(drawer).toBeHidden()
+  await fixtureDb.update(member).set({ role: "owner" })
+    .where(and(eq(member.organizationId, org.id), eq(member.userId, owner.user.id)))
+
   // «No me interesa»: se oculta una semana para toda la clínica.
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await gotoHydrated(page, tenant(org.slug, "/home"))
   await card.getByRole("button", { name: "No me interesa" }).click()
   await page.getByRole("alertdialog", { name: "Ocultarla una semana" }).getByRole("button", { name: "Ocultar 7 días" }).click()
   await expect(today).toContainText("1 recomendación del asesor")
   await expect(today).not.toContainText("control vencido")
-
-  // --- Teléfono ---
-  await page.setViewportSize({ width: 390, height: 844 })
-  await gotoHydrated(page, tenant(org.slug, "/home"))
-  const review = today.getByRole("button", { name: "Revisar y decidir" })
-  expect((await review.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44)
-  expect(await overflow(page)).toBeLessThanOrEqual(0)
-  await info.attach("inicio-asesor-movil", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" })
+  // Sin automatización equivalente, la acción principal es crear las tareas.
+  await today.getByRole("button", { name: "Revisar y decidir" }).click()
+  await expect(drawer).toContainText("Oportunidades abiertas que no tienen a nadie del equipo asignado.")
+  await expect(drawer.getByRole("button", { name: "Crear 1 tarea", exact: true })).toBeVisible()
+  await expect(drawer.getByRole("button", { name: /Encender/ })).toHaveCount(0)
+  await drawer.getByRole("button", { name: "Cerrar" }).click()
+  await expect(drawer).toBeHidden()
 
   // Cada rol ve solo lo que ya puede ver, y solo quien administra cambia los ajustes.
   await fixtureDb.update(member).set({ role: "cashier" })

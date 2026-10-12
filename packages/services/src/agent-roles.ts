@@ -160,8 +160,9 @@ export const AGENT_ROLES: Record<AgentRoleId, AgentRole> = {
     ],
     always: [],
     // Lo que de verdad recibe: el texto dictado y los nombres de los servicios; el código CIE-10 se
-    // comprueba contra el catálogo. No lee la atención, el odontograma ni el plan.
-    sees: "Lo que el odontólogo dicta en esa atención. Los servicios de la clínica y el catálogo CIE-10, para reconocer lo dictado.",
+    // comprueba contra el catálogo. Mientras se dicta recibe también las sugerencias de ese mismo
+    // dictado que siguen sin decidir (sin tarifas). No lee la atención, el odontograma ni el plan.
+    sees: "Lo que el odontólogo dicta en esa atención. Las sugerencias de ese dictado que aún no decide, para entender una corrección dicha en voz alta. Los servicios de la clínica y el catálogo CIE-10, para reconocer lo dictado.",
     notSees: "El resto de la historia clínica, el odontograma ni el plan del paciente. Conversaciones ni caja.",
     never:
       "Guardar sin que el odontólogo confirme. Firmar o cerrar la atención. Diagnosticar por su cuenta. Escuchar sin que el odontólogo pulse «Dictar». Tocar atenciones de otros profesionales.",
@@ -187,14 +188,14 @@ export const AGENT_ROLES: Record<AgentRoleId, AgentRole> = {
       { id: "atenciones_sin_firmar", label: "Atenciones sin firmar", description: "Borradores que quedaron abiertos.", fixed: false, tools: [] },
       { id: "seguimientos_sin_responsable", label: "Seguimientos sin responsable", description: "Oportunidades que nadie lleva.", fixed: false, tools: [] },
       { id: "cobranza_vencida", label: "Cobranza vencida", description: "Saldos que pasaron su fecha.", fixed: false, tools: [] },
-      { id: "preparar", label: "Preparar la acción", description: "La lista de personas y el mensaje o la tarea, listos para aprobar.", fixed: true, tools: [] },
+      { id: "preparar", label: "Preparar la acción", description: "La lista de personas y las tareas listas para crear. Si hay una automatización que lo evita, como el recordatorio de control, ofrece encenderla.", fixed: true, tools: [] },
       { id: "explicar", label: "Mostrar cómo se calculó", description: "Cada cifra con la lista que la respalda.", fixed: true, tools: [] },
     ],
     always: [],
     sees: "Agenda, pendientes y reportes, según los permisos de quien lee. Los números salen de la base de datos, no del modelo.",
     notSees: "Conversaciones ni historia clínica.",
-    never: "Ejecutar por su cuenta. Dar un número que no pueda mostrar. Más de tres recomendaciones a la vez.",
-    confirms: "Quien administra aprueba cada acción.",
+    never: "Ejecutar por su cuenta: no crea tareas, no envía mensajes ni enciende automatizaciones. Dar un número que no pueda mostrar. Más de tres recomendaciones a la vez.",
+    confirms: "Una persona confirma cada acción: crear las tareas o encender una automatización, con el permiso de cada una.",
     // No hay aprendizaje automático: «No me interesa» pospone la detección y el umbral se cambia a mano.
     learnsFrom: "De lo que descartas: «No me interesa» oculta esa detección una semana. El umbral de días lo cambias tú.",
     behaves: "No redacta con un modelo: cada recomendación es una consulta a los datos de la clínica. Breve, con la cifra, la lista que la respalda y cómo se calculó.",

@@ -1,18 +1,19 @@
 import { createHash, randomBytes } from "node:crypto"
+import { normalizePhone, pendingRegistrationFields, type RegistrationAnswers, type RegistrationConfig } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { appointment, appointmentBookingLink } from "@odentia/db/schema/agenda"
 import { organization, user } from "@odentia/db/schema/auth"
 import { patient, serviceCatalog } from "@odentia/db/schema/clinical"
-import { conversation } from "@odentia/db/schema/crm"
+import { channelConnection, contactIdentity, conversation } from "@odentia/db/schema/crm"
 import { branch } from "@odentia/db/schema/org"
 import { and, asc, eq, isNull } from "drizzle-orm"
-import { addAgentCaseNote } from "./agent-case.js"
+import { addAgentCaseNote, CASE_NOTE_CHARS } from "./agent-case.js"
 import { createProposal } from "./agent-operations.js"
 import { createAppointment, moveAppointment, setAppointmentStatus } from "./appointments.js"
 import { listAvailableSlots } from "./availability.js"
 import { notFound, ServiceError, validation } from "./errors.js"
-import { createPatientRegistrationLink, getPatientRegistrationConfig } from "./patient-registration.js"
-import { listPatientsByContact } from "./patients.js"
+import { createPatientRegistrationLink, getPatientRegistrationConfig, registerPatient } from "./patient-registration.js"
+import { listPatientsByContact, patientOrganizationToday } from "./patients.js"
 
 /**
  * Reservar desde un enlace: la persona de una conversación elige ella misma
@@ -21,8 +22,9 @@ import { listPatientsByContact } from "./patients.js"
  * personal (una conversación y su persona), efímero y de una sola cita; solo se
  * guarda su huella. Con la cita ya reservada, el mismo enlace sirve para
  * cambiarla de horario o cancelarla hasta que empiece. Sirve a quien ya es paciente y a quien recién se contacta:
- * este completa antes sus datos con el registro de pacientes de la clínica,
- * que es quien crea la ficha. La reserva usa la misma operación de Agenda que
+ * este deja antes sus datos esenciales (identidad y celular) y el registro de
+ * pacientes de la clínica, con ese alcance, es quien crea la ficha; lo demás
+ * se completa en la clínica. La reserva usa la misma operación de Agenda que
  * recepción y el agente, así que valen las mismas reglas de disponibilidad.
  * La página no muestra tarifas.
  */
@@ -353,17 +355,100 @@ export async function listBookingLinkSlots(
 }
 
 /**
- * Abre el registro de pacientes para la persona del enlace: devuelve el enlace
- * de registro con el que la página muestra el formulario de la clínica y envía
- * sus datos. La ficha la crea ese registro, con sus reglas de identidad y
- * consentimiento; aquí solo se autoriza porque el enlace de reserva es suyo.
+ * El celular desde el que la persona escribe, solo si el sistema lo conoce de
+ * verdad: la conversación del enlace es de WhatsApp, cuyo identificador es el
+ * número. En cualquier otro canal no se supone ninguno.
  */
-export async function startBookingLinkRegistration(tx: Db, orgId: string, token: string): Promise<{ registrationToken: string }> {
+async function conversationPhone(tx: Db, orgId: string, link: LinkRow): Promise<string | null> {
+  const [row] = await tx
+    .select({ channel: channelConnection.channel, sender: contactIdentity.externalUserId })
+    .from(conversation)
+    .innerJoin(channelConnection, and(eq(channelConnection.id, conversation.channelConnectionId), eq(channelConnection.organizationId, orgId)))
+    .innerJoin(
+      contactIdentity,
+      and(eq(contactIdentity.id, conversation.contactIdentityId), eq(contactIdentity.organizationId, orgId), eq(contactIdentity.contactId, link.contactId)),
+    )
+    .where(and(eq(conversation.organizationId, orgId), eq(conversation.id, link.conversationId)))
+    .limit(1)
+  if (row?.channel !== "whatsapp") return null
+  return normalizePhone(`+${row.sender.replace(/[^0-9]/g, "")}`)
+}
+
+function alreadyPatient(): ServiceError {
+  return new ServiceError("BOOKING_ALREADY_PATIENT", 409, "Ya tenemos tus datos: puedes reservar")
+}
+
+export interface BookingLinkRegistrationForm {
+  /** El registro de pacientes vigente de la clínica: de ahí salen la versión y el aviso de privacidad. */
+  config: RegistrationConfig
+  today: string
+  /** El celular de la conversación, si es de WhatsApp; `null` si no se conoce. */
+  phone: string | null
+}
+
+/**
+ * Lo que la página necesita para pedir los datos de quien aún no es paciente:
+ * el registro vigente de la clínica (versión y aviso de privacidad) y, si se
+ * conoce, el celular desde el que escribe.
+ */
+export async function getBookingLinkRegistrationForm(tx: Db, orgId: string, token: string): Promise<BookingLinkRegistrationForm> {
   const link = await findLink(tx, orgId, token)
   requireOpen(link)
-  if ((await patientOf(tx, orgId, link)) !== null) throw new ServiceError("BOOKING_ALREADY_PATIENT", 409, "Ya tenemos tus datos: puedes reservar")
-  const created = await createPatientRegistrationLink(tx, orgId, null, { contactId: link.contactId, conversationId: link.conversationId })
-  return { registrationToken: created.token }
+  if ((await patientOf(tx, orgId, link)) !== null) throw alreadyPatient()
+  const config = await getPatientRegistrationConfig(tx, orgId)
+  if (!config.enabled) throw new ServiceError("BOOKING_NEEDS_PATIENT", 409, "La clínica no tiene activo el registro de pacientes en línea")
+  return { config, today: await patientOrganizationToday(tx, orgId), phone: await conversationPhone(tx, orgId, link) }
+}
+
+/**
+ * Registra a quien aún no es paciente con los datos esenciales para reservar.
+ * La ficha la crea el registro de pacientes (`registerPatient`, alcance
+ * `essentials`), con sus reglas de identidad, su aviso de privacidad, su
+ * consentimiento y su auditoría; aquí solo se emite el enlace de registro para
+ * la persona del enlace de reserva y se consume en la misma transacción. Lo
+ * que la clínica exige y no se pidió queda anotado en el caso.
+ */
+export async function registerFromBookingLink(
+  tx: Db,
+  orgId: string,
+  token: string,
+  input: { submissionId: string; formVersion: number; answers: RegistrationAnswers },
+): Promise<{ registered: true }> {
+  const link = await findLink(tx, orgId, token, true)
+  requireOpen(link)
+  if ((await patientOf(tx, orgId, link)) !== null) throw alreadyPatient()
+  const registration = await createPatientRegistrationLink(tx, orgId, null, { contactId: link.contactId, conversationId: link.conversationId })
+  const created = await registerPatient(
+    tx,
+    orgId,
+    { kind: "public", token: registration.token, entryPoint: "public_link", scope: "essentials" },
+    { submissionId: input.submissionId, formVersion: input.formVersion, answers: input.answers },
+  )
+  await tx
+    .update(appointmentBookingLink)
+    .set({ patientId: created.id })
+    .where(and(eq(appointmentBookingLink.organizationId, orgId), eq(appointmentBookingLink.id, link.id)))
+  // Recepción lo ve en el caso: qué pide la clínica y aún falta. La ficha
+  // queda además con la identidad por revisar.
+  const pending = pendingRegistrationFields(await getPatientRegistrationConfig(tx, orgId), input.answers).map((field) => field.label.toLowerCase())
+  const who = input.answers.respondent === "representative" ? "Registró a otra persona" : "Se registró"
+  const head = `${who} desde el enlace de reserva con los datos esenciales. Falta en la clínica: confirmar apellidos y nombres`
+  // La nota del caso es corta: si la lista no cabe, dice cuántos más faltan en vez de cortarse.
+  const named: string[] = []
+  for (const label of pending) {
+    const rest = pending.length - named.length - 1
+    const tail = rest > 0 ? ` y ${rest} más` : ""
+    if (`${head}, ${[...named, label].join(", ")}${tail}.`.length > CASE_NOTE_CHARS) break
+    named.push(label)
+  }
+  const left = pending.length - named.length
+  await addAgentCaseNote(
+    tx,
+    orgId,
+    link.conversationId,
+    `${head}${named.length ? `, ${named.join(", ")}` : ""}${left > 0 ? ` y ${left} más` : ""}.`,
+  )
+  return { registered: true }
 }
 
 function whenText(startsAt: string, timeZone: string): string {

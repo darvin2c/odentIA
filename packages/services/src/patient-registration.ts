@@ -331,7 +331,18 @@ export async function getPublicPatientRegistration(
 
 export type RegistrationContext =
   | { kind: "internal"; userId: string; contactId?: string; conversationId?: string }
-  | { kind: "public"; token?: string; entryPoint: "qr" | "public_link" }
+  | {
+      kind: "public"
+      token?: string
+      entryPoint: "qr" | "public_link"
+      /**
+       * `essentials`: datos esenciales para reservar (identidad y celular). Solo
+       * con el enlace de una conversación; lo que la clínica exige y no se pide
+       * queda por completar y la identidad, por revisar. Lo usa el enlace de
+       * reserva; el registro público de la clínica no lo ofrece.
+       */
+      scope?: "essentials"
+    }
 
 export interface RegistrationInput {
   submissionId: string
@@ -421,13 +432,15 @@ export async function registerPatient(
   const internalContext = context.kind === "internal" ? context : null
   const publicToken = publicContext?.token
   const hasToken = publicToken !== undefined
+  const essentials = publicContext?.scope === "essentials"
+  if (essentials && !hasToken) throw validation("Los datos esenciales solo se aceptan desde el enlace de una conversación")
   const entryPoint: RegistrationEntryPoint = publicContext
     ? (hasToken ? "conversation" : publicContext.entryPoint)
     : (internalContext?.conversationId ? "conversation" : "platform")
   const actorUserId = publicContext ? null : (internalContext?.userId ?? null)
   const publicTokenHash = hasToken ? sha256Hex(publicToken as string) : null
   const stableContext = publicContext
-    ? { kind: "public", entryPoint, tokenHash: publicTokenHash }
+    ? { kind: "public", entryPoint, tokenHash: publicTokenHash, ...(essentials ? { scope: "essentials" } : {}) }
     : {
         kind: "internal",
         entryPoint,
@@ -506,6 +519,7 @@ export async function registerPatient(
   const errors = validateRegistrationAnswers(config, answers, {
     mode: isPublic ? "public" : "internal",
     today,
+    ...(essentials ? { scope: "essentials" as const } : {}),
   })
   if (Object.keys(errors).length) throw validation(Object.values(errors)[0]!)
 
@@ -612,6 +626,16 @@ export async function registerPatient(
       throw notCompleted()
     }
     throw e
+  }
+
+  // 5b. Con los datos esenciales los apellidos llegan de un solo campo y se
+  // reparten sin certeza: la ficha queda «identidad por revisar» hasta que
+  // recepción los confirme.
+  if (essentials) {
+    await tx
+      .update(patient)
+      .set({ identityNeedsReview: true })
+      .where(and(eq(patient.id, created.id), eq(patient.organizationId, orgId)))
   }
 
   // 6. Salud declarada solo con contenido significativo; nunca firma revisión.
