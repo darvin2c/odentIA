@@ -188,6 +188,8 @@ export const AGENT_ROLES: Record<AgentRoleId, AgentRole> = {
       { id: "atenciones_sin_firmar", label: "Atenciones sin firmar", description: "Borradores que quedaron abiertos.", fixed: false, tools: [] },
       { id: "seguimientos_sin_responsable", label: "Seguimientos sin responsable", description: "Oportunidades que nadie lleva.", fixed: false, tools: [] },
       { id: "cobranza_vencida", label: "Cobranza vencida", description: "Saldos que pasaron su fecha.", fixed: false, tools: [] },
+      { id: "inasistencias_sin_cita", label: "Inasistencias sin otra cita", description: "Personas que faltaron y nadie volvió a agendar.", fixed: false, tools: [] },
+      { id: "presupuestos_sin_respuesta", label: "Presupuestos sin respuesta", description: "Presupuestos presentados que siguen esperando.", fixed: false, tools: [] },
       { id: "preparar", label: "Preparar la acción", description: "La lista de personas y las tareas listas para crear. Si hay una automatización que lo evita, como el recordatorio de control, ofrece encenderla.", fixed: true, tools: [] },
       { id: "explicar", label: "Mostrar cómo se calculó", description: "Cada cifra con la lista que la respalda.", fixed: true, tools: [] },
     ],

@@ -43,6 +43,7 @@ import { getConnectionTemplates } from "./connections.js"
 import { sendOutbound, sendTemplateOutbound, startContactConversation } from "./conversations.js"
 import { notFound, ServiceError, validation } from "./errors.js"
 import { findOrgLocale, NEUTRAL_TIMEZONE } from "./locale.js"
+import { CHECKUP_REMINDER_WINDOW_HOURS } from "./automation-windows.js"
 import { createWorkspaceNotification } from "./workspace.js"
 
 /**
@@ -1389,8 +1390,7 @@ export async function syncInactiveRecall(tx: Db, orgId: string, now: Date): Prom
   return { programados, omitidos }
 }
 
-/** Ventana del recordatorio de control: avisa de los controles que vencen en estas horas. */
-export const CHECKUP_REMINDER_WINDOW_HOURS = 48
+export { CHECKUP_REMINDER_WINDOW_HOURS } from "./automation-windows.js"
 
 /** Recordatorio de controles clínicos próximos (48 h). */
 export async function syncCheckupReminders(tx: Db, orgId: string, now: Date): Promise<SyncSummary> {

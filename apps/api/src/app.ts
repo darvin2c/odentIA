@@ -52,6 +52,7 @@ import { createTasksRoute } from "./routes/tasks.js"
 import { createUbigeoRoute } from "./routes/ubigeo.js"
 import { createWebchatAdminRoute, createWebchatPublicRoute } from "./routes/webchat.js"
 import { createWebhooksRoute } from "./routes/webhooks.js"
+import { createReportsRoute } from "./routes/reports.js"
 import { createWorkspaceRoute } from "./routes/workspace.js"
 
 export interface AppDeps {
@@ -600,6 +601,7 @@ export function createApp(deps: AppDeps) {
   guarded.route("/appointments", createAppointmentsRoute(crmDeps))
   guarded.route("/fields", createFieldsRoute(crmDeps))
   guarded.route("/workspace", createWorkspaceRoute(crmDeps))
+  guarded.route("/reports", createReportsRoute(crmDeps))
   guarded.route("/inventory", createInventoryRoute(crmDeps))
   guarded.route("/opportunities", createOpportunitiesRoute(crmDeps))
   guarded.route("/help", createHelpRoute({ ...crmDeps, appVersion: process.env["APP_VERSION"] ?? null }))

@@ -1,0 +1,633 @@
+/**
+ * Reportes: cuatro preguntas (dinero, agenda, pacientes y ventas, atención)
+ * sobre un mismo periodo y una misma sede, cada cifra con la del periodo
+ * anterior. Solo lecturas; ninguna cifra sale de un modelo.
+ *
+ * - Una definición por cifra: la tarjeta, su lista y la comparación usan la
+ *   misma consulta con otro tramo.
+ * - Lo que no pertenece a una sede (controles, presupuestos, oportunidades,
+ *   conversaciones) se entrega de toda la clínica y lo dice (`wholeClinic`).
+ * - Los nombres de estados y grupos viajan como claves; los escribe la interfaz.
+ */
+import type { Db } from "@odentia/db"
+import { sql, type SQL } from "drizzle-orm"
+import { type AdvisorRecommendation, getAdvisorRecommendations } from "./agent-advisor.js"
+import { validation } from "./errors.js"
+import { getFinanceResultBetween, getFinanceTotalsBetween, requireBranch } from "./finance.js"
+import { getOrgLocale } from "./locale.js"
+import {
+  addMonths,
+  monthsOf,
+  monthStart,
+  resolveReportWindow,
+  type ReportSpan,
+  type ReportWindow,
+  type YearMonth,
+} from "./report-periods.js"
+
+export interface ReportQuery {
+  /** `este_mes`, `mes_pasado`, `ultimos_3_meses`, `este_ano` o `YYYY-MM`. */
+  period: string
+  branchId?: string
+}
+
+interface ReportScope {
+  window: ReportWindow
+  timezone: string
+  locale: string
+  /** Moneda de la clínica: va primero cuando hay más de una. */
+  currency: string
+  branch: { id: string; name: string } | null
+  now: Date
+}
+
+async function reportScope(tx: Db, orgId: string, query: ReportQuery, now: Date): Promise<ReportScope> {
+  const { timezone, locale, currency } = await getOrgLocale(tx, orgId)
+  const window = resolveReportWindow(timezone, query.period, now)
+  const branch = query.branchId ? await requireBranch(tx, orgId, query.branchId) : null
+  return { window, timezone, locale, currency, branch: branch ? { id: branch.id, name: branch.name } : null, now }
+}
+
+function serializeSpan(span: ReportSpan) {
+  return {
+    from: span.from,
+    to: span.to,
+    partial: span.partial,
+    start: span.start.toISOString(),
+    end: span.end.toISOString(),
+  }
+}
+
+/** Lo que toda respuesta de Reportes dice de sí misma: periodo, comparación, región y sede. */
+function reportHead(scope: ReportScope) {
+  return {
+    period: { key: scope.window.key, ...serializeSpan(scope.window) },
+    previous: serializeSpan(scope.window.previous),
+    timezone: scope.timezone,
+    locale: scope.locale,
+    currency: scope.currency,
+    branch: scope.branch,
+  }
+}
+
+/** Instante como parámetro: el controlador de Postgres entrega y recibe las fechas como texto. */
+function at(date: Date): SQL {
+  return sql`${date.toISOString()}::timestamptz`
+}
+
+function safeCents(value: string | number | null | undefined): number {
+  const cents = Number(value ?? 0)
+  if (!Number.isSafeInteger(cents)) throw validation("El total excede el rango exacto admitido")
+  return cents
+}
+
+// --- Agenda ---------------------------------------------------------------------------------
+
+export type AppointmentTotals = {
+  total: number
+  attended: number
+  noShow: number
+  cancelled: number
+  /** Citas que ya pasaron y nadie marcó: se muestran aparte, no se reparten. */
+  unmarked: number
+}
+
+/** Una cita cuenta si ya tiene desenlace o si su hora pasó; la que aún no ocurre no es de ningún grupo. */
+function settledAppointment(now: Date): SQL {
+  return sql`(a.status in ('atendida','no_asistio','cancelada') or (a.status in ('programada','confirmada') and a.ends_at < ${at(now)}))`
+}
+
+async function appointmentTotals(tx: Db, orgId: string, scope: ReportScope, span: ReportSpan): Promise<AppointmentTotals> {
+  const [row] = await tx.execute<Omit<AppointmentTotals, "total">>(sql`
+    select count(*) filter (where a.status='atendida')::int as attended,
+      count(*) filter (where a.status='no_asistio')::int as "noShow",
+      count(*) filter (where a.status='cancelada')::int as cancelled,
+      count(*) filter (where a.status in ('programada','confirmada'))::int as unmarked
+    from appointment a
+    where a.organization_id=${orgId} and a.starts_at >= ${at(span.start)} and a.starts_at < ${at(span.end)}
+      and ${settledAppointment(scope.now)}
+      ${scope.branch ? sql`and a.branch_id=${scope.branch.id}` : sql``}`)
+  const totals = row ?? { attended: 0, noShow: 0, cancelled: 0, unmarked: 0 }
+  return { ...totals, total: totals.attended + totals.noShow + totals.cancelled + totals.unmarked }
+}
+
+export type ControlTotals = {
+  due: number
+  /** Realizados con su atención cerrada y su resultado: lo demás no cuenta como venido. */
+  came: number
+  pending: number
+  cancelled: number
+  /** Marcados como realizados sin atención cerrada que lo respalde: ni venido ni pendiente. */
+  unknown: number
+}
+
+/**
+ * Controles que tocaban en el tramo, según su estado a hoy (como los
+ * presupuestos): así «siguen pendientes» coincide con su lista. De toda la clínica.
+ */
+async function controlTotals(tx: Db, orgId: string, span: ReportSpan): Promise<ControlTotals> {
+  const [row] = await tx.execute<Omit<ControlTotals, "unknown">>(sql`
+    select count(*)::int as due,
+      count(*) filter (where f.status='realizado' and f.completed_encounter_id is not null
+        and f.outcome is not null and e.status='finalizada')::int as came,
+      count(*) filter (where f.status in ('pendiente','programado'))::int as pending,
+      count(*) filter (where f.status='cancelado')::int as cancelled
+    from clinical_follow_up f
+    left join encounter e on e.id=f.completed_encounter_id and e.organization_id=${orgId}
+    where f.organization_id=${orgId} and f.due_at >= ${at(span.start)} and f.due_at < ${at(span.end)}`)
+  const totals = row ?? { due: 0, came: 0, pending: 0, cancelled: 0 }
+  return { ...totals, unknown: totals.due - totals.came - totals.pending - totals.cancelled }
+}
+
+export async function getReportAgenda(tx: Db, orgId: string, query: ReportQuery, now: Date = new Date()) {
+  const scope = await reportScope(tx, orgId, query, now)
+  const { window } = scope
+  const branchSql = scope.branch ? sql`and a.branch_id=${scope.branch.id}` : sql``
+  const inWindow = sql`a.organization_id=${orgId} and a.starts_at >= ${at(window.start)} and a.starts_at < ${at(window.end)}
+    and ${settledAppointment(now)} ${branchSql}`
+  const byProfessional = await tx.execute<{ userId: string; name: string; total: number; attended: number; noShow: number }>(sql`
+    select a.dentist_user_id as "userId", u.name, count(*)::int as total,
+      count(*) filter (where a.status='atendida')::int as attended,
+      count(*) filter (where a.status='no_asistio')::int as "noShow"
+    from appointment a join "user" u on u.id=a.dentist_user_id
+    where ${inWindow}
+    group by a.dentist_user_id, u.name order by attended desc, u.name`)
+  const bySource = await tx.execute<{ source: string; count: number }>(sql`
+    select a.source, count(*)::int as count from appointment a
+    where ${inWindow} group by a.source order by count desc, a.source`)
+  return {
+    ...reportHead(scope),
+    appointments: await appointmentTotals(tx, orgId, scope, window),
+    previousAppointments: await appointmentTotals(tx, orgId, scope, window.previous),
+    byProfessional: [...byProfessional],
+    bySource: [...bySource],
+    controls: await controlTotals(tx, orgId, window),
+    previousControls: await controlTotals(tx, orgId, window.previous),
+    /** Los controles son de la persona, no de una sede. */
+    wholeClinic: scope.branch ? (["controls"] as const) : ([] as const),
+    series: await monthlySeries(scope, (span) => appointmentTotals(tx, orgId, scope, span)),
+  }
+}
+
+// --- Pacientes y ventas ---------------------------------------------------------------------
+
+/** Personas atendidas por primera vez en el tramo (su primera cita atendida cae dentro). */
+async function newPatients(tx: Db, orgId: string, scope: ReportScope, span: ReportSpan): Promise<number> {
+  const [row] = await tx.execute<{ count: number }>(sql`
+    with first_visit as (
+      select distinct on (patient_id) patient_id, starts_at, branch_id
+      from appointment where organization_id=${orgId} and status='atendida'
+      order by patient_id, starts_at, id
+    ) select count(*)::int as count from first_visit
+    where starts_at >= ${at(span.start)} and starts_at < ${at(span.end)}
+      ${scope.branch ? sql`and branch_id=${scope.branch.id}` : sql``}`)
+  return row?.count ?? 0
+}
+
+export type BudgetGroup = "accepted" | "waiting" | "rejected"
+
+export interface BudgetTotals {
+  currency: string
+  accepted: { count: number; cents: number }
+  waiting: { count: number; cents: number }
+  rejected: { count: number; cents: number }
+}
+
+/**
+ * Presupuestos presentados en el tramo, según su respuesta a hoy. Uno aceptado
+ * en parte cuenta por lo aceptado; las revisiones sustituidas no cuentan.
+ */
+async function budgetTotals(tx: Db, orgId: string, span: ReportSpan): Promise<BudgetTotals[]> {
+  const rows = await tx.execute<{ currency: string; grp: BudgetGroup; count: number; cents: string }>(sql`
+    with line as (
+      select b.id, b.currency,
+        case when b.status in ('aceptado','parcial') then 'accepted'
+          when b.status in ('presentado','pospuesto') then 'waiting' else 'rejected' end as grp,
+        case when b.status in ('aceptado','parcial') and i.decision <> 'aceptado' then 0
+          else coalesce(i.price_cents, 0)::bigint
+            * (case when i.billing_mode='session' then greatest(coalesce(i.sessions_planned, 1), 1) else 1 end)
+        end as cents
+      from treatment_budget b
+      left join treatment_budget_item i on i.budget_id=b.id and i.organization_id=${orgId}
+      where b.organization_id=${orgId} and b.presented_at >= ${at(span.start)} and b.presented_at < ${at(span.end)}
+        and b.status in ('aceptado','parcial','presentado','pospuesto','rechazado')
+    ) select currency, grp, count(distinct id)::int as count, coalesce(sum(cents), 0)::text as cents
+    from line group by currency, grp order by currency`)
+  const byCurrency = new Map<string, BudgetTotals>()
+  for (const row of rows) {
+    const entry = byCurrency.get(row.currency) ?? {
+      currency: row.currency,
+      accepted: { count: 0, cents: 0 },
+      waiting: { count: 0, cents: 0 },
+      rejected: { count: 0, cents: 0 },
+    }
+    entry[row.grp] = { count: row.count, cents: safeCents(row.cents) }
+    byCurrency.set(row.currency, entry)
+  }
+  return [...byCurrency.values()]
+}
+
+/** Tratamientos de atenciones cerradas en el tramo, a su precio, sin los anulados. */
+async function procedureTotals(tx: Db, orgId: string, scope: ReportScope, span: ReportSpan) {
+  const rows = await tx.execute<{ name: string; currency: string | null; count: number; cents: string }>(sql`
+    select coalesce(s.name, p.description) as name, p.currency, count(*)::int as count,
+      coalesce(sum(p.price_cents), 0)::text as cents
+    from encounter_procedure p
+    join encounter e on e.id=p.encounter_id and e.organization_id=${orgId}
+    left join service_catalog s on s.id=p.service_id and s.organization_id=${orgId}
+    where p.organization_id=${orgId} and e.status='finalizada' and p.voided_at is null
+      and e.finalized_at >= ${at(span.start)} and e.finalized_at < ${at(span.end)}
+      ${scope.branch ? sql`and e.branch_id=${scope.branch.id}` : sql``}
+    group by 1, p.currency order by count desc, name`)
+  return rows.map((row) => ({ name: row.name, currency: row.currency, count: row.count, cents: safeCents(row.cents) }))
+}
+
+export async function getReportSales(tx: Db, orgId: string, query: ReportQuery, now: Date = new Date()) {
+  const scope = await reportScope(tx, orgId, query, now)
+  const { window } = scope
+  const procedures = await procedureTotals(tx, orgId, scope, window)
+  const previousProcedures = await procedureTotals(tx, orgId, scope, window.previous)
+  const opportunities = await tx.execute<{ status: string; count: number }>(sql`
+    select status, count(*)::int as count from opportunity
+    where organization_id=${orgId} and created_at >= ${at(window.start)} and created_at < ${at(window.end)}
+    group by status order by status`)
+  return {
+    ...reportHead(scope),
+    newPatients: await newPatients(tx, orgId, scope, window),
+    previousNewPatients: await newPatients(tx, orgId, scope, window.previous),
+    budgets: await budgetTotals(tx, orgId, window),
+    previousBudgets: await budgetTotals(tx, orgId, window.previous),
+    procedures,
+    previousProcedureCount: previousProcedures.reduce((sum, row) => sum + row.count, 0),
+    opportunities: [...opportunities],
+    /** Presupuestos y oportunidades son de la persona, no de una sede. */
+    wholeClinic: scope.branch ? (["budgets", "opportunities"] as const) : ([] as const),
+    series: await monthlySeries(scope, async (span) => ({ newPatients: await newPatients(tx, orgId, scope, span) })),
+  }
+}
+
+// --- Atención -------------------------------------------------------------------------------
+
+export type ResponseTotals = {
+  /** Conversaciones cuyo primer mensaje de la persona cae en el tramo. */
+  conversations: number
+  responded: number
+  /** Respuestas con hora de envío conocida: la base del promedio. */
+  timedResponses: number
+  avgFirstResponseSeconds: number | null
+  byAgent: number
+  byTeam: number
+  /** De las que respondió primero el agente, cuántas pasó después al equipo. */
+  handedOff: number
+}
+
+/**
+ * Primera respuesta: del primer mensaje de la persona a la primera respuesta
+ * aceptada por el canal. Los envíos de prueba y los que no salieron no cuentan.
+ */
+function firstResponseCohort(orgId: string, span: ReportSpan): SQL {
+  return sql`
+    with first_inbound as (
+      select distinct on (conversation_id) conversation_id, created_at
+      from message where organization_id=${orgId} and direction='in'
+      order by conversation_id, created_at, id
+    ), cohort as (
+      select i.conversation_id, i.created_at, r.sent_at, r.id as response_id, r.sender_kind, cc.channel
+      from first_inbound i
+      join conversation c on c.id=i.conversation_id and c.organization_id=${orgId}
+      left join channel_connection cc on cc.id=c.channel_connection_id and cc.organization_id=${orgId}
+      left join lateral (
+        select m.id, m.sent_at, m.sender_kind from message m
+        where m.organization_id=${orgId} and m.conversation_id=i.conversation_id
+          and m.direction='out' and m.status in ('sent','delivered','read')
+          and coalesce(m.external_id,'') not like 'mock-%'
+          and m.created_at >= i.created_at
+        order by coalesce(m.sent_at, m.created_at), m.id limit 1
+      ) r on true
+      where i.created_at >= ${at(span.start)} and i.created_at < ${at(span.end)}
+    )`
+}
+
+async function responseTotals(tx: Db, orgId: string, span: ReportSpan): Promise<ResponseTotals> {
+  const [row] = await tx.execute<ResponseTotals>(sql`
+    ${firstResponseCohort(orgId, span)}
+    select count(*)::int as conversations, count(response_id)::int as responded,
+      count(*) filter (where sent_at >= created_at)::int as "timedResponses",
+      avg(extract(epoch from (sent_at-created_at))) filter (where sent_at >= created_at)::float8 as "avgFirstResponseSeconds",
+      count(*) filter (where sender_kind='agent')::int as "byAgent",
+      count(*) filter (where response_id is not null and sender_kind<>'agent')::int as "byTeam",
+      count(*) filter (where sender_kind='agent' and exists (
+        select 1 from agent_handoff h where h.organization_id=${orgId}
+          and h.conversation_id=cohort.conversation_id and h.created_at >= cohort.created_at))::int as "handedOff"
+    from cohort`)
+  return (
+    row ?? {
+      conversations: 0,
+      responded: 0,
+      timedResponses: 0,
+      avgFirstResponseSeconds: null,
+      byAgent: 0,
+      byTeam: 0,
+      handedOff: 0,
+    }
+  )
+}
+
+export async function getReportService(tx: Db, orgId: string, query: ReportQuery, now: Date = new Date()) {
+  const scope = await reportScope(tx, orgId, query, now)
+  const { window } = scope
+  const byChannel = await tx.execute<{ channel: string | null; count: number }>(sql`
+    ${firstResponseCohort(orgId, window)}
+    select channel, count(*)::int as count from cohort group by channel order by count desc, channel`)
+  return {
+    ...reportHead(scope),
+    responses: await responseTotals(tx, orgId, window),
+    previousResponses: await responseTotals(tx, orgId, window.previous),
+    byChannel: [...byChannel],
+    /** Las conversaciones no pertenecen a una sede. */
+    wholeClinic: scope.branch ? (["responses"] as const) : ([] as const),
+    series: await monthlySeries(scope, async (span) => {
+      const totals = await responseTotals(tx, orgId, span)
+      return { conversations: totals.conversations, responded: totals.responded }
+    }),
+  }
+}
+
+// --- Dinero ---------------------------------------------------------------------------------
+
+export async function getReportMoney(tx: Db, orgId: string, query: ReportQuery, now: Date = new Date()) {
+  const scope = await reportScope(tx, orgId, query, now)
+  const { window } = scope
+  const branchId = scope.branch?.id
+  const result = await getFinanceResultBetween(tx, orgId, { start: window.start, end: window.end, branchId })
+  const previousTotals = await getFinanceTotalsBetween(tx, orgId, {
+    start: window.previous.start,
+    end: window.previous.end,
+    branchId,
+  })
+  return {
+    ...reportHead(scope),
+    ...result,
+    /** Totales del tramo anterior, por moneda. */
+    previousTotals,
+    series: await monthlySeries(scope, async (span) => ({
+      totals: await getFinanceTotalsBetween(tx, orgId, { start: span.start, end: span.end, branchId }),
+    })),
+  }
+}
+
+// --- Las cuatro cifras de arriba ------------------------------------------------------------
+
+export async function getReportOverview(tx: Db, orgId: string, query: ReportQuery, now: Date = new Date()) {
+  const scope = await reportScope(tx, orgId, query, now)
+  const { window } = scope
+  const branchId = scope.branch?.id
+  const money = await getFinanceTotalsBetween(tx, orgId, { start: window.start, end: window.end, branchId })
+  const previousMoney = await getFinanceTotalsBetween(tx, orgId, {
+    start: window.previous.start,
+    end: window.previous.end,
+    branchId,
+  })
+  const appointments = await appointmentTotals(tx, orgId, scope, window)
+  const previousAppointments = await appointmentTotals(tx, orgId, scope, window.previous)
+  const responses = await responseTotals(tx, orgId, window)
+  const previousResponses = await responseTotals(tx, orgId, window.previous)
+  const currencies = [...new Set([...money, ...previousMoney].map((row) => row.currency))]
+  return {
+    ...reportHead(scope),
+    money: currencies.map((currency) => ({
+      currency,
+      quedaCents: money.find((row) => row.currency === currency)?.quedaCents ?? 0,
+      previousQuedaCents: previousMoney.find((row) => row.currency === currency)?.quedaCents ?? null,
+    })),
+    agenda: { attended: appointments.attended, previousAttended: previousAppointments.attended },
+    sales: {
+      newPatients: await newPatients(tx, orgId, scope, window),
+      previousNewPatients: await newPatients(tx, orgId, scope, window.previous),
+    },
+    service: {
+      avgFirstResponseSeconds: responses.avgFirstResponseSeconds,
+      previousAvgFirstResponseSeconds: previousResponses.avgFirstResponseSeconds,
+    },
+  }
+}
+
+// --- El asesor junto a la cifra -------------------------------------------------------------
+
+/** La inasistencia merece aviso si llega a este porcentaje… */
+export const NO_SHOW_ALERT_RATE = 10
+/** …o si subió al menos estos puntos frente al periodo anterior. */
+export const NO_SHOW_ALERT_RISE = 2
+
+export type ReportAdviceTab = "dinero" | "agenda" | "ventas"
+
+export interface ReportAdvice {
+  tab: ReportAdviceTab
+  /** Recomendación del asesor que respalda el aviso: su lista y su acción se abren con esta clave. */
+  key: string
+  title: string
+  total: number
+  /** Solo en la inasistencia: la cifra del periodo y la del anterior, en porcentaje entero. */
+  rate: number | null
+  previousRate: number | null
+  /** Automatización que evita que la lista vuelva a llenarse, si existe y quien lee puede verla. */
+  automation: { label: string; enabled: boolean } | null
+}
+
+function percent(part: number, total: number): number | null {
+  return total > 0 ? Math.round((part * 100) / total) : null
+}
+
+/**
+ * Un aviso por pregunta como mucho, y solo si hay algo que hacer: cada uno es
+ * una recomendación del asesor (una consulta, con su lista) que hoy encuentra
+ * a alguien. Respeta su interruptor, lo apagado y lo pospuesto. No hay modelo.
+ */
+export async function getReportAdvice(
+  tx: Db,
+  orgId: string,
+  query: ReportQuery,
+  can: (permission: string) => boolean,
+  now: Date = new Date(),
+): Promise<{ enabled: boolean; notices: ReportAdvice[] }> {
+  const view = await getAdvisorRecommendations(tx, orgId, can, { all: true })
+  if (!view.enabled) return { enabled: false, notices: [] }
+  const scope = await reportScope(tx, orgId, query, now)
+  const found = (key: string): AdvisorRecommendation | undefined => view.recommendations.find((item) => item.key === key)
+  const notice = (tab: ReportAdviceTab, item: AdvisorRecommendation, rates?: { rate: number | null; previousRate: number | null }): ReportAdvice => ({
+    tab,
+    key: item.key,
+    title: item.title,
+    total: item.total,
+    rate: rates?.rate ?? null,
+    previousRate: rates?.previousRate ?? null,
+    automation: item.automation ? { label: item.automation.label, enabled: item.automation.enabled } : null,
+  })
+  const notices: ReportAdvice[] = []
+
+  const debts = found("cobranza_vencida")
+  if (debts) notices.push(notice("dinero", debts))
+
+  // Agenda: la inasistencia solo si la cifra del periodo lo justifica; si no, los controles vencidos.
+  const noShows = found("inasistencias_sin_cita")
+  const appointments = await appointmentTotals(tx, orgId, scope, scope.window)
+  const before = await appointmentTotals(tx, orgId, scope, scope.window.previous)
+  const rate = percent(appointments.noShow, appointments.total)
+  const previousRate = percent(before.noShow, before.total)
+  const worth = rate !== null && (rate >= NO_SHOW_ALERT_RATE || (previousRate !== null && rate - previousRate >= NO_SHOW_ALERT_RISE))
+  const controls = found("controles_vencidos")
+  if (noShows && worth) notices.push(notice("agenda", noShows, { rate, previousRate }))
+  else if (controls) notices.push(notice("agenda", controls))
+
+  const budgets = found("presupuestos_sin_respuesta")
+  if (budgets) notices.push(notice("ventas", budgets))
+
+  return { enabled: true, notices }
+}
+
+// --- Barras por mes -------------------------------------------------------------------------
+
+/** Con más de un mes, la misma cifra mes a mes; con uno solo no hay serie. */
+async function monthlySeries<T>(scope: ReportScope, read: (span: ReportSpan) => Promise<T>) {
+  const months = monthsOf(scope.window)
+  if (months.length < 2) return []
+  const series: Array<YearMonth & { partial: boolean } & T> = []
+  for (const month of months) {
+    const start = monthStart(scope.timezone, month.year, month.month)
+    const next = addMonths(month, 1)
+    const monthEnd = monthStart(scope.timezone, next.year, next.month)
+    const end = monthEnd.getTime() > scope.window.end.getTime() ? scope.window.end : monthEnd
+    const span: ReportSpan = { from: month, to: month, start, end, partial: end.getTime() < monthEnd.getTime() }
+    series.push({ ...month, partial: span.partial, ...(await read(span)) })
+  }
+  return series
+}
+
+// --- La lista detrás de una cifra -----------------------------------------------------------
+
+export const REPORT_LISTS = [
+  "no_show",
+  "cancelled",
+  "unmarked",
+  "controls_pending",
+  "budgets_waiting",
+  "new_patients",
+] as const
+export type ReportListKey = (typeof REPORT_LISTS)[number]
+
+export type ReportListRow = {
+  id: string
+  at: string
+  patientId: string
+  personName: string
+  /** Lo que identifica la fila: prestación de la cita, título del control o del presupuesto. */
+  title: string | null
+  professionalName: string | null
+  branchName: string | null
+  /** La persona ya tiene una cita por venir: quien llama sabe a quién no hace falta. */
+  hasNextAppointment: boolean
+  cents: number | null
+  currency: string | null
+}
+
+const REPORT_LIST_LIMIT = 200
+
+export async function getReportList(
+  tx: Db,
+  orgId: string,
+  query: ReportQuery & { list: ReportListKey },
+  now: Date = new Date(),
+) {
+  const scope = await reportScope(tx, orgId, query, now)
+  const { window } = scope
+  const start = at(window.start)
+  const end = at(window.end)
+  const nextAppointment = (patient: SQL): SQL => sql`exists (
+    select 1 from appointment n where n.organization_id=${orgId} and n.patient_id=${patient}
+      and n.starts_at > ${at(now)} and n.status in ('programada','confirmada'))`
+  type Row = Omit<ReportListRow, "cents"> & { cents: string | null; total: number }
+  let rows: Row[]
+
+  if (query.list === "no_show" || query.list === "cancelled" || query.list === "unmarked") {
+    const status =
+      query.list === "no_show"
+        ? sql`a.status='no_asistio'`
+        : query.list === "cancelled"
+          ? sql`a.status='cancelada'`
+          : sql`a.status in ('programada','confirmada') and a.ends_at < ${at(now)}`
+    rows = [
+      ...(await tx.execute<Row>(sql`
+        select a.id, a.starts_at as at, a.patient_id as "patientId", p.display_name as "personName",
+          a.service_name as title, u.name as "professionalName", b.name as "branchName",
+          ${nextAppointment(sql`a.patient_id`)} as "hasNextAppointment",
+          null::text as cents, null::text as currency, count(*) over()::int as total
+        from appointment a
+        join patient p on p.id=a.patient_id and p.organization_id=${orgId}
+        join branch b on b.id=a.branch_id and b.organization_id=${orgId}
+        join "user" u on u.id=a.dentist_user_id
+        where a.organization_id=${orgId} and a.starts_at >= ${start} and a.starts_at < ${end} and ${status}
+          ${scope.branch ? sql`and a.branch_id=${scope.branch.id}` : sql``}
+        order by a.starts_at desc, a.id limit ${REPORT_LIST_LIMIT}`)),
+    ]
+  } else if (query.list === "controls_pending") {
+    rows = [
+      ...(await tx.execute<Row>(sql`
+        select f.id, f.due_at as at, f.patient_id as "patientId", p.display_name as "personName",
+          f.title, null::text as "professionalName", null::text as "branchName",
+          ${nextAppointment(sql`f.patient_id`)} as "hasNextAppointment",
+          null::text as cents, null::text as currency, count(*) over()::int as total
+        from clinical_follow_up f
+        join patient p on p.id=f.patient_id and p.organization_id=${orgId}
+        where f.organization_id=${orgId} and f.due_at >= ${start} and f.due_at < ${end}
+          and f.status in ('pendiente','programado')
+        order by f.due_at, f.id limit ${REPORT_LIST_LIMIT}`)),
+    ]
+  } else if (query.list === "budgets_waiting") {
+    rows = [
+      ...(await tx.execute<Row>(sql`
+        select b.id, b.presented_at as at, b.patient_id as "patientId", p.display_name as "personName",
+          b.title, null::text as "professionalName", null::text as "branchName",
+          ${nextAppointment(sql`b.patient_id`)} as "hasNextAppointment",
+          (select coalesce(sum(coalesce(i.price_cents, 0)::bigint
+              * (case when i.billing_mode='session' then greatest(coalesce(i.sessions_planned, 1), 1) else 1 end)), 0)
+            from treatment_budget_item i where i.budget_id=b.id and i.organization_id=${orgId})::text as cents,
+          b.currency::text as currency, count(*) over()::int as total
+        from treatment_budget b
+        join patient p on p.id=b.patient_id and p.organization_id=${orgId}
+        where b.organization_id=${orgId} and b.presented_at >= ${start} and b.presented_at < ${end}
+          and b.status in ('presentado','pospuesto')
+        order by b.presented_at, b.id limit ${REPORT_LIST_LIMIT}`)),
+    ]
+  } else {
+    rows = [
+      ...(await tx.execute<Row>(sql`
+        with first_visit as (
+          select distinct on (patient_id) id, patient_id, starts_at, branch_id, service_name, dentist_user_id
+          from appointment where organization_id=${orgId} and status='atendida'
+          order by patient_id, starts_at, id
+        ) select v.id, v.starts_at as at, v.patient_id as "patientId", p.display_name as "personName",
+          v.service_name as title, u.name as "professionalName", b.name as "branchName",
+          ${nextAppointment(sql`v.patient_id`)} as "hasNextAppointment",
+          null::text as cents, null::text as currency, count(*) over()::int as total
+        from first_visit v
+        join patient p on p.id=v.patient_id and p.organization_id=${orgId}
+        join branch b on b.id=v.branch_id and b.organization_id=${orgId}
+        join "user" u on u.id=v.dentist_user_id
+        where v.starts_at >= ${start} and v.starts_at < ${end}
+          ${scope.branch ? sql`and v.branch_id=${scope.branch.id}` : sql``}
+        order by v.starts_at desc, v.id limit ${REPORT_LIST_LIMIT}`)),
+    ]
+  }
+
+  return {
+    ...reportHead(scope),
+    list: query.list,
+    /** Filas que existen; la respuesta trae como mucho `REPORT_LIST_LIMIT`. */
+    total: rows[0]?.total ?? 0,
+    rows: rows.map(({ total: _total, cents, at: when, ...row }) => ({
+      ...row,
+      at: new Date(when).toISOString(),
+      cents: cents === null ? null : safeCents(cents),
+    })),
+  }
+}

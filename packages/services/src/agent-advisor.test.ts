@@ -136,8 +136,12 @@ describe("detecciones", () => {
     await run((tx) => updateRule(tx, ORG, OWNER, rule.id, { enabled: false }))
   })
 
-  it("las demás detecciones no tienen una automatización equivalente: su acción son las tareas", async () => {
-    expect(ADVISOR_DETECTIONS.filter((item) => item.automation !== null).map((item) => item.key)).toEqual(["controles_vencidos"])
+  it("solo tres detecciones tienen una automatización que ofrecer; en las demás la acción son las tareas", async () => {
+    expect(ADVISOR_DETECTIONS.filter((item) => item.automation !== null).map((item) => [item.key, item.automation?.kind])).toEqual([
+      ["controles_vencidos", "recordatorio_control"],
+      ["inasistencias_sin_cita", "recordatorio_cita"],
+      ["presupuestos_sin_respuesta", "seguimiento_presupuesto"],
+    ])
     expect(ADVISOR_DETECTIONS.find((item) => item.key === "atenciones_sin_firmar")?.taskNoun.many).toBe("tareas")
   })
 
@@ -233,5 +237,60 @@ describe("lo que recomienda y lo que deja hacer", () => {
     // Otra organización no ve nada de esta.
     expect((await run((tx) => getAdvisorRecommendations(tx, OTHER, all, { preview: true }), OTHER)).recommendations).toEqual([])
     expect(randomUUID()).toBeTruthy()
+  })
+
+  it("inasistencias sin otra cita: quien faltó hace poco y nadie volvió a agendar, una vez por persona", async () => {
+    const missed = await person("Gabriel Núñez")
+    const rebooked = await person("Valeria Campos")
+    const longAgo = await person("Óscar Peña")
+    const pastVisit = (patientId: string, daysAgo: number, minutes: number, status: string) => {
+      const startsAt = new Date(Date.now() - daysAgo * DAY + minutes * 60_000)
+      return ownerDb.insert(appointment).values({
+        organizationId: ORG, branchId, patientId, dentistUserId: DENTIST, chairId, serviceName: "Limpieza dental",
+        startsAt, endsAt: new Date(startsAt.getTime() + 30 * 60_000), durationMin: 30, status,
+      })
+    }
+    // Dos faltas de la misma persona cuentan una vez, con la más reciente.
+    await pastVisit(missed, 12, 0, "no_asistio")
+    await pastVisit(missed, 4, 40, "no_asistio")
+    await pastVisit(rebooked, 5, 80, "no_asistio")
+    // Su nueva cita, lejos de las de otras pruebas: el profesional no admite solapes.
+    await pastVisit(rebooked, -10, 0, "programada")
+    await pastVisit(longAgo, 45, 120, "no_asistio")
+    const found = await run((tx) => getAdvisorRecommendation(tx, ORG, all, "inasistencias_sin_cita"))
+    expect(found.items.map((item) => item.personName)).toEqual(["Gabriel Núñez"])
+    expect(found.title).toBe("1 persona faltó a su cita en los últimos 30 días y no tiene otra")
+    expect(found.items[0]?.line).toMatch(/^Limpieza dental · faltó el \d+ de /)
+    expect(found.automation).toMatchObject({ kind: "recordatorio_cita", enabled: false })
+    expect(found.automation?.reach).toContain("No escribe a quienes ya faltaron")
+    // Con un umbral más largo entra también la falta antigua.
+    await run((tx) => updateAdvisorSettings(tx, ORG, OWNER, { detections: { inasistencias_sin_cita: { days: 60 } } }))
+    expect((await run((tx) => getAdvisorRecommendation(tx, ORG, all, "inasistencias_sin_cita"))).items.map((item) => item.personName)).toEqual(["Gabriel Núñez", "Óscar Peña"])
+    await run((tx) => updateAdvisorSettings(tx, ORG, OWNER, { detections: { inasistencias_sin_cita: { days: null } } }))
+    // La acción es la de siempre: una tarea de llamada por persona.
+    expect(await run((tx) => createAdvisorTasks(tx, ORG, OWNER, all, "inasistencias_sin_cita"))).toEqual({ created: 1, total: 1 })
+    const [task] = await ownerDb.select({ title: crmTask.title }).from(crmTask).where(eq(crmTask.patientId, missed))
+    expect(task?.title).toBe("Llamar a Gabriel Núñez para reagendar su cita")
+  })
+
+  it("presupuestos sin respuesta: presentados hace días, sin importes, y solo para quien ve presupuestos", async () => {
+    const waiting = await person("Renata Salas")
+    const fresh = await person("Bruno Medina")
+    for (const [index, [patientId, days, status]] of ([[waiting, 12, "presentado"], [fresh, 2, "presentado"]] as const).entries()) {
+      const [plan] = await ownerDb.insert(treatmentPlan).values({ organizationId: ORG, patientId, title: "Plan" }).returning({ id: treatmentPlan.id })
+      await ownerDb.insert(treatmentBudget).values({
+        organizationId: ORG, patientId, planId: plan!.id, budgetNumber: 9100 + index, title: "Implante", currency: "PEN",
+        status, presentedAt: new Date(Date.now() - days * DAY),
+      })
+    }
+    const found = await run((tx) => getAdvisorRecommendation(tx, ORG, all, "presupuestos_sin_respuesta"))
+    expect(found.items.map((item) => item.personName)).toEqual(["Renata Salas"])
+    expect(found.title).toBe("1 presupuesto espera respuesta desde hace más de 7 días")
+    expect(found.items[0]?.line).toMatch(/^Presupuesto N\.º 9100 · Implante · presentado el /)
+    expect(JSON.stringify(found)).not.toMatch(/S\/|PEN|cents/i)
+    expect(found.automation).toMatchObject({ kind: "seguimiento_presupuesto", enabled: false })
+    // Recepción no ve presupuestos: no recibe la recomendación.
+    const reception = (permission: string) => permission === "appointments.read"
+    await expect(run((tx) => getAdvisorRecommendation(tx, ORG, reception, "presupuestos_sin_respuesta"))).rejects.toMatchObject({ status: 403 })
   })
 })

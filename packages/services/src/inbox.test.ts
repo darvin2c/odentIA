@@ -107,11 +107,12 @@ it("cada conversación trae su estado de atención y las vistas cuentan con las 
   expect(await withOrgContext(appDb, "org_b", (tx) => summarizeInbox(tx, orgId, {}))).toEqual({ all: 0, waiting: 0, withAgent: 0, handoffs: 0 })
   expect((await withOrgContext(appDb, "org_b", (tx) => listInboxConversations(tx, orgId, {}))).items).toEqual([])
 
-  // Inicio usa la misma cuenta de conversaciones derivadas que la bandeja.
+  // «Te espera» de Inicio cuenta las conversaciones sin responder como la bandeja.
   const home = await withOrgContext(appDb, orgId, (tx) =>
-    getWorkspaceHome(tx, orgId, "nadie", { patients: false, appointments: false, conversations: true, tasks: false, allTasks: false, finance: false, clinical: false, crm: false, agent: true, configure: false }))
-  // Solo abiertas: coincide con el chip «Derivadas» de la bandeja por defecto.
-  expect(home.agent?.derivedConversations).toBe((await summary({ status: "open" })).handoffs)
+    getWorkspaceHome(tx, orgId, "nadie", { patients: false, appointments: false, conversations: true, tasks: false, allTasks: false, finance: false, clinical: false, crm: false, agent: true, configure: false, ownAppointments: false }))
+  // Solo abiertas: coincide con el chip «Sin responder» de la bandeja por defecto.
+  const waitingRow = home.waiting.find((row) => row.kind === "conversations")
+  expect(waitingRow?.kind === "conversations" ? waitingRow.waiting : 0).toBe((await summary({ status: "open" })).waiting)
 
   // Con el agente desactivado en la organización nadie está «con el agente».
   await ownerDb.update(agentConfig).set({ enabled: false }).where(eq(agentConfig.organizationId, orgId))

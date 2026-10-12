@@ -1,23 +1,20 @@
 /**
- * Comisiones de los profesionales y resultado del mes (Fases 6 y 8).
+ * Comisiones de los profesionales (Fase 8). El resultado del periodo vive en `reports.ts`.
  * Montaje del padre: `guarded.route("/commissions", createCommissionsRoute(crmDeps))`.
  *
  * - `commissions.read`: cada profesional ve solo las suyas (`/my`, `/monthly`
  *   y `/payments` propios).
  * - `commissions.write` (administración): ve a todos, fija el porcentaje,
  *   registra el pago y lo anula.
- * - El resultado del mes es de quien dirige la clínica (`reports.read`): ni
- *   caja ni el profesional lo ven.
  */
 import { withOrgContext } from "@odentia/db"
 import { Hono } from "hono"
 import { z } from "zod"
-import { canAccess, canAccessAny, orgContextOf } from "../lib/context.js"
+import { canAccess, orgContextOf } from "../lib/context.js"
 import { errorBody } from "../lib/error.js"
 import { type CrmDeps, runService, validationError } from "./helpers.js"
 import {
   getMonthlyCommissions,
-  getMonthlyFinanceResult,
   getMyCommissions,
   listCommissionRates,
   listCommissionSettlements,
@@ -57,7 +54,7 @@ export function createCommissionsRoute(deps: Pick<CrmDeps, "db">) {
   const app = new Hono()
   app.use("*", async (c, next) => {
     const { memberRole } = orgContextOf(c)
-    if (!canAccessAny(memberRole, ["commissions.read", "reports.read"])) return forbid(c)
+    if (!canAccess(memberRole, "commissions.read")) return forbid(c)
     await next()
   })
 
@@ -194,25 +191,6 @@ export function createCommissionsRoute(deps: Pick<CrmDeps, "db">) {
       withOrgContext(deps.db, orgId, (tx) =>
         voidCommissionSettlement(tx, orgId, userId, c.req.param("id"), parsed.data),
       ),
-    )
-  })
-
-  // --- Resultado del mes (Fase 6) ----------------------------------------------------------
-  app.get("/monthly-result", async (c) => {
-    const { orgId, memberRole } = orgContextOf(c)
-    if (!canAccess(memberRole, "reports.read"))
-      return c.json(errorBody(c, "FORBIDDEN", "No tienes acceso al resultado del mes"), 403)
-    const parsed = z
-      .object({
-        year,
-        month,
-        branchId: z.uuid().optional(),
-        currency: currency.optional(),
-      })
-      .safeParse(c.req.query())
-    if (!parsed.success) return validationError(c, parsed.error.issues)
-    return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) => getMonthlyFinanceResult(tx, orgId, parsed.data)),
     )
   })
 

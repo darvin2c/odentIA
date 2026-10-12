@@ -130,6 +130,7 @@ import { seedInventory } from "./seed-inventory.js"
 import { seedMailbox } from "./seed-mailbox.js"
 import { seedOpportunities } from "./seed-opportunities.js"
 import { seedPortal } from "./seed-portal.js"
+import { seedReports } from "./seed-reports.js"
 import { seedRoles } from "./seed-roles.js"
 import { seedWebchat } from "./seed-webchat.js"
 import { seedWorkspace } from "./seed-workspace.js"
@@ -2468,6 +2469,15 @@ await db.transaction(async (tx) => {
 })
 await db.transaction((tx) => seedChannels(tx, domainSeed, secretsKey, { fetch }))
 await db.transaction((tx) => seedWebchat(tx, domainSeed, { secretsKey, fetch }))
+// Dos meses de historia para que Reportes tenga con qué comparar.
+await db.transaction((tx) =>
+  seedReports(tx, {
+    ...domainSeed,
+    chairId: chairA(0),
+    dentistUserIds: [ANA_ID, LUIS_ID],
+    patientIds: [...patientIdByName.values()],
+  }),
+)
 
 // --- Resumen ---
 async function summary(orgId: string, label: string): Promise<string> {

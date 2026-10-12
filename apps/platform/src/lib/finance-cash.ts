@@ -13,6 +13,7 @@ import { minutesToInstant, zonedDateOf } from "@odentia/ui-patterns"
 import { type QueryClient, useQuery } from "@tanstack/react-query"
 import { ApiError, apiFetch } from "./api"
 import { financeErrorMessage } from "./finance"
+import type { DebtRow } from "./finance-debt"
 
 /** Efectivo según UN/CEFACT 4461: lo único que se cuenta al cerrar. */
 export const CASH_TYPE_CODE = "10"
@@ -97,25 +98,7 @@ export function otherMethods(byMethod: MethodTotal[]): MethodTotal[] {
 
 // --- Deudas: GET /finance/debts ------------------------------------------------
 
-export interface DebtRow {
-  patientId: string
-  displayName: string
-  branchId: string | null
-  currency: string
-  totalCents: number
-  /** Saldo a favor: al cobrar se descuenta solo. */
-  creditCents: number
-  oldestSince: string | null
-  latestSince: string | null
-  chargesCount: number
-  /** Hasta tres conceptos, del más antiguo al más nuevo. */
-  concepts: string[]
-  lastAttended: { at: string; dentistName: string | null } | null
-  /** La persona a quien se le escribe; null si la ficha aún no tiene la suya. */
-  contactId: string | null
-  /** Su conversación abierta más reciente, si tiene alguna. */
-  conversationId: string | null
-}
+export type { DebtRow } from "./finance-debt"
 
 export function fetchDebts(branchId: string): Promise<{ data: DebtRow[] }> {
   return apiFetch<{ data: DebtRow[] }>(`/api/finance/debts?branchId=${encodeURIComponent(branchId)}`)
@@ -135,11 +118,12 @@ export function debtConcepts(row: DebtRow): string {
   return listed ? `${listed} y ${rest} más` : `${row.chargesCount} conceptos`
 }
 
-/** Cuándo salió hoy de su atención (o se le anotó algo hoy); null si debe de antes. */
-export function attendedTodayAt(row: DebtRow, timeZone: string, today: string): string | null {
-  if (row.lastAttended && dayKeyOf(row.lastAttended.at, timeZone) === today) return row.lastAttended.at
-  if (row.latestSince && dayKeyOf(row.latestSince, timeZone) === today) return row.latestSince
-  return null
+/**
+ * Cuándo salió hoy de su atención (o se le anotó algo hoy); null si debe de
+ * antes. La regla es del servidor (`getDebts`): la comparten la Caja e Inicio.
+ */
+export function attendedTodayAt(row: DebtRow): string | null {
+  return row.attendedTodayAt
 }
 
 /** Días que lleva debiendo, contados por día de calendario en la zona de la sede. */

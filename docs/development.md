@@ -94,7 +94,7 @@ del modelo no demuestra entrega del canal ni sustituye la observación humana.
 - `pnpm e2e crm.spec.ts --workers=1 --grep "crm derivación"` comprueba en la plataforma la cola con plazo y la toma de un caso.
 - `pnpm --filter @odentia/services test -- commercial-coordination.test.ts workspace-continuity.test.ts` verifica deduplicación del seguimiento vencido, revocación, aislamiento y cohortes con desconocidos; requiere el mismo PostgreSQL efímero.
 - La prueba real de un seguimiento proactivo debe observar vencimiento → decisión → propuesta/derivación y reinicio del worker. Un envío `unknown` se concilia en el proveedor y no se reintenta.
-- En Inicio y Reportes, derivaciones usan cohorte por creación; controles y tareas usan cohorte por vencimiento. Cancelaciones no cuentan como éxito y los históricos sin evento suficiente permanecen desconocidos.
+- En Reportes, los controles se cuentan por la fecha en que tocaban y según su estado a hoy; uno marcado como realizado sin atención cerrada que lo respalde no cuenta como venido. `pnpm e2e reports.spec.ts --workers=2` recorre las cuatro preguntas, el cambio de periodo y la lista detrás de una cifra en 1440px/390px.
 - Los modos fake/mock prueban contratos internos, no entrega de proveedor, calidad de un LLM real ni observación con usuarios. El cierre de una validación integral exige proveedor/modelo reales identificados, datos consentidos o sintéticos y observación de recepción, clínico y caja.
 
 ## Identidad visual y temas

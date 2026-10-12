@@ -47,55 +47,86 @@ export function MonthPicker({
         <ChevronDown aria-hidden />
       </PopoverTrigger>
       <PopoverContent align={align} className="w-72 gap-3">
-        <div className="flex items-center justify-between gap-2">
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-sm"
-            aria-label="Año anterior"
-            disabled={viewYear <= FIRST_YEAR}
-            onClick={() => setViewYear((year) => year - 1)}
-          >
-            <ChevronLeft aria-hidden />
-          </Button>
-          <span className="text-sm font-semibold tabular-nums" aria-live="polite">
-            {viewYear}
-          </span>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-sm"
-            aria-label="Año siguiente"
-            disabled={viewYear >= max.year}
-            onClick={() => setViewYear((year) => year + 1)}
-          >
-            <ChevronRight aria-hidden />
-          </Button>
-        </div>
-        <fieldset aria-label={`Meses de ${viewYear}`} className="grid min-w-0 grid-cols-3 gap-1">
-          {MONTHS.map((month) => {
-            const candidate = { year: viewYear, month }
-            const selected = compareMonths(candidate, value) === 0
-            return (
-              <Button
-                key={month}
-                type="button"
-                size="sm"
-                variant={selected ? "default" : "ghost"}
-                aria-pressed={selected}
-                aria-label={monthLabel(candidate, locale)}
-                disabled={compareMonths(candidate, max) > 0}
-                onClick={() => {
-                  onChange(candidate)
-                  setOpen(false)
-                }}
-              >
-                {monthName(month, locale, "short")}
-              </Button>
-            )
-          })}
-        </fieldset>
+        <MonthGrid
+          value={value}
+          max={max}
+          locale={locale}
+          viewYear={viewYear}
+          onViewYear={setViewYear}
+          onPick={(next) => {
+            onChange(next)
+            setOpen(false)
+          }}
+        />
       </PopoverContent>
     </Popover>
+  )
+}
+
+/** Los doce meses de un año, con el año a un paso. Sin texto libre ni meses futuros. */
+export function MonthGrid({
+  value,
+  max,
+  locale,
+  viewYear,
+  onViewYear,
+  onPick,
+}: {
+  /** Mes elegido; `null` si la pantalla no está en un mes suelto. */
+  value: YearMonth | null
+  max: YearMonth
+  locale: string
+  viewYear: number
+  onViewYear: (year: number) => void
+  onPick: (next: YearMonth) => void
+}) {
+  return (
+    <>
+      <div className="flex items-center justify-between gap-2">
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          aria-label="Año anterior"
+          disabled={viewYear <= FIRST_YEAR}
+          onClick={() => onViewYear(viewYear - 1)}
+        >
+          <ChevronLeft aria-hidden />
+        </Button>
+        <span className="text-sm font-semibold tabular-nums" aria-live="polite">
+          {viewYear}
+        </span>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          aria-label="Año siguiente"
+          disabled={viewYear >= max.year}
+          onClick={() => onViewYear(viewYear + 1)}
+        >
+          <ChevronRight aria-hidden />
+        </Button>
+      </div>
+      <fieldset aria-label={`Meses de ${viewYear}`} className="grid min-w-0 grid-cols-3 gap-1">
+        {MONTHS.map((month) => {
+          const candidate = { year: viewYear, month }
+          const selected = value !== null && compareMonths(candidate, value) === 0
+          return (
+            <Button
+              key={month}
+              type="button"
+              size="sm"
+              variant={selected ? "default" : "ghost"}
+              aria-pressed={selected}
+              aria-label={monthLabel(candidate, locale)}
+              disabled={compareMonths(candidate, max) > 0}
+              onClick={() => onPick(candidate)}
+            >
+              {monthName(month, locale, "short")}
+            </Button>
+          )
+        })}
+      </fieldset>
+    </>
   )
 }
