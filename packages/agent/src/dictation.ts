@@ -77,7 +77,7 @@ function systemPrompt(input: { services: string[]; today: string; timezone: stri
     "En las indicaciones, pon en `service` la prestación con las palabras del odontólogo: el sistema la busca en los servicios de la clínica. No inventes precios.",
     input.services.length
       ? `Servicios de la clínica, para reconocer de qué prestación habla: ${input.services.slice(0, 200).join("; ")}.`
-      : "La clínica aún no tiene servicios en su tarifario.",
+      : "La clínica aún no tiene servicios.",
     `Hoy es ${input.today} (zona ${input.timezone}). Un control «en seis meses» se cuenta desde hoy.`,
     `Responde únicamente llamando a ${TOOL_NAME}, una sola vez, con todo lo dictado.`,
   ].join("\n")
@@ -297,7 +297,7 @@ export async function extractDictation(
   const bound = (model as unknown as { bindTools?: (tools: unknown[]) => { invoke: (messages: BaseMessage[]) => Promise<AIMessage> } }).bindTools
     ? (model as unknown as { bindTools: (tools: unknown[]) => { invoke: (messages: BaseMessage[]) => Promise<AIMessage> } }).bindTools([record])
     : model
-  const today = new Intl.DateTimeFormat("es-PE", { timeZone: zone.timezone, dateStyle: "full" }).format(now)
+  const today = new Intl.DateTimeFormat(zone.locale, { timeZone: zone.timezone, dateStyle: "full" }).format(now)
   const reply = await bound.invoke([
     new SystemMessage({ content: systemPrompt({ services, today: `${today}, ${now.toISOString()}`, timezone: zone.timezone }) }),
     new HumanMessage({ content: human }),

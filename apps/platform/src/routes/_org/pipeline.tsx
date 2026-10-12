@@ -23,6 +23,7 @@ import { createFileRoute, Link } from "@tanstack/react-router"
 import { ArrowRight, CalendarClock, Check, Circle, Columns3, GripVertical, List, Undo2, UserRound } from "lucide-react"
 import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-table"
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
+import { formatMoney as sharedFormatMoney } from "@odentia/clinical"
 import { formatDueAt, isOverdue } from "../../components/crm/crm-helpers"
 import { OpportunityDrawer } from "../../components/crm/opportunity-drawer"
 import { apiFetch } from "../../lib/api"
@@ -35,6 +36,7 @@ import {
   usePermission,
 } from "../../lib/crm"
 import { useOrgEvents } from "../../lib/org-events"
+import { useOrgProfile } from "../../lib/org"
 
 export const Route = createFileRoute("/_org/pipeline")({
   component: PipelinePage,
@@ -58,6 +60,9 @@ function PipelinePage() {
   const queryClient = useQueryClient()
   const myUserId = useMyUserId()
   const members = useOrgMembers()
+  // Formato de la clínica para los importes (moneda congelada de cada registro).
+  const profile = useOrgProfile()
+  const orgLocale = profile.data?.locale
   const canWrite = usePermission("crm.write")
   const listSearch = useListSearch()
   // Filtros y selección persistentes en la URL: no se pierde el caso al
@@ -263,7 +268,7 @@ function PipelinePage() {
     )
   }
 
-  const totalAmounts = sumAmounts(summary?.stages ?? [])
+  const totalAmounts = sumAmounts(summary?.stages ?? [], orgLocale)
 
   return (
     <PageShell fill className="flex min-h-0 flex-1 flex-col gap-4">
@@ -394,7 +399,8 @@ function PipelinePage() {
   )
 }
 
-function sumAmounts(stages: SummaryStage[]): string | null {
+function sumAmounts(stages: SummaryStage[], locale: string | undefined): string | null {
+  if (!locale) return null
   const totals = new Map<string, number>()
   for (const stage of stages) {
     for (const entry of stage.amounts) {
@@ -404,9 +410,13 @@ function sumAmounts(stages: SummaryStage[]): string | null {
     }
   }
   if (totals.size === 0) return null
-  return [...totals.entries()]
-    .map(([currency, cents]) => formatMoney(cents, currency) ?? `${cents / 100} ${currency}`)
-    .join(" + ")
+  const parts: string[] = []
+  for (const [currency, cents] of totals) {
+    const text = formatMoney(cents, currency, locale)
+    if (text === null) return null
+    parts.push(text)
+  }
+  return parts.join(" + ")
 }
 
 interface MoveFeedback {
@@ -485,6 +495,8 @@ function BoardColumns(
   },
 ) {
   const { stages } = props
+  const profile = useOrgProfile()
+  const orgLocale = profile.data?.locale
   const [dragged, setDragged] = useState<OpportunityListItem | null>(null)
   const [reducedMotion, setReducedMotion] = useState(false)
   const [dropAccepted, setDropAccepted] = useState(false)
@@ -557,7 +569,7 @@ function BoardColumns(
               onlyDue={props.onlyDue}
               params={props.paramsFor(stage.id)}
               total={props.summaryByStage[stage.id]?.count}
-              amount={sumAmounts(props.summaryByStage[stage.id] ? [props.summaryByStage[stage.id]] : [])}
+              amount={sumAmounts(props.summaryByStage[stage.id] ? [props.summaryByStage[stage.id]] : [], orgLocale)}
               memberName={props.memberName}
               canMove={props.canMove}
               onMoveRequest={props.onMoveRequest}
@@ -833,12 +845,17 @@ function StageColumn({
   )
 }
 
-export function formatMoney(amountCents: number | null, currency: string): string | null {
-  if (amountCents === null) return null
+/**
+ * Importe histórico con la moneda congelada del registro y el formato de la
+ * clínica. Sin locale (perfil aún cargando) devuelve null: cada superficie
+ * muestra su estado neutro en vez de inventar un precio.
+ */
+export function formatMoney(amountCents: number | null, currency: string, locale?: string): string | null {
+  if (amountCents === null || !locale) return null
   try {
-    return new Intl.NumberFormat("es-PE", { style: "currency", currency }).format(amountCents / 100)
+    return sharedFormatMoney(amountCents, currency, locale)
   } catch {
-    return `${amountCents / 100} ${currency}`
+    return null
   }
 }
 
@@ -909,7 +926,8 @@ function CardContents({ card, assignee, title, actions, saving = false, feedback
   saving?: boolean
   feedback?: MoveFeedback | null
 }) {
-  const money = formatMoney(card.amountCents, card.currency)
+  const profile = useOrgProfile()
+  const money = formatMoney(card.amountCents, card.currency, profile.data?.locale)
   const overdue = isOverdue(card.nextActionAt)
   return <div className="flex min-w-0 flex-col gap-3">
     <div className="flex items-start justify-between gap-2">
@@ -922,7 +940,7 @@ function CardContents({ card, assignee, title, actions, saving = false, feedback
       {card.interestText && <p className="line-clamp-1 text-xs text-muted-foreground">{card.interestText}</p>}
     </div>
     <div className="flex items-center justify-between gap-3">
-      <span className="text-sm font-semibold tabular-nums tracking-tight">{money ?? <span className="text-xs font-normal text-muted-foreground">Sin importe</span>}</span>
+      <span className="text-sm font-semibold tabular-nums tracking-tight">{money ?? (profile.isPending ? "…" : <span className="text-xs font-normal text-muted-foreground">Sin importe</span>)}</span>
       <span title={`Responsable: ${assignee}`} aria-label={`Responsable: ${assignee}`} className="flex size-7 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-semibold text-muted-foreground ring-2 ring-card">
         {card.assignedUserId ? assignee.split(/\s+/).slice(0, 2).map((part) => part.charAt(0)).join("") : <UserRound aria-hidden className="size-3.5" />}
       </span>
@@ -960,6 +978,8 @@ function PipelineListView({
   onReopenRequest: (opp: OpportunityListItem) => void
   movePending: boolean
 }) {
+  const profile = useOrgProfile()
+  const orgLocale = profile.data?.locale
   const listQuery = useInfiniteQuery({
     queryKey,
     queryFn: ({ pageParam }: { pageParam: string | null }) => {
@@ -1012,7 +1032,7 @@ function PipelineListView({
       {
         id: "valor",
         header: "Valor",
-        cell: ({ row }) => formatMoney(row.original.amountCents, row.original.currency) ?? "—",
+        cell: ({ row }) => formatMoney(row.original.amountCents, row.original.currency, orgLocale) ?? "—",
       },
       {
         id: "responsable",
@@ -1063,7 +1083,7 @@ function PipelineListView({
           ]
         : []),
     ],
-    [stages, memberName, canMove, onMoveRequest, onReopenRequest, movePending],
+    [stages, memberName, canMove, onMoveRequest, onReopenRequest, movePending, orgLocale],
   )
   const table = useReactTable({ data: rows, columns, getCoreRowModel: getCoreRowModel() })
 

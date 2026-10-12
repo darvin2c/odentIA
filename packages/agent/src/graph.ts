@@ -12,6 +12,7 @@ import {
   CASE_LOOKUP_TOOLS,
   formatAgentCaseForPrompt,
   formatKnowledgeForPrompt,
+  formatOrgMoney,
   formatLessonExamples,
   formatLessonRules,
   formatPersonMemoryForPrompt,
@@ -425,7 +426,7 @@ export function compileAgentGraph(
             ? `; próxima acción ${formatZoned(new Date(o.nextActionAt), zone)}`
             : ""
           const amount =
-            o.amountCents !== null ? `; valor ${(o.amountCents / 100).toFixed(2)} ${o.currency}` : ""
+            o.amountCents !== null ? `; valor ${formatOrgMoney(o.amountCents, o.currency, zone)}` : ""
           parts.push(`${o.title} (etapa ${o.stageName}${followup}${amount})`)
         }
         if (nextCursor) parts.push("hay más oportunidades: usa listar_oportunidades para verlas todas")

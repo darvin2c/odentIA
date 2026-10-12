@@ -12,6 +12,7 @@ import { createProposal } from "./agent-operations.js"
 import { createAppointment, moveAppointment, setAppointmentStatus } from "./appointments.js"
 import { listAvailableSlots } from "./availability.js"
 import { notFound, ServiceError, validation } from "./errors.js"
+import { findOrgLocale, NEUTRAL_TIMEZONE } from "./locale.js"
 import { createPatientRegistrationLink, getPatientRegistrationConfig, registerPatient } from "./patient-registration.js"
 import { listPatientsByContact, patientOrganizationToday } from "./patients.js"
 
@@ -192,7 +193,8 @@ async function appointmentView(tx: Db, orgId: string, appointmentId: string): Pr
   return {
     startsAt: row.startsAt.toISOString(),
     endsAt: row.endsAt.toISOString(),
-    timeZone: row.branchTimeZone ?? "America/Lima",
+    // La sede hereda la zona de la clínica; nunca la de un país fijo.
+    timeZone: row.branchTimeZone ?? (await findOrgLocale(tx, orgId)).timezone,
     durationMin: Math.round((row.endsAt.getTime() - row.startsAt.getTime()) / 60_000),
     branchId: row.branchId,
     cancelled: row.status === "cancelada",
@@ -207,6 +209,8 @@ async function appointmentView(tx: Db, orgId: string, appointmentId: string): Pr
 export interface BookingLinkView {
   status: "abierto" | "usado" | "vencido"
   clinicName: string
+  /** Formato regional de la clínica (BCP 47): la página pública escribe fechas y horas con él. */
+  locale: string
   /** Solo el nombre de pila: la página confirma para quién es sin exponer más. */
   patientFirstName: string | null
   /** La persona aún no es paciente: antes de reservar completa sus datos en la misma página. */
@@ -224,7 +228,8 @@ export async function getBookingLinkView(tx: Db, orgId: string, token: string): 
   const link = await findLink(tx, orgId, token)
   const status = stateOf(link)
   const [org] = await tx.select({ name: organization.name }).from(organization).where(eq(organization.id, orgId)).limit(1)
-  const base = { status, clinicName: org?.name ?? "", expiresAt: link.expiresAt.toISOString() }
+  const region = await findOrgLocale(tx, orgId)
+  const base = { status, clinicName: org?.name ?? "", locale: region.locale, expiresAt: link.expiresAt.toISOString() }
   if (status === "vencido") {
     return { ...base, patientFirstName: null, needsRegistration: false, service: null, branches: [], branchId: null, appointment: null }
   }
@@ -257,7 +262,7 @@ export async function getBookingLinkView(tx: Db, orgId: string, token: string): 
     service,
     branches: sites
       .filter((site) => !link.branchId || site.id === link.branchId)
-      .map((site) => ({ id: site.id, name: site.name, address: site.address, timeZone: site.timezone ?? "America/Lima", defaultMinutes: site.minutes })),
+      .map((site) => ({ id: site.id, name: site.name, address: site.address, timeZone: site.timezone ?? region.timezone, defaultMinutes: site.minutes })),
     branchId: link.branchId,
     appointment: link.appointmentId ? await appointmentView(tx, orgId, link.appointmentId) : null,
   }
@@ -334,7 +339,7 @@ export async function listBookingLinkSlots(
   // Día por día: la Agenda recorta cada consulta a un tope de huecos, y con
   // varios profesionales una semana entera dejaría sin horarios los últimos días.
   const slots: BookingLinkSlot[] = []
-  let timeZone = "America/Lima"
+  let timeZone = NEUTRAL_TIMEZONE
   let truncated = false
   for (let start = from.getTime(); start < to.getTime(); start += 86_400_000) {
     const day = await listAvailableSlots(tx, orgId, {
@@ -451,10 +456,12 @@ export async function registerFromBookingLink(
   return { registered: true }
 }
 
-function whenText(startsAt: string, timeZone: string): string {
+/** «lunes, 21 de septiembre a las 3:00 p. m.», en el formato de la clínica y la zona de la sede. */
+async function whenText(tx: Db, orgId: string, startsAt: string, timeZone: string): Promise<string> {
+  const { locale } = await findOrgLocale(tx, orgId)
   const date = new Date(startsAt)
-  const day = new Intl.DateTimeFormat("es-PE", { timeZone, weekday: "long", day: "numeric", month: "long" }).format(date)
-  const time = new Intl.DateTimeFormat("es-PE", { timeZone, hour: "numeric", minute: "2-digit", hour12: true }).format(date)
+  const day = new Intl.DateTimeFormat(locale, { timeZone, weekday: "long", day: "numeric", month: "long" }).format(date)
+  const time = new Intl.DateTimeFormat(locale, { timeZone, hour: "numeric", minute: "2-digit" }).format(date)
   return `${day} a las ${time}`
 }
 
@@ -494,7 +501,7 @@ export async function reserveBookingLink(
     .where(and(eq(appointmentBookingLink.organizationId, orgId), eq(appointmentBookingLink.id, link.id)))
   const view = await appointmentView(tx, orgId, created.id)
   if (!view) throw notFound("Cita")
-  const when = whenText(view.startsAt, view.timeZone)
+  const when = await whenText(tx, orgId, view.startsAt, view.timeZone)
   const what = view.serviceName ? `tu cita de ${view.serviceName}` : "tu cita"
   await addAgentCaseNote(tx, orgId, link.conversationId, `Reservó desde el enlace: ${view.serviceName ?? "cita"} el ${when} en ${view.branchName}, con ${view.dentistName}.`)
   // La confirmación sale por la conversación con la misma política que cualquier mensaje del agente.
@@ -556,7 +563,7 @@ export async function changeBookingLinkAppointment(
   })
   const view = await appointmentView(tx, orgId, current.id)
   if (!view) throw notFound("Cita")
-  const when = whenText(view.startsAt, view.timeZone)
+  const when = await whenText(tx, orgId, view.startsAt, view.timeZone)
   await tellConversation(
     tx,
     orgId,
@@ -588,7 +595,7 @@ export async function cancelBookingLinkAppointment(
   })
   const view = await appointmentView(tx, orgId, current.id)
   if (!view || !before) throw notFound("Cita")
-  const when = whenText(before.startsAt, before.timeZone)
+  const when = await whenText(tx, orgId, before.startsAt, before.timeZone)
   await tellConversation(
     tx,
     orgId,

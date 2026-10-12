@@ -1,8 +1,10 @@
+import { randomUUID } from "node:crypto"
 import type { ChannelAdapter, NormalizedInbound } from "@odentia/channels"
 import { type Db, type InboundMessageJob, withOrgContext } from "@odentia/db"
 import { agentRunLedger } from "@odentia/db/schema/agent"
 import { member, user } from "@odentia/db/schema/auth"
-import { crmTask, message } from "@odentia/db/schema/crm"
+import { patient, patientContact, treatmentBudget, treatmentPlan } from "@odentia/db/schema/clinical"
+import { contact, crmTask, message } from "@odentia/db/schema/crm"
 import { and, eq } from "drizzle-orm"
 import { beforeAll, expect, it } from "vitest"
 import { listAgentActivity } from "./agent-activity.js"
@@ -13,6 +15,7 @@ import {
   createProposal,
   decideProposal,
   getAgentPanelSummary,
+  getAgentPatientSummary,
   listHandoffs,
   updateAutonomyPolicy,
 } from "./agent-operations.js"
@@ -22,7 +25,7 @@ import { createOpportunity, getOpportunity } from "./opportunities.js"
 import { secretsKeyFromEnv } from "./secrets.js"
 import type { Storage } from "./storage.js"
 import { updateTask } from "./tasks.js"
-import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
+import { appDb, insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
 
 /**
  * Panel lateral del agente: lo que recepción ve y decide desde cualquier
@@ -183,4 +186,19 @@ it("una derivación resuelta no se toma, y la de un seguimiento comercial asigna
   expect((await run((tx) => getOpportunity(tx, ORG, opportunity.id))).assignedUserId).toBe(RECEP)
   const [task] = await run((tx) => tx.select().from(crmTask).where(eq(crmTask.id, followUp?.id as string)))
   expect(task?.assigneeUserId).toBe(RECEP)
+})
+
+it("el resumen del agente excluye los presupuestos en borrador", async () => {
+  const orgId = randomUUID()
+  await insertOrg(ownerDb, orgId, `agente-${orgId.slice(0, 8)}`)
+  const [who] = await ownerDb.insert(contact).values({ organizationId: orgId, displayName: "Contacto agente" }).returning({ id: contact.id })
+  const [ficha] = await ownerDb.insert(patient).values({ organizationId: orgId, displayName: "Paciente agente", patientNumber: 1 }).returning({ id: patient.id })
+  await ownerDb.insert(patientContact).values({ organizationId: orgId, patientId: ficha!.id, contactId: who!.id, relationship: "self" })
+  const [plan] = await ownerDb.insert(treatmentPlan).values({ organizationId: orgId, patientId: ficha!.id, title: "Plan general" }).returning({ id: treatmentPlan.id })
+  await ownerDb.insert(treatmentBudget).values([
+    { organizationId: orgId, patientId: ficha!.id, planId: plan!.id, budgetNumber: 1, title: "Propuesta presentada", currency: "PEN", status: "presentado" },
+    { organizationId: orgId, patientId: ficha!.id, planId: plan!.id, budgetNumber: 2, title: "Borrador interno", currency: "PEN", status: "borrador" },
+  ])
+  const summary = await withOrgContext(appDb, orgId, tx => getAgentPatientSummary(tx, orgId, who!.id, ficha!.id))
+  expect(summary.budgets.map(budget => budget.status)).toEqual(["presentado"])
 })

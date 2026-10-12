@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
+import { activeOrgLocale } from "../../lib/locale"
 
 export type DictationKind = "nota" | "diagnostico" | "plan" | "control"
 
@@ -212,7 +213,8 @@ export function useDictationSession({
     if (!Recognition) return
     setMicError(null)
     const instance = new Recognition()
-    instance.lang = "es-PE"
+    // Idioma del dictado: el formato de la clínica; sin él, español sin país.
+    instance.lang = activeOrgLocale() ?? "es"
     instance.continuous = true
     // Lo que se va oyendo se muestra al momento; solo las frases cerradas entran a lo dictado.
     instance.interimResults = true

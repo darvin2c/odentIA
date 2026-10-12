@@ -16,6 +16,7 @@ import { assertOpenDraft, lockEncounter, updateEncounterDraft, type UpdateEncoun
 import { notFound, ServiceError, validation } from "./errors.js"
 import { createFollowUp } from "./follow-ups.js"
 import { normalizeForSearch } from "./knowledge.js"
+import { findOrgLocale, formatOrgMoney, type OrgLocale } from "./locale.js"
 import { OPERATIONS, operationAgentSchema } from "./operation-fields.js"
 import { addPlanItem, createTreatmentPlan } from "./plan.js"
 
@@ -192,7 +193,8 @@ function normalizeSite(payload: Record<string, unknown>): { payload: Record<stri
   return { payload: { ...rest, toothNumber, ...(faces.length ? { surfaces: faces } : {}) }, invalid: false }
 }
 
-const money = (cents: number, currency: string) => `${currency === "PEN" ? "S/" : currency} ${(cents / 100).toFixed(2)}`
+/** Formato y zona de la clínica con los que se escribe el resumen de una sugerencia. */
+type Zone = Pick<OrgLocale, "locale" | "timezone">
 
 function site(payload: Record<string, unknown>): string {
   const tooth = typeof payload["toothNumber"] === "number" ? `Pieza ${payload["toothNumber"]}` : ""
@@ -205,7 +207,7 @@ function site(payload: Record<string, unknown>): string {
 
 const NOTE_LABEL = Object.fromEntries(Object.entries(OPERATIONS["atencion.nota"].fields).map(([key, field]) => [key, field.label]))
 
-function summarize(kind: DictationKind, payload: Record<string, unknown>): string {
+function summarize(kind: DictationKind, payload: Record<string, unknown>, zone: Zone): string {
   if (kind === "nota") {
     return Object.entries(payload)
       .filter(([, value]) => typeof value === "string" && value.trim())
@@ -218,14 +220,18 @@ function summarize(kind: DictationKind, payload: Record<string, unknown>): strin
       .join("\n")
   }
   if (kind === "plan") {
-    const price = typeof payload["priceCents"] === "number" ? money(payload["priceCents"], String(payload["currency"] ?? "PEN")) : ""
+    // La tarifa lleva la moneda del tarifario; sin moneda no se inventa una: no se escribe el importe.
+    const price =
+      typeof payload["priceCents"] === "number" && typeof payload["currency"] === "string"
+        ? formatOrgMoney(payload["priceCents"], payload["currency"], zone)
+        : ""
     return [`${payload["serviceName"] ?? payload["service"] ?? ""}${price ? ` · ${price}` : ""}`, site(payload), payload["detail"]].filter(Boolean).join("\n")
   }
-  const due = typeof payload["dueAt"] === "string" ? new Date(payload["dueAt"]).toLocaleDateString("es-PE", { day: "numeric", month: "long", year: "numeric" }) : ""
+  const due = typeof payload["dueAt"] === "string" ? new Date(payload["dueAt"]).toLocaleDateString(zone.locale, { timeZone: zone.timezone, day: "numeric", month: "long", year: "numeric" }) : ""
   return [String(payload["title"] ?? "Control"), due ? `Alrededor del ${due}` : "", payload["instructions"]].filter(Boolean).join("\n")
 }
 
-function toItem(row: typeof encounterDictationSuggestion.$inferSelect): DictationSuggestion {
+function toItem(row: typeof encounterDictationSuggestion.$inferSelect, zone: Zone): DictationSuggestion {
   const { data, meta } = splitMeta(row.payload)
   return {
     id: row.id,
@@ -234,7 +240,7 @@ function toItem(row: typeof encounterDictationSuggestion.$inferSelect): Dictatio
     sourceText: row.sourceText,
     status: row.status as DictationSuggestion["status"],
     note: row.note,
-    summary: summarize(row.kind, data),
+    summary: summarize(row.kind, data, zone),
     voice: meta.voice ? { before: meta.voice.before } : null,
     createdAt: row.createdAt.toISOString(),
   }
@@ -539,7 +545,8 @@ export async function saveDictationSegment(
       metadata: { patientId, count: inserted.length, kinds: [...new Set(inserted.map((row) => row.kind))], corrected: corrected.length, removed: removed.length },
     })
   }
-  return { suggestions: inserted.map(toItem), corrected, removed, repeated: false }
+  const zone = await findOrgLocale(tx, orgId)
+  return { suggestions: inserted.map((row) => toItem(row, zone)), corrected, removed, repeated: false }
 }
 
 /**
@@ -587,7 +594,8 @@ export async function listDictationSuggestions(tx: Db, orgId: string, patientId:
       ),
     )
     .orderBy(asc(encounterDictationSuggestion.createdAt), asc(encounterDictationSuggestion.id))
-  return rows.map(toItem)
+  const zone = await findOrgLocale(tx, orgId)
+  return rows.map((row) => toItem(row, zone))
 }
 
 async function lockSuggestion(tx: Db, orgId: string, patientId: string, encounterId: string, id: string) {
@@ -635,7 +643,7 @@ export async function updateDictationSuggestion(
     .where(eq(encounterDictationSuggestion.id, id))
     .returning()
   if (!updated) throw new Error("No se pudo actualizar la sugerencia")
-  return toItem(updated)
+  return toItem(updated, await findOrgLocale(tx, orgId))
 }
 
 /** Deshace una corrección dicha en voz alta: la sugerencia vuelve a como estaba antes de ella. */
@@ -657,7 +665,7 @@ export async function undoDictationVoiceCorrection(
     .where(eq(encounterDictationSuggestion.id, id))
     .returning()
   if (!updated) throw new Error("No se pudo deshacer la corrección")
-  return toItem(updated)
+  return toItem(updated, await findOrgLocale(tx, orgId))
 }
 
 /** Plan donde entra una indicación dictada: el de esta atención, el más reciente del paciente o uno nuevo. */
@@ -733,7 +741,7 @@ export async function confirmDictationSuggestion(
     .where(eq(encounterDictationSuggestion.id, id))
     .returning()
   if (!updated) throw new Error("No se pudo confirmar la sugerencia")
-  return toItem(updated)
+  return toItem(updated, await findOrgLocale(tx, orgId))
 }
 
 /** Descartar: la sugerencia no entra a la historia. */
@@ -776,11 +784,12 @@ export async function discardPendingDictation(tx: Db, orgId: string, actorUserId
  */
 export async function previewDictationSuggestions(tx: Db, orgId: string, drafts: DictationDraft[]): Promise<Array<Omit<DictationSuggestion, "id" | "createdAt" | "voice">>> {
   const services = await activeServices(tx, orgId)
+  const zone = await findOrgLocale(tx, orgId)
   const out: Array<Omit<DictationSuggestion, "id" | "createdAt" | "voice">> = []
   for (const draft of drafts.slice(0, DICTATION_MAX_SUGGESTIONS)) {
     const ready = await prepare(tx, draft, services)
     if (!ready) continue
-    out.push({ kind: draft.kind, payload: ready.payload, sourceText: (draft.sourceText ?? "").slice(0, SOURCE_CHARS), status: ready.status, note: ready.note, summary: summarize(draft.kind, ready.payload) })
+    out.push({ kind: draft.kind, payload: ready.payload, sourceText: (draft.sourceText ?? "").slice(0, SOURCE_CHARS), status: ready.status, note: ready.note, summary: summarize(draft.kind, ready.payload, zone) })
   }
   return out
 }

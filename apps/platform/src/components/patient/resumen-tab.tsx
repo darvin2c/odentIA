@@ -9,12 +9,12 @@ import { apiFetch } from "../../lib/api"
 import { planDecisionLabel } from "../../lib/budgets"
 import {
   fetchFollowUps,
-  fetchPatientAccount,
   fetchResponsibilities,
   formatDate,
   NEXT_ACTION_LABELS,
   RESPONSIBILITY_KIND_LABELS,
 } from "../../lib/clinical-journey"
+import { fetchPatientAccount3 } from "../../lib/finance-collect"
 import { type TaskItem, timeAgo, usePermission } from "../../lib/crm"
 import {
   APPOINTMENT_STATUS_LABELS,
@@ -32,7 +32,8 @@ import {
   planStatusLabel,
 } from "../../lib/patients"
 import { QueryErrorState } from "../../lib/query-error"
-import { formatMoney } from "../../lib/services"
+import { formatMoney } from "@odentia/clinical"
+import { useOrgProfile } from "../../lib/org"
 import { useTreatmentCoordination } from "./coordinacion-panel"
 import { NewPatientTaskButton } from "./new-patient-task-button"
 import {
@@ -97,6 +98,11 @@ export function ResumenTab({
   const canReadAgent = usePermission("agent.read")
   const canTasks = usePermission("tasks.read")
 
+  // Formato de la clínica para saldos históricos (moneda congelada de cada registro).
+  const profile = useOrgProfile()
+  const orgLocale = profile.data?.locale
+  const money = (cents: number, currency: string): string =>
+    orgLocale ? formatMoney(cents, currency, orgLocale) : "…"
   const healthQuery = useQuery({
     queryKey: ["patient-health", patientId],
     queryFn: () => fetchPatientHealth(patientId),
@@ -114,7 +120,7 @@ export function ResumenTab({
   })
   const accountQuery = useQuery({
     queryKey: ["patient-account", patientId],
-    queryFn: () => fetchPatientAccount(patientId),
+    queryFn: () => fetchPatientAccount3(patientId),
     enabled: canFinance,
   })
   const responsibilitiesQuery = useQuery({
@@ -290,13 +296,13 @@ export function ResumenTab({
   }
   const balances = accountQuery.data?.data.byCurrency ?? []
   for (const balance of balances) {
-    if (balance.outstandingCents > 0)
+    if (balance.porCobrar > 0)
       pending.push({
         id: `balance-${balance.currency}`,
-        title: `Saldo por cobrar de ${formatMoney(balance.outstandingCents, balance.currency)}`,
+        title: `Saldo por cobrar de ${money(balance.porCobrar, balance.currency)}`,
         detail:
-          balance.availableCreditCents > 0
-            ? `Hay un anticipo disponible de ${formatMoney(balance.availableCreditCents, balance.currency)}.`
+          balance.aFavor > 0
+            ? `Hay un anticipo disponible de ${money(balance.aFavor, balance.currency)}.`
             : "Cargos emitidos sin pago aplicado.",
         action: go("cuenta", "Ir a la cuenta"),
       })
@@ -553,11 +559,11 @@ export function ResumenTab({
                         Por cobrar ({balance.currency})
                       </dt>
                       <dd className="text-lg font-semibold tabular-nums">
-                        {formatMoney(balance.outstandingCents, balance.currency)}
+                        {money(balance.porCobrar, balance.currency)}
                       </dd>
                       <dd className="text-xs text-muted-foreground">
                         anticipo disponible{" "}
-                        {formatMoney(balance.availableCreditCents, balance.currency)}
+                        {money(balance.aFavor, balance.currency)}
                       </dd>
                     </div>
                   ))}

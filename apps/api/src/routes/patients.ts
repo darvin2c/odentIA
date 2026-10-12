@@ -465,13 +465,19 @@ const CLINICAL_SUBPATHS = [
 ]
 
 /** Subrutas de caja: exigen `finance.read`/`.write`. */
-const FINANCE_SUBPATHS = ["/account", "/payments", "/budgets"]
+const FINANCE_SUBPATHS = ["/account", "/collect", "/charges", "/tickets", "/refunds", "/receipts"]
+
+/** Documentos financieros: guardas propias en su router, no `patients.write`. */
+const FINANCIAL_DOCUMENTS_PREFIXES = ["/financial-documents", "/financial-document-"]
 
 /**
  * Coordinación del tratamiento: quien agenda ve qué falta reservar o decidir
  * sin leer la ficha. Exige `appointments.read`/`.write`, no `clinical.*`.
  */
 const COORDINATION_SUBPATH = "/coordination"
+
+/** Presupuestos: `budgets.read`/`.write`; la decisión usa `budgets.decide`. */
+const BUDGET_SUBPATH = "/budgets"
 
 /** Bitácora de consultas a la historia: la lee quien audita (`audit.read`). */
 const ACCESS_LOG_SUBPATH = "/access-log"
@@ -520,6 +526,12 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
     // `c.req.path` trae el prefijo de montaje (/api/patients...): el resto
     // tras el id clasifica el subdominio (filiación, clínica o caja).
     const remainder = c.req.path.match(/\/patients\/[^/]+(\/.*)?$/)?.[1] ?? ""
+    // Documentos financieros: guardas propias en su router (ticket finance.*,
+    // presupuesto budgets/finance); el guarda genérico no decide.
+    if (FINANCIAL_DOCUMENTS_PREFIXES.some((prefix) => remainder.startsWith(prefix))) {
+      await next()
+      return
+    }
     const domain = remainder.startsWith(ACCESS_LOG_SUBPATH)
       ? "audit"
       : remainder.startsWith(COORDINATION_SUBPATH)
@@ -528,9 +540,17 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
           ? "clinical"
           : FINANCE_SUBPATHS.some((prefix) => remainder.startsWith(prefix))
             ? "finance"
-            : "patients"
+            : remainder.startsWith(BUDGET_SUBPATH)
+              ? "budgets"
+              : "patients"
     const write = !["GET", "HEAD", "OPTIONS"].includes(c.req.method)
-    if (!canAccess(memberRole, `${domain}.${write ? "write" : "read"}`)) {
+    // La decisión del presupuesto usa `budgets.decide` (caja decide sin
+    // clínica); el resto de mutaciones, `budgets.write`.
+    const permission =
+      domain === "budgets" && write && remainder.includes("/decision")
+        ? "budgets.decide"
+        : `${domain}.${write ? "write" : "read"}`
+    if (!canAccess(memberRole, permission)) {
       return c.json(
         errorBody(
           c,

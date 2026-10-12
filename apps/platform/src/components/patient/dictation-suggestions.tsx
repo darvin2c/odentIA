@@ -1,9 +1,10 @@
-import { isValidTooth, surfaceLabel, surfacesForTooth } from "@odentia/clinical"
+import { formatMoney, isValidTooth, surfaceLabel, surfacesForTooth } from "@odentia/clinical"
 import { Badge, Button, Field, FieldDescription, FieldLabel, Input, Textarea } from "@odentia/ui"
 import { AgentMark, FormDrawer, SubmitButton } from "@odentia/ui-patterns"
 import { Check, CircleAlert, X } from "lucide-react"
 import { type FormEvent, useState } from "react"
-import { formatMoney, type ServiceCatalogItem } from "../../lib/services"
+import { activeOrgLocale } from "../../lib/locale"
+import type { ServiceCatalogItem } from "../../lib/services"
 import {
   DICTATION_KIND_LABEL,
   type DictationKind,
@@ -13,6 +14,15 @@ import {
   suggestionText,
 } from "./dictation-session"
 import { ServicePicker } from "./service-picker"
+
+/**
+ * Tarifa con la moneda del tarifario en el formato de la clínica. Sin moneda
+ * o sin formato cargado no se inventa ninguno: no se escribe el importe.
+ */
+function price(cents: number, currency: string): string {
+  const locale = activeOrgLocale()
+  return currency && locale ? formatMoney(cents, currency, locale) : "…"
+}
 
 interface Candidate {
   id: string
@@ -103,7 +113,7 @@ export function DictationBlockSuggestions({ session, kind }: { session: Dictatio
                       disabled={busy || session.save.isPending}
                       onClick={() => session.save.mutate({ item, patch: { serviceId: candidate.id }, confirm: false })}
                     >
-                      {candidate.name} · {formatMoney(candidate.priceCents, candidate.currency)}
+                      {candidate.name} · {price(candidate.priceCents, candidate.currency)}
                     </Button>
                   ))}
                   <Button type="button" variant="ghost" size="sm" className="min-h-11 sm:min-h-8" disabled={busy} onClick={() => session.openEdit(item)}>
@@ -171,7 +181,8 @@ function EditForm({ item, session }: { item: DictationSuggestion; session: Dicta
           id: payload["serviceId"],
           name: String(payload["serviceName"] ?? ""),
           priceCents: Number(payload["priceCents"] ?? 0),
-          currency: String(payload["currency"] ?? "PEN"),
+          // La moneda viene del tarifario (en el payload); si falta, no se asume ninguna.
+          currency: typeof payload["currency"] === "string" ? payload["currency"] : "",
           scope: (payload["serviceScope"] as string | null | undefined) ?? null,
         }
       : null,
@@ -246,7 +257,7 @@ function EditForm({ item, session }: { item: DictationSuggestion; session: Dicta
               <p className="text-sm font-medium">Prestación</p>
               <p className="text-sm">{service ? service.name : "Sin elegir"}</p>
               <p className="text-xs text-muted-foreground">
-                {service ? `Tarifa del tarifario: ${formatMoney(service.priceCents, service.currency)}. No se edita aquí.` : "La tarifa sale del tarifario; no se edita aquí."}
+                {service ? `Precio del servicio: ${price(service.priceCents, service.currency)}. No se edita aquí.` : "El precio sale de la lista de servicios; no se edita aquí."}
               </p>
               {candidates.length > 0 ? (
                 <fieldset className="m-0 flex min-w-0 flex-wrap gap-2 border-0 p-0" aria-label="Prestaciones parecidas">
@@ -260,7 +271,7 @@ function EditForm({ item, session }: { item: DictationSuggestion; session: Dicta
                       aria-pressed={service?.id === candidate.id}
                       onClick={() => pick(candidate)}
                     >
-                      {candidate.name} · {formatMoney(candidate.priceCents, candidate.currency)}
+                      {candidate.name} · {price(candidate.priceCents, candidate.currency)}
                     </Button>
                   ))}
                 </fieldset>

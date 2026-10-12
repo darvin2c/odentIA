@@ -21,6 +21,7 @@ import { fetchTreatmentPlans, planDecisionLabel } from "../../lib/budgets"
 import { NEXT_ACTION_LABELS } from "../../lib/clinical-journey"
 import { usePermission } from "../../lib/crm"
 import { type PlanItem, planStatusLabel, type TreatmentJourneySummary } from "../../lib/patients"
+import { activeOrgLocale } from "../../lib/locale"
 
 const CLOSED = ["realizado", "cancelado", "reemplazado"]
 
@@ -89,7 +90,7 @@ export function PlanPhases({
             patientId={patientId}
             title={
               info
-                ? `${info.plan.title} · abierto el ${new Date(info.plan.createdAt).toLocaleDateString("es-PE", { day: "2-digit", month: "short", year: "numeric" })}`
+                ? `${info.plan.title} · abierto el ${new Date(info.plan.createdAt).toLocaleDateString(activeOrgLocale(), { day: "2-digit", month: "short", year: "numeric" })}`
                 : "Plan de tratamiento"
             }
             items={items.filter((item) => item.planId === planId)}

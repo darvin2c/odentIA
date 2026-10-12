@@ -863,8 +863,10 @@ export const serviceCatalog = pgTable(
     scope: text("scope"),
     // Todo servicio tiene tarifa explícita (>= 0; 0 = incluido sin costo).
     priceCents: integer("price_cents").notNull(),
-    currency: char("currency", { length: 3 }).notNull().default("PEN"),
+    currency: char("currency", { length: 3 }).notNull(),
     durationMin: integer("duration_min"),
+    // Cómo se cobra: 'treatment' una vez por tratamiento, 'session' en cada visita atendida.
+    billingMode: text("billing_mode").notNull().default("treatment"),
     isActive: boolean("is_active").notNull().default(true),
     ...timestamps,
   },
@@ -876,6 +878,7 @@ export const serviceCatalog = pgTable(
     index("service_catalog_org_specialty_idx").on(table.organizationId, table.specialty),
     index("service_catalog_template_idx").on(table.templateId),
     check("service_catalog_price_check", sql`${table.priceCents} >= 0`),
+    check("service_catalog_billing_mode_check", sql`${table.billingMode} IN ('treatment','session')`),
   ],
 )
 /** Procedimiento de una sesión; completar la indicación es una decisión explícita. */
@@ -992,7 +995,7 @@ export const treatmentBudget = pgTable(
     presentedAt: timestamp("presented_at", { withTimezone: true }),
     decisionContactId: uuid("decision_contact_id").references(() => contact.id),
     title: text("title").notNull(),
-    currency: char("currency", { length: 3 }).notNull().default("PEN"),
+    currency: char("currency", { length: 3 }).notNull(),
     status: text("status").notNull().default("borrador"),
     notes: text("notes"),
     acceptedByName: text("accepted_by_name"),
@@ -1057,7 +1060,7 @@ export const treatmentPlanItem = pgTable(
     diagnosisCode: text("diagnosis_code").references(() => cie10Code.code),
     codings: jsonb("codings").$type<ProcedureCodingSnapshot[]>().notNull().default([]),
     priceCents: integer("price_cents"),
-    currency: char("currency", { length: 3 }).notNull().default("PEN"),
+    currency: char("currency", { length: 3 }).notNull(),
     status: text("status").notNull().default("pendiente"),
     /** Fase del plan (urgencia → mantenimiento); la propone la especialidad. */
     phase: text("phase").notNull().default("basica"),
@@ -1094,7 +1097,15 @@ export const treatmentPlanItem = pgTable(
 )
 /** Línea económica cotizada en un presupuesto: snapshot de lo realmente
  * cotizado (no un join mutable). UNIQUE(budgetId,planItemId). Append-only
- * tras presentar: solo `decision` cambia al decidir. */
+ * tras entregar: solo `decision` cambia al decidir.
+ *
+ * `priceCents` es el precio final acordado por unidad (total en modo
+ * `treatment`, por sesión en modo `session`); `tariffPriceCents` congela la
+ * tarifa original y `priceReason` el motivo cuando el final baja de la
+ * referencia (tarifa, o mínimo `from` con promoción). `promotionId`/`Name`/
+ * `Mode` congelan la promoción aplicada; el histórico nunca relee la
+ * promoción vigente. `billingMode` + `sessionsPlanned` congelan cómo se cobra
+ * la línea (una vez o por visita atendida, con tope de visitas). */
 export const treatmentBudgetItem = pgTable(
   "treatment_budget_item",
   {
@@ -1121,7 +1132,19 @@ export const treatmentBudgetItem = pgTable(
     arch: text("arch"),
     codings: jsonb("codings").$type<ProcedureCodingSnapshot[]>().notNull().default([]),
     priceCents: integer("price_cents"),
-    currency: char("currency", { length: 3 }).notNull().default("PEN"),
+    /** Tarifa original al cotizar (por unidad); null = sin tarifa conocida. */
+    tariffPriceCents: integer("tariff_price_cents"),
+    /** Motivo del ajuste; obligatorio si el final baja de la referencia. */
+    priceReason: text("price_reason"),
+    /** Promoción aplicada (snapshot; el histórico no relee la vigente). */
+    promotionId: uuid("promotion_id"),
+    promotionName: text("promotion_name"),
+    promotionMode: text("promotion_mode"),
+    /** Cómo se cobra la línea: 'treatment' una vez, 'session' por visita. */
+    billingMode: text("billing_mode").notNull().default("treatment"),
+    /** Tope de visitas con cargo en modo `session` (snapshot al cotizar). */
+    sessionsPlanned: smallint("sessions_planned"),
+    currency: char("currency", { length: 3 }).notNull(),
     decision: text("decision").notNull().default("pendiente"),
     createdBy: text("created_by").references(() => user.id),
     ...timestamps,
@@ -1131,6 +1154,19 @@ export const treatmentBudgetItem = pgTable(
     index("treatment_budget_item_org_patient_idx").on(table.organizationId, table.patientId),
     index("treatment_budget_item_org_budget_idx").on(table.organizationId, table.budgetId),
     index("treatment_budget_item_org_plan_idx").on(table.organizationId, table.planId),
+    index("treatment_budget_item_org_promotion_idx").on(table.organizationId, table.promotionId),
+    check(
+      "treatment_budget_item_billing_mode_check",
+      sql`${table.billingMode} IN ('treatment','session')`,
+    ),
+    check(
+      "treatment_budget_item_promotion_mode_check",
+      sql`${table.promotionMode} IS NULL OR ${table.promotionMode} IN ('fixed','from')`,
+    ),
+    check(
+      "treatment_budget_item_promotion_check",
+      sql`(${table.promotionId} IS NULL) = (${table.promotionName} IS NULL)`,
+    ),
   ],
 )
 /** Vínculo atención ↔ ítem del plan (creado al abrir atención o al registrar
@@ -1464,6 +1500,12 @@ export const patientCharge = pgTable(
     planItemId: uuid("plan_item_id").references(() => treatmentPlanItem.id),
     budgetItemId: uuid("budget_item_id").references(() => treatmentBudgetItem.id),
     encounterProcedureId: uuid("encounter_procedure_id").references(() => encounterProcedure.id),
+    branchId: uuid("branch_id").references(() => branch.id),
+    /** Promoción aplicada al cobrar/presupuestar: snapshot, el histórico nunca relee la regla. */
+    promotionId: text("promotion_id"),
+    promotionName: text("promotion_name"),
+    /** Motivo del último cambio de importe/descripción (auditoría de corrección en Cobrar). */
+    editReason: text("edit_reason"),
     description: text("description").notNull(),
     amountCents: integer("amount_cents").notNull(),
     currency: char("currency", { length: 3 }).notNull(),
@@ -1491,10 +1533,19 @@ export const patientPayment = pgTable(
     patientId: uuid("patient_id")
       .notNull()
       .references(() => patient.id),
+    /** Ticket del cobro atómico (un ticket agrupa un pago por medio). */
+    ticketId: uuid("ticket_id").references(() => paymentTicket.id),
+    branchId: uuid("branch_id").references(() => branch.id),
+    /** Medio configurado por la clínica; nombre/tipo congelados al cobrar. */
+    paymentMethodId: uuid("payment_method_id"),
+    methodName: text("method_name"),
+    /** Tipo UN/CEFACT 4461 congelado, independiente del nombre del medio. */
+    methodTypeCode: text("method_type_code"),
     payerContactId: uuid("payer_contact_id").references(() => contact.id),
     amountCents: integer("amount_cents").notNull(),
     currency: char("currency", { length: 3 }).notNull(),
     paidAt: timestamp("paid_at", { withTimezone: true }).notNull(),
+    /** Nombre conservado en pagos anteriores al catálogo configurable. */
     method: text("method").notNull(),
     reference: text("reference"),
     notes: text("notes"),
@@ -1507,9 +1558,10 @@ export const patientPayment = pgTable(
   (table) => [
     index("patient_payment_org_patient_idx").on(table.organizationId, table.patientId),
     check("patient_payment_amount_check", sql`${table.amountCents} > 0`),
+    // El tipo congelado es de la lista UN/CEFACT 4461, igual que el del medio.
     check(
-      "patient_payment_method_check",
-      sql`${table.method} IN ('efectivo','tarjeta','transferencia','yape','plin','otro')`,
+      "patient_payment_method_type_check",
+      sql`${table.methodTypeCode} IS NULL OR ${table.methodTypeCode} IN ('10','48','30','68','20','1')`,
     ),
   ],
 )
@@ -1528,6 +1580,8 @@ export const patientPaymentApplication = pgTable(
     chargeId: uuid("charge_id")
       .notNull()
       .references(() => patientCharge.id),
+    /** Ticket cuyo cobro originó la aplicación (nulo = histórico manual anterior). */
+    ticketId: uuid("ticket_id").references(() => paymentTicket.id),
     amountCents: integer("amount_cents").notNull(),
     createdBy: text("created_by").references(() => user.id),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -1566,6 +1620,57 @@ export const patientPaymentRefund = pgTable(
     check("payment_refund_amount_check", sql`${table.amountCents} > 0`),
   ],
 )
+
+/** Ticket numerado del cobro atómico: un ticket agrupa un pago por medio. Inmutable salvo anulación. */
+export const paymentTicket = pgTable(
+  "payment_ticket",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    organizationId: orgFk("organization_id"),
+    patientId: uuid("patient_id")
+      .notNull()
+      .references(() => patient.id),
+    branchId: uuid("branch_id")
+      .notNull()
+      .references(() => branch.id),
+    /** Número único por organización, sin saltos: lo asigna el contador bajo lock. */
+    ticketNumber: integer("ticket_number").notNull(),
+    currency: char("currency", { length: 3 }).notNull(),
+    totalCents: integer("total_cents").notNull(),
+    /** Crédito previo aplicado automáticamente (lo más antiguo primero). */
+    creditAppliedCents: integer("credit_applied_cents").notNull().default(0),
+    cashReceivedCents: integer("cash_received_cents"),
+    changeCents: integer("change_cents"),
+    payerContactId: uuid("payer_contact_id").references(() => contact.id),
+    /** Clave de idempotencia del cobro (requestId del cliente). */
+    requestId: uuid("request_id"),
+    /** Snapshot inmutable: paciente, emisor, sede, líneas, medios, precios y promociones. */
+    snapshot: jsonb("snapshot").notNull(),
+    createdBy: text("created_by").references(() => user.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    voidedAt: timestamp("voided_at", { withTimezone: true }),
+    voidedBy: text("voided_by").references(() => user.id),
+    voidReason: text("void_reason"),
+  },
+  (table) => [
+    index("payment_ticket_org_patient_idx").on(table.organizationId, table.patientId),
+    index("payment_ticket_org_branch_idx").on(table.organizationId, table.branchId),
+    uniqueIndex("payment_ticket_org_number_uidx").on(table.organizationId, table.ticketNumber),
+    uniqueIndex("payment_ticket_org_request_uidx")
+      .on(table.organizationId, table.requestId)
+      .where(sql`${table.requestId} IS NOT NULL`),
+    check("payment_ticket_total_check", sql`${table.totalCents} >= 0`),
+  ],
+)
+
+/** Contador de tickets por organización: se incrementa en la misma transacción del cobro (sin saltos por rollback). */
+export const ticketCounter = pgTable("ticket_counter", {
+  organizationId: text("organization_id")
+    .primaryKey()
+    .references(() => organization.id),
+  nextNumber: integer("next_number").notNull().default(1),
+})
+
 
 export const patientResponsibility = pgTable(
   "patient_responsibility",

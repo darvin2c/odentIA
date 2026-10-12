@@ -6,6 +6,7 @@ import { useState } from "react"
 import { apiFetch } from "../../lib/api"
 import { channelLabel } from "../../lib/channels"
 import { timeAgo } from "../../lib/crm"
+import { activeOrgLocale } from "../../lib/locale"
 import { mutationErrorMessage, QueryErrorState } from "../../lib/query-error"
 import { HandoffUrgency } from "./handoff-badges"
 
@@ -58,7 +59,7 @@ function label(item: CaseBrief["known"][number]): string {
 function origin(item: CaseBrief["known"][number]): string {
   if (item.origin === "caso") return "Lo dijo hoy, en esta conversación"
   if (item.origin === "ficha") return "De su ficha"
-  const day = item.at ? new Date(item.at).toLocaleDateString("es-PE", { day: "numeric", month: "long" }) : null
+  const day = item.at ? new Date(item.at).toLocaleDateString(activeOrgLocale(), { day: "numeric", month: "long" }) : null
   const when = day ? ` el ${day}` : ""
   if (item.notedBy === "equipo") return `Lo anotó tu equipo${when}`
   return `Lo recordaba de otra conversación${item.channel ? `, por ${channelLabel(item.channel)}` : ""}${when}`

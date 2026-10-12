@@ -14,8 +14,10 @@ import { message } from "@odentia/db/schema/crm"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import { and, asc, count, desc, eq, gt, ilike, inArray, ne, or, sql } from "drizzle-orm"
 import { notFound, validation } from "./errors.js"
-import { getOrgLocale } from "./locale.js"
+import { formatOrgMoney, getOrgLocale, NEUTRAL_LOCALE, NEUTRAL_TIMEZONE } from "./locale.js"
+import { listPaymentMethods } from "./payment-methods.js"
 import { listServices } from "./service-catalog.js"
+import { listClinicPromotionSummaries } from "./promotions.js"
 
 const KINDS = ["faq", "info_sede", "politica"] as const
 const STATUSES = ["borrador", "publicada"] as const
@@ -37,7 +39,7 @@ export const KNOWLEDGE_BASICS: ReadonlyArray<{ key: string; question: string; au
   { key: "estacionamiento", question: "¿Tienen estacionamiento?" },
   { key: "accesibilidad", question: "¿El local es accesible para silla de ruedas?" },
   { key: "servicios", question: "¿Qué tratamientos ofrecen?", auto: "Servicios activos" },
-  { key: "precios", question: "¿Cuánto cuesta una consulta o un tratamiento?", auto: "Tarifas de los servicios" },
+  { key: "precios", question: "¿Cuánto cuesta una consulta o un tratamiento?", auto: "Precios de los servicios" },
   { key: "presupuesto", question: "¿Cómo obtengo un presupuesto?" },
   { key: "medios_pago", question: "¿Qué medios de pago aceptan?" },
   { key: "cuotas", question: "¿Se puede pagar en cuotas?" },
@@ -539,17 +541,29 @@ export async function searchPublishedKnowledge(tx: Db, orgId: string, q: string,
 export interface ClinicInfoSnapshot {
   clinicName: string
   timezone: string
+  /** Formato regional de la clínica (BCP 47): con él se escriben los importes. */
+  locale: string
   branches: Array<{ id: string; name: string; address: string | null; phone: string | null; mapsUrl: string | null; timezone: string | null }>
   services: Array<{ id: string; name: string; code: string | null; specialty: string | null; priceCents: number; currency: string; durationMin: number | null }>
+  paymentMethods: Array<{ id: string; name: string; typeCode: string }>
+  /** Promociones vigentes: el agente las nombra sin inventar precios finales. */
+  promotions: Array<{ id: string; name: string; endsAt: string | null }>
 }
 
 /**
  * Información de la clínica desde catálogo y sedes (fuente de verdad para el
- * agente: nunca inventa precios ni direcciones).
+ * agente: nunca inventa precios ni direcciones). Incluye los medios de pago
+ * activos y las promociones vigentes: el agente responde con estas mismas
+ * listas que ofrece caja.
  */
 export async function getClinicInfoSnapshot(tx: Db, orgId: string): Promise<ClinicInfoSnapshot> {
   const [profile] = await tx
-    .select({ legalName: orgProfile.legalName, tradeName: orgProfile.tradeName, timezone: orgProfile.timezone })
+    .select({
+      legalName: orgProfile.legalName,
+      tradeName: orgProfile.tradeName,
+      timezone: orgProfile.timezone,
+      locale: orgProfile.locale,
+    })
     .from(orgProfile)
     .where(eq(orgProfile.organizationId, orgId))
     .limit(1)
@@ -567,9 +581,12 @@ export async function getClinicInfoSnapshot(tx: Db, orgId: string): Promise<Clin
     .orderBy(asc(branch.name), asc(branch.id))
     .limit(20)
   const { data } = await listServices(tx, orgId, { state: "active", limit: 50 })
+  const methods = await listPaymentMethods(tx, orgId, { activeOnly: true })
+  const promos = await listClinicPromotionSummaries(tx, orgId)
   return {
     clinicName: profile?.tradeName ?? profile?.legalName ?? "la clínica",
-    timezone: profile?.timezone ?? "America/Lima",
+    timezone: profile?.timezone ?? NEUTRAL_TIMEZONE,
+    locale: profile?.locale || NEUTRAL_LOCALE,
     branches: branchRows.map((b) => ({ ...b, address: b.address ?? null })),
     services: data.map((s) => ({
       id: s.id,
@@ -580,6 +597,8 @@ export async function getClinicInfoSnapshot(tx: Db, orgId: string): Promise<Clin
       currency: s.currency,
       durationMin: s.durationMin,
     })),
+    paymentMethods: methods.map((m) => ({ id: m.id, name: m.name, typeCode: m.typeCode })),
+    promotions: promos.map((p) => ({ id: p.id, name: p.name, endsAt: p.endsAt ? p.endsAt.toISOString() : null })),
   }
 }
 
@@ -609,15 +628,6 @@ export async function getKnowledgeDataSources(tx: Db, orgId: string): Promise<Kn
     .from(branch)
     .where(and(eq(branch.organizationId, orgId), eq(branch.isActive, true)))
   return { pricedServices: services?.priced ?? 0, services: services?.total ?? 0, branches: branches?.total ?? 0 }
-}
-
-/** Importe con su moneda: nunca se presenta como soles una tarifa en otra moneda. */
-export function formatServicePrice(priceCents: number, currency: string): string {
-  const amount = (priceCents / 100).toFixed(2)
-  const code = currency.trim().toUpperCase()
-  if (code === "PEN") return `S/ ${amount}`
-  if (code === "USD") return `US$ ${amount}`
-  return `${amount} ${code}`
 }
 
 /**
@@ -693,7 +703,8 @@ export function formatKnowledgeForPrompt(
   if (snapshot.services.length) {
     lines.push("Servicios y tarifas vigentes (cada importe con su moneda):")
     for (const s of snapshot.services) {
-      lines.push(`- ${s.name} (id ${s.id}): ${formatServicePrice(s.priceCents, s.currency)}${s.durationMin ? ` (${s.durationMin} min)` : ""}`)
+      const price = formatOrgMoney(s.priceCents, s.currency, snapshot)
+      lines.push(`- ${s.name} (id ${s.id}): ${price}${s.durationMin ? ` (${s.durationMin} min)` : ""}`)
     }
   } else {
     lines.push("Sin servicios publicados: no des precios, ofrece derivar.")

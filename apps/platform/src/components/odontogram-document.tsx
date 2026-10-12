@@ -9,6 +9,7 @@ import {
 } from "@odentia/clinical"
 import { useId } from "react"
 import type { OdontogramEntry } from "../lib/patients"
+import { activeOrgLocale } from "../lib/locale"
 
 export interface OdontogramDocumentProps {
   entries: OdontogramEntry[]
@@ -739,7 +740,7 @@ function formatDate(raw?: string): string {
   if (!raw) return ""
   const time = new Date(raw).getTime()
   if (Number.isNaN(time)) return raw
-  return new Date(raw).toLocaleDateString("es-PE")
+  return new Date(raw).toLocaleDateString(activeOrgLocale())
 }
 
 /**

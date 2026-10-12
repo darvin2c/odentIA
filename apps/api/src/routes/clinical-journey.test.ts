@@ -2,6 +2,7 @@ process.env.DOCKER_HOST ??= "unix:///mnt/wsl/podman-sockets/odentia.sock"
 
 import { createAppDb, createOwnerDb, type Db, withOrgContext } from "@odentia/db"
 import { branch } from "@odentia/db/schema/org"
+import { organizationPaymentMethod } from "@odentia/db/schema/org-payments"
 import { createChair, secretsKeyFromEnv, setProfessionalSchedule } from "@odentia/services"
 import { createHash } from "node:crypto"
 import { encodeDemoDicom } from "@odentia/clinical"
@@ -206,7 +207,7 @@ async function setupAcceptedItem(): Promise<AcceptedItem> {
   })
   expect(budgetResponse.status).toBe(201)
   const budgetId = (await json<{ data: { id: string } }>(budgetResponse)).data.id
-  expect((await post(app, `/patients/${patientId}/budgets/${budgetId}/present`)).status).toBe(200)
+  expect((await post(app, `/patients/${patientId}/budgets/${budgetId}/deliver`)).status).toBe(200)
   const detail = await app.request(`/patients/${patientId}/budgets/${budgetId}`)
   const lines = (await json<{ data: { items: Array<{ id: string; planItemId: string }> } }>(detail))
     .data.items
@@ -249,6 +250,10 @@ beforeAll(async () => {
   )
   await ownerDb.execute(
     sql`insert into "organization" ("id", "name", "slug", "created_at") values ('org_b', 'Clínica Sur', 'sur', now())`,
+  )
+  // Toda clínica real tiene su perfil regional: sin él no se registra dinero.
+  await ownerDb.execute(
+    sql`insert into "org_profile" ("organization_id", "legal_name", "country_code", "currency", "timezone", "locale") values ('org_a', 'Clínica', 'PE', 'PEN', 'America/Lima', 'es-PE'), ('org_b', 'Clínica Sur', 'PE', 'PEN', 'America/Lima', 'es-PE')`,
   )
   await ownerDb.execute(
     sql`insert into "user" ("id", "name", "email") values ('u-1', 'Doctora', 'doc@test.dev') on conflict do nothing`,
@@ -464,135 +469,114 @@ it("recetas: emisión con medicamentos, detalle y anulación con motivo", async 
   expect(missing.status).toBe(404)
 })
 
-it("cuenta: cargo desde línea aceptada, pago, aplicación, devolución y límites", async () => {
-  const { patientId, itemId } = await setupAcceptedItem()
+it("cuenta: concepto manual, cobro parcial, anulación, devolución y límites", async () => {
+  const { patientId } = await setupAcceptedItem()
   const contactId = await linkContact(patientId)
+  const [site] = await ownerDb
+    .insert(branch)
+    .values({ organizationId: "org_a", name: "Sede caja", timezone: "America/Lima" })
+    .returning()
+  const [cash] = await ownerDb
+    .insert(organizationPaymentMethod)
+    .values({ organizationId: "org_a", name: "Efectivo", typeCode: "10", isActive: true })
+    .returning()
+  const requestId = () => crypto.randomUUID()
 
-  const charge = await post(app, `/patients/${patientId}/charges`, { planItemId: itemId })
+  const charge = await post(app, `/patients/${patientId}/charges`, { planItemId: "x" })
   expect(charge.status).toBe(400)
-  // Describir el concepto no sustituye a la fuente: sigue faltando importe y moneda.
+  // Concepto manual sin moneda: la toma de la clínica.
   const manual = await post(app, `/patients/${patientId}/charges`, {
     description: "Cargo manual",
     amountCents: 5000,
-    currency: "PEN",
   })
   expect(manual.status).toBe(201)
+  const manualId = (await json<{ data: { id: string } }>(manual)).data.id
 
-  const accepted = await (async () => {
-    const detail = await app.request(`/patients/${patientId}/budgets`)
-    const budgets = await json<{ data: Array<{ id: string; items: Array<{ id: string }> }> }>(
-      detail,
-    )
-    const line = budgets.data[0]?.items[0]
-    if (!line) throw new Error("El presupuesto aceptado no tiene líneas")
-    return line.id
-  })()
-  // Primero un cargo parcial: la línea conserva 50 000 centavos por generar.
-  const partial = await post(app, `/patients/${patientId}/charges`, {
-    budgetItemId: accepted,
-    amountCents: 40000,
-  })
-  expect(partial.status).toBe(201)
-  // Superar el importe pendiente de la línea se rechaza con su código propio.
-  const over = await post(app, `/patients/${patientId}/charges`, {
-    budgetItemId: accepted,
-    amountCents: 60000,
-  })
-  expect(over.status).toBe(409)
-  expect((await json<ErrorBody>(over)).error.code).toBe("CHARGE_EXCEEDS_BUDGET")
-  const fromLine = await post(app, `/patients/${patientId}/charges`, { budgetItemId: accepted })
-  expect(fromLine.status).toBe(201)
-  const fromLineBody = await json<{ data: { id: string; amountCents: number } }>(fromLine)
-  expect(fromLineBody.data.amountCents).toBe(50000)
-  const chargeId = fromLineBody.data.id
-  // Agotado el importe del tratamiento, otro cargo no tiene nada que generar:
-  // el contrato lo dice con su código propio, no con un error genérico.
-  const exhausted = await post(app, `/patients/${patientId}/charges`, { budgetItemId: accepted })
-  expect(exhausted.status).toBe(409)
-  expect((await json<ErrorBody>(exhausted)).error.code).toBe("CHARGE_EXCEEDS_BUDGET")
-
-  const payment = await post(app, `/patients/${patientId}/payments`, {
-    amountCents: 40000,
-    currency: "PEN",
-    paidAt: new Date().toISOString(),
-    method: "efectivo",
+  // Cobro parcial en un paso: el resto queda por cobrar.
+  const collected = await post(app, `/patients/${patientId}/collect`, {
+    branchId: site.id,
+    chargeIds: [manualId],
+    payments: [{ paymentMethodId: cash.id, amountCents: 3000 }],
     payerContactId: contactId,
+    requestId: requestId(),
   })
-  expect(payment.status).toBe(201)
-  const paymentId = (await json<{ data: { id: string } }>(payment)).data.id
+  expect(collected.status).toBe(201)
+  const ticketId = (await json<{ data: { ticket: { id: string } } }>(collected)).data.ticket.id
 
-  // Sobregiro real: no puede aplicarse más de lo pendiente del cargo.
-  const excessive = await post(app, `/patients/${patientId}/payments/${paymentId}/applications`, {
-    chargeId,
-    amountCents: 50000,
-  })
-  expect(excessive.status).toBe(409)
-  expect((await json<ErrorBody>(excessive)).error.code).toBe("INSUFFICIENT_BALANCE")
-
-  const applied = await post(app, `/patients/${patientId}/payments/${paymentId}/applications`, {
-    chargeId,
-    amountCents: 30000,
-  })
-  expect(applied.status).toBe(200)
-  const applicationId = (await json<{ data: { id: string } }>(applied)).data.id
-
-  // Un pago en otra moneda no se aplica a un cargo en soles.
-  const dollars = await post(app, `/patients/${patientId}/payments`, {
-    amountCents: 1000,
-    currency: "USD",
-    paidAt: new Date().toISOString(),
-    method: "tarjeta",
-  })
-  const crossCurrency = await post(
-    app,
-    `/patients/${patientId}/payments/${(await json<{ data: { id: string } }>(dollars)).data.id}/applications`,
-    { chargeId, amountCents: 100 },
-  )
-  expect(crossCurrency.status).toBe(409)
-  expect((await json<ErrorBody>(crossCurrency)).error.code).toBe("CURRENCY_MISMATCH")
-
-  // Devolver más de lo no aplicado se rechaza; el excedente exacto se acepta.
-  const refundOver = await post(app, `/patients/${patientId}/payments/${paymentId}/refunds`, {
-    amountCents: 20000,
-    reason: "Devolución excesiva",
-  })
-  expect(refundOver.status).toBe(409)
-  const refund = await post(app, `/patients/${patientId}/payments/${paymentId}/refunds`, {
-    amountCents: 10000,
-    reason: "Ajuste acordado",
-  })
-  expect(refund.status).toBe(200)
-
-  // Un cargo con aplicación activa no se anula.
-  const voidCharge = await post(app, `/patients/${patientId}/charges/${chargeId}/void`, {
+  // Un concepto con cobros aplicados no se anula.
+  const voidCharge = await post(app, `/patients/${patientId}/charges/${manualId}/void`, {
     reason: "Error de digitación",
   })
   expect(voidCharge.status).toBe(409)
-  // Anular la aplicación reabre el saldo y permite anular el cargo.
+  expect((await json<ErrorBody>(voidCharge)).error.code).toBe("CHARGE_HAS_APPLICATIONS")
+  // Anular el cobro revierte todo en una acción y reabre el concepto.
+  const voidTicket = await post(app, `/patients/${patientId}/tickets/${ticketId}/void`, {
+    reason: "Importe mal digitado",
+  })
+  expect(voidTicket.status).toBe(200)
   expect(
-    (
-      await post(app, `/patients/${patientId}/payment-applications/${applicationId}/void`, {
-        reason: "Corrección de aplicación",
-      })
-    ).status,
-  ).toBe(200)
-  expect(
-    (await post(app, `/patients/${patientId}/charges/${chargeId}/void`, { reason: "Duplicado" }))
+    (await post(app, `/patients/${patientId}/charges/${manualId}/void`, { reason: "Duplicado" }))
       .status,
   ).toBe(200)
+
+  // Monedas distintas no se mezclan en un cobro.
+  const soles = await post(app, `/patients/${patientId}/charges`, {
+    description: "Soles",
+    amountCents: 10000,
+  })
+  const dollars = await post(app, `/patients/${patientId}/charges`, {
+    description: "Dólares",
+    amountCents: 5000,
+    currency: "USD",
+  })
+  const solesId = (await json<{ data: { id: string } }>(soles)).data.id
+  const dollarsId = (await json<{ data: { id: string } }>(dollars)).data.id
+  const crossCurrency = await post(app, `/patients/${patientId}/collect`, {
+    branchId: site.id,
+    chargeIds: [solesId, dollarsId],
+    payments: [{ paymentMethodId: cash.id, amountCents: 15000 }],
+    requestId: requestId(),
+  })
+  expect(crossCurrency.status).toBe(409)
+  expect((await json<ErrorBody>(crossCurrency)).error.code).toBe("CURRENCY_MISMATCH")
+
+  // Devolver más del saldo a favor se rechaza; el monto disponible se acepta.
+  const advance = await post(app, `/patients/${patientId}/collect`, {
+    branchId: site.id,
+    advanceCents: 40000,
+    payments: [{ paymentMethodId: cash.id, amountCents: 40000 }],
+    requestId: requestId(),
+  })
+  expect(advance.status).toBe(201)
+  const refundOver = await post(app, `/patients/${patientId}/refunds`, {
+    branchId: site.id,
+    amountCents: 50000,
+    reason: "Devolución excesiva",
+  })
+  expect(refundOver.status).toBe(409)
+  expect((await json<ErrorBody>(refundOver)).error.code).toBe("INSUFFICIENT_CREDIT")
+  const refund = await post(app, `/patients/${patientId}/refunds`, {
+    branchId: site.id,
+    amountCents: 10000,
+    reason: "Ajuste acordado",
+  })
+  expect(refund.status).toBe(201)
 
   const account = await app.request(`/patients/${patientId}/account`)
   expect(account.status).toBe(200)
   const balances = await json<{
-    data: { byCurrency: Array<{ currency: string; chargedCents: number; paidCents: number }> }
+    data: { byCurrency: Array<{ currency: string; porCobrar: number; pagado: number; aFavor: number }> }
   }>(account)
+  // Soles: 10000 por cobrar; 40000 cobrados menos 10000 devueltos.
   expect(balances.data.byCurrency.find((row) => row.currency === "PEN")).toMatchObject({
-    chargedCents: 45000,
-    paidCents: 40000,
+    porCobrar: 10000,
+    pagado: 30000,
+    aFavor: 30000,
   })
   expect(balances.data.byCurrency.find((row) => row.currency === "USD")).toMatchObject({
-    chargedCents: 0,
-    paidCents: 1000,
+    porCobrar: 5000,
+    pagado: 0,
+    aFavor: 0,
   })
 })
 
@@ -721,19 +705,24 @@ it("suspendido se reanuda y las alternativas se agrupan con recomendación", asy
 it("la historia declara el contexto de cada evento del recorrido", async () => {
   const { patientId, itemId } = await setupAcceptedItem()
   const charge = await post(app, `/patients/${patientId}/charges`, {
-    planItemId: itemId,
     description: "Cargo de historia",
     amountCents: 15000,
-    currency: "PEN",
   })
   expect(charge.status).toBe(201)
-  const payment = await post(app, `/patients/${patientId}/payments`, {
-    amountCents: 15000,
-    currency: "PEN",
-    paidAt: new Date().toISOString(),
-    method: "efectivo",
+  const [site] = await ownerDb
+    .insert(branch)
+    .values({ organizationId: "org_a", name: "Sede historia", timezone: "America/Lima" })
+    .returning()
+  const [cash] = await ownerDb
+    .insert(organizationPaymentMethod)
+    .values({ organizationId: "org_a", name: "Efectivo", typeCode: "10", isActive: true })
+    .returning()
+  const collected = await post(app, `/patients/${patientId}/collect`, {
+    branchId: site.id,
+    payments: [{ paymentMethodId: cash.id, amountCents: 15000 }],
+    requestId: crypto.randomUUID(),
   })
-  expect(payment.status).toBe(201)
+  expect(collected.status).toBe(201)
 
   const timeline = await app.request(`/patients/${patientId}/timeline?limit=100`)
   expect(timeline.status).toBe(200)
@@ -768,9 +757,9 @@ it("la historia declara el contexto de cada evento del recorrido", async () => {
   const account = await app.request(`/patients/${patientId}/account`)
   expect(account.status).toBe(200)
   const { data: accountData } = await json<{
-    data: { payments: Array<{ id: string; amountCents: number }> }
+    data: { cobros: Array<{ payments: Array<{ id: string; amountCents: number }> }> }
   }>(account)
-  expect(accountData.payments.some((row) => row.amountCents === 15000)).toBe(true)
+  expect(accountData.cobros.flatMap((row) => row.payments).some((row) => row.amountCents === 15000)).toBe(true)
 })
 
 it("recorrido: hallazgo de origen, sesiones y saldo del tratamiento; aislado por tenant", async () => {
@@ -870,9 +859,9 @@ it("propuestas: revisión versionada, decisión por línea y cargo posterior", a
     data: { id: string; revisionNumber: number; budgetNumber: number }
   }>(revised)
   expect(revision.data.revisionNumber).toBe(2)
-  // La revisión se presenta y sustituye al documento anterior.
+  // La revisión se entrega y sustituye al documento anterior.
   expect(
-    (await post(app, `/patients/${patientId}/budgets/${revision.data.id}/present`)).status,
+    (await post(app, `/patients/${patientId}/budgets/${revision.data.id}/deliver`)).status,
   ).toBe(200)
   const original = await app.request(`/patients/${patientId}/budgets/${budgetId}`)
   expect(await json<{ data: { status: string } }>(original)).toMatchObject({

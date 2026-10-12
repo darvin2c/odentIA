@@ -5,6 +5,7 @@ import { createFileRoute } from "@tanstack/react-router"
 import { useEffect, useState, type ReactNode } from "react"
 import { apiFetch } from "../../lib/api"
 import { PerformanceSummary } from "../../components/crm/performance-summary"
+import { MonthlyResultPanel } from "../../components/finance/MonthlyResultPanel"
 import { usePermission } from "../../lib/crm"
 import { useOrgProfile } from "../../lib/org"
 import { type ManagementReport, moneyFromCents, stateLabel } from "../../lib/workspace"
@@ -32,6 +33,8 @@ function ReportsPage() {
   const report = query.data?.data
   if (!allowed) return <PageShell><PageHeader title="Reportes" /><ErrorState title="Sin acceso" message="No tienes permiso para consultar reportes. Solicita acceso a la administración." /></PageShell>
   return <PageShell className="flex flex-col gap-6"><PageHeader title="Reportes" subtitle="Resultados de la clínica, separados por moneda y sin mezclar cobros con producción." />
+    {/* Lo primero que busca quien dirige la clínica: elige su propio mes y su sede. */}
+    <MonthlyResultPanel />
     <form className="flex flex-wrap items-end gap-3" onSubmit={event => { event.preventDefault(); setPeriod({ from, to }) }}>
       <label htmlFor="report-from" className="flex flex-col gap-1 text-sm">Desde<Input id="report-from" type="date" required value={from} max={to} onChange={event => setFrom(event.target.value)} /></label>
       <label htmlFor="report-to" className="flex flex-col gap-1 text-sm">Hasta<Input id="report-to" type="date" required value={to} min={from} onChange={event => setTo(event.target.value)} /></label><Button type="submit">Consultar</Button>
@@ -41,7 +44,7 @@ function ReportsPage() {
       <div className="grid gap-6 xl:grid-cols-2">
         <ReportSection title="Asistencia y cancelaciones" description="Citas cuya fecha de inicio pertenece al período; estado actual."><SimpleTable headers={["Estado", "Citas"]} rows={report.appointments.map(row => [stateLabel[row.status] ?? row.status, row.count])} /></ReportSection>
         <ReportSection title="Atención por profesional" description="Citas atendidas; no equivale a procedimientos producidos ni a importe facturado."><SimpleTable headers={["Profesional", "Atendidas", "Citas totales"]} rows={report.production.map(row => [row.name, row.attended, row.total])} /></ReportSection>
-        <ReportSection title="Producción clínica" description="Procedimientos de atenciones finalizadas en el período, valorados con su tarifa conservada. No equivale a cobros."><SimpleTable headers={["Profesional", "Moneda", "Procedimientos", "Valor"]} rows={report.clinicalProduction.map(row => [row.name, row.currency ?? "Sin tarifa", row.procedures, row.currency ? moneyFromCents(row.amountCents, row.currency, report.locale) : "Sin valoración"])} /></ReportSection>
+        <ReportSection title="Producción clínica" description="Procedimientos de atenciones finalizadas en el período, valorados con su precio conservado. No equivale a cobros."><SimpleTable headers={["Profesional", "Moneda", "Procedimientos", "Valor"]} rows={report.clinicalProduction.map(row => [row.name, row.currency ?? "Sin precio", row.procedures, row.currency ? moneyFromCents(row.amountCents, row.currency, report.locale) : "Sin valoración"])} /></ReportSection>
         <ReportSection title="Conversión comercial" description="Estado actual de las oportunidades creadas en el período, separado por moneda."><SimpleTable headers={["Estado", "Moneda", "Oportunidades", "Valor estimado"]} rows={report.opportunities.map(row => [stateLabel[row.status] ?? row.status, row.currency, row.count, moneyFromCents(row.amountCents, row.currency, report.locale)])} /></ReportSection>
         <ReportSection title="Antigüedad de saldos" description="Deuda actual según la fecha de vencimiento de cada cargo."><SimpleTable headers={["Moneda", "Vencimiento", "Pendiente"]} rows={report.aging.map(row => [row.currency, row.bucket, moneyFromCents(row.amountCents, row.currency, report.locale)])} /></ReportSection>
         <ReportSection title="Decisiones de presupuestos" description="Estado actual de las propuestas presentadas durante el período. Las revisiones sustituidas se muestran separadas."><SimpleTable headers={["Estado", "Propuestas"]} rows={report.budgets.map(row => [stateLabel[row.status] ?? row.status, row.count])} /></ReportSection>

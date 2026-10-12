@@ -8,7 +8,7 @@ const SETTINGS_SECTIONS = [
   "Organización",
   "Sucursales",
   "Equipo y permisos",
-  "Servicios y tarifas",
+  "Medios de pago",
   "Disponibilidad",
   "Especialidades",
   "Formularios y consentimientos",

@@ -70,21 +70,24 @@ const APPOINTMENT_STATUS_LABEL: Record<string, string> = {
   cancelada: "Cancelada",
 }
 
+/** Estado del presupuesto con las palabras de quien lo recibe, nunca el código. */
 const BUDGET_STATUS_LABEL: Record<string, string> = {
-  presentado: "Presentado",
+  presentado: "Por responder",
   aceptado: "Aceptado",
-  parcial: "Parcial",
-  rechazado: "Rechazado",
-  pospuesto: "Pospuesto",
+  parcial: "Aceptado en parte",
+  rechazado: "No aceptado",
+  pospuesto: "Lo estás pensando",
   cancelado: "Cancelado",
-  sustituido: "Sustituido",
+  sustituido: "Reemplazado por uno nuevo",
   historico: "Histórico",
 }
 
 const DECISION_LABEL: Record<string, string> = {
   aceptado: "Acepto",
-  rechazado: "Rechazo",
-  pospuesto: "Pospongo",
+  rechazado: "No acepto",
+  pospuesto: "Lo pienso",
+  pendiente: "Sin responder",
+  reemplazado: "Reemplazado",
 }
 
 function readStoredPortalSession(): string | null {
@@ -728,13 +731,22 @@ function BudgetCard({ sessionToken, budget, onDecided }: { sessionToken: string;
       decidePortalBudgetApi(sessionToken, budget.id, {
         decisions: budget.items.map((item) => ({
           planItemId: item.planItemId,
-          decision: decisions[item.planItemId] ?? "pospuesto",
+          decision: decisions[item.planItemId] ?? (item.decision === "aceptado" || item.decision === "rechazado" ? item.decision : "pospuesto"),
         })),
         decisionNote: note.trim() || null,
       }),
     onSuccess: onDecided,
   })
-  const decidable = budget.status === "presentado"
+  // Responder después: parcial/pospuesto admite completar lo pospuesto con la
+  // misma autoridad; lo ya decidido no se reescribe (lo aplica el servidor).
+  const decidable =
+    budget.status === "presentado" || budget.status === "parcial" || budget.status === "pospuesto"
+  // Importes con la moneda y el formato de la clínica; los totales son los del
+  // servidor (línea, presupuesto y aceptado), aquí solo se muestran.
+  // Las cifras de cada línea van sin símbolo (`plain`): el total dice la moneda.
+  const money = (cents: number | null, currency: string, plain = false) =>
+    formatPortalMoney(cents, currency, budget.locale, plain)
+  const hasSessions = budget.items.some((item) => item.billingMode === "session")
 
   return (
     <div className="rounded-md border p-4">
@@ -743,37 +755,97 @@ function BudgetCard({ sessionToken, budget, onDecided }: { sessionToken: string;
           {budget.title} · N.º {budget.budgetNumber} rev. {budget.revisionNumber}
         </p>
         <Badge variant={budget.status === "presentado" ? "default" : "secondary"}>
-          {BUDGET_STATUS_LABEL[budget.status] ?? budget.status}
+          {BUDGET_STATUS_LABEL[budget.status] ?? "En revisión"}
         </Badge>
       </div>
       {budget.notes && <p className="mt-1 text-sm text-muted-foreground">{budget.notes}</p>}
-      <ul className="mt-2 grid gap-1">
-        {budget.items.map((item) => (
-          <li key={item.planItemId} className="flex flex-wrap items-center gap-2 text-sm">
-            <span className="flex-1">{item.title}</span>
-            <span className="font-medium">{formatPortalMoney(item.priceCents, item.currency)}</span>
-            {decidable ? (
-              <Select
-                value={decisions[item.planItemId] ?? "pospuesto"}
-                onValueChange={(v) => {
-                  if (v !== "aceptado" && v !== "rechazado" && v !== "pospuesto") return
-                  setDecisions((prev) => ({ ...prev, [item.planItemId]: v }))
-                }}
-              >
-                <SelectTrigger className="w-36">
-                  <SelectValue />
-                </SelectTrigger>
-              </Select>
-            ) : (
-              <Badge variant="secondary">{DECISION_LABEL[item.decision] ?? item.decision}</Badge>
-            )}
-          </li>
-        ))}
+      <ul className="mt-3 grid gap-3">
+        {budget.items.map((item) => {
+          const locked = item.decision === "aceptado" || item.decision === "rechazado"
+          const perVisit = item.billingMode === "session"
+          const lowered =
+            item.tariffLineTotalCents != null &&
+            item.lineTotalCents != null &&
+            item.tariffLineTotalCents > item.lineTotalCents
+          return (
+            <li key={item.planItemId} className="flex flex-wrap items-center gap-x-3 gap-y-2 text-sm">
+              <div className="min-w-0 flex-[1_1_12rem]">
+                <p className="font-medium">{item.title}</p>
+                {perVisit ? (
+                  <p className="text-xs text-muted-foreground">
+                    {item.priceCents == null
+                      ? "Se paga en cada visita"
+                      : `${money(item.priceCents, item.currency, true)} por visita`}
+                    {item.sessionsPlanned == null
+                      ? ""
+                      : item.sessionsPlanned === 1
+                        ? " · 1 visita prevista"
+                        : ` · ${item.sessionsPlanned} visitas previstas`}
+                  </p>
+                ) : null}
+                {item.promotionName ? (
+                  <p className="text-xs text-muted-foreground">Promoción: {item.promotionName}</p>
+                ) : null}
+                {lowered ? (
+                  <p className="text-xs text-muted-foreground">
+                    Antes {money(item.tariffLineTotalCents, item.currency, true)}
+                  </p>
+                ) : null}
+              </div>
+              <span className="font-medium whitespace-nowrap tabular-nums">
+                {money(item.lineTotalCents, item.currency, true)}
+              </span>
+              {decidable && !locked ? (
+                <Select
+                  value={decisions[item.planItemId] ?? "pospuesto"}
+                  onValueChange={(v) => {
+                    if (v !== "aceptado" && v !== "rechazado" && v !== "pospuesto") return
+                    setDecisions((prev) => ({ ...prev, [item.planItemId]: v }))
+                  }}
+                >
+                  <SelectTrigger className="w-36" aria-label={`Decisión para ${item.title}`}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(["aceptado", "rechazado", "pospuesto"] as const).map((value) => (
+                      <SelectItem key={value} value={value}>
+                        {DECISION_LABEL[value]}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              ) : (
+                <Badge variant="secondary">{DECISION_LABEL[item.decision] ?? "Sin responder"}</Badge>
+              )}
+            </li>
+          )
+        })}
       </ul>
-      <p className="mt-2 text-sm font-medium">Total: {formatPortalMoney(budget.totalCents, budget.currency)}</p>
+      <dl className="mt-3 grid gap-1 border-t pt-3 text-sm">
+        <div className="flex items-baseline gap-3">
+          <dt className="flex-1 font-medium">Total</dt>
+          <dd className="text-base font-semibold whitespace-nowrap tabular-nums">
+            {money(budget.totalCents, budget.currency)}
+          </dd>
+        </div>
+        {budget.decidedAt && budget.acceptedCents != null ? (
+          <div className="flex items-baseline gap-3">
+            <dt className="flex-1 text-muted-foreground">Aceptado</dt>
+            <dd className="whitespace-nowrap tabular-nums">
+              {money(budget.acceptedCents, budget.currency)}
+            </dd>
+          </div>
+        ) : null}
+      </dl>
+      {hasSessions ? (
+        <p className="mt-1 text-xs text-muted-foreground">
+          No lo debes todo desde el primer día: lo que se cobra por visita se paga en cada visita
+          atendida.
+        </p>
+      ) : null}
       {budget.decidedAt && (
         <p className="mt-1 text-xs text-muted-foreground">
-          Decidido el {formatPortalDate(budget.decidedAt)}
+          Respondido el {formatPortalDate(budget.decidedAt, budget.locale)}
           {budget.acceptedByName ? ` por ${budget.acceptedByName}` : ""}
           {budget.decisionNote ? ` · ${budget.decisionNote}` : ""}
         </p>
@@ -875,19 +947,19 @@ function AccountTab({ sessionToken }: { sessionToken: string }) {
       {account.byCurrency.map((row) => (
         <div key={row.currency} className="rounded-md border p-4">
           <p className="text-sm font-medium">Saldo en {row.currency}</p>
-          <p className="mt-1 text-2xl font-semibold">{formatPortalMoney(row.outstandingCents, row.currency)}</p>
+          <p className="mt-1 text-2xl font-semibold">{formatPortalMoney(row.outstandingCents, row.currency, account.locale)}</p>
           <p className="text-xs text-muted-foreground">pendiente de pago</p>
           <dl className="mt-2 grid grid-cols-2 gap-1 text-sm">
             <dt className="text-muted-foreground">Tratamiento aceptado</dt>
-            <dd className="text-right">{formatPortalMoney(row.agreedCents, row.currency)}</dd>
+            <dd className="text-right">{formatPortalMoney(row.agreedCents, row.currency, account.locale)}</dd>
             <dt className="text-muted-foreground">Cargado</dt>
-            <dd className="text-right">{formatPortalMoney(row.chargedCents, row.currency)}</dd>
+            <dd className="text-right">{formatPortalMoney(row.chargedCents, row.currency, account.locale)}</dd>
             <dt className="text-muted-foreground">Pagado</dt>
-            <dd className="text-right">{formatPortalMoney(row.paidCents, row.currency)}</dd>
+            <dd className="text-right">{formatPortalMoney(row.paidCents, row.currency, account.locale)}</dd>
             {row.availableCreditCents > 0 && (
               <>
                 <dt className="text-muted-foreground">Crédito a favor</dt>
-                <dd className="text-right">{formatPortalMoney(row.availableCreditCents, row.currency)}</dd>
+                <dd className="text-right">{formatPortalMoney(row.availableCreditCents, row.currency, account.locale)}</dd>
               </>
             )}
           </dl>
@@ -898,16 +970,16 @@ function AccountTab({ sessionToken }: { sessionToken: string }) {
         {account.charges.map((charge) => (
           <div key={`c-${charge.id}`} className="flex items-center gap-2 text-sm">
             <span className="flex-1">{charge.description}</span>
-            <span>{formatPortalMoney(charge.amountCents, charge.currency)}</span>
+            <span>{formatPortalMoney(charge.amountCents, charge.currency, account.locale)}</span>
             {charge.voidedAt && <Badge variant="secondary">Anulado</Badge>}
           </div>
         ))}
         {account.payments.map((payment) => (
           <div key={`p-${payment.id}`} className="flex items-center gap-2 text-sm">
             <span className="flex-1">
-              Pago · {payment.method}{payment.reference ? ` · ${payment.reference}` : ""} · {formatPortalDate(payment.paidAt)}
+              Pago · {payment.method}{payment.reference ? ` · ${payment.reference}` : ""} · {formatPortalDate(payment.paidAt, account.locale)}
             </span>
-            <span>{formatPortalMoney(payment.amountCents, payment.currency)}</span>
+            <span>{formatPortalMoney(payment.amountCents, payment.currency, account.locale)}</span>
           </div>
         ))}
       </div>

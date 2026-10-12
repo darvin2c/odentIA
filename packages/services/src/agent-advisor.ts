@@ -5,7 +5,7 @@ import type { AutomationKind } from "@odentia/db/schema/automation"
 import { and, eq, sql } from "drizzle-orm"
 import { CHECKUP_REMINDER_WINDOW_HOURS, listRules } from "./automation.js"
 import { notFound, ServiceError, validation } from "./errors.js"
-import { getOrgLocale, type OrgLocale } from "./locale.js"
+import { formatOrgMoney, getOrgLocale, type OrgLocale } from "./locale.js"
 import { createTask } from "./tasks.js"
 
 /* ---------- Asesor: qué conviene atender primero, con la lista que lo respalda ---------- */
@@ -144,10 +144,10 @@ export const ADVISOR_DETECTIONS: readonly AdvisorDetection[] = [
     key: "cobranza_vencida",
     area: "Cobranza",
     label: "Cobranza vencida",
-    description: "Cuotas con saldo que ya pasaron su fecha.",
+    description: "Personas que deben desde hace días y todavía no pagan.",
     permission: "finance.read",
-    defaultDays: null,
-    taskTitle: (item) => `Llamar a ${item.personName} por su cuota vencida`,
+    defaultDays: 30,
+    taskTitle: (item) => `Llamar a ${item.personName} por lo que debe`,
     taskNoun: CALL_TASK,
     automation: null,
   },
@@ -389,35 +389,42 @@ async function followUpsWithoutOwner(tx: Db, orgId: string, zone: OrgLocale): Pr
   }
 }
 
-async function overdueCollections(tx: Db, orgId: string, zone: OrgLocale): Promise<DetectionResult> {
-  const rows = await tx.execute<{ id: string; patient_id: string; name: string; nro: number; due_at: string; owed: number; currency: string; total: number }>(sql`
-    select q.id, p.id as patient_id, p.display_name as name, q.nro, q.due_at::text as due_at,
-           (q.amount_cents - q.paid_cents)::int as owed, pl.currency,
+/**
+ * Deuda vieja: lo que la persona debe (conceptos vigentes menos lo aplicado)
+ * cuando su concepto más antiguo sin pagar pasa del umbral. No hay cuotas con
+ * fecha: la deuda es el saldo de la cuenta, igual que en Caja.
+ */
+async function overdueCollections(tx: Db, orgId: string, zone: OrgLocale, days: number): Promise<DetectionResult> {
+  const rows = await tx.execute<{ patient_id: string; name: string; currency: string; owed: number; since: Date | string; total: number }>(sql`
+    select p.id as patient_id, p.display_name as name, c.currency,
+           sum(c.amount_cents - coalesce(a.applied, 0))::int as owed, min(c.created_at) as since,
            count(*) over ()::int as total
-    from installment_quota q
-    join installment_plan pl on pl.id = q.plan_id and pl.organization_id = q.organization_id
-    join patient p on p.id = pl.patient_id and p.organization_id = pl.organization_id
-    where q.organization_id = ${orgId} and pl.status = 'vigente'
-      and q.status in ('pendiente', 'parcial', 'vencida') and q.amount_cents > q.paid_cents
-      and q.due_at < (now() at time zone ${zone.timezone})::date
-    order by q.due_at asc
+    from patient_charge c
+    join patient p on p.id = c.patient_id and p.organization_id = c.organization_id
+    left join lateral (
+      select sum(app.amount_cents)::int as applied
+      from patient_payment_application app
+      where app.charge_id = c.id and app.organization_id = c.organization_id and app.voided_at is null
+    ) a on true
+    where c.organization_id = ${orgId} and c.voided_at is null and c.amount_cents > coalesce(a.applied, 0)
+    group by p.id, p.display_name, c.currency
+    having min(c.created_at) < now() - make_interval(days => ${days})
+    order by min(c.created_at) asc
     limit ${ADVISOR_LIST_LIMIT}`)
   const total = Number(rows[0]?.total ?? 0)
-  const people = new Set(rows.map((row) => row.patient_id)).size
   return {
     total,
     items: rows.map((row) => ({
-      id: row.id,
+      id: `${row.patient_id}:${row.currency}`,
       personName: row.name,
-      // La fecha es un día de calendario: se muestra tal cual, sin pasarla por la zona.
-      line: `Cuota ${row.nro} · venció el ${dayOf(`${row.due_at}T12:00:00Z`, { ...zone, timezone: "UTC" })} · debe ${(row.owed / 100).toFixed(2)} ${row.currency}`,
+      line: `Debe ${formatOrgMoney(Number(row.owed), row.currency, zone)} · desde el ${dayOf(row.since, zone)}`,
       patientId: row.patient_id,
       contactId: null,
       opportunityId: null,
     })),
-    title: `${total} ${plural(total, "cuota vencida", "cuotas vencidas")} con saldo`,
-    detail: `De ${people} ${plural(people, "paciente", "pacientes")}${total > rows.length ? " (entre los primeros de la lista)" : ""}.`,
-    how: "Cuotas de planes vigentes con saldo por pagar y fecha anterior a hoy.",
+    title: `${total} ${plural(total, "persona debe", "personas deben")} desde hace más de ${days} días`,
+    detail: total > rows.length ? `Se muestran las ${rows.length} más antiguas.` : "Ordenadas de la deuda más antigua a la más reciente.",
+    how: `Conceptos por cobrar sin anular cuyo saldo sigue pendiente y que se anotaron hace más de ${days} días.`,
   }
 }
 
@@ -426,7 +433,7 @@ async function runDetection(tx: Db, orgId: string, key: string, zone: OrgLocale,
   if (key === "presupuestos_sin_cita") return budgetsWithoutAppointment(tx, orgId, zone, days ?? 7)
   if (key === "atenciones_sin_firmar") return unsignedEncounters(tx, orgId, zone)
   if (key === "seguimientos_sin_responsable") return followUpsWithoutOwner(tx, orgId, zone)
-  if (key === "cobranza_vencida") return overdueCollections(tx, orgId, zone)
+  if (key === "cobranza_vencida") return overdueCollections(tx, orgId, zone, days ?? 30)
   throw notFound("Recomendación")
 }
 

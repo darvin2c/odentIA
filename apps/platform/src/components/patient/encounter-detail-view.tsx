@@ -14,6 +14,7 @@ import {
 } from "../../lib/patients"
 import { EncounterAddendumDrawer } from "./encounter-addendum-drawer"
 import { diagnosisSiteLabel } from "./encounter-diagnoses"
+import { activeOrgLocale } from "../../lib/locale"
 
 /** Las URL firmadas expiran: se consideran frescas 10 min y luego se regeneran. */
 const SIGNED_URL_STALE_MS = 10 * 60 * 1000
@@ -22,7 +23,7 @@ function formatDateTime(iso: string | null): string {
   if (!iso) return "—"
   const date = new Date(iso)
   if (Number.isNaN(date.getTime())) return "—"
-  return date.toLocaleString("es-PE", {
+  return date.toLocaleString(activeOrgLocale(), {
     day: "2-digit",
     month: "2-digit",
     year: "numeric",

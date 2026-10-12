@@ -16,7 +16,6 @@ export {
   countryOf,
   countryOptions,
   DEFAULT_COUNTRY,
-  DEFAULT_LOCALE,
   getCountryCallingCode,
   isValidE164,
   nationalText,

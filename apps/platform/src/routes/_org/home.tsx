@@ -16,7 +16,7 @@ import { ApiError, apiFetch } from "../../lib/api"
 import { channelLabel } from "../../lib/channels"
 import { usePermission } from "../../lib/crm"
 import { useOrgEvents } from "../../lib/org-events"
-import { moneyFromCents, stateLabel, type WorkspaceHome, type WorkspacePulse } from "../../lib/workspace"
+import { amountFromCents, moneyFromCents, stateLabel, type WorkspaceHome, type WorkspacePulse } from "../../lib/workspace"
 
 export const Route = createFileRoute("/_org/home")({ component: HomePage })
 
@@ -311,7 +311,7 @@ function PulseSection({ locale }: { locale: string }) {
   const collectionsByCurrency: Record<string, { label: string; value: number }[]> = {}
   for (const row of pulse.collections ?? []) {
     const points = collectionsByCurrency[row.currency] ?? []
-    points.push({ label: formatDay(row.day, locale), value: Number(BigInt(row.amountCents)) / 100 })
+    points.push({ label: formatDay(row.day, locale), value: amountFromCents(row.amountCents, row.currency) })
     collectionsByCurrency[row.currency] = points
   }
   return <section aria-label="Pulso" className="flex flex-col gap-4">

@@ -1,406 +1,63 @@
-import { ApiError, apiFetch } from "./api"
-import { formatMoney } from "./services"
+/**
+ * Mensajes de error de finanzas en lenguaje llano. El cliente vigente vive en
+ * `finance-collect.ts`; aquí solo se decide qué texto ve la persona cuando el
+ * servidor rechaza algo o la respuesta no llega.
+ *
+ * Manda el mensaje del servidor (ya es de negocio y está en español). Solo se
+ * sustituye cuando es técnico (claves de reintento, textos del validador) o
+ * cuando no hay mensaje.
+ */
+import { ApiError } from "./api"
+
+/** Códigos cuyo mensaje del servidor es técnico: se explican con palabras de caja. */
+const PLAIN_BY_CODE: Record<string, string> = {
+  CHARGE_HAS_APPLICATIONS:
+    "Este concepto ya tiene pagos: no se puede cambiar ni quitar. Para corregirlo, primero anula el cobro.",
+  REQUEST_ID_CONFLICT:
+    "Este cobro ya quedó registrado con otros datos. Cierra el panel y revisa la cuenta antes de cobrar otra vez.",
+}
+
+/** Textos del validador de entrada (en inglés): no dicen nada a quien cobra. */
+const VALIDATOR_TEXT = /^(invalid|too (small|big)|unrecognized|expected|required)\b/i
+
+function isNetworkFailure(err: unknown): boolean {
+  return err instanceof TypeError
+}
+
+/** Sin respuesta o error del servidor: no se sabe si la operación llegó a aplicarse. */
+export function isUnconfirmedError(err: unknown): boolean {
+  if (isNetworkFailure(err)) return true
+  return err instanceof ApiError && (err.status >= 500 || err.status === 408)
+}
 
 /** Mensaje de error en español para mutaciones de caja y finanzas. */
 export function financeErrorMessage(err: unknown): string {
+  if (isNetworkFailure(err)) {
+    return "No hay conexión con el servidor. Revisa tu conexión e inténtalo de nuevo."
+  }
   if (err instanceof ApiError) {
-    if (err.shape.message) return err.shape.message
-    if (err.shape.code) return `No se pudo guardar (${err.shape.code}). Inténtalo de nuevo.`
+    const { code, message } = err.shape
+    if (code && PLAIN_BY_CODE[code]) return PLAIN_BY_CODE[code]
+    if (err.status === 401) return "Tu sesión venció. Vuelve a iniciar sesión para continuar."
+    if (message && !VALIDATOR_TEXT.test(message)) return message
+    if (code === "VALIDATION") return "Hay un dato que no es válido. Revísalo e inténtalo de nuevo."
+    if (err.status === 403) return "Tu rol no tiene permiso para hacer esto. Pídeselo a quien administra la clínica."
+    if (err.status >= 500) return "El servidor no pudo completar la operación. Inténtalo de nuevo."
+    if (code) return `No se pudo guardar (${code}). Inténtalo de nuevo.`
+    return "No se pudo guardar. Inténtalo de nuevo."
   }
-  return err instanceof Error ? err.message : "No se pudo guardar. Inténtalo de nuevo."
+  return err instanceof Error && err.message ? err.message : "No se pudo guardar. Inténtalo de nuevo."
 }
 
-/** "120", "120.50" o "120,50" a centavos; null si no es un positivo válido. */
-export function centsFromSoles(value: string): number | null {
-  const normalized = value.trim().replace(",", ".")
-  if (!/^\d+(?:\.\d{1,2})?$/.test(normalized)) return null
-  const [whole, fraction = ""] = normalized.split(".")
-  const cents = Number(whole) * 100 + Number(fraction.padEnd(2, "0"))
-  return Number.isSafeInteger(cents) && cents > 0 ? cents : null
-}
+export { financeErrorMessage as collectErrorMessage }
 
-export function formatCents(cents: number, currency: string): string {
-  return formatMoney(cents, currency)
-}
-
-export function formatDateTimeShort(value: string | null | undefined): string {
-  if (!value) return "—"
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return "—"
-  return date.toLocaleString("es-PE", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  })
-}
-
-export interface CashShift {
-  id: string
-  branchId: string
-  currency: string
-  openingCents: number
-  status: "abierta" | "cerrada"
-  openedBy: string | null
-  openedAt: string
-  openNotes: string | null
-  closedBy: string | null
-  closedAt: string | null
-  expectedCents: number | null
-  electronicCents: number | null
-  countedCents: number | null
-  differenceCents: number | null
-  closeNotes: string | null
-}
-
-export interface CashMovement {
-  id: string
-  shiftId: string
-  direction: "ingreso" | "egreso"
-  kind: string
-  amountCents: number
-  currency: string
-  method: string | null
-  concept: string
-  patientPaymentId: string | null
-  expenseId: string | null
-  createdAt: string
-  voidedAt: string | null
-}
-
-export interface ShiftDetail {
-  shift: CashShift
-  movements: CashMovement[]
-  ingresosCents: number
-  electronicosCents: number
-  egresosCents: number
-  esperadoCents: number
-}
-
-export interface Supplier {
-  id: string
-  name: string
-  docType: string
-  docNumber: string | null
-  email: string | null
-  phone: string | null
-}
-
-export interface ExpenseItem {
-  id: string
-  branchId: string
-  supplierId: string | null
-  shiftId: string | null
-  concept: string
-  amountCents: number
-  currency: string
-  spentAt: string
-  receiptKind: string
-  receiptNumber: string | null
-  notes: string | null
-}
-
-export interface ReceivableRow {
-  charge: {
-    id: string
-    patientId: string
-    description: string
-    amountCents: number
-    currency: string
-    dueAt: string | null
-    createdAt: string
+/**
+ * Error al cobrar. El cobro lleva una clave propia: si la respuesta no llegó,
+ * volver a pulsar «Cobrar» sin cambiar nada devuelve el mismo ticket.
+ */
+export function collectFailureMessage(err: unknown): string {
+  if (isUnconfirmedError(err)) {
+    return "No pudimos confirmar si el cobro quedó registrado. Pulsa «Cobrar» otra vez sin cambiar nada: si ya se registró, no se cobra dos veces."
   }
-  appliedCents: number
-  outstandingCents: number
-}
-
-export interface InstallmentQuota {
-  id: string
-  nro: number
-  dueAt: string
-  amountCents: number
-  status: string
-  paidCents: number
-}
-
-export interface InstallmentPlanWithQuotas {
-  plan: {
-    id: string
-    patientId: string
-    chargeId: string
-    currency: string
-    totalCents: number
-    installments: number
-    status: string
-    notes: string | null
-  }
-  quotas: InstallmentQuota[]
-}
-
-export interface CommissionRule {
-  id: string
-  professionalUserId: string
-  base: string
-  rateBps: number
-  serviceId: string | null
-  branchId: string | null
-  isActive: boolean
-  validFrom: string | null
-  validTo: string | null
-}
-
-export interface CommissionPreview {
-  lines: Array<{
-    sourceKey: string
-    applicationId: string | null
-    chargeId: string | null
-    paymentId: string | null
-    patientId: string | null
-    description: string
-    baseCents: number
-    occurredAt: string
-    rateBps: number
-    commissionCents: number
-  }>
-  baseCents: number
-  commissionCents: number
-}
-
-export interface Settlement {
-  id: string
-  professionalUserId: string
-  periodFrom: string
-  periodTo: string
-  base: string
-  currency: string
-  baseCents: number
-  commissionCents: number
-  status: string
-  notes: string | null
-}
-
-export interface Overview {
-  byCurrency: Array<{
-    currency: string
-    ingresosCents: number
-    egresosCents: number
-    gastosCents: number
-    porCobrarCents: number
-    balanceCents: number
-  }>
-  openShifts: number
-  shifts: number
-}
-
-export const MOVEMENT_KIND_LABELS: Record<string, string> = {
-  apertura: "Apertura",
-  cobro: "Cobro",
-  gasto: "Gasto",
-  aporte: "Aporte",
-  retiro: "Retiro",
-  devolucion: "Devolución",
-  ajuste: "Ajuste",
-}
-
-export const QUOTA_STATUS_LABELS: Record<string, string> = {
-  pendiente: "Pendiente",
-  parcial: "Parcial",
-  pagada: "Pagada",
-  vencida: "Vencida",
-}
-
-
-export function fetchShifts(status?: "abierta" | "cerrada"): Promise<{ data: CashShift[] }> {
-  const query = status ? `?status=${status}` : ""
-  return apiFetch<{ data: CashShift[] }>(`/api/finance/shifts${query}`)
-}
-
-export function fetchShiftDetail(id: string): Promise<{ data: ShiftDetail }> {
-  return apiFetch<{ data: ShiftDetail }>(`/api/finance/shifts/${id}`)
-}
-
-export function openShiftApi(body: {
-  branchId: string
-  currency: string
-  openingCents?: number
-  notes?: string
-}): Promise<{ data: CashShift }> {
-  return apiFetch<{ data: CashShift }>("/api/finance/shifts", {
-    method: "POST",
-    body: JSON.stringify(body),
-  })
-}
-
-export function addMovementApi(
-  shiftId: string,
-  body: { direction: "ingreso" | "egreso"; kind: string; amountCents: number; concept: string },
-): Promise<{ data: CashMovement }> {
-  return apiFetch<{ data: CashMovement }>(`/api/finance/shifts/${shiftId}/movements`, {
-    method: "POST",
-    body: JSON.stringify(body),
-  })
-}
-
-export function registerPaymentApi(
-  shiftId: string,
-  paymentId: string,
-): Promise<{ data: CashMovement }> {
-  return apiFetch<{ data: CashMovement }>(`/api/finance/shifts/${shiftId}/payments`, {
-    method: "POST",
-    body: JSON.stringify({ paymentId }),
-  })
-}
-
-export function closeShiftApi(
-  shiftId: string,
-  body: { countedCents: number; notes?: string },
-): Promise<{ data: CashShift }> {
-  return apiFetch<{ data: CashShift }>(`/api/finance/shifts/${shiftId}/close`, {
-    method: "POST",
-    body: JSON.stringify(body),
-  })
-}
-
-export function voidMovementApi(id: string, reason: string): Promise<unknown> {
-  return apiFetch(`/api/finance/movements/${id}/void`, {
-    method: "POST",
-    body: JSON.stringify({ reason }),
-  })
-}
-
-export function fetchSuppliers(): Promise<{ data: Supplier[] }> {
-  return apiFetch<{ data: Supplier[] }>("/api/finance/suppliers")
-}
-
-export function createSupplierApi(body: {
-  name: string
-  docType?: string
-  docNumber?: string
-  email?: string
-  phone?: string
-}): Promise<{ data: Supplier }> {
-  return apiFetch<{ data: Supplier }>("/api/finance/suppliers", {
-    method: "POST",
-    body: JSON.stringify(body),
-  })
-}
-
-export function fetchExpenses(): Promise<{ data: ExpenseItem[] }> {
-  return apiFetch<{ data: ExpenseItem[] }>("/api/finance/expenses?limit=100")
-}
-
-export function createExpenseApi(body: {
-  branchId: string
-  supplierId?: string | null
-  concept: string
-  amountCents: number
-  currency: string
-  receiptKind?: string
-  receiptNumber?: string
-  shiftId?: string | null
-}): Promise<{ data: ExpenseItem }> {
-  return apiFetch<{ data: ExpenseItem }>("/api/finance/expenses", {
-    method: "POST",
-    body: JSON.stringify(body),
-  })
-}
-
-export function voidExpenseApi(id: string, reason: string): Promise<unknown> {
-  return apiFetch(`/api/finance/expenses/${id}/void`, {
-    method: "POST",
-    body: JSON.stringify({ reason }),
-  })
-}
-
-export function fetchReceivables(): Promise<{ data: ReceivableRow[] }> {
-  return apiFetch<{ data: ReceivableRow[] }>("/api/finance/receivables")
-}
-
-export function fetchPlans(): Promise<{ data: InstallmentPlanWithQuotas[] }> {
-  return apiFetch<{ data: InstallmentPlanWithQuotas[] }>("/api/finance/installment-plans")
-}
-
-export function createPlanApi(body: {
-  patientId: string
-  chargeId: string
-  installments: number
-  firstDueAt: string
-  notes?: string
-}): Promise<unknown> {
-  return apiFetch("/api/finance/installment-plans", {
-    method: "POST",
-    body: JSON.stringify(body),
-  })
-}
-
-export function refreshPlanApi(id: string): Promise<unknown> {
-  return apiFetch(`/api/finance/installment-plans/${id}/refresh`, { method: "POST" })
-}
-
-export function voidPlanApi(id: string, reason: string): Promise<unknown> {
-  return apiFetch(`/api/finance/installment-plans/${id}/void`, {
-    method: "POST",
-    body: JSON.stringify({ reason }),
-  })
-}
-
-export function fetchCommissionRules(): Promise<{ data: CommissionRule[] }> {
-  return apiFetch<{ data: CommissionRule[] }>("/api/finance/commission-rules")
-}
-
-export function upsertRuleApi(body: {
-  professionalUserId: string
-  base: "cobrado" | "produccion"
-  rateBps: number
-}): Promise<{ data: CommissionRule }> {
-  return apiFetch<{ data: CommissionRule }>("/api/finance/commission-rules", {
-    method: "POST",
-    body: JSON.stringify(body),
-  })
-}
-
-export function previewCommissionsApi(query: {
-  professionalUserId: string
-  base: string
-  from: string
-  to: string
-  currency: string
-}): Promise<{ data: CommissionPreview }> {
-  const params = new URLSearchParams(query).toString()
-  return apiFetch<{ data: CommissionPreview }>(`/api/finance/commissions/preview?${params}`)
-}
-
-export function settleCommissionsApi(body: {
-  professionalUserId: string
-  base: "cobrado" | "produccion"
-  from: string
-  to: string
-  currency: string
-}): Promise<{ data: Settlement }> {
-  return apiFetch<{ data: Settlement }>("/api/finance/commissions/settle", {
-    method: "POST",
-    body: JSON.stringify(body),
-  })
-}
-
-export function fetchSettlements(): Promise<{ data: Settlement[] }> {
-  return apiFetch<{ data: Settlement[] }>("/api/finance/settlements")
-}
-
-export function fetchSettlementDetail(id: string): Promise<{
-  data: { settlement: Settlement; lines: CommissionPreview["lines"] }
-}> {
-  return apiFetch(`/api/finance/settlements/${id}`)
-}
-
-export function fetchFinanceOverview(): Promise<{ data: Overview }> {
-  return apiFetch<{ data: Overview }>("/api/finance/overview")
-}
-
-export function voidSettlementApi(id: string, reason: string): Promise<unknown> {
-  return apiFetch(`/api/finance/settlements/${id}/void`, {
-    method: "POST",
-    body: JSON.stringify({ reason }),
-  })
+  return financeErrorMessage(err)
 }

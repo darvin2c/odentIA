@@ -84,7 +84,7 @@ describe("dictado en la atención", () => {
     expect(unknownCode?.note).toContain("no está en el catálogo CIE-10")
     // La prestación se reconoce por su nombre y trae la tarifa del tarifario, que no se dicta.
     expect(plan?.payload).toMatchObject({ serviceId: fx.service.id, serviceName: "Resina compuesta", priceCents: 120000, currency: "PEN" })
-    expect(plan?.summary).toBe("Resina compuesta · S/ 1200.00\nPieza 16 · cara oclusal")
+    expect(plan?.summary).toMatch(/^Resina compuesta · S\/\s1,200\.00\nPieza 16 · cara oclusal$/)
     expect(unknownService?.note).toBe("Dijiste «Corona de zirconio» y no está en tus servicios. Elige la prestación.")
 
     // Nada entró a la historia todavía.

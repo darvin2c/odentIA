@@ -8,6 +8,7 @@ import { AdvisorPreview, type AdvisorSettings } from "../../components/agent/adv
 import type { AgentRoles } from "../../lib/agent"
 import { apiFetch } from "../../lib/api"
 import { usePermission } from "../../lib/crm"
+import { activeOrgLocale } from "../../lib/locale"
 import { mutationErrorMessage, QueryErrorState } from "../../lib/query-error"
 
 export const Route = createFileRoute("/_org/agent/asesor")({
@@ -117,7 +118,7 @@ function AdvisorPage() {
                     <p className="text-sm text-muted-foreground">{detection.on ? detection.description : "Apagada: no la calcula ni la muestra."}</p>
                     {detection.on && detection.snoozedUntil ? (
                       <p className="text-sm">
-                        Oculta hasta el {new Date(detection.snoozedUntil).toLocaleDateString("es-PE", { day: "numeric", month: "long" })}.{" "}
+                        Oculta hasta el {new Date(detection.snoozedUntil).toLocaleDateString(activeOrgLocale(), { day: "numeric", month: "long" })}.{" "}
                         {canWrite ? (
                           <Button
                             type="button"

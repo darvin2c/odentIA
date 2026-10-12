@@ -4,6 +4,7 @@
 // el deltaLink como cursor.
 // Referencias: https://learn.microsoft.com/en-us/graph/delta-query-messages
 // y https://learn.microsoft.com/en-us/graph/api/message-delta
+import { splitColdSubject } from "./protocol.js"
 import type {
   ChannelAdapter,
   ChannelAdapterDeps,
@@ -554,6 +555,14 @@ async function downloadOutboundMedia(
   return new Uint8Array(buf)
 }
 
+function coldAddress(to: string): string | null {
+  if (!to.startsWith("mail:")) return null
+  const address = to.slice("mail:".length).trim().toLowerCase()
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(address)) throw new Error("Microsoft 365: dirección de destino inválida")
+  return address
+}
+
+
 /* ------------------------- Adaptador ------------------------- */
 
 export const microsoft365Adapter: ChannelAdapter = {
@@ -578,11 +587,53 @@ export const microsoft365Adapter: ChannelAdapter = {
 
   async sendMessage(config, msg: OutboundMessage, deps) {
     const { accessToken } = requireAccessToken(config)
-    const conversationId = msg.to.startsWith("m365-conv:")
-      ? msg.to.slice("m365-conv:".length)
-      : null
-    if (!conversationId) throw new Error("Microsoft 365: hilo inválido para responder")
     if (msg.kind.type === "template") throw new Error("Microsoft 365 no soporta plantillas")
+    // Envío en frío (Fase 7 Finanzas): `to: mail:<destino>` crea y envía un
+    // mensaje nuevo con el asunto de la primera línea del texto.
+    if (!msg.to.startsWith("m365-conv:")) {
+      const to = coldAddress(msg.to)
+      if (!to) throw new Error("Microsoft 365: hilo inválido para responder")
+      if (msg.kind.type === "text") {
+        if (!msg.kind.text.trim()) throw new Error("El texto del mensaje es obligatorio")
+        const { subject, body } = splitColdSubject(msg.kind.text)
+        const { status, json } = await graphApi(accessToken, `${GRAPH_API}/me/sendMail`, deps, {
+          method: "POST",
+          body: {
+            message: {
+              subject,
+              body: { contentType: "Text", content: body },
+              toRecipients: [{ emailAddress: { address: to } }],
+            },
+          },
+        })
+        if (status >= 400 && status !== 202) throw new Error(graphApiError("messages.send", status, json))
+        return { externalId: `m365-send:${to}:${Date.now()}` }
+      }
+      if (msg.kind.type !== "media") throw new Error("Tipo de mensaje no soportado por Microsoft 365")
+      const { subject, body } = splitColdSubject(msg.kind.media.caption ?? "")
+      const bytes = await downloadOutboundMedia(msg.kind.media.url, deps)
+      const { status, json } = await graphApi(accessToken, `${GRAPH_API}/me/sendMail`, deps, {
+        method: "POST",
+        body: {
+          message: {
+            subject,
+            body: { contentType: "Text", content: body },
+            toRecipients: [{ emailAddress: { address: to } }],
+            attachments: [
+              {
+                "@odata.type": "#microsoft.graph.fileAttachment",
+                name: msg.kind.media.filename,
+                contentType: msg.kind.media.mimeType,
+                contentBytes: Buffer.from(bytes).toString("base64"),
+              },
+            ],
+          },
+        },
+      })
+      if (status >= 400 && status !== 202) throw new Error(graphApiError("messages.send", status, json))
+      return { externalId: `m365-send:${to}:${Date.now()}` }
+    }
+    const conversationId = msg.to.slice("m365-conv:".length)
     const replyToId = await latestInboundInConversation(accessToken, conversationId, deps)
     if (!replyToId) throw new Error("Microsoft 365: sin mensaje previo para responder en el hilo")
     if (msg.kind.type === "text") {

@@ -12,6 +12,7 @@ import {
   useOrgMembers,
   usePermission,
 } from "../../lib/crm"
+import { useOrgProfile } from "../../lib/org"
 import { fetchServices } from "../../lib/services"
 import { isoToLocalInput, localInputToIso, parseAmountToCents } from "./crm-helpers"
 
@@ -108,7 +109,9 @@ export function OpportunityDrawer({
   const [draftServiceId, setDraftServiceId] = useState("")
   const [draftServiceName, setDraftServiceName] = useState("")
   const [draftAmount, setDraftAmount] = useState("")
-  const [draftCurrency, setDraftCurrency] = useState("PEN")
+  // Vacía = la moneda de la clínica (se muestra como sugerencia en el campo).
+  const [draftCurrency, setDraftCurrency] = useState("")
+  const orgCurrency = useOrgProfile().data?.currency
   const [draftAssignee, setDraftAssignee] = useState("")
   const [draftNextAction, setDraftNextAction] = useState("")
   const [draftNote, setDraftNote] = useState("")
@@ -157,7 +160,7 @@ export function OpportunityDrawer({
       setDraftServiceId("")
       setDraftServiceName("")
       setDraftAmount("")
-      setDraftCurrency("PEN")
+      setDraftCurrency("")
       setDraftAssignee("")
       setDraftNextAction("")
       setDraftNote("")
@@ -265,7 +268,8 @@ export function OpportunityDrawer({
         interestText: draftInterest.trim() || null,
         serviceId: draftServiceId || null,
         amountCents,
-        currency: draftCurrency.trim().toUpperCase() || "PEN",
+        // Vacía: el servidor usa la moneda de la clínica; nunca se asume una aquí.
+        currency: draftCurrency.trim().toUpperCase() || undefined,
         assignedUserId: draftAssignee || null,
         nextActionAt: localInputToIso(draftNextAction),
         nextActionNote: draftNote.trim() || null,
@@ -539,7 +543,7 @@ export function OpportunityDrawer({
             {draftServiceName ? ` · ${draftServiceName}` : ""}
           </summary>
           <Field>
-            <FieldLabel htmlFor="opp-drawer-service-search">Buscar en el tarifario</FieldLabel>
+            <FieldLabel htmlFor="opp-drawer-service-search">Buscar un servicio</FieldLabel>
             {draftServiceId ? (
               <p className="flex items-center gap-2 text-sm">
                 <span className="font-medium">{draftServiceName || "Servicio elegido"}</span>
@@ -562,7 +566,7 @@ export function OpportunityDrawer({
                     id="opp-drawer-service-search"
                     value={serviceSearch}
                     onChange={(e) => setServiceSearch(e.target.value)}
-                    placeholder="Buscar en el tarifario"
+                    placeholder="Buscar un servicio"
                     aria-busy={servicesQuery.isFetching}
                     className={servicesQuery.isFetching ? "pr-9" : undefined}
                   />
@@ -574,7 +578,7 @@ export function OpportunityDrawer({
                 </div>
                 {servicesQuery.isFetching ? (
                   <p className="text-xs text-muted-foreground" role="status">
-                    Buscando en el tarifario…
+                    Buscando servicios…
                   </p>
                 ) : null}
                 {serviceSearch.trim() !== "" ? (
@@ -599,7 +603,7 @@ export function OpportunityDrawer({
                   </div>
                 ) : (
                   <p className="text-xs text-muted-foreground">
-                    Escribe para buscar en el tarifario.
+                    Escribe para buscar un servicio.
                   </p>
                 )}
                 {servicesQuery.hasNextPage ? (
@@ -623,7 +627,7 @@ export function OpportunityDrawer({
                 ) : null}
                 {servicesQuery.isError ? (
                   <p role="alert" className="text-sm text-destructive">
-                    No se pudo buscar en el tarifario.{" "}
+                    No se pudieron buscar los servicios.{" "}
                     <Button
                       type="button"
                       variant="link"
@@ -731,6 +735,7 @@ export function OpportunityDrawer({
               id="opp-drawer-currency"
               value={draftCurrency}
               maxLength={3}
+              placeholder={orgCurrency}
               onChange={(e) => setDraftCurrency(e.target.value)}
             />
           </Field>

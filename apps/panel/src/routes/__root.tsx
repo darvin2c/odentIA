@@ -40,7 +40,7 @@ function RootComponent() {
 
 function RootDocument({ children }: Readonly<{ children: ReactNode }>) {
   return (
-    <html lang="es-PE">
+    <html lang="es">
       <head>
         <HeadContent />
       </head>

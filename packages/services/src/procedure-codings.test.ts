@@ -3,7 +3,7 @@ import { user } from "@odentia/db/schema/auth"
 import { procedureCode, procedureCodeSystem, treatmentTemplate } from "@odentia/db/schema/clinical"
 import { sql } from "drizzle-orm"
 import { expect, it } from "vitest"
-import { createBudget, decideBudget, getBudgetDetail, presentBudget } from "./budgets.js"
+import { createBudget, decideBudget, deliverBudget, getBudgetDetail } from "./budgets.js"
 import { addEncounterProcedure, createEncounter } from "./encounters.js"
 import { addPlanItem, createTreatmentPlan, listPlanItems, updatePlanItem } from "./plan.js"
 import {
@@ -285,7 +285,7 @@ it("presupuesto y atención heredan el snapshot exacto del ítem", async () => {
   )
   expect(budget.items.map((l) => l.codings)).toEqual([item.codings])
   await withOrgContext(appDb, "org_a", (tx) =>
-    presentBudget(tx, "org_a", ACTOR, patient.id, budget.id),
+    deliverBudget(tx, "org_a", ACTOR, patient.id, budget.id),
   )
   await withOrgContext(appDb, "org_a", (tx) =>
     decideBudget(tx, "org_a", ACTOR, patient.id, budget.id, {
@@ -351,7 +351,7 @@ it("cambio de servicio recodifica la nueva indicación; el presentado es inmutab
     "D2330",
   ])
   await withOrgContext(appDb, "org_a", (tx) =>
-    presentBudget(tx, "org_a", ACTOR, patient.id, budget.id),
+    deliverBudget(tx, "org_a", ACTOR, patient.id, budget.id),
   )
   await expect(
     withOrgContext(appDb, "org_a", (tx) =>
@@ -459,7 +459,7 @@ it("ejecutar un plan antiguo con snapshot ambiguo falla sin elegir principal", a
     createBudget(tx, "org_a", ACTOR, patient.id, { planId: plan.id, itemIds: [item.id] }),
   )
   await withOrgContext(appDb, "org_a", (tx) =>
-    presentBudget(tx, "org_a", ACTOR, patient.id, budget.id),
+    deliverBudget(tx, "org_a", ACTOR, patient.id, budget.id),
   )
   await withOrgContext(appDb, "org_a", (tx) =>
     decideBudget(tx, "org_a", ACTOR, patient.id, budget.id, {

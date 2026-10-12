@@ -18,13 +18,13 @@ import {
   createTask,
   deriveCommercialFollowUpCoordination,
   findFreeGaps,
-  formatServicePrice,
   getAgentPatientSummary,
   getAutonomyPolicy,
   getContact,
   getClinicInfoSnapshot,
   getOpportunity,
   getOrgLocale,
+  formatOrgMoney,
   formatZoned,
   listAgentContextCandidates,
   listContactChannelHistory,
@@ -56,7 +56,7 @@ export interface AgentEvidence extends Evidence {
 
 /** Cómo ve el equipo cada herramienta de lectura cuando una respuesta se apoya en ella. */
 export const TOOL_SOURCES: Record<string, { kind: string; label: string }> = {
-  ver_sedes_y_servicios: { kind: "servicios", label: "Sedes, servicios y tarifas" },
+  ver_sedes_y_servicios: { kind: "servicios", label: "Sedes, servicios y precios" },
   consultar_conocimiento: { kind: "conocimiento", label: "Respuestas oficiales de la clínica" },
   buscar_huecos: { kind: "agenda", label: "Agenda: horarios disponibles" },
   ver_contexto_paciente: { kind: "persona", label: "Vínculo con el paciente" },
@@ -91,7 +91,7 @@ export const SANDBOX_PERSON = "Paciente de prueba"
 
 /** Lo que hizo el agente en un turno, dicho para quien prueba (no para el modelo). */
 export const TOOL_ACTION_LABEL: Record<string, string> = {
-  ver_sedes_y_servicios: "Consultó sedes, servicios y tarifas.",
+  ver_sedes_y_servicios: "Consultó sedes, servicios y precios.",
   consultar_conocimiento: "Buscó en las respuestas oficiales.",
   buscar_huecos: "Buscó huecos reales en la agenda.",
   ver_contexto_paciente: "Verificó para quién es la atención.",
@@ -660,14 +660,22 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       }
       if (!snapshot.services.length) lines.push("Sin servicios publicados: no des precios.")
       for (const s of snapshot.services.slice(0, 50)) {
-        lines.push(`- Servicio ${s.name} (id ${s.id}): ${formatServicePrice(s.priceCents, s.currency)}${s.durationMin ? ` (${s.durationMin} min)` : ""}`)
+        lines.push(`- Servicio ${s.name} (id ${s.id}): ${formatOrgMoney(s.priceCents, s.currency, snapshot)}${s.durationMin ? ` (${s.durationMin} min)` : ""}`)
+      }
+      if (snapshot.paymentMethods.length) {
+        lines.push("Medios de pago aceptados por la clínica (los mismos que ofrece caja):")
+        for (const m of snapshot.paymentMethods) lines.push(`- ${m.name}`)
+      }
+      if (snapshot.promotions.length) {
+        lines.push("Promociones vigentes (el precio «desde» es un mínimo: el final sale del presupuesto):")
+        for (const p of snapshot.promotions) lines.push(`- ${p.name}`)
       }
       return lines.join("\n")
     },
     {
       name: "ver_sedes_y_servicios",
       description:
-        "Sedes (con id) y servicios con tarifas oficiales. Úsalo antes de hablar de precios, sedes o disponibilidad.",
+        "Sedes (con id), servicios con tarifas oficiales, medios de pago aceptados y promociones vigentes. Úsalo antes de hablar de precios, sedes, medios, promociones o disponibilidad.",
       schema: z.object({}),
     },
   )
@@ -761,7 +769,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       } else {
         for (const b of summary.balance) {
           if (b.outstandingCents > 0) {
-            lines.push(`- Saldo pendiente: ${(b.outstandingCents / 100).toFixed(2)} ${b.currency}.`)
+            lines.push(`- Saldo pendiente: ${formatOrgMoney(b.outstandingCents, b.currency, zone)}.`)
           }
         }
       }

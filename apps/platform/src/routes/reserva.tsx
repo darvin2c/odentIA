@@ -16,6 +16,7 @@ import {
   reserveBooking,
 } from "../lib/booking-link"
 import { orgSlugFromHostname, requestHostname } from "../lib/host"
+import { activeOrgLocale, activeOrgTimeZone, setOrgLocale } from "../lib/locale"
 
 /**
  * Página del enlace de reserva: quien recibió el enlace elige el día y la hora
@@ -58,7 +59,7 @@ function hourOf(instant: string, timeZone: string): number {
 }
 
 function timeLabel(instant: string, timeZone: string): string {
-  return new Intl.DateTimeFormat("es-PE", { timeZone, hour: "numeric", minute: "2-digit", hour12: true }).format(new Date(instant))
+  return new Intl.DateTimeFormat(activeOrgLocale(), { timeZone, hour: "numeric", minute: "2-digit" }).format(new Date(instant))
 }
 
 function capital(text: string): string {
@@ -66,19 +67,19 @@ function capital(text: string): string {
 }
 
 function longDay(instant: string, timeZone: string): string {
-  return capital(new Intl.DateTimeFormat("es-PE", { timeZone, weekday: "long", day: "numeric", month: "long" }).format(new Date(instant)))
+  return capital(new Intl.DateTimeFormat(activeOrgLocale(), { timeZone, weekday: "long", day: "numeric", month: "long" }).format(new Date(instant)))
 }
 
 function shortDay(instant: string, timeZone: string): string {
-  return new Intl.DateTimeFormat("es-PE", { timeZone, weekday: "long", day: "numeric" }).format(new Date(instant))
+  return new Intl.DateTimeFormat(activeOrgLocale(), { timeZone, weekday: "long", day: "numeric" }).format(new Date(instant))
 }
 
 function monthName(instant: string, timeZone: string): string {
-  return new Intl.DateTimeFormat("es-PE", { timeZone, month: "long" }).format(new Date(instant)).toLowerCase()
+  return new Intl.DateTimeFormat(activeOrgLocale(), { timeZone, month: "long" }).format(new Date(instant)).toLowerCase()
 }
 
 function dayParts(instant: string, timeZone: string): { weekday: string; number: string } {
-  const parts = new Intl.DateTimeFormat("es-PE", { timeZone, weekday: "long", day: "numeric" }).formatToParts(new Date(instant))
+  const parts = new Intl.DateTimeFormat(activeOrgLocale(), { timeZone, weekday: "long", day: "numeric" }).formatToParts(new Date(instant))
   return {
     weekday: capital(parts.find((part) => part.type === "weekday")?.value ?? ""),
     number: parts.find((part) => part.type === "day")?.value ?? "",
@@ -320,6 +321,9 @@ function BookingLinkPage() {
     retry: false,
   })
   const view = viewQuery.data?.data
+  // Página pública, sin layout de organización: el formato regional de la
+  // clínica llega con el enlace y se fija antes de pintar fechas y horas.
+  if (view) setOrgLocale(view.locale)
 
   const [branchChoice, setBranchChoice] = useState<string | null>(null)
   const [dentist, setDentist] = useState<string>(ANYONE)
@@ -367,7 +371,7 @@ function BookingLinkPage() {
     enabled: ready && branch !== undefined && (changing || (view?.status === "abierto" && current === null)),
     retry: false,
   })
-  const timeZone = slotsQuery.data?.data.timeZone ?? branch?.timeZone ?? "America/Lima"
+  const timeZone = slotsQuery.data?.data.timeZone ?? branch?.timeZone ?? activeOrgTimeZone()
   const allSlots = slotsQuery.data?.data.slots ?? []
 
   // Con quién: los profesionales que tienen algún horario libre esta semana.

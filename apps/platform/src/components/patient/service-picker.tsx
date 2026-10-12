@@ -22,12 +22,13 @@ import { ApiError } from "../../lib/api"
 import { usePermission } from "../../lib/crm"
 import {
   fetchServices,
-  formatMoney,
   type ServiceCatalogItem,
   TREATMENT_SCOPE_LABELS,
   TREATMENT_SPECIALTIES,
   TREATMENT_SPECIALTY_LABELS,
 } from "../../lib/services"
+import { formatMoney } from "@odentia/clinical"
+import { useOrgProfile } from "../../lib/org"
 
 interface ServicePickerProps {
   value: string
@@ -57,6 +58,7 @@ export function ServicePicker({
   const [specialty, setSpecialty] = useState<string>(NO_SPECIALTY)
   const canRead = usePermission("clinical.read")
   const canAdmin = usePermission("settings.write")
+  const orgLocale = useOrgProfile().data?.locale
 
   const servicesQuery = useQuery({
     queryKey: ["services", "picker", query.trim(), specialty],
@@ -168,7 +170,7 @@ export function ServicePicker({
                     nativeButton={false}
                     render={<Link to="/services" target="_blank" rel="noreferrer" />}
                   >
-                    Administrar tarifario
+                    Ir a Servicios y precios
                   </Button>
                 ) : null}
               </div>
@@ -188,7 +190,7 @@ export function ServicePicker({
                           : ""}
                         {item.scope ? `${TREATMENT_SCOPE_LABELS[item.scope] ?? item.scope} · ` : ""}
                         {item.code ? `${item.code} · ` : ""}
-                        {formatMoney(item.priceCents, item.currency)}
+                        {orgLocale ? formatMoney(item.priceCents, item.currency, orgLocale) : "…"}
                         {item.durationMin !== null ? ` · ${item.durationMin} min` : ""}
                       </span>
                     </ComboboxItem>
@@ -204,7 +206,10 @@ export function ServicePicker({
         <div className="flex flex-wrap items-center gap-2">
           <Badge>{selectedItem.name}</Badge>
           <span className="text-sm text-muted-foreground">
-            Tarifa de catálogo: {formatMoney(selectedItem.priceCents, selectedItem.currency)}
+            Precio normal:{" "}
+            {orgLocale
+              ? formatMoney(selectedItem.priceCents, selectedItem.currency, orgLocale)
+              : "…"}
             {selectedItem.durationMin !== null ? ` · ${selectedItem.durationMin} min` : ""}
           </span>
         </div>

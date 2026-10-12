@@ -15,6 +15,7 @@ import {
 import { auditEvent, orgProfile } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, ilike, inArray, ne, or, sql } from "drizzle-orm"
 import { isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
+import { orgProfileRequired } from "./locale.js"
 import {
   currentCatalogRelease,
   resolveSingleTemplateCoding,
@@ -88,13 +89,29 @@ function assertSpecialty(specialty: string | null | undefined): TreatmentSpecial
   return value as TreatmentSpecialty
 }
 
-function assertScope(scope: string | null | undefined): TreatmentScope {
-  const value = (scope ?? "").trim().toLowerCase()
-  if (!(TREATMENT_SCOPES as readonly string[]).includes(value)) {
-    throw validation("scope inválido: general|tooth|surfaces|quadrant|arch")
+export const BILLING_MODES = ["treatment", "session"] as const
+export type BillingMode = (typeof BILLING_MODES)[number]
+
+/**
+ * Cómo se cobra la oferta: 'treatment' una vez por tratamiento, 'session' el
+ * precio en cada visita atendida. Lo que está en curso usa el snapshot
+ * congelado; cambiar el modo solo afecta lo nuevo.
+ */
+export function assertBillingMode(mode: string | null | undefined): BillingMode {
+  const value = (mode ?? "treatment").trim().toLowerCase()
+  if (value !== "treatment" && value !== "session") {
+    throw validation("billingMode inválido: treatment|session")
   }
-  return value as TreatmentScope
+  return value
 }
+
+function assertScope(scope: string | null | undefined): TreatmentScope {
+   const value = (scope ?? "").trim().toLowerCase()
+   if (!(TREATMENT_SCOPES as readonly string[]).includes(value)) {
+     throw validation("scope inválido: general|tooth|surfaces|quadrant|arch")
+   }
+   return value as TreatmentScope
+ }
 
 /**
  * Toda oferta tiene tarifa explícita: 0 = incluido sin costo. Nunca null.
@@ -109,11 +126,10 @@ function assertPrice(priceCents: number | null | undefined): number {
   return priceCents
 }
 
-function assertCurrency(currency: string | null | undefined, orgCurrency: string): string {
-  const value = currency ?? orgCurrency
-  if (!/^[A-Z]{3}$/.test(value))
+function assertCurrency(currency: string): string {
+  if (!/^[A-Z]{3}$/.test(currency))
     throw validation("currency debe ser ISO-4217 de 3 letras mayúsculas")
-  return value
+  return currency
 }
 
 function assertDuration(durationMin: number | null | undefined): number | null {
@@ -124,14 +140,18 @@ function assertDuration(durationMin: number | null | undefined): number | null {
   return durationMin
 }
 
-/** Moneda de la organización (nunca un literal de moneda en el código). */
+/**
+ * Moneda de la organización. Sin perfil regional no se asume la de ningún
+ * país: poner precio a un servicio exige haber configurado la clínica.
+ */
 async function orgCurrency(tx: Db, orgId: string): Promise<string> {
   const [profile] = await tx
     .select({ currency: orgProfile.currency })
     .from(orgProfile)
     .where(eq(orgProfile.organizationId, orgId))
     .limit(1)
-  return profile?.currency ?? "PEN"
+  if (!profile) throw orgProfileRequired()
+  return profile.currency
 }
 
 async function requireTemplate(tx: Db, templateId: string): Promise<TreatmentTemplateRow> {
@@ -440,6 +460,7 @@ export interface CreateServiceInput {
   priceCents?: number | null
   currency?: string | null
   durationMin?: number | null
+  billingMode?: string | null
   isActive?: boolean
 }
 
@@ -449,7 +470,9 @@ export async function createService(
   actorUserId: string,
   input: CreateServiceInput,
 ): Promise<ServiceRow> {
-  const currencyDefault = await orgCurrency(tx, orgId)
+  // La moneda viaja siempre explícita: la indicada o la de la clínica (la
+  // columna no tiene valor por defecto).
+  const currency = assertCurrency(input.currency ?? (await orgCurrency(tx, orgId)))
   let values: typeof serviceCatalog.$inferInsert
   if (input.templateId) {
     const tpl = await requireTemplate(tx, input.templateId)
@@ -474,8 +497,9 @@ export async function createService(
       specialty: tpl.specialty,
       scope: tpl.scope,
       priceCents: assertPrice(input.priceCents),
-      currency: assertCurrency(input.currency, currencyDefault),
+      currency,
       durationMin: assertDuration(input.durationMin),
+      billingMode: assertBillingMode(input.billingMode),
       isActive: input.isActive ?? true,
     }
   } else {
@@ -488,8 +512,9 @@ export async function createService(
       specialty: assertSpecialty(input.specialty),
       scope: assertScope(input.scope),
       priceCents: assertPrice(input.priceCents),
-      currency: assertCurrency(input.currency, currencyDefault),
+      currency,
       durationMin: assertDuration(input.durationMin),
+      billingMode: assertBillingMode(input.billingMode),
       isActive: input.isActive ?? true,
     }
   }
@@ -521,6 +546,7 @@ export interface UpdateServicePatch {
   priceCents?: number | null
   currency?: string
   durationMin?: number | null
+  billingMode?: string
   isActive?: boolean
 }
 
@@ -532,7 +558,6 @@ export async function updateService(
   patch: UpdateServicePatch,
 ): Promise<ServiceRow> {
   const current = await requireService(tx, orgId, serviceId)
-  const currencyDefault = await orgCurrency(tx, orgId)
   const set: Partial<typeof serviceCatalog.$inferInsert> = {}
   const fields: string[] = []
 
@@ -594,12 +619,16 @@ export async function updateService(
     fields.push("priceCents")
   }
   if (patch.currency !== undefined) {
-    set.currency = assertCurrency(patch.currency, currencyDefault)
+    set.currency = assertCurrency(patch.currency)
     fields.push("currency")
   }
   if (patch.durationMin !== undefined) {
     set.durationMin = assertDuration(patch.durationMin)
     fields.push("durationMin")
+  }
+  if (patch.billingMode !== undefined) {
+    set.billingMode = assertBillingMode(patch.billingMode)
+    fields.push("billingMode")
   }
   if (patch.isActive !== undefined) {
     set.isActive = patch.isActive
@@ -644,34 +673,48 @@ export interface FromTemplatesResult {
   existing: ServiceRow[]
 }
 
+export interface FromTemplateItem {
+  templateId: string
+  /** Nombre con el que la clínica lo ofrece; sin él rige la denominación de la biblioteca. */
+  name?: string | null
+  /** Tarifa explícita en unidad menor; 0 = incluido sin costo. Nunca null. */
+  priceCents: number
+  billingMode?: string | null
+  durationMin?: number | null
+}
+
 /**
- * Incorpora ofertas base desde la biblioteca: crea solo las faltantes con
- * tarifa cero e inactivas hasta su revisión, sin pisar variantes ni precios existentes.
+ * Carga rápida del tarifario en una pantalla: se eligen prestaciones de la
+ * biblioteca con su nombre, su precio y cómo se cobran, y quedan activas en el
+ * mismo acto. Sin alta diferida: no se crean ofertas inactivas con tarifa 0.
+ * El nombre es el comercial de la clínica; el código oficial no se altera.
  * Serializa en la fila de organización para evitar duplicados concurrentes.
  */
 export async function fromTemplates(
   tx: Db,
   orgId: string,
   actorUserId: string,
-  templateIds: string[],
+  items: FromTemplateItem[],
 ): Promise<FromTemplatesResult> {
-  if (!Array.isArray(templateIds) || templateIds.length < 1 || templateIds.length > 100) {
-    throw validation("templateIds debe tener entre 1 y 100 identificadores")
+  if (!Array.isArray(items) || items.length < 1 || items.length > 100) {
+    throw validation("items debe tener entre 1 y 100 prestaciones con su precio")
   }
-  if (new Set(templateIds).size !== templateIds.length) {
-    throw validation("templateIds no debe repetirse")
+  const ids = items.map((item) => item.templateId)
+  if (new Set(ids).size !== ids.length) {
+    throw validation("templateId no debe repetirse")
   }
   await tx.execute(sql`select "id" from "organization" where "id" = ${orgId} for update`)
   const templates = await tx
     .select()
     .from(treatmentTemplate)
-    .where(inArray(treatmentTemplate.id, templateIds))
-  if (templates.length !== templateIds.length) throw notFound("Prestación de la biblioteca")
+    .where(inArray(treatmentTemplate.id, ids))
+  if (templates.length !== ids.length) throw notFound("Prestación de la biblioteca")
   for (const tpl of templates) {
     if (!tpl.isActive)
       throw conflict("TEMPLATE_INACTIVE", "La prestación de la biblioteca ya no está vigente")
     await resolveSingleTemplateCoding(tx, tpl.id)
   }
+  const byId = new Map(templates.map((tpl) => [tpl.id, tpl]))
   const owned = await tx
     .select()
     .from(serviceCatalog)
@@ -679,14 +722,17 @@ export async function fromTemplates(
       and(
         eq(serviceCatalog.organizationId, orgId),
         eq(serviceCatalog.source, "template"),
-        inArray(serviceCatalog.templateId, templateIds),
+        inArray(serviceCatalog.templateId, ids),
       ),
     )
   const ownedIds = new Set(owned.map((row) => row.templateId))
-  const currencyDefault = await orgCurrency(tx, orgId)
-  const missing = templates.filter((tpl) => !ownedIds.has(tpl.id))
+  // Moneda explícita de la clínica: la columna no tiene valor por defecto.
+  const currency = await orgCurrency(tx, orgId)
   const created: ServiceRow[] = []
-  for (const tpl of missing) {
+  for (const item of items) {
+    if (ownedIds.has(item.templateId)) continue
+    const tpl = byId.get(item.templateId)
+    if (!tpl) throw notFound("Prestación de la biblioteca")
     const [row] = await tx
       .insert(serviceCatalog)
       .values({
@@ -694,14 +740,14 @@ export async function fromTemplates(
         templateId: tpl.id,
         source: "template",
         code: null,
-        name: tpl.name,
+        name: item.name?.trim() ? assertName(item.name) : tpl.name,
         specialty: tpl.specialty,
         scope: tpl.scope,
-        // Nace inactiva con tarifa 0: pendiente de tarifa real antes de indicarse.
-        priceCents: 0,
-        currency: currencyDefault,
-        durationMin: null,
-        isActive: false,
+        priceCents: assertPrice(item.priceCents),
+        currency,
+        durationMin: assertDuration(item.durationMin),
+        billingMode: assertBillingMode(item.billingMode),
+        isActive: true,
       })
       .returning()
     if (!row) throw new Error("No se pudo incorporar la prestación")
@@ -710,9 +756,300 @@ export async function fromTemplates(
       source: "template",
       templateId: tpl.id,
       fromLibrary: true,
+      priceCents: row.priceCents,
+      billingMode: row.billingMode,
     })
   }
   return { created, existing: owned }
+}
+
+/** Servicio propio dentro de la carga rápida: sin plantilla ni código oficial. */
+export interface CustomServiceItem {
+  name: string
+  specialty: string
+  scope: string
+  /** Tarifa explícita en unidad menor; 0 = incluido sin costo. */
+  priceCents: number
+  billingMode?: string | null
+  durationMin?: number | null
+}
+
+export type QuickAddServiceItem =
+  | ({ kind: "template" } & FromTemplateItem)
+  | ({ kind: "custom" } & CustomServiceItem)
+
+/**
+ * «Agregar servicios» en un solo acto: lo elegido de la biblioteca y los
+ * servicios propios se guardan juntos y quedan activos, o no se guarda nada
+ * (la transacción es de quien llama). Compone las dos altas existentes: aquí
+ * no hay otra regla de precio, moneda ni código.
+ */
+export async function quickAddServices(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  items: QuickAddServiceItem[],
+): Promise<FromTemplatesResult> {
+  if (!Array.isArray(items) || items.length < 1 || items.length > 100) {
+    throw validation("items debe tener entre 1 y 100 servicios con su precio")
+  }
+  const fromLibrary: FromTemplateItem[] = []
+  const custom: CustomServiceItem[] = []
+  for (const item of items) {
+    if (item.kind === "template") fromLibrary.push(item)
+    else custom.push(item)
+  }
+  const result: FromTemplatesResult =
+    fromLibrary.length > 0
+      ? await fromTemplates(tx, orgId, actorUserId, fromLibrary)
+      : { created: [], existing: [] }
+  for (const item of custom) {
+    result.created.push(
+      await createService(tx, orgId, actorUserId, {
+        name: item.name,
+        specialty: item.specialty,
+        scope: item.scope,
+        priceCents: item.priceCents,
+        billingMode: item.billingMode,
+        durationMin: item.durationMin,
+        isActive: true,
+      }),
+    )
+  }
+  return result
+}
+
+/**
+ * Concepto de «Más usados»: lo que casi toda clínica ofrece, dicho con
+ * vocabulario clínico general y no con el código de un catálogo. `phrases` va
+ * en orden de preferencia; una frase casa cuando el nombre de la plantilla
+ * contiene todas sus raíces (sin tildes ni mayúsculas). `specialties` acota el
+ * área, para que «limpieza» no traiga la limpieza de una prótesis.
+ */
+export interface StarterConcept {
+  key: string
+  label: string
+  phrases: readonly (readonly [string, ...string[]])[]
+  specialties?: readonly TreatmentSpecialty[]
+}
+
+export const STARTER_CONCEPTS: readonly StarterConcept[] = [
+  {
+    key: "consulta",
+    label: "Consulta",
+    phrases: [["consulta"], ["evaluacion"]],
+    specialties: ["diagnostico", "general"],
+  },
+  {
+    key: "radiografia",
+    label: "Radiografía",
+    phrases: [["radiograf"]],
+    specialties: ["diagnostico"],
+  },
+  {
+    key: "profilaxis",
+    label: "Limpieza (profilaxis)",
+    phrases: [["profilaxis"], ["limpieza"], ["destartraje"]],
+    specialties: ["prevencion", "periodoncia"],
+  },
+  { key: "fluor", label: "Flúor", phrases: [["fluor"]], specialties: ["prevencion"] },
+  {
+    key: "sellante",
+    label: "Sellante",
+    phrases: [["sellante"]],
+    specialties: ["prevencion", "restauradora", "odontopediatria"],
+  },
+  {
+    key: "resina",
+    label: "Resina",
+    phrases: [["restauracion", "resina"], ["resina"]],
+    specialties: ["restauradora"],
+  },
+  {
+    key: "endodoncia",
+    label: "Endodoncia",
+    phrases: [["endodon"], ["conducto"]],
+    specialties: ["endodoncia"],
+  },
+  {
+    key: "exodoncia",
+    label: "Extracción (exodoncia)",
+    phrases: [["exodoncia"], ["extraccion"]],
+    specialties: ["cirugia"],
+  },
+  { key: "corona", label: "Corona", phrases: [["corona"]], specialties: ["protesis"] },
+  {
+    key: "implante",
+    label: "Implante",
+    phrases: [["implante"]],
+    specialties: ["implantologia"],
+  },
+  {
+    key: "ortodoncia",
+    label: "Ortodoncia y controles",
+    phrases: [["control", "ortodon"], ["ortodon"]],
+    specialties: ["ortodoncia"],
+  },
+  { key: "blanqueamiento", label: "Blanqueamiento", phrases: [["blanqueamiento"]] },
+]
+
+/**
+ * Pares para `translate()`: la biblioteca escribe «Restauracion» y
+ * «Radiografía». Incluye las mayúsculas porque `lower()` solo las convierte si
+ * la base tiene una configuración regional que las conozca.
+ */
+const FOLD_FROM = "áàäâãéèëêíìïîóòöôõúùüûñçÁÀÄÂÃÉÈËÊÍÌÏÎÓÒÖÔÕÚÙÜÛÑÇ"
+const FOLD_TO = "aaaaaeeeeiiiiooooouuuuncaaaaaeeeeiiiiooooouuuunc"
+
+/** Minúsculas y sin tildes, igual que el filtro de la consulta. */
+function foldText(text: string): string {
+  return text
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .toLowerCase()
+}
+
+export type LibraryTemplate = TreatmentTemplateRow & { codings: ProcedureCodingSnapshot[] }
+
+export interface StarterSuggestion {
+  key: string
+  label: string
+  templates: LibraryTemplate[]
+}
+
+/**
+ * «Más usados»: punto de partida para una clínica que aún no tiene tarifario.
+ * Resuelve cada concepto contra la biblioteca disponible para la clínica (la
+ * misma que lista `listTemplates`) y devuelve, por concepto, las plantillas que
+ * casan y que la clínica todavía no incorporó. Un concepto que la biblioteca no
+ * tiene —o que ya está entero en el tarifario— no aparece; sin biblioteca la
+ * lista queda vacía y la clínica crea sus servicios propios.
+ */
+export async function listMostUsedServices(
+  tx: Db,
+  orgId: string,
+  options: { perConcept?: number } = {},
+): Promise<StarterSuggestion[]> {
+  const perConcept = options.perConcept ?? 3
+  if (!Number.isInteger(perConcept) || perConcept < 1 || perConcept > 10) {
+    throw validation("perConcept debe ser un entero entre 1 y 10")
+  }
+  const release = await currentCatalogRelease(tx)
+  if (!release) return []
+  // Toda frase exige su primera raíz: basta con ella para acotar en la base.
+  const stems = [
+    ...new Set(STARTER_CONCEPTS.flatMap((concept) => concept.phrases.map((phrase) => phrase[0]))),
+  ]
+  const folded = sql`translate(lower(${treatmentTemplate.name}), ${FOLD_FROM}, ${FOLD_TO})`
+  const rows = await tx
+    .select({
+      id: treatmentTemplate.id,
+      key: treatmentTemplate.key,
+      name: treatmentTemplate.name,
+      specialty: treatmentTemplate.specialty,
+      scope: treatmentTemplate.scope,
+      surfaceCountMin: treatmentTemplate.surfaceCountMin,
+      surfaceCountMax: treatmentTemplate.surfaceCountMax,
+      isActive: treatmentTemplate.isActive,
+      version: treatmentTemplate.version,
+      code: procedureCode.code,
+      codeVersion: procedureCode.version,
+      display: procedureCode.display,
+    })
+    .from(treatmentTemplate)
+    .innerJoin(treatmentTemplateCode, eq(treatmentTemplateCode.templateId, treatmentTemplate.id))
+    .innerJoin(
+      procedureCode,
+      and(
+        eq(treatmentTemplateCode.systemKey, procedureCode.systemKey),
+        eq(treatmentTemplateCode.code, procedureCode.code),
+        eq(treatmentTemplateCode.version, procedureCode.version),
+      ),
+    )
+    .where(
+      and(
+        eq(treatmentTemplate.isActive, true),
+        eq(treatmentTemplateCode.isPrimary, true),
+        eq(procedureCode.systemKey, release.system),
+        eq(procedureCode.version, release.version),
+        eq(procedureCode.isActive, true),
+        or(...stems.map((stem) => sql`${folded} like ${`%${stem}%`}`)),
+      ),
+    )
+    .orderBy(asc(treatmentTemplate.name), asc(treatmentTemplate.id))
+  if (rows.length === 0) return []
+  const owned = await tx
+    .select({ templateId: serviceCatalog.templateId })
+    .from(serviceCatalog)
+    .where(
+      and(
+        eq(serviceCatalog.organizationId, orgId),
+        eq(serviceCatalog.source, "template"),
+        inArray(
+          serviceCatalog.templateId,
+          rows.map((row) => row.id),
+        ),
+      ),
+    )
+  const ownedIds = new Set(owned.map((row) => row.templateId))
+  const candidates = rows
+    .filter((row) => !ownedIds.has(row.id))
+    .map((row) => ({ row, text: foldText(row.name) }))
+
+  // Una plantilla pertenece a un solo concepto: el primero que la reclama.
+  const taken = new Set<string>()
+  const suggestions: StarterSuggestion[] = []
+  for (const concept of STARTER_CONCEPTS) {
+    const ranked: Array<{ row: (typeof rows)[number]; phrase: number; at: number }> = []
+    for (const candidate of candidates) {
+      if (taken.has(candidate.row.id)) continue
+      if (
+        concept.specialties &&
+        !(concept.specialties as readonly string[]).includes(candidate.row.specialty)
+      ) {
+        continue
+      }
+      const phrase = concept.phrases.findIndex((phraseStems) =>
+        phraseStems.every((stem) => candidate.text.includes(stem)),
+      )
+      const phraseStems = concept.phrases[phrase]
+      if (!phraseStems) continue
+      const at = Math.min(...phraseStems.map((stem) => candidate.text.indexOf(stem)))
+      ranked.push({ row: candidate.row, phrase, at })
+    }
+    // Primero la frase preferida, luego el nombre que empieza por el concepto y
+    // el más corto: la denominación general antes que sus variantes.
+    ranked.sort(
+      (a, b) =>
+        a.phrase - b.phrase ||
+        a.at - b.at ||
+        a.row.name.length - b.row.name.length ||
+        a.row.name.localeCompare(b.row.name) ||
+        a.row.id.localeCompare(b.row.id),
+    )
+    const chosen = ranked.slice(0, perConcept)
+    if (chosen.length === 0) continue
+    for (const pick of chosen) taken.add(pick.row.id)
+    suggestions.push({
+      key: concept.key,
+      label: concept.label,
+      templates: chosen.map(({ row }) => ({
+        id: row.id,
+        key: row.key,
+        name: row.name,
+        specialty: row.specialty,
+        scope: row.scope,
+        surfaceCountMin: row.surfaceCountMin,
+        surfaceCountMax: row.surfaceCountMax,
+        isActive: row.isActive,
+        version: row.version,
+        codings: [
+          { system: release.system, code: row.code, version: row.codeVersion, display: row.display },
+        ],
+      })),
+    })
+  }
+  return suggestions
 }
 
 

@@ -1,4 +1,4 @@
-export {}
+import { setFormatRegion } from "./src/locale.js"
 
 declare global {
   var IS_REACT_ACT_ENVIRONMENT: boolean | undefined
@@ -26,3 +26,7 @@ if (typeof window !== "undefined" && !window.matchMedia) {
       dispatchEvent: () => false,
     }) as unknown as MediaQueryList
 }
+
+// El paquete no asume país: las pruebas fijan de forma explícita el formato y
+// la zona (peruanos) contra los que comparan sus textos.
+setFormatRegion({ locale: "es-PE", timeZone: "America/Lima" })

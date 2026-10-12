@@ -2,6 +2,7 @@ import { Button, cn, Calendar as DatePicker } from "@odentia/ui"
 import { format, subDays } from "date-fns"
 import { es } from "date-fns/locale"
 import { common } from "../common.js"
+import { formatTimeZone } from "../locale.js"
 
 export type CalendarRange = { from?: string; to?: string }
 
@@ -31,11 +32,12 @@ function toDateOnly(value: Date | undefined): string | undefined {
   return value ? format(value, "yyyy-MM-dd") : undefined
 }
 
-/** "Hoy" en America/Lima, no en el huso del navegador: los presets de rango
- * se anclan a la fecha de Lima igual que antes de la migración. */
-function todayInLima(): Date {
+/** «Hoy» en la zona horaria de la clínica (`formatTimeZone`), no en el huso del
+ * navegador: los presets de rango se anclan a la fecha de la clínica. Sin zona
+ * fijada, la del entorno. */
+function todayInClinicZone(): Date {
   const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/Lima",
+    timeZone: formatTimeZone(),
     year: "numeric",
     month: "numeric",
     day: "numeric",
@@ -73,7 +75,7 @@ export function Calendar(props: CalendarProps) {
     from: parseDateOnly(props.selected?.from),
     to: parseDateOnly(props.selected?.to),
   }
-  const today = todayInLima()
+  const today = todayInClinicZone()
 
   return (
     <div className="w-full space-y-3">

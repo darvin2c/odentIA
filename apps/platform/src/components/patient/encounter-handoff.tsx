@@ -6,16 +6,16 @@ import { apiFetch } from "../../lib/api"
 import { fetchConsents } from "../../lib/clinical-forms"
 import {
   fetchFollowUps,
-  fetchPatientAccount,
   fetchPrescriptions,
   formatDate,
   formatDateTime,
 } from "../../lib/clinical-journey"
+import { fetchPatientAccount3 } from "../../lib/finance-collect"
 import { usePermission } from "../../lib/crm"
 import type { PatientSectionId } from "../../lib/patient-areas"
+import { formatMoney } from "@odentia/clinical"
+import { useOrgProfile } from "../../lib/org"
 import type { EncounterDetail, PatientSummary } from "../../lib/patients"
-import { formatMoney } from "../../lib/services"
-
 interface Step {
   key: string
   /** Quién continúa el trabajo. */
@@ -41,8 +41,8 @@ export function EncounterHandoff({
 }) {
   const canClinical = usePermission("clinical.read")
   const canFinance = usePermission("finance.read")
+  const orgLocale = useOrgProfile().data?.locale
   const encounterId = detail.encounter.id
-
   const followUps = useQuery({
     queryKey: ["follow-ups", patientId],
     queryFn: () => fetchFollowUps(patientId),
@@ -65,10 +65,9 @@ export function EncounterHandoff({
   })
   const account = useQuery({
     queryKey: ["patient-account", patientId],
-    queryFn: () => fetchPatientAccount(patientId),
+    queryFn: () => fetchPatientAccount3(patientId),
     enabled: canFinance,
   })
-
   const ownControls = (followUps.data?.data ?? []).filter(
     (row) => row.originEncounterId === encounterId,
   )
@@ -80,7 +79,7 @@ export function EncounterHandoff({
   )
   const proposed = summary.data?.data.proposedBudgets ?? []
   const outstanding = (account.data?.data.byCurrency ?? []).filter(
-    (balance) => balance.outstandingCents > 0,
+    (balance) => balance.porCobrar > 0,
   )
   const activeProcedures = detail.procedures.filter((proc) => !proc.voidedAt)
   const priced = activeProcedures.length
@@ -145,7 +144,7 @@ export function EncounterHandoff({
       steps.push({
         key: `balance-${balance.currency}`,
         owner: "Caja",
-        title: `Cobrar ${formatMoney(balance.outstandingCents, balance.currency)}`,
+        title: `Cobrar ${orgLocale ? formatMoney(balance.porCobrar, balance.currency, orgLocale) : "…"}`,
         detail: "Saldo por cobrar en la cuenta del paciente.",
         tone: "warning",
         section: "cuenta",
@@ -214,7 +213,7 @@ export function EncounterHandoff({
       )}
       {!canFinance && priced > 0 ? (
         <p className="text-sm text-muted-foreground">
-          Los actos con tarifa generaron sus cargos: caja los ve en la cuenta del paciente.
+          Los actos con precio generaron sus cargos: caja los ve en la cuenta del paciente.
         </p>
       ) : null}
     </section>

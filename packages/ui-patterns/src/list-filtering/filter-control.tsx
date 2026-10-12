@@ -14,6 +14,7 @@ import {
 import { Check, ChevronDown, Search, X } from "lucide-react"
 import * as React from "react"
 import { common } from "../common.js"
+import { formatLocale } from "../locale.js"
 import { normalizeSearchText } from "../text.js"
 import { Calendar } from "./calendar.js"
 import type { FilterDef, FilterOption } from "./filter-def.js"
@@ -72,17 +73,17 @@ function OptionSearch({
     </InputGroup>
   )
 }
-const shortDateFormatter = new Intl.DateTimeFormat("es-PE", {
-  day: "2-digit",
-  month: "short",
-  year: "numeric",
-})
 
 function formatDate(value?: string): string | undefined {
   if (!value) return undefined
   const [year, month, day] = value.split("-").map(Number)
   if (!year || !month || !day) return value
-  return shortDateFormatter.format(new Date(year, month - 1, day))
+  // Formato regional vigente, leído al formatear (no a nivel de módulo).
+  return new Intl.DateTimeFormat(formatLocale(), {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  }).format(new Date(year, month - 1, day))
 }
 
 export function hasFilterValue(
@@ -111,7 +112,13 @@ export function filterSummary(
     if (!min && !max) return undefined
     const display = (value?: string) => {
       if (!value) return undefined
-      return filter.money ? `S/ ${(Number(value) / 100).toFixed(2)}` : value
+      // Sin símbolo: el filtro no conoce la moneda y no se asume ninguna.
+      return filter.money
+        ? (Number(value) / 100).toLocaleString(formatLocale(), {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2,
+          })
+        : value
     }
     return [display(min), display(max)].filter(Boolean).join(" – ")
   }

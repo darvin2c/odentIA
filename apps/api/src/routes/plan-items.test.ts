@@ -269,8 +269,8 @@ async function createBudget(
   return body.data.id
 }
 
-async function presentBudget(app: Hono, patientId: string, budgetId: string): Promise<void> {
-  const res = await postJson(app, `/patients/${patientId}/budgets/${budgetId}/present`, {})
+async function deliverBudget(app: Hono, patientId: string, budgetId: string): Promise<void> {
+  const res = await postJson(app, `/patients/${patientId}/budgets/${budgetId}/deliver`, {})
   expect(res.status).toBe(200)
 }
 
@@ -413,7 +413,7 @@ it("plan: programar exige decisión aceptada en la línea vigente", async () => 
   expect(((await denied.json()) as ErrorBody).error.code).toBe("ITEM_NOT_ACCEPTED")
 
   const budgetId = await createBudget(app, patientId, ctx.planId, [item.id])
-  await presentBudget(app, patientId, budgetId)
+  await deliverBudget(app, patientId, budgetId)
   await decideBudget(app, patientId, budgetId, [item.id])
 
   const scheduled = await patchJson(app, `/patients/${patientId}/plan/items/${item.id}`, {
@@ -440,7 +440,7 @@ it("plan: realizar exige decisión aceptada y atención; manual sin atención re
   expect(((await denied.json()) as ErrorBody).error.code).toBe("INVALID_TRANSITION")
 
   const budgetId = await createBudget(app, patientId, ctx.planId, [item.id])
-  await presentBudget(app, patientId, budgetId)
+  await deliverBudget(app, patientId, budgetId)
   await decideBudget(app, patientId, budgetId, [item.id])
   expect((await patchJson(app, `/patients/${patientId}/plan/items/${item.id}`, {
     encounterId: ctx.encounterId, status: "programado",
@@ -462,7 +462,7 @@ it("plan: contenido en realizado/cancelado responde 409 ITEM_CLOSED", async () =
   const done = await addItem(app, patientId, ctx, { serviceId: SVC_LIMPIEZA, toothNumber: 36 })
   const undone = await addItem(app, patientId, ctx, { serviceId: SVC_ENDO, toothNumber: 46 })
   const budgetId = await createBudget(app, patientId, ctx.planId, [done.id, undone.id])
-  await presentBudget(app, patientId, budgetId)
+  await deliverBudget(app, patientId, budgetId)
   await decideBudget(app, patientId, budgetId, [done.id])
 
   // El realizado siempre pasa por un procedimiento en la atención de origen.
@@ -509,7 +509,7 @@ it("plan: realizado es terminal; reabrir o cancelar ejecutado responde 409 ITEM_
   const ctx = await setupPlan(app, patientId)
   const item = await addItem(app, patientId, ctx, { serviceId: SVC_LIMPIEZA, toothNumber: 36 })
   const budgetId = await createBudget(app, patientId, ctx.planId, [item.id])
-  await presentBudget(app, patientId, budgetId)
+  await deliverBudget(app, patientId, budgetId)
   await decideBudget(app, patientId, budgetId, [item.id])
   const closed = await postJson(
     app,
@@ -709,9 +709,9 @@ it("plan: summary separa totales por moneda sin sumar distinto dinero", async ()
   )
   const mixedPen = await createBudget(app, mixed, mixedPenPlan, [penItem.id])
   const mixedUsd = await createBudget(app, mixed, mixedUsdPlan, [usdItem.id])
-  await presentBudget(app, mixed, mixedPen)
+  await deliverBudget(app, mixed, mixedPen)
   await decideBudget(app, mixed, mixedPen, [penItem.id])
-  await presentBudget(app, mixed, mixedUsd)
+  await deliverBudget(app, mixed, mixedUsd)
   await decideBudget(app, mixed, mixedUsd, [usdItem.id])
 
   const res = await app.request(`/patients/${mixed}/summary`, { method: "GET" })
@@ -742,7 +742,7 @@ it("plan: summary separa totales por moneda sin sumar distinto dinero", async ()
   })
   const singleB = await addItem(app, single, singleCtx, { serviceId: SVC_ENDO, toothNumber: 46 })
   const singleBudget = await createBudget(app, single, singleCtx.planId, [singleA.id, singleB.id])
-  await presentBudget(app, single, singleBudget)
+  await deliverBudget(app, single, singleBudget)
   await decideBudget(app, single, singleBudget, [singleA.id, singleB.id])
   const singleRes = await app.request(`/patients/${single}/summary`, { method: "GET" })
   expect(singleRes.status).toBe(200)
@@ -933,7 +933,7 @@ it("plan: decisión parcial congela aceptado/rechazado y el detalle totaliza", a
   const accepted = await addItem(app, patientId, ctx, { serviceId: SVC_LIMPIEZA, toothNumber: 36 })
   const rejected = await addItem(app, patientId, ctx, { serviceId: SVC_ENDO, toothNumber: 37 })
   const budgetId = await createBudget(app, patientId, ctx.planId, [accepted.id, rejected.id])
-  await presentBudget(app, patientId, budgetId)
+  await deliverBudget(app, patientId, budgetId)
 
   const decided = await decideBudget(app, patientId, budgetId, [accepted.id])
   expect(decided.items.find((row) => row.planItemId === accepted.id)?.decision).toBe("aceptado")
@@ -985,7 +985,7 @@ it("plan: dentist lee 200, member ni lee ni muta ni decide (403 sin efectos)", a
   const ctx = await setupPlan(admin, patientId)
   const item = await addItem(admin, patientId, ctx, { serviceId: SVC_LIMPIEZA, toothNumber: 36 })
   const budgetId = await createBudget(admin, patientId, ctx.planId, [item.id])
-  await presentBudget(admin, patientId, budgetId)
+  await deliverBudget(admin, patientId, budgetId)
 
   const read = await dentist.request(`/patients/${patientId}/plan`, { method: "GET" })
   expect(read.status).toBe(200)
@@ -1066,4 +1066,50 @@ it("plan: planes del paciente con estado derivado y detalle", async () => {
     { method: "GET" },
   )
   expect(foreign.status).toBe(404)
+})
+
+it("presupuesto: en borrador se añaden y se quitan tratamientos; entregado ya no", async () => {
+  const app = buildApp("admin")
+  const patientId = await createFreshPatient(app, "Borrador con casillas")
+  const ctx = await setupPlan(app, patientId)
+  const first = await addItem(app, patientId, ctx, { serviceId: SVC_LIMPIEZA, toothNumber: 36 })
+  const second = await addItem(app, patientId, ctx, { serviceId: SVC_LIMPIEZA, toothNumber: 37 })
+  const budgetId = await createBudget(app, patientId, ctx.planId, [first.id])
+  const items = `/patients/${patientId}/budgets/${budgetId}/items`
+
+  // Cuerpo inválido y rol sin permiso: sin efectos.
+  expect((await postJson(app, items, { itemIds: [] })).status).toBe(400)
+  expect((await postJson(buildApp("cashier"), items, { itemIds: [second.id] })).status).toBe(403)
+  expect(
+    (await postJson(buildApp("cashier"), `${items}/remove`, { itemIds: [first.id] })).status,
+  ).toBe(403)
+
+  const added = await postJson(app, items, { itemIds: [second.id] })
+  expect(added.status).toBe(200)
+  const addedBody = (await added.json()) as { data: BudgetTotals }
+  expect(addedBody.data.items.map((line) => line.planItemId).sort()).toEqual(
+    [first.id, second.id].sort(),
+  )
+  expect(addedBody.data.totalCents).toBe(24000)
+  // Ya está en el borrador: no se repite.
+  const again = await postJson(app, items, { itemIds: [second.id] })
+  expect(again.status).toBe(409)
+  expect(((await again.json()) as ErrorBody).error.code).toBe("ITEM_ALREADY_QUOTED")
+
+  const removed = await postJson(app, `${items}/remove`, { itemIds: [first.id] })
+  expect(removed.status).toBe(200)
+  const removedBody = (await removed.json()) as { data: BudgetTotals }
+  expect(removedBody.data.items.map((line) => line.planItemId)).toEqual([second.id])
+  expect(removedBody.data.totalCents).toBe(12000)
+  // Lo que no está en el borrador no se puede quitar.
+  expect((await postJson(app, `${items}/remove`, { itemIds: [first.id] })).status).toBe(404)
+
+  // Entregado, sus tratamientos ya no cambian.
+  await deliverBudget(app, patientId, budgetId)
+  const late = await postJson(app, `${items}/remove`, { itemIds: [second.id] })
+  expect(late.status).toBe(409)
+  expect(((await late.json()) as ErrorBody).error.code).toBe("BUDGET_STATUS")
+  const lateAdd = await postJson(app, items, { itemIds: [first.id] })
+  expect(lateAdd.status).toBe(409)
+  expect(((await lateAdd.json()) as ErrorBody).error.code).toBe("BUDGET_STATUS")
 })

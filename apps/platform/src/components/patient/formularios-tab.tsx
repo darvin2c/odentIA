@@ -45,6 +45,7 @@ import {
   isFieldVisible,
   missingRequired,
 } from "./form-fields"
+import { activeOrgLocale } from "../../lib/locale"
 
 const errorMessage = (e: unknown) =>
   e instanceof ApiError
@@ -52,7 +53,7 @@ const errorMessage = (e: unknown) =>
     : "No se pudo completar la acción"
 
 const when = (value: string | null | undefined) =>
-  value ? new Date(value).toLocaleDateString("es-PE", { dateStyle: "medium" }) : "—"
+  value ? new Date(value).toLocaleDateString(activeOrgLocale(), { dateStyle: "medium" }) : "—"
 
 function statusOf(response: FormResponse): {
   label: string
@@ -610,7 +611,7 @@ function ResponseDetail({
             <div key={item.id} className="rounded-md border p-2 text-sm">
               <p className="text-xs text-muted-foreground">
                 {item.createdBy ? memberName(item.createdBy) : "—"} ·{" "}
-                {new Date(item.createdAt).toLocaleString("es-PE", {
+                {new Date(item.createdAt).toLocaleString(activeOrgLocale(), {
                   dateStyle: "medium",
                   timeStyle: "short",
                 })}

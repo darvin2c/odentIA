@@ -42,6 +42,7 @@ import { reconcileProposedCoordinations } from "./commercial-coordination.js"
 import { getConnectionTemplates } from "./connections.js"
 import { sendOutbound, sendTemplateOutbound, startContactConversation } from "./conversations.js"
 import { notFound, ServiceError, validation } from "./errors.js"
+import { findOrgLocale, NEUTRAL_TIMEZONE } from "./locale.js"
 import { createWorkspaceNotification } from "./workspace.js"
 
 /**
@@ -719,18 +720,19 @@ async function timezoneOf(tx: Db, orgId: string, branchId?: string | null): Prom
     .from(orgProfile)
     .where(eq(orgProfile.organizationId, orgId))
     .limit(1)
-  return profile?.timezone ?? "America/Lima"
+  return profile?.timezone ?? NEUTRAL_TIMEZONE
 }
 
 /** true si `now` cae en la ventana de silencio (regla de horarios por sede). */
 export function inQuietHours(now: Date, timeZone: string, start?: string, end?: string): boolean {
   const s = start ?? "21:00"
   const e = end ?? "08:00"
-  const parts = new Intl.DateTimeFormat("es-PE", {
+  // Lectura técnica de la hora (HH:mm) para comparar, no un texto para personas.
+  const parts = new Intl.DateTimeFormat("en-GB", {
     timeZone,
     hour: "2-digit",
     minute: "2-digit",
-    hour12: false,
+    hourCycle: "h23",
   }).format(now)
   const [h, m] = parts.split(":").map(Number)
   const cur = (h ?? 0) * 60 + (m ?? 0)
@@ -1160,7 +1162,8 @@ export async function syncAppointmentReminders(
           now,
         })
         const apptTz = await timezoneOf(tx, orgId, appt.branchId)
-        const when = new Intl.DateTimeFormat("es-PE", {
+        const { locale: apptLocale } = await findOrgLocale(tx, orgId)
+        const when = new Intl.DateTimeFormat(apptLocale, {
           timeZone: apptTz,
           weekday: "long",
           day: "numeric",
@@ -1965,7 +1968,7 @@ export async function getPublicLinkInfo(tx: Db, token: string): Promise<PublicLi
   const purpose = assertLinkPurpose(link.purpose)
   const expired = link.expiresAt.getTime() < Date.now()
   let when: string | null = null
-  let timeZone = "America/Lima"
+  let timeZone = NEUTRAL_TIMEZONE
   if (link.appointmentId) {
     const [appt] = await tx
       .select({
@@ -1978,7 +1981,8 @@ export async function getPublicLinkInfo(tx: Db, token: string): Promise<PublicLi
       .limit(1)
     if (appt) {
       timeZone = await timezoneOf(tx, appt.orgId, appt.branchId)
-      when = new Intl.DateTimeFormat("es-PE", {
+      const { locale } = await findOrgLocale(tx, appt.orgId)
+      when = new Intl.DateTimeFormat(locale, {
         timeZone,
         weekday: "long",
         day: "numeric",

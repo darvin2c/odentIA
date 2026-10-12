@@ -1,4 +1,4 @@
-import { Button, Field, FieldDescription, FieldError, FieldLabel, Input, toast } from "@odentia/ui"
+import { Button, Field, FieldDescription, FieldError, FieldLabel, Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, toast } from "@odentia/ui"
 import {
   type CountryCode,
   CountrySelect,
@@ -20,7 +20,7 @@ import { createFileRoute, getRouteApi } from "@tanstack/react-router"
 import { type FormEvent, useEffect, useState } from "react"
 import { z } from "zod"
 import { usePermission } from "../../lib/crm"
-import { fetchOrgProfile, type OrgProfile, type OrgProfileInput, saveOrgProfile, useOrgProfile } from "../../lib/org"
+import { fetchOrgProfile, fetchRegionDefaults, type OrgProfile, type OrgProfileInput, saveOrgProfile, useOrgProfile } from "../../lib/org"
 import { PageDraftGuard, sameDraft } from "../../lib/page-draft-guard"
 
 export const Route = createFileRoute("/_org/settings/")({
@@ -61,6 +61,10 @@ const profileSchema = z.object({
   currency: z.string().length(3, "Moneda de 3 letras"),
   timezone: z.string().min(1, "Elige una zona horaria"),
   locale: z.string().min(2, "Elige el idioma y formato"),
+  receiptWidth: z.enum(["58", "80"]),
+  sheetSize: z.enum(["A4", "Letter"]),
+  ticketFooter: z.string().min(1, "Escribe la frase al pie del ticket").max(280),
+  applyCountryPreset: z.boolean(),
 })
 
 type ProfileValues = z.infer<typeof profileSchema>
@@ -74,9 +78,14 @@ const emptyValues: ProfileValues = {
   billingEmail: "",
   fiscalAddress: "",
   countryCode: DEFAULT_COUNTRY,
-  currency: "PEN",
-  timezone: "America/Lima",
-  locale: "es-PE",
+  // Moneda, zona y formato los propone el país al cargar el formulario.
+  currency: "",
+  timezone: "",
+  locale: "",
+  receiptWidth: "80",
+  sheetSize: "A4",
+  ticketFooter: "Recibo interno. No es un documento fiscal.",
+  applyCountryPreset: true,
 }
 
 function toValues(profile: {
@@ -90,6 +99,9 @@ function toValues(profile: {
   currency: string
   timezone: string
   locale: string
+  receiptWidth: string | null
+  sheetSize: string | null
+  ticketFooter: string | null
 }): ProfileValues {
   return {
     legalName: profile.legalName,
@@ -102,6 +114,10 @@ function toValues(profile: {
     currency: profile.currency,
     timezone: profile.timezone,
     locale: profile.locale,
+    receiptWidth: profile.receiptWidth === "58" ? "58" : "80",
+    sheetSize: profile.sheetSize === "Letter" ? "Letter" : "A4",
+    ticketFooter: profile.ticketFooter ?? "Recibo interno. No es un documento fiscal.",
+    applyCountryPreset: false,
   }
 }
 
@@ -118,6 +134,9 @@ function toInput(values: ProfileValues): OrgProfileInput {
     currency: values.currency.trim().toUpperCase(),
     timezone: values.timezone,
     locale: values.locale.trim(),
+    receiptWidth: values.receiptWidth,
+    sheetSize: values.sheetSize,
+    ticketFooter: values.ticketFooter.trim(),
   }
 }
 
@@ -221,6 +240,30 @@ function ProfileForm({
   // árbol. El desfase, en cambio, es el mismo en los dos lados.
   const [localTime, setLocalTime] = useState<string | null>(null)
   useEffect(() => setLocalTime(zone?.localTime ?? null), [zone?.localTime])
+  // Al elegir país se propone lo que cambia con él. Queda escrito en el
+  // formulario, a la vista, y nada se guarda hasta pulsar Guardar. Lo que el
+  // país no permite deducir (una moneda desconocida, varias zonas) queda como
+  // estaba para que la persona lo elija.
+  const proposeRegion = async (nextCountry: string) => {
+    try {
+      const language = form.state.values.locale.split("-")[0] || undefined
+      const proposal = await fetchRegionDefaults(nextCountry, language)
+      if (proposal.currency) form.setFieldValue("currency", proposal.currency)
+      form.setFieldValue("locale", proposal.locale)
+      const zoneProposal = proposal.timezone ?? zonesForCountry(nextCountry)[0]
+      if (zoneProposal) form.setFieldValue("timezone", zoneProposal)
+      form.setFieldValue("sheetSize", proposal.sheetSize)
+    } catch {
+      toast.error("No pudimos proponer los datos de ese país: complétalos a mano.")
+    }
+  }
+  // Una clínica sin perfil parte de lo que propone su país, no de valores fijos.
+  const needsProposal = !values.currency
+  useEffect(() => {
+    if (needsProposal) void proposeRegion(values.countryCode)
+    // Solo al montar: después manda lo que la persona escriba.
+    // biome-ignore lint/correctness/useExhaustiveDependencies: propuesta inicial única
+  }, [needsProposal])
 
   return (
     <form
@@ -266,7 +309,6 @@ function ProfileForm({
                 <Input
                   id="org-doc-type"
                   value={field.state.value}
-                  placeholder="RUC"
                   onChange={(event) => field.handleChange(event.target.value)}
                 />
               </Field>
@@ -323,10 +365,14 @@ function ProfileForm({
               <CountrySelect
                 id="org-country"
                 value={normalizeCountry(field.state.value) ?? DEFAULT_COUNTRY}
-                onChange={(next: CountryCode) => field.handleChange(next)}
+                onChange={(next: CountryCode) => {
+                  field.handleChange(next)
+                  void proposeRegion(next)
+                }}
               />
               <FieldDescription>
-                Define el formato de los teléfonos y las zonas horarias sugeridas.
+                Define el formato de los teléfonos. Al cambiarlo se proponen aquí abajo su zona
+                horaria, moneda, formato y papel: revísalos antes de guardar.
               </FieldDescription>
               <FieldError>{fieldErrorMessages(field.state.meta.errors)[0] ?? null}</FieldError>
             </Field>
@@ -367,6 +413,10 @@ function ProfileForm({
                   maxLength={3}
                   onChange={(event) => field.handleChange(event.target.value.toUpperCase())}
                 />
+                <FieldDescription>
+                  Código ISO 4217. Si la clínica ya tiene movimientos, no se puede
+                  cambiar sin una migración explícita: los históricos no se convierten.
+                </FieldDescription>
                 <FieldError>{fieldErrorMessages(field.state.meta.errors)[0] ?? null}</FieldError>
               </Field>
             )}
@@ -378,7 +428,6 @@ function ProfileForm({
                 <Input
                   id="org-locale"
                   value={field.state.value}
-                  placeholder="es-PE"
                   onChange={(event) => field.handleChange(event.target.value)}
                 />
                 <FieldError>{fieldErrorMessages(field.state.meta.errors)[0] ?? null}</FieldError>
@@ -386,6 +435,70 @@ function ProfileForm({
             )}
           </form.Field>
         </div>
+      </section>
+
+      <section className="flex flex-col gap-4 elevated rounded-xl border bg-card p-6">
+        <h2 className="font-heading text-base font-medium">Impresión</h2>
+        <FieldDescription>
+          De aquí salen la moneda, los formatos y el papel. El ticket y la hoja de
+          cierre salen en térmica; el presupuesto, en hoja.
+        </FieldDescription>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <form.Field name="receiptWidth">
+            {(field) => (
+              <Field>
+                <FieldLabel htmlFor="org-receipt-width">Ticket y cierre en</FieldLabel>
+                <Select
+                  value={field.state.value}
+                  onValueChange={(next) => field.handleChange(next as "58" | "80")}
+                >
+                  <SelectTrigger id="org-receipt-width">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="80">Térmica de 80 mm</SelectItem>
+                    <SelectItem value="58">Térmica de 58 mm</SelectItem>
+                  </SelectContent>
+                </Select>
+                <FieldError>{fieldErrorMessages(field.state.meta.errors)[0] ?? null}</FieldError>
+              </Field>
+            )}
+          </form.Field>
+          <form.Field name="sheetSize">
+            {(field) => (
+              <Field>
+                <FieldLabel htmlFor="org-sheet-size">Tamaño de hoja, para el presupuesto</FieldLabel>
+                <Select
+                  value={field.state.value}
+                  onValueChange={(next) => field.handleChange(next as "A4" | "Letter")}
+                >
+                  <SelectTrigger id="org-sheet-size">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="A4">A4 · 210 × 297 mm</SelectItem>
+                    <SelectItem value="Letter">Carta · 216 × 279 mm</SelectItem>
+                  </SelectContent>
+                </Select>
+                <FieldError>{fieldErrorMessages(field.state.meta.errors)[0] ?? null}</FieldError>
+              </Field>
+            )}
+          </form.Field>
+        </div>
+        <form.Field name="ticketFooter">
+          {(field) => (
+            <Field>
+              <FieldLabel htmlFor="org-ticket-footer">Frase al pie del ticket</FieldLabel>
+              <Input
+                id="org-ticket-footer"
+                value={field.state.value}
+                maxLength={280}
+                onChange={(event) => field.handleChange(event.target.value)}
+              />
+              <FieldError>{fieldErrorMessages(field.state.meta.errors)[0] ?? null}</FieldError>
+            </Field>
+          )}
+        </form.Field>
       </section>
 
       <div className="flex justify-end gap-3">

@@ -2,6 +2,7 @@
 import { useQuery } from "@tanstack/react-query"
 import type { AgendaAppointment, AppointmentStatus } from "./agenda"
 import { apiFetch } from "./api"
+import { activeOrgLocale } from "./locale"
 
 export const APPOINTMENT_STATUS_LABELS: Record<AppointmentStatus, string> = {
   programada: "Programada",
@@ -56,7 +57,7 @@ export function nextAppointment(
 }
 
 export function appointmentWhen(appointment: AgendaAppointment): string {
-  return new Date(appointment.startsAt).toLocaleString("es-PE", {
+  return new Date(appointment.startsAt).toLocaleString(activeOrgLocale(), {
     weekday: "short",
     day: "numeric",
     month: "short",

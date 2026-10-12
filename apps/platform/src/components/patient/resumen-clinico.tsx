@@ -12,6 +12,7 @@ import {
   type PatientSummary,
 } from "../../lib/patients"
 import { categoryLabel, imageTypeLabel, takenAt } from "./document-labels"
+import { activeOrgLocale } from "../../lib/locale"
 
 /** Lo que le falta a la atención, dicho para quien no necesariamente la lleva. */
 const MISSING_LABELS: Record<OpenEncounterBrief["missing"][number], string> = {
@@ -26,10 +27,10 @@ function formatClock(iso: string): string {
   if (Number.isNaN(date.getTime())) return ""
   const today = new Date()
   const sameDay = date.toDateString() === today.toDateString()
-  const time = date.toLocaleTimeString("es-PE", { hour: "2-digit", minute: "2-digit" })
+  const time = date.toLocaleTimeString(activeOrgLocale(), { hour: "2-digit", minute: "2-digit" })
   return sameDay
     ? `hoy ${time}`
-    : `${date.toLocaleDateString("es-PE", { day: "2-digit", month: "short" })} ${time}`
+    : `${date.toLocaleDateString(activeOrgLocale(), { day: "2-digit", month: "short" })} ${time}`
 }
 
 function plural(n: number, one: string, many: string) {
@@ -219,7 +220,7 @@ function Thumbnail({ patientId, doc }: { patientId: string; doc: RecentDoc }) {
       <span className="text-xs text-muted-foreground">
         {imageTypeLabel(doc.imageType) ?? categoryLabel(doc.category)}
         {doc.toothNumbers.length > 0 ? ` · ${doc.toothNumbers.join(", ")}` : ""} ·{" "}
-        {new Date(takenAt(doc)).toLocaleDateString("es-PE", { day: "2-digit", month: "short" })}
+        {new Date(takenAt(doc)).toLocaleDateString(activeOrgLocale(), { day: "2-digit", month: "short" })}
       </span>
     </li>
   )

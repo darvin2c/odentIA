@@ -634,7 +634,7 @@ it("fichas, resumen, nivel y prueba del agente", async () => {
 
   // El resumen cuenta «hoy» en la zona de la clínica: necesita su perfil.
   await ownerDb.execute(
-    sql`insert into "org_profile" ("organization_id", "legal_name") values ('org_a', 'Clínica') on conflict do nothing`,
+    sql`insert into "org_profile" ("organization_id", "legal_name", "country_code", "currency", "timezone", "locale") values ('org_a', 'Clínica', 'PE', 'PEN', 'America/Lima', 'es-PE') on conflict do nothing`,
   )
   const before = (await (await app.request("/agent/overview")).json()) as {
     data: { level: string; readiness: { channels: string[]; sandboxTurns: number } }

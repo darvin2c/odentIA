@@ -13,6 +13,7 @@ export * from "./identity.js"
 export * from "./documents.js"
 export * from "./dicom-demo.js"
 export * from "./consent.js"
+export * from "./money.js"
 export * from "./patient-registration.js"
 export type {
   FindingColorKind,

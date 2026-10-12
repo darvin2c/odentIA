@@ -69,11 +69,11 @@ test("bandeja: cada respuesta del agente dice en qué se basó", async ({ owner,
     outcome: "enviada",
     replyText: real!.replyText,
     basis: [
-      { kind: "servicios", label: "Sedes, servicios y tarifas" },
+      { kind: "servicios", label: "Sedes, servicios y precios" },
       { kind: "agenda", label: "Agenda: horarios disponibles", detail: "3 horarios" },
     ],
     checks: [
-      { kind: "precio", value: "S/ 150", ok: true, source: "Sedes, servicios y tarifas" },
+      { kind: "precio", value: "S/ 150", ok: true, source: "Sedes, servicios y precios" },
       { kind: "hora", value: "9:00 a. m.", ok: true, source: "Agenda: horarios disponibles" },
     ],
     model: "fake",

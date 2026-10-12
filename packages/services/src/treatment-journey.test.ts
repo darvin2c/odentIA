@@ -6,8 +6,8 @@ import { expect, it } from "vitest"
 import {
   createBudget,
   decideBudget,
+  deliverBudget,
   getBudgetDetail,
-  presentBudget,
   reviseBudget,
 } from "./budgets.js"
 import { registerPatientDocument } from "./clinical.js"
@@ -89,7 +89,7 @@ it("traza alternativas, propuesta versionada, representante, sesiones y evidenci
   const budget = await f.run((tx) =>
     createBudget(tx, ...f.args, { planId: f.plan.id, itemIds: [a.id, b.id] }),
   )
-  await f.run((tx) => presentBudget(tx, ...f.args, budget.id))
+  await f.run((tx) => deliverBudget(tx, ...f.args, budget.id))
   await expect(
     f.run((tx) =>
       decideBudget(tx, ...f.args, budget.id, {
@@ -119,7 +119,7 @@ it("traza alternativas, propuesta versionada, representante, sesiones y evidenci
   expect((await f.run((tx) => getBudgetDetail(tx, "org_a", f.patient.id, budget.id))).status).toBe(
     "parcial",
   )
-  await f.run((tx) => presentBudget(tx, ...f.args, revision.id))
+  await f.run((tx) => deliverBudget(tx, ...f.args, revision.id))
   await f.run((tx) =>
     decideBudget(tx, ...f.args, revision.id, {
       decisions: [decisions[0]],

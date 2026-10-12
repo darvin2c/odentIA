@@ -13,6 +13,7 @@ import { FormDrawer } from "@odentia/ui-patterns"
 import { useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
 import { useState } from "react"
+import { useActiveBranch } from "../../lib/active-branch"
 import { ApiError, apiFetch } from "../../lib/api"
 import { useMyUserId, useOrgMembers, usePermission } from "../../lib/crm"
 import type { Encounter, PatientFull, PatientSummary } from "../../lib/patients"
@@ -46,6 +47,7 @@ export function NewEncounterButton({
   const canWrite = usePermission("clinical.write")
   const myUserId = useMyUserId()
   const members = useOrgMembers()
+  const sede = useActiveBranch()
   const queryClient = useQueryClient()
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [reason, setReason] = useState(appointment?.reason ?? "")
@@ -68,7 +70,13 @@ export function NewEncounterButton({
         body: JSON.stringify({
           reason: reason.trim(),
           dentistUserId,
-          ...(appointment ? { appointmentId: appointment.id } : {}),
+          // Con cita manda su sede; sin cita, la sede en la que se trabaja:
+          // así lo que quede por cobrar aparece en la caja de esa sede.
+          ...(appointment
+            ? { appointmentId: appointment.id }
+            : sede.branchId
+              ? { branchId: sede.branchId }
+              : {}),
           planItemIds: [...new Set(initialPlanItemIds ?? [])],
         }),
       })

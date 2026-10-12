@@ -5,6 +5,7 @@ import { BookOpen, CalendarDays, CircleAlert, CircleCheck, GraduationCap, Messag
 import type { ReactNode } from "react"
 import { apiFetch } from "../../lib/api"
 import { ANSWER_CHECK_LABEL, type AnswerBasisItem, type AnswerTrace } from "../../lib/agent"
+import { activeOrgLocale } from "../../lib/locale"
 import { mutationErrorMessage } from "../../lib/query-error"
 
 const BASIS_ICON: Record<string, ReactNode> = {
@@ -64,7 +65,7 @@ function checkedKinds(trace: AnswerTrace): string {
  */
 export function AnswerTraceDrawer({
   trace,
-  locale = "es-PE",
+  locale = activeOrgLocale(),
   timeZone,
   onClose,
   onCorrect,

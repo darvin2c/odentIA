@@ -1,6 +1,7 @@
 import { canAccess } from "@odentia/auth/permissions"
 import { getRouteApi } from "@tanstack/react-router"
 import { useCallback } from "react"
+import { activeOrgLocale } from "./locale"
 
 const orgRouteApi = getRouteApi("/_org")
 
@@ -149,7 +150,7 @@ export function useMemberName(): (userId: string) => string {
     members.find((member) => member.userId === userId)?.user.name ?? "Profesional fuera del equipo"
 }
 
-/** Hace cuánto (es-PE, corto): "hace 5 min", "ayer", "12/03". */
+/** Hace cuánto (corto, formato de la clínica): "hace 5 min", "ayer", "12/03". */
 export function timeAgo(iso: string | null): string {
   if (!iso) return ""
   const diff = Date.now() - new Date(iso).getTime()
@@ -162,7 +163,7 @@ export function timeAgo(iso: string | null): string {
   const days = Math.floor(hours / 24)
   if (days === 1) return "ayer"
   if (days < 7) return `hace ${days} días`
-  return new Date(iso).toLocaleDateString("es-PE", { day: "numeric", month: "numeric" })
+  return new Date(iso).toLocaleDateString(activeOrgLocale(), { day: "numeric", month: "numeric" })
 }
 
 export interface ContactListItem {
@@ -170,6 +171,7 @@ export interface ContactListItem {
   displayName: string
   phone: string | null
   email: string | null
+  preferredChannel: string | null
   isActive: boolean
   tags: string[]
   assignedUserId: string | null

@@ -1,3 +1,4 @@
+import { currencyFractionDigits } from "@odentia/clinical"
 import type { AgentProposal } from "./agent"
 
 export interface WorkspaceHome {
@@ -64,11 +65,24 @@ export const stateLabel: Record<string, string> = {
   pospuesto: "Pospuesto", cancelado: "Cancelado", sustituido: "Sustituido", historico: "Histórico",
   open: "Abierta", won: "Ganada", lost: "Perdida",
 }
-/** Los agregados llegan como enteros decimales para no redondear dinero en JSON. */
-export function moneyFromCents(cents: string, currency: string, locale = "es-PE") {
+/**
+ * Los agregados llegan como enteros (texto) en la unidad menor de su moneda,
+ * para no redondear dinero en JSON. Los decimales son los de cada moneda
+ * (ISO 4217: ninguno en CLP o JPY, dos en PEN o USD, tres en KWD) y el formato,
+ * el de la clínica.
+ */
+export function moneyFromCents(cents: string, currency: string, locale: string) {
   const value = BigInt(cents)
   const negative = value < 0n
   const absolute = negative ? -value : value
+  const digits = currencyFractionDigits(currency)
+  const scale = 10n ** BigInt(digits)
   const decimal = new Intl.NumberFormat(locale).formatToParts(1.1).find(part => part.type === "decimal")?.value ?? "."
-  return `${negative ? "−" : ""}${currency} ${(absolute / 100n).toLocaleString(locale)}${decimal}${(absolute % 100n).toString().padStart(2, "0")}`
+  const fraction = digits > 0 ? `${decimal}${(absolute % scale).toString().padStart(digits, "0")}` : ""
+  return `${negative ? "−" : ""}${currency} ${(absolute / scale).toLocaleString(locale)}${fraction}`
+}
+
+/** El mismo agregado como número para un gráfico, en la unidad mayor de su moneda. */
+export function amountFromCents(cents: string, currency: string): number {
+  return Number(BigInt(cents)) / 10 ** currencyFractionDigits(currency)
 }

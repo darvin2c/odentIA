@@ -13,6 +13,12 @@ import {
   SelectTrigger,
   SelectValue,
   Textarea,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
 } from "@odentia/ui"
 import {
   ConfirmDialog,
@@ -30,7 +36,8 @@ import { DictationMobileBar, dictationMobileBarVisible, DictationPanel, Dictatio
 import { type DictationKind, type DictationSuggestion, useDictationSession } from "./dictation-session"
 import { DictationSignDialog } from "./dictation-sign-dialog"
 import { DictationBlockSuggestions, DictationEditDrawer } from "./dictation-suggestions"
-import { fetchFollowUps, fetchPatientAccount, fetchPrescriptions } from "../../lib/clinical-journey"
+import { fetchFollowUps, fetchPrescriptions } from "../../lib/clinical-journey"
+import { fetchPatientAccount3 } from "../../lib/finance-collect"
 import { useMemberName, useMyUserId, usePermission } from "../../lib/crm"
 import {
   CLOSING_REQUIREMENT_LABELS,
@@ -49,7 +56,8 @@ import {
   type OdontogramState,
   type PatientFull,
 } from "../../lib/patients"
-import { formatMoney } from "../../lib/services"
+import { formatMoney } from "@odentia/clinical"
+import { useOrgProfile } from "../../lib/org"
 import { OdontogramStudio } from "../odontogram-studio"
 import { ProfessionalProfileDrawer } from "../professional-profile-drawer"
 import { ChoiceSelect } from "../ui/choice-select"
@@ -60,6 +68,7 @@ import { EncounterProcedures } from "./encounter-procedures"
 import { EncounterTreatments } from "./encounter-treatments"
 import { ImagenesTab } from "./imagenes-tab"
 import { PatientClinicalStrip } from "./patient-header"
+import { activeOrgLocale } from "../../lib/locale"
 
 export interface EncounterEditorProps {
   patientId: string
@@ -284,7 +293,36 @@ function formatClock(iso: string): string {
   const date = new Date(iso)
   return Number.isNaN(date.getTime())
     ? ""
-    : date.toLocaleTimeString("es-PE", { hour: "2-digit", minute: "2-digit" })
+    : date.toLocaleTimeString(activeOrgLocale(), { hour: "2-digit", minute: "2-digit" })
+}
+
+/** Resumen económico del cierre: qué quedó por cobrar y qué no. */
+export interface FinalizeBilling {
+  chargedCents: number
+  currency: string | null
+  lines: Array<{
+    procedureId: string
+    description: string
+    amountCents: number | null
+    currency: string | null
+    status: "charged" | "skipped"
+    reason: string | null
+  }>
+}
+
+function skippedReasonLabel(reason: string | null): string {
+  switch (reason) {
+    case "covered":
+      return "ya estaba incluido en lo cobrado del tratamiento"
+    case "free_act":
+      return "se registró sin servicio de la lista"
+    case "zero_price":
+      return "su servicio no tiene precio"
+    case "sessions_complete":
+      return "ya se cobraron todas las visitas previstas"
+    default:
+      return "no genera cobro"
+  }
 }
 
 export function EncounterEditor({
@@ -302,10 +340,11 @@ export function EncounterEditor({
   const canRead = usePermission("clinical.read")
   const canReadFinance = usePermission("finance.read")
   const memberName = useMemberName()
+  const orgLocale = useOrgProfile().data?.locale
   const uid = useId()
   const accountQuery = useQuery({
     queryKey: ["patient-account", patientId],
-    queryFn: () => fetchPatientAccount(patientId),
+    queryFn: () => fetchPatientAccount3(patientId),
     enabled: canReadFinance,
   })
 
@@ -339,6 +378,7 @@ export function EncounterEditor({
   const [explicitSaving, setExplicitSaving] = useState(false)
   const [finalizing, setFinalizing] = useState(false)
   const [confirmOpen, setConfirmOpen] = useState(false)
+  const [finalizedBilling, setFinalizedBilling] = useState<FinalizeBilling | null>(null)
   // El aviso de firma se elige al abrirlo: firmar descarta las sugerencias y no debe cambiar de diálogo a mitad.
   const [confirmWithDictation, setConfirmWithDictation] = useState(false)
   // «Lo dictado», el respaldo del odontólogo: columna lateral si cabe, cajón si no.
@@ -806,6 +846,15 @@ export function EncounterEditor({
     }
   }
 
+  const chargedLines = finalizedBilling?.lines.filter((line) => line.status === "charged") ?? []
+  const skippedLines = finalizedBilling?.lines.filter((line) => line.status !== "charged") ?? []
+  const closeFinalized = () => {
+    if (!finalizedBilling) return
+    const hadCharges = finalizedBilling.lines.some((line) => line.status === "charged")
+    setFinalizedBilling(null)
+    void onFinalized(hadCharges)
+  }
+
   const handleConfirmFinalize = async () => {
     if (finalizing || childCountRef.current > 0) return
     if (apptBlocked()) {
@@ -826,12 +875,17 @@ export function EncounterEditor({
       await flush()
       const endedAt = endedAtIso()
       const result = await apiFetch<{
-        data: { charges: Array<{ id: string }> }
+        data: {
+          charges: Array<{ id: string }>
+          skippedCharges: Array<{ procedureId: string; reason: string }>
+          billing: FinalizeBilling
+        }
       }>(`/api/patients/${patientId}/encounters/${encounterId}/finalize`, {
         method: "POST",
         body: JSON.stringify(endedAt ? { endedAt } : {}),
       })
-      await onFinalized(result.data.charges.length > 0)
+      setConfirmOpen(false)
+      setFinalizedBilling(result.data.billing)
     } catch (err) {
       // Falla: se conserva el borrador intacto y se muestra el error real.
       if (mountedRef.current) {
@@ -875,12 +929,8 @@ export function EncounterEditor({
     ])
   }
 
-  // Una sola tarifa por tratamiento; los cargos activos ya emitidos lo cubren.
-  const coveredItems = new Set(
-    (accountQuery.data?.data.charges ?? [])
-      .filter((charge) => !charge.voidedAt && charge.planItemId)
-      .map((charge) => charge.planItemId),
-  )
+  // Una sola tarifa por tratamiento; los cargos vivos ya emitidos lo cubren.
+  const coveredItems = new Set(accountQuery.data?.data.conCargo ?? [])
   const chargeableByCurrency = new Map<string, number>()
   for (const proc of detail.procedures) {
     if (proc.voidedAt) continue
@@ -894,7 +944,7 @@ export function EncounterEditor({
     )
   }
   const chargeableText = [...chargeableByCurrency.entries()]
-    .map(([currency, cents]) => formatMoney(cents, currency))
+    .map(([currency, cents]) => (orgLocale ? formatMoney(cents, currency, orgLocale) : "…"))
     .join(" · ")
 
   const mode = useDetailMode()
@@ -969,7 +1019,7 @@ export function EncounterEditor({
     {
       key: "procedimientos",
       title: "Procedimientos",
-      description: "Actos ejecutados hoy, con su prestación y tarifa. Se anulan con motivo.",
+      description: "Actos ejecutados hoy, con su prestación y precio. Se anulan con motivo.",
       summary:
         activeProcedures === 0
           ? "Sin procedimientos registrados"
@@ -1843,7 +1893,7 @@ export function EncounterEditor({
               )
             ) : (
               <p className="text-muted-foreground">
-                Los actos con tarifa generan sus cargos al cerrar; caja los gestiona.
+                Los actos con precio generan sus cargos al cerrar; caja los gestiona.
               </p>
             )}
           </div>
@@ -1940,6 +1990,64 @@ export function EncounterEditor({
       >
         {signFields}
       </DictationSignDialog>
+
+      {/* Cierre de la atención: qué quedó por cobrar y qué no, con su porqué. */}
+      <Dialog
+        open={finalizedBilling !== null}
+        onOpenChange={(next) => {
+          if (!next) closeFinalized()
+        }}
+      >
+        <DialogContent showCloseButton={false} aria-label="Atención finalizada">
+          <DialogHeader>
+            <DialogTitle>Atención finalizada</DialogTitle>
+            <DialogDescription>
+              {chargedLines.length > 0
+                ? "Caja ya lo ve en su lista de por cobrar."
+                : "Esta atención no dejó nada que cobrar."}
+            </DialogDescription>
+          </DialogHeader>
+          {chargedLines.length > 0 ? (
+            <section className="flex flex-col gap-2" aria-label="Quedó por cobrar">
+              <h3 className="text-sm font-semibold">Quedó por cobrar</h3>
+              <ul className="flex flex-col gap-1">
+                {chargedLines.map((line) => (
+                  <li key={line.procedureId} className="flex items-baseline justify-between gap-3 text-sm">
+                    <span>{line.description}</span>
+                    <span className="tabular-nums">
+                      {line.currency && orgLocale && line.amountCents != null
+                        ? formatMoney(line.amountCents, line.currency, orgLocale)
+                        : ""}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              {finalizedBilling?.currency && orgLocale ? (
+                <p className="flex items-baseline justify-between gap-3 border-t pt-2 text-sm font-semibold">
+                  <span>Total</span>
+                  <span className="tabular-nums">
+                    {formatMoney(finalizedBilling.chargedCents, finalizedBilling.currency, orgLocale)}
+                  </span>
+                </p>
+              ) : null}
+            </section>
+          ) : null}
+          {skippedLines.length > 0 ? (
+            <ul className="flex flex-col gap-1 text-sm text-muted-foreground">
+              {skippedLines.map((line) => (
+                <li key={line.procedureId}>
+                  No se cobra «{line.description}»: {skippedReasonLabel(line.reason)}.
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          <DialogFooter>
+            <Button type="button" onClick={closeFinalized}>
+              Listo
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <ConfirmDialog
         open={voidOpen}

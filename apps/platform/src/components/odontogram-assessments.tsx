@@ -26,6 +26,7 @@ import { createPortal } from "react-dom"
 import { apiFetch } from "../lib/api"
 import type { OdontogramAssessment, OdontogramEntry, PatientFull } from "../lib/patients"
 import { OdontogramDocument } from "./odontogram-document"
+import { activeOrgLocale } from "../lib/locale"
 
 const PURPOSES: Record<OdontogramAssessment["purpose"], string> = {
   initial: "Inicio del plan de tratamiento",
@@ -125,7 +126,7 @@ export function OdontogramAssessments({
         draft: true,
       }
   const previewLabel = assessment
-    ? `${new Date(assessment.createdAt).toLocaleString("es-PE")} · ${PURPOSES[assessment.purpose]} · ${assessment.examinerName}`
+    ? `${new Date(assessment.createdAt).toLocaleString(activeOrgLocale())} · ${PURPOSES[assessment.purpose]} · ${assessment.examinerName}`
     : "Borrador actual · sin firmar"
 
   useEffect(() => {
@@ -240,7 +241,7 @@ export function OdontogramAssessments({
               ...Object.fromEntries(
                 assessments.map((item) => [
                   item.id,
-                  `${new Date(item.createdAt).toLocaleString("es-PE")} · ${PURPOSES[item.purpose]} · ${item.examinerName}`,
+                  `${new Date(item.createdAt).toLocaleString(activeOrgLocale())} · ${PURPOSES[item.purpose]} · ${item.examinerName}`,
                 ]),
               ),
             }}
@@ -252,7 +253,7 @@ export function OdontogramAssessments({
               <SelectItem value="current">Borrador actual · sin firmar</SelectItem>
               {assessments.map((item) => (
                 <SelectItem key={item.id} value={item.id}>
-                  {new Date(item.createdAt).toLocaleString("es-PE")} · {PURPOSES[item.purpose]} ·{" "}
+                  {new Date(item.createdAt).toLocaleString(activeOrgLocale())} · {PURPOSES[item.purpose]} ·{" "}
                   {item.examinerName}
                 </SelectItem>
               ))}

@@ -4,7 +4,6 @@ import { appointment, scheduleChair } from "@odentia/db/schema/agenda"
 import { member, user } from "@odentia/db/schema/auth"
 import { clinicalFollowUp, encounter, patient, patientCharge, treatmentBudget, treatmentPlan } from "@odentia/db/schema/clinical"
 import { crmTask } from "@odentia/db/schema/crm"
-import { installmentPlan, installmentQuota } from "@odentia/db/schema/finance"
 import { branch } from "@odentia/db/schema/org"
 import { eq } from "drizzle-orm"
 import { beforeAll, describe, expect, it } from "vitest"
@@ -148,7 +147,7 @@ describe("detecciones", () => {
     for (const [index, [patientId, days]] of ([[old, 20], [recent, 3]] as const).entries()) {
       const [plan] = await ownerDb.insert(treatmentPlan).values({ organizationId: ORG, patientId, title: "Plan" }).returning({ id: treatmentPlan.id })
       await ownerDb.insert(treatmentBudget).values({
-        organizationId: ORG, patientId, planId: plan!.id, budgetNumber: 9000 + index, title: "Ortodoncia",
+        organizationId: ORG, patientId, planId: plan!.id, budgetNumber: 9000 + index, title: "Ortodoncia", currency: "PEN",
         status: "aceptado", decidedAt: new Date(Date.now() - days * DAY),
       })
     }
@@ -182,19 +181,17 @@ describe("detecciones", () => {
     expect(orphan.items.map((item) => item.personName)).toEqual(["Interesada sin dueño"])
     expect(orphan.items[0]).toMatchObject({ line: "Blanqueamiento · sin próxima acción", patientId: null })
 
-    const debtor = await person("Deudor Cuotas")
-    const [charge] = await ownerDb.insert(patientCharge).values({ organizationId: ORG, patientId: debtor, description: "Ortodoncia", amountCents: 30000, currency: "PEN" }).returning({ id: patientCharge.id })
-    const [plan] = await ownerDb.insert(installmentPlan).values({ organizationId: ORG, patientId: debtor, chargeId: charge!.id, currency: "PEN", totalCents: 30000, installments: 3 }).returning({ id: installmentPlan.id })
-    const date = (offset: number) => new Date(Date.now() + offset * DAY).toISOString().slice(0, 10)
-    await ownerDb.insert(installmentQuota).values([
-      { organizationId: ORG, planId: plan!.id, nro: 1, dueAt: date(-20), amountCents: 10000, paidCents: 10000, status: "pagada" },
-      { organizationId: ORG, planId: plan!.id, nro: 2, dueAt: date(-10), amountCents: 10000, paidCents: 2500, status: "parcial" },
-      { organizationId: ORG, planId: plan!.id, nro: 3, dueAt: date(10), amountCents: 10000 },
+    // Deuda vieja: cuenta lo que falta pagar del concepto, no cuotas con fecha.
+    const debtor = await person("Deudor Antiguo")
+    const fresh = await person("Deudor Reciente")
+    await ownerDb.insert(patientCharge).values([
+      { organizationId: ORG, patientId: debtor, description: "Ortodoncia", amountCents: 30000, currency: "PEN", createdAt: new Date(Date.now() - 45 * DAY) },
+      { organizationId: ORG, patientId: fresh, description: "Limpieza", amountCents: 9000, currency: "PEN", createdAt: new Date(Date.now() - 5 * DAY) },
     ])
     const owed = await run((tx) => getAdvisorRecommendation(tx, ORG, all, "cobranza_vencida"))
-    expect(owed.total).toBe(1)
-    expect(owed.items[0]?.line).toMatch(/^Cuota 2 · venció el \d+ de .+ · debe 75\.00 PEN$/)
-    expect(owed.detail).toBe("De 1 paciente.")
+    expect(owed.items.map((item) => item.personName)).toEqual(["Deudor Antiguo"])
+    expect(owed.items[0]?.line).toMatch(/^Debe S\/\s300\.00 · desde el \d+ de .+$/)
+    expect(owed.title).toBe("1 persona debe desde hace más de 30 días")
   })
 })
 

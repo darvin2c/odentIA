@@ -23,6 +23,7 @@ import { and, asc, desc, eq, inArray, isNull, notInArray, type SQL, sql } from "
 import { getCurrentDocumentContexts, getOdontogram, listPatientDocuments } from "./clinical.js"
 import { decodeCursor, encodeCursor } from "./cursors.js"
 import { validation } from "./errors.js"
+import { NEUTRAL_LOCALE, NEUTRAL_TIMEZONE } from "./locale.js"
 import { checkEncounterClosing, type ClosingRequirement } from "./encounters.js"
 import { requirePatient } from "./patients.js"
 import { listTreatmentJourneys } from "./treatment-journey.js"
@@ -654,8 +655,8 @@ export async function getTimeline(
     .from(orgProfile)
     .where(eq(orgProfile.organizationId, orgId))
     .limit(1)
-  const timezone = profile?.timezone || "America/Lima"
-  const locale = profile?.locale || "es-PE"
+  const timezone = profile?.timezone || NEUTRAL_TIMEZONE
+  const locale = profile?.locale || NEUTRAL_LOCALE
   const limit = Math.min(Math.max(input.limit ?? 30, 1), 100)
   const types = input.types ?? TIMELINE_TYPES
   const order = input.order ?? "desc"

@@ -57,6 +57,7 @@ import {
 import { ApiError, apiFetch } from "../lib/api"
 import { channelLabel } from "../lib/channels"
 import { usePermission } from "../lib/crm"
+import { activeOrgLocale } from "../lib/locale"
 
 /**
  * Panel lateral global del agente: decidir, ver derivadas y actividad desde
@@ -338,7 +339,7 @@ type WhenFormatter = (iso: string) => string
 
 /** Fechas en la zona y el idioma de la organización, como en Inicio. */
 function whenFormatter(summary: AgentPanelSummary | undefined): WhenFormatter {
-  const locale = summary?.locale ?? "es-PE"
+  const locale = summary?.locale ?? activeOrgLocale()
   const timeZone = summary?.timezone
   return (iso) =>
     new Date(iso).toLocaleString(locale, {

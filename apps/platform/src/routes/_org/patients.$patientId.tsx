@@ -25,7 +25,7 @@ import { CitasPanel } from "../../components/patient/citas-panel"
 import { ControlesPanel, RecetasPanel } from "../../components/patient/clinical-panels"
 import { ConsentimientosTab } from "../../components/patient/consentimientos-tab"
 import { CoordinacionPanel } from "../../components/patient/coordinacion-panel"
-import { CuentaTab } from "../../components/patient/cuenta-tab"
+import { AccountTab } from "../../components/patient/account-tab"
 import { DocumentosPanel } from "../../components/patient/documentos-panel"
 import { FiliacionPanel } from "../../components/patient/filiacion-panel"
 import { FormulariosTab } from "../../components/patient/formularios-tab"
@@ -390,7 +390,7 @@ function PatientDetailPage() {
       case "contactos":
         return <PatientContactSection detail={patient} />
       case "cuenta":
-        return <CuentaTab patientId={patientId} />
+        return <AccountTab patientId={patientId} />
       case "filiacion":
         return <FiliacionPanel detail={patient} />
       case "responsables":

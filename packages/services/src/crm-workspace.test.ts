@@ -596,6 +596,7 @@ async function makePatientSetup(orgId: string, contactId: string, n: number) {
         planId: plan!.id,
         budgetNumber: 100 + i,
         title: `Presupuesto ${statuses[i]}`,
+        currency: "PEN",
         status: statuses[i]!,
       })
     }

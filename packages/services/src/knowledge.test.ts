@@ -7,6 +7,7 @@ import { branch } from "@odentia/db/schema/org"
 import { eq, sql } from "drizzle-orm"
 import { beforeAll, describe, expect, it } from "vitest"
 import { createConnection } from "./connections.js"
+import { formatOrgMoney } from "./locale.js"
 import { type IngestDeps, ingestInbound, sendOutbound } from "./conversations.js"
 import {
   answerKnowledgeGaps,
@@ -14,7 +15,6 @@ import {
   createKnowledgeEntry,
   discardKnowledgeGaps,
   formatKnowledgeForPrompt,
-  formatServicePrice,
   getKnowledgeBasics,
   getKnowledgeDataSources,
   getKnowledgeEntry,
@@ -116,9 +116,8 @@ describe("puntuación de una respuesta frente a una pregunta", () => {
 })
 
 it("cada importe se presenta con su moneda", () => {
-  expect(formatServicePrice(15000, "PEN")).toBe("S/ 150.00")
-  expect(formatServicePrice(8050, "usd")).toBe("US$ 80.50")
-  expect(formatServicePrice(120000, "CLP")).toBe("1200.00 CLP")
+  expect(formatOrgMoney(15000, "PEN", { locale: "es-PE" })).toMatch(/^S\/\s150\.00$/)
+  expect(formatOrgMoney(120000, "CLP", { locale: "es-CL" })).toMatch(/120\.000/)
 })
 
 it("solo lo publicado y dentro de su vigencia llega al agente", async () => {
@@ -183,6 +182,9 @@ describe("bloque de conocimiento del prompt", () => {
   const snapshot: ClinicInfoSnapshot = {
     clinicName: "Clínica Sonríe",
     timezone: "America/Lima",
+    locale: "es-PE",
+    paymentMethods: [],
+    promotions: [],
     branches: [{ id: "b1", name: "Sede Centro", address: "Av. Larco 123", phone: null, mapsUrl: null, timezone: null }],
     services: [
       { id: "s1", name: "Limpieza", code: null, specialty: null, priceCents: 15000, currency: "PEN", durationMin: 45 },
@@ -201,8 +203,8 @@ describe("bloque de conocimiento del prompt", () => {
     const block = formatKnowledgeForPrompt(snapshot, [...entries, { ...entry(99, "No debe salir."), state: "vencida" }])
     for (let i = 1; i <= 25; i++) expect(block).toContain(`- Tema ${i}: Respuesta breve ${i}.`)
     expect(block).not.toContain("Tema 99")
-    expect(block).toMatch(/- Limpieza \(id [^)]+\): S\/ 150\.00 \(45 min\)/)
-    expect(block).toMatch(/- Blanqueamiento \(id [^)]+\): US\$ 120\.00/)
+    expect(block).toMatch(/- Limpieza \(id [^)]+\): S\/\s150\.00 \(45 min\)/)
+    expect(block).toMatch(/- Blanqueamiento \(id [^)]+\): USD\s120\.00/)
   })
 
   it("cuando no caben todas va el índice, y una respuesta de sede lo dice", () => {

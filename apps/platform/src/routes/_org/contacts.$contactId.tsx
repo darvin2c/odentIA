@@ -60,6 +60,19 @@ const RELATIONSHIP_LABELS: Record<string, string> = {
   other: "Otro contacto",
 }
 
+const PREFERRED_LABELS: Record<string, string> = {
+  email: "Correo",
+  whatsapp: "WhatsApp",
+  telegram: "Telegram",
+  messenger: "Messenger",
+  instagram: "Instagram",
+}
+
+function preferredLabel(value: string | null): string {
+  if (!value) return "Sin preferencia"
+  return PREFERRED_LABELS[value] ?? value
+}
+
 interface PatientSearchItem {
   id: string
   displayName: string
@@ -97,6 +110,24 @@ function ContactDetailPage() {
   const [draftSex, setDraftSex] = useState("")
   const [draftNotes, setDraftNotes] = useState("")
   const [draftAssignee, setDraftAssignee] = useState("")
+  const [draftPreferred, setDraftPreferred] = useState("")
+  // Canales con conexión activa: solo entre ellos se elige el preferido.
+  const usableConnections = useQuery({
+    queryKey: ["connections", "usable", "preferred"],
+    queryFn: () =>
+      apiFetch<{ data: { id: string; channel: string; status: string }[] }>(
+        "/api/channels/connections/usable",
+      ),
+    enabled: editOpen,
+  })
+  const connectedChannels = useMemo(() => {
+    const channels = (usableConnections.data?.data ?? [])
+      .filter((c) => c.status === "active")
+      .map((c) => c.channel)
+    const distinct = [...new Set(channels)]
+    if (draftPreferred && !distinct.includes(draftPreferred)) distinct.unshift(draftPreferred)
+    return distinct
+  }, [usableConnections.data, draftPreferred])
   const [customOpen, setCustomOpen] = useState(false)
   const [draftCustom, setDraftCustom] = useState<Record<string, unknown>>({})
   const [assignConvId, setAssignConvId] = useState<string | null>(null)
@@ -528,6 +559,7 @@ function ContactDetailPage() {
                   setDraftSex(detail.contact.sex ?? "")
                   setDraftNotes(detail.contact.notes ?? "")
                   setDraftAssignee(detail.contact.assignedUserId ?? "")
+                  setDraftPreferred(detail.contact.preferredChannel ?? "")
                   setEditOpen(true)
                 }}
               >
@@ -547,6 +579,10 @@ function ContactDetailPage() {
             <div className="flex gap-2">
               <dt className="w-24 shrink-0 text-muted-foreground">Correo</dt>
               <dd>{detail.contact.email ?? "—"}</dd>
+            </div>
+            <div className="flex gap-2">
+              <dt className="w-24 shrink-0 text-muted-foreground">Medio preferido</dt>
+              <dd>{preferredLabel(detail.contact.preferredChannel)}</dd>
             </div>
             <div className="flex gap-2">
               <dt className="w-24 shrink-0 text-muted-foreground">Documento</dt>
@@ -1011,6 +1047,7 @@ function ContactDetailPage() {
               sex: draftSex || null,
               notes: draftNotes.trim(),
               assignedUserId: draftAssignee || null,
+              preferredChannel: draftPreferred || null,
             },
             { onSuccess: () => setEditOpen(false) },
           )
@@ -1105,6 +1142,26 @@ function ContactDetailPage() {
                 </option>
               ))}
             </select>
+          </Field>
+          <Field>
+            <FieldLabel htmlFor="contact-detail-preferred">Medio preferido para avisos y mensajes</FieldLabel>
+            <select
+              id="contact-detail-preferred"
+              className="rounded-md border bg-background px-2 py-1.5 text-sm"
+              value={draftPreferred}
+              onChange={(e) => setDraftPreferred(e.target.value)}
+            >
+              <option value="">Sin preferencia</option>
+              {connectedChannels.map((channel) => (
+                <option key={channel} value={channel}>
+                  {preferredLabel(channel)}
+                </option>
+              ))}
+            </select>
+            <p className="text-xs text-muted-foreground">
+              Solo los canales que la clínica tiene conectados. Si nadie lo eligió, se usa el
+              canal de su última conversación; los documentos van por correo si la persona tiene uno.
+            </p>
           </Field>
         </div>
       </FormDrawer>

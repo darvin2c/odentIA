@@ -124,7 +124,8 @@ export const purchaseOrder = pgTable(
       .notNull()
       .references(() => warehouse.id),
     status: text("status").notNull().default("borrador"),
-    currency: text("currency").notNull().default("PEN"),
+    // ISO 4217, siempre explícita: sin moneda por defecto de ningún país.
+    currency: text("currency").notNull(),
     notes: text("notes"),
     createdBy: text("created_by").references(() => user.id),
     ...timestamps,

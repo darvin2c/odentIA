@@ -60,7 +60,7 @@ import { requireLinkedActiveContact } from "./responsibilities.js"
 import { createTask, getTask, updateTask } from "./tasks.js"
 import { createWorkspaceNotification } from "./workspace.js"
 import { auditEvent, branch } from "@odentia/db/schema/org"
-import { getPatientBalanceForPortal } from "./finance.js"
+import { getAccountSummary } from "./payments.js"
 import { handoffOpenSql } from "./handoff-state.js"
 import { CONFIRM_TTL_HOURS } from "./proposal-state.js"
 import { formatZoned, getOrgLocale, type OrgLocale } from "./locale.js"
@@ -323,10 +323,10 @@ export interface AgentPatientSummary {
 
 /**
  * Resumen mínimo del paciente según la facultad del interlocutor, sin leer
- * historia clínica: próximas citas y estado de presupuestos para
- * self/representante/autorizado; saldo solo para self, representante legal o
- * responsable económico vigente. Siempre del paciente verificado, nunca de
- * otro.
+ * historia clínica: próximas citas y estado de presupuestos presentados o
+ * decididos (nunca borradores) para self/representante/autorizado; saldo
+ * solo para self, representante legal o responsable económico vigente.
+ * Siempre del paciente verificado, nunca de otro.
  */
 export async function getAgentPatientSummary(
   tx: Db,
@@ -367,7 +367,7 @@ export async function getAgentPatientSummary(
       status: treatmentBudget.status,
     })
     .from(treatmentBudget)
-    .where(and(eq(treatmentBudget.organizationId, orgId), eq(treatmentBudget.patientId, patientId)))
+    .where(and(eq(treatmentBudget.organizationId, orgId), eq(treatmentBudget.patientId, patientId), ne(treatmentBudget.status, "borrador")))
     .orderBy(desc(treatmentBudget.budgetNumber))
     .limit(3)
   let balance: AgentPatientSummary["balance"] = null
@@ -376,8 +376,9 @@ export async function getAgentPatientSummary(
     context.authorization === "representante_legal" ||
     (await hasEconomicRole(tx, orgId, patientId, contactId))
   if (maySeeBalance) {
-    const full = await getPatientBalanceForPortal(tx, orgId, patientId)
-    balance = full.byCurrency.map((b) => ({ currency: b.currency, outstandingCents: b.outstandingCents }))
+    // La misma cuenta que ve caja: una sola operación para pantalla, portal y agente.
+    const account = await getAccountSummary(tx, orgId, patientId)
+    balance = account.byCurrency.map((b) => ({ currency: b.currency, outstandingCents: b.porCobrar }))
   }
   return {
     context,

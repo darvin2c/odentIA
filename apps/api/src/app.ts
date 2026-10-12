@@ -3,7 +3,7 @@ import type { Auth } from "@odentia/auth"
 import { type Db, sendDemoTask, withOrgContext } from "@odentia/db"
 import { message } from "@odentia/db/schema/crm"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
-import type { MailboxEnv, Storage } from "@odentia/services"
+import { initialOrgRegion, type MailboxEnv, regionPresetForCountry, type Storage, updateOrgRegion } from "@odentia/services"
 import { and, eq, gt, inArray, sql } from "drizzle-orm"
 import { type Context, Hono } from "hono"
 import { cors } from "hono/cors"
@@ -29,11 +29,16 @@ import { createConversationsRoute } from "./routes/conversations.js"
 import { createCrmWorkspaceRoute } from "./routes/crm-workspace.js"
 import { createFieldsRoute } from "./routes/fields.js"
 import { createFinanceRoute } from "./routes/finance.js"
+import { createFinancialDocumentsRoute } from "./routes/financial-documents.js"
 import { createInventoryRoute } from "./routes/inventory.js"
+import { createCommissionsRoute } from "./routes/commissions.js"
+import { runService } from "./routes/helpers.js"
 import { createMailboxesRoute } from "./routes/mailboxes.js"
 import { createOpportunitiesRoute } from "./routes/opportunities.js"
 import { createPatientRegistrationRoute } from "./routes/patient-registration.js"
 import { createPatientsRoute } from "./routes/patients.js"
+import { createPaymentMethodsRoute } from "./routes/payment-methods.js"
+import { createPromotionsRoute } from "./routes/promotions.js"
 import { createPipelinesRoute } from "./routes/pipelines.js"
 import { createPortalRoute } from "./routes/portal.js"
 import {
@@ -94,14 +99,18 @@ const branchPatch = branchInput.partial()
 const orgProfileInput = z.object({
   legalName: z.string().min(1).max(200),
   tradeName: z.string().max(200).optional(),
-  fiscalDocType: z.string().max(20).optional(),
+  fiscalDocType: z.string().max(20).nullish(),
   fiscalDocNumber: z.string().max(20).optional(),
   billingEmail: z.string().email().optional(),
   fiscalAddress: z.string().max(300).optional(),
   countryCode: z.string().length(2).optional(),
   currency: z.string().length(3).optional(),
   timezone: z.string().max(60).optional(),
-  locale: z.string().max(20).optional(),
+  locale: z.string().max(100).optional(),
+  receiptWidth: z.enum(["58", "80"]).optional(),
+  sheetSize: z.enum(["A4", "Letter"]).optional(),
+  ticketFooter: z.string().trim().min(1).max(280).optional(),
+  applyCountryPreset: z.boolean().optional(),
 })
 
 const demoTaskInput = z.object({
@@ -282,6 +291,19 @@ export function createApp(deps: AppDeps) {
     return c.json({ data: { url } }, 201)
   })
 
+  // Lo que se propone al elegir país: moneda, formato, zona y papel. Es dato
+  // de referencia, no de una organización: el alta lo consulta antes de que
+  // la clínica exista, por eso solo exige sesión.
+  userScoped.get("/org-profile/region-defaults", (c) => {
+    const parsed = z
+      .object({ countryCode: z.string().regex(/^[A-Za-z]{2}$/), language: z.string().max(8).optional() })
+      .safeParse(c.req.query())
+    if (!parsed.success) {
+      return c.json(errorBody(c, "VALIDATION", parsed.error.issues[0]?.message ?? "Datos inválidos"), 400)
+    }
+    return c.json({ data: regionPresetForCountry(parsed.data.countryCode, parsed.data.language) })
+  })
+
   // Webhooks de proveedor ANTES que los routers con guards: el use("*") de
   // userScoped/guarded también casa /api/webhooks/* y respondería 401.
   app.route(
@@ -332,15 +354,32 @@ export function createApp(deps: AppDeps) {
     if (!parsed.success) return validationError(c, parsed.error.issues)
     const input = parsed.data
 
-    const row = await withOrgContext(db, orgId, async (tx) => {
-      const [upserted] = await tx
-        .insert(orgProfile)
-        .values({ organizationId: orgId, ...input })
-        .onConflictDoUpdate({
-          target: orgProfile.organizationId,
-          set: { ...input, updatedAt: new Date() },
-        })
-        .returning()
+    return runService(c, 200, () => withOrgContext(db, orgId, async (tx) => {
+      const [current] = await tx
+        .select({ id: orgProfile.organizationId })
+        .from(orgProfile)
+        .where(eq(orgProfile.organizationId, orgId))
+        .for("update")
+      const { countryCode, currency, timezone, locale, receiptWidth, sheetSize, ticketFooter, applyCountryPreset, ...identity } = input
+      if (current) {
+        await tx
+          .update(orgProfile)
+          .set({ ...identity, updatedAt: new Date() })
+          .where(eq(orgProfile.organizationId, orgId))
+      } else {
+        // El perfil nace con su región explícita: la base no asume ningún país.
+        await tx
+          .insert(orgProfile)
+          .values({
+            organizationId: orgId,
+            ...identity,
+            ...initialOrgRegion({ countryCode, currency, timezone, locale, sheetSize }),
+          })
+      }
+      const updated = await updateOrgRegion(tx, orgId, userId, {
+        countryCode, currency, timezone, locale, receiptWidth, sheetSize, ticketFooter,
+        applyCountryPreset: applyCountryPreset ?? !current,
+      })
       await tx.insert(auditEvent).values({
         organizationId: orgId,
         actorUserId: userId,
@@ -349,9 +388,8 @@ export function createApp(deps: AppDeps) {
         entityId: orgId,
         metadata: input,
       })
-      return upserted
-    })
-    return c.json({ data: row })
+      return updated
+    }))
   })
 
   guarded.get("/branches", async (c) => {
@@ -545,9 +583,13 @@ export function createApp(deps: AppDeps) {
   guarded.route("/conversations", createConversationsRoute(crmDeps))
   guarded.route("/contacts", createContactsRoute(crmDeps))
   guarded.route("/crm", createCrmWorkspaceRoute(crmDeps))
+  guarded.route("/patients", createFinancialDocumentsRoute(crmDeps))
   const llm: PlatformLlm = deps.llm ?? { modelName: "fake" }
   guarded.route("/patients", createPatientsRoute({ ...crmDeps, llm }))
   guarded.route("/services", createServicesRoute(crmDeps))
+  guarded.route("/org/payment-methods", createPaymentMethodsRoute(crmDeps))
+  guarded.route("/promotions", createPromotionsRoute(crmDeps))
+  guarded.route("/commissions", createCommissionsRoute(crmDeps))
   guarded.route("/cie10", createCie10Route(crmDeps))
   guarded.route("/ubigeo", createUbigeoRoute(crmDeps))
   guarded.route("/pipelines", createPipelinesRoute(crmDeps))

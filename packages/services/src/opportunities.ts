@@ -18,6 +18,7 @@ import { and, asc, desc, eq, ilike, lt, or, sql } from "drizzle-orm"
 import { requireContact } from "./contacts.js"
 import { cancelPendingJobsForOpportunity } from "./automation.js"
 import { notFound, validation } from "./errors.js"
+import { findOrgCurrency, NO_CURRENCY, requireOrgCurrency } from "./locale.js"
 import { requirePatient } from "./patients.js"
 import { ensureDefaultPipeline } from "./pipelines.js"
 import { createWorkspaceNotification } from "./workspace.js"
@@ -27,15 +28,6 @@ export const OPPORTUNITY_STATUS_LIST: OpportunityStatus[] = [...OPPORTUNITY_STAT
 
 /** Motivo de cierre: texto corto obligatorio al ganar o perder. */
 const CLOSE_REASON_MAX = 500
-/** Moneda de la organización (perfil); sin perfil rige el default existente. */
-async function orgCurrency(tx: Db, orgId: string): Promise<string> {
-  const [profile] = await tx
-    .select({ currency: orgProfile.currency })
-    .from(orgProfile)
-    .where(eq(orgProfile.organizationId, orgId))
-    .limit(1)
-  return profile?.currency ?? "PEN"
-}
 
 /** Aviso mínimo CRM para refresco: solo `{ orgId, kind, at }`, sin PII. */
 async function notifyOpp(tx: Db, orgId: string): Promise<void> {
@@ -945,7 +937,14 @@ export async function createOpportunity(
     input.contactId,
   )
   const amountCents = cleanAmount(input.amountCents) ?? null
-  const currency = cleanCurrency(input.currency) ?? (await orgCurrency(tx, orgId))
+  // Moneda indicada o la de la clínica. Una oportunidad sin importe puede nacer
+  // antes de que la clínica configure su moneda (p. ej. al entrar un mensaje):
+  // entonces lleva «sin moneda» (ISO 4217 XXX), nunca la de un país. Con
+  // importe, la moneda es obligatoria.
+  const currency =
+    cleanCurrency(input.currency) ??
+    (await findOrgCurrency(tx, orgId)) ??
+    (amountCents === null ? NO_CURRENCY : await requireOrgCurrency(tx, orgId))
   const assignedUserId = (await resolveAssignee(tx, orgId, input.assignedUserId)) ?? null
   const nextActionAt = cleanNextActionAt(input.nextActionAt) ?? null
   const nextActionNote = cleanNote(input.nextActionNote ?? null, 500, "La nota") ?? null
@@ -1051,7 +1050,7 @@ export async function updateOpportunity(
     changed.push("amountCents")
   }
   if (input.currency !== undefined) {
-    patch.currency = cleanCurrency(input.currency) ?? "PEN"
+    patch.currency = cleanCurrency(input.currency) ?? (await requireOrgCurrency(tx, orgId))
     changed.push("currency")
   }
   const assigneeChanged = input.assignedUserId !== undefined

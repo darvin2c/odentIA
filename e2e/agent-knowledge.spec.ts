@@ -93,7 +93,7 @@ test("conocimiento: lo que no supo responder, lo básico, respuestas en filas co
   await expect(basics.getByRole("button")).toHaveCount(1)
 
   // Lo que toma de tus datos: cifras del sistema y dónde se editan.
-  await expect(sources.getByRole("link", { name: /Servicios y tarifas.*Ningún servicio con precio todavía.*Se editan en Servicios/ })).toBeVisible()
+  await expect(sources.getByRole("link", { name: /Servicios y precios.*Ningún servicio con precio todavía.*Se editan en Servicios/ })).toBeVisible()
   await expect(sources.getByRole("link", { name: /Sedes y horarios.*2 sedes.*Se editan en Sucursales/ })).toBeVisible()
 
   // La primera vez: el vacío lleva a lo básico.

@@ -20,6 +20,8 @@ export interface BookingAppointment {
 export interface BookingLinkView {
   status: "abierto" | "usado" | "vencido"
   clinicName: string
+  /** Formato regional de la clínica (BCP 47). */
+  locale: string
   patientFirstName: string | null
   needsRegistration: boolean
   service: { name: string; durationMin: number | null } | null

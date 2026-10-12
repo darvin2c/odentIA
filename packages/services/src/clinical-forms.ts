@@ -2052,6 +2052,9 @@ export async function getConsentPrint(tx: Db, orgId: string, documentId: string)
       fiscalDocType: orgProfile.fiscalDocType,
       fiscalDocNumber: orgProfile.fiscalDocNumber,
       address: orgProfile.fiscalAddress,
+      // Con qué formato y en qué zona se escriben las fechas del documento.
+      locale: orgProfile.locale,
+      timezone: orgProfile.timezone,
     })
     .from(orgProfile)
     .where(eq(orgProfile.organizationId, orgId))

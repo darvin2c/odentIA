@@ -56,6 +56,7 @@ import {
   type MedicationRowValue,
   ReviewStateSelect,
 } from "./patient-health-fields"
+import { activeOrgLocale } from "../../lib/locale"
 
 type Rec = Record<string, unknown>
 
@@ -1202,7 +1203,7 @@ export function AntecedentesTab({ patientId }: { patientId: string }): React.JSX
               {consentedAt ? (
                 <p className="text-sm text-muted-foreground">
                   Consentimiento de datos registrado
-                  {consentedAt ? ` el ${new Date(consentedAt).toLocaleDateString("es-PE")}` : ""}.
+                  {consentedAt ? ` el ${new Date(consentedAt).toLocaleDateString(activeOrgLocale())}` : ""}.
                   No se modifica al completar salud.
                 </p>
               ) : (
@@ -1488,7 +1489,7 @@ function RegistrationSnapshotDialog({
               </div>
               <div className="grid grid-cols-[12rem_minmax(0,1fr)] gap-2">
                 <dt className="text-muted-foreground">Fecha</dt>
-                <dd>{new Date(registration.createdAt).toLocaleString("es-PE")}</dd>
+                <dd>{new Date(registration.createdAt).toLocaleString(activeOrgLocale())}</dd>
               </div>
               <div className="grid grid-cols-[12rem_minmax(0,1fr)] gap-2">
                 <dt className="text-muted-foreground">Registrado por</dt>

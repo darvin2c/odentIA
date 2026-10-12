@@ -25,10 +25,13 @@ import {
   type ProcedureItem,
   planStatusLabel,
 } from "../../lib/patients"
-import { formatMoney, type ServiceCatalogItem } from "../../lib/services"
+import { formatMoney } from "@odentia/clinical"
+import { useOrgProfile } from "../../lib/org"
+import { type ServiceCatalogItem } from "../../lib/services"
 import { Cie10Search } from "./cie10-search"
 import { ServicePicker } from "./service-picker"
 import { type ToothSite, ToothSiteSelector } from "./tooth-site-selector"
+import { activeOrgLocale } from "../../lib/locale"
 
 const NO_PLAN = "__sin-plan__"
 const NO_SITE: ToothSite = { toothNumber: null, surfaces: [] }
@@ -54,7 +57,7 @@ function formatDateTime(iso: string | null): string {
   if (!iso) return "—"
   const date = new Date(iso)
   if (Number.isNaN(date.getTime())) return "—"
-  return date.toLocaleString("es-PE", { dateStyle: "short", timeStyle: "short" })
+  return date.toLocaleString(activeOrgLocale(), { dateStyle: "short", timeStyle: "short" })
 }
 
 function mutationMessage(err: unknown): string {
@@ -62,8 +65,13 @@ function mutationMessage(err: unknown): string {
   return err instanceof Error ? err.message : "No se pudo registrar el procedimiento."
 }
 
-function planOptionLabel(item: PlanItem): string {
-  const price = item.priceCents == null ? "sin tarifa" : formatMoney(item.priceCents, item.currency)
+function planOptionLabel(item: PlanItem, locale: string | undefined): string {
+  const price =
+    item.priceCents == null
+      ? "sin precio"
+      : locale
+        ? formatMoney(item.priceCents, item.currency, locale)
+        : "…"
   const tooth = item.toothNumber == null ? "general" : `pieza ${item.toothNumber}`
   return `${item.title} · ${tooth} · ${planStatusLabel(item.status)} · ${price}`
 }
@@ -94,6 +102,7 @@ export function EncounterProcedures({
 }): React.JSX.Element {
   const canWrite = usePermission("clinical.write")
   const canRead = usePermission("clinical.read")
+  const orgLocale = useOrgProfile().data?.locale
   const queryClient = useQueryClient()
   const uid = useId()
   const [open, setOpen] = useState(false)
@@ -146,7 +155,7 @@ export function EncounterProcedures({
       : visiblePlans
 
   const planItems: Record<string, string> = { [NO_PLAN]: "Seleccionar otro servicio del catálogo" }
-  for (const item of options) planItems[item.id] = planOptionLabel(item)
+  for (const item of options) planItems[item.id] = planOptionLabel(item, orgLocale)
 
   // El ámbito del servicio decide qué sitio pide: pieza, superficies,
   // cuadrante, arcada o nada (general). El acto libre admite pieza opcional.
@@ -362,7 +371,7 @@ export function EncounterProcedures({
                         <time dateTime={proc.createdAt}>{formatDateTime(proc.createdAt)}</time>
                         {proc.priceCents != null && proc.currency ? (
                           <span className="font-medium text-foreground">
-                            {formatMoney(proc.priceCents, proc.currency)}
+                            {orgLocale ? formatMoney(proc.priceCents, proc.currency, orgLocale) : "…"}
                           </span>
                         ) : (
                           <span>Sin cargo (acto libre)</span>
@@ -432,7 +441,7 @@ export function EncounterProcedures({
                   }}
                 />
                 <FieldLabel htmlFor={`${uid}-free`} className="font-normal">
-                  Acto libre (sin servicio del tarifario; queda registrado pero no se cobra)
+                  Acto libre (sin servicio de la lista; queda registrado pero no se cobra)
                 </FieldLabel>
               </Field>
               {freeMode && (
@@ -591,7 +600,7 @@ export function EncounterProcedures({
                         </SelectItem>
                         {options.map((item) => (
                           <SelectItem key={item.id} value={item.id}>
-                            {planOptionLabel(item)}
+                            {planOptionLabel(item, orgLocale)}
                           </SelectItem>
                         ))}
                       </SelectContent>

@@ -18,8 +18,10 @@ import { serviceCatalog } from "@odentia/db/schema/clinical"
 import { branch, orgProfile } from "@odentia/db/schema/org"
 import { and, asc, eq, gt, gte, inArray, isNull, lt, ne, or } from "drizzle-orm"
 import { notFound, ServiceError, validation } from "./errors.js"
+import { NEUTRAL_TIMEZONE } from "./locale.js"
 
-const FALLBACK_TZ = "America/Lima"
+// Sin zona en la sede ni en la organización: UTC, nunca la de un país.
+const FALLBACK_TZ = NEUTRAL_TIMEZONE
 const MAX_RANGE_DAYS = 62
 const MAX_SLOTS = 200
 
@@ -49,7 +51,7 @@ function assertTimeZone(value: string, field: string): string {
   const candidate = value.trim()
   if (!candidate) throw validation(`${field} es obligatoria`)
   try {
-    new Intl.DateTimeFormat("es-PE", { timeZone: candidate })
+    new Intl.DateTimeFormat("en", { timeZone: candidate })
     return candidate
   } catch {
     throw validation(`${field} inválida: ${value}`)

@@ -17,6 +17,7 @@ import { Route as ReservaRouteImport } from './routes/reserva'
 import { Route as OrgAgendaRouteImport } from './routes/_org/agenda'
 import { Route as OrgAutomationsRouteImport } from './routes/_org/automations'
 import { Route as OrgBranchesRouteImport } from './routes/_org/branches'
+import { Route as OrgCommissionsRouteImport } from './routes/_org/commissions'
 import { Route as OrgDemoRouteImport } from './routes/_org/demo'
 import { Route as OrgFinanceRouteImport } from './routes/_org/finance'
 import { Route as OrgHomeRouteImport } from './routes/_org/home'
@@ -47,6 +48,7 @@ import { Route as OrgPatientsIndexRouteImport } from './routes/_org/patients.ind
 import { Route as OrgPatientsPatientIdRouteImport } from './routes/_org/patients.$patientId'
 import { Route as OrgServicesIndexRouteImport } from './routes/_org/services.index'
 import { Route as OrgServicesBibliotecaRouteImport } from './routes/_org/services.biblioteca'
+import { Route as OrgServicesPromotionsRouteImport } from './routes/_org/services.promotions'
 import { Route as OrgSettingsIndexRouteImport } from './routes/_org/settings.index'
 import { Route as OrgSettingsAgentRouteImport } from './routes/_org/settings.agent'
 import { Route as OrgSettingsAuditRouteImport } from './routes/_org/settings.audit'
@@ -57,6 +59,7 @@ import { Route as OrgSettingsFormsRouteImport } from './routes/_org/settings.for
 import { Route as OrgSettingsMailRouteImport } from './routes/_org/settings.mail'
 import { Route as OrgSettingsPatientAccessRouteImport } from './routes/_org/settings.patient-access'
 import { Route as OrgSettingsPatientRegistrationRouteImport } from './routes/_org/settings.patient-registration'
+import { Route as OrgSettingsPaymentMethodsRouteImport } from './routes/_org/settings.payment-methods'
 import { Route as OrgSettingsPipelinesRouteImport } from './routes/_org/settings.pipelines'
 import { Route as OrgSettingsSpecialtiesRouteImport } from './routes/_org/settings.specialties'
 import { Route as OrgSettingsWebchatRouteImport } from './routes/_org/settings.webchat'
@@ -101,6 +104,11 @@ const OrgAutomationsRoute = OrgAutomationsRouteImport.update({
 const OrgBranchesRoute = OrgBranchesRouteImport.update({
   id: '/branches',
   path: '/branches',
+  getParentRoute: () => OrgRoute,
+} as any)
+const OrgCommissionsRoute = OrgCommissionsRouteImport.update({
+  id: '/commissions',
+  path: '/commissions',
   getParentRoute: () => OrgRoute,
 } as any)
 const OrgDemoRoute = OrgDemoRouteImport.update({
@@ -255,6 +263,11 @@ const OrgServicesBibliotecaRoute = OrgServicesBibliotecaRouteImport.update({
   path: '/biblioteca',
   getParentRoute: () => OrgServicesRoute,
 } as any)
+const OrgServicesPromotionsRoute = OrgServicesPromotionsRouteImport.update({
+  id: '/promotions',
+  path: '/promotions',
+  getParentRoute: () => OrgServicesRoute,
+} as any)
 const OrgSettingsIndexRoute = OrgSettingsIndexRouteImport.update({
   id: '/',
   path: '/',
@@ -307,6 +320,12 @@ const OrgSettingsPatientRegistrationRoute =
     path: '/patient-registration',
     getParentRoute: () => OrgSettingsRoute,
   } as any)
+const OrgSettingsPaymentMethodsRoute =
+  OrgSettingsPaymentMethodsRouteImport.update({
+    id: '/payment-methods',
+    path: '/payment-methods',
+    getParentRoute: () => OrgSettingsRoute,
+  } as any)
 const OrgSettingsPipelinesRoute = OrgSettingsPipelinesRouteImport.update({
   id: '/pipelines',
   path: '/pipelines',
@@ -349,6 +368,7 @@ export interface FileRoutesByFullPath {
   '/agenda': typeof OrgAgendaRoute
   '/automations': typeof OrgAutomationsRoute
   '/branches': typeof OrgBranchesRoute
+  '/commissions': typeof OrgCommissionsRoute
   '/demo': typeof OrgDemoRoute
   '/finance': typeof OrgFinanceRoute
   '/home': typeof OrgHomeRoute
@@ -375,6 +395,7 @@ export interface FileRoutesByFullPath {
   '/opportunities/$opportunityId': typeof OrgOpportunitiesOpportunityIdRoute
   '/patients/$patientId': typeof OrgPatientsPatientIdRouteWithChildren
   '/services/biblioteca': typeof OrgServicesBibliotecaRoute
+  '/services/promotions': typeof OrgServicesPromotionsRoute
   '/settings/agent': typeof OrgSettingsAgentRoute
   '/settings/audit': typeof OrgSettingsAuditRoute
   '/settings/availability': typeof OrgSettingsAvailabilityRoute
@@ -384,6 +405,7 @@ export interface FileRoutesByFullPath {
   '/settings/mail': typeof OrgSettingsMailRoute
   '/settings/patient-access': typeof OrgSettingsPatientAccessRoute
   '/settings/patient-registration': typeof OrgSettingsPatientRegistrationRoute
+  '/settings/payment-methods': typeof OrgSettingsPaymentMethodsRoute
   '/settings/pipelines': typeof OrgSettingsPipelinesRoute
   '/settings/specialties': typeof OrgSettingsSpecialtiesRoute
   '/settings/webchat': typeof OrgSettingsWebchatRoute
@@ -404,6 +426,7 @@ export interface FileRoutesByTo {
   '/agenda': typeof OrgAgendaRoute
   '/automations': typeof OrgAutomationsRoute
   '/branches': typeof OrgBranchesRoute
+  '/commissions': typeof OrgCommissionsRoute
   '/demo': typeof OrgDemoRoute
   '/finance': typeof OrgFinanceRoute
   '/home': typeof OrgHomeRoute
@@ -428,6 +451,7 @@ export interface FileRoutesByTo {
   '/opportunities/$opportunityId': typeof OrgOpportunitiesOpportunityIdRoute
   '/patients/$patientId': typeof OrgPatientsPatientIdRouteWithChildren
   '/services/biblioteca': typeof OrgServicesBibliotecaRoute
+  '/services/promotions': typeof OrgServicesPromotionsRoute
   '/settings/agent': typeof OrgSettingsAgentRoute
   '/settings/audit': typeof OrgSettingsAuditRoute
   '/settings/availability': typeof OrgSettingsAvailabilityRoute
@@ -437,6 +461,7 @@ export interface FileRoutesByTo {
   '/settings/mail': typeof OrgSettingsMailRoute
   '/settings/patient-access': typeof OrgSettingsPatientAccessRoute
   '/settings/patient-registration': typeof OrgSettingsPatientRegistrationRoute
+  '/settings/payment-methods': typeof OrgSettingsPaymentMethodsRoute
   '/settings/pipelines': typeof OrgSettingsPipelinesRoute
   '/settings/specialties': typeof OrgSettingsSpecialtiesRoute
   '/settings/webchat': typeof OrgSettingsWebchatRoute
@@ -459,6 +484,7 @@ export interface FileRoutesById {
   '/_org/agenda': typeof OrgAgendaRoute
   '/_org/automations': typeof OrgAutomationsRoute
   '/_org/branches': typeof OrgBranchesRoute
+  '/_org/commissions': typeof OrgCommissionsRoute
   '/_org/demo': typeof OrgDemoRoute
   '/_org/finance': typeof OrgFinanceRoute
   '/_org/home': typeof OrgHomeRoute
@@ -485,6 +511,7 @@ export interface FileRoutesById {
   '/_org/opportunities/$opportunityId': typeof OrgOpportunitiesOpportunityIdRoute
   '/_org/patients/$patientId': typeof OrgPatientsPatientIdRouteWithChildren
   '/_org/services/biblioteca': typeof OrgServicesBibliotecaRoute
+  '/_org/services/promotions': typeof OrgServicesPromotionsRoute
   '/_org/settings/agent': typeof OrgSettingsAgentRoute
   '/_org/settings/audit': typeof OrgSettingsAuditRoute
   '/_org/settings/availability': typeof OrgSettingsAvailabilityRoute
@@ -494,6 +521,7 @@ export interface FileRoutesById {
   '/_org/settings/mail': typeof OrgSettingsMailRoute
   '/_org/settings/patient-access': typeof OrgSettingsPatientAccessRoute
   '/_org/settings/patient-registration': typeof OrgSettingsPatientRegistrationRoute
+  '/_org/settings/payment-methods': typeof OrgSettingsPaymentMethodsRoute
   '/_org/settings/pipelines': typeof OrgSettingsPipelinesRoute
   '/_org/settings/specialties': typeof OrgSettingsSpecialtiesRoute
   '/_org/settings/webchat': typeof OrgSettingsWebchatRoute
@@ -516,6 +544,7 @@ export interface FileRouteTypes {
     | '/agenda'
     | '/automations'
     | '/branches'
+    | '/commissions'
     | '/demo'
     | '/finance'
     | '/home'
@@ -542,6 +571,7 @@ export interface FileRouteTypes {
     | '/opportunities/$opportunityId'
     | '/patients/$patientId'
     | '/services/biblioteca'
+    | '/services/promotions'
     | '/settings/agent'
     | '/settings/audit'
     | '/settings/availability'
@@ -551,6 +581,7 @@ export interface FileRouteTypes {
     | '/settings/mail'
     | '/settings/patient-access'
     | '/settings/patient-registration'
+    | '/settings/payment-methods'
     | '/settings/pipelines'
     | '/settings/specialties'
     | '/settings/webchat'
@@ -571,6 +602,7 @@ export interface FileRouteTypes {
     | '/agenda'
     | '/automations'
     | '/branches'
+    | '/commissions'
     | '/demo'
     | '/finance'
     | '/home'
@@ -595,6 +627,7 @@ export interface FileRouteTypes {
     | '/opportunities/$opportunityId'
     | '/patients/$patientId'
     | '/services/biblioteca'
+    | '/services/promotions'
     | '/settings/agent'
     | '/settings/audit'
     | '/settings/availability'
@@ -604,6 +637,7 @@ export interface FileRouteTypes {
     | '/settings/mail'
     | '/settings/patient-access'
     | '/settings/patient-registration'
+    | '/settings/payment-methods'
     | '/settings/pipelines'
     | '/settings/specialties'
     | '/settings/webchat'
@@ -625,6 +659,7 @@ export interface FileRouteTypes {
     | '/_org/agenda'
     | '/_org/automations'
     | '/_org/branches'
+    | '/_org/commissions'
     | '/_org/demo'
     | '/_org/finance'
     | '/_org/home'
@@ -651,6 +686,7 @@ export interface FileRouteTypes {
     | '/_org/opportunities/$opportunityId'
     | '/_org/patients/$patientId'
     | '/_org/services/biblioteca'
+    | '/_org/services/promotions'
     | '/_org/settings/agent'
     | '/_org/settings/audit'
     | '/_org/settings/availability'
@@ -660,6 +696,7 @@ export interface FileRouteTypes {
     | '/_org/settings/mail'
     | '/_org/settings/patient-access'
     | '/_org/settings/patient-registration'
+    | '/_org/settings/payment-methods'
     | '/_org/settings/pipelines'
     | '/_org/settings/specialties'
     | '/_org/settings/webchat'
@@ -740,6 +777,13 @@ declare module '@tanstack/react-router' {
       path: '/branches'
       fullPath: '/branches'
       preLoaderRoute: typeof OrgBranchesRouteImport
+      parentRoute: typeof OrgRoute
+    }
+    '/_org/commissions': {
+      id: '/_org/commissions'
+      path: '/commissions'
+      fullPath: '/commissions'
+      preLoaderRoute: typeof OrgCommissionsRouteImport
       parentRoute: typeof OrgRoute
     }
     '/_org/demo': {
@@ -952,6 +996,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof OrgServicesBibliotecaRouteImport
       parentRoute: typeof OrgServicesRoute
     }
+    '/_org/services/promotions': {
+      id: '/_org/services/promotions'
+      path: '/promotions'
+      fullPath: '/services/promotions'
+      preLoaderRoute: typeof OrgServicesPromotionsRouteImport
+      parentRoute: typeof OrgServicesRoute
+    }
     '/_org/settings/': {
       id: '/_org/settings/'
       path: '/'
@@ -1022,6 +1073,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof OrgSettingsPatientRegistrationRouteImport
       parentRoute: typeof OrgSettingsRoute
     }
+    '/_org/settings/payment-methods': {
+      id: '/_org/settings/payment-methods'
+      path: '/payment-methods'
+      fullPath: '/settings/payment-methods'
+      preLoaderRoute: typeof OrgSettingsPaymentMethodsRouteImport
+      parentRoute: typeof OrgSettingsRoute
+    }
     '/_org/settings/pipelines': {
       id: '/_org/settings/pipelines'
       path: '/pipelines'
@@ -1081,11 +1139,13 @@ const OrgInventoryRouteWithChildren = OrgInventoryRoute._addFileChildren(
 
 interface OrgServicesRouteChildren {
   OrgServicesBibliotecaRoute: typeof OrgServicesBibliotecaRoute
+  OrgServicesPromotionsRoute: typeof OrgServicesPromotionsRoute
   OrgServicesIndexRoute: typeof OrgServicesIndexRoute
 }
 
 const OrgServicesRouteChildren: OrgServicesRouteChildren = {
   OrgServicesBibliotecaRoute: OrgServicesBibliotecaRoute,
+  OrgServicesPromotionsRoute: OrgServicesPromotionsRoute,
   OrgServicesIndexRoute: OrgServicesIndexRoute,
 }
 
@@ -1103,6 +1163,7 @@ interface OrgSettingsRouteChildren {
   OrgSettingsMailRoute: typeof OrgSettingsMailRoute
   OrgSettingsPatientAccessRoute: typeof OrgSettingsPatientAccessRoute
   OrgSettingsPatientRegistrationRoute: typeof OrgSettingsPatientRegistrationRoute
+  OrgSettingsPaymentMethodsRoute: typeof OrgSettingsPaymentMethodsRoute
   OrgSettingsPipelinesRoute: typeof OrgSettingsPipelinesRoute
   OrgSettingsSpecialtiesRoute: typeof OrgSettingsSpecialtiesRoute
   OrgSettingsWebchatRoute: typeof OrgSettingsWebchatRoute
@@ -1119,6 +1180,7 @@ const OrgSettingsRouteChildren: OrgSettingsRouteChildren = {
   OrgSettingsMailRoute: OrgSettingsMailRoute,
   OrgSettingsPatientAccessRoute: OrgSettingsPatientAccessRoute,
   OrgSettingsPatientRegistrationRoute: OrgSettingsPatientRegistrationRoute,
+  OrgSettingsPaymentMethodsRoute: OrgSettingsPaymentMethodsRoute,
   OrgSettingsPipelinesRoute: OrgSettingsPipelinesRoute,
   OrgSettingsSpecialtiesRoute: OrgSettingsSpecialtiesRoute,
   OrgSettingsWebchatRoute: OrgSettingsWebchatRoute,
@@ -1151,6 +1213,7 @@ interface OrgRouteChildren {
   OrgAgendaRoute: typeof OrgAgendaRoute
   OrgAutomationsRoute: typeof OrgAutomationsRoute
   OrgBranchesRoute: typeof OrgBranchesRoute
+  OrgCommissionsRoute: typeof OrgCommissionsRoute
   OrgDemoRoute: typeof OrgDemoRoute
   OrgFinanceRoute: typeof OrgFinanceRoute
   OrgHomeRoute: typeof OrgHomeRoute
@@ -1181,6 +1244,7 @@ const OrgRouteChildren: OrgRouteChildren = {
   OrgAgendaRoute: OrgAgendaRoute,
   OrgAutomationsRoute: OrgAutomationsRoute,
   OrgBranchesRoute: OrgBranchesRoute,
+  OrgCommissionsRoute: OrgCommissionsRoute,
   OrgDemoRoute: OrgDemoRoute,
   OrgFinanceRoute: OrgFinanceRoute,
   OrgHomeRoute: OrgHomeRoute,

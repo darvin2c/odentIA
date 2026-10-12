@@ -53,6 +53,7 @@ const patchInput = z.object({
   maternalSurname: z.string().max(100).nullable().optional(),
   docCountry: z.string().max(2).nullable().optional(),
   phone: z.string().max(50).nullable().optional(),
+  preferredChannel: z.enum(["email", "whatsapp", "telegram", "messenger", "instagram"]).nullable().optional(),
   email: z.string().max(200).nullable().optional(),
   docType: z.string().max(20).nullable().optional(),
   docNumber: z.string().max(20).nullable().optional(),

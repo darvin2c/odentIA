@@ -4,6 +4,7 @@
 // JWT de Google); este slice usa polling durable con historyId como cursor.
 // Referencias: https://developers.google.com/workspace/gmail/api/guides/sync
 // y https://developers.google.com/workspace/gmail/api/reference/rest/v1/users.history/list
+import { splitColdSubject } from "./protocol.js"
 import type {
   ChannelAdapter,
   ChannelAdapterDeps,
@@ -715,6 +716,34 @@ async function sendThreadMessage(
   }
   return `gmail:${sentId}`
 }
+/** Envío que abre un hilo nuevo (sin threadId): el asunto va en el MIME. */
+async function sendNewMessage(
+  accessToken: string,
+  raw: string,
+  deps: ChannelAdapterDeps,
+): Promise<string> {
+  const { status, json } = await gmailApi(accessToken, "/users/me/messages/send", deps, {
+    method: "POST",
+    body: { raw: b64urlEncodeText(raw) },
+  })
+  if (status >= 400) {
+    throw new Error(gmailApiError("messages.send", status, json))
+  }
+  const sentId = asRecord(json)?.["id"]
+  if (typeof sentId !== "string" || sentId.length === 0) {
+    throw new Error(gmailApiError("messages.send sin id", status, json))
+  }
+  return `gmail:${sentId}`
+}
+
+
+function coldAddress(to: string): string | null {
+  if (!to.startsWith("mail:")) return null
+  const address = to.slice("mail:".length).trim().toLowerCase()
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(address)) throw new Error("Gmail: dirección de destino inválida")
+  return address
+}
+
 
 /* ------------------------- Adaptador ------------------------- */
 
@@ -740,11 +769,35 @@ export const gmailAdapter: ChannelAdapter = {
 
   async sendMessage(config, msg: OutboundMessage, deps) {
     const { cfg, accessToken } = requireAccessToken(config)
-    const threadId = msg.to.startsWith("gmail-thread:")
-      ? msg.to.slice("gmail-thread:".length)
-      : null
-    if (!threadId) throw new Error("Gmail: hilo inválido para responder")
     if (msg.kind.type === "template") throw new Error("Gmail no soporta plantillas")
+    // Envío en frío (Fase 7 Finanzas): `to: mail:<destino>` abre un hilo
+    // nuevo con el asunto de la primera línea del texto. Sin hilo previo no
+    // hay In-Reply-To ni References.
+    if (!msg.to.startsWith("gmail-thread:")) {
+      const to = coldAddress(msg.to)
+      if (!to) throw new Error("Gmail: hilo inválido para responder")
+      if (msg.kind.type === "text") {
+        if (!msg.kind.text.trim()) throw new Error("El texto del mensaje es obligatorio")
+        const { subject, body } = splitColdSubject(msg.kind.text)
+        const raw = buildTextMime({ from: cfg.emailAddress, to, subject, text: body, inReplyTo: null, references: null })
+        return { externalId: await sendNewMessage(accessToken, raw, deps) }
+      }
+      if (msg.kind.type !== "media") throw new Error("Tipo de mensaje no soportado por Gmail")
+      const target = { to, ...splitColdSubject(msg.kind.media.caption ?? "") }
+      const bytes = await downloadOutboundMedia(msg.kind.media.url, deps)
+      const raw = buildMultipartMime({
+        from: cfg.emailAddress,
+        ...target,
+        inReplyTo: null,
+        references: null,
+        text: target.body,
+        attachments: [
+          { filename: msg.kind.media.filename, mimeType: msg.kind.media.mimeType, bytes },
+        ],
+      })
+      return { externalId: await sendNewMessage(accessToken, raw, deps) }
+    }
+    const threadId = msg.to.slice("gmail-thread:".length)
     const target = await resolveReplyTarget(accessToken, threadId, cfg.emailAddress, deps)
     if (msg.kind.type === "text") {
       if (!msg.kind.text.trim()) throw new Error("El texto del mensaje es obligatorio")

@@ -407,6 +407,48 @@
       "when": 1791754209484,
       "tag": "0057_derivacion_con_resumen",
       "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "7",
+      "when": 1791754210484,
+      "tag": "0058_finanzas_integradas",
+      "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1791754211484,
+      "tag": "0059_invariantes_financieras",
+      "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "7",
+      "when": 1791754212484,
+      "tag": "0060_precios_promocionales_activos",
+      "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "7",
+      "when": 1791762515512,
+      "tag": "0061_finanzas_correcciones",
+      "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "7",
+      "when": 1791773799322,
+      "tag": "0062_perfil_regional_sin_pais",
+      "breakpoints": true
+    },
+    {
+      "idx": 63,
+      "version": "7",
+      "when": 1791774534957,
+      "tag": "0063_presupuesto_quitar_en_borrador",
+      "breakpoints": true
     }
   ]
 }

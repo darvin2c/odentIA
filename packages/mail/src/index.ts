@@ -44,7 +44,7 @@ export interface MailTemplate {
 
 function layout(title: string, bodyHtml: string, ctaUrl: string, ctaLabel: string): string {
   return `<!doctype html>
-<html lang="es-PE">
+<html lang="es">
   <body style="margin:0;padding:24px;background:#f4f4f5;font-family:system-ui,sans-serif;color:#18181b">
     <div style="max-width:480px;margin:0 auto;background:#ffffff;border-radius:12px;padding:32px">
       <h1 style="margin:0 0 16px;font-size:20px">${title}</h1>

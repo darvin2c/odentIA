@@ -38,7 +38,9 @@ import {
   statusLabel,
   toothTypeLabel,
 } from "../lib/patients"
-import { formatMoney, type ServiceCatalogItem } from "../lib/services"
+import { formatMoney } from "@odentia/clinical"
+import { type ServiceCatalogItem } from "../lib/services"
+import { useOrgProfile } from "../lib/org"
 import { FindingPicker } from "./finding-picker"
 import { Cie10Search } from "./patient/cie10-search"
 import { ServicePicker } from "./patient/service-picker"
@@ -165,6 +167,9 @@ export function ToothDrawer({
   const queryClient = useQueryClient()
   const canWrite = usePermission("clinical.write")
   const canRead = usePermission("clinical.read")
+  // Formato de la clínica para la tarifa vigente (moneda del catálogo).
+  const profile = useOrgProfile()
+  const orgLocale = profile.data?.locale
   const canMutate = !readOnly && canWrite
   const uid = useId()
   const multi = teeth.length > 1
@@ -1294,13 +1299,15 @@ export function ToothDrawer({
             <div className="rounded-lg border bg-muted/30 p-4 sm:col-span-2" aria-live="polite">
               <p className="text-sm">
                 {teeth.length} pieza{multi ? "s" : ""} ×{" "}
-                {formatMoney(treatService.priceCents, treatService.currency)}
+                {orgLocale ? formatMoney(treatService.priceCents, treatService.currency, orgLocale) : "…"}
               </p>
               <p className="mt-1 text-xl font-semibold tabular-nums">
-                {formatMoney(treatService.priceCents * teeth.length, treatService.currency)}
+                {orgLocale
+                  ? formatMoney(treatService.priceCents * teeth.length, treatService.currency, orgLocale)
+                  : "…"}
               </p>
               <p className="mt-1 text-xs text-muted-foreground">
-                Se indicará el tratamiento en el plan con la tarifa vigente. Proponerlo no equivale
+                Se indicará el tratamiento en el plan con el precio vigente. Proponerlo no equivale
                 a aceptarlo, ejecutarlo ni cobrarlo.
               </p>
             </div>

@@ -34,6 +34,7 @@ import { formatDueAt, isOverdue } from "./crm-helpers"
 import { PersonMemoryDrawer } from "../agent/person-memory"
 import { OpportunityDrawer } from "./opportunity-drawer"
 import { TaskDrawer } from "./task-drawer"
+import { activeOrgLocale } from "../../lib/locale"
 
 export interface ContactWorkspaceProps {
   contactId: string
@@ -65,7 +66,7 @@ const ACTIVITY_STATUS_LABEL: Record<string, string> = {
 function money(amountCents: number | null, currency: string): string {
   if (amountCents === null) return "Sin monto"
   try {
-    return ((amountCents ?? 0) / 100).toLocaleString("es-PE", {
+    return ((amountCents ?? 0) / 100).toLocaleString(activeOrgLocale(), {
       style: "currency",
       currency,
     })

@@ -1,6 +1,6 @@
 import { PageShell, SectionNav, type SectionNavItem } from "@odentia/ui-patterns"
 import { createFileRoute, Outlet, useRouterState } from "@tanstack/react-router"
-import { Library, Tag } from "lucide-react"
+import { BadgePercent, Library, Tag } from "lucide-react"
 import { RouterLink } from "../../lib/router-link"
 
 export const Route = createFileRoute("/_org/services")({
@@ -8,12 +8,13 @@ export const Route = createFileRoute("/_org/services")({
 })
 
 const secciones: SectionNavItem[] = [
-  { label: "Tarifario de la clínica", to: "/services", icon: Tag },
-  { label: "Biblioteca de prestaciones", to: "/services/biblioteca", icon: Library },
+  { label: "Servicios y precios", to: "/services", icon: Tag },
+  { label: "Agregar servicios", to: "/services/biblioteca", icon: Library },
+  { label: "Promociones", to: "/services/promotions", icon: BadgePercent },
 ]
 
 /**
- * Tratamientos y tarifas: el tarifario y la biblioteca viven en el nav de
+ * Servicios y precios: la lista de servicios y la biblioteca viven en el nav de
  * sección (riel en web, barra en tablet y móvil) y cada página aporta su
  * `PageHeader` y su contenido. El `PageShell` es de este layout, para no anidar
  * fondos ni paddings: sin él, el tarifario —que mide el alto del viewport—
@@ -25,7 +26,7 @@ function ServicesLayout() {
   return (
     <PageShell>
       <SectionNav
-        label="Tratamientos y tarifas"
+        label="Servicios y precios"
         items={secciones}
         pathname={pathname}
         LinkComponent={RouterLink}

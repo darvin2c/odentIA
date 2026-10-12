@@ -6,6 +6,7 @@ import {
   isValidPhoneNumber,
   parsePhoneNumberFromString,
 } from "libphonenumber-js"
+import { formatLocale } from "../locale.js"
 
 /**
  * Núcleo de teléfono: el formato canónico es E.164 (`+51987654321`) y todo lo
@@ -21,7 +22,6 @@ import {
 
 /** Perú primero: país de partida mientras el consumidor no fije otro. */
 export const DEFAULT_COUNTRY: CountryCode = "PE"
-export const DEFAULT_LOCALE = "es-PE"
 
 export type { CountryCode }
 export { getCountryCallingCode }
@@ -130,16 +130,18 @@ const regionNames = new Map<string, Intl.DisplayNames>()
 const collators = new Map<string, Intl.Collator>()
 const optionCache = new Map<string, CountryOption[]>()
 
-function namesOf(locale: string): Intl.DisplayNames {
-  const cached = regionNames.get(locale)
+function namesOf(locale: string | undefined): Intl.DisplayNames {
+  const key = locale ?? ""
+  const cached = regionNames.get(key)
   if (cached) return cached
   // Los nombres de país los aporta el runtime: no mantenemos diccionario propio.
-  const names = new Intl.DisplayNames([locale], { type: "region" })
-  regionNames.set(locale, names)
+  // Sin formato fijado, el del entorno.
+  const names = new Intl.DisplayNames(locale ? [locale] : [], { type: "region" })
+  regionNames.set(key, names)
   return names
 }
 
-export function countryLabel(code: CountryCode, locale = DEFAULT_LOCALE): string {
+export function countryLabel(code: CountryCode, locale = formatLocale()): string {
   return namesOf(locale).of(code) ?? code
 }
 
@@ -151,15 +153,16 @@ export function countryLabel(code: CountryCode, locale = DEFAULT_LOCALE): string
 export function countryOptions(
   defaultCountry: CountryCode,
   countries?: readonly CountryCode[],
-  locale = DEFAULT_LOCALE,
+  locale = formatLocale(),
 ): CountryOption[] {
   const codes = [...(countries?.length ? countries : getCountries())].sort()
-  const cacheKey = `${locale}|${defaultCountry}|${codes.join(",")}`
+  const localeKey = locale ?? ""
+  const cacheKey = `${localeKey}|${defaultCountry}|${codes.join(",")}`
   const cached = optionCache.get(cacheKey)
   if (cached) return cached
 
-  const collator = collators.get(locale) ?? new Intl.Collator(locale, { sensitivity: "base" })
-  collators.set(locale, collator)
+  const collator = collators.get(localeKey) ?? new Intl.Collator(locale, { sensitivity: "base" })
+  collators.set(localeKey, collator)
   const option = (code: CountryCode): CountryOption => ({
     value: code,
     label: countryLabel(code, locale),

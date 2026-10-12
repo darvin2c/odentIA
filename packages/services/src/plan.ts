@@ -27,6 +27,7 @@ import { notFound, ServiceError, validation } from "./errors.js"
 import { requirePatient } from "./patients.js"
 import { assertExecutableCodings, resolveServiceCodings } from "./procedure-codings.js"
 import { requireServiceForIndication, type ServiceRow } from "./service-catalog.js"
+import { readBillingModes } from "./budgets.js"
 
 /**
  * Plan clínico longitudinal: existe antes que cualquier presupuesto y puede
@@ -605,7 +606,7 @@ export async function addPlanItem(
   if (!input.planId?.trim())
     throw validation("planId es obligatorio: la indicación pertenece a un plan")
   if (!input.serviceId?.trim())
-    throw validation("serviceId es obligatorio: selecciona una prestación del tarifario")
+    throw validation("serviceId es obligatorio: selecciona una prestación de la lista de servicios")
   await lockDraftEncounter(tx, orgId, patientId, input.sourceEncounterId.trim())
   await lockPlanRow(tx, orgId, patientId, input.planId.trim())
   if (input.odontogramEntryId) {
@@ -766,7 +767,7 @@ export async function addPlanItemsBatch(
   const diagnosisCode = normalizeDiagnosisCode(input.diagnosisCode)
   if (diagnosisCode) await assertDiagnosisCode(tx, diagnosisCode)
   if (service.priceCents === null)
-    throw new ServiceError("SERVICE_UNPRICED", 409, "La prestación aún no tiene tarifa configurada")
+    throw new ServiceError("SERVICE_UNPRICED", 409, "La prestación aún no tiene precio configurado")
   const codings = await resolveServiceCodings(tx, service)
   const rows: PlanItemRow[] = []
   let sortOrder = await nextSortOrder(tx, orgId, input.planId.trim())
@@ -867,7 +868,7 @@ export async function updatePlanItem(
   let scope = assertScopeValue(current.scope)
   if (patch.serviceId !== undefined) {
     if (!patch.serviceId?.trim())
-      throw validation("serviceId es obligatorio: selecciona una prestación del tarifario")
+      throw validation("serviceId es obligatorio: selecciona una prestación de la lista de servicios")
     // El mismo serviceId no recalcula precio; un cambio real sí re-congela.
     if (patch.serviceId.trim() !== current.serviceId) {
       const service = await requireServiceForIndication(tx, orgId, patch.serviceId.trim())
@@ -886,7 +887,7 @@ export async function updatePlanItem(
         throw new ServiceError(
           "SERVICE_UNPRICED",
           409,
-          "La prestación aún no tiene tarifa configurada",
+          "La prestación aún no tiene precio configurado",
         )
       }
       if (budget && service.currency !== budget.currency) {
@@ -973,6 +974,11 @@ export async function updatePlanItem(
     // La línea del borrador es snapshot: se actualiza en la misma transacción.
     // Solo el borrador sigue a la nueva indicación; presentados/decididos son
     // históricos inmutables (updatePlanItem ya rechazó budget no-borrador).
+    // Cambiar de indicación re-congela la tarifa y el modo de cobro, y limpia
+    // precio acordado y promoción (eran del servicio anterior).
+    const modes = updated.serviceId
+      ? await readBillingModes(tx, orgId, [updated.serviceId])
+      : {}
     await tx
       .update(treatmentBudgetItem)
       .set({
@@ -985,6 +991,13 @@ export async function updatePlanItem(
         arch: updated.arch,
         codings: updated.codings,
         priceCents: updated.priceCents,
+        tariffPriceCents: updated.priceCents,
+        priceReason: null,
+        promotionId: null,
+        promotionName: null,
+        promotionMode: null,
+        billingMode: updated.serviceId ? (modes[updated.serviceId] ?? "treatment") : "treatment",
+        sessionsPlanned: updated.plannedSessions,
         currency: updated.currency,
         updatedAt: new Date(),
       })

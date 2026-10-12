@@ -255,16 +255,16 @@ it("encuentros y planes de A son invisibles para B; las piezas cerradas no se bo
   await ownerDb.execute(sql`insert into encounter (id,organization_id,patient_id,dentist_user_id) values
     ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb','org_a','99999999-9999-9999-9999-999999999999','rls-dentist')
     on conflict (id) do nothing`)
-  await ownerDb.execute(sql`insert into treatment_plan_item (id,organization_id,patient_id,plan_id,title,status) values
-    ('11111111-1111-4111-8111-111111111111','org_a','99999999-9999-9999-9999-999999999999','dddddddd-dddd-dddd-dddd-dddddddddddd','Restauración','pendiente')
+  await ownerDb.execute(sql`insert into treatment_plan_item (id,organization_id,patient_id,plan_id,title,currency,status) values
+    ('11111111-1111-4111-8111-111111111111','org_a','99999999-9999-9999-9999-999999999999','dddddddd-dddd-dddd-dddd-dddddddddddd','Restauración','PEN','pendiente')
     on conflict (id) do nothing`)
   await ownerDb.execute(sql`insert into treatment_budget_item (organization_id,patient_id,plan_id,budget_id,plan_item_id,title,currency,decision) values
     ('org_a','99999999-9999-9999-9999-999999999999','dddddddd-dddd-dddd-dddd-dddddddddddd','cccccccc-cccc-cccc-cccc-cccccccccccc','11111111-1111-4111-8111-111111111111','Restauración','PEN','pendiente')
     on conflict do nothing`)
   await ownerDb.execute(sql`insert into encounter_tooth (organization_id,encounter_id,tooth_number)
     values ('org_a','bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',36)`)
-  await ownerDb.execute(sql`insert into service_catalog (organization_id,source,code,name,specialty,scope,price_cents)
-    values ('org_a','custom','RESTAURACION','Restauración','restauradora','tooth',10000)`)
+  await ownerDb.execute(sql`insert into service_catalog (organization_id,source,code,name,specialty,scope,price_cents,currency)
+    values ('org_a','custom','RESTAURACION','Restauración','restauradora','tooth',10000,'PEN')`)
   await ownerDb.execute(sql`insert into encounter_procedure (organization_id,encounter_id,description)
     values ('org_a','bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb','Restauración realizada')`)
   for (const table of [
@@ -284,7 +284,7 @@ it("encuentros y planes de A son invisibles para B; las piezas cerradas no se bo
   await expect(
     withOrgContext(appDb, "org_b", (tx) =>
       tx.execute(
-        sql`insert into service_catalog (organization_id,source,code,name,specialty,scope,price_cents) values ('org_a','custom','INTRUSO','Ajeno','restauradora','tooth',1)`,
+        sql`insert into service_catalog (organization_id,source,code,name,specialty,scope,price_cents,currency) values ('org_a','custom','INTRUSO','Ajeno','restauradora','tooth',1,'PEN')`,
       ),
     ),
   ).rejects.toThrow()
@@ -401,7 +401,7 @@ it("presupuestos, contextos versionados y vínculos atención-plan se aíslan po
   await expect(
     withOrgContext(appDb, "org_b", (tx) =>
       tx.execute(
-        sql`insert into treatment_budget (organization_id,patient_id,plan_id,budget_number,title) values ('org_a','aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','22222222-2222-4222-8222-222222222222',99,'Intruso')`,
+        sql`insert into treatment_budget (organization_id,patient_id,plan_id,budget_number,title,currency) values ('org_a','aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','22222222-2222-4222-8222-222222222222',99,'Intruso','PEN')`,
       ),
     ),
   ).rejects.toThrow()
@@ -429,7 +429,7 @@ it("presupuestos, contextos versionados y vínculos atención-plan se aíslan po
   // Correlativo de presupuesto único por organización.
   await expect(
     ownerDb.execute(
-      sql`insert into treatment_budget (organization_id,patient_id,plan_id,budget_number,title) values ('org_a','99999999-9999-9999-9999-999999999999','22222222-2222-4222-8222-222222222222',2,'Duplicado')`,
+      sql`insert into treatment_budget (organization_id,patient_id,plan_id,budget_number,title,currency) values ('org_a','99999999-9999-9999-9999-999999999999','22222222-2222-4222-8222-222222222222',2,'Duplicado','PEN')`,
     ),
   ).rejects.toThrow()
 
@@ -542,7 +542,7 @@ it("la biblioteca global es de solo lectura y las líneas se blindan por trigger
     ),
   ).rejects.toMatchObject({ cause: { code: "42501" } })
 
-  // Líneas económicas: alta solo en borrador; tras presentar, solo decision cambia; nunca DELETE.
+  // Líneas económicas: alta y baja solo en borrador; tras presentar, solo decision cambia.
   await ownerDb.execute(sql`insert into "treatment_plan" (id,organization_id,patient_id,title)
     values ('33333333-3333-4333-8333-333333333333','org_a','99999999-9999-9999-9999-999999999999','Plan líneas')
     on conflict (id) do nothing`)
@@ -560,6 +560,19 @@ it("la biblioteca global es de solo lectura y las líneas se blindan por trigger
     ),
   )
   expect(inserted).toHaveLength(1)
+  // En borrador la línea se puede quitar (y volver a incluir): nadie la ha recibido.
+  const removed = await withOrgContext(appDb, "org_a", (tx) =>
+    tx.execute(
+      sql`delete from treatment_budget_item where plan_item_id = '55555555-5555-4555-8555-555555555555' returning id`,
+    ),
+  )
+  expect(removed).toHaveLength(1)
+  await withOrgContext(appDb, "org_a", (tx) =>
+    tx.execute(
+      sql`insert into treatment_budget_item (organization_id,patient_id,plan_id,budget_id,plan_item_id,title,price_cents,currency,decision)
+      values ('org_a','99999999-9999-9999-9999-999999999999','33333333-3333-4333-8333-333333333333','44444444-4444-4444-8444-444444444444','55555555-5555-4555-8555-555555555555','Línea',10000,'PEN','pendiente')`,
+    ),
+  )
   await ownerDb.execute(
     sql`update treatment_budget set status = 'presentado' where id = '44444444-4444-4444-8444-444444444444'`,
   )
@@ -578,14 +591,20 @@ it("la biblioteca global es de solo lectura y las líneas se blindan por trigger
     ),
   )
   expect(decided).toHaveLength(1)
-  // Sin DELETE físico en ningún estado (42501 por REVOKE).
+  // Entregado, la línea es evidencia: el disparador rechaza el borrado.
   await expect(
     withOrgContext(appDb, "org_a", (tx) =>
       tx.execute(
         sql`delete from treatment_budget_item where plan_item_id = '55555555-5555-4555-8555-555555555555'`,
       ),
     ),
-  ).rejects.toMatchObject({ cause: { code: "42501" } })
+  ).rejects.toMatchObject({ cause: { message: expect.stringContaining("no se borran") } })
+  const kept = await withOrgContext(appDb, "org_a", (tx) =>
+    tx.execute(
+      sql`select id from treatment_budget_item where plan_item_id = '55555555-5555-4555-8555-555555555555'`,
+    ),
+  )
+  expect(kept).toHaveLength(1)
   // Ni el owner borra planes por API: el rol app no tiene DELETE en treatment_plan.
   await expect(
     withOrgContext(appDb, "org_a", (tx) =>

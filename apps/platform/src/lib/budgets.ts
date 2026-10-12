@@ -5,11 +5,15 @@
  * - GET /api/patients/:id/budgets/:budgetId -> { data: BudgetWithTotals }
  * - POST /api/patients/:id/budgets { planId, itemIds, title?, notes? } -> 201
  * - PATCH /api/patients/:id/budgets/:budgetId { title?, notes? } (solo borrador)
- * - POST /api/patients/:id/budgets/:budgetId/present {} (borrador->presentado)
+ * - POST /api/patients/:id/budgets/:budgetId/lines { lines } (precio, motivo, promoción
+ *   y visitas previstas; solo borrador)
+ * - POST /api/patients/:id/budgets/:budgetId/deliver {} (borrador->presentado; 409
+ *   PROMOTION_NOT_LIVE si una promoción del borrador ya no está vigente)
  * - POST /api/patients/:id/budgets/:budgetId/decision { decisions, decidedByContactId?, decisionNote? }
  * - POST /api/patients/:id/budgets/:budgetId/cancel {}
  * - POST /api/patients/:id/plan/items exige planId + atención borrador de origen.
  * - GET/POST /api/patients/:id/plans para el plan clínico longitudinal.
+ * - PDF servidor: /api/patients/:id/financial-document-pdf?documentType=budget&documentId=
  *
  * Aquí solo tipos de vista y fetch: nunca se recalculan totales ni se
  * reinterpretan estados; el servidor es la fuente (totalCents/acceptedCents).
@@ -23,6 +27,8 @@ export type BudgetStatus =
   | "aceptado"
   | "parcial"
   | "rechazado"
+  | "pospuesto"
+  | "sustituido"
   | "cancelado"
   | "historico"
 
@@ -32,9 +38,14 @@ export const BUDGET_STATUSES: readonly BudgetStatus[] = [
   "aceptado",
   "parcial",
   "rechazado",
+  "pospuesto",
+  "sustituido",
   "cancelado",
   "historico",
 ]
+
+/** Estados en los que todavía se puede anotar (o completar) la respuesta. */
+export const BUDGET_ANSWERABLE_STATUSES: readonly string[] = ["presentado", "parcial", "pospuesto"]
 
 export type PlanDecision = "pendiente" | "aceptado" | "pospuesto" | "rechazado" | "reemplazado"
 
@@ -52,6 +63,10 @@ export interface Budget {
   /** Contacto que asumió la decisión (paciente o representante legal). */
   decisionContactId?: string | null
   decisionNote: string | null
+  /** Presupuesto al que esta revisión sustituye (sus tratamientos se eligen al crearla). */
+  supersedesBudgetId?: string | null
+  /** Cuándo se entregó al paciente (impreso o enviado). */
+  presentedAt?: string | null
   decidedAt: string | null
   decidedBy?: string | null
   createdBy?: string | null
@@ -72,40 +87,81 @@ export interface BudgetLine {
   surfaces: string[]
   quadrant: number | null
   arch: string | null
+  /** Precio final acordado por unidad (total o por sesión según billingMode). */
   priceCents: number | null
+  /** Tarifa original al cotizar (referencia del descuento). */
+  tariffPriceCents: number | null
+  priceReason: string | null
+  promotionId: string | null
+  promotionName: string | null
+  promotionMode: string | null
+  /** 'treatment' una vez, 'session' por visita atendida. */
+  billingMode: string
+  sessionsPlanned: number | null
+  /** Total de la línea: el precio o, por sesión, precio por visita × visitas previstas. */
+  lineTotalCents: number | null
+  /** El mismo total a la tarifa de referencia. */
+  tariffLineTotalCents: number | null
+  /** Rebaja de la línea frente a su tarifa (null si no baja): «{importe} menos que el precio normal». */
+  lineDiscountCents: number | null
   currency: string
   decision: PlanDecision
   itemStatus: string
 }
 
-
 export interface BudgetWithTotals extends Budget {
   items: BudgetLine[]
   totalCents: number | null
   acceptedCents: number | null
+  tariffTotalCents: number | null
+  discountCents: number | null
 }
 
-
-
-/** Etiqueta en español del estado del presupuesto. */
+/**
+ * Etiqueta del estado del presupuesto, con las palabras de la clínica: lo que
+ * el servidor llama «presentado» es un presupuesto entregado al paciente.
+ */
 export function budgetStatusLabel(status: string): string {
   switch (status) {
     case "borrador":
       return "Borrador"
     case "presentado":
-      return "Presentado"
+      return "Entregado"
     case "aceptado":
       return "Aceptado"
     case "parcial":
-      return "Parcial"
+      return "Aceptado en parte"
     case "rechazado":
-      return "Rechazado"
+      return "No aceptado"
+    case "pospuesto":
+      return "Lo va a pensar"
+    case "sustituido":
+      return "Reemplazado por una revisión"
     case "cancelado":
       return "Cancelado"
     case "historico":
       return "Histórico"
+    default: {
+      // Un estado nuevo nunca llega a pantalla como código crudo.
+      const text = status.replace(/[_-]+/g, " ").trim()
+      return text ? text.charAt(0).toUpperCase() + text.slice(1) : "Sin estado"
+    }
+  }
+}
+
+/** Respuesta del paciente a un tratamiento del presupuesto, como se anota en la ficha. */
+export function budgetAnswerLabel(decision: string | null | undefined): string {
+  switch (decision) {
+    case "aceptado":
+      return "Acepta"
+    case "pospuesto":
+      return "Lo piensa"
+    case "rechazado":
+      return "No acepta"
+    case "reemplazado":
+      return "Reemplazado"
     default:
-      return status
+      return "Sin respuesta"
   }
 }
 
@@ -186,11 +242,63 @@ export function updateBudgetApi(
   })
 }
 
-export function presentBudgetApi(patientId: string, budgetId: string): Promise<{ data: Budget }> {
-  return apiFetch<{ data: Budget }>(`${budgetsBase(patientId)}/${budgetId}/present`, {
+/** Entregar el presupuesto: imprimir o enviar lo entrega (no hay paso presentar). */
+export function deliverBudgetApi(patientId: string, budgetId: string): Promise<{ data: Budget }> {
+  return apiFetch<{ data: Budget }>(`${budgetsBase(patientId)}/${budgetId}/deliver`, {
     method: "POST",
     body: JSON.stringify({}),
   })
+}
+
+export interface AdjustBudgetLineBody {
+  planItemId: string
+  priceCents?: number | null
+  reason?: string | null
+  promotionId?: string | null
+  promotionFinalPriceCents?: number | null
+  /** Visitas previstas de una línea que se cobra por sesión. */
+  sessionsPlanned?: number
+}
+
+/** Precio acordado por línea con motivo + promoción opt-in (solo borrador). */
+export function adjustBudgetLinesApi(
+  patientId: string,
+  budgetId: string,
+  body: { lines: AdjustBudgetLineBody[] },
+): Promise<{ data: BudgetWithTotals }> {
+  return apiFetch<{ data: BudgetWithTotals }>(`${budgetsBase(patientId)}/${budgetId}/lines`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  })
+}
+
+/** Añade tratamientos del plan a un borrador, con las reglas de prepararlo. */
+export function addBudgetItemsApi(
+  patientId: string,
+  budgetId: string,
+  itemIds: string[],
+): Promise<{ data: BudgetWithTotals }> {
+  return apiFetch<{ data: BudgetWithTotals }>(`${budgetsBase(patientId)}/${budgetId}/items`, {
+    method: "POST",
+    body: JSON.stringify({ itemIds }),
+  })
+}
+
+/** Quita tratamientos de un borrador: vuelven a quedar sin presupuestar. */
+export function removeBudgetItemsApi(
+  patientId: string,
+  budgetId: string,
+  itemIds: string[],
+): Promise<{ data: BudgetWithTotals }> {
+  return apiFetch<{ data: BudgetWithTotals }>(
+    `${budgetsBase(patientId)}/${budgetId}/items/remove`,
+    { method: "POST", body: JSON.stringify({ itemIds }) },
+  )
+}
+
+/** Documento PDF del servidor (mismo que se envía al paciente). */
+export function budgetPdfUrl(patientId: string, budgetId: string): string {
+  return `/api/patients/${patientId}/financial-document-pdf?documentType=budget&documentId=${budgetId}`
 }
 
 export interface DecideBudgetBody {

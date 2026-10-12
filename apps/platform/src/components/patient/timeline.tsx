@@ -30,6 +30,7 @@ import { statusLabel, type TimelineItem, timelineTypeLabel } from "../../lib/pat
 import { AnamnesisVersionDialog } from "./anamnesis-history"
 import { DocumentOpenButton, useDocumentUrl } from "./document-open-button"
 import { EncounterHistoryCard } from "./encounter-history-card"
+import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
 
 const ALL_TEETH = "all"
 export interface TimelineProps {
@@ -92,7 +93,7 @@ function dayKey(iso: string, timezone: string): string {
   }).format(new Date(iso))
 }
 
-function dayHeading(iso: string, timezone: string, locale: string): string {
+function dayHeading(iso: string, timezone: string, locale: string | undefined): string {
   const time = new Date(iso).getTime()
   if (Number.isNaN(time)) return iso
   return new Date(iso).toLocaleDateString(locale, {
@@ -104,7 +105,7 @@ function dayHeading(iso: string, timezone: string, locale: string): string {
   })
 }
 
-function itemDateTime(iso: string, timezone: string, locale: string): string {
+function itemDateTime(iso: string, timezone: string, locale: string | undefined): string {
   const time = new Date(iso).getTime()
   if (Number.isNaN(time)) return iso
   return new Date(iso).toLocaleString(locale, { timeZone: timezone })
@@ -121,7 +122,7 @@ function CardHeaderRow({
   context?: string | null
   createdAt: string
   timezone: string
-  locale: string
+  locale: string | undefined
 }) {
   return (
     <div className="flex flex-wrap items-center gap-2">
@@ -145,7 +146,7 @@ function NoteCard({
 }: {
   item: TimelineItem
   timezone: string
-  locale: string
+  locale: string | undefined
 }) {
   return (
     <div className="flex flex-col gap-6 elevated rounded-xl border bg-card p-6">
@@ -171,7 +172,7 @@ function OdontogramCard({
 }: {
   item: TimelineItem
   timezone: string
-  locale: string
+  locale: string | undefined
   onOdontogramSelect: (tooth: number) => void
 }) {
   const tooth = item.toothNumbers[0]
@@ -257,7 +258,7 @@ function AnamnesisCard({
 }: {
   item: TimelineItem
   timezone: string
-  locale: string
+  locale: string | undefined
   onView: (refId: string) => void
 }) {
   return (
@@ -333,7 +334,7 @@ function JourneyCard({
   patientId: string
   item: TimelineItem
   timezone: string
-  locale: string
+  locale: string | undefined
 }) {
   const link = ((): { label: string; search: Record<string, unknown> } | null => {
     switch (item.type) {
@@ -457,8 +458,8 @@ export function Timeline({ patientId, initialTooth, onOdontogramSelect }: Timeli
   })
 
   const items = useMemo(() => feed.data?.pages.flatMap((page) => page.data) ?? [], [feed.data])
-  const timezone = feed.data?.pages[0]?.timezone ?? "America/Lima"
-  const locale = feed.data?.pages[0]?.locale ?? "es-PE"
+  const timezone = feed.data?.pages[0]?.timezone ?? activeOrgTimeZone()
+  const locale = feed.data?.pages[0]?.locale ?? activeOrgLocale()
 
   const groups = useMemo(() => {
     const ordered = new Map<string, { heading: string; sample: string; items: TimelineItem[] }>()

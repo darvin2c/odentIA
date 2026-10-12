@@ -121,7 +121,7 @@ beforeAll(async () => {
   await migrate(ownerDb, { migrationsFolder: "../../packages/db/drizzle" })
   appDb = createAppDb(`postgres://dentalagent_app:dentalagent_app@${host}:${port}/dentalagent`)
   await ownerDb.execute(sql`insert into "organization" ("id", "name", "slug", "created_at") values (${ORG}, 'Clínica Uso', 'uso', now())`)
-  await ownerDb.execute(sql`insert into "org_profile" ("organization_id", "legal_name") values (${ORG}, 'Clínica Uso') on conflict do nothing`)
+  await ownerDb.execute(sql`insert into "org_profile" ("organization_id", "legal_name", "country_code", "currency", "timezone", "locale") values (${ORG}, 'Clínica Uso', 'PE', 'PEN', 'America/Lima', 'es-PE') on conflict do nothing`)
   const checkpointer = PostgresSaver.fromConnString(ownerUri)
   await checkpointer.setup()
   await setupAgentMemory(ownerDb)

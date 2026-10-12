@@ -25,12 +25,14 @@ import {
 } from "../../lib/budgets"
 import { createOptionGroupApi } from "../../lib/clinical-journey"
 import { usePermission } from "../../lib/crm"
+import { formatMoney } from "@odentia/clinical"
+import { useOrgProfile } from "../../lib/org"
 import type { OdontogramState, PlanItem } from "../../lib/patients"
-import { formatMoney, type ServiceCatalogItem, TREATMENT_SCOPE_LABELS } from "../../lib/services"
+import { type ServiceCatalogItem, TREATMENT_SCOPE_LABELS } from "../../lib/services"
+import { ToothSelector } from "./tooth-selector"
 import { Cie10Search } from "./cie10-search"
 import { treatmentSiteLabel } from "./plan-tab"
 import { ServicePicker } from "./service-picker"
-import { ToothSelector } from "./tooth-selector"
 
 const QUADRANT_LABELS: Record<string, string> = {
   "1": "Cuadrante 1 · superior derecho",
@@ -71,6 +73,7 @@ export function EncounterPlanPanel({
   const queryClient = useQueryClient()
   const canWrite = usePermission("clinical.write")
   const canRead = usePermission("clinical.read")
+  const orgLocale = useOrgProfile().data?.locale
   const uid = useId()
   const [planId, setPlanId] = useState("")
   const [newTitle, setNewTitle] = useState("Plan de tratamiento")
@@ -150,7 +153,7 @@ export function EncounterPlanPanel({
   const addMutation = useMutation({
     mutationFn: async () => {
       if (!planId) throw new Error("Elige el plan clínico donde se indicará.")
-      if (!service) throw new Error("Busca y elige la prestación del tarifario.")
+      if (!service) throw new Error("Busca y elige la prestación de la lista de servicios.")
       const tooth = teeth[0] ?? null
       const body: Record<string, unknown> = {
         serviceId: service.id,
@@ -413,7 +416,8 @@ export function EncounterPlanPanel({
           />
           {service ? (
             <p className="text-sm text-muted-foreground" aria-live="polite">
-              Tarifa de solo lectura: {formatMoney(service.priceCents, service.currency)}
+              Precio de solo lectura:{" "}
+              {orgLocale ? formatMoney(service.priceCents, service.currency, orgLocale) : "…"}
               {service.scope ? ` · ${TREATMENT_SCOPE_LABELS[service.scope] ?? service.scope}` : ""}
             </p>
           ) : null}
@@ -526,8 +530,8 @@ export function EncounterPlanPanel({
                       <span className="text-xs text-muted-foreground">
                         {treatmentSiteLabel(item)} ·{" "}
                         {item.priceCents != null
-                          ? formatMoney(item.priceCents, item.currency)
-                          : "sin tarifa"}
+                          ? (orgLocale ? formatMoney(item.priceCents, item.currency, orgLocale) : "…")
+                          : "sin precio"}
                       </span>
                     </span>
                     <span className="flex gap-1">

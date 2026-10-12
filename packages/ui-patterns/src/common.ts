@@ -1,5 +1,5 @@
 /**
- * Catálogo de copy compartido es-PE. Antes venía de un paquete externo;
+ * Catálogo de copy compartido (español). Antes venía de un paquete externo;
  * ahora vive en @odentia/ui-patterns. Todas las claves usadas por los
  * componentes del paquete; consumidores importan { common } del barrel.
  */

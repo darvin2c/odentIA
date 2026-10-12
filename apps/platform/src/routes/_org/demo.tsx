@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react"
 import { apiFetch } from "../../lib/api"
 import { API_URL } from "../../lib/auth-client"
 import { PageDraftGuard } from "../../lib/page-draft-guard"
+import { activeOrgLocale } from "../../lib/locale"
 
 export const Route = createFileRoute("/_org/demo")({
   component: DemoPage,
@@ -109,7 +110,7 @@ function DemoPage() {
             >
               <span className="font-medium">{event.kind}</span>
               <span className="text-muted-foreground">
-                tarea #{event.taskId} · {new Date(event.at).toLocaleTimeString("es-PE")}
+                tarea #{event.taskId} · {new Date(event.at).toLocaleTimeString(activeOrgLocale())}
               </span>
             </li>
           ))}

@@ -112,7 +112,7 @@ async function addFollowUp(
 ) {
   const [opp] = await ownerDb.insert(opportunity).values({
     organizationId: f.orgId, contactId: f.contactId, conversationId: f.threadId, pipelineId: f.pipelineId, stageId: f.stageId,
-    title, nextActionAt: dueAt, nextActionNote: "Retomar presupuesto", assignedUserId: f.userId,
+    title, currency: "PEN", nextActionAt: dueAt, nextActionNote: "Retomar presupuesto", assignedUserId: f.userId,
   }).returning()
   if (!opp) throw new Error("oportunidad")
   const [task] = await ownerDb.insert(crmTask).values({
@@ -345,7 +345,7 @@ it("con atraso acumulado, los vencimientos ya coordinados no tapan a los nuevos"
   const opps = await ownerDb.insert(opportunity).values(
     Array.from({ length: 25 }, (_, i) => ({
       organizationId: f.orgId, contactId: f.contactId, pipelineId: f.pipelineId, stageId: f.stageId,
-      title: `Atraso ${i}`, nextActionAt: older, nextActionNote: "Llamar",
+      title: `Atraso ${i}`, currency: "PEN", nextActionAt: older, nextActionNote: "Llamar",
     })),
   ).returning({ id: opportunity.id })
   await ownerDb.insert(crmTask).values(

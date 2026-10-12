@@ -6,6 +6,7 @@ import { useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
 import { channelLabel } from "../../lib/channels"
 import { usePermission } from "../../lib/crm"
+import { activeOrgLocale } from "../../lib/locale"
 import { mutationErrorMessage, QueryErrorState } from "../../lib/query-error"
 
 export interface AdvisorItem {
@@ -71,7 +72,7 @@ const WHERE: Record<string, { to: string; label: string }> = {
 
 const PREVIEW = 4
 const capitalize = (text: string) => text.charAt(0).toUpperCase() + text.slice(1)
-const hour = (iso: string) => new Date(iso).toLocaleTimeString("es-PE", { hour: "2-digit", minute: "2-digit" })
+const hour = (iso: string) => new Date(iso).toLocaleTimeString(activeOrgLocale(), { hour: "2-digit", minute: "2-digit" })
 /** La hora como cierre de frase: «p. m.» ya trae su punto. */
 const hourEnd = (iso: string) => {
   const text = hour(iso)
