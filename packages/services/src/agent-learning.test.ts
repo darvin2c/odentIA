@@ -23,6 +23,7 @@ import {
   markReviewOk,
   noteLessonUse,
   restoreLesson,
+  saveTestCase,
   syncReviewQueue,
   updateLesson,
   withdrawLesson,
@@ -357,5 +358,19 @@ describe("aprobar con edición", () => {
     await run((tx) => updateAutonomyPolicy(tx, ORG, OWNER, { enviar_mensaje: "directo" }))
     expect(await ownerDb.select({ id: agentAnswerTrace.id }).from(agentAnswerTrace).where(eq(agentAnswerTrace.proposalId, proposal.id))).toHaveLength(1)
     expect(await ownerDb.select({ id: agentTestCase.id }).from(agentTestCase).where(eq(agentTestCase.lessonId, lesson!.id))).toEqual([])
+  })
+})
+
+describe("guardar una prueba como caso", () => {
+  it("queda activo sin lección, no se duplica al guardarlo otra vez y no cruza de organización", async () => {
+    const question = "¿Atienden los sábados?"
+    const first = await run((tx) => saveTestCase(tx, OTHER, OWNER, { question: ` ${question} `, expected: "Sí, de 9:00 a 13:00." }), OTHER)
+    expect(first).toMatchObject({ agent: "recepcion", question, expected: "Sí, de 9:00 a 13:00.", lessonId: null, status: "activo" })
+    const again = await run((tx) => saveTestCase(tx, OTHER, OWNER, { question, expected: "Sí, los sábados de 9:00 a 13:00." }), OTHER)
+    expect(again.id).toBe(first.id)
+    const mine = await run((tx) => listTestCases(tx, OTHER, "recepcion"), OTHER)
+    expect(mine.filter((item) => item.question === question)).toEqual([expect.objectContaining({ expected: "Sí, los sábados de 9:00 a 13:00." })])
+    expect((await run((tx) => listTestCases(tx, ORG))).some((item) => item.id === first.id)).toBe(false)
+    await expect(run((tx) => saveTestCase(tx, OTHER, OWNER, { question: "  ", expected: "x" }), OTHER)).rejects.toThrow("La pregunta es obligatorio")
   })
 })

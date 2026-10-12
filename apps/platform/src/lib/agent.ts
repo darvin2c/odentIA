@@ -199,6 +199,12 @@ export interface AgentRole {
   never: string
   confirms: string
   learnsFrom: string
+  /** Cómo trabaja hoy, de quién es lo que aprende, con qué se prueba y lo que aún no existe. */
+  behaves?: string
+  testedWith?: string
+  learningOwner?: string
+  later?: string
+  learnsLater?: string
 }
 
 export type AgentLevelId = "supervisado" | "equilibrado" | "autonomo"
@@ -217,10 +223,23 @@ export interface AgentRoles {
 
 export interface AgentOutcomes {
   attended: number
+  /** Tres tramos que suman `attended`: corregidas, pasadas a una persona y las que llevó sola. */
+  corrected: number
   passed: number
   alone: number
   booked: number
 }
+
+/** Lo aprobado en la semana que sigue vigente; `latest` es la última lección aprobada. */
+export interface AgentLearned {
+  officialAnswers: number
+  rules: number
+  examples: number
+  latest: { title: string; approvedByName: string | null; approvedAt: string } | null
+}
+
+/** Clase del problema del proveedor del modelo; nunca su texto. */
+export type AgentProviderProblem = "rechazado" | "sin_saldo" | "sin_configurar"
 
 export interface AgentOverview {
   enabled: boolean
@@ -228,6 +247,9 @@ export interface AgentOverview {
   needsYou: { approvals: number; gaps: number; basicsMissing: number; review: number; lessons: number }
   today: AgentOutcomes
   week: AgentOutcomes
+  learned: AgentLearned
+  /** El último intento de usar el modelo falló por el proveedor (`at`: cuándo); `null` si responde. */
+  provider: { problem: AgentProviderProblem | null; at: string | null }
   knows: { answers: number; servicesWithPrice: number; branches: number; basicsCovered: number; basicsTotal: number }
   readiness: { channels: string[]; receivers: string[]; sandboxTurns: number }
   usage: { runsToday: number; dailyRunLimit: number }
@@ -459,4 +481,46 @@ export function previewSummary(counts: { same: number; changed: number }): strin
   if (counts.changed === 0) return counts.same === 1 ? "Responde igual." : `Las ${counts.same} responden igual.`
   if (counts.same === 0) return counts.changed === 1 ? "Cambia." : `Las ${counts.changed} cambian.`
   return `${same} y ${changed}.`
+}
+
+/* ---------- Página de un agente: casos de prueba e indicaciones una por una ---------- */
+
+/** Caso de prueba: una pregunta con la respuesta que una persona dio por buena. */
+export interface TestCaseItem {
+  id: string
+  agent: string
+  question: string
+  expected: string
+  lessonId: string | null
+  status: "activo" | "retirado"
+  createdAt: string
+}
+
+/**
+ * Las indicaciones de la clínica se guardan como un solo texto; la página las
+ * presenta una por línea. `line` es la posición en el texto guardado, para
+ * cambiar una sin tocar las demás.
+ */
+export function splitInstructions(text: string): Array<{ line: number; text: string }> {
+  return text
+    .split(/\r?\n/)
+    .map((raw, line) => ({ line, text: raw.trim() }))
+    .filter((item) => item.text.length > 0)
+}
+
+/**
+ * El texto guardado con una indicación cambiada, quitada (texto vacío) o
+ * añadida al final (`line` nulo). Las demás líneas quedan como estaban; una
+ * indicación ocupa una sola línea, así que sus saltos se vuelven espacios.
+ */
+export function withInstruction(text: string, line: number | null, next: string): string {
+  const value = next.replace(/\s*\r?\n\s*/g, " ").trim()
+  const lines = text.split(/\r?\n/)
+  if (line === null) {
+    if (!value) return text
+    return text.trim() ? `${text.replace(/\s+$/, "")}\n${value}` : value
+  }
+  if (value) lines[line] = value
+  else lines.splice(line, 1)
+  return lines.join("\n")
 }

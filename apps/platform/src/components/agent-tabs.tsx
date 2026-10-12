@@ -7,7 +7,7 @@ import { usePermission } from "../lib/crm"
 
 const TABS = [
   { label: "Resumen", to: "/agent", permission: "read" },
-  { label: "Aprobaciones", to: "/agent/approvals", permission: "decide" },
+  { label: "Aprobaciones", to: "/agent/approvals", permission: "decide", phoneLast: true },
   { label: "Aprender", to: "/agent/learn", permission: "read" },
   { label: "Conocimiento", to: "/agent/knowledge", permission: "write" },
 ] as const
@@ -19,7 +19,10 @@ const TABS = [
  *
  * Cada pestaña dice cuánto espera a una persona. Los números salen del mismo
  * resumen que «Necesita de ti» (`/api/agent/overview`, consulta compartida con
- * esa pantalla): no hay otra cuenta. En teléfono se dibujan como píldoras.
+ * esa pantalla): no hay otra cuenta. En teléfono se dibujan como píldoras y
+ * «Aprobaciones» pasa al final de la fila (`phoneLast`): ahí el recorrido es
+ * Resumen, Aprender, Conocimiento. El orden del documento, y con él el del
+ * teclado, es el mismo en todos los anchos.
  *
  * `learnPending`: «Aprender» concilia su lista al cargarla, así que esa pantalla
  * pasa lo que ya muestra y la pestaña no dice otra cosa mientras el resumen se
@@ -66,6 +69,7 @@ export function AgentTabs({ learnPending }: { learnPending?: number } = {}) {
             className={cn(
               "inline-flex min-h-11 shrink-0 items-center gap-1.5 text-sm transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring",
               "max-sm:rounded-full max-sm:border max-sm:px-3.5 sm:-mb-px sm:border-b-2 sm:px-3 sm:focus-visible:ring-inset",
+              "phoneLast" in tab && "max-sm:order-1",
               active
                 ? "border-primary font-semibold text-primary-soft-foreground max-sm:border-2 max-sm:bg-primary-soft"
                 : "font-medium text-muted-foreground hover:text-foreground max-sm:border-border max-sm:bg-card sm:border-transparent",

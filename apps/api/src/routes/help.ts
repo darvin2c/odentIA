@@ -1,6 +1,6 @@
 import { canAccess, canAccessAny, ORG_ROLES, type OrgRole, type Permission, platformPathPermission, ROLE_LABELS } from "@odentia/auth/permissions"
 import { withOrgContext } from "@odentia/db"
-import { askHelp, describeHelpScreen, type HelpAsker, listMyHelpRequests, markHelpRequestsSeen, rateHelp, sendHelpRequest } from "@odentia/services"
+import { askHelp, describeHelpAttachments, describeHelpScreen, type HelpAsker, listMyHelpRequests, markHelpRequestsSeen, rateHelp, sendHelpRequest } from "@odentia/services"
 import { Hono } from "hono"
 import { z } from "zod"
 import { orgContextOf } from "../lib/context.js"
@@ -8,6 +8,7 @@ import { type CrmDeps, runService, validationError } from "./helpers.js"
 
 const askInput = z.object({ question: z.string().trim().min(3).max(500), screen: z.string().max(200) })
 const feedbackInput = z.object({ helpful: z.boolean() })
+const seenInput = z.object({ id: z.uuid().optional() })
 const requestInput = z.object({
   question: z.string().trim().min(3).max(500),
   screen: z.string().max(200),
@@ -37,8 +38,16 @@ function askerOf(userId: string, memberRole: string): HelpAsker {
 export function createHelpRoute(deps: CrmDeps & { appVersion?: string | null }) {
   const app = new Hono()
 
+  /** La pantalla donde está la persona y lo que un envío a odentIA llevaría de ella. */
   app.get("/screen", async (c) => {
-    return c.json({ data: describeHelpScreen(c.req.query("path") ?? "/") })
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    const path = (c.req.query("path") ?? "/").slice(0, 200)
+    return runService(c, 200, async () => ({
+      ...describeHelpScreen(path),
+      attached: await withOrgContext(deps.db, orgId, (tx) =>
+        describeHelpAttachments(tx, orgId, askerOf(userId, memberRole), { screen: path, appVersion: deps.appVersion ?? null }),
+      ),
+    }))
   })
 
   app.post("/ask", async (c) => {
@@ -79,8 +88,11 @@ export function createHelpRoute(deps: CrmDeps & { appVersion?: string | null }) 
 
   app.post("/requests/seen", async (c) => {
     const { orgId, userId } = orgContextOf(c)
+    // Sin cuerpo marca todas; con `id`, solo la respuesta que la persona abrió.
+    const parsed = seenInput.safeParse((await c.req.json().catch(() => null)) ?? {})
+    if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, async () => {
-      await withOrgContext(deps.db, orgId, (tx) => markHelpRequestsSeen(tx, orgId, userId))
+      await withOrgContext(deps.db, orgId, (tx) => markHelpRequestsSeen(tx, orgId, userId, parsed.data.id))
       return { ok: true }
     })
   })

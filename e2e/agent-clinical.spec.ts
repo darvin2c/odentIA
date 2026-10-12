@@ -39,9 +39,17 @@ test("asistente clínico: dictado de práctica, sugerencias que el odontólogo c
   await gotoHydrated(page, tenant(org.slug, "/agent"))
   const row = page.getByRole("region", { name: "Tus agentes" }).getByRole("listitem").filter({ hasText: "Asistente clínico" })
   await expect(row).toContainText("Apagado")
-  await row.getByRole("link", { name: "Configurar" }).click()
+  await row.getByRole("link", { name: "Ver y encender" }).click()
   await expect(page.getByRole("heading", { level: 1, name: "Asistente clínico" })).toBeVisible()
-  const practice = page.getByRole("region", { name: "Dictado de práctica" })
+  // El mismo marco de seis apartados que los otros agentes, con lo que el catálogo dice de este.
+  await expect(page.getByRole("heading", { level: 2 })).toHaveText(["Qué hace", "Hasta dónde llega solo", "Qué sabe", "Cómo se comporta", "Cómo se prueba", "Qué aprende, y de quién es"])
+  await expect(page.getByRole("region", { name: "Qué sabe" })).toContainText("Lo que el odontólogo dicta en esa atención.")
+  await expect(page.getByRole("region", { name: "Hasta dónde llega solo" })).toContainText("Escuchar sin que el odontólogo pulse «Dictar».")
+  await expect(page.getByRole("region", { name: "Cómo se comporta" }).getByRole("listitem")).toHaveCount(5)
+  // Lo que todavía no existe se anuncia como tal, no como hecho.
+  await expect(page.getByRole("region", { name: "Qué aprende, y de quién es" })).toContainText("Hoy no aprende")
+  await expect(page.getByRole("region", { name: "Qué aprende, y de quién es" })).toContainText("Más adelante: Recordar los términos de cada odontólogo")
+  const practice = page.getByRole("region", { name: "Cómo se prueba" })
   await practice.getByLabel("Dictado de ejemplo").fill(DICTATION)
   await practice.getByRole("button", { name: "Ver qué sugeriría" }).click()
   await expect(practice.getByRole("listitem").filter({ hasText: "Plan de tratamiento" })).toContainText("Endodoncia multirradicular · S/ 650.00")
@@ -51,6 +59,14 @@ test("asistente clínico: dictado de práctica, sugerencias que el odontólogo c
   expect((await dictation()).suggestions).toEqual([])
   expect(await overflow(page)).toBeLessThanOrEqual(0)
   await info.attach("asistente-clinico", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" })
+  // Teléfono: la misma página, sin desbordes.
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expect(practice.getByRole("button", { name: "Ver qué sugeriría" })).toBeVisible()
+  // El alto cambia con una transición al estrechar la ventana: se espera a que termine.
+  await expect.poll(async () => (await practice.getByRole("button", { name: "Ver qué sugeriría" }).boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44)
+  expect(await overflow(page)).toBeLessThanOrEqual(0)
+  await info.attach("asistente-clinico-movil", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" })
+  await page.setViewportSize({ width: 1440, height: 900 })
   await page.getByRole("switch", { name: "Encender el Asistente clínico" }).click()
   await expect(page.getByRole("switch", { name: "Apagar el Asistente clínico" })).toBeChecked()
 
@@ -124,4 +140,9 @@ test("asistente clínico: dictado de práctica, sugerencias que el odontólogo c
     .where(and(eq(member.organizationId, org.id), eq(member.userId, owner.user.id)))
   expect((await api(page, "GET", dictationPath, org.slug)).status).toBe(403)
   expect((await api(page, "POST", "/api/agent/clinical/practice", org.slug, { transcript: DICTATION })).status).toBe(403)
+  // Quien no supervisa al agente no llega a su página: el layout lo devuelve a Inicio.
+  await fixtureDb.update(member).set({ role: "cashier" })
+    .where(and(eq(member.organizationId, org.id), eq(member.userId, owner.user.id)))
+  await gotoHydrated(page, tenant(org.slug, "/agent/asistente-clinico"))
+  await expect(page.getByRole("heading", { level: 1, name: "Inicio" })).toBeVisible()
 })

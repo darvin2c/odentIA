@@ -2,7 +2,7 @@ import { Checkbox, Field, FieldDescription, FieldLabel, Input, Textarea } from "
 import { FormDrawer } from "@odentia/ui-patterns"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { type FormEvent, useEffect, useState } from "react"
-import { type AgentFunction, clockToMinutes, minutesToClock } from "../../lib/agent"
+import { type AgentFunction, clockToMinutes, minutesToClock, withInstruction } from "../../lib/agent"
 import { apiFetch } from "../../lib/api"
 import { channelLabel } from "../../lib/channels"
 import type { AgentConfig } from "../../lib/crm"
@@ -92,6 +92,18 @@ interface LimitsDraft {
   allDay: boolean
   from: string
   until: string
+  dailyRunLimit: string
+}
+
+/** Qué parte de los límites se abre: cada fila de la página lleva a la suya; en teléfono, a todas. */
+export type LimitsSection = "todo" | "pasa" | "horario" | "canales" | "tope"
+
+const LIMITS_TITLE: Record<LimitsSection, string> = {
+  todo: "Límites de Recepción",
+  pasa: "Pasa a una persona cuando",
+  horario: "Horario de Recepción",
+  canales: "Canales de Recepción",
+  tope: "Tope diario de Recepción",
 }
 
 function toLimits(config: AgentConfig): LimitsDraft {
@@ -103,24 +115,35 @@ function toLimits(config: AgentConfig): LimitsDraft {
     allDay: !hasHours,
     from: hasHours ? minutesToClock(config.activeFromMin ?? 0) : "08:00",
     until: hasHours ? minutesToClock(config.activeUntilMin ?? 0) : "20:00",
+    dailyRunLimit: String(config.dailyRunLimit),
   }
 }
 
 /**
  * Límites de Recepción: cuándo pasa siempre a una persona, en qué canales
- * responde y a qué horas. Fuera de ellos el hilo queda para el equipo.
+ * responde, a qué horas y cuántas respuestas da al día. Fuera de ellos el hilo
+ * queda para el equipo. `section` enseña solo la parte que se pidió; se guarda
+ * solo lo que se ve.
  */
 export function LimitsDrawer({
-  open,
+  section,
   onClose,
   config,
   connectedChannels,
 }: {
-  open: boolean
+  /** La parte que se edita; null = cerrado. */
+  section: LimitsSection | null
   onClose: () => void
   config: AgentConfig
   connectedChannels: string[]
 }) {
+  const open = section !== null
+  // Al cerrar se conserva la última parte para que el contenido no cambie mientras sale.
+  const [shown, setShown] = useState<LimitsSection>(section ?? "todo")
+  useEffect(() => {
+    if (section) setShown(section)
+  }, [section])
+  const has = (part: Exclude<LimitsSection, "todo">) => shown === "todo" || shown === part
   const [draft, setDraft] = useState<LimitsDraft>(() => toLimits(config))
   const [baseline, setBaseline] = useState<LimitsDraft>(() => toLimits(config))
   useEffect(() => {
@@ -136,23 +159,30 @@ export function LimitsDrawer({
   const from = clockToMinutes(draft.from)
   // «00:00» como fin significa el final del día.
   const until = clockToMinutes(draft.until) || 1440
-  const issue = !draft.allChannels && draft.channels.length === 0
+  const limit = /^[0-9]+$/.test(draft.dailyRunLimit.trim()) ? Number(draft.dailyRunLimit.trim()) : Number.NaN
+  const issue = has("canales") && !draft.allChannels && draft.channels.length === 0
     ? "Elige al menos un canal, o deja que responda en todos."
-    : !draft.allDay && (from === null || from === until)
+    : has("horario") && !draft.allDay && (from === null || from === until)
       ? "Indica una hora de inicio y una de fin distintas."
-      : null
+      : has("tope") && !(limit >= 1 && limit <= 100_000)
+        ? "El tope diario va de 1 a 100 000 respuestas."
+        : null
 
   function submit(event: FormEvent) {
     event.preventDefault()
     if (issue || save.isPending) return
     save.mutate({
-      handoffKeywords: draft.keywords
-        .split(",")
-        .map((item) => item.trim())
-        .filter(Boolean),
-      channels: draft.allChannels ? null : draft.channels,
-      activeFromMin: draft.allDay ? null : from,
-      activeUntilMin: draft.allDay ? null : until,
+      ...(has("pasa")
+        ? {
+            handoffKeywords: draft.keywords
+              .split(",")
+              .map((item) => item.trim())
+              .filter(Boolean),
+          }
+        : {}),
+      ...(has("canales") ? { channels: draft.allChannels ? null : draft.channels } : {}),
+      ...(has("horario") ? { activeFromMin: draft.allDay ? null : from, activeUntilMin: draft.allDay ? null : until } : {}),
+      ...(has("tope") ? { dailyRunLimit: limit } : {}),
     })
   }
 
@@ -163,8 +193,12 @@ export function LimitsDrawer({
         save.reset()
         onClose()
       }}
-      title="Límites de Recepción"
-      description="Fuera de estos límites no responde: la conversación queda para tu equipo."
+      title={LIMITS_TITLE[shown]}
+      description={
+        shown === "pasa"
+          ? "Además de cuando duda, no tiene el dato o le piden hablar con alguien."
+          : "Fuera de estos límites no responde: la conversación queda para tu equipo."
+      }
       onSubmit={submit}
       isSubmitting={save.isPending}
       isDirty={!sameDraft(draft, baseline)}
@@ -174,6 +208,7 @@ export function LimitsDrawer({
       submitDisabled={issue !== null}
     >
       <div className="flex flex-col gap-5">
+      {has("pasa") ? (
       <Field>
         <FieldLabel htmlFor="limites-temas">Pasa siempre a una persona si mencionan</FieldLabel>
         <Input
@@ -184,7 +219,9 @@ export function LimitsDrawer({
         />
         <FieldDescription>Palabras separadas por coma. Además pasa el caso cuando duda o se lo piden.</FieldDescription>
       </Field>
+      ) : null}
 
+      {has("canales") ? (
       <fieldset className="flex flex-col gap-2">
         <legend className="mb-1 text-sm font-medium">En qué canales responde</legend>
         <label htmlFor="limites-todos-canales" className="flex min-h-11 cursor-pointer items-center gap-2 text-sm sm:min-h-8">
@@ -223,7 +260,9 @@ export function LimitsDrawer({
           ))
         )}
       </fieldset>
+      ) : null}
 
+      {has("horario") ? (
       <fieldset className="flex flex-col gap-2">
         <legend className="mb-1 text-sm font-medium">A qué horas responde</legend>
         <label htmlFor="limites-todo-el-dia" className="flex min-h-11 cursor-pointer items-center gap-2 text-sm sm:min-h-8">
@@ -258,6 +297,22 @@ export function LimitsDrawer({
         )}
         <FieldDescription>En la hora de tu clínica. Puede cruzar la medianoche (por ejemplo, de 20:00 a 08:00).</FieldDescription>
       </fieldset>
+      ) : null}
+
+      {has("tope") ? (
+      <Field>
+        <FieldLabel htmlFor="limites-tope">Tope diario de respuestas</FieldLabel>
+        <Input
+          id="limites-tope"
+          inputMode="numeric"
+          value={draft.dailyRunLimit}
+          onChange={(event) => setDraft({ ...draft, dailyRunLimit: event.target.value })}
+        />
+        <FieldDescription>
+          Cada mensaje que atiende con el modelo cuenta una. Al llegar al tope deja de responder ese día y pasa los casos a tu equipo.
+        </FieldDescription>
+      </Field>
+      ) : null}
       {issue ? (
         <p role="status" className="text-sm text-muted-foreground">
           {issue}
@@ -268,56 +323,81 @@ export function LimitsDrawer({
   )
 }
 
-/** Indicaciones de la clínica para Recepción: texto libre que el agente lee después de la base. */
-export function InstructionsDrawer({
-  open,
+/** Lo que cabe en el texto de indicaciones que guarda el servidor. */
+const INSTRUCTIONS_MAX = 8000
+
+/**
+ * Una indicación de la clínica para Recepción. El servidor guarda todas como
+ * un solo texto: aquí se cambia, se quita o se añade una línea y las demás
+ * quedan como estaban.
+ */
+export function InstructionDrawer({
+  target,
   onClose,
   config,
 }: {
-  open: boolean
+  /** Línea del texto guardado que se edita, "nueva" para añadir; null = cerrado. */
+  target: number | "nueva" | null
   onClose: () => void
   config: AgentConfig
 }) {
-  const [text, setText] = useState(config.systemPrompt)
+  const line = typeof target === "number" ? target : null
+  const saved = line === null ? "" : (config.systemPrompt.split(/\r?\n/)[line] ?? "").trim()
+  const [text, setText] = useState(saved)
+  const [adding, setAdding] = useState(target === "nueva")
   useEffect(() => {
-    if (open) setText(config.systemPrompt)
-  }, [open, config.systemPrompt])
+    if (target === null) return
+    setText(saved)
+    setAdding(target === "nueva")
+  }, [target, saved])
   const save = useSaveConfig(onClose)
+  const next = withInstruction(config.systemPrompt, line, text)
+  const tooLong = next.length > INSTRUCTIONS_MAX
 
   function submit(event: FormEvent) {
     event.preventDefault()
-    if (!save.isPending) save.mutate({ systemPrompt: text })
+    if (target === null || save.isPending || tooLong) return
+    if (adding && !text.trim()) return
+    save.mutate({ systemPrompt: next })
   }
 
   return (
     <FormDrawer
-      open={open}
+      open={target !== null}
       onClose={() => {
         save.reset()
         onClose()
       }}
-      title="Indicaciones de tu clínica"
-      description="Cómo quieres que atienda. Los datos concretos (precios, horarios, políticas) van en Conocimiento."
+      title={adding ? "Agregar indicación" : "Editar indicación"}
+      description="Cómo quieres que atienda Recepción. Los datos concretos (precios, horarios, políticas) van en Conocimiento."
       onSubmit={submit}
       isSubmitting={save.isPending}
-      isDirty={text !== config.systemPrompt}
+      isDirty={text !== saved}
       error={mutationErrorMessage(save.error)}
       submitLabel="Guardar"
       cancelLabel="Cancelar"
+      submitDisabled={tooLong || (adding && !text.trim())}
     >
       <div className="flex flex-col gap-5">
       <Field>
-        <FieldLabel htmlFor="recepcion-indicaciones">Indicaciones</FieldLabel>
+        <FieldLabel htmlFor="recepcion-indicacion">Indicación</FieldLabel>
         <Textarea
-          id="recepcion-indicaciones"
-          rows={10}
-          maxLength={8000}
+          id="recepcion-indicacion"
+          rows={4}
+          maxLength={600}
           value={text}
           onChange={(event) => setText(event.target.value)}
           placeholder="Si alguien llega con dolor, ofrece la primera cita disponible del día."
         />
-        <FieldDescription>No pueden contradecir lo que fija odentIA: ante un choque, gana la base.</FieldDescription>
+        <FieldDescription>
+          Una idea por indicación. {adding ? "" : "Déjala vacía para quitarla. "}No puede contradecir lo que fija odentIA: ante un choque, gana la base.
+        </FieldDescription>
       </Field>
+      {tooLong ? (
+        <p role="status" className="text-sm text-muted-foreground">
+          Las indicaciones de Recepción ya ocupan todo el espacio disponible. Acorta o quita alguna antes de agregar otra.
+        </p>
+      ) : null}
       </div>
     </FormDrawer>
   )

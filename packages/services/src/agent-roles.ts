@@ -58,6 +58,16 @@ export interface AgentRole {
   never: string
   confirms: string
   learnsFrom: string
+  /** «Cómo se comporta», tal como trabaja hoy. Lo fijo de todos los agentes va aparte, en `AGENT_BASE_PRINCIPLES`. */
+  behaves?: string
+  /** «Cómo se prueba»: con qué lo prueba la clínica antes de usarlo. */
+  testedWith?: string
+  /** De quién es lo que aprende o lo que se le ajusta. */
+  learningOwner?: string
+  /** Lo previsto que todavía no existe: la página lo anuncia como «Más adelante», nunca como hecho. */
+  later?: string
+  /** Lo mismo, para lo que aprenderá. */
+  learnsLater?: string
 }
 
 export const AGENT_ROLES: Record<AgentRoleId, AgentRole> = {
@@ -149,11 +159,20 @@ export const AGENT_ROLES: Record<AgentRoleId, AgentRole> = {
       { id: "controles", label: "Controles", description: "Deja sugerido el próximo control.", fixed: true, tools: [] },
     ],
     always: [],
-    sees: "La atención abierta de quien dicta, con su odontograma y su plan. El catálogo CIE-10 y los servicios. El vocabulario de ese odontólogo.",
-    notSees: "Conversaciones ni caja.",
-    never: "Guardar sin que el odontólogo confirme. Firmar o cerrar la atención. Diagnosticar por su cuenta.",
-    confirms: "El odontólogo que lleva la atención, con su firma.",
-    learnsFrom: "Las correcciones de cada odontólogo. Su vocabulario es suyo.",
+    // Lo que de verdad recibe: el texto dictado y los nombres de los servicios; el código CIE-10 se
+    // comprueba contra el catálogo. No lee la atención, el odontograma ni el plan.
+    sees: "Lo que el odontólogo dicta en esa atención. Los servicios de la clínica y el catálogo CIE-10, para reconocer lo dictado.",
+    notSees: "El resto de la historia clínica, el odontograma ni el plan del paciente. Conversaciones ni caja.",
+    never:
+      "Guardar sin que el odontólogo confirme. Firmar o cerrar la atención. Diagnosticar por su cuenta. Escuchar sin que el odontólogo pulse «Dictar». Tocar atenciones de otros profesionales.",
+    confirms: "El odontólogo que lleva la atención: confirma cada sugerencia y firma.",
+    learnsFrom: "Hoy no aprende: cada dictado se ordena desde cero, con los servicios que la clínica tenga en ese momento.",
+    behaves:
+      "Registra solo lo que el odontólogo dijo, sin completar lo que falta. Si se corrige al dictar, vale lo último. Una prestación que no encuentra, o que coincide con varias, queda «Por revisar» para que el odontólogo elija.",
+    testedWith: "Con un dictado de práctica: sin paciente ni atención, nada llega a una historia.",
+    learningOwner: "No guarda nada de un odontólogo ni de la clínica.",
+    later: "Odontograma por voz y recetas. Elegir el estilo de la nota, breve o detallada.",
+    learnsLater: "Recordar los términos de cada odontólogo, como algo suyo.",
   },
   asesor: {
     id: "asesor",
@@ -176,7 +195,12 @@ export const AGENT_ROLES: Record<AgentRoleId, AgentRole> = {
     notSees: "Conversaciones ni historia clínica.",
     never: "Ejecutar por su cuenta. Dar un número que no pueda mostrar. Más de tres recomendaciones a la vez.",
     confirms: "Quien administra aprueba cada acción.",
-    learnsFrom: "Lo que descartas: deja de mostrarlo o cambia el umbral.",
+    // No hay aprendizaje automático: «No me interesa» pospone la detección y el umbral se cambia a mano.
+    learnsFrom: "De lo que descartas: «No me interesa» oculta esa detección una semana. El umbral de días lo cambias tú.",
+    behaves: "No redacta con un modelo: cada recomendación es una consulta a los datos de la clínica. Breve, con la cifra, la lista que la respalda y cómo se calculó.",
+    testedWith: "Con una vista previa de lo que recomendaría hoy, antes de encenderlo.",
+    learningOwner: "Es solo del asesor de esta clínica: no cambia a los otros agentes.",
+    learnsLater: "Ajustar el umbral por su cuenta según lo que descartas.",
   },
   ayuda: {
     id: "ayuda",

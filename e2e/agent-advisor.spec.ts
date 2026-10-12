@@ -43,15 +43,29 @@ test("asesor: vista previa, encenderlo, recomendación en Inicio con su lista y 
   await gotoHydrated(page, tenant(org.slug, "/agent"))
   const row = page.getByRole("region", { name: "Tus agentes" }).getByRole("listitem").filter({ hasText: "Asesor" })
   await expect(row).toContainText("Apagado")
-  await row.getByRole("link", { name: "Configurar" }).click()
+  await row.getByRole("link", { name: "Ver y encender" }).click()
   await expect(page.getByRole("heading", { level: 1, name: "Asesor" })).toBeVisible()
-  const detects = page.getByRole("region", { name: "Qué detecta" })
+  // El mismo marco de seis apartados que los otros agentes.
+  await expect(page.getByRole("heading", { level: 2 })).toHaveText(["Qué hace", "Hasta dónde llega solo", "Qué sabe", "Cómo se comporta", "Cómo se prueba", "Qué aprende, y de quién es"])
+  await expect(page.getByRole("region", { name: "Qué sabe" })).toContainText("Los números salen de la base de datos, no del modelo.")
+  await expect(page.getByRole("region", { name: "Cómo se comporta" })).toContainText("cada recomendación es una consulta a los datos de la clínica")
+  await expect(page.getByRole("region", { name: "Qué aprende, y de quién es" })).toContainText("«No me interesa» oculta esa detección una semana.")
+  const detects = page.getByRole("region", { name: "Qué hace" })
   await expect(detects.getByRole("switch")).toHaveCount(5)
-  const preview = page.getByRole("region", { name: "Lo que recomendaría hoy" })
+  const preview = page.getByRole("region", { name: "Cómo se prueba" })
+  await expect(preview).toContainText("Con una vista previa de lo que recomendaría hoy, antes de encenderlo.")
   await expect(preview).toContainText("1 control vencido de un paciente sin cita")
   await expect(preview).toContainText("1 seguimiento abierto sin responsable")
   expect(await overflow(page)).toBeLessThanOrEqual(0)
   await info.attach("asesor-apagado", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" })
+  // Teléfono: la misma página, sin desbordes.
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expect(preview.getByRole("button", { name: "Ver la lista" }).first()).toBeVisible()
+  // El alto cambia con una transición al estrechar la ventana: se espera a que termine.
+  await expect.poll(async () => (await preview.getByRole("button", { name: "Ver la lista" }).first().boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44)
+  expect(await overflow(page)).toBeLessThanOrEqual(0)
+  await info.attach("asesor-movil", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" })
+  await page.setViewportSize({ width: 1440, height: 900 })
 
   // Apagar una detección la quita de la vista previa; encender el Asesor la lleva a Inicio.
   await detects.getByRole("switch", { name: "Seguimientos sin responsable" }).click()
@@ -114,4 +128,7 @@ test("asesor: vista previa, encenderlo, recomendación en Inicio con su lista y 
   expect((await advisor()).recommendations).toEqual([])
   expect((await api(page, "GET", "/api/agent/advisor/seguimientos_sin_responsable", org.slug)).status).toBe(403)
   expect((await api(page, "PUT", "/api/agent/advisor/settings", org.slug, { enabled: false })).status).toBe(403)
+  // Quien no supervisa al agente no llega a su página: el layout lo devuelve a Inicio.
+  await gotoHydrated(page, tenant(org.slug, "/agent/asesor"))
+  await expect(page.getByRole("heading", { level: 1, name: "Inicio" })).toBeVisible()
 })

@@ -1,4 +1,4 @@
-import { Button } from "@odentia/ui"
+import { Badge, Button, FieldLabel, RadioGroup, RadioGroupItem } from "@odentia/ui"
 import { FormDrawer } from "@odentia/ui-patterns"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
@@ -38,8 +38,11 @@ function Check({
 const LINK = "inline-flex min-h-11 items-center text-sm font-semibold text-primary hover:underline sm:min-h-8"
 
 /**
- * Encender Recepción por primera vez: cuatro comprobaciones (ninguna lo
- * impide; lo que falta lleva a donde se resuelve) y con qué nivel empieza.
+ * Encender Recepción por primera vez: cuatro comprobaciones (lo que falta
+ * lleva a donde se resuelve) y con qué nivel empieza. Solo la falta de un
+ * canal deja el botón sin efecto: sin canal no le llega ningún mensaje y
+ * encender no cambiaría nada. Las otras tres avisan y dejan encender; el
+ * servidor no exige ninguna.
  */
 export function TurnOnDrawer({
   open,
@@ -142,7 +145,7 @@ export function TurnOnDrawer({
           }
           action={
             <Button type="button" variant="link" size="sm" className="h-auto min-h-11 p-0 sm:min-h-8" onClick={onTest}>
-              {readiness.sandboxTurns > 0 ? "Probar otra vez" : "Probar"}
+              {readiness.sandboxTurns > 0 ? "Probar otra" : "Probar"}
             </Button>
           }
         />
@@ -166,38 +169,31 @@ export function TurnOnDrawer({
 
       <fieldset className="flex flex-col gap-2 pt-2">
         <legend className="mb-1 pt-2 text-sm font-semibold">Cómo empieza</legend>
-        {custom ? (
-          <Button
-            type="button"
-            variant="outline"
-            aria-pressed={level === "actual"}
-            onClick={() => setLevel("actual")}
-            className={`h-auto min-h-11 flex-col items-start gap-0.5 whitespace-normal rounded-xl p-3 text-left ${level === "actual" ? "border-primary bg-primary-soft" : ""}`}
-          >
-            <span className="font-semibold">Como lo tienes ahora</span>
-            <span className="text-sm font-normal text-muted-foreground">
-              Conserva lo que ajustaste acto por acto. Elegir un nivel de abajo lo reemplaza.
-            </span>
-          </Button>
-        ) : null}
-        {levels.map((option) => (
-          <Button
-            key={option.id}
-            type="button"
-            variant="outline"
-            aria-pressed={level === option.id}
-            onClick={() => setLevel(option.id)}
-            className={`h-auto min-h-11 flex-col items-start gap-0.5 whitespace-normal rounded-xl p-3 text-left ${level === option.id ? "border-primary bg-primary-soft" : ""}`}
-          >
-            <span className="font-semibold">
-              {option.label}
-              {option.id === "supervisado" ? <span className="font-normal text-muted-foreground"> · Recomendado para empezar</span> : null}
-            </span>
-            <span className="text-sm font-normal text-muted-foreground">{option.summary}</span>
-          </Button>
-        ))}
+        <RadioGroup aria-label="Cómo empieza" value={level} onValueChange={(next) => setLevel(next as AgentLevelId | "actual")}>
+          {custom ? (
+            <FieldLabel className={`flex h-auto min-h-11 w-full cursor-pointer items-start gap-3 rounded-xl border p-3 text-sm font-normal ${level === "actual" ? "border-primary bg-primary-soft" : ""}`}>
+              <RadioGroupItem value="actual" className="mt-0.5" />
+              <span className="flex min-w-0 flex-col gap-0.5">
+                <span className="font-semibold">Como lo tienes ahora</span>
+                <span className="text-muted-foreground">Conserva lo que ajustaste acto por acto. Elegir un nivel de abajo lo reemplaza.</span>
+              </span>
+            </FieldLabel>
+          ) : null}
+          {levels.map((option) => (
+            <FieldLabel key={option.id} className={`flex h-auto min-h-11 w-full cursor-pointer items-start gap-3 rounded-xl border p-3 text-sm font-normal ${level === option.id ? "border-primary bg-primary-soft" : ""}`}>
+              <RadioGroupItem value={option.id} className="mt-0.5" />
+              <span className="flex min-w-0 flex-col gap-0.5">
+                <span className="flex flex-wrap items-center gap-2 font-semibold">
+                  {option.label}
+                  {option.id === "supervisado" ? <Badge variant="secondary">Recomendado para empezar</Badge> : null}
+                </span>
+                <span className="text-muted-foreground">{option.summary}</span>
+              </span>
+            </FieldLabel>
+          ))}
+        </RadioGroup>
       </fieldset>
-      <p className="text-sm text-muted-foreground">Lo apagas cuando quieras. Lo que esté a medias queda para tu equipo.</p>
+      <p className="text-sm text-muted-foreground">Lo apagas cuando quieras. Lo que esté a medias pasa a tu equipo.</p>
       </div>
     </FormDrawer>
   )

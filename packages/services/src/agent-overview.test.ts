@@ -1,6 +1,6 @@
 import type { ChannelAdapter, NormalizedInbound } from "@odentia/channels"
 import { type Db, type InboundMessageJob, withOrgContext } from "@odentia/db"
-import { AUTONOMY_ACTIONS, agentHandoff, agentRunLedger } from "@odentia/db/schema/agent"
+import { AUTONOMY_ACTIONS, agentAnswerTrace, agentHandoff, agentLesson, agentReviewItem, agentRunLedger } from "@odentia/db/schema/agent"
 import { member, user } from "@odentia/db/schema/auth"
 import { beforeAll, describe, expect, it } from "vitest"
 import { randomUUID } from "node:crypto"
@@ -188,7 +188,9 @@ describe("resumen del agente", () => {
       enabled: false,
       level: "equilibrado",
       needsYou: { approvals: 0, gaps: 0 },
-      week: { attended: 0, passed: 0, alone: 0, booked: 0 },
+      week: { attended: 0, corrected: 0, passed: 0, alone: 0, booked: 0 },
+      learned: { officialAnswers: 0, rules: 0, examples: 0, latest: null },
+      provider: { problem: null, at: null },
       readiness: { channels: [], receivers: [], sandboxTurns: 0 },
     })
     expect(overview.knows.basicsTotal).toBe(KNOWLEDGE_BASICS.length)
@@ -233,8 +235,93 @@ describe("resumen del agente", () => {
     ])
     await ownerDb.insert(agentHandoff).values({ organizationId: ORG, conversationId: passed, reason: "Pide una persona", summary: "Resumen" })
     const overview = await run((tx) => getAgentOverview(tx, ORG))
-    expect(overview.week).toEqual({ attended: 2, passed: 1, alone: 1, booked: 0 })
-    expect(overview.today).toEqual({ attended: 2, passed: 1, alone: 1, booked: 0 })
+    expect(overview.week).toEqual({ attended: 2, corrected: 0, passed: 1, alone: 1, booked: 0 })
+    expect(overview.today).toEqual({ attended: 2, corrected: 0, passed: 1, alone: 1, booked: 0 })
+  })
+
+  it("una conversación corregida sale de las otras dos cuentas: los tres tramos suman las atendidas", async () => {
+    const fixed = await openConversation(connectionId, "corregida")
+    const fixedLate = await openConversation(connectionId, "corregida-antes")
+    const now = new Date()
+    await ownerDb.insert(agentRunLedger).values([
+      { organizationId: ORG, conversationId: fixed, model: "fake", status: "handoff", startedAt: now },
+      { organizationId: ORG, conversationId: fixedLate, model: "fake", status: "ok", startedAt: now },
+    ])
+    // Además se derivó: cuenta como corregida, no dos veces.
+    await ownerDb.insert(agentHandoff).values({ organizationId: ORG, conversationId: fixed, reason: "Pide una persona", summary: "Resumen" })
+    const review = async (conversationId: string, status: string, decidedAt: Date | null) => {
+      const [trace] = await ownerDb.insert(agentAnswerTrace)
+        .values({ organizationId: ORG, conversationId, outcome: "enviada", replyText: "Atendemos los domingos." })
+        .returning({ id: agentAnswerTrace.id })
+      if (!trace) throw new Error("No se pudo sembrar la respuesta")
+      await ownerDb.insert(agentReviewItem).values({
+        organizationId: ORG, conversationId, traceId: trace.id, reason: "marcada", reply: "Atendemos los domingos.",
+        status, decidedBy: decidedAt ? OWNER : null, decidedAt,
+      })
+    }
+    await review(fixed, "corregida", now)
+    // Una corrección de antes de la semana y una revisión que se dio por buena no cuentan.
+    await review(fixedLate, "corregida", new Date(now.getTime() - 9 * 86_400_000))
+    await review(fixedLate, "bien", now)
+    const { week } = await run((tx) => getAgentOverview(tx, ORG))
+    expect(week).toEqual({ attended: 4, corrected: 1, passed: 1, alone: 2, booked: 0 })
+    expect(week.corrected + week.passed + week.alone).toBe(week.attended)
+  })
+
+  it("lo que aprendió esta semana: solo lo aprobado y vigente, por tipo, y la más reciente", async () => {
+    const now = Date.now()
+    const lesson = (kind: "respuesta_oficial" | "regla" | "ejemplo", title: string, status: string, approvedAt: Date | null) => ({
+      organizationId: ORG, kind, title, body: title, status: status as "activa", proposedBy: OWNER,
+      approvedBy: approvedAt ? OWNER : null, approvedAt,
+    })
+    await ownerDb.insert(agentLesson).values([
+      lesson("respuesta_oficial", "Horario de sábados", "activa", new Date(now - 3 * 86_400_000)),
+      lesson("regla", "No ofrecer citas en domingo.", "activa", new Date(now - 60_000)),
+      lesson("ejemplo", "Saludo breve", "activa", new Date(now - 2 * 86_400_000)),
+      // Aprobada hace más de una semana, retirada después de aprobarse y sin aprobar: fuera.
+      lesson("regla", "Antigua", "activa", new Date(now - 10 * 86_400_000)),
+      lesson("regla", "Retirada", "retirada", new Date(now - 86_400_000)),
+      lesson("respuesta_oficial", "Propuesta", "propuesta", null),
+    ])
+    const { learned } = await run((tx) => getAgentOverview(tx, ORG))
+    expect(learned).toMatchObject({ officialAnswers: 1, rules: 1, examples: 1 })
+    expect(learned.latest).toMatchObject({ title: "No ofrecer citas en domingo.", approvedByName: "Dueña Resumen" })
+    // Lo de otra clínica no entra.
+    expect((await run((tx) => getAgentOverview(tx, OTHER), OTHER)).learned.latest).toBeNull()
+  })
+
+  it("avisa de un problema del proveedor solo si es lo último que pasó y nadie tocó la configuración", async () => {
+    const provider = async () => (await run((tx) => getAgentOverview(tx, ORG))).provider
+    const at = (minutesAgo: number) => new Date(Date.now() - minutesAgo * 60_000)
+    const entry = (status: string, startedAt: Date, extra: { error?: string; llmCalls?: number } = {}) =>
+      ownerDb.insert(agentRunLedger).values({ organizationId: ORG, model: "fake", status, startedAt, ...extra })
+    await run((tx) => upsertAgentConfig(tx, ORG, { tone: "formal" }, { actorUserId: OWNER }))
+    // Las corridas sembradas arriba no llamaron al modelo, y un error que no es del proveedor no dice nada de él.
+    expect(await provider()).toEqual({ problem: null, at: null })
+    // El tope diario tiene su propio aviso.
+    await entry("error", at(-1), { error: "DAILY_LIMIT: Se alcanzó el tope diario de 500 corridas del agente" })
+    expect((await provider()).problem).toBeNull()
+    const failedAt = at(-2)
+    await entry("error", failedAt, { error: "PROVIDER_REJECTED: HTTP 401: clave inválida" })
+    // Viaja la clase del problema y cuándo fue; nunca el texto del proveedor.
+    expect(await provider()).toEqual({ problem: "rechazado", at: failedAt.toISOString() })
+    await entry("error", at(-3), { error: "PROVIDER_QUOTA: HTTP 402" })
+    expect((await provider()).problem).toBe("sin_saldo")
+    await entry("error", at(-4), { error: "API_KEY_REQUIRED: Falta la clave" })
+    expect((await provider()).problem).toBe("sin_configurar")
+    // Una corrida posterior que sí llamó al modelo lo da por resuelto.
+    await entry("ok", at(-5), { llmCalls: 1 })
+    expect((await provider()).problem).toBeNull()
+  })
+
+  it("cambiar la configuración del agente retira el aviso hasta el siguiente intento", async () => {
+    const provider = async () => (await run((tx) => getAgentOverview(tx, OTHER), OTHER)).provider
+    await ownerDb.insert(agentRunLedger).values({
+      organizationId: OTHER, model: "fake", status: "error", startedAt: new Date(Date.now() - 60_000), error: "PROVIDER_REJECTED: HTTP 401",
+    })
+    expect((await provider()).problem).toBe("rechazado")
+    await run((tx) => upsertAgentConfig(tx, OTHER, { tone: "neutro" }), OTHER)
+    expect((await provider()).problem).toBeNull()
   })
 
   it("contar una prueba no enciende el agente ni cambia su configuración", async () => {

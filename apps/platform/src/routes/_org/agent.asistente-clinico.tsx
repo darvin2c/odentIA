@@ -72,7 +72,7 @@ function ClinicalAssistantPage() {
   if (!canRead) {
     return (
       <PageShell>
-        <ErrorState title="Sin acceso" message="No tienes acceso a la configuración del agente." />
+        <ErrorState title="No tienes acceso a esta sección" message="Pídelo a quien administra la clínica. Tus aprobaciones siguen en su pestaña." />
       </PageShell>
     )
   }
@@ -80,12 +80,13 @@ function ClinicalAssistantPage() {
   const role = rolesQuery.data?.data.roles.find((item) => item.id === "asistente_clinico")
   const on = config?.clinicalAssistantEnabled === true
   const result = tryIt.data?.data
+  const principles = rolesQuery.data?.data.principles ?? []
 
   return (
     <PageShell className="flex flex-col gap-6">
       <PageHeader
         title="Asistente clínico"
-        subtitle={role?.audience ?? "Para el odontólogo, dentro de la atención"}
+        subtitle={role?.audience}
         actions={
           config && canWrite ? (
             <label htmlFor="asistente-clinico-encendido" className="flex min-h-11 cursor-pointer items-center gap-2 text-sm font-semibold sm:min-h-8">
@@ -132,7 +133,11 @@ function ClinicalAssistantPage() {
                 </li>
               ))}
             </ul>
-            <p className="text-sm text-muted-foreground">Más adelante: odontograma por voz y recetas. Hoy no los sugiere.</p>
+            {role.later ? (
+              <p className="text-sm text-muted-foreground">
+                <span className="font-semibold text-foreground">Más adelante:</span> {role.later} Hoy no lo hace.
+              </p>
+            ) : null}
           </Card>
 
           <Card id="clinico-llega" title="Hasta dónde llega solo" hint="Nunca guarda: siempre sugiere. No tiene niveles.">
@@ -145,9 +150,14 @@ function ClinicalAssistantPage() {
                 <dt className="font-semibold">Nunca</dt>
                 <dd className="text-muted-foreground">{role.never}</dd>
               </div>
+            </dl>
+          </Card>
+
+          <Card id="clinico-sabe" title="Qué sabe" hint="Lo que recibe para ordenar un dictado, y lo que no.">
+            <dl className="grid gap-3 text-sm sm:grid-cols-2">
               <div>
-                <dt className="font-semibold">Qué sabe</dt>
-                <dd className="text-muted-foreground">Los servicios y tarifas de la clínica y el catálogo CIE-10. De la atención, solo lo que se le dicta.</dd>
+                <dt className="font-semibold">Puede ver</dt>
+                <dd className="text-muted-foreground">{role.sees}</dd>
               </div>
               <div>
                 <dt className="font-semibold">No ve</dt>
@@ -160,65 +170,106 @@ function ClinicalAssistantPage() {
             </p>
           </Card>
 
-          {canWrite ? (
-            <Card id="clinico-prueba" title="Dictado de práctica" hint="Escribe un dictado de ejemplo y mira qué sugeriría. No hay paciente ni atención: nada llega a una historia.">
-              <Field>
-                <FieldLabel htmlFor="clinico-practica">Dictado de ejemplo</FieldLabel>
-                <Textarea
-                  id="clinico-practica"
-                  rows={4}
-                  maxLength={12_000}
-                  value={practice}
-                  onChange={(event) => setPractice(event.target.value)}
-                  placeholder="Viene por dolor al masticar. En la dieciséis hay caries en dentina, le ponemos una resina en la cara oclusal. Control en seis meses."
-                />
-                <FieldDescription>Usa nombres de tus propios servicios para ver cómo los reconoce.</FieldDescription>
-              </Field>
-              <SubmitButton
-                type="button"
-                className="min-h-11 self-start sm:min-h-9"
-                pending={tryIt.isPending}
-                disabled={practice.trim().length < 3}
-                onClick={() => tryIt.mutate()}
-              >
-                Ver qué sugeriría
-              </SubmitButton>
-              {tryIt.isError ? (
-                <p role="alert" className="text-sm text-destructive">
-                  {tryIt.error instanceof ApiError && tryIt.error.status < 500 && tryIt.error.shape.message
-                    ? tryIt.error.shape.message
-                    : "No pudimos ordenar ese dictado. Vuelve a intentarlo."}
-                </p>
-              ) : null}
-              {result ? (
-                <div className="flex flex-col gap-2" aria-live="polite">
-                  {result.suggestions.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">No sugeriría nada con ese texto.</p>
-                  ) : (
-                    <ul className="flex flex-col gap-2">
-                      {result.suggestions.map((item, index) => (
-                        // biome-ignore lint/suspicious/noArrayIndexKey: resultado de una práctica; la lista se reemplaza entera.
-                        <li key={`${item.kind}-${index}`} className="flex flex-col gap-1 rounded-xl border bg-card p-3 text-sm">
-                          <p className="flex flex-wrap items-center gap-2">
-                            <span className="font-semibold">{KIND_LABEL[item.kind] ?? item.kind}</span>
-                            <Badge variant={item.status === "lista" ? "secondary" : "default"}>{item.status === "lista" ? "Sugerido" : "Por revisar"}</Badge>
-                          </p>
-                          <p className="whitespace-pre-wrap">{item.summary}</p>
-                          {item.note ? <p>{item.note}</p> : null}
-                          {item.sourceText ? <p className="text-muted-foreground">Lo que dijiste: «{item.sourceText}»</p> : null}
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                  {result.model === "fake" ? (
-                    <p className="text-xs text-muted-foreground">
-                      Modelo de demostración: reconoce solo unas pocas frases y no dice cómo entendería un dictado un proveedor real.
-                    </p>
-                  ) : null}
+          <Card id="clinico-comporta" title="Cómo se comporta" hint="Primero la base que comparten todos los agentes; después cómo ordena un dictado.">
+            <div className="flex flex-col gap-1 text-sm">
+              <p className="font-semibold">La base</p>
+              <ul className="flex list-disc flex-col gap-1 pl-5 text-muted-foreground">
+                {principles.map((principle) => (
+                  <li key={principle}>{principle}</li>
+                ))}
+              </ul>
+            </div>
+            {role.behaves ? (
+              <div className="flex flex-col gap-1 text-sm">
+                <p className="font-semibold">Al ordenar un dictado</p>
+                <p className="text-muted-foreground">{role.behaves}</p>
+              </div>
+            ) : null}
+          </Card>
+
+          <Card id="clinico-prueba" title="Cómo se prueba" hint={role.testedWith ?? "Con un dictado de práctica."}>
+            {canWrite ? (
+              <>
+                <Field>
+                  <FieldLabel htmlFor="clinico-practica">Dictado de ejemplo</FieldLabel>
+                  <Textarea
+                    id="clinico-practica"
+                    rows={4}
+                    maxLength={12_000}
+                    value={practice}
+                    onChange={(event) => setPractice(event.target.value)}
+                    placeholder="Viene por dolor al masticar. En la dieciséis hay caries en dentina, le ponemos una resina en la cara oclusal. Control en seis meses."
+                  />
+                  <FieldDescription>Usa nombres de tus propios servicios para ver cómo los reconoce.</FieldDescription>
+                </Field>
+                <SubmitButton
+                  type="button"
+                  className="min-h-11 self-start sm:min-h-9"
+                  pending={tryIt.isPending}
+                  disabled={practice.trim().length < 3}
+                  onClick={() => tryIt.mutate()}
+                >
+                  Ver qué sugeriría
+                </SubmitButton>
+                {tryIt.isError ? (
+                  <p role="alert" className="text-sm text-destructive">
+                    {tryIt.error instanceof ApiError && tryIt.error.status < 500 && tryIt.error.shape.message
+                      ? tryIt.error.shape.message
+                      : "No pudimos ordenar ese dictado. Vuelve a intentarlo."}
+                  </p>
+                ) : null}
+                {result ? (
+                  <div className="flex flex-col gap-2" aria-live="polite">
+                    {result.suggestions.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">No sugeriría nada con ese texto.</p>
+                    ) : (
+                      <ul className="flex flex-col gap-2">
+                        {result.suggestions.map((item, index) => (
+                          // biome-ignore lint/suspicious/noArrayIndexKey: resultado de una práctica; la lista se reemplaza entera.
+                          <li key={`${item.kind}-${index}`} className="flex flex-col gap-1 rounded-xl border bg-card p-3 text-sm">
+                            <p className="flex flex-wrap items-center gap-2">
+                              <span className="font-semibold">{KIND_LABEL[item.kind] ?? item.kind}</span>
+                              <Badge variant={item.status === "lista" ? "secondary" : "default"}>{item.status === "lista" ? "Sugerido" : "Por revisar"}</Badge>
+                            </p>
+                            <p className="whitespace-pre-wrap">{item.summary}</p>
+                            {item.note ? <p>{item.note}</p> : null}
+                            {item.sourceText ? <p className="text-muted-foreground">Lo que dijiste: «{item.sourceText}»</p> : null}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    {result.model === "fake" ? (
+                      <p className="text-xs text-muted-foreground">
+                        Modelo de demostración: reconoce solo unas pocas frases y no dice cómo entendería un dictado un proveedor real.
+                      </p>
+                    ) : null}
+                  </div>
+                ) : null}
+              </>
+            ) : (
+              <p className="text-sm text-muted-foreground">El dictado de práctica lo usa quien administra el agente.</p>
+            )}
+          </Card>
+
+          <Card id="clinico-aprende" title="Qué aprende, y de quién es" hint="Lo que cambia con el uso, y a quién le pertenece.">
+            <dl className="grid gap-3 text-sm sm:grid-cols-2">
+              <div>
+                <dt className="font-semibold">Qué aprende</dt>
+                <dd className="text-muted-foreground">{role.learnsFrom}</dd>
+              </div>
+              {role.learningOwner ? (
+                <div>
+                  <dt className="font-semibold">De quién es</dt>
+                  <dd className="text-muted-foreground">{role.learningOwner}</dd>
                 </div>
               ) : null}
-            </Card>
-          ) : null}
+            </dl>
+            {role.learnsLater ? (
+              <p className="text-sm text-muted-foreground">
+                <span className="font-semibold text-foreground">Más adelante:</span> {role.learnsLater}
+              </p>
+            ) : null}
+          </Card>
         </>
       )}
     </PageShell>

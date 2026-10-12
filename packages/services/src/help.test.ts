@@ -2,13 +2,13 @@ import { readFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 import { type Db, withOrgContext } from "@odentia/db"
 import { scheduleChair } from "@odentia/db/schema/agenda"
-import { member, user } from "@odentia/db/schema/auth"
+import { member, organization, user } from "@odentia/db/schema/auth"
 import { professionalSchedule } from "@odentia/db/schema/availability"
 import { branch } from "@odentia/db/schema/org"
 import { helpAsk, helpRequest } from "@odentia/db/schema/workspace"
 import { eq } from "drizzle-orm"
 import { beforeAll, describe, expect, it } from "vitest"
-import { answerHelpCase, askHelp, describeHelpScreen, HELP_DAILY_LIMIT, type HelpAsker, listHelpCases, listMyHelpRequests, markHelpRequestsSeen, rateHelp, sendHelpRequest } from "./help.js"
+import { answerHelpCase, askHelp, describeHelpAttachments, describeHelpScreen, HELP_DAILY_LIMIT, type HelpAsker, listHelpCases, listMyHelpRequests, markHelpRequestsSeen, rateHelp, sendHelpRequest } from "./help.js"
 import { HELP_TOPICS, helpTopicForScreen, matchHelpTopics } from "./help-guide.js"
 import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
 
@@ -151,6 +151,14 @@ describe("responder", () => {
 })
 
 describe("enviar a odentIA", () => {
+  it("dice lo que se agrega solo con los mismos valores que guarda el envío", async () => {
+    const [org] = await ownerDb.select({ name: organization.name }).from(organization).where(eq(organization.id, ORG))
+    const attached = await run((tx) => describeHelpAttachments(tx, ORG, reception, { screen: "/patients/123", appVersion: "1.2.3" }))
+    expect(attached).toEqual({ screen: "Pacientes", role: "Recepción", clinic: org!.name, version: "1.2.3" })
+    // Sin versión declarada no se promete ninguna; una pantalla fuera de la guía se dice por su ruta.
+    expect(await run((tx) => describeHelpAttachments(tx, ORG, reception, { screen: "/no-existe" }))).toMatchObject({ screen: "/no-existe", version: null })
+  })
+
   it("la misma pregunta de dos clínicas es un solo caso, y la respuesta llega a las dos", async () => {
     const question = "¿Cómo exporto mis pacientes a Excel?"
     const mine = await run((tx) => sendHelpRequest(tx, ORG, reception, { question, screen: "/patients", appVersion: "1.2.3" }))
@@ -176,8 +184,13 @@ describe("enviar a odentIA", () => {
     const answered = (await run((tx) => listMyHelpRequests(tx, ORG, USER))).find((item) => item.id === mine.id)
     expect(answered).toMatchObject({ status: "respondida", answer: expect.stringContaining("Todavía no se puede exportar"), seen: false })
     expect((await run((tx) => listMyHelpRequests(tx, OTHER, OTHER_USER), OTHER))[0]?.status).toBe("respondida")
-    await run((tx) => markHelpRequestsSeen(tx, ORG, USER))
+    // «Ver» marca solo la respuesta que se abrió; la de otra persona no se toca.
+    const other = (await run((tx) => listMyHelpRequests(tx, OTHER, OTHER_USER), OTHER))[0]
+    await run((tx) => markHelpRequestsSeen(tx, ORG, USER, other!.id))
+    expect((await run((tx) => listMyHelpRequests(tx, ORG, USER))).find((item) => item.id === mine.id)?.seen).toBe(false)
+    await run((tx) => markHelpRequestsSeen(tx, ORG, USER, mine.id))
     expect((await run((tx) => listMyHelpRequests(tx, ORG, USER))).find((item) => item.id === mine.id)?.seen).toBe(true)
+    expect((await run((tx) => listMyHelpRequests(tx, OTHER, OTHER_USER), OTHER))[0]?.seen).toBe(false)
     // Respondido, el caso sale de la lista del equipo; una pregunta nueva igual abre otro.
     expect((await listHelpCases(ownerDb)).some((item) => item.question === question)).toBe(false)
     await expect(answerHelpCase(ownerDb, exportCase!.dedupeKey, " ")).rejects.toThrow(/Escribe la respuesta/)

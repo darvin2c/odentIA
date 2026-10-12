@@ -1,10 +1,11 @@
-import { Button, Field, FieldLabel, Textarea } from "@odentia/ui"
-import { DataRefreshMarker, SubmitButton } from "@odentia/ui-patterns"
-import { useMutation } from "@tanstack/react-query"
-import { CircleAlert, CircleCheck } from "lucide-react"
-import { type FormEvent, useState } from "react"
-import { ANSWER_CHECK_LABEL, type SandboxResult, type SandboxState } from "../../lib/agent"
+import { Button, Field, FieldLabel, Input } from "@odentia/ui"
+import { DataRefreshMarker } from "@odentia/ui-patterns"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { ArrowLeft, ArrowRight, CircleAlert, CircleCheck } from "lucide-react"
+import { type FormEvent, useEffect, useRef, useState } from "react"
+import { ANSWER_CHECK_LABEL, type SandboxResult, type SandboxState, type TestCaseItem } from "../../lib/agent"
 import { ApiError, apiFetch } from "../../lib/api"
+import { mutationErrorMessage } from "../../lib/query-error"
 
 interface Turn {
   role: "contact" | "agent"
@@ -22,27 +23,53 @@ const STARTERS = [
 
 /**
  * «Probar»: una conversación de prueba con el agente tal como está
- * configurado. Nada se envía ni se guarda; el historial y lo que el agente dejó
- * pendiente viven en esta pantalla y se pierden al empezar de nuevo.
+ * configurado. Nada se envía ni cambia ninguna ficha; el historial y lo que el
+ * agente dejó pendiente viven en esta pantalla y se pierden al empezar de nuevo.
+ * Lo único que se guarda, y solo si se pide, es la conversación como caso de prueba.
+ *
+ * En teléfono es una pantalla propia (`screen`): cabecera con volver, ejemplos
+ * en una fila y el campo fijo abajo. Mientras no se abre, ahí no ocupa sitio.
+ * Va en el flujo de la página (que oculta lo demás) con cabecera y campo
+ * `sticky`: un `fixed` quedaría atrapado por el contenedor de la rejilla.
  */
-export function AgentSandbox({ onTested }: { onTested?: () => void }) {
+export function AgentSandbox({
+  onTested,
+  screen = false,
+  onLeaveScreen,
+}: {
+  onTested?: () => void
+  /** Teléfono: ocupa toda la pantalla. En ventana ancha no cambia nada. */
+  screen?: boolean
+  /** Teléfono: volver a la página del agente. */
+  onLeaveScreen?: () => void
+}) {
+  const queryClient = useQueryClient()
   const [turns, setTurns] = useState<Turn[]>([])
   const [state, setState] = useState<SandboxState | undefined>(undefined)
   const [draft, setDraft] = useState("")
+  const backRef = useRef<HTMLButtonElement>(null)
+  const endRef = useRef<HTMLLIElement>(null)
+
+  const cases = useQuery({
+    queryKey: ["agent-test-cases"],
+    queryFn: () => apiFetch<{ data: TestCaseItem[] }>("/api/agent/learning/cases"),
+    retry: false,
+  })
 
   const send = useMutation({
     retry: false,
-    mutationFn: (message: string) =>
+    mutationFn: (input: { message: string; fresh: boolean }) =>
       apiFetch<{ data: SandboxResult }>("/api/agent/sandbox", {
         method: "POST",
         body: JSON.stringify({
-          message,
-          transcript: turns.map(({ role, text }) => ({ role, text })),
-          ...(state ? { state } : {}),
+          message: input.message,
+          transcript: input.fresh ? [] : turns.map(({ role, text }) => ({ role, text })),
+          ...(state && !input.fresh ? { state } : {}),
         }),
       }),
-    onMutate: (message) => {
-      setTurns((current) => [...current, { role: "contact", text: message }])
+    onMutate: ({ message, fresh }) => {
+      if (fresh) setState(undefined)
+      setTurns((current) => [...(fresh ? [] : current), { role: "contact", text: message }])
       setDraft("")
     },
     onSuccess: (response) => {
@@ -51,25 +78,55 @@ export function AgentSandbox({ onTested }: { onTested?: () => void }) {
       setTurns((current) => [...current, { role: "agent", text: result.reply, result }])
       onTested?.()
     },
-    // El mensaje sin respuesta se retira y vuelve al cuadro de texto para reintentar.
-    onError: (_error, message) => {
+    // El mensaje sin respuesta se retira y vuelve al campo para reintentar.
+    onError: (_error, { message }) => {
       setTurns((current) => current.slice(0, -1))
       setDraft(message)
     },
   })
 
+  // Un caso de prueba se vuelve a responder sin conversación previa: se guarda
+  // la pregunta que abrió la prueba con su respuesta, no un turno intermedio.
+  const opening = turns[0]?.role === "contact" && turns[1]?.role === "agent" ? { question: turns[0].text, answer: turns[1] } : null
+  const canSave = opening !== null && opening.answer.result?.replied === true
+  const saveCase = useMutation({
+    retry: false,
+    mutationFn: (input: { question: string; expected: string }) =>
+      apiFetch<{ data: TestCaseItem }>("/api/agent/learning/cases", { method: "POST", body: JSON.stringify(input) }),
+    onSuccess: () => {
+      for (const key of ["agent-test-cases", "agent-learning"]) void queryClient.invalidateQueries({ queryKey: [key] })
+    },
+  })
+
+  // En teléfono, al abrir la pantalla el foco va a «volver» y la conversación sigue al último mensaje.
+  useEffect(() => {
+    if (screen) backRef.current?.focus()
+  }, [screen])
+  const turnCount = turns.length
+  useEffect(() => {
+    if (screen && turnCount > 0) endRef.current?.scrollIntoView({ block: "nearest" })
+  }, [screen, turnCount])
+
   function submit(event: FormEvent) {
     event.preventDefault()
     const message = draft.trim()
     if (!message || send.isPending) return
-    send.mutate(message)
+    send.mutate({ message, fresh: false })
   }
 
   function restart() {
     send.reset()
+    saveCase.reset()
     setTurns([])
     setState(undefined)
     setDraft("")
+  }
+
+  /** Un ejemplo abre su propia conversación: la anterior se reemplaza. */
+  function start(text: string) {
+    if (send.isPending) return
+    saveCase.reset()
+    send.mutate({ message: text, fresh: true })
   }
 
   const error =
@@ -78,47 +135,73 @@ export function AgentSandbox({ onTested }: { onTested?: () => void }) {
       : send.error
         ? "No pudimos probar. Vuelve a intentarlo."
         : null
+  // En teléfono es la pantalla entera y su título es el de la página; al lado de la página, una sección.
+  const Title = screen ? "h1" : "h2"
+  const used = STARTERS.find((starter) => starter.text === turns[0]?.text)?.label
+  const saved = cases.data?.data.filter((item) => item.agent === "recepcion").length
 
   return (
     <section
       id="probar"
       aria-labelledby="probar-titulo"
-      className="elevated flex min-w-0 flex-col gap-3 rounded-xl border border-agent-border bg-card p-5 sm:p-6"
+      className={`min-w-0 flex-col gap-3 sm:elevated sm:flex sm:rounded-xl sm:border sm:border-agent-border sm:bg-card sm:p-6 ${
+        screen ? "max-sm:flex max-sm:min-h-[calc(100svh-2rem)]" : "max-sm:hidden"
+      }`}
     >
-      <div className="flex flex-wrap items-start gap-2">
+      <div className="flex items-start gap-2 max-sm:sticky max-sm:top-0 max-sm:z-10 max-sm:items-center max-sm:bg-canvas max-sm:pb-1">
+        {onLeaveScreen ? (
+          <Button
+            ref={backRef}
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="-ml-2 size-11 shrink-0 sm:hidden"
+            aria-label="Volver a Recepción"
+            onClick={onLeaveScreen}
+          >
+            <ArrowLeft aria-hidden />
+          </Button>
+        ) : null}
         <div className="min-w-0 flex-1">
-          <h2 id="probar-titulo" className="font-heading text-base font-semibold">
+          <Title id="probar-titulo" className="font-heading text-base font-semibold max-sm:text-lg">
             Probar
-          </h2>
+          </Title>
           <p className="text-sm text-muted-foreground">
-            Escribe como si fueras un paciente. No se envía nada ni cambia ninguna ficha.
+            <span className="max-sm:hidden">Escribe como si fueras un paciente. </span>No se envía nada ni cambia ninguna ficha.
           </p>
         </div>
         {turns.length > 0 ? (
-          <Button type="button" variant="ghost" size="sm" className="min-h-11 sm:min-h-8" onClick={restart}>
+          <Button type="button" variant="ghost" size="sm" className="min-h-11 shrink-0 sm:min-h-8" onClick={restart}>
             Empezar de nuevo
           </Button>
         ) : null}
       </div>
 
+      {/* En teléfono los ejemplos van en una fila que se desplaza; el contenedor es `relative` por lo que lleva dentro. */}
+      <fieldset
+        className="relative m-0 flex min-w-0 shrink-0 gap-2 border-0 p-0 max-sm:-mx-4 max-sm:overflow-x-auto max-sm:px-4 max-sm:pb-1 sm:flex-wrap"
+        aria-label="Ejemplos"
+      >
+        {STARTERS.map((starter) => (
+          <Button
+            key={starter.label}
+            type="button"
+            variant="outline"
+            size="sm"
+            className={`min-h-11 shrink-0 rounded-full sm:min-h-8 ${used === starter.label ? "border-primary bg-primary-soft" : ""}`}
+            aria-pressed={used === starter.label}
+            disabled={send.isPending}
+            onClick={() => start(starter.text)}
+          >
+            {starter.label}
+          </Button>
+        ))}
+      </fieldset>
+
       {turns.length === 0 ? (
-        <fieldset className="m-0 min-w-0 border-0 p-0 flex flex-wrap gap-2" aria-label="Ejemplos para empezar">
-          {STARTERS.map((starter) => (
-            <Button
-              key={starter.label}
-              type="button"
-              variant="outline"
-              size="sm"
-              className="min-h-11 rounded-full sm:min-h-8"
-              disabled={send.isPending}
-              onClick={() => send.mutate(starter.text)}
-            >
-              {starter.label}
-            </Button>
-          ))}
-        </fieldset>
+        <p className="text-sm text-muted-foreground max-sm:flex-1">Elige un ejemplo o escribe tu propio mensaje.</p>
       ) : (
-        <ol className="flex flex-col gap-3" aria-live="polite">
+        <ol className="flex min-h-0 flex-col gap-3 max-sm:flex-1" aria-live="polite">
           {turns.map((turn, index) => (
             // biome-ignore lint/suspicious/noArrayIndexKey: la conversación solo crece por el final; no se reordena.
             <li key={`${index}-${turn.role}`} className={`flex flex-col gap-2 ${turn.role === "contact" ? "items-end" : "items-start"}`}>
@@ -135,11 +218,9 @@ export function AgentSandbox({ onTested }: { onTested?: () => void }) {
               {turn.result ? <TurnDetail result={turn.result} /> : null}
             </li>
           ))}
-          {send.isPending ? (
-            <li>
-              <DataRefreshMarker message="El agente está respondiendo…" />
-            </li>
-          ) : null}
+          <li ref={endRef} aria-hidden={!send.isPending}>
+            {send.isPending ? <DataRefreshMarker message="El agente está respondiendo…" /> : null}
+          </li>
         </ol>
       )}
 
@@ -149,34 +230,82 @@ export function AgentSandbox({ onTested }: { onTested?: () => void }) {
         </p>
       ) : null}
 
-      <form onSubmit={submit} className="flex flex-col gap-2">
-        <Field>
+      {/* Casos de prueba: cuántos hay y guardar esta conversación como uno. En teléfono la pantalla es solo la conversación. */}
+      <div className="flex flex-col gap-2 border-t pt-3 text-sm max-sm:hidden">
+        <p>
+          {saved === undefined ? (
+            <span className="text-muted-foreground">Casos de prueba</span>
+          ) : saved === 0 ? (
+            "Todavía no guardaste ningún caso de prueba."
+          ) : (
+            <>
+              <strong className="font-semibold">
+                {saved} {saved === 1 ? "caso de prueba" : "casos de prueba"}
+              </strong>{" "}
+              {saved === 1 ? "guardado." : "guardados."}
+            </>
+          )}{" "}
+          <span className="text-muted-foreground">Con ellos se prueba una lección antes de aprobarla.</span>
+        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="min-h-11 sm:min-h-8"
+            disabled={!canSave || saveCase.isPending || saveCase.isSuccess}
+            onClick={() => {
+              if (opening) saveCase.mutate({ question: opening.question, expected: opening.answer.text })
+            }}
+          >
+            Guardar esta como caso
+          </Button>
+          {saveCase.isSuccess ? (
+            <span role="status" className="text-muted-foreground">
+              Guardada: «{saveCase.data.data.question}» con su respuesta.
+            </span>
+          ) : opening && !canSave ? (
+            <span className="text-muted-foreground">Esta respuesta no llegó a salir: no se guarda como caso.</span>
+          ) : null}
+        </div>
+        {saveCase.isError ? (
+          <p role="alert" className="text-destructive">
+            {mutationErrorMessage(saveCase.error)}
+          </p>
+        ) : null}
+      </div>
+
+      <form onSubmit={submit} className="flex shrink-0 items-end gap-2 max-sm:sticky max-sm:bottom-0 max-sm:bg-canvas max-sm:py-3">
+        <Field className="min-w-0 flex-1">
           <FieldLabel htmlFor="probar-mensaje" className="sr-only">
             Mensaje de prueba
           </FieldLabel>
-          <Textarea
+          <Input
             id="probar-mensaje"
-            rows={2}
             value={draft}
+            maxLength={2000}
+            autoComplete="off"
+            enterKeyHint="send"
+            className="h-11 sm:h-9"
             onChange={(event) => setDraft(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" && !event.shiftKey) {
-                event.preventDefault()
-                event.currentTarget.form?.requestSubmit()
-              }
-            }}
-            placeholder="Mensaje de prueba…"
+            placeholder="Escribe como paciente…"
           />
         </Field>
-        <SubmitButton type="submit" pending={send.isPending} disabled={!draft.trim()} className="self-end">
-          Enviar prueba
-        </SubmitButton>
+        <Button
+          type="submit"
+          size="icon"
+          className="size-11 shrink-0 sm:size-9"
+          aria-label="Enviar el mensaje de prueba"
+          disabled={!draft.trim() || send.isPending}
+        >
+          <ArrowRight aria-hidden />
+        </Button>
       </form>
     </section>
   )
 }
 
-/** Debajo de cada respuesta de prueba: lo que hizo, en qué se basó y lo que queda esperando. */
+/** Debajo de cada respuesta de prueba: lo que hizo, en qué se basó y lo que haría después. */
 function TurnDetail({ result }: { result: SandboxResult }) {
   const nothing =
     result.did.length === 0 && result.basis.length === 0 && result.checks.length === 0 && result.waiting.length === 0
@@ -224,7 +353,7 @@ function TurnDetail({ result }: { result: SandboxResult }) {
       ) : null}
       {result.waiting.length > 0 ? (
         <div>
-          <p className="text-xs font-semibold text-muted-foreground">Lo que queda esperando</p>
+          <p className="text-xs font-semibold text-muted-foreground">Lo que haría después</p>
           <ul className="list-disc pl-5">
             {result.waiting.map((line) => (
               <li key={line}>{line}</li>

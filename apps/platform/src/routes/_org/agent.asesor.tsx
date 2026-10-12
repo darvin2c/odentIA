@@ -62,18 +62,19 @@ function AdvisorPage() {
   if (!canRead) {
     return (
       <PageShell>
-        <ErrorState title="Sin acceso" message="No tienes acceso a la configuración del agente." />
+        <ErrorState title="No tienes acceso a esta sección" message="Pídelo a quien administra la clínica. Tus aprobaciones siguen en su pestaña." />
       </PageShell>
     )
   }
   const settings = settingsQuery.data?.data
   const role = rolesQuery.data?.data.roles.find((item) => item.id === "asesor")
+  const principles = rolesQuery.data?.data.principles ?? []
 
   return (
     <PageShell className="flex flex-col gap-6">
       <PageHeader
         title="Asesor"
-        subtitle={role?.audience ?? "Para quien administra, en Inicio"}
+        subtitle={role?.audience}
         actions={
           settings && canWrite ? (
             <label htmlFor="asesor-encendido" className="flex min-h-11 cursor-pointer items-center gap-2 text-sm font-semibold sm:min-h-8">
@@ -96,10 +97,10 @@ function AdvisorPage() {
       </Link>
       {role ? <p className="-mt-2 max-w-prose text-sm">{role.role}</p> : null}
 
-      {settingsQuery.isPending ? (
+      {settingsQuery.isPending || rolesQuery.isPending ? (
         <LoadingState message="Cargando al Asesor…" />
-      ) : settingsQuery.isError || !settings ? (
-        <QueryErrorState error={settingsQuery.error} onRetry={() => void settingsQuery.refetch()} />
+      ) : settingsQuery.isError || !settings || !role ? (
+        <QueryErrorState error={settingsQuery.error ?? rolesQuery.error} onRetry={() => void (settingsQuery.isError ? settingsQuery : rolesQuery).refetch()} />
       ) : (
         <>
           {save.isError ? (
@@ -107,7 +108,7 @@ function AdvisorPage() {
               {mutationErrorMessage(save.error)}
             </p>
           ) : null}
-          <Card id="asesor-detecta" title="Qué detecta" hint="Cada detección se enciende por separado. Muestra hasta tres recomendaciones a la vez en Inicio.">
+          <Card id="asesor-hace" title="Qué hace" hint="Cada detección se enciende por separado. Muestra hasta tres recomendaciones a la vez en Inicio.">
             <ul className="flex flex-col divide-y">
               {settings.detections.map((detection) => (
                 <li key={detection.key} className="flex items-start gap-3 py-3 first:pt-0 last:pb-0">
@@ -170,16 +171,25 @@ function AdvisorPage() {
           >
             <dl className="grid gap-3 text-sm sm:grid-cols-2">
               <div>
-                <dt className="font-semibold">Qué sabe</dt>
-                <dd className="text-muted-foreground">{role?.sees}</dd>
+                <dt className="font-semibold">Quién confirma</dt>
+                <dd className="text-muted-foreground">{role.confirms}</dd>
+              </div>
+              <div>
+                <dt className="font-semibold">Nunca</dt>
+                <dd className="text-muted-foreground">{role.never}</dd>
+              </div>
+            </dl>
+          </Card>
+
+          <Card id="asesor-sabe" title="Qué sabe" hint="De dónde salen sus números, y lo que no lee.">
+            <dl className="grid gap-3 text-sm sm:grid-cols-2">
+              <div>
+                <dt className="font-semibold">Puede ver</dt>
+                <dd className="text-muted-foreground">{role.sees}</dd>
               </div>
               <div>
                 <dt className="font-semibold">No ve</dt>
-                <dd className="text-muted-foreground">{role?.notSees}</dd>
-              </div>
-              <div className="sm:col-span-2">
-                <dt className="font-semibold">Nunca</dt>
-                <dd className="text-muted-foreground">{role?.never}</dd>
+                <dd className="text-muted-foreground">{role.notSees}</dd>
               </div>
             </dl>
             <p className="text-sm text-muted-foreground">
@@ -187,15 +197,56 @@ function AdvisorPage() {
             </p>
           </Card>
 
-          {canWrite ? (
-            <Card
-              id="asesor-vista-previa"
-              title={settings.enabled ? "Lo que recomienda hoy" : "Lo que recomendaría hoy"}
-              hint={settings.enabled ? "Todas las que encuentra ahora, no solo las tres de Inicio." : "Una vista previa con tus datos de ahora, antes de encenderlo. Nadie más la ve."}
-            >
-              <AdvisorPreview />
-            </Card>
-          ) : null}
+          <Card id="asesor-comporta" title="Cómo se comporta" hint="Primero la base que comparten todos los agentes; después cómo recomienda.">
+            <div className="flex flex-col gap-1 text-sm">
+              <p className="font-semibold">La base</p>
+              <ul className="flex list-disc flex-col gap-1 pl-5 text-muted-foreground">
+                {principles.map((principle) => (
+                  <li key={principle}>{principle}</li>
+                ))}
+              </ul>
+            </div>
+            {role.behaves ? (
+              <div className="flex flex-col gap-1 text-sm">
+                <p className="font-semibold">Al recomendar</p>
+                <p className="text-muted-foreground">{role.behaves}</p>
+              </div>
+            ) : null}
+          </Card>
+
+          <Card
+            id="asesor-prueba"
+            title="Cómo se prueba"
+            hint={
+              !canWrite
+                ? (role.testedWith ?? "Con una vista previa de lo que recomendaría hoy.")
+                : settings.enabled
+                  ? "Ya está encendido: esto es todo lo que encuentra ahora, no solo las tres de Inicio."
+                  : `${role.testedWith ?? "Con una vista previa de lo que recomendaría hoy."} Usa tus datos de ahora y nadie más la ve.`
+            }
+          >
+            {canWrite ? <AdvisorPreview /> : <p className="text-sm text-muted-foreground">La vista previa la ve quien administra el agente.</p>}
+          </Card>
+
+          <Card id="asesor-aprende" title="Qué aprende, y de quién es" hint="Lo que cambia con el uso, y a quién le pertenece.">
+            <dl className="grid gap-3 text-sm sm:grid-cols-2">
+              <div>
+                <dt className="font-semibold">Qué aprende</dt>
+                <dd className="text-muted-foreground">{role.learnsFrom}</dd>
+              </div>
+              {role.learningOwner ? (
+                <div>
+                  <dt className="font-semibold">De quién es</dt>
+                  <dd className="text-muted-foreground">{role.learningOwner}</dd>
+                </div>
+              ) : null}
+            </dl>
+            {role.learnsLater ? (
+              <p className="text-sm text-muted-foreground">
+                <span className="font-semibold text-foreground">Más adelante:</span> {role.learnsLater}
+              </p>
+            ) : null}
+          </Card>
         </>
       )}
     </PageShell>

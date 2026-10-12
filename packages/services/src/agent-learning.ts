@@ -17,7 +17,7 @@ import {
 import { user } from "@odentia/db/schema/auth"
 import { channelConnection, contact, conversation, message } from "@odentia/db/schema/crm"
 import { auditEvent } from "@odentia/db/schema/org"
-import { and, asc, count, desc, eq, inArray, sql } from "drizzle-orm"
+import { and, asc, count, desc, eq, inArray, isNull, sql } from "drizzle-orm"
 import { notFound, ServiceError, validation } from "./errors.js"
 import {
   createKnowledgeEntry,
@@ -855,6 +855,54 @@ export async function listTestCases(tx: Db, orgId: string, agent?: string): Prom
     status: row.status as TestCaseItem["status"],
     createdAt: row.createdAt.toISOString(),
   }))
+}
+
+/**
+ * Guarda como caso de prueba una pregunta de «Probar» con la respuesta que
+ * quien administra dio por buena. No nace de una lección: no cambia lo que el
+ * agente sabe ni lo que responde. Guardar otra vez la misma pregunta actualiza
+ * la respuesta esperada en vez de duplicar el caso.
+ */
+export async function saveTestCase(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  input: { question: string; expected: string; agent?: string },
+): Promise<TestCaseItem> {
+  const question = cleanText(input.question, "La pregunta", 2000)
+  const expected = cleanText(input.expected, "La respuesta esperada", 4000)
+  const agent = input.agent ?? "recepcion"
+  const [same] = await tx
+    .select({ id: agentTestCase.id })
+    .from(agentTestCase)
+    .where(
+      and(
+        eq(agentTestCase.organizationId, orgId),
+        eq(agentTestCase.agent, agent),
+        eq(agentTestCase.question, question),
+        isNull(agentTestCase.lessonId),
+      ),
+    )
+    .limit(1)
+  const [row] = same
+    ? await tx
+        .update(agentTestCase)
+        .set({ status: "activo", expected, updatedAt: new Date() })
+        .where(eq(agentTestCase.id, same.id))
+        .returning()
+    : await tx.insert(agentTestCase).values({ organizationId: orgId, agent, question, expected, createdBy: actorUserId }).returning()
+  if (!row) throw validation("No se pudo guardar el caso de prueba")
+  // La auditoría no copia el texto de la conversación de prueba.
+  await audit(tx, orgId, actorUserId, "agent.test_case_saved", "agent_test_case", row.id, { agent, updated: Boolean(same) })
+  return {
+    id: row.id,
+    agent: row.agent,
+    question: row.question,
+    expected: row.expected,
+    lessonId: row.lessonId,
+    status: row.status as TestCaseItem["status"],
+    createdAt: row.createdAt.toISOString(),
+  }
 }
 
 /**

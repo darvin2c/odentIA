@@ -3,6 +3,7 @@ import type { Db } from "@odentia/db"
 import { scheduleChair } from "@odentia/db/schema/agenda"
 import { professionalSchedule } from "@odentia/db/schema/availability"
 import { serviceCatalog } from "@odentia/db/schema/clinical"
+import { organization } from "@odentia/db/schema/auth"
 import { agentConfig, channelConnection } from "@odentia/db/schema/crm"
 import { helpAsk, helpRequest } from "@odentia/db/schema/workspace"
 import { and, count, desc, eq, gte, isNull, sql } from "drizzle-orm"
@@ -195,6 +196,37 @@ export function describeHelpScreen(screen: string): { title: string | null; sugg
 
 /* ---------- Enviar a odentIA ---------- */
 
+/** Lo que acompaña a un envío sin que la persona lo escriba, dicho con sus valores. */
+export interface HelpAttachments {
+  /** Nombre de la pantalla en la guía; su ruta si la guía no la conoce. */
+  screen: string
+  role: string
+  clinic: string | null
+  /** Nula si este despliegue no declara versión: entonces no se envía ninguna. */
+  version: string | null
+}
+
+/**
+ * «Se agrega solo»: lo mismo que `sendHelpRequest` guarda junto a la pregunta
+ * (pantalla, rol, clínica y versión), para mostrarlo antes de enviar. Un dato
+ * nuevo en el envío se añade aquí en el mismo cambio.
+ */
+export async function describeHelpAttachments(
+  tx: Db,
+  orgId: string,
+  asker: Pick<HelpAsker, "roleLabel">,
+  input: { screen: string; appVersion?: string | null },
+): Promise<HelpAttachments> {
+  const [org] = await tx.select({ name: organization.name }).from(organization).where(eq(organization.id, orgId)).limit(1)
+  const screen = input.screen.slice(0, 200)
+  return {
+    screen: helpTopicForScreen(screen)?.title ?? screen,
+    role: asker.roleLabel,
+    clinic: org?.name ?? null,
+    version: input.appVersion?.trim() || null,
+  }
+}
+
 export interface HelpRequestItem {
   id: string
   kind: "pregunta" | "problema"
@@ -273,12 +305,20 @@ export async function listMyHelpRequests(tx: Db, orgId: string, userId: string):
   return rows.map(toRequest)
 }
 
-/** Marca como vistas las respuestas que la persona ya leyó. */
-export async function markHelpRequestsSeen(tx: Db, orgId: string, userId: string): Promise<void> {
+/** Marca como vistas las respuestas que la persona ya leyó: la que abrió con «Ver» o, sin `requestId`, todas. */
+export async function markHelpRequestsSeen(tx: Db, orgId: string, userId: string, requestId?: string): Promise<void> {
   await tx
     .update(helpRequest)
     .set({ seenAt: new Date() })
-    .where(and(eq(helpRequest.organizationId, orgId), eq(helpRequest.userId, userId), eq(helpRequest.status, "respondida"), isNull(helpRequest.seenAt)))
+    .where(
+      and(
+        eq(helpRequest.organizationId, orgId),
+        eq(helpRequest.userId, userId),
+        eq(helpRequest.status, "respondida"),
+        isNull(helpRequest.seenAt),
+        requestId ? eq(helpRequest.id, requestId) : undefined,
+      ),
+    )
 }
 
 /* ---------- Del lado de odentIA: los casos, juntando las preguntas iguales ---------- */

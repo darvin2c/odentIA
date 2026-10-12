@@ -1,4 +1,4 @@
-import { Button, Field, FieldDescription, FieldLabel, Input, Textarea } from "@odentia/ui"
+import { Badge, Button, Field, FieldDescription, FieldLabel, Input, Textarea } from "@odentia/ui"
 import { FormDrawer } from "@odentia/ui-patterns"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { Lock } from "lucide-react"
@@ -73,6 +73,9 @@ function Choice<T extends string>({
 /**
  * La base: lo que odentIA fija para todos los agentes (no se cambia) y la voz
  * de la clínica (se edita aquí). Lo propio de cada agente va en su página.
+ *
+ * Guardar no prueba nada con el modelo: el servidor todavía no sabe responder
+ * los casos de prueba con una voz sin guardar, así que la pantalla no lo promete.
  */
 export function AgentBaseDrawer({
   open,
@@ -131,7 +134,6 @@ export function AgentBaseDrawer({
         onClose()
       }}
       title="La base"
-      description="Lo primero que lee cada agente. Es corta a propósito y la comparten todos."
       onSubmit={submit}
       isSubmitting={save.isPending}
       isDirty={!sameDraft(draft, baseline)}
@@ -141,22 +143,34 @@ export function AgentBaseDrawer({
       hideSubmit={!canWrite}
     >
       <div className="flex flex-col gap-5">
+      <div className="flex flex-col gap-1">
+        <h3 className="font-heading text-lg font-semibold">Quién es y cómo decide</h3>
+        <p className="text-sm text-muted-foreground">
+          Lo primero que lee cada agente. Es corta a propósito, la comparten todos y ninguna indicación ni lección la puede contradecir.
+        </p>
+      </div>
+
       <section aria-labelledby="base-fija" className="flex flex-col gap-2 rounded-xl bg-muted/60 p-4">
-        <h3 id="base-fija" className="flex items-center gap-1.5 text-sm font-semibold">
-          <Lock className="size-4" aria-hidden /> Lo que fija odentIA
-        </h3>
-        <ul className="list-disc pl-5 text-sm">
+        <div className="flex flex-wrap items-center gap-2">
+          <h4 id="base-fija" className="flex min-w-0 flex-1 items-center gap-1.5 text-sm font-semibold">
+            <Lock className="size-4 shrink-0" aria-hidden /> Lo que fija odentIA
+          </h4>
+          <Badge variant="secondary">No se cambia</Badge>
+        </div>
+        <ol className="flex list-decimal flex-col gap-1 pl-5 text-sm">
           {principles.map((line) => (
             <li key={line}>{line}</li>
           ))}
-        </ul>
-        <p className="text-xs text-muted-foreground">No se cambia: ninguna indicación ni lección puede contradecirlo.</p>
+        </ol>
       </section>
 
       <section aria-labelledby="base-voz" className="flex flex-col gap-4">
-        <h3 id="base-voz" className="text-sm font-semibold">
-          La voz de tu clínica
-        </h3>
+        <div className="flex flex-wrap items-center gap-2">
+          <h4 id="base-voz" className="min-w-0 flex-1 text-sm font-semibold">
+            La voz de tu clínica
+          </h4>
+          {canWrite ? <Badge variant="outline">La editas tú</Badge> : null}
+        </div>
         <Field>
           <FieldLabel htmlFor="base-nombre">Se presenta como</FieldLabel>
           <Input
@@ -196,6 +210,16 @@ export function AgentBaseDrawer({
           </p>
           <span className="text-xs text-muted-foreground">Es una muestra del estilo. La respuesta real la redacta el agente.</span>
         </div>
+      </section>
+
+      <section aria-labelledby="base-encima" className="flex flex-col gap-1 rounded-xl border p-4">
+        <h4 id="base-encima" className="text-sm font-semibold">
+          Encima de la base, cada agente suma lo suyo
+        </h4>
+        <p className="text-sm text-muted-foreground">
+          Recepción, el asistente clínico y el asesor tienen sus propias funciones y las reglas que aprendieron de tus correcciones. Eso no se
+          mezcla entre ellos.
+        </p>
       </section>
       </div>
     </FormDrawer>

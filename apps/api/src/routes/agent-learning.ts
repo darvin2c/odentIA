@@ -11,6 +11,7 @@ import {
   markAnswerOk,
   markReviewOk,
   restoreLesson,
+  saveTestCase,
   updateLesson,
   withdrawLesson,
 } from "@odentia/services"
@@ -35,6 +36,8 @@ const lessonPatch = z.object({
   kind: z.enum(["respuesta_oficial", "regla", "ejemplo"]).optional(),
   knowledgeEntryId: z.null().optional(),
 })
+
+const caseInput = z.object({ question: z.string().trim().min(1).max(2000), expected: z.string().trim().min(1).max(4000) })
 
 const withdrawInput = z.object({ withdrawCase: z.boolean().optional() })
 
@@ -61,6 +64,15 @@ export function createAgentLearningRoute(deps: AgentLearningDeps) {
     const { orgId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "agent.read")) return forbidden(c)
     return runService(c, 200, () => withOrgContext(deps.db, orgId, (tx) => listTestCases(tx, orgId)))
+  })
+
+  // Guardar una conversación de «Probar» como caso: la da por buena quien administra el agente.
+  app.post("/cases", async (c) => {
+    const { orgId, memberRole, userId } = orgContextOf(c)
+    if (!canAccess(memberRole, "agent.write")) return forbidden(c)
+    const parsed = caseInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 201, () => withOrgContext(deps.db, orgId, (tx) => saveTestCase(tx, orgId, userId, parsed.data)))
   })
 
   app.post("/review/:id/ok", async (c) => {
