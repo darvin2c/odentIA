@@ -40,6 +40,7 @@ import {
   Wallet,
   Workflow,
 } from "lucide-react"
+import { useEffect } from "react"
 import {
   AGENT_PANEL_EVENTS,
   AgentPanelButton,
@@ -52,9 +53,41 @@ import { invalidateAppointmentQueries } from "../lib/agenda"
 import { authClient } from "../lib/auth-client"
 import { requireVerifiedSession, ssrFetchOptions } from "../lib/guards"
 import { orgSlugFromHostname, panelUrl, requestHostname, tenantUrl } from "../lib/host"
+import { notifyOrgLocale, setOrgLocale } from "../lib/locale"
+import { fetchOrgProfile, useOrgProfile } from "../lib/org"
 import { useOrgEvents } from "../lib/org-events"
 import { PageDraftGuard } from "../lib/page-draft-guard"
 import { RouterLink } from "../lib/router-link"
+
+/**
+ * Formato regional de la clínica, conocido antes del primer render para que
+ * ninguna fecha se pinte con otro formato. En el navegador se pide una vez por
+ * sesión de pantalla (el host es de una sola clínica); después lo mantiene al
+ * día la consulta del perfil que observa el layout. Sin perfil: `undefined`,
+ * el formato del navegador.
+ */
+interface OrgRegion {
+  locale: string | undefined
+  timeZone: string | undefined
+}
+let orgRegionLoaded: OrgRegion | null = null
+async function loadOrgRegion(): Promise<OrgRegion> {
+  if (typeof window !== "undefined" && orgRegionLoaded) return orgRegionLoaded
+  try {
+    const profile = await fetchOrgProfile()
+    const region = {
+      locale: profile?.locale?.trim() || undefined,
+      timeZone: profile?.timezone?.trim() || undefined,
+    }
+    if (typeof window !== "undefined") {
+      orgRegionLoaded = region
+      setOrgLocale(region.locale, region.timeZone)
+    }
+    return region
+  } catch {
+    return { locale: undefined, timeZone: undefined }
+  }
+}
 
 export const Route = createFileRoute("/_org")({
   beforeLoad: async ({ location }) => {
@@ -75,7 +108,7 @@ export const Route = createFileRoute("/_org")({
     const role = data.members.find((member) => member.userId === session.userId)?.role ?? "member"
     const permissions = platformPathPermission(location.pathname)
     if (permissions && !canAccessAny(role, permissions)) throw redirect({ to: "/home" })
-    return { session, org: data }
+    return { session, org: data, region: await loadOrgRegion() }
   },
   component: OrgLayout,
 })
@@ -177,7 +210,16 @@ function OrgSwitcher() {
 }
 
 function OrgLayout() {
-  const { org, session } = orgRouteApi.useRouteContext()
+  const { org, session, region } = orgRouteApi.useRouteContext()
+  // El formato de la clínica queda fijado antes de pintar las pantallas hijas
+  // (también en SSR e hidratación); si el perfil cambia, se avisa a quien lo usa.
+  const profile = useOrgProfile()
+  const activeLocale = profile.data === undefined ? region.locale : profile.data?.locale
+  const activeTimeZone = profile.data === undefined ? region.timeZone : profile.data?.timezone
+  setOrgLocale(activeLocale, activeTimeZone)
+  useEffect(() => {
+    notifyOrgLocale()
+  }, [activeLocale, activeTimeZone])
   const pathname = useRouterState({ select: (state) => state.location.pathname })
   const role = org.members.find((member) => member.userId === session?.userId)?.role ?? "member"
   const queryClient = useQueryClient()

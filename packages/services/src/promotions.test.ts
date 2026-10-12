@@ -134,6 +134,18 @@ it("la vencida deja de ofrecerse y lo cobrado no cambia", async () => {
   await expect(
     f.run((tx) => requirePromotionPrice(tx, "org_a", promo.id, f.service.id, 38000)),
   ).rejects.toMatchObject({ code: "PROMOTION_NOT_LIVE" })
+  // Terminada no se alarga: se crea otra. El nombre sí se puede corregir.
+  await expect(
+    f.run((tx) =>
+      updatePromotion(tx, f.args[0], f.args[1], promo.id, {
+        endsAt: new Date(now + 30 * DAY).toISOString(),
+      }),
+    ),
+  ).rejects.toMatchObject({ code: "PROMOTION_ENDED" })
+  const renamed = await f.run((tx) =>
+    updatePromotion(tx, f.args[0], f.args[1], promo.id, { name: "Madre mayo 2026" }),
+  )
+  expect(renamed.name).toBe("Madre mayo 2026")
   const live = await f.run((tx) =>
     createPromotion(tx, f.args[0], f.args[1], {
       name: "Temporal",

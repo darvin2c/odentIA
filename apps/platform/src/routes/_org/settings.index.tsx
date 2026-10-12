@@ -20,7 +20,7 @@ import { createFileRoute, getRouteApi } from "@tanstack/react-router"
 import { type FormEvent, useEffect, useState } from "react"
 import { z } from "zod"
 import { usePermission } from "../../lib/crm"
-import { fetchOrgProfile, type OrgProfile, type OrgProfileInput, saveOrgProfile, useOrgProfile } from "../../lib/org"
+import { fetchOrgProfile, fetchRegionDefaults, type OrgProfile, type OrgProfileInput, saveOrgProfile, useOrgProfile } from "../../lib/org"
 import { PageDraftGuard, sameDraft } from "../../lib/page-draft-guard"
 
 export const Route = createFileRoute("/_org/settings/")({
@@ -78,9 +78,10 @@ const emptyValues: ProfileValues = {
   billingEmail: "",
   fiscalAddress: "",
   countryCode: DEFAULT_COUNTRY,
-  currency: "PEN",
-  timezone: "America/Lima",
-  locale: "es-PE",
+  // Moneda, zona y formato los propone el país al cargar el formulario.
+  currency: "",
+  timezone: "",
+  locale: "",
   receiptWidth: "80",
   sheetSize: "A4",
   ticketFooter: "Recibo interno. No es un documento fiscal.",
@@ -136,7 +137,6 @@ function toInput(values: ProfileValues): OrgProfileInput {
     receiptWidth: values.receiptWidth,
     sheetSize: values.sheetSize,
     ticketFooter: values.ticketFooter.trim(),
-    ...(values.applyCountryPreset ? { applyCountryPreset: true } : {}),
   }
 }
 
@@ -240,6 +240,30 @@ function ProfileForm({
   // árbol. El desfase, en cambio, es el mismo en los dos lados.
   const [localTime, setLocalTime] = useState<string | null>(null)
   useEffect(() => setLocalTime(zone?.localTime ?? null), [zone?.localTime])
+  // Al elegir país se propone lo que cambia con él. Queda escrito en el
+  // formulario, a la vista, y nada se guarda hasta pulsar Guardar. Lo que el
+  // país no permite deducir (una moneda desconocida, varias zonas) queda como
+  // estaba para que la persona lo elija.
+  const proposeRegion = async (nextCountry: string) => {
+    try {
+      const language = form.state.values.locale.split("-")[0] || undefined
+      const proposal = await fetchRegionDefaults(nextCountry, language)
+      if (proposal.currency) form.setFieldValue("currency", proposal.currency)
+      form.setFieldValue("locale", proposal.locale)
+      const zoneProposal = proposal.timezone ?? zonesForCountry(nextCountry)[0]
+      if (zoneProposal) form.setFieldValue("timezone", zoneProposal)
+      form.setFieldValue("sheetSize", proposal.sheetSize)
+    } catch {
+      toast.error("No pudimos proponer los datos de ese país: complétalos a mano.")
+    }
+  }
+  // Una clínica sin perfil parte de lo que propone su país, no de valores fijos.
+  const needsProposal = !values.currency
+  useEffect(() => {
+    if (needsProposal) void proposeRegion(values.countryCode)
+    // Solo al montar: después manda lo que la persona escriba.
+    // biome-ignore lint/correctness/useExhaustiveDependencies: propuesta inicial única
+  }, [needsProposal])
 
   return (
     <form
@@ -285,7 +309,6 @@ function ProfileForm({
                 <Input
                   id="org-doc-type"
                   value={field.state.value}
-                  placeholder="RUC"
                   onChange={(event) => field.handleChange(event.target.value)}
                 />
               </Field>
@@ -342,10 +365,14 @@ function ProfileForm({
               <CountrySelect
                 id="org-country"
                 value={normalizeCountry(field.state.value) ?? DEFAULT_COUNTRY}
-                onChange={(next: CountryCode) => field.handleChange(next)}
+                onChange={(next: CountryCode) => {
+                  field.handleChange(next)
+                  void proposeRegion(next)
+                }}
               />
               <FieldDescription>
-                Define el formato de los teléfonos y las zonas horarias sugeridas.
+                Define el formato de los teléfonos. Al cambiarlo se proponen aquí abajo su zona
+                horaria, moneda, formato y papel: revísalos antes de guardar.
               </FieldDescription>
               <FieldError>{fieldErrorMessages(field.state.meta.errors)[0] ?? null}</FieldError>
             </Field>
@@ -401,7 +428,6 @@ function ProfileForm({
                 <Input
                   id="org-locale"
                   value={field.state.value}
-                  placeholder="es-PE"
                   onChange={(event) => field.handleChange(event.target.value)}
                 />
                 <FieldError>{fieldErrorMessages(field.state.meta.errors)[0] ?? null}</FieldError>
@@ -409,27 +435,6 @@ function ProfileForm({
             )}
           </form.Field>
         </div>
-        <form.Field name="applyCountryPreset">
-          {(field) => (
-            <Field orientation="horizontal">
-              <input
-                id="org-apply-preset"
-                type="checkbox"
-                checked={field.state.value}
-                onChange={(event) => field.handleChange(event.target.checked)}
-              />
-              <div>
-                <FieldLabel htmlFor="org-apply-preset">
-                  Proponer moneda, formato, papel y medios al cambiar de país
-                </FieldLabel>
-                <FieldDescription>
-                  Todo se puede cambiar después; los medios se inicializan solo si la
-                  clínica aún no tiene ninguno.
-                </FieldDescription>
-              </div>
-            </Field>
-          )}
-        </form.Field>
       </section>
 
       <section className="flex flex-col gap-4 elevated rounded-xl border bg-card p-6">

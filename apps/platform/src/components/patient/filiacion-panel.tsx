@@ -23,6 +23,7 @@ import {
   useBranches,
 } from "./filiacion-section-drawer"
 import { useUbigeoLabel } from "./ubigeo-field"
+import { activeOrgLocale } from "../../lib/locale"
 
 const missing = <span className="text-muted-foreground">No registrado</span>
 
@@ -137,7 +138,7 @@ export function FiliacionPanel({ detail }: { detail: PatientFull }) {
           </Item>
           <Item label="Nacimiento">
             {p.birthDate
-              ? `${new Date(`${p.birthDate}T12:00:00`).toLocaleDateString("es-PE", { day: "numeric", month: "short", year: "numeric" })}${age ? ` · ${age}` : ""}`
+              ? `${new Date(`${p.birthDate}T12:00:00`).toLocaleDateString(activeOrgLocale(), { day: "numeric", month: "short", year: "numeric" })}${age ? ` · ${age}` : ""}`
               : null}
           </Item>
           <Item label="Sexo">{p.sex ? sexLabel(p.sex) : null}</Item>
@@ -213,7 +214,7 @@ export function FiliacionPanel({ detail }: { detail: PatientFull }) {
             </Item>
             <Item label="Registrado">
               {detail.registration
-                ? `${new Date(detail.registration.createdAt).toLocaleDateString("es-PE")} · ${detail.registration.entryPoint === "platform" ? "alta interna" : "registro público"}`
+                ? `${new Date(detail.registration.createdAt).toLocaleDateString(activeOrgLocale())} · ${detail.registration.entryPoint === "platform" ? "alta interna" : "registro público"}`
                 : null}
             </Item>
           </dl>

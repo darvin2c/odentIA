@@ -3,7 +3,7 @@ import type { Auth } from "@odentia/auth"
 import { type Db, sendDemoTask, withOrgContext } from "@odentia/db"
 import { message } from "@odentia/db/schema/crm"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
-import { type MailboxEnv, type Storage, updateOrgRegion } from "@odentia/services"
+import { initialOrgRegion, type MailboxEnv, regionPresetForCountry, type Storage, updateOrgRegion } from "@odentia/services"
 import { and, eq, gt, inArray, sql } from "drizzle-orm"
 import { type Context, Hono } from "hono"
 import { cors } from "hono/cors"
@@ -95,7 +95,7 @@ const branchPatch = branchInput.partial()
 const orgProfileInput = z.object({
   legalName: z.string().min(1).max(200),
   tradeName: z.string().max(200).optional(),
-  fiscalDocType: z.string().max(20).optional(),
+  fiscalDocType: z.string().max(20).nullish(),
   fiscalDocNumber: z.string().max(20).optional(),
   billingEmail: z.string().email().optional(),
   fiscalAddress: z.string().max(300).optional(),
@@ -283,6 +283,19 @@ export function createApp(deps: AppDeps) {
     return c.json({ data: { url } }, 201)
   })
 
+  // Lo que se propone al elegir país: moneda, formato, zona y papel. Es dato
+  // de referencia, no de una organización: el alta lo consulta antes de que
+  // la clínica exista, por eso solo exige sesión.
+  userScoped.get("/org-profile/region-defaults", (c) => {
+    const parsed = z
+      .object({ countryCode: z.string().regex(/^[A-Za-z]{2}$/), language: z.string().max(8).optional() })
+      .safeParse(c.req.query())
+    if (!parsed.success) {
+      return c.json(errorBody(c, "VALIDATION", parsed.error.issues[0]?.message ?? "Datos inválidos"), 400)
+    }
+    return c.json({ data: regionPresetForCountry(parsed.data.countryCode, parsed.data.language) })
+  })
+
   // Webhooks de proveedor ANTES que los routers con guards: el use("*") de
   // userScoped/guarded también casa /api/webhooks/* y respondería 401.
   app.route(
@@ -340,13 +353,21 @@ export function createApp(deps: AppDeps) {
         .where(eq(orgProfile.organizationId, orgId))
         .for("update")
       const { countryCode, currency, timezone, locale, receiptWidth, sheetSize, ticketFooter, applyCountryPreset, ...identity } = input
-      await tx
-        .insert(orgProfile)
-        .values({ organizationId: orgId, ...identity })
-        .onConflictDoUpdate({
-          target: orgProfile.organizationId,
-          set: { ...identity, updatedAt: new Date() },
-        })
+      if (current) {
+        await tx
+          .update(orgProfile)
+          .set({ ...identity, updatedAt: new Date() })
+          .where(eq(orgProfile.organizationId, orgId))
+      } else {
+        // El perfil nace con su región explícita: la base no asume ningún país.
+        await tx
+          .insert(orgProfile)
+          .values({
+            organizationId: orgId,
+            ...identity,
+            ...initialOrgRegion({ countryCode, currency, timezone, locale, sheetSize }),
+          })
+      }
       const updated = await updateOrgRegion(tx, orgId, userId, {
         countryCode, currency, timezone, locale, receiptWidth, sheetSize, ticketFooter,
         applyCountryPreset: applyCountryPreset ?? !current,

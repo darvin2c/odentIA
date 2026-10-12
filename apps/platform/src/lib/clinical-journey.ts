@@ -19,6 +19,7 @@ import type {
   TreatmentNextAction,
   TreatmentPlan,
 } from "./patients"
+import { activeOrgLocale } from "./locale"
 
 const base = (patientId: string) => `/api/patients/${patientId}`
 
@@ -31,29 +32,20 @@ export function mutationMessage(err: unknown): string {
   return err instanceof Error ? err.message : "No se pudo guardar. Inténtalo de nuevo."
 }
 
-/** Fecha corta en español (es-PE); "—" cuando el valor falta o es inválido. */
+/** Fecha corta, en el formato de la clínica; "—" cuando el valor falta o es inválido. */
 export function formatDate(value: string | null | undefined): string {
   if (!value) return "—"
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return "—"
-  return date.toLocaleDateString("es-PE", { day: "2-digit", month: "2-digit", year: "numeric" })
+  return date.toLocaleDateString(activeOrgLocale(), { day: "2-digit", month: "2-digit", year: "numeric" })
 }
 
-/** Importe escrito por una persona a centavos enteros; null si no es un positivo válido. */
-export function centsFromInput(value: string): number | null {
-  const normalized = value.trim().replace(",", ".")
-  if (!/^\d+(?:\.\d{1,2})?$/.test(normalized)) return null
-  const [whole, fraction = ""] = normalized.split(".")
-  const cents = Number(whole) * 100 + Number(fraction.padEnd(2, "0"))
-  return Number.isSafeInteger(cents) && cents > 0 ? cents : null
-}
-
-/** Fecha y hora cortas en español (es-PE) para citas y controles. */
+/** Fecha y hora cortas, en el formato de la clínica para citas y controles. */
 export function formatDateTime(value: string | null | undefined): string {
   if (!value) return "—"
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return "—"
-  return date.toLocaleString("es-PE", {
+  return date.toLocaleString(activeOrgLocale(), {
     day: "2-digit",
     month: "2-digit",
     year: "numeric",
@@ -282,7 +274,7 @@ export interface PrescriptionPrint {
   establishment: {
     legalName: string
     tradeName: string | null
-    fiscalDocType: string
+    fiscalDocType: string | null
     fiscalDocNumber: string | null
     address: string | null
   } | null

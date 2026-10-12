@@ -9,6 +9,7 @@ import { ACTION_LABEL, permissionForAction, proposalErrorMessage, type AgentHand
 import { channelLabel } from "../../lib/channels"
 import { usePermission } from "../../lib/crm"
 import { useOrgEvents } from "../../lib/org-events"
+import { activeOrgLocale } from "../../lib/locale"
 
 export const Route = createFileRoute("/_org/agent/approvals")({
   validateSearch: (search: Record<string, unknown>): { conversationId?: string; status?: string } => ({
@@ -136,7 +137,7 @@ function AgentApprovalsPage() {
           const needed = permissionForAction(proposal.action)
           const authorized = canDecide && (needed === "conversations.write" ? canConversations : needed === "appointments.write" ? canAgenda : canCrm)
           return <li key={proposal.id} className="flex min-w-0 flex-col gap-3 elevated rounded-xl border bg-card p-5">
-            <div className="flex flex-wrap items-center gap-2"><Badge variant={proposal.status === "propuesta" ? "default" : "secondary"}>{STATUS_LABEL[proposal.status] ?? proposal.status}</Badge><h2 className="font-medium">{ACTION_LABEL[proposal.action] ?? proposal.action}</h2><span className="text-xs text-muted-foreground">{new Date(proposal.createdAt).toLocaleString("es-PE")}</span></div>
+            <div className="flex flex-wrap items-center gap-2"><Badge variant={proposal.status === "propuesta" ? "default" : "secondary"}>{STATUS_LABEL[proposal.status] ?? proposal.status}</Badge><h2 className="font-medium">{ACTION_LABEL[proposal.action] ?? proposal.action}</h2><span className="text-xs text-muted-foreground">{new Date(proposal.createdAt).toLocaleString(activeOrgLocale())}</span></div>
             <p className="font-medium">{proposal.context.contactName ?? "Interlocutor no disponible"}{proposal.context.channel ? ` · ${channelLabel(proposal.context.channel)}` : ""}</p>
             <dl className="grid gap-2 text-sm sm:grid-cols-2">
               {proposal.context.patientName && <div><dt className="text-muted-foreground">Paciente</dt><dd>{proposal.context.patientName}</dd></div>}
@@ -151,7 +152,7 @@ function AgentApprovalsPage() {
             {proposal.conversationId && <Link to="/inbox" search={{ conversation: proposal.conversationId }} className="text-sm text-primary underline">Abrir conversación y evidencia</Link>}
             {!proposal.conversationId && typeof proposal.payload.opportunityId === "string" && <Link to="/opportunities/$opportunityId" params={{ opportunityId: proposal.payload.opportunityId }} className="text-sm text-primary underline">Abrir oportunidad</Link>}
             {proposalErrorMessage(proposal) && <p role="alert" className="text-sm text-destructive">{proposalErrorMessage(proposal)}</p>}
-            {proposal.status === "ejecutada" && <p role="status" className="text-sm">Cambio ejecutado{proposal.executedAt ? ` · ${new Date(proposal.executedAt).toLocaleString("es-PE")}` : ""}. {typeof proposal.result?.messageId === "string" ? "Mensaje encolado; consulta su estado de entrega en el hilo." : "Consulta el estado actualizado en el caso."}</p>}
+            {proposal.status === "ejecutada" && <p role="status" className="text-sm">Cambio ejecutado{proposal.executedAt ? ` · ${new Date(proposal.executedAt).toLocaleString(activeOrgLocale())}` : ""}. {typeof proposal.result?.messageId === "string" ? "Mensaje encolado; consulta su estado de entrega en el hilo." : "Consulta el estado actualizado en el caso."}</p>}
             {(proposal.status === "fallida" || proposal.status === "expirada") && <p role="alert" className="text-sm">Esta propuesta no se ejecutó ({STATUS_LABEL[proposal.status] ?? proposal.status}). Gestiona la acción manualmente desde el caso y su conversación; aquí no hay reintento.</p>}
             {authorized && canConversations && proposal.status === "propuesta" && proposal.mode === "confirmar_usuario" && <div className="flex flex-wrap gap-2">
               <SubmitButton size="sm" pending={confirmMutation.isPending} disabled={!proposal.contactId} onClick={() => { confirmMutation.reset(); confirmMutation.mutate(proposal) }}>Registrar confirmación del interlocutor</SubmitButton>
@@ -197,7 +198,7 @@ function AgentApprovalsPage() {
                 <p className="whitespace-pre-wrap text-muted-foreground">{handoff.summary}</p>
                 <p className="text-muted-foreground">
                   {handoff.assigneeUserId ? "Responsable asignado" : "En cola por recoger"}
-                  {handoff.dueAt ? ` · vence ${new Date(handoff.dueAt).toLocaleString("es-PE")}` : ""}
+                  {handoff.dueAt ? ` · vence ${new Date(handoff.dueAt).toLocaleString(activeOrgLocale())}` : ""}
                 </p>
                 <div className="flex flex-wrap items-center gap-3">
                   {handoff.conversationId ? (

@@ -10,7 +10,6 @@ import { usePermission } from "../../lib/crm"
 import { useOrgProfile } from "../../lib/org"
 import { type ManagementReport, moneyFromCents, stateLabel } from "../../lib/workspace"
 import { QueryErrorState } from "../../lib/query-error"
-import { ChoiceSelect } from "../../components/ui/choice-select"
 
 export const Route = createFileRoute("/_org/reports")({ component: ReportsPage })
 function ReportsPage() {
@@ -19,11 +18,6 @@ function ReportsPage() {
   const [from, setFrom] = useState("")
   const [to, setTo] = useState("")
   const [period, setPeriod] = useState<{ from: string; to: string } | null>(null)
-  const [resultYear, setResultYear] = useState("")
-  const [resultMonth, setResultMonth] = useState("")
-  const [resultBranch, setResultBranch] = useState("")
-  const [resultCurrency, setResultCurrency] = useState("")
-  const [resultMonthInit, setResultMonthInit] = useState(false)
   useEffect(() => {
     if (!profile.data?.timezone || period) return
     const parts = new Intl.DateTimeFormat("en-CA", { timeZone: profile.data.timezone, year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date())
@@ -34,25 +28,13 @@ function ReportsPage() {
     setTo(today)
     setPeriod({ from: first, to: today })
   }, [profile.data?.timezone, period])
-  useEffect(() => {
-    if (!profile.data?.timezone || resultMonthInit) return
-    const parts = new Intl.DateTimeFormat("en-CA", { timeZone: profile.data.timezone, year: "numeric", month: "2-digit" }).formatToParts(new Date())
-    const part = (name: string) => parts.find(item => item.type === name)?.value ?? ""
-    setResultYear(part("year"))
-    setResultMonth(part("month"))
-    setResultMonthInit(true)
-  }, [profile.data?.timezone, resultMonthInit])
-  const branchesQuery = useQuery({
-    queryKey: ["branches"],
-    queryFn: () => apiFetch<{ data: Array<{ id: string; name: string }> }>("/api/branches"),
-    enabled: allowed,
-    retry: false,
-  })
   const query = useQuery({ queryKey: ["management-report", period], enabled: allowed && period !== null, retry: false,
     queryFn: () => apiFetch<{ data: ManagementReport }>(`/api/workspace/reports?from=${period?.from}&to=${period?.to}`) })
   const report = query.data?.data
   if (!allowed) return <PageShell><PageHeader title="Reportes" /><ErrorState title="Sin acceso" message="No tienes permiso para consultar reportes. Solicita acceso a la administración." /></PageShell>
   return <PageShell className="flex flex-col gap-6"><PageHeader title="Reportes" subtitle="Resultados de la clínica, separados por moneda y sin mezclar cobros con producción." />
+    {/* Lo primero que busca quien dirige la clínica: elige su propio mes y su sede. */}
+    <MonthlyResultPanel />
     <form className="flex flex-wrap items-end gap-3" onSubmit={event => { event.preventDefault(); setPeriod({ from, to }) }}>
       <label htmlFor="report-from" className="flex flex-col gap-1 text-sm">Desde<Input id="report-from" type="date" required value={from} max={to} onChange={event => setFrom(event.target.value)} /></label>
       <label htmlFor="report-to" className="flex flex-col gap-1 text-sm">Hasta<Input id="report-to" type="date" required value={to} min={from} onChange={event => setTo(event.target.value)} /></label><Button type="submit">Consultar</Button>
@@ -71,19 +53,6 @@ function ReportsPage() {
       </div>
       <PerformanceSummary data={report.performance} />
     </> : null}
-    <ReportSection title="Resultado del mes" description="Cuánto se cobró, se gastó y quedó, por moneda y sin mezclar. Ya descontadas las devoluciones y anulaciones del mes.">
-      <form className="mb-4 flex flex-wrap items-end gap-3" onSubmit={event => event.preventDefault()}>
-        <label htmlFor="result-year" className="flex flex-col gap-1 text-sm">Año<Input id="result-year" inputMode="numeric" required value={resultYear} onChange={event => setResultYear(event.target.value)} /></label>
-        <label htmlFor="result-month" className="flex flex-col gap-1 text-sm">Mes (1–12)<Input id="result-month" inputMode="numeric" required value={resultMonth} onChange={event => setResultMonth(event.target.value)} /></label>
-        <label htmlFor="result-branch" className="flex flex-col gap-1 text-sm">Sede<ChoiceSelect id="result-branch" className="h-9 rounded-md border bg-background px-3 text-sm" value={resultBranch} onChange={event => setResultBranch(event.target.value)}><option value="">Todas las sedes</option>{(branchesQuery.data?.data ?? []).map(branch => <option key={branch.id} value={branch.id}>{branch.name}</option>)}</ChoiceSelect></label>
-        <label htmlFor="result-currency" className="flex flex-col gap-1 text-sm">Moneda (vacío = todas)<Input id="result-currency" className="uppercase" maxLength={3} value={resultCurrency} onChange={event => setResultCurrency(event.target.value.toUpperCase())} /></label>
-      </form>
-      {/^\d{4}$/.test(resultYear) && /^(0?[1-9]|1[0-2])$/.test(resultMonth) && (resultCurrency === "" || /^[A-Z]{3}$/.test(resultCurrency)) ? (
-        <MonthlyResultPanel year={Number(resultYear)} month={Number(resultMonth)} branchId={resultBranch || undefined} currency={resultCurrency || undefined} />
-      ) : (
-        <EmptyState title="Elige el mes" description="Año de cuatro cifras y mes del 1 al 12 para ver el resultado." />
-      )}
-    </ReportSection>
   </PageShell>
 }
 function ReportSection({ title, description, children }: { title: string; description: string; children: ReactNode }) {

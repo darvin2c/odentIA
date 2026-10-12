@@ -4,7 +4,9 @@ import {
   endPromotion,
   getPromotion,
   getPromotionMetrics,
+  isPromotionLive,
   listPromotions,
+  type PromotionRow,
   updatePromotion,
 } from "@odentia/services"
 import { Hono } from "hono"
@@ -16,14 +18,32 @@ import { type CrmDeps, runService, validationError } from "./helpers.js"
 /**
  * Promociones (propiedad PresupuestosPromociones, fase 5).
  * - GET /?scope=vigentes|todas&serviceId= → lista (caja y presupuestos leen
- *   vigentes; `catalog.read` la ven todos los roles operativos).
+ *   vigentes; `catalog.read` la ven todos los roles operativos). Cada una
+ *   trae su `state` y, para quien ve dinero, sus métricas de uso y cobrado.
  * - POST / { name, startsAt, endsAt?, conditions?, items } → 201
- * - GET /:id → detalle con servicios y métricas de uso/cobrado
+ * - GET /:id → detalle con servicios, `state` y métricas de uso/cobrado
  * - PATCH /:id { name?, startsAt?, endsAt?, conditions?, isActive?, items? }
  * - POST /:id/end {} → termina hoy (lo usado conserva su snapshot)
  * Mutaciones solo administración (`settings.write`).
  * Dinero solo en centavos enteros; modo fixed|from según servicio.
  */
+
+/**
+ * En qué momento está la promoción, con la misma regla que decide si se
+ * ofrece (`isPromotionLive`): la pantalla lo lee, no lo deduce con su reloj.
+ */
+function promotionState(row: PromotionRow, at: Date): "programada" | "vigente" | "terminada" {
+  if (isPromotionLive(row, at)) return "vigente"
+  return row.isActive && row.startsAt > at ? "programada" : "terminada"
+}
+
+/**
+ * Cuánto se usó y cuánto se cobró con una promoción es dato económico: lo ve
+ * caja y quien configura. Recepción y odontología leen la promoción, no su caja.
+ */
+function seesPromotionMoney(memberRole: string): boolean {
+  return canAccess(memberRole, "finance.read") || canAccess(memberRole, "settings.read")
+}
 const promotionItemInput = z
   .object({
     serviceId: z.uuid(),
@@ -70,13 +90,25 @@ export function createPromotionsRoute(deps: Pick<CrmDeps, "db">) {
     }
     const parsed = promotionsQuery.safeParse(c.req.query())
     if (!parsed.success) return validationError(c, parsed.error.issues)
+    const withMoney = seesPromotionMoney(memberRole)
     return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) =>
-        listPromotions(tx, orgId, {
+      withOrgContext(deps.db, orgId, async (tx) => {
+        const at = new Date()
+        const promotions = await listPromotions(tx, orgId, {
           vigentesOnly: (parsed.data.scope ?? "vigentes") === "vigentes",
           serviceId: parsed.data.serviceId,
-        }),
-      ),
+          at,
+        })
+        const list = []
+        for (const promotion of promotions) {
+          list.push({
+            ...promotion,
+            state: promotionState(promotion, at),
+            metrics: withMoney ? await getPromotionMetrics(tx, orgId, promotion.id) : null,
+          })
+        }
+        return list
+      }),
     )
   })
 
@@ -100,8 +132,10 @@ export function createPromotionsRoute(deps: Pick<CrmDeps, "db">) {
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, async (tx) => {
         const promotion = await getPromotion(tx, orgId, c.req.param("id"))
+        const state = promotionState(promotion, new Date())
+        if (!seesPromotionMoney(memberRole)) return { ...promotion, state, metrics: null }
         const metrics = await getPromotionMetrics(tx, orgId, c.req.param("id"))
-        return { ...promotion, metrics }
+        return { ...promotion, state, metrics }
       }),
     )
   })

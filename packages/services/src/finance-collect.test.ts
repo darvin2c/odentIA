@@ -1,7 +1,6 @@
 /**
  * Cobro atómico: idempotencia, concurrencia sin duplicados ni saltos, saldo a
  * favor automático, anulación antes/después del cierre y moneda extranjera.
- * (Escrito sin ejecutar: lo corre la verificación conjunta del integrador.)
  */
 import { randomUUID } from "node:crypto"
 import type { Db } from "@odentia/db"
@@ -310,7 +309,7 @@ it("el cierre congela hoja imprimible e historial", async () => {
     retainedCents: 5000,
     deliveredCents: 25000,
   })
-  expect(sheet.totalsByMethod).toEqual([{ name: "Yape", count: 1, amountCents: 50000 }])
+  expect(sheet.totalsByMethod).toMatchObject([{ name: "Yape", count: 1, amountCents: 50000, refundedCents: 0 }])
 })
 
 it("aplica solo el saldo a favor sin dinero nuevo", async () => {

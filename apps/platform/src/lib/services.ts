@@ -1,4 +1,6 @@
+import { currencyFractionDigits } from "@odentia/clinical"
 import { apiFetch } from "./api"
+import { amountFromCents } from "./workspace"
 
 /** Oferta del tarifario de la clínica (contrato GET /api/services). */
 export interface ServiceCatalogItem {
@@ -27,7 +29,7 @@ export interface TreatmentTemplateItem {
   scope: "general" | "tooth" | "surfaces" | "quadrant" | "arch"
   surfaceCountMin: number | null
   surfaceCountMax: number | null
-  /** Proyección 1:1 de un código oficial: exactamente un elemento (CPMS primero). */
+  /** Proyección 1:1 de un código oficial de la biblioteca: el primario primero. */
   codings: Array<{ system: string; code: string; version: string; display: string }>
 }
 
@@ -95,6 +97,32 @@ export const SPECIALTY_FILTER_OPTIONS = [
 
 /** Máximo entero admitido por la columna PG integer. */
 export const MAX_PRICE_CENTS = 2147483647
+
+/**
+ * Importe sin símbolo de moneda, con el formato de la clínica: para precios
+ * secundarios que acompañan a otro dato («a 79.00 en vez de 120.00»), donde
+ * repetir el símbolo solo añade ruido. El importe principal usa `formatMoney`.
+ */
+export function formatAmount(cents: number, currency: string, locale: string): string {
+  const digits = currencyFractionDigits(currency)
+  return new Intl.NumberFormat(locale, {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  }).format(amountFromCents(String(cents), currency))
+}
+
+/**
+ * Símbolo de una moneda tal como lo escribe el formato de la clínica: el
+ * prefijo del campo de un importe. Nunca un símbolo fijo en el código.
+ */
+export function currencySymbol(currency: string, locale: string): string {
+  try {
+    const parts = new Intl.NumberFormat(locale, { style: "currency", currency }).formatToParts(0)
+    return parts.find((part) => part.type === "currency")?.value ?? currency
+  } catch {
+    return currency
+  }
+}
 
 export interface ServicesQuery {
   q?: string
@@ -197,23 +225,60 @@ export function updateServiceApi(
   })
 }
 
-export interface FromTemplateItemBody {
+export type BillingMode = "treatment" | "session"
+
+/** Cómo se cobra un servicio, con las palabras de la pantalla. */
+export const BILLING_MODE_LABELS: Record<BillingMode, string> = {
+  treatment: "Por tratamiento",
+  session: "Por sesión",
+}
+
+/** «Dónde se hace» un servicio propio: así la atención sabe qué pedir al registrarlo. */
+export const SERVICE_PLACE_OPTIONS: ReadonlyArray<{
+  value: NonNullable<ServiceCatalogItem["scope"]>
+  label: string
+}> = [
+  { value: "general", label: "Toda la boca" },
+  { value: "tooth", label: "Una pieza" },
+  { value: "surfaces", label: "Caras de una pieza" },
+  { value: "quadrant", label: "Un cuadrante" },
+  { value: "arch", label: "Una arcada" },
+]
+
+/** Servicio elegido de la biblioteca, con el nombre que usará la clínica. */
+export interface TemplateServiceBody {
+  kind: "template"
   templateId: string
+  /** Nombre comercial; sin él queda la denominación de la biblioteca. */
+  name?: string | null
   /** Tarifa explícita en unidad menor; 0 = incluido sin costo. */
   priceCents: number
-  billingMode?: "treatment" | "session" | null
+  billingMode?: BillingMode | null
   durationMin?: number | null
 }
 
+/** Servicio propio de la clínica, sin código oficial. */
+export interface CustomServiceBody {
+  kind: "custom"
+  name: string
+  specialty: string
+  scope: string
+  priceCents: number
+  billingMode?: BillingMode | null
+  durationMin?: number | null
+}
+
+export type QuickAddServiceBody = TemplateServiceBody | CustomServiceBody
+
 /**
- * Carga rápida del tarifario: las elegidas entran con su precio y activas en
- * el mismo acto. Sin alta diferida inactiva con tarifa 0.
+ * «Agregar servicios»: lo elegido de la biblioteca y los servicios propios se
+ * guardan juntos, con su precio, y quedan activos. Todo o nada.
  */
-export function incorporateTemplatesApi(
-  items: FromTemplateItemBody[],
+export function quickAddServicesApi(
+  items: QuickAddServiceBody[],
 ): Promise<{ data: { created: ServiceCatalogItem[]; existing: ServiceCatalogItem[] } }> {
   return apiFetch<{ data: { created: ServiceCatalogItem[]; existing: ServiceCatalogItem[] } }>(
-    "/api/services/from-templates",
+    "/api/services/batch",
     {
       method: "POST",
       body: JSON.stringify({ items }),
@@ -221,20 +286,18 @@ export function incorporateTemplatesApi(
   )
 }
 
-export interface MostUsedServiceItem {
-  service: ServiceCatalogItem
-  indications: number
+/** Concepto de «Más usados» con las plantillas de la biblioteca que lo resuelven. */
+export interface MostUsedConcept {
+  key: string
+  label: string
+  templates: TreatmentTemplateItem[]
 }
 
-/** Ofertas activas más indicadas, por concepto de uso real. */
-export function fetchMostUsedServices(
-  query: { specialty?: string; limit?: number } = {},
-): Promise<{ data: MostUsedServiceItem[] }> {
-  const params = new URLSearchParams()
-  if (query.specialty) params.set("specialty", query.specialty)
-  if (query.limit) params.set("limit", String(query.limit))
-  const qs = params.toString()
-  return apiFetch<{ data: MostUsedServiceItem[] }>(
-    `/api/services/most-used${qs ? `?${qs}` : ""}`,
-  )
+/**
+ * Punto de partida de una clínica nueva: conceptos generales (consulta,
+ * limpieza, resina…) resueltos contra la biblioteca disponible, sin lo que la
+ * clínica ya tiene. Vacío si no hay biblioteca.
+ */
+export function fetchMostUsedServices(): Promise<{ data: MostUsedConcept[] }> {
+  return apiFetch<{ data: MostUsedConcept[] }>("/api/services/most-used")
 }

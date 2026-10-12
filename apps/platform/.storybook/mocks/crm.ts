@@ -18,7 +18,7 @@ export function useOrgMembers(): Array<{ userId: string; role: string; user: { n
   ]
 }
 
-/** «Hace cuánto» corto en es-PE, igual que en el platform. */
+/** «Hace cuánto» corto, igual que en el platform. */
 export function timeAgo(iso: string | null): string {
   if (!iso) return "—"
   const then = new Date(iso).getTime()
@@ -30,5 +30,5 @@ export function timeAgo(iso: string | null): string {
   if (hours < 24) return `hace ${hours} h`
   const days = Math.round(hours / 24)
   if (days < 30) return `hace ${days} d`
-  return new Date(iso).toLocaleDateString("es-PE")
+  return new Date(iso).toLocaleDateString()
 }

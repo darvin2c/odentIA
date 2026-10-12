@@ -9,7 +9,7 @@ export const Route = createFileRoute("/_org/services")({
 
 const secciones: SectionNavItem[] = [
   { label: "Tarifario de la clínica", to: "/services", icon: Tag },
-  { label: "Biblioteca de prestaciones", to: "/services/biblioteca", icon: Library },
+  { label: "Agregar servicios", to: "/services/biblioteca", icon: Library },
   { label: "Promociones", to: "/services/promotions", icon: BadgePercent },
 ]
 

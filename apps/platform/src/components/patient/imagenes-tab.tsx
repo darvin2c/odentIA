@@ -67,6 +67,7 @@ import {
 } from "./image-viewer"
 import { TagsInput } from "./tags-input"
 import { ToothSelector } from "./tooth-selector"
+import { activeOrgLocale } from "../../lib/locale"
 
 /** Las URL firmadas expiran: se consideran frescas 10 min y luego se regeneran. */
 const SIGNED_URL_STALE_MS = 10 * 60 * 1000
@@ -96,7 +97,7 @@ const PERIODS: Record<string, { label: string; days: number }> = {
 }
 
 function monthHeading(iso: string): string {
-  const text = new Date(iso).toLocaleDateString("es-PE", { month: "long", year: "numeric" })
+  const text = new Date(iso).toLocaleDateString(activeOrgLocale(), { month: "long", year: "numeric" })
   return text.charAt(0).toUpperCase() + text.slice(1)
 }
 
@@ -853,14 +854,14 @@ function DocumentViewer({
               <dt className="text-xs text-muted-foreground">Fecha de toma</dt>
               <dd>
                 {doc.capturedAt
-                  ? new Date(doc.capturedAt).toLocaleString("es-PE", {
+                  ? new Date(doc.capturedAt).toLocaleString(activeOrgLocale(), {
                       dateStyle: "medium",
                       timeStyle: "short",
                     })
                   : "No registrada"}{" "}
                 <span className="text-muted-foreground">
                   (subida{" "}
-                  {new Date(doc.createdAt).toLocaleString("es-PE", {
+                  {new Date(doc.createdAt).toLocaleString(activeOrgLocale(), {
                     dateStyle: "medium",
                     timeStyle: "short",
                   })}

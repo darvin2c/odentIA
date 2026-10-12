@@ -34,6 +34,7 @@ import { type ContactFull, type ContactListItem, timeAgo, usePermission } from "
 import { useOrgProfile } from "../../lib/org"
 import type { PatientContactLink, PatientFull } from "../../lib/patients"
 import { ContactConversationDialog } from "../contact-conversation-dialog"
+import { activeOrgLocale } from "../../lib/locale"
 
 type Relationship = PatientContactLink["relationship"]
 
@@ -273,7 +274,7 @@ export function PatientContactSection({ detail }: { detail: PatientFull }) {
               <p className="text-sm">
                 {ENTRY_LABELS[registration.entryPoint] ?? registration.entryPoint}
                 {" · "}
-                {new Date(registration.createdAt).toLocaleString("es-PE", {
+                {new Date(registration.createdAt).toLocaleString(activeOrgLocale(), {
                   dateStyle: "medium",
                   timeStyle: "short",
                 })}

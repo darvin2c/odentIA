@@ -90,6 +90,7 @@ import { invalidateAppointmentQueries } from "../../lib/agenda"
 import { apiFetch } from "../../lib/api"
 import { usePermission } from "../../lib/crm"
 import { fetchCrmContext } from "../../lib/crm-workspace"
+import { activeOrgTimeZone } from "../../lib/locale"
 
 export const Route = createFileRoute("/_org/agenda")({
   validateSearch: (
@@ -183,7 +184,7 @@ function AgendaPage() {
   })
   const resources = resourcesQuery.data?.data
   const branchId = resources?.branchId
-  const TZ = resources?.timeZone ?? "America/Lima"
+  const TZ = resources?.timeZone ?? activeOrgTimeZone()
 
   const now = useScheduleNow()
   const today = zonedDateOf(now, TZ)

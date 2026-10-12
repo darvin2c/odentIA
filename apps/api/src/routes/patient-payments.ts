@@ -39,7 +39,9 @@ const updateChargeInput = z.object({
   amountCents: cents.nullish(),
   description: z.string().trim().min(1).max(2000).nullish(),
   promotionId: z.uuid().nullish(),
-  reason: z.string().trim().min(1).max(2000),
+  // Obligatorio al cambiar importe o descripción (lo exige el servicio);
+  // aplicar una promoción ya dice el motivo.
+  reason: z.string().trim().min(1).max(2000).nullish(),
 }).strict()
 const refundInput = z.object({
   branchId: z.uuid(),
@@ -137,7 +139,8 @@ export function createPatientPaymentsRoute(deps: Pick<CrmDeps, "db">) {
       updateCharge(tx, orgId, userId, params.data.id, params.data.chargeId, {
         amountCents: parsed.data.amountCents ?? undefined,
         description: parsed.data.description ?? undefined,
-        promotionId: parsed.data.promotionId ?? undefined,
+        // null quita la promoción; ausente la deja como está.
+        promotionId: parsed.data.promotionId,
         reason: parsed.data.reason,
       })))
   })

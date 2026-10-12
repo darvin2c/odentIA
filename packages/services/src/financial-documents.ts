@@ -27,9 +27,9 @@ import {
   contactIdentity,
   conversation,
 } from "@odentia/db/schema/crm"
-import { auditEvent } from "@odentia/db/schema/org"
+import { auditEvent, orgProfile } from "@odentia/db/schema/org"
 import { and, desc, eq, isNull, sql } from "drizzle-orm"
-import { findChannelIdentity, lockChannelIdentity, normalizeChannelIdentity } from "./contacts.js"
+import { findChannelIdentity, lockChannelIdentity, normalizeChannelIdentity, updateContact } from "./contacts.js"
 import { sendOutbound, startContactConversation } from "./conversations.js"
 import { notFound, ServiceError, validation } from "./errors.js"
 import { deliverBudget, requireOwnPlan } from "./budgets.js"
@@ -187,6 +187,28 @@ export interface DocumentSendOptions {
   channels: DocumentChannelOption[]
   proposed: DocumentChannelOption | null
   document: DocumentMeta
+  /** Mensaje que acompaña al documento: lo propone el servidor y quien envía puede editarlo. */
+  message: string
+}
+
+/** Texto propuesto: saluda a quien lo recibe y dice de quién es el documento si no es suyo. */
+function proposeMessage(
+  documentType: FinancialDocumentType,
+  recipient: DocumentRecipient,
+  patientName: string,
+  clinicName: string,
+): string {
+  const where = clinicName ? ` en ${clinicName}` : ""
+  const own = recipient.relation === "paciente"
+  const text =
+    documentType === "ticket"
+      ? own
+        ? `Hola, ${recipient.displayName}. Te enviamos el ticket de tu pago${where}. Gracias por tu visita.`
+        : `Hola, ${recipient.displayName}. Te enviamos el ticket del pago de ${patientName}${where}. Gracias por tu visita.`
+      : own
+        ? `Hola, ${recipient.displayName}. Te enviamos el presupuesto de tu tratamiento${where}.`
+        : `Hola, ${recipient.displayName}. Te enviamos el presupuesto del tratamiento de ${patientName}${where}.`
+  return text.slice(0, 500)
 }
 
 async function loadDocumentMeta(
@@ -291,8 +313,12 @@ export async function getDocumentSendOptions(
   orgId: string,
   patientId: string,
   input: { documentType: string; documentId: string; recipientContactId?: string },
+  /** Quién lo pide: un odontólogo solo prepara el envío de presupuestos de sus planes. */
+  actor: { actorUserId?: string; memberRole?: string } = {},
 ): Promise<DocumentSendOptions> {
   const documentType = assertDocumentType(input.documentType)
+  if (documentType === "budget" && actor.memberRole === "dentist" && actor.actorUserId)
+    await requireDentistOwnPlan(tx, orgId, actor.actorUserId, patientId, input.documentId)
   const { meta, preferContactId } = await loadDocumentMeta(tx, orgId, patientId, documentType, input.documentId)
   const recipients = await listDocumentRecipients(tx, orgId, patientId, preferContactId)
   if (recipients.length === 0) throw notFound("Destinatario del documento")
@@ -411,7 +437,19 @@ export async function getDocumentSendOptions(
     lastChannel: threads[0]?.connection.channel ?? null,
   })
   if (proposed) proposed.isProposed = true
-  return { recipients, recipient, channels, proposed, document: meta }
+  const patientRow = await requirePatient(tx, orgId, patientId)
+  const [profile] = await tx
+    .select({ tradeName: orgProfile.tradeName, legalName: orgProfile.legalName })
+    .from(orgProfile)
+    .where(eq(orgProfile.organizationId, orgId))
+    .limit(1)
+  const message = proposeMessage(
+    documentType,
+    recipient,
+    patientRow.displayName,
+    profile?.tradeName || profile?.legalName || "",
+  )
+  return { recipients, recipient, channels, proposed, document: meta, message }
 }
 
 // --- Entrega de borrador --------------------------------------------------------
@@ -483,6 +521,19 @@ export interface SendFinancialDocumentInput {
   savePreferredChannel?: boolean
   /** Hoja explícita para el PDF ('A4'|'Carta'); nulo = papel del perfil. */
   paper?: string | null
+  /**
+   * Clave del intento (una por apertura del panel). Reenviar con la misma
+   * clave —doble clic, reintento tras un corte— devuelve el envío ya hecho en
+   * vez de mandar el documento otra vez.
+   */
+  requestId?: string | null
+  /**
+   * Otro correo, escrito en el momento, en lugar del registrado. Solo por un
+   * buzón de correo y con `confirmOtherEmail`: quien envía confirma que la
+   * persona pidió recibirlo ahí. Queda en auditoría a qué dirección se envió.
+   */
+  otherEmail?: string | null
+  confirmOtherEmail?: boolean
 }
 
 export interface SendFinancialDocumentResult {
@@ -493,6 +544,8 @@ export interface SendFinancialDocumentResult {
   channel: string
   documentLabel: string
   deliveredBudget: boolean
+  /** Dirección a la que salió cuando fue por correo. */
+  sentToEmail: string | null
 }
 
 export interface SendDeps {
@@ -506,6 +559,13 @@ function cleanMessage(value: string | undefined): string | null {
   if (text.length > 500) throw validation("El mensaje admite hasta 500 caracteres")
   if (/[\r]/.test(text)) throw validation("El mensaje no admite saltos de línea especiales")
   return text
+}
+
+function assertEmail(value: string): string {
+  const email = value.trim().toLowerCase()
+  if (email.length > 200 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
+    throw validation("El correo no tiene un formato válido")
+  return email
 }
 
 function asciiFilename(value: string): string {
@@ -575,10 +635,12 @@ async function resolveConversation(
   actorUserId: string,
   recipient: DocumentRecipient,
   conn: UsableConnection,
+  /** Con otro correo el hilo es el de esa dirección, no el último abierto de la persona. */
+  exactAddress = false,
 ): Promise<{ id: string }> {
   if (conn.channel === "email") {
     const identity = await ensureEmailIdentity(tx, orgId, recipient)
-    const [thread] = await tx
+    const [thread] = exactAddress ? [] : await tx
       .select({ id: conversation.id, status: conversation.status })
       .from(conversation)
       .where(
@@ -692,7 +754,49 @@ export async function sendFinancialDocument(
   const documentType = assertDocumentType(input.documentType)
   if (!input.connectionId) throw validation("Elige el canal de envío")
   const { meta, preferContactId } = await loadDocumentMeta(tx, orgId, input.patientId, documentType, input.documentId)
-  const recipient = await requireAuthorizedRecipient(tx, orgId, input.patientId, input.recipientContactId, preferContactId)
+  if (input.requestId) {
+    // Mismo intento = un solo envío: se serializa por clave y se devuelve lo ya hecho.
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(hashtext('doc-send:' || ${orgId} || ':' || ${input.requestId}))`,
+    )
+    const [previous] = await tx
+      .select({ entityId: auditEvent.entityId, metadata: auditEvent.metadata })
+      .from(auditEvent)
+      .where(
+        and(
+          eq(auditEvent.organizationId, orgId),
+          eq(auditEvent.action, "financial_document.sent"),
+          sql`${auditEvent.metadata}->>'requestId' = ${input.requestId}`,
+        ),
+      )
+      .limit(1)
+    if (previous) {
+      const sent = previous.metadata as {
+        documentId?: string
+        conversationId?: string
+        channel?: string
+        deliveredBudget?: boolean
+        sentToEmail?: string | null
+      }
+      if (sent.documentId !== input.documentId)
+        throw new ServiceError("REQUEST_ID_CONFLICT", 409, "Esa clave de envío ya se usó con otro documento")
+      return {
+        conversationId: sent.conversationId ?? "",
+        messageId: previous.entityId ?? "",
+        status: "queued",
+        channel: sent.channel ?? "",
+        documentLabel: meta.label,
+        deliveredBudget: sent.deliveredBudget ?? false,
+        sentToEmail: sent.sentToEmail ?? null,
+      }
+    }
+  }
+  const registered = await requireAuthorizedRecipient(tx, orgId, input.patientId, input.recipientContactId, preferContactId)
+  // Otro correo: lo decide quien envía, de forma explícita, y queda registrado.
+  const otherEmail = input.otherEmail?.trim() ? assertEmail(input.otherEmail) : null
+  if (otherEmail && !input.confirmOtherEmail)
+    throw validation("Confirma que la persona pidió recibirlo en ese correo")
+  const recipient: DocumentRecipient = otherEmail ? { ...registered, email: otherEmail } : registered
   const [conn] = await tx
     .select()
     .from(channelConnection)
@@ -708,6 +812,8 @@ export async function sendFinancialDocument(
     throw validation("Esa conexión no admite adjuntos: elige otro canal")
   }
   const usable: UsableConnection = { id: conn.id, channel: conn.channel, provider: conn.provider, displayName: conn.displayName }
+  if (otherEmail && conn.channel !== "email")
+    throw validation("Otro correo solo se puede usar enviando por correo")
 
   let filename: string
   let subject: string
@@ -725,7 +831,10 @@ export async function sendFinancialDocument(
       await requireDentistOwnPlan(tx, orgId, actorUserId, input.patientId, input.documentId)
     }
     deliveredBudget = await deliverIfDraft(tx, orgId, actorUserId, memberRole, input.patientId, input.documentId)
-    const snap = await buildBudgetSnapshot(tx, orgId, input.patientId, input.documentId)
+    const snap = await buildBudgetSnapshot(tx, orgId, input.patientId, input.documentId, {
+      actorUserId,
+      memberRole,
+    })
     pdf = await renderBudgetPdf(snap, input.paper ?? null)
     filename = asciiFilename(`Presupuesto-${snap.numberLabel.replace(/\D/g, "")}-r${snap.sourceId.slice(0, 4)}.pdf`)
     subject = `Presupuesto ${snap.numberLabel} · ${snap.org.tradeName}`
@@ -733,7 +842,7 @@ export async function sendFinancialDocument(
   }
   if (pdf.byteLength > 20 * 1024 * 1024) throw validation("El documento supera 20 MB: no se puede adjuntar")
 
-  const { id: conversationId } = await resolveConversation(tx, orgId, actorUserId, recipient, usable)
+  const { id: conversationId } = await resolveConversation(tx, orgId, actorUserId, recipient, usable, !!otherEmail)
   const ref = await deps.storage.putAttachment({
     orgId,
     conversationId,
@@ -758,6 +867,7 @@ export async function sendFinancialDocument(
       .set({ preferredChannel: conn.channel, updatedAt: new Date() })
       .where(and(eq(contact.id, recipient.contactId), eq(contact.organizationId, orgId)))
   }
+  const sentToEmail = conn.channel === "email" ? (recipient.email?.trim().toLowerCase() ?? null) : null
   await tx.insert(auditEvent).values({
     organizationId: orgId,
     actorUserId,
@@ -770,8 +880,13 @@ export async function sendFinancialDocument(
       documentId: input.documentId,
       recipientContactId: recipient.contactId,
       connectionId: conn.id,
+      conversationId,
       channel: conn.channel,
       deliveredBudget,
+      sentToEmail,
+      // Dirección distinta de la registrada: decisión explícita de quien envió.
+      ...(otherEmail ? { otherEmail: true, registeredEmail: registered.email, decidedBy: actorUserId } : {}),
+      ...(input.requestId ? { requestId: input.requestId } : {}),
     },
   })
   return {
@@ -781,7 +896,26 @@ export async function sendFinancialDocument(
     channel: conn.channel,
     documentLabel: meta.label,
     deliveredBudget,
+    sentToEmail,
   }
+}
+
+/**
+ * «Agregar correo»: guarda el correo en los datos de quien recibe (la propia
+ * persona o un responsable vigente del paciente), con las mismas reglas y la
+ * misma traza que editar el contacto.
+ */
+export async function saveRecipientEmail(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  patientId: string,
+  input: { recipientContactId: string; email: string },
+): Promise<DocumentRecipient> {
+  const recipient = await requireAuthorizedRecipient(tx, orgId, patientId, input.recipientContactId)
+  const email = assertEmail(input.email)
+  await updateContact(tx, orgId, recipient.contactId, { email }, { userId: actorUserId })
+  return { ...recipient, email }
 }
 
 /** PDF del documento para previsualizar/descargar (impresión usa el mismo). */
@@ -790,6 +924,8 @@ export async function getFinancialDocumentPdf(
   orgId: string,
   patientId: string,
   input: { documentType: string; documentId: string; paper?: string | null },
+  /** Quién lo pide: un odontólogo solo obtiene presupuestos de sus planes. */
+  actor: { actorUserId?: string; memberRole?: string } = {},
 ): Promise<{ bytes: Uint8Array; filename: string }> {
   const documentType = assertDocumentType(input.documentType)
   if (documentType === "ticket") {
@@ -799,9 +935,9 @@ export async function getFinancialDocumentPdf(
       filename: asciiFilename(`Ticket-${snap.numberLabel}.pdf`),
     }
   }
-  const snap = await buildBudgetSnapshot(tx, orgId, patientId, input.documentId)
+  const snap = await buildBudgetSnapshot(tx, orgId, patientId, input.documentId, actor)
   return {
-      bytes: await renderBudgetPdf(snap, input.paper ?? null),
+    bytes: await renderBudgetPdf(snap, input.paper ?? null),
     filename: asciiFilename(`Presupuesto-${snap.numberLabel.replace(/\D/g, "")}.pdf`),
   }
 }

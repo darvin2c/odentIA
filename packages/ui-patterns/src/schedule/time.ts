@@ -8,6 +8,7 @@
  * desde la medianoche local convertida a UTC.
  */
 
+import { formatLocale } from "../locale.js"
 import type { ScheduleEntry, ScheduleWindow } from "./types.js"
 
 const MINUTE_MS = 60_000
@@ -125,21 +126,32 @@ export function weekDates(dateISO: string): string[] {
   return Array.from({ length: 7 }, (_, index) => addDays(monday, index))
 }
 
-const hourFormatter = new Intl.DateTimeFormat("es-PE", {
-  timeZone: "UTC",
-  hour: "2-digit",
-  minute: "2-digit",
-  hourCycle: "h23",
-})
+// Los formateadores se crean al formatear, con el formato regional vigente
+// (`formatLocale`): a nivel de módulo quedarían fijados antes de conocer la
+// clínica. Se guardan por formato para no recrearlos en cada celda.
+const dateFormatters = new Map<string, Intl.DateTimeFormat>()
+function formatter(key: string, options: Intl.DateTimeFormatOptions): Intl.DateTimeFormat {
+  const locale = formatLocale()
+  const cacheKey = `${locale ?? ""}|${key}`
+  let found = dateFormatters.get(cacheKey)
+  if (!found) {
+    found = new Intl.DateTimeFormat(locale, options)
+    dateFormatters.set(cacheKey, found)
+  }
+  return found
+}
+
+const hourFormatter = () =>
+  formatter("hour", { timeZone: "UTC", hour: "2-digit", minute: "2-digit", hourCycle: "h23" })
 
 /** «08:00» para minutos del día; zona UTC porque el valor ya es local de la sede. */
 export function hourLabel(minutes: number): string {
-  return hourFormatter.format(new Date(Date.UTC(2026, 0, 1, 0, minutes)))
+  return hourFormatter().format(new Date(Date.UTC(2026, 0, 1, 0, minutes)))
 }
 
 /** «08:00 – 09:00» en la zona de la sede. */
 export function timeRangeLabel(startISO: string, endISO: string, timeZone: string): string {
-  const withZone = new Intl.DateTimeFormat("es-PE", {
+  const withZone = new Intl.DateTimeFormat(formatLocale(), {
     timeZone,
     hour: "2-digit",
     minute: "2-digit",
@@ -148,32 +160,23 @@ export function timeRangeLabel(startISO: string, endISO: string, timeZone: strin
   return `${withZone.format(new Date(startISO))} – ${withZone.format(new Date(endISO))}`
 }
 
-const longDateFormatter = new Intl.DateTimeFormat("es-PE", {
-  timeZone: "UTC",
-  weekday: "long",
-  day: "numeric",
-  month: "long",
-})
-const shortDateFormatter = new Intl.DateTimeFormat("es-PE", {
-  timeZone: "UTC",
-  weekday: "short",
-  day: "numeric",
-})
-const monthShortFormatter = new Intl.DateTimeFormat("es-PE", {
-  timeZone: "UTC",
-  month: "short",
-})
+const longDateFormatter = () =>
+  formatter("long", { timeZone: "UTC", weekday: "long", day: "numeric", month: "long" })
+const shortDateFormatter = () =>
+  formatter("short", { timeZone: "UTC", weekday: "short", day: "numeric" })
+const monthShortFormatter = () => formatter("month", { timeZone: "UTC", month: "short" })
 
 function dateParts(dateISO: string): Map<string, string> {
   const [year, month, day] = dateISO.split("-").map(Number)
-  const parts = longDateFormatter.formatToParts(new Date(Date.UTC(year, month - 1, day, 12)))
+  const parts = longDateFormatter().formatToParts(new Date(Date.UTC(year, month - 1, day, 12)))
   return new Map(parts.map((part) => [part.type, part.value]))
 }
 
 /**
  * Fecha rotulada para barras y nombres accesibles: «Lunes 21 de setiembre».
  * Sin año (la agenda se mira dentro del año en curso) y compuesta por partes
- * porque «es-PE» mete una coma entre el día de la semana y el del mes.
+ * porque algunos formatos regionales meten una coma entre el día de la semana
+ * y el del mes.
  */
 export function formatDateLong(dateISO: string): string {
   const parts = dateParts(dateISO)
@@ -183,7 +186,7 @@ export function formatDateLong(dateISO: string): string {
 /** «lun 21» para cabeceras estrechas, sin coma. */
 export function formatDayShort(dateISO: string): string {
   const [year, month, day] = dateISO.split("-").map(Number)
-  const parts = shortDateFormatter.formatToParts(new Date(Date.UTC(year, month - 1, day, 12)))
+  const parts = shortDateFormatter().formatToParts(new Date(Date.UTC(year, month - 1, day, 12)))
   const get = (type: string) => parts.find((part) => part.type === type)?.value ?? ""
   return `${get("weekday")} ${get("day")}`.replace(",", "")
 }
@@ -192,7 +195,7 @@ export function formatDayShort(dateISO: string): string {
 export function formatDayMonthShort(dateISO: string): string {
   const [year, month, day] = dateISO.split("-").map(Number)
   const at = new Date(Date.UTC(year, month - 1, day, 12))
-  return `${formatDayShort(dateISO)} ${monthShortFormatter.format(at).replace(".", "")}`
+  return `${formatDayShort(dateISO)} ${monthShortFormatter().format(at).replace(".", "")}`
 }
 
 

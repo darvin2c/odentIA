@@ -85,8 +85,8 @@ beforeAll(async () => {
            (${ORG_OFF}, 'Clínica Portal Off', 'portal-off', now())
     on conflict do nothing`)
   await ownerDb.execute(sql`
-    insert into "org_profile" ("organization_id", "legal_name")
-    values (${ORG}, 'Clínica Portal Acc'), (${ORG_OFF}, 'Clínica Portal Off')
+    insert into "org_profile" ("organization_id", "legal_name", "country_code", "currency", "timezone", "locale")
+    values (${ORG}, 'Clínica Portal Acc', 'PE', 'PEN', 'America/Lima', 'es-PE'), (${ORG_OFF}, 'Clínica Portal Off', 'PE', 'PEN', 'America/Lima', 'es-PE')
     on conflict do nothing`)
   await ownerDb.insert(user).values([{ id: ACTOR, name: "Recepción Portal", email: "portal-actor@example.test" }])
   await ownerDb.execute(sql`

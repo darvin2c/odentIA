@@ -81,6 +81,7 @@ async function seedDueFollowUp(input: { consent: boolean }) {
       pipelineId: pipe.id,
       stageId: stage.id,
       title: "Ortodoncia",
+      currency: "PEN",
       nextActionAt: dueAt,
       nextActionNote: "Retomar propuesta",
     })

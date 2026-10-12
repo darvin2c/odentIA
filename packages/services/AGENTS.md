@@ -5,7 +5,10 @@ Objetivo: una operación de negocio coherente para personal, portal y agente, co
 - Toda función recibe `tx: Db` YA ejecutándose con tenant. Rutas/worker abren `withOrgContext`; los servicios nunca lo abren.
 - Secretos de conexión: AES-256-GCM mediante `encryptJson`/`secretsKeyFromEnv` de `secrets.ts`.
 - Agenda: horario explícito por profesional/sede; sin horario no se reserva. Intervalos semiabiertos y protección ante reservas concurrentes; citas contiguas no se solapan.
-- Caja: enteros en centavos, arqueo solo efectivo y movimientos electrónicos separados. Anulaciones revierten efectos; cuotas recalculadas y comisiones sin reutilizar fuentes.
+- Caja y cobros: importes enteros en la unidad menor de la moneda de la clínica; nunca se asume una moneda (sin perfil regional no se registra dinero). La caja nace sola por sede y solo se cierra; el arqueo cuenta el efectivo por el tipo del medio (UN/CEFACT 4461) y lo que entra o sale por otro medio no toca el contado. El cierre se identifica por la ventana contada: repetirlo no abre otro.
+- Un cobro es un ticket numerado sin saltos que congela conceptos, medios, clínica y frase al pie; el documento se imprime y se envía solo desde lo congelado. Anular un ticket revierte todo lo que sus pagos cubrieron, también en otros tickets. Los movimientos de un cobro, un gasto o una devolución se anulan en su origen, no sueltos.
+- Presupuesto: el total suma cada línea (lo que se cobra por sesión cuenta sus visitas previstas) y la interfaz no calcula totales. Lo aceptado con una promoción se cobra a ese precio aunque la promoción termine después.
+- Comisiones: un porcentaje por profesional sobre lo cobrado de lo que atendió. Un cobro entra en un solo pago; lo pagado conserva su porcentaje, y lo anulado después de pagado se descuenta del siguiente pago.
 - Inventario: recepción parcial idempotente, traslados de doble movimiento y saldo nunca negativo.
 - Formularios/consentimientos: versiones publicadas y registros finalizados inmutables. Consentimiento no equivale a firma digital certificada.
 - Portal deshabilitado por defecto. Personal verifica identidad/representación y alcance; activación por conversación o QR más PIN separado. Reingreso con passkey descubrible y verificación del usuario. Revocación invalida sesiones/enlaces; recuperación exige revocar explícitamente la credencial perdida.

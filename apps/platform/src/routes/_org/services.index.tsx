@@ -12,6 +12,7 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
+  Skeleton,
   toast,
   FieldError as UiFieldError,
 } from "@odentia/ui"
@@ -44,16 +45,20 @@ import { ChevronDown, Plus, Tag } from "lucide-react"
 import { type FormEvent, type ReactNode, useCallback, useEffect, useMemo, useState } from "react"
 import { z } from "zod"
 import { formatMoney, formatMoneyInput, parseMoney } from "@odentia/clinical"
+import { RadioChips } from "../../components/ui/radio-chips"
 import { ApiError } from "../../lib/api"
 import { usePermission } from "../../lib/crm"
 import { useOrgProfile } from "../../lib/org"
 import { PageDraftGuard } from "../../lib/page-draft-guard"
 import {
+  BILLING_MODE_LABELS,
+  type BillingMode,
   createServiceApi,
   fetchServices,
   fetchTreatmentTemplate,
   fetchTreatmentTemplates,
   type ServiceCatalogItem,
+  SERVICE_PLACE_OPTIONS,
   SPECIALTY_FILTER_OPTIONS,
   TREATMENT_SCOPE_LABELS,
   TREATMENT_SPECIALTIES,
@@ -83,6 +88,16 @@ const TARIFARIO_SORT_OPTIONS = [
   { value: "nombre", label: "Nombre" },
   { value: "precio", label: "Precio" },
   { value: "ambito", label: "Ámbito" },
+]
+
+const BILLING_OPTIONS: ReadonlyArray<{ value: BillingMode; label: string }> = [
+  { value: "treatment", label: BILLING_MODE_LABELS.treatment },
+  { value: "session", label: BILLING_MODE_LABELS.session },
+]
+
+const RESOLVE_OPTIONS: ReadonlyArray<{ value: "plantilla" | "propia"; label: string }> = [
+  { value: "plantilla", label: "Vincular a la biblioteca" },
+  { value: "propia", label: "Confirmar como propia" },
 ]
 
 function stateLabel(state: string): string {
@@ -245,7 +260,7 @@ function TarifarioPage() {
         meta: { view: { primary: true } },
         cell: ({ row }) =>
           profileLocale === undefined ? (
-            <span className="text-muted-foreground">…</span>
+            <Skeleton className="h-4 w-16" />
           ) : (
             formatMoney(row.original.priceCents, row.original.currency, profileLocale)
           ),
@@ -254,8 +269,7 @@ function TarifarioPage() {
         accessorKey: "billingMode",
         header: "Se cobra",
         meta: { view: { primary: true } },
-        cell: ({ row }) =>
-          row.original.billingMode === "session" ? "Por sesión" : "Por tratamiento",
+        cell: ({ row }) => BILLING_MODE_LABELS[row.original.billingMode],
       },
       {
         id: "actions",
@@ -369,10 +383,24 @@ function TarifarioPage() {
           subtitle={`${org.name} · prestaciones de la clínica y su tarifa`}
           actions={
             canManage ? (
-              <Button type="button" className="min-h-11" onClick={() => openOffer(null)}>
-                <Plus aria-hidden />
-                Nueva prestación propia
-              </Button>
+              <>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="min-h-11"
+                  onClick={() => openOffer(null)}
+                >
+                  Crear un servicio propio
+                </Button>
+                <Button
+                  type="button"
+                  className="min-h-11"
+                  onClick={() => void navigate({ to: "/services/biblioteca" })}
+                >
+                  <Plus aria-hidden />
+                  Agregar servicios
+                </Button>
+              </>
             ) : undefined
           }
         />
@@ -400,10 +428,18 @@ function TarifarioPage() {
         ) : rows.length === 0 && !hasFilters && estadoFilter === "active" ? (
           <EmptyState
             icon={Tag}
-            title="Sin prestaciones en el tarifario"
-            description="Incorpora prestaciones desde la biblioteca o crea una prestación propia. Cada prestación tiene una tarifa; 0 significa incluida sin costo."
-            actionLabel="Ir a la biblioteca"
-            onAction={() => void navigate({ to: "/services/biblioteca" })}
+            title="El tarifario está vacío"
+            description={
+              canManage
+                ? "Elige los servicios más usados o crea los tuyos, y ponles precio en una sola pantalla. Lo que guardes queda activo."
+                : "Todavía no hay servicios con precio. Los agrega quien administra la clínica."
+            }
+            actionLabel={canManage ? "Agregar servicios" : undefined}
+            onAction={
+              canManage ? () => void navigate({ to: "/services/biblioteca" }) : undefined
+            }
+            secondaryActionLabel={canManage ? "Crear un servicio propio" : undefined}
+            onSecondaryAction={canManage ? () => openOffer(null) : undefined}
           />
         ) : rows.length === 0 ? (
           <EmptyState
@@ -652,7 +688,7 @@ function OfferEditor({
     },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["services"] })
-      toast.success(offer ? "Prestación actualizada" : "Prestación creada")
+      toast.success(offer ? "Servicio actualizado" : "Servicio guardado y activo")
       onClose()
     },
     onError: (error) => {
@@ -695,7 +731,7 @@ function OfferEditor({
             comercial de esta oferta son propios de la clínica y no alteran el código oficial.
           </p>
         ) : linkedTemplateQuery.isPending ? (
-          <p className="text-xs text-muted-foreground">Buscando el código oficial vinculado…</p>
+          <Skeleton className="h-3 w-56" />
         ) : (
           <p className="text-xs text-muted-foreground">
             Oferta vinculada a la biblioteca; el código oficial se consulta en la biblioteca.
@@ -714,24 +750,12 @@ function OfferEditor({
     <div className="flex flex-col gap-4">
       {isLegacy ? (
         <LegacyNote>
-          <div className="flex gap-2" role="tablist" aria-label="Modo de resolución">
-            <Button
-              type="button"
-              size="sm"
-              variant={resolveMode === "plantilla" ? "default" : "outline"}
-              onClick={() => setResolveMode("plantilla")}
-            >
-              Vincular plantilla
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              variant={resolveMode === "propia" ? "default" : "outline"}
-              onClick={() => setResolveMode("propia")}
-            >
-              Confirmar propia
-            </Button>
-          </div>
+          <RadioChips
+            aria-label="Cómo resolverla"
+            value={resolveMode}
+            options={RESOLVE_OPTIONS}
+            onChange={setResolveMode}
+          />
           {pickingTemplate && offer ? (
             <LegacyTemplatePicker offer={offer} onLinked={onClose} />
           ) : null}
@@ -743,7 +767,8 @@ function OfferEditor({
             form={form}
             offer={offer}
             allowSpecialtyScope={!isTemplate}
-            currency={currency ?? null}
+            currency={currency}
+            locale={orgLocale}
           />
           {offer ? <OfferDetails offer={offer} linkedCoding={linkedCoding} /> : null}
         </>
@@ -766,15 +791,15 @@ function OfferEditor({
   }
 
   const formSurface = {
-    title: offer ? offer.name : "Nueva prestación propia",
+    title: offer ? offer.name : "Servicio propio",
     description: offer
       ? undefined
-      : "Prestación de la clínica con su tarifa. El código interno es opcional.",
+      : "Lo que tu clínica ofrece y la biblioteca no trae. Queda activo al guardarlo.",
     headerContent,
     isDirty,
     isSubmitting: saveMutation.isPending,
     submitLabel: !offer
-      ? "Crear prestación"
+      ? "Guardar y activar"
       : isLegacy
         ? "Confirmar y reactivar"
         : common.actions.save,
@@ -838,9 +863,7 @@ function OfferReadOnly({
         <DetailField label={`Tarifa (${offer.currency})`}>
           {formatMoney(offer.priceCents, offer.currency, locale)}
         </DetailField>
-        <DetailField label="Se cobra">
-          {offer.billingMode === "session" ? "Por sesión" : "Por tratamiento"}
-        </DetailField>
+        <DetailField label="Se cobra">{BILLING_MODE_LABELS[offer.billingMode]}</DetailField>
         <DetailField label="Duración">
           {offer.durationMin === null ? null : `${offer.durationMin} min`}
         </DetailField>
@@ -904,13 +927,16 @@ function OfferFields({
   offer,
   allowSpecialtyScope,
   currency,
+  locale,
 }: {
   form: OfferForm
   /** Oferta editada; `null` es el alta de una prestación propia. */
   offer: ServiceCatalogItem | null
   allowSpecialtyScope: boolean
-  /** Moneda de la oferta; en el alta la fija la organización al guardar. */
-  currency: string | null
+  /** Moneda de la oferta; en el alta, la de la clínica. */
+  currency: string
+  /** Formato de la clínica para escribir el importe. */
+  locale: string
 }) {
   const isTemplate = offer?.source === "template"
   const idPrefix = offer?.id ?? "nueva"
@@ -919,7 +945,7 @@ function OfferFields({
       <form.Field name="name" validators={{ onChange: offerSchema.shape.name }}>
         {(field) => (
           <Field>
-            <FieldLabel htmlFor={`${idPrefix}-nombre`}>Nombre comercial</FieldLabel>
+            <FieldLabel htmlFor={`${idPrefix}-nombre`}>Nombre</FieldLabel>
             <Input
               id={`${idPrefix}-nombre`}
               value={field.state.value}
@@ -963,7 +989,7 @@ function OfferFields({
           <form.Field name="scope" validators={{ onChange: offerSchema.shape.scope }}>
             {(field) => (
               <Field>
-                <FieldLabel htmlFor={`${idPrefix}-ambito`}>Ámbito</FieldLabel>
+                <FieldLabel htmlFor={`${idPrefix}-ambito`}>Dónde se hace</FieldLabel>
                 <Select
                   value={field.state.value}
                   onValueChange={(v) => field.handleChange(v ?? "")}
@@ -972,9 +998,9 @@ function OfferFields({
                     <SelectValue placeholder="Elige" />
                   </SelectTrigger>
                   <SelectContent>
-                    {Object.entries(TREATMENT_SCOPE_LABELS).map(([value, label]) => (
-                      <SelectItem key={value} value={value}>
-                        {label}
+                    {SERVICE_PLACE_OPTIONS.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -989,21 +1015,17 @@ function OfferFields({
         <form.Field name="price" validators={{ onChange: offerSchema.shape.price }}>
           {(field) => (
             <Field>
-              <FieldLabel htmlFor={`${idPrefix}-precio`}>
-                {currency ? `Tarifa (${currency})` : "Tarifa (0 si va incluida)"}
-              </FieldLabel>
+              <FieldLabel htmlFor={`${idPrefix}-precio`}>{`Precio (${currency})`}</FieldLabel>
               <Input
                 id={`${idPrefix}-precio`}
                 inputMode="decimal"
-                placeholder="0.00"
+                placeholder={formatMoneyInput(0, currency, locale)}
                 value={field.state.value}
                 onChange={(event) => field.handleChange(event.target.value)}
                 onBlur={field.handleBlur}
               />
               <FieldError errors={fieldErrorMessages(field.state.meta.errors)} />
-              <p className="text-xs text-muted-foreground">
-                Tarifa obligatoria. Usa 0 si va incluida sin costo.
-              </p>
+              <p className="text-xs text-muted-foreground">Usa 0 si no tiene costo.</p>
             </Field>
           )}
         </form.Field>
@@ -1026,25 +1048,15 @@ function OfferFields({
       <form.Field name="billingMode" validators={{ onChange: offerSchema.shape.billingMode }}>
         {(field) => (
           <Field>
-            <FieldLabel>Cómo se cobra</FieldLabel>
-            <div className="flex gap-2" role="radiogroup" aria-label="Cómo se cobra">
-              <Button
-                type="button"
-                size="sm"
-                variant={field.state.value === "treatment" ? "default" : "outline"}
-                onClick={() => field.handleChange("treatment")}
-              >
-                Por tratamiento
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant={field.state.value === "session" ? "default" : "outline"}
-                onClick={() => field.handleChange("session")}
-              >
-                Por sesión
-              </Button>
-            </div>
+            <span id={`${idPrefix}-cobro`} className="text-sm font-medium">
+              Cómo se cobra
+            </span>
+            <RadioChips
+              labelledBy={`${idPrefix}-cobro`}
+              value={field.state.value}
+              options={BILLING_OPTIONS}
+              onChange={(next) => field.handleChange(next)}
+            />
             <FieldError errors={fieldErrorMessages(field.state.meta.errors)} />
             <p className="text-xs text-muted-foreground">
               Por sesión: se cobra el precio en cada visita atendida.
@@ -1163,19 +1175,12 @@ function LegacyTemplateLink({
         </p>
       ) : null}
       {templatesQuery.isPending ? (
-        <p className="text-sm text-muted-foreground">{common.states.loading}</p>
+        <LoadingState />
       ) : templatesQuery.isError ? (
-        <p className="text-sm text-muted-foreground">
-          No se pudo cargar la biblioteca.{" "}
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            onClick={() => void templatesQuery.refetch()}
-          >
-            {common.actions.retry}
-          </Button>
-        </p>
+        <ErrorState
+          message="No se pudo cargar la biblioteca"
+          onRetry={() => void templatesQuery.refetch()}
+        />
       ) : (
         <>
           <ul className="flex max-h-48 flex-col gap-1 overflow-y-auto">

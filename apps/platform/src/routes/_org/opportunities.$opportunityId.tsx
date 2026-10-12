@@ -25,6 +25,7 @@ import {
 import { useOrgEvents } from "../../lib/org-events"
 import { useOrgProfile } from "../../lib/org"
 import { formatMoney } from "./pipeline"
+import { activeOrgLocale } from "../../lib/locale"
 export const Route = createFileRoute("/_org/opportunities/$opportunityId")({
   component: OpportunityDetailPage,
 })
@@ -392,7 +393,7 @@ function OpportunityDetailPage() {
                 )}
                 {h.note && <span className="text-xs">{h.note}</span>}
                 <span className="text-xs text-muted-foreground">
-                  {new Date(h.createdAt).toLocaleString("es-PE")}
+                  {new Date(h.createdAt).toLocaleString(activeOrgLocale())}
                 </span>
               </li>
             ))}

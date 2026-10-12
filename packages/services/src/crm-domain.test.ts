@@ -320,6 +320,7 @@ it("oportunidades: paciente vinculado estricto y presupuesto coherente al cambia
       planId: plan!.id,
       budgetNumber: 1,
       title: `Presupuesto ${TAG}`,
+      currency: "PEN",
       status: "presentado",
     })
     .returning({ id: treatmentBudget.id })

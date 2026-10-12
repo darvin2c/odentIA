@@ -1,3 +1,4 @@
+import { activeOrgLocale } from "../../lib/locale"
 /** Helpers puros de la UI comercial (sin red ni estado global). */
 
 /**
@@ -58,7 +59,7 @@ export function isOverdue(iso: string | null | undefined, now: number = Date.now
 }
 
 /**
- * Fecha+hora corta es-PE para vencimientos ("12/09/2026, 02:30 p. m.").
+ * Fecha+hora corta, en el formato de la clínica, para vencimientos ("12/09/2026, 02:30 p. m.").
  * null/ausente/inválido → "Sin fecha" (nunca blanco). Pasado o futuro se
  * formatea igual; el vencido lo marca `isOverdue` por separado.
  */
@@ -66,7 +67,7 @@ export function formatDueAt(iso: string | null | undefined): string {
   if (!iso) return "Sin fecha"
   const date = new Date(iso)
   if (Number.isNaN(date.getTime())) return "Sin fecha"
-  return date.toLocaleString("es-PE", {
+  return date.toLocaleString(activeOrgLocale(), {
     day: "2-digit",
     month: "2-digit",
     year: "numeric",

@@ -6,6 +6,11 @@ import {
   FieldGroup,
   FieldLabel,
   Input,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
   toast,
 } from "@odentia/ui"
 import {
@@ -25,7 +30,7 @@ import {
 } from "@odentia/ui-patterns"
 import { useForm, useStore } from "@tanstack/react-form"
 import { createFileRoute } from "@tanstack/react-router"
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { z } from "zod"
 import { apiFetch } from "../lib/api"
 import { authClient } from "../lib/auth-client"
@@ -51,7 +56,7 @@ const STEP_TOPICS = ["tus datos", "organización", "perfil legal", "primera sucu
 const STEP_FIELDS = [
   ["firstName", "lastName"],
   ["orgName", "slug"],
-  ["legalName", "fiscalDocNumber", "countryCode"],
+  ["legalName", "fiscalDocNumber", "countryCode", "currency"],
   ["branchName", "branchAddress", "branchPhone", "branchTimezone"],
 ] as const
 
@@ -74,6 +79,8 @@ const onboardingSchema = personaSchema.extend({
   fiscalDocNumber: z.string().max(20),
   // El país define la máscara de los teléfonos y las zonas horarias sugeridas.
   countryCode: z.string().length(2, "Elige el país"),
+  // ISO 4217: se propone según el país y se puede cambiar.
+  currency: z.string().regex(/^[A-Z]{3}$/, "Elige la moneda con la que cobra la clínica"),
   branchName: z.string().min(2, "Nombre de la sucursal"),
   branchAddress: z.string(),
   // Vacío = sin teléfono; si hay valor, tiene que ser un número real (E.164).
@@ -92,6 +99,7 @@ const FIELD_SCHEMAS = {
   legalName: onboardingSchema.shape.legalName,
   fiscalDocNumber: onboardingSchema.shape.fiscalDocNumber,
   countryCode: onboardingSchema.shape.countryCode,
+  currency: onboardingSchema.shape.currency,
   branchName: onboardingSchema.shape.branchName,
   branchAddress: onboardingSchema.shape.branchAddress,
   branchPhone: onboardingSchema.shape.branchPhone,
@@ -107,6 +115,7 @@ const FIELD_STEP: Record<keyof typeof FIELD_SCHEMAS, number> = {
   legalName: 2,
   fiscalDocNumber: 2,
   countryCode: 2,
+  currency: 2,
   branchName: 3,
   branchAddress: 3,
   branchPhone: 3,
@@ -149,11 +158,14 @@ function OnboardingPage() {
     legalName: "",
     fiscalDocNumber: "",
     countryCode: DEFAULT_COUNTRY,
+    // Se completa con lo que propone el país elegido.
+    currency: "",
     branchName: "",
     branchAddress: "",
     branchPhone: "",
-    // La clínica se configura desde su propio dispositivo: su zona es la de partida.
-    branchTimezone: detectedTimeZone() ?? "America/Lima",
+    // La clínica se configura desde su propio dispositivo: su zona es la de
+    // partida; sin ella se elige en el último paso.
+    branchTimezone: detectedTimeZone() ?? "",
   }
   const form = useForm({
     defaultValues: initialValues,
@@ -191,6 +203,7 @@ function OnboardingPage() {
             legalName: value.legalName,
             fiscalDocNumber: value.fiscalDocNumber || undefined,
             countryCode: value.countryCode,
+            currency: value.currency,
             timezone: value.branchTimezone,
           }),
         })
@@ -213,6 +226,30 @@ function OnboardingPage() {
 
   // El país elegido alimenta la máscara del teléfono y las zonas sugeridas.
   const country = useStore(form.store, (state) => state.values.countryCode)
+  // Y propone la moneda: el servidor la deduce para el país; si no la conoce,
+  // el campo queda vacío y se elige a mano. Nunca se asume la de otro país.
+  useEffect(() => {
+    let cancelled = false
+    apiFetch<{ data: { currency: string | null } }>(
+      `/api/org-profile/region-defaults?countryCode=${encodeURIComponent(country)}`,
+    )
+      .then((result) => {
+        if (!cancelled) form.setFieldValue("currency", result.data.currency ?? "")
+      })
+      .catch(() => {
+        if (!cancelled) form.setFieldValue("currency", "")
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [country, form])
+  const currencies = useMemo(() => {
+    const names = new Intl.DisplayNames(["es"], { type: "currency" })
+    return Intl.supportedValuesOf("currency").map((code) => ({
+      code,
+      label: `${code} — ${names.of(code) ?? code}`,
+    }))
+  }, [])
 
   // Precarga el nombre de la sesión cuando llega después del primer render y
   // salta el paso de perfil si la cuenta ya lo trae guardado.
@@ -393,10 +430,9 @@ function OnboardingPage() {
               <form.Field name="fiscalDocNumber" validators={stepValidator("fiscalDocNumber")}>
                 {(field) => (
                   <Field>
-                    <FieldLabel htmlFor="fiscalDocNumber">RUC (opcional)</FieldLabel>
+                    <FieldLabel htmlFor="fiscalDocNumber">Documento fiscal (opcional)</FieldLabel>
                     <Input
                       id="fiscalDocNumber"
-                      inputMode="numeric"
                       value={field.state.value}
                       onChange={(event) => field.handleChange(event.target.value)}
                     />
@@ -413,7 +449,41 @@ function OnboardingPage() {
                       onChange={(next) => field.handleChange(next)}
                     />
                     <FieldDescription>
-                      Define el formato de los teléfonos y las zonas horarias que se sugieren.
+                      Define el formato de los teléfonos, la moneda y las zonas horarias que se sugieren.
+                    </FieldDescription>
+                    <FieldError>
+                      {fieldErrorMessages(field.state.meta.errors)[0] ?? null}
+                    </FieldError>
+                  </Field>
+                )}
+              </form.Field>
+              <form.Field name="currency" validators={stepValidator("currency")}>
+                {(field) => (
+                  <Field>
+                    <FieldLabel htmlFor="currency">Moneda</FieldLabel>
+                    <Select<string>
+                      value={field.state.value || null}
+                      onValueChange={(next) => {
+                        if (next) field.handleChange(next)
+                      }}
+                    >
+                      <SelectTrigger id="currency" className="w-full">
+                        <SelectValue placeholder="Elige la moneda">
+                          {(selected: string) =>
+                            currencies.find((item) => item.code === selected)?.label ?? selected
+                          }
+                        </SelectValue>
+                      </SelectTrigger>
+                      <SelectContent>
+                        {currencies.map((item) => (
+                          <SelectItem key={item.code} value={item.code}>
+                            {item.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <FieldDescription>
+                      Con ella se cobran y se muestran los importes. Se propone según el país.
                     </FieldDescription>
                     <FieldError>
                       {fieldErrorMessages(field.state.meta.errors)[0] ?? null}

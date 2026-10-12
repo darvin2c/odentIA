@@ -1,45 +1,74 @@
-import { Badge, Button, Checkbox, Input, toast } from "@odentia/ui"
+import { formatMoneyInput, parseMoney } from "@odentia/clinical"
+import {
+  Badge,
+  Button,
+  Checkbox,
+  cn,
+  Field,
+  FieldError,
+  FieldLabel,
+  Input,
+  InputGroup,
+  InputGroupAddon,
+  InputGroupInput,
+  InputGroupText,
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+  toast,
+} from "@odentia/ui"
 import {
   common,
+  ConfirmDialog,
   DataTable,
   EmptyState,
   ErrorState,
   FilterBar,
+  FormDrawer,
   LoadingState,
   PageHeader,
-  RowActions,
   SubmitButton,
   useListSearch,
 } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { createFileRoute } from "@tanstack/react-router"
+import { createFileRoute, useBlocker, useNavigate } from "@tanstack/react-router"
 import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-table"
-import { Library } from "lucide-react"
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { parseMoney } from "@odentia/clinical"
+import { Library, Plus } from "lucide-react"
+import { type FormEvent, useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
+import { ChoiceSelect } from "../../components/ui/choice-select"
+import { RadioChips } from "../../components/ui/radio-chips"
 import { ApiError } from "../../lib/api"
 import { usePermission } from "../../lib/crm"
 import { useOrgProfile } from "../../lib/org"
 import {
+  BILLING_MODE_LABELS,
+  type BillingMode,
+  currencySymbol,
+  createServiceApi,
+  fetchMostUsedServices,
   fetchServices,
   fetchTreatmentTemplates,
-  incorporateTemplatesApi,
+  type QuickAddServiceBody,
+  quickAddServicesApi,
+  SERVICE_PLACE_OPTIONS,
   SPECIALTY_FILTER_OPTIONS,
-  TREATMENT_SCOPE_LABELS,
+  TREATMENT_SPECIALTIES,
   TREATMENT_SPECIALTY_LABELS,
-  type FromTemplateItemBody,
   type TreatmentTemplateCatalog,
   type TreatmentTemplateItem,
 } from "../../lib/services"
 
 export const Route = createFileRoute("/_org/services/biblioteca")({
-  component: BibliotecaPage,
+  component: AddServicesPage,
 })
 
 const PAGE_LIMIT = 20
 
-/** Tope de incorporación por envío: la API acepta 100 identificadores como máximo. */
+/** Tope por guardado: la API recibe 100 servicios como máximo. */
 const MAX_SELECTION = 100
+
+type View = "mas-usados" | "biblioteca"
 
 /** Todos los templateId ya incorporados (recorre el cursor de cada estado). */
 async function fetchAllOwnedTemplateIds(): Promise<Set<string>> {
@@ -57,12 +86,141 @@ async function fetchAllOwnedTemplateIds(): Promise<Set<string>> {
   return ids
 }
 
+/* --------------------------- Borrador de la tabla -------------------------- */
+
 /**
- * Biblioteca de prestaciones: el catálogo oficial completo, sin precios. Se
- * elige de la biblioteca, se pone el precio aquí mismo y lo que se guarda
- * queda activo en el tarifario.
+ * Lo que la persona ya eligió o escribió de un servicio. Vive aparte de la
+ * vista: cambiar de «Más usados» a la biblioteca, buscar o paginar no lo borra.
  */
-function BibliotecaPage() {
+interface Draft {
+  chosen: boolean
+  /** Nombre que usará la clínica. */
+  name: string
+  price: string
+  billingMode: BillingMode
+  durationMin: string
+  specialty: string
+  scope: string
+  /** Denominación y código de la biblioteca; `null` en un servicio propio. */
+  officialName: string | null
+  code: string | null
+}
+
+/** Fila de la tabla: el servicio con lo elegido y lo que le falta para guardarse. */
+interface AddRow extends Draft {
+  key: string
+  /** Concepto de «Más usados» del que salió, si aplica. */
+  concept: string | null
+  /** Ya está en el tarifario de la clínica: no se elige otra vez. */
+  owned: boolean
+  nameIssue: string | null
+  priceIssue: string | null
+  /** El precio se marca como error: ya se intentó guardar o lo escrito no vale. */
+  priceFlagged: boolean
+  durationIssue: string | null
+  ready: boolean
+}
+
+function templateDraft(template: TreatmentTemplateItem): Draft {
+  return {
+    chosen: false,
+    name: template.name,
+    price: "",
+    billingMode: "treatment",
+    durationMin: "",
+    specialty: template.specialty,
+    scope: template.scope,
+    officialName: template.codings[0]?.display ?? template.name,
+    code: template.codings[0]?.code ?? null,
+  }
+}
+
+function draftOf(row: AddRow): Draft {
+  return {
+    chosen: row.chosen,
+    name: row.name,
+    price: row.price,
+    billingMode: row.billingMode,
+    durationMin: row.durationMin,
+    specialty: row.specialty,
+    scope: row.scope,
+    officialName: row.officialName,
+    code: row.code,
+  }
+}
+
+interface Regional {
+  currency: string
+  locale: string
+}
+
+type PriceCheck = { state: "empty" } | { state: "invalid"; message: string } | { state: "ok"; cents: number }
+
+function checkPrice(raw: string, regional: Regional): PriceCheck {
+  if (raw.trim() === "") return { state: "empty" }
+  try {
+    return { state: "ok", cents: parseMoney(raw, regional.currency, regional.locale) }
+  } catch (error) {
+    return {
+      state: "invalid",
+      message: error instanceof Error ? error.message : "Importe inválido",
+    }
+  }
+}
+
+/** Minutos enteros entre 1 y 1440; vacío es «sin duración». */
+function checkDuration(raw: string): { ok: boolean; minutes: number | null } {
+  if (raw.trim() === "") return { ok: true, minutes: null }
+  const minutes = Number(raw.trim())
+  if (!Number.isInteger(minutes) || minutes < 1 || minutes > 1440) return { ok: false, minutes: null }
+  return { ok: true, minutes }
+}
+
+function checkName(raw: string): string | null {
+  const name = raw.trim()
+  if (!name) return "Ponle un nombre"
+  if (name.length > 200) return "Máximo 200 caracteres"
+  return null
+}
+
+function toRow(
+  key: string,
+  draft: Draft,
+  regional: Regional,
+  extra: { concept: string | null; owned: boolean; attempted: boolean },
+): AddRow {
+  const price = checkPrice(draft.price, regional)
+  const nameIssue = checkName(draft.name)
+  const durationIssue = checkDuration(draft.durationMin).ok ? null : "Minutos entre 1 y 1440"
+  const priceIssue =
+    price.state === "empty" ? "Falta el precio" : price.state === "invalid" ? price.message : null
+  return {
+    ...draft,
+    key,
+    concept: extra.concept,
+    owned: extra.owned,
+    nameIssue,
+    priceIssue,
+    priceFlagged: price.state === "invalid" || (price.state === "empty" && extra.attempted),
+    durationIssue,
+    ready: price.state === "ok" && nameIssue === null && durationIssue === null,
+  }
+}
+
+function errorMessage(error: unknown): string {
+  if (error instanceof ApiError) return error.shape.message ?? error.message
+  return error instanceof Error ? error.message : common.errors.generic
+}
+
+/* --------------------------------- Página --------------------------------- */
+
+/**
+ * Agregar servicios (tablero 8b): se eligen de «Más usados», de la biblioteca
+ * o se crean propios; en la misma tabla se les pone nombre, precio y cómo se
+ * cobran, y lo que se guarda queda activo. Quien no administra el tarifario
+ * solo consulta la biblioteca.
+ */
+function AddServicesPage() {
   const canIncorporate = usePermission("settings.write")
   const canViewLibrary =
     canIncorporate ||
@@ -71,39 +229,48 @@ function BibliotecaPage() {
     usePermission("appointments.read") ||
     usePermission("finance.read")
   const queryClient = useQueryClient()
+  const navigate = useNavigate()
   const listSearch = useListSearch()
   const search = listSearch.get("q") ?? ""
   const specialtyFilter = listSearch.get("especialidad") ?? "todas"
   const cursor = listSearch.get("cursor")
+  const hasFilters = search.trim() !== "" || specialtyFilter !== "todas"
+  /** «Más usados» es el punto de partida de quien agrega; buscar o filtrar va a la biblioteca. */
+  const view: View =
+    canIncorporate && !hasFilters && listSearch.get("vista") !== "biblioteca"
+      ? "mas-usados"
+      : "biblioteca"
+
   const [previousCursors, setPreviousCursors] = useState<string[]>([])
-  const [checked, setChecked] = useState<string[]>([])
-  /** Tarifa explícita por prestación elegida (unidad menor al guardar; 0 = sin costo). */
-  const [prices, setPrices] = useState<Record<string, string>>({})
-  /** Cómo se cobra cada elegida: por tratamiento o por sesión. */
-  const [modes, setModes] = useState<Record<string, "treatment" | "session">>({})
-  /** Moneda y formato de la clínica para escribir las tarifas. */
+  const [drafts, setDrafts] = useState<Record<string, Draft>>({})
+  /** Tras un guardado, lo que quedó incompleto se marca como pendiente de corregir. */
+  const [attempted, setAttempted] = useState(false)
+  /** Cada apertura del servicio propio empieza en blanco. */
+  const [ownSession, setOwnSession] = useState(0)
+  const [ownOpen, setOwnOpen] = useState(false)
+
+  /** Moneda y formato de la clínica: con ellos se escriben y leen los precios. */
   const profileQuery = useOrgProfile()
-  const orgCurrency = profileQuery.data?.currency
-  const orgLocale = profileQuery.data?.locale
+  const currency = profileQuery.data?.currency
+  const locale = profileQuery.data?.locale
+  const regional = useMemo<Regional | null>(
+    () => (currency && locale ? { currency, locale } : null),
+    [currency, locale],
+  )
 
   useEffect(() => {
     if (!cursor) setPreviousCursors([])
   }, [cursor])
 
-  // Al cambiar búsqueda o filtro se vuelve a la primera página: el cursor anterior
-  // pertenece al resultado previo y la selección por página se conserva aparte.
-  const filterKey = `${search}||${specialtyFilter}`
-  const prevFilterKey = useRef(filterKey)
-  useEffect(() => {
-    if (prevFilterKey.current === filterKey) return
-    prevFilterKey.current = filterKey
-    setPreviousCursors([])
-    if (cursor) listSearch.setParam("cursor", undefined)
+  const mostUsedQuery = useQuery({
+    queryKey: ["services", "most-used"],
+    enabled: canIncorporate && view === "mas-usados",
+    queryFn: fetchMostUsedServices,
   })
 
   const libraryQuery = useQuery({
     queryKey: ["services", "biblioteca", search, specialtyFilter, cursor],
-    enabled: canViewLibrary,
+    enabled: canViewLibrary && view === "biblioteca",
     queryFn: () =>
       fetchTreatmentTemplates({
         q: search.trim() || undefined,
@@ -115,251 +282,308 @@ function BibliotecaPage() {
 
   const ownedQuery = useQuery({
     queryKey: ["services", "owned-templates"],
-    enabled: canViewLibrary,
+    enabled: canViewLibrary && view === "biblioteca",
     queryFn: fetchAllOwnedTemplateIds,
     staleTime: 60_000,
   })
 
-  const rows = useMemo(() => libraryQuery.data?.data ?? [], [libraryQuery.data])
+  const activeQuery = view === "mas-usados" ? mostUsedQuery : libraryQuery
   const nextCursor = libraryQuery.data?.nextCursor ?? null
-  const total = libraryQuery.data?.total ?? rows.length
+  const total = libraryQuery.data?.total ?? 0
   const catalog: TreatmentTemplateCatalog | null = libraryQuery.data?.catalog ?? null
   const pageNumber = previousCursors.length + 1
-  const owned = ownedQuery.data ?? new Set<string>()
-  const selectable = rows.filter((row) => !owned.has(row.id))
-  /** Selección acumulada de todas las páginas visitadas (ya incorporadas excluidas). */
-  const checkedPending = checked.filter((id) => !owned.has(id))
-  /** Elegidas con precio escrito: listas para guardar y activar. */
-  const readyCount = checkedPending.filter((id) => (prices[id] ?? "").trim() !== "").length
-  const incorporateMutation = useMutation({
-    mutationFn: async () => {
-      if (orgCurrency === undefined || orgLocale === undefined) {
-        throw new Error("Cargando la configuración de la clínica…")
+
+  /** Plantillas de la vista, con el concepto del que salen en «Más usados». */
+  const viewTemplates = useMemo<Array<{ template: TreatmentTemplateItem; concept: string | null }>>(
+    () =>
+      view === "mas-usados"
+        ? (mostUsedQuery.data?.data ?? []).flatMap((concept) =>
+            concept.templates.map((template) => ({ template, concept: concept.label })),
+          )
+        : (libraryQuery.data?.data ?? []).map((template) => ({ template, concept: null })),
+    [view, mostUsedQuery.data, libraryQuery.data],
+  )
+
+  const owned = ownedQuery.data
+  const rows = useMemo<AddRow[]>(() => {
+    if (!regional) return []
+    const inView = new Set(viewTemplates.map((entry) => entry.template.id))
+    const list = viewTemplates.map(({ template, concept }) =>
+      toRow(template.id, drafts[template.id] ?? templateDraft(template), regional, {
+        concept,
+        owned: view === "biblioteca" && (owned?.has(template.id) ?? false),
+        attempted,
+      }),
+    )
+    // Lo elegido en otra vista sigue a la vista: lo que se va a guardar —y lo
+    // que quedó incompleto— nunca se pierde de vista.
+    for (const [key, draft] of Object.entries(drafts)) {
+      if (inView.has(key)) continue
+      if (draft.chosen) {
+        list.push(toRow(key, draft, regional, { concept: null, owned: false, attempted }))
       }
-      const items: FromTemplateItemBody[] = []
-      for (const id of checkedPending) {
-        const raw = (prices[id] ?? "").trim()
-        if (!raw) throw new Error("Pon el precio de cada prestación elegida (usa 0 si va incluida)")
+    }
+    return list
+  }, [attempted, drafts, owned, regional, view, viewTemplates])
+
+  /** Todo lo elegido, esté o no en la vista: es lo que cuenta y lo que se guarda. */
+  const chosen = useMemo(
+    () =>
+      regional
+        ? Object.entries(drafts)
+            .filter(([, draft]) => draft.chosen)
+            .map(([key, draft]) =>
+              toRow(key, draft, regional, { concept: null, owned: false, attempted }),
+            )
+        : [],
+    [attempted, drafts, regional],
+  )
+  const ready = chosen.filter((row) => row.ready)
+  const missingPrice = chosen.filter((row) => row.price.trim() === "").length
+  const toFix = chosen.length - ready.length - missingPrice
+  const chosenCount = useRef(0)
+  chosenCount.current = chosen.length
+  const dirty = Object.values(drafts).some((draft) => draft.chosen)
+
+  /** Aplica un cambio a la fila; elegir respeta el tope de un guardado. */
+  const editRow = useCallback((row: AddRow, patch: Partial<Draft>) => {
+    if (patch.chosen === true && !row.chosen && chosenCount.current >= MAX_SELECTION) {
+      toast.info(`Guarda estos ${MAX_SELECTION} antes de elegir más`)
+      return
+    }
+    setDrafts((previous) => ({
+      ...previous,
+      [row.key]: { ...(previous[row.key] ?? draftOf(row)), ...patch },
+    }))
+  }, [])
+
+  const openOwn = useCallback(() => {
+    setOwnSession((session) => session + 1)
+    setOwnOpen(true)
+  }, [])
+
+  const saveMutation = useMutation({
+    mutationFn: async (toSave: AddRow[]) => {
+      if (!regional) throw new Error("Falta la moneda de la clínica")
+      const items: QuickAddServiceBody[] = []
+      for (const row of toSave) {
+        const price = checkPrice(row.price, regional)
+        const duration = checkDuration(row.durationMin)
+        if (price.state !== "ok" || !duration.ok) continue
         items.push({
-          templateId: id,
-          priceCents: parseMoney(raw, orgCurrency, orgLocale),
-          billingMode: modes[id] ?? "treatment",
+          kind: "template",
+          templateId: row.key,
+          name: row.name.trim(),
+          priceCents: price.cents,
+          billingMode: row.billingMode,
+          durationMin: duration.minutes,
         })
       }
-      return incorporateTemplatesApi(items)
+      const result = await quickAddServicesApi(items)
+      return { result, savedKeys: toSave.map((row) => row.key) }
     },
-    onSuccess: async (result) => {
-      setChecked([])
-      setPrices({})
-      setModes({})
+    onSuccess: async ({ result, savedKeys }) => {
+      // Sale de la tabla solo lo guardado; lo incompleto se queda, marcado.
+      const saved = new Set(savedKeys)
+      const left = chosen.filter((row) => !saved.has(row.key)).length
+      setDrafts((previous) =>
+        Object.fromEntries(Object.entries(previous).filter(([key]) => !saved.has(key))),
+      )
+      setAttempted(left > 0)
       await queryClient.invalidateQueries({ queryKey: ["services"] })
       const created = result.data.created.length
-      toast.success(
-        created > 0
-          ? `${created} prestación(es) guardada(s) y activa(s) en tu tarifario`
-          : "Esas prestaciones ya estaban en tu tarifario",
-      )
+      const already = result.data.existing.length
+      const parts = [
+        created === 1
+          ? "1 servicio guardado y activo"
+          : `${created} servicios guardados y activos`,
+      ]
+      if (already > 0) {
+        parts.push(already === 1 ? "1 ya estaba en tu tarifario" : `${already} ya estaban en tu tarifario`)
+      }
+      if (left > 0) {
+        parts.push(left === 1 ? "queda 1 por completar en la tabla" : `quedan ${left} por completar en la tabla`)
+      }
+      toast.success(`${parts.join(" · ")}.`)
     },
     onError: (error) => {
-      toast.error(
-        error instanceof ApiError ? (error.shape.message ?? error.message) : error.message,
-      )
+      toast.error(errorMessage(error))
     },
   })
+  const saving = saveMutation.isPending
 
-  const toggle = useCallback(
-    (id: string) => {
-      if (!checked.includes(id) && checkedPending.length >= MAX_SELECTION) {
-        toast.info(`Máximo ${MAX_SELECTION} prestaciones por incorporación`)
-        return
-      }
-      setChecked((prev) => (prev.includes(id) ? prev.filter((v) => v !== id) : [...prev, id]))
-    },
-    [checked, checkedPending.length],
-  )
+  /** Un cambio de vista conserva lo elegido; solo cambia qué se muestra para elegir. */
+  const changeView = (next: View) => {
+    setPreviousCursors([])
+    listSearch.setParams(
+      next === "mas-usados"
+        ? { vista: undefined, q: undefined, especialidad: undefined, cursor: undefined }
+        : { vista: "biblioteca", cursor: undefined },
+    )
+  }
 
-  /** Casillas de esta página marcadas (la selección global se conserva al navegar). */
-  const checkedOnPage = selectable.filter((row) => checked.includes(row.id))
-  const allSelected = selectable.length > 0 && checkedOnPage.length === selectable.length
-  const togglePage = useCallback(
-    (value: boolean) => {
-      if (value) {
-        const fresh = selectable.map((row) => row.id).filter((id) => !checked.includes(id))
-        const room = MAX_SELECTION - checkedPending.length
-        if (room <= 0) {
-          toast.info(`Máximo ${MAX_SELECTION} prestaciones por incorporación`)
-          return
-        }
-        if (fresh.length > room) {
-          toast.info(`Solo se seleccionan ${room} más (máximo ${MAX_SELECTION})`)
-        }
-        setChecked((prev) => [...prev, ...fresh.slice(0, room)])
-        return
-      }
-      setChecked((prev) => {
-        const pageIds = new Set(selectable.map((row) => row.id))
-        return prev.filter((id) => !pageIds.has(id))
-      })
-    },
-    [checked, checkedPending.length, selectable],
-  )
+  const pricePlaceholder = regional ? formatMoneyInput(0, regional.currency, regional.locale) : ""
+  const priceHeader = regional
+    ? `Precio (${currencySymbol(regional.currency, regional.locale)})`
+    : "Precio"
 
-  const columns = useMemo<ColumnDef<TreatmentTemplateItem>[]>(
-    () => [
+  // Las definiciones no dependen de lo escrito: una columna recreada en cada
+  // tecla remontaría su celda y el campo perdería el foco. Los valores llegan
+  // por la fila.
+  const columns = useMemo<ColumnDef<AddRow>[]>(() => {
+    const serviceColumn: ColumnDef<AddRow> = {
+      id: "servicio",
+      header: canIncorporate ? "Servicio, con el nombre que usará la clínica" : "Procedimiento",
+      meta: { view: { role: "title" } },
+      cell: ({ row }) => (
+        <ServiceCell
+          row={row.original}
+          editable={canIncorporate}
+          disabled={saving}
+          onName={(name) => editRow(row.original, { name })}
+        />
+      ),
+    }
+    if (!canIncorporate) {
+      return [
+        serviceColumn,
+        {
+          id: "estado",
+          header: "En la clínica",
+          meta: { view: { primary: true } },
+          cell: ({ row }) =>
+            row.original.owned ? (
+              <Badge variant="secondary">En el tarifario</Badge>
+            ) : (
+              <span className="text-muted-foreground">No agregado</span>
+            ),
+        },
+      ]
+    }
+    return [
       {
-        id: "select",
-        meta: { view: { role: "select" } },
-        header: () => (
+        id: "elegir",
+        header: "",
+        // «media» y no «select»: en teléfono la casilla acompaña a cada fila
+        // sin la barra de «seleccionar todo», que aquí no existe.
+        meta: { view: { role: "media", label: "Agregar" } },
+        cell: ({ row }) => (
           <Checkbox
-            checked={allSelected}
-            disabled={!canIncorporate || selectable.length === 0}
-            onCheckedChange={(value) => togglePage(value === true)}
-            aria-label="Seleccionar las prestaciones disponibles de esta página"
+            checked={row.original.chosen}
+            disabled={row.original.owned || saving}
+            onCheckedChange={(value) => editRow(row.original, { chosen: value === true })}
+            aria-label={`Agregar ${row.original.name.trim() || "este servicio"}`}
           />
         ),
-        cell: ({ row }) => {
-          const incorporated = owned.has(row.original.id)
-          return (
-            <Checkbox
-              checked={checked.includes(row.original.id)}
-              disabled={!canIncorporate || incorporated}
-              onCheckedChange={() => toggle(row.original.id)}
-              aria-label={`Incorporar ${row.original.name}`}
-            />
-          )
-        },
       },
-      {
-        accessorKey: "name",
-        header: "Prestación",
-        meta: { view: { primary: true } },
-        cell: ({ row }) => (
-          <span className="flex min-w-0 max-w-xl flex-col whitespace-normal">
-            <span className="font-medium break-words">{row.original.name}</span>
-            <span className="text-xs text-muted-foreground">
-              {TREATMENT_SPECIALTY_LABELS[row.original.specialty] ?? row.original.specialty} ·{" "}
-              {TREATMENT_SCOPE_LABELS[row.original.scope] ?? row.original.scope}
-              {row.original.surfaceCountMin !== null
-                ? ` · ${row.original.surfaceCountMin}–${row.original.surfaceCountMax ?? "…"} superficies`
-                : ""}
-            </span>
-          </span>
-        ),
-      },
-      {
-        id: "codigo",
-        header: "Código oficial",
-        meta: { view: { primary: true } },
-        cell: ({ row }) => {
-          // Cada plantilla proyecta UN código oficial: se muestra completo, sin recortes.
-          const coding = row.original.codings[0]
-          if (!coding) {
-            return <span className="text-muted-foreground">Sin código oficial</span>
-          }
-          return (
-            <span className="flex min-w-0 flex-col whitespace-normal">
-              <span className="font-mono font-medium break-all">{coding.code}</span>
-              <span className="text-xs text-muted-foreground break-words">
-                {coding.system} · edición {coding.version}
-              </span>
-            </span>
-          )
-        },
-      },
-      {
-        id: "precio",
-        header: `Precio${orgCurrency ? ` (${orgCurrency})` : ""}`,
-        meta: { view: { primary: true } },
-        cell: ({ row }) => {
-          const incorporated = owned.has(row.original.id)
-          const selected = checked.includes(row.original.id)
-          return (
-            <Input
-              className="w-28"
-              inputMode="decimal"
-              placeholder="0.00"
-              aria-label={`Precio de ${row.original.name}`}
-              disabled={!canIncorporate || incorporated || !selected}
-              value={prices[row.original.id] ?? ""}
-              onChange={(event) =>
-                setPrices((prev) => ({ ...prev, [row.original.id]: event.target.value }))
-              }
-            />
-          )
-        },
-      },
+      serviceColumn,
       {
         id: "cobro",
         header: "Se cobra",
-        cell: ({ row }) => {
-          const incorporated = owned.has(row.original.id)
-          const selected = checked.includes(row.original.id)
-          const mode = modes[row.original.id] ?? "treatment"
-          return (
-            <select
-              className="rounded-md border bg-background px-2 py-1.5 text-sm"
-              aria-label={`Cómo se cobra ${row.original.name}`}
-              disabled={!canIncorporate || incorporated || !selected}
-              value={mode}
+        meta: { view: { primary: true } },
+        cell: ({ row }) =>
+          row.original.owned ? (
+            <span className="text-muted-foreground">—</span>
+          ) : row.original.chosen ? (
+            <ChoiceSelect
+              className="w-40"
+              aria-label={`Cómo se cobra ${row.original.name.trim() || "este servicio"}`}
+              disabled={saving}
+              value={row.original.billingMode}
               onChange={(event) =>
-                setModes((prev) => ({
-                  ...prev,
-                  [row.original.id]: event.target.value as "treatment" | "session",
-                }))
+                editRow(row.original, { billingMode: event.target.value as BillingMode })
               }
             >
-              <option value="treatment">Por tratamiento</option>
-              <option value="session">Por sesión</option>
-            </select>
-          )
-        },
-      },
-      {
-        id: "estado",
-        header: "Estado",
-        cell: ({ row }) =>
-          owned.has(row.original.id) ? (
-            <Badge variant="secondary">En tu tarifario</Badge>
+              <option value="treatment">{BILLING_MODE_LABELS.treatment}</option>
+              <option value="session">{BILLING_MODE_LABELS.session}</option>
+            </ChoiceSelect>
           ) : (
-            <Badge variant="outline">Disponible</Badge>
+            BILLING_MODE_LABELS[row.original.billingMode]
           ),
       },
       {
-        id: "actions",
-        header: "",
+        id: "duracion",
+        header: "Duración",
+        // Principal: en teléfono también se pone la duración, junto al precio.
+        meta: { view: { primary: true } },
+        cell: ({ row }) =>
+          row.original.owned ? (
+            <span className="text-muted-foreground">—</span>
+          ) : row.original.chosen ? (
+            <span className="inline-flex flex-col gap-1">
+              <span className="inline-flex items-center gap-1.5">
+                <Input
+                  className="w-16"
+                  inputMode="numeric"
+                  aria-label={`Duración en minutos de ${row.original.name.trim() || "este servicio"}`}
+                  aria-invalid={row.original.durationIssue !== null || undefined}
+                  disabled={saving}
+                  value={row.original.durationMin}
+                  onChange={(event) => editRow(row.original, { durationMin: event.target.value })}
+                />
+                <span className="text-muted-foreground">min</span>
+              </span>
+              {row.original.durationIssue ? (
+                <span className="text-xs text-destructive">{row.original.durationIssue}</span>
+              ) : null}
+            </span>
+          ) : row.original.durationMin.trim() !== "" ? (
+            `${row.original.durationMin.trim()} min`
+          ) : (
+            <span className="text-muted-foreground">Sin duración</span>
+          ),
+      },
+      {
+        id: "precio",
+        header: priceHeader,
+        meta: { view: { primary: true } },
         cell: ({ row }) => {
-          const incorporated = owned.has(row.original.id)
+          const item = row.original
+          if (item.owned) return <Badge variant="secondary">Ya está en tu tarifario</Badge>
+          const label = item.name.trim() || "este servicio"
           return (
-            <RowActions
-              label={`Acciones de ${row.original.name}`}
-              items={[
-                {
-                  key: "incorporar",
-                  label: "Elegir y ponerle precio",
-                  disabled: incorporated || !canIncorporate,
-                  onSelect: () => toggle(row.original.id),
-                },
-              ]}
-            />
+            <span className="flex flex-col gap-1">
+              <Input
+                className="w-28"
+                inputMode="decimal"
+                placeholder={pricePlaceholder}
+                aria-label={
+                  item.billingMode === "session"
+                    ? `Precio por sesión de ${label}`
+                    : `Precio de ${label}`
+                }
+                aria-invalid={(item.chosen && item.priceFlagged) || undefined}
+                disabled={saving}
+                value={item.price}
+                onChange={(event) => {
+                  const price = event.target.value
+                  // Poner el precio ya es elegirlo: no hace falta marcar antes la casilla.
+                  editRow(item, price.trim() !== "" && !item.chosen ? { price, chosen: true } : { price })
+                }}
+              />
+              {item.chosen && item.priceIssue ? (
+                <span
+                  className={cn(
+                    "text-xs",
+                    item.priceFlagged ? "text-destructive" : "text-muted-foreground",
+                  )}
+                >
+                  {item.priceIssue}
+                </span>
+              ) : null}
+            </span>
           )
         },
       },
-    ],
-    [
-      allSelected,
-      canIncorporate,
-      checked,
-      modes,
-      orgCurrency,
-      owned,
-      prices,
-      selectable,
-      toggle,
-      togglePage,
-    ],
-  )
+    ]
+  }, [canIncorporate, editRow, priceHeader, pricePlaceholder, saving])
 
-  const table = useReactTable({ data: rows, columns, getCoreRowModel: getCoreRowModel() })
+  const table = useReactTable({
+    data: rows,
+    columns,
+    getCoreRowModel: getCoreRowModel(),
+    getRowId: (row) => row.key,
+  })
 
   const goNext = () => {
     if (!nextCursor) return
@@ -373,15 +597,15 @@ function BibliotecaPage() {
     listSearch.setParam("cursor", previous || undefined)
   }
 
-  const hasFilters = search.trim() !== "" || specialtyFilter !== "todas"
+  const title = canIncorporate ? "Agregar servicios" : "Biblioteca de procedimientos"
+  const subtitle = canIncorporate
+    ? "Elige de la biblioteca o crea los tuyos, y pon el precio aquí mismo. Lo que guardes queda activo."
+    : "Lo que la clínica puede agregar a su tarifario. Los agrega quien administra la clínica."
 
   if (!canViewLibrary) {
     return (
       <div className="flex flex-col gap-4">
-        <PageHeader
-          title="Biblioteca de prestaciones"
-          subtitle="Elige de la biblioteca, pon el precio aquí mismo y lo que guardes queda activo"
-        />
+        <PageHeader title="Biblioteca de procedimientos" />
         <EmptyState
           title="Sin acceso"
           description="Necesitas permiso clínico, de agenda, de caja o de configuración para ver la biblioteca."
@@ -390,136 +614,445 @@ function BibliotecaPage() {
     )
   }
 
-  return (
-    <div className="flex flex-col gap-4">
-      <PageHeader
-        title="Biblioteca de prestaciones"
-        subtitle="Elige de la biblioteca, pon el precio aquí mismo y lo que guardes queda activo"
+  const ownAction = canIncorporate && regional ? (
+    <Button type="button" variant="outline" className="min-h-11" onClick={openOwn}>
+      <Plus aria-hidden />
+      Crear un servicio propio
+    </Button>
+  ) : undefined
+
+  const emptyView =
+    view === "mas-usados" ? (
+      <EmptyState
+        icon={Library}
+        title="No hay sugerencias para empezar"
+        description="No hay una biblioteca de procedimientos para tu clínica, o ya agregaste los más usados. Crea tus servicios propios o busca en la biblioteca."
+        actionLabel="Crear un servicio propio"
+        onAction={openOwn}
+        secondaryActionLabel="Ver toda la biblioteca"
+        onSecondaryAction={() => changeView("biblioteca")}
       />
-      <FilterBar
-        filters={[
-          {
-            key: "especialidad",
-            label: "Especialidad",
-            type: "select",
-            options: SPECIALTY_FILTER_OPTIONS,
-          },
-        ]}
-        sortOptions={[]}
-        searchPlaceholder="Buscar por código o nombre"
+    ) : hasFilters ? (
+      <EmptyState
+        icon={Library}
+        title="Sin resultados"
+        description={
+          canIncorporate
+            ? "Ningún procedimiento de la biblioteca coincide. Si tu clínica lo ofrece, créalo como servicio propio."
+            : "Ningún procedimiento de la biblioteca coincide con la búsqueda."
+        }
+        actionLabel={canIncorporate && regional ? "Crear un servicio propio" : undefined}
+        onAction={canIncorporate && regional ? openOwn : undefined}
       />
-      {catalog ? (
-        <div className="flex flex-col gap-1 rounded-lg border p-3 text-sm" role="note">
-          <p className="font-medium">
-            Biblioteca {catalog.system} · edición {catalog.version}
-          </p>
+    ) : (
+      <EmptyState
+        icon={Library}
+        title="Aún no hay biblioteca de procedimientos"
+        description={
+          canIncorporate
+            ? "El tarifario funciona igual con servicios propios: créalos con su precio."
+            : "Cuando la clínica tenga una biblioteca de procedimientos, aparecerá aquí."
+        }
+        actionLabel={canIncorporate && regional ? "Crear un servicio propio" : undefined}
+        onAction={canIncorporate && regional ? openOwn : undefined}
+      />
+    )
+
+  const body = !regional ? null : activeQuery.isPending ? (
+    <LoadingState />
+  ) : activeQuery.isError ? (
+    <ErrorState
+      error={activeQuery.error instanceof ApiError ? activeQuery.error.shape : null}
+      onRetry={() => void activeQuery.refetch()}
+    />
+  ) : rows.length === 0 ? (
+    emptyView
+  ) : (
+    <div className="flex min-w-0 flex-col gap-3">
+      <DataTable table={table} isFetching={activeQuery.isFetching && !activeQuery.isPending} />
+      {view === "biblioteca" ? (
+        <div className="flex flex-wrap items-center justify-between gap-2">
           <p className="text-xs text-muted-foreground">
-            Cobertura limitada a esta edición y su ámbito ({catalog.scope}):{" "}
-            {catalog.availableCount} de {catalog.expectedCount} procedimientos disponibles. Cada
-            prestación corresponde a un solo código oficial.
+            Página {pageNumber} · {total} con este filtro
+            {catalog ? (
+              <>
+                {" · "}Biblioteca {catalog.system}, edición {catalog.version}:{" "}
+                {catalog.availableCount} de {catalog.expectedCount} procedimientos ·{" "}
+                <a
+                  href={catalog.sourceUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="font-medium text-primary underline-offset-4 hover:underline"
+                >
+                  Ver fuente oficial
+                </a>
+              </>
+            ) : null}
           </p>
-          <p className="text-xs">
-            <a
-              href={catalog.sourceUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="font-medium text-primary underline-offset-4 hover:underline"
+          <div className="flex gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={previousCursors.length === 0 || libraryQuery.isFetching}
+              onClick={goPrevious}
             >
-              Ver fuente oficial
-            </a>
-          </p>
-        </div>
-      ) : libraryQuery.data ? (
-        <p
-          className="rounded-lg border border-dashed p-3 text-xs text-muted-foreground"
-          role="note"
-        >
-          Sin edición oficial importada: la biblioteca no muestra cobertura ni fuente.
-        </p>
-      ) : null}
-      {canIncorporate ? (
-        <div className="flex flex-col items-end gap-1">
-          <SubmitButton
-            type="button"
-            disabled={checkedPending.length === 0}
-            pending={incorporateMutation.isPending}
-            onClick={() => incorporateMutation.mutate()}
-          >
-            <Library aria-hidden />
-            {readyCount > 0
-              ? `Guardar y activar ${readyCount}`
-              : checkedPending.length > 0
-                ? `Incorporar a mi tarifario (${checkedPending.length})`
-                : "Incorporar a mi tarifario"}
-          </SubmitButton>
-          {checkedPending.length > 0 ? (
-            <p className="text-xs text-muted-foreground">
-              {readyCount} listas · {checkedPending.length - readyCount} sin precio. La selección
-              se conserva al cambiar de página (máximo {MAX_SELECTION} por envío). Lo que guardes
-              queda activo.
-            </p>
-          ) : null}
+              {common.filters.previous}
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={!nextCursor || libraryQuery.isFetching}
+              onClick={goNext}
+            >
+              {common.filters.next}
+            </Button>
+          </div>
         </div>
       ) : null}
-      {libraryQuery.isPending ? (
+    </div>
+  )
+
+  return (
+    <div className="flex min-w-0 flex-col gap-4">
+      <PageHeader title={title} subtitle={subtitle} actions={ownAction} />
+      {profileQuery.isPending ? (
         <LoadingState />
-      ) : libraryQuery.isError ? (
+      ) : profileQuery.isError ? (
         <ErrorState
-          error={libraryQuery.error instanceof ApiError ? libraryQuery.error.shape : null}
-          onRetry={() => void libraryQuery.refetch()}
+          message="No se pudo cargar la moneda de la clínica"
+          onRetry={() => void profileQuery.refetch()}
         />
-      ) : rows.length === 0 && !hasFilters ? (
+      ) : !regional ? (
         <EmptyState
-          icon={Library}
-          title="Biblioteca vacía"
-          description="Aún no hay prestaciones publicadas."
-        />
-      ) : rows.length === 0 ? (
-        <EmptyState
-          icon={Library}
-          title="Sin resultados"
-          description="Ninguna prestación de la biblioteca coincide con la búsqueda."
+          title="Falta la región de la clínica"
+          description={
+            canIncorporate
+              ? "Los precios se guardan en la moneda de la clínica. Configura el país y la moneda para agregar servicios."
+              : "Quien administra la clínica debe configurar el país y la moneda antes de armar el tarifario."
+          }
+          actionLabel={canIncorporate ? "Configurar la clínica" : undefined}
+          onAction={canIncorporate ? () => void navigate({ to: "/settings" }) : undefined}
         />
       ) : (
         <>
-          <p className="text-sm text-muted-foreground">
-            Denominación oficial completa con su código único
-            {catalog ? ` (${catalog.system} · edición ${catalog.version})` : ""}, sin precios
-            propuestos. Elige, pon el precio y el modo de cobro, y lo que guardes queda activo.
-            El nombre incorporado es comercial y editable; el código oficial no se altera.
-          </p>
-          <DataTable table={table} />
-          <div className="flex flex-wrap items-center justify-between gap-2 py-2">
-            <p className="text-xs text-muted-foreground">
-              Página {pageNumber} · {rows.length} en esta página · {total} con este filtro
-              {nextCursor ? " · hay más resultados" : " · fin del listado"}
-              {catalog
-                ? ` · cobertura de la edición: ${catalog.availableCount} de ${catalog.expectedCount}`
-                : ""}
-            </p>
-            <div className="flex gap-2">
-              <Button
+          <FilterBar
+            filters={[
+              {
+                key: "especialidad",
+                label: "Especialidad",
+                type: "select",
+                options: SPECIALTY_FILTER_OPTIONS,
+              },
+            ]}
+            sortOptions={[]}
+            resetKeys={["q", "especialidad"]}
+            searchPlaceholder="Buscar en la biblioteca"
+          />
+          {canIncorporate ? (
+            <Tabs value={view} onValueChange={(next) => changeView(next as View)}>
+              <TabsList aria-label="De dónde elegir">
+                <TabsTrigger value="mas-usados">Más usados</TabsTrigger>
+                <TabsTrigger value="biblioteca">Toda la biblioteca</TabsTrigger>
+              </TabsList>
+              <TabsContent value="mas-usados">{view === "mas-usados" ? body : null}</TabsContent>
+              <TabsContent value="biblioteca">{view === "biblioteca" ? body : null}</TabsContent>
+            </Tabs>
+          ) : (
+            body
+          )}
+          {canIncorporate && (chosen.length > 0 || rows.length > 0) ? (
+            <div
+              // Fija al pie: en teléfono y tablet queda justo encima de la
+              // barra de secciones (pegada al borde, con su zona segura); desde
+              // `lg` esa barra es un riel lateral y esta baja hasta el borde.
+              className="sticky bottom-[calc(4.5rem+env(safe-area-inset-bottom))] z-10 flex flex-wrap items-center justify-between gap-x-3 gap-y-2 rounded-md border border-border bg-card p-3 shadow-sm lg:bottom-0"
+            >
+              <p className="hidden min-w-0 flex-1 basis-56 text-xs text-muted-foreground sm:block">
+                El nombre es el que verán caja y el paciente; se puede cambiar. El código oficial se
+                conserva.
+              </p>
+              <p className="text-sm font-medium" role="status">
+                {ready.length === 1 ? "1 listo" : `${ready.length} listos`}
+                {missingPrice > 0 ? ` · ${missingPrice} sin precio` : ""}
+                {toFix > 0 ? ` · ${toFix} por corregir` : ""}
+              </p>
+              <SubmitButton
                 type="button"
-                size="sm"
-                variant="outline"
-                disabled={previousCursors.length === 0 || libraryQuery.isFetching}
-                onClick={goPrevious}
+                className="min-h-11"
+                disabled={ready.length === 0}
+                pending={saving}
+                onClick={() => saveMutation.mutate(ready)}
               >
-                {common.filters.previous}
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                disabled={!nextCursor || libraryQuery.isFetching}
-                onClick={goNext}
-              >
-                {common.filters.next}
-              </Button>
+                {`Guardar y activar ${ready.length}`}
+              </SubmitButton>
             </div>
-          </div>
+          ) : null}
+          <OwnServiceDrawer
+            key={ownSession}
+            open={ownOpen}
+            regional={regional}
+            onClose={() => setOwnOpen(false)}
+          />
         </>
       )}
+      <LeaveGuard dirty={dirty && !saving} />
     </div>
+  )
+}
+
+/* --------------------------------- Celdas --------------------------------- */
+
+/** Nombre que usará la clínica (editable al elegirlo) y de qué servicio se trata. */
+function ServiceCell({
+  row,
+  editable,
+  disabled,
+  onName,
+}: {
+  row: AddRow
+  /** Quien administra el tarifario cambia el nombre de lo que elige. */
+  editable: boolean
+  /** Guardando: el campo se conserva, sin aceptar cambios. */
+  disabled: boolean
+  onName: (name: string) => void
+}) {
+  const official = [row.concept, row.code, row.officialName].filter(Boolean).join(" · ")
+  return (
+    // `whitespace-normal` y tope de ancho: las celdas son `nowrap` y una
+    // denominación oficial larga empujaría el precio fuera de la pantalla.
+    <span className="flex min-w-48 max-w-xl flex-col gap-1 whitespace-normal">
+      {row.chosen && editable ? (
+        <>
+          <Input
+            className="w-full min-w-48"
+            aria-label={`Nombre que usará la clínica para ${row.officialName ?? row.name}`}
+            aria-invalid={row.nameIssue !== null || undefined}
+            maxLength={200}
+            disabled={disabled}
+            value={row.name}
+            onChange={(event) => onName(event.target.value)}
+          />
+          {row.nameIssue ? <span className="text-xs text-destructive">{row.nameIssue}</span> : null}
+        </>
+      ) : (
+        <span className="font-medium break-words">{row.name}</span>
+      )}
+      <span className="text-xs font-normal break-words text-muted-foreground">{official}</span>
+    </span>
+  )
+}
+
+const BILLING_OPTIONS: ReadonlyArray<{ value: BillingMode; label: string }> = [
+  { value: "treatment", label: BILLING_MODE_LABELS.treatment },
+  { value: "session", label: BILLING_MODE_LABELS.session },
+]
+
+/* ----------------------------- Servicio propio ----------------------------- */
+
+/**
+ * Servicio propio (tablero 26): lo que la clínica ofrece y la biblioteca no
+ * trae. «Guardar y activar» lo deja en el tarifario en el acto, con su precio;
+ * no pasa por la tabla de lo elegido.
+ */
+function OwnServiceDrawer({
+  open,
+  regional,
+  onClose,
+}: {
+  open: boolean
+  regional: Regional
+  onClose: () => void
+}) {
+  const id = useId()
+  const queryClient = useQueryClient()
+  const [name, setName] = useState("")
+  const [specialty, setSpecialty] = useState("")
+  const [scope, setScope] = useState<string>("general")
+  const [billingMode, setBillingMode] = useState<BillingMode>("treatment")
+  const [price, setPrice] = useState("")
+  const [durationMin, setDurationMin] = useState("")
+  const [submitted, setSubmitted] = useState(false)
+
+  const nameIssue = checkName(name)
+  const specialtyIssue = specialty ? null : "Elige la especialidad"
+  const priceCheck = checkPrice(price, regional)
+  const priceIssue =
+    priceCheck.state === "invalid"
+      ? priceCheck.message
+      : priceCheck.state === "empty" && submitted
+        ? "Pon el precio (0 si no tiene costo)"
+        : null
+  const duration = checkDuration(durationMin)
+  const durationIssue = duration.ok ? null : "Minutos enteros entre 1 y 1440"
+  const isDirty =
+    name !== "" ||
+    specialty !== "" ||
+    scope !== "general" ||
+    billingMode !== "treatment" ||
+    price !== "" ||
+    durationMin !== ""
+
+  const saveMutation = useMutation({
+    mutationFn: (priceCents: number) =>
+      createServiceApi({
+        name: name.trim(),
+        specialty,
+        scope,
+        priceCents,
+        billingMode,
+        durationMin: duration.minutes,
+      }),
+    onSuccess: async (result) => {
+      await queryClient.invalidateQueries({ queryKey: ["services"] })
+      toast.success(`«${result.data.name}» ya está activo en tu tarifario`)
+      onClose()
+    },
+  })
+
+  const submit = (event: FormEvent) => {
+    event.preventDefault()
+    setSubmitted(true)
+    if (nameIssue || specialtyIssue || durationIssue || priceCheck.state !== "ok") return
+    saveMutation.mutate(priceCheck.cents)
+  }
+
+  return (
+    <FormDrawer
+      open={open}
+      title="Servicio propio"
+      description="Lo que tu clínica ofrece y la biblioteca no trae. Queda activo al guardarlo."
+      error={saveMutation.isError ? errorMessage(saveMutation.error) : null}
+      isDirty={isDirty}
+      isSubmitting={saveMutation.isPending}
+      submitLabel="Guardar y activar"
+      onClose={onClose}
+      onSubmit={submit}
+    >
+      <Field>
+        <FieldLabel htmlFor={`${id}-nombre`}>Nombre</FieldLabel>
+        <Input
+          id={`${id}-nombre`}
+          value={name}
+          maxLength={200}
+          aria-invalid={(submitted && nameIssue !== null) || undefined}
+          onChange={(event) => setName(event.target.value)}
+        />
+        {submitted && nameIssue ? <FieldError>{nameIssue}</FieldError> : null}
+      </Field>
+      <Field>
+        <FieldLabel htmlFor={`${id}-especialidad`}>Especialidad</FieldLabel>
+        <ChoiceSelect
+          id={`${id}-especialidad`}
+          value={specialty}
+          placeholder="Elige la especialidad"
+          aria-invalid={(submitted && specialtyIssue !== null) || undefined}
+          onChange={(event) => setSpecialty(event.target.value)}
+        >
+          {TREATMENT_SPECIALTIES.map((option) => (
+            <option key={option} value={option}>
+              {TREATMENT_SPECIALTY_LABELS[option]}
+            </option>
+          ))}
+        </ChoiceSelect>
+        {submitted && specialtyIssue ? <FieldError>{specialtyIssue}</FieldError> : null}
+      </Field>
+      <Field>
+        <span id={`${id}-donde`} className="text-sm font-medium">
+          Dónde se hace
+        </span>
+        <RadioChips
+          labelledBy={`${id}-donde`}
+          value={scope}
+          options={SERVICE_PLACE_OPTIONS}
+          onChange={setScope}
+        />
+        <p className="text-xs text-muted-foreground">
+          Así la atención sabe qué pedir al registrarlo.
+        </p>
+      </Field>
+      <Field>
+        <span id={`${id}-cobro`} className="text-sm font-medium">
+          Cómo se cobra
+        </span>
+        <RadioChips
+          labelledBy={`${id}-cobro`}
+          value={billingMode}
+          options={BILLING_OPTIONS}
+          onChange={setBillingMode}
+        />
+        <p className="text-xs text-muted-foreground">
+          Por sesión: se cobra el precio en cada visita atendida.
+        </p>
+      </Field>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <Field>
+          <FieldLabel htmlFor={`${id}-precio`}>
+            {billingMode === "session" ? "Precio por sesión" : "Precio"}
+          </FieldLabel>
+          <InputGroup>
+            <InputGroupAddon align="inline-start">
+              <InputGroupText>{currencySymbol(regional.currency, regional.locale)}</InputGroupText>
+            </InputGroupAddon>
+            <InputGroupInput
+              id={`${id}-precio`}
+              inputMode="decimal"
+              placeholder={formatMoneyInput(0, regional.currency, regional.locale)}
+              aria-invalid={priceIssue !== null || undefined}
+              value={price}
+              onChange={(event) => setPrice(event.target.value)}
+            />
+          </InputGroup>
+          {priceIssue ? (
+            <FieldError>{priceIssue}</FieldError>
+          ) : (
+            <p className="text-xs text-muted-foreground">Usa 0 si no tiene costo.</p>
+          )}
+        </Field>
+        <Field>
+          <FieldLabel htmlFor={`${id}-duracion`}>Duración</FieldLabel>
+          <InputGroup>
+            <InputGroupInput
+              id={`${id}-duracion`}
+              inputMode="numeric"
+              aria-invalid={durationIssue !== null || undefined}
+              value={durationMin}
+              onChange={(event) => setDurationMin(event.target.value)}
+            />
+            <InputGroupAddon align="inline-end">
+              <InputGroupText>min</InputGroupText>
+            </InputGroupAddon>
+          </InputGroup>
+          {durationIssue ? <FieldError>{durationIssue}</FieldError> : null}
+        </Field>
+      </div>
+    </FormDrawer>
+  )
+}
+
+/* ------------------------------ Salir sin guardar -------------------------- */
+
+/**
+ * Lo elegido vive en la pantalla hasta guardarlo: salir pregunta antes. Buscar,
+ * filtrar o paginar cambian la URL de esta misma pantalla y no cuentan como salir.
+ */
+function LeaveGuard({ dirty }: { dirty: boolean }) {
+  const blocker = useBlocker({
+    disabled: !dirty,
+    enableBeforeUnload: () => dirty,
+    withResolver: true,
+    shouldBlockFn: ({ current, next }) => current.pathname !== next.pathname,
+  })
+  return (
+    <ConfirmDialog
+      open={blocker.status === "blocked"}
+      title="Salir sin guardar"
+      description="Los servicios que elegiste todavía no están en el tarifario. Si sales, se pierde lo que escribiste."
+      confirmLabel="Salir sin guardar"
+      cancelLabel="Seguir aquí"
+      onConfirm={() => blocker.proceed?.()}
+      onClose={() => blocker.reset?.()}
+    />
   )
 }

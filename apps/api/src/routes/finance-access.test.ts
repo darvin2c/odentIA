@@ -20,6 +20,7 @@ import { afterAll, beforeAll, expect, it } from "vitest"
 import { z } from "zod"
 import { createCommissionsRoute } from "./commissions.js"
 import { createFinanceRoute } from "./finance.js"
+import { createFinancialDocumentsRoute } from "./financial-documents.js"
 import type { CrmDeps } from "./helpers.js"
 import { createPatientsRoute } from "./patients.js"
 import { createPaymentMethodsRoute } from "./payment-methods.js"
@@ -133,6 +134,8 @@ function buildApp(role: string, userId: string, orgId = ORG_A): Hono {
   }
   const app = new Hono()
   app.use("*", stubOrg(role, userId, orgId))
+  // Mismo orden que `app.ts`: los documentos financieros van antes de la ficha.
+  app.route("/patients", createFinancialDocumentsRoute(deps))
   app.route("/patients", createPatientsRoute(deps))
   app.route("/finance", createFinanceRoute(deps))
   app.route("/org/payment-methods", createPaymentMethodsRoute(deps))
@@ -203,9 +206,10 @@ beforeAll(async () => {
       (${ORG_A}, 'Clínica Acceso', 'acceso', now()),
       (${ORG_B}, 'Clínica Acceso Sur', 'acceso-sur', now())`)
   await ownerDb.execute(sql`
-    insert into "org_profile" ("organization_id", "legal_name") values
-      (${ORG_A}, 'Clínica Acceso'),
-      (${ORG_B}, 'Clínica Acceso Sur')`)
+    insert into "org_profile"
+      ("organization_id", "legal_name", "country_code", "currency", "timezone", "locale") values
+      (${ORG_A}, 'Clínica Acceso', 'PE', 'PEN', 'America/Lima', 'es-PE'),
+      (${ORG_B}, 'Clínica Acceso Sur', 'PE', 'PEN', 'America/Lima', 'es-PE')`)
   await ownerDb.execute(sql`
     insert into "user" ("id", "name", "email") values
       (${OWNER}, 'Dueña', 'fin-owner@example.test'),
@@ -330,11 +334,50 @@ it("caja: reception/dentist sin finance.read; cashier lee y cierra", async () =>
   expect((await buildApp("reception", RECEP).request(closuresPath)).status).toBe(403)
   expect((await buildApp("cashier", CASH).request(closuresPath)).status).toBe(200)
 
-  // Cierre con importes válidos (cero sobre ventana vacía: 0+0=0).
-  const closeBody = { branchId: BRANCH_A, countedCents: 0, retainedCents: 0, deliveredCents: 0 }
+  // Cierre con importes válidos (cero sobre ventana vacía: 0+0=0). La sede
+  // aún no tenía caja: se afirma con `shiftId: null`.
+  const closeBody = { branchId: BRANCH_A, shiftId: null, countedCents: 0, retainedCents: 0, deliveredCents: 0 }
   expect((await postJson(buildApp("reception", RECEP), "/finance/closures", closeBody)).status).toBe(403)
   expect((await postJson(buildApp("dentist", DENT1), "/finance/closures", closeBody)).status).toBe(403)
-  expect((await postJson(buildApp("cashier", CASH), "/finance/closures", closeBody)).status).toBe(201)
+  const closed = await postJson(buildApp("cashier", CASH), "/finance/closures", closeBody)
+  expect(closed.status).toBe(201)
+  const shiftId = ((await closed.json()) as { data: { id: string } }).data.id
+  // Reenviar el mismo cierre no abre otro: con la ventana vista devuelve el
+  // mismo; afirmando que no había caja, pide volver a contar.
+  const again = await postJson(buildApp("cashier", CASH), "/finance/closures", { ...closeBody, shiftId })
+  expect(again.status).toBe(201)
+  expect(((await again.json()) as { data: { id: string } }).data.id).toBe(shiftId)
+  const stale = await postJson(buildApp("cashier", CASH), "/finance/closures", closeBody)
+  expect(stale.status).toBe(409)
+  expect(((await stale.json()) as { error: { code: string } }).error.code).toBe("CASH_WINDOW_CHANGED")
+  // Sin decir qué ventana se contó no hay cierre.
+  const { shiftId: _omit, ...withoutShift } = closeBody
+  expect((await postJson(buildApp("cashier", CASH), "/finance/closures", withoutShift)).status).toBe(400)
+})
+
+it("finanzas: cada ruta rechaza a quien no es caja ni administración", async () => {
+  const id = "00000000-0000-4000-8000-000000000000"
+  const reads = [
+    `/finance/cash?branchId=${BRANCH_A}`,
+    `/finance/closures?branchId=${BRANCH_A}`,
+    `/finance/closures/${id}`,
+    `/finance/debts?branchId=${BRANCH_A}`,
+    `/finance/movements?branchId=${BRANCH_A}&day=2026-01-15`,
+    `/finance/expenses?branchId=${BRANCH_A}`,
+  ]
+  const writes: Array<[string, unknown]> = [
+    ["/finance/cash/movements", { branchId: BRANCH_A, kind: "aporte", amountCents: 1000, concept: "Fondo" }],
+    [`/finance/movements/${id}/void`, { reason: "x" }],
+    ["/finance/expenses", { branchId: BRANCH_A, concept: "Útiles", amountCents: 1000 }],
+    [`/finance/expenses/${id}/void`, { reason: "x" }],
+    ["/finance/closures", { branchId: BRANCH_A, shiftId: null, countedCents: 0, retainedCents: 0, deliveredCents: 0 }],
+  ]
+  for (const [role, userId] of [["reception", RECEP], ["dentist", DENT1], ["member", MEMBER]] as const) {
+    for (const path of reads)
+      expect((await buildApp(role, userId).request(path)).status, `${role} GET ${path}`).toBe(403)
+    for (const [path, body] of writes)
+      expect((await postJson(buildApp(role, userId), path, body)).status, `${role} POST ${path}`).toBe(403)
+  }
 })
 
 it("cuenta y cobro: reception/dentist 403, cashier cobra con ticket, tenancy", async () => {
@@ -375,6 +418,31 @@ it("presupuestos: reception fuera, cashier decide sin escribir, dentist solo pla
   expect(dent2Budgets.data).toEqual([])
   expect(dent2Budgets.data.map((b) => b.id)).not.toContain(BUDGET1)
   expect((await buildApp("dentist", DENT2).request(detailPath)).status).toBe(403)
+
+  // La hoja en PDF y las opciones de envío respetan la misma frontera que la
+  // pantalla: un odontólogo no obtiene el presupuesto de un plan ajeno.
+  const pdfPath = `/patients/${PAT_A}/financial-document-pdf?documentType=budget&documentId=${BUDGET1}`
+  const optionsPath = `/patients/${PAT_A}/financial-document-options?documentType=budget&documentId=${BUDGET1}`
+  expect((await buildApp("dentist", DENT2).request(pdfPath)).status).toBe(403)
+  expect((await buildApp("dentist", DENT2).request(optionsPath)).status).toBe(403)
+  expect((await buildApp("reception", RECEP).request(pdfPath)).status).toBe(403)
+  const ownPdf = await buildApp("dentist", DENT1).request(pdfPath)
+  expect(ownPdf.status).toBe(200)
+  expect(ownPdf.headers.get("content-type")).toBe("application/pdf")
+  expect(Buffer.from(await ownPdf.arrayBuffer()).subarray(0, 5).toString("latin1")).toBe("%PDF-")
+
+  // Caja recibe el presupuesto como documento económico: precio y decisión,
+  // sin pieza, superficies ni códigos de procedimiento.
+  const forCashier = (await (await buildApp("cashier", CASH).request(detailPath)).json()) as {
+    data: { totalCents: number | null; items: Array<{ title: string; priceCents: number | null; toothNumber: number | null; surfaces: string[]; codings: unknown[] }> }
+  }
+  expect(forCashier.data.items.length).toBeGreaterThan(0)
+  expect(forCashier.data.items.every((line) => line.title.length > 0 && line.priceCents !== null)).toBe(true)
+  expect(
+    forCashier.data.items.every(
+      (line) => line.toothNumber === null && line.surfaces.length === 0 && line.codings.length === 0,
+    ),
+  ).toBe(true)
 
   // Escritura: reception y cashier 403 con cuerpo válido; DENT2 403 sobre plan ajeno.
   const createBody = { planId: PLAN_A, itemIds: [ITEM3] }
@@ -419,26 +487,24 @@ it("comisiones: dentist propias sin ajenas ni resultado; cashier sin commissions
     headers: { "content-type": "application/json" },
     body: JSON.stringify(rateBody),
   })).status).toBe(403)
-  expect((await dent2.request("/commissions/settle", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ professionalUserId: DENT2, year: 2026, month: 9, currency: "PEN" }),
-  })).status).toBe(403)
+  const payBody = { professionalUserId: DENT2, year: 2026, month: 9, branchId: BRANCH_A }
+  expect((await postJson(dent2, "/commissions/pay", payBody)).status).toBe(403)
+  // El mes de toda la clínica y los pagos de otro son de administración.
+  expect((await dent2.request(`/commissions/month?${month}`)).status).toBe(403)
+  expect((await dent2.request(`/commissions/payments?professionalUserId=${DENT1}`)).status).toBe(403)
+  expect((await dent2.request("/commissions/payments")).status).toBe(200)
 
-  // Cashier ve el resultado del mes (finance.read) pero no comisiones ni configura.
+  // Caja no ve comisiones ni el resultado del mes, que es de quien dirige la clínica.
   const cashier = buildApp("cashier", CASH)
-  expect((await cashier.request(`/commissions/monthly-result?year=2026&month=9`)).status).toBe(200)
+  expect((await cashier.request(`/commissions/monthly-result?year=2026&month=9`)).status).toBe(403)
   expect((await cashier.request(`/commissions/my?${month}`)).status).toBe(403)
+  expect((await cashier.request(`/commissions/month?${month}`)).status).toBe(403)
   expect((await cashier.request("/commissions/rates", {
     method: "PUT",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(rateBody),
   })).status).toBe(403)
-  expect((await cashier.request("/commissions/settle", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ professionalUserId: DENT1, year: 2026, month: 9, currency: "PEN" }),
-  })).status).toBe(403)
+  expect((await postJson(cashier, "/commissions/pay", { ...payBody, professionalUserId: DENT1 })).status).toBe(403)
 
   const admin = buildApp("admin", ADMIN)
   expect((await admin.request("/commissions/rates", {
@@ -446,6 +512,11 @@ it("comisiones: dentist propias sin ajenas ni resultado; cashier sin commissions
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ professionalUserId: DENT1, rateBps: 4000 }),
   })).status).toBe(200)
+  expect((await admin.request(`/commissions/month?${month}`)).status).toBe(200)
+  expect((await admin.request(`/commissions/monthly-result?year=2026&month=9`)).status).toBe(200)
+  // Sin cobros no hay nada que pagar: se rechaza sin registrar un gasto.
+  const nothing = await postJson(admin, "/commissions/pay", { ...payBody, professionalUserId: DENT1 })
+  expect(nothing.status).toBe(409)
 })
 
 it("tenancy: medios, caja y presupuestos aislados por organización", async () => {

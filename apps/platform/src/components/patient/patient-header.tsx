@@ -30,13 +30,14 @@ import {
 import type { PatientSectionId } from "../../lib/patient-areas"
 import { ageFrom, hcLabel, type PatientFull, type PatientSummary } from "../../lib/patients"
 import { formatMoney } from "@odentia/clinical"
+import { activeOrgLocale } from "../../lib/locale"
 import { useOrgProfile } from "../../lib/org"
 import { FiliacionSectionDrawer } from "./filiacion-section-drawer"
 import { NewEncounterButton } from "./new-encounter-button"
 import { PatientAvatar } from "./patient-avatar"
 
 const dateLabel = (value: string) =>
-  new Date(value).toLocaleString("es-PE", { dateStyle: "medium", timeStyle: "short" })
+  new Date(value).toLocaleString(activeOrgLocale(), { dateStyle: "medium", timeStyle: "short" })
 function pendingLine(summary: PatientSummary, locale: string | undefined): string {
   const accepted = summary.planPending.count
   const proposed = summary.proposedBudgets.length
@@ -269,7 +270,7 @@ export function PatientHeader({
               </Button>
             ) : null}
             {primary === "charge" ? (
-              <Button onClick={() => onSection("cuenta")}>Registrar pago</Button>
+              <Button onClick={() => onSection("cuenta")}>Cobrar</Button>
             ) : null}
             <NewEncounterButton
               patientId={patient.id}

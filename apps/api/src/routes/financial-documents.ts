@@ -4,6 +4,8 @@ import { z } from "zod"
 import {
   getDocumentSendOptions,
   getFinancialDocumentPdf,
+  getRefundReceiptPdf,
+  saveRecipientEmail,
   sendFinancialDocument,
 } from "@odentia/services"
 import { canAccess, orgContextOf } from "../lib/context.js"
@@ -64,14 +66,32 @@ const sendInput = z
     message: z.string().max(500).nullish(),
     savePreferredChannel: z.boolean().optional(),
     paper: z.enum(["A4", "Letter"]).nullish(),
+    // Clave del intento: reenviar con la misma no manda el documento dos veces.
+    requestId: z.uuid().nullish(),
+    // Otro correo escrito en el momento: exige confirmación explícita de quien envía.
+    otherEmail: z.string().trim().max(200).nullish(),
+    confirmOtherEmail: z.boolean().optional(),
   })
   .strict()
+
+const recipientEmailInput = z
+  .object({
+    documentType,
+    recipientContactId: z.uuid(),
+    email: z.string().trim().min(3).max(200),
+  })
+  .strict()
+
+const refundPdfQuery = z.object({
+  receiptId: z.uuid(),
+  paper: z.enum(["A4", "Letter"]).optional(),
+})
 
 export function createFinancialDocumentsRoute(deps: Pick<CrmDeps, "db" | "storage">) {
   const app = new Hono()
 
   app.get("/:id/financial-document-options", async (c) => {
-    const { orgId, memberRole } = orgContextOf(c)
+    const { orgId, userId, memberRole } = orgContextOf(c)
     const parsed = optionsQuery.safeParse(c.req.query())
     if (!parsed.success) return validationError(c, parsed.error.issues)
     if (parsed.data.documentType === "ticket") {
@@ -81,13 +101,16 @@ export function createFinancialDocumentsRoute(deps: Pick<CrmDeps, "db" | "storag
     }
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
-        getDocumentSendOptions(tx, orgId, c.req.param("id"), parsed.data),
+        getDocumentSendOptions(tx, orgId, c.req.param("id"), parsed.data, {
+          actorUserId: userId,
+          memberRole,
+        }),
       ),
     )
   })
 
   app.get("/:id/financial-document-pdf", async (c) => {
-    const { orgId, memberRole } = orgContextOf(c)
+    const { orgId, userId, memberRole } = orgContextOf(c)
     const parsed = paperQuery.safeParse(c.req.query())
     if (!parsed.success) return validationError(c, parsed.error.issues)
     if (parsed.data.documentType === "ticket") {
@@ -97,7 +120,10 @@ export function createFinancialDocumentsRoute(deps: Pick<CrmDeps, "db" | "storag
     }
     try {
       const pdf = await withOrgContext(deps.db, orgId, (tx) =>
-        getFinancialDocumentPdf(tx, orgId, c.req.param("id"), parsed.data),
+        getFinancialDocumentPdf(tx, orgId, c.req.param("id"), parsed.data, {
+          actorUserId: userId,
+          memberRole,
+        }),
       )
       return c.body(Buffer.from(pdf.bytes), 200, {
         "Content-Type": "application/pdf",
@@ -133,12 +159,54 @@ export function createFinancialDocumentsRoute(deps: Pick<CrmDeps, "db" | "storag
             message: parsed.data.message ?? undefined,
             savePreferredChannel: parsed.data.savePreferredChannel,
             paper: parsed.data.paper ?? undefined,
+            requestId: parsed.data.requestId ?? undefined,
+            otherEmail: parsed.data.otherEmail ?? undefined,
+            confirmOtherEmail: parsed.data.confirmOtherEmail,
             patientId,
           },
           { storage: deps.storage },
         ),
       ),
     )
+  })
+
+  // «Agregar correo»: lo guarda en los datos de quien recibe. Mismo permiso que enviar.
+  app.post("/:id/financial-documents/recipient-email", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    const parsed = recipientEmailInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    if (parsed.data.documentType === "ticket") {
+      if (!canAccess(memberRole, "finance.write")) return forbid(c)
+    } else if (!canSendBudget(memberRole)) {
+      return forbid(c)
+    }
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        saveRecipientEmail(tx, orgId, userId, c.req.param("id"), {
+          recipientContactId: parsed.data.recipientContactId,
+          email: parsed.data.email,
+        }),
+      ),
+    )
+  })
+
+  // Constancia de devolución en PDF, desde lo congelado al devolver.
+  app.get("/:id/refund-receipt-pdf", async (c) => {
+    const { orgId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "finance.read")) return forbid(c)
+    const parsed = refundPdfQuery.safeParse(c.req.query())
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    try {
+      const pdf = await withOrgContext(deps.db, orgId, (tx) =>
+        getRefundReceiptPdf(tx, orgId, c.req.param("id"), parsed.data.receiptId, parsed.data.paper ?? null),
+      )
+      return c.body(Buffer.from(pdf.bytes), 200, {
+        "Content-Type": "application/pdf",
+        "Content-Disposition": `inline; filename="${pdf.filename}"`,
+      })
+    } catch (e) {
+      return serviceErrorResponse(c, e) ?? Promise.reject(e)
+    }
   })
 
   return app

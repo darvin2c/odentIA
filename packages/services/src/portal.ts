@@ -1094,8 +1094,17 @@ export interface PortalBudgetLineView {
   title: string
   scope: string | null
   toothNumber: number | null
+  /** Precio acordado: el total o, si se cobra por sesión, el de cada visita. */
   priceCents: number | null
   tariffCents: number | null
+  /** 'treatment' se cobra una vez; 'session', en cada visita atendida. */
+  billingMode: string
+  /** Visitas previstas de lo que se cobra por sesión. */
+  sessionsPlanned: number | null
+  /** Total de la línea: el precio o, por sesión, precio por visita × visitas previstas. */
+  lineTotalCents: number | null
+  /** El mismo total a la tarifa de referencia. */
+  tariffLineTotalCents: number | null
   promotionName: string | null
   currency: string
   decision: string
@@ -1111,8 +1120,16 @@ export interface PortalBudgetView {
   notes: string | null
   status: string
   currency: string
+  /**
+   * Formato regional de la clínica (`org_profile.locale`): el portal presenta
+   * los importes igual que la ficha. `null` si la clínica aún no lo configuró.
+   */
+  locale: string | null
   totalCents: number | null
   acceptedCents: number | null
+  /** Suma a la tarifa de referencia y rebaja acordada (null si falta algún precio). */
+  tariffTotalCents: number | null
+  discountCents: number | null
   presentedAt: Date | null
   decidedAt: Date | null
   acceptedByName: string | null
@@ -1120,7 +1137,17 @@ export interface PortalBudgetView {
   items: PortalBudgetLineView[]
 }
 
-function toPortalBudget(budget: BudgetWithTotals): PortalBudgetView {
+/** Formato regional de la clínica para el portal; sin perfil no se inventa uno. */
+async function portalBudgetLocale(tx: Db, orgId: string): Promise<string | null> {
+  try {
+    return (await getOrgLocale(tx, orgId)).locale
+  } catch (error) {
+    if (error instanceof ServiceError && error.status === 404) return null
+    throw error
+  }
+}
+
+function toPortalBudget(budget: BudgetWithTotals, locale: string | null): PortalBudgetView {
   return {
     id: budget.id,
     planId: budget.planId,
@@ -1130,8 +1157,11 @@ function toPortalBudget(budget: BudgetWithTotals): PortalBudgetView {
     notes: budget.notes,
     status: budget.status,
     currency: budget.currency,
+    locale,
     totalCents: budget.totalCents,
     acceptedCents: budget.acceptedCents,
+    tariffTotalCents: budget.tariffTotalCents,
+    discountCents: budget.discountCents,
     presentedAt: budget.presentedAt,
     decidedAt: budget.decidedAt,
     acceptedByName: budget.acceptedByName,
@@ -1143,6 +1173,10 @@ function toPortalBudget(budget: BudgetWithTotals): PortalBudgetView {
       toothNumber: line.toothNumber,
       priceCents: line.priceCents,
       tariffCents: line.tariffPriceCents ?? line.priceCents,
+      billingMode: line.billingMode,
+      sessionsPlanned: line.sessionsPlanned,
+      lineTotalCents: line.lineTotalCents,
+      tariffLineTotalCents: line.tariffLineTotalCents,
       promotionName: line.promotionName,
       currency: line.currency,
       decision: line.decision,
@@ -1155,8 +1189,11 @@ function toPortalBudget(budget: BudgetWithTotals): PortalBudgetView {
 export async function listPortalBudgets(tx: Db, ctx: PortalContext): Promise<PortalBudgetView[]> {
   requireScope(ctx.session, "budgets")
   const budgets = await listBudgets(tx, ctx.orgId, ctx.session.patientId)
+  const locale = await portalBudgetLocale(tx, ctx.orgId)
   await logAccess(tx, ctx.orgId, ctx.session.id, "budgets.listed")
-  return budgets.filter((budget) => budget.status !== "borrador").map(toPortalBudget)
+  return budgets
+    .filter((budget) => budget.status !== "borrador")
+    .map((budget) => toPortalBudget(budget, locale))
 }
 
 export interface DecidePortalBudgetInput {
@@ -1176,6 +1213,7 @@ export async function decidePortalBudget(
   input: DecidePortalBudgetInput,
 ): Promise<{ budget: PortalBudgetView; replay: boolean }> {
   requireScope(ctx.session, "budgets")
+  const locale = await portalBudgetLocale(tx, ctx.orgId)
   const current = await getBudgetDetail(tx, ctx.orgId, ctx.session.patientId, budgetId)
   // Responder después: parcial/pospuesto admite completar lo pospuesto con la
   // misma autoridad (el contacto que decidió); otra autoridad no pisa.
@@ -1186,7 +1224,7 @@ export async function decidePortalBudget(
     const decided = ["aceptado", "parcial", "rechazado", "pospuesto"].includes(current.status)
     if (decided && current.decisionContactId === ctx.session.contactId) {
       await logAccess(tx, ctx.orgId, ctx.session.id, "budget.decision_replayed", "treatment_budget", budgetId)
-      return { budget: toPortalBudget(current), replay: true }
+      return { budget: toPortalBudget(current, locale), replay: true }
     }
     throw conflict("BUDGET_STATUS", "Este presupuesto ya no admite decisión")
   }
@@ -1205,7 +1243,7 @@ export async function decidePortalBudget(
       const current = await getBudgetDetail(tx, ctx.orgId, ctx.session.patientId, budgetId)
       if (current.decisionContactId === ctx.session.contactId) {
         await logAccess(tx, ctx.orgId, ctx.session.id, "budget.decision_replayed", "treatment_budget", budgetId)
-        return { budget: toPortalBudget(current), replay: true }
+        return { budget: toPortalBudget(current, locale), replay: true }
       }
     }
     throw error
@@ -1224,7 +1262,7 @@ export async function decidePortalBudget(
     body: "Un representante decidió un presupuesto desde el portal.",
     href: `/patients/${ctx.session.patientId}?tab=plan`,
   })
-  return { budget: toPortalBudget(decided), replay: false }
+  return { budget: toPortalBudget(decided, locale), replay: false }
 }
 
 export interface PortalDocumentView {
@@ -1277,6 +1315,8 @@ export async function getPortalDocumentUrl(
 }
 
 export interface PortalAccountView {
+  /** Formato regional de la clínica; `null` si aún no lo configuró. */
+  locale: string | null
   byCurrency: Array<{
     currency: string
     agreedCents: number
@@ -1316,6 +1356,7 @@ export async function getPortalAccount(tx: Db, ctx: PortalContext): Promise<Port
   const account = await getPatientAccount(tx, ctx.orgId, ctx.session.patientId)
   await logAccess(tx, ctx.orgId, ctx.session.id, "account.viewed")
   return {
+    locale: await portalBudgetLocale(tx, ctx.orgId),
     byCurrency: account.byCurrency,
     charges: account.charges.map((charge) => ({
       id: charge.id,

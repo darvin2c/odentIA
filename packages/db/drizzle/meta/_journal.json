@@ -351,6 +351,27 @@
       "when": 1791751798177,
       "tag": "0049_precios_promocionales_activos",
       "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1791762515512,
+      "tag": "0050_finanzas_correcciones",
+      "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "7",
+      "when": 1791773799322,
+      "tag": "0051_perfil_regional_sin_pais",
+      "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1791774534957,
+      "tag": "0052_presupuesto_quitar_en_borrador",
+      "breakpoints": true
     }
   ]
 }

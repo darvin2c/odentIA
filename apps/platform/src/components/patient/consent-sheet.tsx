@@ -1,10 +1,11 @@
 import { CONSENT_DECLARATION, CONSENT_SECTION_LABELS } from "@odentia/clinical"
 import type { ConsentDocument } from "../../lib/clinical-forms"
 import { FirmaView } from "./firma-pad"
+import { activeOrgLocale } from "../../lib/locale"
 
 function when(value: string | null | undefined): string {
   return value
-    ? new Date(value).toLocaleString("es-PE", { dateStyle: "long", timeStyle: "short" })
+    ? new Date(value).toLocaleString(activeOrgLocale(), { dateStyle: "long", timeStyle: "short" })
     : "—"
 }
 

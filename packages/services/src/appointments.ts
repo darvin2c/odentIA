@@ -25,6 +25,7 @@ import {
   invalidateAppointmentTokens,
 } from "./automation.js"
 import { isExclusionViolation, notFound, ServiceError, validation } from "./errors.js"
+import { NEUTRAL_TIMEZONE } from "./locale.js"
 import { listPatients } from "./patients.js"
 
 function conflict(code: string, message: string): ServiceError {
@@ -85,7 +86,7 @@ async function resolveBranch(tx: Db, orgId: string, branchId?: string) {
     .orderBy(asc(branch.createdAt))
     .limit(1)
   if (!row) throw notFound(branchId ? "Sucursal" : "Sucursal activa")
-  return { ...row, timeZone: row.timezone ?? row.orgTimezone ?? "America/Lima" }
+  return { ...row, timeZone: row.timezone ?? row.orgTimezone ?? NEUTRAL_TIMEZONE }
 }
 
 async function requireDentist(tx: Db, orgId: string, dentistUserId: string) {

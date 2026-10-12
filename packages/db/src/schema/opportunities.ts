@@ -52,7 +52,8 @@ export const opportunity = pgTable(
     interestText: text("interest_text"),
     // Valor estimado en moneda (entero de céntimos, nunca float).
     amountCents: integer("amount_cents"),
-    currency: char("currency", { length: 3 }).notNull().default("PEN"),
+    // ISO 4217, siempre explícita: sin moneda por defecto de ningún país.
+    currency: char("currency", { length: 3 }).notNull(),
     assignedUserId: text("assigned_user_id").references(() => user.id, {
       onDelete: "set null",
     }),

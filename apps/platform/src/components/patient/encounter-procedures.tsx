@@ -31,6 +31,7 @@ import { type ServiceCatalogItem } from "../../lib/services"
 import { Cie10Search } from "./cie10-search"
 import { ServicePicker } from "./service-picker"
 import { type ToothSite, ToothSiteSelector } from "./tooth-site-selector"
+import { activeOrgLocale } from "../../lib/locale"
 
 const NO_PLAN = "__sin-plan__"
 const NO_SITE: ToothSite = { toothNumber: null, surfaces: [] }
@@ -56,7 +57,7 @@ function formatDateTime(iso: string | null): string {
   if (!iso) return "—"
   const date = new Date(iso)
   if (Number.isNaN(date.getTime())) return "—"
-  return date.toLocaleString("es-PE", { dateStyle: "short", timeStyle: "short" })
+  return date.toLocaleString(activeOrgLocale(), { dateStyle: "short", timeStyle: "short" })
 }
 
 function mutationMessage(err: unknown): string {

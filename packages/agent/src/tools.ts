@@ -13,6 +13,7 @@ import {
   getClinicInfoSnapshot,
   getOpportunity,
   getOrgLocale,
+  formatOrgMoney,
   formatZoned,
   listAgentContextCandidates,
   listContactChannelHistory,
@@ -381,7 +382,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       }
       if (!snapshot.services.length) lines.push("Sin servicios publicados: no des precios.")
       for (const s of snapshot.services.slice(0, 50)) {
-        lines.push(`- Servicio ${s.name} (id ${s.id}): S/ ${(s.priceCents / 100).toFixed(2)}${s.durationMin ? ` (${s.durationMin} min)` : ""}`)
+        lines.push(`- Servicio ${s.name} (id ${s.id}): ${formatOrgMoney(s.priceCents, s.currency, snapshot)}${s.durationMin ? ` (${s.durationMin} min)` : ""}`)
       }
       if (snapshot.paymentMethods.length) {
         lines.push("Medios de pago aceptados por la clínica (los mismos que ofrece caja):")
@@ -459,7 +460,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       } else {
         for (const b of summary.balance) {
           if (b.outstandingCents > 0) {
-            lines.push(`- Saldo pendiente: ${(b.outstandingCents / 100).toFixed(2)} ${b.currency}.`)
+            lines.push(`- Saldo pendiente: ${formatOrgMoney(b.outstandingCents, b.currency, zone)}.`)
           }
         }
       }

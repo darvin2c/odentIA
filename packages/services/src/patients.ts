@@ -18,6 +18,7 @@ import { and, asc, desc, eq, gte, ilike, isNull, lte, or, sql } from "drizzle-or
 import { requireContact } from "./contacts.js"
 import { decodeCursor } from "./cursors.js"
 import { isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
+import { NEUTRAL_TIMEZONE } from "./locale.js"
 
 const PAGE_DEFAULT = 30
 const PATIENT_SEXES = ["M", "F"] as const
@@ -93,7 +94,7 @@ export type RegistrationProvenance = Pick<typeof patientRegistration.$inferInser
 /** Fecha de referencia del tenant, calculada exclusivamente en servidor. */
 export async function patientOrganizationToday(tx: Db, orgId: string): Promise<string> {
   const [profile] = await tx.select({ timezone: orgProfile.timezone }).from(orgProfile).where(eq(orgProfile.organizationId, orgId)).limit(1)
-  return new Intl.DateTimeFormat("en-CA", { timeZone: profile?.timezone ?? "America/Lima", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date())
+  return new Intl.DateTimeFormat("en-CA", { timeZone: profile?.timezone ?? NEUTRAL_TIMEZONE, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date())
 }
 
 export async function requirePatient(tx: Db, orgId: string, id: string): Promise<PatientRow> {

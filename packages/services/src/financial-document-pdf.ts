@@ -17,16 +17,15 @@ import { formatMoney } from "@odentia/clinical"
 import fontkit from "@pdf-lib/fontkit"
 import type { Font } from "@pdf-lib/fontkit"
 import { readFileSync } from "node:fs"
-import { branch, orgProfile } from "@odentia/db/schema/org"
 import type { Db } from "@odentia/db"
-import { treatmentBudget } from "@odentia/db/schema/clinical"
 import { contact } from "@odentia/db/schema/crm"
 import { PDFDocument, rgb, type PDFFont, type PDFPage } from "pdf-lib"
 import { and, eq } from "drizzle-orm"
-import { getBudgetDetail } from "./budgets.js"
-import { notFound, validation } from "./errors.js"
+import { type BudgetPrintLine, getBudgetPrintPayload } from "./budgets.js"
+import { orgProfile } from "@odentia/db/schema/org"
+import { validation } from "./errors.js"
 import { requirePatient } from "./patients.js"
-import { getTicketReceipt } from "./payments.js"
+import { getRefundReceipt, getTicketReceipt, type TicketFrozen } from "./payments.js"
 
 const INK = rgb(0.07, 0.09, 0.15)
 const MUTED = rgb(0.4, 0.42, 0.47)
@@ -137,6 +136,56 @@ class Writer {
       if (words.length === 0) this.y -= size / 2
     }
   }
+  /** Fila de tabla: texto a la izquierda (con salto) e importe alineado a la derecha. */
+  row(label: string, amount: string, opts: { size?: number; bold?: boolean; color?: typeof INK } = {}) {
+    const size = opts.size ?? 10
+    const font = opts.bold ? this.bold : this.regular
+    assertPrintable(amount)
+    const amountWidth = font.widthOfTextAtSize(amount, size)
+    const full = this.pageWidth - this.margin * 2
+    const labelWidth = Math.max(full - amountWidth - 8, full * 0.4)
+    const lines: string[] = []
+    let line = ""
+    assertPrintable(label)
+    for (const word of label.split(/\s+/).filter(Boolean)) {
+      const next = line ? `${line} ${word}` : word
+      if (font.widthOfTextAtSize(next, size) > labelWidth && line) {
+        lines.push(line)
+        line = word
+      } else {
+        line = next
+      }
+    }
+    if (line) lines.push(line)
+    if (lines.length === 0) lines.push("")
+    lines.forEach((text, index) => {
+      this.ensure(size + 4)
+      this.page.drawText(text, { x: this.margin, y: this.y - size, size, font, color: opts.color ?? INK })
+      if (index === 0) {
+        this.page.drawText(amount, {
+          x: this.pageWidth - this.margin - amountWidth,
+          y: this.y - size,
+          size,
+          font,
+          color: opts.color ?? INK,
+        })
+      }
+      this.y -= size + 4
+    })
+  }
+  /** Línea para firmar con su leyenda debajo. */
+  signature(caption: string, widthRatio = 0.55) {
+    this.ensure(46)
+    this.y -= 30
+    this.page.drawLine({
+      start: { x: this.margin, y: this.y },
+      end: { x: this.margin + (this.pageWidth - this.margin * 2) * widthRatio, y: this.y },
+      thickness: 0.5,
+      color: INK,
+    })
+    this.y -= 4
+    this.text(caption, { size: 8, color: MUTED })
+  }
   gap(height = 8) {
     this.y -= height
   }
@@ -209,40 +258,6 @@ export function budgetFormat(org: DocOrg, paper?: string | null): DocFormat {
   return paper ? sheetPaperFormat(paper) : sheetFormat(org)
 }
 
-async function loadOrg(tx: Db, orgId: string, branchId: string | null): Promise<DocOrg> {
-  const [profile] = await tx
-    .select()
-    .from(orgProfile)
-    .where(eq(orgProfile.organizationId, orgId))
-    .limit(1)
-  // Sin defaults de país: moneda, locale, zona y textos salen del perfil.
-  if (!profile) {
-    throw validation("La organización no tiene perfil regional: configúralo antes de generar documentos")
-  }
-  let branchRow: { name: string; addressLine1: string | null; phone: string | null } | null = null
-  if (branchId) {
-    const [found] = await tx
-      .select({ name: branch.name, addressLine1: branch.addressLine1, phone: branch.phone })
-      .from(branch)
-      .where(and(eq(branch.id, branchId), eq(branch.organizationId, orgId)))
-      .limit(1)
-    branchRow = found ?? null
-  }
-  return {
-    tradeName: profile.tradeName ?? profile.legalName,
-    legalName: profile.legalName,
-    address: profile.fiscalAddress ?? branchRow?.addressLine1 ?? null,
-    phone: branchRow?.phone ?? null,
-    branchName: branchRow?.name ?? null,
-    currency: profile.currency,
-    locale: profile.locale,
-    timezone: profile.timezone,
-    ticketFooter: profile.ticketFooter,
-    receiptWidth: profile.receiptWidth,
-    sheetSize: profile.sheetSize,
-  }
-}
-
 export function formatDate(value: Date, org: DocOrg): string {
   return new Intl.DateTimeFormat(org.locale, {
     timeZone: org.timezone,
@@ -251,6 +266,16 @@ export function formatDate(value: Date, org: DocOrg): string {
     year: "numeric",
     hour: "2-digit",
     minute: "2-digit",
+  }).format(value)
+}
+
+/** Fecha larga sin hora, para la hoja del presupuesto. */
+function formatDay(value: Date, org: DocOrg): string {
+  return new Intl.DateTimeFormat(org.locale, {
+    timeZone: org.timezone,
+    day: "numeric",
+    month: "long",
+    year: "numeric",
   }).format(value)
 }
 
@@ -296,7 +321,10 @@ function header(w: Writer, org: DocOrg, docTitle: string, docNumber: string | nu
 
 export interface TicketLine {
   description: string
+  /** Lo que este cobro pagó del concepto. */
   amountCents: number
+  /** Precio completo del concepto, si este cobro solo pagó una parte. */
+  ofCents: number | null
   /** Promoción aplicada al concepto (snapshot; null = sin promoción). */
   promotion: string | null
 }
@@ -304,6 +332,7 @@ export interface TicketLine {
 export interface TicketMethod {
   label: string
   amountCents: number
+  reference: string | null
 }
 
 export interface TicketSnapshot {
@@ -316,20 +345,29 @@ export interface TicketSnapshot {
   patientName: string
   patientDoc: string | null
   payerName: string | null
+  /** Quién cobró. */
+  issuerName: string | null
   paidAt: Date
   currency: string
   lines: TicketLine[]
+  /** Importe del adelanto, si el cobro dejó saldo a favor sin conceptos. */
+  advanceCents: number | null
   methods: TicketMethod[]
   creditAppliedCents: number
   cashReceivedCents: number | null
   changeCents: number | null
   totalCents: number
+  /** Lo que quedó por cobrar de esos conceptos al momento del cobro. */
+  remainingCents: number | null
   org: DocOrg
 }
 
 /**
- * Snapshot del ticket numerado (CobrosCaja `getTicketReceipt`): cabecera
- * inmutable, aplicaciones vigentes con sus cargos, medios congelados y sede.
+ * Ticket desde lo que se congeló al cobrar (`payment_ticket.snapshot`):
+ * conceptos, medios, clínica, sede, frase al pie y quién cobró. Un ticket
+ * anulado se imprime completo con su marca; cambiar después el nombre de la
+ * clínica, el medio o el concepto no reescribe lo ya emitido. Solo el papel
+ * (ancho de la térmica u hoja) sale del perfil actual: es de la impresora.
  * `documentId` es `paymentTicket.id`.
  */
 export async function buildTicketSnapshot(
@@ -340,28 +378,30 @@ export async function buildTicketSnapshot(
 ): Promise<TicketSnapshot> {
   const patientRow = await requirePatient(tx, orgId, patientId)
   const receipt = await getTicketReceipt(tx, orgId, patientId, documentId)
-  const { ticket, payments, applications, chargeById } = receipt
+  const { ticket } = receipt
   const profile = receipt.orgProfile
   // Sin defaults de país: el perfil regional es obligatorio.
   if (!profile) {
     throw validation("La organización no tiene perfil regional: configúralo antes de generar documentos")
   }
-  const branchRow = receipt.branch
+  const frozen = ticket.snapshot as TicketFrozen
+  const clinic = frozen.clinic
   const org: DocOrg = {
-    tradeName: profile.tradeName ?? profile.legalName,
-    legalName: profile.legalName,
-    address: profile.fiscalAddress ?? branchRow?.addressLine1 ?? null,
-    phone: branchRow?.phone ?? null,
-    branchName: branchRow?.name ?? null,
-    currency: profile.currency,
-    locale: profile.locale,
-    timezone: profile.timezone,
-    ticketFooter: profile.ticketFooter,
+    tradeName: clinic.tradeName || clinic.legalName,
+    legalName: clinic.legalName,
+    address: clinic.fiscalAddress ?? receipt.branch?.addressLine1 ?? null,
+    phone: receipt.branch?.phone ?? null,
+    branchName: frozen.branch?.name ?? null,
+    currency: ticket.currency,
+    locale: clinic.locale,
+    timezone: clinic.timezone,
+    ticketFooter: frozen.notice,
     receiptWidth: profile.receiptWidth,
     sheetSize: profile.sheetSize,
   }
-  let payerName: string | null = null
-  if (ticket.payerContactId) {
+  // Tickets anteriores a congelar pagador y documento: se leen de la ficha.
+  let payerName = frozen.payer?.displayName ?? null
+  if (!frozen.payer && ticket.payerContactId) {
     const [payer] = await tx
       .select({ displayName: contact.displayName })
       .from(contact)
@@ -369,43 +409,48 @@ export async function buildTicketSnapshot(
       .limit(1)
     payerName = payer?.displayName ?? null
   }
-  // Solo suman las aplicaciones vigentes, en orden de registro.
-  const live = applications
-    .filter((a) => !a.voidedAt)
-    .sort(
-      (x, y) =>
-        x.createdAt.getTime() - y.createdAt.getTime() || (x.id < y.id ? -1 : x.id > y.id ? 1 : 0),
-    )
-  const docLabel = patientRow.docNumber ? `${patientRow.docType ?? "Doc."} ${patientRow.docNumber}` : null
+  const docType = frozen.patient.docType === undefined ? patientRow.docType : frozen.patient.docType
+  const docNumber = frozen.patient.docNumber === undefined ? patientRow.docNumber : frozen.patient.docNumber
+  const lines = frozen.lines ?? []
+  const advance = lines.find((line) => line.chargeId === null) ?? null
   return {
     kind: "ticket",
     sourceId: ticket.id,
     numberLabel: String(ticket.ticketNumber).padStart(6, "0"),
     status: ticket.voidedAt ? "anulado" : "vigente",
     voidReason: ticket.voidReason ?? null,
-    patientName: patientRow.displayName,
-    patientDoc: docLabel,
+    patientName: frozen.patient.displayName || patientRow.displayName,
+    patientDoc: docNumber ? `${docType ?? "Doc."} ${docNumber}` : null,
     payerName,
+    issuerName: frozen.issuer?.name || null,
     paidAt: ticket.createdAt,
     currency: ticket.currency,
-    lines: live.map((a) => ({
-      description: chargeById[a.chargeId]?.description ?? "Concepto",
-      amountCents: a.amountCents,
-      promotion: chargeById[a.chargeId]?.promotionName ?? null,
+    lines: lines
+      .filter((line) => line.chargeId !== null)
+      .map((line) => ({
+        description: line.description,
+        amountCents: line.appliedCents,
+        ofCents: line.appliedCents < line.amountCents ? line.amountCents : null,
+        promotion: line.promotion,
+      })),
+    advanceCents: advance ? advance.amountCents : null,
+    methods: (frozen.methods ?? []).map((method) => ({
+      label: method.name,
+      amountCents: method.amountCents,
+      reference: method.reference,
     })),
-    methods: payments
-      .filter((p) => !p.voidedAt)
-      .map((p) => ({ label: p.methodName ?? p.method ?? "otro", amountCents: p.amountCents })),
     creditAppliedCents: ticket.creditAppliedCents,
     cashReceivedCents: ticket.cashReceivedCents,
     changeCents: ticket.changeCents,
     totalCents: ticket.totalCents,
+    remainingCents: frozen.remainingCents ?? null,
     org,
   }
 }
 
 export async function renderTicketPdf(snap: TicketSnapshot, paper?: string | null): Promise<Uint8Array> {
   const org = snap.org
+  const money = (cents: number) => formatMoney(cents, snap.currency, org.locale)
   const title = `Ticket N.º ${snap.numberLabel}`
   return buildPdf(
     title,
@@ -418,51 +463,35 @@ export async function renderTicketPdf(snap: TicketSnapshot, paper?: string | nul
         )
         w.gap(2)
       }
-      w.text(
-        `${formatDate(snap.paidAt, org)}${org.branchName ? ` · ${org.branchName}` : ""}`,
-        { size: 9, color: MUTED },
-      )
+      w.text(formatDate(snap.paidAt, org), { size: 9, color: MUTED })
       w.text(`Paciente: ${snap.patientName}`, { size: 10 })
       if (snap.patientDoc) w.text(snap.patientDoc, { size: 9, color: MUTED })
       if (snap.payerName && snap.payerName !== snap.patientName) {
         w.text(`Pagó: ${snap.payerName}`, { size: 10 })
       }
+      if (snap.issuerName) w.text(`Caja: ${snap.issuerName}`, { size: 9, color: MUTED })
       w.gap(4)
       w.rule()
-      if (snap.lines.length === 0) {
-        w.text("Adelanto / saldo a favor (sin conceptos aplicados).", { size: 10 })
-      } else {
-        for (const line of snap.lines) {
-          w.text(
-            `${line.description} — ${formatMoney(line.amountCents, snap.currency, org.locale)}`,
-            { size: 10 },
-          )
-          if (line.promotion) w.text(`Promo: ${line.promotion}`, { size: 9, color: MUTED })
-        }
+      for (const line of snap.lines) {
+        w.row(line.description, money(line.amountCents), { size: 10 })
+        if (line.ofCents != null) w.text(`A cuenta de ${money(line.ofCents)}`, { size: 9, color: MUTED })
+        if (line.promotion) w.text(`Promoción: ${line.promotion}`, { size: 9, color: MUTED })
+      }
+      if (snap.advanceCents != null) {
+        w.row("Adelanto (queda como saldo a favor)", money(snap.advanceCents), { size: 10 })
       }
       w.gap(4)
       w.rule()
-      w.text(`TOTAL: ${formatMoney(snap.totalCents, snap.currency, org.locale)}`, { size: 12, bold: true })
+      w.row("TOTAL", money(snap.totalCents), { size: 12, bold: true })
       for (const method of snap.methods) {
-        w.text(
-          `${method.label}: ${formatMoney(method.amountCents, snap.currency, org.locale)}`,
-          { size: 10 },
-        )
+        w.row(method.label, money(method.amountCents), { size: 10 })
+        if (method.reference) w.text(`Operación ${method.reference}`, { size: 8, color: MUTED })
       }
-      if (snap.creditAppliedCents > 0) {
-        w.text(
-          `Saldo a favor aplicado: ${formatMoney(snap.creditAppliedCents, snap.currency, org.locale)}`,
-          { size: 10 },
-        )
-      }
-      if (snap.cashReceivedCents != null) {
-        w.text(
-          `Recibido: ${formatMoney(snap.cashReceivedCents, snap.currency, org.locale)}`,
-          { size: 10 },
-        )
-      }
-      if (snap.changeCents != null && snap.changeCents > 0) {
-        w.text(`Vuelto: ${formatMoney(snap.changeCents, snap.currency, org.locale)}`, { size: 10 })
+      if (snap.creditAppliedCents > 0) w.row("Saldo a favor usado", money(snap.creditAppliedCents), { size: 10 })
+      if (snap.cashReceivedCents != null) w.row("Recibido", money(snap.cashReceivedCents), { size: 10 })
+      if (snap.changeCents != null && snap.changeCents > 0) w.row("Vuelto", money(snap.changeCents), { size: 10 })
+      if (snap.remainingCents != null && snap.lines.length > 0) {
+        w.row("Saldo por cobrar", money(snap.remainingCents), { size: 10 })
       }
       w.gap(6)
       w.text(org.ticketFooter, { size: 8, color: MUTED })
@@ -480,72 +509,84 @@ export interface BudgetSnapshot {
   numberLabel: string
   status: string
   isDraft: boolean
-  presentedAt: Date | null
+  issuedAt: Date
   patientName: string
   patientDoc: string | null
-  title: string
+  professional: string | null
+  planTitle: string
   currency: string
-  lines: { description: string; detail: string | null; amountCents: number | null; promotion: string | null }[]
+  lines: BudgetPrintLine[]
+  subtotalCents: number | null
   totalCents: number | null
   notes: string | null
   org: DocOrg
 }
 
+/**
+ * Hoja del presupuesto desde su contenido imprimible (`getBudgetPrintPayload`).
+ * `actor` aplica la misma frontera que la pantalla: un odontólogo solo
+ * obtiene la hoja de los presupuestos de sus planes.
+ */
 export async function buildBudgetSnapshot(
   tx: Db,
   orgId: string,
   patientId: string,
   budgetId: string,
+  actor: { actorUserId?: string; memberRole?: string } = {},
 ): Promise<BudgetSnapshot> {
-  const patientRow = await requirePatient(tx, orgId, patientId)
-  const [budgetHead] = await tx
-    .select({ presentedAt: treatmentBudget.presentedAt })
-    .from(treatmentBudget)
-    .where(
-      and(
-        eq(treatmentBudget.id, budgetId),
-        eq(treatmentBudget.organizationId, orgId),
-        eq(treatmentBudget.patientId, patientId),
-      ),
-    )
+  const payload = await getBudgetPrintPayload(tx, orgId, patientId, budgetId, actor)
+  const [profile] = await tx
+    .select({ receiptWidth: orgProfile.receiptWidth, ticketFooter: orgProfile.ticketFooter })
+    .from(orgProfile)
+    .where(eq(orgProfile.organizationId, orgId))
     .limit(1)
-  if (!budgetHead) throw notFound("Presupuesto")
-  const detail = await getBudgetDetail(tx, orgId, patientId, budgetId)
-  const org = await loadOrg(tx, orgId, null)
-  const docLabel = patientRow.docNumber
-    ? `${patientRow.docType ?? "Doc."} ${patientRow.docNumber}`
+  if (!profile) {
+    throw validation("La organización no tiene perfil regional: configúralo antes de generar documentos")
+  }
+  const org: DocOrg = {
+    tradeName: payload.clinic.name,
+    legalName: payload.clinic.name,
+    address: payload.clinic.address,
+    phone: payload.clinic.phone,
+    branchName: payload.clinic.branchName,
+    currency: payload.currency,
+    locale: payload.locale,
+    timezone: payload.timezone,
+    ticketFooter: profile.ticketFooter,
+    receiptWidth: profile.receiptWidth,
+    sheetSize: payload.paper,
+  }
+  const professional = payload.professional
+    ? [payload.professional.title, payload.professional.name].filter(Boolean).join(" ")
     : null
   return {
     kind: "budget",
-    sourceId: detail.id,
-    numberLabel: `N.º ${String(detail.budgetNumber).padStart(4, "0")}`,
-    status: detail.status,
-    isDraft: detail.status === "borrador",
-    presentedAt: budgetHead.presentedAt,
-    patientName: patientRow.displayName,
-    patientDoc: docLabel,
-    title: detail.title,
-    currency: detail.currency,
-    lines: detail.items.map((item) => {
-      const extras = [
-        item.toothNumber ? `pieza ${item.toothNumber}` : null,
-        item.scope && item.scope !== "pieza" ? item.scope : null,
-      ].filter(Boolean)
-      return {
-        description: item.title,
-        detail: extras.length > 0 ? extras.join(" · ") : null,
-        amountCents: item.priceCents,
-        promotion: item.promotionName ?? null,
-      }
-    }),
-    totalCents: detail.totalCents,
-    notes: detail.notes,
+    sourceId: budgetId,
+    numberLabel: `N.º ${String(payload.budgetNumber).padStart(4, "0")}${
+      payload.revisionNumber > 1 ? ` · revisión ${payload.revisionNumber}` : ""
+    }`,
+    status: payload.status,
+    isDraft: payload.isDraft,
+    issuedAt: payload.issuedAt,
+    patientName: payload.patient.displayName,
+    patientDoc: payload.patient.docNumber
+      ? `${payload.patient.docType ?? "Doc."} ${payload.patient.docNumber}`
+      : null,
+    professional,
+    planTitle: payload.planTitle,
+    currency: payload.currency,
+    lines: payload.lines,
+    subtotalCents: payload.subtotalCents,
+    totalCents: payload.totalCents,
+    notes: payload.notes,
     org,
   }
 }
 
 export async function renderBudgetPdf(snap: BudgetSnapshot, paper?: string | null): Promise<Uint8Array> {
   const org = snap.org
+  const money = (cents: number | null) =>
+    cents == null ? "por definir" : formatMoney(cents, snap.currency, org.locale)
   const title = `Presupuesto ${snap.numberLabel}`
   return buildPdf(
     title,
@@ -554,48 +595,55 @@ export async function renderBudgetPdf(snap: BudgetSnapshot, paper?: string | nul
       if (snap.isDraft) {
         w.text("BORRADOR — documento no entregado", { size: 12, bold: true, color: ACCENT })
         w.gap(2)
-      } else if (snap.presentedAt) {
-        w.text(`Presentado el ${formatDate(snap.presentedAt, org)} · Estado: ${snap.status}`, {
-          size: 9,
-          color: MUTED,
-        })
       } else {
-        w.text(`Estado: ${snap.status}`, { size: 9, color: MUTED })
+        w.text(formatDay(snap.issuedAt, org), { size: 9, color: MUTED })
       }
-      w.text(`Paciente: ${snap.patientName}`, { size: 10 })
-      if (snap.patientDoc) w.text(snap.patientDoc, { size: 9, color: MUTED })
-      w.text(`Plan: ${snap.title}`, { size: 10 })
+      w.text(`Paciente: ${snap.patientName}${snap.patientDoc ? ` · ${snap.patientDoc}` : ""}`, { size: 10 })
+      if (snap.professional) w.text(`Profesional: ${snap.professional}`, { size: 10 })
+      w.text(`Plan: ${snap.planTitle}`, { size: 10 })
       w.gap(4)
       w.rule()
+      w.row("Tratamiento", "Precio", { size: 9, bold: true, color: MUTED })
       for (const line of snap.lines) {
-        const amount =
-          line.amountCents == null
-            ? "precio por definir"
-            : formatMoney(line.amountCents, snap.currency, org.locale)
-        w.text(
-          `${line.description}${line.detail ? ` (${line.detail})` : ""} — ${amount}`,
-          { size: 10 },
-        )
-        if (line.promotion) {
-          w.text(`Promoción: ${line.promotion}`, { size: 9, color: MUTED })
+        const label = `${line.title}${line.detail ? `, ${line.detail}` : ""}`
+        w.row(label, money(line.listTotalCents), { size: 10 })
+        if (line.billingMode === "session") {
+          // Lo que se cobra por sesión: el paciente ve el total, pero la deuda
+          // nace visita a visita.
+          w.text(
+            `Se cobra por sesión: ${money(line.listUnitCents)} en cada visita · ${line.units} ${
+              line.units === 1 ? "visita prevista" : "visitas previstas"
+            }`,
+            { size: 9, color: MUTED },
+          )
         }
       }
       w.gap(4)
       w.rule()
+      const discounts = snap.lines.filter((line) => (line.discountCents ?? 0) > 0)
+      if (discounts.length > 0) {
+        w.row("Subtotal", money(snap.subtotalCents), { size: 10 })
+        for (const line of discounts) {
+          const reason = line.promotionName ? `Promoción ${line.promotionName}` : "Descuento"
+          w.row(`${reason} en ${line.title}`, `− ${money(line.discountCents)}`, { size: 10 })
+        }
+      }
+      w.row("TOTAL", money(snap.totalCents), { size: 12, bold: true })
+      w.gap(6)
+      w.text("Cómo se paga", { size: 10, bold: true })
       w.text(
-        snap.totalCents == null
-          ? "TOTAL: por definir"
-          : `TOTAL: ${formatMoney(snap.totalCents, snap.currency, org.locale)}`,
-        { size: 12, bold: true },
+        "Cada tratamiento se paga cuando se realiza. Puede dejar un adelanto, que se descuenta de lo siguiente que deba.",
+        { size: 9, color: MUTED },
       )
-      w.gap(2)
-      w.text("Cada tratamiento se paga cuando se realiza, salvo adelanto acordado.", {
-        size: 9,
-        color: MUTED,
-      })
       if (snap.notes) {
         w.gap(2)
         w.text(snap.notes, { size: 9 })
+      }
+      if (!snap.isDraft) {
+        w.gap(6)
+        w.text("Acepto este presupuesto", { size: 10, bold: true })
+        w.signature("Nombre y firma del paciente o su representante")
+        w.signature("Fecha", 0.25)
       }
       w.gap(6)
       w.text("Este presupuesto no es un documento fiscal.", { size: 8, color: MUTED })
@@ -603,4 +651,60 @@ export async function renderBudgetPdf(snap: BudgetSnapshot, paper?: string | nul
     org,
     budgetFormat(org, paper),
   )
+}
+
+// --- Constancia de devolución ------------------------------------------------
+
+/**
+ * Constancia de una devolución de saldo a favor, desde lo que se congeló al
+ * devolver. Mismo papel que el ticket: la térmica del perfil, u hoja si se pide.
+ */
+export async function getRefundReceiptPdf(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+  receiptId: string,
+  paper?: string | null,
+): Promise<{ bytes: Uint8Array; filename: string }> {
+  const frozen = await getRefundReceipt(tx, orgId, patientId, receiptId)
+  const [profile] = await tx.select().from(orgProfile).where(eq(orgProfile.organizationId, orgId))
+  if (!profile) {
+    throw validation("La organización no tiene perfil regional: configúralo antes de generar documentos")
+  }
+  const clinic = frozen.clinic
+  const org: DocOrg = {
+    tradeName: clinic.tradeName || clinic.legalName,
+    legalName: clinic.legalName,
+    address: clinic.fiscalAddress,
+    phone: null,
+    branchName: frozen.branch.name,
+    currency: frozen.currency,
+    locale: clinic.locale,
+    timezone: clinic.timezone,
+    ticketFooter: "",
+    receiptWidth: profile.receiptWidth,
+    sheetSize: profile.sheetSize,
+  }
+  const money = (cents: number) => formatMoney(cents, frozen.currency, org.locale)
+  const bytes = await buildPdf(
+    "Constancia de devolución",
+    (w) => {
+      header(w, org, "CONSTANCIA DE DEVOLUCIÓN", null)
+      w.text(formatDate(new Date(frozen.refundedAt), org), { size: 9, color: MUTED })
+      w.text(`Paciente: ${frozen.patient.displayName}`, { size: 10 })
+      if (frozen.patient.docNumber) {
+        w.text(`${frozen.patient.docType ?? "Doc."} ${frozen.patient.docNumber}`, { size: 9, color: MUTED })
+      }
+      if (frozen.issuer.name) w.text(`Caja: ${frozen.issuer.name}`, { size: 9, color: MUTED })
+      w.gap(4)
+      w.rule()
+      w.row("Devuelto de su saldo a favor", money(frozen.amountCents), { size: 12, bold: true })
+      w.text(`Se devolvió por: ${frozen.methodName}`, { size: 10 })
+      w.text(`Motivo: ${frozen.reason}`, { size: 10 })
+      w.signature("Recibí conforme")
+    },
+    org,
+    ticketFormat(org, paper),
+  )
+  return { bytes, filename: `Devolucion-${frozen.refundedAt.slice(0, 10)}.pdf` }
 }

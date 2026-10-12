@@ -1,13 +1,14 @@
 import type { Db } from "@odentia/db"
 import {
   patientCharge,
+  patientPaymentApplication,
   serviceCatalog,
   treatmentBudget,
   treatmentBudgetItem,
 } from "@odentia/db/schema/clinical"
 import { promotion, promotionServicePrice } from "@odentia/db/schema/promotions"
 import { auditEvent } from "@odentia/db/schema/org"
-import { and, asc, desc, eq, gte, isNull, lte, or, sql } from "drizzle-orm"
+import { and, asc, desc, eq, gte, inArray, isNull, lte, or, sql } from "drizzle-orm"
 import { notFound, ServiceError, validation } from "./errors.js"
 
 /**
@@ -241,6 +242,13 @@ export async function updatePromotion(
         : assertInstant(input.endsAt, "endsAt")
       : current.endsAt
   if (input.startsAt !== undefined || input.endsAt !== undefined) {
+    // Una promoción terminada no vuelve a ofrecerse: se crea otra con sus fechas.
+    const ended = current.endsAt !== null && current.endsAt.getTime() <= Date.now()
+    const moved =
+      startsAt.getTime() !== current.startsAt.getTime() ||
+      (endsAt?.getTime() ?? null) !== (current.endsAt?.getTime() ?? null)
+    if (ended && moved)
+      throw conflict("PROMOTION_ENDED", "La promoción ya terminó: crea una nueva con sus fechas")
     if (endsAt && endsAt < startsAt) throw validation("endsAt no puede ser anterior a startsAt")
     set.startsAt = startsAt
     set.endsAt = endsAt
@@ -490,12 +498,24 @@ export async function requirePromotionPrice(
 
 export interface PromotionMetrics {
   promotionId: string
-  /** Líneas no-borrador que la aplican (veces usada). */
+  /**
+   * Veces que se usó: tratamientos aceptados en un presupuesto con la
+   * promoción, más conceptos a los que se aplicó en caja.
+   */
   uses: number
+  /** Lo realmente cobrado de esos conceptos, por moneda. */
   chargedByCurrency: Array<{ currency: string; cents: number }>
+  /** Precio promedio acordado (útil en «desde», donde cada uso tiene el suyo). */
+  averageByCurrency: Array<{ currency: string; cents: number }>
 }
 
-/** Uso y cobrado por promoción (Fase 6 lee esto; vencidas conservan su histórico). */
+/**
+ * Uso y cobrado por promoción. Un uso es un tratamiento aceptado en un
+ * presupuesto con la promoción, o un concepto al que se aplicó al cobrar (uno
+ * sin costo también cuenta, aunque no deje nada que cobrar). Un presupuesto
+ * en borrador, rechazado o sustituido no es un uso, y lo anulado no cuenta.
+ * «Cobrado» suma solo el dinero que ya entró. Las vencidas conservan su histórico.
+ */
 export async function getPromotionMetrics(
   tx: Db,
   orgId: string,
@@ -507,45 +527,71 @@ export async function getPromotionMetrics(
     .where(and(eq(promotion.id, promotionId), eq(promotion.organizationId, orgId)))
     .limit(1)
   if (!promo) throw notFound("Promoción")
-  const lines = await tx
-    .select({ id: treatmentBudgetItem.id, budgetId: treatmentBudgetItem.budgetId })
+  const accepted = await tx
+    .select({
+      planItemId: treatmentBudgetItem.planItemId,
+      priceCents: treatmentBudgetItem.priceCents,
+      currency: treatmentBudgetItem.currency,
+    })
     .from(treatmentBudgetItem)
     .innerJoin(treatmentBudget, eq(treatmentBudget.id, treatmentBudgetItem.budgetId))
     .where(
       and(
         eq(treatmentBudgetItem.organizationId, orgId),
         eq(treatmentBudgetItem.promotionId, promotionId),
-        sql`${treatmentBudget.status} <> 'borrador'`,
+        eq(treatmentBudgetItem.decision, "aceptado"),
+        sql`${treatmentBudget.status} IN ('aceptado','parcial')`,
       ),
     )
-  const chargedByCurrency = new Map<string, number>()
-  if (lines.length > 0) {
-    const charges = await tx
-      .select({ amountCents: patientCharge.amountCents, currency: patientCharge.currency })
-      .from(patientCharge)
+  const fromBudget = new Set(accepted.map((line) => line.planItemId))
+  const charges = await tx
+    .select()
+    .from(patientCharge)
+    .where(and(eq(patientCharge.organizationId, orgId), eq(patientCharge.promotionId, promotionId)))
+  const live = charges.filter((charge) => !charge.voidedAt)
+  // Aplicada en caja: no viene de un tratamiento ya contado por su presupuesto.
+  // La promoción sin costo retira el concepto con ella como motivo: sigue siendo un uso.
+  const atDesk = charges.filter(
+    (charge) =>
+      !(charge.planItemId && fromBudget.has(charge.planItemId)) &&
+      (!charge.voidedAt || (charge.voidReason !== null && charge.voidReason === charge.editReason)),
+  )
+  const collected = new Map<string, number>()
+  if (live.length > 0) {
+    const currencyOf = new Map(live.map((charge) => [charge.id, charge.currency]))
+    const applications = await tx
+      .select({ chargeId: patientPaymentApplication.chargeId, amountCents: patientPaymentApplication.amountCents })
+      .from(patientPaymentApplication)
       .where(
         and(
-          eq(patientCharge.organizationId, orgId),
-          sql`${patientCharge.budgetItemId} IN (${sql.join(
-            lines.map((l) => sql`${l.id}`),
-            sql`, `,
-          )})`,
-          isNull(patientCharge.voidedAt),
+          eq(patientPaymentApplication.organizationId, orgId),
+          inArray(patientPaymentApplication.chargeId, [...currencyOf.keys()]),
+          isNull(patientPaymentApplication.voidedAt),
         ),
       )
-    for (const charge of charges) {
-      chargedByCurrency.set(
-        charge.currency,
-        (chargedByCurrency.get(charge.currency) ?? 0) + charge.amountCents,
-      )
+    for (const app of applications) {
+      const unit = currencyOf.get(app.chargeId)
+      if (!unit) continue
+      collected.set(unit, (collected.get(unit) ?? 0) + app.amountCents)
     }
   }
+  const prices = new Map<string, { total: number; count: number }>()
+  const addPrice = (unit: string, cents: number | null) => {
+    if (cents == null) return
+    const entry = prices.get(unit) ?? { total: 0, count: 0 }
+    entry.total += cents
+    entry.count += 1
+    prices.set(unit, entry)
+  }
+  for (const line of accepted) addPrice(line.currency, line.priceCents)
+  for (const charge of atDesk) addPrice(charge.currency, charge.voidedAt ? 0 : charge.amountCents)
   return {
     promotionId,
-    uses: lines.length,
-    chargedByCurrency: [...chargedByCurrency.entries()].map(([currency, cents]) => ({
+    uses: accepted.length + atDesk.length,
+    chargedByCurrency: [...collected.entries()].map(([currency, cents]) => ({ currency, cents })),
+    averageByCurrency: [...prices.entries()].map(([currency, entry]) => ({
       currency,
-      cents,
+      cents: Math.round(entry.total / entry.count),
     })),
   }
 }

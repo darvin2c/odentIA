@@ -864,7 +864,7 @@ export const serviceCatalog = pgTable(
     scope: text("scope"),
     // Todo servicio tiene tarifa explícita (>= 0; 0 = incluido sin costo).
     priceCents: integer("price_cents").notNull(),
-    currency: char("currency", { length: 3 }).notNull().default("PEN"),
+    currency: char("currency", { length: 3 }).notNull(),
     durationMin: integer("duration_min"),
     // Cómo se cobra: 'treatment' una vez por tratamiento, 'session' en cada visita atendida.
     billingMode: text("billing_mode").notNull().default("treatment"),
@@ -996,7 +996,7 @@ export const treatmentBudget = pgTable(
     presentedAt: timestamp("presented_at", { withTimezone: true }),
     decisionContactId: uuid("decision_contact_id").references(() => contact.id),
     title: text("title").notNull(),
-    currency: char("currency", { length: 3 }).notNull().default("PEN"),
+    currency: char("currency", { length: 3 }).notNull(),
     status: text("status").notNull().default("borrador"),
     notes: text("notes"),
     acceptedByName: text("accepted_by_name"),
@@ -1061,7 +1061,7 @@ export const treatmentPlanItem = pgTable(
     diagnosisCode: text("diagnosis_code").references(() => cie10Code.code),
     codings: jsonb("codings").$type<ProcedureCodingSnapshot[]>().notNull().default([]),
     priceCents: integer("price_cents"),
-    currency: char("currency", { length: 3 }).notNull().default("PEN"),
+    currency: char("currency", { length: 3 }).notNull(),
     status: text("status").notNull().default("pendiente"),
     /** Fase del plan (urgencia → mantenimiento); la propone la especialidad. */
     phase: text("phase").notNull().default("basica"),
@@ -1145,7 +1145,7 @@ export const treatmentBudgetItem = pgTable(
     billingMode: text("billing_mode").notNull().default("treatment"),
     /** Tope de visitas con cargo en modo `session` (snapshot al cotizar). */
     sessionsPlanned: smallint("sessions_planned"),
-    currency: char("currency", { length: 3 }).notNull().default("PEN"),
+    currency: char("currency", { length: 3 }).notNull(),
     decision: text("decision").notNull().default("pendiente"),
     createdBy: text("created_by").references(() => user.id),
     ...timestamps,
@@ -1511,6 +1511,11 @@ export const patientPayment = pgTable(
   (table) => [
     index("patient_payment_org_patient_idx").on(table.organizationId, table.patientId),
     check("patient_payment_amount_check", sql`${table.amountCents} > 0`),
+    // El tipo congelado es de la lista UN/CEFACT 4461, igual que el del medio.
+    check(
+      "patient_payment_method_type_check",
+      sql`${table.methodTypeCode} IS NULL OR ${table.methodTypeCode} IN ('10','48','30','68','20','1')`,
+    ),
   ],
 )
 

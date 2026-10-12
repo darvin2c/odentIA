@@ -8,7 +8,7 @@ export type StageKind = "open" | "won" | "lost"
 
 const STAGE_KINDS: StageKind[] = ["open", "won", "lost"]
 
-/** Etapas por defecto (es-PE) del pipeline "Ventas". */
+/** Etapas por defecto del pipeline "Ventas". */
 const DEFAULT_STAGES: { name: string; kind: StageKind }[] = [
   { name: "Nuevo", kind: "open" },
   { name: "Contactado", kind: "open" },

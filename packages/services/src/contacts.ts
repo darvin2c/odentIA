@@ -611,6 +611,23 @@ export async function updateContact(
     const preferred = fields.preferredChannel?.trim() || null
     if (preferred && !PREFERRED_CHANNELS.includes(preferred as (typeof PREFERRED_CHANNELS)[number]))
       throw validation("Medio preferido inválido: solo email, whatsapp, telegram, messenger o instagram")
+    // Solo vale un medio por el que la clínica puede escribirle: uno conectado.
+    // La regla vive aquí, no en el desplegable de la pantalla.
+    if (preferred) {
+      const [connected] = await tx
+        .select({ id: channelConnection.id })
+        .from(channelConnection)
+        .where(
+          and(
+            eq(channelConnection.organizationId, orgId),
+            eq(channelConnection.channel, preferred),
+            eq(channelConnection.status, "active"),
+          ),
+        )
+        .limit(1)
+      if (!connected)
+        throw validation("La clínica no tiene conectado ese medio: conéctalo antes de elegirlo como preferido")
+    }
     patch.preferredChannel = preferred
     changed.push("preferredChannel")
   }

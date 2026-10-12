@@ -29,6 +29,7 @@ import { patient } from "@odentia/db/schema/clinical"
 import { auditEvent, branch } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, gte, ilike, isNotNull, lte, or, sql } from "drizzle-orm"
 import { isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
+import { requireOrgCurrency } from "./locale.js"
 import { createWorkspaceNotification } from "./workspace.js"
 
 /* ---------------- validaciones ---------------- */
@@ -605,7 +606,7 @@ export async function createPurchaseOrder(
       organizationId: orgId,
       supplierId: input.supplierId,
       warehouseId: input.warehouseId,
-      currency: currency(input.currency ?? "PEN"),
+      currency: currency(input.currency ?? (await requireOrgCurrency(tx, orgId))),
       notes: textOptional(input.notes, "Las notas", 2000),
       createdBy: actorUserId,
     })

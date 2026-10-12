@@ -2,14 +2,16 @@ import { withOrgContext } from "@odentia/db"
 import { Hono } from "hono"
 import { z } from "zod"
 import {
+  type BudgetLineWithStatus,
+  addBudgetItems,
   adjustBudgetLines,
   cancelBudget,
   createBudget,
   decideBudget,
   deliverBudget,
   getBudgetDetail,
-  getBudgetPrintPayload,
   listBudgets,
+  removeBudgetItems,
   reviseBudget,
   updateBudgetDraft,
 } from "@odentia/services"
@@ -28,8 +30,9 @@ function forbid(c: Context) {
  * - GET /:id/budgets/:budgetId → detalle con líneas + totales
  * - PATCH /:id/budgets/:budgetId { title?, notes? } (solo borrador)
  * - POST /:id/budgets/:budgetId/lines { lines: [{ planItemId, priceCents?, reason?, promotionId?|null, promotionFinalPriceCents? }] } (solo borrador)
+ * - POST /:id/budgets/:budgetId/items { itemIds } (añade tratamientos del plan; solo borrador)
+ * - POST /:id/budgets/:budgetId/items/remove { itemIds } (quita tratamientos; solo borrador)
  * - POST /:id/budgets/:budgetId/deliver {} (borrador→presentado; imprimir/enviar entrega)
- * - GET /:id/budgets/:budgetId/print → payload A4 con código 310 y precios finales
  * - POST /:id/budgets/:budgetId/decision { decisions, decidedByContactId?, decisionNote? }
  * - POST /:id/budgets/:budgetId/cancel {}
  * - POST /:id/budgets/:budgetId/revise { itemIds, title?, notes?, reason }
@@ -37,6 +40,8 @@ function forbid(c: Context) {
  * `budgets.decide` (caja decide sin clínica; odontólogo solo su plan, objeto).
  * Dinero solo en centavos enteros; estados/transiciones según servicio.
  */
+const budgetItemsInput = z.object({ itemIds: z.array(z.uuid()).min(1).max(200) }).strict()
+
 const budgetCreateInput = z
   .object({
     planId: z.uuid(),
@@ -76,6 +81,8 @@ const budgetLinesInput = z
             reason: z.string().trim().min(1).max(500).nullish(),
             promotionId: z.uuid().nullish(),
             promotionFinalPriceCents: z.number().int().min(0).max(2147483647).nullish(),
+            // Visitas previstas de lo que se cobra por sesión.
+            sessionsPlanned: z.number().int().min(1).max(200).optional(),
           })
           .strict(),
       )
@@ -83,6 +90,27 @@ const budgetLinesInput = z
       .max(200),
   })
   .strict()
+
+/**
+ * Quien no lee la parte clínica (caja) recibe el presupuesto como documento
+ * económico: tratamiento, precio, decisión y estado, sin pieza, superficies,
+ * cuadrante, arcada ni códigos de procedimiento. La frontera se aplica aquí,
+ * en el servidor, no ocultando columnas en la pantalla.
+ */
+function economicView<T extends { items: BudgetLineWithStatus[] }>(memberRole: string, budget: T): T {
+  if (canAccess(memberRole, "clinical.read")) return budget
+  return {
+    ...budget,
+    items: budget.items.map((line) => ({
+      ...line,
+      toothNumber: null,
+      surfaces: [],
+      quadrant: null,
+      arch: null,
+      codings: [],
+    })),
+  }
+}
 
 export function createPatientBudgetsRoute(deps: Pick<CrmDeps, "db">) {
   const app = new Hono()
@@ -101,10 +129,12 @@ export function createPatientBudgetsRoute(deps: Pick<CrmDeps, "db">) {
     const { orgId, userId, memberRole } = orgContextOf(c)
     const patientId = c.req.param("id")
     const planId = c.req.query("planId") || undefined
-    return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) =>
-        listBudgets(tx, orgId, patientId, planId, { memberRole, actorUserId: userId }),
-      ),
+    return runService(c, 200, async () =>
+      (
+        await withOrgContext(deps.db, orgId, (tx) =>
+          listBudgets(tx, orgId, patientId, planId, { memberRole, actorUserId: userId }),
+        )
+      ).map((budget) => economicView(memberRole, budget)),
     )
   })
 
@@ -123,24 +153,15 @@ export function createPatientBudgetsRoute(deps: Pick<CrmDeps, "db">) {
 
   app.get("/:id/budgets/:budgetId", async (c) => {
     const { orgId, userId, memberRole } = orgContextOf(c)
-    return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) =>
-        getBudgetDetail(tx, orgId, c.req.param("id"), c.req.param("budgetId"), {
-          memberRole,
-          actorUserId: userId,
-        }),
-      ),
-    )
-  })
-
-  app.get("/:id/budgets/:budgetId/print", async (c) => {
-    const { orgId, userId, memberRole } = orgContextOf(c)
-    return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) =>
-        getBudgetPrintPayload(tx, orgId, c.req.param("id"), c.req.param("budgetId"), {
-          memberRole,
-          actorUserId: userId,
-        }),
+    return runService(c, 200, async () =>
+      economicView(
+        memberRole,
+        await withOrgContext(deps.db, orgId, (tx) =>
+          getBudgetDetail(tx, orgId, c.req.param("id"), c.req.param("budgetId"), {
+            memberRole,
+            actorUserId: userId,
+          }),
+        ),
       ),
     )
   })
@@ -179,6 +200,36 @@ export function createPatientBudgetsRoute(deps: Pick<CrmDeps, "db">) {
     )
   })
 
+  // Añadir tratamientos del plan a un borrador (mismas reglas que al prepararlo).
+  app.post("/:id/budgets/:budgetId/items", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "budgets.write")) return forbid(c)
+    const parsed = budgetItemsInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        addBudgetItems(tx, orgId, userId, c.req.param("id"), c.req.param("budgetId"), parsed.data, {
+          memberRole,
+        }),
+      ),
+    )
+  })
+
+  // Quitar tratamientos de un borrador: vuelven a quedar sin presupuestar.
+  app.post("/:id/budgets/:budgetId/items/remove", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "budgets.write")) return forbid(c)
+    const parsed = budgetItemsInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        removeBudgetItems(tx, orgId, userId, c.req.param("id"), c.req.param("budgetId"), parsed.data, {
+          memberRole,
+        }),
+      ),
+    )
+  })
+
   app.post("/:id/budgets/:budgetId/deliver", async (c) => {
     const { orgId, userId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "budgets.write")) return forbid(c)
@@ -194,11 +245,14 @@ export function createPatientBudgetsRoute(deps: Pick<CrmDeps, "db">) {
     if (!canAccess(memberRole, "budgets.decide")) return forbid(c)
     const parsed = budgetDecisionInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
-    return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) =>
-        decideBudget(tx, orgId, userId, c.req.param("id"), c.req.param("budgetId"), parsed.data, {
-          memberRole,
-        }),
+    return runService(c, 200, async () =>
+      economicView(
+        memberRole,
+        await withOrgContext(deps.db, orgId, (tx) =>
+          decideBudget(tx, orgId, userId, c.req.param("id"), c.req.param("budgetId"), parsed.data, {
+            memberRole,
+          }),
+        ),
       ),
     )
   })

@@ -6,6 +6,7 @@ import {
   listMostUsedServices,
   listServices,
   listTemplates,
+  quickAddServices,
   updateService,
 } from "@odentia/services"
 import { Hono } from "hono"
@@ -72,21 +73,49 @@ const patchInput = z
   })
   .strict()
 
+const templateItemShape = {
+  templateId: z.string().uuid(),
+  /** Nombre con el que la clínica lo ofrece; sin él, el de la biblioteca. */
+  name: z.string().trim().min(1).max(200).nullish(),
+  priceCents: z.number().int().min(0).max(2147483647),
+  billingMode: z.enum(["treatment", "session"]).nullish(),
+  durationMin: z.number().int().min(1).max(1440).nullish(),
+}
+
 const fromTemplatesInput = z
+  .object({
+    items: z.array(z.object(templateItemShape).strict()).min(1).max(100),
+  })
+  .strict()
+
+/** «Agregar servicios»: de la biblioteca y propios, guardados en un solo acto. */
+const batchInput = z
   .object({
     items: z
       .array(
-        z
-          .object({
-            templateId: z.string().uuid(),
-            priceCents: z.number().int().min(0).max(2147483647),
-            billingMode: z.enum(["treatment", "session"]).nullish(),
-            durationMin: z.number().int().min(1).max(1440).nullish(),
-          })
-          .strict(),
+        z.discriminatedUnion("kind", [
+          z.object({ kind: z.literal("template"), ...templateItemShape }).strict(),
+          z
+            .object({
+              kind: z.literal("custom"),
+              name: z.string().trim().min(1).max(200),
+              specialty: z.string().trim().min(1).max(40),
+              scope: z.string().trim().min(1).max(20),
+              priceCents: z.number().int().min(0).max(2147483647),
+              billingMode: z.enum(["treatment", "session"]).nullish(),
+              durationMin: z.number().int().min(1).max(1440).nullish(),
+            })
+            .strict(),
+        ]),
       )
       .min(1)
       .max(100),
+  })
+  .strict()
+
+const mostUsedQuery = z
+  .object({
+    perConcept: z.coerce.number().int().min(1).max(10).optional(),
   })
   .strict()
 
@@ -116,25 +145,18 @@ export function createServicesRoute(deps: CrmDeps) {
     }
   })
 
+  // «Más usados»: conceptos generales (consulta, limpieza, resina…) resueltos
+  // contra la biblioteca disponible, sin lo que la clínica ya incorporó.
   app.get("/most-used", async (c) => {
     const { orgId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "catalog.read")) {
       return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para ver el tarifario"), 403)
     }
-    const parsed = z
-      .object({
-        specialty: z.string().max(40).optional(),
-        limit: z.coerce.number().int().min(1).max(50).optional(),
-      })
-      .strict()
-      .safeParse(c.req.query())
+    const parsed = mostUsedQuery.safeParse(c.req.query())
     if (!parsed.success) return validationError(c, parsed.error.issues)
     try {
       const data = await withOrgContext(deps.db, orgId, (tx) =>
-        listMostUsedServices(tx, orgId, {
-          specialty: parsed.data.specialty,
-          limit: parsed.data.limit,
-        }),
+        listMostUsedServices(tx, orgId, { perConcept: parsed.data.perConcept }),
       )
       return c.json({ data })
     } catch (e) {
@@ -190,6 +212,23 @@ export function createServicesRoute(deps: CrmDeps) {
     return runService(c, 201, () =>
       withOrgContext(deps.db, orgId, (tx) =>
         fromTemplates(tx, orgId, userId, parsed.data.items),
+      ),
+    )
+  })
+
+  app.post("/batch", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "settings.write")) {
+      return c.json(
+        errorBody(c, "FORBIDDEN", "No tienes permiso para administrar el tarifario"),
+        403,
+      )
+    }
+    const parsed = batchInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 201, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        quickAddServices(tx, orgId, userId, parsed.data.items),
       ),
     )
   })

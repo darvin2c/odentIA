@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query"
 import { useEffect, useId, useMemo, useRef, useState } from "react"
 import { ApiError, apiFetchBytes } from "../../lib/api"
 import { DicomUnsupportedError, decodeDicom, distanceMm, renderDicom } from "../../lib/dicom"
+import { activeOrgLocale } from "../../lib/locale"
 
 type Point = { x: number; y: number }
 
@@ -15,7 +16,7 @@ function formatDicomDate(value: string | null): string | null {
   if (!value || !/^\d{8}$/.test(value)) return value
   return new Date(
     `${value.slice(0, 4)}-${value.slice(4, 6)}-${value.slice(6, 8)}T12:00:00`,
-  ).toLocaleDateString("es-PE", { dateStyle: "medium" })
+  ).toLocaleDateString(activeOrgLocale(), { dateStyle: "medium" })
 }
 
 /**

@@ -101,6 +101,7 @@ export {
   type SectionNavProps,
   type SectionNavSide,
 } from "./section-nav/index.js"
+export { type FormatRegion, formatLocale, formatTimeZone, setFormatRegion } from "./locale.js"
 export { normalizeSearchText } from "./text.js"
 export {
   applyTheme,

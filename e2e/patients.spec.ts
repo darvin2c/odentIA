@@ -106,12 +106,7 @@ test("paciente: responsabilidad y decisión de la propuesta", async ({ owner }) 
   const entregar = page.getByRole("button", { name: "Imprimir y entregar", exact: true })
   await expect(entregar).toBeEnabled()
   await entregar.click()
-  await expect(
-    page
-      .locator("span")
-      .filter({ hasText: /^Presentado$/ })
-      .first(),
-  ).toBeVisible()
+  await expect(page.getByRole("heading", { name: "¿Qué respondió?" })).toBeVisible()
 
   // Responsables: el rol vigente habilita registrar quién decide la propuesta.
   await openSection(page, "Datos", "Responsables")
@@ -130,21 +125,19 @@ test("paciente: responsabilidad y decisión de la propuesta", async ({ owner }) 
     page,
     tenant(owner.org.slug, `${patientPath}?tab=plan&planId=${ids.planId}&budgetId=${budgetId}`),
   )
-  const registrarDecision = page.getByRole("button", { name: "Registrar decisión", exact: true })
-  await expect(registrarDecision).toBeEnabled()
-  await registrarDecision.click()
-  const decision = page.locator('[aria-label="Registrar decisión"]')
-  await chooseOption(decision.getByLabel("Quién decide", { exact: true }), {
-    label: "Representante legal: Madre de Lucía",
+  // Responde el representante: se elige quién decide y se anota la respuesta completa.
+  const respuesta = page.locator('[aria-label="Respuesta del paciente"]')
+  await respuesta.getByRole("button", { name: "Cambiar", exact: true }).click()
+  await chooseOption(respuesta.getByLabel("Quién decide", { exact: true }), {
+    label: "Madre de Lucía · representante legal",
   })
-  await chooseOption(decision.getByRole("combobox").first(), "aceptado")
-  await decision.getByRole("button", { name: "Registrar", exact: true }).click()
-  await expect(
-    page
-      .locator("span")
-      .filter({ hasText: /^Aceptado$/ })
-      .first(),
-  ).toBeVisible()
+  // «Acepta todo» anota con un clic más su confirmación corta (no se reescribe después).
+  await respuesta.getByRole("button", { name: "Acepta todo", exact: true }).click()
+  await page
+    .getByRole("alertdialog")
+    .getByRole("button", { name: "Anotar que acepta todo", exact: true })
+    .click()
+  await expect(page.getByRole("button", { name: /Presupuesto N\.º 1 .*Aceptado/ })).toBeVisible()
 
   // Alternativas: la agrupación y la recomendación se registran desde la ficha.
   await page.getByRole("button", { name: "Crear agrupación", exact: true }).click()
@@ -179,9 +172,9 @@ test("paciente: cuenta con cargo, cobro parcial y ticket", async ({ owner }) => 
   await gotoHydrated(page, tenant(owner.org.slug, `${patientPath}?tab=cuenta`))
   await expect(page.getByText("POR COBRAR").first()).toBeVisible()
   await page.getByRole("button", { name: /Cobrar S\/\s*450\.00/ }).click()
-  const drawer = surface(page, { name: /Cobrar ·/ })
+  const drawer = surface(page, { name: "Cobrar", exact: true })
   await drawer.getByLabel("Importe", { exact: true }).fill("200")
-  await drawer.getByLabel("Efectivo recibido").fill("200")
+  await drawer.getByLabel("Recibes en efectivo").fill("200")
   await drawer.getByRole("button", { name: /Cobrar S\/\s*200\.00/ }).click()
   await expect(page.getByText(/TICKET N.º/)).toBeVisible()
   await gotoHydrated(page, tenant(owner.org.slug, `${patientPath}?tab=cuenta`))
@@ -462,7 +455,7 @@ for (const role of ["reception", "dentist", "cashier"] as const) {
     }
     if (role === "cashier") {
       await expect(areas).toHaveText(["Resumen", "Cuenta", "Datos"])
-      await expect(page.getByRole("button", { name: /Cobrar S\// })).toBeVisible()
+      await expect(page.getByRole("button", { name: "Cobrar", exact: true })).toBeVisible()
       await expect(allergy).toHaveCount(0)
       expect(health.status).toBe(403)
       expect(account.status).toBe(200)

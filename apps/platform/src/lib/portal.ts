@@ -1,3 +1,4 @@
+import { formatMoney, formatMoneyAmount } from "@odentia/clinical"
 import type { FormSchemaDef } from "./clinical-forms"
 import type {
   AuthenticationResponseJSON,
@@ -124,8 +125,17 @@ export interface PortalBudgetLine {
   title: string
   scope: string | null
   toothNumber: number | null
+  /** Precio acordado: el total o, si se cobra por sesión, el de cada visita. */
   priceCents: number | null
   tariffCents: number | null
+  /** 'treatment' se cobra una vez; 'session', en cada visita atendida. */
+  billingMode: string
+  /** Visitas previstas de lo que se cobra por sesión. */
+  sessionsPlanned: number | null
+  /** Total de la línea: el precio o, por sesión, precio por visita × visitas previstas. */
+  lineTotalCents: number | null
+  /** El mismo total a la tarifa de referencia. */
+  tariffLineTotalCents: number | null
   promotionName: string | null
   currency: string
   decision: string
@@ -141,8 +151,13 @@ export interface PortalBudget {
   notes: string | null
   status: string
   currency: string
+  /** Formato regional de la clínica; `null` si aún no lo configuró. */
+  locale: string | null
+  /** Totales del servidor: el portal los muestra, no los recalcula. */
   totalCents: number | null
   acceptedCents: number | null
+  tariffTotalCents: number | null
+  discountCents: number | null
   presentedAt: string | null
   decidedAt: string | null
   acceptedByName: string | null
@@ -160,6 +175,8 @@ export interface PortalDocument {
 }
 
 export interface PortalAccount {
+  /** Formato regional de la clínica; `null` si aún no lo configuró. */
+  locale: string | null
   byCurrency: Array<{
     currency: string
     agreedCents: number
@@ -352,25 +369,49 @@ export async function closePortalSessionApi(sessionToken: string): Promise<void>
   await portalFetch(sessionToken, "/session/revoke", { method: "POST" })
 }
 
-/** Centavos enteros → texto es-PE (nunca floats en dinero). */
-export function formatPortalMoney(amountCents: number | null, currency: string): string {
-  if (amountCents === null) return "Por cotizar"
-  try {
-    return new Intl.NumberFormat("es-PE", {
-      style: "currency",
-      currency,
-      minimumFractionDigits: 2,
-    }).format(amountCents / 100)
-  } catch {
-    return `${amountCents / 100} ${currency}`
-  }
+/** Formato del dispositivo: respaldo cuando el portal no entrega el de la clínica. */
+function deviceLocale(): string {
+  return new Intl.NumberFormat().resolvedOptions().locale
 }
 
-export function formatPortalDate(iso: string | null): string {
+/**
+ * Importe entero en la unidad menor de su moneda → texto con la moneda y el
+ * formato de la clínica (`locale` que entrega el portal con cada presupuesto).
+ * Los decimales los pone la moneda (ISO 4217), no una división fija; sin
+ * formato de la clínica se usa el del dispositivo, nunca el de un país.
+ */
+export function formatPortalMoney(
+  amountCents: number | null,
+  currency: string,
+  locale?: string | null,
+  /** Sin símbolo: cifras de una lista cuyo total ya dice la moneda. */
+  plain = false,
+): string {
+  if (amountCents === null) return "Por cotizar"
+  for (const candidate of [locale?.trim(), deviceLocale()]) {
+    if (!candidate) continue
+    try {
+      return plain
+        ? formatMoneyAmount(amountCents, currency, candidate)
+        : formatMoney(amountCents, currency, candidate)
+    } catch {
+      // Formato que este dispositivo no reconoce: se prueba el siguiente.
+    }
+  }
+  return "Importe no disponible"
+}
+
+/** Fecha y hora con el formato de la clínica o, si falta, el del dispositivo. */
+export function formatPortalDate(iso: string | null, locale?: string | null): string {
   if (!iso) return "—"
   const date = new Date(iso)
   if (!Number.isFinite(date.getTime())) return "—"
-  return date.toLocaleString("es-PE", { dateStyle: "medium", timeStyle: "short" })
+  const options: Intl.DateTimeFormatOptions = { dateStyle: "medium", timeStyle: "short" }
+  try {
+    return date.toLocaleString(locale?.trim() || undefined, options)
+  } catch {
+    return date.toLocaleString(undefined, options)
+  }
 }
 
 // ---- Gobernanza del portal (contrato PortalDomain 2026-09-29) ----

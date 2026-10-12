@@ -63,7 +63,7 @@ function ConsentPrintPage() {
             <p className="text-xs">
               {[
                 establishment.fiscalDocNumber
-                  ? `${establishment.fiscalDocType ?? "RUC"} ${establishment.fiscalDocNumber}`
+                  ? [establishment.fiscalDocType, establishment.fiscalDocNumber].filter(Boolean).join(" ")
                   : null,
                 establishment.address,
               ]

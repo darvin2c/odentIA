@@ -1,56 +1,69 @@
 /**
- * Cobrar en un paso: qué paga, cuánto y con qué medio. Un solo formulario que
- * llama al cobro atómico (`POST /patients/:id/collect`); el servidor reparte,
- * consume el saldo a favor solo y devuelve el ticket con número único.
- * Sin datos clínicos: solo conceptos económicos pendientes.
+ * Cobrar en un paso: qué paga, cuánto y con qué medio, en un solo formulario
+ * que llama al cobro atómico (`POST /patients/:id/collect`). El servidor cobra
+ * de lo más antiguo a lo más nuevo, usa solo el saldo a favor y devuelve el
+ * ticket numerado. Sin datos clínicos: solo conceptos económicos pendientes.
  *
- * Desde aquí también se agrega otro concepto (cargo manual de caja), se
- * aplica una promoción vigente al concepto con servicio (el precio lo resuelve
- * el servidor) y se aplica solo el saldo a favor sin medios. El responsable
- * que paga sale de sus responsabilidades vigentes, no de todos los contactos.
+ * Un concepto se corrige en la misma lista: nuevo importe con motivo, quitarlo,
+ * o la promoción vigente de su servicio (el precio lo resuelve el servidor).
+ * Paga el paciente salvo que se elija a uno de sus responsables vigentes.
  *
- * Moneda de la clínica (prop requerida) y locale del perfil; dinero con el
- * módulo compartido `@odentia/clinical`. Nada fijo.
+ * Moneda de la clínica (prop requerida) y formato del perfil; dinero con el
+ * módulo compartido `@odentia/clinical`. Nada fijo de un país.
  */
 import { formatMoney, formatMoneyInput, parseMoney } from "@odentia/clinical"
-import { Badge, Button, Field, FieldLabel, Input, Textarea } from "@odentia/ui"
-import { EmptyState, FormDrawer } from "@odentia/ui-patterns"
+import {
+  Button,
+  Checkbox,
+  cn,
+  Field,
+  FieldDescription,
+  FieldLabel,
+  Input,
+  InputGroup,
+  InputGroupAddon,
+  InputGroupInput,
+  RadioGroup,
+  RadioGroupItem,
+  Skeleton,
+} from "@odentia/ui"
+import { EmptyState, ErrorState, FormDrawer, SubmitButton } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useNavigate } from "@tanstack/react-router"
+import { MoreHorizontal, Plus, X } from "lucide-react"
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
 import { ChoiceSelect } from "../ui/choice-select"
-import { apiFetch } from "../../lib/api"
-import { fetchBudgets } from "../../lib/budgets"
-import { RESPONSIBILITY_KIND_LABELS } from "../../lib/clinical-journey"
+import { useActiveBranch } from "../../lib/active-branch"
+import { fetchResponsibilities, RESPONSIBILITY_KIND_LABELS } from "../../lib/clinical-journey"
 import { usePermission } from "../../lib/crm"
+import { collectFailureMessage, financeErrorMessage } from "../../lib/finance"
 import {
   CASH_TYPE_CODE,
   collectApi,
   createManualChargeApi,
+  currencySymbol,
   editChargeConceptApi,
+  fetchActivePromotions,
   fetchPatientAccount3,
   fetchPaymentMethods,
-  fetchActivePromotions,
-  fetchResponsibilities,
+  formatAmountPlain,
+  searchPatientsApi,
   voidChargeApi,
   type AccountPendingItem,
   type CollectResultBody,
+  type PaymentMethodOption,
+  type PromotionItem,
   type PromotionOption,
 } from "../../lib/finance-collect"
-import { collectErrorMessage } from "../../lib/finance"
 
 const MAX_REASON = 2000
+const MAX_REFERENCE = 200
 
-const PAYER_KINDS = ["responsable_economico", "representante_legal"] as const
-
-interface MedioLine {
-  key: number
-  paymentMethodId: string
-  amountText: string
-  reference: string
-}
+/** Quién puede figurar como pagador además del paciente. */
+const PAYER_KINDS: readonly string[] = ["responsable_economico", "representante_legal"]
 
 /** Lectura de formulario: null si el texto no es un importe válido. */
-function parseOrNull(raw: string, currency: string, locale: string): number | null {
+export function parseMoneyOrNull(raw: string, currency: string, locale: string): number | null {
   try {
     return parseMoney(raw, currency, locale)
   } catch {
@@ -58,10 +71,164 @@ function parseOrNull(raw: string, currency: string, locale: string): number | nu
   }
 }
 
+/** «el paciente» / «la paciente» según el sexo registrado; sin dato no se supone. */
+export function patientNoun(sex: string | null | undefined): string {
+  if (sex === "F") return "la paciente"
+  if (sex === "M") return "el paciente"
+  return "paciente"
+}
+
+/** Enter dentro de un bloque en línea guarda ese bloque: no envía el cobro. */
+function onEnter(action: () => void) {
+  return (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (event.key !== "Enter") return
+    event.preventDefault()
+    action()
+  }
+}
+
+/** Campo de importe con el símbolo y el formato de la clínica. */
+export function MoneyInput({
+  id,
+  value,
+  onChange,
+  currency,
+  locale,
+  onKeyDown,
+  disabled,
+  autoFocus,
+  invalid,
+  "aria-label": ariaLabel,
+  "aria-describedby": describedBy,
+}: {
+  id?: string
+  value: string
+  onChange: (value: string) => void
+  currency: string
+  locale: string
+  onKeyDown?: (event: React.KeyboardEvent<HTMLInputElement>) => void
+  disabled?: boolean
+  autoFocus?: boolean
+  invalid?: boolean
+  "aria-label"?: string
+  "aria-describedby"?: string
+}): React.JSX.Element {
+  return (
+    <InputGroup>
+      <InputGroupAddon>{currencySymbol(currency, locale)}</InputGroupAddon>
+      <InputGroupInput
+        id={id}
+        inputMode="decimal"
+        autoComplete="off"
+        className="tabular-nums"
+        placeholder={formatMoneyInput(0, currency, locale)}
+        value={value}
+        disabled={disabled}
+        autoFocus={autoFocus}
+        aria-label={ariaLabel}
+        aria-describedby={describedBy}
+        aria-invalid={invalid || undefined}
+        onChange={(event) => onChange(event.target.value)}
+        onKeyDown={onKeyDown}
+      />
+    </InputGroup>
+  )
+}
+
+/** Medios de pago activos como botones, en el orden que la clínica les dio. */
+export function PaymentMethodButtons({
+  labelId,
+  methods,
+  value,
+  onChange,
+  disabled,
+}: {
+  labelId: string
+  methods: PaymentMethodOption[]
+  value: string
+  onChange: (id: string) => void
+  disabled?: boolean
+}): React.JSX.Element {
+  return (
+    <div role="group" aria-labelledby={labelId} className="flex flex-wrap gap-2">
+      {methods.map((method) => {
+        const selected = method.id === value
+        return (
+          <Button
+            key={method.id}
+            type="button"
+            variant={selected ? "default" : "outline"}
+            aria-pressed={selected}
+            disabled={disabled}
+            className="min-h-10"
+            onClick={() => onChange(method.id)}
+          >
+            {method.name}
+          </Button>
+        )
+      })}
+    </div>
+  )
+}
+
+/** Un medio dentro de un cobro con varios medios. */
+interface SplitLine {
+  key: number
+  paymentMethodId: string
+  amountText: string
+  reference: string
+  /** Absorbe la diferencia con el importe hasta que la persona escribe el suyo. */
+  auto: boolean
+}
+
+/** Con una sola línea «automática», esta completa lo que falta para el importe. */
+function rebalance(
+  lines: SplitLine[],
+  totalCents: number | null,
+  currency: string,
+  locale: string,
+): SplitLine[] {
+  if (totalCents === null) return lines
+  if (lines.filter((line) => line.auto).length !== 1) return lines
+  const fixed = lines
+    .filter((line) => !line.auto)
+    .reduce((sum, line) => sum + (parseMoneyOrNull(line.amountText, currency, locale) ?? 0), 0)
+  const rest = totalCents - fixed
+  return lines.map((line) =>
+    line.auto
+      ? { ...line, amountText: rest > 0 ? formatMoneyInput(rest, currency, locale) : "" }
+      : line,
+  )
+}
+
+/** Bloque abierto bajo un concepto: corregir el importe o poner el precio de una promoción «desde». */
+type Editor =
+  | { kind: "amount"; chargeId: string; amountText: string; reason: string; confirmRemove: boolean }
+  | {
+      kind: "promo"
+      chargeId: string
+      promotionId: string
+      promotionName: string
+      floorCents: number
+      amountText: string
+      reason: string
+    }
+
+/** Cambio sobre un concepto: quién muestra el progreso, qué se llama y qué pasa al terminar. */
+interface ConceptJob {
+  target: string
+  errorAt: string
+  run: () => Promise<unknown>
+  done?: (result: unknown) => void
+}
+
 export function CollectDrawer({
   patientId,
   patientName,
+  patientDocument,
+  patientSex,
   branchId,
+  branchName,
   currency,
   presetChargeIds,
   locale,
@@ -71,7 +238,13 @@ export function CollectDrawer({
 }: {
   patientId: string | null
   patientName?: string
+  /** Documento ya conocido por quien abre el cobro («DNI 45678912»). */
+  patientDocument?: string | null
+  /** Sexo registrado, solo para escribir «el/la paciente». */
+  patientSex?: string | null
   branchId: string
+  /** Nombre de la sede; si no llega se busca entre las sedes activas. */
+  branchName?: string
   /** Moneda de la clínica: el servidor solo cobra conceptos en ella. */
   currency: string
   presetChargeIds?: string[]
@@ -80,64 +253,68 @@ export function CollectDrawer({
   onClose: () => void
   onCollected: (result: CollectResultBody, patientId: string) => void
 }): React.JSX.Element {
-  const uid = useRef(`cobrar-${Math.random().toString(36).slice(2)}`).current
+  const uid = useId()
+  const navigate = useNavigate()
   const queryClient = useQueryClient()
   const canWrite = usePermission("finance.write")
+  const canConfigure = usePermission("settings.write")
+  const sede = useActiveBranch()
 
   const [search, setSearch] = useState("")
-  const [chosenId, setChosenId] = useState<string | null>(null)
-  const [chosenName, setChosenName] = useState("")
-  const effectiveId = patientId ?? chosenId
+  const [chosen, setChosen] = useState<{
+    id: string
+    name: string
+    document: string | null
+    sex: string | null
+  } | null>(null)
+  const effectiveId = patientId ?? chosen?.id ?? null
 
   const [selected, setSelected] = useState<string[]>([])
   const [selectInit, setSelectInit] = useState(false)
   const [advanceMode, setAdvanceMode] = useState(false)
-  const [advanceText, setAdvanceText] = useState("")
-  const [medios, setMedios] = useState<MedioLine[]>([])
-  const [mediosTouched, setMediosTouched] = useState(false)
+  const [amountText, setAmountText] = useState("")
+  const [amountTouched, setAmountTouched] = useState(false)
+  const [methodId, setMethodId] = useState("")
+  const [reference, setReference] = useState("")
+  const [split, setSplit] = useState<SplitLine[] | null>(null)
   const [cashReceived, setCashReceived] = useState("")
   const [payerContactId, setPayerContactId] = useState("")
-  const [editing, setEditing] = useState<{ charge: AccountPendingItem; amountText: string; description: string } | null>(null)
-  const [removing, setRemoving] = useState<AccountPendingItem | null>(null)
-  const [adding, setAdding] = useState(false)
-  const [newDescription, setNewDescription] = useState("")
-  const [newAmount, setNewAmount] = useState("")
-  const [promo, setPromo] = useState<{ charge: AccountPendingItem; serviceId: string } | null>(null)
-  const [promotionId, setPromotionId] = useState("")
-  const [promoFinal, setPromoFinal] = useState("")
-  const [reason, setReason] = useState("")
+  const [payerOpen, setPayerOpen] = useState(false)
+  const [editor, setEditor] = useState<Editor | null>(null)
+  const [adding, setAdding] = useState<{ description: string; amountText: string } | null>(null)
+  const [inlineError, setInlineError] = useState<{ at: string; message: string } | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [dirty, setDirty] = useState(false)
   const [requestId, setRequestId] = useState(() => crypto.randomUUID())
   const keySeq = useRef(1)
 
-  // Sesión nueva al abrir: borrador limpio e idempotencia nueva.
-  useEffect(() => {
-    if (!open) return
-    setSearch("")
-    setChosenId(null)
-    setChosenName("")
+  const resetDraft = useCallback(() => {
     setSelected([])
     setSelectInit(false)
     setAdvanceMode(false)
-    setAdvanceText("")
-    setMedios([])
-    setMediosTouched(false)
+    setAmountText("")
+    setAmountTouched(false)
+    setMethodId("")
+    setReference("")
+    setSplit(null)
     setCashReceived("")
     setPayerContactId("")
-    setEditing(null)
-    setRemoving(null)
-    setAdding(false)
-    setNewDescription("")
-    setNewAmount("")
-    setPromo(null)
-    setPromotionId("")
-    setPromoFinal("")
-    setReason("")
+    setPayerOpen(false)
+    setEditor(null)
+    setAdding(null)
+    setInlineError(null)
     setError(null)
+  }, [])
+
+  // Sesión nueva al abrir: borrador limpio y clave de cobro nueva.
+  useEffect(() => {
+    if (!open) return
+    setSearch("")
+    setChosen(null)
+    resetDraft()
     setDirty(false)
     setRequestId(crypto.randomUUID())
-  }, [open, patientId])
+  }, [open, patientId, resetDraft])
 
   const account = useQuery({
     queryKey: ["patient-account3", effectiveId],
@@ -150,27 +327,15 @@ export function CollectDrawer({
     enabled: open,
   })
   const responsibilities = useQuery({
-    queryKey: ["patient-responsibilities", effectiveId],
+    queryKey: ["responsibilities", effectiveId],
     queryFn: () => fetchResponsibilities(effectiveId as string),
     enabled: open && effectiveId !== null,
   })
-  const budgets = useQuery({
-    queryKey: ["budgets", effectiveId],
-    queryFn: () => fetchBudgets(effectiveId as string),
-    enabled: open && effectiveId !== null,
-  })
-  const promoOptions = useQuery({
-    queryKey: ["active-promotions", promo?.serviceId],
-    queryFn: () => fetchActivePromotions(promo!.serviceId),
-    enabled: open && promo !== null,
-  })
+  const searchText = search.trim()
   const searchQuery = useQuery({
-    queryKey: ["patients-search", search.trim()],
-    queryFn: () =>
-      apiFetch<{ data: Array<{ id: string; displayName: string }> }>(
-        `/api/patients?q=${encodeURIComponent(search.trim())}&limit=10`,
-      ),
-    enabled: open && patientId === null && search.trim().length >= 2,
+    queryKey: ["patients-search", searchText],
+    queryFn: () => searchPatientsApi(searchText),
+    enabled: open && patientId === null && chosen === null && searchText.length >= 2,
     retry: false,
   })
 
@@ -182,29 +347,29 @@ export function CollectDrawer({
     [data, currency],
   )
   const otherCurrencyCount = useMemo(
-    () => (data?.pendiente ?? []).filter((item) => item.saldoCents > 0 && item.currency !== currency).length,
+    () =>
+      (data?.pendiente ?? []).filter((item) => item.saldoCents > 0 && item.currency !== currency)
+        .length,
     [data, currency],
   )
+  const offersPromotions = canWrite && pending.some((item) => item.serviceId !== null)
+  const promotions = useQuery({
+    queryKey: ["active-promotions"],
+    queryFn: () => fetchActivePromotions(),
+    enabled: open && offersPromotions,
+  })
   const methodList = methods.data?.data ?? []
-  const serviceByBudgetItem = useMemo(() => {
-    const map = new Map<string, string>()
-    for (const budget of budgets.data?.data ?? []) {
-      for (const line of budget.items) {
-        if (line.serviceId) map.set(line.id, line.serviceId)
-      }
-    }
-    return map
-  }, [budgets.data])
-  const serviceOf = (item: AccountPendingItem): string | null =>
-    (item.budgetItemId && serviceByBudgetItem.get(item.budgetItemId)) || null
+  const method = methodList.find((item) => item.id === methodId) ?? methodList[0] ?? null
+  const methodById = (id: string) => methodList.find((item) => item.id === id)
+  const isCash = (id: string) => methodById(id)?.typeCode === CASH_TYPE_CODE
 
-  // Selección inicial: lo pendiente o lo pedido por quien abrió el cobro.
-  // Sin pendiente, el cobro nace como adelanto.
+  // Selección inicial: lo pendiente, o lo que pidió quien abrió el cobro.
+  // Sin nada pendiente el cobro nace como adelanto.
   useEffect(() => {
     if (!open || selectInit || !data) return
-    const ids = new Set(pending.map((item) => item.chargeId))
-    const preset = (presetChargeIds ?? []).filter((id) => ids.has(id))
-    setSelected(preset.length > 0 ? preset : [...ids])
+    const ids = pending.map((item) => item.chargeId)
+    const preset = (presetChargeIds ?? []).filter((id) => ids.includes(id))
+    setSelected(preset.length > 0 ? preset : ids)
     if (pending.length === 0) setAdvanceMode(true)
     setSelectInit(true)
   }, [open, selectInit, data, pending, presetChargeIds])
@@ -212,235 +377,437 @@ export function CollectDrawer({
   const selectedItems = pending.filter((item) => selected.includes(item.chargeId))
   const selectedTotal = selectedItems.reduce((sum, item) => sum + item.saldoCents, 0)
   const autoCredit = advanceMode ? 0 : Math.min(favor, selectedTotal)
-  const advanceCents = advanceMode ? (parseOrNull(advanceText, currency, locale) ?? 0) : 0
-  const remainder = advanceMode ? advanceCents : Math.max(0, selectedTotal - autoCredit)
-  const creditOnly = !advanceMode && selected.length > 0 && remainder <= 0
+  /** Lo que falta pagar de lo marcado, ya descontado el saldo a favor. */
+  const due = advanceMode ? 0 : Math.max(0, selectedTotal - autoCredit)
+  const creditOnly = !advanceMode && selectedItems.length > 0 && due === 0
+  const amountCents = parseMoneyOrNull(amountText, currency, locale)
 
-  const methodById = (id: string) => methodList.find((item) => item.id === id)
-  const lineCents = (text: string) => parseOrNull(text, currency, locale) ?? 0
-  const cashPortion = medios.reduce(
-    (sum, line) =>
-      sum + (methodById(line.paymentMethodId)?.typeCode === CASH_TYPE_CODE ? lineCents(line.amountText) : 0),
-    0,
-  )
-  const mediosTotal = medios.reduce((sum, line) => sum + lineCents(line.amountText), 0)
-  const hasCash = medios.some(
-    (line) => methodById(line.paymentMethodId)?.typeCode === CASH_TYPE_CODE,
-  )
-  const receivedCents = hasCash ? parseOrNull(cashReceived, currency, locale) : null
+  // El importe sigue a lo marcado hasta que la persona escribe otro.
+  useEffect(() => {
+    if (!open || amountTouched || advanceMode) return
+    setAmountText(due > 0 ? formatMoneyInput(due, currency, locale) : "")
+    setSplit((current) => (current ? rebalance(current, due > 0 ? due : null, currency, locale) : current))
+  }, [open, amountTouched, advanceMode, due, currency, locale])
+
+  const lineCents = (text: string) => parseMoneyOrNull(text, currency, locale) ?? 0
+  const splitTotal = split ? split.reduce((sum, line) => sum + lineCents(line.amountText), 0) : 0
+  const hasCash = split
+    ? split.some((line) => isCash(line.paymentMethodId))
+    : method?.typeCode === CASH_TYPE_CODE
+  const cashPortion = split
+    ? split.reduce(
+        (sum, line) => sum + (isCash(line.paymentMethodId) ? lineCents(line.amountText) : 0),
+        0,
+      )
+    : hasCash
+      ? (amountCents ?? 0)
+      : 0
+  const receivedCents = cashReceived.trim() ? parseMoneyOrNull(cashReceived, currency, locale) : null
   const change = hasCash && receivedCents !== null ? receivedCents - cashPortion : null
 
-  // Medio por defecto: cubre el restante hasta que la persona lo toca.
-  useEffect(() => {
-    if (!open || mediosTouched || methodList.length === 0) return
-    if (remainder <= 0 && !advanceMode) {
-      setMedios([])
-      return
-    }
-    const cash = methodList.find((item) => item.typeCode === CASH_TYPE_CODE) ?? methodList[0]
-    setMedios([
-      {
-        key: keySeq.current++,
-        paymentMethodId: cash.id,
-        amountText: formatMoneyInput(remainder, currency, locale),
-        reference: "",
-      },
-    ])
-  }, [open, mediosTouched, methodList, currency, locale, remainder, advanceMode])
-
-  const invalidateAccount = (id: string) => {
-    void queryClient.invalidateQueries({ queryKey: ["patient-account3", id] })
+  const refreshAccount = async (id: string) => {
+    await queryClient.invalidateQueries({ queryKey: ["patient-account3", id] })
+    void queryClient.invalidateQueries({ queryKey: ["patient-account", id] })
     void queryClient.invalidateQueries({ queryKey: ["finance-debts"] })
-    void queryClient.invalidateQueries({ queryKey: ["finance-cash"] })
-    void queryClient.invalidateQueries({ queryKey: ["finance-movements"] })
-    void queryClient.invalidateQueries({ queryKey: ["finance-closures"] })
   }
 
-  const createMutation = useMutation({
-    mutationFn: () =>
-      createManualChargeApi(effectiveId as string, {
-        branchId,
-        description: newDescription.trim(),
-        amountCents: parseOrNull(newAmount, currency, locale) as number,
-      }),
-    onSuccess: (result) => {
-      setSelected((current) => [...current, result.data.id])
-      setAdding(false)
-      setNewDescription("")
-      setNewAmount("")
+  // Corregir, quitar, agregar o aplicar promoción: una sola mutación a la vez.
+  const conceptMutation = useMutation({
+    mutationFn: (job: ConceptJob) => job.run(),
+    onSuccess: async (result, job) => {
+      setEditor(null)
+      setAdding(null)
+      setInlineError(null)
       setError(null)
+      // El precio cambió: el importe vuelve a seguir a lo marcado.
+      setAmountTouched(false)
       setDirty(true)
-      invalidateAccount(effectiveId as string)
+      job.done?.(result)
+      await refreshAccount(effectiveId as string)
     },
-    onError: (err) => setError(collectErrorMessage(err)),
+    onError: (err, job) => setInlineError({ at: job.errorAt, message: financeErrorMessage(err) }),
   })
-
-  const editMutation = useMutation({
-    mutationFn: () => {
-      const charge = editing!.charge
-      const body: { amountCents?: number; description?: string; reason: string } = {
-        reason: reason.trim(),
-      }
-      const cents = parseOrNull(editing!.amountText, currency, locale) as number
-      if (cents !== charge.totalCents) body.amountCents = cents
-      if (editing!.description.trim() && editing!.description.trim() !== charge.description) {
-        body.description = editing!.description.trim()
-      }
-      return editChargeConceptApi(effectiveId as string, charge.chargeId, body)
-    },
-    onSuccess: () => {
-      setEditing(null)
-      setReason("")
-      setError(null)
-      invalidateAccount(effectiveId as string)
-    },
-    onError: (err) => setError(collectErrorMessage(err)),
-  })
-
-  const promoMutation = useMutation({
-    mutationFn: () => {
-      const body: { promotionId: string; amountCents?: number; reason: string } = {
-        promotionId,
-        reason: reason.trim(),
-      }
-      const selectedPromo = (promoOptions.data ?? []).find((item) => item.id === promotionId)
-      const item = selectedPromo?.items.find((entry) => entry.serviceId === promo!.serviceId)
-      if (item?.mode === "from") {
-        body.amountCents = parseOrNull(promoFinal, currency, locale) as number
-      }
-      return editChargeConceptApi(effectiveId as string, promo!.charge.chargeId, body)
-    },
-    onSuccess: () => {
-      setPromo(null)
-      setPromotionId("")
-      setPromoFinal("")
-      setReason("")
-      setError(null)
-      invalidateAccount(effectiveId as string)
-    },
-    onError: (err) => setError(collectErrorMessage(err)),
-  })
-
-  const removeMutation = useMutation({
-    mutationFn: () => voidChargeApi(effectiveId as string, removing!.chargeId, reason.trim()),
-    onSuccess: () => {
-      setSelected((current) => current.filter((id) => id !== removing!.chargeId))
-      setRemoving(null)
-      setReason("")
-      setError(null)
-      invalidateAccount(effectiveId as string)
-    },
-    onError: (err) => setError(collectErrorMessage(err)),
-  })
+  const conceptBusy = (target: string) =>
+    conceptMutation.isPending && conceptMutation.variables?.target === target
 
   const collectMutation = useMutation({
     mutationFn: async () => {
       const id = effectiveId as string
-      const base = {
-        branchId,
-        payerContactId: payerContactId || null,
-        requestId,
-      }
-      // Sin medios el servidor consume solo el saldo a favor.
-      const payments =
-        creditOnly || medios.length === 0
-          ? undefined
-          : medios.map((line) => ({
+      const base = { branchId, payerContactId: payerContactId || null, requestId }
+      // Sin medios el servidor usa solo el saldo a favor.
+      const payments = creditOnly
+        ? undefined
+        : split
+          ? split.map((line) => ({
               paymentMethodId: line.paymentMethodId,
-              amountCents: parseOrNull(line.amountText, currency, locale) as number,
+              amountCents: lineCents(line.amountText),
               ...(line.reference.trim() ? { reference: line.reference.trim() } : {}),
             }))
-      const cash = hasCash && !creditOnly ? { cashReceivedCents: receivedCents as number } : {}
+          : [
+              {
+                paymentMethodId: (method as PaymentMethodOption).id,
+                amountCents: amountCents as number,
+                ...(!hasCash && reference.trim() ? { reference: reference.trim() } : {}),
+              },
+            ]
+      const cash =
+        !creditOnly && hasCash && receivedCents !== null ? { cashReceivedCents: receivedCents } : {}
       const result = advanceMode
-        ? await collectApi(id, { ...base, advanceCents, payments, ...cash })
-        : await collectApi(id, { ...base, chargeIds: selected, ...(payments ? { payments } : {}), ...cash })
+        ? await collectApi(id, { ...base, advanceCents: amountCents as number, payments, ...cash })
+        : await collectApi(id, {
+            ...base,
+            chargeIds: selectedItems.map((item) => item.chargeId),
+            ...(payments ? { payments } : {}),
+            ...cash,
+          })
       return result.data
     },
     onSuccess: (result) => {
-      invalidateAccount(effectiveId as string)
+      const id = effectiveId as string
+      // La respuesta ya trae la cuenta al día: el ticket la lee sin esperar.
+      queryClient.setQueryData(["patient-account3", id], { data: result.account })
+      void queryClient.invalidateQueries({ queryKey: ["patient-account", id] })
+      void queryClient.invalidateQueries({ queryKey: ["finance-debts"] })
+      void queryClient.invalidateQueries({ queryKey: ["finance-cash"] })
+      void queryClient.invalidateQueries({ queryKey: ["finance-movements"] })
+      void queryClient.invalidateQueries({ queryKey: ["finance-closures"] })
       setDirty(false)
       setRequestId(crypto.randomUUID())
-      onCollected(result, effectiveId as string)
+      onCollected(result, id)
       onClose()
     },
-    onError: (err) => setError(collectErrorMessage(err)),
+    onError: (err) => setError(collectFailureMessage(err)),
   })
 
-  const busy =
-    createMutation.isPending ||
-    editMutation.isPending ||
-    promoMutation.isPending ||
-    removeMutation.isPending ||
-    collectMutation.isPending
-  const modalOpen = editing !== null || removing !== null || adding || promo !== null
-  const displayName = patientId !== null ? (patientName ?? "") : chosenName
+  const busy = conceptMutation.isPending || collectMutation.isPending
+  const inlineOpen = editor !== null || adding !== null
+  const noMethods = methods.isSuccess && methodList.length === 0
+
+  // Lo que ya sabe quien abre el cobro manda (sin parpadeo); lo demás lo trae la cuenta.
+  const known = data?.patient ?? null
+  const knownDocument = known?.docNumber
+    ? `${known.docType ? `${known.docType} ` : ""}${known.docNumber}`
+    : null
+  const displayName = (patientId !== null ? patientName : chosen?.name) || known?.displayName || ""
+  const displayDocument = (patientId !== null ? patientDocument : chosen?.document) || knownDocument
+  const displaySex = (patientId !== null ? patientSex : chosen?.sex) ?? known?.sex ?? null
+  // Quién atendió hoy: el profesional de los conceptos de hoy (solo su nombre).
+  const attendedToday = [
+    ...new Set(
+      pending
+        .filter(
+          (item) =>
+            item.attendedBy &&
+            item.attendedAt &&
+            new Date(item.attendedAt).toDateString() === new Date().toDateString(),
+        )
+        .map((item) => item.attendedBy as string),
+    ),
+  ]
+  const attendedLine =
+    attendedToday.length === 0
+      ? null
+      : displaySex === "F"
+        ? `atendida hoy por ${attendedToday.join(" y ")}`
+        : displaySex === "M"
+          ? `atendido hoy por ${attendedToday.join(" y ")}`
+          : `atención de hoy con ${attendedToday.join(" y ")}`
+  const headerLine = [displayDocument, attendedLine].filter(Boolean).join(" · ")
+  const sedeName = branchName || sede.branches.find((item) => item.id === branchId)?.name || ""
+
   const payerOptions = useMemo(() => {
-    const seen = new Map<string, string>()
+    const seen = new Map<string, { name: string; role: string }>()
     for (const row of responsibilities.data?.data ?? []) {
-      if (!row.isCurrent) continue
-      if (!(PAYER_KINDS as readonly string[]).includes(row.kind)) continue
-      const label = RESPONSIBILITY_KIND_LABELS[row.kind as keyof typeof RESPONSIBILITY_KIND_LABELS] ?? row.kind
-      seen.set(row.contactId, `${row.contact.displayName} · ${label}`)
+      if (!row.isCurrent || !PAYER_KINDS.includes(row.kind)) continue
+      // Si tiene los dos papeles, basta el primero: el contacto es uno.
+      if (seen.has(row.contactId)) continue
+      seen.set(row.contactId, {
+        name: row.contact.displayName,
+        role: (RESPONSIBILITY_KIND_LABELS[row.kind] ?? row.kind).toLowerCase(),
+      })
     }
-    return [...seen.entries()].map(([contactId, label]) => ({ contactId, label }))
+    return [...seen.entries()].map(([contactId, value]) => ({ contactId, ...value }))
   }, [responsibilities.data])
-  const selectedPromo: PromotionOption | undefined = (promoOptions.data ?? []).find(
-    (item) => item.id === promotionId,
-  )
-  const selectedPromoItem = selectedPromo?.items.find((entry) => entry.serviceId === promo?.serviceId)
-  const promoNeedsFinal = selectedPromoItem?.mode === "from"
+  const payer = payerOptions.find((option) => option.contactId === payerContactId) ?? null
+
+  /** Promociones vigentes que incluyen el servicio del concepto, en la moneda de la clínica. */
+  const offersFor = (item: AccountPendingItem): Array<{ promo: PromotionOption; price: PromotionItem }> => {
+    if (!item.serviceId) return []
+    return (promotions.data ?? []).flatMap((promo) =>
+      promo.items
+        .filter(
+          (price) =>
+            price.serviceId === item.serviceId &&
+            price.currency === currency &&
+            price.priceCents !== null,
+        )
+        .map((price) => ({ promo, price })),
+    )
+  }
+
+  const toggleConcept = (chargeId: string) => {
+    setSelected((current) =>
+      current.includes(chargeId) ? current.filter((id) => id !== chargeId) : [...current, chargeId],
+    )
+    setAmountTouched(false)
+    setDirty(true)
+  }
+
+  const closeInline = () => {
+    setEditor(null)
+    setAdding(null)
+    setInlineError(null)
+  }
+
+  const saveAmount = () => {
+    if (editor?.kind !== "amount") return
+    const charge = pending.find((item) => item.chargeId === editor.chargeId)
+    if (!charge) return
+    const cents = parseMoneyOrNull(editor.amountText, currency, locale)
+    if (cents === null || cents <= 0) {
+      setInlineError({ at: charge.chargeId, message: "Escribe el nuevo importe." })
+      return
+    }
+    if (cents === charge.totalCents) {
+      setInlineError({ at: charge.chargeId, message: "Es el mismo importe: no hay nada que guardar." })
+      return
+    }
+    if (!editor.reason.trim()) {
+      setInlineError({ at: charge.chargeId, message: "Escribe el motivo del cambio." })
+      return
+    }
+    conceptMutation.mutate({
+      target: `guardar-${charge.chargeId}`,
+      errorAt: charge.chargeId,
+      run: () =>
+        editChargeConceptApi(effectiveId as string, charge.chargeId, {
+          amountCents: cents,
+          reason: editor.reason.trim(),
+        }),
+    })
+  }
+
+  const removeConcept = () => {
+    if (editor?.kind !== "amount") return
+    const chargeId = editor.chargeId
+    if (!editor.reason.trim()) {
+      setEditor({ ...editor, confirmRemove: false })
+      setInlineError({ at: chargeId, message: "Escribe el motivo para quitarlo." })
+      return
+    }
+    if (!editor.confirmRemove) {
+      setInlineError(null)
+      setEditor({ ...editor, confirmRemove: true })
+      return
+    }
+    conceptMutation.mutate({
+      target: `quitar-${chargeId}`,
+      errorAt: chargeId,
+      run: () => voidChargeApi(effectiveId as string, chargeId, editor.reason.trim()),
+      done: () => setSelected((current) => current.filter((id) => id !== chargeId)),
+    })
+  }
+
+  const applyPromotion = (item: AccountPendingItem, promo: PromotionOption, price: PromotionItem) => {
+    if (price.mode === "from") {
+      // «Desde» anuncia un mínimo: el precio final lo pone quien cobra, empezando ahí.
+      setAdding(null)
+      setInlineError(null)
+      setEditor({
+        kind: "promo",
+        chargeId: item.chargeId,
+        promotionId: promo.id,
+        promotionName: promo.name,
+        floorCents: price.priceCents ?? 0,
+        amountText: formatMoneyInput(price.priceCents ?? 0, currency, locale),
+        reason: "",
+      })
+      return
+    }
+    conceptMutation.mutate({
+      target: `promo-${item.chargeId}-${promo.id}`,
+      errorAt: item.chargeId,
+      run: () =>
+        editChargeConceptApi(effectiveId as string, item.chargeId, { promotionId: promo.id }),
+    })
+  }
+
+  const savePromotionPrice = () => {
+    if (editor?.kind !== "promo") return
+    const cents = parseMoneyOrNull(editor.amountText, currency, locale)
+    if (cents === null || cents <= 0) {
+      setInlineError({ at: editor.chargeId, message: "Escribe el precio final." })
+      return
+    }
+    if (cents < editor.floorCents && !editor.reason.trim()) {
+      setInlineError({
+        at: editor.chargeId,
+        message: `El precio baja de ${formatMoney(editor.floorCents, currency, locale)}: escribe el motivo.`,
+      })
+      return
+    }
+    conceptMutation.mutate({
+      target: `guardar-${editor.chargeId}`,
+      errorAt: editor.chargeId,
+      run: () =>
+        editChargeConceptApi(effectiveId as string, editor.chargeId, {
+          promotionId: editor.promotionId,
+          amountCents: cents,
+          ...(editor.reason.trim() ? { reason: editor.reason.trim() } : {}),
+        }),
+    })
+  }
+
+  const removePromotion = (item: AccountPendingItem) => {
+    conceptMutation.mutate({
+      target: `sin-promo-${item.chargeId}`,
+      errorAt: item.chargeId,
+      run: () => editChargeConceptApi(effectiveId as string, item.chargeId, { promotionId: null }),
+    })
+  }
+
+  const addConcept = () => {
+    if (!adding) return
+    if (!branchId) {
+      setInlineError({ at: "agregar", message: "Elige la sede antes de agregar un concepto." })
+      return
+    }
+    const description = adding.description.trim()
+    const cents = parseMoneyOrNull(adding.amountText, currency, locale)
+    if (!description) {
+      setInlineError({ at: "agregar", message: "Escribe qué es lo que se cobra." })
+      return
+    }
+    if (cents === null || cents <= 0) {
+      setInlineError({ at: "agregar", message: "Escribe el importe." })
+      return
+    }
+    conceptMutation.mutate({
+      target: "agregar",
+      errorAt: "agregar",
+      run: () =>
+        createManualChargeApi(effectiveId as string, { branchId, description, amountCents: cents }),
+      done: (result) => {
+        const created = (result as { data?: { id?: string } }).data?.id
+        if (created) setSelected((current) => [...current, created])
+        setAdvanceMode(false)
+      },
+    })
+  }
+
+  const changeAmount = (value: string) => {
+    setAmountText(value)
+    setAmountTouched(true)
+    setDirty(true)
+    if (split) {
+      setSplit(rebalance(split, parseMoneyOrNull(value, currency, locale), currency, locale))
+    }
+  }
+
+  const addSplitLine = () => {
+    const used = new Set(split ? split.map((line) => line.paymentMethodId) : method ? [method.id] : [])
+    const next = methodList.find((item) => !used.has(item.id))
+    const extra: SplitLine = {
+      key: keySeq.current++,
+      paymentMethodId: next?.id ?? "",
+      amountText: "",
+      reference: "",
+      auto: true,
+    }
+    const current: SplitLine[] = split
+      ? split.map((line) => ({ ...line, auto: false }))
+      : [
+          {
+            key: keySeq.current++,
+            paymentMethodId: method?.id ?? "",
+            amountText,
+            reference: hasCash ? "" : reference,
+            auto: false,
+          },
+        ]
+    setSplit(rebalance([...current, extra], amountCents, currency, locale))
+    setDirty(true)
+  }
+
+  const patchSplitLine = (key: number, patch: Partial<SplitLine>) => {
+    if (!split) return
+    const next = split.map((line) => (line.key === key ? { ...line, ...patch } : line))
+    setSplit("amountText" in patch ? rebalance(next, amountCents, currency, locale) : next)
+    setDirty(true)
+  }
+
+  const removeSplitLine = (key: number) => {
+    if (!split) return
+    const rest = split.filter((line) => line.key !== key)
+    if (rest.length > 1) {
+      setSplit(rebalance(rest, amountCents, currency, locale))
+    } else {
+      // Con un solo medio vuelve la forma simple: botones y un importe.
+      setSplit(null)
+      if (rest[0]) {
+        setMethodId(rest[0].paymentMethodId)
+        setReference(rest[0].reference)
+      }
+    }
+    setDirty(true)
+  }
 
   const submitCollect = () => {
     if (!canWrite) {
-      setError("Tu rol no tiene permiso de caja.")
+      setError("Tu rol no cobra. Pídeselo a caja.")
       return
     }
     if (!effectiveId) {
       setError("Busca y elige al paciente que paga.")
       return
     }
-    if (advanceMode) {
-      if (advanceCents <= 0) {
-        setError("Indica el importe del adelanto.")
-        return
-      }
-    } else if (selected.length === 0) {
-      setError("Elige al menos un concepto o registra un adelanto.")
+    if (!branchId) {
+      setError("Elige la sede a cuya caja entra el cobro.")
+      return
+    }
+    if (inlineOpen) {
+      setError("Guarda o cancela el cambio del concepto antes de cobrar.")
+      return
+    }
+    if (!advanceMode && selectedItems.length === 0) {
+      setError("Marca al menos un concepto o cobra un adelanto.")
       return
     }
     if (!creditOnly) {
-      if (medios.length === 0 || remainder <= 0) {
+      if (amountCents === null || amountCents <= 0) {
+        setError(advanceMode ? "Escribe el importe del adelanto." : "Escribe el importe que paga ahora.")
+        return
+      }
+      if (!advanceMode && amountCents > due) {
         setError(
-          advanceMode
-            ? "Agrega al menos un medio de pago."
-            : "El saldo a favor cubre todo: aplica el saldo o agrega medios.",
+          `El importe supera lo que falta de lo marcado (${formatMoney(due, currency, locale)}). Para dejar dinero a favor, cobra un adelanto.`,
         )
         return
       }
-      for (const line of medios) {
-        const cents = parseOrNull(line.amountText, currency, locale)
-        if (cents === null || cents <= 0) {
-          setError("Revisa los importes de cada medio de pago.")
+      if (split) {
+        for (const line of split) {
+          if (!methodById(line.paymentMethodId)) {
+            setError("Elige el medio de pago de cada parte.")
+            return
+          }
+          const cents = parseMoneyOrNull(line.amountText, currency, locale)
+          if (cents === null || cents <= 0) {
+            setError("Escribe el importe de cada medio de pago.")
+            return
+          }
+        }
+        if (splitTotal !== amountCents) {
+          setError(
+            `Los medios suman ${formatMoney(splitTotal, currency, locale)} y el importe es ${formatMoney(amountCents, currency, locale)}.`,
+          )
           return
         }
-        const method = methodById(line.paymentMethodId)
-        if (!method) {
-          setError("Elige el medio de pago de cada línea.")
-          return
-        }
-        if (method.typeCode !== CASH_TYPE_CODE && !line.reference.trim()) {
-          setError(`El medio ${method.name} pide número de operación.`)
-          return
-        }
-      }
-      if (mediosTotal > remainder) {
-        setError(
-          `Los medios suman ${formatMoney(mediosTotal, currency, locale)} y superan lo seleccionado (${formatMoney(remainder, currency, locale)}).`,
-        )
+      } else if (!method) {
+        setError("Elige el medio de pago.")
         return
       }
-      if (hasCash && (receivedCents === null || (change !== null && change < 0))) {
-        setError("Indica cuánto efectivo recibes; debe cubrir la parte en efectivo.")
+      if (hasCash && cashReceived.trim() && (receivedCents === null || receivedCents < cashPortion)) {
+        setError("Lo que recibes en efectivo no cubre la parte en efectivo.")
         return
       }
     }
@@ -448,350 +815,690 @@ export function CollectDrawer({
     collectMutation.mutate()
   }
 
-  return (
-    <>
-      <FormDrawer
-        open={open}
-        title={displayName ? `Cobrar · ${displayName}` : "Cobrar"}
-        description="Qué paga, cuánto y con qué medio. Puedes cobrar una parte: el resto queda por cobrar. El saldo a favor se descuenta solo."
-        error={modalOpen ? null : error}
-        isSubmitting={collectMutation.isPending}
-        isLoading={Boolean(effectiveId) && account.isPending}
-        isDirty={dirty}
-        submitLabel={
-          creditOnly
-            ? "Aplicar saldo a favor"
-            : mediosTotal > 0 && mediosTotal !== remainder
-              ? `Cobrar ${formatMoney(mediosTotal, currency, locale)}`
-              : remainder > 0
-                ? `Cobrar ${formatMoney(remainder, currency, locale)}`
-                : "Cobrar"
-        }
-        submitDisabled={!canWrite || modalOpen}
-        onClose={() => {
-          if (!busy) onClose()
-        }}
-        onSubmit={(event) => {
-          event.preventDefault()
-          submitCollect()
-        }}
-      >
-        <div className="flex flex-col gap-5">
-          {patientId === null ? (
+  const submitLabel = creditOnly
+    ? "Usar saldo a favor"
+    : amountCents !== null && amountCents > 0
+      ? `Cobrar ${formatMoney(amountCents, currency, locale)}`
+      : "Cobrar"
+
+  const editorFor = (item: AccountPendingItem) => {
+    if (!editor || editor.chargeId !== item.chargeId) return null
+    const errorText = inlineError?.at === item.chargeId ? inlineError.message : null
+    const patch = (change: Partial<Editor>) => setEditor({ ...editor, ...change } as Editor)
+    if (editor.kind === "promo") {
+      const cents = parseMoneyOrNull(editor.amountText, currency, locale)
+      const belowFloor = cents !== null && cents < editor.floorCents
+      return (
+        <div
+          id={`${uid}-editor-${item.chargeId}`}
+          className="flex flex-col gap-3 rounded-xl border bg-muted/40 p-3"
+        >
+          <p className="text-sm font-medium">Promoción: {editor.promotionName}</p>
+          <Field>
+            <FieldLabel htmlFor={`${uid}-promo-precio`}>Precio final</FieldLabel>
+            <MoneyInput
+              id={`${uid}-promo-precio`}
+              autoFocus
+              currency={currency}
+              locale={locale}
+              value={editor.amountText}
+              onChange={(value) => patch({ amountText: value })}
+              onKeyDown={onEnter(savePromotionPrice)}
+            />
+            <FieldDescription>
+              Solo pide un motivo si el precio baja de{" "}
+              {formatMoney(editor.floorCents, currency, locale)}.
+            </FieldDescription>
+          </Field>
+          {belowFloor ? (
             <Field>
-              <FieldLabel htmlFor={`${uid}-patient`}>Paciente que paga</FieldLabel>
+              <FieldLabel htmlFor={`${uid}-promo-motivo`}>Motivo</FieldLabel>
               <Input
-                id={`${uid}-patient`}
-                placeholder="Escribe al menos 2 letras del nombre"
-                value={chosenId ? chosenName : search}
-                onChange={(event) => {
-                  setSearch(event.target.value)
-                  setChosenId(null)
-                  setChosenName("")
-                  setDirty(true)
-                }}
+                id={`${uid}-promo-motivo`}
+                maxLength={MAX_REASON}
+                value={editor.reason}
+                onChange={(event) => patch({ reason: event.target.value })}
+                onKeyDown={onEnter(savePromotionPrice)}
               />
-              {!chosenId && search.trim().length >= 2 ? (
-                <ul className="mt-1 flex max-h-40 flex-col divide-y overflow-y-auto rounded-md border">
-                  {searchQuery.data?.data.map((row) => (
-                    <li key={row.id}>
-                      <button
+            </Field>
+          ) : null}
+          {errorText ? (
+            <p role="alert" className="text-sm text-destructive">
+              {errorText}
+            </p>
+          ) : null}
+          <div className="flex flex-wrap items-center gap-2">
+            <SubmitButton
+              size="sm"
+              pending={conceptBusy(`guardar-${item.chargeId}`)}
+              disabled={conceptMutation.isPending}
+              onClick={savePromotionPrice}
+            >
+              Aplicar promoción
+            </SubmitButton>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              disabled={conceptMutation.isPending}
+              onClick={closeInline}
+            >
+              Cancelar
+            </Button>
+          </div>
+        </div>
+      )
+    }
+    return (
+      <div
+        id={`${uid}-editor-${item.chargeId}`}
+        className="flex flex-col gap-3 rounded-xl border bg-muted/40 p-3"
+      >
+        <Field>
+          <FieldLabel htmlFor={`${uid}-nuevo-importe`}>Nuevo importe</FieldLabel>
+          <MoneyInput
+            id={`${uid}-nuevo-importe`}
+            autoFocus
+            currency={currency}
+            locale={locale}
+            value={editor.amountText}
+            onChange={(value) => patch({ amountText: value, confirmRemove: false })}
+            onKeyDown={onEnter(saveAmount)}
+          />
+        </Field>
+        <Field>
+          <FieldLabel htmlFor={`${uid}-motivo`}>Motivo</FieldLabel>
+          <Input
+            id={`${uid}-motivo`}
+            maxLength={MAX_REASON}
+            value={editor.reason}
+            onChange={(event) => patch({ reason: event.target.value, confirmRemove: false })}
+            onKeyDown={onEnter(saveAmount)}
+          />
+        </Field>
+        {errorText ? (
+          <p role="alert" className="text-sm text-destructive">
+            {errorText}
+          </p>
+        ) : null}
+        {editor.confirmRemove ? (
+          <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Confirmar quitar concepto">
+            <p className="min-w-0 flex-1 basis-full text-sm sm:basis-0">
+              Se quita de la cuenta y queda en el historial. ¿Lo quitas?
+            </p>
+            <SubmitButton
+              size="sm"
+              variant="destructive"
+              pending={conceptBusy(`quitar-${item.chargeId}`)}
+              disabled={conceptMutation.isPending}
+              onClick={removeConcept}
+            >
+              Sí, quitar
+            </SubmitButton>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              disabled={conceptMutation.isPending}
+              onClick={() => patch({ confirmRemove: false })}
+            >
+              No
+            </Button>
+          </div>
+        ) : (
+          <div className="flex flex-wrap items-center gap-2">
+            <SubmitButton
+              size="sm"
+              pending={conceptBusy(`guardar-${item.chargeId}`)}
+              disabled={conceptMutation.isPending}
+              onClick={saveAmount}
+            >
+              Guardar cambio
+            </SubmitButton>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              disabled={conceptMutation.isPending}
+              onClick={closeInline}
+            >
+              Cancelar
+            </Button>
+            <span className="flex-1" />
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="text-destructive hover:text-destructive"
+              disabled={conceptMutation.isPending}
+              onClick={removeConcept}
+            >
+              Quitar concepto
+            </Button>
+          </div>
+        )}
+        <p className="text-xs text-muted-foreground">
+          Queda registrado quién lo cambió, cuándo y por qué.
+        </p>
+      </div>
+    )
+  }
+
+  const promotionFor = (item: AccountPendingItem) => {
+    if (item.promotionName) {
+      return (
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+          <span className="min-w-0 flex-1 text-muted-foreground">Promoción: {item.promotionName}</span>
+          {item.budgetItemId ? (
+            <span className="text-xs text-muted-foreground">Viene del presupuesto aceptado</span>
+          ) : (
+            <SubmitButton
+              size="sm"
+              variant="ghost"
+              pending={conceptBusy(`sin-promo-${item.chargeId}`)}
+              disabled={busy || inlineOpen}
+              onClick={() => removePromotion(item)}
+            >
+              Quitar
+            </SubmitButton>
+          )}
+        </div>
+      )
+    }
+    const offers = offersFor(item)
+    if (offers.length === 0) return null
+    return (
+      <ul className="flex flex-col gap-1">
+        {offers.map(({ promo, price }) => (
+          <li
+            key={`${promo.id}-${price.serviceId}`}
+            className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg bg-muted/60 px-3 py-2 text-sm"
+          >
+            <span className="min-w-0 flex-1">
+              {promo.name}:{" "}
+              {price.mode === "from"
+                ? "tú pones el precio final"
+                : price.priceCents === 0
+                  ? "quedaría sin costo"
+                  : `quedaría en ${formatAmountPlain(price.priceCents ?? 0, currency, locale)}`}
+            </span>
+            <SubmitButton
+              size="sm"
+              variant="outline"
+              pending={conceptBusy(`promo-${item.chargeId}-${promo.id}`)}
+              disabled={busy || inlineOpen}
+              onClick={() => applyPromotion(item, promo, price)}
+            >
+              Aplicar
+            </SubmitButton>
+          </li>
+        ))}
+      </ul>
+    )
+  }
+
+  return (
+    <FormDrawer
+      open={open}
+      title="Cobrar"
+      headerContent={
+        displayName ? (
+          <div className="flex min-w-0 flex-col">
+            <p className="break-words font-heading text-lg font-semibold">{displayName}</p>
+            {headerLine ? (
+              <p className="break-words text-sm text-muted-foreground">
+                {headerLine.charAt(0).toUpperCase() + headerLine.slice(1)}
+              </p>
+            ) : null}
+          </div>
+        ) : undefined
+      }
+      error={error}
+      isSubmitting={collectMutation.isPending}
+      isLoading={Boolean(effectiveId) && account.isPending}
+      isDirty={dirty}
+      submitLabel={submitLabel}
+      submitDisabled={
+        !canWrite || !data || inlineOpen || conceptMutation.isPending || (noMethods && !creditOnly)
+      }
+      onClose={() => {
+        if (!busy) onClose()
+      }}
+      onSubmit={(event) => {
+        event.preventDefault()
+        submitCollect()
+      }}
+    >
+      <div className="flex flex-col gap-6">
+        {patientId === null ? (
+          <Field>
+            <FieldLabel htmlFor={`${uid}-paciente`}>Paciente</FieldLabel>
+            <Input
+              id={`${uid}-paciente`}
+              autoComplete="off"
+              placeholder="Nombre o documento"
+              value={chosen ? chosen.name : search}
+              onChange={(event) => {
+                setSearch(event.target.value)
+                if (chosen) {
+                  setChosen(null)
+                  resetDraft()
+                }
+              }}
+              onKeyDown={onEnter(() => undefined)}
+            />
+            {!chosen && searchText.length >= 2 ? (
+              searchQuery.isPending ? (
+                <div className="flex flex-col gap-2" aria-busy="true">
+                  <Skeleton className="h-9 w-full" />
+                  <Skeleton className="h-9 w-full" />
+                </div>
+              ) : searchQuery.isError ? (
+                <p role="alert" className="text-sm text-destructive">
+                  {financeErrorMessage(searchQuery.error)}{" "}
+                  <Button
+                    type="button"
+                    variant="link"
+                    size="sm"
+                    className="h-auto p-0"
+                    onClick={() => void searchQuery.refetch()}
+                  >
+                    Reintentar
+                  </Button>
+                </p>
+              ) : searchQuery.data.data.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  Nadie coincide con «{searchText}». Prueba con otro nombre o con su documento.
+                </p>
+              ) : (
+                <ul className="flex max-h-56 flex-col gap-1 overflow-y-auto">
+                  {searchQuery.data.data.map((row) => {
+                    const document = row.docNumber
+                      ? `${row.docType ? `${row.docType} ` : ""}${row.docNumber}`
+                      : null
+                    return (
+                      <li key={row.id}>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          className="h-auto min-h-10 w-full justify-between gap-3 whitespace-normal py-2 text-left"
+                          onClick={() => {
+                            resetDraft()
+                            setChosen({
+                              id: row.id,
+                              name: row.displayName,
+                              document,
+                              sex: row.sex ?? null,
+                            })
+                            setDirty(true)
+                          }}
+                        >
+                          <span className="min-w-0 break-words">{row.displayName}</span>
+                          {document ? (
+                            <span className="shrink-0 text-xs text-muted-foreground">{document}</span>
+                          ) : null}
+                        </Button>
+                      </li>
+                    )
+                  })}
+                </ul>
+              )
+            ) : null}
+          </Field>
+        ) : null}
+
+        {!effectiveId ? (
+          <EmptyState
+            title="Elige a quién le cobras"
+            description="Escribe su nombre o su documento para ver lo que tiene pendiente."
+          />
+        ) : account.isError ? (
+          <ErrorState
+            title="No se pudo abrir la cuenta"
+            message={financeErrorMessage(account.error)}
+            onRetry={() => void account.refetch()}
+          />
+        ) : data ? (
+          <>
+            <fieldset className="flex min-w-0 flex-col gap-3">
+              <legend className="mb-2 text-sm font-semibold">Qué paga</legend>
+              {advanceMode ? (
+                <p className="rounded-xl bg-muted/60 px-3 py-2 text-sm">
+                  Adelanto: no paga un concepto. Queda como saldo a favor y se usa solo en el
+                  próximo cobro.
+                </p>
+              ) : pending.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No tiene nada pendiente.</p>
+              ) : (
+                <ul className="flex flex-col divide-y rounded-xl border">
+                  {pending.map((item) => {
+                    const checked = selected.includes(item.chargeId)
+                    // Con pagos aplicados el concepto ya no se corrige: se cobra lo que falta.
+                    const editable = canWrite && item.paidCents === 0
+                    const editing = editor?.chargeId === item.chargeId
+                    const promotion = editable ? promotionFor(item) : null
+                    const rowError =
+                      !editing && inlineError?.at === item.chargeId ? inlineError.message : null
+                    return (
+                      <li key={item.chargeId} className="flex flex-col gap-2 px-3 py-2.5">
+                        <div className="flex items-start gap-2">
+                          <label className="flex min-w-0 flex-1 cursor-pointer items-start gap-3 text-sm">
+                            <Checkbox
+                              className="mt-0.5"
+                              checked={checked}
+                              disabled={busy}
+                              onCheckedChange={() => toggleConcept(item.chargeId)}
+                            />
+                            <span className="min-w-0 flex-1">
+                              <span className="block break-words font-medium">
+                                {item.description}
+                                {item.visitNumber && item.visitsPlanned
+                                  ? `, visita ${item.visitNumber} de ${item.visitsPlanned}`
+                                  : ""}
+                              </span>
+                              {item.paidCents > 0 ? (
+                                <span className="block text-xs text-muted-foreground">
+                                  Costó {formatAmountPlain(item.totalCents, currency, locale)} · pagó{" "}
+                                  {formatAmountPlain(item.paidCents, currency, locale)}
+                                </span>
+                              ) : null}
+                              {!editable && item.promotionName ? (
+                                <span className="block text-xs text-muted-foreground">
+                                  Promoción: {item.promotionName}
+                                </span>
+                              ) : null}
+                            </span>
+                            <span className="shrink-0 font-semibold tabular-nums">
+                              {formatAmountPlain(item.saldoCents, currency, locale)}
+                            </span>
+                          </label>
+                          {editable ? (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon-sm"
+                              className="-my-1 -mr-1 shrink-0"
+                              aria-label={`Cambiar ${item.description}`}
+                              aria-expanded={editing}
+                              aria-controls={editing ? `${uid}-editor-${item.chargeId}` : undefined}
+                              disabled={busy}
+                              onClick={() => {
+                                setInlineError(null)
+                                setAdding(null)
+                                setEditor(
+                                  editing
+                                    ? null
+                                    : {
+                                        kind: "amount",
+                                        chargeId: item.chargeId,
+                                        amountText: formatMoneyInput(item.totalCents, currency, locale),
+                                        reason: "",
+                                        confirmRemove: false,
+                                      },
+                                )
+                              }}
+                            >
+                              <MoreHorizontal aria-hidden />
+                            </Button>
+                          ) : null}
+                        </div>
+                        {promotion}
+                        {rowError ? (
+                          <p role="alert" className="text-sm text-destructive">
+                            {rowError}
+                          </p>
+                        ) : null}
+                        {editorFor(item)}
+                      </li>
+                    )
+                  })}
+                </ul>
+              )}
+              {promotions.isError ? (
+                <p role="alert" className="text-sm text-destructive">
+                  No se pudieron consultar las promociones vigentes.{" "}
+                  <Button
+                    type="button"
+                    variant="link"
+                    size="sm"
+                    className="h-auto p-0"
+                    onClick={() => void promotions.refetch()}
+                  >
+                    Reintentar
+                  </Button>
+                </p>
+              ) : null}
+              {autoCredit > 0 ? (
+                <p className="flex items-center justify-between gap-3 rounded-xl bg-muted/60 px-3 py-2 text-sm">
+                  <span>Se usa su saldo a favor</span>
+                  <span className="font-medium tabular-nums">
+                    − {formatAmountPlain(autoCredit, currency, locale)}
+                  </span>
+                </p>
+              ) : null}
+              {otherCurrencyCount > 0 ? (
+                <p className="text-xs text-muted-foreground">
+                  {otherCurrencyCount === 1
+                    ? "Tiene 1 concepto en otra moneda, que no entra en este cobro."
+                    : `Tiene ${otherCurrencyCount} conceptos en otra moneda, que no entran en este cobro.`}
+                </p>
+              ) : null}
+              {adding ? (
+                <div className="flex flex-col gap-3 rounded-xl border bg-muted/40 p-3">
+                  <Field>
+                    <FieldLabel htmlFor={`${uid}-otro-concepto`}>Concepto</FieldLabel>
+                    <Input
+                      id={`${uid}-otro-concepto`}
+                      autoFocus
+                      maxLength={MAX_REASON}
+                      value={adding.description}
+                      onChange={(event) => setAdding({ ...adding, description: event.target.value })}
+                      onKeyDown={onEnter(addConcept)}
+                    />
+                  </Field>
+                  <Field>
+                    <FieldLabel htmlFor={`${uid}-otro-importe`}>Importe</FieldLabel>
+                    <MoneyInput
+                      id={`${uid}-otro-importe`}
+                      currency={currency}
+                      locale={locale}
+                      value={adding.amountText}
+                      onChange={(value) => setAdding({ ...adding, amountText: value })}
+                      onKeyDown={onEnter(addConcept)}
+                    />
+                  </Field>
+                  {inlineError?.at === "agregar" ? (
+                    <p role="alert" className="text-sm text-destructive">
+                      {inlineError.message}
+                    </p>
+                  ) : null}
+                  <div className="flex flex-wrap items-center gap-2">
+                    <SubmitButton
+                      size="sm"
+                      pending={conceptBusy("agregar")}
+                      disabled={conceptMutation.isPending}
+                      onClick={addConcept}
+                    >
+                      Agregar
+                    </SubmitButton>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      disabled={conceptMutation.isPending}
+                      onClick={closeInline}
+                    >
+                      Cancelar
+                    </Button>
+                  </div>
+                </div>
+              ) : canWrite ? (
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={busy}
+                    onClick={() => {
+                      setEditor(null)
+                      setInlineError(null)
+                      setAdding({ description: "", amountText: "" })
+                    }}
+                  >
+                    <Plus aria-hidden />
+                    Agregar otro concepto
+                  </Button>
+                  {advanceMode ? (
+                    pending.length > 0 ? (
+                      <Button
                         type="button"
-                        className="w-full px-3 py-2 text-left text-sm hover:bg-muted"
+                        variant="outline"
+                        size="sm"
+                        disabled={busy}
                         onClick={() => {
-                          setChosenId(row.id)
-                          setChosenName(row.displayName)
+                          setAdvanceMode(false)
+                          setAmountTouched(false)
                           setDirty(true)
                         }}
                       >
-                        {row.displayName}
-                      </button>
-                    </li>
-                  )) ?? null}
-                  {searchQuery.data?.data.length === 0 && !searchQuery.isPending ? (
-                    <li className="px-3 py-2 text-sm text-muted-foreground">Sin resultados.</li>
-                  ) : null}
-                </ul>
-              ) : null}
-            </Field>
-          ) : null}
-
-          {!effectiveId ? (
-            <EmptyState
-              title="Elige al paciente"
-              description="Busca por nombre para ver lo pendiente y cobrar en un paso."
-            />
-          ) : account.isError ? (
-            <div className="flex flex-col gap-2">
-              <p role="alert" className="text-sm text-destructive">
-                {collectErrorMessage(account.error)}
-              </p>
-              <Button type="button" variant="outline" onClick={() => void account.refetch()}>
-                Reintentar
-              </Button>
-            </div>
-          ) : data ? (
-            <>
-              <section className="flex flex-col gap-2">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <h3 className="text-sm font-semibold">Qué paga</h3>
-                  {canWrite ? (
+                        Cobrar lo pendiente
+                      </Button>
+                    ) : null
+                  ) : (
                     <Button
                       type="button"
                       variant="outline"
                       size="sm"
+                      disabled={busy}
                       onClick={() => {
-                        setNewDescription("")
-                        setNewAmount("")
-                        setError(null)
-                        setAdding(true)
+                        closeInline()
+                        setAdvanceMode(true)
+                        setAmountText("")
+                        setAmountTouched(false)
+                        setSplit(null)
+                        setDirty(true)
                       }}
                     >
-                      Agregar otro concepto
+                      Cobrar un adelanto
                     </Button>
-                  ) : null}
+                  )}
                 </div>
-                {pending.length === 0 && !advanceMode ? (
-                  <p className="text-sm text-muted-foreground">
-                    Sin conceptos pendientes en {currency}. Puedes registrar un adelanto.
-                  </p>
-                ) : (
-                  <ul className="flex flex-col divide-y rounded-md border">
-                    {pending.map((item) => {
-                      const checked = selected.includes(item.chargeId)
-                      const serviceId = serviceOf(item)
-                      return (
-                        <li key={item.chargeId} className="flex flex-col gap-1 px-3 py-2">
-                          <label className="flex cursor-pointer items-start gap-2">
-                            <input
-                              type="checkbox"
-                              className="mt-1"
-                              checked={checked}
-                              disabled={advanceMode}
-                              onChange={() => {
-                                setSelected((current) =>
-                                  checked
-                                    ? current.filter((id) => id !== item.chargeId)
-                                    : [...current, item.chargeId],
-                                )
-                                setDirty(true)
-                              }}
-                            />
-                            <span className="flex-1 text-sm">
-                              <span className="font-medium">{item.description}</span>
-                              {item.promotionName ? (
-                                <Badge className="ml-2">{item.promotionName}</Badge>
-                              ) : null}
-                              <span className="block text-xs text-muted-foreground">
-                                Costó {formatMoney(item.totalCents, item.currency, locale)} · pagó{" "}
-                                {formatMoney(item.paidCents, item.currency, locale)}
-                              </span>
-                            </span>
-                            <span className="text-sm font-semibold tabular-nums">
-                              {formatMoney(item.saldoCents, item.currency, locale)}
-                            </span>
-                          </label>
-                          {canWrite && !advanceMode ? (
-                            <span className="flex flex-wrap gap-2 pl-6">
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => {
-                                  setEditing({
-                                    charge: item,
-                                    amountText: formatMoneyInput(item.totalCents, currency, locale),
-                                    description: item.description,
-                                  })
-                                  setReason("")
-                                  setError(null)
-                                }}
-                              >
-                                Nuevo importe
-                              </Button>
-                              {serviceId && !item.promotionName ? (
-                                <Button
-                                  type="button"
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => {
-                                    setPromo({ charge: item, serviceId })
-                                    setPromotionId("")
-                                    setPromoFinal("")
-                                    setReason("")
-                                    setError(null)
-                                  }}
-                                >
-                                  Aplicar promoción
-                                </Button>
-                              ) : null}
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => {
-                                  setRemoving(item)
-                                  setReason("")
-                                  setError(null)
-                                }}
-                              >
-                                Quitar concepto
-                              </Button>
-                            </span>
-                          ) : null}
-                        </li>
-                      )
-                    })}
-                  </ul>
-                )}
-                {otherCurrencyCount > 0 ? (
-                  <p className="text-xs text-muted-foreground">
-                    {otherCurrencyCount} {otherCurrencyCount === 1 ? "concepto en otra moneda no entra" : "conceptos en otra moneda no entran"} a este cobro.
-                  </p>
-                ) : null}
-                {pending.length > 0 ? (
-                  <label className="flex cursor-pointer items-center gap-2 text-sm">
-                    <input
-                      type="checkbox"
-                      checked={advanceMode}
-                      onChange={() => {
-                        setAdvanceMode((value) => !value)
-                        setDirty(true)
-                      }}
-                    />
-                    Es un adelanto (sin concepto, queda a favor)
-                  </label>
-                ) : null}
-                {advanceMode ? (
-                  <Field>
-                    <FieldLabel htmlFor={`${uid}-advance`}>Importe del adelanto</FieldLabel>
-                    <Input
-                      id={`${uid}-advance`}
-                      inputMode="decimal"
-                      placeholder="0.00"
-                      value={advanceText}
-                      onChange={(event) => {
-                        setAdvanceText(event.target.value)
-                        setDirty(true)
-                      }}
-                    />
-                  </Field>
-                ) : null}
-                {favor > 0 && !advanceMode ? (
-                  <p className="text-sm text-muted-foreground">
-                    Tiene {formatMoney(favor, currency, locale)} a favor: se descuenta solo
-                    al cobrar
-                    {autoCredit > 0 ? ` (−${formatMoney(autoCredit, currency, locale)})` : ""}.
-                  </p>
-                ) : null}
-              </section>
+              ) : null}
+            </fieldset>
 
-              <section className="flex flex-col gap-2">
-                <h3 className="text-sm font-semibold">Con qué medio</h3>
-                {creditOnly ? (
-                  <p className="rounded-md bg-muted p-3 text-sm">
-                    El saldo a favor cubre {formatMoney(selectedTotal, currency, locale)}: al
-                    confirmar se aplica sin medios de pago.
-                  </p>
-                ) : (
-                  <>
-                    {methods.isError ? (
-                      <div className="flex flex-col gap-2">
-                        <p role="alert" className="text-sm text-destructive">
-                          {collectErrorMessage(methods.error)}
-                        </p>
-                        <Button type="button" variant="outline" onClick={() => void methods.refetch()}>
-                          Reintentar
-                        </Button>
-                      </div>
-                    ) : (
-                      <ul className="flex flex-col gap-3">
-                        {medios.map((line, index) => {
-                          const method = methodById(line.paymentMethodId)
-                          const needsRef = method !== undefined && method.typeCode !== CASH_TYPE_CODE
+            {creditOnly ? (
+              <p className="rounded-xl bg-muted/60 px-3 py-2 text-sm">
+                Su saldo a favor cubre todo lo marcado: no hace falta otro medio de pago.
+              </p>
+            ) : methods.isPending ? (
+              <div className="flex flex-col gap-2" aria-busy="true">
+                <Skeleton className="h-9 w-full" />
+                <Skeleton className="h-10 w-2/3" />
+              </div>
+            ) : methods.isError ? (
+              <ErrorState
+                title="No se pudieron consultar los medios de pago"
+                message={financeErrorMessage(methods.error)}
+                onRetry={() => void methods.refetch()}
+              />
+            ) : noMethods ? (
+              <EmptyState
+                title="No hay medios de pago activos"
+                description={
+                  canConfigure
+                    ? "Hace falta al menos uno para cobrar."
+                    : "Hace falta al menos uno para cobrar. Pídeselo a quien administra la clínica."
+                }
+                actionLabel={canConfigure ? "Ir a Medios de pago" : undefined}
+                onAction={
+                  canConfigure
+                    ? () => {
+                        onClose()
+                        void navigate({ to: "/settings/payment-methods" })
+                      }
+                    : undefined
+                }
+              />
+            ) : (
+              <>
+                <Field>
+                  <FieldLabel htmlFor={`${uid}-importe`}>Importe</FieldLabel>
+                  <MoneyInput
+                    id={`${uid}-importe`}
+                    currency={currency}
+                    locale={locale}
+                    value={amountText}
+                    onChange={changeAmount}
+                    aria-describedby={`${uid}-importe-ayuda`}
+                  />
+                  <FieldDescription id={`${uid}-importe-ayuda`}>
+                    {advanceMode
+                      ? "Todo queda como saldo a favor."
+                      : "Si paga una parte, el resto queda por cobrar."}
+                  </FieldDescription>
+                </Field>
+
+                <div className="flex flex-col gap-3">
+                  <span id={`${uid}-medio`} className="text-sm font-medium">
+                    {split ? "Medios de pago" : "Medio de pago"}
+                  </span>
+                  {split ? (
+                    <>
+                      <ul className="flex flex-col gap-3" aria-labelledby={`${uid}-medio`}>
+                        {split.map((line, index) => {
+                          const lineMethod = methodById(line.paymentMethodId)
+                          const lineName = lineMethod?.name ?? `medio ${index + 1}`
                           return (
-                            <li key={line.key} className="flex flex-col gap-2 rounded-md border p-3">
-                              <div className="flex items-center justify-between gap-2">
-                                <span className="text-sm font-medium">Medio {index + 1}</span>
-                                {medios.length > 1 ? (
-                                  <Button
-                                    type="button"
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={() => {
-                                      setMedios((current) =>
-                                        current.filter((item) => item.key !== line.key),
-                                      )
-                                      setDirty(true)
-                                    }}
-                                  >
-                                    Quitar
-                                  </Button>
-                                ) : null}
-                              </div>
-                              <Field>
-                                <FieldLabel htmlFor={`${uid}-medio-${line.key}`}>Medio de pago</FieldLabel>
+                            <li key={line.key} className="flex flex-col gap-2 rounded-xl border p-3">
+                              <div className="flex items-center gap-2">
                                 <ChoiceSelect
-                                  id={`${uid}-medio-${line.key}`}
-                                  className="w-full"
+                                  aria-label={`Medio de pago ${index + 1}`}
+                                  className="min-w-0 flex-1"
+                                  placeholder="Elige el medio"
                                   value={line.paymentMethodId}
-                                  onChange={(event) => {
-                                    setMedios((current) =>
-                                      current.map((item) =>
-                                        item.key === line.key
-                                          ? { ...item, paymentMethodId: event.target.value }
-                                          : item,
-                                      ),
-                                    )
-                                    setDirty(true)
-                                  }}
+                                  onChange={(event) =>
+                                    patchSplitLine(line.key, { paymentMethodId: event.target.value })
+                                  }
                                 >
-                                  <option value="">Seleccionar medio</option>
                                   {methodList.map((item) => (
                                     <option key={item.id} value={item.id}>
                                       {item.name}
                                     </option>
                                   ))}
                                 </ChoiceSelect>
-                              </Field>
-                              <Field>
-                                <FieldLabel htmlFor={`${uid}-importe-${line.key}`}>Importe</FieldLabel>
-                                <Input
-                                  id={`${uid}-importe-${line.key}`}
-                                  inputMode="decimal"
-                                  placeholder="0.00"
-                                  value={line.amountText}
-                                  onChange={(event) => {
-                                    setMedios((current) =>
-                                      current.map((item) =>
-                                        item.key === line.key
-                                          ? { ...item, amountText: event.target.value }
-                                          : item,
-                                      ),
-                                    )
-                                    setMediosTouched(true)
-                                    setDirty(true)
-                                  }}
-                                />
-                              </Field>
-                              {needsRef ? (
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon-sm"
+                                  className="shrink-0"
+                                  aria-label={`Quitar ${lineName}`}
+                                  onClick={() => removeSplitLine(line.key)}
+                                >
+                                  <X aria-hidden />
+                                </Button>
+                              </div>
+                              <MoneyInput
+                                aria-label={`Importe por ${lineName}`}
+                                currency={currency}
+                                locale={locale}
+                                value={line.amountText}
+                                onChange={(value) =>
+                                  patchSplitLine(line.key, { amountText: value, auto: false })
+                                }
+                              />
+                              {lineMethod && lineMethod.typeCode !== CASH_TYPE_CODE ? (
                                 <Field>
-                                  <FieldLabel htmlFor={`${uid}-ref-${line.key}`}>
-                                    Número de operación
+                                  <FieldLabel htmlFor={`${uid}-operacion-${line.key}`}>
+                                    N.º de operación (opcional)
                                   </FieldLabel>
                                   <Input
-                                    id={`${uid}-ref-${line.key}`}
+                                    id={`${uid}-operacion-${line.key}`}
+                                    autoComplete="off"
+                                    maxLength={MAX_REFERENCE}
                                     value={line.reference}
-                                    onChange={(event) => {
-                                      setMedios((current) =>
-                                        current.map((item) =>
-                                          item.key === line.key
-                                            ? { ...item, reference: event.target.value }
-                                            : item,
-                                        ),
-                                      )
-                                      setDirty(true)
-                                    }}
+                                    onChange={(event) =>
+                                      patchSplitLine(line.key, { reference: event.target.value })
+                                    }
                                   />
                                 </Field>
                               ) : null}
@@ -799,340 +1506,181 @@ export function CollectDrawer({
                           )
                         })}
                       </ul>
-                    )}
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() => {
-                        setMedios((current) => [
-                          ...current,
-                          {
-                            key: keySeq.current++,
-                            paymentMethodId: "",
-                            amountText: "",
-                            reference: "",
-                          },
-                        ])
-                        setMediosTouched(true)
-                        setDirty(true)
-                      }}
-                    >
-                      Añadir otro medio
-                    </Button>
-                    <p className="text-sm text-muted-foreground">
-                      Medios suman {formatMoney(mediosTotal, currency, locale)} · queda por cobrar{" "}
-                      {formatMoney(Math.max(0, remainder - mediosTotal), currency, locale)}
-                    </p>
-                    {hasCash ? (
-                      <div className="flex flex-col gap-2 rounded-md border p-3">
+                      <p
+                        className={cn(
+                          "text-sm tabular-nums",
+                          amountCents !== null && splitTotal !== amountCents
+                            ? "text-destructive"
+                            : "text-muted-foreground",
+                        )}
+                        role="status"
+                      >
+                        Suman {formatMoney(splitTotal, currency, locale)}
+                        {amountCents !== null && splitTotal < amountCents
+                          ? ` · faltan ${formatMoney(amountCents - splitTotal, currency, locale)}`
+                          : amountCents !== null && splitTotal > amountCents
+                            ? ` · sobran ${formatMoney(splitTotal - amountCents, currency, locale)}`
+                            : ""}
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <PaymentMethodButtons
+                        labelId={`${uid}-medio`}
+                        methods={methodList}
+                        value={method?.id ?? ""}
+                        onChange={(id) => {
+                          setMethodId(id)
+                          setDirty(true)
+                        }}
+                      />
+                      {method && !hasCash ? (
                         <Field>
-                          <FieldLabel htmlFor={`${uid}-recibido`}>Efectivo recibido</FieldLabel>
+                          <FieldLabel htmlFor={`${uid}-operacion`}>
+                            N.º de operación (opcional)
+                          </FieldLabel>
                           <Input
-                            id={`${uid}-recibido`}
-                            inputMode="decimal"
-                            placeholder="0.00"
-                            value={cashReceived}
+                            id={`${uid}-operacion`}
+                            autoComplete="off"
+                            maxLength={MAX_REFERENCE}
+                            value={reference}
                             onChange={(event) => {
-                              setCashReceived(event.target.value)
+                              setReference(event.target.value)
                               setDirty(true)
                             }}
                           />
                         </Field>
-                        <p className="text-sm">
-                          Vuelto:{" "}
-                          {change === null ? (
-                            <span className="text-muted-foreground">—</span>
-                          ) : (
-                            <strong className="tabular-nums">
-                              {formatMoney(change, currency, locale)}
-                            </strong>
+                      ) : null}
+                    </>
+                  )}
+                  {hasCash ? (
+                    <div className="grid grid-cols-2 items-end gap-3">
+                      <Field>
+                        <FieldLabel htmlFor={`${uid}-recibes`}>Recibes en efectivo</FieldLabel>
+                        <MoneyInput
+                          id={`${uid}-recibes`}
+                          currency={currency}
+                          locale={locale}
+                          value={cashReceived}
+                          invalid={change !== null && change < 0}
+                          onChange={(value) => {
+                            setCashReceived(value)
+                            setDirty(true)
+                          }}
+                        />
+                      </Field>
+                      <div className="flex min-h-9 flex-col justify-center" role="status">
+                        <span className="text-sm text-muted-foreground">
+                          {change !== null && change < 0 ? "Falta" : "Vuelto"}
+                        </span>
+                        <span
+                          className={cn(
+                            "text-base font-semibold tabular-nums",
+                            change !== null && change < 0 && "text-destructive",
                           )}
-                        </p>
+                        >
+                          {change === null ? "—" : formatMoney(Math.abs(change), currency, locale)}
+                        </span>
                       </div>
-                    ) : null}
-                  </>
-                )}
-              </section>
+                    </div>
+                  ) : null}
+                  {methodList.length > 1 ? (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="self-start"
+                      onClick={addSplitLine}
+                    >
+                      <Plus aria-hidden />
+                      Añadir otro medio
+                    </Button>
+                  ) : null}
+                </div>
+              </>
+            )}
 
-              <Field>
-                <FieldLabel htmlFor={`${uid}-payer`}>Responsable que paga (opcional)</FieldLabel>
-                <ChoiceSelect
-                  id={`${uid}-payer`}
-                  className="w-full"
-                  value={payerContactId}
-                  onChange={(event) => {
-                    setPayerContactId(event.target.value)
+            <div className="flex flex-col gap-2">
+              <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+                <span className="min-w-0 break-words">
+                  Paga{" "}
+                  <strong className="font-semibold">
+                    {payer ? payer.name : displayName || "el paciente"}
+                  </strong>
+                  {payer ? `, ${payer.role}` : displayName ? `, ${patientNoun(displaySex)}` : ""}
+                </span>
+                {payerOptions.length > 0 ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    aria-expanded={payerOpen}
+                    aria-controls={payerOpen ? `${uid}-quien-paga` : undefined}
+                    onClick={() => setPayerOpen((value) => !value)}
+                  >
+                    Cambiar
+                  </Button>
+                ) : null}
+              </div>
+              {payerOpen ? (
+                <RadioGroup
+                  id={`${uid}-quien-paga`}
+                  aria-label="Quién paga"
+                  value={payerContactId || "paciente"}
+                  onValueChange={(next) => {
+                    setPayerContactId(next === "paciente" ? "" : String(next))
+                    setPayerOpen(false)
                     setDirty(true)
                   }}
                 >
-                  <option value="">Sin especificar</option>
-                  {payerOptions.map((option) => (
-                    <option key={option.contactId} value={option.contactId}>
-                      {option.label}
-                    </option>
+                  {[
+                    {
+                      value: "paciente",
+                      label: `${displayName || "El paciente"}, ${patientNoun(displaySex)}`,
+                    },
+                    ...payerOptions.map((option) => ({
+                      value: option.contactId,
+                      label: `${option.name}, ${option.role}`,
+                    })),
+                  ].map((option) => (
+                    <FieldLabel
+                      key={option.value}
+                      className={cn(
+                        "flex min-h-11 w-full cursor-pointer items-center gap-2.5 rounded-xl border px-3 text-sm font-normal",
+                        (payerContactId || "paciente") === option.value &&
+                          "border-primary bg-primary-soft",
+                      )}
+                    >
+                      <RadioGroupItem value={option.value} />
+                      <span className="min-w-0 break-words">{option.label}</span>
+                    </FieldLabel>
                   ))}
-                </ChoiceSelect>
-                {responsibilities.isError ? (
-                  <p role="alert" className="text-xs text-destructive">
-                    No se pudieron cargar los responsables.{" "}
-                    <button type="button" className="underline" onClick={() => void responsibilities.refetch()}>
-                      Reintentar
-                    </button>
-                  </p>
-                ) : null}
-              </Field>
-              <p className="text-xs text-muted-foreground">
-                Entra a la caja de la sede elegida. Si algo falla a mitad del cobro, reintenta
-                con el mismo código: no se duplica.
-              </p>
-            </>
-          ) : null}
-        </div>
-      </FormDrawer>
-
-      <FormDrawer
-        open={adding}
-        title="Agregar otro concepto"
-        description="Cargo manual de caja, fuera del tarifario. Queda pendiente y seleccionado para este cobro."
-        error={adding ? error : null}
-        isSubmitting={createMutation.isPending}
-        submitLabel="Agregar concepto"
-        onClose={() => {
-          if (!createMutation.isPending) {
-            setAdding(false)
-            setError(null)
-          }
-        }}
-        onSubmit={(event) => {
-          event.preventDefault()
-          if (!newDescription.trim()) {
-            setError("Describe el concepto.")
-            return
-          }
-          if (parseOrNull(newAmount, currency, locale) === null) {
-            setError("Indica un importe positivo válido.")
-            return
-          }
-          createMutation.mutate()
-        }}
-      >
-        <div className="flex flex-col gap-4">
-          <Field>
-            <FieldLabel htmlFor={`${uid}-new-desc`}>Concepto</FieldLabel>
-            <Input
-              id={`${uid}-new-desc`}
-              maxLength={MAX_REASON}
-              value={newDescription}
-              onChange={(event) => setNewDescription(event.target.value)}
-            />
-          </Field>
-          <Field>
-            <FieldLabel htmlFor={`${uid}-new-amount`}>Importe</FieldLabel>
-            <Input
-              id={`${uid}-new-amount`}
-              inputMode="decimal"
-              placeholder="0.00"
-              value={newAmount}
-              onChange={(event) => setNewAmount(event.target.value)}
-            />
-          </Field>
-        </div>
-      </FormDrawer>
-
-      <FormDrawer
-        open={editing !== null}
-        title={`Nuevo importe · ${editing?.charge.description ?? ""}`}
-        description="Queda registrado quién lo cambió, cuándo y por qué. Solo sin aplicaciones activas."
-        error={editing ? error : null}
-        isSubmitting={editMutation.isPending}
-        submitLabel="Guardar cambio"
-        onClose={() => {
-          if (!editMutation.isPending) {
-            setEditing(null)
-            setError(null)
-          }
-        }}
-        onSubmit={(event) => {
-          event.preventDefault()
-          if (!editing) return
-          const cents = parseOrNull(editing.amountText, currency, locale)
-          if (cents === null || cents <= 0) {
-            setError("Indica un importe positivo válido.")
-            return
-          }
-          const sameAmount = cents === editing.charge.totalCents
-          const sameDescription =
-            editing.description.trim() === "" || editing.description.trim() === editing.charge.description
-          if (sameAmount && sameDescription) {
-            setError("No hay cambios que guardar.")
-            return
-          }
-          if (!reason.trim()) {
-            setError("Indica el motivo del cambio.")
-            return
-          }
-          editMutation.mutate()
-        }}
-      >
-        <div className="flex flex-col gap-4">
-          <Field>
-            <FieldLabel htmlFor={`${uid}-edit-amount`}>Nuevo importe</FieldLabel>
-            <Input
-              id={`${uid}-edit-amount`}
-              inputMode="decimal"
-              value={editing?.amountText ?? ""}
-              onChange={(event) =>
-                editing &&
-                setEditing({ ...editing, amountText: event.target.value })
-              }
-            />
-          </Field>
-          <Field>
-            <FieldLabel htmlFor={`${uid}-edit-desc`}>Concepto</FieldLabel>
-            <Input
-              id={`${uid}-edit-desc`}
-              maxLength={MAX_REASON}
-              value={editing?.description ?? ""}
-              onChange={(event) =>
-                editing && setEditing({ ...editing, description: event.target.value })
-              }
-            />
-          </Field>
-          <Field>
-            <FieldLabel htmlFor={`${uid}-edit-reason`}>Motivo</FieldLabel>
-            <Textarea
-              id={`${uid}-edit-reason`}
-              maxLength={MAX_REASON}
-              value={reason}
-              onChange={(event) => setReason(event.target.value)}
-            />
-          </Field>
-        </div>
-      </FormDrawer>
-
-      <FormDrawer
-        open={promo !== null}
-        title={`Aplicar promoción · ${promo?.charge.description ?? ""}`}
-        description="Solo promociones vigentes del servicio. El precio final lo resuelve el servidor."
-        error={promo ? error : null}
-        isSubmitting={promoMutation.isPending}
-        isLoading={promoOptions.isPending}
-        submitLabel="Aplicar promoción"
-        onClose={() => {
-          if (!promoMutation.isPending) {
-            setPromo(null)
-            setError(null)
-          }
-        }}
-        onSubmit={(event) => {
-          event.preventDefault()
-          if (!promo || !promotionId) {
-            setError("Elige la promoción a aplicar.")
-            return
-          }
-          if (promoNeedsFinal && parseOrNull(promoFinal, currency, locale) === null) {
-            setError("Esta promoción pide el precio final: indícalo.")
-            return
-          }
-          if (!reason.trim()) {
-            setError("Indica el motivo.")
-            return
-          }
-          promoMutation.mutate()
-        }}
-      >
-        <div className="flex flex-col gap-4">
-          {promoOptions.isError ? (
-            <div className="flex flex-col gap-2">
-              <p role="alert" className="text-sm text-destructive">
-                {collectErrorMessage(promoOptions.error)}
-              </p>
-              <Button type="button" variant="outline" onClick={() => void promoOptions.refetch()}>
-                Reintentar
-              </Button>
+                </RadioGroup>
+              ) : null}
+              {responsibilities.isError ? (
+                <p role="alert" className="text-sm text-destructive">
+                  No se pudieron consultar sus responsables.{" "}
+                  <Button
+                    type="button"
+                    variant="link"
+                    size="sm"
+                    className="h-auto p-0"
+                    onClick={() => void responsibilities.refetch()}
+                  >
+                    Reintentar
+                  </Button>
+                </p>
+              ) : null}
             </div>
-          ) : (promoOptions.data ?? []).length === 0 && !promoOptions.isPending ? (
-            <p className="text-sm text-muted-foreground">Sin promociones vigentes para este servicio.</p>
-          ) : (
-            <Field>
-              <FieldLabel htmlFor={`${uid}-promo`}>Promoción vigente</FieldLabel>
-              <ChoiceSelect
-                id={`${uid}-promo`}
-                className="w-full"
-                value={promotionId}
-                onChange={(event) => {
-                  setPromotionId(event.target.value)
-                  setPromoFinal("")
-                }}
-              >
-                <option value="">Seleccionar promoción</option>
-                {(promoOptions.data ?? []).map((option) => (
-                  <option key={option.id} value={option.id}>
-                    {option.name}
-                    {option.conditions ? ` · ${option.conditions}` : ""}
-                  </option>
-                ))}
-              </ChoiceSelect>
-            </Field>
-          )}
-          {promoNeedsFinal ? (
-            <Field>
-              <FieldLabel htmlFor={`${uid}-promo-final`}>Precio final acordado</FieldLabel>
-              <Input
-                id={`${uid}-promo-final`}
-                inputMode="decimal"
-                placeholder="0.00"
-                value={promoFinal}
-                onChange={(event) => setPromoFinal(event.target.value)}
-              />
-            </Field>
-          ) : null}
-          <Field>
-            <FieldLabel htmlFor={`${uid}-promo-reason`}>Motivo</FieldLabel>
-            <Textarea
-              id={`${uid}-promo-reason`}
-              maxLength={MAX_REASON}
-              value={reason}
-              onChange={(event) => setReason(event.target.value)}
-            />
-          </Field>
-        </div>
-      </FormDrawer>
 
-      <FormDrawer
-        dock={false}
-        open={removing !== null}
-        title="Quitar concepto"
-        description="El concepto se anula con motivo y queda en el historial; no se borra."
-        error={removing ? error : null}
-        isSubmitting={removeMutation.isPending}
-        submitLabel="Quitar concepto"
-        onClose={() => {
-          if (!removeMutation.isPending) {
-            setRemoving(null)
-            setError(null)
-          }
-        }}
-        onSubmit={(event) => {
-          event.preventDefault()
-          if (!reason.trim()) {
-            setError("Indica el motivo.")
-            return
-          }
-          removeMutation.mutate()
-        }}
-      >
-        <Field>
-          <FieldLabel htmlFor={`${uid}-remove-reason`}>Motivo</FieldLabel>
-          <Textarea
-            id={`${uid}-remove-reason`}
-            maxLength={MAX_REASON}
-            value={reason}
-            onChange={(event) => setReason(event.target.value)}
-          />
-        </Field>
-      </FormDrawer>
-    </>
+            <p className="text-sm text-muted-foreground">
+              {creditOnly
+                ? "No entra dinero a la caja: solo se usa su saldo a favor."
+                : `${sedeName ? `Entra a la caja de ${sedeName}.` : ""}${split ? " Sale un solo ticket." : ""}`.trim()}
+            </p>
+          </>
+        ) : null}
+      </div>
+    </FormDrawer>
   )
 }

@@ -14,6 +14,7 @@ import { EmptyState, FormDrawer } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
 import { useId, useState } from "react"
+import { useActiveBranch } from "../../lib/active-branch"
 import { apiFetch } from "../../lib/api"
 import { budgetStatusLabel, planDecisionLabel } from "../../lib/budgets"
 import {
@@ -109,6 +110,7 @@ export function RecorridoClinicoTab({
   const canWrite = usePermission("clinical.write")
   const canRead = usePermission("clinical.read")
   const queryClient = useQueryClient()
+  const sede = useActiveBranch()
   // Formato de la clínica para importes históricos (moneda congelada de cada registro).
   const profile = useOrgProfile()
   const orgLocale = profile.data?.locale
@@ -338,6 +340,8 @@ export function RecorridoClinicoTab({
               reason: item.title,
               teeth: item.toothNumber != null ? [item.toothNumber] : [],
               planItemIds: [item.id],
+              // La sede en la que se trabaja: lo que quede por cobrar llega a su caja.
+              ...(sede.branchId ? { branchId: sede.branchId } : {}),
             }),
           },
         )

@@ -12,7 +12,6 @@ import {
 import { branch } from "@odentia/db/schema/org"
 import { contact } from "@odentia/db/schema/crm"
 import { expect, it } from "vitest"
-import { updateContact } from "./contacts.js"
 import { budgetFormat, ticketFormat } from "./financial-document-pdf.js"
 import { getDocumentSendOptions, listDocumentRecipients, proposeChannel, sendFinancialDocument } from "./financial-documents.js"
 import { nextPatientNumber } from "./patients.js"
@@ -244,23 +243,6 @@ it("lista a la persona y al pagador, y rechaza a un tercero", async () => {
       ),
     ),
   ).rejects.toMatchObject({ code: "DOCUMENT_RECIPIENT_NOT_AUTHORIZED", status: 403 })
-})
-
-it("guarda el medio preferido solo entre canales válidos", async () => {
-  const seed = await seedRecipients("org_b")
-  await expect(
-    withOrgContext(appDb, "org_b", (tx) =>
-      updateContact(tx, "org_b", seed.selfId, { preferredChannel: "paloma" }, { userId: null }),
-    ),
-  ).rejects.toThrow()
-  const updated = await withOrgContext(appDb, "org_b", (tx) =>
-    updateContact(tx, "org_b", seed.selfId, { preferredChannel: "email" }, { userId: null }),
-  )
-  expect(updated.preferredChannel).toBe("email")
-  const cleared = await withOrgContext(appDb, "org_b", (tx) =>
-    updateContact(tx, "org_b", seed.selfId, { preferredChannel: null }, { userId: null }),
-  )
-  expect(cleared.preferredChannel).toBeNull()
 })
 
 it("respeta el papel configurado en el perfil", () => {

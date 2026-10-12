@@ -20,8 +20,8 @@ export async function insertOrg(db: Db, id: string, slug: string): Promise<void>
         on conflict do nothing`,
   )
   await db.execute(
-    sql`insert into "org_profile" ("organization_id", "legal_name")
-        values (${id}, ${"Clínica " + slug})
+    sql`insert into "org_profile" ("organization_id", "legal_name", "country_code", "currency", "timezone", "locale")
+        values (${id}, ${"Clínica " + slug}, 'PE', 'PEN', 'America/Lima', 'es-PE')
         on conflict do nothing`,
   )
 }

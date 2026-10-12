@@ -196,8 +196,8 @@ it("el resumen del agente excluye los presupuestos en borrador", async () => {
   await ownerDb.insert(patientContact).values({ organizationId: orgId, patientId: ficha!.id, contactId: who!.id, relationship: "self" })
   const [plan] = await ownerDb.insert(treatmentPlan).values({ organizationId: orgId, patientId: ficha!.id, title: "Plan general" }).returning({ id: treatmentPlan.id })
   await ownerDb.insert(treatmentBudget).values([
-    { organizationId: orgId, patientId: ficha!.id, planId: plan!.id, budgetNumber: 1, title: "Propuesta presentada", status: "presentado" },
-    { organizationId: orgId, patientId: ficha!.id, planId: plan!.id, budgetNumber: 2, title: "Borrador interno", status: "borrador" },
+    { organizationId: orgId, patientId: ficha!.id, planId: plan!.id, budgetNumber: 1, title: "Propuesta presentada", currency: "PEN", status: "presentado" },
+    { organizationId: orgId, patientId: ficha!.id, planId: plan!.id, budgetNumber: 2, title: "Borrador interno", currency: "PEN", status: "borrador" },
   ])
   const summary = await withOrgContext(appDb, orgId, tx => getAgentPatientSummary(tx, orgId, who!.id, ficha!.id))
   expect(summary.budgets.map(budget => budget.status)).toEqual(["presentado"])

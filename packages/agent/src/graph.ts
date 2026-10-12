@@ -6,6 +6,7 @@ import type { PostgresSaver } from "@langchain/langgraph-checkpoint-postgres"
 import { withOrgContext } from "@odentia/db"
 import {
   formatKnowledgeForPrompt,
+  formatOrgMoney,
   formatZoned,
   getAgentConfig,
   getAutonomyPolicy,
@@ -160,7 +161,7 @@ export function compileAgentGraph(
             ? `; próxima acción ${formatZoned(new Date(o.nextActionAt), zone)}`
             : ""
           const amount =
-            o.amountCents !== null ? `; valor ${(o.amountCents / 100).toFixed(2)} ${o.currency}` : ""
+            o.amountCents !== null ? `; valor ${formatOrgMoney(o.amountCents, o.currency, zone)}` : ""
           parts.push(`${o.title} (etapa ${o.stageName}${followup}${amount})`)
         }
         if (nextCursor) parts.push("hay más oportunidades: usa listar_oportunidades para verlas todas")

@@ -68,3 +68,20 @@ export function useOrgProfile() {
     staleTime: 5 * 60_000,
   })
 }
+
+/** Lo que el servidor propone para un país (moneda, formato, zona y papel). */
+export interface RegionDefaults {
+  /** `null`: no se conoce la moneda de ese país y se elige a mano. */
+  currency: string | null
+  locale: string
+  /** `null`: el país tiene varias zonas horarias. */
+  timezone: string | null
+  sheetSize: "A4" | "Letter"
+}
+
+export async function fetchRegionDefaults(countryCode: string, language?: string): Promise<RegionDefaults> {
+  const params = new URLSearchParams({ countryCode })
+  if (language) params.set("language", language)
+  const result = await apiFetch<{ data: RegionDefaults }>(`/api/org-profile/region-defaults?${params}`)
+  return result.data
+}

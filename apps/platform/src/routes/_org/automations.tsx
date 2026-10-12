@@ -18,6 +18,7 @@ import { type FormEvent, useEffect, useMemo, useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
 import { usePermission } from "../../lib/crm"
 import { usePageDraftGuard } from "../../lib/page-draft-guard"
+import { activeOrgLocale } from "../../lib/locale"
 
 export const Route = createFileRoute("/_org/automations")({
   component: AutomationsPage,
@@ -211,7 +212,7 @@ function AutomationsPage() {
         accessorKey: "scheduledFor",
         header: "Programado",
         cell: ({ row }) =>
-          new Date(row.original.scheduledFor).toLocaleString("es-PE", {
+          new Date(row.original.scheduledFor).toLocaleString(activeOrgLocale(), {
             day: "numeric",
             month: "short",
             hour: "2-digit",

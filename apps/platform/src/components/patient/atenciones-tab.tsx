@@ -8,6 +8,7 @@ import { useCallback, useMemo, useState } from "react"
 import { apiFetch } from "../../lib/api"
 import { useMemberName, usePermission } from "../../lib/crm"
 import { type Encounter, encounterStatusLabel } from "../../lib/patients"
+import { activeOrgLocale } from "../../lib/locale"
 
 /** Atención en la lista del paciente: lo necesario para reconocerla sin abrirla. */
 export interface EncounterListItem extends Encounter {
@@ -26,7 +27,7 @@ function formatDate(iso: string): string {
   const date = new Date(iso)
   return Number.isNaN(date.getTime())
     ? "—"
-    : date.toLocaleString("es-PE", {
+    : date.toLocaleString(activeOrgLocale(), {
         day: "2-digit",
         month: "2-digit",
         year: "numeric",

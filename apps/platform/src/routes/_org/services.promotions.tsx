@@ -1,680 +1,976 @@
-import { formatMoney, parseMoney } from "@odentia/clinical"
-import { Badge, Button, Field, FieldLabel, Input, Textarea } from "@odentia/ui"
+import { formatMoney, formatMoneyInput, parseMoney } from "@odentia/clinical"
 import {
+  Badge,
+  Button,
+  Combobox,
+  ComboboxContent,
+  ComboboxEmpty,
+  ComboboxInput,
+  ComboboxItem,
+  ComboboxList,
+  Field,
+  FieldError,
+  FieldLabel,
+  Input,
+  InputGroup,
+  InputGroupAddon,
+  InputGroupInput,
+  InputGroupText,
+  Skeleton,
+  Textarea,
+  toast,
+} from "@odentia/ui"
+import {
+  addDays,
   DataTable,
   DatePickerButton,
+  DetailDrawer,
+  DetailField,
+  DetailList,
   EmptyState,
   ErrorState,
   FormDrawer,
   LoadingState,
   PageHeader,
-  formatDateLong,
+  zonedDateOf,
+  zonedDayStart,
 } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { createFileRoute } from "@tanstack/react-router"
+import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-table"
-import { useMemo, useState } from "react"
+import { BadgePercent, Plus } from "lucide-react"
+import { type FormEvent, useId, useMemo, useRef, useState } from "react"
+import { RadioChips } from "../../components/ui/radio-chips"
 import { ApiError } from "../../lib/api"
 import { usePermission } from "../../lib/crm"
 import { useOrgProfile } from "../../lib/org"
 import {
   createPromotionApi,
   endPromotionApi,
-  fetchPromotionDetail,
   fetchPromotions,
-  updatePromotionApi,
-  type CreatePromotionBody,
-  type Promotion,
   type PromotionItemBody,
+  type PromotionMode,
+  type PromotionServiceItem,
   type PromotionWithMetrics,
+  type UpdatePromotionBody,
+  updatePromotionApi,
 } from "../../lib/promotions"
-import { fetchServices, type ServiceCatalogItem } from "../../lib/services"
-import { ChoiceSelect } from "../../components/ui/choice-select"
+import {
+  currencySymbol,
+  fetchServices,
+  formatAmount,
+  type ServiceCatalogItem,
+} from "../../lib/services"
+
 export const Route = createFileRoute("/_org/services/promotions")({
   component: PromotionsPage,
 })
 
-function toIsoDateInput(value: string): string {
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return ""
-  return date.toISOString().slice(0, 10)
+/** Formato, moneda y zona de la clínica: con ellos se lee y escribe todo aquí. */
+interface Regional {
+  locale: string
+  timeZone: string
 }
 
-/** Fecha-sola (yyyy-MM-dd) de un instante en la zona de la clínica (no UTC). */
-function instantToClinicDate(iso: string, timeZone: string | undefined): string {
-  const date = new Date(iso)
-  if (Number.isNaN(date.getTime())) return ""
-  try {
-    return new Intl.DateTimeFormat("en-CA", {
-      timeZone: timeZone || undefined,
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-    }).format(date)
-  } catch {
-    return date.toISOString().slice(0, 10)
+function errorMessage(error: unknown): string {
+  if (error instanceof ApiError) {
+    if (error.shape.message) return error.shape.message
+    if (error.shape.code) return `No se pudo guardar (${error.shape.code}). Inténtalo de nuevo.`
   }
+  return error instanceof Error ? error.message : "No se pudo guardar. Inténtalo de nuevo."
 }
 
-function tzOffsetMs(timeZone: string, at: Date): number {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone,
-    hour12: false,
+/* ------------------------------ Fechas y textos ---------------------------- */
+
+/** Fin del día elegido en la zona de la clínica: la promoción vale ese día entero. */
+function endOfClinicDay(dateISO: string, timeZone: string): string {
+  return new Date(zonedDayStart(addDays(dateISO, 1), timeZone).getTime() - 1000).toISOString()
+}
+
+function startOfClinicDay(dateISO: string, timeZone: string): string {
+  return zonedDayStart(dateISO, timeZone).toISOString()
+}
+
+function dayParts(dateISO: string): Date {
+  const [year, month, day] = dateISO.split("-").map(Number)
+  return new Date(Date.UTC(year ?? 1970, (month ?? 1) - 1, day ?? 1, 12))
+}
+
+/** «31 de octubre»; con el año si no es el que corre en la clínica. */
+function dayInWords(dateISO: string, regional: Regional): string {
+  const thisYear = zonedDateOf(new Date().toISOString(), regional.timeZone).slice(0, 4)
+  return new Intl.DateTimeFormat(regional.locale, {
+    day: "numeric",
+    month: "long",
+    ...(dateISO.slice(0, 4) === thisYear ? {} : { year: "numeric" }),
+    timeZone: "UTC",
+  }).format(dayParts(dateISO))
+}
+
+/** «1 nov 2026», para el botón que abre el calendario. */
+function dayShort(dateISO: string, regional: Regional): string {
+  return new Intl.DateTimeFormat(regional.locale, {
+    day: "numeric",
+    month: "short",
     year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  })
-    .formatToParts(at)
-    .reduce<Record<string, string>>((acc, part) => {
-      acc[part.type] = part.value
-      return acc
-    }, {})
-  const asUtc = Date.UTC(
-    Number(parts["year"]),
-    Number(parts["month"]) - 1,
-    Number(parts["day"]),
-    Number(parts["hour"]) % 24,
-    Number(parts["minute"]),
-    Number(parts["second"]),
-  )
-  return asUtc - at.getTime()
+    timeZone: "UTC",
+  }).format(dayParts(dateISO))
+}
+
+/** Vigencia con palabras, siempre en el día de la clínica y no en el del navegador. */
+function validityText(promotion: PromotionWithMetrics, regional: Regional): string {
+  const end = promotion.endsAt ? zonedDateOf(promotion.endsAt, regional.timeZone) : null
+  if (promotion.state === "terminada") {
+    return end ? `Terminó el ${dayInWords(end, regional)}` : "Terminada"
+  }
+  if (promotion.state === "programada") {
+    const start = zonedDateOf(promotion.startsAt, regional.timeZone)
+    return `Empieza el ${dayInWords(start, regional)}`
+  }
+  return end ? `Vigente hasta el ${dayInWords(end, regional)}` : "Vigente, sin fecha de fin"
 }
 
 /**
- * Fecha-sola a instante ISO: medianoche (inicio) o fin del día en la zona de
- * la clínica. Sin zona, medianoche local del navegador.
+ * Precio de un servicio en la promoción. Estos importes acompañan al nombre y
+ * van sin símbolo, como en el tablero; «Cobrado» y «Precio promedio» sí lo llevan.
  */
-function clinicDateToIso(dateOnly: string, timeZone: string | undefined, endOfDay: boolean): string {
-  const [year, month, day] = dateOnly.split("-").map(Number)
-  if (!year || !month || !day) return new Date(dateOnly).toISOString()
-  if (!timeZone) {
-    return new Date(year, month - 1, day, endOfDay ? 23 : 0, endOfDay ? 59 : 0, endOfDay ? 59 : 0).toISOString()
+function itemText(item: PromotionServiceItem, locale: string): string {
+  const price = formatAmount(item.priceCents, item.currency, locale)
+  if (item.mode === "from") {
+    return `${item.serviceName} desde ${price} · el precio final se pone en el presupuesto`
   }
-  const guess = Date.UTC(year, month - 1, day, endOfDay ? 23 : 0, endOfDay ? 59 : 0, endOfDay ? 59 : 0)
-  return new Date(guess - tzOffsetMs(timeZone, new Date(guess))).toISOString()
+  if (item.priceCents === 0) return `${item.serviceName} sin costo`
+  if (item.priceCents === item.tariffCents && item.currency === item.tariffCurrency) {
+    return `${item.serviceName} a ${price}`
+  }
+  return `${item.serviceName} a ${price} en vez de ${formatAmount(item.tariffCents, item.tariffCurrency, locale)}`
 }
 
-function mutationMessage(err: unknown): string {
-  if (err instanceof ApiError) {
-    if (err.shape.message) return err.shape.message
-    if (err.shape.code) return `No se pudo guardar (${err.shape.code}). Inténtalo de nuevo.`
-  }
-  return err instanceof Error ? err.message : "No se pudo guardar. Inténtalo de nuevo."
+function usesText(uses: number): string {
+  if (uses === 0) return "Aún no se usó"
+  return uses === 1 ? "Usada 1 vez" : `Usada ${uses} veces`
 }
+
+/** «Cobrado …» o, si anuncia un mínimo, «Precio promedio …». `null` si no hay nada que decir. */
+function moneyText(promotion: PromotionWithMetrics, locale: string): string | null {
+  const metrics = promotion.metrics
+  if (!metrics || metrics.uses === 0) return null
+  const hasFrom = promotion.items.some((item) => item.mode === "from")
+  const amounts = (hasFrom ? metrics.averageByCurrency : metrics.chargedByCurrency).filter(
+    (row) => row.cents > 0,
+  )
+  if (amounts.length === 0) return null
+  const text = amounts.map((row) => formatMoney(row.cents, row.currency, locale)).join(" · ")
+  return hasFrom ? `Precio promedio ${text}` : `Cobrado ${text}`
+}
+
+/* --------------------------------- Página --------------------------------- */
 
 /**
- * Promociones (tablero 8c): nombre, fechas, precio por servicio (fijo o
- * «desde») y condiciones. Administración las configura; caja y presupuestos
- * las leen vigentes y la persona decide si corresponde. Al vencer dejan de
- * ofrecerse solas y lo cobrado con ellas no cambia.
+ * Promociones (tableros 8c y 27): un nombre, unas fechas y el precio de cada
+ * servicio. Administración las crea, edita y termina; los demás las leen, y
+ * solo quien ve dinero recibe cuánto se usaron y cobraron.
  */
 function PromotionsPage() {
   const canConfigure = usePermission("settings.write")
   const canView = canConfigure || usePermission("catalog.read")
-  const queryClient = useQueryClient()
-  const profile = useOrgProfile()
-  const locale = profile.data?.locale
-  const money = (cents: number | null, currency: string): string =>
-    cents == null || !locale ? "…" : formatMoney(cents, currency, locale)
+  const navigate = useNavigate()
+  const profileQuery = useOrgProfile()
+  const locale = profileQuery.data?.locale
+  const timeZone = profileQuery.data?.timezone
+  const regional = useMemo<Regional | null>(
+    () => (locale && timeZone ? { locale, timeZone } : null),
+    [locale, timeZone],
+  )
 
-  const [showEnded, setShowEnded] = useState(false)
-  const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [formOpen, setFormOpen] = useState(false)
-  const [editing, setEditing] = useState<Promotion | null>(null)
-  const [formError, setFormError] = useState<string | null>(null)
+  /** Lo abierto al lado: alta, edición o lectura. `session` remonta el formulario. */
+  const [surface, setSurface] = useState<{ id: string | null; session: number } | null>(null)
+  const [surfaceOpen, setSurfaceOpen] = useState(false)
+  const sequence = useRef(0)
+  const open = (id: string | null) => {
+    sequence.current += 1
+    setSurface({ id, session: sequence.current })
+    setSurfaceOpen(true)
+  }
 
   const listQuery = useQuery({
-    queryKey: ["promotions", showEnded ? "todas" : "vigentes"],
-    queryFn: () => fetchPromotions({ scope: showEnded ? "todas" : "vigentes" }),
+    queryKey: ["promotions", "todas"],
+    queryFn: () => fetchPromotions({ scope: "todas" }),
     enabled: canView,
   })
-  const detailQuery = useQuery({
-    queryKey: ["promotion", selectedId],
-    queryFn: () => fetchPromotionDetail(selectedId as string),
-    enabled: canView && selectedId != null,
-  })
-  const invalidate = () => {
-    void queryClient.invalidateQueries({ queryKey: ["promotions"] })
-    void queryClient.invalidateQueries({ queryKey: ["promotion"] })
-  }
-  const saveMutation = useMutation({
-    mutationFn: (body: { id: string | null; payload: CreatePromotionBody }) =>
-      body.id
-        ? updatePromotionApi(body.id, body.payload)
-        : createPromotionApi(body.payload),
-    onSuccess: () => {
-      setFormOpen(false)
-      setEditing(null)
-      setFormError(null)
-      invalidate()
-    },
-    onError: (err) => setFormError(mutationMessage(err)),
-  })
-  const endMutation = useMutation({
-    mutationFn: (id: string) => endPromotionApi(id),
-    onSuccess: invalidate,
-  })
+  const promotions = useMemo(() => listQuery.data?.data ?? [], [listQuery.data])
+  const current = useMemo(
+    () => promotions.filter((promotion) => promotion.state !== "terminada"),
+    [promotions],
+  )
+  const ended = useMemo(
+    () =>
+      promotions
+        .filter((promotion) => promotion.state === "terminada")
+        .sort((a, b) => (b.endsAt ?? b.startsAt).localeCompare(a.endsAt ?? a.startsAt)),
+    [promotions],
+  )
+  const selected = surface?.id
+    ? (promotions.find((promotion) => promotion.id === surface.id) ?? null)
+    : null
 
-  const rows = useMemo(() => listQuery.data?.data ?? [], [listQuery.data])
-  const detail: PromotionWithMetrics | null = detailQuery.data?.data ?? null
-  const columns = useMemo<ColumnDef<Promotion>[]>(
-    () => [
+  const columns = useMemo<ColumnDef<PromotionWithMetrics>[]>(() => {
+    if (!regional) return []
+    return [
       {
-        accessorKey: "name",
+        id: "promocion",
         header: "Promoción",
+        meta: { view: { role: "title" } },
         cell: ({ row }) => (
-          <span className="flex flex-col">
-            <span className="font-medium">{row.original.name}</span>
-            <span className="text-xs text-muted-foreground">
-              {row.original.conditions ?? "Sin condiciones"}
+          <span className="flex min-w-0 max-w-xl flex-col gap-1 whitespace-normal">
+            <span className="flex flex-wrap items-center gap-2">
+              <span className="font-medium break-words">{row.original.name}</span>
+              {row.original.items.some((item) => item.mode === "from") ? (
+                <Badge variant="outline">Precio «desde»</Badge>
+              ) : null}
+            </span>
+            <span className="text-xs font-normal break-words text-muted-foreground">
+              {row.original.items.length === 0
+                ? "Sin servicios"
+                : row.original.items.map((item) => itemText(item, regional.locale)).join(" · ")}
             </span>
           </span>
         ),
       },
       {
-        accessorKey: "endsAt",
+        id: "vigencia",
         header: "Vigencia",
         meta: { view: { primary: true } },
         cell: ({ row }) => (
-          <span className="text-sm">
-            {row.original.endsAt
-              ? `Hasta el ${new Date(row.original.endsAt).toLocaleDateString(locale, { day: "numeric", month: "long" })}`
-              : "Sin fecha de fin"}
-          </span>
+          <span className="whitespace-normal">{validityText(row.original, regional)}</span>
         ),
       },
       {
-        accessorKey: "items",
-        header: "Precios",
-        cell: ({ row }) => (
-          <span className="flex flex-col gap-1 text-sm">
-            {row.original.items.map((item) => (
-              <span key={item.id}>
-                {item.serviceName}:{" "}
-                {item.mode === "fixed" ? (
-                  <strong className="tabular-nums">{money(item.priceCents, item.currency)}</strong>
-                ) : (
-                  <span>
-                    desde <strong className="tabular-nums">{money(item.priceCents, item.currency)}</strong>
-                  </span>
-                )}{" "}
-                <span className="text-xs text-muted-foreground">
-                  (tarifa {money(item.tariffCents, item.tariffCurrency)})
-                </span>
-              </span>
-            ))}
-          </span>
-        ),
+        id: "uso",
+        header: "Uso",
+        meta: { view: { primary: true } },
+        cell: ({ row }) => {
+          const metrics = row.original.metrics
+          // Sin permiso para ver dinero no llega el uso: no se inventa un cero.
+          if (!metrics) return <span className="text-muted-foreground">—</span>
+          const money = moneyText(row.original, regional.locale)
+          return (
+            <span className="flex flex-col whitespace-normal">
+              <span>{usesText(metrics.uses)}</span>
+              {money ? <span className="text-xs text-muted-foreground">{money}</span> : null}
+            </span>
+          )
+        },
       },
-    ],
-    [locale],
+    ]
+  }, [regional])
+
+  const header = (
+    <PageHeader
+      title="Promociones"
+      subtitle="Un nombre, unas fechas y el precio de cada servicio. Caja y el agente las leen de aquí."
+      actions={
+        canConfigure && regional ? (
+          <Button type="button" className="min-h-11" onClick={() => open(null)}>
+            <Plus aria-hidden />
+            Nueva promoción
+          </Button>
+        ) : undefined
+      }
+    />
   )
-  const table = useReactTable({ data: rows, columns, getCoreRowModel: getCoreRowModel() })
 
   if (!canView) {
     return (
-      <div className="flex flex-col gap-4 p-4">
-        <PageHeader title="Promociones" subtitle="Precios especiales por fecha" />
+      <div className="flex flex-col gap-4">
+        <PageHeader title="Promociones" />
         <EmptyState
           title="Sin acceso"
-          description="Necesitas permiso de configuración o de tarifario para ver promociones."
+          description="Necesitas permiso de tarifario o de configuración para ver las promociones."
         />
       </div>
     )
   }
-  if (listQuery.isPending) return <LoadingState />
-  if (listQuery.isError || !listQuery.data) {
-    return (
-      <div className="flex flex-col gap-4 p-4">
-        <PageHeader title="Promociones" subtitle="Precios especiales por fecha" />
+
+  return (
+    <div className="flex min-w-0 flex-col gap-4">
+      {header}
+      {profileQuery.isPending || listQuery.isPending ? (
+        <LoadingState />
+      ) : profileQuery.isError ? (
+        <ErrorState
+          message="No se pudo cargar el formato de la clínica"
+          onRetry={() => void profileQuery.refetch()}
+        />
+      ) : !regional ? (
+        <EmptyState
+          title="Falta la región de la clínica"
+          description={
+            canConfigure
+              ? "Las promociones usan la moneda y la zona horaria de la clínica. Configúralas para crear la primera."
+              : "Quien administra la clínica debe configurar el país y la moneda."
+          }
+          actionLabel={canConfigure ? "Configurar la clínica" : undefined}
+          onAction={canConfigure ? () => void navigate({ to: "/settings" }) : undefined}
+        />
+      ) : listQuery.isError ? (
         <ErrorState
           error={listQuery.error instanceof ApiError ? listQuery.error.shape : null}
           onRetry={() => void listQuery.refetch()}
         />
-      </div>
-    )
-  }
-
-  return (
-    <div className="flex flex-col gap-4 p-4">
-      <PageHeader
-        title="Promociones"
-        subtitle="Un nombre, unas fechas y el precio de cada servicio. Caja y el agente las leen de aquí."
-      />
-      <div className="flex flex-wrap items-center gap-2">
-        <Button
-          type="button"
-          variant={showEnded ? "outline" : "default"}
-          size="sm"
-          onClick={() => setShowEnded(false)}
-        >
-          Vigentes
-        </Button>
-        <Button
-          type="button"
-          variant={showEnded ? "default" : "outline"}
-          size="sm"
-          onClick={() => setShowEnded(true)}
-        >
-          Todas
-        </Button>
-        {canConfigure ? (
-          <Button
-            type="button"
-            size="sm"
-            onClick={() => {
-              setEditing(null)
-              setFormError(null)
-              setFormOpen(true)
-            }}
-          >
-            Nueva promoción
-          </Button>
-        ) : null}
-      </div>
-      {rows.length === 0 ? (
+      ) : promotions.length === 0 ? (
         <EmptyState
-          title={showEnded ? "Sin promociones" : "Sin promociones vigentes"}
-          description="Al llegar la fecha de fin dejan de ofrecerse solas. Lo ya cobrado con ellas no cambia."
+          icon={BadgePercent}
+          title="Aún no hay promociones"
+          description={
+            canConfigure
+              ? "Crea una con su nombre, sus fechas y el precio de cada servicio. Al llegar la fecha de fin deja de ofrecerse sola."
+              : "Cuando la clínica tenga una promoción, aparecerá aquí con sus precios."
+          }
+          actionLabel={canConfigure ? "Nueva promoción" : undefined}
+          onAction={canConfigure ? () => open(null) : undefined}
         />
       ) : (
-        <DataTable
-          table={table}
-          onRowClick={(row) => setSelectedId(row.id)}
-        />
-      )}
-      {selectedId ? (
-        <PromotionDetail
-          detail={detail}
-          loading={detailQuery.isPending}
-          canConfigure={canConfigure}
-          money={money}
-          ending={endMutation.isPending}
-          onClose={() => setSelectedId(null)}
-          onEdit={(promotion) => {
-            setEditing(promotion)
-            setFormError(null)
-            setFormOpen(true)
-          }}
-          onEnd={() => endMutation.mutate(selectedId)}
-        />
-      ) : null}
-      {formOpen ? (
-        <PromotionForm
-          initial={editing}
-          locale={locale}
-          timeZone={profile.data?.timezone}
-          error={formError}
-          pending={saveMutation.isPending}
-          onClose={() => {
-            if (!saveMutation.isPending) {
-              setFormOpen(false)
-              setEditing(null)
-            }
-          }}
-          onSubmit={(payload) => saveMutation.mutate({ id: editing?.id ?? null, payload })}
-          onError={setFormError}
-        />
-      ) : null}
-    </div>
-  )
-}
-
-function PromotionDetail({
-  detail,
-  loading,
-  canConfigure,
-  money,
-  ending,
-  onClose,
-  onEdit,
-  onEnd,
-}: {
-  detail: PromotionWithMetrics | null
-  loading: boolean
-  canConfigure: boolean
-  money: (cents: number | null, currency: string) => string
-  ending: boolean
-  onClose: () => void
-  onEdit: (promotion: Promotion) => void
-  onEnd: () => void
-}) {
-  if (loading || !detail) {
-    return (
-      <div role="dialog" aria-label="Detalle de promoción" className="rounded-xl border p-4">
-        <LoadingState />
-      </div>
-    )
-  }
-  const live = detail.isActive && (!detail.endsAt || new Date(detail.endsAt) >= new Date())
-  return (
-    <div
-      role="dialog"
-      aria-label={`Promoción ${detail.name}`}
-      className="flex flex-col gap-3 rounded-xl border p-4"
-    >
-      <div className="flex flex-wrap items-center gap-2">
-        <h3 className="font-semibold">{detail.name}</h3>
-        <Badge variant={live ? "success" : "secondary"}>{live ? "Vigente" : "Terminada"}</Badge>
-        <span className="text-sm text-muted-foreground">usada {detail.metrics.uses} veces</span>
-      </div>
-      {detail.conditions ? <p className="text-sm">{detail.conditions}</p> : null}
-      <ul className="flex flex-col gap-1 text-sm">
-        {detail.items.map((item) => (
-          <li key={item.id}>
-            {item.serviceName}:{" "}
-            {item.mode === "fixed" ? (
-              <strong className="tabular-nums">{money(item.priceCents, item.currency)}</strong>
+        <>
+          <section aria-labelledby="promos-vigentes" className="flex min-w-0 flex-col gap-2">
+            <h2 id="promos-vigentes" className="text-sm font-semibold">
+              Vigentes
+            </h2>
+            {current.length === 0 ? (
+              <EmptyState
+                icon={BadgePercent}
+                title="Ninguna promoción vigente"
+                description="Las terminadas quedan abajo, con lo que se usó de cada una."
+                actionLabel={canConfigure ? "Nueva promoción" : undefined}
+                onAction={canConfigure ? () => open(null) : undefined}
+              />
             ) : (
-              <span>
-                desde <strong className="tabular-nums">{money(item.priceCents, item.currency)}</strong>
-              </span>
-            )}{" "}
-            <span className="text-xs text-muted-foreground">
-              (tarifa {money(item.tariffCents, item.tariffCurrency)})
-            </span>
-          </li>
-        ))}
-      </ul>
-      <p className="text-sm text-muted-foreground">
-        Cobrado:{" "}
-        {detail.metrics.chargedByCurrency.length === 0
-          ? "—"
-          : detail.metrics.chargedByCurrency
-              .map((row) => money(row.cents, row.currency))
-              .join(" · ")}
-          {detail.metrics.uses > 0
-            ? detail.metrics.chargedByCurrency.map((row) => (
-                <span key={row.currency}>
-                  {" "}· promedio {money(Math.round(row.cents / detail.metrics.uses), row.currency)}
-                </span>
-              ))
-            : null}
-      </p>
-      <p className="text-xs text-muted-foreground">
-        Los cambios valen desde ahora. Lo ya usado queda con el precio de ese momento.
-      </p>
-      <div className="flex flex-wrap justify-end gap-2">
-        <Button type="button" variant="outline" onClick={onClose}>
-          Cerrar
-        </Button>
-        {canConfigure ? (
-          <Button type="button" variant="outline" onClick={() => onEdit(detail)}>
-            Editar
-          </Button>
-        ) : null}
-        {canConfigure && live ? (
-          <Button type="button" variant="outline" disabled={ending} onClick={onEnd}>
-            {ending ? "Terminando…" : "Terminar hoy"}
-          </Button>
-        ) : null}
-      </div>
+              <PromotionTable
+                rows={current}
+                columns={columns}
+                onSelect={(row) => open(row.id)}
+                activeId={surfaceOpen ? (surface?.id ?? null) : null}
+                isFetching={listQuery.isFetching}
+              />
+            )}
+          </section>
+          {ended.length > 0 ? (
+            <section aria-labelledby="promos-terminadas" className="flex min-w-0 flex-col gap-2">
+              <h2 id="promos-terminadas" className="text-sm font-semibold">
+                Terminadas
+              </h2>
+              <PromotionTable
+                rows={ended}
+                columns={columns}
+                onSelect={(row) => open(row.id)}
+                activeId={surfaceOpen ? (surface?.id ?? null) : null}
+                isFetching={false}
+              />
+            </section>
+          ) : null}
+        </>
+      )}
+      {regional && surface ? (
+        canConfigure ? (
+          <PromotionForm
+            key={surface.session}
+            open={surfaceOpen}
+            initial={surface.id ? selected : null}
+            regional={regional}
+            onClose={() => setSurfaceOpen(false)}
+          />
+        ) : selected ? (
+          <PromotionReadOnly
+            open={surfaceOpen}
+            promotion={selected}
+            regional={regional}
+            onClose={() => setSurfaceOpen(false)}
+          />
+        ) : null
+      ) : null}
     </div>
   )
 }
 
-interface PromoRowState {
+function PromotionTable({
+  rows,
+  columns,
+  onSelect,
+  activeId,
+  isFetching,
+}: {
+  rows: PromotionWithMetrics[]
+  columns: ColumnDef<PromotionWithMetrics>[]
+  onSelect: (row: PromotionWithMetrics) => void
+  activeId: string | null
+  isFetching: boolean
+}) {
+  const table = useReactTable({
+    data: rows,
+    columns,
+    getCoreRowModel: getCoreRowModel(),
+    getRowId: (row) => row.id,
+  })
+  return (
+    <DataTable
+      table={table}
+      onRowClick={onSelect}
+      isRowActive={(row) => row.id === activeId}
+      isFetching={isFetching}
+    />
+  )
+}
+
+/** Estado y uso, en la cabecera de la promoción abierta. */
+function PromotionStatus({ promotion, locale }: { promotion: PromotionWithMetrics; locale: string }) {
+  const label =
+    promotion.state === "vigente"
+      ? "Vigente"
+      : promotion.state === "programada"
+        ? "Aún no empieza"
+        : "Terminada"
+  const money = moneyText(promotion, locale)
+  return (
+    <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+      <Badge variant={promotion.state === "vigente" ? "success" : "secondary"}>{label}</Badge>
+      {promotion.metrics ? <span>{usesText(promotion.metrics.uses).toLowerCase()}</span> : null}
+      {money ? <span>· {money.toLowerCase()}</span> : null}
+    </div>
+  )
+}
+
+/** Lectura para quien no administra: la promoción y sus precios, sin controles que no puede usar. */
+function PromotionReadOnly({
+  open,
+  promotion,
+  regional,
+  onClose,
+}: {
+  open: boolean
+  promotion: PromotionWithMetrics
+  regional: Regional
+  onClose: () => void
+}) {
+  return (
+    <DetailDrawer
+      open={open}
+      title={promotion.name}
+      headerContent={<PromotionStatus promotion={promotion} locale={regional.locale} />}
+      onClose={onClose}
+    >
+      <DetailList columns={1}>
+        <DetailField label="Vigencia">{validityText(promotion, regional)}</DetailField>
+        <DetailField label="Servicios y su precio">
+          <ul className="flex flex-col gap-1">
+            {promotion.items.map((item) => (
+              <li key={item.id}>{itemText(item, regional.locale)}</li>
+            ))}
+          </ul>
+        </DetailField>
+        <DetailField label="Condiciones">{promotion.conditions}</DetailField>
+      </DetailList>
+    </DetailDrawer>
+  )
+}
+
+/* -------------------------------- Formulario ------------------------------- */
+
+interface PriceRow {
   serviceId: string
   serviceName: string
   currency: string
   tariffCents: number
-  mode: "fixed" | "from"
+  mode: PromotionMode
   priceText: string
 }
 
+const MODE_OPTIONS: ReadonlyArray<{ value: PromotionMode; label: string }> = [
+  { value: "fixed", label: "Fijo" },
+  { value: "from", label: "Desde" },
+]
+
+function parsePrice(row: PriceRow, locale: string): number | null {
+  if (row.priceText.trim() === "") return null
+  try {
+    return parseMoney(row.priceText, row.currency, locale)
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Alta y edición (tableros 8c y 27). Al editar solo viaja lo que cambió: así
+ * una promoción terminada no vuelve a ofrecerse por corregirle el nombre, y sus
+ * fechas ya no se tocan.
+ */
 function PromotionForm({
+  open,
   initial,
-  locale,
-  timeZone,
-  error,
-  pending,
+  regional,
   onClose,
-  onSubmit,
-  onError,
 }: {
-  initial: Promotion | null
-  locale: string | undefined
-  timeZone: string | undefined
-  error: string | null
-  pending: boolean
+  open: boolean
+  initial: PromotionWithMetrics | null
+  regional: Regional
   onClose: () => void
-  onSubmit: (payload: CreatePromotionBody) => void
-  onError: (message: string | null) => void
 }) {
+  const id = useId()
+  const queryClient = useQueryClient()
+  const { locale, timeZone } = regional
+  const today = zonedDateOf(new Date().toISOString(), timeZone)
+  const initialStart = initial ? zonedDateOf(initial.startsAt, timeZone) : today
+  const initialEnd = initial?.endsAt ? zonedDateOf(initial.endsAt, timeZone) : ""
+  const initialRows = useMemo<PriceRow[]>(
+    () =>
+      (initial?.items ?? []).map((item) => ({
+        serviceId: item.serviceId,
+        serviceName: item.serviceName,
+        currency: item.currency,
+        tariffCents: item.tariffCents,
+        mode: item.mode,
+        priceText: formatMoneyInput(item.priceCents, item.currency, locale),
+      })),
+    [initial, locale],
+  )
+  const ended = initial?.state === "terminada"
+  /** Lo que ya empezó conserva su inicio: el histórico se cuenta desde ahí. */
+  const started = initial !== null && initial.state !== "programada"
+
   const [name, setName] = useState(initial?.name ?? "")
-  const [startsAt, setStartsAt] = useState(
-    initial
-      ? instantToClinicDate(initial.startsAt, timeZone)
-      : instantToClinicDate(new Date().toISOString(), timeZone),
-  )
-  const [endsAt, setEndsAt] = useState(
-    initial?.endsAt ? instantToClinicDate(initial.endsAt, timeZone) : "",
-  )
+  const [startsOn, setStartsOn] = useState(initialStart)
+  const [endsOn, setEndsOn] = useState(initialEnd)
   const [conditions, setConditions] = useState(initial?.conditions ?? "")
-  const [rows, setRows] = useState<PromoRowState[]>(
-    initial?.items.map((item) => ({
-      serviceId: item.serviceId,
-      serviceName: item.serviceName,
-      currency: item.currency,
-      tariffCents: item.tariffCents,
-      mode: item.mode,
-      priceText: "",
-    })) ?? [],
-  )
-  const [serviceSearch, setServiceSearch] = useState("")
-  const servicesQuery = useQuery({
-    queryKey: ["services", "promo-picker", serviceSearch],
-    queryFn: () => fetchServices({ q: serviceSearch || undefined, state: "active", limit: 30 }),
-    enabled: serviceSearch.trim() !== "",
-  })
-  const setRow = (serviceId: string, patch: Partial<PromoRowState>) =>
-    setRows((current) => current.map((row) => (row.serviceId === serviceId ? { ...row, ...patch } : row)))
-  // Snapshot al seleccionar: nombre, moneda y tarifa viajan en la fila para no
-  // depender de resultados de búsqueda efímeros que cambian al limpiar.
-  const addService = (service: ServiceCatalogItem) => {
-    setRows((current) =>
-      current.some((row) => row.serviceId === service.id)
-        ? current
-        : [
-            ...current,
-            {
-              serviceId: service.id,
-              serviceName: service.name,
-              currency: service.currency,
-              tariffCents: service.priceCents,
-              mode: "fixed" as const,
-              priceText: "",
-            },
-          ],
-    )
-    setServiceSearch("")
+  const [rows, setRows] = useState<PriceRow[]>(initialRows)
+  const [submitted, setSubmitted] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [confirmEnd, setConfirmEnd] = useState(false)
+
+  const invalidate = async () => {
+    await queryClient.invalidateQueries({ queryKey: ["promotions"] })
+    await queryClient.invalidateQueries({ queryKey: ["promotion"] })
   }
-  const submit = (event: React.FormEvent) => {
-    event.preventDefault()
-    if (!locale) {
-      onError("Sin formato de moneda de la clínica; inténtalo de nuevo.")
-      return
-    }
-    if (!name.trim()) {
-      onError("El nombre es obligatorio.")
-      return
-    }
-    if (!startsAt) {
-      onError("El inicio es obligatorio.")
-      return
-    }
-    if (rows.length === 0) {
-      onError("Agrega al menos un servicio con su precio.")
-      return
-    }
-    const items: PromotionItemBody[] = []
-    for (const row of rows) {
-      let priceCents: number
-      try {
-        priceCents = parseMoney(row.priceText, row.currency, locale)
-      } catch {
-        onError(`Precio inválido para «${row.serviceName}».`)
-        return
-      }
-      items.push({ serviceId: row.serviceId, mode: row.mode, priceCents })
-    }
-    onError(null)
-    onSubmit({
-      name: name.trim(),
-      startsAt: clinicDateToIso(startsAt, timeZone, false),
-      endsAt: endsAt ? clinicDateToIso(endsAt, timeZone, true) : null,
-      conditions: conditions.trim() || null,
-      items,
+
+  const itemsChanged =
+    rows.length !== initialRows.length ||
+    rows.some((row, index) => {
+      const before = initialRows[index]
+      return (
+        !before ||
+        before.serviceId !== row.serviceId ||
+        before.mode !== row.mode ||
+        before.priceText !== row.priceText
+      )
     })
+  const isDirty =
+    name !== (initial?.name ?? "") ||
+    startsOn !== initialStart ||
+    endsOn !== initialEnd ||
+    conditions !== (initial?.conditions ?? "") ||
+    itemsChanged
+
+  const nameIssue = name.trim() ? null : "Ponle un nombre"
+  const rowsIssue = rows.length === 0 ? "Agrega al menos un servicio con su precio" : null
+  const datesIssue = endsOn && endsOn < startsOn ? "No puede terminar antes de empezar" : null
+  const priceIssues = rows.map((row) => {
+    if (row.priceText.trim() === "") return "Falta el precio (usa 0 si es sin costo)"
+    return parsePrice(row, locale) === null ? "Precio inválido" : null
+  })
+
+  const saveMutation = useMutation({
+    mutationFn: async () => {
+      const items: PromotionItemBody[] = rows.map((row) => ({
+        serviceId: row.serviceId,
+        mode: row.mode,
+        priceCents: parsePrice(row, locale) ?? 0,
+      }))
+      if (!initial) {
+        return createPromotionApi({
+          name: name.trim(),
+          startsAt: startOfClinicDay(startsOn, timeZone),
+          endsAt: endsOn ? endOfClinicDay(endsOn, timeZone) : null,
+          conditions: conditions.trim() || null,
+          items,
+        })
+      }
+      const patch: UpdatePromotionBody = {}
+      if (name.trim() !== initial.name) patch.name = name.trim()
+      if ((conditions.trim() || null) !== (initial.conditions ?? null)) {
+        patch.conditions = conditions.trim() || null
+      }
+      if (itemsChanged) patch.items = items
+      // Las fechas de lo terminado no viajan: editarla no la revive.
+      if (!ended) {
+        if (!started && startsOn !== initialStart) patch.startsAt = startOfClinicDay(startsOn, timeZone)
+        if (endsOn !== initialEnd) patch.endsAt = endsOn ? endOfClinicDay(endsOn, timeZone) : null
+      }
+      if (Object.keys(patch).length === 0) return null
+      return updatePromotionApi(initial.id, patch)
+    },
+    onSuccess: async () => {
+      setError(null)
+      await invalidate()
+      toast.success(initial ? "Promoción actualizada" : "Promoción guardada")
+      onClose()
+    },
+    onError: (failure) => setError(errorMessage(failure)),
+  })
+
+  const endMutation = useMutation({
+    mutationFn: () => endPromotionApi(initial?.id ?? ""),
+    onSuccess: async () => {
+      await invalidate()
+      toast.success("La promoción terminó hoy")
+      setConfirmEnd(false)
+      onClose()
+    },
+  })
+
+  const submit = (event: FormEvent) => {
+    event.preventDefault()
+    setSubmitted(true)
+    if (nameIssue || rowsIssue || datesIssue || priceIssues.some(Boolean)) {
+      setError("Revisa lo marcado antes de guardar.")
+      return
+    }
+    setError(null)
+    saveMutation.mutate()
   }
+
+  const setRow = (serviceId: string, patch: Partial<PriceRow>) =>
+    setRows((list) => list.map((row) => (row.serviceId === serviceId ? { ...row, ...patch } : row)))
+
+  const uses = initial?.metrics?.uses ?? null
+  const usedNote =
+    uses === null || uses === 0
+      ? "Los cambios valen desde ahora."
+      : uses === 1
+        ? "Los cambios valen desde ahora. La vez que ya se usó queda con el precio de ese momento."
+        : `Los cambios valen desde ahora. Las ${uses} veces que ya se usó quedan con el precio de ese momento.`
+
   return (
-    <FormDrawer
-      open
-      title={initial ? `Editar ${initial.name}` : "Nueva promoción"}
-      description="«Desde» anuncia un mínimo: el precio final lo pone quien hace el presupuesto."
-      error={error}
-      isSubmitting={pending}
-      submitLabel={initial ? "Guardar cambios" : "Guardar promoción"}
-      onClose={onClose}
-      onSubmit={submit}
-    >
-      <Field>
-        <FieldLabel htmlFor="promo-name">Nombre, como sale en la publicación</FieldLabel>
-        <Input
-          id="promo-name"
-          value={name}
-          maxLength={120}
-          onChange={(event) => {
-            const value = event.currentTarget.value
-            setName(value)
-          }}
-        />
-      </Field>
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+    <>
+      <FormDrawer
+        open={open}
+        title={initial ? initial.name : "Nueva promoción"}
+        headerContent={initial ? <PromotionStatus promotion={initial} locale={locale} /> : undefined}
+        error={error}
+        isDirty={isDirty}
+        isSubmitting={saveMutation.isPending}
+        submitLabel={initial ? "Guardar cambios" : "Guardar promoción"}
+        onClose={onClose}
+        onSubmit={submit}
+      >
         <Field>
-          <FieldLabel htmlFor="promo-starts">Empieza</FieldLabel>
-          <DatePickerButton id="promo-starts" value={startsAt} onChange={setStartsAt}>
-            {startsAt ? formatDateLong(startsAt) : "Elige el inicio"}
-          </DatePickerButton>
+          <FieldLabel htmlFor={`${id}-nombre`}>
+            {initial ? "Nombre" : "Nombre, como sale en la publicación"}
+          </FieldLabel>
+          <Input
+            id={`${id}-nombre`}
+            value={name}
+            maxLength={120}
+            aria-invalid={(submitted && nameIssue !== null) || undefined}
+            onChange={(event) => setName(event.target.value)}
+          />
+          {submitted && nameIssue ? <FieldError>{nameIssue}</FieldError> : null}
         </Field>
-        <Field>
-          <FieldLabel htmlFor="promo-ends">Termina (vacío = sin fin)</FieldLabel>
-          <div className="flex flex-wrap items-center gap-2">
-            <DatePickerButton
-              id="promo-ends"
-              value={endsAt || startsAt}
-              min={startsAt || undefined}
-              onChange={setEndsAt}
-            >
-              {endsAt ? formatDateLong(endsAt) : "Sin fecha de fin"}
-            </DatePickerButton>
-            {endsAt ? (
-              <Button type="button" variant="ghost" size="sm" onClick={() => setEndsAt("")}>
-                Quitar fin
-              </Button>
-            ) : null}
-          </div>
-        </Field>
-      </div>
-      <Field>
-        <FieldLabel htmlFor="promo-service-search">Agregar servicio del tarifario</FieldLabel>
-        <Input
-          id="promo-service-search"
-          value={serviceSearch}
-          placeholder="Buscar en el tarifario"
-          onChange={(event) => {
-            const value = event.currentTarget.value
-            setServiceSearch(value)
-          }}
-        />
-        {serviceSearch.trim() !== "" ? (
-          <ul className="mt-2 flex max-h-48 flex-col gap-1 overflow-auto">
-            {(servicesQuery.data?.data ?? []).map((service) => (
-              <li key={service.id}>
-                <Button type="button" variant="ghost" size="sm" onClick={() => addService(service)}>
-                  {service.name} · {service.code ? `${service.code} · ` : ""}
-                  {locale ? formatMoney(service.priceCents, service.currency, locale) : "…"}
-                </Button>
-              </li>
-            ))}
-          </ul>
+
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <Field>
+            <span id={`${id}-empieza`} className="text-sm font-medium">
+              {started ? "Empezó" : "Empieza"}
+            </span>
+            {started ? (
+              <p className="text-sm" aria-labelledby={`${id}-empieza`}>
+                {dayShort(startsOn, regional)}
+              </p>
+            ) : (
+              <DatePickerButton
+                aria-labelledby={`${id}-empieza`}
+                className="w-full justify-start"
+                value={startsOn}
+                min={today}
+                onChange={setStartsOn}
+              >
+                {dayShort(startsOn, regional)}
+              </DatePickerButton>
+            )}
+          </Field>
+          <Field>
+            <span id={`${id}-termina`} className="text-sm font-medium">
+              {ended ? "Terminó" : "Termina"}
+            </span>
+            {ended ? (
+              <p className="text-sm" aria-labelledby={`${id}-termina`}>
+                {endsOn ? dayShort(endsOn, regional) : "Se desactivó"}
+              </p>
+            ) : (
+              <div className="flex flex-wrap items-center gap-2">
+                <DatePickerButton
+                  aria-labelledby={`${id}-termina`}
+                  className="min-w-0 flex-1 justify-start"
+                  value={endsOn || startsOn}
+                  min={startsOn > today ? startsOn : today}
+                  onChange={setEndsOn}
+                >
+                  {endsOn ? dayShort(endsOn, regional) : "Sin fecha de fin"}
+                </DatePickerButton>
+                {endsOn ? (
+                  <Button type="button" variant="ghost" size="sm" onClick={() => setEndsOn("")}>
+                    Quitar fin
+                  </Button>
+                ) : null}
+              </div>
+            )}
+            {datesIssue ? <FieldError>{datesIssue}</FieldError> : null}
+          </Field>
+        </div>
+        {ended ? (
+          <p className="text-xs text-muted-foreground">
+            Una promoción terminada no vuelve a ofrecerse. Para repetirla, crea una nueva.
+          </p>
         ) : null}
-      </Field>
-      {rows.map((row) => {
-        const currentPrice = initial?.items.find((i) => i.serviceId === row.serviceId)
-        return (
-          <div key={row.serviceId} className="flex flex-col gap-2 rounded-lg border p-3">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <span className="text-sm font-medium">
-                {row.serviceName}{" "}
-                <span className="font-normal text-muted-foreground">
-                  (tarifa {locale ? formatMoney(row.tariffCents, row.currency, locale) : "…"})
-                </span>
-              </span>
+
+        <div className="flex flex-col gap-3">
+          <span className="text-sm font-medium">
+            {initial ? "Servicios y su precio" : "Servicios y su precio en la promoción"}
+          </span>
+          {rows.map((row, index) => {
+            const price = parsePrice(row, locale)
+            const issue = submitted ? priceIssues[index] : null
+            const above = price !== null && price > row.tariffCents
+            return (
+              <div key={row.serviceId} className="flex flex-col gap-2 rounded-lg border p-3">
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <span className="flex min-w-0 flex-col">
+                    <span className="text-sm font-medium break-words">{row.serviceName}</span>
+                    <span className="text-xs text-muted-foreground">
+                      Normal {formatAmount(row.tariffCents, row.currency, locale)}
+                    </span>
+                  </span>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    aria-label={`Quitar ${row.serviceName} de la promoción`}
+                    onClick={() =>
+                      setRows((list) => list.filter((item) => item.serviceId !== row.serviceId))
+                    }
+                  >
+                    Quitar
+                  </Button>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <RadioChips
+                    aria-label={`Tipo de precio de ${row.serviceName}`}
+                    className="w-auto"
+                    value={row.mode}
+                    options={MODE_OPTIONS}
+                    onChange={(mode) => setRow(row.serviceId, { mode })}
+                  />
+                  <InputGroup className="w-40">
+                    <InputGroupAddon align="inline-start">
+                      <InputGroupText>{currencySymbol(row.currency, locale)}</InputGroupText>
+                    </InputGroupAddon>
+                    <InputGroupInput
+                      inputMode="decimal"
+                      placeholder={formatMoneyInput(0, row.currency, locale)}
+                      aria-label={
+                        row.mode === "from"
+                          ? `Precio desde de ${row.serviceName} en la promoción`
+                          : `Precio de ${row.serviceName} en la promoción`
+                      }
+                      aria-invalid={Boolean(issue) || undefined}
+                      value={row.priceText}
+                      onChange={(event) => setRow(row.serviceId, { priceText: event.target.value })}
+                    />
+                  </InputGroup>
+                </div>
+                {issue ? <FieldError>{issue}</FieldError> : null}
+                {above ? (
+                  <p className="text-xs text-warning" role="status">
+                    Es más que el precio normal ({formatMoney(row.tariffCents, row.currency, locale)}
+                    ). Revisa que sea lo que quieres.
+                  </p>
+                ) : null}
+              </div>
+            )
+          })}
+          {rows.some((row) => row.mode === "from") ? (
+            <p className="text-xs text-muted-foreground">
+              «Desde» anuncia un mínimo. El precio final lo pone quien hace el presupuesto.
+            </p>
+          ) : null}
+          <ServiceAdder
+            id={`${id}-servicio`}
+            label={rows.length === 0 ? "Agregar un servicio" : "Agregar otro servicio"}
+            locale={locale}
+            taken={rows.map((row) => row.serviceId)}
+            onAdd={(service) =>
+              setRows((list) => [
+                ...list,
+                {
+                  serviceId: service.id,
+                  serviceName: service.name,
+                  currency: service.currency,
+                  tariffCents: service.priceCents,
+                  mode: "fixed",
+                  priceText: "",
+                },
+              ])
+            }
+          />
+          {submitted && rowsIssue ? <FieldError>{rowsIssue}</FieldError> : null}
+        </div>
+
+        <Field>
+          <FieldLabel htmlFor={`${id}-condiciones`}>
+            {initial ? "Condiciones" : "Condiciones, en una frase"}
+          </FieldLabel>
+          <Textarea
+            id={`${id}-condiciones`}
+            value={conditions}
+            rows={2}
+            maxLength={500}
+            onChange={(event) => setConditions(event.target.value)}
+          />
+        </Field>
+
+        <p className="text-xs text-muted-foreground" role="status">
+          {initial
+            ? usedNote
+            : "Al llegar la fecha de fin deja de ofrecerse sola. Lo ya cobrado con ella no cambia."}
+        </p>
+        {initial?.state === "vigente" ? (
+          <Button
+            type="button"
+            variant="outline"
+            className="min-h-11 self-start"
+            disabled={saveMutation.isPending}
+            onClick={() => {
+              endMutation.reset()
+              setConfirmEnd(true)
+            }}
+          >
+            Terminar la promoción hoy
+          </Button>
+        ) : null}
+      </FormDrawer>
+
+      {initial ? (
+        <FormDrawer
+          dock={false}
+          open={confirmEnd}
+          title="Terminar la promoción hoy"
+          description={`«${initial.name}» deja de ofrecerse desde ahora. Lo ya presupuestado o cobrado con ella no cambia, y no se puede volver a activar.`}
+          error={endMutation.isError ? errorMessage(endMutation.error) : null}
+          isSubmitting={endMutation.isPending}
+          submitLabel="Terminar hoy"
+          cancelLabel="Dejarla vigente"
+          onClose={() => setConfirmEnd(false)}
+          onSubmit={(event) => {
+            event.preventDefault()
+            endMutation.mutate()
+          }}
+        >
+          <p className="text-sm">{usesText(uses ?? 0)}.</p>
+        </FormDrawer>
+      ) : null}
+    </>
+  )
+}
+
+/** Buscador del tarifario para sumar un servicio a la promoción. */
+function ServiceAdder({
+  id,
+  label,
+  locale,
+  taken,
+  onAdd,
+}: {
+  id: string
+  label: string
+  locale: string
+  /** Servicios ya en la promoción: cada uno aparece una sola vez. */
+  taken: string[]
+  onAdd: (service: ServiceCatalogItem) => void
+}) {
+  const [query, setQuery] = useState("")
+  const [open, setOpen] = useState(false)
+  const servicesQuery = useQuery({
+    queryKey: ["services", "promo-picker", query.trim()],
+    queryFn: () => fetchServices({ q: query.trim() || undefined, state: "active", limit: 30 }),
+    staleTime: 30_000,
+  })
+  const items = useMemo(
+    () => (servicesQuery.data?.data ?? []).filter((service) => !taken.includes(service.id)),
+    [servicesQuery.data, taken],
+  )
+  return (
+    <Field>
+      <FieldLabel htmlFor={id}>{label}</FieldLabel>
+      <Combobox
+        items={items}
+        filter={null}
+        open={open}
+        onOpenChange={setOpen}
+        value={null}
+        itemToStringValue={(item: ServiceCatalogItem) => item.id}
+        inputValue={query}
+        onInputValueChange={(next, details) => {
+          if (details.reason === "input-change") {
+            setQuery(next)
+            setOpen(true)
+          } else if (details.reason === "input-clear" || details.reason === "clear-press") {
+            setQuery("")
+          }
+        }}
+        onValueChange={(item: ServiceCatalogItem | null) => {
+          if (!item) return
+          onAdd(item)
+          setQuery("")
+          setOpen(false)
+        }}
+      >
+        <ComboboxInput id={id} placeholder="Buscar en el tarifario" showTrigger={false} />
+        <ComboboxContent>
+          {servicesQuery.isPending ? (
+            <div className="flex flex-col gap-2 p-3">
+              <Skeleton className="h-4 w-3/4" />
+              <Skeleton className="h-4 w-1/2" />
+            </div>
+          ) : servicesQuery.isError ? (
+            <div role="alert" className="flex flex-col gap-2 p-2">
+              <p className="text-sm text-destructive">No se pudo buscar en el tarifario.</p>
               <Button
                 type="button"
-                variant="ghost"
                 size="sm"
-                onClick={() => setRows((current) => current.filter((r) => r.serviceId !== row.serviceId))}
+                variant="outline"
+                onClick={() => void servicesQuery.refetch()}
               >
-                Quitar
+                Reintentar
               </Button>
             </div>
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-              <Field>
-                <FieldLabel htmlFor={`promo-mode-${row.serviceId}`}>Tipo de precio</FieldLabel>
-                <ChoiceSelect
-                  id={`promo-mode-${row.serviceId}`}
-                  className="w-full"
-                  value={row.mode}
-                  onChange={(event) => {
-                    const mode = event.target.value as "fixed" | "from"
-                    setRow(row.serviceId, { mode })
-                  }}
-                >
-                  <option value="fixed">Fijo</option>
-                  <option value="from">Desde</option>
-                </ChoiceSelect>
-              </Field>
-              <Field>
-                <FieldLabel htmlFor={`promo-price-${row.serviceId}`}>
-                  {row.mode === "fixed" ? "Precio" : "Mínimo anunciado"}
-                </FieldLabel>
-                <Input
-                  id={`promo-price-${row.serviceId}`}
-                  value={row.priceText}
-                  inputMode="decimal"
-                  placeholder={
-                    currentPrice && locale
-                      ? formatMoney(currentPrice.priceCents, currentPrice.currency, locale)
-                      : ""
-                  }
-                  onChange={(event) => {
-                    const priceText = event.currentTarget.value
-                    setRow(row.serviceId, { priceText })
-                  }}
-                />
-              </Field>
-            </div>
-          </div>
-        )
-      })}
-      <Field>
-        <FieldLabel htmlFor="promo-conditions">Condiciones, en una frase</FieldLabel>
-        <Textarea
-          id="promo-conditions"
-          value={conditions}
-          rows={2}
-          maxLength={500}
-          onChange={(event) => {
-            const value = event.currentTarget.value
-            setConditions(value)
-          }}
-        />
-      </Field>
-    </FormDrawer>
+          ) : items.length === 0 ? (
+            <p className="p-2 text-sm text-muted-foreground">
+              Ningún servicio activo del tarifario coincide.
+            </p>
+          ) : (
+            <>
+              <ComboboxList aria-label="Servicios del tarifario">
+                {items.map((item) => (
+                  <ComboboxItem key={item.id} value={item} className="flex-col items-start gap-0 py-2">
+                    <span className="font-medium">{item.name}</span>
+                    <span className="text-muted-foreground">
+                      Normal {formatAmount(item.priceCents, item.currency, locale)}
+                    </span>
+                  </ComboboxItem>
+                ))}
+              </ComboboxList>
+              <ComboboxEmpty>Sin resultados.</ComboboxEmpty>
+            </>
+          )}
+        </ComboboxContent>
+      </Combobox>
+    </Field>
   )
 }

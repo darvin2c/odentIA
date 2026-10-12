@@ -1,3 +1,4 @@
+import { formatLocale } from "../locale.js"
 import { normalizeSearchText } from "../text.js"
 
 /**
@@ -34,7 +35,6 @@ export interface TimeZoneMeta extends TimeZoneInfo {
   localTime: string
 }
 
-const ZONE_LOCALE = "es-PE"
 
 /** Caché de identificadores ya interpretados (incluye los inválidos). */
 const canonical = new Map<string, string | undefined>()
@@ -106,7 +106,20 @@ export function timeZoneInfo(
   }
 }
 
-const collator = new Intl.Collator(ZONE_LOCALE, { sensitivity: "base" })
+// Orden alfabético con el formato regional vigente, leído al ordenar (y no a
+// nivel de módulo); un comparador por formato.
+const collators = new Map<string, Intl.Collator>()
+const collator = {
+  compare(a: string, b: string): number {
+    const locale = formatLocale()
+    let found = collators.get(locale ?? "")
+    if (!found) {
+      found = new Intl.Collator(locale, { sensitivity: "base" })
+      collators.set(locale ?? "", found)
+    }
+    return found.compare(a, b)
+  },
+}
 
 /**
  * Zona lista para el selector: la lectura de `timeZoneInfo` más el texto de
@@ -185,7 +198,7 @@ export function localTimeIn(
 ): string {
   const timeZone = canonicalTimeZone(value)
   if (!timeZone) return ""
-  return new Intl.DateTimeFormat(ZONE_LOCALE, {
+  return new Intl.DateTimeFormat(formatLocale(), {
     timeZone,
     hour: "2-digit",
     minute: "2-digit",

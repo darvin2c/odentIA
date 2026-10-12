@@ -98,8 +98,9 @@ beforeAll(async () => {
     insert into "organization" ("id", "name", "slug", "created_at")
     values (${ORG}, 'Clínica Comisiones API', 'comisiones-api', now())`)
   await ownerDb.execute(sql`
-    insert into "org_profile" ("organization_id", "legal_name")
-    values (${ORG}, 'Clínica Comisiones API')`)
+    insert into "org_profile"
+      ("organization_id", "legal_name", "country_code", "currency", "timezone", "locale")
+    values (${ORG}, 'Clínica Comisiones API', 'PE', 'PEN', 'America/Lima', 'es-PE')`)
   await ownerDb.execute(sql`
     insert into "user" ("id", "name", "email") values
       (${OWNER}, 'Dueña API', 'comm-owner@example.test'),
@@ -144,15 +145,22 @@ it("el odontólogo ve solo las suyas y no administra", async () => {
     body: JSON.stringify({ professionalUserId: DENTIST, rateBps: 4000 }),
   })
   expect(rate.status).toBe(403)
-  const settle = await app.request("/commissions/settle", {
+  const pay = await app.request("/commissions/pay", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ professionalUserId: DENTIST, year: 2026, month: 9, currency: "PEN" }),
+    body: JSON.stringify({
+      professionalUserId: DENTIST,
+      year: 2026,
+      month: 9,
+      branchId: "00000000-0000-4000-8000-000000000001",
+    }),
   })
-  expect(settle.status).toBe(403)
+  expect(pay.status).toBe(403)
+  // El mes de toda la clínica es de administración.
+  expect((await app.request("/commissions/month?year=2026&month=9")).status).toBe(403)
 })
 
-it("admin configura la tasa y caja ve el resultado sin ver comisiones ajenas", async () => {
+it("administración fija el porcentaje y ve el mes; caja no ve comisiones ni el resultado", async () => {
   const admin = buildApp("admin", OWNER)
   const rate = await admin.request("/commissions/rates", {
     method: "PUT",
@@ -160,9 +168,15 @@ it("admin configura la tasa y caja ve el resultado sin ver comisiones ajenas", a
     body: JSON.stringify({ professionalUserId: DENTIST, rateBps: 4000 }),
   })
   expect(rate.status).toBe(200)
+  const month = await admin.request("/commissions/month?year=2026&month=9")
+  expect(month.status).toBe(200)
+  const rows = ((await month.json()) as { data: Array<{ professionalUserId: string; rateBps: number }> }).data
+  // Con porcentaje fijado aparece en el mes aunque aún no tenga cobros.
+  expect(rows.find((row) => row.professionalUserId === DENTIST)?.rateBps).toBe(4000)
+  expect((await admin.request("/commissions/monthly-result?year=2026&month=9")).status).toBe(200)
   const cashier = buildApp("cashier", CASHIER)
   const result = await cashier.request("/commissions/monthly-result?year=2026&month=9")
-  expect(result.status).toBe(200)
+  expect(result.status).toBe(403)
   const commissions = await cashier.request("/commissions/my?year=2026&month=9&currency=PEN")
   expect(commissions.status).toBe(403)
 })

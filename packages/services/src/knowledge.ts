@@ -8,6 +8,7 @@ import {
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, ilike, or, sql } from "drizzle-orm"
 import { notFound, validation } from "./errors.js"
+import { formatOrgMoney, NEUTRAL_LOCALE, NEUTRAL_TIMEZONE } from "./locale.js"
 import { listPaymentMethods } from "./payment-methods.js"
 import { listServices } from "./service-catalog.js"
 import { listClinicPromotionSummaries } from "./promotions.js"
@@ -282,6 +283,8 @@ export async function searchPublishedKnowledge(tx: Db, orgId: string, q: string,
 export interface ClinicInfoSnapshot {
   clinicName: string
   timezone: string
+  /** Formato regional de la clínica (BCP 47): con él se escriben los importes. */
+  locale: string
   branches: Array<{ id: string; name: string; address: string | null; phone: string | null; mapsUrl: string | null; timezone: string | null }>
   services: Array<{ id: string; name: string; code: string | null; specialty: string | null; priceCents: number; currency: string; durationMin: number | null }>
   paymentMethods: Array<{ id: string; name: string; typeCode: string }>
@@ -297,7 +300,12 @@ export interface ClinicInfoSnapshot {
  */
 export async function getClinicInfoSnapshot(tx: Db, orgId: string): Promise<ClinicInfoSnapshot> {
   const [profile] = await tx
-    .select({ legalName: orgProfile.legalName, tradeName: orgProfile.tradeName, timezone: orgProfile.timezone })
+    .select({
+      legalName: orgProfile.legalName,
+      tradeName: orgProfile.tradeName,
+      timezone: orgProfile.timezone,
+      locale: orgProfile.locale,
+    })
     .from(orgProfile)
     .where(eq(orgProfile.organizationId, orgId))
     .limit(1)
@@ -319,7 +327,8 @@ export async function getClinicInfoSnapshot(tx: Db, orgId: string): Promise<Clin
   const promos = await listClinicPromotionSummaries(tx, orgId)
   return {
     clinicName: profile?.tradeName ?? profile?.legalName ?? "la clínica",
-    timezone: profile?.timezone ?? "America/Lima",
+    timezone: profile?.timezone ?? NEUTRAL_TIMEZONE,
+    locale: profile?.locale || NEUTRAL_LOCALE,
     branches: branchRows.map((b) => ({ ...b, address: b.address ?? null })),
     services: data.map((s) => ({
       id: s.id,
@@ -355,10 +364,10 @@ export function formatKnowledgeForPrompt(snapshot: ClinicInfoSnapshot, faqs: Kno
     }
   }
   if (snapshot.services.length) {
-    lines.push("Servicios y tarifas vigentes (PEN en céntimos → soles):")
+    lines.push("Servicios y tarifas vigentes (importe con su moneda):")
     for (const s of snapshot.services) {
-      const soles = (s.priceCents / 100).toFixed(2)
-      lines.push(`- ${s.name}: S/ ${soles}${s.durationMin ? ` (${s.durationMin} min)` : ""}`)
+      const price = formatOrgMoney(s.priceCents, s.currency, snapshot)
+      lines.push(`- ${s.name}: ${price}${s.durationMin ? ` (${s.durationMin} min)` : ""}`)
     }
   } else {
     lines.push("Sin servicios publicados: no des precios, ofrece derivar.")

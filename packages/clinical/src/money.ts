@@ -89,3 +89,35 @@ export function formatMoneyInput(amountMinor: number, currency: string, locale: 
   const options = inputFormat(locale, digits).resolvedOptions()
   return new Intl.NumberFormat(locale, { ...options, useGrouping: false }).format(amountMinor / 10 ** digits)
 }
+
+/**
+ * Importe aceptado de un presupuesto: suma el total de cada línea cuya
+ * respuesta es «aceptado». Es la única regla, la misma para el servidor (lo
+ * guardado) y para la vista previa de la interfaz (lo que se está marcando);
+ * `null` si alguna línea aceptada aún no tiene precio.
+ */
+export function sumAcceptedCents(
+  lines: ReadonlyArray<{ lineTotalCents: number | null; decision: string | null | undefined }>,
+): number | null {
+  let total = 0
+  for (const line of lines) {
+    if (line.decision !== "aceptado") continue
+    if (line.lineTotalCents == null) return null
+    total += line.lineTotalCents
+  }
+  return total
+}
+
+/**
+ * El mismo importe que `formatMoney`, sin el símbolo de la moneda: para las
+ * cifras secundarias de una lista cuyo total ya dice la moneda.
+ */
+export function formatMoneyAmount(amountMinor: number, currency: string, locale: string): string {
+  if (!Number.isSafeInteger(amountMinor)) throw new Error("El importe debe ser un entero")
+  if (!locale.trim()) throw new Error("El idioma y formato es obligatorio")
+  const digits = currencyFractionDigits(currency)
+  return new Intl.NumberFormat(locale, {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  }).format(amountMinor / 10 ** digits)
+}

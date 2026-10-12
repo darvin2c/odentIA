@@ -2,7 +2,6 @@
  * Caja automática: se crea al cobrar, el arqueo cuenta solo efectivo, el
  * cierre congela hoja inmutable con diferencia notificada, gastos con salida
  * de caja, deudas por sede y resumen sin contar la apertura como ingreso.
- * (Escrito sin ejecutar: lo corre la verificación conjunta del integrador.)
  */
 import { randomUUID } from "node:crypto"
 import type { Db } from "@odentia/db"
@@ -16,9 +15,9 @@ import {
   getCashState,
   getDayMovements,
   getDebts,
-  getFinanceOverview,
   listExpenses,
 } from "./finance.js"
+import { getOrgLocale } from "./locale.js"
 import { collectCharge, createCharge } from "./payments.js"
 import { createPaymentMethod } from "./payment-methods.js"
 import { ownerDb, setupTestDb } from "./test-setup.js"
@@ -121,7 +120,7 @@ it("el gasto con salida de caja descuenta el contado y el directo no", async () 
   expect(materials).toHaveLength(1)
 })
 
-it("las deudas agrupan por persona y el resumen no cuenta la apertura", async () => {
+it("las deudas agrupan por persona y lo que queda no se cuenta como cobro", async () => {
   const f = await clinicalFixture()
   const { branchId, cash } = await seedCashbox(f)
   await f.run((tx) =>
@@ -145,12 +144,16 @@ it("las deudas agrupan por persona y el resumen no cuenta la apertura", async ()
       deliveredCents: 0,
     }),
   )
-  const overview = await f.run((tx) => getFinanceOverview(tx, "org_a", { branchId }))
-  const pen = overview.byCurrency.find((c) => c.currency === "PEN")
-  // 60000 cobrados una sola vez: la apertura de la ventana nueva (60000 que
-  // quedaron) no suma como ingreso nuevo.
-  expect(pen?.ingresosCents).toBe(60000)
-  const today = new Date().toISOString().slice(0, 10)
+  // Lo que quedó abre la ventana nueva como «quedó del cierre anterior», no
+  // como un cobro: nada se cuenta dos veces.
+  const state = await f.run((tx) => getCashState(tx, "org_a", { branchId }))
+  expect(state.cashOnHandCents).toBe(60000)
+  expect(state.tickets).toBe(0)
+  expect(state.breakdown).toMatchObject({ openingCents: 60000, cashCollectedCents: 0 })
+  expect(state.lastClosure?.differenceCents).toBe(0)
+  // «Hoy» es el día de la clínica, no el de UTC: de noche no coinciden.
+  const { timezone } = await f.run((tx) => getOrgLocale(tx, "org_a"))
+  const today = new Intl.DateTimeFormat("en-CA", { timeZone: timezone }).format(new Date())
   const movements = await f.run((tx) =>
     getDayMovements(tx, "org_a", { branchId, day: today }),
   )

@@ -8,6 +8,7 @@ import {
 } from "@odentia/clinical"
 import { timeAgo } from "../../lib/crm"
 import { type Encounter, encounterStatusLabel, type PlanItem } from "../../lib/patients"
+import { activeOrgLocale } from "../../lib/locale"
 
 export const UPLOAD_CATEGORIES = [
   "radiografia",
@@ -68,7 +69,7 @@ export function takenAt(doc: { capturedAt?: string | null; createdAt: string }):
 }
 
 export function formatTakenAt(doc: { capturedAt?: string | null; createdAt: string }): string {
-  const when = new Date(takenAt(doc)).toLocaleDateString("es-PE", {
+  const when = new Date(takenAt(doc)).toLocaleDateString(activeOrgLocale(), {
     day: "numeric",
     month: "short",
     year: "numeric",

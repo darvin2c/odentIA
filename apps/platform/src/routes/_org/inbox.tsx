@@ -101,6 +101,7 @@ import { ACTION_LABEL, type AgentProposal } from "../../lib/agent"
 import { channelIcon, channelLabel } from "../../lib/channels"
 import { useOrgEvents } from "../../lib/org-events"
 import { createRegistrationLink } from "../../lib/patient-registration"
+import { activeOrgLocale } from "../../lib/locale"
 
 export const Route = createFileRoute("/_org/inbox")({
   validateSearch: (search: Record<string, unknown>) => ({
@@ -1390,7 +1391,7 @@ function ThreadView({
                     </PromptInputActionMenuContent>
                   </PromptInputActionMenu>
                   <SpeechInput
-                    lang="es-PE"
+                    lang={activeOrgLocale() ?? "es"}
                     size="icon-sm"
                     aria-label="Dictar"
                     onTranscriptionChange={(text) =>
@@ -1521,7 +1522,7 @@ function MessageBubble({
         <div
           className={`flex items-center gap-1 text-xs text-muted-foreground ${out ? "justify-end" : ""}`}
         >
-          {new Date(msg.createdAt).toLocaleTimeString("es-PE", {
+          {new Date(msg.createdAt).toLocaleTimeString(activeOrgLocale(), {
             hour: "2-digit",
             minute: "2-digit",
           })}

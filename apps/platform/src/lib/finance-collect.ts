@@ -9,7 +9,9 @@
  * horaria siempre del perfil/sede. Nada fijo.
  */
 import { useQuery } from "@tanstack/react-query"
+import { currencyFractionDigits } from "@odentia/clinical"
 import { apiFetch } from "./api"
+import { amountFromCents } from "./workspace"
 
 /** Fecha y hora cortas en la zona de la sede cuando se indica. */
 export function formatDateTimeShortLocale(
@@ -30,6 +32,67 @@ export function formatDateTimeShortLocale(
   })
 }
 
+/**
+ * Día en palabras, en la zona de la clínica: «28 de septiembre». El año solo
+ * se escribe cuando no es el actual.
+ */
+export function formatDayLongLocale(
+  value: string | null | undefined,
+  locale: string,
+  timeZone?: string,
+): string {
+  if (!value) return "—"
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return "—"
+  const zone = timeZone ? { timeZone } : {}
+  const year = (at: Date) => at.toLocaleDateString("en", { year: "numeric", ...zone })
+  return date.toLocaleDateString(locale, {
+    day: "numeric",
+    month: "long",
+    ...(year(date) === year(new Date()) ? {} : { year: "numeric" }),
+    ...zone,
+  })
+}
+
+/** Hora corta en la zona de la clínica. */
+export function formatTimeShortLocale(
+  value: string | null | undefined,
+  locale: string,
+  timeZone?: string,
+): string {
+  if (!value) return "—"
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return "—"
+  return date.toLocaleTimeString(locale, {
+    hour: "2-digit",
+    minute: "2-digit",
+    ...(timeZone ? { timeZone } : {}),
+  })
+}
+
+/** Símbolo de la moneda tal como lo escribe el formato de la clínica (prefijo de los campos de importe). */
+export function currencySymbol(currency: string, locale: string): string {
+  try {
+    const parts = new Intl.NumberFormat(locale, { style: "currency", currency }).formatToParts(0)
+    return parts.find((part) => part.type === "currency")?.value ?? currency
+  } catch {
+    return currency
+  }
+}
+
+/**
+ * Importe sin símbolo de moneda, con el formato de la clínica: para las cifras
+ * secundarias (filas de conceptos, «costó… pagó…»), que acompañan a un total
+ * que sí lo lleva.
+ */
+export function formatAmountPlain(cents: number, currency: string, locale: string): string {
+  const digits = currencyFractionDigits(currency)
+  return amountFromCents(String(cents), currency).toLocaleString(locale, {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  })
+}
+
 /** Día local YYYY-MM-DD en una zona horaria IANA. */
 export function dayInTimezone(timeZone: string, at: Date = new Date()): string {
   const parts = new Intl.DateTimeFormat("en-CA", {
@@ -40,17 +103,6 @@ export function dayInTimezone(timeZone: string, at: Date = new Date()): string {
   }).formatToParts(at)
   const get = (type: string) => parts.find((part) => part.type === type)?.value ?? ""
   return `${get("year")}-${get("month")}-${get("day")}`
-}
-
-/** Días entre una fecha ISO y hoy ( zona local, solo fecha). */
-export function daysSince(value: string | null | undefined): number | null {
-  if (!value) return null
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return null
-  const start = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime()
-  const now = new Date()
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
-  return Math.max(0, Math.round((today - start) / 86_400_000))
 }
 
 // --- Perfil y medios (Configuración) ---------------------------------------
@@ -88,10 +140,15 @@ export function fetchPaymentMethods(): Promise<{ data: PaymentMethodOption[] }> 
 
 // --- Cobro atómico: POST /patients/:id/collect ----------------------------------
 
+/** Línea del ticket congelada al cobrar (`TicketFrozen.lines` en el servidor). */
 export interface CollectSnapshotLine {
-  chargeId?: string
+  /** `null` = adelanto sin concepto. */
+  chargeId?: string | null
   description: string
+  /** Precio completo del concepto (o el importe del adelanto). */
   amountCents: number
+  /** Lo que este cobro pagó de él; los tickets anteriores a congelarlo no lo traen. */
+  appliedCents?: number
   promotion: string | null
 }
 
@@ -103,13 +160,32 @@ export interface CollectSnapshotMethod {
   reference: string | null
 }
 
+/**
+ * Lo que el ticket congela al cobrar (`payment_ticket.snapshot`): con esto se
+ * arma el ticket en pantalla, igual que el PDF del servidor. Los campos
+ * opcionales faltan en tickets emitidos antes de congelarlos.
+ */
 export interface CollectSnapshot {
-  patient: { id: string; displayName: string }
+  patient: { id: string; displayName: string; docType?: string | null; docNumber?: string | null }
+  /** Quién pagó, si no fue el propio paciente. */
+  payer?: { contactId: string; displayName: string } | null
+  /** Quién cobró. */
   issuer: { userId: string; name: string }
+  clinic?: {
+    legalName: string
+    tradeName: string | null
+    fiscalAddress: string | null
+    locale: string
+    currency: string
+    timezone: string
+  }
   branch: { id: string; name: string }
   lines: CollectSnapshotLine[]
   methods: CollectSnapshotMethod[]
+  /** Frase al pie vigente al cobrar. */
   notice: string
+  /** Lo que quedó por cobrar de esos conceptos. */
+  remainingCents?: number
 }
 
 /** Fila real de `payment_ticket` con su snapshot inmutable. */
@@ -162,15 +238,48 @@ export function collectApi(patientId: string, body: CollectInput): Promise<{ dat
   })
 }
 
-export function voidTicketApi(patientId: string, ticketId: string, reason: string): Promise<unknown> {
-  return apiFetch(`/api/patients/${patientId}/tickets/${ticketId}/void`, {
+export interface VoidTicketResult {
+  ticket: CollectTicketRow
+  voidedPayments: number
+  voidedApplications: number
+  /**
+   * Lo que este cobro había cubierto en otros tickets (un adelanto ya usado)
+   * y vuelve a quedar por cobrar.
+   */
+  reopenedCents: number
+  compensated: boolean
+  account: AccountSummary
+}
+
+export function voidTicketApi(
+  patientId: string,
+  ticketId: string,
+  reason: string,
+): Promise<{ data: VoidTicketResult }> {
+  return apiFetch<{ data: VoidTicketResult }>(`/api/patients/${patientId}/tickets/${ticketId}/void`, {
     method: "POST",
     body: JSON.stringify({ reason }),
   })
 }
 
+/**
+ * Fila completa de un ticket ya emitido (`GET /patients/:id/receipts/:ticketId`):
+ * la cuenta lista cada cobro con su snapshot, pero lo recibido, el vuelto y la
+ * fecha de anulación son columnas del ticket.
+ */
+export function fetchTicketReceipt(
+  patientId: string,
+  ticketId: string,
+): Promise<{ data: { ticket: CollectTicketRow; closedAfter?: boolean } }> {
+  return apiFetch<{ data: { ticket: CollectTicketRow; closedAfter?: boolean } }>(
+    `/api/patients/${patientId}/receipts/${ticketId}`,
+  )
+}
+
 export interface RefundResult {
   refunds: Array<{ id: string }>
+  /** Con este id se pide la constancia en PDF. */
+  receiptId: string
   amountCents: number
   currency: string
   branchId: string
@@ -209,6 +318,17 @@ export interface AccountPendingItem {
   budgetItemId: string | null
   planItemId: string | null
   encounterProcedureId: string | null
+  /** Quién atendió el acto que originó el concepto (solo el nombre). */
+  attendedBy?: string | null
+  attendedAt?: string | null
+  /** En lo que se cobra por sesión: qué visita es y cuántas se previeron. */
+  visitNumber?: number | null
+  visitsPlanned?: number | null
+  /** Servicio del concepto (su acto o su línea): con él se ofrece la promoción vigente. */
+  serviceId: string | null
+  /** Sede donde se originó el concepto. */
+  branchId: string | null
+  promotionId: string | null
   promotionName: string | null
 }
 
@@ -225,8 +345,15 @@ export interface AccountCobro {
   currency: string
   totalCents: number
   creditAppliedCents: number
+  branchId?: string
+  cashReceivedCents?: number | null
+  changeCents?: number | null
+  payerContactId?: string | null
   status: "vigente" | "anulado"
+  voidedAt?: string | null
   voidReason: string | null
+  /** La caja de su sede ya cerró después de este cobro: solo administración lo anula. */
+  closedAfter?: boolean
   createdAt: string
   snapshot: CollectSnapshot
   payments: AccountCobroPayment[]
@@ -247,8 +374,25 @@ export interface AccountHistoric {
   origin: "historico"
 }
 
+/** De qué cobro viene el saldo a favor. */
+export interface AccountCreditSource {
+  paymentId: string
+  ticketId: string | null
+  ticketNumber: number | null
+  currency: string
+  paidAt: string
+  availableCents: number
+  /** El cobro fue un adelanto (sin concepto). */
+  advance: boolean
+}
+
 export interface AccountSummary {
   patientId: string
+  /** Identidad mínima para la cabecera de caja. */
+  patient?: { displayName: string; docType: string | null; docNumber: string | null; sex: string | null }
+  aFavorOrigen?: AccountCreditSource[]
+  /** Visitas atendidas por tratamiento (id del tratamiento del plan). */
+  visitasPorTratamiento?: Record<string, number>
   byCurrency: AccountCurrency[]
   pendiente: AccountPendingItem[]
   cobros: AccountCobro[]
@@ -272,21 +416,21 @@ export function createManualChargeApi(
   })
 }
 
-export interface ResponsibilityRow {
-  contactId: string
-  kind: string
-  isCurrent: boolean
-  contact: { id: string; displayName: string; isActive: boolean }
-}
-
-/** Responsables del paciente (económico, representante…): payer real del cobro. */
-export function fetchResponsibilities(patientId: string): Promise<{ data: ResponsibilityRow[] }> {
-  return apiFetch<{ data: ResponsibilityRow[] }>(`/api/patients/${patientId}/responsibilities`)
-}
+/**
+ * Corrige un concepto por cobrar. `reason` es obligatorio al cambiar importe o
+ * descripción; aplicar una promoción ya es el motivo (con «desde», solo se pide
+ * si el precio final baja del mínimo). `promotionId: null` quita la promoción
+ * y devuelve el precio de origen. Una promoción sin costo retira el concepto.
+ */
 export function editChargeConceptApi(
   patientId: string,
   chargeId: string,
-  body: { amountCents?: number; description?: string; promotionId?: string; reason: string },
+  body: {
+    amountCents?: number
+    description?: string
+    promotionId?: string | null
+    reason?: string
+  },
 ): Promise<unknown> {
   return apiFetch(`/api/patients/${patientId}/charges/${chargeId}/update`, {
     method: "POST",
@@ -299,299 +443,6 @@ export function voidChargeApi(patientId: string, chargeId: string, reason: strin
     method: "POST",
     body: JSON.stringify({ reason }),
   })
-}
-
-// --- Caja por sede: GET /finance/cash → { branchId, currency, openedAt, cashOnHandCents, byMethod, tickets } ---
-
-export interface CashByMethod {
-  name: string
-  typeCode: string | null
-  count: number
-  amountCents: number
-}
-
-export interface CashState {
-  branchId: string
-  currency: string
-  openedAt: string | null
-  cashOnHandCents: number
-  byMethod: CashByMethod[]
-  tickets: number
-}
-
-export function fetchCashState(branchId: string, currency?: string): Promise<{ data: CashState }> {
-  const params = new URLSearchParams({ branchId })
-  if (currency) params.set("currency", currency)
-  return apiFetch<{ data: CashState }>(`/api/finance/cash?${params}`)
-}
-
-export interface CashShiftRow {
-  id: string
-  branchId: string
-  currency: string
-  openingCents: number
-  status: "abierta" | "cerrada"
-  openedAt: string
-  closedAt: string | null
-}
-
-export function fetchOpenShifts(branchId: string): Promise<{ data: CashShiftRow[] }> {
-  const params = new URLSearchParams({ branchId, status: "abierta" })
-  return apiFetch<{ data: CashShiftRow[] }>(`/api/finance/shifts?${params}`)
-}
-
-export interface CashMovementRow {
-  id: string
-  shiftId: string
-  direction: "ingreso" | "egreso"
-  kind: string
-  amountCents: number
-  currency: string
-  method: string | null
-  methodTypeCode: string | null
-  concept: string
-  patientPaymentId: string | null
-  expenseId: string | null
-  createdAt: string
-  voidedAt: string | null
-}
-
-export interface ShiftDetailBody {
-  shift: CashShiftRow
-  movements: CashMovementRow[]
-  ingresosCents: number
-  electronicosCents: number
-  egresosCents: number
-  esperadoCents: number
-}
-
-export function fetchShiftDetail(shiftId: string): Promise<{ data: ShiftDetailBody }> {
-  return apiFetch<{ data: ShiftDetailBody }>(`/api/finance/shifts/${shiftId}`)
-}
-
-/** Ventana abierta con su arqueo en vivo; null si la sede aún no tiene caja. */
-export async function fetchOpenShiftDetail(
-  branchId: string,
-  currency: string,
-): Promise<ShiftDetailBody | null> {
-  const shifts = await fetchOpenShifts(branchId)
-  const open = shifts.data.find((row) => row.currency === currency) ?? null
-  if (!open) return null
-  const detail = await fetchShiftDetail(open.id)
-  return detail.data
-}
-
-export interface DebtRow {
-  patientId: string
-  displayName: string
-  branchId: string | null
-  currency: string
-  totalCents: number
-  /** Serializado ISO (el servicio devuelve Date). */
-  oldestSince: string | null
-  chargesCount: number
-}
-
-export function fetchDebts(branchId?: string): Promise<{ data: DebtRow[] }> {
-  const query = branchId ? `?branchId=${encodeURIComponent(branchId)}` : ""
-  return apiFetch<{ data: DebtRow[] }>(`/api/finance/debts${query}`)
-}
-
-export interface DayMovementsBody {
-  branchId: string
-  day: string
-  timezone: string
-  movements: CashMovementRow[]
-}
-
-export function fetchDayMovements(query: {
-  branchId: string
-  currency?: string
-  day: string
-  timezone?: string
-}): Promise<{ data: DayMovementsBody }> {
-  const params = new URLSearchParams({ branchId: query.branchId, day: query.day })
-  if (query.currency) params.set("currency", query.currency)
-  if (query.timezone) params.set("timezone", query.timezone)
-  return apiFetch<{ data: DayMovementsBody }>(`/api/finance/movements?${params}`)
-}
-
-/** Único movimiento manual (aporte/retiro) sobre la ventana abierta de la sede. */
-export async function appendCashMovementApi(body: {
-  branchId: string
-  currency: string
-  direction: "ingreso" | "egreso"
-  kind: "aporte" | "retiro"
-  amountCents: number
-  concept: string
-}): Promise<unknown> {
-  const shifts = await fetchOpenShifts(body.branchId)
-  const open = shifts.data.find((row) => row.currency === body.currency) ?? null
-  if (!open) throw new Error("La sede aún no tiene caja: cobra o registra un gasto para abrirla.")
-  return apiFetch(`/api/finance/shifts/${open.id}/movements`, {
-    method: "POST",
-    body: JSON.stringify({
-      direction: body.direction,
-      kind: body.kind,
-      amountCents: body.amountCents,
-      concept: body.concept,
-    }),
-  })
-}
-
-// --- Gastos cortos por categoría (filas reales de `expense`) ---------------------
-
-export const EXPENSE_CATEGORIES = [
-  "Personal",
-  "Alquiler",
-  "Laboratorio",
-  "Materiales",
-  "Servicios",
-  "Impuestos",
-  "Otros",
-] as const
-export type ExpenseCategory = (typeof EXPENSE_CATEGORIES)[number]
-
-export interface ExpenseRow {
-  id: string
-  branchId: string
-  supplierId: string | null
-  shiftId: string | null
-  concept: string
-  category: string
-  amountCents: number
-  currency: string
-  spentAt: string
-  receiptKind: string
-  receiptNumber: string | null
-  notes: string | null
-}
-
-/** Salió del efectivo de la caja = el gasto quedó atado a un turno. */
-export function expenseFromCash(row: Pick<ExpenseRow, "shiftId">): boolean {
-  return row.shiftId !== null
-}
-
-export function fetchShortExpenses(query: {
-  branchId?: string
-  category?: ExpenseCategory
-  limit?: number
-}): Promise<{ data: ExpenseRow[] }> {
-  const params = new URLSearchParams()
-  if (query.branchId) params.set("branchId", query.branchId)
-  if (query.category) params.set("category", query.category)
-  if (query.limit) params.set("limit", String(query.limit))
-  const suffix = params.size > 0 ? `?${params}` : ""
-  return apiFetch<{ data: ExpenseRow[] }>(`/api/finance/expenses${suffix}`)
-}
-
-export function createShortExpenseApi(body: {
-  branchId: string
-  category: ExpenseCategory
-  concept: string
-  amountCents: number
-  currency?: string
-  spentAt?: string
-  receiptKind?: string
-  receiptNumber?: string
-  notes?: string
-  fromCash?: boolean
-}): Promise<unknown> {
-  return apiFetch("/api/finance/expenses", { method: "POST", body: JSON.stringify(body) })
-}
-
-export function voidShortExpenseApi(id: string, reason: string): Promise<unknown> {
-  return apiFetch(`/api/finance/expenses/${id}/void`, {
-    method: "POST",
-    body: JSON.stringify({ reason }),
-  })
-}
-
-// --- Cierres: POST /closures devuelve el turno; la hoja sale de /closures/:id ---
-
-export interface CashClosureMethodTotal {
-  name: string
-  count: number
-  amountCents: number
-}
-
-/** Fila real de `cash_closure` (inmutable). */
-export interface CashClosureRow {
-  id: string
-  branchId: string
-  currency: string
-  shiftId: string
-  windowFrom: string
-  windowTo: string
-  openingRetainedCents: number
-  cashCollectedCents: number | null
-  expenseCashCents: number
-  expectedCents: number
-  countedCents: number
-  differenceCents: number
-  retainedCents: number | null
-  deliveredCents: number | null
-  notes: string | null
-  closedBy: string | null
-  closedAt: string
-}
-
-export function createClosureApi(body: {
-  branchId: string
-  currency?: string
-  countedCents: number
-  retainedCents: number
-  deliveredCents: number
-  notes?: string
-}): Promise<{ data: CashShiftRow }> {
-  return apiFetch<{ data: CashShiftRow }>("/api/finance/closures", {
-    method: "POST",
-    body: JSON.stringify(body),
-  })
-}
-
-/** Item de historial: cierres nuevos y turnos viejos unidos. */
-export interface ClosureListItem {
-  id: string
-  source: "cierre" | "turno"
-  branchId: string
-  currency: string
-  closedAt: string
-  closedBy: string | null
-  expectedCents: number
-  countedCents: number
-  differenceCents: number
-  /** Nulo en turnos viejos: desconocido, nunca 0. */
-  retainedCents: number | null
-  deliveredCents: number | null
-  notes: string | null
-}
-
-export function fetchClosures(branchId: string): Promise<{ data: ClosureListItem[] }> {
-  return apiFetch<{ data: ClosureListItem[] }>(
-    `/api/finance/closures?branchId=${encodeURIComponent(branchId)}`,
-  )
-}
-
-export interface ClosureSheetEnvelope {
-  legacy: boolean
-  closure: CashClosureRow
-  /** Nulo en turnos viejos: sin desglose por medio. */
-  totalsByMethod: CashClosureMethodTotal[] | null
-  branch: { id: string; name: string } | null
-  orgProfile: {
-    receiptWidth: string
-    sheetSize: string
-    ticketFooter: string
-    tradeName?: string | null
-    legalName?: string | null
-    fiscalAddress?: string | null
-  } | null
-  closedByName: string | null
-}
-
-export function fetchClosureSheet(id: string): Promise<{ data: ClosureSheetEnvelope }> {
-  return apiFetch<{ data: ClosureSheetEnvelope }>(`/api/finance/closures/${id}`)
 }
 
 // --- Promociones vigentes (PresupuestosPromociones) ------------------------------
@@ -626,6 +477,10 @@ export async function fetchActivePromotions(serviceId?: string): Promise<Promoti
 export interface PatientSearchRow {
   id: string
   displayName: string
+  /** La lista de pacientes ya trae el documento y el sexo registrados. */
+  docType?: string | null
+  docNumber?: string | null
+  sex?: string | null
 }
 
 export function searchPatientsApi(query: string): Promise<{ data: PatientSearchRow[] }> {

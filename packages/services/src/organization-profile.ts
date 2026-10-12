@@ -15,28 +15,82 @@ export type ReceiptWidth = (typeof RECEIPT_WIDTHS)[number]
 export const SHEET_SIZES = ["A4", "Letter"] as const
 export type SheetSize = (typeof SHEET_SIZES)[number]
 
-/** Países con preset; otros países usan el perfil genérico (moneda ISO libre). */
-export const COUNTRY_PRESETS: Record<
-  string,
-  { currency: string; locale: string; timezone: string; sheetSize: SheetSize }
-> = {
-  PE: { currency: "PEN", locale: "es-PE", timezone: "America/Lima", sheetSize: "A4" },
-  MX: { currency: "MXN", locale: "es-MX", timezone: "America/Mexico_City", sheetSize: "Letter" },
-  CO: { currency: "COP", locale: "es-CO", timezone: "America/Bogota", sheetSize: "Letter" },
-  CL: { currency: "CLP", locale: "es-CL", timezone: "America/Santiago", sheetSize: "A4" },
-  AR: { currency: "ARS", locale: "es-AR", timezone: "America/Argentina/Buenos_Aires", sheetSize: "A4" },
-  ES: { currency: "EUR", locale: "es-ES", timezone: "Europe/Madrid", sheetSize: "A4" },
-  US: { currency: "USD", locale: "en-US", timezone: "America/New_York", sheetSize: "Letter" },
+/**
+ * Propuesta regional al elegir país. No es un «perfil» por país escrito a
+ * mano: sale de datos de referencia de Unicode CLDR (moneda de curso legal,
+ * papel) y sirve para cualquier país. Lo que no se puede deducir con
+ * seguridad queda en `null` y lo completa la persona; todo se puede cambiar.
+ */
+export interface RegionDefaults {
+  /** ISO 4217 de curso legal; `null` si el país no está en la tabla. */
+  currency: string | null
+  /** BCP 47: idioma principal del país (o el indicado) con su región. */
+  locale: string
+  /** IANA; `null` cuando el país tiene varias zonas o no está en la tabla. */
+  timezone: string | null
+  sheetSize: SheetSize
 }
 
-/** Propuesta regional/impresión al elegir país (PUT /api/org-profile la aplica; Main integra). */
-export function regionPresetForCountry(countryCode: string): {
-  currency: string
-  locale: string
-  timezone: string
-  sheetSize: SheetSize
-} | null {
-  return COUNTRY_PRESETS[countryCode.trim().toUpperCase()] ?? null
+/** Moneda de curso legal por país (CLDR `currencyData`, vigente). */
+const COUNTRY_CURRENCY: Record<string, string> = {
+  // América
+  AR: "ARS", BB: "BBD", BO: "BOB", BR: "BRL", BS: "BSD", BZ: "BZD", CA: "CAD", CL: "CLP",
+  CO: "COP", CR: "CRC", CU: "CUP", DO: "DOP", EC: "USD", GT: "GTQ", GY: "GYD", HN: "HNL",
+  HT: "HTG", JM: "JMD", MX: "MXN", NI: "NIO", PA: "PAB", PE: "PEN", PR: "USD", PY: "PYG",
+  SR: "SRD", SV: "USD", TT: "TTD", US: "USD", UY: "UYU", VE: "VES",
+  // Zona euro y quienes usan el euro
+  AD: "EUR", AT: "EUR", BE: "EUR", BG: "EUR", CY: "EUR", DE: "EUR", EE: "EUR", ES: "EUR",
+  FI: "EUR", FR: "EUR", GR: "EUR", HR: "EUR", IE: "EUR", IT: "EUR", LT: "EUR", LU: "EUR",
+  LV: "EUR", MC: "EUR", ME: "EUR", MT: "EUR", NL: "EUR", PT: "EUR", SI: "EUR", SK: "EUR",
+  SM: "EUR", VA: "EUR", XK: "EUR",
+  // Resto de Europa
+  CH: "CHF", CZ: "CZK", DK: "DKK", GB: "GBP", HU: "HUF", IS: "ISK", NO: "NOK", PL: "PLN",
+  RO: "RON", RS: "RSD", RU: "RUB", SE: "SEK", TR: "TRY", UA: "UAH",
+  // África, Asia y Oceanía
+  AE: "AED", AU: "AUD", CN: "CNY", EG: "EGP", GQ: "XAF", HK: "HKD", ID: "IDR", IL: "ILS",
+  IN: "INR", JP: "JPY", KE: "KES", KR: "KRW", KW: "KWD", MA: "MAD", MY: "MYR", NG: "NGN",
+  NZ: "NZD", PH: "PHP", QA: "QAR", SA: "SAR", SG: "SGD", TH: "THB", TW: "TWD", VN: "VND",
+  ZA: "ZAR",
+}
+
+/** Idioma principal para el formato de números y fechas (no traduce la interfaz). */
+const COUNTRY_LANGUAGE: Record<string, string> = {
+  AR: "es", BO: "es", CL: "es", CO: "es", CR: "es", CU: "es", DO: "es", EC: "es", ES: "es",
+  GQ: "es", GT: "es", HN: "es", MX: "es", NI: "es", PA: "es", PE: "es", PR: "es", PY: "es",
+  SV: "es", UY: "es", VE: "es",
+  AO: "pt", BR: "pt", MZ: "pt", PT: "pt",
+  AU: "en", BB: "en", BS: "en", BZ: "en", CA: "en", GB: "en", GY: "en", IE: "en", IN: "en",
+  JM: "en", KE: "en", NG: "en", NZ: "en", PH: "en", SG: "en", TT: "en", US: "en", ZA: "en",
+  AT: "de", DE: "de", FR: "fr", HT: "fr", IT: "it", NL: "nl",
+}
+
+/** Países donde la hoja habitual es Carta (CLDR `paperSize` US-Letter); el resto usa A4 (ISO 216). */
+const LETTER_COUNTRIES = new Set([
+  "BZ", "CA", "CL", "CO", "CR", "GT", "MX", "NI", "PA", "PH", "PR", "SV", "US", "VE",
+])
+
+/** Zona horaria cuando el país tiene una sola de uso general. */
+const COUNTRY_TIMEZONE: Record<string, string> = {
+  AR: "America/Argentina/Buenos_Aires", BO: "America/La_Paz", CL: "America/Santiago",
+  CO: "America/Bogota", CR: "America/Costa_Rica", CU: "America/Havana",
+  DO: "America/Santo_Domingo", EC: "America/Guayaquil", ES: "Europe/Madrid",
+  GT: "America/Guatemala", HN: "America/Tegucigalpa", NI: "America/Managua",
+  PA: "America/Panama", PE: "America/Lima", PR: "America/Puerto_Rico", PY: "America/Asuncion",
+  SV: "America/El_Salvador", UY: "America/Montevideo", VE: "America/Caracas",
+}
+
+/**
+ * Lo que se propone al elegir país. `language` es el idioma de respaldo
+ * cuando el país no tiene uno principal conocido (el del perfil actual).
+ */
+export function regionPresetForCountry(countryCode: string, language = "es"): RegionDefaults {
+  const code = countryCode.trim().toUpperCase()
+  return {
+    currency: COUNTRY_CURRENCY[code] ?? null,
+    locale: `${COUNTRY_LANGUAGE[code] ?? language}-${code}`,
+    timezone: COUNTRY_TIMEZONE[code] ?? null,
+    sheetSize: LETTER_COUNTRIES.has(code) ? "Letter" : "A4",
+  }
 }
 
 function assertCountryCode(value: string | null | undefined): string {
@@ -108,6 +162,50 @@ export interface UpdateOrgRegionInput {
   /** Al cambiar de país se proponen moneda/formato/papel; todo se puede cambiar. */
   applyCountryPreset?: boolean
 }
+/** Perfil regional completo con el que nace `org_profile`. */
+export interface InitialOrgRegion {
+  countryCode: string
+  currency: string
+  timezone: string
+  locale: string
+  sheetSize: SheetSize
+}
+
+/**
+ * Región con la que se crea el perfil de una clínica. La base no tiene valores
+ * por defecto de ningún país: el país se indica siempre y de él se deriva lo
+ * demás (`regionPresetForCountry`); lo indicado a mano manda, y lo que no se
+ * puede deducir (moneda desconocida, país con varias zonas) se exige.
+ */
+export function initialOrgRegion(
+  input: Pick<UpdateOrgRegionInput, "countryCode" | "currency" | "timezone" | "locale" | "sheetSize">,
+): InitialOrgRegion {
+  if (!input.countryCode?.trim()) throw validation("Indica el país de la clínica")
+  const countryCode = assertCountryCode(input.countryCode)
+  let language = "es"
+  if (input.locale) {
+    try {
+      language = new Intl.Locale(input.locale).language
+    } catch {
+      // Se valida abajo con su propio mensaje.
+    }
+  }
+  const preset = regionPresetForCountry(countryCode, language)
+  if (!input.currency && !preset.currency) {
+    throw validation("Indica la moneda de la clínica: no la conocemos para ese país")
+  }
+  if (!input.timezone && !preset.timezone) {
+    throw validation("Indica la zona horaria de la clínica: ese país tiene más de una")
+  }
+  return {
+    countryCode,
+    currency: assertCurrency(input.currency || preset.currency),
+    timezone: assertTimezone(input.timezone || preset.timezone),
+    locale: assertLocale(input.locale || preset.locale),
+    sheetSize: input.sheetSize ? assertSheetSize(input.sheetSize) : preset.sheetSize,
+  }
+}
+
 /**
  * La moneda no reinterpreta históricos: si existen cargos, pagos,
  * presupuestos o turnos en otra moneda, el cambio se bloquea (409
@@ -160,17 +258,30 @@ export async function updateOrgRegion(
     fields.push("countryCode")
   }
   if (input.applyCountryPreset) {
-    const preset = regionPresetForCountry(countryCode)
-    if (preset) {
+    // Lo que el país propone; cada valor indicado a mano lo reemplaza abajo.
+    // Sirve para cualquier país: solo se pide lo que no se puede deducir.
+    let language = "es"
+    try {
+      language = new Intl.Locale(current.locale).language
+    } catch {
+      // Idioma guardado ilegible: vale el de respaldo.
+    }
+    const preset = regionPresetForCountry(countryCode, language)
+    if (preset.currency) {
       set.currency = preset.currency
-      set.locale = preset.locale
+      fields.push("currency")
+    } else if (!input.currency) {
+      throw validation("Indica la moneda de la clínica: no la conocemos para ese país")
+    }
+    if (preset.timezone) {
       set.timezone = preset.timezone
-      set.sheetSize = preset.sheetSize
-      fields.push("currency", "locale", "timezone", "sheetSize")
+      fields.push("timezone")
+    } else if (!input.timezone) {
+      throw validation("Indica la zona horaria de la clínica: ese país tiene más de una")
     }
-    else if (!input.currency || !input.locale || !input.timezone) {
-      throw validation("Indica moneda, idioma y zona horaria para este país")
-    }
+    set.locale = preset.locale
+    set.sheetSize = preset.sheetSize
+    fields.push("locale", "sheetSize")
   }
   if (input.currency !== undefined && input.currency !== null) {
     set.currency = assertCurrency(input.currency)

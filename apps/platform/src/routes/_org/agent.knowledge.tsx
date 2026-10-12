@@ -8,6 +8,7 @@ import { apiFetch } from "../../lib/api"
 import { usePermission } from "../../lib/crm"
 import { isAmbiguousMutationError, mutationErrorMessage, QueryErrorState } from "../../lib/query-error"
 import { PageDraftGuard, sameDraft } from "../../lib/page-draft-guard"
+import { activeOrgLocale } from "../../lib/locale"
 
 export const Route = createFileRoute("/_org/agent/knowledge")({
   component: AgentKnowledgePage,
@@ -289,7 +290,7 @@ function AgentKnowledgePage() {
               {revisions.map((r) => (
                 <li key={r.version} className="text-sm">
                   <span className="font-medium">v{r.version}</span>{" "}
-                  <span className="text-muted-foreground">{new Date(r.createdAt).toLocaleString("es-PE")}</span>
+                  <span className="text-muted-foreground">{new Date(r.createdAt).toLocaleString(activeOrgLocale())}</span>
                   <p className="whitespace-pre-wrap text-muted-foreground">{r.body}</p>
                 </li>
               ))}

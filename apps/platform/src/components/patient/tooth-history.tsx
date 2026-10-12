@@ -5,6 +5,7 @@ import { Link } from "@tanstack/react-router"
 import { apiFetch } from "../../lib/api"
 import { DIAGNOSIS_STATUS_LABELS } from "../../lib/encounters"
 import { categoryLabel } from "./document-labels"
+import { activeOrgLocale } from "../../lib/locale"
 
 export interface ToothEvent {
   kind: "hallazgo" | "diagnostico" | "procedimiento" | "control" | "documento"
@@ -42,7 +43,7 @@ const STATUS_LABELS: Record<string, string> = {
 }
 
 function day(iso: string) {
-  return new Date(iso).toLocaleDateString("es-PE", {
+  return new Date(iso).toLocaleDateString(activeOrgLocale(), {
     day: "2-digit",
     month: "short",
     year: "numeric",

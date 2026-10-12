@@ -12,6 +12,12 @@ import {
   SelectTrigger,
   SelectValue,
   Textarea,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
 } from "@odentia/ui"
 import {
   ConfirmDialog,
@@ -57,6 +63,7 @@ import { EncounterProcedures } from "./encounter-procedures"
 import { EncounterTreatments } from "./encounter-treatments"
 import { ImagenesTab } from "./imagenes-tab"
 import { PatientClinicalStrip } from "./patient-header"
+import { activeOrgLocale } from "../../lib/locale"
 
 export interface EncounterEditorProps {
   patientId: string
@@ -270,7 +277,7 @@ function formatClock(iso: string): string {
   const date = new Date(iso)
   return Number.isNaN(date.getTime())
     ? ""
-    : date.toLocaleTimeString("es-PE", { hour: "2-digit", minute: "2-digit" })
+    : date.toLocaleTimeString(activeOrgLocale(), { hour: "2-digit", minute: "2-digit" })
 }
 
 /** Resumen económico del cierre: qué quedó por cobrar y qué no. */
@@ -290,15 +297,15 @@ export interface FinalizeBilling {
 function skippedReasonLabel(reason: string | null): string {
   switch (reason) {
     case "covered":
-      return "Ya cubierto por un cargo"
+      return "ya estaba incluido en lo cobrado del tratamiento"
     case "free_act":
-      return "Acto libre sin servicio"
+      return "se registró sin servicio del tarifario"
     case "zero_price":
-      return "Sin precio"
+      return "su servicio no tiene precio"
     case "sessions_complete":
-      return "Sesiones previstas completas"
+      return "ya se cobraron todas las visitas previstas"
     default:
-      return "No genera cargo"
+      return "no genera cobro"
   }
 }
 
@@ -776,6 +783,15 @@ export function EncounterEditor({
     } finally {
       if (mountedRef.current) setTakingOver(false)
     }
+  }
+
+  const chargedLines = finalizedBilling?.lines.filter((line) => line.status === "charged") ?? []
+  const skippedLines = finalizedBilling?.lines.filter((line) => line.status !== "charged") ?? []
+  const closeFinalized = () => {
+    if (!finalizedBilling) return
+    const hadCharges = finalizedBilling.lines.some((line) => line.status === "charged")
+    setFinalizedBilling(null)
+    void onFinalized(hadCharges)
   }
 
   const handleConfirmFinalize = async () => {
@@ -1807,59 +1823,63 @@ export function EncounterEditor({
         </Field>
       </ConfirmDialog>
 
-      {finalizedBilling ? (
-        <div
-          role="dialog"
-          aria-label="Atención finalizada"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-        >
-          <div className="flex max-h-[85vh] w-full max-w-lg flex-col gap-3 overflow-auto rounded-xl bg-card p-6">
-            <h3 className="font-heading text-lg font-semibold">Atención finalizada</h3>
-            <p className="text-sm text-muted-foreground">
-              Quedó por cobrar{" "}
-              <strong className="tabular-nums">
-                {finalizedBilling.currency && orgLocale
-                  ? formatMoney(finalizedBilling.chargedCents, finalizedBilling.currency, orgLocale)
-                  : "…"}
-              </strong>
-              . Caja ya lo ve en su lista de por cobrar.
-            </p>
-            <ul className="flex flex-col gap-2">
-              {finalizedBilling.lines.map((line) => (
-                <li
-                  key={line.procedureId}
-                  className="flex flex-wrap items-center justify-between gap-2 text-sm"
-                >
-                  <span className="font-medium">{line.description}</span>
-                  {line.status === "charged" ? (
+      {/* Cierre de la atención: qué quedó por cobrar y qué no, con su porqué. */}
+      <Dialog
+        open={finalizedBilling !== null}
+        onOpenChange={(next) => {
+          if (!next) closeFinalized()
+        }}
+      >
+        <DialogContent showCloseButton={false} aria-label="Atención finalizada">
+          <DialogHeader>
+            <DialogTitle>Atención finalizada</DialogTitle>
+            <DialogDescription>
+              {chargedLines.length > 0
+                ? "Caja ya lo ve en su lista de por cobrar."
+                : "Esta atención no dejó nada que cobrar."}
+            </DialogDescription>
+          </DialogHeader>
+          {chargedLines.length > 0 ? (
+            <section className="flex flex-col gap-2" aria-label="Quedó por cobrar">
+              <h3 className="text-sm font-semibold">Quedó por cobrar</h3>
+              <ul className="flex flex-col gap-1">
+                {chargedLines.map((line) => (
+                  <li key={line.procedureId} className="flex items-baseline justify-between gap-3 text-sm">
+                    <span>{line.description}</span>
                     <span className="tabular-nums">
                       {line.currency && orgLocale && line.amountCents != null
                         ? formatMoney(line.amountCents, line.currency, orgLocale)
-                        : "…"}
+                        : ""}
                     </span>
-                  ) : (
-                    <span className="text-xs text-muted-foreground">
-                      {skippedReasonLabel(line.reason)} · no se cobra
-                    </span>
-                  )}
+                  </li>
+                ))}
+              </ul>
+              {finalizedBilling?.currency && orgLocale ? (
+                <p className="flex items-baseline justify-between gap-3 border-t pt-2 text-sm font-semibold">
+                  <span>Total</span>
+                  <span className="tabular-nums">
+                    {formatMoney(finalizedBilling.chargedCents, finalizedBilling.currency, orgLocale)}
+                  </span>
+                </p>
+              ) : null}
+            </section>
+          ) : null}
+          {skippedLines.length > 0 ? (
+            <ul className="flex flex-col gap-1 text-sm text-muted-foreground">
+              {skippedLines.map((line) => (
+                <li key={line.procedureId}>
+                  No se cobra «{line.description}»: {skippedReasonLabel(line.reason)}.
                 </li>
               ))}
             </ul>
-            <div className="flex justify-end">
-              <Button
-                type="button"
-                onClick={() => {
-                  const hadCharges = finalizedBilling.lines.some((line) => line.status === "charged")
-                  setFinalizedBilling(null)
-                  void onFinalized(hadCharges)
-                }}
-              >
-                Listo
-              </Button>
-            </div>
-          </div>
-        </div>
-      ) : null}
+          ) : null}
+          <DialogFooter>
+            <Button type="button" onClick={closeFinalized}>
+              Listo
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <ConfirmDialog
         open={voidOpen}

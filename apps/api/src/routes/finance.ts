@@ -15,20 +15,16 @@ import { canAccess, orgContextOf } from "../lib/context.js"
 import { errorBody } from "../lib/error.js"
 import { type CrmDeps, runService, validationError } from "./helpers.js"
 import {
-  addShiftMovement,
+  addCashMovement,
   closeCashWindow,
   createExpense,
   getCashState,
   getClosureSheet,
   getDayMovements,
   getDebts,
-  getFinanceOverview,
-  getPatientBalanceForPortal,
-  getReceivables,
-  getShiftDetail,
+  getMonthExpenses,
   listClosures,
   listExpenses,
-  listShifts,
   voidExpense,
   voidMovement,
 } from "@odentia/services"
@@ -54,31 +50,14 @@ export function createFinanceRoute(deps: Pick<CrmDeps, "db">) {
   })
 
   // --- Caja -------------------------------------------------------------------
-  app.get("/shifts", async (c) => {
-    const { orgId } = orgContextOf(c)
-    const parsed = z
-      .object({ branchId: z.uuid().optional(), status: z.enum(["abierta", "cerrada"]).optional() })
-      .safeParse(c.req.query())
-    if (!parsed.success) return validationError(c, parsed.error.issues)
-    return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) => listShifts(tx, orgId, parsed.data)),
-    )
-  })
-
-  app.get("/shifts/:id", async (c) => {
-    const { orgId } = orgContextOf(c)
-    return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) => getShiftDetail(tx, orgId, c.req.param("id"))),
-    )
-  })
-
-  // Ingresar o retirar efectivo de la ventana abierta (único movimiento manual).
-  app.post("/shifts/:id/movements", async (c) => {
+  // Ingresar o retirar efectivo (único movimiento manual). Va por sede: la
+  // caja nace sola si aún no existía.
+  app.post("/cash/movements", async (c) => {
     const { orgId, userId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "finance.write")) return forbid(c)
     const parsed = z
       .object({
-        direction: z.enum(["ingreso", "egreso"]),
+        branchId: z.uuid(),
         kind: z.enum(["aporte", "retiro"]),
         amountCents: cents,
         concept: z.string().trim().min(1).max(500),
@@ -87,9 +66,7 @@ export function createFinanceRoute(deps: Pick<CrmDeps, "db">) {
       .safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 201, () =>
-      withOrgContext(deps.db, orgId, (tx) =>
-        addShiftMovement(tx, orgId, userId, c.req.param("id"), parsed.data),
-      ),
+      withOrgContext(deps.db, orgId, (tx) => addCashMovement(tx, orgId, userId, parsed.data)),
     )
   })
 
@@ -101,6 +78,9 @@ export function createFinanceRoute(deps: Pick<CrmDeps, "db">) {
     const parsed = z
       .object({
         branchId: z.uuid(),
+        // La ventana que se contó (o null si la sede aún no tenía caja):
+        // repetir el envío devuelve el mismo cierre, no abre otro.
+        shiftId: z.uuid().nullable(),
         currency: currency.optional(),
         countedCents: z.number().int().min(0).max(2147483647),
         retainedCents: z.number().int().min(0).max(2147483647),
@@ -121,6 +101,8 @@ export function createFinanceRoute(deps: Pick<CrmDeps, "db">) {
       .object({
         branchId: z.uuid().optional(),
         limit: z.coerce.number().int().min(1).max(100).optional(),
+        // Página siguiente: `closedAt` del último cierre ya recibido.
+        before: isoDateTime.optional(),
       })
       .safeParse(c.req.query())
     if (!parsed.success) return validationError(c, parsed.error.issues)
@@ -186,6 +168,22 @@ export function createFinanceRoute(deps: Pick<CrmDeps, "db">) {
   })
 
   // --- Gastos cortos (los proveedores quedan solo en Inventario) -------------------------
+  // Gastos de un mes con su total por tipo (el mes es el de la clínica).
+  app.get("/expenses/month", async (c) => {
+    const { orgId } = orgContextOf(c)
+    const parsed = z
+      .object({
+        year: z.coerce.number().int().min(2000).max(2100),
+        month: z.coerce.number().int().min(1).max(12),
+        branchId: z.uuid().optional(),
+      })
+      .safeParse(c.req.query())
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) => getMonthExpenses(tx, orgId, parsed.data)),
+    )
+  })
+
   app.get("/expenses", async (c) => {
     const { orgId } = orgContextOf(c)
     const parsed = z
@@ -239,35 +237,5 @@ export function createFinanceRoute(deps: Pick<CrmDeps, "db">) {
     )
   })
 
-  // --- Cuentas por cobrar ----------------------------------------------------------
-  app.get("/receivables", async (c) => {
-    const { orgId } = orgContextOf(c)
-    const parsed = z.object({ patientId: z.uuid().optional(), branchId: z.uuid().optional() }).safeParse(c.req.query())
-    if (!parsed.success) return validationError(c, parsed.error.issues)
-    return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) => getReceivables(tx, orgId, parsed.data)),
-    )
-  })
-
-  app.get("/patients/:id/balance", async (c) => {
-    const { orgId } = orgContextOf(c)
-    return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) =>
-        getPatientBalanceForPortal(tx, orgId, c.req.param("id")),
-      ),
-    )
-  })
-
-  // --- Resumen (Home / Reportes) --------------------------------------------------------------
-  app.get("/overview", async (c) => {
-    const { orgId } = orgContextOf(c)
-    const parsed = z
-      .object({ branchId: z.uuid().optional(), from: isoDay.optional(), to: isoDay.optional() })
-      .safeParse(c.req.query())
-    if (!parsed.success) return validationError(c, parsed.error.issues)
-    return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) => getFinanceOverview(tx, orgId, parsed.data)),
-    )
-  })
   return app
 }

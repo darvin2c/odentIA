@@ -1067,3 +1067,49 @@ it("plan: planes del paciente con estado derivado y detalle", async () => {
   )
   expect(foreign.status).toBe(404)
 })
+
+it("presupuesto: en borrador se añaden y se quitan tratamientos; entregado ya no", async () => {
+  const app = buildApp("admin")
+  const patientId = await createFreshPatient(app, "Borrador con casillas")
+  const ctx = await setupPlan(app, patientId)
+  const first = await addItem(app, patientId, ctx, { serviceId: SVC_LIMPIEZA, toothNumber: 36 })
+  const second = await addItem(app, patientId, ctx, { serviceId: SVC_LIMPIEZA, toothNumber: 37 })
+  const budgetId = await createBudget(app, patientId, ctx.planId, [first.id])
+  const items = `/patients/${patientId}/budgets/${budgetId}/items`
+
+  // Cuerpo inválido y rol sin permiso: sin efectos.
+  expect((await postJson(app, items, { itemIds: [] })).status).toBe(400)
+  expect((await postJson(buildApp("cashier"), items, { itemIds: [second.id] })).status).toBe(403)
+  expect(
+    (await postJson(buildApp("cashier"), `${items}/remove`, { itemIds: [first.id] })).status,
+  ).toBe(403)
+
+  const added = await postJson(app, items, { itemIds: [second.id] })
+  expect(added.status).toBe(200)
+  const addedBody = (await added.json()) as { data: BudgetTotals }
+  expect(addedBody.data.items.map((line) => line.planItemId).sort()).toEqual(
+    [first.id, second.id].sort(),
+  )
+  expect(addedBody.data.totalCents).toBe(24000)
+  // Ya está en el borrador: no se repite.
+  const again = await postJson(app, items, { itemIds: [second.id] })
+  expect(again.status).toBe(409)
+  expect(((await again.json()) as ErrorBody).error.code).toBe("ITEM_ALREADY_QUOTED")
+
+  const removed = await postJson(app, `${items}/remove`, { itemIds: [first.id] })
+  expect(removed.status).toBe(200)
+  const removedBody = (await removed.json()) as { data: BudgetTotals }
+  expect(removedBody.data.items.map((line) => line.planItemId)).toEqual([second.id])
+  expect(removedBody.data.totalCents).toBe(12000)
+  // Lo que no está en el borrador no se puede quitar.
+  expect((await postJson(app, `${items}/remove`, { itemIds: [first.id] })).status).toBe(404)
+
+  // Entregado, sus tratamientos ya no cambian.
+  await deliverBudget(app, patientId, budgetId)
+  const late = await postJson(app, `${items}/remove`, { itemIds: [second.id] })
+  expect(late.status).toBe(409)
+  expect(((await late.json()) as ErrorBody).error.code).toBe("BUDGET_STATUS")
+  const lateAdd = await postJson(app, items, { itemIds: [first.id] })
+  expect(lateAdd.status).toBe(409)
+  expect(((await lateAdd.json()) as ErrorBody).error.code).toBe("BUDGET_STATUS")
+})

@@ -14,12 +14,22 @@ import {
   treatmentPlan,
   treatmentPlanItem,
 } from "@odentia/db/schema/clinical"
+import { contact } from "@odentia/db/schema/crm"
+import { cashClosure } from "@odentia/db/schema/finance"
 import { auditEvent } from "@odentia/db/schema/org"
 import { branch, orgProfile } from "@odentia/db/schema/org"
 import { user } from "@odentia/db/schema/auth"
-import { and, asc, eq, isNull, sql } from "drizzle-orm"
+import { and, asc, desc, eq, inArray, isNull, or, sql } from "drizzle-orm"
 import { notFound, ServiceError, validation } from "./errors.js"
-import { ensureOpenShift, recordCashEgreso, recordCashIncome, requireBranch, reverseCashIncome } from "./finance.js"
+import { orgProfileRequired } from "./locale.js"
+import {
+  ensureOpenShift,
+  hasClosureSince,
+  recordCashEgreso,
+  recordCashIncome,
+  requireBranch,
+  reverseCashIncome,
+} from "./finance.js"
 import { isCashLike, requirePaymentMethod } from "./payment-methods.js"
 import { requirePromotionPrice } from "./promotions.js"
 import { requirePatient } from "./patients.js"
@@ -32,7 +42,7 @@ async function notify(tx: Db, payload: { orgId: string; kind: string; at: string
 
 export function assertPositiveCents(value: number): number {
   if (!Number.isSafeInteger(value) || value <= 0 || value > 2147483647)
-    throw validation("El importe debe ser un entero positivo de centavos")
+    throw validation("El importe debe ser un entero mayor que cero")
   return value
 }
 function currency(value: string): string {
@@ -78,10 +88,11 @@ async function audit(
   entity: string,
   id: string,
   action: string,
+  metadata?: Record<string, unknown>,
 ) {
   await tx
     .insert(auditEvent)
-    .values({ organizationId: orgId, actorUserId, entity, entityId: id, action })
+    .values({ organizationId: orgId, actorUserId, entity, entityId: id, action, ...(metadata ? { metadata } : {}) })
 }
 async function chargeRow(tx: Db, orgId: string, patientId: string, id: string) {
   const [row] = await tx
@@ -106,6 +117,12 @@ export interface CreateChargeInput {
   branchId?: string | null
   /** Promoción para un acto con servicio (la línea presupuestaria ya trae la suya). */
   promotionId?: string | null
+  /**
+   * Promoción que ya se acordó en un presupuesto aceptado: el cargo la hereda
+   * tal cual (nombre y precio congelados). No se vuelve a exigir que siga
+   * vigente: lo aceptado a tiempo se cobra aunque la promoción haya terminado.
+   */
+  frozenPromotion?: { id: string; name: string } | null
   description?: string
   amountCents?: number
   currency?: string
@@ -271,8 +288,11 @@ export async function createCharge(
     // El costo viaja con el acto: importe y moneda del snapshot registrado.
     amountCents ??= source.procedure.priceCents ?? undefined
     unit ??= source.procedure.currency ?? undefined
-    // Promoción al cobrar un servicio incluido: exige precio final si es «desde» (misma regla).
-    if (input.promotionId) {
+    if (input.frozenPromotion) {
+      promotionId = input.frozenPromotion.id
+      promotionName = input.frozenPromotion.name
+    } else if (input.promotionId) {
+      // Promoción al cobrar un servicio incluido: exige precio final si es «desde» (misma regla).
       const snapshot = await requirePromotionPrice(
         tx,
         orgId,
@@ -280,6 +300,8 @@ export async function createCharge(
         source.procedure.serviceId,
         amountCents,
       )
+      // El precio fijo manda; el «desde» ya validó el final contra su mínimo.
+      if (snapshot.mode === "fixed") amountCents = snapshot.priceCents
       promotionId = input.promotionId
       promotionName = snapshot.promotionName
     }
@@ -366,7 +388,13 @@ export async function voidCharge(
       ),
     )
     .returning()
-  await audit(tx, orgId, actorUserId, "patient_charge", id, "charge.voided")
+  await audit(tx, orgId, actorUserId, "patient_charge", id, "charge.voided", {
+    patientId,
+    description: row?.description,
+    amountCents: row?.amountCents,
+    currency: row?.currency,
+    reason: row?.voidReason,
+  })
   return row
 }
 // --- Edición de conceptos (corrige lo que quedó por cobrar, con motivo) -----------------
@@ -374,15 +402,50 @@ export async function voidCharge(
 export interface UpdateChargeInput {
   amountCents?: number
   description?: string
-  /** Promoción a aplicar al cobrar (exige servicio en el concepto). */
+  /** Promoción a aplicar al cobrar (exige servicio en el concepto); null la quita. */
   promotionId?: string | null
-  reason: string
+  /** Obligatorio al cambiar importe o descripción; una promoción es su propio motivo. */
+  reason?: string | null
+}
+
+/** Servicio del concepto: el de su acto o el de su línea presupuestaria. */
+async function chargeServiceId(
+  tx: Db,
+  orgId: string,
+  charge: { budgetItemId: string | null; encounterProcedureId: string | null },
+): Promise<{ serviceId: string | null; sourcePriceCents: number | null }> {
+  if (charge.encounterProcedureId) {
+    const [procedure] = await tx
+      .select({ serviceId: encounterProcedure.serviceId, priceCents: encounterProcedure.priceCents })
+      .from(encounterProcedure)
+      .where(
+        and(
+          eq(encounterProcedure.id, charge.encounterProcedureId),
+          eq(encounterProcedure.organizationId, orgId),
+        ),
+      )
+    return { serviceId: procedure?.serviceId ?? null, sourcePriceCents: procedure?.priceCents ?? null }
+  }
+  if (charge.budgetItemId) {
+    const [line] = await tx
+      .select({ serviceId: treatmentBudgetItem.serviceId, priceCents: treatmentBudgetItem.priceCents })
+      .from(treatmentBudgetItem)
+      .where(
+        and(
+          eq(treatmentBudgetItem.id, charge.budgetItemId),
+          eq(treatmentBudgetItem.organizationId, orgId),
+        ),
+      )
+    return { serviceId: line?.serviceId ?? null, sourcePriceCents: line?.priceCents ?? null }
+  }
+  return { serviceId: null, sourcePriceCents: null }
 }
 
 /**
- * Cambia el importe o la descripción de un concepto sin aplicaciones activas.
- * Con aplicaciones, el concepto se cobra parcial y el resto queda por cobrar:
- * no se reescribe. El motivo queda en auditoría (`editReason`).
+ * Corrige un concepto sin cobros aplicados: importe, descripción o promoción.
+ * Con cobros aplicados no se reescribe (se cobra parcial y el resto queda por
+ * cobrar). Cada cambio queda en auditoría con el valor anterior, el nuevo y
+ * el motivo; `edit_reason` guarda solo el último.
  */
 export async function updateCharge(
   tx: Db,
@@ -393,7 +456,7 @@ export async function updateCharge(
   input: UpdateChargeInput,
 ) {
   await lockAccount(tx, orgId, patientId)
-  await chargeRow(tx, orgId, patientId, id)
+  const current = await chargeRow(tx, orgId, patientId, id)
   const [application] = await tx
     .select({ id: patientPaymentApplication.id })
     .from(patientPaymentApplication)
@@ -415,49 +478,75 @@ export async function updateCharge(
     if (!text || text.length > 2000) throw validation("La descripción debe tener 1–2000 caracteres")
     patch.description = text
   }
-  if (input.promotionId !== undefined && input.promotionId !== null) {
-    const current = await chargeRow(tx, orgId, patientId, id)
-    // La promoción exige servicio: línea presupuestaria o acto con servicio.
-    let serviceId: string | null = null
-    if (current.budgetItemId) {
-      const [line] = await tx
-        .select({ serviceId: treatmentBudgetItem.serviceId })
-        .from(treatmentBudgetItem)
+  // Motivo: lo escribe la persona o lo da la promoción aplicada.
+  let reasonText = input.reason?.trim() ? reason(input.reason) : null
+  if (input.promotionId) {
+    const { serviceId } = await chargeServiceId(tx, orgId, current)
+    if (!serviceId) throw validation("La promoción solo aplica a conceptos con servicio")
+    const snapshot = await requirePromotionPrice(tx, orgId, input.promotionId, serviceId, patch.amountCents)
+    if (snapshot.currency !== current.currency)
+      throw conflict("CURRENCY_MISMATCH", "La promoción usa otra moneda")
+    // Con «desde», bajar del mínimo anunciado sí exige un motivo propio.
+    if (snapshot.mode === "from" && snapshot.floorCents != null && snapshot.priceCents < snapshot.floorCents && !reasonText)
+      throw validation("El precio queda por debajo del mínimo de la promoción: indica el motivo")
+    reasonText ??= `Promoción «${snapshot.promotionName}»`
+    if (snapshot.priceCents === 0) {
+      // Una promoción sin costo no deja nada que cobrar: el concepto se retira
+      // con la promoción como motivo, en vez de quedar con importe cero.
+      const [gone] = await tx
+        .update(patientCharge)
+        .set({
+          voidedAt: new Date(),
+          voidedBy: actorUserId,
+          voidReason: reasonText,
+          // Mismo texto en ambos: así se reconoce el concepto que una promoción dejó sin costo.
+          editReason: reasonText,
+          promotionId: snapshot.promotionId,
+          promotionName: snapshot.promotionName,
+          updatedAt: new Date(),
+        })
         .where(
           and(
-            eq(treatmentBudgetItem.id, current.budgetItemId),
-            eq(treatmentBudgetItem.organizationId, orgId),
+            eq(patientCharge.id, id),
+            eq(patientCharge.organizationId, orgId),
+            eq(patientCharge.patientId, patientId),
           ),
         )
-      serviceId = line?.serviceId ?? null
-    } else if (current.encounterProcedureId) {
-      const [procedure] = await tx
-        .select({ serviceId: encounterProcedure.serviceId })
-        .from(encounterProcedure)
-        .where(
-          and(
-            eq(encounterProcedure.id, current.encounterProcedureId),
-            eq(encounterProcedure.organizationId, orgId),
-          ),
-        )
-      serviceId = procedure?.serviceId ?? null
+        .returning()
+      await audit(tx, orgId, actorUserId, "patient_charge", id, "charge.voided", {
+        patientId,
+        description: current.description,
+        amountCents: current.amountCents,
+        currency: current.currency,
+        reason: reasonText,
+        promotionId: snapshot.promotionId,
+      })
+      return gone
     }
-    if (!serviceId)
-      throw validation("La promoción solo aplica a conceptos con servicio")
-    const snapshot = await requirePromotionPrice(
-      tx,
-      orgId,
-      input.promotionId,
-      serviceId,
-      patch.amountCents,
-    )
     patch.amountCents = snapshot.priceCents
     patch.promotionId = snapshot.promotionId
     patch.promotionName = snapshot.promotionName
+  } else if (input.promotionId === null && current.promotionId) {
+    // Quitar la promoción devuelve el precio de origen del concepto.
+    if (current.budgetItemId)
+      throw conflict(
+        "PROMOTION_FROM_BUDGET",
+        "La promoción viene del presupuesto aceptado: se cambia con una revisión del presupuesto",
+      )
+    const { sourcePriceCents } = await chargeServiceId(tx, orgId, current)
+    if (patch.amountCents === undefined) {
+      if (sourcePriceCents == null || sourcePriceCents <= 0)
+        throw validation("Indica el importe del concepto sin la promoción")
+      patch.amountCents = sourcePriceCents
+    }
+    patch.promotionId = null
+    patch.promotionName = null
+    reasonText ??= `Se quitó la promoción «${current.promotionName ?? ""}»`
   }
   if (patch.amountCents === undefined && patch.description === undefined)
     throw validation("Indique el nuevo importe, la nueva descripción o una promoción")
-  patch.editReason = reason(input.reason)
+  if (!reasonText) throw validation("El motivo del cambio es obligatorio")
+  patch.editReason = reasonText
   const [row] = await tx
     .update(patientCharge)
     .set({ ...patch, updatedAt: new Date() })
@@ -469,7 +558,17 @@ export async function updateCharge(
       ),
     )
     .returning()
-  await audit(tx, orgId, actorUserId, "patient_charge", id, "charge.edited")
+  await audit(tx, orgId, actorUserId, "patient_charge", id, "charge.edited", {
+    patientId,
+    reason: reasonText,
+    fromAmountCents: current.amountCents,
+    toAmountCents: row?.amountCents,
+    fromDescription: current.description,
+    toDescription: row?.description,
+    fromPromotion: current.promotionName,
+    toPromotion: row?.promotionName ?? null,
+    currency: current.currency,
+  })
   return row
 }
 
@@ -492,25 +591,69 @@ async function lockOrgCurrency(tx: Db, orgId: string): Promise<string> {
     .from(orgProfile)
     .where(eq(orgProfile.organizationId, orgId))
     .for("share")
-  return profile?.currency ?? "PEN"
+  // Sin respaldo de un país: la moneda sale del perfil o no hay cobro.
+  if (!profile) throw orgProfileRequired()
+  return profile.currency
 }
 
 /** Siguiente número de ticket de la organización, sin saltos: vive en la misma transacción. */
 async function nextTicketNumber(tx: Db, orgId: string): Promise<number> {
+  // La fila nace sin competir: dos primeros cobros simultáneos de la clínica
+  // esperan aquí y después toman números consecutivos, ninguno falla.
+  await tx.insert(ticketCounter).values({ organizationId: orgId, nextNumber: 1 }).onConflictDoNothing()
   const [current] = await tx
     .select()
     .from(ticketCounter)
     .where(eq(ticketCounter.organizationId, orgId))
     .for("update")
-  if (!current) {
-    await tx.insert(ticketCounter).values({ organizationId: orgId, nextNumber: 2 })
-    return 1
-  }
+  if (!current) throw new ServiceError("INTERNAL", 500, "No se pudo numerar el ticket")
   await tx
     .update(ticketCounter)
     .set({ nextNumber: current.nextNumber + 1 })
     .where(eq(ticketCounter.organizationId, orgId))
   return current.nextNumber
+}
+
+/**
+ * Lo que el ticket congela al cobrar (`payment_ticket.snapshot`). El ticket
+ * impreso y enviado se arma solo con esto: nada vivo lo reescribe después.
+ */
+export interface TicketFrozen {
+  /** Huella del pedido (idempotencia). */
+  request: string
+  patient: { id: string; displayName: string; docType?: string | null; docNumber?: string | null }
+  payer?: { contactId: string; displayName: string } | null
+  issuer: { userId: string; name: string }
+  clinic: {
+    legalName: string
+    tradeName: string | null
+    fiscalAddress: string | null
+    locale: string
+    currency: string
+    timezone: string
+  }
+  branch: { id: string; name: string }
+  lines: Array<{
+    /** null = adelanto sin concepto. */
+    chargeId: string | null
+    description: string
+    /** Precio completo del concepto. */
+    amountCents: number
+    /** Lo que este cobro pagó de él. */
+    appliedCents: number
+    promotion: string | null
+  }>
+  methods: Array<{
+    paymentMethodId: string
+    name: string
+    typeCode: string
+    amountCents: number
+    reference: string | null
+  }>
+  /** Frase al pie vigente al cobrar. */
+  notice: string
+  /** Lo que quedó por cobrar de esos conceptos. */
+  remainingCents?: number
 }
 
 export interface CollectMethodInput {
@@ -683,7 +826,7 @@ export async function collectCharge(
   const fingerprint = JSON.stringify({
     branchId: input.branchId,
     payerContactId: input.payerContactId ?? null,
-    chargeIds: input.chargeIds ? [...input.chargeIds].sort() : null,
+    chargeIds: input.chargeIds ? [...new Set(input.chargeIds)].sort() : null,
     advanceCents: input.advanceCents ?? null,
     payments: (input.payments ?? []).map((p) => ({
       paymentMethodId: p.paymentMethodId,
@@ -698,10 +841,29 @@ export async function collectCharge(
     .where(and(eq(paymentTicket.organizationId, orgId), eq(paymentTicket.requestId, requestId)))
   if (replay) {
     // La clave no se reusa entre pacientes ni entre cobros distintos.
-    const snapshot = replay.snapshot as { request?: string } | null
+    const snapshot = replay.snapshot as { request?: string; remainingCents?: number } | null
     if (replay.patientId !== patientId || snapshot?.request !== fingerprint)
       throw conflict("REQUEST_ID_CONFLICT", "La clave de idempotencia ya se usó en otro cobro")
-    return { ticket: replay, duplicate: true as const, account: await getAccountSummary(tx, orgId, patientId) }
+    // El reintento devuelve lo mismo que el cobro original, sin registrar nada.
+    const replayPayments = await tx
+      .select()
+      .from(patientPayment)
+      .where(
+        and(
+          eq(patientPayment.organizationId, orgId),
+          eq(patientPayment.patientId, patientId),
+          eq(patientPayment.ticketId, replay.id),
+        ),
+      )
+      .orderBy(asc(patientPayment.createdAt), asc(patientPayment.id))
+    return {
+      ticket: replay,
+      payments: replayPayments,
+      creditAppliedCents: replay.creditAppliedCents,
+      remainingCents: snapshot?.remainingCents ?? 0,
+      duplicate: true as const,
+      account: await getAccountSummary(tx, orgId, patientId),
+    }
   }
   const branchRow = await requireBranch(tx, orgId, input.branchId)
   if (input.payerContactId)
@@ -730,7 +892,8 @@ export async function collectCharge(
       throw validation("El adelanto coincide con la suma de los medios")
     targets = []
   } else if (input.chargeIds?.length) {
-    const wanted = input.chargeIds
+    // Sin repetidos: el mismo concepto dos veces se cobraría dos veces.
+    const wanted = new Set(input.chargeIds)
     const selected = await tx
       .select()
       .from(patientCharge)
@@ -744,9 +907,10 @@ export async function collectCharge(
       .orderBy(asc(patientCharge.createdAt), asc(patientCharge.id))
     const byId: Record<string, (typeof selected)[number]> = {}
     for (const charge of selected) byId[charge.id] = charge
-    const missing = wanted.filter((id) => !byId[id])
+    const missing = [...wanted].filter((id) => !byId[id])
     if (missing.length) throw notFound("Cargo")
-    const picked = wanted.map((id) => byId[id])
+    // Siempre lo más antiguo primero: el orden en que se marcaron no decide.
+    const picked = selected.filter((charge) => wanted.has(charge.id))
     if (picked.some((c) => c.currency !== unit))
       throw conflict("CURRENCY_MISMATCH", "Los conceptos son de otra moneda que la clínica")
     const applied = await liveAppliedByCharge(tx, orgId, patientId)
@@ -801,9 +965,15 @@ export async function collectCharge(
     throw validation("No hay saldo a favor ni medios para cobrar")
   const ticketNumber = await nextTicketNumber(tx, orgId)
   const [person] = await tx
-    .select({ displayName: patient.displayName })
+    .select({ displayName: patient.displayName, docType: patient.docType, docNumber: patient.docNumber })
     .from(patient)
     .where(and(eq(patient.id, patientId), eq(patient.organizationId, orgId)))
+  const [payer] = input.payerContactId
+    ? await tx
+        .select({ displayName: contact.displayName })
+        .from(contact)
+        .where(and(eq(contact.id, input.payerContactId), eq(contact.organizationId, orgId)))
+    : []
   const [issuer] = await tx
     .select({ name: user.name })
     .from(user)
@@ -812,6 +982,7 @@ export async function collectCharge(
     .select()
     .from(orgProfile)
     .where(eq(orgProfile.organizationId, orgId))
+  if (!profile) throw orgProfileRequired()
   const paidAt = new Date()
   // Reparte lo nuevo empezando por lo más antiguo; el excedente queda a favor.
   // Las líneas del ticket reflejan lo realmente pagado por este cobro.
@@ -870,15 +1041,23 @@ export async function collectCharge(
       requestId,
       snapshot: {
         request: fingerprint,
-        patient: { id: patientId, displayName: person?.displayName ?? "" },
+        patient: {
+          id: patientId,
+          displayName: person?.displayName ?? "",
+          docType: person?.docType ?? null,
+          docNumber: person?.docNumber ?? null,
+        },
+        payer: input.payerContactId
+          ? { contactId: input.payerContactId, displayName: payer?.displayName ?? "" }
+          : null,
         issuer: { userId: actorUserId, name: issuer?.name ?? "" },
         clinic: {
-          legalName: profile?.legalName ?? "",
-          tradeName: profile?.tradeName ?? null,
-          fiscalAddress: profile?.fiscalAddress ?? null,
-          locale: profile?.locale ?? "es-PE",
-          currency: profile?.currency ?? unit,
-          timezone: profile?.timezone ?? "America/Lima",
+          legalName: profile.legalName ?? "",
+          tradeName: profile.tradeName ?? null,
+          fiscalAddress: profile.fiscalAddress ?? null,
+          locale: profile.locale,
+          currency: profile.currency,
+          timezone: profile.timezone,
         },
         branch: { id: branchRow.id, name: branchRow.name },
         lines,
@@ -889,7 +1068,9 @@ export async function collectCharge(
           amountCents: m.amountCents,
           reference: m.reference,
         })),
-        notice: profile?.ticketFooter ?? "Recibo interno. No es un documento fiscal.",
+        notice: profile.ticketFooter,
+        // Lo que quedó por cobrar de estos conceptos: el reintento lo repite igual.
+        remainingCents: sum(targets.map((t) => ({ amountCents: t.outstanding }))),
       },
       createdBy: actorUserId,
     })
@@ -1041,6 +1222,22 @@ export async function voidTicket(
     if (refunds.length)
       throw conflict("TICKET_HAS_REFUNDS", "El ticket tiene devoluciones: no se puede anular")
   }
+  // Un cobro solo con saldo a favor no tocó la caja, pero la regla es la
+  // misma: después del siguiente cierre lo anula administración.
+  if (
+    payments.length === 0 &&
+    !input.allowPostClose &&
+    (await hasClosureSince(tx, orgId, ticket.branchId, ticket.currency, ticket.createdAt))
+  )
+    throw conflict(
+      "POST_CLOSE_NEEDS_ADMIN",
+      "La caja ya cerró después de este cobro: solo administración puede anularlo",
+    )
+  // Se revierte lo que este ticket aplicó (incluido el saldo a favor que usó)
+  // y también lo que sus pagos cubrieron después en otros tickets: un adelanto
+  // anulado no puede seguir pagando un concepto. Ese concepto vuelve a quedar
+  // por cobrar.
+  const paymentIds = payments.map((p) => p.id)
   const applications = await tx
     .select()
     .from(patientPaymentApplication)
@@ -1048,10 +1245,16 @@ export async function voidTicket(
       and(
         eq(patientPaymentApplication.organizationId, orgId),
         eq(patientPaymentApplication.patientId, patientId),
-        eq(patientPaymentApplication.ticketId, ticket.id),
         isNull(patientPaymentApplication.voidedAt),
+        paymentIds.length
+          ? or(
+              eq(patientPaymentApplication.ticketId, ticket.id),
+              inArray(patientPaymentApplication.paymentId, paymentIds),
+            )
+          : eq(patientPaymentApplication.ticketId, ticket.id),
       ),
     )
+  const reopenedCents = sum(applications.filter((app) => app.ticketId !== ticket.id))
   let compensated = false
   for (const payment of payments) {
     compensated = (await reverseCashIncome(tx, orgId, actorUserId, payment, voidReason, input.allowPostClose)) || compensated
@@ -1077,7 +1280,15 @@ export async function voidTicket(
     .returning()
   await audit(tx, orgId, actorUserId, "payment_ticket", ticket.id, "ticket.voided")
   await notify(tx, { orgId, kind: "payment.voided", at: new Date().toISOString() })
-  return { ticket: row, voidedPayments: payments.length, voidedApplications: applications.length, compensated, account: await getAccountSummary(tx, orgId, patientId) }
+  return {
+    ticket: row,
+    voidedPayments: payments.length,
+    voidedApplications: applications.length,
+    /** Lo que este cobro había cubierto en otros tickets y vuelve a quedar por cobrar. */
+    reopenedCents,
+    compensated,
+    account: await getAccountSummary(tx, orgId, patientId),
+  }
 }
 
 // --- Devolución del saldo a favor ----------------------------------------------------------
@@ -1143,6 +1354,42 @@ export async function refundCredit(
       rest -= take
     }
   }
+  // La constancia se congela al devolver: clínica, sede, a quién, cuánto y por
+  // qué medio. El PDF se arma solo con esto, igual que el ticket.
+  const [person] = await tx
+    .select({ displayName: patient.displayName, docType: patient.docType, docNumber: patient.docNumber })
+    .from(patient)
+    .where(and(eq(patient.id, patientId), eq(patient.organizationId, orgId)))
+  const [issuer] = await tx.select({ name: user.name }).from(user).where(eq(user.id, actorUserId))
+  const [profile] = await tx.select().from(orgProfile).where(eq(orgProfile.organizationId, orgId))
+  if (!profile) throw orgProfileRequired()
+  const receiptId = refunds[0]!.id
+  const frozen: RefundFrozen = {
+    patientId,
+    refundIds: refunds.map((r) => r.id),
+    patient: {
+      displayName: person?.displayName ?? "",
+      docType: person?.docType ?? null,
+      docNumber: person?.docNumber ?? null,
+    },
+    issuer: { userId: actorUserId, name: issuer?.name ?? "" },
+    clinic: {
+      legalName: profile.legalName ?? "",
+      tradeName: profile.tradeName ?? null,
+      fiscalAddress: profile.fiscalAddress ?? null,
+      locale: profile.locale,
+      currency: profile.currency,
+      timezone: profile.timezone,
+    },
+    branch: { id: branchRow.id, name: branchRow.name },
+    amountCents: amount,
+    currency: unit,
+    methodName,
+    methodTypeCode,
+    reason: reason(input.reason),
+    refundedAt: at.toISOString(),
+  }
+  await audit(tx, orgId, actorUserId, "patient_payment_refund", receiptId, "refund.receipt", { ...frozen })
   const shift = await ensureOpenShift(tx, orgId, actorUserId, branchRow.id, unit)
   await recordCashEgreso(tx, orgId, actorUserId, shift.id, {
     kind: "devolucion",
@@ -1155,6 +1402,8 @@ export async function refundCredit(
   await notify(tx, { orgId, kind: "payment.refunded", at: at.toISOString() })
   return {
     refunds,
+    /** Con este id se pide la constancia en PDF. */
+    receiptId,
     amountCents: amount,
     currency: unit,
     branchId: branchRow.id,
@@ -1162,6 +1411,54 @@ export async function refundCredit(
     refundedAt: at,
     account: await getAccountSummary(tx, orgId, patientId),
   }
+}
+
+/** Lo que la constancia de devolución congela (`audit_event` «refund.receipt»). */
+export interface RefundFrozen {
+  patientId: string
+  refundIds: string[]
+  patient: { displayName: string; docType: string | null; docNumber: string | null }
+  issuer: { userId: string; name: string }
+  clinic: {
+    legalName: string
+    tradeName: string | null
+    fiscalAddress: string | null
+    locale: string
+    currency: string
+    timezone: string
+  }
+  branch: { id: string; name: string }
+  amountCents: number
+  currency: string
+  methodName: string
+  methodTypeCode: string | null
+  reason: string
+  refundedAt: string
+}
+
+/** Constancia congelada de una devolución del paciente. Solo lectura. */
+export async function getRefundReceipt(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+  receiptId: string,
+): Promise<RefundFrozen> {
+  await requirePatient(tx, orgId, patientId)
+  const [row] = await tx
+    .select({ metadata: auditEvent.metadata })
+    .from(auditEvent)
+    .where(
+      and(
+        eq(auditEvent.organizationId, orgId),
+        eq(auditEvent.action, "refund.receipt"),
+        eq(auditEvent.entity, "patient_payment_refund"),
+        eq(auditEvent.entityId, uuid(receiptId)),
+      ),
+    )
+    .limit(1)
+  const frozen = row?.metadata as RefundFrozen | null | undefined
+  if (!frozen || frozen.patientId !== patientId) throw notFound("Constancia de devolución")
+  return frozen
 }
 
 // --- Cuenta del paciente (tres cifras) ------------------------------------------------------
@@ -1177,6 +1474,16 @@ export interface AccountPending {
   budgetItemId: string | null
   planItemId: string | null
   encounterProcedureId: string | null
+  /** Quién atendió el acto que originó el concepto: solo el nombre, nada clínico. */
+  attendedBy: string | null
+  attendedAt: Date | null
+  /** En lo que se cobra por sesión: qué visita es y cuántas se previeron. */
+  visitNumber: number | null
+  visitsPlanned: number | null
+  /** Servicio del concepto (su acto o su línea): con él caja ofrece la promoción vigente. */
+  serviceId: string | null
+  branchId: string | null
+  promotionId: string | null
   promotionName: string | null
 }
 
@@ -1186,7 +1493,7 @@ export interface AccountPending {
  * moneda: cada fila trae la suya.
  */
 export async function getAccountSummary(tx: Db, orgId: string, patientId: string) {
-  await requirePatient(tx, orgId, patientId)
+  const patientRow = await requirePatient(tx, orgId, patientId)
   const charges = await tx
     .select()
     .from(patientCharge)
@@ -1257,6 +1564,69 @@ export async function getAccountSummary(tx: Db, orgId: string, patientId: string
       aFavor: paid - applied - refunded,
     }
   })
+  // Servicio de cada concepto vivo, en dos consultas (actos y líneas).
+  const procedureIds = liveCharges.map((c) => c.encounterProcedureId).filter((v): v is string => !!v)
+  const lineIds = liveCharges.map((c) => c.budgetItemId).filter((v): v is string => !!v)
+  const serviceByProcedure: Record<string, string | null> = {}
+  // Quién atendió: el profesional de la atención del acto. Caja ve el nombre, no la atención.
+  const attendedByProcedure: Record<string, { name: string | null; at: Date | null }> = {}
+  if (procedureIds.length) {
+    const rows = await tx
+      .select({
+        id: encounterProcedure.id,
+        serviceId: encounterProcedure.serviceId,
+        dentistName: user.name,
+        finalizedAt: encounter.finalizedAt,
+        startedAt: encounter.startedAt,
+      })
+      .from(encounterProcedure)
+      .innerJoin(
+        encounter,
+        and(eq(encounter.id, encounterProcedure.encounterId), eq(encounter.organizationId, orgId)),
+      )
+      .leftJoin(user, eq(user.id, encounter.dentistUserId))
+      .where(and(eq(encounterProcedure.organizationId, orgId), inArray(encounterProcedure.id, procedureIds)))
+    for (const row of rows) {
+      serviceByProcedure[row.id] = row.serviceId
+      attendedByProcedure[row.id] = { name: row.dentistName ?? null, at: row.finalizedAt ?? row.startedAt ?? null }
+    }
+  }
+  // Cobro por sesión: visitas previstas del tratamiento y qué visita es cada concepto.
+  const planItemIds = [...new Set(liveCharges.map((c) => c.planItemId).filter((v): v is string => !!v))]
+  const plannedByPlanItem: Record<string, number> = {}
+  if (planItemIds.length) {
+    const rows = await tx
+      .select({ planItemId: treatmentBudgetItem.planItemId, sessionsPlanned: treatmentBudgetItem.sessionsPlanned })
+      .from(treatmentBudgetItem)
+      .where(
+        and(
+          eq(treatmentBudgetItem.organizationId, orgId),
+          eq(treatmentBudgetItem.patientId, patientId),
+          inArray(treatmentBudgetItem.planItemId, planItemIds),
+          eq(treatmentBudgetItem.billingMode, "session"),
+          eq(treatmentBudgetItem.decision, "aceptado"),
+        ),
+      )
+      .orderBy(asc(treatmentBudgetItem.createdAt))
+    for (const row of rows) plannedByPlanItem[row.planItemId] = row.sessionsPlanned ?? 1
+  }
+  const visitNumberByCharge: Record<string, number> = {}
+  const visitasPorTratamiento: Record<string, number> = {}
+  for (const charge of liveCharges) {
+    // Una visita es un acto atendido de ese tratamiento (los cargos van del más antiguo al más nuevo).
+    if (!charge.planItemId || !charge.encounterProcedureId) continue
+    const next = (visitasPorTratamiento[charge.planItemId] ?? 0) + 1
+    visitasPorTratamiento[charge.planItemId] = next
+    visitNumberByCharge[charge.id] = next
+  }
+  const serviceByLine: Record<string, string | null> = {}
+  if (lineIds.length) {
+    const rows = await tx
+      .select({ id: treatmentBudgetItem.id, serviceId: treatmentBudgetItem.serviceId })
+      .from(treatmentBudgetItem)
+      .where(and(eq(treatmentBudgetItem.organizationId, orgId), inArray(treatmentBudgetItem.id, lineIds)))
+    for (const row of rows) serviceByLine[row.id] = row.serviceId
+  }
   const pendiente: AccountPending[] = liveCharges
     .map((charge) => {
       const paid = appliedByCharge[charge.id] ?? 0
@@ -1271,6 +1641,23 @@ export async function getAccountSummary(tx: Db, orgId: string, patientId: string
         budgetItemId: charge.budgetItemId,
         planItemId: charge.planItemId,
         encounterProcedureId: charge.encounterProcedureId,
+        attendedBy: charge.encounterProcedureId
+          ? (attendedByProcedure[charge.encounterProcedureId]?.name ?? null)
+          : null,
+        attendedAt: charge.encounterProcedureId
+          ? (attendedByProcedure[charge.encounterProcedureId]?.at ?? null)
+          : null,
+        visitNumber:
+          charge.planItemId && plannedByPlanItem[charge.planItemId] != null
+            ? (visitNumberByCharge[charge.id] ?? null)
+            : null,
+        visitsPlanned: charge.planItemId ? (plannedByPlanItem[charge.planItemId] ?? null) : null,
+        serviceId:
+          (charge.encounterProcedureId ? serviceByProcedure[charge.encounterProcedureId] : null) ??
+          (charge.budgetItemId ? serviceByLine[charge.budgetItemId] : null) ??
+          null,
+        branchId: charge.branchId,
+        promotionId: charge.promotionId,
         promotionName: charge.promotionName,
       }
     })
@@ -1281,14 +1668,35 @@ export async function getAccountSummary(tx: Db, orgId: string, patientId: string
     if (!ticketPayments[payment.ticketId]) ticketPayments[payment.ticketId] = []
     ticketPayments[payment.ticketId].push(payment)
   }
+  // Último cierre por sede y moneda: después de él, anular un cobro anterior pide administración.
+  const lastClosure: Record<string, Date> = {}
+  const ticketBranches = [...new Set(tickets.map((t) => t.branchId))]
+  if (ticketBranches.length) {
+    const rows = await tx
+      .select({ branchId: cashClosure.branchId, currency: cashClosure.currency, closedAt: cashClosure.closedAt })
+      .from(cashClosure)
+      .where(and(eq(cashClosure.organizationId, orgId), inArray(cashClosure.branchId, ticketBranches)))
+      .orderBy(desc(cashClosure.closedAt))
+    for (const row of rows) {
+      const key = `${row.branchId}|${row.currency}`
+      if (!lastClosure[key]) lastClosure[key] = row.closedAt
+    }
+  }
   const cobros = tickets.map((ticket) => ({
     ticketId: ticket.id,
     number: ticket.ticketNumber,
+    branchId: ticket.branchId,
     currency: ticket.currency,
     totalCents: ticket.totalCents,
     creditAppliedCents: ticket.creditAppliedCents,
+    cashReceivedCents: ticket.cashReceivedCents,
+    changeCents: ticket.changeCents,
+    payerContactId: ticket.payerContactId,
     status: ticket.voidedAt ? ("anulado" as const) : ("vigente" as const),
+    voidedAt: ticket.voidedAt,
     voidReason: ticket.voidReason,
+    /** La caja de su sede ya cerró después de este cobro: solo administración lo anula. */
+    closedAfter: (lastClosure[`${ticket.branchId}|${ticket.currency}`]?.getTime() ?? 0) >= ticket.createdAt.getTime(),
     createdAt: ticket.createdAt,
     snapshot: ticket.snapshot,
     payments: (ticketPayments[ticket.id] ?? []).map((p) => ({
@@ -1315,7 +1723,41 @@ export async function getAccountSummary(tx: Db, orgId: string, patientId: string
       voidReason: p.voidReason,
       origin: "historico" as const,
     }))
-  return { patientId, byCurrency, pendiente, cobros, historico, conCargo: coveredPlanItems(liveCharges) }
+  // De qué cobro viene el saldo a favor: los pagos vigentes con dinero sin aplicar ni devolver.
+  const ticketById: Record<string, (typeof tickets)[number]> = {}
+  for (const ticket of tickets) ticketById[ticket.id] = ticket
+  const aFavorOrigen = livePayments
+    .map((p) => ({
+      paymentId: p.id,
+      ticketId: p.ticketId,
+      ticketNumber: p.ticketId ? (ticketById[p.ticketId]?.ticketNumber ?? null) : null,
+      currency: p.currency,
+      paidAt: p.paidAt,
+      availableCents: p.amountCents - (appliedByPayment[p.id] ?? 0) - (refundedByPayment[p.id] ?? 0),
+      /** El cobro fue un adelanto (sin concepto). */
+      advance: p.ticketId
+        ? ((ticketById[p.ticketId]?.snapshot as TicketFrozen | null)?.lines ?? []).some((l) => l.chargeId === null)
+        : false,
+    }))
+    .filter((row) => row.availableCents > 0)
+  return {
+    patientId,
+    /** Identidad mínima para la cabecera de caja: sin datos clínicos ni traza de lectura. */
+    patient: {
+      displayName: patientRow.displayName,
+      docType: patientRow.docType,
+      docNumber: patientRow.docNumber,
+      sex: patientRow.sex,
+    },
+    byCurrency,
+    pendiente,
+    cobros,
+    historico,
+    aFavorOrigen,
+    /** Visitas atendidas por tratamiento (actos con cargo vivo): base de «ya realizado» en cobro por sesión. */
+    visitasPorTratamiento,
+    conCargo: coveredPlanItems(liveCharges),
+  }
 }
 
 /** Tratamientos con cargo vivo (cobrado o no): una sola tarifa por tratamiento. */
@@ -1382,7 +1824,16 @@ export async function getTicketReceipt(tx: Db, orgId: string, patientId: string,
     .select()
     .from(orgProfile)
     .where(eq(orgProfile.organizationId, orgId))
-  return { ticket, payments, applications, chargeById, branch: branchRow ?? null, orgProfile: profile ?? null }
+  return {
+    ticket,
+    payments,
+    applications,
+    chargeById,
+    branch: branchRow ?? null,
+    orgProfile: profile ?? null,
+    /** La caja de su sede ya cerró después de este cobro: solo administración lo anula. */
+    closedAfter: await hasClosureSince(tx, orgId, ticket.branchId, ticket.currency, ticket.createdAt),
+  }
 }
 /** Receipt desde un pago suelto (Fase 7): resuelve su ticket y delega. */
 export async function getTicketReceiptByPayment(tx: Db, orgId: string, patientId: string, paymentId: string) {

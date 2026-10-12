@@ -73,6 +73,7 @@ async function seedPlanItem(org: string, patientId: string, title: string): Prom
         planId: plan!.id,
         budgetId: budget!.id,
         title,
+        currency: "PEN",
         status: "pendiente",
         createdBy: ACTOR,
       })

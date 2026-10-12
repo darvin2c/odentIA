@@ -1,16 +1,22 @@
 import {
   Button,
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
+  Checkbox,
+  cn,
+  Field,
+  FieldDescription,
+  FieldLabel,
+  Input,
+  RadioGroup,
+  RadioGroupItem,
+  Textarea,
 } from "@odentia/ui"
-import { useMutation, useQuery } from "@tanstack/react-query"
-import { Link, useNavigate } from "@tanstack/react-router"
-import { FileText, Loader2, Send } from "lucide-react"
-import { useEffect, useState, type ReactNode } from "react"
+import { DataRefreshMarker, ErrorState, FormDrawer, SubmitButton } from "@odentia/ui-patterns"
+import { keepPreviousData, useMutation, useQuery } from "@tanstack/react-query"
+import { useNavigate } from "@tanstack/react-router"
+import { FileText, Send } from "lucide-react"
+import { useEffect, useId, useState, type ReactNode } from "react"
 import { ApiError, apiFetch, apiFetchBytes } from "../../lib/api"
+import { usePermission } from "../../lib/crm"
 import { ChoiceSelect } from "../ui/choice-select"
 
 export interface SendFinancialDocumentProps {
@@ -19,7 +25,10 @@ export interface SendFinancialDocumentProps {
   documentId: string
   trigger?: ReactNode
   onSent?: (info: { conversationId: string; messageId: string }) => void
+  /** Layout del envoltorio del botón que abre el panel. */
+  className?: string
 }
+
 interface ChannelOption {
   channel: string
   connectionId: string
@@ -47,6 +56,25 @@ interface SendOptions {
   channels: ChannelOption[]
   proposed: ChannelOption | null
   document: { type: string; label: string; statusLabel: string; isDraft: boolean }
+  /** Mensaje propuesto por el servidor; aquí solo se edita. */
+  message: string
+}
+
+interface SendResult {
+  conversationId: string
+  messageId: string
+  status: string
+  channel: string
+  sentToEmail?: string | null
+}
+
+const MAX_MESSAGE = 500
+
+const RELATION_LABELS: Record<string, string> = {
+  paciente: "paciente",
+  representante_legal: "representante legal",
+  responsable_economico: "responsable económico",
+  autorizado_informacion: "autorizado para información",
 }
 
 function channelLabel(channel: string): string {
@@ -58,16 +86,20 @@ function channelLabel(channel: string): string {
   return channel
 }
 
+/** El mensaje del servidor se muestra tal cual; el respaldo solo si no hay ninguno. */
 function errorMessage(err: unknown, fallback: string): string {
   if (err instanceof ApiError) return err.shape.message ?? fallback
-  return err instanceof Error ? err.message : fallback
+  if (err instanceof TypeError) return "No hay conexión con el servidor. Revisa tu conexión e inténtalo de nuevo."
+  return err instanceof Error && err.message ? err.message : fallback
 }
 
 /**
- * Envío del documento económico (ticket o presupuesto) al paciente, con PDF
- * adjunto generado en el servidor. Propone correo si hay conexión utilizable
- * y si no el medio preferido; sin canal utilizable explica y enlaza a
- * configurar. El resultado es `encolado, pendiente de entrega`: nunca se
+ * «Enviar al paciente»: manda el ticket o el presupuesto en PDF (el mismo del
+ * servidor que se imprime) y lo deja en la conversación de la persona. El
+ * servidor propone el canal —correo si la persona tiene uno, si no su medio
+ * preferido— y quien envía puede cambiarlo, igual que el destinatario y el
+ * mensaje. Cada apertura lleva su clave: reintentar o un doble clic no manda
+ * el documento dos veces. Lo que responde el servidor es «en cola»: nunca se
  * presenta como entregado.
  */
 export function SendFinancialDocument({
@@ -76,339 +108,526 @@ export function SendFinancialDocument({
   documentId,
   trigger,
   onSent,
+  className,
 }: SendFinancialDocumentProps) {
+  const uid = useId()
   const navigate = useNavigate()
+  const canConfigure = usePermission("settings.read")
+  const canInbox = usePermission("conversations.read")
   const [open, setOpen] = useState(false)
+  // null = el destinatario y el canal que propone el servidor.
   const [recipientId, setRecipientId] = useState<string | null>(null)
   const [connectionId, setConnectionId] = useState<string | null>(null)
-  const [message, setMessage] = useState("")
+  const [choosingRecipient, setChoosingRecipient] = useState(false)
+  // null = el mensaje propuesto, sin tocar.
+  const [message, setMessage] = useState<string | null>(null)
   const [savePreferred, setSavePreferred] = useState(false)
-  const [paper, setPaper] = useState<"profile" | "A4" | "Letter">("profile")
-  const [sent, setSent] = useState<{ conversationId: string; messageId: string; channel: string } | null>(null)
+  const [sent, setSent] = useState<SendResult | null>(null)
+  const [viewing, setViewing] = useState(false)
+  const [viewError, setViewError] = useState<string | null>(null)
+  const [requestId, setRequestId] = useState(() => crypto.randomUUID())
+  // Correo escrito en el momento: para enviarlo ahí esta vez, o para guardarlo en sus datos.
+  const [emailMode, setEmailMode] = useState<"otro" | "agregar" | null>(null)
+  const [emailText, setEmailText] = useState("")
+  const [emailConfirmed, setEmailConfirmed] = useState(false)
+  const [emailError, setEmailError] = useState<string | null>(null)
 
   const optionsQuery = useQuery({
-    queryKey: ["financial-document-options", patientId, documentType, documentId],
-    queryFn: () =>
-      apiFetch<{ data: SendOptions }>(
-        `/api/patients/${patientId}/financial-document-options?documentType=${documentType}&documentId=${documentId}`,
-      ),
-    enabled: open,
-  })
-
-  const options = optionsQuery.data?.data ?? null
-
-  useEffect(() => {
-    if (open) {
-      setSent(null)
-      sendMutation.reset()
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, patientId, documentType, documentId])
-
-  useEffect(() => {
-    if (options && recipientId === null) setRecipientId(options.recipient.contactId)
-    if (options && connectionId === null && options.proposed) setConnectionId(options.proposed.connectionId)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [options])
-
-  const pdfQuery = useQuery({
-    queryKey: ["financial-document-pdf", patientId, documentType, documentId, paper],
-    queryFn: async () => {
-      const bytes = await apiFetchBytes(
-        `/api/patients/${patientId}/financial-document-pdf?documentType=${documentType}&documentId=${documentId}${paper === "profile" ? "" : `&paper=${paper}`}`,
+    queryKey: ["financial-document-options", patientId, documentType, documentId, recipientId],
+    queryFn: () => {
+      const params = new URLSearchParams({ documentType, documentId })
+      if (recipientId) params.set("recipientContactId", recipientId)
+      return apiFetch<{ data: SendOptions }>(
+        `/api/patients/${patientId}/financial-document-options?${params}`,
       )
-      return URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }))
     },
-    enabled: false,
+    enabled: open,
+    // Al cambiar de destinatario se conserva la lista mientras llegan sus canales.
+    placeholderData: keepPreviousData,
   })
-
-  useEffect(() => {
-    const url = pdfQuery.data
-    return () => {
-      if (url) URL.revokeObjectURL(url)
-    }
-  }, [pdfQuery.data])
+  const options = optionsQuery.data?.data ?? null
+  const refreshing = optionsQuery.isPlaceholderData
 
   const sendMutation = useMutation({
-    mutationFn: () =>
-      apiFetch<{ data: { conversationId: string; messageId: string; status: string; channel: string } }>(
-        `/api/patients/${patientId}/financial-documents/send`,
-        {
-          method: "POST",
-          body: JSON.stringify({
-            documentType,
-            documentId,
-            recipientContactId: recipientId,
-            connectionId,
-            message: message.trim() ? message.trim() : null,
-            savePreferredChannel: savePreferred,
-            paper: paper === "profile" ? null : paper,
-          }),
-        },
-      ),
+    mutationFn: (input: {
+      connectionId: string
+      recipientContactId: string
+      message: string
+      otherEmail: string | null
+    }) =>
+      apiFetch<{ data: SendResult }>(`/api/patients/${patientId}/financial-documents/send`, {
+        method: "POST",
+        body: JSON.stringify({
+          documentType,
+          documentId,
+          recipientContactId: input.recipientContactId,
+          connectionId: input.connectionId,
+          message: input.message || null,
+          savePreferredChannel: savePreferred,
+          requestId,
+          ...(input.otherEmail ? { otherEmail: input.otherEmail, confirmOtherEmail: true } : {}),
+        }),
+      }),
     onSuccess: (result) => {
-      setSent({
-        conversationId: result.data.conversationId,
-        messageId: result.data.messageId,
-        channel: result.data.channel,
-      })
+      setSent(result.data)
       onSent?.({ conversationId: result.data.conversationId, messageId: result.data.messageId })
     },
   })
+  const resetSend = sendMutation.reset
 
-  const recipient = options?.recipients.find((r) => r.contactId === recipientId) ?? options?.recipient ?? null
-  const selectedChannel = options?.channels.find((ch) => ch.connectionId === connectionId) ?? null
-  const usableCount = options?.channels.filter((ch) => ch.usable).length ?? 0
+  const saveEmailMutation = useMutation({
+    mutationFn: (input: { recipientContactId: string; email: string }) =>
+      apiFetch(`/api/patients/${patientId}/financial-documents/recipient-email`, {
+        method: "POST",
+        body: JSON.stringify({ documentType, ...input }),
+      }),
+    onSuccess: () => {
+      setEmailMode(null)
+      setEmailText("")
+      setEmailError(null)
+      setConnectionId(null)
+      void optionsQuery.refetch()
+    },
+    onError: (err) => setEmailError(errorMessage(err, "No se pudo guardar el correo.")),
+  })
+
+  // Cada apertura (o documento) es un intento nuevo: borrador limpio y clave nueva.
+  useEffect(() => {
+    if (!open) return
+    setRecipientId(null)
+    setConnectionId(null)
+    setChoosingRecipient(false)
+    setMessage(null)
+    setSavePreferred(false)
+    setSent(null)
+    setViewError(null)
+    setEmailMode(null)
+    setEmailText("")
+    setEmailConfirmed(false)
+    setEmailError(null)
+    setRequestId(crypto.randomUUID())
+    resetSend()
+  }, [open, patientId, documentType, documentId, resetSend])
+
+  const recipient = options?.recipient ?? null
+  const patientPerson = options?.recipients.find((item) => item.relation === "paciente") ?? null
+  const channels = options?.channels ?? []
+  const emailChannel = channels.find((item) => item.channel === "email") ?? null
+  // Con otro correo se envía por el buzón de la clínica aunque la persona no tenga uno registrado.
+  const otherEmail = emailMode === "otro" ? emailText.trim() : ""
+  const sendingToOther = emailMode === "otro" && emailChannel !== null
+  const selected = sendingToOther
+    ? emailChannel
+    : (channels.find((item) => item.connectionId === connectionId && item.usable) ??
+      (options?.proposed && options.proposed.usable ? options.proposed : null))
+  const usableCount = channels.filter((item) => item.usable).length
+  const canSend = usableCount > 0 || sendingToOther
+
+  const proposedMessage = options?.message ?? ""
+  const messageText = message ?? proposedMessage
+
+  const viewPdf = async () => {
+    if (viewing) return
+    // La pestaña se abre en el clic para que el navegador no la bloquee.
+    const tab = window.open("", "_blank")
+    if (tab) tab.opener = null
+    setViewing(true)
+    setViewError(null)
+    try {
+      const bytes = await apiFetchBytes(
+        `/api/patients/${patientId}/financial-document-pdf?documentType=${documentType}&documentId=${documentId}`,
+      )
+      const url = URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }))
+      if (tab && !tab.closed) tab.location.href = url
+      else window.open(url, "_blank", "noopener")
+      window.setTimeout(() => URL.revokeObjectURL(url), 5 * 60_000)
+    } catch (err) {
+      if (tab && !tab.closed) tab.close()
+      setViewError(errorMessage(err, "No se pudo generar el documento."))
+    } finally {
+      setViewing(false)
+    }
+  }
+
+  const close = () => {
+    if (!sendMutation.isPending) setOpen(false)
+  }
+
+  const submit = () => {
+    if (!recipient || !selected || refreshing) return
+    if (sendingToOther) {
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(otherEmail)) {
+        setEmailError("Escribe un correo válido.")
+        return
+      }
+      if (!emailConfirmed) {
+        setEmailError("Marca la confirmación para enviarlo a ese correo.")
+        return
+      }
+    }
+    setEmailError(null)
+    sendMutation.mutate({
+      connectionId: selected.connectionId,
+      recipientContactId: recipient.contactId,
+      message: messageText.trim(),
+      otherEmail: sendingToOther ? otherEmail : null,
+    })
+  }
+
+  const channelTitle = (item: ChannelOption) =>
+    channels.filter((other) => other.channel === item.channel).length > 1
+      ? `${channelLabel(item.channel)} · ${item.connectionName}`
+      : channelLabel(item.channel)
+  const channelAddress = (item: ChannelOption) =>
+    item.channel === "email" ? recipient?.email : item.channel === "whatsapp" ? recipient?.phone : null
 
   return (
     <>
-      <span onClick={() => setOpen(true)} className="inline-flex">
+      <span onClick={() => setOpen(true)} className={cn("inline-flex", className)}>
         {trigger ?? (
           <Button type="button" variant="outline" size="sm">
-            <Send className="size-4" />
+            <Send aria-hidden />
             Enviar al paciente
           </Button>
         )}
       </span>
-      <Dialog open={open} onOpenChange={(value) => !sendMutation.isPending && setOpen(value)}>
-        <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-xl">
-          <DialogHeader>
-            <DialogTitle>Enviar {documentType === "ticket" ? "ticket" : "presupuesto"}</DialogTitle>
-            <DialogDescription>
-              El documento viaja en PDF adjunto y queda en la conversación de la persona.
-            </DialogDescription>
-          </DialogHeader>
-          {sent ? (
-            <div className="flex flex-col gap-3">
-              <p className="rounded-md border p-3 text-sm">
-                Encolado por {channelLabel(sent.channel)}, pendiente de entrega: el sistema lo envía
-                y la conversación mostrará el resultado. Aún no entregado.
-              </p>
-              <div className="flex gap-2">
-                <Button
-                  type="button"
-                  onClick={() => {
-                    setOpen(false)
-                    void navigate({ to: "/inbox", search: { conversation: sent.conversationId } })
-                  }}
-                >
-                  Ver en bandeja
-                </Button>
-                <Button type="button" variant="outline" onClick={() => setOpen(false)}>
-                  Cerrar
-                </Button>
-              </div>
-            </div>
-          ) : optionsQuery.isLoading ? (
-            <p className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Loader2 className="size-4 animate-spin" />
-              Cargando canales…
+      <FormDrawer
+        open={open}
+        title="Enviar"
+        headerContent={
+          options && recipient ? (
+            <p className="break-words font-heading text-lg font-semibold">
+              {options.document.label} a {recipient.displayName}
             </p>
-          ) : optionsQuery.isError || !options ? (
-            <div className="flex flex-col gap-2">
-              <p className="text-sm text-destructive">
-                {errorMessage(optionsQuery.error, "No se pudieron cargar las opciones de envío")}
-              </p>
-              <Button type="button" variant="outline" onClick={() => optionsQuery.refetch()}>
-                Reintentar
+          ) : undefined
+        }
+        isLoading={optionsQuery.isPending}
+        isSubmitting={sendMutation.isPending}
+        isDirty={!sent && message !== null && message !== proposedMessage}
+        error={
+          sendMutation.isError
+            ? `${errorMessage(sendMutation.error, "No se pudo enviar.")} Tu mensaje se conserva: puedes intentarlo otra vez sin que se envíe dos veces.`
+            : null
+        }
+        hideSubmit={sent !== null || !options || !canSend}
+        submitDisabled={!selected || refreshing}
+        submitLabel={selected ? `Enviar por ${channelLabel(selected.channel).toLowerCase()}` : "Enviar"}
+        cancelLabel={sent ? "Listo" : undefined}
+        onClose={close}
+        onSubmit={(event) => {
+          event.preventDefault()
+          submit()
+        }}
+      >
+        {sent ? (
+          <div className="flex flex-col gap-3" role="status">
+            <p className="rounded-xl bg-muted/60 px-3 py-2 text-sm">
+              {sent.status === "queued"
+                ? `Quedó en cola para enviarse por ${channelLabel(sent.channel).toLowerCase()}${sent.sentToEmail ? ` a ${sent.sentToEmail}` : ""}. Todavía no está entregado: la conversación mostrará si llegó.`
+                : `Enviado por ${channelLabel(sent.channel).toLowerCase()}${sent.sentToEmail ? ` a ${sent.sentToEmail}` : ""}. Queda en la conversación de la persona.`}
+            </p>
+            {canInbox ? (
+              <Button
+                type="button"
+                variant="outline"
+                className="self-start"
+                onClick={() => {
+                  setOpen(false)
+                  void navigate({ to: "/inbox", search: { conversation: sent.conversationId } })
+                }}
+              >
+                Ver en la bandeja
               </Button>
+            ) : null}
+          </div>
+        ) : optionsQuery.isError || !options || !recipient ? (
+          <ErrorState
+            title="No se pudo preparar el envío"
+            message={errorMessage(optionsQuery.error, "No se pudieron consultar los canales.")}
+            onRetry={() => void optionsQuery.refetch()}
+          />
+        ) : (
+          <div className="flex flex-col gap-5">
+            <div className="flex flex-wrap items-center gap-2 rounded-xl border px-3 py-2 text-sm">
+              <FileText className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+              <span className="min-w-0 flex-1 break-words font-medium">{options.document.label}.pdf</span>
+              <SubmitButton size="sm" variant="ghost" pending={viewing} onClick={() => void viewPdf()}>
+                Ver
+              </SubmitButton>
             </div>
-          ) : (
-            <div className="flex flex-col gap-4">
-              <div className="flex flex-wrap items-center gap-2 text-sm">
-                <span className="font-medium">{options.document.label}</span>
-                <span className="text-muted-foreground">· {options.document.statusLabel}</span>
+            {viewError ? (
+              <p role="alert" className="text-sm text-destructive">
+                {viewError}
+              </p>
+            ) : null}
+            {options.document.isDraft ? (
+              <p className="rounded-xl bg-muted/60 px-3 py-2 text-sm">
+                Está en borrador: al enviarlo queda entregado al paciente.
+              </p>
+            ) : null}
+
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center justify-between gap-2">
+                <span id={`${uid}-canal`} className="text-sm font-semibold">
+                  Por dónde
+                </span>
+                {refreshing ? <DataRefreshMarker message="Buscando sus canales" /> : null}
+              </div>
+              {channels.length === 0 ? (
+                <div className="flex flex-col gap-2 rounded-xl border px-3 py-3 text-sm">
+                  <p>
+                    La clínica no tiene ningún canal conectado para enviar documentos.{" "}
+                    {canConfigure ? "" : "Pídele a quien administra la clínica que conecte uno."}
+                  </p>
+                  {canConfigure ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="self-start"
+                      onClick={() => {
+                        setOpen(false)
+                        void navigate({ to: "/settings/channels" })
+                      }}
+                    >
+                      Conectar un canal
+                    </Button>
+                  ) : null}
+                </div>
+              ) : (
+                <RadioGroup
+                  aria-labelledby={`${uid}-canal`}
+                  value={selected?.connectionId ?? ""}
+                  disabled={sendingToOther}
+                  onValueChange={(next) => setConnectionId(String(next))}
+                >
+                  {channels.map((item) => (
+                    <FieldLabel
+                      key={item.connectionId}
+                      className={cn(
+                        "flex min-h-11 w-full items-start gap-2.5 rounded-xl border px-3 py-2.5 text-sm font-normal",
+                        item.usable ? "cursor-pointer" : "opacity-70",
+                        selected?.connectionId === item.connectionId && "border-primary bg-primary-soft",
+                      )}
+                    >
+                      <RadioGroupItem
+                        className="mt-0.5"
+                        value={item.connectionId}
+                        disabled={!item.usable || refreshing || sendMutation.isPending}
+                      />
+                      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                        <span className="font-medium">{channelTitle(item)}</span>
+                        {channelAddress(item) ? (
+                          <span className="break-all text-muted-foreground">{channelAddress(item)}</span>
+                        ) : null}
+                        {!item.usable && item.reason ? (
+                          <span className="text-muted-foreground">{item.reason}</span>
+                        ) : null}
+                      </span>
+                      {item.usable && (item.isPreferred || item.channel === "email") ? (
+                        <span className="shrink-0 text-xs text-muted-foreground">
+                          {item.isPreferred ? "Su medio preferido" : "Para documentos"}
+                        </span>
+                      ) : null}
+                    </FieldLabel>
+                  ))}
+                </RadioGroup>
+              )}
+              {emailChannel && !recipient.email && emailMode === null ? (
+                <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-muted/60 px-3 py-2 text-sm">
+                  <span className="min-w-0 flex-1">{recipient.displayName} no tiene correo registrado.</span>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      setEmailMode("agregar")
+                      setEmailText("")
+                      setEmailError(null)
+                    }}
+                  >
+                    Agregar correo
+                  </Button>
+                </div>
+              ) : channels.length > 0 && usableCount === 0 && emailMode === null ? (
+                <p className="text-sm text-muted-foreground">
+                  Por ahora no hay por dónde enviárselo a {recipient.displayName}.
+                </p>
+              ) : null}
+              {emailMode ? (
+                <div className="flex flex-col gap-3 rounded-xl border bg-muted/40 p-3">
+                  <Field>
+                    <FieldLabel htmlFor={`${uid}-correo`}>
+                      {emailMode === "agregar" ? `Correo de ${recipient.displayName}` : "Otro correo"}
+                    </FieldLabel>
+                    <Input
+                      id={`${uid}-correo`}
+                      type="email"
+                      inputMode="email"
+                      autoComplete="off"
+                      autoFocus
+                      maxLength={200}
+                      value={emailText}
+                      disabled={saveEmailMutation.isPending || sendMutation.isPending}
+                      onChange={(event) => {
+                        setEmailText(event.target.value)
+                        setEmailError(null)
+                      }}
+                      onKeyDown={(event) => {
+                        // Enter aquí no envía el documento.
+                        if (event.key === "Enter") event.preventDefault()
+                      }}
+                    />
+                    <FieldDescription>
+                      {emailMode === "agregar"
+                        ? "Se guarda en sus datos y queda para los próximos envíos."
+                        : "Solo para este envío: no cambia el correo registrado. Queda anotado a qué dirección se envió y quién lo decidió."}
+                    </FieldDescription>
+                  </Field>
+                  {emailMode === "otro" ? (
+                    <label className="flex cursor-pointer items-start gap-2.5 text-sm">
+                      <Checkbox
+                        className="mt-0.5"
+                        checked={emailConfirmed}
+                        disabled={sendMutation.isPending}
+                        onCheckedChange={(value) => {
+                          setEmailConfirmed(value === true)
+                          setEmailError(null)
+                        }}
+                      />
+                      <span>Confirmo que {recipient.displayName} pidió recibirlo en este correo</span>
+                    </label>
+                  ) : null}
+                  {emailError ? (
+                    <p role="alert" className="text-sm text-destructive">
+                      {emailError}
+                    </p>
+                  ) : null}
+                  <div className="flex flex-wrap gap-2">
+                    {emailMode === "agregar" ? (
+                      <SubmitButton
+                        size="sm"
+                        pending={saveEmailMutation.isPending}
+                        onClick={() => {
+                          if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailText.trim())) {
+                            setEmailError("Escribe un correo válido.")
+                            return
+                          }
+                          saveEmailMutation.mutate({
+                            recipientContactId: recipient.contactId,
+                            email: emailText.trim(),
+                          })
+                        }}
+                      >
+                        Guardar correo
+                      </SubmitButton>
+                    ) : null}
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      disabled={saveEmailMutation.isPending || sendMutation.isPending}
+                      onClick={() => {
+                        setEmailMode(null)
+                        setEmailText("")
+                        setEmailConfirmed(false)
+                        setEmailError(null)
+                      }}
+                    >
+                      {emailMode === "otro" ? "Usar el correo registrado" : "Cancelar"}
+                    </Button>
+                  </div>
+                </div>
+              ) : null}
+              {emailChannel && emailMode === null ? (
                 <Button
                   type="button"
                   variant="ghost"
                   size="sm"
-                  disabled={pdfQuery.isFetching}
-                  onClick={() => void pdfQuery.refetch()}
+                  className="self-start"
+                  onClick={() => {
+                    setEmailMode("otro")
+                    setEmailText("")
+                    setEmailConfirmed(false)
+                    setEmailError(null)
+                  }}
                 >
-                  <FileText className="size-4" />
-                  {pdfQuery.isFetching ? "Generando…" : pdfQuery.data ? "Volver a generar" : "Ver PDF"}
+                  Enviar a otro correo
                 </Button>
-                <label className="flex items-center gap-1 text-xs text-muted-foreground">
-                  Papel
-                  <ChoiceSelect
-                    aria-label="Papel del PDF"
-                    className="rounded-md border bg-background px-1.5 py-1 text-xs"
-                    value={paper}
-                    disabled={pdfQuery.isFetching || sendMutation.isPending}
-                    onChange={(e) => setPaper(e.target.value as "profile" | "A4" | "Letter")}
-                  >
-                    <option value="profile">Térmica del perfil</option>
-                    <option value="A4">A4</option>
-                    <option value="Letter">Carta</option>
-                  </ChoiceSelect>
-                </label>
-              </div>
-              {pdfQuery.data && (
-                <a
-                  href={pdfQuery.data}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-sm font-medium text-primary underline-offset-4 hover:underline"
-                >
-                  Abrir vista previa del PDF
-                </a>
-              )}
-              {pdfQuery.isError && (
-                <p className="text-sm text-destructive">
-                  {errorMessage(pdfQuery.error, "No se pudo generar el PDF")}
-                </p>
-              )}
-              {options.document.isDraft && (
-                <p className="rounded-md border p-2 text-sm">
-                  Está en borrador: al enviar queda entregado (presentado) en la misma operación.
-                </p>
-              )}
-              {options.recipients.length > 1 && (
-                <div className="flex flex-col gap-1">
-                  <span className="text-sm font-medium">Destinatario</span>
-                  <ChoiceSelect
-                    aria-label="Destinatario"
-                    className="rounded-md border bg-background px-2 py-1.5 text-sm"
-                    value={recipientId ?? ""}
-                    onChange={(e) => {
-                      setRecipientId(e.target.value)
-                      setConnectionId(null)
-                    }}
-                  >
-                    {options.recipients.map((r) => (
-                      <option key={r.contactId} value={r.contactId}>
-                        {r.displayName}
-                        {r.relation !== "paciente" ? ` · ${r.relation.replace(/_/g, " ")}` : ""}
-                      </option>
-                    ))}
-                  </ChoiceSelect>
-                </div>
-              )}
-              <div className="flex flex-col gap-2">
-                <span className="text-sm font-medium">Por dónde</span>
-                {options.channels.length === 0 ? (
-                  <div className="flex flex-col gap-2 rounded-md border p-3 text-sm">
-                    <p>
-                      No hay ningún canal conectado en la clínica: conecta uno para enviar documentos.
-                    </p>
-                    <Link
-                      to="/settings/channels"
-                      onClick={() => setOpen(false)}
-                      className="font-medium text-primary underline-offset-4 hover:underline"
-                    >
-                      Conectar un canal
-                    </Link>
-                  </div>
-                ) : (
-                  options.channels.map((ch) => (
-                    <label
-                      key={ch.connectionId}
-                      className={`flex items-start gap-2 rounded-md border px-2 py-1.5 text-sm ${ch.usable ? "cursor-pointer" : "opacity-70"}`}
-                    >
-                      <input
-                        type="radio"
-                        name="send-channel"
-                        className="mt-1"
-                        checked={connectionId === ch.connectionId}
-                        disabled={!ch.usable || sendMutation.isPending}
-                        onChange={() => setConnectionId(ch.connectionId)}
-                      />
-                      <span className="flex min-w-0 flex-col">
-                        <span className="flex flex-wrap items-center gap-2">
-                          <span className="font-medium">
-                            {channelLabel(ch.channel)} · {ch.connectionName}
-                          </span>
-                          {ch.isProposed && (
-                            <span className="rounded bg-primary/10 px-1.5 py-0.5 text-xs text-primary">
-                              Propuesto
-                            </span>
-                          )}
-                          {ch.isPreferred && (
-                            <span className="rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
-                              Preferido
-                            </span>
-                          )}
-                        </span>
-                        <span className="text-xs text-muted-foreground">
-                          {ch.channel === "email" && recipient?.email
-                            ? recipient.email
-                            : ch.channel === "whatsapp" && recipient?.phone
-                              ? recipient.phone
-                              : ch.reason ?? (ch.hasThread ? "Con conversación previa" : "Se inicia al enviar")}
-                        </span>
-                        {!ch.usable && ch.reason && (
-                          <span className="text-xs text-muted-foreground">{ch.reason}</span>
-                        )}
-                      </span>
-                    </label>
-                  ))
-                )}
-              </div>
-              {usableCount > 0 && (
-                <>
-                  <div className="flex flex-col gap-1">
-                    <label htmlFor="send-message" className="text-sm font-medium">
-                      Mensaje <span className="font-normal text-muted-foreground">(opcional)</span>
-                    </label>
-                    <textarea
-                      id="send-message"
-                      className="min-h-20 rounded-md border bg-background px-2 py-1.5 text-sm"
-                      value={message}
-                      maxLength={500}
+              ) : null}
+              {options.recipients.length > 1 ? (
+                choosingRecipient ? (
+                  <Field>
+                    <FieldLabel htmlFor={`${uid}-destinatario`}>A quién se lo envías</FieldLabel>
+                    <ChoiceSelect
+                      id={`${uid}-destinatario`}
+                      value={recipient.contactId}
                       disabled={sendMutation.isPending}
-                      onChange={(e) => setMessage(e.target.value)}
-                      placeholder="Texto que acompaña al documento"
-                    />
-                  </div>
-                  <label className="flex items-center gap-2 text-sm">
-                    <input
-                      type="checkbox"
+                      onChange={(event) => {
+                        // Otra persona, otros canales: se vuelven a pedir al servidor.
+                        setRecipientId(event.target.value)
+                        setConnectionId(null)
+                        setSavePreferred(false)
+                      }}
+                    >
+                      {options.recipients.map((item) => (
+                        <option key={item.contactId} value={item.contactId}>
+                          {item.displayName}, {RELATION_LABELS[item.relation] ?? item.relation}
+                        </option>
+                      ))}
+                    </ChoiceSelect>
+                    <FieldDescription>
+                      Solo el paciente y sus responsables vigentes pueden recibirlo.
+                    </FieldDescription>
+                  </Field>
+                ) : (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="self-start"
+                    onClick={() => setChoosingRecipient(true)}
+                  >
+                    Enviar a otra persona
+                  </Button>
+                )
+              ) : null}
+            </div>
+
+            {canSend ? (
+              <>
+                <Field>
+                  <FieldLabel htmlFor={`${uid}-mensaje`}>Mensaje</FieldLabel>
+                  <Textarea
+                    id={`${uid}-mensaje`}
+                    rows={4}
+                    maxLength={MAX_MESSAGE}
+                    value={messageText}
+                    disabled={sendMutation.isPending}
+                    onChange={(event) => setMessage(event.target.value)}
+                  />
+                </Field>
+                {selected && !selected.isPreferred && !sendingToOther ? (
+                  <label className="flex cursor-pointer items-start gap-2.5 text-sm">
+                    <Checkbox
+                      className="mt-0.5"
                       checked={savePreferred}
                       disabled={sendMutation.isPending}
-                      onChange={(e) => setSavePreferred(e.target.checked)}
+                      onCheckedChange={(value) => setSavePreferred(value === true)}
                     />
-                    Recordar como medio preferido de esta persona
+                    <span>
+                      Recordar {channelLabel(selected.channel).toLowerCase()} como el medio preferido de{" "}
+                      {recipient.displayName}
+                    </span>
                   </label>
-                  {sendMutation.isError && (
-                    <p className="text-sm text-destructive">
-                      {errorMessage(sendMutation.error, "No se pudo encolar el envío")}: revisa los
-                      datos y reintenta. Tu mensaje se conserva.
-                    </p>
-                  )}
-                  <div className="flex gap-2">
-                    <Button
-                      type="button"
-                      disabled={!connectionId || !selectedChannel?.usable || sendMutation.isPending}
-                      onClick={() => sendMutation.mutate()}
-                    >
-                      {sendMutation.isPending ? (
-                        <>
-                          <Loader2 className="size-4 animate-spin" />
-                          Encolando…
-                        </>
-                      ) : (
-                        `Enviar por ${channelLabel(selectedChannel?.channel ?? "email").toLowerCase()}`
-                      )}
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      disabled={sendMutation.isPending}
-                      onClick={() => setOpen(false)}
-                    >
-                      Cancelar
-                    </Button>
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    Queda en la conversación de {recipient?.displayName ?? "la persona"}, con el
-                    documento adjunto.
-                  </p>
-                </>
-              )}
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
+                ) : null}
+                <p className="text-sm text-muted-foreground">
+                  Queda en la conversación de {recipient.displayName}, con el documento adjunto.
+                </p>
+              </>
+            ) : null}
+          </div>
+        )}
+      </FormDrawer>
     </>
   )
 }

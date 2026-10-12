@@ -8,6 +8,7 @@ import { documentCategoryLabel } from "../../lib/patient-overview"
 import { type EncounterDetail, encounterStatusLabel, type TimelineItem } from "../../lib/patients"
 import { DocumentOpenButton } from "./document-open-button"
 import { EncounterDetailView } from "./encounter-detail-view"
+import { activeOrgLocale } from "../../lib/locale"
 
 /**
  * Atención finalizada como unidad clínica: motivo, evolución, procedimientos
@@ -137,7 +138,7 @@ export function EncounterHistoryCard({
           {item.nextStep ? `Paso siguiente: ${item.nextStep} · ` : ""}
           {item.nextAppointmentAt ? (
             <time dateTime={item.nextAppointmentAt}>
-              Próxima revisión sugerida: {new Date(item.nextAppointmentAt).toLocaleString("es-PE")}
+              Próxima revisión sugerida: {new Date(item.nextAppointmentAt).toLocaleString(activeOrgLocale())}
             </time>
           ) : (
             "Sin próxima revisión sugerida"

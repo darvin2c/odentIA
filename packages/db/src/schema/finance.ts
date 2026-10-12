@@ -1,13 +1,15 @@
 /**
- * Finanzas: caja por sede/turno, gastos y proveedores, cuentas por cobrar con
- * planes de cuotas, y comisiones por profesional.
+ * Finanzas: caja por sede (ventanas que nacen solas y solo se cierran), cierres
+ * inmutables, gastos con su tipo y comisiones por profesional.
  *
  * Invariantes:
- * - Dinero siempre en centavos enteros (`integer`) con moneda ISO congelada por
- *   documento; cambiar la configuración nunca reinterpreta históricos.
+ * - Dinero siempre en enteros de la unidad menor de la moneda (ISO 4217), con
+ *   la moneda congelada por documento; cambiar la configuración nunca
+ *   reinterpreta históricos.
  * - Nada se borra: las correcciones son anulaciones con motivo y auditoría.
  * - Un cobro real (`patient_payment`) se integra a caja una sola vez.
- * - Las cuotas calendarizan un cargo existente: nunca duplican la deuda.
+ * - El arqueo cuenta solo efectivo, por el tipo del medio (UN/CEFACT 4461),
+ *   nunca por su nombre.
  * - Sin emisor fiscal ni pasarela: no hay emisión de comprobantes ni cobro
  *   online en este dominio.
  */
@@ -28,7 +30,6 @@ import {
 import { user } from "./auth.js"
 import { orgFk, timestamps } from "./crm.js"
 import { patient, patientCharge, patientPayment, patientPaymentApplication } from "./clinical.js"
-import { supplier } from "./inventory.js"
 import { branch } from "./org.js"
 
 /** Turno de caja de una sucursal. Solo un turno abierto por sucursal+moneda. */
@@ -81,7 +82,6 @@ export const CASH_MOVEMENT_KINDS = [
   "aporte",
   "retiro",
   "devolucion",
-  "ajuste",
 ] as const
 
 export const CASH_MOVEMENT_DIRECTIONS = ["ingreso", "egreso"] as const
@@ -126,7 +126,7 @@ export const cashMovement = pgTable(
     ),
     check(
       "cash_movement_kind_check",
-      sql`${table.kind} IN ('apertura','cobro','gasto','aporte','retiro','devolucion','ajuste')`,
+      sql`${table.kind} IN ('apertura','cobro','gasto','aporte','retiro','devolucion')`,
     ),
   ],
 )
@@ -143,7 +143,6 @@ export const expense = pgTable(
     branchId: uuid("branch_id")
       .notNull()
       .references(() => branch.id),
-    supplierId: uuid("supplier_id").references(() => supplier.id),
     shiftId: uuid("shift_id").references(() => cashShift.id),
     concept: text("concept").notNull(),
     /** Tipo del gasto (Personal, Alquiler, Laboratorio, Materiales, Servicios, Impuestos, Otros). */
@@ -167,7 +166,6 @@ export const expense = pgTable(
       table.branchId,
       table.spentAt,
     ),
-    index("expense_org_supplier_idx").on(table.organizationId, table.supplierId),
     check("expense_amount_check", sql`${table.amountCents} > 0`),
   ],
 )
@@ -186,10 +184,19 @@ export const cashClosure = pgTable(
       .references(() => cashShift.id),
     windowFrom: timestamp("window_from", { withTimezone: true }).notNull(),
     windowTo: timestamp("window_to", { withTimezone: true }).notNull(),
-    /** Quedó del cierre anterior + cobros en efectivo − gastos de caja. */
+    /**
+     * Desglose del efectivo de la ventana. Siempre suma el esperado:
+     * quedó + cobros + ingresado − gastos − retirado − devuelto.
+     */
     openingRetainedCents: integer("opening_retained_cents").notNull().default(0),
     cashCollectedCents: integer("cash_collected_cents").notNull().default(0),
+    /** Efectivo ingresado a mano (fondo, cambio). */
+    cashAddedCents: integer("cash_added_cents").notNull().default(0),
     expenseCashCents: integer("expense_cash_cents").notNull().default(0),
+    /** Efectivo retirado a mano (depósito, entrega parcial). */
+    cashWithdrawnCents: integer("cash_withdrawn_cents").notNull().default(0),
+    /** Efectivo devuelto a pacientes (devoluciones y anulaciones posteriores al cierre). */
+    cashRefundedCents: integer("cash_refunded_cents").notNull().default(0),
     expectedCents: integer("expected_cents").notNull(),
     countedCents: integer("counted_cents").notNull(),
     differenceCents: integer("difference_cents").notNull(),
@@ -204,6 +211,11 @@ export const cashClosure = pgTable(
   (table) => [
     index("cash_closure_org_branch_idx").on(table.organizationId, table.branchId, table.closedAt),
     uniqueIndex("cash_closure_shift_uidx").on(table.organizationId, table.shiftId),
+    // Lo contado se reparte entero entre lo que queda y lo que se entrega.
+    check(
+      "cash_closure_split_check",
+      sql`${table.retainedCents} + ${table.deliveredCents} = ${table.countedCents}`,
+    ),
   ],
 )
 
@@ -271,23 +283,19 @@ export const commissionSettlement = pgTable(
     voidReason: text("void_reason"),
   },
   (table) => [
-    // Solo liquidaciones mensuales nuevas: el histórico (año/mes nulos o
-    // anulado) no entra al único-por-mes aunque comparta profesional y mes.
-    uniqueIndex("commission_settlement_month_uidx")
-      .on(
-        table.organizationId,
-        table.professionalUserId,
-        table.periodYear,
-        table.periodMonth,
-        table.currency,
-      )
-      .where(
-        sql`${table.voidedAt} IS NULL AND ${table.periodYear} IS NOT NULL AND ${table.periodMonth} IS NOT NULL`,
-      ),
+    // Un mes admite más de un pago (quincena, pago adelantado): cada pago
+    // cubre lo pendiente hasta ese momento. Lo que impide pagar dos veces un
+    // cobro es la unicidad por fuente de las líneas.
+    index("commission_settlement_month_idx").on(
+      table.organizationId,
+      table.professionalUserId,
+      table.periodYear,
+      table.periodMonth,
+    ),
     check("commission_settlement_base_check", sql`${table.base} IN ('cobrado','produccion')`),
     check(
       "commission_settlement_status_check",
-      sql`${table.status} IN ('borrador','liquidada','anulada')`,
+      sql`${table.status} IN ('liquidada','anulada')`,
     ),
     check(
       "commission_settlement_month_check",
@@ -312,6 +320,11 @@ export const commissionSettlementLine = pgTable(
     settlementId: uuid("settlement_id")
       .notNull()
       .references(() => commissionSettlement.id, { onDelete: "cascade" }),
+    /**
+     * 'cobro': comisión de un cobro. 'ajuste': comisión ya pagada de un cobro
+     * que después se anuló; resta del pago en el que entra.
+     */
+    kind: text("kind").notNull().default("cobro"),
     sourceKey: text("source_key").notNull(),
     applicationId: uuid("application_id").references(() => patientPaymentApplication.id),
     chargeId: uuid("charge_id").references(() => patientCharge.id),
@@ -333,5 +346,6 @@ export const commissionSettlementLine = pgTable(
       .where(sql`${table.voidedAt} IS NULL`),
     check("commission_line_base_check", sql`${table.baseCents} >= 0`),
     check("commission_line_amount_check", sql`${table.commissionCents} >= 0`),
+    check("commission_line_kind_check", sql`${table.kind} IN ('cobro','ajuste')`),
   ],
 )

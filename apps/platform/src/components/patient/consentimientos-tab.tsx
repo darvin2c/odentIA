@@ -43,6 +43,7 @@ import { ageFrom, type PatientFull } from "../../lib/patients"
 import { Cie10Search } from "./cie10-search"
 import { ConsentSheet } from "./consent-sheet"
 import { FirmaPad } from "./firma-pad"
+import { activeOrgLocale } from "../../lib/locale"
 
 const errorMessage = (e: unknown) =>
   e instanceof ApiError
@@ -150,7 +151,7 @@ export function ConsentimientosTab({
                     <span className="text-xs text-muted-foreground">
                       {document.procedureRef ? `${document.procedureRef} · ` : ""}
                       {new Date(document.signedAt ?? document.createdAt).toLocaleDateString(
-                        "es-PE",
+                        activeOrgLocale(),
                         {
                           dateStyle: "medium",
                         },
@@ -471,7 +472,7 @@ function ConsentDetail({
         <ol className="mt-1 flex flex-col gap-1 text-sm text-muted-foreground">
           {(historyQuery.data?.data ?? []).map((event) => (
             <li key={event.id}>
-              {new Date(event.createdAt).toLocaleString("es-PE", {
+              {new Date(event.createdAt).toLocaleString(activeOrgLocale(), {
                 dateStyle: "medium",
                 timeStyle: "short",
               })}{" "}

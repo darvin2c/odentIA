@@ -11,13 +11,16 @@ import {
   treatmentPlan,
   treatmentPlanItem,
 } from "@odentia/db/schema/clinical"
-import { auditEvent, orgProfile } from "@odentia/db/schema/org"
+import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
+import { promotion as promotionTable } from "@odentia/db/schema/promotions"
+import { sumAcceptedCents } from "@odentia/clinical"
 import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm"
 import { notFound, ServiceError, validation } from "./errors.js"
+import { requireOrgCurrency } from "./locale.js"
 import { requirePatient } from "./patients.js"
 import type { PlanItemDecision } from "./plan.js"
 import { requireProfessionalSignature } from "./professional-profiles.js"
-import { requirePromotionPrice } from "./promotions.js"
+import { isPromotionLive, requirePromotionPrice } from "./promotions.js"
 
 import { requireDecisionContact } from "./responsibilities.js"
 import { assertExecutableCodings } from "./procedure-codings.js"
@@ -46,8 +49,36 @@ export type BudgetStatus = (typeof BUDGET_STATUSES)[number]
 export type BudgetRow = typeof treatmentBudget.$inferSelect
 export type BudgetLineRow = typeof treatmentBudgetItem.$inferSelect
 
-/** Línea con estado clínico unido solo para lectura. */
-export type BudgetLineWithStatus = BudgetLineRow & { itemStatus: string }
+/** Línea con estado clínico y totales unidos solo para lectura. */
+export type BudgetLineWithStatus = BudgetLineRow & {
+  itemStatus: string
+  /**
+   * Total de la línea: el precio acordado o, si se cobra por sesión, el
+   * precio de cada visita por las visitas previstas. Es lo que suma el
+   * presupuesto; la deuda nace visita a visita.
+   */
+  lineTotalCents: number | null
+  /** El mismo total a la tarifa de referencia (base del descuento). */
+  tariffLineTotalCents: number | null
+  /** Rebaja de la línea frente a la tarifa; null si no hay rebaja o falta un importe. */
+  lineDiscountCents: number | null
+}
+
+/** Visitas que cuenta una línea: las previstas si se cobra por sesión; si no, una. */
+export function budgetLineUnits(line: { billingMode: string; sessionsPlanned: number | null }): number {
+  return line.billingMode === "session" ? Math.max(line.sessionsPlanned ?? 1, 1) : 1
+}
+
+function lineTotal(
+  line: { billingMode: string; sessionsPlanned: number | null },
+  unitCents: number | null,
+): number | null {
+  if (unitCents == null) return null
+  const total = unitCents * budgetLineUnits(line)
+  if (!Number.isSafeInteger(total) || total > 2147483647)
+    throw validation("El total de la línea excede el importe admitido")
+  return total
+}
 
 /** Presupuesto con líneas snapshot y totales enteros (null = precio desconocido). */
 export type BudgetWithTotals = BudgetRow & {
@@ -288,32 +319,44 @@ async function listBudgetLines(
       )
     for (const item of items) statuses.set(item.id, item.status)
   }
-  return lines.map((line) => ({
-    ...line,
-    itemStatus: statuses.get(line.planItemId) ?? "pendiente",
-  }))
+  return lines.map((line) => {
+    const lineTotalCents = lineTotal(line, line.priceCents)
+    const tariffLineTotalCents = lineTotal(line, line.tariffPriceCents ?? line.priceCents)
+    const discount =
+      lineTotalCents != null && tariffLineTotalCents != null
+        ? tariffLineTotalCents - lineTotalCents
+        : null
+    return {
+      ...line,
+      itemStatus: statuses.get(line.planItemId) ?? "pendiente",
+      lineTotalCents,
+      tariffLineTotalCents,
+      lineDiscountCents: discount != null && discount > 0 ? discount : null,
+    }
+  })
 }
 
-/** Suma entera exacta; null si algún precio del conjunto es desconocido. */
-function sumCents(items: Array<{ priceCents: number | null }>): number | null {
+/** Suma entera exacta; null si algún importe del conjunto es desconocido. */
+function sumCents(values: Array<number | null>): number | null {
   let total = 0
-  for (const item of items) {
-    if (item.priceCents == null) return null
-    total += item.priceCents
+  for (const value of values) {
+    if (value == null) return null
+    total += value
   }
   return total
 }
 
 function withTotals(budget: BudgetRow, items: BudgetLineWithStatus[]): BudgetWithTotals {
-  const totalCents = sumCents(items)
-  const tariffTotalCents = sumCents(
-    items.map((item) => ({ priceCents: item.tariffPriceCents ?? item.priceCents })),
-  )
+  // El presupuesto suma el total de cada línea: lo que se cobra por sesión
+  // cuenta todas sus visitas previstas, no solo la primera.
+  const totalCents = sumCents(items.map((item) => item.lineTotalCents))
+  const tariffTotalCents = sumCents(items.map((item) => item.tariffLineTotalCents))
   return {
     ...budget,
     items,
     totalCents,
-    acceptedCents: sumCents(items.filter((item) => item.decision === "aceptado")),
+    // Regla compartida con la vista previa de la interfaz (`@odentia/clinical`).
+    acceptedCents: sumAcceptedCents(items),
     tariffTotalCents,
     discountCents:
       totalCents == null || tariffTotalCents == null ? null : tariffTotalCents - totalCents,
@@ -460,50 +503,27 @@ async function requireQuotableItems(
   return locked
 }
 
-export async function createBudget(
+/**
+ * Líneas de un borrador a partir de indicaciones cotizables: precio y tarifa
+ * congelados de la indicación, sin promoción, y el modo de cobro del servicio.
+ * La usan preparar un presupuesto y añadirle tratamientos: misma regla.
+ */
+async function insertDraftLines(
   tx: Db,
   orgId: string,
   actorUserId: string,
   patientId: string,
-  input: CreateBudgetInput,
-  opts: BudgetActorOpts = {},
-): Promise<BudgetWithTotals> {
-  await requirePatient(tx, orgId, patientId)
-  if (!input.planId?.trim())
-    throw validation("planId es obligatorio: el presupuesto pertenece a un plan")
-  const plan = await lockPlan(tx, orgId, patientId, input.planId.trim())
-  assertOwnPlan(plan, actorUserId, opts.memberRole)
-  const items = await requireQuotableItems(tx, orgId, patientId, plan.id, input.itemIds)
-  const billingModes = await readBillingModes(
-    tx,
-    orgId,
-    items.map((item) => item.serviceId).filter((id): id is string => id !== null),
-  )
-  const currency = items[0]?.currency ?? "PEN"
-  const title = assertTitle(input.title, plan.title)
-  const notes = assertNotes(input.notes) ?? null
-  const budgetNumber = await nextBudgetNumber(tx, orgId)
-  const [budget] = await tx
-    .insert(treatmentBudget)
-    .values({
-      organizationId: orgId,
-      patientId,
-      planId: plan.id,
-      budgetNumber,
-      title,
-      currency,
-      status: "borrador",
-      notes,
-      createdBy: actorUserId,
-    })
-    .returning()
-  if (!budget) throw new Error("No se pudo crear el presupuesto")
+  planId: string,
+  budgetId: string,
+  items: QuotableItem[],
+  billingModes: Record<string, string>,
+): Promise<void> {
   for (const item of items) {
     await tx.insert(treatmentBudgetItem).values({
       organizationId: orgId,
       patientId,
-      planId: plan.id,
-      budgetId: budget.id,
+      planId,
+      budgetId,
       planItemId: item.id,
       serviceId: item.serviceId,
       title: item.title,
@@ -527,7 +547,7 @@ export async function createBudget(
     })
     await tx
       .update(treatmentPlanItem)
-      .set({ budgetId: budget.id, updatedAt: new Date() })
+      .set({ budgetId, updatedAt: new Date() })
       .where(
         and(
           eq(treatmentPlanItem.id, item.id),
@@ -536,6 +556,179 @@ export async function createBudget(
         ),
       )
   }
+}
+
+export interface AddBudgetItemsInput {
+  itemIds: string[]
+}
+
+/**
+ * Añadir tratamientos del plan a un presupuesto en borrador. Entran con las
+ * mismas reglas que al prepararlo (cotizables, con tarifa, misma moneda, sin
+ * promoción). El borrador de una revisión no lo admite: sus tratamientos se
+ * eligen al crearla.
+ */
+export async function addBudgetItems(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  patientId: string,
+  budgetId: string,
+  input: AddBudgetItemsInput,
+  opts: BudgetActorOpts = {},
+): Promise<BudgetWithTotals> {
+  await requirePatient(tx, orgId, patientId)
+  const budget = await requireBudget(tx, orgId, patientId, budgetId)
+  assertOwnPlan(await lockPlan(tx, orgId, patientId, budget.planId), actorUserId, opts.memberRole)
+  const current = await lockBudgetRow(tx, orgId, patientId, budgetId)
+  if (current.status !== "borrador") {
+    throw conflict("BUDGET_STATUS", "Solo a un presupuesto en borrador se le añaden tratamientos")
+  }
+  if (current.supersedesBudgetId) {
+    throw conflict(
+      "BUDGET_REVISION_ITEMS",
+      "Los tratamientos de una revisión se eligen al crearla",
+    )
+  }
+  const items = await requireQuotableItems(tx, orgId, patientId, current.planId, input.itemIds)
+  if (items.some((item) => item.currency !== current.currency)) {
+    throw conflict("BUDGET_CURRENCY_MIX", "Los tratamientos usan otra moneda que el presupuesto")
+  }
+  const billingModes = await readBillingModes(
+    tx,
+    orgId,
+    items.map((item) => item.serviceId).filter((id): id is string => id !== null),
+  )
+  await insertDraftLines(tx, orgId, actorUserId, patientId, current.planId, budgetId, items, billingModes)
+  await audit(tx, orgId, actorUserId, "budget.items_added", budgetId, {
+    patientId,
+    itemIds: items.map((item) => item.id),
+    itemCount: items.length,
+  })
+  await notifyBudget(tx, orgId)
+  return withTotals(current, await listBudgetLines(tx, orgId, patientId, budgetId))
+}
+
+export interface RemoveBudgetItemsInput {
+  itemIds: string[]
+}
+
+/**
+ * Quitar tratamientos de un presupuesto en borrador: nadie lo ha recibido, así
+ * que la línea se borra (la base solo lo permite en borrador) y la indicación
+ * vuelve a quedar sin presupuestar. Lo acordado en esa línea (precio, motivo,
+ * promoción) se pierde y queda en la auditoría. El borrador puede quedar sin
+ * líneas, pero así no se entrega (`deliverBudget`). Como al añadir, el
+ * borrador de una revisión no lo admite.
+ */
+export async function removeBudgetItems(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  patientId: string,
+  budgetId: string,
+  input: RemoveBudgetItemsInput,
+  opts: BudgetActorOpts = {},
+): Promise<BudgetWithTotals> {
+  await requirePatient(tx, orgId, patientId)
+  const budget = await requireBudget(tx, orgId, patientId, budgetId)
+  assertOwnPlan(await lockPlan(tx, orgId, patientId, budget.planId), actorUserId, opts.memberRole)
+  const current = await lockBudgetRow(tx, orgId, patientId, budgetId)
+  if (current.status !== "borrador") {
+    throw conflict("BUDGET_STATUS", "Solo de un presupuesto en borrador se quitan tratamientos")
+  }
+  if (current.supersedesBudgetId) {
+    throw conflict(
+      "BUDGET_REVISION_ITEMS",
+      "Los tratamientos de una revisión se eligen al crearla",
+    )
+  }
+  if (!Array.isArray(input.itemIds) || input.itemIds.length < 1 || input.itemIds.length > 200) {
+    throw validation("itemIds debe tener entre 1 y 200 identificadores únicos")
+  }
+  const ids = [...new Set(input.itemIds)].sort()
+  if (ids.length !== input.itemIds.length) throw validation("itemIds no debe repetirse")
+  const lines = await listBudgetLines(tx, orgId, patientId, budgetId)
+  const removed = lines.filter((line) => ids.includes(line.planItemId))
+  if (removed.length !== ids.length) throw notFound("Línea del presupuesto")
+  await tx
+    .delete(treatmentBudgetItem)
+    .where(
+      and(
+        eq(treatmentBudgetItem.organizationId, orgId),
+        eq(treatmentBudgetItem.patientId, patientId),
+        eq(treatmentBudgetItem.budgetId, budgetId),
+        inArray(treatmentBudgetItem.planItemId, ids),
+      ),
+    )
+  await tx
+    .update(treatmentPlanItem)
+    .set({ budgetId: null, updatedAt: new Date() })
+    .where(
+      and(
+        eq(treatmentPlanItem.organizationId, orgId),
+        eq(treatmentPlanItem.patientId, patientId),
+        eq(treatmentPlanItem.budgetId, budgetId),
+        inArray(treatmentPlanItem.id, ids),
+      ),
+    )
+  await audit(tx, orgId, actorUserId, "budget.items_removed", budgetId, {
+    patientId,
+    itemCount: removed.length,
+    removed: removed.map((line) => ({
+      planItemId: line.planItemId,
+      title: line.title,
+      priceCents: line.priceCents,
+      tariffCents: line.tariffPriceCents,
+      reason: line.priceReason,
+      promotion: line.promotionName,
+      sessions: line.sessionsPlanned,
+    })),
+  })
+  await notifyBudget(tx, orgId)
+  return withTotals(current, await listBudgetLines(tx, orgId, patientId, budgetId))
+}
+
+export async function createBudget(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  patientId: string,
+  input: CreateBudgetInput,
+  opts: BudgetActorOpts = {},
+): Promise<BudgetWithTotals> {
+  await requirePatient(tx, orgId, patientId)
+  if (!input.planId?.trim())
+    throw validation("planId es obligatorio: el presupuesto pertenece a un plan")
+  const plan = await lockPlan(tx, orgId, patientId, input.planId.trim())
+  assertOwnPlan(plan, actorUserId, opts.memberRole)
+  const items = await requireQuotableItems(tx, orgId, patientId, plan.id, input.itemIds)
+  const billingModes = await readBillingModes(
+    tx,
+    orgId,
+    items.map((item) => item.serviceId).filter((id): id is string => id !== null),
+  )
+  // La moneda es la de sus tratamientos (una sola); nunca la de un país fijo.
+  const currency = items[0]?.currency ?? (await requireOrgCurrency(tx, orgId))
+  const title = assertTitle(input.title, plan.title)
+  const notes = assertNotes(input.notes) ?? null
+  const budgetNumber = await nextBudgetNumber(tx, orgId)
+  const [budget] = await tx
+    .insert(treatmentBudget)
+    .values({
+      organizationId: orgId,
+      patientId,
+      planId: plan.id,
+      budgetNumber,
+      title,
+      currency,
+      status: "borrador",
+      notes,
+      createdBy: actorUserId,
+    })
+    .returning()
+  if (!budget) throw new Error("No se pudo crear el presupuesto")
+  await insertDraftLines(tx, orgId, actorUserId, patientId, plan.id, budget.id, items, billingModes)
   await audit(tx, orgId, actorUserId, "budget.created", budget.id, {
     patientId,
     planId: plan.id,
@@ -636,6 +829,21 @@ export async function deliverBudget(
   }
   const lines = await listBudgetLines(tx, orgId, patientId, budgetId)
   if (lines.length === 0) throw validation("El presupuesto no tiene ítems")
+  // El borrador pudo esperar días: al entregarlo, cada promoción debe seguir
+  // vigente e incluir el servicio. Después de entregado ya no se revalida.
+  for (const line of lines) {
+    if (!line.promotionId || !line.serviceId) continue
+    try {
+      await requirePromotionPrice(tx, orgId, line.promotionId, line.serviceId, line.priceCents)
+    } catch (error) {
+      if (error instanceof ServiceError && error.code.startsWith("PROMOTION_"))
+        throw conflict(
+          "PROMOTION_NOT_LIVE",
+          `La promoción «${line.promotionName ?? ""}» de «${line.title}» ya no está vigente: quítala o elige otra antes de entregar`,
+        )
+      throw error
+    }
+  }
   const [updated] = await tx
     .update(treatmentBudget)
     .set({ status: "presentado", presentedAt: new Date(), updatedAt: new Date() })
@@ -677,6 +885,8 @@ export interface AdjustBudgetLineInput {
   promotionId?: string | null
   /** Precio final con promoción «desde» (el final lo pone quien presupuesta). */
   promotionFinalPriceCents?: number | null
+  /** Visitas previstas de una línea que se cobra por sesión; undefined = sin cambio. */
+  sessionsPlanned?: number
 }
 
 export interface AdjustBudgetLinesInput {
@@ -724,6 +934,7 @@ export async function adjustBudgetLines(
   const byItem: Record<string, (typeof lines)[number]> = {}
   for (const line of lines) byItem[line.planItemId] = line
   const now = new Date()
+  const changes: Array<Record<string, unknown>> = []
   for (const patch of input.lines) {
     const line = byItem[patch.planItemId]
     if (!line) throw notFound("Línea del presupuesto")
@@ -732,8 +943,22 @@ export async function adjustBudgetLines(
     let promotionId = line.promotionId
     let promotionName = line.promotionName
     let promotionMode = line.promotionMode
+    let sessionsPlanned = line.sessionsPlanned
+    if (patch.sessionsPlanned !== undefined) {
+      if (line.billingMode !== "session")
+        throw validation("Las visitas previstas solo aplican a lo que se cobra por sesión")
+      if (!Number.isInteger(patch.sessionsPlanned) || patch.sessionsPlanned < 1 || patch.sessionsPlanned > 200)
+        throw validation("Las visitas previstas van de 1 a 200")
+      sessionsPlanned = patch.sessionsPlanned
+    }
     if (patch.promotionId !== undefined) {
       if (patch.promotionId === null) {
+        // Quitar la promoción devuelve la tarifa: su precio no era un
+        // descuento acordado y no necesita motivo.
+        if (promotionId) {
+          priceCents = line.tariffPriceCents ?? priceCents
+          priceReason = null
+        }
         promotionId = null
         promotionName = null
         promotionMode = null
@@ -782,19 +1007,35 @@ export async function adjustBudgetLines(
         priceReason = patch.reason?.trim() ? assertPriceReason(patch.reason) : null
       }
     }
+    lineTotal({ billingMode: line.billingMode, sessionsPlanned }, priceCents)
     await tx
       .update(treatmentBudgetItem)
-      .set({ priceCents, priceReason, promotionId, promotionName, promotionMode, updatedAt: now })
+      .set({ priceCents, priceReason, promotionId, promotionName, promotionMode, sessionsPlanned, updatedAt: now })
       .where(
         and(
           eq(treatmentBudgetItem.id, line.id),
           eq(treatmentBudgetItem.organizationId, orgId),
         ),
       )
+    // El motivo se sobrescribe en la línea: la auditoría conserva cada cambio.
+    changes.push({
+      lineId: line.id,
+      planItemId: line.planItemId,
+      title: line.title,
+      fromCents: line.priceCents,
+      toCents: priceCents,
+      tariffCents: line.tariffPriceCents,
+      reason: priceReason,
+      fromPromotion: line.promotionName,
+      toPromotion: promotionName,
+      fromSessions: line.sessionsPlanned,
+      toSessions: sessionsPlanned,
+    })
   }
   await audit(tx, orgId, actorUserId, "budget.prices_adjusted", budgetId, {
     patientId,
     lineCount: input.lines.length,
+    changes,
   })
   await notifyBudget(tx, orgId)
   return withTotals(await requireBudget(tx, orgId, patientId, budgetId), await listBudgetLines(tx, orgId, patientId, budgetId))
@@ -1118,21 +1359,48 @@ export async function reviseBudget(
   }).returning()
   if (!revision) throw new Error("No se pudo crear la revisión")
   const oldLines = await listBudgetLines(tx, orgId, patientId, current.id)
+  // Un tratamiento que entra nuevo a la revisión toma el modo de cobro de su servicio.
+  const billingModes = await readBillingModes(
+    tx,
+    orgId,
+    items.map((item) => item.serviceId).filter((id): id is string => !!id),
+  )
+  const revisedAt = new Date()
   for (const item of items) {
     const snapshot = oldLines.find(l => l.planItemId === item.id) ?? item
     const carried = "tariffPriceCents" in snapshot ? snapshot as BudgetLineWithStatus : null
+    // La revisión conserva lo acordado, salvo una promoción que ya terminó:
+    // esa línea vuelve a su tarifa y queda a la vista en el borrador.
+    let promotion = carried?.promotionId
+      ? { id: carried.promotionId, name: carried.promotionName, mode: carried.promotionMode }
+      : null
+    let priceCents = snapshot.priceCents
+    let priceReason = carried?.priceReason ?? null
+    if (promotion) {
+      const [promo] = await tx
+        .select()
+        .from(promotionTable)
+        .where(and(eq(promotionTable.id, promotion.id), eq(promotionTable.organizationId, orgId)))
+        .limit(1)
+      if (!promo || !isPromotionLive(promo, revisedAt)) {
+        promotion = null
+        priceCents = carried?.tariffPriceCents ?? item.priceCents
+        priceReason = null
+      }
+    }
     await tx.insert(treatmentBudgetItem).values({
       organizationId: orgId, patientId, planId: current.planId, budgetId: revision.id,
       planItemId: item.id, serviceId: snapshot.serviceId, title: snapshot.title,
       scope: snapshot.scope, toothNumber: snapshot.toothNumber, surfaces: snapshot.surfaces,
       quadrant: snapshot.quadrant, arch: snapshot.arch, codings: snapshot.codings,
-      priceCents: snapshot.priceCents,
+      priceCents,
       tariffPriceCents: carried?.tariffPriceCents ?? item.priceCents,
-      priceReason: carried?.priceReason ?? null,
-      promotionId: carried?.promotionId ?? null,
-      promotionName: carried?.promotionName ?? null,
-      promotionMode: carried?.promotionMode ?? null,
-      billingMode: carried?.billingMode ?? "treatment",
+      priceReason,
+      promotionId: promotion?.id ?? null,
+      promotionName: promotion?.name ?? null,
+      promotionMode: promotion?.mode ?? null,
+      billingMode:
+        carried?.billingMode ?? (item.serviceId ? (billingModes[item.serviceId] ?? "treatment") : "treatment"),
       sessionsPlanned: carried?.sessionsPlanned ?? item.plannedSessions,
       currency: snapshot.currency, createdBy: actorUserId,
     })
@@ -1145,8 +1413,16 @@ export async function reviseBudget(
 export interface BudgetPrintLine {
   title: string
   detail: string | null
-  tariffCents: number | null
-  priceCents: number | null
+  /** Precio de referencia de la unidad (tarifa, o lo acordado si es mayor). */
+  listUnitCents: number | null
+  /** Precio final acordado de la unidad (el tratamiento o cada visita). */
+  unitCents: number | null
+  /** Visitas previstas si se cobra por sesión; si no, 1. */
+  units: number
+  /** Total de la línea a precio de referencia y a precio acordado. */
+  listTotalCents: number | null
+  totalCents: number | null
+  /** Rebaja de la línea (referencia − acordado; nunca negativa). */
   discountCents: number | null
   promotionName: string | null
   billingMode: string
@@ -1157,34 +1433,32 @@ export interface BudgetPrintLine {
 export interface BudgetPrintPayload {
   /** UN/CEFACT 1001: 310 = oferta/cotización. */
   quotationCode: "310"
-  /** Hoja del presupuesto: A4 (ISO 216). */
-  paper: "A4"
+  /** Hoja del presupuesto según la clínica: A4 (ISO 216) o Carta. */
+  paper: string
   budgetNumber: number
   revisionNumber: number
   title: string
   planTitle: string
   status: string
   isDraft: boolean
+  notes: string | null
   currency: string
   locale: string
   timezone: string
   issuedAt: Date
-  clinic: { name: string; address: string | null; phone: string | null }
+  clinic: { name: string; branchName: string | null; address: string | null; phone: string | null }
   patient: { displayName: string; docType: string | null; docNumber: string | null }
   professional: { name: string; title: string | null; registration: string | null } | null
   lines: BudgetPrintLine[]
   subtotalCents: number | null
   discountCents: number | null
   totalCents: number | null
-  paymentNote: string
-  fiscalNote: string
 }
 
 /**
- * Payload estructurado para imprimir el presupuesto (plantilla A4 del
- * servidor o PDF de Documentos): precios finales acordados, tarifa de
- * referencia y código de cotización 310. Moneda/locale/zona salen del perfil
- * de la organización, nunca fijos en el código.
+ * Contenido de la hoja del presupuesto (lo que imprime el PDF): precios
+ * finales acordados, referencia del descuento y código de cotización 310.
+ * Moneda, formato, zona y papel salen del perfil de la clínica.
  */
 export async function getBudgetPrintPayload(
   tx: Db,
@@ -1199,6 +1473,7 @@ export async function getBudgetPrintPayload(
     .from(orgProfile)
     .where(eq(orgProfile.organizationId, orgId))
     .limit(1)
+  if (!profile) throw notFound("Perfil de organización")
   const [patientRow] = await tx
     .select({
       displayName: patient.displayName,
@@ -1235,46 +1510,68 @@ export async function getBudgetPrintPayload(
       }
     }
   }
-  const lines: BudgetPrintLine[] = budget.items.map((line) => ({
-    title: line.title,
-    detail: line.scope ?? (line.toothNumber != null ? `Pieza ${line.toothNumber}` : null),
-    tariffCents: line.tariffPriceCents ?? line.priceCents,
-    priceCents: line.priceCents,
-    discountCents:
-      line.tariffPriceCents != null && line.priceCents != null
-        ? line.tariffPriceCents - line.priceCents
-        : null,
-    promotionName: line.promotionName,
-    billingMode: line.billingMode,
-    sessionsPlanned: line.sessionsPlanned,
-    decision: line.decision,
-  }))
+  // El presupuesto no pertenece a una sede. Si la clínica tiene una sola, la
+  // hoja lleva su nombre, dirección y teléfono; con varias, los de la clínica.
+  const branches = await tx
+    .select({ name: branch.name, addressLine1: branch.addressLine1, phone: branch.phone })
+    .from(branch)
+    .where(and(eq(branch.organizationId, orgId), eq(branch.isActive, true)))
+    .limit(2)
+  const onlyBranch = branches.length === 1 ? branches[0]! : null
+  const lines: BudgetPrintLine[] = budget.items.map((line) => {
+    const units = budgetLineUnits(line)
+    const unitCents = line.priceCents
+    // La referencia nunca queda por debajo de lo acordado: un precio mayor
+    // que la tarifa no se imprime como «descuento negativo».
+    const listUnitCents =
+      unitCents == null
+        ? null
+        : Math.max(line.tariffPriceCents ?? unitCents, unitCents)
+    const totalCents = unitCents == null ? null : unitCents * units
+    const listTotalCents = listUnitCents == null ? null : listUnitCents * units
+    return {
+      title: line.title,
+      detail: line.toothNumber != null ? `pieza ${line.toothNumber}` : null,
+      listUnitCents,
+      unitCents,
+      units,
+      listTotalCents,
+      totalCents,
+      discountCents:
+        listTotalCents != null && totalCents != null ? listTotalCents - totalCents : null,
+      promotionName: line.promotionName,
+      billingMode: line.billingMode,
+      sessionsPlanned: line.sessionsPlanned,
+      decision: line.decision,
+    }
+  })
+  const subtotalCents = sumCents(lines.map((line) => line.listTotalCents))
   return {
     quotationCode: "310",
-    paper: "A4",
+    paper: profile.sheetSize,
     budgetNumber: budget.budgetNumber,
     revisionNumber: budget.revisionNumber,
     title: budget.title,
     planTitle: planRow?.title ?? budget.title,
     status: budget.status,
     isDraft: budget.status === "borrador",
+    notes: budget.notes,
     currency: budget.currency,
-    locale: profile?.locale ?? "es-PE",
-    timezone: profile?.timezone ?? "America/Lima",
+    locale: profile.locale,
+    timezone: profile.timezone,
     issuedAt: budget.presentedAt ?? budget.createdAt,
     clinic: {
-      name: profile?.tradeName || profile?.legalName || "",
-      address: profile?.fiscalAddress ?? null,
-      phone: null,
+      name: profile.tradeName || profile.legalName || "",
+      branchName: onlyBranch?.name ?? null,
+      address: onlyBranch?.addressLine1 ?? profile.fiscalAddress ?? null,
+      phone: onlyBranch?.phone ?? null,
     },
     patient: patientRow,
     professional,
     lines,
-    subtotalCents: budget.tariffTotalCents,
-    discountCents: budget.discountCents,
+    subtotalCents,
+    discountCents:
+      subtotalCents == null || budget.totalCents == null ? null : subtotalCents - budget.totalCents,
     totalCents: budget.totalCents,
-    paymentNote:
-      "Cada tratamiento se paga cuando se realiza. Puede dejar un adelanto, que se descuenta de lo siguiente que deba.",
-    fiscalNote: "Este presupuesto no es un documento fiscal.",
   }
 }

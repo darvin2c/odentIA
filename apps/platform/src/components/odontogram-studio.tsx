@@ -48,6 +48,7 @@ import { OdontogramArch } from "./odontogram-arch"
 import { OdontogramAssessments } from "./odontogram-assessments"
 import { ToothDrawer } from "./tooth-drawer"
 import { ToothSVG } from "./tooth-svg"
+import { activeOrgLocale } from "../lib/locale"
 
 /** Ancho del contenedor disponible (no del viewport): a partir de 960 px el área es de dos columnas. */
 function useContainerWide(): { ref: RefObject<HTMLDivElement | null>; wide: boolean } {
@@ -314,7 +315,7 @@ export function OdontogramStudio({
                   items={{
                     current: "Actual",
                     ...Object.fromEntries(
-                      dates.map((date) => [date, new Date(date).toLocaleString("es-PE")]),
+                      dates.map((date) => [date, new Date(date).toLocaleString(activeOrgLocale())]),
                     ),
                   }}
                   onValueChange={(value) => {
@@ -329,7 +330,7 @@ export function OdontogramStudio({
                     <SelectItem value="current">Actual</SelectItem>
                     {dates.map((date) => (
                       <SelectItem key={date} value={date}>
-                        {new Date(date).toLocaleString("es-PE")}
+                        {new Date(date).toLocaleString(activeOrgLocale())}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -498,7 +499,7 @@ export function OdontogramStudio({
                                 <p className="text-xs text-muted-foreground">
                                   Pieza {entry.toothNumber}
                                   {entry.createdAt
-                                    ? ` · ${new Date(entry.createdAt).toLocaleDateString("es-PE")}`
+                                    ? ` · ${new Date(entry.createdAt).toLocaleDateString(activeOrgLocale())}`
                                     : ""}
                                 </p>
                                 <h4 className="mt-1 font-medium">
@@ -636,7 +637,7 @@ export function OdontogramStudio({
                       <span>
                         Pieza {entry.toothNumber} · {conditionLabel(entry.condition)}
                         {entry.createdAt
-                          ? ` · ${new Date(entry.createdAt).toLocaleDateString("es-PE")}`
+                          ? ` · ${new Date(entry.createdAt).toLocaleDateString(activeOrgLocale())}`
                           : ""}
                       </span>
                       <span className="flex gap-2">

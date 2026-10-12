@@ -1,4 +1,5 @@
 import { assertTreatmentSite, parseVitals, VALID_FDI_TEETH } from "@odentia/clinical"
+import { readBillingModes } from "./budgets.js"
 import type { Db } from "@odentia/db"
 import { appointment } from "@odentia/db/schema/agenda"
 import {
@@ -338,6 +339,16 @@ export async function createEncounter(
       .limit(1)
     if (!found) throw notFound("Sucursal")
     branchId = found.id
+  }
+  // Sin cita ni sede indicada, una clínica de una sola sede no tiene nada que
+  // elegir: la atención nace en ella y lo que se cobre llega a su caja.
+  if (!branchId) {
+    const active = await tx
+      .select({ id: branch.id })
+      .from(branch)
+      .where(and(eq(branch.organizationId, orgId), eq(branch.isActive, true)))
+      .limit(2)
+    if (active.length === 1) branchId = active[0]!.id
   }
   const reason = cleanText(input.reason, "reason", TEXT_LIMITS.reason)
   if (!reason) throw validation("El motivo de la atención es obligatorio")
@@ -1207,7 +1218,32 @@ async function acceptedBudgetLine(
     )
     .orderBy(desc(treatmentBudget.decidedAt), desc(treatmentBudget.createdAt))
     .limit(1)
-  return found?.line ?? null
+  if (found) return found.line
+  // Mientras una revisión ya entregada espera respuesta, lo último aceptado
+  // sigue valiendo: lo que se atienda en ese intervalo se cobra a lo acordado,
+  // no a tarifa. Deja de valer cuando la revisión se decide.
+  const [previous] = await tx
+    .select({ line: treatmentBudgetItem })
+    .from(treatmentBudgetItem)
+    .innerJoin(treatmentBudget, eq(treatmentBudget.id, treatmentBudgetItem.budgetId))
+    .where(
+      and(
+        eq(treatmentBudgetItem.organizationId, orgId),
+        eq(treatmentBudgetItem.patientId, patientId),
+        eq(treatmentBudgetItem.planItemId, planItemId),
+        eq(treatmentBudgetItem.decision, "aceptado"),
+        eq(treatmentBudget.status, "sustituido"),
+        sql`exists (
+          select 1 from "treatment_budget" next
+          where next."supersedes_budget_id" = ${treatmentBudget.id}
+            and next."organization_id" = ${orgId}
+            and next."status" in ('presentado','pospuesto')
+        )`,
+      ),
+    )
+    .orderBy(desc(treatmentBudget.decidedAt), desc(treatmentBudget.createdAt))
+    .limit(1)
+  return previous?.line ?? null
 }
 
 /** Lo que falta para cerrar una atención, en el orden de la historia clínica. */
@@ -1377,7 +1413,15 @@ export async function finalizeEncounter(
     const line = proc.planItemId
       ? await acceptedBudgetLine(tx, orgId, patientId, proc.planItemId)
       : null
-    const sessionMode = line?.billingMode === "session"
+    // Lo acordado en el presupuesto manda; sin presupuesto aceptado decide el
+    // servicio: un control por sesión se cobra en cada visita igualmente.
+    const serviceMode = line ? null : (await readBillingModes(tx, orgId, [proc.serviceId]))[proc.serviceId]
+    const sessionMode = (line?.billingMode ?? serviceMode) === "session"
+    // La promoción acordada viaja congelada: no se revalida su vigencia.
+    const frozenPromotion =
+      line?.promotionId && line.promotionName
+        ? { id: line.promotionId, name: line.promotionName }
+        : undefined
     if (sessionMode && proc.planItemId) {
       const [duplicate] = await tx
         .select({ id: patientCharge.id })
@@ -1419,8 +1463,10 @@ export async function finalizeEncounter(
             )
             .limit(1)
         : []
-      const cap = line?.sessionsPlanned ?? planItem?.plannedSessions ?? 1
-      if (visits.length >= cap) {
+      // El tope son las visitas previstas. Si nadie las fijó no hay tope:
+      // se cobra cada visita atendida, no solo la primera.
+      const cap = line?.sessionsPlanned ?? planItem?.plannedSessions ?? null
+      if (cap !== null && visits.length >= cap) {
         skip(proc, "sessions_complete")
         continue
       }
@@ -1432,7 +1478,7 @@ export async function finalizeEncounter(
       const charge = await createCharge(tx, orgId, actorUserId, patientId, {
         encounterProcedureId: proc.id,
         amountCents: amount,
-        promotionId: line?.promotionId ?? undefined,
+        frozenPromotion,
       })
       charges.push(charge)
       billingLines.push({
@@ -1468,11 +1514,13 @@ export async function finalizeEncounter(
         skip(proc, "covered")
         continue
       }
-      const amount = Math.min(proc.priceCents, remaining)
+      // Por tratamiento se cobra lo acordado completo en la primera
+      // atención, también cuando lo acordado supera la tarifa del acto.
+      const amount = remaining
       const charge = await createCharge(tx, orgId, actorUserId, patientId, {
         encounterProcedureId: proc.id,
         amountCents: amount,
-        promotionId: line?.promotionId ?? undefined,
+        frozenPromotion,
       })
       charges.push(charge)
       billingLines.push({

@@ -7,6 +7,7 @@ import { createHash } from "node:crypto"
 import type { Db } from "@odentia/db"
 import { PDFDocument, type PDFFont, type PDFPage, rgb, StandardFonts } from "pdf-lib"
 import { attachConsentPdf, type ConsentDocumentRow, getConsentPrint } from "./clinical-forms.js"
+import { NEUTRAL_LOCALE, NEUTRAL_TIMEZONE } from "./locale.js"
 import { registerPatientDocument } from "./clinical.js"
 import type { Storage } from "./storage.js"
 
@@ -129,10 +130,13 @@ function strokesOf(value: unknown): Strokes | null {
   return null
 }
 
-function when(value: Date | string | null | undefined): string {
+/** Formato y zona del establecimiento; sin perfil, valores neutros (nunca un país). */
+type Zone = { locale: string; timezone: string }
+
+function when(value: Date | string | null | undefined, zone: Zone): string {
   if (!value) return "-"
-  return new Date(value).toLocaleString("es-PE", {
-    timeZone: "America/Lima",
+  return new Date(value).toLocaleString(zone.locale, {
+    timeZone: zone.timezone,
     dateStyle: "long",
     timeStyle: "short",
   })
@@ -145,6 +149,10 @@ function when(value: Date | string | null | undefined): string {
  */
 export async function renderConsentPdf(data: ConsentPrint): Promise<Uint8Array> {
   const { document: doc, patient, establishment } = data
+  const zone: Zone = {
+    locale: establishment?.locale || NEUTRAL_LOCALE,
+    timezone: establishment?.timezone || NEUTRAL_TIMEZONE,
+  }
   const pdf = await PDFDocument.create()
   pdf.setTitle(safe(doc.titleSnapshot))
   pdf.setSubject(`Consentimiento informado ${doc.id}`)
@@ -161,7 +169,7 @@ export async function renderConsentPdf(data: ConsentPrint): Promise<Uint8Array> 
       [
         establishment.legalName,
         establishment.fiscalDocNumber &&
-          `${establishment.fiscalDocType ?? "RUC"} ${establishment.fiscalDocNumber}`,
+          [establishment.fiscalDocType, establishment.fiscalDocNumber].filter(Boolean).join(" "),
         establishment.address,
       ]
         .filter(Boolean)
@@ -210,13 +218,13 @@ export async function renderConsentPdf(data: ConsentPrint): Promise<Uint8Array> 
   w.signature(
     doc.signerKind === "representante" ? "Firma del representante legal" : "Firma del paciente",
     strokesOf(doc.signatureData),
-    `${doc.signerName}${doc.signerDoc ? ` · ${doc.signerDoc}` : ""}${doc.representativeRelation ? ` · ${doc.representativeRelation}` : ""} · ${when(doc.signedAt)}`,
+    `${doc.signerName}${doc.signerDoc ? ` · ${doc.signerDoc}` : ""}${doc.representativeRelation ? ` · ${doc.representativeRelation}` : ""} · ${when(doc.signedAt, zone)}`,
   )
   w.gap(6)
   w.signature(
     "Firma del profesional que informa",
     strokesOf(doc.professionalSignature),
-    `${doc.informerName ?? "-"}${doc.informerTitle ? ` · ${doc.informerTitle}` : ""}${doc.informerRegistration ? ` · ${doc.informerRegistration}` : ""} · informó ${when(doc.informedAt)}`,
+    `${doc.informerName ?? "-"}${doc.informerTitle ? ` · ${doc.informerTitle}` : ""}${doc.informerRegistration ? ` · ${doc.informerRegistration}` : ""} · informó ${when(doc.informedAt, zone)}`,
   )
   if (doc.witnessName) {
     w.gap(6)
@@ -226,7 +234,7 @@ export async function renderConsentPdf(data: ConsentPrint): Promise<Uint8Array> 
     w.gap(10)
     w.text("REVOCADO", { size: 11, bold: true })
     w.text(
-      `${doc.revokerName ?? "-"} · ${when(doc.revokedAt)} · Motivo: ${doc.revokeReason ?? "-"}`,
+      `${doc.revokerName ?? "-"} · ${when(doc.revokedAt, zone)} · Motivo: ${doc.revokeReason ?? "-"}`,
     )
     w.signature("Firma de quien revoca", strokesOf(doc.revokeSignature), doc.revokerName ?? "")
   }

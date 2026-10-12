@@ -44,3 +44,60 @@ it("no permite leer ni escribir medios de otra organización aunque se conozca s
   await expect(withOrgContext(appDb, other, (tx) => requirePaymentMethod(tx, other, methods[0]!.id))).rejects.toMatchObject({ status: 404 })
   await expect(withOrgContext(appDb, other, (tx) => tx.insert(organizationPaymentMethod).values({ organizationId: orgId, name: "Cruce indebido", typeCode: "10" }))).rejects.toThrow()
 })
+
+it("el alta sirve para cualquier país: propone lo que se deduce y pide solo lo que no", async () => {
+  // Ecuador: no era uno de los países con datos fijos y antes fallaba el alta.
+  const ecuador = randomUUID()
+  await insertOrg(ownerDb, ecuador, ecuador)
+  const profile = await withOrgContext(appDb, ecuador, (tx) =>
+    updateOrgRegion(tx, ecuador, "config-test", { countryCode: "EC", applyCountryPreset: true }),
+  )
+  expect(profile).toMatchObject({
+    countryCode: "EC",
+    currency: "USD",
+    locale: "es-EC",
+    timezone: "America/Guayaquil",
+    sheetSize: "A4",
+  })
+  const methods = await withOrgContext(appDb, ecuador, (tx) => listPaymentMethods(tx, ecuador))
+  expect(methods.some((method) => method.name === "Yape" || method.name === "Plin")).toBe(false)
+
+  // Brasil tiene varias zonas: se pide la zona, no se inventa una.
+  const brazil = randomUUID()
+  await insertOrg(ownerDb, brazil, brazil)
+  await expect(
+    withOrgContext(appDb, brazil, (tx) =>
+      updateOrgRegion(tx, brazil, "config-test", { countryCode: "BR", applyCountryPreset: true }),
+    ),
+  ).rejects.toThrow(/zona horaria/)
+  const withZone = await withOrgContext(appDb, brazil, (tx) =>
+    updateOrgRegion(tx, brazil, "config-test", {
+      countryCode: "BR",
+      timezone: "America/Sao_Paulo",
+      applyCountryPreset: true,
+    }),
+  )
+  expect(withZone).toMatchObject({ currency: "BRL", locale: "pt-BR", timezone: "America/Sao_Paulo" })
+
+  // Un país del que no se conoce la moneda: se pide, y con ella el alta pasa.
+  const other = randomUUID()
+  await insertOrg(ownerDb, other, other)
+  await expect(
+    withOrgContext(appDb, other, (tx) =>
+      updateOrgRegion(tx, other, "config-test", {
+        countryCode: "KZ",
+        timezone: "Asia/Almaty",
+        applyCountryPreset: true,
+      }),
+    ),
+  ).rejects.toThrow(/moneda/)
+  const explicit = await withOrgContext(appDb, other, (tx) =>
+    updateOrgRegion(tx, other, "config-test", {
+      countryCode: "KZ",
+      currency: "KZT",
+      timezone: "Asia/Almaty",
+      applyCountryPreset: true,
+    }),
+  )
+  expect(explicit).toMatchObject({ countryCode: "KZ", currency: "KZT", timezone: "Asia/Almaty" })
+})

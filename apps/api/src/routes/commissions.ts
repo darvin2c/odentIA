@@ -1,10 +1,13 @@
 /**
- * Comisiones y resultado del mes (Fases 6 y 8).
+ * Comisiones de los profesionales y resultado del mes (Fases 6 y 8).
  * Montaje del padre: `guarded.route("/commissions", createCommissionsRoute(crmDeps))`.
- * Permisos: `commissions.read` (odontólogo: solo propias; admin: todas),
- * `commissions.write` (solo admin) para tasa/liquidar/pagar/anular.
- * El resultado mensual exige `reports.read` o `finance.read` (nunca solo
- * `commissions.read`: el profesional no ve el resto de la caja).
+ *
+ * - `commissions.read`: cada profesional ve solo las suyas (`/my`, `/monthly`
+ *   y `/payments` propios).
+ * - `commissions.write` (administración): ve a todos, fija el porcentaje,
+ *   registra el pago y lo anula.
+ * - El resultado del mes es de quien dirige la clínica (`reports.read`): ni
+ *   caja ni el profesional lo ven.
  */
 import { withOrgContext } from "@odentia/db"
 import { Hono } from "hono"
@@ -13,16 +16,14 @@ import { canAccess, canAccessAny, orgContextOf } from "../lib/context.js"
 import { errorBody } from "../lib/error.js"
 import { type CrmDeps, runService, validationError } from "./helpers.js"
 import {
-  getCommissionSettlementDetail,
   getMonthlyCommissions,
   getMonthlyFinanceResult,
   getMyCommissions,
   listCommissionRates,
   listCommissionSettlements,
-  payCommissionSettlement,
-  ServiceError,
+  listMonthCommissions,
+  payMonthCommission,
   setCommissionRate,
-  settleMonthCommissions,
   voidCommissionSettlement,
 } from "@odentia/services"
 import type { Context } from "hono"
@@ -35,50 +36,43 @@ const currency = z.string().regex(/^[A-Z]{3}$/)
 const year = z.coerce.number().int().min(2000).max(2100)
 const month = z.coerce.number().int().min(1).max(12)
 const reasonInput = z.object({ reason: z.string().trim().min(1).max(2000) }).strict()
+const period = z.object({ year, month, currency: currency.optional() })
 
-/** Odontólogo: solo sus comisiones; resto: el profesional pedido. */
+/**
+ * A quién se puede mirar: administración, a quien pida; cualquier otro con
+ * `commissions.read`, solo a sí mismo. Decide el permiso, no el nombre del rol.
+ */
 function scopedTarget(
   c: Context,
   requested: string | undefined,
-  { required }: { required: boolean },
 ): { target: string | undefined } | { response: Response } {
   const { userId, memberRole } = orgContextOf(c)
-  if (memberRole === "dentist") {
-    if (requested && requested !== userId)
-      return { response: forbid(c, "Solo puedes ver tus propias comisiones") }
-    return { target: userId }
-  }
-  if (!requested && required)
-    return {
-      response: c.json(
-        errorBody(c, "VALIDATION", "Elige el profesional"),
-        400,
-      ),
-    }
-  return { target: requested }
+  if (canAccess(memberRole, "commissions.write")) return { target: requested }
+  if (requested && requested !== userId)
+    return { response: forbid(c, "Solo puedes ver tus propias comisiones") }
+  return { target: userId }
 }
 
 export function createCommissionsRoute(deps: Pick<CrmDeps, "db">) {
   const app = new Hono()
   app.use("*", async (c, next) => {
     const { memberRole } = orgContextOf(c)
-    if (!canAccessAny(memberRole, ["commissions.read", "reports.read", "finance.read"]))
-      return forbid(c)
+    if (!canAccessAny(memberRole, ["commissions.read", "reports.read"])) return forbid(c)
     await next()
   })
 
-  // --- Tasa única por profesional -------------------------------------------------
+  // --- Porcentaje por profesional ------------------------------------------------
   app.get("/rates", async (c) => {
-    const { orgId } = orgContextOf(c)
-    if (!canAccess(orgContextOf(c).memberRole, "commissions.read")) return forbid(c)
+    const { orgId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "commissions.read")) return forbid(c)
     const parsed = z.object({ professionalUserId: z.string().optional() }).safeParse(c.req.query())
     if (!parsed.success) return validationError(c, parsed.error.issues)
-    const scoped = scopedTarget(c, parsed.data.professionalUserId, { required: false })
+    const scoped = scopedTarget(c, parsed.data.professionalUserId)
     if ("response" in scoped) return scoped.response
-    const professionalUserId =
-      orgContextOf(c).memberRole === "dentist" ? scoped.target : parsed.data.professionalUserId
     return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) => listCommissionRates(tx, orgId, { professionalUserId })),
+      withOrgContext(deps.db, orgId, (tx) =>
+        listCommissionRates(tx, orgId, { professionalUserId: scoped.target }),
+      ),
     )
   })
 
@@ -98,126 +92,100 @@ export function createCommissionsRoute(deps: Pick<CrmDeps, "db">) {
     )
   })
 
-  // --- Mes por profesional ----------------------------------------------------------
+  // --- El mes de toda la clínica (administración) ----------------------------------
+  app.get("/month", async (c) => {
+    const { orgId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "commissions.write"))
+      return forbid(c, "Solo administración ve las comisiones de todos")
+    const parsed = period.safeParse(c.req.query())
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) => listMonthCommissions(tx, orgId, parsed.data)),
+    )
+  })
+
+  // --- El mes de un profesional, con cada cobro -------------------------------------
   app.get("/monthly", async (c) => {
-    const { orgId } = orgContextOf(c)
-    if (!canAccess(orgContextOf(c).memberRole, "commissions.read")) return forbid(c)
-    const parsed = z
-      .object({
-        professionalUserId: z.string().min(1).optional(),
-        year,
-        month,
-        currency,
-      })
+    const { orgId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "commissions.read")) return forbid(c)
+    const parsed = period
+      .extend({ professionalUserId: z.string().min(1).optional() })
       .safeParse(c.req.query())
     if (!parsed.success) return validationError(c, parsed.error.issues)
-    const scoped = scopedTarget(c, parsed.data.professionalUserId, { required: true })
+    const scoped = scopedTarget(c, parsed.data.professionalUserId)
     if ("response" in scoped) return scoped.response
     const target = scoped.target
     if (!target) return c.json(errorBody(c, "VALIDATION", "Elige el profesional"), 400)
-    const { year: y, month: m, currency: curr } = parsed.data
+    const { year: y, month: m, currency: unit } = parsed.data
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
-        getMonthlyCommissions(tx, orgId, {
-          professionalUserId: target,
-          year: y,
-          month: m,
-          currency: curr,
-        }),
+        getMonthlyCommissions(tx, orgId, { professionalUserId: target, year: y, month: m, currency: unit }),
       ),
     )
   })
 
-  /** Acceso propio directo: siempre el profesional autenticado. */
+  /** Lo propio: siempre el profesional autenticado, con sus meses anteriores. */
   app.get("/my", async (c) => {
-    const { orgId, userId } = orgContextOf(c)
-    if (!canAccess(orgContextOf(c).memberRole, "commissions.read")) return forbid(c)
-    const parsed = z.object({ year, month, currency }).safeParse(c.req.query())
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "commissions.read")) return forbid(c)
+    const parsed = period.safeParse(c.req.query())
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) => getMyCommissions(tx, orgId, userId, parsed.data)),
     )
   })
 
-  app.post("/settle", async (c) => {
+  // --- Registrar el pago: un solo paso (congela los cobros y deja el gasto) ----------
+  app.post("/pay", async (c) => {
     const { orgId, userId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "commissions.write")) return forbid(c)
     const parsed = z
       .object({
         professionalUserId: z.string().min(1),
-        year,
-        month,
-        currency,
+        year: z.number().int().min(2000).max(2100),
+        month: z.number().int().min(1).max(12),
+        currency: currency.optional(),
+        branchId: z.uuid(),
         notes: z.string().max(2000).nullish(),
+        expectedCents: z.number().int().positive().optional(),
       })
       .strict()
       .safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 201, () =>
-      withOrgContext(deps.db, orgId, (tx) => settleMonthCommissions(tx, orgId, userId, parsed.data)),
+      withOrgContext(deps.db, orgId, (tx) => payMonthCommission(tx, orgId, userId, parsed.data)),
     )
   })
 
-  // --- Liquidaciones ------------------------------------------------------------------
-  app.get("/settlements", async (c) => {
-    const { orgId } = orgContextOf(c)
-    if (!canAccess(orgContextOf(c).memberRole, "commissions.read")) return forbid(c)
+  // --- Pagos registrados --------------------------------------------------------------
+  app.get("/payments", async (c) => {
+    const { orgId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "commissions.read")) return forbid(c)
     const parsed = z
       .object({
         professionalUserId: z.string().optional(),
-        year: z.coerce.number().int().min(2000).max(2100).optional(),
-        month: z.coerce.number().int().min(1).max(12).optional(),
+        year: year.optional(),
+        month: month.optional(),
+        // Con `1` llegan también los anulados (motivo y quién anuló).
+        includeVoided: z.enum(["0", "1"]).optional(),
       })
       .safeParse(c.req.query())
     if (!parsed.success) return validationError(c, parsed.error.issues)
-    const scoped = scopedTarget(c, parsed.data.professionalUserId, { required: false })
+    const scoped = scopedTarget(c, parsed.data.professionalUserId)
     if ("response" in scoped) return scoped.response
-    const professionalUserId =
-      orgContextOf(c).memberRole === "dentist" ? scoped.target : parsed.data.professionalUserId
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
         listCommissionSettlements(tx, orgId, {
-          professionalUserId,
+          professionalUserId: scoped.target,
           year: parsed.data.year,
           month: parsed.data.month,
+          includeVoided: parsed.data.includeVoided === "1",
         }),
       ),
     )
   })
 
-  app.get("/settlements/:id", async (c) => {
-    const { orgId, userId, memberRole } = orgContextOf(c)
-    if (!canAccess(memberRole, "commissions.read")) return forbid(c)
-    const id = c.req.param("id")
-    return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, async (tx) => {
-        const detail = await getCommissionSettlementDetail(tx, orgId, id)
-        if (memberRole === "dentist" && detail.settlement.professionalUserId !== userId)
-          throw new ServiceError("FORBIDDEN", 403, "Solo puedes ver tus propias comisiones")
-        return detail
-      }),
-    )
-  })
-
-  app.post("/settlements/:id/pay", async (c) => {
-    const { orgId, userId, memberRole } = orgContextOf(c)
-    if (!canAccess(memberRole, "commissions.write")) return forbid(c)
-    const parsed = z
-      .object({ branchId: z.uuid() })
-      .strict()
-      .safeParse(await c.req.json().catch(() => null))
-    if (!parsed.success) return validationError(c, parsed.error.issues)
-    return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) =>
-        payCommissionSettlement(tx, orgId, userId, {
-          settlementId: c.req.param("id"),
-          branchId: parsed.data.branchId,
-        }),
-      ),
-    )
-  })
-
-  app.post("/settlements/:id/void", async (c) => {
+  app.post("/payments/:id/void", async (c) => {
     const { orgId, userId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "commissions.write")) return forbid(c)
     const parsed = reasonInput.safeParse(await c.req.json().catch(() => null))
@@ -232,7 +200,7 @@ export function createCommissionsRoute(deps: Pick<CrmDeps, "db">) {
   // --- Resultado del mes (Fase 6) ----------------------------------------------------------
   app.get("/monthly-result", async (c) => {
     const { orgId, memberRole } = orgContextOf(c)
-    if (!canAccessAny(memberRole, ["reports.read", "finance.read"]))
+    if (!canAccess(memberRole, "reports.read"))
       return c.json(errorBody(c, "FORBIDDEN", "No tienes acceso al resultado del mes"), 403)
     const parsed = z
       .object({

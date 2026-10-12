@@ -6,6 +6,7 @@ import { ApiError, apiFetch } from "../../lib/api"
 import { usePermission } from "../../lib/crm"
 import type { PatientFull } from "../../lib/patients"
 import { ChoiceSelect } from "../ui/choice-select"
+import { activeOrgLocale } from "../../lib/locale"
 
 interface DataConsent {
   id: string
@@ -26,7 +27,7 @@ const PURPOSES = [
 ] as const
 
 const day = (iso: string) =>
-  new Date(iso).toLocaleDateString("es-PE", { day: "numeric", month: "short", year: "numeric" })
+  new Date(iso).toLocaleDateString(activeOrgLocale(), { day: "numeric", month: "short", year: "numeric" })
 
 function message(error: unknown, fallback: string) {
   return error instanceof ApiError ? (error.shape.message ?? fallback) : error ? fallback : null

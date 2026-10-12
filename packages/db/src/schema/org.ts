@@ -21,14 +21,19 @@ export const orgProfile = pgTable("org_profile", {
     .references(() => organization.id),
   legalName: text("legal_name").notNull(),
   tradeName: text("trade_name"),
-  fiscalDocType: text("fiscal_doc_type").notNull().default("RUC"),
+  // Tipo de identificador fiscal tal como lo nombra el país de la clínica
+  // (texto libre); null mientras la clínica no lo tenga.
+  fiscalDocType: text("fiscal_doc_type"),
   fiscalDocNumber: text("fiscal_doc_number"),
   billingEmail: text("billing_email"),
   fiscalAddress: text("fiscal_address"),
-  countryCode: char("country_code", { length: 2 }).notNull().default("PE"),
-  currency: char("currency", { length: 3 }).notNull().default("PEN"),
-  timezone: text("timezone").notNull().default("America/Lima"),
-  locale: text("locale").notNull().default("es-PE"),
+  // Perfil regional (ISO 3166-1, ISO 4217, IANA, BCP 47): sin valores por
+  // defecto, porque el núcleo no asume ningún país; quien crea el perfil los
+  // pasa siempre (el alta los deriva del país con `regionPresetForCountry`).
+  countryCode: char("country_code", { length: 2 }).notNull(),
+  currency: char("currency", { length: 3 }).notNull(),
+  timezone: text("timezone").notNull(),
+  locale: text("locale").notNull(),
   // Impresión del ticket y hoja de cierre: térmica de 58 o 80 mm.
   receiptWidth: text("receipt_width").notNull().default("80"),
   // Tamaño de hoja para el presupuesto: A4 (ISO 216) o Carta.

@@ -4,7 +4,6 @@
  * no comisionan), neto de devoluciones del saldo a favor y de anulaciones, el
  * pago registra un gasto de Personal exactamente una vez, y el resultado del
  * mes concilia cobrado, devoluciones, gastos y deuda.
- * (Escrito sin ejecutar: lo corre la verificación conjunta del integrador.)
  */
 import { randomUUID } from "node:crypto"
 import { member } from "@odentia/db/schema/auth"
@@ -17,10 +16,11 @@ import {
   getMonthlyCommissions,
   getMonthlyFinanceResult,
   listExpenses,
-  payCommissionSettlement,
+  listMonthCommissions,
+  payMonthCommission,
   setCommissionRate,
-  settleMonthCommissions,
   voidCommissionSettlement,
+  voidExpense,
 } from "./finance.js"
 import { collectCharge, createCharge, refundCredit, voidTicket } from "./payments.js"
 import { createPromotion } from "./promotions.js"
@@ -46,7 +46,7 @@ function currentPeriod(): { year: number; month: number } {
   return { year: get("year"), month: get("month") }
 }
 
-it("comisiones simples: tasa única sobre cobrado con atención y pago único como Personal", async () => {
+it("comisiones: porcentaje sobre lo cobrado de lo atendido, pago en un paso y ajuste de lo anulado", async () => {
   const f = await clinicalFixture()
   await ownerDb.insert(member).values({
     id: randomUUID(),
@@ -155,47 +155,98 @@ it("comisiones simples: tasa única sobre cobrado con atención y pago único co
     getMonthlyCommissions(tx, "org_a", { professionalUserId: f.actor, ...period, currency: "PEN" }),
   )
   expect(afterVoid.baseCents).toBe(10000)
-  const settled = await f.run((tx) =>
-    settleMonthCommissions(tx, "org_a", f.actor, {
-      professionalUserId: f.actor,
-      ...period,
-      currency: "PEN",
-    }),
-  )
-  expect(settled.commissionCents).toBe(1000)
-  expect(settled.base).toBe("cobrado")
-  expect(settled.rateBps).toBe(1000)
+  const pay = () =>
+    f.run((tx) =>
+      payMonthCommission(tx, "org_a", f.actor, { professionalUserId: f.actor, ...period, branchId }),
+    )
+  const view = () =>
+    f.run((tx) => getMonthlyCommissions(tx, "org_a", { professionalUserId: f.actor, ...period }))
+  const collectMore = (amountCents: number) =>
+    f.run((tx) =>
+      collectCharge(tx, ...f.args, {
+        branchId,
+        chargeIds: [charge.id],
+        payments: [{ paymentMethodId: cash.id, amountCents }],
+        requestId: randomUUID(),
+      }),
+    )
+
+  // Si el importe ya no es el que se mostró, no se paga otra cifra.
   await expect(
     f.run((tx) =>
-      settleMonthCommissions(tx, "org_a", f.actor, {
+      payMonthCommission(tx, "org_a", f.actor, {
         professionalUserId: f.actor,
         ...period,
-        currency: "PEN",
+        branchId,
+        expectedCents: 1,
       }),
     ),
-  ).rejects.toMatchObject({ code: "SETTLEMENT_EXISTS" })
-  const paid = await f.run((tx) =>
-    payCommissionSettlement(tx, "org_a", f.actor, { settlementId: settled.id, branchId }),
+  ).rejects.toMatchObject({ code: "COMMISSION_AMOUNT_CHANGED" })
+
+  // Un solo paso: registra el pago, congela los cobros y deja el gasto de Personal.
+  const first = await pay()
+  expect(first.settlement.commissionCents).toBe(1000)
+  expect(first.settlement.rateBps).toBe(1000)
+  expect(first.expense).toMatchObject({ category: "Personal", amountCents: 1000, currency: "PEN" })
+  expect(await view()).toMatchObject({ paidCents: 1000, pendingCents: 0, status: "pagado" })
+  // Repetir no duplica el gasto: ya no queda nada por pagar.
+  await expect(pay()).rejects.toMatchObject({ code: "COMMISSION_NOTHING_TO_PAY" })
+
+  // Haber pagado a mitad de mes no bloquea lo que se cobre después. Este cobro
+  // usa además los 1 000 que quedaban a favor: se cobran 6 000 del tratamiento.
+  const later = await collectMore(5000)
+  expect(later.creditAppliedCents).toBe(1000)
+  expect(await view()).toMatchObject({ commissionCents: 1600, paidCents: 1000, pendingCents: 600, status: "por_pagar" })
+  const second = await pay()
+  expect(second.expense.amountCents).toBe(600)
+  expect(await view()).toMatchObject({ paidCents: 1600, pendingCents: 0, status: "pagado" })
+
+  // Cambiar el porcentaje no reescribe lo ya pagado.
+  await f.run((tx) =>
+    setCommissionRate(tx, "org_a", f.actor, { professionalUserId: f.actor, rateBps: 2000 }),
   )
-  expect(paid.expense.category).toBe("Personal")
-  expect(paid.expense.amountCents).toBe(1000)
+  const afterRate = await view()
+  expect(afterRate.rateBps).toBe(2000)
+  expect(afterRate.commissionCents).toBe(1600)
+  expect(afterRate.lines.every((line) => line.settled && line.rateBps === 1000)).toBe(true)
+
+  // Un cobro anulado después de pagada su comisión se descuenta del siguiente pago.
+  await f.run((tx) =>
+    voidTicket(tx, "org_a", f.actor, f.patient.id, later.ticket.id, { reason: "Cobro errado", allowPostClose: false }),
+  )
+  const owing = await view()
+  // Sus dos partes (dinero nuevo y saldo a favor) ya tenían comisión pagada: 500 + 100.
+  expect(owing.adjustments.map((a) => a.commissionCents).sort((x, y) => x - y)).toEqual([100, 500])
+  expect(owing).toMatchObject({ commissionCents: 1000, pendingCents: -600, status: "por_descontar" })
+  await expect(pay()).rejects.toMatchObject({ code: "COMMISSION_NOT_POSITIVE" })
+  // Llega un cobro nuevo de 10 000 más los 1 000 a favor que volvieron: al 20 %
+  // son 2 200, y el pago descuenta los 600.
+  await collectMore(10000)
+  expect(await view()).toMatchObject({ pendingCents: 1600, status: "por_pagar" })
+  const third = await pay()
+  expect(third.expense.amountCents).toBe(1600)
+  const settledUp = await view()
+  expect(settledUp.adjustments).toHaveLength(0)
+  expect(settledUp).toMatchObject({ pendingCents: 0, status: "pagado" })
+
+  // El mes de la clínica lista al profesional con su estado.
+  const month = await f.run((tx) => listMonthCommissions(tx, "org_a", period))
+  expect(month.find((row) => row.professionalUserId === f.actor)).toMatchObject({
+    status: "pagado",
+    pendingCents: 0,
+    rateBps: 2000,
+  })
+
+  // El gasto de un pago de comisión no se anula suelto…
   await expect(
-    f.run((tx) =>
-      payCommissionSettlement(tx, "org_a", f.actor, { settlementId: settled.id, branchId }),
-    ),
-  ).rejects.toMatchObject({ code: "SETTLEMENT_ALREADY_PAID" })
-  // Anular libera las fuentes y anula el gasto en la misma transacción.
-  await f.run((tx) => voidCommissionSettlement(tx, "org_a", f.actor, settled.id, { reason: "Prueba" }))
+    f.run((tx) => voidExpense(tx, "org_a", f.actor, first.expense.id, { reason: "Prueba" })),
+  ).rejects.toMatchObject({ code: "EXPENSE_IS_COMMISSION" })
+  // …se anula con el pago: el gasto desaparece y sus cobros vuelven a quedar por pagar.
+  await f.run((tx) => voidCommissionSettlement(tx, "org_a", f.actor, first.settlement.id, { reason: "Pago mal registrado" }))
   const expenses = await f.run((tx) => listExpenses(tx, "org_a", { branchId, limit: 200 }))
-  expect(expenses.find((e) => e.id === paid.expense.id)).toBeUndefined()
-  const resettled = await f.run((tx) =>
-    settleMonthCommissions(tx, "org_a", f.actor, {
-      professionalUserId: f.actor,
-      ...period,
-      currency: "PEN",
-    }),
-  )
-  expect(resettled.commissionCents).toBe(1000)
+  expect(expenses.find((e) => e.id === first.expense.id)).toBeUndefined()
+  // El cobro liberado se calcula con el porcentaje vigente (20 % de 10 000).
+  expect(await view()).toMatchObject({ pendingCents: 2000, status: "por_pagar" })
 })
 
 it("resultado del mes concilia cobrado, gastos y deuda sin aportes como ingreso", async () => {
@@ -283,6 +334,8 @@ it("resultado del mes concilia cobrado, gastos y deuda sin aportes como ingreso"
     currency: "PEN",
     veces: 1,
     cobradoCents: 7900,
+    mode: "fixed",
+    averageCents: 7900,
   })
   expect(result.outstanding).toContainEqual({ currency: "PEN", pendienteCents: 8000, pacientes: 1 })
 })

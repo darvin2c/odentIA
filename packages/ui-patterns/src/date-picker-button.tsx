@@ -22,6 +22,8 @@ export interface DatePickerButtonProps
   onChange: (value: string) => void
   /** Primera fecha que se puede elegir. */
   min?: string
+  /** Última fecha que se puede elegir. */
+  max?: string
   /** Hacia dónde se alinea el calendario respecto del botón. */
   align?: "start" | "center" | "end"
 }
@@ -35,6 +37,7 @@ export function DatePickerButton({
   value,
   onChange,
   min,
+  max,
   align = "start",
   children,
   ...button
@@ -42,6 +45,11 @@ export function DatePickerButton({
   const [open, setOpen] = React.useState(false)
   const selected = parseDateOnly(value)
   const first = parseDateOnly(min)
+  const last = parseDateOnly(max)
+  const bounds = [
+    ...(first ? [{ before: first }] : []),
+    ...(last ? [{ after: last }] : []),
+  ]
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger render={<Button type="button" variant="outline" {...button} />}>
@@ -53,7 +61,7 @@ export function DatePickerButton({
           locale={es}
           selected={selected}
           defaultMonth={selected}
-          disabled={first ? { before: first } : undefined}
+          disabled={bounds.length > 0 ? bounds : undefined}
           onSelect={(day) => {
             if (!day) return
             onChange(toDateOnly(day))
