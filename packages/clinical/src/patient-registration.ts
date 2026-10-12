@@ -23,6 +23,17 @@ export type DeclarationState = "unanswered" | "unknown" | "none" | "recorded"
 export const BLOOD_GROUPS = ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-", "unknown"] as const
 export type BloodGroup = (typeof BLOOD_GROUPS)[number]
 export type RegistrationFieldMode = "hidden" | "optional" | "required"
+/**
+ * Alcance del registro público. `essentials` son los datos esenciales para
+ * reservar desde el enlace de cita: identidad y un celular. Lo demás que la
+ * clínica configuró no se pide ahí y queda por completar en la clínica.
+ */
+export type RegistrationScope = "full" | "essentials"
+/** Datos de la persona que admite el alcance `essentials`; cualquier otro se rechaza. */
+export const ESSENTIAL_DEMOGRAPHICS = [
+  "displayName", "givenNames", "paternalSurname", "maternalSurname",
+  "docType", "docNumber", "docCountry", "phone", "birthDate",
+] as const
 export const DOC_TYPES = IDENTITY_DOC_TYPES
 export const INSURANCE_TYPES = ["PARTICULAR", "SIS", "ESSALUD", "EPS", "OTRO"] as const
 export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -178,7 +189,30 @@ export function validateDemographics(value: unknown, today?: string): Record<str
   if ((data.paternalSurname || data.maternalSurname) && !data.givenNames) errors.givenNames = "Indica los nombres"
   return errors
 }
-export function validateRegistrationAnswers(config: RegistrationConfig, answers: RegistrationAnswers, context: { mode: "internal" | "public"; today: string }): Record<string, string> {
+function registrationFieldValue(data: RegistrationAnswers, field: (typeof REGISTRATION_FIELDS)[number]): unknown {
+  const key = field.key
+  if (key.startsWith("dental.")) return data.health?.dental?.[key.slice(7) as keyof NonNullable<NonNullable<RegistrationAnswers["health"]>["dental"]>]
+  if (field.step === "salud") return data.health?.[key as keyof NonNullable<RegistrationAnswers["health"]>]
+  return data.demographics[key as keyof RegistrationDemographics]
+}
+function isUnanswered(value: unknown): boolean {
+  return value === undefined || value === null || value === "" || (typeof value === "object" && "state" in value && value.state === "unanswered")
+}
+/**
+ * Lo que la clínica configuró como obligatorio y estas respuestas no traen.
+ * Con el alcance `essentials` no impide registrar: es lo que queda por
+ * completar en la clínica.
+ */
+export function pendingRegistrationFields(config: RegistrationConfig, answers: RegistrationAnswers): Array<{ key: RegistrationFieldKey; label: string }> {
+  const representativeContact = !!answers.representative && !!(answers.representative.phone || answers.representative.email)
+  return REGISTRATION_FIELDS.filter((field) => {
+    if (config.fields[field.key] !== "required") return false
+    if (field.key === "insuranceDetail" && !answers.demographics.insuranceType) return false
+    if (representativeContact && (field.key === "phone" || field.key === "email")) return false
+    return isUnanswered(registrationFieldValue(answers, field))
+  }).map(({ key, label }) => ({ key, label }))
+}
+export function validateRegistrationAnswers(config: RegistrationConfig, answers: RegistrationAnswers, context: { mode: "internal" | "public"; today: string; scope?: RegistrationScope }): Record<string, string> {
   const errors: Record<string, string> = {}
   const parsed = registrationAnswersSchema.safeParse(answers)
   if (!parsed.success) {
@@ -203,21 +237,37 @@ export function validateRegistrationAnswers(config: RegistrationConfig, answers:
     if (data.respondent === "staff") errors.respondent = "Selecciona quién declara la información"
     if (minor && data.respondent !== "representative") errors.respondent = "El responsable debe registrar al menor"
     if (!data.privacyAccepted) errors.privacyAccepted = "Debes aceptar el aviso de privacidad"
+    const representativeContact = needsRepresentative && !!(data.representative?.phone || data.representative?.email)
+    if (context.scope === "essentials") {
+      // Datos esenciales para reservar: la identidad y un celular, siempre los
+      // mismos. La configuración de la clínica no los quita ni añade otros: lo
+      // que ella exige y aquí no se pide queda pendiente (`pendingRegistrationFields`).
+      const demographics = data.demographics
+      for (const [key, value] of Object.entries(demographics)) {
+        if (!(ESSENTIAL_DEMOGRAPHICS as readonly string[]).includes(key) && value !== null && value !== "") errors[`demographics.${key}`] ??= "Este dato se completa en la clínica"
+      }
+      if (data.health !== undefined) errors.health = "Los datos de salud se completan en la clínica"
+      if (!demographics.givenNames) errors["demographics.givenNames"] ??= "Indica los nombres"
+      if (!demographics.paternalSurname && !demographics.maternalSurname) errors["demographics.paternalSurname"] ??= "Indica los apellidos"
+      if (!demographics.docType) errors["demographics.docType"] ??= "Indica el tipo de documento"
+      if (!demographics.docNumber) errors["demographics.docNumber"] ??= "Indica el número de documento"
+      if (!demographics.phone && !representativeContact) errors["demographics.phone"] ??= "Indica un celular"
+      // De la edad depende que haga falta un representante legal: se pide solo
+      // cuando alguien registra a otra persona.
+      if (data.respondent === "representative" && !demographics.birthDate) errors["demographics.birthDate"] ??= "Indica su fecha de nacimiento"
+      return errors
+    }
     for (const field of REGISTRATION_FIELDS) {
       const key = field.key
       const path = field.step === "datos" || field.step === "contacto" ? `demographics.${key}` : `health.${key}`
-      let value: unknown
-      if (key.startsWith("dental.")) value = data.health?.dental?.[key.slice(7) as keyof NonNullable<NonNullable<RegistrationAnswers["health"]>["dental"]>]
-      else if (field.step === "salud") value = data.health?.[key as keyof NonNullable<RegistrationAnswers["health"]>]
-      else value = data.demographics[key as keyof RegistrationDemographics]
+      const value = registrationFieldValue(data, field)
       if (config.fields[key] === "hidden") {
         if (value !== undefined) errors[path] = "Este campo no está habilitado"
         continue
       }
       if (key === "insuranceDetail" && !data.demographics.insuranceType) continue
       if (needsRepresentative && (key === "phone" || key === "email") && (data.representative?.phone || data.representative?.email)) continue
-      const unanswered = value === undefined || value === null || value === "" || (typeof value === "object" && "state" in value && value.state === "unanswered")
-      if (config.fields[key] === "required" && unanswered) errors[path] = "Este campo es obligatorio"
+      if (config.fields[key] === "required" && isUnanswered(value)) errors[path] = "Este campo es obligatorio"
       if (["allergies", "conditions", "medications"].includes(key) && value === undefined) errors[path] = "Indica una respuesta, incluido Sin responder"
     }
     if (!data.demographics.phone && !data.demographics.email && !(needsRepresentative && (data.representative?.phone || data.representative?.email))) errors["demographics.phone"] = "Indica al menos un medio de contacto"

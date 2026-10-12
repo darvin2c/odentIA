@@ -67,7 +67,7 @@ test("conocimiento: error de consulta y de versiones se recuperan sin inventar u
   })
   await gotoHydrated(page, tenant(org.slug, "/agent/knowledge"))
   await expect(page.getByRole("alert").getByRole("button", { name: "Reintentar" })).toBeVisible()
-  await expect(page.getByText(/^(Sin entradas|Sin resultados)$/)).toBeHidden()
+  await expect(page.getByText(/^(Todavía no hay respuestas oficiales|Sin resultados)$/)).toBeHidden()
   failEntries = false
   await page.getByRole("button", { name: "Reintentar", exact: true }).click()
   await expect(page.getByText("Horario de atención", { exact: true })).toBeVisible()
@@ -77,7 +77,9 @@ test("conocimiento: error de consulta y de versiones se recuperan sin inventar u
     if (failVersions) return route.abort("failed")
     await route.continue()
   })
-  await page.getByRole("button", { name: "Ver versiones", exact: true }).click()
+  // Las versiones se piden desde el detalle de la respuesta.
+  await page.getByRole("listitem").filter({ hasText: "Horario de atención" }).getByRole("button").first().click()
+  await page.getByRole("button", { name: /^Ver versiones/ }).click()
   await expect(page.getByRole("button", { name: "Reintentar", exact: true })).toBeVisible()
   await expect(page.getByText("Sin versiones", { exact: true })).toBeHidden()
   failVersions = false
@@ -151,21 +153,24 @@ test("conocimiento: rechazo conserva campos y permite corregir sin filtrar el er
     await route.continue()
   })
   await gotoHydrated(page, tenant(org.slug, "/agent/knowledge"))
-  await page.getByRole("button", { name: "Nueva entrada", exact: true }).click()
-  const drawer = sideSurface(page, { name: "Nueva entrada", exact: true })
-  await drawer.getByLabel("Título", { exact: true }).fill("Política de citas")
-  await drawer.getByLabel("Contenido (se cita tal cual)", { exact: true }).fill("Confirma tu cita con recepción.")
+  await page.getByRole("button", { name: "Nueva respuesta", exact: true }).click()
+  const drawer = sideSurface(page, { name: "Nueva respuesta", exact: true })
+  await drawer.getByLabel("La pregunta", { exact: true }).fill("Política de citas")
+  await drawer.getByLabel("La respuesta", { exact: true }).fill("Confirma tu cita con recepción.")
   await drawer.getByRole("button", { name: "Guardar", exact: true }).click()
   await expect(drawer.getByRole("alert")).toBeVisible()
-  await expect(drawer.getByLabel("Título", { exact: true })).toHaveValue("Política de citas")
-  await expect(drawer.getByLabel("Contenido (se cita tal cual)", { exact: true })).toHaveValue("Confirma tu cita con recepción.")
+  await expect(drawer.getByLabel("La pregunta", { exact: true })).toHaveValue("Política de citas")
+  await expect(drawer.getByLabel("La respuesta", { exact: true })).toHaveValue("Confirma tu cita con recepción.")
   await expect(drawer.getByText(/secreto-interno|detalle-interno/)).toBeHidden()
   failing = false
-  await drawer.getByLabel("Título", { exact: true }).fill("Política de confirmación")
+  await drawer.getByLabel("La pregunta", { exact: true }).fill("Política de confirmación")
   await drawer.getByRole("button", { name: "Guardar", exact: true }).click()
   await expect(drawer).toBeHidden()
-  const entries = await call<Array<{ title: string; body: string }>>(page, "GET", "/api/agent/knowledge?status=borrador", org.slug)
-  expect(entries.map(({ title, body }) => ({ title, body }))).toEqual([{ title: "Política de confirmación", body: "Confirma tu cita con recepción." }])
+  // Guardar publica por defecto: queda vigente sin un segundo paso.
+  const entries = await call<Array<{ title: string; body: string; state: string }>>(page, "GET", "/api/agent/knowledge", org.slug)
+  expect(entries.map(({ title, body, state }) => ({ title, body, state }))).toEqual([
+    { title: "Política de confirmación", body: "Confirma tu cita con recepción.", state: "vigente" },
+  ])
   expect(writes).toBe(2)
 })
 
@@ -187,11 +192,11 @@ for (const surface of ["knowledge", "product"] as const) {
       await failResponse(page, route, 500)
     })
     await gotoHydrated(page, tenant(org.slug, surface === "knowledge" ? "/agent/knowledge" : "/inventory"))
-    await page.getByRole("button", { name: surface === "knowledge" ? "Nueva entrada" : "Producto", exact: true }).click()
-    const drawer = sideSurface(page, { name: surface === "knowledge" ? "Nueva entrada" : "Nuevo producto", exact: true })
+    await page.getByRole("button", { name: surface === "knowledge" ? "Nueva respuesta" : "Producto", exact: true }).click()
+    const drawer = sideSurface(page, { name: surface === "knowledge" ? "Nueva respuesta" : "Nuevo producto", exact: true })
     if (surface === "knowledge") {
-      await drawer.getByLabel("Título", { exact: true }).fill("Entrada confirmada en servidor")
-      await drawer.getByLabel("Contenido (se cita tal cual)", { exact: true }).fill("No duplicar esta entrada.")
+      await drawer.getByLabel("La pregunta", { exact: true }).fill("Entrada confirmada en servidor")
+      await drawer.getByLabel("La respuesta", { exact: true }).fill("No duplicar esta entrada.")
     } else {
       await drawer.getByLabel("SKU", { exact: true }).fill("PROD-UNICO")
       await drawer.getByLabel("Nombre", { exact: true }).fill("Producto confirmado en servidor")
@@ -199,7 +204,7 @@ for (const surface of ["knowledge", "product"] as const) {
     await drawer.getByRole("button", { name: "Guardar", exact: true }).click()
     await expect(drawer.getByRole("alert")).toBeVisible()
     await expect(drawer.getByRole("button", { name: "Guardar", exact: true })).toBeDisabled()
-    const field = drawer.getByLabel(surface === "knowledge" ? "Título" : "Nombre", { exact: true })
+    const field = drawer.getByLabel(surface === "knowledge" ? "La pregunta" : "Nombre", { exact: true })
     await expect(field).toHaveValue(surface === "knowledge" ? "Entrada confirmada en servidor" : "Producto confirmado en servidor")
     await field.press("Enter")
     const saved = await call<Array<{ title?: string; sku?: string }>>(page, "GET", `${endpoint}${surface === "knowledge" ? "?status=borrador" : ""}`, org.slug)

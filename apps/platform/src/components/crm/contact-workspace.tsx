@@ -31,6 +31,7 @@ import {
 import { useOrgEvents } from "../../lib/org-events"
 import { createRegistrationLink } from "../../lib/patient-registration"
 import { formatDueAt, isOverdue } from "./crm-helpers"
+import { PersonMemoryDrawer } from "../agent/person-memory"
 import { OpportunityDrawer } from "./opportunity-drawer"
 import { TaskDrawer } from "./task-drawer"
 import { activeOrgLocale } from "../../lib/locale"
@@ -101,6 +102,7 @@ export function ContactWorkspace({
   const canRegister = usePermission("patients.write")
 
   const [tab, setTab] = useState("resumen")
+  const [memoryOpen, setMemoryOpen] = useState(false)
   const [note, setNote] = useState("")
   const [noteOk, setNoteOk] = useState(false)
   const [rejectReason, setRejectReason] = useState<Record<string, string>>({})
@@ -497,6 +499,9 @@ export function ContactWorkspace({
                 </li>
               ))}
             </ul>
+            <Button variant="link" size="sm" className="h-auto min-h-11 w-fit p-0 sm:min-h-8" onClick={() => setMemoryOpen(true)}>
+              Lo que recuerda el agente
+            </Button>
             {agentConv && canWriteConv && agent.state !== "closed" && (
               <div className="flex flex-wrap gap-2">
                 {agent.state === "agent" || agent.state === "approval" || agent.state === "handoff" ? (
@@ -1060,6 +1065,12 @@ export function ContactWorkspace({
         </TabsContent>
       </Tabs>
 
+      <PersonMemoryDrawer
+        contactId={memoryOpen ? contactId : null}
+        name={contact.displayName}
+        canWrite={canWriteNote || canWriteConv}
+        onClose={() => setMemoryOpen(false)}
+      />
       <ConfirmDialog
         open={approval !== null}
         title="Aprobar y ejecutar el cambio"

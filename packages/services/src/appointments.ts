@@ -492,6 +492,13 @@ export interface CreateAppointmentInput {
   conversationId?: string
   /** Urgencia: reservar aunque el horario del profesional no cubra esa hora. */
   outsideSchedule?: boolean
+  /**
+   * Persona del equipo que figura como autora de la cita. Quien llama lo
+   * indica cuando el actor no es un usuario (el agente o el interlocutor que
+   * confirmó): `null` deja la cita sin autora y el actor real queda en la
+   * auditoría y en `source`. Sin indicar, la autora es `actorUserId`.
+   */
+  createdByUserId?: string | null
 }
 
 export async function createAppointment(
@@ -577,7 +584,7 @@ export async function createAppointment(
         reason: input.reason?.trim() || null,
         source: input.source ?? "recepcion",
         conversationId: input.conversationId ?? null,
-        createdBy: actorUserId,
+        createdBy: input.createdByUserId === undefined ? actorUserId : input.createdByUserId,
       })
       .returning({ id: appointment.id })
     if (!created) throw new Error("No se pudo crear la cita")

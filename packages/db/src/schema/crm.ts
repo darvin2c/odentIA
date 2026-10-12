@@ -297,6 +297,12 @@ export const customFieldDef = pgTable(
  * par atómico (URL base + clave cifrada): nunca se combina una URL de la
  * organización con la clave de la plataforma.
  */
+/** Ajustes del asesor por organización; ver `agent_config.advisor`. */
+export interface AgentAdvisorSettings {
+  enabled?: boolean
+  detections?: Record<string, { off?: boolean; days?: number; snoozedUntil?: string }>
+}
+
 export const agentConfig = pgTable(
   "agent_config",
   {
@@ -311,11 +317,49 @@ export const agentConfig = pgTable(
     llmApiKeyEncrypted: text("llm_api_key_encrypted"),
     /** Corridas con llamada al modelo permitidas por día (zona de la organización). */
     dailyRunLimit: integer("daily_run_limit").notNull().default(500),
-    /** Modelo de decisión (none | baseline | jev | openai_decisions); solo en sombra por ahora. */
+    /** Modelo de decisión (none | baseline | jev | openai_decisions). */
     decisionProvider: text("decision_provider").notNull().default("none"),
+    /**
+     * Con modelo de decisión: elige el camino del turno antes de llamar al
+     * modelo que escribe. Apagado, el modelo de decisión solo elige
+     * conocimiento y opina en sombra.
+     */
+    decisionRoutingEnabled: boolean("decision_routing_enabled").notNull().default(true),
+    /**
+     * Asesor: si está encendido y, por detección, si se apagó, hasta cuándo
+     * se pospuso y con qué umbral de días. Vacío = apagado, todo por defecto.
+     */
+    advisor: jsonb("advisor").$type<AgentAdvisorSettings>().notNull().default(sql`'{}'::jsonb`),
+    /** Asistente clínico: dictado en la atención. Apagado hasta que la clínica lo encienda. */
+    clinicalAssistantEnabled: boolean("clinical_assistant_enabled").notNull().default(false),
     systemPrompt: text("system_prompt").notNull().default(""),
     handoffKeywords: text("handoff_keywords").array().notNull().default(sql`'{}'`),
     maxTurns: integer("max_turns").notNull().default(10),
+    /** Comprueba precios, fechas y horas de cada respuesta contra lo consultado antes de enviarla. */
+    replyCheckEnabled: boolean("reply_check_enabled").notNull().default(true),
+    /**
+     * La voz de la clínica (la base que comparten sus agentes): cómo se
+     * presenta, el trato, el tono y unas líneas sobre quiénes son. Nulo o vacío
+     * = sin indicación propia.
+     */
+    personaName: text("persona_name"),
+    treatment: text("treatment"),
+    tone: text("tone").notNull().default("cercano"),
+    about: text("about").notNull().default(""),
+    /** Funciones de Recepción que la clínica apagó (ver la ficha del agente). */
+    disabledFunctions: text("disabled_functions").array().notNull().default(sql`'{}'`),
+    /** Indicación de la clínica para una función concreta, por id de función. */
+    functionNotes: jsonb("function_notes").$type<Record<string, string>>().notNull().default(sql`'{}'::jsonb`),
+    /**
+     * Límites que aplica el sistema: franja del día en que responde (minutos
+     * desde medianoche en la zona de la clínica; nulos = a toda hora) y canales
+     * donde atiende (nulo = todos los conectados).
+     */
+    activeFromMin: integer("active_from_min"),
+    activeUntilMin: integer("active_until_min"),
+    channels: text("channels").array(),
+    /** Mensajes de prueba enviados desde «Probar»: solo para saber si la clínica ya lo probó. */
+    sandboxTurns: integer("sandbox_turns").notNull().default(0),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -328,6 +372,12 @@ export const agentConfig = pgTable(
     check(
       "agent_config_decision_provider_check",
       sql`${table.decisionProvider} in ('none','baseline','jev','openai_decisions')`,
+    ),
+    check("agent_config_treatment_check", sql`${table.treatment} is null or ${table.treatment} in ('tu','usted')`),
+    check("agent_config_tone_check", sql`${table.tone} in ('cercano','neutro','formal')`),
+    check(
+      "agent_config_active_hours_check",
+      sql`(${table.activeFromMin} is null) = (${table.activeUntilMin} is null) and (${table.activeFromMin} is null or (${table.activeFromMin} between 0 and 1439 and ${table.activeUntilMin} between 1 and 1440 and ${table.activeFromMin} <> ${table.activeUntilMin}))`,
     ),
   ],
 )

@@ -1,20 +1,32 @@
-import { describeProviderProblem, isProviderConfigError, type PlatformLlm, simulateAgentTurn } from "@odentia/agent"
+import {
+  describeProviderProblem,
+  isProviderConfigError,
+  type PlatformLlm,
+  simulateAgentSandbox,
+  simulateAgentTurn,
+} from "@odentia/agent"
 import { withOrgContext } from "@odentia/db"
 import {
   confirmProposalByContact,
   createHandoff,
+  operationBodySchema,
   createProposal,
   decideProposal,
   executeProposal,
   findFreeGaps,
+  getAgentCaseState,
   getAgentPanelSummary,
   getAgentRunStats,
   getProposal,
   listAgentActivity,
   listAgentDecisions,
   listAgentRuns,
+  listAnswerTraces,
   listHandoffs,
+  noteSandboxTurn,
+  removeAgentCaseNote,
   claimHandoff,
+  getCaseBrief,
   listProposals,
   requiredPermissionForAction,
   ServiceError,
@@ -52,15 +64,12 @@ const proposalInput = z.object({
 const decideInput = z.object({
   decision: z.enum(["aprobada", "rechazada"]),
   reason: z.string().max(2000).optional(),
+  /** Aprobar con edición: el texto que sale en lugar del borrador del agente. */
+  editedText: z.string().min(1).max(4000).optional(),
 })
 
-const handoffInput = z.object({
-  conversationId: z.string().uuid(),
-  reason: z.string().min(1).max(500),
-  summary: z.string().min(1).max(2000),
-  priority: z.enum(["alta", "media", "baja"]).default("media"),
-  assigneeUserId: z.string().optional(),
-})
+// Los campos de una derivación se declaran una vez, para la pantalla y para el agente.
+const handoffInput = operationBodySchema("derivacion.crear")
 
 const gapsInput = z.object({
   branchId: z.string().uuid(),
@@ -80,6 +89,38 @@ const decisionsQuery = z.object({
 const simulateInput = z.object({
   conversationId: z.string().uuid(),
   text: z.string().min(1).max(4000),
+})
+
+const sandboxProposal = z.object({
+  id: z.string().uuid(),
+  action: z.string().max(40),
+  label: z.string().max(80),
+  summary: z.string().max(300),
+  status: z.string().max(20),
+  decider: z.enum(["contact", "team"]),
+  detail: z.string().max(300).nullable(),
+  at: z.string().max(40),
+  expiresAt: z.string().max(40).nullable(),
+})
+
+/**
+ * Conversación de prueba: el historial y el estado los trae quien prueba y
+ * solo alimentan esa prueba; por eso van acotados, no porque se confíe en ellos.
+ */
+const sandboxInput = z.object({
+  message: z.string().min(1).max(2000),
+  transcript: z
+    .array(z.object({ role: z.enum(["contact", "agent"]), text: z.string().max(4000) }))
+    .max(40)
+    .default([]),
+  state: z
+    .object({
+      pending: z.array(sandboxProposal).max(5),
+      recent: z.array(sandboxProposal).max(5),
+      notes: z.array(z.object({ text: z.string().max(300), at: z.string().max(40) })).max(12),
+      lookups: z.array(z.object({ tool: z.string().max(40), text: z.string().max(2100), at: z.string().max(40) })).max(5),
+    })
+    .optional(),
 })
 
   const app = new Hono()
@@ -304,6 +345,96 @@ const simulateInput = z.object({
         getAgentRunStats(tx, orgId, { from: c.req.query("from"), to: c.req.query("to") }),
       ),
     )
+  })
+
+  /**
+   * En qué se basó cada respuesta del agente en un hilo. Lo lee quien puede
+   * ver la conversación: la traza nombra fuentes y datos comprobados, nunca
+   * contenido que el hilo no muestre ya.
+   */
+  app.get("/answer-traces", async (c) => {
+    const { orgId, memberRole } = orgContextOf(c)
+    if (!canAccessAny(memberRole, ["conversations.read", "agent.read"])) return forbidden(c, "conversations.read")
+    const parsed = z
+      .object({ conversationId: z.string().uuid(), limit: z.coerce.number().int().min(1).max(100).optional() })
+      .safeParse(c.req.query())
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        listAnswerTraces(tx, orgId, parsed.data.conversationId, { limit: parsed.data.limit }),
+      ),
+    )
+  })
+
+  /** Lo que el agente recuerda del caso: propuestas, notas propias y consultas recientes. */
+  app.get("/case", async (c) => {
+    const { orgId, memberRole } = orgContextOf(c)
+    if (!canAccessAny(memberRole, ["conversations.read", "agent.read"])) return forbidden(c, "conversations.read")
+    const parsed = z.object({ conversationId: z.string().uuid() }).safeParse(c.req.query())
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) => getAgentCaseState(tx, orgId, parsed.data.conversationId)),
+    )
+  })
+
+  /**
+   * Resumen del caso para quien lo toma: lo que la persona escribió, lo que ya
+   * se sabe y lo que hizo el agente. Lo que se recuerda de la persona solo
+   * viaja a quien puede ver sus contactos.
+   */
+  app.get("/case/brief", async (c) => {
+    const { orgId, memberRole } = orgContextOf(c)
+    if (!canAccessAny(memberRole, ["conversations.read", "agent.read"])) return forbidden(c, "conversations.read")
+    const parsed = z.object({ conversationId: z.string().uuid() }).safeParse(c.req.query())
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        getCaseBrief(tx, orgId, parsed.data.conversationId, { includePerson: canAccessAny(memberRole, ["conversations.read", "crm.read"]) }),
+      ),
+    )
+  })
+
+  /** Una persona retira una nota que el agente dejó sobre el caso. */
+  app.post("/case/notes/remove", async (c) => {
+    const { orgId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "conversations.write")) return forbidden(c, "conversations.write")
+    const parsed = z
+      .object({ conversationId: z.string().uuid(), at: z.string().min(1).max(40) })
+      .safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        removeAgentCaseNote(tx, orgId, parsed.data.conversationId, parsed.data.at),
+      ),
+    )
+  })
+
+  /**
+   * «Probar»: un turno de una conversación de prueba, sin hilo ni persona
+   * real. No envía ni escribe; solo cuenta que la clínica probó a su agente.
+   */
+  app.post("/sandbox", async (c) => {
+    const { orgId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "agent.write")) return forbidden(c, "agent.write")
+    const parsed = sandboxInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    try {
+      return await runService(c, 200, async () => {
+        const result = await simulateAgentSandbox(
+          deps.db,
+          { secretsKey: deps.secretsKey, platform: deps.llm },
+          { orgId, ...parsed.data },
+        )
+        await withOrgContext(deps.db, orgId, (tx) => noteSandboxTurn(tx, orgId))
+        return result
+      })
+    } catch (error) {
+      if (isProviderConfigError(error)) {
+        const problem = describeProviderProblem(error)
+        return c.json(errorBody(c, "LLM_CONFIG", `El agente no puede usar el modelo (${problem.detail})`), 409)
+      }
+      throw error
+    }
   })
 
   app.post("/simulate", async (c) => {

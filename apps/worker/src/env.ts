@@ -29,7 +29,13 @@ const envSchema = z.object({
   // Vacío en el .env cuenta como no definido (no como 0, que la desactivaría).
   AGENT_BURST_WINDOW_SECONDS: z.preprocess(
     (value) => (value === "" ? undefined : value),
-    z.coerce.number().int().min(0).max(30).default(4),
+    z.coerce.number().int().min(0).max(30).default(6),
+  ),
+  // La espera se reinicia con cada mensaje nuevo de la persona; este es el
+  // tope desde su primer mensaje sin responder, para que nadie espere de más.
+  AGENT_BURST_MAX_WAIT_SECONDS: z.preprocess(
+    (value) => (value === "" ? undefined : value),
+    z.coerce.number().int().min(0).max(120).default(30),
   ),
   /** dev/e2e: admite http y destinos privados para servidores locales de prueba. */
   LLM_ALLOW_INSECURE_BASE_URL: z.enum(["true", "false"]).default("false"),

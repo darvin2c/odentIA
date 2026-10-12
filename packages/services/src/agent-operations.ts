@@ -422,7 +422,8 @@ async function hasEconomicRole(tx: Db, orgId: string, patientId: string, contact
 export interface FreeGapInput {
   from: string
   to: string
-  durationMin: number
+  /** Sin indicar, la del servicio y, si no hay servicio, la de una cita regular en la sede. */
+  durationMin?: number
   branchId?: string
   dentistUserId?: string
   chairId?: string
@@ -457,8 +458,8 @@ export async function findFreeGaps(tx: Db, orgId: string, input: FreeGapInput): 
   if (to.getTime() - from.getTime() > 8 * 24 * 60 * 60 * 1000) {
     throw validation("El rango máximo de búsqueda es 8 días")
   }
-  const durationMin = Math.floor(input.durationMin)
-  if (!Number.isInteger(durationMin) || durationMin < 10 || durationMin > 480) {
+  const durationMin = input.durationMin === undefined ? undefined : Math.floor(input.durationMin)
+  if (durationMin !== undefined && (!Number.isInteger(durationMin) || durationMin < 10 || durationMin > 480)) {
     throw validation("durationMin debe ser entero entre 10 y 480")
   }
   if (!input.branchId?.trim()) throw validation("branchId es obligatoria para buscar huecos")
@@ -469,7 +470,7 @@ export async function findFreeGaps(tx: Db, orgId: string, input: FreeGapInput): 
     serviceId: input.serviceId,
     from: from.toISOString(),
     to: to.toISOString(),
-    durationMin,
+    ...(durationMin === undefined ? {} : { durationMin }),
     // El agente nunca ofrece una hora que ya pasó.
     notBefore: new Date().toISOString(),
   })
@@ -512,6 +513,8 @@ export interface ProposalItem {
   mode: AutonomyMode
   status: ProposalStatus
   payload: Record<string, unknown>
+  /** Texto que el equipo aprobó cuando cambió el borrador; el `payload` conserva lo propuesto. */
+  editedText: string | null
   reason: string | null
   idempotencyKey: string
   result: Record<string, unknown> | null
@@ -536,6 +539,7 @@ function baseProposal(row: ProposalRow, mode: AutonomyMode, context: ProposalCon
     mode,
     status: row.status as ProposalStatus,
     payload: row.payload,
+    editedText: row.editedText,
     reason: row.reason,
     idempotencyKey: row.idempotencyKey,
     result: row.result,
@@ -570,7 +574,7 @@ function isUuid(value: unknown): value is string {
 }
 
 /** Etiqueta operativa del acto: fallback de afterSummary si el legado no trae evidencia. */
-const PROPOSAL_ACTION_LABEL: Record<ProposalAction, string> = {
+export const PROPOSAL_ACTION_LABEL: Record<ProposalAction, string> = {
   reservar_cita: "Reservar cita",
   reprogramar_cita: "Reprogramar cita",
   cancelar_cita: "Cancelar cita",
@@ -1520,7 +1524,7 @@ export async function decideProposal(
   orgId: string,
   actorUserId: string,
   id: string,
-  input: { decision: "aprobada" | "rechazada"; reason?: unknown },
+  input: { decision: "aprobada" | "rechazada"; reason?: unknown; editedText?: unknown },
   opts: { secretsKey?: Buffer } = {},
 ): Promise<ProposalItem> {
   const expired = await takeExpiredProposal(tx, orgId, actorUserId, id)
@@ -1530,6 +1534,19 @@ export async function decideProposal(
     throw new ServiceError("PROPOSAL_NOT_PENDING", 409, `La propuesta ya está ${current.status}`)
   }
   const reason = cleanReason(input.reason)
+  // Aprobar con edición: solo el texto de un mensaje, y solo al aprobar. El
+  // borrador del agente se conserva en el payload como evidencia.
+  let editedText: string | null = null
+  if (input.editedText !== undefined && input.editedText !== null) {
+    const draft = (current.payload as Record<string, unknown>)["text"]
+    if (input.decision !== "aprobada" || current.action !== "enviar_mensaje" || typeof draft !== "string") {
+      throw validation("Solo se puede editar el texto de un mensaje al aprobarlo")
+    }
+    if (typeof input.editedText !== "string" || !input.editedText.trim() || input.editedText.length > 4000) {
+      throw validation("El mensaje no puede quedar vacío ni pasar de 4000 caracteres")
+    }
+    if (input.editedText.trim() !== draft.trim()) editedText = input.editedText.trim()
+  }
   if (input.decision === "rechazada") {
     const [row] = await tx
       .update(agentProposal)
@@ -1562,7 +1579,7 @@ export async function decideProposal(
   }
   const [row] = await tx
     .update(agentProposal)
-    .set({ status: "aprobada", reason: reason ?? current.reason, decidedBy: actorUserId, decidedAt: new Date(), updatedAt: new Date() })
+    .set({ status: "aprobada", editedText, reason: reason ?? current.reason, decidedBy: actorUserId, decidedAt: new Date(), updatedAt: new Date() })
     .where(and(eq(agentProposal.id, id), eq(agentProposal.status, "propuesta")))
     .returning()
   if (!row) throw await pendingConflict(tx, orgId, id)
@@ -1572,11 +1589,22 @@ export async function decideProposal(
     action: "agent.proposal_approved",
     entity: "agent_proposal",
     entityId: id,
-    metadata: { reason: reason ?? current.reason },
+    metadata: { reason: reason ?? current.reason, edited: editedText !== null },
   })
   await notify(tx, { orgId, kind: "agent.proposal.decided", at: new Date().toISOString() })
   const executed = await executeProposal(tx, orgId, actorUserId, id, opts)
   await syncCommercialCoordination(tx, orgId, executed)
+  // El mensaje ya salió con el texto del equipo; guardarlo para la próxima vez
+  // es una lección propuesta que aprueba quien administra el agente.
+  if (editedText !== null && executed.status === "ejecutada") {
+    const { proposeLessonFromEditedApproval } = await import("./agent-learning.js")
+    await proposeLessonFromEditedApproval(tx, orgId, actorUserId, {
+      proposalId: id,
+      conversationId: executed.conversationId,
+      originalText: String((current.payload as Record<string, unknown>)["text"] ?? ""),
+      editedText,
+    })
+  }
   return executed
 }
 
@@ -1794,6 +1822,9 @@ export async function executeProposal(
         reason: typeof payload["reason"] === "string" ? (payload["reason"] as string) : undefined,
         source: "agent",
         conversationId: locked.conversationId ?? undefined,
+        // El agente y el interlocutor que confirma no son usuarios: la cita
+        // queda sin autora y quién la decidió consta en la auditoría.
+        createdByUserId: teamUserId,
       })
       result = { appointmentId: created.id, startsAt: created.startsAt, dentistName: created.dentistName }
     } else if (action === "reprogramar_cita") {
@@ -1958,9 +1989,9 @@ export async function executeProposal(
           conversationId,
           senderKind: "agent",
           senderUserId: teamUserId,
-          content: { type: "text", text: payload["text"] as string },
+          content: { type: "text", text: locked.editedText ?? (payload["text"] as string) },
         })
-        result = { messageId: sent.id, kind: "text" }
+        result = { messageId: sent.id, kind: "text", ...(locked.editedText ? { edited: true } : {}) }
       }
     } else if (action === "mover_oportunidad") {
       if (!locked.contactId) throw validation("La propuesta no tiene contacto asociado")
@@ -2140,6 +2171,12 @@ export interface HandoffItem {
   reason: string
   summary: string
   priority: HandoffPriority
+  /** Qué pide la persona, en una frase; nulo si quien derivó no lo dejó escrito. */
+  asks: string | null
+  /** Lo que falta preguntar o hacer; nulo si no se dejó escrito. */
+  pending: string | null
+  /** El aviso que recibió la persona; nulo si no salió ninguno. */
+  notice: string | null
   assigneeUserId: string | null
   taskId: string | null
   /** Plazo de la tarea de seguimiento según la prioridad (visible en la cola). */
@@ -2206,6 +2243,9 @@ async function enrichHandoffs(tx: Db, rows: HandoffRow[]): Promise<HandoffItem[]
       reason: row.reason,
       summary: row.summary,
       priority: row.priority as HandoffPriority,
+      asks: row.asks,
+      pending: row.pending,
+      notice: row.notice,
       assigneeUserId: row.assigneeUserId,
       taskId: row.taskId,
       dueAt: row.taskId ? (dueByTask.get(row.taskId)?.toISOString() ?? null) : null,
@@ -2534,6 +2574,8 @@ export async function createHandoff(
     /** Reutiliza el pendiente origen; no crea una segunda tarea. */
     taskId?: string
     createdBy?: string
+    asks?: string | null
+    pending?: string | null
   },
 ): Promise<HandoffItem> {
   const conv = await requireConversationInOrg(tx, orgId, input.conversationId)
@@ -2584,6 +2626,8 @@ export async function createHandoff(
       reason,
       summary,
       priority,
+      asks: cleanReason(input.asks ?? "", HANDOFF_BRIEF_CHARS) || null,
+      pending: cleanReason(input.pending ?? "", HANDOFF_BRIEF_CHARS) || null,
       assigneeUserId,
       taskId: task.id,
       createdBy,
@@ -2611,6 +2655,34 @@ export async function createHandoff(
   }
   await notify(tx, { orgId, kind: "agent.handoff.created", at: new Date().toISOString() })
   return enrichHandoff(tx, row)
+}
+
+const HANDOFF_BRIEF_CHARS = 400
+const HANDOFF_NOTICE_CHARS = 4000
+
+/**
+ * Completa una derivación ya registrada con lo que se sabe después de crearla:
+ * qué pide la persona, qué falta y el aviso que recibió. Solo escribe lo que
+ * llega con texto; no cambia motivo, prioridad ni responsable.
+ */
+export async function annotateHandoff(
+  tx: Db,
+  orgId: string,
+  handoffId: string,
+  input: { asks?: string | null; pending?: string | null; notice?: string | null },
+): Promise<void> {
+  const patch: { asks?: string; pending?: string; notice?: string } = {}
+  const asks = cleanReason(input.asks ?? "", HANDOFF_BRIEF_CHARS)
+  if (asks) patch.asks = asks
+  const pending = cleanReason(input.pending ?? "", HANDOFF_BRIEF_CHARS)
+  if (pending) patch.pending = pending
+  const notice = (input.notice ?? "").trim().slice(0, HANDOFF_NOTICE_CHARS)
+  if (notice) patch.notice = notice
+  if (Object.keys(patch).length === 0) return
+  await tx
+    .update(agentHandoff)
+    .set(patch)
+    .where(and(eq(agentHandoff.id, handoffId), eq(agentHandoff.organizationId, orgId)))
 }
 
 export async function listHandoffs(
@@ -2843,8 +2915,19 @@ export interface AgentRunStats {
   totalLlmCalls: number | null
   /** Corridas con `llm_calls` registrado: el denominador de `totalLlmCalls`. */
   runsWithLlmCalls: number
+  /**
+   * Conversaciones con al menos una llamada al modelo en el rango: el
+   * denominador del gasto por conversación (llamadas y tokens entre este valor).
+   */
+  conversationsWithLlmCalls: number
   totalCostMicros: number | null
   topTools: Array<{ tool: string; uses: number }>
+  /**
+   * Llamadas al modelo que escribe según el camino que eligió el modelo de
+   * decisión antes del turno (`sin_camino`: corridas sin esa elección). Sirve
+   * para comparar el gasto antes y después de activarlo.
+   */
+  byRoute: Array<{ path: string; runs: number; avgLlmCalls: number | null; avgInputTokens: number | null }>
 }
 
 /** Métricas reales desde el libro (rango opcional ISO). */
@@ -2870,6 +2953,7 @@ export async function getAgentRunStats(tx: Db, orgId: string, input: { from?: st
       cachedInputTokens: sum(agentRunLedger.cachedInputTokens),
       llmCalls: sum(agentRunLedger.llmCalls),
       runsWithLlmCalls: count(agentRunLedger.llmCalls),
+      conversationsWithLlmCalls: sql<number>`count(distinct ${agentRunLedger.conversationId}) filter (where ${agentRunLedger.llmCalls} > 0)`,
       cost: sum(agentRunLedger.costMicros),
     })
     .from(agentRunLedger)
@@ -2882,10 +2966,28 @@ export async function getAgentRunStats(tx: Db, orgId: string, input: { from?: st
   const toolRows = await tx.execute<{ tool: string; uses: number }>(
     sql`select t as tool, count(*)::int as uses from ${agentRunLedger}, lateral unnest(${agentRunLedger.toolsUsed}) as t where ${where} group by t order by uses desc limit 10`,
   )
+  const routeRows = await tx.execute<{ path: string; runs: number; calls: string | null; input: string | null }>(sql`
+    select coalesce(d.path, 'sin_camino') as path, count(*)::int as runs,
+           avg(${agentRunLedger.llmCalls})::text as calls, avg(${agentRunLedger.inputTokens})::text as input
+    from ${agentRunLedger}
+    left join lateral (
+      select dl.outcome->>'path' as path from agent_decision_log dl
+      where dl.organization_id = ${agentRunLedger.organizationId}
+        and dl.trigger_message_id = ${agentRunLedger.triggerMessageId}
+        and dl.mode = 'route' and dl.error is null
+      order by dl.created_at desc limit 1
+    ) d on true
+    where ${where} and ${agentRunLedger.status} in ('ok', 'handoff', 'sin_respuesta')
+    group by 1 order by 2 desc`)
   const toNum = (v: unknown): number | null => {
     if (v === null || v === undefined) return null
     const n = Number(v)
     return Number.isFinite(n) ? Math.round(n) : null
+  }
+  const toAvg = (v: unknown): number | null => {
+    if (v === null || v === undefined) return null
+    const n = Number(v)
+    return Number.isFinite(n) ? Math.round(n * 100) / 100 : null
   }
   const byStatus: Record<string, number> = {}
   for (const row of byStatusRows) byStatus[row.status] = Number(row.total)
@@ -2898,10 +3000,17 @@ export async function getAgentRunStats(tx: Db, orgId: string, input: { from?: st
     totalCachedInputTokens: toNum(totals?.cachedInputTokens),
     totalLlmCalls: toNum(totals?.llmCalls),
     runsWithLlmCalls: Number(totals?.runsWithLlmCalls ?? 0),
+    conversationsWithLlmCalls: Number(totals?.conversationsWithLlmCalls ?? 0),
     totalCostMicros: toNum(totals?.cost),
     topTools: (toolRows as unknown as Array<{ tool: string; uses: number }>).map((r) => ({
       tool: r.tool,
       uses: Number(r.uses),
+    })),
+    byRoute: (routeRows as unknown as Array<{ path: string; runs: number; calls: string | null; input: string | null }>).map((r) => ({
+      path: r.path,
+      runs: Number(r.runs),
+      avgLlmCalls: toAvg(r.calls),
+      avgInputTokens: toNum(r.input),
     })),
   }
 }

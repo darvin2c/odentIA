@@ -4,6 +4,10 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link, createFileRoute } from "@tanstack/react-router"
 import { AlertTriangle, ArrowRight, Bot, CalendarDays, CheckCircle2, CheckSquare, Hand, Inbox, Wallet } from "lucide-react"
 import { useState, type ReactNode } from "react"
+import { AdvisorSection } from "../../components/agent/advisor"
+import { ApproveMessageDrawer, messageDraftOf } from "../../components/agent/approve-message-drawer"
+import { CaseBriefDrawer } from "../../components/agent/case-brief"
+import { HandoffUrgency } from "../../components/agent/handoff-badges"
 import { type AgentPanelTab, useAgentPanel } from "../../components/agent-panel"
 import { PerformanceSummary } from "../../components/crm/performance-summary"
 import { HomeStart } from "../../components/home-start"
@@ -82,8 +86,11 @@ function HomePage() {
         method: "POST",
         body: JSON.stringify({ decision: "aprobada" }),
       }),
-    onSuccess: (response) => {
+    onSuccess: (response) => settle(response),
+  })
+  function settle(response: { data: AgentProposal }) {
       setApproving(null)
+      setMessage(null)
       const proposal = response.data
       setOutcome(
         proposal.status === "fallida" || proposal.status === "expirada"
@@ -92,8 +99,26 @@ function HomePage() {
       )
       void queryClient.invalidateQueries({ queryKey: ["workspace-home"] })
       void queryClient.invalidateQueries({ queryKey: ["workspace-pulse"] })
-    },
-  })
+  }
+  // Un mensaje se revisa y se edita en su cajón, igual que en Aprobaciones; el
+  // resumen de Inicio no trae el borrador, así que se pide al abrirlo.
+  const [message, setMessage] = useState<AgentProposal | null>(null)
+  const [briefFor, setBriefFor] = useState<{ conversationId: string; name: string } | null>(null)
+  const canClaim = usePermission("tasks.write")
+  const review = async (proposal: NonNullable<typeof approving>) => {
+    if (proposal.action === "enviar_mensaje") {
+      try {
+        const full = await apiFetch<{ data: AgentProposal }>(`/api/agent/proposals/${proposal.id}`)
+        if (messageDraftOf(full.data) !== null) {
+          setMessage(full.data)
+          return
+        }
+      } catch {
+        // Sin el borrador se decide con la confirmación de siempre.
+      }
+    }
+    setApproving(proposal)
+  }
   const data = query.data?.data
   const hasAgentPending = Boolean(data?.agent && (data.agent.pendingProposals > 0 || data.agent.derivedConversations > 0 || data.agent.recentHandoffs.length > 0))
   const agentRest = data?.agent ? agentPendingRest(data.agent) : null
@@ -116,6 +141,7 @@ function HomePage() {
     <PageHeader title="Inicio" subtitle={data ? `Tu jornada · ${formatLongDay(data.date, data.locale)}` : "Lo que necesita tu atención hoy"} />
     {query.isPending ? <LoadingState /> : query.isError ? <ErrorState title="No pudimos cargar tu jornada" message="Comprueba tu conexión y vuelve a intentarlo." retryLabel="Volver a intentar" onRetry={() => void query.refetch()} /> : data ? <>
       {!hasPending && <HomeStart data={data} />}
+      <AdvisorSection />
       {data.agent && (hasAgentPending || outcome || decideError) && <AgentSurface aria-label="Pendiente de ti" className="enter">
         <div className="mb-4 flex flex-wrap items-center gap-3">
           <AgentMark />
@@ -156,7 +182,7 @@ function HomePage() {
                 {proposal.summary ? <p>{proposal.summary}</p> : null}
               </div>
               <div className="mt-auto flex flex-wrap gap-2">
-                {canApprove && forTeam ? <SubmitButton type="button" pending={decideMutation.isPending} onClick={() => setApproving(proposal)}>
+                {canApprove && forTeam ? <SubmitButton type="button" pending={decideMutation.isPending} onClick={() => void review(proposal)}>
                   Revisar y aprobar
                 </SubmitButton> : <Button variant="outline" nativeButton={false} render={<Link to="/agent/approvals" search={{ conversationId: proposal.conversationId ?? undefined }} />}>Revisar caso</Button>}
               </div>
@@ -167,13 +193,19 @@ function HomePage() {
           <p className="text-sm font-semibold">Derivaciones recientes</p>
           <ul className="mt-2 flex flex-wrap gap-2">
             {data.agent.recentHandoffs.map((handoff, index) => {
-              const high = handoff.priority === "alta"
               return <li key={handoff.id} className={index === 0 ? "max-w-full" : "hidden max-w-full sm:list-item"}>
-                <Link to={handoff.conversationId ? "/inbox" : "/agent/approvals"} search={handoff.conversationId ? { conversation: handoff.conversationId } : {}} className="flex min-h-11 max-w-full items-center gap-2 rounded-3xl border bg-card px-3.5 py-1.5 text-sm transition-colors hover:bg-accent/60 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary">
-                  <span aria-hidden className={high ? "size-2 shrink-0 rounded-full bg-destructive" : "size-2 shrink-0 rounded-[2px] bg-warning"} />
-                  <span className="min-w-0">{handoff.contactName ? `${handoff.contactName} · ` : ""}{handoff.reason}</span>
-                  <span className={high ? "shrink-0 font-semibold text-destructive" : "shrink-0 font-semibold text-warning"}>Prioridad {handoff.priority}</span>
-                </Link>
+                {handoff.conversationId ? (
+                  <button type="button" aria-label={`Ver el caso de ${handoff.contactName ?? "esta persona"}: ${handoff.reason}`} onClick={() => setBriefFor({ conversationId: handoff.conversationId as string, name: handoff.contactName ?? "Interlocutor" })} className="flex min-h-11 max-w-full items-center gap-2 rounded-3xl border bg-card px-3.5 py-1.5 text-left text-sm transition-colors hover:bg-accent/60 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary">
+                    <HandoffUrgency priority={handoff.priority} />
+                    <span className="min-w-0">{handoff.contactName ? `${handoff.contactName} · ` : ""}{handoff.reason}</span>
+                    <span className="shrink-0 font-semibold text-primary">Ver el caso</span>
+                  </button>
+                ) : (
+                  <Link to="/agent/approvals" className="flex min-h-11 max-w-full items-center gap-2 rounded-3xl border bg-card px-3.5 py-1.5 text-sm transition-colors hover:bg-accent/60 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary">
+                    <HandoffUrgency priority={handoff.priority} />
+                    <span className="min-w-0">{handoff.contactName ? `${handoff.contactName} · ` : ""}{handoff.reason}</span>
+                  </Link>
+                )}
               </li>
             })}
           </ul>
@@ -183,11 +215,12 @@ function HomePage() {
           <ArrowRight className="size-4" aria-hidden />
         </button>}
       </AgentSurface>}
-      {hasMetrics && <div className="enter grid grid-cols-1 gap-4 [--enter-index:1] sm:grid-cols-2 xl:grid-cols-4">
-        {data.access.appointments && data.appointmentCounts.some(item => item.count > 0 && item.status !== "cancelada") && <Metric title="Citas de hoy" value={activeAppointments} meter={{ value: confirmedAppointments, total: activeAppointments }} detail={`${confirmedAppointments} confirmadas · abrir agenda`} href="/agenda" icon={<CalendarDays />} />}
-        {data.conversations && (data.conversations.waiting > 0 || data.conversations.unread > 0) && <Metric title={data.conversations.waiting > 0 ? "Esperan respuesta" : "Conversaciones sin leer"} value={data.conversations.waiting || data.conversations.unread} meter={{ value: data.conversations.unread, total: Math.max(data.conversations.waiting, data.conversations.unread) }} detail={`${data.conversations.human} con atención humana · ${data.conversations.unread} sin leer`} href="/inbox" icon={<Inbox />} />}
-        {data.taskCount && data.taskCount.open > 0 && <Metric title="Tareas abiertas" value={data.taskCount.open} meter={{ value: data.taskCount.overdue, total: data.taskCount.open, tone: "danger" }} detail={`${data.taskCount.overdue} vencidas${data.access.allTasks ? " en el equipo" : " asignadas a ti"}`} href="/tasks" icon={<CheckSquare />} />}
-        {data.access.finance && data.debt.length > 0 && <Metric title="Cuentas con saldo" value={data.debt.reduce((sum, item) => sum + item.patients, 0)} detail="Revisar cobranza · por moneda" href="/finance" icon={<Wallet />} />}
+      {/* En teléfono van tres en fila con rótulos cortos; desde `sm`, las tarjetas completas. */}
+      {hasMetrics && <div className="enter grid grid-cols-3 gap-2 [--enter-index:1] sm:grid-cols-2 sm:gap-4 xl:grid-cols-4">
+        {data.access.appointments && data.appointmentCounts.some(item => item.count > 0 && item.status !== "cancelada") && <Metric title="Citas de hoy" short={{ title: "Citas de hoy", detail: `${confirmedAppointments} confirmadas` }} value={activeAppointments} meter={{ value: confirmedAppointments, total: activeAppointments }} detail={`${confirmedAppointments} confirmadas · abrir agenda`} href="/agenda" icon={<CalendarDays />} />}
+        {data.conversations && (data.conversations.waiting > 0 || data.conversations.unread > 0) && <Metric title={data.conversations.waiting > 0 ? "Esperan respuesta" : "Conversaciones sin leer"} short={{ title: data.conversations.waiting > 0 ? "Esperan" : "Sin leer", detail: `${data.conversations.unread} sin leer` }} value={data.conversations.waiting || data.conversations.unread} meter={{ value: data.conversations.unread, total: Math.max(data.conversations.waiting, data.conversations.unread) }} detail={`${data.conversations.human} con atención humana · ${data.conversations.unread} sin leer`} href="/inbox" icon={<Inbox />} />}
+        {data.taskCount && data.taskCount.open > 0 && <Metric title="Tareas abiertas" short={{ title: "Tareas", detail: `${data.taskCount.overdue} vencidas` }} value={data.taskCount.open} meter={{ value: data.taskCount.overdue, total: data.taskCount.open, tone: "danger" }} detail={`${data.taskCount.overdue} vencidas${data.access.allTasks ? " en el equipo" : " asignadas a ti"}`} href="/tasks" icon={<CheckSquare />} />}
+        {data.access.finance && data.debt.length > 0 && <Metric title="Cuentas con saldo" short={{ title: "Con saldo", detail: "Ver cobranza" }} value={data.debt.reduce((sum, item) => sum + item.patients, 0)} detail="Revisar cobranza · por moneda" href="/finance" icon={<Wallet />} />}
       </div>}
       {(data.appointments.length > 0 || data.tasks.length > 0 || data.budgets.length > 0 || data.debt.length > 0) && <div className="enter grid grid-cols-1 items-start gap-4 [--enter-index:2] xl:grid-cols-2">
         {data.access.appointments && data.appointments.length > 0 && <Section title="Agenda de hoy" href="/agenda" action="Ver agenda">
@@ -195,7 +228,7 @@ function HomePage() {
             const tone = APPOINTMENT_TONE[item.status] ?? APPOINTMENT_TONE.programada
             return <li key={item.id} className={`flex items-center gap-3 rounded-xl border px-3 py-2.5 ${tone.row}`}>
               <p className="w-[4.75rem] shrink-0 text-sm font-semibold whitespace-nowrap tabular-nums">{new Date(item.startsAt).toLocaleTimeString(data.locale, { timeZone: data.timezone, hour: "2-digit", minute: "2-digit" })}</p>
-              <div className="min-w-0 flex-1 leading-tight"><Link to="/patients/$patientId" params={{ patientId: item.patientId }} className="font-semibold hover:underline">{item.patientName}</Link><p className="truncate text-xs text-muted-foreground">{item.dentistName} · {item.branchName}</p></div>
+              <div className="min-w-0 flex-1 leading-tight"><Link to="/patients/$patientId" params={{ patientId: item.patientId }} className="font-semibold hover:underline">{item.patientName}</Link><p className="truncate text-xs text-muted-foreground">{[item.serviceName, item.dentistName, item.multiBranch ? item.branchName : null].filter(Boolean).join(" · ")}</p></div>
               <span className={`inline-flex shrink-0 items-center gap-1.5 rounded-md bg-card px-2 py-0.5 text-xs font-semibold ${tone.text}`}><span aria-hidden className={`size-1.5 rounded-full ${tone.dot}`} />{stateLabel[item.status] ?? item.status}</span>
             </li>
           })}</ul>
@@ -225,6 +258,8 @@ function HomePage() {
       <PulseSection locale={data.locale} />
       {!Object.entries(data.access).some(([key, value]) => key !== "allTasks" && key !== "configure" && value) && <EmptyState title="Sin permisos operativos" description="Pide a la administración los permisos necesarios para tu trabajo." />}
     </> : null}
+    <ApproveMessageDrawer proposal={message} onClose={() => setMessage(null)} onDecided={settle} />
+    <CaseBriefDrawer conversationId={briefFor?.conversationId ?? null} name={briefFor?.name ?? "Interlocutor"} canClaim={canClaim} onClose={() => setBriefFor(null)} onClaimed={() => void queryClient.invalidateQueries({ queryKey: ["workspace-home"] })} />
     <ConfirmDialog open={approving !== null} title="Aprobar y ejecutar el cambio" description={approving ? `${approving.context.contactName ?? "Interlocutor"}: ${approving.context.afterSummary}` : ""} confirmLabel="Aprobar y ejecutar" variant="default" pending={decideMutation.isPending} onClose={() => { if (!decideMutation.isPending) setApproving(null) }} onConfirm={() => approving && decideMutation.mutate(approving.id)} />
   </PageShell>
 }
@@ -315,8 +350,16 @@ function PulseSection({ locale }: { locale: string }) {
   </section>
 }
 
-function Metric({ title, value, detail, href, icon, meter }: { title: string; value: number; detail: string; href: string; icon: ReactNode; meter?: { value: number; total: number; tone?: "primary" | "danger" } }) {
-  return <Link to={href} className="rounded-xl focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"><KpiCard title={title} value={value} description={detail} icon={icon} meter={meter} className="lift" /></Link>
+/** Un indicador que lleva a su pantalla. En teléfono, la versión corta: rótulo, cifra y un dato. */
+function Metric({ title, short, value, detail, href, icon, meter }: { title: string; short: { title: string; detail: string }; value: number; detail: string; href: string; icon: ReactNode; meter?: { value: number; total: number; tone?: "primary" | "danger" } }) {
+  return <Link to={href} className="min-w-0 rounded-xl focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary">
+    <div className="elevated flex h-full min-h-11 flex-col gap-0.5 rounded-xl border bg-card p-3 sm:hidden">
+      <span className="text-xs font-semibold text-muted-foreground">{short.title}</span>
+      <span className="text-2xl leading-[30px] font-bold tabular-nums">{value}</span>
+      <span className="text-xs text-muted-foreground">{short.detail}</span>
+    </div>
+    <div className="hidden h-full sm:block"><KpiCard title={title} value={value} description={detail} icon={icon} meter={meter} className="lift" /></div>
+  </Link>
 }
 function Section({ title, href, action, children }: { title: string; href: string; action: string; children: ReactNode }) {
   return <section className="elevated rounded-xl border bg-card p-5"><div className="mb-3 flex items-center justify-between gap-3"><h2 className="text-base font-bold tracking-tight">{title}</h2><Link to={href} className="inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline">{action}<ArrowRight className="size-4" aria-hidden /></Link></div>{children}</section>

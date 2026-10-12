@@ -23,13 +23,33 @@ export function createFakeDecisionModel(): DecisionModel {
                   : false
           return { id: q.id, kind: "yesno", probability: yes ? 0.92 : 0.08 }
         }
+        if (q.kind === "choice" && q.id === "topic") {
+          // Elección de conocimiento: gana la opción que comparte más palabras
+          // con el estado; sin ninguna en común, «none».
+          const words = new Set(text.normalize("NFD").replace(/[\u0300-\u036f]/g, "").split(/[^a-z0-9]+/).filter((w) => w.length >= 4))
+          let best = { value: "none", hits: 0 }
+          for (const option of q.options) {
+            if (option.value === "none") continue
+            const described = (option.description ?? "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").split(/[^a-z0-9]+/)
+            const hits = described.filter((w) => w.length >= 4 && words.has(w)).length
+            if (hits > best.hits) best = { value: option.value, hits }
+          }
+          const probabilities = Object.fromEntries(
+            q.options.map((o) => [o.value, o.value === best.value ? 0.85 : 0.15 / Math.max(1, q.options.length - 1)]),
+          )
+          return { id: q.id, kind: "choice", choice: best.value, probabilities, confidence: 0.8 }
+        }
         if (q.kind === "choice") {
           const pick =
-            has("cita", "turno", "agendar") && q.options.some((o) => o.value === "appointment_request")
+            has("reprogramar", "cambiar mi cita", "mover mi cita", "cancelar mi cita") && q.options.some((o) => o.value === "reschedule_or_cancel")
+              ? "reschedule_or_cancel"
+              : has("cita", "turno", "agendar") && q.options.some((o) => o.value === "appointment_request")
               ? "appointment_request"
               : has("precio", "cuesta", "costo") && q.options.some((o) => o.value === "price_or_service_info")
                 ? "price_or_service_info"
-                : (q.options.find((o) => o.value === "other")?.value ?? q.options[0]!.value)
+                : has("gracias", "buenos dias", "buenas tardes") && q.options.some((o) => o.value === "greeting_or_thanks")
+                  ? "greeting_or_thanks"
+                  : (q.options.find((o) => o.value === "other")?.value ?? q.options[0]!.value)
           const probabilities = Object.fromEntries(q.options.map((o) => [o.value, o.value === pick ? 0.85 : 0.15 / Math.max(1, q.options.length - 1)]))
           return { id: q.id, kind: "choice", choice: pick, probabilities, confidence: 0.8 }
         }

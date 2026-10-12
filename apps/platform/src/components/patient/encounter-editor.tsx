@@ -3,6 +3,7 @@ import {
   Badge,
   Button,
   ButtonGroup,
+  cn,
   Field,
   FieldLabel,
   Input,
@@ -31,6 +32,10 @@ import {
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useId, useRef, useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
+import { DictationMobileBar, dictationMobileBarVisible, DictationPanel, DictationTranscript } from "./dictation-panel"
+import { type DictationKind, type DictationSuggestion, useDictationSession } from "./dictation-session"
+import { DictationSignDialog } from "./dictation-sign-dialog"
+import { DictationBlockSuggestions, DictationEditDrawer } from "./dictation-suggestions"
 import { fetchFollowUps, fetchPrescriptions } from "../../lib/clinical-journey"
 import { fetchPatientAccount3 } from "../../lib/finance-collect"
 import { useMemberName, useMyUserId, usePermission } from "../../lib/crm"
@@ -109,6 +114,17 @@ type SectionKey =
   | "controles"
   | "documentos"
   | "evolucion"
+
+/**
+ * Bloque donde vive cada clase de sugerencia del dictado, y cómo se resume el
+ * bloque cuando solo tiene sugerencias: sugerido no es registrado.
+ */
+const SECTION_DICTATION: Partial<Record<SectionKey, { kind: DictationKind; onlySuggested?: string }>> = {
+  consulta: { kind: "nota" },
+  hallazgos: { kind: "diagnostico", onlySuggested: "Sin diagnósticos confirmados" },
+  plan: { kind: "plan", onlySuggested: "Sin indicaciones confirmadas" },
+  controles: { kind: "control" },
+}
 
 /** Secciones cuyos campos son del propio borrador: se editan en un `FormPanel`. */
 const FORM_SECTIONS: readonly SectionKey[] = ["consulta", "examen", "evolucion"]
@@ -363,6 +379,10 @@ export function EncounterEditor({
   const [finalizing, setFinalizing] = useState(false)
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [finalizedBilling, setFinalizedBilling] = useState<FinalizeBilling | null>(null)
+  // El aviso de firma se elige al abrirlo: firmar descarta las sugerencias y no debe cambiar de diálogo a mitad.
+  const [confirmWithDictation, setConfirmWithDictation] = useState(false)
+  // «Lo dictado», el respaldo del odontólogo: columna lateral si cabe, cajón si no.
+  const [transcriptOpen, setTranscriptOpen] = useState(false)
   const [backing, setBacking] = useState(false)
   // Hora de fin declarada al cerrar (HH:MM local); vacía = ahora.
   const [endTime, setEndTime] = useState("")
@@ -696,6 +716,47 @@ export function EncounterEditor({
     setNextStep(value)
     markEdited("nextStep")
   }
+  /**
+   * Una sugerencia del dictado ya confirmada: el servidor la guardó con la
+   * operación de siempre y aquí se refleja. Los textos de la nota pasan por los
+   * mismos editores que al escribir, para que el borrador local no los pise.
+   */
+  const applyDictation = (item: DictationSuggestion) => {
+    if (item.kind === "nota") {
+      const text = (key: string) => (typeof item.payload[key] === "string" ? (item.payload[key] as string) : null)
+      const reasonText = text("reason")
+      if (reasonText !== null) editReason(reasonText)
+      const evolutionText = text("evolution")
+      if (evolutionText !== null) editEvolution(evolutionText)
+      const indicationsText = text("indications")
+      if (indicationsText !== null) editIndications(indicationsText)
+      const nextStepText = text("nextStep")
+      if (nextStepText !== null) editNextStep(nextStepText)
+      for (const key of ["presentIllness", "illnessDuration", "prognosis", "auxiliaryExams"] as NoteKey[]) {
+        const value = text(key)
+        if (value !== null) editNote(key, value)
+      }
+    }
+    void queryClient.invalidateQueries({ queryKey: ["plan-items", patientId] })
+    void queryClient.invalidateQueries({ queryKey: ["follow-ups", patientId] })
+    void queryClient.invalidateQueries({ queryKey: ["odontogram", patientId] })
+    void refreshClosing()
+    void onChanged()
+  }
+  // El dictado del asistente clínico, solo para quien lleva la atención.
+  const dictation = useDictationSession({
+    patientId,
+    encounterId,
+    active: canWrite && attending,
+    onApplied: applyDictation,
+  })
+  // Sugerencias que el odontólogo aún no confirmó ni descartó.
+  const dictationPending = dictation.enabled ? dictation.pending : 0
+  const dictationCount = (key: SectionKey): number => {
+    const kind = SECTION_DICTATION[key]?.kind
+    return kind && dictation.enabled ? dictation.suggestions.filter((item) => item.kind === kind).length : 0
+  }
+
   const editApptDate = (value: string) => {
     valuesRef.current.apptDate = value
     setApptDate(value)
@@ -805,6 +866,11 @@ export function EncounterEditor({
     setApptError(null)
     setFinalizing(true)
     try {
+      // Lo que quedó sugerido sin confirmar no entra a la historia: se descarta antes de firmar.
+      if (dictationPending > 0) {
+        await apiFetch(`/api/patients/${patientId}/encounters/${encounterId}/dictation/discard-pending`, { method: "POST" })
+        await dictation.refresh()
+      }
       // Congela: primero todo PATCH pendiente y último dirty, recién después finalize.
       await flush()
       const endedAt = endedAtIso()
@@ -1025,8 +1091,13 @@ export function EncounterEditor({
     .filter(Boolean)
     .join(" ")
 
+  // Un bloque con sugerencias del dictado se muestra aunque no tenga nada registrado: ahí se revisan.
   const includedSections = sections.filter(
-    (section) => section.key === "consulta" || !section.empty || addedSections.has(section.key),
+    (section) =>
+      section.key === "consulta" ||
+      !section.empty ||
+      addedSections.has(section.key) ||
+      dictationCount(section.key) > 0,
   )
   const availableSections = sections.filter((section) => !includedSections.includes(section))
   const openMeta = sections.find((section) => section.key === openSection) ?? null
@@ -1062,6 +1133,39 @@ export function EncounterEditor({
     event.preventDefault()
     void handleSaveDraft()
   }
+
+  /** Al dictar, la atención queda a la vista: se cierra el bloque abierto y, si cabe, se muestra el respaldo al lado. */
+  const startDictation = () => {
+    if (openSection) closeSection()
+    if (mode === "panel") setTranscriptOpen(true)
+  }
+  const finishDictation = () => {
+    dictation.finish()
+    setTranscriptOpen(false)
+  }
+  const showTranscript = () => {
+    if (mode === "panel" && openSection) closeSection()
+    setTranscriptOpen(true)
+  }
+  const transcriptSurface = {
+    title: "Lo dictado",
+    description: "Tu respaldo: lo resaltado generó una sugerencia.",
+    onClose: () => setTranscriptOpen(false),
+    children: <DictationTranscript session={dictation} />,
+  }
+  const closingId = `${uid}-cierre`
+  const canSign = !(locked || explicitSaving || backing || !closingReady || dictation.busy)
+  const openSign = () => {
+    setEndTime("")
+    setConfirmWithDictation(dictationPending > 0)
+    setConfirmOpen(true)
+  }
+  /** «Firmar» desde la barra del teléfono: firma si se puede; si no, lleva a lo que falta para cerrar. */
+  const signFromBar = () => {
+    if (canSign) openSign()
+    else document.getElementById(closingId)?.scrollIntoView({ block: "start" })
+  }
+  const pendingDiagnoses = dictationCount("hallazgos")
 
   const consultaBody = (
     <div className="flex flex-col gap-3">
@@ -1529,8 +1633,35 @@ export function EncounterEditor({
     )
   }
 
+  // Con quién se firma y a qué hora termina: igual con o sin sugerencias pendientes.
+  const signFields = (
+    <>
+      <p className="text-sm">
+        Firmarás como{" "}
+        <strong>
+          {profileQuery.data?.data.signatureName ?? profileQuery.data?.data.accountName ?? "—"}
+        </strong>
+        {profileQuery.data ? ` · ${profileQuery.data.data.professionalTitle}` : ""}
+        {profileQuery.data && registrationLabel(profileQuery.data.data)
+          ? ` · ${registrationLabel(profileQuery.data.data)}`
+          : ""}
+      </p>
+      <Field>
+        <FieldLabel htmlFor={`${uid}-ended`}>Hora de fin</FieldLabel>
+        <Input
+          id={`${uid}-ended`}
+          type="time"
+          className="w-36"
+          value={endTime}
+          onChange={(event) => setEndTime(event.target.value)}
+        />
+        <p className="text-xs text-muted-foreground">Vacía: se registra la hora actual.</p>
+      </Field>
+    </>
+  )
+
   return (
-    <div className="flex flex-col gap-4">
+    <div className={cn("flex flex-col gap-4", dictationMobileBarVisible(dictation) && "max-sm:pb-20")}>
       <PatientClinicalStrip detail={patient} />
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
@@ -1580,7 +1711,22 @@ export function EncounterEditor({
         </p>
       )}
 
-      <MasterDetail panelSize="xl" panel={mode === "panel" ? sectionDetail("panel") : null}>
+      <DictationPanel
+        session={dictation}
+        onStart={startDictation}
+        onFinish={finishDictation}
+        onShowTranscript={showTranscript}
+      />
+
+      <MasterDetail
+        panelSize="xl"
+        panel={
+          mode === "panel"
+            ? (sectionDetail("panel") ??
+              (transcriptOpen && dictation.enabled ? <DetailPanel {...transcriptSurface} /> : null))
+            : null
+        }
+      >
         <div className="flex flex-col gap-4">
           {includedSections.map((section) => (
             <section
@@ -1590,7 +1736,11 @@ export function EncounterEditor({
             >
               <div className="flex min-w-0 flex-col gap-1">
                 <h2 className="font-heading text-base font-medium">{section.title}</h2>
-                <p className="text-sm text-muted-foreground">{section.summary}</p>
+                <p className="text-sm text-muted-foreground">
+                  {dictationCount(section.key) > 0
+                    ? `${(section.empty && SECTION_DICTATION[section.key]?.onlySuggested) || section.summary} · ${dictationCount(section.key)} ${dictationCount(section.key) === 1 ? "sugerencia" : "sugerencias"}`
+                    : section.summary}
+                </p>
               </div>
               <div className="flex flex-wrap gap-2">
                 <Button
@@ -1602,7 +1752,7 @@ export function EncounterEditor({
                 >
                   {openSection === section.key ? "En edición" : "Abrir"}
                 </Button>
-                {section.key !== "consulta" && section.empty ? (
+                {section.key !== "consulta" && section.empty && dictationCount(section.key) === 0 ? (
                   <Button
                     type="button"
                     size="sm"
@@ -1613,6 +1763,12 @@ export function EncounterEditor({
                   </Button>
                 ) : null}
               </div>
+              {SECTION_DICTATION[section.key] ? (
+                <DictationBlockSuggestions
+                  session={dictation}
+                  kind={SECTION_DICTATION[section.key]?.kind ?? "nota"}
+                />
+              ) : null}
             </section>
           ))}
         </div>
@@ -1647,8 +1803,9 @@ export function EncounterEditor({
         ) : null}
 
         <section
+          id={closingId}
           aria-label="Cierre de la atención"
-          className="flex flex-col gap-4 rounded-sm bg-card p-6"
+          className="flex scroll-mt-4 flex-col gap-4 rounded-sm bg-card p-6"
         >
           <div className="flex flex-col gap-1">
             <h2 className="font-heading text-base font-medium">Cierre de la atención</h2>
@@ -1674,7 +1831,11 @@ export function EncounterEditor({
                       {done ? "✓" : "!"}
                     </span>
                     <span>
-                      {CLOSING_REQUIREMENT_LABELS[requirement]}
+                      {requirement === "diagnosis" && !done && pendingDiagnoses > 0
+                        ? pendingDiagnoses === 1
+                          ? "Diagnóstico: hay uno sugerido, sin confirmar"
+                          : `Diagnóstico: hay ${pendingDiagnoses} sugeridos, sin confirmar`
+                        : CLOSING_REQUIREMENT_LABELS[requirement]}
                       <span className="sr-only">{done ? ": listo" : ": pendiente"}</span>
                     </span>
                     {!done && closingQuery.isSuccess ? (
@@ -1766,21 +1927,22 @@ export function EncounterEditor({
               >
                 {backing ? "Guardando…" : "Volver"}
               </Button>
-              <Button
-                type="button"
-                disabled={locked || explicitSaving || backing || !closingReady}
-                onClick={() => {
-                  setEndTime("")
-                  setConfirmOpen(true)
-                }}
-              >
-                Finalizar atención
+              <Button type="button" disabled={!canSign} onClick={openSign}>
+                Finalizar y firmar
               </Button>
             </ButtonGroup>
           </div>
-          {!closingReady && closingQuery.isSuccess ? (
+          {dictation.busy ? (
+            <p className="text-xs text-muted-foreground">
+              Termina el dictado y revisa las sugerencias para poder firmar.
+            </p>
+          ) : !closingReady && closingQuery.isSuccess ? (
             <p className="text-xs text-muted-foreground">
               Completa lo pendiente para poder cerrar.
+            </p>
+          ) : dictationPending > 0 ? (
+            <p className="text-xs text-muted-foreground">
+              Si quedan sugerencias sin revisar, te lo pregunta antes de firmar.
             </p>
           ) : null}
         </section>
@@ -1788,8 +1950,19 @@ export function EncounterEditor({
 
       {mode === "drawer" ? sectionDetail("drawer") : null}
 
+      {mode === "drawer" && dictation.enabled ? (
+        <DetailDrawer open={transcriptOpen} {...transcriptSurface} />
+      ) : null}
+      <DictationEditDrawer session={dictation} />
+      <DictationMobileBar
+        session={dictation}
+        onShowTranscript={showTranscript}
+        onFinish={finishDictation}
+        onSign={signFromBar}
+      />
+
       <ConfirmDialog
-        open={confirmOpen}
+        open={confirmOpen && !confirmWithDictation}
         title="Finalizar y firmar la atención"
         description={finalizeDescription}
         confirmLabel="Finalizar y firmar"
@@ -1800,28 +1973,23 @@ export function EncounterEditor({
           if (!finalizing) setConfirmOpen(false)
         }}
       >
-        <p className="text-sm">
-          Firmarás como{" "}
-          <strong>
-            {profileQuery.data?.data.signatureName ?? profileQuery.data?.data.accountName ?? "—"}
-          </strong>
-          {profileQuery.data ? ` · ${profileQuery.data.data.professionalTitle}` : ""}
-          {profileQuery.data && registrationLabel(profileQuery.data.data)
-            ? ` · ${registrationLabel(profileQuery.data.data)}`
-            : ""}
-        </p>
-        <Field>
-          <FieldLabel htmlFor={`${uid}-ended`}>Hora de fin</FieldLabel>
-          <Input
-            id={`${uid}-ended`}
-            type="time"
-            className="w-36"
-            value={endTime}
-            onChange={(event) => setEndTime(event.target.value)}
-          />
-          <p className="text-xs text-muted-foreground">Vacía: se registra la hora actual.</p>
-        </Field>
+        {signFields}
       </ConfirmDialog>
+      <DictationSignDialog
+        open={confirmOpen && confirmWithDictation}
+        session={dictation}
+        signing={finalizing}
+        onClose={() => setConfirmOpen(false)}
+        onReview={() => {
+          setConfirmOpen(false)
+          // Lo que no se puede confirmar tal cual se abre para completarlo.
+          const first = dictation.suggestions.find((item) => item.status === "por_revisar")
+          if (first) dictation.openEdit(first)
+        }}
+        onDiscardAndSign={() => void handleConfirmFinalize()}
+      >
+        {signFields}
+      </DictationSignDialog>
 
       {/* Cierre de la atención: qué quedó por cobrar y qué no, con su porqué. */}
       <Dialog

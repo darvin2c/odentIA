@@ -1,5 +1,5 @@
 import { withOrgContext } from "@odentia/db"
-import { createTask, getTask, listTasks, updateTask, type TaskItem } from "@odentia/services"
+import { createTask, getTask, listTasks, operationBodySchema, updateTask, type TaskItem } from "@odentia/services"
 import { Hono } from "hono"
 import { z } from "zod"
 import { canAccess, orgContextOf } from "../lib/context.js"
@@ -16,15 +16,8 @@ const listQuery = z.object({
   overdue: z.enum(["true", "false"]).optional(),
 })
 
-const createInput = z.object({
-  title: z.string().min(1).max(200),
-  contactId: z.string().uuid().optional(),
-  conversationId: z.string().uuid().optional(),
-  opportunityId: z.string().uuid().optional(),
-  patientId: z.string().uuid().optional(),
-  assigneeUserId: z.string().nullable().optional(),
-  dueAt: z.string().optional(),
-})
+// Los campos de crear una tarea se declaran una vez, para la pantalla y para el agente.
+const createInput = operationBodySchema("tarea.crear")
 
 const patchInput = z.object({
   title: z.string().min(1).max(200).optional(),

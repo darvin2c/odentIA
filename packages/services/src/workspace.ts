@@ -359,8 +359,11 @@ export async function getWorkspaceHome(tx: Db, orgId: string, userId: string, ac
   const end = sql`((${day.date}::date + 1)::timestamp at time zone ${timezone})`
   const appointments = access.appointments ? await tx.execute<{
     id: string; patientId: string; patientName: string; startsAt: string; status: string; branchName: string; dentistName: string
+    serviceName: string | null; multiBranch: boolean
   }>(sql`select a.id, a.patient_id as "patientId", p.display_name as "patientName",
-    a.starts_at as "startsAt", a.status, b.name as "branchName", u.name as "dentistName"
+    a.starts_at as "startsAt", a.status, b.name as "branchName", u.name as "dentistName",
+    a.service_name as "serviceName",
+    (select count(*) from branch where organization_id=${orgId} and is_active) > 1 as "multiBranch"
     from appointment a join patient p on p.id=a.patient_id and p.organization_id=${orgId}
     join branch b on b.id=a.branch_id and b.organization_id=${orgId}
     join "user" u on u.id=a.dentist_user_id

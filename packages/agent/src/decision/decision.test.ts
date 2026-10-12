@@ -209,6 +209,33 @@ it("la línea base responde sin probabilidades y descarta valores fuera de las o
   expect(result.answers.find((a) => a.id === "unsubscribe")?.kind).toBe("declined")
 })
 
+it("varios mensajes seguidos del contacto viajan juntos y se leen como uno solo", () => {
+  // Uno solo: el estado de siempre.
+  expect(triageState([], "¿Cuánto cuesta una limpieza?")).toBe("Contact (latest): ¿Cuánto cuesta una limpieza?")
+  // Ráfaga: lo importante puede estar en el primero.
+  const state = triageState(
+    [{ direction: "in", body: "Gracias por la cita de ayer" }],
+    "¿Me pueden ayudar?",
+    ["Tengo la cara hinchada desde anoche", "No puedo abrir la boca", null, "Hola"],
+  )
+  expect(state).toBe(
+    [
+      "Contact: Gracias por la cita de ayer",
+      "Contact (latest, 5 messages sent in a row; read them together as one message):",
+      "1. Tengo la cara hinchada desde anoche",
+      "2. No puedo abrir la boca",
+      "3. [attachment]",
+      "4. Hola",
+      "5. ¿Me pueden ayudar?",
+    ].join("\n"),
+  )
+  // Acotado: como mucho ocho mensajes, contando el último.
+  const long = triageState([], "último", Array.from({ length: 12 }, (_, index) => `m${index + 1}`))
+  expect(long.split("\n")).toHaveLength(9)
+  expect(long).toContain("1. m6")
+  expect(long).not.toContain("m5")
+})
+
 it("el modelo falso es determinista y el estado del triaje no lleva datos del contacto", () => {
   const state = triageState([{ direction: "out", body: "Hola, ¿en qué te ayudo?" }], "Quiero hablar con una persona, me duele mucho")
   expect(state).toBe("Clinic: Hola, ¿en qué te ayudo?\nContact (latest): Quiero hablar con una persona, me duele mucho")

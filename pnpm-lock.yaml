@@ -562,6 +562,9 @@ importers:
       sharp:
         specifier: 0.34.4
         version: 0.34.4
+      zod:
+        specifier: 4.6.2
+        version: 4.6.2
     devDependencies:
       '@testcontainers/postgresql':
         specifier: 12.1.0

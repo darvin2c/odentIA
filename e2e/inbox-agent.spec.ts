@@ -91,7 +91,7 @@ test("bandeja: el estado del agente por conversación, las vistas con su total y
   const waitingRow = page.getByRole("button").filter({ hasText: WAITING_TEXT })
   const derivedRow = page.getByRole("button").filter({ hasText: DERIVED_TEXT })
   await expect(waitingRow).toContainText("Espera tu aprobación")
-  await expect(derivedRow).toContainText("Derivada · prioridad alta")
+  await expect(derivedRow).toContainText("Derivada · ahora")
   expect(await overflow(page)).toBeLessThanOrEqual(0)
   await info.attach("bandeja", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
 
@@ -269,7 +269,7 @@ test("bandeja: quien no decide por el agente ve el estado del hilo, no la propue
   await gotoHydrated(page, tenant(org.slug, "/inbox"))
   const waitingRow = page.getByRole("button").filter({ hasText: WAITING_TEXT })
   await expect(waitingRow).toContainText("Espera aprobación del equipo")
-  await expect(page.getByRole("button").filter({ hasText: DERIVED_TEXT })).toContainText("Derivada · prioridad alta")
+  await expect(page.getByRole("button").filter({ hasText: DERIVED_TEXT })).toContainText("Derivada · ahora")
   await waitingRow.click()
   const band = page.getByRole("status").filter({ hasText: "El agente propuso" })
   await expect(band).toContainText("un cambio")

@@ -8,7 +8,7 @@ export interface WorkspaceHome {
   access: Record<"patients" | "appointments" | "conversations" | "tasks" | "finance" | "clinical" | "crm" | "agent" | "allTasks" | "configure", boolean>
   setup: { availability: boolean; chairs: boolean; patients: boolean } | null
   activity: { recorded: boolean; completedToday: boolean }
-  appointments: Array<{ id: string; patientId: string; patientName: string; startsAt: string; status: string; branchName: string; dentistName: string }>
+  appointments: Array<{ id: string; patientId: string; patientName: string; startsAt: string; status: string; branchName: string; dentistName: string; serviceName: string | null; multiBranch: boolean }>
   appointmentCounts: Array<{ status: string; count: number }>
   tasks: Array<{ id: string; title: string; dueAt: string | null; overdue: boolean; href: string }>
   taskCount: { overdue: number; open: number } | null

@@ -72,6 +72,9 @@ import {
   setPlanItemStatus,
   TIMELINE_TYPES,
   takeOverEncounter,
+  operationBodySchema,
+  operationBodyShape,
+  type UpdateEncounterDraftPatch,
   updateEncounterDraft,
   updatePatient,
   updatePlanItem,
@@ -89,6 +92,8 @@ import { errorBody } from "../lib/error.js"
 import { type CrmDeps, runService, serviceErrorResponse, validationError } from "./helpers.js"
 import { createPatientBudgetsRoute } from "./patient-budgets.js"
 import { createPatientDocumentContextRoute } from "./patient-document-context.js"
+import type { PlatformLlm } from "@odentia/agent"
+import { createEncounterDictationRoute } from "./encounter-dictation.js"
 import { createPatientFollowUpsRoute } from "./patient-follow-ups.js"
 import { createPatientPaymentsRoute } from "./patient-payments.js"
 import { createPatientPrescriptionsRoute } from "./patient-prescriptions.js"
@@ -289,12 +294,11 @@ const encounterCreateInput = z.object({
   teeth: z.array(z.number().int()).max(52).optional(),
   planItemIds: z.array(z.uuid()).max(52).optional(),
 })
+// Los textos de la nota se declaran una vez, para la pantalla y para el dictado
+// del asistente clínico; lo anidado y lo propio de la pantalla sigue aquí.
 const encounterPatchInput = z.object({
+  ...operationBodyShape("atencion.nota"),
   branchId: z.uuid().nullish(),
-  reason: z.string().max(2000).nullish(),
-  evolution: z.string().max(10000).nullish(),
-  indications: z.string().max(4000).nullish(),
-  nextStep: z.string().max(2000).nullish(),
   nextAppointmentAt: z.iso.datetime({ offset: true }).nullish(),
   teeth: z.array(z.number().int()).max(52).optional(),
   examination: z
@@ -305,12 +309,8 @@ const encounterPatchInput = z.object({
     })
     .strict()
     .nullish(),
-  presentIllness: z.string().max(4000).nullish(),
-  illnessDuration: z.string().max(200).nullish(),
   /** Claves y rangos de @odentia/clinical (VITAL_SIGNS); el servicio valida. */
   vitals: z.record(z.string(), z.union([z.number(), z.string().max(10), z.null()])).nullish(),
-  prognosis: z.string().max(2000).nullish(),
-  auxiliaryExams: z.string().max(4000).nullish(),
 })
 const procedureInput = z
   .object({
@@ -404,15 +404,8 @@ const planBatchInput = z
   .strict()
 const reasonInput = z.object({ reason: z.string().trim().min(1).max(2000) }).strict()
 const finalizeInput = z.object({ endedAt: z.iso.datetime({ offset: true }).nullish() }).strict()
-const diagnosisInput = z
-  .object({
-    cie10Code: z.string().trim().min(1).max(10),
-    diagnosisType: z.enum(["presuntivo", "definitivo", "repetido"]),
-    toothNumber: z.number().int().nullish(),
-    surfaces: z.array(z.string().min(1).max(20)).max(5).nullish(),
-    note: z.string().max(2000).nullish(),
-  })
-  .strict()
+// El diagnóstico se declara una vez, para la pantalla y para el dictado.
+const diagnosisInput = operationBodySchema("atencion.diagnostico")
 const diagnosisStatusInput = z.object({ status: z.enum(["activo", "resuelto"]) }).strict()
 const treatmentPlanCreateInput = z
   .object({ title: z.string().trim().min(1).max(200), originEncounterId: z.uuid() })
@@ -526,7 +519,7 @@ const coordinationScheduleInput = z.union([
     .strict(),
 ])
 
-export function createPatientsRoute(deps: CrmDeps) {
+export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
   const app = new Hono()
   app.use("*", async (c, next) => {
     const { memberRole } = orgContextOf(c)
@@ -1215,7 +1208,7 @@ export function createPatientsRoute(deps: CrmDeps) {
           userId,
           c.req.param("id"),
           c.req.param("encounterId"),
-          parsed.data,
+          parsed.data as UpdateEncounterDraftPatch,
         ),
       ),
     )
@@ -1484,6 +1477,8 @@ export function createPatientsRoute(deps: CrmDeps) {
   app.route("/", createPatientDocumentContextRoute(deps))
   app.route("/", createPatientTreatmentsRoute(deps))
   app.route("/", createPatientFollowUpsRoute(deps))
+  // El dictado del asistente clínico necesita el proveedor del modelo; sin él no se monta.
+  if (deps.llm) app.route("/", createEncounterDictationRoute({ ...deps, llm: deps.llm }))
   app.route("/", createPatientPrescriptionsRoute(deps))
   app.route("/", createPatientPaymentsRoute(deps))
   app.route("/", createPatientResponsibilitiesRoute(deps))

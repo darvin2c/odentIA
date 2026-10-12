@@ -264,7 +264,7 @@ function AgentPage() {
         </div>
       </fieldset>
       <Field>
-        <FieldLabel htmlFor="agente-decision">Modelo de decisión (en sombra)</FieldLabel>
+        <FieldLabel htmlFor="agente-decision">Modelo de decisión</FieldLabel>
         <select
           id="agente-decision"
           className="rounded-sm border p-2 text-sm"
@@ -278,11 +278,28 @@ function AgentPage() {
           ))}
         </select>
         <FieldDescription>
-          Opina sobre cada mensaje entrante (¿requiere respuesta?, ¿derivar?, urgencia, intención) y solo se registra
-          en Agente › Actividad: no cambia lo que hace el agente. Los proveedores externos reciben el último mensaje
-          y dos turnos previos, sin datos del contacto.
+          Un modelo pequeño y barato que decide antes de que escriba el otro: elige qué respuestas oficiales aplican y
+          por dónde va el turno. Los proveedores externos reciben el último mensaje y dos anteriores del interlocutor,
+          sin datos de su ficha.
         </FieldDescription>
       </Field>
+      {current.decisionProvider !== "none" ? (
+        <Field>
+          <label htmlFor="agente-camino" className="flex cursor-pointer items-center gap-2 text-sm">
+            <Checkbox
+              id="agente-camino"
+              checked={current.decisionRoutingEnabled}
+              onCheckedChange={(value) => set({ decisionRoutingEnabled: value === true })}
+            />
+            Elegir el camino antes de escribir
+          </label>
+          <FieldDescription>
+            Si está seguro de que hace falta una persona, pasa el caso sin llamar al modelo que escribe; si es una
+            pregunta de información o un saludo, le pide resolverlo en un solo paso. Apagado, solo elige conocimiento y
+            su opinión sobre cada mensaje queda registrada sin efecto.
+          </FieldDescription>
+        </Field>
+      ) : null}
       <Field>
         <FieldLabel htmlFor="agente-tope">Tope diario de corridas con el modelo</FieldLabel>
         <Input
@@ -332,6 +349,20 @@ function AgentPage() {
           value={current.maxTurns}
           onChange={(e) => set({ maxTurns: Number(e.target.value) })}
         />
+      </Field>
+      <Field>
+        <label htmlFor="agente-comprobacion" className="flex cursor-pointer items-center gap-2 text-sm">
+          <Checkbox
+            id="agente-comprobacion"
+            checked={current.replyCheckEnabled}
+            onCheckedChange={(value) => set({ replyCheckEnabled: value === true })}
+          />
+          Comprobar precios, fechas y horas antes de enviar
+        </label>
+        <FieldDescription>
+          Si una respuesta trae un precio, una fecha o una hora que no está en lo que el agente consultó, no sale: el
+          agente lo corrige o pasa el caso a una persona. No revisa el resto del texto.
+        </FieldDescription>
       </Field>
     </div>
   )
@@ -404,9 +435,10 @@ function AgentPage() {
               <dd className="text-sm">{config.dailyRunLimit}</dd>
             </div>
             <div>
-              <dt className="text-xs font-medium text-muted-foreground">Modelo de decisión (en sombra)</dt>
+              <dt className="text-xs font-medium text-muted-foreground">Modelo de decisión</dt>
               <dd className="text-sm">
                 {DECISION_PROVIDER_LABEL.find((item) => item.value === config.decisionProvider)?.label ?? config.decisionProvider}
+                {config.decisionProvider !== "none" ? ` · ${config.decisionRoutingEnabled ? "elige el camino" : "sin elegir el camino"}` : ""}
               </dd>
             </div>
             <div>
@@ -414,6 +446,12 @@ function AgentPage() {
                 Máximo de turnos por conversación
               </dt>
               <dd className="text-sm">{config.maxTurns}</dd>
+            </div>
+            <div>
+              <dt className="text-xs font-medium text-muted-foreground">
+                Comprobación de precios, fechas y horas
+              </dt>
+              <dd className="text-sm">{config.replyCheckEnabled ? "Encendida" : "Apagada"}</dd>
             </div>
             <div>
               <dt className="text-xs font-medium text-muted-foreground">Palabras de derivación</dt>

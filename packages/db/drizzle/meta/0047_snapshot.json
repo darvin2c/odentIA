@@ -1,5 +1,5 @@
 {
-  "id": "9a11df2a-bfb4-42fb-b96d-6c928b5986b4",
+  "id": "1ded703f-1707-447e-8f84-7cd3ca7dc392",
   "prevId": "e618c0c0-9779-43ff-ac38-d8414a26feec",
   "version": "7",
   "dialect": "postgresql",
@@ -499,6 +499,308 @@
             "id"
           ],
           "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.agent_answer_trace": {
+      "name": "agent_answer_trace",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "organization_id": {
+          "name": "organization_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "conversation_id": {
+          "name": "conversation_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "trigger_message_id": {
+          "name": "trigger_message_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "proposal_id": {
+          "name": "proposal_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "message_id": {
+          "name": "message_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "agent": {
+          "name": "agent",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'recepcion'"
+        },
+        "outcome": {
+          "name": "outcome",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "reply_text": {
+          "name": "reply_text",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "basis": {
+          "name": "basis",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'[]'::jsonb"
+        },
+        "checks": {
+          "name": "checks",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'[]'::jsonb"
+        },
+        "model": {
+          "name": "model",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "agent_answer_trace_conversation_idx": {
+          "name": "agent_answer_trace_conversation_idx",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "conversation_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "agent_answer_trace_message_idx": {
+          "name": "agent_answer_trace_message_idx",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "message_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "agent_answer_trace_proposal_idx": {
+          "name": "agent_answer_trace_proposal_idx",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "proposal_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "agent_answer_trace_organization_id_organization_id_fk": {
+          "name": "agent_answer_trace_organization_id_organization_id_fk",
+          "tableFrom": "agent_answer_trace",
+          "tableTo": "organization",
+          "columnsFrom": [
+            "organization_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "agent_answer_trace_conversation_id_conversation_id_fk": {
+          "name": "agent_answer_trace_conversation_id_conversation_id_fk",
+          "tableFrom": "agent_answer_trace",
+          "tableTo": "conversation",
+          "columnsFrom": [
+            "conversation_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "agent_answer_trace_outcome_check": {
+          "name": "agent_answer_trace_outcome_check",
+          "value": "\"agent_answer_trace\".\"outcome\" in ('enviada','pendiente','bloqueada','fallida')"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.agent_case_memory": {
+      "name": "agent_case_memory",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "organization_id": {
+          "name": "organization_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "conversation_id": {
+          "name": "conversation_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "notes": {
+          "name": "notes",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'[]'::jsonb"
+        },
+        "lookups": {
+          "name": "lookups",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::jsonb"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "agent_case_memory_org_conversation_uidx": {
+          "name": "agent_case_memory_org_conversation_uidx",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "conversation_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "agent_case_memory_organization_id_organization_id_fk": {
+          "name": "agent_case_memory_organization_id_organization_id_fk",
+          "tableFrom": "agent_case_memory",
+          "tableTo": "organization",
+          "columnsFrom": [
+            "organization_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "agent_case_memory_conversation_fk": {
+          "name": "agent_case_memory_conversation_fk",
+          "tableFrom": "agent_case_memory",
+          "tableTo": "conversation",
+          "columnsFrom": [
+            "organization_id",
+            "conversation_id"
+          ],
+          "columnsTo": [
+            "organization_id",
+            "id"
+          ],
+          "onDelete": "cascade",
           "onUpdate": "no action"
         }
       },
@@ -3641,6 +3943,299 @@
         "schedule_block_kind_check": {
           "name": "schedule_block_kind_check",
           "value": "\"schedule_block\".\"kind\" in ('bloqueo','ausencia')"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.waitlist_entry": {
+      "name": "waitlist_entry",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "organization_id": {
+          "name": "organization_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "branch_id": {
+          "name": "branch_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "patient_id": {
+          "name": "patient_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "contact_id": {
+          "name": "contact_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "dentist_user_id": {
+          "name": "dentist_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "service_id": {
+          "name": "service_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "service_name": {
+          "name": "service_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "priority": {
+          "name": "priority",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'normal'"
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'en_espera'"
+        },
+        "notes": {
+          "name": "notes",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "offered_starts_at": {
+          "name": "offered_starts_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "offered_ends_at": {
+          "name": "offered_ends_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "offered_chair_id": {
+          "name": "offered_chair_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "confirmed_appointment_id": {
+          "name": "confirmed_appointment_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_by": {
+          "name": "created_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "waitlist_entry_org_id_uidx": {
+          "name": "waitlist_entry_org_id_uidx",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "waitlist_entry_org_branch_status_idx": {
+          "name": "waitlist_entry_org_branch_status_idx",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "branch_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "waitlist_entry_organization_id_organization_id_fk": {
+          "name": "waitlist_entry_organization_id_organization_id_fk",
+          "tableFrom": "waitlist_entry",
+          "tableTo": "organization",
+          "columnsFrom": [
+            "organization_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "waitlist_entry_branch_id_branch_id_fk": {
+          "name": "waitlist_entry_branch_id_branch_id_fk",
+          "tableFrom": "waitlist_entry",
+          "tableTo": "branch",
+          "columnsFrom": [
+            "branch_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "waitlist_entry_patient_id_patient_id_fk": {
+          "name": "waitlist_entry_patient_id_patient_id_fk",
+          "tableFrom": "waitlist_entry",
+          "tableTo": "patient",
+          "columnsFrom": [
+            "patient_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "waitlist_entry_contact_id_contact_id_fk": {
+          "name": "waitlist_entry_contact_id_contact_id_fk",
+          "tableFrom": "waitlist_entry",
+          "tableTo": "contact",
+          "columnsFrom": [
+            "contact_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "waitlist_entry_dentist_user_id_user_id_fk": {
+          "name": "waitlist_entry_dentist_user_id_user_id_fk",
+          "tableFrom": "waitlist_entry",
+          "tableTo": "user",
+          "columnsFrom": [
+            "dentist_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "waitlist_entry_service_id_service_catalog_id_fk": {
+          "name": "waitlist_entry_service_id_service_catalog_id_fk",
+          "tableFrom": "waitlist_entry",
+          "tableTo": "service_catalog",
+          "columnsFrom": [
+            "service_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "waitlist_entry_offered_chair_id_schedule_chair_id_fk": {
+          "name": "waitlist_entry_offered_chair_id_schedule_chair_id_fk",
+          "tableFrom": "waitlist_entry",
+          "tableTo": "schedule_chair",
+          "columnsFrom": [
+            "offered_chair_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "waitlist_entry_created_by_user_id_fk": {
+          "name": "waitlist_entry_created_by_user_id_fk",
+          "tableFrom": "waitlist_entry",
+          "tableTo": "user",
+          "columnsFrom": [
+            "created_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "waitlist_entry_priority_check": {
+          "name": "waitlist_entry_priority_check",
+          "value": "\"waitlist_entry\".\"priority\" in ('alta','normal','baja')"
+        },
+        "waitlist_entry_status_check": {
+          "name": "waitlist_entry_status_check",
+          "value": "\"waitlist_entry\".\"status\" in ('en_espera','ofrecida','confirmada','cancelada')"
+        },
+        "waitlist_entry_subject_check": {
+          "name": "waitlist_entry_subject_check",
+          "value": "\"waitlist_entry\".\"patient_id\" is not null or \"waitlist_entry\".\"contact_id\" is not null"
         }
       },
       "isRLSEnabled": false
@@ -9072,30 +9667,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "branch_id": {
-          "name": "branch_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "promotion_id": {
-          "name": "promotion_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "promotion_name": {
-          "name": "promotion_name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "edit_reason": {
-          "name": "edit_reason",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "description": {
           "name": "description",
           "type": "text",
@@ -9289,19 +9860,6 @@
           "tableTo": "encounter_procedure",
           "columnsFrom": [
             "encounter_procedure_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "patient_charge_branch_id_branch_id_fk": {
-          "name": "patient_charge_branch_id_branch_id_fk",
-          "tableFrom": "patient_charge",
-          "tableTo": "branch",
-          "columnsFrom": [
-            "branch_id"
           ],
           "columnsTo": [
             "id"
@@ -10818,36 +11376,6 @@
           "primaryKey": false,
           "notNull": true
         },
-        "ticket_id": {
-          "name": "ticket_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "branch_id": {
-          "name": "branch_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "payment_method_id": {
-          "name": "payment_method_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "method_name": {
-          "name": "method_name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "method_type_code": {
-          "name": "method_type_code",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "payer_contact_id": {
           "name": "payer_contact_id",
           "type": "uuid",
@@ -10979,32 +11507,6 @@
           "onDelete": "no action",
           "onUpdate": "no action"
         },
-        "patient_payment_ticket_id_payment_ticket_id_fk": {
-          "name": "patient_payment_ticket_id_payment_ticket_id_fk",
-          "tableFrom": "patient_payment",
-          "tableTo": "payment_ticket",
-          "columnsFrom": [
-            "ticket_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "patient_payment_branch_id_branch_id_fk": {
-          "name": "patient_payment_branch_id_branch_id_fk",
-          "tableFrom": "patient_payment",
-          "tableTo": "branch",
-          "columnsFrom": [
-            "branch_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
         "patient_payment_payer_contact_id_contact_id_fk": {
           "name": "patient_payment_payer_contact_id_contact_id_fk",
           "tableFrom": "patient_payment",
@@ -11052,6 +11554,10 @@
         "patient_payment_amount_check": {
           "name": "patient_payment_amount_check",
           "value": "\"patient_payment\".\"amount_cents\" > 0"
+        },
+        "patient_payment_method_check": {
+          "name": "patient_payment_method_check",
+          "value": "\"patient_payment\".\"method\" IN ('efectivo','tarjeta','transferencia','yape','plin','otro')"
         }
       },
       "isRLSEnabled": false
@@ -11090,12 +11596,6 @@
           "type": "uuid",
           "primaryKey": false,
           "notNull": true
-        },
-        "ticket_id": {
-          "name": "ticket_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
         },
         "amount_cents": {
           "name": "amount_cents",
@@ -11246,19 +11746,6 @@
           "tableTo": "patient_charge",
           "columnsFrom": [
             "charge_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "patient_payment_application_ticket_id_payment_ticket_id_fk": {
-          "name": "patient_payment_application_ticket_id_payment_ticket_id_fk",
-          "tableFrom": "patient_payment_application",
-          "tableTo": "payment_ticket",
-          "columnsFrom": [
-            "ticket_id"
           ],
           "columnsTo": [
             "id"
@@ -12142,300 +12629,6 @@
       },
       "isRLSEnabled": false
     },
-    "public.payment_ticket": {
-      "name": "payment_ticket",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "organization_id": {
-          "name": "organization_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "patient_id": {
-          "name": "patient_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "branch_id": {
-          "name": "branch_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "ticket_number": {
-          "name": "ticket_number",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "currency": {
-          "name": "currency",
-          "type": "char(3)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "total_cents": {
-          "name": "total_cents",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "credit_applied_cents": {
-          "name": "credit_applied_cents",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "cash_received_cents": {
-          "name": "cash_received_cents",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "change_cents": {
-          "name": "change_cents",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "payer_contact_id": {
-          "name": "payer_contact_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "request_id": {
-          "name": "request_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "snapshot": {
-          "name": "snapshot",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_by": {
-          "name": "created_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "voided_at": {
-          "name": "voided_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "voided_by": {
-          "name": "voided_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "void_reason": {
-          "name": "void_reason",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        }
-      },
-      "indexes": {
-        "payment_ticket_org_patient_idx": {
-          "name": "payment_ticket_org_patient_idx",
-          "columns": [
-            {
-              "expression": "organization_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "patient_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "payment_ticket_org_branch_idx": {
-          "name": "payment_ticket_org_branch_idx",
-          "columns": [
-            {
-              "expression": "organization_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "branch_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "payment_ticket_org_number_uidx": {
-          "name": "payment_ticket_org_number_uidx",
-          "columns": [
-            {
-              "expression": "organization_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "ticket_number",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "payment_ticket_org_request_uidx": {
-          "name": "payment_ticket_org_request_uidx",
-          "columns": [
-            {
-              "expression": "organization_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "request_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "where": "\"payment_ticket\".\"request_id\" IS NOT NULL",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "payment_ticket_organization_id_organization_id_fk": {
-          "name": "payment_ticket_organization_id_organization_id_fk",
-          "tableFrom": "payment_ticket",
-          "tableTo": "organization",
-          "columnsFrom": [
-            "organization_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "payment_ticket_patient_id_patient_id_fk": {
-          "name": "payment_ticket_patient_id_patient_id_fk",
-          "tableFrom": "payment_ticket",
-          "tableTo": "patient",
-          "columnsFrom": [
-            "patient_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "payment_ticket_branch_id_branch_id_fk": {
-          "name": "payment_ticket_branch_id_branch_id_fk",
-          "tableFrom": "payment_ticket",
-          "tableTo": "branch",
-          "columnsFrom": [
-            "branch_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "payment_ticket_payer_contact_id_contact_id_fk": {
-          "name": "payment_ticket_payer_contact_id_contact_id_fk",
-          "tableFrom": "payment_ticket",
-          "tableTo": "contact",
-          "columnsFrom": [
-            "payer_contact_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "payment_ticket_created_by_user_id_fk": {
-          "name": "payment_ticket_created_by_user_id_fk",
-          "tableFrom": "payment_ticket",
-          "tableTo": "user",
-          "columnsFrom": [
-            "created_by"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "payment_ticket_voided_by_user_id_fk": {
-          "name": "payment_ticket_voided_by_user_id_fk",
-          "tableFrom": "payment_ticket",
-          "tableTo": "user",
-          "columnsFrom": [
-            "voided_by"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "payment_ticket_total_check": {
-          "name": "payment_ticket_total_check",
-          "value": "\"payment_ticket\".\"total_cents\" >= 0"
-        }
-      },
-      "isRLSEnabled": false
-    },
     "public.prescription": {
       "name": "prescription",
       "schema": "",
@@ -13267,13 +13460,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "billing_mode": {
-          "name": "billing_mode",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'treatment'"
-        },
         "is_active": {
           "name": "is_active",
           "type": "boolean",
@@ -13412,52 +13598,8 @@
         "service_catalog_price_check": {
           "name": "service_catalog_price_check",
           "value": "\"service_catalog\".\"price_cents\" >= 0"
-        },
-        "service_catalog_billing_mode_check": {
-          "name": "service_catalog_billing_mode_check",
-          "value": "\"service_catalog\".\"billing_mode\" IN ('treatment','session')"
         }
       },
-      "isRLSEnabled": false
-    },
-    "public.ticket_counter": {
-      "name": "ticket_counter",
-      "schema": "",
-      "columns": {
-        "organization_id": {
-          "name": "organization_id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "next_number": {
-          "name": "next_number",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 1
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "ticket_counter_organization_id_organization_id_fk": {
-          "name": "ticket_counter_organization_id_organization_id_fk",
-          "tableFrom": "ticket_counter",
-          "tableTo": "organization",
-          "columnsFrom": [
-            "organization_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
       "isRLSEnabled": false
     },
     "public.treatment_budget": {
@@ -13867,49 +14009,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "tariff_price_cents": {
-          "name": "tariff_price_cents",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "price_reason": {
-          "name": "price_reason",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "promotion_id": {
-          "name": "promotion_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "promotion_name": {
-          "name": "promotion_name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "promotion_mode": {
-          "name": "promotion_mode",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "billing_mode": {
-          "name": "billing_mode",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'treatment'"
-        },
-        "sessions_planned": {
-          "name": "sessions_planned",
-          "type": "smallint",
-          "primaryKey": false,
-          "notNull": false
-        },
         "currency": {
           "name": "currency",
           "type": "char(3)",
@@ -14029,27 +14128,6 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
-        },
-        "treatment_budget_item_org_promotion_idx": {
-          "name": "treatment_budget_item_org_promotion_idx",
-          "columns": [
-            {
-              "expression": "organization_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "promotion_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
         }
       },
       "foreignKeys": {
@@ -14148,20 +14226,7 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
-      "checkConstraints": {
-        "treatment_budget_item_billing_mode_check": {
-          "name": "treatment_budget_item_billing_mode_check",
-          "value": "\"treatment_budget_item\".\"billing_mode\" IN ('treatment','session')"
-        },
-        "treatment_budget_item_promotion_mode_check": {
-          "name": "treatment_budget_item_promotion_mode_check",
-          "value": "\"treatment_budget_item\".\"promotion_mode\" IS NULL OR \"treatment_budget_item\".\"promotion_mode\" IN ('fixed','from')"
-        },
-        "treatment_budget_item_promotion_check": {
-          "name": "treatment_budget_item_promotion_check",
-          "value": "(\"treatment_budget_item\".\"promotion_id\" IS NULL) = (\"treatment_budget_item\".\"promotion_name\" IS NULL)"
-        }
-      },
+      "checkConstraints": {},
       "isRLSEnabled": false
     },
     "public.treatment_option_group": {
@@ -15565,6 +15630,13 @@
           "notNull": true,
           "default": 10
         },
+        "reply_check_enabled": {
+          "name": "reply_check_enabled",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -15800,12 +15872,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "preferred_channel": {
-          "name": "preferred_channel",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "doc_type": {
           "name": "doc_type",
           "type": "text",
@@ -15967,10 +16033,6 @@
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {
-        "contact_preferred_channel_check": {
-          "name": "contact_preferred_channel_check",
-          "value": "\"contact\".\"preferred_channel\" IS NULL OR \"contact\".\"preferred_channel\" IN ('email','whatsapp','telegram','messenger','instagram')"
-        },
         "contact_doc_type_check": {
           "name": "contact_doc_type_check",
           "value": "\"contact\".\"doc_type\" IS NULL OR \"contact\".\"doc_type\" IN ('DNI','CE','PASAPORTE','CNV','DIE','OTRO')"
@@ -17237,240 +17299,6 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.cash_closure": {
-      "name": "cash_closure",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "organization_id": {
-          "name": "organization_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "branch_id": {
-          "name": "branch_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "currency": {
-          "name": "currency",
-          "type": "char(3)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "shift_id": {
-          "name": "shift_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "window_from": {
-          "name": "window_from",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "window_to": {
-          "name": "window_to",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "opening_retained_cents": {
-          "name": "opening_retained_cents",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "cash_collected_cents": {
-          "name": "cash_collected_cents",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "expense_cash_cents": {
-          "name": "expense_cash_cents",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "expected_cents": {
-          "name": "expected_cents",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "counted_cents": {
-          "name": "counted_cents",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "difference_cents": {
-          "name": "difference_cents",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "retained_cents": {
-          "name": "retained_cents",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "delivered_cents": {
-          "name": "delivered_cents",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "totals_by_method": {
-          "name": "totals_by_method",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "notes": {
-          "name": "notes",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "closed_by": {
-          "name": "closed_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "closed_at": {
-          "name": "closed_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "cash_closure_org_branch_idx": {
-          "name": "cash_closure_org_branch_idx",
-          "columns": [
-            {
-              "expression": "organization_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "branch_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "closed_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "cash_closure_shift_uidx": {
-          "name": "cash_closure_shift_uidx",
-          "columns": [
-            {
-              "expression": "organization_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "shift_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "cash_closure_organization_id_organization_id_fk": {
-          "name": "cash_closure_organization_id_organization_id_fk",
-          "tableFrom": "cash_closure",
-          "tableTo": "organization",
-          "columnsFrom": [
-            "organization_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "cash_closure_branch_id_branch_id_fk": {
-          "name": "cash_closure_branch_id_branch_id_fk",
-          "tableFrom": "cash_closure",
-          "tableTo": "branch",
-          "columnsFrom": [
-            "branch_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "cash_closure_shift_id_cash_shift_id_fk": {
-          "name": "cash_closure_shift_id_cash_shift_id_fk",
-          "tableFrom": "cash_closure",
-          "tableTo": "cash_shift",
-          "columnsFrom": [
-            "shift_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "cash_closure_closed_by_user_id_fk": {
-          "name": "cash_closure_closed_by_user_id_fk",
-          "tableFrom": "cash_closure",
-          "tableTo": "user",
-          "columnsFrom": [
-            "closed_by"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
     "public.cash_movement": {
       "name": "cash_movement",
       "schema": "",
@@ -17520,12 +17348,6 @@
         },
         "method": {
           "name": "method",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "method_type_code": {
-          "name": "method_type_code",
           "type": "text",
           "primaryKey": false,
           "notNull": false
@@ -17809,18 +17631,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "retained_cents": {
-          "name": "retained_cents",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "delivered_cents": {
-          "name": "delivered_cents",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
         "close_notes": {
           "name": "close_notes",
           "type": "text",
@@ -17977,11 +17787,48 @@
           "primaryKey": false,
           "notNull": true
         },
+        "base": {
+          "name": "base",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
         "rate_bps": {
           "name": "rate_bps",
           "type": "integer",
           "primaryKey": false,
           "notNull": true
+        },
+        "service_id": {
+          "name": "service_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "branch_id": {
+          "name": "branch_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "is_active": {
+          "name": "is_active",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
+        "valid_from": {
+          "name": "valid_from",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "valid_to": {
+          "name": "valid_to",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
         },
         "created_by": {
           "name": "created_by",
@@ -18005,8 +17852,8 @@
         }
       },
       "indexes": {
-        "commission_rule_org_prof_uidx": {
-          "name": "commission_rule_org_prof_uidx",
+        "commission_rule_org_prof_idx": {
+          "name": "commission_rule_org_prof_idx",
           "columns": [
             {
               "expression": "organization_id",
@@ -18021,7 +17868,7 @@
               "nulls": "last"
             }
           ],
-          "isUnique": true,
+          "isUnique": false,
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -18054,6 +17901,19 @@
           "onDelete": "no action",
           "onUpdate": "no action"
         },
+        "commission_rule_branch_id_branch_id_fk": {
+          "name": "commission_rule_branch_id_branch_id_fk",
+          "tableFrom": "commission_rule",
+          "tableTo": "branch",
+          "columnsFrom": [
+            "branch_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
         "commission_rule_created_by_user_id_fk": {
           "name": "commission_rule_created_by_user_id_fk",
           "tableFrom": "commission_rule",
@@ -18075,6 +17935,10 @@
         "commission_rule_rate_check": {
           "name": "commission_rule_rate_check",
           "value": "\"commission_rule\".\"rate_bps\" BETWEEN 0 AND 10000"
+        },
+        "commission_rule_base_check": {
+          "name": "commission_rule_base_check",
+          "value": "\"commission_rule\".\"base\" IN ('cobrado','produccion')"
         }
       },
       "isRLSEnabled": false
@@ -18106,44 +17970,25 @@
           "name": "period_from",
           "type": "date",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true
         },
         "period_to": {
           "name": "period_to",
           "type": "date",
           "primaryKey": false,
-          "notNull": false
-        },
-        "period_year": {
-          "name": "period_year",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "period_month": {
-          "name": "period_month",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
+          "notNull": true
         },
         "base": {
           "name": "base",
           "type": "text",
           "primaryKey": false,
-          "notNull": true,
-          "default": "'cobrado'"
+          "notNull": true
         },
         "currency": {
           "name": "currency",
           "type": "char(3)",
           "primaryKey": false,
           "notNull": true
-        },
-        "rate_bps": {
-          "name": "rate_bps",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
         },
         "base_cents": {
           "name": "base_cents",
@@ -18159,18 +18004,12 @@
           "notNull": true,
           "default": 0
         },
-        "expense_id": {
-          "name": "expense_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
         "status": {
           "name": "status",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
-          "default": "'liquidada'"
+          "default": "'borrador'"
         },
         "notes": {
           "name": "notes",
@@ -18224,8 +18063,8 @@
         }
       },
       "indexes": {
-        "commission_settlement_month_uidx": {
-          "name": "commission_settlement_month_uidx",
+        "commission_settlement_org_prof_idx": {
+          "name": "commission_settlement_org_prof_idx",
           "columns": [
             {
               "expression": "organization_id",
@@ -18240,26 +18079,13 @@
               "nulls": "last"
             },
             {
-              "expression": "period_year",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "period_month",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "currency",
+              "expression": "period_from",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
             }
           ],
-          "isUnique": true,
-          "where": "\"commission_settlement\".\"voided_at\" IS NULL AND \"commission_settlement\".\"period_year\" IS NOT NULL AND \"commission_settlement\".\"period_month\" IS NOT NULL",
+          "isUnique": false,
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -18285,19 +18111,6 @@
           "tableTo": "user",
           "columnsFrom": [
             "professional_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "commission_settlement_expense_id_expense_id_fk": {
-          "name": "commission_settlement_expense_id_expense_id_fk",
-          "tableFrom": "commission_settlement",
-          "tableTo": "expense",
-          "columnsFrom": [
-            "expense_id"
           ],
           "columnsTo": [
             "id"
@@ -18344,13 +18157,9 @@
           "name": "commission_settlement_status_check",
           "value": "\"commission_settlement\".\"status\" IN ('borrador','liquidada','anulada')"
         },
-        "commission_settlement_month_check": {
-          "name": "commission_settlement_month_check",
-          "value": "\"commission_settlement\".\"period_month\" IS NULL OR (\"commission_settlement\".\"period_month\" BETWEEN 1 AND 12)"
-        },
-        "commission_settlement_rate_check": {
-          "name": "commission_settlement_rate_check",
-          "value": "\"commission_settlement\".\"rate_bps\" IS NULL OR (\"commission_settlement\".\"rate_bps\" BETWEEN 0 AND 10000)"
+        "commission_settlement_period_check": {
+          "name": "commission_settlement_period_check",
+          "value": "\"commission_settlement\".\"period_to\" >= \"commission_settlement\".\"period_from\""
         }
       },
       "isRLSEnabled": false
@@ -18383,12 +18192,6 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true
-        },
-        "application_id": {
-          "name": "application_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
         },
         "charge_id": {
           "name": "charge_id",
@@ -18425,12 +18228,6 @@
           "type": "integer",
           "primaryKey": false,
           "notNull": true
-        },
-        "rate_bps": {
-          "name": "rate_bps",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
         },
         "occurred_at": {
           "name": "occurred_at",
@@ -18527,19 +18324,6 @@
             "id"
           ],
           "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "commission_settlement_line_application_id_patient_payment_application_id_fk": {
-          "name": "commission_settlement_line_application_id_patient_payment_application_id_fk",
-          "tableFrom": "commission_settlement_line",
-          "tableTo": "patient_payment_application",
-          "columnsFrom": [
-            "application_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
           "onUpdate": "no action"
         },
         "commission_settlement_line_charge_id_patient_charge_id_fk": {
@@ -18650,13 +18434,6 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true
-        },
-        "category": {
-          "name": "category",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'Otros'"
         },
         "amount_cents": {
           "name": "amount_cents",
@@ -18872,6 +18649,411 @@
         "expense_amount_check": {
           "name": "expense_amount_check",
           "value": "\"expense\".\"amount_cents\" > 0"
+        },
+        "expense_receipt_check": {
+          "name": "expense_receipt_check",
+          "value": "\"expense\".\"receipt_kind\" IN ('boleta','factura','recibo','nota','ninguno')"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.installment_plan": {
+      "name": "installment_plan",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "organization_id": {
+          "name": "organization_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "patient_id": {
+          "name": "patient_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "charge_id": {
+          "name": "charge_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "currency": {
+          "name": "currency",
+          "type": "char(3)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "total_cents": {
+          "name": "total_cents",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "installments": {
+          "name": "installments",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'vigente'"
+        },
+        "notes": {
+          "name": "notes",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_by": {
+          "name": "created_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "voided_at": {
+          "name": "voided_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "voided_by": {
+          "name": "voided_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "void_reason": {
+          "name": "void_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "installment_plan_org_patient_idx": {
+          "name": "installment_plan_org_patient_idx",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "patient_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "installment_plan_charge_uidx": {
+          "name": "installment_plan_charge_uidx",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "charge_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"installment_plan\".\"voided_at\" IS NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "installment_plan_organization_id_organization_id_fk": {
+          "name": "installment_plan_organization_id_organization_id_fk",
+          "tableFrom": "installment_plan",
+          "tableTo": "organization",
+          "columnsFrom": [
+            "organization_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "installment_plan_patient_id_patient_id_fk": {
+          "name": "installment_plan_patient_id_patient_id_fk",
+          "tableFrom": "installment_plan",
+          "tableTo": "patient",
+          "columnsFrom": [
+            "patient_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "installment_plan_charge_id_patient_charge_id_fk": {
+          "name": "installment_plan_charge_id_patient_charge_id_fk",
+          "tableFrom": "installment_plan",
+          "tableTo": "patient_charge",
+          "columnsFrom": [
+            "charge_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "installment_plan_created_by_user_id_fk": {
+          "name": "installment_plan_created_by_user_id_fk",
+          "tableFrom": "installment_plan",
+          "tableTo": "user",
+          "columnsFrom": [
+            "created_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "installment_plan_voided_by_user_id_fk": {
+          "name": "installment_plan_voided_by_user_id_fk",
+          "tableFrom": "installment_plan",
+          "tableTo": "user",
+          "columnsFrom": [
+            "voided_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "installment_plan_total_check": {
+          "name": "installment_plan_total_check",
+          "value": "\"installment_plan\".\"total_cents\" > 0"
+        },
+        "installment_plan_count_check": {
+          "name": "installment_plan_count_check",
+          "value": "\"installment_plan\".\"installments\" BETWEEN 1 AND 60"
+        },
+        "installment_plan_status_check": {
+          "name": "installment_plan_status_check",
+          "value": "\"installment_plan\".\"status\" IN ('vigente','saldada','anulada')"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.installment_quota": {
+      "name": "installment_quota",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "organization_id": {
+          "name": "organization_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "plan_id": {
+          "name": "plan_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "nro": {
+          "name": "nro",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "due_at": {
+          "name": "due_at",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "amount_cents": {
+          "name": "amount_cents",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'pendiente'"
+        },
+        "paid_cents": {
+          "name": "paid_cents",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "paid_at": {
+          "name": "paid_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "installment_quota_org_plan_idx": {
+          "name": "installment_quota_org_plan_idx",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "plan_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "installment_quota_plan_nro_uidx": {
+          "name": "installment_quota_plan_nro_uidx",
+          "columns": [
+            {
+              "expression": "plan_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "nro",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "installment_quota_organization_id_organization_id_fk": {
+          "name": "installment_quota_organization_id_organization_id_fk",
+          "tableFrom": "installment_quota",
+          "tableTo": "organization",
+          "columnsFrom": [
+            "organization_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "installment_quota_plan_id_installment_plan_id_fk": {
+          "name": "installment_quota_plan_id_installment_plan_id_fk",
+          "tableFrom": "installment_quota",
+          "tableTo": "installment_plan",
+          "columnsFrom": [
+            "plan_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "installment_quota_nro_check": {
+          "name": "installment_quota_nro_check",
+          "value": "\"installment_quota\".\"nro\" > 0"
+        },
+        "installment_quota_amount_check": {
+          "name": "installment_quota_amount_check",
+          "value": "\"installment_quota\".\"amount_cents\" > 0"
+        },
+        "installment_quota_paid_check": {
+          "name": "installment_quota_paid_check",
+          "value": "\"installment_quota\".\"paid_cents\" >= 0"
+        },
+        "installment_quota_status_check": {
+          "name": "installment_quota_status_check",
+          "value": "\"installment_quota\".\"status\" IN ('pendiente','parcial','pagada','vencida')"
         }
       },
       "isRLSEnabled": false
@@ -19044,13 +19226,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "appointment_default_minutes": {
-          "name": "appointment_default_minutes",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 60
-        },
         "is_active": {
           "name": "is_active",
           "type": "boolean",
@@ -19170,27 +19345,6 @@
           "notNull": true,
           "default": "'es-PE'"
         },
-        "receipt_width": {
-          "name": "receipt_width",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'80'"
-        },
-        "sheet_size": {
-          "name": "sheet_size",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'A4'"
-        },
-        "ticket_footer": {
-          "name": "ticket_footer",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'Recibo interno. No es un documento fiscal.'"
-        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -19225,20 +19379,7 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
-      "checkConstraints": {
-        "org_profile_receipt_width_check": {
-          "name": "org_profile_receipt_width_check",
-          "value": "\"org_profile\".\"receipt_width\" IN ('58','80')"
-        },
-        "org_profile_sheet_size_check": {
-          "name": "org_profile_sheet_size_check",
-          "value": "\"org_profile\".\"sheet_size\" IN ('A4','Letter')"
-        },
-        "org_profile_ticket_footer_check": {
-          "name": "org_profile_ticket_footer_check",
-          "value": "length(trim(\"org_profile\".\"ticket_footer\")) BETWEEN 1 AND 280"
-        }
-      },
+      "checkConstraints": {},
       "isRLSEnabled": false
     },
     "public.patient_registration_config": {
@@ -23648,531 +23789,6 @@
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.organization_payment_method": {
-      "name": "organization_payment_method",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "organization_id": {
-          "name": "organization_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "name": {
-          "name": "name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "type_code": {
-          "name": "type_code",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'1'"
-        },
-        "is_active": {
-          "name": "is_active",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": true
-        },
-        "sort_order": {
-          "name": "sort_order",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "organization_payment_method_org_id_uidx": {
-          "name": "organization_payment_method_org_id_uidx",
-          "columns": [
-            {
-              "expression": "organization_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "organization_payment_method_org_active_idx": {
-          "name": "organization_payment_method_org_active_idx",
-          "columns": [
-            {
-              "expression": "organization_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "is_active",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "organization_payment_method_org_sort_idx": {
-          "name": "organization_payment_method_org_sort_idx",
-          "columns": [
-            {
-              "expression": "organization_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "sort_order",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "organization_payment_method_organization_id_organization_id_fk": {
-          "name": "organization_payment_method_organization_id_organization_id_fk",
-          "tableFrom": "organization_payment_method",
-          "tableTo": "organization",
-          "columnsFrom": [
-            "organization_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "organization_payment_method_type_check": {
-          "name": "organization_payment_method_type_check",
-          "value": "\"organization_payment_method\".\"type_code\" IN ('10','48','30','68','20','1')"
-        },
-        "organization_payment_method_sort_check": {
-          "name": "organization_payment_method_sort_check",
-          "value": "\"organization_payment_method\".\"sort_order\" >= 0"
-        },
-        "organization_payment_method_name_check": {
-          "name": "organization_payment_method_name_check",
-          "value": "length(trim(\"organization_payment_method\".\"name\")) BETWEEN 1 AND 120"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.promotion": {
-      "name": "promotion",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "organization_id": {
-          "name": "organization_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "name": {
-          "name": "name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "starts_at": {
-          "name": "starts_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "ends_at": {
-          "name": "ends_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "conditions": {
-          "name": "conditions",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "is_active": {
-          "name": "is_active",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": true
-        },
-        "created_by": {
-          "name": "created_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "promotion_org_active_idx": {
-          "name": "promotion_org_active_idx",
-          "columns": [
-            {
-              "expression": "organization_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "is_active",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "starts_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "promotion_org_ends_idx": {
-          "name": "promotion_org_ends_idx",
-          "columns": [
-            {
-              "expression": "organization_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "ends_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "promotion_organization_id_organization_id_fk": {
-          "name": "promotion_organization_id_organization_id_fk",
-          "tableFrom": "promotion",
-          "tableTo": "organization",
-          "columnsFrom": [
-            "organization_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "promotion_created_by_user_id_fk": {
-          "name": "promotion_created_by_user_id_fk",
-          "tableFrom": "promotion",
-          "tableTo": "user",
-          "columnsFrom": [
-            "created_by"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "promotion_dates_check": {
-          "name": "promotion_dates_check",
-          "value": "\"promotion\".\"ends_at\" IS NULL OR \"promotion\".\"ends_at\" >= \"promotion\".\"starts_at\""
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.promotion_service_price": {
-      "name": "promotion_service_price",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "organization_id": {
-          "name": "organization_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "promotion_id": {
-          "name": "promotion_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "service_id": {
-          "name": "service_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "mode": {
-          "name": "mode",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'fixed'"
-        },
-        "price_cents": {
-          "name": "price_cents",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "currency": {
-          "name": "currency",
-          "type": "char(3)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_by": {
-          "name": "created_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "promotion_service_price_promo_service_uidx": {
-          "name": "promotion_service_price_promo_service_uidx",
-          "columns": [
-            {
-              "expression": "promotion_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "service_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "promotion_service_price_org_service_idx": {
-          "name": "promotion_service_price_org_service_idx",
-          "columns": [
-            {
-              "expression": "organization_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "service_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "promotion_service_price_org_promo_idx": {
-          "name": "promotion_service_price_org_promo_idx",
-          "columns": [
-            {
-              "expression": "organization_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "promotion_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "promotion_service_price_organization_id_organization_id_fk": {
-          "name": "promotion_service_price_organization_id_organization_id_fk",
-          "tableFrom": "promotion_service_price",
-          "tableTo": "organization",
-          "columnsFrom": [
-            "organization_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "promotion_service_price_promotion_id_promotion_id_fk": {
-          "name": "promotion_service_price_promotion_id_promotion_id_fk",
-          "tableFrom": "promotion_service_price",
-          "tableTo": "promotion",
-          "columnsFrom": [
-            "promotion_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "promotion_service_price_service_id_service_catalog_id_fk": {
-          "name": "promotion_service_price_service_id_service_catalog_id_fk",
-          "tableFrom": "promotion_service_price",
-          "tableTo": "service_catalog",
-          "columnsFrom": [
-            "service_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "promotion_service_price_created_by_user_id_fk": {
-          "name": "promotion_service_price_created_by_user_id_fk",
-          "tableFrom": "promotion_service_price",
-          "tableTo": "user",
-          "columnsFrom": [
-            "created_by"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "promotion_service_price_mode_check": {
-          "name": "promotion_service_price_mode_check",
-          "value": "\"promotion_service_price\".\"mode\" IN ('fixed','from')"
-        },
-        "promotion_service_price_amount_check": {
-          "name": "promotion_service_price_amount_check",
-          "value": "\"promotion_service_price\".\"price_cents\" >= 0"
-        }
-      },
       "isRLSEnabled": false
     }
   },

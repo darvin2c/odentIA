@@ -1050,6 +1050,12 @@ await upsertAgentConfig(db, ORG_A, {
   systemPrompt: "Eres el asistente de Dental Smile. Responde en español, tono amable.",
   handoffKeywords: ["humano", "asesor", "recepcion"],
   maxTurns: 10,
+  // La voz de la clínica y una indicación por función: lo que se ve en Agente › Recepción.
+  personaName: "Sofi",
+  treatment: "tu",
+  tone: "cercano",
+  about: "Clínica dental familiar con dos sedes. Atendemos sin apuro y explicamos cada tratamiento antes de empezar.",
+  functionNotes: { agendar: "Ofrece primero los horarios de la mañana; las tardes se llenan rápido." },
 })
 
 // --- Derivaciones del agente: cola con plazo visible y caso ya tomado ---

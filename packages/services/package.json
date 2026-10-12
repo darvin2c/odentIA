@@ -23,7 +23,8 @@
     "drizzle-orm": "0.45.2",
     "pdf-lib": "1.17.1",
     "postgres": "3.4.9",
-    "sharp": "0.34.4"
+    "sharp": "0.34.4",
+    "zod": "4.6.2"
   },
   "devDependencies": {
     "@testcontainers/postgresql": "12.1.0",

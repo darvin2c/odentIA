@@ -22,5 +22,19 @@
   { "previous": [{ "direction": "out", "body": "Tengo disponible el martes a las 10 o el miércoles a las 16." }], "latest": "El martes a las 10 está bien", "expected": { "requires_reply": true, "handoff": false, "urgency": 1, "intent": "appointment_request", "unsubscribe": false } },
   { "latest": "Me equivoqué de número, disculpen", "expected": { "requires_reply": false, "handoff": false, "urgency": 0, "intent": "other", "unsubscribe": false } },
   { "latest": "¿Me pueden enviar la factura de la última consulta?", "expected": { "requires_reply": true, "handoff": false, "urgency": 0, "intent": "other", "unsubscribe": false } },
-  { "latest": "Tomé el antibiótico y me dio alergia, tengo ronchas por todo el cuerpo", "expected": { "requires_reply": true, "handoff": true, "urgency": 2, "intent": "clinical_question", "unsubscribe": false } }
+  { "latest": "Tomé el antibiótico y me dio alergia, tengo ronchas por todo el cuerpo", "expected": { "requires_reply": true, "handoff": true, "urgency": 2, "intent": "clinical_question", "unsubscribe": false } },
+  { "latest": "¿Puedo pagar con Yape?", "expected": { "requires_reply": true, "handoff": false, "urgency": 0, "intent": "price_or_service_info", "unsubscribe": false } },
+  { "latest": "¿Trabajan con algún seguro?", "expected": { "requires_reply": true, "handoff": false, "urgency": 0, "intent": "price_or_service_info", "unsubscribe": false } },
+  { "latest": "¿Tienen estacionamiento?", "expected": { "requires_reply": true, "handoff": false, "urgency": 0, "intent": "price_or_service_info", "unsubscribe": false } },
+  { "latest": "¿Dan factura?", "expected": { "requires_reply": true, "handoff": false, "urgency": 0, "intent": "price_or_service_info", "unsubscribe": false } },
+  { "latest": "¿Se puede pagar en cuotas?", "expected": { "requires_reply": true, "handoff": false, "urgency": 0, "intent": "price_or_service_info", "unsubscribe": false } },
+  { "latest": "¿Atienden sin cita?", "expected": { "requires_reply": true, "handoff": false, "urgency": 0, "intent": "price_or_service_info", "unsubscribe": false } },
+  { "latest": "¿Qué tengo que llevar a mi primera cita?", "expected": { "requires_reply": true, "handoff": false, "urgency": 0, "intent": "price_or_service_info", "unsubscribe": false } },
+  { "latest": "¿Hacen ortodoncia?", "expected": { "requires_reply": true, "handoff": false, "urgency": 0, "intent": "price_or_service_info", "unsubscribe": false } },
+  { "latest": "¿Dónde quedan exactamente?", "expected": { "requires_reply": true, "handoff": false, "urgency": 0, "intent": "price_or_service_info", "unsubscribe": false } },
+  { "burst": ["Me cobraron dos veces la consulta", "Ya escribí ayer y nadie responde"], "latest": "¿Hay alguien ahí?", "expected": { "requires_reply": true, "handoff": true, "urgency": 1, "intent": "complaint", "unsubscribe": false } },
+  { "burst": ["Hola buenas", "Quería saber cuánto cuesta una limpieza"], "latest": "Y si aceptan tarjeta", "expected": { "requires_reply": true, "handoff": false, "urgency": 0, "intent": "price_or_service_info", "unsubscribe": false } },
+  { "burst": ["Se me cayó una corona y me está sangrando la encía", "Me duele bastante", "Estoy en el trabajo"], "latest": "Hola??", "expected": { "requires_reply": true, "handoff": true, "urgency": 2, "intent": "clinical_question", "unsubscribe": false } },
+  { "burst": ["Quiero cancelar mi cita del viernes", "Es que me salió un viaje", "Disculpen la molestia"], "latest": "Gracias", "expected": { "requires_reply": true, "handoff": false, "urgency": 1, "intent": "reschedule_or_cancel", "unsubscribe": false } },
+  { "burst": ["Tengo la cara hinchada desde anoche", "No puedo abrir bien la boca", "Hola", "Buenos días"], "latest": "¿Me pueden ayudar?", "expected": { "requires_reply": true, "handoff": true, "urgency": 2, "intent": "clinical_question", "unsubscribe": false } }
 ]

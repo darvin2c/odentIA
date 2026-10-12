@@ -17,6 +17,7 @@ import { Hono, type Next } from "hono"
 import { GenericContainer, type StartedTestContainer, Wait } from "testcontainers"
 import { afterAll, beforeAll, expect, it } from "vitest"
 import { createAgentRoute } from "./agent.js"
+import { createAgentLearningRoute } from "./agent-learning.js"
 import { createAgentOpsRoute } from "./agent-ops.js"
 import { createConnectionsRoute } from "./connections.js"
 import { createContactsRoute } from "./contacts.js"
@@ -78,6 +79,7 @@ function buildApp(role: string): Hono {
   app.route("/pipelines", createPipelinesRoute(deps))
   app.route("/channels/connections", createConnectionsRoute(deps))
   const llm = { modelName: "fake", allowInsecureBaseUrl: true }
+  app.route("/agent/learning", createAgentLearningRoute({ ...deps, llm }))
   app.route("/agent", createAgentRoute({ ...deps, llm }))
   app.route("/agent", createAgentOpsRoute({ ...deps, llm }))
   app.route("/tasks", createTasksRoute(deps))
@@ -605,4 +607,97 @@ it("conversaciones: identidad manual y directa con restricciones de canal", asyn
   })
   expect(waReuse.status).toBe(200)
   expect(((await waReuse.json()) as { data: { created: boolean } }).data.created).toBe(false)
+})
+
+it("fichas, resumen, nivel y prueba del agente", async () => {
+  const app = buildApp("owner")
+  const member = buildApp("member")
+  const json = { "content-type": "application/json" }
+
+  const roles = await app.request("/agent/roles")
+  expect(roles.status).toBe(200)
+  const fichas = (await roles.json()) as {
+    data: { principles: string[]; roles: { id: string; available: boolean }[]; levels: { id: string }[] }
+  }
+  expect(fichas.data.roles.map((role) => role.id)).toEqual(["recepcion", "asistente_clinico", "asesor", "ayuda"])
+  expect(fichas.data.levels.map((level) => level.id)).toEqual(["supervisado", "equilibrado", "autonomo"])
+  expect(fichas.data.principles.length).toBeGreaterThan(0)
+  expect((await member.request("/agent/roles")).status).toBe(403)
+
+  // El nivel es una política completa: fijarlo cambia lo que dice el resumen.
+  const level = await app.request("/agent/level", { method: "PUT", headers: json, body: JSON.stringify({ level: "supervisado" }) })
+  expect(level.status).toBe(200)
+  const unknown = await app.request("/agent/level", { method: "PUT", headers: json, body: JSON.stringify({ level: "total" }) })
+  expect(unknown.status).toBe(400)
+  const denied = await member.request("/agent/level", { method: "PUT", headers: json, body: JSON.stringify({ level: "autonomo" }) })
+  expect(denied.status).toBe(403)
+
+  // El resumen cuenta «hoy» en la zona de la clínica: necesita su perfil.
+  await ownerDb.execute(
+    sql`insert into "org_profile" ("organization_id", "legal_name", "country_code", "currency", "timezone", "locale") values ('org_a', 'Clínica', 'PE', 'PEN', 'America/Lima', 'es-PE') on conflict do nothing`,
+  )
+  const before = (await (await app.request("/agent/overview")).json()) as {
+    data: { level: string; readiness: { channels: string[]; sandboxTurns: number } }
+  }
+  expect(before.data.level).toBe("supervisado")
+  expect(before.data.readiness.channels).toContain("whatsapp")
+  expect((await member.request("/agent/overview")).status).toBe(403)
+
+  // Probar no escribe mensajes: solo cuenta que la clínica ya probó.
+  const [{ count: messagesBefore }] = await ownerDb.execute<{ count: number }>(sql`select count(*)::int as count from message`)
+  const sandbox = await app.request("/agent/sandbox", {
+    method: "POST",
+    headers: json,
+    body: JSON.stringify({ message: "Hola, ¿atienden los sábados?" }),
+  })
+  expect(sandbox.status).toBe(200)
+  const result = (await sandbox.json()) as { data: { reply: string; state: unknown; did: string[]; waiting: string[] } }
+  expect(result.data.reply.length).toBeGreaterThan(0)
+  expect(result.data.state).toMatchObject({ pending: expect.any(Array), notes: expect.any(Array) })
+  const [{ count: messagesAfter }] = await ownerDb.execute<{ count: number }>(sql`select count(*)::int as count from message`)
+  expect(messagesAfter).toBe(messagesBefore)
+  const after = (await (await app.request("/agent/overview")).json()) as { data: { readiness: { sandboxTurns: number } } }
+  expect(after.data.readiness.sandboxTurns).toBe(before.data.readiness.sandboxTurns + 1)
+
+  const empty = await app.request("/agent/sandbox", { method: "POST", headers: json, body: JSON.stringify({ message: "" }) })
+  expect(empty.status).toBe(400)
+  const noAccess = await member.request("/agent/sandbox", { method: "POST", headers: json, body: JSON.stringify({ message: "Hola" }) })
+  expect(noAccess.status).toBe(403)
+
+  await app.request("/agent/level", { method: "PUT", headers: json, body: JSON.stringify({ level: "equilibrado" }) })
+})
+
+it("aprender: lectura, corrección y aprobación piden permisos distintos y validan su entrada", async () => {
+  const app = buildApp("owner")
+  const member = buildApp("member")
+  const reception = buildApp("reception")
+  const json = { "content-type": "application/json" }
+  const post = (target: Hono, path: string, body?: unknown) =>
+    target.request(path, { method: "POST", headers: json, ...(body === undefined ? {} : { body: JSON.stringify(body) }) })
+
+  const overview = await app.request("/agent/learning")
+  expect(overview.status).toBe(200)
+  expect(((await overview.json()) as { data: Record<string, unknown> }).data).toMatchObject({
+    review: expect.any(Array), proposed: expect.any(Array), learned: expect.any(Array), withdrawn: expect.any(Array), cases: expect.any(Number),
+  })
+  expect((await member.request("/agent/learning")).status).toBe(403)
+
+  // Una corrección nombra exactamente una respuesta y dice qué falló.
+  const trace = randomUUID()
+  expect((await post(app, "/agent/learning/corrections", { failure: "tono", correctedReply: "Hola" })).status).toBe(400)
+  expect((await post(app, "/agent/learning/corrections", { traceId: trace, reviewItemId: trace, failure: "tono" })).status).toBe(400)
+  expect((await post(app, "/agent/learning/corrections", { traceId: trace, failure: "inventado", correctedReply: "Hola" })).status).toBe(400)
+  expect((await post(app, "/agent/learning/corrections", { traceId: trace, failure: "tono", correctedReply: "Hola" })).status).toBe(404)
+  expect((await post(member, "/agent/learning/corrections", { traceId: trace, failure: "tono", correctedReply: "Hola" })).status).toBe(403)
+  // Recepción decide por el agente: puede corregir (aquí la respuesta no existe), pero no aprobar ni retirar lecciones.
+  expect((await post(reception, "/agent/learning/corrections", { traceId: trace, failure: "tono", correctedReply: "Hola" })).status).toBe(404)
+  for (const action of ["approve", "discard", "withdraw", "restore", "preview"]) {
+    expect((await post(reception, `/agent/learning/lessons/${trace}/${action}`, {})).status, action).toBe(403)
+  }
+  expect((await post(app, `/agent/learning/lessons/${trace}/approve`)).status).toBe(404)
+  expect((await post(app, `/agent/learning/lessons/${trace}/preview`)).status).toBe(404)
+
+  // Editar el texto solo vale al aprobar un mensaje.
+  const rejected = await post(app, `/agent/proposals/${randomUUID()}/decision`, { decision: "aprobada", editedText: "" })
+  expect(rejected.status).toBe(400)
 })

@@ -1389,6 +1389,9 @@ export async function syncInactiveRecall(tx: Db, orgId: string, now: Date): Prom
   return { programados, omitidos }
 }
 
+/** Ventana del recordatorio de control: avisa de los controles que vencen en estas horas. */
+export const CHECKUP_REMINDER_WINDOW_HOURS = 48
+
 /** Recordatorio de controles clínicos próximos (48 h). */
 export async function syncCheckupReminders(tx: Db, orgId: string, now: Date): Promise<SyncSummary> {
   const rules = await tx
@@ -1405,7 +1408,7 @@ export async function syncCheckupReminders(tx: Db, orgId: string, now: Date): Pr
   let omitidos = 0
   for (const rule of rules) {
     const config = configOf(rule.config)
-    const horizon = new Date(now.getTime() + 48 * 3_600_000)
+    const horizon = new Date(now.getTime() + CHECKUP_REMINDER_WINDOW_HOURS * 3_600_000)
     const due = await tx
       .select()
       .from(clinicalFollowUp)

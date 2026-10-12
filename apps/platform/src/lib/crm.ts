@@ -318,6 +318,24 @@ export interface AgentConfig {
   systemPrompt: string
   handoffKeywords: string[]
   maxTurns: number
+  /** Comprueba precios, fechas y horas de cada respuesta antes de enviarla. */
+  replyCheckEnabled: boolean
+  /** Con modelo de decisión, este elige el camino del turno antes de que escriba el otro. */
+  decisionRoutingEnabled: boolean
+  /** Asistente clínico: dictado en la atención. */
+  clinicalAssistantEnabled: boolean
+  /** La voz de la clínica. */
+  personaName: string | null
+  treatment: "tu" | "usted" | null
+  tone: "cercano" | "neutro" | "formal"
+  about: string
+  /** Funciones de Recepción apagadas e indicación de la clínica por función. */
+  disabledFunctions: string[]
+  functionNotes: Record<string, string>
+  /** Límites: franja en minutos del día (nulos = a toda hora) y canales (nulo = todos). */
+  activeFromMin: number | null
+  activeUntilMin: number | null
+  channels: string[] | null
 }
 
 export interface LlmConnectionTest {
