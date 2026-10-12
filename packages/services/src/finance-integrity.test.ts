@@ -456,5 +456,6 @@ it("la diferencia del cierre avisa al dueño y a quien administra, con el import
   // Importe con el formato de la clínica; nunca la unidad menor cruda.
   expect(notices[0]!.body).toMatch(/faltaron/)
   expect(notices[0]!.body).toMatch(/5[.,]00/)
-  expect(notices[0]!.body).not.toMatch(/centavos|500/)
+  // El nombre de la sede de prueba lleva un identificador aleatorio: se mira solo el importe.
+  expect(notices[0]!.body).not.toMatch(/centavos|faltaron\D*500/)
 })
