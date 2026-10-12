@@ -87,26 +87,25 @@ test("conocimiento: error de consulta y de versiones se recuperan sin inventar u
   await expect(page.getByText("Atendemos de lunes a viernes.", { exact: true })).toHaveCount(2)
 })
 
-test("reportes: un fallo de red conserva el intervalo y permite consultar otra vez", async ({ owner }) => {
+test("reportes: un fallo de red conserva el periodo y permite consultar otra vez", async ({ owner }) => {
   const { page, org } = owner
   let failing = true
   const requested: string[] = []
-  await page.route(url => url.pathname === "/api/workspace/reports", async route => {
+  await page.route(url => url.pathname === "/api/reports/overview", async route => {
     requested.push(new URL(route.request().url()).search)
     if (failing) return route.abort("failed")
     await route.continue()
   })
-  await gotoHydrated(page, tenant(org.slug, "/reports"))
+  await gotoHydrated(page, tenant(org.slug, "/reports?period=mes_pasado"))
   await expect(page.getByRole("button", { name: "Reintentar", exact: true })).toBeVisible()
-  await expect(page.getByText(/intervalo válido/)).toBeHidden()
-  const from = await page.getByLabel("Desde", { exact: true }).inputValue()
-  const to = await page.getByLabel("Hasta", { exact: true }).inputValue()
+  // Sin las cifras no se enseña ningún detalle a medias.
+  await expect(page.getByRole("navigation", { name: "Preguntas" })).toBeHidden()
   failing = false
   await page.getByRole("button", { name: "Reintentar", exact: true }).click()
-  await expect(page.getByRole("heading", { name: "Asistencia y cancelaciones" })).toBeVisible()
-  await expect(page.getByLabel("Desde", { exact: true })).toHaveValue(from)
-  await expect(page.getByLabel("Hasta", { exact: true })).toHaveValue(to)
-  expect(requested).toEqual([requested[0], requested[0]])
+  await expect(page.getByRole("navigation", { name: "Preguntas" }).getByRole("link")).toHaveCount(4)
+  // El periodo elegido sigue en la dirección y es el que se volvió a pedir.
+  await expect(page).toHaveURL(/period=mes_pasado/)
+  expect(requested).toEqual(["?period=mes_pasado", "?period=mes_pasado"])
 })
 
 for (const status of [500, 404, 403]) {

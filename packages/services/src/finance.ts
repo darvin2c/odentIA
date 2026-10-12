@@ -40,6 +40,7 @@ import { promotionServicePrice } from "@odentia/db/schema/promotions"
 import { and, asc, desc, eq, gte, inArray, isNull, lt, lte, or, sql } from "drizzle-orm"
 import { isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
 import { getOrgLocale, orgProfileRequired } from "./locale.js"
+import { monthStart } from "./report-periods.js"
 import { createWorkspaceNotification } from "./workspace.js"
 export const SHIFT_STATUSES = ["abierta", "cerrada"] as const
 export const MOVEMENT_KINDS = [
@@ -1133,31 +1134,8 @@ const COMMISSION_EXPENSE_CATEGORY = "Personal"
 function monthBounds(timezone: string, year: number, month: number): { start: Date; end: Date } {
   if (!Number.isInteger(year) || year < 2000 || year > 2100) throw validation("Año inválido")
   if (!Number.isInteger(month) || month < 1 || month > 12) throw validation("Mes inválido")
-  const offsetAt = (utc: Date): number => {
-    const parts = new Intl.DateTimeFormat("en-US", {
-      timeZone: timezone,
-      hour12: false,
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-    }).formatToParts(utc)
-    const get = (type: string): number => Number(parts.find((p) => p.type === type)?.value ?? 0)
-    return (
-      (Date.UTC(get("year"), get("month") - 1, get("day"), get("hour") % 24, get("minute"), get("second")) -
-        utc.getTime()) /
-      60000
-    )
-  }
-  const firstOf = (y: number, m: number): Date => {
-    let utc = Date.UTC(y, m - 1, 1, 0, 0, 0)
-    for (let i = 0; i < 3; i += 1) utc = Date.UTC(y, m - 1, 1, 0, 0, 0) - offsetAt(new Date(utc)) * 60000
-    return new Date(utc)
-  }
   const next = month === 12 ? { y: year + 1, m: 1 } : { y: year, m: month + 1 }
-  return { start: firstOf(year, month), end: firstOf(next.y, next.m) }
+  return { start: monthStart(timezone, year, month), end: monthStart(timezone, next.y, next.m) }
 }
 
 /** Vigente en el mes: no anulado, o anulado después del fin de mes. */
@@ -2158,27 +2136,28 @@ export async function voidCommissionSettlement(
   return row
 }
 
-// --- Resultado del mes (Fase 6) ------------------------------------------------------------
+// --- Resultado de un tramo (Reportes › Dinero) ---------------------------------------------
 
-export interface MonthlyFinanceResultQuery {
-  year: number
-  month: number
+/** Tramo semiabierto [start, end) de un resultado. */
+export interface FinanceResultRange {
+  start: Date
+  end: Date
   branchId?: string
   currency?: string
 }
 
 /**
- * Resultado del mes: cobrado (pagos vigentes por fecha de pago, sin aportes
- * de caja como ingreso) menos devoluciones y anulaciones del mes, gastado
- * por categoría, queda por moneda, desgloses por medio/profesional/promoción,
- * deuda al fin de mes y cierres para conciliar el efectivo.
+ * Cobrado, devuelto, anulado y gastado de un tramo, por moneda. Es la base
+ * común del resultado completo y de los totales con que se compara un periodo.
  */
-export async function getMonthlyFinanceResult(tx: Db, orgId: string, query: MonthlyFinanceResultQuery) {
-  const { timezone, locale } = await getOrgLocale(tx, orgId)
-  const { start, end } = monthBounds(timezone, query.year, query.month)
-  const branch = query.branchId ? await requireBranch(tx, orgId, query.branchId) : null
-  const unit = query.currency ? currency(query.currency) : null
-
+async function financeBuckets(
+  tx: Db,
+  orgId: string,
+  start: Date,
+  end: Date,
+  branch: { id: string } | null,
+  unit: string | null,
+) {
   const paymentFilters = [
     eq(patientPayment.organizationId, orgId),
     gte(patientPayment.paidAt, start),
@@ -2315,6 +2294,34 @@ export async function getMonthlyFinanceResult(tx: Db, orgId: string, query: Mont
     const category = e.category ?? "Otros"
     entry.byCategory.set(category, addCents(entry.byCategory.get(category) ?? 0, -e.amountCents))
   }
+  return buckets
+}
+
+/**
+ * Solo los totales por moneda de un tramo: con ellos se compara un periodo con
+ * el anterior y se dibujan las barras por mes, sin recalcular los desgloses.
+ */
+export async function getFinanceTotalsBetween(tx: Db, orgId: string, range: FinanceResultRange) {
+  const branch = range.branchId ? await requireBranch(tx, orgId, range.branchId) : null
+  const unit = range.currency ? currency(range.currency) : null
+  const buckets = await financeBuckets(tx, orgId, range.start, range.end, branch, unit)
+  return [...buckets.entries()].map(([curr, entry]) => {
+    const netoCents = entry.cobradoCents - entry.devolucionesCents - entry.anulacionesCents
+    return { currency: curr, netoCents, gastadoCents: entry.gastadoCents, quedaCents: netoCents - entry.gastadoCents }
+  })
+}
+
+/**
+ * Resultado completo de un tramo: cobrado (pagos vigentes por fecha de pago,
+ * sin aportes de caja como ingreso) menos devoluciones y anulaciones, gastado
+ * por categoría, queda por moneda, desgloses por medio/profesional/promoción,
+ * deuda al cierre del tramo y cierres de caja para conciliar el efectivo.
+ */
+export async function getFinanceResultBetween(tx: Db, orgId: string, range: FinanceResultRange) {
+  const { start, end } = range
+  const branch = range.branchId ? await requireBranch(tx, orgId, range.branchId) : null
+  const unit = range.currency ? currency(range.currency) : null
+  const buckets = await financeBuckets(tx, orgId, start, end, branch, unit)
 
   // Cobrado por profesional (solo atendido) y por promoción (todo cargo con
   // snapshot): aplicaciones del mes, netas de devoluciones con la misma
@@ -2486,10 +2493,6 @@ export async function getMonthlyFinanceResult(tx: Db, orgId: string, query: Mont
   }
 
   return {
-    year: query.year,
-    month: query.month,
-    timezone,
-    locale,
     branchId: branch?.id ?? null,
     branchName: branch?.name ?? null,
     byCurrency: [...buckets.entries()].map(([curr, entry]) => {
@@ -2584,6 +2587,12 @@ export interface DebtRow {
   concepts: string[]
   /** Última atención que dejó algo por cobrar: cuándo terminó y quién atendió. */
   lastAttended: { at: Date; dentistName: string | null } | null
+  /**
+   * Cuándo salió hoy de su atención (o se le anotó algo hoy), en el día de la
+   * sede; null si debe de antes. Con esto se arma «Atendidos hoy» de la caja y
+   * «Por cobrar» de Inicio: la regla vive aquí y ninguna pantalla la repite.
+   */
+  attendedTodayAt: Date | null
   /** La persona (su vínculo `self`): a quien se le escribe. */
   contactId: string | null
   /** Su conversación abierta más reciente, si tiene alguna. */
@@ -2624,6 +2633,7 @@ export async function getDebts(
       chargesCount: 0,
       concepts: [],
       lastAttended: null,
+      attendedTodayAt: null,
       contactId: null,
       conversationId: null,
       latestCharge: null,
@@ -2740,6 +2750,17 @@ export async function getDebts(
     for (const thread of threads)
       if (!openThread.has(thread.contactId)) openThread.set(thread.contactId, thread.id)
   }
+  // El día se parte con la zona de la sede o, sin sede, con la de la clínica.
+  const [zoneRow] = query.branchId
+    ? await tx
+        .select({ timezone: branch.timezone })
+        .from(branch)
+        .where(and(eq(branch.organizationId, orgId), eq(branch.id, query.branchId)))
+        .limit(1)
+    : []
+  const timezone = zoneRow?.timezone ?? (await getOrgLocale(tx, orgId)).timezone
+  const today = dayKeyIn(new Date(), timezone)
+  const isToday = (at: Date | null): at is Date => at !== null && dayKeyIn(at, timezone) === today
   return Object.entries(groups)
     .map(([key, { latestCharge: _latest, ...row }]) => {
       let last: { at: Date; dentistUserId: string } | null = null
@@ -2752,11 +2773,45 @@ export async function getDebts(
         displayName: names.get(row.patientId) ?? "",
         creditCents: credit.get(`${row.patientId}|${row.currency}`) ?? 0,
         lastAttended: last ? { at: last.at, dentistName: dentists.get(last.dentistUserId) ?? null } : null,
+        attendedTodayAt: last && isToday(last.at) ? last.at : isToday(row.latestSince) ? row.latestSince : null,
         contactId: contactOf.get(row.patientId) ?? null,
         conversationId: openThread.get(contactOf.get(row.patientId) ?? "") ?? null,
       }
     })
     .sort((a, b) => b.totalCents - a.totalCents)
+}
+
+/** Día civil `YYYY-MM-DD` de un instante en una zona horaria. */
+function dayKeyIn(at: Date, timezone: string): string {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: timezone, year: "numeric", month: "2-digit", day: "2-digit" }).format(at)
+}
+
+/**
+ * «Caja de hoy» de una sede, para Inicio: lo cobrado en el día (importe y
+ * número de cobros, con las mismas cuentas que la Caja: un ticket con dos
+ * medios es un cobro) y a quién falta cobrar de lo atendido hoy, que es la
+ * lista «Atendidos hoy» de Finanzas › Caja (`getDebts`), no otra regla.
+ */
+export async function getCashToday(tx: Db, orgId: string, query: { branchId: string }) {
+  const branchRow = await requireBranch(tx, orgId, query.branchId)
+  const timezone = await branchTimezone(tx, orgId, branchRow)
+  const unit = (await getOrgLocale(tx, orgId)).currency
+  const today = dayKeyIn(new Date(), timezone)
+  const { movements } = await getDayMovements(tx, orgId, { branchId: branchRow.id, day: today, timezone, currency: unit })
+  const cobros = movements.filter((m) => m.direction === "ingreso" && m.kind === "cobro")
+  const seen = new Set(cobros.map((m) => (m.ticketId ? `ticket:${m.ticketId}` : m.patientPaymentId ? `pago:${m.patientPaymentId}` : `mov:${m.id}`)))
+  const toCollect = (await getDebts(tx, orgId, { branchId: branchRow.id }))
+    .filter((row): row is DebtRow & { attendedTodayAt: Date } => row.attendedTodayAt !== null)
+    .sort((a, b) => a.attendedTodayAt.getTime() - b.attendedTodayAt.getTime())
+  return {
+    branchId: branchRow.id,
+    branchName: branchRow.name,
+    currency: unit,
+    timezone,
+    collectedCents: sumCents(cobros.map((m) => ({ amountCents: m.amountCents }))),
+    tickets: seen.size,
+    toCollect,
+  }
 }
 
 export interface DayMovementsQuery {

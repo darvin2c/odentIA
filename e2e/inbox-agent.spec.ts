@@ -134,27 +134,26 @@ test("bandeja: el estado del agente por conversación, las vistas con su total y
   await expect(band).toHaveCount(0)
   await expect(waitingRow).not.toContainText("Espera tu aprobación")
 
-  // Inicio: en escritorio todas las tarjetas; en móvil una, y el resto en el panel.
+  // Inicio: lo que espera aprobación y el caso derivado son filas de la misma lista, «Te espera».
   await propose(waiting, "Te confirmo la cita de mañana.")
   await gotoHydrated(page, tenant(org.slug, "/home"))
-  const pending = page.getByRole("region", { name: "Pendiente de ti" })
-  await expect(pending).toContainText("2 cambios del agente y 1 conversación derivada")
-  await expect(pending.getByRole("button", { name: "Revisar y aprobar" })).toHaveCount(2)
+  const pending = page.getByRole("region", { name: "Te espera" })
+  await expect(pending.getByRole("button", { name: /Revisar$/ })).toHaveCount(2)
+  // La derivación deja además su tarea: el caso es la fila que dice de dónde viene.
+  const homeCase = pending.getByRole("listitem").filter({ hasText: "Caso que pasó el agente" })
+  await expect(homeCase).toContainText("Pide hablar con una persona")
+  // Decidida una propuesta, su fila se va; en teléfono las filas son las mismas.
   await page.setViewportSize({ width: 390, height: 844 })
-  await expect(pending.getByRole("button", { name: "Revisar y aprobar" })).toHaveCount(1)
-  await expect(pending.getByRole("button", { name: "Ver las otras 2" })).toBeVisible()
-  // Con una sola propuesta, lo que queda oculto es la derivación: el enlace abre esa pestaña.
   await call(page, "POST", `/api/agent/proposals/${otherProposal}/decision`, org.slug, { decision: "rechazada", reason: "Ya se atendió" })
   await gotoHydrated(page, tenant(org.slug, "/home"))
-  await expect(pending).toContainText("1 cambio del agente y 1 conversación derivada")
+  await expect(pending.getByRole("button", { name: /Revisar$/ })).toHaveCount(1)
   expect(await overflow(page)).toBeLessThanOrEqual(0)
   await info.attach("inicio-movil", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" })
-  await pending.getByRole("button", { name: "Ver la otra" }).click()
-  const mobilePanel = page.getByRole("dialog", { name: "Agente" })
-  await expect(mobilePanel.getByRole("tab", { name: /^Derivadas/ })).toHaveAttribute("aria-selected", "true")
-  await expect(mobilePanel.getByText("Pide hablar con una persona")).toBeVisible()
-  await mobilePanel.getByRole("button", { name: "Cerrar el panel del agente" }).click()
-  await expect(mobilePanel).toBeHidden()
+  // La fila del caso abre su resumen, sin salir de Inicio.
+  await homeCase.getByRole("button", { name: /Ver el caso$/ }).click()
+  await expect(page.getByRole("heading", { name: "Resumen del caso" })).toBeVisible()
+  await page.keyboard.press("Escape")
+  await expect(page.getByRole("heading", { name: "Resumen del caso" })).toBeHidden()
 
   // Bandeja en móvil: una vista por vez; con el hilo abierto ceden la pantalla vistas y filtros.
   await gotoHydrated(page, tenant(org.slug, "/inbox"))

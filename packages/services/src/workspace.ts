@@ -1,17 +1,26 @@
 import type { Db } from "@odentia/db"
 import { member } from "@odentia/db/schema/auth"
 import { workspaceNotification } from "@odentia/db/schema/workspace"
-import { and, desc, eq, inArray, isNull, sql, type SQL } from "drizzle-orm"
+import { and, desc, eq, inArray, isNull, type SQL, sql } from "drizzle-orm"
+import { getAdvisorRecommendations } from "./agent-advisor.js"
 import {
-  countAgentRunsToday,
   countPendingProposals,
+  getAutonomyPolicy,
   listHandoffs,
   listProposals,
-  type ProposalItem,
+  pendingProposalDecider,
 } from "./agent-operations.js"
-import { countConversationViews } from "./conversations.js"
 import { notFound, validation } from "./errors.js"
+import { getCashToday } from "./finance.js"
 import { getOrgLocale } from "./locale.js"
+import {
+  composeWaiting,
+  WAITING_LIMITS,
+  type WaitingBudgets,
+  type WaitingCase,
+  type WaitingProposal,
+  type WaitingTask,
+} from "./workspace-home.js"
 
 export interface WorkspaceAccess {
   patients: boolean
@@ -24,6 +33,8 @@ export interface WorkspaceAccess {
   agent: boolean
   allTasks: boolean
   configure: boolean
+  /** Quien atiende (odontólogo): solo sus citas, en todas las sedes, y los presupuestos de sus planes. */
+  ownAppointments: boolean
 }
 
 export async function createWorkspaceNotification(tx: Db, orgId: string, input: {
@@ -104,325 +115,226 @@ async function workspaceZone(tx: Db, orgId: string) {
   return { timezone, locale }
 }
 
+/** Instante como texto ISO en UTC: el cliente lo sitúa en la zona de la clínica. */
+const iso = (column: SQL) => sql`to_char(${column} at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')`
 
-export interface WorkspaceAgentHome {
-  pendingProposals: number
-  /** Conversaciones abiertas con una derivación sin resolver (el chip «Derivadas» de la bandeja). */
-  derivedConversations: number
-  proposals: Array<{ id: string; action: string; summary: string; createdAt: string; conversationId: string | null; mode: string; context: ProposalItem["context"] }>
-  recentHandoffs: Array<{ id: string; reason: string; priority: string; createdAt: string; conversationId: string | null; contactName: string | null; channel: string | null }>
-  today: { runs: number; ok: number; handoff: number; error: number; omitida: number; sinRespuesta: number }
+export interface WorkspaceHomeOptions {
+  /** Sede pedida para la agenda y la caja; sin ella (o si ya no existe) vale la primera activa. */
+  branchId?: string
+  /** Permisos de quien mira, para lo que el asesor puede recomendarle; sin esto no hay recomendaciones. */
+  can?: (permission: string) => boolean
+}
+
+export interface WorkspaceAppointment {
+  id: string
+  patientId: string
+  patientName: string
+  startsAt: string
+  status: string
+  serviceName: string | null
+  dentistName: string
+  chairName: string
+  branchName: string
+  /** La siguiente cita en pie; a lo sumo una. */
+  next: boolean
 }
 
 /**
- * Banda del agente para el home: pendientes (del equipo y del interlocutor,
- * «por revisar»), derivaciones recientes aún abiertas y corridas de hoy con la
- * misma definición de «hoy» que el panel del agente.
+ * «Hoy» de quien trabaja con la agenda. `branch`: la agenda de una sede, solo
+ * lo que falta. `mine`: las citas de quien atiende, en todas las sedes y
+ * también las ya atendidas.
  */
-async function workspaceAgent(tx: Db, orgId: string, timezone: string): Promise<WorkspaceAgentHome> {
-  const proposalRows = await listProposals(tx, orgId, { status: "propuesta", limit: 3 })
-  const pending = await countPendingProposals(tx, orgId)
-  const handoffRows = (await listHandoffs(tx, orgId, { limit: 3, open: true }))
-    .filter(row => Date.parse(row.createdAt) >= Date.now() - 72 * 3_600_000)
-  const today = await countAgentRunsToday(tx, orgId, timezone)
-  // Abiertas, como la vista «Derivadas» de la bandeja con su estado por defecto.
-  const derived = await countConversationViews(tx, orgId, { status: "open" }, ["handoff"])
-  return {
-    pendingProposals: pending.team + pending.contact,
-    derivedConversations: derived.handoff,
-    proposals: proposalRows.map(row => ({
-      id: row.id, action: row.action, summary: row.context.afterSummary,
-      createdAt: row.createdAt, conversationId: row.conversationId, mode: row.mode, context: row.context,
-    })),
-    recentHandoffs: handoffRows.map(row => ({
-      id: row.id, reason: row.reason, priority: row.priority, createdAt: row.createdAt,
-      conversationId: row.conversationId, contactName: row.contactName, channel: row.channel,
-    })),
-    today,
-  }
+export interface WorkspaceToday {
+  scope: "branch" | "mine"
+  branch: { id: string; name: string } | null
+  /** Zona con que se partió el día y se leen las horas: la de la sede o la de la clínica. */
+  timezone: string
+  /**
+   * `total` cuenta lo que ocupa la agenda (ni canceladas ni inasistencias),
+   * igual que el número de citas del día en la Agenda; `upcoming` son las que
+   * siguen en pie y `unconfirmed`, de esas, las que nadie confirmó.
+   */
+  summary: { total: number; attended: number; upcoming: number; unconfirmed: number }
+  appointments: WorkspaceAppointment[]
 }
 
-export interface WorkspacePulse {
-  funnel: { stage: string; count: number; amountCents: string; currency: string }[] | null
-  channels: { channel: string; count: number }[] | null
-  execution: Array<{ day: string; ok: number; handoff: number; error: number; sinRespuesta: number }> | null
-  collections: { day: string; currency: string; amountCents: string }[] | null
-  performance: CrmPerformance
+/** Filas de la agenda de una sede que viajan a Inicio; el resto se ve en la Agenda. */
+const TODAY_BRANCH_ROWS = 5
+
+async function homeBranch(tx: Db, orgId: string, branchId?: string) {
+  const rows = await tx.execute<{ id: string; name: string; timezone: string | null }>(sql`
+    select id, name, timezone from branch where organization_id=${orgId} and is_active order by created_at, id`)
+  return { branch: rows.find(row => row.id === branchId) ?? rows[0] ?? null, many: rows.length > 1 }
 }
 
-
-export interface CrmPerformance {
-  responses: { conversations: number; responded: number; timedResponses: number; avgFirstResponseSeconds: number | null } | null
-  followUps: { open: number; overdue: number; unassigned: number } | null
-  conversations: { closed: number; waiting: number } | null
-  bookings: Array<{ source: string; count: number; active: number }> | null
-  conversion: Array<{ channel: string | null; assigneeUserId: string | null; assigneeName: string | null; created: number; won: number; lost: number; open: number; wonRate: number | null }> | null
-  proposals: { executed: number; failed: number; pending: number } | null
-  handoffs: { cohort: number; collected: number; resolved: number; cancelled: number; open: number; unknown: number } | null
-  clinicalControls: { cohort: number; realized: number; cancelled: number; pending: number; unknown: number } | null
-  taskTimeliness: { cohort: number; onTime: number; late: number; cancelled: number; open: number; unknown: number } | null
-}
-
-/** Cohorte por fecha de entrada/creación; los pendientes son una foto actual. */
-async function crmPerformance(tx: Db, orgId: string, access: WorkspaceAccess, start: SQL, end: SQL): Promise<CrmPerformance> {
-  // audit_event.entity_id es polimórfico (text); convertir el UUID de la entidad
-  // conserva esa columna indexable y evita interpretar referencias ajenas como UUID.
-  const [responses] = access.conversations ? await tx.execute<NonNullable<CrmPerformance["responses"]>>(sql`
-    with first_inbound as (
-      select distinct on (conversation_id) conversation_id, created_at
-      from message where organization_id=${orgId} and direction='in'
-      order by conversation_id, created_at, id
-    ), cohort as (
-      select i.conversation_id, i.created_at, r.sent_at, r.id as response_id
-      from first_inbound i left join lateral (
-        select m.id, m.sent_at from message m
-        where m.organization_id=${orgId} and m.conversation_id=i.conversation_id
-          and m.direction='out' and m.status in ('sent','delivered','read')
-          and coalesce(m.external_id,'') not like 'mock-%'
-          and m.created_at >= i.created_at
-        order by coalesce(m.sent_at, m.created_at), m.id limit 1
-      ) r on true where i.created_at >= ${start} and i.created_at < ${end}
-    ) select count(*)::int as conversations,
-      count(response_id)::int as responded,
-      count(*) filter(where sent_at >= created_at)::int as "timedResponses",
-      avg(extract(epoch from (sent_at-created_at))) filter(where sent_at >= created_at)::float8 as "avgFirstResponseSeconds"
-    from cohort`) : []
-  const [followUps] = access.crm && access.tasks ? await tx.execute<NonNullable<CrmPerformance["followUps"]>>(sql`
-    select count(*)::int as open, count(*) filter(where due_at <= now())::int as overdue,
-      count(*) filter(where assignee_user_id is null)::int as unassigned
-    from task where organization_id=${orgId} and status='open' and kind='opportunity_follow_up'`) : []
-  const [conversations] = access.conversations ? await tx.execute<NonNullable<CrmPerformance["conversations"]>>(sql`
-    select (select count(distinct entity_id)::int from audit_event
-      where organization_id=${orgId} and entity='conversation' and action='conversation.updated'
-        and metadata->>'op'='close' and created_at >= ${start} and created_at < ${end}) as closed,
-      (select count(*)::int from conversation c where c.organization_id=${orgId} and c.status='open'
-        and exists(select 1 from message i where i.organization_id=${orgId} and i.conversation_id=c.id and i.direction='in'
-          and not exists(select 1 from message o where o.organization_id=${orgId} and o.conversation_id=c.id
-            and o.direction='out' and o.status in ('sent','delivered','read')
-            and coalesce(o.external_id,'') not like 'mock-%' and o.created_at >= i.created_at))) as waiting`) : []
-  const bookings = access.appointments ? await tx.execute<NonNullable<CrmPerformance["bookings"]>[number]>(sql`
-    select source, count(*)::int as count,
-      count(*) filter(where status in ('programada','confirmada','atendida'))::int as active
-    from appointment where organization_id=${orgId} and created_at >= ${start} and created_at < ${end}
-    group by source order by source`) : null
-  const conversion = access.crm ? await tx.execute<NonNullable<CrmPerformance["conversion"]>[number]>(sql`
-    select cc.channel, o.assigned_user_id as "assigneeUserId", u.name as "assigneeName",
-      count(*)::int as created, count(*) filter(where o.status='won')::int as won,
-      count(*) filter(where o.status='lost')::int as lost, count(*) filter(where o.status='open')::int as open,
-      (100.0*count(*) filter(where o.status='won')/nullif(count(*),0))::float8 as "wonRate"
-    from opportunity o left join conversation c on c.id=o.conversation_id and c.organization_id=${orgId}
-    left join channel_connection cc on cc.id=c.channel_connection_id and cc.organization_id=${orgId}
-    left join "user" u on u.id=o.assigned_user_id
-    where o.organization_id=${orgId} and o.created_at >= ${start} and o.created_at < ${end}
-    group by cc.channel, o.assigned_user_id, u.name order by cc.channel nulls last, u.name nulls last`) : null
-  const [proposals] = access.agent ? await tx.execute<NonNullable<CrmPerformance["proposals"]>>(sql`
-    select count(*) filter(where status='ejecutada' and executed_at >= ${start} and executed_at < ${end})::int as executed,
-      count(*) filter(where status='fallida' and updated_at >= ${start} and updated_at < ${end})::int as failed,
-      count(*) filter(where status='propuesta')::int as pending
-    from agent_proposal where organization_id=${orgId}`) : []
-  const [handoffs] = access.agent && access.tasks ? await tx.execute<NonNullable<CrmPerformance["handoffs"]>>(sql`
-    with cohort as (
-      select h.id, h.assignee_user_id, t.id as task_id,
-        coalesce(last_transition.status, case when t.updated_at < ${end} then t.status else 'open' end) as effective_status,
-        last_transition.at as transition_at,
-        exists(
-          select 1 from audit_event a where a.organization_id=${orgId}
-            and a.entity='agent_handoff' and a.entity_id=h.id::text
-            and a.action='agent.handoff_claimed' and a.created_at < ${end}
-        ) as claimed
-      from agent_handoff h
-      left join task t on t.id=h.task_id and t.organization_id=${orgId} and t.created_at < ${end}
-      left join lateral (
-        select a.metadata->>'statusNext' as status, a.created_at as at
-        from audit_event a where a.organization_id=${orgId}
-          and a.entity='task' and a.entity_id=t.id::text and a.action='task.updated'
-          and a.created_at < ${end} and a.metadata->>'statusNext' in ('open','done','cancelled')
-        order by a.created_at desc, a.id desc limit 1
-      ) last_transition on true
-      where h.organization_id=${orgId} and h.created_at >= ${start} and h.created_at < ${end}
-    ) select count(*)::int as cohort,
-      count(*) filter(where task_id is not null and (assignee_user_id is not null or claimed))::int as collected,
-      count(*) filter(where effective_status='done' and transition_at is not null)::int as resolved,
-      count(*) filter(where effective_status='cancelled' and transition_at is not null)::int as cancelled,
-      count(*) filter(where task_id is not null and effective_status='open')::int as open,
-      count(*) filter(where task_id is null or (effective_status in ('done','cancelled') and transition_at is null))::int as unknown
-    from cohort`) : []
-  const [clinicalControls] = access.clinical ? await tx.execute<NonNullable<CrmPerformance["clinicalControls"]>>(sql`
-    with cohort as (
-      select f.id, f.status, f.completed_at, f.cancelled_at, f.completed_encounter_id,
-        f.outcome, e.status as encounter_status, e.finalized_at as encounter_finalized_at
-      from clinical_follow_up f
-      left join encounter e on e.id=f.completed_encounter_id and e.organization_id=${orgId}
-      where f.organization_id=${orgId} and f.due_at >= ${start} and f.due_at < ${end}
-        and f.created_at < ${end}
-    ) select count(*)::int as cohort,
-      count(*) filter(where completed_at < ${end} and completed_encounter_id is not null
-        and outcome is not null and encounter_status='finalizada' and encounter_finalized_at < ${end})::int as realized,
-      count(*) filter(where cancelled_at < ${end})::int as cancelled,
-      count(*) filter(where ((status in ('pendiente','programado')
-          and (completed_at is null or completed_at >= ${end})
-          and (cancelled_at is null or cancelled_at >= ${end}))
-        or completed_at >= ${end} or cancelled_at >= ${end}))::int as pending,
-      count(*) filter(where (status='realizado' and completed_at is null)
-        or (completed_at < ${end} and (completed_encounter_id is null or outcome is null
-          or encounter_status<>'finalizada' or encounter_finalized_at is null or encounter_finalized_at >= ${end}))
-        or (status='cancelado' and cancelled_at is null))::int as unknown
-    from cohort`) : []
-  const [taskTimeliness] = access.tasks ? await tx.execute<NonNullable<CrmPerformance["taskTimeliness"]>>(sql`
-    with cohort as (
-      select t.id, t.due_at,
-        coalesce(last_transition.status, case when t.updated_at < ${end} then t.status else 'open' end) as effective_status,
-        last_transition.at as transition_at
-      from task t
-      left join lateral (
-        select a.metadata->>'statusNext' as status, a.created_at as at
-        from audit_event a where a.organization_id=${orgId}
-          and a.entity='task' and a.entity_id=t.id::text and a.action='task.updated'
-          and a.created_at < ${end} and a.metadata->>'statusNext' in ('open','done','cancelled')
-        order by a.created_at desc, a.id desc limit 1
-      ) last_transition on true
-      where t.organization_id=${orgId} and t.due_at >= ${start} and t.due_at < ${end}
-        and t.created_at < ${end}
-    ) select count(*)::int as cohort,
-      count(*) filter(where effective_status='done' and transition_at is not null and transition_at <= due_at)::int as "onTime",
-      count(*) filter(where effective_status='done' and transition_at is not null and transition_at > due_at)::int as late,
-      count(*) filter(where effective_status='cancelled' and transition_at is not null)::int as cancelled,
-      count(*) filter(where effective_status='open')::int as open,
-      count(*) filter(where effective_status in ('done','cancelled') and transition_at is null)::int as unknown
-    from cohort`) : []
-  return {
-    responses: responses ?? null,
-    followUps: followUps ?? null,
-    conversations: conversations ?? null,
-    bookings,
-    conversion,
-    proposals: proposals ?? null,
-    handoffs: handoffs ?? null,
-    clinicalControls: clinicalControls ?? null,
-    taskTimeliness: taskTimeliness ?? null,
-  }
-}
-/**
- * Pulso del negocio para los gráficos del home. Cada sección es nula sin su
- * permiso; los días usan la zona horaria de la organización.
- */
-export async function getWorkspacePulse(tx: Db, orgId: string, access: WorkspaceAccess): Promise<WorkspacePulse> {
-  const { timezone } = await workspaceZone(tx, orgId)
-  const funnel = access.crm ? await tx.execute<{ stage: string; count: number; amountCents: string; currency: string }>(sql`
-    select s.name as stage, count(*)::int as count,
-      coalesce(sum(o.amount_cents), 0)::text as "amountCents", o.currency as currency
-    from opportunity o join pipeline_stage s on s.id = o.stage_id and s.organization_id = ${orgId}
-    where o.organization_id = ${orgId} and o.status = 'open'
-    group by s.id, s.name, s.position, o.currency
-    order by s.position, s.name, o.currency`) : null
-  const channels = access.conversations ? await tx.execute<{ channel: string; count: number }>(sql`
-    select cc.channel as channel, count(*)::int as count
-    from conversation c join channel_connection cc on cc.id = c.channel_connection_id and cc.organization_id = ${orgId}
-    where c.organization_id = ${orgId} and c.status = 'open'
-    group by cc.channel order by cc.channel`) : null
-  const execution = access.agent ? await tx.execute<{ day: string; ok: number; handoff: number; error: number; sinRespuesta: number }>(sql`
-    with days as (
-      select to_char((now() at time zone ${timezone}) - (n || ' days')::interval, 'YYYY-MM-DD') as day
-      from generate_series(0, 29) n
-    ) select days.day as day,
-      count(l.id) filter (where l.status = 'ok')::int as ok,
-      count(l.id) filter (where l.status = 'handoff')::int as handoff,
-      count(l.id) filter (where l.status = 'error')::int as error,
-      count(l.id) filter (where l.status = 'sin_respuesta')::int as "sinRespuesta"
-    from days left join agent_run_ledger l
-      on l.organization_id = ${orgId} and to_char(l.started_at at time zone ${timezone}, 'YYYY-MM-DD') = days.day
-    group by days.day order by days.day`) : null
-  const collections = access.finance ? await tx.execute<{ day: string; currency: string; amountCents: string }>(sql`
-    with movements as (
-      select to_char(paid_at at time zone ${timezone}, 'YYYY-MM-DD') as day,
-        currency, amount_cents::bigint as amount
-      from patient_payment
-      where organization_id = ${orgId} and voided_at is null
-        and paid_at >= (((to_char(now() at time zone ${timezone}, 'YYYY-MM-DD'))::date - 29)::timestamp at time zone ${timezone})
-      union all
-      select to_char(r.refunded_at at time zone ${timezone}, 'YYYY-MM-DD') as day,
-        p.currency, -r.amount_cents::bigint as amount
-      from patient_payment_refund r
-      join patient_payment p on p.id = r.payment_id and p.organization_id = ${orgId} and p.voided_at is null
-      where r.organization_id = ${orgId}
-        and r.refunded_at >= (((to_char(now() at time zone ${timezone}, 'YYYY-MM-DD'))::date - 29)::timestamp at time zone ${timezone})
-    ) select day, currency, sum(amount)::text as "amountCents"
-    from movements group by day, currency order by day, currency`) : null
-  const start = sql`((now() at time zone ${timezone})::date - 29)::timestamp at time zone ${timezone}`
-  return { funnel, channels, execution, collections, performance: await crmPerformance(tx, orgId, access, start, sql`now()`) }
-}
-
-export async function getWorkspaceHome(tx: Db, orgId: string, userId: string, access: WorkspaceAccess) {
-  const { timezone, locale } = await workspaceZone(tx, orgId)
-  const [day] = await tx.execute<{ date: string }>(sql`select to_char(now() at time zone ${timezone}, 'YYYY-MM-DD') as date`)
-  const start = sql`((${day.date}::date)::timestamp at time zone ${timezone})`
-  const end = sql`((${day.date}::date + 1)::timestamp at time zone ${timezone})`
-  const appointments = access.appointments ? await tx.execute<{
-    id: string; patientId: string; patientName: string; startsAt: string; status: string; branchName: string; dentistName: string
-    serviceName: string | null; multiBranch: boolean
-  }>(sql`select a.id, a.patient_id as "patientId", p.display_name as "patientName",
-    a.starts_at as "startsAt", a.status, b.name as "branchName", u.name as "dentistName",
-    a.service_name as "serviceName",
-    (select count(*) from branch where organization_id=${orgId} and is_active) > 1 as "multiBranch"
+async function workspaceToday(
+  tx: Db, orgId: string, userId: string, own: boolean, branch: { id: string; name: string; timezone: string | null } | null, timezone: string,
+): Promise<WorkspaceToday> {
+  const empty = { total: 0, attended: 0, upcoming: 0, unconfirmed: 0 }
+  if (!own && !branch) return { scope: "branch", branch: null, timezone, summary: empty, appointments: [] }
+  // El día se parte con la zona de la sede, como en la Agenda; las citas propias, con la de la clínica.
+  const zone = own ? timezone : (branch?.timezone ?? timezone)
+  const start = sql`((now() at time zone ${zone})::date::timestamp at time zone ${zone})`
+  const end = sql`(((now() at time zone ${zone})::date + 1)::timestamp at time zone ${zone})`
+  const rows = await tx.execute<Omit<WorkspaceAppointment, "next"> & { open: boolean }>(sql`
+    select a.id, a.patient_id as "patientId", p.display_name as "patientName",
+      ${iso(sql`a.starts_at`)} as "startsAt", a.status, a.service_name as "serviceName",
+      u.name as "dentistName", ch.name as "chairName", b.name as "branchName", a.ends_at > now() as open
     from appointment a join patient p on p.id=a.patient_id and p.organization_id=${orgId}
     join branch b on b.id=a.branch_id and b.organization_id=${orgId}
+    join schedule_chair ch on ch.id=a.chair_id and ch.organization_id=${orgId}
     join "user" u on u.id=a.dentist_user_id
     where a.organization_id=${orgId} and a.starts_at >= ${start} and a.starts_at < ${end}
-    and a.status in ('programada','confirmada') order by a.starts_at, a.id limit 12`) : []
-  const appointmentCounts = access.appointments ? await tx.execute<{ status: string; count: number }>(sql`
-    select status, count(*)::int as count from appointment where organization_id=${orgId}
-    and starts_at >= ${start} and starts_at < ${end} group by status`) : []
-  const taskRows = access.tasks ? await tx.execute<{
-    id: string; title: string; dueAt: string | null; overdue: boolean
-    contactId: string | null; conversationId: string | null; opportunityId: string | null
-  }>(sql`
-    select id, title, due_at as "dueAt", coalesce(due_at < now(), false) as overdue,
-      contact_id as "contactId", conversation_id as "conversationId", opportunity_id as "opportunityId"
-    from task where organization_id=${orgId} and status='open'
-    and (${access.allTasks} or assignee_user_id=${userId})
-    order by due_at asc nulls last, id limit 8`) : []
-  const tasks = taskRows.map(({ id, title, dueAt, overdue, contactId, conversationId, opportunityId }) => ({
-    id,
-    title,
-    dueAt,
-    overdue,
+      and a.status in ('programada','confirmada','atendida')
+      and ${own ? sql`a.dentist_user_id=${userId}` : sql`a.branch_id=${branch?.id ?? null}`}
+    order by a.starts_at, a.id limit 300`)
+  const standing = rows.filter(row => row.status !== "atendida")
+  const nextId = standing.find(row => row.open)?.id ?? null
+  const summary = {
+    total: rows.length,
+    attended: rows.length - standing.length,
+    upcoming: standing.length,
+    unconfirmed: standing.filter(row => row.status === "programada").length,
+  }
+  // La sede ve lo que falta, desde la siguiente; quien atiende, su día entero.
+  const from = nextId ? standing.findIndex(row => row.id === nextId) : 0
+  const shown = own ? rows : standing.slice(from, from + TODAY_BRANCH_ROWS)
+  return {
+    scope: own ? "mine" : "branch",
+    branch: own || !branch ? null : { id: branch.id, name: branch.name },
+    timezone: zone,
+    summary,
+    appointments: shown.map(({ open: _open, ...row }) => ({ ...row, next: row.id === nextId })),
+  }
+}
+
+/** Casos que pasó el agente y siguen sin resolver, para quien puede tomarlos. */
+async function waitingCases(tx: Db, orgId: string, userId: string, all: boolean): Promise<WaitingCase[]> {
+  const rows = await listHandoffs(tx, orgId, { limit: 100, open: true })
+  return rows
+    // Lo que ya tomó otra persona no espera a quien mira; quien dirige lo ve todo.
+    .filter(row => all || row.assigneeUserId === null || row.assigneeUserId === userId)
+    .map(row => ({
+      id: row.id, priority: row.priority, reason: row.reason, contactName: row.contactName,
+      channel: row.channel, createdAt: row.createdAt, conversationId: row.conversationId,
+    }))
+    .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))
+}
+
+/** Propuestas pendientes que decide el equipo; las que esperan al interlocutor no esperan a nadie de aquí. */
+async function waitingProposals(tx: Db, orgId: string): Promise<{ items: WaitingProposal[]; total: number }> {
+  const rows = await listProposals(tx, orgId, { status: "propuesta", limit: 50 })
+  const policy = await getAutonomyPolicy(tx, orgId)
+  const items = rows
+    .filter(row => pendingProposalDecider(policy, row.action, row.conversationId !== null) === "team")
+    .slice(0, WAITING_LIMITS.proposals)
+    .map(row => ({
+      id: row.id, action: row.action, summary: row.context.afterSummary, createdAt: row.createdAt,
+      conversationId: row.conversationId, contactName: row.context.contactName, patientName: row.context.patientName,
+    }))
+  return { items, total: (await countPendingProposals(tx, orgId)).team }
+}
+
+/**
+ * Conversaciones abiertas con un entrante posterior al último saliente
+ * aceptado (la vista «Sin responder» de la Bandeja) y desde cuándo espera la
+ * que más lleva.
+ */
+async function waitingConversations(tx: Db, orgId: string) {
+  const [row] = await tx.execute<{ waiting: number; oldestAt: string | null }>(sql`
+    with pending as (
+      select (select min(i.created_at) from message i
+        where i.organization_id=${orgId} and i.conversation_id=c.id and i.direction='in'
+          and i.created_at > coalesce((select max(o.created_at) from message o
+            where o.organization_id=${orgId} and o.conversation_id=c.id and o.direction='out'
+              and o.status in ('sent','delivered','read') and coalesce(o.external_id,'') not like 'mock-%'), '-infinity'::timestamptz)
+      ) as since from conversation c where c.organization_id=${orgId} and c.status='open'
+    ) select count(since)::int as waiting, ${iso(sql`min(since)`)} as "oldestAt" from pending`)
+  return row ?? { waiting: 0, oldestAt: null }
+}
+
+async function waitingTasks(tx: Db, orgId: string, userId: string, access: WorkspaceAccess, dayEnd: SQL) {
+  const scope = sql`t.organization_id=${orgId} and t.status='open' and (${access.allTasks} or t.assignee_user_id=${userId})`
+  type Row = Omit<WaitingTask, "href"> & { contactId: string | null; conversationId: string | null; opportunityId: string | null }
+  const select = sql`select t.id, t.title, ${iso(sql`t.due_at`)} as "dueAt",
+      case when t.due_at is null then 'none' when t.due_at < now() then 'overdue'
+        when t.due_at < ${dayEnd} then 'today' else 'later' end as due,
+      coalesce(t.assignee_user_id=${userId}, false) as mine, u.name as "assigneeName",
+      t.contact_id as "contactId", t.conversation_id as "conversationId", t.opportunity_id as "opportunityId"
+    from task t left join "user" u on u.id=t.assignee_user_id where ${scope}`
+  const overdue = await tx.execute<Row>(sql`${select} and t.due_at < now() order by t.due_at, t.id limit ${WAITING_LIMITS.overdueTasks}`)
+  const [next] = await tx.execute<Row>(sql`${select} and (t.due_at is null or t.due_at >= now()) order by t.due_at asc nulls last, t.id limit 1`)
+  const [count] = await tx.execute<{ open: number }>(sql`select count(*)::int as open from task t where ${scope}`)
+  // Cada tarea abre lo más cercano a su contexto que el rol puede ver.
+  const place = ({ contactId, conversationId, opportunityId, ...task }: Row): WaitingTask => ({
+    ...task,
     href: access.crm && opportunityId
       ? `/opportunities/${opportunityId}`
       : access.conversations && conversationId
         ? `/inbox?conversation=${conversationId}`
         : access.crm && contactId
           ? `/contacts/${contactId}`
-          : `/tasks?task=${id}`,
-  }))
-  const [taskCount] = access.tasks ? await tx.execute<{ overdue: number; open: number }>(sql`
-    select count(*) filter (where due_at < now())::int as overdue, count(*)::int as open
-    from task where organization_id=${orgId} and status='open'
-    and (${access.allTasks} or assignee_user_id=${userId})`) : []
-  const [conversations] = access.conversations ? await tx.execute<{ unread: number; waiting: number; human: number }>(sql`
-    with operative as (
-      select c.unread_count, c.agent_status, exists (
-        select 1 from message i where i.organization_id=${orgId} and i.conversation_id=c.id and i.direction='in'
-          and not exists (select 1 from message o where o.organization_id=${orgId} and o.conversation_id=c.id
-            and o.direction='out' and o.status in ('sent','delivered','read')
-            and coalesce(o.external_id,'') not like 'mock-%' and o.created_at >= i.created_at)
-      ) as waiting from conversation c where c.organization_id=${orgId} and c.status='open'
-    ) select count(*) filter(where unread_count > 0)::int as unread,
-      count(*) filter(where waiting)::int as waiting,
-      count(*) filter(where agent_status='off' and waiting)::int as human from operative`) : []
-  const budgets = access.finance || access.clinical ? await tx.execute<{ id: string; patientId: string; patientName: string; title: string; presentedAt: string | null }>(sql`
-    select b.id, b.patient_id as "patientId", p.display_name as "patientName", b.title, b.presented_at as "presentedAt"
+          : `/tasks?task=${task.id}`,
+  })
+  return { overdue: overdue.map(place), next: next ? place(next) : null, open: count?.open ?? 0 }
+}
+
+/** Presupuestos presentados o pospuestos que siguen sin respuesta; quien atiende, solo los de sus planes. */
+async function waitingBudgets(tx: Db, orgId: string, userId: string, ownOnly: boolean): Promise<WaitingBudgets> {
+  const scope = sql`b.organization_id=${orgId} and b.status in ('presentado','pospuesto')
+    and (not ${ownOnly} or exists (select 1 from treatment_plan tp
+      where tp.id=b.plan_id and tp.organization_id=${orgId} and tp.created_by=${userId}))`
+  const items = await tx.execute<WaitingBudgets["items"][number]>(sql`
+    select b.id, b.patient_id as "patientId", p.display_name as "patientName", b.title,
+      ${iso(sql`b.presented_at`)} as "presentedAt"
     from treatment_budget b join patient p on p.id=b.patient_id and p.organization_id=${orgId}
-    where b.organization_id=${orgId} and b.status in ('presentado','pospuesto')
-    order by b.presented_at nulls last, b.id limit 8`) : []
-  const debt = access.finance ? await currentDebt(tx, orgId) : []
-  const agent = access.agent ? await workspaceAgent(tx, orgId, timezone) : null
+    where ${scope} order by b.presented_at nulls last, b.id limit 20`)
+  const [count] = await tx.execute<{ total: number; oldestPresentedAt: string | null }>(sql`
+    select count(*)::int as total, ${iso(sql`min(b.presented_at)`)} as "oldestPresentedAt" from treatment_budget b where ${scope}`)
+  return { total: count?.total ?? 0, oldestPresentedAt: count?.oldestPresentedAt ?? null, items }
+}
+
+/**
+ * Inicio responde «¿qué me toca hoy?» con dos bloques: `waiting`, la lista
+ * «Te espera» ya ordenada, y lo de hoy según el trabajo de quien mira
+ * (`today`, la agenda de la sede o sus propias citas; `cash`, la caja del
+ * día). Cada parte se calcula solo si `access` la permite: un rol no recibe
+ * filas de lo que no puede ver.
+ */
+export async function getWorkspaceHome(tx: Db, orgId: string, userId: string, access: WorkspaceAccess, options: WorkspaceHomeOptions = {}) {
+  const { timezone, locale } = await workspaceZone(tx, orgId)
+  const [day] = await tx.execute<{ date: string }>(sql`select to_char(now() at time zone ${timezone}, 'YYYY-MM-DD') as date`)
+  const dayEnd = sql`((${day.date}::date + 1)::timestamp at time zone ${timezone})`
+  const needsBranch = access.appointments || access.finance
+  const { branch, many } = needsBranch ? await homeBranch(tx, orgId, options.branchId) : { branch: null, many: false }
+
+  const today = access.appointments ? await workspaceToday(tx, orgId, userId, access.ownAppointments, branch, timezone) : null
+  const cash = access.finance && branch ? await getCashToday(tx, orgId, { branchId: branch.id }) : null
+
+  const proposals = access.agent ? await waitingProposals(tx, orgId) : { items: [], total: 0 }
+  const tasks = access.tasks ? await waitingTasks(tx, orgId, userId, access, dayEnd) : { overdue: [], next: null, open: 0 }
+  // A lo sumo tres recomendaciones a la vez, como declara la ficha del asesor.
+  const advice = options.can ? (await getAdvisorRecommendations(tx, orgId, options.can)).recommendations : []
+  const waiting = composeWaiting({
+    cases: access.agent ? await waitingCases(tx, orgId, userId, access.allTasks) : [],
+    proposals: proposals.items,
+    proposalsTotal: proposals.total,
+    conversations: access.conversations ? await waitingConversations(tx, orgId) : null,
+    overdueTasks: tasks.overdue,
+    nextTask: tasks.next,
+    openTasks: tasks.open,
+    advice: advice.map(({ key, title, detail }) => ({ key, title, detail })),
+    budgets: access.finance || access.clinical ? await waitingBudgets(tx, orgId, userId, access.ownAppointments) : null,
+  })
+
   // La puesta en marcha consulta capacidades existentes, no deduce configuración
   // a partir de contadores operativos en cero. Solo administración recibe estos datos.
   const [setup] = access.configure ? await tx.execute<{ availability: boolean; chairs: boolean; patients: boolean }>(sql`
     select exists(select 1 from professional_schedule where organization_id=${orgId} and is_active) as availability,
       exists(select 1 from schedule_chair where organization_id=${orgId} and is_active) as chairs,
       exists(select 1 from patient where organization_id=${orgId}) as patients`) : []
-  const [activity] = await tx.execute<{ recorded: boolean; completedToday: boolean }>(sql`
+  // Con trabajo ya registrado, Inicio deja de ofrecer la puesta en marcha.
+  const [activity] = await tx.execute<{ recorded: boolean }>(sql`
     select (
       ${access.appointments} and exists(select 1 from appointment where organization_id=${orgId})
       or ${access.tasks} and exists(select 1 from task where organization_id=${orgId} and (${access.allTasks} or assignee_user_id=${userId}))
@@ -434,88 +346,9 @@ export async function getWorkspaceHome(tx: Db, orgId: string, userId: string, ac
       or ${access.crm} and exists(select 1 from opportunity where organization_id=${orgId})
       or ${access.agent} and exists(select 1 from agent_run_ledger where organization_id=${orgId})
       or ${access.agent} and exists(select 1 from agent_proposal where organization_id=${orgId})
-    ) as recorded, (
-      ${access.appointments} and exists(select 1 from appointment where organization_id=${orgId}
-        and status='atendida' and starts_at >= ${start} and starts_at < ${end})
-      or ${access.tasks} and exists(select 1 from task where organization_id=${orgId}
-        and (${access.allTasks} or assignee_user_id=${userId}) and status='done' and updated_at >= ${start} and updated_at < ${end})
-      or ${access.finance} and exists(select 1 from patient_payment where organization_id=${orgId}
-        and voided_at is null and paid_at >= ${start} and paid_at < ${end})
-      or ${access.conversations} and exists(select 1 from audit_event where organization_id=${orgId}
-        and entity='conversation' and action='conversation.updated' and metadata->>'op'='close'
-        and created_at >= ${start} and created_at < ${end})
-    ) as "completedToday"`)
-  return { date: day.date, timezone, locale, access, appointments, appointmentCounts, tasks,
-    taskCount: taskCount ?? null, conversations: conversations ?? null, budgets, debt, agent,
-    setup: setup ?? null, activity }
-}
-
-async function currentDebt(tx: Db, orgId: string) {
-  return tx.execute<{ currency: string; outstandingCents: string; overdueCents: string; patients: number }>(sql`
-    with balances as (
-      select c.patient_id, c.currency, c.due_at, c.amount_cents - coalesce(sum(a.amount_cents),0) as remaining
-      from patient_charge c left join patient_payment_application a on a.charge_id=c.id
-        and a.organization_id=${orgId} and a.voided_at is null
-      where c.organization_id=${orgId} and c.voided_at is null
-      group by c.id
-    ) select currency, sum(remaining)::text as "outstandingCents",
-      coalesce(sum(remaining) filter (where due_at < now()),0)::text as "overdueCents",
-      count(distinct patient_id)::int as patients from balances where remaining > 0 group by currency order by currency`)
-}
-
-export async function getManagementReport(tx: Db, orgId: string, from: string, to: string, access: WorkspaceAccess) {
-  const { timezone, locale } = await workspaceZone(tx, orgId)
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to) || from > to ||
-    !Number.isFinite(Date.parse(from)) || !Number.isFinite(Date.parse(to)) ||
-    Date.parse(to) - Date.parse(from) > 366 * 86_400_000) throw validation("Elige un período válido de hasta un año")
-  const start = sql`(${from}::date::timestamp at time zone ${timezone})`
-  const end = sql`((${to}::date + 1)::timestamp at time zone ${timezone})`
-  const appointments = await tx.execute<{ status: string; count: number }>(sql`
-    select status, count(*)::int as count from appointment where organization_id=${orgId}
-    and starts_at >= ${start} and starts_at < ${end} group by status order by status`)
-  const production = await tx.execute<{ userId: string; name: string; attended: number; total: number }>(sql`
-    select a.dentist_user_id as "userId", u.name,
-      count(*) filter(where a.status='atendida')::int as attended, count(*)::int as total
-    from appointment a join "user" u on u.id=a.dentist_user_id
-    where a.organization_id=${orgId} and a.starts_at >= ${start} and a.starts_at < ${end}
-    group by a.dentist_user_id, u.name order by attended desc, u.name`)
-  const budgets = await tx.execute<{ status: string; count: number }>(sql`
-    select status, count(*)::int as count from treatment_budget where organization_id=${orgId}
-    and presented_at >= ${start} and presented_at < ${end} group by status order by status`)
-  const collections = await tx.execute<{ currency: string; receivedCents: string; refundedCents: string; netCents: string }>(sql`
-    with movements as (
-      select currency, amount_cents::bigint as received, 0::bigint as refunded from patient_payment
-      where organization_id=${orgId} and voided_at is null and paid_at >= ${start} and paid_at < ${end}
-      union all
-      select p.currency, 0::bigint, r.amount_cents::bigint from patient_payment_refund r
-      join patient_payment p on p.id=r.payment_id and p.organization_id=${orgId}
-      where r.organization_id=${orgId} and r.refunded_at >= ${start} and r.refunded_at < ${end}
-    ) select currency, sum(received)::text as "receivedCents", sum(refunded)::text as "refundedCents",
-      (sum(received)-sum(refunded))::text as "netCents" from movements group by currency order by currency`)
-  const clinicalProduction = await tx.execute<{ name: string; currency: string | null; procedures: number; amountCents: string }>(sql`
-    select u.name, p.currency, count(*)::int as procedures,
-      coalesce(sum(p.price_cents),0)::text as "amountCents"
-    from encounter_procedure p join encounter e on e.id=p.encounter_id and e.organization_id=${orgId}
-    join "user" u on u.id=e.dentist_user_id
-    where p.organization_id=${orgId} and e.status='finalizada' and p.voided_at is null
-      and e.finalized_at >= ${start} and e.finalized_at < ${end}
-    group by e.dentist_user_id, u.name, p.currency order by u.name, p.currency`)
-  const opportunities = await tx.execute<{ status: string; currency: string; count: number; amountCents: string }>(sql`
-    select status, currency, count(*)::int as count, coalesce(sum(amount_cents),0)::text as "amountCents"
-    from opportunity where organization_id=${orgId} and created_at >= ${start} and created_at < ${end}
-    group by status, currency order by currency, status`)
-  const aging = await tx.execute<{ currency: string; bucket: string; amountCents: string }>(sql`
-    with balances as (
-      select c.currency, c.due_at, c.amount_cents-coalesce(sum(a.amount_cents),0) as remaining
-      from patient_charge c left join patient_payment_application a on a.charge_id=c.id
-        and a.organization_id=${orgId} and a.voided_at is null
-      where c.organization_id=${orgId} and c.voided_at is null group by c.id
-    ) select currency, case when due_at is null then 'Sin vencimiento'
-      when due_at >= now() then 'Por vencer' when due_at >= now()-interval '30 days' then '1–30 días'
-      when due_at >= now()-interval '60 days' then '31–60 días'
-      when due_at >= now()-interval '90 days' then '61–90 días' else 'Más de 90 días' end as bucket,
-      sum(remaining)::text as "amountCents" from balances where remaining>0 group by currency, bucket order by currency, bucket`)
-  return { from, to, timezone, locale, appointments, production, clinicalProduction, opportunities, aging, budgets, collections, debt: await currentDebt(tx, orgId), performance: await crmPerformance(tx, orgId, access, start, end) }
+    ) as recorded`)
+  return { date: day.date, timezone, locale, access, multiBranch: many, waiting, today, cash,
+    setup: setup ?? null, activity: { recorded: activity?.recorded ?? false } }
 }
 
 export async function listWorkspaceAudit(tx: Db, orgId: string, input: { action?: string; before?: string; beforeId?: string }) {

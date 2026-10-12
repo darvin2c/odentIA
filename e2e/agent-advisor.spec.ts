@@ -38,7 +38,7 @@ test("asesor: vista previa, encenderlo, recomendación en Inicio con su lista y 
   await page.setViewportSize({ width: 1440, height: 900 })
   await gotoHydrated(page, tenant(org.slug, "/home"))
   await expect(page.getByRole("heading", { level: 1, name: "Inicio" })).toBeVisible()
-  await expect(page.getByRole("region", { name: "Para atender hoy" })).toHaveCount(0)
+  await expect(page.getByRole("region", { name: "Te espera" })).not.toContainText("Lo recomienda el asesor")
 
   await gotoHydrated(page, tenant(org.slug, "/agent"))
   const row = page.getByRole("region", { name: "Tus agentes" }).getByRole("listitem").filter({ hasText: "Asesor" })
@@ -51,7 +51,7 @@ test("asesor: vista previa, encenderlo, recomendación en Inicio con su lista y 
   await expect(page.getByRole("region", { name: "Cómo se comporta" })).toContainText("cada recomendación es una consulta a los datos de la clínica")
   await expect(page.getByRole("region", { name: "Qué aprende, y de quién es" })).toContainText("«No me interesa» oculta esa detección una semana.")
   const detects = page.getByRole("region", { name: "Qué hace" })
-  await expect(detects.getByRole("switch")).toHaveCount(5)
+  await expect(detects.getByRole("switch")).toHaveCount(7)
   const preview = page.getByRole("region", { name: "Cómo se prueba" })
   await expect(preview).toContainText("Con una vista previa de lo que recomendaría hoy, antes de encenderlo.")
   await expect(preview).toContainText("1 control vencido de un paciente sin cita")
@@ -79,16 +79,17 @@ test("asesor: vista previa, encenderlo, recomendación en Inicio con su lista y 
 
   // --- Inicio: la recomendación con su lista, cómo se calculó y la acción preparada ---
   await gotoHydrated(page, tenant(org.slug, "/home"))
-  const today = page.getByRole("region", { name: "Para atender hoy" })
-  await expect(today).toContainText("2 recomendaciones del asesor")
+  // Las recomendaciones son filas de «Te espera», junto a lo demás que necesita a una persona.
+  const today = page.getByRole("region", { name: "Te espera" })
+  await expect(today.getByRole("listitem").filter({ hasText: "Lo recomienda el asesor" })).toHaveCount(2)
   const card = today.getByRole("listitem").filter({ hasText: "1 control vencido de un paciente sin cita" })
-  await expect(card).toContainText("Controles")
-  // La tarjeta dice el estado real de la automatización, sin haber tocado nada.
+  const openList = card.getByRole("button", { name: /Ver la lista$/ })
+  // La fila dice el estado real de la automatización, sin haber tocado nada.
   await expect(card).toContainText("El recordatorio de control está apagado.")
   const rules = () => call<Array<{ kind: string; enabled: boolean; name: string }>>(page, "GET", "/api/automations/rules", org.slug)
   expect(await rules()).toEqual([])
   await info.attach("inicio-asesor", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" })
-  await card.getByRole("button", { name: "Revisar y decidir" }).click()
+  await openList.click()
   const drawer = sideSurface(page, { name: "Recomendación del asesor", exact: true })
   await expect(drawer).toContainText("Controles pendientes con fecha vencida")
   await expect(drawer).toContainText("Los números salen de la base de datos, no de un modelo.")
@@ -120,18 +121,18 @@ test("asesor: vista previa, encenderlo, recomendación en Inicio con su lista y 
   await drawer.getByRole("button", { name: "Cerrar" }).click()
   await expect(drawer).toBeHidden()
 
-  // --- Teléfono (390 px): tarjetas, detalle y encender el recordatorio, sin desbordes ---
+  // --- Teléfono (390 px): filas, detalle y encender el recordatorio, sin desbordes ---
   await page.setViewportSize({ width: 390, height: 844 })
   await gotoHydrated(page, tenant(org.slug, "/home"))
-  const review = card.getByRole("button", { name: "Revisar y decidir" })
+  const review = openList
   expect((await review.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44)
-  expect((await card.getByRole("button", { name: "No me interesa" }).boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44)
   expect(await overflow(page)).toBeLessThanOrEqual(0)
   await info.attach("inicio-asesor-movil", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" })
   await review.click()
   const turnOn = drawer.getByRole("button", { name: "Encender recordatorio" })
   await expect(turnOn).toBeVisible()
-  for (const button of [turnOn, drawer.getByRole("button", { name: "Solo crear 1 tarea de llamada" }), drawer.getByRole("button", { name: "No volver a mostrar" })]) {
+  // «No me interesa» vive en el detalle, junto a «No volver a mostrar»: la fila entera es un solo control.
+  for (const button of [turnOn, drawer.getByRole("button", { name: "Solo crear 1 tarea de llamada" }), drawer.getByRole("button", { name: "No me interesa" }), drawer.getByRole("button", { name: "No volver a mostrar" })]) {
     expect((await button.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44)
   }
   expect(await overflow(page)).toBeLessThanOrEqual(0)
@@ -158,21 +159,21 @@ test("asesor: vista previa, encenderlo, recomendación en Inicio con su lista y 
   const [rule] = await call<Array<{ id: string }>>(page, "GET", "/api/automations/rules", org.slug)
   await call(page, "PATCH", `/api/automations/rules/${rule?.id}`, org.slug, { enabled: false })
 
-  // Recepción no administra el agente: ve la tarjeta completa, sin «No me interesa» ni huecos.
+  // Recepción no administra el agente: ve la fila completa y, en el detalle, nada para ocultarla.
   await fixtureDb.update(member).set({ role: "reception" })
     .where(and(eq(member.organizationId, org.id), eq(member.userId, owner.user.id)))
   await gotoHydrated(page, tenant(org.slug, "/home"))
   await expect(card).toContainText("El recordatorio de control está apagado.")
-  await expect(today.getByRole("button", { name: "No me interesa" })).toHaveCount(0)
-  const alone = card.getByRole("button", { name: "Revisar y decidir" })
+  const alone = openList
   const [aloneBox, cardBox] = [await alone.boundingBox(), await card.boundingBox()]
-  // El botón ocupa el ancho útil de la tarjeta (su relleno es de 16 px por lado).
+  // Toda la fila es el control: ocupa su ancho.
   expect(aloneBox?.width ?? 0).toBeGreaterThanOrEqual((cardBox?.width ?? 0) - 36)
   expect(await overflow(page)).toBeLessThanOrEqual(0)
   await info.attach("inicio-recepcion-movil", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" })
   await alone.click()
   await expect(drawer.getByRole("button", { name: "Encender recordatorio" })).toBeVisible()
   await expect(drawer.getByRole("button", { name: "No volver a mostrar" })).toHaveCount(0)
+  await expect(drawer.getByRole("button", { name: "No me interesa" })).toHaveCount(0)
   await expect(drawer).not.toContainText("¿No te sirve esta recomendación?")
   await info.attach("recomendacion-recepcion-movil", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
   await drawer.getByRole("button", { name: "Cerrar" }).click()
@@ -183,12 +184,14 @@ test("asesor: vista previa, encenderlo, recomendación en Inicio con su lista y 
   // «No me interesa»: se oculta una semana para toda la clínica.
   await page.setViewportSize({ width: 1440, height: 900 })
   await gotoHydrated(page, tenant(org.slug, "/home"))
-  await card.getByRole("button", { name: "No me interesa" }).click()
+  await openList.click()
+  await drawer.getByRole("button", { name: "No me interesa" }).click()
   await page.getByRole("alertdialog", { name: "Ocultarla una semana" }).getByRole("button", { name: "Ocultar 7 días" }).click()
-  await expect(today).toContainText("1 recomendación del asesor")
+  await expect(drawer).toBeHidden()
+  await expect(today.getByRole("listitem").filter({ hasText: "Lo recomienda el asesor" })).toHaveCount(1)
   await expect(today).not.toContainText("control vencido")
   // Sin automatización equivalente, la acción principal es crear las tareas.
-  await today.getByRole("button", { name: "Revisar y decidir" }).click()
+  await today.getByRole("button", { name: /Ver la lista$/ }).click()
   await expect(drawer).toContainText("Oportunidades abiertas que no tienen a nadie del equipo asignado.")
   await expect(drawer.getByRole("button", { name: "Crear 1 tarea", exact: true })).toBeVisible()
   await expect(drawer.getByRole("button", { name: /Encender/ })).toHaveCount(0)

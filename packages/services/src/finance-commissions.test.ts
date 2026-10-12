@@ -14,7 +14,6 @@ import { expect, it } from "vitest"
 import { clinicalFixture } from "./clinical-test-fixture.js"
 import {
   getMonthlyCommissions,
-  getMonthlyFinanceResult,
   listExpenses,
   listMonthCommissions,
   payMonthCommission,
@@ -24,6 +23,7 @@ import {
 } from "./finance.js"
 import { collectCharge, createCharge, refundCredit, voidTicket } from "./payments.js"
 import { createPromotion } from "./promotions.js"
+import { getReportMoney } from "./reports.js"
 import { createPaymentMethod } from "./payment-methods.js"
 import { ownerDb, setupTestDb } from "./test-setup.js"
 setupTestDb()
@@ -315,8 +315,7 @@ it("resultado del mes concilia cobrado, gastos y deuda sin aportes como ingreso"
       requestId: randomUUID(),
     }),
   )
-  const period = currentPeriod()
-  const result = await f.run((tx) => getMonthlyFinanceResult(tx, "org_a", { ...period, branchId }))
+  const result = await f.run((tx) => getReportMoney(tx, "org_a", { period: "este_mes", branchId }))
   const pen = result.byCurrency.find((b) => b.currency === "PEN")
   expect(pen?.cobradoCents).toBe(19900)
   expect(pen?.netoCents).toBe(19900)

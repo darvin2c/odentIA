@@ -948,14 +948,14 @@ function CashTab({
     const todayRows: Array<{ row: DebtRow; at: string }> = []
     const before: DebtRow[] = []
     for (const row of debtRows) {
-      const at = attendedTodayAt(row, zone, today)
+      const at = attendedTodayAt(row)
       if (at) todayRows.push({ row, at })
       else before.push(row)
     }
     todayRows.sort((a, b) => Date.parse(a.at) - Date.parse(b.at))
     before.sort(byOldest)
     return { attended: todayRows, earlier: before }
-  }, [debtRows, zone, today])
+  }, [debtRows])
 
   if (
     (cash.isError && isForbidden(cash.error)) ||

@@ -216,9 +216,9 @@ test("panel del agente: decidir, tomar derivadas y ver actividad desde cualquier
   })
   // Inicio la ofrece al equipo, no como espera del interlocutor.
   await gotoHydrated(page, tenant(org.slug, "/home"))
-  const homeCard = page.getByRole("listitem").filter({ hasText: "Plantilla seguimiento_presupuesto" })
-  await expect(homeCard).toContainText("Espera tu aprobación")
-  await expect(homeCard.getByRole("button", { name: "Revisar y aprobar" })).toBeVisible()
+  const homeCard = page.getByRole("region", { name: "Te espera" }).getByRole("listitem").filter({ hasText: "Plantilla seguimiento_presupuesto" })
+  await expect(homeCard).toContainText("El agente espera tu aprobación")
+  await expect(homeCard.getByRole("button", { name: /Revisar$/ })).toBeVisible()
   // Aprobaciones permite decidirla y abre la oportunidad como caso.
   await gotoHydrated(page, tenant(org.slug, "/agent/approvals"))
   const approvalCard = page.getByRole("listitem").filter({ hasText: "Ortodoncia sin hilo" })

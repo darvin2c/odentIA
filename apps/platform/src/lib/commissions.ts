@@ -1,5 +1,5 @@
 /**
- * Comisiones de los profesionales y resultado del mes: cliente tipado de
+ * Comisiones de los profesionales: cliente tipado de
  * `/api/commissions`. Los tipos replican las respuestas del servidor (fechas
  * serializadas como ISO). La moneda no se pide: es la de la clínica y viene en
  * cada respuesta; el servidor decide permisos, importes y estados.
@@ -302,69 +302,4 @@ export function voidCommissionPaymentApi(id: string, reason: string): Promise<un
     method: "POST",
     body: JSON.stringify({ reason }),
   })
-}
-
-// --- Resultado del mes ------------------------------------------------------------
-
-export interface MonthlyResultBucket {
-  currency: string
-  /** Cobrado bruto del mes. */
-  cobradoCents: number
-  devolucionesCents: number
-  anulacionesCents: number
-  /** Cobrado ya descontadas devoluciones y anulaciones: lo que la pantalla llama «Cobrado». */
-  netoCents: number
-  gastadoCents: number
-  quedaCents: number
-  /** Efectivo neto del mes (cobros en efectivo menos lo devuelto o anulado). */
-  efectivoCents: number
-  byMethod: Array<{ key: string; label: string; cash: boolean; cents: number }>
-  byCategory: Array<{ category: string; cents: number }>
-}
-
-export interface MonthlyFinanceResult {
-  year: number
-  month: number
-  timezone: string
-  locale: string
-  branchId: string | null
-  branchName: string | null
-  byCurrency: MonthlyResultBucket[]
-  byProfessional: Array<{
-    professionalUserId: string
-    name: string | null
-    currency: string
-    cobradoCents: number
-  }>
-  byPromotion: Array<{
-    promotionId: string
-    name: string
-    currency: string
-    veces: number
-    cobradoCents: number
-    /** «from»: promoción «desde», con precio distinto en cada caso. */
-    mode?: "fixed" | "from" | null
-    /** Precio promedio pactado; el servidor lo calcula. */
-    averageCents?: number | null
-  }>
-  outstanding: Array<{ currency: string; pendienteCents: number; pacientes: number }>
-  /** Cierres de caja hechos en el mes, sumados por moneda. */
-  closures: Array<{
-    currency: string
-    cierres: number
-    /** Cobros en efectivo de esas ventanas. */
-    efectivoCents: number
-    /** Efectivo devuelto a pacientes en esas ventanas. */
-    efectivoDevueltoCents: number
-    gastosCajaCents: number
-    diferenciasCents: number
-  }>
-}
-
-export function fetchMonthlyFinanceResult(
-  query: YearMonth & { branchId?: string },
-): Promise<{ data: MonthlyFinanceResult }> {
-  const params = monthParams(query)
-  if (query.branchId) params.set("branchId", query.branchId)
-  return apiFetch<{ data: MonthlyFinanceResult }>(`/api/commissions/monthly-result?${params}`)
 }

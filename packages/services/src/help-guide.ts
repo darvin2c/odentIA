@@ -35,7 +35,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     path: "/home",
     title: "Inicio",
     parent: null,
-    purpose: "Tu jornada de un vistazo: lo pendiente de ti, las citas de hoy, las tareas y lo que recomienda el asesor.",
+    purpose: "Lo que te toca hoy. «Te espera» reúne en una lista, por orden de urgencia, los casos que pasó el agente, lo que espera tu aprobación, las conversaciones sin responder, las tareas, lo que recomienda el asesor y los presupuestos sin respuesta. Al lado, tu día: la agenda de la sede, tus pacientes o la caja, según tu trabajo.",
     terms: ["resumen del día", "pendientes", "panel", "dashboard", "qué tengo hoy", "recomendaciones"],
   },
   {
@@ -166,8 +166,8 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     path: "/reports",
     title: "Reportes",
     parent: "Gestión",
-    purpose: "Los números de la clínica en un periodo: citas, atención de conversaciones, oportunidades y cobros.",
-    terms: ["estadísticas", "indicadores", "métricas", "informes", "gráficos", "cuántas citas", "ventas del mes"],
+    purpose: "Cómo va la clínica en un periodo, comparado con el anterior: dinero, agenda, pacientes y ventas, y atención a quien escribe. Cada cifra abre la lista que la respalda.",
+    terms: ["estadísticas", "indicadores", "métricas", "informes", "gráficos", "cuántas citas", "ventas del mes", "inasistencias", "pacientes nuevos", "presupuestos aceptados", "resultado del mes", "cuánto queda"],
   },
   {
     id: "organizacion",

@@ -227,16 +227,12 @@ test("crm agente: una corrida que no respondió queda a la vista para revisión"
   await expect(run).not.toContainText("Ejecución correcta")
   await info.attach("actividad-sin-respuesta", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" })
 
-  const home = await call<{ agent: { today: { runs: number; ok: number; sinRespuesta: number } } | null }>(
-    page,
-    "GET",
-    "/api/workspace/home",
-    org.slug,
-  )
-  expect(home.agent?.today).toMatchObject({ runs: 1, ok: 0, sinRespuesta: 1 })
+  // Las cifras de corridas del agente viven en Agente; Inicio ya no las repite ni las pide.
+  const home = await call<Record<string, unknown>>(page, "GET", "/api/workspace/home", org.slug)
+  expect(home).not.toHaveProperty("agent")
   await gotoHydrated(page, tenant(org.slug, "/home"))
-  await expect(page.getByRole("region", { name: "El agente hoy" })).toContainText("Necesitan revisión")
-  await info.attach("inicio-sin-respuesta", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" })
+  await expect(page.getByRole("heading", { level: 1, name: "Inicio" })).toBeVisible()
+  await expect(page.getByRole("region", { name: "El agente hoy" })).toHaveCount(0)
 })
 
 test("crm derivación: recepción ve plazo y toma un caso de la cola", async ({

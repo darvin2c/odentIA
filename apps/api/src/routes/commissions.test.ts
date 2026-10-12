@@ -11,6 +11,7 @@ import { Hono, type Next } from "hono"
 import { GenericContainer, type StartedTestContainer, Wait } from "testcontainers"
 import { afterAll, beforeAll, expect, it } from "vitest"
 import { createCommissionsRoute } from "./commissions.js"
+import { createReportsRoute } from "./reports.js"
 import type { CrmDeps } from "./helpers.js"
 
 const IMAGE = "dentalagent-postgres:18.6"
@@ -67,6 +68,7 @@ function buildApp(role: string, userId: string): Hono {
   const app = new Hono()
   app.use("*", stubOrg(role, userId))
   app.route("/commissions", createCommissionsRoute(deps))
+  app.route("/reports", createReportsRoute(deps))
   return app
 }
 
@@ -125,7 +127,7 @@ it("sin commissions.read no hay acceso", async () => {
   const app = buildApp("member", MEMBER)
   const monthly = await app.request("/commissions/my?year=2026&month=9&currency=PEN")
   expect(monthly.status).toBe(403)
-  const result = await app.request("/commissions/monthly-result?year=2026&month=9")
+  const result = await app.request("/reports/money?period=2026-09")
   expect(result.status).toBe(403)
 })
 
@@ -137,7 +139,7 @@ it("el odontólogo ve solo las suyas y no administra", async () => {
     `/commissions/monthly?professionalUserId=${OTHER}&year=2026&month=9&currency=PEN`,
   )
   expect(other.status).toBe(403)
-  const result = await app.request("/commissions/monthly-result?year=2026&month=9")
+  const result = await app.request("/reports/money?period=2026-09")
   expect(result.status).toBe(403)
   const rate = await app.request("/commissions/rates", {
     method: "PUT",
@@ -173,9 +175,9 @@ it("administración fija el porcentaje y ve el mes; caja no ve comisiones ni el 
   const rows = ((await month.json()) as { data: Array<{ professionalUserId: string; rateBps: number }> }).data
   // Con porcentaje fijado aparece en el mes aunque aún no tenga cobros.
   expect(rows.find((row) => row.professionalUserId === DENTIST)?.rateBps).toBe(4000)
-  expect((await admin.request("/commissions/monthly-result?year=2026&month=9")).status).toBe(200)
+  expect((await admin.request("/reports/money?period=2026-09")).status).toBe(200)
   const cashier = buildApp("cashier", CASHIER)
-  const result = await cashier.request("/commissions/monthly-result?year=2026&month=9")
+  const result = await cashier.request("/reports/money?period=2026-09")
   expect(result.status).toBe(403)
   const commissions = await cashier.request("/commissions/my?year=2026&month=9&currency=PEN")
   expect(commissions.status).toBe(403)

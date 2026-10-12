@@ -3,7 +3,8 @@ import { type AgentAdvisorSettings, agentConfig, crmTask } from "@odentia/db/sch
 import { auditEvent } from "@odentia/db/schema/org"
 import type { AutomationKind } from "@odentia/db/schema/automation"
 import { and, eq, sql } from "drizzle-orm"
-import { CHECKUP_REMINDER_WINDOW_HOURS, listRules } from "./automation.js"
+import { CHECKUP_REMINDER_WINDOW_HOURS } from "./automation-windows.js"
+import { listRules } from "./automation.js"
 import { notFound, ServiceError, validation } from "./errors.js"
 import { formatOrgMoney, getOrgLocale, type OrgLocale } from "./locale.js"
 import { createTask } from "./tasks.js"
@@ -150,6 +151,40 @@ export const ADVISOR_DETECTIONS: readonly AdvisorDetection[] = [
     taskTitle: (item) => `Llamar a ${item.personName} por lo que debe`,
     taskNoun: CALL_TASK,
     automation: null,
+  },
+  {
+    key: "inasistencias_sin_cita",
+    area: "Agenda",
+    label: "Inasistencias sin otra cita",
+    description: "Personas que faltaron a su cita en los últimos días y no tienen otra.",
+    permission: "appointments.read",
+    defaultDays: 30,
+    taskTitle: (item) => `Llamar a ${item.personName} para reagendar su cita`,
+    taskNoun: CALL_TASK,
+    automation: {
+      kind: "recordatorio_cita",
+      label: "recordatorio de cita",
+      shortLabel: "recordatorio",
+      // La regla avisa antes de la cita (`recordatorio_cita`); no escribe a quien ya faltó.
+      reach: "antes de cada cita a quien dio su consentimiento para recordatorios. No escribe a quienes ya faltaron",
+    },
+  },
+  {
+    key: "presupuestos_sin_respuesta",
+    area: "Presupuestos",
+    label: "Presupuestos sin respuesta",
+    description: "Presupuestos presentados hace días que el paciente todavía no responde.",
+    permission: "budgets.read",
+    defaultDays: 7,
+    taskTitle: (item) => `Llamar a ${item.personName} por su presupuesto`,
+    taskNoun: CALL_TASK,
+    automation: {
+      kind: "seguimiento_presupuesto",
+      label: "seguimiento de presupuesto",
+      shortLabel: "seguimiento",
+      // La regla escribe una vez por presupuesto presentado (`syncBudgetFollowUps`); no por los pospuestos.
+      reach: "una vez a quien tiene un presupuesto presentado sin respuesta y dio su consentimiento para seguimientos. No escribe por los pospuestos",
+    },
   },
 ] as const
 
@@ -428,12 +463,76 @@ async function overdueCollections(tx: Db, orgId: string, zone: OrgLocale, days: 
   }
 }
 
+/** Quien faltó hace poco y no tiene otra cita: cada persona una vez, con su inasistencia más reciente. */
+async function noShowsWithoutAppointment(tx: Db, orgId: string, zone: OrgLocale, days: number): Promise<DetectionResult> {
+  const rows = await tx.execute<{ id: string; patient_id: string; name: string; service: string | null; starts_at: Date | string; total: number }>(sql`
+    with missed as (
+      select distinct on (m.patient_id) m.id, m.patient_id, m.service_name, m.starts_at
+      from appointment m
+      where m.organization_id = ${orgId} and m.status = 'no_asistio'
+        and m.starts_at >= now() - make_interval(days => ${days}) and m.starts_at < now()
+      order by m.patient_id, m.starts_at desc
+    ) select missed.id, p.id as patient_id, p.display_name as name, missed.service_name as service, missed.starts_at,
+           count(*) over ()::int as total
+    from missed
+    join patient p on p.id = missed.patient_id and p.organization_id = ${orgId}
+    where p.is_active and ${NO_FUTURE_APPOINTMENT}
+    order by missed.starts_at desc
+    limit ${ADVISOR_LIST_LIMIT}`)
+  const total = Number(rows[0]?.total ?? 0)
+  return {
+    total,
+    items: rows.map((row) => ({
+      id: row.id,
+      personName: row.name,
+      line: `${row.service ?? "Cita"} · faltó el ${dayOf(row.starts_at, zone)}`,
+      patientId: row.patient_id,
+      contactId: null,
+      opportunityId: null,
+    })),
+    title: `${total} ${plural(total, "persona faltó", "personas faltaron")} a su cita en los últimos ${days} días y no ${plural(total, "tiene", "tienen")} otra`,
+    detail: "Ordenadas de la inasistencia más reciente a la más antigua.",
+    how: `Citas de los últimos ${days} días que quedaron como «No asistió», de pacientes activos que no tienen una cita programada o confirmada desde ahora. Cada persona cuenta una vez.`,
+  }
+}
+
+async function budgetsWithoutAnswer(tx: Db, orgId: string, zone: OrgLocale, days: number): Promise<DetectionResult> {
+  const rows = await tx.execute<{ id: string; patient_id: string; name: string; title: string; number: number; presented_at: Date | string; total: number }>(sql`
+    select b.id, p.id as patient_id, p.display_name as name, b.title, b.budget_number as number, b.presented_at,
+           count(*) over ()::int as total
+    from treatment_budget b
+    join patient p on p.id = b.patient_id and p.organization_id = b.organization_id
+    where b.organization_id = ${orgId} and b.status in ('presentado', 'pospuesto')
+      and b.presented_at < now() - make_interval(days => ${days})
+      and p.is_active
+    order by b.presented_at asc
+    limit ${ADVISOR_LIST_LIMIT}`)
+  const total = Number(rows[0]?.total ?? 0)
+  return {
+    total,
+    items: rows.map((row) => ({
+      id: row.id,
+      personName: row.name,
+      // Sin importes: quien llama ve el presupuesto mínimo, no sus líneas.
+      line: `Presupuesto N.º ${row.number} · ${row.title} · presentado el ${dayOf(row.presented_at, zone)}`,
+      patientId: row.patient_id,
+      contactId: null,
+      opportunityId: null,
+    })),
+    title: `${total} ${plural(total, "presupuesto espera", "presupuestos esperan")} respuesta desde hace más de ${days} días`,
+    detail: "Ordenados del más antiguo al más reciente.",
+    how: `Presupuestos presentados hace más de ${days} días que siguen sin respuesta o pospuestos, de pacientes activos.`,
+  }
+}
+
 async function runDetection(tx: Db, orgId: string, key: string, zone: OrgLocale, days: number | null): Promise<DetectionResult> {
   if (key === "controles_vencidos") return overdueControls(tx, orgId, zone)
   if (key === "presupuestos_sin_cita") return budgetsWithoutAppointment(tx, orgId, zone, days ?? 7)
   if (key === "atenciones_sin_firmar") return unsignedEncounters(tx, orgId, zone)
   if (key === "seguimientos_sin_responsable") return followUpsWithoutOwner(tx, orgId, zone)
   if (key === "cobranza_vencida") return overdueCollections(tx, orgId, zone, days ?? 30)
+  if (key === "inasistencias_sin_cita") return noShowsWithoutAppointment(tx, orgId, zone, days ?? 30)
+  if (key === "presupuestos_sin_respuesta") return budgetsWithoutAnswer(tx, orgId, zone, days ?? 7)
   throw notFound("Recomendación")
 }
 

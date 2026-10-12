@@ -2,22 +2,32 @@ import { randomUUID } from "node:crypto"
 import { withOrgContext } from "@odentia/db"
 import { agentHandoff, agentProposal, agentRunLedger } from "@odentia/db/schema/agent"
 import { member, user } from "@odentia/db/schema/auth"
-import { encounter, encounterProcedure, patient, patientCharge, patientPayment, patientPaymentRefund } from "@odentia/db/schema/clinical"
+import { appointment, scheduleChair } from "@odentia/db/schema/agenda"
+import { encounter, encounterProcedure, patient, patientCharge, patientPayment, treatmentBudget, treatmentPlan } from "@odentia/db/schema/clinical"
 import { channelConnection, contact, conversation, crmTask, message, pipeline, pipelineStage } from "@odentia/db/schema/crm"
 import { opportunity } from "@odentia/db/schema/opportunities"
+import { branch } from "@odentia/db/schema/org"
 import { eq, sql } from "drizzle-orm"
 import { beforeAll, expect, it } from "vitest"
 import { appDb, insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
 import { getAgentRunStats, listAgentRuns } from "./agent-operations.js"
-import { createWorkspaceNotification, getManagementReport, getWorkspaceHome, getWorkspacePulse, listWorkspaceAudit, listWorkspaceNotifications, readWorkspaceNotification, type WorkspaceAccess } from "./workspace.js"
+import { countConversationViews } from "./conversations.js"
+import { getDebts } from "./finance.js"
+import { getReportSales, getReportService } from "./reports.js"
+import type { WaitingRow } from "./workspace-home.js"
+import { createWorkspaceNotification, getWorkspaceHome, listWorkspaceAudit, listWorkspaceNotifications, readWorkspaceNotification, type WorkspaceAccess } from "./workspace.js"
 
 setupTestDb()
 const recipient = randomUUID()
 const colleague = randomUUID()
 const outsider = randomUUID()
-const restricted: WorkspaceAccess = { patients: true, appointments: false, conversations: false, tasks: false, finance: false, clinical: false, crm: false, agent: false, allTasks: false, configure: false }
-const full: WorkspaceAccess = { patients: true, appointments: true, conversations: true, tasks: true, finance: true, clinical: true, crm: true, agent: true, allTasks: true, configure: true }
+const restricted: WorkspaceAccess = { patients: true, appointments: false, conversations: false, tasks: false, finance: false, clinical: false, crm: false, agent: false, allTasks: false, configure: false, ownAppointments: false }
+const full: WorkspaceAccess = { patients: true, appointments: true, conversations: true, tasks: true, finance: true, clinical: true, crm: true, agent: true, allTasks: true, configure: true, ownAppointments: false }
+/** Filas de un tipo de «Te espera», ya con su forma. */
+const rowsOf = <K extends WaitingRow["kind"]>(rows: WaitingRow[], kind: K) =>
+  rows.filter((row): row is Extract<WaitingRow, { kind: K }> => row.kind === kind)
 beforeAll(async () => {
+  await ownerDb.insert(branch).values({ organizationId: "org_a", name: "Sede de prueba", timezone: "America/Lima" })
   await ownerDb.insert(user).values([recipient, colleague, outsider].map(id => ({ id, name: "Persona de prueba", email: `${id}@workspace.test`, emailVerified: true })))
   await ownerDb.insert(member).values([
     { id: randomUUID(), organizationId: "org_a", userId: recipient, role: "reception", createdAt: new Date() },
@@ -117,14 +127,19 @@ it("rechaza avisar a una persona que no pertenece a la organización", async () 
 })
 
 
-it("el inicio no revela saldos a un rol sin permiso financiero", async () => {
+it("el inicio no revela la caja ni a quién falta cobrar a un rol sin permiso financiero", async () => {
   const [person] = await ownerDb.insert(patient).values({ organizationId: "org_a", displayName: "Cuenta privada", patientNumber: 403 }).returning()
   await ownerDb.insert(patientCharge).values({ organizationId: "org_a", patientId: person!.id, description: "Cargo", amountCents: 25000, currency: "PEN" })
   const home = await withOrgContext(appDb, "org_a", tx => getWorkspaceHome(tx, "org_a", recipient, restricted))
-  expect(home.debt).toEqual([])
-  expect(home.budgets).toEqual([])
+  expect(home.cash).toBeNull()
+  expect(rowsOf(home.waiting, "budgets")).toEqual([])
   const authorized = await withOrgContext(appDb, "org_a", tx => getWorkspaceHome(tx, "org_a", recipient, { ...restricted, finance: true }))
-  expect(authorized.debt).toEqual([{ currency: "PEN", outstandingCents: "25000", overdueCents: "0", patients: 1 }])
+  // «Por cobrar» es la lista de Finanzas › Caja: las mismas personas que `getDebts` marca como de hoy.
+  const debts = await withOrgContext(appDb, "org_a", tx => getDebts(tx, "org_a", { branchId: authorized.cash!.branchId }))
+  expect(authorized.cash!.toCollect.map(row => row.patientId)).toEqual(debts.filter(row => row.attendedTodayAt).map(row => row.patientId))
+  expect(authorized.cash!.toCollect.find(row => row.patientId === person!.id)).toMatchObject({ displayName: "Cuenta privada", totalCents: 25000, currency: "PEN" })
+  // Pagos sin movimiento de caja no cuentan como cobros del día de esta sede.
+  expect(authorized.cash).toMatchObject({ currency: "PEN", collectedCents: 0, tickets: 0 })
 })
 
 it("Inicio y avisos abren el contexto autorizado de una tarea", async () => {
@@ -150,13 +165,17 @@ it("Inicio y avisos abren el contexto autorizado de una tarea", async () => {
   const authorized = await withOrgContext(appDb, "org_a", tx =>
     getWorkspaceHome(tx, "org_a", recipient, full),
   )
-  expect(authorized.tasks.find((item) => item.id === task!.id)?.href).toBe(
-    `/opportunities/${opp.id}`,
-  )
+  expect(rowsOf(authorized.waiting, "task").find((item) => item.id === task!.id)).toMatchObject({
+    href: `/opportunities/${opp.id}`,
+    due: "overdue",
+    mine: true,
+  })
   const tasksOnly = await withOrgContext(appDb, "org_a", tx =>
     getWorkspaceHome(tx, "org_a", recipient, { ...restricted, tasks: true }),
   )
-  expect(tasksOnly.tasks.find((item) => item.id === task!.id)?.href).toBe(`/tasks?task=${task!.id}`)
+  expect(rowsOf(tasksOnly.waiting, "task").find((item) => item.id === task!.id)?.href).toBe(`/tasks?task=${task!.id}`)
+  // Solo con tareas, la lista no trae nada de otros dominios.
+  expect(tasksOnly.waiting.every((row) => row.kind === "task" || (row.kind === "more" && row.of === "tasks"))).toBe(true)
   const notices = await withOrgContext(appDb, "org_a", tx =>
     listWorkspaceNotifications(tx, "org_a", recipient, ["tasks.read", "crm.read"]),
   )
@@ -178,16 +197,17 @@ it("la auditoría pagina sin saltar eventos del mismo milisegundo", async () => 
   expect(second.next).toBeNull()
 })
 
-it("el inicio muestra la banda del agente con pendientes, derivaciones y corridas de hoy", async () => {
+it("«Te espera» ordena los casos «Ahora», lo que espera aprobación y los casos sin apuro", async () => {
   const home = await withOrgContext(appDb, "org_a", tx => getWorkspaceHome(tx, "org_a", recipient, full))
-  expect(home.agent).not.toBeNull()
-  expect(home.agent!.pendingProposals).toBe(2)
-  // Solo propuestas en estado 'propuesta', la más reciente primero.
-  expect(home.agent!.proposals.map(item => item.action)).toEqual(["cancelar_cita", "reservar_cita"])
-  // Solo derivaciones de las últimas 72 horas.
-  expect(home.agent!.recentHandoffs).toHaveLength(1)
-  expect(home.agent!.recentHandoffs[0]).toMatchObject({ reason: "Reciente", priority: "alta" })
-  expect(home.agent!.today).toEqual({ runs: 4, ok: 2, handoff: 1, error: 0, omitida: 0, sinRespuesta: 1 })
+  const agentRows = home.waiting.filter(row => row.kind === "case" || row.kind === "proposal")
+  // El caso «Ahora» va primero; las propuestas pendientes, de la más reciente a la más antigua;
+  // el caso sin apuro, aunque sea antiguo, sigue esperando y va después.
+  expect(agentRows.map(row => (row.kind === "case" ? row.reason : row.kind === "proposal" ? row.action : ""))).toEqual([
+    "Reciente", "cancelar_cita", "reservar_cita", "Antigua",
+  ])
+  expect(rowsOf(home.waiting, "case").map(row => row.priority)).toEqual(["alta", "baja"])
+  // Las cifras de corridas del agente ya no viajan a Inicio.
+  expect(home).not.toHaveProperty("agent")
 })
 
 it("el libro de corridas cuenta las que terminaron sin responder y las llamadas medidas", async () => {
@@ -201,47 +221,9 @@ it("el libro de corridas cuenta las que terminaron sin responder y las llamadas 
   expect(unanswered[0]).toMatchObject({ status: "sin_respuesta", llmCalls: 2, cachedInputTokens: null })
 })
 
-it("el inicio oculta la banda del agente sin el permiso", async () => {
+it("sin permiso del agente, «Te espera» no trae casos ni propuestas", async () => {
   const home = await withOrgContext(appDb, "org_a", tx => getWorkspaceHome(tx, "org_a", recipient, { ...full, agent: false }))
-  expect(home.agent).toBeNull()
-})
-
-it("el pulso agrupa el embudo por etapa con importes por moneda", async () => {
-  const pulse = await withOrgContext(appDb, "org_a", tx => getWorkspacePulse(tx, "org_a", full))
-  expect(pulse.funnel).toEqual([
-    { stage: "Nuevo", count: 2, amountCents: "30000", currency: "PEN" },
-    { stage: "Contacto", count: 1, amountCents: "50000", currency: "USD" },
-  ])
-  const gated = await withOrgContext(appDb, "org_a", tx => getWorkspacePulse(tx, "org_a", { ...full, crm: false }))
-  expect(gated.funnel).toBeNull()
-})
-
-it("el pulso cuenta conversaciones abiertas por canal", async () => {
-  const pulse = await withOrgContext(appDb, "org_a", tx => getWorkspacePulse(tx, "org_a", full))
-  expect(pulse.channels).toEqual([{ channel: "whatsapp", count: 2 }])
-  const gated = await withOrgContext(appDb, "org_a", tx => getWorkspacePulse(tx, "org_a", { ...full, conversations: false }))
-  expect(gated.channels).toBeNull()
-})
-
-it("las ejecuciones correctas no incluyen derivaciones ni errores y se ocultan sin permiso", async () => {
-  const pulse = await withOrgContext(appDb, "org_a", tx => getWorkspacePulse(tx, "org_a", full))
-  expect(pulse.execution!.reduce((sum, item) => sum + item.ok, 0)).toBe(2)
-  expect(pulse.execution!.reduce((sum, item) => sum + item.handoff, 0)).toBe(1)
-  expect(pulse.execution!.reduce((sum, item) => sum + item.error, 0)).toBe(1)
-  expect(pulse.execution!.reduce((sum, item) => sum + item.sinRespuesta, 0)).toBe(1)
-  const gated = await withOrgContext(appDb, "org_a", tx => getWorkspacePulse(tx, "org_a", { ...full, agent: false }))
-  expect(gated.execution).toBeNull()
-})
-
-it("el pulso suma cobros no anulados por día y moneda", async () => {
-  const pulse = await withOrgContext(appDb, "org_a", tx => getWorkspacePulse(tx, "org_a", full))
-  const pen = pulse.collections!.filter(item => item.currency === "PEN")
-  const usd = pulse.collections!.filter(item => item.currency === "USD")
-  expect(pen.reduce((sum, item) => sum + Number(item.amountCents), 0)).toBe(20000)
-  expect(usd.reduce((sum, item) => sum + Number(item.amountCents), 0)).toBe(10000)
-  expect(pulse.collections!.every(item => /^\d{4}-\d{2}-\d{2}$/.test(item.day))).toBe(true)
-  const gated = await withOrgContext(appDb, "org_a", tx => getWorkspacePulse(tx, "org_a", { ...full, finance: false }))
-  expect(gated.collections).toBeNull()
+  expect(home.waiting.filter(row => row.kind === "case" || row.kind === "proposal" || row.kind === "more")).toEqual([])
 })
 
 it("la primera respuesta usa aceptación real y excluye colas, fallos y simulación", async () => {
@@ -272,23 +254,13 @@ it("la primera respuesta usa aceptación real y excluye colas, fallos y simulaci
       })
     }
   }
-  const report = await withOrgContext(appDb, orgId, tx => getManagementReport(tx, orgId, "2026-09-01", "2026-09-30", full))
-  expect(report.performance.responses).toEqual({ conversations: 5, responded: 2, timedResponses: 1, avgFirstResponseSeconds: 30 })
-  expect(report.performance.conversations!.waiting).toBe(3)
+  const report = await withOrgContext(appDb, orgId, tx => getReportService(tx, orgId, { period: "2026-09" }))
+  expect(report.responses).toMatchObject({ conversations: 5, responded: 2, timedResponses: 1, avgFirstResponseSeconds: 30, byAgent: 0, byTeam: 2 })
   const home = await withOrgContext(appDb, orgId, tx => getWorkspaceHome(tx, orgId, recipient, full))
-  expect(home.conversations!.waiting).toBe(3)
-  const hidden = await withOrgContext(appDb, orgId, tx => getManagementReport(tx, orgId, "2026-09-01", "2026-09-30", restricted))
-  expect(hidden.performance).toEqual({
-    responses: null,
-    followUps: null,
-    conversations: null,
-    bookings: null,
-    conversion: null,
-    proposals: null,
-    handoffs: null,
-    clinicalControls: null,
-    taskTimeliness: null,
-  })
+  // Una sola fila: cuántas esperan y desde cuándo la más antigua; la misma cuenta que «Sin responder» de la Bandeja.
+  expect(rowsOf(home.waiting, "conversations")).toEqual([{ kind: "conversations", waiting: 3, oldestAt: inboundAt.toISOString() }])
+  const inbox = await withOrgContext(appDb, orgId, tx => countConversationViews(tx, orgId, { status: "open" }, ["unanswered"]))
+  expect(inbox.unanswered).toBe(3)
 })
 
 it("el primer inicio excluye caducadas del contador completo, no solo de la muestra", async () => {
@@ -307,22 +279,128 @@ it("el primer inicio excluye caducadas del contador completo, no solo de la mues
     })),
   ])
   const home = await withOrgContext(appDb, orgId, tx => getWorkspaceHome(tx, orgId, recipient, full))
-  expect(home.agent?.pendingProposals).toBe(4)
-  expect(home.agent?.proposals).toHaveLength(3)
-  expect(home.agent?.proposals.map(row => row.id)).not.toContain(expiredId)
+  // Tres filas y una que resume la que no cupo: la caducada no cuenta en ninguna.
+  expect(rowsOf(home.waiting, "proposal")).toHaveLength(3)
+  expect(rowsOf(home.waiting, "proposal").map(row => row.id)).not.toContain(expiredId)
+  expect(rowsOf(home.waiting, "more")).toEqual([{ kind: "more", of: "proposals", count: 1 }])
   const [expired] = await ownerDb.select({ status: agentProposal.status }).from(agentProposal).where(eq(agentProposal.id, expiredId))
   expect(expired?.status).toBe("expirada")
 })
 
-it("el pulso descuenta las devoluciones del gráfico de cobros", async () => {
+it("«Hoy»: la sede ve su agenda y quien atiende solo sus citas, con el resumen del día", async () => {
   const orgId = randomUUID()
-  await insertOrg(ownerDb, orgId, `pulso-neto-${orgId.slice(0, 8)}`)
-  const [account] = await ownerDb.insert(patient).values({ organizationId: orgId, displayName: "Cuenta neta", patientNumber: 1 }).returning({ id: patient.id })
-  const [payment] = await ownerDb.insert(patientPayment).values({ organizationId: orgId, patientId: account!.id, amountCents: 20000, currency: "PEN", paidAt: new Date(), method: "yape" }).returning({ id: patientPayment.id })
-  await ownerDb.insert(patientPaymentRefund).values({ organizationId: orgId, patientId: account!.id, paymentId: payment!.id, amountCents: 5000, refundedAt: new Date(), reason: "Devolución parcial" })
-  const pulse = await withOrgContext(appDb, orgId, tx => getWorkspacePulse(tx, orgId, full))
-  const pen = pulse.collections!.filter(item => item.currency === "PEN")
-  expect(pen.reduce((sum, item) => sum + Number(item.amountCents), 0)).toBe(15000)
+  await insertOrg(ownerDb, orgId, `hoy-${orgId.slice(0, 8)}`)
+  const [ana, luis] = [randomUUID(), randomUUID()]
+  await ownerDb.insert(user).values([
+    { id: ana, name: "Dra. Ana Torres", email: `${ana}@hoy.test`, emailVerified: true },
+    { id: luis, name: "Dr. Luis Vega", email: `${luis}@hoy.test`, emailVerified: true },
+  ])
+  const [centro] = await ownerDb.insert(branch).values({ organizationId: orgId, name: "Centro", timezone: "America/Lima", createdAt: new Date(Date.now() - 60_000) }).returning({ id: branch.id })
+  const [norte] = await ownerDb.insert(branch).values({ organizationId: orgId, name: "Norte", timezone: "America/Lima" }).returning({ id: branch.id })
+  const [chairCentro] = await ownerDb.insert(scheduleChair).values({ organizationId: orgId, branchId: centro!.id, name: "Sillón 1" }).returning({ id: scheduleChair.id })
+  const [chairNorte] = await ownerDb.insert(scheduleChair).values({ organizationId: orgId, branchId: norte!.id, name: "Sillón 2" }).returning({ id: scheduleChair.id })
+  // Horas fijas del día de la sede: lo atendido al empezar el día y lo pendiente al final,
+  // para que «la siguiente» no dependa de la hora en que corre la prueba (salvo el último cuarto de hora).
+  const day = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Lima" }).format(new Date())
+  const visit = async (name: string, time: string, status: string, dentistUserId: string, where: "centro" | "norte") => {
+    const [person] = await ownerDb.insert(patient).values({ organizationId: orgId, displayName: name, patientNumber: Math.floor(Math.random() * 1_000_000) }).returning({ id: patient.id })
+    const startsAt = new Date(`${day}T${time}:00-05:00`)
+    await ownerDb.insert(appointment).values({
+      organizationId: orgId, patientId: person!.id, dentistUserId, status, serviceName: "Control",
+      branchId: where === "centro" ? centro!.id : norte!.id, chairId: where === "centro" ? chairCentro!.id : chairNorte!.id,
+      startsAt, endsAt: new Date(startsAt.getTime() + 15 * 60_000), durationMin: 15,
+    })
+  }
+  await visit("Atendida de Ana", "00:10", "atendida", ana, "centro")
+  await visit("No asistió", "00:30", "no_asistio", luis, "centro")
+  await visit("Cancelada", "00:50", "cancelada", luis, "centro")
+  await visit("Confirmada de Luis", "23:15", "confirmada", luis, "centro")
+  await visit("Sin confirmar de Ana", "23:40", "programada", ana, "centro")
+  await visit("Ana en Norte", "23:00", "confirmada", ana, "norte")
+
+  const reception: WorkspaceAccess = { ...restricted, appointments: true }
+  const home = (access: WorkspaceAccess, userId: string, branchId?: string) =>
+    withOrgContext(appDb, orgId, tx => getWorkspaceHome(tx, orgId, userId, access, { branchId }))
+
+  // Sin sede pedida vale la primera activa; lo cancelado y lo no asistido no ocupan la agenda.
+  const first = await home(reception, recipient)
+  expect(first.multiBranch).toBe(true)
+  expect(first.today).toMatchObject({ scope: "branch", branch: { id: centro!.id, name: "Centro" }, summary: { total: 3, attended: 1, upcoming: 2, unconfirmed: 1 } })
+  // La sede recibe lo que falta, desde la siguiente; lo atendido queda en el resumen.
+  expect(first.today!.appointments.map(row => [row.patientName, row.status, row.next])).toEqual([
+    ["Confirmada de Luis", "confirmada", true],
+    ["Sin confirmar de Ana", "programada", false],
+  ])
+  expect(first.today!.appointments[0]).toMatchObject({ dentistName: "Dr. Luis Vega", chairName: "Sillón 1", serviceName: "Control" })
+
+  // La sede pedida filtra; una que no existe cae en la primera, sin mezclar sedes.
+  const other = await home(reception, recipient, norte!.id)
+  expect(other.today).toMatchObject({ branch: { id: norte!.id }, summary: { total: 1, attended: 0, upcoming: 1, unconfirmed: 0 } })
+  expect(other.today!.appointments.map(row => row.patientName)).toEqual(["Ana en Norte"])
+  expect((await home(reception, recipient, randomUUID())).today!.branch).toEqual({ id: centro!.id, name: "Centro" })
+
+  // Quien atiende: solo sus citas, de todas las sedes y también las atendidas.
+  const dentist = await home({ ...reception, ownAppointments: true }, ana, norte!.id)
+  expect(dentist.today).toMatchObject({ scope: "mine", branch: null, summary: { total: 3, attended: 1, upcoming: 2, unconfirmed: 1 } })
+  expect(dentist.today!.appointments.map(row => [row.patientName, row.branchName, row.next])).toEqual([
+    ["Atendida de Ana", "Centro", false],
+    ["Ana en Norte", "Norte", true],
+    ["Sin confirmar de Ana", "Centro", false],
+  ])
+  expect(dentist.today!.appointments.some(row => row.dentistName === "Dr. Luis Vega")).toBe(false)
+
+  // Un rol sin agenda ni caja no recibe citas, caja ni filas de otros.
+  const bare = await home(restricted, recipient)
+  expect(bare).toMatchObject({ today: null, cash: null, waiting: [] })
+})
+
+it("los presupuestos que esperan respuesta: quien atiende solo ve los de sus planes y recepción ninguno", async () => {
+  const orgId = randomUUID()
+  await insertOrg(ownerDb, orgId, `presupuestos-${orgId.slice(0, 8)}`)
+  const [ana, luis] = [randomUUID(), randomUUID()]
+  await ownerDb.insert(user).values([ana, luis].map(id => ({ id, name: "Profesional", email: `${id}@presupuestos.test`, emailVerified: true })))
+  const [person] = await ownerDb.insert(patient).values({ organizationId: orgId, displayName: "Paciente con presupuesto", patientNumber: 1 }).returning({ id: patient.id })
+  const presentedAt = new Date(Date.now() - 9 * 86_400_000)
+  for (const [index, createdBy] of [ana, luis].entries()) {
+    const [plan] = await ownerDb.insert(treatmentPlan).values({ organizationId: orgId, patientId: person!.id, title: "Plan", createdBy }).returning({ id: treatmentPlan.id })
+    await ownerDb.insert(treatmentBudget).values([
+      { organizationId: orgId, patientId: person!.id, planId: plan!.id, budgetNumber: index * 10 + 1, title: "Presentado", currency: "PEN", status: "presentado", presentedAt: index === 0 ? presentedAt : new Date() },
+      { organizationId: orgId, patientId: person!.id, planId: plan!.id, budgetNumber: index * 10 + 2, title: "Aceptado", currency: "PEN", status: "aceptado", presentedAt },
+    ])
+  }
+  const budgets = async (access: WorkspaceAccess, userId: string) =>
+    rowsOf((await withOrgContext(appDb, orgId, tx => getWorkspaceHome(tx, orgId, userId, access))).waiting, "budgets")
+  const cashier = await budgets({ ...restricted, finance: true }, recipient)
+  expect(cashier).toHaveLength(1)
+  expect(cashier[0]).toMatchObject({ total: 2, oldestPresentedAt: presentedAt.toISOString() })
+  expect(cashier[0]!.items.map(item => item.title)).toEqual(["Presentado", "Presentado"])
+  const dentist = await budgets({ ...restricted, clinical: true, ownAppointments: true }, luis)
+  expect(dentist[0]).toMatchObject({ total: 1 })
+  expect(await budgets({ ...restricted, appointments: true, conversations: true, tasks: true, crm: true, agent: true }, recipient)).toEqual([])
+})
+
+it("las tareas de otra persona no llegan a quien no dirige", async () => {
+  const orgId = randomUUID()
+  await insertOrg(ownerDb, orgId, `tareas-${orgId.slice(0, 8)}`)
+  const endOfDay = new Date(`${new Intl.DateTimeFormat("en-CA", { timeZone: "America/Lima" }).format(new Date())}T23:59:30-05:00`)
+  await ownerDb.insert(crmTask).values([
+    { organizationId: orgId, title: "Mía vencida", assigneeUserId: recipient, dueAt: new Date(Date.now() - 86_400_000), createdBy: "user" },
+    { organizationId: orgId, title: "Mía de hoy", assigneeUserId: recipient, dueAt: endOfDay, createdBy: "user" },
+    { organizationId: orgId, title: "Mía sin fecha", assigneeUserId: recipient, createdBy: "user" },
+    { organizationId: orgId, title: "De otra persona", assigneeUserId: colleague, dueAt: new Date(Date.now() - 3_600_000), createdBy: "user" },
+  ])
+  const tasks = async (access: WorkspaceAccess) =>
+    rowsOf((await withOrgContext(appDb, orgId, tx => getWorkspaceHome(tx, orgId, recipient, access))).waiting, "task")
+  // Vencida primero; después la siguiente (la de hoy) con el resto resumido.
+  expect((await tasks({ ...restricted, tasks: true })).map(row => [row.title, row.due, row.more])).toEqual([
+    ["Mía vencida", "overdue", 0],
+    ["Mía de hoy", "today", 1],
+  ])
+  // Quien dirige ve también las del equipo, con su responsable.
+  const team = await tasks({ ...restricted, tasks: true, allTasks: true })
+  expect(team.map(row => [row.title, row.mine])).toEqual([["Mía vencida", true], ["De otra persona", false], ["Mía de hoy", true]])
+  expect(team.find(row => row.title === "De otra persona")?.assigneeName).toBe("Persona de prueba")
+  expect(team.at(-1)?.more).toBe(1)
 })
 
 it("la producción clínica excluye los actos anulados", async () => {
@@ -341,6 +419,6 @@ it("la producción clínica excluye los actos anulados", async () => {
   const anulado = procedures.find(procedure => procedure.description === "Acto duplicado")
   await ownerDb.update(encounterProcedure).set({ voidedAt: new Date(), voidReason: "Registro duplicado" }).where(eq(encounterProcedure.id, anulado!.id))
   await ownerDb.update(encounter).set({ status: "finalizada", finalizedAt: new Date(), finalizedBy: dentist, signerName: "Dentista fase cero", signerRegistration: "12345" }).where(eq(encounter.id, visit!.id))
-  const report = await withOrgContext(appDb, orgId, tx => getManagementReport(tx, orgId, "2026-01-01", "2026-12-31", full))
-  expect(report.clinicalProduction).toEqual([{ name: "Dentista fase cero", currency: "PEN", procedures: 1, amountCents: "30000" }])
+  const report = await withOrgContext(appDb, orgId, tx => getReportSales(tx, orgId, { period: "este_mes" }))
+  expect(report.procedures).toEqual([{ name: "Resina vigente", currency: "PEN", count: 1, cents: 30000 }])
 })

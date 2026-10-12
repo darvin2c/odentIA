@@ -1,63 +1,292 @@
-import { Button, Input, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@odentia/ui"
+/**
+ * Reportes: cómo va la clínica, para quien la dirige. Un periodo y una sede
+ * valen para toda la pantalla; arriba, una cifra por pregunta; abajo, el
+ * detalle de la que se elige. Todo viaja en la dirección (`?tab`, `?period`,
+ * `?branch`, `?lista`): se puede compartir el enlace y volver a él.
+ */
+import { formatMoney } from "@odentia/clinical"
+import { cn, Skeleton } from "@odentia/ui"
 import { EmptyState, ErrorState, LoadingState, PageHeader, PageShell } from "@odentia/ui-patterns"
 import { useQuery } from "@tanstack/react-query"
-import { createFileRoute } from "@tanstack/react-router"
-import { useEffect, useState, type ReactNode } from "react"
-import { apiFetch } from "../../lib/api"
-import { PerformanceSummary } from "../../components/crm/performance-summary"
-import { MonthlyResultPanel } from "../../components/finance/MonthlyResultPanel"
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
+import { Bot, Settings } from "lucide-react"
+import { type ReactNode, useState } from "react"
+import { RecommendationDrawer } from "../../components/agent/advisor"
+import { adviceFor, AdviceNote, useReportAdvice } from "../../components/reports/advice-note"
+import { AgendaTab } from "../../components/reports/agenda-tab"
+import { MoneyTab } from "../../components/reports/money-tab"
+import { ReportListDrawer } from "../../components/reports/report-list-drawer"
+import { type Better, ChangeLine, unlessEmpty } from "../../components/reports/report-parts"
+import { ReportPeriodPicker } from "../../components/reports/report-period"
+import { SalesTab } from "../../components/reports/sales-tab"
+import { ServiceTab } from "../../components/reports/service-tab"
+import { ChoiceSelect } from "../../components/ui/choice-select"
+import { currentMonthIn } from "../../lib/commissions"
 import { usePermission } from "../../lib/crm"
-import { useOrgProfile } from "../../lib/org"
-import { type ManagementReport, moneyFromCents, stateLabel } from "../../lib/workspace"
+import { useBranchesOptions, useOrgFinanceProfile } from "../../lib/finance-collect"
 import { QueryErrorState } from "../../lib/query-error"
+import {
+  absoluteChange,
+  type Comparison,
+  comparedWith,
+  durationLabel,
+  fetchReport,
+  isReportList,
+  isReportPeriod,
+  MINUTES,
+  periodLabel,
+  previousPhrase,
+  relativeChange,
+  reportKey,
+  type ReportListKey,
+  type ReportOverview,
+  type ReportAdviceTab,
+  type ReportQuery,
+} from "../../lib/reports"
 
-export const Route = createFileRoute("/_org/reports")({ component: ReportsPage })
+const TABS = ["dinero", "agenda", "ventas", "atencion"] as const
+type ReportTab = (typeof TABS)[number]
+
+const TAB_COPY: Record<ReportTab, { title: string; question: string }> = {
+  dinero: { title: "Dinero", question: "Cuánto entró, cuánto se gastó y cuánto falta cobrar" },
+  agenda: { title: "Agenda", question: "Si los pacientes vinieron y quién los atendió" },
+  ventas: { title: "Pacientes y ventas", question: "El trabajo nuevo que entró y el que se hizo" },
+  atencion: { title: "Atención", question: "Cómo respondimos a quien escribió" },
+}
+
+/** Sin periodo en la dirección se mira el mes en curso, comparado con los mismos días del anterior. */
+const DEFAULT_PERIOD = "este_mes"
+
+interface ReportsSearch {
+  tab?: ReportTab
+  period?: string
+  /** Sede; sin ella, todas. */
+  branch?: string
+  /** Lista abierta al lado. */
+  lista?: ReportListKey
+}
+
+export const Route = createFileRoute("/_org/reports")({
+  // Un valor mal escrito en el enlace no rompe la pantalla: se usa el de siempre.
+  validateSearch: (search: Record<string, unknown>): ReportsSearch => ({
+    ...((TABS as readonly unknown[]).includes(search.tab) ? { tab: search.tab as ReportTab } : {}),
+    ...(isReportPeriod(search.period) && search.period !== DEFAULT_PERIOD ? { period: search.period } : {}),
+    ...(typeof search.branch === "string" && search.branch ? { branch: search.branch } : {}),
+    ...(isReportList(search.lista) ? { lista: search.lista } : {}),
+  }),
+  component: ReportsPage,
+})
+
 function ReportsPage() {
   const allowed = usePermission("reports.read")
-  const profile = useOrgProfile()
-  const [from, setFrom] = useState("")
-  const [to, setTo] = useState("")
-  const [period, setPeriod] = useState<{ from: string; to: string } | null>(null)
-  useEffect(() => {
-    if (!profile.data?.timezone || period) return
-    const parts = new Intl.DateTimeFormat("en-CA", { timeZone: profile.data.timezone, year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date())
-    const part = (name: string) => parts.find(item => item.type === name)?.value ?? ""
-    const today = `${part("year")}-${part("month")}-${part("day")}`
-    const first = `${today.slice(0, 7)}-01`
-    setFrom(first)
-    setTo(today)
-    setPeriod({ from: first, to: today })
-  }, [profile.data?.timezone, period])
-  const query = useQuery({ queryKey: ["management-report", period], enabled: allowed && period !== null, retry: false,
-    queryFn: () => apiFetch<{ data: ManagementReport }>(`/api/workspace/reports?from=${period?.from}&to=${period?.to}`) })
-  const report = query.data?.data
-  if (!allowed) return <PageShell><PageHeader title="Reportes" /><ErrorState title="Sin acceso" message="No tienes permiso para consultar reportes. Solicita acceso a la administración." /></PageShell>
-  return <PageShell className="flex flex-col gap-6"><PageHeader title="Reportes" subtitle="Resultados de la clínica, separados por moneda y sin mezclar cobros con producción." />
-    {/* Lo primero que busca quien dirige la clínica: elige su propio mes y su sede. */}
-    <MonthlyResultPanel />
-    <form className="flex flex-wrap items-end gap-3" onSubmit={event => { event.preventDefault(); setPeriod({ from, to }) }}>
-      <label htmlFor="report-from" className="flex flex-col gap-1 text-sm">Desde<Input id="report-from" type="date" required value={from} max={to} onChange={event => setFrom(event.target.value)} /></label>
-      <label htmlFor="report-to" className="flex flex-col gap-1 text-sm">Hasta<Input id="report-to" type="date" required value={to} min={from} onChange={event => setTo(event.target.value)} /></label><Button type="submit">Consultar</Button>
-    </form>
-    {profile.isError && !period ? <QueryErrorState error={profile.error} onRetry={() => { void profile.refetch() }} /> : query.isPending ? <LoadingState /> : query.isError ? <QueryErrorState error={query.error} onRetry={() => { void query.refetch() }} invalid="Elige un intervalo válido de hasta un año y vuelve a consultar." /> : report ? <>
-      <p className="text-sm text-muted-foreground">Del {report.from} al {report.to}, ambos incluidos. Zona horaria: {report.timezone}.</p>
-      <div className="grid gap-6 xl:grid-cols-2">
-        <ReportSection title="Asistencia y cancelaciones" description="Citas cuya fecha de inicio pertenece al período; estado actual."><SimpleTable headers={["Estado", "Citas"]} rows={report.appointments.map(row => [stateLabel[row.status] ?? row.status, row.count])} /></ReportSection>
-        <ReportSection title="Atención por profesional" description="Citas atendidas; no equivale a procedimientos producidos ni a importe facturado."><SimpleTable headers={["Profesional", "Atendidas", "Citas totales"]} rows={report.production.map(row => [row.name, row.attended, row.total])} /></ReportSection>
-        <ReportSection title="Producción clínica" description="Procedimientos de atenciones finalizadas en el período, valorados con su precio conservado. No equivale a cobros."><SimpleTable headers={["Profesional", "Moneda", "Procedimientos", "Valor"]} rows={report.clinicalProduction.map(row => [row.name, row.currency ?? "Sin precio", row.procedures, row.currency ? moneyFromCents(row.amountCents, row.currency, report.locale) : "Sin valoración"])} /></ReportSection>
-        <ReportSection title="Conversión comercial" description="Estado actual de las oportunidades creadas en el período, separado por moneda."><SimpleTable headers={["Estado", "Moneda", "Oportunidades", "Valor estimado"]} rows={report.opportunities.map(row => [stateLabel[row.status] ?? row.status, row.currency, row.count, moneyFromCents(row.amountCents, row.currency, report.locale)])} /></ReportSection>
-        <ReportSection title="Antigüedad de saldos" description="Deuda actual según la fecha de vencimiento de cada cargo."><SimpleTable headers={["Moneda", "Vencimiento", "Pendiente"]} rows={report.aging.map(row => [row.currency, row.bucket, moneyFromCents(row.amountCents, row.currency, report.locale)])} /></ReportSection>
-        <ReportSection title="Decisiones de presupuestos" description="Estado actual de las propuestas presentadas durante el período. Las revisiones sustituidas se muestran separadas."><SimpleTable headers={["Estado", "Propuestas"]} rows={report.budgets.map(row => [stateLabel[row.status] ?? row.status, row.count])} /></ReportSection>
-        <ReportSection title="Cobros y devoluciones" description="Por fecha de pago y devolución. Los pagos anulados no se incluyen."><SimpleTable headers={["Moneda", "Recibido", "Devuelto", "Neto"]} rows={report.collections.map(row => [row.currency, moneyFromCents(row.receivedCents, row.currency, report.locale), moneyFromCents(row.refundedCents, row.currency, report.locale), moneyFromCents(row.netCents, row.currency, report.locale)])} /></ReportSection>
-        <ReportSection title="Deuda actual" description="Saldo de cargos vigentes menos aplicaciones vigentes a la fecha de consulta; no es un saldo histórico del período."><SimpleTable headers={["Moneda", "Pendiente", "Vencido", "Pacientes"]} rows={report.debt.map(row => [row.currency, moneyFromCents(row.outstandingCents, row.currency, report.locale), moneyFromCents(row.overdueCents, row.currency, report.locale), row.patients])} /></ReportSection>
-      </div>
-      <PerformanceSummary data={report.performance} />
-    </> : null}
-  </PageShell>
+  const search = Route.useSearch()
+  const navigate = useNavigate({ from: Route.fullPath })
+  const profile = useOrgFinanceProfile()
+  const branches = useBranchesOptions()
+  const region = profile.data?.data ?? null
+
+  const tab = search.tab ?? "dinero"
+  const period = search.period ?? DEFAULT_PERIOD
+  const query: ReportQuery = { period, branchId: search.branch }
+  const overview = useQuery({
+    queryKey: reportKey("overview", query),
+    queryFn: () => fetchReport<ReportOverview>("overview", query),
+    enabled: allowed && region !== null,
+    retry: false,
+  })
+
+  // Los avisos del asesor acompañan a su cifra; la recomendación se abre al lado con su lista y su acción.
+  const advice = useReportAdvice(query, allowed && region !== null)
+  const notices = advice.data?.data.notices
+  const [recommendation, setRecommendation] = useState<string | null>(null)
+  const adviceNote = (item: ReportAdviceTab): ReactNode => {
+    const found = adviceFor(notices, item)
+    return found ? <AdviceNote advice={found} onOpen={setRecommendation} /> : undefined
+  }
+
+  const setSearch = (patch: Partial<ReportsSearch>): void => void navigate({ search: (prev) => ({ ...prev, ...patch }) })
+  const openList = (lista: ReportListKey): void => setSearch({ lista })
+  const showCurrentMonth = (): void => setSearch({ period: undefined })
+
+  if (!allowed) {
+    return (
+      <PageShell>
+        <PageHeader title="Reportes" />
+        <ErrorState title="Sin acceso" message="Los reportes los ve quien dirige la clínica. Pide acceso a la administración." />
+      </PageShell>
+    )
+  }
+
+  const head = overview.data?.data
+  const locale = head?.locale ?? region?.locale ?? "es"
+  const branchList = branches.data?.data ?? []
+
+  return (
+    <PageShell className="flex flex-col gap-4">
+      <PageHeader title="Reportes" />
+      {profile.isPending ? (
+        <LoadingState />
+      ) : profile.isError ? (
+        <QueryErrorState error={profile.error} onRetry={() => void profile.refetch()} />
+      ) : !region ? (
+        <ConfigureClinic />
+      ) : (
+        <>
+          {/* Periodo y sede juntos, bajo el título: valen para toda la pantalla. */}
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <ReportPeriodPicker
+              value={period}
+              label={head ? periodLabel(head.period, locale) : "Periodo"}
+              currentMonth={currentMonthIn(region.timezone)}
+              locale={locale}
+              onChange={(next) => setSearch({ period: next === DEFAULT_PERIOD ? undefined : next, lista: undefined })}
+            />
+            {branchList.length > 1 ? (
+              <ChoiceSelect
+                aria-label="Sede"
+                className="w-48"
+                value={search.branch ?? ""}
+                onChange={(event) => setSearch({ branch: event.target.value || undefined, lista: undefined })}
+              >
+                <option value="">Todas las sedes</option>
+                {branchList.map((branch) => (
+                  <option key={branch.id} value={branch.id}>
+                    {branch.name}
+                  </option>
+                ))}
+              </ChoiceSelect>
+            ) : null}
+            {head ? <span className="text-sm text-muted-foreground">Comparado con {comparedWith(head, locale)}</span> : null}
+          </div>
+
+          {overview.isError ? (
+            <QueryErrorState error={overview.error} onRetry={() => void overview.refetch()} notFound="La sede elegida ya no está disponible. Elige otra sede." />
+          ) : (
+            <>
+              <nav aria-label="Preguntas" className="grid min-w-0 grid-cols-2 gap-2 sm:gap-3 lg:grid-cols-4">
+                {TABS.map((item) => (
+                  <QuestionTile key={item} tab={item} selected={item === tab} {...tileOf(item, head)} loading={overview.isPending} advised={item !== "atencion" && adviceFor(notices, item) !== null} />
+                ))}
+              </nav>
+
+              <div>
+                <h2 className="text-lg font-bold tracking-tight">{TAB_COPY[tab].title}</h2>
+                <p className="text-sm text-muted-foreground">{TAB_COPY[tab].question}</p>
+              </div>
+
+              {tab === "dinero" ? (
+                <MoneyTab query={query} onShowCurrentMonth={showCurrentMonth} advice={adviceNote("dinero")} />
+              ) : tab === "agenda" ? (
+                <AgendaTab query={query} onOpenList={openList} advice={adviceNote("agenda")} />
+              ) : tab === "ventas" ? (
+                <SalesTab query={query} onOpenList={openList} advice={adviceNote("ventas")} />
+              ) : (
+                <ServiceTab query={query} />
+              )}
+            </>
+          )}
+        </>
+      )}
+      <ReportListDrawer list={search.lista ?? null} query={query} onClose={() => setSearch({ lista: undefined })} />
+      <RecommendationDrawer recommendationKey={recommendation} onClose={() => setRecommendation(null)} />
+    </PageShell>
+  )
 }
-function ReportSection({ title, description, children }: { title: string; description: string; children: ReactNode }) {
-  return <section className="min-w-0 elevated rounded-xl border bg-card p-5"><h2 className="font-semibold">{title}</h2><p className="mb-4 mt-1 text-sm text-muted-foreground">{description}</p>{children}</section>
+
+function ConfigureClinic() {
+  const navigate = useNavigate()
+  const canSettings = usePermission("settings.write")
+  return (
+    <EmptyState
+      icon={Settings}
+      title="Falta configurar la clínica"
+      description="Los reportes se calculan con la moneda y la zona horaria de la clínica. Aún no están configuradas."
+      actionLabel={canSettings ? "Ir a Configuración" : undefined}
+      onAction={() => void navigate({ to: "/settings" })}
+    />
+  )
 }
-function SimpleTable({ headers, rows }: { headers: string[]; rows: Array<Array<string | number>> }) {
-  return rows.length === 0 ? <EmptyState title="Sin registros" description="No hay registros para este criterio." /> : <Table><TableHeader><TableRow>{headers.map(header => <TableHead key={header} scope="col">{header}</TableHead>)}</TableRow></TableHeader><TableBody>{rows.map(row => <TableRow key={row.map(String).join("|")}>{row.map((cell, index) => <TableCell key={headers[index]} className="tabular-nums">{cell}</TableCell>)}</TableRow>)}</TableBody></Table>
+
+interface TileContent {
+  caption: string
+  value: ReactNode
+  /** `undefined`: nada que comparar todavía (sin datos o cargando). */
+  change?: Comparison | null
+  better: Better
+}
+
+/** La cifra que resume cada pregunta; su detalle no la repite. */
+function tileOf(tab: ReportTab, head: ReportOverview | undefined): TileContent {
+  if (!head) return { caption: TILE_CAPTION[tab], value: null, better: "none" }
+  const locale = head.locale
+  const phrase = previousPhrase(head, locale)
+  if (tab === "dinero") {
+    // La moneda de la clínica primero; con más de una, la cifra dice de cuál es.
+    const row = head.money.find((item) => item.currency === head.currency) ?? head.money[0]
+    if (!row) return { caption: TILE_CAPTION.dinero, value: "Sin movimientos", better: "up" }
+    return {
+      caption: head.money.length > 1 ? `Queda · ${row.currency}` : TILE_CAPTION.dinero,
+      value: formatMoney(row.quedaCents, row.currency, locale),
+      change: unlessEmpty(row.quedaCents, relativeChange(row.quedaCents, row.previousQuedaCents, phrase, locale)),
+      better: "up",
+    }
+  }
+  if (tab === "agenda")
+    return {
+      caption: TILE_CAPTION.agenda,
+      value: head.agenda.attended,
+      change: unlessEmpty(head.agenda.attended, relativeChange(head.agenda.attended, head.agenda.previousAttended, phrase, locale)),
+      better: "up",
+    }
+  if (tab === "ventas")
+    return {
+      caption: TILE_CAPTION.ventas,
+      value: head.sales.newPatients,
+      change: head.sales.newPatients === 0 && head.sales.previousNewPatients === 0 ? undefined : absoluteChange(head.sales.newPatients, head.sales.previousNewPatients, phrase, locale),
+      better: "up",
+    }
+  const seconds = head.service.avgFirstResponseSeconds
+  const before = head.service.previousAvgFirstResponseSeconds
+  if (seconds === null) return { caption: TILE_CAPTION.atencion, value: "Sin datos", better: "down" }
+  return {
+    caption: TILE_CAPTION.atencion,
+    value: durationLabel(seconds),
+    change: before === null ? null : absoluteChange(Math.round(seconds / 60), Math.round(before / 60), phrase, locale, MINUTES),
+    better: "down",
+  }
+}
+
+const TILE_CAPTION: Record<ReportTab, string> = {
+  dinero: "Queda",
+  agenda: "Citas atendidas",
+  ventas: "Pacientes nuevos",
+  atencion: "Primera respuesta",
+}
+
+function QuestionTile({ tab, selected, caption, value, change, better, loading, advised }: TileContent & { tab: ReportTab; selected: boolean; loading: boolean; advised: boolean }) {
+  return (
+    <Link
+      to="/reports"
+      search={(prev) => ({ ...prev, tab: tab === "dinero" ? undefined : tab, lista: undefined })}
+      aria-current={selected ? "page" : undefined}
+      className={cn(
+        "elevated flex min-h-[104px] min-w-0 flex-col gap-0.5 rounded-xl bg-card px-3 py-2.5 outline-none focus-visible:ring-2 focus-visible:ring-ring sm:px-4 sm:py-3.5",
+        selected ? "border-2 border-primary" : "border-2 border-transparent ring-1 ring-border",
+      )}
+    >
+      <span className={cn("text-sm font-bold", selected ? "text-primary-soft-foreground" : "")}>{TAB_COPY[tab].title}</span>
+      <span className="text-xs text-muted-foreground">{caption}</span>
+      {loading ? (
+        <Skeleton className="mt-1 h-7 w-24" />
+      ) : (
+        <span className="truncate text-xl leading-7 font-bold tracking-tight tabular-nums sm:text-2xl sm:leading-[30px]">{value}</span>
+      )}
+      {!loading && change !== undefined ? <ChangeLine change={change} better={better} /> : null}
+      {advised ? (
+        <span className="mt-0.5 inline-flex items-center gap-1.5 text-[13px] font-bold text-primary-soft-foreground">
+          <Bot aria-hidden className="size-3.5 shrink-0" />1 aviso del asesor
+        </span>
+      ) : null}
+    </Link>
+  )
 }

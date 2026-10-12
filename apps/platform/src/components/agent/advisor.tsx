@@ -1,5 +1,5 @@
 import { Button } from "@odentia/ui"
-import { AgentMark, AgentSurface, ConfirmDialog, DetailDrawer, DetailSection, LoadingState, SubmitButton } from "@odentia/ui-patterns"
+import { ConfirmDialog, DetailDrawer, DetailSection, LoadingState, SubmitButton } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { useState } from "react"
@@ -47,6 +47,9 @@ export interface AdvisorView {
   more: number
 }
 
+/** Días que «No me interesa» oculta una recomendación para toda la clínica. */
+const SNOOZE_DAYS = 7
+
 export interface AdvisorSettings {
   enabled: boolean
   detections: Array<{
@@ -68,6 +71,8 @@ const WHERE: Record<string, { to: string; label: string }> = {
   atenciones_sin_firmar: { to: "/patients", label: "Abrir pacientes" },
   seguimientos_sin_responsable: { to: "/pipeline", label: "Abrir oportunidades" },
   cobranza_vencida: { to: "/finance", label: "Abrir finanzas" },
+  inasistencias_sin_cita: { to: "/agenda", label: "Abrir la agenda" },
+  presupuestos_sin_respuesta: { to: "/patients", label: "Abrir pacientes" },
 }
 
 const PREVIEW = 4
@@ -97,6 +102,7 @@ export function RecommendationDrawer({ recommendationKey, onClose }: { recommend
   const [showAll, setShowAll] = useState(false)
   const [confirmTasks, setConfirmTasks] = useState(false)
   const [confirmTurnOn, setConfirmTurnOn] = useState(false)
+  const [confirmSnooze, setConfirmSnooze] = useState(false)
   const [done, setDone] = useState<string | null>(null)
 
   const query = useQuery({
@@ -149,14 +155,30 @@ export function RecommendationDrawer({ recommendationKey, onClose }: { recommend
     },
   })
 
+  // «No me interesa»: la oculta una semana, sin apagar la detección.
+  const snooze = useMutation({
+    retry: false,
+    mutationFn: () =>
+      apiFetch("/api/agent/advisor/settings", {
+        method: "PUT",
+        body: JSON.stringify({ detections: { [recommendationKey ?? ""]: { snoozeDays: SNOOZE_DAYS } } }),
+      }),
+    onSuccess: () => {
+      refreshAdvisor(queryClient)
+      close()
+    },
+  })
+
   function close() {
     setShowAll(false)
     setDone(null)
     setConfirmTasks(false)
     setConfirmTurnOn(false)
+    setConfirmSnooze(false)
     createTasks.reset()
     turnOn.reset()
     hide.reset()
+    snooze.reset()
     onClose()
   }
 
@@ -172,7 +194,7 @@ export function RecommendationDrawer({ recommendationKey, onClose }: { recommend
   const reach = automation ? `Avisa por ${channelLabel(automation.channel)} ${automation.reach}` : ""
 
   return (
-    <DetailDrawer open title="Recomendación del asesor" description={item?.title} onClose={close} isSubmitting={createTasks.isPending || turnOn.isPending}>
+    <DetailDrawer open title="Recomendación del asesor" description={item?.title} onClose={close} isSubmitting={createTasks.isPending || turnOn.isPending || snooze.isPending}>
       {query.isPending ? (
         <LoadingState kind="indeterminate" message="Calculando con tus datos de ahora…" />
       ) : query.isError || !item ? (
@@ -293,11 +315,16 @@ export function RecommendationDrawer({ recommendationKey, onClose }: { recommend
             <div className="flex flex-col gap-2 border-t pt-4">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <p className="min-w-0 flex-1 basis-48 text-[13px] text-muted-foreground">
-                  ¿No te sirve esta recomendación? Deja de aparecer para toda la clínica; la vuelves a encender en Agente › Asesor.
+                  ¿No te sirve esta recomendación? Ocúltala una semana o quítala para toda la clínica; la vuelves a encender en Agente › Asesor.
                 </p>
-                <Button type="button" variant="outline" className="min-h-11 sm:min-h-10" disabled={hide.isPending} onClick={() => hide.mutate()}>
-                  No volver a mostrar
-                </Button>
+                <div className="flex flex-wrap gap-2">
+                  <Button type="button" variant="ghost" className="min-h-11 sm:min-h-10" disabled={snooze.isPending || hide.isPending} onClick={() => setConfirmSnooze(true)}>
+                    No me interesa
+                  </Button>
+                  <Button type="button" variant="outline" className="min-h-11 sm:min-h-10" disabled={hide.isPending || snooze.isPending} onClick={() => hide.mutate()}>
+                    No volver a mostrar
+                  </Button>
+                </div>
               </div>
               {hide.isError ? (
                 <p role="alert" className="text-sm text-destructive">
@@ -307,6 +334,27 @@ export function RecommendationDrawer({ recommendationKey, onClose }: { recommend
             </div>
           ) : null}
 
+          <ConfirmDialog
+            open={confirmSnooze}
+            title="Ocultarla una semana"
+            description={`«${item.title}» deja de aparecer durante ${SNOOZE_DAYS} días para toda la clínica. Para quitarla del todo o cambiar su umbral, ve a Agente › Asesor.`}
+            confirmLabel={`Ocultar ${SNOOZE_DAYS} días`}
+            variant="default"
+            pending={snooze.isPending}
+            onClose={() => {
+              if (!snooze.isPending) {
+                snooze.reset()
+                setConfirmSnooze(false)
+              }
+            }}
+            onConfirm={() => snooze.mutate()}
+          >
+            {snooze.isError ? (
+              <p role="alert" className="text-sm text-destructive">
+                {mutationErrorMessage(snooze.error)}
+              </p>
+            ) : null}
+          </ConfirmDialog>
           {automation ? (
             <ConfirmDialog
               open={confirmTurnOn}
@@ -336,100 +384,6 @@ export function RecommendationDrawer({ recommendationKey, onClose }: { recommend
         </div>
       )}
     </DetailDrawer>
-  )
-}
-
-/**
- * «Para atender hoy»: hasta tres recomendaciones del asesor en Inicio. No
- * ocupa sitio si está apagado o si hoy no hay nada que recomendar.
- */
-export function AdvisorSection() {
-  const queryClient = useQueryClient()
-  const canAdmin = usePermission("agent.write")
-  const [open, setOpen] = useState<string | null>(null)
-  const [all, setAll] = useState(false)
-  const [dismissing, setDismissing] = useState<AdvisorRecommendation | null>(null)
-
-  const query = useQuery({
-    queryKey: ["agent-advisor", "inicio", all],
-    queryFn: () => apiFetch<{ data: AdvisorView }>(`/api/agent/advisor${all ? "?all=1" : ""}`),
-    retry: false,
-  })
-  const snooze = useMutation({
-    retry: false,
-    mutationFn: (key: string) =>
-      apiFetch("/api/agent/advisor/settings", { method: "PUT", body: JSON.stringify({ detections: { [key]: { snoozeDays: 7 } } }) }),
-    onSuccess: () => {
-      setDismissing(null)
-      refreshAdvisor(queryClient)
-    },
-  })
-
-  const view = query.data?.data
-  if (!view || !view.enabled || view.recommendations.length === 0) {
-    return <RecommendationDrawer recommendationKey={open} onClose={() => setOpen(null)} />
-  }
-  const count = view.recommendations.length
-  return (
-    <AgentSurface aria-label="Para atender hoy" className="enter">
-      <div className="mb-4 flex flex-wrap items-center gap-3">
-        <AgentMark />
-        <div className="min-w-0 flex-1 basis-48">
-          <h2 className="text-[17px] font-bold tracking-tight">Para atender hoy</h2>
-          <p className="text-sm text-muted-foreground">
-            {count} {count === 1 ? "recomendación" : "recomendaciones"} del asesor
-            <span className="hidden sm:inline">, con tus datos de hoy a las {hourEnd(view.recommendations[0]?.computedAt ?? new Date().toISOString())}</span>
-          </p>
-        </div>
-        {view.more > 0 ? (
-          <Button type="button" variant="ghost" size="sm" className="min-h-11 sm:min-h-8" onClick={() => setAll(true)}>
-            Ver todas
-          </Button>
-        ) : null}
-      </div>
-      <ul className="grid gap-3 lg:grid-cols-3">
-        {view.recommendations.map((item) => (
-          <li key={item.key} className="flex min-w-0 flex-col gap-2 rounded-xl border bg-card p-4">
-            <p className="hidden text-xs font-semibold uppercase tracking-wide text-primary-soft-foreground sm:block">{item.area}</p>
-            <h3 className="font-semibold">{item.title}</h3>
-            {item.detail ? <p className="text-sm text-muted-foreground">{item.detail}</p> : null}
-            {/* Sin «No me interesa» (solo quien administra), «Revisar y decidir» ocupa la fila en teléfono. */}
-            <div className="mt-auto flex flex-wrap gap-1 pt-1 sm:gap-2">
-              <Button type="button" size="sm" className="min-h-11 flex-1 sm:min-h-8 sm:flex-none" onClick={() => setOpen(item.key)}>
-                Revisar y decidir
-              </Button>
-              {canAdmin ? (
-                <Button type="button" variant="ghost" size="sm" className="min-h-11 sm:min-h-8" onClick={() => setDismissing(item)}>
-                  No me interesa
-                </Button>
-              ) : null}
-            </div>
-          </li>
-        ))}
-      </ul>
-      <RecommendationDrawer recommendationKey={open} onClose={() => setOpen(null)} />
-      <ConfirmDialog
-        open={dismissing !== null}
-        title="Ocultarla una semana"
-        description={`«${dismissing?.title ?? ""}» deja de aparecer durante 7 días para toda la clínica. Para quitarla del todo o cambiar su umbral, ve a Agente › Asesor.`}
-        confirmLabel="Ocultar 7 días"
-        variant="default"
-        pending={snooze.isPending}
-        onClose={() => {
-          if (!snooze.isPending) {
-            snooze.reset()
-            setDismissing(null)
-          }
-        }}
-        onConfirm={() => dismissing && snooze.mutate(dismissing.key)}
-      >
-        {snooze.isError ? (
-          <p role="alert" className="text-sm text-destructive">
-            {mutationErrorMessage(snooze.error)}
-          </p>
-        ) : null}
-      </ConfirmDialog>
-    </AgentSurface>
   )
 }
 

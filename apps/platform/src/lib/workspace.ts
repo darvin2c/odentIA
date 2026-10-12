@@ -1,88 +1,83 @@
 import { currencyFractionDigits } from "@odentia/clinical"
-import type { AgentProposal } from "./agent"
+import type { DebtRow } from "./finance-debt"
 
+/** Lo que devuelve `/api/workspace/home`: «Te espera» ya ordenado y lo de hoy según el rol. */
 export interface WorkspaceHome {
   date: string
   timezone: string
   locale: string
-  access: Record<"patients" | "appointments" | "conversations" | "tasks" | "finance" | "clinical" | "crm" | "agent" | "allTasks" | "configure", boolean>
+  access: Record<"patients" | "appointments" | "conversations" | "tasks" | "finance" | "clinical" | "crm" | "agent" | "allTasks" | "configure" | "ownAppointments", boolean>
+  /** Hay más de una sede activa: solo entonces se ofrece elegirla. */
+  multiBranch: boolean
   setup: { availability: boolean; chairs: boolean; patients: boolean } | null
-  activity: { recorded: boolean; completedToday: boolean }
-  appointments: Array<{ id: string; patientId: string; patientName: string; startsAt: string; status: string; branchName: string; dentistName: string; serviceName: string | null; multiBranch: boolean }>
-  appointmentCounts: Array<{ status: string; count: number }>
-  tasks: Array<{ id: string; title: string; dueAt: string | null; overdue: boolean; href: string }>
-  taskCount: { overdue: number; open: number } | null
-  conversations: { unread: number; waiting: number; human: number } | null
-  budgets: Array<{ id: string; patientId: string; patientName: string; title: string; presentedAt: string | null }>
-  debt: DebtSummary[]
-  /** Resumen del agente autónomo; null sin permiso `agent.read` ni `agent.decide`. */
-  agent: WorkspaceAgentHome | null
+  activity: { recorded: boolean }
+  /** Lo que necesita a una persona, en el orden en que se muestra. */
+  waiting: WaitingRow[]
+  /** La agenda de la sede o las citas de quien atiende; null sin permiso de agenda. */
+  today: WorkspaceToday | null
+  /** La caja del día de la sede; null sin permiso de caja. */
+  cash: WorkspaceCash | null
 }
-export interface WorkspaceAgentHome {
-  pendingProposals: number
-  /** Conversaciones con una derivación sin resolver (misma cuenta que la bandeja). */
-  derivedConversations: number
-  proposals: Array<{ id: string; action: string; summary: string; createdAt: string; conversationId: string | null; mode: string; context: AgentProposal["context"] }>
-  recentHandoffs: Array<{ id: string; reason: string; priority: string; createdAt: string; conversationId: string | null; contactName: string | null; channel: string | null }>
-  today: { runs: number; ok: number; handoff: number; error: number; omitida: number; sinRespuesta: number }
+export interface WaitingTask {
+  id: string
+  title: string
+  dueAt: string | null
+  due: "overdue" | "today" | "later" | "none"
+  href: string
+  mine: boolean
+  assigneeName: string | null
 }
-/** Foto agregada de los últimos 30 días; cada sección es null sin su permiso. */
-export interface WorkspacePulse {
-  funnel: Array<{ stage: string; count: number; amountCents: string; currency: string }> | null
-  channels: Array<{ channel: string; count: number }> | null
-  execution: Array<{ day: string; ok: number; handoff: number; error: number; sinRespuesta: number }> | null
-  collections: Array<{ day: string; currency: string; amountCents: string }> | null
-  performance: CrmPerformance
+export interface WaitingBudgets {
+  total: number
+  oldestPresentedAt: string | null
+  items: Array<{ id: string; patientId: string; patientName: string; title: string; presentedAt: string | null }>
 }
-export interface DebtSummary { currency: string; outstandingCents: string; overdueCents: string; patients: number }
+export type WaitingRow =
+  | { kind: "case"; id: string; priority: string; reason: string; contactName: string | null; channel: string | null; createdAt: string; conversationId: string | null }
+  | { kind: "proposal"; id: string; action: string; summary: string; createdAt: string; conversationId: string | null; contactName: string | null; patientName: string | null }
+  | { kind: "conversations"; waiting: number; oldestAt: string | null }
+  | ({ kind: "task"; more: number } & WaitingTask)
+  | { kind: "advice"; key: string; title: string; detail: string }
+  | ({ kind: "budgets" } & WaitingBudgets)
+  | { kind: "more"; of: "cases" | "proposals" | "tasks"; count: number }
+export interface WorkspaceAppointment {
+  id: string
+  patientId: string
+  patientName: string
+  startsAt: string
+  status: string
+  serviceName: string | null
+  dentistName: string
+  chairName: string
+  branchName: string
+  next: boolean
+}
+export interface WorkspaceToday {
+  scope: "branch" | "mine"
+  branch: { id: string; name: string } | null
+  /** Zona en que se leen las horas: la de la sede o la de la clínica. */
+  timezone: string
+  summary: { total: number; attended: number; upcoming: number; unconfirmed: number }
+  appointments: WorkspaceAppointment[]
+}
+export interface WorkspaceCash {
+  branchId: string
+  branchName: string
+  currency: string
+  timezone: string
+  collectedCents: number
+  /** Cobros del día: un ticket con dos medios cuenta una vez. */
+  tickets: number
+  /** Atendidos hoy con algo por cobrar: la misma lista de Finanzas › Caja. */
+  toCollect: DebtRow[]
+}
 export interface WorkspaceNotice { id: string; title: string; body: string; href: string; createdAt: string; readAt: string | null }
-export interface ManagementReport {
-  from: string; to: string; timezone: string; locale: string
-  appointments: Array<{ status: string; count: number }>
-  production: Array<{ userId: string; name: string; attended: number; total: number }>
-  budgets: Array<{ status: string; count: number }>
-  collections: Array<{ currency: string; receivedCents: string; refundedCents: string; netCents: string }>
-  debt: DebtSummary[]
-  clinicalProduction: Array<{ name: string; currency: string | null; procedures: number; amountCents: string }>
-  opportunities: Array<{ status: string; currency: string; count: number; amountCents: string }>
-  aging: Array<{ currency: string; bucket: string; amountCents: string }>
-  performance: CrmPerformance
-}
-export interface CrmPerformance {
-  responses: { conversations: number; responded: number; timedResponses: number; avgFirstResponseSeconds: number | null } | null
-  followUps: { open: number; overdue: number; unassigned: number } | null
-  conversations: { closed: number; waiting: number } | null
-  bookings: Array<{ source: string; count: number; active: number }> | null
-  conversion: Array<{ channel: string | null; assigneeUserId: string | null; assigneeName: string | null; created: number; won: number; lost: number; open: number; wonRate: number | null }> | null
-  proposals: { executed: number; failed: number; pending: number } | null
-  handoffs: { cohort: number; collected: number; resolved: number; cancelled: number; open: number; unknown: number } | null
-  clinicalControls: { cohort: number; realized: number; cancelled: number; pending: number; unknown: number } | null
-  taskTimeliness: { cohort: number; onTime: number; late: number; cancelled: number; open: number; unknown: number } | null
-}
-export const stateLabel: Record<string, string> = {
-  programada: "Programada", confirmada: "Confirmada", atendida: "Atendida", no_asistio: "No asistió", cancelada: "Cancelada",
-  borrador: "Borrador", presentado: "Presentado", aceptado: "Aceptado", parcial: "Aceptación parcial", rechazado: "Rechazado",
-  pospuesto: "Pospuesto", cancelado: "Cancelado", sustituido: "Sustituido", historico: "Histórico",
-  open: "Abierta", won: "Ganada", lost: "Perdida",
-}
 /**
- * Los agregados llegan como enteros (texto) en la unidad menor de su moneda,
- * para no redondear dinero en JSON. Los decimales son los de cada moneda
- * (ISO 4217: ninguno en CLP o JPY, dos en PEN o USD, tres en KWD) y el formato,
- * el de la clínica.
+ * Un agregado que llega como entero (texto) en la unidad menor de su moneda,
+ * como número para un gráfico o un formato: en la unidad mayor, con los
+ * decimales de cada moneda (ISO 4217: ninguno en CLP o JPY, dos en PEN o USD,
+ * tres en KWD).
  */
-export function moneyFromCents(cents: string, currency: string, locale: string) {
-  const value = BigInt(cents)
-  const negative = value < 0n
-  const absolute = negative ? -value : value
-  const digits = currencyFractionDigits(currency)
-  const scale = 10n ** BigInt(digits)
-  const decimal = new Intl.NumberFormat(locale).formatToParts(1.1).find(part => part.type === "decimal")?.value ?? "."
-  const fraction = digits > 0 ? `${decimal}${(absolute % scale).toString().padStart(digits, "0")}` : ""
-  return `${negative ? "−" : ""}${currency} ${(absolute / scale).toLocaleString(locale)}${fraction}`
-}
-
-/** El mismo agregado como número para un gráfico, en la unidad mayor de su moneda. */
 export function amountFromCents(cents: string, currency: string): number {
   return Number(BigInt(cents)) / 10 ** currencyFractionDigits(currency)
 }

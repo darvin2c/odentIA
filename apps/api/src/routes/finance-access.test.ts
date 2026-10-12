@@ -19,11 +19,13 @@ import { GenericContainer, type StartedTestContainer, Wait } from "testcontainer
 import { afterAll, beforeAll, expect, it } from "vitest"
 import { z } from "zod"
 import { createCommissionsRoute } from "./commissions.js"
+import { createReportsRoute } from "./reports.js"
 import { createFinanceRoute } from "./finance.js"
 import { createFinancialDocumentsRoute } from "./financial-documents.js"
 import type { CrmDeps } from "./helpers.js"
 import { createPatientsRoute } from "./patients.js"
 import { createPaymentMethodsRoute } from "./payment-methods.js"
+import { createWorkspaceRoute } from "./workspace.js"
 
 // Matriz de acceso económico (P2) sobre API real con PostgreSQL efímero.
 // reception no lee caja/cuenta/importes ni configura métodos; cashier cobra,
@@ -140,6 +142,8 @@ function buildApp(role: string, userId: string, orgId = ORG_A): Hono {
   app.route("/finance", createFinanceRoute(deps))
   app.route("/org/payment-methods", createPaymentMethodsRoute(deps))
   app.route("/commissions", createCommissionsRoute(deps))
+  app.route("/reports", createReportsRoute(deps))
+  app.route("/workspace", createWorkspaceRoute(deps))
   return app
 }
 
@@ -480,7 +484,7 @@ it("comisiones: dentist propias sin ajenas ni resultado; cashier sin commissions
   const dent2 = buildApp("dentist", DENT2)
   expect((await dent2.request(`/commissions/my?${month}`)).status).toBe(200)
   expect((await dent2.request(`/commissions/monthly?professionalUserId=${DENT1}&${month}`)).status).toBe(403)
-  expect((await dent2.request(`/commissions/monthly-result?year=2026&month=9`)).status).toBe(403)
+  expect((await dent2.request(`/reports/money?period=2026-09`)).status).toBe(403)
   const rateBody = { professionalUserId: DENT2, rateBps: 4000 }
   expect((await dent2.request("/commissions/rates", {
     method: "PUT",
@@ -496,7 +500,7 @@ it("comisiones: dentist propias sin ajenas ni resultado; cashier sin commissions
 
   // Caja no ve comisiones ni el resultado del mes, que es de quien dirige la clínica.
   const cashier = buildApp("cashier", CASH)
-  expect((await cashier.request(`/commissions/monthly-result?year=2026&month=9`)).status).toBe(403)
+  expect((await cashier.request(`/reports/money?period=2026-09`)).status).toBe(403)
   expect((await cashier.request(`/commissions/my?${month}`)).status).toBe(403)
   expect((await cashier.request(`/commissions/month?${month}`)).status).toBe(403)
   expect((await cashier.request("/commissions/rates", {
@@ -513,10 +517,47 @@ it("comisiones: dentist propias sin ajenas ni resultado; cashier sin commissions
     body: JSON.stringify({ professionalUserId: DENT1, rateBps: 4000 }),
   })).status).toBe(200)
   expect((await admin.request(`/commissions/month?${month}`)).status).toBe(200)
-  expect((await admin.request(`/commissions/monthly-result?year=2026&month=9`)).status).toBe(200)
+  expect((await admin.request(`/reports/money?period=2026-09`)).status).toBe(200)
   // Sin cobros no hay nada que pagar: se rechaza sin registrar un gasto.
   const nothing = await postJson(admin, "/commissions/pay", { ...payBody, professionalUserId: DENT1 })
   expect(nothing.status).toBe(409)
+})
+
+it("Inicio: cada rol recibe su «Hoy» y nada de la caja o la agenda que no puede ver", async () => {
+  const Home = z.object({
+    data: z.object({
+      today: z.object({ scope: z.string(), branch: z.object({ id: z.string() }).nullable() }).passthrough().nullable(),
+      cash: z.object({ branchId: z.string() }).passthrough().nullable(),
+      waiting: z.array(z.object({ kind: z.string() }).passthrough()),
+    }).passthrough(),
+  })
+  const home = async (role: string, userId: string, query = "") =>
+    Home.parse(await (await buildApp(role, userId).request(`/workspace/home${query}`)).json()).data
+  // Recepción: la agenda de la sede; sin caja ni presupuestos.
+  const reception = await home("reception", RECEP, `?branch=${BRANCH_A}`)
+  expect(reception.today).toMatchObject({ scope: "branch", branch: { id: BRANCH_A } })
+  expect(reception.cash).toBeNull()
+  expect(reception.waiting.some((row) => row.kind === "budgets")).toBe(false)
+  // Odontólogo: sus propias citas, pida la sede que pida; sin caja.
+  const dentist = await home("dentist", DENT1, `?branch=${BRANCH_A}`)
+  expect(dentist.today).toMatchObject({ scope: "mine", branch: null })
+  expect(dentist.cash).toBeNull()
+  // Caja: la caja de la sede; sin agenda.
+  const cashier = await home("cashier", CASH, `?branch=${BRANCH_A}`)
+  expect(cashier.today).toBeNull()
+  expect(cashier.cash?.branchId).toBe(BRANCH_A)
+  // Quien dirige: las dos cosas, de la misma sede.
+  const admin = await home("admin", ADMIN, `?branch=${BRANCH_A}`)
+  expect(admin.today).toMatchObject({ scope: "branch", branch: { id: BRANCH_A } })
+  expect(admin.cash?.branchId).toBe(BRANCH_A)
+  // El rol mínimo solo ve tareas: ni agenda ni caja.
+  const minimal = await home("member", MEMBER)
+  expect(minimal).toMatchObject({ today: null, cash: null })
+  // La sede de otra organización no se usa: vale la primera activa de la propia.
+  const foreign = await home("admin", ADMIN, `?branch=${BRANCH_B}`)
+  expect(foreign.today?.branch?.id).not.toBe(BRANCH_B)
+  expect(foreign.cash?.branchId).not.toBe(BRANCH_B)
+  expect((await buildApp("admin", ADMIN).request("/workspace/home?branch=no-es-una-sede")).status).toBe(400)
 })
 
 it("tenancy: medios, caja y presupuestos aislados por organización", async () => {
