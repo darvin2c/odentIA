@@ -25,7 +25,15 @@ export {
   type AgentRuntime,
   consumeAgentRun,
   processAgentRun,
+  EMPTY_SANDBOX_STATE,
   resolveOrgLlm,
+  type LessonPreview,
+  type SandboxResult,
+  type SandboxTurn,
+  previewLesson,
+  simulateAgentSandbox,
   simulateAgentTurn,
   type SimulationResult,
 } from "./run.js"
+export type { AgentSandboxState } from "./tools.js"
+export { demoExtraction, demoSegment, type DictationExtraction, type DictationPending, extractDictation, groundSource } from "./dictation.js"

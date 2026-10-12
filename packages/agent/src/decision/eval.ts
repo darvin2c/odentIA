@@ -16,6 +16,8 @@ import { TRIAGE_QUESTIONS, triageOutcome, triageState } from "./points.js"
 
 interface Example {
   previous?: Array<{ direction: "in" | "out"; body: string }>
+  /** Mensajes que el contacto envió seguidos antes del último, del más antiguo al más reciente. */
+  burst?: string[]
   latest: string
   expected: { requires_reply: boolean; handoff: boolean; urgency: number; intent: string; unsubscribe: boolean }
 }
@@ -63,24 +65,28 @@ const totals: Record<string, number> = {}
 const latencies: number[] = []
 let flips = 0
 let comparisons = 0
-const bump = (key: string, ok: boolean) => {
+const mistakes: string[] = []
+const bump = (key: string, ok: boolean, miss?: () => string) => {
   totals[key] = (totals[key] ?? 0) + 1
   if (ok) hits[key] = (hits[key] ?? 0) + 1
+  else if (miss) mistakes.push(`${key}: «${miss()}`)
 }
 
 for (const example of examples) {
-  const state = triageState(example.previous ?? [], example.latest)
+  const state = triageState(example.previous ?? [], example.latest, example.burst ?? [])
   let first: string | null = null
   for (let i = 0; i < repeats; i += 1) {
     const result = await decision.decide(state, TRIAGE_QUESTIONS)
     latencies.push(result.latencyMs)
     // Mismos umbrales que la sombra (triageOutcome): se mide lo que se haría.
     const outcome = triageOutcome(result)
-    bump("requires_reply", outcome.wouldSkipReply === !example.expected.requires_reply)
-    bump("handoff", outcome.wouldHandoff === example.expected.handoff)
-    bump("urgency", outcome.urgencyLevel === example.expected.urgency)
-    bump("intent", outcome.intent === example.expected.intent)
-    bump("unsubscribe", outcome.wouldFlagUnsubscribe === example.expected.unsubscribe)
+    // Cada fallo se lista con lo esperado y lo obtenido: es lo que sirve para ajustar umbrales.
+    const miss = (expected: unknown, got: unknown) => () => `${example.latest}» → esperado ${String(expected)}, obtuvo ${String(got)}`
+    bump("requires_reply", outcome.wouldSkipReply === !example.expected.requires_reply, miss(example.expected.requires_reply, !outcome.wouldSkipReply))
+    bump("handoff", outcome.wouldHandoff === example.expected.handoff, miss(example.expected.handoff, outcome.wouldHandoff))
+    bump("urgency", outcome.urgencyLevel === example.expected.urgency, miss(example.expected.urgency, outcome.urgencyLevel))
+    bump("intent", outcome.intent === example.expected.intent, miss(example.expected.intent, outcome.intent))
+    bump("unsubscribe", outcome.wouldFlagUnsubscribe === example.expected.unsubscribe, miss(example.expected.unsubscribe, outcome.wouldFlagUnsubscribe))
     const signature = JSON.stringify(outcome)
     if (first === null) first = signature
     else {
@@ -98,3 +104,4 @@ for (const key of Object.keys(totals)) {
 }
 if (comparisons > 0) console.log(`  repetibilidad: ${comparisons - flips}/${comparisons} respuestas iguales entre repeticiones`)
 console.log(`  latencia p50 ${p(0.5)} ms · p95 ${p(0.95)} ms`)
+for (const mistake of mistakes) console.log(`  - ${mistake}`)

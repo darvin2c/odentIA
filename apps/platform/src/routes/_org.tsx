@@ -47,6 +47,7 @@ import {
   invalidateAgentPanelQueries,
   useAgentPanelSummary,
 } from "../components/agent-panel"
+import { HelpButton } from "../components/help-panel"
 import { WorkspaceNotifications } from "../components/workspace-notifications"
 import { invalidateAppointmentQueries } from "../lib/agenda"
 import { authClient } from "../lib/auth-client"
@@ -235,6 +236,7 @@ function OrgLayout() {
           <HeaderUtilitiesProvider
             value={
               <>
+                <HelpButton />
                 <WorkspaceNotifications />
                 <AgentPanelButton />
               </>

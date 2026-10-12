@@ -46,7 +46,7 @@ test("configuración del agente: proveedor propio con clave cifrada, prueba de c
     await page.getByLabel("URL base del proveedor").fill(provider.baseUrl)
     await page.getByLabel("Clave de API").fill("sk-e2e-secreta")
     await page.getByLabel("Modelo", { exact: true }).fill("modelo-controlado")
-    await page.getByLabel("Modelo de decisión (en sombra)").selectOption("baseline")
+    await page.getByLabel("Modelo de decisión", { exact: true }).selectOption("baseline")
     await page.getByRole("button", { name: "Probar conexión" }).click()
     await expect(page.getByRole("status").filter({ hasText: "El proveedor respondió" })).toBeVisible()
     expect(provider.seen).toEqual(["Bearer sk-e2e-secreta"])

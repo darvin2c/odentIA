@@ -2,16 +2,20 @@ import { normalizeTags } from "@odentia/clinical"
 import { withOrgContext } from "@odentia/db"
 import {
   addContactIdentity,
+  addPersonFact,
   createContact,
   getContact,
+  getPersonMemory,
   listContacts,
   moveContactIdentity,
+  operationBodySchema,
+  removePersonFact,
   startContactConversation,
   updateContact,
 } from "@odentia/services"
 import { Hono } from "hono"
 import { z } from "zod"
-import { canAccess, orgContextOf } from "../lib/context.js"
+import { canAccess, canAccessAny, orgContextOf } from "../lib/context.js"
 import { errorBody } from "../lib/error.js"
 import { type CrmDeps, runService, serviceErrorResponse, validationError } from "./helpers.js"
 
@@ -212,6 +216,46 @@ export function createContactsRoute(deps: CrmDeps) {
     } catch (e) {
       return serviceErrorResponse(c, e) ?? Promise.reject(e)
     }
+  })
+
+  /**
+   * Lo que el agente recuerda de la persona. Lo lee quien atiende
+   * conversaciones o lleva el CRM; añadir o quitar un dato exige escribir en
+   * uno de los dos. El dato pasa el mismo filtro que cuando lo guarda el
+   * agente: nada clínico.
+   */
+  const memoryReaders = ["conversations.read", "crm.read"] as const
+  const memoryWriters = ["conversations.write", "crm.write"] as const
+  // Los campos de recordar un dato se declaran una vez, para la pantalla y para el agente.
+  const factInput = operationBodySchema("persona.recordar")
+
+  app.get("/:id/agent-memory", async (c) => {
+    const { orgId, memberRole } = orgContextOf(c)
+    if (!canAccessAny(memberRole, [...memoryReaders])) return c.json(errorBody(c, "FORBIDDEN", "Sin acceso a esta persona"), 403)
+    // «La última vez» incluye su cita solo para quien ve la agenda.
+    const lastTime = { appointments: canAccess(memberRole, "appointments.read") }
+    return runService(c, 200, () => withOrgContext(deps.db, orgId, (tx) => getPersonMemory(tx, orgId, c.req.param("id"), { lastTime })))
+  })
+
+  app.post("/:id/agent-memory", async (c) => {
+    const { orgId, memberRole, userId } = orgContextOf(c)
+    if (!canAccessAny(memberRole, [...memoryWriters])) return c.json(errorBody(c, "FORBIDDEN", "Sin permiso para cambiar lo que recuerda el agente"), 403)
+    const parsed = factInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 201, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        addPersonFact(tx, orgId, { userId, source: "equipo" }, { contactId: c.req.param("id"), ...parsed.data }),
+      ),
+    )
+  })
+
+  app.post("/:id/agent-memory/:factId/remove", async (c) => {
+    const { orgId, memberRole, userId } = orgContextOf(c)
+    if (!canAccessAny(memberRole, [...memoryWriters])) return c.json(errorBody(c, "FORBIDDEN", "Sin permiso para cambiar lo que recuerda el agente"), 403)
+    return runService(c, 200, async () => {
+      await withOrgContext(deps.db, orgId, (tx) => removePersonFact(tx, orgId, userId, c.req.param("id"), c.req.param("factId")))
+      return { ok: true }
+    })
   })
 
   return app

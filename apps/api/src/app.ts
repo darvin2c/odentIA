@@ -14,7 +14,10 @@ import { z } from "zod"
 import { canAccess, orgContextOf, requireOrgContext, requireSession } from "./lib/context.js"
 import { errorBody } from "./lib/error.js"
 import { createAgentRoute } from "./routes/agent.js"
+import { createAgentAdvisorRoute } from "./routes/agent-advisor.js"
 import { createAgentKnowledgeRoute } from "./routes/agent-knowledge.js"
+import { createHelpRoute } from "./routes/help.js"
+import { createAgentLearningRoute } from "./routes/agent-learning.js"
 import { createAgentOpsRoute } from "./routes/agent-ops.js"
 import { createAgendaRoute, createAppointmentsRoute } from "./routes/appointments.js"
 import { createAutomationsRoute, createPublicAutomationsRoute } from "./routes/automations.js"
@@ -37,6 +40,7 @@ import {
   createPublicPatientRegistrationRoute,
   type RegistrationRemoteAddress,
 } from "./routes/public-patient-registration.js"
+import { createPublicBookingRoute } from "./routes/public-booking.js"
 import { createPublicPortalRoute } from "./routes/public-portal.js"
 import { createServicesRoute } from "./routes/services.js"
 import { createTasksRoute } from "./routes/tasks.js"
@@ -215,6 +219,10 @@ export function createApp(deps: AppDeps) {
     }),
   )
   app.route("/api/public/automations", createPublicAutomationsRoute({ db, ownerDb: deps.ownerDb }))
+  app.route(
+    "/api/public/booking",
+    createPublicBookingRoute({ db: deps.db, secretsKey: deps.secretsKey, remoteAddress: deps.registrationRemoteAddress }),
+  )
   app.route(
     "/api/webchat",
     createWebchatPublicRoute({
@@ -537,13 +545,13 @@ export function createApp(deps: AppDeps) {
   guarded.route("/conversations", createConversationsRoute(crmDeps))
   guarded.route("/contacts", createContactsRoute(crmDeps))
   guarded.route("/crm", createCrmWorkspaceRoute(crmDeps))
-  guarded.route("/patients", createPatientsRoute(crmDeps))
+  const llm: PlatformLlm = deps.llm ?? { modelName: "fake" }
+  guarded.route("/patients", createPatientsRoute({ ...crmDeps, llm }))
   guarded.route("/services", createServicesRoute(crmDeps))
   guarded.route("/cie10", createCie10Route(crmDeps))
   guarded.route("/ubigeo", createUbigeoRoute(crmDeps))
   guarded.route("/pipelines", createPipelinesRoute(crmDeps))
   guarded.route("/channels/connections", createConnectionsRoute(crmDeps))
-  const llm: PlatformLlm = deps.llm ?? { modelName: "fake" }
   guarded.route("/agent", createAgentRoute({ ...crmDeps, llm }))
   guarded.route("/tasks", createTasksRoute(crmDeps))
   guarded.route("/agenda", createAgendaRoute(crmDeps))
@@ -552,7 +560,10 @@ export function createApp(deps: AppDeps) {
   guarded.route("/workspace", createWorkspaceRoute(crmDeps))
   guarded.route("/inventory", createInventoryRoute(crmDeps))
   guarded.route("/opportunities", createOpportunitiesRoute(crmDeps))
+  guarded.route("/help", createHelpRoute({ ...crmDeps, appVersion: process.env["APP_VERSION"] ?? null }))
+  guarded.route("/agent/advisor", createAgentAdvisorRoute(crmDeps))
   guarded.route("/agent/knowledge", createAgentKnowledgeRoute(crmDeps))
+  guarded.route("/agent/learning", createAgentLearningRoute({ ...crmDeps, llm }))
   guarded.route("/agent", createAgentOpsRoute({ ...crmDeps, llm }))
   guarded.route("/finance", createFinanceRoute(crmDeps))
   guarded.route("/automations", createAutomationsRoute(crmDeps))

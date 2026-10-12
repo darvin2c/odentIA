@@ -323,7 +323,7 @@ test("paciente: ejecución de la sesión y cierre del tratamiento", async ({ own
   await page.getByRole("button", { name: "Completar tratamiento", exact: true }).click()
   await expect(page.getByText(/Completado el/).first()).toBeVisible()
   // Sin diagnóstico ni evolución la lista de cierre bloquea la firma.
-  await expect(page.getByRole("button", { name: "Finalizar atención", exact: true })).toBeDisabled()
+  await expect(page.getByRole("button", { name: "Finalizar y firmar", exact: true })).toBeDisabled()
   const encounterId = page.url().split("/encounters/")[1]?.split(/[?#]/)[0] ?? ""
   const apiPath = `/api/patients/${ids.patientId}/encounters/${encounterId}`
   await call(page, "POST", `${apiPath}/diagnoses`, owner.org.slug, {
@@ -335,7 +335,7 @@ test("paciente: ejecución de la sesión y cierre del tratamiento", async ({ own
     evolution: "Endodoncia de la pieza 36 sin complicaciones.",
   })
   await page.reload()
-  await page.getByRole("button", { name: "Finalizar atención", exact: true }).click()
+  await page.getByRole("button", { name: "Finalizar y firmar", exact: true }).click()
   const firma = page.getByRole("alertdialog")
   await expect(firma.getByText(/COP 12345/)).toBeVisible()
   await firma.getByRole("button", { name: "Finalizar y firmar", exact: true }).click()

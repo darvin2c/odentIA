@@ -36,7 +36,7 @@ async function activeDay(db: Db, owner: OwnerFixture) {
   await db.insert(patient).values({ id: patientId, organizationId, displayName: "Paciente con cita", patientNumber: 1 })
   await db.insert(scheduleChair).values({ id: chairId, organizationId, branchId: owner.branchId, name: "Sillón de prueba" })
   await db.insert(appointment).values({ organizationId, branchId: owner.branchId, patientId, chairId,
-    dentistUserId: owner.user.id, startsAt: new Date(`${date}T18:00:00-05:00`), endsAt: new Date(`${date}T18:30:00-05:00`), durationMin: 30 })
+    dentistUserId: owner.user.id, serviceName: "Profilaxis", startsAt: new Date(`${date}T18:00:00-05:00`), endsAt: new Date(`${date}T18:30:00-05:00`), durationMin: 30 })
   await db.insert(crmTask).values({ organizationId, title: "Confirmar seguimiento pendiente", assigneeUserId: owner.user.id, createdBy: "user" })
   await db.insert(patientCharge).values({ organizationId, patientId, description: "Cuenta pendiente", amountCents: 12000, currency: "PEN" })
   await db.insert(contact).values({ id: contactId, organizationId, displayName: "Interlocutor pendiente" })
@@ -102,6 +102,23 @@ for (const width of [1440, 390]) {
       await expect(page.getByRole("link", { name: "Confirmar seguimiento pendiente", exact: true })).toBeVisible()
       await expect(page.getByRole("heading", { name: "Cobranza pendiente", exact: true })).toBeVisible()
       await expect(page.getByRole("link", { name: /sin leer/ })).toBeVisible()
+      // La fila de la agenda dice prestación · profesional.
+      await expect(page.getByText(new RegExp(`^Profilaxis · ${owner.user.name}`))).toBeVisible()
+      if (width === 390) {
+        // Teléfono: tres indicadores en la misma fila, con rótulos cortos.
+        const metrics = [/^Citas de hoy\s*1/, /^Sin leer\s*1/, /^Tareas\s*1/].map(name => page.getByRole("link", { name }))
+        const boxes = []
+        for (const metric of metrics) {
+          await expect(metric).toBeVisible()
+          boxes.push(await metric.boundingBox())
+        }
+        expect(new Set(boxes.map(box => Math.round(box?.y ?? -1))).size).toBe(1)
+        expect(boxes.every(box => (box?.height ?? 0) >= 44)).toBe(true)
+        await expect(page.getByRole("link", { name: /^Con saldo\s*1\s*Ver cobranza/ })).toBeVisible()
+      } else {
+        await expect(page.getByRole("link", { name: /^Tareas abiertas/ })).toBeVisible()
+        await expect(page.getByRole("link", { name: /^Cuentas con saldo/ })).toBeVisible()
+      }
       await observe(page, info, "activa")
       const task = page.getByRole("link", { name: "Confirmar seguimiento pendiente", exact: true })
       await task.click()

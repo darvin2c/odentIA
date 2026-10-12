@@ -7,6 +7,7 @@ import { DecisionError, type DecisionModel } from "./port.js"
 
 export * from "./port.js"
 export * from "./points.js"
+export * from "./knowledge.js"
 export { createBaselineDecisionModel } from "./baseline.js"
 export { createFakeDecisionModel } from "./fake.js"
 export { createJevDecisionModel } from "./jev.js"

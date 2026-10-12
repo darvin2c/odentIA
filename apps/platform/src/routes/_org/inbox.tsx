@@ -71,6 +71,7 @@ import { createFileRoute, getRouteApi, Link, useNavigate } from "@tanstack/react
 import {
   AlertCircle,
   Bot,
+  ClipboardList,
   CheckCheck,
   ChevronLeft,
   Clock,
@@ -96,6 +97,13 @@ import {
   useAgentPanelDockBlocker,
   useAgentPanelFitsBesideContext,
 } from "../../components/agent-panel"
+import { AnswerTraceDrawer } from "../../components/agent/answer-trace"
+import { CaseBriefDrawer } from "../../components/agent/case-brief"
+import { urgencyLabel } from "../../components/agent/handoff-badges"
+import { LessonDrawer } from "../../components/agent/lesson-drawer"
+import { ReceptionOffNotice } from "../../components/agent/reception-off-notice"
+import { CorrectDrawer, type CorrectionTarget } from "../../components/agent/correct-drawer"
+import type { AnswerTrace } from "../../lib/agent"
 import { ContactWorkspace } from "../../components/crm/contact-workspace"
 import { ACTION_LABEL, type AgentProposal } from "../../lib/agent"
 import { channelIcon, channelLabel } from "../../lib/channels"
@@ -276,6 +284,7 @@ function InboxPage() {
       void queryClient.invalidateQueries({ queryKey: ["conversations"] })
       if (current) {
         void queryClient.invalidateQueries({ queryKey: ["conversation", current] })
+        void queryClient.invalidateQueries({ queryKey: ["agent-answer-traces", current] })
         void queryClient.invalidateQueries({ queryKey: ["crm-context"] })
         void queryClient.invalidateQueries({ queryKey: ["crm-activity"] })
       }
@@ -294,6 +303,7 @@ function InboxPage() {
       "agent.proposal.decided",
       "agent.proposal.executed",
       "agent.handoff.created",
+      "agent.run.recorded",
       "stream.reconnected",
     ],
     handleOrgEvent,
@@ -485,6 +495,8 @@ function InboxPage() {
         searchPending={listQuery.isFetching && !listQuery.isFetchingNextPage}
         resetKeys={["status", "channel", "assigned", "q"]}
       /> : null}
+      {/* Con el agente apagado en toda la clínica, lo dice junto a la lista; en angosto, con un hilo abierto, la pantalla es del hilo. */}
+      {mode === "panel" || !selectedId ? <ReceptionOffNotice className="shrink-0" /> : null}
       {/* PageShell `fill` acota al viewport: el hilo ocupa el alto restante y el
           composer queda fijo como footer suyo. En escritorio hay tres paneles
           (lista, hilo, contexto); en angosto se muestra una vista por vez y la
@@ -609,7 +621,7 @@ function AttentionLabel({ item, canDecide }: { item: ConversationListItem; canDe
     return (
       <span className={`flex min-w-0 items-center gap-1.5 font-semibold ${high ? "text-destructive" : "text-warning"}`}>
         <span aria-hidden className={high ? "size-2 shrink-0 rounded-full bg-destructive" : "size-2 shrink-0 rounded-[2px] bg-warning"} />
-        <span className="truncate">Derivada · prioridad {attention.handoffPriority}</span>
+        <span className="truncate">Derivada · {urgencyLabel(attention.handoffPriority).toLowerCase()}</span>
       </span>
     )
   }
@@ -894,6 +906,33 @@ function ThreadView({
   const detail = detailQuery.data?.data
   const messages = useMemo(() => [...older, ...(detail?.messages ?? [])], [older, detail?.messages])
 
+  // En qué se basó cada respuesta del agente: solo se ofrece en los mensajes que la tienen.
+  const tracesQuery = useQuery({
+    queryKey: ["agent-answer-traces", id],
+    queryFn: () => apiFetch<{ data: AnswerTrace[] }>(`/api/agent/answer-traces?conversationId=${id}`),
+    enabled: canRead,
+  })
+  const traceByMessage = useMemo(() => {
+    const map = new Map<string, AnswerTrace>()
+    // Llegan de la más reciente a la más antigua: la primera de cada mensaje es la vigente.
+    for (const trace of tracesQuery.data?.data ?? []) {
+      if (trace.messageId && !map.has(trace.messageId)) map.set(trace.messageId, trace)
+    }
+    return map
+  }, [tracesQuery.data])
+  const [openTrace, setOpenTrace] = useState<AnswerTrace | null>(null)
+  // Marcar una respuesta del agente (bien o por corregir) es de quien atiende
+  // conversaciones; lo que se aprende lo aprueba quien administra el agente.
+  const canDecideAgent = usePermission("agent.decide")
+  const canWriteConversations = usePermission("conversations.write")
+  const canCorrectAgent = canDecideAgent || canWriteConversations
+  const canManageAgent = usePermission("agent.write")
+  const [lessonId, setLessonId] = useState<string | null>(null)
+  const [correcting, setCorrecting] = useState<CorrectionTarget | null>(null)
+  // Resumen del caso para quien lo toma; guarda la conversación para que no siga abierto al cambiar de hilo.
+  const canClaimCase = usePermission("tasks.write")
+  const [briefFor, setBriefFor] = useState<string | null>(null)
+
   useEffect(() => {
     setOlder([])
     setOlderCursor(null)
@@ -904,6 +943,8 @@ function ThreadView({
     setRegistrationError(null)
     setSendError(null)
     setCopied(false)
+    setOpenTrace(null)
+    setCorrecting(null)
   }, [id])
 
   useEffect(() => {
@@ -1193,6 +1234,12 @@ function ThreadView({
             </DropdownMenuContent>
           </DropdownMenu>
         )}
+        {threadAttention?.handoffPriority ? (
+          <Button variant="outline" size="sm" onClick={() => setBriefFor(conv.id)}>
+            <ClipboardList className="size-4" />
+            Resumen del caso
+          </Button>
+        ) : null}
         {canWrite && (
           <Button
             variant="outline"
@@ -1254,7 +1301,14 @@ function ThreadView({
             <MessageScrollerContent className="gap-2">
               {messages.map((msg) => (
                 <MessageScrollerItem key={msg.id} messageId={msg.id}>
-                  <MessageBubble msg={msg} conversationId={id} orgSlug={orgSlug} />
+                  <MessageBubble
+                    msg={msg}
+                    conversationId={id}
+                    orgSlug={orgSlug}
+                    onShowTrace={
+                      traceByMessage.has(msg.id) ? () => setOpenTrace(traceByMessage.get(msg.id) ?? null) : undefined
+                    }
+                  />
                 </MessageScrollerItem>
               ))}
             </MessageScrollerContent>
@@ -1262,6 +1316,40 @@ function ThreadView({
         </MessageScroller>
       </MessageScrollerProvider>
 
+      <CaseBriefDrawer
+        conversationId={briefFor === conv.id ? conv.id : null}
+        name={detail.contact.displayName}
+        canClaim={canClaimCase}
+        inConversation
+        onClose={() => setBriefFor(null)}
+        onClaimed={() => void detailQuery.refetch()}
+      />
+      <AnswerTraceDrawer
+        trace={openTrace}
+        onClose={() => setOpenTrace(null)}
+        canMark={canCorrectAgent}
+        onOpenLesson={
+          canManageAgent
+            ? (id) => {
+                setOpenTrace(null)
+                setLessonId(id)
+              }
+            : undefined
+        }
+        onCorrect={
+          canCorrectAgent
+            ? (trace) => {
+                // La pregunta es el último mensaje del interlocutor antes de esa respuesta.
+                const at = messages.findIndex((item) => item.id === trace.messageId)
+                const asked = at > 0 ? [...messages.slice(0, at)].reverse().find((item) => item.direction === "in") : undefined
+                setOpenTrace(null)
+                setCorrecting({ traceId: trace.id, question: trace.question ?? asked?.body ?? "", reply: trace.replyText, teamReply: null, basis: trace.basis })
+              }
+            : undefined
+        }
+      />
+      <CorrectDrawer target={correcting} onClose={() => setCorrecting(null)} />
+      <LessonDrawer lessonId={lessonId} canWrite={canManageAgent} onClose={() => setLessonId(null)} />
       <AgentPendingBand conversationId={id} attention={threadAttention} canSeeProposals={canSeeProposals} />
       <div className="border-t p-3">
         {detail.contact.isActive === false && (
@@ -1486,10 +1574,13 @@ function MessageBubble({
   msg,
   conversationId,
   orgSlug,
+  onShowTrace,
 }: {
   msg: ChatMessage
   conversationId: string
   orgSlug: string
+  /** Presente solo si el mensaje tiene traza: abre «En qué se basó». */
+  onShowTrace?: () => void
 }) {
   const out = msg.direction === "out"
   const byAgent = msg.senderKind === "agent"
@@ -1527,6 +1618,17 @@ function MessageBubble({
           })}
           {out && statusIcon(msg.status)}
         </div>
+        {onShowTrace ? (
+          <Button
+            type="button"
+            variant="link"
+            size="sm"
+            className="h-auto min-h-11 justify-end self-end p-0 text-xs font-semibold sm:min-h-0"
+            onClick={onShowTrace}
+          >
+            En qué se basó
+          </Button>
+        ) : null}
       </MessageContent>
     </Message>
   )

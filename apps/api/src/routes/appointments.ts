@@ -1,6 +1,7 @@
 import { withOrgContext } from "@odentia/db"
 import {
   createAppointment,
+  operationBodySchema,
   createChair,
   createScheduleBlock,
   deleteScheduleBlock,
@@ -43,21 +44,8 @@ const listQuery = z.object({
   patientId: z.uuid().optional(),
 })
 
-const createInput = z.object({
-  branchId: z.uuid().optional(),
-  patientId: z.uuid(),
-  dentistUserId: z.string().min(1),
-  chairId: z.uuid().optional(),
-  serviceId: z.uuid().optional(),
-  startsAt: z.iso.datetime({ offset: true }),
-  endsAt: z.iso.datetime({ offset: true }).optional(),
-  durationMin: z.number().int().positive().optional(),
-  status: z.enum(STATUS).optional(),
-  reason: z.string().max(500).optional(),
-  source: z.string().max(40).optional(),
-  conversationId: z.uuid().optional(),
-  outsideSchedule: z.boolean().optional(),
-})
+// Reservar y mover una cita declaran sus campos una vez, para la pantalla y para el agente.
+const createInput = operationBodySchema("cita.reservar")
 
 const settingsInput = z.object({
   branchId: z.uuid(),
@@ -73,13 +61,7 @@ const patchInput = z.object({
   status: z.enum(STATUS).optional(),
 })
 
-const moveInput = z.object({
-  expectedVersion: z.number().int().positive(),
-  startsAt: z.iso.datetime({ offset: true }),
-  endsAt: z.iso.datetime({ offset: true }).optional(),
-  dentistUserId: z.string().min(1).optional(),
-  chairId: z.uuid().optional(),
-})
+const moveInput = operationBodySchema("cita.mover")
 
 const statusInput = z.object({
   status: z.enum(STATUS),

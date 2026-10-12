@@ -173,9 +173,8 @@ export const patientRegistrationLink = pgTable(
     contactId: uuid("contact_id").notNull(),
     conversationId: uuid("conversation_id").notNull(),
     tokenHash: text("token_hash").notNull(),
-    createdBy: text("created_by")
-      .notNull()
-      .references(() => user.id),
+    /** Quién del equipo lo creó; vacío si lo emitió el sistema para un enlace de reserva. */
+    createdBy: text("created_by").references(() => user.id),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
     consumedAt: timestamp("consumed_at", { withTimezone: true }),
     revokedAt: timestamp("revoked_at", { withTimezone: true }),
@@ -1328,6 +1327,54 @@ export const clinicalFollowUp = pgTable(
     check(
       "clinical_follow_up_treatment_check",
       sql`${table.kind} <> 'tratamiento' OR ${table.planItemId} IS NOT NULL`,
+    ),
+  ],
+)
+
+export const DICTATION_KINDS = ["nota", "diagnostico", "plan", "control"] as const
+export type DictationKind = (typeof DICTATION_KINDS)[number]
+
+/**
+ * Sugerencia del asistente clínico a partir de lo que dictó el odontólogo.
+ * No es parte de la historia: es un borrador de un registro que solo existe
+ * cuando el odontólogo que lleva la atención lo confirma, con la misma
+ * operación y las mismas validaciones que si lo escribiera. `por_revisar`:
+ * falta algo que solo una persona puede elegir (una prestación, un código).
+ * Guarda el fragmento dictado que la originó, no el dictado completo.
+ */
+export const encounterDictationSuggestion = pgTable(
+  "encounter_dictation_suggestion",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    organizationId: orgFk("organization_id"),
+    patientId: uuid("patient_id")
+      .notNull()
+      .references(() => patient.id, { onDelete: "cascade" }),
+    encounterId: uuid("encounter_id")
+      .notNull()
+      .references(() => encounter.id, { onDelete: "cascade" }),
+    dentistUserId: text("dentist_user_id")
+      .notNull()
+      .references(() => user.id),
+    kind: text("kind").$type<DictationKind>().notNull(),
+    payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
+    /** Lo que dijo el odontólogo y dio lugar a la sugerencia. */
+    sourceText: text("source_text").notNull().default(""),
+    status: text("status").notNull().default("lista"),
+    /** Por qué hay que revisarla antes de confirmar. */
+    note: text("note"),
+    /** Registro que creó al confirmarse (diagnóstico, indicación o control). */
+    entityId: uuid("entity_id"),
+    decidedBy: text("decided_by").references(() => user.id),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (table) => [
+    index("encounter_dictation_suggestion_idx").on(table.organizationId, table.encounterId, table.status),
+    check("encounter_dictation_suggestion_kind_check", sql`${table.kind} IN ('nota','diagnostico','plan','control')`),
+    check(
+      "encounter_dictation_suggestion_status_check",
+      sql`${table.status} IN ('lista','por_revisar','confirmada','descartada')`,
     ),
   ],
 )

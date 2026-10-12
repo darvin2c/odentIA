@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm"
 import {
   check,
+  date,
   foreignKey,
   index,
   integer,
@@ -38,12 +39,27 @@ export const agentKnowledgeEntry = pgTable(
     branchId: uuid("branch_id").references(() => branch.id),
     status: text("status").notNull().default("borrador"),
     version: integer("version").notNull().default(1),
+    /**
+     * Vigencia en fechas de la clínica (inclusive). Fuera de ella la respuesta
+     * no llega al agente aunque siga publicada: una promoción vencida deja de
+     * usarse sola.
+     */
+    validFrom: date("valid_from"),
+    validUntil: date("valid_until"),
+    /** Otras formas en que la gente pregunta lo mismo; ayudan a encontrarla. */
+    askForms: text("ask_forms").array().notNull().default(sql`'{}'`),
+    /** Pregunta de «lo básico de una clínica» que esta respuesta cubre. */
+    basicKey: text("basic_key"),
     createdBy: text("created_by"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
     index("agent_knowledge_entry_org_idx").on(table.organizationId, table.status, table.kind),
+    check(
+      "agent_knowledge_entry_validity_check",
+      sql`${table.validFrom} is null or ${table.validUntil} is null or ${table.validUntil} >= ${table.validFrom}`,
+    ),
     check("agent_knowledge_entry_kind_check", sql`${table.kind} in ('faq','info_sede','politica')`),
     check("agent_knowledge_entry_status_check", sql`${table.status} in ('borrador','publicada')`),
     check("agent_knowledge_entry_version_check", sql`${table.version} >= 1`),
@@ -68,6 +84,41 @@ export const agentKnowledgeRevision = pgTable(
   (table) => [
     index("agent_knowledge_revision_entry_idx").on(table.entryId, table.version),
     uniqueIndex("agent_knowledge_revision_entry_version_uidx").on(table.entryId, table.version),
+  ],
+)
+
+export const KNOWLEDGE_GAP_STATUSES = ["abierta", "resuelta", "descartada"] as const
+export type KnowledgeGapStatus = (typeof KNOWLEDGE_GAP_STATUSES)[number]
+
+/**
+ * Lo que el agente no supo responder: buscó en el conocimiento y no encontró
+ * nada. Queda abierto hasta que alguien lo convierte en respuesta oficial, lo
+ * enlaza a una que ya existía o lo descarta.
+ */
+export const agentKnowledgeGap = pgTable(
+  "agent_knowledge_gap",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    organizationId: orgFk("organization_id"),
+    conversationId: uuid("conversation_id")
+      .notNull()
+      .references(() => conversation.id),
+    triggerMessageId: uuid("trigger_message_id"),
+    agent: text("agent").notNull().default("recepcion"),
+    /** Lo que escribió el interlocutor. */
+    question: text("question").notNull(),
+    /** Lo que el agente buscó sin resultado. */
+    query: text("query").notNull(),
+    status: text("status").notNull().default("abierta"),
+    resolvedEntryId: uuid("resolved_entry_id").references(() => agentKnowledgeEntry.id),
+    resolvedBy: text("resolved_by"),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("agent_knowledge_gap_org_idx").on(table.organizationId, table.status, table.createdAt),
+    index("agent_knowledge_gap_conversation_idx").on(table.conversationId),
+    check("agent_knowledge_gap_status_check", sql`${table.status} in ('abierta','resuelta','descartada')`),
   ],
 )
 
@@ -150,6 +201,11 @@ export const agentProposal = pgTable(
     expectedState: jsonb("expected_state").$type<Record<string, unknown>>(),
     idempotencyKey: text("idempotency_key").notNull(),
     result: jsonb("result").$type<Record<string, unknown>>(),
+    /**
+     * Texto que el equipo aprobó cuando cambió el borrador de un mensaje. El
+     * `payload` conserva lo que propuso el agente: es la evidencia.
+     */
+    editedText: text("edited_text"),
     error: text("error"),
     proposedBy: text("proposed_by").notNull().default("agent"),
     decidedBy: text("decided_by"),
@@ -191,6 +247,12 @@ export const agentHandoff = pgTable(
     reason: text("reason").notNull(),
     summary: text("summary").notNull(),
     priority: text("priority").notNull().default("media"),
+    /** Qué pide la persona, en una frase, cuando quien deriva lo deja escrito. */
+    asks: text("asks"),
+    /** Lo que aún no se le preguntó o falta hacer para atenderla. */
+    pending: text("pending"),
+    /** El aviso que recibió la persona al pasar su caso. */
+    notice: text("notice"),
     assigneeUserId: text("assignee_user_id"),
     taskId: uuid("task_id"),
     createdBy: text("created_by").notNull().default("agent"),
@@ -317,7 +379,14 @@ export const agentRunLedger = pgTable(
   ],
 )
 
-export const DECISION_MODES = ["shadow"] as const
+/**
+ * `shadow`: solo se registra y se compara. `retrieval`: el modelo de decisión
+ * elige qué conocimiento llega al turno. `route`: elige el camino del turno
+ * antes de llamar al modelo que escribe y, si está seguro de que hace falta
+ * una persona, pasa el caso sin llamarlo.
+ */
+export const DECISION_MODES = ["shadow", "retrieval", "route"] as const
+export type DecisionMode = (typeof DECISION_MODES)[number]
 
 /**
  * Libro de decisiones del modelo de decisión (append-only). Guarda ids,
@@ -332,7 +401,7 @@ export const agentDecisionLog = pgTable(
     organizationId: orgFk("organization_id"),
     conversationId: uuid("conversation_id"),
     triggerMessageId: uuid("trigger_message_id"),
-    /** Punto de decisión y versión de sus preguntas (p. ej. triage.v1). */
+    /** Punto de decisión y versión de sus preguntas (p. ej. triage.v2). */
     point: text("point").notNull(),
     mode: text("mode").notNull().default("shadow"),
     provider: text("provider").notNull(),
@@ -353,7 +422,272 @@ export const agentDecisionLog = pgTable(
   (table) => [
     index("agent_decision_log_org_idx").on(table.organizationId, table.createdAt),
     index("agent_decision_log_conversation_idx").on(table.conversationId),
-    check("agent_decision_log_mode_check", sql`${table.mode} in ('shadow')`),
+    check("agent_decision_log_mode_check", sql`${table.mode} in ('shadow','retrieval','route')`),
+  ],
+)
+
+/** Nota que el agente deja sobre el caso para turnos posteriores. */
+export interface AgentCaseNote {
+  text: string
+  at: string
+}
+
+/** Última consulta de una herramienta de lectura en el hilo, tal como la vio el modelo. */
+export interface AgentCaseLookup {
+  text: string
+  at: string
+}
+
+/**
+ * Memoria del caso: lo que el agente necesita recordar de un hilo entre turnos
+ * y no vive en otra tabla. Las propuestas, citas y tareas se leen de su fuente;
+ * aquí solo van las notas que el propio agente deja y la última consulta de
+ * cada herramienta de lectura. Una fila por conversación.
+ */
+export const agentCaseMemory = pgTable(
+  "agent_case_memory",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    organizationId: orgFk("organization_id"),
+    conversationId: uuid("conversation_id").notNull(),
+    notes: jsonb("notes").$type<AgentCaseNote[]>().notNull().default(sql`'[]'::jsonb`),
+    lookups: jsonb("lookups").$type<Record<string, AgentCaseLookup>>().notNull().default(sql`'{}'::jsonb`),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("agent_case_memory_org_conversation_uidx").on(table.organizationId, table.conversationId),
+    foreignKey({
+      columns: [table.organizationId, table.conversationId],
+      foreignColumns: [conversation.organizationId, conversation.id],
+      name: "agent_case_memory_conversation_fk",
+    }).onDelete("cascade"),
+  ],
+)
+
+/** De dónde salió un dato de la respuesta: fuente legible, nunca el contenido clínico. */
+export interface AnswerBasisItem {
+  /** agenda | servicios | conocimiento | persona | caso | comercial | otros_canales | conversacion */
+  kind: string
+  label: string
+  detail?: string
+  /** Id de lo consultado cuando se puede abrir desde la ficha (hoy, la lección aplicada). */
+  ref?: string
+}
+
+export const ANSWER_CHECK_KINDS = ["precio", "hora", "fecha"] as const
+export type AnswerCheckKind = (typeof ANSWER_CHECK_KINDS)[number]
+
+/** Comprobación de un dato concreto de la respuesta contra lo consultado. */
+export interface AnswerCheck {
+  kind: AnswerCheckKind
+  /** El dato tal como aparece en la respuesta. */
+  value: string
+  ok: boolean
+  /** Fuente donde se encontró; nulo si no está en lo consultado. */
+  source: string | null
+}
+
+export const ANSWER_TRACE_OUTCOMES = ["enviada", "pendiente", "bloqueada", "fallida"] as const
+export type AnswerTraceOutcome = (typeof ANSWER_TRACE_OUTCOMES)[number]
+
+/**
+ * En qué se basó cada respuesta del agente (solo anexado). `bloqueada` es una
+ * respuesta que no salió porque un precio, fecha u hora no estaba en lo
+ * consultado. El mensaje real se enlaza por `message_id` cuando el envío es
+ * directo y por `proposal_id` cuando espera confirmación o aprobación.
+ */
+export const agentAnswerTrace = pgTable(
+  "agent_answer_trace",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    organizationId: orgFk("organization_id"),
+    conversationId: uuid("conversation_id")
+      .notNull()
+      .references(() => conversation.id),
+    triggerMessageId: uuid("trigger_message_id"),
+    proposalId: uuid("proposal_id"),
+    messageId: uuid("message_id"),
+    /** Agente que respondió (recepcion hoy; los demás roles llegan después). */
+    agent: text("agent").notNull().default("recepcion"),
+    outcome: text("outcome").notNull(),
+    replyText: text("reply_text").notNull(),
+    basis: jsonb("basis").$type<AnswerBasisItem[]>().notNull().default(sql`'[]'::jsonb`),
+    checks: jsonb("checks").$type<AnswerCheck[]>().notNull().default(sql`'[]'::jsonb`),
+    model: text("model"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("agent_answer_trace_conversation_idx").on(table.organizationId, table.conversationId, table.createdAt),
+    index("agent_answer_trace_message_idx").on(table.organizationId, table.messageId),
+    index("agent_answer_trace_proposal_idx").on(table.organizationId, table.proposalId),
+    check("agent_answer_trace_outcome_check", sql`${table.outcome} in ('enviada','pendiente','bloqueada','fallida')`),
+  ],
+)
+
+/* ---------- Aprender: lo que se revisa, lo que se corrige y lo que queda aprendido ---------- */
+
+/** Por qué una respuesta entró en «Por revisar». */
+export const REVIEW_REASONS = ["equipo_tomo", "repitio_pregunta", "muestra", "marcada", "editada"] as const
+export type ReviewReason = (typeof REVIEW_REASONS)[number]
+
+/**
+ * Una respuesta del agente que conviene que una persona mire: porque el
+ * equipo tomó la conversación justo después, porque el interlocutor repitió la
+ * pregunta, por muestra al azar, porque alguien la marcó o porque el equipo
+ * editó el borrador antes de aprobarlo. Una fila por respuesta.
+ */
+export const agentReviewItem = pgTable(
+  "agent_review_item",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    organizationId: orgFk("organization_id"),
+    agent: text("agent").notNull().default("recepcion"),
+    conversationId: uuid("conversation_id")
+      .notNull()
+      .references(() => conversation.id),
+    traceId: uuid("trace_id")
+      .notNull()
+      .references(() => agentAnswerTrace.id),
+    reason: text("reason").$type<ReviewReason>().notNull(),
+    /** Lo que preguntó el interlocutor y lo que respondió el agente, tal como quedaron. */
+    question: text("question").notNull().default(""),
+    reply: text("reply").notNull(),
+    /** Lo que respondió el equipo después, si lo hubo: punto de partida de la corrección. */
+    teamReply: text("team_reply"),
+    status: text("status").notNull().default("pendiente"),
+    decidedBy: text("decided_by"),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("agent_review_item_trace_uidx").on(table.organizationId, table.traceId),
+    index("agent_review_item_org_idx").on(table.organizationId, table.status, table.createdAt),
+    check("agent_review_item_reason_check", sql`${table.reason} in ('equipo_tomo','repitio_pregunta','muestra','marcada','editada')`),
+    check("agent_review_item_status_check", sql`${table.status} in ('pendiente','bien','corregida')`),
+  ],
+)
+
+export const LESSON_KINDS = ["respuesta_oficial", "regla", "ejemplo"] as const
+export type LessonKind = (typeof LESSON_KINDS)[number]
+
+/** Qué falló en la respuesta corregida. */
+export const CORRECTION_FAILURES = ["dato_equivocado", "falto_dato", "tono", "no_debio_responder", "otra_cosa"] as const
+export type CorrectionFailure = (typeof CORRECTION_FAILURES)[number]
+
+export const LESSON_STATUSES = ["propuesta", "activa", "retirada", "descartada"] as const
+export type LessonStatus = (typeof LESSON_STATUSES)[number]
+
+/**
+ * Lección: lo que el agente aprende de una corrección. Nace `propuesta` y no
+ * cambia nada hasta que una persona la aprueba; `activa` se usa; `retirada`
+ * deja de usarse al instante y se puede restaurar. Tres clases: una respuesta
+ * oficial (de toda la clínica, vive en el conocimiento), una regla o un
+ * ejemplo (del agente que la recibió). Nunca se borra: es la historia de lo
+ * aprendido.
+ */
+export const agentLesson = pgTable(
+  "agent_lesson",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    organizationId: orgFk("organization_id"),
+    kind: text("kind").$type<LessonKind>().notNull(),
+    /** `clinica` (respuesta oficial) o el agente al que pertenece. */
+    scope: text("scope").notNull().default("recepcion"),
+    title: text("title").notNull(),
+    /** La pregunta del caso que la originó. */
+    question: text("question").notNull().default(""),
+    /** El texto que se aprende: la respuesta oficial, la regla o la respuesta de ejemplo. */
+    body: text("body").notNull(),
+    failure: text("failure").$type<CorrectionFailure>(),
+    /** Lo que había respondido el agente. */
+    originalReply: text("original_reply").notNull().default(""),
+    status: text("status").$type<LessonStatus>().notNull().default("propuesta"),
+    reviewItemId: uuid("review_item_id").references(() => agentReviewItem.id),
+    conversationId: uuid("conversation_id").references(() => conversation.id),
+    /** Respuesta oficial que la lección creó o cambió al activarse. */
+    knowledgeEntryId: uuid("knowledge_entry_id").references(() => agentKnowledgeEntry.id),
+    /** Texto que tenía esa respuesta antes del cambio; nulo si la lección la creó. */
+    previousBody: text("previous_body"),
+    uses: integer("uses").notNull().default(0),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+    proposedBy: text("proposed_by").notNull(),
+    approvedBy: text("approved_by"),
+    approvedAt: timestamp("approved_at", { withTimezone: true }),
+    withdrawnBy: text("withdrawn_by"),
+    withdrawnAt: timestamp("withdrawn_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("agent_lesson_org_idx").on(table.organizationId, table.status, table.createdAt),
+    check("agent_lesson_kind_check", sql`${table.kind} in ('respuesta_oficial','regla','ejemplo')`),
+    check("agent_lesson_status_check", sql`${table.status} in ('propuesta','activa','retirada','descartada')`),
+    check(
+      "agent_lesson_failure_check",
+      sql`${table.failure} is null or ${table.failure} in ('dato_equivocado','falto_dato','tono','no_debio_responder','otra_cosa')`,
+    ),
+  ],
+)
+
+/**
+ * Caso de prueba: una pregunta real con la respuesta que una persona dio por
+ * buena. Antes de activar o retirar una lección se mira a qué casos toca.
+ */
+export const agentTestCase = pgTable(
+  "agent_test_case",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    organizationId: orgFk("organization_id"),
+    agent: text("agent").notNull().default("recepcion"),
+    question: text("question").notNull(),
+    expected: text("expected").notNull(),
+    lessonId: uuid("lesson_id").references(() => agentLesson.id),
+    status: text("status").notNull().default("activo"),
+    createdBy: text("created_by").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("agent_test_case_org_idx").on(table.organizationId, table.status, table.createdAt),
+    check("agent_test_case_status_check", sql`${table.status} in ('activo','retirado')`),
+  ],
+)
+
+/* ---------- Memoria de la persona: lo que el agente recuerda entre conversaciones ---------- */
+
+/**
+ * Un dato no clínico sobre una persona (una preferencia, cómo quiere que la
+ * traten, a qué hora le viene bien) que vale para sus próximas conversaciones
+ * en cualquier canal. Lleva fecha y origen. Uno nuevo puede reemplazar a otro
+ * y cualquiera se puede quitar; la fila se conserva como historia. Nunca
+ * guarda síntomas, diagnósticos ni nada de la historia clínica.
+ */
+export const agentPersonFact = pgTable(
+  "agent_person_fact",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    organizationId: orgFk("organization_id"),
+    contactId: uuid("contact_id")
+      .notNull()
+      .references(() => contact.id),
+    text: text("text").notNull(),
+    /** Quién lo registró: el agente al oírlo en una conversación, o alguien del equipo. */
+    source: text("source").notNull(),
+    /** Conversación y canal donde se dijo, si vino de una. */
+    conversationId: uuid("conversation_id").references(() => conversation.id),
+    channel: text("channel"),
+    createdBy: text("created_by"),
+    status: text("status").notNull().default("activo"),
+    /** Dato que lo reemplazó. */
+    replacedById: uuid("replaced_by_id"),
+    removedBy: text("removed_by"),
+    removedAt: timestamp("removed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("agent_person_fact_contact_idx").on(table.organizationId, table.contactId, table.status),
+    check("agent_person_fact_source_check", sql`${table.source} in ('agente','equipo')`),
+    check("agent_person_fact_status_check", sql`${table.status} in ('activo','reemplazado','quitado')`),
   ],
 )
 

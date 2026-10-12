@@ -2,6 +2,7 @@ import { withOrgContext } from "@odentia/db"
 import {
   closeOpportunity,
   createOpportunity,
+  operationBodySchema,
   getOpportunity,
   getOpportunitySummary,
   listOpportunities,
@@ -36,21 +37,8 @@ const moneyFields = {
   currency: z.string().min(3).max(3).optional(),
 }
 
-const createInput = z.object({
-  contactId: uuid,
-  patientId: uuid.nullable().optional(),
-  pipelineId: uuid.optional(),
-  stageId: uuid.optional(),
-  title: z.string().min(1).max(200),
-  serviceId: uuid.nullable().optional(),
-  interestText: z.string().max(500).nullable().optional(),
-  ...moneyFields,
-  assignedUserId: z.string().nullable().optional(),
-  nextActionAt: z.string().nullable().optional(),
-  nextActionNote: z.string().max(500).nullable().optional(),
-  budgetId: uuid.nullable().optional(),
-  conversationId: uuid.nullable().optional(),
-})
+// Crear, mover y cerrar una oportunidad declaran sus campos una vez, para la pantalla y para el agente.
+const createInput = operationBodySchema("oportunidad.crear")
 
 const patchInput = z.object({
   contactId: uuid.optional(),
@@ -66,12 +54,9 @@ const patchInput = z.object({
   conversationId: uuid.nullable().optional(),
 })
 
-const moveInput = z.object({ stageId: uuid })
+const moveInput = operationBodySchema("oportunidad.mover")
 
-const closeInput = z.object({
-  outcome: z.enum(["won", "lost"]),
-  reason: z.string().min(1).max(500),
-})
+const closeInput = operationBodySchema("oportunidad.cerrar")
 
 export function createOpportunitiesRoute(deps: CrmDeps) {
   const app = new Hono()

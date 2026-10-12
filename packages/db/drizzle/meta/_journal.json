@@ -330,6 +330,83 @@
       "when": 1791694488742,
       "tag": "0046_agenda_sin_lista_de_espera",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1791741600000,
+      "tag": "0047_agente_memoria_y_traza",
+      "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1791741660000,
+      "tag": "0048_conocimiento_completo",
+      "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1791741720000,
+      "tag": "0049_agente_base_y_funciones",
+      "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1791741780000,
+      "tag": "0050_agente_aprender",
+      "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "7",
+      "when": 1791741840000,
+      "tag": "0051_agente_memoria_persona",
+      "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1791741900000,
+      "tag": "0052_decision_elige_camino",
+      "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1791741960000,
+      "tag": "0053_asesor",
+      "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1791742020000,
+      "tag": "0054_asistente_clinico",
+      "breakpoints": true
+    },
+    {
+      "idx": 55,
+      "version": "7",
+      "when": 1791742080000,
+      "tag": "0055_ayuda",
+      "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "7",
+      "when": 1791751275763,
+      "tag": "0056_enlace_de_reserva",
+      "breakpoints": true
+    },
+    {
+      "idx": 57,
+      "version": "7",
+      "when": 1791754209484,
+      "tag": "0057_derivacion_con_resumen",
+      "breakpoints": true
     }
   ]
 }

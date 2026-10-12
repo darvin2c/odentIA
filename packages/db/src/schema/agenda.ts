@@ -12,7 +12,7 @@ import {
 } from "drizzle-orm/pg-core"
 import { user } from "./auth.js"
 import { patient, serviceCatalog } from "./clinical.js"
-import { conversation, orgFk, timestamps } from "./crm.js"
+import { contact, conversation, orgFk, timestamps } from "./crm.js"
 import { branch } from "./org.js"
 
 /**
@@ -113,5 +113,45 @@ export const appointment = pgTable(
     ),
     check("appointment_range_check", sql`${table.endsAt} > ${table.startsAt}`),
     check("appointment_duration_check", sql`${table.durationMin} > 0`),
+  ],
+)
+
+/**
+ * Enlace personal y efímero para que la persona de una conversación elija ella
+ * misma su cita viendo los horarios libres. Solo se guarda la huella del
+ * enlace; vale para la persona de esa conversación (sea ya paciente o no) y
+ * deja de servir al reservar, al vencer o al revocarse. No da acceso a nada más que elegir día y
+ * hora: ni historia, ni presupuestos, ni tarifas.
+ */
+export const appointmentBookingLink = pgTable(
+  "appointment_booking_link",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    organizationId: orgFk("organization_id"),
+    conversationId: uuid("conversation_id")
+      .notNull()
+      .references(() => conversation.id),
+    contactId: uuid("contact_id")
+      .notNull()
+      .references(() => contact.id),
+    /**
+     * Para quién es la cita. Vacío cuando la persona aún no es paciente: lo
+     * será al completar su registro en la misma página, antes de reservar.
+     */
+    patientId: uuid("patient_id").references(() => patient.id),
+    /** Servicio del que se habló en la conversación; sin él se reserva una cita regular de la sede. */
+    serviceId: uuid("service_id").references(() => serviceCatalog.id),
+    /** Sede ya elegida en la conversación; sin ella la persona la elige en la página. */
+    branchId: uuid("branch_id").references(() => branch.id),
+    tokenHash: text("token_hash").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    usedAt: timestamp("used_at", { withTimezone: true }),
+    appointmentId: uuid("appointment_id").references(() => appointment.id),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("appointment_booking_link_token_uidx").on(table.tokenHash),
+    index("appointment_booking_link_conversation_idx").on(table.organizationId, table.conversationId),
   ],
 )

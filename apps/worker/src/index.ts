@@ -35,6 +35,15 @@ await checkpointer.setup()
 await setupAgentMemory(ownerDb)
 const agentRuntime: AgentRuntime = {
   checkpointer,
+  publicUrl: { webURL: env.WEB_URL, cookieDomain: env.COOKIE_DOMAIN },
+  ...(env.AGENT_BURST_WINDOW_SECONDS > 0
+    ? {
+        burst: {
+          quietMs: env.AGENT_BURST_WINDOW_SECONDS * 1000,
+          maxWaitMs: Math.max(env.AGENT_BURST_WINDOW_SECONDS, env.AGENT_BURST_MAX_WAIT_SECONDS) * 1000,
+        },
+      }
+    : {}),
   platform: {
     modelName: env.LLM_MODEL,
     apiKey: env.LLM_API_KEY || undefined,

@@ -1,4 +1,8 @@
+import { createHash, randomBytes } from "node:crypto"
+import { appointment, appointmentBookingLink } from "@odentia/db/schema/agenda"
+import { patientContact } from "@odentia/db/schema/clinical"
 import type { Browser, Page } from "@playwright/test"
+import { eq } from "drizzle-orm"
 import { simulateTelegramInbound } from "./channels"
 import { API, PANEL, tenant } from "./env"
 import { call, expect, fillPatientNames, test } from "./fixtures"
@@ -576,4 +580,122 @@ test("vista previa de configuración no crea pacientes", async ({ createOwner })
   await dialog.getByRole("button", { name: "Cerrar", exact: true }).click()
 
   expect(await call<unknown[]>(page, "GET", "/api/patients", org.slug)).toEqual([])
+})
+
+test("reserva por enlace: quien recién se contacta elige su hora, deja sus datos esenciales en una pantalla y queda reservado", async ({
+  owner,
+  browser,
+  nextEventId,
+  fixtureDb,
+}, info) => {
+  const { page, org } = owner
+  // La clínica tiene activo su registro de pacientes: de ahí salen los datos que se piden y el aviso de privacidad.
+  await publishConfig(page, org.slug)
+  await call(page, "POST", "/api/agenda/chairs", org.slug, { branchId: owner.branchId, name: "Sillón 1" }, 201)
+  await call(page, "PUT", "/api/agenda/schedules", org.slug, {
+    branchId: owner.branchId,
+    dentistUserId: owner.user.id,
+    rules: [0, 1, 2, 3, 4, 5, 6].map((weekday) => ({ weekday, startMin: 7 * 60, endMin: 22 * 60 })),
+  }, 200)
+  const tgConn = await call<{ id: string; webhookSecret: string }>(page, "POST", "/api/channels/connections", org.slug, {
+    channel: "telegram", provider: "telegram_bot_api", displayName: "Bot E2E", config: { botToken: "e2e" },
+  }, 201)
+  const tgUser = nextEventId()
+  expect(await simulateTelegramInbound(page, API, tgConn.id, tgConn.webhookSecret, { fromId: tgUser, chatId: tgUser, text: "Hola, quiero una cita", updateId: nextEventId() })).toBe(200)
+  await expect
+    .poll(async () => (await call<{ connection: { id: string } }[]>(page, "GET", "/api/conversations", org.slug)).some((c) => c.connection.id === tgConn.id), { timeout: 30_000 })
+    .toBe(true)
+  const conversation = (await call<{ id: string; contact: { id: string }; connection: { id: string } }[]>(page, "GET", "/api/conversations", org.slug)).find((c) => c.connection.id === tgConn.id)!
+
+  // El enlace que entrega el agente a alguien que aún no es paciente: nace sin ficha.
+  const token = randomBytes(32).toString("hex")
+  await fixtureDb.insert(appointmentBookingLink).values({
+    organizationId: org.id,
+    conversationId: conversation.id,
+    contactId: conversation.contact.id,
+    tokenHash: createHash("sha256").update(token).digest("hex"),
+    expiresAt: new Date(Date.now() + 3_600_000),
+  })
+
+  const { context, page: anon } = await anonymousPage(browser, { width: 390, height: 844 })
+  try {
+    await gotoHydrated(anon, tenant(org.slug, `/reserva?token=${token}`))
+    await expect(anon.getByRole("heading", { name: "Elige tu cita" })).toBeVisible()
+    // Tres pasos: elegir, sus datos y listo.
+    await expect(anon.getByText(/paso 1 de 3/)).toBeVisible()
+    // La semana siguiente siempre tiene horarios: la de hoy depende del día y la hora en que corre la prueba.
+    await anon.getByRole("button", { name: "Semana siguiente", exact: true }).click()
+    await anon.getByRole("group", { name: /Mañana|Tarde/ }).first().getByRole("button").first().click()
+    await anon.getByRole("button", { name: "Continuar con mis datos" }).click()
+
+    await expect(anon.getByRole("heading", { name: "Tus datos" })).toBeVisible()
+    await expect(anon.getByText(/paso 2 de 3/)).toBeVisible()
+    await expect(anon.getByRole("button", { name: "Cambiar horario" })).toBeVisible()
+    expect(await anon.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0)
+    // Una sola pantalla: sin los pasos del registro completo ni lo que se completa en la clínica.
+    await expect(anon.getByRole("button", { name: "Siguiente", exact: true })).toHaveCount(0)
+    await expect(anon.getByLabel("Fecha de nacimiento")).toHaveCount(0)
+    // Escribe por Telegram: no se le supone un celular ni se dice que es «el número desde el que nos escribes».
+    const phone = anon.getByLabel("Celular", { exact: true })
+    await expect(phone).toHaveValue("")
+    await expect(anon.getByText(/número desde el que nos escribes/)).toHaveCount(0)
+    const submit = anon.getByRole("button", { name: "Reservar mi cita" })
+    await expect(submit).toBeInViewport()
+    await info.attach("reserva-tus-datos", { body: await anon.screenshot({ fullPage: true }), contentType: "image/png" })
+
+    // Errores por campo, y lo escrito se conserva.
+    await anon.getByLabel("Nombres", { exact: true }).fill("Carla")
+    await anon.getByLabel("Número", { exact: true }).fill("123")
+    await submit.click()
+    await expect(anon.getByText("Escribe tus apellidos")).toBeVisible()
+    await expect(anon.getByText("El DNI tiene exactamente 8 dígitos")).toBeVisible()
+    await expect(anon.getByText("Escribe un celular para avisarte de tu cita")).toBeVisible()
+    await expect(anon.getByText("Para reservar necesitamos que aceptes el uso de estos datos")).toBeVisible()
+    await expect(anon.getByLabel("Nombres", { exact: true })).toHaveValue("Carla")
+    await expect(anon.getByLabel("Apellidos", { exact: true })).toBeFocused()
+    expect(await anon.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0)
+    await info.attach("reserva-tus-datos-errores", { body: await anon.screenshot({ fullPage: true }), contentType: "image/png" })
+
+    // Para otra persona pide, en la misma pantalla, solo lo que el registro exige de ella.
+    await anon.getByRole("radio", { name: "Para otra persona" }).click()
+    await expect(anon.getByRole("group", { name: "La persona que se va a atender" })).toBeVisible()
+    await expect(anon.getByLabel("Fecha de nacimiento")).toBeVisible()
+    expect(await anon.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0)
+    await info.attach("reserva-tus-datos-otra-persona", { body: await anon.screenshot({ fullPage: true }), contentType: "image/png" })
+    await anon.getByRole("radio", { name: "Para mí" }).click()
+    await expect(anon.getByLabel("Fecha de nacimiento")).toHaveCount(0)
+
+    await anon.getByLabel("Apellidos", { exact: true }).fill("Núñez Prado")
+    await anon.getByLabel("Número", { exact: true }).fill(docFromId(nextEventId()))
+    await phone.fill(maskedPhone(phoneFromId(nextEventId())))
+    // El aviso de privacidad es el del registro de la clínica.
+    await anon.getByRole("button", { name: "Ver el aviso de privacidad" }).click()
+    await expect(anon.getByRole("dialog", { name: "Aviso de privacidad" }).getByText(PRIVACY)).toBeVisible()
+    await anon.keyboard.press("Escape")
+    await anon.getByRole("checkbox", { name: /Acepto que la clínica use estos datos/ }).click()
+    // Volver a cambiar de horario no borra lo escrito.
+    await anon.getByRole("button", { name: "Cambiar horario" }).click()
+    await anon.getByRole("button", { name: "Continuar con mis datos" }).click()
+    await expect(anon.getByLabel("Apellidos", { exact: true })).toHaveValue("Núñez Prado")
+    await anon.getByRole("button", { name: "Reservar mi cita" }).click()
+
+    // Con sus datos guardados, la página reserva el horario que ya había elegido.
+    await expect(anon.getByRole("heading", { name: "Tu cita quedó reservada" })).toBeVisible({ timeout: 20_000 })
+    await info.attach("reserva-nuevo-lista", { body: await anon.screenshot({ fullPage: false }), contentType: "image/png" })
+  } finally {
+    await context.close()
+  }
+
+  // La ficha la creó el registro, vinculada a esa persona, y la cita quedó en la agenda con su origen.
+  const rows = await fixtureDb.select().from(appointment).where(eq(appointment.conversationId, conversation.id))
+  expect(rows.map((row) => [row.status, row.source])).toEqual([["programada", "enlace"]])
+  const linked = await fixtureDb.select({ patientId: patientContact.patientId, relationship: patientContact.relationship }).from(patientContact).where(eq(patientContact.contactId, conversation.contact.id))
+  expect(linked).toEqual([{ patientId: rows[0]!.patientId, relationship: "self" }])
+
+  // Recepción ve en la ficha que quedó con lo esencial: filiación incompleta e identidad por revisar.
+  const detail = await getPatientDetail(page, org.slug, rows[0]!.patientId)
+  expect(detail.patient).toMatchObject({ displayName: "Carla Núñez Prado", birthDate: null, identityNeedsReview: true })
+  await gotoHydrated(page, tenant(org.slug, `/patients/${rows[0]!.patientId}`))
+  await expect(page.getByText("Filiación incompleta").first()).toBeVisible()
+  await info.attach("reserva-ficha-incompleta", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
 })
