@@ -556,11 +556,11 @@ export function PlanTab({
       },
       {
         accessorKey: "priceCents",
-        header: "Tarifa indicada",
+        header: "Precio",
         meta: { view: { primary: true } },
         cell: ({ row }) =>
           row.original.priceCents == null ? (
-            <span className="text-muted-foreground">Sin tarifa</span>
+            <span className="text-muted-foreground">Sin precio</span>
           ) : (
             <span className="whitespace-nowrap tabular-nums">
               {money(row.original.priceCents, row.original.currency)}
@@ -873,7 +873,7 @@ export function PlanTab({
                               {b.items.length === 1 ? "" : "s"}
                               {b.totalCents != null
                                 ? ` · ${money(b.totalCents, b.currency)}`
-                                : " · falta la tarifa de algún tratamiento"}
+                                : " · falta el precio de algún tratamiento"}
                             </span>
                           </span>
                         </Button>
@@ -1086,7 +1086,7 @@ export function PlanTab({
 // `discountCents`, `acceptedCents`): aquí se muestran, no se recalculan.
 // ---------------------------------------------------------------------------
 
-const AMOUNT_PENDING = "Falta la tarifa de algún tratamiento"
+const AMOUNT_PENDING = "Falta el precio de algún tratamiento"
 
 type BadgeTone = "secondary" | "warning" | "success" | "destructive" | "outline"
 
@@ -1173,7 +1173,7 @@ function BudgetTotals({
   return (
     <dl className={cn("flex flex-col gap-1.5 rounded-xl bg-muted/50 p-4 text-sm", className)}>
       <div className="flex gap-3">
-        <dt className="flex-1 text-muted-foreground">Según tarifa</dt>
+        <dt className="flex-1 text-muted-foreground">Precio normal</dt>
         <dd className="text-right tabular-nums">
           {budget.tariffTotalCents == null
             ? AMOUNT_PENDING
@@ -1447,12 +1447,12 @@ function BudgetLinesList({
             <div className="flex shrink-0 flex-col items-end">
               <span className="font-semibold whitespace-nowrap tabular-nums">
                 {line.lineTotalCents == null
-                  ? "Sin tarifa"
+                  ? "Sin precio"
                   : money.plain(line.lineTotalCents, line.currency)}
               </span>
               {isBelowTariff(line) && line.tariffLineTotalCents != null ? (
                 <span className="text-xs whitespace-nowrap text-muted-foreground tabular-nums">
-                  <span className="sr-only">Tarifa: </span>
+                  <span className="sr-only">Precio normal: </span>
                   <span className="line-through">
                     {money.plain(line.tariffLineTotalCents, line.currency)}
                   </span>
@@ -1625,9 +1625,9 @@ function BudgetDraftEditor({
         } else if (reference != null && price != null && price < reference) {
           const wanted = reasonTouched ? reasonValue : (line.priceReason ?? reasonValue)
           if (!wanted) {
-            const floor = line.promotionId ? "el mínimo de la promoción" : "la tarifa"
+            const floor = line.promotionId ? "del mínimo de la promoción" : "del precio normal"
             return {
-              error: `Escribe el motivo del ajuste: «${line.title}» queda por debajo de ${floor}.`,
+              error: `Escribe el motivo del ajuste: «${line.title}» queda por debajo ${floor}.`,
             }
           }
           if (wanted !== (line.priceReason ?? "")) {
@@ -1721,7 +1721,7 @@ function BudgetDraftEditor({
     })
     if (lines.length === 0) {
       setDiscountError(
-        "Ningún tratamiento admite el descuento: todos tienen una promoción o les falta la tarifa.",
+        "Ningún tratamiento admite el descuento: todos tienen una promoción o les falta el precio.",
       )
       return
     }
@@ -1749,7 +1749,7 @@ function BudgetDraftEditor({
           className="hidden items-center gap-3 rounded-t-xl bg-muted/50 px-3 py-2 text-xs font-semibold text-muted-foreground sm:grid sm:grid-cols-[minmax(0,1fr)_6rem_8rem]"
         >
           <span>Tratamiento</span>
-          <span className="text-right">Tarifa</span>
+          <span className="text-right">Precio normal</span>
           <span className="text-right">Precio acordado</span>
         </div>
         <ul aria-label="Tratamientos del presupuesto" className="flex flex-col divide-y">
@@ -1804,31 +1804,31 @@ function BudgetDraftEditor({
                     <span className="text-xs text-muted-foreground">
                       {treatmentSiteLabel(line)} · {billingNote(line, money, false)}
                     </span>
-                    {/* En pantallas estrechas no hay columna «Tarifa»: va aquí. */}
+                    {/* En pantallas estrechas no hay columna «Precio normal»: va aquí. */}
                     {!below && line.tariffPriceCents != null ? (
                       <span className="text-xs text-muted-foreground sm:hidden">
-                        Tarifa {money.plain(line.tariffPriceCents, line.currency)}
+                        Precio normal {money.plain(line.tariffPriceCents, line.currency)}
                       </span>
                     ) : null}
                     {below ? (
                       <span className="text-xs font-medium text-primary">
                         {line.lineDiscountCents != null
-                          ? `${money.plain(line.lineDiscountCents, line.currency)} menos que la tarifa`
-                          : `Menos que la tarifa de ${money.plain(line.tariffPriceCents, line.currency)}`}
+                          ? `${money.plain(line.lineDiscountCents, line.currency)} menos que el precio normal`
+                          : `Menos que el precio normal de ${money.plain(line.tariffPriceCents, line.currency)}`}
                       </span>
                     ) : null}
                     {line.priceCents == null ? (
                       <span className="text-xs text-muted-foreground">
-                        Sin tarifa: escribe el precio acordado.
+                        Sin precio normal: escribe el precio acordado.
                       </span>
                     ) : null}
                   </div>
                   </div>
                   <span className="hidden text-right text-sm text-muted-foreground tabular-nums sm:block">
-                    <span className="sr-only">Tarifa: </span>
+                    <span className="sr-only">Precio normal: </span>
                     <span className={cn(below && "line-through")}>
                       {line.tariffPriceCents == null
-                        ? "sin tarifa"
+                        ? "sin precio"
                         : money.plain(line.tariffPriceCents, line.currency)}
                     </span>
                   </span>
@@ -1877,7 +1877,7 @@ function BudgetDraftEditor({
                       <span className="text-muted-foreground">Total de la línea </span>
                       <span className="font-semibold tabular-nums">
                         {line.lineTotalCents == null
-                          ? "sin tarifa"
+                          ? "sin precio"
                           : money.plain(line.lineTotalCents, line.currency)}
                       </span>
                     </span>
@@ -1969,7 +1969,7 @@ function BudgetDraftEditor({
         <fieldset className="flex flex-col gap-2 rounded-xl border border-dashed px-3 py-3">
           <legend className="px-1 text-sm font-medium">Otros tratamientos del plan</legend>
           <p className="text-xs text-muted-foreground">
-            Marca uno para incluirlo en este presupuesto, a su tarifa.
+            Marca uno para incluirlo en este presupuesto, a su precio normal.
           </p>
           {addable.map((item) => (
             <label key={item.id} className="flex items-center gap-3 text-sm">
@@ -1991,7 +1991,7 @@ function BudgetDraftEditor({
                 <span className="text-xs text-muted-foreground">{treatmentSiteLabel(item)}</span>
               </span>
               <span className="text-muted-foreground tabular-nums">
-                {item.priceCents == null ? "Sin tarifa" : money.plain(item.priceCents, item.currency)}
+                {item.priceCents == null ? "Sin precio" : money.plain(item.priceCents, item.currency)}
               </span>
             </label>
           ))}
@@ -2038,7 +2038,7 @@ function BudgetDraftEditor({
               disabled={blocked}
               onChange={(event) => setReason(event.currentTarget.value)}
             />
-            <FieldDescription>Se pide solo cuando un precio baja de la tarifa.</FieldDescription>
+            <FieldDescription>Se pide solo cuando un precio baja del precio normal.</FieldDescription>
           </Field>
         </div>
         <BudgetTotals budget={budget} money={money} className="flex-[1_1_16rem]" />
@@ -2076,7 +2076,7 @@ function BudgetDraftEditor({
         <FormDrawer
           open={discountOpen}
           title="Aplicar un descuento a todo"
-          description="Baja el mismo porcentaje a cada tratamiento, calculado sobre su tarifa. Los que tienen una promoción no cambian."
+          description="Baja el mismo porcentaje a cada tratamiento, calculado sobre su precio normal. Los que tienen una promoción no cambian."
           error={discountError}
           isSubmitting={pending === "discount"}
           submitLabel="Aplicar descuento"
@@ -2652,7 +2652,7 @@ export function BudgetResponse({
                     <span className="min-w-0 flex-1 font-medium">{line.title}</span>
                     <span className="whitespace-nowrap tabular-nums">
                       {line.lineTotalCents == null
-                        ? "Sin tarifa"
+                        ? "Sin precio"
                         : money.plain(line.lineTotalCents, line.currency)}
                     </span>
                   </div>
@@ -2801,8 +2801,8 @@ function PrepareBudgetDrawer({
                 <span className="text-xs text-muted-foreground">
                   {treatmentSiteLabel(item)} ·{" "}
                   {item.priceCents == null
-                    ? "Sin tarifa"
-                    : `Tarifa ${money.plain(item.priceCents, item.currency)}`}{" "}
+                    ? "Sin precio"
+                    : `Precio ${money.plain(item.priceCents, item.currency)}`}{" "}
                   ·{" "}
                   {!item.budgetId
                     ? "Sin presupuestar"

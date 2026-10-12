@@ -1307,7 +1307,7 @@ export function ToothDrawer({
                   : "…"}
               </p>
               <p className="mt-1 text-xs text-muted-foreground">
-                Se indicará el tratamiento en el plan con la tarifa vigente. Proponerlo no equivale
+                Se indicará el tratamiento en el plan con el precio vigente. Proponerlo no equivale
                 a aceptarlo, ejecutarlo ni cobrarlo.
               </p>
             </div>

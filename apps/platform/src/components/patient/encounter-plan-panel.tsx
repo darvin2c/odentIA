@@ -153,7 +153,7 @@ export function EncounterPlanPanel({
   const addMutation = useMutation({
     mutationFn: async () => {
       if (!planId) throw new Error("Elige el plan clínico donde se indicará.")
-      if (!service) throw new Error("Busca y elige la prestación del tarifario.")
+      if (!service) throw new Error("Busca y elige la prestación de la lista de servicios.")
       const tooth = teeth[0] ?? null
       const body: Record<string, unknown> = {
         serviceId: service.id,
@@ -416,7 +416,7 @@ export function EncounterPlanPanel({
           />
           {service ? (
             <p className="text-sm text-muted-foreground" aria-live="polite">
-              Tarifa de solo lectura:{" "}
+              Precio de solo lectura:{" "}
               {orgLocale ? formatMoney(service.priceCents, service.currency, orgLocale) : "…"}
               {service.scope ? ` · ${TREATMENT_SCOPE_LABELS[service.scope] ?? service.scope}` : ""}
             </p>
@@ -531,7 +531,7 @@ export function EncounterPlanPanel({
                         {treatmentSiteLabel(item)} ·{" "}
                         {item.priceCents != null
                           ? (orgLocale ? formatMoney(item.priceCents, item.currency, orgLocale) : "…")
-                          : "sin tarifa"}
+                          : "sin precio"}
                       </span>
                     </span>
                     <span className="flex gap-1">

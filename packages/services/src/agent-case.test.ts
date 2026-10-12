@@ -178,12 +178,12 @@ it("la traza de una respuesta se encuentra por su mensaje, directo o a través d
     proposalId: sent.id,
     outcome: "pendiente",
     replyText: "La limpieza cuesta S/ 150.",
-    basis: [{ kind: "servicios", label: "Sedes, servicios y tarifas" }],
-    checks: [{ kind: "precio", value: "S/ 150", ok: true, source: "Sedes, servicios y tarifas" }],
+    basis: [{ kind: "servicios", label: "Sedes, servicios y precios" }],
+    checks: [{ kind: "precio", value: "S/ 150", ok: true, source: "Sedes, servicios y precios" }],
     model: "fake",
   }))
   const found = await run((tx) => getAnswerTraceForMessage(tx, ORG, messageId))
-  expect(found).toMatchObject({ id: traceId, messageId, basis: [{ kind: "servicios", label: "Sedes, servicios y tarifas" }] })
+  expect(found).toMatchObject({ id: traceId, messageId, basis: [{ kind: "servicios", label: "Sedes, servicios y precios" }] })
   const listed = await run((tx) => listAnswerTraces(tx, ORG, conversationId))
   expect(listed.map((trace) => trace.messageId)).toEqual([messageId])
 

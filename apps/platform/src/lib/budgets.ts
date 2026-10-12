@@ -102,7 +102,7 @@ export interface BudgetLine {
   lineTotalCents: number | null
   /** El mismo total a la tarifa de referencia. */
   tariffLineTotalCents: number | null
-  /** Rebaja de la línea frente a su tarifa (null si no baja): «{importe} menos que la tarifa». */
+  /** Rebaja de la línea frente a su tarifa (null si no baja): «{importe} menos que el precio normal». */
   lineDiscountCents: number | null
   currency: string
   decision: PlanDecision

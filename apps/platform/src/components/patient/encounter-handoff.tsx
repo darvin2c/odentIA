@@ -213,7 +213,7 @@ export function EncounterHandoff({
       )}
       {!canFinance && priced > 0 ? (
         <p className="text-sm text-muted-foreground">
-          Los actos con tarifa generaron sus cargos: caja los ve en la cuenta del paciente.
+          Los actos con precio generaron sus cargos: caja los ve en la cuenta del paciente.
         </p>
       ) : null}
     </section>

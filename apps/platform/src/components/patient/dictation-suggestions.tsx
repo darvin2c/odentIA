@@ -257,7 +257,7 @@ function EditForm({ item, session }: { item: DictationSuggestion; session: Dicta
               <p className="text-sm font-medium">Prestación</p>
               <p className="text-sm">{service ? service.name : "Sin elegir"}</p>
               <p className="text-xs text-muted-foreground">
-                {service ? `Tarifa del tarifario: ${price(service.priceCents, service.currency)}. No se edita aquí.` : "La tarifa sale del tarifario; no se edita aquí."}
+                {service ? `Precio del servicio: ${price(service.priceCents, service.currency)}. No se edita aquí.` : "El precio sale de la lista de servicios; no se edita aquí."}
               </p>
               {candidates.length > 0 ? (
                 <fieldset className="m-0 flex min-w-0 flex-wrap gap-2 border-0 p-0" aria-label="Prestaciones parecidas">

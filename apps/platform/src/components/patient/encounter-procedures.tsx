@@ -68,7 +68,7 @@ function mutationMessage(err: unknown): string {
 function planOptionLabel(item: PlanItem, locale: string | undefined): string {
   const price =
     item.priceCents == null
-      ? "sin tarifa"
+      ? "sin precio"
       : locale
         ? formatMoney(item.priceCents, item.currency, locale)
         : "…"
@@ -441,7 +441,7 @@ export function EncounterProcedures({
                   }}
                 />
                 <FieldLabel htmlFor={`${uid}-free`} className="font-normal">
-                  Acto libre (sin servicio del tarifario; queda registrado pero no se cobra)
+                  Acto libre (sin servicio de la lista; queda registrado pero no se cobra)
                 </FieldLabel>
               </Field>
               {freeMode && (

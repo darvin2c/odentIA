@@ -416,7 +416,7 @@ function ServiceAssignment({ specialty, canAdmin }: { specialty: Specialty; canA
 
   return (
     <section className="rounded-md border p-4">
-      <h3 className="text-sm font-semibold">Prestaciones del tarifario</h3>
+      <h3 className="text-sm font-semibold">Servicios de la clínica</h3>
       <p className="text-sm text-muted-foreground">
         Vincula prestaciones a esta especialidad (la especialidad de biblioteca sigue intacta).
       </p>

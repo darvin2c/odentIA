@@ -286,7 +286,7 @@ function PromotionsPage() {
         <PageHeader title="Promociones" />
         <EmptyState
           title="Sin acceso"
-          description="Necesitas permiso de tarifario o de configuración para ver las promociones."
+          description="Necesitas permiso de servicios o de configuración para ver las promociones."
         />
       </div>
     )
@@ -931,7 +931,7 @@ function ServiceAdder({
           setOpen(false)
         }}
       >
-        <ComboboxInput id={id} placeholder="Buscar en el tarifario" showTrigger={false} />
+        <ComboboxInput id={id} placeholder="Buscar un servicio" showTrigger={false} />
         <ComboboxContent>
           {servicesQuery.isPending ? (
             <div className="flex flex-col gap-2 p-3">
@@ -940,7 +940,7 @@ function ServiceAdder({
             </div>
           ) : servicesQuery.isError ? (
             <div role="alert" className="flex flex-col gap-2 p-2">
-              <p className="text-sm text-destructive">No se pudo buscar en el tarifario.</p>
+              <p className="text-sm text-destructive">No se pudieron buscar los servicios.</p>
               <Button
                 type="button"
                 size="sm"
@@ -952,11 +952,11 @@ function ServiceAdder({
             </div>
           ) : items.length === 0 ? (
             <p className="p-2 text-sm text-muted-foreground">
-              Ningún servicio activo del tarifario coincide.
+              Ningún servicio activo coincide.
             </p>
           ) : (
             <>
-              <ComboboxList aria-label="Servicios del tarifario">
+              <ComboboxList aria-label="Servicios">
                 {items.map((item) => (
                   <ComboboxItem key={item.id} value={item} className="flex-col items-start gap-0 py-2">
                     <span className="font-medium">{item.name}</span>

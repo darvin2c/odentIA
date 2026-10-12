@@ -606,7 +606,7 @@ export async function addPlanItem(
   if (!input.planId?.trim())
     throw validation("planId es obligatorio: la indicación pertenece a un plan")
   if (!input.serviceId?.trim())
-    throw validation("serviceId es obligatorio: selecciona una prestación del tarifario")
+    throw validation("serviceId es obligatorio: selecciona una prestación de la lista de servicios")
   await lockDraftEncounter(tx, orgId, patientId, input.sourceEncounterId.trim())
   await lockPlanRow(tx, orgId, patientId, input.planId.trim())
   if (input.odontogramEntryId) {
@@ -767,7 +767,7 @@ export async function addPlanItemsBatch(
   const diagnosisCode = normalizeDiagnosisCode(input.diagnosisCode)
   if (diagnosisCode) await assertDiagnosisCode(tx, diagnosisCode)
   if (service.priceCents === null)
-    throw new ServiceError("SERVICE_UNPRICED", 409, "La prestación aún no tiene tarifa configurada")
+    throw new ServiceError("SERVICE_UNPRICED", 409, "La prestación aún no tiene precio configurado")
   const codings = await resolveServiceCodings(tx, service)
   const rows: PlanItemRow[] = []
   let sortOrder = await nextSortOrder(tx, orgId, input.planId.trim())
@@ -868,7 +868,7 @@ export async function updatePlanItem(
   let scope = assertScopeValue(current.scope)
   if (patch.serviceId !== undefined) {
     if (!patch.serviceId?.trim())
-      throw validation("serviceId es obligatorio: selecciona una prestación del tarifario")
+      throw validation("serviceId es obligatorio: selecciona una prestación de la lista de servicios")
     // El mismo serviceId no recalcula precio; un cambio real sí re-congela.
     if (patch.serviceId.trim() !== current.serviceId) {
       const service = await requireServiceForIndication(tx, orgId, patch.serviceId.trim())
@@ -887,7 +887,7 @@ export async function updatePlanItem(
         throw new ServiceError(
           "SERVICE_UNPRICED",
           409,
-          "La prestación aún no tiene tarifa configurada",
+          "La prestación aún no tiene precio configurado",
         )
       }
       if (budget && service.currency !== budget.currency) {

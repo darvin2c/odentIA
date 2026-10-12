@@ -102,7 +102,7 @@ async function screenBlockers(tx: Db, orgId: string, topic: HelpTopic | undefine
     const schedules = await total(tx.select({ total: count() }).from(professionalSchedule).where(eq(professionalSchedule.organizationId, orgId)))
     if (schedules === 0) out.push({ text: "Ningún profesional tiene horario de atención. Sin horario no aparecen en la agenda ni se les puede reservar.", ...at("disponibilidad") })
     const services = await total(tx.select({ total: count() }).from(serviceCatalog).where(and(eq(serviceCatalog.organizationId, orgId), eq(serviceCatalog.isActive, true))))
-    if (services === 0) out.push({ text: "Todavía no hay servicios en el tarifario; las citas se pueden reservar, pero sin servicio ni duración sugerida.", ...at("servicios") })
+    if (services === 0) out.push({ text: "Todavía no hay servicios en la clínica; las citas se pueden reservar, pero sin servicio ni duración sugerida.", ...at("servicios") })
   }
   if (topic.id === "bandeja" || topic.id === "canales") {
     const channels = await total(tx.select({ total: count() }).from(channelConnection).where(and(eq(channelConnection.organizationId, orgId), eq(channelConnection.status, "active"))))

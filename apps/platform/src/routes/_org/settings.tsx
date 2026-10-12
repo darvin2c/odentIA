@@ -11,7 +11,6 @@ const secciones: SectionNavItem[] = [
   { label: "Organización", to: "/settings", icon: Building2 },
   { label: "Sucursales", to: "/branches", icon: Building2 },
   { label: "Equipo y permisos", to: "/members", icon: Users },
-  { label: "Tarifario", to: "/services", icon: Tag },
   { label: "Medios de pago", to: "/settings/payment-methods", icon: Wallet },
   { label: "Disponibilidad", to: "/settings/availability", icon: CalendarDays },
   { label: "Especialidades", to: "/settings/specialties", icon: Stethoscope },

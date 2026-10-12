@@ -15,7 +15,7 @@ export function KnowledgeSources({ sources }: { sources: Sources | null }) {
   const rows = [
     {
       to: "/services",
-      title: "Servicios y tarifas",
+      title: "Servicios y precios",
       detail: sources
         ? sources.pricedServices === 0
           ? "Ningún servicio con precio todavía"

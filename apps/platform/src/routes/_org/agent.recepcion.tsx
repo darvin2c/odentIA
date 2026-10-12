@@ -620,7 +620,7 @@ function ReceptionPage() {
               </li>
               <li>
                 <EntryRow
-                  label="Servicios y tarifas"
+                  label="Servicios y precios"
                   value={knows.servicesWithPrice === 0 ? "Ninguno con precio todavía" : `${knows.servicesWithPrice} con precio`}
                   to="/services"
                 />

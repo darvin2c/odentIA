@@ -124,8 +124,8 @@ async function requireCatalogService(tx: Db, orgId: string, serviceId: string) {
     .from(serviceCatalog)
     .where(and(eq(serviceCatalog.id, serviceId), eq(serviceCatalog.organizationId, orgId)))
     .limit(1)
-  if (!row) throw notFound("Servicio del tarifario")
-  if (!row.isActive) throw conflict("SERVICE_INACTIVE", "El servicio no está activo en el tarifario")
+  if (!row) throw notFound("Servicio")
+  if (!row.isActive) throw conflict("SERVICE_INACTIVE", "El servicio no está activo")
   return row
 }
 async function withItems(

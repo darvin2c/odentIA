@@ -179,7 +179,7 @@ test("agente: resumen, página de Recepción, probar y encender", async ({ owner
   // Qué sabe: cuatro filas que llevan a donde se edita cada cosa, y lo que recuerda de cada persona.
   for (const [name, href] of [
     ["Respuestas oficiales", "/agent/knowledge"],
-    ["Servicios y tarifas", "/services"],
+    ["Servicios y precios", "/services"],
     ["Sedes y horarios", "/branches"],
     ["Lo que aprendió de tus correcciones", "/agent/learn"],
   ] as const) {

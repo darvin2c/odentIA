@@ -170,7 +170,7 @@ export function ServicePicker({
                     nativeButton={false}
                     render={<Link to="/services" target="_blank" rel="noreferrer" />}
                   >
-                    Administrar tarifario
+                    Ir a Servicios y precios
                   </Button>
                 ) : null}
               </div>
@@ -206,7 +206,7 @@ export function ServicePicker({
         <div className="flex flex-wrap items-center gap-2">
           <Badge>{selectedItem.name}</Badge>
           <span className="text-sm text-muted-foreground">
-            Tarifa de catálogo:{" "}
+            Precio normal:{" "}
             {orgLocale
               ? formatMoney(selectedItem.priceCents, selectedItem.currency, orgLocale)
               : "…"}

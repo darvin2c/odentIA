@@ -315,7 +315,7 @@ function skippedReasonLabel(reason: string | null): string {
     case "covered":
       return "ya estaba incluido en lo cobrado del tratamiento"
     case "free_act":
-      return "se registró sin servicio del tarifario"
+      return "se registró sin servicio de la lista"
     case "zero_price":
       return "su servicio no tiene precio"
     case "sessions_complete":
@@ -1019,7 +1019,7 @@ export function EncounterEditor({
     {
       key: "procedimientos",
       title: "Procedimientos",
-      description: "Actos ejecutados hoy, con su prestación y tarifa. Se anulan con motivo.",
+      description: "Actos ejecutados hoy, con su prestación y precio. Se anulan con motivo.",
       summary:
         activeProcedures === 0
           ? "Sin procedimientos registrados"
@@ -1893,7 +1893,7 @@ export function EncounterEditor({
               )
             ) : (
               <p className="text-muted-foreground">
-                Los actos con tarifa generan sus cargos al cerrar; caja los gestiona.
+                Los actos con precio generan sus cargos al cerrar; caja los gestiona.
               </p>
             )}
           </div>

@@ -139,7 +139,7 @@ describe("responder", () => {
     await ownerDb.insert(scheduleChair).values({ organizationId: ORG, branchId: site!.id, name: "Sillón 1" })
     await ownerDb.insert(professionalSchedule).values({ organizationId: ORG, branchId: site!.id, dentistUserId: USER, weekday: 1, startMin: 540, endMin: 780 })
     const ready = await run((tx) => askHelp(tx, ORG, owner, { question: "¿Por qué no puedo mover esta cita?", screen: "/agenda" }))
-    expect(ready.blockers.map((item) => item.text)).toEqual(["Todavía no hay servicios en el tarifario; las citas se pueden reservar, pero sin servicio ni duración sugerida."])
+    expect(ready.blockers.map((item) => item.text)).toEqual(["Todavía no hay servicios en la clínica; las citas se pueden reservar, pero sin servicio ni duración sugerida."])
   })
 
   it("tiene un tope diario por persona", async () => {

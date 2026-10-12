@@ -8,7 +8,6 @@ const SETTINGS_SECTIONS = [
   "Organización",
   "Sucursales",
   "Equipo y permisos",
-  "Tarifario",
   "Medios de pago",
   "Disponibilidad",
   "Especialidades",
@@ -74,7 +73,7 @@ test("móvil: el alta de paciente mantiene las acciones operables", async ({ own
   })
 })
 
-test("móvil: Configuración mantiene diecisiete destinos legibles y navegables", async ({
+test("móvil: Configuración mantiene dieciséis destinos legibles y navegables", async ({
   owner,
   browser,
 }) => {

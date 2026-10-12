@@ -126,6 +126,15 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     writePermission: "finance.write",
   },
   {
+    id: "servicios",
+    path: "/services",
+    title: "Servicios y precios",
+    parent: "Gestión",
+    purpose: "Lo que ofrece tu clínica y cuánto cuesta. De ahí salen los precios que ve el equipo, los presupuestos y lo que el agente puede decir.",
+    terms: ["precios", "tarifario", "tarifas", "servicios y tarifas", "tratamientos", "prestaciones", "catálogo", "cuánto cuesta", "lista de precios"],
+    writePermission: "settings.write",
+  },
+  {
     id: "comisiones",
     path: "/commissions",
     title: "Comisiones",
@@ -196,15 +205,6 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     parent: SETTINGS,
     purpose: "Con qué puede pagar un paciente en tu clínica. Los que enciendas son los que ofrece caja al cobrar y los que el agente puede mencionar.",
     terms: ["efectivo", "tarjeta", "transferencia", "billetera", "formas de pago", "cómo pagar", "métodos de pago"],
-    writePermission: "settings.write",
-  },
-  {
-    id: "servicios",
-    path: "/services",
-    title: "Tarifario",
-    parent: SETTINGS,
-    purpose: "Lo que ofrece tu clínica y cuánto cuesta. De ahí salen los precios que ve el equipo, los presupuestos y lo que el agente puede decir.",
-    terms: ["precios", "servicios y tarifas", "tratamientos", "prestaciones", "catálogo", "cuánto cuesta", "lista de precios"],
     writePermission: "settings.write",
   },
   {

@@ -148,7 +148,7 @@ const navDefinitions: NavDefinition[] = [
     label: "Gestión",
     children: [
       { label: "Finanzas", to: "/finance", icon: Wallet, permission: "finance.read" },
-      { label: "Tarifario", to: "/services", icon: ListTodo, permission: "catalog.read" },
+      { label: "Servicios y precios", to: "/services", icon: ListTodo, permission: "catalog.read" },
       { label: "Comisiones", to: "/commissions", icon: Wallet, permission: "commissions.read" },
       { label: "Inventario", to: "/inventory", icon: Package, permission: "inventory.read" },
       { label: "Automatizaciones", to: "/automations", icon: Workflow, permission: "crm.read" },

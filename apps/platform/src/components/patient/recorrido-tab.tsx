@@ -532,7 +532,7 @@ export function RecorridoClinicoTab({
                     </Badge>
                     <span className="tabular-nums">
                       {line.priceCents == null
-                        ? "sin tarifa"
+                        ? "sin precio"
                         : money(line.priceCents, line.currency)}
                     </span>
                     <span className="text-muted-foreground">

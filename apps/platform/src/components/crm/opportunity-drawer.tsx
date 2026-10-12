@@ -543,7 +543,7 @@ export function OpportunityDrawer({
             {draftServiceName ? ` · ${draftServiceName}` : ""}
           </summary>
           <Field>
-            <FieldLabel htmlFor="opp-drawer-service-search">Buscar en el tarifario</FieldLabel>
+            <FieldLabel htmlFor="opp-drawer-service-search">Buscar un servicio</FieldLabel>
             {draftServiceId ? (
               <p className="flex items-center gap-2 text-sm">
                 <span className="font-medium">{draftServiceName || "Servicio elegido"}</span>
@@ -566,7 +566,7 @@ export function OpportunityDrawer({
                     id="opp-drawer-service-search"
                     value={serviceSearch}
                     onChange={(e) => setServiceSearch(e.target.value)}
-                    placeholder="Buscar en el tarifario"
+                    placeholder="Buscar un servicio"
                     aria-busy={servicesQuery.isFetching}
                     className={servicesQuery.isFetching ? "pr-9" : undefined}
                   />
@@ -578,7 +578,7 @@ export function OpportunityDrawer({
                 </div>
                 {servicesQuery.isFetching ? (
                   <p className="text-xs text-muted-foreground" role="status">
-                    Buscando en el tarifario…
+                    Buscando servicios…
                   </p>
                 ) : null}
                 {serviceSearch.trim() !== "" ? (
@@ -603,7 +603,7 @@ export function OpportunityDrawer({
                   </div>
                 ) : (
                   <p className="text-xs text-muted-foreground">
-                    Escribe para buscar en el tarifario.
+                    Escribe para buscar un servicio.
                   </p>
                 )}
                 {servicesQuery.hasNextPage ? (
@@ -627,7 +627,7 @@ export function OpportunityDrawer({
                 ) : null}
                 {servicesQuery.isError ? (
                   <p role="alert" className="text-sm text-destructive">
-                    No se pudo buscar en el tarifario.{" "}
+                    No se pudieron buscar los servicios.{" "}
                     <Button
                       type="button"
                       variant="link"

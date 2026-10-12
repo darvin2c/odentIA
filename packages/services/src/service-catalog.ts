@@ -697,7 +697,7 @@ export async function fromTemplates(
   items: FromTemplateItem[],
 ): Promise<FromTemplatesResult> {
   if (!Array.isArray(items) || items.length < 1 || items.length > 100) {
-    throw validation("items debe tener entre 1 y 100 prestaciones con su tarifa")
+    throw validation("items debe tener entre 1 y 100 prestaciones con su precio")
   }
   const ids = items.map((item) => item.templateId)
   if (new Set(ids).size !== ids.length) {

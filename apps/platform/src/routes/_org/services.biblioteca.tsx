@@ -399,7 +399,7 @@ function AddServicesPage() {
           : `${created} servicios guardados y activos`,
       ]
       if (already > 0) {
-        parts.push(already === 1 ? "1 ya estaba en tu tarifario" : `${already} ya estaban en tu tarifario`)
+        parts.push(already === 1 ? "1 ya estaba entre tus servicios" : `${already} ya estaban entre tus servicios`)
       }
       if (left > 0) {
         parts.push(left === 1 ? "queda 1 por completar en la tabla" : `quedan ${left} por completar en la tabla`)
@@ -453,7 +453,7 @@ function AddServicesPage() {
           meta: { view: { primary: true } },
           cell: ({ row }) =>
             row.original.owned ? (
-              <Badge variant="secondary">En el tarifario</Badge>
+              <Badge variant="secondary">Ya agregado</Badge>
             ) : (
               <span className="text-muted-foreground">No agregado</span>
             ),
@@ -539,7 +539,7 @@ function AddServicesPage() {
         meta: { view: { primary: true } },
         cell: ({ row }) => {
           const item = row.original
-          if (item.owned) return <Badge variant="secondary">Ya está en tu tarifario</Badge>
+          if (item.owned) return <Badge variant="secondary">Ya está entre tus servicios</Badge>
           const label = item.name.trim() || "este servicio"
           return (
             <span className="flex flex-col gap-1">
@@ -600,7 +600,7 @@ function AddServicesPage() {
   const title = canIncorporate ? "Agregar servicios" : "Biblioteca de procedimientos"
   const subtitle = canIncorporate
     ? "Elige de la biblioteca o crea los tuyos, y pon el precio aquí mismo. Lo que guardes queda activo."
-    : "Lo que la clínica puede agregar a su tarifario. Los agrega quien administra la clínica."
+    : "Lo que la clínica puede agregar a sus servicios. Los agrega quien administra la clínica."
 
   if (!canViewLibrary) {
     return (
@@ -650,7 +650,7 @@ function AddServicesPage() {
         title="Aún no hay biblioteca de procedimientos"
         description={
           canIncorporate
-            ? "El tarifario funciona igual con servicios propios: créalos con su precio."
+            ? "Puedes trabajar igual con servicios propios: créalos con su precio."
             : "Cuando la clínica tenga una biblioteca de procedimientos, aparecerá aquí."
         }
         actionLabel={canIncorporate && regional ? "Crear un servicio propio" : undefined}
@@ -730,7 +730,7 @@ function AddServicesPage() {
           description={
             canIncorporate
               ? "Los precios se guardan en la moneda de la clínica. Configura el país y la moneda para agregar servicios."
-              : "Quien administra la clínica debe configurar el país y la moneda antes de armar el tarifario."
+              : "Quien administra la clínica debe configurar el país y la moneda antes de agregar servicios."
           }
           actionLabel={canIncorporate ? "Configurar la clínica" : undefined}
           onAction={canIncorporate ? () => void navigate({ to: "/settings" }) : undefined}
@@ -906,7 +906,7 @@ function OwnServiceDrawer({
       }),
     onSuccess: async (result) => {
       await queryClient.invalidateQueries({ queryKey: ["services"] })
-      toast.success(`«${result.data.name}» ya está activo en tu tarifario`)
+      toast.success(`«${result.data.name}» ya está activo entre tus servicios`)
       onClose()
     },
   })
@@ -1048,7 +1048,7 @@ function LeaveGuard({ dirty }: { dirty: boolean }) {
     <ConfirmDialog
       open={blocker.status === "blocked"}
       title="Salir sin guardar"
-      description="Los servicios que elegiste todavía no están en el tarifario. Si sales, se pierde lo que escribiste."
+      description="Los servicios que elegiste todavía no están guardados. Si sales, se pierde lo que escribiste."
       confirmLabel="Salir sin guardar"
       cancelLabel="Seguir aquí"
       onConfirm={() => blocker.proceed?.()}

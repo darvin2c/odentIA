@@ -56,7 +56,7 @@ export interface AgentEvidence extends Evidence {
 
 /** Cómo ve el equipo cada herramienta de lectura cuando una respuesta se apoya en ella. */
 export const TOOL_SOURCES: Record<string, { kind: string; label: string }> = {
-  ver_sedes_y_servicios: { kind: "servicios", label: "Sedes, servicios y tarifas" },
+  ver_sedes_y_servicios: { kind: "servicios", label: "Sedes, servicios y precios" },
   consultar_conocimiento: { kind: "conocimiento", label: "Respuestas oficiales de la clínica" },
   buscar_huecos: { kind: "agenda", label: "Agenda: horarios disponibles" },
   ver_contexto_paciente: { kind: "persona", label: "Vínculo con el paciente" },
@@ -91,7 +91,7 @@ export const SANDBOX_PERSON = "Paciente de prueba"
 
 /** Lo que hizo el agente en un turno, dicho para quien prueba (no para el modelo). */
 export const TOOL_ACTION_LABEL: Record<string, string> = {
-  ver_sedes_y_servicios: "Consultó sedes, servicios y tarifas.",
+  ver_sedes_y_servicios: "Consultó sedes, servicios y precios.",
   consultar_conocimiento: "Buscó en las respuestas oficiales.",
   buscar_huecos: "Buscó huecos reales en la agenda.",
   ver_contexto_paciente: "Verificó para quién es la atención.",

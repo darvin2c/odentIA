@@ -77,7 +77,7 @@ function systemPrompt(input: { services: string[]; today: string; timezone: stri
     "En las indicaciones, pon en `service` la prestación con las palabras del odontólogo: el sistema la busca en los servicios de la clínica. No inventes precios.",
     input.services.length
       ? `Servicios de la clínica, para reconocer de qué prestación habla: ${input.services.slice(0, 200).join("; ")}.`
-      : "La clínica aún no tiene servicios en su tarifario.",
+      : "La clínica aún no tiene servicios.",
     `Hoy es ${input.today} (zona ${input.timezone}). Un control «en seis meses» se cuenta desde hoy.`,
     `Responde únicamente llamando a ${TOOL_NAME}, una sola vez, con todo lo dictado.`,
   ].join("\n")

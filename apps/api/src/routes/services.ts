@@ -125,7 +125,7 @@ export function createServicesRoute(deps: CrmDeps) {
   app.get("/", async (c) => {
     const { orgId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "catalog.read")) {
-      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para ver el tarifario"), 403)
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para ver los servicios"), 403)
     }
     const parsed = offersQuery.safeParse(c.req.query())
     if (!parsed.success) return validationError(c, parsed.error.issues)
@@ -150,7 +150,7 @@ export function createServicesRoute(deps: CrmDeps) {
   app.get("/most-used", async (c) => {
     const { orgId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "catalog.read")) {
-      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para ver el tarifario"), 403)
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para ver los servicios"), 403)
     }
     const parsed = mostUsedQuery.safeParse(c.req.query())
     if (!parsed.success) return validationError(c, parsed.error.issues)
@@ -167,7 +167,7 @@ export function createServicesRoute(deps: CrmDeps) {
   app.get("/templates", async (c) => {
     const { orgId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "catalog.read")) {
-      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para ver el tarifario"), 403)
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para ver los servicios"), 403)
     }
     const parsed = templatesQuery.safeParse(c.req.query())
     if (!parsed.success) return validationError(c, parsed.error.issues)
@@ -189,7 +189,7 @@ export function createServicesRoute(deps: CrmDeps) {
   app.get("/templates/:id", async (c) => {
     const { orgId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "catalog.read")) {
-      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para ver el tarifario"), 403)
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para ver los servicios"), 403)
     }
     try {
       const data = await withOrgContext(deps.db, orgId, (tx) => getTemplate(tx, c.req.param("id")))
@@ -203,7 +203,7 @@ export function createServicesRoute(deps: CrmDeps) {
     const { orgId, userId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "settings.write")) {
       return c.json(
-        errorBody(c, "FORBIDDEN", "No tienes permiso para administrar el tarifario"),
+        errorBody(c, "FORBIDDEN", "No tienes permiso para administrar los servicios"),
         403,
       )
     }
@@ -220,7 +220,7 @@ export function createServicesRoute(deps: CrmDeps) {
     const { orgId, userId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "settings.write")) {
       return c.json(
-        errorBody(c, "FORBIDDEN", "No tienes permiso para administrar el tarifario"),
+        errorBody(c, "FORBIDDEN", "No tienes permiso para administrar los servicios"),
         403,
       )
     }

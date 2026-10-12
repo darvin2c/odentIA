@@ -39,7 +39,7 @@ export const KNOWLEDGE_BASICS: ReadonlyArray<{ key: string; question: string; au
   { key: "estacionamiento", question: "¿Tienen estacionamiento?" },
   { key: "accesibilidad", question: "¿El local es accesible para silla de ruedas?" },
   { key: "servicios", question: "¿Qué tratamientos ofrecen?", auto: "Servicios activos" },
-  { key: "precios", question: "¿Cuánto cuesta una consulta o un tratamiento?", auto: "Tarifas de los servicios" },
+  { key: "precios", question: "¿Cuánto cuesta una consulta o un tratamiento?", auto: "Precios de los servicios" },
   { key: "presupuesto", question: "¿Cómo obtengo un presupuesto?" },
   { key: "medios_pago", question: "¿Qué medios de pago aceptan?" },
   { key: "cuotas", question: "¿Se puede pagar en cuotas?" },

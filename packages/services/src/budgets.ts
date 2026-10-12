@@ -436,7 +436,7 @@ async function requireQuotableItems(
     // Histórico ambiguo heredado: un nuevo presupuesto nunca cotiza varias
     // equivalencias como actos; se pide una nueva indicación exacta.
     assertExecutableCodings(item.codings)
-    if (item.priceCents === null) throw validation("Todos los ítems deben tener tarifa conocida")
+    if (item.priceCents === null) throw validation("Todos los ítems deben tener precio conocido")
   }
   const currencies = new Set(items.map((i) => i.currency))
   if (currencies.size !== 1)
@@ -1347,7 +1347,7 @@ export async function reviseBudget(
   if (items.length !== input.itemIds.length) throw notFound("Ítem del plan")
   for (const item of items) {
     if (["cancelado", "reemplazado"].includes(item.status)) throw conflict("ITEM_CLOSED", "La indicación está cerrada")
-    if (item.priceCents == null || item.currency !== current.currency) throw conflict("BUDGET_CURRENCY_MIX", "Todas las líneas requieren tarifa en la moneda de la propuesta")
+    if (item.priceCents == null || item.currency !== current.currency) throw conflict("BUDGET_CURRENCY_MIX", "Todas las líneas requieren precio en la moneda de la propuesta")
     if (item.budgetId && item.budgetId !== current.id) throw conflict("ITEM_ALREADY_QUOTED", "La indicación pertenece a otra propuesta")
     assertExecutableCodings(item.codings)
   }

@@ -1323,7 +1323,7 @@ await db.transaction(async (tx) => {
     name: "Profilaxis preventiva demo",
     startsAt: daysAgo(1).toISOString(),
     endsAt: new Date(Date.now() + 30 * 86_400_000).toISOString(),
-    conditions: "Precio promocional para la profilaxis del tarifario.",
+    conditions: "Precio promocional para la profilaxis.",
     items: [{ serviceId: serviceIdA("LIMPIEZA"), mode: "fixed", priceCents: 7900 }],
   })
   await createPromotion(tx, ORG_A, ANA_ID, {

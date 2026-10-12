@@ -186,7 +186,7 @@ export const OPERATIONS = {
     label: "Indicación del plan de tratamiento",
     fields: {
       service: { kind: "text", min: 2, max: 200, label: "Prestación", description: "La prestación tal como la nombró el odontólogo (por ejemplo, «resina compuesta»). El sistema la busca en los servicios de la clínica.", body: "none", agent: "requires" },
-      serviceId: { kind: "uuid", label: "Servicio", description: "El servicio del tarifario.", body: "required", agent: "context" },
+      serviceId: { kind: "uuid", label: "Servicio", description: "El servicio de la clínica.", body: "required", agent: "context" },
       planId: { kind: "uuid", label: "Plan", description: "El plan de tratamiento del paciente.", body: "required", agent: "context" },
       sourceEncounterId: { kind: "uuid", label: "Atención", description: "La atención donde se indica.", body: "required", agent: "context" },
       toothNumber: { kind: "int", min: 11, max: 85, label: "Pieza", description: "La pieza en numeración FDI, si la indicación es para una pieza.", body: "optional", nullable: true, agent: "fills" },

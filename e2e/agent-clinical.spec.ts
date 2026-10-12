@@ -192,7 +192,7 @@ test("asistente clínico: dictado de práctica, sugerencias dentro de cada bloqu
   await expect(review).toContainText("1 por revisar")
   await pendingPlan.getByRole("button", { name: "Buscar otra prestación" }).click()
   await expect(page.getByRole("combobox", { name: "Buscar otra prestación" })).toBeVisible()
-  await expect(page.getByText("Tarifa del tarifario: S/ 650.00. No se edita aquí.")).toBeVisible()
+  await expect(page.getByText("Precio del servicio: S/ 650.00. No se edita aquí.")).toBeVisible()
   await page.getByLabel("Pieza", { exact: true }).fill("26")
   await page.getByRole("button", { name: "Guardar y confirmar" }).click()
   await expect(idle).toBeVisible()

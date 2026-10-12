@@ -214,7 +214,7 @@ function TarifarioPage() {
     () => [
       {
         accessorKey: "name",
-        header: "Prestación",
+        header: "Servicio",
         meta: { view: { primary: true } },
         cell: ({ row }) => (
           // `whitespace-normal` y tope de ancho: las celdas del registry son
@@ -320,7 +320,7 @@ function TarifarioPage() {
   const editor =
     !profileReady ? (
       <DetailPanel
-        title="Tarifario de la clínica"
+        title="Servicios y precios"
         headerContent={null}
         onClose={closeOffer}
       >
@@ -362,10 +362,10 @@ function TarifarioPage() {
   if (!canViewTariff) {
     return (
       <div className="flex flex-col gap-6">
-        <PageHeader title="Tarifario de la clínica" subtitle={org.name} />
+        <PageHeader title="Servicios y precios" subtitle={org.name} />
         <EmptyState
           title="Sin acceso"
-          description="Necesitas permiso clínico, de agenda, de caja o de configuración para ver el tarifario."
+          description="Necesitas permiso clínico, de agenda, de caja o de configuración para ver los servicios y sus precios."
         />
       </div>
     )
@@ -379,8 +379,8 @@ function TarifarioPage() {
         panel={mode === "panel" && editorVisible ? editor : null}
       >
         <PageHeader
-          title="Tarifario de la clínica"
-          subtitle={`${org.name} · prestaciones de la clínica y su tarifa`}
+          title="Servicios y precios"
+          subtitle={`${org.name} · lo que ofrece la clínica y cuánto cuesta`}
           actions={
             canManage ? (
               <>
@@ -428,7 +428,7 @@ function TarifarioPage() {
         ) : rows.length === 0 && !hasFilters && estadoFilter === "active" ? (
           <EmptyState
             icon={Tag}
-            title="El tarifario está vacío"
+            title="Aún no tienes servicios"
             description={
               canManage
                 ? "Elige los servicios más usados o crea los tuyos, y ponles precio en una sola pantalla. Lo que guardes queda activo."
@@ -525,10 +525,10 @@ const offerSchema = z.object({
   price: z
     .string()
     .refine((value) => value.trim() !== "", {
-      message: "Indica la tarifa (usa 0 si va incluida sin costo)",
+      message: "Indica el precio (usa 0 si va incluido sin costo)",
     })
     .refine((value) => /^\d+([.,]\d+)?$/.test(value.trim()), {
-      message: "Tarifa inválida: usa números",
+      message: "Precio inválido: usa números",
     }),
   durationMin: z.string().refine(
     (value) => {
@@ -727,7 +727,7 @@ function OfferEditor({
           <p className="text-xs text-muted-foreground">
             Código oficial {linkedCoding.system}{" "}
             <span className="font-mono">{linkedCoding.code}</span>
-            {" · "}edición {linkedCoding.version} · «{linkedCoding.display}». La tarifa y el nombre
+            {" · "}edición {linkedCoding.version} · «{linkedCoding.display}». El precio y el nombre
             comercial de esta oferta son propios de la clínica y no alteran el código oficial.
           </p>
         ) : linkedTemplateQuery.isPending ? (
@@ -860,7 +860,7 @@ function OfferReadOnly({
             {linkedCoding ? officialCodingLabel(linkedCoding) : "Ver en la biblioteca"}
           </DetailField>
         ) : null}
-        <DetailField label={`Tarifa (${offer.currency})`}>
+        <DetailField label={`Precio (${offer.currency})`}>
           {formatMoney(offer.priceCents, offer.currency, locale)}
         </DetailField>
         <DetailField label="Se cobra">{BILLING_MODE_LABELS[offer.billingMode]}</DetailField>

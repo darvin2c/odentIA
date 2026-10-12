@@ -276,7 +276,7 @@ export async function createCharge(
     if (!source) throw notFound("Procedimiento")
     // Sin servicio no hay tarifa: el acto libre nunca genera cargo.
     if (!source.procedure.serviceId) {
-      throw conflict("ACT_NOT_BILLABLE", "El acto libre no genera cargo (no tiene tarifa)")
+      throw conflict("ACT_NOT_BILLABLE", "El acto libre no genera cargo (no tiene precio)")
     }
     if (planItemId && planItemId !== source.procedure.planItemId)
       throw validation("El cargo conserva el tratamiento de su fuente")

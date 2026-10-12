@@ -52,7 +52,7 @@ function pendingLine(summary: PatientSummary, locale: string | undefined): strin
   // Lo acordado por ejecutar no es deuda: el saldo real vive en la pestaña Cuenta.
   if (totals) parts.push(`acordado por ejecutar: ${totals} (no es saldo pendiente)`)
   if (summary.planPending.unpricedCount)
-    parts.push(`${summary.planPending.unpricedCount} sin tarifa (no incluidos)`)
+    parts.push(`${summary.planPending.unpricedCount} sin precio (no incluidos)`)
   return parts.join(" · ")
 }
 

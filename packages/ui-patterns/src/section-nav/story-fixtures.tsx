@@ -67,7 +67,6 @@ export const configuracion: SectionNavItem[] = [
   ["Organización", "/settings"],
   ["Sucursales", "/branches"],
   ["Equipo y permisos", "/members"],
-  ["Servicios y tarifas", "/services"],
   ["Disponibilidad", "/settings/availability"],
   ["Especialidades", "/settings/specialties"],
   ["Formularios y consentimientos", "/settings/forms"],
