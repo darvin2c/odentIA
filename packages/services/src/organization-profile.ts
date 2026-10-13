@@ -331,28 +331,3 @@ export async function updateOrgRegion(
   await ensureDefaultPaymentMethods(tx, orgId, actorUserId, updated.countryCode)
   return updated
 }
-
-/** Región e impresión efectivas para formatos, papel y pie del ticket. */
-export async function getOrgRegion(
-  tx: Db,
-  orgId: string,
-): Promise<Pick<
-  OrgProfileRow,
-  "countryCode" | "currency" | "locale" | "timezone" | "receiptWidth" | "sheetSize" | "ticketFooter"
->> {
-  const [row] = await tx
-    .select({
-      countryCode: orgProfile.countryCode,
-      currency: orgProfile.currency,
-      locale: orgProfile.locale,
-      timezone: orgProfile.timezone,
-      receiptWidth: orgProfile.receiptWidth,
-      sheetSize: orgProfile.sheetSize,
-      ticketFooter: orgProfile.ticketFooter,
-    })
-    .from(orgProfile)
-    .where(eq(orgProfile.organizationId, orgId))
-    .limit(1)
-  if (!row) throw notFound("Perfil de organización")
-  return row
-}

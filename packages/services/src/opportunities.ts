@@ -23,7 +23,6 @@ import { ensureDefaultPipeline } from "./pipelines.js"
 import { createWorkspaceNotification } from "./workspace.js"
 
 export type { OpportunityStatus }
-export const OPPORTUNITY_STATUS_LIST: OpportunityStatus[] = [...OPPORTUNITY_STATUSES]
 
 /** Motivo de cierre: texto corto obligatorio al ganar o perder. */
 const CLOSE_REASON_MAX = 500

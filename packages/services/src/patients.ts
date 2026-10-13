@@ -18,7 +18,7 @@ import { and, asc, desc, eq, gte, ilike, isNull, lte, or, sql } from "drizzle-or
 import { requireContact } from "./contacts.js"
 import { decodeCursor } from "./cursors.js"
 import { isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
-import { NEUTRAL_TIMEZONE } from "./locale.js"
+import { findOrgCountry, NEUTRAL_TIMEZONE } from "./locale.js"
 
 const PAGE_DEFAULT = 30
 const PATIENT_SEXES = ["M", "F"] as const
@@ -109,9 +109,10 @@ export async function requirePatient(tx: Db, orgId: string, id: string): Promise
 
 /**
  * Filiación lista para guardar: vacíos como null, países en mayúsculas,
- * teléfonos en E.164 y ubigeos que existan en el catálogo del INEI.
+ * teléfonos en E.164 (un número nacional se completa con el país de la clínica)
+ * y ubigeos que existan en el catálogo del INEI.
  */
-async function normalizeDemographics<T extends object>(tx: Db, data: T): Promise<T> {
+async function normalizeDemographics<T extends object>(tx: Db, data: T, countryCode: string | null): Promise<T> {
   const out = { ...data } as Record<string, unknown>
   for (const [key, value] of Object.entries(out)) {
     if (typeof value === "string" && value.trim() === "" && key !== "displayName") out[key] = null
@@ -120,7 +121,7 @@ async function normalizeDemographics<T extends object>(tx: Db, data: T): Promise
     if (typeof out[key] === "string") out[key] = (out[key] as string).toUpperCase()
   }
   for (const key of ["phone", "emergencyContactPhone"]) {
-    if (typeof out[key] === "string") out[key] = normalizePhone(out[key] as string)
+    if (typeof out[key] === "string") out[key] = normalizePhone(out[key] as string, countryCode)
   }
   for (const key of ["birthPlaceUbigeo", "addressUbigeo"]) {
     const code = out[key]
@@ -140,9 +141,10 @@ export async function createPatient(
 ): Promise<PatientRow> {
   if (!provenance && !actorUserId) throw validation("El alta interna requiere operador")
   const { contacts = [], registeredBranchId, ...demographics } = input
-  const errors = validateDemographics(demographics, await patientOrganizationToday(tx, orgId))
+  const countryCode = await findOrgCountry(tx, orgId)
+  const errors = validateDemographics(demographics, await patientOrganizationToday(tx, orgId), countryCode)
   if (Object.keys(errors).length) throw validation(Object.values(errors)[0]!)
-  const clean = await normalizeDemographics(tx, demographicsSchema.parse(demographics))
+  const clean = await normalizeDemographics(tx, demographicsSchema.parse(demographics), countryCode)
   if (registeredBranchId) await assertTenantBranch(tx, orgId, registeredBranchId)
   const links = contacts.map(c => registrationContactInputSchema.parse(c)).sort((a, b) => a.contactId.localeCompare(b.contactId))
   if (new Set(links.map(c => c.contactId)).size !== links.length) throw validation("No repitas un contacto")
@@ -622,13 +624,14 @@ export async function updatePatient(
   const current = await requirePatient(tx, orgId, id)
   const { registeredBranchId: _branch, isActive: _active, dataConsent: _consent, identityConfirmed: _confirmed, ...demographicPatch } = patch
   const demographics = Object.fromEntries(Object.keys(demographicsSchema.shape).map(key => [key, current[key as keyof PatientRow]]))
-  const errors = validateDemographics({ ...demographics, ...demographicPatch }, await patientOrganizationToday(tx, orgId))
+  const countryCode = await findOrgCountry(tx, orgId)
+  const errors = validateDemographics({ ...demographics, ...demographicPatch }, await patientOrganizationToday(tx, orgId), countryCode)
   if (Object.keys(errors).length) throw validation(Object.values(errors)[0]!)
   if (patch.registeredBranchId !== undefined && patch.registeredBranchId !== null) {
     await assertTenantBranch(tx, orgId, patch.registeredBranchId)
   }
   if (patch.displayName !== undefined) patch = { ...patch, displayName: patch.displayName.trim() }
-  patch = await normalizeDemographics(tx, patch)
+  patch = await normalizeDemographics(tx, patch, countryCode)
   // Un paciente que pasa a ser menor necesita a su representante legal vigente.
   if (patch.birthDate && patch.birthDate !== current.birthDate) {
     const today = await patientOrganizationToday(tx, orgId)

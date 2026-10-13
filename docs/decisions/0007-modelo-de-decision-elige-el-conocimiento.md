@@ -1,14 +1,14 @@
 # 0007 · El modelo de decisión elige el conocimiento de cada turno
 
-Fecha: 2026-10-10 · Estado: aceptada · Sustituye a [0002](0002-capa-de-decision-en-sombra.md)
+Fecha: 2026-10-10 · Estado: aceptada · Sustituye a [0017](0017-capa-de-decision-en-sombra.md)
 
 ## Problema
 
-El agente recibía en cada llamada las diez respuestas oficiales más recientes de la clínica, recortadas: una clínica con más de diez no podía usar las demás, y una promoción vencida seguía citándose hasta que alguien la despublicaba. Enviar todo el conocimiento en cada llamada lo resuelve, pero su coste crece con el conocimiento y se paga en todas las llamadas del turno. El 0002 dejaba el modelo de decisión solo en sombra hasta tener evidencia propia; el producto necesita usarlo ya donde un error no puede causar un acto, para gastar menos en el modelo que escribe.
+El agente recibía en cada llamada las diez respuestas oficiales más recientes de la clínica, recortadas: una clínica con más de diez no podía usar las demás, y una promoción vencida seguía citándose hasta que alguien la despublicaba. Enviar todo el conocimiento en cada llamada lo resuelve, pero su coste crece con el conocimiento y se paga en todas las llamadas del turno. El 0017 dejaba el modelo de decisión solo en sombra hasta tener evidencia propia; el producto necesita usarlo ya donde un error no puede causar un acto, para gastar menos en el modelo que escribe.
 
 ## Decisión y motivo
 
-- **Se conserva del 0002:** el puerto propio con sus adaptadores, el estado mínimo (solo lo que escribió el contacto), que un fallo del modelo de decisión nunca reintenta ni corta el turno, y el triaje (responder, derivar, urgencia, intención, baja) **en sombra**: sobre actos, la confianza solo podrá endurecer, y su activación sigue pidiendo ejemplos etiquetados.
+- **Se conserva del 0017:** el puerto propio con sus adaptadores, el estado mínimo (solo lo que escribió el contacto), que un fallo del modelo de decisión nunca reintenta ni corta el turno, y el triaje (responder, derivar, urgencia, intención, baja) **en sombra**: sobre actos, la confianza solo podrá endurecer, y su activación sigue pidiendo ejemplos etiquetados.
 - **Uso nuevo, fuera de la sombra: elegir conocimiento** (`knowledge.v1`, modo `retrieval`). Con un modelo de decisión configurado, el bloque estable de la clínica lleva solo el índice de respuestas vigentes y, por turno, el modelo de decisión dice cuáles aplican al último mensaje:
   - seguro (probabilidad ≥ 0,6): solo esas respuestas viajan completas;
   - duda: se paga más solo ahí — van todas si caben; si no, el modelo que escribe elige con el índice y la búsqueda;

@@ -268,7 +268,7 @@ export function OdontogramAssessments({
       </div>
       {assessment && (
         <p className="mb-4 text-sm text-muted-foreground">
-          {previewLabel} · COP {assessment.registrationNumber} · {assessment.entries.length}{" "}
+          {previewLabel} · Colegiatura {assessment.registrationNumber} · {assessment.entries.length}{" "}
           hallazgos conservados.
         </p>
       )}
@@ -339,7 +339,7 @@ export function OdontogramAssessments({
           </Field>
           <div className="grid gap-4 sm:grid-cols-2">
             <Field>
-              <FieldLabel htmlFor={`${id}-examiner`}>Cirujano dentista</FieldLabel>
+              <FieldLabel htmlFor={`${id}-examiner`}>Examinador</FieldLabel>
               <Input
                 id={`${id}-examiner`}
                 value={examinerName}
@@ -350,7 +350,7 @@ export function OdontogramAssessments({
               />
             </Field>
             <Field>
-              <FieldLabel htmlFor={`${id}-registration`}>Número de colegiatura (COP)</FieldLabel>
+              <FieldLabel htmlFor={`${id}-registration`}>Número de colegiatura</FieldLabel>
               <Input
                 id={`${id}-registration`}
                 value={registrationNumber}

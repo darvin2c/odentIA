@@ -118,7 +118,6 @@ export const Route = createFileRoute("/_org/inbox")({
       ? { prepareRegistration: true as const }
       : {}),
     ...(typeof search.q === "string" ? { q: search.q } : {}),
-    ...(typeof search.sort === "string" ? { sort: search.sort } : {}),
     ...(typeof search.status === "string" ? { status: search.status } : {}),
     ...(typeof search.channel === "string" ? { channel: search.channel } : {}),
     ...(typeof search.assigned === "string" ? { assigned: search.assigned } : {}),
@@ -180,9 +179,8 @@ function InboxPage() {
   const channel = listSearch.get("channel")
   const assigned = listSearch.get("assigned")
   const search = listSearch.get("q") ?? ""
-  const sort = listSearch.get("sort")
-  // Vistas de trabajo (filtrado SQL en el servidor, antes de paginar):
-  // `unanswered` sin responder, `human` necesita al equipo, `approval` por aprobar.
+  // Vistas de trabajo (filtrado SQL en el servidor, antes de paginar); el orden es
+  // el del servidor, por actividad: reordenar aquí solo movería las páginas ya cargadas.
   const view = listSearch.get("view")
   const canDecideAgent = usePermission("agent.decide")
   const canReadAgent = usePermission("agent.read")
@@ -310,32 +308,7 @@ function InboxPage() {
     handleOrgEvent,
   )
 
-  const items = useMemo(() => {
-    const base = listQuery.data?.pages.flatMap((page) => page.data) ?? []
-    if (!sort) return base
-    const field = sort.replace(/^-/, "")
-    const sorted = [...base]
-    if (field === "noleidos") {
-      sorted.sort(
-        (a, b) =>
-          b.unreadCount - a.unreadCount ||
-          (b.lastMessageAt ? new Date(b.lastMessageAt).getTime() : 0) -
-            (a.lastMessageAt ? new Date(a.lastMessageAt).getTime() : 0),
-      )
-      return sorted
-    }
-    if (field === "actividad") {
-      const desc = sort !== "-actividad"
-      sorted.sort((a, b) => {
-        const diff =
-          (b.lastMessageAt ? new Date(b.lastMessageAt).getTime() : 0) -
-          (a.lastMessageAt ? new Date(a.lastMessageAt).getTime() : 0)
-        return desc ? diff : -diff
-      })
-      return sorted
-    }
-    return base
-  }, [listQuery.data, sort])
+  const items = useMemo(() => listQuery.data?.pages.flatMap((page) => page.data) ?? [], [listQuery.data])
 
   const mode = useDetailMode()
   // La columna del agente ocupa el lugar de «Contexto» mientras no quepan los
@@ -488,10 +461,7 @@ function InboxPage() {
             ],
           },
         ]}
-        sortOptions={[
-          { value: "actividad", label: "Actividad reciente" },
-          { value: "noleidos", label: "No leídos primero" },
-        ]}
+        sortOptions={[]}
         searchPlaceholder="Buscar contacto"
         searchPending={listQuery.isFetching && !listQuery.isFetchingNextPage}
         resetKeys={["status", "channel", "assigned", "q"]}
@@ -932,6 +902,7 @@ function ThreadView({
   const [correcting, setCorrecting] = useState<CorrectionTarget | null>(null)
   // Resumen del caso para quien lo toma; guarda la conversación para que no siga abierto al cambiar de hilo.
   const canClaimCase = usePermission("tasks.write")
+  const canOpenContact = usePermission("crm.read")
   const [briefFor, setBriefFor] = useState<string | null>(null)
 
   useEffect(() => {
@@ -1172,13 +1143,18 @@ function ThreadView({
           </Button>
         )}
         <div className="min-w-0 flex-1">
-          <Link
-            to="/contacts/$contactId"
-            params={{ contactId: detail.contact.id }}
-            className="block truncate text-[15px] font-bold hover:underline"
-          >
-            {detail.contact.displayName}
-          </Link>
+          {/* Quien atiende conversaciones sin leer el CRM (odontología) ve el nombre, sin un enlace que rebota. */}
+          {canOpenContact ? (
+            <Link
+              to="/contacts/$contactId"
+              params={{ contactId: detail.contact.id }}
+              className="block truncate text-[15px] font-bold hover:underline"
+            >
+              {detail.contact.displayName}
+            </Link>
+          ) : (
+            <span className="block truncate text-[15px] font-bold">{detail.contact.displayName}</span>
+          )}
           <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
             <span>{channelLabel(detail.connection.channel)}</span>
             <span>·</span>
@@ -1585,6 +1561,8 @@ function MessageBubble({
 }) {
   const out = msg.direction === "out"
   const byAgent = msg.senderKind === "agent"
+  // La línea del Administrador solo la abre quien puede ver el agente.
+  const canOpenLine = usePermission("agent.read")
   return (
     <Message from={out ? "user" : "assistant"}>
       <MessageContent
@@ -1602,7 +1580,7 @@ function MessageBubble({
               <Bot className="size-3.5" aria-hidden /> {msg.automatic ? `Automático · ${msg.automatic.name}` : "Agente"}
             </span>
             {/* Un mensaje automático no es una respuesta de la conversación: dice de qué línea salió. */}
-            {msg.automatic ? (
+            {msg.automatic && canOpenLine ? (
               <Link to="/agent/administrador" search={{ linea: msg.automatic.key }} className="font-normal underline-offset-2 hover:underline">
                 Por qué salió
               </Link>

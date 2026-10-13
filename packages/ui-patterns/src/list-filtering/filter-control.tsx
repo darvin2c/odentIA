@@ -86,6 +86,15 @@ function formatDate(value?: string): string | undefined {
   }).format(new Date(year, month - 1, day))
 }
 
+/**
+ * Decimales del importe de un rango (los de su moneda, que dice la app) o
+ * `null` si el rango no es dinero. El parámetro guarda la unidad menor.
+ */
+function moneyDigits(filter: Extract<FilterDef, { type: "number-range" }>): number | null {
+  const digits = filter.money?.fractionDigits
+  return digits !== undefined && Number.isInteger(digits) && digits >= 0 ? digits : null
+}
+
 export function hasFilterValue(
   filter: FilterDef,
   get: (key: string) => string | undefined,
@@ -110,15 +119,16 @@ export function filterSummary(
     const min = get(`${filter.key}_min`)
     const max = get(`${filter.key}_max`)
     if (!min && !max) return undefined
+    const digits = moneyDigits(filter)
     const display = (value?: string) => {
       if (!value) return undefined
       // Sin símbolo: el filtro no conoce la moneda y no se asume ninguna.
-      return filter.money
-        ? (Number(value) / 100).toLocaleString(formatLocale(), {
-            minimumFractionDigits: 2,
-            maximumFractionDigits: 2,
+      return digits === null
+        ? value
+        : (Number(value) / 10 ** digits).toLocaleString(formatLocale(), {
+            minimumFractionDigits: digits,
+            maximumFractionDigits: digits,
           })
-        : value
     }
     return [display(min), display(max)].filter(Boolean).join(" – ")
   }
@@ -357,15 +367,21 @@ function NumberRangeControl({ filter }: { filter: Extract<FilterDef, { type: "nu
   const { get, setParams } = useListSearch()
   const minKey = `${filter.key}_min`
   const maxKey = `${filter.key}_max`
-  const fromParam = (value?: string) =>
-    value === undefined ? "" : String(filter.money ? Number(value) / 100 : Number(value))
+  // Un importe se escribe en la unidad mayor y viaja en la menor de su moneda;
+  // un rango que no es dinero viaja tal cual (escala 1).
+  const digits = moneyDigits(filter)
+  const isMoney = digits !== null
+  const scale = 10 ** (digits ?? 0)
+  // Una moneda sin decimales no admite medios.
+  const step = digits ? 0.5 : 1
+  const fromParam = (value?: string) => (value === undefined ? "" : String(Number(value) / scale))
   const [minimum, setMinimum] = React.useState(() => fromParam(get(minKey)))
   const [maximum, setMaximum] = React.useState(() => fromParam(get(maxKey)))
   const minimumParam = get(minKey)
   const maximumParam = get(maxKey)
 
-  React.useEffect(() => setMinimum(fromParam(minimumParam)), [filter.money, minimumParam])
-  React.useEffect(() => setMaximum(fromParam(maximumParam)), [filter.money, maximumParam])
+  React.useEffect(() => setMinimum(fromParam(minimumParam)), [scale, minimumParam])
+  React.useEffect(() => setMaximum(fromParam(maximumParam)), [scale, maximumParam])
 
   React.useEffect(() => {
     const timeout = window.setTimeout(() => {
@@ -373,7 +389,7 @@ function NumberRangeControl({ filter }: { filter: Extract<FilterDef, { type: "nu
         if (!value) return undefined
         const parsed = Number(value)
         if (!Number.isFinite(parsed)) return undefined
-        return String(filter.money ? Math.round(parsed * 100) : Math.round(parsed))
+        return String(Math.round(parsed * scale))
       }
       const nextMinimum = toParam(minimum)
       const nextMaximum = toParam(maximum)
@@ -381,10 +397,10 @@ function NumberRangeControl({ filter }: { filter: Extract<FilterDef, { type: "nu
       setParams({ [minKey]: nextMinimum, [maxKey]: nextMaximum }, { replace: true })
     }, 300)
     return () => window.clearTimeout(timeout)
-  }, [filter.money, maxKey, maximum, maximumParam, minKey, minimum, minimumParam, setParams])
+  }, [scale, maxKey, maximum, maximumParam, minKey, minimum, minimumParam, setParams])
 
   const sliderMaximum = Math.max(
-    filter.money ? 1_000 : 100_000,
+    isMoney ? 1_000 : 100_000,
     Number(minimum) || 0,
     Number(maximum) || 0,
   )
@@ -397,7 +413,7 @@ function NumberRangeControl({ filter }: { filter: Extract<FilterDef, { type: "nu
           type="number"
           inputMode="decimal"
           min="0"
-          step={filter.money ? "0.5" : "1"}
+          step={String(step)}
           value={minimum}
           onChange={(event: React.ChangeEvent<HTMLInputElement>) => setMinimum(event.target.value)}
           placeholder={common.filters.min}
@@ -407,7 +423,7 @@ function NumberRangeControl({ filter }: { filter: Extract<FilterDef, { type: "nu
           type="number"
           inputMode="decimal"
           min="0"
-          step={filter.money ? "0.5" : "1"}
+          step={String(step)}
           value={maximum}
           onChange={(event: React.ChangeEvent<HTMLInputElement>) => setMaximum(event.target.value)}
           placeholder={common.filters.max}
@@ -417,7 +433,7 @@ function NumberRangeControl({ filter }: { filter: Extract<FilterDef, { type: "nu
       <Slider
         min={0}
         max={sliderMaximum}
-        step={filter.money ? 0.5 : 1}
+        step={step}
         value={sliderValues}
         className="mx-auto w-full max-w-xs h-2"
         onValueChange={(values) => {

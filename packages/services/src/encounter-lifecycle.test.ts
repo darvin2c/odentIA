@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto"
-import { user } from "@odentia/db/schema/auth"
+import { member, user } from "@odentia/db/schema/auth"
 import { cie10Code, odontogramEntry, patientCharge } from "@odentia/db/schema/clinical"
 import { branch } from "@odentia/db/schema/org"
 import { and, eq } from "drizzle-orm"
@@ -383,4 +383,31 @@ it("una categoría CIE-10 con subcódigos no se registra como diagnóstico", asy
       }),
     ),
   ).rejects.toMatchObject({ status: 400 })
+})
+
+it("el perfil profesional no trae título ni colegio por defecto: los escribe la persona", async () => {
+  const f = await clinicalFixture()
+  const newcomer = `sin-perfil-${randomUUID()}`
+  await ownerDb.insert(user).values({ id: newcomer, name: "Sin Perfil", email: `${newcomer}@example.test` })
+  await ownerDb
+    .insert(member)
+    .values({ id: randomUUID(), organizationId: "org_a", userId: newcomer, role: "dentist", createdAt: new Date() })
+  expect(await f.run((tx) => getProfessionalProfile(tx, "org_a", newcomer))).toMatchObject({
+    professionalTitle: "",
+    registrationBody: "",
+    registrationNumber: null,
+    complete: false,
+  })
+  // La colegiatura sola no basta: nadie rellena el título ni el colegio de un país.
+  await expect(
+    f.run((tx) => setProfessionalProfile(tx, "org_a", f.actor, newcomer, { registrationNumber: "777" })),
+  ).rejects.toMatchObject({ status: 400 })
+  const saved = await f.run((tx) =>
+    setProfessionalProfile(tx, "org_a", f.actor, newcomer, {
+      professionalTitle: "Odontóloga",
+      registrationBody: "COEM",
+      registrationNumber: "28-001",
+    }),
+  )
+  expect(saved).toMatchObject({ professionalTitle: "Odontóloga", registrationBody: "COEM", complete: true })
 })

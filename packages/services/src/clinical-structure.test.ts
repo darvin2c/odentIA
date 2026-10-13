@@ -158,8 +158,8 @@ it("consentimiento: firma verificada del paciente o de su representante legal vi
   // Quien informa firma con su colegiatura: miembro con perfil profesional.
   await ownerDb.execute(sql`insert into "member" ("id", "organization_id", "user_id", "role", "created_at")
     values ('m-estructura', 'org_a', ${ACTOR}, 'member', now()) on conflict do nothing`)
-  await ownerDb.execute(sql`insert into "professional_profile" ("organization_id", "user_id", "registration_number")
-    values ('org_a', ${ACTOR}, '12345') on conflict do nothing`)
+  await ownerDb.execute(sql`insert into "professional_profile" ("organization_id", "user_id", "professional_title", "registration_body", "registration_number")
+    values ('org_a', ${ACTOR}, 'Cirujano dentista', 'COP', '12345') on conflict do nothing`)
   const template = await run(async (tx) => {
     const draft = await createConsentTemplate(tx, "org_a", ACTOR, {
       title: "Consentimiento de restauración",

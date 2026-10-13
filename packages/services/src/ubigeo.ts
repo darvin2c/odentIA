@@ -36,9 +36,3 @@ export async function searchUbigeo(tx: Db, q: string, limit = 30): Promise<Ubige
     .limit(Math.min(Math.max(limit, 1), 100))
   return rows.map((row) => ({ ...row, label: label(row) }))
 }
-
-export async function getUbigeo(tx: Db, codes: string[]): Promise<UbigeoItem[]> {
-  if (codes.length === 0) return []
-  const rows = await tx.select().from(ubigeo).where(sql`${ubigeo.code} in ${codes}`)
-  return rows.map((row) => ({ ...row, label: label(row) }))
-}

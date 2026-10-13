@@ -67,12 +67,16 @@ export function AdminLine({
   onToggle,
   canWrite,
   adminOn,
+  unreachedOnly = false,
+  onShowAll,
 }: {
   line: AdminLineView
   open: boolean
   onToggle: () => void
   canWrite: boolean
   adminOn: boolean
+  unreachedOnly?: boolean
+  onShowAll?: () => void
 }) {
   const uid = useId()
   const queryClient = useQueryClient()
@@ -131,7 +135,7 @@ export function AdminLine({
       ) : null}
       {open ? (
         <div id={`${uid}-detalle`} className="border-t bg-canvas/60 p-4">
-          <AdminLineOpen lineKey={line.key} canWrite={canWrite} adminOn={adminOn} />
+          <AdminLineOpen lineKey={line.key} canWrite={canWrite} adminOn={adminOn} unreachedOnly={unreachedOnly} onShowAll={onShowAll} />
         </div>
       ) : null}
     </li>
@@ -169,7 +173,20 @@ const NO_HOUR = "sin-hora"
 const HOURS_OF_DAY = Array.from({ length: 24 }, (_, hour) => hour)
 
 /** Una línea abierta: su flujo, sus partes, lo que recibe la persona y lo que pasó con cada quien. */
-export function AdminLineOpen({ lineKey, canWrite, adminOn }: { lineKey: string; canWrite: boolean; adminOn: boolean }) {
+export function AdminLineOpen({
+  lineKey,
+  canWrite,
+  adminOn,
+  unreachedOnly = false,
+  onShowAll,
+}: {
+  lineKey: string
+  canWrite: boolean
+  adminOn: boolean
+  /** Llega del aviso «no pude escribirle a N personas»: la lista muestra solo a esas personas. */
+  unreachedOnly?: boolean
+  onShowAll?: () => void
+}) {
   const uid = useId()
   const queryClient = useQueryClient()
   const [whole, setWhole] = useState(false)
@@ -186,6 +203,13 @@ export function AdminLineOpen({ lineKey, canWrite, adminOn }: { lineKey: string;
     queryKey: ["agent-admin-line", lineKey, "people"],
     queryFn: () => apiFetch<{ data: { items: AdminPersonRow[]; total: number } }>(`/api/agent/admin/lines/${lineKey}/people?limit=200`),
     enabled: allPeople,
+    retry: false,
+  })
+  const unreached = useQuery({
+    queryKey: ["agent-admin-line", lineKey, "people", "no-pudo"],
+    queryFn: () =>
+      apiFetch<{ data: { items: AdminPersonRow[]; total: number } }>(`/api/agent/admin/lines/${lineKey}/people?only=no-pudo&limit=200`),
+    enabled: unreachedOnly,
     retry: false,
   })
   const save = useMutation({
@@ -386,7 +410,31 @@ export function AdminLineOpen({ lineKey, canWrite, adminOn }: { lineKey: string;
         <h3 id={`${uid}-personas`} className="font-heading text-sm font-semibold">
           Qué pasó, persona por persona
         </h3>
-        {line.peopleTotal === 0 ? (
+        {unreachedOnly ? (
+          <>
+            <p className="flex flex-wrap items-center gap-x-2 text-sm text-muted-foreground">
+              Solo las personas a las que no pudo escribirles.
+              {onShowAll ? (
+                <Button type="button" variant="link" className="h-auto min-h-11 p-0 sm:min-h-8" onClick={onShowAll}>
+                  Ver a todas
+                </Button>
+              ) : null}
+            </p>
+            {unreached.isPending ? (
+              <LoadingState kind="indeterminate" message="Cargando…" />
+            ) : unreached.isError ? (
+              <QueryErrorState error={unreached.error} onRetry={() => void unreached.refetch()} />
+            ) : unreached.data.data.items.length === 0 ? (
+              <p className="text-sm text-muted-foreground">Ya no queda nadie a quien no haya podido escribirle.</p>
+            ) : (
+              <ul className="flex flex-col divide-y rounded-xl border bg-card">
+                {unreached.data.data.items.map((row) => (
+                  <PersonRow key={row.id} row={row} />
+                ))}
+              </ul>
+            )}
+          </>
+        ) : line.peopleTotal === 0 ? (
           <p className="text-sm text-muted-foreground">
             {line.enabled ? "Todavía nada: actúa sobre lo que ocurra desde que la prendiste." : "Nada todavía."}
           </p>

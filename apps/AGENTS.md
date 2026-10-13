@@ -11,7 +11,7 @@
 ## Interfaces web
 
 - Consultar la skill `odentia-ux` y las reglas de `packages/ui-patterns` al cambiar pantallas. Las apps no importan `@tanstack/charts` directamente.
-- Estado remoto en React Query; `useOrgEvents` invalida consultas, no crea una copia paralela del estado. Respetar permisos canónicos también en navegación.
+- Estado remoto en React Query; `useOrgEvents` invalida consultas, no crea una copia paralela del estado. Respetar permisos canónicos también en navegación: toda ruta bajo `_org` tiene su regla en `PLATFORM_PATH_RULES` (lo fija `lib/route-permissions.test.ts`) y un enlace a otra pantalla solo se ofrece a quien puede abrirla.
 - Las rutas hijas de `settings.tsx` y `services.tsx` no añaden otro `PageShell`: lo aporta su layout.
 - Ficha del paciente: cinco áreas (`lib/patient-areas.ts`) con entrada por rol; `?tab=` identifica la sección y el área se deriva. Una sección nueva se declara ahí con su permiso, no en la ruta.
 - Las subapps de Hono montadas en "/" acotan sus guardas a sus propias rutas: un `use("*")` alcanza a todas las subrutas registradas después.

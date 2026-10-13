@@ -390,8 +390,8 @@ export const agentConfig = pgTable(
      */
     decisionRoutingEnabled: boolean("decision_routing_enabled").notNull().default(true),
     /**
-     * Asesor: si está encendido y, por detección, si se apagó, hasta cuándo
-     * se pospuso y con qué umbral de días. Vacío = apagado, todo por defecto.
+     * Administrador: si está encendido y en qué horario no escribe por su
+     * cuenta. Vacío = apagado, todo por defecto.
      */
     advisor: jsonb("advisor").$type<AgentAdvisorSettings>().notNull().default(sql`'{}'::jsonb`),
     /** Asistente clínico: dictado en la atención. Apagado hasta que la clínica lo encienda. */

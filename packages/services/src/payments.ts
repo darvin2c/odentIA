@@ -1835,22 +1835,6 @@ export async function getTicketReceipt(tx: Db, orgId: string, patientId: string,
     closedAfter: await hasClosureSince(tx, orgId, ticket.branchId, ticket.currency, ticket.createdAt),
   }
 }
-/** Receipt desde un pago suelto (Fase 7): resuelve su ticket y delega. */
-export async function getTicketReceiptByPayment(tx: Db, orgId: string, patientId: string, paymentId: string) {
-  const [payment] = await tx
-    .select({ ticketId: patientPayment.ticketId })
-    .from(patientPayment)
-    .where(
-      and(
-        eq(patientPayment.id, paymentId),
-        eq(patientPayment.organizationId, orgId),
-        eq(patientPayment.patientId, patientId),
-      ),
-    )
-  if (!payment?.ticketId) throw notFound("Ticket")
-  return getTicketReceipt(tx, orgId, patientId, payment.ticketId)
-}
-
 
 export async function getPatientAccount(tx: Db, orgId: string, patientId: string) {
   await requirePatient(tx, orgId, patientId)

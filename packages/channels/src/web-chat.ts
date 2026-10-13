@@ -1,11 +1,11 @@
 // Chat web embebible propio (widget): sin proveedor externo. La entrega al
-// visitante ocurre por polling/SSE autorizado contra nuestra API; el adaptador
+// visitante ocurre por polling autorizado contra nuestra API; el adaptador
 // solo normaliza el protocolo (verificación, parse, envío local) para que la
 // ingesta y el outbound usen el mismo pipeline que el resto de canales.
 //
 // Entrega honesta: `sendMessage` acepta el mensaje para entrega local y, si la
 // conexión configura `notifyUrl`, avisa con un POST al backend del sitio (útil
-// para refrescar el widget). El visitante lo recibe al hacer poll/SSE y recién
+// para refrescar el widget). El visitante lo recibe al hacer poll y recién
 // entonces el mensaje pasa a `delivered`. Nunca se finge lectura del visitante.
 import { createHash, createHmac, randomUUID, timingSafeEqual } from "node:crypto"
 import type {
@@ -297,7 +297,7 @@ export const webChatAdapter: ChannelAdapter = {
     if (!text.trim()) throw new Error("Chat web: texto vacío, no se envía")
     const notifyUrl = pickString(config, "notifyUrl")
     if (!notifyUrl) {
-      // Sin push configurado el visitante lo recibe por polling/SSE; el id
+      // Sin push configurado el visitante lo recibe por polling; el id
       // local marca aceptación para entrega (delivered real al hacer poll).
       return { externalId: `webchat:local:${randomUUID()}` }
     }

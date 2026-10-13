@@ -56,6 +56,7 @@ export interface ProfessionalProfile {
   userId: string
   accountName: string
   signatureName: string | null
+  /** Vacíos mientras la persona no los escriba: no hay título ni colegio por defecto. */
   professionalTitle: string
   registrationBody: string
   registrationNumber: string | null
@@ -162,7 +163,7 @@ export function saveProfessionalProfileApi(userId: string | "me", body: Professi
   )
 }
 
-/** «COP 12345» o null si falta la colegiatura. */
+/** Colegio y número («<colegio> <número>») o null si falta la colegiatura. */
 export function registrationLabel(
   profile: Pick<ProfessionalProfile, "registrationBody" | "registrationNumber">,
 ): string | null {

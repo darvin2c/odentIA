@@ -210,13 +210,16 @@ const PLATFORM_PATH_RULES: PlatformPathRule[] = [
   { prefix: "/inbox", permissions: ["conversations.read"] },
   { prefix: "/contacts", permissions: ["crm.read"] },
   { prefix: "/opportunities", permissions: ["crm.read"] },
+  { prefix: "/pipeline", permissions: ["crm.read"] },
   { prefix: "/tasks", permissions: ["tasks.read"] },
   { prefix: "/services", permissions: ["catalog.read"] },
   { prefix: "/commissions", permissions: ["commissions.read"] },
   { prefix: "/finance", permissions: ["finance.read"] },
   { prefix: "/inventory", permissions: ["inventory.read"] },
   { prefix: "/reports", permissions: ["reports.read"] },
-  { prefix: "/audit", permissions: ["audit.read"] },
+  // Regla específica antes de la genérica: la auditoría vive bajo Configuración
+  // pero la consulta quien tiene `audit.read`.
+  { prefix: "/settings/audit", permissions: ["audit.read"] },
   // Regla específica antes de la genérica: las aprobaciones operativas las
   // resuelve quien decide (`agent.decide`), no solo quien supervisa.
   { prefix: "/agent/approvals", permissions: ["agent.read", "agent.decide"] },

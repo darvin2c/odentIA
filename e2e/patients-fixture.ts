@@ -109,7 +109,10 @@ export async function buildClinicalBase(owner: OwnerFixture): Promise<ClinicalId
     toothNumber: 36,
     surfaces: ["occlusal"],
   }, 201)
+  // Título y colegio se escriben: el perfil no trae los de ningún país por defecto.
   await call(page, "PUT", "/api/clinical-forms/professionals/me/profile", slug, {
+    professionalTitle: "Cirujano dentista",
+    registrationBody: "COP",
     registrationNumber: "12345",
   })
   await call(page, "POST", `${apiPath}/encounters/${encounter.id}/finalize`, slug, {})

@@ -13,8 +13,6 @@ import {
   createProposal,
   decideProposal,
   executeProposal,
-  findFreeGaps,
-  getAgentCaseState,
   getAgentPanelSummary,
   getAgentRunStats,
   getProposal,
@@ -24,7 +22,6 @@ import {
   listAnswerTraces,
   listHandoffs,
   noteSandboxTurn,
-  removeAgentCaseNote,
   claimHandoff,
   getCaseBrief,
   listProposals,
@@ -70,16 +67,6 @@ const decideInput = z.object({
 
 // Los campos de una derivación se declaran una vez, para la pantalla y para el agente.
 const handoffInput = operationBodySchema("derivacion.crear")
-
-const gapsInput = z.object({
-  branchId: z.string().uuid(),
-  from: z.string().min(1),
-  to: z.string().min(1),
-  durationMin: z.number().int().min(10).max(480),
-  dentistUserId: z.string().optional(),
-  chairId: z.string().uuid().optional(),
-  serviceId: z.string().uuid().optional(),
-})
 
 const decisionsQuery = z.object({
   conversationId: z.string().uuid().optional(),
@@ -279,16 +266,6 @@ const sandboxInput = z.object({
     )
   })
 
-  app.post("/availability/gaps", async (c) => {
-    const { orgId, memberRole } = orgContextOf(c)
-    if (!canAccess(memberRole, "agent.read")) return forbidden(c, "agent.read")
-    const parsed = gapsInput.safeParse(await c.req.json().catch(() => null))
-    if (!parsed.success) return validationError(c, parsed.error.issues)
-    return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) => findFreeGaps(tx, orgId, parsed.data)),
-    )
-  })
-
   app.get("/runs", async (c) => {
     const { orgId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "agent.read")) return forbidden(c, "agent.read")
@@ -366,17 +343,6 @@ const sandboxInput = z.object({
     )
   })
 
-  /** Lo que el agente recuerda del caso: propuestas, notas propias y consultas recientes. */
-  app.get("/case", async (c) => {
-    const { orgId, memberRole } = orgContextOf(c)
-    if (!canAccessAny(memberRole, ["conversations.read", "agent.read"])) return forbidden(c, "conversations.read")
-    const parsed = z.object({ conversationId: z.string().uuid() }).safeParse(c.req.query())
-    if (!parsed.success) return validationError(c, parsed.error.issues)
-    return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) => getAgentCaseState(tx, orgId, parsed.data.conversationId)),
-    )
-  })
-
   /**
    * Resumen del caso para quien lo toma: lo que la persona escribió, lo que ya
    * se sabe y lo que hizo el agente. Lo que se recuerda de la persona solo
@@ -390,21 +356,6 @@ const sandboxInput = z.object({
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
         getCaseBrief(tx, orgId, parsed.data.conversationId, { includePerson: canAccessAny(memberRole, ["conversations.read", "crm.read"]) }),
-      ),
-    )
-  })
-
-  /** Una persona retira una nota que el agente dejó sobre el caso. */
-  app.post("/case/notes/remove", async (c) => {
-    const { orgId, memberRole } = orgContextOf(c)
-    if (!canAccess(memberRole, "conversations.write")) return forbidden(c, "conversations.write")
-    const parsed = z
-      .object({ conversationId: z.string().uuid(), at: z.string().min(1).max(40) })
-      .safeParse(await c.req.json().catch(() => null))
-    if (!parsed.success) return validationError(c, parsed.error.issues)
-    return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) =>
-        removeAgentCaseNote(tx, orgId, parsed.data.conversationId, parsed.data.at),
       ),
     )
   })

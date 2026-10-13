@@ -5,7 +5,7 @@ import { sql } from "drizzle-orm"
  * Actividad legible del agente para recepción: qué envió (y si llegó a
  * salir), qué propuso (y en qué quedó) y a quién derivó, con enlace al caso.
  * No es el libro técnico de corridas (modelo, tokens): ese sigue en
- * Agente › Actividad.
+ * Agente › Registro técnico.
  *
  * Todo mensaje del agente nace de una propuesta `enviar_mensaje` ejecutada,
  * así que el feed se alimenta solo de propuestas y derivaciones suyas; no se

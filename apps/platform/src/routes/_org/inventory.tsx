@@ -1,5 +1,6 @@
 import { Badge, Button, Input, Label, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Textarea, toast } from "@odentia/ui"
 import { DataTable, EmptyState, ErrorState, FilterBar, type FilterDef, FormDrawer, LoadingState, PageHeader, PageShell, RowActions, type RowActionItem, useListSearch } from "@odentia/ui-patterns"
+import { formatMoneyInput, parseMoney } from "@odentia/clinical"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, Link } from "@tanstack/react-router"
 import { AlertTriangle, Package, Plus } from "lucide-react"
@@ -8,6 +9,7 @@ import * as React from "react"
 import { apiFetch } from "../../lib/api"
 import { usePermission } from "../../lib/crm"
 import { MOVEMENT_KIND_LABELS, ORDER_STATUS_LABELS, type InventoryAlerts, type InventoryProduct, type PurchaseOrderDetail, type PurchaseOrderItem, type StockMovementItem, type SupplierItem, type WarehouseItem } from "../../lib/inventory"
+import { useOrgProfile } from "../../lib/org"
 import { isAmbiguousMutationError, mutationErrorMessage, QueryErrorState } from "../../lib/query-error"
 import { usePageDraftGuard } from "../../lib/page-draft-guard"
 
@@ -523,16 +525,34 @@ function OrderFormDrawer({ formError, onClose, onDone, onError }: { formError: s
     onSuccess: () => { onError(null); toast.success("Orden creada en borrador"); onDone() },
     onError: (error) => onError(errorMessage(error)),
   })
+  // La orden nace en la moneda de la clínica: el costo se escribe y se lee con
+  // sus decimales (ISO 4217) y con el formato de la clínica, no siempre con dos.
+  const profile = useOrgProfile().data
+  const currency = profile?.currency
+  const locale = profile?.locale
   function handleSubmit(event: React.FormEvent) {
     event.preventDefault()
     if (mutation.isPending || isAmbiguousMutationError(mutation.error)) return
     const form = new FormData(event.currentTarget as HTMLFormElement)
     const productId = String(form.get("productId") ?? "")
     const quantity = Number(form.get("quantity") ?? 0)
-    const unitCost = Math.round(Number(form.get("unitCost") ?? 0) * 100)
     if (!productId || !(quantity > 0)) {
       onError("Elige un producto y una cantidad positiva.")
       return
+    }
+    const costText = String(form.get("unitCost") ?? "").trim()
+    let unitCost = 0
+    if (costText) {
+      if (!currency || !locale) {
+        onError("Configura el país y la moneda de la clínica antes de registrar importes.")
+        return
+      }
+      try {
+        unitCost = parseMoney(costText, currency, locale)
+      } catch (error) {
+        onError(error instanceof Error ? `${error.message} (costo unitario).` : "El costo unitario no es un importe válido.")
+        return
+      }
     }
     mutation.mutate({
       supplierId: String(form.get("supplierId") ?? ""),
@@ -592,7 +612,7 @@ function OrderFormDrawer({ formError, onClose, onDone, onError }: { formError: s
       </div>
       <div className="grid grid-cols-2 gap-3">
         <div><Label htmlFor="ord-qty">Cantidad</Label><Input id="ord-qty" name="quantity" type="number" min={1} required /></div>
-        <div><Label htmlFor="ord-cost">Costo unitario (S/)</Label><Input id="ord-cost" name="unitCost" type="number" min={0} step="0.01" defaultValue={0} /></div>
+        <div><Label htmlFor="ord-cost">{currency ? `Costo unitario (${currency})` : "Costo unitario"}</Label><Input id="ord-cost" name="unitCost" inputMode="decimal" autoComplete="off" placeholder={currency && locale ? formatMoneyInput(0, currency, locale) : undefined} /></div>
       </div>
       <div><Label htmlFor="ord-notes">Notas</Label><Textarea id="ord-notes" name="notes" maxLength={2000} /></div>
     </FormDrawer>

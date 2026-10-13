@@ -23,7 +23,9 @@ test("asistente clínico: dictado de práctica, sugerencias dentro de cada bloqu
     name: "Endodoncia multirradicular", specialty: "endodoncia", scope: "tooth", priceCents: 65000, currency: "PEN",
   }, 201)
   const encounter = await call<{ id: string }>(page, "POST", `${apiPath}/encounters`, org.slug, { reason: "Consulta" }, 201)
-  await call(page, "PUT", "/api/clinical-forms/professionals/me/profile", org.slug, { registrationNumber: "12345" })
+  await call(page, "PUT", "/api/clinical-forms/professionals/me/profile", org.slug, {
+    professionalTitle: "Cirujano dentista", registrationBody: "COP", registrationNumber: "12345",
+  })
   const dictationPath = `${apiPath}/encounters/${encounter.id}/dictation`
   const dictation = () => call<{ enabled: boolean; suggestions: Array<{ kind: string; status: string }> }>(page, "GET", dictationPath, org.slug)
 

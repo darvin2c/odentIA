@@ -138,7 +138,7 @@ export function handoffFallbackNotice(treatment: "tu" | "usted" | null): string 
 export function routeInstruction(path: RoutePath, prefetched?: string | null): string | null {
   const head = "Camino de este turno, elegido por lo que escribió el interlocutor:"
   if (path === "informacion") {
-    return `${head} pide información. Arriba ya tienes las sedes, los servicios con sus tarifas y las respuestas oficiales que aplican. Responde ahora con send_reply, en este mismo paso y sin llamar otras herramientas. Solo si el dato no está arriba, usa consultar_conocimiento una vez; si tampoco está, dilo y ofrece pasar el caso a una persona.`
+    return `${head} pide información. Arriba ya tienes las sedes, los servicios con sus tarifas, los medios de pago que acepta la clínica y las respuestas oficiales que aplican. Responde ahora con send_reply, en este mismo paso y sin llamar otras herramientas. Solo si el dato no está arriba, usa consultar_conocimiento una vez; si tampoco está, dilo y ofrece pasar el caso a una persona.`
   }
   if (path === "saludo") {
     return `${head} un saludo, un agradecimiento o un cierre. Responde en este mismo paso con send_reply, breve, sin consultar nada.`

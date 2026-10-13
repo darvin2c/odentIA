@@ -9,7 +9,6 @@ import {
   getAppointment,
   getProfessionalSchedule,
   listAppointments,
-  listAvailableSlots,
   listScheduleBlocks,
   listScheduleResources,
   moveAppointment,
@@ -96,18 +95,6 @@ const blockInput = z.object({
   endsAt: z.iso.datetime({ offset: true }),
 })
 
-const slotsQuery = z.object({
-  branchId: z.uuid(),
-  dentistUserId: z.string().min(1).optional(),
-  chairId: z.uuid().optional(),
-  serviceId: z.uuid().optional(),
-  from: z.iso.datetime({ offset: true }),
-  to: z.iso.datetime({ offset: true }),
-  durationMin: z.coerce.number().int().positive().max(480).optional(),
-  timeZone: z.string().max(60).optional(),
-  stepMin: z.coerce.number().int().min(5).max(120).optional(),
-})
-
 const availabilityQuery = z.object({
   branchId: z.uuid(),
   from: z.iso.datetime({ offset: true }),
@@ -163,22 +150,6 @@ export function createAgendaRoute(deps: CrmDeps) {
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 201, () =>
       withOrgContext(deps.db, orgId, (tx) => createChair(tx, orgId, parsed.data)),
-    )
-  })
-
-  // Huecos reservables con zona IANA.
-  app.get("/slots", async (c) => {
-    const { orgId, memberRole } = orgContextOf(c)
-    if (!canAccess(memberRole, "appointments.read")) {
-      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para ver la agenda"), 403)
-    }
-    const parsed = slotsQuery.safeParse(c.req.query())
-    if (!parsed.success) return validationError(c, parsed.error.issues)
-    return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) =>
-        // Lo ya pasado no se ofrece: el corte lo pone el servidor, no el reloj del cliente.
-        listAvailableSlots(tx, orgId, { ...parsed.data, notBefore: new Date().toISOString() }),
-      ),
     )
   })
 

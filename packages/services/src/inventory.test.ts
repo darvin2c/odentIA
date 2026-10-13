@@ -21,6 +21,7 @@ import {
   getProductDetail,
   receivePurchaseOrder,
   recordMovement,
+  updateSupplier,
 } from "./inventory.js"
 import { ownerDb, setupTestDb } from "./test-setup.js"
 
@@ -170,4 +171,26 @@ it("recibir por encima de lo pedido responde 409 sin mover saldos", async () => 
   const detail = await fx.run((tx) => getProductDetail(tx, "org_a", fx.producto.id))
   expect(detail.onHand).toBe(10)
   expect(detail.lowStock).toBe(false)
+})
+
+it("el documento de un proveedor exige su tipo: no se asume el de ningún país", async () => {
+  const fx = await inventoryFixture()
+  const tag = randomUUID().replace(/-/g, "").slice(0, 8)
+  await expect(
+    fx.run((tx) => createSupplier(tx, "org_a", fx.actor, { name: "Sin tipo", docNumber: `RFC${tag}` })),
+  ).rejects.toMatchObject({ status: 400 })
+  const supplier = await fx.run((tx) =>
+    createSupplier(tx, "org_a", fx.actor, { name: "Proveedor mexicano", docType: "RFC", docNumber: `XAXX${tag}` }),
+  )
+  expect(supplier).toMatchObject({ docType: "RFC", docNumber: `XAXX${tag}` })
+  // Tampoco al editar: quitar el tipo dejando el número no rellena otro por defecto.
+  await expect(
+    fx.run((tx) => updateSupplier(tx, "org_a", fx.actor, supplier.id, { docType: null })),
+  ).rejects.toMatchObject({ status: 400 })
+  // Un proveedor sin documento sigue siendo válido.
+  const plain = await fx.run((tx) => createSupplier(tx, "org_a", fx.actor, { name: `Sin documento ${tag}` }))
+  expect(plain).toMatchObject({ docType: null, docNumber: null })
+  await expect(
+    fx.run((tx) => updateSupplier(tx, "org_a", fx.actor, plain.id, { docNumber: `NIT${tag}` })),
+  ).rejects.toMatchObject({ status: 400 })
 })

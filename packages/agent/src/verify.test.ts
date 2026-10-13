@@ -1,7 +1,8 @@
 import { expect, it } from "vitest"
 import { describeUnsupported, SOURCE_CALENDAR, SOURCE_SUM, verifyReply } from "./verify.js"
 
-const LIMA = { timezone: "America/Lima" }
+// Lo que recibe la comprobación en una corrida: la zona, la moneda y el formato de la clínica.
+const LIMA = { timezone: "America/Lima", currency: "PEN", locale: "es-PE" }
 const NOW = new Date("2026-10-10T15:00:00Z")
 const SERVICES = { source: "Sedes y servicios", text: "- Servicio Limpieza (id x): S/ 150.00 (45 min)\n- Servicio Blanqueamiento (id y): S/ 480.00" }
 const AGENDA = {
@@ -49,6 +50,43 @@ it("acepta los formatos habituales de un importe", () => {
   expect(check("La ortodoncia va desde S/ 1.200,50.", evidence).ok).toBe(true)
   expect(check("La consulta cuesta 80 soles.", evidence).ok).toBe(true)
   expect(check("La consulta cuesta USD 80.50.", evidence).ok).toBe(false)
+})
+
+it("reconoce la moneda de la clínica por lo que dice ICU, no por una lista de países", () => {
+  const price = (text: string) => [{ source: "Sedes y servicios", text }]
+  const prices = (reply: string, text: string, zone: { timezone: string; currency: string; locale: string }) =>
+    verifyReply(reply, price(text), zone, NOW)
+  // Quetzales: símbolo «Q» y nombre, sin que ningún país figure en el código.
+  const gt = { timezone: "America/Guatemala", currency: "GTQ", locale: "es-GT" }
+  expect(prices("La limpieza cuesta Q150.", "- Servicio Limpieza: Q 150.00", gt).ok).toBe(true)
+  expect(prices("La limpieza cuesta Q200.", "- Servicio Limpieza: Q 150.00", gt).unsupported.map((item) => item.value)).toEqual(["Q200"])
+  expect(prices("Son 200 quetzales.", "- Servicio Limpieza: Q 150.00", gt).ok).toBe(false)
+  // Euros: el símbolo va detrás del número.
+  const es = { timezone: "Europe/Madrid", currency: "EUR", locale: "es-ES" }
+  expect(prices("La limpieza cuesta 60 €.", "- Servicio Limpieza: 60,00 €", es).ok).toBe(true)
+  expect(prices("La limpieza cuesta 65 €.", "- Servicio Limpieza: 60,00 €", es).ok).toBe(false)
+  // Sin moneda de la clínica quedan los códigos ISO, los signos y los nombres compartidos.
+  const bare = { timezone: "UTC" }
+  expect(verifyReply("Cuesta 90 dólares, o MXN 1,500.", price("Tarifa: 80"), bare, NOW).unsupported.map((item) => item.value)).toEqual(["90 dólares", "MXN 1,500"])
+})
+
+it("no asume dos decimales: pesos sin decimales y dinares con tres", () => {
+  const cl = { timezone: "America/Santiago", currency: "CLP", locale: "es-CL" }
+  const pesos = [{ source: "Sedes y servicios", text: "- Servicio Limpieza: $50.000" }]
+  expect(verifyReply("La limpieza cuesta $50.000.", pesos, cl, NOW).ok).toBe(true)
+  expect(verifyReply("La limpieza cuesta 50.000 pesos.", pesos, cl, NOW).ok).toBe(true)
+  expect(verifyReply("La limpieza cuesta $55.000.", pesos, cl, NOW).ok).toBe(false)
+  const kw = { timezone: "Asia/Kuwait", currency: "KWD", locale: "es" }
+  const dinars = [{ source: "Sedes y servicios", text: "- Servicio Limpieza: 12,500 KWD\n- Servicio Corona: 1234,500 KWD" }]
+  expect(verifyReply("La limpieza cuesta 12,500 KWD.", dinars, kw, NOW).ok).toBe(true)
+  expect(verifyReply("La corona cuesta 1234,500 dinares.", dinars, kw, NOW).ok).toBe(true)
+  // Con dos decimales, 12,505 y 12,500 se leían igual.
+  expect(verifyReply("La limpieza cuesta 12,505 KWD.", dinars, kw, NOW).ok).toBe(false)
+})
+
+it("una palabra corriente no es un código de moneda", () => {
+  expect(check("Si ves 2 manchas, aplica el gel 2 veces al día.").checks).toEqual([])
+  expect(check("Estamos en el top 3 de la ciudad.").checks).toEqual([])
 })
 
 it("la hora de un hueco se reconoce en la zona de la sede", () => {

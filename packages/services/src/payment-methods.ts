@@ -10,15 +10,6 @@ export type PaymentMethodRow = typeof organizationPaymentMethod.$inferSelect
 export const PAYMENT_TYPE_CODES = ["10", "48", "30", "68", "20", "1"] as const
 export type PaymentTypeCode = (typeof PAYMENT_TYPE_CODES)[number]
 
-export const PAYMENT_TYPE_LABELS: Record<string, string> = {
-  "10": "Efectivo",
-  "48": "Tarjeta",
-  "30": "Transferencia",
-  "68": "Billetera digital",
-  "20": "Cheque",
-  "1": "Otro",
-}
-
 /** Solo el efectivo se cuenta al cerrar caja; los demás piden número de operación. */
 export function isCashLike(typeCode: string): boolean {
   return typeCode === "10"

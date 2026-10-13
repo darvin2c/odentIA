@@ -393,7 +393,7 @@ export async function seedAgent(
       createdBy: ownerUserId,
     })
     .onConflictDoNothing({ target: agentTestCase.id })
-  // El asesor encendido: Inicio muestra lo que encuentre en los datos sembrados.
+  // El Administrador encendido: Inicio muestra lo que encuentre en los datos sembrados.
   await updateAdminSettings(tx, orgId, ownerUserId, { enabled: true })
   // El asistente clínico encendido: las atenciones en borrador ofrecen «Dictar la atención».
   await upsertAgentConfig(tx, orgId, { clinicalAssistantEnabled: true }, { actorUserId: ownerUserId })

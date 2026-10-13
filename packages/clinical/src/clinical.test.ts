@@ -5,6 +5,7 @@ import {
   composeDisplayName,
   identityDocumentError,
   normalizePhone,
+  phoneFormatError,
   allergyConflicts,
   formatVitals,
   parseVitals,
@@ -573,7 +574,14 @@ describe("alergias al prescribir", () => {
 
 describe("identidad estándar", () => {
   it("normaliza teléfonos, valida documentos y compone el nombre", () => {
-    expect(normalizePhone("987 654 321")).toBe("+51987654321")
+    // Un número nacional solo se completa con el perfil del país de la clínica.
+    expect(normalizePhone("987 654 321", "PE")).toBe("+51987654321")
+    expect(normalizePhone("51 987-654-321", "pe")).toBe("+51987654321")
+    expect(normalizePhone("987 654 321")).toBeNull()
+    expect(normalizePhone("987 654 321", "CL")).toBeNull()
+    expect(phoneFormatError("PE")).toBe("Ingresa el teléfono con código de país (+51…) o un celular de 9 dígitos")
+    expect(phoneFormatError("CL")).not.toMatch(/\+\d|dígitos/)
+    expect(phoneFormatError()).toBe(phoneFormatError("CL"))
     expect(normalizePhone("+58 412 1234567")).toBe("+584121234567")
     expect(normalizePhone("4567890")).toBeNull()
     expect(normalizePhone("5491122334455")).toBe("+5491122334455")

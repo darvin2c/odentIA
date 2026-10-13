@@ -29,8 +29,9 @@ const ASK_FORM_CHARS = 120
 
 /**
  * Lo que una clínica debería tener respondido antes de dejar al agente
- * atender solo. `auto` se cubre con datos que ya están en el sistema (sedes y
- * servicios); el resto, con una respuesta oficial vigente marcada con su clave.
+ * atender solo. `auto` se cubre con datos que ya están en el sistema (sedes,
+ * servicios y medios de pago); el resto, con una respuesta oficial vigente
+ * marcada con su clave.
  */
 export const KNOWLEDGE_BASICS: ReadonlyArray<{ key: string; question: string; auto?: string }> = [
   { key: "horario", question: "¿Cuál es el horario de atención?" },
@@ -41,10 +42,11 @@ export const KNOWLEDGE_BASICS: ReadonlyArray<{ key: string; question: string; au
   { key: "servicios", question: "¿Qué tratamientos ofrecen?", auto: "Servicios activos" },
   { key: "precios", question: "¿Cuánto cuesta una consulta o un tratamiento?", auto: "Precios de los servicios" },
   { key: "presupuesto", question: "¿Cómo obtengo un presupuesto?" },
-  { key: "medios_pago", question: "¿Qué medios de pago aceptan?" },
+  { key: "medios_pago", question: "¿Qué medios de pago aceptan?", auto: "Medios de pago activos" },
   { key: "cuotas", question: "¿Se puede pagar en cuotas?" },
   { key: "seguros", question: "¿Trabajan con seguros o convenios?" },
-  { key: "comprobante", question: "¿Emiten boleta o factura?" },
+  // Neutral respecto del país: cada uno llama distinto a su comprobante (boleta, factura, recibo…).
+  { key: "comprobante", question: "¿Emiten comprobante de pago?" },
   { key: "sin_cita", question: "¿Atienden sin cita?" },
   { key: "urgencias", question: "¿Atienden urgencias?" },
   { key: "primera_cita", question: "¿Qué necesito llevar a mi primera cita?" },
@@ -709,6 +711,13 @@ export function formatKnowledgeForPrompt(
   } else {
     lines.push("Sin servicios publicados: no des precios, ofrece derivar.")
   }
+  // Los medios activos de caja, en una línea: viajan en cada turno para que
+  // «¿aceptan …?» se responda con el dato del sistema y no con un texto escrito.
+  if (snapshot.paymentMethods.length) {
+    lines.push(
+      `Medios de pago que acepta la clínica (lista completa; ningún otro): ${snapshot.paymentMethods.map((m) => m.name).join(", ")}.`,
+    )
+  }
   const active = entries.filter((entry) => entry.state === "vigente")
   if (active.length) {
     const effective = mode ?? (knowledgeFitsPrompt(active) ? "completo" : "indice")
@@ -760,6 +769,7 @@ export async function getKnowledgeBasics(tx: Db, orgId: string): Promise<Knowled
     telefono: snapshot.branches.some((b) => Boolean(b.phone?.trim())),
     servicios: snapshot.services.length > 0,
     precios: snapshot.services.some((s) => s.priceCents > 0),
+    medios_pago: snapshot.paymentMethods.length > 0,
   }
   const items = KNOWLEDGE_BASICS.map((basic): KnowledgeBasicItem => {
     const entry = active.find((item) => item.basicKey === basic.key)

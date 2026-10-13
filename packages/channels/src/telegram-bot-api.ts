@@ -8,7 +8,6 @@ import type {
 
 export interface TelegramBotConfig {
   botToken: string
-  pollingOffset?: number
 }
 
 function getConfig(config: Record<string, unknown>): TelegramBotConfig {
@@ -16,11 +15,7 @@ function getConfig(config: Record<string, unknown>): TelegramBotConfig {
   if (typeof botToken !== "string" || botToken.length === 0) {
     throw new Error("Telegram: falta botToken en la configuración de la conexión")
   }
-  const pollingOffset = config["pollingOffset"]
-  return {
-    botToken,
-    ...(typeof pollingOffset === "number" ? { pollingOffset } : {}),
-  }
+  return { botToken }
 }
 
 function header(headers: Record<string, string>, name: string): string | undefined {
@@ -259,7 +254,10 @@ export const telegramBotApiAdapter: ChannelAdapter = {
   },
 }
 
-/** Registra el webhook del bot (usar tras crear la conexión). */
+/**
+ * Registra el webhook del bot ante Telegram. Todavía no lo llama nadie: sin este
+ * registro una conexión real no recibe mensajes, así que se conserva para completar la integración.
+ */
 export async function setTelegramWebhook(
   config: Record<string, unknown>,
   url: string,
@@ -273,38 +271,4 @@ export async function setTelegramWebhook(
     { url, secret_token: secret, allowed_updates: ["message", "edited_message"] },
     deps,
   )
-}
-
-/** Polling para desarrollo local (getUpdates con offset). */
-export async function pollTelegramUpdates(
-  config: Record<string, unknown>,
-  deps: ChannelAdapterDeps,
-): Promise<{ updateIds: number[]; nextOffset?: number }> {
-  const cfg = getConfig(config)
-  const params = new URLSearchParams({ timeout: "30" })
-  if (cfg.pollingOffset !== undefined) params.set("offset", String(cfg.pollingOffset))
-  const res = await deps.fetch(`https://api.telegram.org/bot${cfg.botToken}/getUpdates?${params}`)
-  const json: unknown = await res.json().catch(() => null)
-  if (
-    !res.ok ||
-    !json ||
-    typeof json !== "object" ||
-    !("result" in json) ||
-    !Array.isArray(json.result)
-  ) {
-    throw new Error("Telegram getUpdates falló")
-  }
-  const updateIds: number[] = []
-  for (const item of json.result) {
-    if (
-      item &&
-      typeof item === "object" &&
-      "update_id" in item &&
-      typeof item.update_id === "number"
-    ) {
-      updateIds.push(item.update_id)
-    }
-  }
-  const last = updateIds.at(-1)
-  return { updateIds, ...(last !== undefined ? { nextOffset: last + 1 } : {}) }
 }

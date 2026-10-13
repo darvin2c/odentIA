@@ -8,6 +8,7 @@ import {
   KINSHIP,
   MARITAL_STATUSES,
   normalizePhone,
+  phoneFormatError,
   SEX_CODES,
   UBIGEO_RE,
 } from "./identity.js"
@@ -172,7 +173,11 @@ export function isMinor(birthDate: string, today: string): boolean {
 export function documentNumberError(docType: string | null | undefined, docNumber: string | null | undefined): string | null {
   return identityDocumentError(docType, docNumber)
 }
-export function validateDemographics(value: unknown, today?: string): Record<string, string> {
+/**
+ * `countryCode` es el país de la clínica (ISO 3166-1 alfa-2): con él se acepta
+ * un teléfono nacional escrito sin prefijo; sin él, solo con código de país.
+ */
+export function validateDemographics(value: unknown, today?: string, countryCode?: string | null): Record<string, string> {
   const errors: Record<string, string> = {}
   const parsed = demographicsSchema.safeParse(value)
   if (!parsed.success) {
@@ -192,7 +197,7 @@ export function validateDemographics(value: unknown, today?: string): Record<str
   for (const key of ["addressUbigeo", "birthPlaceUbigeo"] as const)
     if (data[key] && !UBIGEO_RE.test(data[key] as string)) errors[key] = "Ubigeo de seis dígitos (INEI)"
   for (const key of ["phone", "emergencyContactPhone"] as const)
-    if (data[key] && !normalizePhone(data[key])) errors[key] = "Ingresa el teléfono con código de país (+51…) o un celular de 9 dígitos"
+    if (data[key] && !normalizePhone(data[key], countryCode)) errors[key] = phoneFormatError(countryCode)
   if ((data.givenNames || data.maternalSurname) && !data.paternalSurname && !data.maternalSurname) errors.paternalSurname = "Indica al menos un apellido"
   if ((data.paternalSurname || data.maternalSurname) && !data.givenNames) errors.givenNames = "Indica los nombres"
   return errors
@@ -220,7 +225,7 @@ export function pendingRegistrationFields(config: RegistrationConfig, answers: R
     return isUnanswered(registrationFieldValue(answers, field))
   }).map(({ key, label }) => ({ key, label }))
 }
-export function validateRegistrationAnswers(config: RegistrationConfig, answers: RegistrationAnswers, context: { mode: "internal" | "public"; today: string; scope?: RegistrationScope }): Record<string, string> {
+export function validateRegistrationAnswers(config: RegistrationConfig, answers: RegistrationAnswers, context: { mode: "internal" | "public"; today: string; scope?: RegistrationScope; countryCode?: string | null }): Record<string, string> {
   const errors: Record<string, string> = {}
   const parsed = registrationAnswersSchema.safeParse(answers)
   if (!parsed.success) {
@@ -228,7 +233,7 @@ export function validateRegistrationAnswers(config: RegistrationConfig, answers:
     return errors
   }
   const data = parsed.data
-  for (const [key, message] of Object.entries(validateDemographics(data.demographics, context.today))) errors[`demographics.${key}`] = message
+  for (const [key, message] of Object.entries(validateDemographics(data.demographics, context.today, context.countryCode))) errors[`demographics.${key}`] = message
   const minor = !!data.demographics.birthDate && isRealDate(data.demographics.birthDate) && isMinor(data.demographics.birthDate, context.today)
   const needsRepresentative = minor || data.respondent === "representative" || (context.mode === "internal" && data.respondent === "staff" && !!data.representative)
   if (needsRepresentative) {

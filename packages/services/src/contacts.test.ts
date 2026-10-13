@@ -1,7 +1,7 @@
 import type { ChannelAdapter, NormalizedInbound } from "@odentia/channels"
 import { type InboundMessageJob, withOrgContext } from "@odentia/db"
 import { contactIdentity, conversation, crmTask, message } from "@odentia/db/schema/crm"
-import { and, eq } from "drizzle-orm"
+import { and, eq, sql } from "drizzle-orm"
 import { expect, it } from "vitest"
 import { createConnection } from "./connections.js"
 import {
@@ -24,7 +24,7 @@ import type { Storage } from "./storage.js"
 import { createOpportunity, getOpportunity, updateOpportunity } from "./opportunities.js"
 import { ensureDefaultPipeline } from "./pipelines.js"
 import { createTask, listTasks } from "./tasks.js"
-import { appDb, setupTestDb } from "./test-setup.js"
+import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
 
 setupTestDb()
 const KEY = secretsKeyFromEnv("dd".repeat(32))
@@ -498,4 +498,32 @@ it("transferencia conserva negocio en origen y desvincula el hilo movido", async
   expect(openFollowUps).toHaveLength(1)
   expect(openFollowUps[0]?.contactId).toBe(from.id)
   expect(openFollowUps[0]?.conversationId).toBeNull()
+})
+
+it("un teléfono nacional se completa con el país de la clínica; en otro país se pide con su código", async () => {
+  const peruvian = await withOrgContext(appDb, "org_a", (tx) =>
+    createContact(tx, "org_a", { displayName: "Celular nacional", phone: "987 111 222" }),
+  )
+  expect(peruvian.phone).toBe("+51987111222")
+  // Otra clínica, en Chile: el mismo texto no es un número peruano y nadie le pone +51.
+  await ownerDb.execute(
+    sql`insert into "organization" ("id", "name", "slug", "created_at") values ('org_cl', 'Clínica Santiago', 'santiago', now()) on conflict do nothing`,
+  )
+  await ownerDb.execute(
+    sql`insert into "org_profile" ("organization_id", "legal_name", "country_code", "currency", "timezone", "locale")
+        values ('org_cl', 'Clínica Santiago', 'CL', 'CLP', 'America/Santiago', 'es-CL') on conflict do nothing`,
+  )
+  const rejected = await withOrgContext(appDb, "org_cl", (tx) =>
+    createContact(tx, "org_cl", { displayName: "Sin prefijo", phone: "987 111 222" }),
+  ).catch((error: unknown) => error)
+  expect(rejected).toMatchObject({ status: 400 })
+  expect((rejected as Error).message).not.toMatch(/\+51|9 dígitos/)
+  const chilean = await withOrgContext(appDb, "org_cl", (tx) =>
+    createContact(tx, "org_cl", { displayName: "Con prefijo", phone: "+56 9 8765 4321" }),
+  )
+  expect(chilean.phone).toBe("+56987654321")
+  const edited = await withOrgContext(appDb, "org_a", (tx) =>
+    updateContact(tx, "org_a", peruvian.id, { phone: "51 999-888-777" }),
+  )
+  expect(edited.phone).toBe("+51999888777")
 })

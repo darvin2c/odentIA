@@ -6,7 +6,7 @@ import {
   treatmentTemplate,
   treatmentTemplateCode,
 } from "@odentia/db/schema/clinical"
-import { and, desc, eq } from "drizzle-orm"
+import { and, eq } from "drizzle-orm"
 import { ServiceError } from "./errors.js"
 
 /**
@@ -59,25 +59,6 @@ export async function currentCatalogRelease(
     )
     .limit(1)
   return release ?? null
-}
-
-/** Codificaciones activas de una plantilla, primaria primero. */
-export async function listTemplateCodings(
-  tx: Db,
-  templateId: string,
-): Promise<ProcedureCodingSnapshot[]> {
-  const rows = await tx
-    .select({
-      system: treatmentTemplateCode.systemKey,
-      code: treatmentTemplateCode.code,
-      version: treatmentTemplateCode.version,
-      display: procedureCode.display,
-    })
-    .from(treatmentTemplateCode)
-    .innerJoin(procedureCode, codingJoin)
-    .where(and(eq(treatmentTemplateCode.templateId, templateId), eq(procedureCode.isActive, true)))
-    .orderBy(desc(treatmentTemplateCode.isPrimary), treatmentTemplateCode.systemKey)
-  return rows
 }
 
 function ambiguousError(codes: string[]): ServiceError {
@@ -148,33 +129,4 @@ export async function resolveServiceCodings(
  */
 export function assertExecutableCodings(codings: ProcedureCodingSnapshot[]): void {
   if (codings.length > 1) throw ambiguousError(codings.map((c) => c.code))
-}
-
-/** Plantilla vigente que proyecta un código externo (búsqueda inversa, p. ej. por CPMS). */
-export async function templatesForCode(
-  tx: Db,
-  systemKey: string,
-  code: string,
-): Promise<
-  Array<{ templateId: string; templateKey: string; templateName: string; isPrimary: boolean }>
-> {
-  return tx
-    .select({
-      templateId: treatmentTemplateCode.templateId,
-      templateKey: treatmentTemplate.key,
-      templateName: treatmentTemplate.name,
-      isPrimary: treatmentTemplateCode.isPrimary,
-    })
-    .from(treatmentTemplateCode)
-    .innerJoin(treatmentTemplate, eq(treatmentTemplateCode.templateId, treatmentTemplate.id))
-    .innerJoin(procedureCode, codingJoin)
-    .where(
-      and(
-        eq(treatmentTemplateCode.systemKey, systemKey),
-        eq(treatmentTemplateCode.code, code),
-        eq(treatmentTemplate.isActive, true),
-        eq(procedureCode.isActive, true),
-      ),
-    )
-    .orderBy(treatmentTemplate.key)
 }

@@ -39,18 +39,6 @@ export function dateInputToIso(date: string): string | null {
   return parsed.toISOString()
 }
 
-/**
- * Convierte un monto escrito ("2500", "2500.50", "2500,50") a centavos enteros.
- * Devuelve null si está vacío o no es un monto no negativo.
- */
-export function parseAmountToCents(raw: string): number | null {
-  const value = raw.trim().replace(",", ".")
-  if (!value) return null
-  const num = Number(value)
-  if (!Number.isFinite(num) || num < 0) return null
-  return Math.round(num * 100)
-}
-
 /** ¿La fecha ya pasó? null/ausente/inválido nunca vence. */
 export function isOverdue(iso: string | null | undefined, now: number = Date.now()): boolean {
   if (!iso) return false

@@ -1,7 +1,6 @@
 import { withOrgContext } from "@odentia/db"
 import {
   createService,
-  fromTemplates,
   getTemplate,
   listMostUsedServices,
   listServices,
@@ -81,12 +80,6 @@ const templateItemShape = {
   billingMode: z.enum(["treatment", "session"]).nullish(),
   durationMin: z.number().int().min(1).max(1440).nullish(),
 }
-
-const fromTemplatesInput = z
-  .object({
-    items: z.array(z.object(templateItemShape).strict()).min(1).max(100),
-  })
-  .strict()
 
 /** «Agregar servicios»: de la biblioteca y propios, guardados en un solo acto. */
 const batchInput = z
@@ -197,23 +190,6 @@ export function createServicesRoute(deps: CrmDeps) {
     } catch (e) {
       return serviceErrorResponse(c, e) ?? Promise.reject(e)
     }
-  })
-
-  app.post("/from-templates", async (c) => {
-    const { orgId, userId, memberRole } = orgContextOf(c)
-    if (!canAccess(memberRole, "settings.write")) {
-      return c.json(
-        errorBody(c, "FORBIDDEN", "No tienes permiso para administrar los servicios"),
-        403,
-      )
-    }
-    const parsed = fromTemplatesInput.safeParse(await c.req.json().catch(() => null))
-    if (!parsed.success) return validationError(c, parsed.error.issues)
-    return runService(c, 201, () =>
-      withOrgContext(deps.db, orgId, (tx) =>
-        fromTemplates(tx, orgId, userId, parsed.data.items),
-      ),
-    )
   })
 
   app.post("/batch", async (c) => {

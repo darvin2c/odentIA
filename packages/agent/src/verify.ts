@@ -34,14 +34,115 @@ export const SOURCE_SUM = "Suma de importes consultados"
 /** El día de la semana se comprueba con el calendario, no con una fuente. */
 export const SOURCE_CALENDAR = "Calendario"
 
-const NUMBER = String.raw`\d{1,3}(?:[.,]\d{3})+(?:[.,]\d{1,2})?|\d+(?:[.,]\d{1,2})?`
-const CURRENCY_BEFORE = String.raw`(?:S\/\.?|US\$|U\$S|\$|€|Bs\.?|PEN|USD|EUR|MXN|COP|CLP|ARS|BOB)`
-const CURRENCY_AFTER = String.raw`(?:nuevos soles|soles|sol|d[oó]lares|d[oó]lar|pesos|peso|euros|euro|bolivianos|PEN|USD|EUR|MXN|COP|CLP|ARS|BOB)`
-const AMOUNT = new RegExp(
-  String.raw`(?<![A-Za-zÁÉÍÓÚÑáéíóúñ])${CURRENCY_BEFORE}\s?(${NUMBER})(?![\d])|(?<![\d.,/:])(${NUMBER})\s?${CURRENCY_AFTER}(?![a-záéíóúñ])`,
-  "gi",
-)
+/**
+ * Decimales que se conservan al leer un número: tres, la unidad menor más
+ * pequeña de las monedas ISO 4217 de uso corriente (KWD, BHD, TND). Con dos no
+ * se distinguía un importe en dinares de otro parecido.
+ */
+const READ_DIGITS = 3
+const NUMBER = String.raw`\d{1,3}(?:[.,]\d{3})+(?:[.,]\d{1,2})?|\d+(?:[.,]\d{1,${READ_DIGITS}})?`
 const ANY_NUMBER = new RegExp(String.raw`(?<![\d])(?:${NUMBER})(?![\d])`, "g")
+
+/**
+ * Cómo se reconoce que un número es dinero. No hay una lista de monedas
+ * escrita a mano: los códigos son los ISO 4217 que conoce ICU, los signos son
+ * los monetarios de Unicode y lo propio de un país (su símbolo, el nombre de
+ * su moneda) sale de la moneda de la clínica (`clinicMarks`).
+ */
+const ISO_CODES = Intl.supportedValuesOf("currency")
+  .filter((code) => /^[A-Z]{3}$/.test(code))
+  .join("|")
+/** $, €, ₡, ₲… con las letras que los acompañan al escribirlos (US$, R$, RD$, U$S, $U). */
+const SIGN_BEFORE = String.raw`[A-Za-z]{0,3}\p{Sc}[A-Za-z]?`
+const SIGN_AFTER = String.raw`\p{Sc}`
+
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")
+}
+
+/**
+ * Patrón que acepta el texto con o sin mayúsculas y tildes, letra a letra. El
+ * patrón completo no lleva `i`: un código ISO solo vale en mayúsculas («gel 2»
+ * o «si ves 2» no son lari ni bolívares).
+ */
+function loose(text: string): string {
+  return [...text]
+    .map((char) => {
+      const bare = char.normalize("NFD").replace(/[̀-ͯ]/g, "") || char
+      const forms = new Set([char.toLowerCase(), char.toUpperCase(), bare.toLowerCase(), bare.toUpperCase()])
+      return forms.size === 1 ? escapeRegExp(char) : `[${[...forms].map(escapeRegExp).join("")}]`
+    })
+    .join("")
+}
+
+/** Nombres que comparten las monedas de muchos países; el de la moneda de la clínica lo da ICU. */
+const SHARED_NAMES = ["dólares", "dólar", "pesos", "peso", "euros", "euro"].map(loose).join("|")
+
+/**
+ * Cómo escribe ICU la moneda de la clínica: su símbolo en el formato de la
+ * clínica (S/, Q, Bs, RD$…), a qué lado del número va, y su nombre en español
+ * (soles, quetzales, bolivianos…), que es el idioma de las respuestas.
+ */
+function clinicMarks(currency: string | null | undefined, locale: string | null | undefined) {
+  const before = new Set<string>()
+  const symbolAfter = new Set<string>()
+  const names = new Set<string>()
+  const code = currency?.trim().toUpperCase() ?? ""
+  // Moneda o formato que ICU no reconoce: quedan los códigos, los signos y los nombres compartidos.
+  const partsOf = (format: string, currencyDisplay: "symbol" | "narrowSymbol" | "name", count: number) => {
+    try {
+      return new Intl.NumberFormat(format, { style: "currency", currency: code, currencyDisplay }).formatToParts(count)
+    } catch {
+      return []
+    }
+  }
+  // «XXX» es el código ISO de «sin moneda»: no tiene símbolo ni nombre que buscar.
+  if (!/^[A-Z]{3}$/.test(code) || code === "XXX" || !partsOf("es", "name", 1).length) {
+    return { before, symbolAfter, names }
+  }
+  // Su propio código vale también en minúsculas («150 pen»).
+  before.add(loose(code))
+  names.add(loose(code))
+  for (const currencyDisplay of ["symbol", "narrowSymbol"] as const) {
+    const parts = partsOf(locale?.trim() || "es", currencyDisplay, 1)
+    const at = parts.findIndex((part) => part.type === "currency")
+    // Una abreviatura vale con o sin su punto final: «S/» y «S/.», «Bs» y «Bs.».
+    const symbol = parts[at]?.value.trim().replace(/\.$/, "")
+    if (!symbol) continue
+    const pattern = `${loose(symbol)}\\.?`
+    before.add(pattern)
+    if (at > parts.findIndex((part) => part.type === "integer")) symbolAfter.add(pattern)
+  }
+  for (const count of [2, 1]) {
+    const name = partsOf("es", "name", count).find((part) => part.type === "currency")?.value
+    // «soles peruanos» → «soles»; «nuevo dólar taiwanés» → «dólar».
+    const word = name?.split(/\s+/).find((part) => part && !/^nuev[oa]s?$/i.test(part))
+    if (word) names.add(loose(word))
+  }
+  return { before, symbolAfter, names }
+}
+
+const AMOUNT_PATTERNS = new Map<string, RegExp>()
+
+/** Un importe con su moneda, delante o detrás del número, para la moneda y el formato de la clínica. */
+function amountPattern(currency: string | null | undefined, locale: string | null | undefined): RegExp {
+  const key = `${currency ?? ""}|${locale ?? ""}`
+  const cached = AMOUNT_PATTERNS.get(key)
+  if (cached) return cached
+  const clinic = clinicMarks(currency, locale)
+  const before = [SIGN_BEFORE, ISO_CODES, ...clinic.before].join("|")
+  // Un símbolo seguido de otro número pertenece a ese número («150 $480»).
+  const symbolAfter = `(?:${[SIGN_AFTER, ...clinic.symbolAfter].join("|")})(?!\\s?\\d)`
+  // «480 nuevos soles», «100 nuevos pesos»: el adjetivo no cambia de qué se habla.
+  const names = `(?:${loose("nuev")}[oOaA][sS]?\\s)?(?:${[SHARED_NAMES, ...clinic.names].join("|")})`
+  const after = [symbolAfter, ISO_CODES, names].join("|")
+  const pattern = new RegExp(
+    String.raw`(?<!\p{L})(?:${before})\s?(${NUMBER})(?![\d])|(?<![\d.,/:])(${NUMBER})\s?(?:${after})(?!\p{L})`,
+    "gu",
+  )
+  AMOUNT_PATTERNS.set(key, pattern)
+  return pattern
+}
 const ISO_INSTANT = /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})/g
 const ZONE_NAME = /\b(?:Africa|America|Antarctica|Asia|Atlantic|Australia|Europe|Indian|Pacific)\/[A-Za-z_]+(?:\/[A-Za-z_]+)?\b/g
 
@@ -85,26 +186,34 @@ function plain(word: string): string {
   return word.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
 }
 
+/** Parte entera y fracción escritas, como entero exacto a `READ_DIGITS` decimales (sin coma flotante). */
+function fixed(whole: string, fraction = ""): number {
+  return Number(`${whole}${fraction.padEnd(READ_DIGITS, "0").slice(0, READ_DIGITS)}`)
+}
+
 /**
- * Interpretaciones en céntimos de un número escrito. Un único separador con
- * tres cifras detrás («1.200») es ambiguo entre miles y decimales: se
- * devuelven ambas lecturas para no rechazar por formato.
+ * Lecturas de un número escrito, como entero a `READ_DIGITS` decimales. No es
+ * la unidad menor de ninguna moneda: la respuesta y las fuentes se leen igual
+ * y solo se comparan entre sí, así que no se asume cuántos decimales tiene
+ * cada importe. Un único separador con tres cifras detrás («1.200») es ambiguo
+ * entre miles y decimales: se devuelven ambas lecturas para no rechazar por
+ * formato.
  */
-function parseCents(raw: string): number[] {
+function readAmount(raw: string): number[] {
   const text = raw.replace(/\s/g, "")
   const separators = text.replace(/\d/g, "")
-  if (!separators) return [Number(text) * 100]
+  if (!separators) return [fixed(text)]
   const kinds = new Set(separators)
   if (kinds.size === 2) {
-    const decimal = text[Math.max(text.lastIndexOf("."), text.lastIndexOf(","))]
-    const thousands = decimal === "." ? "," : "."
-    return [Math.round(Number(text.split(thousands).join("").replace(decimal ?? ".", ".")) * 100)]
+    // Con dos separadores distintos, el último es el decimal.
+    const at = Math.max(text.lastIndexOf("."), text.lastIndexOf(","))
+    return [fixed(text.slice(0, at).replace(/[.,]/g, ""), text.slice(at + 1))]
   }
   const separator = separators[0] ?? "."
-  if (separators.length > 1) return [Number(text.split(separator).join("")) * 100]
+  if (separators.length > 1) return [fixed(text.split(separator).join(""))]
   const [whole = "", fraction = ""] = text.split(separator)
-  const asDecimal = Math.round(Number(`${whole}.${fraction}`) * 100)
-  if (fraction.length === 3) return [Number(`${whole}${fraction}`) * 100, asDecimal]
+  const asDecimal = fixed(whole, fraction)
+  if (fraction.length === 3) return [fixed(`${whole}${fraction}`), asDecimal]
   return [asDecimal]
 }
 
@@ -118,13 +227,13 @@ function blank(text: string, start: number, length: number): string {
 }
 
 /** Importes con moneda explícita; devuelve también el texto con ellos tapados. */
-function extractAmounts(text: string): { mentions: Mention<number[]>[]; rest: string } {
+function extractAmounts(text: string, pattern: RegExp): { mentions: Mention<number[]>[]; rest: string } {
   const mentions: Mention<number[]>[] = []
   let rest = text
-  for (const match of text.matchAll(AMOUNT)) {
+  for (const match of text.matchAll(pattern)) {
     const number = match[1] ?? match[2]
     if (!number) continue
-    mentions.push({ raw: match[0].trim(), value: parseCents(number) })
+    mentions.push({ raw: match[0].trim(), value: readAmount(number) })
     rest = blank(rest, match.index, match[0].length)
   }
   return { mentions, rest }
@@ -283,7 +392,7 @@ function factsOf(item: Evidence, timeZone: string): SourceFacts {
     }
   }
   for (const mention of extractTimes(rest).mentions) for (const value of mention.value) times.add(value)
-  for (const match of rest.matchAll(ANY_NUMBER)) for (const cents of parseCents(match[0])) amounts.add(cents)
+  for (const match of rest.matchAll(ANY_NUMBER)) for (const reading of readAmount(match[0])) amounts.add(reading)
   return { source: item.source, amounts, times, dates }
 }
 
@@ -315,32 +424,35 @@ function weekdayOf(day: number, month: number, year: number | null, now: Date): 
 /**
  * Comprueba la respuesta contra las fuentes del turno. Un dato cuenta como
  * sustentado si figura en alguna fuente; un importe, además, si es la suma de
- * otros importes sustentados de la misma respuesta.
+ * otros importes sustentados de la misma respuesta. Con la moneda y el formato
+ * de la clínica (`zone.currency`, `zone.locale`) se reconocen también su
+ * símbolo y su nombre; sin ellos, solo códigos ISO, signos monetarios y los
+ * nombres compartidos.
  */
 export function verifyReply(
   reply: string,
   evidence: Evidence[],
-  zone: { timezone: string },
+  zone: { timezone: string; currency?: string | null; locale?: string | null },
   now: Date = new Date(),
 ): ReplyVerdict {
   const sources = evidence.filter((item) => item.text.trim()).map((item) => factsOf(item, zone.timezone))
   const checks: FactCheck[] = []
   const text = normalize(reply)
 
-  const amounts = extractAmounts(text)
+  const amounts = extractAmounts(text, amountPattern(zone.currency, zone.locale))
   const supportedAmounts: number[] = []
   const pendingAmounts: Mention<number[]>[] = []
   for (const mention of amounts.mentions) {
-    const found = sources.find((source) => mention.value.some((cents) => source.amounts.has(cents)))
+    const found = sources.find((source) => mention.value.some((reading) => source.amounts.has(reading)))
     if (found) {
-      supportedAmounts.push(mention.value.find((cents) => found.amounts.has(cents)) ?? 0)
+      supportedAmounts.push(mention.value.find((reading) => found.amounts.has(reading)) ?? 0)
       checks.push({ kind: "precio", value: mention.raw, ok: true, source: found.source })
     } else {
       pendingAmounts.push(mention)
     }
   }
   for (const mention of pendingAmounts) {
-    const summed = mention.value.some((cents) => isSumOf(cents, supportedAmounts))
+    const summed = mention.value.some((reading) => isSumOf(reading, supportedAmounts))
     checks.push({ kind: "precio", value: mention.raw, ok: summed, source: summed ? SOURCE_SUM : null })
   }
 

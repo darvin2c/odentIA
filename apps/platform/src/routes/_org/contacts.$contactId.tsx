@@ -99,6 +99,7 @@ function ContactDetailPage() {
   const profile = useOrgProfile()
   const countryCode = normalizeCountry(profile.data?.countryCode)
   const canWrite = usePermission("crm.write")
+  const canConfigure = usePermission("settings.read")
   const { contactId } = Route.useParams()
   const [editOpen, setEditOpen] = useState(false)
   const [draftName, setDraftName] = useState("")
@@ -751,7 +752,13 @@ function ContactDetailPage() {
           </div>
           {fieldDefs.length === 0 ? (
             <p className="text-sm text-muted-foreground">
-              Sin campos definidos (Configuración → Campos).
+              Sin campos definidos.{" "}
+              {/* El enlace solo para quien puede abrir Configuración: a los demás los devolvería a Inicio. */}
+              {canConfigure ? (
+                <Link to="/settings/fields" className="font-semibold text-primary hover:underline">
+                  Definir campos
+                </Link>
+              ) : null}
             </p>
           ) : (
             <dl className="flex flex-col gap-2 text-sm">

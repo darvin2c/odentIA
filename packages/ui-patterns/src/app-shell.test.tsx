@@ -66,6 +66,26 @@ describe("AppShell userMenu", () => {
     await waitFor(() => expect(screen.queryByRole("menuitem", { name: "Mi perfil" })).toBeNull())
   })
 
+  it("un ítem con href sale como enlace normal, sin pasar por el router", async () => {
+    render(
+      <AppShell
+        items={[]}
+        LinkComponent={AnchorLink}
+        pathname="/"
+        user={{ name: "Ada" }}
+        userMenuItems={[{ label: "Mi perfil", icon: UserRound, href: "https://app.example.test/profile" }]}
+        onSignOut={() => {}}
+        brand={<Brand />}
+      >
+        <p>contenido</p>
+      </AppShell>,
+    )
+    fireEvent.click(screen.getByRole("button", { name: /Ada/ }))
+    const profile = await screen.findByRole("menuitem", { name: "Mi perfil" })
+    expect(profile.tagName).toBe("A")
+    expect(profile.getAttribute("href")).toBe("https://app.example.test/profile")
+  })
+
   it("click en Cerrar sesión llama onSignOut una vez", async () => {
     const onSignOut = vi.fn()
     shellWithMenu(onSignOut)

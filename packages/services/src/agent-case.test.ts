@@ -10,11 +10,9 @@ import {
   CASE_NOTE_LIMIT,
   formatAgentCaseForPrompt,
   getAgentCaseState,
-  getAnswerTraceForMessage,
   listAnswerTraces,
   recordAgentCaseLookup,
   recordAnswerTrace,
-  removeAgentCaseNote,
 } from "./agent-case.js"
 import { createProposal, decideProposal, getAgentRunStats, recordAgentRun, updateAutonomyPolicy } from "./agent-operations.js"
 import { createConnection } from "./connections.js"
@@ -114,7 +112,7 @@ it("el estado separa lo que espera al interlocutor de lo que decide el equipo y 
   await run((tx) => updateAutonomyPolicy(tx, ORG, OWNER, { enviar_mensaje: "directo" }))
 })
 
-it("las notas del caso son acotadas, no se repiten y una persona puede retirarlas", async () => {
+it("las notas del caso son acotadas y no se repiten", async () => {
   const conversationId = await openConversation("notas")
   await run((tx) => addAgentCaseNote(tx, ORG, conversationId, "  La cita es para su hija   Ana.  "))
   await run((tx) => addAgentCaseNote(tx, ORG, conversationId, "La cita es para su hija Ana."))
@@ -129,11 +127,6 @@ it("las notas del caso son acotadas, no se repiten y una persona puede retirarla
   expect(state.notes).toHaveLength(CASE_NOTE_LIMIT)
   expect(state.notes[0]?.text).toBe("Nota 3")
   expect(formatAgentCaseForPrompt(state, ZONE, 20)).toContain("Notas del caso")
-
-  const removed = state.notes[0]!
-  const left = await run((tx) => removeAgentCaseNote(tx, ORG, conversationId, removed.at))
-  expect(left.map((note) => note.text)).not.toContain("Nota 3")
-  expect(left).toHaveLength(CASE_NOTE_LIMIT - 1)
 })
 
 it("solo se conserva la última consulta de las herramientas previstas, recortada y con caducidad", async () => {
@@ -182,10 +175,10 @@ it("la traza de una respuesta se encuentra por su mensaje, directo o a través d
     checks: [{ kind: "precio", value: "S/ 150", ok: true, source: "Sedes, servicios y precios" }],
     model: "fake",
   }))
-  const found = await run((tx) => getAnswerTraceForMessage(tx, ORG, messageId))
-  expect(found).toMatchObject({ id: traceId, messageId, basis: [{ kind: "servicios", label: "Sedes, servicios y precios" }] })
   const listed = await run((tx) => listAnswerTraces(tx, ORG, conversationId))
-  expect(listed.map((trace) => trace.messageId)).toEqual([messageId])
+  expect(listed).toMatchObject([
+    { id: traceId, messageId, basis: [{ kind: "servicios", label: "Sedes, servicios y precios" }] },
+  ])
 
   // Una respuesta bloqueada no tiene mensaje y aun así queda registrada.
   await run((tx) => recordAnswerTrace(tx, ORG, {

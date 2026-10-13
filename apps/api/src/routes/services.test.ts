@@ -236,10 +236,12 @@ it("services: oferta desde plantilla hereda especialidad y ámbito", async () =>
 it("services: incorporar otra vez una plantilla conserva su tarifa configurada", async () => {
   const app = buildApp("owner")
   const tpl = await templateIdByKey(RESTAURADORA_KEY)
-  const first = await app.request("/services/from-templates", {
+  const first = await app.request("/services/batch", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ items: [{ templateId: tpl, priceCents: 12000, billingMode: "treatment" }] }),
+    body: JSON.stringify({
+      items: [{ kind: "template", templateId: tpl, priceCents: 12000, billingMode: "treatment" }],
+    }),
   })
   expect(first.status).toBe(201)
   const firstBody = (await first.json()) as {
@@ -255,10 +257,12 @@ it("services: incorporar otra vez una plantilla conserva su tarifa configurada",
   })
   expect(withPrice.status).toBe(200)
 
-  const second = await app.request("/services/from-templates", {
+  const second = await app.request("/services/batch", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ items: [{ templateId: tpl, priceCents: 9000, billingMode: "treatment" }] }),
+    body: JSON.stringify({
+      items: [{ kind: "template", templateId: tpl, priceCents: 9000, billingMode: "treatment" }],
+    }),
   })
   expect(second.status).toBe(201)
   const secondBody = (await second.json()) as {
@@ -530,11 +534,13 @@ it("services: sin región configurada no se pone precio a un servicio", async ()
   expect(((await created.json()) as { error: { code: string } }).error.code).toBe(
     "ORG_PROFILE_REQUIRED",
   )
-  const fromLibrary = await app.request("/services/from-templates", {
+  const fromLibrary = await app.request("/services/batch", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
-      items: [{ templateId: await templateIdByKey(PREVENCION_KEY), priceCents: 5000 }],
+      items: [
+        { kind: "template", templateId: await templateIdByKey(PREVENCION_KEY), priceCents: 5000 },
+      ],
     }),
   })
   expect(fromLibrary.status).toBe(409)

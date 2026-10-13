@@ -816,7 +816,7 @@ async function waitForApps(state: RunState, targets: ReadinessTargets): Promise<
   }
 }
 
-/** Sin endpoint nuevo de producción: tarea demo real y espera de `demo_task.done` hasta 15 s. */
+/** Sin endpoint de producción: encola la tarea de comprobación del worker y espera su `demo_task.done` hasta 15 s. */
 async function waitForWorker(state: RunState, env: Record<string, string>): Promise<string> {
   const ownerUrl = env["DATABASE_URL"]
   if (!ownerUrl) throw new Error("Falta DATABASE_URL en el entorno generado.")

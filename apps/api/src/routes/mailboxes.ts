@@ -65,13 +65,7 @@ export function createMailboxesRoute(deps: MailboxesDeps) {
   authed.use("*", requireSession({ auth: deps.auth }))
   authed.use("*", requireOrgContext({ db: deps.db }))
 
-  // Metadatos de proveedores (configurado o no, sin secretos): recepción lee.
-  authed.get("/providers", async (c) => {
-    const denied = forbid(c, "conversations.read")
-    if (denied) return denied
-    return runService(c, 200, async () => mailboxProviderStatus(deps.mailbox))
-  })
-
+  // Conexiones y metadatos de proveedores (configurado o no, sin secretos): recepción lee.
   authed.get("/connections", async (c) => {
     const denied = forbid(c, "conversations.read")
     if (denied) return denied

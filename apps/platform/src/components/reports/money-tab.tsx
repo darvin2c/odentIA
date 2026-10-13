@@ -136,6 +136,8 @@ function CurrencyMoney({
   const canFinance = usePermission("finance.read")
   const canExpense = usePermission("finance.write")
   const canCatalog = usePermission("catalog.read")
+  // Los enlaces a Finanzas llevan la sede del reporte: sin ella la lista de allá no corresponde a la cifra de aquí.
+  const branchSearch = data.branch ? { branch: data.branch.id } : {}
   const [categoriesOpen, setCategoriesOpen] = useState(false)
   const [moreOpen, setMoreOpen] = useState(false)
 
@@ -170,7 +172,7 @@ function CurrencyMoney({
         <EmptyLine
           action={
             canFinance ? (
-              <Link to="/finance" className="font-semibold text-primary underline">
+              <Link to="/finance" search={branchSearch} className="font-semibold text-primary underline">
                 Ir a Finanzas
               </Link>
             ) : undefined
@@ -205,7 +207,7 @@ function CurrencyMoney({
         <EmptyLine
           action={
             canExpense ? (
-              <Link to="/finance" search={{ tab: "gastos" }} className="font-semibold text-primary underline">
+              <Link to="/finance" search={{ tab: "gastos", ...branchSearch }} className="font-semibold text-primary underline">
                 Registrar un gasto
               </Link>
             ) : undefined
@@ -263,7 +265,7 @@ function CurrencyMoney({
       }
     >
       {outstanding && canFinance ? (
-        <Link to="/finance" search={{ tab: "deudas" }} className="self-start text-sm font-semibold text-warning underline">
+        <Link to="/finance" search={{ tab: "deudas", ...branchSearch }} className="self-start text-sm font-semibold text-warning underline">
           Ver quién debe
         </Link>
       ) : null}

@@ -166,22 +166,56 @@ export function splitSurnames(raw: string | null | undefined): {
 }
 
 /**
- * Normaliza un teléfono a E.164 (+código de país y número). Un número
- * peruano sin prefijo se reconoce: celular de 9 dígitos que empieza por 9.
- * Devuelve null si no puede asegurar el formato; nunca inventa un país.
+ * Perfil de país del teléfono: cómo se reconoce un número nacional escrito
+ * sin código de país. Solo figuran los países cuyo formato se ha comprobado;
+ * en los demás el número se pide con su código de país (el campo de teléfono
+ * de la interfaz ya lo entrega en E.164 para cualquier país).
  */
-export function normalizePhone(raw: string | null | undefined): string | null {
+const NATIONAL_PHONE: Record<string, { callingCode: string; national: RegExp; hint: string }> = {
+  // Perú: celular de 9 dígitos que empieza por 9.
+  PE: { callingCode: "51", national: /^9\d{8}$/, hint: "un celular de 9 dígitos" },
+}
+
+function nationalPhone(countryCode: string | null | undefined) {
+  return countryCode ? NATIONAL_PHONE[countryCode.trim().toUpperCase()] : undefined
+}
+
+/**
+ * Normaliza un teléfono a E.164 (+código de país y número). Un número
+ * nacional sin prefijo solo se completa con el perfil del país de la clínica
+ * (`countryCode`, ISO 3166-1 alfa-2); sin país, o si el país no tiene perfil,
+ * se exige el código de país. Devuelve null si no puede asegurar el formato;
+ * nunca inventa un país.
+ */
+export function normalizePhone(raw: string | null | undefined, countryCode?: string | null): string | null {
   const value = raw?.trim()
   if (!value) return null
   const digits = value.replace(/[^\d]/g, "")
   if (value.startsWith("+")) return digits.length >= 8 && digits.length <= 15 ? `+${digits}` : null
   if (value.startsWith("00") && digits.length > 10) return `+${digits.slice(2)}`
-  if (/^9\d{8}$/.test(digits)) return `+51${digits}`
-  if (/^51\d{9}$/.test(digits)) return `+${digits}`
+  const profile = nationalPhone(countryCode)
+  if (profile) {
+    if (profile.national.test(digits)) return `+${profile.callingCode}${digits}`
+    if (digits.startsWith(profile.callingCode) && profile.national.test(digits.slice(profile.callingCode.length))) {
+      return `+${digits}`
+    }
+  }
   // Solo dígitos y largo internacional (p. ej. el identificador de WhatsApp):
   // ya trae el código de país, solo falta el «+».
   if (/^[1-9]\d{9,14}$/.test(digits) && digits === value.replace(/\s+/g, "")) return `+${digits}`
   return null
+}
+
+/**
+ * Qué decir cuando un teléfono no se puede llevar a E.164. Con el país de la
+ * clínica se nombra su prefijo y su formato nacional; sin él, el texto no
+ * menciona ningún país.
+ */
+export function phoneFormatError(countryCode?: string | null): string {
+  const profile = nationalPhone(countryCode)
+  return profile
+    ? `Ingresa el teléfono con código de país (+${profile.callingCode}…) o ${profile.hint}`
+    : "Ingresa el teléfono con su código de país, empezando por «+»"
 }
 
 /** Edad legible: en meses antes de los dos años, en años después. */

@@ -1,6 +1,6 @@
 import type { PlatformDecisions, PlatformLlm } from "@odentia/agent"
 import type { Auth } from "@odentia/auth"
-import { type Db, sendDemoTask, withOrgContext } from "@odentia/db"
+import { type Db, withOrgContext } from "@odentia/db"
 import { message } from "@odentia/db/schema/crm"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import { initialOrgRegion, type MailboxEnv, regionPresetForCountry, type Storage, updateOrgRegion } from "@odentia/services"
@@ -116,10 +116,6 @@ const orgProfileInput = z.object({
   applyCountryPreset: z.boolean().optional(),
 })
 
-const demoTaskInput = z.object({
-  message: z.string().min(1).max(200),
-})
-
 interface NotifyPayload {
   orgId: string
   kind: string
@@ -141,9 +137,6 @@ async function toReplayPayload(
   event: AuditRow,
 ): Promise<NotifyPayload | null> {
   const at = event.createdAt.toISOString()
-  if (event.action === "demo_task.done") {
-    return { orgId, kind: "demo_task.done", taskId: event.entityId ?? "", at }
-  }
   if (event.action === "message.created" || event.action === "message.updated") {
     if (!event.entityId) return null
     const found = await withOrgContext(db, orgId, (tx) =>
@@ -487,19 +480,6 @@ export function createApp(deps: AppDeps) {
     return c.json({ data: row })
   })
 
-  guarded.post("/demo/tasks", async (c) => {
-    const { orgId, userId } = orgContextOf(c)
-    const parsed = demoTaskInput.safeParse(await c.req.json().catch(() => null))
-    if (!parsed.success) return validationError(c, parsed.error.issues)
-    const taskId = await sendDemoTask(db, {
-      orgId,
-      userId,
-      message: parsed.data.message,
-      requestedAt: new Date().toISOString(),
-    })
-    return c.json({ taskId }, 202)
-  })
-
   guarded.get("/notifications/stream", async (c) => {
     const { orgId } = orgContextOf(c)
     const lastEventId = c.req.header("last-event-id")
@@ -515,7 +495,6 @@ export function createApp(deps: AppDeps) {
               and(
                 eq(auditEvent.organizationId, orgId),
                 inArray(auditEvent.action, [
-                  "demo_task.done",
                   "message.created",
                   "message.updated",
                   "conversation.updated",

@@ -16,15 +16,6 @@ export const PATIENT_AVATAR_MIME_EXT: Record<string, string> = {
   "image/webp": "webp",
 }
 
-/** Formatos de documento clínico (detectados por contenido, @odentia/clinical). */
-export const PATIENT_DOC_MIME_EXT: Record<string, string> = {
-  "image/jpeg": "jpg",
-  "image/png": "png",
-  "image/webp": "webp",
-  "application/pdf": "pdf",
-  "application/dicom": "dcm",
-}
-
 export interface StorageEnv {
   endpoint: string
   region: string

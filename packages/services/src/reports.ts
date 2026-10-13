@@ -412,7 +412,7 @@ export async function getReportOverview(tx: Db, orgId: string, query: ReportQuer
   }
 }
 
-// --- El asesor junto a la cifra -------------------------------------------------------------
+// --- El Administrador junto a la cifra ------------------------------------------------------
 
 /** La inasistencia merece aviso si llega a este porcentaje… */
 export const NO_SHOW_ALERT_RATE = 10

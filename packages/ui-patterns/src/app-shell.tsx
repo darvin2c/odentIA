@@ -62,12 +62,14 @@ export type AppShellNavEntry = AppShellNavItem | AppShellNavGroup
 
 export type AppShellUser = { name: string; email?: string; avatarUrl?: string }
 
-export type AppShellUserMenuItem = {
-  label: string
-  icon: NavIcon
-  to: string
-  search?: Record<string, string>
-}
+/**
+ * Ítem del menú de usuario. `to` navega dentro de la app con el link del router;
+ * `href` lleva a otra aplicación (otro origen) con un enlace normal.
+ */
+export type AppShellUserMenuItem = { label: string; icon: NavIcon } & (
+  | { to: string; search?: Record<string, string>; href?: undefined }
+  | { href: string; to?: undefined; search?: undefined }
+)
 
 /**
  * Contrato del link que aporta el router (TanStack `Link` en panel/platform).
@@ -419,6 +421,13 @@ export function AppShell(props: AppShellProps): React.JSX.Element {
           key={item.label}
           render={(menuProps) => {
             const { onClick, ...rest } = menuProps
+            if (item.href !== undefined) {
+              return (
+                <a href={item.href} {...rest} onClick={onClick}>
+                  {menuProps.children}
+                </a>
+              )
+            }
             return (
               <LinkComponent to={item.to} search={item.search} {...rest} onClick={onClick}>
                 {menuProps.children}

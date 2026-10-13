@@ -102,6 +102,7 @@ export function PatientContactSection({ detail }: { detail: PatientFull }) {
   const canWrite = usePermission("patients.write")
   const canChat = usePermission("conversations.write")
   const canReadChats = usePermission("conversations.read")
+  const canOpenContact = usePermission("crm.read")
   const navigate = useNavigate()
   const patientId = detail.patient.id
   const invalidate = useInvalidatePatient(patientId)
@@ -210,40 +211,48 @@ export function PatientContactSection({ detail }: { detail: PatientFull }) {
                         : " · Sin medios registrados"}
                     </p>
                   </div>
-                  <RowActions
-                    label={`Acciones del contacto ${link.displayName}`}
-                    items={[
-                      {
-                        key: "open",
-                        label: "Abrir contacto",
-                        onSelect: () =>
-                          void navigate({
-                            to: "/contacts/$contactId",
-                            params: { contactId: link.contactId },
-                          }),
-                      },
-                      // La propia persona es la identidad de la ficha: no se
-                      // desvincula ni cambia de relación.
-                      ...(canWrite && link.relationship !== "self"
-                        ? [
-                            {
-                              key: "edit",
-                              label: "Editar relación",
-                              onSelect: () => setEditing(link),
-                            },
-                            {
-                              key: "unlink",
-                              label: "Desvincular",
-                              tone: "danger" as const,
-                              onSelect: () => {
-                                setUnlinkError(null)
-                                setUnlinking(link)
+                  {/* Sin ninguna acción permitida no se dibuja un menú vacío. */}
+                  {canOpenContact || (canWrite && link.relationship !== "self") ? (
+                    <RowActions
+                      label={`Acciones del contacto ${link.displayName}`}
+                      items={[
+                        // La ficha de contacto es del CRM: quien no lo lee no recibe un enlace que rebota.
+                        ...(canOpenContact
+                          ? [
+                              {
+                                key: "open",
+                                label: "Abrir contacto",
+                                onSelect: () =>
+                                  void navigate({
+                                    to: "/contacts/$contactId",
+                                    params: { contactId: link.contactId },
+                                  }),
                               },
-                            },
-                          ]
-                        : []),
-                    ]}
-                  />
+                            ]
+                          : []),
+                        // La propia persona es la identidad de la ficha: no se
+                        // desvincula ni cambia de relación.
+                        ...(canWrite && link.relationship !== "self"
+                          ? [
+                              {
+                                key: "edit",
+                                label: "Editar relación",
+                                onSelect: () => setEditing(link),
+                              },
+                              {
+                                key: "unlink",
+                                label: "Desvincular",
+                                tone: "danger" as const,
+                                onSelect: () => {
+                                  setUnlinkError(null)
+                                  setUnlinking(link)
+                                },
+                              },
+                            ]
+                          : []),
+                      ]}
+                    />
+                  ) : null}
                 </li>
               ))}
             </ul>

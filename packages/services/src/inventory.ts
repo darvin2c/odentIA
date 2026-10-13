@@ -230,10 +230,20 @@ export interface SupplierInput {
   address?: string | null
 }
 
+/**
+ * El tipo de documento tributario es el del país del proveedor: lo escribe
+ * quien registra y aquí no se asume ninguno. Un número sin su tipo no se
+ * guarda, porque el tipo es parte de lo que lo hace único.
+ */
+function assertSupplierDocument(docType: string | null, docNumber: string | null): void {
+  if (docNumber && !docType) throw validation("Indica el tipo de documento del proveedor junto con su número")
+}
+
 export async function createSupplier(tx: Db, orgId: string, actorUserId: string, input: SupplierInput) {
   const name = textRequired(input.name, "El nombre del proveedor")
   const docNumber = textOptional(input.docNumber, "El documento", 50)
-  const docType = docNumber ? textRequired(input.docType ?? "RUC", "El tipo de documento", 20) : textOptional(input.docType, "El tipo de documento", 20)
+  const docType = textOptional(input.docType, "El tipo de documento", 20)
+  assertSupplierDocument(docType, docNumber)
   try {
     const [row] = await tx
       .insert(supplier)
@@ -270,7 +280,10 @@ export async function updateSupplier(
   if (input.email !== undefined) patch.email = textOptional(input.email, "El correo", 200)
   if (input.phone !== undefined) patch.phone = textOptional(input.phone, "El teléfono", 50)
   if (input.address !== undefined) patch.address = textOptional(input.address, "La dirección")
-  if (patch.docNumber && !patch.docType && !current.docType) patch.docType = "RUC"
+  assertSupplierDocument(
+    patch.docType !== undefined ? patch.docType : current.docType,
+    patch.docNumber !== undefined ? patch.docNumber : current.docNumber,
+  )
   try {
     const [row] = await tx
       .update(supplier)

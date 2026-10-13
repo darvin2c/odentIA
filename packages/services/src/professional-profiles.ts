@@ -16,7 +16,9 @@ export interface ProfessionalProfile {
   /** Nombre de la cuenta, para mostrar si no hay nombre de firma. */
   accountName: string
   signatureName: string | null
+  /** Como lo escribió la persona; vacío mientras no complete su perfil. */
   professionalTitle: string
+  /** Colegio u organismo que emite su registro; vacío mientras no lo escriba. */
   registrationBody: string
   registrationNumber: string | null
   specialtyRegistration: string | null
@@ -37,12 +39,12 @@ export interface ProfessionalProfileInput {
 export interface ProfessionalSignature {
   name: string
   title: string
-  /** «COP 12345». */
+  /** Colegio y número, como se imprime: «<colegio> <número>». */
   registration: string
 }
 
-const DEFAULT_TITLE = "Cirujano dentista"
-const DEFAULT_BODY = "COP"
+// Título y colegio dependen del país y de la profesión: no hay valor por
+// defecto, los escribe cada profesional (o quien administra) en su perfil.
 /** Colegiatura: letras, dígitos y guion; sin espacios ni símbolos. */
 const REGISTRATION_RE = /^[A-Za-z0-9-]{1,20}$/
 
@@ -74,8 +76,8 @@ function toProfile(
     userId,
     accountName,
     signatureName: row?.signatureName ?? null,
-    professionalTitle: row?.professionalTitle ?? DEFAULT_TITLE,
-    registrationBody: row?.registrationBody ?? DEFAULT_BODY,
+    professionalTitle: row?.professionalTitle ?? "",
+    registrationBody: row?.registrationBody ?? "",
     registrationNumber: row?.registrationNumber ?? null,
     specialtyRegistration: row?.specialtyRegistration ?? null,
     complete: Boolean(row?.registrationNumber),
@@ -99,7 +101,7 @@ export async function getProfessionalProfile(
   return toProfile(userId, accountName, row)
 }
 
-/** Perfiles de todos los miembros, con valores por defecto para quien no lo completó. */
+/** Perfiles de todos los miembros; en blanco para quien aún no lo completó. */
 export async function listProfessionalProfiles(
   tx: Db,
   orgId: string,

@@ -141,12 +141,3 @@ export const ORDER_STATUS_LABELS: Record<string, string> = {
   recibida: "Recibida",
   cancelada: "Cancelada",
 }
-
-/** Centavos enteros a texto en la moneda indicada (sin floats). */
-export function formatCents(amountCents: number, currency: string): string {
-  const sign = amountCents < 0 ? "-" : ""
-  const absolute = Math.abs(amountCents)
-  const whole = Math.floor(absolute / 100)
-  const rest = String(absolute % 100).padStart(2, "0")
-  return `${sign}${currency} ${whole}.${rest}`
-}

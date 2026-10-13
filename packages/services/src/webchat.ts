@@ -13,7 +13,7 @@ import { organization } from "@odentia/db/schema/auth"
 import { channelConnection, conversation, message } from "@odentia/db/schema/crm"
 import { webchatRateLimit } from "@odentia/db/schema/webchat"
 import { auditEvent } from "@odentia/db/schema/org"
-import { and, asc, eq, gt, or, sql } from "drizzle-orm"
+import { and, asc, eq, sql } from "drizzle-orm"
 import { createConnection, setConnectionStatus } from "./connections.js"
 import { listMessages, type MessageItem } from "./conversations.js"
 import { notFound, ServiceError, validation } from "./errors.js"
@@ -449,72 +449,4 @@ export async function pollWebchat(
     }
   }
   return { status: conv.status === "closed" ? "closed" : "open", items, nextCursor, delivered }
-}
-
-/** Mensajes nuevos desde un cursor (ts,id) para el stream SSE del widget. */
-export async function listWebchatNew(
-  tx: Db,
-  orgId: string,
-  connectionId: string,
-  sessionId: string,
-  since: { ts: string; id: string } | null,
-  limit = 20,
-): Promise<{ status: "open" | "closed" | null; items: WebchatPoll["items"] }> {
-  const [conv] = await tx
-    .select({ id: conversation.id, status: conversation.status })
-    .from(conversation)
-    .where(
-      and(
-        eq(conversation.organizationId, orgId),
-        eq(conversation.channelConnectionId, connectionId),
-        eq(conversation.externalThreadId, sessionId),
-      ),
-    )
-    .limit(1)
-  if (!conv) return { status: null, items: [] }
-  const conditions = [eq(message.conversationId, conv.id)]
-  if (since) {
-    const ts = new Date(since.ts)
-    if (!Number.isNaN(ts.getTime())) {
-      conditions.push(or(gt(message.createdAt, ts), and(eq(message.createdAt, ts), gt(message.id, since.id)))!)
-    }
-  }
-  const rows = await tx
-    .select()
-    .from(message)
-    .where(and(...conditions))
-    .orderBy(asc(message.createdAt), asc(message.id))
-    .limit(Math.min(Math.max(limit, 1), 50))
-  if (!since) {
-    await tx
-      .update(message)
-      .set({ status: "delivered" })
-      .where(and(eq(message.conversationId, conv.id), eq(message.direction, "out"), eq(message.status, "sent")))
-  }
-  return {
-    status: conv.status === "closed" ? "closed" : "open",
-    items: rows.map((row) => ({
-      id: row.id,
-      direction: row.direction,
-      senderKind: row.senderKind,
-      senderUserId: row.senderUserId,
-      contentType: row.contentType,
-      body: row.body,
-      attachments: row.attachments,
-      externalId: row.externalId,
-      status: row.status,
-      error: row.error,
-      templateName: row.templateName,
-      templateLanguage: row.templateLanguage,
-      templateParams:
-        Array.isArray(row.templateParams) &&
-        row.templateParams.every((p): p is string => typeof p === "string")
-          ? row.templateParams
-          : null,
-      // El visitante del chat web no recibe mensajes de las líneas del Administrador.
-      automatic: null,
-      createdAt: row.createdAt.toISOString(),
-      sentAt: row.sentAt?.toISOString() ?? null,
-    })),
-  }
 }

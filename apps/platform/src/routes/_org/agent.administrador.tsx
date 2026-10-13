@@ -16,11 +16,14 @@ import { mutationErrorMessage, QueryErrorState } from "../../lib/query-error"
 interface AdminSearch {
   /** Línea abierta: llega aquí desde una recomendación o un aviso. */
   linea?: string
+  /** El aviso «no pude escribirle a N personas» pide ver solo a esas personas. */
+  ver?: "no-pudo"
 }
 
 export const Route = createFileRoute("/_org/agent/administrador")({
   validateSearch: (search: Record<string, unknown>): AdminSearch => ({
     ...(typeof search.linea === "string" && search.linea ? { linea: search.linea } : {}),
+    ...(search.ver === "no-pudo" ? { ver: "no-pudo" as const } : {}),
   }),
   component: AdministratorPage,
 })
@@ -54,6 +57,7 @@ function LineBlock({
   onOpen,
   canWrite,
   adminOn,
+  unreachedOnly,
 }: {
   id: string
   title: string
@@ -64,6 +68,7 @@ function LineBlock({
   onOpen: (key: string | undefined) => void
   canWrite: boolean
   adminOn: boolean
+  unreachedOnly: boolean
 }) {
   return (
     <section aria-labelledby={id} className="flex min-w-0 flex-col gap-3">
@@ -85,6 +90,8 @@ function LineBlock({
               onToggle={() => onOpen(open === line.key ? undefined : line.key)}
               canWrite={canWrite}
               adminOn={adminOn}
+              unreachedOnly={unreachedOnly && open === line.key}
+              onShowAll={() => onOpen(line.key)}
             />
           ))}
         </ul>
@@ -222,7 +229,7 @@ function MissingNotices({ page, onOpen }: { page: AdminPage; onOpen: (key: strin
 function AdministratorPage() {
   const queryClient = useQueryClient()
   const navigate = useNavigate({ from: Route.fullPath })
-  const { linea } = Route.useSearch()
+  const { linea, ver } = Route.useSearch()
   const canRead = usePermission("agent.read")
   const canWrite = usePermission("agent.write")
 
@@ -346,6 +353,7 @@ function AdministratorPage() {
               onOpen={open}
               canWrite={canWrite}
               adminOn={page.enabled}
+              unreachedOnly={ver === "no-pudo"}
             />
           ) : null}
           <LineBlock
@@ -362,6 +370,7 @@ function AdministratorPage() {
             onOpen={open}
             canWrite={canWrite}
             adminOn={page.enabled}
+            unreachedOnly={ver === "no-pudo"}
           />
 
           <QuietHours page={page} canWrite={canWrite} />

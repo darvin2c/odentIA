@@ -4,7 +4,6 @@ import type { AgentRunJob, InboundMessageJob, OutboundMessageJob, QueueMessage }
 import { createAppDb, createOwnerDb, type Db, setupAgentMemory } from "@odentia/db"
 import { createStorage, type Storage, secretsKeyFromEnv } from "@odentia/services"
 import { sql } from "drizzle-orm"
-import { langfuseCallbacks } from "./agent/llm.js"
 import { env } from "./env.js"
 import { type DemoTaskMessage, processDemoTask } from "./handler.js"
 import { consumeInbound } from "./inbound.js"
@@ -60,7 +59,6 @@ const agentRuntime: AgentRuntime = {
     timeoutMs: env.DECISIONS_TIMEOUT_MS,
   },
   secretsKey,
-  callbacks: await langfuseCallbacks(),
 }
 
 const VT_SECONDS = 30

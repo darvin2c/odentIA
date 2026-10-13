@@ -9,7 +9,11 @@ export interface DemoTaskPayload {
   requestedAt: string
 }
 
-/** Encola una tarea demo en pgmq; devuelve msg_id como string. */
+/**
+ * Encola la tarea de comprobación del worker (cola `demo_tasks`); devuelve msg_id
+ * como string. No tiene pantalla ni operación HTTP: la usa el supervisor e2e para
+ * saber que el worker ya consume colas y escribe en auditoría.
+ */
 export async function sendDemoTask(db: Db, payload: DemoTaskPayload): Promise<string> {
   const rows = await db.execute<{ send: number | string }>(
     sql`select pgmq.send('demo_tasks', ${JSON.stringify(payload)}::jsonb)`,

@@ -5,7 +5,6 @@ import {
   isoToLocalInput,
   isOverdue,
   localInputToIso,
-  parseAmountToCents,
 } from "./crm-helpers"
 
 describe("localInputToIso / isoToLocalInput", () => {
@@ -41,21 +40,6 @@ describe("dateInputToIso", () => {
     expect(dateInputToIso("")).toBeNull()
     expect(dateInputToIso("30/09/2026")).toBeNull()
     expect(dateInputToIso("2026-09-30T10:00")).toBeNull()
-  })
-})
-
-describe("parseAmountToCents", () => {
-  it("convierte montos con punto o coma decimal", () => {
-    expect(parseAmountToCents("2500")).toBe(250000)
-    expect(parseAmountToCents("2500.50")).toBe(250050)
-    expect(parseAmountToCents("2500,50")).toBe(250050)
-    expect(parseAmountToCents(" 99.99 ")).toBe(9999)
-  })
-
-  it("devuelve null en vacío o montos inválidos", () => {
-    expect(parseAmountToCents("")).toBeNull()
-    expect(parseAmountToCents("abc")).toBeNull()
-    expect(parseAmountToCents("-5")).toBeNull()
   })
 })
 

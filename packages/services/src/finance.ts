@@ -42,15 +42,6 @@ import { isUniqueViolation, notFound, ServiceError, validation } from "./errors.
 import { getOrgLocale, orgProfileRequired } from "./locale.js"
 import { monthStart } from "./report-periods.js"
 import { createWorkspaceNotification } from "./workspace.js"
-export const SHIFT_STATUSES = ["abierta", "cerrada"] as const
-export const MOVEMENT_KINDS = [
-  "apertura",
-  "cobro",
-  "gasto",
-  "aporte",
-  "retiro",
-  "devolucion",
-] as const
 export const MOVEMENT_DIRECTIONS = ["ingreso", "egreso"] as const
 export const EXPENSE_CATEGORIES = ["Personal", "Alquiler", "Laboratorio", "Materiales", "Servicios", "Impuestos", "Otros"] as const
 

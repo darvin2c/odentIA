@@ -32,10 +32,14 @@ import {
   Home,
   Inbox,
   Kanban,
+  KeyRound,
   ListTodo,
   Package,
+  Percent,
   Settings,
   Smile,
+  Tags,
+  UserRound,
   Users,
   Wallet,
 } from "lucide-react"
@@ -113,7 +117,8 @@ export const Route = createFileRoute("/_org")({
   component: OrgLayout,
 })
 
-type NavChild = AppShellNavItem & { permission?: string }
+/** `unlessPermission`: la entrada sobra para quien ya llega a lo mismo por otra pantalla. */
+type NavChild = AppShellNavItem & { permission?: string; unlessPermission?: string }
 type NavDefinition =
   | (AppShellNavItem & { permission?: string; permissionsAny?: string[]; children?: undefined })
   | (Omit<AppShellNavGroup, "children"> & {
@@ -127,6 +132,10 @@ const navDefinitions: NavDefinition[] = [
   { label: "Bandeja", to: "/inbox", icon: Inbox, permission: "conversations.read" },
   { label: "Agenda", to: "/agenda", icon: CalendarDays, permission: "appointments.read" },
   { label: "Tareas", to: "/tasks", icon: ListTodo, permission: "tasks.read" },
+  // El agente es una sola entrada, junto al trabajo diario; sus secciones
+  // (aprobaciones, aprender, conocimiento) son pestañas de página. El destino se
+  // resuelve por permiso: quien solo decide entra directo a Aprobaciones.
+  { label: "Agente", to: "/agent", icon: Bot, permissionsAny: ["agent.read", "agent.decide"] },
   {
     label: "Personas",
     children: [
@@ -135,20 +144,14 @@ const navDefinitions: NavDefinition[] = [
       { label: "Oportunidades", to: "/pipeline", icon: Kanban, permission: "crm.read" },
     ],
   },
-  // El agente es una sola entrada; sus secciones (aprobaciones, actividad,
-  // conocimiento) son pestañas de página. El destino se resuelve por permiso:
-  // quien solo decide entra directo a Aprobaciones.
-  {
-    label: "Agente",
-    permissionsAny: ["agent.read", "agent.decide"],
-    children: [{ label: "Agente", to: "/agent", icon: Bot }],
-  },
   {
     label: "Gestión",
     children: [
       { label: "Finanzas", to: "/finance", icon: Wallet, permission: "finance.read" },
-      { label: "Servicios y precios", to: "/services", icon: ListTodo, permission: "catalog.read" },
-      { label: "Comisiones", to: "/commissions", icon: Wallet, permission: "commissions.read" },
+      { label: "Servicios y precios", to: "/services", icon: Tags, permission: "catalog.read" },
+      // Para quien ve Finanzas, Comisiones es una pestaña de allí; la entrada queda
+      // para quien solo consulta las suyas.
+      { label: "Comisiones", to: "/commissions", icon: Percent, permission: "commissions.read", unlessPermission: "finance.read" },
       { label: "Inventario", to: "/inventory", icon: Package, permission: "inventory.read" },
       { label: "Reportes", to: "/reports", icon: BarChart3, permission: "reports.read" },
     ],
@@ -232,20 +235,25 @@ function OrgLayout() {
   // Contador ligero para el badge del agente; la misma consulta alimenta el panel.
   const agentSummary = useAgentPanelSummary(canAccessAny(role, ["agent.read", "agent.decide"]))
   const pendingDecisions = agentSummary.data?.data.pendingProposals ?? 0
-  // Filtra entradas y subentradas por permiso: el grupo IA muestra solo las
-  // hijas autorizadas (Aprobaciones para quien decide, sin configuración).
+  // El agente lleva su contador y, para quien solo decide, entra por Aprobaciones.
+  const withAgentState = <T extends AppShellNavItem>(item: T): T => {
+    if (item.to !== "/agent") return item
+    const target = canAccess(role, "agent.read") ? item : { ...item, to: "/agent/approvals" }
+    return pendingDecisions > 0 ? { ...target, badge: pendingDecisions } : target
+  }
+  // Filtra entradas y subentradas por permiso: cada grupo muestra solo las hijas autorizadas.
   const navItems = navDefinitions.flatMap((item): AppShellNavEntry[] => {
     const selfVisible =
       (!item.permission || canAccess(role, item.permission)) &&
       (!item.permissionsAny || canAccessAny(role, item.permissionsAny))
-    if (!item.children) return selfVisible ? [item] : []
+    if (!item.children) return selfVisible ? [withAgentState(item)] : []
     const children = item.children
-      .filter((child) => !child.permission || canAccess(role, child.permission))
-      .map((child) => {
-        if (child.to !== "/agent") return child
-        const target = canAccess(role, "agent.read") ? child : { ...child, to: "/agent/approvals" }
-        return pendingDecisions > 0 ? { ...target, badge: pendingDecisions } : target
-      })
+      .filter(
+        (child) =>
+          (!child.permission || canAccess(role, child.permission)) &&
+          !(child.unlessPermission && canAccess(role, child.unlessPermission)),
+      )
+      .map(withAgentState)
     if (children.length === 0) return []
     if (!selfVisible) return []
     return [{ ...item, children }]
@@ -264,6 +272,11 @@ function OrgLayout() {
       LinkComponent={RouterLink}
       pathname={pathname}
       user={{ name: session.name, email: session.email }}
+      // El perfil vive en el panel de la cuenta (otro origen): se llega con un enlace normal.
+      userMenuItems={[
+        { label: "Mi perfil", icon: UserRound, href: panelUrl("/profile") },
+        { label: "Cambiar contraseña", icon: KeyRound, href: panelUrl("/profile?edit=password") },
+      ]}
       footerItems={footerItems}
       brand={<Brand />}
       brandIcon={<Brand compact />}

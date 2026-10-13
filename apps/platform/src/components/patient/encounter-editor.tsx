@@ -1641,7 +1641,7 @@ export function EncounterEditor({
         <strong>
           {profileQuery.data?.data.signatureName ?? profileQuery.data?.data.accountName ?? "—"}
         </strong>
-        {profileQuery.data ? ` · ${profileQuery.data.data.professionalTitle}` : ""}
+        {profileQuery.data?.data.professionalTitle ? ` · ${profileQuery.data.data.professionalTitle}` : ""}
         {profileQuery.data && registrationLabel(profileQuery.data.data)
           ? ` · ${registrationLabel(profileQuery.data.data)}`
           : ""}

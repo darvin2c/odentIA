@@ -1,5 +1,5 @@
 import { expect, it } from "vitest"
-import { inQuietHours, isTerminalFailureCode, purposeOfKind } from "./automation.js"
+import { inQuietHours, purposeOfKind } from "./automation.js"
 
 // America/Lima es UTC-5 fijo (sin horario de verano): instantes estables.
 
@@ -23,12 +23,4 @@ it("cada línea que escribe pide el permiso de su tipo de mensaje", () => {
   expect(purposeOfKind("seguimiento_presupuesto")).toBe("seguimiento")
   expect(purposeOfKind("seguimiento_no_asistencia")).toBe("seguimiento")
   expect(purposeOfKind("seguimiento_comercial")).toBe("seguimiento")
-})
-
-it("cierra sin reintentos ventana, inbound requerido y validación", () => {
-  expect(isTerminalFailureCode("WINDOW_CLOSED")).toBe(true)
-  expect(isTerminalFailureCode("CHANNEL_REQUIRES_INBOUND")).toBe(true)
-  expect(isTerminalFailureCode("VALIDATION")).toBe(true)
-  expect(isTerminalFailureCode("CONNECTION_DISABLED")).toBe(false)
-  expect(isTerminalFailureCode(undefined)).toBe(false)
 })
