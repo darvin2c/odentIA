@@ -105,7 +105,7 @@ beforeAll(async () => {
     sql`insert into "member" ("id", "organization_id", "user_id", "role", "created_at") values ('m-u1-a', 'org_a', 'u-1', 'dentist', now()) on conflict do nothing`,
   )
   await ownerDb.execute(
-    sql`insert into "professional_profile" ("organization_id", "user_id", "registration_number") values ('org_a', 'u-1', '12345') on conflict do nothing`,
+    sql`insert into "professional_profile" ("organization_id", "user_id", "professional_title", "registration_body", "registration_number") values ('org_a', 'u-1', 'Cirujano dentista', 'COP', '12345') on conflict do nothing`,
   )
   await ownerDb.execute(
     sql`insert into "cie10_code" ("code", "description") values ('K02.1', 'Caries de la dentina') on conflict do nothing`,

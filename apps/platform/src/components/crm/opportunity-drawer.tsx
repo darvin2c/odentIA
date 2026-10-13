@@ -1,5 +1,6 @@
 import { Button, Field, FieldLabel, Input, Spinner } from "@odentia/ui"
 import { FormDrawer } from "@odentia/ui-patterns"
+import { formatMoneyInput, parseMoney } from "@odentia/clinical"
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { useEffect, useMemo, useRef, useState } from "react"
@@ -12,9 +13,10 @@ import {
   useOrgMembers,
   usePermission,
 } from "../../lib/crm"
+import { activeOrgLocale } from "../../lib/locale"
 import { useOrgProfile } from "../../lib/org"
 import { fetchServices } from "../../lib/services"
-import { isoToLocalInput, localInputToIso, parseAmountToCents } from "./crm-helpers"
+import { isoToLocalInput, localInputToIso } from "./crm-helpers"
 
 /** Contrato compartido con InboxWorkspace: no agregar ni quitar props. */
 export interface OpportunityDrawerProps {
@@ -38,6 +40,19 @@ const SERVICE_PAGE = 20
 function mutationMessage(err: unknown, fallback: string): string {
   if (err instanceof ApiError) return err.message || fallback
   return err instanceof Error ? err.message : fallback
+}
+
+/**
+ * Importe (unidad menor ISO 4217) como texto editable: los decimales son los
+ * de su moneda y los separadores, los del formato de la clínica, que es como
+ * después lo lee `parseMoney`. Vacío mientras la moneda no sea un código válido.
+ */
+function amountInputText(amountCents: number, currency: string, locale: string): string {
+  try {
+    return formatMoneyInput(amountCents, currency, locale)
+  } catch {
+    return ""
+  }
 }
 
 /**
@@ -111,7 +126,15 @@ export function OpportunityDrawer({
   const [draftAmount, setDraftAmount] = useState("")
   // Vacía = la moneda de la clínica (se muestra como sugerencia en el campo).
   const [draftCurrency, setDraftCurrency] = useState("")
-  const orgCurrency = useOrgProfile().data?.currency
+  const profileQuery = useOrgProfile()
+  const orgCurrency = profileQuery.data?.currency
+  // Formato con que se escribe y se lee el valor: el de la clínica; sin perfil,
+  // el que ya usa la pantalla o el del dispositivo. Nunca el de un país.
+  const moneyLocale =
+    profileQuery.data?.locale?.trim() || activeOrgLocale() || new Intl.NumberFormat().resolvedOptions().locale
+  // Una edición espera a conocer ese formato: el valor guardado se escribe una
+  // sola vez y con los mismos separadores con que se leerá al guardar.
+  const draftReady = !isEdit || !profileQuery.isPending
   const [draftAssignee, setDraftAssignee] = useState("")
   const [draftNextAction, setDraftNextAction] = useState("")
   const [draftNote, setDraftNote] = useState("")
@@ -122,6 +145,8 @@ export function OpportunityDrawer({
   const [closeReason, setCloseReason] = useState("")
 
   const effectiveContactId = contactId ?? draftContactId ?? ""
+  // Moneda del valor: la escrita en el campo o, vacía, la de la clínica.
+  const amountCurrency = draftCurrency.trim().toUpperCase() || orgCurrency || ""
   const defaultPipeline = pipelines.find((p) => p.isDefault) ?? pipelines[0] ?? null
   const defaultPipelineId = defaultPipeline?.id ?? ""
   // El usuario manda sobre el valor por defecto: si elige o limpia el embudo
@@ -134,7 +159,7 @@ export function OpportunityDrawer({
   // cerrar se conserva el borrador hasta el próximo abrir para no perder el
   // caso a mitad de captura.
   useEffect(() => {
-    if (!open) return
+    if (!open || !draftReady) return
     if (detail) {
       setDraftContactId(detail.contactId)
       setDraftPatientId(detail.patientId ?? "")
@@ -144,7 +169,9 @@ export function OpportunityDrawer({
       setDraftInterest(detail.interestText ?? "")
       setDraftServiceId(detail.serviceId ?? "")
       setDraftServiceName(detail.serviceName ?? "")
-      setDraftAmount(detail.amountCents !== null ? String(detail.amountCents / 100) : "")
+      setDraftAmount(
+        detail.amountCents !== null ? amountInputText(detail.amountCents, detail.currency, moneyLocale) : "",
+      )
       setDraftCurrency(detail.currency)
       setDraftAssignee(detail.assignedUserId ?? "")
       setDraftNextAction(isoToLocalInput(detail.nextActionAt))
@@ -173,7 +200,7 @@ export function OpportunityDrawer({
     setCloseReason("")
     // Solo al abrir o al llegar el detalle: el borrador es del usuario después.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, opportunityId, detail?.id])
+  }, [open, opportunityId, detail?.id, draftReady])
 
   // Embudo por defecto tardío: solo si la selección sigue sin valor y el
   // usuario no la tocó (respeta elegir o limpiar a mano). Nunca toca el resto
@@ -257,9 +284,14 @@ export function OpportunityDrawer({
   const saveMutation = useMutation({
     mutationFn: () => {
       const amountRaw = draftAmount.trim()
-      const amountCents = parseAmountToCents(amountRaw)
-      if (amountRaw !== "" && amountCents === null) {
-        throw new Error("Monto inválido: usa números con hasta dos decimales.")
+      let amountCents: number | null = null
+      if (amountRaw !== "") {
+        if (!amountCurrency) {
+          throw new Error("Indica la moneda del valor o configura la de la clínica.")
+        }
+        // Los decimales que admite son los de la moneda (ISO 4217): ninguno,
+        // dos o tres. `parseMoney` dice qué falla con las palabras de la clínica.
+        amountCents = parseMoney(amountRaw, amountCurrency, moneyLocale)
       }
       if (!draftTitle.trim()) throw new Error("Ingresa el título de la oportunidad.")
       if (!effectiveContactId) throw new Error("Elige el contacto de la oportunidad.")
@@ -363,7 +395,7 @@ export function OpportunityDrawer({
         saveMutation.mutate()
       }}
       isSubmitting={pending}
-      isLoading={isEdit && detailQuery.isLoading}
+      isLoading={isEdit && (detailQuery.isLoading || !draftReady)}
       error={error}
       submitLabel={isEdit ? "Guardar" : "Crear"}
       cancelLabel="Cancelar"
@@ -725,7 +757,7 @@ export function OpportunityDrawer({
               id="opp-drawer-amount"
               value={draftAmount}
               inputMode="decimal"
-              placeholder="2500.00"
+              placeholder={amountCurrency ? amountInputText(0, amountCurrency, moneyLocale) : undefined}
               onChange={(e) => setDraftAmount(e.target.value)}
             />
           </Field>

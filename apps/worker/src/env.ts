@@ -53,9 +53,6 @@ const envSchema = z.object({
   /** Cae a LLM_API_KEY solo si TRANSCRIBE_BASE_URL apunta al mismo host que LLM_BASE_URL. */
   TRANSCRIBE_API_KEY: z.string().optional(),
   TRANSCRIBE_BASE_URL: z.string().url().optional(),
-  LANGFUSE_PUBLIC_KEY: z.string().optional(),
-  LANGFUSE_SECRET_KEY: z.string().optional(),
-  LANGFUSE_HOST: z.string().url().optional(),
   S3_ENDPOINT: z.string().url(),
   S3_REGION: z.string().min(1).default("auto"),
   S3_ACCESS_KEY: z.string().min(1),

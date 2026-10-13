@@ -13,7 +13,6 @@ import {
   AGENT_ROLE_IDS,
   AGENT_ROLES,
   levelOfPolicy,
-  roleTools,
   switchableFunctions,
   toolsDisabledBy,
 } from "./agent-roles.js"
@@ -102,7 +101,8 @@ describe("fichas de los agentes", () => {
 
   it("apagarlo todo deja lo fijo y lo que el agente tiene siempre", () => {
     const off = new Set(toolsDisabledBy("recepcion", switchableFunctions("recepcion")))
-    const left = roleTools("recepcion").filter((tool) => !off.has(tool))
+    const ficha = AGENT_ROLES.recepcion
+    const left = [...ficha.always, ...ficha.functions.flatMap((fn) => fn.tools)].filter((tool) => !off.has(tool))
     expect(left).toEqual(expect.arrayContaining(["send_reply", "request_human_handoff", "anotar_caso", "confirmar_propuesta"]))
     expect(left).not.toContain("proponer_cita")
     expect(left).not.toContain("create_opportunity")

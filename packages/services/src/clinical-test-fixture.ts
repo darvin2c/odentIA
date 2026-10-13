@@ -35,7 +35,14 @@ export async function makeSigner(orgId: string, userId: string): Promise<void> {
   }
   await ownerDb
     .insert(professionalProfile)
-    .values({ organizationId: orgId, userId, registrationNumber: "12345" })
+    // Título y colegio explícitos: el perfil no tiene valores por defecto de ningún país.
+    .values({
+      organizationId: orgId,
+      userId,
+      professionalTitle: "Cirujano dentista",
+      registrationBody: "COP",
+      registrationNumber: "12345",
+    })
     .onConflictDoNothing()
 }
 

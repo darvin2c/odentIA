@@ -3,7 +3,8 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import { Calendar } from "./calendar.js"
 import { FilterBar } from "./filter-bar.js"
-import { FilterControl } from "./filter-control.js"
+import { setFormatRegion } from "../locale.js"
+import { FilterControl, filterSummary } from "./filter-control.js"
 import { SearchInput } from "./search-input.js"
 import { SortMenu } from "./sort-menu.js"
 
@@ -105,7 +106,7 @@ const overflowTotalFilter = {
   key: "total",
   label: "Totales",
   placement: "overflow" as const,
-  money: true,
+  money: { fractionDigits: 2 },
 }
 
 /** Simula el ancho medido del row desktop: jsdom no hace layout. */
@@ -385,5 +386,44 @@ describe("filtros de listas", () => {
     expect(mocks.setParam).not.toHaveBeenCalled()
     act(() => vi.advanceTimersByTime(300))
     expect(mocks.setParam).toHaveBeenCalledWith("q", "ceviche", { replace: true })
+  })
+
+  it("un rango de importes usa los decimales de la moneda que dice la app, no siempre dos", () => {
+    setFormatRegion({ locale: "en-US" })
+    const range = (fractionDigits: number) => ({
+      type: "number-range" as const,
+      key: "total",
+      label: "Totales",
+      money: { fractionDigits },
+    })
+    const get = (key: string) => ({ total_min: "50000", total_max: "125000" })[key]
+    // La misma unidad menor: 50 000 pesos sin decimales, 500.00 o 50.000.
+    expect(filterSummary(range(0), get)).toBe("50,000 – 125,000")
+    expect(filterSummary(range(2), get)).toBe("500.00 – 1,250.00")
+    expect(filterSummary(range(3), get)).toBe("50.000 – 125.000")
+    // Un rango que no es dinero se muestra tal cual.
+    expect(filterSummary({ type: "number-range", key: "total", label: "Totales" }, get)).toBe("50000 – 125000")
+    setFormatRegion({})
+  })
+
+  it("lo escrito en un rango de importes viaja en la unidad menor de su moneda", () => {
+    vi.useFakeTimers()
+    const typed = (fractionDigits: number) => {
+      mocks.setParams.mockReset()
+      const { unmount } = render(
+        <FilterControl
+          layout="inline"
+          filter={{ type: "number-range", key: "total", label: "Totales", money: { fractionDigits } }}
+        />,
+      )
+      fireEvent.change(screen.getByLabelText("Totales Mín"), { target: { value: "1500" } })
+      act(() => vi.advanceTimersByTime(300))
+      const sent = mocks.setParams.mock.calls.at(-1)?.[0] as Record<string, string | undefined>
+      unmount()
+      return sent.total_min
+    }
+    expect(typed(0)).toBe("1500")
+    expect(typed(2)).toBe("150000")
+    expect(typed(3)).toBe("1500000")
   })
 })

@@ -679,13 +679,16 @@ await db.insert(member).values([
 ])
 // Colegiatura con la que firman (ADR 0003). Luis queda sin colegiatura en la
 // clínica B para ejercitar el aviso «falta tu colegiatura» al cerrar.
+// Título y colegio se escriben: el perfil no trae los de ningún país por defecto.
+const PERU_DENTIST = { professionalTitle: "Cirujano dentista", registrationBody: "COP" }
 await setProfessionalProfile(db, ORG_A, ANA_ID, ANA_ID, {
+  ...PERU_DENTIST,
   signatureName: "Ana Torres",
   registrationNumber: "12345",
   specialtyRegistration: "RNE 1024",
 })
-await setProfessionalProfile(db, ORG_A, ANA_ID, LUIS_ID, { registrationNumber: "23456" })
-await setProfessionalProfile(db, ORG_B, CORA_ID, CORA_ID, { registrationNumber: "34567" })
+await setProfessionalProfile(db, ORG_A, ANA_ID, LUIS_ID, { ...PERU_DENTIST, registrationNumber: "23456" })
+await setProfessionalProfile(db, ORG_B, CORA_ID, CORA_ID, { ...PERU_DENTIST, registrationNumber: "34567" })
 await db.insert(orgProfile).values([
   {
     organizationId: ORG_A,

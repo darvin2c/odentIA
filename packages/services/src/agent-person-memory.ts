@@ -401,22 +401,3 @@ export function formatPersonMemoryForPrompt(memory: PersonMemory, zone: OrgLocal
     ...lines,
   ].join("\n")
 }
-
-/** Datos guardados de varias personas a la vez, para listados. */
-export async function countPersonFacts(tx: Db, orgId: string, contactIds: string[]): Promise<Map<string, number>> {
-  const ids = [...new Set(contactIds)]
-  if (ids.length === 0) return new Map()
-  const rows = await tx
-    .select({ contactId: agentPersonFact.contactId })
-    .from(agentPersonFact)
-    .where(
-      and(
-        eq(agentPersonFact.organizationId, orgId),
-        eq(agentPersonFact.status, "activo"),
-        inArray(agentPersonFact.contactId, ids),
-      ),
-    )
-  const totals = new Map<string, number>()
-  for (const row of rows) totals.set(row.contactId, (totals.get(row.contactId) ?? 0) + 1)
-  return totals
-}

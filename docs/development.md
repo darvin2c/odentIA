@@ -26,13 +26,13 @@ Infra definida en `infra/dev/compose.yaml`: PostgreSQL :5432, MinIO :9000/:9001 
 El agente habla un solo protocolo: cualquier endpoint compatible con OpenAI
 (OpenAI, OpenRouter, DeepSeek, Groq, Mistral, Ollama, vLLM, pasarela propia).
 Otros prefijos (`anthropic:`, `google-genai:`…) se rechazan con un error
-explícito; ver `docs/decisions/0001-proveedor-llm-por-organizacion.md`.
+explícito; ver `docs/decisions/0016-proveedor-llm-por-organizacion.md`.
 
 Proveedor de la plataforma: en `infra/dev/.env`, `LLM_MODEL=<nombre que espera
 el endpoint>` (el prefijo `openai:` es opcional), `LLM_API_KEY` y `LLM_BASE_URL`
 con la URL base publicada por el proveedor (incluido `/v1` o el prefijo que
 indique). `LLM_TIMEOUT_MS` y `LLM_MAX_RETRIES` acotan cada llamada.
-`AGENT_BURST_WINDOW_SECONDS` (worker, 4 por defecto, 0–30) es lo que el agente
+`AGENT_BURST_WINDOW_SECONDS` (worker, 6 por defecto, 0–30) es lo que el agente
 espera tras un mensaje entrante antes de leer el hilo: normalmente agrupa una
 ráfaga en una sola corrida y una sola respuesta (mejor esfuerzo; límites en
 `docs/decisions/0005-uso-del-modelo-rafagas-y-prefijo.md`), a cambio de esa
@@ -50,13 +50,13 @@ El modelo elegido debe admitir llamadas a herramientas (`tools`/`tool_calls`).
 API y worker leen las mismas variables; reiniciarlos tras cambiarlas. Nunca
 poner la key en una variable `VITE_*`, un campo de conversación ni el repositorio.
 
-### Modelo de decisión (solo en sombra)
+### Modelo de decisión
 
-Ver `docs/decisions/0002-capa-de-decision-en-sombra.md`. El worker y la API leen
+Ver `docs/decisions/0007-modelo-de-decision-elige-el-conocimiento.md`. El worker y la API leen
 `JEV_API_KEY`/`JEV_BASE_URL` y `OPENAI_DECISIONS_API_KEY`/`OPENAI_DECISIONS_BASE_URL`
 (la API, para entender lo que se le pide al Administrador con palabras);
 sin ellas, elegir ese proveedor en Configuración → Agente deja cada triaje como
-fila con error en Agente › Actividad. `pnpm --filter @odentia/agent eval:decisions
+fila con error en Agente › Registro técnico. `pnpm --filter @odentia/agent eval:decisions
 -- --provider=jev` compara un proveedor con los ejemplos propios de
 `packages/agent/eval/`; no enviar mensajes reales de pacientes sin autorización. `eval:admin`
 mide, con un proveedor real, cuántos pedidos al Administrador entiende y los tokens
@@ -96,7 +96,7 @@ del modelo no demuestra entrega del canal ni sustituye la observación humana.
 
 - `pnpm --filter @odentia/agent test` recorre herramientas y propuestas con PostgreSQL real: reserva, reprogramación, cancelación, obsolescencia, reentrega idempotente y derivación humana.
 - `pnpm e2e crm.spec.ts --workers=1 --grep "crm derivación"` comprueba en la plataforma la cola con plazo y la toma de un caso.
-- `pnpm --filter @odentia/services test -- commercial-coordination.test.ts workspace-continuity.test.ts` verifica deduplicación del seguimiento vencido, revocación, aislamiento y cohortes con desconocidos; requiere el mismo PostgreSQL efímero.
+- `pnpm --filter @odentia/services test -- commercial-coordination.test.ts` verifica deduplicación del seguimiento vencido, falta de consentimiento y aislamiento; requiere el mismo PostgreSQL efímero.
 - La prueba real de un seguimiento proactivo debe observar vencimiento → decisión → propuesta/derivación y reinicio del worker. Un envío `unknown` se concilia en el proveedor y no se reintenta.
 - En Reportes, los controles se cuentan por la fecha en que tocaban y según su estado a hoy; uno marcado como realizado sin atención cerrada que lo respalde no cuenta como venido. `pnpm e2e reports.spec.ts --workers=2` recorre las cuatro preguntas, el cambio de periodo y la lista detrás de una cifra en 1440px/390px.
 - Los modos fake/mock prueban contratos internos, no entrega de proveedor, calidad de un LLM real ni observación con usuarios. El cierre de una validación integral exige proveedor/modelo reales identificados, datos consentidos o sintéticos y observación de recepción, clínico y caja.

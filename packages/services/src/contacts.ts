@@ -5,6 +5,7 @@ import {
   ISO_COUNTRY_RE,
   normalizePhone,
   normalizeTags,
+  phoneFormatError,
   SEX_CODES,
 } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
@@ -22,6 +23,7 @@ import { auditEvent } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, gt, ilike, inArray, isNotNull, lt, or, sql } from "drizzle-orm"
 import { opportunity } from "@odentia/db/schema/opportunities"
 import { isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
+import { findOrgCountry } from "./locale.js"
 
 /** Aviso en vivo mínimo para refresco CRM: solo `{ orgId, kind, at }`, sin PII. */
 async function notifyCrm(tx: Db, orgId: string, kind: string): Promise<void> {
@@ -433,16 +435,26 @@ async function auditContact(
 }
 
 /** Teléfono declarado: se conserva tal cual, sin verificar ni generar identidades. */
-/** Teléfono en E.164 (ADR 0004): +código de país; un celular peruano de 9 dígitos se completa. */
-function cleanContactPhone(input: string | null | undefined): string | null | undefined {
+/**
+ * Teléfono en E.164 (ADR 0004): +código de país. Un número nacional escrito
+ * sin prefijo se completa con el perfil del país de la clínica, que solo se
+ * consulta cuando hace falta: el campo de la interfaz ya entrega E.164.
+ */
+async function cleanContactPhone(
+  tx: Db,
+  orgId: string,
+  input: string | null | undefined,
+): Promise<string | null | undefined> {
   if (input === undefined) return undefined
   if (input === null) return null
   const value = input.trim()
   if (!value) return null
   if (value.length > 50) throw validation("El teléfono no puede superar 50 caracteres")
-  const normalized = normalizePhone(value)
-  if (!normalized)
-    throw validation("Ingresa el teléfono con código de país (+51…) o un celular de 9 dígitos")
+  const international = normalizePhone(value)
+  if (international) return international
+  const countryCode = await findOrgCountry(tx, orgId)
+  const normalized = normalizePhone(value, countryCode)
+  if (!normalized) throw validation(phoneFormatError(countryCode))
   return normalized
 }
 
@@ -478,7 +490,7 @@ export async function createContact(
     .values({
       organizationId: orgId,
       displayName,
-      phone: cleanContactPhone(input.phone) ?? null,
+      phone: (await cleanContactPhone(tx, orgId, input.phone)) ?? null,
       email: cleanContactEmail(input.email) ?? null,
       isActive: input.isActive ?? true,
       notes: input.notes ?? null,
@@ -600,7 +612,7 @@ export async function updateContact(
     if (!changed.includes("displayName")) changed.push("displayName")
   }
   if (fields.phone !== undefined) {
-    patch.phone = cleanContactPhone(fields.phone) ?? null
+    patch.phone = (await cleanContactPhone(tx, orgId, fields.phone)) ?? null
     changed.push("phone")
   }
   if (fields.email !== undefined) {

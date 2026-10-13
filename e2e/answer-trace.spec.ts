@@ -108,9 +108,9 @@ test("bandeja: cada respuesta del agente dice en qué se basó", async ({ owner,
   await detail.getByRole("button", { name: "Cerrar" }).click()
   await expect(detail).toBeHidden()
 
-  // Quien no puede ver conversaciones tampoco lee la traza: lo decide el servidor.
+  // Quien no puede ver conversaciones tampoco lee la traza ni el resumen del caso: lo decide el servidor.
   await fixtureDb.update(member).set({ role: "cashier" })
     .where(and(eq(member.organizationId, org.id), eq(member.userId, owner.user.id)))
   expect((await api(page, "GET", `/api/agent/answer-traces?conversationId=${conversationId}`, org.slug)).status).toBe(403)
-  expect((await api(page, "GET", `/api/agent/case?conversationId=${conversationId}`, org.slug)).status).toBe(403)
+  expect((await api(page, "GET", `/api/agent/case/brief?conversationId=${conversationId}`, org.slug)).status).toBe(403)
 })

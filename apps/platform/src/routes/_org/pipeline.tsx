@@ -293,15 +293,20 @@ function PipelinePage() {
       <FilterBar
         className="min-w-0 flex-1 rounded-none bg-transparent p-1"
         filters={[
-          {
-            key: "embudo",
-            label: "Embudo",
-            type: "select",
-            options: pipelines.map((p) => ({
-              value: p.id,
-              label: `${p.name}${p.isDefault ? " · principal" : ""}`,
-            })),
-          },
+          // El embudo solo se elige si hay más de uno: con uno solo el filtro no cambia nada.
+          ...(pipelines.length > 1
+            ? [
+                {
+                  key: "embudo",
+                  label: "Embudo",
+                  type: "select" as const,
+                  options: pipelines.map((p) => ({
+                    value: p.id,
+                    label: `${p.name}${p.isDefault ? " · principal" : ""}`,
+                  })),
+                },
+              ]
+            : []),
           {
             key: "asignado",
             label: "Responsable",

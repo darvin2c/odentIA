@@ -11,7 +11,24 @@ import { useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
 import { usePermission } from "../../lib/crm"
 
+/** Resultado de la autorización: el proveedor vuelve a esta página con él en la dirección. */
+interface MailSearch {
+  /** Llega como `ok=1`; se conserva tal cual para que el router no reescriba la dirección. */
+  ok?: string | number
+  buzon?: string
+  error?: string
+}
+
+const searchText = (value: unknown): string | undefined => (typeof value === "string" && value ? value : undefined)
+
 export const Route = createFileRoute("/_org/settings/mail")({
+  // Se lee del router y no de `window`: así la página también se genera en el servidor.
+  validateSearch: (search: Record<string, unknown>): MailSearch => {
+    const ok = typeof search.ok === "number" ? search.ok : searchText(search.ok)
+    const buzon = searchText(search.buzon)
+    const error = searchText(search.error)
+    return { ...(ok !== undefined ? { ok } : {}), ...(buzon ? { buzon } : {}), ...(error ? { error } : {}) }
+  },
   component: MailPage,
 })
 
@@ -53,11 +70,8 @@ const PROVIDER_HELP: Record<MailboxProvider, string> = {
     "Lee con delta del Inbox y responde en el mismo hilo. Permisos mínimos: Mail.Read, Mail.Send y User.Read. Microsoft no permite revocar por API: desconectar borra los tokens locales.",
 }
 
-function bannerFromQuery(): { ok: string | null; error: string | null } {
-  const params = new URLSearchParams(window.location.search)
-  const ok = params.get("ok") ? (params.get("buzon") ?? "buzón") : null
-  const error = params.get("error")
-  return { ok, error }
+function bannerFromSearch(search: MailSearch): { ok: string | null; error: string | null } {
+  return { ok: search.ok ? (search.buzon ?? "buzón") : null, error: search.error ?? null }
 }
 
 function errorText(code: string | null): string {
@@ -77,7 +91,9 @@ function MailPage() {
   const canManage = usePermission("settings.write")
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
-  const [banner] = useState(bannerFromQuery)
+  const search = Route.useSearch()
+  // El aviso es el de la llegada: no cambia aunque después cambie la dirección.
+  const [banner] = useState(() => bannerFromSearch(search))
 
   const mailQuery = useQuery({
     queryKey: ["mail"],

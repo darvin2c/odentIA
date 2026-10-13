@@ -24,26 +24,6 @@ export const PATIENT_FILTERS: FilterDef[] = [
       { value: "false", label: "Inactivos" },
     ],
   },
-  {
-    key: "sex",
-    label: "Sexo",
-    type: "select",
-    options: [
-      { value: "M", label: "Masculino" },
-      { value: "F", label: "Femenino" },
-    ],
-  },
-  {
-    key: "docType",
-    label: "Documento",
-    type: "select",
-    options: [
-      { value: "DNI", label: "DNI" },
-      { value: "CE", label: "CE" },
-      { value: "PASAPORTE", label: "Pasaporte" },
-      { value: "OTRO", label: "Otro" },
-    ],
-  },
 ]
 
 export function sexLabel(sex: string | null | undefined): string {

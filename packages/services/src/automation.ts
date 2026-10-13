@@ -54,7 +54,6 @@ import { sendOutbound, sendTemplateOutbound } from "./conversations.js"
 import { notFound, ServiceError, validation } from "./errors.js"
 import { findOrgLocale, NEUTRAL_TIMEZONE } from "./locale.js"
 import { createTask } from "./tasks.js"
-import { CHECKUP_REMINDER_WINDOW_HOURS } from "./automation-windows.js"
 import { createWorkspaceNotification, upsertWorkspaceNotification } from "./workspace.js"
 
 /**
@@ -1310,7 +1309,8 @@ export async function syncCancelledAppointments(tx: Db, orgId: string, now: Date
   return { programados, omitidos }
 }
 
-export { CHECKUP_REMINDER_WINDOW_HOURS } from "./automation-windows.js"
+/** Ventana del recordatorio de control: avisa de los controles que vencen en estas horas. */
+export const CHECKUP_REMINDER_WINDOW_HOURS = 48
 
 /** Casos de «Avisar un control»: los controles que vencen en las próximas horas. */
 export async function syncCheckupReminders(tx: Db, orgId: string, now: Date): Promise<SyncSummary> {
@@ -1544,11 +1544,6 @@ const DEFINITIVE_CODES = new Set(["WINDOW_CLOSED", "CHANNEL_REQUIRES_INBOUND", "
 
 function isDefinitiveCode(code: string | undefined): boolean {
   return !!code && DEFINITIVE_CODES.has(code)
-}
-
-/** Códigos que cierran el trabajo sin reintentos (ventana/inbound/validación). */
-export function isTerminalFailureCode(code: string | undefined): boolean {
-  return isDefinitiveCode(code)
 }
 
 /**

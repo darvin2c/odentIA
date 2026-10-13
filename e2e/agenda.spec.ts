@@ -520,14 +520,14 @@ test("agenda: una ausencia de varios días avisa de sus citas y saca al profesio
   await closures.getByRole("button", { name: /^Quitar Feriado/ }).click()
   await expect(closures.getByText("Sin feriados ni cierres", { exact: false })).toBeVisible()
 
-  // Durante la ausencia no se ofrece ningún hueco.
-  const slots = await call<{ slots: unknown[] }>(
+  // Durante la ausencia no queda ningún tramo reservable (lo mismo que pinta la agenda).
+  const availability = await call<{ free: unknown[] }>(
     page,
     "GET",
-    `/api/agenda/slots?branchId=${owner.branchId}&from=${tomorrow}T05:00:00.000Z&to=${dayAfter}T05:00:00.000Z&durationMin=30`,
+    `/api/agenda/availability?branchId=${owner.branchId}&from=${tomorrow}T05:00:00.000Z&to=${dayAfter}T05:00:00.000Z`,
     owner.org.slug,
   )
-  expect(slots.slots).toHaveLength(0)
+  expect(availability.free).toHaveLength(0)
 
   // Mañana: como aún tiene una cita, sigue en la rejilla y la cita avisa de que hay que moverla.
   await gotoHydrated(page, tenant(owner.org.slug, `/agenda?date=${tomorrow}`))

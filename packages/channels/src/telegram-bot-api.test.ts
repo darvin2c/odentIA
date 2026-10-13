@@ -6,11 +6,7 @@ import {
   createStubFetch,
   runAdapterContract,
 } from "./contract.js"
-import {
-  pollTelegramUpdates,
-  setTelegramWebhook,
-  telegramBotApiAdapter,
-} from "./telegram-bot-api.js"
+import { setTelegramWebhook, telegramBotApiAdapter } from "./telegram-bot-api.js"
 
 // Golden JSON con forma oficial de Bot API; el contrato lo valida en runtime.
 const fx: ContractFixtures = telegramFixtures as unknown as ContractFixtures
@@ -85,19 +81,4 @@ it("setTelegramWebhook registra url y secreto", async () => {
     url: "https://api.example.com/hook",
     secret_token: "s3cret",
   })
-})
-
-it("pollTelegramUpdates devuelve ids y siguiente offset", async () => {
-  const captured: CapturedRequest[] = []
-  const got = await pollTelegramUpdates(
-    { ...fx.config, pollingOffset: 9000 },
-    {
-      fetch: createStubFetch(
-        [{ ok: true, result: [{ update_id: 9001 }, { update_id: 9002 }] }],
-        captured,
-      ),
-    },
-  )
-  expect(got).toEqual({ updateIds: [9001, 9002], nextOffset: 9003 })
-  expect(captured[0]?.url).toContain("offset=9000")
 })

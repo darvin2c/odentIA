@@ -143,7 +143,8 @@ for (const viewport of [
       const page = owner.page
       await page.setViewportSize(viewport)
       await gotoHydrated(page, tenant(owner.org.slug, "/home"))
-      await expect(page.getByRole("region", { name: "Siguiente paso" }).getByRole("link").first()).toBeVisible()
+      // El siguiente paso es un botón que navega (`Button` con `render={<Link />}`): se localiza por su rol real.
+      await expect(page.getByRole("region", { name: "Siguiente paso" }).getByRole("button").first()).toBeVisible()
       await theme(page, dark)
       await audit(page, info, "inicio")
       if (viewport.width < 768) {

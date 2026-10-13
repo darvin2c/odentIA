@@ -64,9 +64,6 @@ export const E2E_SCRUB_ENV_KEYS: readonly string[] = [
   "TRANSCRIBE_MODEL",
   "TRANSCRIBE_API_KEY",
   "TRANSCRIBE_BASE_URL",
-  "LANGFUSE_PUBLIC_KEY",
-  "LANGFUSE_SECRET_KEY",
-  "LANGFUSE_HOST",
 ]
 
 const requireInfra = (

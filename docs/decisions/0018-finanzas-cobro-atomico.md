@@ -1,4 +1,4 @@
-# Cobro atómico con ticket numerado por organización
+# 0018 · Cobro atómico con ticket numerado por organización
 
 - Fecha: 2026-10-11.
 - Estado: aceptada.

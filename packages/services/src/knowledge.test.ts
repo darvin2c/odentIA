@@ -15,6 +15,7 @@ import {
   createKnowledgeEntry,
   discardKnowledgeGaps,
   formatKnowledgeForPrompt,
+  getClinicInfoSnapshot,
   getKnowledgeBasics,
   getKnowledgeDataSources,
   getKnowledgeEntry,
@@ -31,6 +32,7 @@ import {
   setKnowledgeStatus,
   updateKnowledgeEntry,
 } from "./knowledge.js"
+import { createPaymentMethod, updatePaymentMethod } from "./payment-methods.js"
 import { secretsKeyFromEnv } from "./secrets.js"
 import type { Storage } from "./storage.js"
 import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
@@ -207,6 +209,25 @@ describe("bloque de conocimiento del prompt", () => {
     expect(block).toMatch(/- Blanqueamiento \(id [^)]+\): USD\s120\.00/)
   })
 
+  it("lleva los medios de pago activos en una sola línea, y nada si no hay ninguno", () => {
+    // Sin medios activos no se afirma nada.
+    expect(formatKnowledgeForPrompt(snapshot, [])).not.toContain("Medios de pago")
+    const withMethods: ClinicInfoSnapshot = {
+      ...snapshot,
+      paymentMethods: [
+        { id: "m1", name: "Efectivo", typeCode: "10" },
+        { id: "m2", name: "Tarjeta", typeCode: "48" },
+        { id: "m3", name: "Yape", typeCode: "68" },
+      ],
+    }
+    const lines = formatKnowledgeForPrompt(withMethods, []).split("\n")
+    expect(lines.filter((line) => line.includes("Medios de pago"))).toEqual([
+      "Medios de pago que acepta la clínica (lista completa; ningún otro): Efectivo, Tarjeta, Yape.",
+    ])
+    // También con el índice: es un dato del sistema, no una respuesta oficial.
+    expect(formatKnowledgeForPrompt(withMethods, [entry(1, "Respuesta.")], "indice")).toContain("Efectivo, Tarjeta, Yape.")
+  })
+
   it("cuando no caben todas va el índice, y una respuesta de sede lo dice", () => {
     const entries = Array.from({ length: 60 }, (_, i) => entry(i + 1, `${"Explicación larga. ".repeat(40)}${i + 1}`))
     entries[0] = entry(1, "Solo en esta sede hay estacionamiento.", "Sede Centro")
@@ -238,6 +259,21 @@ it("lo básico de una clínica cuenta lo cubierto por respuestas vigentes y por 
   expect((await run((tx) => getKnowledgeBasics(tx, ORG))).covered).toBe(before.covered)
   // Las que salen de los datos dicen de dónde.
   expect(before.items.find((item) => item.key === "servicios")?.dataSource).toBe("Servicios activos")
+})
+
+it("«¿Qué medios de pago aceptan?» se cubre sola con los medios activos de caja", async () => {
+  const basic = async () =>
+    (await run((tx) => getKnowledgeBasics(tx, ORG))).items.find((item) => item.key === "medios_pago")
+  const before = await basic()
+  expect(before?.dataSource).toBe("Medios de pago activos")
+  const method = await run((tx) => createPaymentMethod(tx, ORG, OWNER, { name: "Transferencia básicos", typeCode: "30" }))
+  expect(await basic()).toMatchObject({ covered: true, coveredBy: "datos", entryId: null })
+  const snapshot = await run((tx) => getClinicInfoSnapshot(tx, ORG))
+  expect(formatKnowledgeForPrompt(snapshot, [])).toContain("Transferencia básicos")
+  // Apagado en caja, deja de decirse al agente sin editar ningún texto.
+  await run((tx) => updatePaymentMethod(tx, ORG, OWNER, method.id, { isActive: false }))
+  const after = await run((tx) => getClinicInfoSnapshot(tx, ORG))
+  expect(formatKnowledgeForPrompt(after, [])).not.toContain("Transferencia básicos")
 })
 
 it("la lista dice qué respuesta tiene un cambio por aprobar y cuál salió de una corrección", async () => {

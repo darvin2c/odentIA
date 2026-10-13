@@ -94,6 +94,21 @@ describe("permiso operativo agent.decide", () => {
     expect(canAccessAny("reception", platformPathPermission("/agent/knowledge") ?? [])).toBe(false)
     expect(canAccessAny("owner", platformPathPermission("/agent/knowledge") ?? [])).toBe(true)
   })
+
+  it("el tablero de oportunidades pide lo mismo que sus datos", () => {
+    const pipeline = platformPathPermission("/pipeline")
+    expect(pipeline).toEqual(platformPathPermission("/opportunities/abc"))
+    expect(canAccessAny("reception", pipeline ?? [])).toBe(true)
+    // Odontología y caja no leen el CRM: sin regla entraban y el servidor les negaba los datos.
+    expect(canAccessAny("dentist", pipeline ?? [])).toBe(false)
+    expect(canAccessAny("cashier", pipeline ?? [])).toBe(false)
+  })
+
+  it("la auditoría, bajo Configuración, la abre quien puede consultarla", () => {
+    expect(platformPathPermission("/settings/audit")).toEqual(["audit.read"])
+    expect(platformPathPermission("/settings/fields")).toEqual(["settings.read"])
+    expect(platformPathPermission("/audit")).toBeNull()
+  })
 })
 
 describe("fronteras económicas por rol", () => {

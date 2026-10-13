@@ -30,10 +30,11 @@ export function ProfessionalProfileDrawer({
 }): React.JSX.Element {
   const uid = useId()
   const queryClient = useQueryClient()
+  // Título y colegio dependen del país y de la profesión: se escriben, no se proponen.
   const [values, setValues] = useState<Required<ProfessionalProfileInput>>(() => ({
     signatureName: profile?.signatureName ?? "",
-    professionalTitle: profile?.professionalTitle ?? "Cirujano dentista",
-    registrationBody: profile?.registrationBody ?? "COP",
+    professionalTitle: profile?.professionalTitle ?? "",
+    registrationBody: profile?.registrationBody ?? "",
     registrationNumber: profile?.registrationNumber ?? "",
     specialtyRegistration: profile?.specialtyRegistration ?? "",
   }))
@@ -82,7 +83,9 @@ export function ProfessionalProfileDrawer({
       isSubmitting={save.isPending}
       isDirty={dirty}
       error={error}
-      submitDisabled={!registrationValid || !values.professionalTitle?.trim()}
+      submitDisabled={
+        !registrationValid || !values.professionalTitle?.trim() || !values.registrationBody?.trim()
+      }
       submitLabel="Guardar perfil"
     >
       <div className="grid gap-4 sm:grid-cols-2">
@@ -103,19 +106,27 @@ export function ProfessionalProfileDrawer({
             id={`${uid}-title`}
             maxLength={120}
             required
+            aria-describedby={`${uid}-title-help`}
             value={values.professionalTitle ?? ""}
             onChange={(event) => set("professionalTitle", event.target.value)}
           />
+          <FieldDescription id={`${uid}-title-help`}>
+            Como figura en tu título; aparece junto a tu firma.
+          </FieldDescription>
         </Field>
         <Field>
           <FieldLabel htmlFor={`${uid}-body`}>Colegio profesional</FieldLabel>
           <Input
             id={`${uid}-body`}
             maxLength={40}
+            required
+            aria-describedby={`${uid}-body-help`}
             value={values.registrationBody ?? ""}
             onChange={(event) => set("registrationBody", event.target.value)}
           />
-          <FieldDescription>COP: Colegio Odontológico del Perú.</FieldDescription>
+          <FieldDescription id={`${uid}-body-help`}>
+            El colegio u organismo que emite tu registro, con el nombre o las siglas con que firmas.
+          </FieldDescription>
         </Field>
         <Field>
           <FieldLabel htmlFor={`${uid}-number`}>Número de colegiatura</FieldLabel>

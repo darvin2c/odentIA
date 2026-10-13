@@ -28,14 +28,13 @@ import {
   updateTask,
   getAgentCaseState,
   getAgentConfig,
-  getAnswerTraceForMessage,
   listAnswerTraces,
   listKnowledgeGaps,
   listPersonFacts,
   removePersonFact,
   operationAgentFields,
+  AGENT_ROLES,
   READ_TOOLS,
-  roleTools,
   TOOL_OPERATION,
   TOOLS_WITHOUT_OPERATION,
   getAgentLlmSecrets,
@@ -1624,9 +1623,6 @@ it("el sí del interlocutor en el turno siguiente ejecuta la reserva propuesta, 
     expect(offered.basis).toEqual([{ kind: "agenda", label: "Agenda: horarios disponibles", detail: expect.stringMatching(/horarios?$/) }])
     expect(offered.checks).toEqual([{ kind: "hora", value: "9:00 a. m.", ok: true, source: "Agenda: horarios disponibles" }])
     expect(offered.messageId).toBeTruthy()
-    const byMessage = await withOrgContext(appDb, "org_a", (tx) =>
-      getAnswerTraceForMessage(tx, "org_a", offered.messageId!))
-    expect(byMessage?.id).toBe(offered.id)
   } finally {
     await withOrgContext(appDb, "org_a", (tx) =>
       updateAutonomyPolicy(tx, "org_a", fx.actorId, {
@@ -1860,7 +1856,9 @@ it("la ficha de Recepción declara exactamente las herramientas que el agente ti
   }
   // Una herramienta nueva sin sitio en la ficha, o una función que nombra una
   // herramienta que no existe, rompe esta igualdad.
-  expect(makeAgentTools(ctx).map((tool) => tool.name).sort()).toEqual(roleTools("recepcion").sort())
+  const ficha = AGENT_ROLES.recepcion
+  const declared = [...new Set([...ficha.always, ...ficha.functions.flatMap((fn) => fn.tools)])]
+  expect(makeAgentTools(ctx).map((tool) => tool.name).sort()).toEqual(declared.sort())
 
   // Ninguna herramienta declara campos por su cuenta: o toma los de la
   // operación que comparte con la pantalla, o solo lee, o figura con su motivo

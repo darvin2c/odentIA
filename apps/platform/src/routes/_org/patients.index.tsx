@@ -39,8 +39,6 @@ export const Route = createFileRoute("/_org/patients/")({
     ...(typeof search.contactId === "string" ? { contactId: search.contactId } : {}),
     ...(typeof search.q === "string" ? { q: search.q } : {}),
     ...(typeof search.isActive === "string" ? { isActive: search.isActive } : {}),
-    ...(typeof search.sex === "string" ? { sex: search.sex } : {}),
-    ...(typeof search.docType === "string" ? { docType: search.docType } : {}),
     ...(typeof search.sort === "string" ? { sort: search.sort } : {}),
     ...(typeof search.cursor === "string" ? { cursor: search.cursor } : {}),
   }),
@@ -79,8 +77,6 @@ function PatientsPage() {
   const listSearch = useListSearch()
   const search = listSearch.get("q") ?? ""
   const isActive = listSearch.get("isActive")
-  const sex = listSearch.get("sex")
-  const docType = listSearch.get("docType")
   const sort = listSearch.get("sort")
   const cursor = listSearch.get("cursor")
   const [previousCursors, setPreviousCursors] = useState<string[]>([])
@@ -90,14 +86,12 @@ function PatientsPage() {
   }, [cursor])
 
   const patientsQuery = useQuery({
-    queryKey: ["patients", search, isActive, sex, docType, sort, cursor],
+    queryKey: ["patients", search, isActive, sort, cursor],
     queryFn: () => {
       const params = new URLSearchParams()
       params.set("limit", String(PAGE_LIMIT))
       if (search.trim()) params.set("q", search.trim())
       if (isActive) params.set("isActive", isActive)
-      if (sex) params.set("sex", sex)
-      if (docType) params.set("docType", docType)
       if (sort) params.set("sort", sort)
       if (cursor) params.set("cursor", cursor)
       return apiFetch<{ data: PatientListRow[]; nextCursor?: string | null }>(
@@ -210,7 +204,7 @@ function PatientsPage() {
   const rows = patientsQuery.data?.data ?? []
   const nextCursor = patientsQuery.data?.nextCursor ?? null
   const pageNumber = previousCursors.length + 1
-  const hasActiveFilter = Boolean(search || isActive || sex || docType)
+  const hasActiveFilter = Boolean(search || isActive)
   const currentSort = sort ?? "-created"
   const sorting: SortingState = [
     { id: currentSort.replace(/^-/, ""), desc: currentSort.startsWith("-") },

@@ -12,6 +12,7 @@ import { telegramBotApiAdapter } from "@odentia/channels"
 import { createAppDb, createOwnerDb, type Db, setupAgentMemory, withOrgContext } from "@odentia/db"
 import { agentRunLedger } from "@odentia/db/schema/agent"
 import { message } from "@odentia/db/schema/crm"
+import { organizationPaymentMethod } from "@odentia/db/schema/org-payments"
 import {
   createConnection,
   createKnowledgeEntry,
@@ -307,4 +308,34 @@ it("la herramienta de plantillas solo viaja si algún canal activo de la clínic
   } finally {
     await withOrgContext(appDb, ORG, (tx) => setConnectionStatus(tx, ORG, whatsapp.id, "disabled"))
   }
+})
+
+it("los medios de pago activos de caja viajan en cada turno, en lo que comparte toda la clínica", async () => {
+  const ask = async (thread: string, text: string) => {
+    const model = new RecordingModel()
+    const inbound = await ingest(thread, `${thread}-1`, text)
+    expect(await run(model, inbound.conversationId, inbound.messageId)).toBe("done")
+    return model.systemPrompt(0)
+  }
+  // Sin medios activos el agente no recibe ninguna lista: no afirma nada.
+  expect(await ask("tg:uso-pago-0", "¿Aceptan tarjeta?")).not.toContain("Medios de pago que acepta la clínica")
+  const methods = await ownerDb
+    .insert(organizationPaymentMethod)
+    .values([
+      { organizationId: ORG, name: "Efectivo", typeCode: "10", sortOrder: 1 },
+      { organizationId: ORG, name: "Tarjeta", typeCode: "48", sortOrder: 2 },
+      { organizationId: ORG, name: "Yape", typeCode: "68", sortOrder: 3 },
+    ])
+    .returning({ id: organizationPaymentMethod.id, name: organizationPaymentMethod.name })
+  const line = "Medios de pago que acepta la clínica (lista completa; ningún otro): Efectivo, Tarjeta, Yape."
+  const promptA = await ask("tg:uso-pago-1", "¿Aceptan tarjeta?")
+  const promptB = await ask("tg:uso-pago-2", "Hola")
+  expect(promptA).toContain(line)
+  // Una sola línea, dentro del prefijo común: va antes de lo propio del hilo.
+  expect(promptA.split("\n").filter((text) => text.includes("Medios de pago que acepta"))).toHaveLength(1)
+  expect(promptA.indexOf(line)).toBeLessThan(sharedPrefix(promptA, promptB))
+  // Apagado en caja, el agente deja de recibirlo sin que nadie edite un texto.
+  const wallet = methods.find((method) => method.name === "Yape")
+  await ownerDb.update(organizationPaymentMethod).set({ isActive: false }).where(eq(organizationPaymentMethod.id, wallet!.id))
+  expect(await ask("tg:uso-pago-3", "¿Aceptan tarjeta?")).toContain("(lista completa; ningún otro): Efectivo, Tarjeta.")
 })

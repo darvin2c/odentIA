@@ -12,7 +12,7 @@ import {
   type AnswerTraceOutcome,
 } from "@odentia/db/schema/agent"
 import { conversation, message } from "@odentia/db/schema/crm"
-import { and, count, desc, eq, inArray, or, sql } from "drizzle-orm"
+import { and, count, desc, eq, inArray } from "drizzle-orm"
 import { CONFIRM_TTL_HOURS, listProposals, PROPOSAL_ACTION_LABEL } from "./agent-operations.js"
 import { notFound, validation } from "./errors.js"
 import { formatZoned, type OrgLocale } from "./locale.js"
@@ -225,19 +225,6 @@ export async function addAgentCaseNote(
   return next
 }
 
-/** Quita una nota del caso (la retira una persona desde la ficha de la conversación). */
-export async function removeAgentCaseNote(
-  tx: Db,
-  orgId: string,
-  conversationId: string,
-  at: string,
-): Promise<AgentCaseNote[]> {
-  const current = (await caseMemoryRow(tx, orgId, conversationId))?.notes ?? []
-  const next = current.filter((note) => note.at !== at)
-  if (next.length !== current.length) await upsertCaseMemory(tx, orgId, conversationId, { notes: next })
-  return next
-}
-
 /** Conserva la última consulta de una herramienta de lectura del hilo. */
 export async function recordAgentCaseLookup(
   tx: Db,
@@ -354,35 +341,6 @@ function toTraceItem(row: AnswerTraceRow, messageId: string | null, questions: M
     model: row.model,
     createdAt: row.createdAt.toISOString(),
   }
-}
-
-/**
- * Traza de un mensaje del agente. El envío directo la enlaza por mensaje; el
- * que esperó confirmación o aprobación, por la propuesta que lo ejecutó.
- * Nulo si el mensaje no la tiene (anterior a la traza o escrito por una persona).
- */
-export async function getAnswerTraceForMessage(
-  tx: Db,
-  orgId: string,
-  messageId: string,
-): Promise<AnswerTraceItem | null> {
-  if (!isUuid(messageId)) throw validation("messageId inválido")
-  const [row] = await tx
-    .select({ trace: agentAnswerTrace })
-    .from(agentAnswerTrace)
-    .leftJoin(
-      agentProposal,
-      and(eq(agentProposal.organizationId, orgId), eq(agentProposal.id, agentAnswerTrace.proposalId)),
-    )
-    .where(
-      and(
-        eq(agentAnswerTrace.organizationId, orgId),
-        or(eq(agentAnswerTrace.messageId, messageId), sql`${agentProposal.result}->>'messageId' = ${messageId}`),
-      ),
-    )
-    .orderBy(desc(agentAnswerTrace.createdAt))
-    .limit(1)
-  return row ? toTraceItem(row.trace, messageId, await triggerBodies(tx, orgId, [row.trace])) : null
 }
 
 /**

@@ -201,7 +201,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     purpose: "Quién forma parte de tu clínica y qué puede ver o hacer cada persona según su rol. Desde ahí invitas a alguien nuevo.",
     terms: ["usuarios", "invitar", "roles", "permisos", "recepcionista", "odontólogo", "agregar a alguien", "accesos"],
     writePermission: "settings.write",
-    faqs: [{ q: "¿Cómo invito a alguien a mi equipo?", a: "En Configuración › Equipo y permisos, pulsa «Invitar», escribe su correo y elige su rol. Le llega una invitación para crear su cuenta." }],
+    faqs: [{ q: "¿Cómo invito a alguien a mi equipo?", a: "En Configuración › Equipo y permisos, pulsa «Invitar miembro», escribe su correo y elige su rol. Le llega una invitación para crear su cuenta." }],
   },
   {
     id: "medios-de-pago",
@@ -219,7 +219,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     parent: SETTINGS,
     purpose: "El horario semanal y las ausencias de cada profesional, y de cada sede sus sillones, sus feriados y cierres y lo que dura una cita regular. Sin un horario aquí no se pueden reservar citas.",
     terms: ["horarios", "horario de atención", "días de atención", "sillones", "turnos del doctor", "agenda del profesional", "ausencias", "vacaciones", "feriados", "cierres", "duración de la cita"],
-    writePermission: "appointments.write",
+    writePermission: "settings.write",
     faqs: [{ q: "¿Dónde configuro los horarios?", a: "En Configuración › Disponibilidad. Ahí defines, por profesional y sede, los días y las horas de atención." }],
   },
   {

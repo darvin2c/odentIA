@@ -153,14 +153,18 @@ export function AdminRecommendationDrawer({ recommendationKey, onClose }: { reco
                   Desde ahora, y solo para lo que ocurra desde que la prendas: {item.description.charAt(0).toLowerCase() + item.description.slice(1)}
                 </p>
               </div>
-              <Link
-                to="/agent/administrador"
-                search={{ linea: item.key }}
-                className="inline-flex min-h-11 w-full items-center justify-center rounded-lg bg-primary px-4 text-sm font-semibold text-primary-foreground hover:bg-primary/90"
-              >
-                Ver su flujo y prender
-              </Link>
-              {canAdmin ? null : <p className="text-[13px] text-muted-foreground">La prende quien administra el agente.</p>}
+              {/* La página del Administrador solo la abre quien administra el agente: a los demás no se les ofrece un enlace que rebota. */}
+              {canAdmin ? (
+                <Link
+                  to="/agent/administrador"
+                  search={{ linea: item.key }}
+                  className="inline-flex min-h-11 w-full items-center justify-center rounded-lg bg-primary px-4 text-sm font-semibold text-primary-foreground hover:bg-primary/90"
+                >
+                  Ver su flujo y prender
+                </Link>
+              ) : (
+                <p className="text-[13px] text-muted-foreground">La prende quien administra el agente.</p>
+              )}
             </div>
             {where ? (
               <Link to={where.to} className="inline-flex min-h-11 items-center text-sm font-semibold text-primary hover:underline sm:min-h-8">

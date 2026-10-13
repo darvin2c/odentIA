@@ -17,7 +17,6 @@ import { Route as ReservaRouteImport } from './routes/reserva'
 import { Route as OrgAgendaRouteImport } from './routes/_org/agenda'
 import { Route as OrgBranchesRouteImport } from './routes/_org/branches'
 import { Route as OrgCommissionsRouteImport } from './routes/_org/commissions'
-import { Route as OrgDemoRouteImport } from './routes/_org/demo'
 import { Route as OrgFinanceRouteImport } from './routes/_org/finance'
 import { Route as OrgHomeRouteImport } from './routes/_org/home'
 import { Route as OrgInboxRouteImport } from './routes/_org/inbox'
@@ -103,11 +102,6 @@ const OrgBranchesRoute = OrgBranchesRouteImport.update({
 const OrgCommissionsRoute = OrgCommissionsRouteImport.update({
   id: '/commissions',
   path: '/commissions',
-  getParentRoute: () => OrgRoute,
-} as any)
-const OrgDemoRoute = OrgDemoRouteImport.update({
-  id: '/demo',
-  path: '/demo',
   getParentRoute: () => OrgRoute,
 } as any)
 const OrgFinanceRoute = OrgFinanceRouteImport.update({
@@ -362,7 +356,6 @@ export interface FileRoutesByFullPath {
   '/agenda': typeof OrgAgendaRoute
   '/branches': typeof OrgBranchesRoute
   '/commissions': typeof OrgCommissionsRoute
-  '/demo': typeof OrgDemoRoute
   '/finance': typeof OrgFinanceRoute
   '/home': typeof OrgHomeRoute
   '/inbox': typeof OrgInboxRoute
@@ -419,7 +412,6 @@ export interface FileRoutesByTo {
   '/agenda': typeof OrgAgendaRoute
   '/branches': typeof OrgBranchesRoute
   '/commissions': typeof OrgCommissionsRoute
-  '/demo': typeof OrgDemoRoute
   '/finance': typeof OrgFinanceRoute
   '/home': typeof OrgHomeRoute
   '/inbox': typeof OrgInboxRoute
@@ -476,7 +468,6 @@ export interface FileRoutesById {
   '/_org/agenda': typeof OrgAgendaRoute
   '/_org/branches': typeof OrgBranchesRoute
   '/_org/commissions': typeof OrgCommissionsRoute
-  '/_org/demo': typeof OrgDemoRoute
   '/_org/finance': typeof OrgFinanceRoute
   '/_org/home': typeof OrgHomeRoute
   '/_org/inbox': typeof OrgInboxRoute
@@ -535,7 +526,6 @@ export interface FileRouteTypes {
     | '/agenda'
     | '/branches'
     | '/commissions'
-    | '/demo'
     | '/finance'
     | '/home'
     | '/inbox'
@@ -592,7 +582,6 @@ export interface FileRouteTypes {
     | '/agenda'
     | '/branches'
     | '/commissions'
-    | '/demo'
     | '/finance'
     | '/home'
     | '/inbox'
@@ -648,7 +637,6 @@ export interface FileRouteTypes {
     | '/_org/agenda'
     | '/_org/branches'
     | '/_org/commissions'
-    | '/_org/demo'
     | '/_org/finance'
     | '/_org/home'
     | '/_org/inbox'
@@ -765,13 +753,6 @@ declare module '@tanstack/react-router' {
       path: '/commissions'
       fullPath: '/commissions'
       preLoaderRoute: typeof OrgCommissionsRouteImport
-      parentRoute: typeof OrgRoute
-    }
-    '/_org/demo': {
-      id: '/_org/demo'
-      path: '/demo'
-      fullPath: '/demo'
-      preLoaderRoute: typeof OrgDemoRouteImport
       parentRoute: typeof OrgRoute
     }
     '/_org/finance': {
@@ -1194,7 +1175,6 @@ interface OrgRouteChildren {
   OrgAgendaRoute: typeof OrgAgendaRoute
   OrgBranchesRoute: typeof OrgBranchesRoute
   OrgCommissionsRoute: typeof OrgCommissionsRoute
-  OrgDemoRoute: typeof OrgDemoRoute
   OrgFinanceRoute: typeof OrgFinanceRoute
   OrgHomeRoute: typeof OrgHomeRoute
   OrgInboxRoute: typeof OrgInboxRoute
@@ -1224,7 +1204,6 @@ const OrgRouteChildren: OrgRouteChildren = {
   OrgAgendaRoute: OrgAgendaRoute,
   OrgBranchesRoute: OrgBranchesRoute,
   OrgCommissionsRoute: OrgCommissionsRoute,
-  OrgDemoRoute: OrgDemoRoute,
   OrgFinanceRoute: OrgFinanceRoute,
   OrgHomeRoute: OrgHomeRoute,
   OrgInboxRoute: OrgInboxRoute,

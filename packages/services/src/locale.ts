@@ -84,6 +84,17 @@ export async function findOrgCurrency(tx: Db, orgId: string): Promise<string | n
 }
 
 /**
+ * País de la clínica (ISO 3166-1 alfa-2) si ya tiene perfil; `null` si no. Con
+ * él se aplica lo nacional (p. ej. un teléfono escrito sin código de país);
+ * sin él no se asume el de ningún país.
+ */
+export async function findOrgCountry(tx: Db, orgId: string): Promise<string | null> {
+  const [row] = await tx.execute<{ countryCode: string }>(sql`
+    select country_code as "countryCode" from org_profile where organization_id = ${orgId}`)
+  return row?.countryCode || null
+}
+
+/**
  * Sin perfil regional no se registra dinero: no se asume la moneda de ningún
  * país. Es una precondición de configuración, no un «no encontrado».
  */

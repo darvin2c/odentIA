@@ -1,4 +1,4 @@
-# 0001 · Proveedor LLM por organización sobre un único protocolo
+# 0016 · Proveedor LLM por organización sobre un único protocolo
 
 Fecha: 2026-10-08 · Estado: aceptada
 

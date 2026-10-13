@@ -31,7 +31,12 @@ export type FilterDef =
     })
   | (FilterBase & {
       type: "number-range"
-      money?: boolean
+      /**
+       * El rango es un importe y viaja en la unidad menor de su moneda. El patrón
+       * no conoce la moneda de la clínica: la app le dice cuántos decimales tiene
+       * (ISO 4217: ninguno en CLP, dos en PEN, tres en KWD). Nunca se asumen dos.
+       */
+      money?: { fractionDigits: number }
     })
   | (FilterBase & {
       type: "date"

@@ -1,10 +1,6 @@
 export * from "./contract.js"
 export * from "./protocol.js"
-export {
-  pollTelegramUpdates,
-  setTelegramWebhook,
-  telegramBotApiAdapter,
-} from "./telegram-bot-api.js"
+export { setTelegramWebhook, telegramBotApiAdapter } from "./telegram-bot-api.js"
 export * from "./gmail.js"
 export * from "./microsoft365.js"
 export { whatsappCloudApiAdapter } from "./whatsapp-cloud-api.js"

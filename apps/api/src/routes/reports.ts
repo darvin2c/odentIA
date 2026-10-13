@@ -51,7 +51,7 @@ export function createReportsRoute(deps: Pick<CrmDeps, "db">) {
   read("/sales", getReportSales)
   read("/service", getReportService)
 
-  // Los avisos del asesor: cada detección exige su permiso, como en Inicio.
+  // Los avisos del Administrador: cada línea exige su permiso, como en Inicio.
   app.get("/advice", async (c) => {
     const { orgId, memberRole } = orgContextOf(c)
     const parsed = reportQuery.safeParse(c.req.query())

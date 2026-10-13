@@ -138,7 +138,7 @@ export const AGENT_ROLES: Record<AgentRoleId, AgentRole> = {
       "leer_contexto_comercial",
       "ver_otros_canales",
     ],
-    sees: "La conversación y lo acordado. Agenda, servicios y precios. El conocimiento de la clínica. Las citas y los datos de contacto de la persona; su saldo solo si la clínica lo autoriza.",
+    sees: "La conversación y lo acordado. Agenda, servicios, precios y los medios de pago que acepta la clínica. El conocimiento de la clínica. Las citas y los datos de contacto de la persona; su saldo solo si la clínica lo autoriza.",
     notSees: "Historia clínica ni caja.",
     never: "Diagnosticar o recetar. Inventar precios, horarios o disponibilidad. Ver o mencionar la historia clínica.",
     confirms: "Según el nivel: el paciente con su sí o el equipo en Aprobaciones.",
@@ -254,12 +254,6 @@ export function toolsDisabledBy(role: AgentRoleId, disabledFunctions: readonly s
     for (const tool of fn.tools) if (!kept.has(tool)) removed.add(tool)
   }
   return [...removed]
-}
-
-/** Todas las herramientas que la ficha declara, para comprobar que no sobra ni falta ninguna. */
-export function roleTools(role: AgentRoleId): string[] {
-  const ficha = AGENT_ROLES[role]
-  return [...new Set([...ficha.always, ...ficha.functions.flatMap((fn) => fn.tools)])]
 }
 
 /* ---------- Hasta dónde llega solo: niveles sobre la política de autonomía ---------- */

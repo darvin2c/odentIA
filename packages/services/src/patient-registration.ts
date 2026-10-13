@@ -24,6 +24,7 @@ import { auditEvent, patientRegistrationConfig } from "@odentia/db/schema/org"
 import { createHash, randomBytes } from "node:crypto"
 import { and, eq, sql, type SQL } from "drizzle-orm"
 import { notFound, ServiceError, validation } from "./errors.js"
+import { findOrgCountry } from "./locale.js"
 import { createPatient, patientOrganizationToday, requirePatient, type PatientRow } from "./patients.js"
 import { initializeDeclaredPatientHealth } from "./clinical.js"
 import { applyMessagePermissions } from "./data-consents.js"
@@ -545,6 +546,8 @@ export async function registerPatient(
     }
   }
   const today = await patientOrganizationToday(tx, orgId)
+  // País de la clínica: con su perfil se acepta un teléfono nacional sin prefijo.
+  const countryCode = await findOrgCountry(tx, orgId)
 
   // 3. Validación de respuestas (esquema + reglas de negocio). Todo revierte al fallar.
   const shape = registrationAnswersSchema.safeParse(input.answers)
@@ -555,6 +558,7 @@ export async function registerPatient(
   const errors = validateRegistrationAnswers(config, answers, {
     mode: isPublic ? "public" : "internal",
     today,
+    countryCode,
     ...(essentials ? { scope: "essentials" as const } : {}),
   })
   if (Object.keys(errors).length) throw validation(Object.values(errors)[0]!)
@@ -694,7 +698,7 @@ export async function registerPatient(
         .values({
           organizationId: orgId,
           displayName: rep.displayName,
-          phone: rep.phone ? normalizePhone(rep.phone) : null,
+          phone: rep.phone ? normalizePhone(rep.phone, countryCode) : null,
           email: rep.email || null,
           docType: rep.docType ?? null,
           docNumber: rep.docNumber || null,

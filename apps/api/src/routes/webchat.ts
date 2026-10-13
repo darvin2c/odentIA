@@ -12,7 +12,6 @@ import {
   getWebchatConnection,
   issueWebchatSession,
   listWebchatConnections,
-  listWebchatNew,
   pollWebchat,
   type PublicWebchatConnection,
   readWebchatSession,
@@ -25,7 +24,6 @@ import {
 import { getConnInfo } from "@hono/node-server/conninfo"
 import { type Context, Hono } from "hono"
 import { bodyLimit } from "hono/body-limit"
-import { streamSSE } from "hono/streaming"
 import { z } from "zod"
 import { canAccess, orgContextOf } from "../lib/context.js"
 import { errorBody } from "../lib/error.js"
@@ -254,48 +252,6 @@ export function createWebchatPublicRoute(deps: WebchatPublicDeps) {
       }),
     )
     return c.json({ data: poll })
-  })
-
-  // SSE autorizado por token en query (EventSource no envía headers).
-  app.get("/:slug/:connectionId/stream", async (c) => {
-    const resolved = await resolve(c)
-    if (!resolved.ok) return resolved.response
-    cors(c)
-    const token = c.req.query("token") ?? ""
-    const { found } = resolved
-    const verified = readWebchatSession(found.connection, token)
-    if (!verified) return c.json(errorBody(c, "UNAUTHORIZED", "Sesión inválida o vencida"), 401)
-    const sessionId = verified.sessionId
-    return streamSSE(c, async (stream) => {
-      let cursor: { ts: string; id: string } | null = null
-      for (let tick = 0; tick < 27; tick += 1) {
-        if (stream.aborted) break
-        const page = await withOrgContext(deps.db, found.orgId, (tx) =>
-          listWebchatNew(tx, found.orgId, found.connection.id, sessionId, cursor, 20),
-        ).catch(() => null)
-        if (page === null) break
-        for (const item of page.items) {
-          cursor = { ts: item.createdAt, id: item.id }
-          await stream.writeSSE({
-            event: "webchat.message",
-            data: JSON.stringify({
-              id: item.id,
-              direction: item.direction,
-              senderKind: item.senderKind,
-              contentType: item.contentType,
-              body: item.body,
-              status: item.status,
-              createdAt: item.createdAt,
-            }),
-          })
-        }
-        if (page.status === "closed") {
-          await stream.writeSSE({ event: "webchat.closed", data: JSON.stringify({ closed: true }) })
-          break
-        }
-        await stream.sleep(2000)
-      }
-    })
   })
 
   return app

@@ -154,7 +154,7 @@ const iso = (column: SQL) => sql`to_char(${column} at time zone 'UTC', 'YYYY-MM-
 export interface WorkspaceHomeOptions {
   /** Sede pedida para la agenda y la caja; sin ella (o si ya no existe) vale la primera activa. */
   branchId?: string
-  /** Permisos de quien mira, para lo que el asesor puede recomendarle; sin esto no hay recomendaciones. */
+  /** Permisos de quien mira, para lo que el Administrador puede recomendarle; sin esto no hay recomendaciones. */
   can?: (permission: string) => boolean
 }
 

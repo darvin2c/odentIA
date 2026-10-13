@@ -35,6 +35,7 @@ import { PersonMemoryDrawer } from "../agent/person-memory"
 import { OpportunityDrawer } from "./opportunity-drawer"
 import { TaskDrawer } from "./task-drawer"
 import { activeOrgLocale } from "../../lib/locale"
+import { amountFromCents } from "../../lib/workspace"
 
 export interface ContactWorkspaceProps {
   contactId: string
@@ -63,15 +64,20 @@ const ACTIVITY_STATUS_LABEL: Record<string, string> = {
   normal: "Prioridad normal", urgent: "Prioridad urgente",
 }
 
+/**
+ * Importe de una oportunidad con su moneda. Llega en la unidad menor de esa
+ * moneda: los decimales los pone ella (ISO 4217), no una división fija.
+ */
 function money(amountCents: number | null, currency: string): string {
   if (amountCents === null) return "Sin monto"
   try {
-    return ((amountCents ?? 0) / 100).toLocaleString(activeOrgLocale(), {
+    return amountFromCents(String(amountCents), currency).toLocaleString(activeOrgLocale(), {
       style: "currency",
       currency,
     })
   } catch {
-    return `${amountCents / 100} ${currency}`
+    // Moneda que este navegador no reconoce: no se inventa cuántos decimales tiene.
+    return "Monto no disponible"
   }
 }
 

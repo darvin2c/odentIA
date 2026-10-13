@@ -6,12 +6,7 @@ import { expect, it } from "vitest"
 import { createBudget, decideBudget, deliverBudget, getBudgetDetail } from "./budgets.js"
 import { addEncounterProcedure, createEncounter } from "./encounters.js"
 import { addPlanItem, createTreatmentPlan, listPlanItems, updatePlanItem } from "./plan.js"
-import {
-  assertExecutableCodings,
-  listTemplateCodings,
-  resolveServiceCodings,
-  templatesForCode,
-} from "./procedure-codings.js"
+import { assertExecutableCodings, resolveServiceCodings } from "./procedure-codings.js"
 import { createPatient } from "./patients.js"
 import { createService, listTemplates } from "./service-catalog.js"
 import { isUniqueViolation } from "./errors.js"
@@ -158,21 +153,6 @@ async function setupCase(displayName: string) {
   )
   return { fluorId, resinaId, fluorService, resinaService, patient, draft, plan }
 }
-
-it("proyección 1:1: la plantilla vigente ofrece un único snapshot exacto", async () => {
-  const { fluorId } = await seedGlobals()
-  const codings = await withOrgContext(appDb, "org_a", (tx) => listTemplateCodings(tx, fluorId))
-  expect(codings).toHaveLength(1)
-  expect(codings[0]).toMatchObject({ system: "CPMS", code: "D1208", version: VERSION })
-})
-
-it("búsqueda inversa por código CPMS", async () => {
-  await seedGlobals()
-  const found = await withOrgContext(appDb, "org_a", (tx) => templatesForCode(tx, "CPMS", "D2330"))
-  expect(found.map((f) => f.templateKey)).toContain("restauradora:resina-una-superficie-test")
-  const empty = await withOrgContext(appDb, "org_a", (tx) => templatesForCode(tx, "CPMS", "D1352"))
-  expect(empty).toEqual([])
-})
 
 it("biblioteca vigente: paginada y por código con total y availableCount global", async () => {
   await seedGlobals()

@@ -162,8 +162,21 @@ function Unavailable() {
   )
 }
 
+/**
+ * Identificador del evento (UID, RFC 5545): el mismo en cada descarga de la
+ * misma cita, para que al cambiarla de horario el calendario actualice su
+ * evento en vez de añadir otro. El enlace es de una sola cita, así que sale de
+ * una huella suya: no lleva el enlace ni ningún dato de la persona o de la
+ * cita, porque los calendarios se sincronizan con terceros.
+ */
+async function calendarUid(linkKey: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`odentia:cita:${linkKey}`))
+  const hex = Array.from(new Uint8Array(digest).subarray(0, 16), (byte) => byte.toString(16).padStart(2, "0")).join("")
+  return `${hex}@odentia`
+}
+
 /** La cita como archivo de calendario (iCalendar, RFC 5545): lo abre el calendario del teléfono o del computador. */
-function calendarFile(clinicName: string, appointment: BookingAppointment): string {
+function calendarFile(clinicName: string, appointment: BookingAppointment, uid: string): string {
   const stamp = (instant: string | Date) => new Date(instant).toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "")
   const text = (value: string) => value.replace(/\\/g, "\\\\").replace(/([,;])/g, "\\$1").replace(/\r?\n/g, "\\n")
   const where = [`Sede ${appointment.branchName}`, appointment.branchAddress].filter(Boolean).join(", ")
@@ -172,11 +185,12 @@ function calendarFile(clinicName: string, appointment: BookingAppointment): stri
     "VERSION:2.0",
     "PRODID:-//odentIA//Reserva//ES",
     "BEGIN:VEVENT",
-    `UID:${stamp(appointment.startsAt)}-${crypto.randomUUID()}@odentia`,
+    `UID:${uid}`,
     `DTSTAMP:${stamp(new Date())}`,
     `DTSTART:${stamp(appointment.startsAt)}`,
     `DTEND:${stamp(appointment.endsAt)}`,
-    `SUMMARY:${text(`${appointment.serviceName ?? "Cita"} · ${clinicName}`)}`,
+    // Sin el servicio: un título de calendario no lleva datos clínicos.
+    `SUMMARY:${text(`Cita en ${clinicName}`)}`,
     `LOCATION:${text(where)}`,
     `DESCRIPTION:${text(`Con ${appointment.dentistName}`)}`,
     "END:VEVENT",
@@ -188,6 +202,7 @@ function Booked({
   clinicName,
   firstName,
   appointment,
+  linkKey,
   withData,
   cancelling,
   cancelError,
@@ -197,6 +212,8 @@ function Booked({
   clinicName: string
   firstName: string | null
   appointment: BookingAppointment
+  /** Lo que identifica al enlace (y con él a su cita): de ahí sale el UID del evento. */
+  linkKey: string
   withData: boolean
   cancelling: boolean
   cancelError: string | null
@@ -205,8 +222,9 @@ function Booked({
 }) {
   const [managing, setManaging] = useState(false)
   const [confirming, setConfirming] = useState(false)
-  const addToCalendar = () => {
-    const url = URL.createObjectURL(new Blob([calendarFile(clinicName, appointment)], { type: "text/calendar;charset=utf-8" }))
+  const addToCalendar = async () => {
+    const file = calendarFile(clinicName, appointment, await calendarUid(linkKey))
+    const url = URL.createObjectURL(new Blob([file], { type: "text/calendar;charset=utf-8" }))
     const link = document.createElement("a")
     link.href = url
     link.download = "mi-cita.ics"
@@ -258,7 +276,7 @@ function Booked({
         </dl>
         <p className="text-sm text-muted-foreground">Te lo confirmamos también por el chat. Ya puedes volver a la conversación.</p>
         <div className="flex flex-col gap-2">
-          <Button type="button" className="min-h-11 w-full" onClick={addToCalendar}>
+          <Button type="button" className="min-h-11 w-full" onClick={() => void addToCalendar()}>
             Agregar al calendario
           </Button>
           {appointment.canChange ? (
@@ -467,6 +485,7 @@ function BookingLinkPage() {
         clinicName={view.clinicName}
         firstName={view.patientFirstName}
         appointment={current}
+        linkKey={`${slug ?? ""}:${token ?? ""}`}
         withData={booked !== null && withData}
         cancelling={cancel.isPending}
         cancelError={
