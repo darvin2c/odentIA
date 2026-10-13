@@ -187,7 +187,7 @@ export interface AgentFunction {
 }
 
 export interface AgentRole {
-  id: "recepcion" | "asistente_clinico" | "asesor" | "ayuda"
+  id: "recepcion" | "asistente_clinico" | "administrador" | "ayuda"
   name: string
   audience: string
   role: string
@@ -360,7 +360,7 @@ export function lessonScopeLabel(scope: string): string {
   if (scope === "clinica") return "Toda la clínica"
   if (scope === "recepcion") return "Solo Recepción"
   if (scope === "asistente_clinico") return "Solo el Asistente clínico"
-  if (scope === "asesor") return "Solo el Asesor"
+  if (scope === "administrador") return "Solo el Administrador"
   return scope
 }
 
@@ -429,7 +429,7 @@ const AGENT_NAME: Record<string, string> = {
   recepcion: "Recepción",
   asistente_clinico: "Asistente clínico",
   clinico: "Asistente clínico",
-  asesor: "Asesor",
+  administrador: "Administrador",
   ayuda: "Ayuda",
 }
 

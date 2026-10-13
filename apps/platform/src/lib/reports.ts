@@ -325,7 +325,7 @@ function params(query: ReportQuery): URLSearchParams {
 
 export type ReportAdviceTab = "dinero" | "agenda" | "ventas"
 
-/** Aviso del asesor junto a una pregunta: una recomendación suya que hoy encuentra a alguien. */
+/** Aviso del administrador junto a una pregunta: una línea suya apagada que hoy tiene casos. */
 export interface ReportAdvice {
   tab: ReportAdviceTab
   /** Clave de la recomendación: con ella se abre su lista y su acción. */
@@ -335,7 +335,8 @@ export interface ReportAdvice {
   /** Solo en la inasistencia: la cifra del periodo y la del anterior. */
   rate: number | null
   previousRate: number | null
-  automation: { label: string; enabled: boolean } | null
+  /** La línea que lo atendería, que hoy está apagada. */
+  line: string
 }
 
 export function fetchReportAdvice(query: ReportQuery): Promise<{ data: { enabled: boolean; notices: ReportAdvice[] } }> {

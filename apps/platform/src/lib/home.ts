@@ -85,7 +85,24 @@ export function waitingText(row: WaitingRow, context: HomeTextContext): { title:
         action: row.more > 0 ? "Ver tareas" : "Abrir",
       }
     case "advice":
-      return { title: row.title, detail: joined(["Lo recomienda el asesor", row.detail]), action: "Ver la lista" }
+      return {
+        title: row.title,
+        // Dice quién lo haría si se prende: el agente o una persona del equipo.
+        detail: joined(["Lo recomienda el administrador", row.actor === "agente" ? "puede escribirles el agente" : "le tocaría a tu equipo", row.detail]),
+        action: row.actor === "agente" ? "Ver la propuesta" : "Ver la lista",
+      }
+    case "batch":
+      return {
+        title: `${plural(row.total, "mensaje espera", "mensajes esperan")} tu aprobación: ${row.name.charAt(0).toLowerCase() + row.name.slice(1)}`,
+        detail: joined(["Los encargó el administrador", row.total === 1 ? null : `mismo texto para ${row.total === 2 ? "los 2" : `los ${row.total}`}`]),
+        action: "Revisar",
+      }
+    case "unreached":
+      return {
+        title: row.total === 1 ? "El agente no pudo escribirle a 1 persona" : `El agente no pudo escribirle a ${row.total} personas`,
+        detail: joined([row.byCause.map((item) => `${item.total} ${item.reason}`).join(", "), "dice cómo habilitar a cada una"]),
+        action: "Ver cómo",
+      }
     case "budgets":
       return {
         title: row.total === 1 ? "1 presupuesto espera respuesta" : `${row.total} presupuestos esperan respuesta`,
@@ -121,6 +138,7 @@ export function waitingText(row: WaitingRow, context: HomeTextContext): { title:
 export function waitingKey(row: WaitingRow): string {
   if (row.kind === "case" || row.kind === "proposal" || row.kind === "task") return `${row.kind}:${row.id}`
   if (row.kind === "advice") return `advice:${row.key}`
+  if (row.kind === "batch") return `batch:${row.key}`
   if (row.kind === "more") return `more:${row.of}`
   return row.kind
 }

@@ -13,7 +13,8 @@ import { channelConnection, contact, conversation, message } from "@odentia/db/s
 import { branch } from "@odentia/db/schema/org"
 import { sql } from "drizzle-orm"
 import { expect, it } from "vitest"
-import { updateAdvisorSettings } from "./agent-advisor.js"
+import { updateAdminSettings } from "./agent-admin.js"
+import { setLine } from "./automation.js"
 import { createBudget, decideBudget, deliverBudget } from "./budgets.js"
 import { clinicalFixture } from "./clinical-test-fixture.js"
 import { addPlanItem } from "./plan.js"
@@ -307,23 +308,27 @@ it("el asesor acompaña a la cifra solo si está encendido y hay algo que hacer"
   // Apagado no dice nada.
   expect(await c.run((tx) => getReportAdvice(tx, c.orgId, { period: month }, everyone))).toEqual({ enabled: false, notices: [] })
 
-  await c.run((tx) => updateAdvisorSettings(tx, c.orgId, doctor, { enabled: true }))
+  await c.run((tx) => updateAdminSettings(tx, c.orgId, doctor, { enabled: true }))
   const advice = await c.run((tx) => getReportAdvice(tx, c.orgId, { period: month }, everyone))
   expect(advice.enabled).toBe(true)
   expect(advice.notices).toEqual([
     {
       tab: "agenda",
-      key: "inasistencias_sin_cita",
+      key: "seguimiento_no_asistencia",
       title: "1 persona faltó a su cita en los últimos 30 días y no tiene otra",
       total: 1,
       rate: 50,
       previousRate: null,
-      automation: { label: "recordatorio de cita", enabled: false },
+      // Nombra la línea que sí lo atendería, que hoy está apagada.
+      line: "Reprogramar tras una inasistencia",
     },
   ])
 
-  // Quien no ve la agenda no recibe el aviso; pospuesto, tampoco.
+  // Quien no ve la agenda no recibe el aviso. Si se pidió no recomendarla más, o
+  // si la línea ya está prendida (se está atendiendo), tampoco.
   expect((await c.run((tx) => getReportAdvice(tx, c.orgId, { period: month }, () => false))).notices).toEqual([])
-  await c.run((tx) => updateAdvisorSettings(tx, c.orgId, doctor, { detections: { inasistencias_sin_cita: { snoozeDays: 7 } } }))
+  await c.run((tx) => setLine(tx, c.orgId, doctor, "seguimiento_no_asistencia", { noRecommend: true }))
+  expect((await c.run((tx) => getReportAdvice(tx, c.orgId, { period: month }, everyone))).notices).toEqual([])
+  await c.run((tx) => setLine(tx, c.orgId, doctor, "seguimiento_no_asistencia", { noRecommend: false, enabled: true }))
   expect((await c.run((tx) => getReportAdvice(tx, c.orgId, { period: month }, everyone))).notices).toEqual([])
 })

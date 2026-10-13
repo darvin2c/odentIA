@@ -60,6 +60,8 @@ export interface ChatMessage {
   templateName: string | null
   templateLanguage: string | null
   templateParams: string[] | null
+  /** Lo envió una línea del Administrador: cuál. Nulo en los demás mensajes. */
+  automatic?: { key: string; name: string } | null
   createdAt: string
 }
 
@@ -106,7 +108,20 @@ export interface TaskItem {
   assigneeUserId: string | null
   dueAt: string | null
   status: string
+  /** Quién la dejó: una persona (`user`), Recepción (`agent`) o el Administrador (`admin`). */
   createdBy: string
+  /** A qué parte del equipo va cuando no tiene responsable. */
+  area: "recepcion" | "caja" | "clinico" | "administracion" | null
+  /** Por qué se creó, cuando la deja el Administrador. */
+  reason: string | null
+}
+
+/** A quién va una tarea sin responsable, con las palabras de la pantalla. */
+export const TASK_AREA_LABEL: Record<NonNullable<TaskItem["area"]>, string> = {
+  recepcion: "Equipo de recepción",
+  caja: "Caja",
+  clinico: "Profesional",
+  administracion: "Administración",
 }
 
 /** Rol del usuario en la org actual (fuente: membresía de la sesión). */

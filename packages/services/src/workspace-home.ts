@@ -4,9 +4,12 @@
  * (lo decide `getWorkspaceHome`), y esta función no consulta nada.
  *
  * El orden es fijo y sin puntajes: casos «Ahora», lo que espera la aprobación
- * del equipo, conversaciones sin responder, tareas vencidas, casos «Hoy» y
- * «Sin apuro», la siguiente tarea con el resto resumido, lo que recomienda el
- * asesor y los presupuestos que esperan respuesta.
+ * del equipo (propuestas y mensajes que encargó el administrador), las
+ * personas a las que el agente no pudo escribir, conversaciones sin responder,
+ * tareas vencidas, casos «Hoy» y «Sin apuro», la siguiente tarea con el resto
+ * resumido, lo que recomienda el administrador y, solo si él está apagado, los
+ * presupuestos que esperan respuesta (encendido, esa lista es una de sus
+ * líneas y saldría dos veces).
  */
 
 /** Tope de filas por tipo: lo demás se resume en una fila «y N más». */
@@ -50,6 +53,21 @@ export interface WaitingAdvice {
   key: string
   title: string
   detail: string
+  /** Quién lo haría si se prende la línea: el agente o una persona del equipo. */
+  actor: "agente" | "persona"
+}
+
+/** Mensajes de una línea que esperan aprobación, juntos: llevan el mismo texto. */
+export interface WaitingBatch {
+  key: string
+  name: string
+  total: number
+}
+
+/** Personas a las que el agente no pudo escribir hoy, por motivo. */
+export interface WaitingUnreached {
+  total: number
+  byCause: Array<{ total: number; reason: string }>
 }
 
 export interface WaitingBudgets {
@@ -61,6 +79,8 @@ export interface WaitingBudgets {
 export type WaitingRow =
   | ({ kind: "case" } & WaitingCase)
   | ({ kind: "proposal" } & WaitingProposal)
+  | ({ kind: "batch" } & WaitingBatch)
+  | ({ kind: "unreached" } & WaitingUnreached)
   | { kind: "conversations"; waiting: number; oldestAt: string | null }
   /** `more`: tareas abiertas que no tienen fila propia; solo la lleva la última. */
   | ({ kind: "task"; more: number } & WaitingTask)
@@ -85,6 +105,9 @@ export interface WaitingParts {
   openTasks: number
   advice: WaitingAdvice[]
   budgets: WaitingBudgets | null
+  /** Mensajes del administrador que esperan aprobación, por línea. */
+  batches?: WaitingBatch[]
+  unreached?: WaitingUnreached | null
 }
 
 export function composeWaiting(parts: WaitingParts): WaitingRow[] {
@@ -97,6 +120,9 @@ export function composeWaiting(parts: WaitingParts): WaitingRow[] {
   for (const item of proposals) rows.push({ kind: "proposal", ...item })
   const proposalsLeft = Math.max(parts.proposalsTotal, parts.proposals.length) - proposals.length
   if (proposalsLeft > 0) rows.push({ kind: "more", of: "proposals", count: proposalsLeft })
+  for (const item of parts.batches ?? []) rows.push({ kind: "batch", ...item })
+
+  if (parts.unreached && parts.unreached.total > 0) rows.push({ kind: "unreached", ...parts.unreached })
 
   if (parts.conversations && parts.conversations.waiting > 0) rows.push({ kind: "conversations", ...parts.conversations })
 

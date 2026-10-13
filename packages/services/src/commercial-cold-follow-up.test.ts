@@ -6,6 +6,7 @@ import { automationConsent } from "@odentia/db/schema/automation"
 import {
   agentConfig,
   channelConnection,
+  channelTemplate,
   contact,
   contactIdentity,
   conversation,
@@ -82,7 +83,7 @@ async function seed(input: SeedInput = {}) {
     }, { fetch, validateExternal: false }))
   if (input.consent !== false) {
     await ownerDb.insert(automationConsent).values({
-      organizationId: orgId, contactId: person.id, purpose: "seguimiento", channel: "whatsapp", status: "granted", source: "prueba",
+      organizationId: orgId, contactId: person.id, purpose: "seguimiento", status: "granted", source: "presencial",
     })
   }
   const [thread] =
@@ -268,13 +269,13 @@ it("lo vigente al aprobar manda: consentimiento revocado, política endurecida o
   expect(blocked.status).toBe("fallida")
   expect(blocked.result?.["errorCode"]).toBe("POLICY_REQUIRES_CONTACT_CONFIRM")
 
-  // La plantilla sale de la lista aprobada: el fallo llega con el hilo ya
-  // abierto y todo lo parcial se deshace.
+  // WhatsApp pausa la plantilla entre la propuesta y la aprobación: el fallo
+  // llega con el hilo ya abierto y todo lo parcial se deshace.
   const withdrawn = await seed()
   await tick(withdrawn.orgId)
-  await ownerDb.update(channelConnection)
-    .set({ configEncrypted: encryptJson(KEY, { ...WA_CONFIG, templates: [{ name: "bienvenida", language: "es_PE" }] }) })
-    .where(eq(channelConnection.id, withdrawn.connectionId))
+  await ownerDb.update(channelTemplate)
+    .set({ status: "pausada", reason: "Calidad baja" })
+    .where(and(eq(channelTemplate.connectionId, withdrawn.connectionId), eq(channelTemplate.name, "seguimiento_presupuesto")))
   const notAllowed = await decide(withdrawn, await proposalIdOf(withdrawn.orgId, withdrawn.taskId), "aprobada")
   expect(notAllowed.status).toBe("fallida")
   const [untouched] = await ownerDb.select().from(opportunity).where(eq(opportunity.id, withdrawn.opportunityId))
@@ -312,8 +313,8 @@ it("sin canal apto deriva como antes y nunca tumba el tick", async () => {
       prepare: (f) => withOrgContext(appDb, f.orgId, (tx) => updateAutonomyPolicy(tx, f.orgId, f.userId, { enviar_mensaje: "confirmar_usuario" })),
     },
     {
-      name: "configuración de la conexión ilegible",
-      prepare: (f) => ownerDb.update(channelConnection).set({ configEncrypted: "no-descifrable" }).where(eq(channelConnection.id, f.connectionId)),
+      name: "WhatsApp aún no aprueba la plantilla de seguimiento",
+      prepare: (f) => ownerDb.update(channelTemplate).set({ status: "en_revision" }).where(eq(channelTemplate.connectionId, f.connectionId)),
     },
     {
       name: "contacto archivado",

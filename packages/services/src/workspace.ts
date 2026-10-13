@@ -2,7 +2,8 @@ import type { Db } from "@odentia/db"
 import { member } from "@odentia/db/schema/auth"
 import { workspaceNotification } from "@odentia/db/schema/workspace"
 import { and, desc, eq, inArray, isNull, type SQL, sql } from "drizzle-orm"
-import { getAdvisorRecommendations } from "./agent-advisor.js"
+import { getAdminRecommendations, getAdminUnreached } from "./agent-admin.js"
+import { listPendingApprovals } from "./automation.js"
 import {
   countPendingProposals,
   getAutonomyPolicy,
@@ -32,6 +33,11 @@ export interface WorkspaceAccess {
   crm: boolean
   agent: boolean
   allTasks: boolean
+  /**
+   * Áreas del equipo a las que pertenece quien mira (clave de `TASK_AREAS`): ve
+   * también las tareas sin responsable que el Administrador dejó para su área.
+   */
+  taskAreas?: readonly string[]
   configure: boolean
   /** Quien atiende (odontólogo): solo sus citas, en todas las sedes, y los presupuestos de sus planes. */
   ownAppointments: boolean
@@ -48,6 +54,33 @@ export async function createWorkspaceNotification(tx: Db, orgId: string, input: 
   if (!recipient) throw notFound("Destinatario")
   await tx.insert(workspaceNotification).values({ organizationId: orgId, ...input })
     .onConflictDoNothing({ target: [workspaceNotification.organizationId, workspaceNotification.userId, workspaceNotification.dedupeKey] })
+}
+
+/**
+ * Aviso que se mantiene al día: si ya existe para ese destinatario y clave,
+ * cambia su texto (una cuenta que sube) y vuelve a quedar sin leer solo cuando
+ * el texto cambió. Para avisos que no cambian, `createWorkspaceNotification`.
+ */
+export async function upsertWorkspaceNotification(tx: Db, orgId: string, input: {
+  userId: string; dedupeKey: string; title: string; body: string; href: string; permission: string
+}) {
+  if (!/^\/(?!\/)[a-zA-Z0-9/_?=&.%+-]*$/.test(input.href)) throw validation("El destino del aviso debe ser una ruta interna")
+  if (!input.title.trim() || input.title.length > 200 || input.body.length > 1000 || input.dedupeKey.length > 300)
+    throw validation("El aviso excede los límites admitidos")
+  const [recipient] = await tx.select({ id: member.id }).from(member)
+    .where(and(eq(member.organizationId, orgId), eq(member.userId, input.userId))).limit(1)
+  if (!recipient) throw notFound("Destinatario")
+  await tx.insert(workspaceNotification).values({ organizationId: orgId, ...input })
+    .onConflictDoUpdate({
+      target: [workspaceNotification.organizationId, workspaceNotification.userId, workspaceNotification.dedupeKey],
+      set: {
+        title: input.title,
+        body: input.body,
+        href: input.href,
+        readAt: sql`case when ${workspaceNotification.title} = ${input.title} and ${workspaceNotification.body} = ${input.body}
+          then ${workspaceNotification.readAt} else null end`,
+      },
+    })
 }
 
 export async function listWorkspaceNotifications(tx: Db, orgId: string, userId: string, permissions: string[]) {
@@ -254,7 +287,8 @@ async function waitingConversations(tx: Db, orgId: string) {
 }
 
 async function waitingTasks(tx: Db, orgId: string, userId: string, access: WorkspaceAccess, dayEnd: SQL) {
-  const scope = sql`t.organization_id=${orgId} and t.status='open' and (${access.allTasks} or t.assignee_user_id=${userId})`
+  const areas = access.taskAreas?.length ? sql`or (t.assignee_user_id is null and t.area in ${[...access.taskAreas]})` : sql``
+  const scope = sql`t.organization_id=${orgId} and t.status='open' and (${access.allTasks} or t.assignee_user_id=${userId} ${areas})`
   type Row = Omit<WaitingTask, "href"> & { contactId: string | null; conversationId: string | null; opportunityId: string | null }
   const select = sql`select t.id, t.title, ${iso(sql`t.due_at`)} as "dueAt",
       case when t.due_at is null then 'none' when t.due_at < now() then 'overdue'
@@ -313,8 +347,13 @@ export async function getWorkspaceHome(tx: Db, orgId: string, userId: string, ac
 
   const proposals = access.agent ? await waitingProposals(tx, orgId) : { items: [], total: 0 }
   const tasks = access.tasks ? await waitingTasks(tx, orgId, userId, access, dayEnd) : { overdue: [], next: null, open: 0 }
-  // A lo sumo tres recomendaciones a la vez, como declara la ficha del asesor.
-  const advice = options.can ? (await getAdvisorRecommendations(tx, orgId, options.can)).recommendations : []
+  // A lo sumo tres recomendaciones a la vez, como declara la ficha del administrador.
+  const admin = options.can ? await getAdminRecommendations(tx, orgId, options.can) : { enabled: false, recommendations: [] }
+  const advice = admin.recommendations
+  // Las personas a las que el agente no pudo escribir: un motivo que alguien puede corregir.
+  const unreached = options.can && access.agent ? await getAdminUnreached(tx, orgId, options.can) : null
+  // Lo que el administrador encargó y espera aprobación, para quien decide por el agente.
+  const batches = access.agent ? await listPendingApprovals(tx, orgId) : []
   const waiting = composeWaiting({
     cases: access.agent ? await waitingCases(tx, orgId, userId, access.allTasks) : [],
     proposals: proposals.items,
@@ -323,8 +362,11 @@ export async function getWorkspaceHome(tx: Db, orgId: string, userId: string, ac
     overdueTasks: tasks.overdue,
     nextTask: tasks.next,
     openTasks: tasks.open,
-    advice: advice.map(({ key, title, detail }) => ({ key, title, detail })),
-    budgets: access.finance || access.clinical ? await waitingBudgets(tx, orgId, userId, access.ownAppointments) : null,
+    advice: advice.map(({ key, title, detail, actor }) => ({ key, title, detail, actor })),
+    unreached: unreached && unreached.total > 0 ? { total: unreached.total, byCause: unreached.byCause.map(({ total, reason }) => ({ total, reason })) } : null,
+    batches: batches.map(({ key, name, total }) => ({ key, name, total })),
+    // Con el administrador encendido, los presupuestos sin respuesta son una de sus líneas: no se repiten aquí.
+    budgets: (access.finance || access.clinical) && !admin.enabled ? await waitingBudgets(tx, orgId, userId, access.ownAppointments) : null,
   })
 
   // La puesta en marcha consulta capacidades existentes, no deduce configuración

@@ -32,6 +32,7 @@ import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-
 import { MessageCircle, Plus, Send } from "lucide-react"
 import { type FormEvent, useMemo, useState } from "react"
 import { z } from "zod"
+import { WhatsAppTemplates } from "../../components/whatsapp-templates"
 import { ApiError, apiFetch } from "../../lib/api"
 import { type ConnectionItem, usePermission } from "../../lib/crm"
 import { PageDraftGuard } from "../../lib/page-draft-guard"
@@ -51,7 +52,6 @@ const whatsappSchema = z.object({
   wabaId: z.string().min(1, "Requerido"),
   accessToken: z.string().min(1, "Requerido"),
   appSecret: z.string().min(1, "Requerido"),
-  templates: z.string(),
 })
 
 const messengerSchema = z.object({
@@ -99,7 +99,7 @@ function ChannelsPage() {
   const mode = useDetailMode()
   const [formOpen, setFormOpen] = useState(false)
   const [provider, setProvider] = useState<ProviderId>("telegram_bot_api")
-  const [created, setCreated] = useState<{ webhookUrl: string; webhookSecret: string } | null>(null)
+  const [created, setCreated] = useState<{ webhookUrl: string; webhookSecret: string; templatesError?: string } | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   const listQuery = useQuery({
@@ -134,7 +134,6 @@ function ChannelsPage() {
       wabaId: "",
       accessToken: "",
       appSecret: "",
-      templates: "",
     },
     validators: { onSubmit: whatsappSchema },
     onSubmit: ({ value }) =>
@@ -143,14 +142,6 @@ function ChannelsPage() {
         wabaId: value.wabaId,
         accessToken: value.accessToken,
         appSecret: value.appSecret,
-        templates: value.templates
-          .split("\n")
-          .map((line) => line.trim())
-          .filter(Boolean)
-          .map((line) => {
-            const [name, language] = line.split(":").map((s) => s.trim())
-            return { name: name ?? "", language: language ?? "es_PE" }
-          }),
       }),
   })
 
@@ -203,7 +194,7 @@ function ChannelsPage() {
   ) {
     setError(null)
     try {
-      const res = await apiFetch<{ data: { webhookUrl: string; webhookSecret: string } }>(
+      const res = await apiFetch<{ data: { webhookUrl: string; webhookSecret: string; templatesError?: string } }>(
         "/api/channels/connections",
         {
           method: "POST",
@@ -439,19 +430,10 @@ function ChannelsPage() {
               )}
             </waForm.Field>
           ))}
-          <waForm.Field name="templates">
-            {(field) => (
-              <Field>
-                <FieldLabel>Plantillas (una por línea: nombre:idioma)</FieldLabel>
-                <Input
-                  value={field.state.value}
-                  onChange={(e) => field.handleChange(e.target.value)}
-                  placeholder="cita_recordatorio:es_PE"
-                />
-                <FieldError>{fieldErrorMessages(field.state.meta.errors)}</FieldError>
-              </Field>
-            )}
-          </waForm.Field>
+          <p className="text-sm text-muted-foreground">
+            Los mensajes aprobados se leen de tu cuenta de WhatsApp al conectar: no hay que escribir nombres de
+            plantilla. El token necesita permiso para administrar plantillas (whatsapp_business_management).
+          </p>
         </>
       ) : provider === "messenger" ? (
         <>
@@ -587,6 +569,12 @@ function ChannelsPage() {
             <p className="break-all">Verify token: {created.webhookSecret}</p>
           </div>
         )}
+        {created?.templatesError ? (
+          <div role="alert" className="rounded-lg border border-warning/30 bg-warning-soft p-4 text-sm">
+            <p className="font-semibold">La conexión quedó creada, pero no se pudieron leer sus mensajes aprobados.</p>
+            <p>{created.templatesError}</p>
+          </div>
+        ) : null}
         <FilterBar
           filters={[
             {
@@ -637,6 +625,11 @@ function ChannelsPage() {
              formulario vive al costado. */
           <DataTable table={table} view={mode === "panel" ? "table" : "card"} isFetching={listQuery.isFetching} refreshMessage="Actualizando conexiones…" />
         )}
+        {items
+          .filter((conn) => conn.channel === "whatsapp" && conn.status === "active")
+          .map((conn) => (
+            <WhatsAppTemplates key={conn.id} connection={conn} canWrite={canWrite} />
+          ))}
       </MasterDetail>
     
       {/* Un solo contenedor montado a la vez: montar panel y drawer juntos

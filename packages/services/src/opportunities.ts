@@ -16,7 +16,6 @@ import {
 import { auditEvent, orgProfile } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, ilike, lt, or, sql } from "drizzle-orm"
 import { requireContact } from "./contacts.js"
-import { cancelPendingJobsForOpportunity } from "./automation.js"
 import { notFound, validation } from "./errors.js"
 import { findOrgCurrency, NO_CURRENCY, requireOrgCurrency } from "./locale.js"
 import { requirePatient } from "./patients.js"
@@ -1265,13 +1264,6 @@ export async function closeOpportunity(
     outcome: input.outcome,
     toStageId: terminal?.id ?? current.stageId,
   })
-  // El cierre solo cancela los seguimientos ligados a ESTA oportunidad
-  await cancelPendingJobsForOpportunity(
-    tx,
-    orgId,
-    id,
-    input.outcome === "won" ? "Oportunidad ganada" : "Oportunidad perdida",
-  )
   await cancelOpportunityFollowUp(tx, orgId, id, actor?.userId ?? null)
   await notifyOpp(tx, orgId)
   if (current.assignedUserId && current.assignedUserId !== (actor?.userId ?? null)) {

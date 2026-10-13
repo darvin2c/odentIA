@@ -320,7 +320,7 @@ export async function beginCommercialFollowUpCoordination(
       "Elige un canal válido o gestiona manualmente el seguimiento.",
     )
   }
-  if (!(await hasConsent(tx, orgId, current.contactId, "seguimiento", current.channel))) {
+  if (!(await hasConsent(tx, orgId, current.contactId, "seguimiento"))) {
     return deriveLocked(
       tx,
       row,

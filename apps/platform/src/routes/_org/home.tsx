@@ -3,7 +3,7 @@ import { ConfirmDialog, DetailDrawer, EmptyState, ErrorState, LoadingState, Page
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link, createFileRoute } from "@tanstack/react-router"
 import { useState } from "react"
-import { RecommendationDrawer } from "../../components/agent/advisor"
+import { AdminRecommendationDrawer, AdminUnreachedDrawer } from "../../components/agent/admin-recommendation"
 import { ApproveMessageDrawer, messageDraftOf } from "../../components/agent/approve-message-drawer"
 import { CaseBriefDrawer } from "../../components/agent/case-brief"
 import { CollectDrawer } from "../../components/finance/collect-drawer"
@@ -81,6 +81,7 @@ function HomePage() {
   const [outcome, setOutcome] = useState<{ status: string; detail: string | null; conversationId: string | null } | null>(null)
   const [briefFor, setBriefFor] = useState<{ conversationId: string; name: string } | null>(null)
   const [advice, setAdvice] = useState<string | null>(null)
+  const [unreached, setUnreached] = useState(false)
   const [budgets, setBudgets] = useState<BudgetsRow | null>(null)
 
   function settle(response: { data: AgentProposal }) {
@@ -177,6 +178,7 @@ function HomePage() {
               onReview: (row) => void review(row),
               onCase: (row) => row.conversationId && setBriefFor({ conversationId: row.conversationId, name: row.contactName ?? "Interlocutor" }),
               onAdvice: (row) => setAdvice(row.key),
+              onUnreached: () => setUnreached(true),
               onBudgets: setBudgets,
             }}
           />
@@ -201,7 +203,8 @@ function HomePage() {
 
     <ApproveMessageDrawer proposal={message} onClose={() => setMessage(null)} onDecided={settle} />
     <CaseBriefDrawer conversationId={briefFor?.conversationId ?? null} name={briefFor?.name ?? "Interlocutor"} canClaim={canClaim} onClose={() => setBriefFor(null)} onClaimed={refresh} />
-    <RecommendationDrawer recommendationKey={advice} onClose={() => setAdvice(null)} />
+    <AdminRecommendationDrawer recommendationKey={advice} onClose={() => setAdvice(null)} />
+    <AdminUnreachedDrawer open={unreached} onClose={() => setUnreached(false)} />
     <ConfirmDialog
       open={approving !== null}
       title="Aprobar y ejecutar el cambio"

@@ -15,6 +15,7 @@ export interface WaitingHandlers {
   onReview: (row: RowOf<"proposal">) => void
   onCase: (row: RowOf<"case">) => void
   onAdvice: (row: RowOf<"advice">) => void
+  onUnreached: () => void
   onBudgets: (row: RowOf<"budgets">) => void
 }
 
@@ -37,7 +38,9 @@ function TypeIcon({ icon: Icon, urgent }: { icon: LucideIcon; urgent?: boolean }
 }
 
 function iconOf(row: WaitingRow): ReactNode {
-  if (row.kind === "proposal" || (row.kind === "more" && row.of === "proposals")) return <AgentMark className="rounded-full" />
+  if (row.kind === "proposal" || row.kind === "batch" || row.kind === "unreached" || (row.kind === "more" && row.of === "proposals")) {
+    return <AgentMark className="rounded-full" />
+  }
   if (row.kind === "case") return <TypeIcon icon={UserRound} urgent={row.priority === "alta"} />
   if (row.kind === "more" && row.of === "cases") return <TypeIcon icon={UserRound} />
   if (row.kind === "conversations") return <TypeIcon icon={MessageCircle} />
@@ -60,6 +63,8 @@ function linkOf(row: WaitingRow, handlers: WaitingHandlers): ReactElement | null
       return row.conversationId ? null : <Link to="/agent/approvals" search={{ conversationId: undefined, status: undefined }} />
     case "proposal":
       return handlers.canApprove ? null : <Link to="/agent/approvals" search={{ conversationId: row.conversationId ?? undefined, status: undefined }} />
+    case "batch":
+      return <Link to="/agent/approvals" search={{ conversationId: undefined, status: undefined }} />
     case "conversations":
       return <Link to="/inbox" search={{ conversation: undefined, view: "unanswered" }} />
     case "task":
@@ -75,6 +80,7 @@ function open(row: WaitingRow, handlers: WaitingHandlers) {
   if (row.kind === "case") handlers.onCase(row)
   else if (row.kind === "proposal") handlers.onReview(row)
   else if (row.kind === "advice") handlers.onAdvice(row)
+  else if (row.kind === "unreached") handlers.onUnreached()
   else if (row.kind === "budgets") handlers.onBudgets(row)
 }
 
@@ -118,7 +124,7 @@ function WaitingRowItem({ row, context, handlers, className }: { row: WaitingRow
 /**
  * «Te espera»: todo lo que necesita a una persona en una sola lista, en el
  * orden que entrega el servidor. Cada fila abre lo que ya existe (aprobar, el
- * resumen del caso, la lista del asesor) o lleva a donde se resuelve.
+ * resumen del caso, la recomendación del administrador) o lleva a donde se resuelve.
  */
 export function WaitingList({
   rows,

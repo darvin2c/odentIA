@@ -217,7 +217,7 @@ export function AgentBaseDrawer({
           Encima de la base, cada agente suma lo suyo
         </h4>
         <p className="text-sm text-muted-foreground">
-          Recepción, el asistente clínico y el asesor tienen sus propias funciones y las reglas que aprendieron de tus correcciones. Eso no se
+          Recepción, el asistente clínico y el administrador tienen sus propias funciones y las reglas que aprendieron de tus correcciones. Eso no se
           mezcla entre ellos.
         </p>
       </section>

@@ -4,7 +4,11 @@ import type {
   ChannelAdapterDeps,
   NormalizedInbound,
   NormalizedStatus,
+  NormalizedTemplateStatus,
   OutboundMessage,
+  ProviderTemplate,
+  TemplateCategory,
+  TemplateStatus,
   WebhookParseResult,
 } from "./protocol.js"
 
@@ -18,6 +22,10 @@ export interface WhatsAppCloudConfig {
   wabaId: string
   accessToken: string
   appSecret: string
+  /**
+   * Solo para entornos sin proveedor (pruebas y desarrollo): las plantillas se
+   * leen de la cuenta con `listTemplates`, no se escriben a mano.
+   */
   templates: WhatsAppTemplateRef[]
 }
 
@@ -78,6 +86,10 @@ interface WaMessage {
   image?: WaMedia
   document?: WaMedia
   audio?: WaMedia
+  /** Respuesta rápida de una plantilla. */
+  button?: { payload?: string; text?: string }
+  /** Botón de un mensaje interactivo enviado dentro de la ventana. */
+  interactive?: { type?: string; button_reply?: { id?: string; title?: string } }
 }
 
 interface WaStatus {
@@ -111,6 +123,17 @@ function messageToNormalized(
   const withName = displayName ? { senderDisplayName: displayName } : {}
   if (m.type === "text" && typeof m.text?.body === "string") {
     return { ...base, ...withName, content: { type: "text", text: m.text.body } }
+  }
+  // Un botón llega como texto (lo que la persona ve que respondió) con el
+  // identificador que se le puso al enviarlo.
+  if (m.type === "button" && typeof m.button?.text === "string") {
+    const replyId = typeof m.button.payload === "string" ? { replyId: m.button.payload } : {}
+    return { ...base, ...withName, content: { type: "text", text: m.button.text, ...replyId } }
+  }
+  const reply = m.type === "interactive" ? m.interactive?.button_reply : undefined
+  if (reply && typeof reply.title === "string") {
+    const replyId = typeof reply.id === "string" ? { replyId: reply.id } : {}
+    return { ...base, ...withName, content: { type: "text", text: reply.title, ...replyId } }
   }
   const media: WaMedia | undefined =
     m.type === "image"
@@ -200,8 +223,30 @@ function mediaInfo(json: unknown): { url: string; mimeType: string } | null {
   return { url: json.url, mimeType }
 }
 
-function buildBody(to: string, kind: OutboundMessage["kind"]): Record<string, unknown> {
+/** WhatsApp admite hasta tres botones de respuesta de 20 caracteres. */
+const MAX_REPLY_BUTTONS = 3
+const MAX_REPLY_TITLE = 20
+
+export function buildBody(to: string, kind: OutboundMessage["kind"]): Record<string, unknown> {
   if (kind.type === "text") {
+    const buttons = (kind.buttons ?? []).slice(0, MAX_REPLY_BUTTONS)
+    if (buttons.length > 0) {
+      return {
+        messaging_product: "whatsapp",
+        to,
+        type: "interactive",
+        interactive: {
+          type: "button",
+          body: { text: kind.text },
+          action: {
+            buttons: buttons.map((button) => ({
+              type: "reply",
+              reply: { id: button.id, title: button.title.slice(0, MAX_REPLY_TITLE) },
+            })),
+          },
+        },
+      }
+    }
     return {
       messaging_product: "whatsapp",
       to,
@@ -218,10 +263,16 @@ function buildBody(to: string, kind: OutboundMessage["kind"]): Record<string, un
         name: kind.name,
         language: { code: kind.language },
         components: [
-          {
-            type: "body",
-            parameters: kind.params.map((text) => ({ type: "text", text })),
-          },
+          // Sin variables no se envía el componente: Meta rechaza uno vacío.
+          ...(kind.params.length > 0
+            ? [{ type: "body", parameters: kind.params.map((text) => ({ type: "text", text })) }]
+            : []),
+          ...(kind.buttons ?? []).map((button, index) => ({
+            type: "button",
+            sub_type: "quick_reply",
+            index: String(index),
+            parameters: [{ type: "payload", payload: button.id }],
+          })),
         ],
       },
     }
@@ -259,6 +310,84 @@ function connectionInfo(json: unknown): { id?: string; displayName?: string } {
   return {
     ...(id ? { id } : {}),
     ...((verified ?? phone) ? { displayName: verified ?? phone } : {}),
+  }
+}
+
+const META_TEMPLATE_STATUS: Record<string, TemplateStatus> = {
+  APPROVED: "aprobada",
+  PENDING: "en_revision",
+  IN_APPEAL: "en_revision",
+  REJECTED: "rechazada",
+  PAUSED: "pausada",
+  FLAGGED: "pausada",
+}
+
+/** Lo que Meta no declara aprobado, en revisión, rechazado o pausado ya no sirve para enviar. */
+function templateStatus(value: unknown): TemplateStatus {
+  return (typeof value === "string" && META_TEMPLATE_STATUS[value.toUpperCase()]) || "deshabilitada"
+}
+
+function templateCategory(value: unknown): TemplateCategory {
+  const category = typeof value === "string" ? value.toLowerCase() : ""
+  return category === "marketing" || category === "authentication" ? category : "utility"
+}
+
+function text(value: unknown): string | null {
+  return typeof value === "string" && value.length > 0 ? value : null
+}
+
+/** Motivo legible: Meta usa `NONE` cuando no hay ninguno. */
+function templateReason(value: unknown): string | null {
+  const reason = text(value)
+  return reason && reason.toUpperCase() !== "NONE" ? reason : null
+}
+
+function toProviderTemplate(raw: unknown): ProviderTemplate | null {
+  if (!raw || typeof raw !== "object") return null
+  const name = "name" in raw ? text(raw.name) : null
+  const language = "language" in raw ? text(raw.language) : null
+  if (!name || !language) return null
+  let body = ""
+  const buttons: string[] = []
+  const components = "components" in raw && Array.isArray(raw.components) ? raw.components : []
+  for (const component of components) {
+    if (!component || typeof component !== "object" || !("type" in component)) continue
+    const type = typeof component.type === "string" ? component.type.toUpperCase() : ""
+    if (type === "BODY" && "text" in component && typeof component.text === "string") body = component.text
+    if (type === "BUTTONS" && "buttons" in component && Array.isArray(component.buttons)) {
+      for (const button of component.buttons) {
+        if (!button || typeof button !== "object") continue
+        const kind = "type" in button && typeof button.type === "string" ? button.type.toUpperCase() : ""
+        if (kind === "QUICK_REPLY" && "text" in button && typeof button.text === "string") buttons.push(button.text)
+      }
+    }
+  }
+  const positions = [...body.matchAll(/\{\{(\d+)\}\}/g)].map((match) => Number(match[1]))
+  return {
+    externalId: "id" in raw ? text(raw.id) : null,
+    name,
+    language,
+    category: templateCategory("category" in raw ? raw.category : null),
+    status: templateStatus("status" in raw ? raw.status : null),
+    reason: templateReason("rejected_reason" in raw ? raw.rejected_reason : null),
+    body,
+    variables: positions.length > 0 ? Math.max(...positions) : 0,
+    buttons,
+  }
+}
+
+function toTemplateStatus(value: unknown): NormalizedTemplateStatus | null {
+  if (!value || typeof value !== "object") return null
+  const name = "message_template_name" in value ? text(value.message_template_name) : null
+  const language = "message_template_language" in value ? text(value.message_template_language) : null
+  if (!name || !language) return null
+  const id = "message_template_id" in value ? value.message_template_id : null
+  return {
+    externalId: typeof id === "string" || typeof id === "number" ? String(id) : null,
+    name,
+    language,
+    status: templateStatus("event" in value ? value.event : null),
+    reason: templateReason("reason" in value ? value.reason : null),
   }
 }
 
@@ -302,6 +431,7 @@ export const whatsappCloudApiAdapter: ChannelAdapter = {
       return empty
     const messages: NormalizedInbound[] = []
     const statuses: NormalizedStatus[] = []
+    const templateStatuses: NormalizedTemplateStatus[] = []
     for (const entry of body.entry) {
       if (
         !entry ||
@@ -312,6 +442,11 @@ export const whatsappCloudApiAdapter: ChannelAdapter = {
         continue
       for (const change of entry.changes) {
         if (!change || typeof change !== "object" || !("value" in change)) continue
+        if ("field" in change && change.field === "message_template_status_update") {
+          const update = toTemplateStatus(change.value)
+          if (update) templateStatuses.push(update)
+          continue
+        }
         const value = change.value as WaValue
         if (!value || typeof value !== "object") continue
         for (const m of value.messages ?? []) {
@@ -324,7 +459,7 @@ export const whatsappCloudApiAdapter: ChannelAdapter = {
         }
       }
     }
-    return { messages, statuses }
+    return { messages, statuses, ...(templateStatuses.length > 0 ? { templateStatuses } : {}) }
   },
 
   async sendMessage(config, msg: OutboundMessage, deps) {
@@ -359,6 +494,68 @@ export const whatsappCloudApiAdapter: ChannelAdapter = {
     const bytes = new Uint8Array(await dl.arrayBuffer())
     const ext = EXT_BY_MIME[info.mimeType] ?? "bin"
     return { bytes, mimeType: info.mimeType, filename: `${mediaExternalId}.${ext}` }
+  },
+
+  async listTemplates(config, deps) {
+    const cfg = getConfig(config)
+    const found: ProviderTemplate[] = []
+    let path: string | null =
+      `${cfg.wabaId}/message_templates?fields=id,name,language,status,category,components,rejected_reason&limit=100`
+    // Tope de páginas: una cuenta no tiene miles de plantillas y el cursor no debe colgar la lectura.
+    for (let page = 0; path && page < 10; page++) {
+      const { status, json }: { status: number; json: unknown } = await graphFetch(cfg, path, {}, deps)
+      if (status >= 400) throw new Error(`WhatsApp plantillas falló: ${graphError(status, json)}`)
+      const data = json && typeof json === "object" && "data" in json && Array.isArray(json.data) ? json.data : []
+      for (const raw of data) {
+        const template = toProviderTemplate(raw)
+        if (template) found.push(template)
+      }
+      const paging = json && typeof json === "object" && "paging" in json ? json.paging : null
+      const cursors = paging && typeof paging === "object" && "cursors" in paging ? paging.cursors : null
+      const after = cursors && typeof cursors === "object" && "after" in cursors ? text(cursors.after) : null
+      const more = paging && typeof paging === "object" && "next" in paging && typeof paging.next === "string"
+      path =
+        more && after
+          ? `${cfg.wabaId}/message_templates?fields=id,name,language,status,category,components,rejected_reason&limit=100&after=${encodeURIComponent(after)}`
+          : null
+    }
+    return found
+  },
+
+  async requestTemplate(config, request, deps) {
+    const cfg = getConfig(config)
+    const { status, json } = await graphFetch(
+      cfg,
+      `${cfg.wabaId}/message_templates`,
+      {
+        method: "POST",
+        body: {
+          name: request.name,
+          language: request.language,
+          category: request.category.toUpperCase(),
+          components: [
+            {
+              type: "BODY",
+              text: request.body,
+              // Meta exige un valor de ejemplo por cada variable del cuerpo.
+              ...(request.examples.length > 0 ? { example: { body_text: [request.examples] } } : {}),
+            },
+            ...(request.buttons.length > 0
+              ? [{ type: "BUTTONS", buttons: request.buttons.map((title) => ({ type: "QUICK_REPLY", text: title })) }]
+              : []),
+          ],
+        },
+      },
+      deps,
+    )
+    if (status >= 400 || !json || typeof json !== "object") {
+      throw new Error(`WhatsApp no aceptó la solicitud de plantilla: ${graphError(status, json)}`)
+    }
+    return {
+      externalId: "id" in json ? text(json.id) : null,
+      status: templateStatus("status" in json ? json.status : "PENDING"),
+      category: templateCategory("category" in json ? json.category : request.category),
+    }
   },
 
   async validateConnection(config, deps) {

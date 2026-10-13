@@ -11,7 +11,7 @@ import { useQuery } from "@tanstack/react-query"
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
 import { Bot, Settings } from "lucide-react"
 import { type ReactNode, useState } from "react"
-import { RecommendationDrawer } from "../../components/agent/advisor"
+import { AdminRecommendationDrawer } from "../../components/agent/admin-recommendation"
 import { adviceFor, AdviceNote, useReportAdvice } from "../../components/reports/advice-note"
 import { AgendaTab } from "../../components/reports/agenda-tab"
 import { MoneyTab } from "../../components/reports/money-tab"
@@ -95,7 +95,7 @@ function ReportsPage() {
     retry: false,
   })
 
-  // Los avisos del asesor acompañan a su cifra; la recomendación se abre al lado con su lista y su acción.
+  // Los avisos del administrador acompañan a su cifra; la recomendación se abre al lado con su lista y su acción.
   const advice = useReportAdvice(query, allowed && region !== null)
   const notices = advice.data?.data.notices
   const [recommendation, setRecommendation] = useState<string | null>(null)
@@ -188,7 +188,7 @@ function ReportsPage() {
         </>
       )}
       <ReportListDrawer list={search.lista ?? null} query={query} onClose={() => setSearch({ lista: undefined })} />
-      <RecommendationDrawer recommendationKey={recommendation} onClose={() => setRecommendation(null)} />
+      <AdminRecommendationDrawer recommendationKey={recommendation} onClose={() => setRecommendation(null)} />
     </PageShell>
   )
 }
@@ -284,7 +284,7 @@ function QuestionTile({ tab, selected, caption, value, change, better, loading, 
       {!loading && change !== undefined ? <ChangeLine change={change} better={better} /> : null}
       {advised ? (
         <span className="mt-0.5 inline-flex items-center gap-1.5 text-[13px] font-bold text-primary-soft-foreground">
-          <Bot aria-hidden className="size-3.5 shrink-0" />1 aviso del asesor
+          <Bot aria-hidden className="size-3.5 shrink-0" />1 aviso del administrador
         </span>
       ) : null}
     </Link>

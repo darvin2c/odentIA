@@ -2,6 +2,7 @@ import { type ChannelProvider, channelAdapters } from "@odentia/channels"
 import type { Db } from "@odentia/db"
 import { channelConnection } from "@odentia/db/schema/crm"
 import { and, asc, eq } from "drizzle-orm"
+import { declareConfigTemplates, listChannelTemplates, syncConnectionTemplates } from "./channel-templates.js"
 import { notFound, validation } from "./errors.js"
 import { decryptConfig, encryptJson } from "./secrets.js"
 
@@ -77,6 +78,11 @@ export interface ConnectionDeps {
 /**
  * Crea la conexión: valida contra el proveedor (salvo validateExternal=false),
  * cifra la config y genera el webhookSecret. Nunca devuelve secretos.
+ *
+ * Si el canal usa plantillas, deja su catálogo: leído de la cuenta o, sin
+ * proveedor, con las que declare la configuración. Si la cuenta no deja
+ * leerlas (el token no puede administrar plantillas), la conexión se crea
+ * igual y `templatesError` dice qué corregir.
  */
 export async function createConnection(
   tx: Db,
@@ -84,7 +90,7 @@ export async function createConnection(
   secretsKey: Buffer,
   input: CreateConnectionInput,
   deps: ConnectionDeps,
-): Promise<ConnectionPublic & { webhookSecret: string }> {
+): Promise<ConnectionPublic & { webhookSecret: string; templatesError?: string }> {
   const adapter = requireAdapter(input.provider)
   assertChannelMatches(input.provider, input.channel)
   const displayName = input.displayName.trim()
@@ -109,7 +115,23 @@ export async function createConnection(
     })
     .returning()
   if (!created) throw new Error("No se pudo crear la conexión")
-  return { ...toPublic(created), webhookSecret: created.webhookSecret }
+  let templatesError: string | undefined
+  if (adapter.capabilities.templates) {
+    if (deps.validateExternal === false) {
+      await declareConfigTemplates(tx, orgId, created.id, input.config["templates"])
+    } else {
+      try {
+        await syncConnectionTemplates(tx, orgId, created.id, secretsKey, { fetch: deps.fetch })
+      } catch (error) {
+        templatesError = error instanceof Error ? error.message : "No se pudieron leer las plantillas"
+      }
+    }
+  }
+  return {
+    ...toPublic(created),
+    webhookSecret: created.webhookSecret,
+    ...(templatesError ? { templatesError } : {}),
+  }
 }
 
 /** Conexión con config descifrada: solo worker/webhooks (nunca a la UI). */
@@ -169,28 +191,19 @@ export async function testConnection(
 }
 
 
-/** Plantillas autorizadas de la conexión (nombres, sin secretos). */
+/**
+ * Plantillas que la conexión puede enviar hoy: las aprobadas del catálogo, con
+ * su texto y cuántos datos llevan. Las demás (en revisión, rechazadas,
+ * pausadas) se ven en `listChannelTemplates`, no aquí.
+ */
 export async function getConnectionTemplates(
   tx: Db,
   orgId: string,
   id: string,
-  secretsKey: Buffer,
-): Promise<{ name: string; language: string }[]> {
-  const { config } = await getConnectionSecrets(tx, orgId, id, secretsKey)
-  const raw = config["templates"]
-  if (!Array.isArray(raw)) return []
-  const out: { name: string; language: string }[] = []
-  for (const t of raw) {
-    if (
-      t &&
-      typeof t === "object" &&
-      "name" in t &&
-      typeof t.name === "string" &&
-      "language" in t &&
-      typeof t.language === "string"
-    ) {
-      out.push({ name: t.name, language: t.language })
-    }
-  }
-  return out
+  _secretsKey?: Buffer,
+): Promise<{ name: string; language: string; body: string; variables: number; buttons: string[] }[]> {
+  const templates = await listChannelTemplates(tx, orgId, id)
+  return templates
+    .filter((template) => template.status === "aprobada")
+    .map(({ name, language, body, variables, buttons }) => ({ name, language, body, variables, buttons }))
 }

@@ -25,6 +25,12 @@ export {
   type AgentSurfaceProps,
 } from "./agent-mark.js"
 export { AppShell, isNavItemActive } from "./app-shell.js"
+export {
+  FlowDiagram,
+  type FlowDiagramActor,
+  type FlowDiagramProps,
+  type FlowDiagramStep,
+} from "./flow-diagram.js"
 export { AuthCard } from "./auth-card.js"
 export { AuthSplit } from "./auth-split.js"
 export { Brand } from "./brand.js"

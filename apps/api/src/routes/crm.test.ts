@@ -619,7 +619,7 @@ it("fichas, resumen, nivel y prueba del agente", async () => {
   const fichas = (await roles.json()) as {
     data: { principles: string[]; roles: { id: string; available: boolean }[]; levels: { id: string }[] }
   }
-  expect(fichas.data.roles.map((role) => role.id)).toEqual(["recepcion", "asistente_clinico", "asesor", "ayuda"])
+  expect(fichas.data.roles.map((role) => role.id)).toEqual(["recepcion", "asistente_clinico", "administrador", "ayuda"])
   expect(fichas.data.levels.map((level) => level.id)).toEqual(["supervisado", "equilibrado", "autonomo"])
   expect(fichas.data.principles.length).toBeGreaterThan(0)
   expect((await member.request("/agent/roles")).status).toBe(403)

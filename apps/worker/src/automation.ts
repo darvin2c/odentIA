@@ -1,5 +1,5 @@
 import type { Db } from "@odentia/db"
-import { tickAutomations } from "@odentia/services"
+import { tickAutomations, type TickDeps } from "@odentia/services"
 import { sql } from "drizzle-orm"
 
 export interface AutomationWorkerDeps {
@@ -9,6 +9,13 @@ export interface AutomationWorkerDeps {
   secretsKey: Buffer
   /** Origen público de la plataforma para los enlaces amables /c/ y /baja/. */
   publicBaseUrl: string
+  /**
+   * Con envío real, el tick pide a WhatsApp las plantillas que faltan. En
+   * demostración las deja «en revisión» sin llamar a nadie.
+   */
+  senderMode: "mock" | "live"
+  /** Lee lo último que escribió la persona antes de escribirle por un seguimiento. */
+  alreadyTold?: TickDeps["alreadyTold"]
 }
 
 const MAX_DRAIN = 50
@@ -23,7 +30,7 @@ const MAX_DRAIN = 50
  * nunca el origen webhook/API) para los enlaces /c/ y /baja/.
  */
 export async function runAutomationTick(deps: AutomationWorkerDeps): Promise<boolean> {
-  const { appDb, ownerDb, secretsKey, publicBaseUrl } = deps
+  const { appDb, ownerDb, secretsKey, publicBaseUrl, senderMode, alreadyTold } = deps
   let pending = 0
   for (let i = 0; i < MAX_DRAIN; i++) {
     const rows = (await appDb.execute(
@@ -42,7 +49,12 @@ export async function runAutomationTick(deps: AutomationWorkerDeps): Promise<boo
   }>
   const raw = Array.isArray(nowRows) ? nowRows[0]?.now : undefined
   const now = raw instanceof Date ? raw : new Date(typeof raw === "string" ? raw : Date.now())
-  const summary = await tickAutomations(ownerDb, appDb, now, { secretsKey, publicBaseUrl })
+  const summary = await tickAutomations(ownerDb, appDb, now, {
+    secretsKey,
+    publicBaseUrl,
+    templates: { fetch, validateExternal: senderMode === "live" },
+    alreadyTold,
+  })
   console.log(
     `worker: automations despertadores=${pending} orgs=${summary.orgs} ` +
       `programados=${summary.programados} coordinados=${summary.coordinados} ` +

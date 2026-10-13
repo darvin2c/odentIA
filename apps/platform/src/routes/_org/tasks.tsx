@@ -19,7 +19,7 @@ import { useEffect, useMemo, useState } from "react"
 import { TaskDrawer } from "../../components/crm/task-drawer"
 import { formatDueAt, isOverdue } from "../../components/crm/crm-helpers"
 import { apiFetch } from "../../lib/api"
-import { type TaskItem, useMyUserId, usePermission } from "../../lib/crm"
+import { TASK_AREA_LABEL, type TaskItem, useMyUserId, usePermission } from "../../lib/crm"
 import { PortalRequestsSection } from "../../components/portal/portal-requests-panel"
 import { useOrgEvents } from "../../lib/org-events"
 
@@ -114,7 +114,20 @@ function TasksPage() {
 
   const columns = useMemo<ColumnDef<TaskItem>[]>(
     () => [
-      { accessorKey: "title", header: "Título" },
+      {
+        accessorKey: "title",
+        header: "Título",
+        // Lo que deja el Administrador dice por qué se creó, bajo el título.
+        cell: ({ row }) =>
+          row.original.reason ? (
+            <span className="flex flex-col">
+              <span>{row.original.title}</span>
+              <span className="text-sm text-muted-foreground">{row.original.reason}</span>
+            </span>
+          ) : (
+            row.original.title
+          ),
+      },
       {
         id: "contexto",
         header: "Contexto",
@@ -164,7 +177,9 @@ function TasksPage() {
         meta: { view: { primary: true } },
         cell: ({ row }) => {
           const member = org.members.find((m) => m.userId === row.original.assigneeUserId)
-          return member ? member.user.name : <span className="text-muted-foreground">—</span>
+          if (member) return member.user.name
+          // Sin responsable, dice a qué parte del equipo va.
+          return row.original.area ? TASK_AREA_LABEL[row.original.area] : <span className="text-muted-foreground">—</span>
         },
       },
       {
@@ -198,6 +213,7 @@ function TasksPage() {
           if (row.original.kind === "opportunity_follow_up") {
             return <Badge variant="secondary">Seguimiento</Badge>
           }
+          if (row.original.createdBy === "admin") return <Badge variant="soft">Administrador</Badge>
           return row.original.createdBy === "agent" ? (
             <Badge variant="secondary">Agente</Badge>
           ) : (

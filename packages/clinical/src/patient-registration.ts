@@ -70,10 +70,14 @@ export interface RegistrationConfig {
   enabled: boolean
   fields: Record<RegistrationFieldKey, RegistrationFieldMode>
   privacyNotice: string
+  /** El registro pregunta si acepta recordatorios de citas y controles. */
+  askReminders: boolean
+  /** El registro pregunta si acepta otros mensajes de la clínica. */
+  askMessages: boolean
 }
 const optionalDefaults: Record<string, true> = { docType: true, docNumber: true, email: true, sex: true, address: true, bloodGroup: true, allergies: true, conditions: true, medications: true }
 export const DEFAULT_REGISTRATION_CONFIG: RegistrationConfig = {
-  version: 0, enabled: false, privacyNotice: "",
+  version: 0, enabled: false, privacyNotice: "", askReminders: true, askMessages: true,
   fields: Object.fromEntries(REGISTRATION_FIELDS.map(({ key }) => [key,
     ["displayName", "birthDate", "phone"].includes(key) ? "required" : optionalDefaults[key] ? "optional" : "hidden",
   ])) as RegistrationConfig["fields"],
@@ -135,12 +139,16 @@ export const registrationAnswersSchema = z.strictObject({
     }).optional(),
   }).optional(),
   privacyAccepted: z.boolean(),
+  // Permisos de mensajes: solo cuentan si el registro los pregunta y se aceptó el aviso.
+  acceptsReminders: z.boolean().optional(),
+  acceptsMessages: z.boolean().optional(),
 })
 export type RegistrationAnswers = z.infer<typeof registrationAnswersSchema>
 const fieldKeys = REGISTRATION_FIELDS.map(f => f.key) as [RegistrationFieldKey, ...RegistrationFieldKey[]]
 export const registrationConfigSchema = z.strictObject({
   version: z.number().int().nonnegative(), enabled: z.boolean(),
   fields: z.record(z.enum(fieldKeys), z.enum(["hidden", "optional", "required"])), privacyNotice: text(10000),
+  askReminders: z.boolean().default(true), askMessages: z.boolean().default(true),
 }).superRefine((config, ctx) => {
   const issue = (path: string[], message: string) => ctx.addIssue({ code: "custom", path, message })
   for (const key of ["displayName", "birthDate"] as const) {

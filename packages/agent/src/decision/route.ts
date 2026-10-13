@@ -149,6 +149,9 @@ export function routeInstruction(path: RoutePath, prefetched?: string | null): s
   if (path === "clinico") {
     return `${head} una consulta clínica. No des consejo clínico ni diagnóstico. En este mismo paso, pasa el caso a una persona con request_human_handoff y avisa al interlocutor en su campo message.`
   }
+  if (path === "cita" && prefetched) {
+    return `${head} reservar una cita. Esto se consultó ahora mismo y no hace falta volver a pedirlo (ni con ver_contexto_paciente ni con ver_resumen_paciente):\n${prefetched}\nLas sedes y los servicios, con sus ids, están arriba: no llames a ver_sedes_y_servicios para eso. Si el interlocutor aún no eligió un día y una hora concretos, busca con buscar_huecos y ofrécele dos o tres horarios en tu respuesta, sin reservar nada; proponer_cita va solo cuando ya eligió uno.`
+  }
   if (path === "cambio_cita" && prefetched) {
     return `${head} cambiar o cancelar una cita. Esto se consultó ahora mismo y no hace falta volver a pedirlo:\n${prefetched}\nUsa los ids y las versiones exactos de ahí.`
   }

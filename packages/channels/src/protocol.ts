@@ -21,8 +21,15 @@ export interface ChannelCapabilities {
   edit: boolean
 }
 
+/** Botón de respuesta: `id` vuelve tal cual cuando la persona lo toca. */
+export interface ReplyButton {
+  id: string
+  title: string
+}
+
 export type InboundContent =
-  | { type: "text"; text: string }
+  // `replyId` viene cuando el texto es el botón que tocó la persona.
+  | { type: "text"; text: string; replyId?: string }
   | { type: "media"; mediaExternalId: string; mimeType: string; caption?: string }
 
 export interface NormalizedInbound {
@@ -41,16 +48,66 @@ export interface NormalizedStatus {
   status: "delivered" | "read" | "failed"
 }
 
+/** Estado de una plantilla en el proveedor, en palabras del sistema. */
+export const TEMPLATE_STATUSES = [
+  "en_revision",
+  "aprobada",
+  "rechazada",
+  "pausada",
+  "deshabilitada",
+] as const
+export type TemplateStatus = (typeof TEMPLATE_STATUSES)[number]
+
+export const TEMPLATE_CATEGORIES = ["utility", "marketing", "authentication"] as const
+export type TemplateCategory = (typeof TEMPLATE_CATEGORIES)[number]
+
+/** Plantilla tal como la tiene el proveedor. */
+export interface ProviderTemplate {
+  externalId: string | null
+  name: string
+  language: string
+  category: TemplateCategory
+  status: TemplateStatus
+  /** Motivo del proveedor cuando la rechaza o la pausa. */
+  reason: string | null
+  /** Cuerpo con sus variables por posición: `{{1}}`, `{{2}}`… */
+  body: string
+  variables: number
+  /** Títulos de los botones de respuesta rápida, en orden. */
+  buttons: string[]
+}
+
+/** Lo que se pide aprobar: texto, un ejemplo por variable y botones. */
+export interface TemplateRequest {
+  name: string
+  language: string
+  category: TemplateCategory
+  body: string
+  examples: string[]
+  buttons: string[]
+}
+
+/** Aviso del proveedor: una plantilla cambió de estado. */
+export interface NormalizedTemplateStatus {
+  externalId: string | null
+  name: string
+  language: string
+  status: TemplateStatus
+  reason: string | null
+}
+
 export interface WebhookParseResult {
   messages: NormalizedInbound[]
   statuses: NormalizedStatus[]
+  templateStatuses?: NormalizedTemplateStatus[]
 }
 
 export interface OutboundMessage {
   to: string
   kind:
-    | { type: "text"; text: string }
-    | { type: "template"; name: string; language: string; params: string[] }
+    | { type: "text"; text: string; buttons?: ReplyButton[] }
+    // `buttons`: lo que devuelve cada botón de respuesta rápida, por posición.
+    | { type: "template"; name: string; language: string; params: string[]; buttons?: ReplyButton[] }
     // `url` es una URL firmada que el proveedor descarga al enviar.
     | {
         type: "media"
@@ -90,6 +147,17 @@ export interface ChannelAdapter {
     config: Record<string, unknown>,
     deps: ChannelAdapterDeps,
   ): Promise<{ externalId: string; displayName: string }>
+  /** Plantillas de la cuenta con su estado (solo canales con plantillas). */
+  listTemplates?(config: Record<string, unknown>, deps: ChannelAdapterDeps): Promise<ProviderTemplate[]>
+  /**
+   * Pide al proveedor la aprobación de una plantilla. El proveedor decide el
+   * estado y puede cambiar la categoría: se devuelve lo que respondió.
+   */
+  requestTemplate?(
+    config: Record<string, unknown>,
+    request: TemplateRequest,
+    deps: ChannelAdapterDeps,
+  ): Promise<{ externalId: string | null; status: TemplateStatus; category: TemplateCategory }>
 }
 
 /**

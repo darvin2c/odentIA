@@ -5,7 +5,7 @@ import { patientContact } from "@odentia/db/schema/clinical"
 import { conversation, message } from "@odentia/db/schema/crm"
 import { helpRequest } from "@odentia/db/schema/workspace"
 import { and, asc, desc, eq, gt } from "drizzle-orm"
-import { updateAdvisorSettings } from "./agent-advisor.js"
+import { updateAdminSettings } from "./agent-admin.js"
 import { upsertAgentConfig } from "./agentConfig.js"
 
 /** Hora local de Lima (UTC-5 fijo en la semilla) → instante ISO, como en seed-dev. */
@@ -394,7 +394,7 @@ export async function seedAgent(
     })
     .onConflictDoNothing({ target: agentTestCase.id })
   // El asesor encendido: Inicio muestra lo que encuentre en los datos sembrados.
-  await updateAdvisorSettings(tx, orgId, ownerUserId, { enabled: true })
+  await updateAdminSettings(tx, orgId, ownerUserId, { enabled: true })
   // El asistente clínico encendido: las atenciones en borrador ofrecen «Dictar la atención».
   await upsertAgentConfig(tx, orgId, { clinicalAssistantEnabled: true }, { actorUserId: ownerUserId })
   // Memoria de la persona de demostración: lo que el agente recuerda entre conversaciones.

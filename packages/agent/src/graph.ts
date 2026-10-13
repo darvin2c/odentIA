@@ -624,7 +624,8 @@ export function compileAgentGraph(
     // índice y el texto de los temas llega por turno; sin él, van todas las
     // respuestas si caben y, si no, el índice. Un disparador operativo (sin
     // mensaje del interlocutor) no elige nada.
-    const selecting = Boolean(toolCtx.decision) && faqs.length > 0 && !toolCtx.runInstruction
+    // Un botón tocado no pregunta nada: no hay tema que elegir.
+    const selecting = Boolean(toolCtx.decision) && faqs.length > 0 && !toolCtx.runInstruction && !toolCtx.routeHint
     const knowledgeBlock = formatKnowledgeForPrompt(snapshot, faqs, selecting ? "indice" : undefined)
     const picked = selecting ? await selectKnowledge(asked, faqs) : null
     // De lo más estable a lo más cambiante. Los proveedores sirven desde su
@@ -636,8 +637,10 @@ export function compileAgentGraph(
     // El camino que eligió el modelo de decisión: el código trae antes lo que
     // ese camino necesita y el modelo que escribe lo recibe ya consultado.
     const route = toolCtx.runInstruction ? null : (toolCtx.route ?? null)
-    const prefetched = route?.path === "cambio_cita" ? await prefetchPatientSummary() : null
-    const routeBlock = route ? routeInstruction(route.path, prefetched?.text) : null
+    // Para reservar o cambiar una cita lo primero que el modelo pide es quién
+    // es el paciente y qué citas tiene: llega ya consultado y se ahorra el paso.
+    const prefetched = route?.path === "cambio_cita" || route?.path === "cita" ? await prefetchPatientSummary() : null
+    const routeBlock = route ? [routeInstruction(route.path, prefetched?.text), toolCtx.routeHint].filter(Boolean).join("\n") || null : null
     const nowLine = `Fecha y hora actual de la clínica: ${formatZoned(new Date(), zone)}.`
     // Las reglas son de la organización (estables); los ejemplos dependen del mensaje y van con lo del turno.
     const system = [receptionPrompt(zone, cfg), orgPrompt, rulesBlock, policyLine, knowledgeBlock, contactBlock, crossBlock, caseBlock, picked?.block, trialBlock, examplesBlock, routeBlock, runBlock, nowLine]

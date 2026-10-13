@@ -3,7 +3,7 @@ import { contact } from "@odentia/db/schema/crm"
 import { patientRegistrationConfig } from "@odentia/db/schema/org"
 import { and, eq } from "drizzle-orm"
 import { expect, it } from "vitest"
-import { hasConsent, setConsent } from "./automation.js"
+import { getMessagePermissions, hasConsent, setConsent } from "./automation.js"
 import { getPatientHealth, savePatientHealth } from "./clinical.js"
 import { clinicalFixture } from "./clinical-test-fixture.js"
 import { updateContact } from "./contacts.js"
@@ -94,8 +94,7 @@ it("el consentimiento de datos guarda la versión del aviso y revocarlo da de ba
   const personId = await ownPerson(f.patient.id)
   await f.run((tx) =>
     setConsent(tx, "org_a", f.actor, personId, {
-      purpose: "marketing",
-      channel: "whatsapp",
+      purpose: "recordatorio",
       granted: true,
     }),
   )
@@ -114,14 +113,23 @@ it("el consentimiento de datos guarda la versión del aviso y revocarlo da de ba
     }),
   )
   expect(granted).toMatchObject({ noticeVersion: 3, noticeText: "Aviso de privacidad v3" })
+  // Lo aceptado en el consentimiento es el permiso de mensajes, sin otro paso:
+  // «comunicaciones» concede los demás mensajes; «recordatorios» no se aceptó.
+  expect(await f.run((tx) => getMessagePermissions(tx, "org_a", personId))).toMatchObject([
+    { purpose: "recordatorio", granted: false, source: "presencial" },
+    { purpose: "seguimiento", granted: true, source: "presencial" },
+  ])
   await f.run((tx) =>
     revokeDataConsent(tx, "org_a", f.actor, f.patient.id, granted.id, { reason: "Lo pidió" }),
   )
   const [row] = await f.run((tx) => listDataConsents(tx, "org_a", f.patient.id))
   expect(row?.revokeReason).toBe("Lo pidió")
-  expect(await f.run((tx) => hasConsent(tx, "org_a", personId, "marketing", "whatsapp"))).toBe(
-    false,
-  )
+  expect(await f.run((tx) => hasConsent(tx, "org_a", personId, "recordatorio"))).toBe(false)
+  // Revocar el consentimiento de datos retira también lo que había aceptado recibir.
+  expect(await f.run((tx) => getMessagePermissions(tx, "org_a", personId))).toMatchObject([
+    { purpose: "recordatorio", granted: false },
+    { purpose: "seguimiento", granted: false, source: "revocacion_datos" },
+  ])
   expect(
     (await f.run((tx) => getPatient(tx, "org_a", f.patient.id))).patient.dataConsentAt,
   ).not.toBeNull()

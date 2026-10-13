@@ -1940,11 +1940,11 @@ export async function executeProposal(
         if (!identity) throw validation("La identidad de canal ya no pertenece a este contacto")
         // Import diferido: `automation` depende de este módulo.
         const { hasConsent } = await import("./automation.js")
-        if (!(await hasConsent(tx, orgId, locked.contactId, "seguimiento", identity.channel))) {
+        if (!(await hasConsent(tx, orgId, locked.contactId, "seguimiento"))) {
           throw new ServiceError(
             "CONSENT_REQUIRED",
             409,
-            "El contacto ya no tiene consentimiento vigente para seguimiento en ese canal",
+            "La persona ya no acepta mensajes de seguimiento",
           )
         }
         const thread = await startContactConversation(tx, orgId, teamUserId, locked.contactId, {

@@ -248,6 +248,8 @@ function buildDefaults(
         dental: { ...initialHealth?.dental },
       },
       privacyAccepted: initialValues?.privacyAccepted ?? false,
+      acceptsReminders: initialValues?.acceptsReminders ?? false,
+      acceptsMessages: initialValues?.acceptsMessages ?? false,
     },
     recipient: "self",
     registeredBranchId: "",
@@ -338,6 +340,9 @@ function buildAnswers(
       : undefined,
     health: keptHealth as HealthValue,
     privacyAccepted: values.answers.privacyAccepted,
+    // Solo viaja lo que el registro de la clínica pregunta: lo demás no se da por respondido.
+    ...(config.askReminders ? { acceptsReminders: values.answers.acceptsReminders === true } : {}),
+    ...(config.askMessages ? { acceptsMessages: values.answers.acceptsMessages === true } : {}),
   }
 }
 
@@ -1460,6 +1465,54 @@ export function PatientRegistrationForm({
                   )}
                 </form.Field>
               </div>
+              {config.askReminders || config.askMessages ? (
+                <fieldset className="flex flex-col gap-3">
+                  <legend className="mb-3 text-sm font-medium">
+                    {pub ? "Mensajes de la clínica (opcional)" : "Mensajes de la clínica: lo que aceptó recibir"}
+                  </legend>
+                  {config.askReminders ? (
+                    <form.Field name="answers.acceptsReminders">
+                      {(field) => (
+                        <label htmlFor="registration-reminders" className="flex cursor-pointer items-start gap-2 text-sm">
+                          <Checkbox
+                            id="registration-reminders"
+                            checked={field.state.value === true}
+                            onCheckedChange={(checked) => field.handleChange(checked === true)}
+                          />
+                          <span>
+                            {pub
+                              ? "Acepto recibir recordatorios de mis citas y controles."
+                              : "Recordatorios de citas y controles."}
+                          </span>
+                        </label>
+                      )}
+                    </form.Field>
+                  ) : null}
+                  {config.askMessages ? (
+                    <form.Field name="answers.acceptsMessages">
+                      {(field) => (
+                        <label htmlFor="registration-messages" className="flex cursor-pointer items-start gap-2 text-sm">
+                          <Checkbox
+                            id="registration-messages"
+                            checked={field.state.value === true}
+                            onCheckedChange={(checked) => field.handleChange(checked === true)}
+                          />
+                          <span>
+                            {pub
+                              ? "Acepto recibir otros mensajes de la clínica, como avisos sobre un presupuesto o una cita pendiente."
+                              : "Otros mensajes de la clínica: inasistencias y presupuestos pendientes."}
+                          </span>
+                        </label>
+                      )}
+                    </form.Field>
+                  ) : null}
+                  <p className="text-sm text-muted-foreground">
+                    {pub
+                      ? "Puedes dejar de recibirlos cuando quieras, con un toque desde cualquier mensaje."
+                      : "Queda en su ficha, en «Mensajes de la clínica», y se puede cambiar ahí."}
+                  </p>
+                </fieldset>
+              ) : null}
             </div>
           </div>
         )

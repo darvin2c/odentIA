@@ -1,7 +1,12 @@
 /**
  * Consentimiento para el tratamiento de datos personales (Ley 29733, ADR 0004):
  * por versión del aviso, con finalidades separadas, quién lo otorga y su
- * revocación. Revocar las comunicaciones da de baja los envíos comerciales.
+ * revocación.
+ *
+ * Dos de sus finalidades son, además, el permiso para que la clínica escriba
+ * primero: `recordatorios` (citas y controles) y `comunicaciones` (los demás
+ * mensajes). No hay un permiso aparte: lo que se acepta aquí vale de inmediato
+ * para los mensajes automáticos, y revocarlo los da de baja.
  */
 import type { Db } from "@odentia/db"
 import { automationConsent } from "@odentia/db/schema/automation"
@@ -9,7 +14,7 @@ import { patient, patientContact, patientDataConsent } from "@odentia/db/schema/
 import { contact } from "@odentia/db/schema/crm"
 import { auditEvent, patientRegistrationConfig } from "@odentia/db/schema/org"
 import { and, desc, eq } from "drizzle-orm"
-import { setConsent } from "./automation.js"
+import { type MessagePermissionKey, setConsent } from "./automation.js"
 import { notFound, ServiceError, validation } from "./errors.js"
 import { requirePatient } from "./patients.js"
 import { requireDecisionContact } from "./responsibilities.js"
@@ -19,6 +24,43 @@ export const DATA_CONSENT_PURPOSES = ["atencion", "recordatorios", "comunicacion
 export const DATA_CONSENT_CHANNELS = ["presencial", "formulario_publico", "portal"] as const
 
 export type DataConsentRow = typeof patientDataConsent.$inferSelect
+
+/** Finalidad del consentimiento de datos → permiso de mensajes que concede. */
+const MESSAGE_PERMISSION_OF: Record<string, MessagePermissionKey> = {
+  recordatorios: "recordatorio",
+  comunicaciones: "seguimiento",
+}
+
+/** Cómo quedó registrado el permiso según por dónde se otorgó el consentimiento. */
+const PERMISSION_SOURCE_OF: Record<string, string> = {
+  presencial: "presencial",
+  formulario_publico: "registro",
+  portal: "portal",
+}
+
+/**
+ * Lleva a los permisos de mensajes de una persona lo que respondió en su
+ * consentimiento de datos. `asked` son las finalidades que se le preguntaron:
+ * la que aceptó queda concedida y la que no, registrada como no aceptada; lo
+ * que no se le preguntó no se toca.
+ */
+export async function applyMessagePermissions(
+  tx: Db,
+  orgId: string,
+  actorUserId: string | null,
+  contactId: string,
+  input: { accepted: string[]; asked: string[]; channel: string },
+): Promise<void> {
+  const source = PERMISSION_SOURCE_OF[input.channel] ?? "presencial"
+  for (const [dataPurpose, purpose] of Object.entries(MESSAGE_PERMISSION_OF)) {
+    if (!input.asked.includes(dataPurpose)) continue
+    await setConsent(tx, orgId, actorUserId, contactId, {
+      purpose,
+      granted: input.accepted.includes(dataPurpose),
+      source,
+    })
+  }
+}
 
 export async function listDataConsents(
   tx: Db,
@@ -93,6 +135,11 @@ export async function grantDataConsent(
     })
     .returning()
   if (!row) throw new Error("No se pudo registrar el consentimiento")
+  await applyMessagePermissions(tx, orgId, actorUserId, grantor.id, {
+    accepted: purposes,
+    asked: Object.keys(MESSAGE_PERMISSION_OF),
+    channel,
+  })
   if (!person.dataConsentAt) {
     await tx
       .update(patient)
@@ -140,9 +187,9 @@ export async function revokeDataConsent(
     .set({ revokedAt: new Date(), revokedBy: actorUserId, revokeReason: reason })
     .where(eq(patientDataConsent.id, consentId))
     .returning()
-  // Revocar retira también el permiso comercial: se da de baja todo envío de
-  // marketing a la persona del paciente y se cancelan los pendientes. Para
-  // volver a recibirlos hace falta un consentimiento nuevo.
+  // Revocar retira también los permisos de mensajes de la persona del paciente
+  // y de quien otorgó el consentimiento, y cancela lo pendiente. Para volver a
+  // recibirlos hace falta un consentimiento nuevo.
   const [own] = await tx
     .select({ contactId: patientContact.contactId })
     .from(patientContact)
@@ -158,22 +205,21 @@ export async function revokeDataConsent(
       ),
     )
     .limit(1)
-  if (own) {
-    const marketing = await tx
-      .select({ channel: automationConsent.channel })
+  const affected = [...new Set([own?.contactId, current.grantedByContactId].filter((id): id is string => !!id))]
+  for (const contactId of affected) {
+    const granted = await tx
+      .select({ purpose: automationConsent.purpose })
       .from(automationConsent)
       .where(
         and(
           eq(automationConsent.organizationId, orgId),
-          eq(automationConsent.contactId, own.contactId),
-          eq(automationConsent.purpose, "marketing"),
+          eq(automationConsent.contactId, contactId),
           eq(automationConsent.status, "granted"),
         ),
       )
-    for (const { channel } of marketing) {
-      await setConsent(tx, orgId, actorUserId, own.contactId, {
-        purpose: "marketing",
-        channel,
+    for (const { purpose } of granted) {
+      await setConsent(tx, orgId, actorUserId, contactId, {
+        purpose,
         granted: false,
         source: "revocacion_datos",
       })

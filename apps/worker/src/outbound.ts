@@ -59,6 +59,7 @@ async function buildOutbound(
           m.templateParams.every((p): p is string => typeof p === "string")
             ? m.templateParams
             : [],
+        ...(replyButtonsOf(m.replyButtons) ? { buttons: replyButtonsOf(m.replyButtons)! } : {}),
       },
     }
   }
@@ -80,7 +81,17 @@ async function buildOutbound(
       },
     }
   }
-  return { to, kind: { type: "text", text: m.body ?? "" } }
+  const buttons = replyButtonsOf(m.replyButtons)
+  return { to, kind: { type: "text", text: m.body ?? "", ...(buttons ? { buttons } : {}) } }
+}
+
+function replyButtonsOf(value: unknown): { id: string; title: string }[] | null {
+  if (!Array.isArray(value)) return null
+  const buttons = value.filter(
+    (item): item is { id: string; title: string } =>
+      !!item && typeof item === "object" && typeof item.id === "string" && typeof item.title === "string",
+  )
+  return buttons.length > 0 ? buttons : null
 }
 
 /**

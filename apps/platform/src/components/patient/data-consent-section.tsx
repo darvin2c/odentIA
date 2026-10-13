@@ -23,7 +23,7 @@ interface DataConsent {
 const PURPOSES = [
   { key: "atencion", label: "Atención clínica", fixed: true },
   { key: "recordatorios", label: "Recordatorios de citas y controles", fixed: false },
-  { key: "comunicaciones", label: "Comunicaciones comerciales", fixed: false },
+  { key: "comunicaciones", label: "Otros mensajes de la clínica", fixed: false },
 ] as const
 
 const day = (iso: string) =>
@@ -194,7 +194,7 @@ export function DataConsentSection({ detail }: { detail: PatientFull }): React.J
       <ConfirmDialog
         open={revoking}
         title="Revocar consentimiento"
-        description="Queda registrado con el motivo. Se dan de baja las comunicaciones comerciales; la historia clínica se conserva por ley."
+        description="Queda registrado con el motivo. Se dan de baja los mensajes que había aceptado recibir; la historia clínica se conserva por ley."
         confirmLabel="Revocar"
         pending={revoke.isPending}
         confirmDisabled={!reason.trim()}

@@ -1,5 +1,5 @@
 import { PostgresSaver } from "@langchain/langgraph-checkpoint-postgres"
-import { type AgentRuntime, consumeAgentRun } from "@odentia/agent"
+import { type AgentRuntime, consumeAgentRun, createAlreadyTold } from "@odentia/agent"
 import type { AgentRunJob, InboundMessageJob, OutboundMessageJob, QueueMessage } from "@odentia/db"
 import { createAppDb, createOwnerDb, type Db, setupAgentMemory } from "@odentia/db"
 import { createStorage, type Storage, secretsKeyFromEnv } from "@odentia/services"
@@ -149,7 +149,15 @@ const queues: QueueDef[] = [
   },
   {
     name: "automation_ticks",
-    poll: () => runAutomationTick({ appDb: db, ownerDb, secretsKey, publicBaseUrl: env.WEB_URL }),
+    poll: () =>
+      runAutomationTick({
+        appDb: db,
+        ownerDb,
+        secretsKey,
+        publicBaseUrl: env.WEB_URL,
+        senderMode: env.CHANNEL_SENDER_MODE,
+        alreadyTold: createAlreadyTold(db, { secretsKey, platform: agentRuntime.platform, decisions: agentRuntime.decisions }),
+      }),
   },
 ]
 let nextMailboxPoll = 0

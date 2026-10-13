@@ -150,6 +150,11 @@ export interface AgentToolCtx {
   /** Camino que eligió el modelo de decisión para este turno; ausente = camino abierto. */
   route?: AgentRoute | null
   /**
+   * Lo que el sistema ya sabe del turno sin preguntarle a un modelo: la persona
+   * tocó un botón de un mensaje automático. Va con lo del turno, tras el camino.
+   */
+  routeHint?: string
+  /**
    * Dirección pública de la plataforma, para armar enlaces que la persona abre
    * (reservar su cita). Sin ella el agente no tiene la herramienta del enlace.
    */

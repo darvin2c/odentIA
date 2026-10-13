@@ -27,7 +27,7 @@ export function createPatientRegistrationRoute(deps: CrmDeps & { cookieDomain: s
     if (!canAccess(memberRole, "settings.write")) {
       return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para configurar el registro"), 403)
     }
-    const parsed = z.strictObject({ enabled: z.boolean(), fields: registrationConfigSchema.shape.fields, privacyNotice: registrationConfigSchema.shape.privacyNotice, expectedVersion: z.number().int().nonnegative() }).safeParse(await c.req.json().catch(() => null))
+    const parsed = z.strictObject({ enabled: z.boolean(), fields: registrationConfigSchema.shape.fields, privacyNotice: registrationConfigSchema.shape.privacyNotice, askReminders: z.boolean().optional(), askMessages: z.boolean().optional(), expectedVersion: z.number().int().nonnegative() }).safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () => withOrgContext(deps.db, orgId, tx => savePatientRegistrationConfig(tx, orgId, userId, parsed.data)))
   })

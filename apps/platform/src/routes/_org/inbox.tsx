@@ -1597,16 +1597,29 @@ function MessageBubble({
         }
       >
         {byAgent && (
-          <div className="flex items-center gap-1 text-xs font-semibold text-primary-soft-foreground">
-            <Bot className="size-3.5" aria-hidden /> Agente
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs font-semibold text-primary-soft-foreground">
+            <span className="flex items-center gap-1">
+              <Bot className="size-3.5" aria-hidden /> {msg.automatic ? `Automático · ${msg.automatic.name}` : "Agente"}
+            </span>
+            {/* Un mensaje automático no es una respuesta de la conversación: dice de qué línea salió. */}
+            {msg.automatic ? (
+              <Link to="/agent/administrador" search={{ linea: msg.automatic.key }} className="font-normal underline-offset-2 hover:underline">
+                Por qué salió
+              </Link>
+            ) : null}
           </div>
         )}
         {/* WhatsApp muestra la media arriba y el texto (caption o transcripción) abajo. */}
         <MessageAttachments msg={msg} conversationId={conversationId} orgSlug={orgSlug} />
         {msg.contentType === "template" ? (
-          <span className="italic opacity-80">
-            Plantilla: {msg.templateName} {(msg.templateParams ?? []).join(" · ")}
-          </span>
+          // Con el texto armado se ve lo que la persona recibió; sin él, solo qué plantilla salió.
+          msg.body ? (
+            <p className="whitespace-pre-wrap">{msg.body}</p>
+          ) : (
+            <span className="italic opacity-80">
+              Plantilla: {msg.templateName} {(msg.templateParams ?? []).join(" · ")}
+            </span>
+          )
         ) : (
           msg.body && <p className="whitespace-pre-wrap">{msg.body}</p>
         )}

@@ -1,0 +1,392 @@
+import { randomUUID } from "node:crypto"
+import { type Db, withOrgContext } from "@odentia/db"
+import { appointment, scheduleChair } from "@odentia/db/schema/agenda"
+import { member, user } from "@odentia/db/schema/auth"
+import { automationJob, automationRule } from "@odentia/db/schema/automation"
+import { encounter, patient, patientCharge, treatmentBudget, treatmentPlan } from "@odentia/db/schema/clinical"
+import { agentConfig, contact, crmTask, pipeline, pipelineStage } from "@odentia/db/schema/crm"
+import { opportunity } from "@odentia/db/schema/opportunities"
+import { branch } from "@odentia/db/schema/org"
+import { eq } from "drizzle-orm"
+import { describe, expect, it } from "vitest"
+import { ADMIN_LINES, flowOf } from "./admin-lines.js"
+import {
+  getAdminLine,
+  getAdminOverview,
+  getAdminPage,
+  getAdminRecommendation,
+  getAdminRecommendations,
+  getAdminSettings,
+  getAdminUnreached,
+  runAdminLineOnce,
+  syncTeamLines,
+  tickAutomations,
+  updateAdminLine,
+  updateAdminSettings,
+} from "./agent-admin.js"
+import { deliverDueJobs, setLine } from "./automation.js"
+import { nextPatientNumber } from "./patients.js"
+import { secretsKeyFromEnv } from "./secrets.js"
+import { completeTask } from "./tasks.js"
+import { appDb, insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
+
+/**
+ * El Administrador: una sola lista de líneas, cada una prendida o apagada y
+ * diciendo quién lo hace. Cada cifra sale de una consulta y respeta los
+ * permisos de quien lee. Nada se prende ni se apaga sin una persona.
+ */
+setupTestDb()
+const KEY = secretsKeyFromEnv("cd".repeat(32))
+const DAY = 86_400_000
+const all = () => true
+
+interface Clinic {
+  orgId: string
+  ownerId: string
+  dentistId: string
+  branchId: string
+  chairId: string
+}
+
+async function clinic(options: { admin?: boolean; reception?: boolean } = {}): Promise<Clinic> {
+  const orgId = randomUUID()
+  const ownerId = `owner-${orgId}`
+  const dentistId = `dentist-${orgId}`
+  await insertOrg(ownerDb, orgId, `admin-${orgId}`)
+  await ownerDb.insert(user).values([
+    { id: ownerId, name: "Ana Ruiz", email: `${ownerId}@admin.test`, emailVerified: true },
+    { id: dentistId, name: "Dra. Carla Ríos", email: `${dentistId}@admin.test`, emailVerified: true },
+  ])
+  await ownerDb.insert(member).values([
+    { id: `m-${ownerId}`, userId: ownerId, organizationId: orgId, role: "owner", createdAt: new Date() },
+    { id: `m-${dentistId}`, userId: dentistId, organizationId: orgId, role: "dentist", createdAt: new Date() },
+  ])
+  await ownerDb.insert(agentConfig).values({
+    organizationId: orgId,
+    enabled: options.reception !== false,
+    advisor: options.admin === false ? {} : { enabled: true, quietStart: "00:00", quietEnd: "00:00" },
+  })
+  const [site] = await ownerDb.insert(branch).values({ organizationId: orgId, name: "Centro", timezone: "America/Lima" }).returning({ id: branch.id })
+  const [chair] = await ownerDb.insert(scheduleChair).values({ organizationId: orgId, branchId: site!.id, name: "Sillón 1" }).returning({ id: scheduleChair.id })
+  return { orgId, ownerId, dentistId, branchId: site!.id, chairId: chair!.id }
+}
+
+function run<T>(c: Clinic, fn: (tx: Db) => Promise<T>): Promise<T> {
+  return withOrgContext(appDb, c.orgId, fn)
+}
+
+async function person(c: Clinic, name: string): Promise<string> {
+  const [row] = await ownerDb
+    .insert(patient)
+    .values({ organizationId: c.orgId, displayName: name, patientNumber: await nextPatientNumber(ownerDb, c.orgId) })
+    .returning({ id: patient.id })
+  return row!.id
+}
+
+let budgetNumber = 5000
+async function acceptedBudget(c: Clinic, patientId: string, daysAgo: number) {
+  const [plan] = await ownerDb.insert(treatmentPlan).values({ organizationId: c.orgId, patientId, title: "Plan" }).returning({ id: treatmentPlan.id })
+  await ownerDb.insert(treatmentBudget).values({
+    organizationId: c.orgId, patientId, planId: plan!.id, budgetNumber: budgetNumber++, title: "Ortodoncia", currency: "PEN",
+    status: "aceptado", decidedAt: new Date(Date.now() - daysAgo * DAY),
+  })
+}
+
+async function noShow(c: Clinic, patientId: string, daysAgo: number) {
+  const startsAt = new Date(Date.now() - daysAgo * DAY)
+  await ownerDb.insert(appointment).values({
+    organizationId: c.orgId, branchId: c.branchId, patientId, dentistUserId: c.dentistId, chairId: c.chairId,
+    startsAt, endsAt: new Date(startsAt.getTime() + 30 * 60_000), durationMin: 30, status: "no_asistio",
+  })
+}
+
+const tasksOf = (c: Clinic) => ownerDb.select().from(crmTask).where(eq(crmTask.organizationId, c.orgId))
+const jobsOf = (c: Clinic) => ownerDb.select().from(automationJob).where(eq(automationJob.organizationId, c.orgId))
+const deliver = (c: Clinic) => run(c, (tx) => deliverDueJobs(tx, c.orgId, new Date(), { secretsKey: KEY }))
+/** La línea se prendió hace `daysAgo` días: lo que cumplió su condición antes no cuenta. */
+async function turnedOn(c: Clinic, key: string, daysAgo: number, days?: number) {
+  const rule = await run(c, (tx) => setLine(tx, c.orgId, c.ownerId, key, { enabled: true, ...(days ? { days } : {}) }))
+  await ownerDb.update(automationRule).set({ enabledAt: new Date(Date.now() - daysAgo * DAY) }).where(eq(automationRule.id, rule.id))
+}
+
+describe("ajustes", () => {
+  it("empieza apagado, con su horario de silencio, y encenderlo no prende ninguna línea", async () => {
+    const c = await clinic({ admin: false })
+    expect(await run(c, (tx) => getAdminSettings(tx, c.orgId))).toEqual({ enabled: false, quietStart: "21:00", quietEnd: "08:00" })
+    await expect(run(c, (tx) => updateAdminSettings(tx, c.orgId, c.ownerId, { quietStart: "9pm" }))).rejects.toThrow(/HH:MM/)
+    // Con él apagado no se puede prender una línea: no haría nada.
+    await expect(run(c, (tx) => updateAdminLine(tx, c.orgId, c.ownerId, all, "cobranza_vencida", { enabled: true }))).rejects.toMatchObject({ code: "ADMIN_OFF" })
+    expect(await run(c, (tx) => updateAdminSettings(tx, c.orgId, c.ownerId, { enabled: true, quietStart: "20:30" }))).toEqual({ enabled: true, quietStart: "20:30", quietEnd: "08:00" })
+    const page = await run(c, (tx) => getAdminPage(tx, c.orgId, all))
+    expect(page.lines.every((line) => !line.enabled)).toBe(true)
+    expect(await ownerDb.select().from(automationRule).where(eq(automationRule.organizationId, c.orgId))).toEqual([])
+  })
+})
+
+describe("su página", () => {
+  it("es una sola lista de nueve líneas y cada una dice quién lo hace", async () => {
+    const c = await clinic()
+    const page = await run(c, (tx) => getAdminPage(tx, c.orgId, all))
+    expect(page.lines.map((line) => [line.key, line.actor])).toEqual([
+      ["recordatorio_cita", "agente"],
+      ["recordatorio_control", "agente"],
+      ["seguimiento_presupuesto", "agente"],
+      ["seguimiento_comercial", "agente"],
+      ["seguimiento_no_asistencia", "agente"],
+      ["presupuestos_sin_cita", "persona"],
+      ["atenciones_sin_firmar", "persona"],
+      ["cobranza_vencida", "persona"],
+      ["seguimientos_sin_responsable", "persona"],
+    ])
+    expect(page.lines.map((line) => line.key)).toEqual(ADMIN_LINES.map((line) => line.key))
+    const noShowLine = page.lines.find((line) => line.key === "seguimiento_no_asistencia")!
+    // Apagada: se dice en condicional, y con cuántos casos empezaría hoy.
+    expect(noShowLine).toMatchObject({
+      trigger: "Una persona falta a su cita",
+      description: "El agente Recepción le escribiría al día siguiente para reprogramar. Si no puede, avisa por qué y cómo habilitarlo, y quedaría una tarea para el equipo de recepción.",
+      enabled: false, hasAgent: true, agentPart: true, teamPart: true, todayCases: 0, recommended: false, week: null,
+    })
+    expect(page.lines.find((line) => line.key === "cobranza_vencida")).toMatchObject({
+      trigger: "Un saldo pasa 30 días vencido", description: "Quedaría una tarea para el equipo de caja.", hasAgent: false, agentPart: false, days: 30,
+    })
+    expect(page).toMatchObject({ enabled: true, receptionOn: true, whatsapp: false, today: { recommendations: 0, done: 0, yours: 0 }, monthTemplates: 0 })
+  })
+
+  it("prendida habla en presente, cambia quién lo hace según sus partes y guarda quién la cambió", async () => {
+    const c = await clinic()
+    const change = (input: Parameters<typeof updateAdminLine>[5]) =>
+      run(c, (tx) => updateAdminLine(tx, c.orgId, c.ownerId, all, "seguimiento_no_asistencia", input))
+    const on = await change({ enabled: true })
+    expect(on).toMatchObject({
+      enabled: true, actor: "agente", week: "Esta semana: todavía nada", paused: null,
+      description: "El agente Recepción le escribe al día siguiente para reprogramar. Si no puede, avisa por qué y cómo habilitarlo, y queda una tarea para el equipo de recepción.",
+    })
+    expect(on.since).not.toBeNull()
+    // El flujo dibuja solo lo que se ejecuta; el aviso de «no pude» no depende de ningún interruptor.
+    expect(on.flow.main.map((step) => step.label)).toEqual(["Una persona falta a su cita", "Espera al día siguiente", "¿Puede escribirle el agente?", "Le escribe", "Lo resuelve el agente"])
+    expect(on.flow.otherwise?.map((step) => [step.label, step.always])).toEqual([["Avisa por qué y cómo habilitarlo", true], ["Tarea de llamada", false], ["Le toca a una persona", false]])
+    expect(on.message).toEqual({
+      text: "Hola, Lucía. No pudimos verte en la cita del lunes 12 de octubre en Clínica Sonríe. ¿Te buscamos otro horario?",
+      buttons: ["Sí, otro horario", "No enviar más"],
+    })
+    const noTask = await change({ teamPart: false })
+    expect(noTask.description).toBe("El agente Recepción le escribe al día siguiente para reprogramar. Si no puede, avisa por qué y cómo habilitarlo.")
+    expect(noTask.flow.otherwise?.map((step) => step.label)).toEqual(["Avisa por qué y cómo habilitarlo", "Queda avisado"])
+    // «Mejor que a quien falta lo llame una persona»: sin el agente, la línea le toca al equipo.
+    const byPerson = await change({ teamPart: true, agentPart: false })
+    expect(byPerson).toMatchObject({ actor: "persona", description: "Queda una tarea de llamada para el equipo de recepción." })
+    expect(byPerson.flow).toMatchObject({ otherwise: null })
+    expect(byPerson.flow.main.map((step) => step.label)).toEqual(["Una persona falta a su cita", "Espera al día siguiente", "Tarea de llamada", "Le toca a una persona"])
+    // Apagada, el flujo entero sigue a la vista.
+    expect(byPerson.fullFlow.main.map((step) => step.id)).toEqual(["inicio", "espera", "puede", "escribe", "fin"])
+    expect(byPerson.changes.map((item) => [item.by, item.what])).toEqual([
+      ["Ana Ruiz", "apagó «el agente le escribe» y prendió la tarea para el equipo"],
+      ["Ana Ruiz", "apagó la tarea para el equipo"],
+      ["Ana Ruiz", "la prendió"],
+    ])
+  })
+
+  it("con Recepción apagada, la línea que escribe dice que está en pausa", async () => {
+    const c = await clinic({ reception: false })
+    const line = await run(c, (tx) => updateAdminLine(tx, c.orgId, c.ownerId, all, "recordatorio_cita", { enabled: true }))
+    expect(line.paused).toBe("recepcion_apagada")
+    expect((await run(c, (tx) => updateAdminLine(tx, c.orgId, c.ownerId, all, "cobranza_vencida", { enabled: true }))).paused).toBeNull()
+  })
+
+  it("el flujo de una línea que solo deja trabajo al equipo no tiene decisión ni aviso", () => {
+    const line = ADMIN_LINES.find((item) => item.key === "atenciones_sin_firmar")!
+    const flow = flowOf(line, { agentPart: false, teamPart: true }, { days: 2 })
+    expect(flow.otherwise).toBeNull()
+    expect(flow.main.map((step) => [step.label, step.actorLabel])).toEqual([
+      ["Una atención lleva 2 días sin firmar", null],
+      ["Espera 2 días", "Administrador · agente"],
+      ["Tarea para firmar", "Quien lo lleva · persona"],
+      ["Le toca a una persona", null],
+    ])
+  })
+})
+
+describe("lo que recomienda", () => {
+  it("son las líneas apagadas que hoy tienen casos: tres como mucho, según el rol, y sin las que se pidió no recomendar", async () => {
+    const c = await clinic()
+    await acceptedBudget(c, await person(c, "Camila Ortiz"), 20)
+    await noShow(c, await person(c, "Rosa Medina"), 3)
+    await ownerDb.insert(patientCharge).values({
+      organizationId: c.orgId, patientId: await person(c, "Pedro Lara"), description: "Cargo", amountCents: 25000, currency: "PEN",
+      createdAt: new Date(Date.now() - 45 * DAY),
+    })
+    await ownerDb.insert(encounter).values({
+      organizationId: c.orgId, patientId: await person(c, "Elena Vargas"), dentistUserId: c.dentistId, branchId: c.branchId,
+      startedAt: new Date(Date.now() - 5 * DAY),
+    })
+    const advice = await run(c, (tx) => getAdminRecommendations(tx, c.orgId, all))
+    expect(advice.recommendations.map((item) => [item.key, item.actor, item.total])).toEqual([
+      ["seguimiento_no_asistencia", "agente", 1],
+      ["presupuestos_sin_cita", "persona", 1],
+      ["atenciones_sin_firmar", "persona", 1],
+    ])
+    expect(advice.more).toBe(1)
+    expect(advice.recommendations[0]).toMatchObject({
+      title: "1 persona faltó a su cita en los últimos 30 días y no tiene otra",
+      once: { label: "Escribirles esta vez" },
+    })
+    expect(advice.recommendations[1]?.once).toEqual({ label: "Crear 1 tarea", detail: "Una tarea para el equipo de recepción, una por persona. No se envía ningún mensaje." })
+    // Quien solo ve la caja recibe solo lo de la caja.
+    const cashier = (permission: string) => permission === "finance.read"
+    expect((await run(c, (tx) => getAdminRecommendations(tx, c.orgId, cashier))).recommendations.map((item) => item.key)).toEqual(["cobranza_vencida"])
+    await expect(run(c, (tx) => getAdminRecommendation(tx, c.orgId, cashier, "atenciones_sin_firmar"))).rejects.toMatchObject({ code: "FORBIDDEN" })
+    // «No recomendarla más» la deja en la lista, sin recomendarla; prendida, tampoco se recomienda.
+    await run(c, (tx) => updateAdminLine(tx, c.orgId, c.ownerId, all, "presupuestos_sin_cita", { noRecommend: true }))
+    await run(c, (tx) => updateAdminLine(tx, c.orgId, c.ownerId, all, "atenciones_sin_firmar", { enabled: true }))
+    expect((await run(c, (tx) => getAdminRecommendations(tx, c.orgId, all))).recommendations.map((item) => item.key)).toEqual(["seguimiento_no_asistencia", "cobranza_vencida"])
+    const page = await run(c, (tx) => getAdminPage(tx, c.orgId, all))
+    expect(page.lines.find((line) => line.key === "presupuestos_sin_cita")).toMatchObject({ todayCases: 1, recommended: false, noRecommend: true })
+    expect(page.today.recommendations).toBe(2)
+    expect(await run(c, (tx) => getAdminOverview(tx, c.orgId, all))).toEqual({ enabled: true, on: 1, byAgent: 0, byTeam: 1, recommended: 2 })
+    // Apagado no recomienda nada; la vista previa sí calcula.
+    await run(c, (tx) => updateAdminSettings(tx, c.orgId, c.ownerId, { enabled: false }))
+    expect(await run(c, (tx) => getAdminRecommendations(tx, c.orgId, all))).toEqual({ enabled: false, recommendations: [], more: 0 })
+    expect((await run(c, (tx) => getAdminRecommendations(tx, c.orgId, all, { preview: true, all: true }))).recommendations).toHaveLength(2)
+  })
+
+  it("«solo esta vez» deja las tareas de hoy sin prender la línea, y repetirlo no duplica", async () => {
+    const c = await clinic()
+    const patientId = await person(c, "Camila Ortiz")
+    await acceptedBudget(c, patientId, 20)
+    const once = () => run(c, (tx) => runAdminLineOnce(tx, c.orgId, c.ownerId, all, "presupuestos_sin_cita", { secretsKey: KEY }))
+    expect(await once()).toEqual({ created: 1, total: 1, writes: false })
+    expect(await once()).toEqual({ created: 0, total: 1, writes: false })
+    expect(await tasksOf(c)).toMatchObject([
+      { title: "Llamar a Camila Ortiz para agendar su tratamiento", createdBy: "admin", area: "recepcion", patientId, status: "open" },
+    ])
+    expect((await tasksOf(c))[0]?.reason).toMatch(/^Presupuesto N\.º \d+ · Ortodoncia · aceptado el /)
+    expect((await run(c, (tx) => getAdminPage(tx, c.orgId, all))).lines.find((line) => line.key === "presupuestos_sin_cita")?.enabled).toBe(false)
+    // Donde escribe el agente, los mensajes quedan para el siguiente ciclo, con sus comprobaciones.
+    await noShow(c, await person(c, "Rosa Medina"), 3)
+    expect(await run(c, (tx) => runAdminLineOnce(tx, c.orgId, c.ownerId, all, "seguimiento_no_asistencia", { secretsKey: KEY }))).toEqual({ created: 1, total: 1, writes: true })
+    expect((await jobsOf(c)).find((job) => job.kind === "seguimiento_no_asistencia")).toMatchObject({ status: "pendiente", payload: { once: true } })
+    // Una línea que solo tiene sentido prendida no ofrece «solo esta vez».
+    await expect(run(c, (tx) => runAdminLineOnce(tx, c.orgId, c.ownerId, all, "recordatorio_cita", { secretsKey: KEY }))).rejects.toThrow(/solo se puede prender/)
+  })
+})
+
+describe("las líneas que dejan trabajo al equipo", () => {
+  it("dejan una tarea por caso nuevo desde que se prendieron, a su área o a quien lo lleva, con el motivo", async () => {
+    const c = await clinic()
+    const before = await person(c, "Ya debía")
+    const after = await person(c, "Cumple hoy")
+    await acceptedBudget(c, before, 30)
+    await acceptedBudget(c, after, 8)
+    const signer = await person(c, "Elena Vargas")
+    await ownerDb.insert(encounter).values({
+      organizationId: c.orgId, patientId: signer, dentistUserId: c.dentistId, branchId: c.branchId, startedAt: new Date(Date.now() - 2.5 * DAY),
+    })
+    // Prendidas hace dos días: el presupuesto de 30 días ya cumplía la condición antes y no cuenta.
+    await turnedOn(c, "presupuestos_sin_cita", 2)
+    await turnedOn(c, "atenciones_sin_firmar", 2)
+    expect(await run(c, (tx) => syncTeamLines(tx, c.orgId, new Date()))).toBe(2)
+    expect(await run(c, (tx) => syncTeamLines(tx, c.orgId, new Date()))).toBe(0)
+    expect((await deliver(c)).map((result) => result.outcome)).toEqual(["tarea", "tarea"])
+    const tasks = await tasksOf(c)
+    expect(tasks.map((task) => [task.title, task.area, task.assigneeUserId, task.createdBy]).sort()).toEqual([
+      ["Llamar a Cumple hoy para agendar su tratamiento", "recepcion", null, "admin"],
+      // La atención tiene quien la lleva: la tarea es suya, no de un área.
+      ["Revisar y firmar la atención de Elena Vargas", "clinico", c.dentistId, "admin"],
+    ])
+    expect(tasks.every((task) => task.dueAt !== null && !!task.reason)).toBe(true)
+    const line = await run(c, (tx) => getAdminLine(tx, c.orgId, all, "presupuestos_sin_cita"))
+    expect(line.week).toBe("Esta semana: 1 tarea, 0 resueltas")
+    expect(line.people).toMatchObject([{ personName: "Cumple hoy", outcome: "tarea", text: "Quedó una tarea para el equipo de recepción." }])
+    // Resuelta la tarea, la línea lo cuenta.
+    await run(c, (tx) => completeTask(tx, c.orgId, tasks.find((task) => task.area === "recepcion")!.id, { userId: c.ownerId }))
+    const done = await run(c, (tx) => getAdminLine(tx, c.orgId, all, "presupuestos_sin_cita"))
+    expect(done.week).toBe("Esta semana: 1 tarea, 1 resuelta")
+    expect(done.people[0]).toMatchObject({ outcome: "tarea_resuelta", text: "Una persona ya lo resolvió." })
+    expect((await run(c, (tx) => getAdminPage(tx, c.orgId, all))).today).toMatchObject({ done: 2, yours: 1 })
+  })
+
+  it("si el motivo ya no está en pie cuando toca, no deja nada", async () => {
+    const c = await clinic()
+    const [pipe] = await ownerDb.insert(pipeline).values({ organizationId: c.orgId, name: "Comercial", isDefault: true }).returning()
+    const [stage] = await ownerDb.insert(pipelineStage).values({ organizationId: c.orgId, pipelineId: pipe!.id, name: "Contacto", position: 0 }).returning()
+    const [who] = await ownerDb.insert(contact).values({ organizationId: c.orgId, displayName: "Sin dueño" }).returning()
+    await turnedOn(c, "seguimientos_sin_responsable", 1)
+    const [opp] = await ownerDb
+      .insert(opportunity)
+      .values({ organizationId: c.orgId, contactId: who!.id, pipelineId: pipe!.id, stageId: stage!.id, title: "Implantes", currency: "PEN" })
+      .returning()
+    expect(await run(c, (tx) => syncTeamLines(tx, c.orgId, new Date()))).toBe(1)
+    // Alguien lo tomó antes de que el ciclo lo atienda.
+    await ownerDb.update(opportunity).set({ assignedUserId: c.ownerId }).where(eq(opportunity.id, opp!.id))
+    expect(await deliver(c)).toMatchObject([{ outcome: "cancelado", detail: "El seguimiento ya tiene responsable" }])
+    expect(await tasksOf(c)).toEqual([])
+  })
+})
+
+describe("a quién no pudo escribirle", () => {
+  it("junta por motivo a las personas de hoy, con cómo habilitar a cada una", async () => {
+    const c = await clinic()
+    await noShow(c, await person(c, "Tomás Rivas"), 3)
+    await noShow(c, await person(c, "Pedro Lara"), 4)
+    await run(c, (tx) => runAdminLineOnce(tx, c.orgId, c.ownerId, all, "seguimiento_no_asistencia", { secretsKey: KEY }))
+    // Ninguno aceptó mensajes: el agente no escribe, avisa, y queda la tarea de llamada.
+    expect((await deliver(c)).map((result) => result.outcome)).toEqual(["omitido", "omitido"])
+    const unreached = await run(c, (tx) => getAdminUnreached(tx, c.orgId, all))
+    expect(unreached.total).toBe(2)
+    expect(unreached.byCause).toEqual([
+      { cause: "sin_permiso", total: 2, reason: "no aceptó mensajes de la clínica", fix: "Pídele el permiso la próxima vez que venga o escriba." },
+    ])
+    expect(unreached.people.map((row) => [row.personName, row.lineName, row.outcome]).sort()).toEqual([
+      ["Pedro Lara", "Reprogramar tras una inasistencia", "no_pudo"],
+      ["Tomás Rivas", "Reprogramar tras una inasistencia", "no_pudo"],
+    ])
+    expect(unreached.people[0]?.text).toBe("El agente no pudo escribirle: no aceptó mensajes de la clínica. Lo tiene el equipo de recepción.")
+    expect(await tasksOf(c)).toHaveLength(2)
+    // Quien no ve la agenda no ve a esas personas.
+    expect(await run(c, (tx) => getAdminUnreached(tx, c.orgId, (permission) => permission === "finance.read"))).toEqual({ total: 0, byCause: [], people: [] })
+  })
+})
+
+describe("el ciclo del worker", () => {
+  it("con el administrador apagado no hace nada; encendido, atiende solo lo prendido", async () => {
+    const off = await clinic({ admin: false })
+    const on = await clinic()
+    for (const c of [off, on]) {
+      await ownerDb.insert(patientCharge).values({
+        organizationId: c.orgId, patientId: await person(c, "Rosa Medina"), description: "Cargo", amountCents: 9000, currency: "PEN",
+        createdAt: new Date(Date.now() - 31 * DAY),
+      })
+      // La línea se prendió hace dos días: el saldo cumplió sus 30 días ayer.
+      await ownerDb.insert(automationRule).values({
+        organizationId: c.orgId, name: "Saldo vencido", kind: "cobranza_vencida", enabled: true, agentPart: false,
+        enabledAt: new Date(Date.now() - 2 * DAY), createdBy: c.ownerId,
+      })
+    }
+    await tickAutomations(ownerDb, appDb, new Date(), { secretsKey: KEY, publicBaseUrl: "https://clinica.test" })
+    expect(await tasksOf(off)).toEqual([])
+    expect(await tasksOf(on)).toMatchObject([{ title: "Llamar a Rosa Medina por lo que debe", area: "caja", createdBy: "admin" }])
+    expect((await tasksOf(on))[0]?.reason).toMatch(/^Debe .* · desde el /)
+    // Otro ciclo no vuelve a dejar la misma tarea.
+    await tickAutomations(ownerDb, appDb, new Date(), { secretsKey: KEY, publicBaseUrl: "https://clinica.test" })
+    expect(await tasksOf(on)).toHaveLength(1)
+  })
+})
+
+describe("propone cambiar o apagar la línea que no sirve", () => {
+  it("lo dice con su cifra cuando no pudo escribirle a la mayoría, y nunca lo aplica por su cuenta", async () => {
+    const c = await clinic()
+    await turnedOn(c, "seguimiento_presupuesto", 20)
+    const [rule] = await ownerDb.select().from(automationRule).where(eq(automationRule.organizationId, c.orgId))
+    const quiet = (await run(c, (tx) => getAdminPage(tx, c.orgId, all))).lines.find((line) => line.key === "seguimiento_presupuesto")!
+    expect(quiet.suggestion).toBeNull()
+    await ownerDb.insert(automationJob).values(
+      Array.from({ length: 10 }, (_, index) => ({
+        organizationId: c.orgId, ruleId: rule!.id, kind: "seguimiento_presupuesto", dedupeKey: `seguimiento_presupuesto:prueba-${index}`,
+        scheduledFor: new Date(), status: "omitido", cause: "sin_permiso",
+      })),
+    )
+    const line = (await run(c, (tx) => getAdminPage(tx, c.orgId, all))).lines.find((item) => item.key === "seguimiento_presupuesto")!
+    expect(line.suggestion).toBe("En 30 días el agente no pudo escribirle a 10 de 10 personas. Mira por qué antes de seguir: casi siempre es el permiso o un dato que falta.")
+    expect(line.enabled).toBe(true)
+  })
+})

@@ -109,7 +109,7 @@ test("agente: el resumen dice cómo le fue, qué aprendió y qué pasa cuando no
   await expect(reception.getByRole("link", { name: "Probar" })).toBeVisible()
   await expect(reception.getByRole("link", { name: "Configurar" })).toBeVisible()
   await expect(reception.getByRole("switch", { name: "Apagar Recepción" })).toBeChecked()
-  for (const name of ["Asistente clínico", "Asesor"]) {
+  for (const name of ["Asistente clínico", "Administrador"]) {
     const row = rows.filter({ hasText: name })
     await expect(row.getByRole("link", { name: "Ver y encender" })).toBeVisible()
     await expect(row.getByRole("switch")).toHaveCount(0)
@@ -156,14 +156,14 @@ test("agente: el resumen dice cómo le fue, qué aprendió y qué pasa cuando no
   await expect(receptionRow).toHaveCount(1)
   await expect(receptionRow).toContainText("Encendido · nivel")
   expect((await box(receptionRow)).height).toBeGreaterThanOrEqual(44)
-  const advisorRow = rows.filter({ hasText: "Asesor" }).getByRole("link")
+  const advisorRow = rows.filter({ hasText: "Administrador" }).getByRole("link")
   await expect(advisorRow).toContainText("Apagado · ver y encender")
   expect((await box(advisorRow)).height).toBeGreaterThanOrEqual(44)
   await expect(week.getByRole("img", { name: /1 se las corregiste/ })).toBeVisible()
   expect(await overflow(page)).toBeLessThanOrEqual(0)
   await info.attach("resumen-movil", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" })
   await advisorRow.click()
-  await expect(page).toHaveURL(tenantPattern(org.slug, "/agent/asesor"))
+  await expect(page).toHaveURL(tenantPattern(org.slug, "/agent/administrador"))
 
   // --- El proveedor rechaza la conexión: lo dice arriba y lleva a donde se arregla ---
   await fixtureDb.insert(agentRunLedger).values({

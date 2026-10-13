@@ -35,7 +35,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     path: "/home",
     title: "Inicio",
     parent: null,
-    purpose: "Lo que te toca hoy. «Te espera» reúne en una lista, por orden de urgencia, los casos que pasó el agente, lo que espera tu aprobación, las conversaciones sin responder, las tareas, lo que recomienda el asesor y los presupuestos sin respuesta. Al lado, tu día: la agenda de la sede, tus pacientes o la caja, según tu trabajo.",
+    purpose: "Lo que te toca hoy. «Te espera» reúne en una lista, por orden de urgencia, los casos que pasó el agente, lo que espera tu aprobación, las conversaciones sin responder, las tareas, lo que recomienda el administrador y las personas a las que el agente no pudo escribir. Al lado, tu día: la agenda de la sede, tus pacientes o la caja, según tu trabajo.",
     terms: ["resumen del día", "pendientes", "panel", "dashboard", "qué tengo hoy", "recomendaciones"],
   },
   {
@@ -117,6 +117,20 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     ],
   },
   {
+    id: "administrador",
+    path: "/agent/administrador",
+    title: "Administrador",
+    parent: "Agente",
+    purpose: "El agente que mira cómo va la clínica. Su página es la lista de lo que puede hacer por su cuenta: recordar citas, avisar controles, retomar presupuestos o dejar tareas a tu equipo. Cada línea se prende o se apaga con su interruptor y dice quién lo hace, el agente o una persona.",
+    terms: ["recordatorios", "mensajes automáticos", "automatizaciones", "confirmar cita", "avisos", "reglas", "seguimientos", "recomendaciones", "asesor"],
+    writePermission: "agent.write",
+    faqs: [
+      { q: "¿Dónde enciendo los recordatorios de cita?", a: "En Agente › Administrador, en «Listas para activar», prende «Recordar la cita». Antes enciende al administrador con el interruptor de arriba. El recordatorio llega solo a quien aceptó recibirlo." },
+      { q: "¿Puedo pedirle algo con mis palabras?", a: "Sí. En Agente › Administrador, escribe en «Dile qué quieres que haga» lo que quieres: prender, apagar o ajustar una línea, o que le ofrezca otra fecha a quien cancela su cita. Te lo deja como borrador con su flujo y una prueba con tus últimos 30 días; nada cambia hasta que lo prendas o lo guardes." },
+      { q: "¿Por qué el agente no le escribió a una persona?", a: "En Agente › Administrador, abre la línea y mira «Qué pasó con cada persona»: dice el motivo (no aceptó mensajes, no tiene WhatsApp ni correo, o WhatsApp aún no aprueba el mensaje) y cómo habilitarlo." },
+    ],
+  },
+  {
     id: "finanzas",
     path: "/finance",
     title: "Finanzas",
@@ -151,15 +165,6 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     purpose: "Los productos e insumos, sus existencias por sede, las compras y los traslados.",
     terms: ["stock", "insumos", "materiales", "productos", "compras", "almacén", "existencias"],
     writePermission: "inventory.write",
-  },
-  {
-    id: "automatizaciones",
-    path: "/automations",
-    title: "Automatizaciones",
-    parent: "Gestión",
-    purpose: "Los mensajes que salen solos según una regla: recordatorios de cita, confirmaciones y seguimientos, con su horario de silencio.",
-    terms: ["recordatorios", "mensajes automáticos", "confirmar cita", "avisos", "reglas", "plantillas"],
-    writePermission: "crm.write",
   },
   {
     id: "reportes",

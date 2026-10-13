@@ -7,6 +7,7 @@ import { telegramBotApiAdapter } from "@odentia/channels"
 import { createAppDb, createOwnerDb, type Db, setupAgentMemory, withOrgContext } from "@odentia/db"
 import { contactIdentity, conversation, crmTask, message } from "@odentia/db/schema/crm"
 import { agentDecisionLog, agentHandoff, agentRunLedger } from "@odentia/db/schema/agent"
+import { automationJob } from "@odentia/db/schema/automation"
 import {
   addContactIdentity,
   createChair,
@@ -2488,4 +2489,53 @@ it("el asistente clínico ordena el dictado con el esquema de la atención y no 
   await expect(extractDictation(appDb, deps, { orgId: "org_a", transcript: "  " })).rejects.toMatchObject({ code: "VALIDATION" })
   // Con el modelo de demostración responde por reglas, sin proveedor.
   expect((await extractDictation(appDb, deps, { orgId: "org_a", transcript: "Control en 3 meses." })).drafts[0]).toMatchObject({ kind: "control" })
+})
+
+it("un botón de un mensaje automático fija el camino sin preguntarle al modelo de decisión", async () => {
+  await withOrgContext(appDb, "org_a", (tx) => upsertAgentConfig(tx, "org_a", { enabled: true, decisionProvider: "baseline", decisionRoutingEnabled: true }))
+  let asked = 0
+  const fake = createFakeDecisionModel()
+  const decision = { ...fake, decide: async (...args: Parameters<typeof fake.decide>) => { asked += 1; return fake.decide(...args) } }
+  try {
+    const first = await ingestText("tg:boton-inasistencia", "evt-boton-1", "Hola")
+    const [thread] = await ownerDb.select({ contactId: conversation.contactId }).from(conversation).where(eq(conversation.id, first.conversationId))
+    // El mensaje automático por una inasistencia, con sus botones, ya salió hacia la persona.
+    const jobId = "11111111-2222-4333-8444-555555555555"
+    const [sent] = await ownerDb.insert(message).values({
+      organizationId: "org_a", conversationId: first.conversationId, direction: "out", senderKind: "agent",
+      body: "Hola. No pudimos verte en la cita del lunes. ¿Te buscamos otro horario?",
+      replyButtons: [{ id: `odentia:responder:${jobId}`, title: "Sí, otro horario" }, { id: `odentia:baja:${jobId}`, title: "No enviar más" }],
+      createdAt: new Date(Date.now() + 1000),
+    }).returning({ id: message.id })
+    await ownerDb.insert(automationJob).values({
+      id: jobId, organizationId: "org_a", kind: "seguimiento_no_asistencia", dedupeKey: `seguimiento_no_asistencia:prueba-boton`,
+      scheduledFor: new Date(), status: "enviado", contactId: thread!.contactId, sentMessageId: sent!.id,
+    })
+    const tap = await ingestText("tg:boton-inasistencia", "evt-boton-2", "Sí, otro horario")
+    await ownerDb.update(message).set({ createdAt: new Date(Date.now() + 2000) }).where(eq(message.id, tap.messageId))
+    const model = new ScriptedModel(() => toolCall("send_reply", { text: "Claro, te busco otro horario." }, "boton-envio"))
+    expect(await processAgentRun(appDb, { ...runtime, createModel: async () => model, createDecisionModel: () => decision }, {
+      msg_id: 1, read_ct: 0, message: { kind: "inbound_message", orgId: "org_a", conversationId: tap.conversationId, messageId: tap.messageId },
+    })).toBe("done")
+    // Ni el camino ni el conocimiento se le preguntaron a un modelo: el botón ya lo dice.
+    expect(asked).toBe(0)
+    const system = systemTextOf(model.seen[0] ?? [])
+    expect(system).toContain("El interlocutor tocó el botón «Sí, otro horario» del mensaje automático de la clínica por «Una persona falta a su cita».")
+    expect(system).toContain("Quiere una cita nueva")
+    // Recibe las herramientas de reservar, no las de mover una cita que ya no está en pie.
+    expect(model.offered[0]).toEqual(expect.arrayContaining(["buscar_huecos", "proponer_cita", "send_reply", "ampliar_herramientas"]))
+    expect(model.offered[0]).not.toContain("reprogramar_cita")
+    expect(await agentMessages(tap.conversationId)).toContain("Claro, te busco otro horario.")
+
+    // Un texto cualquiera en el mismo hilo sí pasa por el modelo de decisión, como siempre.
+    const free = await ingestText("tg:boton-inasistencia", "evt-boton-3", "¿Cuánto cuesta una limpieza?")
+    await ownerDb.update(message).set({ createdAt: new Date(Date.now() + 5000) }).where(eq(message.id, free.messageId))
+    const again = new ScriptedModel(() => toolCall("send_reply", { text: "Te cuento." }, "boton-envio-2"))
+    await processAgentRun(appDb, { ...runtime, createModel: async () => again, createDecisionModel: () => decision }, {
+      msg_id: 2, read_ct: 0, message: { kind: "inbound_message", orgId: "org_a", conversationId: free.conversationId, messageId: free.messageId },
+    })
+    expect(asked).toBeGreaterThan(0)
+  } finally {
+    await withOrgContext(appDb, "org_a", (tx) => upsertAgentConfig(tx, "org_a", { decisionProvider: "none", decisionRoutingEnabled: true }))
+  }
 })

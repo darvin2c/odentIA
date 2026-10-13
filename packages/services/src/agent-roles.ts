@@ -1,3 +1,4 @@
+import { ADMIN_LINES, say } from "./admin-lines.js"
 import { AUTONOMY_ACTIONS, type AutonomyAction, type AutonomyMode, DEFAULT_AUTONOMY_MODES } from "@odentia/db/schema/agent"
 
 /**
@@ -20,7 +21,7 @@ export const AGENT_BASE_PRINCIPLES = [
   "No diagnostica, no receta y no decide por el profesional.",
 ] as const
 
-export const AGENT_ROLE_IDS = ["recepcion", "asistente_clinico", "asesor", "ayuda"] as const
+export const AGENT_ROLE_IDS = ["recepcion", "asistente_clinico", "administrador", "ayuda"] as const
 export type AgentRoleId = (typeof AGENT_ROLE_IDS)[number]
 
 export interface AgentFunction {
@@ -175,35 +176,38 @@ export const AGENT_ROLES: Record<AgentRoleId, AgentRole> = {
     later: "Odontograma por voz y recetas. Elegir el estilo de la nota, breve o detallada.",
     learnsLater: "Recordar los términos de cada odontólogo, como algo suyo.",
   },
-  asesor: {
-    id: "asesor",
-    name: "Asesor",
-    audience: "Para quien administra, en Inicio",
-    role: "Revisa lo que pasa en la clínica y dice qué conviene atender primero, con la acción lista para aprobar.",
+  administrador: {
+    id: "administrador",
+    name: "Administrador",
+    audience: "Para quien administra, en su página y en Inicio",
+    role: "Mira cómo va la clínica, te recomienda qué atender y hace por su cuenta lo que tú le encargues.",
     available: true,
     switchable: true,
+    // Sus funciones son las líneas de `ADMIN_LINES`: se prenden una por una en su página.
     functions: [
-      { id: "controles_vencidos", label: "Controles vencidos", description: "Pacientes con un control pendiente que ya pasó.", fixed: false, tools: [] },
-      { id: "presupuestos_sin_cita", label: "Presupuestos sin cita", description: "Presupuestos aceptados que nadie agendó.", fixed: false, tools: [] },
-      { id: "atenciones_sin_firmar", label: "Atenciones sin firmar", description: "Borradores que quedaron abiertos.", fixed: false, tools: [] },
-      { id: "seguimientos_sin_responsable", label: "Seguimientos sin responsable", description: "Oportunidades que nadie lleva.", fixed: false, tools: [] },
-      { id: "cobranza_vencida", label: "Cobranza vencida", description: "Saldos que pasaron su fecha.", fixed: false, tools: [] },
-      { id: "inasistencias_sin_cita", label: "Inasistencias sin otra cita", description: "Personas que faltaron y nadie volvió a agendar.", fixed: false, tools: [] },
-      { id: "presupuestos_sin_respuesta", label: "Presupuestos sin respuesta", description: "Presupuestos presentados que siguen esperando.", fixed: false, tools: [] },
-      { id: "preparar", label: "Preparar la acción", description: "La lista de personas y las tareas listas para crear. Si hay una automatización que lo evita, como el recordatorio de control, ofrece encenderla.", fixed: true, tools: [] },
-      { id: "explicar", label: "Mostrar cómo se calculó", description: "Cada cifra con la lista que la respalda.", fixed: true, tools: [] },
+      ...ADMIN_LINES.map((line) => ({
+        id: line.key,
+        label: line.name,
+        description: `${line.trigger(line.defaultDays)}: ${line.agent ? `el agente Recepción ${say(line.agent.does)}` : line.team.does.charAt(0).toLowerCase() + line.team.does.slice(1)}.`,
+        fixed: false,
+        tools: [],
+      })),
+      { id: "recomendar", label: "Recomendar qué prender", description: "Las líneas apagadas que hoy tienen casos, con su lista. A lo sumo tres a la vez.", fixed: true, tools: [] },
+      { id: "avisar", label: "Avisar cuando no puede", description: "Si el agente no puede escribirle a alguien, dice por qué y cómo habilitarlo. No se apaga.", fixed: true, tools: [] },
+      { id: "explicar", label: "Mostrar cómo se calculó", description: "Cada cifra con la lista que la respalda y lo que pasó con cada persona.", fixed: true, tools: [] },
+      { id: "pedir", label: "Entender lo que le pides con palabras", description: "Arma el cambio con las líneas que el sistema ya sabe hacer y lo deja como borrador, con su flujo, una prueba con tus últimos 30 días y lo que revisó. Tú lo prendes, lo guardas o lo descartas.", fixed: true, tools: [] },
+      { id: "proponer", label: "Proponer cambiar o apagar", description: "Cuando una línea prendida no está sirviendo lo dice con su cifra. No la cambia.", fixed: true, tools: [] },
+      { id: "ya_aviso", label: "No escribir encima de lo que la persona ya dijo", description: "Antes de que Recepción escriba por un seguimiento, mira si esa persona ya avisó algo sobre eso. Si es así, no le escribe.", fixed: true, tools: [] },
     ],
     always: [],
-    sees: "Agenda, pendientes y reportes, según los permisos de quien lee. Los números salen de la base de datos, no del modelo.",
-    notSees: "Conversaciones ni historia clínica.",
-    never: "Ejecutar por su cuenta: no crea tareas, no envía mensajes ni enciende automatizaciones. Dar un número que no pueda mostrar. Más de tres recomendaciones a la vez.",
-    confirms: "Una persona confirma cada acción: crear las tareas o encender una automatización, con el permiso de cada una.",
-    // No hay aprendizaje automático: «No me interesa» pospone la detección y el umbral se cambia a mano.
-    learnsFrom: "De lo que descartas: «No me interesa» oculta esa detección una semana. El umbral de días lo cambias tú.",
-    behaves: "No redacta con un modelo: cada recomendación es una consulta a los datos de la clínica. Breve, con la cifra, la lista que la respalda y cómo se calculó.",
-    testedWith: "Con una vista previa de lo que recomendaría hoy, antes de encenderlo.",
-    learningOwner: "Es solo del asesor de esta clínica: no cambia a los otros agentes.",
-    learnsLater: "Ajustar el umbral por su cuenta según lo que descartas.",
+    sees: "Agenda, pendientes y cifras, según los permisos de quien lee. Los números salen de la base de datos, no de un modelo. El modelo recibe dos cosas: el texto de lo que le pides con palabras y, antes de un mensaje de seguimiento, los últimos mensajes que escribió esa persona.",
+    notSees: "Historia clínica, caja ni el resto de las conversaciones. Al entender un pedido el modelo no recibe nombres ni datos de la clínica. Quien escribe a las personas es Recepción.",
+    never: "Prender, cambiar ni apagar nada por su cuenta. Escribirle a quien no lo aceptó. Dar un número que no pueda mostrar. Más de tres recomendaciones a la vez. Armar una línea que el sistema no sepa hacer ni cambiar el texto de un mensaje.",
+    confirms: "Una persona prende cada línea, una por una; prender un recordatorio ya es aprobarlo. Con Recepción en «Supervisado», los demás mensajes esperan tu aprobación.",
+    learnsFrom: "De lo que descartas: «No recomendarla más» deja la línea en la lista sin volver a recomendarla. El plazo de cada línea lo cambias tú. No aprende de las conversaciones.",
+    behaves: "Usa la base de tu clínica. El modelo solo elige entre opciones cerradas: de qué línea hablas, qué quieres hacer con ella y si una persona ya avisó algo. No redacta: cada cifra y cada mensaje salen de reglas fijas y de consultas a tus datos. Si el modelo no responde, lo dice; lo prendido y los interruptores siguen funcionando.",
+    testedWith: "Con lo que haría hoy con tus datos antes de prender cada línea y, al pedirle algo con palabras, con lo que pasó en tus últimos 30 días. La prueba no envía nada.",
+    learningOwner: "Es solo del administrador de esta clínica: no cambia a los otros agentes.",
   },
   ayuda: {
     id: "ayuda",

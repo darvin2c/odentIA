@@ -38,7 +38,6 @@ import {
   Smile,
   Users,
   Wallet,
-  Workflow,
 } from "lucide-react"
 import { useEffect } from "react"
 import {
@@ -151,7 +150,6 @@ const navDefinitions: NavDefinition[] = [
       { label: "Servicios y precios", to: "/services", icon: ListTodo, permission: "catalog.read" },
       { label: "Comisiones", to: "/commissions", icon: Wallet, permission: "commissions.read" },
       { label: "Inventario", to: "/inventory", icon: Package, permission: "inventory.read" },
-      { label: "Automatizaciones", to: "/automations", icon: Workflow, permission: "crm.read" },
       { label: "Reportes", to: "/reports", icon: BarChart3, permission: "reports.read" },
     ],
   },

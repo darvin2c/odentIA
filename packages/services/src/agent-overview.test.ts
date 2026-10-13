@@ -82,7 +82,7 @@ async function openConversation(connectionId: string, sender: string): Promise<s
 describe("fichas de los agentes", () => {
   it("cada agente tiene su ficha y los cuatro existen", () => {
     expect(Object.keys(AGENT_ROLES).sort()).toEqual([...AGENT_ROLE_IDS].sort())
-    expect(AGENT_ROLE_IDS.filter((id) => AGENT_ROLES[id].available)).toEqual(["recepcion", "asistente_clinico", "asesor", "ayuda"])
+    expect(AGENT_ROLE_IDS.filter((id) => AGENT_ROLES[id].available)).toEqual(["recepcion", "asistente_clinico", "administrador", "ayuda"])
     // Ayuda viene con el sistema: la clínica no la enciende.
     expect(AGENT_ROLES.ayuda.switchable).toBe(false)
   })
