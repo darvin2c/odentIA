@@ -170,7 +170,7 @@ function assertStatus(status: string): AppointmentStatus {
 async function audit(
   tx: Db,
   orgId: string,
-  actorUserId: string,
+  actorUserId: string | null,
   action: string,
   id: string,
   metadata?: Record<string, unknown>,
@@ -789,19 +789,22 @@ export type AppointmentCancelReason = (typeof APPOINTMENT_CANCEL_REASONS)[number
 /**
  * Transición explícita; cancelada y no_asistio liberan el recurso en DB. Al
  * cancelar, el motivo y la nota (opcionales) quedan en la auditoría de la cita.
+ * El actor es nulo cuando quien confirma o cancela es la propia persona desde
+ * su enlace; `via` deja dicho por dónde llegó el cambio.
  */
 export async function setAppointmentStatus(
   tx: Db,
   orgId: string,
-  actorUserId: string,
+  actorUserId: string | null,
   id: string,
   status: string,
-  detail?: { cancelReason?: string; cancelNote?: string },
+  detail?: { cancelReason?: string; cancelNote?: string; via?: string },
 ): Promise<AppointmentItem> {
   const next = assertStatus(status)
   const current = await requireAppointment(tx, orgId, id)
   if (current.status === next) return getAppointment(tx, orgId, id)
   const metadata: Record<string, unknown> = { from: current.status }
+  if (detail?.via) metadata.via = detail.via
   if (next === "cancelada") {
     if (detail?.cancelReason !== undefined) {
       if (!(APPOINTMENT_CANCEL_REASONS as readonly string[]).includes(detail.cancelReason)) {

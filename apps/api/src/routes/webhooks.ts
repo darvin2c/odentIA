@@ -1,7 +1,7 @@
 import { type ChannelProvider, channelAdapters, verifyMetaChallenge } from "@odentia/channels"
 import { type Db, sendInboundMessage, withOrgContext } from "@odentia/db"
 import { channelConnection, inboundEvent } from "@odentia/db/schema/crm"
-import { applyStatus, decryptConfig } from "@odentia/services"
+import { applyStatus, applyTemplateUpdates, decryptConfig } from "@odentia/services"
 import { eq } from "drizzle-orm"
 import { Hono } from "hono"
 import { z } from "zod"
@@ -117,6 +117,13 @@ export function createWebhooksRoute(deps: WebhookDeps) {
         .returning({ id: inboundEvent.id })
       if (inserted.length === 0) continue
       await withOrgContext(deps.db, orgId, (tx) => applyStatus(tx, orgId, [status]).then(() => {}))
+    }
+
+    if (parsedBody.templateStatuses?.length) {
+      const updates = parsedBody.templateStatuses
+      await withOrgContext(deps.db, orgId, (tx) =>
+        applyTemplateUpdates(tx, orgId, connection.id, updates).then(() => {}),
+      )
     }
 
     for (const event of parsedBody.messages) {

@@ -24,7 +24,7 @@ const BASIS_ICON: Record<string, ReactNode> = {
 const AGENT_NAME: Record<string, string> = {
   recepcion: "Recepción",
   clinico: "Asistente clínico",
-  asesor: "Asesor",
+  administrador: "Administrador",
   ayuda: "Ayuda",
 }
 

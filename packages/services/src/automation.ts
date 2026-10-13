@@ -1,50 +1,61 @@
 import { createHash, randomBytes } from "node:crypto"
-import { sendAgentRun, type Db, withOrgContext } from "@odentia/db"
+import type { NormalizedTemplateStatus } from "@odentia/channels"
+import { sendAgentRun, type Db } from "@odentia/db"
 import { appointment } from "@odentia/db/schema/agenda"
-import { member, organization } from "@odentia/db/schema/auth"
+import { member } from "@odentia/db/schema/auth"
 import { commercialFollowUpCoordination } from "@odentia/db/schema/agent"
 import type {
-  AutomationChannel,
+  AutomationCause,
   AutomationJobStatus,
   AutomationKind,
   ConsentPurpose,
 } from "@odentia/db/schema/automation"
 import {
-  AUTOMATION_CHANNELS,
-  AUTOMATION_JOB_STATUSES,
   AUTOMATION_KINDS,
   automationConsent,
   automationJob,
   automationLinkToken,
   automationRule,
   CONSENT_PURPOSES,
+  CONSENT_SOURCES,
+  type ConsentSource,
 } from "@odentia/db/schema/automation"
-import { clinicalFollowUp, patientContact, treatmentBudget } from "@odentia/db/schema/clinical"
-import { agentConfig, channelConnection, contact, contactIdentity, conversation, crmTask } from "@odentia/db/schema/crm"
+import { clinicalFollowUp, patient, patientContact, treatmentBudget } from "@odentia/db/schema/clinical"
+import {
+  agentConfig,
+  channelConnection,
+  contact,
+  contactIdentity,
+  conversation,
+  crmTask,
+  message,
+} from "@odentia/db/schema/crm"
 import { opportunity } from "@odentia/db/schema/opportunities"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
-import {
-  and,
-  arrayOverlaps,
-  asc,
-  count,
-  desc,
-  eq,
-  exists,
-  gte,
-  inArray,
-  isNull,
-  lte,
-  sql,
-} from "drizzle-orm"
+import { and, asc, desc, eq, gte, inArray, isNull, lte, sql } from "drizzle-orm"
+import { adminLineOf, DEFAULT_HOURS_BEFORE, type LineTiming } from "./admin-lines.js"
 import { createProposal, getAutonomyPolicy } from "./agent-operations.js"
+import { setAppointmentStatus } from "./appointments.js"
+import {
+  AUTOMATION_MESSAGE_KEYS,
+  type AutomationMessageKey,
+  automationMessageOf,
+  parseReplyId,
+} from "./automation-messages.js"
+import { type ComposedMessage, composeJobMessage, routeMessage } from "./automation-routing.js"
+import {
+  applyTemplateStatuses,
+  requestMessageTemplate,
+  type TemplateDeps,
+} from "./channel-templates.js"
 import { reconcileProposedCoordinations } from "./commercial-coordination.js"
 import { getConnectionTemplates } from "./connections.js"
-import { sendOutbound, sendTemplateOutbound, startContactConversation } from "./conversations.js"
+import { sendOutbound, sendTemplateOutbound } from "./conversations.js"
 import { notFound, ServiceError, validation } from "./errors.js"
 import { findOrgLocale, NEUTRAL_TIMEZONE } from "./locale.js"
+import { createTask } from "./tasks.js"
 import { CHECKUP_REMINDER_WINDOW_HOURS } from "./automation-windows.js"
-import { createWorkspaceNotification } from "./workspace.js"
+import { createWorkspaceNotification, upsertWorkspaceNotification } from "./workspace.js"
 
 /**
  * Automatizaciones: reglas, trabajos durables en DB, consentimientos y
@@ -56,32 +67,41 @@ import { createWorkspaceNotification } from "./workspace.js"
  * transacciones separadas: estado + encolado son atómicos en cada paso.
  */
 
-// ---------------------------------------------------------------- reglas ---
+// ---------------------------------------------------------------- líneas ---
 
+/** Estado de una línea del Administrador en una organización. */
 export type RuleRow = typeof automationRule.$inferSelect
 
-export interface RuleConfig {
+/** Lo que se puede ajustar de una línea. */
+export interface LineConfig {
+  /** Cuántas horas antes se recuerda una cita. */
   hoursBefore?: number[]
+  /** El plazo, en las líneas que lo tienen. */
+  days?: number
+  /** Horas de espera, en las líneas que esperan horas. */
   delayHours?: number
-  inactiveDays?: number
-  quietStart?: string
-  quietEnd?: string
-  /** Segmento de campaña: etiquetas y/o etapas de oportunidad abiertas. */
-  segment?: { tags?: string[]; opportunityStageIds?: string[]; inactiveDays?: number }
-  startsAt?: string
-  endsAt?: string
+  /** Hora del día a la que sale (0–23), con la hora de la sede. */
+  hour?: number
+  /** Indicación de la clínica para quien reciba la tarea. La lee una persona; el agente nunca la dice. */
+  taskNote?: string
+}
+
+export const TASK_NOTE_CHARS = 160
+
+/** Los tiempos vigentes de una línea, para decirlos con las palabras del catálogo. */
+export function lineTiming(rule: Pick<RuleRow, "config"> | null, extra: LineTiming = {}): LineTiming {
+  const { hoursBefore, delayHours, hour } = lineConfigOf(rule?.config)
+  return {
+    ...(hoursBefore ? { hoursBefore } : {}),
+    ...(delayHours !== undefined ? { delayHours } : {}),
+    ...(hour !== undefined ? { hour } : {}),
+    ...extra,
+  }
 }
 
 function assertKind(kind: string): AutomationKind {
-  if (!(AUTOMATION_KINDS as readonly string[]).includes(kind))
-    throw validation("Tipo de automatización inválido")
+  if (!(AUTOMATION_KINDS as readonly string[]).includes(kind)) throw notFound("Línea del administrador")
   return kind as AutomationKind
-}
-
-function assertChannel(channel: string): AutomationChannel {
-  if (!(AUTOMATION_CHANNELS as readonly string[]).includes(channel))
-    throw validation("Canal inválido")
-  return channel as AutomationChannel
 }
 
 function assertPurpose(purpose: string): ConsentPurpose {
@@ -90,179 +110,284 @@ function assertPurpose(purpose: string): ConsentPurpose {
   return purpose as ConsentPurpose
 }
 
-/** Finalidad de consentimiento que exige cada kind antes de enviar. */
+/** Permiso que la persona tiene que haber dado para recibir el mensaje de una línea. */
 export function purposeOfKind(kind: string): ConsentPurpose {
-  if (kind === "campana") return "marketing"
-  if (kind === "recordatorio_cita" || kind === "recordatorio_control") return "recordatorio"
-  return "seguimiento"
+  return adminLineOf(kind)?.agent?.purpose ?? "seguimiento"
 }
 
-/** Lee la config JSONB de una regla campo por campo (sin casts ciegos). */
-function configOf(value: unknown): RuleConfig {
-  const config: RuleConfig = {}
+/** Lee la config JSONB de una línea campo por campo (sin casts ciegos). */
+export function lineConfigOf(value: unknown): LineConfig {
+  const config: LineConfig = {}
   if (typeof value !== "object" || value === null) return config
   if ("hoursBefore" in value && Array.isArray(value.hoursBefore)) {
     const hours = value.hoursBefore.filter((h): h is number => typeof h === "number")
     if (hours.length > 0) config.hoursBefore = hours
   }
-  if ("delayHours" in value && typeof value.delayHours === "number")
-    config.delayHours = value.delayHours
-  if ("inactiveDays" in value && typeof value.inactiveDays === "number") {
-    config.inactiveDays = value.inactiveDays
-  }
-  if ("quietStart" in value && typeof value.quietStart === "string")
-    config.quietStart = value.quietStart
-  if ("quietEnd" in value && typeof value.quietEnd === "string") config.quietEnd = value.quietEnd
-  if ("startsAt" in value && typeof value.startsAt === "string") config.startsAt = value.startsAt
-  if ("endsAt" in value && typeof value.endsAt === "string") config.endsAt = value.endsAt
-  if ("segment" in value && typeof value.segment === "object" && value.segment !== null) {
-    const raw = value.segment
-    const segment: NonNullable<RuleConfig["segment"]> = {}
-    if ("tags" in raw && Array.isArray(raw.tags)) {
-      const tags = raw.tags.filter((t): t is string => typeof t === "string")
-      if (tags.length > 0) segment.tags = tags
-    }
-    if ("opportunityStageIds" in raw && Array.isArray(raw.opportunityStageIds)) {
-      const stages = raw.opportunityStageIds.filter((s): s is string => typeof s === "string")
-      if (stages.length > 0) segment.opportunityStageIds = stages
-    }
-    if ("inactiveDays" in raw && typeof raw.inactiveDays === "number") {
-      segment.inactiveDays = raw.inactiveDays
-    }
-    config.segment = segment
-  }
+  if ("days" in value && typeof value.days === "number") config.days = value.days
+  if ("delayHours" in value && typeof value.delayHours === "number") config.delayHours = value.delayHours
+  if ("hour" in value && typeof value.hour === "number") config.hour = value.hour
+  if ("taskNote" in value && typeof value.taskNote === "string" && value.taskNote.trim()) config.taskNote = value.taskNote.trim()
   return config
 }
 
 export interface JobPayload {
-  text?: string
-  templateName?: string | null
-  templateLanguage?: string
-  quietStart?: string
-  quietEnd?: string
+  /** Zona de la sede del caso: con ella se mide el horario de silencio. */
   timeZone?: string
   controlId?: string
-  campaign?: string
+  /** Persona que lleva el caso (el profesional de una atención): a ella va la tarea. */
+  ownerUserId?: string
+  /** Lo que dice el caso en la lista: «Debe … · desde el 18 de agosto». */
+  detail?: string
+  /** Lo pidió una persona con «Solo esta vez»: sale aunque la línea esté apagada. */
+  once?: boolean
+  /** Con Recepción en «Supervisado», una persona ya aprobó este mensaje. */
+  approved?: boolean
 }
 
-/** Lee el payload JSONB de un trabajo campo por campo (sin casts ciegos). */
-function payloadOf(value: unknown): JobPayload {
+/** Lee el payload JSONB de un caso campo por campo (sin casts ciegos). */
+export function jobPayloadOf(value: unknown): JobPayload {
   const payload: JobPayload = {}
   if (typeof value !== "object" || value === null) return payload
-  if ("text" in value && typeof value.text === "string") payload.text = value.text
-  if (
-    "templateName" in value &&
-    (typeof value.templateName === "string" || value.templateName === null)
-  ) {
-    payload.templateName = value.templateName
-  }
-  if ("templateLanguage" in value && typeof value.templateLanguage === "string") {
-    payload.templateLanguage = value.templateLanguage
-  }
-  if ("quietStart" in value && typeof value.quietStart === "string")
-    payload.quietStart = value.quietStart
-  if ("quietEnd" in value && typeof value.quietEnd === "string") payload.quietEnd = value.quietEnd
   if ("timeZone" in value && typeof value.timeZone === "string") payload.timeZone = value.timeZone
-  if ("controlId" in value && typeof value.controlId === "string")
-    payload.controlId = value.controlId
-  if ("campaign" in value && typeof value.campaign === "string") payload.campaign = value.campaign
+  if ("controlId" in value && typeof value.controlId === "string") payload.controlId = value.controlId
+  if ("ownerUserId" in value && typeof value.ownerUserId === "string") payload.ownerUserId = value.ownerUserId
+  if ("detail" in value && typeof value.detail === "string") payload.detail = value.detail
+  if ("once" in value && value.once === true) payload.once = true
+  if ("approved" in value && value.approved === true) payload.approved = true
   return payload
 }
 
-export async function listRules(tx: Db, orgId: string): Promise<RuleRow[]> {
+/** Las líneas que tienen fila; las que no la tienen están apagadas, con todo por defecto. */
+export async function listLineRules(tx: Db, orgId: string): Promise<RuleRow[]> {
   return tx
     .select()
     .from(automationRule)
     .where(eq(automationRule.organizationId, orgId))
-    .orderBy(asc(automationRule.kind), asc(automationRule.name))
+    .orderBy(asc(automationRule.kind))
 }
 
-export interface CreateRuleInput {
-  name: string
-  kind: string
-  channel?: string
+export async function findLineRule(tx: Db, orgId: string, kind: string): Promise<RuleRow | null> {
+  const [row] = await tx
+    .select()
+    .from(automationRule)
+    .where(and(eq(automationRule.organizationId, orgId), eq(automationRule.kind, kind)))
+    .limit(1)
+  return row ?? null
+}
+
+/** Plazo vigente de una línea: el que ajustó la clínica o el del catálogo. */
+export function lineDays(rule: Pick<RuleRow, "config"> | null, kind: string): number | null {
+  const line = adminLineOf(kind)
+  if (!line || line.defaultDays === null) return null
+  return lineConfigOf(rule?.config).days ?? line.defaultDays
+}
+
+export interface SetLineInput {
   enabled?: boolean
-  templateName?: string | null
-  templateLanguage?: string
-  /** JSON validado en ruta; se normaliza con configOf antes de persistir. */
-  config?: unknown
+  /** «El agente le escribe». */
+  agentPart?: boolean
+  /** «Tarea para el equipo». */
+  teamPart?: boolean
+  /** null vuelve al plazo del catálogo. */
+  days?: number | null
+  hoursBefore?: number[]
+  /** null vuelve a la espera del catálogo. */
+  delayHours?: number | null
+  /** null quita la hora fija. */
+  hour?: number | null
+  /** null o vacío quita la indicación. */
+  taskNote?: string | null
+  noRecommend?: boolean
 }
 
-export async function createRule(
+/**
+ * Prende, apaga o ajusta una línea. Es la única operación que cambia lo que el
+ * Administrador hace por su cuenta, y siempre la pide una persona.
+ *
+ * - Prender fija desde cuándo actúa: lo ocurrido antes no cuenta.
+ * - Apagar descarta lo que estaba por salir.
+ * - Apagar las dos partes es apagar la línea.
+ * - El aviso de «no pude» no es una parte: no se puede apagar.
+ */
+export async function setLine(
   tx: Db,
   orgId: string,
   actorUserId: string,
-  input: CreateRuleInput,
+  key: string,
+  input: SetLineInput,
 ): Promise<RuleRow> {
-  const name = input.name?.trim()
-  if (!name || name.length > 120) throw validation("El nombre debe tener 1–120 caracteres")
-  const kind = assertKind(input.kind)
-  const channel = assertChannel(input.channel ?? "whatsapp")
-  if (
-    input.templateName !== undefined &&
-    input.templateName !== null &&
-    input.templateName.trim() === ""
-  ) {
-    throw validation("El nombre de la plantilla no puede estar vacío")
+  const kind = assertKind(key)
+  const line = adminLineOf(kind)
+  if (!line) throw notFound("Línea del administrador")
+  // Serializa cambios simultáneos sobre la misma línea aunque aún no tenga fila.
+  await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`admin-line:${orgId}:${kind}`}))`)
+  const existing = await findLineRule(tx, orgId, kind)
+  const was = {
+    enabled: existing?.enabled ?? false,
+    agentPart: line.agent ? (existing?.agentPart ?? true) : false,
+    teamPart: existing?.teamPart ?? true,
+    noRecommend: existing?.noRecommend ?? false,
+    config: lineConfigOf(existing?.config),
+  }
+  const agentPart = line.agent ? (input.agentPart ?? was.agentPart) : false
+  // El seguimiento comercial siempre pasa a una persona cuando el agente no puede.
+  const teamPart = kind === "seguimiento_comercial" ? true : (input.teamPart ?? was.teamPart)
+  let enabled = input.enabled ?? was.enabled
+  if (!agentPart && !teamPart) {
+    if (input.enabled === true) {
+      throw validation("Elige al menos una parte: que el agente escriba o que quede una tarea para el equipo")
+    }
+    enabled = false
+  }
+  const config: LineConfig = { ...was.config }
+  if (input.days !== undefined) {
+    if (line.defaultDays === null) throw validation(`«${line.name}» no tiene un plazo en días`)
+    if (input.days === null) delete config.days
+    else {
+      if (!Number.isInteger(input.days) || input.days < 1 || input.days > 365) throw validation("El plazo va de 1 a 365 días")
+      config.days = input.days
+    }
+  }
+  if (input.hoursBefore !== undefined) {
+    if (kind !== "recordatorio_cita") throw validation(`«${line.name}» no se ajusta por horas`)
+    const hours = [...new Set(input.hoursBefore)].sort((a, b) => b - a)
+    if (hours.length < 1 || hours.length > 3 || hours.some((h) => !Number.isInteger(h) || h < 1 || h > 168)) {
+      throw validation("El recordatorio admite de uno a tres avisos, entre 1 y 168 horas antes")
+    }
+    config.hoursBefore = hours
+  }
+  if (input.delayHours !== undefined) {
+    if (line.delayHours === undefined) throw validation(`«${line.name}» no espera horas`)
+    if (input.delayHours === null) delete config.delayHours
+    else {
+      if (!Number.isInteger(input.delayHours) || input.delayHours < 1 || input.delayHours > 72) throw validation("La espera va de 1 a 72 horas")
+      config.delayHours = input.delayHours
+    }
+  }
+  if (input.hour !== undefined) {
+    if (!line.hourAdjustable) throw validation(`«${line.name}» no tiene una hora de salida que se pueda fijar`)
+    if (input.hour === null) delete config.hour
+    else {
+      if (!Number.isInteger(input.hour) || input.hour < 0 || input.hour > 23) throw validation("La hora va de 0 a 23")
+      config.hour = input.hour
+    }
+  }
+  if (input.taskNote !== undefined) {
+    const note = input.taskNote?.replace(/\s+/g, " ").trim() ?? ""
+    if (note.length > TASK_NOTE_CHARS) throw validation(`La indicación para la tarea admite hasta ${TASK_NOTE_CHARS} caracteres`)
+    if (note) config.taskNote = note
+    else delete config.taskNote
+  }
+  const now = new Date()
+  const turnedOn = enabled && !was.enabled
+  const values = {
+    name: line.name,
+    enabled,
+    agentPart,
+    teamPart,
+    noRecommend: input.noRecommend ?? was.noRecommend,
+    config,
+    updatedAt: now,
+    ...(turnedOn ? { enabledAt: now, enabledBy: actorUserId } : {}),
   }
   const [row] = await tx
     .insert(automationRule)
-    .values({
-      organizationId: orgId,
-      name,
-      kind,
-      channel,
-      enabled: input.enabled ?? true,
-      templateName: input.templateName?.trim() || null,
-      templateLanguage: input.templateLanguage?.trim() || "es_PE",
-      config: configOf(input.config),
-      createdBy: actorUserId,
-    })
+    .values({ organizationId: orgId, kind, createdBy: actorUserId, ...values })
+    .onConflictDoUpdate({ target: [automationRule.organizationId, automationRule.kind], set: values })
     .returning()
-  if (!row) throw new Error("No se pudo crear la regla")
-  await audit(tx, orgId, actorUserId, "automation_rule.created", row.id, { kind, channel })
-  return row
-}
-
-export async function updateRule(
-  tx: Db,
-  orgId: string,
-  actorUserId: string,
-  id: string,
-  input: Partial<CreateRuleInput>,
-): Promise<RuleRow> {
-  const [existing] = await tx
-    .select()
-    .from(automationRule)
-    .where(and(eq(automationRule.id, id), eq(automationRule.organizationId, orgId)))
-    .limit(1)
-  if (!existing) throw notFound("Regla de automatización")
-  const patch: Partial<typeof automationRule.$inferInsert> = { updatedAt: new Date() }
-  if (input.name !== undefined) {
-    const name = input.name.trim()
-    if (!name || name.length > 120) throw validation("El nombre debe tener 1–120 caracteres")
-    patch.name = name
+  if (!row) throw new Error("No se pudo guardar la línea")
+  if (was.enabled && !enabled) {
+    // Apagar descarta lo que estaba por salir: al volver a prender no se envía
+    // lo que quedó atrás. Lo que una persona pidió «solo esta vez» sí sale.
+    await tx
+      .update(automationJob)
+      .set({ status: "cancelado", lastError: "Línea apagada", updatedAt: now })
+      .where(
+        and(
+          eq(automationJob.organizationId, orgId),
+          eq(automationJob.ruleId, row.id),
+          inArray(automationJob.status, ["pendiente", "por_aprobar"]),
+          sql`coalesce(${automationJob.payload}->>'once', 'false') <> 'true'`,
+        ),
+      )
   }
-  if (input.kind !== undefined) patch.kind = assertKind(input.kind)
-  if (input.channel !== undefined) patch.channel = assertChannel(input.channel)
-  if (input.enabled !== undefined) patch.enabled = input.enabled
-  if (input.templateName !== undefined) patch.templateName = input.templateName?.trim() || null
-  if (input.templateLanguage !== undefined)
-    patch.templateLanguage = input.templateLanguage.trim() || "es_PE"
-  if (input.config !== undefined) patch.config = configOf(input.config)
-  const [row] = await tx
-    .update(automationRule)
-    .set(patch)
-    .where(and(eq(automationRule.id, id), eq(automationRule.organizationId, orgId)))
-    .returning()
-  if (!row) throw notFound("Regla de automatización")
-  await audit(tx, orgId, actorUserId, "automation_rule.updated", row.id, { enabled: row.enabled })
+  const changes: Record<string, unknown> = {}
+  if (enabled !== was.enabled) changes.enabled = enabled
+  if (agentPart !== was.agentPart) changes.agentPart = agentPart
+  if (teamPart !== was.teamPart) changes.teamPart = teamPart
+  if (config.days !== was.config.days) changes.days = config.days ?? line.defaultDays
+  if (input.hoursBefore !== undefined) changes.hoursBefore = config.hoursBefore
+  if (config.delayHours !== was.config.delayHours) changes.delayHours = config.delayHours ?? line.delayHours
+  if (config.hour !== was.config.hour) changes.hour = config.hour ?? null
+  // La auditoría dice que la indicación cambió; no copia su texto.
+  if (config.taskNote !== was.config.taskNote) changes.taskNote = !!config.taskNote
+  if (input.noRecommend !== undefined && input.noRecommend !== was.noRecommend) changes.noRecommend = input.noRecommend
+  if (Object.keys(changes).length > 0) {
+    await audit(tx, orgId, actorUserId, "admin_line.updated", row.id, { key: kind, changes })
+  }
   return row
 }
 
-// ---------------------------------------------------------- consentimiento ---
+/**
+ * Desde cuándo actúa una línea: el momento en que se prendió por última vez.
+ */
+export function activeSince(rule: Pick<RuleRow, "enabledAt" | "createdAt">): Date {
+  return rule.enabledAt ?? rule.createdAt
+}
+
+/**
+ * Lo que el Administrador necesita saber antes de hacer algo por su cuenta:
+ * si él y Recepción están encendidos, su horario de silencio y si los mensajes
+ * que no son recordatorios esperan aprobación (Recepción en «Supervisado»).
+ */
+export interface AdminRuntime {
+  adminOn: boolean
+  receptionOn: boolean
+  quietStart: string
+  quietEnd: string
+  supervised: boolean
+}
+
+export const DEFAULT_QUIET_START = "21:00"
+export const DEFAULT_QUIET_END = "08:00"
+
+export async function adminRuntime(tx: Db, orgId: string): Promise<AdminRuntime> {
+  const [row] = await tx
+    .select({ enabled: agentConfig.enabled, advisor: agentConfig.advisor })
+    .from(agentConfig)
+    .where(eq(agentConfig.organizationId, orgId))
+    .limit(1)
+  const policy = await getAutonomyPolicy(tx, orgId)
+  return {
+    adminOn: row?.advisor?.enabled === true,
+    receptionOn: row?.enabled === true,
+    quietStart: row?.advisor?.quietStart ?? DEFAULT_QUIET_START,
+    quietEnd: row?.advisor?.quietEnd ?? DEFAULT_QUIET_END,
+    supervised: policy.enviar_mensaje === "aprobar_equipo",
+  }
+}
+
+// ----------------------------------------------------- permiso de mensajes ---
 
 export type ConsentRow = typeof automationConsent.$inferSelect
+
+/** Los dos permisos que una persona da para que la clínica le escriba primero. */
+export const MESSAGE_PERMISSIONS = ["recordatorio", "seguimiento"] as const
+export type MessagePermissionKey = (typeof MESSAGE_PERMISSIONS)[number]
+
+export interface MessagePermission {
+  purpose: MessagePermissionKey
+  /** null: nunca se le preguntó. */
+  granted: boolean | null
+  /** Cómo quedó registrado (clave de `CONSENT_SOURCES`). */
+  source: string | null
+  at: string | null
+}
+
+function assertSource(source: string): ConsentSource {
+  if (!(CONSENT_SOURCES as readonly string[]).includes(source)) throw validation("Origen del permiso inválido")
+  return source as ConsentSource
+}
 
 export async function listConsents(
   tx: Db,
@@ -275,19 +400,50 @@ export async function listConsents(
     .where(
       and(eq(automationConsent.organizationId, orgId), eq(automationConsent.contactId, contactId)),
     )
-    .orderBy(asc(automationConsent.purpose), asc(automationConsent.channel))
+    .orderBy(asc(automationConsent.purpose))
 }
 
-/** Registra o actualiza el opt-in/opt-out de un contacto (idempotente). */
+/**
+ * Lo que la persona aceptó recibir sin haber escrito primero, para su ficha:
+ * siempre las dos filas, con cómo y cuándo quedó cada una.
+ */
+export async function getMessagePermissions(
+  tx: Db,
+  orgId: string,
+  contactId: string,
+): Promise<MessagePermission[]> {
+  const [person] = await tx
+    .select({ id: contact.id })
+    .from(contact)
+    .where(and(eq(contact.id, contactId), eq(contact.organizationId, orgId)))
+    .limit(1)
+  if (!person) throw notFound("Contacto")
+  const rows = await listConsents(tx, orgId, contactId)
+  return MESSAGE_PERMISSIONS.map((purpose) => {
+    const row = rows.find((item) => item.purpose === purpose)
+    return {
+      purpose,
+      granted: row ? row.status === "granted" : null,
+      source: row?.source ?? null,
+      at: row?.updatedAt.toISOString() ?? null,
+    }
+  })
+}
+
+/**
+ * Registra que la persona aceptó o dejó de aceptar un tipo de mensaje
+ * (idempotente). El permiso es de la persona, no de un canal. Al retirarlo se
+ * cancela lo que estaba por salir de ese tipo, y solo de ese tipo.
+ */
 export async function setConsent(
   tx: Db,
   orgId: string,
   actorUserId: string | null,
   contactId: string,
-  input: { purpose: string; channel: string; granted: boolean; source?: string },
+  input: { purpose: string; granted: boolean; source?: string },
 ): Promise<ConsentRow> {
   const purpose = assertPurpose(input.purpose)
-  const channel = assertChannel(input.channel)
+  const source = assertSource(input.source?.trim() || (actorUserId ? "presencial" : "baja"))
   const [contactRow] = await tx
     .select({ id: contact.id })
     .from(contact)
@@ -297,56 +453,45 @@ export async function setConsent(
   const status = input.granted ? "granted" : "revoked"
   const [row] = await tx
     .insert(automationConsent)
-    .values({
-      organizationId: orgId,
-      contactId,
-      purpose,
-      channel,
-      status,
-      source: input.source?.trim() || (actorUserId ? "recepcion" : "enlace"),
-      createdBy: actorUserId,
-    })
+    .values({ organizationId: orgId, contactId, purpose, status, source, createdBy: actorUserId })
     .onConflictDoUpdate({
-      target: [
-        automationConsent.organizationId,
-        automationConsent.contactId,
-        automationConsent.purpose,
-        automationConsent.channel,
-      ],
-      set: { status, updatedAt: new Date() },
+      target: [automationConsent.organizationId, automationConsent.contactId, automationConsent.purpose],
+      set: { status, source, updatedAt: new Date() },
     })
     .returning()
-  if (!row) throw new Error("No se pudo registrar el consentimiento")
+  if (!row) throw new Error("No se pudo registrar el permiso")
   await audit(tx, orgId, actorUserId, "automation_consent.set", row.id, {
     contactId,
     purpose,
-    channel,
     status,
+    source,
   })
   if (!input.granted) {
-    // Baja verificable: cancela lo pendiente de esa finalidad/canal.
     await tx
       .update(automationJob)
-      .set({ status: "cancelado", lastError: "Baja del contacto", updatedAt: new Date() })
+      .set({ status: "cancelado", lastError: "La persona retiró el permiso", updatedAt: new Date() })
       .where(
         and(
           eq(automationJob.organizationId, orgId),
           eq(automationJob.contactId, contactId),
-          eq(automationJob.channel, channel),
           eq(automationJob.status, "pendiente"),
+          // Solo los mensajes de ese tipo; lo que deja trabajo al equipo no depende del permiso.
+          inArray(
+            automationJob.kind,
+            AUTOMATION_KINDS.filter((kind) => adminLineOf(kind)?.agent?.purpose === purpose),
+          ),
         ),
       )
   }
   return row
 }
 
-/** true solo con opt-in explícito vigente para finalidad + canal. */
+/** true solo si la persona aceptó ese tipo de mensaje y no lo retiró después. */
 export async function hasConsent(
   tx: Db,
   orgId: string,
   contactId: string,
   purpose: ConsentPurpose,
-  channel: string,
 ): Promise<boolean> {
   const [row] = await tx
     .select({ status: automationConsent.status })
@@ -356,7 +501,6 @@ export async function hasConsent(
         eq(automationConsent.organizationId, orgId),
         eq(automationConsent.contactId, contactId),
         eq(automationConsent.purpose, purpose),
-        eq(automationConsent.channel, channel),
       ),
     )
     .limit(1)
@@ -367,47 +511,22 @@ export async function hasConsent(
 
 export type JobRow = typeof automationJob.$inferSelect
 
-export async function listJobs(
-  tx: Db,
-  orgId: string,
-  input: { status?: string; kind?: string; limit?: number },
-): Promise<JobRow[]> {
-  const conditions = [eq(automationJob.organizationId, orgId)]
-  if (input.status) {
-    if (!(AUTOMATION_JOB_STATUSES as readonly string[]).includes(input.status)) {
-      throw validation("Estado inválido")
-    }
-    conditions.push(eq(automationJob.status, input.status))
-  }
-  if (input.kind) conditions.push(eq(automationJob.kind, assertKind(input.kind)))
-  return tx
-    .select()
-    .from(automationJob)
-    .where(and(...conditions))
-    .orderBy(desc(automationJob.scheduledFor))
-    .limit(Math.min(Math.max(input.limit ?? 50, 1), 200))
-}
+/**
+ * Qué pasó con el mensaje después de dejarlo en la cola. «enviado» en el
+ * trabajo solo significa que salió hacia el canal: `enviando` mientras el
+ * proveedor no lo acepta, `aceptado` cuando lo aceptó, `entregado` o `leido`
+ * cuando el proveedor lo confirma, y `no_entregado` si lo rechazó.
+ */
+export type JobDelivery = "enviando" | "aceptado" | "entregado" | "leido" | "no_entregado"
 
-export async function cancelJob(
-  tx: Db,
-  orgId: string,
-  actorUserId: string,
-  id: string,
-): Promise<JobRow> {
-  const [row] = await tx
-    .update(automationJob)
-    .set({ status: "cancelado", lastError: "Cancelado manualmente", updatedAt: new Date() })
-    .where(
-      and(
-        eq(automationJob.id, id),
-        eq(automationJob.organizationId, orgId),
-        eq(automationJob.status, "pendiente"),
-      ),
-    )
-    .returning()
-  if (!row) throw notFound("Trabajo pendiente")
-  await audit(tx, orgId, actorUserId, "automation_job.cancelled", row.id, { kind: row.kind })
-  return row
+export function deliveryOf(messageStatus: string | null | undefined): JobDelivery | null {
+  if (!messageStatus) return null
+  if (messageStatus === "queued" || messageStatus === "unknown") return "enviando"
+  if (messageStatus === "sent") return "aceptado"
+  if (messageStatus === "delivered") return "entregado"
+  if (messageStatus === "read") return "leido"
+  if (messageStatus === "failed") return "no_entregado"
+  return null
 }
 
 /**
@@ -462,20 +581,18 @@ async function notify(tx: Db, payload: Record<string, unknown>): Promise<void> {
 export interface EnqueueInput {
   ruleId?: string | null
   kind: string
-  channel: string
   dedupeKey: string
   scheduledFor: Date
   contactId?: string | null
   appointmentId?: string | null
   patientId?: string | null
   budgetId?: string | null
-  /** Oportunidad origen (campañas por etapa, cierres exactos). */
   opportunityId?: string | null
-  payload?: Record<string, unknown>
+  payload?: JobPayload
 }
 
 /**
- * Inserta un trabajo durable; el unique (org, dedupe_key) evita duplicados
+ * Anota un caso de una línea; el unique (org, dedupe_key) evita duplicados
  * aunque el tick o el evento se repitan. Devuelve null si ya existía.
  */
 export async function enqueueJob(
@@ -484,14 +601,12 @@ export async function enqueueJob(
   input: EnqueueInput,
 ): Promise<JobRow | null> {
   assertKind(input.kind)
-  assertChannel(input.channel)
   const [row] = await tx
     .insert(automationJob)
     .values({
       organizationId: orgId,
       ruleId: input.ruleId ?? null,
       kind: input.kind,
-      channel: input.channel,
       status: "pendiente",
       dedupeKey: input.dedupeKey,
       scheduledFor: input.scheduledFor,
@@ -509,10 +624,17 @@ export async function enqueueJob(
   return row ?? null
 }
 
-/** Contacto preferido del paciente (self/preferido) para dirigir el mensaje. */
-async function preferredContact(tx: Db, orgId: string, patientId: string): Promise<string | null> {
+/**
+ * A quién se le escribe lo de un paciente: su persona preferida y, si no tiene,
+ * él mismo. Siempre la misma para el mismo paciente.
+ */
+export async function preferredContact(tx: Db, orgId: string, patientId: string): Promise<string | null> {
   const rows = await tx
-    .select({ contactId: patientContact.contactId, isPreferred: patientContact.isPreferred })
+    .select({
+      contactId: patientContact.contactId,
+      isPreferred: patientContact.isPreferred,
+      relationship: patientContact.relationship,
+    })
     .from(patientContact)
     .innerJoin(
       contact,
@@ -525,9 +647,10 @@ async function preferredContact(tx: Db, orgId: string, patientId: string): Promi
         eq(contact.isActive, true),
       ),
     )
-    .limit(5)
+    .orderBy(asc(patientContact.createdAt), asc(patientContact.id))
+    .limit(20)
   if (rows.length === 0) return null
-  return (rows.find((r) => r.isPreferred) ?? rows[0])!.contactId
+  return (rows.find((r) => r.isPreferred) ?? rows.find((r) => r.relationship === "self") ?? rows[0])!.contactId
 }
 
 function hashToken(token: string): string {
@@ -565,149 +688,7 @@ function publicLink(baseUrl: string, path: string, token: string): string {
   return `${baseUrl.replace(/\/$/, "")}/${path}/${token}`
 }
 
-/**
- * Cancela lo pendiente de un contacto (gancho para Oportunidades al
- * ganar/perder, o baja manual). Devuelve trabajos cancelados.
- */
-export async function cancelPendingJobsForContact(
-  tx: Db,
-  orgId: string,
-  contactId: string,
-  reason: string,
-): Promise<number> {
-  const rows = await tx
-    .update(automationJob)
-    .set({ status: "cancelado", lastError: reason, updatedAt: new Date() })
-    .where(
-      and(
-        eq(automationJob.organizationId, orgId),
-        eq(automationJob.contactId, contactId),
-        eq(automationJob.status, "pendiente"),
-      ),
-    )
-    .returning({ id: automationJob.id })
-  return rows.length
-}
-
-export interface CampaignPreview {
-  total: number
-  consentidos: number
-  sinConsentimiento: number
-  /** Muestra explícita (20 primeros por id) para inspección, no para conteo. */
-  sample: Array<{ id: string; displayName: string }>
-}
-
-export interface SegmentInput {
-  tags?: string[]
-  opportunityStageIds?: string[]
-  channel?: string
-}
-
-/**
- * Condiciones SQL del segmento sobre contact: etiquetas (overlap) y etapas
- * de oportunidad abierta (EXISTS correlacionado, sin paginación silenciosa).
- */
-function segmentConditions(
-  tx: Db,
-  orgId: string,
-  segment: { tags?: string[]; opportunityStageIds?: string[] },
-) {
-  const conds = [eq(contact.organizationId, orgId), eq(contact.isActive, true)]
-  if (segment.tags?.length) conds.push(arrayOverlaps(contact.tags, segment.tags))
-  if (segment.opportunityStageIds?.length) {
-    conds.push(
-      exists(
-        tx
-          .select({ one: sql`1` })
-          .from(opportunity)
-          .where(
-            and(
-              eq(opportunity.organizationId, orgId),
-              eq(opportunity.contactId, contact.id),
-              eq(opportunity.status, "open"),
-              inArray(opportunity.stageId, segment.opportunityStageIds),
-            ),
-          ),
-      ),
-    )
-  }
-  return conds
-}
-
-function marketingConsentCondition(tx: Db, orgId: string, channel: string) {
-  return exists(
-    tx
-      .select({ one: sql`1` })
-      .from(automationConsent)
-      .where(
-        and(
-          eq(automationConsent.organizationId, orgId),
-          eq(automationConsent.contactId, contact.id),
-          eq(automationConsent.purpose, "marketing"),
-          eq(automationConsent.channel, channel),
-          eq(automationConsent.status, "granted"),
-        ),
-      ),
-  )
-}
-
-/**
- * Oportunidad abierta más reciente del contacto en las etapas dadas.
- * Da el linkage exacto oportunidad→trabajo en campañas por etapa.
- */
-async function matchingOpportunity(
-  tx: Db,
-  orgId: string,
-  contactId: string,
-  stageIds: string[],
-): Promise<string | null> {
-  const [opp] = await tx
-    .select({ id: opportunity.id })
-    .from(opportunity)
-    .where(
-      and(
-        eq(opportunity.organizationId, orgId),
-        eq(opportunity.contactId, contactId),
-        eq(opportunity.status, "open"),
-        inArray(opportunity.stageId, stageIds),
-      ),
-    )
-    .orderBy(desc(opportunity.updatedAt))
-    .limit(1)
-  return opp?.id ?? null
-}
-
-/**
- * Vista previa de campaña: conteos SQL totales (sin caps silenciosos) más
- * muestra explícita de 20. El conteo de consentidos usa la misma base.
- */
-export async function previewCampaignSegment(
-  tx: Db,
-  orgId: string,
-  input: SegmentInput,
-): Promise<CampaignPreview> {
-  const channel = input.channel ? assertChannel(input.channel) : "whatsapp"
-  const base = segmentConditions(tx, orgId, input)
-  const [t] = await tx
-    .select({ n: count() })
-    .from(contact)
-    .where(and(...base))
-  const [c] = await tx
-    .select({ n: count() })
-    .from(contact)
-    .where(and(...base, marketingConsentCondition(tx, orgId, channel)))
-  const sample = await tx
-    .select({ id: contact.id, displayName: contact.displayName })
-    .from(contact)
-    .where(and(...base))
-    .orderBy(asc(contact.id))
-    .limit(20)
-  const total = Number(t?.n ?? 0)
-  const consentidos = Number(c?.n ?? 0)
-  return { total, consentidos, sinConsentimiento: total - consentidos, sample }
-}
-
-async function timezoneOf(tx: Db, orgId: string, branchId?: string | null): Promise<string> {
+export async function timezoneOf(tx: Db, orgId: string, branchId?: string | null): Promise<string> {
   if (branchId) {
     const [b] = await tx
       .select({ timezone: branch.timezone })
@@ -765,6 +746,25 @@ export interface SyncSummary {
   omitidos: number
 }
 
+/** Casos que una regla revisa por tick; el resto queda para el siguiente. */
+export const BATCH_LIMIT = 200
+
+/** Pasado este tiempo desde que venció el plazo, un seguimiento ya no se envía. */
+const FOLLOW_UP_MAX_AGE_HOURS = 7 * 24
+
+/** Tras una inasistencia se espera al día siguiente. */
+const NO_SHOW_DELAY_HOURS = 24
+
+/**
+ * Deja fuera del lote lo que ya tiene su trabajo (enviado, cancelado u omitido).
+ * Sin esto, un tope sin orden volvía a traer los mismos casos y los nuevos no
+ * entraban nunca.
+ */
+export function notYetQueued(orgId: string, prefix: string, idColumn: unknown) {
+  return sql`not exists (select 1 from automation_job j
+    where j.organization_id = ${orgId} and j.dedupe_key = ${prefix + ":"} || ${idColumn}::text)`
+}
+
 const COMMERCIAL_QUIET_START = "20:00"
 const COMMERCIAL_QUIET_END = "08:00"
 
@@ -817,7 +817,7 @@ export async function findTemplateChannel(
     .orderBy(desc(contactIdentity.isPrimary), asc(contactIdentity.createdAt), asc(contactIdentity.id))
     .limit(1)
   if (!identity) return null
-  if (!(await hasConsent(tx, orgId, contactId, purpose, identity.channel))) return null
+  if (!(await hasConsent(tx, orgId, contactId, purpose))) return null
   const connections = await tx
     .select({ id: channelConnection.id })
     .from(channelConnection)
@@ -844,17 +844,16 @@ export async function findTemplateChannel(
       )
       .limit(1)
     if (thread) return null
-    let templates: { name: string; language: string }[]
-    try {
-      templates = await getConnectionTemplates(tx, orgId, connection.id, secretsKey)
-    } catch {
-      // Configuración ilegible (clave rotada, dato corrupto): esa conexión no
-      // sirve, pero no puede tumbar el tick de la organización.
-      continue
-    }
-    const template = templates.find((t) => FOLLOW_UP_TEMPLATE.test(t.name))
+    // Solo plantillas aprobadas y sin variables: se envía tal cual.
+    const templates = await getConnectionTemplates(tx, orgId, connection.id, secretsKey)
+    const template = templates.find((t) => FOLLOW_UP_TEMPLATE.test(t.name) && t.variables === 0)
     if (template) {
-      return { identityId: identity.id, connectionId: connection.id, channel: identity.channel, template }
+      return {
+        identityId: identity.id,
+        connectionId: connection.id,
+        channel: identity.channel,
+        template: { name: template.name, language: template.language },
+      }
     }
   }
   return null
@@ -961,7 +960,7 @@ export async function syncOverdueCommercialFollowUps(
     } else if (row.agentStatus !== "on") reason = "El agente está desactivado en la conversación"
     else if (!row.agentEnabled) reason = "El agente está desactivado en la organización"
     else if (!row.channel || row.connectionStatus !== "active") reason = "El canal no está disponible"
-    else if (!row.contactId || !(await hasConsent(tx, orgId, row.contactId, "seguimiento", row.channel))) {
+    else if (!row.contactId || !(await hasConsent(tx, orgId, row.contactId, "seguimiento"))) {
       reason = "No existe consentimiento vigente para seguimiento en el canal"
     }
     const derive = reason !== null && cold === null
@@ -1082,31 +1081,31 @@ export async function syncOverdueCommercialFollowUps(
   return { programados, omitidos }
 }
 
+/** La línea, si está prendida; null si está apagada o nunca se prendió. */
+async function enabledLine(tx: Db, orgId: string, kind: AutomationKind): Promise<RuleRow | null> {
+  const rule = await findLineRule(tx, orgId, kind)
+  return rule?.enabled ? rule : null
+}
+
 /**
- * Programa recordatorios de citas próximas (ventana 72 h). Idempotente por
- * dedupe `recordatorio_cita:<cita>:<horas>`. El texto incluye enlaces seguros
- * de confirmar/cancelar (token de 72 h, sin exponer al paciente).
+ * Casos de «Recordar la cita»: uno por cita y por aviso (por defecto, un día y
+ * tres horas antes). Idempotente por `recordatorio_cita:<cita>:<horas>`. El
+ * mensaje se arma al entregar, con los datos de la agenda de ese momento.
  */
 export async function syncAppointmentReminders(
   tx: Db,
   orgId: string,
   now: Date,
-  publicBaseUrl: string,
 ): Promise<SyncSummary> {
-  const rules = await tx
-    .select()
-    .from(automationRule)
-    .where(
-      and(
-        eq(automationRule.organizationId, orgId),
-        eq(automationRule.kind, "recordatorio_cita"),
-        eq(automationRule.enabled, true),
-      ),
-    )
+  const rule = await enabledLine(tx, orgId, "recordatorio_cita")
   let programados = 0
   let omitidos = 0
-  if (rules.length === 0) return { programados, omitidos }
-  const horizon = new Date(now.getTime() + 72 * 3_600_000)
+  if (!rule) return { programados, omitidos }
+  const hoursList = lineConfigOf(rule.config).hoursBefore ?? [...DEFAULT_HOURS_BEFORE]
+  // Solo las citas que entran en el aviso más lejano, las más próximas primero,
+  // y sin las que ya tienen todos sus avisos: el lote avanza aunque la clínica
+  // tenga más citas que el tope.
+  const horizon = new Date(now.getTime() + (Math.max(...hoursList) + 1) * 3_600_000)
   const upcoming = await tx
     .select()
     .from(appointment)
@@ -1116,495 +1115,252 @@ export async function syncAppointmentReminders(
         inArray(appointment.status, ["programada", "confirmada"]),
         gte(appointment.startsAt, now),
         lte(appointment.startsAt, horizon),
+        sql`(select count(*) from automation_job j
+          where j.organization_id = ${orgId} and j.rule_id = ${rule.id}
+            and j.appointment_id = ${appointment.id}) < ${hoursList.length}`,
       ),
     )
-    .limit(200)
-  for (const rule of rules) {
-    const config = configOf(rule.config)
-    const hoursList = config.hoursBefore?.length ? config.hoursBefore : [24, 3]
-    const tz = await timezoneOf(tx, orgId, null)
-    for (const appt of upcoming) {
-      const contactId = await preferredContact(tx, orgId, appt.patientId)
-      if (!contactId) {
-        omitidos++
-        continue
-      }
-      for (const h of hoursList) {
-        const scheduledFor = new Date(appt.startsAt.getTime() - h * 3_600_000)
-        if (scheduledFor.getTime() < now.getTime() - 30 * 60_000) continue
-        const dedupeKey = `recordatorio_cita:${appt.id}:${h}`
-        const job = await enqueueJob(tx, orgId, {
-          ruleId: rule.id,
-          kind: "recordatorio_cita",
-          channel: rule.channel,
-          dedupeKey,
-          scheduledFor: scheduledFor < now ? now : scheduledFor,
-          contactId,
-          appointmentId: appt.id,
-          patientId: appt.patientId,
-          payload: {},
-        })
-        if (!job) continue
-        // Enlaces seguros creados junto al trabajo (un par por cita).
-        const confirmToken = await createLinkToken(tx, orgId, {
-          purpose: "confirm",
-          jobId: job.id,
-          appointmentId: appt.id,
-          contactId,
-          ttlHours: 72,
-          now,
-        })
-        const cancelToken = await createLinkToken(tx, orgId, {
-          purpose: "cancel",
-          jobId: job.id,
-          appointmentId: appt.id,
-          contactId,
-          ttlHours: 72,
-          now,
-        })
-        const apptTz = await timezoneOf(tx, orgId, appt.branchId)
-        const { locale: apptLocale } = await findOrgLocale(tx, orgId)
-        const when = new Intl.DateTimeFormat(apptLocale, {
-          timeZone: apptTz,
-          weekday: "long",
-          day: "numeric",
-          month: "long",
-          hour: "2-digit",
-          minute: "2-digit",
-        }).format(appt.startsAt)
-        const text =
-          `Hola, le recordamos su cita odontológica del ${when}. ` +
-          `Confirme aquí: ${publicLink(publicBaseUrl, "c", confirmToken)} ` +
-          `Si no puede asistir, cancele aquí: ${publicLink(publicBaseUrl, "c", cancelToken)}`
-        await tx
-          .update(automationJob)
-          .set({
-            payload: {
-              text,
-              templateName: rule.templateName,
-              templateLanguage: rule.templateLanguage,
-              quietStart: config.quietStart,
-              quietEnd: config.quietEnd,
-              timeZone: tz,
-            },
-            updatedAt: new Date(),
-          })
-          .where(eq(automationJob.id, job.id))
-        programados++
-      }
+    .orderBy(asc(appointment.startsAt), asc(appointment.id))
+    .limit(BATCH_LIMIT)
+  for (const appt of upcoming) {
+    const contactId = await preferredContact(tx, orgId, appt.patientId)
+    if (!contactId) {
+      omitidos++
+      continue
+    }
+    for (const h of hoursList) {
+      const scheduledFor = new Date(appt.startsAt.getTime() - h * 3_600_000)
+      if (scheduledFor.getTime() < now.getTime() - 30 * 60_000) continue
+      const job = await enqueueJob(tx, orgId, {
+        ruleId: rule.id,
+        kind: "recordatorio_cita",
+        dedupeKey: `recordatorio_cita:${appt.id}:${h}`,
+        scheduledFor: scheduledFor < now ? now : scheduledFor,
+        contactId,
+        appointmentId: appt.id,
+        patientId: appt.patientId,
+        // El horario de silencio se mide con la hora de la sede de la cita.
+        payload: { timeZone: await timezoneOf(tx, orgId, appt.branchId) },
+      })
+      if (job) programados++
     }
   }
   return { programados, omitidos }
 }
 
-/** Seguimiento de presupuestos presentados sin decisión tras delayHours (48 h). */
+/** Casos de «Retomar un presupuesto»: presentado y sin decisión al cumplirse el plazo. */
 export async function syncBudgetFollowUps(tx: Db, orgId: string, now: Date): Promise<SyncSummary> {
-  const rules = await tx
-    .select()
-    .from(automationRule)
-    .where(
-      and(
-        eq(automationRule.organizationId, orgId),
-        eq(automationRule.kind, "seguimiento_presupuesto"),
-        eq(automationRule.enabled, true),
-      ),
-    )
+  const rule = await enabledLine(tx, orgId, "seguimiento_presupuesto")
   let programados = 0
   let omitidos = 0
-  for (const rule of rules) {
-    const config = configOf(rule.config)
-    const delayHours = config.delayHours ?? 48
-    const cutoff = new Date(now.getTime() - delayHours * 3_600_000)
-    const pending = await tx
-      .select()
-      .from(treatmentBudget)
-      .where(
-        and(
-          eq(treatmentBudget.organizationId, orgId),
-          eq(treatmentBudget.status, "presentado"),
-          lte(treatmentBudget.presentedAt, cutoff),
-        ),
-      )
-      .limit(100)
-    for (const budget of pending) {
-      const contactId =
-        budget.decisionContactId ?? (await preferredContact(tx, orgId, budget.patientId))
-      if (!contactId) {
-        omitidos++
-        continue
-      }
-      const job = await enqueueJob(tx, orgId, {
-        ruleId: rule.id,
-        kind: "seguimiento_presupuesto",
-        channel: rule.channel,
-        dedupeKey: `seguimiento_presupuesto:${budget.id}`,
-        scheduledFor: now,
-        contactId,
-        patientId: budget.patientId,
-        budgetId: budget.id,
-        payload: {
-          text: `Hola, su presupuesto "${budget.title}" sigue pendiente de decisión. Responda a este mensaje si desea retomarlo o ajustar opciones.`,
-          templateName: rule.templateName,
-          templateLanguage: rule.templateLanguage,
-          quietStart: config.quietStart,
-          quietEnd: config.quietEnd,
-        },
-      })
-      if (job) programados++
+  if (!rule) return { programados, omitidos }
+  const delayMs = (lineDays(rule, "seguimiento_presupuesto") ?? 2) * 24 * 3_600_000
+  const cutoff = new Date(now.getTime() - delayMs)
+  // Solo los que cumplen el plazo con la línea ya prendida: un presupuesto que
+  // llevaba semanas sin respuesta cuando se prendió no recibe nada.
+  const since = new Date(activeSince(rule).getTime() - delayMs)
+  const pending = await tx
+    .select()
+    .from(treatmentBudget)
+    .where(
+      and(
+        eq(treatmentBudget.organizationId, orgId),
+        eq(treatmentBudget.status, "presentado"),
+        lte(treatmentBudget.presentedAt, cutoff),
+        gte(treatmentBudget.presentedAt, since),
+        notYetQueued(orgId, "seguimiento_presupuesto", treatmentBudget.id),
+      ),
+    )
+    .orderBy(asc(treatmentBudget.presentedAt), asc(treatmentBudget.id))
+    .limit(BATCH_LIMIT)
+  for (const budget of pending) {
+    const contactId =
+      budget.decisionContactId ?? (await preferredContact(tx, orgId, budget.patientId))
+    if (!contactId) {
+      omitidos++
+      continue
     }
+    const job = await enqueueJob(tx, orgId, {
+      ruleId: rule.id,
+      kind: "seguimiento_presupuesto",
+      dedupeKey: `seguimiento_presupuesto:${budget.id}`,
+      scheduledFor: now,
+      contactId,
+      patientId: budget.patientId,
+      budgetId: budget.id,
+    })
+    if (job) programados++
   }
   return { programados, omitidos }
 }
 
-/** Seguimiento post-cita (atendida) y de no asistencia. */
+/** Casos de «Reprogramar tras una inasistencia»: al día siguiente de la cita a la que no vino. */
 export async function syncVisitFollowUps(tx: Db, orgId: string, now: Date): Promise<SyncSummary> {
+  const rule = await enabledLine(tx, orgId, "seguimiento_no_asistencia")
   let programados = 0
   let omitidos = 0
-  const kinds = ["seguimiento_cita", "seguimiento_no_asistencia"] as const
-  for (const kind of kinds) {
-    const rules = await tx
-      .select()
-      .from(automationRule)
-      .where(
-        and(
-          eq(automationRule.organizationId, orgId),
-          eq(automationRule.kind, kind),
-          eq(automationRule.enabled, true),
-        ),
-      )
-    for (const rule of rules) {
-      const config = configOf(rule.config)
-      const delayHours = config.delayHours ?? 24
-      const cutoff = new Date(now.getTime() - delayHours * 3_600_000)
-      const wanted = kind === "seguimiento_cita" ? "atendida" : "no_asistio"
-      const visits = await tx
-        .select()
-        .from(appointment)
-        .where(
-          and(
-            eq(appointment.organizationId, orgId),
-            eq(appointment.status, wanted),
-            lte(appointment.updatedAt, cutoff),
-          ),
-        )
-        .limit(100)
-      for (const appt of visits) {
-        const contactId = await preferredContact(tx, orgId, appt.patientId)
-        if (!contactId) {
-          omitidos++
-          continue
-        }
-        const text =
-          kind === "seguimiento_cita"
-            ? "Hola, ¿cómo se siente tras su atención? Si tiene molestias o dudas, responda a este mensaje y le ayudamos."
-            : "Hola, notamos que no pudo asistir a su cita. Responda a este mensaje para reprogramarla sin costo de gestión."
-        const job = await enqueueJob(tx, orgId, {
-          ruleId: rule.id,
-          kind,
-          channel: rule.channel,
-          dedupeKey: `${kind}:${appt.id}`,
-          scheduledFor: now,
-          contactId,
-          appointmentId: appt.id,
-          patientId: appt.patientId,
-          payload: {
-            text,
-            templateName: rule.templateName,
-            templateLanguage: rule.templateLanguage,
-            quietStart: config.quietStart,
-            quietEnd: config.quietEnd,
-          },
-        })
-        if (job) programados++
-      }
+  if (!rule) return { programados, omitidos }
+  // Con hora fija sale al día siguiente a esa hora de la sede; sin ella, 24
+  // horas después de terminar la cita.
+  const { hour } = lineConfigOf(rule.config)
+  const cutoff = hour === undefined ? new Date(now.getTime() - NO_SHOW_DELAY_HOURS * 3_600_000) : now
+  // El plazo corre desde que terminó la cita (no desde su última edición) y
+  // solo cuentan las citas que empezaron con la línea ya prendida. Una cita
+  // marcada con mucho retraso ya no se sigue: el mensaje llegaría fuera de lugar.
+  const oldest = new Date(now.getTime() - (NO_SHOW_DELAY_HOURS + FOLLOW_UP_MAX_AGE_HOURS) * 3_600_000)
+  const visits = await tx
+    .select()
+    .from(appointment)
+    .where(
+      and(
+        eq(appointment.organizationId, orgId),
+        eq(appointment.status, "no_asistio"),
+        lte(appointment.endsAt, cutoff),
+        gte(appointment.endsAt, oldest),
+        gte(appointment.startsAt, activeSince(rule)),
+        notYetQueued(orgId, "seguimiento_no_asistencia", appointment.id),
+      ),
+    )
+    .orderBy(asc(appointment.endsAt), asc(appointment.id))
+    .limit(BATCH_LIMIT)
+  for (const appt of visits) {
+    const contactId = await preferredContact(tx, orgId, appt.patientId)
+    if (!contactId) {
+      omitidos++
+      continue
     }
+    const timeZone = await timezoneOf(tx, orgId, appt.branchId)
+    const at = hour === undefined ? now : nextDayAt(appt.endsAt, timeZone, hour)
+    const job = await enqueueJob(tx, orgId, {
+      ruleId: rule.id,
+      kind: "seguimiento_no_asistencia",
+      dedupeKey: `seguimiento_no_asistencia:${appt.id}`,
+      scheduledFor: at < now ? now : at,
+      contactId,
+      appointmentId: appt.id,
+      patientId: appt.patientId,
+      payload: { timeZone },
+    })
+    if (job) programados++
   }
   return { programados, omitidos }
 }
 
-/** Recuperación de pacientes inactivos (sin citas recientes ni futuras). */
-export async function syncInactiveRecall(tx: Db, orgId: string, now: Date): Promise<SyncSummary> {
-  const rules = await tx
-    .select()
-    .from(automationRule)
-    .where(
-      and(
-        eq(automationRule.organizationId, orgId),
-        eq(automationRule.kind, "recuperacion_inactivo"),
-        eq(automationRule.enabled, true),
-      ),
-    )
+/** El día siguiente a `date`, a la hora dada, en la zona de la sede. */
+export function nextDayAt(date: Date, timeZone: string, hour: number): Date {
+  const parts = new Intl.DateTimeFormat("en-GB", { timeZone, hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" })
+    .formatToParts(date)
+  const read = (type: string) => Number(parts.find((part) => part.type === type)?.value ?? 0)
+  const sinceMidnight = (read("hour") * 3600 + read("minute") * 60 + read("second")) * 1000 + date.getMilliseconds()
+  return new Date(date.getTime() - sinceMidnight + (24 + hour) * 3_600_000)
+}
+
+/** Cuándo canceló la persona su cita: la propia persona desde su enlace o el equipo con ese motivo. */
+const CANCELLED_BY_PERSON = sql`(
+  select max(e.created_at) from audit_event e
+  where e.organization_id = ${appointment.organizationId} and e.entity = 'appointment'
+    and e.entity_id = ${appointment.id}::text and e.action = 'appointment.status_cancelada'
+    and (e.actor_user_id is null or e.metadata->>'cancelReason' = 'paciente'))`
+
+/**
+ * Casos de «Ofrecer otra fecha tras una cancelación»: citas que canceló la
+ * persona (no la clínica) con la línea ya prendida, pasada la espera. Una que
+ * se canceló hace más de una semana ya no se sigue.
+ */
+export async function syncCancelledAppointments(tx: Db, orgId: string, now: Date): Promise<SyncSummary> {
+  const rule = await enabledLine(tx, orgId, "cita_cancelada")
   let programados = 0
   let omitidos = 0
-  for (const rule of rules) {
-    const config = configOf(rule.config)
-    const inactiveDays = config.inactiveDays ?? 180
-    const cutoff = new Date(now.getTime() - inactiveDays * 86_400_000)
-    const month = now.toISOString().slice(0, 7)
-    // Pacientes cuya última cita es anterior al corte y sin citas futuras.
-    const rows = await tx.execute<{ patient_id: string }>(sql`
-      select a.patient_id from appointment a
-      where a.organization_id = ${orgId}
-      group by a.patient_id
-      having max(a.starts_at) < ${cutoff.toISOString()}::timestamptz
-      limit 50`)
-    const list = Array.isArray(rows) ? rows : []
-    for (const r of list) {
-      const future = await tx
-        .select({ id: appointment.id })
-        .from(appointment)
-        .where(
-          and(
-            eq(appointment.organizationId, orgId),
-            eq(appointment.patientId, r.patient_id),
-            gte(appointment.startsAt, now),
-            inArray(appointment.status, ["programada", "confirmada"]),
-          ),
-        )
-        .limit(1)
-      if (future.length > 0) continue
-      const contactId = await preferredContact(tx, orgId, r.patient_id)
-      if (!contactId) {
-        omitidos++
-        continue
-      }
-      const job = await enqueueJob(tx, orgId, {
-        ruleId: rule.id,
-        kind: "recuperacion_inactivo",
-        channel: rule.channel,
-        dedupeKey: `recuperacion_inactivo:${r.patient_id}:${month}`,
-        scheduledFor: now,
-        contactId,
-        patientId: r.patient_id,
-        payload: {
-          text: "Hola, hace tiempo no nos visita. Su control preventivo es importante: responda a este mensaje y le reservamos un horario.",
-          templateName: rule.templateName,
-          templateLanguage: rule.templateLanguage,
-          quietStart: config.quietStart,
-          quietEnd: config.quietEnd,
-        },
-      })
-      if (job) programados++
+  if (!rule) return { programados, omitidos }
+  const delayMs = (lineConfigOf(rule.config).delayHours ?? adminLineOf("cita_cancelada")?.delayHours ?? 1) * 3_600_000
+  const cutoff = new Date(now.getTime() - delayMs)
+  const since = activeSince(rule)
+  const oldest = new Date(now.getTime() - FOLLOW_UP_MAX_AGE_HOURS * 3_600_000)
+  const cancelled = await tx
+    .select()
+    .from(appointment)
+    .where(
+      and(
+        eq(appointment.organizationId, orgId),
+        eq(appointment.status, "cancelada"),
+        sql`${CANCELLED_BY_PERSON} between ${(since > oldest ? since : oldest).toISOString()}::timestamptz and ${cutoff.toISOString()}::timestamptz`,
+        notYetQueued(orgId, "cita_cancelada", appointment.id),
+      ),
+    )
+    .orderBy(asc(appointment.updatedAt), asc(appointment.id))
+    .limit(BATCH_LIMIT)
+  for (const appt of cancelled) {
+    const contactId = await preferredContact(tx, orgId, appt.patientId)
+    if (!contactId) {
+      omitidos++
+      continue
     }
+    const job = await enqueueJob(tx, orgId, {
+      ruleId: rule.id,
+      kind: "cita_cancelada",
+      dedupeKey: `cita_cancelada:${appt.id}`,
+      scheduledFor: now,
+      contactId,
+      appointmentId: appt.id,
+      patientId: appt.patientId,
+      payload: { timeZone: await timezoneOf(tx, orgId, appt.branchId) },
+    })
+    if (job) programados++
   }
   return { programados, omitidos }
 }
 
 export { CHECKUP_REMINDER_WINDOW_HOURS } from "./automation-windows.js"
 
-/** Recordatorio de controles clínicos próximos (48 h). */
+/** Casos de «Avisar un control»: los controles que vencen en las próximas horas. */
 export async function syncCheckupReminders(tx: Db, orgId: string, now: Date): Promise<SyncSummary> {
-  const rules = await tx
-    .select()
-    .from(automationRule)
-    .where(
-      and(
-        eq(automationRule.organizationId, orgId),
-        eq(automationRule.kind, "recordatorio_control"),
-        eq(automationRule.enabled, true),
-      ),
-    )
+  const rule = await enabledLine(tx, orgId, "recordatorio_control")
   let programados = 0
   let omitidos = 0
-  for (const rule of rules) {
-    const config = configOf(rule.config)
-    const horizon = new Date(now.getTime() + CHECKUP_REMINDER_WINDOW_HOURS * 3_600_000)
-    const due = await tx
-      .select()
-      .from(clinicalFollowUp)
-      .where(
-        and(
-          eq(clinicalFollowUp.organizationId, orgId),
-          inArray(clinicalFollowUp.status, ["pendiente", "programado"]),
-          gte(clinicalFollowUp.dueAt, now),
-          lte(clinicalFollowUp.dueAt, horizon),
-        ),
-      )
-      .limit(100)
-    for (const control of due) {
-      const contactId = await preferredContact(tx, orgId, control.patientId)
-      if (!contactId) {
-        omitidos++
-        continue
-      }
-      const job = await enqueueJob(tx, orgId, {
-        ruleId: rule.id,
-        kind: "recordatorio_control",
-        channel: rule.channel,
-        dedupeKey: `recordatorio_control:${control.id}`,
-        scheduledFor: now,
-        contactId,
-        patientId: control.patientId,
-        payload: {
-          text: `Hola, tiene pendiente el control "${control.title}". Responda para coordinar su atención. Este aviso no confirma una reserva.`,
-          controlId: control.id,
-          templateName: rule.templateName,
-          templateLanguage: rule.templateLanguage,
-          quietStart: config.quietStart,
-          quietEnd: config.quietEnd,
-        },
-      })
-      if (job) programados++
-    }
-  }
-  return { programados, omitidos }
-}
-
-/**
- * Campañas segmentadas: contactos activos del segmento con marketing
- * consentido. Sin consentimiento explícito no se programa (se cuenta como
- * omitido visible en resultados). Límite 200 contactos por tick.
- */
-export async function syncCampaigns(
-  tx: Db,
-  orgId: string,
-  now: Date,
-  publicBaseUrl: string,
-): Promise<SyncSummary> {
-  const rules = await tx
+  if (!rule) return { programados, omitidos }
+  const horizon = new Date(now.getTime() + CHECKUP_REMINDER_WINDOW_HOURS * 3_600_000)
+  const due = await tx
     .select()
-    .from(automationRule)
+    .from(clinicalFollowUp)
     .where(
       and(
-        eq(automationRule.organizationId, orgId),
-        eq(automationRule.kind, "campana"),
-        eq(automationRule.enabled, true),
+        eq(clinicalFollowUp.organizationId, orgId),
+        inArray(clinicalFollowUp.status, ["pendiente", "programado"]),
+        gte(clinicalFollowUp.dueAt, now),
+        lte(clinicalFollowUp.dueAt, horizon),
+        notYetQueued(orgId, "recordatorio_control", clinicalFollowUp.id),
       ),
     )
-  let programados = 0
-  let omitidos = 0
-  for (const rule of rules) {
-    const config = configOf(rule.config)
-    if (config.startsAt && new Date(config.startsAt) > now) continue
-    if (config.endsAt && new Date(config.endsAt) < now) {
-      await tx
-        .update(automationRule)
-        .set({ enabled: false, updatedAt: new Date() })
-        .where(eq(automationRule.id, rule.id))
+    .orderBy(asc(clinicalFollowUp.dueAt), asc(clinicalFollowUp.id))
+    .limit(BATCH_LIMIT)
+  for (const control of due) {
+    const contactId = await preferredContact(tx, orgId, control.patientId)
+    if (!contactId) {
+      omitidos++
       continue
     }
-    const segment = config.segment ?? {}
-    // Progreso durable vía la tabla de trabajos: excluye contactos que ya
-    // tienen un trabajo de esta regla (cualquier estado) y avanza por id.
-    // Sin cursor en memoria: cada tick toma los siguientes 200 pendientes.
-    const alreadyProcessed = exists(
-      tx
-        .select({ one: sql`1` })
-        .from(automationJob)
-        .where(
-          and(
-            eq(automationJob.organizationId, orgId),
-            eq(automationJob.ruleId, rule.id),
-            eq(automationJob.contactId, contact.id),
-          ),
-        ),
-    )
-    const candidates = await tx
-      .select({ id: contact.id })
-      .from(contact)
-      .where(and(...segmentConditions(tx, orgId, segment), sql`not ${alreadyProcessed}`))
-      .orderBy(asc(contact.id))
-      .limit(200)
-    for (const candidate of candidates) {
-      const ok = await hasConsent(tx, orgId, candidate.id, "marketing", rule.channel)
-      const opportunityId =
-        ok && segment.opportunityStageIds?.length
-          ? await matchingOpportunity(tx, orgId, candidate.id, segment.opportunityStageIds)
-          : null
-      const job = await enqueueJob(tx, orgId, {
-        ruleId: rule.id,
-        kind: "campana",
-        channel: rule.channel,
-        dedupeKey: `campana:${rule.id}:${candidate.id}`,
-        scheduledFor: now,
-        contactId: candidate.id,
-        opportunityId,
-        payload: {},
-      })
-      if (!job) continue // procesado por un tick concurrente
-      if (!ok) {
-        // Sin opt-in no hay envío: queda registrado como omitido (visible en
-        // resultados) y no vuelve a ocupar el cupo del tick.
-        await tx
-          .update(automationJob)
-          .set({
-            status: "omitido",
-            lastError: `Sin opt-in de marketing por ${rule.channel}`,
-            updatedAt: new Date(),
-          })
-          .where(eq(automationJob.id, job.id))
-        omitidos++
-        continue
-      }
-      const bajaUrl = await createUnsubscribeLink(tx, orgId, candidate.id, publicBaseUrl)
-      await tx
-        .update(automationJob)
-        .set({
-          payload: {
-            text:
-              `Hola, ${rule.name}: responda a este mensaje si desea más información. ` +
-              `Para no recibir más mensajes, abra este enlace: ${bajaUrl}`,
-            templateName: rule.templateName,
-            templateLanguage: rule.templateLanguage,
-            quietStart: config.quietStart,
-            quietEnd: config.quietEnd,
-            campaign: rule.name,
-          },
-          updatedAt: new Date(),
-        })
-        .where(eq(automationJob.id, job.id))
-      programados++
-    }
+    const job = await enqueueJob(tx, orgId, {
+      ruleId: rule.id,
+      kind: "recordatorio_control",
+      dedupeKey: `recordatorio_control:${control.id}`,
+      scheduledFor: now,
+      contactId,
+      patientId: control.patientId,
+      payload: { controlId: control.id },
+    })
+    if (job) programados++
   }
   return { programados, omitidos }
 }
 
 // ------------------------------------------------- resolución y entrega ---
 
-async function resolveConversation(
-  tx: Db,
-  orgId: string,
-  contactId: string,
-  channel: string,
-): Promise<{ conversationId: string } | { error: string; code?: string }> {
-  const identities = await tx
-    .select()
-    .from(contactIdentity)
-    .where(and(eq(contactIdentity.organizationId, orgId), eq(contactIdentity.contactId, contactId)))
-    .limit(10)
-  const identity =
-    identities.find((i) => i.channel === channel && i.isPrimary) ??
-    identities.find((i) => i.channel === channel)
-  if (!identity) return { error: "El contacto no tiene identidad en ese canal" }
-  const [connection] = await tx
-    .select()
-    .from(channelConnection)
-    .where(
-      and(
-        eq(channelConnection.organizationId, orgId),
-        eq(channelConnection.channel, identity.channel),
-        eq(channelConnection.status, "active"),
-      ),
-    )
-    .limit(1)
-  if (!connection) return { error: "No hay conexión activa para ese canal" }
-  try {
-    const conv = await startContactConversation(tx, orgId, null, contactId, {
-      identityId: identity.id,
-      connectionId: connection.id,
-    })
-    return { conversationId: conv.id }
-  } catch (e) {
-    if (e instanceof ServiceError) return { error: e.message, code: e.code }
-    return { error: "No se pudo abrir la conversación" }
-  }
-}
-
-/** Verifica que el motivo del trabajo siga vigente; si se resolvió, lo cancela. */
+/** Verifica que el motivo del caso siga en pie; si ya se resolvió, no se hace nada. */
 async function stillValid(
   tx: Db,
   orgId: string,
   job: JobRow,
+  now: Date,
 ): Promise<{ valid: boolean; reason?: string }> {
   if (job.kind === "recordatorio_cita" && job.appointmentId) {
     const [appt] = await tx
@@ -1616,7 +1372,7 @@ async function stillValid(
     if (!["programada", "confirmada"].includes(appt.status)) {
       return { valid: false, reason: `La cita ya está ${appt.status}` }
     }
-    if (appt.startsAt.getTime() < Date.now() - 60_000) {
+    if (appt.startsAt.getTime() < now.getTime() - 60_000) {
       return { valid: false, reason: "La cita ya pasó" }
     }
     return { valid: true }
@@ -1633,22 +1389,34 @@ async function stillValid(
     }
     return { valid: true }
   }
-  if (
-    (job.kind === "seguimiento_cita" || job.kind === "seguimiento_no_asistencia") &&
-    job.appointmentId
-  ) {
+  if (job.kind === "seguimiento_no_asistencia" && job.appointmentId) {
     const [appt] = await tx
       .select({ status: appointment.status })
       .from(appointment)
       .where(and(eq(appointment.id, job.appointmentId), eq(appointment.organizationId, orgId)))
       .limit(1)
     if (!appt) return { valid: false, reason: "La cita ya no existe" }
-    const wanted = job.kind === "seguimiento_cita" ? "atendida" : "no_asistio"
-    if (appt.status !== wanted) return { valid: false, reason: `La cita cambió a ${appt.status}` }
+    if (appt.status !== "no_asistio") return { valid: false, reason: `La cita cambió a ${appt.status}` }
+    if (job.patientId && (await hasFutureAppointment(tx, orgId, job.patientId, now))) {
+      return { valid: false, reason: "Ya tiene otra cita reservada" }
+    }
+    return { valid: true }
+  }
+  if (job.kind === "cita_cancelada" && job.appointmentId) {
+    const [appt] = await tx
+      .select({ status: appointment.status })
+      .from(appointment)
+      .where(and(eq(appointment.id, job.appointmentId), eq(appointment.organizationId, orgId)))
+      .limit(1)
+    if (!appt) return { valid: false, reason: "La cita ya no existe" }
+    if (appt.status !== "cancelada") return { valid: false, reason: `La cita cambió a ${appt.status}` }
+    if (job.patientId && (await hasFutureAppointment(tx, orgId, job.patientId, now))) {
+      return { valid: false, reason: "Ya tiene otra cita reservada" }
+    }
     return { valid: true }
   }
   if (job.kind === "recordatorio_control") {
-    const { controlId } = payloadOf(job.payload)
+    const { controlId } = jobPayloadOf(job.payload)
     if (controlId) {
       const [control] = await tx
         .select({ status: clinicalFollowUp.status, appointmentStatus: appointment.status })
@@ -1671,6 +1439,30 @@ async function stillValid(
     }
     return { valid: true }
   }
+  if (job.kind === "presupuestos_sin_cita" && job.budgetId) {
+    const [budget] = await tx
+      .select({ status: treatmentBudget.status })
+      .from(treatmentBudget)
+      .where(and(eq(treatmentBudget.id, job.budgetId), eq(treatmentBudget.organizationId, orgId)))
+      .limit(1)
+    if (!budget || !["aceptado", "parcial"].includes(budget.status)) {
+      return { valid: false, reason: "El presupuesto ya no está aceptado" }
+    }
+    if (job.patientId && (await hasFutureAppointment(tx, orgId, job.patientId, now))) {
+      return { valid: false, reason: "Ya tiene una cita reservada" }
+    }
+    return { valid: true }
+  }
+  if (job.kind === "seguimientos_sin_responsable" && job.opportunityId) {
+    const [opp] = await tx
+      .select({ status: opportunity.status, assignedUserId: opportunity.assignedUserId })
+      .from(opportunity)
+      .where(and(eq(opportunity.id, job.opportunityId), eq(opportunity.organizationId, orgId)))
+      .limit(1)
+    if (!opp || opp.status !== "open") return { valid: false, reason: "El seguimiento ya se cerró" }
+    if (opp.assignedUserId) return { valid: false, reason: "El seguimiento ya tiene responsable" }
+    return { valid: true }
+  }
   if (job.contactId) {
     const [c] = await tx
       .select({ isActive: contact.isActive })
@@ -1683,23 +1475,70 @@ async function stillValid(
   return { valid: true }
 }
 
+async function hasFutureAppointment(tx: Db, orgId: string, patientId: string, now: Date): Promise<boolean> {
+  const [next] = await tx
+    .select({ id: appointment.id })
+    .from(appointment)
+    .where(
+      and(
+        eq(appointment.organizationId, orgId),
+        eq(appointment.patientId, patientId),
+        inArray(appointment.status, ["programada", "confirmada"]),
+        gte(appointment.startsAt, now),
+      ),
+    )
+    .limit(1)
+  return !!next
+}
+
 export interface DeliverDeps {
   secretsKey: Buffer
+  /** Origen público de la plataforma, para los enlaces que van en el correo. */
+  publicBaseUrl?: string
+  /**
+   * Antes de escribirle a alguien por un seguimiento, lee lo último que esa
+   * persona escribió: true si ya avisó algo sobre ese asunto. Lo responde un
+   * modelo de decisión; sin él, o si falla, se escribe como siempre.
+   */
+  alreadyTold?: ((orgId: string, input: { kind: string; reason: string; messages: string[] }) => Promise<boolean>) | undefined
+}
+
+/** Cuánto hacia atrás se mira lo que la persona escribió antes de escribirle. */
+const ALREADY_TOLD_HOURS = 72
+
+/** Lo último que la persona escribió a la clínica, de lo más reciente a lo más antiguo. */
+async function recentlyWritten(tx: Db, orgId: string, contactId: string, now: Date): Promise<string[]> {
+  const rows = await tx
+    .select({ body: message.body })
+    .from(message)
+    .innerJoin(conversation, and(eq(conversation.id, message.conversationId), eq(conversation.organizationId, orgId)))
+    .where(
+      and(
+        eq(message.organizationId, orgId),
+        eq(conversation.contactId, contactId),
+        eq(message.direction, "in"),
+        gte(message.createdAt, new Date(now.getTime() - ALREADY_TOLD_HOURS * 3_600_000)),
+        sql`coalesce(${message.body}, '') <> ''`,
+      ),
+    )
+    .orderBy(desc(message.createdAt))
+    .limit(5)
+  return rows.map((row) => row.body ?? "")
 }
 
 export interface DeliverResult {
   jobId: string
-  outcome: "enviado" | "pospuesto" | "omitido" | "cancelado" | "fallido"
+  outcome: "enviado" | "tarea" | "por_aprobar" | "pospuesto" | "omitido" | "cancelado" | "fallido"
   detail?: string
 }
 
 const MAX_ATTEMPTS = 5
 
 /**
- * Códigos definitivos (sin reintento): ventana cerrada o inbound requerido
- * en Meta/Telegram, y validaciones (p. ej. plantilla no admitida). Solo los
- * fallos transitorios del proveedor reintentan; como el reintento corre en
- * una transacción que revierte el encolado al fallar, nunca duplica envíos.
+ * Códigos definitivos (sin reintento): ventana cerrada o inbound requerido y
+ * validaciones (p. ej. plantilla no aprobada). Solo los fallos transitorios del
+ * proveedor reintentan; como el reintento corre en una transacción que revierte
+ * el encolado al fallar, nunca duplica envíos.
  */
 const DEFINITIVE_CODES = new Set(["WINDOW_CLOSED", "CHANNEL_REQUIRES_INBOUND", "VALIDATION"])
 
@@ -1713,9 +1552,219 @@ export function isTerminalFailureCode(code: string | undefined): boolean {
 }
 
 /**
- * Entrega un trabajo vencido: reclama la fila (FOR UPDATE), verifica ventana
- * de silencio, vigencia, consentimiento y canal, envía por el servicio de
- * conversaciones y actualiza estado + mensaje en la misma transacción.
+ * Por qué no se le pudo escribir a una persona y cómo se habilita, dicho de
+ * una persona (`one`) y de varias (`many`). Lo usan el aviso al equipo, la
+ * tarea de respaldo y la lista de «no pude» de Inicio.
+ */
+export const CAUSE_WORDS: Record<AutomationCause, { one: string; many: string; fix: string; fixMany: string }> = {
+  sin_permiso: {
+    one: "no aceptó mensajes de la clínica",
+    many: "no aceptaron recibir este mensaje",
+    fix: "Pídele el permiso la próxima vez que venga o escriba.",
+    fixMany: "Para habilitarlo, pídeles el permiso la próxima vez que vengan o escriban.",
+  },
+  sin_destino: {
+    one: "no tiene WhatsApp ni correo registrados",
+    many: "no tienen WhatsApp ni correo registrados",
+    fix: "Agrega su número o su correo en su ficha.",
+    fixMany: "Para habilitarlo, agrega su número o su correo en su ficha.",
+  },
+  sin_conexion: {
+    one: "la clínica no tiene conectado un canal por el que llegarle",
+    many: "la clínica no tiene conectado un canal por el que llegarles",
+    fix: "Conecta WhatsApp o el correo en Configuración › Canales.",
+    fixMany: "Para habilitarlo, conecta WhatsApp o el correo en Configuración › Canales.",
+  },
+  sin_plantilla: {
+    one: "no escribió en las últimas 24 horas y WhatsApp aún no aprueba el mensaje",
+    many: "no escribieron en las últimas 24 horas y WhatsApp aún no aprueba el mensaje",
+    fix: "El mensaje ya se pidió: sale cuando WhatsApp lo apruebe. Agregar su correo también lo habilita.",
+    fixMany: "El mensaje ya se pidió: empieza a salir cuando WhatsApp lo apruebe. Agregar su correo también lo habilita.",
+  },
+  no_entregado: {
+    one: "el canal no entregó el mensaje",
+    many: "el canal no entregó el mensaje",
+    fix: "Revisa su número.",
+    fixMany: "Para habilitarlo, revisa su número.",
+  },
+  proveedor: {
+    one: "el envío falló",
+    many: "el envío falló",
+    fix: "Revisa la conexión en Configuración › Canales.",
+    fixMany: "Para habilitarlo, revisa la conexión en Configuración › Canales.",
+  },
+}
+
+/** Motivo de un fallo definitivo según el código que devuelve el envío. */
+function causeOfCode(code: string | undefined): AutomationCause {
+  return code === "WINDOW_CLOSED" || code === "CHANNEL_REQUIRES_INBOUND" || code === "VALIDATION"
+    ? "sin_plantilla"
+    : "proveedor"
+}
+
+/**
+ * Un aviso por línea, causa y día, con la cuenta al día: veinte personas sin
+ * permiso son un aviso que dice «20», no veinte avisos. Se cuenta sobre los
+ * casos, así que repetirlo no suma de más. Abre la línea en la página del
+ * Administrador, con las personas a las que no pudo escribir.
+ */
+async function noticeCause(
+  tx: Db,
+  orgId: string,
+  rule: RuleRow,
+  cause: AutomationCause,
+  timeZone: string,
+  now: Date,
+): Promise<void> {
+  const recipient = await failureRecipient(tx, orgId, rule.enabledBy ?? rule.createdBy)
+  if (!recipient) return
+  const rows = await tx.execute<{ n: number | string; day: string }>(sql`
+    select count(*) as n, to_char(${now.toISOString()}::timestamptz at time zone ${timeZone}, 'YYYY-MM-DD') as day
+    from automation_job j
+    where j.organization_id = ${orgId} and j.rule_id = ${rule.id} and j.cause = ${cause}
+      and (j.updated_at at time zone ${timeZone})::date
+        = (${now.toISOString()}::timestamptz at time zone ${timeZone})::date`)
+  const first = Array.isArray(rows) ? rows[0] : undefined
+  const total = Math.max(Number(first?.n ?? 0), 1)
+  const words = CAUSE_WORDS[cause]
+  const name = adminLineOf(rule.kind)?.name ?? rule.name
+  await upsertWorkspaceNotification(tx, orgId, {
+    userId: recipient,
+    dedupeKey: `automation-cause:${rule.id}:${cause}:${first?.day ?? now.toISOString().slice(0, 10)}`,
+    title:
+      total === 1
+        ? `«${name}»: no pude escribirle a 1 persona`
+        : `«${name}»: no pude escribirle a ${total} personas`,
+    body: `Motivo: ${words.many}. ${words.fixMany}`,
+    href: `/agent/administrador?linea=${rule.kind}&ver=no-pudo`,
+    permission: "agent.read",
+  })
+}
+
+/** Margen para juntar recordatorios que vencen casi a la vez. */
+const GROUP_WINDOW_MS = 30 * 60_000
+
+/**
+ * El correo no tiene botones: lleva el mismo texto y, en su lugar, enlaces.
+ * Un recordatorio trae los de confirmar y cancelar cada cita; todos traen el
+ * de darse de baja de ese tipo de mensaje. La primera línea es el asunto.
+ */
+function emailBody(
+  message: ComposedMessage,
+  clinic: string,
+  links: { appointments: { confirm: string; cancel: string }[]; optOut: string | null },
+): string {
+  const lines = links.appointments.map((link, index) => {
+    const which = links.appointments.length > 1 ? `Cita ${index + 1}. ` : ""
+    return `${which}Para confirmar: ${link.confirm}\n${which}Si no podrás ir: ${link.cancel}`
+  })
+  const actions = lines.length > 0 ? `\n\n${lines.join("\n")}` : ""
+  const optOut = links.optOut ? `\n\nSi no quieres recibir más estos mensajes: ${links.optOut}` : ""
+  return `${message.subject}\n\n${message.text}${actions}\n\nPuedes responder a este correo.\n\n${clinic}${optOut}`
+}
+
+/** Primer instante de mañana (en la zona dada) fuera del horario de silencio. */
+function tomorrowMorning(now: Date, timeZone: string, quietStart?: string, quietEnd?: string): Date {
+  const hourNow = Number(
+    new Intl.DateTimeFormat("en-GB", { timeZone, hour: "2-digit", hourCycle: "h23" }).format(now),
+  )
+  const midnight = new Date(now.getTime() + (24 - hourNow) * 3_600_000)
+  return afterQuietEnd(midnight, timeZone, quietStart, quietEnd)
+}
+
+/** Fin del día siguiente en la zona dada: el plazo de una tarea que deja el Administrador. */
+function endOfTomorrow(now: Date, timeZone: string): Date {
+  const hourNow = Number(
+    new Intl.DateTimeFormat("en-GB", { timeZone, hour: "2-digit", hourCycle: "h23" }).format(now),
+  )
+  return new Date(now.getTime() + (48 - hourNow) * 3_600_000 - (now.getMinutes() * 60_000 + now.getSeconds() * 1000))
+}
+
+/**
+ * Deja la tarea de un caso para una persona del equipo: a su área o, si el
+ * caso tiene quien lo lleva, a esa persona. Dice quién la dejó (el
+ * Administrador) y por qué. Una tarea por caso: repetirlo no la duplica.
+ */
+async function leaveTask(
+  tx: Db,
+  orgId: string,
+  job: JobRow,
+  input: { reason: string; note?: string | undefined; dueAt?: Date; timeZone: string; now: Date },
+): Promise<string | null> {
+  const line = adminLineOf(job.kind)
+  if (!line) return null
+  const payload = jobPayloadOf(job.payload)
+  let name: string | null = null
+  if (job.patientId) {
+    const [row] = await tx
+      .select({ name: patient.displayName })
+      .from(patient)
+      .where(and(eq(patient.id, job.patientId), eq(patient.organizationId, orgId)))
+      .limit(1)
+    name = row?.name ?? null
+  }
+  if (!name && job.contactId) {
+    const [row] = await tx
+      .select({ name: contact.displayName })
+      .from(contact)
+      .where(and(eq(contact.id, job.contactId), eq(contact.organizationId, orgId)))
+      .limit(1)
+    name = row?.name ?? null
+  }
+  // Una tarea cuyo responsable ya no es del equipo vuelve a su área.
+  let assignee: string | null = null
+  if (line.team.toOwner && payload.ownerUserId) {
+    const [still] = await tx
+      .select({ userId: member.userId })
+      .from(member)
+      .where(and(eq(member.organizationId, orgId), eq(member.userId, payload.ownerUserId)))
+      .limit(1)
+    assignee = still?.userId ?? null
+  }
+  const task = await createTask(tx, orgId, {
+    title: line.team.taskTitle(name ?? "esta persona").slice(0, 200),
+    patientId: job.patientId,
+    contactId: job.patientId ? null : job.contactId,
+    opportunityId: job.opportunityId,
+    assigneeUserId: assignee,
+    dueAt: (input.dueAt ?? endOfTomorrow(input.now, input.timeZone)).toISOString(),
+    createdBy: "admin",
+    area: line.team.area,
+    reason: `${input.reason}${input.note ? ` Indicación de la clínica: ${input.note}` : ""}`.slice(0, 480),
+    idempotencyKey: `admin:${job.id}`,
+  })
+  return task.id
+}
+
+/** Hasta cuándo sirve llamar por el recordatorio de una cita: hasta que empieza. */
+async function reminderDue(tx: Db, orgId: string, job: JobRow): Promise<Date | undefined> {
+  if (job.kind !== "recordatorio_cita" || !job.appointmentId) return undefined
+  const [appt] = await tx
+    .select({ startsAt: appointment.startsAt })
+    .from(appointment)
+    .where(and(eq(appointment.id, job.appointmentId), eq(appointment.organizationId, orgId)))
+    .limit(1)
+  return appt?.startsAt
+}
+
+/**
+ * Atiende un caso vencido: reclama la fila (FOR UPDATE), comprueba que el
+ * motivo siga en pie y hace lo que la línea tiene prendido.
+ *
+ * - Si la línea solo deja trabajo al equipo (o «el agente le escribe» está
+ *   apagado), queda una tarea para una persona.
+ * - Si el agente escribe: comprueba el horario de silencio y el permiso de la
+ *   persona, elige la vía (respuesta, mensaje aprobado o correo) y deja el
+ *   mensaje en la cola. Con Recepción en «Supervisado», lo que no es un
+ *   recordatorio espera antes la aprobación de una persona.
+ *
+ * Nunca termina en blanco: si no puede escribir, el caso se cierra con su
+ * motivo, el equipo recibe un aviso por causa con cómo habilitarlo y, si la
+ * línea tiene prendida su tarea, queda la tarea para una persona.
+ *
+ * Como mucho un mensaje al día por persona: los recordatorios de cita que
+ * vencen juntos salen en uno solo y los demás tipos esperan al día siguiente
+ * si esa persona ya recibió algo hoy o tiene un recordatorio por salir.
  */
 export async function deliverJob(
   tx: Db,
@@ -1744,126 +1793,439 @@ export async function deliverJob(
         .where(and(eq(automationRule.id, job.ruleId), eq(automationRule.organizationId, orgId)))
         .limit(1)
     : []
-  const fail = async (detail: string, retryable: boolean): Promise<DeliverResult> => {
-    const attempts = job.attempts + 1
-    const status: AutomationJobStatus =
-      !retryable || attempts >= MAX_ATTEMPTS ? "fallido" : "pendiente"
+  const payload = jobPayloadOf(job.payload)
+  const line = adminLineOf(job.kind)
+  const close = async (ids: string[], status: AutomationJobStatus, detail: string | undefined) => {
     await tx
       .update(automationJob)
-      .set({
-        attempts,
-        status,
-        lastError: detail,
-        scheduledFor:
-          status === "pendiente" ? new Date(now.getTime() + 15 * 60_000) : job.scheduledFor,
-        updatedAt: new Date(),
-      })
+      .set({ status, lastError: detail ?? null, updatedAt: now })
+      .where(inArray(automationJob.id, ids))
+  }
+  // Lo que una persona pidió «solo esta vez» sale aunque la línea esté apagada.
+  if (!rule || !line || (!rule.enabled && !payload.once)) {
+    await close([job.id], "cancelado", "Línea apagada o retirada")
+    return { jobId: job.id, outcome: "cancelado", detail: "Línea apagada" }
+  }
+  const runtime = await adminRuntime(tx, orgId)
+  const tz = payload.timeZone ?? (await timezoneOf(tx, orgId, null))
+  const validity = await stillValid(tx, orgId, job, now)
+  if (!validity.valid) {
+    await close([job.id], "cancelado", validity.reason)
+    return { jobId: job.id, outcome: "cancelado", detail: validity.reason }
+  }
+
+  // ---- le toca a una persona -------------------------------------------------
+  if (!line.agent || !rule.agentPart) {
+    const taskId = await leaveTask(tx, orgId, job, {
+      reason: payload.detail ?? line.trigger(lineDays(rule, job.kind)),
+      note: lineConfigOf(rule.config).taskNote,
+      dueAt: await reminderDue(tx, orgId, job),
+      timeZone: tz,
+      now,
+    })
+    await tx
+      .update(automationJob)
+      .set({ status: "tarea", taskId, attempts: job.attempts + 1, updatedAt: now })
       .where(eq(automationJob.id, job.id))
-    if (status === "fallido") {
-      await audit(tx, orgId, null, "automation_job.failed", job.id, { kind: job.kind, detail })
-      await notify(tx, {
-        orgId,
-        kind: "automation.job.failed",
-        jobId: job.id,
-        at: now.toISOString(),
-      })
-      // Aviso dirigido sin datos clínicos: creador de la regla o administrador.
-      const recipient = await failureRecipient(tx, orgId, rule?.createdBy ?? null)
-      if (recipient) {
-        const ruleName = rule?.name ?? job.kind
-        await createWorkspaceNotification(tx, orgId, {
-          userId: recipient,
-          dedupeKey: `automation-failed-${job.id}`,
-          title: "Falló un envío automático",
-          body: `La regla "${ruleName}" no pudo enviar un mensaje (${job.kind}) tras ${MAX_ATTEMPTS} intentos: ${detail}`,
-          href: "/automations?estado=fallido",
-          permission: "crm.read",
+    await audit(tx, orgId, null, "automation_job.task", job.id, { kind: job.kind, taskId })
+    return { jobId: job.id, outcome: "tarea" }
+  }
+
+  // ---- lo hace el agente -----------------------------------------------------
+  if (!runtime.receptionOn) {
+    // Recepción es quien escribe: con ella apagada no sale nada, y lo que quedó
+    // atrás no se envía al volver a encenderla.
+    await close([job.id], "cancelado", "Recepción apagada")
+    return { jobId: job.id, outcome: "cancelado", detail: "Recepción apagada" }
+  }
+  /** Casos que salen en este mismo mensaje; al menos, el reclamado. */
+  let group: JobRow[] = [job]
+  const ids = () => group.map((item) => item.id)
+  /**
+   * Cierra el caso (y los que iban con él) porque no se pudo escribir. Un
+   * fallo transitorio del proveedor reintenta hasta `MAX_ATTEMPTS`; lo demás
+   * es definitivo desde el primer intento.
+   */
+  const cannot = async (
+    detail: string,
+    cause: AutomationCause,
+    options: { retryable?: boolean; status?: "fallido" | "omitido" } = {},
+  ): Promise<DeliverResult> => {
+    const attempts = job.attempts + 1
+    if (options.retryable && attempts < MAX_ATTEMPTS) {
+      await tx
+        .update(automationJob)
+        .set({ attempts, lastError: detail, scheduledFor: new Date(now.getTime() + 15 * 60_000), updatedAt: now })
+        .where(inArray(automationJob.id, ids()))
+      return { jobId: job.id, outcome: "pospuesto", detail }
+    }
+    const status = options.status ?? "fallido"
+    await tx
+      .update(automationJob)
+      .set({ attempts, status, lastError: detail, cause, updatedAt: now })
+      .where(inArray(automationJob.id, ids()))
+    await audit(tx, orgId, null, status === "omitido" ? "automation_job.skipped" : "automation_job.failed", job.id, {
+      kind: job.kind,
+      cause,
+      detail,
+    })
+    await notify(tx, { orgId, kind: "automation.job.failed", jobId: job.id, at: now.toISOString() })
+    await noticeCause(tx, orgId, rule, cause, tz, now)
+    if (rule.teamPart) {
+      const words = CAUSE_WORDS[cause]
+      for (const item of group) {
+        const taskId = await leaveTask(tx, orgId, item, {
+          reason: `El agente no pudo escribirle: ${words.one}. ${words.fix}`,
+          note: lineConfigOf(rule.config).taskNote,
+          dueAt: await reminderDue(tx, orgId, item),
+          timeZone: tz,
+          now,
         })
+        await tx.update(automationJob).set({ taskId }).where(eq(automationJob.id, item.id))
       }
     }
-    return { jobId: job.id, outcome: status === "fallido" ? "fallido" : "pospuesto", detail }
+    return { jobId: job.id, outcome: status, detail }
   }
-  if (!rule || !rule.enabled) {
+  if (inQuietHours(now, tz, runtime.quietStart, runtime.quietEnd)) {
+    const later = afterQuietEnd(now, tz, runtime.quietStart, runtime.quietEnd)
     await tx
       .update(automationJob)
-      .set({
-        status: "cancelado",
-        lastError: "Regla desactivada o eliminada",
-        updatedAt: new Date(),
-      })
-      .where(eq(automationJob.id, job.id))
-    return { jobId: job.id, outcome: "cancelado", detail: "Regla desactivada" }
-  }
-  const payload = payloadOf(job.payload)
-  const tz = payload.timeZone ?? (await timezoneOf(tx, orgId, null))
-  if (inQuietHours(now, tz, payload.quietStart, payload.quietEnd)) {
-    const later = afterQuietEnd(now, tz, payload.quietStart, payload.quietEnd)
-    await tx
-      .update(automationJob)
-      .set({ scheduledFor: later, updatedAt: new Date() })
+      .set({ scheduledFor: later, updatedAt: now })
       .where(eq(automationJob.id, job.id))
     return { jobId: job.id, outcome: "pospuesto", detail: "Fuera del horario de envío" }
   }
-  const validity = await stillValid(tx, orgId, job)
-  if (!validity.valid) {
-    await tx
-      .update(automationJob)
-      .set({ status: "cancelado", lastError: validity.reason, updatedAt: new Date() })
-      .where(eq(automationJob.id, job.id))
-    return { jobId: job.id, outcome: "cancelado", detail: validity.reason }
+  if (!job.contactId) return cannot("Sin persona a quien escribirle", "sin_destino")
+  const contactId = job.contactId
+  const purpose = line.agent.purpose
+  if (!(await hasConsent(tx, orgId, contactId, purpose))) {
+    return cannot(`La persona no aceptó mensajes de ${purpose}`, "sin_permiso", { status: "omitido" })
   }
-  if (!job.contactId) return fail("Sin contacto destinatario", false)
-  const purpose = purposeOfKind(job.kind)
-  if (!(await hasConsent(tx, orgId, job.contactId, purpose, job.channel))) {
-    await tx
-      .update(automationJob)
-      .set({
-        status: "omitido",
-        lastError: `Sin opt-in de ${purpose} por ${job.channel}`,
-        updatedAt: new Date(),
-      })
-      .where(eq(automationJob.id, job.id))
-    await audit(tx, orgId, null, "automation_job.skipped", job.id, {
-      kind: job.kind,
-      reason: "sin-consentimiento",
+
+  if (job.kind === "recordatorio_cita") {
+    // Varias citas de la misma persona (un padre con tres hijos) son un solo mensaje.
+    const siblings = await tx
+      .select()
+      .from(automationJob)
+      .where(
+        and(
+          eq(automationJob.organizationId, orgId),
+          eq(automationJob.contactId, contactId),
+          eq(automationJob.ruleId, rule.id),
+          eq(automationJob.kind, "recordatorio_cita"),
+          eq(automationJob.status, "pendiente"),
+          lte(automationJob.scheduledFor, new Date(now.getTime() + GROUP_WINDOW_MS)),
+          sql`${automationJob.id} <> ${job.id}`,
+        ),
+      )
+      .orderBy(asc(automationJob.scheduledFor), asc(automationJob.id))
+      .for("update", { skipLocked: true })
+    for (const sibling of siblings) {
+      const check = await stillValid(tx, orgId, sibling, now)
+      if (check.valid) group.push(sibling)
+      else await close([sibling.id], "cancelado", check.reason)
+    }
+    // Un recordatorio por cita en el mensaje: si dos avisos de la misma cita
+    // coinciden (uno atrasado), sale el primero y el otro se da por cubierto.
+    const seen = new Set<string>()
+    const covered: string[] = []
+    group = group.filter((item) => {
+      const key = item.appointmentId ?? item.id
+      if (seen.has(key)) {
+        covered.push(item.id)
+        return false
+      }
+      seen.add(key)
+      return true
     })
-    return { jobId: job.id, outcome: "omitido", detail: "Sin consentimiento" }
+    if (covered.length > 0) await close(covered, "cancelado", "Cubierto por otro recordatorio de la misma cita")
+  } else {
+    const rows = await tx.execute<{ sent: boolean; reminder: boolean }>(sql`
+      select
+        exists (select 1 from automation_job j
+          where j.organization_id = ${orgId} and j.contact_id = ${contactId} and j.status = 'enviado'
+            and (j.updated_at at time zone ${tz})::date = (${now.toISOString()}::timestamptz at time zone ${tz})::date) as sent,
+        exists (select 1 from automation_job j
+          where j.organization_id = ${orgId} and j.contact_id = ${contactId} and j.status = 'pendiente'
+            and j.kind = 'recordatorio_cita'
+            and (j.scheduled_for at time zone ${tz})::date = (${now.toISOString()}::timestamptz at time zone ${tz})::date) as reminder`)
+    const today = Array.isArray(rows) ? rows[0] : undefined
+    if (today?.sent || today?.reminder) {
+      await tx
+        .update(automationJob)
+        .set({ scheduledFor: tomorrowMorning(now, tz, runtime.quietStart, runtime.quietEnd), updatedAt: now })
+        .where(eq(automationJob.id, job.id))
+      return { jobId: job.id, outcome: "pospuesto", detail: "Ya recibió un mensaje hoy" }
+    }
   }
-  const resolved = await resolveConversation(tx, orgId, job.contactId, job.channel)
-  if ("error" in resolved) return fail(resolved.error, !isDefinitiveCode(resolved.code))
+
+  // Recepción no escribe encima de lo que la persona ya dijo. Lo que una persona
+  // aprobó o pidió «solo esta vez» sale igual: ya lo decidió alguien.
+  if (deps.alreadyTold && purpose !== "recordatorio" && !payload.approved && !payload.once) {
+    const written = await recentlyWritten(tx, orgId, contactId, now)
+    let told = false
+    if (written.length > 0) {
+      try {
+        told = await deps.alreadyTold(orgId, { kind: job.kind, reason: line.trigger(lineDays(rule, job.kind)), messages: written })
+      } catch {
+        // Sin modelo, lo prendido sigue funcionando.
+        told = false
+      }
+    }
+    if (told) {
+      await close(ids(), "cancelado", "La persona ya había escrito sobre esto")
+      await audit(tx, orgId, null, "automation_job.already_told", job.id, { kind: job.kind })
+      return { jobId: job.id, outcome: "cancelado", detail: "La persona ya había escrito sobre esto" }
+    }
+  }
+
+  // Prender un recordatorio ya fue aprobarlo. Lo demás, con Recepción en
+  // «Supervisado», espera a que una persona lo apruebe; «solo esta vez» ya lo
+  // pidió una persona.
+  if (purpose !== "recordatorio" && runtime.supervised && !payload.approved && !payload.once) {
+    await tx
+      .update(automationJob)
+      .set({ status: "por_aprobar", updatedAt: now })
+      .where(inArray(automationJob.id, ids()))
+    await notify(tx, { orgId, kind: "automation.approval.pending", at: now.toISOString() })
+    return { jobId: job.id, outcome: "por_aprobar" }
+  }
+
+  const spec = automationMessageOf(job.kind)
+  const composed = spec ? await composeJobMessage(tx, orgId, spec, group, now) : null
+  if (!spec || !composed) {
+    await close(ids(), "cancelado", "Ya no existe lo que originó el mensaje")
+    return { jobId: job.id, outcome: "cancelado", detail: "Sin datos para el mensaje" }
+  }
+  const route = await routeMessage(tx, orgId, contactId, spec.key)
+  if ("cause" in route) return cannot(route.detail, route.cause)
   try {
-    const sent = payload.templateName
-      ? await sendTemplateOutbound(tx, orgId, deps.secretsKey, {
-          conversationId: resolved.conversationId,
-          senderKind: "agent",
-          name: payload.templateName,
-          language: payload.templateLanguage ?? "es_PE",
-          params: [],
-        })
-      : await sendOutbound(tx, orgId, {
-          conversationId: resolved.conversationId,
-          senderKind: "agent",
-          content: { type: "text", text: payload.text ?? "" },
-        })
+    let sent: { id: string }
+    if (route.via === "plantilla" && route.template) {
+      sent = await sendTemplateOutbound(tx, orgId, deps.secretsKey, {
+        conversationId: route.conversationId,
+        senderKind: "agent",
+        name: route.template.name,
+        language: route.template.language,
+        params: composed.params,
+        buttons: composed.buttons,
+        preview: composed.text,
+      })
+    } else if (route.via === "correo") {
+      const [profile] = await tx
+        .select({ tradeName: orgProfile.tradeName, legalName: orgProfile.legalName })
+        .from(orgProfile)
+        .where(eq(orgProfile.organizationId, orgId))
+        .limit(1)
+      const links: Parameters<typeof emailBody>[2] = { appointments: [], optOut: null }
+      if (deps.publicBaseUrl) {
+        const base = deps.publicBaseUrl
+        if (job.kind === "recordatorio_cita") {
+          for (const item of group) {
+            if (!item.appointmentId) continue
+            const link = { jobId: item.id, appointmentId: item.appointmentId, contactId, ttlHours: 72, now }
+            links.appointments.push({
+              confirm: publicLink(base, "c", await createLinkToken(tx, orgId, { purpose: "confirm", ...link })),
+              cancel: publicLink(base, "c", await createLinkToken(tx, orgId, { purpose: "cancel", ...link })),
+            })
+          }
+        }
+        links.optOut = await createUnsubscribeLink(tx, orgId, contactId, base, { jobId: job.id })
+      }
+      sent = await sendOutbound(tx, orgId, {
+        conversationId: route.conversationId,
+        senderKind: "agent",
+        content: {
+          type: "text",
+          text: emailBody(composed, profile?.tradeName?.trim() || profile?.legalName || "", links),
+        },
+      })
+    } else {
+      sent = await sendOutbound(tx, orgId, {
+        conversationId: route.conversationId,
+        senderKind: "agent",
+        content: {
+          type: "text",
+          text: composed.text,
+          ...(composed.buttons.length ? { buttons: composed.buttons } : {}),
+        },
+      })
+    }
     await tx
       .update(automationJob)
       .set({
         status: "enviado",
         sentMessageId: sent.id,
+        via: route.via,
+        channel: route.channel,
         attempts: job.attempts + 1,
-        updatedAt: new Date(),
+        updatedAt: now,
       })
-      .where(eq(automationJob.id, job.id))
+      .where(inArray(automationJob.id, ids()))
     await audit(tx, orgId, null, "automation_job.sent", job.id, {
       kind: job.kind,
       messageId: sent.id,
+      via: route.via,
+      ...(group.length > 1 ? { together: group.length } : {}),
     })
     return { jobId: job.id, outcome: "enviado" }
   } catch (e) {
     const code = e instanceof ServiceError ? e.code : undefined
     const detail = e instanceof ServiceError ? e.message : "Error al enviar"
-    return fail(detail, !isDefinitiveCode(code))
+    return cannot(detail, causeOfCode(code), { retryable: !isDefinitiveCode(code) })
   }
+}
+
+// ------------------------------------------------- aprobación del equipo ---
+
+export interface PendingApproval {
+  /** Línea que los encargó. */
+  key: string
+  name: string
+  total: number
+  /** A quiénes, para reconocer el encargo (los primeros). */
+  people: string[]
+  since: string
+}
+
+/**
+ * Mensajes del Administrador que esperan la aprobación de una persona, uno por
+ * línea y no uno por persona: todos los de una línea llevan el mismo texto
+ * aprobado, con los datos de cada quien.
+ */
+export async function listPendingApprovals(tx: Db, orgId: string): Promise<PendingApproval[]> {
+  const rows = await tx.execute<{ kind: string; total: number; people: string[] | null; since: Date | string }>(sql`
+    select j.kind, count(*)::int as total, min(j.updated_at) as since,
+           (array_agg(c.display_name order by j.updated_at asc, j.id asc))[1:3] as people
+    from automation_job j
+    left join contact c on c.id = j.contact_id and c.organization_id = j.organization_id
+    where j.organization_id = ${orgId} and j.status = 'por_aprobar'
+    group by j.kind
+    order by min(j.updated_at) asc`)
+  return (Array.isArray(rows) ? rows : []).map((row) => ({
+    key: row.kind,
+    name: adminLineOf(row.kind)?.name ?? row.kind,
+    total: Number(row.total),
+    people: (row.people ?? []).filter((name): name is string => typeof name === "string"),
+    since: new Date(row.since).toISOString(),
+  }))
+}
+
+/**
+ * Aprueba o rechaza, de una vez, los mensajes de una línea que esperan. Lo
+ * aprobado sale en el siguiente ciclo, con las mismas comprobaciones de
+ * siempre (motivo vigente, permiso, horario); lo rechazado no se envía.
+ */
+export async function decidePendingApprovals(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  key: string,
+  decision: "aprobar" | "rechazar",
+): Promise<{ total: number }> {
+  const kind = assertKind(key)
+  const now = new Date()
+  const rows =
+    decision === "aprobar"
+      ? await tx
+          .update(automationJob)
+          .set({
+            status: "pendiente",
+            payload: sql`${automationJob.payload} || '{"approved": true}'::jsonb`,
+            updatedAt: now,
+          })
+          .where(
+            and(
+              eq(automationJob.organizationId, orgId),
+              eq(automationJob.kind, kind),
+              eq(automationJob.status, "por_aprobar"),
+            ),
+          )
+          .returning({ id: automationJob.id })
+      : await tx
+          .update(automationJob)
+          .set({ status: "cancelado", lastError: "Una persona del equipo no lo aprobó", updatedAt: now })
+          .where(
+            and(
+              eq(automationJob.organizationId, orgId),
+              eq(automationJob.kind, kind),
+              eq(automationJob.status, "por_aprobar"),
+            ),
+          )
+          .returning({ id: automationJob.id })
+  if (rows.length === 0) throw notFound("Mensajes por aprobar")
+  await audit(tx, orgId, actorUserId, `automation_job.${decision === "aprobar" ? "approved" : "rejected"}`, rows[0]!.id, {
+    kind,
+    total: rows.length,
+  })
+  return { total: rows.length }
+}
+
+/**
+ * «Enviado» solo dice que el mensaje salió hacia el canal. Si después el
+ * proveedor lo rechaza, el caso pasa a `fallido` con su motivo, entra en el
+ * aviso del día y, si la línea tiene prendida su tarea, queda para una
+ * persona: nadie se queda creyendo que lo recibió.
+ */
+export async function reconcileDeliveries(tx: Db, orgId: string, now: Date): Promise<number> {
+  const recent = new Date(now.getTime() - 3 * 24 * 3_600_000)
+  const rows = await tx
+    .select({ job: automationJob, error: message.error })
+    .from(automationJob)
+    .innerJoin(
+      message,
+      and(
+        eq(message.id, automationJob.sentMessageId),
+        eq(message.organizationId, automationJob.organizationId),
+      ),
+    )
+    .where(
+      and(
+        eq(automationJob.organizationId, orgId),
+        eq(automationJob.status, "enviado"),
+        gte(automationJob.updatedAt, recent),
+        eq(message.status, "failed"),
+      ),
+    )
+    .orderBy(asc(automationJob.updatedAt), asc(automationJob.id))
+    .limit(BATCH_LIMIT)
+  if (rows.length === 0) return 0
+  const timeZone = await timezoneOf(tx, orgId, null)
+  const rules = new Map<string, RuleRow | null>()
+  const words = CAUSE_WORDS.no_entregado
+  for (const { job, error } of rows) {
+    await tx
+      .update(automationJob)
+      .set({
+        status: "fallido",
+        cause: "no_entregado",
+        lastError: error ?? "El canal no entregó el mensaje",
+        updatedAt: now,
+      })
+      .where(eq(automationJob.id, job.id))
+    if (!job.ruleId) continue
+    if (!rules.has(job.ruleId)) {
+      const [rule] = await tx
+        .select()
+        .from(automationRule)
+        .where(and(eq(automationRule.id, job.ruleId), eq(automationRule.organizationId, orgId)))
+        .limit(1)
+      rules.set(job.ruleId, rule ?? null)
+    }
+    const rule = rules.get(job.ruleId)
+    if (rule?.teamPart && !job.taskId) {
+      const taskId = await leaveTask(tx, orgId, job, {
+        reason: `El agente no pudo escribirle: ${words.one}. ${words.fix}`,
+        dueAt: await reminderDue(tx, orgId, job),
+        timeZone: jobPayloadOf(job.payload).timeZone ?? timeZone,
+        now,
+      })
+      await tx.update(automationJob).set({ taskId }).where(eq(automationJob.id, job.id))
+    }
+  }
+  for (const rule of rules.values()) {
+    if (rule) await noticeCause(tx, orgId, rule, "no_entregado", timeZone, now)
+  }
+  return rows.length
 }
 
 /** Reclama hasta `limit` trabajos vencidos (SKIP LOCKED) y los entrega. */
@@ -1904,32 +2266,6 @@ export async function cancelPendingForAppointment(
       and(
         eq(automationJob.organizationId, orgId),
         eq(automationJob.appointmentId, appointmentId),
-        eq(automationJob.status, "pendiente"),
-      ),
-    )
-    .returning({ id: automationJob.id })
-  return rows.length
-}
-
-/**
- * Cancela lo pendiente ligado a UNA oportunidad (gancho exacto para
- * closeOpportunity: otras oportunidades, recordatorios y controles del
- * contacto sobreviven). Los trabajos de campaña por etapa guardan
- * opportunityId al programarse.
- */
-export async function cancelPendingJobsForOpportunity(
-  tx: Db,
-  orgId: string,
-  opportunityId: string,
-  reason: string,
-): Promise<number> {
-  const rows = await tx
-    .update(automationJob)
-    .set({ status: "cancelado", lastError: reason, updatedAt: new Date() })
-    .where(
-      and(
-        eq(automationJob.organizationId, orgId),
-        eq(automationJob.opportunityId, opportunityId),
         eq(automationJob.status, "pendiente"),
       ),
     )
@@ -2043,8 +2379,10 @@ export async function invalidateAppointmentTokens(
  * Transición por enlace público con fila bloqueada: solo desde estados
  * pendientes futuros (confirmar: programada; cancelar: programada o
  * confirmada). Nunca reabre canceladas ni toca atendidas/no asistidas.
- * Incrementa `version` (bloqueo optimista de Agenda), invalida hermanos y
- * audita con actor nulo (origen enlace, sin FK inventada).
+ * El cambio lo hace la operación de la agenda (`setAppointmentStatus`), la
+ * misma que usa recepción: versión, auditoría de la cita, enlaces hermanos,
+ * recordatorios pendientes y aviso a las pantallas. El actor es nulo (origen
+ * enlace, sin FK inventada).
  */
 async function transitionAppointmentByToken(
   tx: Db,
@@ -2072,23 +2410,9 @@ async function transitionAppointmentByToken(
   if (appt.startsAt.getTime() < Date.now()) {
     throw new ServiceError("APPOINTMENT_PAST", 409, "La cita ya pasó")
   }
-  const [updated] = await tx
-    .update(appointment)
-    .set({ status: toStatus, version: appt.version + 1, updatedAt: new Date() })
-    .where(and(eq(appointment.id, appt.id), eq(appointment.version, appt.version)))
-    .returning({ id: appointment.id, status: appointment.status })
-  if (!updated) throw new ServiceError("APPOINTMENT_CONFLICT", 409, "La cita cambió mientras tanto")
-  await invalidateAppointmentTokens(tx, link.organizationId, appt.id)
-  await cancelPendingForAppointment(
-    tx,
-    link.organizationId,
-    appt.id,
-    toStatus === "confirmada" ? "Cita confirmada por enlace" : "Cita cancelada por enlace",
-  )
-  await audit(tx, link.organizationId, null, "automation_appointment.status", appt.id, {
-    from: appt.status,
-    to: toStatus,
+  const updated = await setAppointmentStatus(tx, link.organizationId, null, appt.id, toStatus, {
     via: "enlace-publico",
+    ...(toStatus === "cancelada" ? { cancelReason: "paciente" } : {}),
   })
   return { appointmentId: updated.id, status: updated.status }
 }
@@ -2109,7 +2433,11 @@ export async function cancelAppointmentByToken(
   return transitionAppointmentByToken(tx, token, "cancel", "cancelada")
 }
 
-/** Baja verificable: revoca marketing + recordatorio/seguimiento y cancela pendientes. */
+/**
+ * Baja verificable. Apaga el tipo de mensaje del que salió el enlace (quien se
+ * da de baja de un seguimiento sigue recibiendo el recordatorio de su cita); un
+ * enlace que no viene de un mensaje concreto apaga los tres.
+ */
 export async function unsubscribeByToken(tx: Db, token: string): Promise<{ contactId: string }> {
   const [link] = await tx
     .select()
@@ -2121,121 +2449,365 @@ export async function unsubscribeByToken(tx: Db, token: string): Promise<{ conta
   if (link.expiresAt.getTime() < Date.now())
     throw new ServiceError("LINK_EXPIRED", 409, "El enlace venció")
   if (!link.contactId) throw notFound("Contacto")
-  for (const purpose of ["marketing", "recordatorio", "seguimiento"] as const) {
-    for (const channel of ["whatsapp", "telegram", "messenger", "instagram"] as const) {
-      await tx
-        .insert(automationConsent)
-        .values({
-          organizationId: link.organizationId,
-          contactId: link.contactId,
-          purpose,
-          channel,
-          status: "revoked",
-          source: "enlace",
-          createdBy: null,
-        })
-        .onConflictDoUpdate({
-          target: [
-            automationConsent.organizationId,
-            automationConsent.contactId,
-            automationConsent.purpose,
-            automationConsent.channel,
-          ],
-          set: { status: "revoked", updatedAt: new Date() },
-        })
-    }
+  const [origin] = link.jobId
+    ? await tx
+        .select({ kind: automationJob.kind })
+        .from(automationJob)
+        .where(and(eq(automationJob.id, link.jobId), eq(automationJob.organizationId, link.organizationId)))
+        .limit(1)
+    : []
+  const purposes = origin ? [purposeOfKind(origin.kind)] : CONSENT_PURPOSES
+  for (const purpose of purposes) {
+    await setConsent(tx, link.organizationId, null, link.contactId, { purpose, granted: false, source: "baja" })
   }
-  await tx
-    .update(automationJob)
-    .set({ status: "cancelado", lastError: "Baja por enlace", updatedAt: new Date() })
-    .where(
-      and(
-        eq(automationJob.organizationId, link.organizationId),
-        eq(automationJob.contactId, link.contactId),
-        eq(automationJob.status, "pendiente"),
-      ),
-    )
   await tx
     .update(automationLinkToken)
     .set({ usedAt: new Date() })
     .where(eq(automationLinkToken.tokenHash, link.tokenHash))
-  await audit(tx, link.organizationId, null, "automation_consent.unsubscribed", link.contactId, {})
+  await audit(tx, link.organizationId, null, "automation_consent.unsubscribed", link.contactId, {
+    purposes: [...purposes],
+  })
   return { contactId: link.contactId }
 }
 
-/** Crea el enlace de baja de un contacto (se incluye en campañas y seguimientos). */
+/**
+ * Crea el enlace de baja de una persona. Con `jobId` la baja es solo del tipo
+ * de mensaje de ese trabajo; sin él, de todos.
+ */
 export async function createUnsubscribeLink(
   tx: Db,
   orgId: string,
   contactId: string,
   publicBaseUrl: string,
-  ttlHours = 24 * 30,
+  options: { jobId?: string; ttlHours?: number } = {},
 ): Promise<string> {
   const token = await createLinkToken(tx, orgId, {
     purpose: "baja",
     contactId,
-    ttlHours,
+    jobId: options.jobId ?? null,
+    ttlHours: options.ttlHours ?? 24 * 30,
     now: new Date(),
   })
   return publicLink(publicBaseUrl, "baja", token)
 }
 
-// ------------------------------------------------------------- tick (worker) ---
+// ------------------------------------------------ respuestas con botón ---
 
-export interface TickDeps {
-  secretsKey: Buffer
-  publicBaseUrl: string
-  limit?: number
+/**
+ * La persona tocó un botón de un mensaje automático. Dos los resuelve el
+ * sistema, sin modelo y con un texto fijo de respuesta: «Confirmar» confirma
+ * por la operación de la agenda cada cita de ese mensaje, y «No enviar más»
+ * retira el permiso de ese tipo de mensaje. Devuelve true si quedó resuelto;
+ * con false la conversación sigue su curso normal (el agente o una persona),
+ * que es lo que pasa con cualquier otro botón.
+ *
+ * El botón solo vale en la conversación de la persona a la que se le envió.
+ */
+export async function handleAutomationReply(
+  tx: Db,
+  orgId: string,
+  input: { conversationId: string; replyId: string | null | undefined },
+): Promise<boolean> {
+  const reply = parseReplyId(input.replyId)
+  if (!reply || reply.action === "responder") return false
+  const [thread] = await tx
+    .select({ contactId: conversation.contactId })
+    .from(conversation)
+    .where(and(eq(conversation.id, input.conversationId), eq(conversation.organizationId, orgId)))
+    .limit(1)
+  const [origin] = await tx
+    .select()
+    .from(automationJob)
+    .where(and(eq(automationJob.id, reply.jobId), eq(automationJob.organizationId, orgId)))
+    .limit(1)
+  if (!thread || !origin?.sentMessageId || origin.contactId !== thread.contactId) return false
+  if (reply.action === "baja") {
+    const purpose = purposeOfKind(origin.kind)
+    await setConsent(tx, orgId, null, thread.contactId, { purpose, granted: false, source: "baja" })
+    await sendOutbound(tx, orgId, {
+      conversationId: input.conversationId,
+      senderKind: "agent",
+      content: {
+        type: "text",
+        text:
+          purpose === "recordatorio"
+            ? "Listo: no te enviaremos más recordatorios. Si cambias de opinión, dínoslo por aquí."
+            : "Listo: no te enviaremos más estos mensajes. Si cambias de opinión, dínoslo por aquí.",
+      },
+    })
+    return true
+  }
+  const together = await tx
+    .select({ appointmentId: automationJob.appointmentId })
+    .from(automationJob)
+    .where(
+      and(
+        eq(automationJob.organizationId, orgId),
+        eq(automationJob.sentMessageId, origin.sentMessageId),
+        eq(automationJob.contactId, thread.contactId),
+      ),
+    )
+  const appointmentIds = [...new Set(together.map((row) => row.appointmentId).filter((id): id is string => !!id))]
+  if (appointmentIds.length === 0) return false
+  let confirmed = 0
+  let already = 0
+  for (const appointmentId of appointmentIds) {
+    const [appt] = await tx
+      .select({ status: appointment.status, startsAt: appointment.startsAt })
+      .from(appointment)
+      .where(and(eq(appointment.id, appointmentId), eq(appointment.organizationId, orgId)))
+      .for("update")
+      .limit(1)
+    if (!appt || appt.startsAt.getTime() < Date.now()) continue
+    if (appt.status === "confirmada") already++
+    if (appt.status !== "programada") continue
+    await setAppointmentStatus(tx, orgId, null, appointmentId, "confirmada", { via: "respuesta" })
+    confirmed++
+  }
+  // Cita cancelada, atendida o ya pasada: no hay nada que confirmar y lo
+  // correcto es que alguien lea la conversación.
+  if (confirmed + already === 0) return false
+  const many = confirmed + already > 1
+  await sendOutbound(tx, orgId, {
+    conversationId: input.conversationId,
+    senderKind: "agent",
+    content: {
+      type: "text",
+      text:
+        confirmed === 0
+          ? many
+            ? "Tus citas ya estaban confirmadas. ¡Te esperamos!"
+            : "Tu cita ya estaba confirmada. ¡Te esperamos!"
+          : many
+            ? "¡Listo! Tus citas quedaron confirmadas. Te esperamos."
+            : "¡Listo! Tu cita quedó confirmada. Te esperamos.",
+    },
+  })
+  await audit(tx, orgId, null, "automation_job.confirmed", origin.id, {
+    appointments: appointmentIds.length,
+    confirmed,
+    via: "respuesta",
+  })
+  return true
 }
 
-export interface TickSummary {
-  orgs: number
-  programados: number
-  coordinados: number
-  entregados: number
-  fallidos: number
+/** Lo que se sabe de un mensaje entrante que es el toque de un botón de un mensaje automático. */
+export interface AutomationReply {
+  kind: string
+  /** Texto del botón, tal como lo vio la persona. */
+  button: string
+  /** Qué pide con ese botón; null si el botón no lo declara. */
+  asks: "reservar" | "cambiar" | null
+  /** Lo mismo dicho para quien sigue la conversación: de qué mensaje viene y qué quiere la persona. */
+  hint: string
 }
 
 /**
- * Tick real de automatizaciones para el worker: por cada organización,
- * sincroniza (programa con dedupe) y entrega lo vencido. Las orgs se listan
- * de la tabla global `organization` (sin RLS de tenant), así funciona con
- * RLS normal o FORCE: el trabajo siempre corre con `appDb` dentro de
- * `withOrgContext`. Despertador durable: pg_cron → pgmq `automation_ticks`.
+ * Si el mensaje entrante es el toque de un botón «responder» de un mensaje
+ * automático, dice de qué línea venía y qué pide la persona. Se reconoce sin
+ * modelo: es la respuesta inmediata a ese mensaje y su texto es el del botón.
+ * Así Recepción no tiene que adivinar si «Sí, otro horario» es mover una cita
+ * o reservar una nueva: quien faltó o canceló ya no tiene esa cita en pie.
  */
-export async function tickAutomations(
-  ownerDb: Db,
-  appDb: Db,
-  now: Date,
-  deps: TickDeps,
-): Promise<TickSummary> {
-  const orgRows = await ownerDb.select({ orgId: organization.id }).from(organization)
-  const summary: TickSummary = { orgs: 0, programados: 0, coordinados: 0, entregados: 0, fallidos: 0 }
-  for (const { orgId } of orgRows) {
-    summary.orgs++
-    // Secuencial: las sincronizaciones comparten la transacción del tenant.
-    const synced = await withOrgContext(appDb, orgId, async (tx) => {
-      let total = 0
-      const commercial = await syncOverdueCommercialFollowUps(tx, orgId, now, {
-        secretsKey: deps.secretsKey,
-      })
-      total += (await syncAppointmentReminders(tx, orgId, now, deps.publicBaseUrl)).programados
-      total += (await syncBudgetFollowUps(tx, orgId, now)).programados
-      total += (await syncVisitFollowUps(tx, orgId, now)).programados
-      total += (await syncInactiveRecall(tx, orgId, now)).programados
-      total += (await syncCheckupReminders(tx, orgId, now)).programados
-      total += (await syncCampaigns(tx, orgId, now, deps.publicBaseUrl)).programados
-      return { total, coordinated: commercial.programados }
-    })
-    summary.programados += synced.total
-    summary.coordinados += synced.coordinated
-    const delivered = await withOrgContext(appDb, orgId, (tx) =>
-      deliverDueJobs(tx, orgId, now, { secretsKey: deps.secretsKey }, deps.limit ?? 25),
+export async function automationReplyOf(
+  tx: Db,
+  orgId: string,
+  input: { conversationId: string; messageId: string },
+): Promise<AutomationReply | null> {
+  const [trigger] = await tx
+    .select({ body: message.body, createdAt: message.createdAt })
+    .from(message)
+    .where(and(eq(message.id, input.messageId), eq(message.organizationId, orgId), eq(message.conversationId, input.conversationId), eq(message.direction, "in")))
+    .limit(1)
+  const text = trigger?.body?.trim()
+  if (!trigger || !text) return null
+  // El mensaje anterior del hilo, sea de quien sea: si entre el automático y el
+  // toque hubo otra cosa, ya no es una respuesta directa a ese botón.
+  const [before] = await tx
+    .select({ id: message.id, direction: message.direction, replyButtons: message.replyButtons })
+    .from(message)
+    .where(and(eq(message.conversationId, input.conversationId), eq(message.organizationId, orgId), sql`${message.createdAt} < ${trigger.createdAt.toISOString()}::timestamptz`))
+    .orderBy(desc(message.createdAt), desc(message.id))
+    .limit(1)
+  if (!before || before.direction === "in") return null
+  const tapped = (before.replyButtons ?? []).find((button) => button.title.trim() === text)
+  const reply = tapped ? parseReplyId(tapped.id) : null
+  if (!tapped || reply?.action !== "responder") return null
+  const [origin] = await tx
+    .select({ kind: automationJob.kind, sentMessageId: automationJob.sentMessageId })
+    .from(automationJob)
+    .where(and(eq(automationJob.id, reply.jobId), eq(automationJob.organizationId, orgId)))
+    .limit(1)
+  if (!origin || origin.sentMessageId !== before.id) return null
+  const line = adminLineOf(origin.kind)
+  const asks = automationMessageOf(origin.kind)?.buttons.find((button) => button.action === "responder" && button.title === tapped.title)?.asks ?? null
+  const wants =
+    asks === "reservar"
+      ? "Quiere una cita nueva: lo de ese mensaje ya no está en pie como cita, así que no hay nada que mover. Ofrécele horarios; todavía no eligió ninguno."
+      : asks === "cambiar"
+        ? "Quiere cambiar o cancelar la cita de ese recordatorio, que sigue en pie."
+        : "Sigue la conversación desde ahí."
+  return {
+    kind: origin.kind,
+    button: tapped.title,
+    asks,
+    hint: `El interlocutor tocó el botón «${tapped.title}» del mensaje automático de la clínica${line ? ` por «${line.trigger(lineDays(null, origin.kind))}»` : ""}. ${wants}`,
+  }
+}
+
+// ------------------------------------------------- mensajes aprobados ---
+
+/** Mensajes que necesitan las reglas prendidas de una organización. */
+async function neededMessages(tx: Db, orgId: string): Promise<AutomationMessageKey[]> {
+  const rules = await tx
+    .select({ kind: automationRule.kind })
+    .from(automationRule)
+    .where(
+      and(
+        eq(automationRule.organizationId, orgId),
+        eq(automationRule.enabled, true),
+        eq(automationRule.agentPart, true),
+      ),
     )
-    for (const r of delivered) {
-      if (r.outcome === "enviado") summary.entregados++
-      if (r.outcome === "fallido") summary.fallidos++
+  const kinds = new Set(rules.map((rule) => rule.kind))
+  return AUTOMATION_MESSAGE_KEYS.filter((key) => kinds.has(key))
+}
+
+/**
+ * Pide a WhatsApp la aprobación de los mensajes que usan las reglas prendidas
+ * y que aún no están en el catálogo. La clínica no hace nada: al prender una
+ * regla el mensaje queda «en revisión» y empieza a salir cuando se aprueba.
+ * Una solicitud que el proveedor no acepta se avisa una vez al día, con su
+ * motivo, y se reintenta al día siguiente.
+ */
+export async function requestNeededTemplates(
+  tx: Db,
+  orgId: string,
+  secretsKey: Buffer,
+  now: Date,
+  deps: TemplateDeps,
+): Promise<number> {
+  const needed = await neededMessages(tx, orgId)
+  if (needed.length === 0) return 0
+  const connections = await tx
+    .select({ id: channelConnection.id })
+    .from(channelConnection)
+    .where(
+      and(
+        eq(channelConnection.organizationId, orgId),
+        eq(channelConnection.channel, "whatsapp"),
+        eq(channelConnection.status, "active"),
+      ),
+    )
+    .orderBy(asc(channelConnection.createdAt), asc(channelConnection.id))
+  let requested = 0
+  for (const connection of connections) {
+    const existing = await tx.execute<{ name: string }>(sql`
+      select name from channel_template
+      where organization_id = ${orgId} and connection_id = ${connection.id} and message_key is not null`)
+    const known = new Set((Array.isArray(existing) ? existing : []).map((row) => row.name))
+    for (const key of needed) {
+      const spec = automationMessageOf(key)
+      if (!spec || known.has(spec.template)) continue
+      const day = now.toISOString().slice(0, 10)
+      const attempted = await tx.execute<{ one: number }>(sql`
+        select 1 as one from audit_event
+        where organization_id = ${orgId} and action = 'channel_template.request_failed'
+          and entity_id = ${connection.id} and metadata->>'messageKey' = ${key} and metadata->>'day' = ${day}
+        limit 1`)
+      if (Array.isArray(attempted) && attempted.length > 0) continue
+      try {
+        // Punto de retorno: un rechazo del proveedor no debe abortar el tick.
+        await tx.transaction((inner) => requestMessageTemplate(inner, orgId, connection.id, key, secretsKey, deps))
+        requested++
+        await audit(tx, orgId, null, "channel_template.requested", connection.id, { messageKey: key })
+      } catch (error) {
+        if (!(error instanceof ServiceError)) throw error
+        await audit(tx, orgId, null, "channel_template.request_failed", connection.id, {
+          messageKey: key,
+          day,
+          detail: error.message.slice(0, 300),
+        })
+        const recipient = await failureRecipient(tx, orgId, null)
+        if (recipient) {
+          await upsertWorkspaceNotification(tx, orgId, {
+            userId: recipient,
+            dedupeKey: `template-request:${connection.id}:${key}:${day}`,
+            title: "WhatsApp no aceptó la solicitud de un mensaje",
+            body: `Motivo: ${error.message.slice(0, 300)}. Revisa en Configuración › Canales que el token de WhatsApp pueda administrar plantillas. Se vuelve a pedir mañana.`,
+            href: "/settings/channels",
+            permission: "settings.write",
+          })
+        }
+      }
     }
   }
-  return summary
+  return requested
 }
+
+const TEMPLATE_NOTICE: Partial<Record<string, { title: string; fix: string }>> = {
+  aprobada: {
+    title: "WhatsApp aprobó un mensaje",
+    fix: "Ya puede salir a quien no escribió en las últimas 24 horas.",
+  },
+  rechazada: {
+    title: "WhatsApp rechazó un mensaje",
+    fix: "Mientras tanto solo sale como respuesta o por correo. odentIA tiene que cambiar el texto y volver a pedirlo.",
+  },
+  pausada: {
+    title: "WhatsApp pausó un mensaje",
+    fix: "Mientras tanto solo sale como respuesta o por correo. WhatsApp lo reactiva solo si mejora su calidad.",
+  },
+  deshabilitada: {
+    title: "WhatsApp deshabilitó un mensaje",
+    fix: "Mientras tanto solo sale como respuesta o por correo.",
+  },
+}
+
+/**
+ * El proveedor avisó que una plantilla cambió de estado. Se actualiza el
+ * catálogo y, si es de un mensaje de odentIA, quien administra recibe un aviso
+ * por cambio: cuál, el motivo que da el proveedor y qué pasa mientras tanto.
+ */
+export async function applyTemplateUpdates(
+  tx: Db,
+  orgId: string,
+  connectionId: string,
+  statuses: NormalizedTemplateStatus[],
+): Promise<number> {
+  const changes = await applyTemplateStatuses(tx, orgId, connectionId, statuses)
+  for (const { template } of changes) {
+    await audit(tx, orgId, null, "channel_template.status", connectionId, {
+      name: template.name,
+      status: template.status,
+      reason: template.reason,
+    })
+    const notice = TEMPLATE_NOTICE[template.status]
+    const spec = template.messageKey ? automationMessageOf(template.messageKey) : null
+    if (!notice || !spec) continue
+    const recipient = await failureRecipient(tx, orgId, null)
+    if (!recipient) continue
+    // A cuántas personas les toca ya: las que tienen ese mensaje por salir en el próximo día.
+    let waiting = ""
+    if (template.status !== "aprobada") {
+      const [soon] = await tx.execute<{ n: number }>(sql`
+        select count(distinct j.contact_id)::int as n from automation_job j
+        where j.organization_id = ${orgId} and j.kind = ${spec.key} and j.status in ('pendiente', 'por_aprobar')
+          and j.scheduled_for <= now() + interval '24 hours'`)
+      const n = Number(soon?.n ?? 0)
+      if (n > 0) {
+        waiting = ` ${n === 1 ? "1 persona lo tiene" : `${n} personas lo tienen`} por salir en las próximas 24 horas: a quien no le llegue lo verás con su motivo en Agente › Administrador.`
+      }
+    }
+    await upsertWorkspaceNotification(tx, orgId, {
+      userId: recipient,
+      dedupeKey: `template-status:${template.id}:${template.status}`,
+      title: `${notice.title}: «${spec.subject}»`,
+      body: `${template.reason ? `Motivo: ${template.reason}. ` : ""}${notice.fix}${waiting}`,
+      href: "/settings/channels",
+      permission: "settings.write",
+    })
+  }
+  return changes.length
+}
+

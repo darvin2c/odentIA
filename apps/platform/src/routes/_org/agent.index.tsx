@@ -5,7 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, getRouteApi, Link, useNavigate } from "@tanstack/react-router"
 import { ArrowRight, ChevronRight, CircleHelp, Lightbulb, Lock, MessageCircle, Mic } from "lucide-react"
 import { type ReactNode, useState } from "react"
-import type { AdvisorSettings } from "../../components/agent/advisor"
+import type { AdminOverview } from "../../lib/admin"
 import { AgentBaseDrawer } from "../../components/agent/base-drawer"
 import { AgentTabs } from "../../components/agent-tabs"
 import { type AgentLearned, type AgentOverview, type AgentProviderProblem, type AgentRole, type AgentRoles, LEVEL_LABEL } from "../../lib/agent"
@@ -20,10 +20,21 @@ export const Route = createFileRoute("/_org/agent/")({
 })
 const orgRouteApi = getRouteApi("/_org")
 
+/** Lo que el Administrador tiene activo, en una frase: cuántas, quién las hace y cuántas más recomienda. */
+function adminSummary(admin: AdminOverview): string {
+  const parts = [
+    admin.on === 0
+      ? "Ninguna línea prendida todavía"
+      : `${admin.on} ${admin.on === 1 ? "prendida" : "prendidas"}: ${admin.byAgent} ${admin.byAgent === 1 ? "la hace" : "las hace"} el agente y ${admin.byTeam} ${admin.byTeam === 1 ? "le toca" : "le tocan"} a tu equipo`,
+    admin.recommended > 0 ? `te recomienda ${admin.recommended} más` : null,
+  ]
+  return parts.filter(Boolean).join(" · ")
+}
+
 const ROLE_ICON: Record<AgentRole["id"], ReactNode> = {
   recepcion: <MessageCircle aria-hidden />,
   asistente_clinico: <Mic aria-hidden />,
-  asesor: <Lightbulb aria-hidden />,
+  administrador: <Lightbulb aria-hidden />,
   ayuda: <CircleHelp aria-hidden />,
 }
 
@@ -31,7 +42,7 @@ const ROLE_ICON: Record<AgentRole["id"], ReactNode> = {
 const ROLE_PAGE = {
   recepcion: "/agent/recepcion",
   asistente_clinico: "/agent/asistente-clinico",
-  asesor: "/agent/asesor",
+  administrador: "/agent/administrador",
 } as const
 
 /** Qué pasó con el proveedor, con palabras de la clínica; el texto del proveedor no llega a la pantalla. */
@@ -108,14 +119,15 @@ function AgentSummaryPage() {
     queryFn: () => apiFetch<{ data: AgentConfig }>("/api/agent/config"),
     enabled: canRead,
   })
-  // El Asesor se enciende aparte: su estado sale de sus propios ajustes.
-  const advisorQuery = useQuery({
-    queryKey: ["agent-advisor-settings"],
-    queryFn: () => apiFetch<{ data: AdvisorSettings }>("/api/agent/advisor/settings"),
+  // El Administrador se enciende aparte: lo suyo sale de su propio resumen.
+  const adminQuery = useQuery({
+    queryKey: ["agent-admin", "overview"],
+    queryFn: () => apiFetch<{ data: AdminOverview }>("/api/agent/admin/overview"),
     enabled: canRead,
     retry: false,
   })
-  const advisorOn = advisorQuery.data?.data.enabled === true
+  const admin = adminQuery.data?.data
+  const adminOn = admin?.enabled === true
   useOrgEvents(
     ["agent.run.recorded", "agent.proposal.created", "agent.proposal.decided", "agent.handoff.created", "stream.reconnected"],
     () => void queryClient.invalidateQueries({ queryKey: ["agent-overview"] }),
@@ -269,8 +281,8 @@ function AgentSummaryPage() {
                   ? null
                   : isReception
                     ? overview.enabled
-                    : role.id === "asesor"
-                      ? advisorOn
+                    : role.id === "administrador"
+                      ? adminOn
                       : config?.clinicalAssistantEnabled === true
                 const channels = config?.channels?.length ? config.channels : overview.readiness.channels
                 return (
@@ -315,7 +327,9 @@ function AgentSummaryPage() {
                             ? `Nivel ${LEVEL_LABEL[overview.level]} · ${
                                 channels.length ? channels.map((channel) => channelLabel(channel)).join(", ") : "sin canal conectado"
                               }`
-                            : role.role}
+                            : role.id === "administrador" && on && admin
+                              ? adminSummary(admin)
+                              : role.role}
                         </p>
                       </div>
                       {on === null ? null : on ? (

@@ -15,7 +15,6 @@ import { Route as PortalRouteImport } from './routes/portal'
 import { Route as RegistroRouteImport } from './routes/registro'
 import { Route as ReservaRouteImport } from './routes/reserva'
 import { Route as OrgAgendaRouteImport } from './routes/_org/agenda'
-import { Route as OrgAutomationsRouteImport } from './routes/_org/automations'
 import { Route as OrgBranchesRouteImport } from './routes/_org/branches'
 import { Route as OrgCommissionsRouteImport } from './routes/_org/commissions'
 import { Route as OrgDemoRouteImport } from './routes/_org/demo'
@@ -33,8 +32,8 @@ import { Route as BajaTokenRouteImport } from './routes/baja.$token'
 import { Route as CTokenRouteImport } from './routes/c.$token'
 import { Route as EmbedConnectionIdRouteImport } from './routes/embed.$connectionId'
 import { Route as OrgAgentIndexRouteImport } from './routes/_org/agent.index'
+import { Route as OrgAgentAdministradorRouteImport } from './routes/_org/agent.administrador'
 import { Route as OrgAgentApprovalsRouteImport } from './routes/_org/agent.approvals'
-import { Route as OrgAgentAsesorRouteImport } from './routes/_org/agent.asesor'
 import { Route as OrgAgentAsistenteClinicoRouteImport } from './routes/_org/agent.asistente-clinico'
 import { Route as OrgAgentKnowledgeRouteImport } from './routes/_org/agent.knowledge'
 import { Route as OrgAgentLearnRouteImport } from './routes/_org/agent.learn'
@@ -94,11 +93,6 @@ const ReservaRoute = ReservaRouteImport.update({
 const OrgAgendaRoute = OrgAgendaRouteImport.update({
   id: '/agenda',
   path: '/agenda',
-  getParentRoute: () => OrgRoute,
-} as any)
-const OrgAutomationsRoute = OrgAutomationsRouteImport.update({
-  id: '/automations',
-  path: '/automations',
   getParentRoute: () => OrgRoute,
 } as any)
 const OrgBranchesRoute = OrgBranchesRouteImport.update({
@@ -186,14 +180,14 @@ const OrgAgentIndexRoute = OrgAgentIndexRouteImport.update({
   path: '/agent/',
   getParentRoute: () => OrgRoute,
 } as any)
+const OrgAgentAdministradorRoute = OrgAgentAdministradorRouteImport.update({
+  id: '/agent/administrador',
+  path: '/agent/administrador',
+  getParentRoute: () => OrgRoute,
+} as any)
 const OrgAgentApprovalsRoute = OrgAgentApprovalsRouteImport.update({
   id: '/agent/approvals',
   path: '/agent/approvals',
-  getParentRoute: () => OrgRoute,
-} as any)
-const OrgAgentAsesorRoute = OrgAgentAsesorRouteImport.update({
-  id: '/agent/asesor',
-  path: '/agent/asesor',
   getParentRoute: () => OrgRoute,
 } as any)
 const OrgAgentAsistenteClinicoRoute =
@@ -366,7 +360,6 @@ export interface FileRoutesByFullPath {
   '/registro': typeof RegistroRoute
   '/reserva': typeof ReservaRoute
   '/agenda': typeof OrgAgendaRoute
-  '/automations': typeof OrgAutomationsRoute
   '/branches': typeof OrgBranchesRoute
   '/commissions': typeof OrgCommissionsRoute
   '/demo': typeof OrgDemoRoute
@@ -383,8 +376,8 @@ export interface FileRoutesByFullPath {
   '/baja/$token': typeof BajaTokenRoute
   '/c/$token': typeof CTokenRoute
   '/embed/$connectionId': typeof EmbedConnectionIdRoute
+  '/agent/administrador': typeof OrgAgentAdministradorRoute
   '/agent/approvals': typeof OrgAgentApprovalsRoute
-  '/agent/asesor': typeof OrgAgentAsesorRoute
   '/agent/asistente-clinico': typeof OrgAgentAsistenteClinicoRoute
   '/agent/knowledge': typeof OrgAgentKnowledgeRoute
   '/agent/learn': typeof OrgAgentLearnRoute
@@ -424,7 +417,6 @@ export interface FileRoutesByTo {
   '/registro': typeof RegistroRoute
   '/reserva': typeof ReservaRoute
   '/agenda': typeof OrgAgendaRoute
-  '/automations': typeof OrgAutomationsRoute
   '/branches': typeof OrgBranchesRoute
   '/commissions': typeof OrgCommissionsRoute
   '/demo': typeof OrgDemoRoute
@@ -439,8 +431,8 @@ export interface FileRoutesByTo {
   '/baja/$token': typeof BajaTokenRoute
   '/c/$token': typeof CTokenRoute
   '/embed/$connectionId': typeof EmbedConnectionIdRoute
+  '/agent/administrador': typeof OrgAgentAdministradorRoute
   '/agent/approvals': typeof OrgAgentApprovalsRoute
-  '/agent/asesor': typeof OrgAgentAsesorRoute
   '/agent/asistente-clinico': typeof OrgAgentAsistenteClinicoRoute
   '/agent/knowledge': typeof OrgAgentKnowledgeRoute
   '/agent/learn': typeof OrgAgentLearnRoute
@@ -482,7 +474,6 @@ export interface FileRoutesById {
   '/registro': typeof RegistroRoute
   '/reserva': typeof ReservaRoute
   '/_org/agenda': typeof OrgAgendaRoute
-  '/_org/automations': typeof OrgAutomationsRoute
   '/_org/branches': typeof OrgBranchesRoute
   '/_org/commissions': typeof OrgCommissionsRoute
   '/_org/demo': typeof OrgDemoRoute
@@ -499,8 +490,8 @@ export interface FileRoutesById {
   '/baja/$token': typeof BajaTokenRoute
   '/c/$token': typeof CTokenRoute
   '/embed/$connectionId': typeof EmbedConnectionIdRoute
+  '/_org/agent/administrador': typeof OrgAgentAdministradorRoute
   '/_org/agent/approvals': typeof OrgAgentApprovalsRoute
-  '/_org/agent/asesor': typeof OrgAgentAsesorRoute
   '/_org/agent/asistente-clinico': typeof OrgAgentAsistenteClinicoRoute
   '/_org/agent/knowledge': typeof OrgAgentKnowledgeRoute
   '/_org/agent/learn': typeof OrgAgentLearnRoute
@@ -542,7 +533,6 @@ export interface FileRouteTypes {
     | '/registro'
     | '/reserva'
     | '/agenda'
-    | '/automations'
     | '/branches'
     | '/commissions'
     | '/demo'
@@ -559,8 +549,8 @@ export interface FileRouteTypes {
     | '/baja/$token'
     | '/c/$token'
     | '/embed/$connectionId'
+    | '/agent/administrador'
     | '/agent/approvals'
-    | '/agent/asesor'
     | '/agent/asistente-clinico'
     | '/agent/knowledge'
     | '/agent/learn'
@@ -600,7 +590,6 @@ export interface FileRouteTypes {
     | '/registro'
     | '/reserva'
     | '/agenda'
-    | '/automations'
     | '/branches'
     | '/commissions'
     | '/demo'
@@ -615,8 +604,8 @@ export interface FileRouteTypes {
     | '/baja/$token'
     | '/c/$token'
     | '/embed/$connectionId'
+    | '/agent/administrador'
     | '/agent/approvals'
-    | '/agent/asesor'
     | '/agent/asistente-clinico'
     | '/agent/knowledge'
     | '/agent/learn'
@@ -657,7 +646,6 @@ export interface FileRouteTypes {
     | '/registro'
     | '/reserva'
     | '/_org/agenda'
-    | '/_org/automations'
     | '/_org/branches'
     | '/_org/commissions'
     | '/_org/demo'
@@ -674,8 +662,8 @@ export interface FileRouteTypes {
     | '/baja/$token'
     | '/c/$token'
     | '/embed/$connectionId'
+    | '/_org/agent/administrador'
     | '/_org/agent/approvals'
-    | '/_org/agent/asesor'
     | '/_org/agent/asistente-clinico'
     | '/_org/agent/knowledge'
     | '/_org/agent/learn'
@@ -763,13 +751,6 @@ declare module '@tanstack/react-router' {
       path: '/agenda'
       fullPath: '/agenda'
       preLoaderRoute: typeof OrgAgendaRouteImport
-      parentRoute: typeof OrgRoute
-    }
-    '/_org/automations': {
-      id: '/_org/automations'
-      path: '/automations'
-      fullPath: '/automations'
-      preLoaderRoute: typeof OrgAutomationsRouteImport
       parentRoute: typeof OrgRoute
     }
     '/_org/branches': {
@@ -891,18 +872,18 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof OrgAgentIndexRouteImport
       parentRoute: typeof OrgRoute
     }
+    '/_org/agent/administrador': {
+      id: '/_org/agent/administrador'
+      path: '/agent/administrador'
+      fullPath: '/agent/administrador'
+      preLoaderRoute: typeof OrgAgentAdministradorRouteImport
+      parentRoute: typeof OrgRoute
+    }
     '/_org/agent/approvals': {
       id: '/_org/agent/approvals'
       path: '/agent/approvals'
       fullPath: '/agent/approvals'
       preLoaderRoute: typeof OrgAgentApprovalsRouteImport
-      parentRoute: typeof OrgRoute
-    }
-    '/_org/agent/asesor': {
-      id: '/_org/agent/asesor'
-      path: '/agent/asesor'
-      fullPath: '/agent/asesor'
-      preLoaderRoute: typeof OrgAgentAsesorRouteImport
       parentRoute: typeof OrgRoute
     }
     '/_org/agent/asistente-clinico': {
@@ -1211,7 +1192,6 @@ const OrgPatientsPatientIdRouteWithChildren =
 
 interface OrgRouteChildren {
   OrgAgendaRoute: typeof OrgAgendaRoute
-  OrgAutomationsRoute: typeof OrgAutomationsRoute
   OrgBranchesRoute: typeof OrgBranchesRoute
   OrgCommissionsRoute: typeof OrgCommissionsRoute
   OrgDemoRoute: typeof OrgDemoRoute
@@ -1225,8 +1205,8 @@ interface OrgRouteChildren {
   OrgServicesRoute: typeof OrgServicesRouteWithChildren
   OrgSettingsRoute: typeof OrgSettingsRouteWithChildren
   OrgTasksRoute: typeof OrgTasksRoute
+  OrgAgentAdministradorRoute: typeof OrgAgentAdministradorRoute
   OrgAgentApprovalsRoute: typeof OrgAgentApprovalsRoute
-  OrgAgentAsesorRoute: typeof OrgAgentAsesorRoute
   OrgAgentAsistenteClinicoRoute: typeof OrgAgentAsistenteClinicoRoute
   OrgAgentKnowledgeRoute: typeof OrgAgentKnowledgeRoute
   OrgAgentLearnRoute: typeof OrgAgentLearnRoute
@@ -1242,7 +1222,6 @@ interface OrgRouteChildren {
 
 const OrgRouteChildren: OrgRouteChildren = {
   OrgAgendaRoute: OrgAgendaRoute,
-  OrgAutomationsRoute: OrgAutomationsRoute,
   OrgBranchesRoute: OrgBranchesRoute,
   OrgCommissionsRoute: OrgCommissionsRoute,
   OrgDemoRoute: OrgDemoRoute,
@@ -1256,8 +1235,8 @@ const OrgRouteChildren: OrgRouteChildren = {
   OrgServicesRoute: OrgServicesRouteWithChildren,
   OrgSettingsRoute: OrgSettingsRouteWithChildren,
   OrgTasksRoute: OrgTasksRoute,
+  OrgAgentAdministradorRoute: OrgAgentAdministradorRoute,
   OrgAgentApprovalsRoute: OrgAgentApprovalsRoute,
-  OrgAgentAsesorRoute: OrgAgentAsesorRoute,
   OrgAgentAsistenteClinicoRoute: OrgAgentAsistenteClinicoRoute,
   OrgAgentKnowledgeRoute: OrgAgentKnowledgeRoute,
   OrgAgentLearnRoute: OrgAgentLearnRoute,

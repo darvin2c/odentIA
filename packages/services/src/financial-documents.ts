@@ -582,10 +582,13 @@ function captionWithSubject(subject: string, body: string): string {
   return `${subject}\n\n${body}`
 }
 
+/** A quién se le escribe por correo: la persona y la dirección de su ficha. */
+export type EmailRecipient = Pick<DocumentRecipient, "contactId" | "email">
+
 async function ensureEmailIdentity(
   tx: Db,
   orgId: string,
-  recipient: DocumentRecipient,
+  recipient: EmailRecipient,
 ): Promise<typeof contactIdentity.$inferSelect> {
   const email = recipient.email?.trim().toLowerCase()
   if (!email || !email.includes("@")) throw validation("La persona no tiene correo registrado")
@@ -629,16 +632,22 @@ async function ensureEmailIdentity(
   return row
 }
 
-async function resolveConversation(
+/**
+ * Hilo de correo con una persona: el último abierto por esa conexión o uno
+ * nuevo a la dirección de su ficha. El correo es el único canal, junto con
+ * WhatsApp y su plantilla, por el que la clínica puede escribir primero. La
+ * usan el envío de documentos y los mensajes automáticos (sin actor).
+ */
+export async function openEmailThread(
   tx: Db,
   orgId: string,
-  actorUserId: string,
-  recipient: DocumentRecipient,
-  conn: UsableConnection,
+  actorUserId: string | null,
+  recipient: EmailRecipient,
+  conn: { id: string },
   /** Con otro correo el hilo es el de esa dirección, no el último abierto de la persona. */
   exactAddress = false,
 ): Promise<{ id: string }> {
-  if (conn.channel === "email") {
+  {
     const identity = await ensureEmailIdentity(tx, orgId, recipient)
     const [thread] = exactAddress ? [] : await tx
       .select({ id: conversation.id, status: conversation.status })
@@ -699,6 +708,18 @@ async function resolveConversation(
     }
     return { id: retry.id }
   }
+}
+
+async function resolveConversation(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  recipient: DocumentRecipient,
+  conn: UsableConnection,
+  /** Con otro correo el hilo es el de esa dirección, no el último abierto de la persona. */
+  exactAddress = false,
+): Promise<{ id: string }> {
+  if (conn.channel === "email") return openEmailThread(tx, orgId, actorUserId, recipient, conn, exactAddress)
   if (conn.channel === "whatsapp") {
     const phone = recipient.phone?.trim()
     if (!phone) throw validation("La persona no tiene teléfono registrado")

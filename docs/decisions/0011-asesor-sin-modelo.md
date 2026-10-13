@@ -1,6 +1,6 @@
 # 0011 · El asesor recomienda con consultas, no con un modelo
 
-Fecha: 2026-10-10 · Estado: aceptada
+Fecha: 2026-10-10 · Estado: sustituida por [0015](0015-administrador-lineas-prendidas-o-apagadas.md), que conserva que toda cifra salga de una consulta
 
 ## Problema
 

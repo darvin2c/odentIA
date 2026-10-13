@@ -13,48 +13,120 @@ import {
 import { orgFk, timestamps } from "./crm.js"
 
 /**
- * Automatizaciones: recordatorios de citas, seguimientos (presupuesto, cita,
- * no asistencia, inactivo, controles) y campañas segmentadas.
+ * Lo que el agente Administrador hace por su cuenta cuando una persona lo
+ * prende: nueve líneas, cada una con su estado por organización.
  *
- * - `automation_rule`: configuración por organización (qué, cuándo, por qué
- *   canal y con qué plantilla). `enabled=false` nunca programa ni envía.
- * - `automation_job`: trabajo durable en DB. Dedupe por
- *   (organization_id, dedupe_key); el worker reclama con FOR UPDATE SKIP
- *   LOCKED. Sin cron en memoria ni setTimeout.
- * - `automation_consent`: opt-in explícito por contacto, finalidad y canal.
- *   Sin fila `granted` vigente NO hay envío automático (tampoco marketing).
+ * - `automation_rule`: el estado de una línea (una fila por organización y
+ *   línea): prendida o apagada, desde cuándo, y cuál de sus dos partes va («el
+ *   agente le escribe», «tarea para el equipo»). Apagada nunca programa ni envía.
+ * - `automation_job`: un caso de una línea (una persona, una cita, un
+ *   presupuesto…) con lo que pasó: mensaje enviado, tarea dejada o por qué no
+ *   se pudo. Dedupe por (organization_id, dedupe_key); el worker reclama con
+ *   FOR UPDATE SKIP LOCKED. Sin cron en memoria ni setTimeout.
+ * - `automation_consent`: lo que cada persona aceptó recibir sin haber escrito
+ *   primero. Sin fila `granted` no hay mensaje automático.
  * - `automation_link_token`: enlaces seguros de confirmación/cancelación/baja.
- *   Solo guarda el hash (sha256); el token crudo se entrega una vez al
- *   programar el mensaje y nunca expone el paciente.
+ *   Solo guarda el hash (sha256); el token crudo viaja una vez, en el correo.
  */
+
+/**
+ * Las líneas. Las nueve primeras vienen armadas: cinco escriben a la persona
+ * (el agente Recepción) y cuatro dejan trabajo a una persona del equipo. Las
+ * de `CUSTOM_AUTOMATION_KINDS` son piezas que el sistema también sabe hacer y
+ * que solo existen en una clínica cuando ella las crea pidiéndoselas al
+ * Administrador.
+ */
+export const CUSTOM_AUTOMATION_KINDS = ["cita_cancelada"] as const
 
 export const AUTOMATION_KINDS = [
   "recordatorio_cita",
-  "seguimiento_presupuesto",
-  "seguimiento_cita",
-  "seguimiento_no_asistencia",
-  "recuperacion_inactivo",
   "recordatorio_control",
-  "campana",
+  "seguimiento_presupuesto",
+  "seguimiento_comercial",
+  "seguimiento_no_asistencia",
+  "presupuestos_sin_cita",
+  "atenciones_sin_firmar",
+  "cobranza_vencida",
+  "seguimientos_sin_responsable",
+  ...CUSTOM_AUTOMATION_KINDS,
 ] as const
 export type AutomationKind = (typeof AUTOMATION_KINDS)[number]
 
-/** Canales con adaptador registrado (whatsapp/telegram núcleo, messenger/instagram Meta). Sin SMS ni email. */
-export const AUTOMATION_CHANNELS = ["whatsapp", "telegram", "messenger", "instagram"] as const
+/**
+ * Canales por los que sale un mensaje automático. El canal se decide por
+ * persona al entregar (WhatsApp primero, correo de respaldo); el de la regla es
+ * solo el preferido.
+ */
+export const AUTOMATION_CHANNELS = ["whatsapp", "telegram", "messenger", "instagram", "email"] as const
 export type AutomationChannel = (typeof AUTOMATION_CHANNELS)[number]
 
-/** Finalidades de consentimiento: el marketing exige opt-in de `marketing`. */
-export const CONSENT_PURPOSES = ["recordatorio", "seguimiento", "marketing"] as const
+/**
+ * Qué aceptó recibir una persona sin haber escrito primero: `recordatorio`
+ * (citas y controles) y `seguimiento` (inasistencias y presupuestos). Es un
+ * permiso de la persona, no de un canal.
+ */
+export const CONSENT_PURPOSES = ["recordatorio", "seguimiento"] as const
 export type ConsentPurpose = (typeof CONSENT_PURPOSES)[number]
+
+/** Por dónde salió un mensaje automático. */
+export const AUTOMATION_VIAS = ["respuesta", "plantilla", "correo"] as const
+export type AutomationVia = (typeof AUTOMATION_VIAS)[number]
 
 export const AUTOMATION_JOB_STATUSES = [
   "pendiente",
+  /** Espera que una persona del equipo lo apruebe (Recepción en «Supervisado»). */
+  "por_aprobar",
   "enviado",
+  /** Quedó como tarea para una persona, sin mensaje. */
+  "tarea",
   "fallido",
   "cancelado",
   "omitido",
 ] as const
 export type AutomationJobStatus = (typeof AUTOMATION_JOB_STATUSES)[number]
+
+/**
+ * Motivos por los que un trabajo no llega a la persona. Cada uno tiene una
+ * corrección distinta, y el aviso al equipo se agrupa por motivo.
+ */
+export const AUTOMATION_CAUSES = [
+  /** La persona no aceptó ese tipo de mensaje. */
+  "sin_permiso",
+  /** No tiene WhatsApp ni correo registrados. */
+  "sin_destino",
+  /** La clínica no tiene un canal conectado por el que llegarle. */
+  "sin_conexion",
+  /** No escribió hace poco y WhatsApp aún no aprueba el mensaje. */
+  "sin_plantilla",
+  /** El canal aceptó el mensaje y después no lo entregó. */
+  "no_entregado",
+  /** El envío falló en el proveedor. */
+  "proveedor",
+] as const
+export type AutomationCause = (typeof AUTOMATION_CAUSES)[number]
+
+/** Pedido pendiente de decisión sobre una línea. */
+export interface AutomationDraft {
+  /** Lo que la persona escribió. */
+  request: string
+  /** El cambio que quedaría, en los mismos campos que una línea se ajusta. */
+  changes: {
+    enabled?: boolean
+    agentPart?: boolean
+    teamPart?: boolean
+    days?: number
+    hoursBefore?: number[]
+    delayHours?: number
+    hour?: number
+    taskNote?: string
+  }
+  /** Lo que pidió y no se puede, con el motivo. */
+  unsupported: string[]
+  /** La línea no existía: descartar el borrador la quita. */
+  creates: boolean
+  by: string
+  at: string
+}
 
 export const automationRule = pgTable(
   "automation_rule",
@@ -63,25 +135,38 @@ export const automationRule = pgTable(
     organizationId: orgFk("organization_id"),
     name: text("name").notNull(),
     kind: text("kind").notNull(),
-    channel: text("channel").notNull().default("whatsapp"),
     enabled: boolean("enabled").notNull().default(true),
-    /** Plantilla del canal (nombre/idioma aprobados por el proveedor). */
-    templateName: text("template_name"),
-    templateLanguage: text("template_language").notNull().default("es_PE"),
+    /** Las dos partes de una línea; apagar las dos es apagar la línea. */
+    agentPart: boolean("agent_part").notNull().default(true),
+    teamPart: boolean("team_part").notNull().default(true),
+    /** «No recomendarla más»: sigue en la lista, pero no sale en Inicio. */
+    noRecommend: boolean("no_recommend").notNull().default(false),
     /**
-     * Configuración por kind:
-     * - recordatorio_cita: { hoursBefore: number[], quietStart, quietEnd }
-     * - seguimiento_*: { delayHours, quietStart, quietEnd, segment? }
-     * - campana: { segment: { tags?, opportunityStageIds?, inactiveDays? }, quietStart, quietEnd }
-     * Horas locales de la sucursal/organización; quiet* "HH:MM".
+     * Desde cuándo está prendida (se fija en cada apagado→prendido). La regla
+     * solo actúa sobre lo ocurrido después: prender nunca escribe por algo anterior.
+     */
+    enabledAt: timestamp("enabled_at", { withTimezone: true }),
+    /** Quién la prendió la última vez. */
+    enabledBy: text("enabled_by"),
+    /**
+     * Lo que se puede ajustar de la línea: `days` (el plazo, en las que lo
+     * tienen), `hoursBefore` (cuánto antes se recuerda una cita), `delayHours`
+     * (las que esperan horas), `hour` (a qué hora del día sale) y `taskNote`
+     * (una indicación de la clínica para quien reciba la tarea).
      */
     config: jsonb("config").notNull().default(sql`'{}'::jsonb`),
+    /**
+     * Un pedido hecho con palabras que todavía nadie decidió: lo que se pidió y
+     * el cambio que quedaría. No hace nada hasta que una persona lo prende o lo
+     * guarda; mientras tanto la línea sigue como estaba.
+     */
+    draft: jsonb("draft").$type<AutomationDraft>(),
     createdBy: text("created_by"),
     ...timestamps,
   },
   (table) => [
     uniqueIndex("automation_rule_org_id_uidx").on(table.organizationId, table.id),
-    index("automation_rule_org_kind_idx").on(table.organizationId, table.kind),
+    uniqueIndex("automation_rule_org_kind_uidx").on(table.organizationId, table.kind),
   ],
 )
 
@@ -101,12 +186,21 @@ export const automationJob = pgTable(
     appointmentId: uuid("appointment_id"),
     patientId: uuid("patient_id"),
     budgetId: uuid("budget_id"),
-    /** Oportunidad origen (segmentos de campaña y cierres); sin FK para no acoplar migraciones. */
+    /** Oportunidad del caso (seguimiento sin responsable); sin FK para no acoplar migraciones. */
     opportunityId: uuid("opportunity_id"),
-    /** Snapshot del texto/plantilla resuelto al programar (trazabilidad). */
+    /** Tarea que quedó para una persona: el caso entero, o el respaldo si el agente no pudo escribir. */
+    taskId: uuid("task_id"),
+    /** Lo que el caso necesita recordar hasta que se atiende (zona de la sede, control, «solo esta vez»). */
     payload: jsonb("payload").notNull().default(sql`'{}'::jsonb`),
     attempts: integer("attempts").notNull().default(0),
     lastError: text("last_error"),
+    /**
+     * Por qué no se pudo (clave de `AUTOMATION_CAUSES`), para avisar una vez por
+     * causa y no una por mensaje. Nulo si se envió o si aún no se intenta.
+     */
+    cause: text("cause"),
+    /** Por dónde salió (clave de `AUTOMATION_VIAS`); nulo mientras no sale. */
+    via: text("via"),
     sentMessageId: uuid("sent_message_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -121,6 +215,7 @@ export const automationJob = pgTable(
     index("automation_job_org_appointment_idx").on(table.organizationId, table.appointmentId),
     index("automation_job_org_contact_idx").on(table.organizationId, table.contactId),
     index("automation_job_org_opportunity_idx").on(table.organizationId, table.opportunityId),
+    index("automation_job_org_message_idx").on(table.organizationId, table.sentMessageId),
   ],
 )
 
@@ -131,25 +226,37 @@ export const automationConsent = pgTable(
     organizationId: orgFk("organization_id"),
     contactId: uuid("contact_id").notNull(),
     purpose: text("purpose").notNull(),
-    channel: text("channel").notNull(),
     /** granted | revoked: solo `granted` habilita el envío automático. */
     status: text("status").notNull().default("granted"),
-    /** Evidencia del opt-in: origen (recepción, enlace, campaña) y actor. */
-    source: text("source").notNull().default("recepcion"),
+    /**
+     * Cómo se supo (clave de `CONSENT_SOURCES`): al registrarse, en persona, por
+     * la conversación, por su baja… La pantalla lo dice con la fecha.
+     */
+    source: text("source").notNull().default("presencial"),
     createdBy: text("created_by"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
-    uniqueIndex("automation_consent_org_contact_purpose_channel_uidx").on(
+    uniqueIndex("automation_consent_org_contact_purpose_uidx").on(
       table.organizationId,
       table.contactId,
       table.purpose,
-      table.channel,
     ),
     index("automation_consent_org_contact_idx").on(table.organizationId, table.contactId),
   ],
 )
+
+/** Cómo quedó registrado un permiso de mensajes. */
+export const CONSENT_SOURCES = [
+  "registro",
+  "presencial",
+  "conversacion",
+  "portal",
+  "baja",
+  "revocacion_datos",
+] as const
+export type ConsentSource = (typeof CONSENT_SOURCES)[number]
 
 export const automationLinkToken = pgTable(
   "automation_link_token",

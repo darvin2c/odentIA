@@ -1,4 +1,4 @@
-import type { PlatformLlm } from "@odentia/agent"
+import type { PlatformDecisions, PlatformLlm } from "@odentia/agent"
 import type { Auth } from "@odentia/auth"
 import { type Db, sendDemoTask, withOrgContext } from "@odentia/db"
 import { message } from "@odentia/db/schema/crm"
@@ -14,13 +14,13 @@ import { z } from "zod"
 import { canAccess, orgContextOf, requireOrgContext, requireSession } from "./lib/context.js"
 import { errorBody } from "./lib/error.js"
 import { createAgentRoute } from "./routes/agent.js"
-import { createAgentAdvisorRoute } from "./routes/agent-advisor.js"
+import { createAgentAdminRoute } from "./routes/agent-admin.js"
 import { createAgentKnowledgeRoute } from "./routes/agent-knowledge.js"
 import { createHelpRoute } from "./routes/help.js"
 import { createAgentLearningRoute } from "./routes/agent-learning.js"
 import { createAgentOpsRoute } from "./routes/agent-ops.js"
 import { createAgendaRoute, createAppointmentsRoute } from "./routes/appointments.js"
-import { createAutomationsRoute, createPublicAutomationsRoute } from "./routes/automations.js"
+import { createPublicAutomationsRoute } from "./routes/automations.js"
 import { createCie10Route } from "./routes/cie10.js"
 import { createClinicalFormsRoute } from "./routes/clinical-forms.js"
 import { createConnectionsRoute } from "./routes/connections.js"
@@ -78,6 +78,8 @@ export interface AppDeps {
   registrationRemoteAddress?: RegistrationRemoteAddress
   /** Proveedor LLM de la plataforma (LLM_*); la organización puede traer el suyo. */
   llm?: PlatformLlm
+  /** Credenciales de plataforma de los modelos de decisión (JEV_*, OPENAI_DECISIONS_*). */
+  decisions?: PlatformDecisions
   mailbox?: MailboxEnv
 }
 const branchInput = z.object({
@@ -605,12 +607,11 @@ export function createApp(deps: AppDeps) {
   guarded.route("/inventory", createInventoryRoute(crmDeps))
   guarded.route("/opportunities", createOpportunitiesRoute(crmDeps))
   guarded.route("/help", createHelpRoute({ ...crmDeps, appVersion: process.env["APP_VERSION"] ?? null }))
-  guarded.route("/agent/advisor", createAgentAdvisorRoute(crmDeps))
+  guarded.route("/agent/admin", createAgentAdminRoute({ ...crmDeps, llm, decisions: deps.decisions }))
   guarded.route("/agent/knowledge", createAgentKnowledgeRoute(crmDeps))
   guarded.route("/agent/learning", createAgentLearningRoute({ ...crmDeps, llm }))
   guarded.route("/agent", createAgentOpsRoute({ ...crmDeps, llm }))
   guarded.route("/finance", createFinanceRoute(crmDeps))
-  guarded.route("/automations", createAutomationsRoute(crmDeps))
   guarded.route("/clinical-forms", createClinicalFormsRoute(crmDeps))
   guarded.route(
     "/portal",

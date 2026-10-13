@@ -24,6 +24,8 @@ export interface SaveRegistrationConfigInput {
   enabled: boolean
   fields: RegistrationConfig["fields"]
   privacyNotice: string
+  askReminders: boolean
+  askMessages: boolean
 }
 
 export interface PublicSubmitInput {

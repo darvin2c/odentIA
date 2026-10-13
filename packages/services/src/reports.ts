@@ -11,7 +11,7 @@
  */
 import type { Db } from "@odentia/db"
 import { sql, type SQL } from "drizzle-orm"
-import { type AdvisorRecommendation, getAdvisorRecommendations } from "./agent-advisor.js"
+import { type AdminRecommendation, getAdminRecommendations } from "./agent-admin.js"
 import { validation } from "./errors.js"
 import { getFinanceResultBetween, getFinanceTotalsBetween, requireBranch } from "./finance.js"
 import { getOrgLocale } from "./locale.js"
@@ -423,15 +423,15 @@ export type ReportAdviceTab = "dinero" | "agenda" | "ventas"
 
 export interface ReportAdvice {
   tab: ReportAdviceTab
-  /** Recomendación del asesor que respalda el aviso: su lista y su acción se abren con esta clave. */
+  /** Línea del administrador que respalda el aviso: su lista y lo que se puede hacer se abren con esta clave. */
   key: string
   title: string
   total: number
   /** Solo en la inasistencia: la cifra del periodo y la del anterior, en porcentaje entero. */
   rate: number | null
   previousRate: number | null
-  /** Automatización que evita que la lista vuelva a llenarse, si existe y quien lee puede verla. */
-  automation: { label: string; enabled: boolean } | null
+  /** La línea que lo atendería, que hoy está apagada: «Reprogramar tras una inasistencia». */
+  line: string
 }
 
 function percent(part: number, total: number): number | null {
@@ -440,8 +440,9 @@ function percent(part: number, total: number): number | null {
 
 /**
  * Un aviso por pregunta como mucho, y solo si hay algo que hacer: cada uno es
- * una recomendación del asesor (una consulta, con su lista) que hoy encuentra
- * a alguien. Respeta su interruptor, lo apagado y lo pospuesto. No hay modelo.
+ * una recomendación del administrador (una línea apagada que hoy tiene casos,
+ * con su lista). Con él apagado no hay avisos; con la línea prendida tampoco,
+ * porque ya se está atendiendo. No hay modelo.
  */
 export async function getReportAdvice(
   tx: Db,
@@ -450,18 +451,18 @@ export async function getReportAdvice(
   can: (permission: string) => boolean,
   now: Date = new Date(),
 ): Promise<{ enabled: boolean; notices: ReportAdvice[] }> {
-  const view = await getAdvisorRecommendations(tx, orgId, can, { all: true })
+  const view = await getAdminRecommendations(tx, orgId, can, { all: true })
   if (!view.enabled) return { enabled: false, notices: [] }
   const scope = await reportScope(tx, orgId, query, now)
-  const found = (key: string): AdvisorRecommendation | undefined => view.recommendations.find((item) => item.key === key)
-  const notice = (tab: ReportAdviceTab, item: AdvisorRecommendation, rates?: { rate: number | null; previousRate: number | null }): ReportAdvice => ({
+  const found = (key: string): AdminRecommendation | undefined => view.recommendations.find((item) => item.key === key)
+  const notice = (tab: ReportAdviceTab, item: AdminRecommendation, rates?: { rate: number | null; previousRate: number | null }): ReportAdvice => ({
     tab,
     key: item.key,
     title: item.title,
     total: item.total,
     rate: rates?.rate ?? null,
     previousRate: rates?.previousRate ?? null,
-    automation: item.automation ? { label: item.automation.label, enabled: item.automation.enabled } : null,
+    line: item.name,
   })
   const notices: ReportAdvice[] = []
 
@@ -469,17 +470,17 @@ export async function getReportAdvice(
   if (debts) notices.push(notice("dinero", debts))
 
   // Agenda: la inasistencia solo si la cifra del periodo lo justifica; si no, los controles vencidos.
-  const noShows = found("inasistencias_sin_cita")
+  const noShows = found("seguimiento_no_asistencia")
   const appointments = await appointmentTotals(tx, orgId, scope, scope.window)
   const before = await appointmentTotals(tx, orgId, scope, scope.window.previous)
   const rate = percent(appointments.noShow, appointments.total)
   const previousRate = percent(before.noShow, before.total)
   const worth = rate !== null && (rate >= NO_SHOW_ALERT_RATE || (previousRate !== null && rate - previousRate >= NO_SHOW_ALERT_RISE))
-  const controls = found("controles_vencidos")
+  const controls = found("recordatorio_control")
   if (noShows && worth) notices.push(notice("agenda", noShows, { rate, previousRate }))
   else if (controls) notices.push(notice("agenda", controls))
 
-  const budgets = found("presupuestos_sin_respuesta")
+  const budgets = found("seguimiento_presupuesto")
   if (budgets) notices.push(notice("ventas", budgets))
 
   return { enabled: true, notices }

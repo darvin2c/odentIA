@@ -35,10 +35,12 @@ it("el orden es fijo: ahora, aprobación, conversaciones, vencidas, hoy, siguien
     overdueTasks: [taskOf("vencida", "overdue")],
     nextTask: taskOf("de-hoy", "today"),
     openTasks: 9,
-    advice: [{ key: "controles_vencidos", title: "12 controles vencidos", detail: "" }],
+    advice: [{ key: "recordatorio_control", title: "12 controles vencidos", detail: "", actor: "agente" }],
+    batches: [{ key: "seguimiento_presupuesto", name: "Retomar un presupuesto", total: 4 }],
+    unreached: { total: 6, byCause: [{ total: 6, reason: "no aceptó mensajes de la clínica" }] },
     budgets: { total: 4, oldestPresentedAt: "2026-10-03T15:00:00.000Z", items: [] },
   })).toEqual([
-    "case:ahora", "proposal:p1", "conversations", "task:vencida", "case:hoy", "case:sin-apuro", "task:de-hoy", "advice:controles_vencidos", "budgets",
+    "case:ahora", "proposal:p1", "batch", "unreached", "conversations", "task:vencida", "case:hoy", "case:sin-apuro", "task:de-hoy", "advice:recordatorio_control", "budgets",
   ])
 })
 

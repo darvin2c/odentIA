@@ -9,7 +9,14 @@ import {
 import { organization } from "@odentia/db/schema/auth"
 import { agentConfig, channelConnection, conversation } from "@odentia/db/schema/crm"
 import { auditEvent } from "@odentia/db/schema/org"
-import { handlePortalChannelRequest, ingestInbound, ServiceError, type Storage, type TranscribeFn } from "@odentia/services"
+import {
+  handleAutomationReply,
+  handlePortalChannelRequest,
+  ingestInbound,
+  ServiceError,
+  type Storage,
+  type TranscribeFn,
+} from "@odentia/services"
 import { and, eq, sql } from "drizzle-orm"
 
 export interface IngestDeps {
@@ -76,6 +83,18 @@ export async function processInbound(
         ...(deps.transcribe ? { transcribe: deps.transcribe } : {}),
       })
       if (!result.created) return
+      // Un botón de un mensaje automático («Confirmar», «No enviar más») lo
+      // resuelve el sistema: no llega al modelo ni gasta una corrida.
+      const content = msg.message.event.content
+      if (
+        content.type === "text" &&
+        (await handleAutomationReply(tx, orgId, {
+          conversationId: result.conversationId,
+          replyId: content.replyId,
+        }))
+      ) {
+        return
+      }
       if (deps.webURL && deps.cookieDomain) {
         const [org] = await tx.select({ slug: organization.slug }).from(organization).where(eq(organization.id, orgId)).limit(1)
         if (org?.slug) {

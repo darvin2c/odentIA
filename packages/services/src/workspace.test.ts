@@ -401,6 +401,14 @@ it("las tareas de otra persona no llegan a quien no dirige", async () => {
   expect(team.map(row => [row.title, row.mine])).toEqual([["Mía vencida", true], ["De otra persona", false], ["Mía de hoy", true]])
   expect(team.find(row => row.title === "De otra persona")?.assigneeName).toBe("Persona de prueba")
   expect(team.at(-1)?.more).toBe(1)
+  // Lo que el Administrador deja a un área, sin responsable, llega a quien trabaja en ella y a nadie más.
+  await ownerDb.insert(crmTask).values({
+    organizationId: orgId, title: "Llamar por un saldo", dueAt: new Date(Date.now() - 7_200_000), createdBy: "admin", area: "caja", reason: "Saldo vencido",
+  })
+  expect((await tasks({ ...restricted, tasks: true, taskAreas: ["caja"] })).map(row => [row.title, row.mine])).toEqual([
+    ["Mía vencida", true], ["Llamar por un saldo", false], ["Mía de hoy", true],
+  ])
+  expect((await tasks({ ...restricted, tasks: true, taskAreas: ["recepcion"] })).map(row => row.title)).toEqual(["Mía vencida", "Mía de hoy"])
 })
 
 it("la producción clínica excluye los actos anulados", async () => {

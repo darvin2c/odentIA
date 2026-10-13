@@ -511,6 +511,8 @@ export async function listWebchatNew(
         row.templateParams.every((p): p is string => typeof p === "string")
           ? row.templateParams
           : null,
+      // El visitante del chat web no recibe mensajes de las líneas del Administrador.
+      automatic: null,
       createdAt: row.createdAt.toISOString(),
       sentAt: row.sentAt?.toISOString() ?? null,
     })),

@@ -24,6 +24,7 @@ import {
   SelectValue,
   Textarea,
 } from "@odentia/ui"
+import { Switch } from "@odentia/ui/components/switch"
 import {
   EmptyState,
   ErrorState,
@@ -95,6 +96,8 @@ function PatientRegistrationSettingsPage() {
   const [fields, setFields] = useState<RegistrationConfig["fields"] | null>(null)
   const [enabled, setEnabled] = useState(false)
   const [privacyNotice, setPrivacyNotice] = useState("")
+  const [askReminders, setAskReminders] = useState(true)
+  const [askMessages, setAskMessages] = useState(true)
   const [expectedVersion, setExpectedVersion] = useState(0)
   const [formErrors, setFormErrors] = useState<Record<string, string>>({})
   const [savedNotice, setSavedNotice] = useState<string | null>(null)
@@ -104,7 +107,10 @@ function PatientRegistrationSettingsPage() {
   const [qrPending, setQrPending] = useState(false)
   const [qrError, setQrError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
-  const [baseline, setBaseline] = useState<Pick<RegistrationConfig, "fields" | "enabled" | "privacyNotice"> | null>(null)
+  const [baseline, setBaseline] = useState<Pick<
+    RegistrationConfig,
+    "fields" | "enabled" | "privacyNotice" | "askReminders" | "askMessages"
+  > | null>(null)
 
   const loaded = configQuery.data?.data
   useEffect(() => {
@@ -112,8 +118,16 @@ function PatientRegistrationSettingsPage() {
       setFields({ ...loaded.fields })
       setEnabled(loaded.enabled)
       setPrivacyNotice(loaded.privacyNotice)
+      setAskReminders(loaded.askReminders)
+      setAskMessages(loaded.askMessages)
       setExpectedVersion(loaded.version)
-      setBaseline({ fields: loaded.fields, enabled: loaded.enabled, privacyNotice: loaded.privacyNotice })
+      setBaseline({
+        fields: loaded.fields,
+        enabled: loaded.enabled,
+        privacyNotice: loaded.privacyNotice,
+        askReminders: loaded.askReminders,
+        askMessages: loaded.askMessages,
+      })
     }
   }, [loaded, fields])
 
@@ -124,10 +138,18 @@ function PatientRegistrationSettingsPage() {
         enabled,
         fields: fields as RegistrationConfig["fields"],
         privacyNotice,
+        askReminders,
+        askMessages,
       }),
     onSuccess: (result) => {
       setExpectedVersion(result.data.version)
-      setBaseline({ fields: result.data.fields, enabled: result.data.enabled, privacyNotice: result.data.privacyNotice })
+      setBaseline({
+        fields: result.data.fields,
+        enabled: result.data.enabled,
+        privacyNotice: result.data.privacyNotice,
+        askReminders: result.data.askReminders,
+        askMessages: result.data.askMessages,
+      })
       setFormErrors({})
       setSavedNotice("Configuración guardada")
       void queryClient.invalidateQueries({ queryKey: ["patient-registration-config"] })
@@ -205,6 +227,8 @@ function PatientRegistrationSettingsPage() {
       enabled,
       fields,
       privacyNotice,
+      askReminders,
+      askMessages,
     })
     const errors: Record<string, string> = {}
     if (!parsed.success)
@@ -250,7 +274,9 @@ function PatientRegistrationSettingsPage() {
 
   return (
     <div className="mx-auto w-full max-w-3xl">
-      <PageDraftGuard dirty={baseline !== null && !sameDraft({ fields, enabled, privacyNotice }, baseline)} />
+      <PageDraftGuard
+        dirty={baseline !== null && !sameDraft({ fields, enabled, privacyNotice, askReminders, askMessages }, baseline)}
+      />
       <PageHeader
         title="Registro de pacientes"
         subtitle="Campos del formulario público, aviso de privacidad y código QR"
@@ -321,6 +347,48 @@ function PatientRegistrationSettingsPage() {
             </div>
           </div>
         ))}
+        <div className="flex flex-col gap-6 rounded-sm bg-card p-6">
+          <div className="flex flex-col gap-1.5">
+            <div className="font-heading text-base font-medium">Mensajes de la clínica</div>
+            <p className="text-sm text-muted-foreground">
+              Lo que el registro pregunta, además de la atención. Lo que la persona acepte vale de
+              inmediato para lo que el agente le escribe por su cuenta; sin preguntarlo, casi nadie
+              podrá recibirlo.
+            </p>
+          </div>
+          <div className="flex flex-col divide-y rounded-lg border">
+            <div className="flex items-center gap-3 p-3">
+              <div className="flex-1">
+                <div className="text-sm font-medium">Atención</div>
+                <div className="text-sm text-muted-foreground">Siempre se pide: es la base del registro.</div>
+              </div>
+              <span className="text-xs font-semibold text-muted-foreground">Fijo</span>
+            </div>
+            <div className="flex items-center gap-3 p-3">
+              <label htmlFor="registro-recordatorios" className="flex-1 text-sm font-medium">
+                Recordatorios de citas y controles
+              </label>
+              <Switch
+                id="registro-recordatorios"
+                checked={askReminders}
+                onCheckedChange={setAskReminders}
+                disabled={!canWrite}
+              />
+            </div>
+            <div className="flex items-center gap-3 p-3">
+              <label htmlFor="registro-otros-mensajes" className="flex-1">
+                <span className="block text-sm font-medium">Otros mensajes de la clínica</span>
+                <span className="block text-sm text-muted-foreground">Inasistencias y presupuestos pendientes.</span>
+              </label>
+              <Switch
+                id="registro-otros-mensajes"
+                checked={askMessages}
+                onCheckedChange={setAskMessages}
+                disabled={!canWrite}
+              />
+            </div>
+          </div>
+        </div>
         <div className="flex flex-col gap-6 rounded-sm bg-card p-6">
           <div className="flex flex-col gap-1.5">
             <div className="font-heading text-base font-medium">
@@ -444,7 +512,7 @@ function PatientRegistrationSettingsPage() {
           ) : (
             <PatientRegistrationForm
               mode="preview"
-              config={{ version: expectedVersion, enabled, fields, privacyNotice }}
+              config={{ version: expectedVersion, enabled, fields, privacyNotice, askReminders, askMessages }}
               today={today}
               defaultCountry={countryCode}
               context={{ kind: "generic" }}

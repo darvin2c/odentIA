@@ -449,6 +449,41 @@
       "when": 1791774534957,
       "tag": "0063_presupuesto_quitar_en_borrador",
       "breakpoints": true
+    },
+    {
+      "idx": 64,
+      "version": "7",
+      "when": 1791854331327,
+      "tag": "0064_automatizaciones_desde_que_se_prende",
+      "breakpoints": true
+    },
+    {
+      "idx": 65,
+      "version": "7",
+      "when": 1791855198597,
+      "tag": "0065_mensajes_que_llegan",
+      "breakpoints": true
+    },
+    {
+      "idx": 66,
+      "version": "7",
+      "when": 1791857126736,
+      "tag": "0066_administrador_lineas",
+      "breakpoints": true
+    },
+    {
+      "idx": 67,
+      "version": "7",
+      "when": 1791857129121,
+      "tag": "0067_administrador_limpieza",
+      "breakpoints": true
+    },
+    {
+      "idx": 68,
+      "version": "7",
+      "when": 1791859678825,
+      "tag": "0068_administrador_borradores",
+      "breakpoints": true
     }
   ]
 }

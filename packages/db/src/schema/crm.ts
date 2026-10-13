@@ -49,6 +49,51 @@ export const channelConnection = pgTable(
   ],
 )
 
+/**
+ * Plantillas de la conexión tal como las tiene el proveedor (hoy, WhatsApp):
+ * nadie escribe nombres a mano. Se leen de la cuenta y se actualizan cuando el
+ * proveedor avisa un cambio de estado. Solo una `aprobada` se puede enviar.
+ * `messageKey` enlaza la plantilla con el mensaje de odentIA que la pidió.
+ */
+export const channelTemplate = pgTable(
+  "channel_template",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    organizationId: orgFk("organization_id"),
+    connectionId: uuid("connection_id")
+      .notNull()
+      .references(() => channelConnection.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    language: text("language").notNull(),
+    /** utility | marketing | authentication: la decide el proveedor. */
+    category: text("category").notNull().default("utility"),
+    /** en_revision | aprobada | rechazada | pausada | deshabilitada */
+    status: text("status").notNull().default("en_revision"),
+    /** Motivo del proveedor cuando la rechaza o la pausa. */
+    reason: text("reason"),
+    /** Cuerpo con variables por posición (`{{1}}`). */
+    body: text("body").notNull().default(""),
+    variables: integer("variables").notNull().default(0),
+    /** Títulos de los botones de respuesta rápida, en orden. */
+    buttons: jsonb("buttons").$type<string[]>().notNull().default(sql`'[]'::jsonb`),
+    externalId: text("external_id"),
+    /** Mensaje de odentIA al que sirve (clave de `AUTOMATION_MESSAGES`); nulo si es de la clínica. */
+    messageKey: text("message_key"),
+    /** Cuándo la pidió odentIA; nulo si ya existía en la cuenta. */
+    requestedAt: timestamp("requested_at", { withTimezone: true }),
+    syncedAt: timestamp("synced_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("channel_template_connection_name_language_uidx").on(
+      table.connectionId,
+      table.name,
+      table.language,
+    ),
+    index("channel_template_org_message_idx").on(table.organizationId, table.messageKey),
+  ],
+)
+
 export const pipeline = pgTable(
   "pipeline",
   {
@@ -224,6 +269,9 @@ export const message = pgTable(
     templateName: text("template_name"),
     templateLanguage: text("template_language"),
     templateParams: jsonb("template_params"),
+    // Botones de respuesta que acompañan al mensaje: `id` es lo que vuelve
+    // cuando la persona toca uno. Nulo si no lleva.
+    replyButtons: jsonb("reply_buttons").$type<{ id: string; title: string }[]>(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
@@ -233,6 +281,10 @@ export const message = pgTable(
     index("message_conversation_created_idx").on(table.conversationId, table.createdAt),
   ],
 )
+
+/** Partes del equipo a las que puede ir una tarea sin responsable. */
+export const TASK_AREAS = ["recepcion", "caja", "clinico", "administracion"] as const
+export type TaskArea = (typeof TASK_AREAS)[number]
 
 /** Clases de tarea: manual o seguimiento comercial sincronizado con la próxima acción. */
 export const TASK_KINDS = ["manual", "opportunity_follow_up"] as const
@@ -255,7 +307,13 @@ export const crmTask = pgTable(
     dueAt: timestamp("due_at", { withTimezone: true }),
     status: text("status").notNull().default("open"),
     kind: text("kind").notNull().default("manual"),
+    // Quién la dejó: `user`, `agent` (Recepción, en una conversación) o `admin`
+    // (el Administrador, por una línea prendida).
     createdBy: text("created_by").notNull(),
+    // A qué parte del equipo va cuando no tiene responsable (clave de `TASK_AREAS`).
+    area: text("area"),
+    // Por qué se creó, en una frase, cuando la deja el Administrador.
+    reason: text("reason"),
     /** Clave estable por trigger del agente: la reentrega no duplica la tarea. */
     idempotencyKey: text("idempotency_key"),
     ...timestamps,
@@ -297,10 +355,16 @@ export const customFieldDef = pgTable(
  * par atómico (URL base + clave cifrada): nunca se combina una URL de la
  * organización con la clave de la plataforma.
  */
-/** Ajustes del asesor por organización; ver `agent_config.advisor`. */
+/**
+ * Ajustes del Administrador por organización; ver `agent_config.advisor` (la
+ * columna conserva el nombre que tenía cuando el agente se llamaba «Asesor»).
+ * El estado de cada línea vive en `automation_rule`, no aquí.
+ */
 export interface AgentAdvisorSettings {
   enabled?: boolean
-  detections?: Record<string, { off?: boolean; days?: number; snoozedUntil?: string }>
+  /** Horario en que no escribe por su cuenta, con la hora de cada sede («HH:MM»). */
+  quietStart?: string
+  quietEnd?: string
 }
 
 export const agentConfig = pgTable(

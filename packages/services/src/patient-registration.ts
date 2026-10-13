@@ -26,6 +26,7 @@ import { and, eq, sql, type SQL } from "drizzle-orm"
 import { notFound, ServiceError, validation } from "./errors.js"
 import { createPatient, patientOrganizationToday, requirePatient, type PatientRow } from "./patients.js"
 import { initializeDeclaredPatientHealth } from "./clinical.js"
+import { applyMessagePermissions } from "./data-consents.js"
 import { grantResponsibility } from "./responsibilities.js"
 import { isDirectThread, lockRegistrationContacts } from "./contacts.js"
 
@@ -55,6 +56,8 @@ function cloneDefaultConfig(): RegistrationConfig {
     version: 0,
     enabled: false,
     privacyNotice: "",
+    askReminders: true,
+    askMessages: true,
     fields: { ...DEFAULT_REGISTRATION_CONFIG.fields },
   }
 }
@@ -69,6 +72,8 @@ function rowToConfig(row: typeof patientRegistrationConfig.$inferSelect): Regist
     enabled: row.enabled,
     fields: row.fields,
     privacyNotice: row.privacyNotice,
+    askReminders: row.askReminders,
+    askMessages: row.askMessages,
   }
 }
 
@@ -104,6 +109,24 @@ function hasMeaningfulHealth(health: NonNullable<RegistrationAnswers["health"]> 
   return Object.values(health.dental ?? {}).some((v) => v !== undefined && v !== "")
 }
 
+/**
+ * Persona que responde por el consentimiento del registro: el representante
+ * legal si lo llenó él, o la propia persona del paciente.
+ */
+async function registrationGrantor(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+  byRepresentative: boolean,
+): Promise<string | null> {
+  const rows = await tx
+    .select({ contactId: patientContact.contactId, relationship: patientContact.relationship })
+    .from(patientContact)
+    .where(and(eq(patientContact.organizationId, orgId), eq(patientContact.patientId, patientId)))
+  const wanted = byRepresentative ? "guardian" : "self"
+  return (rows.find((row) => row.relationship === wanted) ?? rows.find((row) => row.relationship === "self"))?.contactId ?? null
+}
+
 // --- Configuración ---
 
 export async function getPatientRegistrationConfig(
@@ -123,6 +146,9 @@ export interface SaveRegistrationConfigInput {
   enabled: boolean
   fields: RegistrationConfig["fields"]
   privacyNotice: string
+  /** Sin valor, se conserva lo que ya tenía la clínica. */
+  askReminders?: boolean
+  askMessages?: boolean
 }
 
 export async function savePatientRegistrationConfig(
@@ -139,6 +165,8 @@ export async function savePatientRegistrationConfig(
     enabled: input.enabled,
     fields: input.fields,
     privacyNotice: input.privacyNotice,
+    ...(input.askReminders !== undefined ? { askReminders: input.askReminders } : {}),
+    ...(input.askMessages !== undefined ? { askMessages: input.askMessages } : {}),
   })
   if (!parsed.success) {
     throw validation(parsed.error.issues[0]?.message ?? "Configuración inválida")
@@ -160,6 +188,8 @@ export async function savePatientRegistrationConfig(
     )
   }
   const nextVersion = input.expectedVersion + 1
+  const askReminders = input.askReminders ?? current?.askReminders ?? true
+  const askMessages = input.askMessages ?? current?.askMessages ?? true
   await tx
     .insert(patientRegistrationConfig)
     .values({
@@ -168,6 +198,8 @@ export async function savePatientRegistrationConfig(
       enabled: parsed.data.enabled,
       fields: parsed.data.fields,
       privacyNotice: parsed.data.privacyNotice,
+      askReminders,
+      askMessages,
       updatedAt: new Date(),
     })
     .onConflictDoUpdate({
@@ -177,6 +209,8 @@ export async function savePatientRegistrationConfig(
         enabled: parsed.data.enabled,
         fields: parsed.data.fields,
         privacyNotice: parsed.data.privacyNotice,
+        askReminders,
+        askMessages,
         updatedAt: new Date(),
       },
     })
@@ -193,6 +227,8 @@ export async function savePatientRegistrationConfig(
     enabled: parsed.data.enabled,
     fields: parsed.data.fields,
     privacyNotice: parsed.data.privacyNotice,
+    askReminders,
+    askMessages,
   }
 }
 
@@ -687,6 +723,25 @@ export async function registerPatient(
   // 7. Consentimiento de datos (Ley 29733) con la versión del aviso aceptada y
   // quién lo otorga; se atribuye en servidor (operador interno o null público).
   if (answers.privacyAccepted) {
+    // Los permisos de mensajes son finalidades de este mismo consentimiento:
+    // cuentan solo las que el registro de la clínica pregunta.
+    const asked = [
+      ...(config.askReminders && answers.acceptsReminders !== undefined ? ["recordatorios"] : []),
+      ...(config.askMessages && answers.acceptsMessages !== undefined ? ["comunicaciones"] : []),
+    ]
+    const purposes = [
+      "atencion",
+      ...(asked.includes("recordatorios") && answers.acceptsReminders ? ["recordatorios"] : []),
+      ...(asked.includes("comunicaciones") && answers.acceptsMessages ? ["comunicaciones"] : []),
+    ]
+    const grantorId = await registrationGrantor(tx, orgId, created.id, answers.respondent === "representative")
+    if (grantorId && asked.length > 0) {
+      await applyMessagePermissions(tx, orgId, actorUserId, grantorId, {
+        accepted: purposes,
+        asked,
+        channel: isPublic ? "formulario_publico" : "presencial",
+      })
+    }
     await tx
       .update(patient)
       .set({ dataConsentAt: new Date(), dataConsentBy: actorUserId, updatedAt: new Date() })
@@ -696,7 +751,7 @@ export async function registerPatient(
       patientId: created.id,
       noticeVersion: config.version,
       noticeText: config.privacyNotice || "Aviso de privacidad de la organización.",
-      purposes: ["atencion"],
+      purposes,
       grantedByName:
         answers.respondent === "representative" && answers.representative
           ? answers.representative.displayName

@@ -128,7 +128,7 @@ function CurrencyMoney({
   currency: string
   /** Nombre de la moneda cuando hay más de una; `null` si es la única. */
   heading: string | null
-  /** El aviso del asesor sobre lo que se debe: va bajo las cifras. */
+  /** El aviso del administrador sobre lo que se debe: va bajo las cifras. */
   advice?: ReactNode
 }) {
   const headingId = useId()

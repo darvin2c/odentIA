@@ -117,7 +117,7 @@ import { createPromotion } from "./promotions.js"
 import { grantResponsibility } from "./responsibilities.js"
 import { secretsKeyFromEnv } from "./secrets.js"
 import { seedAgent } from "./seed-agent.js"
-import { seedAutomation } from "./seed-automation.js"
+import { seedAutomation, seedChannelTemplates } from "./seed-automation.js"
 import { seedAvailability } from "./seed-availability.js"
 import { seedChannels } from "./seed-channels.js"
 import { generateConsentPdf } from "./consent-pdf.js"
@@ -336,6 +336,7 @@ async function wipeSeed(): Promise<void> {
     "clinical_access_log",
     "portal_session",
     "portal_link",
+    "channel_template",
     "automation_link_token",
     "automation_job",
     "automation_consent",
@@ -763,6 +764,7 @@ const connA = await createConnection(
   },
   { fetch, validateExternal: false },
 )
+await seedChannelTemplates(db, { orgId: ORG_A, connectionId: connA.id })
 const connB = await createConnection(
   db,
   ORG_B,

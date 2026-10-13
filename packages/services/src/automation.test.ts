@@ -17,13 +17,12 @@ it("respeta ventanas diurnas personalizadas", () => {
   expect(inQuietHours(new Date("2026-03-10T18:30:00Z"), "America/Lima", "15:00", "16:00")).toBe(false)
 })
 
-it("asigna la finalidad de consentimiento por kind", () => {
-  expect(purposeOfKind("campana")).toBe("marketing")
+it("cada línea que escribe pide el permiso de su tipo de mensaje", () => {
   expect(purposeOfKind("recordatorio_cita")).toBe("recordatorio")
   expect(purposeOfKind("recordatorio_control")).toBe("recordatorio")
   expect(purposeOfKind("seguimiento_presupuesto")).toBe("seguimiento")
   expect(purposeOfKind("seguimiento_no_asistencia")).toBe("seguimiento")
-  expect(purposeOfKind("recuperacion_inactivo")).toBe("seguimiento")
+  expect(purposeOfKind("seguimiento_comercial")).toBe("seguimiento")
 })
 
 it("cierra sin reintentos ventana, inbound requerido y validación", () => {

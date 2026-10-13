@@ -12,6 +12,7 @@ import {
   beginCommercialFollowUpCoordination,
   countAgentModelRunsToday,
   deriveCommercialFollowUpCoordination,
+  automationReplyOf,
   getAgentConfig,
   getLesson,
   lessonImpact,
@@ -481,7 +482,19 @@ export async function processAgentRun(
     // sin llamar al modelo que escribe; si no, el turno sigue con el camino
     // indicado (o abierto, si duda o falla).
     const routing = decision !== null && inboundMessageId !== null && cfg.decisionRoutingEnabled
-    if (routing && decision && inboundMessageId !== null) {
+    // Un botón ya dice qué quiere la persona: si el mensaje es el toque de un
+    // botón de un mensaje automático, el camino lo fija el código y no se le
+    // pregunta al modelo de decisión, que solo ve el texto y no sabe en qué
+    // estado quedó la cita.
+    const tappedId = inboundMessageId
+    const tapped = tappedId !== null
+      ? await withOrgContext(db, orgId, (tx) => automationReplyOf(tx, orgId, { conversationId, messageId: tappedId })).catch(() => null)
+      : null
+    if (tapped?.asks) {
+      const reserve = tapped.asks === "reservar"
+      toolCtx.route = { path: reserve ? "cita" : "cambio_cita", intent: reserve ? "appointment_request" : "reschedule_or_cancel", handoff: null, confidence: null, urgency: null }
+      toolCtx.routeHint = tapped.hint
+    } else if (routing && decision && inboundMessageId !== null) {
       toolCtx.route = await decideRoute(db, orgId, decision, { conversationId, triggerMessageId: inboundMessageId })
     }
     const invokeGraph = async () => {

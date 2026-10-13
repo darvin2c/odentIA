@@ -15,6 +15,8 @@ function accessFor(role: string): WorkspaceAccess {
     // decide; la configuración y el proveedor siguen en `agent.write`.
     crm: canAccess(role, "crm.read"), agent: canAccessAny(role, ["agent.read", "agent.decide"]),
     allTasks: role === "owner" || role === "admin",
+    // Las tareas que el Administrador deja a un área llegan a quien trabaja en ella.
+    taskAreas: role === "reception" ? ["recepcion"] : role === "cashier" ? ["caja"] : role === "dentist" ? ["clinico"] : [],
     configure: canAccess(role, "settings.write"),
     // Quien atiende ve su propio día, no la agenda de la sede.
     ownAppointments: role === "dentist",

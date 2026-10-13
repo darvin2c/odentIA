@@ -52,12 +52,16 @@ poner la key en una variable `VITE_*`, un campo de conversación ni el repositor
 
 ### Modelo de decisión (solo en sombra)
 
-Ver `docs/decisions/0002-capa-de-decision-en-sombra.md`. Solo el worker lee
-`JEV_API_KEY`/`JEV_BASE_URL` y `OPENAI_DECISIONS_API_KEY`/`OPENAI_DECISIONS_BASE_URL`;
+Ver `docs/decisions/0002-capa-de-decision-en-sombra.md`. El worker y la API leen
+`JEV_API_KEY`/`JEV_BASE_URL` y `OPENAI_DECISIONS_API_KEY`/`OPENAI_DECISIONS_BASE_URL`
+(la API, para entender lo que se le pide al Administrador con palabras);
 sin ellas, elegir ese proveedor en Configuración → Agente deja cada triaje como
 fila con error en Agente › Actividad. `pnpm --filter @odentia/agent eval:decisions
 -- --provider=jev` compara un proveedor con los ejemplos propios de
-`packages/agent/eval/`; no enviar mensajes reales de pacientes sin autorización.
+`packages/agent/eval/`; no enviar mensajes reales de pacientes sin autorización. `eval:admin`
+mide, con un proveedor real, cuántos pedidos al Administrador entiende y los tokens
+por llamada; `eval:month` corre un mes de una clínica inventada y proyecta los tokens
+del mes (necesita el runtime de contenedores, como las pruebas).
 
 En producción, usar las mismas variables en los secretos de despliegue de API y
 worker o en `infra/prod/.env`. `CHANNEL_SENDER_MODE=mock` sigue impidiendo envíos

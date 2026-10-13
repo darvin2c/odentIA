@@ -291,7 +291,7 @@ describe("lo aprendido dentro del turno", () => {
     expect(formatLessonRules(related.rules)).toContain("- No ofrezcas citas en domingo.")
     expect(formatLessonExamples(related.examples)).toContain("Respuesta: «La ortodoncia empieza con una evaluación de S/ 50.00.»")
     // Otro agente no recibe lo de Recepción.
-    expect((await run((tx) => lessonsForTurn(tx, ORG, "asesor", "¿Cuánto cuesta la ortodoncia?"))).rules).toEqual([])
+    expect((await run((tx) => lessonsForTurn(tx, ORG, "administrador", "¿Cuánto cuesta la ortodoncia?"))).rules).toEqual([])
 
     // Probar sin una lección, o con una aún no aprobada, sin tocar nada.
     const without = await run((tx) => lessonsForTurn(tx, ORG, "recepcion", "¿Tienen cita el domingo?", { skipIds: [rule.id] }))

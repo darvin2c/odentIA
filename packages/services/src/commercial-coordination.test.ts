@@ -56,7 +56,6 @@ async function seedDueFollowUp(input: { consent: boolean }) {
       organizationId: orgId,
       contactId: person.id,
       purpose: "seguimiento",
-      channel: "telegram",
       status: "granted",
       source: "prueba",
     })

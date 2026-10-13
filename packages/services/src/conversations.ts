@@ -1,4 +1,9 @@
-import { type ChannelAdapter, channelAdapters, type NormalizedStatus } from "@odentia/channels"
+import {
+  type ChannelAdapter,
+  channelAdapters,
+  type NormalizedStatus,
+  type ReplyButton,
+} from "@odentia/channels"
 import { type Db, type InboundMessageJob, sendOutboundMessage } from "@odentia/db"
 import {
   channelConnection,
@@ -7,8 +12,11 @@ import {
   conversation,
   message,
 } from "@odentia/db/schema/crm"
+import { automationJob } from "@odentia/db/schema/automation"
 import { auditEvent } from "@odentia/db/schema/org"
-import { and, asc, desc, eq, ilike, lt, or, type SQL, sql } from "drizzle-orm"
+import { and, asc, desc, eq, ilike, inArray, lt, or, type SQL, sql } from "drizzle-orm"
+import { adminLineOf } from "./admin-lines.js"
+import { assertTemplateSendable } from "./channel-templates.js"
 import {
   findChannelIdentity,
   isDirectThread,
@@ -25,7 +33,7 @@ import { decryptConfig } from "./secrets.js"
 import type { AttachmentRef, Storage } from "./storage.js"
 
 /** Ventana de WhatsApp para texto libre: 24h desde el último inbound. */
-const WA_FREE_TEXT_WINDOW_MS = 24 * 60 * 60 * 1000
+export const WA_FREE_TEXT_WINDOW_MS = 24 * 60 * 60 * 1000
 
 /** Acepta las marcas UTC emitidas por nuestros cursores sin perder microsegundos. */
 function conversationCursor(value: string): { ts: string; id: string } {
@@ -81,10 +89,16 @@ export interface MessageItem {
   templateName: string | null
   templateLanguage: string | null
   templateParams: string[] | null
+  /**
+   * El mensaje lo envió una línea del Administrador, no una respuesta de la
+   * conversación: cuál fue. Nulo en cualquier otro mensaje.
+   */
+  automatic: { key: string; name: string } | null
   createdAt: string
 }
-function toMessageItem(row: typeof message.$inferSelect): MessageItem {
+function toMessageItem(row: typeof message.$inferSelect, automatic: MessageItem["automatic"] = null): MessageItem {
   return {
+    automatic,
     id: row.id,
     direction: row.direction,
     senderKind: row.senderKind,
@@ -439,8 +453,16 @@ export async function applyStatus(
 }
 
 export type OutboundContent =
-  | { type: "text"; text: string }
-  | { type: "template"; name: string; language: string; params: string[] }
+  | { type: "text"; text: string; buttons?: ReplyButton[] }
+  // `preview` es el texto ya armado: lo que la persona lee, para mostrarlo en el hilo.
+  | {
+      type: "template"
+      name: string
+      language: string
+      params: string[]
+      buttons?: ReplyButton[]
+      preview?: string
+    }
   | { type: "media"; attachment: AttachmentRef; caption?: string }
 
 /** Tipos MIME admitidos para media saliente y su extensión (límite WhatsApp: 16 MB). */
@@ -552,10 +574,11 @@ export async function sendOutbound(
           ? content.text
           : content.type === "media"
             ? (content.caption ?? null)
-            : null,
+            : (content.preview ?? null),
       templateName: content.type === "template" ? content.name : null,
       templateLanguage: content.type === "template" ? content.language : null,
       templateParams: content.type === "template" ? content.params : null,
+      replyButtons: content.type !== "media" && content.buttons?.length ? content.buttons : null,
       attachments: content.type === "media" ? [content.attachment] : [],
       status: "queued",
     })
@@ -579,26 +602,15 @@ export async function sendOutbound(
   return toMessageItem(created)
 }
 
-/** Valida la plantilla contra el allowlist de la conexión (config descifrada). */
-export function assertTemplateAllowed(templates: unknown, name: string, language: string): void {
-  if (!Array.isArray(templates)) throw validation("La conexión no tiene plantillas configuradas")
-  const found = templates.some(
-    (t) =>
-      !!t &&
-      typeof t === "object" &&
-      "name" in t &&
-      t.name === name &&
-      "language" in t &&
-      t.language === language,
-  )
-  if (!found) throw validation("Plantilla no autorizada en esta conexión")
-}
-
-/** Envío de plantilla con validación contra la config descifrada. */
+/**
+ * Envío de plantilla. La valida contra el catálogo de la conexión: tiene que
+ * estar aprobada por el proveedor y llevar tantos datos como variables tiene.
+ * Es la misma regla para una persona, una automatización y el agente.
+ */
 export async function sendTemplateOutbound(
   tx: Db,
   orgId: string,
-  secretsKey: Buffer,
+  _secretsKey: Buffer,
   input: {
     conversationId: string
     senderKind: "user" | "agent"
@@ -606,16 +618,34 @@ export async function sendTemplateOutbound(
     name: string
     language: string
     params: string[]
+    buttons?: ReplyButton[]
+    preview?: string
   },
 ): Promise<MessageItem> {
   const row = await requireOpenConversation(tx, orgId, input.conversationId)
-  const config = decryptConfig(secretsKey, row.connection.configEncrypted)
-  assertTemplateAllowed(config["templates"], input.name, input.language)
+  const template = await assertTemplateSendable(tx, orgId, row.connection.id, {
+    name: input.name,
+    language: input.language,
+    params: input.params.length,
+  })
+  // Sin texto armado por quien envía, se arma con el cuerpo del catálogo.
+  const preview =
+    input.preview ??
+    (template.body
+      ? template.body.replace(/\{\{(\d+)\}\}/g, (_, position: string) => input.params[Number(position) - 1] ?? "")
+      : undefined)
   return sendOutbound(tx, orgId, {
     conversationId: input.conversationId,
     senderKind: input.senderKind,
     senderUserId: input.senderUserId,
-    content: { type: "template", name: input.name, language: input.language, params: input.params },
+    content: {
+      type: "template",
+      name: input.name,
+      language: input.language,
+      params: input.params,
+      ...(input.buttons?.length ? { buttons: input.buttons } : {}),
+      ...(preview ? { preview } : {}),
+    },
   })
 }
 
@@ -855,8 +885,21 @@ export async function listMessages(
     .limit(limit + 1)
   const page = rows.slice(0, limit)
   const oldest = page[page.length - 1]
+  // Los mensajes que salieron por una línea del Administrador se marcan como automáticos.
+  const outgoing = page.filter((row) => row.direction === "out").map((row) => row.id)
+  const lines = outgoing.length
+    ? await tx
+        .select({ messageId: automationJob.sentMessageId, kind: automationJob.kind })
+        .from(automationJob)
+        .where(and(eq(automationJob.organizationId, orgId), inArray(automationJob.sentMessageId, outgoing)))
+    : []
+  const lineOf = new Map(lines.map((row) => [row.messageId, row.kind]))
+  const automaticOf = (id: string): MessageItem["automatic"] => {
+    const key = lineOf.get(id)
+    return key ? { key, name: adminLineOf(key)?.name ?? key } : null
+  }
   return {
-    items: page.reverse().map(toMessageItem),
+    items: page.reverse().map((row) => toMessageItem(row, automaticOf(row.id))),
     nextCursor:
       rows.length > limit && oldest
         ? encodeCursor(oldest.createdAt.toISOString(), oldest.id)

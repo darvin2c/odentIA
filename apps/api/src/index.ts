@@ -56,6 +56,13 @@ const app = createApp({
     maxRetries: env.LLM_MAX_RETRIES,
     allowInsecureBaseUrl: env.LLM_ALLOW_INSECURE_BASE_URL === "true",
   },
+  decisions: {
+    ...(env.JEV_API_KEY ? { jev: { apiKey: env.JEV_API_KEY, baseUrl: env.JEV_BASE_URL, model: env.JEV_MODEL } } : {}),
+    ...(env.OPENAI_DECISIONS_API_KEY
+      ? { openai: { apiKey: env.OPENAI_DECISIONS_API_KEY, baseUrl: env.OPENAI_DECISIONS_BASE_URL, model: env.OPENAI_DECISIONS_MODEL } }
+      : {}),
+    timeoutMs: env.DECISIONS_TIMEOUT_MS,
+  },
   mailbox: {
     gmail: { clientId: env.GMAIL_CLIENT_ID, clientSecret: env.GMAIL_CLIENT_SECRET, redirectUri: env.GMAIL_REDIRECT_URI },
     microsoft365: { clientId: env.MICROSOFT_MAIL_CLIENT_ID, clientSecret: env.MICROSOFT_MAIL_CLIENT_SECRET, redirectUri: env.MICROSOFT_MAIL_REDIRECT_URI, tenant: env.MICROSOFT_MAIL_TENANT },

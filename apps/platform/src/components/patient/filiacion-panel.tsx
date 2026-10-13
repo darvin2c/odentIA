@@ -15,6 +15,7 @@ import { usePermission } from "../../lib/crm"
 import { sexLabel } from "../../lib/patient-overview"
 import { hcLabel, type PatientFull } from "../../lib/patients"
 import { DataConsentSection } from "./data-consent-section"
+import { MessagePermissionsSection } from "./message-permissions-section"
 import {
   COUNTRY_LABELS,
   FiliacionSectionDrawer,
@@ -219,6 +220,7 @@ export function FiliacionPanel({ detail }: { detail: PatientFull }) {
             </Item>
           </dl>
           <DataConsentSection detail={detail} />
+          <MessagePermissionsSection detail={detail} />
         </section>
       </div>
       {editing ? (

@@ -53,8 +53,8 @@ test("agente: resumen, página de Recepción, probar y encender", async ({ owner
   await expect(reception).toContainText("Apagado")
   // Ayuda viene con el sistema: no se enciende ni aparece en esta lista.
   await expect(agents.getByRole("listitem")).toHaveCount(3)
-  // El Asistente clínico y el Asesor ya existen y se encienden por separado.
-  for (const name of ["Asistente clínico", "Asesor"]) {
+  // El Asistente clínico y el Administrador ya existen y se encienden por separado.
+  for (const name of ["Asistente clínico", "Administrador"]) {
     await expect(agents.getByRole("listitem").filter({ hasText: name })).toContainText("Apagado")
   }
   // Lo básico que falta se dice en la ficha de las preguntas sin respuesta: se responde en el mismo sitio.

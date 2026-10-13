@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { ChevronRight } from "lucide-react"
 import { type ReactNode, useState } from "react"
-import type { AdvisorSettings } from "../../components/agent/advisor"
+import type { AdminOverview } from "../../lib/admin"
 import { CorrectDrawer, type CorrectionTarget } from "../../components/agent/correct-drawer"
 import { LessonDrawer, lessonOriginText, WithdrawLessonDialog } from "../../components/agent/lesson-drawer"
 import { AgentTabs } from "../../components/agent-tabs"
@@ -173,9 +173,9 @@ function AgentLearnPage() {
     queryFn: () => apiFetch<{ data: AgentConfig }>("/api/agent/config"),
     enabled: canRead,
   })
-  const advisorQuery = useQuery({
-    queryKey: ["agent-advisor-settings"],
-    queryFn: () => apiFetch<{ data: AdvisorSettings }>("/api/agent/advisor/settings"),
+  const adminQuery = useQuery({
+    queryKey: ["agent-admin", "overview"],
+    queryFn: () => apiFetch<{ data: AdminOverview }>("/api/agent/admin/overview"),
     enabled: canRead,
     retry: false,
   })
@@ -221,8 +221,8 @@ function AgentLearnPage() {
       ? overviewQuery.data?.data.enabled
       : id === "asistente_clinico"
         ? configQuery.data?.data.clinicalAssistantEnabled
-        : id === "asesor"
-          ? advisorQuery.data?.data.enabled
+        : id === "administrador"
+          ? adminQuery.data?.data.enabled
           : undefined
   const ofAgent = (lesson: LessonItem) => agent === null || lesson.agent === agent || lesson.scope === "clinica"
   const review = (data?.review ?? []).filter((item) => agent === null || item.agent === agent)

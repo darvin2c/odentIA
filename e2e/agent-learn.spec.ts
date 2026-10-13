@@ -76,7 +76,7 @@ test("aprender: revisar, corregir, aprobar la lección, retirarla y aprobar un m
   const agents = page.getByRole("group", { name: "De qué agente" })
   await expect(agents.getByRole("button", { name: "Todos los agentes" })).toHaveAttribute("aria-pressed", "true")
   await expect(agents.getByRole("button", { name: "Asistente clínico · apagado" })).toBeDisabled()
-  await expect(agents.getByRole("button", { name: "Asesor · apagado" })).toBeDisabled()
+  await expect(agents.getByRole("button", { name: "Administrador · apagado" })).toBeDisabled()
   await agents.getByRole("button", { name: "Recepción · 1" }).click()
   await expect(agents.getByRole("button", { name: "Recepción · 1" })).toHaveAttribute("aria-pressed", "true")
   await expect(review.getByRole("heading", { level: 2 })).toHaveText("Por revisar · 1")

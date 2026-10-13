@@ -54,6 +54,9 @@ export const patientRegistrationConfig = pgTable("patient_registration_config", 
   enabled: boolean("enabled").notNull().default(false),
   fields: jsonb("fields").$type<RegistrationConfig["fields"]>().notNull(),
   privacyNotice: text("privacy_notice").notNull().default(""),
+  // Qué permisos de mensajes pregunta el registro, además de la atención.
+  askReminders: boolean("ask_reminders").notNull().default(true),
+  askMessages: boolean("ask_messages").notNull().default(true),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 })

@@ -805,6 +805,9 @@ async function listContactTasks(tx: Db, orgId: string, contactId: string): Promi
     dueAt: r.task.dueAt ? r.task.dueAt.toISOString() : null,
     status: r.task.status,
     createdBy: r.task.createdBy,
+    // El contexto comercial muestra la tarea, no a qué área va ni por qué se creó.
+    area: null,
+    reason: r.task.reason,
     contactName: r.contactName,
     opportunityTitle: r.opportunityTitle,
   }))

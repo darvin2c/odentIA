@@ -1,7 +1,7 @@
 import type { Db } from "@odentia/db"
 import { member } from "@odentia/db/schema/auth"
 import { patient, patientContact } from "@odentia/db/schema/clinical"
-import { contact, conversation, crmTask } from "@odentia/db/schema/crm"
+import { contact, conversation, crmTask, TASK_AREAS, type TaskArea } from "@odentia/db/schema/crm"
 import { opportunity } from "@odentia/db/schema/opportunities"
 import { auditEvent } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, or, sql } from "drizzle-orm"
@@ -13,7 +13,9 @@ async function notify(tx: Db, payload: { orgId: string; kind: string; at: string
 }
 
 const STATUSES = ["open", "done", "cancelled"]
-const CREATED_BY = ["user", "agent"]
+// Quién deja una tarea: una persona, Recepción en una conversación o el
+// Administrador por una línea prendida.
+const CREATED_BY = ["user", "agent", "admin"]
 const KINDS = ["manual", "opportunity_follow_up"] as const
 export type TaskKind = (typeof KINDS)[number]
 
@@ -30,6 +32,10 @@ export interface TaskItem {
   dueAt: string | null
   status: string
   createdBy: string
+  /** A qué parte del equipo va cuando no tiene responsable; nulo en las tareas de siempre. */
+  area: TaskArea | null
+  /** Por qué se creó, cuando la deja el Administrador. */
+  reason: string | null
   /** Nombre del paciente (nulo sin patients.read en la API o sin vínculo). */
   patientName: string | null
   /** Nombre del contacto (nulo sin crm.read en la API o sin vínculo). */
@@ -58,6 +64,8 @@ function toItem(
     dueAt: row.dueAt ? row.dueAt.toISOString() : null,
     status: row.status,
     createdBy: row.createdBy,
+    area: (TASK_AREAS as readonly string[]).includes(row.area ?? "") ? (row.area as TaskArea) : null,
+    reason: row.reason,
     patientName,
     contactName,
     opportunityTitle,
@@ -294,6 +302,10 @@ export async function createTask(
     dueAt?: string | null
     createdBy: string
     kind?: TaskKind
+    /** Parte del equipo a la que va si no tiene responsable. */
+    area?: TaskArea | null
+    /** Por qué se creó, en una frase. */
+    reason?: string | null
     /** Clave estable por trigger (agente): la reentrega no duplica la tarea. */
     idempotencyKey?: string | null
     /** Usuario real que crea la tarea; nulo cuando es el agente. */
@@ -303,7 +315,9 @@ export async function createTask(
   const title = input.title.trim()
   if (!title) throw validation("El título de la tarea es obligatorio")
   if (title.length > 200) throw validation("El título no puede superar 200 caracteres")
-  if (!CREATED_BY.includes(input.createdBy)) throw validation("createdBy inválido (user|agent)")
+  if (!CREATED_BY.includes(input.createdBy)) throw validation("createdBy inválido (user|agent|admin)")
+  if (input.area != null && !(TASK_AREAS as readonly string[]).includes(input.area)) throw validation("Área inválida")
+  const reason = input.reason?.trim() ? input.reason.trim().slice(0, 480) : null
   const kind: TaskKind = input.kind ?? "manual"
   if (!KINDS.includes(kind)) throw validation("kind inválido (manual|opportunity_follow_up)")
   if (kind === "opportunity_follow_up" && !input.opportunityId) {
@@ -338,6 +352,8 @@ export async function createTask(
     dueAt,
     kind,
     createdBy: input.createdBy,
+    area: input.area ?? null,
+    reason,
     idempotencyKey: idemKey,
   }
   // El índice único es parcial (solo claves no nulas): el upsert aplica solo

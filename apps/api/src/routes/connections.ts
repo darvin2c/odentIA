@@ -3,6 +3,8 @@ import { withOrgContext } from "@odentia/db"
 import {
   createConnection,
   getConnectionTemplates,
+  listChannelTemplates,
+  syncConnectionTemplates,
   listConnections,
   setConnectionStatus,
   testConnection,
@@ -103,6 +105,33 @@ export function createConnectionsRoute(deps: CrmDeps) {
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
         getConnectionTemplates(tx, orgId, c.req.param("id"), deps.secretsKey),
+      ),
+    )
+  })
+
+  /** Catálogo completo, con el estado que da el proveedor: para Configuración › Canales. */
+  app.get("/:id/templates/catalog", async (c) => {
+    const { orgId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "settings.read")) {
+      return c.json(errorBody(c, "FORBIDDEN", "Sin permiso de configuración"), 403)
+    }
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) => listChannelTemplates(tx, orgId, c.req.param("id"))),
+    )
+  })
+
+  /** Vuelve a leer las plantillas de la cuenta del proveedor. */
+  app.post("/:id/templates/sync", async (c) => {
+    const { orgId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "settings.write")) {
+      return c.json(errorBody(c, "FORBIDDEN", "Sin permiso de configuración"), 403)
+    }
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        syncConnectionTemplates(tx, orgId, c.req.param("id"), deps.secretsKey, {
+          fetch,
+          validateExternal: deps.validateExternal,
+        }),
       ),
     )
   })

@@ -37,7 +37,11 @@ export type WaitingRow =
   | { kind: "proposal"; id: string; action: string; summary: string; createdAt: string; conversationId: string | null; contactName: string | null; patientName: string | null }
   | { kind: "conversations"; waiting: number; oldestAt: string | null }
   | ({ kind: "task"; more: number } & WaitingTask)
-  | { kind: "advice"; key: string; title: string; detail: string }
+  | { kind: "advice"; key: string; title: string; detail: string; actor: "agente" | "persona" }
+  /** Mensajes de una línea del administrador que esperan aprobación, juntos. */
+  | { kind: "batch"; key: string; name: string; total: number }
+  /** Personas a las que el agente no pudo escribir hoy, por motivo. */
+  | { kind: "unreached"; total: number; byCause: Array<{ total: number; reason: string }> }
   | ({ kind: "budgets" } & WaitingBudgets)
   | { kind: "more"; of: "cases" | "proposals" | "tasks"; count: number }
 export interface WorkspaceAppointment {
