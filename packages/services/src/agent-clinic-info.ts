@@ -325,7 +325,7 @@ export function formatAgentPromotion(promo: AgentPromotionInfo, zone: Zone): str
       const amount = formatOrgMoney(item.priceCents, item.currency, zone)
       return item.disclosure === "desde"
         ? `${item.serviceName}: desde ${amount} (mínimo; dilo con «desde»)`
-        : `${item.serviceName}: ${amount} en vez de ${tariff}`
+        : `${item.serviceName}: ${amount} en vez de ${tariff}${item.tariffCents > item.priceCents ? ` (ahorra ${formatOrgMoney(item.tariffCents - item.priceCents, item.currency, zone)})` : ""}`
     })
     .join("; ")
   return `- Promoción «${promo.name}»: ${items}.${promo.conditions ? ` Condiciones: ${promo.conditions}.` : ""}${until}`

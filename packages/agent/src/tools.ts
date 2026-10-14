@@ -2,7 +2,8 @@ import { randomUUID } from "node:crypto"
 import { tool } from "@langchain/core/tools"
 import { type Db, withOrgContext } from "@odentia/db"
 import { organization } from "@odentia/db/schema/auth"
-import { eq } from "drizzle-orm"
+import { channelConnection, conversation } from "@odentia/db/schema/crm"
+import { and, eq } from "drizzle-orm"
 import type { AgentCaseNote, AnswerBasisItem, AnswerCheck, AnswerTraceOutcome, ProposalAction } from "@odentia/db/schema/agent"
 import {
   addAgentCaseNote,
@@ -52,6 +53,7 @@ import type { MeaningRank, OpportunityDetail, OrgLocale, ProposalItem, SearchEmb
 import { z } from "zod"
 import type { DecisionModel } from "./decision/port.js"
 import type { AgentRoute } from "./decision/route.js"
+import { formatForChannel } from "./channel-format.js"
 import { describeUnsupported, type Evidence, type ReplyVerdict, verifyReply } from "./verify.js"
 
 /** Fuente de un dato del turno, con la clase que verá el equipo en «En qué se basó». */
@@ -60,6 +62,25 @@ export interface AgentEvidence extends Evidence {
 }
 
 /** Cómo ve el equipo cada herramienta de lectura cuando una respuesta se apoya en ella. */
+/** El canal de la conversación, leído una vez por corrida. Una prueba se ve como WhatsApp, el canal principal. */
+export async function conversationChannel(ctx: AgentToolCtx): Promise<string | null> {
+  if (ctx.channel !== undefined) return ctx.channel
+  if (ctx.sandbox || ctx.dryRun) {
+    ctx.channel = "whatsapp"
+    return ctx.channel
+  }
+  const [row] = await withOrgContext(ctx.db, ctx.orgId, (tx) =>
+    tx
+      .select({ channel: channelConnection.channel })
+      .from(conversation)
+      .innerJoin(channelConnection, eq(channelConnection.id, conversation.channelConnectionId))
+      .where(and(eq(conversation.id, ctx.conversationId), eq(conversation.organizationId, ctx.orgId)))
+      .limit(1),
+  )
+  ctx.channel = row?.channel ?? null
+  return ctx.channel
+}
+
 export const TOOL_SOURCES: Record<string, { kind: string; label: string }> = {
   ver_sedes_y_servicios: { kind: "servicios", label: "Sedes, servicios y precios" },
   buscar_en_la_clinica: { kind: "servicios", label: "Búsqueda en servicios, promociones y profesionales" },
@@ -171,6 +192,11 @@ export interface AgentToolCtx {
    * palabras. Solo ordena: los datos se leen de la base al responder.
    */
   embedder?: SearchEmbedder
+  /**
+   * Canal de la conversación (`whatsapp`, `telegram`…), para el formato del
+   * texto. Lo resuelve `conversationChannel`; en una prueba se usa WhatsApp.
+   */
+  channel?: string | null
   /** Hay una propuesta esperando el sí del interlocutor: el turno recibe todas las herramientas, sea cual sea el camino. */
   casePending?: boolean
   /** El modelo que escribe pidió el resto de herramientas en este turno. */
@@ -519,7 +545,9 @@ export function makeAgentTools(ctx: AgentToolCtx) {
   }
 
   const sendReply = tool(
-    async ({ text }: { text: string }) => {
+    async ({ text: written }: { text: string }) => {
+      // Las marcas de formato se ajustan al canal antes de comprobar y enviar.
+      const text = formatForChannel(written, await conversationChannel(ctx))
       const { verdict, blocked } = await checkReply(text)
       if (blocked) return blocked
       if (ctx.dryRun) {

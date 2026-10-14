@@ -52,11 +52,13 @@ import {
 import { DecisionError, type DecisionResult } from "./decision/port.js"
 import { z } from "zod"
 import { BURST_HORIZON_MS, BURST_MESSAGES } from "./decision/points.js"
+import { channelFormatRule } from "./channel-format.js"
 import { ROUTE_TOOLS, routeInstruction, WIDEN_TOOL, widenDescription } from "./decision/route.js"
 import {
   type AgentEvidence,
   type AgentSandbox,
   type AgentToolCtx,
+  conversationChannel,
   makeAgentTools,
   performHandoff,
   SANDBOX_PATIENT_ID,
@@ -152,6 +154,15 @@ const TONE_TEXT: Record<AgentConfig["tone"], string> = {
  * qué hacer cuando alguien la pide. Con la configuración por defecto dice lo
  * mismo que antes de existir las funciones, más los principios fijos.
  */
+/**
+ * Vender bien sin decir nada falso: la promoción que aplica se ofrece aunque
+ * no la pidan, dicha como promoción, con el ahorro y la fecha de fin que trae
+ * el dato, y siempre con un paso siguiente. Nada de urgencia, cupos ni
+ * condiciones que no estén en los datos.
+ */
+const SELLS =
+  "Vendes como un buen asesor de la clínica: si lo que pregunta la persona tiene una promoción vigente, ofrécela aunque no la pida, dejando claro que es una promoción, su precio, cuánto ahorra y hasta cuándo vale (si tiene fecha de fin, dila siempre); cierra invitando a dar el siguiente paso (agendar la cita o la evaluación). Usa solo lo que traen los datos: nunca inventes descuentos, plazos, cupos, urgencia ni condiciones, y no presiones."
+
 function receptionPrompt(zone: OrgLocale, cfg: AgentConfig): string {
   const ficha = AGENT_ROLES.recepcion
   const off = new Set(cfg.disabledFunctions)
@@ -177,7 +188,7 @@ function receptionPrompt(zone: OrgLocale, cfg: AgentConfig): string {
     lookups.length
       ? `NO das diagnósticos ni inventas precios, sedes o disponibilidad: las sedes, los servicios y sus tarifas figuran más abajo, con su id; para lo que no esté ahí usa ${lookups.join(", ").replace(/, ([^,]*)$/, " y $1")}.`
       : "NO das diagnósticos ni inventas precios, sedes o disponibilidad.",
-    on("informar") ? null : whenOff("informar"),
+    on("informar") ? SELLS : whenOff("informar"),
     on("agendar")
       ? "Para buscar huecos usa el id exacto de la sede que figura en «Sedes» (si no aparece ahí, consúltalo con ver_sedes_y_servicios); reserva con proponer_cita usando los IDs exactos del hueco elegido (sede, sillón, profesional, inicio). Si la persona ya sabe qué quiere, ofrécele dos o tres horarios por aquí; si duda entre días, sedes o profesionales, envíale el enlace con enviar_enlace_cita para que vea todo de una vez (sirve a quien ya es paciente y a quien recién se contacta) y ofrece seguir por aquí si lo prefiere."
       : whenOff("agendar"),
@@ -653,7 +664,9 @@ export function compileAgentGraph(
     const routeBlock = route ? [routeInstruction(route.path, prefetched?.text), toolCtx.routeHint].filter(Boolean).join("\n") || null : null
     const nowLine = `Fecha y hora actual de la clínica: ${formatZoned(new Date(), zone)}.`
     // Las reglas son de la organización (estables); los ejemplos dependen del mensaje y van con lo del turno.
-    const system = [receptionPrompt(zone, cfg), orgPrompt, rulesBlock, policyLine, knowledgeBlock, contactBlock, crossBlock, caseBlock, picked?.block, trialBlock, examplesBlock, routeBlock, runBlock, nowLine]
+    // El formato depende del canal del hilo: va con lo del hilo, no en el prefijo estable.
+    const formatLine = channelFormatRule(await conversationChannel(toolCtx))
+    const system = [receptionPrompt(zone, cfg), orgPrompt, rulesBlock, policyLine, knowledgeBlock, contactBlock, formatLine, crossBlock, caseBlock, picked?.block, trialBlock, examplesBlock, routeBlock, runBlock, nowLine]
       .filter(Boolean)
       .join("\n\n")
     const said = (who: "contact" | "agent" | "team") =>
