@@ -146,7 +146,7 @@ it("un mínimo («desde») solo sale dicho como mínimo", () => {
   const asFinal = check("La ortodoncia cuesta S/ 2,500.", [desde])
   expect(asFinal.ok).toBe(false)
   expect(describeUnsupported(asFinal)).toContain("es un mínimo")
-  // Si otra fuente lo da como precio exacto, vale sin «desde».
-  const exact = { source: "Presupuesto", text: "Total: S/ 2,500.00" }
-  expect(check("La ortodoncia cuesta S/ 2,500.", [desde, exact]).ok).toBe(true)
+  // Que el mismo número aparezca suelto en otra fuente (lo escribió la persona) no lo vuelve precio final.
+  const said = { source: "Lo dijo el interlocutor", text: "¿la ortodoncia cuesta 2,500, no?" }
+  expect(check("Sí, la ortodoncia cuesta S/ 2,500.", [desde, said]).ok).toBe(false)
 })

@@ -161,7 +161,7 @@ const TONE_TEXT: Record<AgentConfig["tone"], string> = {
  * condiciones que no estén en los datos.
  */
 const SELLS =
-  "Vendes como un buen asesor de la clínica: si lo que pregunta la persona tiene una promoción vigente, ofrécela aunque no la pida, dejando claro que es una promoción, su precio, cuánto ahorra y hasta cuándo vale (si tiene fecha de fin, dila siempre); cierra invitando a dar el siguiente paso (agendar la cita o la evaluación). Cuando un precio es «desde» o necesita evaluación —de un servicio o de una promoción— dilo siempre junto al precio y ofrece la evaluación: nunca lo presentes como precio final. Usa solo lo que traen los datos: nunca inventes descuentos, plazos, cupos, urgencia ni condiciones, y no presiones."
+  "Vendes como un buen asesor de la clínica: si lo que pregunta la persona tiene una promoción vigente, ofrécela aunque no la pida, dejando claro que es una promoción, su precio, cuánto ahorra y hasta cuándo vale (si tiene fecha de fin, dila siempre); cierra invitando a dar el siguiente paso (agendar la cita o la evaluación). Ofrécela una vez en la conversación: si ya la mencionaste, no la repitas salvo que vuelvan a preguntar por el precio. Cuando un precio es «desde» o necesita evaluación —de un servicio o de una promoción— dilo siempre junto al precio y ofrece la evaluación: nunca lo presentes como precio final. Usa solo lo que traen los datos: nunca inventes descuentos, plazos, cupos, urgencia ni condiciones, y no presiones."
 
 function receptionPrompt(zone: OrgLocale, cfg: AgentConfig): string {
   const ficha = AGENT_ROLES.recepcion
@@ -184,6 +184,7 @@ function receptionPrompt(zone: OrgLocale, cfg: AgentConfig): string {
     cfg.treatment ? `Tratas de ${cfg.treatment === "tu" ? "tú" : "usted"} al interlocutor.` : null,
     cfg.about ? `Sobre la clínica: ${cfg.about}` : null,
     `La zona horaria de la clínica es ${zone.timezone}. Di las fechas y horas en la hora local de la sede de cada cita, sin nombrar la zona horaria ni escribir «hora de…»: solo acláralo si el interlocutor lo pregunta o si esa sede está en una zona distinta de la de la clínica.`,
+    "Lo que envías es solo la respuesta final para la persona, en su idioma: nunca tus dudas, cálculos, conversiones de hora ni razonamiento. Atiendes solo lo de la clínica; si te preguntan otra cosa, dilo con amabilidad y ofrece ayuda con la clínica.",
     "Respondes, cualificas al interlocutor y ayudas con información general y citas. Quien escribe no es necesariamente el paciente: puede ser su representante, un familiar o alguien que aún no se atiende.",
     lookups.length
       ? `NO das diagnósticos ni inventas precios, sedes o disponibilidad: las sedes, los servicios y sus tarifas figuran más abajo, con su id; para lo que no esté ahí usa ${lookups.join(", ").replace(/, ([^,]*)$/, " y $1")}.`
@@ -199,6 +200,7 @@ function receptionPrompt(zone: OrgLocale, cfg: AgentConfig): string {
     on("seguimiento") ? null : whenOff("seguimiento"),
     "Si el interlocutor pide hablar con un humano, se queja o el caso es clínico, usa request_human_handoff con motivo, resumen factual, prioridad y, en message, el aviso para el interlocutor; no uses send_reply para ese aviso.",
     ...notes,
+    "Una cita solo existe si la propusiste con proponer_cita (o la moviste o cancelaste con su herramienta) y la persona la confirmó con confirmar_propuesta. Nunca digas que propusiste, reservaste, agendaste o que «se gestionará» una cita sin haber usado esas herramientas: para pedir el sí, primero llama a proponer_cita con un hueco que devolvió buscar_huecos; si la hora que pide no estaba entre los huecos, búscala antes. Si el «Estado del caso» no muestra una propuesta pendiente, no hay nada que confirmar todavía.",
     "El «Estado del caso» lo registra el sistema y manda sobre tu recuerdo: si hay una propuesta pendiente de que el interlocutor confirme y su último mensaje es un sí claro, ejecútala con confirmar_propuesta y el id indicado, sin volver a buscar ni a proponer. Cuando el interlocutor dé un dato que hará falta más adelante (para quién es la cita, servicio y sede elegidos, preferencia de horario), guárdalo con anotar_caso; nunca anotes datos clínicos.",
     "Si la persona te dice una preferencia o un dato práctico que servirá en otra conversación (horario que le viene bien, cómo quiere que la llamen, por quién escribe), guárdalo con recordar_dato. La memoria de la persona nunca lleva síntomas, diagnósticos ni nada de salud.",
     "Cada precio, fecha y hora de tu respuesta se comprueba contra lo que consultaste en este turno o figura en este contexto: si un dato no está, la respuesta no sale. Consulta antes de afirmarlo y no calcules precios por tu cuenta.",
@@ -438,9 +440,9 @@ export function compileAgentGraph(
           const followup = o.nextActionAt
             ? `; próxima acción ${formatZoned(new Date(o.nextActionAt), zone)}`
             : ""
-          const amount =
-            o.amountCents !== null ? `; valor ${formatOrgMoney(o.amountCents, o.currency, zone)}` : ""
-          parts.push(`${o.title} (etapa ${o.stageName}${followup}${amount})`)
+          // El valor de la oportunidad es una cifra interna de ventas, no un precio: no llega al
+          // agente, que podría decirlo a la persona y la comprobación lo daría por bueno (ADR 0021).
+          parts.push(`${o.title} (etapa ${o.stageName}${followup})`)
         }
         if (nextCursor) parts.push("hay más oportunidades: usa listar_oportunidades para verlas todas")
       }

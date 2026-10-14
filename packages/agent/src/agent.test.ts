@@ -1050,21 +1050,33 @@ it("buscar_huecos entrega una opción completa que proponer_cita ejecuta como ci
     to: new Date(Date.parse(from) + 86_400_000).toISOString(),
     durationMin: 45,
   }))
-  const firstLine = out.split("\n")[0] ?? ""
+  // La hora va en la de la sede, para decirla tal cual; el instante exacto queda entre corchetes para reservar.
+  expect(out.split("\n")[0]).toContain("hora local de la sede")
+  const firstLine = out.split("\n")[1] ?? ""
   const optionBranch = firstLine.match(/sede ([0-9a-f-]{36})/i)?.[1]
   const optionChair = firstLine.match(/sillón ([0-9a-f-]{36})/i)?.[1]
-  const optionDentist = firstLine.match(/profesional (\S+)/)?.[1]
-  const optionZone = firstLine.match(/zona ([^)]+)\)/)?.[1]
-  const [optionStart, optionEnd] = firstLine.match(/(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)/g) ?? []
+  const optionDentist = firstLine.match(/profesional ([^\]\s]+)/)?.[1]
+  const optionStart = firstLine.match(/startsAt (\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)/)?.[1]
+  const [, startClock, endClock] = firstLine.match(/(\d{2}:\d{2})–(\d{2}:\d{2})/) ?? []
   expect(optionBranch).toBe(branchId)
   expect(optionChair).toBe(chairId)
   expect(optionDentist).toBe(dentistId)
-  expect(optionZone).toBe("America/Lima")
-  if (!optionStart || !optionEnd || !optionDentist || !optionChair || !optionBranch) {
+  if (!optionStart || !startClock || !endClock || !optionDentist || !optionChair || !optionBranch) {
     throw new Error("El hueco no contiene los datos necesarios para reservar")
   }
-  const durationMin = Math.round((Date.parse(optionEnd) - Date.parse(optionStart)) / 60000)
+  // La hora local que lee la persona es la del instante en Lima.
+  expect(new Date(optionStart).toLocaleTimeString("es-PE", { timeZone: "America/Lima", hour: "2-digit", minute: "2-digit", hourCycle: "h23" })).toBe(startClock)
+  const minutesOf = (clock: string) => Number(clock.slice(0, 2)) * 60 + Number(clock.slice(3))
+  const durationMin = minutesOf(endClock) - minutesOf(startClock)
   expect(durationMin).toBe(45)
+  // Un rango en hora local, sin zona, es el mismo día en Lima.
+  const localDay = String(await gaps!.invoke({
+    branchId,
+    from: `${monday.toISOString().slice(0, 10)}T00:00`,
+    to: `${monday.toISOString().slice(0, 10)}T23:59`,
+    durationMin: 45,
+  }))
+  expect(localDay.split("\n")[1]).toBe(firstLine)
   const booking = tools.find((t) => t.name === "proponer_cita")
   expect(booking).toBeDefined()
   await booking!.invoke({
@@ -1092,7 +1104,7 @@ it("buscar_huecos entrega una opción completa que proponer_cita ejecuta como ci
   expect(booked.dentistUserId).toBe(dentistId)
   expect(booked.durationMin).toBe(45)
   expect(booked.startsAt.toISOString()).toBe(optionStart)
-  expect(booked.endsAt.toISOString()).toBe(optionEnd)
+  expect(booked.endsAt.toISOString()).toBe(new Date(Date.parse(optionStart) + durationMin * 60_000).toISOString())
   expect(booked.status).toBe("programada")
 })
 
@@ -1536,12 +1548,12 @@ it("el sí del interlocutor en el turno siguiente ejecuta la reserva propuesta, 
         )
       }
       if (call === 2) {
-        const line = String(messages[messages.length - 1]?.content ?? "").split("\n")[0] ?? ""
+        const line = String(messages[messages.length - 1]?.content ?? "").split("\n")[1] ?? ""
         return toolCall(
           "proponer_cita",
           {
             patientId: fx.patientId,
-            dentistUserId: line.match(/profesional (\S+)/)?.[1],
+            dentistUserId: line.match(/profesional ([^\]\s]+)/)?.[1],
             chairId: line.match(/sillón ([0-9a-f-]{36})/i)?.[1],
             startsAt: line.match(ISO_INSTANT)?.[0],
             branchId: fx.branchId,
@@ -2024,12 +2036,12 @@ it("probar: una conversación de prueba reserva en dos turnos sin tocar la base"
       )
     }
     if (call === 2) {
-      const line = String(messages[messages.length - 1]?.content ?? "").split("\n")[0] ?? ""
+      const line = String(messages[messages.length - 1]?.content ?? "").split("\n")[1] ?? ""
       return toolCall(
         "proponer_cita",
         {
           patientId: "00000000-0000-4000-8000-0000000000aa",
-          dentistUserId: line.match(/profesional (\S+)/)?.[1],
+          dentistUserId: line.match(/profesional ([^\]\s]+)/)?.[1],
           chairId: line.match(/sillón ([0-9a-f-]{36})/i)?.[1],
           startsAt: line.match(ISO_INSTANT)?.[0],
           branchId: fx.branchId,

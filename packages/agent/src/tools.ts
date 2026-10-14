@@ -81,6 +81,9 @@ export async function conversationChannel(ctx: AgentToolCtx): Promise<string | n
   return ctx.channel
 }
 
+/** Lo máximo que espera una búsqueda en la conversación al proveedor de vectores. */
+const QUERY_EMBED_MS = 3_000
+
 export const TOOL_SOURCES: Record<string, { kind: string; label: string }> = {
   ver_sedes_y_servicios: { kind: "servicios", label: "Sedes, servicios y precios" },
   buscar_en_la_clinica: { kind: "servicios", label: "Búsqueda en servicios, promociones y profesionales" },
@@ -696,9 +699,12 @@ export function makeAgentTools(ctx: AgentToolCtx) {
 
   const clinicInfo = tool(
     async () => {
+      // Con «Informar» apagado esta herramienta sigue para Agendar, pero solo con sedes y horarios:
+      // ni precios, ni promociones, ni profesionales, ni medios de pago.
+      const informs = !(ctx.excludedTools ?? []).includes("buscar_en_la_clinica")
       const { snapshot, data, zone } = await inOrg(async (tx) => ({
         snapshot: await getClinicInfoSnapshot(tx, ctx.orgId),
-        data: await getAgentClinicData(tx, ctx.orgId, true),
+        data: await getAgentClinicData(tx, ctx.orgId, informs),
         zone: await getOrgLocale(tx, ctx.orgId),
       }))
       const lines = [`Clínica: ${snapshot.clinicName}.`]
@@ -708,7 +714,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
         )
       }
       lines.push(...formatAgentClinicData(data, zone))
-      if (snapshot.paymentMethods.length) {
+      if (informs && snapshot.paymentMethods.length) {
         lines.push("Medios de pago aceptados por la clínica (los mismos que ofrece caja):")
         for (const m of snapshot.paymentMethods) lines.push(`- ${m.name}`)
       }
@@ -730,7 +736,11 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     const embedder = ctx.embedder
     if (!embedder) return undefined
     try {
-      const [embedding] = await embedder.embed([text])
+      // En una conversación se espera poco: pasado el plazo se busca por palabras.
+      const [embedding] = await Promise.race([
+        embedder.embed([text]),
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error("vectores: sin respuesta a tiempo")), QUERY_EMBED_MS)),
+      ])
       if (!embedding?.length) return undefined
       return await inOrg((tx) => rankByMeaning(tx, ctx.orgId, { model: embedder.model, embedding }))
     } catch {
@@ -879,23 +889,30 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     }) => {
       const { gaps, truncated, timeZone } = await inOrg((tx) => findFreeGaps(tx, ctx.orgId, input))
       if (!gaps.length) return "Sin huecos en ese rango (quizá sin horario configurado): ofrece otro rango o deriva."
-      const lines = gaps.map((g) => {
-        const chair = g.chairId ?? "sin sillón asignado: filtra por un sillón real o deriva"
-        return (
-          `- ${g.startsAt} → ${g.endsAt} (${Math.round((Date.parse(g.endsAt) - Date.parse(g.startsAt)) / 60_000)} min, zona ${timeZone})` +
-          ` · sede ${input.branchId} · sillón ${chair} · profesional ${g.dentistUserId}`
-        )
-      })
-      lines.push(
-        "Usa los IDs exactos del hueco elegido en proponer_cita (sede, sillón y profesional): nunca inventes IDs.",
-      )
-      if (truncated) lines.push(`Hay más huecos (${timeZone}): acota el rango por días.`)
+      const { locale } = await orgZone()
+      // La hora ya va en la de la sede: el modelo la dice tal cual y nunca convierte zonas.
+      const day = new Intl.DateTimeFormat(locale, { timeZone, weekday: "long", day: "numeric", month: "long" })
+      const clock = new Intl.DateTimeFormat(locale, { timeZone, hour: "2-digit", minute: "2-digit", hourCycle: "h23" })
+      const lines = [
+        "Huecos libres, en hora local de la sede (dilos así, sin convertir horas). El dato entre corchetes es solo para proponer_cita: no lo escribas a la persona.",
+        ...gaps.map((g) => {
+          const start = new Date(g.startsAt)
+          const end = new Date(g.endsAt)
+          const chair = g.chairId ?? "sin sillón asignado: filtra por un sillón real o deriva"
+          return (
+            `- ${day.format(start)}, ${clock.format(start)}–${clock.format(end)}${g.dentistName ? ` con ${g.dentistName}` : ""}` +
+            ` [startsAt ${g.startsAt} · sede ${input.branchId} · sillón ${chair} · profesional ${g.dentistUserId}]`
+          )
+        }),
+        "Usa los datos exactos del hueco elegido en proponer_cita (startsAt, sede, sillón y profesional): nunca inventes IDs ni horas.",
+      ]
+      if (truncated) lines.push("Hay más huecos: acota el rango por días.")
       return lines.join("\n")
     },
     {
       name: "buscar_huecos",
       description:
-        "Huecos reales de agenda según horario del profesional, ausencias, feriados y citas ocupantes. Usa el id exacto de la sede (branchId) y from/to en ISO. No indiques durationMin: con serviceId se usa la duración del servicio y, sin servicio, la de una cita regular en esa sede; indícala solo si el interlocutor pide otra duración. Cada hueco devuelve sede, sillón, profesional, inicio, fin, zona y duración para proponer_cita.",
+        "Huecos reales de agenda según horario del profesional, ausencias, feriados y citas ocupantes. Usa el id exacto de la sede (branchId); from/to en hora local de la sede y sin zona (por ejemplo 2026-10-16T08:00 y 2026-10-16T13:00 para «el viernes en la mañana»). No indiques durationMin: con serviceId se usa la duración del servicio y, sin servicio, la de una cita regular en esa sede; indícala solo si el interlocutor pide otra duración. Cada hueco devuelve sede, sillón, profesional, inicio, fin, zona y duración para proponer_cita.",
       schema: z.object({
         branchId: z.string().uuid(),
         from: z.string().min(1),
@@ -1304,7 +1321,8 @@ export function makeAgentTools(ctx: AgentToolCtx) {
 
   const requestHandoff = tool(
     async ({ reason, summary, priority, assigneeUserId, message, asks, pending }: { reason: string; summary?: string; priority?: string; assigneeUserId?: string; message?: string; asks?: string; pending?: string }) => {
-      const notice = message?.trim()
+      // El aviso a la persona sigue el mismo formato del canal que cualquier respuesta.
+      const notice = message?.trim() ? formatForChannel(message.trim(), await conversationChannel(ctx)) : undefined
       // Lo que queda escrito para quien toma el caso: qué pide, qué falta y el
       // aviso que de verdad salió (no el que se intentó).
       const annotate = (sent: boolean) => {

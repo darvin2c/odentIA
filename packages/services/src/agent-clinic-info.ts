@@ -48,7 +48,15 @@ export interface AgentPromotionInfo {
   name: string
   endsAt: string | null
   conditions: string | null
-  items: Array<{ serviceName: string; disclosure: PriceDisclosure; priceCents: number; currency: string; tariffCents: number }>
+  items: Array<{
+    serviceName: string
+    disclosure: PriceDisclosure
+    priceCents: number
+    currency: string
+    tariffCents: number
+    /** Cómo dice el precio el propio servicio: la tarifa solo se compara si es exacta. */
+    serviceDisclosure: PriceDisclosure
+  }>
 }
 
 export interface AgentBranchHours {
@@ -262,6 +270,17 @@ export async function listAgentServices(
 /** Promociones vigentes con lo que el agente necesita para decirlas bien. */
 export async function listAgentPromotions(tx: Db, orgId: string, at = new Date()): Promise<AgentPromotionInfo[]> {
   const live = await listClinicPromotionSummaries(tx, orgId, at)
+  const serviceIds = [...new Set(live.flatMap((promo) => promo.items.map((item) => item.serviceId)))]
+  const own = serviceIds.length
+    ? new Map(
+        (
+          await tx
+            .select({ id: serviceCatalog.id, disclosure: serviceCatalog.priceDisclosure })
+            .from(serviceCatalog)
+            .where(and(eq(serviceCatalog.organizationId, orgId), inArray(serviceCatalog.id, serviceIds)))
+        ).map((row) => [row.id, row.disclosure as PriceDisclosure]),
+      )
+    : new Map<string, PriceDisclosure>()
   return live.map((promo) => ({
     id: promo.id,
     name: promo.name,
@@ -273,6 +292,8 @@ export async function listAgentPromotions(tx: Db, orgId: string, at = new Date()
       priceCents: item.priceCents,
       currency: item.currency,
       tariffCents: item.tariffCents,
+      // Sin dato, se asume lo más prudente: no comparar con la tarifa.
+      serviceDisclosure: own.get(item.serviceId) ?? "evaluacion",
     })),
   }))
 }
@@ -325,7 +346,10 @@ export function formatAgentPromotion(promo: AgentPromotionInfo, zone: Zone): str
       const amount = formatOrgMoney(item.priceCents, item.currency, zone)
       return item.disclosure === "desde"
         ? `${item.serviceName}: desde ${amount} (mínimo; dilo con «desde»)`
-        : `${item.serviceName}: ${amount} en vez de ${tariff}${item.tariffCents > item.priceCents ? ` (ahorra ${formatOrgMoney(item.tariffCents - item.priceCents, item.currency, zone)})` : ""}`
+        : // La tarifa y el ahorro solo si el servicio dice su precio exacto: si no, la promoción delataría un número que la clínica no quiere dar.
+          item.serviceDisclosure === "exacto"
+          ? `${item.serviceName}: ${amount} en vez de ${tariff}${item.tariffCents > item.priceCents ? ` (ahorra ${formatOrgMoney(item.tariffCents - item.priceCents, item.currency, zone)})` : ""}`
+          : `${item.serviceName}: ${amount} con la promoción (no compares con otro precio: el del servicio se define en la evaluación)`
     })
     .join("; ")
   return `- Promoción «${promo.name}»: ${items}.${promo.conditions ? ` Condiciones: ${promo.conditions}.` : ""}${until}`

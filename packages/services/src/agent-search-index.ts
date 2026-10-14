@@ -224,7 +224,14 @@ export async function refreshAgentSearch(
   let embedded = 0
   let failed = 0
   for (const org of orgs) {
-    const pending = await withOrgContext(appDb, org.id, (tx) => syncSearchItems(tx, org.id))
+    // Lo que falla en una clínica no deja sin conciliar a las demás.
+    let pending: number
+    try {
+      pending = await withOrgContext(appDb, org.id, (tx) => syncSearchItems(tx, org.id))
+    } catch {
+      failed += 1
+      continue
+    }
     if (pending === 0 && !(await hasOtherModel(appDb, org.id, embedder.model))) continue
     for (let batch = 0; batch < (options.maxBatchesPerOrg ?? 4); batch++) {
       const items = await withOrgContext(appDb, org.id, (tx) => pendingSearchItems(tx, org.id, embedder.model))
@@ -240,14 +247,19 @@ export async function refreshAgentSearch(
         failed += items.length
         break
       }
-      await withOrgContext(appDb, org.id, (tx) =>
-        storeSearchEmbeddings(
-          tx,
-          org.id,
-          embedder.model,
-          items.map((item, index) => ({ ...item, embedding: vectors[index] ?? [] })),
-        ),
-      )
+      try {
+        await withOrgContext(appDb, org.id, (tx) =>
+          storeSearchEmbeddings(
+            tx,
+            org.id,
+            embedder.model,
+            items.map((item, index) => ({ ...item, embedding: vectors[index] ?? [] })),
+          ),
+        )
+      } catch {
+        failed += items.length
+        break
+      }
       embedded += items.length
     }
   }

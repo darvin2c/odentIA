@@ -475,8 +475,10 @@ export function verifyReply(
     if (found) {
       const reading = mention.value.find((value) => found.amounts.has(value)) ?? 0
       // Un mínimo («desde») dicho como precio final no sale: el precio lo define la evaluación.
-      const onlyMinimum = !sources.some((source) => source.exact.has(reading))
-      if (onlyMinimum && !cuedAsMinimum(text, mention.index ?? 0)) {
+      // Basta con que una fuente lo dé como mínimo: que el mismo número aparezca suelto en
+      // otra (lo que escribió la persona, una hora, una duración) no lo vuelve precio final.
+      const minimum = sources.some((source) => source.amounts.has(reading) && !source.exact.has(reading))
+      if (minimum && !cuedAsMinimum(text, mention.index ?? 0)) {
         checks.push({ kind: "precio", value: `${mention.raw} (es un mínimo: dilo con «desde»)`, ok: false, source: found.source })
         continue
       }

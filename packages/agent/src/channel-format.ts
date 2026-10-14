@@ -25,8 +25,13 @@ const DOUBLE_UNDERSCORE = /__(\S(?:[^_\n]*?\S)?)__/g
 /** `*texto*` como marca de negrita: pegado al texto y separado de lo demás. */
 const SINGLE = /(^|[\s(¡¿«"])\*(\S(?:[^*\n]*?\S)?)\*(?=[\s.,;:!?)»"]|$)/g
 
+/** Encabezados y enlaces de Markdown: ningún canal los muestra, en ninguno se dejan. */
+const HEADING = /^#{1,6}\s+/gm
+const LINK = /\[([^\]\n]+)\]\((https?:\/\/[^)\s]+)\)/g
+
 /** Convierte las marcas al formato del canal, o las quita si el canal no tiene formato. */
-export function formatForChannel(text: string, channel: string | null | undefined): string {
+export function formatForChannel(raw: string, channel: string | null | undefined): string {
+  const text = raw.replace(HEADING, "").replace(LINK, "$1: $2")
   if (supportsBold(channel)) {
     return text.replace(DOUBLE, "*$1*").replace(DOUBLE_UNDERSCORE, "*$1*")
   }

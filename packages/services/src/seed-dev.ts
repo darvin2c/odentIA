@@ -17,7 +17,7 @@ import { deflateSync } from "node:zlib"
 import { DEFAULT_REGISTRATION_CONFIG } from "@odentia/clinical"
 import { createOwnerDb } from "@odentia/db"
 import { appointment, scheduleChair } from "@odentia/db/schema/agenda"
-import { commercialFollowUpCoordination } from "@odentia/db/schema/agent"
+import { agentSearchItem, commercialFollowUpCoordination } from "@odentia/db/schema/agent"
 import { account, invitation, member, organization, user } from "@odentia/db/schema/auth"
 import {
   clinicalFollowUp,
@@ -497,6 +497,8 @@ async function wipeSeed(): Promise<void> {
   // Los mensajes de WhatsApp son de la organización, no de la conexión; sus versiones se van en cascada.
   await db.delete(clinicMessage).where(inArray(clinicMessage.organizationId, SEED_ORGS))
   await db.delete(customFieldDef).where(inArray(customFieldDef.organizationId, SEED_ORGS))
+  // El índice de búsqueda del agente apunta a la organización: se borra antes.
+  await db.delete(agentSearchItem).where(inArray(agentSearchItem.organizationId, SEED_ORGS))
   await db.delete(agentConfig).where(inArray(agentConfig.organizationId, SEED_ORGS))
   await db.delete(orgCounter).where(inArray(orgCounter.organizationId, SEED_ORGS))
   await db.delete(branch).where(inArray(branch.organizationId, SEED_ORGS))

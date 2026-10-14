@@ -19,3 +19,11 @@ it("en un canal sin formato las marcas se quitan y el texto queda intacto", () =
   // Un asterisco que no marca nada (una nota, una cuenta) no se toca.
   expect(formatForChannel("Precio* sujeto a evaluación; 2 * 3", "telegram")).toBe("Precio* sujeto a evaluación; 2 * 3")
 })
+
+it("encabezados y enlaces de Markdown no llegan como símbolos a ningún canal", () => {
+  for (const channel of ["whatsapp", "telegram"]) {
+    expect(formatForChannel("## Promociones\nReserva aquí: [tu cita](https://clinica.example/reserva?token=ab12)", channel)).toBe(
+      "Promociones\nReserva aquí: tu cita: https://clinica.example/reserva?token=ab12",
+    )
+  }
+})

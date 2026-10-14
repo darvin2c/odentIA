@@ -55,7 +55,7 @@ const envSchema = z.object({
    * plataforma, compatible con OpenAI. `fake`: vectores por letras, sin red.
    * Vacío: el agente busca solo por palabras.
    */
-  EMBEDDINGS_MODEL: z.string().optional().default("fake"),
+  EMBEDDINGS_MODEL: z.string().optional(),
   EMBEDDINGS_BASE_URL: z.string().url().optional(),
   EMBEDDINGS_API_KEY: z.string().optional().default(""),
   EMBEDDINGS_TIMEOUT_MS: z.coerce.number().int().min(1000).max(120_000).default(20_000),

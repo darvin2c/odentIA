@@ -21,6 +21,31 @@ export interface AutomationWorkerDeps {
 }
 
 const MAX_DRAIN = 50
+/** Cada cuánto se concilia y vectoriza el índice de búsqueda del agente. */
+const SEARCH_EVERY_MS = 5 * 60_000
+let searchRunning = false
+let searchLastStart = 0
+
+/**
+ * El índice se refresca aparte y sin esperarlo: el trabajador atiende todas
+ * las colas en un solo bucle, y un proveedor de vectores lento no puede
+ * demorar los mensajes de los pacientes. Nunca hay dos refrescos a la vez.
+ */
+function refreshSearchInBackground(deps: AutomationWorkerDeps, embedder: SearchEmbedder): void {
+  if (searchRunning || Date.now() - searchLastStart < SEARCH_EVERY_MS) return
+  searchRunning = true
+  searchLastStart = Date.now()
+  refreshAgentSearch(deps.ownerDb, deps.appDb, embedder)
+    .then((search) => {
+      if (search.embedded || search.failed) {
+        console.log(`worker: búsqueda del agente vectorizados=${search.embedded} sin_vector=${search.failed}`)
+      }
+    })
+    .catch((error) => console.error("worker: búsqueda del agente", error instanceof Error ? error.message : error))
+    .finally(() => {
+      searchRunning = false
+    })
+}
 
 /**
  * Despertador durable `automation_ticks` (pg_cron cada minuto, sin PII):
@@ -62,17 +87,7 @@ export async function runAutomationTick(deps: AutomationWorkerDeps): Promise<boo
       `programados=${summary.programados} coordinados=${summary.coordinados} ` +
       `entregados=${summary.entregados} fallidos=${summary.fallidos}`,
   )
-  // El índice del agente se concilia en el mismo despertador. Un fallo aquí no
-  // detiene las automatizaciones: la búsqueda sigue por palabras.
-  if (embedder) {
-    try {
-      const search = await refreshAgentSearch(ownerDb, appDb, embedder)
-      if (search.embedded || search.failed) {
-        console.log(`worker: búsqueda del agente vectorizados=${search.embedded} sin_vector=${search.failed}`)
-      }
-    } catch (error) {
-      console.error("worker: búsqueda del agente", error instanceof Error ? error.message : error)
-    }
-  }
+  // El índice del agente se refresca aparte, sin esperarlo (`refreshSearchInBackground`).
+  if (embedder) refreshSearchInBackground(deps, embedder)
   return true
 }

@@ -79,7 +79,7 @@ recrear el contenedor de desarrollo antes de migrar; el volumen de datos se cons
 La base de producción debe tenerla instalada.
 
 Worker y API leen `EMBEDDINGS_MODEL`, `EMBEDDINGS_BASE_URL` y `EMBEDDINGS_API_KEY`
-(cualquier endpoint compatible con OpenAI). `fake` (por defecto) vectoriza por
+(cualquier endpoint compatible con OpenAI). `fake` (el de `.env.example`) vectoriza por
 trozos de letras, sin red: encuentra palabras mal escritas pero no entiende
 significado y no acredita a ningún proveedor. Vacío: el agente busca solo por
 palabras. El índice se concilia y se vectoriza en el ciclo de automatizaciones

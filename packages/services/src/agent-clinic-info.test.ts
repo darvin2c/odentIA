@@ -141,7 +141,12 @@ describe("lo que sabe Informar", () => {
         startsAt: new Date(now - 86_400_000).toISOString(),
         endsAt: new Date(now + 20 * 86_400_000).toISOString(),
         conditions: "Solo pacientes nuevos",
-        items: [{ serviceId: ids["Limpieza dental"]!, mode: "fixed", priceCents: 9000 }, { serviceId: ortho, mode: "from", priceCents: 200000 }],
+        items: [
+          { serviceId: ids["Limpieza dental"]!, mode: "fixed", priceCents: 9000 },
+          { serviceId: ortho, mode: "from", priceCents: 200000 },
+          // Precio fijo en la promoción de un servicio que se dice «solo con evaluación».
+          { serviceId: ids["Implante dental"]!, mode: "fixed", priceCents: 250000 },
+        ],
       }),
     )
     await run((tx) =>
@@ -156,6 +161,9 @@ describe("lo que sabe Informar", () => {
     expect(text).toContain("Sonrisa de primavera")
     expect(text).toMatch(/Limpieza dental: S\/\s?90\.00 en vez de S\/\s?120\.00/)
     expect(text).toMatch(/Ortodoncia con brackets: desde S\/\s?2,000\.00/)
+    // La promoción no delata la tarifa de un servicio que se dice «solo con evaluación».
+    expect(text).toMatch(/Implante dental: S\/\s?2,500\.00 con la promoción/)
+    expect(text).not.toMatch(/3,000/)
     expect(text).toContain("Condiciones: Solo pacientes nuevos.")
     expect(text).toContain("Vigente hasta el")
     expect(text).not.toContain("Promo vencida")
